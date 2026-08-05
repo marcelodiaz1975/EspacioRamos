@@ -68,6 +68,20 @@ def test_bruto_y_subtotal_reserva(conn, consultorio):
     assert liquidacion.total == pytest.approx(liquidacion.subtotal_reserva)
 
 
+def test_categoria_b_tiene_100_por_ciento_de_bonificacion(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, categoria="B", horas=2)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+
+    assert liquidacion.descuento_bonificacion == pytest.approx(liquidacion.subtotal_reserva)
+    # la bonificación cubre la reserva regular, pero las aisladas se siguen cobrando
+    assert liquidacion.total == pytest.approx(liquidacion.aisladas_mes_en_curso)
+    assert liquidacion.total > 0
+
+
 def test_descuento_feriado_nacional_se_lista_por_dia(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     assert fecha_a_dia_semana(date(2026, 8, 17)) == "Lunes"

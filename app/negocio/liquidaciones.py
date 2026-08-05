@@ -8,14 +8,19 @@ que la sección 4.5:
 
     Bruto -> Descuento horas -> Subtotal reserva -> Saldo anterior ->
     Descuento feriados -> Descuento no laborables -> Descuento vacaciones ->
-    Descuento licencias -> Aisladas mes anterior -> Aisladas mes en curso ->
-    Ajuste por saldo atrasado -> Cargos especiales -> Cuotas de plan de pago
-    -> Total
+    Descuento licencias -> Descuento bonificación (solo categoría B) ->
+    Aisladas mes anterior -> Aisladas mes en curso -> Ajuste por saldo
+    atrasado -> Cargos especiales -> Cuotas de plan de pago -> Total
+
+La categoría B ("bonificado") tiene 100% de descuento sobre lo que le
+correspondería pagar por sus reservas regulares del período: Bruto ya con
+el descuento por volumen de horas y neto de los descuentos de feriados,
+no laborables, vacaciones y licencias. Sigue pagando, si corresponde,
+aisladas, cargos especiales, cuotas de plan de pago y el ajuste por saldo
+atrasado (esas líneas no dependen de la categoría).
 
 Ítems del documento que quedan fuera de este cálculo porque no tienen
 fórmula ni dato de origen definido todavía:
-- "Descuento bonificación": la categoría B ("bonificado") no tiene un
-  porcentaje asociado en ningún lado del modelo de datos.
 - "Horas regulares agregadas" y "Feriados mes anterior" como líneas propias:
   ya están cubiertas conceptualmente (el Bruto usa las reservas vigentes de
   todo el mes, sin importar cuándo se agregaron; y "feriados mes anterior"
@@ -64,6 +69,7 @@ class Liquidacion:
     descuentos_no_laborables: list[ItemFeriado] = field(default_factory=list)
     descuento_vacaciones: float = 0.0
     descuento_licencias: float = 0.0
+    descuento_bonificacion: float = 0.0
     aisladas_mes_anterior: float = 0.0
     aisladas_mes_en_curso: float = 0.0
     ajuste_saldo_atrasado: float = 0.0
@@ -95,6 +101,7 @@ class Liquidacion:
             - self.total_descuento_no_laborables
             - self.descuento_vacaciones
             - self.descuento_licencias
+            - self.descuento_bonificacion
             + self.aisladas_mes_anterior
             + self.aisladas_mes_en_curso
             + self.ajuste_saldo_atrasado
@@ -261,6 +268,17 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
         conn, id_profesional, primer_dia_periodo, ultimo_dia_periodo
     )
 
+    descuento_bonificacion = 0.0
+    if profesional["CategoriaProfesional"] == "B":
+        neto_antes_de_bonificar = (
+            subtotal_reserva
+            - sum(i.monto for i in descuentos_feriados)
+            - sum(i.monto for i in descuentos_no_laborables)
+            - descuento_vacaciones
+            - descuento_licencias
+        )
+        descuento_bonificacion = max(0.0, neto_antes_de_bonificar)
+
     aisladas_mes_anterior = _valor_aisladas_periodo(conn, id_profesional, anio_ant, mes_ant)
     aisladas_mes_en_curso = _valor_aisladas_periodo(conn, id_profesional, anio, mes)
 
@@ -288,7 +306,8 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
         descuento_horas_pct=descuento_horas_pct, subtotal_reserva=subtotal_reserva,
         saldo_anterior=saldo_anterior, descuentos_feriados=descuentos_feriados,
         descuentos_no_laborables=descuentos_no_laborables, descuento_vacaciones=descuento_vacaciones,
-        descuento_licencias=descuento_licencias, aisladas_mes_anterior=aisladas_mes_anterior,
+        descuento_licencias=descuento_licencias, descuento_bonificacion=descuento_bonificacion,
+        aisladas_mes_anterior=aisladas_mes_anterior,
         aisladas_mes_en_curso=aisladas_mes_en_curso, ajuste_saldo_atrasado=ajuste_saldo_atrasado,
         cargos_especiales=cargos_especiales, cuotas_plan=cuotas_plan,
     )
