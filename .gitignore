@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+data/*.db
+data/*.db-journal
+plantillas_excel/*.xlsx
+
+.pytest_cache/
+*.spec
+build/
+dist/
+
+.vscode/
+.idea/
