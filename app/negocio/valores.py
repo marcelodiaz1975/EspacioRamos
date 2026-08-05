@@ -7,7 +7,9 @@ semanales aplicado (EsquemaDescuentos, sección 3.18).
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
+
+from app.negocio.dias import fecha_a_dia_semana
 
 
 def obtener_porcentaje_descuento(conn: sqlite3.Connection, horas_semanales: float) -> float:
@@ -56,3 +58,31 @@ def calcular_valor_semanal_regular(
     descuento_pct = obtener_porcentaje_descuento(conn, horas_totales)
     valor_bruto = sum((f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"] for f in filas)
     return valor_bruto * (1 - descuento_pct / 100)
+
+
+def valor_regular_por_rango_dias(
+    conn: sqlite3.Connection, id_profesional: int, fecha_desde: str, fecha_hasta: str,
+) -> float:
+    """Suma, día por día del rango [fecha_desde, fecha_hasta], el valor
+    bruto (sin descuento por volumen) de las horas regulares que el
+    profesional tiene reservadas ese día de la semana. Usado para prorratear
+    vacaciones y liquidaciones sobre reservas reales, no sobre un promedio."""
+    total = 0.0
+    dia_actual = date.fromisoformat(fecha_desde)
+    dia_final = date.fromisoformat(fecha_hasta)
+    while dia_actual <= dia_final:
+        fecha_iso = dia_actual.isoformat()
+        filas = conn.execute(
+            """
+            SELECT rr.HoraInicio, rr.HoraFin, c.ValorHoraRegularActual
+            FROM ReservaRegular rr
+            JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
+            WHERE rr.IdProfesional = ? AND rr.DiaSemana = ?
+              AND rr.VigenciaInicio <= ? AND (rr.VigenciaFin IS NULL OR rr.VigenciaFin >= ?)
+            """,
+            (id_profesional, fecha_a_dia_semana(dia_actual), fecha_iso, fecha_iso),
+        ).fetchall()
+        for f in filas:
+            total += (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"]
+        dia_actual += timedelta(days=1)
+    return total

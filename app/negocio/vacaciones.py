@@ -31,10 +31,13 @@ porque todavía no tiene registros propios.
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, timedelta
+from datetime import date
 
-from app.negocio.dias import fecha_a_dia_semana
-from app.negocio.valores import calcular_valor_semanal_regular, obtener_porcentaje_descuento
+from app.negocio.valores import (
+    calcular_valor_semanal_regular,
+    obtener_porcentaje_descuento,
+    valor_regular_por_rango_dias,
+)
 from app.repositorio.registro import obtener_repositorio
 
 CATEGORIAS_CON_DERECHO_A_VACACIONES = ("R", "B", "E")
@@ -71,28 +74,10 @@ def _semanas_consumidas_en_anio(conn: sqlite3.Connection, id_profesional: int, a
 def _valor_bonificado_bruto(
     conn: sqlite3.Connection, id_profesional: int, fecha_desde: str, fecha_hasta: str, descuento_pct: float,
 ) -> float:
-    """Suma, día por día del período, el valor de las horas regulares que
-    el profesional tiene reservadas ese día de la semana (con descuento)."""
-    total = 0.0
-    dia_actual = date.fromisoformat(fecha_desde)
-    dia_final = date.fromisoformat(fecha_hasta)
-    while dia_actual <= dia_final:
-        fecha_iso = dia_actual.isoformat()
-        filas = conn.execute(
-            """
-            SELECT rr.HoraInicio, rr.HoraFin, c.ValorHoraRegularActual
-            FROM ReservaRegular rr
-            JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
-            WHERE rr.IdProfesional = ? AND rr.DiaSemana = ?
-              AND rr.VigenciaInicio <= ? AND (rr.VigenciaFin IS NULL OR rr.VigenciaFin >= ?)
-            """,
-            (id_profesional, fecha_a_dia_semana(dia_actual), fecha_iso, fecha_iso),
-        ).fetchall()
-        for f in filas:
-            horas = f["HoraFin"] - f["HoraInicio"]
-            total += horas * f["ValorHoraRegularActual"] * (1 - descuento_pct / 100)
-        dia_actual += timedelta(days=1)
-    return total
+    """Valor de las horas regulares reservadas en el período, con el
+    descuento por volumen ya aplicado (sección 3.12)."""
+    bruto = valor_regular_por_rango_dias(conn, id_profesional, fecha_desde, fecha_hasta)
+    return bruto * (1 - descuento_pct / 100)
 
 
 def crear_vacacion(
