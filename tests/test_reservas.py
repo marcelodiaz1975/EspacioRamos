@@ -120,14 +120,15 @@ def test_no_superposicion_si_no_hay_solapamiento_horario(conn, consultorio, prof
 
 # ---------------------------------------------------------------- bloque rígido
 
-def test_reserva_parcial_de_bloque_rigido_bloquea(conn, consultorio, profesional_factory):
+def test_reserva_parcial_de_bloque_rigido_solo_advierte(conn, consultorio, profesional_factory):
     id_prof = profesional_factory("Lo Veci")
-    with pytest.raises(ConflictoBloqueanteError) as exc_info:
-        crear_reserva_regular(
-            conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
-            hora_inicio=9, hora_fin=10, vigencia_inicio="2026-01-01",
-        )
-    assert "bloque rígido" in str(exc_info.value)
+    id_reserva, advertencias = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=9, hora_fin=10, vigencia_inicio="2026-01-01",
+    )
+    assert id_reserva is not None
+    assert len(advertencias) == 1
+    assert "bloque rígido" in advertencias[0]
 
 
 def test_reserva_que_cubre_bloque_rigido_completo_no_bloquea(conn, consultorio, profesional_factory):

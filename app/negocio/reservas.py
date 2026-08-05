@@ -5,8 +5,9 @@ Reglas tomadas de las secciones 3.9 a 3.11 del documento de planificación:
 - Dos reservas del mismo consultorio no pueden superponerse en día/horario,
   excepto que sean de un profesional categoría E y su propio R (cat.
   "ProfesionalCabezaEquipo"): en ese caso se avisa pero no se bloquea.
-- Un bloque rígido no se puede reservar parcialmente: si una reserva toca
-  un bloque rígido activo ese día, tiene que cubrirlo completo.
+- Un bloque rígido no se debería reservar parcialmente (si una reserva toca
+  un bloque rígido activo ese día, lo ideal es que lo cubra completo), pero
+  esto solo genera un aviso, nunca bloquea la carga.
 - Cancelar una reserva aislada el mismo día está permitida (con aviso),
   salvo que el horario caiga dentro de un bloque rígido.
 """
@@ -192,8 +193,8 @@ def crear_reserva_regular(
     )
     problemas_rigidos = verificar_bloques_rigidos(conn, dia_semana, hora_inicio, hora_fin)
     bloqueantes = [c for c in conflictos if c.bloqueante]
-    if (bloqueantes or problemas_rigidos) and not forzar:
-        raise ConflictoBloqueanteError(bloqueantes, problemas_rigidos)
+    if bloqueantes and not forzar:
+        raise ConflictoBloqueanteError(bloqueantes)
 
     repo = obtener_repositorio(conn, "ReservaRegular")
     id_reserva = repo.crear(
@@ -201,9 +202,9 @@ def crear_reserva_regular(
         HoraInicio=hora_inicio, HoraFin=hora_fin, VigenciaInicio=vigencia_inicio,
         VigenciaFin=vigencia_fin, EsExcepcion=int(es_excepcion), Observacion=observacion,
     )
-    advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
+    advertencias = [c.mensaje for c in conflictos if not c.bloqueante] + problemas_rigidos
     if forzar:
-        advertencias += [c.mensaje for c in bloqueantes] + problemas_rigidos
+        advertencias += [c.mensaje for c in bloqueantes]
     return id_reserva, advertencias
 
 
@@ -219,8 +220,8 @@ def crear_reserva_aislada(
     dia_semana = fecha_a_dia_semana(date.fromisoformat(fecha))
     problemas_rigidos = verificar_bloques_rigidos(conn, dia_semana, hora_inicio, hora_fin)
     bloqueantes = [c for c in conflictos if c.bloqueante]
-    if (bloqueantes or problemas_rigidos) and not forzar:
-        raise ConflictoBloqueanteError(bloqueantes, problemas_rigidos)
+    if bloqueantes and not forzar:
+        raise ConflictoBloqueanteError(bloqueantes)
 
     if aplica_recargo is None:
         fila_cfg = conn.execute(
@@ -234,9 +235,9 @@ def crear_reserva_aislada(
         HoraInicio=hora_inicio, HoraFin=hora_fin, Estado="Confirmada",
         AplicaRecargo=int(aplica_recargo), EsReubicacion=int(es_reubicacion), Observacion=observacion,
     )
-    advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
+    advertencias = [c.mensaje for c in conflictos if not c.bloqueante] + problemas_rigidos
     if forzar:
-        advertencias += [c.mensaje for c in bloqueantes] + problemas_rigidos
+        advertencias += [c.mensaje for c in bloqueantes]
     return id_reserva, advertencias
 
 
