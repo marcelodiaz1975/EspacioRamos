@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.db.connection import DB_PATH_DEFAULT
 from app.db.init_db import init_database
+from app.db.seed import sembrar_valores_por_defecto
 from app.importacion.importar_excel import importar_planilla
 from app.importacion.plantillas import generar_plantillas
 
@@ -13,7 +14,8 @@ PLANTILLA_DEFAULT = Path(__file__).resolve().parent / "plantillas_excel" / "Plan
 
 
 def comando_init_db(args):
-    init_database(args.db)
+    conn = init_database(args.db)
+    sembrar_valores_por_defecto(conn)
     print(f"Base de datos inicializada en: {args.db}")
 
 
@@ -24,6 +26,7 @@ def comando_generar_plantillas(args):
 
 def comando_importar(args):
     conn = init_database(args.db)
+    sembrar_valores_por_defecto(conn)
     resultados = importar_planilla(conn, args.archivo)
     for r in resultados:
         print(f"{r.entidad}: {r.filas_importadas} fila(s) importada(s)")
