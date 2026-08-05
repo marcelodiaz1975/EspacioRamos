@@ -9,6 +9,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.importacion.importar_excel import importar_planilla
 from app.importacion.plantillas import generar_plantillas
+from app.negocio.feriados import importar_feriados_argentina
 
 PLANTILLA_DEFAULT = Path(__file__).resolve().parent / "plantillas_excel" / "Plantilla_Importacion_EspacioRamos.xlsx"
 
@@ -34,6 +35,13 @@ def comando_importar(args):
             print(f"  ! {error}")
 
 
+def comando_importar_feriados(args):
+    conn = init_database(args.db)
+    sembrar_valores_por_defecto(conn)
+    cantidad = importar_feriados_argentina(conn, args.anio)
+    print(f"{cantidad} feriado(s) nuevo(s) importado(s) para {args.anio}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Administración de la base de datos - Sistema Espacio Ramos")
     parser.add_argument("--db", type=Path, default=DB_PATH_DEFAULT, help="Ruta al archivo de base de datos SQLite")
@@ -49,6 +57,12 @@ def main():
     sp_imp = subparsers.add_parser("importar", help="Importa datos desde una planilla Excel")
     sp_imp.add_argument("archivo", type=Path)
     sp_imp.set_defaults(func=comando_importar)
+
+    sp_feriados = subparsers.add_parser(
+        "importar-feriados", help="Importa los feriados nacionales de un año desde argentina.gob.ar"
+    )
+    sp_feriados.add_argument("anio", type=int)
+    sp_feriados.set_defaults(func=comando_importar_feriados)
 
     args = parser.parse_args()
     args.func(args)

@@ -10,6 +10,9 @@ Reglas tomadas de las secciones 3.9 a 3.11 del documento de planificación:
   esto solo genera un aviso, nunca bloquea la carga.
 - Cancelar una reserva aislada el mismo día está permitida (con aviso),
   salvo que el horario caiga dentro de un bloque rígido.
+- Una reserva regular no genera conflicto contra una aislada si el
+  profesional de la regular tiene una Ausencia activa ese día (sección
+  3.14): el consultorio queda libre mientras dure la ausencia.
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date
 
+from app.negocio.ausencias import esta_ausente
 from app.negocio.dias import fecha_a_dia_semana
 from app.repositorio.registro import obtener_repositorio
 
@@ -166,6 +170,8 @@ def verificar_conflictos_aislada(
             continue
         if not _vigencias_solapan(fecha, fecha, fila["VigenciaInicio"], fila["VigenciaFin"]):
             continue
+        if esta_ausente(conn, fila["IdProfesional"], fecha, id_consultorio):
+            continue  # el profesional regular no va a estar: el consultorio queda libre
         bloqueante = not _relacion_equipo(conn, id_profesional, fila["IdProfesional"])
         conflictos.append(Conflicto(
             bloqueante=bloqueante,
