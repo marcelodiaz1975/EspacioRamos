@@ -1,43 +1,43 @@
 """Vacaciones (sección 3.12 del documento).
 
 Solo aplican a profesionales categoría R, B o E con reservas regulares
-activas. Tienen un cupo anual configurable en semanas (Configuracion.
-SemanasVacacionesMaximasPorAnio, default 2) que se resetea en el avance de
-mes de enero (eso lo maneja el proceso de avance de mes, no este módulo).
+activas. El cupo máximo es de N semanas por año calendario
+(Configuracion.SemanasVacacionesMaximasPorAnio, default 2). El consumo del
+cupo no se mide en días corridos sino en peso económico relativo a la
+semana del profesional:
 
-Interpretación del cálculo (el documento no lo detalla en fórmula, solo
-nombra los campos "congelados" a guardar):
-- FraccionSemanaConsumida = días del período / 7 (puede superar 1 si el
-  período dura más de una semana).
-- CupoConsumidoPorcentaje / CupoRestantePorcentaje: acumulado del año en
-  curso, incluyendo este registro, sobre el cupo máximo configurado.
-- ValorBonificado = valor semanal vigente del profesional * fracción de
-  semana consumida (la vacación se descuenta al 100%).
+1. ValorSemanalAlMomentoDelRegistro: suma de todas sus horas regulares
+   semanales × su valor con el descuento por volumen de horas aplicado.
+   Se congela al momento del registro.
+2. ValorBonificado: suma, para cada día del período de vacaciones que cae
+   en un día de la semana en que el profesional tiene reserva regular
+   vigente, de las horas de ese día × el valor con descuento. Es el
+   importe que se descuenta en la liquidación.
+3. FraccionSemanaConsumida = ValorBonificado / ValorSemanalAlMomentoDelRegistro.
+4. CupoConsumidoPorcentaje: suma de todas las fracciones del año calendario
+   (incluida esta) × 100 / SemanasVacacionesMaximasPorAnio.
+5. CupoRestantePorcentaje = 100 - CupoConsumidoPorcentaje.
 
-Si se pide una vacación que excede el cupo restante, se rechaza salvo que
-se fuerce explícitamente; la alternativa sugerida es cargar el excedente
-como Ausencia con motivo "Vacaciones fuera de cupo" (no genera descuento).
+Si el período solicitado supera el cupo disponible, el sistema avisa pero
+no bloquea: se bonifica solo la porción que entra en el cupo restante y el
+resto se factura normalmente en la liquidación (no se le resta nada de
+ValorBonificado).
+
+El cupo se calcula siempre en vivo sumando las Vacacion del profesional
+del año calendario correspondiente, así que no hace falta un paso de
+"reseteo" en el avance de mes de enero: el año siguiente arranca en cero
+porque todavía no tiene registros propios.
 """
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 
-from app.negocio.valores import calcular_valor_semanal_regular
+from app.negocio.dias import fecha_a_dia_semana
+from app.negocio.valores import calcular_valor_semanal_regular, obtener_porcentaje_descuento
 from app.repositorio.registro import obtener_repositorio
 
 CATEGORIAS_CON_DERECHO_A_VACACIONES = ("R", "B", "E")
-
-
-class CupoVacacionesExcedidoError(Exception):
-    def __init__(self, cupo_restante_porcentaje: float, fraccion_solicitada: float):
-        self.cupo_restante_porcentaje = cupo_restante_porcentaje
-        self.fraccion_solicitada = fraccion_solicitada
-        super().__init__(
-            f"La vacación solicitada ({fraccion_solicitada:.2f} semanas) supera el cupo "
-            f"disponible ({cupo_restante_porcentaje:.1f}% restante). Se puede forzar, o "
-            "cargar el excedente como Ausencia con motivo 'Vacaciones fuera de cupo'."
-        )
 
 
 def _profesional_tiene_derecho(conn: sqlite3.Connection, id_profesional: int) -> bool:
@@ -68,44 +68,90 @@ def _semanas_consumidas_en_anio(conn: sqlite3.Connection, id_profesional: int, a
     return sum(f["FraccionSemanaConsumida"] or 0 for f in filas)
 
 
+def _valor_bonificado_bruto(
+    conn: sqlite3.Connection, id_profesional: int, fecha_desde: str, fecha_hasta: str, descuento_pct: float,
+) -> float:
+    """Suma, día por día del período, el valor de las horas regulares que
+    el profesional tiene reservadas ese día de la semana (con descuento)."""
+    total = 0.0
+    dia_actual = date.fromisoformat(fecha_desde)
+    dia_final = date.fromisoformat(fecha_hasta)
+    while dia_actual <= dia_final:
+        fecha_iso = dia_actual.isoformat()
+        filas = conn.execute(
+            """
+            SELECT rr.HoraInicio, rr.HoraFin, c.ValorHoraRegularActual
+            FROM ReservaRegular rr
+            JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
+            WHERE rr.IdProfesional = ? AND rr.DiaSemana = ?
+              AND rr.VigenciaInicio <= ? AND (rr.VigenciaFin IS NULL OR rr.VigenciaFin >= ?)
+            """,
+            (id_profesional, fecha_a_dia_semana(dia_actual), fecha_iso, fecha_iso),
+        ).fetchall()
+        for f in filas:
+            horas = f["HoraFin"] - f["HoraInicio"]
+            total += horas * f["ValorHoraRegularActual"] * (1 - descuento_pct / 100)
+        dia_actual += timedelta(days=1)
+    return total
+
+
 def crear_vacacion(
     conn: sqlite3.Connection, *, id_profesional: int, fecha_desde: str, fecha_hasta: str,
-    forzar: bool = False,
-) -> int:
+) -> tuple[int, list[str]]:
     if not _profesional_tiene_derecho(conn, id_profesional):
         raise ValueError(
             "Las vacaciones solo aplican a profesionales categoría R, B o E "
             "con reservas regulares activas"
         )
-
-    dias = (date.fromisoformat(fecha_hasta) - date.fromisoformat(fecha_desde)).days + 1
-    if dias <= 0:
+    if fecha_hasta < fecha_desde:
         raise ValueError("FechaHasta debe ser posterior o igual a FechaDesde")
 
-    fraccion = dias / 7
+    fecha_hoy = date.today().isoformat()
+    horas_semanales = conn.execute(
+        "SELECT COALESCE(SUM(HoraFin - HoraInicio), 0) AS total FROM ReservaRegular "
+        "WHERE IdProfesional = ? AND VigenciaInicio <= ? AND (VigenciaFin IS NULL OR VigenciaFin >= ?)",
+        (id_profesional, fecha_hoy, fecha_hoy),
+    ).fetchone()["total"]
+    descuento_pct = obtener_porcentaje_descuento(conn, horas_semanales)
+
+    valor_semanal = calcular_valor_semanal_regular(conn, id_profesional, fecha_hoy)
+    valor_bonificado_bruto = _valor_bonificado_bruto(conn, id_profesional, fecha_desde, fecha_hasta, descuento_pct)
+    fraccion_bruta = (valor_bonificado_bruto / valor_semanal) if valor_semanal > 0 else 0.0
+
     cupo_maximo = _cupo_maximo_semanas(conn)
     anio = date.fromisoformat(fecha_desde).year
     ya_consumido = _semanas_consumidas_en_anio(conn, id_profesional, anio)
-    consumido_total = ya_consumido + fraccion
+    cupo_restante_antes = max(0.0, cupo_maximo - ya_consumido)
+    if cupo_restante_antes < 1e-9:  # residuo de punto flotante: tratarlo como cupo agotado
+        cupo_restante_antes = 0.0
 
+    advertencias = []
+    if fraccion_bruta > cupo_restante_antes:
+        proporcion_cubierta = (cupo_restante_antes / fraccion_bruta) if fraccion_bruta > 0 else 0.0
+        valor_bonificado = valor_bonificado_bruto * proporcion_cubierta
+        fraccion_consumida = cupo_restante_antes
+        valor_excedente = valor_bonificado_bruto - valor_bonificado
+        advertencias.append(
+            "La vacación excede el cupo disponible: se bonifican "
+            f"{fraccion_consumida:.2f} semana(s) (cupo agotado) y ${valor_excedente:,.2f} "
+            "del período se facturan normalmente en la liquidación"
+        )
+    else:
+        valor_bonificado = valor_bonificado_bruto
+        fraccion_consumida = fraccion_bruta
+
+    consumido_total = ya_consumido + fraccion_consumida
     if cupo_maximo > 0:
         cupo_consumido_pct = consumido_total / cupo_maximo * 100
-        restante_antes_pct = max(0.0, 100 - (ya_consumido / cupo_maximo * 100))
     else:
-        cupo_consumido_pct = 100.0
-        restante_antes_pct = 0.0
+        cupo_consumido_pct = 100.0 if consumido_total > 0 else 0.0
     cupo_restante_pct = max(0.0, 100 - cupo_consumido_pct)
 
-    if consumido_total > cupo_maximo and not forzar:
-        raise CupoVacacionesExcedidoError(restante_antes_pct, fraccion)
-
-    valor_semanal = calcular_valor_semanal_regular(conn, id_profesional)
-    valor_bonificado = valor_semanal * fraccion
-
     repo = obtener_repositorio(conn, "Vacacion")
-    return repo.crear(
+    id_vacacion = repo.crear(
         IdProfesional=id_profesional, FechaDesde=fecha_desde, FechaHasta=fecha_hasta,
         ValorSemanalAlMomentoDelRegistro=valor_semanal, ValorBonificado=valor_bonificado,
-        FraccionSemanaConsumida=fraccion, CupoConsumidoPorcentaje=cupo_consumido_pct,
+        FraccionSemanaConsumida=fraccion_consumida, CupoConsumidoPorcentaje=cupo_consumido_pct,
         CupoRestantePorcentaje=cupo_restante_pct,
     )
+    return id_vacacion, advertencias
