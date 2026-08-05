@@ -9,8 +9,9 @@ que la sección 4.5:
     Bruto -> Descuento horas -> Subtotal reserva -> Saldo anterior ->
     Descuento feriados -> Descuento no laborables -> Descuento vacaciones ->
     Descuento licencias -> Descuento bonificación (solo categoría B) ->
-    Aisladas mes anterior -> Aisladas mes en curso -> Ajuste por saldo
-    atrasado -> Cargos especiales -> Cuotas de plan de pago -> Total
+    Horas regulares agregadas -> Aisladas mes anterior -> Aisladas mes en
+    curso -> Ajuste por saldo atrasado -> Cargos especiales -> Cuotas de
+    plan de pago -> Total
 
 La categoría B ("bonificado") tiene 100% de descuento sobre lo que le
 correspondería pagar por sus reservas regulares del período: Bruto ya con
@@ -19,15 +20,23 @@ no laborables, vacaciones y licencias. Sigue pagando, si corresponde,
 aisladas, cargos especiales, cuotas de plan de pago y el ajuste por saldo
 atrasado (esas líneas no dependen de la categoría).
 
-Ítems del documento que quedan fuera de este cálculo porque no tienen
-fórmula ni dato de origen definido todavía:
-- "Horas regulares agregadas" y "Feriados mes anterior" como líneas propias:
-  ya están cubiertas conceptualmente (el Bruto usa las reservas vigentes de
-  todo el mes, sin importar cuándo se agregaron; y "feriados mes anterior"
-  requeriría rastrear qué liquidación ya descontó qué feriado, algo que el
-  modelo no guarda). Quedan para cuando se arme el PDF real en la Etapa 7.
-- "Ítem libre" y "Depósito/Reintegro llave": se resuelven con CargoEspecial
-  (sección 3.15), que ya cubre ambos casos vía Concepto/IdLlave.
+Horas regulares agregadas: cuando se suma una reserva regular nueva a
+mitad de mes DESPUÉS de que la liquidación de ese mes ya fue emitida, sus
+horas del resto del mes (excluyendo feriados) no se cobran en ese mes —
+se trasladan como cargo aparte a la liquidación siguiente. Se detecta
+comparando ReservaRegular.VigenciaInicio contra LiquidacionEmitida.
+FechaEmision del mismo período: si la reserva empezó después de esa
+fecha, sus ocurrencias de ese mes quedan afuera del Bruto de ese mes y
+pasan a "horas_regulares_agregadas" del mes siguiente. Si el período
+todavía no fue emitido, no hay nada que trasladar: se cobra completo como
+siempre.
+
+Feriados mes anterior: es el cargo (no descuento) por un profesional que
+trabajó un día feriado, algo que en general se sabe/avisa tarde. No hace
+falta una línea de cálculo propia para esto: se carga a mano con
+`pagos.crear_cargo_especial` (Tipo="Débito", PeriodoImputado=mes que
+corresponda cobrarlo), el mismo mecanismo genérico que ya cubre "Ítem
+libre" y "Depósito/Reintegro llave" (sección 3.15).
 
 Solo aplica a profesionales categoría R, B o E (los que tienen reservas
 regulares y por lo tanto liquidación mensual). Los aislados (categoría A)
@@ -39,7 +48,7 @@ from __future__ import annotations
 import calendar
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from app.negocio.dias import fecha_a_dia_semana
 from app.negocio.feriados import feriados_relevantes_periodo
@@ -57,6 +66,14 @@ class ItemFeriado:
 
 
 @dataclass
+class ItemHorasAgregadas:
+    id_reserva_regular: int
+    dia_semana: str
+    vigencia_inicio: str
+    monto: float
+
+
+@dataclass
 class Liquidacion:
     id_profesional: int
     periodo: str
@@ -70,6 +87,7 @@ class Liquidacion:
     descuento_vacaciones: float = 0.0
     descuento_licencias: float = 0.0
     descuento_bonificacion: float = 0.0
+    horas_regulares_agregadas: list[ItemHorasAgregadas] = field(default_factory=list)
     aisladas_mes_anterior: float = 0.0
     aisladas_mes_en_curso: float = 0.0
     ajuste_saldo_atrasado: float = 0.0
@@ -83,6 +101,10 @@ class Liquidacion:
     @property
     def total_descuento_no_laborables(self) -> float:
         return sum(i.monto for i in self.descuentos_no_laborables)
+
+    @property
+    def total_horas_regulares_agregadas(self) -> float:
+        return sum(i.monto for i in self.horas_regulares_agregadas)
 
     @property
     def total_cargos_especiales(self) -> float:
@@ -102,6 +124,7 @@ class Liquidacion:
             - self.descuento_vacaciones
             - self.descuento_licencias
             - self.descuento_bonificacion
+            + self.total_horas_regulares_agregadas
             + self.aisladas_mes_anterior
             + self.aisladas_mes_en_curso
             + self.ajuste_saldo_atrasado
@@ -134,7 +157,7 @@ def _reservas_regulares_del_dia(conn: sqlite3.Connection, id_profesional: int, d
     fecha_iso = dia.isoformat()
     return conn.execute(
         """
-        SELECT rr.HoraInicio, rr.HoraFin, c.ValorHoraRegularActual
+        SELECT rr.IdReservaRegular, rr.HoraInicio, rr.HoraFin, c.ValorHoraRegularActual
         FROM ReservaRegular rr
         JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
         WHERE rr.IdProfesional = ? AND rr.DiaSemana = ?
@@ -142,6 +165,96 @@ def _reservas_regulares_del_dia(conn: sqlite3.Connection, id_profesional: int, d
         """,
         (id_profesional, fecha_a_dia_semana(dia), fecha_iso, fecha_iso),
     ).fetchall()
+
+
+def _fecha_emision_periodo(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str | None:
+    """Fecha de la última emisión (o reemisión) de la liquidación de ese
+    período, o None si ese período todavía no fue emitido."""
+    filas = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    fechas = [f["FechaEmision"] for f in filas if f["FechaEmision"]]
+    return max(fechas) if fechas else None
+
+
+def _ids_reservas_tardias(
+    conn: sqlite3.Connection, id_profesional: int, anio: int, mes: int, fecha_corte: str | None,
+) -> set[int]:
+    """IdReservaRegular de reservas que empezaron dentro de (anio, mes)
+    después de `fecha_corte` (la emisión de la liquidación de ese mismo
+    mes). Vacío si el mes no fue emitido: no hay nada que trasladar."""
+    if fecha_corte is None:
+        return set()
+    primer = _primer_dia(anio, mes).isoformat()
+    ultimo = _ultimo_dia(anio, mes).isoformat()
+    filas = conn.execute(
+        "SELECT IdReservaRegular FROM ReservaRegular WHERE IdProfesional = ? "
+        "AND VigenciaInicio > ? AND VigenciaInicio BETWEEN ? AND ?",
+        (id_profesional, fecha_corte, primer, ultimo),
+    ).fetchall()
+    return {f["IdReservaRegular"] for f in filas}
+
+
+def _valor_regular_excluyendo(
+    conn: sqlite3.Connection, id_profesional: int, fecha_desde: str, fecha_hasta: str, ids_excluir: set[int],
+) -> float:
+    """Igual que `valores.valor_regular_por_rango_dias`, pero sin contar las
+    reservas de `ids_excluir` (las que se trasladan al mes siguiente)."""
+    if not ids_excluir:
+        return valor_regular_por_rango_dias(conn, id_profesional, fecha_desde, fecha_hasta)
+    total = 0.0
+    dia = date.fromisoformat(fecha_desde)
+    fin = date.fromisoformat(fecha_hasta)
+    while dia <= fin:
+        for f in _reservas_regulares_del_dia(conn, id_profesional, dia):
+            if f["IdReservaRegular"] in ids_excluir:
+                continue
+            total += (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"]
+        dia += timedelta(days=1)
+    return total
+
+
+def _calcular_horas_regulares_agregadas(
+    conn: sqlite3.Connection, id_profesional: int, periodo: str,
+) -> list[ItemHorasAgregadas]:
+    """Reservas regulares agregadas a mitad del mes anterior, después de que
+    la liquidación de ese mes ya había sido emitida: se cobran ahora, por
+    las ocurrencias entre su VigenciaInicio y el fin de ese mes, sin contar
+    los feriados de ese mes."""
+    periodo_anterior = _periodo_anterior(periodo)
+    fecha_corte = _fecha_emision_periodo(conn, id_profesional, periodo_anterior)
+    if fecha_corte is None:
+        return []
+
+    anio_ant, mes_ant = _parsear_periodo(periodo_anterior)
+    ultimo_dia_ant = _ultimo_dia(anio_ant, mes_ant)
+    feriados_ant = {f["Fecha"] for f in feriados_relevantes_periodo(conn, anio_ant, mes_ant)}
+
+    filas = conn.execute(
+        """
+        SELECT rr.IdReservaRegular, rr.DiaSemana, rr.HoraInicio, rr.HoraFin, rr.VigenciaInicio,
+               c.ValorHoraRegularActual
+        FROM ReservaRegular rr
+        JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
+        WHERE rr.IdProfesional = ? AND rr.VigenciaInicio > ?
+          AND rr.VigenciaInicio BETWEEN ? AND ?
+        """,
+        (id_profesional, fecha_corte, _primer_dia(anio_ant, mes_ant).isoformat(), ultimo_dia_ant.isoformat()),
+    ).fetchall()
+
+    items = []
+    for f in filas:
+        dia = date.fromisoformat(f["VigenciaInicio"])
+        valor_ocurrencia = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"]
+        monto = 0.0
+        while dia <= ultimo_dia_ant:
+            if fecha_a_dia_semana(dia) == f["DiaSemana"] and dia.isoformat() not in feriados_ant:
+                monto += valor_ocurrencia
+            dia += timedelta(days=1)
+        if monto > 0:
+            items.append(ItemHorasAgregadas(
+                id_reserva_regular=f["IdReservaRegular"], dia_semana=f["DiaSemana"],
+                vigencia_inicio=f["VigenciaInicio"], monto=monto,
+            ))
+    return items
 
 
 def _horas_semanales_vigentes(conn: sqlite3.Connection, id_profesional: int, fecha_referencia: str) -> float:
@@ -155,6 +268,7 @@ def _horas_semanales_vigentes(conn: sqlite3.Connection, id_profesional: int, fec
 
 def _calcular_descuentos_feriados(
     conn: sqlite3.Connection, id_profesional: int, anio: int, mes: int, descuento_horas_pct: float,
+    ids_excluir: set[int] = frozenset(),
 ) -> tuple[list[ItemFeriado], list[ItemFeriado]]:
     feriados = feriados_relevantes_periodo(conn, anio, mes)
     nacionales, no_laborables = [], []
@@ -162,6 +276,8 @@ def _calcular_descuentos_feriados(
         dia = date.fromisoformat(feriado["Fecha"])
         monto = 0.0
         for f in _reservas_regulares_del_dia(conn, id_profesional, dia):
+            if f["IdReservaRegular"] in ids_excluir:
+                continue
             horas = f["HoraFin"] - f["HoraInicio"]
             monto += horas * f["ValorHoraRegularActual"] * (1 - descuento_horas_pct / 100)
         if monto <= 0:
@@ -255,12 +371,16 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
     horas_semanales = _horas_semanales_vigentes(conn, id_profesional, primer_dia_periodo)
     descuento_horas_pct = obtener_porcentaje_descuento(conn, horas_semanales)
 
-    bruto = valor_regular_por_rango_dias(conn, id_profesional, primer_dia_periodo, ultimo_dia_periodo)
+    fecha_emision_este_periodo = _fecha_emision_periodo(conn, id_profesional, periodo)
+    ids_tardias = _ids_reservas_tardias(conn, id_profesional, anio, mes, fecha_emision_este_periodo)
+
+    bruto = _valor_regular_excluyendo(conn, id_profesional, primer_dia_periodo, ultimo_dia_periodo, ids_tardias)
     subtotal_reserva = bruto * (1 - descuento_horas_pct / 100)
 
     descuentos_feriados, descuentos_no_laborables = _calcular_descuentos_feriados(
-        conn, id_profesional, anio, mes, descuento_horas_pct
+        conn, id_profesional, anio, mes, descuento_horas_pct, ids_excluir=ids_tardias,
     )
+    horas_regulares_agregadas = _calcular_horas_regulares_agregadas(conn, id_profesional, periodo)
     descuento_vacaciones = _calcular_descuento_vacaciones(
         conn, id_profesional, primer_dia_periodo, ultimo_dia_periodo, descuento_horas_pct
     )
@@ -307,7 +427,7 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
         saldo_anterior=saldo_anterior, descuentos_feriados=descuentos_feriados,
         descuentos_no_laborables=descuentos_no_laborables, descuento_vacaciones=descuento_vacaciones,
         descuento_licencias=descuento_licencias, descuento_bonificacion=descuento_bonificacion,
-        aisladas_mes_anterior=aisladas_mes_anterior,
+        horas_regulares_agregadas=horas_regulares_agregadas, aisladas_mes_anterior=aisladas_mes_anterior,
         aisladas_mes_en_curso=aisladas_mes_en_curso, ajuste_saldo_atrasado=ajuste_saldo_atrasado,
         cargos_especiales=cargos_especiales, cuotas_plan=cuotas_plan,
     )

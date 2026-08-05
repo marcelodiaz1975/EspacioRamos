@@ -221,6 +221,59 @@ def test_cuotas_de_plan_pendientes_del_periodo_se_incluyen(conn, consultorio):
     assert liquidacion_luego_de_pagar.total_cuotas_plan == 0
 
 
+def test_reserva_agregada_a_mitad_de_mes_sin_emision_previa_se_cobra_completa(conn, consultorio):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
+    id_reserva = obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana="Martes",
+        HoraInicio=14, HoraFin=16, VigenciaInicio="2026-08-15",
+    )
+    # martes de agosto 2026 desde el 15 en adelante: 18 y 25
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion.bruto == pytest.approx(2 * 2 * VALOR_HORA_REGULAR)
+    assert liquidacion.horas_regulares_agregadas == []
+    assert id_reserva is not None
+
+
+def test_reserva_agregada_luego_de_emitida_la_liquidacion_se_traslada_al_mes_siguiente(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+
+    id_reserva_nueva = obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana="Martes",
+        HoraInicio=14, HoraFin=16, VigenciaInicio="2026-08-15",
+    )
+
+    # recalcular agosto: la reserva nueva no debe sumarse, ya se emitió antes de que existiera
+    liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    lunes_en_agosto = _cantidad_lunes(2026, 8)
+    assert liq_agosto.bruto == pytest.approx(lunes_en_agosto * 2 * VALOR_HORA_REGULAR)
+    assert liq_agosto.horas_regulares_agregadas == []
+
+    # septiembre trae el cargo de los martes de agosto que quedaron afuera (18 y 25)
+    liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
+    assert len(liq_septiembre.horas_regulares_agregadas) == 1
+    item = liq_septiembre.horas_regulares_agregadas[0]
+    assert item.id_reserva_regular == id_reserva_nueva
+    assert item.monto == pytest.approx(2 * 2 * VALOR_HORA_REGULAR)
+    assert liq_septiembre.total_horas_regulares_agregadas == pytest.approx(item.monto)
+
+
+def test_horas_agregadas_no_cuentan_feriados_del_mes_anterior(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+    assert fecha_a_dia_semana(date(2026, 8, 18)) == "Martes"
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-08-18", Descripcion="Feriado de prueba", Tipo="Feriado nacional",
+    )
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana="Martes",
+        HoraInicio=14, HoraFin=16, VigenciaInicio="2026-08-15",
+    )
+    liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
+    # solo el martes 25 (el 18 es feriado y no se cuenta)
+    assert liq_septiembre.total_horas_regulares_agregadas == pytest.approx(2 * VALOR_HORA_REGULAR)
+
+
 def test_emitir_liquidacion_persiste_y_actualiza_saldo(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaActual=1000)
