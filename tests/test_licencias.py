@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 import pytest
 
 from app.db.init_db import init_database
@@ -38,6 +40,21 @@ def _valor_semanal_esperado(conn):
     return HORAS_SEMANA * VALOR_HORA * (1 - descuento_pct / 100)
 
 
+def _valor_bonificado_esperado(conn, fecha_desde, fecha_hasta, porcentaje):
+    """Día por día del período: solo cuentan los lunes (único día reservado
+    en el fixture), con el descuento por horas semanales ya aplicado."""
+    descuento_pct = obtener_porcentaje_descuento(conn, HORAS_SEMANA)
+    valor_dia = HORAS_SEMANA * VALOR_HORA * (1 - descuento_pct / 100) * (porcentaje / 100)
+    dia = date.fromisoformat(fecha_desde)
+    fin = date.fromisoformat(fecha_hasta)
+    total = 0.0
+    while dia <= fin:
+        if dia.weekday() == 0:  # lunes
+            total += valor_dia
+        dia += timedelta(days=1)
+    return total
+
+
 def _id_tipo(conn, nombre):
     tipos = obtener_repositorio(conn, "TipoLicencia").listar(Nombre=nombre)
     return tipos[0]["IdTipoLicencia"]
@@ -54,44 +71,83 @@ def test_licencia_manual_requiere_fecha_hasta(conn, profesional_con_reserva):
 
 def test_licencia_no_manual_calcula_fecha_hasta_sola(conn, profesional_con_reserva):
     id_tipo = _id_tipo(conn, "Licencia por duelo")  # 5 días, no manual
-    id_licencia = crear_licencia(
+    id_licencia, advertencias = crear_licencia(
         conn, id_profesional=profesional_con_reserva, id_tipo_licencia=id_tipo,
         fecha_desde="2026-08-01",
     )
     licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
     assert licencia["FechaHasta"] == "2026-08-05"
+    assert advertencias == []
 
 
-def test_licencia_supera_duracion_maxima_se_rechaza(conn, profesional_con_reserva):
-    id_tipo = _id_tipo(conn, "Licencia por duelo")  # máximo 5 días
-    with pytest.raises(ValueError):
-        crear_licencia(
-            conn, id_profesional=profesional_con_reserva, id_tipo_licencia=id_tipo,
-            fecha_desde="2026-08-01", fecha_hasta="2026-08-10",
-        )
+def test_licencia_supera_duracion_maxima_no_bloquea_y_bonifica_solo_hasta_el_tope(conn, profesional_con_reserva):
+    id_tipo = _id_tipo(conn, "Licencia por duelo")  # máximo 5 días, 100%
+    id_licencia, advertencias = crear_licencia(
+        conn, id_profesional=profesional_con_reserva, id_tipo_licencia=id_tipo,
+        fecha_desde="2026-08-01", fecha_hasta="2026-08-10",
+    )
+    licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
+    assert len(advertencias) == 1
+    assert "supera la duración máxima" in advertencias[0]
+    assert licencia["FechaHasta"] == "2026-08-10"  # se guarda el período completo pedido
+    # solo se bonifican los primeros 5 días (01 al 05/8): un solo lunes, el 3/8
+    esperado = _valor_bonificado_esperado(conn, "2026-08-01", "2026-08-05", 100)
+    assert licencia["ValorBonificado"] == pytest.approx(esperado)
 
 
 def test_licencia_maternidad_bonifica_50_por_ciento(conn, profesional_con_reserva):
     id_tipo = _id_tipo(conn, "Licencia por maternidad")  # 50%, 90 días, no manual
-    id_licencia = crear_licencia(
+    id_licencia, advertencias = crear_licencia(
         conn, id_profesional=profesional_con_reserva, id_tipo_licencia=id_tipo,
         fecha_desde="2026-08-01",
     )
     licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
+    assert advertencias == []
     assert licencia["PorcentajeBonificacionAplicado"] == 50
     valor_semanal = _valor_semanal_esperado(conn)
     assert licencia["ValorSemanalAlMomentoDelRegistro"] == pytest.approx(valor_semanal)
-    # 90 días * (valor_semanal/7) * 50% de bonificación
-    esperado = (valor_semanal / 7) * 90 * 0.5
+    esperado = _valor_bonificado_esperado(conn, "2026-08-01", licencia["FechaHasta"], 50)
     assert licencia["ValorBonificado"] == pytest.approx(esperado)
 
 
-def test_licencia_medica_bonifica_100_por_ciento_de_un_dia(conn, profesional_con_reserva):
+def test_licencia_medica_bonifica_100_por_ciento_un_dia_con_reserva(conn, profesional_con_reserva):
     id_tipo = _id_tipo(conn, "Licencia médica")  # 100%, sin límite, manual
-    id_licencia = crear_licencia(
+    id_licencia, advertencias = crear_licencia(
         conn, id_profesional=profesional_con_reserva, id_tipo_licencia=id_tipo,
-        fecha_desde="2026-08-01", fecha_hasta="2026-08-01",
+        fecha_desde="2026-08-03", fecha_hasta="2026-08-03",  # lunes
     )
     licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
-    valor_semanal = _valor_semanal_esperado(conn)
-    assert licencia["ValorBonificado"] == pytest.approx(valor_semanal / 7)
+    assert advertencias == []
+    descuento_pct = obtener_porcentaje_descuento(conn, HORAS_SEMANA)
+    valor_dia = HORAS_SEMANA * VALOR_HORA * (1 - descuento_pct / 100)
+    assert licencia["ValorBonificado"] == pytest.approx(valor_dia)
+
+
+def test_licencia_no_bonifica_dia_sin_reserva(conn, profesional_con_reserva):
+    id_tipo = _id_tipo(conn, "Licencia médica")
+    id_licencia, _ = crear_licencia(
+        conn, id_profesional=profesional_con_reserva, id_tipo_licencia=id_tipo,
+        fecha_desde="2026-08-04", fecha_hasta="2026-08-04",  # martes, sin reserva
+    )
+    licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
+    assert licencia["ValorBonificado"] == pytest.approx(0.0)
+
+
+def test_licencia_categoria_b_no_genera_descuento(conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=VALOR_HORA,
+    )
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bonificada")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=10 + HORAS_SEMANA, VigenciaInicio="2026-01-01",
+    )
+    id_tipo = _id_tipo(conn, "Licencia médica")
+    id_licencia, _ = crear_licencia(
+        conn, id_profesional=id_prof, id_tipo_licencia=id_tipo,
+        fecha_desde="2026-08-03", fecha_hasta="2026-08-03",
+    )
+    licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
+    assert licencia["ValorBonificado"] == 0.0

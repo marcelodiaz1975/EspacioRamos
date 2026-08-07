@@ -26,6 +26,7 @@ TABLAS = [
     "Ausencia",
     "CargoEspecial",
     "LiquidacionEmitida",
+    "FeriadoTrabajado",
     "FechasEspeciales",
     "EsquemaDescuentos",
     "ListasEditables",

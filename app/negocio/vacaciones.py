@@ -27,6 +27,12 @@ El cupo se calcula siempre en vivo sumando las Vacacion del profesional
 del año calendario correspondiente, así que no hace falta un paso de
 "reseteo" en el avance de mes de enero: el año siguiente arranca en cero
 porque todavía no tiene registros propios.
+
+Categoría B (DC-05 §1.1): sin impacto económico — sus bloques ya están
+bonificados en la liquidación, así que ValorBonificado se guarda siempre
+en 0. El cupo (FraccionSemanaConsumida y derivados) se sigue consumiendo
+igual que para R/E: sirve para saber cuándo el consultorio queda libre
+para asignar aisladas, no depende de si hay o no descuento económico.
 """
 from __future__ import annotations
 
@@ -131,6 +137,16 @@ def crear_vacacion(
     else:
         cupo_consumido_pct = 100.0 if consumido_total > 0 else 0.0
     cupo_restante_pct = max(0.0, 100 - cupo_consumido_pct)
+
+    # Categoría B (DC-05 §1.1): sin impacto económico — sus bloques ya están
+    # bonificados, así que no hay nada que descontar en ninguna liquidación.
+    # El cupo se sigue consumiendo igual (sirve para saber cuándo el
+    # consultorio queda libre para aisladas).
+    profesional = conn.execute(
+        "SELECT CategoriaProfesional FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
+    ).fetchone()
+    if profesional["CategoriaProfesional"] == "B":
+        valor_bonificado = 0.0
 
     repo = obtener_repositorio(conn, "Vacacion")
     id_vacacion = repo.crear(

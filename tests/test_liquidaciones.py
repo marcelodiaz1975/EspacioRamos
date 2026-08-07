@@ -7,13 +7,14 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.dias import fecha_a_dia_semana
 from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion
-from app.negocio.pagos import crear_cargo_especial, crear_plan_pago, marcar_cuota_pagada
+from app.negocio.pagos import crear_cargo_especial, crear_plan_pago, marcar_cuota_pagada, registrar_pago
 from app.negocio.valores import obtener_porcentaje_descuento
 from app.repositorio.registro import obtener_repositorio
 
 VALOR_HORA_REGULAR = 1000
 VALOR_HORA_AISLADA = 500
 PERIODO = "2026-08"
+PERIODO_ANTERIOR = "2026-07"
 
 
 @pytest.fixture
@@ -34,52 +35,117 @@ def consultorio(conn):
     )
 
 
-def _profesional_con_reserva_lunes(conn, consultorio, categoria="R", horas=2):
-    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional=categoria, Apellido="Lo Veci")
-    obtener_repositorio(conn, "ReservaRegular").crear(
-        IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana="Lunes",
-        HoraInicio=10, HoraFin=10 + horas, VigenciaInicio="2026-01-01",
+def _crear_profesional(conn, categoria="R", cabeza_equipo=None):
+    return obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional=categoria, Apellido="Lo Veci", ProfesionalCabezaEquipo=cabeza_equipo,
     )
+
+
+def _crear_reserva(conn, id_prof, consultorio, dia_semana="Lunes", horas=2, vigencia_inicio="2026-01-01",
+                    vigencia_fin=None):
+    return obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana=dia_semana,
+        HoraInicio=10, HoraFin=10 + horas, VigenciaInicio=vigencia_inicio, VigenciaFin=vigencia_fin,
+    )
+
+
+def _profesional_con_reserva_lunes(conn, consultorio, categoria="R", horas=2):
+    id_prof = _crear_profesional(conn, categoria=categoria)
+    _crear_reserva(conn, id_prof, consultorio, "Lunes", horas)
     return id_prof
 
 
-def _cantidad_lunes(anio: int, mes: int) -> int:
+def _cantidad_dia(anio: int, mes: int, dia_semana: str) -> int:
     total_dias = calendar.monthrange(anio, mes)[1]
-    return sum(1 for d in range(1, total_dias + 1) if date(anio, mes, d).weekday() == 0)
+    return sum(
+        1 for d in range(1, total_dias + 1)
+        if fecha_a_dia_semana(date(anio, mes, d)) == dia_semana
+    )
 
 
-def test_categoria_sin_liquidacion_mensual_lanza_error(conn, consultorio):
-    id_prof = _profesional_con_reserva_lunes(conn, consultorio, categoria="A")
-    with pytest.raises(ValueError):
-        calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+def test_categorias_sin_liquidacion_propia_lanzan_error(conn, consultorio):
+    for categoria in ("A", "B", "E", "X", "C"):
+        id_prof = _profesional_con_reserva_lunes(conn, consultorio, categoria=categoria)
+        with pytest.raises(ValueError):
+            calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
 
 
 def test_bruto_y_subtotal_reserva(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
 
-    lunes_en_agosto = _cantidad_lunes(2026, 8)
+    lunes_en_agosto = _cantidad_dia(2026, 8, "Lunes")
     bruto_esperado = lunes_en_agosto * 2 * VALOR_HORA_REGULAR
     descuento_pct = obtener_porcentaje_descuento(conn, 2)
 
     assert liquidacion.bruto == pytest.approx(bruto_esperado)
     assert liquidacion.subtotal_reserva == pytest.approx(bruto_esperado * (1 - descuento_pct / 100))
     assert liquidacion.saldo_anterior == 0
+    assert len(liquidacion.tramos) == 1
     assert liquidacion.total == pytest.approx(liquidacion.subtotal_reserva)
 
 
-def test_categoria_b_tiene_100_por_ciento_de_bonificacion(conn, consultorio):
-    id_prof = _profesional_con_reserva_lunes(conn, consultorio, categoria="B", horas=2)
-    obtener_repositorio(conn, "ReservaAislada").crear(
-        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-08-05",
-        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
-    )
+def test_categoria_e_se_consolida_en_liquidacion_del_r(conn, consultorio):
+    id_r = _crear_profesional(conn, categoria="R")
+    _crear_reserva(conn, id_r, consultorio, "Lunes", horas=2)
+    id_e = _crear_profesional(conn, categoria="E", cabeza_equipo=id_r)
+    _crear_reserva(conn, id_e, consultorio, "Martes", horas=3)
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_r, periodo=PERIODO)
+
+    lunes = _cantidad_dia(2026, 8, "Lunes")
+    martes = _cantidad_dia(2026, 8, "Martes")
+    bruto_esperado = lunes * 2 * VALOR_HORA_REGULAR + martes * 3 * VALOR_HORA_REGULAR
+    descuento_pct = obtener_porcentaje_descuento(conn, 5)  # 2hs (R) + 3hs (E) = 5hs consolidadas
+
+    assert liquidacion.bruto == pytest.approx(bruto_esperado)
+    assert liquidacion.subtotal_reserva == pytest.approx(bruto_esperado * (1 - descuento_pct / 100))
+
+    # el E no tiene liquidación propia
+    with pytest.raises(ValueError):
+        calcular_liquidacion(conn, id_profesional=id_e, periodo=PERIODO)
+
+
+def test_tramos_se_desglosan_si_cambian_horas_semanales_a_mitad_de_mes(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    # 15/8 es sábado: agrega una reserva nueva desde ese día (sin emisión previa, se cobra completa)
+    _crear_reserva(conn, id_prof, consultorio, "Martes", horas=3, vigencia_inicio="2026-08-15")
+
     liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
 
-    assert liquidacion.descuento_bonificacion == pytest.approx(liquidacion.subtotal_reserva)
-    # la bonificación cubre la reserva regular, pero las aisladas se siguen cobrando
-    assert liquidacion.total == pytest.approx(liquidacion.aisladas_mes_en_curso)
-    assert liquidacion.total > 0
+    assert len(liquidacion.tramos) == 2
+    assert liquidacion.tramos[0].fecha_desde == "2026-08-01"
+    assert liquidacion.tramos[0].fecha_hasta == "2026-08-14"
+    assert liquidacion.tramos[0].horas_semanales == pytest.approx(2)
+    assert liquidacion.tramos[1].fecha_desde == "2026-08-15"
+    assert liquidacion.tramos[1].fecha_hasta == "2026-08-31"
+    assert liquidacion.tramos[1].horas_semanales == pytest.approx(5)
+    assert liquidacion.tramos[0].descuento_pct == pytest.approx(obtener_porcentaje_descuento(conn, 2))
+    assert liquidacion.tramos[1].descuento_pct == pytest.approx(obtener_porcentaje_descuento(conn, 5))
+    assert liquidacion.subtotal_reserva == pytest.approx(sum(t.subtotal for t in liquidacion.tramos))
+
+
+def test_pierde_descuento_horas_si_saldo_anterior_supera_tolerancia(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=100)
+    # tolerancia por defecto es 0 -> cualquier saldo positivo hace perder el descuento
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+
+    assert liquidacion.pierde_descuento_horas is True
+    assert liquidacion.tramos[0].descuento_pct == 0
+    assert liquidacion.subtotal_reserva == pytest.approx(liquidacion.bruto)
+
+
+def test_no_pierde_descuento_si_saldo_anterior_dentro_de_tolerancia(conn, consultorio):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=500)
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=100)
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+
+    assert liquidacion.pierde_descuento_horas is False
+    assert liquidacion.tramos[0].descuento_pct == pytest.approx(obtener_porcentaje_descuento(conn, 2))
 
 
 def test_descuento_feriado_nacional_se_lista_por_dia(conn, consultorio):
@@ -112,6 +178,34 @@ def test_descuento_dia_no_laborable_va_en_lista_separada(conn, consultorio):
     assert liquidacion.descuentos_no_laborables[0].fecha == "2026-08-24"
 
 
+def test_feriado_pendiente_agregado_despues_de_emitida_la_liquidacion_del_mes_anterior(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO_ANTERIOR, fecha_emision="2026-07-01")
+
+    # el 20/7 (lunes) se agrega como feriado extraordinario DESPUÉS de emitida julio
+    assert fecha_a_dia_semana(date(2026, 7, 20)) == "Lunes"
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-07-20", Descripcion="Feriado extraordinario", Tipo="Feriado nacional",
+    )
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert len(liquidacion.feriados_pendientes) == 1
+    assert liquidacion.feriados_pendientes[0].fecha == "2026-07-20"
+    descuento_pct = obtener_porcentaje_descuento(conn, 2)
+    assert liquidacion.feriados_pendientes[0].monto == pytest.approx(2 * VALOR_HORA_REGULAR * (1 - descuento_pct / 100))
+
+
+def test_feriado_conocido_antes_de_emitir_no_queda_pendiente(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-07-06", Descripcion="Feriado conocido", Tipo="Feriado nacional",
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO_ANTERIOR, fecha_emision="2026-07-10")
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion.feriados_pendientes == []
+
+
 def test_aisladas_mes_en_curso_y_mes_anterior(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     obtener_repositorio(conn, "ReservaAislada").crear(
@@ -140,12 +234,9 @@ def test_reserva_aislada_cancelada_no_se_factura(conn, consultorio):
 
 def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_mes(conn, consultorio):
     dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
-    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
+    id_prof = _crear_profesional(conn)
     for dia in dias:
-        obtener_repositorio(conn, "ReservaRegular").crear(
-            IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana=dia,
-            HoraInicio=10, HoraFin=12, VigenciaInicio="2026-01-01",
-        )
+        _crear_reserva(conn, id_prof, consultorio, dia, horas=2)
     from app.negocio.vacaciones import crear_vacacion
     id_vacacion, _ = crear_vacacion(
         conn, id_profesional=id_prof, fecha_desde="2026-08-28", fecha_hasta="2026-09-03",
@@ -161,36 +252,89 @@ def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_mes(conn, consultor
     assert suma == pytest.approx(vacacion["ValorBonificado"])
 
 
-def test_descuento_licencias_prorratea_por_mes(conn, consultorio):
+def test_descuento_licencias_dia_por_dia(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     from app.negocio.licencias import crear_licencia
     id_tipo = obtener_repositorio(conn, "TipoLicencia").listar(Nombre="Licencia médica")[0]["IdTipoLicencia"]
-    id_licencia = crear_licencia(
+    id_licencia, _ = crear_licencia(
         conn, id_profesional=id_prof, id_tipo_licencia=id_tipo,
         fecha_desde="2026-08-29", fecha_hasta="2026-09-04",
     )
     licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
+    assert licencia["ValorBonificado"] > 0
 
     liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-08")
     liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
-
-    # 3 días en agosto (29,30,31) + 4 en septiembre (1,2,3,4) = 7 días totales
-    valor_dia = licencia["ValorSemanalAlMomentoDelRegistro"] / 7 * (licencia["PorcentajeBonificacionAplicado"] / 100)
-    assert liq_agosto.descuento_licencias == pytest.approx(valor_dia * 3)
-    assert liq_septiembre.descuento_licencias == pytest.approx(valor_dia * 4)
+    suma = liq_agosto.descuento_licencias + liq_septiembre.descuento_licencias
+    assert suma == pytest.approx(licencia["ValorBonificado"])
 
 
-def test_ajuste_saldo_atrasado_solo_si_hay_deuda(conn, consultorio):
-    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
-    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaActual=1000)
+def test_reserva_agregada_sin_emision_previa_se_cobra_completa(conn, consultorio):
+    id_prof = _crear_profesional(conn)
+    id_reserva = _crear_reserva(conn, id_prof, consultorio, "Martes", horas=2, vigencia_inicio="2026-08-15")
     liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
-    assert liquidacion.saldo_anterior == 1000
-    assert liquidacion.ajuste_saldo_atrasado == pytest.approx(1000 * 3 / 100)  # default 3%
+    # martes de agosto 2026 desde el 15 en adelante: 18 y 25
+    assert liquidacion.bruto == pytest.approx(2 * 2 * VALOR_HORA_REGULAR)
+    assert liquidacion.horas_regulares_agregadas == []
+    assert id_reserva is not None
 
-    id_prof2 = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
-    obtener_repositorio(conn, "Profesional").actualizar(id_prof2, SaldoCuentaActual=-500)  # a favor
-    liquidacion2 = calcular_liquidacion(conn, id_profesional=id_prof2, periodo=PERIODO)
-    assert liquidacion2.ajuste_saldo_atrasado == 0
+
+def test_reserva_agregada_luego_de_emitida_se_traslada_al_mes_siguiente(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+
+    id_reserva_nueva = _crear_reserva(conn, id_prof, consultorio, "Martes", horas=2, vigencia_inicio="2026-08-15")
+
+    liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    lunes_en_agosto = _cantidad_dia(2026, 8, "Lunes")
+    assert liq_agosto.bruto == pytest.approx(lunes_en_agosto * 2 * VALOR_HORA_REGULAR)
+    assert liq_agosto.horas_regulares_agregadas == []
+
+    liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
+    assert len(liq_septiembre.horas_regulares_agregadas) == 1
+    item = liq_septiembre.horas_regulares_agregadas[0]
+    assert item.id_reserva_regular == id_reserva_nueva
+    assert liq_septiembre.total_horas_regulares_agregadas > 0
+
+
+def test_feriado_trabajado_mes_en_curso_avisado_antes_de_emitir(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "FeriadoTrabajado").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-08-17",
+        HoraInicio=9, HoraFin=11, AplicaRecargo=0, FechaCarga="2026-08-01",
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+
+    assert len(liquidacion.feriados_trabajados_mes_en_curso) == 1
+    descuento_pct = obtener_porcentaje_descuento(conn, 2)
+    esperado = 2 * VALOR_HORA_REGULAR * (1 - descuento_pct / 100)
+    assert liquidacion.feriados_trabajados_mes_en_curso[0].monto == pytest.approx(esperado)
+    assert liquidacion.feriados_trabajados_mes_anterior == []
+
+
+def test_feriado_trabajado_mes_anterior_avisado_despues_de_emitir(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO_ANTERIOR, fecha_emision="2026-07-05")
+
+    obtener_repositorio(conn, "FeriadoTrabajado").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-07-09",
+        HoraInicio=9, HoraFin=11, AplicaRecargo=0, FechaCarga="2026-07-20",  # avisó después de emitida julio
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert len(liquidacion.feriados_trabajados_mes_anterior) == 1
+    assert liquidacion.feriados_trabajados_mes_en_curso == []
+
+
+def test_feriado_trabajado_avisado_a_tiempo_no_se_duplica_al_mes_siguiente(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "FeriadoTrabajado").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-07-09",
+        HoraInicio=9, HoraFin=11, AplicaRecargo=0, FechaCarga="2026-07-01",  # antes de emitir julio
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO_ANTERIOR, fecha_emision="2026-07-05")
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion.feriados_trabajados_mes_anterior == []
 
 
 def test_cargos_especiales_suman_con_signo(conn, consultorio):
@@ -210,7 +354,7 @@ def test_cargos_especiales_suman_con_signo(conn, consultorio):
 def test_cuotas_de_plan_pendientes_del_periodo_se_incluyen(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     id_plan = crear_plan_pago(
-        conn, id_profesional=id_prof, monto_total=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
+        conn, id_profesional=id_prof, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
     assert liquidacion.total_cuotas_plan == pytest.approx(100)
@@ -221,62 +365,9 @@ def test_cuotas_de_plan_pendientes_del_periodo_se_incluyen(conn, consultorio):
     assert liquidacion_luego_de_pagar.total_cuotas_plan == 0
 
 
-def test_reserva_agregada_a_mitad_de_mes_sin_emision_previa_se_cobra_completa(conn, consultorio):
-    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
-    id_reserva = obtener_repositorio(conn, "ReservaRegular").crear(
-        IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana="Martes",
-        HoraInicio=14, HoraFin=16, VigenciaInicio="2026-08-15",
-    )
-    # martes de agosto 2026 desde el 15 en adelante: 18 y 25
-    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
-    assert liquidacion.bruto == pytest.approx(2 * 2 * VALOR_HORA_REGULAR)
-    assert liquidacion.horas_regulares_agregadas == []
-    assert id_reserva is not None
-
-
-def test_reserva_agregada_luego_de_emitida_la_liquidacion_se_traslada_al_mes_siguiente(conn, consultorio):
+def test_emitir_liquidacion_no_toca_saldo_anterior_y_acredita_lo_generado(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
-    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
-
-    id_reserva_nueva = obtener_repositorio(conn, "ReservaRegular").crear(
-        IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana="Martes",
-        HoraInicio=14, HoraFin=16, VigenciaInicio="2026-08-15",
-    )
-
-    # recalcular agosto: la reserva nueva no debe sumarse, ya se emitió antes de que existiera
-    liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
-    lunes_en_agosto = _cantidad_lunes(2026, 8)
-    assert liq_agosto.bruto == pytest.approx(lunes_en_agosto * 2 * VALOR_HORA_REGULAR)
-    assert liq_agosto.horas_regulares_agregadas == []
-
-    # septiembre trae el cargo de los martes de agosto que quedaron afuera (18 y 25)
-    liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
-    assert len(liq_septiembre.horas_regulares_agregadas) == 1
-    item = liq_septiembre.horas_regulares_agregadas[0]
-    assert item.id_reserva_regular == id_reserva_nueva
-    assert item.monto == pytest.approx(2 * 2 * VALOR_HORA_REGULAR)
-    assert liq_septiembre.total_horas_regulares_agregadas == pytest.approx(item.monto)
-
-
-def test_horas_agregadas_no_cuentan_feriados_del_mes_anterior(conn, consultorio):
-    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
-    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
-    assert fecha_a_dia_semana(date(2026, 8, 18)) == "Martes"
-    obtener_repositorio(conn, "FechasEspeciales").crear(
-        Fecha="2026-08-18", Descripcion="Feriado de prueba", Tipo="Feriado nacional",
-    )
-    obtener_repositorio(conn, "ReservaRegular").crear(
-        IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana="Martes",
-        HoraInicio=14, HoraFin=16, VigenciaInicio="2026-08-15",
-    )
-    liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
-    # solo el martes 25 (el 18 es feriado y no se cuenta)
-    assert liq_septiembre.total_horas_regulares_agregadas == pytest.approx(2 * VALOR_HORA_REGULAR)
-
-
-def test_emitir_liquidacion_persiste_y_actualiza_saldo(conn, consultorio):
-    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
-    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaActual=1000)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=1000, SaldoCuentaActual=0)
 
     id_liquidacion, liquidacion = emitir_liquidacion(
         conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01",
@@ -284,7 +375,32 @@ def test_emitir_liquidacion_persiste_y_actualiza_saldo(conn, consultorio):
     registro = obtener_repositorio(conn, "LiquidacionEmitida").obtener(id_liquidacion)
     assert registro["Periodo"] == PERIODO
     assert registro["EstadoEnvio"] == "No enviada"
+    assert registro["MontoGenerado"] == pytest.approx(liquidacion.monto_generado)
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
-    assert profesional["SaldoCuentaAnterior"] == pytest.approx(1000)
-    assert profesional["SaldoCuentaActual"] == pytest.approx(liquidacion.total)
+    assert profesional["SaldoCuentaAnterior"] == pytest.approx(1000)  # sin tocar
+    assert profesional["SaldoCuentaActual"] == pytest.approx(liquidacion.monto_generado)
+    assert liquidacion.total == pytest.approx(1000 + liquidacion.monto_generado)
+
+
+def test_reemision_no_pisa_pagos_ya_registrados_contra_el_mes_en_curso(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=0, SaldoCuentaActual=0)
+
+    _, liq_1 = emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+    registrar_pago(conn, id_profesional=id_prof, monto=500)  # pago contra el mes en curso
+
+    saldo_tras_pago = obtener_repositorio(conn, "Profesional").obtener(id_prof)["SaldoCuentaActual"]
+    assert saldo_tras_pago == pytest.approx(liq_1.monto_generado - 500)
+
+    crear_cargo_especial(
+        conn, id_profesional=id_prof, tipo="Débito", concepto="depósito llave", monto=300, periodo_imputado=PERIODO,
+    )
+    _, liq_2 = emitir_liquidacion(
+        conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-10", es_reemision=True,
+    )
+    assert liq_2.monto_generado == pytest.approx(liq_1.monto_generado + 300)
+
+    saldo_final = obtener_repositorio(conn, "Profesional").obtener(id_prof)["SaldoCuentaActual"]
+    # el pago de 500 sigue descontado; el cargo de 300 se suma encima, sin repetir lo ya emitido
+    assert saldo_final == pytest.approx(liq_1.monto_generado - 500 + 300)

@@ -281,7 +281,34 @@ CREATE TABLE IF NOT EXISTS LiquidacionEmitida (
     FechaEmision TEXT,
     NombreArchivo TEXT,
     EsReemision INTEGER NOT NULL DEFAULT 0,
-    EstadoEnvio TEXT NOT NULL CHECK (EstadoEnvio IN ('Enviada','No enviada','Regenerada no enviada')) DEFAULT 'No enviada'
+    EstadoEnvio TEXT NOT NULL CHECK (EstadoEnvio IN ('Enviada','No enviada','Regenerada no enviada')) DEFAULT 'No enviada',
+    -- Monto que ESTA emisión aportó a SaldoCuentaActual (total sin el saldo
+    -- anterior). Al reemitir se usa para calcular el delta contra la emisión
+    -- previa sin pisar pagos ya registrados contra el mes en curso.
+    MontoGenerado REAL NOT NULL DEFAULT 0
+);
+
+-- FeriadoTrabajado (DC-01 sec. 1.5, DC-11 caso 2, aclarado en conversación) -----------------
+-- Horas que un profesional trabajó en un feriado en lugar de tomarse el
+-- descuento habitual. El consultorio es independiente del que usa en su
+-- reserva regular (el operador lo asigna al coordinar). Se calcula en vivo
+-- al armar la liquidación: horas x ValorHoraRegularActual del consultorio
+-- asignado x (1 - descuento por horas semanales, igual que las horas
+-- regulares) x (1 + recargo aisladas si aplica). Igual que las aisladas,
+-- no se congela ningún valor acá.
+-- FechaCarga: cuándo se cargó el registro (no la fecha del feriado). Sirve
+-- para decidir si entra en la liquidación del mes del feriado (avisado
+-- antes de emitirla) o se traslada a la del mes siguiente (avisado después).
+CREATE TABLE IF NOT EXISTS FeriadoTrabajado (
+    IdFeriadoTrabajado INTEGER PRIMARY KEY AUTOINCREMENT,
+    IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional),
+    IdConsultorio INTEGER NOT NULL REFERENCES Consultorio(IdConsultorio),
+    Fecha TEXT NOT NULL,
+    HoraInicio REAL NOT NULL,
+    HoraFin REAL NOT NULL,
+    AplicaRecargo INTEGER NOT NULL DEFAULT 0,
+    FechaCarga TEXT NOT NULL,
+    Observacion TEXT
 );
 
 -- 3.17 FechasEspeciales --------------------------------------------------------------------
@@ -340,14 +367,20 @@ CREATE TABLE IF NOT EXISTS Responsable (
 );
 
 -- 3.23 PlanPago / CuotaPlan -----------------------------------------------------------------
+-- DC-09 sec. 3: refinanciación con interés simple. Todas las cuotas tienen
+-- el mismo importe (interés simple, no compuesto).
 CREATE TABLE IF NOT EXISTS PlanPago (
     IdPlan INTEGER PRIMARY KEY AUTOINCREMENT,
     IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional),
-    MontoTotal REAL NOT NULL,
+    MontoRefinanciado REAL NOT NULL,
+    PorcentajeInteresMensual REAL NOT NULL DEFAULT 0,
+    MontoTotalAPagar REAL NOT NULL,
     CantidadCuotas INTEGER NOT NULL,
-    MontoPorCuota REAL NOT NULL,
+    ImportePorCuota REAL NOT NULL,
     MesAnoInicio TEXT NOT NULL,
-    Estado TEXT NOT NULL DEFAULT 'Activo',
+    Estado TEXT NOT NULL CHECK (Estado IN ('Activo','Finalizado','Cancelado')) DEFAULT 'Activo',
+    EsRefinanciacion INTEGER NOT NULL DEFAULT 0,
+    IdPlanAnterior INTEGER REFERENCES PlanPago(IdPlan),
     Observacion TEXT
 );
 
@@ -357,7 +390,8 @@ CREATE TABLE IF NOT EXISTS CuotaPlan (
     NumeroCuota INTEGER NOT NULL,
     PeriodoImputado TEXT,
     Monto REAL NOT NULL,
-    Pagado INTEGER NOT NULL DEFAULT 0
+    Pagado INTEGER NOT NULL DEFAULT 0,
+    Estado TEXT NOT NULL CHECK (Estado IN ('Pendiente','Pagada','Cerrada')) DEFAULT 'Pendiente'
 );
 
 -- 3.24 SnapshotMensual ----------------------------------------------------------------------

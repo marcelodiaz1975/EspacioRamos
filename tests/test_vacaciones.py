@@ -131,6 +131,20 @@ def test_vacacion_parcialmente_dentro_del_cupo_se_prorratea(conn, consultorio):
     assert vacacion["ValorBonificado"] < vacacion["ValorSemanalAlMomentoDelRegistro"]
 
 
+def test_categoria_b_no_genera_descuento_pero_consume_cupo(conn, consultorio):
+    dias = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+    id_prof = _profesional_con_reserva(conn, consultorio, categoria="B", dias=dias, horas_por_dia=2)
+
+    id_vacacion, advertencias = crear_vacacion(
+        conn, id_profesional=id_prof, fecha_desde="2026-08-03", fecha_hasta="2026-08-09",
+    )
+    vacacion = obtener_repositorio(conn, "Vacacion").obtener(id_vacacion)
+    assert advertencias == []
+    assert vacacion["ValorBonificado"] == 0.0
+    assert vacacion["FraccionSemanaConsumida"] == pytest.approx(1.0)
+    assert vacacion["CupoConsumidoPorcentaje"] == pytest.approx(50.0)
+
+
 def test_cupo_por_anio_no_se_mezcla(conn, consultorio):
     dias = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
     id_prof = _profesional_con_reserva(conn, consultorio, dias=dias, horas_por_dia=2)

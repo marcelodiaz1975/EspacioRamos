@@ -3,9 +3,11 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.pagos import (
+    cancelar_plan,
     crear_cargo_especial,
     crear_plan_pago,
     marcar_cuota_pagada,
+    refinanciar_plan,
     registrar_pago,
 )
 from app.repositorio.registro import obtener_repositorio
@@ -26,7 +28,7 @@ def profesional(conn):
     )
 
 
-def test_registrar_pago_descuenta_saldo_actual_sin_tocar_el_anterior(conn, profesional):
+def test_registrar_pago_sin_periodo_descuenta_saldo_actual(conn, profesional):
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
     id_pago = registrar_pago(conn, id_profesional=profesional, monto=400, medio_pago="Sobre en buzón")
     assert id_pago is not None
@@ -34,6 +36,16 @@ def test_registrar_pago_descuenta_saldo_actual_sin_tocar_el_anterior(conn, profe
     actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
     assert actualizado["SaldoCuentaActual"] == pytest.approx(600)
     assert actualizado["SaldoCuentaAnterior"] == pytest.approx(1000)
+
+
+def test_registrar_pago_imputado_a_mes_anterior_descuenta_saldo_anterior(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
+    # hoy (fecha real de sistema) cae en 2026-08 en este entorno de test
+    registrar_pago(conn, id_profesional=profesional, monto=400, periodo_imputado="2026-07")
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(600)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(1000)  # sin tocar
 
 
 def test_registrar_pago_profesional_inexistente(conn):
@@ -59,28 +71,49 @@ def test_crear_cargo_especial_rechaza_monto_no_positivo(conn, profesional):
         crear_cargo_especial(conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=0)
 
 
-def test_crear_plan_pago_genera_cuotas_consecutivas(conn, profesional):
+def test_crear_plan_pago_sin_interes_genera_cuotas_iguales(conn, profesional):
     id_plan = crear_plan_pago(
-        conn, id_profesional=profesional, monto_total=1000, cantidad_cuotas=3, mes_ano_inicio="2026-08",
+        conn, id_profesional=profesional, monto_refinanciado=1000, cantidad_cuotas=3, mes_ano_inicio="2026-08",
     )
-    cuotas = obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=id_plan)
-    cuotas = sorted(cuotas, key=lambda c: c["NumeroCuota"])
+    plan = obtener_repositorio(conn, "PlanPago").obtener(id_plan)
+    assert plan["MontoTotalAPagar"] == pytest.approx(1000)
+    assert plan["ImportePorCuota"] == pytest.approx(333.33)
+
+    cuotas = sorted(obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=id_plan), key=lambda c: c["NumeroCuota"])
     assert [c["PeriodoImputado"] for c in cuotas] == ["2026-08", "2026-09", "2026-10"]
+    assert [c["Estado"] for c in cuotas] == ["Pendiente", "Pendiente", "Pendiente"]
     assert sum(c["Monto"] for c in cuotas) == pytest.approx(1000)  # la última absorbe el redondeo
+
+
+def test_crear_plan_pago_con_interes_simple(conn, profesional):
+    # 1000 refinanciado, 5% mensual, 4 cuotas -> total = 1000*(1+0.05*4) = 1200
+    id_plan = crear_plan_pago(
+        conn, id_profesional=profesional, monto_refinanciado=1000, cantidad_cuotas=4,
+        mes_ano_inicio="2026-08", porcentaje_interes_mensual=5,
+    )
+    plan = obtener_repositorio(conn, "PlanPago").obtener(id_plan)
+    assert plan["MontoTotalAPagar"] == pytest.approx(1200)
+    assert plan["ImportePorCuota"] == pytest.approx(300)
 
 
 def test_crear_plan_pago_cruza_fin_de_anio(conn, profesional):
     id_plan = crear_plan_pago(
-        conn, id_profesional=profesional, monto_total=300, cantidad_cuotas=3, mes_ano_inicio="2026-11",
+        conn, id_profesional=profesional, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-11",
     )
     cuotas = obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=id_plan)
     periodos = sorted(c["PeriodoImputado"] for c in cuotas)
     assert periodos == ["2026-11", "2026-12", "2027-01"]
 
 
+def test_crear_plan_pago_rechaza_dos_activos_a_la_vez(conn, profesional):
+    crear_plan_pago(conn, id_profesional=profesional, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08")
+    with pytest.raises(ValueError):
+        crear_plan_pago(conn, id_profesional=profesional, monto_refinanciado=100, cantidad_cuotas=2, mes_ano_inicio="2026-08")
+
+
 def test_marcar_cuota_pagada_finaliza_plan_al_pagar_la_ultima(conn, profesional):
     id_plan = crear_plan_pago(
-        conn, id_profesional=profesional, monto_total=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
+        conn, id_profesional=profesional, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
     )
     cuotas = sorted(
         obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=id_plan), key=lambda c: c["NumeroCuota"],
@@ -88,7 +121,44 @@ def test_marcar_cuota_pagada_finaliza_plan_al_pagar_la_ultima(conn, profesional)
 
     marcar_cuota_pagada(conn, cuotas[0]["IdCuota"])
     assert obtener_repositorio(conn, "PlanPago").obtener(id_plan)["Estado"] == "Activo"
+    assert obtener_repositorio(conn, "CuotaPlan").obtener(cuotas[0]["IdCuota"])["Estado"] == "Pagada"
 
     marcar_cuota_pagada(conn, cuotas[1]["IdCuota"])
     marcar_cuota_pagada(conn, cuotas[2]["IdCuota"])
     assert obtener_repositorio(conn, "PlanPago").obtener(id_plan)["Estado"] == "Finalizado"
+
+
+def test_cancelar_plan_suma_cuotas_pendientes_al_saldo(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=0)
+    id_plan = crear_plan_pago(
+        conn, id_profesional=profesional, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
+    )
+    cuotas = sorted(obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=id_plan), key=lambda c: c["NumeroCuota"])
+    marcar_cuota_pagada(conn, cuotas[0]["IdCuota"])  # 100 ya pagados, quedan 200 pendientes
+
+    cancelar_plan(conn, id_plan)
+
+    assert obtener_repositorio(conn, "PlanPago").obtener(id_plan)["Estado"] == "Cancelado"
+    profesional_actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert profesional_actualizado["SaldoCuentaActual"] == pytest.approx(200)
+
+
+def test_refinanciar_plan_cancela_el_vigente_y_descuenta_del_saldo(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=0)
+    id_plan_viejo = crear_plan_pago(
+        conn, id_profesional=profesional, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
+    )
+
+    id_plan_nuevo = refinanciar_plan(
+        conn, id_profesional=profesional, monto_a_refinanciar=250, cantidad_cuotas=5, mes_ano_inicio="2026-09",
+    )
+
+    assert obtener_repositorio(conn, "PlanPago").obtener(id_plan_viejo)["Estado"] == "Cancelado"
+    plan_nuevo = obtener_repositorio(conn, "PlanPago").obtener(id_plan_nuevo)
+    assert plan_nuevo["EsRefinanciacion"] == 1
+    assert plan_nuevo["IdPlanAnterior"] == id_plan_viejo
+    assert plan_nuevo["MontoRefinanciado"] == pytest.approx(250)
+
+    # saldo: 0 (viejo cancelado, +300 de cuotas pendientes) - 250 (refinanciado al plan nuevo) = 50
+    profesional_actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert profesional_actualizado["SaldoCuentaActual"] == pytest.approx(50)
