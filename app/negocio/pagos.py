@@ -16,8 +16,9 @@ el existente.
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime
+from datetime import datetime
 
+from app.negocio.dias import periodo_actual
 from app.repositorio.registro import obtener_repositorio
 
 TIPOS_CARGO = ("Débito", "Crédito")
@@ -32,18 +33,6 @@ def _sumar_meses(periodo: str, cantidad: int) -> str:
     anio, mes = (int(p) for p in periodo.split("-"))
     total = (anio * 12 + (mes - 1)) + cantidad
     return f"{total // 12:04d}-{total % 12 + 1:02d}"
-
-
-def _periodo_actual(conn: sqlite3.Connection) -> str:
-    """'AAAA-MM' de hoy, respetando el modo de fecha ficticia (sección 2)."""
-    cfg = conn.execute(
-        "SELECT ModoFechaFicticia, FechaFicticia FROM Configuracion WHERE IdConfiguracion = 1"
-    ).fetchone()
-    if cfg and cfg["ModoFechaFicticia"] and cfg["FechaFicticia"]:
-        fecha = date.fromisoformat(cfg["FechaFicticia"])
-    else:
-        fecha = date.today()
-    return f"{fecha.year:04d}-{fecha.month:02d}"
 
 
 def registrar_pago(
@@ -67,7 +56,7 @@ def registrar_pago(
         PeriodoImputado=periodo_imputado, EsAjuste=int(es_ajuste), Observacion=observacion,
     )
 
-    campo = "SaldoCuentaAnterior" if periodo_imputado and periodo_imputado < _periodo_actual(conn) else "SaldoCuentaActual"
+    campo = "SaldoCuentaAnterior" if periodo_imputado and periodo_imputado < periodo_actual(conn) else "SaldoCuentaActual"
     nuevo_saldo = (profesional[campo] or 0.0) - monto
     obtener_repositorio(conn, "Profesional").actualizar(id_profesional, **{campo: nuevo_saldo})
     return id_pago

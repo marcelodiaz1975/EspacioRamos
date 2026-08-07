@@ -418,6 +418,28 @@ def test_emitir_liquidacion_no_toca_saldo_anterior_y_acredita_lo_generado(conn, 
     assert liquidacion.total == pytest.approx(1000 + liquidacion.monto_generado)
 
 
+def test_estado_envio_y_reemision_se_derivan_solos(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+
+    id_liq_1, _ = emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+    liq_1 = obtener_repositorio(conn, "LiquidacionEmitida").obtener(id_liq_1)
+    assert liq_1["EstadoEnvio"] == "No enviada"
+    assert liq_1["EsReemision"] == 0
+
+    # regenerar sin haberla marcado como enviada: sigue "No enviada"
+    id_liq_2, _ = emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-02")
+    liq_2 = obtener_repositorio(conn, "LiquidacionEmitida").obtener(id_liq_2)
+    assert liq_2["EstadoEnvio"] == "No enviada"
+    assert liq_2["EsReemision"] == 1
+
+    # el operador la marca como enviada; una regeneración posterior pasa a "Regenerada no enviada"
+    obtener_repositorio(conn, "LiquidacionEmitida").actualizar(id_liq_2, EstadoEnvio="Enviada")
+    id_liq_3, _ = emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-15")
+    liq_3 = obtener_repositorio(conn, "LiquidacionEmitida").obtener(id_liq_3)
+    assert liq_3["EstadoEnvio"] == "Regenerada no enviada"
+    assert liq_3["EsReemision"] == 1
+
+
 def test_reemision_no_pisa_pagos_ya_registrados_contra_el_mes_en_curso(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=0, SaldoCuentaActual=0)
@@ -432,7 +454,7 @@ def test_reemision_no_pisa_pagos_ya_registrados_contra_el_mes_en_curso(conn, con
         conn, id_profesional=id_prof, tipo="Débito", concepto="depósito llave", monto=300, periodo_imputado=PERIODO,
     )
     _, liq_2 = emitir_liquidacion(
-        conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-10", es_reemision=True,
+        conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-10",
     )
     assert liq_2.monto_generado == pytest.approx(liq_1.monto_generado + 300)
 

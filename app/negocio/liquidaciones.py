@@ -686,25 +686,33 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
 
 def emitir_liquidacion(
     conn: sqlite3.Connection, *, id_profesional: int, periodo: str, fecha_emision: str | None = None,
-    nombre_archivo: str | None = None, es_reemision: bool = False,
+    nombre_archivo: str | None = None,
 ) -> tuple[int, Liquidacion]:
     """Calcula la liquidación, la persiste en LiquidacionEmitida y acredita
     lo generado a SaldoCuentaActual. No toca SaldoCuentaAnterior (eso es
     responsabilidad del avance de mes). Si ya había una emisión previa para
     el mismo período, se acredita solo el DELTA contra esa emisión, para no
-    perder pagos ya registrados contra el mes en curso mientras tanto."""
-    monto_generado_anterior = 0.0
+    perder pagos ya registrados contra el mes en curso mientras tanto.
+
+    EsReemision y EstadoEnvio se derivan solos de si ya existía una emisión
+    previa para este período (DC-09 §2.1/2.2): si la última ya estaba
+    Enviada, la nueva entra como "Regenerada no enviada"; si no, entra como
+    "No enviada" (primera vez o todavía pendiente)."""
     repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
     previas = repo_liq.listar(IdProfesional=id_profesional, Periodo=periodo)
+    monto_generado_anterior = 0.0
+    estado_envio = "No enviada"
     if previas:
         ultima = max(previas, key=lambda f: f["IdLiquidacion"])
         monto_generado_anterior = ultima["MontoGenerado"] or 0.0
+        if ultima["EstadoEnvio"] == "Enviada":
+            estado_envio = "Regenerada no enviada"
 
     liquidacion = calcular_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
 
     id_liquidacion = repo_liq.crear(
         IdProfesional=id_profesional, Periodo=periodo, FechaEmision=fecha_emision,
-        NombreArchivo=nombre_archivo, EsReemision=int(es_reemision), EstadoEnvio="No enviada",
+        NombreArchivo=nombre_archivo, EsReemision=int(bool(previas)), EstadoEnvio=estado_envio,
         MontoGenerado=liquidacion.monto_generado,
     )
 
