@@ -16,6 +16,7 @@ datetime si Excel la formateó como fecha -- se acepta igual.
 from __future__ import annotations
 
 import sqlite3
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -23,13 +24,23 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from app.importacion.definiciones import (
-    ALIAS_ENCABEZADOS,
     CAMPOS_BOOLEANOS,
     CAMPOS_FECHA,
     COLUMNAS_REFERENCIA,
     ENTIDADES_IMPORTABLES,
 )
 from app.repositorio.registro import obtener_repositorio
+
+
+def _normalizar_encabezado(texto: str) -> str:
+    """La base usa nombres de columna ASCII a propósito (sin tildes ni ñ,
+    para evitar problemas de codificación al empaquetar con PyInstaller en
+    Windows -- ver schema.sql), pero la planilla puede traer la versión con
+    tilde/diéresis (p.ej. "Baños"). Se le sacan los diacríticos acá antes de
+    matchear contra el nombre de columna real, en vez de mantener una lista
+    de alias por cada palabra acentuada que pueda aparecer."""
+    descompuesto = unicodedata.normalize("NFKD", texto)
+    return "".join(c for c in descompuesto if not unicodedata.combining(c))
 
 
 @dataclass
@@ -182,9 +193,7 @@ def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImport
     if not filas:
         return resultado
 
-    encabezados = [
-        ALIAS_ENCABEZADOS.get(str(c).strip(), str(c).strip()) if c is not None else "" for c in filas[0]
-    ]
+    encabezados = [_normalizar_encabezado(str(c).strip()) if c is not None else "" for c in filas[0]]
     repo = obtener_repositorio(conn, entidad)
 
     for numero_fila, fila in enumerate(filas[1:], start=2):

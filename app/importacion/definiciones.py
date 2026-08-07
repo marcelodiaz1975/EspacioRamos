@@ -72,14 +72,6 @@ CAMPOS_FECHA = {
     "FechaNacimiento", "FechaContacto", "VigenciaInicio", "VigenciaFin", "Fecha",
 }
 
-# Alias de encabezados: la base usa nombres ASCII a propósito (sin tildes
-# ni ñ, para evitar problemas de codificación al empaquetar con PyInstaller
-# en Windows — ver schema.sql), pero alguna planilla puede traer la versión
-# con tilde. Se normalizan acá antes de matchear contra las columnas reales.
-ALIAS_ENCABEZADOS = {
-    "Baños": "Banos",
-}
-
 # Columnas de referencia a otra entidad, agrupadas por entidad importada.
 # Se usan en importar_excel.py para resolver el texto legible a un IdX.
 COLUMNAS_REFERENCIA = {

@@ -29,6 +29,7 @@ from datetime import date, timedelta
 from app.negocio.dias import fecha_actual
 from app.negocio.valores import (
     calcular_valor_semanal_regular,
+    horas_semanales_vigentes,
     obtener_porcentaje_descuento,
     valor_regular_por_rango_dias,
 )
@@ -70,11 +71,7 @@ def crear_licencia(
         )
 
     fecha_hoy = fecha_actual(conn).isoformat()
-    horas_semanales = conn.execute(
-        "SELECT COALESCE(SUM(HoraFin - HoraInicio), 0) AS total FROM ReservaRegular "
-        "WHERE IdProfesional = ? AND VigenciaInicio <= ? AND (VigenciaFin IS NULL OR VigenciaFin >= ?)",
-        (id_profesional, fecha_hoy, fecha_hoy),
-    ).fetchone()["total"]
+    horas_semanales = horas_semanales_vigentes(conn, [id_profesional], fecha_hoy)
     descuento_pct = obtener_porcentaje_descuento(conn, horas_semanales)
     valor_semanal = calcular_valor_semanal_regular(conn, id_profesional, fecha_hoy)
 

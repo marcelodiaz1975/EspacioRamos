@@ -74,14 +74,19 @@ mes, en el avance de mes).
 """
 from __future__ import annotations
 
-import calendar
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from app.negocio.dias import fecha_a_dia_semana
+from app.negocio.dias import (
+    fecha_a_dia_semana,
+    parsear_periodo,
+    periodo_anterior as calcular_periodo_anterior,
+    primer_dia_mes,
+    ultimo_dia_mes,
+)
 from app.negocio.feriados import feriados_relevantes_periodo
-from app.negocio.valores import obtener_porcentaje_descuento, valor_regular_por_rango_dias
+from app.negocio.valores import horas_semanales_vigentes, obtener_porcentaje_descuento, valor_regular_por_rango_dias
 from app.repositorio.registro import obtener_repositorio
 
 CATEGORIAS_CON_LIQUIDACION_MENSUAL = ("R",)
@@ -210,26 +215,6 @@ class Liquidacion:
 
 # ------------------------------------------------------------------ utilidades de fecha
 
-def _parsear_periodo(periodo: str) -> tuple[int, int]:
-    anio, mes = (int(p) for p in periodo.split("-"))
-    if not 1 <= mes <= 12:
-        raise ValueError(f"Período inválido: {periodo!r}")
-    return anio, mes
-
-
-def _periodo_anterior(periodo: str) -> str:
-    anio, mes = _parsear_periodo(periodo)
-    return f"{anio}-{12:02d}" if mes == 1 else f"{anio}-{mes - 1:02d}"
-
-
-def _primer_dia(anio: int, mes: int) -> date:
-    return date(anio, mes, 1)
-
-
-def _ultimo_dia(anio: int, mes: int) -> date:
-    return date(anio, mes, calendar.monthrange(anio, mes)[1])
-
-
 def _interseccion(desde_a: str, hasta_a: str, desde_b: str, hasta_b: str) -> tuple[str, str] | None:
     desde = max(desde_a, desde_b)
     hasta = min(hasta_a, hasta_b)
@@ -268,25 +253,12 @@ def _reservas_regulares_del_dia(
     return [f for f in filas if f["IdReservaRegular"] not in ids_excluir]
 
 
-def _horas_semanales_vigentes(
-    conn: sqlite3.Connection, ids: list[int], fecha_referencia: str, ids_excluir: frozenset[int] = frozenset(),
-) -> float:
-    placeholders = ", ".join("?" for _ in ids)
-    filas = conn.execute(
-        f"SELECT IdReservaRegular, HoraInicio, HoraFin FROM ReservaRegular "
-        f"WHERE IdProfesional IN ({placeholders}) "
-        "AND VigenciaInicio <= ? AND (VigenciaFin IS NULL OR VigenciaFin >= ?)",
-        (*ids, fecha_referencia, fecha_referencia),
-    ).fetchall()
-    return sum(f["HoraFin"] - f["HoraInicio"] for f in filas if f["IdReservaRegular"] not in ids_excluir)
-
-
 def _descuento_pct_en_fecha(
     conn: sqlite3.Connection, ids: list[int], fecha: str, ids_excluir: frozenset[int], pierde_descuento: bool,
 ) -> float:
     if pierde_descuento:
         return 0.0
-    horas = _horas_semanales_vigentes(conn, ids, fecha, ids_excluir)
+    horas = horas_semanales_vigentes(conn, ids, fecha, ids_excluir)
     return obtener_porcentaje_descuento(conn, horas)
 
 
@@ -301,8 +273,8 @@ def _ids_reservas_tardias(
     if fecha_corte is None:
         return frozenset()
     placeholders = ", ".join("?" for _ in ids)
-    primer = _primer_dia(anio, mes).isoformat()
-    ultimo = _ultimo_dia(anio, mes).isoformat()
+    primer = primer_dia_mes(anio, mes).isoformat()
+    ultimo = ultimo_dia_mes(anio, mes).isoformat()
     filas = conn.execute(
         f"SELECT IdReservaRegular FROM ReservaRegular WHERE IdProfesional IN ({placeholders}) "
         "AND VigenciaInicio > ? AND VigenciaInicio BETWEEN ? AND ?",
@@ -324,7 +296,7 @@ def _bruto_y_tramos(
     fin = date.fromisoformat(ultimo_dia)
     while dia <= fin:
         fecha_iso = dia.isoformat()
-        horas_sem = _horas_semanales_vigentes(conn, ids, fecha_iso, ids_excluir)
+        horas_sem = horas_semanales_vigentes(conn, ids, fecha_iso, ids_excluir)
         pct = 0.0 if pierde_descuento else obtener_porcentaje_descuento(conn, horas_sem)
         bruto_dia = sum(
             (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"]
@@ -352,6 +324,19 @@ def _fecha_emision_periodo(conn: sqlite3.Connection, id_profesional: int, period
     return max(fechas) if fechas else None
 
 
+def _monto_feriado_dia(
+    conn: sqlite3.Connection, ids: list[int], fecha: str, ids_excluir: frozenset[int], pierde_descuento: bool,
+) -> float:
+    """Valor descontado de las horas regulares reservadas para ese día de
+    feriado, con el % de descuento por horas semanales vigente ese día."""
+    dia = date.fromisoformat(fecha)
+    pct = _descuento_pct_en_fecha(conn, ids, fecha, ids_excluir, pierde_descuento)
+    return sum(
+        (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"] * (1 - pct / 100)
+        for f in _reservas_regulares_del_dia(conn, ids, dia, ids_excluir)
+    )
+
+
 def _calcular_descuentos_feriados(
     conn: sqlite3.Connection, ids: list[int], anio: int, mes: int,
     ids_excluir: frozenset[int], pierde_descuento: bool,
@@ -359,12 +344,7 @@ def _calcular_descuentos_feriados(
     feriados = feriados_relevantes_periodo(conn, anio, mes)
     nacionales, no_laborables = [], []
     for feriado in feriados:
-        dia = date.fromisoformat(feriado["Fecha"])
-        pct = _descuento_pct_en_fecha(conn, ids, feriado["Fecha"], ids_excluir, pierde_descuento)
-        monto = sum(
-            (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"] * (1 - pct / 100)
-            for f in _reservas_regulares_del_dia(conn, ids, dia, ids_excluir)
-        )
+        monto = _monto_feriado_dia(conn, ids, feriado["Fecha"], ids_excluir, pierde_descuento)
         if monto <= 0:
             continue
         item = ItemFeriado(fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto)
@@ -382,17 +362,12 @@ def _calcular_feriados_pendientes(
     fecha_emision_ant = _fecha_emision_periodo(conn, id_profesional, periodo_anterior)
     if fecha_emision_ant is None:
         return []
-    anio_ant, mes_ant = _parsear_periodo(periodo_anterior)
+    anio_ant, mes_ant = parsear_periodo(periodo_anterior)
     pendientes = []
     for feriado in feriados_relevantes_periodo(conn, anio_ant, mes_ant):
         if feriado["Fecha"] <= fecha_emision_ant:
             continue  # ya estaba en la lista cuando se emitió esa liquidación
-        dia = date.fromisoformat(feriado["Fecha"])
-        pct = _descuento_pct_en_fecha(conn, ids, feriado["Fecha"], ids_excluir, pierde_descuento)
-        monto = sum(
-            (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"] * (1 - pct / 100)
-            for f in _reservas_regulares_del_dia(conn, ids, dia, ids_excluir)
-        )
+        monto = _monto_feriado_dia(conn, ids, feriado["Fecha"], ids_excluir, pierde_descuento)
         if monto > 0:
             pendientes.append(ItemFeriado(fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto))
     return pendientes
@@ -408,13 +383,13 @@ def _calcular_horas_regulares_agregadas(
     descuento por horas semanales que tendrían si se hubieran cobrado a
     tiempo, por las ocurrencias entre su VigenciaInicio y el fin de ese
     mes, sin contar los feriados de ese mes."""
-    periodo_anterior = _periodo_anterior(periodo)
+    periodo_anterior = calcular_periodo_anterior(periodo)
     fecha_corte = _fecha_emision_periodo(conn, id_profesional, periodo_anterior)
     if fecha_corte is None:
         return []
 
-    anio_ant, mes_ant = _parsear_periodo(periodo_anterior)
-    ultimo_dia_ant = _ultimo_dia(anio_ant, mes_ant)
+    anio_ant, mes_ant = parsear_periodo(periodo_anterior)
+    ultimo_dia_ant = ultimo_dia_mes(anio_ant, mes_ant)
     feriados_ant = {f["Fecha"] for f in feriados_relevantes_periodo(conn, anio_ant, mes_ant)}
 
     placeholders = ", ".join("?" for _ in ids)
@@ -427,7 +402,7 @@ def _calcular_horas_regulares_agregadas(
         WHERE rr.IdProfesional IN ({placeholders}) AND rr.VigenciaInicio > ?
           AND rr.VigenciaInicio BETWEEN ? AND ?
         """,
-        (*ids, fecha_corte, _primer_dia(anio_ant, mes_ant).isoformat(), ultimo_dia_ant.isoformat()),
+        (*ids, fecha_corte, primer_dia_mes(anio_ant, mes_ant).isoformat(), ultimo_dia_ant.isoformat()),
     ).fetchall()
 
     items = []
@@ -462,16 +437,13 @@ def _valor_feriado_trabajado(
 
 def _calcular_feriados_trabajados(
     conn: sqlite3.Connection, ids: list[int], id_profesional: int, periodo: str, pierde_descuento: bool,
+    recargo_pct: float,
 ) -> tuple[list[ItemFeriadoTrabajado], list[ItemFeriadoTrabajado]]:
     """Horas trabajadas en un feriado en vez de tomarse el descuento (DC-01
     §1.5, DC-11 caso 2). Con el mismo descuento por horas semanales que las
     horas regulares. Si se cargó antes de emitir la liquidación del mes del
     feriado entra ese mes; si se cargó después, se traslada al siguiente."""
     placeholders = ", ".join("?" for _ in ids)
-    cfg = conn.execute(
-        "SELECT RecargoPorcentajeAisladas FROM Configuracion WHERE IdConfiguracion = 1"
-    ).fetchone()
-    recargo_pct = cfg["RecargoPorcentajeAisladas"] if cfg else 0.0
 
     def _filas_del_mes(anio: int, mes: int) -> list[sqlite3.Row]:
         prefijo = f"{anio:04d}-{mes:02d}-"
@@ -486,7 +458,7 @@ def _calcular_feriados_trabajados(
             (*ids, prefijo + "%"),
         ).fetchall()
 
-    anio, mes = _parsear_periodo(periodo)
+    anio, mes = parsear_periodo(periodo)
     fecha_emision_este = _fecha_emision_periodo(conn, id_profesional, periodo)
     mes_en_curso = []
     for f in _filas_del_mes(anio, mes):
@@ -498,8 +470,8 @@ def _calcular_feriados_trabajados(
             fecha=f["Fecha"], hora_inicio=f["HoraInicio"], hora_fin=f["HoraFin"], monto=monto,
         ))
 
-    periodo_anterior = _periodo_anterior(periodo)
-    anio_ant, mes_ant = _parsear_periodo(periodo_anterior)
+    periodo_anterior = calcular_periodo_anterior(periodo)
+    anio_ant, mes_ant = parsear_periodo(periodo_anterior)
     fecha_emision_ant = _fecha_emision_periodo(conn, id_profesional, periodo_anterior)
     mes_anterior = []
     if fecha_emision_ant is not None:
@@ -589,7 +561,9 @@ def _calcular_descuento_licencias(conn: sqlite3.Connection, ids: list[int], prim
 
 # --------------------------------------------------------------------------- aisladas
 
-def _valor_aisladas_periodo(conn: sqlite3.Connection, ids: list[int], anio: int, mes: int) -> float:
+def _valor_aisladas_periodo(
+    conn: sqlite3.Connection, ids: list[int], anio: int, mes: int, recargo_pct: float,
+) -> float:
     placeholders = ", ".join("?" for _ in ids)
     prefijo = f"{anio:04d}-{mes:02d}-"
     filas = conn.execute(
@@ -601,10 +575,6 @@ def _valor_aisladas_periodo(conn: sqlite3.Connection, ids: list[int], anio: int,
         """,
         (*ids, prefijo + "%"),
     ).fetchall()
-    cfg = conn.execute(
-        "SELECT RecargoPorcentajeAisladas FROM Configuracion WHERE IdConfiguracion = 1"
-    ).fetchone()
-    recargo_pct = cfg["RecargoPorcentajeAisladas"] if cfg else 0.0
 
     total = 0.0
     for f in filas:
@@ -632,17 +602,19 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
         )
 
     ids = _ids_consolidados(conn, id_profesional)
-    anio, mes = _parsear_periodo(periodo)
-    anio_ant, mes_ant = _parsear_periodo(_periodo_anterior(periodo))
-    primer_dia_periodo = _primer_dia(anio, mes).isoformat()
-    ultimo_dia_periodo = _ultimo_dia(anio, mes).isoformat()
+    anio, mes = parsear_periodo(periodo)
+    anio_ant, mes_ant = parsear_periodo(calcular_periodo_anterior(periodo))
+    primer_dia_periodo = primer_dia_mes(anio, mes).isoformat()
+    ultimo_dia_periodo = ultimo_dia_mes(anio, mes).isoformat()
 
     saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
     cfg = conn.execute(
-        "SELECT ToleranciaDeudaDescuento, PorcentajeAjusteSaldoAtrasado FROM Configuracion WHERE IdConfiguracion = 1"
+        "SELECT ToleranciaDeudaDescuento, PorcentajeAjusteSaldoAtrasado, RecargoPorcentajeAisladas "
+        "FROM Configuracion WHERE IdConfiguracion = 1"
     ).fetchone()
     tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
     ajuste_pct = cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0.0
+    recargo_pct = cfg["RecargoPorcentajeAisladas"] if cfg else 0.0
     pierde_descuento = saldo_anterior > tolerancia
     # Ajuste por saldo atrasado (DC-06 §5.2): se evalúa en vivo, igual que
     # pierde_descuento. Si un pago imputado al mes anterior ya regularizó
@@ -661,19 +633,19 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
         conn, ids, anio, mes, ids_tardias, pierde_descuento
     )
     feriados_pendientes = _calcular_feriados_pendientes(
-        conn, ids, id_profesional, _periodo_anterior(periodo), ids_tardias, pierde_descuento
+        conn, ids, id_profesional, calcular_periodo_anterior(periodo), ids_tardias, pierde_descuento
     )
     horas_regulares_agregadas = _calcular_horas_regulares_agregadas(
         conn, ids, id_profesional, periodo, pierde_descuento
     )
     feriados_trab_anterior, feriados_trab_actual = _calcular_feriados_trabajados(
-        conn, ids, id_profesional, periodo, pierde_descuento
+        conn, ids, id_profesional, periodo, pierde_descuento, recargo_pct
     )
     descuento_vacaciones = _calcular_descuento_vacaciones(conn, ids, primer_dia_periodo, ultimo_dia_periodo)
     descuento_licencias = _calcular_descuento_licencias(conn, ids, primer_dia_periodo, ultimo_dia_periodo)
 
-    aisladas_mes_anterior = _valor_aisladas_periodo(conn, ids, anio_ant, mes_ant)
-    aisladas_mes_en_curso = _valor_aisladas_periodo(conn, ids, anio, mes)
+    aisladas_mes_anterior = _valor_aisladas_periodo(conn, ids, anio_ant, mes_ant, recargo_pct)
+    aisladas_mes_en_curso = _valor_aisladas_periodo(conn, ids, anio, mes, recargo_pct)
 
     cargos_especiales = obtener_repositorio(conn, "CargoEspecial").listar(
         IdProfesional=id_profesional, PeriodoImputado=periodo

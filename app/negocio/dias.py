@@ -1,4 +1,5 @@
-"""Utilidades de días de la semana en español."""
+"""Utilidades de días, meses y períodos ('AAAA-MM')."""
+import calendar
 import sqlite3
 from datetime import date
 
@@ -26,3 +27,29 @@ def periodo_actual(conn: sqlite3.Connection) -> str:
     """'AAAA-MM' de hoy (o de la fecha ficticia si está activa)."""
     fecha = fecha_actual(conn)
     return f"{fecha.year:04d}-{fecha.month:02d}"
+
+
+def primer_dia_mes(anio: int, mes: int) -> date:
+    return date(anio, mes, 1)
+
+
+def ultimo_dia_mes(anio: int, mes: int) -> date:
+    return date(anio, mes, calendar.monthrange(anio, mes)[1])
+
+
+def parsear_periodo(periodo: str) -> tuple[int, int]:
+    anio, mes = (int(p) for p in periodo.split("-"))
+    if not 1 <= mes <= 12:
+        raise ValueError(f"Período inválido: {periodo!r}")
+    return anio, mes
+
+
+def sumar_meses(periodo: str, cantidad: int) -> str:
+    """'AAAA-MM' desplazado `cantidad` meses (puede ser negativo)."""
+    anio, mes = parsear_periodo(periodo)
+    total = (anio * 12 + (mes - 1)) + cantidad
+    return f"{total // 12:04d}-{total % 12 + 1:02d}"
+
+
+def periodo_anterior(periodo: str) -> str:
+    return sumar_meses(periodo, -1)

@@ -19,11 +19,12 @@ esa unidad quedan libres:
 """
 from __future__ import annotations
 
-import calendar
 import sqlite3
 from datetime import date
 
 from app.negocio.dias import DIAS_SEMANA
+from app.negocio.dias import primer_dia_mes as _primer_dia_mes
+from app.negocio.dias import ultimo_dia_mes as _ultimo_dia_mes
 
 DIAS_GRILLA_DEFAULT = DIAS_SEMANA[:6]  # Lunes a Sábado
 
@@ -31,14 +32,6 @@ VERDE = "verde"
 AMARILLO = "amarillo"
 NARANJA = "naranja"
 ROJO = "rojo"
-
-
-def _primer_dia_mes(anio: int, mes: int) -> date:
-    return date(anio, mes, 1)
-
-
-def _ultimo_dia_mes(anio: int, mes: int) -> date:
-    return date(anio, mes, calendar.monthrange(anio, mes)[1])
 
 
 def _mes_siguiente(anio: int, mes: int) -> tuple[int, int]:

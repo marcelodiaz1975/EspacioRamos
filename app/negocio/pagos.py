@@ -18,7 +18,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 
-from app.negocio.dias import periodo_actual
+from app.negocio.dias import periodo_actual, sumar_meses
 from app.repositorio.registro import obtener_repositorio
 
 TIPOS_CARGO = ("Débito", "Crédito")
@@ -27,12 +27,6 @@ TIPOS_CARGO = ("Débito", "Crédito")
 def _capitalizar(texto: str) -> str:
     texto = texto.strip()
     return texto[:1].upper() + texto[1:] if texto else texto
-
-
-def _sumar_meses(periodo: str, cantidad: int) -> str:
-    anio, mes = (int(p) for p in periodo.split("-"))
-    total = (anio * 12 + (mes - 1)) + cantidad
-    return f"{total // 12:04d}-{total % 12 + 1:02d}"
 
 
 def registrar_pago(
@@ -92,7 +86,7 @@ def _generar_cuotas(conn: sqlite3.Connection, id_plan: int, monto_total_a_pagar:
             monto_cuota = round(monto_total_a_pagar - acumulado, 2)
         repo_cuota.crear(
             IdPlan=id_plan, NumeroCuota=numero,
-            PeriodoImputado=_sumar_meses(mes_ano_inicio, numero - 1),
+            PeriodoImputado=sumar_meses(mes_ano_inicio, numero - 1),
             Monto=monto_cuota, Pagado=0, Estado="Pendiente",
         )
 
@@ -100,17 +94,30 @@ def _generar_cuotas(conn: sqlite3.Connection, id_plan: int, monto_total_a_pagar:
 def crear_plan_pago(
     conn: sqlite3.Connection, *, id_profesional: int, monto_refinanciado: float, cantidad_cuotas: int,
     mes_ano_inicio: str, porcentaje_interes_mensual: float = 0.0, observacion: str | None = None,
-    _es_refinanciacion: bool = False, _id_plan_anterior: int | None = None,
 ) -> int:
-    if cantidad_cuotas <= 0:
-        raise ValueError("La cantidad de cuotas debe ser mayor a cero")
-
     plan_activo = obtener_repositorio(conn, "PlanPago").listar(IdProfesional=id_profesional, Estado="Activo")
-    if plan_activo and not _es_refinanciacion:
+    if plan_activo:
         raise ValueError(
             f"El profesional #{id_profesional} ya tiene un plan de pagos activo "
             f"(#{plan_activo[0]['IdPlan']}); hay que cancelarlo o refinanciarlo, no puede haber dos a la vez"
         )
+    return _crear_plan_pago(
+        conn, id_profesional=id_profesional, monto_refinanciado=monto_refinanciado,
+        cantidad_cuotas=cantidad_cuotas, mes_ano_inicio=mes_ano_inicio,
+        porcentaje_interes_mensual=porcentaje_interes_mensual, observacion=observacion,
+    )
+
+
+def _crear_plan_pago(
+    conn: sqlite3.Connection, *, id_profesional: int, monto_refinanciado: float, cantidad_cuotas: int,
+    mes_ano_inicio: str, porcentaje_interes_mensual: float = 0.0, observacion: str | None = None,
+    es_refinanciacion: bool = False, id_plan_anterior: int | None = None,
+) -> int:
+    """Crea el plan sin verificar el invariante de "un solo plan activo" —
+    `refinanciar_plan` ya canceló el plan vigente (o decidió a propósito no
+    hacerlo) antes de llamar acá, así que no corresponde repetir el chequeo."""
+    if cantidad_cuotas <= 0:
+        raise ValueError("La cantidad de cuotas debe ser mayor a cero")
 
     monto_total_a_pagar = monto_refinanciado * (1 + (porcentaje_interes_mensual / 100) * cantidad_cuotas)
     importe_por_cuota = round(monto_total_a_pagar / cantidad_cuotas, 2)
@@ -120,7 +127,7 @@ def crear_plan_pago(
         IdProfesional=id_profesional, MontoRefinanciado=monto_refinanciado,
         PorcentajeInteresMensual=porcentaje_interes_mensual, MontoTotalAPagar=monto_total_a_pagar,
         CantidadCuotas=cantidad_cuotas, ImportePorCuota=importe_por_cuota, MesAnoInicio=mes_ano_inicio,
-        Estado="Activo", EsRefinanciacion=int(_es_refinanciacion), IdPlanAnterior=_id_plan_anterior,
+        Estado="Activo", EsRefinanciacion=int(es_refinanciacion), IdPlanAnterior=id_plan_anterior,
         Observacion=observacion,
     )
     _generar_cuotas(conn, id_plan, monto_total_a_pagar, importe_por_cuota, cantidad_cuotas, mes_ano_inicio)
@@ -171,11 +178,11 @@ def refinanciar_plan(
         id_profesional, SaldoCuentaActual=(profesional["SaldoCuentaActual"] or 0.0) - monto_a_refinanciar
     )
 
-    return crear_plan_pago(
+    return _crear_plan_pago(
         conn, id_profesional=id_profesional, monto_refinanciado=monto_a_refinanciar,
         cantidad_cuotas=cantidad_cuotas, mes_ano_inicio=mes_ano_inicio,
         porcentaje_interes_mensual=porcentaje_interes_mensual, observacion=observacion,
-        _es_refinanciacion=True, _id_plan_anterior=id_plan_anterior,
+        es_refinanciacion=True, id_plan_anterior=id_plan_anterior,
     )
 
 

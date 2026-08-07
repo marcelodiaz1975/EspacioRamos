@@ -32,6 +32,24 @@ def obtener_porcentaje_descuento(conn: sqlite3.Connection, horas_semanales: floa
     return fila["PorcentajeDescuento"] if fila else 0.0
 
 
+def horas_semanales_vigentes(
+    conn: sqlite3.Connection, ids: list[int], fecha_referencia: str, ids_excluir: frozenset[int] = frozenset(),
+) -> float:
+    """Total de horas semanales reservadas (sumadas entre todos los `ids` —
+    para consolidar categoría E en la liquidación del R) vigentes a
+    `fecha_referencia`. `ids_excluir` deja afuera reservas puntuales (por
+    IdReservaRegular) que todavía no corresponde contar, p.ej. las que se
+    trasladan a la liquidación del mes siguiente."""
+    placeholders = ", ".join("?" for _ in ids)
+    filas = conn.execute(
+        f"SELECT IdReservaRegular, HoraInicio, HoraFin FROM ReservaRegular "
+        f"WHERE IdProfesional IN ({placeholders}) "
+        "AND VigenciaInicio <= ? AND (VigenciaFin IS NULL OR VigenciaFin >= ?)",
+        (*ids, fecha_referencia, fecha_referencia),
+    ).fetchall()
+    return sum(f["HoraFin"] - f["HoraInicio"] for f in filas if f["IdReservaRegular"] not in ids_excluir)
+
+
 def _reservas_regulares_vigentes(conn: sqlite3.Connection, id_profesional: int, fecha_referencia: str):
     return conn.execute(
         """
