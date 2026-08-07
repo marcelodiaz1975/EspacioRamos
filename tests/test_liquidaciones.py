@@ -304,6 +304,60 @@ def test_descuento_licencias_dia_por_dia(conn, consultorio):
     assert suma == pytest.approx(licencia["ValorBonificado"])
 
 
+def test_descuento_vacaciones_respeta_tope_de_cupo_sin_duplicar(conn, consultorio):
+    # cupo chico a propósito para forzar que la vacación exceda y se prorratee
+    obtener_repositorio(conn, "Configuracion").actualizar(1, SemanasVacacionesMaximasPorAnio=0.5)
+    dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    id_prof = _crear_profesional(conn)
+    for dia in dias:
+        _crear_reserva(conn, id_prof, consultorio, dia, horas=2)
+    from app.negocio.vacaciones import crear_vacacion
+    id_vacacion, advertencias = crear_vacacion(
+        conn, id_profesional=id_prof, fecha_desde="2026-08-28", fecha_hasta="2026-09-03",  # 1 semana pedida
+    )
+    vacacion = obtener_repositorio(conn, "Vacacion").obtener(id_vacacion)
+    assert len(advertencias) == 1  # excede el cupo de 0.5 semanas
+    assert 0 < vacacion["ValorBonificado"] < 14 * VALOR_HORA_REGULAR  # capeado, no el bruto semanal completo
+
+    liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-08")
+    liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
+    suma = liq_agosto.descuento_vacaciones + liq_septiembre.descuento_vacaciones
+    # la suma entre los dos meses tiene que dar EXACTO el ValorBonificado ya
+    # capeado, nunca más (antes del fix se recalculaba sobre el rango
+    # completo pedido y se perdía el recorte por cupo agotado)
+    assert suma == pytest.approx(vacacion["ValorBonificado"])
+
+
+def test_descuento_licencias_respeta_tope_de_duracion_maxima_sin_duplicar(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    from app.negocio.licencias import crear_licencia
+    id_tipo = obtener_repositorio(conn, "TipoLicencia").listar(Nombre="Licencia por duelo")[0]["IdTipoLicencia"]  # 5 días, 100%
+    # pide 12 días (30/8 al 10/9); el tope de 5 días solo llega a cubrir hasta el 3/9,
+    # así que el lunes 7/9 (dentro del rango pedido pero fuera del bonificable) es excedente
+    assert fecha_a_dia_semana(date(2026, 9, 7)) == "Lunes"
+    id_licencia, advertencias = crear_licencia(
+        conn, id_profesional=id_prof, id_tipo_licencia=id_tipo,
+        fecha_desde="2026-08-30", fecha_hasta="2026-09-10",
+    )
+    licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
+    assert len(advertencias) == 1
+
+    liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-08")
+    liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
+    suma = liq_agosto.descuento_licencias + liq_septiembre.descuento_licencias
+    # si se contara el lunes 7/9 (excedente) la suma daría de más
+    assert suma == pytest.approx(licencia["ValorBonificado"])
+
+
+def test_emitir_liquidacion_rechaza_reemitir_periodo_anterior_a_uno_ya_emitido(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-08", fecha_emision="2026-08-01")
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+
+    with pytest.raises(ValueError):
+        emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-08", fecha_emision="2026-09-15")
+
+
 def test_reserva_agregada_sin_emision_previa_se_cobra_completa(conn, consultorio):
     id_prof = _crear_profesional(conn)
     id_reserva = _crear_reserva(conn, id_prof, consultorio, "Martes", horas=2, vigencia_inicio="2026-08-15")

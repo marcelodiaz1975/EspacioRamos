@@ -23,6 +23,7 @@ from datetime import date
 
 from app.negocio.ausencias import esta_ausente
 from app.negocio.dias import fecha_a_dia_semana
+from app.negocio.dias import fecha_actual as _fecha_actual_sistema
 from app.repositorio.registro import obtener_repositorio
 
 FIN_INDEFINIDO = "9999-12-31"
@@ -300,7 +301,7 @@ def cancelar_reserva_aislada(
     if reserva is None:
         raise ValueError(f"No existe la reserva aislada #{id_reserva_aislada}")
 
-    fecha_actual = fecha_actual or date.today().isoformat()
+    fecha_actual = fecha_actual or _fecha_actual_sistema(conn).isoformat()
     mismo_dia = fecha_actual == reserva["Fecha"]
     requiere_aviso = False
 

@@ -31,8 +31,12 @@ semanales en tramos, solo para exponer el desglose.
 Pérdida del descuento por horas (DC-02/DC-06 §5.1, aclarado en
 conversación): si el profesional arrastra saldo por encima de
 ToleranciaDeudaDescuento, el descuento por horas semanales es 0% en TODA
-la liquidación de ese mes (bruto, feriados, vacaciones, licencias, horas
-agregadas, feriado trabajado — todo lo que use "valor con descuento").
+la liquidación de ese mes (bruto, feriados, horas agregadas, feriado
+trabajado — todo lo que use "valor con descuento" calculado EN VIVO).
+Vacaciones y licencias quedan afuera de esta regla a propósito: su
+ValorBonificado ya quedó congelado con el % vigente al momento de
+registrarlas (DC-05 §1.3) y acá solo se prorratea ese valor entre los
+meses que abarca — no se recalcula con el % de hoy.
 
 Ajuste por saldo atrasado y pérdida de descuento (DC-06 §5.2, corregido en
 conversación): las dos cosas se evalúan EN VIVO en cada cálculo, no una
@@ -77,7 +81,7 @@ from datetime import date, timedelta
 
 from app.negocio.dias import fecha_a_dia_semana
 from app.negocio.feriados import feriados_relevantes_periodo
-from app.negocio.valores import obtener_porcentaje_descuento
+from app.negocio.valores import obtener_porcentaje_descuento, valor_regular_por_rango_dias
 from app.repositorio.registro import obtener_repositorio
 
 CATEGORIAS_CON_LIQUIDACION_MENSUAL = ("R",)
@@ -513,52 +517,73 @@ def _calcular_feriados_trabajados(
 
 # --------------------------------------------------------------- vacaciones y licencias
 
-def _calcular_descuento_vacaciones(
-    conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str,
-    ids_excluir: frozenset[int], pierde_descuento: bool,
+def _fecha_hasta_bonificable_licencia(conn: sqlite3.Connection, licencia: sqlite3.Row) -> str:
+    """La licencia puede pedirse por más días de los que su tipo permite
+    bonificar (DC-05 §2.3: avisa pero no bloquea, el excedente se cobra
+    normal) — `licencias.crear_licencia` ya recorta el cálculo de
+    ValorBonificado a esta franja, pero guarda el FechaHasta completo tal
+    como se pidió. Hay que rederivar el mismo recorte acá para no prorratear
+    contra días que nunca se bonificaron."""
+    tipo = obtener_repositorio(conn, "TipoLicencia").obtener(licencia["IdTipoLicencia"])
+    dias_max = tipo["DuracionMaximaDias"] if tipo else None
+    if not dias_max:
+        return licencia["FechaHasta"]
+    limite = (date.fromisoformat(licencia["FechaDesde"]) + timedelta(days=dias_max - 1)).isoformat()
+    return min(limite, licencia["FechaHasta"])
+
+
+def _prorratear_valor_bonificado(
+    conn: sqlite3.Connection, id_profesional: int, valor_bonificado: float,
+    fecha_desde_bonificable: str, fecha_hasta_bonificable: str, primer_dia: str, ultimo_dia: str,
 ) -> float:
-    """Recalcula el ValorBonificado de cada Vacacion (de R y de sus E)
-    restringido a los días que caen en este período — evita descontar dos
-    veces una vacación que cruza fin de mes (DC-01 §1.7, DC-05 §1.6)."""
+    """Prorratea un ValorBonificado ya congelado (vacaciones o licencias)
+    según qué proporción de sus días con reserva regular cae en este
+    período. Se prorratea por bruto ponderado por día, no por días
+    corridos, para que un período con más horas reservadas un mes que otro
+    (ej. cambia de consultorio o de cantidad de días a mitad de la
+    vacación) reparta el descuento de forma proporcional y no en partes
+    iguales. Nunca recalcula con el % de descuento vigente HOY: usa el
+    valor ya congelado al momento de registrar (DC-05 §1.3), que es
+    justamente lo que evita perder de vista el tope de cupo o de duración
+    máxima ya aplicado en el registro original."""
+    if not valor_bonificado:
+        return 0.0
+    interseccion = _interseccion(fecha_desde_bonificable, fecha_hasta_bonificable, primer_dia, ultimo_dia)
+    if interseccion is None:
+        return 0.0
+    bruto_total = valor_regular_por_rango_dias(conn, id_profesional, fecha_desde_bonificable, fecha_hasta_bonificable)
+    if bruto_total <= 0:
+        return 0.0
+    bruto_interseccion = valor_regular_por_rango_dias(conn, id_profesional, *interseccion)
+    return valor_bonificado * (bruto_interseccion / bruto_total)
+
+
+def _calcular_descuento_vacaciones(conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str) -> float:
+    """Prorratea el ValorBonificado ya congelado de cada Vacacion (de R y
+    de sus E) — evita descontar dos veces una vacación que cruza fin de mes
+    (DC-01 §1.7, DC-05 §1.6) y respeta el recorte por cupo agotado, que
+    `vacaciones.crear_vacacion` aplica como un escalado de todo el período,
+    no como un corte de fecha."""
     total = 0.0
     for id_prof in ids:
         for v in obtener_repositorio(conn, "Vacacion").listar(IdProfesional=id_prof):
-            interseccion = _interseccion(v["FechaDesde"], v["FechaHasta"], primer_dia, ultimo_dia)
-            if interseccion is None:
-                continue
-            dia = date.fromisoformat(interseccion[0])
-            fin = date.fromisoformat(interseccion[1])
-            while dia <= fin:
-                for f in _reservas_regulares_del_dia(conn, [id_prof], dia, ids_excluir):
-                    pct = _descuento_pct_en_fecha(conn, ids, dia.isoformat(), ids_excluir, pierde_descuento)
-                    total += (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"] * (1 - pct / 100)
-                dia += timedelta(days=1)
+            total += _prorratear_valor_bonificado(
+                conn, id_prof, v["ValorBonificado"], v["FechaDesde"], v["FechaHasta"], primer_dia, ultimo_dia,
+            )
     return total
 
 
-def _calcular_descuento_licencias(
-    conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str,
-    ids_excluir: frozenset[int], pierde_descuento: bool,
-) -> float:
-    """Igual criterio que vacaciones (DC-05 §2.4), multiplicado además por
-    el % de bonificación del tipo de licencia."""
+def _calcular_descuento_licencias(conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str) -> float:
+    """Igual criterio que vacaciones (DC-05 §2.4/§2.5), prorrateando contra
+    la franja realmente bonificada (hasta el tope de duración máxima del
+    tipo si el pedido lo excedió), no contra el FechaHasta completo."""
     total = 0.0
     for id_prof in ids:
         for l in obtener_repositorio(conn, "Licencia").listar(IdProfesional=id_prof):
-            interseccion = _interseccion(l["FechaDesde"], l["FechaHasta"], primer_dia, ultimo_dia)
-            if interseccion is None:
-                continue
-            porcentaje = (l["PorcentajeBonificacionAplicado"] or 0.0) / 100
-            dia = date.fromisoformat(interseccion[0])
-            fin = date.fromisoformat(interseccion[1])
-            while dia <= fin:
-                for f in _reservas_regulares_del_dia(conn, [id_prof], dia, ids_excluir):
-                    pct = _descuento_pct_en_fecha(conn, ids, dia.isoformat(), ids_excluir, pierde_descuento)
-                    total += (
-                        (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"]
-                        * (1 - pct / 100) * porcentaje
-                    )
-                dia += timedelta(days=1)
+            fecha_hasta_bonificable = _fecha_hasta_bonificable_licencia(conn, l)
+            total += _prorratear_valor_bonificado(
+                conn, id_prof, l["ValorBonificado"], l["FechaDesde"], fecha_hasta_bonificable, primer_dia, ultimo_dia,
+            )
     return total
 
 
@@ -644,12 +669,8 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
     feriados_trab_anterior, feriados_trab_actual = _calcular_feriados_trabajados(
         conn, ids, id_profesional, periodo, pierde_descuento
     )
-    descuento_vacaciones = _calcular_descuento_vacaciones(
-        conn, ids, primer_dia_periodo, ultimo_dia_periodo, ids_tardias, pierde_descuento
-    )
-    descuento_licencias = _calcular_descuento_licencias(
-        conn, ids, primer_dia_periodo, ultimo_dia_periodo, ids_tardias, pierde_descuento
-    )
+    descuento_vacaciones = _calcular_descuento_vacaciones(conn, ids, primer_dia_periodo, ultimo_dia_periodo)
+    descuento_licencias = _calcular_descuento_licencias(conn, ids, primer_dia_periodo, ultimo_dia_periodo)
 
     aisladas_mes_anterior = _valor_aisladas_periodo(conn, ids, anio_ant, mes_ant)
     aisladas_mes_en_curso = _valor_aisladas_periodo(conn, ids, anio, mes)
@@ -697,8 +718,22 @@ def emitir_liquidacion(
     EsReemision y EstadoEnvio se derivan solos de si ya existía una emisión
     previa para este período (DC-09 §2.1/2.2): si la última ya estaba
     Enviada, la nueva entra como "Regenerada no enviada"; si no, entra como
-    "No enviada" (primera vez o todavía pendiente)."""
+    "No enviada" (primera vez o todavía pendiente).
+
+    No se puede reemitir un período si ya hay liquidaciones de períodos
+    posteriores (DC-08 §6.2: "nunca se puede generar una liquidación de un
+    mes anterior ya cerrado"): reabrirlo pisaría con valores de hoy un
+    período que un mes posterior ya pudo haber usado como base para sus
+    propios "feriados/horas pendientes", duplicando ese descuento."""
     repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
+    if conn.execute(
+        "SELECT 1 FROM LiquidacionEmitida WHERE IdProfesional = ? AND Periodo > ? LIMIT 1",
+        (id_profesional, periodo),
+    ).fetchone():
+        raise ValueError(
+            f"No se puede reemitir la liquidación de {periodo}: ya hay liquidaciones de períodos "
+            "posteriores emitidas para este profesional"
+        )
     previas = repo_liq.listar(IdProfesional=id_profesional, Periodo=periodo)
     monto_generado_anterior = 0.0
     estado_envio = "No enviada"

@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, timedelta
 
-from app.negocio.dias import fecha_a_dia_semana
+from app.negocio.dias import fecha_a_dia_semana, fecha_actual
 
 
 def obtener_porcentaje_descuento(conn: sqlite3.Connection, horas_semanales: float) -> float:
@@ -52,7 +52,7 @@ def calcular_valor_semanal_regular(
     """Valor semanal vigente del profesional (lo que paga por semana por
     sus reservas regulares), con el descuento por volumen de horas ya
     aplicado."""
-    fecha_referencia = fecha_referencia or date.today().isoformat()
+    fecha_referencia = fecha_referencia or fecha_actual(conn).isoformat()
     filas = _reservas_regulares_vigentes(conn, id_profesional, fecha_referencia)
     horas_totales = sum(f["HoraFin"] - f["HoraInicio"] for f in filas)
     descuento_pct = obtener_porcentaje_descuento(conn, horas_totales)

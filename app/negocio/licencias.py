@@ -26,6 +26,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, timedelta
 
+from app.negocio.dias import fecha_actual
 from app.negocio.valores import (
     calcular_valor_semanal_regular,
     obtener_porcentaje_descuento,
@@ -68,7 +69,7 @@ def crear_licencia(
             "se cobran normalmente en la liquidación"
         )
 
-    fecha_hoy = date.today().isoformat()
+    fecha_hoy = fecha_actual(conn).isoformat()
     horas_semanales = conn.execute(
         "SELECT COALESCE(SUM(HoraFin - HoraInicio), 0) AS total FROM ReservaRegular "
         "WHERE IdProfesional = ? AND VigenciaInicio <= ? AND (VigenciaFin IS NULL OR VigenciaFin >= ?)",
