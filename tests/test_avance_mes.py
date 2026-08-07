@@ -2,7 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.avance_mes import avanzar_mes, revertir_ajuste_saldo_atrasado
+from app.negocio.avance_mes import avanzar_mes
 from app.negocio.pagos import crear_plan_pago
 from app.repositorio.registro import obtener_repositorio
 
@@ -23,8 +23,7 @@ def _crear_profesional(conn, categoria="R", saldo_actual=0.0, saldo_anterior=0.0
 
 
 def test_traspaso_de_saldo(conn):
-    # categoría A: no le aplica el ajuste por saldo atrasado, aísla el paso 2
-    id_prof = _crear_profesional(conn, categoria="A", saldo_actual=500, saldo_anterior=999)
+    id_prof = _crear_profesional(conn, saldo_actual=500, saldo_anterior=999)
     avanzar_mes(conn, periodo_cerrado="2026-08")
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
     assert profesional["SaldoCuentaAnterior"] == pytest.approx(500)
@@ -65,51 +64,3 @@ def test_plan_no_se_finaliza_si_quedan_cuotas_futuras(conn):
     resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
     assert id_plan not in resumen.planes_finalizados
     assert obtener_repositorio(conn, "PlanPago").obtener(id_plan)["Estado"] == "Activo"
-
-
-def test_ajuste_por_saldo_atrasado_por_encima_de_tolerancia(conn):
-    id_prof = _crear_profesional(conn, categoria="R", saldo_actual=1000)
-    # tolerancia por defecto 0, PorcentajeAjusteSaldoAtrasado por defecto 3%
-    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
-
-    assert len(resumen.profesionales_con_ajuste) == 1
-    assert resumen.profesionales_con_ajuste[0]["id_profesional"] == id_prof
-    assert resumen.profesionales_con_ajuste[0]["ajuste"] == pytest.approx(30)
-
-    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
-    assert profesional["SaldoCuentaAnterior"] == pytest.approx(1030)
-
-
-def test_ajuste_no_aplica_dentro_de_tolerancia(conn):
-    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=2000)
-    id_prof = _crear_profesional(conn, categoria="R", saldo_actual=1000)
-    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
-
-    assert resumen.profesionales_con_ajuste == []
-    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
-    assert profesional["SaldoCuentaAnterior"] == pytest.approx(1000)
-
-
-def test_ajuste_no_aplica_a_saldo_a_favor(conn):
-    id_prof = _crear_profesional(conn, categoria="R", saldo_actual=-500)
-    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
-    assert resumen.profesionales_con_ajuste == []
-    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
-    assert profesional["SaldoCuentaAnterior"] == pytest.approx(-500)
-
-
-def test_ajuste_no_aplica_a_categoria_distinta_de_r(conn):
-    _crear_profesional(conn, categoria="A", saldo_actual=1000)
-    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
-    assert resumen.profesionales_con_ajuste == []
-
-
-def test_revertir_ajuste_saldo_atrasado(conn):
-    id_prof = _crear_profesional(conn, categoria="R", saldo_actual=1000)
-    avanzar_mes(conn, periodo_cerrado="2026-08")
-    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
-    assert profesional["SaldoCuentaAnterior"] == pytest.approx(1030)
-
-    revertir_ajuste_saldo_atrasado(conn, id_prof, 30)
-    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
-    assert profesional["SaldoCuentaAnterior"] == pytest.approx(1000)

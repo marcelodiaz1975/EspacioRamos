@@ -16,8 +16,9 @@ Orden de ítems (DC-01 §1.10), con el detalle de cómo se calcula cada uno:
     Descuento feriados pendientes del mes anterior -> Descuento vacaciones
     -> Descuento licencias -> Horas regulares agregadas (deferidas del mes
     anterior) -> Feriado trabajado mes anterior -> Feriado trabajado mes en
-    curso -> Aisladas mes anterior -> Aisladas mes en curso -> Cargos
-    especiales -> Cuotas de plan de pago -> Total
+    curso -> Aisladas mes anterior -> Aisladas mes en curso -> Ajuste por
+    saldo atrasado (solo si aplica) -> Cargos especiales -> Cuotas de plan
+    de pago -> Total
 
 Tramos (DC-01 §1.1/§1.2): si cambia la cantidad de horas semanales
 reservadas (agrega/quita reservas) o el consultorio a mitad de mes, el %
@@ -33,11 +34,16 @@ ToleranciaDeudaDescuento, el descuento por horas semanales es 0% en TODA
 la liquidación de ese mes (bruto, feriados, vacaciones, licencias, horas
 agregadas, feriado trabajado — todo lo que use "valor con descuento").
 
-Ajuste por saldo atrasado (DC-06 §5.2): NO se calcula acá. Se aplica una
-sola vez sobre SaldoCuentaAnterior durante el avance de mes (ver
-`avance_mes.py`), incluyendo la lógica de reversión si un pago posterior
-regulariza la situación. `saldo_anterior` en esta liquidación ya viene con
-el ajuste incluido si corresponde — mostrarlo de nuevo acá lo duplicaría.
+Ajuste por saldo atrasado y pérdida de descuento (DC-06 §5.2, corregido en
+conversación): las dos cosas se evalúan EN VIVO en cada cálculo, no una
+sola vez en el avance de mes. Si el profesional paga algo imputado al mes
+anterior que regulariza la situación ANTES de que se le emita y envíe la
+liquidación, ni el ajuste ni la pérdida de descuento se aplican — no hace
+falta ninguna reversión porque nunca llegaron a calcularse: alcanza con
+que `calcular_liquidacion` siempre lea el SaldoCuentaAnterior actual (ya
+neto de cualquier pago tardío, ver `pagos.registrar_pago`). El avance de
+mes (`avance_mes.py`) solo trasplanta el saldo — no aplica ningún ajuste
+por su cuenta.
 
 Feriados — tres situaciones distintas (aclaradas en conversación):
 1. Feriado ya conocido dentro del mes en curso: descuento normal, uno por
@@ -136,6 +142,7 @@ class Liquidacion:
     feriados_trabajados_mes_en_curso: list[ItemFeriadoTrabajado] = field(default_factory=list)
     aisladas_mes_anterior: float = 0.0
     aisladas_mes_en_curso: float = 0.0
+    ajuste_saldo_atrasado: float = 0.0
     cargos_especiales: list[sqlite3.Row] = field(default_factory=list)
     cuotas_plan: list[sqlite3.Row] = field(default_factory=list)
 
@@ -187,6 +194,7 @@ class Liquidacion:
             + self.total_feriados_trabajados_mes_en_curso
             + self.aisladas_mes_anterior
             + self.aisladas_mes_en_curso
+            + self.ajuste_saldo_atrasado
             + self.total_cargos_especiales
             + self.total_cuotas_plan
         )
@@ -606,10 +614,16 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
 
     saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
     cfg = conn.execute(
-        "SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1"
+        "SELECT ToleranciaDeudaDescuento, PorcentajeAjusteSaldoAtrasado FROM Configuracion WHERE IdConfiguracion = 1"
     ).fetchone()
     tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
+    ajuste_pct = cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0.0
     pierde_descuento = saldo_anterior > tolerancia
+    # Ajuste por saldo atrasado (DC-06 §5.2): se evalúa en vivo, igual que
+    # pierde_descuento. Si un pago imputado al mes anterior ya regularizó
+    # la situación antes de calcular esto, saldo_anterior bajó y no aplica
+    # — no hace falta ninguna reversión posterior.
+    ajuste_saldo_atrasado = saldo_anterior * ajuste_pct / 100 if pierde_descuento else 0.0
 
     fecha_emision_este_periodo = _fecha_emision_periodo(conn, id_profesional, periodo)
     ids_tardias = _ids_reservas_tardias(conn, ids, anio, mes, fecha_emision_este_periodo)
@@ -665,6 +679,7 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
         feriados_trabajados_mes_anterior=feriados_trab_anterior,
         feriados_trabajados_mes_en_curso=feriados_trab_actual,
         aisladas_mes_anterior=aisladas_mes_anterior, aisladas_mes_en_curso=aisladas_mes_en_curso,
+        ajuste_saldo_atrasado=ajuste_saldo_atrasado,
         cargos_especiales=cargos_especiales, cuotas_plan=cuotas_plan,
     )
 

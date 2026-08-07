@@ -148,6 +148,41 @@ def test_no_pierde_descuento_si_saldo_anterior_dentro_de_tolerancia(conn, consul
     assert liquidacion.tramos[0].descuento_pct == pytest.approx(obtener_porcentaje_descuento(conn, 2))
 
 
+def test_ajuste_saldo_atrasado_por_encima_de_tolerancia(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=1000)
+    # tolerancia por defecto 0, PorcentajeAjusteSaldoAtrasado por defecto 3%
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion.ajuste_saldo_atrasado == pytest.approx(30)
+
+
+def test_ajuste_no_aplica_dentro_de_tolerancia(conn, consultorio):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=2000)
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=1000)
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion.ajuste_saldo_atrasado == 0
+
+
+def test_pago_imputado_a_mes_anterior_regulariza_antes_de_calcular_y_evita_ajuste(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=1000)
+
+    liquidacion_antes = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion_antes.ajuste_saldo_atrasado > 0
+    assert liquidacion_antes.pierde_descuento_horas is True
+
+    # paga el saldo del mes anterior (2026-07) antes de que se calcule/emita la liquidación
+    registrar_pago(conn, id_profesional=id_prof, monto=1000, periodo_imputado=PERIODO_ANTERIOR)
+
+    liquidacion_despues = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion_despues.saldo_anterior == 0
+    assert liquidacion_despues.ajuste_saldo_atrasado == 0
+    assert liquidacion_despues.pierde_descuento_horas is False
+
+
 def test_descuento_feriado_nacional_se_lista_por_dia(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     assert fecha_a_dia_semana(date(2026, 8, 17)) == "Lunes"
