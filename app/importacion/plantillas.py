@@ -32,9 +32,13 @@ def _armar_hoja_instrucciones(ws: Worksheet) -> None:
     ws.append(["  ya cargado en la hoja correspondiente, no con un número interno."])
     ws.append(["- En la hoja ReservaRegular y Placa, la columna \"Profesional\" se completa con el"])
     ws.append(["  Código del profesional (columna IdCodigo de la hoja Profesional)."])
+    ws.append(["- Columnas de fecha (FechaNacimiento, VigenciaInicio, VigenciaFin, Fecha, etc.):"])
+    ws.append(["  formato DD/MM/AAAA."])
+    ws.append(["- ProfesionalCabezaEquipo (solo para categoría E) se completa con el Código del R,"])
+    ws.append(["  y ese R tiene que estar cargado ANTES en la misma hoja."])
     ws.append([])
     ws.append(["Orden recomendado de carga: Edificio, Unidad, Consultorio, Profesion, Profesional,"])
-    ws.append(["ReservaRegular, Llave, Placa, Responsable."])
+    ws.append(["ReservaRegular, Llave, Placa, FechasEspeciales, Responsable."])
     ws.column_dimensions["A"].width = 100
 
 

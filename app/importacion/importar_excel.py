@@ -6,17 +6,26 @@ en la hoja "Consultorio" se indica el nombre del Edificio y el Departamento
 de la Unidad, no sus IdEdificio/IdUnidad. Este módulo resuelve esas
 referencias contra lo que ya se cargó en la base (por eso el orden de
 ENTIDADES_IMPORTABLES importa: primero Edificio, después Unidad, etc.)
+
+Fechas (DC-11 caso 7): el único formato aceptado en la planilla es
+DD/MM/AAAA; se convierten a ISO (AAAA-MM-DD) antes de guardar, y un
+formato inválido se reporta como error de esa fila/columna sin abortar el
+resto de la importación. openpyxl también puede entregar la celda ya como
+datetime si Excel la formateó como fecha -- se acepta igual.
 """
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
 
 from app.importacion.definiciones import (
+    ALIAS_ENCABEZADOS,
     CAMPOS_BOOLEANOS,
+    CAMPOS_FECHA,
     COLUMNAS_REFERENCIA,
     ENTIDADES_IMPORTABLES,
 )
@@ -35,11 +44,29 @@ def _convertir_booleano(valor) -> int:
     return 1 if texto in ("SI", "SÍ", "TRUE", "1", "X") else 0
 
 
+def _convertir_fecha(valor) -> str:
+    if isinstance(valor, datetime):
+        return valor.date().isoformat()
+    if isinstance(valor, date):
+        return valor.isoformat()
+    texto = str(valor).strip()
+    partes = texto.split("/")
+    if len(partes) != 3:
+        raise ValueError(f"Fecha inválida (se espera DD/MM/AAAA): {valor!r}")
+    dia, mes, anio = partes
+    try:
+        return date(int(anio), int(mes), int(dia)).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"Fecha inválida (se espera DD/MM/AAAA): {valor!r}") from exc
+
+
 def _convertir_valor(columna: str, valor):
     if valor is None or valor == "":
         return None
     if columna in CAMPOS_BOOLEANOS:
         return _convertir_booleano(valor)
+    if columna in CAMPOS_FECHA:
+        return _convertir_fecha(valor)
     return valor
 
 
@@ -104,6 +131,16 @@ def _resolver_referencias(conn: sqlite3.Connection, entidad: str, datos: dict) -
                 errores.append(f"No se encontró la profesión '{nombre_prof}'")
             datos["IdProfesion"] = id_profesion
 
+        codigo_cabeza = datos.pop("ProfesionalCabezaEquipo", None)
+        if codigo_cabeza is not None:
+            id_cabeza = _buscar_id(conn, "Profesional", "IdCodigo", codigo_cabeza)
+            if id_cabeza is None:
+                errores.append(
+                    f"No se encontró el profesional cabeza de equipo con código '{codigo_cabeza}' "
+                    "(tiene que estar cargado antes en la planilla)"
+                )
+            datos["ProfesionalCabezaEquipo"] = id_cabeza
+
     elif entidad == "ReservaRegular":
         codigo = datos.pop("Profesional", None)
         id_profesional = _buscar_id(conn, "Profesional", "IdCodigo", codigo)
@@ -145,18 +182,29 @@ def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImport
     if not filas:
         return resultado
 
-    encabezados = [str(c).strip() if c is not None else "" for c in filas[0]]
+    encabezados = [
+        ALIAS_ENCABEZADOS.get(str(c).strip(), str(c).strip()) if c is not None else "" for c in filas[0]
+    ]
     repo = obtener_repositorio(conn, entidad)
 
     for numero_fila, fila in enumerate(filas[1:], start=2):
         if fila is None or all(v is None or str(v).strip() == "" for v in fila):
             continue
 
-        datos = {
-            columna: _convertir_valor(columna, valor)
-            for columna, valor in zip(encabezados, fila)
-            if columna
-        }
+        datos: dict = {}
+        error_conversion = None
+        for columna, valor in zip(encabezados, fila):
+            if not columna:
+                continue
+            try:
+                datos[columna] = _convertir_valor(columna, valor)
+            except ValueError as exc:
+                error_conversion = f"Columna '{columna}': {exc}"
+                break
+        if error_conversion:
+            resultado.errores.append(f"Fila {numero_fila}: {error_conversion}")
+            continue
+
         datos, errores_referencia = _resolver_referencias(conn, entidad, datos)
         if errores_referencia:
             for err in errores_referencia:

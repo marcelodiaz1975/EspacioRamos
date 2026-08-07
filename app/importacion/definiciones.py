@@ -3,13 +3,17 @@ columnas "legibles" (en vez de IDs internos) se le muestran al usuario.
 
 Alcance de la Etapa 1: la carga inicial cubre la estructura física
 (edificios, unidades, consultorios), los profesionales, sus reservas
-regulares, las llaves, las placas de timbre y los responsables. El resto de
-las entidades del modelo de datos (pagos, licencias, liquidaciones, etc.) se
-cargan desde el sistema a medida que ocurren, no por importación masiva.
+regulares, las llaves, las placas de timbre, los feriados/fechas especiales
+y los responsables. El resto de las entidades del modelo de datos (pagos,
+licencias, liquidaciones, etc.) se cargan desde el sistema a medida que
+ocurren, no por importación masiva.
 
 El orden de la lista importa: se importa en ese orden porque las entidades
 más adelante en la lista referencian a las anteriores (ej. Unidad necesita
-que su Edificio ya exista).
+que su Edificio ya exista). Dentro de la hoja Profesional, además, los R
+deben cargarse antes que sus E: ProfesionalCabezaEquipo se resuelve fila a
+fila contra lo ya importado, así que un E no encuentra a su R si viene
+antes en la misma planilla.
 """
 
 # Entidad -> columnas tal como se muestran en la planilla (nombres legibles).
@@ -31,20 +35,23 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
     "Profesion": [
         "Nombre", "NombreMasculino", "NombreFemenino", "NombreNeutro",
         "TratamientoDefaultMasculino", "TratamientoDefaultFemenino",
+        "TieneMultiplesTratamientos", "OpcionesTratamientoMasculino", "OpcionesTratamientoFemenino",
     ],
     "Profesional": [
-        "CategoriaProfesional", "IdCodigo", "Apellido", "NombrePila", "Apodo",
+        "CategoriaProfesional", "IdCodigo", "Apellido", "NombreCompleto", "NombrePila", "Apodo",
         "Sexo", "DNI", "CUIT", "CondicionFiscal", "FechaNacimiento",
         "Domicilio", "DomicilioLocalidad", "TelefonoParticular", "Celular",
         "Email", "Profesion", "Tratamiento", "MatriculaNacional",
-        "MatriculaProvincial",
+        "MatriculaProvincial", "FechaContacto", "ProfesionalCabezaEquipo",
+        "CampoLibre1", "CampoLibre2", "CampoLibre3",
     ],
     "ReservaRegular": [
         "Profesional", "Edificio", "Unidad", "Consultorio", "DiaSemana",
-        "HoraInicio", "HoraFin", "VigenciaInicio", "VigenciaFin",
+        "HoraInicio", "HoraFin", "VigenciaInicio", "VigenciaFin", "EsExcepcion", "Observacion",
     ],
     "Llave": ["Descripcion", "Tipo", "ValorDepositoActual"],
-    "Placa": ["Edificio", "Unidad", "PosicionTablero", "Profesional", "NombreGrabado"],
+    "Placa": ["Edificio", "Unidad", "PosicionTablero", "Profesional", "NombreGrabado", "EsPersonalizada"],
+    "FechasEspeciales": ["Fecha", "Descripcion", "Tipo"],
     "Responsable": ["Nombre", "Celular", "Email", "Rol", "EsContactoPrincipal", "AptoPDF"],
 }
 
@@ -56,6 +63,21 @@ CAMPOS_BOOLEANOS = {
     "Recepcionista", "BalconComun", "EntradaProfesionalExclusiva", "WiFi",
     "Ventana", "PanelVidrioLuzNatural", "AireAcondicionado", "VentiladorTecho",
     "Sillones", "AptoCamilla", "Balcon", "EsContactoPrincipal", "AptoPDF",
+    "TieneMultiplesTratamientos", "EsExcepcion", "EsPersonalizada",
+}
+
+# Columnas de fecha: en la planilla se cargan como DD/MM/AAAA (DC-11 caso 7),
+# se convierten a ISO (AAAA-MM-DD) antes de guardar.
+CAMPOS_FECHA = {
+    "FechaNacimiento", "FechaContacto", "VigenciaInicio", "VigenciaFin", "Fecha",
+}
+
+# Alias de encabezados: la base usa nombres ASCII a propósito (sin tildes
+# ni ñ, para evitar problemas de codificación al empaquetar con PyInstaller
+# en Windows — ver schema.sql), pero alguna planilla puede traer la versión
+# con tilde. Se normalizan acá antes de matchear contra las columnas reales.
+ALIAS_ENCABEZADOS = {
+    "Baños": "Banos",
 }
 
 # Columnas de referencia a otra entidad, agrupadas por entidad importada.
@@ -63,7 +85,7 @@ CAMPOS_BOOLEANOS = {
 COLUMNAS_REFERENCIA = {
     "Unidad": {"Edificio"},
     "Consultorio": {"Edificio", "Unidad"},
-    "Profesional": {"Profesion"},
+    "Profesional": {"Profesion", "ProfesionalCabezaEquipo"},
     "ReservaRegular": {"Profesional", "Edificio", "Unidad", "Consultorio"},
     "Placa": {"Edificio", "Unidad", "Profesional"},
 }
