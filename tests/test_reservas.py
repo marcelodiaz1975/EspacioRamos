@@ -202,3 +202,39 @@ def test_cancelar_reserva_aislada_mismo_dia_en_bloque_rigido_falla(conn, consult
     )
     with pytest.raises(ValueError):
         cancelar_reserva_aislada(conn, id_reserva, fecha_actual="2026-08-20")
+
+
+# ---------------------------------------------- reserva regular sobre aisladas futuras (DC-04 §1.3)
+
+def test_reserva_regular_sobre_aislada_futura_confirmada_solo_advierte(conn, consultorio, profesional_factory):
+    id_aislado = profesional_factory("Aislado", categoria="A")
+    assert fecha_a_dia_semana(date(2026, 8, 17)) == "Lunes"
+    id_reserva_aislada, _ = crear_reserva_aislada(
+        conn, id_profesional=id_aislado, id_consultorio=consultorio,
+        fecha="2026-08-17", hora_inicio=14, hora_fin=16,
+    )
+
+    id_regular = profesional_factory("Regular nuevo")
+    id_reserva, advertencias = crear_reserva_regular(
+        conn, id_profesional=id_regular, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
+    )
+    assert id_reserva is not None  # no bloquea, DC-08 §3.4 prevalece sobre DC-04 §1.3
+    assert len(advertencias) == 1
+    assert str(id_reserva_aislada) in advertencias[0] or "reserva aislada" in advertencias[0]
+
+
+def test_aislada_anterior_a_vigencia_de_la_regular_no_genera_aviso(conn, consultorio, profesional_factory):
+    id_aislado = profesional_factory("Aislado", categoria="A")
+    crear_reserva_aislada(
+        conn, id_profesional=id_aislado, id_consultorio=consultorio,
+        fecha="2026-07-06", hora_inicio=14, hora_fin=16,  # antes de la vigencia de la regular
+    )
+
+    id_regular = profesional_factory("Regular nuevo")
+    id_reserva, advertencias = crear_reserva_regular(
+        conn, id_profesional=id_regular, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
+    )
+    assert id_reserva is not None
+    assert advertencias == []

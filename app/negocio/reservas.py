@@ -184,6 +184,39 @@ def verificar_conflictos_aislada(
     return conflictos
 
 
+def verificar_conflicto_aisladas_futuras(
+    conn: sqlite3.Connection, *, id_consultorio: int, dia_semana: str,
+    hora_inicio: float, hora_fin: float, vigencia_inicio: str, vigencia_fin: str | None = None,
+) -> list[Conflicto]:
+    """Reservas aisladas ya confirmadas en el mismo consultorio dentro del
+    período de vigencia de la nueva regular (sección DC-04 §1.3). Es aviso,
+    no bloqueo: DC-08 §3.4 aclara que la única validación que bloquea por
+    completo es la superposición entre dos reservas regulares, y por orden
+    de prioridad entre documentos complementarios ese criterio prevalece."""
+    conflictos = []
+    fecha_hasta = vigencia_fin or FIN_INDEFINIDO
+    filas = conn.execute(
+        "SELECT * FROM ReservaAislada WHERE IdConsultorio = ? AND Estado = 'Confirmada' "
+        "AND Fecha >= ? AND Fecha <= ?",
+        (id_consultorio, vigencia_inicio, fecha_hasta),
+    ).fetchall()
+    for fila in filas:
+        if fecha_a_dia_semana(date.fromisoformat(fila["Fecha"])) != dia_semana:
+            continue
+        if not _solapan(hora_inicio, hora_fin, fila["HoraInicio"], fila["HoraFin"]):
+            continue
+        conflictos.append(Conflicto(
+            bloqueante=False,
+            mensaje=(
+                f"Ya hay una reserva aislada confirmada #{fila['IdReservaAislada']} del profesional "
+                f"#{fila['IdProfesional']} en ese consultorio el {fila['Fecha']} de "
+                f"{fila['HoraInicio']}–{fila['HoraFin']}hs"
+            ),
+            reserva_existente=fila,
+        ))
+    return conflictos
+
+
 # ------------------------------------------------------------------------ servicio
 
 def crear_reserva_regular(
@@ -197,6 +230,11 @@ def crear_reserva_regular(
         vigencia_inicio=vigencia_inicio, vigencia_fin=vigencia_fin,
         id_profesional=id_profesional,
     )
+    conflictos_aisladas = verificar_conflicto_aisladas_futuras(
+        conn, id_consultorio=id_consultorio, dia_semana=dia_semana,
+        hora_inicio=hora_inicio, hora_fin=hora_fin,
+        vigencia_inicio=vigencia_inicio, vigencia_fin=vigencia_fin,
+    )
     problemas_rigidos = verificar_bloques_rigidos(conn, dia_semana, hora_inicio, hora_fin)
     bloqueantes = [c for c in conflictos if c.bloqueante]
     if bloqueantes and not forzar:
@@ -208,7 +246,11 @@ def crear_reserva_regular(
         HoraInicio=hora_inicio, HoraFin=hora_fin, VigenciaInicio=vigencia_inicio,
         VigenciaFin=vigencia_fin, EsExcepcion=int(es_excepcion), Observacion=observacion,
     )
-    advertencias = [c.mensaje for c in conflictos if not c.bloqueante] + problemas_rigidos
+    advertencias = (
+        [c.mensaje for c in conflictos if not c.bloqueante]
+        + [c.mensaje for c in conflictos_aisladas]
+        + problemas_rigidos
+    )
     if forzar:
         advertencias += [c.mensaje for c in bloqueantes]
     return id_reserva, advertencias
