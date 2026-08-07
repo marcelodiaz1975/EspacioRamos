@@ -311,6 +311,19 @@ CREATE TABLE IF NOT EXISTS FeriadoTrabajado (
     Observacion TEXT
 );
 
+-- AumentoAplicado (Etapa 5, DC-10 sec. 1) -----------------------------------------------
+-- Registro de cada corrida del análisis de aumentos. Sirve para saber si
+-- ya se aplicó un aumento en este mes calendario: si es la primera corrida
+-- se congela ValorHoraXAnterior; si es una corrección dentro del mismo mes
+-- se deja el "anterior" como estaba (el del proceso original).
+CREATE TABLE IF NOT EXISTS AumentoAplicado (
+    IdAumento INTEGER PRIMARY KEY AUTOINCREMENT,
+    Periodo TEXT NOT NULL,
+    PorcentajeGeneral REAL NOT NULL,
+    FechaAplicacion TEXT,
+    Observacion TEXT
+);
+
 -- 3.17 FechasEspeciales --------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS FechasEspeciales (
     IdFecha INTEGER PRIMARY KEY AUTOINCREMENT,
