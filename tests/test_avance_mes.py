@@ -99,7 +99,7 @@ def test_ajuste_no_aplica_a_saldo_a_favor(conn):
 
 
 def test_ajuste_no_aplica_a_categoria_distinta_de_r(conn):
-    id_prof = _crear_profesional(conn, categoria="A", saldo_actual=1000)
+    _crear_profesional(conn, categoria="A", saldo_actual=1000)
     resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
     assert resumen.profesionales_con_ajuste == []
 
