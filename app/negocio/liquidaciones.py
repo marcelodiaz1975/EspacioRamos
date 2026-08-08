@@ -223,7 +223,7 @@ def _interseccion(desde_a: str, hasta_a: str, desde_b: str, hasta_b: str) -> tup
 
 # ------------------------------------------------------------- consolidación categoría E
 
-def _ids_consolidados(conn: sqlite3.Connection, id_profesional: int) -> list[int]:
+def ids_consolidados(conn: sqlite3.Connection, id_profesional: int) -> list[int]:
     """El profesional R más todos los E que lo tienen como cabeza de
     equipo (DC-01 §1.1: sus horas se consolidan económicamente en el R)."""
     filas = conn.execute(
@@ -601,7 +601,7 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
             "(categoría E se consolida en la de su R, categoría B nunca se liquida)"
         )
 
-    ids = _ids_consolidados(conn, id_profesional)
+    ids = ids_consolidados(conn, id_profesional)
     anio, mes = parsear_periodo(periodo)
     anio_ant, mes_ant = parsear_periodo(calcular_periodo_anterior(periodo))
     primer_dia_periodo = primer_dia_mes(anio, mes).isoformat()

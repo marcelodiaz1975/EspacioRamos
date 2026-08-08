@@ -459,6 +459,16 @@ CREATE TABLE IF NOT EXISTS MensajePredefinido (
     Activo INTEGER NOT NULL DEFAULT 1
 );
 
+-- 3.29 CondicionNorma (Etapa 7, sección 4.5/4.3: los 21 puntos editables de "Condiciones y
+-- normas" que aparecen en el PDF de Liquidación y el de Propuesta) -------------------------
+CREATE TABLE IF NOT EXISTS CondicionNorma (
+    IdCondicion INTEGER PRIMARY KEY AUTOINCREMENT,
+    Numero INTEGER NOT NULL,
+    Titulo TEXT NOT NULL,
+    Texto TEXT NOT NULL,
+    Activo INTEGER NOT NULL DEFAULT 1
+);
+
 -- 3.28 Configuracion (tabla de una sola fila, IdConfiguracion siempre = 1) -------------------
 CREATE TABLE IF NOT EXISTS Configuracion (
     IdConfiguracion INTEGER PRIMARY KEY CHECK (IdConfiguracion = 1),

@@ -40,6 +40,7 @@ TABLAS = [
     "Imagen",
     "MensajePredefinido",
     "Configuracion",
+    "CondicionNorma",
 ]
 
 
