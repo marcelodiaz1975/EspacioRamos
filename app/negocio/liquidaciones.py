@@ -115,7 +115,10 @@ class ItemFeriado:
 @dataclass
 class ItemHorasAgregadas:
     id_reserva_regular: int
+    id_consultorio: int
     dia_semana: str
+    hora_inicio: float
+    hora_fin: float
     vigencia_inicio: str
     monto: float
 
@@ -123,6 +126,33 @@ class ItemHorasAgregadas:
 @dataclass
 class ItemFeriadoTrabajado:
     id_feriado_trabajado: int
+    id_consultorio: int
+    fecha: str
+    hora_inicio: float
+    hora_fin: float
+    monto: float
+
+
+@dataclass
+class ItemVacacion:
+    id_vacacion: int
+    fecha_desde: str
+    fecha_hasta: str
+    monto: float
+
+
+@dataclass
+class ItemLicencia:
+    id_licencia: int
+    id_tipo_licencia: int
+    fecha_desde: str
+    fecha_hasta: str
+    monto: float
+
+
+@dataclass
+class ItemAislada:
+    id_reserva_aislada: int
     id_consultorio: int
     fecha: str
     hora_inicio: float
@@ -144,13 +174,13 @@ class Liquidacion:
     descuentos_feriados: list[ItemFeriado] = field(default_factory=list)
     descuentos_no_laborables: list[ItemFeriado] = field(default_factory=list)
     feriados_pendientes: list[ItemFeriado] = field(default_factory=list)
-    descuento_vacaciones: float = 0.0
-    descuento_licencias: float = 0.0
+    descuento_vacaciones: list[ItemVacacion] = field(default_factory=list)
+    descuento_licencias: list[ItemLicencia] = field(default_factory=list)
     horas_regulares_agregadas: list[ItemHorasAgregadas] = field(default_factory=list)
     feriados_trabajados_mes_anterior: list[ItemFeriadoTrabajado] = field(default_factory=list)
     feriados_trabajados_mes_en_curso: list[ItemFeriadoTrabajado] = field(default_factory=list)
-    aisladas_mes_anterior: float = 0.0
-    aisladas_mes_en_curso: float = 0.0
+    aisladas_mes_anterior: list[ItemAislada] = field(default_factory=list)
+    aisladas_mes_en_curso: list[ItemAislada] = field(default_factory=list)
     ajuste_saldo_atrasado: float = 0.0
     cargos_especiales: list[sqlite3.Row] = field(default_factory=list)
     cuotas_plan: list[sqlite3.Row] = field(default_factory=list)
@@ -180,6 +210,22 @@ class Liquidacion:
         return sum(i.monto for i in self.feriados_trabajados_mes_en_curso)
 
     @property
+    def total_descuento_vacaciones(self) -> float:
+        return sum(i.monto for i in self.descuento_vacaciones)
+
+    @property
+    def total_descuento_licencias(self) -> float:
+        return sum(i.monto for i in self.descuento_licencias)
+
+    @property
+    def total_aisladas_mes_anterior(self) -> float:
+        return sum(i.monto for i in self.aisladas_mes_anterior)
+
+    @property
+    def total_aisladas_mes_en_curso(self) -> float:
+        return sum(i.monto for i in self.aisladas_mes_en_curso)
+
+    @property
     def total_cargos_especiales(self) -> float:
         return sum(c["Monto"] if c["Tipo"] == "Débito" else -c["Monto"] for c in self.cargos_especiales)
 
@@ -196,13 +242,13 @@ class Liquidacion:
             - self.total_descuento_feriados
             - self.total_descuento_no_laborables
             - self.total_feriados_pendientes
-            - self.descuento_vacaciones
-            - self.descuento_licencias
+            - self.total_descuento_vacaciones
+            - self.total_descuento_licencias
             + self.total_horas_regulares_agregadas
             + self.total_feriados_trabajados_mes_anterior
             + self.total_feriados_trabajados_mes_en_curso
-            + self.aisladas_mes_anterior
-            + self.aisladas_mes_en_curso
+            + self.total_aisladas_mes_anterior
+            + self.total_aisladas_mes_en_curso
             + self.ajuste_saldo_atrasado
             + self.total_cargos_especiales
             + self.total_cuotas_plan
@@ -395,7 +441,7 @@ def _calcular_horas_regulares_agregadas(
     placeholders = ", ".join("?" for _ in ids)
     filas = conn.execute(
         f"""
-        SELECT rr.IdReservaRegular, rr.DiaSemana, rr.HoraInicio, rr.HoraFin, rr.VigenciaInicio,
+        SELECT rr.IdReservaRegular, rr.IdConsultorio, rr.DiaSemana, rr.HoraInicio, rr.HoraFin, rr.VigenciaInicio,
                c.ValorHoraRegularActual
         FROM ReservaRegular rr
         JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
@@ -416,7 +462,8 @@ def _calcular_horas_regulares_agregadas(
             dia += timedelta(days=1)
         if monto > 0:
             items.append(ItemHorasAgregadas(
-                id_reserva_regular=f["IdReservaRegular"], dia_semana=f["DiaSemana"],
+                id_reserva_regular=f["IdReservaRegular"], id_consultorio=f["IdConsultorio"],
+                dia_semana=f["DiaSemana"], hora_inicio=f["HoraInicio"], hora_fin=f["HoraFin"],
                 vigencia_inicio=f["VigenciaInicio"], monto=monto,
             ))
     return items
@@ -530,45 +577,63 @@ def _prorratear_valor_bonificado(
     return valor_bonificado * (bruto_interseccion / bruto_total)
 
 
-def _calcular_descuento_vacaciones(conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str) -> float:
+def _calcular_descuento_vacaciones(
+    conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str,
+) -> list[ItemVacacion]:
     """Prorratea el ValorBonificado ya congelado de cada Vacacion (de R y
     de sus E) — evita descontar dos veces una vacación que cruza fin de mes
     (DC-01 §1.7, DC-05 §1.6) y respeta el recorte por cupo agotado, que
     `vacaciones.crear_vacacion` aplica como un escalado de todo el período,
-    no como un corte de fecha."""
-    total = 0.0
+    no como un corte de fecha. Un ítem por Vacacion (no un total): el PDF
+    de liquidación detalla cada una con su rango de fechas."""
+    items = []
     for id_prof in ids:
         for v in obtener_repositorio(conn, "Vacacion").listar(IdProfesional=id_prof):
-            total += _prorratear_valor_bonificado(
+            monto = _prorratear_valor_bonificado(
                 conn, id_prof, v["ValorBonificado"], v["FechaDesde"], v["FechaHasta"], primer_dia, ultimo_dia,
             )
-    return total
+            if monto:
+                items.append(ItemVacacion(
+                    id_vacacion=v["IdVacacion"], fecha_desde=v["FechaDesde"], fecha_hasta=v["FechaHasta"],
+                    monto=monto,
+                ))
+    return items
 
 
-def _calcular_descuento_licencias(conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str) -> float:
+def _calcular_descuento_licencias(
+    conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str,
+) -> list[ItemLicencia]:
     """Igual criterio que vacaciones (DC-05 §2.4/§2.5), prorrateando contra
     la franja realmente bonificada (hasta el tope de duración máxima del
     tipo si el pedido lo excedió), no contra el FechaHasta completo."""
-    total = 0.0
+    items = []
     for id_prof in ids:
         for l in obtener_repositorio(conn, "Licencia").listar(IdProfesional=id_prof):
             fecha_hasta_bonificable = _fecha_hasta_bonificable_licencia(conn, l)
-            total += _prorratear_valor_bonificado(
+            monto = _prorratear_valor_bonificado(
                 conn, id_prof, l["ValorBonificado"], l["FechaDesde"], fecha_hasta_bonificable, primer_dia, ultimo_dia,
             )
-    return total
+            if monto:
+                items.append(ItemLicencia(
+                    id_licencia=l["IdLicencia"], id_tipo_licencia=l["IdTipoLicencia"],
+                    fecha_desde=l["FechaDesde"], fecha_hasta=fecha_hasta_bonificable, monto=monto,
+                ))
+    return items
 
 
 # --------------------------------------------------------------------------- aisladas
 
-def _valor_aisladas_periodo(
+def _aisladas_periodo(
     conn: sqlite3.Connection, ids: list[int], anio: int, mes: int, recargo_pct: float,
-) -> float:
+) -> list[ItemAislada]:
+    """Un ítem por ReservaAislada confirmada del período (no un total): el
+    PDF de liquidación detalla cada una con fecha, horario y consultorio."""
     placeholders = ", ".join("?" for _ in ids)
     prefijo = f"{anio:04d}-{mes:02d}-"
     filas = conn.execute(
         f"""
-        SELECT ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo, c.ValorHoraAisladaActual
+        SELECT ra.IdReservaAislada, ra.IdConsultorio, ra.Fecha, ra.HoraInicio, ra.HoraFin,
+               ra.AplicaRecargo, c.ValorHoraAisladaActual
         FROM ReservaAislada ra
         JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
         WHERE ra.IdProfesional IN ({placeholders}) AND ra.Estado = 'Confirmada' AND ra.Fecha LIKE ?
@@ -576,13 +641,16 @@ def _valor_aisladas_periodo(
         (*ids, prefijo + "%"),
     ).fetchall()
 
-    total = 0.0
+    items = []
     for f in filas:
         monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
         if f["AplicaRecargo"]:
             monto *= 1 + recargo_pct / 100
-        total += monto
-    return total
+        items.append(ItemAislada(
+            id_reserva_aislada=f["IdReservaAislada"], id_consultorio=f["IdConsultorio"], fecha=f["Fecha"],
+            hora_inicio=f["HoraInicio"], hora_fin=f["HoraFin"], monto=monto,
+        ))
+    return items
 
 
 # ------------------------------------------------------------------------------ cálculo
@@ -644,8 +712,8 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
     descuento_vacaciones = _calcular_descuento_vacaciones(conn, ids, primer_dia_periodo, ultimo_dia_periodo)
     descuento_licencias = _calcular_descuento_licencias(conn, ids, primer_dia_periodo, ultimo_dia_periodo)
 
-    aisladas_mes_anterior = _valor_aisladas_periodo(conn, ids, anio_ant, mes_ant, recargo_pct)
-    aisladas_mes_en_curso = _valor_aisladas_periodo(conn, ids, anio, mes, recargo_pct)
+    aisladas_mes_anterior = _aisladas_periodo(conn, ids, anio_ant, mes_ant, recargo_pct)
+    aisladas_mes_en_curso = _aisladas_periodo(conn, ids, anio, mes, recargo_pct)
 
     cargos_especiales = obtener_repositorio(conn, "CargoEspecial").listar(
         IdProfesional=id_profesional, PeriodoImputado=periodo

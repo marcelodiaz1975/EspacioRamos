@@ -3,8 +3,8 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.liquidaciones import calcular_liquidacion
-from app.pdf.liquidacion_pdf import _items_cuenta, _nombre_archivo, generar_pdf_liquidacion
-from app.pdf.numeros_en_letras import monto_en_letras
+from app.pdf.liquidacion_pdf import _items_cuenta, _mapa_consultorios, _nombre_archivo, generar_pdf_liquidacion
+from app.pdf.numeros_en_letras import en_letras_pesos, monto_en_letras
 from app.repositorio.registro import obtener_repositorio
 
 PERIODO = "2026-08"
@@ -49,13 +49,14 @@ def test_nombre_archivo_sigue_el_formato_del_documento(conn, profesional):
 
 def test_items_cuenta_respeta_el_orden_de_dc01(conn, profesional):
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion)
+    consultorios = _mapa_consultorios(conn)
+    items = _items_cuenta(liquidacion, consultorios, {}, "agosto", "julio")
     conceptos = [c for c, _, _ in items]
-    assert conceptos[0] == "Bruto"
-    assert conceptos[1].startswith("Descuento por horas semanales")
-    assert conceptos[2] == "Subtotal reserva"
-    assert conceptos[3] == "Saldo anterior"
-    assert conceptos[-1] == "TOTAL"
+    assert conceptos[0].startswith("Importe bruto correspondiente a la reserva regular de agosto")
+    assert conceptos[1].startswith("Descuento (")
+    assert conceptos[2] == "Subtotal por reserva para el mes de agosto"
+    assert conceptos[3] == "Saldo pendiente de la liquidación anterior"
+    assert conceptos[-1] == "Liquidación a abonar por el profesional en el mes de agosto"
     assert items[-1][1] == pytest.approx(liquidacion.total)
 
 
@@ -65,6 +66,12 @@ def test_monto_en_letras_casos_basicos():
     assert monto_en_letras(21000) == "Pesos veintiún mil con 00/100"
     assert monto_en_letras(1234.56) == "Pesos mil doscientos treinta y cuatro con 56/100"
     assert monto_en_letras(-50.25) == "Menos pesos cincuenta con 25/100"
+
+
+def test_en_letras_pesos_formato_recuadro_total():
+    assert en_letras_pesos(202544) == "(son pesos Doscientos dos mil quinientos cuarenta y cuatro)"
+    assert en_letras_pesos(1234.56) == "(son pesos Mil doscientos treinta y cuatro con 56/100)"
+    assert en_letras_pesos(0) == "(son pesos Cero)"
 
 
 def test_generar_pdf_liquidacion_crea_archivo_valido(conn, profesional, tmp_path):

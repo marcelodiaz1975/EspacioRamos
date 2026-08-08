@@ -37,10 +37,19 @@ _NIVELES = {
 }
 
 
-def crear_documento(ruta: str, apaisado: bool = False) -> tuple[SimpleDocTemplate, float]:
+def crear_documento(
+    ruta: str, apaisado: bool = False, altura: float | None = None,
+) -> tuple[SimpleDocTemplate, float]:
     """SimpleDocTemplate con los márgenes estándar del sistema. Devuelve
-    también el ancho útil (para dimensionar tablas de ancho completo)."""
-    tamano = (A4[1], A4[0]) if apaisado else A4
+    también el ancho útil (para dimensionar tablas de ancho completo).
+
+    `altura`, si se pasa, reemplaza el alto de página estándar — se usa
+    para los PDFs de "página única continua" del modelo real (Etapa 7):
+    se estima una altura generosa a partir del volumen de datos y, si la
+    estimación se queda corta, SimpleDocTemplate sigue funcionando bien:
+    agrega páginas de continuación del mismo tamaño en vez de fallar."""
+    ancho_base, alto_base = (A4[1], A4[0]) if apaisado else A4
+    tamano = (ancho_base, altura if altura is not None else alto_base)
     doc = SimpleDocTemplate(
         ruta, pagesize=tamano,
         leftMargin=MARGEN, rightMargin=MARGEN, topMargin=MARGEN, bottomMargin=MARGEN,

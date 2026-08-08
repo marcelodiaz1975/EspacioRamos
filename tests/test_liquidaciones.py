@@ -253,8 +253,8 @@ def test_aisladas_mes_en_curso_y_mes_anterior(conn, consultorio):
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
 
-    assert liquidacion.aisladas_mes_en_curso == pytest.approx(2 * VALOR_HORA_AISLADA)
-    assert liquidacion.aisladas_mes_anterior == pytest.approx(2 * VALOR_HORA_AISLADA * 1.10)
+    assert liquidacion.total_aisladas_mes_en_curso == pytest.approx(2 * VALOR_HORA_AISLADA)
+    assert liquidacion.total_aisladas_mes_anterior == pytest.approx(2 * VALOR_HORA_AISLADA * 1.10)
 
 
 def test_reserva_aislada_cancelada_no_se_factura(conn, consultorio):
@@ -264,7 +264,7 @@ def test_reserva_aislada_cancelada_no_se_factura(conn, consultorio):
         HoraInicio=9, HoraFin=11, Estado="Cancelada", AplicaRecargo=0,
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
-    assert liquidacion.aisladas_mes_en_curso == 0
+    assert liquidacion.total_aisladas_mes_en_curso == 0
 
 
 def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_mes(conn, consultorio):
@@ -281,9 +281,9 @@ def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_mes(conn, consultor
     liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-08")
     liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
 
-    assert liq_agosto.descuento_vacaciones > 0
-    assert liq_septiembre.descuento_vacaciones > 0
-    suma = liq_agosto.descuento_vacaciones + liq_septiembre.descuento_vacaciones
+    assert liq_agosto.total_descuento_vacaciones > 0
+    assert liq_septiembre.total_descuento_vacaciones > 0
+    suma = liq_agosto.total_descuento_vacaciones + liq_septiembre.total_descuento_vacaciones
     assert suma == pytest.approx(vacacion["ValorBonificado"])
 
 
@@ -300,7 +300,7 @@ def test_descuento_licencias_dia_por_dia(conn, consultorio):
 
     liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-08")
     liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
-    suma = liq_agosto.descuento_licencias + liq_septiembre.descuento_licencias
+    suma = liq_agosto.total_descuento_licencias + liq_septiembre.total_descuento_licencias
     assert suma == pytest.approx(licencia["ValorBonificado"])
 
 
@@ -321,7 +321,7 @@ def test_descuento_vacaciones_respeta_tope_de_cupo_sin_duplicar(conn, consultori
 
     liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-08")
     liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
-    suma = liq_agosto.descuento_vacaciones + liq_septiembre.descuento_vacaciones
+    suma = liq_agosto.total_descuento_vacaciones + liq_septiembre.total_descuento_vacaciones
     # la suma entre los dos meses tiene que dar EXACTO el ValorBonificado ya
     # capeado, nunca más (antes del fix se recalculaba sobre el rango
     # completo pedido y se perdía el recorte por cupo agotado)
@@ -344,7 +344,7 @@ def test_descuento_licencias_respeta_tope_de_duracion_maxima_sin_duplicar(conn, 
 
     liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-08")
     liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
-    suma = liq_agosto.descuento_licencias + liq_septiembre.descuento_licencias
+    suma = liq_agosto.total_descuento_licencias + liq_septiembre.total_descuento_licencias
     # si se contara el lunes 7/9 (excedente) la suma daría de más
     assert suma == pytest.approx(licencia["ValorBonificado"])
 

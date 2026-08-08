@@ -79,14 +79,30 @@ def _entero_en_letras(n: int) -> str:
     return " ".join(partes)
 
 
-def monto_en_letras(monto: float) -> str:
-    """'Pesos cuarenta y cinco mil seiscientos setenta y ocho con 50/100'."""
-    negativo = monto < 0
+def _entero_y_centavos(monto: float) -> tuple[int, int]:
     entero = int(abs(monto) // 1)
     centavos = round((abs(monto) - entero) * 100)
     if centavos == 100:
         entero += 1
         centavos = 0
+    return entero, centavos
+
+
+def monto_en_letras(monto: float) -> str:
+    """'Pesos cuarenta y cinco mil seiscientos setenta y ocho con 50/100'."""
+    entero, centavos = _entero_y_centavos(monto)
     texto = f"Pesos {_entero_en_letras(entero)} con {centavos:02d}/100"
     texto = texto[0].upper() + texto[1:]
-    return f"Menos {texto[0].lower()}{texto[1:]}" if negativo else texto
+    return f"Menos {texto[0].lower()}{texto[1:]}" if monto < 0 else texto
+
+
+def en_letras_pesos(monto: float) -> str:
+    """'(son pesos Doscientos dos mil quinientos cuarenta y cuatro)' — el
+    formato entre paréntesis del recuadro de total del modelo real. Si hay
+    centavos se agrega '... con NN/100', igual que en un cheque."""
+    entero, centavos = _entero_y_centavos(monto)
+    letras = _entero_en_letras(entero)
+    letras = letras[0].upper() + letras[1:]
+    sufijo = f" con {centavos:02d}/100" if centavos else ""
+    prefijo = "menos son pesos" if monto < 0 else "son pesos"
+    return f"({prefijo} {letras}{sufijo})"

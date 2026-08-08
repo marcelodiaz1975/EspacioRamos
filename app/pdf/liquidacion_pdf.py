@@ -1,36 +1,45 @@
-"""PDF de liquidación mensual (Etapa 7, sección 4.5).
+"""PDF de liquidación mensual (Etapa 7, sección 4.5), reconstruido sobre un
+modelo real ya generado por el sistema previo (no sobre la redacción
+original de la sección 4.5 del documento, que quedó desactualizada).
 
-Se construye sobre `negocio.liquidaciones.Liquidacion`: no recalcula nada,
-solo formatea lo que `calcular_liquidacion`/`emitir_liquidacion` ya
-produjeron. El orden de los ítems de la cuenta es el de DC-01 §1.10 (el
-mismo que usa `liquidaciones.calcular_liquidacion`) — reemplaza al orden de
-la sección 4.5 del documento v1.0 original, que los documentos
-complementarios dejaron desactualizado (ya no existe "descuento
-bonificación": la categoría B nunca se liquida).
+Estructura, de arriba a abajo:
+    Título + subtítulo + línea
+    Nivel 1: "Detalle reserva {MM/AAAA} - {Tratamiento} {Nombre} {Apellido}"
+      Nivel 2: Bloques de horarios regulares reservados
+      Nivel 2: Liquidación mensual mes en curso (ítems + subtotal + total)
+      Nivel 2: Consultorios y cantidad de horas utilizadas
+    Nivel 2: Valores de los consultorios para el período X-Y (por edificio)
+    Nivel 2: Esquema de descuentos
+    Nivel 2: Recordatorios varios para el profesional
+    Nivel 2: Disponibilidad de consultorios al {fecha} (por edificio)
+    Nivel 2: Condiciones y normas generales de convivencia...
 
-Las secciones "Bloques horarios regulares reservados", "Consultorios y
-horas utilizadas", "Valores vigentes por edificio", "Esquema de
-descuentos" y "Disponibilidad" no tienen un layout detallado en la versión
-del documento disponible (remite a versiones v2/v3 no incluidas acá) — se
-implementaron con un criterio razonable a partir de los datos existentes,
-para ajustar una vez que se puedan revisar contra un ejemplo real.
+Es una página única continua (no A4 paginado): se estima una altura
+generosa a partir del volumen de datos de este profesional en particular
+y, si la estimación se queda corta, simplemente se agrega una página de
+continuación del mismo ancho — no es un error, es el mismo comportamiento
+que tiene el documento modelo (que también deja margen de sobra al final).
+
+El orden y el cálculo de los montos de la cuenta siguen siendo los de
+DC-01 §1.10 (los que ya usa `negocio.liquidaciones`) — categoría B nunca
+se liquida, categoría E se consolida en la de su R.
 """
 from __future__ import annotations
 
 import os
 import sqlite3
 from datetime import date, timedelta
+from math import ceil
 
-from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.units import cm
+from reportlab.platypus import Flowable, Paragraph, Spacer, Table, TableStyle
 
-from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, primer_dia_mes, ultimo_dia_mes
-from app.negocio.grilla import calcular_grilla
+from app.negocio.dias import DIAS_SEMANA, fecha_actual, parsear_periodo, primer_dia_mes, ultimo_dia_mes
+from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.liquidaciones import Liquidacion, ids_consolidados
 from app.pdf.estilos import (
-    COLOR_AMARILLO,
-    COLOR_NARANJA,
+    COLOR_NIVEL_1,
     COLOR_ROJO,
-    COLOR_VERDE,
     FUENTE,
     FUENTE_NEGRITA,
     FUENTE_NEGRITA_ITALICA,
@@ -39,11 +48,26 @@ from app.pdf.estilos import (
     estilo_texto,
     formatear_moneda,
 )
-from app.pdf.numeros_en_letras import monto_en_letras
+from app.pdf.formato import fecha_corta, fecha_larga, hora_fmt, mes_texto, periodo_mm_aaaa
+from app.pdf.grilla_pdf import secciones_disponibilidad
+from app.pdf.numeros_en_letras import en_letras_pesos
 from app.repositorio.registro import obtener_repositorio
 
-DIAS_SEMANA_ORDEN = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
-_COLOR_CELDA = {"verde": COLOR_VERDE, "amarillo": COLOR_AMARILLO, "naranja": COLOR_NARANJA, "rojo": COLOR_ROJO}
+
+class _Regla(Flowable):
+    """Línea horizontal simple, para separar el título del resto."""
+
+    def __init__(self, ancho: float, grosor: float = 1.2, color=COLOR_NIVEL_1):
+        super().__init__()
+        self.ancho, self.grosor, self.color = ancho, grosor, color
+
+    def wrap(self, availWidth, availHeight):
+        return self.ancho, self.grosor + 4
+
+    def draw(self):
+        self.canv.setStrokeColor(self.color)
+        self.canv.setLineWidth(self.grosor)
+        self.canv.line(0, 2, self.ancho, 2)
 
 
 def _nombre_archivo(periodo: str, profesional: sqlite3.Row) -> str:
@@ -54,355 +78,556 @@ def _nombre_archivo(periodo: str, profesional: sqlite3.Row) -> str:
     return f"{periodo} - {partes} - Liquidación mensual.pdf"
 
 
-def _edificios_de_bloques(bloques: list[sqlite3.Row]) -> list[sqlite3.Row]:
-    vistos: dict[int, sqlite3.Row] = {}
-    for b in bloques:
-        vistos.setdefault(b["IdEdificio"], b)
-    return list(vistos.values())
+def _nombre_completo(profesional: sqlite3.Row) -> str:
+    tratamiento = profesional["Tratamiento"] or ""
+    nombre = profesional["NombrePila"] or ""
+    apellido = profesional["Apellido"]
+    return " ".join(p for p in (tratamiento, nombre, apellido) if p)
 
 
-def _bloques_horarios(conn: sqlite3.Connection, ids: list[int], fecha_referencia: str) -> list[sqlite3.Row]:
+def _mapa_consultorios(conn: sqlite3.Connection) -> dict[int, sqlite3.Row]:
+    filas = conn.execute(
+        """
+        SELECT c.IdConsultorio, c.NumeroConsultorio, c.Ventana,
+               c.ValorHoraRegularActual, c.ValorHoraAisladaActual,
+               u.IdUnidad, u.Departamento, e.IdEdificio, e.Nombre AS NombreEdificio,
+               e.Domicilio, e.DomicilioLocalidad
+        FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad
+        JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        """
+    ).fetchall()
+    return {f["IdConsultorio"]: f for f in filas}
+
+
+def _lugar(consultorios: dict, id_consultorio: int) -> str:
+    c = consultorios[id_consultorio]
+    return f"consul {c['NumeroConsultorio']} del {c['Departamento']} - {c['NombreEdificio']}"
+
+
+def _dia_y_fecha(fecha_iso: str) -> tuple[str, str]:
+    dia_semana = DIAS_SEMANA[date.fromisoformat(fecha_iso).weekday()]
+    return dia_semana, fecha_corta(fecha_iso)
+
+
+# ------------------------------------------------------------------- bloques horarios
+
+def _bloques_horarios(conn: sqlite3.Connection, ids: list[int]) -> list[sqlite3.Row]:
     placeholders = ", ".join("?" for _ in ids)
     filas = conn.execute(
         f"""
-        SELECT rr.DiaSemana, rr.HoraInicio, rr.HoraFin, c.NumeroConsultorio,
-               u.Departamento, e.Nombre AS NombreEdificio, e.Domicilio, e.DomicilioLocalidad,
-               e.IdEdificio
+        SELECT rr.DiaSemana, rr.HoraInicio, rr.HoraFin, rr.VigenciaInicio, rr.VigenciaFin,
+               c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio, e.IdEdificio
         FROM ReservaRegular rr
         JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
         JOIN Unidad u ON u.IdUnidad = c.IdUnidad
         JOIN Edificio e ON e.IdEdificio = u.IdEdificio
         WHERE rr.IdProfesional IN ({placeholders})
-          AND rr.VigenciaInicio <= ? AND (rr.VigenciaFin IS NULL OR rr.VigenciaFin >= ?)
         """,
-        (*ids, fecha_referencia, fecha_referencia),
+        ids,
     ).fetchall()
-    return sorted(filas, key=lambda f: (DIAS_SEMANA_ORDEN.index(f["DiaSemana"]), f["HoraInicio"]))
+    return sorted(
+        filas,
+        key=lambda f: (f["NombreEdificio"], DIAS_SEMANA.index(f["DiaSemana"]), f["HoraInicio"]),
+    )
 
 
-def _consultorios_y_horas(
-    conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str,
-) -> list[tuple[str, float, float]]:
-    """Horas y bruto del período agrupados por consultorio (misma lógica
-    día-por-día que `liquidaciones._bruto_y_tramos`, pero desglosada por
-    consultorio en vez de por día: la suma de esta tabla da `bruto`)."""
-    placeholders = ", ".join("?" for _ in ids)
-    acumulado: dict[int, list] = {}
-    dia = date.fromisoformat(primer_dia)
-    fin = date.fromisoformat(ultimo_dia)
-    while dia <= fin:
-        fecha_iso = dia.isoformat()
-        filas = conn.execute(
-            f"""
-            SELECT rr.IdConsultorio, rr.HoraInicio, rr.HoraFin, c.ValorHoraRegularActual,
-                   c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio
-            FROM ReservaRegular rr
-            JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
-            JOIN Unidad u ON u.IdUnidad = c.IdUnidad
-            JOIN Edificio e ON e.IdEdificio = u.IdEdificio
-            WHERE rr.IdProfesional IN ({placeholders}) AND rr.DiaSemana = ?
-              AND rr.VigenciaInicio <= ? AND (rr.VigenciaFin IS NULL OR rr.VigenciaFin >= ?)
-            """,
-            (*ids, fecha_a_dia_semana(dia), fecha_iso, fecha_iso),
-        ).fetchall()
-        for f in filas:
-            horas = f["HoraFin"] - f["HoraInicio"]
-            monto = horas * f["ValorHoraRegularActual"]
-            clave = f["IdConsultorio"]
-            if clave not in acumulado:
-                nombre = f"{f['NombreEdificio']} - {f['Departamento']} - Consultorio {f['NumeroConsultorio']}"
-                acumulado[clave] = [nombre, 0.0, 0.0]
-            acumulado[clave][1] += horas
-            acumulado[clave][2] += monto
-        dia += timedelta(days=1)
-    return [tuple(v) for v in acumulado.values()]
+def _tabla_bloques_horarios(bloques: list[sqlite3.Row], ancho: float) -> Table:
+    filas = [["Edificio", "Día", "Hora inicio", "Hora liberación", "Unidad", "Consultorio", "Vigencia desde", "Vigencia hasta"]]
+    for b in bloques:
+        filas.append([
+            b["NombreEdificio"], b["DiaSemana"], hora_fmt(b["HoraInicio"]), hora_fmt(b["HoraFin"]),
+            b["Departamento"], str(b["NumeroConsultorio"]),
+            fecha_larga(b["VigenciaInicio"]), fecha_larga(b["VigenciaFin"]),
+        ])
+    anchos = [ancho * p for p in (0.14, 0.11, 0.11, 0.13, 0.13, 0.11, 0.135, 0.135)]
+    tabla = Table(filas, colWidths=anchos, repeatRows=1)
+    tabla.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA), ("FONTNAME", (0, 1), (-1, -1), FUENTE),
+        ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("GRID", (0, 0), (-1, -1), 0.6, "#000000"),
+        ("BACKGROUND", (0, 0), (-1, 0), COLOR_NIVEL_1), ("TEXTCOLOR", (0, 0), (-1, 0), "#FFFFFF"),
+    ]))
+    return tabla
 
 
-def _valores_vigentes_por_edificio(conn: sqlite3.Connection, edificios: list[sqlite3.Row]) -> list[tuple]:
-    resultado = []
-    for ed in edificios:
-        consultorios = conn.execute(
-            """
-            SELECT c.NumeroConsultorio, u.Departamento, c.ValorHoraRegularActual, c.ValorHoraAisladaActual
-            FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad
-            WHERE u.IdEdificio = ? ORDER BY u.Departamento, c.NumeroConsultorio
-            """,
-            (ed["IdEdificio"],),
-        ).fetchall()
-        resultado.append((ed["NombreEdificio"], consultorios))
-    return resultado
+# ---------------------------------------------------------------- ítems de la cuenta
+
+def _texto_horas_agregadas(consultorios: dict, h) -> str:
+    return (
+        f"Horas regulares agregadas a partir del {h.dia_semana.lower()} {fecha_corta(h.vigencia_inicio)} "
+        f"de {hora_fmt(h.hora_inicio)[:-2]} a {hora_fmt(h.hora_fin)} {_lugar(consultorios, h.id_consultorio)}"
+    )
 
 
-def _esquema_descuentos_vigente(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute(
-        "SELECT * FROM EsquemaDescuentos WHERE Activo = 1 ORDER BY HorasSemanalesDesde"
-    ).fetchall()
+def _texto_feriado_trabajado_actual(consultorios: dict, item, tipo: str) -> str:
+    concepto = "feriado" if tipo == "Feriado nacional" else "día no laborable"
+    return (
+        f"Importe con descuento incluido por {concepto} del {fecha_corta(item.fecha)} "
+        f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} {_lugar(consultorios, item.id_consultorio)}"
+    )
 
 
-def _condiciones_normas(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute(
-        "SELECT * FROM CondicionNorma WHERE Activo = 1 ORDER BY Numero"
-    ).fetchall()
+def _texto_feriado_trabajado_anterior(consultorios: dict, item, mes_ant_texto: str) -> str:
+    dia_semana = DIAS_SEMANA[date.fromisoformat(item.fecha).weekday()]
+    return (
+        f"Feriado trabajado en {mes_ant_texto}: {dia_semana.lower()} {fecha_corta(item.fecha)} "
+        f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} {_lugar(consultorios, item.id_consultorio)}"
+    )
 
 
-def _items_cuenta(liquidacion: Liquidacion) -> list[tuple[str, float | None, bool]]:
-    """(concepto, importe, es_subtotal) en el orden de DC-01 §1.10. Los
-    ítems compuestos por varias líneas (feriados, cargos especiales, etc.)
-    se listan uno por uno; `importe=None` marca una línea de sub-encabezado
-    sin importe propio."""
-    items: list[tuple[str, float | None, bool]] = []
-    items.append(("Bruto", liquidacion.bruto, False))
-    items.append((
-        f"Descuento por horas semanales ({liquidacion.horas_semanales:g} hs, "
-        f"{'0% — pierde descuento' if liquidacion.pierde_descuento_horas else f'{liquidacion.descuento_horas_pct:g}%'})",
-        -(liquidacion.bruto - liquidacion.subtotal_reserva), False,
-    ))
-    items.append(("Subtotal reserva", liquidacion.subtotal_reserva, True))
-    items.append(("Saldo anterior", liquidacion.saldo_anterior, False))
+def _texto_aislada(consultorios: dict, item, verbo: str, mes_texto_opt: str | None) -> str:
+    dia_semana = DIAS_SEMANA[date.fromisoformat(item.fecha).weekday()]
+    prefijo = f"Hora aislada {verbo} en {mes_texto_opt}: " if mes_texto_opt else f"Hora aislada {verbo}: "
+    return (
+        f"{prefijo}{dia_semana.lower()} {fecha_corta(item.fecha)} "
+        f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} {_lugar(consultorios, item.id_consultorio)}"
+    )
+
+
+def _items_cuenta(
+    liquidacion: Liquidacion, consultorios: dict, tipos_feriado_actual: dict[str, str],
+    mes_actual_texto: str, mes_anterior_texto: str,
+) -> list[tuple[str, float, bool]]:
+    """(concepto, importe, es_subtotal) — DC-01 §1.10, con la redacción del
+    modelo real: sin prefijos de categoría genéricos para cargos
+    especiales (se muestra el Concepto tal cual se cargó). Los ítems de
+    `descuento_licencias` deben traer ya colgado `.nombre_tipo` (ver
+    `generar_pdf_liquidacion`, que lo resuelve una sola vez)."""
+    items: list[tuple[str, float, bool]] = []
+    items.append((f"Importe bruto correspondiente a la reserva regular de {mes_actual_texto}", liquidacion.bruto, False))
+    if liquidacion.pierde_descuento_horas:
+        concepto_desc = (
+            f"Descuento (0%, pierde el descuento por saldo atrasado) por cantidad de horas "
+            f"semanales reservadas ({liquidacion.horas_semanales:g}hs)"
+        )
+    else:
+        concepto_desc = (
+            f"Descuento ({liquidacion.descuento_horas_pct:g}%) por cantidad de horas semanales "
+            f"reservadas ({liquidacion.horas_semanales:g}hs)"
+        )
+    items.append((concepto_desc, -(liquidacion.bruto - liquidacion.subtotal_reserva), False))
+    items.append((f"Subtotal por reserva para el mes de {mes_actual_texto}", liquidacion.subtotal_reserva, True))
+    items.append(("Saldo pendiente de la liquidación anterior", liquidacion.saldo_anterior, False))
+
     for f in liquidacion.descuentos_feriados:
-        items.append((f"Descuento feriado {f.fecha}", -f.monto, False))
+        dia_semana, fecha = _dia_y_fecha(f.fecha)
+        items.append((f"Descuento por feriado - {dia_semana} {fecha}", -f.monto, False))
     for f in liquidacion.descuentos_no_laborables:
-        items.append((f"Descuento no laborable {f.fecha}", -f.monto, False))
+        dia_semana, fecha = _dia_y_fecha(f.fecha)
+        items.append((f"Descuento por día no laborable - {dia_semana} {fecha}", -f.monto, False))
     for f in liquidacion.feriados_pendientes:
-        items.append((f"Feriado pendiente mes anterior {f.fecha}", -f.monto, False))
-    if liquidacion.descuento_vacaciones:
-        items.append(("Descuento vacaciones", -liquidacion.descuento_vacaciones, False))
-    if liquidacion.descuento_licencias:
-        items.append(("Descuento licencias", -liquidacion.descuento_licencias, False))
+        dia_semana, fecha = _dia_y_fecha(f.fecha)
+        items.append((f"Descuento feriado pendiente - {dia_semana} {fecha}", -f.monto, False))
+    for v in liquidacion.descuento_vacaciones:
+        d1, f1 = _dia_y_fecha(v.fecha_desde)
+        d2, f2 = _dia_y_fecha(v.fecha_hasta)
+        items.append((
+            f"Descuento por vacaciones desde el {d1.lower()} {f1} hasta el {d2.lower()} {f2} inclusive",
+            -v.monto, False,
+        ))
+    for lic in liquidacion.descuento_licencias:
+        d1, f1 = _dia_y_fecha(lic.fecha_desde)
+        d2, f2 = _dia_y_fecha(lic.fecha_hasta)
+        items.append((
+            f"Descuento por {lic.nombre_tipo.lower()} desde el {d1.lower()} {f1} hasta el {d2.lower()} {f2} inclusive",
+            -lic.monto, False,
+        ))
+
     for h in liquidacion.horas_regulares_agregadas:
-        items.append((f"Horas regulares agregadas ({h.dia_semana} desde {h.vigencia_inicio})", h.monto, False))
-    for f in liquidacion.feriados_trabajados_mes_anterior:
-        items.append((f"Feriado trabajado mes anterior {f.fecha}", f.monto, False))
-    for f in liquidacion.feriados_trabajados_mes_en_curso:
-        items.append((f"Feriado trabajado {f.fecha}", f.monto, False))
-    if liquidacion.aisladas_mes_anterior:
-        items.append(("Aisladas mes anterior", liquidacion.aisladas_mes_anterior, False))
-    if liquidacion.aisladas_mes_en_curso:
-        items.append(("Aisladas mes en curso", liquidacion.aisladas_mes_en_curso, False))
+        items.append((_texto_horas_agregadas(consultorios, h), h.monto, False))
+    for item in liquidacion.feriados_trabajados_mes_anterior:
+        items.append((_texto_feriado_trabajado_anterior(consultorios, item, mes_anterior_texto), item.monto, False))
+    for item in liquidacion.feriados_trabajados_mes_en_curso:
+        tipo = tipos_feriado_actual.get(item.fecha, "Feriado nacional")
+        items.append((_texto_feriado_trabajado_actual(consultorios, item, tipo), item.monto, False))
+    for item in liquidacion.aisladas_mes_anterior:
+        items.append((_texto_aislada(consultorios, item, "trabajada", mes_anterior_texto), item.monto, False))
+    for item in liquidacion.aisladas_mes_en_curso:
+        items.append((_texto_aislada(consultorios, item, "a trabajar", mes_actual_texto), item.monto, False))
     if liquidacion.ajuste_saldo_atrasado:
         items.append(("Ajuste por saldo atrasado", liquidacion.ajuste_saldo_atrasado, False))
     for c in liquidacion.cargos_especiales:
         signo = 1 if c["Tipo"] == "Débito" else -1
-        etiqueta = "Depósito/Reintegro llave" if c["IdLlave"] else "Ítem libre"
-        items.append((f"{etiqueta}: {c['Concepto']}", signo * c["Monto"], False))
+        items.append((c["Concepto"], signo * c["Monto"], False))
     for c in liquidacion.cuotas_plan:
-        items.append((f"Cuota plan de pagos #{c['NumeroCuota']}", c["Monto"], False))
-    items.append(("TOTAL", liquidacion.total, True))
+        items.append((f"Cuota {c['NumeroCuota']} del plan de pagos", c["Monto"], False))
+    items.append((f"Liquidación a abonar por el profesional en el mes de {mes_actual_texto}", liquidacion.total, True))
     return items
 
 
-def _tabla_items(liquidacion: Liquidacion, ancho: float) -> Table:
-    filas = [["Concepto", "Importe"]]
-    estilo = [
-        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA),
-        ("FONTNAME", (0, 1), (-1, -1), FUENTE),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("GRID", (0, 0), (-1, -1), 0.4, "#999999"),
-        ("BACKGROUND", (0, 0), (-1, 0), "#DDDDDD"),
-    ]
-    for i, (concepto, importe, es_subtotal) in enumerate(_items_cuenta(liquidacion), start=1):
-        filas.append([concepto, formatear_moneda(importe)])
+def _tabla_items(items: list[tuple[str, float, bool]], ancho: float) -> list:
+    """Filas simples (sin grilla, como el modelo real) para los ítems, y
+    una caja con borde para cada fila marcada `es_subtotal` (el subtotal
+    intermedio y el total final)."""
+    story = []
+    filas_simples: list[tuple[str, float]] = []
+    for concepto, importe, es_subtotal in items[:-1]:
         if es_subtotal:
-            estilo.append(("FONTNAME", (0, i), (-1, i), FUENTE_NEGRITA))
-    tabla = Table(filas, colWidths=[ancho * 0.75, ancho * 0.25], repeatRows=1)
+            if filas_simples:
+                story.append(_tabla_plana(filas_simples, ancho))
+                filas_simples = []
+            story.append(_caja_subtotal(concepto, importe, ancho))
+        else:
+            filas_simples.append((concepto, importe))
+    if filas_simples:
+        story.append(_tabla_plana(filas_simples, ancho))
+
+    concepto_total, importe_total, _ = items[-1]
+    story.append(_caja_total(concepto_total, importe_total, ancho))
+    return story
+
+
+def _tabla_plana(filas: list[tuple[str, float]], ancho: float) -> Table:
+    datos = [[concepto, formatear_moneda(importe)] for concepto, importe in filas]
+    tabla = Table(datos, colWidths=[ancho * 0.78, ancho * 0.22])
+    estilo = [
+        ("FONTNAME", (0, 0), (-1, -1), FUENTE), ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]
+    for i, (_, importe) in enumerate(filas):
+        if importe < 0:
+            estilo.append(("TEXTCOLOR", (0, i), (-1, i), COLOR_ROJO))
     tabla.setStyle(TableStyle(estilo))
     return tabla
 
 
-def _total_recuadro(liquidacion: Liquidacion, ancho: float) -> Table:
-    tabla = Table(
-        [
-            ["Total", formatear_moneda(liquidacion.total)],
-            [monto_en_letras(liquidacion.total), ""],
-        ],
-        colWidths=[ancho * 0.75, ancho * 0.25],
-    )
+def _caja_subtotal(concepto: str, importe: float, ancho: float) -> Table:
+    tabla = Table([[concepto, formatear_moneda(importe)]], colWidths=[ancho * 0.78, ancho * 0.22])
     tabla.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA_ITALICA),
-        ("FONTNAME", (0, 1), (0, 1), FUENTE),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-        ("SPAN", (0, 1), (1, 1)),
-        ("BOX", (0, 0), (-1, -1), 1, "#000000"),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.5, "#000000"),
+        ("FONTNAME", (0, 0), (-1, -1), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"), ("BOX", (0, 0), (-1, -1), 1, "#000000"),
+        ("BACKGROUND", (0, 0), (-1, -1), "#EEEEEE"), ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4), ("LEFTPADDING", (0, 0), (-1, -1), 6),
     ]))
     return tabla
 
+
+def _caja_total(concepto: str, importe: float, ancho: float) -> Table:
+    tabla = Table(
+        [[concepto, formatear_moneda(importe)], ["", en_letras_pesos(importe)]],
+        colWidths=[ancho * 0.55, ancho * 0.45],
+    )
+    tabla.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, 1), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (0, 1), 10),
+        ("FONTNAME", (1, 0), (1, 0), FUENTE_NEGRITA_ITALICA), ("FONTSIZE", (1, 0), (1, 0), 12),
+        ("FONTNAME", (1, 1), (1, 1), FUENTE), ("FONTSIZE", (1, 1), (1, 1), 8),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("VALIGN", (0, 0), (0, 1), "MIDDLE"),
+        ("SPAN", (0, 0), (0, 1)), ("BOX", (0, 0), (-1, -1), 1.2, "#000000"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    return tabla
+
+
+# --------------------------------------------------------- consultorios y horas
+
+def _consultorios_y_horas(
+    conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str,
+    consultorios: dict, descuento_pct: float,
+) -> list[dict]:
+    placeholders = ", ".join("?" for _ in ids)
+    acumulado: dict[int, float] = {}
+    dia = date.fromisoformat(primer_dia)
+    fin = date.fromisoformat(ultimo_dia)
+    while dia <= fin:
+        filas = conn.execute(
+            f"""
+            SELECT rr.IdConsultorio, rr.HoraInicio, rr.HoraFin
+            FROM ReservaRegular rr
+            WHERE rr.IdProfesional IN ({placeholders}) AND rr.DiaSemana = ?
+              AND rr.VigenciaInicio <= ? AND (rr.VigenciaFin IS NULL OR rr.VigenciaFin >= ?)
+            """,
+            (*ids, DIAS_SEMANA[dia.weekday()], dia.isoformat(), dia.isoformat()),
+        ).fetchall()
+        for f in filas:
+            acumulado[f["IdConsultorio"]] = acumulado.get(f["IdConsultorio"], 0.0) + (f["HoraFin"] - f["HoraInicio"])
+        dia += timedelta(days=1)
+
+    filas_resultado = []
+    for id_consultorio, horas in acumulado.items():
+        c = consultorios[id_consultorio]
+        valor_regular = c["ValorHoraRegularActual"]
+        valor_con_descuento = valor_regular * (1 - descuento_pct / 100)
+        filas_resultado.append({
+            "edificio": c["NombreEdificio"], "unidad": c["Departamento"], "consultorio": c["NumeroConsultorio"],
+            "valor_regular": valor_regular, "desc_pct": descuento_pct, "valor_con_descuento": valor_con_descuento,
+            "horas": horas,
+        })
+    return filas_resultado
+
+
+def _tabla_consultorios_y_horas(filas_datos: list[dict], ancho: float) -> Table:
+    filas = [["Edificio", "Unidad", "Consul.", "Valor regular", "Desc.", "Valor c/descuento", "Horas mensuales"]]
+    for f in filas_datos:
+        filas.append([
+            f["edificio"], f["unidad"], str(f["consultorio"]), formatear_moneda(f["valor_regular"]),
+            f"{f['desc_pct']:g}%", formatear_moneda(f["valor_con_descuento"]), f"{f['horas']:g}",
+        ])
+    anchos = [ancho * p for p in (0.17, 0.14, 0.08, 0.15, 0.08, 0.17, 0.21)]
+    tabla = Table(filas, colWidths=anchos, repeatRows=1)
+    tabla.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA), ("FONTNAME", (0, 1), (-1, -1), FUENTE),
+        ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (2, 0), (-1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.5, "#000000"), ("BACKGROUND", (0, 0), (-1, 0), COLOR_NIVEL_1),
+        ("TEXTCOLOR", (0, 0), (-1, 0), "#FFFFFF"),
+    ]))
+    return tabla
+
+
+# --------------------------------------------------------------- valores vigentes
+
+def _rango_actualizacion(conn: sqlite3.Connection, periodo: str) -> tuple[str, str]:
+    fila = conn.execute(
+        "SELECT MAX(Periodo) AS p FROM AumentoAplicado WHERE Periodo <= ?", (periodo,)
+    ).fetchone()
+    desde = fila["p"] if fila and fila["p"] else periodo
+    return desde, periodo
+
+
+def _matriz_valores_edificio(conn: sqlite3.Connection, id_edificio: int, ancho: float) -> list:
+    filas_bd = conn.execute(
+        """
+        SELECT u.Departamento, c.NumeroConsultorio, c.ValorHoraRegularActual
+        FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad
+        WHERE u.IdEdificio = ? ORDER BY u.Departamento, c.NumeroConsultorio
+        """,
+        (id_edificio,),
+    ).fetchall()
+    por_unidad: dict[str, dict[int, float]] = {}
+    for f in filas_bd:
+        por_unidad.setdefault(f["Departamento"], {})[f["NumeroConsultorio"]] = f["ValorHoraRegularActual"]
+    max_consultorios = max((max(v.keys()) for v in por_unidad.values()), default=0)
+    if max_consultorios == 0:
+        return [Paragraph("Sin consultorios cargados.", estilo_texto(9))]
+
+    encabezado_fila = ["Unidad"] + [f"Consul. {n}" for n in range(1, max_consultorios + 1)]
+    filas = [encabezado_fila]
+    for unidad, valores in por_unidad.items():
+        filas.append(
+            [unidad] + [formatear_moneda(valores[n]) if n in valores else "—" for n in range(1, max_consultorios + 1)]
+        )
+
+    ancho_unidad = ancho * 0.18
+    ancho_col = (ancho - ancho_unidad) / max_consultorios
+    tabla = Table(filas, colWidths=[ancho_unidad] + [ancho_col] * max_consultorios, repeatRows=1)
+    tabla.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA), ("FONTNAME", (0, 1), (0, -1), FUENTE_NEGRITA),
+        ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.5, "#000000"), ("BACKGROUND", (0, 0), (-1, 0), COLOR_NIVEL_1),
+        ("TEXTCOLOR", (0, 0), (-1, 0), "#FFFFFF"), ("BACKGROUND", (0, 1), (0, -1), "#F0F0F0"),
+    ]))
+    return [tabla]
+
+
+# --------------------------------------------------------------- esquema de descuentos
+
+def _bloques_esquema_descuentos(conn: sqlite3.Connection, ancho: float) -> list:
+    tramos = conn.execute(
+        "SELECT * FROM EsquemaDescuentos WHERE Activo = 1 ORDER BY HorasSemanalesDesde"
+    ).fetchall()
+    if not tramos:
+        return [Paragraph("Sin esquema de descuentos configurado.", estilo_texto(9))]
+
+    story = []
+    por_bloque = 9
+    for inicio in range(0, len(tramos), por_bloque):
+        grupo = tramos[inicio:inicio + por_bloque]
+        fila_horas = ["Hs. semanales"] + [f"Hasta {t['HorasSemanalesHasta']:g}hs" for t in grupo]
+        fila_desc = ["Descuento"] + [f"{t['PorcentajeDescuento']:g}%" for t in grupo]
+        n = len(grupo)
+        ancho_col = ancho / (n + 1)
+        tabla = Table([fila_horas, fila_desc], colWidths=[ancho_col] * (n + 1))
+        tabla.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.5, "#000000"),
+            ("BACKGROUND", (0, 0), (0, -1), "#6B0000"), ("TEXTCOLOR", (0, 0), (0, -1), "#FFFFFF"),
+            ("BACKGROUND", (1, 0), (-1, 0), "#6B0000"), ("TEXTCOLOR", (1, 0), (-1, 0), "#FFFFFF"),
+        ]))
+        story.append(tabla)
+        story.append(Spacer(1, 4))
+    return story
+
+
+# ------------------------------------------------------------------- recordatorios
+
+def _recordatorios(conn: sqlite3.Connection, ids: list[int], ajuste_pct: float) -> list:
+    placeholders = ", ".join("?" for _ in ids)
+    placas = conn.execute(
+        f"""
+        SELECT p.PosicionTablero, u.Departamento, e.Nombre AS NombreEdificio
+        FROM Placa p JOIN Unidad u ON u.IdUnidad = p.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        WHERE p.IdProfesional IN ({placeholders}) AND p.Activo = 1
+        """,
+        ids,
+    ).fetchall()
+    style = estilo_texto(8)
+    story = []
+    for p in placas:
+        story.append(Paragraph(
+            f"* Placa para los timbres en la unidad del {p['Departamento']} del edificio "
+            f"{p['NombreEdificio']} en la posición {p['PosicionTablero']} del tablero", style,
+        ))
+    story.append(Paragraph(
+        "* Abonar el total liquidado dentro del mes en curso para mantener los descuentos "
+        "en el próximo período.", style,
+    ))
+    story.append(Paragraph(
+        f"* Los saldos pendientes que se trasladan de un mes a otro reciben un ajuste del "
+        f"{ajuste_pct:g}% para mantener los mismos actualizados.", style,
+    ))
+    return story
+
+
+# --------------------------------------------------------------------- condiciones
+
+def _condiciones_normas(conn: sqlite3.Connection) -> list:
+    condiciones = conn.execute("SELECT * FROM CondicionNorma WHERE Activo = 1 ORDER BY Numero").fetchall()
+    style = estilo_texto(9)
+    return [Paragraph(f"<b>{c['Numero']}) {c['Titulo'].upper()}:</b> {c['Texto']}", style) for c in condiciones]
+
+
+# --------------------------------------------------------------------------- altura
+
+def _altura_estimada(
+    n_bloques: int, n_items: int, n_consultorios: int, n_edificios_valores: int,
+    n_tramos_descuento: int, n_recordatorios: int, n_edificios_disp: int, n_horas_disp: int,
+    n_condiciones: int,
+) -> float:
+    altura = 6 * cm  # título + subtítulo + línea
+    altura += 1.5 * cm + max(n_bloques, 1) * 0.55 * cm  # bloques horarios
+    altura += 1.5 * cm + n_items * 0.55 * cm + 3 * cm  # ítems + subtotal + total
+    altura += 1.5 * cm + max(n_consultorios, 1) * 0.5 * cm + 1 * cm  # consultorios y horas
+    altura += 1.5 * cm + n_edificios_valores * 3 * cm  # valores vigentes
+    altura += 1.5 * cm + ceil(n_tramos_descuento / 9) * 1.4 * cm  # esquema descuentos
+    altura += 1.5 * cm + max(n_recordatorios, 1) * 0.45 * cm  # recordatorios
+    altura += n_edificios_disp * (2 * cm + n_horas_disp * 0.42 * cm + 3 * cm)  # disponibilidad
+    altura += 1.5 * cm + n_condiciones * 1.3 * cm  # condiciones
+    return altura * 1.15
+
+
+# ------------------------------------------------------------------------------ main
 
 def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, directorio: str) -> str:
     """Genera el PDF de liquidación mensual y devuelve la ruta completa del
     archivo creado (`directorio` debe existir)."""
     profesional = obtener_repositorio(conn, "Profesional").obtener(liquidacion.id_profesional)
     cfg = conn.execute("SELECT * FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos"
+    nombre_espacio = ((cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos").upper()
 
     ids = ids_consolidados(conn, liquidacion.id_profesional)
     anio, mes = parsear_periodo(liquidacion.periodo)
+    anio_ant, mes_ant = parsear_periodo(f"{anio - 1:04d}-12" if mes == 1 else f"{anio:04d}-{mes - 1:02d}")
     primer_dia = primer_dia_mes(anio, mes).isoformat()
     ultimo_dia = ultimo_dia_mes(anio, mes).isoformat()
+    consultorios = _mapa_consultorios(conn)
+
+    # Resolver los nombres de TipoLicencia una sola vez, no en cada ítem.
+    repo_tipo_lic = obtener_repositorio(conn, "TipoLicencia")
+    for lic in liquidacion.descuento_licencias:
+        tipo = repo_tipo_lic.obtener(lic.id_tipo_licencia)
+        lic.nombre_tipo = tipo["Nombre"] if tipo else "licencia"
+
+    tipos_feriado_actual = {f["Fecha"]: f["Tipo"] for f in feriados_relevantes_periodo(conn, anio, mes)}
+    mes_actual_texto = mes_texto(mes)
+    mes_anterior_texto = mes_texto(mes_ant)
+
+    bloques = _bloques_horarios(conn, ids)
+    edificios_bloques: dict[int, str] = {}
+    for b in bloques:
+        edificios_bloques.setdefault(b["IdEdificio"], b["NombreEdificio"])
+
+    items = _items_cuenta(liquidacion, consultorios, tipos_feriado_actual, mes_actual_texto, mes_anterior_texto)
+    filas_consultorios = _consultorios_y_horas(
+        conn, ids, primer_dia, ultimo_dia, consultorios, liquidacion.descuento_horas_pct
+    )
+
+    n_tramos_descuento = conn.execute("SELECT COUNT(*) FROM EsquemaDescuentos WHERE Activo = 1").fetchone()[0]
+    n_condiciones = conn.execute("SELECT COUNT(*) FROM CondicionNorma WHERE Activo = 1").fetchone()[0]
+    cfg_grilla = conn.execute(
+        "SELECT HoraInicioGrilla, HoraFinGrilla FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    n_horas_disp = int(
+        (cfg_grilla["HoraFinGrilla"] if cfg_grilla else 22) - (cfg_grilla["HoraInicioGrilla"] if cfg_grilla else 8)
+    )
+    n_edificios_disp = max(len(edificios_bloques), 1)
+
+    altura = _altura_estimada(
+        n_bloques=len(bloques), n_items=len(items), n_consultorios=len(filas_consultorios),
+        n_edificios_valores=len(edificios_bloques), n_tramos_descuento=n_tramos_descuento,
+        n_recordatorios=3, n_edificios_disp=n_edificios_disp, n_horas_disp=n_horas_disp,
+        n_condiciones=n_condiciones,
+    )
 
     ruta = os.path.join(directorio, _nombre_archivo(liquidacion.periodo, profesional))
-    doc, ancho = crear_documento(ruta)
-    style_texto = estilo_texto(9)
-    style_nota = estilo_texto(7, italica=True)
+    doc, ancho = crear_documento(ruta, altura=altura)
     story = []
 
-    story.append(encabezado(1, f"{nombre_espacio} - Liquidación mensual", ancho))
+    story.append(Paragraph(nombre_espacio, estilo_texto(20, negrita=True)))
+    story.append(Paragraph(f"Liquidación mensual - {_nombre_completo(profesional)}", estilo_texto(11)))
+    story.append(Spacer(1, 4))
+    story.append(_Regla(ancho))
+    story.append(Spacer(1, 10))
+
+    titulo_detalle = f"Detalle reserva {periodo_mm_aaaa(liquidacion.periodo)} - {_nombre_completo(profesional)}"
+    story.append(encabezado(1, titulo_detalle, ancho))
     story.append(Spacer(1, 6))
 
-    bloques = _bloques_horarios(conn, ids, ultimo_dia)
-    story.append(encabezado(2, "Bloques horarios regulares reservados", ancho))
+    story.append(encabezado(2, "Bloques de horarios regulares reservados", ancho))
     if bloques:
-        filas = [["Día", "Horario", "Consultorio"]]
-        for b in bloques:
-            filas.append([
-                b["DiaSemana"], f"{b['HoraInicio']:g} a {b['HoraFin']:g} hs",
-                f"{b['NombreEdificio']} - {b['Departamento']} - Consultorio {b['NumeroConsultorio']}",
-            ])
-        tabla = Table(filas, colWidths=[ancho * 0.2, ancho * 0.25, ancho * 0.55], repeatRows=1)
-        tabla.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("GRID", (0, 0), (-1, -1), 0.4, "#999999"), ("BACKGROUND", (0, 0), (-1, 0), "#DDDDDD"),
-        ]))
-        story.append(tabla)
+        story.append(_tabla_bloques_horarios(bloques, ancho))
     else:
-        story.append(Paragraph("Sin bloques horarios regulares vigentes.", style_texto))
-    for ed in _edificios_de_bloques(bloques):
+        story.append(Paragraph("Sin bloques horarios regulares vigentes.", estilo_texto(9)))
+    story.append(Spacer(1, 8))
+
+    story.append(encabezado(2, "Liquidación mensual mes en curso", ancho))
+    story.append(Spacer(1, 4))
+    story.extend(_tabla_items(items, ancho))
+    story.append(Spacer(1, 8))
+
+    story.append(encabezado(2, "Consultorios y cantidad de horas utilizadas por el profesional en el mes liquidado", ancho))
+    if filas_consultorios:
+        story.append(_tabla_consultorios_y_horas(filas_consultorios, ancho))
+        total_horas = sum(f["horas"] for f in filas_consultorios)
+        story.append(Spacer(1, 3))
         story.append(Paragraph(
-            f"* Edificio {ed['NombreEdificio']}: Corresponde a {ed['Domicilio']}, {ed['DomicilioLocalidad']}",
-            style_nota,
+            f"<para align=right><b>Total horas mensuales: {total_horas:g}hs - "
+            f"Subtotal liquidación: {formatear_moneda(liquidacion.subtotal_reserva)}</b></para>",
+            estilo_texto(9),
         ))
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 10))
 
-    story.append(encabezado(1, f"Liquidación mensual {liquidacion.periodo}", ancho))
-    story.append(Spacer(1, 4))
-    story.append(_tabla_items(liquidacion, ancho))
-    story.append(Spacer(1, 4))
-    story.append(_total_recuadro(liquidacion, ancho))
-    story.append(Spacer(1, 8))
-
-    story.append(encabezado(2, "Consultorios y horas utilizadas", ancho))
-    filas_ch = [["Consultorio", "Horas del período", "Bruto del período"]]
-    for nombre, horas, monto in _consultorios_y_horas(conn, ids, primer_dia, ultimo_dia):
-        filas_ch.append([nombre, f"{horas:g}", formatear_moneda(monto)])
-    tabla_ch = Table(filas_ch, colWidths=[ancho * 0.55, ancho * 0.2, ancho * 0.25], repeatRows=1)
-    tabla_ch.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("GRID", (0, 0), (-1, -1), 0.4, "#999999"),
-        ("BACKGROUND", (0, 0), (-1, 0), "#DDDDDD"),
-    ]))
-    story.append(tabla_ch)
-    story.append(Spacer(1, 8))
-
-    for nombre_ed, consultorios in _valores_vigentes_por_edificio(conn, _edificios_de_bloques(bloques)):
-        story.append(encabezado(3, f"Valores vigentes — Edificio {nombre_ed}", ancho))
-        filas_v = [["Unidad", "Consultorio", "Valor hora regular", "Valor hora aislada"]]
-        for c in consultorios:
-            filas_v.append([
-                c["Departamento"], str(c["NumeroConsultorio"]),
-                formatear_moneda(c["ValorHoraRegularActual"]), formatear_moneda(c["ValorHoraAisladaActual"]),
-            ])
-        tabla_v = Table(filas_v, colWidths=[ancho * 0.25, ancho * 0.25, ancho * 0.25, ancho * 0.25], repeatRows=1)
-        tabla_v.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (-1, -1), 7),
-            ("ALIGN", (2, 0), (-1, -1), "RIGHT"), ("GRID", (0, 0), (-1, -1), 0.3, "#999999"),
-        ]))
-        story.append(tabla_v)
-        story.append(Spacer(1, 4))
+    desde, hasta = _rango_actualizacion(conn, liquidacion.periodo)
+    titulo_valores = (
+        f"Valores de los consultorios para el período comprendido entre "
+        f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
+    )
+    story.append(encabezado(2, titulo_valores, ancho))
+    for id_edificio, nombre_ed in edificios_bloques.items():
+        story.append(encabezado(3, f"Edificio {nombre_ed}", ancho))
+        story.extend(_matriz_valores_edificio(conn, id_edificio, ancho))
+        story.append(Spacer(1, 6))
 
     story.append(encabezado(2, "Esquema de descuentos", ancho))
-    filas_e = [["Desde (hs)", "Hasta (hs)", "% descuento"]]
-    for e in _esquema_descuentos_vigente(conn):
-        filas_e.append([f"{e['HorasSemanalesDesde']:g}", f"{e['HorasSemanalesHasta']:g}", f"{e['PorcentajeDescuento']:g}%"])
-    tabla_e = Table(filas_e, colWidths=[ancho / 3] * 3, repeatRows=1)
-    tabla_e.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("GRID", (0, 0), (-1, -1), 0.4, "#999999"),
-        ("BACKGROUND", (0, 0), (-1, 0), "#DDDDDD"),
-    ]))
-    story.append(tabla_e)
-    story.append(Spacer(1, 8))
+    story.extend(_bloques_esquema_descuentos(conn, ancho))
+    story.append(Spacer(1, 6))
 
-    story.append(encabezado(2, "Recordatorios", ancho))
-    ajuste_pct = cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0
-    story.append(Paragraph(
-        "* Abonar el total liquidado dentro del mes en curso para mantener los descuentos "
-        "en el próximo período.", style_nota,
+    story.append(encabezado(2, "Recordatorios varios para el profesional", ancho))
+    story.extend(_recordatorios(conn, ids, cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0))
+    story.append(Spacer(1, 10))
+
+    fecha_titulo = fecha_larga(fecha_actual(conn).isoformat()).replace("/", "-")
+    story.extend(secciones_disponibilidad(
+        conn, anio, mes, ancho, fecha_titulo, ids_edificio=list(edificios_bloques.keys()) or None,
     ))
-    story.append(Paragraph(
-        f"* Los saldos pendientes que se trasladan de un mes a otro reciben un ajuste del "
-        f"{ajuste_pct:g}% para mantener los mismos actualizados.", style_nota,
-    ))
-    story.append(Spacer(1, 8))
 
-    story.append(encabezado(2, "Disponibilidad", ancho))
-    story.append(_grilla_disponibilidad(conn, anio, mes, ancho))
-    story.append(Spacer(1, 8))
-
-    condiciones = _condiciones_normas(conn)
-    if condiciones:
-        story.append(encabezado(2, "Condiciones y normas", ancho))
-        for c in condiciones:
-            story.append(Paragraph(f"<b>{c['Numero']}. {c['Titulo']}:</b> {c['Texto']}", style_texto))
+    condiciones_flowables = _condiciones_normas(conn)
+    if condiciones_flowables:
+        titulo_condiciones = "Condiciones y normas generales de convivencia relacionadas con la reserva en el espacio"
+        story.append(encabezado(2, titulo_condiciones, ancho))
+        story.append(Spacer(1, 4))
+        story.extend(condiciones_flowables)
 
     doc.build(story)
     return ruta
-
-
-_ORDEN_COLOR = {"rojo": 0, "naranja": 1, "amarillo": 2, "verde": 3}
-
-
-def _grilla_disponibilidad(conn: sqlite3.Connection, anio: int, mes: int, ancho: float) -> KeepTogether:
-    """Resumen diario (no hora por hora: no entra en el ancho de una hoja
-    A4 junto con el resto del PDF) — cada celda es el PEOR color de
-    disponibilidad de esa unidad en ese día, sección 4.2. Filas = días,
-    columnas = unidades, como indica la grilla normal del documento."""
-    cfg = conn.execute(
-        "SELECT HoraInicioGrilla, HoraFinGrilla FROM Configuracion WHERE IdConfiguracion = 1"
-    ).fetchone()
-    hora_ini = int(cfg["HoraInicioGrilla"]) if cfg else 8
-    hora_fin = int(cfg["HoraFinGrilla"]) if cfg else 22
-    dias = DIAS_SEMANA_ORDEN[:6]  # Lunes a Sábado
-
-    grilla = calcular_grilla(conn, anio, mes, hora_ini, hora_fin, dias)
-    unidades = conn.execute(
-        """
-        SELECT u.IdUnidad, u.Departamento, e.Nombre AS NombreEdificio
-        FROM Unidad u JOIN Edificio e ON e.IdEdificio = u.IdEdificio
-        ORDER BY e.Nombre, u.Departamento
-        """
-    ).fetchall()
-
-    encabezados = ["Día"] + [f"{u['NombreEdificio']} - {u['Departamento']}" for u in unidades]
-    filas = [encabezados]
-    fondos = []
-    for fila_idx, dia in enumerate(dias, start=1):
-        fila = [dia]
-        for col_idx, u in enumerate(unidades, start=1):
-            colores_dia = [grilla.get((u["IdUnidad"], dia, h), "rojo") for h in range(hora_ini, hora_fin)]
-            peor = min(colores_dia, key=lambda c: _ORDEN_COLOR[c]) if colores_dia else "rojo"
-            fila.append("")
-            fondos.append((peor, fila_idx, col_idx))
-        filas.append(fila)
-
-    ancho_dia = ancho * 0.15
-    ancho_unidad = (ancho - ancho_dia) / max(len(unidades), 1)
-    tabla = Table(filas, colWidths=[ancho_dia] + [ancho_unidad] * len(unidades), repeatRows=1)
-    estilo = [
-        ("FONTNAME", (0, 0), (-1, -1), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (-1, -1), 6),
-        ("GRID", (0, 0), (-1, -1), 0.3, "#999999"), ("BACKGROUND", (0, 0), (0, -1), "#6B0000"),
-        ("TEXTCOLOR", (0, 0), (0, -1), "#FFFFFF"), ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]
-    for color, fila, col in fondos:
-        estilo.append(("BACKGROUND", (col, fila), (col, fila), _COLOR_CELDA[color]))
-    tabla.setStyle(TableStyle(estilo))
-
-    leyenda = Paragraph(
-        "Verde: 2 o más consultorios disponibles &nbsp;·&nbsp; Amarillo: 1 disponible con ventana "
-        "&nbsp;·&nbsp; Naranja: 1 disponible sin ventana &nbsp;·&nbsp; Rojo: sin disponibilidad. "
-        "Cada celda muestra el peor color del día (resumen; no hora por hora).",
-        estilo_texto(6, italica=True),
-    )
-    return KeepTogether([tabla, Spacer(1, 3), leyenda])
