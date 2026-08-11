@@ -51,6 +51,12 @@ from app.pdf.estilos import (
 from app.pdf.formato import fecha_corta, fecha_larga, hora_fmt, mes_texto, periodo_mm_aaaa
 from app.pdf.grilla_pdf import secciones_disponibilidad
 from app.pdf.numeros_en_letras import en_letras_pesos
+from app.pdf.valores_pdf import (
+    bloques_esquema_descuentos,
+    condiciones_normas,
+    matriz_valores_edificio,
+    rango_actualizacion,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -375,81 +381,6 @@ def _tabla_consultorios_y_horas(filas_datos: list[dict], ancho: float) -> Table:
     return tabla
 
 
-# --------------------------------------------------------------- valores vigentes
-
-def _rango_actualizacion(conn: sqlite3.Connection, periodo: str) -> tuple[str, str]:
-    fila = conn.execute(
-        "SELECT MAX(Periodo) AS p FROM AumentoAplicado WHERE Periodo <= ?", (periodo,)
-    ).fetchone()
-    desde = fila["p"] if fila and fila["p"] else periodo
-    return desde, periodo
-
-
-def _matriz_valores_edificio(conn: sqlite3.Connection, id_edificio: int, ancho: float) -> list:
-    filas_bd = conn.execute(
-        """
-        SELECT u.Departamento, c.NumeroConsultorio, c.ValorHoraRegularActual
-        FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad
-        WHERE u.IdEdificio = ? ORDER BY u.Departamento, c.NumeroConsultorio
-        """,
-        (id_edificio,),
-    ).fetchall()
-    por_unidad: dict[str, dict[int, float]] = {}
-    for f in filas_bd:
-        por_unidad.setdefault(f["Departamento"], {})[f["NumeroConsultorio"]] = f["ValorHoraRegularActual"]
-    max_consultorios = max((max(v.keys()) for v in por_unidad.values()), default=0)
-    if max_consultorios == 0:
-        return [Paragraph("Sin consultorios cargados.", estilo_texto(9))]
-
-    encabezado_fila = ["Unidad"] + [f"Consul. {n}" for n in range(1, max_consultorios + 1)]
-    filas = [encabezado_fila]
-    for unidad, valores in por_unidad.items():
-        filas.append(
-            [unidad] + [formatear_moneda(valores[n]) if n in valores else "—" for n in range(1, max_consultorios + 1)]
-        )
-
-    ancho_unidad = ancho * 0.18
-    ancho_col = (ancho - ancho_unidad) / max_consultorios
-    tabla = Table(filas, colWidths=[ancho_unidad] + [ancho_col] * max_consultorios, repeatRows=1)
-    tabla.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA), ("FONTNAME", (0, 1), (0, -1), FUENTE_NEGRITA),
-        ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (1, 0), (-1, -1), "CENTER"),
-        ("GRID", (0, 0), (-1, -1), 0.5, "#000000"), ("BACKGROUND", (0, 0), (-1, 0), COLOR_NIVEL_1),
-        ("TEXTCOLOR", (0, 0), (-1, 0), "#FFFFFF"), ("BACKGROUND", (0, 1), (0, -1), "#F0F0F0"),
-    ]))
-    return [tabla]
-
-
-# --------------------------------------------------------------- esquema de descuentos
-
-def _bloques_esquema_descuentos(conn: sqlite3.Connection, ancho: float) -> list:
-    tramos = conn.execute(
-        "SELECT * FROM EsquemaDescuentos WHERE Activo = 1 ORDER BY HorasSemanalesDesde"
-    ).fetchall()
-    if not tramos:
-        return [Paragraph("Sin esquema de descuentos configurado.", estilo_texto(9))]
-
-    story = []
-    por_bloque = 9
-    for inicio in range(0, len(tramos), por_bloque):
-        grupo = tramos[inicio:inicio + por_bloque]
-        fila_horas = ["Hs. semanales"] + [f"Hasta {t['HorasSemanalesHasta']:g}hs" for t in grupo]
-        fila_desc = ["Descuento"] + [f"{t['PorcentajeDescuento']:g}%" for t in grupo]
-        n = len(grupo)
-        ancho_col = ancho / (n + 1)
-        tabla = Table([fila_horas, fila_desc], colWidths=[ancho_col] * (n + 1))
-        tabla.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, -1), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (-1, -1), 7),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("GRID", (0, 0), (-1, -1), 0.5, "#000000"),
-            ("BACKGROUND", (0, 0), (0, -1), "#6B0000"), ("TEXTCOLOR", (0, 0), (0, -1), "#FFFFFF"),
-            ("BACKGROUND", (1, 0), (-1, 0), "#6B0000"), ("TEXTCOLOR", (1, 0), (-1, 0), "#FFFFFF"),
-        ]))
-        story.append(tabla)
-        story.append(Spacer(1, 4))
-    return story
-
-
 # ------------------------------------------------------------------- recordatorios
 
 def _recordatorios(conn: sqlite3.Connection, ids: list[int], ajuste_pct: float) -> list:
@@ -478,14 +409,6 @@ def _recordatorios(conn: sqlite3.Connection, ids: list[int], ajuste_pct: float) 
         f"{ajuste_pct:g}% para mantener los mismos actualizados.", style,
     ))
     return story
-
-
-# --------------------------------------------------------------------- condiciones
-
-def _condiciones_normas(conn: sqlite3.Connection) -> list:
-    condiciones = conn.execute("SELECT * FROM CondicionNorma WHERE Activo = 1 ORDER BY Numero").fetchall()
-    style = estilo_texto(9)
-    return [Paragraph(f"<b>{c['Numero']}) {c['Titulo'].upper()}:</b> {c['Texto']}", style) for c in condiciones]
 
 
 # --------------------------------------------------------------------------- altura
@@ -598,7 +521,7 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         ))
     story.append(Spacer(1, 10))
 
-    desde, hasta = _rango_actualizacion(conn, liquidacion.periodo)
+    desde, hasta = rango_actualizacion(conn, liquidacion.periodo)
     titulo_valores = (
         f"Valores de los consultorios para el período comprendido entre "
         f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
@@ -606,11 +529,11 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
     story.append(encabezado(2, titulo_valores, ancho))
     for id_edificio, nombre_ed in edificios_bloques.items():
         story.append(encabezado(3, f"Edificio {nombre_ed}", ancho))
-        story.extend(_matriz_valores_edificio(conn, id_edificio, ancho))
+        story.extend(matriz_valores_edificio(conn, id_edificio, ancho))
         story.append(Spacer(1, 6))
 
     story.append(encabezado(2, "Esquema de descuentos", ancho))
-    story.extend(_bloques_esquema_descuentos(conn, ancho))
+    story.extend(bloques_esquema_descuentos(conn, ancho))
     story.append(Spacer(1, 6))
 
     story.append(encabezado(2, "Recordatorios varios para el profesional", ancho))
@@ -622,7 +545,7 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         conn, anio, mes, ancho, fecha_titulo, ids_edificio=list(edificios_bloques.keys()) or None,
     ))
 
-    condiciones_flowables = _condiciones_normas(conn)
+    condiciones_flowables = condiciones_normas(conn)
     if condiciones_flowables:
         titulo_condiciones = "Condiciones y normas generales de convivencia relacionadas con la reserva en el espacio"
         story.append(encabezado(2, titulo_condiciones, ancho))
