@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -149,16 +150,26 @@ class _DialogoRegistro(QDialog):
         self.setWindowTitle(titulo)
         self._entradas: dict[str, QWidget] = {}
 
-        layout = QFormLayout(self)
+        layout_general = QVBoxLayout(self)
+
+        formulario = QWidget()
+        layout_formulario = QFormLayout(formulario)
         for campo in campos:
             entrada = self._crear_entrada(campo, registro)
             self._entradas[campo.nombre] = entrada
-            layout.addRow(campo.etiqueta, entrada)
+            layout_formulario.addRow(campo.etiqueta, entrada)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(formulario)
+        layout_general.addWidget(scroll)
 
         botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         botones.accepted.connect(self._validar_y_aceptar)
         botones.rejected.connect(self.reject)
-        layout.addRow(botones)
+        layout_general.addWidget(botones)
+
+        self.resize(480, min(60 + 40 * len(campos), 640))
 
     def _crear_entrada(self, campo: Campo, registro: sqlite3.Row | None) -> QWidget:
         valor = registro[campo.nombre] if registro is not None else None

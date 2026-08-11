@@ -13,6 +13,7 @@ from app.gui.pantallas.grilla import GrillaDisponibilidad
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
 from app.gui.pantallas.mensajeria import CentroMensajeria
 from app.gui.pantallas.panel_control import PanelControl
+from app.gui.pantallas.profesionales import pantalla_profesionales
 
 
 def construir_secciones() -> list[Seccion]:
@@ -21,6 +22,7 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Disponibilidad operativa", lambda conn: GrillaDisponibilidad(conn), categoria="Principal"),
         Seccion("Liquidación mensual", lambda conn: ProcesoLiquidacion(conn), categoria="Principal"),
         Seccion("Centro de mensajería", lambda conn: CentroMensajeria(conn), categoria="Principal"),
+        Seccion("Profesionales", pantalla_profesionales, categoria="Catálogos"),
         Seccion("Edificios", catalogos.pantalla_edificios, categoria="Catálogos"),
         Seccion("Unidades", catalogos.pantalla_unidades, categoria="Catálogos"),
         Seccion("Consultorios", catalogos.pantalla_consultorios, categoria="Catálogos"),
