@@ -1,7 +1,8 @@
 """Pantallas de catálogo (Edificios, Unidades, Consultorios, Responsables,
 Tipos de licencia, Listas editables, Condiciones y normas, Mensajes
-predefinidos) — todas construidas sobre PantallaCRUD, sin código bespoke
-por tabla."""
+predefinidos, Profesiones, Gastos operativos, Placas, Fechas especiales,
+Esquema de descuentos) — todas construidas sobre PantallaCRUD, sin código
+bespoke por tabla."""
 from __future__ import annotations
 
 import sqlite3
@@ -139,3 +140,76 @@ def pantalla_mensajes_predefinidos(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Activo", "Activo", tipo="booleano"),
     ]
     return PantallaCRUD(conn, "MensajePredefinido", "Mensajes predefinidos", campos)
+
+
+def pantalla_profesiones(conn: sqlite3.Connection) -> PantallaCRUD:
+    campos = [
+        Campo("Nombre", "Nombre", requerido=True),
+        Campo("NombreMasculino", "Nombre (masculino)"),
+        Campo("NombreFemenino", "Nombre (femenino)"),
+        Campo("NombreNeutro", "Nombre (neutro)"),
+        Campo("TratamientoDefaultMasculino", "Tratamiento por defecto (masculino)"),
+        Campo("TratamientoDefaultFemenino", "Tratamiento por defecto (femenino)"),
+        Campo("TieneMultiplesTratamientos", "Tiene múltiples tratamientos", tipo="booleano"),
+        Campo("OpcionesTratamientoMasculino", "Opciones de tratamiento (masculino, separadas por coma)"),
+        Campo("OpcionesTratamientoFemenino", "Opciones de tratamiento (femenino, separadas por coma)"),
+    ]
+    return PantallaCRUD(conn, "Profesion", "Profesiones", campos)
+
+
+def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
+    def opciones_alcance(c):
+        return [("Espacio general", "Espacio general"), ("Edificio", "Edificio"), ("Unidad", "Unidad")]
+
+    def opciones_origen(c):
+        return [("Manual", "Manual"), ("Importado", "Importado")]
+
+    campos = [
+        Campo("Periodo", "Período (AAAA-MM)", requerido=True),
+        Campo("Categoria", "Categoría"),
+        Campo("Concepto", "Concepto"),
+        Campo("Monto", "Monto", tipo="numero", requerido=True),
+        Campo("Alcance", "Alcance", tipo="combo", opciones=opciones_alcance),
+        Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio),
+        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad),
+        Campo("Origen", "Origen", tipo="combo", opciones=opciones_origen),
+        Campo("Observacion", "Observación", tipo="texto_largo"),
+    ]
+    return PantallaCRUD(conn, "GastoOperativo", "Gastos operativos", campos)
+
+
+def pantalla_placas(conn: sqlite3.Connection) -> PantallaCRUD:
+    def opciones_profesional(c):
+        filas = c.execute("SELECT IdProfesional, Apellido, NombrePila FROM Profesional ORDER BY Apellido").fetchall()
+        return [(f["IdProfesional"], f"{f['Apellido']}, {f['NombrePila'] or ''}".strip(", ")) for f in filas]
+
+    campos = [
+        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad, requerido=True),
+        Campo("PosicionTablero", "Posición en el tablero", tipo="numero"),
+        Campo("IdProfesional", "Profesional", tipo="combo", opciones=opciones_profesional),
+        Campo("NombreGrabado", "Nombre grabado"),
+        Campo("EsPersonalizada", "Es personalizada", tipo="booleano"),
+        Campo("Activo", "Activo", tipo="booleano"),
+    ]
+    return PantallaCRUD(conn, "Placa", "Placas", campos)
+
+
+def pantalla_fechas_especiales(conn: sqlite3.Connection) -> PantallaCRUD:
+    campos = [
+        Campo("Fecha", "Fecha (AAAA-MM-DD)", requerido=True),
+        Campo("Descripcion", "Descripción"),
+        Campo("Tipo", "Tipo"),
+        Campo("Activo", "Activo", tipo="booleano"),
+    ]
+    return PantallaCRUD(conn, "FechasEspeciales", "Fechas especiales", campos)
+
+
+def pantalla_esquema_descuentos(conn: sqlite3.Connection) -> PantallaCRUD:
+    campos = [
+        Campo("HorasSemanalesDesde", "Horas semanales desde", tipo="numero", requerido=True),
+        Campo("HorasSemanalesHasta", "Horas semanales hasta", tipo="numero", requerido=True),
+        Campo("PorcentajeDescuento", "% Descuento", tipo="numero", requerido=True),
+        Campo("FechaVigenciaDesde", "Vigencia desde (AAAA-MM-DD)"),
+        Campo("Activo", "Activo", tipo="booleano"),
+    ]
+    return PantallaCRUD(conn, "EsquemaDescuentos", "Esquema de descuentos", campos)

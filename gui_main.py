@@ -40,6 +40,11 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Listas editables", catalogos.pantalla_listas_editables, categoria="Catálogos"),
         Seccion("Condiciones y normas", catalogos.pantalla_condiciones_normas, categoria="Catálogos"),
         Seccion("Mensajes predefinidos", catalogos.pantalla_mensajes_predefinidos, categoria="Catálogos"),
+        Seccion("Profesiones", catalogos.pantalla_profesiones, categoria="Catálogos"),
+        Seccion("Gastos operativos", catalogos.pantalla_gastos_operativos, categoria="Catálogos"),
+        Seccion("Placas", catalogos.pantalla_placas, categoria="Catálogos"),
+        Seccion("Fechas especiales", catalogos.pantalla_fechas_especiales, categoria="Catálogos"),
+        Seccion("Esquema de descuentos", catalogos.pantalla_esquema_descuentos, categoria="Catálogos"),
         Seccion("Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria="Configuración"),
     ]
 
