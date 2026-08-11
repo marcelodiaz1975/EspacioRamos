@@ -7,9 +7,11 @@ from app.negocio.mensajes import (
     _lista_con_y,
     determinar_situacion,
     mensaje_detalle_reserva_aislada,
+    mensaje_disponibilidad_horarios,
     mensaje_grupal,
     mensaje_situacion,
     nombre_para_mensaje,
+    sustituir_variables,
 )
 from app.negocio.pagos import crear_plan_pago, registrar_pago
 from app.repositorio.registro import obtener_repositorio
@@ -209,3 +211,71 @@ def test_detalle_aislada_deposito_de_llave_del_mes(conn, profesional_aislada_con
     )
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
     assert "Depósito de llave: $ 5.000,00" in texto
+
+
+@pytest.fixture
+def edificio_dos_consultorios(conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
+    c1 = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, Ventana=1, ValorHoraRegularActual=1000,
+    )
+    c2 = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=2, Ventana=0, ValorHoraRegularActual=1000,
+    )
+    return c1, c2
+
+
+def test_disponibilidad_horarios_sin_coincidencia(conn, edificio_dos_consultorios):
+    c1, c2 = edificio_dos_consultorios
+    otro = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
+    for c in (c1, c2):
+        obtener_repositorio(conn, "ReservaRegular").crear(
+            IdProfesional=otro, IdConsultorio=c, DiaSemana="Lunes", HoraInicio=10, HoraFin=12,
+            VigenciaInicio="2026-01-01",
+        )
+    texto = mensaje_disponibilidad_horarios(conn, periodo="2026-08", dias=["Lunes"], horario_desde=10, horario_hasta=12)
+    assert "Sin disponibilidad para lo solicitado." in texto
+
+
+def test_disponibilidad_horarios_alternativa_simple(conn, edificio_dos_consultorios):
+    texto = mensaje_disponibilidad_horarios(conn, periodo="2026-08", dias=["Lunes"], horario_desde=10, horario_hasta=12)
+    assert "Alternativas disponibles:" in texto
+    assert "· Lunes de 10 a 12hs" in texto
+
+
+def test_disponibilidad_horarios_combinacion_indentada(conn, edificio_dos_consultorios):
+    c1, c2 = edificio_dos_consultorios
+    otro = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
+    # c1 libre 10-11, c2 libre 11-12: hace falta combinar para cubrir 10-12
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=otro, IdConsultorio=c1, DiaSemana="Lunes", HoraInicio=11, HoraFin=12, VigenciaInicio="2026-01-01",
+    )
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=otro, IdConsultorio=c2, DiaSemana="Lunes", HoraInicio=10, HoraFin=11, VigenciaInicio="2026-01-01",
+    )
+    texto = mensaje_disponibilidad_horarios(conn, periodo="2026-08", dias=["Lunes"], horario_desde=10, horario_hasta=12)
+    assert "· Lunes:" in texto
+    lineas = texto.splitlines()
+    idx = lineas.index("· Lunes:")
+    assert lineas[idx + 1].startswith("  - ")
+    assert lineas[idx + 2].startswith("  - ")
+
+
+def test_disponibilidad_horarios_muestra_caracteristicas_pedidas(conn, edificio_dos_consultorios):
+    texto = mensaje_disponibilidad_horarios(
+        conn, periodo="2026-08", dias=["Lunes"], horario_desde=10, horario_hasta=11,
+        condiciones_consultorio={"ventana": True},
+    )
+    assert "Características: con ventana" in texto
+
+
+def test_sustituir_variables_respeta_saltos_de_linea():
+    texto = "Hola {nombre},\nTu saldo es {saldo}."
+    resultado = sustituir_variables(texto, {"nombre": "Ana", "saldo": "$1000"})
+    assert resultado == "Hola Ana,\nTu saldo es $1000."
+
+
+def test_sustituir_variables_deja_variables_no_provistas_intactas():
+    resultado = sustituir_variables("Hola {nombre}, {otra}", {"nombre": "Ana"})
+    assert resultado == "Hola Ana, {otra}"

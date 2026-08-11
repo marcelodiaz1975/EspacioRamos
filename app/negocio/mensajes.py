@@ -20,14 +20,21 @@ automático de la situación 1 encima.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date
 
 from app.negocio.dias import DIAS_SEMANA, sumar_meses
 from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, hora_fmt, mes_texto, periodo_mm_aaaa
+from app.negocio.lista_espera import calcular_coincidencia
 from app.negocio.liquidaciones import CATEGORIAS_CON_LIQUIDACION_MENSUAL
 from app.repositorio.registro import obtener_repositorio
+
+NOMBRES_CONDICION = {
+    "ventana": "con ventana", "aptoCamilla": "apto camilla",
+    "balcon": "con balcón", "aire": "con aire acondicionado",
+}
 
 
 def _moneda(monto: float) -> str:
@@ -316,3 +323,89 @@ def mensaje_detalle_reserva_aislada(
 
     lineas += ["", "* Los sobres con el pago en efectivo se dejan en la recepción a nombre del espacio."]
     return "\n".join(lineas)
+
+
+# ------------------------------------------------------ disponibilidad horarios (5.2)
+
+def _mapa_consultorios_basico(conn: sqlite3.Connection, ids_consultorio: set[int]) -> dict[int, sqlite3.Row]:
+    if not ids_consultorio:
+        return {}
+    placeholders = ", ".join("?" for _ in ids_consultorio)
+    filas = conn.execute(
+        f"""
+        SELECT c.IdConsultorio, c.NumeroConsultorio, u.Departamento, e.NombreEdificio
+        FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad
+        JOIN (SELECT IdEdificio, Nombre AS NombreEdificio FROM Edificio) e ON e.IdEdificio = u.IdEdificio
+        WHERE c.IdConsultorio IN ({placeholders})
+        """,
+        list(ids_consultorio),
+    ).fetchall()
+    return {f["IdConsultorio"]: f for f in filas}
+
+
+def mensaje_disponibilidad_horarios(
+    conn: sqlite3.Connection, *, periodo: str, dias: list[str], horario_desde: float, horario_hasta: float,
+    tipo_combinacion: str = "O", condiciones_consultorio: dict | None = None,
+    incluir_consultorio: bool = True, incluir_unidad: bool = True, incluir_edificio: bool = True,
+) -> str:
+    """"Disponibilidad período {MM/AAAA}" (sección 5.2): reusa el mismo
+    motor de cruce que la lista de espera (`lista_espera.calcular_coincidencia`)
+    contra un pedido armado al vuelo, sin necesidad de persistirlo en
+    ListaEspera. Cuando un día necesita combinar más de un consultorio
+    para cubrir todo el horario pedido, cada tramo se lista aparte con
+    guión indentado debajo del día (sección 5.2: "combinación con punto y
+    guión indentado")."""
+    anio, mes = (int(p) for p in periodo.split("-"))
+    pedido = {
+        "Dias": json.dumps(dias), "HorarioDesde": horario_desde, "HorarioHasta": horario_hasta,
+        "TipoCombinacion": tipo_combinacion, "CondicionesConsultorio": json.dumps(condiciones_consultorio or {}),
+    }
+    coincidencia = calcular_coincidencia(conn, pedido, anio, mes)
+
+    lineas = [
+        f"Disponibilidad período {periodo_mm_aaaa(periodo)}",
+        "",
+        f"Días y horarios de interés: {', '.join(dias)}, de {hora_fmt(horario_desde)[:-2]} a "
+        f"{hora_fmt(horario_hasta)}",
+    ]
+    if condiciones_consultorio:
+        partes = [NOMBRES_CONDICION[k] for k, v in condiciones_consultorio.items() if v and k in NOMBRES_CONDICION]
+        if condiciones_consultorio.get("tamano"):
+            partes.append(f"tamaño {condiciones_consultorio['tamano']}")
+        if partes:
+            lineas.append(f"Características: {', '.join(partes)}")
+    lineas.append("")
+
+    if coincidencia is None:
+        lineas.append("Sin disponibilidad para lo solicitado.")
+        return "\n".join(lineas)
+
+    ids_consultorio = {t.id_consultorio for tramos in coincidencia.tramos_por_dia.values() for t in tramos}
+    consultorios = _mapa_consultorios_basico(conn, ids_consultorio)
+
+    lineas.append("Alternativas disponibles:")
+    for dia, tramos in coincidencia.tramos_por_dia.items():
+        if len(tramos) == 1:
+            t = tramos[0]
+            lugar = _lugar_reserva(consultorios[t.id_consultorio], incluir_consultorio, incluir_unidad, incluir_edificio)
+            sufijo = f" - {lugar}" if lugar else ""
+            lineas.append(f"· {dia} de {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)}{sufijo}")
+        else:
+            lineas.append(f"· {dia}:")
+            for t in tramos:
+                lugar = _lugar_reserva(consultorios[t.id_consultorio], incluir_consultorio, incluir_unidad, incluir_edificio)
+                sufijo = f" - {lugar}" if lugar else ""
+                lineas.append(f"  - {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)}{sufijo}")
+    return "\n".join(lineas)
+
+
+# -------------------------------------------------------- mensajes predefinidos (5.5)
+
+def sustituir_variables(texto: str, variables: dict[str, str]) -> str:
+    """Reemplaza "{variable}" en el texto de un MensajePredefinido por su
+    valor. Los saltos de línea del texto guardado se respetan tal cual
+    (no hace falta hacer nada especial: son parte del `texto`)."""
+    resultado = texto
+    for clave, valor in variables.items():
+        resultado = resultado.replace(f"{{{clave}}}", str(valor))
+    return resultado
