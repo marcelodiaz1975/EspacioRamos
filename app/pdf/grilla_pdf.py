@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import DIAS_SEMANA
@@ -72,9 +73,26 @@ def _tabla_grilla_edificio(
     dias = DIAS_GRILLA_DEFAULT
     tipo_por_hora = _tipo_bloque_por_hora(conn, horas)
 
+    n_unidades = len(unidades)
+    ancho_tipo, ancho_horario = ancho * 0.08, ancho * 0.06
+    ancho_restante = ancho - ancho_tipo - ancho_horario
+    n_cols_datos = max(len(dias) * n_unidades, 1)
+    ancho_col = ancho_restante / n_cols_datos
+
+    # Con muchas unidades por edificio la columna por consultorio se vuelve
+    # angosta (varios edificios reales tienen 4+ unidades) — una celda de
+    # texto plano no ajusta el contenido y termina desbordando sobre la
+    # celda vecina, así que la etiqueta de unidad va en un Paragraph que
+    # puede partirse en dos líneas, con una fuente que se achica si la
+    # columna es angosta en vez de desbordar.
+    tamano_etiqueta = 6 if ancho_col >= 40 else 5 if ancho_col >= 28 else 4
+    style_etiqueta = estilo_texto(tamano_etiqueta, negrita=True, alignment=TA_CENTER)
+
     fila_dias = ["Tipo\nBloque", "Horario"] + [d.upper() for d in dias for _ in unidades]
     fila_unidad_label = ["", ""] + ["Unidad" for _ in dias for _ in unidades]
-    fila_unidades = ["", ""] + [_etiqueta_unidad(u, anonimizar_unidad) for _ in dias for u in unidades]
+    fila_unidades = ["", ""] + [
+        Paragraph(_etiqueta_unidad(u, anonimizar_unidad), style_etiqueta) for _ in dias for u in unidades
+    ]
     filas = [fila_dias, fila_unidad_label, fila_unidades]
 
     fondos = []
@@ -97,12 +115,6 @@ def _tabla_grilla_edificio(
 
     for fila_idx, h in enumerate(horas, start=3):
         filas[fila_idx][0] = tipo_por_hora[h]
-
-    n_unidades = len(unidades)
-    ancho_tipo, ancho_horario = ancho * 0.08, ancho * 0.06
-    ancho_restante = ancho - ancho_tipo - ancho_horario
-    n_cols_datos = max(len(dias) * n_unidades, 1)
-    ancho_col = ancho_restante / n_cols_datos
 
     col_widths = [ancho_tipo, ancho_horario] + [ancho_col] * n_cols_datos
     tabla = Table(filas, colWidths=col_widths, repeatRows=3)
