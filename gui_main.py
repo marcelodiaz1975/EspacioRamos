@@ -17,12 +17,14 @@ from app.gui.pantallas.llaves import PantallaLlaves
 from app.gui.pantallas.mensajeria import CentroMensajeria
 from app.gui.pantallas.panel_control import PanelControl
 from app.gui.pantallas.profesionales import pantalla_profesionales
+from app.gui.pantallas.reservas import PantallaReservas
 
 
 def construir_secciones() -> list[Seccion]:
     return [
         Seccion("Panel de control", lambda conn: PanelControl(conn), categoria="Principal"),
         Seccion("Disponibilidad operativa", lambda conn: GrillaDisponibilidad(conn), categoria="Principal"),
+        Seccion("Reservas", lambda conn: PantallaReservas(conn), categoria="Principal"),
         Seccion("Liquidación mensual", lambda conn: ProcesoLiquidacion(conn), categoria="Principal"),
         Seccion("Centro de mensajería", lambda conn: CentroMensajeria(conn), categoria="Principal"),
         Seccion("Llaves", lambda conn: PantallaLlaves(conn), categoria="Principal"),
