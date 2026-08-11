@@ -13,6 +13,7 @@ from app.gui.pantallas.aumentos import PantallaAumentos
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla import GrillaDisponibilidad
+from app.gui.pantallas.importacion import PantallaImportacion
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
 from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.pantallas.llaves import PantallaLlaves
@@ -52,6 +53,7 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Fechas especiales", catalogos.pantalla_fechas_especiales, categoria="Catálogos"),
         Seccion("Esquema de descuentos", catalogos.pantalla_esquema_descuentos, categoria="Catálogos"),
         Seccion("Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria="Configuración"),
+        Seccion("Importar planilla", lambda conn: PantallaImportacion(conn), categoria="Configuración"),
     ]
 
 
