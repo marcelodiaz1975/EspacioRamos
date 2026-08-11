@@ -103,7 +103,9 @@ class PantallaCRUD(QWidget):
             return opciones.get(valor, "" if valor is None else str(valor))
         return "" if valor is None else str(valor)
 
-    def _fila_seleccionada_id(self):
+    def fila_seleccionada_id(self):
+        """ID de la fila seleccionada, o None — pantallas compuestas (p. ej.
+        Llaves) lo usan para saber sobre qué registro maestro operar."""
         filas = self.tabla_widget.selectionModel().selectedRows()
         if not filas:
             return None
@@ -116,7 +118,7 @@ class PantallaCRUD(QWidget):
             self.actualizar()
 
     def _editar(self) -> None:
-        id_valor = self._fila_seleccionada_id()
+        id_valor = self.fila_seleccionada_id()
         if id_valor is None:
             QMessageBox.information(self, "Editar", "Seleccioná un registro para editar.")
             return
@@ -127,7 +129,7 @@ class PantallaCRUD(QWidget):
             self.actualizar()
 
     def _eliminar(self) -> None:
-        id_valor = self._fila_seleccionada_id()
+        id_valor = self.fila_seleccionada_id()
         if id_valor is None:
             QMessageBox.information(self, "Eliminar", "Seleccioná un registro para eliminar.")
             return
