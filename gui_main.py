@@ -11,6 +11,7 @@ from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.grilla import GrillaDisponibilidad
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
+from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.pantallas.llaves import PantallaLlaves
 from app.gui.pantallas.mensajeria import CentroMensajeria
 from app.gui.pantallas.panel_control import PanelControl
@@ -24,6 +25,7 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Liquidación mensual", lambda conn: ProcesoLiquidacion(conn), categoria="Principal"),
         Seccion("Centro de mensajería", lambda conn: CentroMensajeria(conn), categoria="Principal"),
         Seccion("Llaves", lambda conn: PantallaLlaves(conn), categoria="Principal"),
+        Seccion("Lista de espera", lambda conn: PantallaListaEspera(conn), categoria="Principal"),
         Seccion("Profesionales", pantalla_profesionales, categoria="Catálogos"),
         Seccion("Edificios", catalogos.pantalla_edificios, categoria="Catálogos"),
         Seccion("Unidades", catalogos.pantalla_unidades, categoria="Catálogos"),
