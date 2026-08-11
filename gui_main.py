@@ -10,6 +10,7 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.grilla import GrillaDisponibilidad
+from app.gui.pantallas.liquidacion import ProcesoLiquidacion
 from app.gui.pantallas.mensajeria import CentroMensajeria
 from app.gui.pantallas.panel_control import PanelControl
 
@@ -18,6 +19,7 @@ def construir_secciones() -> list[Seccion]:
     return [
         Seccion("Panel de control", lambda conn: PanelControl(conn), categoria="Principal"),
         Seccion("Disponibilidad operativa", lambda conn: GrillaDisponibilidad(conn), categoria="Principal"),
+        Seccion("Liquidación mensual", lambda conn: ProcesoLiquidacion(conn), categoria="Principal"),
         Seccion("Centro de mensajería", lambda conn: CentroMensajeria(conn), categoria="Principal"),
         Seccion("Edificios", catalogos.pantalla_edificios, categoria="Catálogos"),
         Seccion("Unidades", catalogos.pantalla_unidades, categoria="Catálogos"),
