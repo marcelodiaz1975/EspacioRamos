@@ -6,11 +6,12 @@ from app.negocio.liquidaciones import emitir_liquidacion
 from app.negocio.mensajes import (
     _lista_con_y,
     determinar_situacion,
+    mensaje_detalle_reserva_aislada,
     mensaje_grupal,
     mensaje_situacion,
     nombre_para_mensaje,
 )
-from app.negocio.pagos import crear_plan_pago
+from app.negocio.pagos import crear_plan_pago, registrar_pago
 from app.repositorio.registro import obtener_repositorio
 
 PERIODO = "2026-08"
@@ -137,3 +138,74 @@ def test_mensaje_grupal_con_varios_feriados_concuerda_en_plural(conn):
     assert "hay feriados" in texto
     assert "se descuentan al 100%" in texto
     assert " y " in texto
+
+
+@pytest.fixture
+def profesional_aislada_con_edificios(conn):
+    id_ed1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", DomicilioLocalidad="CABA")
+    id_ed2 = obtener_repositorio(conn, "Edificio").crear(Nombre="San Justo 1", Domicilio="Belgrano 500", DomicilioLocalidad="San Justo")
+    id_un1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_ed1, Departamento="7mo L")
+    id_un2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_ed2, Departamento="3ro B")
+    c1 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_un1, NumeroConsultorio=1, ValorHoraAisladaActual=500)
+    c2 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_un2, NumeroConsultorio=2, ValorHoraAisladaActual=600)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="A", Apellido="Aislada", Apodo="Lu", SaldoCuentaAnterior=1000,
+    )
+    return id_prof, c1, c2, id_ed1, id_ed2
+
+
+def test_detalle_aislada_calcula_saldo_a_abonar(conn, profesional_aislada_con_edificios):
+    id_prof, c1, c2, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    registrar_pago(conn, id_profesional=id_prof, monto=500, fecha="2026-08-15", periodo_imputado="2026-08")
+
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    # saldo_anterior 1000 + reserva (2hs x 500) 1000 - pago 500 = 1500
+    assert "SALDO A ABONAR: $ 1.500,00" in texto
+    assert "Lu" in texto
+
+
+def test_detalle_aislada_separa_reservas_posteriores(conn, profesional_aislada_con_edificios):
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-09-03", HoraInicio=9, HoraFin=10,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "RESERVAS POSTERIORES:" in texto
+    assert texto.index("RESERVAS POSTERIORES") > texto.index("SALDO A ABONAR")
+
+
+def test_detalle_aislada_agrega_edificio_si_tiene_llaves_de_mas_de_uno(conn, profesional_aislada_con_edificios):
+    id_prof, c1, c2, id_ed1, id_ed2 = profesional_aislada_con_edificios
+    id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave", ValorDepositoActual=5000)
+    obtener_repositorio(conn, "LlaveAcceso").crear(IdLlave=id_llave, IdEdificio=id_ed1)
+    obtener_repositorio(conn, "LlaveAcceso").crear(IdLlave=id_llave, IdEdificio=id_ed2)
+    obtener_repositorio(conn, "LlaveProfesional").crear(IdLlave=id_llave, IdProfesional=id_prof, FechaEntrega="2026-08-02")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c2, Fecha="2026-08-06", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(
+        conn, id_profesional=id_prof, periodo="2026-08", incluir_edificio=False,
+    )
+    assert "Ramos 1" in texto and "San Justo 1" in texto
+
+
+def test_detalle_aislada_deposito_de_llave_del_mes(conn, profesional_aislada_con_edificios):
+    id_prof, c1, _, id_ed1, _ = profesional_aislada_con_edificios
+    id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave", ValorDepositoActual=5000)
+    obtener_repositorio(conn, "LlaveAcceso").crear(IdLlave=id_llave, IdEdificio=id_ed1)
+    obtener_repositorio(conn, "LlaveProfesional").crear(
+        IdLlave=id_llave, IdProfesional=id_prof, FechaEntrega="2026-08-02",
+        DepositoCobrado=1, MontoCobrado=5000,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "Depósito de llave: $ 5.000,00" in texto

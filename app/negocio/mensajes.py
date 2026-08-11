@@ -21,14 +21,13 @@ automático de la situación 1 encima.
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 
-from app.negocio.dias import sumar_meses
+from app.negocio.dias import DIAS_SEMANA, sumar_meses
 from app.negocio.feriados import feriados_relevantes_periodo
-from app.negocio.formato import mes_texto, periodo_mm_aaaa
+from app.negocio.formato import fecha_corta, hora_fmt, mes_texto, periodo_mm_aaaa
 from app.negocio.liquidaciones import CATEGORIAS_CON_LIQUIDACION_MENSUAL
 from app.repositorio.registro import obtener_repositorio
-
-DIAS_SEMANA_TEXTO = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado")
 
 
 def _moneda(monto: float) -> str:
@@ -172,4 +171,148 @@ def mensaje_grupal(conn: sqlite3.Connection, periodo_liquidacion: str) -> str:
             f"liquidación, en este caso la de {mes_texto(int(mes_siguiente_2.split('-')[1]))}, {pronombre_verbo} "
             f"si hay novedades.",
         ]
+    return "\n".join(lineas)
+
+
+# --------------------------------------------------------- detalle aisladas (5.1)
+
+def _edificios_de_llaves_activas(conn: sqlite3.Connection, id_profesional: int) -> set[int]:
+    filas = conn.execute(
+        """
+        SELECT DISTINCT la.IdEdificio
+        FROM LlaveProfesional lp
+        JOIN LlaveAcceso la ON la.IdLlave = lp.IdLlave
+        WHERE lp.IdProfesional = ? AND lp.FechaDevolucion IS NULL
+        """,
+        (id_profesional,),
+    ).fetchall()
+    return {f["IdEdificio"] for f in filas}
+
+
+def _lugar_reserva(fila: sqlite3.Row, incluir_consultorio: bool, incluir_unidad: bool, incluir_edificio: bool) -> str:
+    """Sección 5.1: los controles están "encadenados" — si no se incluye
+    el consultorio tampoco tiene sentido mostrar unidad/edificio solos
+    (sin consultorio no queda claro a qué corresponde el importe)."""
+    partes = []
+    if incluir_consultorio:
+        partes.append(f"consul {fila['NumeroConsultorio']}")
+        if incluir_unidad:
+            partes.append(fila["Departamento"])
+        if incluir_edificio:
+            partes.append(fila["NombreEdificio"])
+    return " - ".join(partes)
+
+
+def mensaje_detalle_reserva_aislada(
+    conn: sqlite3.Connection, *, id_profesional: int, periodo: str,
+    incluir_consultorio: bool = True, incluir_unidad: bool = True, incluir_edificio: bool = True,
+) -> str:
+    """"DETALLE RESERVA {MES}" (sección 5.1, categoría A). No implementa
+    todavía "Combinar misma unidad"/"Combinar distintas unidades" (fusionar
+    en una sola línea reservas del mismo día que terminan cayendo en el
+    mismo consultorio/unidad) — cada reserva aislada aparece en su propia
+    línea; a revisar en la beta si hace falta la fusión.
+
+    "Regla edificio" (si tiene llaves de más de un edificio, se agrega el
+    edificio a cada línea aunque `incluir_edificio` esté en False) se
+    resuelve mirando las llaves ACTIVAS (sin devolver) del profesional."""
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    if profesional is None:
+        raise ValueError(f"No existe el profesional #{id_profesional}")
+    nombre = nombre_para_mensaje(profesional)
+    anio, mes = (int(p) for p in periodo.split("-"))
+
+    if len(_edificios_de_llaves_activas(conn, id_profesional)) > 1:
+        incluir_edificio = True
+
+    filas = conn.execute(
+        """
+        SELECT ra.IdReservaAislada, ra.Fecha, ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo,
+               c.NumeroConsultorio, c.ValorHoraAisladaActual, u.Departamento,
+               e.IdEdificio, e.Nombre AS NombreEdificio, e.Domicilio, e.DomicilioLocalidad
+        FROM ReservaAislada ra
+        JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
+        JOIN Unidad u ON u.IdUnidad = c.IdUnidad
+        JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        WHERE ra.IdProfesional = ? AND ra.Estado = 'Confirmada'
+        ORDER BY ra.Fecha, ra.HoraInicio
+        """,
+        (id_profesional,),
+    ).fetchall()
+
+    cfg = conn.execute("SELECT RecargoPorcentajeAisladas FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    recargo_pct = cfg["RecargoPorcentajeAisladas"] if cfg else 0.0
+
+    prefijo_mes = f"{anio:04d}-{mes:02d}-"
+    del_mes = [f for f in filas if f["Fecha"].startswith(prefijo_mes)]
+    posteriores = [f for f in filas if f["Fecha"] > f"{anio:04d}-{mes:02d}-31"]
+
+    def _monto(f: sqlite3.Row) -> float:
+        monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
+        return monto * (1 + recargo_pct / 100) if f["AplicaRecargo"] else monto
+
+    lineas = [f"Hola {nombre}!", "", f"DETALLE RESERVA {mes_texto(mes).upper()}:", ""]
+
+    llaves = conn.execute(
+        """
+        SELECT lp.*, l.ValorDepositoActual FROM LlaveProfesional lp JOIN Llave l ON l.IdLlave = lp.IdLlave
+        WHERE lp.IdProfesional = ? AND (lp.FechaEntrega LIKE ? OR lp.FechaDevolucion LIKE ?)
+        """,
+        (id_profesional, prefijo_mes + "%", prefijo_mes + "%"),
+    ).fetchall()
+    for ll in llaves:
+        if ll["FechaEntrega"] and ll["FechaEntrega"].startswith(prefijo_mes) and ll["DepositoCobrado"]:
+            lineas.append(f"Depósito de llave: {_moneda(ll['MontoCobrado'] or ll['ValorDepositoActual'])}")
+        if ll["FechaDevolucion"] and ll["FechaDevolucion"].startswith(prefijo_mes) and ll["DepositoReintegrado"]:
+            lineas.append(f"Reintegro de llave: -{_moneda(ll['MontoReintegrado'] or ll['ValorDepositoActual'])}")
+    if llaves:
+        lineas.append("")
+
+    total_reservas = 0.0
+    for f in del_mes:
+        dia_semana = DIAS_SEMANA[date.fromisoformat(f["Fecha"]).weekday()]
+        monto = _monto(f)
+        total_reservas += monto
+        lugar = _lugar_reserva(f, incluir_consultorio, incluir_unidad, incluir_edificio)
+        sufijo_lugar = f" - {lugar}" if lugar else ""
+        lineas.append(
+            f"{dia_semana} {fecha_corta(f['Fecha'])} de {hora_fmt(f['HoraInicio'])[:-2]} a "
+            f"{hora_fmt(f['HoraFin'])}{sufijo_lugar}: {_moneda(monto)}"
+        )
+    lineas.append("")
+
+    saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
+    lineas.append(f"Saldo anterior: {_moneda(saldo_anterior)}")
+
+    pagos = conn.execute(
+        "SELECT * FROM HistorialPagos WHERE IdProfesional = ? AND Fecha LIKE ? ORDER BY Fecha",
+        (id_profesional, prefijo_mes + "%"),
+    ).fetchall()
+    total_pagos = sum(p["Monto"] for p in pagos if not p["EsAjuste"])
+    total_ajustes = sum(p["Monto"] for p in pagos if p["EsAjuste"])
+    for p in pagos:
+        etiqueta = "Ajuste" if p["EsAjuste"] else "Pago"
+        lineas.append(f"{etiqueta} {fecha_corta(p['Fecha'])}: -{_moneda(p['Monto'])}")
+
+    saldo_a_abonar = saldo_anterior + total_reservas - total_pagos - total_ajustes
+    lineas += ["", f"SALDO A ABONAR: {_moneda(saldo_a_abonar)}"]
+
+    if posteriores:
+        lineas += ["", "RESERVAS POSTERIORES:"]
+        for f in posteriores:
+            dia_semana = DIAS_SEMANA[date.fromisoformat(f["Fecha"]).weekday()]
+            lugar = _lugar_reserva(f, incluir_consultorio, incluir_unidad, incluir_edificio)
+            sufijo_lugar = f" - {lugar}" if lugar else ""
+            lineas.append(
+                f"{dia_semana} {fecha_corta(f['Fecha'])} de {hora_fmt(f['HoraInicio'])[:-2]} a "
+                f"{hora_fmt(f['HoraFin'])}{sufijo_lugar}"
+            )
+
+    edificios_mencionados: dict[int, sqlite3.Row] = {f["IdEdificio"]: f for f in del_mes + posteriores}
+    if incluir_edificio and edificios_mencionados:
+        lineas.append("")
+        for e in edificios_mencionados.values():
+            lineas.append(f"* Edificio {e['NombreEdificio']}: Corresponde a {e['Domicilio']}, {e['DomicilioLocalidad']}")
+
+    lineas += ["", "* Los sobres con el pago en efectivo se dejan en la recepción a nombre del espacio."]
     return "\n".join(lineas)
