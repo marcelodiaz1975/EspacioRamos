@@ -1,7 +1,7 @@
-"""Formateo de fechas/horas/períodos compartido por los PDFs del sistema,
-siguiendo las convenciones del modelo real (Etapa 7): fechas cortas "D/M"
-sin ceros a la izquierda dentro del texto de los ítems, fechas largas
-"DD/MM/AAAA" en tablas, y "Xhs"/"X:MMhs" para horarios."""
+"""Formateo de fechas/horas/períodos compartido por los PDFs y los
+mensajes del sistema: fechas cortas "D/M" sin ceros a la izquierda dentro
+de texto corrido, fechas largas "DD/MM/AAAA" en tablas, y "Xhs"/"X:MMhs"
+para horarios."""
 from __future__ import annotations
 
 from datetime import date

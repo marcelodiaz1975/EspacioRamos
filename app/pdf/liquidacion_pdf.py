@@ -36,6 +36,7 @@ from reportlab.platypus import Flowable, Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, parsear_periodo, primer_dia_mes, ultimo_dia_mes
 from app.negocio.feriados import feriados_relevantes_periodo
+from app.negocio.formato import fecha_corta, fecha_larga, hora_fmt, mes_texto, periodo_mm_aaaa
 from app.negocio.liquidaciones import Liquidacion, ids_consolidados
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
@@ -48,7 +49,6 @@ from app.pdf.estilos import (
     estilo_texto,
     formatear_moneda,
 )
-from app.pdf.formato import fecha_corta, fecha_larga, hora_fmt, mes_texto, periodo_mm_aaaa
 from app.pdf.grilla_pdf import secciones_disponibilidad
 from app.pdf.numeros_en_letras import en_letras_pesos
 from app.pdf.valores_pdf import (

@@ -22,10 +22,10 @@ from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, Spacer
 
 from app.negocio.dias import parsear_periodo, periodo_actual
+from app.negocio.formato import hora_fmt
 from app.negocio.lista_espera import AMARILLO, NARANJA, ROJO, VERDE, Coincidencia, calcular_coincidencia
 from app.pdf.estilos import crear_documento, encabezado, estilo_texto, formatear_moneda
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
-from app.pdf.formato import hora_fmt
 from app.repositorio.registro import obtener_repositorio
 
 _ES_ACTIVO = ("R", "A", "B", "E")

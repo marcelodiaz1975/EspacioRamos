@@ -21,10 +21,10 @@ from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, Spacer
 
 from app.negocio.dias import fecha_actual, parsear_periodo, periodo_actual
+from app.negocio.formato import fecha_larga
 from app.pdf.edificios_pdf import edificios_incluidos, ids_consultorio_de_edificios, sufijo_localidad
 from app.pdf.estilos import crear_documento, encabezado, estilo_texto
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
-from app.pdf.formato import fecha_larga
 from app.pdf.grilla_pdf import secciones_disponibilidad
 from app.pdf.valores_pdf import bloques_esquema_descuentos, condiciones_normas, matriz_valores_edificio
 from app.repositorio.registro import obtener_repositorio

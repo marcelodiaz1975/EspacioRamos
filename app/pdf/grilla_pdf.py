@@ -13,6 +13,7 @@ import sqlite3
 from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import DIAS_SEMANA
+from app.negocio.formato import hora_fmt
 from app.negocio.grilla import calcular_grilla
 from app.pdf.estilos import (
     COLOR_AMARILLO,
@@ -23,7 +24,6 @@ from app.pdf.estilos import (
     encabezado,
     estilo_texto,
 )
-from app.pdf.formato import hora_fmt
 
 DIAS_GRILLA_DEFAULT = DIAS_SEMANA[:6]  # Lunes a Sábado
 _COLOR_CELDA = {"verde": COLOR_VERDE, "amarillo": COLOR_AMARILLO, "naranja": COLOR_AMARILLO, "rojo": COLOR_ROJO}
