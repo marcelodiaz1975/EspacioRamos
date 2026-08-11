@@ -16,6 +16,7 @@ from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.pantallas.llaves import PantallaLlaves
 from app.gui.pantallas.mensajeria import CentroMensajeria
 from app.gui.pantallas.novedades import PantallaNovedades
+from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.pantallas.panel_control import PanelControl
 from app.gui.pantallas.profesionales import pantalla_profesionales
 from app.gui.pantallas.reservas import PantallaReservas
@@ -31,6 +32,7 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Llaves", lambda conn: PantallaLlaves(conn), categoria="Principal"),
         Seccion("Lista de espera", lambda conn: PantallaListaEspera(conn), categoria="Principal"),
         Seccion("Novedades", lambda conn: PantallaNovedades(conn), categoria="Principal"),
+        Seccion("Pagos", lambda conn: PantallaPagos(conn), categoria="Principal"),
         Seccion("Profesionales", pantalla_profesionales, categoria="Catálogos"),
         Seccion("Edificios", catalogos.pantalla_edificios, categoria="Catálogos"),
         Seccion("Unidades", catalogos.pantalla_unidades, categoria="Catálogos"),
