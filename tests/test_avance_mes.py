@@ -111,3 +111,16 @@ def test_lista_espera_elimina_activos_vencidos_si_se_confirma(conn):
     assert resumen.pedidos_activos_vencidos_eliminados == 1
     assert obtener_repositorio(conn, "ListaEspera").obtener(id_viejo) is None
     assert obtener_repositorio(conn, "ListaEspera").obtener(id_reciente) is not None
+
+
+def test_avanzar_mes_genera_snapshot(conn):
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+    snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(resumen.id_snapshot)
+    assert snapshot is not None
+    assert snapshot["Periodo"] == "2026-08"
+
+
+def test_avanzar_mes_pasa_porcentaje_aumento_al_snapshot(conn):
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08", porcentaje_aumento_aplicado=12.5)
+    snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(resumen.id_snapshot)
+    assert snapshot["PorcentajeAumentoAplicado"] == pytest.approx(12.5)

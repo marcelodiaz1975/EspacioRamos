@@ -1,15 +1,16 @@
-"""Avance de mes (DC-06), subconjunto de las Etapas 4 y 6.
+"""Avance de mes (DC-06), subconjunto de las Etapas 4, 6 y 9.
 
-Cubre lo que le compete a liquidaciones, pagos y lista de espera: traspaso
-de saldo, cierre de cuotas del mes cerrado y limpieza de la lista de
-espera. El resto del proceso de 9 pasos del documento (backup previo,
-oferta de análisis de valores, archivo de aisladas, reset del centro de
-mensajería, snapshot definitivo) pertenece a otras etapas (snapshots:
-Etapa 9; centro de mensajería: Etapa 8; análisis de valores: Etapa 5) y se
-integra acá cuando corresponda. El archivo de aisladas del mes cerrado
-tampoco necesita código: "desaparecer de la vista operativa" es un filtro
-de pantalla (Etapa 8), no una migración de datos — los registros siguen
-enteros, solo se dejan de mostrar como "del mes en curso".
+Cubre lo que le compete a liquidaciones, pagos, lista de espera y
+estadísticas: snapshot del mes que se cierra, traspaso de saldo, cierre
+de cuotas del mes cerrado y limpieza de la lista de espera. El resto del
+proceso de 9 pasos del documento (backup previo, oferta de análisis de
+valores, archivo de aisladas, reset del centro de mensajería) pertenece a
+otras etapas (centro de mensajería: Etapa 8; análisis de valores: Etapa
+5) y se integra acá cuando corresponda. El archivo de aisladas del mes
+cerrado tampoco necesita código: "desaparecer de la vista operativa" es
+un filtro de pantalla (Etapa 8), no una migración de datos — los
+registros siguen enteros, solo se dejan de mostrar como "del mes en
+curso".
 
 El reset de cupo de vacaciones en enero (DC-06 Paso 7) no necesita código:
 el cupo se calcula siempre en vivo filtrando por año calendario (ver
@@ -31,12 +32,14 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from app.negocio.dias import fecha_actual
+from app.negocio.estadisticas import generar_snapshot
 from app.repositorio.registro import obtener_repositorio
 
 
 @dataclass
 class ResumenAvanceMes:
     periodo_cerrado: str
+    id_snapshot: int = 0
     profesionales_con_traspaso: int = 0
     cuotas_cerradas: int = 0
     planes_finalizados: list[int] = field(default_factory=list)
@@ -114,10 +117,17 @@ def _limpiar_lista_espera(conn: sqlite3.Connection, *, eliminar_activos_vencidos
 
 def avanzar_mes(
     conn: sqlite3.Connection, *, periodo_cerrado: str, eliminar_activos_vencidos_lista_espera: bool = False,
+    porcentaje_aumento_aplicado: float | None = None,
 ) -> ResumenAvanceMes:
-    """Ejecuta el subconjunto de Etapas 4 y 6 del avance de mes para el
-    período que se está cerrando (formato 'AAAA-MM')."""
+    """Ejecuta el subconjunto de Etapas 4, 6 y 9 del avance de mes para el
+    período que se está cerrando (formato 'AAAA-MM'). `porcentaje_aumento_aplicado`
+    queda en el snapshot si ese mes se confirmó un aumento (sección 6.1:
+    "ofrece evaluar aumentos o saltear" — `aumentos.confirmar_aumento` no
+    llama a esta función, así que el llamador es quien conecta ambos)."""
     resumen = ResumenAvanceMes(periodo_cerrado=periodo_cerrado)
+    resumen.id_snapshot = generar_snapshot(
+        conn, periodo_cerrado, porcentaje_aumento_aplicado=porcentaje_aumento_aplicado,
+    )
     resumen.profesionales_con_traspaso = _traspasar_saldos(conn)
     resumen.cuotas_cerradas, resumen.planes_finalizados = _cerrar_cuotas(conn, periodo_cerrado)
     resumen.pedidos_lista_espera_eliminados, resumen.pedidos_activos_vencidos_eliminados = _limpiar_lista_espera(
