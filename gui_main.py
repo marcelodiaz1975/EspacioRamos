@@ -9,6 +9,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
+from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.grilla import GrillaDisponibilidad
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
 from app.gui.pantallas.lista_espera import PantallaListaEspera
@@ -35,6 +36,7 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Listas editables", catalogos.pantalla_listas_editables, categoria="Catálogos"),
         Seccion("Condiciones y normas", catalogos.pantalla_condiciones_normas, categoria="Catálogos"),
         Seccion("Mensajes predefinidos", catalogos.pantalla_mensajes_predefinidos, categoria="Catálogos"),
+        Seccion("Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria="Configuración"),
     ]
 
 
