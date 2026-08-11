@@ -20,12 +20,17 @@ def rango_actualizacion(conn: sqlite3.Connection, periodo: str) -> tuple[str, st
     return desde, periodo
 
 
-def matriz_valores_edificio(conn: sqlite3.Connection, id_edificio: int, ancho: float) -> list:
+def matriz_valores_edificio(
+    conn: sqlite3.Connection, id_edificio: int, ancho: float, anonimizar_unidad: bool = False,
+) -> list:
     """Tabla Unidad (filas) x Consultorio N (columnas) -> ValorHoraRegularActual,
-    con "—" para los números de consultorio que no existen en esa unidad."""
+    con "—" para los números de consultorio que no existen en esa unidad.
+    `anonimizar_unidad` muestra "Unidad {IdUnidad}" en vez del Departamento
+    real (sección 4.3, PDF de Propuesta, que va a profesionales NO
+    activos)."""
     filas_bd = conn.execute(
         """
-        SELECT u.Departamento, c.NumeroConsultorio, c.ValorHoraRegularActual
+        SELECT u.IdUnidad, u.Departamento, c.NumeroConsultorio, c.ValorHoraRegularActual
         FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad
         WHERE u.IdEdificio = ? ORDER BY u.Departamento, c.NumeroConsultorio
         """,
@@ -33,7 +38,8 @@ def matriz_valores_edificio(conn: sqlite3.Connection, id_edificio: int, ancho: f
     ).fetchall()
     por_unidad: dict[str, dict[int, float]] = {}
     for f in filas_bd:
-        por_unidad.setdefault(f["Departamento"], {})[f["NumeroConsultorio"]] = f["ValorHoraRegularActual"]
+        etiqueta = f"Unidad {f['IdUnidad']}" if anonimizar_unidad else f["Departamento"]
+        por_unidad.setdefault(etiqueta, {})[f["NumeroConsultorio"]] = f["ValorHoraRegularActual"]
     max_consultorios = max((max(v.keys()) for v in por_unidad.values()), default=0)
     if max_consultorios == 0:
         return [Paragraph("Sin consultorios cargados.", estilo_texto(9))]

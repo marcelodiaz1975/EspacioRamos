@@ -57,15 +57,24 @@ def _unidades_por_edificio(conn: sqlite3.Connection, ids_edificio: list[int] | N
     ).fetchall()
 
 
+def _etiqueta_unidad(u: sqlite3.Row, anonimizar: bool) -> str:
+    """Sección 4.3: el PDF de Propuesta va a profesionales NO activos y
+    "muestra IdUnidad en lugar de departamento" — no debe revelar el
+    nombre/número real de la unidad a un contacto que todavía no forma
+    parte del espacio."""
+    return f"Unidad {u['IdUnidad']}" if anonimizar else u["Departamento"]
+
+
 def _tabla_grilla_edificio(
     conn: sqlite3.Connection, unidades: list[sqlite3.Row], grilla: dict, horas: list[int], ancho: float,
+    anonimizar_unidad: bool = False,
 ) -> Table:
     dias = DIAS_GRILLA_DEFAULT
     tipo_por_hora = _tipo_bloque_por_hora(conn, horas)
 
     fila_dias = ["Tipo\nBloque", "Horario"] + [d.upper() for d in dias for _ in unidades]
     fila_unidad_label = ["", ""] + ["Unidad" for _ in dias for _ in unidades]
-    fila_unidades = ["", ""] + [u["Departamento"] for _ in dias for u in unidades]
+    fila_unidades = ["", ""] + [_etiqueta_unidad(u, anonimizar_unidad) for _ in dias for u in unidades]
     filas = [fila_dias, fila_unidad_label, fila_unidades]
 
     fondos = []
@@ -125,7 +134,7 @@ def _tabla_grilla_edificio(
 
 def secciones_disponibilidad(
     conn: sqlite3.Connection, anio: int, mes: int, ancho: float, fecha_titulo: str,
-    ids_edificio: list[int] | None = None,
+    ids_edificio: list[int] | None = None, anonimizar_unidad: bool = False,
 ) -> list:
     """Nivel 2 "Disponibilidad de consultorios al {fecha_titulo}" seguido,
     por cada edificio relevante, de un nivel 3 con su grilla completa +
@@ -153,7 +162,7 @@ def secciones_disponibilidad(
     for id_edificio, unidades_ed in por_edificio.items():
         bloque = [
             encabezado(3, f"Edificio {nombres[id_edificio]}", ancho),
-            _tabla_grilla_edificio(conn, unidades_ed, grilla, horas, ancho),
+            _tabla_grilla_edificio(conn, unidades_ed, grilla, horas, ancho, anonimizar_unidad),
             Spacer(1, 4),
             _tabla_leyenda(ancho),
             Paragraph(
