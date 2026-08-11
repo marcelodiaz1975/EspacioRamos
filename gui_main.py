@@ -10,6 +10,7 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
+from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla import GrillaDisponibilidad
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
 from app.gui.pantallas.lista_espera import PantallaListaEspera
@@ -33,6 +34,7 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Lista de espera", lambda conn: PantallaListaEspera(conn), categoria="Principal"),
         Seccion("Novedades", lambda conn: PantallaNovedades(conn), categoria="Principal"),
         Seccion("Pagos", lambda conn: PantallaPagos(conn), categoria="Principal"),
+        Seccion("Estadísticas", lambda conn: PantallaEstadisticas(conn), categoria="Principal"),
         Seccion("Profesionales", pantalla_profesionales, categoria="Catálogos"),
         Seccion("Edificios", catalogos.pantalla_edificios, categoria="Catálogos"),
         Seccion("Unidades", catalogos.pantalla_unidades, categoria="Catálogos"),
