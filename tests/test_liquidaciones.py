@@ -132,9 +132,32 @@ def test_pierde_descuento_horas_si_saldo_anterior_supera_tolerancia(conn, consul
 
     liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
 
+    descuento_pct = obtener_porcentaje_descuento(conn, 2)
     assert liquidacion.pierde_descuento_horas is True
-    assert liquidacion.tramos[0].descuento_pct == 0
-    assert liquidacion.subtotal_reserva == pytest.approx(liquidacion.bruto)
+    # el % real se sigue aplicando y mostrando (subtotal < bruto)...
+    assert liquidacion.tramos[0].descuento_pct == pytest.approx(descuento_pct)
+    assert liquidacion.subtotal_reserva == pytest.approx(liquidacion.bruto * (1 - descuento_pct / 100))
+    # ...pero se revierte por completo, así que el total final no cambia
+    # (el % de descuento aplicado y su reversión se cancelan entre sí)
+    assert liquidacion.reversion_descuento == pytest.approx(liquidacion.bruto - liquidacion.subtotal_reserva)
+    assert liquidacion.total == pytest.approx(
+        liquidacion.bruto + liquidacion.saldo_anterior + liquidacion.ajuste_saldo_atrasado
+    )
+
+
+def test_reversion_descuento_es_cero_si_las_horas_no_alcanzan_ningun_tramo(conn, consultorio):
+    """Si no hay ningún tramo de descuento que aplique (0% real), no hay
+    nada que revertir aunque se pierda el descuento por saldo atrasado."""
+    conn.execute("DELETE FROM EsquemaDescuentos")
+    conn.commit()
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=100)
+    assert obtener_porcentaje_descuento(conn, 2) == 0
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+
+    assert liquidacion.pierde_descuento_horas is True
+    assert liquidacion.reversion_descuento == 0
 
 
 def test_no_pierde_descuento_si_saldo_anterior_dentro_de_tolerancia(conn, consultorio):

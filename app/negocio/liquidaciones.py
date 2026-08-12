@@ -29,10 +29,21 @@ LUEGO se agrupan los días consecutivos con el mismo % y las mismas horas
 semanales en tramos, solo para exponer el desglose.
 
 Pérdida del descuento por horas (DC-02/DC-06 §5.1, aclarado en
-conversación): si el profesional arrastra saldo por encima de
-ToleranciaDeudaDescuento, el descuento por horas semanales es 0% en TODA
-la liquidación de ese mes (bruto, feriados, horas agregadas, feriado
-trabajado — todo lo que use "valor con descuento" calculado EN VIVO).
+conversación — ajustado a pedido para que el PDF sea transparente sobre
+CUÁNTO descuento se pierde, no solo que se pierde): si el profesional
+arrastra saldo por encima de ToleranciaDeudaDescuento, el descuento por
+horas semanales se sigue calculando y APLICANDO al bruto normalmente
+(`subtotal_reserva` refleja el % real, no 0%) y de inmediato se REVIERTE
+con `reversion_descuento` (bruto - subtotal_reserva), que el PDF muestra
+como una línea aparte junto al saldo anterior — el efecto neto sobre el
+total es el mismo que forzar 0% directamente, pero mostrando el número
+real en vez de esconderlo. Si las horas reservadas no alcanzan ningún
+tramo con descuento, `reversion_descuento` da 0 sola (bruto ya es igual a
+subtotal_reserva) y el PDF omite esa línea. El resto de los ítems que
+usan "valor con descuento" calculado EN VIVO (feriados, horas agregadas,
+feriado trabajado) SÍ se siguen forzando a 0% cuando se pierde el
+descuento — a diferencia del bruto, no hay una línea de reversión para
+cada uno de ellos, así que se calculan directamente "sin descuento".
 Vacaciones y licencias quedan afuera de esta regla a propósito: su
 ValorBonificado ya quedó congelado con el % vigente al momento de
 registrarlas (DC-05 §1.3) y acá solo se prorratea ese valor entre los
@@ -171,6 +182,7 @@ class Liquidacion:
     saldo_anterior: float
     tramos: list[Tramo] = field(default_factory=list)
     pierde_descuento_horas: bool = False
+    reversion_descuento: float = 0.0
     descuentos_feriados: list[ItemFeriado] = field(default_factory=list)
     descuentos_no_laborables: list[ItemFeriado] = field(default_factory=list)
     feriados_pendientes: list[ItemFeriado] = field(default_factory=list)
@@ -239,6 +251,7 @@ class Liquidacion:
         que se acredita a SaldoCuentaActual al emitir)."""
         return (
             self.subtotal_reserva
+            + self.reversion_descuento
             - self.total_descuento_feriados
             - self.total_descuento_no_laborables
             - self.total_feriados_pendientes
@@ -331,19 +344,25 @@ def _ids_reservas_tardias(
 
 def _bruto_y_tramos(
     conn: sqlite3.Connection, ids: list[int], primer_dia: str, ultimo_dia: str,
-    ids_excluir: frozenset[int], pierde_descuento: bool,
+    ids_excluir: frozenset[int],
 ) -> list[Tramo]:
     """Recorre día por día el período y agrupa los días consecutivos con
     las mismas horas semanales y el mismo % de descuento en tramos. El
     monto siempre es exacto (se calcula por día); los tramos son solo para
-    desglosar el PDF más adelante."""
+    desglosar el PDF más adelante.
+
+    Siempre usa el % real (no se fuerza a 0% acá aunque el profesional
+    pierda el descuento por saldo atrasado) — `calcular_liquidacion` es
+    quien revierte ese descuento después con `reversion_descuento`, para
+    que el PDF pueda mostrar el número real aplicado y su reversión por
+    separado en vez de esconderlo detrás de un "0%"."""
     tramos: list[Tramo] = []
     dia = date.fromisoformat(primer_dia)
     fin = date.fromisoformat(ultimo_dia)
     while dia <= fin:
         fecha_iso = dia.isoformat()
         horas_sem = horas_semanales_vigentes(conn, ids, fecha_iso, ids_excluir)
-        pct = 0.0 if pierde_descuento else obtener_porcentaje_descuento(conn, horas_sem)
+        pct = obtener_porcentaje_descuento(conn, horas_sem)
         bruto_dia = sum(
             (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"]
             for f in _reservas_regulares_del_dia(conn, ids, dia, ids_excluir)
@@ -693,9 +712,13 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
     fecha_emision_este_periodo = _fecha_emision_periodo(conn, id_profesional, periodo)
     ids_tardias = _ids_reservas_tardias(conn, ids, anio, mes, fecha_emision_este_periodo)
 
-    tramos = _bruto_y_tramos(conn, ids, primer_dia_periodo, ultimo_dia_periodo, ids_tardias, pierde_descuento)
+    tramos = _bruto_y_tramos(conn, ids, primer_dia_periodo, ultimo_dia_periodo, ids_tardias)
     bruto = sum(t.bruto for t in tramos)
     subtotal_reserva = sum(t.subtotal for t in tramos)
+    # El descuento por horas semanales se aplica siempre (ver _bruto_y_tramos)
+    # y, si se pierde por saldo atrasado, se revierte acá — da 0 solo si las
+    # horas reservadas no alcanzan ningún tramo con descuento real.
+    reversion_descuento = (bruto - subtotal_reserva) if pierde_descuento else 0.0
 
     descuentos_feriados, descuentos_no_laborables = _calcular_descuentos_feriados(
         conn, ids, anio, mes, ids_tardias, pierde_descuento
@@ -732,7 +755,7 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
         horas_semanales=tramos[0].horas_semanales if tramos else 0.0,
         descuento_horas_pct=tramos[0].descuento_pct if tramos else 0.0,
         subtotal_reserva=subtotal_reserva, saldo_anterior=saldo_anterior, tramos=tramos,
-        pierde_descuento_horas=pierde_descuento,
+        pierde_descuento_horas=pierde_descuento, reversion_descuento=reversion_descuento,
         descuentos_feriados=descuentos_feriados, descuentos_no_laborables=descuentos_no_laborables,
         feriados_pendientes=feriados_pendientes,
         descuento_vacaciones=descuento_vacaciones, descuento_licencias=descuento_licencias,

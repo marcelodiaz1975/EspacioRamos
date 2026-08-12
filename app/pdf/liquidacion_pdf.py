@@ -240,8 +240,8 @@ def _items_cuenta(
     items.append((f"Importe bruto correspondiente a la reserva regular de {mes_actual_texto}", liquidacion.bruto, False))
     if liquidacion.pierde_descuento_horas:
         concepto_desc = (
-            f"Descuento (0%, pierde el descuento por saldo atrasado) por cantidad de horas "
-            f"semanales reservadas ({liquidacion.horas_semanales:g}hs)"
+            f"Descuento ({liquidacion.descuento_horas_pct:g}%, pierde el descuento por saldo atrasado) "
+            f"por cantidad de horas semanales reservadas ({liquidacion.horas_semanales:g}hs)"
         )
     else:
         concepto_desc = (
@@ -257,6 +257,11 @@ def _items_cuenta(
     else:
         concepto_saldo = "Saldo de la liquidación anterior"
     items.append((concepto_saldo, liquidacion.saldo_anterior, False))
+    if liquidacion.reversion_descuento:
+        items.append((
+            "Reversión del descuento por arrastrar saldos del período anterior",
+            liquidacion.reversion_descuento, False,
+        ))
 
     for f in liquidacion.descuentos_feriados:
         dia_semana, fecha = _dia_y_fecha(f.fecha)
@@ -529,8 +534,13 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         edificios_bloques.setdefault(b["IdEdificio"], b)
 
     items = _items_cuenta(liquidacion, consultorios, tipos_feriado_actual, mes_actual_texto, mes_anterior_texto)
+    # El "valor con descuento" de cada consultorio es un valor final "en
+    # vivo" (igual que feriados trabajados u horas agregadas): si se pierde
+    # el descuento por saldo atrasado, va sin descuento — a diferencia del
+    # bruto, acá no hay una línea de reversión que lo compense.
+    descuento_pct_valores = 0.0 if liquidacion.pierde_descuento_horas else liquidacion.descuento_horas_pct
     filas_consultorios = _consultorios_y_horas(
-        conn, ids, primer_dia, ultimo_dia, consultorios, liquidacion.descuento_horas_pct
+        conn, ids, primer_dia, ultimo_dia, consultorios, descuento_pct_valores
     )
 
     imagenes = imagenes_de_consultorios(conn, _ids_consultorio_reservados(conn, ids))

@@ -68,6 +68,18 @@ def test_items_cuenta_respeta_el_orden_de_dc01(conn, profesional):
     assert items[-1][1] == pytest.approx(liquidacion.total)
 
 
+def test_items_cuenta_incluye_reversion_justo_despues_del_saldo_anterior(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=100)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    consultorios = _mapa_consultorios(conn)
+    items = _items_cuenta(liquidacion, consultorios, {}, "agosto", "julio")
+    conceptos = [c for c, _, _ in items]
+    idx_saldo = conceptos.index("Saldo pendiente de la liquidación anterior")
+    assert conceptos[idx_saldo + 1] == "Reversión del descuento por arrastrar saldos del período anterior"
+    assert items[idx_saldo + 1][1] == pytest.approx(liquidacion.reversion_descuento)
+    assert items[-1][1] == pytest.approx(liquidacion.total)  # se sigue sumando correctamente al total
+
+
 def test_items_cuenta_saldo_anterior_positivo_dice_pendiente(conn, profesional):
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=500)
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
@@ -205,6 +217,41 @@ def test_valores_incluye_edificios_de_la_misma_localidad_aunque_no_reserve_ahi(c
     ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
     texto = _texto_pdf(ruta)
     assert "Edificio Ramos 2" in texto
+
+
+def test_reversion_descuento_aparece_y_muestra_el_pct_real_cuando_se_pierde(conn, profesional, tmp_path):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=100)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert liquidacion.pierde_descuento_horas is True
+    assert liquidacion.reversion_descuento > 0
+
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Reversión del descuento por arrastrar saldos del período anterior" in texto
+    assert "pierde el descuento por saldo atrasado" in texto
+    assert "Descuento (0%, pierde" not in texto  # ahora muestra el % real, no 0%
+
+
+def test_reversion_descuento_no_aparece_si_no_hay_descuento_real_que_perder(conn, profesional, tmp_path):
+    conn.execute("DELETE FROM EsquemaDescuentos")
+    conn.commit()
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=100)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert liquidacion.pierde_descuento_horas is True
+    assert liquidacion.reversion_descuento == 0
+
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Reversión del descuento" not in texto
+
+
+def test_valor_con_descuento_va_sin_descuento_cuando_se_pierde(conn, profesional, tmp_path):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=100)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    # $ 1.000,00 es el valor regular (ValorHoraRegularActual) sin descontar
+    assert "$ 1.000,00" in texto
 
 
 def test_valores_no_incluye_edificios_de_otra_localidad(conn, profesional, tmp_path):

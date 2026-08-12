@@ -5,7 +5,7 @@ from reportlab.platypus import Paragraph, Table
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.pdf.estilos import COLOR_DIA_GRILLA, COLOR_NIVEL_1, FUENTE, FUENTE_NEGRITA
+from app.pdf.estilos import COLOR_NIVEL_1, FUENTE, FUENTE_NEGRITA
 from app.pdf.grilla_pdf import (
     DIAS_GRILLA_DEFAULT,
     _partir_etiqueta_unidad,
@@ -163,14 +163,23 @@ def test_divisor_piso_letra_es_del_mismo_azul_que_el_fondo(conn):
     assert lineas[0][4] == COLOR_NIVEL_1
 
 
-def test_dia_de_la_semana_usa_color_fuerte_y_fuente_mas_grande(conn):
+def test_dia_de_la_semana_usa_el_mismo_azul_y_fuente_mas_grande(conn):
+    """El fondo del día de la semana va del mismo azul que el resto de la
+    grilla (COLOR_NIVEL_1) — no un color aparte — pero mantiene la fuente
+    más grande auto-ajustada."""
     unidades = _unidades_ficticias(2)
     tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9], ancho=400)
     colores_fila_dia = {cmd[3] for cmd in tabla._bkgrndcmds if cmd[1] == (2, 0)}
-    assert COLOR_DIA_GRILLA in colores_fila_dia
+    assert colores_fila_dia == {COLOR_NIVEL_1}
 
     tamano_dia = tabla._cellStyles[0][2].fontsize
     assert tamano_dia > 6  # más grande que el tamaño base de la grilla (6)
+
+
+def test_fila_unidad_en_mayusculas(conn):
+    unidades = _unidades_ficticias(2)
+    tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9], ancho=400)
+    assert tabla._cellvalues[1][2] == "UNIDAD"
 
 
 def test_sv_tiene_fuente_autoajustable(conn):

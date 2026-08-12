@@ -23,7 +23,6 @@ from app.negocio.formato import hora_fmt
 from app.negocio.grilla import calcular_grilla
 from app.pdf.estilos import (
     COLOR_AMARILLO,
-    COLOR_DIA_GRILLA,
     COLOR_NIVEL_1,
     COLOR_ROJO,
     COLOR_VERDE,
@@ -156,7 +155,7 @@ def _tabla_grilla_edificio(
     tamano_sv = _tamano_que_entra(["S/V"], ancho_col - 2, tamano_max=6, tamano_min=3)
 
     fila_dias = ["Tipo\nBloque", "Horario"] + [d.upper() for d in dias for _ in unidades]
-    fila_unidad_label = ["", ""] + ["Unidad" for _ in dias for _ in unidades]
+    fila_unidad_label = ["", ""] + ["UNIDAD" for _ in dias for _ in unidades]
     fila_piso = ["", ""] + [Paragraph(par[0], style_etiqueta) for _ in dias for par in partes]
     fila_letra = ["", ""] + [Paragraph(par[1], style_etiqueta) for _ in dias for par in partes]
     filas = [fila_dias, fila_unidad_label, fila_piso, fila_letra]
@@ -206,16 +205,17 @@ def _tabla_grilla_edificio(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
         ("BACKGROUND", (0, 0), (1, 3), COLOR_NIVEL_1),
         ("TEXTCOLOR", (0, 0), (1, 3), "#FFFFFF"),
-        ("BACKGROUND", (2, 0), (-1, 0), COLOR_DIA_GRILLA),
+        ("BACKGROUND", (2, 0), (-1, 0), COLOR_NIVEL_1),
         ("TEXTCOLOR", (2, 0), (-1, 0), "#FFFFFF"),
         ("FONTSIZE", (2, 0), (-1, 0), tamano_dia),
         ("BACKGROUND", (2, 1), (-1, 3), COLOR_NIVEL_1),
         ("TEXTCOLOR", (2, 1), (-1, 3), "#FFFFFF"),
         ("FONTSIZE", (2, 4), (-1, ultima_fila), tamano_sv),
         # El divisor entre la fila de piso y la de letra se pinta del mismo
-        # azul que el fondo para que quede invisible (línea de la GRID fina
-        # de abajo, dibujada encima).
-        ("LINEBELOW", (2, 2), (-1, 2), 0.3, COLOR_NIVEL_1),
+        # azul que el fondo para que quede invisible — más grueso que la
+        # línea fina de la GRID que tapa (dibujada antes, debajo), para que
+        # el antialiasing de esa línea no deje un resto visible del gris.
+        ("LINEBELOW", (2, 2), (-1, 2), 1.2, COLOR_NIVEL_1),
         # "Tipo Bloque"/"Horario" combinan las 4 filas de encabezado (mismo
         # alto que Día/Unidad/Piso/Letra) en vez de quedar ancladas arriba.
         ("SPAN", (0, 0), (0, 3)),
@@ -343,7 +343,7 @@ def _tabla_grilla_edificio_girada(
         ("BACKGROUND", (3, 0), (-1, 1), COLOR_NIVEL_1),
         ("TEXTCOLOR", (3, 0), (-1, 1), "#FFFFFF"),
         ("FONTSIZE", (3, 2), (-1, ultima_fila), tamano_sv),
-        ("BACKGROUND", (0, 2), (0, ultima_fila), COLOR_DIA_GRILLA),
+        ("BACKGROUND", (0, 2), (0, ultima_fila), COLOR_NIVEL_1),
         ("TEXTCOLOR", (0, 2), (0, ultima_fila), "#FFFFFF"),
         ("FONTSIZE", (0, 2), (0, ultima_fila), 8),  # con varias filas de alto de sobra, entra más grande
         ("BACKGROUND", (1, 2), (2, ultima_fila), COLOR_NIVEL_1),
