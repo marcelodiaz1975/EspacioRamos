@@ -1,9 +1,11 @@
 import pytest
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.pdf.grilla_pdf import _partir_etiqueta_unidad, _tabla_grilla_edificio
+from app.pdf.estilos import FUENTE_NEGRITA
+from app.pdf.grilla_pdf import _partir_etiqueta_unidad, _tabla_grilla_edificio, _tamano_que_entra
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -28,12 +30,15 @@ def test_etiquetas_de_unidad_no_se_truncan_con_muchas_unidades(conn):
     unidades = _unidades_ficticias(4)
     tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9, 10], ancho=500)
 
-    fila_etiquetas = tabla._cellvalues[2]
-    celdas_unidad = fila_etiquetas[2:]  # las primeras 2 columnas son Tipo/Horario, vacías en esta fila
-    assert len(celdas_unidad) == 6 * len(unidades)  # 6 días x 4 unidades
+    fila_piso = tabla._cellvalues[2][2:]  # las primeras 2 columnas son Tipo/Horario, vacías en esta fila
+    fila_letra = tabla._cellvalues[3][2:]
+    assert len(fila_piso) == 6 * len(unidades)  # 6 días x 4 unidades
 
-    esperado = ["".join(_partir_etiqueta_unidad(u["Departamento"])) for _ in range(6) for u in unidades]
-    obtenido = [c.getPlainText() if isinstance(c, Paragraph) else c for c in celdas_unidad]
+    esperado = [_partir_etiqueta_unidad(u["Departamento"]) for _ in range(6) for u in unidades]
+    obtenido = list(zip(
+        [c.getPlainText() if isinstance(c, Paragraph) else c for c in fila_piso],
+        [c.getPlainText() if isinstance(c, Paragraph) else c for c in fila_letra],
+    ))
     assert obtenido == esperado
 
 
@@ -43,34 +48,36 @@ def test_etiquetas_de_unidad_son_paragraph_para_poder_ajustar(conn):
     vez de desbordar sobre la celda vecina."""
     unidades = _unidades_ficticias(5)
     tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9], ancho=400)
-    fila_etiquetas = tabla._cellvalues[2]
-    assert all(isinstance(c, Paragraph) for c in fila_etiquetas[2:])
+    assert all(isinstance(c, Paragraph) for c in tabla._cellvalues[2][2:])
+    assert all(isinstance(c, Paragraph) for c in tabla._cellvalues[3][2:])
 
 
 def test_una_sola_unidad_no_rompe(conn):
     unidades = _unidades_ficticias(1)
     tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9], ancho=500)
-    fila_etiquetas = tabla._cellvalues[2]
-    assert [c.getPlainText() for c in fila_etiquetas[2:]] == ["1X"] * 6
+    assert [c.getPlainText() for c in tabla._cellvalues[2][2:]] == ["1"] * 6
+    assert [c.getPlainText() for c in tabla._cellvalues[3][2:]] == ["X"] * 6
 
 
 def test_grilla_edificio_real_conserva_columnas(conn):
     """Reproduce el caso real que disparó el bug: un edificio con 4
     unidades importado desde planilla — cada columna conserva su propia
-    etiqueta (piso arriba, letra abajo, sin comillas) en vez de mezclarse
-    con la de al lado."""
+    etiqueta (piso arriba, letra abajo, sin comillas, cada una en su
+    propia fila) en vez de mezclarse con la de al lado."""
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     nombres = ['15 "H"', '7mo "L"', '9no "C"', 'EP "K"']
-    esperado = ["15H", "7L", "9C", "EPK"]
+    esperado_piso = ["15", "7", "9", "EP"]
+    esperado_letra = ["H", "L", "C", "K"]
     unidades = []
     for nombre in nombres:
         id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=nombre)
         unidades.append({"IdUnidad": id_unidad, "Departamento": nombre})
 
     tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=list(range(9, 21)), ancho=550)
-    fila_etiquetas = tabla._cellvalues[2]
-    obtenido = [c.getPlainText() for c in fila_etiquetas[2:2 + len(nombres)]]
-    assert obtenido == esperado
+    obtenido_piso = [c.getPlainText() for c in tabla._cellvalues[2][2:2 + len(nombres)]]
+    obtenido_letra = [c.getPlainText() for c in tabla._cellvalues[3][2:2 + len(nombres)]]
+    assert obtenido_piso == esperado_piso
+    assert obtenido_letra == esperado_letra
 
 
 def test_partir_etiqueta_unidad_numero_de_piso_y_letra():
@@ -79,6 +86,42 @@ def test_partir_etiqueta_unidad_numero_de_piso_y_letra():
     assert _partir_etiqueta_unidad('15 "H"') == ("15", "H")
     assert _partir_etiqueta_unidad('9no "C"') == ("9", "C")
     assert _partir_etiqueta_unidad('3ero "B"') == ("3", "B")
+
+
+def test_tamano_que_entra_no_parte_el_texto_a_mitad_de_palabra():
+    """Regresión: con columnas angostas (7 unidades x 6 días es habitual en
+    datos reales) y una fuente fija más grande, "15"/"EP" se envolvían en
+    "1"/"5" y "E"/"P" a mitad de palabra — peor que un texto más chico
+    pero legible en una sola línea."""
+    ancho_columna_angosta = 11  # el caso real que disparó el bug
+    tamano = _tamano_que_entra(["15", "EP", "7", "9"], ancho_columna_angosta)
+    assert stringWidth("15", FUENTE_NEGRITA, tamano) <= ancho_columna_angosta * 0.85
+
+
+def test_tamano_que_entra_usa_el_maximo_si_hay_lugar():
+    assert _tamano_que_entra(["7"], ancho_disponible=200, tamano_max=10) == 10
+
+
+def test_grilla_con_columnas_angostas_no_envuelve_el_piso(conn):
+    """Con 7 unidades reales (varias de 2 dígitos/letras, ej. "15"/"EP")
+    en un ancho chico, cada celda del piso tiene que quedar en una sola
+    línea de texto — no partida en dos como "1"/"5"."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    nombres = ['15 "H"', '7mo "L"', '9no "C"', 'EP "K"', '3ero "B"', 'PB "D"', '1ro "A"']
+    unidades = []
+    for nombre in nombres:
+        id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=nombre)
+        unidades.append({"IdUnidad": id_unidad, "Departamento": nombre})
+
+    ancho_total = 550
+    n_unidades = len(unidades)
+    ancho_col = (ancho_total - ancho_total * 0.14) / (6 * n_unidades)  # misma cuenta que _tabla_grilla_edificio
+
+    tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9], ancho=ancho_total)
+    fila_piso = tabla._cellvalues[2][2:2 + n_unidades]
+    for celda in fila_piso:
+        celda.wrap(ancho_col - 2, 1000)  # -2: LEFTPADDING+RIGHTPADDING de la celda (1pt cada uno)
+        assert len(celda.blPara.lines) == 1, f"'{celda.getPlainText()}' se partió en {len(celda.blPara.lines)} líneas"
 
 
 def test_partir_etiqueta_unidad_formato_inesperado_no_rompe():

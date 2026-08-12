@@ -1,9 +1,11 @@
+import json
+
 import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.pdf.estilos import COLOR_NIVEL_1
-from app.pdf.valores_pdf import bloques_esquema_descuentos
+from app.pdf.valores_pdf import _hasta_por_frecuencia, bloques_esquema_descuentos, rango_actualizacion
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -13,6 +15,47 @@ def conn(tmp_path):
     sembrar_valores_por_defecto(connection)
     yield connection
     connection.close()
+
+
+def test_hasta_por_frecuencia_bimestral_meses_pares():
+    # actualización en agosto (un mes par); vigente hasta septiembre (mes
+    # antes de la próxima actualización, octubre)
+    assert _hasta_por_frecuencia("2026-08", [2, 4, 6, 8, 10, 12]) == "2026-09"
+
+
+def test_hasta_por_frecuencia_envuelve_al_anio_siguiente():
+    # actualización en julio (semestral enero/julio); vigente hasta
+    # diciembre — la próxima actualización es en enero del año siguiente
+    assert _hasta_por_frecuencia("2026-07", [1, 7]) == "2026-12"
+
+
+def test_hasta_por_frecuencia_ultimo_mes_configurado():
+    assert _hasta_por_frecuencia("2026-12", [2, 4, 6, 8, 10, 12]) == "2027-01"
+
+
+def test_rango_actualizacion_usa_la_frecuencia_configurada(conn):
+    desde, hasta = rango_actualizacion(conn, "2026-08")
+    assert desde == "2026-08"
+    assert hasta == "2026-09"  # default sembrado: bimestral, meses pares
+
+
+def test_rango_actualizacion_sin_frecuencia_configurada_no_inventa_rango(conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, MesesPeriodoActualizacion=None)
+    desde, hasta = rango_actualizacion(conn, "2026-08")
+    assert desde == hasta == "2026-08"
+
+
+def test_rango_actualizacion_semestral_configurable(conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(
+        1, MesesPeriodoActualizacion=json.dumps([1, 7]),
+    )
+    conn.execute(
+        "INSERT INTO AumentoAplicado (Periodo, PorcentajeGeneral, FechaAplicacion) VALUES ('2026-07', 5, '2026-07-01')"
+    )
+    conn.commit()
+    desde, hasta = rango_actualizacion(conn, "2026-08")
+    assert desde == "2026-07"
+    assert hasta == "2026-12"
 
 
 def _limpiar_esquema(conn):

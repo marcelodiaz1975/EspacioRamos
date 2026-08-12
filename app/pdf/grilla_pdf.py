@@ -12,6 +12,7 @@ import re
 import sqlite3
 
 from reportlab.lib.enums import TA_CENTER
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import DIAS_SEMANA
@@ -68,6 +69,23 @@ def _etiqueta_unidad(u: sqlite3.Row, anonimizar: bool) -> str:
     return f"Unidad {u['IdUnidad']}" if anonimizar else u["Departamento"]
 
 
+def _tamano_que_entra(textos: list[str], ancho_disponible: float, tamano_max: int = 10, tamano_min: int = 5) -> int:
+    """El tamaño de fuente más grande (dentro de [tamano_min, tamano_max])
+    con el que TODOS los textos entran en una línea sin envolver — se mide
+    el ancho real de cada uno en vez de asumir que el más largo por
+    cantidad de caracteres es el más ancho (ej. "EP" es más ancho que "15"
+    aunque tengan la misma longitud, las letras son más anchas que los
+    dígitos en negrita). Envolver "15" en "1"/"5" a mitad de palabra se ve
+    peor que dejarlo un poco más chico pero legible en una sola línea."""
+    if not textos:
+        return tamano_max
+    for tamano in range(tamano_max, tamano_min - 1, -1):
+        ancho_maximo = max(stringWidth(t, FUENTE_NEGRITA, tamano) for t in textos)
+        if ancho_maximo <= ancho_disponible * 0.85:
+            return tamano
+    return tamano_min
+
+
 def _partir_etiqueta_unidad(etiqueta: str) -> tuple[str, str]:
     """'7mo "L"' -> ('7', 'L'); 'EP "K"' -> ('EP', 'K'); '15 "H"' -> ('15', 'H').
     Arriba va solo el número de piso (sin el sufijo ordinal "mo"/"ro"/"no"
@@ -97,32 +115,35 @@ def _tabla_grilla_edificio(
     n_cols_datos = max(len(dias) * n_unidades, 1)
     ancho_col = ancho_restante / n_cols_datos
 
+    def _partes_etiqueta(u: sqlite3.Row) -> tuple[str, str]:
+        if anonimizar_unidad:
+            return _etiqueta_unidad(u, anonimizar_unidad), ""
+        return _partir_etiqueta_unidad(u["Departamento"])
+
     # Con muchas unidades por edificio la columna por consultorio se vuelve
     # angosta (varios edificios reales tienen 4+ unidades) — una celda de
     # texto plano no ajusta el contenido y termina desbordando sobre la
-    # celda vecina, así que la etiqueta de unidad va en un Paragraph que
-    # puede partirse en dos líneas, con una fuente que se achica si la
-    # columna es angosta en vez de desbordar.
-    tamano_etiqueta = 6 if ancho_col >= 40 else 5 if ancho_col >= 28 else 4
+    # celda vecina, así que el piso y la letra van en un Paragraph propio
+    # cada uno (una fila para cada uno). El tamaño de fuente se calcula
+    # para que el texto más largo entre en una sola línea — más grande
+    # cuando hay lugar, sin llegar a partir "15" en "1"/"5".
+    partes = [_partes_etiqueta(u) for u in unidades]
+    textos_etiqueta = [p for par in partes for p in par if p]
+    tamano_etiqueta = _tamano_que_entra(textos_etiqueta, ancho_col - 2)  # -2: LEFTPADDING+RIGHTPADDING de la celda
     style_etiqueta = estilo_texto(tamano_etiqueta, negrita=True, alignment=TA_CENTER)
-
-    def _texto_etiqueta(u: sqlite3.Row) -> str:
-        if anonimizar_unidad:
-            return _etiqueta_unidad(u, anonimizar_unidad)
-        arriba, abajo = _partir_etiqueta_unidad(u["Departamento"])
-        return f"{arriba}<br/>{abajo}" if abajo else arriba
 
     fila_dias = ["Tipo\nBloque", "Horario"] + [d.upper() for d in dias for _ in unidades]
     fila_unidad_label = ["", ""] + ["Unidad" for _ in dias for _ in unidades]
-    fila_unidades = ["", ""] + [Paragraph(_texto_etiqueta(u), style_etiqueta) for _ in dias for u in unidades]
-    filas = [fila_dias, fila_unidad_label, fila_unidades]
+    fila_piso = ["", ""] + [Paragraph(par[0], style_etiqueta) for _ in dias for par in partes]
+    fila_letra = ["", ""] + [Paragraph(par[1], style_etiqueta) for _ in dias for par in partes]
+    filas = [fila_dias, fila_unidad_label, fila_piso, fila_letra]
 
     fondos = []
     spans = []
     limites_grupo: list[int] = []  # última fila de cada grupo rígido/flexible (para línea gruesa + caja)
     inicios_grupo: list[int] = []
     tipo_anterior, inicio_grupo = None, None
-    for fila_idx, h in enumerate(horas, start=3):
+    for fila_idx, h in enumerate(horas, start=4):
         fila = ["", hora_fmt(h)]
         tipo = tipo_por_hora[h]
         if tipo != tipo_anterior:
@@ -137,15 +158,15 @@ def _tabla_grilla_edificio(
                 fila.append("S/V" if color == "naranja" else "")
                 fondos.append((color, fila_idx, len(fila) - 1))
         filas.append(fila)
-    spans.append(("SPAN", (0, inicio_grupo), (0, len(horas) + 2)))
+    spans.append(("SPAN", (0, inicio_grupo), (0, len(horas) + 3)))
     inicios_grupo.append(inicio_grupo)
 
-    for fila_idx, h in enumerate(horas, start=3):
+    for fila_idx, h in enumerate(horas, start=4):
         filas[fila_idx][0] = tipo_por_hora[h]
 
     col_widths = [ancho_tipo, ancho_horario] + [ancho_col] * n_cols_datos
-    tabla = Table(filas, colWidths=col_widths, repeatRows=3)
-    ultima_fila = len(horas) + 2
+    tabla = Table(filas, colWidths=col_widths, repeatRows=4)
+    ultima_fila = len(horas) + 3
 
     estilo = [
         ("FONTNAME", (0, 0), (-1, -1), FUENTE_NEGRITA),
@@ -153,16 +174,23 @@ def _tabla_grilla_edificio(
         ("GRID", (0, 0), (-1, -1), 0.3, "#999999"),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND", (0, 0), (1, 2), COLOR_NIVEL_1),
-        ("TEXTCOLOR", (0, 0), (1, 2), "#FFFFFF"),
-        ("BACKGROUND", (2, 0), (-1, 1), "#6B0000"),
-        ("TEXTCOLOR", (2, 0), (-1, 1), "#FFFFFF"),
-        ("BACKGROUND", (2, 2), (-1, 2), "#2E86AB"),
-        ("TEXTCOLOR", (2, 2), (-1, 2), "#FFFFFF"),
-        # "Tipo Bloque"/"Horario" combinan las 3 filas de encabezado (mismo
-        # alto que Día/Unidad/Detalle) en vez de quedar ancladas arriba.
-        ("SPAN", (0, 0), (0, 2)),
-        ("SPAN", (1, 0), (1, 2)),
+        # El padding por defecto de reportlab (6pt a cada lado) se come casi
+        # toda una columna angosta (edificios con 4+ unidades) — achicarlo
+        # le devuelve ese espacio al texto del piso/letra.
+        ("LEFTPADDING", (0, 0), (-1, -1), 1),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 1),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("BACKGROUND", (0, 0), (1, 3), COLOR_NIVEL_1),
+        ("TEXTCOLOR", (0, 0), (1, 3), "#FFFFFF"),
+        ("BACKGROUND", (2, 0), (-1, 0), "#6B0000"),
+        ("TEXTCOLOR", (2, 0), (-1, 0), "#FFFFFF"),
+        ("BACKGROUND", (2, 1), (-1, 3), COLOR_NIVEL_1),
+        ("TEXTCOLOR", (2, 1), (-1, 3), "#FFFFFF"),
+        # "Tipo Bloque"/"Horario" combinan las 4 filas de encabezado (mismo
+        # alto que Día/Unidad/Piso/Letra) en vez de quedar ancladas arriba.
+        ("SPAN", (0, 0), (0, 3)),
+        ("SPAN", (1, 0), (1, 3)),
     ]
     idx = 2
     for dia in dias:
@@ -174,11 +202,13 @@ def _tabla_grilla_edificio(
         estilo.append(("BACKGROUND", (col, fila), (col, fila), _COLOR_CELDA[color]))
 
     # Líneas estructurales más gruesas que la grilla fina: el marco de
-    # Tipo Bloque/Horario, el marco de Día/Unidad/Detalle, un divisor por
-    # cada día, un divisor entre cada bloque rígido/flexible, y una caja
-    # por cada grupo Rígido/Flexible con sus horarios (columnas 0-1).
-    estilo.append(("BOX", (0, 0), (1, 2), _GROSOR_GRUESO, "#000000"))
-    estilo.append(("BOX", (2, 0), (-1, 2), _GROSOR_GRUESO, "#000000"))
+    # Tipo Bloque/Horario, el marco de Día/Unidad/Piso/Letra, un divisor
+    # por cada día, un divisor entre cada bloque rígido/flexible, una caja
+    # por cada grupo Rígido/Flexible con sus horarios (columnas 0-1), y un
+    # marco grueso alrededor de toda la grilla (incluye el borde inferior
+    # del último bloque flexible, que si no queda sin remarcar).
+    estilo.append(("BOX", (0, 0), (1, 3), _GROSOR_GRUESO, "#000000"))
+    estilo.append(("BOX", (2, 0), (-1, 3), _GROSOR_GRUESO, "#000000"))
     idx = 2
     for _dia in dias:
         idx += n_unidades
@@ -189,6 +219,7 @@ def _tabla_grilla_edificio(
         estilo.append(("LINEBELOW", (0, limite), (-1, limite), _GROSOR_GRUESO, "#000000"))
     for ini, fin in zip(inicios_grupo, limites_grupo + [ultima_fila]):
         estilo.append(("BOX", (0, ini), (1, fin), _GROSOR_GRUESO, "#000000"))
+    estilo.append(("BOX", (0, 0), (-1, ultima_fila), _GROSOR_GRUESO, "#000000"))
 
     tabla.setStyle(TableStyle(estilo))
     return tabla
@@ -257,5 +288,9 @@ def _tabla_leyenda(ancho: float) -> Table:
         ("FONTNAME", (2, 0), (2, 0), FUENTE_NEGRITA),
         ("ALIGN", (2, 0), (2, 0), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BOX", (0, 0), (0, 0), _GROSOR_GRUESO, "#000000"),
+        ("BOX", (0, 1), (0, 1), _GROSOR_GRUESO, "#000000"),
+        ("BOX", (2, 0), (2, 0), _GROSOR_GRUESO, "#000000"),
+        ("BOX", (2, 1), (2, 1), _GROSOR_GRUESO, "#000000"),
     ]))
     return tabla

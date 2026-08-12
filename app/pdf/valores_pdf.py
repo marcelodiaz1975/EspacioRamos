@@ -2,6 +2,7 @@
 por el PDF de Liquidación y el de Propuesta (secciones 4.5/4.3)."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
@@ -9,15 +10,44 @@ from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 from app.pdf.estilos import COLOR_NIVEL_1, FUENTE_NEGRITA, decimales_configurados, estilo_texto, formatear_moneda
 
 
+def _hasta_por_frecuencia(desde: str, meses_actualizacion: list[int]) -> str:
+    """Último mes en que el valor de `desde` sigue vigente: el mes
+    anterior al próximo mes de actualización programado (envolviendo al
+    año siguiente si hace falta). Ej: actualización bimestral en meses
+    pares, `desde`="2026-08" -> próxima actualización en 10, vigente
+    hasta "2026-09". Semestral en enero/julio, `desde`="2026-07" ->
+    próxima actualización en 01/2027, vigente hasta "2026-12"."""
+    anio, mes = (int(p) for p in desde.split("-"))
+    meses_ordenados = sorted(set(meses_actualizacion))
+    siguientes = [m for m in meses_ordenados if m > mes]
+    if siguientes:
+        proximo_mes, proximo_anio = siguientes[0], anio
+    else:
+        proximo_mes, proximo_anio = meses_ordenados[0], anio + 1
+    mes_hasta, anio_hasta = proximo_mes - 1, proximo_anio
+    if mes_hasta == 0:
+        mes_hasta, anio_hasta = 12, anio_hasta - 1
+    return f"{anio_hasta:04d}-{mes_hasta:02d}"
+
+
 def rango_actualizacion(conn: sqlite3.Connection, periodo: str) -> tuple[str, str]:
     """(desde, hasta) — el período del último aumento aplicado hasta
-    `periodo` (o `periodo` mismo si nunca hubo uno), para el título
-    "Valores... para el período comprendido entre X y Y"."""
+    `periodo` (o `periodo` mismo si nunca hubo uno) como `desde`, y el
+    último mes en que ese valor sigue vigente según
+    `Configuracion.MesesPeriodoActualizacion` como `hasta`. Si no hay
+    frecuencia configurada, `hasta` queda igual a `desde` — mostrar un
+    rango inventado sería peor que no mostrar rango."""
     fila = conn.execute(
         "SELECT MAX(Periodo) AS p FROM AumentoAplicado WHERE Periodo <= ?", (periodo,)
     ).fetchone()
     desde = fila["p"] if fila and fila["p"] else periodo
-    return desde, periodo
+
+    cfg = conn.execute(
+        "SELECT MesesPeriodoActualizacion FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    meses = json.loads(cfg["MesesPeriodoActualizacion"]) if cfg and cfg["MesesPeriodoActualizacion"] else []
+    hasta = _hasta_por_frecuencia(desde, meses) if meses else desde
+    return desde, hasta
 
 
 def matriz_valores_edificio(
@@ -57,7 +87,7 @@ def matriz_valores_edificio(
     ancho_col = (ancho - ancho_unidad) / max_consultorios
     tabla = Table(filas, colWidths=[ancho_unidad] + [ancho_col] * max_consultorios, repeatRows=1)
     tabla.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA), ("FONTNAME", (0, 1), (0, -1), FUENTE_NEGRITA),
+        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA),
         ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (1, 0), (-1, -1), "CENTER"),
         ("GRID", (0, 0), (-1, -1), 0.5, "#000000"), ("BACKGROUND", (0, 0), (-1, 0), COLOR_NIVEL_1),
         ("TEXTCOLOR", (0, 0), (-1, 0), "#FFFFFF"), ("BACKGROUND", (0, 1), (0, -1), "#F0F0F0"),

@@ -152,6 +152,27 @@ def _notas_direcciones_edificios(edificios: dict[int, sqlite3.Row]) -> list:
     return story
 
 
+def _edificios_para_valores(conn: sqlite3.Connection, edificios_reservados: dict[int, sqlite3.Row]) -> list[sqlite3.Row]:
+    """La sección "Valores de los consultorios" lista todos los edificios
+    de la(s) localidad(es) donde el profesional reserva, no solo los
+    edificios donde reserva puntualmente — si algún día llega a reservar
+    en otro edificio de esa misma localidad, ya tiene sus valores a mano.
+    Los edificios sin localidad cargada no se pueden agrupar por
+    localidad, así que solo entran si el profesional reserva ahí."""
+    localidades = {info["DomicilioLocalidad"] for info in edificios_reservados.values() if info["DomicilioLocalidad"]}
+    resultado = {id_ed: info for id_ed, info in edificios_reservados.items()}
+    if localidades:
+        placeholders = ", ".join("?" for _ in localidades)
+        filas = conn.execute(
+            f"SELECT IdEdificio, Nombre AS NombreEdificio, Domicilio, DomicilioLocalidad FROM Edificio "
+            f"WHERE DomicilioLocalidad IN ({placeholders})",
+            list(localidades),
+        ).fetchall()
+        for f in filas:
+            resultado.setdefault(f["IdEdificio"], f)
+    return sorted(resultado.values(), key=lambda info: info["NombreEdificio"])
+
+
 def _tabla_bloques_horarios(bloques: list[sqlite3.Row], ancho: float) -> Table:
     filas = [["Edificio", "Día", "Hora inicio", "Hora liberación", "Unidad", "Consultorio", "Vigencia desde", "Vigencia hasta"]]
     for b in bloques:
@@ -377,6 +398,7 @@ def _consultorios_y_horas(
             "valor_regular": valor_regular, "desc_pct": descuento_pct, "valor_con_descuento": valor_con_descuento,
             "horas": horas,
         })
+    filas_resultado.sort(key=lambda f: (f["edificio"], f["consultorio"]))
     return filas_resultado
 
 
@@ -496,10 +518,11 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
     )
     n_edificios_disp = max(len(edificios_bloques), 1)
     n_notas_direccion = sum(1 for info in edificios_bloques.values() if _direccion_edificio(info))
+    edificios_valores = _edificios_para_valores(conn, edificios_bloques)
 
     altura = _altura_estimada(
         n_bloques=len(bloques), n_items=len(items), n_consultorios=len(filas_consultorios),
-        n_edificios_valores=len(edificios_bloques), n_tramos_descuento=n_tramos_descuento,
+        n_edificios_valores=len(edificios_valores), n_tramos_descuento=n_tramos_descuento,
         n_recordatorios=3, n_edificios_disp=n_edificios_disp, n_horas_disp=n_horas_disp,
         n_condiciones=n_condiciones, n_notas_direccion=n_notas_direccion, n_fotos=len(imagenes),
     )
@@ -518,6 +541,7 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
     story.append(encabezado(1, titulo_detalle, ancho))
     story.append(Spacer(1, 6))
 
+    story.append(Spacer(1, 6))
     story.append(encabezado(2, "Bloques de horarios regulares reservados", ancho))
     story.append(Spacer(1, 6))
     if bloques:
@@ -530,11 +554,13 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         story.extend(notas_direcciones)
     story.append(Spacer(1, 8))
 
+    story.append(Spacer(1, 6))
     story.append(encabezado(2, "Liquidación mensual mes en curso", ancho))
     story.append(Spacer(1, 6))
     story.extend(_tabla_items(items, ancho, decimales))
     story.append(Spacer(1, 8))
 
+    story.append(Spacer(1, 6))
     story.append(encabezado(2, "Consultorios y cantidad de horas utilizadas por el profesional en el mes liquidado", ancho))
     story.append(Spacer(1, 6))
     if filas_consultorios:
@@ -553,37 +579,43 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         f"Valores de los consultorios para el período comprendido entre "
         f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
     )
+    story.append(Spacer(1, 6))
     story.append(encabezado(2, titulo_valores, ancho))
-    for id_edificio, info in edificios_bloques.items():
+    for info in edificios_valores:
         story.append(Spacer(1, 6))
         direccion = _direccion_edificio(info)
         texto_edificio = f"Edificio {info['NombreEdificio']} - {direccion}" if direccion else f"Edificio {info['NombreEdificio']}"
         story.append(encabezado(3, texto_edificio, ancho))
         story.append(Spacer(1, 6))
-        story.extend(matriz_valores_edificio(conn, id_edificio, ancho))
+        story.extend(matriz_valores_edificio(conn, info["IdEdificio"], ancho))
         story.append(Spacer(1, 6))
 
+    story.append(Spacer(1, 6))
     story.append(encabezado(2, "Esquema de descuentos", ancho))
     story.append(Spacer(1, 6))
     story.extend(bloques_esquema_descuentos(conn, ancho))
 
+    story.append(Spacer(1, 6))
     story.append(encabezado(2, "Recordatorios varios para el profesional", ancho))
     story.append(Spacer(1, 6))
     story.extend(_recordatorios(conn, ids, cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0))
     story.append(Spacer(1, 10))
 
     fecha_titulo = fecha_larga(fecha_actual(conn).isoformat()).replace("/", "-")
+    story.append(Spacer(1, 6))
     story.extend(secciones_disponibilidad(
         conn, anio, mes, ancho, fecha_titulo, ids_edificio=list(edificios_bloques.keys()) or None,
     ))
 
-    story.append(encabezado(2, "Fotos", ancho))
+    story.append(Spacer(1, 6))
+    story.append(encabezado(2, "Fotos de los consultorios reservados", ancho))
     story.append(Spacer(1, 6))
     story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=True))
 
     condiciones_flowables = condiciones_normas(conn)
     if condiciones_flowables:
         titulo_condiciones = "Condiciones y normas generales de convivencia relacionadas con la reserva en el espacio"
+        story.append(Spacer(1, 6))
         story.append(Spacer(1, 6))
         story.append(encabezado(2, titulo_condiciones, ancho))
         story.append(Spacer(1, 6))
