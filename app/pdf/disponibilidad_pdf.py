@@ -21,7 +21,7 @@ from app.negocio.formato import fecha_larga
 from app.pdf.edificios_pdf import edificios_incluidos, ids_consultorio_de_edificios, sufijo_localidad
 from app.pdf.estilos import crear_documento, encabezado
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
-from app.pdf.grilla_pdf import secciones_disponibilidad
+from app.pdf.grilla_pdf import altura_estimada_grilla, secciones_disponibilidad
 
 
 def generar_pdf_disponibilidad(conn: sqlite3.Connection, directorio: str, ids_edificio: list[int] | None = None) -> str:
@@ -42,7 +42,7 @@ def generar_pdf_disponibilidad(conn: sqlite3.Connection, directorio: str, ids_ed
     ids_consultorio = ids_consultorio_de_edificios(conn, ids_edificio_incluidos)
     imagenes = imagenes_de_consultorios(conn, ids_consultorio)
 
-    altura = 4 * cm + len(edificios) * (14 * cm) + (len(imagenes) // 2 + 1) * 7 * cm
+    altura = 4 * cm + altura_estimada_grilla(conn, ids_edificio_incluidos or None) + (len(imagenes) // 2 + 1) * 7 * cm
     ruta = os.path.join(directorio, nombre_archivo)
     doc, ancho = crear_documento(ruta, altura=altura)
 

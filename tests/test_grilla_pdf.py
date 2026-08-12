@@ -1,12 +1,20 @@
 import pytest
 from reportlab.lib import colors
 from reportlab.pdfbase.pdfmetrics import stringWidth
-from reportlab.platypus import Paragraph
+from reportlab.platypus import Paragraph, Table
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.pdf.estilos import COLOR_DIA_GRILLA, COLOR_NIVEL_1, FUENTE, FUENTE_NEGRITA
-from app.pdf.grilla_pdf import _partir_etiqueta_unidad, _tabla_grilla_edificio, _tamano_que_entra
+from app.pdf.grilla_pdf import (
+    DIAS_GRILLA_DEFAULT,
+    _partir_etiqueta_unidad,
+    _tabla_grilla_edificio,
+    _tabla_grilla_edificio_girada,
+    _tamano_que_entra,
+    altura_estimada_grilla,
+    secciones_disponibilidad,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -174,3 +182,64 @@ def test_sv_tiene_fuente_autoajustable(conn):
     tabla_angosta = _tabla_grilla_edificio(conn, unidades_muchas, grilla={}, horas=[9], ancho=500)
 
     assert tabla_angosta._cellStyles[4][2].fontsize <= tabla_ancha._cellStyles[4][2].fontsize
+
+
+# ---------------------------------------------------------------- grilla girada
+
+def test_grilla_girada_tiene_las_dimensiones_esperadas(conn):
+    n_unidades, horas = 10, [9, 10, 11]
+    unidades = _unidades_ficticias(n_unidades)
+    tabla = _tabla_grilla_edificio_girada(conn, unidades, grilla={}, horas=horas, ancho=550)
+
+    n_dias = len(DIAS_GRILLA_DEFAULT)
+    assert len(tabla._cellvalues) == 2 + n_dias * n_unidades  # 2 filas de encabezado + día x unidad
+    assert len(tabla._cellvalues[0]) == 3 + len(horas)  # Día/Piso/Depto. + una columna por hora
+
+
+def test_grilla_girada_conserva_piso_y_letra_por_fila(conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    nombres = ['15 "H"', '7mo "L"', '9no "C"']
+    unidades = []
+    for nombre in nombres:
+        id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=nombre)
+        unidades.append({"IdUnidad": id_unidad, "Departamento": nombre})
+
+    tabla = _tabla_grilla_edificio_girada(conn, unidades, grilla={}, horas=[9], ancho=550)
+    primeras_filas = tabla._cellvalues[2:2 + len(unidades)]
+    obtenido = [(f[1].getPlainText(), f[2].getPlainText()) for f in primeras_filas]
+    assert obtenido == [("15", "H"), ("7", "L"), ("9", "C")]
+
+
+def test_grilla_girada_el_dia_abarca_todas_las_filas_de_sus_unidades(conn):
+    unidades = _unidades_ficticias(3)
+    tabla = _tabla_grilla_edificio_girada(conn, unidades, grilla={}, horas=[9], ancho=550)
+    spans_dia = [cmd for cmd in tabla._spanCmds if cmd[1][0] == 0 and cmd[1][1] >= 2]
+    # un SPAN de columna 0 por cada día, cubriendo sus 3 filas de unidades
+    assert len(spans_dia) == len(DIAS_GRILLA_DEFAULT)
+    assert all(fin[1] - ini[1] == len(unidades) - 1 for _, ini, fin in spans_dia)
+
+
+def test_secciones_disponibilidad_usa_grilla_girada_al_superar_el_umbral(conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    for i in range(5):
+        obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=f'{i + 1}ro "A"')
+    obtener_repositorio(conn, "Configuracion").actualizar(1, UmbralGiroGrilla=3)
+
+    story = secciones_disponibilidad(conn, 2026, 8, ancho=550, fecha_titulo="12-08-2026")
+    tablas_grilla = [f for f in story[2]._content if isinstance(f, Table) and len(f._cellvalues) > 2]
+    assert len(tablas_grilla) == 1
+    # girada: repeatRows=2 (Día/Piso/Depto. arriba); sin girar sería 4.
+    assert tablas_grilla[0].repeatRows == 2
+
+
+def test_altura_estimada_grilla_crece_mas_con_grilla_girada(conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    for i in range(3):
+        obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=f'{i + 1}ro "A"')
+    obtener_repositorio(conn, "Configuracion").actualizar(1, UmbralGiroGrilla=2)
+    altura_girada = altura_estimada_grilla(conn, [id_edificio])
+
+    obtener_repositorio(conn, "Configuracion").actualizar(1, UmbralGiroGrilla=10)
+    altura_normal = altura_estimada_grilla(conn, [id_edificio])
+
+    assert altura_girada > altura_normal

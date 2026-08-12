@@ -54,7 +54,7 @@ from app.pdf.estilos import (
     formatear_moneda,
 )
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
-from app.pdf.grilla_pdf import secciones_disponibilidad
+from app.pdf.grilla_pdf import altura_estimada_grilla, secciones_disponibilidad
 from app.pdf.numeros_en_letras import en_letras_pesos
 from app.pdf.valores_pdf import (
     bloques_esquema_descuentos,
@@ -481,7 +481,7 @@ def _recordatorios(conn: sqlite3.Connection, ids: list[int], ajuste_pct: float) 
 
 def _altura_estimada(
     n_bloques: int, n_items: int, n_consultorios: int, n_edificios_valores: int,
-    n_tramos_descuento: int, n_recordatorios: int, n_edificios_disp: int, n_horas_disp: int,
+    n_tramos_descuento: int, n_recordatorios: int, altura_disponibilidad: float,
     n_condiciones: int, n_notas_direccion: int = 0, n_fotos: int = 0,
 ) -> float:
     altura = 4 * cm  # logo/nombre + línea
@@ -491,7 +491,7 @@ def _altura_estimada(
     altura += 1.5 * cm + n_edificios_valores * 3 * cm  # valores vigentes
     altura += 1.5 * cm + ceil(n_tramos_descuento / 9) * 1.4 * cm  # esquema descuentos
     altura += 1.5 * cm + max(n_recordatorios, 1) * 0.45 * cm  # recordatorios
-    altura += n_edificios_disp * (2 * cm + n_horas_disp * 0.42 * cm + 3 * cm)  # disponibilidad
+    altura += altura_disponibilidad  # disponibilidad (grilla, o girada si supera el umbral)
     altura += 1.5 * cm + ceil(max(n_fotos, 1) / 2) * 6.8 * cm  # fotos
     altura += 1.5 * cm + n_condiciones * 1.3 * cm  # condiciones
     return altura * 1.15
@@ -537,20 +537,14 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
 
     n_tramos_descuento = conn.execute("SELECT COUNT(*) FROM EsquemaDescuentos WHERE Activo = 1").fetchone()[0]
     n_condiciones = conn.execute("SELECT COUNT(*) FROM CondicionNorma WHERE Activo = 1").fetchone()[0]
-    cfg_grilla = conn.execute(
-        "SELECT HoraInicioGrilla, HoraFinGrilla FROM Configuracion WHERE IdConfiguracion = 1"
-    ).fetchone()
-    n_horas_disp = int(
-        (cfg_grilla["HoraFinGrilla"] if cfg_grilla else 22) - (cfg_grilla["HoraInicioGrilla"] if cfg_grilla else 8)
-    )
-    n_edificios_disp = max(len(edificios_bloques), 1)
+    altura_disponibilidad = altura_estimada_grilla(conn, list(edificios_bloques.keys()) or None)
     n_notas_direccion = sum(1 for info in edificios_bloques.values() if _direccion_edificio(info))
     edificios_valores = _edificios_para_valores(conn, edificios_bloques)
 
     altura = _altura_estimada(
         n_bloques=len(bloques), n_items=len(items), n_consultorios=len(filas_consultorios),
         n_edificios_valores=len(edificios_valores), n_tramos_descuento=n_tramos_descuento,
-        n_recordatorios=3, n_edificios_disp=n_edificios_disp, n_horas_disp=n_horas_disp,
+        n_recordatorios=3, altura_disponibilidad=altura_disponibilidad,
         n_condiciones=n_condiciones, n_notas_direccion=n_notas_direccion, n_fotos=len(imagenes),
     )
 
