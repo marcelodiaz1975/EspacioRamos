@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import sqlite3
 
+from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
@@ -20,9 +21,11 @@ from app.negocio.formato import hora_fmt
 from app.negocio.grilla import calcular_grilla
 from app.pdf.estilos import (
     COLOR_AMARILLO,
+    COLOR_DIA_GRILLA,
     COLOR_NIVEL_1,
     COLOR_ROJO,
     COLOR_VERDE,
+    FUENTE,
     FUENTE_NEGRITA,
     encabezado,
     estilo_texto,
@@ -69,18 +72,24 @@ def _etiqueta_unidad(u: sqlite3.Row, anonimizar: bool) -> str:
     return f"Unidad {u['IdUnidad']}" if anonimizar else u["Departamento"]
 
 
-def _tamano_que_entra(textos: list[str], ancho_disponible: float, tamano_max: int = 10, tamano_min: int = 5) -> int:
+def _tamano_que_entra(
+    textos: list[str], ancho_disponible: float, tamano_max: int = 10, tamano_min: int = 5,
+    fuente: str = FUENTE_NEGRITA,
+) -> int:
     """El tamaño de fuente más grande (dentro de [tamano_min, tamano_max])
     con el que TODOS los textos entran en una línea sin envolver — se mide
     el ancho real de cada uno en vez de asumir que el más largo por
     cantidad de caracteres es el más ancho (ej. "EP" es más ancho que "15"
     aunque tengan la misma longitud, las letras son más anchas que los
     dígitos en negrita). Envolver "15" en "1"/"5" a mitad de palabra se ve
-    peor que dejarlo un poco más chico pero legible en una sola línea."""
+    peor que dejarlo un poco más chico pero legible en una sola línea.
+    `fuente` debe coincidir con la fuente real de renderizado — medir con
+    una fuente distinta a la usada al dibujar puede sub o sobre-estimar
+    cuánto entra."""
     if not textos:
         return tamano_max
     for tamano in range(tamano_max, tamano_min - 1, -1):
-        ancho_maximo = max(stringWidth(t, FUENTE_NEGRITA, tamano) for t in textos)
+        ancho_maximo = max(stringWidth(t, fuente, tamano) for t in textos)
         if ancho_maximo <= ancho_disponible * 0.85:
             return tamano
     return tamano_min
@@ -129,8 +138,19 @@ def _tabla_grilla_edificio(
     # cuando hay lugar, sin llegar a partir "15" en "1"/"5".
     partes = [_partes_etiqueta(u) for u in unidades]
     textos_etiqueta = [p for par in partes for p in par if p]
-    tamano_etiqueta = _tamano_que_entra(textos_etiqueta, ancho_col - 2)  # -2: LEFTPADDING+RIGHTPADDING de la celda
-    style_etiqueta = estilo_texto(tamano_etiqueta, negrita=True, alignment=TA_CENTER)
+    # -2: LEFTPADDING+RIGHTPADDING de la celda. Sin negrita y en blanco
+    # (fondo azul) — la medición usa la misma fuente con la que se dibuja.
+    tamano_etiqueta = _tamano_que_entra(textos_etiqueta, ancho_col - 2, fuente=FUENTE)
+    style_etiqueta = estilo_texto(tamano_etiqueta, negrita=False, alignment=TA_CENTER, textColor=colors.white)
+
+    # El día de la semana usa la palabra más larga ("MIÉRCOLES") para
+    # calcular el tamaño que entra en el ancho de todo su bloque de
+    # columnas (mismo ancho para los 6 días, ya que unidades x ancho_col
+    # se cancela). La celda "S/V" se auto-ajusta al ancho de una sola
+    # columna de unidad, que sí se achica con más unidades por edificio.
+    ancho_dia = ancho_restante / len(dias)
+    tamano_dia = _tamano_que_entra([d.upper() for d in dias], ancho_dia - 2, tamano_max=14, tamano_min=6)
+    tamano_sv = _tamano_que_entra(["S/V"], ancho_col - 2, tamano_max=6, tamano_min=3)
 
     fila_dias = ["Tipo\nBloque", "Horario"] + [d.upper() for d in dias for _ in unidades]
     fila_unidad_label = ["", ""] + ["Unidad" for _ in dias for _ in unidades]
@@ -183,10 +203,16 @@ def _tabla_grilla_edificio(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
         ("BACKGROUND", (0, 0), (1, 3), COLOR_NIVEL_1),
         ("TEXTCOLOR", (0, 0), (1, 3), "#FFFFFF"),
-        ("BACKGROUND", (2, 0), (-1, 0), "#6B0000"),
+        ("BACKGROUND", (2, 0), (-1, 0), COLOR_DIA_GRILLA),
         ("TEXTCOLOR", (2, 0), (-1, 0), "#FFFFFF"),
+        ("FONTSIZE", (2, 0), (-1, 0), tamano_dia),
         ("BACKGROUND", (2, 1), (-1, 3), COLOR_NIVEL_1),
         ("TEXTCOLOR", (2, 1), (-1, 3), "#FFFFFF"),
+        ("FONTSIZE", (2, 4), (-1, ultima_fila), tamano_sv),
+        # El divisor entre la fila de piso y la de letra se pinta del mismo
+        # azul que el fondo para que quede invisible (línea de la GRID fina
+        # de abajo, dibujada encima).
+        ("LINEBELOW", (2, 2), (-1, 2), 0.3, COLOR_NIVEL_1),
         # "Tipo Bloque"/"Horario" combinan las 4 filas de encabezado (mismo
         # alto que Día/Unidad/Piso/Letra) en vez de quedar ancladas arriba.
         ("SPAN", (0, 0), (0, 3)),
@@ -209,6 +235,10 @@ def _tabla_grilla_edificio(
     # del último bloque flexible, que si no queda sin remarcar).
     estilo.append(("BOX", (0, 0), (1, 3), _GROSOR_GRUESO, "#000000"))
     estilo.append(("BOX", (2, 0), (-1, 3), _GROSOR_GRUESO, "#000000"))
+    idx = 2
+    for _dia in dias:
+        estilo.append(("BOX", (idx, 0), (idx + n_unidades - 1, 0), _GROSOR_GRUESO, "#000000"))
+        idx += n_unidades
     idx = 2
     for _dia in dias:
         idx += n_unidades

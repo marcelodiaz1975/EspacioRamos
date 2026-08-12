@@ -1,10 +1,11 @@
 import pytest
+from reportlab.lib import colors
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.pdf.estilos import FUENTE_NEGRITA
+from app.pdf.estilos import COLOR_DIA_GRILLA, COLOR_NIVEL_1, FUENTE, FUENTE_NEGRITA
 from app.pdf.grilla_pdf import _partir_etiqueta_unidad, _tabla_grilla_edificio, _tamano_que_entra
 from app.repositorio.registro import obtener_repositorio
 
@@ -126,3 +127,50 @@ def test_grilla_con_columnas_angostas_no_envuelve_el_piso(conn):
 
 def test_partir_etiqueta_unidad_formato_inesperado_no_rompe():
     assert _partir_etiqueta_unidad("Consultorio único") == ("Consultorio único", "")
+
+
+def test_tamano_que_entra_mide_con_la_fuente_indicada():
+    """Con una fuente angosta (no negrita) entra un tamaño más grande que
+    con la negrita en el mismo ancho — la medición tiene que usar la
+    fuente real de dibujo, no una fija."""
+    ancho = stringWidth("EP", FUENTE_NEGRITA, 8) / 0.85 + 0.5
+    tamano_negrita = _tamano_que_entra(["EP"], ancho, tamano_max=8, fuente=FUENTE_NEGRITA)
+    tamano_regular = _tamano_que_entra(["EP"], ancho, tamano_max=8, fuente=FUENTE)
+    assert tamano_regular >= tamano_negrita
+
+
+def test_piso_y_letra_son_blancos_sin_negrita(conn):
+    unidades = _unidades_ficticias(2)
+    tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9], ancho=400)
+    celda_piso = tabla._cellvalues[2][2]
+    assert celda_piso.style.fontName == FUENTE
+    assert celda_piso.style.textColor == colors.white
+
+
+def test_divisor_piso_letra_es_del_mismo_azul_que_el_fondo(conn):
+    unidades = _unidades_ficticias(2)
+    tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9], ancho=400)
+    lineas = [cmd for cmd in tabla._linecmds if cmd[0] == "LINEBELOW" and cmd[1][1] == 2]
+    assert lineas, "no se encontró el LINEBELOW de la fila de piso"
+    assert lineas[0][4] == COLOR_NIVEL_1
+
+
+def test_dia_de_la_semana_usa_color_fuerte_y_fuente_mas_grande(conn):
+    unidades = _unidades_ficticias(2)
+    tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9], ancho=400)
+    colores_fila_dia = {cmd[3] for cmd in tabla._bkgrndcmds if cmd[1] == (2, 0)}
+    assert COLOR_DIA_GRILLA in colores_fila_dia
+
+    tamano_dia = tabla._cellStyles[0][2].fontsize
+    assert tamano_dia > 6  # más grande que el tamaño base de la grilla (6)
+
+
+def test_sv_tiene_fuente_autoajustable(conn):
+    """Con muchas unidades (columnas angostas) el tamaño de "S/V" tiene que
+    reducirse para no desbordar la celda."""
+    unidades_pocas = _unidades_ficticias(1)
+    unidades_muchas = _unidades_ficticias(8)
+    tabla_ancha = _tabla_grilla_edificio(conn, unidades_pocas, grilla={}, horas=[9], ancho=500)
+    tabla_angosta = _tabla_grilla_edificio(conn, unidades_muchas, grilla={}, horas=[9], ancho=500)
+
+    assert tabla_angosta._cellStyles[4][2].fontsize <= tabla_ancha._cellStyles[4][2].fontsize

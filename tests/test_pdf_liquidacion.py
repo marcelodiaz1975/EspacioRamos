@@ -63,9 +63,23 @@ def test_items_cuenta_respeta_el_orden_de_dc01(conn, profesional):
     assert conceptos[0].startswith("Importe bruto correspondiente a la reserva regular de agosto")
     assert conceptos[1].startswith("Descuento (")
     assert conceptos[2] == "Subtotal por reserva para el mes de agosto"
-    assert conceptos[3] == "Saldo pendiente de la liquidación anterior"
+    assert conceptos[3] == "Saldo de la liquidación anterior"  # SaldoCuentaAnterior=0 en este profesional
     assert conceptos[-1] == "Liquidación a abonar por el profesional en el mes de agosto"
     assert items[-1][1] == pytest.approx(liquidacion.total)
+
+
+def test_items_cuenta_saldo_anterior_positivo_dice_pendiente(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=500)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    assert items[3][0] == "Saldo pendiente de la liquidación anterior"
+
+
+def test_items_cuenta_saldo_anterior_negativo_dice_a_favor(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=-500)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    assert items[3][0] == "Saldo a favor del profesional de la liquidación anterior"
 
 
 def test_monto_en_letras_casos_basicos():
@@ -201,3 +215,37 @@ def test_valores_no_incluye_edificios_de_otra_localidad(conn, profesional, tmp_p
     ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
     texto = _texto_pdf(ruta)
     assert "San Justo Norte" not in texto
+
+
+def test_titulo_dice_valor_con_descuento_no_c_barra(conn, profesional, tmp_path):
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Valor con descuento" in texto
+    assert "Valor c/descuento" not in texto
+
+
+def test_columnas_valor_regular_y_con_descuento_tienen_el_mismo_ancho():
+    from app.pdf.liquidacion_pdf import _tabla_consultorios_y_horas
+
+    filas = [{
+        "edificio": "Ramos 1", "unidad": '7mo "L"', "consultorio": 1,
+        "valor_regular": 1000.0, "desc_pct": 10, "valor_con_descuento": 900.0, "horas": 3,
+    }]
+    tabla = _tabla_consultorios_y_horas(filas, ancho=500, decimales=2)
+    assert tabla._colWidths[3] == pytest.approx(tabla._colWidths[5])
+
+
+def test_fotos_de_liquidacion_no_muestran_apto_camilla(conn, profesional, consultorio, tmp_path):
+    obtener_repositorio(conn, "Consultorio").actualizar(consultorio, AptoCamilla=1)
+    ruta_foto = tmp_path / "foto.jpg"
+    from PIL import Image as ImagenPIL
+    ImagenPIL.new("RGB", (400, 300), color="red").save(ruta_foto)
+    obtener_repositorio(conn, "Imagen").crear(
+        IdConsultorio=consultorio, RutaArchivo=str(ruta_foto), NumeroOrden=1, Descripcion="foto",
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Apto camilla" not in texto
+    assert "Consultorio 1 - 7mo \"L\" - Ramos 1" in texto

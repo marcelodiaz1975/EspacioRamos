@@ -25,7 +25,7 @@ FUENTE_NEGRITA_ITALICA = "Helvetica-BoldOblique"
 COLOR_NIVEL_1 = colors.HexColor("#2E86AB")
 COLOR_NIVEL_2 = colors.HexColor("#E07B39")
 COLOR_NIVEL_3 = colors.HexColor("#3D3D3D")
-COLOR_DIA_GRILLA = colors.HexColor("#6B0000")
+COLOR_DIA_GRILLA = colors.HexColor("#0047AB")  # azul fuerte, distinto de COLOR_NIVEL_1 — encabezado de días de la grilla
 
 COLOR_VERDE = colors.HexColor("#4CAF50")
 COLOR_AMARILLO = colors.HexColor("#F5D547")
@@ -140,7 +140,7 @@ def encabezado_espacio(
 
     story = []
     if ruta_logo and os.path.isfile(ruta_logo):
-        logo = Image(ruta_logo, width=ancho * 0.45, height=3 * cm, kind="proportional")
+        logo = Image(ruta_logo, width=ancho, height=5 * cm, kind="proportional")
         logo.hAlign = "CENTER"
         story.append(logo)
     else:

@@ -33,6 +33,7 @@ from math import ceil
 
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.units import cm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, parsear_periodo, primer_dia_mes, ultimo_dia_mes
@@ -249,7 +250,13 @@ def _items_cuenta(
         )
     items.append((concepto_desc, -(liquidacion.bruto - liquidacion.subtotal_reserva), False))
     items.append((f"Subtotal por reserva para el mes de {mes_actual_texto}", liquidacion.subtotal_reserva, True))
-    items.append(("Saldo pendiente de la liquidación anterior", liquidacion.saldo_anterior, False))
+    if liquidacion.saldo_anterior > 0:
+        concepto_saldo = "Saldo pendiente de la liquidación anterior"
+    elif liquidacion.saldo_anterior < 0:
+        concepto_saldo = "Saldo a favor del profesional de la liquidación anterior"
+    else:
+        concepto_saldo = "Saldo de la liquidación anterior"
+    items.append((concepto_saldo, liquidacion.saldo_anterior, False))
 
     for f in liquidacion.descuentos_feriados:
         dia_semana, fecha = _dia_y_fecha(f.fecha)
@@ -403,17 +410,37 @@ def _consultorios_y_horas(
 
 
 def _tabla_consultorios_y_horas(filas_datos: list[dict], ancho: float, decimales: int) -> Table:
-    filas = [["Edificio", "Unidad", "Consul.", "Valor regular", "Desc.", "Valor c/descuento", "Horas mensuales"]]
+    filas = [["Edificio", "Unidad", "Consul.", "Valor regular", "Desc.", "Valor con descuento", "Horas mensuales"]]
     for f in filas_datos:
         filas.append([
             f["edificio"], f["unidad"], str(f["consultorio"]), formatear_moneda(f["valor_regular"], decimales),
             f"{f['desc_pct']:g}%", formatear_moneda(f["valor_con_descuento"], decimales), f"{f['horas']:g}",
         ])
-    anchos = [ancho * p for p in (0.17, 0.14, 0.08, 0.15, 0.08, 0.17, 0.21)]
+
+    # "Valor regular" y "Valor con descuento" van al mismo ancho — el que
+    # necesite el título más largo de los dos para no cortarse — sacando
+    # la diferencia de "Horas mensuales" en vez de fracciones fijas, así
+    # el ajuste sigue siendo válido si cambia cualquiera de los dos textos.
+    padding = 12  # LEFT+RIGHTPADDING por defecto de reportlab (6pt c/u)
+    ancho_valor_regular = ancho * 0.15
+    ancho_valor_descuento = ancho * 0.17
+    ancho_horas = ancho * 0.21
+    minimo_valor = max(
+        stringWidth("Valor regular", FUENTE_NEGRITA, 8),
+        stringWidth("Valor con descuento", FUENTE_NEGRITA, 8),
+    ) + padding
+    ancho_columna_valor = max(ancho_valor_regular, ancho_valor_descuento, minimo_valor)
+    delta = (ancho_columna_valor - ancho_valor_regular) + (ancho_columna_valor - ancho_valor_descuento)
+    minimo_horas = stringWidth("Horas mensuales", FUENTE_NEGRITA, 8) + padding
+    ancho_horas = max(ancho_horas - delta, minimo_horas)
+
+    anchos = [ancho * 0.17, ancho * 0.14, ancho * 0.08, ancho_columna_valor, ancho * 0.08, ancho_columna_valor, ancho_horas]
     tabla = Table(filas, colWidths=anchos, repeatRows=1)
     tabla.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA), ("FONTNAME", (0, 1), (-1, -1), FUENTE),
-        ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (2, 0), (-1, -1), "CENTER"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"), ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+        ("ALIGN", (2, 1), (-1, -1), "CENTER"),
         ("GRID", (0, 0), (-1, -1), 0.5, "#000000"), ("BACKGROUND", (0, 0), (-1, 0), COLOR_NIVEL_1),
         ("TEXTCOLOR", (0, 0), (-1, 0), "#FFFFFF"),
     ]))
@@ -610,7 +637,7 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
     story.append(Spacer(1, 6))
     story.append(encabezado(2, "Fotos de los consultorios reservados", ancho))
     story.append(Spacer(1, 6))
-    story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=True))
+    story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=False))
 
     condiciones_flowables = condiciones_normas(conn)
     if condiciones_flowables:

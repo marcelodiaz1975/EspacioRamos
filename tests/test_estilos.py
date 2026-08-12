@@ -46,6 +46,18 @@ def test_encabezado_espacio_con_logo_usa_imagen(conn, tmp_path):
     assert any(isinstance(f, Image) for f in story)
 
 
+def test_encabezado_espacio_logo_ocupa_el_ancho_de_pagina(conn, tmp_path):
+    """Un logo bien apaisado (relación de aspecto grande) debe quedar
+    limitado por el ancho de la página, no por una fracción chica de él."""
+    ruta_logo = tmp_path / "logo.png"
+    ImagenPIL.new("RGB", (2000, 200), color="blue").save(ruta_logo)
+    obtener_repositorio(conn, "Configuracion").actualizar(1, RutaLogo=str(ruta_logo))
+
+    story = encabezado_espacio(conn, ancho=500)
+    logo = next(f for f in story if isinstance(f, Image))
+    assert logo.drawWidth == pytest.approx(500)
+
+
 def test_encabezado_espacio_muestra_localidad_solo_si_se_pide(conn):
     sin_localidad = encabezado_espacio(conn, ancho=500, mostrar_localidad=False, localidad="Ramos Mejía")
     con_localidad = encabezado_espacio(conn, ancho=500, mostrar_localidad=True, localidad="Ramos Mejía")
