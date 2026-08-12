@@ -7,11 +7,15 @@ cada uno con su propio color/alto/tamaño de fuente.
 """
 from __future__ import annotations
 
+import os
+import sqlite3
+
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import Flowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 FUENTE = "Helvetica"
 FUENTE_NEGRITA = "Helvetica-Bold"
@@ -86,7 +90,66 @@ def estilo_texto(tamano: int = 9, negrita: bool = False, italica: bool = False, 
     return ParagraphStyle(name="texto", fontName=fuente, fontSize=tamano, leading=tamano * 1.25, **kwargs)
 
 
-def formatear_moneda(monto: float) -> str:
-    texto = f"{abs(monto):,.2f}"
+def decimales_configurados(conn) -> int:
+    """`Configuracion.CantidadDecimales` (default 2) — parámetro que el
+    usuario puede ajustar desde Configuración general sin tocar código."""
+    fila = conn.execute("SELECT CantidadDecimales FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    return int(fila["CantidadDecimales"]) if fila and fila["CantidadDecimales"] is not None else 2
+
+
+def formatear_moneda(monto: float, decimales: int = 2) -> str:
+    texto = f"{abs(monto):,.{decimales}f}"
     texto = texto.replace(",", "_").replace(".", ",").replace("_", ".")
     return f"-$ {texto}" if monto < 0 else f"$ {texto}"
+
+
+class LineaSeparadora(Flowable):
+    """Línea horizontal simple, para separar el encabezado del resto del
+    documento (compartida por todos los PDFs del sistema)."""
+
+    def __init__(self, ancho: float, grosor: float = 1.2, color=None):
+        super().__init__()
+        self.ancho, self.grosor, self.color = ancho, grosor, color or COLOR_NIVEL_1
+
+    def wrap(self, availWidth, availHeight):
+        return self.ancho, self.grosor + 4
+
+    def draw(self):
+        self.canv.setStrokeColor(self.color)
+        self.canv.setLineWidth(self.grosor)
+        self.canv.line(0, 2, self.ancho, 2)
+
+
+def encabezado_espacio(
+    conn: sqlite3.Connection, ancho: float, *, mostrar_localidad: bool = False, localidad: str | None = None,
+) -> list:
+    """Encabezado común a los PDFs del sistema: logo centrado (si hay uno
+    configurado en `Configuracion.RutaLogo` y el archivo existe — si no,
+    se cae al nombre del espacio en texto, igual que con las fotos de
+    consultorio que no están cargadas todavía), localidad debajo cuando
+    corresponde, y la línea separatoria.
+
+    `mostrar_localidad` lo decide cada PDF: en Liquidación no se muestra
+    (un profesional puede tener reservas en edificios de más de una
+    localidad, no hay una sola localidad "de este documento"); en
+    Disponibilidad/Propuesta sí, porque esos PDFs ya se generan un
+    archivo distinto por localidad cuando el espacio abarca más de una."""
+    cfg = conn.execute("SELECT NombreEspacio, RutaLogo FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    nombre_espacio = ((cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos").upper()
+    ruta_logo = cfg["RutaLogo"] if cfg else None
+
+    story = []
+    if ruta_logo and os.path.isfile(ruta_logo):
+        logo = Image(ruta_logo, width=ancho * 0.45, height=3 * cm, kind="proportional")
+        logo.hAlign = "CENTER"
+        story.append(logo)
+    else:
+        story.append(Paragraph(nombre_espacio, estilo_texto(20, negrita=True, alignment=TA_CENTER)))
+
+    if mostrar_localidad and localidad:
+        story.append(Paragraph(localidad, estilo_texto(10, alignment=TA_CENTER)))
+
+    story.append(Spacer(1, 4))
+    story.append(LineaSeparadora(ancho))
+    story.append(Spacer(1, 10))
+    return story

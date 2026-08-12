@@ -497,5 +497,7 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     FrecuenciaBackupDrive TEXT,
     ModoFechaFicticia INTEGER NOT NULL DEFAULT 0,
     FechaFicticia TEXT,
-    MensajesPlural INTEGER NOT NULL DEFAULT 1
+    MensajesPlural INTEGER NOT NULL DEFAULT 1,
+    CantidadDecimales INTEGER NOT NULL DEFAULT 2,
+    RutaLogo TEXT
 );

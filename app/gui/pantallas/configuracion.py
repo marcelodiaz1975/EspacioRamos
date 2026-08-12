@@ -29,6 +29,7 @@ _CAMPOS_TEXTO = [
     ("RangosEstadisticasOcupacion", "Rangos de estadísticas de ocupación (JSON)"),
     ("FrecuenciaBackupDrive", "Frecuencia de backup a Drive"),
     ("FechaFicticia", "Fecha ficticia (AAAA-MM-DD)"),
+    ("RutaLogo", "Ruta del archivo de logo (PNG/JPG)"),
 ]
 _CAMPOS_NUMERICOS = [
     ("HoraInicioGrilla", "Hora inicio de grilla"),
@@ -44,6 +45,7 @@ _CAMPOS_NUMERICOS = [
     ("DiasAntesFinMesRecordatorioGeneral", "Días antes de fin de mes: recordatorio general"),
     ("RetencionHistorialListaEsperaAnios", "Retención historial lista de espera (años)"),
     ("TamanoMaximoImagenMB", "Tamaño máximo de imagen (MB)"),
+    ("CantidadDecimales", "Cantidad de decimales en los montos"),
 ]
 _CAMPOS_BOOLEANOS = [
     ("RecargoAisladasActivoPorDefecto", "Recargo de aisladas activo por defecto"),

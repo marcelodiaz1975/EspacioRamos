@@ -50,6 +50,18 @@ def test_guardar_persiste_booleano(qtbot, conn):
     assert fila["ModoFechaFicticia"] == 1
 
 
+def test_guardar_ruta_logo_y_decimales(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["RutaLogo"].setText("/tmp/logo.png")
+    pantalla._entradas["CantidadDecimales"].setText("0")
+    pantalla._guardar()
+
+    fila = conn.execute("SELECT RutaLogo, CantidadDecimales FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    assert fila["RutaLogo"] == "/tmp/logo.png"
+    assert fila["CantidadDecimales"] == 0.0
+
+
 def test_guardar_con_numero_invalido_no_persiste(qtbot, conn):
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)

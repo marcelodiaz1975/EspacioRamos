@@ -133,10 +133,10 @@ def test_importar_profesional_cabeza_de_equipo(conn, tmp_path):
     wb = load_workbook(ruta)
     fila_r = ["R", "R1", "Lo Veci", "María Virginia Lo Veci", "Virginia", "Virgi", "Femenino",
               "28456789", "27-28456789-3", "Monotributo", None, None, None, None, "1145678901",
-              None, None, "Lic.", None, None, None, None, None, None, None]
+              None, None, "Lic.", None, None, None, None, None, None, None, None]
     fila_e = ["E", "E1", "Gomez", "Ana Gomez", "Ana", None, "Femenino",
               "30111222", "27-30111222-3", "Monotributo", None, None, None, None, "1145678902",
-              None, None, "Lic.", None, None, None, "R1", None, None, None]
+              None, None, "Lic.", None, None, None, None, "R1", None, None, None]
     wb["Profesional"].append(fila_r)
     wb["Profesional"].append(fila_e)
     wb.save(ruta)
@@ -148,6 +148,28 @@ def test_importar_profesional_cabeza_de_equipo(conn, tmp_path):
     r1 = obtener_repositorio(conn, "Profesional").listar(IdCodigo="R1")[0]
     e1 = obtener_repositorio(conn, "Profesional").listar(IdCodigo="E1")[0]
     assert e1["ProfesionalCabezaEquipo"] == r1["IdProfesional"]
+
+
+def test_importar_saldo_cuenta_anterior(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    encabezados = [c.value for c in wb["Profesional"][1]]
+    assert "SaldoCuentaAnterior" in encabezados
+    columna_saldo = encabezados.index("SaldoCuentaAnterior")
+
+    fila = [None] * len(encabezados)
+    fila[encabezados.index("CategoriaProfesional")] = "R"
+    fila[encabezados.index("IdCodigo")] = "R1"
+    fila[encabezados.index("Apellido")] = "Lo Veci"
+    fila[columna_saldo] = 15000.50
+    wb["Profesional"].append(fila)
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert not resultados["Profesional"].errores
+
+    r1 = obtener_repositorio(conn, "Profesional").listar(IdCodigo="R1")[0]
+    assert r1["SaldoCuentaAnterior"] == 15000.50
 
 
 def test_importar_fechas_especiales(conn, tmp_path):

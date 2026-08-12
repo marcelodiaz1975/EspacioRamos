@@ -48,3 +48,15 @@ def test_sembrar_es_idempotente(conn):
     sembrar_valores_por_defecto(conn)
     assert len(obtener_repositorio(conn, "BloqueRigido").listar()) == 2
     assert len(obtener_repositorio(conn, "Profesion").listar()) == 12
+
+
+def test_condiciones_normas_por_defecto(conn):
+    condiciones = obtener_repositorio(conn, "CondicionNorma").listar()
+    assert len(condiciones) == 21
+    numeros = sorted(c["Numero"] for c in condiciones)
+    assert numeros == list(range(1, 22))
+    primera = next(c for c in condiciones if c["Numero"] == 1)
+    assert primera["Titulo"] == "Forma de pago"
+    ultima = next(c for c in condiciones if c["Numero"] == 21)
+    assert ultima["Titulo"] == "Conformidad y cumplimiento"
+    assert all(c["Activo"] == 1 for c in condiciones)

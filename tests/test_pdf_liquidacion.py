@@ -1,3 +1,4 @@
+import fitz
 import pytest
 
 from app.db.init_db import init_database
@@ -83,3 +84,57 @@ def test_generar_pdf_liquidacion_crea_archivo_valido(conn, profesional, tmp_path
         contenido = f.read()
     assert contenido.startswith(b"%PDF")
     assert len(contenido) > 1000
+
+
+def _texto_pdf(ruta: str) -> str:
+    doc = fitz.open(ruta)
+    return "\n".join(pagina.get_text() for pagina in doc)
+
+
+def test_titulo_dice_liquidacion_periodo_no_detalle_reserva(conn, profesional, tmp_path):
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Liquidación período 08/2026 - Lic. Marcela Lo Veci" in texto
+    assert "Detalle reserva" not in texto
+
+
+def test_nota_de_direccion_del_edificio_aparece(conn, profesional, tmp_path):
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Edificio Ramos 1: Corresponde a Av. Rivadavia 1234, CABA." in texto
+
+
+def test_barra_de_edificio_incluye_domicilio(conn, profesional, tmp_path):
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Edificio Ramos 1 - Av. Rivadavia 1234, CABA" in texto
+
+
+def test_condiciones_y_normas_sembradas_aparecen(conn, profesional, tmp_path):
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "CONDICIONES Y NORMAS GENERALES" in texto.upper()
+    assert "FORMA DE PAGO" in texto.upper()
+    assert "CONFORMIDAD Y CUMPLIMIENTO" in texto.upper()
+
+
+def test_decimales_configurados_en_0_no_muestra_centavos(conn, profesional, tmp_path):
+    from app.pdf.estilos import formatear_moneda
+
+    obtener_repositorio(conn, "Configuracion").actualizar(1, CantidadDecimales=0)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert formatear_moneda(liquidacion.total, decimales=0) in texto
+    assert formatear_moneda(liquidacion.total, decimales=2) not in texto
+
+
+def test_fotos_sin_cargar_muestra_mensaje(conn, profesional, tmp_path):
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Sin fotos cargadas." in texto

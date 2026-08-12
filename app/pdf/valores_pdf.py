@@ -6,7 +6,7 @@ import sqlite3
 
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
-from app.pdf.estilos import COLOR_NIVEL_1, FUENTE_NEGRITA, estilo_texto, formatear_moneda
+from app.pdf.estilos import COLOR_NIVEL_1, FUENTE_NEGRITA, decimales_configurados, estilo_texto, formatear_moneda
 
 
 def rango_actualizacion(conn: sqlite3.Connection, periodo: str) -> tuple[str, str]:
@@ -28,6 +28,7 @@ def matriz_valores_edificio(
     `anonimizar_unidad` muestra "Unidad {IdUnidad}" en vez del Departamento
     real (sección 4.3, PDF de Propuesta, que va a profesionales NO
     activos)."""
+    decimales = decimales_configurados(conn)
     filas_bd = conn.execute(
         """
         SELECT u.IdUnidad, u.Departamento, c.NumeroConsultorio, c.ValorHoraRegularActual
@@ -48,7 +49,8 @@ def matriz_valores_edificio(
     filas = [encabezado_fila]
     for unidad, valores in por_unidad.items():
         filas.append(
-            [unidad] + [formatear_moneda(valores[n]) if n in valores else "—" for n in range(1, max_consultorios + 1)]
+            [unidad]
+            + [formatear_moneda(valores[n], decimales) if n in valores else "—" for n in range(1, max_consultorios + 1)]
         )
 
     ancho_unidad = ancho * 0.18
@@ -64,15 +66,33 @@ def matriz_valores_edificio(
 
 
 def bloques_esquema_descuentos(conn: sqlite3.Connection, ancho: float) -> list:
-    """Bloques horizontales de a 9 tramos ("Hs. semanales" / "Descuento")."""
+    """Bloques horizontales de a 9 tramos ("Hs. semanales" / "Descuento").
+
+    Si la cantidad de tramos no es múltiplo de 9, la última fila queda con
+    menos columnas que las anteriores — para que las filas se vean parejas
+    se completa con tramos "de relleno" que repiten el % tope (el de más
+    horas semanales), incrementando "Hasta Nhs" con el mismo paso que ya
+    usan los tramos reales. Así, si en el futuro se agregan o sacan
+    tramos, la última fila se sigue completando sola."""
     tramos = conn.execute(
         "SELECT * FROM EsquemaDescuentos WHERE Activo = 1 ORDER BY HorasSemanalesDesde"
     ).fetchall()
     if not tramos:
         return [Paragraph("Sin esquema de descuentos configurado.", estilo_texto(9))]
 
-    story = []
     por_bloque = 9
+    faltan = (-len(tramos)) % por_bloque
+    if faltan:
+        paso = tramos[-1]["HorasSemanalesHasta"] - tramos[-2]["HorasSemanalesHasta"] if len(tramos) >= 2 else 2
+        tope_pct = max(t["PorcentajeDescuento"] for t in tramos)
+        ultimo_hasta = tramos[-1]["HorasSemanalesHasta"]
+        relleno = []
+        for _ in range(faltan):
+            ultimo_hasta += paso
+            relleno.append({"HorasSemanalesHasta": ultimo_hasta, "PorcentajeDescuento": tope_pct})
+        tramos = list(tramos) + relleno
+
+    story = []
     for inicio in range(0, len(tramos), por_bloque):
         grupo = tramos[inicio:inicio + por_bloque]
         fila_horas = ["Hs. semanales"] + [f"Hasta {t['HorasSemanalesHasta']:g}hs" for t in grupo]
@@ -84,8 +104,8 @@ def bloques_esquema_descuentos(conn: sqlite3.Connection, ancho: float) -> list:
             ("FONTNAME", (0, 0), (-1, -1), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (-1, -1), 7),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("GRID", (0, 0), (-1, -1), 0.5, "#000000"),
-            ("BACKGROUND", (0, 0), (0, -1), "#6B0000"), ("TEXTCOLOR", (0, 0), (0, -1), "#FFFFFF"),
-            ("BACKGROUND", (1, 0), (-1, 0), "#6B0000"), ("TEXTCOLOR", (1, 0), (-1, 0), "#FFFFFF"),
+            ("BACKGROUND", (0, 0), (0, -1), COLOR_NIVEL_1), ("TEXTCOLOR", (0, 0), (0, -1), "#FFFFFF"),
+            ("BACKGROUND", (1, 0), (-1, 0), COLOR_NIVEL_1), ("TEXTCOLOR", (1, 0), (-1, 0), "#FFFFFF"),
         ]))
         story.append(tabla)
         story.append(Spacer(1, 4))

@@ -42,7 +42,7 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
         "Sexo", "DNI", "CUIT", "CondicionFiscal", "FechaNacimiento",
         "Domicilio", "DomicilioLocalidad", "TelefonoParticular", "Celular",
         "Email", "Profesion", "Tratamiento", "MatriculaNacional",
-        "MatriculaProvincial", "FechaContacto", "ProfesionalCabezaEquipo",
+        "MatriculaProvincial", "FechaContacto", "SaldoCuentaAnterior", "ProfesionalCabezaEquipo",
         "CampoLibre1", "CampoLibre2", "CampoLibre3",
     ],
     "ReservaRegular": [

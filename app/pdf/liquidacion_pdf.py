@@ -31,8 +31,9 @@ import sqlite3
 from datetime import date, timedelta
 from math import ceil
 
+from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.units import cm
-from reportlab.platypus import Flowable, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, parsear_periodo, primer_dia_mes, ultimo_dia_mes
 from app.negocio.feriados import feriados_relevantes_periodo
@@ -45,10 +46,13 @@ from app.pdf.estilos import (
     FUENTE_NEGRITA,
     FUENTE_NEGRITA_ITALICA,
     crear_documento,
+    decimales_configurados,
     encabezado,
+    encabezado_espacio,
     estilo_texto,
     formatear_moneda,
 )
+from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.pdf.grilla_pdf import secciones_disponibilidad
 from app.pdf.numeros_en_letras import en_letras_pesos
 from app.pdf.valores_pdf import (
@@ -58,22 +62,6 @@ from app.pdf.valores_pdf import (
     rango_actualizacion,
 )
 from app.repositorio.registro import obtener_repositorio
-
-
-class _Regla(Flowable):
-    """Línea horizontal simple, para separar el título del resto."""
-
-    def __init__(self, ancho: float, grosor: float = 1.2, color=COLOR_NIVEL_1):
-        super().__init__()
-        self.ancho, self.grosor, self.color = ancho, grosor, color
-
-    def wrap(self, availWidth, availHeight):
-        return self.ancho, self.grosor + 4
-
-    def draw(self):
-        self.canv.setStrokeColor(self.color)
-        self.canv.setLineWidth(self.grosor)
-        self.canv.line(0, 2, self.ancho, 2)
 
 
 def _nombre_archivo(periodo: str, profesional: sqlite3.Row) -> str:
@@ -110,6 +98,14 @@ def _lugar(consultorios: dict, id_consultorio: int) -> str:
     return f"consul {c['NumeroConsultorio']} del {c['Departamento']} - {c['NombreEdificio']}"
 
 
+def _ids_consultorio_reservados(conn: sqlite3.Connection, ids: list[int]) -> list[int]:
+    placeholders = ", ".join("?" for _ in ids)
+    filas = conn.execute(
+        f"SELECT DISTINCT IdConsultorio FROM ReservaRegular WHERE IdProfesional IN ({placeholders})", ids,
+    ).fetchall()
+    return [f["IdConsultorio"] for f in filas]
+
+
 def _dia_y_fecha(fecha_iso: str) -> tuple[str, str]:
     dia_semana = DIAS_SEMANA[date.fromisoformat(fecha_iso).weekday()]
     return dia_semana, fecha_corta(fecha_iso)
@@ -122,7 +118,8 @@ def _bloques_horarios(conn: sqlite3.Connection, ids: list[int]) -> list[sqlite3.
     filas = conn.execute(
         f"""
         SELECT rr.DiaSemana, rr.HoraInicio, rr.HoraFin, rr.VigenciaInicio, rr.VigenciaFin,
-               c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio, e.IdEdificio
+               c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio, e.IdEdificio,
+               e.Domicilio, e.DomicilioLocalidad
         FROM ReservaRegular rr
         JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
         JOIN Unidad u ON u.IdUnidad = c.IdUnidad
@@ -135,6 +132,24 @@ def _bloques_horarios(conn: sqlite3.Connection, ids: list[int]) -> list[sqlite3.
         filas,
         key=lambda f: (f["NombreEdificio"], DIAS_SEMANA.index(f["DiaSemana"]), f["HoraInicio"]),
     )
+
+
+def _direccion_edificio(info: sqlite3.Row) -> str:
+    partes = [p for p in (info["Domicilio"], info["DomicilioLocalidad"]) if p]
+    return ", ".join(partes)
+
+
+def _notas_direcciones_edificios(edificios: dict[int, sqlite3.Row]) -> list:
+    """Aclaración con asterisco de a qué domicilio corresponde cada
+    edificio mencionado en la tabla de bloques horarios, ej: "* Edificio
+    Ramos 1: Corresponde a Av. Rivadavia 13876, Ramos Mejía."."""
+    style = estilo_texto(8)
+    story = []
+    for info in edificios.values():
+        direccion = _direccion_edificio(info)
+        if direccion:
+            story.append(Paragraph(f"* Edificio {info['NombreEdificio']}: Corresponde a {direccion}.", style))
+    return story
 
 
 def _tabla_bloques_horarios(bloques: list[sqlite3.Row], ancho: float) -> Table:
@@ -261,7 +276,7 @@ def _items_cuenta(
     return items
 
 
-def _tabla_items(items: list[tuple[str, float, bool]], ancho: float) -> list:
+def _tabla_items(items: list[tuple[str, float, bool]], ancho: float, decimales: int) -> list:
     """Filas simples (sin grilla, como el modelo real) para los ítems, y
     una caja con borde para cada fila marcada `es_subtotal` (el subtotal
     intermedio y el total final)."""
@@ -270,21 +285,21 @@ def _tabla_items(items: list[tuple[str, float, bool]], ancho: float) -> list:
     for concepto, importe, es_subtotal in items[:-1]:
         if es_subtotal:
             if filas_simples:
-                story.append(_tabla_plana(filas_simples, ancho))
+                story.append(_tabla_plana(filas_simples, ancho, decimales))
                 filas_simples = []
-            story.append(_caja_subtotal(concepto, importe, ancho))
+            story.append(_caja_subtotal(concepto, importe, ancho, decimales))
         else:
             filas_simples.append((concepto, importe))
     if filas_simples:
-        story.append(_tabla_plana(filas_simples, ancho))
+        story.append(_tabla_plana(filas_simples, ancho, decimales))
 
     concepto_total, importe_total, _ = items[-1]
-    story.append(_caja_total(concepto_total, importe_total, ancho))
+    story.append(_caja_total(concepto_total, importe_total, ancho, decimales))
     return story
 
 
-def _tabla_plana(filas: list[tuple[str, float]], ancho: float) -> Table:
-    datos = [[concepto, formatear_moneda(importe)] for concepto, importe in filas]
+def _tabla_plana(filas: list[tuple[str, float]], ancho: float, decimales: int) -> Table:
+    datos = [[concepto, formatear_moneda(importe, decimales)] for concepto, importe in filas]
     tabla = Table(datos, colWidths=[ancho * 0.78, ancho * 0.22])
     estilo = [
         ("FONTNAME", (0, 0), (-1, -1), FUENTE), ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -293,13 +308,13 @@ def _tabla_plana(filas: list[tuple[str, float]], ancho: float) -> Table:
     ]
     for i, (_, importe) in enumerate(filas):
         if importe < 0:
-            estilo.append(("TEXTCOLOR", (0, i), (-1, i), COLOR_ROJO))
+            estilo.append(("TEXTCOLOR", (1, i), (1, i), COLOR_ROJO))
     tabla.setStyle(TableStyle(estilo))
     return tabla
 
 
-def _caja_subtotal(concepto: str, importe: float, ancho: float) -> Table:
-    tabla = Table([[concepto, formatear_moneda(importe)]], colWidths=[ancho * 0.78, ancho * 0.22])
+def _caja_subtotal(concepto: str, importe: float, ancho: float, decimales: int) -> Table:
+    tabla = Table([[concepto, formatear_moneda(importe, decimales)]], colWidths=[ancho * 0.78, ancho * 0.22])
     tabla.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("ALIGN", (1, 0), (1, 0), "RIGHT"), ("BOX", (0, 0), (-1, -1), 1, "#000000"),
@@ -309,17 +324,19 @@ def _caja_subtotal(concepto: str, importe: float, ancho: float) -> Table:
     return tabla
 
 
-def _caja_total(concepto: str, importe: float, ancho: float) -> Table:
+def _caja_total(concepto: str, importe: float, ancho: float, decimales: int) -> Table:
+    style_letras = estilo_texto(8, alignment=TA_RIGHT)
+    letras = Paragraph(en_letras_pesos(importe), style_letras)
     tabla = Table(
-        [[concepto, formatear_moneda(importe)], ["", en_letras_pesos(importe)]],
+        [[concepto, formatear_moneda(importe, decimales)], ["", letras]],
         colWidths=[ancho * 0.55, ancho * 0.45],
     )
     tabla.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (0, 1), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (0, 1), 10),
         ("FONTNAME", (1, 0), (1, 0), FUENTE_NEGRITA_ITALICA), ("FONTSIZE", (1, 0), (1, 0), 12),
-        ("FONTNAME", (1, 1), (1, 1), FUENTE), ("FONTSIZE", (1, 1), (1, 1), 8),
         ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("VALIGN", (0, 0), (0, 1), "MIDDLE"),
         ("SPAN", (0, 0), (0, 1)), ("BOX", (0, 0), (-1, -1), 1.2, "#000000"),
+        ("BACKGROUND", (0, 0), (-1, -1), "#EEEEEE"),
         ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
     ]))
@@ -363,12 +380,12 @@ def _consultorios_y_horas(
     return filas_resultado
 
 
-def _tabla_consultorios_y_horas(filas_datos: list[dict], ancho: float) -> Table:
+def _tabla_consultorios_y_horas(filas_datos: list[dict], ancho: float, decimales: int) -> Table:
     filas = [["Edificio", "Unidad", "Consul.", "Valor regular", "Desc.", "Valor c/descuento", "Horas mensuales"]]
     for f in filas_datos:
         filas.append([
-            f["edificio"], f["unidad"], str(f["consultorio"]), formatear_moneda(f["valor_regular"]),
-            f"{f['desc_pct']:g}%", formatear_moneda(f["valor_con_descuento"]), f"{f['horas']:g}",
+            f["edificio"], f["unidad"], str(f["consultorio"]), formatear_moneda(f["valor_regular"], decimales),
+            f"{f['desc_pct']:g}%", formatear_moneda(f["valor_con_descuento"], decimales), f"{f['horas']:g}",
         ])
     anchos = [ancho * p for p in (0.17, 0.14, 0.08, 0.15, 0.08, 0.17, 0.21)]
     tabla = Table(filas, colWidths=anchos, repeatRows=1)
@@ -416,16 +433,17 @@ def _recordatorios(conn: sqlite3.Connection, ids: list[int], ajuste_pct: float) 
 def _altura_estimada(
     n_bloques: int, n_items: int, n_consultorios: int, n_edificios_valores: int,
     n_tramos_descuento: int, n_recordatorios: int, n_edificios_disp: int, n_horas_disp: int,
-    n_condiciones: int,
+    n_condiciones: int, n_notas_direccion: int = 0, n_fotos: int = 0,
 ) -> float:
-    altura = 6 * cm  # título + subtítulo + línea
-    altura += 1.5 * cm + max(n_bloques, 1) * 0.55 * cm  # bloques horarios
+    altura = 4 * cm  # logo/nombre + línea
+    altura += 1.5 * cm + max(n_bloques, 1) * 0.55 * cm + n_notas_direccion * 0.4 * cm  # bloques horarios + notas
     altura += 1.5 * cm + n_items * 0.55 * cm + 3 * cm  # ítems + subtotal + total
     altura += 1.5 * cm + max(n_consultorios, 1) * 0.5 * cm + 1 * cm  # consultorios y horas
     altura += 1.5 * cm + n_edificios_valores * 3 * cm  # valores vigentes
     altura += 1.5 * cm + ceil(n_tramos_descuento / 9) * 1.4 * cm  # esquema descuentos
     altura += 1.5 * cm + max(n_recordatorios, 1) * 0.45 * cm  # recordatorios
     altura += n_edificios_disp * (2 * cm + n_horas_disp * 0.42 * cm + 3 * cm)  # disponibilidad
+    altura += 1.5 * cm + ceil(max(n_fotos, 1) / 2) * 6.8 * cm  # fotos
     altura += 1.5 * cm + n_condiciones * 1.3 * cm  # condiciones
     return altura * 1.15
 
@@ -437,7 +455,7 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
     archivo creado (`directorio` debe existir)."""
     profesional = obtener_repositorio(conn, "Profesional").obtener(liquidacion.id_profesional)
     cfg = conn.execute("SELECT * FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    nombre_espacio = ((cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos").upper()
+    decimales = decimales_configurados(conn)
 
     ids = ids_consolidados(conn, liquidacion.id_profesional)
     anio, mes = parsear_periodo(liquidacion.periodo)
@@ -457,14 +475,16 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
     mes_anterior_texto = mes_texto(mes_ant)
 
     bloques = _bloques_horarios(conn, ids)
-    edificios_bloques: dict[int, str] = {}
+    edificios_bloques: dict[int, sqlite3.Row] = {}
     for b in bloques:
-        edificios_bloques.setdefault(b["IdEdificio"], b["NombreEdificio"])
+        edificios_bloques.setdefault(b["IdEdificio"], b)
 
     items = _items_cuenta(liquidacion, consultorios, tipos_feriado_actual, mes_actual_texto, mes_anterior_texto)
     filas_consultorios = _consultorios_y_horas(
         conn, ids, primer_dia, ultimo_dia, consultorios, liquidacion.descuento_horas_pct
     )
+
+    imagenes = imagenes_de_consultorios(conn, _ids_consultorio_reservados(conn, ids))
 
     n_tramos_descuento = conn.execute("SELECT COUNT(*) FROM EsquemaDescuentos WHERE Activo = 1").fetchone()[0]
     n_condiciones = conn.execute("SELECT COUNT(*) FROM CondicionNorma WHERE Activo = 1").fetchone()[0]
@@ -475,48 +495,55 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         (cfg_grilla["HoraFinGrilla"] if cfg_grilla else 22) - (cfg_grilla["HoraInicioGrilla"] if cfg_grilla else 8)
     )
     n_edificios_disp = max(len(edificios_bloques), 1)
+    n_notas_direccion = sum(1 for info in edificios_bloques.values() if _direccion_edificio(info))
 
     altura = _altura_estimada(
         n_bloques=len(bloques), n_items=len(items), n_consultorios=len(filas_consultorios),
         n_edificios_valores=len(edificios_bloques), n_tramos_descuento=n_tramos_descuento,
         n_recordatorios=3, n_edificios_disp=n_edificios_disp, n_horas_disp=n_horas_disp,
-        n_condiciones=n_condiciones,
+        n_condiciones=n_condiciones, n_notas_direccion=n_notas_direccion, n_fotos=len(imagenes),
     )
 
     ruta = os.path.join(directorio, _nombre_archivo(liquidacion.periodo, profesional))
     doc, ancho = crear_documento(ruta, altura=altura)
     story = []
 
-    story.append(Paragraph(nombre_espacio, estilo_texto(20, negrita=True)))
-    story.append(Paragraph(f"Liquidación mensual - {_nombre_completo(profesional)}", estilo_texto(11)))
-    story.append(Spacer(1, 4))
-    story.append(_Regla(ancho))
-    story.append(Spacer(1, 10))
+    # Logo centrado (o el nombre del espacio si no hay uno configurado) y
+    # línea separatoria — sin subtítulo ni localidad: un profesional puede
+    # reservar en edificios de más de una localidad, no hay una localidad
+    # única "de este documento" como sí la hay en Disponibilidad/Propuesta.
+    story.extend(encabezado_espacio(conn, ancho, mostrar_localidad=False))
 
-    titulo_detalle = f"Detalle reserva {periodo_mm_aaaa(liquidacion.periodo)} - {_nombre_completo(profesional)}"
+    titulo_detalle = f"Liquidación período {periodo_mm_aaaa(liquidacion.periodo)} - {_nombre_completo(profesional)}"
     story.append(encabezado(1, titulo_detalle, ancho))
     story.append(Spacer(1, 6))
 
     story.append(encabezado(2, "Bloques de horarios regulares reservados", ancho))
+    story.append(Spacer(1, 6))
     if bloques:
         story.append(_tabla_bloques_horarios(bloques, ancho))
     else:
         story.append(Paragraph("Sin bloques horarios regulares vigentes.", estilo_texto(9)))
+    notas_direcciones = _notas_direcciones_edificios(edificios_bloques)
+    if notas_direcciones:
+        story.append(Spacer(1, 3))
+        story.extend(notas_direcciones)
     story.append(Spacer(1, 8))
 
     story.append(encabezado(2, "Liquidación mensual mes en curso", ancho))
-    story.append(Spacer(1, 4))
-    story.extend(_tabla_items(items, ancho))
+    story.append(Spacer(1, 6))
+    story.extend(_tabla_items(items, ancho, decimales))
     story.append(Spacer(1, 8))
 
     story.append(encabezado(2, "Consultorios y cantidad de horas utilizadas por el profesional en el mes liquidado", ancho))
+    story.append(Spacer(1, 6))
     if filas_consultorios:
-        story.append(_tabla_consultorios_y_horas(filas_consultorios, ancho))
+        story.append(_tabla_consultorios_y_horas(filas_consultorios, ancho, decimales))
         total_horas = sum(f["horas"] for f in filas_consultorios)
         story.append(Spacer(1, 3))
         story.append(Paragraph(
             f"<para align=right><b>Total horas mensuales: {total_horas:g}hs - "
-            f"Subtotal liquidación: {formatear_moneda(liquidacion.subtotal_reserva)}</b></para>",
+            f"Subtotal liquidación: {formatear_moneda(liquidacion.subtotal_reserva, decimales)}</b></para>",
             estilo_texto(9),
         ))
     story.append(Spacer(1, 10))
@@ -527,16 +554,21 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
     )
     story.append(encabezado(2, titulo_valores, ancho))
-    for id_edificio, nombre_ed in edificios_bloques.items():
-        story.append(encabezado(3, f"Edificio {nombre_ed}", ancho))
+    for id_edificio, info in edificios_bloques.items():
+        story.append(Spacer(1, 6))
+        direccion = _direccion_edificio(info)
+        texto_edificio = f"Edificio {info['NombreEdificio']} - {direccion}" if direccion else f"Edificio {info['NombreEdificio']}"
+        story.append(encabezado(3, texto_edificio, ancho))
+        story.append(Spacer(1, 6))
         story.extend(matriz_valores_edificio(conn, id_edificio, ancho))
         story.append(Spacer(1, 6))
 
     story.append(encabezado(2, "Esquema de descuentos", ancho))
-    story.extend(bloques_esquema_descuentos(conn, ancho))
     story.append(Spacer(1, 6))
+    story.extend(bloques_esquema_descuentos(conn, ancho))
 
     story.append(encabezado(2, "Recordatorios varios para el profesional", ancho))
+    story.append(Spacer(1, 6))
     story.extend(_recordatorios(conn, ids, cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0))
     story.append(Spacer(1, 10))
 
@@ -545,11 +577,16 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         conn, anio, mes, ancho, fecha_titulo, ids_edificio=list(edificios_bloques.keys()) or None,
     ))
 
+    story.append(encabezado(2, "Fotos", ancho))
+    story.append(Spacer(1, 6))
+    story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=True))
+
     condiciones_flowables = condiciones_normas(conn)
     if condiciones_flowables:
         titulo_condiciones = "Condiciones y normas generales de convivencia relacionadas con la reserva en el espacio"
+        story.append(Spacer(1, 6))
         story.append(encabezado(2, titulo_condiciones, ancho))
-        story.append(Spacer(1, 4))
+        story.append(Spacer(1, 6))
         story.extend(condiciones_flowables)
 
     doc.build(story)
