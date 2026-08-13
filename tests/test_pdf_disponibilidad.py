@@ -2,7 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.pdf.disponibilidad_pdf import generar_pdf_disponibilidad
+from app.pdf.disponibilidad_pdf import generar_pdf_disponibilidad, generar_pdfs_disponibilidad_por_localidad
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -43,3 +43,17 @@ def test_nombre_archivo_incluye_localidad_si_hay_varias(conn, tmp_path):
     id_ed2 = _crear_edificio(conn, "San Justo 1", "San Justo")
     ruta = generar_pdf_disponibilidad(conn, str(tmp_path), ids_edificio=[id_ed2])
     assert "San Justo" in ruta
+
+
+def test_por_localidad_genera_un_archivo_separado_por_cada_una(conn, tmp_path):
+    _crear_edificio(conn, "Ramos 1", "CABA")
+    _crear_edificio(conn, "San Justo 1", "San Justo")
+
+    rutas = generar_pdfs_disponibilidad_por_localidad(conn, str(tmp_path))
+
+    assert len(rutas) == 2
+    assert any("CABA" in r for r in rutas)
+    assert any("San Justo" in r for r in rutas)
+    for ruta in rutas:
+        with open(ruta, "rb") as f:
+            assert f.read().startswith(b"%PDF")

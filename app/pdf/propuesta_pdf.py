@@ -39,7 +39,7 @@ from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import fecha_actual, parsear_periodo, periodo_actual
 from app.negocio.formato import fecha_larga, periodo_mm_aaaa
-from app.pdf.edificios_pdf import edificios_incluidos, ids_consultorio_de_edificios, sufijo_localidad
+from app.pdf.edificios_pdf import edificios_incluidos, hay_multiples_localidades, ids_consultorio_de_edificios, sufijo_localidad
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
     FUENTE,
@@ -75,7 +75,7 @@ def _si_no(valor) -> str:
 
 def _titulo_edificio(e: sqlite3.Row) -> str:
     direccion = ", ".join(p for p in (e["Domicilio"], e["DomicilioLocalidad"]) if p)
-    return f"{e['Nombre']} - {direccion}" if direccion else e["Nombre"]
+    return f"Edificio {e['Nombre']} - {direccion}" if direccion else f"Edificio {e['Nombre']}"
 
 
 def _encabezados_tabla(textos: list[str], tamano: int = 7) -> list[Paragraph]:
@@ -263,8 +263,9 @@ def generar_pdf_propuesta(
     fecha_titulo = fecha_larga(fecha_actual(conn).isoformat()).replace("/", "-")
     desde, hasta = rango_actualizacion(conn, periodo_actual(conn))
 
+    mostrar_localidad = hay_multiples_localidades(conn)
     localidades = sorted({e["DomicilioLocalidad"] for e in edificios if e["DomicilioLocalidad"]})
-    localidad_texto = " / ".join(localidades)
+    localidad_texto = " / ".join(localidades) if mostrar_localidad else ""
 
     n_unidades = 0
     n_consultorios = 0
@@ -301,7 +302,7 @@ def generar_pdf_propuesta(
     ruta = os.path.join(directorio, nombre_archivo)
     doc, ancho = crear_documento(ruta, altura=altura)
 
-    story = list(encabezado_espacio(conn, ancho, mostrar_localidad=bool(localidad_texto), localidad=localidad_texto or None))
+    story = list(encabezado_espacio(conn, ancho, mostrar_localidad=mostrar_localidad, localidad=localidad_texto or None))
 
     # ------------------------------------------------------- Detalles principales
     story.append(encabezado(1, "Detalles principales de la propuesta", ancho))
@@ -345,9 +346,11 @@ def generar_pdf_propuesta(
             ))
             story.append(Spacer(1, 10))
     else:
+        # Con un solo edificio, repetir "Edificio {Nombre}" arriba de la
+        # grilla es redundante (no hay otro edificio del que distinguirlo).
         story.extend(_bloque_disponibilidad(
             conn, edificios[0], anio, mes, ancho, fecha_titulo, nivel=2,
-            mostrar_encabezado_grid=True, desde=desde, hasta=hasta,
+            mostrar_encabezado_grid=False, desde=desde, hasta=hasta,
         ))
     story.append(Spacer(1, 10))
 
@@ -358,3 +361,15 @@ def generar_pdf_propuesta(
 
     doc.build(story)
     return ruta
+
+
+def generar_pdfs_propuesta_por_localidad(conn: sqlite3.Connection, directorio: str) -> list[str]:
+    """Un PDF de Propuesta por cada localidad con edificios cargados: nunca
+    mezcla edificios de distintas localidades en el mismo archivo. Los
+    edificios sin localidad cargada quedan agrupados aparte, en un único
+    archivo sin sufijo de localidad. Devuelve las rutas generadas."""
+    filas = conn.execute("SELECT IdEdificio, DomicilioLocalidad FROM Edificio").fetchall()
+    grupos: dict[str | None, list[int]] = {}
+    for f in filas:
+        grupos.setdefault(f["DomicilioLocalidad"], []).append(f["IdEdificio"])
+    return [generar_pdf_propuesta(conn, directorio, ids_edificio=ids) for ids in grupos.values()]

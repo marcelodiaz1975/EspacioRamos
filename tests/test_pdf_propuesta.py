@@ -3,7 +3,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.pdf.propuesta_pdf import generar_pdf_propuesta
+from app.pdf.propuesta_pdf import generar_pdf_propuesta, generar_pdfs_propuesta_por_localidad
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -54,3 +54,21 @@ def test_incluye_las_cuatro_secciones_de_nivel_1(conn, edificio_con_consultorio_
     assert "Fotos de los consultorios" in texto
     assert "Disponibilidad de consultorios al" in texto
     assert "Detalles complementarios de la propuesta" in texto
+
+
+def test_por_localidad_genera_un_archivo_separado_por_cada_una(conn, edificio_con_consultorio_y_foto, tmp_path):
+    """Nunca mezcla edificios de distintas localidades en el mismo PDF: un
+    edificio en San Justo no debe terminar en el mismo archivo que uno en
+    CABA (el de la fixture)."""
+    id_ed2 = obtener_repositorio(conn, "Edificio").crear(Nombre="San Justo 1", DomicilioLocalidad="San Justo")
+    id_unidad2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_ed2, Departamento="1ro A")
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad2, NumeroConsultorio=1, ValorHoraRegularActual=500)
+
+    rutas = generar_pdfs_propuesta_por_localidad(conn, str(tmp_path))
+
+    assert len(rutas) == 2
+    assert any("CABA" in r for r in rutas)
+    assert any("San Justo" in r for r in rutas)
+    for ruta in rutas:
+        with open(ruta, "rb") as f:
+            assert f.read().startswith(b"%PDF")

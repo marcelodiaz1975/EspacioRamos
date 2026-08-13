@@ -96,8 +96,10 @@ def _etiqueta_unidad(u: sqlite3.Row, anonimizar: bool) -> str:
     """Sección 4.3: el PDF de Propuesta va a profesionales NO activos y
     "muestra IdUnidad en lugar de departamento" — no debe revelar el
     nombre/número real de la unidad a un contacto que todavía no forma
-    parte del espacio."""
-    return f"Unidad {u['IdUnidad']}" if anonimizar else u["Departamento"]
+    parte del espacio. Solo el número (sin el prefijo "Unidad"), en el
+    mismo renglón grande/autoajustable que ya usa el piso real — la
+    palabra "UNIDAD" ya está en el renglón de arriba."""
+    return str(u["IdUnidad"]) if anonimizar else u["Departamento"]
 
 
 def _tamano_que_entra(
@@ -479,8 +481,16 @@ def secciones_disponibilidad(
     for u in unidades:
         por_edificio.setdefault(u["IdEdificio"], []).append(u)
         nombres[u["IdEdificio"]] = u["NombreEdificio"]
+    # Anonimizado (Propuesta): orden por número de unidad ascendente, no
+    # por piso — la etiqueta ya no muestra el piso real, así que ordenar
+    # por él saltearía sin ningún criterio visible ("Unidad 2" antes que
+    # "Unidad 1"). Sin anonimizar: piso ascendente y letra alfabética,
+    # como en el resto del sistema.
     for id_edificio in por_edificio:
-        por_edificio[id_edificio].sort(key=lambda u: clave_orden_unidad(u["Departamento"]))
+        if anonimizar_unidad:
+            por_edificio[id_edificio].sort(key=lambda u: u["IdUnidad"])
+        else:
+            por_edificio[id_edificio].sort(key=lambda u: clave_orden_unidad(u["Departamento"]))
 
     style_nota = estilo_texto(7, negrita=True, italica=True)
 

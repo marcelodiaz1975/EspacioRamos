@@ -56,3 +56,15 @@ def generar_pdf_disponibilidad(conn: sqlite3.Connection, directorio: str, ids_ed
 
     doc.build(story)
     return ruta
+
+
+def generar_pdfs_disponibilidad_por_localidad(conn: sqlite3.Connection, directorio: str) -> list[str]:
+    """Un PDF de Disponibilidad por cada localidad con edificios cargados:
+    nunca mezcla edificios de distintas localidades en el mismo archivo.
+    Los edificios sin localidad cargada quedan agrupados aparte, en un
+    único archivo sin sufijo de localidad. Devuelve las rutas generadas."""
+    filas = conn.execute("SELECT IdEdificio, DomicilioLocalidad FROM Edificio").fetchall()
+    grupos: dict[str | None, list[int]] = {}
+    for f in filas:
+        grupos.setdefault(f["DomicilioLocalidad"], []).append(f["IdEdificio"])
+    return [generar_pdf_disponibilidad(conn, directorio, ids_edificio=ids) for ids in grupos.values()]

@@ -24,14 +24,22 @@ def ids_consultorio_de_edificios(conn: sqlite3.Connection, ids_edificio: list[in
     return [f["IdConsultorio"] for f in filas]
 
 
-def sufijo_localidad(conn: sqlite3.Connection, edificios: list[sqlite3.Row]) -> str:
-    """Sección 4.1: "si hay edificios en más de una localidad" (en TODO el
-    sistema, no solo en este PDF puntual) "encabezado muestra la localidad
-    y nombre de archivo la incluye al final" — para desambiguar de cuál
-    localidad es este PDF en particular."""
+def hay_multiples_localidades(conn: sqlite3.Connection) -> bool:
+    """Sección 4.1: la localidad debajo del logo y el sufijo de localidad
+    en el nombre del archivo solo se muestran "si el espacio tiene
+    edificios en más de una localidad" (en TODO el sistema, no solo en
+    los edificios de este PDF puntual) — con una sola, aclararla es
+    redundante."""
     todas = {f["DomicilioLocalidad"] for f in conn.execute("SELECT DomicilioLocalidad FROM Edificio").fetchall()
              if f["DomicilioLocalidad"]}
-    if len(todas) <= 1:
+    return len(todas) > 1
+
+
+def sufijo_localidad(conn: sqlite3.Connection, edificios: list[sqlite3.Row]) -> str:
+    """" - {Localidad}" para desambiguar de cuál localidad es este PDF en
+    particular, cuando corresponde mostrarla (`hay_multiples_localidades`)
+    y los edificios de este PDF caen todos en una sola."""
+    if not hay_multiples_localidades(conn):
         return ""
     localidades_pdf = {e["DomicilioLocalidad"] for e in edificios if e["DomicilioLocalidad"]}
     return f" - {next(iter(localidades_pdf))}" if len(localidades_pdf) == 1 else ""
