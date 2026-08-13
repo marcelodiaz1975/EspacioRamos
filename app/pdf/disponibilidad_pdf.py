@@ -55,7 +55,7 @@ def _bloque_fotos_por_unidad(imagenes_edificio: list[sqlite3.Row], ancho: float,
     # criterio de orden que la grilla y "Valores vigentes" sin anonimizar.
     for id_unidad in sorted(por_unidad, key=lambda i: clave_orden_unidad(por_unidad[i][0]["Departamento"])):
         imgs = sorted(por_unidad[id_unidad], key=lambda i: i["NumeroConsultorio"])
-        story.append(encabezado(nivel, imgs[0]["Departamento"], ancho))
+        story.append(encabezado(nivel, f"Unidad {imgs[0]['Departamento']}", ancho))
         story.append(Spacer(1, 6))
         story.extend(tabla_fotos(imgs, ancho, mostrar_apto_camilla=False, mostrar_valor=True, decimales=decimales))
     return story
