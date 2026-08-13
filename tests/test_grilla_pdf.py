@@ -8,6 +8,7 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.pdf.estilos import COLOR_NIVEL_1, FUENTE, FUENTE_NEGRITA
 from app.pdf.grilla_pdf import (
     DIAS_GRILLA_DEFAULT,
+    _CeldaDosTonos,
     _partir_etiqueta_unidad,
     _tabla_grilla_edificio,
     _tabla_grilla_edificio_girada,
@@ -218,15 +219,33 @@ def test_orden_a_igualdad_de_piso_es_alfabetico_por_letra(conn):
     assert letras == ["A", "B", "C"]
 
 
-def test_sv_tiene_fuente_autoajustable(conn):
-    """Con muchas unidades (columnas angostas) el tamaño de "S/V" tiene que
+def _grilla_con_naranja(unidades, dia="Lunes", hora=9):
+    return {(u["IdUnidad"], dia, hora): "naranja" for u in unidades}
+
+
+def test_referencia_naranja_es_celda_dos_tonos(conn):
+    """"Un solo consultorio disponible sin ventana" ya no usa el texto
+    "S/V" — es un círculo naranja (`_CeldaDosTonos`) sobre el fondo
+    amarillo de la celda."""
+    unidades = _unidades_ficticias(1)
+    tabla = _tabla_grilla_edificio(conn, unidades, grilla=_grilla_con_naranja(unidades), horas=[9], ancho=500)
+    celda = tabla._cellvalues[4][2]
+    assert isinstance(celda, _CeldaDosTonos)
+
+
+def test_celda_dos_tonos_se_achica_con_columnas_angostas(conn):
+    """Con muchas unidades (columnas angostas) el círculo tiene que
     reducirse para no desbordar la celda."""
     unidades_pocas = _unidades_ficticias(1)
     unidades_muchas = _unidades_ficticias(8)
-    tabla_ancha = _tabla_grilla_edificio(conn, unidades_pocas, grilla={}, horas=[9], ancho=500)
-    tabla_angosta = _tabla_grilla_edificio(conn, unidades_muchas, grilla={}, horas=[9], ancho=500)
+    tabla_ancha = _tabla_grilla_edificio(
+        conn, unidades_pocas, grilla=_grilla_con_naranja(unidades_pocas), horas=[9], ancho=500,
+    )
+    tabla_angosta = _tabla_grilla_edificio(
+        conn, unidades_muchas, grilla=_grilla_con_naranja(unidades_muchas), horas=[9], ancho=500,
+    )
 
-    assert tabla_angosta._cellStyles[4][2].fontsize <= tabla_ancha._cellStyles[4][2].fontsize
+    assert tabla_angosta._cellvalues[4][2].diametro <= tabla_ancha._cellvalues[4][2].diametro
 
 
 # ---------------------------------------------------------------- grilla girada
@@ -239,6 +258,14 @@ def test_grilla_girada_tiene_las_dimensiones_esperadas(conn):
     n_dias = len(DIAS_GRILLA_DEFAULT)
     assert len(tabla._cellvalues) == 2 + n_dias * n_unidades  # 2 filas de encabezado + día x unidad
     assert len(tabla._cellvalues[0]) == 3 + len(horas)  # Día/Piso/Depto. + una columna por hora
+
+
+def test_grilla_girada_referencia_naranja_es_celda_dos_tonos(conn):
+    unidades = _unidades_ficticias(1)
+    tabla = _tabla_grilla_edificio_girada(
+        conn, unidades, grilla=_grilla_con_naranja(unidades), horas=[9], ancho=550,
+    )
+    assert isinstance(tabla._cellvalues[2][3], _CeldaDosTonos)
 
 
 def test_grilla_girada_conserva_piso_y_letra_por_fila(conn):

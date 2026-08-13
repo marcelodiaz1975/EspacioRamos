@@ -4,8 +4,11 @@
 PDF de Liquidación (sección 4.5), siguiendo el modelo real: filas =
 Tipo de bloque (Rígido/Flexible, según BloqueRigido) + Horario, columnas
 = Día > Unidad. Las celdas "naranja" (un solo consultorio disponible SIN
-ventana) se pintan del mismo color que "amarillo" pero con la leyenda
-"S/V" superpuesta, para distinguirlas sin agregar un quinto color."""
+ventana) se pintan del mismo amarillo que "amarillo" (ya lo hace el
+`BACKGROUND` de la celda) con un círculo naranja encima (`_CeldaDosTonos`)
+para distinguirlas sin agregar un quinto color — reemplaza al texto "S/V"
+que se usaba antes, que con muchas unidades por edificio quedaba
+demasiado chico para leerse."""
 from __future__ import annotations
 
 import sqlite3
@@ -15,13 +18,14 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.pdfbase.pdfmetrics import stringWidth
-from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import Flowable, KeepTogether, Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import DIAS_SEMANA
 from app.negocio.formato import hora_fmt
 from app.negocio.grilla import calcular_grilla
 from app.pdf.estilos import (
     COLOR_AMARILLO,
+    COLOR_NARANJA,
     COLOR_NIVEL_1,
     COLOR_ROJO,
     COLOR_VERDE,
@@ -37,6 +41,27 @@ from app.pdf.estilos import partir_etiqueta_unidad as _partir_etiqueta_unidad
 DIAS_GRILLA_DEFAULT = DIAS_SEMANA[:6]  # Lunes a Sábado
 _COLOR_CELDA = {"verde": COLOR_VERDE, "amarillo": COLOR_AMARILLO, "naranja": COLOR_AMARILLO, "rojo": COLOR_ROJO}
 _GROSOR_GRUESO = 1.3  # líneas estructurales (días, rígido/flexible, marcos de encabezado)
+_DIAMETRO_DOS_TONOS_MAX = 6  # tamaño "cómodo" del círculo naranja cuando hay lugar de sobra
+
+
+class _CeldaDosTonos(Flowable):
+    """Círculo naranja centrado sobre el amarillo de fondo de la celda —
+    referencia de "un solo consultorio disponible sin ventana". Tamaño
+    fijo (no depende del `availHeight`/`availWidth` que le pase la tabla
+    al medir: usar esos valores directamente haría que una sola pasada de
+    medición con alto "infinito" infle la fila entera)."""
+
+    def __init__(self, diametro: float = _DIAMETRO_DOS_TONOS_MAX):
+        super().__init__()
+        self.diametro = diametro
+
+    def wrap(self, availWidth, availHeight):
+        return self.diametro, self.diametro
+
+    def draw(self):
+        radio = self.diametro / 2
+        self.canv.setFillColor(COLOR_NARANJA)
+        self.canv.circle(radio, radio, radio, stroke=0, fill=1)
 
 
 def _tipo_bloque_por_hora(conn: sqlite3.Connection, horas: list[int]) -> dict[int, str]:
@@ -133,11 +158,12 @@ def _tabla_grilla_edificio(
     # El día de la semana usa la palabra más larga ("MIÉRCOLES") para
     # calcular el tamaño que entra en el ancho de todo su bloque de
     # columnas (mismo ancho para los 6 días, ya que unidades x ancho_col
-    # se cancela). La celda "S/V" se auto-ajusta al ancho de una sola
-    # columna de unidad, que sí se achica con más unidades por edificio.
+    # se cancela). El círculo naranja de "un solo consultorio sin ventana"
+    # se achica si la columna de una unidad es más angosta que su tamaño
+    # cómodo (más unidades por edificio).
     ancho_dia = ancho_restante / len(dias)
     tamano_dia = _tamano_que_entra([d.upper() for d in dias], ancho_dia - 2, tamano_max=14, tamano_min=6)
-    tamano_sv = _tamano_que_entra(["S/V"], ancho_col - 2, tamano_max=6, tamano_min=3)
+    diametro_dos_tonos = min(ancho_col - 2, _DIAMETRO_DOS_TONOS_MAX)
 
     fila_dias = ["Tipo\nBloque", "Horario"] + [d.upper() for d in dias for _ in unidades]
     fila_unidad_label = ["", ""] + ["UNIDAD" for _ in dias for _ in unidades]
@@ -162,7 +188,7 @@ def _tabla_grilla_edificio(
         for dia in dias:
             for u in unidades:
                 color = grilla.get((u["IdUnidad"], dia, h), "rojo")
-                fila.append("S/V" if color == "naranja" else "")
+                fila.append(_CeldaDosTonos(diametro_dos_tonos) if color == "naranja" else "")
                 fondos.append((color, fila_idx, len(fila) - 1))
         filas.append(fila)
     spans.append(("SPAN", (0, inicio_grupo), (0, len(horas) + 3)))
@@ -195,7 +221,6 @@ def _tabla_grilla_edificio(
         ("FONTSIZE", (2, 0), (-1, 0), tamano_dia),
         ("BACKGROUND", (2, 1), (-1, 3), COLOR_NIVEL_1),
         ("TEXTCOLOR", (2, 1), (-1, 3), "#FFFFFF"),
-        ("FONTSIZE", (2, 4), (-1, ultima_fila), tamano_sv),
         # El divisor entre la fila de piso y la de letra se pinta del mismo
         # azul que el fondo para que quede invisible — más grueso que la
         # línea fina de la GRID que tapa (dibujada antes, debajo), para que
@@ -282,7 +307,7 @@ def _tabla_grilla_edificio_girada(
     ancho_etiqueta_col = min(ancho_piso, ancho_letra) - 2
     tamano_etiqueta = _tamano_que_entra(textos_etiqueta, ancho_etiqueta_col, fuente=FUENTE)
     style_etiqueta = estilo_texto(tamano_etiqueta, negrita=False, alignment=TA_CENTER, textColor=colors.white)
-    tamano_sv = _tamano_que_entra(["S/V"], ancho_col_hora - 2, tamano_max=6, tamano_min=3)
+    diametro_dos_tonos = min(ancho_col_hora - 2, _DIAMETRO_DOS_TONOS_MAX)
 
     # El contenido de una celda combinada (SPAN) es el de su celda ancla —
     # la de arriba/izquierda. "Día"/"Piso"/"Depto." combinan las filas 0 y
@@ -312,7 +337,7 @@ def _tabla_grilla_edificio_girada(
             fila = [dia.upper(), Paragraph(par[0], style_etiqueta), Paragraph(par[1], style_etiqueta)]
             for h in horas:
                 color = grilla.get((u["IdUnidad"], dia, h), "rojo")
-                fila.append("S/V" if color == "naranja" else "")
+                fila.append(_CeldaDosTonos(diametro_dos_tonos) if color == "naranja" else "")
                 fondos.append((color, fila_idx, len(fila) - 1))
             filas.append(fila)
 
@@ -334,7 +359,6 @@ def _tabla_grilla_edificio_girada(
         ("TEXTCOLOR", (0, 0), (2, 1), "#FFFFFF"),
         ("BACKGROUND", (3, 0), (-1, 1), COLOR_NIVEL_1),
         ("TEXTCOLOR", (3, 0), (-1, 1), "#FFFFFF"),
-        ("FONTSIZE", (3, 2), (-1, ultima_fila), tamano_sv),
         ("BACKGROUND", (0, 2), (0, ultima_fila), COLOR_NIVEL_1),
         ("TEXTCOLOR", (0, 2), (0, ultima_fila), "#FFFFFF"),
         ("FONTSIZE", (0, 2), (0, ultima_fila), 8),  # con varias filas de alto de sobra, entra más grande
@@ -479,7 +503,7 @@ def secciones_disponibilidad(
 
 def _tabla_leyenda(ancho: float) -> Table:
     filas = [
-        [" ", "Hay al menos dos consultorios disponibles", "S/V", "Solo un consultorio disponible sin ventana"],
+        [" ", "Hay al menos dos consultorios disponibles", _CeldaDosTonos(8), "Solo un consultorio disponible sin ventana"],
         [" ", "Solo un consultorio disponible con ventana", " ", "Sin consultorios disponibles"],
     ]
     tabla = Table(filas, colWidths=[ancho * 0.04, ancho * 0.46, ancho * 0.04, ancho * 0.46])
@@ -489,7 +513,6 @@ def _tabla_leyenda(ancho: float) -> Table:
         ("BACKGROUND", (0, 1), (0, 1), COLOR_AMARILLO),
         ("BACKGROUND", (2, 0), (2, 0), COLOR_AMARILLO),
         ("BACKGROUND", (2, 1), (2, 1), COLOR_ROJO),
-        ("FONTNAME", (2, 0), (2, 0), FUENTE_NEGRITA),
         ("ALIGN", (2, 0), (2, 0), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("BOX", (0, 0), (0, 0), _GROSOR_GRUESO, "#000000"),
