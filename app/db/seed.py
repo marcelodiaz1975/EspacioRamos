@@ -169,6 +169,83 @@ CONDICIONES_NORMAS = [
     )),
 ]
 
+DETALLES_COMPLEMENTARIOS_PROPUESTA = [
+    # Orden, Titulo, Texto
+    (1, "Apertura a los pacientes", (
+        "El ingreso del paciente al edificio es a cargo nuestro, totalmente desatendido por parte del "
+        "profesional, el mismo no tiene que hacer nada al respecto. Una vez que el paciente llega a la puerta de "
+        "la unidad se le abre a través de un pulsador desde el mismo consultorio para que ingrese directamente a "
+        "la sala de espera y aguarde allí para ser llamado por el profesional. Es decir, en ningún momento hay "
+        "que bajar del piso, salir del consultorio, ni interrumpir la sesión en curso para abrirle al próximo "
+        "paciente."
+    )),
+    (2, "Modalidades de reserva", (
+        "Se puede reservar en forma regular para todas las semanas del mes o en forma aislada solo para una "
+        "fecha específica."
+    )),
+    (3, "Descuentos", "Esquema progresivo de descuentos por horas semanales regulares reservadas:"),
+    (4, "Vacaciones", (
+        "Se contemplan en favor del profesional hasta dos semanas por año calendario en concepto de vacaciones, "
+        "dicho lapso no será abonado por el profesional y este conservará la reserva del espacio sin costo "
+        "alguno."
+    )),
+    (5, "Feriados", (
+        "Las horas reservadas en los días feriados no se abonan, salvo que el profesional quiera hacer uso igual "
+        "del espacio ese día, en ese caso solo abonaría las horas utilizadas en esa jornada."
+    )),
+    (6, "Compromiso de reserva", (
+        "El profesional tiene un compromiso de reserva solo por un mes. Esto significa que puede ir modificando "
+        "y adaptando su bloque reservado mes a mes de acuerdo a su necesidad."
+    )),
+    (7, "Ajuste de valores", (
+        "Se realizan en forma bimestral los ajustes mínimos en los valores con el fin de mantener los mismos "
+        "actualizados."
+    )),
+    (8, "Forma de pago", (
+        "Los bloques reservados se liquidan a principio de mes y luego el profesional abona dicha liquidación "
+        "preferentemente dentro de la primera quincena. El pago debe estar completado en su totalidad antes de "
+        "que termine el mes en curso."
+    )),
+    (9, "Horas aisladas", (
+        "Las horas aisladas por fuera de la reserva regular pueden tener un recargo configurable sobre el valor "
+        "de la hora regular."
+    )),
+    (10, "Lista de espera", (
+        "En el caso de no contar con la disponibilidad buscada manejamos una lista de espera en la que agendamos "
+        "las preferencias de los profesionales, si en algún momento a futuro se produce una liberación que "
+        "coincide con el interés del profesional nosotros nos comunicamos con el mismo para que sin compromiso "
+        "alguno vuelva a evaluar la propuesta en ese momento."
+    )),
+    (11, "Grupo de WhatsApp", (
+        "Contamos con un grupo de WhatsApp en el que están los profesionales que son miembros del espacio. "
+        "Nosotros avisamos en el mismo cosas relacionadas con el lugar, y por otro lado queda como fuente de "
+        "intercambio profesional para los profesionales miembros como consultas, derivaciones, avisos de cursos, "
+        "etc."
+    )),
+    (12, "Juego de llaves", (
+        "Se entrega al profesional un juego de llaves para que el mismo se maneje con independencia durante su "
+        "permanencia en el espacio. Dicho juego tiene un costo a modo de depósito, eso significa que si el "
+        "profesional prescinde de los servicios del espacio por cualquier motivo contraentrega de las llaves se "
+        "le reintegrará el dinero del depósito actualizado a lo que valga en ese momento."
+    )),
+    (13, "Documentación necesaria", (
+        "De confirmar la incorporación al espacio como documentación se pide únicamente DNI frente y dorso, "
+        "título, y matrícula nacional y/o provincial más una ficha para completar con los datos personales."
+    )),
+    (14, "Visita al espacio en persona", (
+        "Los profesionales interesados en conocer el lugar en persona están invitados a hacerlo sin compromiso "
+        "alguno solo con un mensaje previo para coordinar el día y el momento. Para poder apreciar el lugar sin "
+        "gente y ver la totalidad de los consultorios se sugiere hacerlo temprano, alrededor de las 8:30hs, ya "
+        "que la mayoría de los profesionales activos empiezan a llegar a partir de las 9hs."
+    )),
+    (15, "Atención personalizada", (
+        "Quedamos a disposición del profesional interesado en todo momento por cualquier consulta que nos "
+        "quieran realizar o bien para volver a recibir la información actualizada del lugar. Las consultas no "
+        "molestan, al contrario, es un placer para nosotros responderlas, así que no duden en escribir por "
+        "cualquier cosa en que los podamos ayudar."
+    )),
+]
+
 LISTAS_EDITABLES = {
     "CondicionFiscal": ["Responsable Inscripto", "Monotributo", "Consumidor Final", "Exento"],
     "MedioPago": ["Sobre en buzón", "Dinero en mano", "Transferencia a cta Celeste", "Transferencia a cta Marcelo"],
@@ -283,6 +360,16 @@ def sembrar_condiciones_normas(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def sembrar_detalles_complementarios_propuesta(conn: sqlite3.Connection) -> None:
+    if not _tabla_vacia(conn, "DetalleComplementarioPropuesta"):
+        return
+    conn.executemany(
+        "INSERT INTO DetalleComplementarioPropuesta (Orden, Titulo, Texto, Activo) VALUES (?, ?, ?, 1)",
+        DETALLES_COMPLEMENTARIOS_PROPUESTA,
+    )
+    conn.commit()
+
+
 def sembrar_valores_por_defecto(conn: sqlite3.Connection) -> None:
     sembrar_bloques_rigidos(conn)
     sembrar_configuracion(conn)
@@ -291,3 +378,4 @@ def sembrar_valores_por_defecto(conn: sqlite3.Connection) -> None:
     sembrar_esquema_descuentos(conn)
     sembrar_listas_editables(conn)
     sembrar_condiciones_normas(conn)
+    sembrar_detalles_complementarios_propuesta(conn)

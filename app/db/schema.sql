@@ -459,11 +459,22 @@ CREATE TABLE IF NOT EXISTS MensajePredefinido (
     Activo INTEGER NOT NULL DEFAULT 1
 );
 
--- 3.29 CondicionNorma (Etapa 7, sección 4.5/4.3: los 21 puntos editables de "Condiciones y
--- normas" que aparecen en el PDF de Liquidación y el de Propuesta) -------------------------
+-- 3.29 CondicionNorma (Etapa 7, sección 4.5: los 21 puntos editables de "Condiciones y
+-- normas" que aparecen en el PDF de Liquidación) --------------------------------------------
 CREATE TABLE IF NOT EXISTS CondicionNorma (
     IdCondicion INTEGER PRIMARY KEY AUTOINCREMENT,
     Numero INTEGER NOT NULL,
+    Titulo TEXT NOT NULL,
+    Texto TEXT NOT NULL,
+    Activo INTEGER NOT NULL DEFAULT 1
+);
+
+-- 3.30 DetalleComplementarioPropuesta (Etapa 7, sección 4.3: los ítems editables y
+-- ordenables de "Detalles complementarios de la propuesta" del PDF de Propuesta al
+-- profesional) ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS DetalleComplementarioPropuesta (
+    IdDetalleComplementario INTEGER PRIMARY KEY AUTOINCREMENT,
+    Orden INTEGER NOT NULL,
     Titulo TEXT NOT NULL,
     Texto TEXT NOT NULL,
     Activo INTEGER NOT NULL DEFAULT 1

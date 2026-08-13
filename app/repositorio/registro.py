@@ -41,6 +41,7 @@ TABLAS = [
     "MensajePredefinido",
     "Configuracion",
     "CondicionNorma",
+    "DetalleComplementarioPropuesta",
 ]
 
 

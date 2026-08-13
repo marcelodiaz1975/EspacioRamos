@@ -129,6 +129,18 @@ def pantalla_condiciones_normas(conn: sqlite3.Connection) -> PantallaCRUD:
     return PantallaCRUD(conn, "CondicionNorma", "Condiciones y normas", campos)
 
 
+def pantalla_detalles_complementarios_propuesta(conn: sqlite3.Connection) -> PantallaCRUD:
+    campos = [
+        Campo("Orden", "Orden", tipo="numero", requerido=True),
+        Campo("Titulo", "Título", requerido=True),
+        Campo("Texto", "Texto", tipo="texto_largo", requerido=True),
+        Campo("Activo", "Activo", tipo="booleano"),
+    ]
+    return PantallaCRUD(
+        conn, "DetalleComplementarioPropuesta", "Detalles complementarios (Propuesta)", campos,
+    )
+
+
 def pantalla_mensajes_predefinidos(conn: sqlite3.Connection) -> PantallaCRUD:
     campos = [
         Campo("Categoria", "Categoría"),

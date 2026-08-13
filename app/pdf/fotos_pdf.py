@@ -21,7 +21,7 @@ from PIL import Image as ImagenPIL
 from reportlab.lib.units import cm
 from reportlab.platypus import Image, Paragraph, Spacer, Table, TableStyle
 
-from app.pdf.estilos import FUENTE, estilo_texto
+from app.pdf.estilos import FUENTE, estilo_texto, formatear_moneda
 
 RELACION_FOTO = 4 / 3
 
@@ -53,7 +53,7 @@ def imagenes_de_consultorios(conn: sqlite3.Connection, ids_consultorio: list[int
     placeholders = ", ".join("?" for _ in ids_consultorio)
     return conn.execute(
         f"""
-        SELECT i.*, c.NumeroConsultorio, c.AptoCamilla, u.IdUnidad AS IdUnidadConsultorio,
+        SELECT i.*, c.NumeroConsultorio, c.AptoCamilla, c.ValorHoraRegularActual, u.IdUnidad AS IdUnidadConsultorio,
                u.Departamento, e.Nombre AS NombreEdificio
         FROM Imagen i
         JOIN Consultorio c ON c.IdConsultorio = i.IdConsultorio
@@ -66,7 +66,10 @@ def imagenes_de_consultorios(conn: sqlite3.Connection, ids_consultorio: list[int
     ).fetchall()
 
 
-def _celda_foto(imagen: sqlite3.Row, ancho_celda: float, mostrar_apto_camilla: bool, anonimizar_unidad: bool) -> list:
+def _celda_foto(
+    imagen: sqlite3.Row, ancho_celda: float, mostrar_apto_camilla: bool, anonimizar_unidad: bool,
+    mostrar_valor: bool = False, decimales: int = 2,
+) -> list:
     contenido = []
     ruta = imagen["RutaArchivo"]
     if ruta and os.path.isfile(ruta):
@@ -87,8 +90,11 @@ def _celda_foto(imagen: sqlite3.Row, ancho_celda: float, mostrar_apto_camilla: b
             f"[Foto no disponible — {imagen['Descripcion'] or 'consultorio ' + str(imagen['NumeroConsultorio'])}]",
             estilo_texto(8),
         ))
-    unidad = f"Unidad {imagen['IdUnidadConsultorio']}" if anonimizar_unidad else imagen["Departamento"]
-    pie = f"Consultorio {imagen['NumeroConsultorio']} - {unidad} - {imagen['NombreEdificio']}"
+    if mostrar_valor:
+        pie = f"Consultorio {imagen['NumeroConsultorio']} — Valor hora regular {formatear_moneda(imagen['ValorHoraRegularActual'], decimales)}"
+    else:
+        unidad = f"Unidad {imagen['IdUnidadConsultorio']}" if anonimizar_unidad else imagen["Departamento"]
+        pie = f"Consultorio {imagen['NumeroConsultorio']} - {unidad} - {imagen['NombreEdificio']}"
     if mostrar_apto_camilla and imagen["AptoCamilla"]:
         pie += " ✔ Apto camilla"
     contenido.append(Paragraph(pie, estilo_texto(8, negrita=True)))
@@ -97,6 +103,7 @@ def _celda_foto(imagen: sqlite3.Row, ancho_celda: float, mostrar_apto_camilla: b
 
 def tabla_fotos(
     imagenes: list[sqlite3.Row], ancho: float, mostrar_apto_camilla: bool = True, anonimizar_unidad: bool = False,
+    mostrar_valor: bool = False, decimales: int = 2,
 ) -> list:
     """2 fotos por fila (sección 4.3/4.4/4.6)."""
     if not imagenes:
@@ -106,8 +113,11 @@ def tabla_fotos(
     filas = []
     for i in range(0, len(imagenes), 2):
         par = imagenes[i:i + 2]
-        fila = [_celda_foto(par[0], ancho_celda, mostrar_apto_camilla, anonimizar_unidad)]
-        fila.append(_celda_foto(par[1], ancho_celda, mostrar_apto_camilla, anonimizar_unidad) if len(par) > 1 else "")
+        fila = [_celda_foto(par[0], ancho_celda, mostrar_apto_camilla, anonimizar_unidad, mostrar_valor, decimales)]
+        fila.append(
+            _celda_foto(par[1], ancho_celda, mostrar_apto_camilla, anonimizar_unidad, mostrar_valor, decimales)
+            if len(par) > 1 else ""
+        )
         filas.append(fila)
 
     tabla = Table(filas, colWidths=[ancho / 2, ancho / 2])

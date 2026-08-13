@@ -7,6 +7,7 @@ import sqlite3
 
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
+from app.negocio.formato import hora_fmt
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
     FUENTE_NEGRITA,
@@ -156,8 +157,59 @@ def bloques_esquema_descuentos(conn: sqlite3.Connection, ancho: float) -> list:
 
 def condiciones_normas(conn: sqlite3.Connection) -> list:
     """Los 21 puntos editables de "Condiciones y normas" (CondicionNorma),
-    numerados "N) TÍTULO:" en mayúsculas — mismo formato en Liquidación y
-    Propuesta."""
+    numerados "N) TÍTULO:" en mayúsculas (PDF de Liquidación)."""
     condiciones = conn.execute("SELECT * FROM CondicionNorma WHERE Activo = 1 ORDER BY Numero").fetchall()
     style = estilo_texto(9)
     return [Paragraph(f"<b>{c['Numero']}) {c['Titulo'].upper()}:</b> {c['Texto']}", style) for c in condiciones]
+
+
+def condiciones_forma_reserva(conn: sqlite3.Connection) -> list:
+    """"Condiciones y forma de reserva" del PDF de Propuesta (sección
+    4.3): los dos puntos que dependen de datos configurados de verdad
+    (bloques rígidos activos, límites de la grilla horaria) se arman
+    dinámicamente a partir de `BloqueRigido`/`Configuracion` para no
+    desactualizarse si esos valores cambian; el resto son reglas fijas
+    del sistema."""
+    style = estilo_texto(9)
+    story = [Paragraph("* No hay un mínimo de horas a reservar.", style)]
+
+    bloques = conn.execute("SELECT HoraInicio, HoraFin FROM BloqueRigido WHERE Activo = 1 ORDER BY HoraInicio").fetchall()
+    if bloques:
+        rangos = [f"{hora_fmt(b['HoraInicio'])[:-2]} a {hora_fmt(b['HoraFin'])}" for b in bloques]
+        texto_rangos = (", de ".join(rangos[:-1]) + " y de " + rangos[-1]) if len(rangos) > 1 else rangos[0]
+        story.append(Paragraph(
+            f"* Los bloques de {texto_rangos} se deben reservar enteros sin fraccionar, el resto de los "
+            f"horarios sin limitaciones.", style,
+        ))
+
+    story.append(Paragraph("* Las horas reservadas en un mismo consultorio deben ser consecutivas.", style))
+
+    cfg = conn.execute("SELECT HoraInicioGrilla, HoraFinGrilla FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    if cfg:
+        story.append(Paragraph(
+            f"* Los horarios de las {hora_fmt(cfg['HoraInicioGrilla'])} y de las "
+            f"{hora_fmt(cfg['HoraFinGrilla'] - 1)} también están disponibles.", style,
+        ))
+
+    story.append(Paragraph(
+        "* De acuerdo a la disponibilidad al momento, también se pueden reservar horas aisladas por solo una "
+        "única vez.", style,
+    ))
+    return story
+
+
+def detalles_complementarios_propuesta(conn: sqlite3.Connection, ancho: float) -> list:
+    """Los ítems editables y ordenables de "Detalles complementarios de la
+    propuesta" (DetalleComplementarioPropuesta, sección 4.3). El ítem
+    "Descuentos" es el único con contenido tabular: además del texto,
+    muestra debajo el esquema de descuentos vigente (EsquemaDescuentos)."""
+    items = conn.execute("SELECT * FROM DetalleComplementarioPropuesta WHERE Activo = 1 ORDER BY Orden").fetchall()
+    story = []
+    for item in items:
+        story.append(Paragraph(f"<b>{item['Titulo']}</b>", estilo_texto(9, negrita=True)))
+        story.append(Paragraph(item["Texto"], estilo_texto(9)))
+        if item["Titulo"].strip().lower() == "descuentos":
+            story.append(Spacer(1, 4))
+            story.extend(bloques_esquema_descuentos(conn, ancho))
+        story.append(Spacer(1, 6))
+    return story

@@ -46,6 +46,11 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Tipos de licencia", catalogos.pantalla_tipos_licencia, categoria="Catálogos"),
         Seccion("Listas editables", catalogos.pantalla_listas_editables, categoria="Catálogos"),
         Seccion("Condiciones y normas", catalogos.pantalla_condiciones_normas, categoria="Catálogos"),
+        Seccion(
+            "Detalles complementarios (Propuesta)",
+            catalogos.pantalla_detalles_complementarios_propuesta,
+            categoria="Catálogos",
+        ),
         Seccion("Mensajes predefinidos", catalogos.pantalla_mensajes_predefinidos, categoria="Catálogos"),
         Seccion("Profesiones", catalogos.pantalla_profesiones, categoria="Catálogos"),
         Seccion("Gastos operativos", catalogos.pantalla_gastos_operativos, categoria="Catálogos"),
