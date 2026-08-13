@@ -179,11 +179,14 @@ DETALLES_COMPLEMENTARIOS_PROPUESTA = [
         "que bajar del piso, salir del consultorio, ni interrumpir la sesión en curso para abrirle al próximo "
         "paciente."
     )),
-    (2, "Modalidades de reserva", (
-        "Se puede reservar en forma regular para todas las semanas del mes o en forma aislada solo para una "
-        "fecha específica."
+    (2, "Modalidad de reserva aislada", (
+        "Aparte de las reservas regulares, que son las reservas fijas para todas las semanas del mes, se puede "
+        "reservar en forma aislada para fechas y horarios puntuales por única vez nada mas."
     )),
-    (3, "Descuentos", "Esquema progresivo de descuentos por horas semanales regulares reservadas:"),
+    (3, "Descuentos por cantidad de horas semanales reservadas", (
+        "Se realizan descuentos en base a la cantidad de horas semanales reservadas sobre el valor total de la "
+        "reserva, siempre y cuando los pagos se vayan realizando dentro del mes en curso."
+    )),
     (4, "Vacaciones", (
         "Se contemplan en favor del profesional hasta dos semanas por año calendario en concepto de vacaciones, "
         "dicho lapso no será abonado por el profesional y este conservará la reserva del espacio sin costo "
@@ -194,56 +197,53 @@ DETALLES_COMPLEMENTARIOS_PROPUESTA = [
         "del espacio ese día, en ese caso solo abonaría las horas utilizadas en esa jornada."
     )),
     (6, "Compromiso de reserva", (
-        "El profesional tiene un compromiso de reserva solo por un mes. Esto significa que puede ir modificando "
-        "y adaptando su bloque reservado mes a mes de acuerdo a su necesidad."
+        "El profesional puede ir modificando y adaptando su bloque reservado mes a mes de acuerdo a su necesidad "
+        "y a la disponibilidad del espacio."
     )),
     (7, "Ajuste de valores", (
-        "Se realizan en forma bimestral los ajustes mínimos en los valores con el fin de mantener los mismos "
+        "Se realizan en forma {frecuencia} los ajustes mínimos en los valores con el fin de mantener los mismos "
         "actualizados."
     )),
     (8, "Forma de pago", (
         "Los bloques reservados se liquidan a principio de mes y luego el profesional abona dicha liquidación "
-        "preferentemente dentro de la primera quincena. El pago debe estar completado en su totalidad antes de "
-        "que termine el mes en curso."
+        "preferentemente en cualquier momento dentro del mes en curso."
     )),
-    (9, "Horas aisladas", (
-        "Las horas aisladas por fuera de la reserva regular pueden tener un recargo configurable sobre el valor "
-        "de la hora regular."
-    )),
-    (10, "Lista de espera", (
+    (9, "Lista de espera", (
         "En el caso de no contar con la disponibilidad buscada manejamos una lista de espera en la que agendamos "
         "las preferencias de los profesionales, si en algún momento a futuro se produce una liberación que "
         "coincide con el interés del profesional nosotros nos comunicamos con el mismo para que sin compromiso "
         "alguno vuelva a evaluar la propuesta en ese momento."
     )),
-    (11, "Grupo de WhatsApp", (
+    (10, "Grupo de WhatsApp", (
         "Contamos con un grupo de WhatsApp en el que están los profesionales que son miembros del espacio. "
         "Nosotros avisamos en el mismo cosas relacionadas con el lugar, y por otro lado queda como fuente de "
         "intercambio profesional para los profesionales miembros como consultas, derivaciones, avisos de cursos, "
         "etc."
     )),
-    (12, "Juego de llaves", (
+    (11, "Juego de llaves", (
         "Se entrega al profesional un juego de llaves para que el mismo se maneje con independencia durante su "
         "permanencia en el espacio. Dicho juego tiene un costo a modo de depósito, eso significa que si el "
         "profesional prescinde de los servicios del espacio por cualquier motivo contraentrega de las llaves se "
         "le reintegrará el dinero del depósito actualizado a lo que valga en ese momento."
     )),
-    (13, "Documentación necesaria", (
+    (12, "Documentación necesaria", (
         "De confirmar la incorporación al espacio como documentación se pide únicamente DNI frente y dorso, "
         "título, y matrícula nacional y/o provincial más una ficha para completar con los datos personales."
     )),
-    (14, "Visita al espacio en persona", (
+    (13, "Visita para conocer el espacio", (
         "Los profesionales interesados en conocer el lugar en persona están invitados a hacerlo sin compromiso "
         "alguno solo con un mensaje previo para coordinar el día y el momento. Para poder apreciar el lugar sin "
         "gente y ver la totalidad de los consultorios se sugiere hacerlo temprano, alrededor de las 8:30hs, ya "
-        "que la mayoría de los profesionales activos empiezan a llegar a partir de las 9hs."
+        "que la mayoría de los profesionales activos empiezan a llegar a partir de las 9hs. Los sábados luego de "
+        "las 14hs es otra buena opción."
     )),
-    (15, "Atención personalizada", (
+    (14, "Atención personalizada", (
         "Quedamos a disposición del profesional interesado en todo momento por cualquier consulta que nos "
         "quieran realizar o bien para volver a recibir la información actualizada del lugar. Las consultas no "
         "molestan, al contrario, es un placer para nosotros responderlas, así que no duden en escribir por "
         "cualquier cosa en que los podamos ayudar."
     )),
+    (15, "Contacto", "{contacto}"),
 ]
 
 LISTAS_EDITABLES = {

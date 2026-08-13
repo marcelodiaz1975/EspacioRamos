@@ -5,17 +5,28 @@ anonimiza las unidades como "Unidad {IdUnidad}" en vez de mostrar el
 Departamento real, para no revelar información interna del edificio a
 alguien que todavía no forma parte del espacio.
 
-Secciones (orden y contenido tomados del modelo real de referencia del
-documento): Detalles principales de la propuesta (Ubicación, Destino y
-uso del espacio, Detalle de las unidades, Detalle de los consultorios,
-por edificio) -> Fotos de los consultorios (con valor de la hora regular
-y ✔ Apto camilla, información útil para quien todavía no conoce el
-espacio) -> Disponibilidad -> Condiciones y forma de reserva (dinámica,
-a partir de BloqueRigido/Configuracion) -> Valores vigentes por hora
-regular -> Detalles complementarios de la propuesta (editable, tabla
-DetalleComplementarioPropuesta). No incluye "Condiciones y normas"
-(CondicionNorma): ese contenido queda reservado al PDF de Liquidación,
-donde no se superpone con "Detalles complementarios"."""
+Estructura (4 secciones de nivel 1): "Detalles principales de la
+propuesta" (Ubicación, Destino y uso del espacio, Detalle de las
+unidades, Detalle de los consultorios) -> "Fotos de los consultorios"
+(agrupadas por Unidad, con valor de la hora regular y ✔ Apto camilla) ->
+"Disponibilidad de consultorios al {fecha}" (grilla igual que en
+Liquidación + "Condiciones y forma de reserva" dinámica + "Valores
+vigentes por hora regular") -> "Detalles complementarios de la
+propuesta" (editable y ordenable, tabla DetalleComplementarioPropuesta).
+
+Con un solo edificio los sub-ítems de las primeras 3 secciones van en
+nivel 2. Con más de uno, se agrega por cada edificio un nivel 2 "{Edificio}
+- {Dirección}, {Localidad}" y esos mismos sub-ítems (repetidos por
+edificio) bajan a nivel 3 — "Detalles complementarios" nunca se repite
+por edificio, es contenido genérico del espacio.
+
+Las unidades se ordenan por IdUnidad ascendente (no por piso/letra como
+en Liquidación): con la etiqueta anonimizada "Unidad {N}" lo esperable es
+"Unidad 1, Unidad 2, Unidad 3..." en vez de saltar según el piso real.
+
+No incluye "Condiciones y normas" (CondicionNorma): ese contenido queda
+reservado al PDF de Liquidación, donde no se superpone con "Detalles
+complementarios"."""
 from __future__ import annotations
 
 import os
@@ -27,13 +38,12 @@ from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import fecha_actual, parsear_periodo, periodo_actual
-from app.negocio.formato import fecha_larga
+from app.negocio.formato import fecha_larga, periodo_mm_aaaa
 from app.pdf.edificios_pdf import edificios_incluidos, ids_consultorio_de_edificios, sufijo_localidad
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
     FUENTE,
     FUENTE_NEGRITA,
-    clave_orden_unidad,
     crear_documento,
     decimales_configurados,
     encabezado,
@@ -42,29 +52,17 @@ from app.pdf.estilos import (
 )
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.pdf.grilla_pdf import altura_estimada_grilla, secciones_disponibilidad
-from app.pdf.valores_pdf import condiciones_forma_reserva, detalles_complementarios_propuesta, matriz_valores_edificio
-from app.repositorio.registro import obtener_repositorio
+from app.pdf.valores_pdf import (
+    condiciones_forma_reserva,
+    detalles_complementarios_propuesta,
+    matriz_valores_edificio,
+    rango_actualizacion,
+)
 
 _TEXTO_DESTINO_USO = (
     "El uso de los consultorios se encuentra dirigido a la realización de terapias individuales de salud "
     "mental, nutrición y similares."
 )
-
-
-def _contacto_y_profesion(conn: sqlite3.Connection, profesional: sqlite3.Row | None) -> list:
-    cfg = conn.execute("SELECT * FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    style = estilo_texto(9)
-    story = []
-    if cfg and (cfg["ContactoCelular"] or cfg["ContactoEmail"]):
-        contacto = " / ".join(c for c in (cfg["ContactoCelular"], cfg["ContactoEmail"]) if c)
-        story.append(Paragraph(f"<b>Contacto:</b> {contacto}", style))
-    if profesional is not None:
-        profesion = obtener_repositorio(conn, "Profesion").obtener(profesional["IdProfesion"]) if profesional["IdProfesion"] else None
-        if profesion:
-            story.append(Paragraph(f"<b>Profesión de interés:</b> {profesion['Nombre']}", style))
-    if story:
-        story.append(Spacer(1, 6))
-    return story
 
 
 def _medida(valor: float | None) -> str:
@@ -73,6 +71,11 @@ def _medida(valor: float | None) -> str:
 
 def _si_no(valor) -> str:
     return "Sí" if valor else "No"
+
+
+def _titulo_edificio(e: sqlite3.Row) -> str:
+    direccion = ", ".join(p for p in (e["Domicilio"], e["DomicilioLocalidad"]) if p)
+    return f"{e['Nombre']} - {direccion}" if direccion else e["Nombre"]
 
 
 def _encabezados_tabla(textos: list[str], tamano: int = 7) -> list[Paragraph]:
@@ -87,16 +90,15 @@ def _encabezados_tabla(textos: list[str], tamano: int = 7) -> list[Paragraph]:
 def _tabla_detalle_unidades(conn: sqlite3.Connection, id_edificio: int, ancho: float) -> list:
     filas_bd = conn.execute(
         """
-        SELECT u.IdUnidad, u.Departamento, u.SalaDeEspera, u.Cocina, u.Banos, u.WiFi, u.BalconComun,
+        SELECT u.IdUnidad, u.SalaDeEspera, u.Cocina, u.Banos, u.WiFi, u.BalconComun,
                u.EntradaProfesionalExclusiva, u.AreaGuardado, u.AreaFumadores,
                (SELECT COUNT(*) FROM Consultorio c WHERE c.IdUnidad = u.IdUnidad) AS CantConsultorios
-        FROM Unidad u WHERE u.IdEdificio = ?
+        FROM Unidad u WHERE u.IdEdificio = ? ORDER BY u.IdUnidad
         """,
         (id_edificio,),
     ).fetchall()
     if not filas_bd:
         return [Paragraph("Sin unidades cargadas.", estilo_texto(9))]
-    filas_bd = sorted(filas_bd, key=lambda f: clave_orden_unidad(f["Departamento"]))
 
     encabezados = [
         "Unidad", "Consultorios", "Sala de espera", "Cocina", "Baños", "WiFi",
@@ -154,8 +156,9 @@ def _tabla_consultorios(filas_bd: list[sqlite3.Row], ancho: float) -> Table:
 
 
 def _detalle_consultorios_edificio(conn: sqlite3.Connection, id_edificio: int, ancho: float) -> list:
-    unidades = conn.execute("SELECT IdUnidad, Departamento FROM Unidad WHERE IdEdificio = ?", (id_edificio,)).fetchall()
-    unidades = sorted(unidades, key=lambda f: clave_orden_unidad(f["Departamento"]))
+    unidades = conn.execute(
+        "SELECT IdUnidad FROM Unidad WHERE IdEdificio = ? ORDER BY IdUnidad", (id_edificio,)
+    ).fetchall()
     mostrar_unidad = len(unidades) > 1
     story = []
     for u in unidades:
@@ -176,74 +179,80 @@ def _detalle_consultorios_edificio(conn: sqlite3.Connection, id_edificio: int, a
     return story
 
 
-def _bloque_edificio_detalles(conn: sqlite3.Connection, edificio: sqlite3.Row, ancho: float, mostrar_encabezado: bool) -> list:
-    story = []
-    if mostrar_encabezado:
-        story.append(encabezado(3, f"Edificio: {edificio['Nombre']}", ancho))
-        story.append(Spacer(1, 6))
-
-    style_label = estilo_texto(9, negrita=True)
-    story.append(Paragraph("Ubicación", style_label))
+def _bloque_detalles_principales(conn: sqlite3.Connection, edificio: sqlite3.Row, ancho: float, nivel: int) -> list:
+    story = [encabezado(nivel, "Ubicación", ancho), Spacer(1, 6)]
     ubicacion = ", ".join(p for p in (edificio["Domicilio"], edificio["DomicilioLocalidad"]) if p)
     story.append(Paragraph(ubicacion or "Sin domicilio cargado.", estilo_texto(9)))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("Destino y uso del espacio", style_label))
+    story.append(encabezado(nivel, "Destino y uso del espacio", ancho))
+    story.append(Spacer(1, 6))
     story.append(Paragraph(_TEXTO_DESTINO_USO, estilo_texto(9)))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("Detalle de las unidades", style_label))
-    story.append(Spacer(1, 3))
+    story.append(encabezado(nivel, "Detalle de las unidades", ancho))
+    story.append(Spacer(1, 6))
     story.extend(_tabla_detalle_unidades(conn, edificio["IdEdificio"], ancho))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("Detalle de los consultorios", style_label))
-    story.append(Spacer(1, 3))
+    story.append(encabezado(nivel, "Detalle de los consultorios", ancho))
+    story.append(Spacer(1, 6))
     story.extend(_detalle_consultorios_edificio(conn, edificio["IdEdificio"], ancho))
     return story
 
 
-def _fotos_agrupadas(conn: sqlite3.Connection, edificios: list[sqlite3.Row], imagenes: list[sqlite3.Row], ancho: float, decimales: int) -> list:
-    if not imagenes:
+def _bloque_fotos(imagenes_edificio: list[sqlite3.Row], ancho: float, nivel: int, decimales: int) -> list:
+    if not imagenes_edificio:
         return [Paragraph("Sin fotos cargadas.", estilo_texto(9))]
+    por_unidad: dict[int, list] = {}
+    for img in imagenes_edificio:
+        por_unidad.setdefault(img["IdUnidadConsultorio"], []).append(img)
 
-    por_edificio: dict[str, dict[int, list]] = {}
-    for img in imagenes:
-        por_edificio.setdefault(img["NombreEdificio"], {}).setdefault(img["IdUnidadConsultorio"], []).append(img)
-
-    orden_edificios = [e["Nombre"] for e in edificios if e["Nombre"] in por_edificio]
-    mostrar_edificio = len(orden_edificios) > 1
     story = []
-    for nombre_edificio in orden_edificios:
-        unidades = por_edificio[nombre_edificio]
-        if mostrar_edificio:
-            story.append(encabezado(3, f"Edificio: {nombre_edificio}", ancho))
-            story.append(Spacer(1, 6))
-        ids_unidad = sorted(unidades, key=lambda id_u: clave_orden_unidad(unidades[id_u][0]["Departamento"]))
-        mostrar_unidad = len(unidades) > 1
-        for id_unidad in ids_unidad:
-            imgs = sorted(unidades[id_unidad], key=lambda i: i["NumeroConsultorio"])
-            if mostrar_unidad:
-                story.append(Paragraph(f"<b>Unidad {id_unidad}</b>", estilo_texto(9, negrita=True)))
-                story.append(Spacer(1, 2))
-            story.extend(tabla_fotos(imgs, ancho, mostrar_apto_camilla=True, mostrar_valor=True, decimales=decimales))
+    for id_unidad in sorted(por_unidad):
+        imgs = sorted(por_unidad[id_unidad], key=lambda i: i["NumeroConsultorio"])
+        story.append(encabezado(nivel, f"Unidad {id_unidad}", ancho))
+        story.append(Spacer(1, 6))
+        story.extend(tabla_fotos(imgs, ancho, mostrar_apto_camilla=True, mostrar_valor=True, decimales=decimales))
+    return story
+
+
+def _bloque_disponibilidad(
+    conn: sqlite3.Connection, edificio: sqlite3.Row, anio: int, mes: int, ancho: float, fecha_titulo: str,
+    nivel: int, mostrar_encabezado_grid: bool, desde: str, hasta: str,
+) -> list:
+    story = list(secciones_disponibilidad(
+        conn, anio, mes, ancho, fecha_titulo, ids_edificio=[edificio["IdEdificio"]], anonimizar_unidad=True,
+        mostrar_titulo=False, mostrar_encabezado_edificio=mostrar_encabezado_grid,
+    ))
+
+    story.append(encabezado(nivel, "Condiciones y forma de reserva", ancho))
+    story.append(Spacer(1, 6))
+    story.extend(condiciones_forma_reserva(conn))
+    story.append(Spacer(1, 10))
+
+    titulo_valores = (
+        f"Valores vigentes por hora regular para el período comprendido entre "
+        f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
+    )
+    story.append(encabezado(nivel, titulo_valores, ancho))
+    story.append(Spacer(1, 6))
+    story.extend(matriz_valores_edificio(conn, edificio["IdEdificio"], ancho, anonimizar_unidad=True))
     return story
 
 
 def generar_pdf_propuesta(
-    conn: sqlite3.Connection, directorio: str, id_profesional: int | None = None,
-    ids_edificio: list[int] | None = None,
+    conn: sqlite3.Connection, directorio: str, ids_edificio: list[int] | None = None,
 ) -> str:
-    """Genera el PDF de propuesta y devuelve la ruta completa.
-    `id_profesional` personaliza "Detalles principales" (profesión de
-    interés) cuando se conoce al contacto; sin él genera una propuesta
-    genérica del espacio."""
+    """Genera el PDF de propuesta y devuelve la ruta completa. Es la misma
+    propuesta genérica del espacio para cualquier profesional interesado
+    (no se personaliza por contacto puntual)."""
     cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos"
     decimales = decimales_configurados(conn)
 
-    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional) if id_profesional else None
     edificios = edificios_incluidos(conn, ids_edificio)
+    multi = len(edificios) > 1
     sufijo = sufijo_localidad(conn, edificios)
     nombre_archivo = f"{nombre_espacio} - Propuesta al profesional{sufijo}.pdf"
 
@@ -252,6 +261,7 @@ def generar_pdf_propuesta(
     imagenes = imagenes_de_consultorios(conn, ids_consultorio)
     anio, mes = parsear_periodo(periodo_actual(conn))
     fecha_titulo = fecha_larga(fecha_actual(conn).isoformat()).replace("/", "-")
+    desde, hasta = rango_actualizacion(conn, periodo_actual(conn))
 
     localidades = sorted({e["DomicilioLocalidad"] for e in edificios if e["DomicilioLocalidad"]})
     localidad_texto = " / ".join(localidades)
@@ -270,16 +280,21 @@ def generar_pdf_propuesta(
     n_detalles = conn.execute("SELECT COUNT(*) FROM DetalleComplementarioPropuesta WHERE Activo = 1").fetchone()[0]
     n_tramos = conn.execute("SELECT COUNT(*) FROM EsquemaDescuentos WHERE Activo = 1").fetchone()[0]
     altura_disponibilidad = altura_estimada_grilla(conn, ids_edificio_incluidos or None)
+    n_ed = len(edificios)
+    n_unidades_con_fotos = len({(i["NombreEdificio"], i["IdUnidadConsultorio"]) for i in imagenes})
 
     altura = (
-        8 * cm  # encabezado_espacio + nivel1 "Propuesta al profesional"
-        + 1.5 * cm + len(edificios) * 4 * cm  # detalles principales: ubicación/destino por edificio
-        + n_unidades * 0.45 * cm + len(edificios) * 1 * cm  # tabla detalle de unidades
-        + n_consultorios * 0.4 * cm + len(edificios) * 1 * cm  # tabla detalle de consultorios (agrupada por unidad)
-        + 1.5 * cm + (len(imagenes) // 2 + 1) * 7 * cm + len(edificios) * 1 * cm  # fotos
-        + altura_disponibilidad  # disponibilidad
-        + 1.5 * cm + 5 * 0.5 * cm  # condiciones y forma de reserva
-        + 1.5 * cm + len(edificios) * 3 * cm  # valores vigentes
+        6 * cm  # encabezado_espacio (logo + línea)
+        + 1.5 * cm + n_ed * 1 * cm  # nivel1 "Detalles principales" + wrapper nivel2 por edificio (si multi)
+        + n_ed * 3 * cm  # Ubicación + Destino y uso por edificio
+        + n_unidades * 0.45 * cm + n_ed * 1 * cm  # tabla detalle de unidades
+        + n_consultorios * 0.4 * cm + n_ed * 1 * cm  # tabla detalle de consultorios
+        + 1.5 * cm + n_ed * 1 * cm  # nivel1 "Fotos de los consultorios" + wrapper por edificio
+        + (len(imagenes) // 2 + 1) * 7 * cm + n_unidades_con_fotos * 1 * cm  # fotos + "Unidad N"
+        + 1.5 * cm + n_ed * 1 * cm  # nivel1 "Disponibilidad..." + wrapper por edificio
+        + altura_disponibilidad  # grillas (ya suma por edificio)
+        + n_ed * (1.5 * cm + 5 * 0.5 * cm)  # condiciones y forma de reserva (por edificio si multi)
+        + n_ed * (1.5 * cm + 3 * cm)  # valores vigentes (por edificio)
         + 1.5 * cm + n_detalles * 1.8 * cm + ((n_tramos // 9) + 1) * 1.4 * cm  # detalles complementarios
     ) * 1.15
 
@@ -287,43 +302,58 @@ def generar_pdf_propuesta(
     doc, ancho = crear_documento(ruta, altura=altura)
 
     story = list(encabezado_espacio(conn, ancho, mostrar_localidad=bool(localidad_texto), localidad=localidad_texto or None))
-    story.append(encabezado(1, "Propuesta al profesional", ancho))
-    story.append(Spacer(1, 6))
 
-    story.append(encabezado(2, "Detalles principales de la propuesta", ancho))
-    story.append(Spacer(1, 6))
-    story.extend(_contacto_y_profesion(conn, profesional))
-    for i, e in enumerate(edificios):
-        if i > 0:
-            story.append(Spacer(1, 8))
-        story.extend(_bloque_edificio_detalles(conn, e, ancho, mostrar_encabezado=len(edificios) > 1))
+    # ------------------------------------------------------- Detalles principales
+    story.append(encabezado(1, "Detalles principales de la propuesta", ancho))
+    story.append(Spacer(1, 8))
+    if multi:
+        for e in edificios:
+            story.append(encabezado(2, _titulo_edificio(e), ancho))
+            story.append(Spacer(1, 6))
+            story.extend(_bloque_detalles_principales(conn, e, ancho, nivel=3))
+            story.append(Spacer(1, 10))
+    else:
+        story.extend(_bloque_detalles_principales(conn, edificios[0], ancho, nivel=2))
     story.append(Spacer(1, 10))
 
-    story.append(encabezado(2, "Fotos de los consultorios", ancho))
-    story.append(Spacer(1, 6))
-    story.extend(_fotos_agrupadas(conn, edificios, imagenes, ancho, decimales))
-    story.append(Spacer(1, 6))
-
-    story.extend(secciones_disponibilidad(
-        conn, anio, mes, ancho, fecha_titulo, ids_edificio=ids_edificio_incluidos or None, anonimizar_unidad=True,
-    ))
-
-    story.append(Spacer(1, 6))
-    story.append(encabezado(2, "Condiciones y forma de reserva", ancho))
-    story.append(Spacer(1, 6))
-    story.extend(condiciones_forma_reserva(conn))
+    # ------------------------------------------------------------- Fotos
+    story.append(encabezado(1, "Fotos de los consultorios", ancho))
+    story.append(Spacer(1, 8))
+    if multi:
+        for e in edificios:
+            imagenes_ed = [i for i in imagenes if i["NombreEdificio"] == e["Nombre"]]
+            if not imagenes_ed:
+                continue
+            story.append(encabezado(2, _titulo_edificio(e), ancho))
+            story.append(Spacer(1, 6))
+            story.extend(_bloque_fotos(imagenes_ed, ancho, nivel=3, decimales=decimales))
+            story.append(Spacer(1, 10))
+    else:
+        story.extend(_bloque_fotos(imagenes, ancho, nivel=2, decimales=decimales))
     story.append(Spacer(1, 10))
 
-    story.append(encabezado(2, "Valores vigentes por hora regular", ancho))
-    for e in edificios:
-        story.append(Spacer(1, 6))
-        story.append(encabezado(3, f"Edificio {e['Nombre']}", ancho))
-        story.append(Spacer(1, 6))
-        story.extend(matriz_valores_edificio(conn, e["IdEdificio"], ancho, anonimizar_unidad=True))
+    # ---------------------------------------------------------- Disponibilidad
+    story.append(encabezado(1, f"Disponibilidad de consultorios al {fecha_titulo}", ancho))
+    story.append(Spacer(1, 8))
+    if multi:
+        for e in edificios:
+            story.append(encabezado(2, _titulo_edificio(e), ancho))
+            story.append(Spacer(1, 6))
+            story.extend(_bloque_disponibilidad(
+                conn, e, anio, mes, ancho, fecha_titulo, nivel=3,
+                mostrar_encabezado_grid=False, desde=desde, hasta=hasta,
+            ))
+            story.append(Spacer(1, 10))
+    else:
+        story.extend(_bloque_disponibilidad(
+            conn, edificios[0], anio, mes, ancho, fecha_titulo, nivel=2,
+            mostrar_encabezado_grid=True, desde=desde, hasta=hasta,
+        ))
     story.append(Spacer(1, 10))
 
-    story.append(encabezado(2, "Detalles complementarios de la propuesta", ancho))
-    story.append(Spacer(1, 6))
+    # ---------------------------------------------------- Detalles complementarios
+    story.append(encabezado(1, "Detalles complementarios de la propuesta", ancho))
+    story.append(Spacer(1, 8))
     story.extend(detalles_complementarios_propuesta(conn, ancho))
 
     doc.build(story)

@@ -13,6 +13,7 @@ from app.pdf.estilos import (
     FUENTE_NEGRITA,
     clave_orden_unidad,
     decimales_configurados,
+    encabezado,
     estilo_texto,
     formatear_moneda,
 )
@@ -67,11 +68,16 @@ def matriz_valores_edificio(
     real (sección 4.3, PDF de Propuesta, que va a profesionales NO
     activos)."""
     decimales = decimales_configurados(conn)
+    # Anonimizado (Propuesta): orden por número de unidad ascendente, no
+    # por piso — la etiqueta "Unidad {IdUnidad}" no tiene piso/letra real
+    # que ordenar, y así queda "Unidad 1, Unidad 2, Unidad 3..." en vez de
+    # saltar según el piso real de cada una.
+    orden_sql = "u.IdUnidad" if anonimizar_unidad else "u.Departamento"
     filas_bd = conn.execute(
-        """
+        f"""
         SELECT u.IdUnidad, u.Departamento, c.NumeroConsultorio, c.ValorHoraRegularActual
         FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad
-        WHERE u.IdEdificio = ? ORDER BY u.Departamento, c.NumeroConsultorio
+        WHERE u.IdEdificio = ? ORDER BY {orden_sql}, c.NumeroConsultorio
         """,
         (id_edificio,),
     ).fetchall()
@@ -85,10 +91,13 @@ def matriz_valores_edificio(
 
     encabezado_fila = ["Unidad"] + [f"Consul. {n}" for n in range(1, max_consultorios + 1)]
     filas = [encabezado_fila]
-    # Piso ascendente (EP/PB como si fuera 0, arriba de todo) y, a igualdad
-    # de piso, letra del departamento alfabética — mismo criterio que las
+    # Anonimizado: ya vino ordenado por IdUnidad de la consulta SQL (dict
+    # preserva orden de inserción). Sin anonimizar (Liquidación): piso
+    # ascendente (EP/PB como si fuera 0, arriba de todo) y, a igualdad de
+    # piso, letra del departamento alfabética — mismo criterio que las
     # grillas de disponibilidad.
-    for unidad in sorted(por_unidad, key=clave_orden_unidad):
+    unidades_ordenadas = list(por_unidad) if anonimizar_unidad else sorted(por_unidad, key=clave_orden_unidad)
+    for unidad in unidades_ordenadas:
         valores = por_unidad[unidad]
         filas.append(
             [unidad]
@@ -198,18 +207,45 @@ def condiciones_forma_reserva(conn: sqlite3.Connection) -> list:
     return story
 
 
+def _sustituciones_detalles_complementarios(conn: sqlite3.Connection) -> dict[str, str]:
+    """Valores para los placeholders que puede llevar el `Texto` de un
+    ítem editable: "{frecuencia}" (el ítem "Ajuste de valores" toma la
+    frecuencia real configurada, no queda hardcodeada) y "{contacto}" (el
+    ítem "Contacto" arma "Nombre - Celular - Email" del responsable
+    marcado como contacto principal)."""
+    cfg = conn.execute(
+        "SELECT FrecuenciaActualizacionValores FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    frecuencia = ((cfg["FrecuenciaActualizacionValores"] if cfg else None) or "periódica").lower()
+
+    resp = conn.execute(
+        "SELECT Nombre, Celular, Email FROM Responsable WHERE EsContactoPrincipal = 1 AND Activo = 1 LIMIT 1"
+    ).fetchone()
+    contacto = (
+        " - ".join(p for p in (resp["Nombre"], resp["Celular"], resp["Email"]) if p)
+        if resp else "Sin datos de contacto cargados."
+    )
+    return {"{frecuencia}": frecuencia, "{contacto}": contacto}
+
+
 def detalles_complementarios_propuesta(conn: sqlite3.Connection, ancho: float) -> list:
     """Los ítems editables y ordenables de "Detalles complementarios de la
-    propuesta" (DetalleComplementarioPropuesta, sección 4.3). El ítem
-    "Descuentos" es el único con contenido tabular: además del texto,
-    muestra debajo el esquema de descuentos vigente (EsquemaDescuentos)."""
+    propuesta" (DetalleComplementarioPropuesta, sección 4.3), cada uno con
+    su propio título de nivel 2. El ítem de descuentos es el único con
+    contenido tabular: además del texto, muestra debajo el esquema de
+    descuentos vigente (EsquemaDescuentos)."""
     items = conn.execute("SELECT * FROM DetalleComplementarioPropuesta WHERE Activo = 1 ORDER BY Orden").fetchall()
+    sustituciones = _sustituciones_detalles_complementarios(conn)
     story = []
     for item in items:
-        story.append(Paragraph(f"<b>{item['Titulo']}</b>", estilo_texto(9, negrita=True)))
-        story.append(Paragraph(item["Texto"], estilo_texto(9)))
-        if item["Titulo"].strip().lower() == "descuentos":
+        story.append(encabezado(2, item["Titulo"], ancho))
+        story.append(Spacer(1, 4))
+        texto = item["Texto"]
+        for clave, valor in sustituciones.items():
+            texto = texto.replace(clave, valor)
+        story.append(Paragraph(texto, estilo_texto(9)))
+        if "descuentos" in item["Titulo"].strip().lower():
             story.append(Spacer(1, 4))
             story.extend(bloques_esquema_descuentos(conn, ancho))
-        story.append(Spacer(1, 6))
+        story.append(Spacer(1, 8))
     return story

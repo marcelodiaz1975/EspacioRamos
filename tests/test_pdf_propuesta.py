@@ -46,13 +46,11 @@ def test_anonimiza_unidad_en_pie_de_foto_y_grilla(conn, edificio_con_consultorio
     assert '7mo "L"' not in texto  # el departamento real no debe aparecer
 
 
-def test_personaliza_con_profesion_del_contacto(conn, edificio_con_consultorio_y_foto, tmp_path):
-    id_profesion = obtener_repositorio(conn, "Profesion").listar()[0]["IdProfesion"]
-    nombre_profesion = obtener_repositorio(conn, "Profesion").obtener(id_profesion)["Nombre"]
-    id_prof = obtener_repositorio(conn, "Profesional").crear(
-        CategoriaProfesional="C", Apellido="Prospecto", IdProfesion=id_profesion,
-    )
-    ruta = generar_pdf_propuesta(conn, str(tmp_path), id_profesional=id_prof)
+def test_incluye_las_cuatro_secciones_de_nivel_1(conn, edificio_con_consultorio_y_foto, tmp_path):
+    ruta = generar_pdf_propuesta(conn, str(tmp_path))
 
     texto = fitz.open(ruta)[0].get_text()
-    assert nombre_profesion in texto
+    assert "Detalles principales de la propuesta" in texto
+    assert "Fotos de los consultorios" in texto
+    assert "Disponibilidad de consultorios al" in texto
+    assert "Detalles complementarios de la propuesta" in texto

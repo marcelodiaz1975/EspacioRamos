@@ -452,10 +452,16 @@ def altura_estimada_grilla(conn: sqlite3.Connection, ids_edificio: list[int] | N
 def secciones_disponibilidad(
     conn: sqlite3.Connection, anio: int, mes: int, ancho: float, fecha_titulo: str,
     ids_edificio: list[int] | None = None, anonimizar_unidad: bool = False,
+    mostrar_titulo: bool = True, mostrar_encabezado_edificio: bool = True,
 ) -> list:
     """Nivel 2 "Disponibilidad de consultorios al {fecha_titulo}" seguido,
     por cada edificio relevante, de un nivel 3 con su grilla completa +
-    leyenda + notas de horarios rígidos/flexibles (sección 4.2)."""
+    leyenda + notas de horarios rígidos/flexibles (sección 4.2).
+
+    `mostrar_titulo`/`mostrar_encabezado_edificio` en False dejan afuera el
+    título compartido y/o el "Edificio {Nombre}" nivel 3 de cada bloque —
+    el PDF de Propuesta arma su propio título (nivel 1, o nivel 2 por
+    edificio cuando hay más de uno) y no necesita este duplicado."""
     cfg = conn.execute(
         "SELECT HoraInicioGrilla, HoraFinGrilla FROM Configuracion WHERE IdConfiguracion = 1"
     ).fetchone()
@@ -478,12 +484,17 @@ def secciones_disponibilidad(
 
     style_nota = estilo_texto(7, negrita=True, italica=True)
 
-    story = [encabezado(2, f"Disponibilidad de consultorios al {fecha_titulo}", ancho), Spacer(1, 6)]
+    story = []
+    if mostrar_titulo:
+        story.append(encabezado(2, f"Disponibilidad de consultorios al {fecha_titulo}", ancho))
+        story.append(Spacer(1, 6))
     for id_edificio, unidades_ed in por_edificio.items():
         constructor_tabla = _tabla_grilla_edificio_girada if len(unidades_ed) > umbral_giro else _tabla_grilla_edificio
-        bloque = [
-            encabezado(3, f"Edificio {nombres[id_edificio]}", ancho),
-            Spacer(1, 6),
+        bloque = []
+        if mostrar_encabezado_edificio:
+            bloque.append(encabezado(3, f"Edificio {nombres[id_edificio]}", ancho))
+            bloque.append(Spacer(1, 6))
+        bloque.extend([
             constructor_tabla(conn, unidades_ed, grilla, horas, ancho, anonimizar_unidad),
             Spacer(1, 4),
             _tabla_leyenda(ancho),
@@ -496,7 +507,7 @@ def secciones_disponibilidad(
                 "restricción y sin mínimo alguno.", style_nota,
             ),
             Spacer(1, 8),
-        ]
+        ])
         story.append(KeepTogether(bloque))
     return story
 
