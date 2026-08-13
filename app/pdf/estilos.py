@@ -71,23 +71,39 @@ def ancho_util(apaisado: bool = False) -> float:
     return ancho_base - 2 * MARGEN
 
 
+# Límite real del formato PDF: 14400pt (200 in) de lado máximo de página.
+# Por encima de esto Acrobat Reader avisa "Las dimensiones de esta página
+# superan los límites" (y puede recortar contenido) al abrir el archivo —
+# no todos los lectores lo toleran igual de bien, así que nunca hay que
+# pedirle a `crear_documento` una altura mayor a esta, aunque el contenido
+# no entre en una sola página. Un par de puntos de margen por debajo del
+# límite exacto, para no depender de que el lector lo trate como "<=" o
+# como "<" ni de redondeos de punto flotante al construir el pagesize.
+_ALTURA_MAXIMA_PAGINA = 14398
+
+
 def construir_sin_saltos(
     ruta: str, construir_story: Callable[[float], list], altura: float, apaisado: bool = False,
     max_intentos: int = 6, factor: float = 1.35,
 ) -> None:
     """Arma el PDF reintentando con una página más alta si el contenido no
     entró en una sola con la altura estimada — ningún PDF del sistema debe
-    salir paginado (Etapa 7: "página única continua"). `construir_story(ancho)`
-    arma el story desde cero en cada intento: reusar el mismo `story` entre
-    llamadas a `doc.build` rompe el conteo interno de reportlab (los
-    flowables no están pensados para pasar por dos documentos), así que no
-    alcanza con guardar el story una sola vez afuera. El ancho útil no
-    cambia con la altura (`crear_documento`), así que da lo mismo en qué
-    intento se calculen los anchos de columna."""
+    salir paginado (Etapa 7: "página única continua") salvo que el
+    contenido sea tan largo que ni siquiera entre en el alto máximo válido
+    de una página PDF (`_ALTURA_MAXIMA_PAGINA`): ahí se acepta que el
+    documento se reparta en páginas de continuación antes que generar un
+    PDF fuera de norma. `construir_story(ancho)` arma el story desde cero
+    en cada intento: reusar el mismo `story` entre llamadas a `doc.build`
+    rompe el conteo interno de reportlab (los flowables no están pensados
+    para pasar por dos documentos), así que no alcanza con guardar el
+    story una sola vez afuera. El ancho útil no cambia con la altura
+    (`crear_documento`), así que da lo mismo en qué intento se calculen
+    los anchos de columna."""
     for _ in range(max_intentos):
+        altura = min(altura, _ALTURA_MAXIMA_PAGINA)
         doc, ancho = crear_documento(ruta, apaisado=apaisado, altura=altura)
         doc.build(construir_story(ancho))
-        if doc.page <= 1:
+        if doc.page <= 1 or altura >= _ALTURA_MAXIMA_PAGINA:
             return
         # Saltar directo a una altura proporcional a cuántas páginas hizo
         # falta (no un factor fijo): con `factor` de más margen para que la
