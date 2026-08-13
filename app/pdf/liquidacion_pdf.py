@@ -238,16 +238,10 @@ def _items_cuenta(
     `generar_pdf_liquidacion`, que lo resuelve una sola vez)."""
     items: list[tuple[str, float, bool]] = []
     items.append((f"Importe bruto correspondiente a la reserva regular de {mes_actual_texto}", liquidacion.bruto, False))
-    if liquidacion.pierde_descuento_horas:
-        concepto_desc = (
-            f"Descuento ({liquidacion.descuento_horas_pct:g}%, pierde el descuento por saldo atrasado) "
-            f"por cantidad de horas semanales reservadas ({liquidacion.horas_semanales:g}hs)"
-        )
-    else:
-        concepto_desc = (
-            f"Descuento ({liquidacion.descuento_horas_pct:g}%) por cantidad de horas semanales "
-            f"reservadas ({liquidacion.horas_semanales:g}hs)"
-        )
+    concepto_desc = (
+        f"Descuento ({liquidacion.descuento_horas_pct:g}%) por cantidad de horas semanales "
+        f"reservadas ({liquidacion.horas_semanales:g}hs)"
+    )
     items.append((concepto_desc, -(liquidacion.bruto - liquidacion.subtotal_reserva), False))
     items.append((f"Subtotal por reserva para el mes de {mes_actual_texto}", liquidacion.subtotal_reserva, True))
     if liquidacion.saldo_anterior > 0:
@@ -367,7 +361,11 @@ def _caja_total(concepto: str, importe: float, ancho: float, decimales: int) -> 
     tabla.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (0, 1), FUENTE_NEGRITA), ("FONTSIZE", (0, 0), (0, 1), 10),
         ("FONTNAME", (1, 0), (1, 0), FUENTE_NEGRITA_ITALICA), ("FONTSIZE", (1, 0), (1, 0), 12),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("VALIGN", (0, 0), (0, 1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        # El concepto ancla arriba (fila del importe): si el texto en
+        # letras se envuelve en más de una línea, la fila de abajo crece
+        # sola sin arrastrar el concepto hacia el medio de las dos líneas.
+        ("VALIGN", (0, 0), (0, 1), "TOP"), ("VALIGN", (1, 0), (1, 1), "TOP"),
         ("SPAN", (0, 0), (0, 1)), ("BOX", (0, 0), (-1, -1), 1.2, "#000000"),
         ("BACKGROUND", (0, 0), (-1, -1), "#EEEEEE"),
         ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),

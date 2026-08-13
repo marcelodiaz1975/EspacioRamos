@@ -8,6 +8,7 @@ cada uno con su propio color/alto/tamaño de fuente.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 
 from reportlab.lib import colors
@@ -100,6 +101,34 @@ def formatear_moneda(monto: float, decimales: int = 2) -> str:
     texto = f"{abs(monto):,.{decimales}f}"
     texto = texto.replace(",", "_").replace(".", ",").replace("_", ".")
     return f"-$ {texto}" if monto < 0 else f"$ {texto}"
+
+
+def partir_etiqueta_unidad(etiqueta: str) -> tuple[str, str]:
+    """'7mo "L"' -> ('7', 'L'); 'EP "K"' -> ('EP', 'K'); '15 "H"' -> ('15', 'H').
+    Arriba va solo el número de piso (sin el sufijo ordinal "mo"/"ro"/"no"
+    si lo tiene; si el piso no es numérico, ej. "EP"/"PB", se deja tal
+    cual). Abajo va la letra del departamento sin comillas. Si la etiqueta
+    no sigue este patrón (dato cargado distinto), se deja completa arriba
+    y nada abajo, en vez de romper. Compartido por la grilla (piso/letra
+    en celdas separadas) y "Valores de los consultorios" (orden por piso)."""
+    m = re.match(r'^(\S+)\s+"([^"]+)"$', etiqueta)
+    if not m:
+        return etiqueta, ""
+    prefijo, sufijo = m.groups()
+    numero = re.match(r"^(\d+)", prefijo)
+    arriba = numero.group(1) if numero else prefijo
+    return arriba, sufijo
+
+
+def clave_orden_unidad(etiqueta: str) -> tuple[float, str]:
+    """Orden pedido para listar unidades: piso ascendente y, a igualdad de
+    piso, la letra del departamento alfabéticamente — los pisos no
+    numéricos (ej. "EP"/"PB") valen 0 y quedan primero. Usado tanto en
+    "Valores de los consultorios" como en las grillas de disponibilidad
+    (girada o no) para que las dos secciones ordenen igual."""
+    piso, letra = partir_etiqueta_unidad(etiqueta)
+    piso_num = float(piso) if piso.isdigit() else 0.0
+    return piso_num, letra
 
 
 class LineaSeparadora(Flowable):

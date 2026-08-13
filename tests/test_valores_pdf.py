@@ -5,7 +5,12 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.pdf.estilos import COLOR_NIVEL_1
-from app.pdf.valores_pdf import _hasta_por_frecuencia, bloques_esquema_descuentos, rango_actualizacion
+from app.pdf.valores_pdf import (
+    _hasta_por_frecuencia,
+    bloques_esquema_descuentos,
+    matriz_valores_edificio,
+    rango_actualizacion,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -117,3 +122,14 @@ def test_sin_tramos_muestra_mensaje(conn):
     _limpiar_esquema(conn)
     resultado = bloques_esquema_descuentos(conn, ancho=500)
     assert len(resultado) == 1
+
+
+def test_matriz_valores_ordena_unidades_por_piso_y_letra(conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    for nombre in ['15 "H"', '7mo "L"', '9no "C"', 'EP "K"']:
+        id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=nombre)
+        obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+
+    [tabla] = matriz_valores_edificio(conn, id_edificio, ancho=500)
+    unidades = [fila[0] for fila in tabla._cellvalues[1:]]
+    assert unidades == ['EP "K"', '7mo "L"', '9no "C"', '15 "H"']

@@ -228,8 +228,10 @@ def test_reversion_descuento_aparece_y_muestra_el_pct_real_cuando_se_pierde(conn
     ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
     texto = _texto_pdf(ruta)
     assert "Reversión del descuento por arrastrar saldos del período anterior" in texto
-    assert "pierde el descuento por saldo atrasado" in texto
-    assert "Descuento (0%, pierde" not in texto  # ahora muestra el % real, no 0%
+    # La línea de descuento va igual que siempre, sin aclarar la pérdida
+    # ahí — la transparencia queda a cargo de la línea de reversión.
+    assert "pierde el descuento por saldo atrasado" not in texto
+    assert "Descuento (0%" not in texto  # muestra el % real, no 0%
 
 
 def test_reversion_descuento_no_aparece_si_no_hay_descuento_real_que_perder(conn, profesional, tmp_path):

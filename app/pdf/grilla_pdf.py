@@ -8,7 +8,6 @@ ventana) se pintan del mismo color que "amarillo" pero con la leyenda
 "S/V" superpuesta, para distinguirlas sin agregar un quinto color."""
 from __future__ import annotations
 
-import re
 import sqlite3
 
 from reportlab.lib import colors
@@ -29,9 +28,11 @@ from app.pdf.estilos import (
     FUENTE,
     FUENTE_NEGRITA,
     MARGEN,
+    clave_orden_unidad,
     encabezado,
     estilo_texto,
 )
+from app.pdf.estilos import partir_etiqueta_unidad as _partir_etiqueta_unidad
 
 DIAS_GRILLA_DEFAULT = DIAS_SEMANA[:6]  # Lunes a Sábado
 _COLOR_CELDA = {"verde": COLOR_VERDE, "amarillo": COLOR_AMARILLO, "naranja": COLOR_AMARILLO, "rojo": COLOR_ROJO}
@@ -95,22 +96,6 @@ def _tamano_que_entra(
         if ancho_maximo <= ancho_disponible * 0.85:
             return tamano
     return tamano_min
-
-
-def _partir_etiqueta_unidad(etiqueta: str) -> tuple[str, str]:
-    """'7mo "L"' -> ('7', 'L'); 'EP "K"' -> ('EP', 'K'); '15 "H"' -> ('15', 'H').
-    Arriba va solo el número de piso (sin el sufijo ordinal "mo"/"ro"/"no"
-    si lo tiene; si el piso no es numérico, ej. "EP"/"PB", se deja tal
-    cual). Abajo va la letra del departamento sin comillas. Si la etiqueta
-    no sigue este patrón (dato cargado distinto), se deja completa arriba
-    y nada abajo, en vez de romper."""
-    m = re.match(r'^(\S+)\s+"([^"]+)"$', etiqueta)
-    if not m:
-        return etiqueta, ""
-    prefijo, sufijo = m.groups()
-    numero = re.match(r"^(\d+)", prefijo)
-    arriba = numero.group(1) if numero else prefijo
-    return arriba, sufijo
 
 
 def _tabla_grilla_edificio(
@@ -216,6 +201,9 @@ def _tabla_grilla_edificio(
         # línea fina de la GRID que tapa (dibujada antes, debajo), para que
         # el antialiasing de esa línea no deje un resto visible del gris.
         ("LINEBELOW", (2, 2), (-1, 2), 1.2, COLOR_NIVEL_1),
+        # "UNIDAD" con justificación inferior (el resto de la grilla queda
+        # centrado verticalmente por el VALIGN de arriba).
+        ("VALIGN", (2, 1), (-1, 1), "BOTTOM"),
         # "Tipo Bloque"/"Horario" combinan las 4 filas de encabezado (mismo
         # alto que Día/Unidad/Piso/Letra) en vez de quedar ancladas arriba.
         ("SPAN", (0, 0), (0, 3)),
@@ -348,10 +336,17 @@ def _tabla_grilla_edificio_girada(
         ("FONTSIZE", (0, 2), (0, ultima_fila), 8),  # con varias filas de alto de sobra, entra más grande
         ("BACKGROUND", (1, 2), (2, ultima_fila), COLOR_NIVEL_1),
         ("TEXTCOLOR", (1, 2), (2, ultima_fila), "#FFFFFF"),
+        # El divisor entre la columna de piso y la de letra se pinta del
+        # mismo azul que el fondo para que quede invisible, igual que en
+        # la grilla sin girar.
+        ("LINEAFTER", (1, 2), (1, ultima_fila), 1.2, COLOR_NIVEL_1),
         # "Día"/"Piso"/"Depto." combinan las 2 filas de encabezado.
         ("SPAN", (0, 0), (0, 1)),
         ("SPAN", (1, 0), (1, 1)),
         ("SPAN", (2, 0), (2, 1)),
+        # Título de cada columna de encabezado separado con línea gruesa.
+        ("LINEAFTER", (0, 0), (0, 1), _GROSOR_GRUESO, "#000000"),
+        ("LINEAFTER", (1, 0), (1, 1), _GROSOR_GRUESO, "#000000"),
     ]
     for ini, fin in zip(inicios_grupo_col, limites_grupo_col):
         estilo.append(("SPAN", (ini, 0), (fin, 0)))
@@ -371,7 +366,7 @@ def _tabla_grilla_edificio_girada(
     estilo.append(("BOX", (3, 0), (-1, 1), _GROSOR_GRUESO, "#000000"))
     idx = 2
     for _dia in dias:
-        estilo.append(("BOX", (0, idx), (0, idx + n_unidades - 1), _GROSOR_GRUESO, "#000000"))
+        estilo.append(("BOX", (0, idx), (2, idx + n_unidades - 1), _GROSOR_GRUESO, "#000000"))
         idx += n_unidades
         if idx <= ultima_fila + 1:
             estilo.append(("LINEBELOW", (0, idx - 1), (-1, idx - 1), _GROSOR_GRUESO, "#000000"))
@@ -445,6 +440,8 @@ def secciones_disponibilidad(
     for u in unidades:
         por_edificio.setdefault(u["IdEdificio"], []).append(u)
         nombres[u["IdEdificio"]] = u["NombreEdificio"]
+    for id_edificio in por_edificio:
+        por_edificio[id_edificio].sort(key=lambda u: clave_orden_unidad(u["Departamento"]))
 
     style_nota = estilo_texto(7, negrita=True, italica=True)
 

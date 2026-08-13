@@ -23,7 +23,6 @@ from reportlab.platypus import Image, Paragraph, Spacer, Table, TableStyle
 
 from app.pdf.estilos import FUENTE, estilo_texto
 
-ALTO_FOTO = 6 * cm
 RELACION_FOTO = 4 / 3
 
 
@@ -73,7 +72,13 @@ def _celda_foto(imagen: sqlite3.Row, ancho_celda: float, mostrar_apto_camilla: b
     if ruta and os.path.isfile(ruta):
         try:
             recorte = _recortar_al_centro(ruta)
-            img = Image(recorte, width=ancho_celda, height=ALTO_FOTO, kind="proportional")
+            # Ancho fijo en vez de alto fijo: la foto ya está recortada a
+            # 4:3 exacto, así que el ancho dibujado siempre llena toda la
+            # celda (antes, con alto fijo, el "proportional" a veces
+            # devolvía un ancho menor y centraba la foto, dejando un hueco
+            # entre el borde de la celda y el de la foto que no coincidía
+            # con dónde arrancaba el pie de foto).
+            img = Image(recorte, width=ancho_celda, height=ancho_celda / RELACION_FOTO, kind="proportional")
             contenido.append(img)
         except Exception:
             contenido.append(Paragraph(f"(no se pudo leer la imagen: {imagen['Descripcion'] or ruta})", estilo_texto(8)))

@@ -182,6 +182,39 @@ def test_fila_unidad_en_mayusculas(conn):
     assert tabla._cellvalues[1][2] == "UNIDAD"
 
 
+def test_fila_unidad_alineada_abajo(conn):
+    unidades = _unidades_ficticias(2)
+    tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9], ancho=400)
+    assert tabla._cellStyles[1][2].valign == "BOTTOM"
+
+
+def test_secciones_disponibilidad_ordena_unidades_por_piso_y_letra(conn):
+    """Piso ascendente (EP/PB valen 0, van primero), a igualdad de piso la
+    letra alfabética — mismo ejemplo que dio el usuario."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    for nombre in ['15 "H"', '7mo "L"', '9no "C"', 'EP "K"']:
+        obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=nombre)
+
+    story = secciones_disponibilidad(conn, 2026, 8, ancho=550, fecha_titulo="12-08-2026")
+    tabla = next(f for f in story[2]._content if isinstance(f, Table) and len(f._cellvalues) > 2)
+    piso_letra = list(zip(
+        [c.getPlainText() for c in tabla._cellvalues[2][2:2 + 4]],
+        [c.getPlainText() for c in tabla._cellvalues[3][2:2 + 4]],
+    ))
+    assert piso_letra == [("EP", "K"), ("7", "L"), ("9", "C"), ("15", "H")]
+
+
+def test_orden_a_igualdad_de_piso_es_alfabetico_por_letra(conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    for nombre in ['5to "C"', '5to "A"', '5to "B"']:
+        obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=nombre)
+
+    story = secciones_disponibilidad(conn, 2026, 8, ancho=550, fecha_titulo="12-08-2026")
+    tabla = next(f for f in story[2]._content if isinstance(f, Table) and len(f._cellvalues) > 2)
+    letras = [c.getPlainText() for c in tabla._cellvalues[3][2:2 + 3]]
+    assert letras == ["A", "B", "C"]
+
+
 def test_sv_tiene_fuente_autoajustable(conn):
     """Con muchas unidades (columnas angostas) el tamaño de "S/V" tiene que
     reducirse para no desbordar la celda."""
@@ -217,6 +250,33 @@ def test_grilla_girada_conserva_piso_y_letra_por_fila(conn):
     primeras_filas = tabla._cellvalues[2:2 + len(unidades)]
     obtenido = [(f[1].getPlainText(), f[2].getPlainText()) for f in primeras_filas]
     assert obtenido == [("15", "H"), ("7", "L"), ("9", "C")]
+
+
+def test_grilla_girada_divisor_piso_letra_es_invisible(conn):
+    unidades = _unidades_ficticias(3)
+    tabla = _tabla_grilla_edificio_girada(conn, unidades, grilla={}, horas=[9], ancho=550)
+    lineas = [cmd for cmd in tabla._linecmds if cmd[0] == "LINEAFTER" and cmd[1] == (1, 2)]
+    assert lineas, "no se encontró el LINEAFTER entre piso y depto."
+    assert lineas[0][4] == COLOR_NIVEL_1
+
+
+def test_grilla_girada_titulos_de_encabezado_separados_con_linea_gruesa(conn):
+    unidades = _unidades_ficticias(2)
+    tabla = _tabla_grilla_edificio_girada(conn, unidades, grilla={}, horas=[9], ancho=550)
+    lineas_negras = [
+        cmd for cmd in tabla._linecmds
+        if cmd[0] == "LINEAFTER" and cmd[1][1] == 0 and cmd[1][0] in (0, 1) and cmd[4] == "#000000"
+    ]
+    assert len(lineas_negras) == 2  # Día|Piso y Piso|Depto.
+
+
+def test_grilla_girada_envuelve_piso_y_depto_de_cada_dia(conn):
+    """La caja gruesa de cada día tiene que abarcar también las columnas
+    de piso y depto., no solo la columna del nombre del día."""
+    unidades = _unidades_ficticias(3)
+    tabla = _tabla_grilla_edificio_girada(conn, unidades, grilla={}, horas=[9], ancho=550)
+    cajas_dia = [cmd for cmd in tabla._linecmds if cmd[0] == "BOX" and cmd[1] == (0, 2) and cmd[2][0] == 2]
+    assert cajas_dia, "no se encontró la caja del primer día abarcando columnas 0-2"
 
 
 def test_grilla_girada_el_dia_abarca_todas_las_filas_de_sus_unidades(conn):

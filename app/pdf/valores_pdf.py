@@ -7,7 +7,14 @@ import sqlite3
 
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
-from app.pdf.estilos import COLOR_NIVEL_1, FUENTE_NEGRITA, decimales_configurados, estilo_texto, formatear_moneda
+from app.pdf.estilos import (
+    COLOR_NIVEL_1,
+    FUENTE_NEGRITA,
+    clave_orden_unidad,
+    decimales_configurados,
+    estilo_texto,
+    formatear_moneda,
+)
 
 
 def _hasta_por_frecuencia(desde: str, meses_actualizacion: list[int]) -> str:
@@ -77,7 +84,11 @@ def matriz_valores_edificio(
 
     encabezado_fila = ["Unidad"] + [f"Consul. {n}" for n in range(1, max_consultorios + 1)]
     filas = [encabezado_fila]
-    for unidad, valores in por_unidad.items():
+    # Piso ascendente (EP/PB como si fuera 0, arriba de todo) y, a igualdad
+    # de piso, letra del departamento alfabética — mismo criterio que las
+    # grillas de disponibilidad.
+    for unidad in sorted(por_unidad, key=clave_orden_unidad):
+        valores = por_unidad[unidad]
         filas.append(
             [unidad]
             + [formatear_moneda(valores[n], decimales) if n in valores else "—" for n in range(1, max_consultorios + 1)]
