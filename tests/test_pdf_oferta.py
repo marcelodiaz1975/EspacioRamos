@@ -61,6 +61,60 @@ def test_sin_pedido_lanza_error(conn, tmp_path):
         generar_pdf_oferta(conn, str(tmp_path), 999)
 
 
+def test_coincidencia_verde_explica_cobertura_directa(conn, consultorio, tmp_path):
+    id_pedido = _crear_pedido_para(conn, consultorio, "R")
+    ruta = generar_pdf_oferta(conn, str(tmp_path), id_pedido)
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Cobertura directa: un solo consultorio cubre todo el horario pedido." in texto
+
+
+def test_cantidad_horas_se_describe_en_criterios(conn, consultorio, tmp_path):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    id_pedido = crear_pedido(
+        conn, id_profesional=id_prof, tipo_combinacion="O", dias=["Lunes"],
+        horario_desde=9, horario_hasta=13, cantidad_horas_requeridas=2,
+    )
+    ruta = generar_pdf_oferta(conn, str(tmp_path), id_pedido)
+    texto = fitz.open(ruta)[0].get_text()
+    assert "2hs dentro del rango de 9 a 13hs (no hace falta que sea el rango completo)" in texto
+
+
+def test_orden_consultorios_activo_por_piso_y_departamento(conn, tmp_path):
+    """Profesional activo (departamento real): dentro de un edificio, el
+    orden tiene que ser por piso ascendente — PB antes que 1ro — no por
+    IdUnidad ni por orden alfabético de Departamento."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad_1ro = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='1ro "A"')
+    id_unidad_pb = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='PB "B"')
+    id_c_1ro = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_1ro, NumeroConsultorio=1, ValorHoraRegularActual=100)
+    id_c_pb = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_pb, NumeroConsultorio=1, ValorHoraRegularActual=100)
+    # Cada pedido ocupa el consultorio del OTRO piso en su propio día, para
+    # forzar que cada uno termine matcheando con una unidad distinta (si no,
+    # el barrido siempre elige el primer consultorio libre y el otro nunca
+    # aparecería en la sección final).
+    id_prof_ocupante = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ocupante")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof_ocupante, IdConsultorio=id_c_1ro, DiaSemana="Lunes", HoraInicio=10, HoraFin=11,
+        VigenciaInicio="2020-01-01",
+    )
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof_ocupante, IdConsultorio=id_c_pb, DiaSemana="Martes", HoraInicio=10, HoraFin=11,
+        VigenciaInicio="2020-01-01",
+    )
+
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    id_pedido1 = crear_pedido(
+        conn, id_profesional=id_prof, tipo_combinacion="O", dias=["Lunes"], horario_desde=10, horario_hasta=11,
+    )
+    id_pedido2 = crear_pedido(
+        conn, id_profesional=id_prof, tipo_combinacion="O", dias=["Martes"], horario_desde=10, horario_hasta=11,
+    )
+    ruta = generar_pdf_oferta_multiple(conn, str(tmp_path), [id_pedido1, id_pedido2])
+    texto = fitz.open(ruta)[0].get_text()
+    seccion = texto.split("Consultorios que intervienen en las ofertas")[1]
+    assert seccion.index('PB "B"') < seccion.index('1ro "A"')
+
+
 def test_multiple_combina_varios_pedidos_del_mismo_profesional_en_un_pdf(conn, consultorio, tmp_path):
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     id_pedido1 = crear_pedido(
@@ -71,8 +125,12 @@ def test_multiple_combina_varios_pedidos_del_mismo_profesional_en_un_pdf(conn, c
     )
     ruta = generar_pdf_oferta_multiple(conn, str(tmp_path), [id_pedido1, id_pedido2])
     texto = fitz.open(ruta)[0].get_text()
-    assert texto.count("Filtros de búsqueda y alternativas disponibles") == 2
-    assert texto.count("Fotos y valores regulares de los consultorios ofrecidos") == 1
+    assert texto.count("Criterios de búsqueda") == 1
+    assert texto.count("Coincidencias") == 1
+    assert texto.count("Consultorios que intervienen en las ofertas") == 1
+    # Una franja por pedido, en cada una de las dos secciones que las repiten.
+    assert texto.count("Franja horaria 1") == 2
+    assert texto.count("Franja horaria 2") == 2
 
 
 def test_multiple_con_profesionales_distintos_lanza_error(conn, consultorio, tmp_path):
@@ -113,4 +171,4 @@ def test_sin_combinar_rechaza_coincidencias_que_no_sean_verde(conn, tmp_path):
     ruta = generar_pdf_oferta(conn, str(tmp_path), id_pedido)
     texto = fitz.open(ruta)[0].get_text()
     assert "sin combinación de consultorios" in texto
-    assert "Sin alternativas disponibles con los filtros solicitados." in texto
+    assert "Sin disponibilidad para este bloque con los filtros solicitados." in texto

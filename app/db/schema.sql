@@ -361,6 +361,7 @@ CREATE TABLE IF NOT EXISTS ListaEspera (
     Dias TEXT,
     HorarioDesde REAL,
     HorarioHasta REAL,
+    CantidadHorasRequeridas REAL,
     CondicionesConsultorio TEXT,
     Detalle TEXT,
     Estado TEXT NOT NULL CHECK (Estado IN ('Activo','Resuelto','Descartado')) DEFAULT 'Activo',

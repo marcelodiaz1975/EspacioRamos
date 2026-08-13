@@ -96,6 +96,17 @@ class PantallaListaEspera(QWidget):
         fila_horario.addWidget(self.spin_hasta)
         form.addLayout(fila_horario)
 
+        fila_cantidad_horas = QHBoxLayout()
+        self.casilla_cantidad_horas = QCheckBox("Cantidad de horas dentro del rango (en vez del rango completo)")
+        self.spin_cantidad_horas = QDoubleSpinBox()
+        self.spin_cantidad_horas.setRange(0.5, 24)
+        self.spin_cantidad_horas.setValue(1)
+        self.spin_cantidad_horas.setEnabled(False)
+        self.casilla_cantidad_horas.toggled.connect(self.spin_cantidad_horas.setEnabled)
+        fila_cantidad_horas.addWidget(self.casilla_cantidad_horas)
+        fila_cantidad_horas.addWidget(self.spin_cantidad_horas)
+        form.addLayout(fila_cantidad_horas)
+
         form.addWidget(QLabel("Características pedidas"))
         self.casilla_ventana = QCheckBox("Con ventana")
         self.casilla_camilla = QCheckBox("Apto camilla")
@@ -213,7 +224,9 @@ class PantallaListaEspera(QWidget):
             crear_pedido(
                 self.conn, id_profesional=id_profesional, tipo_combinacion=self.combo_tipo.currentData(),
                 dias=self._dias_seleccionados(), horario_desde=self.spin_desde.value(),
-                horario_hasta=self.spin_hasta.value(), condiciones_consultorio=self._condiciones(),
+                horario_hasta=self.spin_hasta.value(),
+                cantidad_horas_requeridas=self.spin_cantidad_horas.value() if self.casilla_cantidad_horas.isChecked() else None,
+                condiciones_consultorio=self._condiciones(),
                 detalle=self.campo_detalle.toPlainText().strip() or None,
             )
         except ValueError as error:

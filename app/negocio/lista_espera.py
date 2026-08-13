@@ -19,6 +19,16 @@ Tipo de combinación de días (TipoCombinacion):
     O — alcanza con que UN día de los pedidos tenga cobertura.
     Y — TODOS los días pedidos tienen que tener cobertura simultánea.
 
+`CantidadHorasRequeridas` (opcional): en vez de exigir que TODO el rango
+HorarioDesde-HorarioHasta esté libre, alcanza con encontrar un sub-rango
+contiguo de esa duración en algún punto del rango pedido — "necesito 3hs
+dentro del bloque de 9 a 13hs, sin importar cuáles exactamente". Se prueba
+arrancar en cada hora posible del rango, de la más temprana a la más
+tardía, y se toma la primera que se puede cubrir entera (con un solo
+consultorio si se puede, si no combinando). Sin este campo (None), el
+comportamiento es el de siempre: el sub-rango buscado es el rango
+completo.
+
 Cuando hace falta combinar consultorios se arma con un barrido simple hora
 por hora: se mantiene el consultorio elegido mientras siga libre, y al
 liberarse se elige uno nuevo priorizando quedarse en la misma unidad, luego
@@ -61,8 +71,8 @@ class Coincidencia:
 
 def crear_pedido(
     conn: sqlite3.Connection, *, id_profesional: int, tipo_combinacion: str, dias: list[str],
-    horario_desde: float, horario_hasta: float, condiciones_consultorio: dict | None = None,
-    detalle: str | None = None, fecha_pedido: str | None = None,
+    horario_desde: float, horario_hasta: float, cantidad_horas_requeridas: float | None = None,
+    condiciones_consultorio: dict | None = None, detalle: str | None = None, fecha_pedido: str | None = None,
 ) -> int:
     if tipo_combinacion not in TIPOS_COMBINACION:
         raise ValueError(f"tipo_combinacion inválido: {tipo_combinacion!r} (debe ser 'O' o 'Y')")
@@ -70,12 +80,14 @@ def crear_pedido(
         raise ValueError("HorarioHasta debe ser posterior a HorarioDesde")
     if not dias:
         raise ValueError("El pedido necesita al menos un día")
+    if cantidad_horas_requeridas is not None and not (0 < cantidad_horas_requeridas <= horario_hasta - horario_desde):
+        raise ValueError("CantidadHorasRequeridas debe ser mayor a 0 y no superar el rango HorarioDesde-HorarioHasta")
 
     repo = obtener_repositorio(conn, "ListaEspera")
     return repo.crear(
         IdProfesional=id_profesional, FechaPedido=fecha_pedido or fecha_actual(conn).isoformat(),
         TipoCombinacion=tipo_combinacion, Dias=json.dumps(dias),
-        HorarioDesde=horario_desde, HorarioHasta=horario_hasta,
+        HorarioDesde=horario_desde, HorarioHasta=horario_hasta, CantidadHorasRequeridas=cantidad_horas_requeridas,
         CondicionesConsultorio=json.dumps(condiciones_consultorio or {}), Detalle=detalle, Estado="Activo",
     )
 
@@ -138,21 +150,19 @@ def _elegir_consultorio(libres_ids: list[int], candidatos_por_id: dict, actual_i
     return libres_ids[0]
 
 
-def _cobertura_dia(
-    candidatos_por_id: dict, dia: str, hora_desde: float, hora_hasta: float, ocupado: dict,
-) -> list[TramoCobertura] | None:
-    horas = list(range(int(hora_desde), int(hora_hasta)))
-    if not horas:
-        return None
-
+def _cobertura_subrango(candidatos_por_id: dict, dia: str, horas: list[int], ocupado: dict) -> list[TramoCobertura] | None:
+    """Cobertura de un sub-rango YA elegido (una hora de inicio concreta):
+    None si alguna hora puntual no tiene ningún consultorio libre, si no un
+    solo tramo (un consultorio cubre todo) o varios (combinación, barrido
+    hora por hora)."""
     libres_por_hora = {}
     for h in horas:
         libres = [i for i, c in candidatos_por_id.items() if not ocupado.get((i, dia, h))]
         if not libres:
-            return None  # ninguna hora de cobertura posible para esta hora puntual
+            return None
         libres_por_hora[h] = libres
 
-    # un solo consultorio para todo el rango
+    # un solo consultorio para todo el sub-rango
     for id_consultorio in candidatos_por_id:
         if all(id_consultorio in libres_por_hora[h] for h in horas):
             return [TramoCobertura(hora_inicio=horas[0], hora_fin=horas[-1] + 1, id_consultorio=id_consultorio)]
@@ -169,6 +179,28 @@ def _cobertura_dia(
         actual_id = elegido
     tramos.append(TramoCobertura(hora_inicio=inicio_tramo, hora_fin=horas[-1] + 1, id_consultorio=actual_id))
     return tramos
+
+
+def _cobertura_dia(
+    candidatos_por_id: dict, dia: str, hora_desde: float, hora_hasta: float, ocupado: dict,
+    duracion_requerida: float | None = None,
+) -> list[TramoCobertura] | None:
+    """Sin `duracion_requerida` (o igual al rango completo): comportamiento
+    de siempre, todo el rango hora_desde-hora_hasta tiene que estar libre.
+    Con `duracion_requerida` menor al rango: alcanza con encontrar ESE
+    tanto de horas contiguas en algún punto del rango — se prueba cada
+    hora de inicio posible, de la más temprana a la más tardía, y se toma
+    la primera que se puede cubrir entera."""
+    hora_desde_i, hora_hasta_i = int(hora_desde), int(hora_hasta)
+    duracion = int(duracion_requerida) if duracion_requerida else hora_hasta_i - hora_desde_i
+    if duracion <= 0 or duracion > hora_hasta_i - hora_desde_i:
+        return None
+
+    for inicio in range(hora_desde_i, hora_hasta_i - duracion + 1):
+        cobertura = _cobertura_subrango(candidatos_por_id, dia, list(range(inicio, inicio + duracion)), ocupado)
+        if cobertura is not None:
+            return cobertura
+    return None
 
 
 def _clasificar_color(candidatos_por_id: dict, ids_consultorios: set[int]) -> str:
@@ -194,9 +226,17 @@ def calcular_coincidencia(conn: sqlite3.Connection, pedido: sqlite3.Row, anio: i
     candidatos_por_id = {c["IdConsultorio"]: c for c in candidatos}
     ocupado = calcular_ocupacion_regular(conn, anio, mes, dias=dias)
 
+    # `pedido` puede ser una fila real de ListaEspera o un dict armado al
+    # vuelo (mensajes.mensaje_disponibilidad_horarios, que no persiste el
+    # pedido) — a diferencia de un dict, sqlite3.Row no tiene `.get()`, así
+    # que el chequeo de la clave tiene que andar para los dos.
+    duracion_requerida = pedido["CantidadHorasRequeridas"] if "CantidadHorasRequeridas" in pedido.keys() else None
     cobertura_por_dia: dict[str, list[TramoCobertura]] = {}
     for dia in dias:
-        tramos = _cobertura_dia(candidatos_por_id, dia, pedido["HorarioDesde"], pedido["HorarioHasta"], ocupado)
+        tramos = _cobertura_dia(
+            candidatos_por_id, dia, pedido["HorarioDesde"], pedido["HorarioHasta"], ocupado,
+            duracion_requerida=duracion_requerida,
+        )
         if tramos is not None:
             cobertura_por_dia[dia] = tramos
 

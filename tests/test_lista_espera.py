@@ -211,3 +211,48 @@ def test_marcar_resuelto_y_descartado(conn):
 
     with pytest.raises(ValueError):
         marcar_resuelto(conn, id_pedido_1)  # ya no está Activo
+
+
+def test_cantidad_horas_encuentra_subrango_libre_dentro_del_rango_pedido(conn):
+    """De 9 a 13hs el consultorio está ocupado de 9 a 11 y libre de 11 a
+    13 — pidiendo 2hs "en algún punto" del rango (sin importar cuáles)
+    tiene que encontrar el sub-rango 11-13, no descartar el pedido solo
+    porque el rango completo (9-13) no está libre."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    _ocupar(conn, id_consultorio, "Lunes", 9, 11)
+
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), tipo_combinacion="O", dias=["Lunes"],
+        horario_desde=9, horario_hasta=13, cantidad_horas_requeridas=2,
+    )
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
+
+    assert coincidencia.color == VERDE
+    tramo = coincidencia.tramos_por_dia["Lunes"][0]
+    assert (tramo.hora_inicio, tramo.hora_fin) == (11, 13)
+
+
+def test_cantidad_horas_sin_ningun_subrango_libre_no_da_coincidencia(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    _ocupar(conn, id_consultorio, "Lunes", 9, 12)  # solo queda 1hs libre (12-13), no alcanzan las 2hs pedidas
+
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), tipo_combinacion="O", dias=["Lunes"],
+        horario_desde=9, horario_hasta=13, cantidad_horas_requeridas=2,
+    )
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
+    assert coincidencia is None
+
+
+def test_cantidad_horas_mayor_al_rango_pedido_lanza_error(conn):
+    with pytest.raises(ValueError):
+        crear_pedido(
+            conn, id_profesional=_profesional(conn), tipo_combinacion="O", dias=["Lunes"],
+            horario_desde=9, horario_hasta=11, cantidad_horas_requeridas=3,
+        )

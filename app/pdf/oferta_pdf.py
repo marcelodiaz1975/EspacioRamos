@@ -1,6 +1,7 @@
-"""PDF de Oferta de consultorios (Etapa 7, sección 4.6). Se genera a partir
-de un pedido de lista de espera (`ListaEspera`, sección 3.21) — reusa el
-mismo motor de cruce que ya arma las coincidencias para esa pantalla
+"""PDF de Oferta de consultorios (Etapa 7, sección 4.6, alineado a DC-03/
+DC-07/DC-08 §F24). Se genera a partir de uno o más pedidos de lista de
+espera (`ListaEspera`, sección 3.21) — reusa el mismo motor de cruce que
+ya arma las coincidencias para esa pantalla
 (`negocio.lista_espera.calcular_coincidencia`) en vez de reimplementar la
 búsqueda de alternativas.
 
@@ -11,6 +12,15 @@ Anonimización (sección 4.6): "Profesional activo (departamento real) / No
 activo ('Unidad N')" — a diferencia de Disponibilidad (siempre activos) y
 Propuesta (siempre no activos), acá depende del profesional dueño del
 pedido en particular.
+
+Estructura (3 secciones de nivel 1): "Criterios de búsqueda" (un bloque
+por franja horaria pedida) -> "Coincidencias" (una explicación en texto
+del tipo de cobertura encontrada por franja — cobertura directa,
+combinación dentro de la misma unidad/edificio/entre edificios, o sin
+disponibilidad — más el detalle día por día) -> "Consultorios que
+intervienen en las ofertas" (fotos + valores, unión de todos los
+consultorios ofrecidos en cualquiera de las franjas, agrupados por
+edificio cuando hay más de uno).
 """
 from __future__ import annotations
 
@@ -24,36 +34,53 @@ from reportlab.platypus import Paragraph, Spacer
 from app.negocio.dias import parsear_periodo, periodo_actual
 from app.negocio.formato import hora_fmt
 from app.negocio.lista_espera import AMARILLO, NARANJA, ROJO, VERDE, Coincidencia, calcular_coincidencia
-from app.pdf.estilos import construir_sin_saltos, encabezado, estilo_texto, formatear_moneda
+from app.pdf.edificios_pdf import numero_unidad_en_edificio
+from app.pdf.estilos import clave_orden_unidad, construir_sin_saltos, decimales_configurados, encabezado, estilo_texto, formatear_moneda
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.repositorio.registro import obtener_repositorio
 
 _ES_ACTIVO = ("R", "A", "B", "E")
-_COLOR_BADGE_HEX = {VERDE: "#4CAF50", AMARILLO: "#F5D547", NARANJA: "#E07B39", ROJO: "#C0392B"}
+
+_DESCRIPCION_COINCIDENCIA = {
+    VERDE: "Cobertura directa: un solo consultorio cubre todo el horario pedido.",
+    AMARILLO: "Requiere combinar más de un consultorio, todos dentro de la misma unidad.",
+    NARANJA: "Requiere combinar consultorios de distintas unidades, dentro del mismo edificio.",
+    ROJO: "Requiere combinar consultorios de distintos edificios.",
+}
+
+_NOMBRES_CONDICION = {
+    "ventana": "con ventana", "aptoCamilla": "apto camilla",
+    "balcon": "con balcón", "aire": "con aire acondicionado",
+    "sinCombinar": "sin combinación de consultorios",
+}
 
 
 def _categoria_es_activa(profesional: sqlite3.Row) -> bool:
     return profesional["CategoriaProfesional"] in _ES_ACTIVO
 
 
-def _texto_filtros(pedido: sqlite3.Row) -> list:
+def _etiqueta_franja(pedido: sqlite3.Row, indice: int) -> str:
+    return pedido["Detalle"] or f"Franja horaria {indice + 1}"
+
+
+def _texto_criterios(pedido: sqlite3.Row) -> list:
     condiciones = json.loads(pedido["CondicionesConsultorio"] or "{}")
     dias = json.loads(pedido["Dias"] or "[]")
     style = estilo_texto(9)
-    nombres_condicion = {
-        "ventana": "con ventana", "aptoCamilla": "apto camilla",
-        "balcon": "con balcón", "aire": "con aire acondicionado",
-        "sinCombinar": "sin combinación de consultorios",
-    }
-    partes_condiciones = [nombres_condicion[k] for k, v in condiciones.items() if v and k in nombres_condicion]
+    partes_condiciones = [_NOMBRES_CONDICION[k] for k, v in condiciones.items() if v and k in _NOMBRES_CONDICION]
     if condiciones.get("tamano"):
         partes_condiciones.append(f"tamaño {condiciones['tamano']}")
 
+    desde, hasta = hora_fmt(pedido["HorarioDesde"])[:-2], hora_fmt(pedido["HorarioHasta"])
+    cantidad_horas = pedido["CantidadHorasRequeridas"]
+    if cantidad_horas:
+        texto_horario = f"{cantidad_horas:g}hs dentro del rango de {desde} a {hasta} (no hace falta que sea el rango completo)"
+    else:
+        texto_horario = f"{desde} a {hasta}"
+
     story = [
         Paragraph(f"<b>Días solicitados:</b> {', '.join(dias) or '—'}", style),
-        Paragraph(
-            f"<b>Horario:</b> {hora_fmt(pedido['HorarioDesde'])[:-2]} a {hora_fmt(pedido['HorarioHasta'])}", style,
-        ),
+        Paragraph(f"<b>Horario:</b> {texto_horario}", style),
         Paragraph(
             f"<b>Combinación de días:</b> {'todos los días pedidos' if pedido['TipoCombinacion'] == 'Y' else 'alcanza con uno de los días pedidos'}",
             style,
@@ -61,8 +88,6 @@ def _texto_filtros(pedido: sqlite3.Row) -> list:
     ]
     if partes_condiciones:
         story.append(Paragraph(f"<b>Condiciones del consultorio:</b> {', '.join(partes_condiciones)}", style))
-    if pedido["Detalle"]:
-        story.append(Paragraph(f"<b>Detalle:</b> {pedido['Detalle']}", style))
     return story
 
 
@@ -82,17 +107,20 @@ def _mapa_consultorios_basico(conn: sqlite3.Connection, ids_consultorio: list[in
     return {f["IdConsultorio"]: f for f in filas}
 
 
-def _alternativas(coincidencia: Coincidencia | None, consultorios: dict, anonimizar: bool, ancho: float) -> list:
+def _texto_coincidencia(coincidencia: Coincidencia | None, consultorios: dict, anonimizar: bool) -> list:
+    """Explica el tipo de cobertura encontrada y, día por día, el detalle:
+    una línea simple para un consultorio único, o "combinación de
+    consultorios:" con un renglón indentado por tramo cuando hace falta
+    más de uno — mismo criterio que el mensaje de texto para WhatsApp, así
+    el PDF no queda con una redacción distinta para lo mismo."""
     style = estilo_texto(9)
     if coincidencia is None:
-        return [Paragraph("Sin alternativas disponibles con los filtros solicitados.", style)]
+        return [Paragraph("Sin disponibilidad para este bloque con los filtros solicitados.", style)]
 
-    badge_hex = _COLOR_BADGE_HEX.get(coincidencia.color, "#000000")
-    story = [Paragraph(
-        f'<font color="{badge_hex}"><b>&bull;</b></font> Coincidencia: {coincidencia.color}', style,
-    )]
+    story = [Paragraph(f"<i>{_DESCRIPCION_COINCIDENCIA.get(coincidencia.color, '')}</i>", style)]
     for dia, tramos in coincidencia.tramos_por_dia.items():
-        for t in tramos:
+        if len(tramos) == 1:
+            t = tramos[0]
             c = consultorios.get(t.id_consultorio)
             if c is None:
                 continue
@@ -102,34 +130,72 @@ def _alternativas(coincidencia: Coincidencia | None, consultorios: dict, anonimi
                 f"Consultorio {c['NumeroConsultorio']} - {unidad} - {c['NombreEdificio']}",
                 style,
             ))
+        else:
+            story.append(Paragraph(f"* {dia}, combinación de consultorios:", style))
+            for t in tramos:
+                c = consultorios.get(t.id_consultorio)
+                if c is None:
+                    continue
+                unidad = f"Unidad {c['IdUnidad']}" if anonimizar else c["Departamento"]
+                story.append(Paragraph(
+                    f"&nbsp;&nbsp;&nbsp;&nbsp;· de {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)} — "
+                    f"Consultorio {c['NumeroConsultorio']} - {unidad} - {c['NombreEdificio']}",
+                    style,
+                ))
     return story
 
 
-def _bloque_filtros_y_alternativas(
-    pedido: sqlite3.Row, coincidencia: Coincidencia | None, consultorios: dict, anonimizar: bool, ancho: float,
+def _consultorios_ordenados(conn: sqlite3.Connection, consultorios: dict, anonimizar: bool) -> list[sqlite3.Row]:
+    """Sin activar (anonimizado): edificio, unidad (posición dentro del
+    edificio) y consultorio. Profesional activo (departamento real):
+    edificio, piso y departamento (`clave_orden_unidad`, el mismo criterio
+    que el resto del sistema) y consultorio."""
+    numeros_por_edificio: dict[int, dict[int, int]] = {}
+    if anonimizar:
+        for id_edificio in {c["IdEdificio"] for c in consultorios.values()}:
+            numeros_por_edificio[id_edificio] = numero_unidad_en_edificio(conn, id_edificio)
+
+    def clave(c: sqlite3.Row):
+        if anonimizar:
+            return (c["IdEdificio"], numeros_por_edificio[c["IdEdificio"]].get(c["IdUnidad"], 0), c["NumeroConsultorio"])
+        return (c["IdEdificio"], clave_orden_unidad(c["Departamento"]), c["NumeroConsultorio"])
+
+    return sorted(consultorios.values(), key=clave)
+
+
+def _bloque_consultorios_intervinientes(
+    conn: sqlite3.Connection, consultorios: dict, imagenes: list[sqlite3.Row], anonimizar: bool, ancho: float,
+    decimales: int,
 ) -> list:
-    story = [encabezado(2, "Filtros de búsqueda y alternativas disponibles", ancho), Spacer(1, 4)]
-    story.extend(_texto_filtros(pedido))
-    story.append(Spacer(1, 4))
-    story.extend(_alternativas(coincidencia, consultorios, anonimizar, ancho))
-    return story
+    if not consultorios:
+        return [Paragraph("No hay consultorios involucrados en las alternativas encontradas.", estilo_texto(9))]
 
+    consultorios_ordenados = _consultorios_ordenados(conn, consultorios, anonimizar)
+    imagenes_por_consultorio: dict[int, list] = {}
+    for img in imagenes:
+        imagenes_por_consultorio.setdefault(img["IdConsultorio"], []).append(img)
 
-def _bloque_fotos_valores(imagenes: list[sqlite3.Row], consultorios: dict, anonimizar: bool, ancho: float) -> list:
-    story = [encabezado(2, "Fotos y valores regulares de los consultorios ofrecidos", ancho), Spacer(1, 4)]
-    story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=True, anonimizar_unidad=anonimizar))
-    for c in consultorios.values():
-        unidad = f"Unidad {c['IdUnidad']}" if anonimizar else c["Departamento"]
-        story.append(Paragraph(
-            f"Consultorio {c['NumeroConsultorio']} - {unidad} - {c['NombreEdificio']}: "
-            f"{formatear_moneda(c['ValorHoraRegularActual'])}/hora",
-            estilo_texto(9),
+    ids_edificio_orden = list(dict.fromkeys(c["IdEdificio"] for c in consultorios_ordenados))
+    multi = len(ids_edificio_orden) > 1
+
+    story = []
+    for id_edificio in ids_edificio_orden:
+        del_edificio = [c for c in consultorios_ordenados if c["IdEdificio"] == id_edificio]
+        if multi:
+            story.append(encabezado(2, f"Edificio {del_edificio[0]['NombreEdificio']}", ancho))
+            story.append(Spacer(1, 6))
+        imagenes_ed = [img for c in del_edificio for img in imagenes_por_consultorio.get(c["IdConsultorio"], [])]
+        story.extend(tabla_fotos(
+            imagenes_ed, ancho, mostrar_apto_camilla=True, anonimizar_unidad=anonimizar, decimales=decimales,
         ))
-    if len({c["IdEdificio"] for c in consultorios.values()}) > 1:
-        for id_ed in {c["IdEdificio"] for c in consultorios.values()}:
-            nombre_ed = next(c["NombreEdificio"] for c in consultorios.values() if c["IdEdificio"] == id_ed)
-            story.append(Paragraph(f"* Edificio {nombre_ed}", estilo_texto(8, italica=True)))
-    story.append(Spacer(1, 6))
+        for c in del_edificio:
+            unidad = f"Unidad {c['IdUnidad']}" if anonimizar else c["Departamento"]
+            story.append(Paragraph(
+                f"Consultorio {c['NumeroConsultorio']} - {unidad} - {c['NombreEdificio']}: "
+                f"{formatear_moneda(c['ValorHoraRegularActual'], decimales)}/hora",
+                estilo_texto(9),
+            ))
+        story.append(Spacer(1, 6))
     story.append(Paragraph(
         "Los valores detallados corresponden a los vigentes a este mes en curso, y a los mismos luego se le "
         "aplican los descuentos en base a la cantidad de horas regulares que se tenga reservadas.",
@@ -147,11 +213,10 @@ def generar_pdf_oferta_multiple(conn: sqlite3.Connection, directorio: str, ids_p
     franjas horarias distintas por día dentro de un mismo pedido. Una
     búsqueda con varias franjas (p. ej. "lunes a jueves de 8 a 15hs" +
     "lunes de 8 a 12hs" + "viernes desde las 16hs") se arma como varios
-    pedidos, uno por franja, y este PDF muestra las alternativas de todos
-    juntos en un solo archivo: un bloque "Filtros de búsqueda y
-    alternativas disponibles" por pedido, seguido de una única sección de
-    fotos y valores con la unión de los consultorios ofrecidos en
-    cualquiera de las franjas."""
+    pedidos, uno por franja, y este PDF muestra "Criterios de búsqueda" y
+    "Coincidencias" de todas juntas, con una única sección final de
+    "Consultorios que intervienen en las ofertas" (unión de los
+    consultorios ofrecidos en cualquiera de las franjas)."""
     repo_pedido = obtener_repositorio(conn, "ListaEspera")
     pedidos = [repo_pedido.obtener(id_pedido) for id_pedido in ids_pedido]
     faltante = next((id_pedido for id_pedido, p in zip(ids_pedido, pedidos) if p is None), None)
@@ -163,6 +228,7 @@ def generar_pdf_oferta_multiple(conn: sqlite3.Connection, directorio: str, ids_p
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(pedidos[0]["IdProfesional"])
     anonimizar = not (profesional is not None and _categoria_es_activa(profesional))
+    decimales = decimales_configurados(conn)
 
     anio, mes = parsear_periodo(periodo_actual(conn))
     coincidencias = [calcular_coincidencia(conn, p, anio, mes) for p in pedidos]
@@ -175,8 +241,9 @@ def generar_pdf_oferta_multiple(conn: sqlite3.Connection, directorio: str, ids_p
     cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos"
 
+    multi_franjas = len(pedidos) > 1
     altura = (
-        6 * cm + len(pedidos) * 3 * cm + len(ids_consultorio) * 2 * 0.5 * cm
+        6 * cm + len(pedidos) * 3 * cm * 2 + len(ids_consultorio) * 2 * 0.5 * cm
         + (len(imagenes) // 2 + 1) * 7 * cm + 3 * cm
     ) * 1.2
 
@@ -186,10 +253,28 @@ def generar_pdf_oferta_multiple(conn: sqlite3.Connection, directorio: str, ids_p
             Paragraph("Oferta de consultorios", estilo_texto(11)),
             Spacer(1, 10),
         ]
-        for pedido, coincidencia in zip(pedidos, coincidencias):
-            story.extend(_bloque_filtros_y_alternativas(pedido, coincidencia, consultorios, anonimizar, ancho))
-            story.append(Spacer(1, 10))
-        story.extend(_bloque_fotos_valores(imagenes, consultorios, anonimizar, ancho))
+
+        story.append(encabezado(1, "Criterios de búsqueda", ancho))
+        story.append(Spacer(1, 8))
+        for i, pedido in enumerate(pedidos):
+            if multi_franjas:
+                story.append(encabezado(2, _etiqueta_franja(pedido, i), ancho))
+                story.append(Spacer(1, 4))
+            story.extend(_texto_criterios(pedido))
+            story.append(Spacer(1, 8))
+
+        story.append(encabezado(1, "Coincidencias", ancho))
+        story.append(Spacer(1, 8))
+        for i, (pedido, coincidencia) in enumerate(zip(pedidos, coincidencias)):
+            if multi_franjas:
+                story.append(encabezado(2, _etiqueta_franja(pedido, i), ancho))
+                story.append(Spacer(1, 4))
+            story.extend(_texto_coincidencia(coincidencia, consultorios, anonimizar))
+            story.append(Spacer(1, 8))
+
+        story.append(encabezado(1, "Consultorios que intervienen en las ofertas", ancho))
+        story.append(Spacer(1, 8))
+        story.extend(_bloque_consultorios_intervinientes(conn, consultorios, imagenes, anonimizar, ancho, decimales))
         return story
 
     ruta = os.path.join(directorio, "Oferta consultorios.pdf")
