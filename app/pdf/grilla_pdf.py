@@ -301,7 +301,9 @@ def _tabla_grilla_edificio_girada(
 
     partes = [_partes_etiqueta(i, u) for i, u in enumerate(unidades)]
     textos_etiqueta = [p for par in partes for p in par if p]
-    ancho_etiqueta_col = min(ancho_piso, ancho_letra) - 2
+    # Anonimizado: columnas 1-2 fusionadas en "Unidad", así que el número
+    # dispone de todo el ancho combinado (no solo el de la más angosta).
+    ancho_etiqueta_col = (ancho_piso + ancho_letra - 2) if anonimizar_unidad else min(ancho_piso, ancho_letra) - 2
     tamano_etiqueta = _tamano_que_entra(textos_etiqueta, ancho_etiqueta_col, fuente=FUENTE)
     style_etiqueta = estilo_texto(tamano_etiqueta, negrita=False, alignment=TA_CENTER, textColor=colors.white)
     diametro_dos_tonos = min(ancho_col_hora - 2, _DIAMETRO_DOS_TONOS_MAX)
@@ -309,7 +311,10 @@ def _tabla_grilla_edificio_girada(
     # El contenido de una celda combinada (SPAN) es el de su celda ancla —
     # la de arriba/izquierda. "Día"/"Piso"/"Depto." combinan las filas 0 y
     # 1 con ancla en la fila 0, así que van ahí (no en la fila 1).
-    fila_tipo: list = ["Día", "Piso", "Depto."] + [""] * n_horas
+    # Anonimizado: no hay piso/letra real que mostrar por separado, así que
+    # las columnas 1 y 2 se fusionan en una sola "Unidad" (encabezado y, más
+    # abajo, cada número de unidad centrado en el ancho combinado).
+    fila_tipo: list = ["Día", "Unidad" if anonimizar_unidad else "Piso", "Depto."] + [""] * n_horas
     fila_horario: list = ["", "", ""] + [hora_fmt(h) for h in horas]
     filas = [fila_tipo, fila_horario]
 
@@ -365,10 +370,14 @@ def _tabla_grilla_edificio_girada(
         # mismo azul que el fondo para que quede invisible, igual que en
         # la grilla sin girar.
         ("LINEAFTER", (1, 2), (1, ultima_fila), 1.2, COLOR_NIVEL_1),
-        # "Día"/"Piso"/"Depto." combinan las 2 filas de encabezado.
+        # "Día"/"Piso"/"Depto." combinan las 2 filas de encabezado. Anonimizado:
+        # "Piso" y "Depto." además se combinan ENTRE SÍ en una sola "Unidad"
+        # (reportlab no dibuja líneas internas dentro de un SPAN, así que el
+        # LINEAFTER de más abajo entre columna 1 y 2 queda automáticamente
+        # suprimido sin necesidad de condicionarlo aparte).
         ("SPAN", (0, 0), (0, 1)),
-        ("SPAN", (1, 0), (1, 1)),
-        ("SPAN", (2, 0), (2, 1)),
+        ("SPAN", (1, 0), (2, 1) if anonimizar_unidad else (1, 1)),
+    ] + ([] if anonimizar_unidad else [("SPAN", (2, 0), (2, 1))]) + [
         # Título de cada columna de encabezado separado con línea gruesa.
         ("LINEAFTER", (0, 0), (0, 1), _GROSOR_GRUESO, "#000000"),
         ("LINEAFTER", (1, 0), (1, 1), _GROSOR_GRUESO, "#000000"),
@@ -379,6 +388,11 @@ def _tabla_grilla_edificio_girada(
     for _dia in dias:
         estilo.append(("SPAN", (0, idx), (0, idx + n_unidades - 1)))
         idx += n_unidades
+    if anonimizar_unidad:
+        # Mismo criterio que el encabezado: el número de unidad va centrado
+        # en el ancho combinado de las columnas 1-2, no pegado a la izquierda.
+        for fila_idx in range(2, len(filas)):
+            estilo.append(("SPAN", (1, fila_idx), (2, fila_idx)))
     for color, fila, col in fondos:
         estilo.append(("BACKGROUND", (col, fila), (col, fila), _COLOR_CELDA[color]))
 
