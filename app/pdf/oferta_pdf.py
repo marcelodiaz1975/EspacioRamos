@@ -24,7 +24,7 @@ from reportlab.platypus import Paragraph, Spacer
 from app.negocio.dias import parsear_periodo, periodo_actual
 from app.negocio.formato import hora_fmt
 from app.negocio.lista_espera import AMARILLO, NARANJA, ROJO, VERDE, Coincidencia, calcular_coincidencia
-from app.pdf.estilos import crear_documento, encabezado, estilo_texto, formatear_moneda
+from app.pdf.estilos import construir_sin_saltos, encabezado, estilo_texto, formatear_moneda
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.repositorio.registro import obtener_repositorio
 
@@ -124,42 +124,43 @@ def generar_pdf_oferta(conn: sqlite3.Connection, directorio: str, id_pedido: int
     nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos"
 
     altura = (6 * cm + len(ids_consultorio) * 2 * 0.5 * cm + (len(imagenes) // 2 + 1) * 7 * cm + 3 * cm) * 1.2
-    ruta = os.path.join(directorio, "Oferta consultorios.pdf")
-    doc, ancho = crear_documento(ruta, altura=altura)
 
-    story = [
-        Paragraph(nombre_espacio.upper(), estilo_texto(20, negrita=True)),
-        Paragraph("Oferta de consultorios", estilo_texto(11)),
-        Spacer(1, 10),
-    ]
+    def _construir_story(ancho: float) -> list:
+        story = [
+            Paragraph(nombre_espacio.upper(), estilo_texto(20, negrita=True)),
+            Paragraph("Oferta de consultorios", estilo_texto(11)),
+            Spacer(1, 10),
+        ]
 
-    story.append(encabezado(2, "Filtros de búsqueda y alternativas disponibles", ancho))
-    story.append(Spacer(1, 4))
-    story.extend(_texto_filtros(pedido))
-    story.append(Spacer(1, 4))
-    story.extend(_alternativas(coincidencia, consultorios, anonimizar, ancho))
-    story.append(Spacer(1, 10))
+        story.append(encabezado(2, "Filtros de búsqueda y alternativas disponibles", ancho))
+        story.append(Spacer(1, 4))
+        story.extend(_texto_filtros(pedido))
+        story.append(Spacer(1, 4))
+        story.extend(_alternativas(coincidencia, consultorios, anonimizar, ancho))
+        story.append(Spacer(1, 10))
 
-    story.append(encabezado(2, "Fotos y valores regulares de los consultorios ofrecidos", ancho))
-    story.append(Spacer(1, 4))
-    story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=True, anonimizar_unidad=anonimizar))
-    for c in consultorios.values():
-        unidad = f"Unidad {c['IdUnidad']}" if anonimizar else c["Departamento"]
+        story.append(encabezado(2, "Fotos y valores regulares de los consultorios ofrecidos", ancho))
+        story.append(Spacer(1, 4))
+        story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=True, anonimizar_unidad=anonimizar))
+        for c in consultorios.values():
+            unidad = f"Unidad {c['IdUnidad']}" if anonimizar else c["Departamento"]
+            story.append(Paragraph(
+                f"Consultorio {c['NumeroConsultorio']} - {unidad} - {c['NombreEdificio']}: "
+                f"{formatear_moneda(c['ValorHoraRegularActual'])}/hora",
+                estilo_texto(9),
+            ))
+        if len({c["IdEdificio"] for c in consultorios.values()}) > 1:
+            for id_ed in {c["IdEdificio"] for c in consultorios.values()}:
+                nombre_ed = next(c["NombreEdificio"] for c in consultorios.values() if c["IdEdificio"] == id_ed)
+                story.append(Paragraph(f"* Edificio {nombre_ed}", estilo_texto(8, italica=True)))
+        story.append(Spacer(1, 6))
         story.append(Paragraph(
-            f"Consultorio {c['NumeroConsultorio']} - {unidad} - {c['NombreEdificio']}: "
-            f"{formatear_moneda(c['ValorHoraRegularActual'])}/hora",
-            estilo_texto(9),
+            "Los valores detallados corresponden a los vigentes a este mes en curso, y a los mismos luego se le "
+            "aplican los descuentos en base a la cantidad de horas regulares que se tenga reservadas.",
+            estilo_texto(8, italica=True),
         ))
-    if len({c["IdEdificio"] for c in consultorios.values()}) > 1:
-        for id_ed in {c["IdEdificio"] for c in consultorios.values()}:
-            nombre_ed = next(c["NombreEdificio"] for c in consultorios.values() if c["IdEdificio"] == id_ed)
-            story.append(Paragraph(f"* Edificio {nombre_ed}", estilo_texto(8, italica=True)))
-    story.append(Spacer(1, 6))
-    story.append(Paragraph(
-        "Los valores detallados corresponden a los vigentes a este mes en curso, y a los mismos luego se le "
-        "aplican los descuentos en base a la cantidad de horas regulares que se tenga reservadas.",
-        estilo_texto(8, italica=True),
-    ))
+        return story
 
-    doc.build(story)
+    ruta = os.path.join(directorio, "Oferta consultorios.pdf")
+    construir_sin_saltos(ruta, _construir_story, altura)
     return ruta

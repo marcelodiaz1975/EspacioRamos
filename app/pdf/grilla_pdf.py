@@ -92,16 +92,6 @@ def _unidades_por_edificio(conn: sqlite3.Connection, ids_edificio: list[int] | N
     ).fetchall()
 
 
-def _etiqueta_unidad(u: sqlite3.Row, anonimizar: bool) -> str:
-    """Sección 4.3: el PDF de Propuesta va a profesionales NO activos y
-    "muestra IdUnidad en lugar de departamento" — no debe revelar el
-    nombre/número real de la unidad a un contacto que todavía no forma
-    parte del espacio. Solo el número (sin el prefijo "Unidad"), en el
-    mismo renglón grande/autoajustable que ya usa el piso real — la
-    palabra "UNIDAD" ya está en el renglón de arriba."""
-    return str(u["IdUnidad"]) if anonimizar else u["Departamento"]
-
-
 def _tamano_que_entra(
     textos: list[str], ancho_disponible: float, tamano_max: int = 10, tamano_min: int = 5,
     fuente: str = FUENTE_NEGRITA,
@@ -138,9 +128,14 @@ def _tabla_grilla_edificio(
     n_cols_datos = max(len(dias) * n_unidades, 1)
     ancho_col = ancho_restante / n_cols_datos
 
-    def _partes_etiqueta(u: sqlite3.Row) -> tuple[str, str]:
+    def _partes_etiqueta(indice: int, u: sqlite3.Row) -> tuple[str, str]:
         if anonimizar_unidad:
-            return _etiqueta_unidad(u, anonimizar_unidad), ""
+            # Posición 1-based DENTRO de este edificio (no el IdUnidad
+            # real, que es un autoincremental global a todo el sistema):
+            # `unidades` ya viene ordenada por IdUnidad ascendente cuando
+            # anonimizar_unidad (ver `secciones_disponibilidad`), así que
+            # el índice en la lista es exactamente esa posición.
+            return str(indice + 1), ""
         return _partir_etiqueta_unidad(u["Departamento"])
 
     # Con muchas unidades por edificio la columna por consultorio se vuelve
@@ -150,7 +145,7 @@ def _tabla_grilla_edificio(
     # cada uno (una fila para cada uno). El tamaño de fuente se calcula
     # para que el texto más largo entre en una sola línea — más grande
     # cuando hay lugar, sin llegar a partir "15" en "1"/"5".
-    partes = [_partes_etiqueta(u) for u in unidades]
+    partes = [_partes_etiqueta(i, u) for i, u in enumerate(unidades)]
     textos_etiqueta = [p for par in partes for p in par if p]
     # -2: LEFTPADDING+RIGHTPADDING de la celda. Sin negrita y en blanco
     # (fondo azul) — la medición usa la misma fuente con la que se dibuja.
@@ -299,12 +294,12 @@ def _tabla_grilla_edificio_girada(
     ancho_restante = ancho - ancho_dia - ancho_piso - ancho_letra
     ancho_col_hora = ancho_restante / n_horas
 
-    def _partes_etiqueta(u: sqlite3.Row) -> tuple[str, str]:
+    def _partes_etiqueta(indice: int, u: sqlite3.Row) -> tuple[str, str]:
         if anonimizar_unidad:
-            return _etiqueta_unidad(u, anonimizar_unidad), ""
+            return str(indice + 1), ""
         return _partir_etiqueta_unidad(u["Departamento"])
 
-    partes = [_partes_etiqueta(u) for u in unidades]
+    partes = [_partes_etiqueta(i, u) for i, u in enumerate(unidades)]
     textos_etiqueta = [p for par in partes for p in par if p]
     ancho_etiqueta_col = min(ancho_piso, ancho_letra) - 2
     tamano_etiqueta = _tamano_que_entra(textos_etiqueta, ancho_etiqueta_col, fuente=FUENTE)

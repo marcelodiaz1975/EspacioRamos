@@ -24,6 +24,18 @@ def ids_consultorio_de_edificios(conn: sqlite3.Connection, ids_edificio: list[in
     return [f["IdConsultorio"] for f in filas]
 
 
+def numero_unidad_en_edificio(conn: sqlite3.Connection, id_edificio: int) -> dict[int, int]:
+    """Posición 1-based de cada unidad dentro de SU edificio, ordenada por
+    IdUnidad ascendente: {IdUnidad real -> 1, 2, 3...}. La etiqueta
+    anonimizada "Unidad N" de Propuesta (sección 4.3) usa este número
+    relativo al edificio, no el IdUnidad real — que es un autoincremental
+    global a todo el sistema, así que sin este ajuste el segundo edificio
+    de una Propuesta con más de uno arrancaba en "Unidad 5" en vez de
+    "Unidad 1"."""
+    filas = conn.execute("SELECT IdUnidad FROM Unidad WHERE IdEdificio = ? ORDER BY IdUnidad", (id_edificio,)).fetchall()
+    return {f["IdUnidad"]: i + 1 for i, f in enumerate(filas)}
+
+
 def hay_multiples_localidades(conn: sqlite3.Connection) -> bool:
     """Sección 4.1: la localidad debajo del logo y el sufijo de localidad
     en el nombre del archivo solo se muestran "si el espacio tiene

@@ -39,12 +39,18 @@ from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import fecha_actual, parsear_periodo, periodo_actual
 from app.negocio.formato import fecha_larga, periodo_mm_aaaa
-from app.pdf.edificios_pdf import edificios_incluidos, hay_multiples_localidades, ids_consultorio_de_edificios, sufijo_localidad
+from app.pdf.edificios_pdf import (
+    edificios_incluidos,
+    hay_multiples_localidades,
+    ids_consultorio_de_edificios,
+    numero_unidad_en_edificio,
+    sufijo_localidad,
+)
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
     FUENTE,
     FUENTE_NEGRITA,
-    crear_documento,
+    construir_sin_saltos,
     decimales_configurados,
     encabezado,
     encabezado_espacio,
@@ -105,9 +111,12 @@ def _tabla_detalle_unidades(conn: sqlite3.Connection, id_edificio: int, ancho: f
         "Balcón de uso común", "Entrada profesional exclusiva", "Área de guardado", "Área de fumadores",
     ]
     filas = [_encabezados_tabla(encabezados)]
-    for f in filas_bd:
+    # Posición dentro de ESTE edificio (1, 2, 3...), no el IdUnidad real
+    # (autoincremental global a todo el sistema): la consulta ya viene
+    # ordenada por IdUnidad ascendente, así que el índice alcanza.
+    for i, f in enumerate(filas_bd):
         filas.append([
-            f"Unidad {f['IdUnidad']}", str(f["CantConsultorios"]), _si_no(f["SalaDeEspera"]), _si_no(f["Cocina"]),
+            f"Unidad {i + 1}", str(f["CantConsultorios"]), _si_no(f["SalaDeEspera"]), _si_no(f["Cocina"]),
             _si_no(f["Banos"]), _si_no(f["WiFi"]), _si_no(f["BalconComun"]), _si_no(f["EntradaProfesionalExclusiva"]),
             _si_no(f["AreaGuardado"]), _si_no(f["AreaFumadores"]),
         ])
@@ -161,7 +170,7 @@ def _detalle_consultorios_edificio(conn: sqlite3.Connection, id_edificio: int, a
     ).fetchall()
     mostrar_unidad = len(unidades) > 1
     story = []
-    for u in unidades:
+    for i, u in enumerate(unidades):
         filas_bd = conn.execute(
             "SELECT NumeroConsultorio, Largo, Ancho, Ventana, Balcon, PanelVidrioLuzNatural, AireAcondicionado, "
             "Sillones, AptoCamilla FROM Consultorio WHERE IdUnidad = ? ORDER BY NumeroConsultorio",
@@ -170,7 +179,7 @@ def _detalle_consultorios_edificio(conn: sqlite3.Connection, id_edificio: int, a
         if not filas_bd:
             continue
         if mostrar_unidad:
-            story.append(Paragraph(f"<b>Unidad {u['IdUnidad']}</b>", estilo_texto(9, negrita=True)))
+            story.append(Paragraph(f"<b>Unidad {i + 1}</b>", estilo_texto(9, negrita=True)))
             story.append(Spacer(1, 2))
         story.append(_tabla_consultorios(filas_bd, ancho))
         story.append(Spacer(1, 6))
@@ -201,7 +210,9 @@ def _bloque_detalles_principales(conn: sqlite3.Connection, edificio: sqlite3.Row
     return story
 
 
-def _bloque_fotos(imagenes_edificio: list[sqlite3.Row], ancho: float, nivel: int, decimales: int) -> list:
+def _bloque_fotos(
+    imagenes_edificio: list[sqlite3.Row], ancho: float, nivel: int, decimales: int, numeros_unidad: dict[int, int],
+) -> list:
     if not imagenes_edificio:
         return [Paragraph("Sin fotos cargadas.", estilo_texto(9))]
     por_unidad: dict[int, list] = {}
@@ -209,9 +220,11 @@ def _bloque_fotos(imagenes_edificio: list[sqlite3.Row], ancho: float, nivel: int
         por_unidad.setdefault(img["IdUnidadConsultorio"], []).append(img)
 
     story = []
-    for id_unidad in sorted(por_unidad):
+    # Ordenar por la posición real dentro del edificio (no por IdUnidad):
+    # una unidad sin fotos no debe "correr" el número de las siguientes.
+    for id_unidad in sorted(por_unidad, key=lambda id_u: numeros_unidad[id_u]):
         imgs = sorted(por_unidad[id_unidad], key=lambda i: i["NumeroConsultorio"])
-        story.append(encabezado(nivel, f"Unidad {id_unidad}", ancho))
+        story.append(encabezado(nivel, f"Unidad {numeros_unidad[id_unidad]}", ancho))
         story.append(Spacer(1, 6))
         story.extend(tabla_fotos(imgs, ancho, mostrar_apto_camilla=True, mostrar_valor=True, decimales=decimales))
     return story
@@ -237,7 +250,10 @@ def _bloque_disponibilidad(
     )
     story.append(encabezado(nivel, titulo_valores, ancho))
     story.append(Spacer(1, 6))
-    story.extend(matriz_valores_edificio(conn, edificio["IdEdificio"], ancho, anonimizar_unidad=True))
+    numeros_unidad = numero_unidad_en_edificio(conn, edificio["IdEdificio"])
+    story.extend(matriz_valores_edificio(
+        conn, edificio["IdEdificio"], ancho, anonimizar_unidad=True, numeros_unidad=numeros_unidad,
+    ))
     return story
 
 
@@ -299,67 +315,71 @@ def generar_pdf_propuesta(
         + 1.5 * cm + n_detalles * 1.8 * cm + ((n_tramos // 9) + 1) * 1.4 * cm  # detalles complementarios
     ) * 1.15
 
-    ruta = os.path.join(directorio, nombre_archivo)
-    doc, ancho = crear_documento(ruta, altura=altura)
+    def _construir_story(ancho: float) -> list:
+        story = list(encabezado_espacio(
+            conn, ancho, mostrar_localidad=mostrar_localidad, localidad=localidad_texto or None,
+        ))
 
-    story = list(encabezado_espacio(conn, ancho, mostrar_localidad=mostrar_localidad, localidad=localidad_texto or None))
+        # --------------------------------------------------- Detalles principales
+        story.append(encabezado(1, "Detalles principales de la propuesta", ancho))
+        story.append(Spacer(1, 8))
+        if multi:
+            for e in edificios:
+                story.append(encabezado(2, _titulo_edificio(e), ancho))
+                story.append(Spacer(1, 6))
+                story.extend(_bloque_detalles_principales(conn, e, ancho, nivel=3))
+                story.append(Spacer(1, 10))
+        else:
+            story.extend(_bloque_detalles_principales(conn, edificios[0], ancho, nivel=2))
+        story.append(Spacer(1, 10))
 
-    # ------------------------------------------------------- Detalles principales
-    story.append(encabezado(1, "Detalles principales de la propuesta", ancho))
-    story.append(Spacer(1, 8))
-    if multi:
-        for e in edificios:
-            story.append(encabezado(2, _titulo_edificio(e), ancho))
-            story.append(Spacer(1, 6))
-            story.extend(_bloque_detalles_principales(conn, e, ancho, nivel=3))
-            story.append(Spacer(1, 10))
-    else:
-        story.extend(_bloque_detalles_principales(conn, edificios[0], ancho, nivel=2))
-    story.append(Spacer(1, 10))
+        # ----------------------------------------------------------------- Fotos
+        story.append(encabezado(1, "Fotos de los consultorios", ancho))
+        story.append(Spacer(1, 8))
+        if multi:
+            for e in edificios:
+                imagenes_ed = [i for i in imagenes if i["NombreEdificio"] == e["Nombre"]]
+                if not imagenes_ed:
+                    continue
+                numeros_unidad = numero_unidad_en_edificio(conn, e["IdEdificio"])
+                story.append(encabezado(2, _titulo_edificio(e), ancho))
+                story.append(Spacer(1, 6))
+                story.extend(_bloque_fotos(imagenes_ed, ancho, nivel=3, decimales=decimales, numeros_unidad=numeros_unidad))
+                story.append(Spacer(1, 10))
+        else:
+            numeros_unidad = numero_unidad_en_edificio(conn, edificios[0]["IdEdificio"])
+            story.extend(_bloque_fotos(imagenes, ancho, nivel=2, decimales=decimales, numeros_unidad=numeros_unidad))
+        story.append(Spacer(1, 10))
 
-    # ------------------------------------------------------------- Fotos
-    story.append(encabezado(1, "Fotos de los consultorios", ancho))
-    story.append(Spacer(1, 8))
-    if multi:
-        for e in edificios:
-            imagenes_ed = [i for i in imagenes if i["NombreEdificio"] == e["Nombre"]]
-            if not imagenes_ed:
-                continue
-            story.append(encabezado(2, _titulo_edificio(e), ancho))
-            story.append(Spacer(1, 6))
-            story.extend(_bloque_fotos(imagenes_ed, ancho, nivel=3, decimales=decimales))
-            story.append(Spacer(1, 10))
-    else:
-        story.extend(_bloque_fotos(imagenes, ancho, nivel=2, decimales=decimales))
-    story.append(Spacer(1, 10))
-
-    # ---------------------------------------------------------- Disponibilidad
-    story.append(encabezado(1, f"Disponibilidad de consultorios al {fecha_titulo}", ancho))
-    story.append(Spacer(1, 8))
-    if multi:
-        for e in edificios:
-            story.append(encabezado(2, _titulo_edificio(e), ancho))
-            story.append(Spacer(1, 6))
+        # -------------------------------------------------------- Disponibilidad
+        story.append(encabezado(1, f"Disponibilidad de consultorios al {fecha_titulo}", ancho))
+        story.append(Spacer(1, 8))
+        if multi:
+            for e in edificios:
+                story.append(encabezado(2, _titulo_edificio(e), ancho))
+                story.append(Spacer(1, 6))
+                story.extend(_bloque_disponibilidad(
+                    conn, e, anio, mes, ancho, fecha_titulo, nivel=3,
+                    mostrar_encabezado_grid=False, desde=desde, hasta=hasta,
+                ))
+                story.append(Spacer(1, 10))
+        else:
+            # Con un solo edificio, repetir "Edificio {Nombre}" arriba de
+            # la grilla es redundante (no hay otro del que distinguirlo).
             story.extend(_bloque_disponibilidad(
-                conn, e, anio, mes, ancho, fecha_titulo, nivel=3,
+                conn, edificios[0], anio, mes, ancho, fecha_titulo, nivel=2,
                 mostrar_encabezado_grid=False, desde=desde, hasta=hasta,
             ))
-            story.append(Spacer(1, 10))
-    else:
-        # Con un solo edificio, repetir "Edificio {Nombre}" arriba de la
-        # grilla es redundante (no hay otro edificio del que distinguirlo).
-        story.extend(_bloque_disponibilidad(
-            conn, edificios[0], anio, mes, ancho, fecha_titulo, nivel=2,
-            mostrar_encabezado_grid=False, desde=desde, hasta=hasta,
-        ))
-    story.append(Spacer(1, 10))
+        story.append(Spacer(1, 10))
 
-    # ---------------------------------------------------- Detalles complementarios
-    story.append(encabezado(1, "Detalles complementarios de la propuesta", ancho))
-    story.append(Spacer(1, 8))
-    story.extend(detalles_complementarios_propuesta(conn, ancho))
+        # ------------------------------------------------ Detalles complementarios
+        story.append(encabezado(1, "Detalles complementarios de la propuesta", ancho))
+        story.append(Spacer(1, 8))
+        story.extend(detalles_complementarios_propuesta(conn, ancho))
+        return story
 
-    doc.build(story)
+    ruta = os.path.join(directorio, nombre_archivo)
+    construir_sin_saltos(ruta, _construir_story, altura)
     return ruta
 
 

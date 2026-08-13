@@ -11,6 +11,8 @@ import os
 import re
 import sqlite3
 
+from typing import Callable
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
@@ -49,9 +51,9 @@ def crear_documento(
 
     `altura`, si se pasa, reemplaza el alto de página estándar — se usa
     para los PDFs de "página única continua" del modelo real (Etapa 7):
-    se estima una altura generosa a partir del volumen de datos y, si la
-    estimación se queda corta, SimpleDocTemplate sigue funcionando bien:
-    agrega páginas de continuación del mismo tamaño en vez de fallar."""
+    se estima una altura generosa a partir del volumen de datos. Si la
+    estimación se queda corta, usar `construir_sin_saltos` en vez de
+    `doc.build` directo — ningún PDF del sistema debe salir paginado."""
     ancho_base, alto_base = (A4[1], A4[0]) if apaisado else A4
     tamano = (ancho_base, altura if altura is not None else alto_base)
     doc = SimpleDocTemplate(
@@ -60,6 +62,38 @@ def crear_documento(
     )
     ancho_util = tamano[0] - 2 * MARGEN
     return doc, ancho_util
+
+
+def ancho_util(apaisado: bool = False) -> float:
+    """El mismo ancho útil que devuelve `crear_documento`, sin necesidad
+    de crear todavía un `SimpleDocTemplate` — no depende de la altura."""
+    ancho_base = A4[1] if apaisado else A4[0]
+    return ancho_base - 2 * MARGEN
+
+
+def construir_sin_saltos(
+    ruta: str, construir_story: Callable[[float], list], altura: float, apaisado: bool = False,
+    max_intentos: int = 6, factor: float = 1.35,
+) -> None:
+    """Arma el PDF reintentando con una página más alta si el contenido no
+    entró en una sola con la altura estimada — ningún PDF del sistema debe
+    salir paginado (Etapa 7: "página única continua"). `construir_story(ancho)`
+    arma el story desde cero en cada intento: reusar el mismo `story` entre
+    llamadas a `doc.build` rompe el conteo interno de reportlab (los
+    flowables no están pensados para pasar por dos documentos), así que no
+    alcanza con guardar el story una sola vez afuera. El ancho útil no
+    cambia con la altura (`crear_documento`), así que da lo mismo en qué
+    intento se calculen los anchos de columna."""
+    for _ in range(max_intentos):
+        doc, ancho = crear_documento(ruta, apaisado=apaisado, altura=altura)
+        doc.build(construir_story(ancho))
+        if doc.page <= 1:
+            return
+        # Saltar directo a una altura proporcional a cuántas páginas hizo
+        # falta (no un factor fijo): con `factor` de más margen para que la
+        # próxima pasada no se quede corta por el redondeo del reparto de
+        # contenido entre páginas.
+        altura *= doc.page * factor
 
 
 def encabezado(nivel: int, texto: str, ancho: float) -> Table:

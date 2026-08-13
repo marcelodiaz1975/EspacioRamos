@@ -61,16 +61,21 @@ def rango_actualizacion(conn: sqlite3.Connection, periodo: str) -> tuple[str, st
 
 def matriz_valores_edificio(
     conn: sqlite3.Connection, id_edificio: int, ancho: float, anonimizar_unidad: bool = False,
+    numeros_unidad: dict[int, int] | None = None,
 ) -> list:
     """Tabla Unidad (filas) x Consultorio N (columnas) -> ValorHoraRegularActual,
     con "—" para los números de consultorio que no existen en esa unidad.
-    `anonimizar_unidad` muestra "Unidad {IdUnidad}" en vez del Departamento
-    real (sección 4.3, PDF de Propuesta, que va a profesionales NO
-    activos)."""
+    `anonimizar_unidad` muestra "Unidad {N}" en vez del Departamento real
+    (sección 4.3, PDF de Propuesta, que va a profesionales NO activos); `N`
+    es la posición de la unidad DENTRO de su edificio (`numeros_unidad`,
+    ver `edificios_pdf.numero_unidad_en_edificio`) — no el IdUnidad real,
+    que es un autoincremental global a todo el sistema. Si no se pasa
+    `numeros_unidad` con `anonimizar_unidad=True` se calcula acá mismo a
+    partir del orden de IdUnidad de esta misma consulta."""
     decimales = decimales_configurados(conn)
     # Anonimizado (Propuesta): orden por número de unidad ascendente, no
-    # por piso — la etiqueta "Unidad {IdUnidad}" no tiene piso/letra real
-    # que ordenar, y así queda "Unidad 1, Unidad 2, Unidad 3..." en vez de
+    # por piso — la etiqueta "Unidad N" no tiene piso/letra real que
+    # ordenar, y así queda "Unidad 1, Unidad 2, Unidad 3..." en vez de
     # saltar según el piso real de cada una.
     orden_sql = "u.IdUnidad" if anonimizar_unidad else "u.Departamento"
     filas_bd = conn.execute(
@@ -81,9 +86,13 @@ def matriz_valores_edificio(
         """,
         (id_edificio,),
     ).fetchall()
+    if anonimizar_unidad and numeros_unidad is None:
+        numeros_unidad = {}
+        for f in filas_bd:
+            numeros_unidad.setdefault(f["IdUnidad"], len(numeros_unidad) + 1)
     por_unidad: dict[str, dict[int, float]] = {}
     for f in filas_bd:
-        etiqueta = f"Unidad {f['IdUnidad']}" if anonimizar_unidad else f["Departamento"]
+        etiqueta = f"Unidad {numeros_unidad[f['IdUnidad']]}" if anonimizar_unidad else f["Departamento"]
         por_unidad.setdefault(etiqueta, {})[f["NumeroConsultorio"]] = f["ValorHoraRegularActual"]
     max_consultorios = max((max(v.keys()) for v in por_unidad.values()), default=0)
     if max_consultorios == 0:

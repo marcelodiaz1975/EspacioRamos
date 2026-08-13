@@ -46,7 +46,7 @@ from app.pdf.estilos import (
     FUENTE,
     FUENTE_NEGRITA,
     FUENTE_NEGRITA_ITALICA,
-    crear_documento,
+    construir_sin_saltos,
     decimales_configurados,
     encabezado,
     encabezado_espacio,
@@ -556,99 +556,107 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         n_condiciones=n_condiciones, n_notas_direccion=n_notas_direccion, n_fotos=len(imagenes),
     )
 
-    ruta = os.path.join(directorio, _nombre_archivo(liquidacion.periodo, profesional))
-    doc, ancho = crear_documento(ruta, altura=altura)
-    story = []
-
-    # Logo centrado (o el nombre del espacio si no hay uno configurado) y
-    # línea separatoria — sin subtítulo ni localidad: un profesional puede
-    # reservar en edificios de más de una localidad, no hay una localidad
-    # única "de este documento" como sí la hay en Disponibilidad/Propuesta.
-    story.extend(encabezado_espacio(conn, ancho, mostrar_localidad=False))
-
-    titulo_detalle = f"Liquidación período {periodo_mm_aaaa(liquidacion.periodo)} - {_nombre_completo(profesional)}"
-    story.append(encabezado(1, titulo_detalle, ancho))
-    story.append(Spacer(1, 6))
-
-    story.append(Spacer(1, 6))
-    story.append(encabezado(2, "Bloques de horarios regulares reservados", ancho))
-    story.append(Spacer(1, 6))
-    if bloques:
-        story.append(_tabla_bloques_horarios(bloques, ancho))
-    else:
-        story.append(Paragraph("Sin bloques horarios regulares vigentes.", estilo_texto(9)))
-    notas_direcciones = _notas_direcciones_edificios(edificios_bloques)
-    if notas_direcciones:
-        story.append(Spacer(1, 3))
-        story.extend(notas_direcciones)
-    story.append(Spacer(1, 8))
-
-    story.append(Spacer(1, 6))
-    story.append(encabezado(2, "Liquidación mensual mes en curso", ancho))
-    story.append(Spacer(1, 6))
-    story.extend(_tabla_items(items, ancho, decimales))
-    story.append(Spacer(1, 8))
-
-    story.append(Spacer(1, 6))
-    story.append(encabezado(2, "Consultorios y cantidad de horas utilizadas por el profesional en el mes liquidado", ancho))
-    story.append(Spacer(1, 6))
-    if filas_consultorios:
-        story.append(_tabla_consultorios_y_horas(filas_consultorios, ancho, decimales))
-        total_horas = sum(f["horas"] for f in filas_consultorios)
-        story.append(Spacer(1, 3))
-        story.append(Paragraph(
-            f"<para align=right><b>Total horas mensuales: {total_horas:g}hs - "
-            f"Subtotal liquidación: {formatear_moneda(liquidacion.subtotal_reserva, decimales)}</b></para>",
-            estilo_texto(9),
-        ))
-    story.append(Spacer(1, 10))
-
-    desde, hasta = rango_actualizacion(conn, liquidacion.periodo)
-    titulo_valores = (
-        f"Valores de los consultorios para el período comprendido entre "
-        f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
-    )
-    story.append(Spacer(1, 6))
-    story.append(encabezado(2, titulo_valores, ancho))
-    for info in edificios_valores:
-        story.append(Spacer(1, 6))
-        direccion = _direccion_edificio(info)
-        texto_edificio = f"Edificio {info['NombreEdificio']} - {direccion}" if direccion else f"Edificio {info['NombreEdificio']}"
-        story.append(encabezado(3, texto_edificio, ancho))
-        story.append(Spacer(1, 6))
-        story.extend(matriz_valores_edificio(conn, info["IdEdificio"], ancho))
-        story.append(Spacer(1, 6))
-
-    story.append(Spacer(1, 6))
-    story.append(encabezado(2, "Esquema de descuentos", ancho))
-    story.append(Spacer(1, 6))
-    story.extend(bloques_esquema_descuentos(conn, ancho))
-
-    story.append(Spacer(1, 6))
-    story.append(encabezado(2, "Recordatorios varios para el profesional", ancho))
-    story.append(Spacer(1, 6))
-    story.extend(_recordatorios(conn, ids, cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0))
-    story.append(Spacer(1, 10))
-
     fecha_titulo = fecha_larga(fecha_actual(conn).isoformat()).replace("/", "-")
-    story.append(Spacer(1, 6))
-    story.extend(secciones_disponibilidad(
-        conn, anio, mes, ancho, fecha_titulo, ids_edificio=list(edificios_bloques.keys()) or None,
-    ))
+    desde, hasta = rango_actualizacion(conn, liquidacion.periodo)
 
-    story.append(Spacer(1, 6))
-    story.append(encabezado(2, "Fotos de los consultorios reservados", ancho))
-    story.append(Spacer(1, 6))
-    story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=False))
+    def _construir_story(ancho: float) -> list:
+        # Los flowables (Paragraph/Table) no se pueden reusar entre
+        # distintos `doc.build()` — si `construir_sin_saltos` reintenta con
+        # más alto, este closure se vuelve a llamar entero, así que todo
+        # (incluidas las condiciones) se arma de cero acá adentro.
+        condiciones_flowables = condiciones_normas(conn)
+        story = []
 
-    condiciones_flowables = condiciones_normas(conn)
-    if condiciones_flowables:
-        titulo_condiciones = "Condiciones y normas generales de convivencia relacionadas con la reserva en el espacio"
-        story.append(Spacer(1, 6))
-        story.append(Spacer(1, 6))
-        story.append(encabezado(2, titulo_condiciones, ancho))
-        story.append(Spacer(1, 6))
-        story.extend(condiciones_flowables)
+        # Logo centrado (o el nombre del espacio si no hay uno configurado)
+        # y línea separatoria — sin subtítulo ni localidad: un profesional
+        # puede reservar en edificios de más de una localidad, no hay una
+        # localidad única "de este documento" como sí la hay en
+        # Disponibilidad/Propuesta.
+        story.extend(encabezado_espacio(conn, ancho, mostrar_localidad=False))
 
-    doc.build(story)
+        titulo_detalle = f"Liquidación período {periodo_mm_aaaa(liquidacion.periodo)} - {_nombre_completo(profesional)}"
+        story.append(encabezado(1, titulo_detalle, ancho))
+        story.append(Spacer(1, 6))
+
+        story.append(Spacer(1, 6))
+        story.append(encabezado(2, "Bloques de horarios regulares reservados", ancho))
+        story.append(Spacer(1, 6))
+        if bloques:
+            story.append(_tabla_bloques_horarios(bloques, ancho))
+        else:
+            story.append(Paragraph("Sin bloques horarios regulares vigentes.", estilo_texto(9)))
+        notas_direcciones = _notas_direcciones_edificios(edificios_bloques)
+        if notas_direcciones:
+            story.append(Spacer(1, 3))
+            story.extend(notas_direcciones)
+        story.append(Spacer(1, 8))
+
+        story.append(Spacer(1, 6))
+        story.append(encabezado(2, "Liquidación mensual mes en curso", ancho))
+        story.append(Spacer(1, 6))
+        story.extend(_tabla_items(items, ancho, decimales))
+        story.append(Spacer(1, 8))
+
+        story.append(Spacer(1, 6))
+        story.append(encabezado(2, "Consultorios y cantidad de horas utilizadas por el profesional en el mes liquidado", ancho))
+        story.append(Spacer(1, 6))
+        if filas_consultorios:
+            story.append(_tabla_consultorios_y_horas(filas_consultorios, ancho, decimales))
+            total_horas = sum(f["horas"] for f in filas_consultorios)
+            story.append(Spacer(1, 3))
+            story.append(Paragraph(
+                f"<para align=right><b>Total horas mensuales: {total_horas:g}hs - "
+                f"Subtotal liquidación: {formatear_moneda(liquidacion.subtotal_reserva, decimales)}</b></para>",
+                estilo_texto(9),
+            ))
+        story.append(Spacer(1, 10))
+
+        titulo_valores = (
+            f"Valores de los consultorios para el período comprendido entre "
+            f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
+        )
+        story.append(Spacer(1, 6))
+        story.append(encabezado(2, titulo_valores, ancho))
+        for info in edificios_valores:
+            story.append(Spacer(1, 6))
+            direccion = _direccion_edificio(info)
+            texto_edificio = f"Edificio {info['NombreEdificio']} - {direccion}" if direccion else f"Edificio {info['NombreEdificio']}"
+            story.append(encabezado(3, texto_edificio, ancho))
+            story.append(Spacer(1, 6))
+            story.extend(matriz_valores_edificio(conn, info["IdEdificio"], ancho))
+            story.append(Spacer(1, 6))
+
+        story.append(Spacer(1, 6))
+        story.append(encabezado(2, "Esquema de descuentos", ancho))
+        story.append(Spacer(1, 6))
+        story.extend(bloques_esquema_descuentos(conn, ancho))
+
+        story.append(Spacer(1, 6))
+        story.append(encabezado(2, "Recordatorios varios para el profesional", ancho))
+        story.append(Spacer(1, 6))
+        story.extend(_recordatorios(conn, ids, cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0))
+        story.append(Spacer(1, 10))
+
+        story.append(Spacer(1, 6))
+        story.extend(secciones_disponibilidad(
+            conn, anio, mes, ancho, fecha_titulo, ids_edificio=list(edificios_bloques.keys()) or None,
+        ))
+
+        story.append(Spacer(1, 6))
+        story.append(encabezado(2, "Fotos de los consultorios reservados", ancho))
+        story.append(Spacer(1, 6))
+        story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=False))
+
+        if condiciones_flowables:
+            titulo_condiciones = "Condiciones y normas generales de convivencia relacionadas con la reserva en el espacio"
+            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 6))
+            story.append(encabezado(2, titulo_condiciones, ancho))
+            story.append(Spacer(1, 6))
+            story.extend(condiciones_flowables)
+
+        return story
+
+    ruta = os.path.join(directorio, _nombre_archivo(liquidacion.periodo, profesional))
+    construir_sin_saltos(ruta, _construir_story, altura)
     return ruta
