@@ -45,6 +45,7 @@ from app.pdf.edificios_pdf import (
     ids_consultorio_de_edificios,
     numero_unidad_en_edificio,
     sufijo_localidad,
+    titulo_edificio,
 )
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
@@ -77,11 +78,6 @@ def _medida(valor: float | None) -> str:
 
 def _si_no(valor) -> str:
     return "Sí" if valor else "No"
-
-
-def _titulo_edificio(e: sqlite3.Row) -> str:
-    direccion = ", ".join(p for p in (e["Domicilio"], e["DomicilioLocalidad"]) if p)
-    return f"Edificio {e['Nombre']} - {direccion}" if direccion else f"Edificio {e['Nombre']}"
 
 
 def _encabezados_tabla(textos: list[str], tamano: int = 7) -> list[Paragraph]:
@@ -325,7 +321,7 @@ def generar_pdf_propuesta(
         story.append(Spacer(1, 8))
         if multi:
             for e in edificios:
-                story.append(encabezado(2, _titulo_edificio(e), ancho))
+                story.append(encabezado(2, titulo_edificio(e), ancho))
                 story.append(Spacer(1, 6))
                 story.extend(_bloque_detalles_principales(conn, e, ancho, nivel=3))
                 story.append(Spacer(1, 10))
@@ -342,7 +338,7 @@ def generar_pdf_propuesta(
                 if not imagenes_ed:
                     continue
                 numeros_unidad = numero_unidad_en_edificio(conn, e["IdEdificio"])
-                story.append(encabezado(2, _titulo_edificio(e), ancho))
+                story.append(encabezado(2, titulo_edificio(e), ancho))
                 story.append(Spacer(1, 6))
                 story.extend(_bloque_fotos(imagenes_ed, ancho, nivel=3, decimales=decimales, numeros_unidad=numeros_unidad))
                 story.append(Spacer(1, 10))
@@ -356,7 +352,7 @@ def generar_pdf_propuesta(
         story.append(Spacer(1, 8))
         if multi:
             for e in edificios:
-                story.append(encabezado(2, _titulo_edificio(e), ancho))
+                story.append(encabezado(2, titulo_edificio(e), ancho))
                 story.append(Spacer(1, 6))
                 story.extend(_bloque_disponibilidad(
                     conn, e, anio, mes, ancho, fecha_titulo, nivel=3,

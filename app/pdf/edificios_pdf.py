@@ -36,6 +36,14 @@ def numero_unidad_en_edificio(conn: sqlite3.Connection, id_edificio: int) -> dic
     return {f["IdUnidad"]: i + 1 for i, f in enumerate(filas)}
 
 
+def titulo_edificio(e: sqlite3.Row) -> str:
+    """"Edificio {Nombre} - {Domicilio}, {Localidad}" — encabezado nivel 2
+    por edificio, compartido por Propuesta y Disponibilidad cuando el PDF
+    incluye más de uno."""
+    direccion = ", ".join(p for p in (e["Domicilio"], e["DomicilioLocalidad"]) if p)
+    return f"Edificio {e['Nombre']} - {direccion}" if direccion else f"Edificio {e['Nombre']}"
+
+
 def hay_multiples_localidades(conn: sqlite3.Connection) -> bool:
     """Sección 4.1: la localidad debajo del logo y el sufijo de localidad
     en el nombre del archivo solo se muestran "si el espacio tiene
