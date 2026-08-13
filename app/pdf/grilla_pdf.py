@@ -201,9 +201,13 @@ def _tabla_grilla_edificio(
         # línea fina de la GRID que tapa (dibujada antes, debajo), para que
         # el antialiasing de esa línea no deje un resto visible del gris.
         ("LINEBELOW", (2, 2), (-1, 2), 1.2, COLOR_NIVEL_1),
-        # "UNIDAD" con justificación inferior (el resto de la grilla queda
-        # centrado verticalmente por el VALIGN de arriba).
+        # "UNIDAD" pegado a la fila de piso/letra de abajo (no solo abajo
+        # dentro de su propia celda, que ya era tan ajustada que el VALIGN
+        # solo no se notaba): más padding arriba (la aleja del día) y casi
+        # nada abajo (la acerca al piso).
         ("VALIGN", (2, 1), (-1, 1), "BOTTOM"),
+        ("TOPPADDING", (2, 1), (-1, 1), 5),
+        ("BOTTOMPADDING", (2, 1), (-1, 1), 0),
         # "Tipo Bloque"/"Horario" combinan las 4 filas de encabezado (mismo
         # alto que Día/Unidad/Piso/Letra) en vez de quedar ancladas arriba.
         ("SPAN", (0, 0), (0, 3)),
@@ -366,7 +370,10 @@ def _tabla_grilla_edificio_girada(
     estilo.append(("BOX", (3, 0), (-1, 1), _GROSOR_GRUESO, "#000000"))
     idx = 2
     for _dia in dias:
-        estilo.append(("BOX", (0, idx), (2, idx + n_unidades - 1), _GROSOR_GRUESO, "#000000"))
+        # Envuelve el día completo (Día/Piso/Depto. + todas sus horas), no
+        # solo las columnas de la izquierda — un solo BOX asegura esquinas
+        # limpias en vez de superponer varios comandos de línea distintos.
+        estilo.append(("BOX", (0, idx), (-1, idx + n_unidades - 1), _GROSOR_GRUESO, "#000000"))
         idx += n_unidades
         if idx <= ultima_fila + 1:
             estilo.append(("LINEBELOW", (0, idx - 1), (-1, idx - 1), _GROSOR_GRUESO, "#000000"))

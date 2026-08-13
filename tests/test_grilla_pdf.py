@@ -185,7 +185,10 @@ def test_fila_unidad_en_mayusculas(conn):
 def test_fila_unidad_alineada_abajo(conn):
     unidades = _unidades_ficticias(2)
     tabla = _tabla_grilla_edificio(conn, unidades, grilla={}, horas=[9], ancho=400)
-    assert tabla._cellStyles[1][2].valign == "BOTTOM"
+    estilo = tabla._cellStyles[1][2]
+    assert estilo.valign == "BOTTOM"
+    # más separación del día de arriba que del piso de abajo
+    assert estilo.topPadding > estilo.bottomPadding
 
 
 def test_secciones_disponibilidad_ordena_unidades_por_piso_y_letra(conn):
@@ -270,13 +273,13 @@ def test_grilla_girada_titulos_de_encabezado_separados_con_linea_gruesa(conn):
     assert len(lineas_negras) == 2  # Día|Piso y Piso|Depto.
 
 
-def test_grilla_girada_envuelve_piso_y_depto_de_cada_dia(conn):
-    """La caja gruesa de cada día tiene que abarcar también las columnas
-    de piso y depto., no solo la columna del nombre del día."""
+def test_grilla_girada_envuelve_el_dia_completo(conn):
+    """La caja gruesa de cada día tiene que abarcar TODAS las columnas
+    (Día/Piso/Depto. y todas las horas), no solo las de la izquierda."""
     unidades = _unidades_ficticias(3)
     tabla = _tabla_grilla_edificio_girada(conn, unidades, grilla={}, horas=[9], ancho=550)
-    cajas_dia = [cmd for cmd in tabla._linecmds if cmd[0] == "BOX" and cmd[1] == (0, 2) and cmd[2][0] == 2]
-    assert cajas_dia, "no se encontró la caja del primer día abarcando columnas 0-2"
+    cajas_dia = [cmd for cmd in tabla._linecmds if cmd[0] == "BOX" and cmd[1] == (0, 2) and cmd[2][0] == -1]
+    assert cajas_dia, "no se encontró la caja del primer día abarcando todas las columnas"
 
 
 def test_grilla_girada_el_dia_abarca_todas_las_filas_de_sus_unidades(conn):
