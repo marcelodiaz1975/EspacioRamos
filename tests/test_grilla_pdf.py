@@ -273,13 +273,18 @@ def test_grilla_girada_titulos_de_encabezado_separados_con_linea_gruesa(conn):
     assert len(lineas_negras) == 2  # Día|Piso y Piso|Depto.
 
 
-def test_grilla_girada_envuelve_el_dia_completo(conn):
-    """La caja gruesa de cada día tiene que abarcar TODAS las columnas
-    (Día/Piso/Depto. y todas las horas), no solo las de la izquierda."""
+def test_grilla_girada_dia_y_piso_depto_van_en_cajas_separadas(conn):
+    """Dos cajas gruesas por día: una solo para la palabra del día
+    (columna 0) y otra que engloba piso+depto. (columnas 1-2) de todas
+    sus unidades — las columnas de horario no llevan caja propia."""
     unidades = _unidades_ficticias(3)
     tabla = _tabla_grilla_edificio_girada(conn, unidades, grilla={}, horas=[9], ancho=550)
-    cajas_dia = [cmd for cmd in tabla._linecmds if cmd[0] == "BOX" and cmd[1] == (0, 2) and cmd[2][0] == -1]
-    assert cajas_dia, "no se encontró la caja del primer día abarcando todas las columnas"
+    cajas = [cmd for cmd in tabla._linecmds if cmd[0] == "BOX" and cmd[1][1] == 2]
+    caja_dia = next((c for c in cajas if c[1][0] == 0 and c[2][0] == 0), None)
+    caja_piso_depto = next((c for c in cajas if c[1][0] == 1 and c[2][0] == 2), None)
+    assert caja_dia, "no se encontró la caja de la columna del día"
+    assert caja_piso_depto, "no se encontró la caja de piso+depto."
+    assert not any(c[1][0] == 0 and c[2][0] == 2 for c in cajas), "no debería haber una caja combinada 0-2"
 
 
 def test_grilla_girada_el_dia_abarca_todas_las_filas_de_sus_unidades(conn):

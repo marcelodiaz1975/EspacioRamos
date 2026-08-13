@@ -370,10 +370,12 @@ def _tabla_grilla_edificio_girada(
     estilo.append(("BOX", (3, 0), (-1, 1), _GROSOR_GRUESO, "#000000"))
     idx = 2
     for _dia in dias:
-        # Envuelve el día completo (Día/Piso/Depto. + todas sus horas), no
-        # solo las columnas de la izquierda — un solo BOX asegura esquinas
-        # limpias en vez de superponer varios comandos de línea distintos.
-        estilo.append(("BOX", (0, idx), (-1, idx + n_unidades - 1), _GROSOR_GRUESO, "#000000"))
+        # Dos cajas separadas por día: una solo para la palabra del día
+        # (columna 0) y otra que engloba piso+depto. de todas sus unidades
+        # (columnas 1-2) — no las columnas de horario, esas solo quedan
+        # separadas por el divisor horizontal entre días de más abajo.
+        estilo.append(("BOX", (0, idx), (0, idx + n_unidades - 1), _GROSOR_GRUESO, "#000000"))
+        estilo.append(("BOX", (1, idx), (2, idx + n_unidades - 1), _GROSOR_GRUESO, "#000000"))
         idx += n_unidades
         if idx <= ultima_fila + 1:
             estilo.append(("LINEBELOW", (0, idx - 1), (-1, idx - 1), _GROSOR_GRUESO, "#000000"))
