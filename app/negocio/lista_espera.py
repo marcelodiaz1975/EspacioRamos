@@ -211,6 +211,8 @@ def calcular_coincidencia(conn: sqlite3.Connection, pedido: sqlite3.Row, anio: i
 
     ids_consultorios = {t.id_consultorio for d in dias_cubiertos for t in cobertura_por_dia[d]}
     color = _clasificar_color(candidatos_por_id, ids_consultorios)
+    if condiciones.get("sinCombinar") and color != VERDE:
+        return None
     return Coincidencia(
         color=color, dias_cubiertos=dias_cubiertos,
         tramos_por_dia={d: cobertura_por_dia[d] for d in dias_cubiertos},

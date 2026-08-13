@@ -101,7 +101,11 @@ class PantallaListaEspera(QWidget):
         self.casilla_camilla = QCheckBox("Apto camilla")
         self.casilla_balcon = QCheckBox("Con balcón")
         self.casilla_aire = QCheckBox("Con aire acondicionado")
-        for casilla in (self.casilla_ventana, self.casilla_camilla, self.casilla_balcon, self.casilla_aire):
+        self.casilla_sin_combinar = QCheckBox("Sin combinación de consultorios")
+        for casilla in (
+            self.casilla_ventana, self.casilla_camilla, self.casilla_balcon, self.casilla_aire,
+            self.casilla_sin_combinar,
+        ):
             form.addWidget(casilla)
         self.campo_tamano = QLineEdit()
         self.campo_tamano.setPlaceholderText("Tamaño (opcional)")
@@ -194,6 +198,8 @@ class PantallaListaEspera(QWidget):
             condiciones["balcon"] = True
         if self.casilla_aire.isChecked():
             condiciones["aire"] = True
+        if self.casilla_sin_combinar.isChecked():
+            condiciones["sinCombinar"] = True
         if self.campo_tamano.text().strip():
             condiciones["tamano"] = self.campo_tamano.text().strip()
         return condiciones

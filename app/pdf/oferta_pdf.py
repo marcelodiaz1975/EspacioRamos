@@ -43,6 +43,7 @@ def _texto_filtros(pedido: sqlite3.Row) -> list:
     nombres_condicion = {
         "ventana": "con ventana", "aptoCamilla": "apto camilla",
         "balcon": "con balcón", "aire": "con aire acondicionado",
+        "sinCombinar": "sin combinación de consultorios",
     }
     partes_condiciones = [nombres_condicion[k] for k, v in condiciones.items() if v and k in nombres_condicion]
     if condiciones.get("tamano"):
@@ -104,26 +105,80 @@ def _alternativas(coincidencia: Coincidencia | None, consultorios: dict, anonimi
     return story
 
 
-def generar_pdf_oferta(conn: sqlite3.Connection, directorio: str, id_pedido: int) -> str:
-    """Genera "Oferta consultorios.pdf" a partir de un pedido de lista de
-    espera y devuelve la ruta completa (siempre el mismo nombre: se
-    sobrescribe en cada regeneración)."""
-    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
-    if pedido is None:
-        raise ValueError(f"No existe el pedido de lista de espera #{id_pedido}")
-    profesional = obtener_repositorio(conn, "Profesional").obtener(pedido["IdProfesional"])
+def _bloque_filtros_y_alternativas(
+    pedido: sqlite3.Row, coincidencia: Coincidencia | None, consultorios: dict, anonimizar: bool, ancho: float,
+) -> list:
+    story = [encabezado(2, "Filtros de búsqueda y alternativas disponibles", ancho), Spacer(1, 4)]
+    story.extend(_texto_filtros(pedido))
+    story.append(Spacer(1, 4))
+    story.extend(_alternativas(coincidencia, consultorios, anonimizar, ancho))
+    return story
+
+
+def _bloque_fotos_valores(imagenes: list[sqlite3.Row], consultorios: dict, anonimizar: bool, ancho: float) -> list:
+    story = [encabezado(2, "Fotos y valores regulares de los consultorios ofrecidos", ancho), Spacer(1, 4)]
+    story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=True, anonimizar_unidad=anonimizar))
+    for c in consultorios.values():
+        unidad = f"Unidad {c['IdUnidad']}" if anonimizar else c["Departamento"]
+        story.append(Paragraph(
+            f"Consultorio {c['NumeroConsultorio']} - {unidad} - {c['NombreEdificio']}: "
+            f"{formatear_moneda(c['ValorHoraRegularActual'])}/hora",
+            estilo_texto(9),
+        ))
+    if len({c["IdEdificio"] for c in consultorios.values()}) > 1:
+        for id_ed in {c["IdEdificio"] for c in consultorios.values()}:
+            nombre_ed = next(c["NombreEdificio"] for c in consultorios.values() if c["IdEdificio"] == id_ed)
+            story.append(Paragraph(f"* Edificio {nombre_ed}", estilo_texto(8, italica=True)))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        "Los valores detallados corresponden a los vigentes a este mes en curso, y a los mismos luego se le "
+        "aplican los descuentos en base a la cantidad de horas regulares que se tenga reservadas.",
+        estilo_texto(8, italica=True),
+    ))
+    return story
+
+
+def generar_pdf_oferta_multiple(conn: sqlite3.Connection, directorio: str, ids_pedido: list[int]) -> str:
+    """Genera "Oferta consultorios.pdf" combinando varios pedidos de lista
+    de espera del MISMO profesional en un solo documento.
+
+    El sistema representa cada pedido con un único horario aplicado a una
+    lista de días (`ListaEspera.HorarioDesde/HorarioHasta`) — no admite
+    franjas horarias distintas por día dentro de un mismo pedido. Una
+    búsqueda con varias franjas (p. ej. "lunes a jueves de 8 a 15hs" +
+    "lunes de 8 a 12hs" + "viernes desde las 16hs") se arma como varios
+    pedidos, uno por franja, y este PDF muestra las alternativas de todos
+    juntos en un solo archivo: un bloque "Filtros de búsqueda y
+    alternativas disponibles" por pedido, seguido de una única sección de
+    fotos y valores con la unión de los consultorios ofrecidos en
+    cualquiera de las franjas."""
+    repo_pedido = obtener_repositorio(conn, "ListaEspera")
+    pedidos = [repo_pedido.obtener(id_pedido) for id_pedido in ids_pedido]
+    faltante = next((id_pedido for id_pedido, p in zip(ids_pedido, pedidos) if p is None), None)
+    if faltante is not None:
+        raise ValueError(f"No existe el pedido de lista de espera #{faltante}")
+    ids_profesional = {p["IdProfesional"] for p in pedidos}
+    if len(ids_profesional) > 1:
+        raise ValueError("Los pedidos deben pertenecer al mismo profesional para combinarlos en un solo PDF")
+
+    profesional = obtener_repositorio(conn, "Profesional").obtener(pedidos[0]["IdProfesional"])
     anonimizar = not (profesional is not None and _categoria_es_activa(profesional))
 
     anio, mes = parsear_periodo(periodo_actual(conn))
-    coincidencia = calcular_coincidencia(conn, pedido, anio, mes)
-    ids_consultorio = sorted({t.id_consultorio for tramos in (coincidencia.tramos_por_dia.values() if coincidencia else []) for t in tramos})
+    coincidencias = [calcular_coincidencia(conn, p, anio, mes) for p in pedidos]
+    ids_consultorio = sorted({
+        t.id_consultorio for c in coincidencias if c is not None for tramos in c.tramos_por_dia.values() for t in tramos
+    })
     consultorios = _mapa_consultorios_basico(conn, ids_consultorio)
     imagenes = imagenes_de_consultorios(conn, ids_consultorio)
 
     cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos"
 
-    altura = (6 * cm + len(ids_consultorio) * 2 * 0.5 * cm + (len(imagenes) // 2 + 1) * 7 * cm + 3 * cm) * 1.2
+    altura = (
+        6 * cm + len(pedidos) * 3 * cm + len(ids_consultorio) * 2 * 0.5 * cm
+        + (len(imagenes) // 2 + 1) * 7 * cm + 3 * cm
+    ) * 1.2
 
     def _construir_story(ancho: float) -> list:
         story = [
@@ -131,36 +186,19 @@ def generar_pdf_oferta(conn: sqlite3.Connection, directorio: str, id_pedido: int
             Paragraph("Oferta de consultorios", estilo_texto(11)),
             Spacer(1, 10),
         ]
-
-        story.append(encabezado(2, "Filtros de búsqueda y alternativas disponibles", ancho))
-        story.append(Spacer(1, 4))
-        story.extend(_texto_filtros(pedido))
-        story.append(Spacer(1, 4))
-        story.extend(_alternativas(coincidencia, consultorios, anonimizar, ancho))
-        story.append(Spacer(1, 10))
-
-        story.append(encabezado(2, "Fotos y valores regulares de los consultorios ofrecidos", ancho))
-        story.append(Spacer(1, 4))
-        story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=True, anonimizar_unidad=anonimizar))
-        for c in consultorios.values():
-            unidad = f"Unidad {c['IdUnidad']}" if anonimizar else c["Departamento"]
-            story.append(Paragraph(
-                f"Consultorio {c['NumeroConsultorio']} - {unidad} - {c['NombreEdificio']}: "
-                f"{formatear_moneda(c['ValorHoraRegularActual'])}/hora",
-                estilo_texto(9),
-            ))
-        if len({c["IdEdificio"] for c in consultorios.values()}) > 1:
-            for id_ed in {c["IdEdificio"] for c in consultorios.values()}:
-                nombre_ed = next(c["NombreEdificio"] for c in consultorios.values() if c["IdEdificio"] == id_ed)
-                story.append(Paragraph(f"* Edificio {nombre_ed}", estilo_texto(8, italica=True)))
-        story.append(Spacer(1, 6))
-        story.append(Paragraph(
-            "Los valores detallados corresponden a los vigentes a este mes en curso, y a los mismos luego se le "
-            "aplican los descuentos en base a la cantidad de horas regulares que se tenga reservadas.",
-            estilo_texto(8, italica=True),
-        ))
+        for pedido, coincidencia in zip(pedidos, coincidencias):
+            story.extend(_bloque_filtros_y_alternativas(pedido, coincidencia, consultorios, anonimizar, ancho))
+            story.append(Spacer(1, 10))
+        story.extend(_bloque_fotos_valores(imagenes, consultorios, anonimizar, ancho))
         return story
 
     ruta = os.path.join(directorio, "Oferta consultorios.pdf")
     construir_sin_saltos(ruta, _construir_story, altura)
     return ruta
+
+
+def generar_pdf_oferta(conn: sqlite3.Connection, directorio: str, id_pedido: int) -> str:
+    """Genera "Oferta consultorios.pdf" a partir de un único pedido de
+    lista de espera y devuelve la ruta completa (siempre el mismo nombre:
+    se sobrescribe en cada regeneración)."""
+    return generar_pdf_oferta_multiple(conn, directorio, [id_pedido])
