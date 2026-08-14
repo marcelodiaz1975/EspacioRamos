@@ -43,7 +43,15 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from app.negocio.dias import fecha_a_dia_semana, fecha_actual, parsear_periodo, periodo_actual, primer_dia_mes, sumar_meses
+from app.negocio.dias import (
+    fecha_a_dia_semana,
+    fecha_actual,
+    parsear_periodo,
+    periodo_actual,
+    primer_dia_mes,
+    sumar_meses,
+    ultimo_dia_mes,
+)
 from app.negocio.grilla import calcular_ocupacion_regular
 
 TIPO_REGULAR = "Regular"
@@ -65,6 +73,7 @@ class CriteriosGlobales:
     ids_unidad: list[int] | None = None  # None = todas las de los edificios seleccionados
     ids_consultorio: list[int] | None = None  # None = todos los de las unidades seleccionadas
     salida: str = SALIDA_PDF  # SALIDA_PDF | SALIDA_TEXTO — a dónde vuelca el resultado, no es un criterio de búsqueda
+    detalle_reducido_aislada: bool = False  # solo Aislada: el detalle de cada alternativa omite el consultorio
 
 
 @dataclass
@@ -95,11 +104,20 @@ class TramoCobertura:
 class Alternativa:
     """Una alternativa encontrada. `fecha` es None en Regular (el día de
     la semana se cubre de forma recurrente); en Aislada es la fecha
-    calendario puntual que tuvo cobertura."""
+    calendario puntual que tuvo cobertura.
+
+    `avisos` — solo se completa en Regular: fechas puntuales del mes en
+    las que, pese a que el horario da libre de forma recurrente, hay una
+    ReservaAislada confirmada superpuesta con el bloque ofrecido. La
+    disponibilidad regular se calcula IGNORANDO las horas aisladas (no las
+    bloquea — una reserva aislada no debería impedir ofrecer un horario
+    regular a futuro), pero se avisa igual para poder evaluar más
+    adelante si conviene reubicar esa hora aislada en otro consultorio."""
     dia_semana: str
     fecha: str | None
     color: str
     tramos: list[TramoCobertura]
+    avisos: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -243,6 +261,33 @@ def _ocupado_regular(conn: sqlite3.Connection, anio: int, mes: int, dia_semana: 
     return lambda id_consultorio, hora: mapa.get((id_consultorio, dia_semana, hora), False)
 
 
+def _avisos_aislada_regular(conn: sqlite3.Connection, anio: int, mes: int, dia_semana: str, tramos: list[TramoCobertura]) -> list[str]:
+    """Fechas puntuales del mes que caen en `dia_semana` donde alguno de
+    los `tramos` ofrecidos se superpone con una ReservaAislada confirmada
+    en ese consultorio — la disponibilidad regular no las tiene en cuenta
+    para bloquear (ver docstring de `Alternativa.avisos`), pero se
+    reportan para decisión manual."""
+    avisos = []
+    fecha = primer_dia_mes(anio, mes)
+    ultimo = ultimo_dia_mes(anio, mes)
+    while fecha <= ultimo:
+        if fecha_a_dia_semana(fecha) == dia_semana:
+            fecha_iso = fecha.isoformat()
+            for t in tramos:
+                filas = conn.execute(
+                    "SELECT * FROM ReservaAislada WHERE IdConsultorio = ? AND Fecha = ? AND Estado = 'Confirmada'",
+                    (t.id_consultorio, fecha_iso),
+                ).fetchall()
+                for r in filas:
+                    if r["HoraInicio"] < t.hora_fin and t.hora_inicio < r["HoraFin"]:
+                        avisos.append(
+                            f"Atención: el {fecha_iso} hay una hora aislada asignada en el consultorio "
+                            f"#{t.id_consultorio} de {r['HoraInicio']:g} a {r['HoraFin']:g}hs, dentro de este bloque."
+                        )
+        fecha += timedelta(days=1)
+    return avisos
+
+
 def _ocupado_fecha(conn: sqlite3.Connection, fecha: date):
     dia_semana = fecha_a_dia_semana(fecha)
     fecha_iso = fecha.isoformat()
@@ -280,7 +325,8 @@ def resolver_busqueda(conn: sqlite3.Connection, globales: CriteriosGlobales, bus
         for dia in busqueda.dias:
             id_edificio, tramos = cobertura_por_dia[dia]
             color = _clasificar_color(candidatos_por_edificio[id_edificio], {t.id_consultorio for t in tramos})
-            alternativas.append(Alternativa(dia_semana=dia, fecha=None, color=color, tramos=tramos))
+            avisos = _avisos_aislada_regular(conn, anio, mes, dia, tramos)
+            alternativas.append(Alternativa(dia_semana=dia, fecha=None, color=color, tramos=tramos, avisos=avisos))
     else:
         fecha = date.fromisoformat(busqueda.fecha_desde)
         fecha_fin = date.fromisoformat(busqueda.fecha_hasta) if busqueda.fecha_hasta else fecha

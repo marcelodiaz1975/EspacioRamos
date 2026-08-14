@@ -203,3 +203,34 @@ def test_naranja_combina_unidades_distintas_mismo_edificio(conn):
     )
     resultado = resolver_busqueda(conn, globales, busqueda)
     assert resultado.alternativas[0].color == NARANJA
+
+
+def test_regular_avisa_hora_aislada_superpuesta_sin_bloquear(conn):
+    """Una ReservaAislada no bloquea la disponibilidad regular (se ignora
+    para calcular ocupación), pero si cae dentro del bloque ofrecido tiene
+    que avisarse — 2026-08-10 es lunes."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    _ocupar_aislada(conn, id_consultorio, "2026-08-10", 9, 10)
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11)
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    assert len(resultado.alternativas) == 1  # no se bloquea
+    alt = resultado.alternativas[0]
+    assert alt.color == VERDE
+    assert len(alt.avisos) == 1
+    assert "2026-08-10" in alt.avisos[0]
+
+
+def test_regular_sin_hora_aislada_no_genera_avisos(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1)
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11)
+    resultado = resolver_busqueda(conn, globales, busqueda)
+    assert resultado.alternativas[0].avisos == []
