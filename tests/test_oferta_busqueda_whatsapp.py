@@ -42,9 +42,29 @@ def test_estructura_basica_con_una_sola_alternativa(conn, edificio_con_consultor
     assert "- Lunes de 9 a 11hs" in texto
     assert "*Listado de alternativas encontradas*" in texto
     assert "_Alternativa" not in texto  # una sola alternativa: no se numera
-    assert '- Lunes de 9 a 11hs consultorio 1 del 7mo "L"' in texto
+    assert '- Lunes de 9 a 11hs consultorio 1 del 7mo "L" - Hora regular $ 1.000' in texto
     assert "*Comentario*" not in texto  # un solo edificio, sin avisos
-    assert "Hora regular" not in texto  # sin fotos en el texto, no hace falta el valor
+
+
+def test_muestra_valor_al_final_cuando_se_identifica_el_consultorio(conn, edificio_con_consultorio, tmp_path):
+    """A diferencia del PDF (donde el valor va debajo de la foto), en el
+    texto no hay fotos — así que si se nombra el consultorio, el valor
+    tiene que ir al final de esa misma línea."""
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
+    assert 'consultorio 1 del 7mo "L" - Hora regular $ 1.000' in texto
+
+
+def test_detalle_reducido_no_muestra_valor(conn, edificio_con_consultorio, tmp_path):
+    """Sin identificar el consultorio puntual no hay un valor del que
+    hablar — detalle reducido no debe mostrar "Hora regular"."""
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio], detalle_reducido=True)
+    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
+    assert "Hora regular" not in texto
 
 
 def test_numera_alternativas_con_guion_bajo(conn, tmp_path):

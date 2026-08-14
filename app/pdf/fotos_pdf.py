@@ -22,7 +22,8 @@ from PIL import Image as ImagenPIL
 from reportlab.lib.units import cm
 from reportlab.platypus import Image, Paragraph, Spacer, Table, TableStyle
 
-from app.pdf.estilos import FUENTE, estilo_texto, formatear_moneda
+from app.negocio.formato import formatear_moneda
+from app.pdf.estilos import FUENTE, estilo_texto
 
 RELACION_FOTO = 4 / 3
 

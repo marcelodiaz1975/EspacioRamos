@@ -38,7 +38,8 @@ from app.pdf.edificios_pdf import (
     sufijo_localidad,
     titulo_edificio,
 )
-from app.pdf.estilos import clave_orden_unidad, construir_sin_saltos, decimales_configurados, encabezado, encabezado_espacio, estilo_texto
+from app.negocio.formato import decimales_configurados
+from app.pdf.estilos import clave_orden_unidad, construir_sin_saltos, encabezado, encabezado_espacio, estilo_texto
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.pdf.grilla_pdf import altura_estimada_grilla, secciones_disponibilidad
 

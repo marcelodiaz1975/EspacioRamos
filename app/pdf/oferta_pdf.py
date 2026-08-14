@@ -35,7 +35,8 @@ from app.negocio.dias import parsear_periodo, periodo_actual
 from app.negocio.formato import hora_fmt
 from app.negocio.lista_espera import AMARILLO, NARANJA, ROJO, VERDE, Coincidencia, calcular_coincidencia
 from app.pdf.edificios_pdf import numero_unidad_en_edificio
-from app.pdf.estilos import clave_orden_unidad, construir_sin_saltos, decimales_configurados, encabezado, estilo_texto, formatear_moneda
+from app.negocio.formato import decimales_configurados, formatear_moneda
+from app.pdf.estilos import clave_orden_unidad, construir_sin_saltos, encabezado, estilo_texto
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.repositorio.registro import obtener_repositorio
 

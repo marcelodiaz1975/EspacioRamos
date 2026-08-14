@@ -8,15 +8,8 @@ import sqlite3
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.formato import hora_fmt
-from app.pdf.estilos import (
-    COLOR_NIVEL_1,
-    FUENTE_NEGRITA,
-    clave_orden_unidad,
-    decimales_configurados,
-    encabezado,
-    estilo_texto,
-    formatear_moneda,
-)
+from app.negocio.formato import decimales_configurados, formatear_moneda
+from app.pdf.estilos import COLOR_NIVEL_1, FUENTE_NEGRITA, clave_orden_unidad, encabezado, estilo_texto
 
 
 def _hasta_por_frecuencia(desde: str, meses_actualizacion: list[int]) -> str:

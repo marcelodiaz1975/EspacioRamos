@@ -24,13 +24,15 @@ requerida por el profesional" -> nivel 2 "Detalle de la búsqueda" (una
 línea por búsqueda del documento, solo días y horario — más el rango de
 fechas si es Aislada) -> nivel 2 "Listado de alternativas encontradas"
 (todas las opciones de todas las búsquedas, una tras otra; si hay más de
-una se numeran "Alternativa N", si hay una sola se detalla directo) ->
-nivel 2 "Comentario", solo si hace falta (a qué dirección corresponde
-cada edificio mencionado, cuando hay más de uno; avisos de hora aislada
-superpuesta) -> nivel 2 "Fotos de los consultorios ofrecidos" (unión de
-todos los consultorios ofrecidos, agrupados por edificio cuando hay más
-de uno, con el valor por hora debajo de cada foto — el único lugar donde
-se muestra, no se repite en el listado de alternativas)."""
+una se numeran "Alternativa N", si hay una sola se detalla directo;
+abajo de todo, sin título propio, un "Comentario" con la misma etiqueta
+en negrita que "Alternativa N" — solo si hace falta: a qué dirección
+corresponde cada edificio mencionado, cuando hay más de uno, y avisos de
+hora aislada superpuesta) -> nivel 2 "Fotos de los consultorios
+ofrecidos" (unión de todos los consultorios ofrecidos, agrupados por
+edificio cuando hay más de uno, con el valor por hora debajo de cada
+foto — el único lugar donde se muestra, no se repite en el listado de
+alternativas)."""
 from __future__ import annotations
 
 import os
@@ -50,24 +52,11 @@ from app.negocio.oferta_busqueda_texto import (
     mapa_consultorios_basico,
     resumen_busqueda,
 )
+from app.negocio.formato import decimales_configurados, formatear_valor
 from app.pdf.edificios_pdf import numero_unidad_en_edificio
-from app.pdf.estilos import (
-    clave_orden_unidad,
-    construir_sin_saltos,
-    decimales_configurados,
-    encabezado,
-    encabezado_espacio,
-    estilo_texto,
-    formatear_moneda,
-)
+from app.pdf.estilos import clave_orden_unidad, construir_sin_saltos, encabezado, encabezado_espacio, estilo_texto
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.repositorio.registro import obtener_repositorio
-
-
-def _formatear_valor(monto: float, decimales: int) -> str:
-    """Sin decimales cuando el valor es redondo (sin centavos), con los
-    decimales configurados cuando no."""
-    return formatear_moneda(monto, 0 if monto == int(monto) else decimales)
 
 
 def _texto_detalle_busqueda(busquedas: list[Busqueda], tipo_busqueda: str) -> list:
@@ -98,11 +87,15 @@ def _texto_alternativas(
 
 
 def _texto_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[int], mostrar_edificio: bool, avisos: list[str]) -> list:
+    """Sin título de nivel 2 propio — va pegado abajo de las alternativas,
+    con el mismo estilo de etiqueta en negrita que "Alternativa N"."""
     style = estilo_texto(9)
     style_aviso = estilo_texto(8, italica=True)
     lineas = [Paragraph(f"* {t}", style) for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
     lineas += [Paragraph(f"* {aviso}", style_aviso) for aviso in avisos]
-    return lineas
+    if not lineas:
+        return []
+    return [Paragraph("<b>Comentario</b>", style), Spacer(1, 2)] + lineas
 
 
 def _consultorios_ordenados(conn: sqlite3.Connection, consultorios: dict, anonimizar: bool) -> list[sqlite3.Row]:
@@ -124,7 +117,7 @@ def _pie_foto(imagen: sqlite3.Row, mostrar_edificio: bool, anonimizar: bool, dec
     $Valor — el único lugar del documento donde se muestra el valor."""
     unidad = f"Unidad {imagen['IdUnidadConsultorio']}" if anonimizar else f"Unidad {imagen['Departamento']}"
     partes = ([f"Edificio {imagen['NombreEdificio']}"] if mostrar_edificio else []) + [unidad, f"Consultorio {imagen['NumeroConsultorio']}"]
-    return f"{' - '.join(partes)} - Hora regular {_formatear_valor(imagen['ValorHoraRegularActual'], decimales)}"
+    return f"{' - '.join(partes)} - Hora regular {formatear_valor(imagen['ValorHoraRegularActual'], decimales)}"
 
 
 def _bloque_consultorios_intervinientes(
@@ -217,14 +210,12 @@ def generar_pdf_oferta_busqueda(
         story.append(encabezado(2, "Listado de alternativas encontradas", ancho))
         story.append(Spacer(1, 6))
         story.extend(_texto_alternativas(listas_alternativas, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar))
-        story.append(Spacer(1, 10))
 
         comentario = _texto_comentario(conn, ids_edificio_resultado, mostrar_edificio, avisos)
         if comentario:
-            story.append(encabezado(2, "Comentario", ancho))
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 8))
             story.extend(comentario)
-            story.append(Spacer(1, 10))
+        story.append(Spacer(1, 10))
 
         # Con detalle reducido no se identifica qué consultorio puntual se
         # ofrece (ver `Busqueda`/`detalle_tramo`) — una foto es, en los

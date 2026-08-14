@@ -156,7 +156,7 @@ def test_condiciones_y_normas_sembradas_aparecen(conn, profesional, tmp_path):
 
 
 def test_decimales_configurados_en_0_no_muestra_centavos(conn, profesional, tmp_path):
-    from app.pdf.estilos import formatear_moneda
+    from app.negocio.formato import formatear_moneda
 
     obtener_repositorio(conn, "Configuracion").actualizar(1, CantidadDecimales=0)
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)

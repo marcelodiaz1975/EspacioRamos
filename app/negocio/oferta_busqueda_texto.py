@@ -7,18 +7,21 @@ salida digan lo mismo con distinta presentación — el PDF envuelve estas
 líneas en Paragraphs con estilos y encabezados, el texto de WhatsApp las
 arma con la sintaxis de WhatsApp (*negrita*, _itálica_).
 
-A propósito NO incluyen el valor por hora: eso ya se muestra debajo de
-cada foto en el PDF (`app.pdf.oferta_busqueda_pdf._pie_foto`), repetirlo
-acá haría el texto más largo sin agregar nada. Tampoco se detallan los
-criterios de la búsqueda (fechas, combinación, características, valor
-máximo, cantidad de horas mínimas): son los que se usaron para ENCONTRAR
-las alternativas, no hacen falta para elegir entre ellas — el profesional
-ya sabe lo que pidió."""
+El valor por hora es opcional (`mostrar_valor` en `detalle_tramo`/
+`lineas_opcion`): el PDF lo omite en el listado de alternativas porque ya
+se muestra debajo de cada foto (`app.pdf.oferta_busqueda_pdf._pie_foto`)
+— repetirlo ahí sería redundante. El texto de WhatsApp no tiene fotos, así
+que sí lo necesita cuando se identifica el consultorio puntual (si el
+detalle es reducido y no se nombra ningún consultorio, tampoco hay valor
+que mostrar). Tampoco se detallan los criterios de la búsqueda (fechas,
+combinación, características, valor máximo, cantidad de horas mínimas):
+son los que se usaron para ENCONTRAR las alternativas, no hacen falta
+para elegir entre ellas — el profesional ya sabe lo que pidió."""
 from __future__ import annotations
 
 import sqlite3
 
-from app.negocio.formato import fecha_larga, hora_fmt
+from app.negocio.formato import fecha_larga, formatear_valor, hora_fmt
 from app.negocio.oferta_busqueda import TIPO_AISLADA, Alternativa, Busqueda, Opcion, TramoCobertura
 
 _ES_ACTIVO = ("R", "A", "E", "X", "B")
@@ -106,11 +109,14 @@ def avisos_planos(listas_alternativas: list[list[Alternativa]]) -> list[str]:
 
 def detalle_tramo(
     etiqueta: str, t: TramoCobertura, c: sqlite3.Row, mostrar_edificio: bool, mostrar_consultorio: bool, anonimizar: bool,
+    mostrar_valor: bool = False, decimales: int = 2,
 ) -> str:
     """Con consultorio (modo normal): "Viernes de 13 a 16hs consultorio 4
     del EP "K" en Ramos 2" (el edificio se omite si hay uno solo). Sin
     consultorio (detalle reducido): "Viernes de 13 a 16hs en la unidad del
-    EP "K" en Ramos 2"."""
+    EP "K" en Ramos 2". `mostrar_valor` agrega el valor por hora al final
+    ("- Hora regular $X") — solo tiene sentido junto con un consultorio
+    identificado, si no no hay un valor puntual del que hablar."""
     rango = f"{etiqueta} de {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)}"
     if mostrar_consultorio:
         unidad_txt = f"- Unidad {c['IdUnidad']}" if anonimizar else f"del {c['Departamento']}"
@@ -120,11 +126,14 @@ def detalle_tramo(
         texto = f"{rango} {unidad_txt}"
     if mostrar_edificio:
         texto += f" en {c['NombreEdificio']}"
+    if mostrar_valor and mostrar_consultorio:
+        texto += f" - Hora regular {formatear_valor(c['ValorHoraRegularActual'], decimales)}"
     return texto
 
 
 def lineas_opcion(
     etiqueta: str, opcion: Opcion, consultorios: dict, mostrar_edificio: bool, mostrar_consultorio: bool, anonimizar: bool,
+    mostrar_valor: bool = False, decimales: int = 2,
 ) -> list[str]:
     """Una línea por tramo — una sola si es un consultorio solo, varias si
     es una combinación (una por cada consultorio que interviene)."""
@@ -133,7 +142,7 @@ def lineas_opcion(
         c = consultorios.get(t.id_consultorio)
         if c is None:
             continue
-        lineas.append(detalle_tramo(etiqueta, t, c, mostrar_edificio, mostrar_consultorio, anonimizar))
+        lineas.append(detalle_tramo(etiqueta, t, c, mostrar_edificio, mostrar_consultorio, anonimizar, mostrar_valor, decimales))
     return lineas
 
 

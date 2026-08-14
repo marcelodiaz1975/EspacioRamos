@@ -40,6 +40,7 @@ from app.negocio.dias import DIAS_SEMANA, fecha_actual, parsear_periodo, primer_
 from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, fecha_larga, hora_fmt, mes_texto, periodo_mm_aaaa
 from app.negocio.liquidaciones import Liquidacion, ids_consolidados
+from app.negocio.formato import decimales_configurados, formatear_moneda
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
     COLOR_ROJO,
@@ -47,11 +48,9 @@ from app.pdf.estilos import (
     FUENTE_NEGRITA,
     FUENTE_NEGRITA_ITALICA,
     construir_sin_saltos,
-    decimales_configurados,
     encabezado,
     encabezado_espacio,
     estilo_texto,
-    formatear_moneda,
 )
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.pdf.grilla_pdf import altura_estimada_grilla, secciones_disponibilidad

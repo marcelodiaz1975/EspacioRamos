@@ -140,19 +140,6 @@ def estilo_texto(tamano: int = 9, negrita: bool = False, italica: bool = False, 
     return ParagraphStyle(name="texto", fontName=fuente, fontSize=tamano, leading=tamano * 1.25, **kwargs)
 
 
-def decimales_configurados(conn) -> int:
-    """`Configuracion.CantidadDecimales` (default 2) — parámetro que el
-    usuario puede ajustar desde Configuración general sin tocar código."""
-    fila = conn.execute("SELECT CantidadDecimales FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    return int(fila["CantidadDecimales"]) if fila and fila["CantidadDecimales"] is not None else 2
-
-
-def formatear_moneda(monto: float, decimales: int = 2) -> str:
-    texto = f"{abs(monto):,.{decimales}f}"
-    texto = texto.replace(",", "_").replace(".", ",").replace("_", ".")
-    return f"-$ {texto}" if monto < 0 else f"$ {texto}"
-
-
 def partir_etiqueta_unidad(etiqueta: str) -> tuple[str, str]:
     """'7mo "L"' -> ('7', 'L'); 'EP "K"' -> ('EP', 'K'); '15 "H"' -> ('15', 'H').
     Arriba va solo el número de piso (sin el sufijo ordinal "mo"/"ro"/"no"

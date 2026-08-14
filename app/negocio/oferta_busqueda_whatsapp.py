@@ -8,11 +8,15 @@ rompería la negrita del resto del mensaje, WhatsApp la extendería hasta
 el próximo "*" que encuentre).
 
 No incluye la sección de fotos: son archivos aparte, se adjuntan sueltos
-en el chat — no hay forma de incrustarlas en el texto del mensaje."""
+en el chat — no hay forma de incrustarlas en el texto del mensaje. Por
+eso, a diferencia del PDF, acá SÍ se muestra el valor por hora al final
+de cada línea que identifica un consultorio puntual — no hay foto debajo
+de la cual mostrarlo."""
 from __future__ import annotations
 
 import sqlite3
 
+from app.negocio.formato import decimales_configurados
 from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales, resolver_busqueda
 from app.negocio.oferta_busqueda_texto import (
     alternativas_planas,
@@ -40,6 +44,7 @@ def generar_texto_oferta_busqueda(
     if profesional is None:
         raise ValueError(f"No existe el profesional #{id_profesional}")
     anonimizar = not categoria_es_activa(profesional)
+    decimales = decimales_configurados(conn)
 
     listas_alternativas: list[list[Alternativa]] = [
         filtrar_excluidas(resolver_busqueda(conn, globales, b).alternativas, i, excluir)
@@ -73,7 +78,10 @@ def generar_texto_oferta_busqueda(
                 lineas.append("")
             if numerar:
                 lineas.append(f"_Alternativa {indice + 1}_")
-            for linea in lineas_opcion(etiqueta, opcion, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar):
+            for linea in lineas_opcion(
+                etiqueta, opcion, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar,
+                mostrar_valor=True, decimales=decimales,
+            ):
                 lineas.append(f"- {linea}")
 
     comentario = [f"- {t}" for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
