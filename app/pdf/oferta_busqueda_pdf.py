@@ -3,8 +3,9 @@
 pedido de Lista de espera (`app.pdf.oferta_pdf`). Este es el que se arma
 cuando un profesional pide opciones de consultorios (para reservar en
 forma regular o por horas aisladas) y el resultado puede salir como este
-PDF o como mensaje de WhatsApp (el mensaje se resuelve más adelante, con
-el mismo motor de búsqueda).
+PDF o como texto para portapapeles/WhatsApp (mismo motor de búsqueda y
+mismo armado de texto — ver `app.negocio.oferta_busqueda_texto` — con
+formato de WhatsApp en `app.negocio.oferta_busqueda_whatsapp`).
 
 Nombre de archivo fijo "Oferta consultorios.pdf": siempre se sobrescribe,
 sin historial de versiones.
@@ -17,24 +18,19 @@ porque, a diferencia de Propuesta/Disponibilidad, esto lo arma el
 operador para un profesional puntual, no es un documento que se entrega
 sin más contexto.
 
-Estructura: nivel 1 "Búsqueda solicitada por {profesional}" -> nivel 2
-"Criterios de búsqueda generales" (los criterios comunes a todas las
-búsquedas del documento: tipo, localidad, edificios/unidades/consultorios
-alcanzados — "todos"/"todas" cuando no se restringió, o cuando el alcance
-elegido igual cubre absolutamente todo lo que hay en la localidad) -> por
-cada búsqueda, nivel 2 "Búsqueda {N}" con nivel 3 "Criterios de búsqueda
-seleccionados" (los filtros particulares de esa búsqueda) y nivel 3
-"Coincidencias de la búsqueda" (TODAS las opciones encontradas por día —
-si más de un consultorio puede cubrir el bloque por sí solo, se listan
-todas, no solo la primera — con una explicación en texto del tipo de
-cobertura: completa o parcial según si se cubrió todo el bloque pedido o
-solo una parte, y un aviso cuando hay una hora aislada asignada dentro
-del bloque ofrecido) -> nivel 2 "Fotos de los consultorios que
-intervienen en las búsquedas" (unión de todos los consultorios ofrecidos
-en cualquiera de las búsquedas, agrupados por edificio cuando hay más de
-uno administrado, ordenados por unidad real o posición anonimizada y
-consultorio; el pie de cada foto es Edificio (si hay más de uno) - Unidad
-- Consultorio: Valor, sin repetir el valor en ningún otro lado)."""
+Estructura, deliberadamente breve (el profesional ya sabe lo que pidió,
+no hace falta repetirle los criterios de la búsqueda): nivel 1 "Búsqueda
+requerida por el profesional" -> nivel 2 "Detalle de la búsqueda" (una
+línea por búsqueda del documento, solo días y horario — más el rango de
+fechas si es Aislada) -> nivel 2 "Listado de alternativas encontradas"
+(todas las opciones de todas las búsquedas, una tras otra; si hay más de
+una se numeran "Alternativa N", si hay una sola se detalla directo) ->
+nivel 2 "Comentario", solo si hace falta (a qué dirección corresponde
+cada edificio mencionado, cuando hay más de uno; avisos de hora aislada
+superpuesta) -> nivel 2 "Fotos de los consultorios ofrecidos" (unión de
+todos los consultorios ofrecidos, agrupados por edificio cuando hay más
+de uno, con el valor por hora debajo de cada foto — el único lugar donde
+se muestra, no se repite en el listado de alternativas)."""
 from __future__ import annotations
 
 import os
@@ -43,16 +39,16 @@ import sqlite3
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, Spacer
 
-from app.negocio.formato import fecha_larga, hora_fmt
-from app.negocio.oferta_busqueda import (
-    AMARILLO,
-    NARANJA,
-    VERDE,
-    Alternativa,
-    Busqueda,
-    CriteriosGlobales,
-    Opcion,
-    resolver_busqueda,
+from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales, resolver_busqueda
+from app.negocio.oferta_busqueda_texto import (
+    alternativas_planas,
+    avisos_planos,
+    categoria_es_activa,
+    edificios_comentario,
+    filtrar_excluidas,
+    lineas_opcion,
+    mapa_consultorios_basico,
+    resumen_busqueda,
 )
 from app.pdf.edificios_pdf import numero_unidad_en_edificio
 from app.pdf.estilos import (
@@ -67,27 +63,6 @@ from app.pdf.estilos import (
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.repositorio.registro import obtener_repositorio
 
-_ES_ACTIVO = ("R", "A", "E", "X", "B")
-
-_DETALLE_COLOR = {
-    VERDE: "un solo consultorio cubre {parte} bloque pedido.",
-    AMARILLO: "requiere combinar más de un consultorio, todos dentro de la misma unidad, para cubrir {parte} bloque pedido.",
-    NARANJA: "requiere combinar consultorios de distintas unidades, dentro del mismo edificio, para cubrir {parte} bloque pedido.",
-}
-
-_NOMBRES_CARACTERISTICA = {"apto_camilla": "apto camilla", "ventana": "con ventana", "sillones": "con sillones"}
-
-
-def _categoria_es_activa(profesional: sqlite3.Row) -> bool:
-    return profesional["CategoriaProfesional"] in _ES_ACTIVO
-
-
-def _nombre_completo(profesional: sqlite3.Row) -> str:
-    tratamiento = profesional["Tratamiento"] or ""
-    nombre = profesional["NombrePila"] or ""
-    apellido = profesional["Apellido"]
-    return " ".join(p for p in (tratamiento, nombre, apellido) if p)
-
 
 def _formatear_valor(monto: float, decimales: int) -> str:
     """Sin decimales cuando el valor es redondo (sin centavos), con los
@@ -95,181 +70,39 @@ def _formatear_valor(monto: float, decimales: int) -> str:
     return formatear_moneda(monto, 0 if monto == int(monto) else decimales)
 
 
-def _texto_edificios(conn: sqlite3.Connection, ids_edificio_resultado: set[int]) -> str:
-    """Siempre enumera con dirección — "Av. Rivadavia 13876 (Ramos 1)" —
-    los edificios de la localidad elegida en los que efectivamente se
-    encontró alguna coincidencia (no los que se incluyeron en el alcance
-    de la búsqueda, que pueden ser más): así el profesional tiene de
-    referencia en cuáles hay algo para ofrecer. La localidad ya se aclaró
-    antes, no hace falta repetirla."""
-    if not ids_edificio_resultado:
-        return "—"
-    placeholders = ", ".join("?" for _ in ids_edificio_resultado)
-    filas = conn.execute(
-        f"SELECT Nombre, Domicilio FROM Edificio WHERE IdEdificio IN ({placeholders}) ORDER BY IdEdificio",
-        list(ids_edificio_resultado),
-    ).fetchall()
-    return ", ".join(f"{f['Domicilio']} ({f['Nombre']})" if f["Domicilio"] else f["Nombre"] for f in filas)
-
-
-def _nombres_unidad(conn: sqlite3.Connection, ids_unidad: list[int]) -> list[str]:
-    if not ids_unidad:
-        return []
-    placeholders = ", ".join("?" for _ in ids_unidad)
-    filas = conn.execute(f"SELECT Departamento FROM Unidad WHERE IdUnidad IN ({placeholders})", ids_unidad).fetchall()
-    return [f["Departamento"] for f in filas]
-
-
-def _texto_criterios_globales(conn: sqlite3.Connection, globales: CriteriosGlobales, ids_edificio_resultado: set[int]) -> list:
+def _texto_detalle_busqueda(busquedas: list[Busqueda], tipo_busqueda: str) -> list:
     style = estilo_texto(9)
-    tipo_texto = "Horarios regulares" if globales.tipo_busqueda == "Regular" else "Horas aisladas"
-    nombres_un = _nombres_unidad(conn, globales.ids_unidad) if globales.ids_unidad else []
-    return [
-        Paragraph(f"<b>Tipo de búsqueda:</b> {tipo_texto}", style),
-        Paragraph(f"<b>Localidad:</b> {globales.localidad or '—'}", style),
-        Paragraph(f"<b>Edificios:</b> {_texto_edificios(conn, ids_edificio_resultado)}", style),
-        Paragraph(f"<b>Unidades:</b> {', '.join(nombres_un) or 'todas'}", style),
-        Paragraph(
-            f"<b>Consultorios:</b> {len(globales.ids_consultorio) if globales.ids_consultorio else 'todos'}"
-            + (" seleccionados" if globales.ids_consultorio else ""),
-            style,
-        ),
-    ]
+    return [Paragraph(f"* {resumen_busqueda(b, tipo_busqueda)}", style) for b in busquedas]
 
 
-def _texto_criterios_busqueda(busqueda: Busqueda) -> list:
-    style = estilo_texto(9)
-    story = [
-        Paragraph(f"<b>Fecha inicial:</b> {fecha_larga(busqueda.fecha_desde)}", style),
-        Paragraph(f"<b>Fecha final:</b> {fecha_larga(busqueda.fecha_hasta) if busqueda.fecha_hasta else 'indefinida'}", style),
-        Paragraph(f"<b>Días solicitados:</b> {', '.join(busqueda.dias)}", style),
-    ]
-    desde, hasta = hora_fmt(busqueda.hora_desde)[:-2], hora_fmt(busqueda.hora_hasta)
-    story.append(Paragraph(f"<b>Horario:</b> {desde} a {hasta}", style))
-    texto_cantidad = f"{busqueda.cantidad_horas_minimas:g}hs dentro del rango horario (no hace falta que sea el rango completo)" if busqueda.cantidad_horas_minimas else "todo el rango horario"
-    story.append(Paragraph(f"<b>Cantidad de horas mínimas dentro del rango solicitado:</b> {texto_cantidad}", style))
-    texto_combinar = {
-        "Ninguna": "un solo consultorio, sin combinar",
-        "MismaUnidad": "admite combinar consultorios, sin salir de la misma unidad",
-        "MismoEdificio": "admite combinar consultorios (siempre dentro del mismo edificio)",
-    }.get(busqueda.combinacion, busqueda.combinacion)
-    story.append(Paragraph(f"<b>Combinación de consultorios:</b> {texto_combinar}", style))
-
-    caracteristicas = [
-        etiqueta for clave, etiqueta in _NOMBRES_CARACTERISTICA.items() if getattr(busqueda, clave)
-    ]
-    if busqueda.tamano:
-        caracteristicas.append(f"tamaño {busqueda.tamano.lower()}")
-    story.append(Paragraph(f"<b>Características del consultorio:</b> {', '.join(caracteristicas) or '—'}", style))
-    if busqueda.valor_maximo_hora is not None:
-        story.append(Paragraph(f"<b>Valor máximo por hora regular:</b> {formatear_moneda(busqueda.valor_maximo_hora)}", style))
-    if busqueda.combinacion_con_siguiente:
-        texto = (
-            "tienen que darse las dos búsquedas juntas" if busqueda.combinacion_con_siguiente == "Y"
-            else "alcanza con que se dé alguna de las dos búsquedas"
-        )
-        story.append(Paragraph(f"<b>Combinación con la búsqueda siguiente:</b> {texto}", style))
-    return story
-
-
-def _etiqueta_dia(dia_semana: str, fecha: str | None) -> str:
-    return f"{dia_semana} {fecha_larga(fecha)}" if fecha else dia_semana
-
-
-def _es_cobertura_parcial(busqueda: Busqueda, tramos: list) -> bool:
-    duracion_cubierta = sum(t.hora_fin - t.hora_inicio for t in tramos)
-    return duracion_cubierta < (busqueda.hora_hasta - busqueda.hora_desde)
-
-
-def _texto_tipo_cobertura(busqueda: Busqueda, opcion: Opcion) -> str:
-    parcial = _es_cobertura_parcial(busqueda, opcion.tramos)
-    prefijo = "Cobertura parcial" if parcial else "Cobertura completa"
-    parte = "una parte del" if parcial else "todo el"
-    detalle = _DETALLE_COLOR.get(opcion.color, "").format(parte=parte)
-    return f"{prefijo}: {detalle}"
-
-
-def _detalle_tramo(
-    t, c: sqlite3.Row, mostrar_edificio: bool, mostrar_consultorio: bool, anonimizar: bool, decimales: int,
-) -> str:
-    """Con consultorio (modo normal): "De 9 a 15hs consultorio 2 del 7mo
-    "L" del edificio Ramos 1 - Hora regular $X" (el tramo del edificio se
-    omite si hay uno solo). Sin consultorio (detalle reducido): "De 9 a
-    15hs en la unidad del 7mo "L" - Edificio Ramos 1" (mismo criterio de
-    edificio, sin valor porque no hay un consultorio puntual del que
-    salga)."""
-    rango = f"De {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)}"
-    if mostrar_consultorio:
-        unidad_txt = f"- Unidad {c['IdUnidad']}" if anonimizar else f"del {c['Departamento']}"
-        texto = f"{rango} consultorio {c['NumeroConsultorio']} {unidad_txt}"
-        if mostrar_edificio:
-            texto += f" del edificio {c['NombreEdificio']}"
-        texto += f" - Hora regular {_formatear_valor(c['ValorHoraRegularActual'], decimales)}"
-    else:
-        unidad_txt = f"en la Unidad {c['IdUnidad']}" if anonimizar else f"en la unidad del {c['Departamento']}"
-        texto = f"{rango} {unidad_txt}"
-        if mostrar_edificio:
-            texto += f" - Edificio {c['NombreEdificio']}"
-    return texto
-
-
-def _texto_opcion(opcion: Opcion, consultorios: dict, mostrar_edificio: bool, mostrar_consultorio: bool, anonimizar: bool, decimales: int) -> list:
-    style = estilo_texto(9)
-    if len(opcion.tramos) == 1:
-        t = opcion.tramos[0]
-        c = consultorios.get(t.id_consultorio)
-        if c is None:
-            return []
-        detalle = _detalle_tramo(t, c, mostrar_edificio, mostrar_consultorio, anonimizar, decimales)
-        return [Paragraph(f"* {detalle}", style)]
-    story = [Paragraph("* Combinación de consultorios:", style)]
-    for t in opcion.tramos:
-        c = consultorios.get(t.id_consultorio)
-        if c is None:
-            continue
-        detalle = _detalle_tramo(t, c, mostrar_edificio, mostrar_consultorio, anonimizar, decimales)
-        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;· {detalle}", style))
-    return story
-
-
-def _texto_coincidencias(
-    busqueda: Busqueda, alternativas: list[Alternativa], consultorios: dict, anonimizar: bool, mostrar_edificio: bool,
-    mostrar_consultorio: bool, decimales: int,
+def _texto_alternativas(
+    listas_alternativas: list[list[Alternativa]], consultorios: dict, mostrar_edificio: bool, mostrar_consultorio: bool,
+    anonimizar: bool,
 ) -> list:
     style = estilo_texto(9)
-    style_aviso = estilo_texto(8, italica=True)
-    if not alternativas:
+    planas = alternativas_planas(listas_alternativas)
+    if not planas:
         return [Paragraph("Sin disponibilidad para esta búsqueda con los filtros solicitados.", style)]
 
+    numerar = len(planas) > 1
     story = []
-    for indice, alt in enumerate(alternativas):
+    for indice, (etiqueta, opcion) in enumerate(planas):
         if indice > 0:
-            story.append(Spacer(1, 6))
-        # Cuando hay más de una opción para el mismo día, todas comparten
-        # tipo de cobertura (todas son de un solo consultorio — si hiciera
-        # falta combinar, solo se ofrece UNA opción de respaldo).
-        story.append(Paragraph(f"<i>{_etiqueta_dia(alt.dia_semana, alt.fecha)}: {_texto_tipo_cobertura(busqueda, alt.opciones[0])}</i>", style))
-        for opcion in alt.opciones:
-            story.extend(_texto_opcion(opcion, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar, decimales))
-        for aviso in alt.avisos:
-            story.append(Paragraph(aviso, style_aviso))
+            story.append(Spacer(1, 8))
+        if numerar:
+            story.append(Paragraph(f"<b>Alternativa {indice + 1}</b>", style))
+            story.append(Spacer(1, 2))
+        for linea in lineas_opcion(etiqueta, opcion, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar):
+            story.append(Paragraph(f"* {linea}", style))
     return story
 
 
-def _mapa_consultorios_basico(conn: sqlite3.Connection, ids_consultorio: list[int]) -> dict[int, sqlite3.Row]:
-    if not ids_consultorio:
-        return {}
-    placeholders = ", ".join("?" for _ in ids_consultorio)
-    filas = conn.execute(
-        f"""
-        SELECT c.IdConsultorio, c.NumeroConsultorio, c.ValorHoraRegularActual,
-               u.IdUnidad, u.Departamento, e.IdEdificio, e.Nombre AS NombreEdificio
-        FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
-        WHERE c.IdConsultorio IN ({placeholders})
-        """,
-        ids_consultorio,
-    ).fetchall()
-    return {f["IdConsultorio"]: f for f in filas}
+def _texto_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[int], mostrar_edificio: bool, avisos: list[str]) -> list:
+    style = estilo_texto(9)
+    style_aviso = estilo_texto(8, italica=True)
+    lineas = [Paragraph(f"* {t}", style) for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
+    lineas += [Paragraph(f"* {aviso}", style_aviso) for aviso in avisos]
+    return lineas
 
 
 def _consultorios_ordenados(conn: sqlite3.Connection, consultorios: dict, anonimizar: bool) -> list[sqlite3.Row]:
@@ -288,8 +121,7 @@ def _consultorios_ordenados(conn: sqlite3.Connection, consultorios: dict, anonim
 
 def _pie_foto(imagen: sqlite3.Row, mostrar_edificio: bool, anonimizar: bool, decimales: int) -> str:
     """Edificio (si hay más de uno) - Unidad - Consultorio - Hora regular
-    $Valor — ni apto camilla ni el valor se repiten en ningún otro lado, ese
-    detalle ya se desprende de "Criterios de búsqueda seleccionados"."""
+    $Valor — el único lugar del documento donde se muestra el valor."""
     unidad = f"Unidad {imagen['IdUnidadConsultorio']}" if anonimizar else f"Unidad {imagen['Departamento']}"
     partes = ([f"Edificio {imagen['NombreEdificio']}"] if mostrar_edificio else []) + [unidad, f"Consultorio {imagen['NumeroConsultorio']}"]
     return f"{' - '.join(partes)} - Hora regular {_formatear_valor(imagen['ValorHoraRegularActual'], decimales)}"
@@ -328,19 +160,6 @@ def _bloque_consultorios_intervinientes(
     return story
 
 
-def _filtrar_excluidas(alternativas: list[Alternativa], indice_busqueda: int, excluir: set[tuple[int, int, int]]) -> list[Alternativa]:
-    """Deja afuera opciones puntuales marcadas en `excluir` (índice de
-    búsqueda, índice de alternativa/día, índice de opción dentro de ese
-    día) — si un día se queda sin ninguna opción, el día entero desaparece
-    del documento (equivale a no haber encontrado nada ese día)."""
-    resultado = []
-    for i_alt, alt in enumerate(alternativas):
-        opciones = [op for i_op, op in enumerate(alt.opciones) if (indice_busqueda, i_alt, i_op) not in excluir]
-        if opciones:
-            resultado.append(Alternativa(dia_semana=alt.dia_semana, fecha=alt.fecha, opciones=opciones, avisos=alt.avisos))
-    return resultado
-
-
 def generar_pdf_oferta_busqueda(
     conn: sqlite3.Connection, directorio: str, id_profesional: int, globales: CriteriosGlobales,
     busquedas: list[Busqueda], excluir: set[tuple[int, int, int]] | None = None,
@@ -363,55 +182,56 @@ def generar_pdf_oferta_busqueda(
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None:
         raise ValueError(f"No existe el profesional #{id_profesional}")
-    anonimizar = not _categoria_es_activa(profesional)
+    anonimizar = not categoria_es_activa(profesional)
     decimales = decimales_configurados(conn)
 
     listas_alternativas = [
-        _filtrar_excluidas(resolver_busqueda(conn, globales, b).alternativas, i, excluir)
+        filtrar_excluidas(resolver_busqueda(conn, globales, b).alternativas, i, excluir)
         for i, b in enumerate(busquedas)
     ]
     ids_consultorio = sorted({
         t.id_consultorio for alts in listas_alternativas for alt in alts for op in alt.opciones for t in op.tramos
     })
-    consultorios = _mapa_consultorios_basico(conn, ids_consultorio)
+    consultorios = mapa_consultorios_basico(conn, ids_consultorio)
     imagenes = imagenes_de_consultorios(conn, ids_consultorio)
     ids_edificio_resultado = {c["IdEdificio"] for c in consultorios.values()}
     mostrar_edificio = len(ids_edificio_resultado) > 1
     mostrar_consultorio = not globales.detalle_reducido
+    avisos = avisos_planos(listas_alternativas)
 
     altura = (
-        6 * cm + 3 * cm + len(busquedas) * 6 * cm + len(ids_consultorio) * 2 * 0.5 * cm
-        + (len(imagenes) // 2 + 1) * 7 * cm + 3 * cm
+        6 * cm + 3 * cm + len(busquedas) * 1 * cm + len(ids_consultorio) * 2 * 1.2 * cm
+        + (len(imagenes) // 2 + 1) * 7 * cm + 4 * cm
     ) * 1.2
 
     def _construir_story(ancho: float) -> list:
         story = list(encabezado_espacio(conn, ancho))
 
-        story.append(encabezado(1, f"Búsqueda solicitada por {_nombre_completo(profesional)}", ancho))
+        story.append(encabezado(1, "Búsqueda requerida por el profesional", ancho))
         story.append(Spacer(1, 8))
-        story.append(encabezado(2, "Criterios de búsqueda generales", ancho))
+        story.append(encabezado(2, "Detalle de la búsqueda", ancho))
         story.append(Spacer(1, 6))
-        story.extend(_texto_criterios_globales(conn, globales, ids_edificio_resultado))
+        story.extend(_texto_detalle_busqueda(busquedas, globales.tipo_busqueda))
         story.append(Spacer(1, 10))
 
-        for i, (busqueda, alternativas) in enumerate(zip(busquedas, listas_alternativas)):
-            story.append(encabezado(2, f"Búsqueda {i + 1}", ancho))
+        story.append(encabezado(2, "Listado de alternativas encontradas", ancho))
+        story.append(Spacer(1, 6))
+        story.extend(_texto_alternativas(listas_alternativas, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar))
+        story.append(Spacer(1, 10))
+
+        comentario = _texto_comentario(conn, ids_edificio_resultado, mostrar_edificio, avisos)
+        if comentario:
+            story.append(encabezado(2, "Comentario", ancho))
             story.append(Spacer(1, 6))
-            story.append(encabezado(3, "Criterios de búsqueda seleccionados", ancho))
-            story.append(Spacer(1, 4))
-            story.extend(_texto_criterios_busqueda(busqueda))
-            story.append(Spacer(1, 6))
-            story.append(encabezado(3, "Coincidencias de la búsqueda", ancho))
-            story.append(Spacer(1, 4))
-            story.extend(_texto_coincidencias(busqueda, alternativas, consultorios, anonimizar, mostrar_edificio, mostrar_consultorio, decimales))
+            story.extend(comentario)
             story.append(Spacer(1, 10))
 
         # Con detalle reducido no se identifica qué consultorio puntual se
-        # ofrece (ver `Busqueda`/`_detalle_tramo`) — una foto es, en los
+        # ofrece (ver `Busqueda`/`detalle_tramo`) — una foto es, en los
         # hechos, el consultorio mostrado sin ambigüedad, así que esta
         # sección completa no tiene sentido en ese modo.
         if not globales.detalle_reducido:
-            story.append(encabezado(2, "Fotos de los consultorios que intervienen en las búsquedas", ancho))
+            story.append(encabezado(2, "Fotos de los consultorios ofrecidos", ancho))
             story.append(Spacer(1, 8))
             story.extend(_bloque_consultorios_intervinientes(conn, consultorios, imagenes, anonimizar, mostrar_edificio, ancho, decimales))
         return story
