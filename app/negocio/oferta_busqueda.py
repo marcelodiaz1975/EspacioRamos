@@ -208,15 +208,37 @@ def _candidatos_por_edificio(candidatos: list[sqlite3.Row]) -> dict[int, dict[in
     return por_edificio
 
 
-def _elegir_consultorio(libres_ids: list[int], candidatos_por_id: dict, actual_id: int | None) -> int:
+def _duracion_libre(id_consultorio: int, indice_hora: int, horas: list[int], libres_por_hora: dict) -> int:
+    """Cantidad de horas consecutivas, arrancando en horas[indice_hora], en
+    que id_consultorio sigue libre — para preferir, al elegir entre varios
+    candidatos, el que evita el próximo cambio más lejos en el tiempo (menos
+    tramos, combinación más simple de leer)."""
+    cuenta = 0
+    for h in horas[indice_hora:]:
+        if id_consultorio not in libres_por_hora[h]:
+            break
+        cuenta += 1
+    return cuenta
+
+
+def _elegir_consultorio(
+    libres_ids: list[int], candidatos_por_id: dict, actual_id: int | None,
+    indice_hora: int, horas: list[int], libres_por_hora: dict,
+) -> int:
     if actual_id in libres_ids:
         return actual_id
+
+    def clave(i: int) -> tuple[int, int]:
+        # A igual duración libre restante, desempata por menor id (elección
+        # estable y predecible).
+        return (_duracion_libre(i, indice_hora, horas, libres_por_hora), -i)
+
     actual = candidatos_por_id.get(actual_id) if actual_id is not None else None
     if actual is not None:
         misma_unidad = [i for i in libres_ids if candidatos_por_id[i]["IdUnidad"] == actual["IdUnidad"]]
         if misma_unidad:
-            return misma_unidad[0]
-    return libres_ids[0]
+            return max(misma_unidad, key=clave)
+    return max(libres_ids, key=clave)
 
 
 def _libres_por_hora(candidatos_por_id: dict, horas: list[int], ocupado_lookup) -> dict[int, list[int]] | None:
@@ -242,13 +264,13 @@ def _combinacion_subrango(candidatos_por_id: dict, horas: list[int], libres_por_
     tramos: list[TramoCobertura] = []
     actual_id: int | None = None
     inicio_tramo = horas[0]
-    for h in horas:
+    for indice_hora, h in enumerate(horas):
         libres = libres_por_hora[h]
         if combinacion == COMBINAR_MISMA_UNIDAD and unidad_fija is not None:
             libres = [i for i in libres if candidatos_por_id[i]["IdUnidad"] == unidad_fija]
             if not libres:
                 return None
-        elegido = _elegir_consultorio(libres, candidatos_por_id, actual_id)
+        elegido = _elegir_consultorio(libres, candidatos_por_id, actual_id, indice_hora, horas, libres_por_hora)
         if combinacion == COMBINAR_MISMA_UNIDAD and unidad_fija is None:
             unidad_fija = candidatos_por_id[elegido]["IdUnidad"]
         if actual_id is not None and elegido != actual_id:

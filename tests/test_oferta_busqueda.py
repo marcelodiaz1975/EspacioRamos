@@ -324,3 +324,38 @@ def test_ofrece_opcion_verde_y_combinada_juntas(conn):
     opcion_combinada = next(op for op in alt.opciones if op.color == AMARILLO)
     ids_combinados = {t.id_consultorio for t in opcion_combinada.tramos}
     assert ids_combinados == {id_c2, id_c4}
+
+
+def test_combinacion_prefiere_el_tramo_mas_largo_para_no_fragmentar(conn):
+    """Reporte real: al elegir con qué consultorio arrancar la combinación,
+    el barrido no debe quedarse con el primero que esté libre (menor id) si
+    hay otro que sigue libre más tiempo — si no, arma una combinación de más
+    tramos y cruzando unidades sin necesidad, en vez de la más simple
+    posible (acá: 2 tramos, ambos en la misma unidad)."""
+    id_edificio = _crear_edificio(conn)
+
+    id_unidad_decoy = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_c_decoy = _crear_consultorio(conn, id_unidad_decoy, 1)  # id más bajo, libre solo la 1ra hora
+
+    id_unidad_combi = _crear_unidad(conn, id_edificio, 'EP "K"')
+    id_c4 = _crear_consultorio(conn, id_unidad_combi, 4)
+    id_c2 = _crear_consultorio(conn, id_unidad_combi, 2)
+
+    _ocupar_regular(conn, id_c_decoy, "Viernes", 14, 18)  # libre solo 13-14
+    _ocupar_regular(conn, id_c4, "Viernes", 16, 18)  # libre 13-16
+    _ocupar_regular(conn, id_c2, "Viernes", 13, 16)  # libre 16-18
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Viernes"], hora_desde=13, hora_hasta=18,
+        combinacion=COMBINAR_MISMO_EDIFICIO,
+    )
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    alt = resultado.alternativas[0]
+    assert len(alt.opciones) == 1
+    opcion = alt.opciones[0]
+    assert opcion.color == AMARILLO
+    assert len(opcion.tramos) == 2
+    tramos_por_id = {t.id_consultorio: (t.hora_inicio, t.hora_fin) for t in opcion.tramos}
+    assert tramos_por_id == {id_c4: (13, 16), id_c2: (16, 18)}
