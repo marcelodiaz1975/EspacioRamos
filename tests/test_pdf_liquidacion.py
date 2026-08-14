@@ -52,7 +52,7 @@ def profesional(conn, consultorio):
 
 def test_nombre_archivo_sigue_el_formato_del_documento(conn, profesional):
     prof = obtener_repositorio(conn, "Profesional").obtener(profesional)
-    assert _nombre_archivo("2026-08", prof) == "2026-08 - Lic. Marcela Lo Veci - Liquidación mensual.pdf"
+    assert _nombre_archivo("2026-08", prof) == "2026-08 - Liquidación Lic. Marcela Lo Veci.pdf"
 
 
 def test_items_cuenta_respeta_el_orden_de_dc01(conn, profesional):

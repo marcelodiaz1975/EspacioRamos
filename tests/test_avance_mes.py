@@ -124,3 +124,44 @@ def test_avanzar_mes_pasa_porcentaje_aumento_al_snapshot(conn):
     resumen = avanzar_mes(conn, periodo_cerrado="2026-08", porcentaje_aumento_aplicado=12.5)
     snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(resumen.id_snapshot)
     assert snapshot["PorcentajeAumentoAplicado"] == pytest.approx(12.5)
+
+
+def test_avanzar_mes_sin_carpeta_base_no_regenera_archivos(conn):
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+    assert resumen.archivos_varios_regenerados is False
+    assert resumen.liquidaciones_antiguas_eliminadas == 0
+
+
+def test_avanzar_mes_regenera_archivos_varios_y_limpia_liquidaciones_antiguas(conn, tmp_path):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, CarpetaBaseArchivos=str(tmp_path))
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_prof = _crear_profesional(conn)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, IdCodigo="R1")
+
+    from app.negocio.archivos_generados import carpeta_archivos_varios, carpeta_profesional
+    (carpeta_profesional(conn, "R1") / "2020-01 - Liquidación Vieja.pdf").write_text("x")
+    (carpeta_archivos_varios(conn, "Oferta") / "Oferta de consultorios - Vieja.pdf").write_text("x")
+
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+
+    assert resumen.archivos_varios_regenerados is True
+    assert resumen.liquidaciones_antiguas_eliminadas == 1
+    assert not (carpeta_profesional(conn, "R1") / "2020-01 - Liquidación Vieja.pdf").exists()
+    assert list(carpeta_archivos_varios(conn, "Oferta").iterdir()) == []
+    assert any((tmp_path / "Archivos varios" / "Propuesta").iterdir())
+    assert any((tmp_path / "Archivos varios" / "Disponibilidad").iterdir())
+
+
+def test_avanzar_mes_vacia_historial_de_oferta(conn):
+    from app.negocio.oferta_busqueda import Busqueda, CriteriosGlobales
+    from app.negocio.historial_oferta import guardar_busqueda
+
+    id_prof = _crear_profesional(conn)
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[])
+    busqueda = Busqueda(fecha_desde="2026-09-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11)
+    guardar_busqueda(conn, id_prof, globales, [busqueda], set(), "2026-08-01")
+
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+
+    assert resumen.historial_oferta_eliminado == 1
+    assert obtener_repositorio(conn, "HistorialOferta").listar() == []

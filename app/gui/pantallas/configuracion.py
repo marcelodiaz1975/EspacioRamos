@@ -30,6 +30,7 @@ _CAMPOS_TEXTO = [
     ("FrecuenciaBackupDrive", "Frecuencia de backup a Drive"),
     ("FechaFicticia", "Fecha ficticia (AAAA-MM-DD)"),
     ("RutaLogo", "Ruta del archivo de logo (PNG/JPG)"),
+    ("CarpetaBaseArchivos", "Carpeta base de archivos generados"),
 ]
 _CAMPOS_NUMERICOS = [
     ("HoraInicioGrilla", "Hora inicio de grilla"),

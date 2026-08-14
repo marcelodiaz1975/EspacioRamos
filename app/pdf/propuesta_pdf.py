@@ -258,7 +258,7 @@ def generar_pdf_propuesta(
     edificios = edificios_incluidos(conn, ids_edificio)
     multi = len(edificios) > 1
     sufijo = sufijo_localidad(conn, edificios)
-    nombre_archivo = f"{nombre_espacio} - Propuesta al profesional{sufijo}.pdf"
+    nombre_archivo = f"Propuesta {nombre_espacio} Consultorios{sufijo}.pdf"
 
     ids_edificio_incluidos = [e["IdEdificio"] for e in edificios]
     ids_consultorio = ids_consultorio_de_edificios(conn, ids_edificio_incluidos)

@@ -39,7 +39,7 @@ def test_genera_pdf_valido(conn, edificio_con_consultorio, tmp_path):
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="C", Apellido="Lo Veci", NombrePila="Virginia", Tratamiento="Lic.")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
     ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
-    assert ruta.endswith("Oferta consultorios.pdf")
+    assert ruta.endswith("Oferta de consultorios - Espacio Ramos.pdf")
     with open(ruta, "rb") as f:
         assert f.read().startswith(b"%PDF")
 

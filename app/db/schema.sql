@@ -481,6 +481,17 @@ CREATE TABLE IF NOT EXISTS DetalleComplementarioPropuesta (
     Activo INTEGER NOT NULL DEFAULT 1
 );
 
+-- 3.31 HistorialOferta (Etapa 9: historial de búsquedas de Oferta de consultorios) -----------
+-- Guarda los criterios completos de cada búsqueda armada (no una foto congelada del
+-- resultado): al regenerar el PDF o el texto se vuelve a resolver contra la
+-- disponibilidad vigente en ese momento, igual que si se armara de nuevo.
+CREATE TABLE IF NOT EXISTS HistorialOferta (
+    IdHistorialOferta INTEGER PRIMARY KEY AUTOINCREMENT,
+    IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional),
+    FechaGeneracion TEXT NOT NULL,
+    CriteriosJSON TEXT NOT NULL
+);
+
 -- 3.28 Configuracion (tabla de una sola fila, IdConfiguracion siempre = 1) -------------------
 CREATE TABLE IF NOT EXISTS Configuracion (
     IdConfiguracion INTEGER PRIMARY KEY CHECK (IdConfiguracion = 1),
@@ -511,5 +522,6 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     FechaFicticia TEXT,
     MensajesPlural INTEGER NOT NULL DEFAULT 1,
     CantidadDecimales INTEGER NOT NULL DEFAULT 2,
-    RutaLogo TEXT
+    RutaLogo TEXT,
+    CarpetaBaseArchivos TEXT
 );

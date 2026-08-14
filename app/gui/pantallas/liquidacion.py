@@ -1,8 +1,8 @@
 """Proceso de liquidación mensual (F22, sección 4.1): calcula la vista
 previa de la liquidación de cada profesional categoría R para el período,
 permite emitirlas (persistir en LiquidacionEmitida + acreditar a
-SaldoCuentaActual, DC-09 §2) y generar el PDF de cada una en la carpeta
-elegida."""
+SaldoCuentaActual, DC-09 §2) y generar el PDF de cada una en
+Profesionales/{código} del profesional correspondiente."""
 from __future__ import annotations
 
 import os
@@ -10,7 +10,6 @@ import sqlite3
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -23,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion
 from app.negocio.mensajes import nombre_para_mensaje
@@ -36,7 +36,6 @@ class ProcesoLiquidacion(QWidget):
         self.conn = conn
         self._profesionales: list[sqlite3.Row] = []
         self._casillas: list[QCheckBox] = []
-        self._directorio_pdfs = ""
         self._armar_ui()
         self.actualizar()
 
@@ -57,15 +56,8 @@ class ProcesoLiquidacion(QWidget):
         boton_calcular.clicked.connect(self.actualizar)
         fila_filtros.addWidget(boton_calcular)
 
-        boton_carpeta = QPushButton("Elegir carpeta de destino…")
-        boton_carpeta.clicked.connect(self._elegir_carpeta)
-        fila_filtros.addWidget(boton_carpeta)
         fila_filtros.addStretch()
         layout.addLayout(fila_filtros)
-
-        self.etiqueta_carpeta = QLabel("Carpeta de destino: (sin elegir)")
-        self.etiqueta_carpeta.setObjectName("subtitulo")
-        layout.addWidget(self.etiqueta_carpeta)
 
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(5)
@@ -82,12 +74,6 @@ class ProcesoLiquidacion(QWidget):
         layout.addWidget(boton_emitir)
 
         self.campo_periodo.setText(periodo_actual(self.conn))
-
-    def _elegir_carpeta(self) -> None:
-        carpeta = QFileDialog.getExistingDirectory(self, "Elegir carpeta de destino para los PDF")
-        if carpeta:
-            self._directorio_pdfs = carpeta
-            self.etiqueta_carpeta.setText(f"Carpeta de destino: {carpeta}")
 
     def _periodo(self) -> str:
         return self.campo_periodo.text().strip() or periodo_actual(self.conn)
@@ -126,8 +112,10 @@ class ProcesoLiquidacion(QWidget):
 
     def _emitir_seleccionadas(self) -> None:
         periodo = self._periodo()
-        if not self._directorio_pdfs:
-            QMessageBox.warning(self, "Emitir liquidaciones", "Elegí primero una carpeta de destino para los PDF.")
+        if carpeta_base(self.conn) is None:
+            QMessageBox.warning(
+                self, "Emitir liquidaciones", "Configurá primero la carpeta base de archivos en Configuración general.",
+            )
             return
         seleccionados = [p for p, casilla in zip(self._profesionales, self._casillas) if casilla.isChecked()]
         if not seleccionados:
@@ -149,7 +137,8 @@ class ProcesoLiquidacion(QWidget):
                     self.conn, id_profesional=profesional["IdProfesional"], periodo=periodo,
                     fecha_emision=fecha_actual(self.conn).isoformat(),
                 )
-                ruta = generar_pdf_liquidacion(self.conn, liquidacion, self._directorio_pdfs)
+                directorio = str(carpeta_profesional(self.conn, profesional["IdCodigo"]))
+                ruta = generar_pdf_liquidacion(self.conn, liquidacion, directorio)
                 obtener_repositorio(self.conn, "LiquidacionEmitida").actualizar(
                     id_liquidacion, NombreArchivo=os.path.basename(ruta)
                 )

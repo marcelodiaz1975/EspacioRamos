@@ -44,12 +44,16 @@ class Campo:
 
 
 class PantallaCRUD(QWidget):
-    def __init__(self, conn: sqlite3.Connection, tabla: str, titulo: str, campos: list[Campo], parent=None):
+    def __init__(
+        self, conn: sqlite3.Connection, tabla: str, titulo: str, campos: list[Campo], parent=None,
+        al_actualizar: Callable[[sqlite3.Row, dict], None] | None = None,
+    ):
         super().__init__(parent)
         self.conn = conn
         self.tabla = tabla
         self.campos = campos
         self.repositorio = obtener_repositorio(conn, tabla)
+        self.al_actualizar = al_actualizar
         self._armar_ui(titulo)
         self.actualizar()
 
@@ -125,7 +129,10 @@ class PantallaCRUD(QWidget):
         registro = self.repositorio.obtener(id_valor)
         dialogo = _DialogoRegistro(self.conn, self.campos, "Editar registro", registro=registro)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
-            self.repositorio.actualizar(id_valor, **dialogo.valores())
+            valores = dialogo.valores()
+            self.repositorio.actualizar(id_valor, **valores)
+            if self.al_actualizar:
+                self.al_actualizar(registro, valores)
             self.actualizar()
 
     def _eliminar(self) -> None:

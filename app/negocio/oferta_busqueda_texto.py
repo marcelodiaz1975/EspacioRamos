@@ -35,6 +35,21 @@ def categoria_es_activa(profesional: sqlite3.Row) -> bool:
     return profesional["CategoriaProfesional"] in _ES_ACTIVO
 
 
+def nombre_archivo_oferta(conn: sqlite3.Connection, profesional: sqlite3.Row) -> str:
+    """"Oferta de consultorios - {Tratamiento} {Nombre} {Apellido}.pdf"
+    para categorías activas; genérico con el nombre del espacio para
+    categoría C, igual que la anonimización del contenido del documento."""
+    if categoria_es_activa(profesional):
+        tratamiento = profesional["Tratamiento"] or ""
+        nombre = profesional["NombrePila"] or ""
+        apellido = profesional["Apellido"]
+        partes = " ".join(p for p in (tratamiento, nombre, apellido) if p)
+        return f"Oferta de consultorios - {partes}.pdf"
+    cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos"
+    return f"Oferta de consultorios - {nombre_espacio}.pdf"
+
+
 def filtrar_excluidas(alternativas: list[Alternativa], indice_busqueda: int, excluir: set[tuple[int, int, int]]) -> list[Alternativa]:
     """Deja afuera opciones puntuales marcadas en `excluir` (índice de
     búsqueda, índice de alternativa/día, índice de opción dentro de ese

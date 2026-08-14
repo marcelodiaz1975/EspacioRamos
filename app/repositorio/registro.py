@@ -42,6 +42,7 @@ TABLAS = [
     "Configuracion",
     "CondicionNorma",
     "DetalleComplementarioPropuesta",
+    "HistorialOferta",
 ]
 
 

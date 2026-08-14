@@ -31,8 +31,19 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field
 
+from app.negocio.archivos_generados import (
+    SUBCARPETA_DISPONIBILIDAD,
+    SUBCARPETA_OFERTA,
+    SUBCARPETA_PROPUESTA,
+    carpeta_archivos_varios,
+    carpeta_base,
+    carpeta_profesional,
+    limpiar_liquidaciones_antiguas,
+    vaciar_carpeta,
+)
 from app.negocio.dias import fecha_actual
 from app.negocio.estadisticas import generar_snapshot
+from app.negocio.historial_oferta import vaciar_historial
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -45,6 +56,10 @@ class ResumenAvanceMes:
     planes_finalizados: list[int] = field(default_factory=list)
     pedidos_lista_espera_eliminados: int = 0
     pedidos_activos_vencidos_eliminados: int = 0
+    archivos_varios_regenerados: bool = False
+    liquidaciones_antiguas_eliminadas: int = 0
+    ofertas_eliminadas: int = 0
+    historial_oferta_eliminado: int = 0
 
 
 def _traspasar_saldos(conn: sqlite3.Connection) -> int:
@@ -115,6 +130,35 @@ def _limpiar_lista_espera(conn: sqlite3.Connection, *, eliminar_activos_vencidos
     return len(cerrados), vencidos_eliminados
 
 
+def _regenerar_archivos_varios(conn: sqlite3.Connection) -> bool:
+    """Paso 9 (Etapa 9): Propuesta y Disponibilidad se regeneran contra el
+    estado del mes que arranca y quedan listas en Archivos varios; la
+    carpeta de Oferta se vacía entera (esas búsquedas ya no aplican al mes
+    nuevo). Si todavía no se configuró la carpeta base, se salta sin
+    romper el resto del avance de mes — el operador la configura cuando
+    quiera empezar a usar esta parte."""
+    if carpeta_base(conn) is None:
+        return False
+    from app.pdf.disponibilidad_pdf import generar_pdfs_disponibilidad_por_localidad
+    from app.pdf.propuesta_pdf import generar_pdfs_propuesta_por_localidad
+
+    generar_pdfs_propuesta_por_localidad(conn, str(carpeta_archivos_varios(conn, SUBCARPETA_PROPUESTA)))
+    generar_pdfs_disponibilidad_por_localidad(conn, str(carpeta_archivos_varios(conn, SUBCARPETA_DISPONIBILIDAD)))
+    return True
+
+
+def _limpiar_liquidaciones_antiguas_todos(conn: sqlite3.Connection, hoy) -> int:
+    if carpeta_base(conn) is None:
+        return 0
+    repo = obtener_repositorio(conn, "Profesional")
+    total = 0
+    for p in repo.listar():
+        if not p["IdCodigo"]:
+            continue
+        total += limpiar_liquidaciones_antiguas(carpeta_profesional(conn, p["IdCodigo"]), hoy)
+    return total
+
+
 def avanzar_mes(
     conn: sqlite3.Connection, *, periodo_cerrado: str, eliminar_activos_vencidos_lista_espera: bool = False,
     porcentaje_aumento_aplicado: float | None = None,
@@ -133,4 +177,10 @@ def avanzar_mes(
     resumen.pedidos_lista_espera_eliminados, resumen.pedidos_activos_vencidos_eliminados = _limpiar_lista_espera(
         conn, eliminar_activos_vencidos=eliminar_activos_vencidos_lista_espera,
     )
+
+    resumen.archivos_varios_regenerados = _regenerar_archivos_varios(conn)
+    resumen.liquidaciones_antiguas_eliminadas = _limpiar_liquidaciones_antiguas_todos(conn, fecha_actual(conn))
+    if carpeta_base(conn) is not None:
+        resumen.ofertas_eliminadas = vaciar_carpeta(carpeta_archivos_varios(conn, SUBCARPETA_OFERTA))
+    resumen.historial_oferta_eliminado = vaciar_historial(conn)
     return resumen

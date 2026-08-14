@@ -74,7 +74,10 @@ def generar_pdf_disponibilidad(conn: sqlite3.Connection, directorio: str, ids_ed
     sufijo = sufijo_localidad(conn, edificios)
     fecha_hoy = fecha_actual(conn)
     fecha_titulo = fecha_larga(fecha_hoy.isoformat()).replace("/", "-")
-    nombre_archivo = f"{nombre_espacio} - Disponibilidad al {fecha_titulo}{sufijo}.pdf"
+    # Nombre fijo (sin la fecha): se sobrescribe en cada regeneración, no
+    # se acumula un archivo por día — la fecha sigue en el título dentro
+    # del documento.
+    nombre_archivo = f"Disponibilidad {nombre_espacio} Consultorios{sufijo}.pdf"
 
     anio, mes = parsear_periodo(periodo_actual(conn))
 

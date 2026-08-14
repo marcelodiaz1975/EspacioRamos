@@ -32,7 +32,7 @@ def edificio_con_consultorio_y_foto(conn):
 
 def test_genera_pdf_valido(conn, edificio_con_consultorio_y_foto, tmp_path):
     ruta = generar_pdf_propuesta(conn, str(tmp_path))
-    assert ruta.endswith("Propuesta al profesional.pdf")
+    assert ruta.endswith("Propuesta Espacio Ramos Consultorios.pdf")
     with open(ruta, "rb") as f:
         assert f.read().startswith(b"%PDF")
 

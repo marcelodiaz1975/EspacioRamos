@@ -7,8 +7,11 @@ PDF o como texto para portapapeles/WhatsApp (mismo motor de búsqueda y
 mismo armado de texto — ver `app.negocio.oferta_busqueda_texto` — con
 formato de WhatsApp en `app.negocio.oferta_busqueda_whatsapp`).
 
-Nombre de archivo fijo "Oferta consultorios.pdf": siempre se sobrescribe,
-sin historial de versiones.
+Nombre de archivo "Oferta de consultorios - {Tratamiento} {Nombre}
+{Apellido}.pdf" (o "- {NombreEspacio}.pdf" si es categoría C, ver
+`app.negocio.oferta_busqueda_texto.nombre_archivo_oferta`): al ser el
+mismo profesional siempre sobrescribe el anterior, el historial de
+búsquedas hechas se guarda aparte (`HistorialOferta`), no como archivos.
 
 Anonimización: depende de la categoría del profesional al que va dirigida
 la búsqueda — R/A/E/X/B muestran el departamento real (piso y letra), C
@@ -50,6 +53,7 @@ from app.negocio.oferta_busqueda_texto import (
     filtrar_excluidas,
     lineas_opcion,
     mapa_consultorios_basico,
+    nombre_archivo_oferta,
     resumen_busqueda,
 )
 from app.negocio.formato import decimales_configurados, formatear_valor
@@ -157,9 +161,8 @@ def generar_pdf_oferta_busqueda(
     conn: sqlite3.Connection, directorio: str, id_profesional: int, globales: CriteriosGlobales,
     busquedas: list[Busqueda], excluir: set[tuple[int, int, int]] | None = None,
 ) -> str:
-    """Genera "Oferta consultorios.pdf" a partir de una búsqueda ad-hoc (no
-    se persiste nada — a diferencia de Lista de espera) y devuelve la ruta
-    completa. `busquedas` es la lista de franjas de la búsqueda global,
+    """Genera el PDF de Oferta de consultorios a partir de una búsqueda
+    ad-hoc y devuelve la ruta completa. `busquedas` es la lista de franjas de la búsqueda global,
     todas del mismo `globales.tipo_busqueda`.
 
     `excluir` — tripletas (índice de búsqueda, índice de alternativa/día,
@@ -227,6 +230,6 @@ def generar_pdf_oferta_busqueda(
             story.extend(_bloque_consultorios_intervinientes(conn, consultorios, imagenes, anonimizar, mostrar_edificio, ancho, decimales))
         return story
 
-    ruta = os.path.join(directorio, "Oferta consultorios.pdf")
+    ruta = os.path.join(directorio, nombre_archivo_oferta(conn, profesional))
     construir_sin_saltos(ruta, _construir_story, altura)
     return ruta

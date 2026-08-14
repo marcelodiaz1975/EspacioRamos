@@ -41,8 +41,8 @@ def test_calcula_monto_a_generar_sin_reservas(qtbot, conn):
     assert pantalla.tabla.item(0, 4).text() == "Sin emitir"
 
 
-def test_emitir_sin_carpeta_no_falla_ni_emite(qtbot, conn):
-    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Gómez')")
+def test_emitir_sin_carpeta_base_no_falla_ni_emite(qtbot, conn):
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido, IdCodigo) VALUES ('R', 'Gómez', 'R1')")
     conn.commit()
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
@@ -51,11 +51,11 @@ def test_emitir_sin_carpeta_no_falla_ni_emite(qtbot, conn):
 
 
 def test_emitir_seleccionadas_persiste_liquidacion_y_genera_pdf(qtbot, conn, tmp_path):
-    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Gómez')")
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido, IdCodigo) VALUES ('R', 'Gómez', 'R1')")
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
-    pantalla._directorio_pdfs = str(tmp_path)
 
     pantalla._emitir_seleccionadas()
 
@@ -63,15 +63,15 @@ def test_emitir_seleccionadas_persiste_liquidacion_y_genera_pdf(qtbot, conn, tmp
     assert fila is not None
     assert fila["Periodo"] == periodo_actual(conn)
     assert fila["NombreArchivo"] is not None
-    assert (tmp_path / fila["NombreArchivo"]).exists()
+    assert (tmp_path / "Profesionales" / "R1" / fila["NombreArchivo"]).exists()
 
 
 def test_emitir_sin_seleccionados_no_emite(qtbot, conn, tmp_path):
-    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Gómez')")
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido, IdCodigo) VALUES ('R', 'Gómez', 'R1')")
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
-    pantalla._directorio_pdfs = str(tmp_path)
     pantalla._casillas[0].setChecked(False)
 
     pantalla._emitir_seleccionadas()

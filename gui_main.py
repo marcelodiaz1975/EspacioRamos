@@ -9,6 +9,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
+from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
 from app.gui.pantallas.aumentos import PantallaAumentos
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
@@ -19,6 +20,7 @@ from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.pantallas.llaves import PantallaLlaves
 from app.gui.pantallas.mensajeria import CentroMensajeria
 from app.gui.pantallas.novedades import PantallaNovedades
+from app.gui.pantallas.oferta import PantallaOferta
 from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.pantallas.panel_control import PanelControl
 from app.gui.pantallas.profesionales import pantalla_profesionales
@@ -34,6 +36,8 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Centro de mensajería", lambda conn: CentroMensajeria(conn), categoria="Principal"),
         Seccion("Llaves", lambda conn: PantallaLlaves(conn), categoria="Principal"),
         Seccion("Lista de espera", lambda conn: PantallaListaEspera(conn), categoria="Principal"),
+        Seccion("Oferta de consultorios", lambda conn: PantallaOferta(conn), categoria="Principal"),
+        Seccion("Archivos varios", lambda conn: PantallaArchivosVarios(conn), categoria="Principal"),
         Seccion("Novedades", lambda conn: PantallaNovedades(conn), categoria="Principal"),
         Seccion("Pagos", lambda conn: PantallaPagos(conn), categoria="Principal"),
         Seccion("Estadísticas", lambda conn: PantallaEstadisticas(conn), categoria="Principal"),
