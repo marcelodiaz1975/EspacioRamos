@@ -74,7 +74,7 @@ def test_criterios_generales_muestra_las_5_lineas_con_defaults(conn, edificio_co
     texto = fitz.open(ruta)[0].get_text()
     assert "Tipo de búsqueda:" in texto
     assert "Localidad:" in texto
-    assert "Edificios:" in texto
+    assert "Edificios: todos" in texto  # un solo edificio en todo el sistema: cubre toda la localidad
     assert "Unidades: todas" in texto
     assert "Consultorios: todos" in texto
 
@@ -211,7 +211,7 @@ def test_excluir_omite_alternativas_puntuales(conn, edificio_con_consultorio, tm
     busqueda = _busqueda_simple(dias=("Lunes", "Martes"))
 
     ruta = generar_pdf_oferta_busqueda(
-        conn, str(tmp_path), id_prof, globales, [busqueda], excluir={(0, 0)},
+        conn, str(tmp_path), id_prof, globales, [busqueda], excluir={(0, 0, 0)},
     )
     texto = fitz.open(ruta)[0].get_text()
     assert "Lunes: Cobertura" not in texto
@@ -227,10 +227,13 @@ def test_categoria_x_no_se_anonimiza(conn, edificio_con_consultorio, tmp_path):
     assert '7mo "L"' in texto
 
 
-def test_detalle_reducido_aislada_omite_consultorio(conn, tmp_path):
+def test_detalle_reducido_omite_consultorio_y_fotos(conn, tmp_path):
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
-    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    obtener_repositorio(conn, "Imagen").crear(
+        IdConsultorio=id_consultorio, NumeroOrden=1, Descripcion="Vista", RutaArchivo="/no/existe.jpg", Activo=1,
+    )
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
 
     busqueda = Busqueda(
@@ -238,12 +241,23 @@ def test_detalle_reducido_aislada_omite_consultorio(conn, tmp_path):
         hora_desde=9, hora_hasta=11,
     )
     globales = CriteriosGlobales(
-        tipo_busqueda="Aislada", ids_edificio=[id_edificio], salida="Texto", detalle_reducido_aislada=True,
+        tipo_busqueda="Aislada", ids_edificio=[id_edificio], salida="Texto", detalle_reducido=True,
     )
     ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [busqueda])
     texto = fitz.open(ruta)[0].get_text()
     assert "consultorio 1" not in texto.lower()  # no se identifica el consultorio puntual
     assert 'De 9 a 11hs en la unidad del 7mo "L"' in texto
+    assert "Fotos de los consultorios que intervienen en las búsquedas" not in texto
+
+
+def test_detalle_reducido_tambien_aplica_a_busqueda_regular(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio], detalle_reducido=True)
+    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
+    texto = fitz.open(ruta)[0].get_text()
+    assert "consultorio 1" not in texto.lower()
+    assert "Fotos de los consultorios que intervienen en las búsquedas" not in texto
 
 
 def test_detalle_tramo_formato_con_consultorio_un_edificio(conn, edificio_con_consultorio, tmp_path):
@@ -275,3 +289,91 @@ def test_detalle_tramo_formato_con_consultorio_varios_edificios(conn, tmp_path):
     texto = fitz.open(ruta)[0].get_text()
     assert 'consultorio 1 del 7mo "L" del edificio Ramos 1 - Hora regular' in texto
     assert 'consultorio 1 del 3ro "B" del edificio Ramos 2 - Hora regular' in texto
+
+
+def test_todas_las_opciones_verdes_se_detallan(conn, tmp_path):
+    """Si más de un consultorio cubre el bloque por sí solo, el PDF lista
+    todas las opciones bajo el mismo día, no solo la primera."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
+    id_unidad2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='3ro "B"')
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad1, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad2, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
+    texto = fitz.open(ruta)[0].get_text()
+    assert 'consultorio 1 del 7mo "L"' in texto
+    assert 'consultorio 1 del 3ro "B"' in texto
+    assert texto.count("Cobertura completa") == 1  # una sola línea de tipo de cobertura para el día
+
+
+def test_tamano_en_minuscula_en_caracteristicas(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11,
+        tamano="Grande",
+    )
+    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [busqueda])
+    texto = fitz.open(ruta)[0].get_text()
+    assert "tamaño grande" in texto
+    assert "tamaño Grande" not in texto
+
+
+def test_cantidad_horas_minimas_arriba_de_combinacion(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Cantidad de horas mínimas dentro del rango solicitado:" in texto
+    assert texto.index("Cantidad de horas mínimas dentro del rango solicitado:") < texto.index("Combinación de consultorios:")
+
+
+def test_edificios_enumera_direccion_cuando_no_cubre_toda_la_localidad(conn, tmp_path):
+    id_edificio1 = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 1", Domicilio="Av. Rivadavia 13876", DomicilioLocalidad="Ramos Mejía",
+    )
+    obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 2", Domicilio="Alvear 856", DomicilioLocalidad="Ramos Mejía",
+    )
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio1, Departamento='7mo "L"')
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio1], localidad="Ramos Mejía")
+    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Edificios: Av. Rivadavia 13876 (Ramos 1)" in texto
+
+
+def test_edificios_todos_cuando_cubre_toda_la_localidad(conn, tmp_path):
+    id_edificio1 = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 1", Domicilio="Av. Rivadavia 13876", DomicilioLocalidad="Ramos Mejía",
+    )
+    id_edificio2 = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 2", Domicilio="Alvear 856", DomicilioLocalidad="Ramos Mejía",
+    )
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio1, Departamento='7mo "L"')
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(
+        tipo_busqueda="Regular", ids_edificio=[id_edificio1, id_edificio2], localidad="Ramos Mejía",
+    )
+    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Edificios: todos" in texto
+
+
+def test_combinacion_misma_unidad_texto(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11,
+        combinacion="MismaUnidad",
+    )
+    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [busqueda])
+    texto = fitz.open(ruta)[0].get_text()
+    assert "admite combinar consultorios, sin salir de la misma unidad" in texto

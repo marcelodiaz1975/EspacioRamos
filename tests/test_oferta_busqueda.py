@@ -1,15 +1,18 @@
 import pytest
 
-from app.db.init_db import init_database
-from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.oferta_busqueda import (
     AMARILLO,
+    COMBINAR_MISMA_UNIDAD,
+    COMBINAR_MISMO_EDIFICIO,
     NARANJA,
+    SIN_COMBINAR,
     VERDE,
     Busqueda,
     CriteriosGlobales,
     resolver_busqueda,
 )
+from app.db.init_db import init_database
+from app.db.seed import sembrar_valores_por_defecto
 from app.repositorio.registro import obtener_repositorio
 
 ANIO, MES = 2026, 8
@@ -61,9 +64,30 @@ def test_regular_verde_un_consultorio_cubre_todo(conn):
 
     assert len(resultado.alternativas) == 1
     alt = resultado.alternativas[0]
-    assert alt.color == VERDE
     assert alt.fecha is None
-    assert alt.tramos[0].id_consultorio == id_consultorio
+    assert len(alt.opciones) == 1
+    assert alt.opciones[0].color == VERDE
+    assert alt.opciones[0].tramos[0].id_consultorio == id_consultorio
+
+
+def test_regular_reporta_todas_las_opciones_verdes(conn):
+    """Si más de un consultorio puede cubrir el bloque por sí solo, se
+    reportan TODAS las opciones, no solo la primera."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad1 = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_unidad2 = _crear_unidad(conn, id_edificio, '3ro "B"')
+    id_c1 = _crear_consultorio(conn, id_unidad1, 1)
+    id_c2 = _crear_consultorio(conn, id_unidad2, 1)
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11)
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    alt = resultado.alternativas[0]
+    assert len(alt.opciones) == 2
+    assert all(op.color == VERDE for op in alt.opciones)
+    ids_ofrecidos = {op.tramos[0].id_consultorio for op in alt.opciones}
+    assert ids_ofrecidos == {id_c1, id_c2}
 
 
 def test_regular_exige_todos_los_dias_pedidos(conn):
@@ -101,7 +125,7 @@ def test_aislada_alternativas_no_requieren_todas_las_fechas(conn):
     assert resultado.alternativas[0].fecha == "2026-08-10"
 
 
-def test_combinar_consultorios_false_rechaza_cobertura_combinada(conn):
+def test_sin_combinar_rechaza_cobertura_combinada(conn):
     id_edificio = _crear_edificio(conn)
     id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
     id_c1 = _crear_consultorio(conn, id_unidad, 1)
@@ -112,14 +136,46 @@ def test_combinar_consultorios_false_rechaza_cobertura_combinada(conn):
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
     busqueda = Busqueda(
         fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11,
-        combinar_consultorios=False,
+        combinacion=SIN_COMBINAR,
     )
     assert resolver_busqueda(conn, globales, busqueda).alternativas == []
 
-    busqueda.combinar_consultorios = True
+    busqueda.combinacion = COMBINAR_MISMO_EDIFICIO
     resultado = resolver_busqueda(conn, globales, busqueda)
     assert len(resultado.alternativas) == 1
-    assert resultado.alternativas[0].color == AMARILLO
+    assert resultado.alternativas[0].opciones[0].color == AMARILLO
+
+
+def test_combinar_misma_unidad_no_salta_a_otra_unidad(conn):
+    """Con COMBINAR_MISMA_UNIDAD, si la unidad elegida para el primer
+    tramo se queda sin consultorios libres, la cobertura falla en vez de
+    saltar a otra unidad — aunque, SIN esa restricción (mismo edificio),
+    la combinación cruzando unidades sí resolvería el bloque."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad1 = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_unidad2 = _crear_unidad(conn, id_edificio, '3ro "B"')
+    id_c1 = _crear_consultorio(conn, id_unidad1, 1)
+    id_c2 = _crear_consultorio(conn, id_unidad2, 1)
+    # Ninguno de los dos consultorios cubre 9-11 solo: c1 libre a las 9,
+    # ocupado a las 10; c2 al revés. Combinando c1(9)+c2(10) se cubriría
+    # todo el rango, pero eso cruza de unidad.
+    _ocupar_regular(conn, id_c1, "Lunes", 10, 11)
+    _ocupar_regular(conn, id_c2, "Lunes", 9, 10)
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+
+    busqueda_misma_unidad = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11,
+        combinacion=COMBINAR_MISMA_UNIDAD,
+    )
+    assert resolver_busqueda(conn, globales, busqueda_misma_unidad).alternativas == []
+
+    busqueda_mismo_edificio = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11,
+        combinacion=COMBINAR_MISMO_EDIFICIO,
+    )
+    resultado = resolver_busqueda(conn, globales, busqueda_mismo_edificio)
+    assert resultado.alternativas[0].opciones[0].color == NARANJA
 
 
 def test_combinacion_nunca_cruza_edificios(conn):
@@ -156,7 +212,7 @@ def test_cantidad_horas_minimas_encuentra_subrango(conn):
     )
     resultado = resolver_busqueda(conn, globales, busqueda)
     assert len(resultado.alternativas) == 1
-    tramo = resultado.alternativas[0].tramos[0]
+    tramo = resultado.alternativas[0].opciones[0].tramos[0]
     assert (tramo.hora_inicio, tramo.hora_fin) == (11, 13)
 
 
@@ -185,7 +241,7 @@ def test_sillones_y_tamano_filtran_candidatos(conn):
         sillones=True, tamano="grande",
     )
     resultado = resolver_busqueda(conn, globales, busqueda)
-    assert resultado.alternativas[0].tramos[0].id_consultorio == id_c_grande
+    assert resultado.alternativas[0].opciones[0].tramos[0].id_consultorio == id_c_grande
 
 
 def test_naranja_combina_unidades_distintas_mismo_edificio(conn):
@@ -202,7 +258,7 @@ def test_naranja_combina_unidades_distintas_mismo_edificio(conn):
         fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11,
     )
     resultado = resolver_busqueda(conn, globales, busqueda)
-    assert resultado.alternativas[0].color == NARANJA
+    assert resultado.alternativas[0].opciones[0].color == NARANJA
 
 
 def test_regular_avisa_hora_aislada_superpuesta_sin_bloquear(conn):
@@ -220,7 +276,7 @@ def test_regular_avisa_hora_aislada_superpuesta_sin_bloquear(conn):
 
     assert len(resultado.alternativas) == 1  # no se bloquea
     alt = resultado.alternativas[0]
-    assert alt.color == VERDE
+    assert alt.opciones[0].color == VERDE
     assert len(alt.avisos) == 1
     assert "2026-08-10" in alt.avisos[0]
 
