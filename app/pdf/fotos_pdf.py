@@ -16,6 +16,7 @@ from __future__ import annotations
 import io
 import os
 import sqlite3
+from typing import Callable
 
 from PIL import Image as ImagenPIL
 from reportlab.lib.units import cm
@@ -68,7 +69,7 @@ def imagenes_de_consultorios(conn: sqlite3.Connection, ids_consultorio: list[int
 
 def _celda_foto(
     imagen: sqlite3.Row, ancho_celda: float, mostrar_apto_camilla: bool, anonimizar_unidad: bool,
-    mostrar_valor: bool = False, decimales: int = 2,
+    mostrar_valor: bool = False, decimales: int = 2, pie_personalizado: Callable[[sqlite3.Row], str] | None = None,
 ) -> list:
     contenido = []
     ruta = imagen["RutaArchivo"]
@@ -90,12 +91,14 @@ def _celda_foto(
             f"[Foto no disponible — {imagen['Descripcion'] or 'consultorio ' + str(imagen['NumeroConsultorio'])}]",
             estilo_texto(8),
         ))
-    if mostrar_valor:
+    if pie_personalizado is not None:
+        pie = pie_personalizado(imagen)
+    elif mostrar_valor:
         pie = f"Consultorio {imagen['NumeroConsultorio']} — Valor hora regular {formatear_moneda(imagen['ValorHoraRegularActual'], decimales)}"
     else:
         unidad = f"Unidad {imagen['IdUnidadConsultorio']}" if anonimizar_unidad else imagen["Departamento"]
         pie = f"Consultorio {imagen['NumeroConsultorio']} - {unidad} - {imagen['NombreEdificio']}"
-    if mostrar_apto_camilla and imagen["AptoCamilla"]:
+    if pie_personalizado is None and mostrar_apto_camilla and imagen["AptoCamilla"]:
         pie += " ✔ Apto camilla"
     contenido.append(Paragraph(pie, estilo_texto(8, negrita=True)))
     return contenido
@@ -103,9 +106,14 @@ def _celda_foto(
 
 def tabla_fotos(
     imagenes: list[sqlite3.Row], ancho: float, mostrar_apto_camilla: bool = True, anonimizar_unidad: bool = False,
-    mostrar_valor: bool = False, decimales: int = 2,
+    mostrar_valor: bool = False, decimales: int = 2, pie_personalizado: Callable[[sqlite3.Row], str] | None = None,
 ) -> list:
-    """2 fotos por fila (sección 4.3/4.4/4.6)."""
+    """2 fotos por fila (sección 4.3/4.4/4.6). `pie_personalizado`, si se
+    pasa, reemplaza por completo el pie de foto (incluido el ✔ Apto
+    camilla, que solo se agrega en los dos modos default) — para cuando
+    ninguno de los dos formatos fijos alcanza (ej. Oferta de consultorios
+    por búsqueda: edificio + unidad + consultorio + valor en un pie
+    único)."""
     if not imagenes:
         return [Paragraph("Sin fotos cargadas.", estilo_texto(9))]
 
@@ -113,9 +121,9 @@ def tabla_fotos(
     filas = []
     for i in range(0, len(imagenes), 2):
         par = imagenes[i:i + 2]
-        fila = [_celda_foto(par[0], ancho_celda, mostrar_apto_camilla, anonimizar_unidad, mostrar_valor, decimales)]
+        fila = [_celda_foto(par[0], ancho_celda, mostrar_apto_camilla, anonimizar_unidad, mostrar_valor, decimales, pie_personalizado)]
         fila.append(
-            _celda_foto(par[1], ancho_celda, mostrar_apto_camilla, anonimizar_unidad, mostrar_valor, decimales)
+            _celda_foto(par[1], ancho_celda, mostrar_apto_camilla, anonimizar_unidad, mostrar_valor, decimales, pie_personalizado)
             if len(par) > 1 else ""
         )
         filas.append(fila)

@@ -49,6 +49,9 @@ from app.negocio.grilla import calcular_ocupacion_regular
 TIPO_REGULAR = "Regular"
 TIPO_AISLADA = "Aislada"
 
+SALIDA_PDF = "PDF"
+SALIDA_TEXTO = "Texto"
+
 VERDE = "verde"
 AMARILLO = "amarillo"
 NARANJA = "naranja"
@@ -61,6 +64,7 @@ class CriteriosGlobales:
     localidad: str | None = None
     ids_unidad: list[int] | None = None  # None = todas las de los edificios seleccionados
     ids_consultorio: list[int] | None = None  # None = todos los de las unidades seleccionadas
+    salida: str = SALIDA_PDF  # SALIDA_PDF | SALIDA_TEXTO — a dónde vuelca el resultado, no es un criterio de búsqueda
 
 
 @dataclass
