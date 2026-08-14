@@ -28,6 +28,7 @@ FUENTE_NEGRITA_ITALICA = "Helvetica-BoldOblique"
 COLOR_NIVEL_1 = colors.HexColor("#2E86AB")
 COLOR_NIVEL_2 = colors.HexColor("#E07B39")
 COLOR_NIVEL_3 = colors.HexColor("#3D3D3D")
+COLOR_NIVEL_4 = colors.HexColor("#8A8A8A")
 
 COLOR_VERDE = colors.HexColor("#4CAF50")
 COLOR_AMARILLO = colors.HexColor("#F5D547")
@@ -40,6 +41,7 @@ _NIVELES = {
     1: {"color": COLOR_NIVEL_1, "alto": 1.1 * cm, "tamano": 11},
     2: {"color": COLOR_NIVEL_2, "alto": 0.55 * cm, "tamano": 9},
     3: {"color": COLOR_NIVEL_3, "alto": 0.46 * cm, "tamano": 8},
+    4: {"color": COLOR_NIVEL_4, "alto": 0.4 * cm, "tamano": 7.5},
 }
 
 
