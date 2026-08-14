@@ -6,10 +6,15 @@ así se puede volver a generar más adelante sin tener que cargarla de
 nuevo — la regeneración vuelve a resolver contra la disponibilidad vigente
 en ese momento, no repite el resultado congelado del día que se armó.
 
-Esta pantalla arma UNA búsqueda por documento (no encadena varias
-franjas con combinación Y/O, aunque el motor lo soporta) — cubre el caso
-de uso más habitual; si hace falta combinar varias franjas en un mismo
-documento, por ahora se arma por fuera de la pantalla."""
+Un documento puede tener varias franjas (una por cada característica de
+búsqueda distinta, p. ej. "lunes y miércoles de mañana" + "viernes de
+tarde"): el formulario arma UNA franja por vez y "Agregar franja" la suma
+a la lista de la búsqueda actual — cada franja se resuelve por separado y
+sus alternativas se listan juntas en el mismo documento (todavía no hay
+combinación Y/O real entre franjas distintas, ver
+`app.negocio.oferta_busqueda_texto.alternativas_planas`). Si no se agrega
+ninguna franja explícita, "Generar" usa directo lo cargado en el
+formulario como franja única (cubre el caso más común sin pasos de más)."""
 from __future__ import annotations
 
 import json
@@ -52,6 +57,7 @@ from app.negocio.oferta_busqueda import (
     fecha_inicio_default,
 )
 from app.negocio.mensajes import nombre_para_mensaje
+from app.negocio.oferta_busqueda_texto import resumen_busqueda
 from app.repositorio.registro import obtener_repositorio
 
 _COMBINACIONES = [
@@ -86,6 +92,7 @@ class PantallaOferta(QWidget):
         super().__init__(parent)
         self.conn = conn
         self._historial: list[sqlite3.Row] = []
+        self._franjas: list[Busqueda] = []
         self._armar_ui()
         self._cargar_profesionales()
         self._cargar_edificios()
@@ -192,6 +199,22 @@ class PantallaOferta(QWidget):
         self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
         form.addWidget(self.casilla_detalle_reducido)
 
+        fila_franja = QHBoxLayout()
+        boton_agregar_franja = QPushButton("Agregar franja a la búsqueda")
+        boton_agregar_franja.clicked.connect(self._agregar_franja)
+        boton_quitar_franja = QPushButton("Quitar franja seleccionada")
+        boton_quitar_franja.clicked.connect(self._quitar_franja_seleccionada)
+        fila_franja.addWidget(boton_agregar_franja)
+        fila_franja.addWidget(boton_quitar_franja)
+        form.addLayout(fila_franja)
+
+        form.addWidget(QLabel(
+            "Franjas agregadas a esta búsqueda (si no agregás ninguna, se usa lo cargado arriba como franja única)"
+        ))
+        self.lista_franjas = QListWidget()
+        self.lista_franjas.setMaximumHeight(90)
+        form.addWidget(self.lista_franjas)
+
         fila_botones = QHBoxLayout()
         boton_pdf = QPushButton("Generar PDF")
         boton_pdf.setObjectName("botonPrimario")
@@ -265,23 +288,15 @@ class PantallaOferta(QWidget):
             if self.lista_edificios.item(i).checkState() == Qt.CheckState.Checked
         ]
 
-    def _armar_criterios(self) -> tuple[int, CriteriosGlobales, list[Busqueda]] | None:
-        id_profesional = self.combo_profesional.currentData()
-        if id_profesional is None:
-            QMessageBox.warning(self, "Oferta de consultorios", "No hay profesionales cargados.")
-            return None
+    def _armar_busqueda_actual(self) -> Busqueda | None:
+        """Arma la franja a partir de lo cargado en el formulario ahora
+        mismo (sin tocar `self._franjas`)."""
         dias = self._dias_seleccionados()
         if not dias:
             QMessageBox.warning(self, "Oferta de consultorios", "Elegí al menos un día.")
             return None
-
         tipo = self.combo_tipo.currentData()
-        globales = CriteriosGlobales(
-            tipo_busqueda=tipo,
-            ids_edificio=self._ids_edificio_seleccionados(),
-            detalle_reducido=self.casilla_detalle_reducido.isChecked(),
-        )
-        busqueda = Busqueda(
+        return Busqueda(
             fecha_desde=self.campo_fecha_desde.text().strip(),
             fecha_hasta=(self.campo_fecha_hasta.text().strip() or None) if tipo == TIPO_AISLADA else None,
             dias=dias,
@@ -295,7 +310,47 @@ class PantallaOferta(QWidget):
             valor_maximo_hora=self.spin_valor_maximo.value() if self.casilla_valor_maximo.isChecked() else None,
             cantidad_horas_minimas=self.spin_horas_minimas.value() if self.casilla_horas_minimas.isChecked() else None,
         )
-        return id_profesional, globales, [busqueda]
+
+    def _agregar_franja(self) -> None:
+        busqueda = self._armar_busqueda_actual()
+        if busqueda is None:
+            return
+        self._franjas.append(busqueda)
+        self.lista_franjas.addItem(resumen_busqueda(busqueda, self.combo_tipo.currentData()))
+        for i in range(self.lista_dias.count()):
+            self.lista_dias.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def _quitar_franja_seleccionada(self) -> None:
+        fila = self.lista_franjas.currentRow()
+        if fila < 0:
+            return
+        self.lista_franjas.takeItem(fila)
+        del self._franjas[fila]
+
+    def _armar_criterios(self) -> tuple[int, CriteriosGlobales, list[Busqueda]] | None:
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            QMessageBox.warning(self, "Oferta de consultorios", "No hay profesionales cargados.")
+            return None
+
+        if self._franjas:
+            busquedas = list(self._franjas)
+        else:
+            busqueda = self._armar_busqueda_actual()
+            if busqueda is None:
+                return None
+            busquedas = [busqueda]
+
+        globales = CriteriosGlobales(
+            tipo_busqueda=self.combo_tipo.currentData(),
+            ids_edificio=self._ids_edificio_seleccionados(),
+            detalle_reducido=self.casilla_detalle_reducido.isChecked(),
+        )
+        return id_profesional, globales, busquedas
+
+    def _limpiar_franjas(self) -> None:
+        self._franjas = []
+        self.lista_franjas.clear()
 
     def _guardar_y_generar(self, generador) -> None:
         armado = self._armar_criterios()
@@ -310,6 +365,7 @@ class PantallaOferta(QWidget):
         except ValueError as error:
             QMessageBox.warning(self, "Oferta de consultorios", str(error))
             return
+        self._limpiar_franjas()
         self.actualizar()
 
     def _generar_pdf(self) -> None:

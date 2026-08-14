@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
@@ -77,6 +79,65 @@ def test_generar_pdf_guarda_en_archivos_varios_oferta(qtbot, conn, tmp_path, pro
     generados = list((tmp_path / "Archivos varios" / "Oferta").iterdir())
     assert len(generados) == 1
     assert generados[0].name.startswith("Oferta de consultorios - Lic. Virginia Lo Veci")
+
+
+def test_agregar_franja_la_suma_a_la_lista_y_limpia_dias(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+
+    pantalla._agregar_franja()
+
+    assert len(pantalla._franjas) == 1
+    assert pantalla.lista_franjas.count() == 1
+    assert pantalla._dias_seleccionados() == []  # se limpia para cargar la próxima franja
+
+
+def test_agregar_franja_sin_dias_no_suma_nada(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._agregar_franja()
+    assert pantalla._franjas == []
+    assert pantalla.lista_franjas.count() == 0
+
+
+def test_quitar_franja_seleccionada(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+    pantalla._agregar_franja()
+    pantalla.lista_franjas.setCurrentRow(0)
+
+    pantalla._quitar_franja_seleccionada()
+
+    assert pantalla._franjas == []
+    assert pantalla.lista_franjas.count() == 0
+
+
+def test_generar_con_dos_franjas_guarda_ambas_en_el_historial(qtbot, conn, tmp_path, profesional_y_consultorio):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+    pantalla._agregar_franja()
+    pantalla.spin_desde.setValue(15)
+    pantalla.spin_hasta.setValue(17)
+    pantalla.lista_dias.item(4).setCheckState(Qt.CheckState.Checked)  # Viernes
+    pantalla._agregar_franja()
+    assert pantalla.lista_franjas.count() == 2
+
+    pantalla._generar_pdf()
+
+    fila = obtener_repositorio(conn, "HistorialOferta").listar()[0]
+    criterios = json.loads(fila["CriteriosJSON"])
+    assert len(criterios["busquedas"]) == 2
+    assert criterios["busquedas"][0]["dias"] == ["Lunes"]
+    assert criterios["busquedas"][1]["dias"] == ["Viernes"]
+    # se limpia la lista de franjas para la próxima búsqueda
+    assert pantalla._franjas == []
+    assert pantalla.lista_franjas.count() == 0
 
 
 class _FalsoDialogo:
