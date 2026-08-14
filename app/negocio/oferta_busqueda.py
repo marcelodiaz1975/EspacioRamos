@@ -270,10 +270,12 @@ def _opciones_en_horas(
     candidatos_por_edificio: dict[int, dict[int, sqlite3.Row]], horas: list[int], ocupado_lookup, combinacion: str,
 ) -> list[Opcion] | None:
     """None si ningún edificio del alcance puede cubrir estas horas (ni
-    solo ni combinando). Si no, TODAS las opciones de un solo consultorio
-    encontradas en cualquier edificio; si no hay ninguna, una combinación
-    de respaldo (la primera que se encuentra recorriendo los edificios en
-    orden)."""
+    solo ni combinando). Si no, TODAS las opciones encontradas: las de un
+    solo consultorio (una por cada consultorio libre, en cualquier
+    edificio) MÁS una combinación por cada edificio que pueda armar una
+    (siempre se prueban las dos vías — encontrar una opción de un solo
+    consultorio en un edificio no descarta ofrecer también una
+    combinación en ese u otro edificio)."""
     libres_por_edificio: dict[int, dict[int, list[int]]] = {}
     for id_edificio, candidatos_por_id in candidatos_por_edificio.items():
         libres_por_hora = _libres_por_hora(candidatos_por_id, horas, ocupado_lookup)
@@ -283,22 +285,38 @@ def _opciones_en_horas(
         return None
 
     opciones: list[Opcion] = []
+    verdes_por_edificio: dict[int, set[int]] = {}
     for id_edificio, libres_por_hora in libres_por_edificio.items():
         candidatos_por_id = candidatos_por_edificio[id_edificio]
+        verdes = set()
         for id_consultorio in candidatos_por_id:
             if all(id_consultorio in libres_por_hora[h] for h in horas):
                 tramo = TramoCobertura(id_consultorio, horas[0], horas[-1] + 1)
                 opciones.append(Opcion(color=VERDE, tramos=[tramo]))
-    if opciones:
-        return opciones
+                verdes.add(id_consultorio)
+        verdes_por_edificio[id_edificio] = verdes
 
+    # La combinación busca SOLO entre los consultorios que no alcanzan por
+    # sí solos — si se dejaran los "verdes" en la bolsa, el barrido greedy
+    # se queda pegado al que está libre todo el rango (siempre "disponible"
+    # para seguir) y nunca llega a explorar una combinación real entre los
+    # demás, aunque exista.
     for id_edificio, libres_por_hora in libres_por_edificio.items():
         candidatos_por_id = candidatos_por_edificio[id_edificio]
-        tramos = _combinacion_subrango(candidatos_por_id, horas, libres_por_hora, combinacion)
-        if tramos is not None:
-            color = _clasificar_color(candidatos_por_id, {t.id_consultorio for t in tramos})
-            return [Opcion(color=color, tramos=tramos)]
-    return None
+        verdes = verdes_por_edificio[id_edificio]
+        candidatos_restantes = {i: c for i, c in candidatos_por_id.items() if i not in verdes}
+        if len(candidatos_restantes) < 2:
+            continue
+        libres_restantes = {h: [i for i in libres if i not in verdes] for h, libres in libres_por_hora.items()}
+        if any(not libres_restantes[h] for h in horas):
+            continue
+        tramos = _combinacion_subrango(candidatos_restantes, horas, libres_restantes, combinacion)
+        if tramos is None:
+            continue
+        color = _clasificar_color(candidatos_por_id, {t.id_consultorio for t in tramos})
+        opciones.append(Opcion(color=color, tramos=tramos))
+
+    return opciones if opciones else None
 
 
 def _opciones_con_duracion(

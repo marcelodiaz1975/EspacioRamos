@@ -95,24 +95,19 @@ def _formatear_valor(monto: float, decimales: int) -> str:
     return formatear_moneda(monto, 0 if monto == int(monto) else decimales)
 
 
-def _edificios_de_localidad(conn: sqlite3.Connection, localidad: str | None) -> set[int]:
-    if localidad:
-        filas = conn.execute("SELECT IdEdificio FROM Edificio WHERE DomicilioLocalidad = ?", (localidad,)).fetchall()
-    else:
-        filas = conn.execute("SELECT IdEdificio FROM Edificio").fetchall()
-    return {f["IdEdificio"] for f in filas}
-
-
-def _texto_edificios(conn: sqlite3.Connection, globales: CriteriosGlobales) -> str:
-    """"todos" cuando no se restringió el alcance, o cuando el alcance
-    elegido igual cubre TODOS los edificios de la localidad — si no,
-    enumera con la dirección de cada uno ("Av. Rivadavia 13876 (Ramos
-    1)"): la localidad ya se aclaró antes, no hace falta repetirla."""
-    if not globales.ids_edificio or set(globales.ids_edificio) == _edificios_de_localidad(conn, globales.localidad):
-        return "todos"
-    placeholders = ", ".join("?" for _ in globales.ids_edificio)
+def _texto_edificios(conn: sqlite3.Connection, ids_edificio_resultado: set[int]) -> str:
+    """Siempre enumera con dirección — "Av. Rivadavia 13876 (Ramos 1)" —
+    los edificios de la localidad elegida en los que efectivamente se
+    encontró alguna coincidencia (no los que se incluyeron en el alcance
+    de la búsqueda, que pueden ser más): así el profesional tiene de
+    referencia en cuáles hay algo para ofrecer. La localidad ya se aclaró
+    antes, no hace falta repetirla."""
+    if not ids_edificio_resultado:
+        return "—"
+    placeholders = ", ".join("?" for _ in ids_edificio_resultado)
     filas = conn.execute(
-        f"SELECT Nombre, Domicilio FROM Edificio WHERE IdEdificio IN ({placeholders})", globales.ids_edificio,
+        f"SELECT Nombre, Domicilio FROM Edificio WHERE IdEdificio IN ({placeholders}) ORDER BY IdEdificio",
+        list(ids_edificio_resultado),
     ).fetchall()
     return ", ".join(f"{f['Domicilio']} ({f['Nombre']})" if f["Domicilio"] else f["Nombre"] for f in filas)
 
@@ -125,14 +120,14 @@ def _nombres_unidad(conn: sqlite3.Connection, ids_unidad: list[int]) -> list[str
     return [f["Departamento"] for f in filas]
 
 
-def _texto_criterios_globales(conn: sqlite3.Connection, globales: CriteriosGlobales) -> list:
+def _texto_criterios_globales(conn: sqlite3.Connection, globales: CriteriosGlobales, ids_edificio_resultado: set[int]) -> list:
     style = estilo_texto(9)
     tipo_texto = "Horarios regulares" if globales.tipo_busqueda == "Regular" else "Horas aisladas"
     nombres_un = _nombres_unidad(conn, globales.ids_unidad) if globales.ids_unidad else []
     return [
         Paragraph(f"<b>Tipo de búsqueda:</b> {tipo_texto}", style),
         Paragraph(f"<b>Localidad:</b> {globales.localidad or '—'}", style),
-        Paragraph(f"<b>Edificios:</b> {_texto_edificios(conn, globales)}", style),
+        Paragraph(f"<b>Edificios:</b> {_texto_edificios(conn, ids_edificio_resultado)}", style),
         Paragraph(f"<b>Unidades:</b> {', '.join(nombres_un) or 'todas'}", style),
         Paragraph(
             f"<b>Consultorios:</b> {len(globales.ids_consultorio) if globales.ids_consultorio else 'todos'}"
@@ -292,12 +287,12 @@ def _consultorios_ordenados(conn: sqlite3.Connection, consultorios: dict, anonim
 
 
 def _pie_foto(imagen: sqlite3.Row, mostrar_edificio: bool, anonimizar: bool, decimales: int) -> str:
-    """Edificio (si hay más de uno) - Unidad - Consultorio: Valor/hora — ni
-    apto camilla ni el valor se repiten en ningún otro lado, ese detalle
-    ya se desprende de "Criterios de búsqueda seleccionados"."""
-    unidad = f"Unidad {imagen['IdUnidadConsultorio']}" if anonimizar else imagen["Departamento"]
+    """Edificio (si hay más de uno) - Unidad - Consultorio - Hora regular
+    $Valor — ni apto camilla ni el valor se repiten en ningún otro lado, ese
+    detalle ya se desprende de "Criterios de búsqueda seleccionados"."""
+    unidad = f"Unidad {imagen['IdUnidadConsultorio']}" if anonimizar else f"Unidad {imagen['Departamento']}"
     partes = ([f"Edificio {imagen['NombreEdificio']}"] if mostrar_edificio else []) + [unidad, f"Consultorio {imagen['NumeroConsultorio']}"]
-    return f"{' - '.join(partes)}: {_formatear_valor(imagen['ValorHoraRegularActual'], decimales)}/hora"
+    return f"{' - '.join(partes)} - Hora regular {_formatear_valor(imagen['ValorHoraRegularActual'], decimales)}"
 
 
 def _bloque_consultorios_intervinientes(
@@ -380,7 +375,8 @@ def generar_pdf_oferta_busqueda(
     })
     consultorios = _mapa_consultorios_basico(conn, ids_consultorio)
     imagenes = imagenes_de_consultorios(conn, ids_consultorio)
-    mostrar_edificio = len({c["IdEdificio"] for c in consultorios.values()}) > 1
+    ids_edificio_resultado = {c["IdEdificio"] for c in consultorios.values()}
+    mostrar_edificio = len(ids_edificio_resultado) > 1
     mostrar_consultorio = not globales.detalle_reducido
 
     altura = (
@@ -395,7 +391,7 @@ def generar_pdf_oferta_busqueda(
         story.append(Spacer(1, 8))
         story.append(encabezado(2, "Criterios de búsqueda generales", ancho))
         story.append(Spacer(1, 6))
-        story.extend(_texto_criterios_globales(conn, globales))
+        story.extend(_texto_criterios_globales(conn, globales, ids_edificio_resultado))
         story.append(Spacer(1, 10))
 
         for i, (busqueda, alternativas) in enumerate(zip(busquedas, listas_alternativas)):

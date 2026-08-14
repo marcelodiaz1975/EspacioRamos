@@ -290,3 +290,37 @@ def test_regular_sin_hora_aislada_no_genera_avisos(conn):
     busqueda = Busqueda(fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11)
     resultado = resolver_busqueda(conn, globales, busqueda)
     assert resultado.alternativas[0].avisos == []
+
+
+def test_ofrece_opcion_verde_y_combinada_juntas(conn):
+    """Si un consultorio cubre el bloque solo Y ADEMÁS otros dos, en otra
+    unidad, lo cubren combinados, hay que ofrecer las dos alternativas —
+    encontrar la opción de un solo consultorio no debe cortar la búsqueda
+    de combinaciones."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad_sola = _crear_unidad(conn, id_edificio, '15 "H"')
+    id_c_solo = _crear_consultorio(conn, id_unidad_sola, 1)  # libre las 5 horas
+
+    id_unidad_combi = _crear_unidad(conn, id_edificio, 'EP "K"')
+    id_c4 = _crear_consultorio(conn, id_unidad_combi, 4)
+    id_c2 = _crear_consultorio(conn, id_unidad_combi, 2)
+    # c4 libre 13-16 y ocupado 16-18; c2 al revés — combinados cubren 13-18.
+    _ocupar_regular(conn, id_c4, "Viernes", 16, 18)
+    _ocupar_regular(conn, id_c2, "Viernes", 13, 16)
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Viernes"], hora_desde=13, hora_hasta=18,
+        combinacion=COMBINAR_MISMO_EDIFICIO,
+    )
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    alt = resultado.alternativas[0]
+    assert len(alt.opciones) == 2
+    colores = {op.color for op in alt.opciones}
+    assert colores == {VERDE, AMARILLO}
+    opcion_verde = next(op for op in alt.opciones if op.color == VERDE)
+    assert opcion_verde.tramos[0].id_consultorio == id_c_solo
+    opcion_combinada = next(op for op in alt.opciones if op.color == AMARILLO)
+    ids_combinados = {t.id_consultorio for t in opcion_combinada.tramos}
+    assert ids_combinados == {id_c2, id_c4}
