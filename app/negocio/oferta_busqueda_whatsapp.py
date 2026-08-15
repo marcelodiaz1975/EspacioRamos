@@ -17,7 +17,7 @@ from __future__ import annotations
 import sqlite3
 
 from app.negocio.formato import decimales_configurados
-from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales, resolver_busqueda
+from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales, resolver_busquedas_documento
 from app.negocio.oferta_busqueda_texto import (
     alternativas_planas,
     avisos_planos,
@@ -47,8 +47,8 @@ def generar_texto_oferta_busqueda(
     decimales = decimales_configurados(conn)
 
     listas_alternativas: list[list[Alternativa]] = [
-        filtrar_excluidas(resolver_busqueda(conn, globales, b).alternativas, i, excluir)
-        for i, b in enumerate(busquedas)
+        filtrar_excluidas(alts, i, excluir)
+        for i, alts in enumerate(resolver_busquedas_documento(conn, globales, busquedas))
     ]
     ids_consultorio = sorted({
         t.id_consultorio for alts in listas_alternativas for alt in alts for op in alt.opciones for t in op.tramos

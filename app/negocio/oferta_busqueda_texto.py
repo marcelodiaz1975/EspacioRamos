@@ -21,8 +21,17 @@ from __future__ import annotations
 
 import sqlite3
 
-from app.negocio.formato import fecha_larga, formatear_valor, hora_fmt
-from app.negocio.oferta_busqueda import TIPO_AISLADA, Alternativa, Busqueda, Opcion, TramoCobertura
+from app.negocio.formato import decimales_configurados, fecha_larga, formatear_valor, hora_fmt
+from app.negocio.oferta_busqueda import (
+    TIPO_AISLADA,
+    Alternativa,
+    Busqueda,
+    CriteriosGlobales,
+    Opcion,
+    TramoCobertura,
+    resolver_busquedas_documento,
+)
+from app.repositorio.registro import obtener_repositorio
 
 _ES_ACTIVO = ("R", "A", "E", "X", "B")
 
@@ -98,9 +107,10 @@ def etiqueta_dia(dia_semana: str, fecha: str | None) -> str:
 def alternativas_planas(listas_alternativas: list[list[Alternativa]]) -> list[tuple[str, Opcion]]:
     """Aplana todas las alternativas (una por día/fecha con cobertura) de
     todas las búsquedas del documento en una sola lista de a pares
-    (etiqueta de día, opción) — cada búsqueda ya se resuelve de forma
-    independiente (todavía no hay combinación Y/O real entre búsquedas
-    distintas), así que alcanza con concatenar en orden."""
+    (etiqueta de día, opción) — la combinación Y/O entre búsquedas
+    (`app.negocio.oferta_busqueda.resolver_busquedas_documento`) ya se
+    resolvió antes de llegar acá, así que alcanza con concatenar en
+    orden lo que haya quedado."""
     planas = []
     for alternativas in listas_alternativas:
         for alt in alternativas:
@@ -184,3 +194,41 @@ def edificios_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[i
         list(ids_edificio_resultado),
     ).fetchall()
     return [_texto_edificio_comentario(f) for f in filas]
+
+
+def previsualizar_documento(
+    conn: sqlite3.Connection, id_profesional: int, globales: CriteriosGlobales, busquedas: list[Busqueda],
+) -> list[tuple[int, int, int, str]]:
+    """Para la pantalla de previsualización (`app.gui.pantallas.oferta`):
+    una entrada por cada opción encontrada, ya con la combinación Y/O
+    entre búsquedas aplicada (`resolver_busquedas_documento`), junto con
+    la tripleta de índices (búsqueda, alternativa/día, opción) que la
+    identifica para poder excluirla puntualmente sin descartar el resto
+    de la búsqueda (ver `excluir` en `generar_pdf_oferta_busqueda` /
+    `generar_texto_oferta_busqueda`)."""
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    if profesional is None:
+        raise ValueError(f"No existe el profesional #{id_profesional}")
+    anonimizar = not categoria_es_activa(profesional)
+    decimales = decimales_configurados(conn)
+
+    resultados = resolver_busquedas_documento(conn, globales, busquedas)
+    ids_consultorio = sorted({
+        t.id_consultorio for alts in resultados for alt in alts for op in alt.opciones for t in op.tramos
+    })
+    consultorios = mapa_consultorios_basico(conn, ids_consultorio)
+    ids_edificio_resultado = {c["IdEdificio"] for c in consultorios.values()}
+    mostrar_edificio = len(ids_edificio_resultado) > 1
+    mostrar_consultorio = not globales.detalle_reducido
+
+    filas: list[tuple[int, int, int, str]] = []
+    for i_busqueda, alternativas in enumerate(resultados):
+        for i_alt, alt in enumerate(alternativas):
+            etiqueta = etiqueta_dia(alt.dia_semana, alt.fecha)
+            for i_op, opcion in enumerate(alt.opciones):
+                lineas = lineas_opcion(
+                    etiqueta, opcion, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar,
+                    mostrar_valor=True, decimales=decimales,
+                )
+                filas.append((i_busqueda, i_alt, i_op, " / ".join(lineas)))
+    return filas

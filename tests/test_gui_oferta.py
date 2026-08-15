@@ -2,11 +2,11 @@ import json
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.oferta import PantallaOferta
+from app.gui.pantallas.oferta import PantallaOferta, _DialogoPrevisualizacion
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -23,6 +23,13 @@ def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+
+
+@pytest.fixture(autouse=True)
+def _confirmar_previsualizacion(monkeypatch):
+    """La previsualización ahora se abre siempre antes de generar — para
+    los tests que no la ejercitan específicamente, se confirma sola."""
+    monkeypatch.setattr(_DialogoPrevisualizacion, "exec", lambda self: QDialog.DialogCode.Accepted)
 
 
 @pytest.fixture
@@ -138,6 +145,97 @@ def test_generar_con_dos_franjas_guarda_ambas_en_el_historial(qtbot, conn, tmp_p
     # se limpia la lista de franjas para la próxima búsqueda
     assert pantalla._franjas == []
     assert pantalla.lista_franjas.count() == 0
+
+
+def test_cancelar_previsualizacion_no_genera_ni_guarda_historial(qtbot, conn, monkeypatch, profesional_y_consultorio):
+    monkeypatch.setattr(_DialogoPrevisualizacion, "exec", lambda self: QDialog.DialogCode.Rejected)
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+
+    pantalla._generar_pdf()
+
+    assert obtener_repositorio(conn, "HistorialOferta").listar() == []
+
+
+def test_previsualizacion_muestra_una_fila_por_opcion(qtbot, conn, monkeypatch, profesional_y_consultorio):
+    capturado = {}
+
+    def _exec_capturando(self):
+        capturado["filas"] = list(self._filas)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoPrevisualizacion, "exec", _exec_capturando)
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+
+    pantalla._generar_pdf()
+
+    assert len(capturado["filas"]) == 1
+    assert "consultorio 1" in capturado["filas"][0][3]
+
+
+def test_destildar_una_opcion_en_la_previsualizacion_la_excluye_del_historial(
+    qtbot, conn, tmp_path, monkeypatch, profesional_y_consultorio,
+):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+
+    def _exec_destildando_todo(self):
+        if self.lista is not None:
+            for i in range(self.lista.count()):
+                self.lista.item(i).setCheckState(Qt.CheckState.Unchecked)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoPrevisualizacion, "exec", _exec_destildando_todo)
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+
+    pantalla._generar_pdf()
+
+    fila = obtener_repositorio(conn, "HistorialOferta").listar()[0]
+    criterios = json.loads(fila["CriteriosJSON"])
+    assert criterios["excluir"] == [[0, 0, 0]]
+
+
+def test_sin_alternativas_la_previsualizacion_permite_generar_igual(qtbot, conn, tmp_path, profesional_y_consultorio):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+    pantalla.casilla_camilla.setChecked(True)  # el consultorio de la fixture no es apto camilla: sin cobertura
+
+    pantalla._generar_pdf()
+
+    assert obtener_repositorio(conn, "HistorialOferta").listar() != []
+
+
+def test_paquete_y_con_franja_sin_cobertura_no_muestra_nada_en_la_previsualizacion(
+    qtbot, conn, monkeypatch, profesional_y_consultorio,
+):
+    capturado = {}
+
+    def _exec_capturando(self):
+        capturado["filas"] = list(self._filas)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoPrevisualizacion, "exec", _exec_capturando)
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes: con cobertura
+    pantalla.combo_union_franja.setCurrentIndex(1)  # Y con la próxima
+    pantalla._agregar_franja()
+
+    pantalla.lista_dias.item(1).setCheckState(Qt.CheckState.Checked)  # Martes
+    pantalla.casilla_camilla.setChecked(True)  # el consultorio de la fixture no es apto camilla: sin cobertura
+    pantalla._agregar_franja()
+
+    pantalla._generar_pdf()
+
+    assert capturado["filas"] == []
 
 
 class _FalsoDialogo:

@@ -44,7 +44,7 @@ import sqlite3
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, Spacer
 
-from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales, resolver_busqueda
+from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales, resolver_busquedas_documento
 from app.negocio.oferta_busqueda_texto import (
     alternativas_planas,
     avisos_planos,
@@ -167,10 +167,11 @@ def generar_pdf_oferta_busqueda(
 
     `excluir` — tripletas (índice de búsqueda, índice de alternativa/día,
     índice de opción dentro de ese día), 0-based, a dejar afuera del
-    documento: pensado para la futura pantalla de previsualización, donde
-    se puede destildar una opción puntual para no ofrecerla (p. ej.
-    porque se prefiere guardar ese consultorio libre para otro
-    profesional) sin descartar el resto de la búsqueda."""
+    documento: lo arma la pantalla de previsualización
+    (`app.gui.pantallas.oferta`), donde se puede destildar una opción
+    puntual para no ofrecerla (p. ej. porque se prefiere guardar ese
+    consultorio libre para otro profesional) sin descartar el resto de
+    la búsqueda."""
     if not busquedas:
         raise ValueError("La búsqueda necesita al menos una franja")
     excluir = excluir or set()
@@ -182,8 +183,8 @@ def generar_pdf_oferta_busqueda(
     decimales = decimales_configurados(conn)
 
     listas_alternativas = [
-        filtrar_excluidas(resolver_busqueda(conn, globales, b).alternativas, i, excluir)
-        for i, b in enumerate(busquedas)
+        filtrar_excluidas(alts, i, excluir)
+        for i, alts in enumerate(resolver_busquedas_documento(conn, globales, busquedas))
     ]
     ids_consultorio = sorted({
         t.id_consultorio for alts in listas_alternativas for alt in alts for op in alt.opciones for t in op.tramos

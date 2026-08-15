@@ -438,3 +438,44 @@ def resolver_busqueda(conn: sqlite3.Connection, globales: CriteriosGlobales, bus
             fecha += timedelta(days=1)
 
     return ResultadoBusqueda(alternativas=alternativas)
+
+
+def _grupos_por_combinacion(busquedas: list[Busqueda]) -> list[list[int]]:
+    """Agrupa índices de búsquedas consecutivas encadenadas con "Y"
+    (`Busqueda.combinacion_con_siguiente`): cada grupo es un paquete que
+    tiene que cubrirse entero o no ofrecerse nada de él. Un grupo termina
+    en la primera búsqueda con combinación "O" (o None, la última)."""
+    if not busquedas:
+        return []
+    grupos: list[list[int]] = []
+    actual = [0]
+    for i in range(len(busquedas) - 1):
+        if busquedas[i].combinacion_con_siguiente == "Y":
+            actual.append(i + 1)
+        else:
+            grupos.append(actual)
+            actual = [i + 1]
+    grupos.append(actual)
+    return grupos
+
+
+def resolver_busquedas_documento(
+    conn: sqlite3.Connection, globales: CriteriosGlobales, busquedas: list[Busqueda],
+) -> list[list[Alternativa]]:
+    """Resuelve todas las búsquedas de un documento y aplica la
+    combinación Y/O entre ellas (`Busqueda.combinacion_con_siguiente`):
+    las búsquedas encadenadas con "Y" forman un paquete que tiene que
+    cubrirse ENTERO — si a alguna del paquete le falta cobertura, ninguna
+    del paquete se ofrece (mismo criterio que "todos los días" dentro de
+    una búsqueda Regular, aplicado ahora entre búsquedas). Las que quedan
+    sueltas (combinación "O", o la última) son independientes: se ofrecen
+    si tienen cobertura, sin condicionar a las demás. Devuelve una lista
+    de alternativas por búsqueda, en el mismo orden que `busquedas`
+    (vacía para las que quedaron descartadas por pertenecer a un paquete
+    incompleto)."""
+    resultados = [resolver_busqueda(conn, globales, b).alternativas for b in busquedas]
+    for grupo in _grupos_por_combinacion(busquedas):
+        if any(not resultados[i] for i in grupo):
+            for i in grupo:
+                resultados[i] = []
+    return resultados

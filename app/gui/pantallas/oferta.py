@@ -9,12 +9,18 @@ en ese momento, no repite el resultado congelado del día que se armó.
 Un documento puede tener varias franjas (una por cada característica de
 búsqueda distinta, p. ej. "lunes y miércoles de mañana" + "viernes de
 tarde"): el formulario arma UNA franja por vez y "Agregar franja" la suma
-a la lista de la búsqueda actual — cada franja se resuelve por separado y
-sus alternativas se listan juntas en el mismo documento (todavía no hay
-combinación Y/O real entre franjas distintas, ver
-`app.negocio.oferta_busqueda_texto.alternativas_planas`). Si no se agrega
-ninguna franja explícita, "Generar" usa directo lo cargado en el
-formulario como franja única (cubre el caso más común sin pasos de más)."""
+a la lista de la búsqueda actual, con su combinación con la próxima franja
+(O: alcanza con que cualquiera tenga cobertura; Y: forman un paquete que
+se ofrece entero o no se ofrece nada de él — ver
+`app.negocio.oferta_busqueda.resolver_busquedas_documento`). Si no se
+agrega ninguna franja explícita, "Generar" usa directo lo cargado en el
+formulario como franja única (cubre el caso más común sin pasos de más).
+
+Antes de generar, se muestra una previsualización
+(`_DialogoPrevisualizacion`) con todas las alternativas encontradas y un
+casillero por opción para destildar puntualmente las que no se quieran
+ofrecer (p. ej. porque se prefiere guardar ese consultorio libre para
+otro profesional) sin descartar el resto de la búsqueda."""
 from __future__ import annotations
 
 import json
@@ -57,13 +63,17 @@ from app.negocio.oferta_busqueda import (
     fecha_inicio_default,
 )
 from app.negocio.mensajes import nombre_para_mensaje
-from app.negocio.oferta_busqueda_texto import resumen_busqueda
+from app.negocio.oferta_busqueda_texto import previsualizar_documento, resumen_busqueda
 from app.repositorio.registro import obtener_repositorio
 
 _COMBINACIONES = [
     ("Sin combinación de consultorios", SIN_COMBINAR),
     ("Combinar, misma unidad", COMBINAR_MISMA_UNIDAD),
     ("Combinar, mismo edificio", COMBINAR_MISMO_EDIFICIO),
+]
+_UNION_FRANJAS = [
+    ("Alcanza con esta franja sola (O)", "O"),
+    ("Hace falta también la próxima (Y)", "Y"),
 ]
 
 
@@ -85,6 +95,51 @@ class _DialogoTexto(QDialog):
         boton_cerrar = QPushButton("Cerrar")
         boton_cerrar.clicked.connect(self.accept)
         layout.addWidget(boton_cerrar)
+
+
+class _DialogoPrevisualizacion(QDialog):
+    """Muestra las alternativas encontradas (ya con la combinación Y/O
+    entre franjas aplicada) con un casillero por opción: destildar una la
+    deja afuera del documento sin descartar el resto de la búsqueda."""
+
+    def __init__(self, filas: list[tuple[int, int, int, str]], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Previsualización de la oferta")
+        self.resize(560, 480)
+        self._filas = filas
+        layout = QVBoxLayout(self)
+
+        if not filas:
+            layout.addWidget(QLabel("No se encontraron alternativas para los criterios cargados."))
+            self.lista = None
+        else:
+            layout.addWidget(QLabel("Destildá las opciones que no querés ofrecer:"))
+            self.lista = QListWidget()
+            for _, _, _, texto in filas:
+                item = QListWidgetItem(texto)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Checked)
+                self.lista.addItem(item)
+            layout.addWidget(self.lista, stretch=1)
+
+        fila_botones = QHBoxLayout()
+        boton_confirmar = QPushButton("Confirmar y generar")
+        boton_confirmar.setObjectName("botonPrimario")
+        boton_confirmar.clicked.connect(self.accept)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        fila_botones.addWidget(boton_confirmar)
+        fila_botones.addWidget(boton_cancelar)
+        layout.addLayout(fila_botones)
+
+    def excluidas(self) -> set[tuple[int, int, int]]:
+        if self.lista is None:
+            return set()
+        excluidas = set()
+        for i in range(self.lista.count()):
+            if self.lista.item(i).checkState() != Qt.CheckState.Checked:
+                excluidas.add(self._filas[i][:3])
+        return excluidas
 
 
 class PantallaOferta(QWidget):
@@ -198,6 +253,12 @@ class PantallaOferta(QWidget):
 
         self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
         form.addWidget(self.casilla_detalle_reducido)
+
+        self.combo_union_franja = QComboBox()
+        for etiqueta, valor in _UNION_FRANJAS:
+            self.combo_union_franja.addItem(etiqueta, valor)
+        form.addWidget(QLabel("Combinación con la próxima franja"))
+        form.addWidget(self.combo_union_franja)
 
         fila_franja = QHBoxLayout()
         boton_agregar_franja = QPushButton("Agregar franja a la búsqueda")
@@ -315,8 +376,12 @@ class PantallaOferta(QWidget):
         busqueda = self._armar_busqueda_actual()
         if busqueda is None:
             return
+        busqueda.combinacion_con_siguiente = self.combo_union_franja.currentData()
         self._franjas.append(busqueda)
-        self.lista_franjas.addItem(resumen_busqueda(busqueda, self.combo_tipo.currentData()))
+        resumen = resumen_busqueda(busqueda, self.combo_tipo.currentData())
+        if busqueda.combinacion_con_siguiente == "Y":
+            resumen += " (Y con la próxima)"
+        self.lista_franjas.addItem(resumen)
         for i in range(self.lista_dias.count()):
             self.lista_dias.item(i).setCheckState(Qt.CheckState.Unchecked)
 
@@ -357,9 +422,21 @@ class PantallaOferta(QWidget):
         if armado is None:
             return
         id_profesional, globales, busquedas = armado
+
+        try:
+            filas = previsualizar_documento(self.conn, id_profesional, globales, busquedas)
+        except ValueError as error:
+            QMessageBox.warning(self, "Oferta de consultorios", str(error))
+            return
+
+        dialogo = _DialogoPrevisualizacion(filas, self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
+            return
+        excluir = dialogo.excluidas()
+
         try:
             id_historial = guardar_busqueda(
-                self.conn, id_profesional, globales, busquedas, set(), fecha_actual(self.conn).isoformat(),
+                self.conn, id_profesional, globales, busquedas, excluir, fecha_actual(self.conn).isoformat(),
             )
             generador(id_historial)
         except ValueError as error:

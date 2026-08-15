@@ -165,3 +165,19 @@ def test_sin_profesional_lanza_error(conn, tmp_path):
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[])
     with pytest.raises(ValueError):
         generar_texto_oferta_busqueda(conn, 999, globales, [_busqueda_simple()])
+
+
+def test_combinacion_y_con_franja_sin_cobertura_descarta_el_paquete(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    franja_1 = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11,
+        combinacion_con_siguiente="Y",
+    )
+    franja_2_sin_cobertura = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=[], hora_desde=9, hora_hasta=11,
+    )
+    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [franja_1, franja_2_sin_cobertura])
+    assert "Sin disponibilidad" in texto
+    assert "Lunes de 9 a 11hs consultorio 1" not in texto  # el paquete se descarta entero, aunque esta franja sí cubría
