@@ -14,6 +14,7 @@ from app.gui.pantallas.aumentos import PantallaAumentos
 from app.gui.pantallas.bloques_rigidos import PantallaBloquesRigidos
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
+from app.gui.pantallas.estado_cuenta import PantallaEstadoCuenta
 from app.gui.pantallas.grilla import GrillaDisponibilidad
 from app.gui.pantallas.imagenes import PantallaImagenes
 from app.gui.pantallas.importacion import PantallaImportacion
@@ -42,6 +43,7 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Archivos varios", lambda conn: PantallaArchivosVarios(conn), categoria="Principal"),
         Seccion("Novedades", lambda conn: PantallaNovedades(conn), categoria="Principal"),
         Seccion("Pagos", lambda conn: PantallaPagos(conn), categoria="Principal"),
+        Seccion("Estado de cuenta", lambda conn: PantallaEstadoCuenta(conn), categoria="Principal"),
         Seccion("Estadísticas", lambda conn: PantallaEstadisticas(conn), categoria="Principal"),
         Seccion("Análisis de aumentos", lambda conn: PantallaAumentos(conn), categoria="Principal"),
         Seccion("Profesionales", pantalla_profesionales, categoria="Catálogos"),
