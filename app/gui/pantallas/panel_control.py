@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.negocio.avance_mes import avanzar_mes
+from app.negocio.backup import generar_backup
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.formato import mes_texto, periodo_mm_aaaa
 from app.negocio.panel_control import Alertas, calcular_alertas, puede_avanzar_mes
@@ -61,6 +62,9 @@ class PanelControl(QWidget):
         self.boton_avanzar.setObjectName("botonPrimario")
         self.boton_avanzar.clicked.connect(self._avanzar_mes)
         fila_boton.addWidget(self.boton_avanzar)
+        boton_backup = QPushButton("Generar backup ahora")
+        boton_backup.clicked.connect(self._generar_backup)
+        fila_boton.addWidget(boton_backup)
         fila_boton.addStretch()
         layout.addLayout(fila_boton)
 
@@ -134,9 +138,21 @@ class PanelControl(QWidget):
             return
         resumen = avanzar_mes(self.conn, periodo_cerrado=periodo)
         self.conn.commit()
+        mensaje_backup = (
+            f"Backup previo generado en:\n{resumen.ruta_backup}\n\n" if resumen.backup_generado
+            else "No se generó backup previo (falta configurar la carpeta de backup).\n\n"
+        )
         QMessageBox.information(
             self, "Avance de mes completado",
-            f"Se traspasó el saldo de {resumen.profesionales_con_traspaso} profesional(es), se cerraron "
+            f"{mensaje_backup}Se traspasó el saldo de {resumen.profesionales_con_traspaso} profesional(es), se cerraron "
             f"{resumen.cuotas_cerradas} cuota(s) y se generó el snapshot #{resumen.id_snapshot}.",
         )
         self.actualizar()
+
+    def _generar_backup(self) -> None:
+        try:
+            ruta = generar_backup(self.conn)
+        except ValueError as error:
+            QMessageBox.warning(self, "Generar backup", str(error))
+            return
+        QMessageBox.information(self, "Generar backup", f"Backup generado en:\n{ruta}")

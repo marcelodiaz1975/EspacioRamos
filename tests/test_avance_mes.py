@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from app.db.init_db import init_database
@@ -165,3 +167,19 @@ def test_avanzar_mes_vacia_historial_de_oferta(conn):
 
     assert resumen.historial_oferta_eliminado == 1
     assert obtener_repositorio(conn, "HistorialOferta").listar() == []
+
+
+def test_avanzar_mes_sin_carpeta_backup_no_falla(conn):
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+    assert resumen.backup_generado is False
+    assert resumen.ruta_backup is None
+
+
+def test_avanzar_mes_genera_backup_previo(conn, tmp_path):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, CarpetaBackup=str(tmp_path / "backups"))
+
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+
+    assert resumen.backup_generado is True
+    assert resumen.ruta_backup is not None
+    assert list(Path(resumen.ruta_backup).glob("*.db"))

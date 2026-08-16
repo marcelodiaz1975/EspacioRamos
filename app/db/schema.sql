@@ -523,5 +523,6 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     MensajesPlural INTEGER NOT NULL DEFAULT 1,
     CantidadDecimales INTEGER NOT NULL DEFAULT 2,
     RutaLogo TEXT,
-    CarpetaBaseArchivos TEXT
+    CarpetaBaseArchivos TEXT,
+    CarpetaBackup TEXT
 );

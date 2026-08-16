@@ -1,9 +1,9 @@
 """Avance de mes (DC-06), subconjunto de las Etapas 4, 6 y 9.
 
 Cubre lo que le compete a liquidaciones, pagos, lista de espera y
-estadísticas: snapshot del mes que se cierra, traspaso de saldo, cierre
-de cuotas del mes cerrado y limpieza de la lista de espera. El resto del
-proceso de 9 pasos del documento (backup previo, oferta de análisis de
+estadísticas: backup previo, snapshot del mes que se cierra, traspaso de
+saldo, cierre de cuotas del mes cerrado y limpieza de la lista de espera.
+El resto del proceso de 9 pasos del documento (oferta de análisis de
 valores, archivo de aisladas, reset del centro de mensajería) pertenece a
 otras etapas (centro de mensajería: Etapa 8; análisis de valores: Etapa
 5) y se integra acá cuando corresponda. El archivo de aisladas del mes
@@ -41,6 +41,7 @@ from app.negocio.archivos_generados import (
     limpiar_liquidaciones_antiguas,
     vaciar_carpeta,
 )
+from app.negocio.backup import generar_backup
 from app.negocio.dias import fecha_actual
 from app.negocio.estadisticas import generar_snapshot
 from app.negocio.historial_oferta import vaciar_historial
@@ -50,6 +51,8 @@ from app.repositorio.registro import obtener_repositorio
 @dataclass
 class ResumenAvanceMes:
     periodo_cerrado: str
+    backup_generado: bool = False
+    ruta_backup: str | None = None
     id_snapshot: int = 0
     profesionales_con_traspaso: int = 0
     cuotas_cerradas: int = 0
@@ -130,6 +133,17 @@ def _limpiar_lista_espera(conn: sqlite3.Connection, *, eliminar_activos_vencidos
     return len(cerrados), vencidos_eliminados
 
 
+def _generar_backup_previo(conn: sqlite3.Connection) -> str | None:
+    """Paso 1 (DC-06): backup de la base de datos y de la carpeta base de
+    archivos antes de tocar nada. Si todavía no se configuró la carpeta
+    de backup, o la copia falla por algún problema de disco/permisos, no
+    bloquea el resto del avance de mes — se informa en el resumen."""
+    try:
+        return str(generar_backup(conn))
+    except (ValueError, OSError):
+        return None
+
+
 def _regenerar_archivos_varios(conn: sqlite3.Connection) -> bool:
     """Paso 9 (Etapa 9): Propuesta y Disponibilidad se regeneran contra el
     estado del mes que arranca y quedan listas en Archivos varios; la
@@ -169,6 +183,8 @@ def avanzar_mes(
     "ofrece evaluar aumentos o saltear" — `aumentos.confirmar_aumento` no
     llama a esta función, así que el llamador es quien conecta ambos)."""
     resumen = ResumenAvanceMes(periodo_cerrado=periodo_cerrado)
+    resumen.ruta_backup = _generar_backup_previo(conn)
+    resumen.backup_generado = resumen.ruta_backup is not None
     resumen.id_snapshot = generar_snapshot(
         conn, periodo_cerrado, porcentaje_aumento_aplicado=porcentaje_aumento_aplicado,
     )

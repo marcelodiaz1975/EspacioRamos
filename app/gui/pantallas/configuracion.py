@@ -31,6 +31,7 @@ _CAMPOS_TEXTO = [
     ("FechaFicticia", "Fecha ficticia (AAAA-MM-DD)"),
     ("RutaLogo", "Ruta del archivo de logo (PNG/JPG)"),
     ("CarpetaBaseArchivos", "Carpeta base de archivos generados"),
+    ("CarpetaBackup", "Carpeta de backup (sincronizada con Google Drive)"),
 ]
 _CAMPOS_NUMERICOS = [
     ("HoraInicioGrilla", "Hora inicio de grilla"),
