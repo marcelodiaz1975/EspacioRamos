@@ -8,7 +8,10 @@ from app.negocio.archivos_generados import (
     aplicar_cambio_codigo,
     carpeta_archivos_varios,
     carpeta_base,
+    carpeta_documentacion_profesional,
+    carpeta_imagenes,
     carpeta_profesional,
+    destino_sin_colision,
     limpiar_liquidaciones_antiguas,
     renombrar_carpeta_profesional,
     vaciar_carpeta,
@@ -133,3 +136,39 @@ def test_aplicar_cambio_codigo_sin_cambios_no_hace_nada(conn, tmp_path):
     aplicar_cambio_codigo(conn, registro, {"CategoriaProfesional": "R", "IdCodigo": "R3"}, date(2026, 8, 15))
 
     assert conn.execute("SELECT COUNT(*) FROM HistorialCodigo").fetchone()[0] == 0
+
+
+def test_carpeta_documentacion_profesional_crea_subcarpeta(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path)
+    carpeta = carpeta_documentacion_profesional(conn, "R1")
+    assert carpeta == tmp_path / "Profesionales" / "R1" / "Documentación"
+    assert carpeta.is_dir()
+
+
+def test_carpeta_imagenes_crea_subcarpeta_por_id(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path)
+    carpeta = carpeta_imagenes(conn, "Consultorio", 7)
+    assert carpeta == tmp_path / "Imagenes" / "Consultorio_7"
+    assert carpeta.is_dir()
+
+
+def test_destino_sin_colision_devuelve_nombre_original_si_no_existe(tmp_path):
+    assert destino_sin_colision(tmp_path, "foto.jpg") == tmp_path / "foto.jpg"
+
+
+def test_destino_sin_colision_agrega_sufijo_si_ya_existe(tmp_path):
+    (tmp_path / "foto.jpg").write_text("x")
+    assert destino_sin_colision(tmp_path, "foto.jpg") == tmp_path / "foto (2).jpg"
+    (tmp_path / "foto (2).jpg").write_text("x")
+    assert destino_sin_colision(tmp_path, "foto.jpg") == tmp_path / "foto (3).jpg"
+
+
+def test_renombrar_carpeta_profesional_conserva_la_subcarpeta_documentacion(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path)
+    carpeta_documentacion_profesional(conn, "R3")  # crea Profesionales/R3/Documentación
+    (tmp_path / "Profesionales" / "R3" / "Documentación" / "dni.pdf").write_text("x")
+
+    renombrar_carpeta_profesional(conn, "R3", "X34")
+
+    assert (tmp_path / "Profesionales" / "X34" / "Documentación" / "dni.pdf").exists()
+    assert not (tmp_path / "Profesionales" / "R3").exists()

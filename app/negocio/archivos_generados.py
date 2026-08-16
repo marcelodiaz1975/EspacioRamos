@@ -1,17 +1,25 @@
-"""Carpetas y limpieza de los documentos que el sistema genera (Propuesta,
-Disponibilidad, Oferta de consultorios, Liquidación): todos se guardan bajo
-una única carpeta base configurada una sola vez (Configuracion.
+"""Carpetas y limpieza de los documentos que el sistema genera o administra
+(Propuesta, Disponibilidad, Oferta de consultorios, Liquidación, fotos de
+edificios/unidades/consultorios, documentación de profesionales): todos se
+guardan bajo una única carpeta base configurada una sola vez (Configuracion.
 CarpetaBaseArchivos), en subcarpetas fijas:
 
     {base}/Archivos varios/Propuesta/
     {base}/Archivos varios/Disponibilidad/
     {base}/Archivos varios/Oferta/
     {base}/Profesionales/{IdCodigo}/
+    {base}/Profesionales/{IdCodigo}/Documentación/
+    {base}/Imagenes/{Alcance}_{Id}/
 
 Los tres primeros son documentos únicos del espacio en general: cada
 regeneración sobrescribe el anterior, no se acumula historial de archivos.
-Profesionales/{IdCodigo} en cambio acumula las liquidaciones mensuales de
-ese profesional en particular.
+Profesionales/{IdCodigo} en cambio acumula las liquidaciones mensuales (y,
+en su subcarpeta Documentación, cualquier archivo del profesional) de ese
+profesional en particular — todo bajo el mismo código, así que se muda
+entero cuando el código cambia (ver `renombrar_carpeta_profesional`).
+Imagenes/{Alcance}_{Id} usa el ID interno (no un nombre editable) para no
+depender de que el operador no le cambie el nombre al edificio/unidad más
+adelante.
 """
 from __future__ import annotations
 
@@ -56,6 +64,35 @@ def carpeta_profesional(conn: sqlite3.Connection, codigo: str) -> Path:
     carpeta = _requerir_carpeta_base(conn) / "Profesionales" / codigo
     carpeta.mkdir(parents=True, exist_ok=True)
     return carpeta
+
+
+def carpeta_documentacion_profesional(conn: sqlite3.Connection, codigo: str) -> Path:
+    """"Profesionales/{codigo}/Documentación" bajo la carpeta base. La crea si hace falta."""
+    carpeta = carpeta_profesional(conn, codigo) / "Documentación"
+    carpeta.mkdir(parents=True, exist_ok=True)
+    return carpeta
+
+
+def carpeta_imagenes(conn: sqlite3.Connection, alcance: str, id_valor: int) -> Path:
+    """"Imagenes/{Alcance}_{Id}" bajo la carpeta base (alcance: "Edificio",
+    "Unidad" o "Consultorio"). La crea si hace falta."""
+    carpeta = _requerir_carpeta_base(conn) / "Imagenes" / f"{alcance}_{id_valor}"
+    carpeta.mkdir(parents=True, exist_ok=True)
+    return carpeta
+
+
+def destino_sin_colision(carpeta: Path, nombre: str) -> Path:
+    """Ruta de destino para copiar `nombre` a `carpeta` sin pisar un
+    archivo existente: si ya hay uno con ese nombre, agrega " (2)", " (3)"
+    etc. antes de la extensión."""
+    destino = carpeta / nombre
+    if not destino.exists():
+        return destino
+    base, ext = destino.stem, destino.suffix
+    i = 2
+    while (carpeta / f"{base} ({i}){ext}").exists():
+        i += 1
+    return carpeta / f"{base} ({i}){ext}"
 
 
 def vaciar_carpeta(carpeta: Path) -> int:

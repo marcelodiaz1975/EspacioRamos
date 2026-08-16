@@ -14,6 +14,7 @@ from app.gui.pantallas.aumentos import PantallaAumentos
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla import GrillaDisponibilidad
+from app.gui.pantallas.imagenes import PantallaImagenes
 from app.gui.pantallas.importacion import PantallaImportacion
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
 from app.gui.pantallas.lista_espera import PantallaListaEspera
@@ -46,6 +47,7 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Edificios", catalogos.pantalla_edificios, categoria="Catálogos"),
         Seccion("Unidades", catalogos.pantalla_unidades, categoria="Catálogos"),
         Seccion("Consultorios", catalogos.pantalla_consultorios, categoria="Catálogos"),
+        Seccion("Imágenes", lambda conn: PantallaImagenes(conn), categoria="Catálogos"),
         Seccion("Responsables", catalogos.pantalla_responsables, categoria="Catálogos"),
         Seccion("Tipos de licencia", catalogos.pantalla_tipos_licencia, categoria="Catálogos"),
         Seccion("Listas editables", catalogos.pantalla_listas_editables, categoria="Catálogos"),
