@@ -90,6 +90,109 @@ def test_sin_llave_seleccionada_boton_entregar_deshabilitado(qtbot, conn):
     assert pantalla.boton_entregar.isEnabled() is False
 
 
+def _crear_edificio_con_unidad(conn, nombre="Ramos 1", departamento="1ro A"):
+    id_edificio = conn.execute("INSERT INTO Edificio (Nombre) VALUES (?)", (nombre,)).lastrowid
+    id_unidad = conn.execute(
+        "INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, ?)", (id_edificio, departamento)
+    ).lastrowid
+    conn.commit()
+    return id_edificio, id_unidad
+
+
+def test_sin_llave_seleccionada_boton_agregar_acceso_deshabilitado(qtbot, conn):
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_agregar_acceso.isEnabled() is False
+
+
+def test_agregar_acceso_edificio_completo(qtbot, conn, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    from app.gui.pantallas.llaves import _DialogoAcceso
+
+    id_llave, _ = _crear_llave_y_profesional(conn)
+    _crear_edificio_con_unidad(conn)
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud_llaves.tabla_widget.selectRow(0)
+
+    monkeypatch.setattr(_DialogoAcceso, "exec", lambda self: QDialog.DialogCode.Accepted)
+    pantalla._agregar_acceso()
+
+    assert pantalla.tabla_accesos.rowCount() == 1
+    assert pantalla.tabla_accesos.item(0, 0).text() == "Ramos 1"
+    assert pantalla.tabla_accesos.item(0, 1).text() == "Todas"
+
+    acceso = conn.execute("SELECT * FROM LlaveAcceso WHERE IdLlave = ?", (id_llave,)).fetchone()
+    assert acceso["IdEdificio"] is not None
+    assert acceso["IdUnidad"] is None
+
+
+def test_agregar_acceso_unidad_puntual_con_descripcion(qtbot, conn, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    from app.gui.pantallas.llaves import _DialogoAcceso
+
+    id_llave, _ = _crear_llave_y_profesional(conn)
+    _, id_unidad = _crear_edificio_con_unidad(conn)
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud_llaves.tabla_widget.selectRow(0)
+
+    def _elegir_unidad(self):
+        indice = self.combo_unidad.findData(id_unidad)
+        self.combo_unidad.setCurrentIndex(indice)
+        self.campo_descripcion.setText("Portón lateral")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAcceso, "exec", _elegir_unidad)
+    pantalla._agregar_acceso()
+
+    assert pantalla.tabla_accesos.item(0, 1).text() == "1ro A"
+    assert pantalla.tabla_accesos.item(0, 2).text() == "Portón lateral"
+
+
+def test_eliminar_acceso(qtbot, conn, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    from app.gui.pantallas.llaves import _DialogoAcceso
+
+    _crear_llave_y_profesional(conn)
+    _crear_edificio_con_unidad(conn)
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud_llaves.tabla_widget.selectRow(0)
+    monkeypatch.setattr(_DialogoAcceso, "exec", lambda self: QDialog.DialogCode.Accepted)
+    pantalla._agregar_acceso()
+    assert pantalla.tabla_accesos.rowCount() == 1
+
+    pantalla.tabla_accesos.selectRow(0)
+    pantalla._eliminar_acceso()
+
+    assert pantalla.tabla_accesos.rowCount() == 0
+
+
+def test_cambiar_de_llave_actualiza_accesos_mostrados(qtbot, conn, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    from app.gui.pantallas.llaves import _DialogoAcceso
+
+    conn.execute("INSERT INTO Llave (Descripcion) VALUES ('Llave A')")
+    conn.execute("INSERT INTO Llave (Descripcion) VALUES ('Llave B')")
+    conn.commit()
+    _crear_edificio_con_unidad(conn)
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+
+    monkeypatch.setattr(_DialogoAcceso, "exec", lambda self: QDialog.DialogCode.Accepted)
+    pantalla.crud_llaves.tabla_widget.selectRow(0)
+    pantalla._agregar_acceso()
+    assert pantalla.tabla_accesos.rowCount() == 1
+
+    pantalla.crud_llaves.tabla_widget.selectRow(1)
+    assert pantalla.tabla_accesos.rowCount() == 0
+
+
 def test_flujo_completo_entregar_y_devolver_via_botones(qtbot, conn, monkeypatch):
     from PySide6.QtWidgets import QDialog
 

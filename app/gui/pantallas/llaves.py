@@ -1,5 +1,6 @@
 """Pantalla de Llaves (sección 3.7): administra las llaves con el CRUD
-genérico y, para la llave seleccionada, su historial de entregas y
+genérico, sus accesos (LlaveAcceso — a qué edificio/unidad abre, sección
+3.7) y, para la llave seleccionada, su historial de entregas y
 devoluciones — reusa app.negocio.llaves.entregar_llave/devolver_llave en
 vez de tocar LlaveProfesional a mano, para no saltarse la validación de
 "un titular por vez" ni el cargo especial de depósito que generan."""
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QSplitter,
@@ -27,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.crud_generico import Campo, PantallaCRUD
 from app.negocio.llaves import devolver_llave, entregar_llave
+from app.repositorio.registro import obtener_repositorio
 
 
 def _opciones_tipo(conn: sqlite3.Connection) -> list[tuple[str, str]]:
@@ -56,10 +59,32 @@ class PantallaLlaves(QWidget):
         ]
         self.crud_llaves = PantallaCRUD(self.conn, "Llave", "", campos)
         self.crud_llaves.tabla_widget.itemSelectionChanged.connect(self._actualizar_tenencias)
+        self.crud_llaves.tabla_widget.itemSelectionChanged.connect(self._actualizar_accesos)
         splitter.addWidget(self.crud_llaves)
 
         panel_tenencias = QWidget()
         layout_tenencias = QVBoxLayout(panel_tenencias)
+
+        layout_tenencias.addWidget(QLabel("Accesos (edificios/unidades que abre)"))
+        self.tabla_accesos = QTableWidget()
+        self.tabla_accesos.setColumnCount(3)
+        self.tabla_accesos.setHorizontalHeaderLabels(["Edificio", "Unidad", "Descripción"])
+        self.tabla_accesos.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla_accesos.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla_accesos.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla_accesos.setMaximumHeight(140)
+        layout_tenencias.addWidget(self.tabla_accesos)
+
+        fila_accesos = QHBoxLayout()
+        self.boton_agregar_acceso = QPushButton("Agregar acceso…")
+        self.boton_agregar_acceso.clicked.connect(self._agregar_acceso)
+        self.boton_eliminar_acceso = QPushButton("Eliminar acceso")
+        self.boton_eliminar_acceso.clicked.connect(self._eliminar_acceso)
+        fila_accesos.addWidget(self.boton_agregar_acceso)
+        fila_accesos.addWidget(self.boton_eliminar_acceso)
+        fila_accesos.addStretch()
+        layout_tenencias.addLayout(fila_accesos)
+
         layout_tenencias.addWidget(QLabel("Historial de tenencia"))
         self.tabla_tenencias = QTableWidget()
         self.tabla_tenencias.setColumnCount(5)
@@ -83,10 +108,62 @@ class PantallaLlaves(QWidget):
 
         layout.addWidget(splitter, stretch=1)
         self._actualizar_tenencias()
+        self._actualizar_accesos()
 
     def actualizar(self) -> None:
         self.crud_llaves.actualizar()
         self._actualizar_tenencias()
+        self._actualizar_accesos()
+
+    def _accesos(self, id_llave: int) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            """
+            SELECT la.*, e.Nombre AS NombreEdificio, u.Departamento
+            FROM LlaveAcceso la
+            JOIN Edificio e ON e.IdEdificio = la.IdEdificio
+            LEFT JOIN Unidad u ON u.IdUnidad = la.IdUnidad
+            WHERE la.IdLlave = ? ORDER BY e.Nombre, u.Departamento
+            """,
+            (id_llave,),
+        ).fetchall()
+
+    def _actualizar_accesos(self) -> None:
+        id_llave = self.crud_llaves.fila_seleccionada_id()
+        self.boton_agregar_acceso.setEnabled(id_llave is not None)
+        self.boton_eliminar_acceso.setEnabled(False)
+        self._accesos_actuales: list[sqlite3.Row] = []
+        self.tabla_accesos.setRowCount(0)
+        if id_llave is None:
+            return
+        self._accesos_actuales = self._accesos(id_llave)
+        self.tabla_accesos.setRowCount(len(self._accesos_actuales))
+        for fila_idx, a in enumerate(self._accesos_actuales):
+            self.tabla_accesos.setItem(fila_idx, 0, QTableWidgetItem(a["NombreEdificio"]))
+            self.tabla_accesos.setItem(fila_idx, 1, QTableWidgetItem(a["Departamento"] or "Todas"))
+            self.tabla_accesos.setItem(fila_idx, 2, QTableWidgetItem(a["DescripcionAcceso"] or ""))
+        self.tabla_accesos.resizeColumnsToContents()
+        self.boton_eliminar_acceso.setEnabled(bool(self._accesos_actuales))
+
+    def _agregar_acceso(self) -> None:
+        id_llave = self.crud_llaves.fila_seleccionada_id()
+        if id_llave is None:
+            return
+        dialogo = _DialogoAcceso(self.conn, self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
+            return
+        obtener_repositorio(self.conn, "LlaveAcceso").crear(IdLlave=id_llave, **dialogo.valores())
+        self.conn.commit()
+        self._actualizar_accesos()
+
+    def _eliminar_acceso(self) -> None:
+        filas = self.tabla_accesos.selectionModel().selectedRows()
+        if not filas:
+            QMessageBox.information(self, "Eliminar acceso", "Seleccioná un acceso para eliminar.")
+            return
+        acceso = self._accesos_actuales[filas[0].row()]
+        obtener_repositorio(self.conn, "LlaveAcceso").eliminar(acceso["IdLlaveAcceso"])
+        self.conn.commit()
+        self._actualizar_accesos()
 
     def _actualizar_tenencias(self) -> None:
         id_llave = self.crud_llaves.fila_seleccionada_id()
@@ -176,6 +253,51 @@ class _DialogoEntrega(QDialog):
             "id_profesional": self.combo_profesional.currentData(),
             "cobrar_deposito": self.casilla_deposito.isChecked(),
             "monto_cobrado": self.spin_monto.value() or None,
+        }
+
+
+class _DialogoAcceso(QDialog):
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.conn = conn
+        self.setWindowTitle("Agregar acceso")
+        layout = QFormLayout(self)
+
+        self.combo_edificio = QComboBox()
+        for f in conn.execute("SELECT IdEdificio, Nombre FROM Edificio ORDER BY Nombre"):
+            self.combo_edificio.addItem(f["Nombre"], f["IdEdificio"])
+        self.combo_edificio.currentIndexChanged.connect(self._cargar_unidades)
+        layout.addRow("Edificio", self.combo_edificio)
+
+        self.combo_unidad = QComboBox()
+        layout.addRow("Unidad", self.combo_unidad)
+        self._cargar_unidades()
+
+        self.campo_descripcion = QLineEdit()
+        self.campo_descripcion.setPlaceholderText("Descripción del acceso (opcional)")
+        layout.addRow("Descripción", self.campo_descripcion)
+
+        botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        botones.accepted.connect(self.accept)
+        botones.rejected.connect(self.reject)
+        layout.addRow(botones)
+
+    def _cargar_unidades(self) -> None:
+        self.combo_unidad.clear()
+        self.combo_unidad.addItem("Todas las unidades del edificio", None)
+        id_edificio = self.combo_edificio.currentData()
+        if id_edificio is None:
+            return
+        for f in self.conn.execute(
+            "SELECT IdUnidad, Departamento FROM Unidad WHERE IdEdificio = ? ORDER BY Departamento", (id_edificio,)
+        ):
+            self.combo_unidad.addItem(f["Departamento"], f["IdUnidad"])
+
+    def valores(self) -> dict:
+        return {
+            "IdEdificio": self.combo_edificio.currentData(),
+            "IdUnidad": self.combo_unidad.currentData(),
+            "DescripcionAcceso": self.campo_descripcion.text().strip() or None,
         }
 
 
