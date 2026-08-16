@@ -11,6 +11,7 @@ from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
 from app.gui.pantallas.aumentos import PantallaAumentos
+from app.gui.pantallas.bloques_rigidos import PantallaBloquesRigidos
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla import GrillaDisponibilidad
@@ -63,6 +64,7 @@ def construir_secciones() -> list[Seccion]:
         Seccion("Placas", catalogos.pantalla_placas, categoria="Catálogos"),
         Seccion("Fechas especiales", catalogos.pantalla_fechas_especiales, categoria="Catálogos"),
         Seccion("Esquema de descuentos", catalogos.pantalla_esquema_descuentos, categoria="Catálogos"),
+        Seccion("Bloques rígidos", lambda conn: PantallaBloquesRigidos(conn), categoria="Catálogos"),
         Seccion("Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria="Configuración"),
         Seccion("Importar planilla", lambda conn: PantallaImportacion(conn), categoria="Configuración"),
     ]
