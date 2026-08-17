@@ -3,7 +3,8 @@ import json
 import pytest
 
 from app.db.init_db import init_database
-from app.db.seed import sembrar_valores_por_defecto
+from app.db.seed import CATEGORIA_MENSAJES_SITUACIONES, MENSAJES_PREDEFINIDOS_SITUACIONES, sembrar_valores_por_defecto
+from app.negocio.mensajes import _DESCRIPCION_SITUACION, _TEXTO_SITUACION_DEFAULT
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -65,6 +66,35 @@ def test_sembrar_es_idempotente(conn):
     sembrar_valores_por_defecto(conn)
     assert len(obtener_repositorio(conn, "BloqueRigido").listar()) == 2
     assert len(obtener_repositorio(conn, "Profesion").listar()) == 12
+    assert len(obtener_repositorio(conn, "MensajePredefinido").listar()) == 5
+
+
+def test_mensajes_predefinidos_situaciones_por_defecto(conn):
+    """Sección 11: "Modelos de mensajes situaciones 1 a 5 — ya definidos,
+    a cargar como predefinidos editables al instalar"."""
+    mensajes = obtener_repositorio(conn, "MensajePredefinido").listar()
+    assert len(mensajes) == 5
+    assert all(m["Categoria"] == CATEGORIA_MENSAJES_SITUACIONES for m in mensajes)
+    assert all(m["Activo"] == 1 for m in mensajes)
+    descripciones = {m["Descripcion"] for m in mensajes}
+    assert descripciones == {
+        "Situación 1 — Deuda sobre tolerancia",
+        "Situación 2 — Liquidación enviada",
+        "Situación 3 — Pendiente de liquidación",
+        "Situación 4 — Plan de pagos, enviada",
+        "Situación 5 — Plan de pagos, pendiente",
+    }
+
+
+def test_mensajes_predefinidos_situaciones_coinciden_con_el_fallback_de_mensajes():
+    """Guarda contra el desvío entre el texto sembrado (app.db.seed) y el
+    texto de emergencia (app.negocio.mensajes._TEXTO_SITUACION_DEFAULT) —
+    tienen que decir lo mismo, uno es la semilla y el otro el resguardo
+    para cuando esa semilla no está."""
+    por_descripcion = {descripcion: mensaje for _, descripcion, mensaje in MENSAJES_PREDEFINIDOS_SITUACIONES}
+    assert len(por_descripcion) == 5
+    for situacion, descripcion in _DESCRIPCION_SITUACION.items():
+        assert por_descripcion[descripcion] == _TEXTO_SITUACION_DEFAULT[situacion]
 
 
 def test_condiciones_normas_por_defecto(conn):

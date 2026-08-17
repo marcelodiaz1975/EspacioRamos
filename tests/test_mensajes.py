@@ -116,6 +116,45 @@ def test_mensaje_situacion_rechaza_categoria_no_r(conn):
         mensaje_situacion(conn, id_prof, PERIODO)
 
 
+def test_mensaje_situacion_usa_la_plantilla_editada(conn, consultorio):
+    """Sección 11: una vez sembrados como predefinidos editables, un
+    cambio en la biblioteca tiene que reflejarse en el mensaje real."""
+    id_prof = _crear_regular(conn, consultorio, Apodo="Male", SaldoCuentaAnterior=50000)
+    mensaje = obtener_repositorio(conn, "MensajePredefinido").listar(
+        Descripcion="Situación 1 — Deuda sobre tolerancia",
+    )[0]
+    obtener_repositorio(conn, "MensajePredefinido").actualizar(
+        mensaje["IdMensaje"], Mensaje="Texto editado a mano para {nombre}, debe {saldo}.",
+    )
+    texto = mensaje_situacion(conn, id_prof, PERIODO)
+    assert texto == "Texto editado a mano para Male, debe $ 50.000,00."
+
+
+def test_mensaje_situacion_usa_fallback_si_la_plantilla_esta_desactivada(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio, Apodo="Male", SaldoCuentaAnterior=50000)
+    mensaje = obtener_repositorio(conn, "MensajePredefinido").listar(
+        Descripcion="Situación 1 — Deuda sobre tolerancia",
+    )[0]
+    obtener_repositorio(conn, "MensajePredefinido").actualizar(mensaje["IdMensaje"], Activo=0)
+    texto = mensaje_situacion(conn, id_prof, PERIODO)
+    assert "Male" in texto
+    assert "50.000" in texto
+
+
+def test_mensaje_situacion_usa_fallback_sin_seed(tmp_path):
+    """Sin sembrar_valores_por_defecto (instalación antigua ya
+    inicializada antes de este cambio) las situaciones siguen andando
+    con el texto fijo — la biblioteca vacía no puede romper el flujo."""
+    conn = init_database(tmp_path / "sin_seed.db")
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Test", Apodo="Male", SaldoCuentaAnterior=50000,
+    )
+    texto = mensaje_situacion(conn, id_prof, PERIODO)
+    assert "Male" in texto
+    assert "50.000" in texto
+    conn.close()
+
+
 def test_lista_con_y_gramatica():
     assert _lista_con_y([]) == ""
     assert _lista_con_y(["X"]) == "X"

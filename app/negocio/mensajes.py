@@ -116,7 +116,53 @@ def determinar_situacion(conn: sqlite3.Connection, id_profesional: int, periodo:
     return "1" if supera_tolerancia else "3"
 
 
+_DESCRIPCION_SITUACION = {
+    "1": "Situación 1 — Deuda sobre tolerancia",
+    "2": "Situación 2 — Liquidación enviada",
+    "3": "Situación 3 — Pendiente de liquidación",
+    "4": "Situación 4 — Plan de pagos, enviada",
+    "5": "Situación 5 — Plan de pagos, pendiente",
+}
+
+# Fallback si el registro sembrado (app.db.seed.MENSAJES_PREDEFINIDOS_SITUACIONES,
+# mismo texto) fue borrado o desactivado — para que las situaciones sigan
+# funcionando aunque la biblioteca de mensajes predefinidos quede vacía.
+_TEXTO_SITUACION_DEFAULT = {
+    "1": (
+        "Hola {nombre}! Te escribimos porque registramos un saldo pendiente de {saldo}. Tenés hasta el fin de "
+        "mes ({dias_remanentes} días de margen) para regularizarlo y no perder los descuentos por horas "
+        "semanales reservadas del próximo período. Los saldos que se trasladan de un mes a otro reciben además "
+        "un ajuste del {ajuste_pct}%."
+    ),
+    "2": "Hola {nombre}! Te enviamos la liquidación del período {periodo}. Cualquier consulta, quedamos atentos.",
+    "3": (
+        "Hola {nombre}! En los próximos días vas a recibir un mensaje automático con el resumen de tu cuenta y, "
+        "apenas esté lista, te enviamos la liquidación de {periodo}."
+    ),
+    "4": (
+        "Hola {nombre}! Te enviamos la liquidación de {periodo}. Recordá que incluye la cuota de tu plan de "
+        "pagos por {monto_cuota}."
+    ),
+    "5": (
+        "Hola {nombre}! En los próximos días vas a recibir el mensaje automático con el resumen de tu cuenta. "
+        "Recordá que, al tener un plan de pagos activo, la cuota correspondiente se descuenta igual aunque "
+        "todavía no se haya enviado la liquidación."
+    ),
+}
+
+
+def _plantilla_situacion(conn: sqlite3.Connection, situacion: str) -> str | None:
+    descripcion = _DESCRIPCION_SITUACION.get(situacion)
+    filas = obtener_repositorio(conn, "MensajePredefinido").listar(Descripcion=descripcion, Activo=1)
+    return filas[0]["Mensaje"] if filas else None
+
+
 def mensaje_situacion(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:
+    """El texto sale de la biblioteca de mensajes predefinidos (sembrada
+    por app.db.seed.sembrar_mensajes_predefinidos, sección 11) cuando hay
+    un registro activo para la situación — así el operador puede ajustar
+    la redacción desde el sistema y que quede. Sin eso, usa el mismo texto
+    como fallback fijo."""
     situacion = determinar_situacion(conn, id_profesional, periodo)
     if situacion is None:
         raise ValueError("Las situaciones del centro de mensajería solo aplican a profesionales categoría R")
@@ -131,33 +177,19 @@ def mensaje_situacion(conn: sqlite3.Connection, id_profesional: int, periodo: st
     ajuste_pct = cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0.0
     dias_remanentes = cfg["DiasEnvioLiquidacionesRemanentes"] if cfg else 5
 
+    variables = {"nombre": nombre, "periodo": periodo_mm_aaaa(periodo)}
     if situacion == "1":
-        return (
-            f"Hola {nombre}! Te escribimos porque registramos un saldo pendiente de {_moneda(saldo_anterior)}. "
-            f"Tenés hasta el fin de mes ({dias_remanentes} días de margen) para regularizarlo y no perder los "
-            f"descuentos por horas semanales reservadas del próximo período. Los saldos que se trasladan de un "
-            f"mes a otro reciben además un ajuste del {ajuste_pct:g}%."
-        )
-    if situacion == "2":
-        return f"Hola {nombre}! Te enviamos la liquidación del período {periodo_mm_aaaa(periodo)}. Cualquier consulta, quedamos atentos."
-    if situacion == "3":
-        return (
-            f"Hola {nombre}! En los próximos días vas a recibir un mensaje automático con el resumen de tu "
-            f"cuenta y, apenas esté lista, te enviamos la liquidación de {periodo_mm_aaaa(periodo)}."
-        )
-    if situacion == "4":
+        variables["saldo"] = _moneda(saldo_anterior)
+        variables["dias_remanentes"] = dias_remanentes
+        variables["ajuste_pct"] = f"{ajuste_pct:g}"
+    elif situacion == "4":
         plan = plan_activo(conn, id_profesional)
         cuota = obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=plan["IdPlan"], PeriodoImputado=periodo)
         monto_cuota = cuota[0]["Monto"] if cuota else plan["ImportePorCuota"]
-        return (
-            f"Hola {nombre}! Te enviamos la liquidación de {periodo_mm_aaaa(periodo)}. Recordá que incluye la "
-            f"cuota de tu plan de pagos por {_moneda(monto_cuota)}."
-        )
-    return (  # situación 5
-        f"Hola {nombre}! En los próximos días vas a recibir el mensaje automático con el resumen de tu cuenta. "
-        f"Recordá que, al tener un plan de pagos activo, la cuota correspondiente se descuenta igual aunque "
-        f"todavía no se haya enviado la liquidación."
-    )
+        variables["monto_cuota"] = _moneda(monto_cuota)
+
+    plantilla = _plantilla_situacion(conn, situacion) or _TEXTO_SITUACION_DEFAULT[situacion]
+    return sustituir_variables(plantilla, variables)
 
 
 # ------------------------------------------------------------------- mensaje grupal (5.4)

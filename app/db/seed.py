@@ -352,6 +352,55 @@ def sembrar_listas_editables(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+CATEGORIA_MENSAJES_SITUACIONES = "Situaciones centro de mensajería"
+
+# Sección 11: "Modelos de mensajes situaciones 1 a 5 — ya definidos, a
+# cargar como predefinidos editables al instalar" (sección 5.3). El texto
+# es el mismo que app.negocio.mensajes usa como fallback fijo si el
+# operador borra o desactiva el registro — mensaje_situacion() busca
+# primero acá para que la redacción se pueda ajustar una vez y quede.
+MENSAJES_PREDEFINIDOS_SITUACIONES = [
+    # Categoria, Descripcion, Mensaje
+    (
+        CATEGORIA_MENSAJES_SITUACIONES, "Situación 1 — Deuda sobre tolerancia",
+        "Hola {nombre}! Te escribimos porque registramos un saldo pendiente de {saldo}. Tenés hasta el fin de "
+        "mes ({dias_remanentes} días de margen) para regularizarlo y no perder los descuentos por horas "
+        "semanales reservadas del próximo período. Los saldos que se trasladan de un mes a otro reciben además "
+        "un ajuste del {ajuste_pct}%.",
+    ),
+    (
+        CATEGORIA_MENSAJES_SITUACIONES, "Situación 2 — Liquidación enviada",
+        "Hola {nombre}! Te enviamos la liquidación del período {periodo}. Cualquier consulta, quedamos atentos.",
+    ),
+    (
+        CATEGORIA_MENSAJES_SITUACIONES, "Situación 3 — Pendiente de liquidación",
+        "Hola {nombre}! En los próximos días vas a recibir un mensaje automático con el resumen de tu cuenta y, "
+        "apenas esté lista, te enviamos la liquidación de {periodo}.",
+    ),
+    (
+        CATEGORIA_MENSAJES_SITUACIONES, "Situación 4 — Plan de pagos, enviada",
+        "Hola {nombre}! Te enviamos la liquidación de {periodo}. Recordá que incluye la cuota de tu plan de "
+        "pagos por {monto_cuota}.",
+    ),
+    (
+        CATEGORIA_MENSAJES_SITUACIONES, "Situación 5 — Plan de pagos, pendiente",
+        "Hola {nombre}! En los próximos días vas a recibir el mensaje automático con el resumen de tu cuenta. "
+        "Recordá que, al tener un plan de pagos activo, la cuota correspondiente se descuenta igual aunque "
+        "todavía no se haya enviado la liquidación.",
+    ),
+]
+
+
+def sembrar_mensajes_predefinidos(conn: sqlite3.Connection) -> None:
+    if not _tabla_vacia(conn, "MensajePredefinido"):
+        return
+    conn.executemany(
+        "INSERT INTO MensajePredefinido (Categoria, Descripcion, Mensaje, Activo) VALUES (?, ?, ?, 1)",
+        MENSAJES_PREDEFINIDOS_SITUACIONES,
+    )
+    conn.commit()
+
+
 def sembrar_condiciones_normas(conn: sqlite3.Connection) -> None:
     if not _tabla_vacia(conn, "CondicionNorma"):
         return
@@ -379,5 +428,6 @@ def sembrar_valores_por_defecto(conn: sqlite3.Connection) -> None:
     sembrar_tipos_licencia(conn)
     sembrar_esquema_descuentos(conn)
     sembrar_listas_editables(conn)
+    sembrar_mensajes_predefinidos(conn)
     sembrar_condiciones_normas(conn)
     sembrar_detalles_complementarios_propuesta(conn)
