@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QLabel, QMessageBox, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -17,7 +17,7 @@ def conn(tmp_path):
 
 def _secciones():
     return [
-        Seccion("Uno", lambda c: QWidget(), categoria="Principal"),
+        Seccion("Uno", lambda c: QWidget(), categoria="Principal", ayuda="Ayuda de Uno."),
         Seccion("Dos", lambda c: QWidget(), categoria="Principal"),
     ]
 
@@ -66,3 +66,44 @@ def test_barra_fecha_ficticia_es_un_qlabel(qtbot, conn):
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
     assert isinstance(ventana._barra_fecha_ficticia, QLabel)
+
+
+def test_f1_muestra_ayuda_de_la_seccion_actual(qtbot, conn, monkeypatch):
+    llamada = {}
+    monkeypatch.setattr(
+        QMessageBox, "information",
+        staticmethod(lambda parent, titulo, texto: llamada.update(titulo=titulo, texto=texto)),
+    )
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+
+    ventana._mostrar_ayuda()
+
+    assert "Uno" in llamada["titulo"]
+    assert llamada["texto"] == "Ayuda de Uno."
+
+
+def test_f1_sin_ayuda_cargada_muestra_mensaje_generico(qtbot, conn, monkeypatch):
+    llamada = {}
+    monkeypatch.setattr(
+        QMessageBox, "information",
+        staticmethod(lambda parent, titulo, texto: llamada.update(titulo=titulo, texto=texto)),
+    )
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    ventana._navegacion.setCurrentRow(2)  # "Dos", sin ayuda cargada
+
+    ventana._mostrar_ayuda()
+
+    assert llamada["texto"]
+
+
+def test_f1_sin_secciones_no_falla(qtbot, conn, monkeypatch):
+    llamado = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: llamado.append(1)))
+    ventana = VentanaPrincipal(conn, [])
+    qtbot.addWidget(ventana)
+
+    ventana._mostrar_ayuda()
+
+    assert llamado == []

@@ -11,13 +11,16 @@ import sqlite3
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
+from app.gui.main_window import Seccion
 from app.negocio.archivos_generados import (
     SUBCARPETA_DISPONIBILIDAD,
+    SUBCARPETA_MANUAL,
     SUBCARPETA_PLACAS,
     SUBCARPETA_PROPUESTA,
     carpeta_archivos_varios,
 )
 from app.pdf.disponibilidad_pdf import generar_pdfs_disponibilidad_por_localidad
+from app.pdf.manual_pdf import generar_pdf_manual
 from app.pdf.placas_pdf import generar_pdf_placas
 from app.pdf.propuesta_pdf import generar_pdfs_propuesta_por_localidad
 
@@ -27,9 +30,10 @@ def _generar_pdfs_placas(conn, directorio: str) -> list[str]:
 
 
 class PantallaArchivosVarios(QWidget):
-    def __init__(self, conn: sqlite3.Connection, parent=None):
+    def __init__(self, conn: sqlite3.Connection, secciones: list[Seccion] | None = None, parent=None):
         super().__init__(parent)
         self.conn = conn
+        self._secciones = secciones or []
         self._armar_ui()
 
     def _armar_ui(self) -> None:
@@ -59,6 +63,10 @@ class PantallaArchivosVarios(QWidget):
         boton_placas = QPushButton("Regenerar Placas")
         boton_placas.clicked.connect(self._regenerar_placas)
         fila.addWidget(boton_placas)
+
+        boton_manual = QPushButton("Regenerar Manual de usuario")
+        boton_manual.clicked.connect(self._regenerar_manual)
+        fila.addWidget(boton_manual)
         fila.addStretch()
         layout.addLayout(fila)
         layout.addStretch()
@@ -75,6 +83,18 @@ class PantallaArchivosVarios(QWidget):
 
     def _regenerar_placas(self) -> None:
         self._regenerar("Placas", SUBCARPETA_PLACAS, _generar_pdfs_placas)
+
+    def _regenerar_manual(self) -> None:
+        if not self._secciones:
+            QMessageBox.warning(
+                self, "Regenerar Manual de usuario", "No hay ayuda contextual disponible para armar el manual.",
+            )
+            return
+        tuplas = [(s.categoria, s.nombre, s.ayuda) for s in self._secciones]
+        self._regenerar(
+            "Manual de usuario", SUBCARPETA_MANUAL,
+            lambda conn, directorio: [generar_pdf_manual(conn, directorio, tuplas)],
+        )
 
     def _regenerar(self, etiqueta: str, subcarpeta: str, generador) -> None:
         try:

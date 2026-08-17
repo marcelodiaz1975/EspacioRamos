@@ -3,6 +3,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.main_window import Seccion
 from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
 from app.repositorio.registro import obtener_repositorio
 
@@ -66,3 +67,23 @@ def test_regenerar_placas_genera_archivo(qtbot, conn, tmp_path):
     generados = list((tmp_path / "Archivos varios" / "Placas").iterdir())
     assert len(generados) == 1
     assert generados[0].name.startswith("Placas Espacio Ramos")
+
+
+def test_regenerar_manual_sin_secciones_avisa_y_no_falla(qtbot, conn):
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._regenerar_manual()  # no debe lanzar, solo avisar
+
+
+def test_regenerar_manual_genera_archivo(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    secciones = [Seccion("Alguna pantalla", lambda c: None, categoria="Principal", ayuda="Texto de ayuda.")]
+    pantalla = PantallaArchivosVarios(conn, secciones)
+    qtbot.addWidget(pantalla)
+
+    pantalla._regenerar_manual()
+
+    generados = list((tmp_path / "Archivos varios" / "Manual").iterdir())
+    assert len(generados) == 1
+    assert generados[0].name == "Manual de usuario.pdf"

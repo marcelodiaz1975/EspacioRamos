@@ -11,12 +11,14 @@ from dataclasses import dataclass
 from typing import Callable
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -30,6 +32,7 @@ class Seccion:
     nombre: str
     fabrica: Callable[[sqlite3.Connection], QWidget]
     categoria: str = "General"
+    ayuda: str = ""
 
 
 _INDICE_PILA = Qt.ItemDataRole.UserRole
@@ -39,6 +42,7 @@ class VentanaPrincipal(QMainWindow):
     def __init__(self, conn: sqlite3.Connection, secciones: list[Seccion]):
         super().__init__()
         self.conn = conn
+        self._secciones = secciones
         self.setWindowTitle("Sistema Espacio Ramos")
         self.resize(1200, 800)
         self.setStyleSheet(HOJA_ESTILOS)
@@ -92,6 +96,19 @@ class VentanaPrincipal(QMainWindow):
         layout.addWidget(self._barra_fecha_ficticia)
         layout.addWidget(fila_principal, stretch=1)
         self.setCentralWidget(contenedor)
+
+        self._atajo_ayuda = QShortcut(Qt.Key.Key_F1, self)
+        self._atajo_ayuda.activated.connect(self._mostrar_ayuda)
+
+    def _mostrar_ayuda(self) -> None:
+        """Ayuda contextual (Etapa 11): F1 muestra el texto de ayuda de
+        la pantalla actualmente visible, tomado de Seccion.ayuda."""
+        indice_pila = self._pila.currentIndex()
+        if indice_pila < 0 or indice_pila >= len(self._secciones):
+            return
+        seccion = self._secciones[indice_pila]
+        texto = seccion.ayuda or "Esta pantalla todavía no tiene ayuda contextual cargada."
+        QMessageBox.information(self, f"Ayuda — {seccion.nombre}", texto)
 
     def _actualizar_barra_fecha_ficticia(self) -> None:
         """Modo de fecha ficticia para testing (sección 2): barra bien
