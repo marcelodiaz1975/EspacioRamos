@@ -47,6 +47,11 @@ QLabel#encabezadoAlerta {{
     font-weight: bold; padding: 4px 8px;
 }}
 
+QLabel#barraFechaFicticia {{
+    background-color: {COLOR_ROJO}; color: {COLOR_TEXTO_CLARO};
+    font-weight: bold; font-size: 12px; padding: 6px 12px;
+}}
+
 QTableView {{ gridline-color: #DDDDDD; }}
 QHeaderView::section {{
     background-color: {COLOR_NIVEL_1}; color: {COLOR_TEXTO_CLARO}; padding: 4px; border: none;
