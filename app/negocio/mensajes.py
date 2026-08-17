@@ -63,7 +63,7 @@ def _lista_con_y(items: list[str]) -> str:
 
 # --------------------------------------------------------------- situaciones (5.3)
 
-def _plan_activo(conn: sqlite3.Connection, id_profesional: int) -> sqlite3.Row | None:
+def plan_activo(conn: sqlite3.Connection, id_profesional: int) -> sqlite3.Row | None:
     filas = obtener_repositorio(conn, "PlanPago").listar(IdProfesional=id_profesional, Estado="Activo")
     return filas[0] if filas else None
 
@@ -76,6 +76,21 @@ def liquidacion_del_periodo(conn: sqlite3.Connection, id_profesional: int, perio
     return max(filas, key=lambda f: f["IdLiquidacion"]) if filas else None
 
 
+def dias_desde_ultimo_pago(conn: sqlite3.Connection, id_profesional: int, hoy: date) -> int | None:
+    """Días entre `hoy` y el último pago real (no ajuste) registrado —
+    orden del centro de mensajería (sección 6.2). None si nunca pagó (se
+    ordena antes que cualquier profesional con pagos, es a quien más
+    tiempo hace falta contactar)."""
+    fila = conn.execute(
+        "SELECT MAX(Fecha) AS ultima FROM HistorialPagos WHERE IdProfesional = ? AND EsAjuste = 0",
+        (id_profesional,),
+    ).fetchone()
+    ultima = fila["ultima"] if fila else None
+    if not ultima:
+        return None
+    return (hoy - date.fromisoformat(ultima)).days
+
+
 def determinar_situacion(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str | None:
     """"1".."5" (sección 5.3), o None si la categoría no tiene liquidación
     mensual propia (solo R aplica; las aisladas usan el detalle de
@@ -84,7 +99,7 @@ def determinar_situacion(conn: sqlite3.Connection, id_profesional: int, periodo:
     if profesional is None or profesional["CategoriaProfesional"] not in CATEGORIAS_CON_LIQUIDACION_MENSUAL:
         return None
 
-    plan = _plan_activo(conn, id_profesional)
+    plan = plan_activo(conn, id_profesional)
     liquidacion = liquidacion_del_periodo(conn, id_profesional, periodo)
     enviada = liquidacion is not None and liquidacion["EstadoEnvio"] == "Enviada"
 
@@ -131,7 +146,7 @@ def mensaje_situacion(conn: sqlite3.Connection, id_profesional: int, periodo: st
             f"cuenta y, apenas esté lista, te enviamos la liquidación de {periodo_mm_aaaa(periodo)}."
         )
     if situacion == "4":
-        plan = _plan_activo(conn, id_profesional)
+        plan = plan_activo(conn, id_profesional)
         cuota = obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=plan["IdPlan"], PeriodoImputado=periodo)
         monto_cuota = cuota[0]["Monto"] if cuota else plan["ImportePorCuota"]
         return (

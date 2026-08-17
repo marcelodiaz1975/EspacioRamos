@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from app.db.init_db import init_database
@@ -6,11 +8,13 @@ from app.negocio.liquidaciones import emitir_liquidacion
 from app.negocio.mensajes import (
     _lista_con_y,
     determinar_situacion,
+    dias_desde_ultimo_pago,
     mensaje_detalle_reserva_aislada,
     mensaje_disponibilidad_horarios,
     mensaje_grupal,
     mensaje_situacion,
     nombre_para_mensaje,
+    plan_activo,
     sustituir_variables,
 )
 from app.negocio.pagos import crear_plan_pago, registrar_pago
@@ -279,3 +283,40 @@ def test_sustituir_variables_respeta_saltos_de_linea():
 def test_sustituir_variables_deja_variables_no_provistas_intactas():
     resultado = sustituir_variables("Hola {nombre}, {otra}", {"nombre": "Ana"})
     assert resultado == "Hola Ana, {otra}"
+
+
+def test_dias_desde_ultimo_pago_nunca_pago_devuelve_none(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio)
+    assert dias_desde_ultimo_pago(conn, id_prof, date(2026, 8, 15)) is None
+
+
+def test_dias_desde_ultimo_pago_usa_el_mas_reciente(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio)
+    obtener_repositorio(conn, "HistorialPagos").crear(IdProfesional=id_prof, Fecha="2026-08-01", Monto=100)
+    obtener_repositorio(conn, "HistorialPagos").crear(IdProfesional=id_prof, Fecha="2026-08-10", Monto=100)
+    assert dias_desde_ultimo_pago(conn, id_prof, date(2026, 8, 15)) == 5
+
+
+def test_dias_desde_ultimo_pago_ignora_ajustes(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio)
+    obtener_repositorio(conn, "HistorialPagos").crear(IdProfesional=id_prof, Fecha="2026-08-01", Monto=100)
+    obtener_repositorio(conn, "HistorialPagos").crear(
+        IdProfesional=id_prof, Fecha="2026-08-14", Monto=30, EsAjuste=1,
+    )
+    assert dias_desde_ultimo_pago(conn, id_prof, date(2026, 8, 15)) == 14
+
+
+def test_plan_activo_devuelve_none_sin_plan(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio)
+    assert plan_activo(conn, id_prof) is None
+
+
+def test_plan_activo_devuelve_el_plan_activo(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio)
+    id_plan = crear_plan_pago(
+        conn, id_profesional=id_prof, monto_refinanciado=1000, porcentaje_interes_mensual=0,
+        cantidad_cuotas=2, mes_ano_inicio=PERIODO,
+    )
+    plan = plan_activo(conn, id_prof)
+    assert plan is not None
+    assert plan["IdPlan"] == id_plan

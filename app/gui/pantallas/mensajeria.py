@@ -2,7 +2,13 @@
 situación (categoría R, sección 5.3) o de reserva aislada (categoría A,
 sección 5.1) para el período elegido, arma el mensaje correspondiente
 reusando app.negocio.mensajes y permite copiarlo al portapapeles. También
-expone el mensaje grupal (sección 5.4)."""
+expone el mensaje grupal (sección 5.4).
+
+Filtros y orden según sección 6.2: "Todos / Solo regulares / Solo
+aisladas / Solo con plan / Con deuda (default) / Liquidación enviada /
+Liquidación sin enviar", ordenado por días desde el último pago
+(descendente) y, a igualdad, por monto adeudado (descendente) — a quién
+hace falta contactar primero."""
 from __future__ import annotations
 
 import sqlite3
@@ -23,15 +29,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.negocio.dias import periodo_actual
+from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.liquidaciones import marcar_estado_envio
 from app.negocio.mensajes import (
     determinar_situacion,
+    dias_desde_ultimo_pago,
     liquidacion_del_periodo,
     mensaje_detalle_reserva_aislada,
     mensaje_grupal,
     mensaje_situacion,
     nombre_para_mensaje,
+    plan_activo,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -44,6 +52,17 @@ _ETIQUETA_SITUACION = {
     "4": "4 — Plan de pagos, enviada",
     "5": "5 — Plan de pagos, pendiente",
 }
+
+_FILTROS = [
+    ("Todos", "todos"),
+    ("Solo regulares", "regulares"),
+    ("Solo aisladas", "aisladas"),
+    ("Solo con plan", "con_plan"),
+    ("Con deuda", "con_deuda"),
+    ("Liquidación enviada", "liq_enviada"),
+    ("Liquidación sin enviar", "liq_sin_enviar"),
+]
+_FILTRO_DEFAULT = "con_deuda"
 
 
 class CentroMensajeria(QWidget):
@@ -63,12 +82,13 @@ class CentroMensajeria(QWidget):
         layout.addWidget(titulo)
 
         fila_filtros = QHBoxLayout()
-        fila_filtros.addWidget(QLabel("Categoría:"))
-        self.combo_categoria = QComboBox()
-        self.combo_categoria.addItem("Regulares (R)", "R")
-        self.combo_categoria.addItem("Reserva aislada (A)", "A")
-        self.combo_categoria.currentIndexChanged.connect(self.actualizar)
-        fila_filtros.addWidget(self.combo_categoria)
+        fila_filtros.addWidget(QLabel("Filtro:"))
+        self.combo_filtro = QComboBox()
+        for etiqueta, clave in _FILTROS:
+            self.combo_filtro.addItem(etiqueta, clave)
+        self.combo_filtro.setCurrentIndex([clave for _, clave in _FILTROS].index(_FILTRO_DEFAULT))
+        self.combo_filtro.currentIndexChanged.connect(self.actualizar)
+        fila_filtros.addWidget(self.combo_filtro)
 
         fila_filtros.addWidget(QLabel("Período:"))
         self.campo_periodo = QLineEdit()
@@ -114,13 +134,15 @@ class CentroMensajeria(QWidget):
 
     def actualizar(self) -> None:
         periodo = self._periodo()
-        categoria = self.combo_categoria.currentData()
-        self._profesionales = obtener_repositorio(self.conn, "Profesional").listar(CategoriaProfesional=categoria)
+        filtro = self.combo_filtro.currentData()
+        self._profesionales = self._listar_filtrados(periodo, filtro)
+        self._profesionales.sort(key=lambda p: self._clave_orden(p), reverse=True)
 
         self._actualizando_tabla = True
         try:
             self.tabla.setRowCount(len(self._profesionales))
             for fila_idx, profesional in enumerate(self._profesionales):
+                categoria = profesional["CategoriaProfesional"]
                 nombre = f"{nombre_para_mensaje(profesional)} ({profesional['Apellido']})"
                 self.tabla.setItem(fila_idx, 0, QTableWidgetItem(nombre))
                 self.tabla.setItem(fila_idx, 1, QTableWidgetItem(f"$ {profesional['SaldoCuentaAnterior']:,.2f}"))
@@ -135,6 +157,45 @@ class CentroMensajeria(QWidget):
             self._actualizando_tabla = False
         self.tabla.resizeColumnsToContents()
         self.texto_mensaje.clear()
+
+    def _listar_filtrados(self, periodo: str, filtro: str) -> list[sqlite3.Row]:
+        """Base = profesionales de categoría R o A (las únicas con
+        contenido propio en este centro de mensajería: situaciones 5.3 o
+        detalle de reservas 5.1), acotada según el filtro elegido."""
+        candidatos = [
+            p for p in obtener_repositorio(self.conn, "Profesional").listar()
+            if p["CategoriaProfesional"] in ("R", "A")
+        ]
+        if filtro == "regulares":
+            return [p for p in candidatos if p["CategoriaProfesional"] == "R"]
+        if filtro == "aisladas":
+            return [p for p in candidatos if p["CategoriaProfesional"] == "A"]
+        if filtro == "con_plan":
+            return [p for p in candidatos if plan_activo(self.conn, p["IdProfesional"]) is not None]
+        if filtro == "con_deuda":
+            return [p for p in candidatos if (p["SaldoCuentaAnterior"] or 0) > 0]
+        if filtro == "liq_enviada":
+            return [
+                p for p in candidatos
+                if p["CategoriaProfesional"] == "R" and self._enviada(p["IdProfesional"], periodo)
+            ]
+        if filtro == "liq_sin_enviar":
+            return [
+                p for p in candidatos
+                if p["CategoriaProfesional"] == "R" and not self._enviada(p["IdProfesional"], periodo)
+            ]
+        return candidatos  # "todos"
+
+    def _enviada(self, id_profesional: int, periodo: str) -> bool:
+        liquidacion = liquidacion_del_periodo(self.conn, id_profesional, periodo)
+        return liquidacion is not None and liquidacion["EstadoEnvio"] == "Enviada"
+
+    def _clave_orden(self, profesional: sqlite3.Row) -> tuple[float, float]:
+        """Días desde el último pago (mayor a menor) y, a igualdad, monto
+        adeudado (mayor a menor) — sección 6.2. Nunca pagó = infinito, va
+        primero."""
+        dias = dias_desde_ultimo_pago(self.conn, profesional["IdProfesional"], fecha_actual(self.conn))
+        return (float("inf") if dias is None else dias, profesional["SaldoCuentaAnterior"] or 0.0)
 
     def _item_enviada(self, profesional: sqlite3.Row, categoria: str, periodo: str) -> QTableWidgetItem:
         """Check "enviada" del centro de mensajería (sección 6.2): marcable
@@ -169,7 +230,7 @@ class CentroMensajeria(QWidget):
         if not filas:
             return
         profesional = self._profesionales[filas[0].row()]
-        categoria = self.combo_categoria.currentData()
+        categoria = profesional["CategoriaProfesional"]
         try:
             if categoria == "R":
                 texto = mensaje_situacion(self.conn, profesional["IdProfesional"], self._periodo())
