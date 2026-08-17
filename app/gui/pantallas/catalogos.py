@@ -8,6 +8,7 @@ from __future__ import annotations
 import sqlite3
 
 from app.gui.crud_generico import Campo, PantallaCRUD
+from app.negocio.listas_editables import opciones_lista
 
 
 def _opciones_edificio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
@@ -90,7 +91,7 @@ def pantalla_responsables(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Nombre", "Nombre", requerido=True),
         Campo("Celular", "Celular"),
         Campo("Email", "Email"),
-        Campo("Rol", "Rol"),
+        Campo("Rol", "Rol", tipo="combo", opciones=opciones_lista("RolResponsable"), combo_editable=True),
         Campo("EsContactoPrincipal", "Contacto principal", tipo="booleano"),
         Campo("AptoPDF", "Apto para figurar en PDF", tipo="booleano"),
         Campo("Activo", "Activo", tipo="booleano"),
@@ -210,7 +211,7 @@ def pantalla_fechas_especiales(conn: sqlite3.Connection) -> PantallaCRUD:
     campos = [
         Campo("Fecha", "Fecha (AAAA-MM-DD)", requerido=True),
         Campo("Descripcion", "Descripción"),
-        Campo("Tipo", "Tipo"),
+        Campo("Tipo", "Tipo", tipo="combo", opciones=opciones_lista("TipoFechaEspecial")),
         Campo("Activo", "Activo", tipo="booleano"),
     ]
     return PantallaCRUD(conn, "FechasEspeciales", "Fechas especiales", campos)

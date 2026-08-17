@@ -71,7 +71,7 @@ def test_crear_ausencia_persiste(qtbot, conn):
     panel = pantalla.panel_ausencias
     panel.campo_desde.setText("2026-09-01")
     panel.campo_hasta.setText("2026-09-03")
-    panel.campo_motivo.setText("Congreso")
+    panel.combo_motivo.setEditText("Congreso")
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
     assert panel.tabla.item(0, 3).text() == "Congreso"

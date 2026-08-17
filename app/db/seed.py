@@ -247,7 +247,7 @@ DETALLES_COMPLEMENTARIOS_PROPUESTA = [
 ]
 
 LISTAS_EDITABLES = {
-    "CondicionFiscal": ["Responsable Inscripto", "Monotributo", "Consumidor Final", "Exento"],
+    "CondicionFiscal": ["Consumidor Final", "Responsable Inscripto", "Monotributo", "Exento"],
     "MedioPago": ["Sobre en buzón", "Dinero en mano", "Transferencia a cta Celeste", "Transferencia a cta Marcelo"],
     "CuentaReceptora": ["CA Banco Macro - Celeste", "CA Banco Hipotecario - Marcelo", "CA Banco Patagonia - Marcelo"],
     "TipoFechaEspecial": ["Feriado nacional", "Día no laborable", "Paro general", "Paro de transporte",

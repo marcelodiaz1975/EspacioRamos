@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.negocio.dias import fecha_actual, periodo_actual
+from app.negocio.listas_editables import valores_lista
 from app.negocio.pagos import cancelar_plan, crear_plan_pago, registrar_pago
 from app.repositorio.registro import obtener_repositorio
 
@@ -90,9 +91,22 @@ class _PanelRegistrarPago(QWidget):
         form.addWidget(QLabel("Fecha"))
         form.addWidget(self.campo_fecha)
 
-        self.campo_medio_pago = QLineEdit()
+        self.combo_medio_pago = QComboBox()
+        self.combo_medio_pago.setEditable(True)
+        for valor in valores_lista(self.conn, "MedioPago"):
+            self.combo_medio_pago.addItem(valor)
+        self.combo_medio_pago.currentTextChanged.connect(self._actualizar_visibilidad_cuenta_receptora)
         form.addWidget(QLabel("Medio de pago"))
-        form.addWidget(self.campo_medio_pago)
+        form.addWidget(self.combo_medio_pago)
+
+        self.etiqueta_cuenta_receptora = QLabel("Cuenta receptora (transferencias)")
+        self.combo_cuenta_receptora = QComboBox()
+        self.combo_cuenta_receptora.setEditable(True)
+        for valor in valores_lista(self.conn, "CuentaReceptora"):
+            self.combo_cuenta_receptora.addItem(valor)
+        form.addWidget(self.etiqueta_cuenta_receptora)
+        form.addWidget(self.combo_cuenta_receptora)
+        self._actualizar_visibilidad_cuenta_receptora()
 
         self.campo_periodo = QLineEdit()
         self.campo_periodo.setPlaceholderText("AAAA-MM (a qué período se imputa)")
@@ -110,14 +124,23 @@ class _PanelRegistrarPago(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(5)
-        self.tabla.setHorizontalHeaderLabels(["Profesional", "Fecha", "Monto", "Medio de pago", "Período imputado"])
+        self.tabla.setColumnCount(6)
+        self.tabla.setHorizontalHeaderLabels(
+            ["Profesional", "Fecha", "Monto", "Medio de pago", "Cuenta receptora", "Período imputado"]
+        )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
 
         self.campo_fecha.setText(fecha_actual(self.conn).isoformat())
+
+    def _actualizar_visibilidad_cuenta_receptora(self, *_args) -> None:
+        """Sección 3.6: CuentaReceptora "solo para transferencias" — se
+        oculta salvo que el medio de pago elegido sea una transferencia."""
+        es_transferencia = "transferencia" in self.combo_medio_pago.currentText().lower()
+        self.etiqueta_cuenta_receptora.setVisible(es_transferencia)
+        self.combo_cuenta_receptora.setVisible(es_transferencia)
 
     def actualizar(self) -> None:
         registros = obtener_repositorio(self.conn, "HistorialPagos").listar()
@@ -129,7 +152,8 @@ class _PanelRegistrarPago(QWidget):
             etiqueta_monto = f"$ {r['Monto']:,.2f}" + (" (ajuste)" if r["EsAjuste"] else "")
             self.tabla.setItem(i, 2, QTableWidgetItem(etiqueta_monto))
             self.tabla.setItem(i, 3, QTableWidgetItem(r["MedioPago"] or ""))
-            self.tabla.setItem(i, 4, QTableWidgetItem(r["PeriodoImputado"] or ""))
+            self.tabla.setItem(i, 4, QTableWidgetItem(r["CuentaReceptora"] or ""))
+            self.tabla.setItem(i, 5, QTableWidgetItem(r["PeriodoImputado"] or ""))
         self.tabla.resizeColumnsToContents()
 
     def _registrar(self) -> None:
@@ -137,11 +161,13 @@ class _PanelRegistrarPago(QWidget):
         if monto <= 0:
             QMessageBox.warning(self, "Registrar pago", "El monto debe ser mayor a cero.")
             return
+        es_transferencia = "transferencia" in self.combo_medio_pago.currentText().lower()
         try:
             registrar_pago(
                 self.conn, id_profesional=self.combo_profesional.currentData(), monto=monto,
                 fecha=self.campo_fecha.text().strip() or None,
-                medio_pago=self.campo_medio_pago.text().strip() or None,
+                medio_pago=self.combo_medio_pago.currentText().strip() or None,
+                cuenta_receptora=self.combo_cuenta_receptora.currentText().strip() if es_transferencia else None,
                 periodo_imputado=self.campo_periodo.text().strip() or None,
                 es_ajuste=self.casilla_ajuste.isChecked(),
             )

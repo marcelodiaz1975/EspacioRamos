@@ -41,6 +41,12 @@ class Campo:
     tipo: str = "texto"  # "texto" | "texto_largo" | "numero" | "booleano" | "combo"
     opciones: Callable[[sqlite3.Connection], list[tuple]] | None = None
     requerido: bool = False
+    combo_editable: bool = False
+    """Solo para tipo="combo": si el combo acepta texto libre además de las
+    opciones sugeridas — para catálogos abiertos (p. ej. CondicionFiscal)
+    a diferencia de los realmente cerrados (p. ej. TipoFechaEspecial, que
+    feriados.py compara por string exacto: un valor fuera de catálogo ahí
+    rompe en silencio el descuento del 100%)."""
 
 
 class PantallaCRUD(QWidget):
@@ -188,12 +194,15 @@ class _DialogoRegistro(QDialog):
             return entrada
         if campo.tipo == "combo":
             entrada = QComboBox()
+            entrada.setEditable(campo.combo_editable)
             for valor_opcion, etiqueta_opcion in campo.opciones(self.conn):
                 entrada.addItem(etiqueta_opcion, valor_opcion)
             if valor is not None:
                 indice = entrada.findData(valor)
                 if indice >= 0:
                     entrada.setCurrentIndex(indice)
+                elif campo.combo_editable:
+                    entrada.setEditText(str(valor))
             return entrada
         if campo.tipo == "texto_largo":
             entrada = QPlainTextEdit()
@@ -226,7 +235,11 @@ class _DialogoRegistro(QDialog):
             if campo.tipo == "booleano":
                 resultado[campo.nombre] = 1 if entrada.isChecked() else 0
             elif campo.tipo == "combo":
-                resultado[campo.nombre] = entrada.currentData()
+                if campo.combo_editable:
+                    texto = entrada.currentText().strip()
+                    resultado[campo.nombre] = texto or None
+                else:
+                    resultado[campo.nombre] = entrada.currentData()
             elif campo.tipo == "texto_largo":
                 texto = entrada.toPlainText().strip()
                 resultado[campo.nombre] = texto or None

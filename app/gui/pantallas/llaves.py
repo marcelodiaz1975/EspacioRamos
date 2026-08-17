@@ -28,12 +28,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.crud_generico import Campo, PantallaCRUD
+from app.negocio.listas_editables import opciones_lista
 from app.negocio.llaves import devolver_llave, entregar_llave
 from app.repositorio.registro import obtener_repositorio
-
-
-def _opciones_tipo(conn: sqlite3.Connection) -> list[tuple[str, str]]:
-    return [("Edificio", "Edificio"), ("Unidad", "Unidad"), ("No especificada", "No especificada")]
 
 
 class PantallaLlaves(QWidget):
@@ -52,7 +49,7 @@ class PantallaLlaves(QWidget):
         splitter = QSplitter()
         campos = [
             Campo("Descripcion", "Descripción"),
-            Campo("Tipo", "Tipo", tipo="combo", opciones=_opciones_tipo),
+            Campo("Tipo", "Tipo", tipo="combo", opciones=opciones_lista("TipoLlave")),
             Campo("ValorDepositoActual", "Depósito actual", tipo="numero"),
             Campo("ValorDepositoAnterior", "Depósito anterior", tipo="numero"),
             Campo("Activo", "Activo", tipo="booleano"),

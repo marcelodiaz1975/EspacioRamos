@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.licencias import crear_licencia
+from app.negocio.listas_editables import valores_lista
 from app.negocio.pagos import TIPOS_CARGO, crear_cargo_especial
 from app.negocio.vacaciones import crear_vacacion
 from app.repositorio.registro import obtener_repositorio
@@ -242,9 +243,12 @@ class _PanelAusencias(QWidget):
         self.campo_hasta.setPlaceholderText("AAAA-MM-DD")
         form.addWidget(QLabel("Hasta"))
         form.addWidget(self.campo_hasta)
-        self.campo_motivo = QLineEdit()
+        self.combo_motivo = QComboBox()
+        self.combo_motivo.setEditable(True)
+        for valor in valores_lista(self.conn, "MotivoAusencia"):
+            self.combo_motivo.addItem(valor)
         form.addWidget(QLabel("Motivo"))
-        form.addWidget(self.campo_motivo)
+        form.addWidget(self.combo_motivo)
         boton = QPushButton("Crear ausencia")
         boton.setObjectName("botonPrimario")
         boton.clicked.connect(self._crear)
@@ -276,7 +280,7 @@ class _PanelAusencias(QWidget):
             crear_ausencia(
                 self.conn, id_profesional=self.combo_profesional.currentData(),
                 fecha_desde=self.campo_desde.text().strip(), fecha_hasta=self.campo_hasta.text().strip(),
-                motivo=self.campo_motivo.text().strip() or None,
+                motivo=self.combo_motivo.currentText().strip() or None,
             )
         except ValueError as error:
             QMessageBox.warning(self, "Crear ausencia", str(error))

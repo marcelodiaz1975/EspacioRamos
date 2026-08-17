@@ -3,6 +3,7 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.crud_generico import _DialogoRegistro
 from app.gui.pantallas.profesionales import pantalla_profesionales
 from app.repositorio.registro import obtener_repositorio
 
@@ -53,6 +54,18 @@ def test_pantalla_profesionales_muestra_cabeza_de_equipo(qtbot, conn):
         i for i in range(pantalla.crud_profesionales.tabla_widget.rowCount()) if pantalla.crud_profesionales.tabla_widget.item(i, 1).text() == "Ruiz"
     )
     assert "Gómez" in pantalla.crud_profesionales.tabla_widget.item(fila_equipo, 20).text()
+
+
+def test_condicion_fiscal_es_combo_editable_con_default_consumidor_final(qtbot, conn):
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.crud_profesionales.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    combo = dialogo._entradas["CondicionFiscal"]
+    assert combo.isEditable() is True
+    assert combo.itemText(0) == "Consumidor Final"
+    combo.setEditText("Otra condición")
+    assert dialogo.valores()["CondicionFiscal"] == "Otra condición"
 
 
 def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_path, monkeypatch):

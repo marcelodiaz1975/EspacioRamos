@@ -2,6 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.crud_generico import _DialogoRegistro
 from app.gui.pantallas import catalogos
 
 
@@ -91,3 +92,32 @@ def test_pantalla_gastos_operativos_muestra_alcance(qtbot, conn):
     pantalla = catalogos.pantalla_gastos_operativos(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla_widget.item(0, 4).text() == "Espacio general"
+
+
+def test_fechas_especiales_tipo_es_combo_cerrado(qtbot, conn):
+    """Sección 3.17 + 8.2: el Tipo tiene que salir de ListasEditables, no
+    ser texto libre — feriados.py compara por string exacto, un typo acá
+    rompe en silencio el descuento del 100% (hallazgo de la auditoría)."""
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    combo_tipo = dialogo._entradas["Tipo"]
+    assert combo_tipo.isEditable() is False
+    textos = [combo_tipo.itemText(i) for i in range(combo_tipo.count())]
+    assert "Feriado nacional" in textos
+    assert textos[0] == "Feriado nacional"
+
+
+def test_responsables_rol_es_combo_editable(qtbot, conn):
+    """Rol es un catálogo abierto (sección 8.2): sugiere los valores
+    sembrados pero admite texto libre, a diferencia de Tipo de fecha
+    especial."""
+    pantalla = catalogos.pantalla_responsables(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    combo_rol = dialogo._entradas["Rol"]
+    assert combo_rol.isEditable() is True
+    combo_rol.setEditText("Rol inventado")
+    assert dialogo.valores()["Rol"] == "Rol inventado"

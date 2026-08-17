@@ -52,6 +52,49 @@ def test_registrar_pago_descuenta_saldo_actual(qtbot, conn):
     assert pantalla.panel_pagos.tabla.rowCount() == 1
 
 
+def test_registrar_pago_medio_no_transferencia_no_guarda_cuenta_receptora(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    panel.combo_medio_pago.setCurrentText("Sobre en buzón")
+    panel.spin_monto.setValue(1000)
+
+    panel._registrar()
+
+    fila = conn.execute("SELECT MedioPago, CuentaReceptora FROM HistorialPagos").fetchone()
+    assert fila["MedioPago"] == "Sobre en buzón"
+    assert fila["CuentaReceptora"] is None
+
+
+def test_registrar_pago_transferencia_guarda_cuenta_receptora(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    panel.combo_medio_pago.setCurrentText("Transferencia a cta Celeste")
+    panel.combo_cuenta_receptora.setCurrentText("CA Banco Macro - Celeste")
+    panel.spin_monto.setValue(1000)
+
+    panel._registrar()
+
+    fila = conn.execute("SELECT MedioPago, CuentaReceptora FROM HistorialPagos").fetchone()
+    assert fila["MedioPago"] == "Transferencia a cta Celeste"
+    assert fila["CuentaReceptora"] == "CA Banco Macro - Celeste"
+
+
+def test_cuenta_receptora_se_oculta_salvo_transferencia(qtbot, conn):
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+
+    panel.combo_medio_pago.setCurrentText("Sobre en buzón")
+    assert panel.combo_cuenta_receptora.isHidden() is True
+
+    panel.combo_medio_pago.setCurrentText("Transferencia a cta Marcelo")
+    assert panel.combo_cuenta_receptora.isHidden() is False
+
+
 def test_crear_plan_de_pagos_persiste_y_genera_cuotas(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaPagos(conn)

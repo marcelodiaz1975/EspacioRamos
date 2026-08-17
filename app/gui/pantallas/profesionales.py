@@ -22,6 +22,7 @@ from app.gui.crud_generico import Campo, PantallaCRUD
 from app.negocio.archivos_generados import aplicar_cambio_codigo
 from app.negocio.dias import fecha_actual
 from app.negocio.documentacion_profesional import agregar_documento, eliminar_documento, listar_documentos
+from app.negocio.listas_editables import opciones_lista
 from app.repositorio.registro import obtener_repositorio
 
 _CATEGORIAS = [
@@ -64,7 +65,10 @@ def _campos_profesional() -> list[Campo]:
         Campo("IdCodigo", "Código"),
         Campo("DNI", "DNI"),
         Campo("CUIT", "CUIT"),
-        Campo("CondicionFiscal", "Condición fiscal"),
+        Campo(
+            "CondicionFiscal", "Condición fiscal", tipo="combo",
+            opciones=opciones_lista("CondicionFiscal"), combo_editable=True,
+        ),
         Campo("FechaNacimiento", "Fecha de nacimiento (AAAA-MM-DD)"),
         Campo("Domicilio", "Domicilio"),
         Campo("DomicilioLocalidad", "Localidad"),

@@ -3,6 +3,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.crud_generico import _DialogoRegistro
 from app.gui.pantallas.llaves import PantallaLlaves
 
 
@@ -28,6 +29,19 @@ def _crear_llave_y_profesional(conn):
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     conn.commit()
     return id_llave, id_profesional
+
+
+def test_llave_tipo_lee_valores_de_listas_editables(qtbot, conn):
+    """El combo Tipo tenía los 3 valores hardcodeados en Python — si el
+    admin los editaba desde la pantalla Listas editables, no tenía ningún
+    efecto. Ahora tiene que leerlos de ahí (sección 8.2)."""
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.crud_llaves.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    combo_tipo = dialogo._entradas["Tipo"]
+    textos = [combo_tipo.itemText(i) for i in range(combo_tipo.count())]
+    assert textos == ["Unidad", "Edificio", "No especificada"]
 
 
 def test_seleccionar_llave_sin_tenencias_deshabilita_devolver(qtbot, conn):
