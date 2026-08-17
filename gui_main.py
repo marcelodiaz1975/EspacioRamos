@@ -2,12 +2,13 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.db.connection import DB_PATH_DEFAULT
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion, VentanaPrincipal
+from app.negocio.instancia_unica import BloqueoInstanciaUnica, InstanciaYaAbierta
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
 from app.gui.pantallas.aumentos import PantallaAumentos
@@ -74,13 +75,24 @@ def construir_secciones() -> list[Seccion]:
 
 def main() -> None:
     db_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DB_PATH_DEFAULT
+
+    app = QApplication(sys.argv)
+
+    bloqueo = BloqueoInstanciaUnica(db_path)
+    try:
+        bloqueo.adquirir()
+    except InstanciaYaAbierta as error:
+        QMessageBox.critical(None, "Sistema Espacio Ramos", str(error))
+        sys.exit(1)
+
     conn = init_database(db_path)
     sembrar_valores_por_defecto(conn)
 
-    app = QApplication(sys.argv)
     ventana = VentanaPrincipal(conn, construir_secciones())
     ventana.show()
-    sys.exit(app.exec())
+    codigo_salida = app.exec()
+    bloqueo.liberar()
+    sys.exit(codigo_salida)
 
 
 if __name__ == "__main__":
