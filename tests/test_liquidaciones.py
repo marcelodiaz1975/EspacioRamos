@@ -6,7 +6,7 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.dias import fecha_a_dia_semana
-from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion
+from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion, marcar_estado_envio
 from app.negocio.pagos import crear_cargo_especial, crear_plan_pago, marcar_cuota_pagada, registrar_pago
 from app.negocio.valores import obtener_porcentaje_descuento
 from app.repositorio.registro import obtener_repositorio
@@ -379,6 +379,37 @@ def test_emitir_liquidacion_rechaza_reemitir_periodo_anterior_a_uno_ya_emitido(c
 
     with pytest.raises(ValueError):
         emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-08", fecha_emision="2026-09-15")
+
+
+def test_marcar_estado_envio_falla_sin_liquidacion_emitida(conn):
+    id_prof = _crear_profesional(conn)
+    with pytest.raises(ValueError):
+        marcar_estado_envio(conn, id_profesional=id_prof, periodo=PERIODO, enviada=True)
+
+
+def test_marcar_estado_envio_marca_y_revierte(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+
+    marcar_estado_envio(conn, id_profesional=id_prof, periodo=PERIODO, enviada=True)
+    ultima = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_prof, Periodo=PERIODO)[0]
+    assert ultima["EstadoEnvio"] == "Enviada"
+
+    marcar_estado_envio(conn, id_profesional=id_prof, periodo=PERIODO, enviada=False)
+    ultima = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_prof, Periodo=PERIODO)[0]
+    assert ultima["EstadoEnvio"] == "No enviada"
+
+
+def test_marcar_estado_envio_actua_sobre_la_ultima_emision(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    id_liq_1, _ = emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+    id_liq_2, _ = emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-05")
+
+    marcar_estado_envio(conn, id_profesional=id_prof, periodo=PERIODO, enviada=True)
+
+    repo = obtener_repositorio(conn, "LiquidacionEmitida")
+    assert repo.obtener(id_liq_2)["EstadoEnvio"] == "Enviada"
+    assert repo.obtener(id_liq_1)["EstadoEnvio"] == "No enviada"
 
 
 def test_reserva_agregada_sin_emision_previa_se_cobra_completa(conn, consultorio):

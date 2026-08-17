@@ -68,7 +68,10 @@ def _plan_activo(conn: sqlite3.Connection, id_profesional: int) -> sqlite3.Row |
     return filas[0] if filas else None
 
 
-def _liquidacion_del_periodo(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> sqlite3.Row | None:
+def liquidacion_del_periodo(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> sqlite3.Row | None:
+    """Última emisión de LiquidacionEmitida para (profesional, período), o
+    None si todavía no se emitió ninguna — la misma noción de "última" que
+    usa `liquidaciones.emitir_liquidacion`/`marcar_estado_envio`."""
     filas = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
     return max(filas, key=lambda f: f["IdLiquidacion"]) if filas else None
 
@@ -82,7 +85,7 @@ def determinar_situacion(conn: sqlite3.Connection, id_profesional: int, periodo:
         return None
 
     plan = _plan_activo(conn, id_profesional)
-    liquidacion = _liquidacion_del_periodo(conn, id_profesional, periodo)
+    liquidacion = liquidacion_del_periodo(conn, id_profesional, periodo)
     enviada = liquidacion is not None and liquidacion["EstadoEnvio"] == "Enviada"
 
     if plan is not None:

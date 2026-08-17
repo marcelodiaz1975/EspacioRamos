@@ -820,3 +820,16 @@ def emitir_liquidacion(
     repo_prof.actualizar(id_profesional, SaldoCuentaActual=(profesional["SaldoCuentaActual"] or 0.0) + delta)
 
     return id_liquidacion, liquidacion
+
+
+def marcar_estado_envio(conn: sqlite3.Connection, *, id_profesional: int, periodo: str, enviada: bool) -> None:
+    """Check "enviada" del centro de mensajería (sección 6.2): "marcable y
+    reversible", habilita la situación 2/4 de esa liquidación. Actúa sobre
+    la última emisión del período — no hay otra a la que pueda referirse
+    un check que vive fuera de la pantalla de liquidación."""
+    repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
+    previas = repo_liq.listar(IdProfesional=id_profesional, Periodo=periodo)
+    if not previas:
+        raise ValueError(f"Todavía no se emitió ninguna liquidación de {periodo} para este profesional.")
+    ultima = max(previas, key=lambda f: f["IdLiquidacion"])
+    repo_liq.actualizar(ultima["IdLiquidacion"], EstadoEnvio="Enviada" if enviada else "No enviada")
