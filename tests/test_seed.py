@@ -39,6 +39,23 @@ def test_profesiones_por_defecto(conn):
     assert "Nutrición" in nombres
 
 
+def test_fonoaudiologia_y_psicopedagogia_tienen_desplegable_de_tratamiento(conn):
+    """Sección 8.1: son las dos únicas profesiones con "(desplegable)" —
+    el resto tiene un único tratamiento por defecto, sin opciones."""
+    repo = obtener_repositorio(conn, "Profesion")
+    fono = repo.listar(Nombre="Fonoaudiología")[0]
+    psp = repo.listar(Nombre="Psicopedagogía")[0]
+    psico = repo.listar(Nombre="Psicología")[0]
+
+    assert fono["TieneMultiplesTratamientos"] == 1
+    assert fono["OpcionesTratamientoMasculino"] == "Fgo.,Lic."
+    assert fono["OpcionesTratamientoFemenino"] == "Fga.,Lic."
+    assert psp["TieneMultiplesTratamientos"] == 1
+    assert psp["OpcionesTratamientoMasculino"] == "Psp.,Lic."
+    assert psico["TieneMultiplesTratamientos"] == 0
+    assert psico["OpcionesTratamientoMasculino"] is None
+
+
 def test_esquema_descuentos_tope_25(conn):
     tramos = obtener_repositorio(conn, "EsquemaDescuentos").listar()
     assert max(t["PorcentajeDescuento"] for t in tramos) == 25

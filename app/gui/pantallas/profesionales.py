@@ -23,6 +23,7 @@ from app.negocio.archivos_generados import aplicar_cambio_codigo
 from app.negocio.dias import fecha_actual
 from app.negocio.documentacion_profesional import agregar_documento, eliminar_documento, listar_documentos
 from app.negocio.listas_editables import opciones_lista
+from app.negocio.profesionales import normalizar_cuit, opciones_tratamiento, sugerir_codigo, tratamiento_sugerido
 from app.repositorio.registro import obtener_repositorio
 
 _CATEGORIAS = [
@@ -60,11 +61,11 @@ def _campos_profesional() -> list[Campo]:
         Campo("Apellido", "Apellido", requerido=True),
         Campo("NombrePila", "Nombre"),
         Campo("Apodo", "Apodo"),
-        Campo("Tratamiento", "Tratamiento"),
+        Campo("Tratamiento", "Tratamiento", tipo="combo", opciones=lambda conn: [], combo_editable=True),
         Campo("Sexo", "Sexo", tipo="combo", opciones=_opciones_sexo),
         Campo("IdCodigo", "Código"),
         Campo("DNI", "DNI"),
-        Campo("CUIT", "CUIT"),
+        Campo("CUIT", "CUIT", normalizar=normalizar_cuit),
         Campo(
             "CondicionFiscal", "Condición fiscal", tipo="combo",
             opciones=opciones_lista("CondicionFiscal"), combo_editable=True,
@@ -90,6 +91,61 @@ def _campos_profesional() -> list[Campo]:
     ]
 
 
+def _al_abrir_dialogo_nuevo(dialogo) -> None:
+    """Sección 3.4: sugiere el código (según categoría) y pre-completa el
+    tratamiento (según profesión y sexo) apenas se abre "Nuevo registro".
+    Cada uno se recalcula mientras el operador no haya tocado ese campo a
+    mano (se compara contra la última sugerencia, no contra "vacío", para
+    no pisar un valor que sí escribieron); ambos quedan editables antes
+    de confirmar."""
+    conn = dialogo.conn
+    combo_categoria = dialogo._entradas["CategoriaProfesional"]
+    campo_codigo = dialogo._entradas["IdCodigo"]
+    combo_profesion = dialogo._entradas["IdProfesion"]
+    combo_sexo = dialogo._entradas["Sexo"]
+    combo_tratamiento = dialogo._entradas["Tratamiento"]
+
+    ultimo_codigo_sugerido = [None]
+
+    def _actualizar_codigo() -> None:
+        categoria = combo_categoria.currentData()
+        if categoria is None:
+            return
+        sugerido = sugerir_codigo(conn, categoria)
+        actual = campo_codigo.text().strip()
+        if actual in ("", ultimo_codigo_sugerido[0]):
+            campo_codigo.setText(sugerido)
+            ultimo_codigo_sugerido[0] = sugerido
+
+    ultimo_tratamiento_sugerido = [None]
+
+    def _actualizar_tratamiento() -> None:
+        id_profesion = combo_profesion.currentData()
+        sexo = combo_sexo.currentData()
+        opciones = opciones_tratamiento(conn, id_profesion, sexo)
+        sugerido = tratamiento_sugerido(conn, id_profesion, sexo)
+        actual = combo_tratamiento.currentText().strip()
+
+        combo_tratamiento.blockSignals(True)
+        combo_tratamiento.clear()
+        for opcion in opciones:
+            combo_tratamiento.addItem(opcion)
+        combo_tratamiento.blockSignals(False)
+
+        if actual in ("", ultimo_tratamiento_sugerido[0]):
+            nuevo = sugerido or ""
+            combo_tratamiento.setEditText(nuevo)
+            ultimo_tratamiento_sugerido[0] = nuevo
+        else:
+            combo_tratamiento.setEditText(actual)
+
+    combo_categoria.currentIndexChanged.connect(_actualizar_codigo)
+    combo_profesion.currentIndexChanged.connect(_actualizar_tratamiento)
+    combo_sexo.currentIndexChanged.connect(_actualizar_tratamiento)
+    _actualizar_codigo()
+    _actualizar_tratamiento()
+
+
 class PantallaProfesionales(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -103,6 +159,7 @@ class PantallaProfesionales(QWidget):
         self.crud_profesionales = PantallaCRUD(
             self.conn, "Profesional", "Profesionales", _campos_profesional(),
             al_actualizar=self._al_actualizar_profesional,
+            al_abrir_dialogo=_al_abrir_dialogo_nuevo,
         )
         self.crud_profesionales.tabla_widget.itemSelectionChanged.connect(self._actualizar_documentacion)
         splitter.addWidget(self.crud_profesionales)

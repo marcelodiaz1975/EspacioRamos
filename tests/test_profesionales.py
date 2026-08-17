@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.crud_generico import _DialogoRegistro
-from app.gui.pantallas.profesionales import pantalla_profesionales
+from app.gui.pantallas.profesionales import _al_abrir_dialogo_nuevo, _campos_profesional, pantalla_profesionales
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -66,6 +66,68 @@ def test_condicion_fiscal_es_combo_editable_con_default_consumidor_final(qtbot, 
     assert combo.itemText(0) == "Consumidor Final"
     combo.setEditText("Otra condición")
     assert dialogo.valores()["CondicionFiscal"] == "Otra condición"
+
+
+def _nuevo_dialogo_con_hook(conn, qtbot):
+    dialogo = _DialogoRegistro(conn, _campos_profesional(), "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    _al_abrir_dialogo_nuevo(dialogo)
+    return dialogo
+
+
+def test_nuevo_profesional_sugiere_codigo_de_la_categoria_por_defecto(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    assert dialogo._entradas["IdCodigo"].text() == "R1"
+
+
+def test_sugerencia_de_codigo_se_actualiza_al_cambiar_categoria(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    combo_categoria = dialogo._entradas["CategoriaProfesional"]
+    combo_categoria.setCurrentIndex(combo_categoria.findData("X"))
+    assert dialogo._entradas["IdCodigo"].text() == "X1"
+
+
+def test_sugerencia_de_codigo_no_pisa_una_edicion_manual(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    campo_codigo = dialogo._entradas["IdCodigo"]
+    campo_codigo.setText("R99")
+
+    combo_categoria = dialogo._entradas["CategoriaProfesional"]
+    combo_categoria.setCurrentIndex(combo_categoria.findData("X"))
+
+    assert campo_codigo.text() == "R99"
+
+
+def test_nuevo_profesional_pre_completa_tratamiento(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    combo_profesion = dialogo._entradas["IdProfesion"]
+    id_psicologia = obtener_repositorio(conn, "Profesion").listar(Nombre="Psicología")[0]["IdProfesion"]
+    combo_profesion.setCurrentIndex(combo_profesion.findData(id_psicologia))
+    combo_sexo = dialogo._entradas["Sexo"]
+    combo_sexo.setCurrentIndex(combo_sexo.findData("Masculino"))
+    assert dialogo._entradas["Tratamiento"].currentText() == "Lic."
+
+
+def test_tratamiento_ofrece_desplegable_para_fonoaudiologia(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    combo_profesion = dialogo._entradas["IdProfesion"]
+    id_fono = obtener_repositorio(conn, "Profesion").listar(Nombre="Fonoaudiología")[0]["IdProfesion"]
+    combo_profesion.setCurrentIndex(combo_profesion.findData(id_fono))
+    combo_sexo = dialogo._entradas["Sexo"]
+    combo_sexo.setCurrentIndex(combo_sexo.findData("Femenino"))
+
+    combo_tratamiento = dialogo._entradas["Tratamiento"]
+    opciones = [combo_tratamiento.itemText(i) for i in range(combo_tratamiento.count())]
+    assert opciones == ["Fga.", "Lic."]
+    assert combo_tratamiento.currentText() == "Fga."
+
+
+def test_cuit_se_normaliza_al_guardar(qtbot, conn):
+    dialogo = _DialogoRegistro(conn, _campos_profesional(), "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    dialogo._entradas["Apellido"].setText("Gómez")
+    dialogo._entradas["CUIT"].setText("20-12345678-9")
+    assert dialogo.valores()["CUIT"] == "20123456789"
 
 
 def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_path, monkeypatch):

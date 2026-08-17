@@ -13,19 +13,20 @@ DIAS_LUNES_A_SABADO = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "S�
 DIAS_LUNES_A_VIERNES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
 
 PROFESIONES = [
-    # Nombre, NombreMasculino, NombreFemenino, TratamientoDefaultMasculino, TratamientoDefaultFemenino
-    ("Psicología", "Psicólogo", "Psicóloga", "Lic.", "Lic."),
-    ("Coaching", "Coach", "Coach", "Coach", "Coach"),
-    ("Counseling", "Counselor", "Counselor", "Counselor", "Counselor"),
-    ("Fonoaudiología", "Fonoaudiólogo", "Fonoaudióloga", "Fgo. o Lic.", "Fga. o Lic."),
-    ("Medicina clínica", "Médico clínico", "Médica clínica", "Dr.", "Dra."),
-    ("Nutrición", "Nutricionista", "Nutricionista", "Lic.", "Lic."),
-    ("Profesorado", "Profesor", "Profesora", "Prof.", "Prof."),
-    ("Psicopedagogía", "Psicopedagogo", "Psicopedagoga", "Psp. o Lic.", "Psp. o Lic."),
-    ("Psiquiatría", "Psiquiatra", "Psiquiatra", "Dr.", "Dra."),
-    ("Terapista hipnótico", "Terapista hipnótico", "Terapista hipnótica", "Tta.", "Tta."),
-    ("Terapista holístico", "Terapista holístico", "Terapista holística", "Tta.", "Tta."),
-    ("Terapista vibracional", "Terapista vibracional", "Terapista vibracional", "Tta.", "Tta."),
+    # Nombre, NombreMasculino, NombreFemenino, TratDefaultM, TratDefaultF,
+    # TieneMultiplesTratamientos, OpcionesTratamientoMasculino, OpcionesTratamientoFemenino
+    ("Psicología", "Psicólogo", "Psicóloga", "Lic.", "Lic.", 0, None, None),
+    ("Coaching", "Coach", "Coach", "Coach", "Coach", 0, None, None),
+    ("Counseling", "Counselor", "Counselor", "Counselor", "Counselor", 0, None, None),
+    ("Fonoaudiología", "Fonoaudiólogo", "Fonoaudióloga", "Fgo. o Lic.", "Fga. o Lic.", 1, "Fgo.,Lic.", "Fga.,Lic."),
+    ("Medicina clínica", "Médico clínico", "Médica clínica", "Dr.", "Dra.", 0, None, None),
+    ("Nutrición", "Nutricionista", "Nutricionista", "Lic.", "Lic.", 0, None, None),
+    ("Profesorado", "Profesor", "Profesora", "Prof.", "Prof.", 0, None, None),
+    ("Psicopedagogía", "Psicopedagogo", "Psicopedagoga", "Psp. o Lic.", "Psp. o Lic.", 1, "Psp.,Lic.", "Psp.,Lic."),
+    ("Psiquiatría", "Psiquiatra", "Psiquiatra", "Dr.", "Dra.", 0, None, None),
+    ("Terapista hipnótico", "Terapista hipnótico", "Terapista hipnótica", "Tta.", "Tta.", 0, None, None),
+    ("Terapista holístico", "Terapista holístico", "Terapista holística", "Tta.", "Tta.", 0, None, None),
+    ("Terapista vibracional", "Terapista vibracional", "Terapista vibracional", "Tta.", "Tta.", 0, None, None),
 ]
 
 TIPOS_LICENCIA = [
@@ -301,7 +302,8 @@ def sembrar_profesiones(conn: sqlite3.Connection) -> None:
         return
     conn.executemany(
         "INSERT INTO Profesion (Nombre, NombreMasculino, NombreFemenino, "
-        "TratamientoDefaultMasculino, TratamientoDefaultFemenino) VALUES (?, ?, ?, ?, ?)",
+        "TratamientoDefaultMasculino, TratamientoDefaultFemenino, TieneMultiplesTratamientos, "
+        "OpcionesTratamientoMasculino, OpcionesTratamientoFemenino) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         PROFESIONES,
     )
     conn.commit()

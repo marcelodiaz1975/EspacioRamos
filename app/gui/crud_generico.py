@@ -47,12 +47,16 @@ class Campo:
     a diferencia de los realmente cerrados (p. ej. TipoFechaEspecial, que
     feriados.py compara por string exacto: un valor fuera de catálogo ahí
     rompe en silencio el descuento del 100%)."""
+    normalizar: Callable[[str], str] | None = None
+    """Solo para tipo="texto": transforma el texto tipeado antes de
+    guardarlo (p. ej. CUIT sin guiones — sección 3.4)."""
 
 
 class PantallaCRUD(QWidget):
     def __init__(
         self, conn: sqlite3.Connection, tabla: str, titulo: str, campos: list[Campo], parent=None,
         al_actualizar: Callable[[sqlite3.Row, dict], None] | None = None,
+        al_abrir_dialogo: Callable[[QDialog], None] | None = None,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -60,6 +64,12 @@ class PantallaCRUD(QWidget):
         self.campos = campos
         self.repositorio = obtener_repositorio(conn, tabla)
         self.al_actualizar = al_actualizar
+        # al_abrir_dialogo: llamado con el diálogo recién construido, antes de
+        # mostrarlo, solo al crear un registro nuevo — para pantallas que
+        # necesitan sugerir/reaccionar entre campos del mismo formulario (p.
+        # ej. Profesionales: código sugerido según categoría) sin acoplar eso
+        # al CRUD genérico.
+        self.al_abrir_dialogo = al_abrir_dialogo
         self._armar_ui(titulo)
         self.actualizar()
 
@@ -123,6 +133,8 @@ class PantallaCRUD(QWidget):
 
     def _nuevo(self) -> None:
         dialogo = _DialogoRegistro(self.conn, self.campos, "Nuevo registro")
+        if self.al_abrir_dialogo:
+            self.al_abrir_dialogo(dialogo)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             self.repositorio.crear(**dialogo.valores())
             self.actualizar()
@@ -248,5 +260,7 @@ class _DialogoRegistro(QDialog):
                 resultado[campo.nombre] = float(texto) if texto else None
             else:
                 texto = entrada.text().strip()
+                if texto and campo.normalizar:
+                    texto = campo.normalizar(texto)
                 resultado[campo.nombre] = texto or None
         return resultado
