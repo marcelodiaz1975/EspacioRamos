@@ -60,3 +60,46 @@ def generar_backup(conn: sqlite3.Connection, momento: datetime | None = None) ->
         shutil.copytree(base_archivos, destino / "Archivos", dirs_exist_ok=True)
 
     return destino
+
+
+def buscar_backup_mas_reciente(carpeta: Path) -> Path | None:
+    """La más reciente de las subcarpetas "Backup AAAA-MM-DD HHhMM" de
+    `carpeta` (orden alfabético == orden cronológico, por el formato de
+    fecha usado). None si no hay ninguna."""
+    if not carpeta.is_dir():
+        return None
+    candidatos = sorted(p for p in carpeta.iterdir() if p.is_dir() and p.name.startswith("Backup "))
+    return candidatos[-1] if candidatos else None
+
+
+def restaurar_backup(carpeta_backups: Path, db_path: Path) -> Path:
+    """Instalación en máquina nueva (sección 2: "restauración automática
+    desde Google Drive"): busca el backup más reciente dentro de
+    `carpeta_backups` (la carpeta de Drive que el operador ya tiene
+    sincronizada en la máquina nueva) y restaura ahí la base de datos y
+    la carpeta de archivos generados. Devuelve la carpeta de backup que
+    se usó."""
+    origen = buscar_backup_mas_reciente(Path(carpeta_backups))
+    if origen is None:
+        raise ValueError(f"No se encontró ningún backup en {carpeta_backups}.")
+    archivos_db = list(origen.glob("*.db"))
+    if not archivos_db:
+        raise ValueError(f"El backup en {origen} no tiene ningún archivo de base de datos.")
+
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(archivos_db[0], db_path)
+
+    origen_archivos = origen / "Archivos"
+    if origen_archivos.is_dir():
+        from app.db.connection import get_connection
+
+        conn_restaurada = get_connection(db_path)
+        try:
+            base_archivos = carpeta_base(conn_restaurada)
+        finally:
+            conn_restaurada.close()
+        if base_archivos is not None:
+            shutil.copytree(origen_archivos, base_archivos, dirs_exist_ok=True)
+
+    return origen

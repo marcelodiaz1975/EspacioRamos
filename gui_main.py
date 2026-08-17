@@ -2,13 +2,12 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from app.db.connection import DB_PATH_DEFAULT
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion, VentanaPrincipal
-from app.negocio.instancia_unica import BloqueoInstanciaUnica, InstanciaYaAbierta
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
 from app.gui.pantallas.aumentos import PantallaAumentos
@@ -29,6 +28,8 @@ from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.pantallas.panel_control import PanelControl
 from app.gui.pantallas.profesionales import pantalla_profesionales
 from app.gui.pantallas.reservas import PantallaReservas
+from app.negocio.backup import restaurar_backup
+from app.negocio.instancia_unica import BloqueoInstanciaUnica, InstanciaYaAbierta
 
 
 def construir_secciones() -> list[Seccion]:
@@ -73,10 +74,37 @@ def construir_secciones() -> list[Seccion]:
     ]
 
 
+def _ofrecer_restaurar_backup(db_path: Path) -> None:
+    """Instalación en máquina nueva (sección 2): si no hay base de datos
+    todavía, ofrece restaurar el último backup desde una carpeta de
+    Google Drive que el operador ya tenga sincronizada en esta máquina
+    (ver app.negocio.backup — el backup en sí ya asume esa carpeta, acá
+    solo se recorre en sentido inverso)."""
+    respuesta = QMessageBox.question(
+        None, "Sistema Espacio Ramos",
+        "No se encontró una base de datos en esta máquina.\n\n"
+        "¿Querés restaurar el último backup desde una carpeta de Google Drive ya sincronizada acá?",
+    )
+    if respuesta != QMessageBox.StandardButton.Yes:
+        return
+    carpeta = QFileDialog.getExistingDirectory(None, "Elegir la carpeta de backups de Google Drive")
+    if not carpeta:
+        return
+    try:
+        origen = restaurar_backup(Path(carpeta), db_path)
+    except ValueError as error:
+        QMessageBox.warning(None, "Restaurar backup", str(error))
+        return
+    QMessageBox.information(None, "Restaurar backup", f"Se restauró: {origen.name}")
+
+
 def main() -> None:
     db_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DB_PATH_DEFAULT
 
     app = QApplication(sys.argv)
+
+    if not db_path.exists():
+        _ofrecer_restaurar_backup(db_path)
 
     bloqueo = BloqueoInstanciaUnica(db_path)
     try:
