@@ -53,3 +53,16 @@ def test_regenerar_disponibilidad_genera_archivo(qtbot, conn, tmp_path):
     generados = list((tmp_path / "Archivos varios" / "Disponibilidad").iterdir())
     assert len(generados) == 1
     assert generados[0].name.startswith("Disponibilidad Espacio Ramos Consultorios")
+
+
+def test_regenerar_placas_genera_archivo(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla._regenerar_placas()
+
+    generados = list((tmp_path / "Archivos varios" / "Placas").iterdir())
+    assert len(generados) == 1
+    assert generados[0].name.startswith("Placas Espacio Ramos")

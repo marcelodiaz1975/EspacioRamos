@@ -7,6 +7,7 @@ CarpetaBaseArchivos), en subcarpetas fijas:
     {base}/Archivos varios/Propuesta/
     {base}/Archivos varios/Disponibilidad/
     {base}/Archivos varios/Oferta/
+    {base}/Archivos varios/Placas/
     {base}/Profesionales/{IdCodigo}/
     {base}/Profesionales/{IdCodigo}/Documentación/
     {base}/Imagenes/{Alcance}_{Id}/
@@ -31,6 +32,7 @@ from pathlib import Path
 SUBCARPETA_PROPUESTA = "Propuesta"
 SUBCARPETA_DISPONIBILIDAD = "Disponibilidad"
 SUBCARPETA_OFERTA = "Oferta"
+SUBCARPETA_PLACAS = "Placas"
 
 _RETENCION_LIQUIDACIONES_ANIOS = 1
 

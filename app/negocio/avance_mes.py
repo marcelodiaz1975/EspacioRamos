@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from app.negocio.archivos_generados import (
     SUBCARPETA_DISPONIBILIDAD,
     SUBCARPETA_OFERTA,
+    SUBCARPETA_PLACAS,
     SUBCARPETA_PROPUESTA,
     carpeta_archivos_varios,
     carpeta_base,
@@ -145,19 +146,21 @@ def _generar_backup_previo(conn: sqlite3.Connection) -> str | None:
 
 
 def _regenerar_archivos_varios(conn: sqlite3.Connection) -> bool:
-    """Paso 9 (Etapa 9): Propuesta y Disponibilidad se regeneran contra el
-    estado del mes que arranca y quedan listas en Archivos varios; la
-    carpeta de Oferta se vacía entera (esas búsquedas ya no aplican al mes
-    nuevo). Si todavía no se configuró la carpeta base, se salta sin
-    romper el resto del avance de mes — el operador la configura cuando
-    quiera empezar a usar esta parte."""
+    """Paso 9 (Etapa 9): Propuesta, Disponibilidad y Placas se regeneran
+    contra el estado del mes que arranca y quedan listas en Archivos
+    varios; la carpeta de Oferta se vacía entera (esas búsquedas ya no
+    aplican al mes nuevo). Si todavía no se configuró la carpeta base, se
+    salta sin romper el resto del avance de mes — el operador la
+    configura cuando quiera empezar a usar esta parte."""
     if carpeta_base(conn) is None:
         return False
     from app.pdf.disponibilidad_pdf import generar_pdfs_disponibilidad_por_localidad
+    from app.pdf.placas_pdf import generar_pdf_placas
     from app.pdf.propuesta_pdf import generar_pdfs_propuesta_por_localidad
 
     generar_pdfs_propuesta_por_localidad(conn, str(carpeta_archivos_varios(conn, SUBCARPETA_PROPUESTA)))
     generar_pdfs_disponibilidad_por_localidad(conn, str(carpeta_archivos_varios(conn, SUBCARPETA_DISPONIBILIDAD)))
+    generar_pdf_placas(conn, str(carpeta_archivos_varios(conn, SUBCARPETA_PLACAS)))
     return True
 
 

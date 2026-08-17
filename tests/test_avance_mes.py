@@ -152,6 +152,7 @@ def test_avanzar_mes_regenera_archivos_varios_y_limpia_liquidaciones_antiguas(co
     assert list(carpeta_archivos_varios(conn, "Oferta").iterdir()) == []
     assert any((tmp_path / "Archivos varios" / "Propuesta").iterdir())
     assert any((tmp_path / "Archivos varios" / "Disponibilidad").iterdir())
+    assert any((tmp_path / "Archivos varios" / "Placas").iterdir())
 
 
 def test_avanzar_mes_vacia_historial_de_oferta(conn):

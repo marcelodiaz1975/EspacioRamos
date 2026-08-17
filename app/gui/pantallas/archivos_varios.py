@@ -1,19 +1,29 @@
 """Archivos varios (Etapa 9): regenerar a demanda, contra el estado actual
-del sistema, los documentos únicos del espacio en general — Propuesta y
-Disponibilidad — que se guardan en Archivos varios/Propuesta y Archivos
-varios/Disponibilidad bajo la carpeta base configurada. También se
-regeneran solos en el avance de mes (`app.negocio.avance_mes`); esta
-pantalla es para cuando hace falta actualizarlos en el medio del mes (p.
-ej. después de dar de alta un edificio nuevo)."""
+del sistema, los documentos únicos del espacio en general — Propuesta,
+Disponibilidad y Placas — que se guardan en su subcarpeta bajo Archivos
+varios en la carpeta base configurada. También se regeneran solos en el
+avance de mes (`app.negocio.avance_mes`); esta pantalla es para cuando
+hace falta actualizarlos en el medio del mes (p. ej. después de dar de
+alta un edificio nuevo)."""
 from __future__ import annotations
 
 import sqlite3
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
-from app.negocio.archivos_generados import SUBCARPETA_DISPONIBILIDAD, SUBCARPETA_PROPUESTA, carpeta_archivos_varios
+from app.negocio.archivos_generados import (
+    SUBCARPETA_DISPONIBILIDAD,
+    SUBCARPETA_PLACAS,
+    SUBCARPETA_PROPUESTA,
+    carpeta_archivos_varios,
+)
 from app.pdf.disponibilidad_pdf import generar_pdfs_disponibilidad_por_localidad
+from app.pdf.placas_pdf import generar_pdf_placas
 from app.pdf.propuesta_pdf import generar_pdfs_propuesta_por_localidad
+
+
+def _generar_pdfs_placas(conn, directorio: str) -> list[str]:
+    return [generar_pdf_placas(conn, directorio)]
 
 
 class PantallaArchivosVarios(QWidget):
@@ -45,6 +55,10 @@ class PantallaArchivosVarios(QWidget):
         boton_disponibilidad = QPushButton("Regenerar Disponibilidad")
         boton_disponibilidad.clicked.connect(self._regenerar_disponibilidad)
         fila.addWidget(boton_disponibilidad)
+
+        boton_placas = QPushButton("Regenerar Placas")
+        boton_placas.clicked.connect(self._regenerar_placas)
+        fila.addWidget(boton_placas)
         fila.addStretch()
         layout.addLayout(fila)
         layout.addStretch()
@@ -58,6 +72,9 @@ class PantallaArchivosVarios(QWidget):
         self._regenerar(
             "Disponibilidad", SUBCARPETA_DISPONIBILIDAD, generar_pdfs_disponibilidad_por_localidad,
         )
+
+    def _regenerar_placas(self) -> None:
+        self._regenerar("Placas", SUBCARPETA_PLACAS, _generar_pdfs_placas)
 
     def _regenerar(self, etiqueta: str, subcarpeta: str, generador) -> None:
         try:
