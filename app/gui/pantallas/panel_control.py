@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.negocio.avance_mes import avanzar_mes
+from app.negocio.avance_mes import avanzar_mes, porcentaje_aumento_del_periodo
 from app.negocio.backup import generar_backup
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.formato import mes_texto, periodo_mm_aaaa
@@ -129,6 +129,21 @@ class PanelControl(QWidget):
 
     def _avanzar_mes(self) -> None:
         periodo = periodo_actual(self.conn)
+
+        if porcentaje_aumento_del_periodo(self.conn, periodo) is None:
+            respuesta_aumento = QMessageBox.question(
+                self, "Avanzar de mes",
+                f"¿Querés evaluar un aumento de valores para el período {periodo} antes de avanzar de mes?\n\n"
+                "Elegí \"No\" para saltear este paso y avanzar directamente.",
+            )
+            if respuesta_aumento == QMessageBox.StandardButton.Yes:
+                QMessageBox.information(
+                    self, "Avanzar de mes",
+                    "Se canceló el avance. Confirmá el aumento desde \"Análisis de aumentos\" y volvé "
+                    "a \"Avanzar de mes\" cuando termines.",
+                )
+                return
+
         confirmacion = QMessageBox.question(
             self, "Avanzar de mes",
             f"¿Confirmás el avance de mes para el período {periodo}? Esta acción traspasa saldos, "

@@ -81,7 +81,7 @@ def test_generar_backup_con_carpeta_configurada(qtbot, conn, tmp_path):
     assert list((tmp_path / "backups").iterdir())
 
 
-def test_avanzar_mes_genera_backup_cuando_esta_configurado(qtbot, conn, tmp_path):
+def test_avanzar_mes_genera_backup_cuando_esta_configurado(qtbot, conn, tmp_path, monkeypatch):
     conn.execute(
         "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-31', CarpetaBackup = ? "
         "WHERE IdConfiguracion = 1",
@@ -90,10 +90,80 @@ def test_avanzar_mes_genera_backup_cuando_esta_configurado(qtbot, conn, tmp_path
     conn.commit()
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
+    _saltear_aumento_y_confirmar(monkeypatch)
 
     pantalla._avanzar_mes()
 
     assert list((tmp_path / "backups").iterdir())
+
+
+def _saltear_aumento_y_confirmar(monkeypatch) -> None:
+    """"No" a evaluar aumentos (saltear), "Sí" a confirmar el avance — la
+    secuencia que sigue `_avanzar_mes` cuando no hay un aumento confirmado
+    todavía este período."""
+    respuestas = iter([QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes])
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: next(respuestas)))
+
+
+def test_avanzar_mes_ofrece_evaluar_aumentos_si_no_se_confirmo_ninguno(qtbot, conn, monkeypatch):
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-31' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+
+    preguntas = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda self, titulo, texto, *a, **k: (preguntas.append(texto), QMessageBox.StandardButton.Yes)[1]),
+    )
+
+    pantalla._avanzar_mes()
+
+    assert len(preguntas) == 1
+    assert "evaluar un aumento" in preguntas[0]
+    snapshots = obtener_repositorio(conn, "SnapshotMensual").listar()
+    assert snapshots == []  # se canceló el avance, no llegó a ejecutarlo
+
+
+def test_avanzar_mes_saltea_aumentos_y_avanza(qtbot, conn, monkeypatch):
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-31' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    _saltear_aumento_y_confirmar(monkeypatch)
+
+    pantalla._avanzar_mes()
+
+    snapshots = obtener_repositorio(conn, "SnapshotMensual").listar()
+    assert len(snapshots) == 1
+    assert snapshots[0]["PorcentajeAumentoAplicado"] is None
+
+
+def test_avanzar_mes_no_pregunta_por_aumento_si_ya_se_confirmo_uno(qtbot, conn, monkeypatch):
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-31' WHERE IdConfiguracion = 1"
+    )
+    obtener_repositorio(conn, "AumentoAplicado").crear(Periodo="2026-08", PorcentajeGeneral=5.0)
+    conn.commit()
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+
+    preguntas = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda self, titulo, texto, *a, **k: (preguntas.append(texto), QMessageBox.StandardButton.Yes)[1]),
+    )
+
+    pantalla._avanzar_mes()
+
+    assert len(preguntas) == 1  # solo la confirmación del avance, sin la pregunta de aumentos
+    assert "evaluar un aumento" not in preguntas[0]
+    snapshots = obtener_repositorio(conn, "SnapshotMensual").listar()
+    assert snapshots[0]["PorcentajeAumentoAplicado"] == 5.0
 
 
 def test_ventana_principal_navega_entre_secciones(qtbot, conn):

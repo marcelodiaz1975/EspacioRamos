@@ -176,15 +176,33 @@ def _limpiar_liquidaciones_antiguas_todos(conn: sqlite3.Connection, hoy) -> int:
     return total
 
 
+def porcentaje_aumento_del_periodo(conn: sqlite3.Connection, periodo: str) -> float | None:
+    """Último % de aumento confirmado (`aumentos.confirmar_aumento`) para
+    `periodo` — una corrección posterior en el mismo mes reemplaza, no se
+    suma (DC-10 §1.3), así que alcanza con el registro más reciente."""
+    aplicados = obtener_repositorio(conn, "AumentoAplicado").listar(Periodo=periodo)
+    if not aplicados:
+        return None
+    return max(aplicados, key=lambda a: a["IdAumento"])["PorcentajeGeneral"]
+
+
 def avanzar_mes(
     conn: sqlite3.Connection, *, periodo_cerrado: str, eliminar_activos_vencidos_lista_espera: bool = False,
     porcentaje_aumento_aplicado: float | None = None,
 ) -> ResumenAvanceMes:
     """Ejecuta el subconjunto de Etapas 4, 6 y 9 del avance de mes para el
-    período que se está cerrando (formato 'AAAA-MM'). `porcentaje_aumento_aplicado`
-    queda en el snapshot si ese mes se confirmó un aumento (sección 6.1:
-    "ofrece evaluar aumentos o saltear" — `aumentos.confirmar_aumento` no
-    llama a esta función, así que el llamador es quien conecta ambos)."""
+    período que se está cerrando (formato 'AAAA-MM').
+
+    `porcentaje_aumento_aplicado` queda en el snapshot si ese mes se
+    confirmó un aumento (sección 6.1: "ofrece evaluar aumentos o
+    saltear"). Si no se pasa explícito, se busca solo en AumentoAplicado
+    para `periodo_cerrado`: la pantalla de avance de mes ofrece ir a
+    evaluar aumentos ANTES de avanzar (`aumentos.confirmar_aumento` deja
+    ahí el registro), así que para cuando se llega acá alcanza con
+    consultar si ya se confirmó uno — no hace falta que el llamador
+    pase el valor a mano."""
+    if porcentaje_aumento_aplicado is None:
+        porcentaje_aumento_aplicado = porcentaje_aumento_del_periodo(conn, periodo_cerrado)
     resumen = ResumenAvanceMes(periodo_cerrado=periodo_cerrado)
     resumen.ruta_backup = _generar_backup_previo(conn)
     resumen.backup_generado = resumen.ruta_backup is not None

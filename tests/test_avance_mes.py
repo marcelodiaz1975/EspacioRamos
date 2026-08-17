@@ -4,7 +4,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.avance_mes import avanzar_mes
+from app.negocio.avance_mes import avanzar_mes, porcentaje_aumento_del_periodo
 from app.negocio.lista_espera import crear_pedido, marcar_descartado, marcar_resuelto
 from app.negocio.pagos import crear_plan_pago
 from app.repositorio.registro import obtener_repositorio
@@ -126,6 +126,44 @@ def test_avanzar_mes_pasa_porcentaje_aumento_al_snapshot(conn):
     resumen = avanzar_mes(conn, periodo_cerrado="2026-08", porcentaje_aumento_aplicado=12.5)
     snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(resumen.id_snapshot)
     assert snapshot["PorcentajeAumentoAplicado"] == pytest.approx(12.5)
+
+
+def test_avanzar_mes_sin_pasar_porcentaje_lo_busca_en_aumento_aplicado(conn):
+    obtener_repositorio(conn, "AumentoAplicado").crear(Periodo="2026-08", PorcentajeGeneral=7.0)
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+    snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(resumen.id_snapshot)
+    assert snapshot["PorcentajeAumentoAplicado"] == pytest.approx(7.0)
+
+
+def test_avanzar_mes_sin_aumento_confirmado_snapshot_queda_sin_porcentaje(conn):
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+    snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(resumen.id_snapshot)
+    assert snapshot["PorcentajeAumentoAplicado"] is None
+
+
+def test_avanzar_mes_toma_la_ultima_correccion_del_periodo(conn):
+    obtener_repositorio(conn, "AumentoAplicado").crear(Periodo="2026-08", PorcentajeGeneral=5.0)
+    obtener_repositorio(conn, "AumentoAplicado").crear(Periodo="2026-08", PorcentajeGeneral=8.0)
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+    snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(resumen.id_snapshot)
+    assert snapshot["PorcentajeAumentoAplicado"] == pytest.approx(8.0)
+
+
+def test_avanzar_mes_ignora_aumento_de_otro_periodo(conn):
+    obtener_repositorio(conn, "AumentoAplicado").crear(Periodo="2026-07", PorcentajeGeneral=5.0)
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+    snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(resumen.id_snapshot)
+    assert snapshot["PorcentajeAumentoAplicado"] is None
+
+
+def test_porcentaje_aumento_del_periodo_sin_registros(conn):
+    assert porcentaje_aumento_del_periodo(conn, "2026-08") is None
+
+
+def test_porcentaje_aumento_del_periodo_devuelve_el_ultimo(conn):
+    obtener_repositorio(conn, "AumentoAplicado").crear(Periodo="2026-08", PorcentajeGeneral=5.0)
+    obtener_repositorio(conn, "AumentoAplicado").crear(Periodo="2026-08", PorcentajeGeneral=8.0)
+    assert porcentaje_aumento_del_periodo(conn, "2026-08") == pytest.approx(8.0)
 
 
 def test_avanzar_mes_sin_carpeta_base_no_regenera_archivos(conn):
