@@ -1,14 +1,16 @@
 """Lista de espera (F12, sección 3.21 y DC-08 §2 / DC-10 §2): alta de
 pedidos y cruce automático contra la disponibilidad real del período en
-curso, reusando app.negocio.lista_espera (mismo motor que usa el Centro
-de mensajería para "Disponibilidad de horarios")."""
+curso, reusando app.negocio.lista_espera. El mismo formulario de pedido
+también arma, sin necesidad de persistirlo, el mensaje "Disponibilidad de
+horarios regulares" (sección 5.2), con la opción de regenerar además el
+PDF de disponibilidad con fotos."""
 from __future__ import annotations
 
 import json
 import sqlite3
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -28,9 +30,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.negocio.archivos_generados import SUBCARPETA_DISPONIBILIDAD, carpeta_archivos_varios
 from app.negocio.dias import DIAS_SEMANA, periodo_actual
 from app.negocio.lista_espera import crear_pedido, listar_pedidos_con_coincidencia, marcar_descartado, marcar_resuelto
-from app.negocio.mensajes import nombre_para_mensaje
+from app.negocio.mensajes import mensaje_disponibilidad_horarios, nombre_para_mensaje
+from app.pdf.disponibilidad_pdf import generar_pdfs_disponibilidad_por_localidad
 from app.repositorio.registro import obtener_repositorio
 
 _COLOR_CELDA = {"verde": "#4CAF50", "amarillo": "#F5D547", "naranja": "#E07B39", "rojo": "#C0392B"}
@@ -131,6 +135,13 @@ class PantallaListaEspera(QWidget):
         boton_crear.setObjectName("botonPrimario")
         boton_crear.clicked.connect(self._crear_pedido)
         form.addWidget(boton_crear)
+
+        self.casilla_pdf_disponibilidad = QCheckBox("Generar también como PDF con fotos")
+        form.addWidget(self.casilla_pdf_disponibilidad)
+        boton_mensaje_disponibilidad = QPushButton("Generar mensaje de disponibilidad")
+        boton_mensaje_disponibilidad.clicked.connect(self._generar_mensaje_disponibilidad)
+        form.addWidget(boton_mensaje_disponibilidad)
+
         form.addStretch()
         splitter.addWidget(panel_form)
 
@@ -153,6 +164,15 @@ class PantallaListaEspera(QWidget):
         fila_acciones.addWidget(boton_descartar)
         fila_acciones.addStretch()
         layout_tabla.addLayout(fila_acciones)
+
+        layout_tabla.addWidget(QLabel("Mensaje de disponibilidad generado (a partir del formulario de arriba)"))
+        self.texto_mensaje_disponibilidad = QPlainTextEdit()
+        self.texto_mensaje_disponibilidad.setFixedHeight(120)
+        layout_tabla.addWidget(self.texto_mensaje_disponibilidad)
+        boton_copiar_disponibilidad = QPushButton("Copiar mensaje")
+        boton_copiar_disponibilidad.clicked.connect(self._copiar_mensaje_disponibilidad)
+        layout_tabla.addWidget(boton_copiar_disponibilidad)
+
         splitter.addWidget(panel_tabla)
         splitter.setStretchFactor(1, 1)
 
@@ -214,6 +234,38 @@ class PantallaListaEspera(QWidget):
         if self.campo_tamano.text().strip():
             condiciones["tamano"] = self.campo_tamano.text().strip()
         return condiciones
+
+    def _generar_mensaje_disponibilidad(self) -> None:
+        """Sección 5.2: arma "Disponibilidad período {MM/AAAA}" con los
+        mismos campos del formulario de pedido, sin necesidad de crear un
+        pedido en Lista de espera. El checkbox "PDF con fotos" además
+        regenera el PDF de disponibilidad general (Archivos varios) para
+        adjuntar junto al mensaje."""
+        dias = self._dias_seleccionados()
+        if not dias:
+            QMessageBox.warning(self, "Generar mensaje de disponibilidad", "Elegí al menos un día.")
+            return
+        try:
+            texto = mensaje_disponibilidad_horarios(
+                self.conn, periodo=periodo_actual(self.conn), dias=dias,
+                horario_desde=self.spin_desde.value(), horario_hasta=self.spin_hasta.value(),
+                tipo_combinacion=self.combo_tipo.currentData(), condiciones_consultorio=self._condiciones(),
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Generar mensaje de disponibilidad", str(error))
+            return
+        self.texto_mensaje_disponibilidad.setPlainText(texto)
+
+        if self.casilla_pdf_disponibilidad.isChecked():
+            directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_DISPONIBILIDAD))
+            rutas = generar_pdfs_disponibilidad_por_localidad(self.conn, directorio)
+            QMessageBox.information(
+                self, "PDF de disponibilidad",
+                f"Se generó {len(rutas)} archivo(s) en:\n{directorio}",
+            )
+
+    def _copiar_mensaje_disponibilidad(self) -> None:
+        QGuiApplication.clipboard().setText(self.texto_mensaje_disponibilidad.toPlainText())
 
     def _crear_pedido(self) -> None:
         id_profesional = self.combo_profesional.currentData()

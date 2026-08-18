@@ -75,6 +75,68 @@ def test_marcar_resuelto_saca_el_pedido_de_la_lista(qtbot, conn):
     assert estado == "Resuelto"
 
 
+def _crear_edificio_con_consultorio(conn):
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute(
+        "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio, ValorHoraRegularActual, ValorHoraAisladaActual) "
+        "VALUES (?, 1, 1000, 1500)",
+        (id_unidad,),
+    )
+    conn.commit()
+
+
+def test_generar_mensaje_disponibilidad_sin_dias_no_completa_texto(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._generar_mensaje_disponibilidad()
+    assert pantalla.texto_mensaje_disponibilidad.toPlainText() == ""
+
+
+def test_generar_mensaje_disponibilidad_completa_texto(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+
+    pantalla._generar_mensaje_disponibilidad()
+
+    texto = pantalla.texto_mensaje_disponibilidad.toPlainText()
+    assert texto.startswith("Disponibilidad período")
+    assert "Lunes" in texto
+
+
+def test_generar_mensaje_disponibilidad_con_pdf_tildado_genera_archivo(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    _crear_edificio_con_consultorio(conn)
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)
+    pantalla.casilla_pdf_disponibilidad.setChecked(True)
+
+    pantalla._generar_mensaje_disponibilidad()
+
+    carpeta_disponibilidad = tmp_path / "Archivos varios" / "Disponibilidad"
+    assert list(carpeta_disponibilidad.glob("*.pdf"))
+
+
+def test_copiar_mensaje_disponibilidad_usa_portapapeles(qtbot, conn, monkeypatch):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.texto_mensaje_disponibilidad.setPlainText("texto de prueba")
+
+    copiado = []
+    monkeypatch.setattr(
+        "app.gui.pantallas.lista_espera.QGuiApplication.clipboard",
+        staticmethod(lambda: type("_C", (), {"setText": lambda self, t: copiado.append(t)})()),
+    )
+    pantalla._copiar_mensaje_disponibilidad()
+    assert copiado == ["texto de prueba"]
+
+
 def test_descartar_saca_el_pedido_de_la_lista(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)
