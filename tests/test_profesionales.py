@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.crud_generico import _DialogoRegistro
-from app.gui.pantallas.profesionales import _al_abrir_dialogo_nuevo, _campos_profesional, pantalla_profesionales
+from app.gui.pantallas.profesionales import _al_abrir_dialogo, _campos_profesional, pantalla_profesionales
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -71,7 +71,7 @@ def test_condicion_fiscal_es_combo_editable_con_default_consumidor_final(qtbot, 
 def _nuevo_dialogo_con_hook(conn, qtbot):
     dialogo = _DialogoRegistro(conn, _campos_profesional(), "Nuevo registro")
     qtbot.addWidget(dialogo)
-    _al_abrir_dialogo_nuevo(dialogo)
+    _al_abrir_dialogo(dialogo)
     return dialogo
 
 
@@ -120,6 +120,47 @@ def test_tratamiento_ofrece_desplegable_para_fonoaudiologia(qtbot, conn):
     opciones = [combo_tratamiento.itemText(i) for i in range(combo_tratamiento.count())]
     assert opciones == ["Fga.", "Lic."]
     assert combo_tratamiento.currentText() == "Fga."
+
+
+def test_editar_profesional_repuebla_desplegable_tratamiento_sin_perder_valor(qtbot, conn):
+    id_fono = obtener_repositorio(conn, "Profesion").listar(Nombre="Fonoaudiología")[0]["IdProfesion"]
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Pérez", IdProfesion=id_fono, Sexo="Femenino", Tratamiento="Lic.",
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    dialogo = _DialogoRegistro(conn, _campos_profesional(), "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    _al_abrir_dialogo(dialogo)
+
+    combo_tratamiento = dialogo._entradas["Tratamiento"]
+    opciones = [combo_tratamiento.itemText(i) for i in range(combo_tratamiento.count())]
+    assert opciones == ["Fga.", "Lic."]
+    assert combo_tratamiento.currentText() == "Lic."
+
+
+def test_editar_desde_pantalla_invoca_al_abrir_dialogo(qtbot, conn, monkeypatch):
+    """El hook de Profesionales debe engancharse también al editar (no
+    solo al crear), para repoblar el desplegable de Tratamiento."""
+    id_fono = obtener_repositorio(conn, "Profesion").listar(Nombre="Fonoaudiología")[0]["IdProfesion"]
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Pérez", IdProfesion=id_fono, Sexo="Femenino", Tratamiento="Lic.",
+    )
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud_profesionales.tabla_widget.selectRow(0)
+
+    opciones_vistas = []
+
+    def _exec_falso(self, *a, **k):
+        opciones_vistas.extend(
+            self._entradas["Tratamiento"].itemText(i) for i in range(self._entradas["Tratamiento"].count())
+        )
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _exec_falso)
+    pantalla.crud_profesionales._editar()
+
+    assert opciones_vistas == ["Fga.", "Lic."]
 
 
 def test_cuit_se_normaliza_al_guardar(qtbot, conn):

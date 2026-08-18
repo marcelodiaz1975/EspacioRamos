@@ -73,10 +73,13 @@ class PantallaCRUD(QWidget):
         # se muestran únicamente como consulta/historial.
         self.solo_lectura = solo_lectura
         # al_abrir_dialogo: llamado con el diálogo recién construido, antes de
-        # mostrarlo, solo al crear un registro nuevo — para pantallas que
-        # necesitan sugerir/reaccionar entre campos del mismo formulario (p.
-        # ej. Profesionales: código sugerido según categoría) sin acoplar eso
-        # al CRUD genérico.
+        # mostrarlo, tanto al crear un registro nuevo como al editar uno
+        # existente — para pantallas que necesitan sugerir/reaccionar entre
+        # campos del mismo formulario (p. ej. Profesionales: código sugerido
+        # según categoría, desplegable de Tratamiento según profesión/sexo)
+        # sin acoplar eso al CRUD genérico. Los hooks que solo deben sugerir
+        # sobre un campo vacío (y no pisar un valor ya cargado) comparan
+        # contra la última sugerencia propia, no contra "vacío".
         self.al_abrir_dialogo = al_abrir_dialogo
         # al_guardar: llamado con (valores, registro_existente_o_None) justo
         # antes de crear/actualizar — devuelve los valores a guardar (puede
@@ -168,6 +171,8 @@ class PantallaCRUD(QWidget):
             return
         registro = self.repositorio.obtener(id_valor)
         dialogo = _DialogoRegistro(self.conn, self.campos, "Editar registro", registro=registro)
+        if self.al_abrir_dialogo:
+            self.al_abrir_dialogo(dialogo)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             valores = dialogo.valores()
             if self.al_guardar:

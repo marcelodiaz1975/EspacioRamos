@@ -92,13 +92,17 @@ def _campos_profesional() -> list[Campo]:
     ]
 
 
-def _al_abrir_dialogo_nuevo(dialogo) -> None:
+def _al_abrir_dialogo(dialogo) -> None:
     """Sección 3.4: sugiere el código (según categoría) y pre-completa el
-    tratamiento (según profesión y sexo) apenas se abre "Nuevo registro".
-    Cada uno se recalcula mientras el operador no haya tocado ese campo a
-    mano (se compara contra la última sugerencia, no contra "vacío", para
-    no pisar un valor que sí escribieron); ambos quedan editables antes
-    de confirmar."""
+    tratamiento (según profesión y sexo) apenas se abre el formulario, tanto
+    al crear un registro nuevo como al editar uno existente — en edición,
+    además de sugerir, repuebla el desplegable de Tratamiento con las
+    opciones de la profesión/sexo actuales (para Fonoaudiología y
+    Psicopedagogía) sin perder el valor ya cargado. Cada campo se
+    recalcula mientras el operador no haya tocado ese campo a mano (se
+    compara contra la última sugerencia, no contra "vacío", para no pisar
+    un valor que sí escribieron o que ya traía el registro); ambos quedan
+    editables antes de confirmar."""
     conn = dialogo.conn
     combo_categoria = dialogo._entradas["CategoriaProfesional"]
     campo_codigo = dialogo._entradas["IdCodigo"]
@@ -160,7 +164,7 @@ class PantallaProfesionales(QWidget):
         self.crud_profesionales = PantallaCRUD(
             self.conn, "Profesional", "Profesionales", _campos_profesional(),
             al_actualizar=self._al_actualizar_profesional,
-            al_abrir_dialogo=_al_abrir_dialogo_nuevo,
+            al_abrir_dialogo=_al_abrir_dialogo,
         )
         self.crud_profesionales.tabla_widget.itemSelectionChanged.connect(self._actualizar_documentacion)
         splitter.addWidget(self.crud_profesionales)
