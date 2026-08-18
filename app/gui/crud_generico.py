@@ -57,6 +57,7 @@ class PantallaCRUD(QWidget):
         self, conn: sqlite3.Connection, tabla: str, titulo: str, campos: list[Campo], parent=None,
         al_actualizar: Callable[[sqlite3.Row, dict], None] | None = None,
         al_abrir_dialogo: Callable[[QDialog], None] | None = None,
+        al_guardar: Callable[[dict, sqlite3.Row | None], dict | None] | None = None,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -70,6 +71,13 @@ class PantallaCRUD(QWidget):
         # ej. Profesionales: código sugerido según categoría) sin acoplar eso
         # al CRUD genérico.
         self.al_abrir_dialogo = al_abrir_dialogo
+        # al_guardar: llamado con (valores, registro_existente_o_None) justo
+        # antes de crear/actualizar — devuelve los valores a guardar (puede
+        # modificarlos) o None para cancelar el guardado por completo. Para
+        # validaciones entre registros que el diálogo por sí solo no puede
+        # resolver (p. ej. Gastos operativos: no puede convivir un origen
+        # Manual y uno Importado para el mismo concepto y período).
+        self.al_guardar = al_guardar
         self._armar_ui(titulo)
         self.actualizar()
 
@@ -136,7 +144,12 @@ class PantallaCRUD(QWidget):
         if self.al_abrir_dialogo:
             self.al_abrir_dialogo(dialogo)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
-            self.repositorio.crear(**dialogo.valores())
+            valores = dialogo.valores()
+            if self.al_guardar:
+                valores = self.al_guardar(valores, None)
+                if valores is None:
+                    return
+            self.repositorio.crear(**valores)
             self.actualizar()
 
     def _editar(self) -> None:
@@ -148,6 +161,10 @@ class PantallaCRUD(QWidget):
         dialogo = _DialogoRegistro(self.conn, self.campos, "Editar registro", registro=registro)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             valores = dialogo.valores()
+            if self.al_guardar:
+                valores = self.al_guardar(valores, registro)
+                if valores is None:
+                    return
             self.repositorio.actualizar(id_valor, **valores)
             if self.al_actualizar:
                 self.al_actualizar(registro, valores)

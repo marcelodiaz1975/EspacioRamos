@@ -1,9 +1,11 @@
 import pytest
+from PySide6.QtWidgets import QDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.crud_generico import _DialogoRegistro
 from app.gui.pantallas import catalogos
+from app.repositorio.registro import obtener_repositorio
 
 
 @pytest.fixture
@@ -121,3 +123,89 @@ def test_responsables_rol_es_combo_editable(qtbot, conn):
     assert combo_rol.isEditable() is True
     combo_rol.setEditText("Rol inventado")
     assert dialogo.valores()["Rol"] == "Rol inventado"
+
+
+def _completar_gasto(periodo="2026-08", concepto="Limpieza", monto="1000", origen=None):
+    def _completar(self, *a, **k):
+        self._entradas["Periodo"].setText(periodo)
+        self._entradas["Concepto"].setText(concepto)
+        self._entradas["Monto"].setText(monto)
+        if origen is not None:
+            self._entradas["Origen"].setCurrentIndex(self._entradas["Origen"].findData(origen))
+        return QDialog.DialogCode.Accepted
+    return _completar
+
+
+def test_gasto_operativo_sin_conflicto_se_guarda(qtbot, conn, monkeypatch):
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _completar_gasto())
+
+    pantalla._nuevo()
+
+    gastos = obtener_repositorio(conn, "GastoOperativo").listar()
+    assert len(gastos) == 1
+    assert gastos[0]["Origen"] == "Manual"
+
+
+def test_gasto_operativo_conflicto_confirmado_reemplaza(qtbot, conn, monkeypatch):
+    """Sección 3.25: "Si existe valor para mismo concepto y período de
+    otro origen: obliga a elegir entre uno u otro" — confirmar reemplaza
+    el existente."""
+    id_anterior = obtener_repositorio(conn, "GastoOperativo").crear(
+        Periodo="2026-08", Concepto="Limpieza", Monto=500, Origen="Manual",
+    )
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    monkeypatch.setattr(
+        "app.gui.crud_generico._DialogoRegistro.exec", _completar_gasto(monto="800", origen="Importado"),
+    )
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+
+    pantalla._nuevo()
+
+    gastos = obtener_repositorio(conn, "GastoOperativo").listar()
+    assert len(gastos) == 1
+    assert gastos[0]["Origen"] == "Importado"
+    assert gastos[0]["Monto"] == 800
+    assert obtener_repositorio(conn, "GastoOperativo").obtener(id_anterior) is None
+
+
+def test_gasto_operativo_conflicto_cancelado_no_guarda(qtbot, conn, monkeypatch):
+    id_anterior = obtener_repositorio(conn, "GastoOperativo").crear(
+        Periodo="2026-08", Concepto="Limpieza", Monto=500, Origen="Manual",
+    )
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    monkeypatch.setattr(
+        "app.gui.crud_generico._DialogoRegistro.exec", _completar_gasto(monto="800", origen="Importado"),
+    )
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+
+    pantalla._nuevo()
+
+    gastos = obtener_repositorio(conn, "GastoOperativo").listar()
+    assert len(gastos) == 1
+    assert gastos[0]["IdGasto"] == id_anterior
+    assert gastos[0]["Monto"] == 500
+
+
+def test_gasto_operativo_mismo_origen_no_pregunta(qtbot, conn, monkeypatch):
+    obtener_repositorio(conn, "GastoOperativo").crear(
+        Periodo="2026-08", Concepto="Limpieza", Monto=500, Origen="Manual",
+    )
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    monkeypatch.setattr(
+        "app.gui.crud_generico._DialogoRegistro.exec", _completar_gasto(monto="800", origen="Manual"),
+    )
+    preguntas = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: (preguntas.append(1), QMessageBox.StandardButton.Yes)[1]),
+    )
+
+    pantalla._nuevo()
+
+    assert preguntas == []
+    assert len(obtener_repositorio(conn, "GastoOperativo").listar()) == 2

@@ -7,8 +7,12 @@ from __future__ import annotations
 
 import sqlite3
 
+from PySide6.QtWidgets import QMessageBox
+
 from app.gui.crud_generico import Campo, PantallaCRUD
+from app.negocio.gastos_operativos import gasto_en_conflicto
 from app.negocio.listas_editables import opciones_lista
+from app.repositorio.registro import obtener_repositorio
 
 
 def _opciones_edificio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
@@ -188,7 +192,30 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Origen", "Origen", tipo="combo", opciones=opciones_origen),
         Campo("Observacion", "Observación", tipo="texto_largo"),
     ]
-    return PantallaCRUD(conn, "GastoOperativo", "Gastos operativos", campos)
+    pantalla = PantallaCRUD(conn, "GastoOperativo", "Gastos operativos", campos)
+    pantalla.al_guardar = lambda valores, registro: _resolver_conflicto_gasto(pantalla, conn, valores, registro)
+    return pantalla
+
+
+def _resolver_conflicto_gasto(parent, conn: sqlite3.Connection, valores: dict, registro) -> dict | None:
+    id_actual = registro["IdGasto"] if registro is not None else None
+    conflicto = gasto_en_conflicto(
+        conn, periodo=valores.get("Periodo"), concepto=valores.get("Concepto"),
+        origen=valores.get("Origen"), id_gasto_actual=id_actual,
+    )
+    if conflicto is None:
+        return valores
+    respuesta = QMessageBox.question(
+        parent, "Conflicto de origen",
+        f"Ya existe un gasto operativo \"{conflicto['Concepto']}\" del período {conflicto['Periodo']} con "
+        f"origen \"{conflicto['Origen']}\" (${conflicto['Monto']:,.2f}). No pueden convivir un origen Manual "
+        f"y uno Importado para el mismo concepto y período.\n\n¿Reemplazarlo por este nuevo valor "
+        f"(\"{valores.get('Origen')}\")?",
+    )
+    if respuesta != QMessageBox.StandardButton.Yes:
+        return None
+    obtener_repositorio(conn, "GastoOperativo").eliminar(conflicto["IdGasto"])
+    return valores
 
 
 def pantalla_placas(conn: sqlite3.Connection) -> PantallaCRUD:
