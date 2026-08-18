@@ -59,6 +59,7 @@ def _campos_profesional() -> list[Campo]:
     return [
         Campo("CategoriaProfesional", "Categoría", tipo="combo", opciones=_opciones_categoria, requerido=True),
         Campo("Apellido", "Apellido", requerido=True),
+        Campo("NombreCompleto", "Nombre completo"),
         Campo("NombrePila", "Nombre"),
         Campo("Apodo", "Apodo"),
         Campo("Tratamiento", "Tratamiento", tipo="combo", opciones=lambda conn: [], combo_editable=True),

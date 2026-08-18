@@ -53,7 +53,7 @@ def test_pantalla_profesionales_muestra_cabeza_de_equipo(qtbot, conn):
     fila_equipo = next(
         i for i in range(pantalla.crud_profesionales.tabla_widget.rowCount()) if pantalla.crud_profesionales.tabla_widget.item(i, 1).text() == "Ruiz"
     )
-    assert "Gómez" in pantalla.crud_profesionales.tabla_widget.item(fila_equipo, 20).text()
+    assert "Gómez" in pantalla.crud_profesionales.tabla_widget.item(fila_equipo, 21).text()
 
 
 def test_condicion_fiscal_es_combo_editable_con_default_consumidor_final(qtbot, conn):
@@ -128,6 +128,24 @@ def test_cuit_se_normaliza_al_guardar(qtbot, conn):
     dialogo._entradas["Apellido"].setText("Gómez")
     dialogo._entradas["CUIT"].setText("20-12345678-9")
     assert dialogo.valores()["CUIT"] == "20123456789"
+
+
+def test_nombre_completo_se_puede_cargar_y_editar_a_mano(qtbot, conn):
+    dialogo = _DialogoRegistro(conn, _campos_profesional(), "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    dialogo._entradas["Apellido"].setText("Gómez")
+    dialogo._entradas["NombreCompleto"].setText("Gómez, Juan Carlos")
+    assert dialogo.valores()["NombreCompleto"] == "Gómez, Juan Carlos"
+
+    id_prof = obtener_repositorio(conn, "Profesional").crear(**dialogo.valores())
+    assert obtener_repositorio(conn, "Profesional").obtener(id_prof)["NombreCompleto"] == "Gómez, Juan Carlos"
+
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    dialogo_edicion = _DialogoRegistro(conn, pantalla.crud_profesionales.campos, "Editar registro", registro=obtener_repositorio(conn, "Profesional").obtener(id_prof))
+    qtbot.addWidget(dialogo_edicion)
+    dialogo_edicion._entradas["NombreCompleto"].setText("Gómez, Juan C.")
+    assert dialogo_edicion.valores()["NombreCompleto"] == "Gómez, Juan C."
 
 
 def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_path, monkeypatch):
