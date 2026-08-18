@@ -496,8 +496,6 @@ CREATE TABLE IF NOT EXISTS HistorialOferta (
 CREATE TABLE IF NOT EXISTS Configuracion (
     IdConfiguracion INTEGER PRIMARY KEY CHECK (IdConfiguracion = 1),
     NombreEspacio TEXT,
-    ContactoCelular TEXT,
-    ContactoEmail TEXT,
     HoraInicioGrilla REAL NOT NULL DEFAULT 8,
     HoraFinGrilla REAL NOT NULL DEFAULT 22,
     DiasGrilla TEXT,

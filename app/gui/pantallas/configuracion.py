@@ -21,8 +21,6 @@ from app.repositorio.registro import obtener_repositorio
 
 _CAMPOS_TEXTO = [
     ("NombreEspacio", "Nombre del espacio"),
-    ("ContactoCelular", "Celular de contacto"),
-    ("ContactoEmail", "Email de contacto"),
     ("DiasGrilla", "Días de grilla (JSON)"),
     ("FrecuenciaActualizacionValores", "Frecuencia de actualización de valores"),
     ("MesesPeriodoActualizacion", "Meses del período de actualización (JSON)"),
