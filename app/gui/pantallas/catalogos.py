@@ -1,8 +1,9 @@
 """Pantallas de catálogo (Edificios, Unidades, Consultorios, Responsables,
-Tipos de licencia, Listas editables, Condiciones y normas, Mensajes
-predefinidos, Profesiones, Gastos operativos, Placas, Fechas especiales,
-Esquema de descuentos) — todas construidas sobre PantallaCRUD, sin código
-bespoke por tabla."""
+Tipos de licencia, Listas editables, Condiciones y normas, Profesiones,
+Gastos operativos, Placas, Fechas especiales, Esquema de descuentos) —
+todas construidas sobre PantallaCRUD, sin código bespoke por tabla.
+("Mensajes predefinidos" vive aparte, en mensajes_predefinidos.py — tiene
+filtro y vista previa propios, sección 5.5.)"""
 from __future__ import annotations
 
 import sqlite3
@@ -144,19 +145,6 @@ def pantalla_detalles_complementarios_propuesta(conn: sqlite3.Connection) -> Pan
     return PantallaCRUD(
         conn, "DetalleComplementarioPropuesta", "Detalles complementarios (Propuesta)", campos,
     )
-
-
-def pantalla_mensajes_predefinidos(conn: sqlite3.Connection) -> PantallaCRUD:
-    campos = [
-        Campo("Categoria", "Categoría"),
-        Campo("Descripcion", "Descripción"),
-        Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio),
-        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad),
-        Campo("IdConsultorio", "Consultorio", tipo="combo", opciones=_opciones_consultorio),
-        Campo("Mensaje", "Mensaje", tipo="texto_largo"),
-        Campo("Activo", "Activo", tipo="booleano"),
-    ]
-    return PantallaCRUD(conn, "MensajePredefinido", "Mensajes predefinidos", campos)
 
 
 def pantalla_profesiones(conn: sqlite3.Connection) -> PantallaCRUD:

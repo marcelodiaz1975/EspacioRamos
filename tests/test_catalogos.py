@@ -25,7 +25,6 @@ _FABRICAS = [
     catalogos.pantalla_listas_editables,
     catalogos.pantalla_condiciones_normas,
     catalogos.pantalla_detalles_complementarios_propuesta,
-    catalogos.pantalla_mensajes_predefinidos,
     catalogos.pantalla_profesiones,
     catalogos.pantalla_gastos_operativos,
     catalogos.pantalla_placas,

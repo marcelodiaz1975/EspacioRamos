@@ -22,6 +22,7 @@ from app.gui.pantallas.liquidacion import ProcesoLiquidacion
 from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.pantallas.llaves import PantallaLlaves
 from app.gui.pantallas.mensajeria import CentroMensajeria
+from app.gui.pantallas.mensajes_predefinidos import pantalla_mensajes_predefinidos
 from app.gui.pantallas.novedades import PantallaNovedades
 from app.gui.pantallas.oferta import PantallaOferta
 from app.gui.pantallas.pagos import PantallaPagos
@@ -149,7 +150,7 @@ def construir_secciones() -> list[Seccion]:
             ayuda="Datos adicionales por consultorio que se muestran en el PDF de Propuesta.",
         ),
         Seccion(
-            "Mensajes predefinidos", catalogos.pantalla_mensajes_predefinidos, categoria="Catálogos",
+            "Mensajes predefinidos", pantalla_mensajes_predefinidos, categoria="Catálogos",
             ayuda="Plantillas de mensaje usadas por el Centro de mensajería para cada situación.",
         ),
         Seccion(
