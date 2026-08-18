@@ -4,6 +4,11 @@ sección 5.1) para el período elegido, arma el mensaje correspondiente
 reusando app.negocio.mensajes y permite copiarlo al portapapeles. También
 expone el mensaje grupal (sección 5.4).
 
+Sección 5.1: para categoría A, los 5 controles (todos marcados por
+default) que arman el detalle de reserva aislada — Incluir consultorio /
+Incluir unidad / Incluir edificio / Combinar misma unidad / Combinar
+distintas unidades.
+
 Filtros y orden según sección 6.2: "Todos / Solo regulares / Solo
 aisladas / Solo con plan / Con deuda (default) / Liquidación enviada /
 Liquidación sin enviar", ordenado por días desde el último pago
@@ -120,6 +125,22 @@ class CentroMensajeria(QWidget):
 
         panel_derecho = QWidget()
         layout_derecho = QVBoxLayout(panel_derecho)
+
+        fila_incluir = QHBoxLayout()
+        self.check_incluir_consultorio = QCheckBox("Incluir consultorio")
+        self.check_incluir_consultorio.setChecked(True)
+        self.check_incluir_consultorio.toggled.connect(self._mostrar_mensaje_seleccionado)
+        fila_incluir.addWidget(self.check_incluir_consultorio)
+        self.check_incluir_unidad = QCheckBox("Incluir unidad")
+        self.check_incluir_unidad.setChecked(True)
+        self.check_incluir_unidad.toggled.connect(self._mostrar_mensaje_seleccionado)
+        fila_incluir.addWidget(self.check_incluir_unidad)
+        self.check_incluir_edificio = QCheckBox("Incluir edificio")
+        self.check_incluir_edificio.setChecked(True)
+        self.check_incluir_edificio.toggled.connect(self._mostrar_mensaje_seleccionado)
+        fila_incluir.addWidget(self.check_incluir_edificio)
+        fila_incluir.addStretch()
+        layout_derecho.addLayout(fila_incluir)
 
         fila_combinar = QHBoxLayout()
         self.check_combinar_misma_unidad = QCheckBox("Combinar misma unidad")
@@ -249,6 +270,9 @@ class CentroMensajeria(QWidget):
             else:
                 texto = mensaje_detalle_reserva_aislada(
                     self.conn, id_profesional=profesional["IdProfesional"], periodo=self._periodo(),
+                    incluir_consultorio=self.check_incluir_consultorio.isChecked(),
+                    incluir_unidad=self.check_incluir_unidad.isChecked(),
+                    incluir_edificio=self.check_incluir_edificio.isChecked(),
                     combinar_misma_unidad=self.check_combinar_misma_unidad.isChecked(),
                     combinar_distintas_unidades=self.check_combinar_distintas_unidades.isChecked(),
                 )
