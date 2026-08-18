@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox, QPushButton
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -188,6 +188,18 @@ def test_gasto_operativo_conflicto_cancelado_no_guarda(qtbot, conn, monkeypatch)
     assert len(gastos) == 1
     assert gastos[0]["IdGasto"] == id_anterior
     assert gastos[0]["Monto"] == 500
+
+
+def test_esquema_descuentos_es_solo_lectura(qtbot, conn):
+    """Sección 3.18: "solo modificable al ejecutar análisis de aumentos" —
+    el catálogo genérico no debe ofrecer Nuevo/Editar/Eliminar ni edición
+    por doble clic, para no romper el historial que garantiza
+    aumentos.actualizar_esquema_descuentos."""
+    pantalla = catalogos.pantalla_esquema_descuentos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.solo_lectura is True
+    textos_botones = [boton.text() for boton in pantalla.findChildren(QPushButton)]
+    assert not any(texto in ("Nuevo", "Editar", "Eliminar") for texto in textos_botones)
 
 
 def test_gasto_operativo_mismo_origen_no_pregunta(qtbot, conn, monkeypatch):

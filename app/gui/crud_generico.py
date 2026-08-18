@@ -58,6 +58,7 @@ class PantallaCRUD(QWidget):
         al_actualizar: Callable[[sqlite3.Row, dict], None] | None = None,
         al_abrir_dialogo: Callable[[QDialog], None] | None = None,
         al_guardar: Callable[[dict, sqlite3.Row | None], dict | None] | None = None,
+        solo_lectura: bool = False,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -65,6 +66,12 @@ class PantallaCRUD(QWidget):
         self.campos = campos
         self.repositorio = obtener_repositorio(conn, tabla)
         self.al_actualizar = al_actualizar
+        # solo_lectura: sin botones Nuevo/Editar/Eliminar ni doble clic para
+        # editar — para catálogos que se modifican solo desde un proceso de
+        # negocio específico (p. ej. Esquema de descuentos, que DC-10 §1.1
+        # dice que solo debe tocarse durante el análisis de aumentos) y acá
+        # se muestran únicamente como consulta/historial.
+        self.solo_lectura = solo_lectura
         # al_abrir_dialogo: llamado con el diálogo recién construido, antes de
         # mostrarlo, solo al crear un registro nuevo — para pantallas que
         # necesitan sugerir/reaccionar entre campos del mismo formulario (p.
@@ -88,19 +95,20 @@ class PantallaCRUD(QWidget):
         etiqueta_titulo.setObjectName("tituloPantalla")
         layout.addWidget(etiqueta_titulo)
 
-        fila_botones = QHBoxLayout()
-        boton_nuevo = QPushButton("Nuevo")
-        boton_nuevo.setObjectName("botonPrimario")
-        boton_nuevo.clicked.connect(self._nuevo)
-        boton_editar = QPushButton("Editar")
-        boton_editar.clicked.connect(self._editar)
-        boton_eliminar = QPushButton("Eliminar")
-        boton_eliminar.clicked.connect(self._eliminar)
-        fila_botones.addWidget(boton_nuevo)
-        fila_botones.addWidget(boton_editar)
-        fila_botones.addWidget(boton_eliminar)
-        fila_botones.addStretch()
-        layout.addLayout(fila_botones)
+        if not self.solo_lectura:
+            fila_botones = QHBoxLayout()
+            boton_nuevo = QPushButton("Nuevo")
+            boton_nuevo.setObjectName("botonPrimario")
+            boton_nuevo.clicked.connect(self._nuevo)
+            boton_editar = QPushButton("Editar")
+            boton_editar.clicked.connect(self._editar)
+            boton_eliminar = QPushButton("Eliminar")
+            boton_eliminar.clicked.connect(self._eliminar)
+            fila_botones.addWidget(boton_nuevo)
+            fila_botones.addWidget(boton_editar)
+            fila_botones.addWidget(boton_eliminar)
+            fila_botones.addStretch()
+            layout.addLayout(fila_botones)
 
         self.tabla_widget = QTableWidget()
         self.tabla_widget.setColumnCount(len(self.campos))
@@ -108,7 +116,8 @@ class PantallaCRUD(QWidget):
         self.tabla_widget.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_widget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_widget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla_widget.doubleClicked.connect(self._editar)
+        if not self.solo_lectura:
+            self.tabla_widget.doubleClicked.connect(self._editar)
         layout.addWidget(self.tabla_widget, stretch=1)
 
     def actualizar(self) -> None:

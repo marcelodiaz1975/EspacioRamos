@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.aumentos import PantallaAumentos
+from app.repositorio.registro import obtener_repositorio
 
 
 @pytest.fixture
@@ -69,6 +70,59 @@ def test_confirmar_sin_simular_no_falla(qtbot, conn):
     pantalla = PantallaAumentos(conn)
     qtbot.addWidget(pantalla)
     pantalla._confirmar()  # tabla vacía -> solo advierte, no debe lanzar excepción
+
+
+def test_tabla_esquema_oculta_por_defecto(qtbot, conn):
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla_esquema.isHidden() is True
+
+
+def test_tildar_actualizar_esquema_precarga_tramos_vigentes(qtbot, conn):
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    filas_esperadas = len(obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1))
+    assert filas_esperadas > 0
+
+    pantalla.check_actualizar_esquema.setChecked(True)
+    assert pantalla.tabla_esquema.isHidden() is False
+    assert pantalla.tabla_esquema.rowCount() == filas_esperadas
+
+
+def test_confirmar_sin_tildar_esquema_no_lo_modifica(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    esquema_antes = [dict(f) for f in obtener_repositorio(conn, "EsquemaDescuentos").listar()]
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.spin_porcentaje.setValue(10)
+    pantalla._simular()
+    pantalla._confirmar()
+
+    esquema_despues = [dict(f) for f in obtener_repositorio(conn, "EsquemaDescuentos").listar()]
+    assert esquema_despues == esquema_antes
+
+
+def test_confirmar_con_esquema_tildado_reemplaza_tramos_y_preserva_historial(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    cantidad_original = len(obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1))
+    assert cantidad_original > 0
+
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.spin_porcentaje.setValue(10)
+    pantalla._simular()
+
+    pantalla.check_actualizar_esquema.setChecked(True)
+    pantalla.tabla_esquema.setRowCount(0)
+    pantalla._agregar_fila_tramo(0, 10, 5)
+    pantalla._agregar_fila_tramo(10, 999, 15)
+    pantalla._confirmar()
+
+    activos = obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1)
+    assert len(activos) == 2
+    assert {f["PorcentajeDescuento"] for f in activos} == {5.0, 15.0}
+    inactivos = obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=0)
+    assert len(inactivos) == cantidad_original
 
 
 def test_confirmar_actualiza_valores_de_consultorio(qtbot, conn):
