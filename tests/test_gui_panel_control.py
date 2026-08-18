@@ -67,6 +67,17 @@ def test_panel_control_alerta_de_deuda_se_muestra(qtbot, conn):
     assert any("Deudor" in t for t in _textos_visibles(pantalla.contenedor_alertas))
 
 
+def test_panel_control_alerta_de_backup_vencido_se_muestra(qtbot, conn, tmp_path):
+    conn.execute(
+        "UPDATE Configuracion SET CarpetaBackup = ?, FrecuenciaBackupDrive = 'Diario' WHERE IdConfiguracion = 1",
+        (str(tmp_path / "backups"),),
+    )
+    conn.commit()
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert any("Backup vencido" in t for t in _textos_visibles(pantalla.contenedor_alertas))
+
+
 def test_generar_backup_sin_carpeta_configurada_no_falla(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)

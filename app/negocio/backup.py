@@ -13,10 +13,17 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from app.negocio.archivos_generados import carpeta_base
+
+_DIAS_MAXIMOS_POR_FRECUENCIA = {
+    "diario": 1, "diaria": 1,
+    "semanal": 7,
+    "quincenal": 15,
+    "mensual": 30,
+}
 
 
 def carpeta_backup(conn: sqlite3.Connection) -> Path | None:
@@ -70,6 +77,41 @@ def buscar_backup_mas_reciente(carpeta: Path) -> Path | None:
         return None
     candidatos = sorted(p for p in carpeta.iterdir() if p.is_dir() and p.name.startswith("Backup "))
     return candidatos[-1] if candidatos else None
+
+
+def _fecha_backup(carpeta: Path) -> date | None:
+    """Fecha codificada en el nombre "Backup AAAA-MM-DD HHhMM" de una
+    subcarpeta de backup generada por `generar_backup`."""
+    try:
+        return datetime.strptime(carpeta.name, "Backup %Y-%m-%d %Hh%M").date()
+    except ValueError:
+        return None
+
+
+def backup_vencido(conn: sqlite3.Connection, hoy: date) -> bool:
+    """Sección 3.28 (Configuracion.FrecuenciaBackupDrive): True si pasó más
+    tiempo que la frecuencia configurada desde el último backup generado.
+    No hay nada que evaluar (False) sin carpeta de backup configurada,
+    sin frecuencia configurada, o con un texto que no coincide con
+    ninguna frecuencia conocida ("Diario"/"Semanal"/"Quincenal"/
+    "Mensual") — nada de esto bloquea el uso del sistema, la alerta es
+    solo un recordatorio."""
+    cfg = conn.execute(
+        "SELECT FrecuenciaBackupDrive, CarpetaBackup FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    if not cfg or not cfg["CarpetaBackup"] or not cfg["FrecuenciaBackupDrive"]:
+        return False
+    dias_maximos = _DIAS_MAXIMOS_POR_FRECUENCIA.get(cfg["FrecuenciaBackupDrive"].strip().lower())
+    if dias_maximos is None:
+        return False
+
+    ultimo = buscar_backup_mas_reciente(Path(cfg["CarpetaBackup"]))
+    if ultimo is None:
+        return True
+    fecha_ultimo = _fecha_backup(ultimo)
+    if fecha_ultimo is None:
+        return True
+    return (hoy - fecha_ultimo).days > dias_maximos
 
 
 def restaurar_backup(carpeta_backups: Path, db_path: Path) -> Path:

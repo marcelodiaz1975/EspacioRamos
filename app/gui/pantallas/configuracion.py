@@ -43,8 +43,6 @@ _CAMPOS_NUMERICOS = [
     ("ToleranciaDeudaDescuento", "Tolerancia deuda para descuento"),
     ("SemanasVacacionesMaximasPorAnio", "Semanas de vacaciones máximas por año"),
     ("DiasEnvioLiquidacionesRemanentes", "Días de margen para envío de liquidaciones"),
-    ("DiasAntesFinMesRecordatorioPlan", "Días antes de fin de mes: recordatorio de plan"),
-    ("DiasAntesFinMesRecordatorioGeneral", "Días antes de fin de mes: recordatorio general"),
     ("RetencionHistorialListaEsperaAnios", "Retención historial lista de espera (años)"),
     ("TamanoMaximoImagenMB", "Tamaño máximo de imagen (MB)"),
     ("CantidadDecimales", "Cantidad de decimales en los montos"),

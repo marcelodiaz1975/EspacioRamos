@@ -19,6 +19,7 @@ esa unidad quedan libres:
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date
 
@@ -27,6 +28,22 @@ from app.negocio.dias import primer_dia_mes as _primer_dia_mes
 from app.negocio.dias import ultimo_dia_mes as _ultimo_dia_mes
 
 DIAS_GRILLA_DEFAULT = DIAS_SEMANA[:6]  # Lunes a Sábado
+
+
+def dias_grilla(conn: sqlite3.Connection) -> list[str]:
+    """Días configurables de la grilla (sección 3.28: Configuracion.
+    DiasGrilla, JSON) — DIAS_GRILLA_DEFAULT si no está configurado o el
+    valor guardado no es una lista de días válida."""
+    cfg = conn.execute("SELECT DiasGrilla FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    if not cfg or not cfg["DiasGrilla"]:
+        return DIAS_GRILLA_DEFAULT
+    try:
+        dias = json.loads(cfg["DiasGrilla"])
+    except (TypeError, ValueError):
+        return DIAS_GRILLA_DEFAULT
+    if not isinstance(dias, list) or not dias:
+        return DIAS_GRILLA_DEFAULT
+    return dias
 
 VERDE = "verde"
 AMARILLO = "amarillo"
@@ -73,7 +90,7 @@ def calcular_ocupacion_regular(
     conn: sqlite3.Connection, anio_activo: int, mes_activo: int, dias: list[str] | None = None,
 ) -> dict[tuple[int, str, int], bool]:
     """Devuelve {(IdConsultorio, dia, hora): True} para cada hora ocupada."""
-    dias = dias or DIAS_GRILLA_DEFAULT
+    dias = dias or dias_grilla(conn)
     ocupado: dict[tuple[int, str, int], bool] = {}
     reservas = conn.execute("SELECT * FROM ReservaRegular").fetchall()
     for r in reservas:
@@ -93,7 +110,7 @@ def calcular_grilla(
     hora_ini: int | None = None, hora_fin: int | None = None, dias: list[str] | None = None,
 ) -> dict[tuple[int, str, int], str]:
     """Devuelve {(IdUnidad, dia, hora): color} para toda la grilla."""
-    dias = dias or DIAS_GRILLA_DEFAULT
+    dias = dias or dias_grilla(conn)
 
     if hora_ini is None or hora_fin is None:
         cfg = conn.execute(

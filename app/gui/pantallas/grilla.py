@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.negocio.dias import periodo_actual
-from app.negocio.grilla import DIAS_GRILLA_DEFAULT, calcular_grilla
+from app.negocio.grilla import calcular_grilla, dias_grilla
 
 _COLOR_CELDA = {
     "verde": "#4CAF50",
@@ -102,13 +102,14 @@ class GrillaDisponibilidad(QWidget):
         id_edificio = self.combo_edificio.currentData()
 
         grilla = calcular_grilla(self.conn, anio, mes)
+        dias = dias_grilla(self.conn)
         unidades = self._unidades(id_edificio)
         if not unidades:
             self.layout_contenedor.addWidget(QLabel("No hay unidades para mostrar."))
             return
 
         for unidad in unidades:
-            self.layout_contenedor.addWidget(self._tarjeta_unidad(unidad, grilla))
+            self.layout_contenedor.addWidget(self._tarjeta_unidad(unidad, grilla, dias))
         self.layout_contenedor.addStretch()
 
     def _unidades(self, id_edificio: int | None) -> list[sqlite3.Row]:
@@ -123,7 +124,7 @@ class GrillaDisponibilidad(QWidget):
         sql += " ORDER BY e.Nombre, u.Departamento"
         return self.conn.execute(sql, parametros).fetchall()
 
-    def _tarjeta_unidad(self, unidad: sqlite3.Row, grilla: dict) -> QWidget:
+    def _tarjeta_unidad(self, unidad: sqlite3.Row, grilla: dict, dias: list[str]) -> QWidget:
         contenedor = QWidget()
         layout = QVBoxLayout(contenedor)
         layout.setContentsMargins(0, 0, 0, 12)
@@ -139,12 +140,12 @@ class GrillaDisponibilidad(QWidget):
         hora_fin = cfg["HoraFinGrilla"] if cfg else 22
         horas = list(range(int(hora_ini), int(hora_fin)))
 
-        tabla = QTableWidget(len(horas), len(DIAS_GRILLA_DEFAULT))
-        tabla.setHorizontalHeaderLabels(DIAS_GRILLA_DEFAULT)
+        tabla = QTableWidget(len(horas), len(dias))
+        tabla.setHorizontalHeaderLabels(dias)
         tabla.setVerticalHeaderLabels([f"{h}:00" for h in horas])
         tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         for fila_idx, hora in enumerate(horas):
-            for col_idx, dia in enumerate(DIAS_GRILLA_DEFAULT):
+            for col_idx, dia in enumerate(dias):
                 color_nombre = grilla.get((unidad["IdUnidad"], dia, hora), "rojo")
                 item = QTableWidgetItem(_TEXTO_CELDA.get(color_nombre, ""))
                 item.setBackground(QColor(_COLOR_CELDA[color_nombre]))

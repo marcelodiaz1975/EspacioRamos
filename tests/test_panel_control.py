@@ -78,3 +78,26 @@ def test_alerta_categoria_x_con_llaves_pendientes(conn):
     )
     alertas = calcular_alertas(conn)
     assert len(alertas.categoria_x_con_llaves_pendientes) == 1
+
+
+def test_alerta_backup_vencido_sin_configurar_no_prende(conn):
+    alertas = calcular_alertas(conn)
+    assert alertas.backup_vencido is False
+
+
+def test_alerta_backup_vencido_prende_con_backup_desactualizado(conn, tmp_path):
+    _fijar_fecha(conn, "2026-08-15")
+    obtener_repositorio(conn, "Configuracion").actualizar(
+        1, CarpetaBackup=str(tmp_path / "backups"), FrecuenciaBackupDrive="Diario",
+    )
+    alertas = calcular_alertas(conn)
+    assert alertas.backup_vencido is True
+
+
+def test_alertas_total_cuenta_el_backup_vencido_como_uno(conn, tmp_path):
+    _fijar_fecha(conn, "2026-08-15")
+    obtener_repositorio(conn, "Configuracion").actualizar(
+        1, CarpetaBackup=str(tmp_path / "backups"), FrecuenciaBackupDrive="Diario",
+    )
+    alertas = calcular_alertas(conn)
+    assert alertas.total == 1

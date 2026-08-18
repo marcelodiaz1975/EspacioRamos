@@ -108,8 +108,26 @@ class PanelControl(QWidget):
             tarjeta = self._tarjeta_alerta(titulo, filas, _ETIQUETA_FILA[campo])
             self.layout_alertas.insertWidget(self.layout_alertas.count() - 1, tarjeta)
 
+        if alertas.backup_vencido:
+            hubo_alertas = True
+            tarjeta = self._tarjeta_alerta_simple(
+                "Backup vencido según la frecuencia configurada — generá uno nuevo cuando puedas.",
+            )
+            self.layout_alertas.insertWidget(self.layout_alertas.count() - 1, tarjeta)
+
         if not hubo_alertas:
             self.layout_alertas.insertWidget(0, QLabel("Sin alertas pendientes."))
+
+    def _tarjeta_alerta_simple(self, mensaje: str) -> QFrame:
+        """Alerta binaria (no una lista de registros) — una sola línea."""
+        tarjeta = QFrame()
+        tarjeta.setObjectName("tarjetaAlerta")
+        layout = QVBoxLayout(tarjeta)
+        layout.setContentsMargins(0, 0, 0, 8)
+        encabezado = QLabel(mensaje)
+        encabezado.setObjectName("encabezadoAlerta")
+        layout.addWidget(encabezado)
+        return tarjeta
 
     def _tarjeta_alerta(self, titulo: str, filas: list, etiqueta) -> QFrame:
         tarjeta = QFrame()

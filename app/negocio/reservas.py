@@ -78,6 +78,21 @@ def _relacion_equipo(conn: sqlite3.Connection, id_profesional_a: int, id_profesi
     return False
 
 
+def _validar_fraccion_grilla(conn: sqlite3.Connection, *horas: float) -> None:
+    """Sección 3.28 (Configuracion.FraccionGrilla, default 30 min): los
+    horarios de reserva tienen que caer en esa fracción — con 30 min,
+    10.5 es válido pero 10.25 no."""
+    cfg = conn.execute("SELECT FraccionGrilla FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    fraccion_min = cfg["FraccionGrilla"] if cfg else 30
+    fraccion_horas = fraccion_min / 60
+    for hora in horas:
+        pasos = hora / fraccion_horas
+        if abs(pasos - round(pasos)) > 1e-6:
+            raise ValueError(
+                f"El horario {hora}hs no coincide con la fracción de grilla configurada ({fraccion_min:g} min)."
+            )
+
+
 def verificar_bloques_rigidos(conn: sqlite3.Connection, dia_semana: str, hora_inicio: float, hora_fin: float) -> list[str]:
     problemas = []
     for fila in conn.execute("SELECT * FROM BloqueRigido WHERE Activo = 1").fetchall():
@@ -225,6 +240,7 @@ def crear_reserva_regular(
     hora_inicio: float, hora_fin: float, vigencia_inicio: str, vigencia_fin: str | None = None,
     es_excepcion: bool = False, observacion: str | None = None, forzar: bool = False,
 ) -> tuple[int, list[str]]:
+    _validar_fraccion_grilla(conn, hora_inicio, hora_fin)
     conflictos = verificar_conflictos_regular(
         conn, id_consultorio=id_consultorio, dia_semana=dia_semana,
         hora_inicio=hora_inicio, hora_fin=hora_fin,
@@ -262,6 +278,7 @@ def crear_reserva_aislada(
     hora_inicio: float, hora_fin: float, aplica_recargo: bool | None = None,
     es_reubicacion: bool = False, observacion: str | None = None, forzar: bool = False,
 ) -> tuple[int, list[str]]:
+    _validar_fraccion_grilla(conn, hora_inicio, hora_fin)
     conflictos = verificar_conflictos_aislada(
         conn, id_consultorio=id_consultorio, fecha=fecha,
         hora_inicio=hora_inicio, hora_fin=hora_fin, id_profesional=id_profesional,

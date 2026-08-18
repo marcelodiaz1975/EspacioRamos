@@ -11,6 +11,7 @@ import sqlite3
 from dataclasses import dataclass, field, fields
 from datetime import timedelta
 
+from app.negocio.backup import backup_vencido as _backup_vencido
 from app.negocio.dias import fecha_actual, periodo_actual, ultimo_dia_mes
 from app.repositorio.registro import obtener_repositorio
 
@@ -23,10 +24,17 @@ class Alertas:
     planes_con_cuotas_vencidas: list[sqlite3.Row] = field(default_factory=list)
     fechas_especiales_proximas: list[sqlite3.Row] = field(default_factory=list)
     categoria_x_con_llaves_pendientes: list[sqlite3.Row] = field(default_factory=list)
+    backup_vencido: bool = False
 
     @property
     def total(self) -> int:
-        return sum(len(getattr(self, f.name)) for f in fields(self))
+        """`backup_vencido` es un bool (una alerta binaria, no una lista de
+        registros como el resto) — cuenta como 1 cuando está prendida."""
+        total = 0
+        for f in fields(self):
+            valor = getattr(self, f.name)
+            total += len(valor) if isinstance(valor, list) else int(bool(valor))
+        return total
 
 
 def puede_avanzar_mes(conn: sqlite3.Connection) -> bool:
@@ -93,4 +101,5 @@ def calcular_alertas(conn: sqlite3.Connection) -> Alertas:
         planes_con_cuotas_vencidas=_planes_con_cuotas_vencidas(conn, periodo),
         fechas_especiales_proximas=_fechas_especiales_proximas(conn),
         categoria_x_con_llaves_pendientes=_categoria_x_con_llaves_pendientes(conn),
+        backup_vencido=_backup_vencido(conn, fecha_actual(conn)),
     )

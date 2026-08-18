@@ -57,6 +57,48 @@ def test_crear_reserva_regular_sin_conflictos(conn, consultorio, profesional_fac
     assert advertencias == []
 
 
+def test_crear_reserva_regular_media_hora_es_valida(conn, consultorio, profesional_factory):
+    """Sección 3.28 (FraccionGrilla, default 30 min): 14.5 = 14:30, cae
+    justo en la fracción configurada."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, advertencias = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14.5, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    assert id_reserva is not None
+    assert advertencias == []
+
+
+def test_crear_reserva_regular_fuera_de_fraccion_falla(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    with pytest.raises(ValueError):
+        crear_reserva_regular(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=14.25, hora_fin=16, vigencia_inicio="2026-01-01",
+        )
+
+
+def test_crear_reserva_regular_respeta_fraccion_configurada(conn, consultorio, profesional_factory):
+    """Con la fracción configurada en 15 min, un cuarto de hora pasa a
+    ser válido."""
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FraccionGrilla=15)
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14.25, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    assert id_reserva is not None
+
+
+def test_crear_reserva_aislada_fuera_de_fraccion_falla(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    with pytest.raises(ValueError):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, fecha="2026-08-10",
+            hora_inicio=14, hora_fin=16.1,
+        )
+
+
 def test_superposicion_entre_profesionales_distintos_bloquea(conn, consultorio, profesional_factory):
     id_prof_a = profesional_factory("Lo Veci")
     id_prof_b = profesional_factory("Gomez")

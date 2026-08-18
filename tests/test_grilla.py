@@ -1,8 +1,10 @@
+import json
+
 import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.grilla import calcular_grilla
+from app.negocio.grilla import DIAS_GRILLA_DEFAULT, calcular_grilla, dias_grilla
 from app.negocio.reservas import crear_reserva_regular
 from app.repositorio.registro import obtener_repositorio
 
@@ -107,3 +109,40 @@ def test_reserva_que_termina_el_mes_que_viene_ya_figura_disponible(conn, unidad_
     )
     grilla = calcular_grilla(conn, 2026, 8)  # mes activo: agosto; termina en septiembre (mes siguiente)
     assert grilla[(id_unidad, "Lunes", 15)] == "verde"
+
+
+# --------------------------------------------------------------- dias_grilla (3.28)
+
+def test_dias_grilla_usa_el_default_sin_configurar(conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, DiasGrilla=None)
+    assert dias_grilla(conn) == DIAS_GRILLA_DEFAULT
+
+
+def test_dias_grilla_lee_la_configuracion(conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, DiasGrilla=json.dumps(["Lunes", "Miércoles"]))
+    assert dias_grilla(conn) == ["Lunes", "Miércoles"]
+
+
+def test_dias_grilla_ignora_json_invalido(conn):
+    conn.execute("UPDATE Configuracion SET DiasGrilla = ? WHERE IdConfiguracion = 1", ("no es json",))
+    conn.commit()
+    assert dias_grilla(conn) == DIAS_GRILLA_DEFAULT
+
+
+def test_dias_grilla_ignora_lista_vacia(conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, DiasGrilla=json.dumps([]))
+    assert dias_grilla(conn) == DIAS_GRILLA_DEFAULT
+
+
+def test_calcular_grilla_respeta_dias_configurados(conn, unidad_con_dos_consultorios, profesional):
+    """Con la grilla acotada a Lunes/Martes, una reserva en Miércoles no
+    debería figurar en absoluto (día fuera de la grilla configurada)."""
+    id_unidad, id_c1, _ = unidad_con_dos_consultorios
+    obtener_repositorio(conn, "Configuracion").actualizar(1, DiasGrilla=json.dumps(["Lunes", "Martes"]))
+    crear_reserva_regular(
+        conn, id_profesional=profesional, id_consultorio=id_c1, dia_semana="Miércoles",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    grilla = calcular_grilla(conn, 2026, 8)
+    assert (id_unidad, "Miércoles", 15) not in grilla
+    assert (id_unidad, "Lunes", 15) in grilla

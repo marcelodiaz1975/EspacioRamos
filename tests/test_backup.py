@@ -1,11 +1,17 @@
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.backup import buscar_backup_mas_reciente, carpeta_backup, generar_backup, restaurar_backup
+from app.negocio.backup import (
+    backup_vencido,
+    buscar_backup_mas_reciente,
+    carpeta_backup,
+    generar_backup,
+    restaurar_backup,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -144,3 +150,56 @@ def test_restaurar_backup_sin_carpeta_archivos_en_el_backup_no_falla(conn, tmp_p
     db_nueva = tmp_path / "maquina_nueva" / "espacio_ramos.db"
     restaurar_backup(tmp_path / "backups", db_nueva)
     assert db_nueva.is_file()
+
+
+# ------------------------------------------------------------------ backup_vencido (3.28)
+
+def test_backup_vencido_sin_carpeta_configurada_es_false(conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FrecuenciaBackupDrive="Diario")
+    assert backup_vencido(conn, date(2026, 8, 15)) is False
+
+
+def test_backup_vencido_sin_frecuencia_configurada_es_false(conn, tmp_path):
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    assert backup_vencido(conn, date(2026, 8, 15)) is False
+
+
+def test_backup_vencido_frecuencia_desconocida_es_false(conn, tmp_path):
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FrecuenciaBackupDrive="Bimestral")
+    assert backup_vencido(conn, date(2026, 8, 15)) is False
+
+
+def test_backup_vencido_sin_ningun_backup_generado_es_true(conn, tmp_path):
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FrecuenciaBackupDrive="Semanal")
+    assert backup_vencido(conn, date(2026, 8, 15)) is True
+
+
+def test_backup_vencido_dentro_de_la_frecuencia_es_false(conn, tmp_path):
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FrecuenciaBackupDrive="Semanal")
+    generar_backup(conn, momento=datetime(2026, 8, 10, 9, 0))
+    assert backup_vencido(conn, date(2026, 8, 15)) is False  # 5 días, semanal = 7
+
+
+def test_backup_vencido_fuera_de_la_frecuencia_es_true(conn, tmp_path):
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FrecuenciaBackupDrive="Diario")
+    generar_backup(conn, momento=datetime(2026, 8, 10, 9, 0))
+    assert backup_vencido(conn, date(2026, 8, 15)) is True  # 5 días, diario = 1
+
+
+def test_backup_vencido_usa_el_backup_mas_reciente(conn, tmp_path):
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FrecuenciaBackupDrive="Semanal")
+    generar_backup(conn, momento=datetime(2026, 7, 1, 9, 0))
+    generar_backup(conn, momento=datetime(2026, 8, 14, 9, 0))
+    assert backup_vencido(conn, date(2026, 8, 15)) is False  # 1 día desde el más reciente
+
+
+def test_backup_vencido_frecuencia_no_distingue_mayusculas(conn, tmp_path):
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FrecuenciaBackupDrive="  diario  ")
+    generar_backup(conn, momento=datetime(2026, 8, 10, 9, 0))
+    assert backup_vencido(conn, date(2026, 8, 15)) is True

@@ -5,9 +5,9 @@ from reportlab.platypus import Paragraph, Table
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.negocio.grilla import DIAS_GRILLA_DEFAULT
 from app.pdf.estilos import COLOR_NIVEL_1, FUENTE, FUENTE_NEGRITA
 from app.pdf.grilla_pdf import (
-    DIAS_GRILLA_DEFAULT,
     _CeldaDosTonos,
     _partir_etiqueta_unidad,
     _tabla_grilla_edificio,

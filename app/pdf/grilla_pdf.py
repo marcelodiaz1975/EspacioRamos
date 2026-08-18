@@ -20,9 +20,8 @@ from reportlab.lib.units import cm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Flowable, KeepTogether, Paragraph, Spacer, Table, TableStyle
 
-from app.negocio.dias import DIAS_SEMANA
 from app.negocio.formato import hora_fmt
-from app.negocio.grilla import calcular_grilla
+from app.negocio.grilla import calcular_grilla, dias_grilla
 from app.pdf.estilos import (
     COLOR_AMARILLO,
     COLOR_NARANJA,
@@ -38,7 +37,6 @@ from app.pdf.estilos import (
 )
 from app.pdf.estilos import partir_etiqueta_unidad as _partir_etiqueta_unidad
 
-DIAS_GRILLA_DEFAULT = DIAS_SEMANA[:6]  # Lunes a Sábado
 _COLOR_CELDA = {"verde": COLOR_VERDE, "amarillo": COLOR_AMARILLO, "naranja": COLOR_AMARILLO, "rojo": COLOR_ROJO}
 _GROSOR_GRUESO = 1.3  # líneas estructurales (días, rígido/flexible, marcos de encabezado)
 _DIAMETRO_DOS_TONOS_MAX = 6  # tamaño "cómodo" del círculo naranja cuando hay lugar de sobra
@@ -119,7 +117,7 @@ def _tabla_grilla_edificio(
     conn: sqlite3.Connection, unidades: list[sqlite3.Row], grilla: dict, horas: list[int], ancho: float,
     anonimizar_unidad: bool = False,
 ) -> Table:
-    dias = DIAS_GRILLA_DEFAULT
+    dias = dias_grilla(conn)
     tipo_por_hora = _tipo_bloque_por_hora(conn, horas)
 
     n_unidades = len(unidades)
@@ -285,7 +283,7 @@ def _tabla_grilla_edificio_girada(
     continua (crece en alto sin límite), así que girarla la mantiene
     dentro del ancho de la página. Mismos colores, líneas gruesas
     estructurales y fuentes auto-ajustables que la versión sin girar."""
-    dias = DIAS_GRILLA_DEFAULT
+    dias = dias_grilla(conn)
     tipo_por_hora = _tipo_bloque_por_hora(conn, horas)
     n_unidades = len(unidades)
     n_horas = max(len(horas), 1)
@@ -480,7 +478,7 @@ def secciones_disponibilidad(
     hora_fin = int(cfg["HoraFinGrilla"]) if cfg else 22
     umbral_giro = _umbral_giro_grilla(conn)
     horas = list(range(hora_ini, hora_fin))
-    dias = DIAS_GRILLA_DEFAULT
+    dias = dias_grilla(conn)
 
     grilla = calcular_grilla(conn, anio, mes, hora_ini, hora_fin, dias)
     unidades = _unidades_por_edificio(conn, ids_edificio)
