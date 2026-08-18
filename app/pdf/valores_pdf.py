@@ -214,14 +214,17 @@ def _sustituciones_detalles_complementarios(conn: sqlite3.Connection) -> dict[st
     ítem editable: "{frecuencia}" (el ítem "Ajuste de valores" toma la
     frecuencia real configurada, no queda hardcodeada) y "{contacto}" (el
     ítem "Contacto" arma "Nombre - Celular - Email" del responsable
-    marcado como contacto principal)."""
+    marcado como contacto principal — además exige AptoPDF=1, sección
+    3.22: EsContactoPrincipal no alcanza si esa persona está marcada como
+    no apta para figurar en documentos impresos)."""
     cfg = conn.execute(
         "SELECT FrecuenciaActualizacionValores FROM Configuracion WHERE IdConfiguracion = 1"
     ).fetchone()
     frecuencia = ((cfg["FrecuenciaActualizacionValores"] if cfg else None) or "periódica").lower()
 
     resp = conn.execute(
-        "SELECT Nombre, Celular, Email FROM Responsable WHERE EsContactoPrincipal = 1 AND Activo = 1 LIMIT 1"
+        "SELECT Nombre, Celular, Email FROM Responsable "
+        "WHERE EsContactoPrincipal = 1 AND AptoPDF = 1 AND Activo = 1 LIMIT 1"
     ).fetchone()
     contacto = (
         " - ".join(p for p in (resp["Nombre"], resp["Celular"], resp["Email"]) if p)

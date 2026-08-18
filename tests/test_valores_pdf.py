@@ -7,6 +7,7 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.pdf.estilos import COLOR_NIVEL_1
 from app.pdf.valores_pdf import (
     _hasta_por_frecuencia,
+    _sustituciones_detalles_complementarios,
     bloques_esquema_descuentos,
     matriz_valores_edificio,
     rango_actualizacion,
@@ -122,6 +123,25 @@ def test_sin_tramos_muestra_mensaje(conn):
     _limpiar_esquema(conn)
     resultado = bloques_esquema_descuentos(conn, ancho=500)
     assert len(resultado) == 1
+
+
+def test_contacto_exige_apto_pdf_ademas_de_contacto_principal(conn):
+    """Sección 3.22: EsContactoPrincipal no alcanza si esa persona está
+    marcada como no apta para figurar en documentos impresos (AptoPDF=0,
+    el default)."""
+    obtener_repositorio(conn, "Responsable").crear(
+        Nombre="Marcelo", Celular="1111", Email="marcelo@x.com", EsContactoPrincipal=1, AptoPDF=0, Activo=1,
+    )
+    sustituciones = _sustituciones_detalles_complementarios(conn)
+    assert sustituciones["{contacto}"] == "Sin datos de contacto cargados."
+
+
+def test_contacto_se_arma_cuando_es_principal_y_apto_pdf(conn):
+    obtener_repositorio(conn, "Responsable").crear(
+        Nombre="Marcelo", Celular="1111", Email="marcelo@x.com", EsContactoPrincipal=1, AptoPDF=1, Activo=1,
+    )
+    sustituciones = _sustituciones_detalles_complementarios(conn)
+    assert sustituciones["{contacto}"] == "Marcelo - 1111 - marcelo@x.com"
 
 
 def test_matriz_valores_ordena_unidades_por_piso_y_letra(conn):
