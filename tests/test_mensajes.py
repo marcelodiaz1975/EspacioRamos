@@ -256,6 +256,117 @@ def test_detalle_aislada_deposito_de_llave_del_mes(conn, profesional_aislada_con
     assert "Depósito de llave: $ 5.000,00" in texto
 
 
+# ------------------------------------- combinar misma/distintas unidades (5.1)
+
+def test_detalle_aislada_sin_combinar_cada_reserva_en_su_propia_linea(conn, profesional_aislada_con_edificios):
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=14, HoraFin=16,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "Miércoles 5/8 de 10 a 12hs" in texto
+    assert "Miércoles 5/8 de 14 a 16hs" in texto
+    assert "y de" not in texto
+
+
+def test_detalle_aislada_combinar_misma_unidad_funde_horarios(conn, profesional_aislada_con_edificios):
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=14, HoraFin=16,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(
+        conn, id_profesional=id_prof, periodo="2026-08", combinar_misma_unidad=True,
+    )
+    assert "Miércoles 5/8 de 10 a 12hs y de 14 a 16hs" in texto
+    assert "$ 2.000,00" in texto  # 4hs x 500 = 2000, una sola línea
+
+
+def test_detalle_aislada_combinar_misma_unidad_no_funde_consultorios_distintos(conn, profesional_aislada_con_edificios):
+    id_prof, c1, c2, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c2, Fecha="2026-08-05", HoraInicio=14, HoraFin=16,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(
+        conn, id_profesional=id_prof, periodo="2026-08", combinar_misma_unidad=True,
+    )
+    assert "Miércoles 5/8 de 10 a 12hs" in texto
+    assert "Miércoles 5/8 de 14 a 16hs" in texto
+    assert "y de" not in texto
+
+
+def test_detalle_aislada_combinar_distintas_unidades_agrupa_bajo_la_fecha(conn, profesional_aislada_con_edificios):
+    id_prof, c1, c2, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c2, Fecha="2026-08-05", HoraInicio=14, HoraFin=15,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(
+        conn, id_profesional=id_prof, periodo="2026-08", combinar_distintas_unidades=True,
+    )
+    # c1: 2hs x 500 = 1000; c2: 1hs x 600 = 600; total del día = 1600
+    assert "Miércoles 5/8: $ 1.600,00" in texto
+    assert "de 10 a 12hs - consul 1" in texto
+    assert "de 14 a 15hs - consul 2" in texto
+
+
+def test_detalle_aislada_combinar_distintas_unidades_implica_combinar_misma_unidad(
+    conn, profesional_aislada_con_edificios,
+):
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=14, HoraFin=16,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(
+        conn, id_profesional=id_prof, periodo="2026-08", combinar_distintas_unidades=True,
+    )
+    # un solo consultorio ese día -> no hay encabezado de día, pero sigue fundiendo los horarios
+    assert "Miércoles 5/8 de 10 a 12hs y de 14 a 16hs" in texto
+    assert "Miércoles 5/8: " not in texto
+
+
+def test_detalle_aislada_combinar_no_afecta_reservas_de_dias_distintos(conn, profesional_aislada_con_edificios):
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-06", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(
+        conn, id_profesional=id_prof, periodo="2026-08",
+        combinar_misma_unidad=True, combinar_distintas_unidades=True,
+    )
+    assert "Miércoles 5/8 de 10 a 12hs" in texto
+    assert "Jueves 6/8 de 10 a 12hs" in texto
+    assert "y de" not in texto
+
+
 @pytest.fixture
 def edificio_dos_consultorios(conn):
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")

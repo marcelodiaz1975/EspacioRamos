@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import date
+from typing import Callable
 
 from app.negocio.dias import DIAS_SEMANA, sumar_meses
 from app.negocio.feriados import feriados_relevantes_periodo
@@ -260,15 +261,75 @@ def _lugar_reserva(fila: sqlite3.Row, incluir_consultorio: bool, incluir_unidad:
     return " - ".join(partes)
 
 
+def _lineas_reservas_aisladas(
+    filas: list[sqlite3.Row], *, incluir_consultorio: bool, incluir_unidad: bool, incluir_edificio: bool,
+    combinar_misma_unidad: bool, combinar_distintas_unidades: bool,
+    monto_fn: Callable[[sqlite3.Row], float] | None = None,
+) -> tuple[list[str], float]:
+    """Sección 5.1: sin combinar (default), cada reserva aislada aparece en
+    su propia línea — es el comportamiento pedido para no perder el
+    detalle reserva por reserva. Con "Combinar misma unidad" se funden en
+    una sola línea las reservas del mismo día y consultorio, uniendo las
+    franjas horarias con "y de". "Combinar distintas unidades" además
+    agrupa bajo una sola fecha (con el total del día) las reservas de
+    consultorios distintos ese mismo día — implica combinar misma unidad
+    (no tendría sentido agrupar entre consultorios sin haber fundido antes
+    los repetidos). `monto_fn` es None para "RESERVAS POSTERIORES" (sección
+    5.1: esa lista va sin importe)."""
+    combinar_misma_unidad = combinar_misma_unidad or combinar_distintas_unidades
+
+    por_fecha: dict[str, list[sqlite3.Row]] = {}
+    for f in filas:
+        por_fecha.setdefault(f["Fecha"], []).append(f)
+
+    lineas: list[str] = []
+    total = 0.0
+    for fecha, reservas_dia in por_fecha.items():
+        dia_semana = DIAS_SEMANA[date.fromisoformat(fecha).weekday()]
+
+        if combinar_misma_unidad:
+            grupos: dict[int, list[sqlite3.Row]] = {}
+            for f in reservas_dia:
+                grupos.setdefault(f["IdConsultorio"], []).append(f)
+            grupos_ordenados = list(grupos.values())
+        else:
+            grupos_ordenados = [[f] for f in reservas_dia]
+
+        entradas = []  # (horarios, lugar, monto | None)
+        for grupo in grupos_ordenados:
+            horarios = " y de ".join(
+                f"{hora_fmt(f['HoraInicio'])[:-2]} a {hora_fmt(f['HoraFin'])}" for f in grupo
+            )
+            lugar = _lugar_reserva(grupo[0], incluir_consultorio, incluir_unidad, incluir_edificio)
+            monto = sum(monto_fn(f) for f in grupo) if monto_fn else None
+            entradas.append((horarios, lugar, monto))
+
+        if combinar_distintas_unidades and len(entradas) > 1 and monto_fn:
+            total_dia = sum(monto for _, _, monto in entradas)
+            lineas.append(f"{dia_semana} {fecha_corta(fecha)}: {_moneda(total_dia)}")
+            for horarios, lugar, monto in entradas:
+                sufijo_lugar = f" - {lugar}" if lugar else ""
+                lineas.append(f"  de {horarios}{sufijo_lugar}: {_moneda(monto)}")
+            total += total_dia
+        else:
+            for horarios, lugar, monto in entradas:
+                sufijo_lugar = f" - {lugar}" if lugar else ""
+                sufijo_monto = f": {_moneda(monto)}" if monto is not None else ""
+                lineas.append(f"{dia_semana} {fecha_corta(fecha)} de {horarios}{sufijo_lugar}{sufijo_monto}")
+                total += monto or 0.0
+
+    return lineas, total
+
+
 def mensaje_detalle_reserva_aislada(
     conn: sqlite3.Connection, *, id_profesional: int, periodo: str,
     incluir_consultorio: bool = True, incluir_unidad: bool = True, incluir_edificio: bool = True,
+    combinar_misma_unidad: bool = False, combinar_distintas_unidades: bool = False,
 ) -> str:
-    """"DETALLE RESERVA {MES}" (sección 5.1, categoría A). No implementa
-    todavía "Combinar misma unidad"/"Combinar distintas unidades" (fusionar
-    en una sola línea reservas del mismo día que terminan cayendo en el
-    mismo consultorio/unidad) — cada reserva aislada aparece en su propia
-    línea; a revisar en la beta si hace falta la fusión.
+    """"DETALLE RESERVA {MES}" (sección 5.1, categoría A). Por defecto (los
+    dos combinar en False) cada reserva aislada aparece en su propia línea
+    — es el comportamiento pedido, reserva por reserva. Ver
+    `_lineas_reservas_aisladas` para el detalle de qué hace cada combinar.
 
     "Regla edificio" (si tiene llaves de más de un edificio, se agrega el
     edificio a cada línea aunque `incluir_edificio` esté en False) se
@@ -285,7 +346,7 @@ def mensaje_detalle_reserva_aislada(
     filas = conn.execute(
         """
         SELECT ra.IdReservaAislada, ra.Fecha, ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo,
-               c.NumeroConsultorio, c.ValorHoraAisladaActual, u.Departamento,
+               c.IdConsultorio, c.NumeroConsultorio, c.ValorHoraAisladaActual, u.Departamento,
                e.IdEdificio, e.Nombre AS NombreEdificio, e.Domicilio, e.DomicilioLocalidad
         FROM ReservaAislada ra
         JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
@@ -325,17 +386,12 @@ def mensaje_detalle_reserva_aislada(
     if llaves:
         lineas.append("")
 
-    total_reservas = 0.0
-    for f in del_mes:
-        dia_semana = DIAS_SEMANA[date.fromisoformat(f["Fecha"]).weekday()]
-        monto = _monto(f)
-        total_reservas += monto
-        lugar = _lugar_reserva(f, incluir_consultorio, incluir_unidad, incluir_edificio)
-        sufijo_lugar = f" - {lugar}" if lugar else ""
-        lineas.append(
-            f"{dia_semana} {fecha_corta(f['Fecha'])} de {hora_fmt(f['HoraInicio'])[:-2]} a "
-            f"{hora_fmt(f['HoraFin'])}{sufijo_lugar}: {_moneda(monto)}"
-        )
+    lineas_reservas, total_reservas = _lineas_reservas_aisladas(
+        del_mes, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
+        incluir_edificio=incluir_edificio, combinar_misma_unidad=combinar_misma_unidad,
+        combinar_distintas_unidades=combinar_distintas_unidades, monto_fn=_monto,
+    )
+    lineas += lineas_reservas
     lineas.append("")
 
     saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
@@ -355,15 +411,12 @@ def mensaje_detalle_reserva_aislada(
     lineas += ["", f"SALDO A ABONAR: {_moneda(saldo_a_abonar)}"]
 
     if posteriores:
-        lineas += ["", "RESERVAS POSTERIORES:"]
-        for f in posteriores:
-            dia_semana = DIAS_SEMANA[date.fromisoformat(f["Fecha"]).weekday()]
-            lugar = _lugar_reserva(f, incluir_consultorio, incluir_unidad, incluir_edificio)
-            sufijo_lugar = f" - {lugar}" if lugar else ""
-            lineas.append(
-                f"{dia_semana} {fecha_corta(f['Fecha'])} de {hora_fmt(f['HoraInicio'])[:-2]} a "
-                f"{hora_fmt(f['HoraFin'])}{sufijo_lugar}"
-            )
+        lineas_posteriores, _ = _lineas_reservas_aisladas(
+            posteriores, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
+            incluir_edificio=incluir_edificio, combinar_misma_unidad=combinar_misma_unidad,
+            combinar_distintas_unidades=combinar_distintas_unidades,
+        )
+        lineas += ["", "RESERVAS POSTERIORES:"] + lineas_posteriores
 
     edificios_mencionados: dict[int, sqlite3.Row] = {f["IdEdificio"]: f for f in del_mes + posteriores}
     if incluir_edificio and edificios_mencionados:

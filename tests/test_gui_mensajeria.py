@@ -286,4 +286,65 @@ def test_orden_a_igualdad_de_dias_por_monto_adeudado_descendente(qtbot, conn):
     assert nombres.index("DeudaAlta (DeudaAlta)") < nombres.index("DeudaBaja (DeudaBaja)")
 
 
+# ------------------------------------------------- combinar reservas aisladas (5.1)
+
+def _crear_consultorio(conn, numero=1, valor=500):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
+    return obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=numero, ValorHoraAisladaActual=valor,
+    )
+
+
+def test_checks_combinar_aparecen_desmarcados_por_defecto(qtbot, conn):
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.check_combinar_misma_unidad.isChecked() is False
+    assert pantalla.check_combinar_distintas_unidades.isChecked() is False
+
+
+def test_mensaje_aislada_por_defecto_no_combina(qtbot, conn):
+    id_consultorio = _crear_consultorio(conn)
+    id_prof = _crear_profesional(conn, categoria="A", apellido="Aislada")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-05", HoraInicio=14, HoraFin=16,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    conn.commit()
+
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "aisladas")
+    pantalla.tabla.selectRow(0)
+
+    assert "y de" not in pantalla.texto_mensaje.toPlainText()
+
+
+def test_tildar_combinar_misma_unidad_actualiza_el_mensaje(qtbot, conn):
+    id_consultorio = _crear_consultorio(conn)
+    id_prof = _crear_profesional(conn, categoria="A", apellido="Aislada")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-05", HoraInicio=14, HoraFin=16,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    conn.commit()
+
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "aisladas")
+    pantalla.tabla.selectRow(0)
+
+    pantalla.check_combinar_misma_unidad.setChecked(True)
+
+    assert "y de 14 a 16hs" in pantalla.texto_mensaje.toPlainText()
+
+
 _ETIQUETA_SITUACION_2 = "2 — Liquidación enviada"

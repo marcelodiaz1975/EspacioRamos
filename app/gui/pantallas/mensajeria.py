@@ -16,6 +16,7 @@ import sqlite3
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -119,6 +120,17 @@ class CentroMensajeria(QWidget):
 
         panel_derecho = QWidget()
         layout_derecho = QVBoxLayout(panel_derecho)
+
+        fila_combinar = QHBoxLayout()
+        self.check_combinar_misma_unidad = QCheckBox("Combinar misma unidad")
+        self.check_combinar_misma_unidad.toggled.connect(self._mostrar_mensaje_seleccionado)
+        fila_combinar.addWidget(self.check_combinar_misma_unidad)
+        self.check_combinar_distintas_unidades = QCheckBox("Combinar distintas unidades")
+        self.check_combinar_distintas_unidades.toggled.connect(self._mostrar_mensaje_seleccionado)
+        fila_combinar.addWidget(self.check_combinar_distintas_unidades)
+        fila_combinar.addStretch()
+        layout_derecho.addLayout(fila_combinar)
+
         self.texto_mensaje = QPlainTextEdit()
         layout_derecho.addWidget(self.texto_mensaje, stretch=1)
         fila_acciones = QHBoxLayout()
@@ -236,7 +248,9 @@ class CentroMensajeria(QWidget):
                 texto = mensaje_situacion(self.conn, profesional["IdProfesional"], self._periodo())
             else:
                 texto = mensaje_detalle_reserva_aislada(
-                    self.conn, id_profesional=profesional["IdProfesional"], periodo=self._periodo()
+                    self.conn, id_profesional=profesional["IdProfesional"], periodo=self._periodo(),
+                    combinar_misma_unidad=self.check_combinar_misma_unidad.isChecked(),
+                    combinar_distintas_unidades=self.check_combinar_distintas_unidades.isChecked(),
                 )
         except ValueError as error:
             texto = str(error)
