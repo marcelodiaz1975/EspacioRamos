@@ -288,6 +288,23 @@ CREATE TABLE IF NOT EXISTS LiquidacionEmitida (
     MontoGenerado REAL NOT NULL DEFAULT 0
 );
 
+-- EstadoMensajeriaPeriodo (DC-02 sec. 2) ------------------------------------------------------
+-- Trackea, por profesional y período, las dos transiciones de color del
+-- Centro de mensajería que no se pueden derivar de otra tabla: marrón (mensaje
+-- previo pendiente) -> amarillo (mensaje previo ya generado) para categoría R,
+-- y celeste (mensaje aisladas pendiente) -> azul (ya generado) para categoría
+-- A. Sin fila para (profesional, período) = arranque de mes (marrón/celeste
+-- según corresponda). No se resetea con un paso explícito de avance de mes:
+-- un período nuevo simplemente no tiene fila todavía.
+CREATE TABLE IF NOT EXISTS EstadoMensajeriaPeriodo (
+    IdEstadoMensajeria INTEGER PRIMARY KEY AUTOINCREMENT,
+    IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional),
+    Periodo TEXT NOT NULL,
+    MensajePrevioGenerado INTEGER NOT NULL DEFAULT 0,
+    MensajeAisladaGenerado INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (IdProfesional, Periodo)
+);
+
 -- FeriadoTrabajado (DC-01 sec. 1.5, DC-11 caso 2, aclarado en conversación) -----------------
 -- Horas que un profesional trabajó en un feriado en lugar de tomarse el
 -- descuento habitual. El consultorio es independiente del que usa en su
