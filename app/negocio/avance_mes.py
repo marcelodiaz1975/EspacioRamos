@@ -25,11 +25,18 @@ mes anterior que regulariza la situación, el ajuste directamente no se
 llega a aplicar — no hace falta revertir nada. Ver
 `liquidaciones.calcular_liquidacion` (usa el SaldoCuentaAnterior vigente
 en ese momento, después de traspasado acá).
+
+El plazo de pago extendido automático (Miscelánea, confirmado por el
+usuario) tampoco es un paso separado del documento original: es un
+agregado sobre el traspaso de saldo, para profesionales R que siempre
+tienen el mismo día límite del mes (ej. R54 y R38, hasta el 15) sin que
+el operador tenga que volver a setearlo a mano cada vez.
 """
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import date
 
 from app.negocio.archivos_generados import (
     SUBCARPETA_DISPONIBILIDAD,
@@ -43,7 +50,7 @@ from app.negocio.archivos_generados import (
     vaciar_carpeta,
 )
 from app.negocio.backup import generar_backup
-from app.negocio.dias import fecha_actual
+from app.negocio.dias import fecha_actual, parsear_periodo, sumar_meses, ultimo_dia_mes
 from app.negocio.estadisticas import generar_snapshot
 from app.negocio.historial_oferta import vaciar_historial
 from app.repositorio.registro import obtener_repositorio
@@ -56,6 +63,7 @@ class ResumenAvanceMes:
     ruta_backup: str | None = None
     id_snapshot: int = 0
     profesionales_con_traspaso: int = 0
+    plazos_extendidos_automaticos_aplicados: int = 0
     cuotas_cerradas: int = 0
     planes_finalizados: list[int] = field(default_factory=list)
     pedidos_lista_espera_eliminados: int = 0
@@ -77,6 +85,31 @@ def _traspasar_saldos(conn: sqlite3.Connection) -> int:
             p["IdProfesional"], SaldoCuentaAnterior=p["SaldoCuentaActual"] or 0.0, SaldoCuentaActual=0.0,
         )
     return len(profesionales)
+
+
+def _aplicar_plazos_extendidos_automaticos(conn: sqlite3.Connection, periodo_nuevo: str) -> int:
+    """Miscelánea (confirmado por el usuario, ejemplo real: R54 y R38 tienen
+    plazo hasta el día 15 de cada mes): un profesional R con
+    DiaPlazoExtendidoAutomatico configurado recibe el PlazoPagoExtendido del
+    mes que arranca sin que el operador tenga que setearlo a mano cada vez.
+    Se aplica siempre, sin mirar si hay deuda este mes — si no la hay,
+    `limpiar_plazos_vencidos_o_regularizados` lo limpia solo en el próximo
+    refresco del Centro de mensajería, igual que un plazo cargado a mano."""
+    anio, mes = parsear_periodo(periodo_nuevo)
+    ultimo_dia = ultimo_dia_mes(anio, mes).day
+    repo = obtener_repositorio(conn, "Profesional")
+    aplicados = 0
+    for p in repo.listar(CategoriaProfesional="R"):
+        dia = p["DiaPlazoExtendidoAutomatico"]
+        if not dia:
+            continue
+        fecha_plazo = date(anio, mes, min(int(dia), ultimo_dia))
+        repo.actualizar(
+            p["IdProfesional"], PlazoPagoExtendido=fecha_plazo.isoformat(),
+            MotivoPlazoExtra="Plazo extendido automático (configurado en la ficha del profesional)",
+        )
+        aplicados += 1
+    return aplicados
 
 
 def _cerrar_cuotas(conn: sqlite3.Connection, periodo_cerrado: str) -> tuple[int, list[int]]:
@@ -210,6 +243,9 @@ def avanzar_mes(
         conn, periodo_cerrado, porcentaje_aumento_aplicado=porcentaje_aumento_aplicado,
     )
     resumen.profesionales_con_traspaso = _traspasar_saldos(conn)
+    resumen.plazos_extendidos_automaticos_aplicados = _aplicar_plazos_extendidos_automaticos(
+        conn, sumar_meses(periodo_cerrado, 1),
+    )
     resumen.cuotas_cerradas, resumen.planes_finalizados = _cerrar_cuotas(conn, periodo_cerrado)
     resumen.pedidos_lista_espera_eliminados, resumen.pedidos_activos_vencidos_eliminados = _limpiar_lista_espera(
         conn, eliminar_activos_vencidos=eliminar_activos_vencidos_lista_espera,

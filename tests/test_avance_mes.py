@@ -33,6 +33,48 @@ def test_traspaso_de_saldo(conn):
     assert profesional["SaldoCuentaActual"] == 0
 
 
+def test_plazo_extendido_automatico_se_aplica_al_avanzar_de_mes(conn):
+    id_prof = _crear_profesional(conn)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, DiaPlazoExtendidoAutomatico=15)
+
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    assert profesional["PlazoPagoExtendido"] == "2026-09-15"
+    assert profesional["MotivoPlazoExtra"]
+    assert resumen.plazos_extendidos_automaticos_aplicados == 1
+
+
+def test_plazo_extendido_automatico_recorta_al_ultimo_dia_del_mes(conn):
+    id_prof = _crear_profesional(conn)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, DiaPlazoExtendidoAutomatico=31)
+
+    avanzar_mes(conn, periodo_cerrado="2026-01")  # pasa a febrero, que no tiene 31
+
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    assert profesional["PlazoPagoExtendido"] == "2026-02-28"
+
+
+def test_plazo_extendido_automatico_no_aplica_sin_configurar(conn):
+    id_prof = _crear_profesional(conn)
+
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    assert profesional["PlazoPagoExtendido"] is None
+    assert resumen.plazos_extendidos_automaticos_aplicados == 0
+
+
+def test_plazo_extendido_automatico_no_aplica_a_categoria_a(conn):
+    id_prof = _crear_profesional(conn, categoria="A")
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, DiaPlazoExtendidoAutomatico=15)
+
+    avanzar_mes(conn, periodo_cerrado="2026-08")
+
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    assert profesional["PlazoPagoExtendido"] is None
+
+
 def test_cierre_de_cuotas_marca_cerrada_pagas_e_impagas(conn):
     id_prof = _crear_profesional(conn)
     id_plan = crear_plan_pago(

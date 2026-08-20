@@ -175,10 +175,15 @@ class PanelControl(QWidget):
             f"Backup previo generado en:\n{resumen.ruta_backup}\n\n" if resumen.backup_generado
             else "No se generó backup previo (falta configurar la carpeta de backup).\n\n"
         )
+        mensaje_plazos = (
+            f" Se aplicó el plazo extendido automático a {resumen.plazos_extendidos_automaticos_aplicados} "
+            f"profesional(es)."
+            if resumen.plazos_extendidos_automaticos_aplicados else ""
+        )
         QMessageBox.information(
             self, "Avance de mes completado",
             f"{mensaje_backup}Se traspasó el saldo de {resumen.profesionales_con_traspaso} profesional(es), se cerraron "
-            f"{resumen.cuotas_cerradas} cuota(s) y se generó el snapshot #{resumen.id_snapshot}.",
+            f"{resumen.cuotas_cerradas} cuota(s) y se generó el snapshot #{resumen.id_snapshot}.{mensaje_plazos}",
         )
         self.actualizar()
 

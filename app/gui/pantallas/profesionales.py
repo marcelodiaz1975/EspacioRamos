@@ -86,6 +86,11 @@ def _campos_profesional() -> list[Campo]:
         Campo("SaldoCuentaAnterior", "Saldo cuenta anterior", tipo="numero"),
         Campo("PlazoPagoExtendido", "Plazo de pago extendido"),
         Campo("MotivoPlazoExtra", "Motivo del plazo extra"),
+        Campo(
+            "DiaPlazoExtendidoAutomatico",
+            "Día del mes para plazo extendido automático (1-31, dejar vacío si no aplica)",
+            tipo="numero",
+        ),
         Campo("CampoLibre1", "Campo libre 1"),
         Campo("CampoLibre2", "Campo libre 2"),
         Campo("CampoLibre3", "Campo libre 3"),

@@ -100,6 +100,9 @@ CREATE TABLE IF NOT EXISTS Profesional (
     SaldoCuentaAnterior REAL NOT NULL DEFAULT 0,
     PlazoPagoExtendido TEXT,
     MotivoPlazoExtra TEXT,
+    DiaPlazoExtendidoAutomatico INTEGER CHECK (
+        DiaPlazoExtendidoAutomatico IS NULL OR DiaPlazoExtendidoAutomatico BETWEEN 1 AND 31
+    ),
     CampoLibre1 TEXT,
     CampoLibre2 TEXT,
     CampoLibre3 TEXT
