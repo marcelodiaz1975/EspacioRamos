@@ -2,8 +2,16 @@
 pedidos y cruce automático contra la disponibilidad real del período en
 curso, reusando app.negocio.lista_espera. El mismo formulario de pedido
 también arma, sin necesidad de persistirlo, el mensaje "Disponibilidad de
-horarios regulares" (sección 5.2), con la opción de regenerar además el
-PDF de disponibilidad con fotos.
+horarios regulares" (sección 5.2, Mensaje 2 de DC-03), con la opción de
+regenerar además el PDF de disponibilidad con fotos.
+
+A diferencia del Mensaje 1 (detalle de aisladas, que decide solo si
+mencionar el edificio según las llaves del profesional — no hay
+checkboxes ahí), el Mensaje 2 no está atado a un profesional en
+particular, así que la "regla del edificio" (`mensajes._incluir_edificio_efectivo`)
+solo aplica el primer nivel (un solo edificio en el espacio -> se omite
+siempre) y para el resto queda a criterio manual del operador: de ahí los
+tres checkboxes "Incluir consultorio/unidad/edificio" de acá abajo.
 
 Un pedido puede necesitar varios bloques día(s)+horario a la vez (ej.
 "martes o jueves 3hs entre 14 y 18hs" Y "sábado de 9 a 12hs"): los campos
@@ -172,6 +180,16 @@ class PantallaListaEspera(QWidget):
         boton_crear.clicked.connect(self._crear_pedido)
         form.addWidget(boton_crear)
 
+        form.addWidget(QLabel("Mensaje de disponibilidad — qué incluir en cada alternativa"))
+        self.casilla_incluir_consultorio = QCheckBox("Incluir consultorio")
+        self.casilla_incluir_consultorio.setChecked(True)
+        self.casilla_incluir_unidad = QCheckBox("Incluir unidad")
+        self.casilla_incluir_unidad.setChecked(True)
+        self.casilla_incluir_edificio = QCheckBox("Incluir edificio")
+        self.casilla_incluir_edificio.setChecked(True)
+        for casilla in (self.casilla_incluir_consultorio, self.casilla_incluir_unidad, self.casilla_incluir_edificio):
+            form.addWidget(casilla)
+
         self.casilla_pdf_disponibilidad = QCheckBox("Generar también como PDF con fotos")
         form.addWidget(self.casilla_pdf_disponibilidad)
         boton_mensaje_disponibilidad = QPushButton("Generar mensaje de disponibilidad")
@@ -292,6 +310,9 @@ class PantallaListaEspera(QWidget):
                 self.conn, periodo=periodo_actual(self.conn), dias=dias,
                 horario_desde=self.spin_desde.value(), horario_hasta=self.spin_hasta.value(),
                 tipo_combinacion=self.combo_tipo.currentData(), condiciones_consultorio=self._condiciones(),
+                incluir_consultorio=self.casilla_incluir_consultorio.isChecked(),
+                incluir_unidad=self.casilla_incluir_unidad.isChecked(),
+                incluir_edificio=self.casilla_incluir_edificio.isChecked(),
             )
         except ValueError as error:
             QMessageBox.warning(self, "Generar mensaje de disponibilidad", str(error))

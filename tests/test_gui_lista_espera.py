@@ -123,6 +123,29 @@ def test_generar_mensaje_disponibilidad_con_pdf_tildado_genera_archivo(qtbot, co
     assert list(carpeta_disponibilidad.glob("*.pdf"))
 
 
+def test_generar_mensaje_disponibilidad_respeta_checkbox_de_edificio(qtbot, conn):
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Sur')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio WHERE Nombre = 'Torre Norte'").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute(
+        "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio, ValorHoraRegularActual, ValorHoraAisladaActual) "
+        "VALUES (?, 1, 1000, 1500)",
+        (id_unidad,),
+    )
+    conn.commit()
+
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+    pantalla.casilla_incluir_edificio.setChecked(False)
+
+    pantalla._generar_mensaje_disponibilidad()
+
+    assert "Torre Norte" not in pantalla.texto_mensaje_disponibilidad.toPlainText()
+
+
 def test_copiar_mensaje_disponibilidad_usa_portapapeles(qtbot, conn, monkeypatch):
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
