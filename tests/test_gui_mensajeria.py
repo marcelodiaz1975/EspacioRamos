@@ -7,6 +7,7 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.mensajeria import CentroMensajeria
 from app.negocio.archivos_generados import carpeta_profesional
 from app.negocio.dias import periodo_actual
+from app.negocio.mensajeria import color_profesional, marcar_mensaje_previo_generado
 from app.negocio.pagos import crear_plan_pago
 from app.pdf.liquidacion_pdf import nombre_archivo_liquidacion
 from app.repositorio.registro import obtener_repositorio
@@ -43,6 +44,11 @@ def _crear_profesional(conn, categoria="R", apellido="Gómez", saldo=0.0, codigo
     )
 
 
+def _color(conn, id_profesional):
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    return color_profesional(conn, profesional, periodo_actual(conn))
+
+
 def test_centro_mensajeria_lista_profesionales_categoria_r(qtbot, conn):
     _crear_profesional(conn, saldo=500)
     pantalla = CentroMensajeria(conn)
@@ -52,12 +58,31 @@ def test_centro_mensajeria_lista_profesionales_categoria_r(qtbot, conn):
     assert "Gómez" in pantalla.tabla.item(0, 0).text()
 
 
-def test_centro_mensajeria_muestra_color_en_columna_propia(qtbot, conn):
+def test_centro_mensajeria_muestra_estado_en_columna_propia(qtbot, conn):
     _crear_profesional(conn, saldo=0)
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
-    assert "Verde" in pantalla.tabla.item(0, 2).text()
+    assert pantalla.tabla.item(0, 2).text() == "Situación regular"
+
+
+def test_centro_mensajeria_muestra_nombre_y_apellido_sin_apodo(qtbot, conn):
+    id_prof = _crear_profesional(conn, apellido="Lo Veci", saldo=0)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, NombrePila="Marcela", Apodo="Male")
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    assert pantalla.tabla.item(0, 0).text() == "Marcela Lo Veci"
+
+
+def test_centro_mensajeria_saldo_actual_suma_anterior_y_actual(qtbot, conn):
+    id_prof = _crear_profesional(conn, saldo=1000)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaActual=500)
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    assert pantalla.tabla.item(0, 3).text() == "$ 1,000.00"
+    assert pantalla.tabla.item(0, 4).text() == "$ 1,500.00"
 
 
 def test_centro_mensajeria_cambia_a_categoria_aislada(qtbot, conn):
@@ -66,7 +91,7 @@ def test_centro_mensajeria_cambia_a_categoria_aislada(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     assert pantalla.tabla.rowCount() == 1
-    assert "Celeste" in pantalla.tabla.item(0, 2).text()
+    assert pantalla.tabla.item(0, 2).text() == "Con aisladas para enviar mensaje"
 
 
 def test_centro_mensajeria_boton_grupal_llena_texto(qtbot, conn):
@@ -91,10 +116,10 @@ def test_generar_texto_marron_pasa_a_amarillo(qtbot, conn):
     _set_filtro(pantalla, "todos")
 
     fila = pantalla._profesionales.index(next(p for p in pantalla._profesionales if p["IdProfesional"] == id_prof))
-    pantalla.tabla.cellWidget(fila, 5).click()
+    pantalla.tabla.cellWidget(fila, 6).click()
 
     assert "se van a mandar los archivos" in pantalla.texto_mensaje.toPlainText()
-    assert "Amarillo" in pantalla.tabla.item(0, 2).text()
+    assert _color(conn, id_prof) == "amarillo"
 
 
 def test_generar_texto_aislada_pasa_a_azul(qtbot, conn):
@@ -104,10 +129,10 @@ def test_generar_texto_aislada_pasa_a_azul(qtbot, conn):
     _set_filtro(pantalla, "aisladas")
 
     fila = pantalla._profesionales.index(next(p for p in pantalla._profesionales if p["IdProfesional"] == id_prof))
-    pantalla.tabla.cellWidget(fila, 5).click()
+    pantalla.tabla.cellWidget(fila, 6).click()
 
     assert "DETALLE RESERVA" in pantalla.texto_mensaje.toPlainText()
-    assert "Azul" in pantalla.tabla.item(0, 2).text()
+    assert _color(conn, id_prof) == "azul"
 
 
 def test_generar_texto_copia_al_portapapeles(qtbot, conn, monkeypatch):
@@ -121,7 +146,7 @@ def test_generar_texto_copia_al_portapapeles(qtbot, conn, monkeypatch):
         "app.gui.pantallas.mensajeria.QGuiApplication.clipboard",
         staticmethod(lambda: type("_C", (), {"setText": lambda self, t: copiado.append(t)})()),
     )
-    pantalla.tabla.cellWidget(0, 5).click()
+    pantalla.tabla.cellWidget(0, 6).click()
     assert copiado and copiado[0] == pantalla.texto_mensaje.toPlainText()
 
 
@@ -133,7 +158,7 @@ def test_check_enviada_deshabilitado_para_marron(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    item = pantalla.tabla.item(0, 4)
+    item = pantalla.tabla.item(0, 5)
     assert not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable)
 
 
@@ -143,7 +168,7 @@ def test_check_enviada_deshabilitado_para_aislada(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
 
-    item = pantalla.tabla.item(0, 4)
+    item = pantalla.tabla.item(0, 5)
     assert not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable)
 
 
@@ -156,18 +181,18 @@ def test_check_enviada_habilitado_para_verde_sin_liquidacion_emitida(qtbot, conn
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    item = pantalla.tabla.item(0, 4)
+    item = pantalla.tabla.item(0, 5)
     assert item.flags() & Qt.ItemFlag.ItemIsUserCheckable
     assert item.checkState() == Qt.CheckState.Unchecked
 
 
 def test_marcar_enviada_emite_liquidacion_genera_pdf_y_baja_a_gris(qtbot, conn):
-    _crear_profesional(conn, saldo=0, codigo="R1")  # verde
+    id_prof = _crear_profesional(conn, saldo=0, codigo="R1")  # verde
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Checked)
 
     liquidaciones = obtener_repositorio(conn, "LiquidacionEmitida").listar()
     assert len(liquidaciones) == 1
@@ -176,21 +201,20 @@ def test_marcar_enviada_emite_liquidacion_genera_pdf_y_baja_a_gris(qtbot, conn):
     assert "MENSAJE AUTOMATICO" in pantalla.texto_mensaje.toPlainText()
 
     _set_filtro(pantalla, "todos")
-    assert "Gris" in pantalla.tabla.item(0, 2).text()
-    assert pantalla.tabla.item(0, 4).checkState() == Qt.CheckState.Checked
+    assert _color(conn, id_prof) == "gris"
+    assert pantalla.tabla.item(0, 5).checkState() == Qt.CheckState.Checked
 
 
 def test_marcar_enviada_amarillo_usa_situacion_2(qtbot, conn):
     id_prof = _crear_profesional(conn, saldo=1, codigo="R1")  # marrón -> lo subimos a mano a amarillo
-    from app.negocio.mensajeria import marcar_mensaje_previo_generado
     marcar_mensaje_previo_generado(conn, id_prof, periodo_actual(conn))
 
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
-    assert "Amarillo" in pantalla.tabla.item(0, 2).text()
+    assert _color(conn, id_prof) == "amarillo"
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Checked)
     assert "en forma manual" in pantalla.texto_mensaje.toPlainText()
 
 
@@ -202,9 +226,9 @@ def test_marcar_enviada_violeta_borra_plazo_extendido(qtbot, conn):
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
-    assert "Violeta" in pantalla.tabla.item(0, 2).text()
+    assert _color(conn, id_prof) == "violeta"
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Checked)
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
     assert profesional["PlazoPagoExtendido"] is None
@@ -221,9 +245,9 @@ def test_marcar_enviada_es_reversible(qtbot, conn):
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
-    assert pantalla.tabla.item(0, 4).checkState() == Qt.CheckState.Checked
+    assert pantalla.tabla.item(0, 5).checkState() == Qt.CheckState.Checked
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Unchecked)
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Unchecked)
 
     liquidacion = obtener_repositorio(conn, "LiquidacionEmitida").obtener(id_liquidacion)
     assert liquidacion["EstadoEnvio"] == "No enviada"
@@ -237,7 +261,7 @@ def test_marcar_enviada_sin_carpeta_base_avisa_y_no_rompe(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)  # no debe lanzar
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Checked)  # no debe lanzar
 
     assert obtener_repositorio(conn, "LiquidacionEmitida").listar() == []
 
@@ -322,8 +346,8 @@ def test_orden_por_color_y_dentro_de_cada_color_por_codigo(qtbot, conn):
 
     nombres = [pantalla.tabla.item(i, 0).text() for i in range(pantalla.tabla.rowCount())]
     # verde va antes que rojo (DC-02 §2.1); entre los dos rojos, R1 antes que R2 (por código).
-    assert nombres.index("Verde (Verde)") < nombres.index("RojoUno (RojoUno)")
-    assert nombres.index("RojoUno (RojoUno)") < nombres.index("RojoDos (RojoDos)")
+    assert nombres.index("Verde") < nombres.index("RojoUno")
+    assert nombres.index("RojoUno") < nombres.index("RojoDos")
 
 
 def test_orden_codigo_natural_r10_despues_de_r2(qtbot, conn):
@@ -334,7 +358,7 @@ def test_orden_codigo_natural_r10_despues_de_r2(qtbot, conn):
     _set_filtro(pantalla, "todos")
 
     nombres = [pantalla.tabla.item(i, 0).text() for i in range(pantalla.tabla.rowCount())]
-    assert nombres.index("Dos (Dos)") < nombres.index("Diez (Diez)")
+    assert nombres.index("Dos") < nombres.index("Diez")
 
 
 # ------------------------------------------------- combinar reservas aisladas (5.1)
@@ -375,7 +399,7 @@ def test_destildar_incluir_consultorio_lo_saca_del_mensaje(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     pantalla.check_incluir_consultorio.setChecked(False)
-    pantalla.tabla.cellWidget(0, 5).click()
+    pantalla.tabla.cellWidget(0, 6).click()
 
     assert "consul 7" not in pantalla.texto_mensaje.toPlainText()
 
@@ -395,7 +419,7 @@ def test_mensaje_aislada_por_defecto_no_combina(qtbot, conn):
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
-    pantalla.tabla.cellWidget(0, 5).click()
+    pantalla.tabla.cellWidget(0, 6).click()
 
     assert "y de" not in pantalla.texto_mensaje.toPlainText()
 
@@ -416,7 +440,7 @@ def test_tildar_combinar_misma_unidad_actualiza_el_mensaje(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     pantalla.check_combinar_misma_unidad.setChecked(True)
-    pantalla.tabla.cellWidget(0, 5).click()
+    pantalla.tabla.cellWidget(0, 6).click()
 
     assert "y de 14 a 16hs" in pantalla.texto_mensaje.toPlainText()
 
@@ -430,12 +454,12 @@ def test_deshacer_sin_acciones_no_rompe(qtbot, conn):
 
 
 def test_deshacer_marcar_enviada_sin_pdf_previo_borra_el_generado(qtbot, conn):
-    _crear_profesional(conn, saldo=0, codigo="R1")  # verde
+    id_prof = _crear_profesional(conn, saldo=0, codigo="R1")  # verde
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Checked)
     liquidacion = obtener_repositorio(conn, "LiquidacionEmitida").listar()[0]
     ruta = carpeta_profesional(conn, "R1") / liquidacion["NombreArchivo"]
     assert ruta.exists()
@@ -445,8 +469,8 @@ def test_deshacer_marcar_enviada_sin_pdf_previo_borra_el_generado(qtbot, conn):
     assert obtener_repositorio(conn, "LiquidacionEmitida").listar() == []
     assert not ruta.exists()
     _set_filtro(pantalla, "todos")
-    assert "Verde" in pantalla.tabla.item(0, 2).text()
-    assert pantalla.tabla.item(0, 4).checkState() == Qt.CheckState.Unchecked
+    assert _color(conn, id_prof) == "verde"
+    assert pantalla.tabla.item(0, 5).checkState() == Qt.CheckState.Unchecked
 
 
 def test_deshacer_marcar_enviada_restaura_el_pdf_previo(qtbot, conn):
@@ -460,7 +484,7 @@ def test_deshacer_marcar_enviada_restaura_el_pdf_previo(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Checked)
     assert ruta.read_bytes() != b"PDF-VIEJO"
 
     pantalla._deshacer_ultima_accion()
@@ -476,7 +500,7 @@ def test_deshacer_marcar_enviada_restaura_saldo_actual(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Checked)
     pantalla._deshacer_ultima_accion()
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
@@ -492,7 +516,7 @@ def test_deshacer_marcar_enviada_violeta_restaura_plazo_extendido(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Checked)
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
     assert profesional["PlazoPagoExtendido"] is None
 
@@ -513,7 +537,7 @@ def test_deshacer_desmarcar_enviada_la_vuelve_a_marcar(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Unchecked)
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Unchecked)
     assert obtener_repositorio(conn, "LiquidacionEmitida").obtener(id_liquidacion)["EstadoEnvio"] == "No enviada"
 
     pantalla._deshacer_ultima_accion()
@@ -522,31 +546,31 @@ def test_deshacer_desmarcar_enviada_la_vuelve_a_marcar(qtbot, conn):
 
 
 def test_deshacer_generar_texto_marron_vuelve_a_marron(qtbot, conn):
-    _crear_profesional(conn, saldo=1, codigo="R1")  # dentro de tolerancia -> marrón
+    id_prof = _crear_profesional(conn, saldo=1, codigo="R1")  # dentro de tolerancia -> marrón
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    pantalla.tabla.cellWidget(0, 5).click()
-    assert "Amarillo" in pantalla.tabla.item(0, 2).text()
+    pantalla.tabla.cellWidget(0, 6).click()
+    assert _color(conn, id_prof) == "amarillo"
 
     pantalla._deshacer_ultima_accion()
 
-    assert "Marrón" in pantalla.tabla.item(0, 2).text()
+    assert _color(conn, id_prof) == "marron"
 
 
 def test_deshacer_generar_texto_aislada_vuelve_a_celeste(qtbot, conn):
-    _crear_profesional(conn, categoria="A", apellido="Aislada", codigo="A1")
+    id_prof = _crear_profesional(conn, categoria="A", apellido="Aislada", codigo="A1")
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
 
-    pantalla.tabla.cellWidget(0, 5).click()
-    assert "Azul" in pantalla.tabla.item(0, 2).text()
+    pantalla.tabla.cellWidget(0, 6).click()
+    assert _color(conn, id_prof) == "azul"
 
     pantalla._deshacer_ultima_accion()
 
-    assert "Celeste" in pantalla.tabla.item(0, 2).text()
+    assert _color(conn, id_prof) == "celeste"
 
 
 def test_generar_texto_sin_mutacion_no_deja_nada_para_deshacer(qtbot, conn):
@@ -558,11 +582,11 @@ def test_generar_texto_sin_mutacion_no_deja_nada_para_deshacer(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)  # acción mutante
+    pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Checked)  # acción mutante
     assert pantalla._ultima_accion is not None
 
     _set_filtro(pantalla, "todos")
-    pantalla.tabla.cellWidget(0, 5).click()  # generar texto de gris: no muta nada
+    pantalla.tabla.cellWidget(0, 6).click()  # generar texto de gris: no muta nada
     assert pantalla._ultima_accion is None
 
     pantalla._deshacer_ultima_accion()  # no debe revertir la marca como enviada

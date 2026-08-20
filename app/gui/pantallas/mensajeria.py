@@ -59,13 +59,12 @@ from app.negocio.mensajes import (
     mensaje_situacion_3,
     mensaje_situacion_4,
     mensaje_situacion_5,
-    nombre_para_mensaje,
 )
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion, nombre_archivo_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
-_COLUMNA_ENVIADA = 4
-_COLUMNA_BOTON = 5
+_COLUMNA_ENVIADA = 5
+_COLUMNA_BOTON = 6
 
 _ORDEN_COLOR = {
     color: orden for orden, color in enumerate(
@@ -73,10 +72,19 @@ _ORDEN_COLOR = {
     )
 }
 
-_ETIQUETA_COLOR = {
-    "marron": "🟤 Marrón", "verde": "🟢 Verde", "amarillo": "🟡 Amarillo",
-    "naranja": "🟠 Naranja", "rojo": "🔴 Rojo", "violeta": "🟣 Violeta",
-    "celeste": "🔵 Celeste", "azul": "🔵 Azul", "gris": "⚫ Gris",
+# Texto de la columna "Estado" (confirmado por el usuario) — el color de la
+# fila ya identifica visualmente cuál es cuál, esto es la descripción en
+# palabras para quien lo lea sin distinguir colores.
+_ESTADO_TEXTO = {
+    "marron": "Deuda en rango de tolerancia",
+    "verde": "Situación regular",
+    "amarillo": "Deuda en rango de tolerancia",
+    "naranja": "Deuda fuera del rango de tolerancia",
+    "rojo": "Plan acordado y con deuda",
+    "violeta": "Plazo extendido activo",
+    "celeste": "Con aisladas para enviar mensaje",
+    "azul": "Con aisladas y mensaje enviado",
+    "gris": "Liquidación enviada",
 }
 _COLOR_FONDO = {
     "marron": "#8D6E63", "verde": "#4CAF50", "amarillo": "#F5D547",
@@ -96,6 +104,15 @@ _FILTROS = [
     ("Solo aisladas", "aisladas"),
 ]
 _FILTRO_DEFAULT = "pendientes"
+
+
+def _nombre_apellido(profesional: sqlite3.Row) -> str:
+    """Columna "Profesional" de la grilla: nombre y apellido tal cual,
+    para que el operador identifique a la persona sin ambigüedad — a
+    diferencia de `nombre_para_mensaje` (Apodo/NombrePila/Tratamiento),
+    pensado para el texto que recibe el profesional, no para esta lista."""
+    partes = [p for p in (profesional["NombrePila"], profesional["Apellido"]) if p]
+    return " ".join(partes)
 
 
 def _clave_codigo(codigo: str | None) -> tuple[str, int, str]:
@@ -157,9 +174,9 @@ class CentroMensajeria(QWidget):
 
         splitter = QSplitter()
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(6)
+        self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
-            ["Profesional", "Código", "Color", "Saldo anterior", "Enviada", ""]
+            ["Profesional", "Código", "Estado", "Saldo anterior", "Saldo actual", "Enviada", ""]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -218,11 +235,12 @@ class CentroMensajeria(QWidget):
             self.tabla.setRowCount(len(self._profesionales))
             for fila_idx, profesional in enumerate(self._profesionales):
                 color = color_profesional(self.conn, profesional, periodo)
-                nombre = f"{nombre_para_mensaje(profesional)} ({profesional['Apellido']})"
-                self.tabla.setItem(fila_idx, 0, QTableWidgetItem(nombre))
+                saldo_actual = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
+                self.tabla.setItem(fila_idx, 0, QTableWidgetItem(_nombre_apellido(profesional)))
                 self.tabla.setItem(fila_idx, 1, QTableWidgetItem(profesional["IdCodigo"] or ""))
-                self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_ETIQUETA_COLOR.get(color, "")))
+                self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_ESTADO_TEXTO.get(color, "")))
                 self.tabla.setItem(fila_idx, 3, QTableWidgetItem(f"$ {profesional['SaldoCuentaAnterior']:,.2f}"))
+                self.tabla.setItem(fila_idx, 4, QTableWidgetItem(f"$ {saldo_actual:,.2f}"))
                 self.tabla.setItem(fila_idx, _COLUMNA_ENVIADA, self._item_enviada(profesional, color, periodo))
 
                 boton = QPushButton("Generar texto")
@@ -232,7 +250,7 @@ class CentroMensajeria(QWidget):
                 if color in _COLOR_FONDO:
                     fondo = QColor(_COLOR_FONDO[color])
                     letra = QColor("#000000" if color in _COLOR_TEXTO_CLARO else "#FFFFFF")
-                    for columna in range(4):
+                    for columna in range(5):
                         celda = self.tabla.item(fila_idx, columna)
                         celda.setBackground(fondo)
                         celda.setForeground(letra)
