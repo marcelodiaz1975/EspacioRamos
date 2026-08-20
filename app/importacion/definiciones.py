@@ -8,6 +8,14 @@ y los responsables. El resto de las entidades del modelo de datos (pagos,
 licencias, liquidaciones, etc.) se cargan desde el sistema a medida que
 ocurren, no por importación masiva.
 
+Excepción: PlanPago sí se puede importar, específicamente para dar de alta
+de una sola vez los planes de pago que un profesional ya tenía acordados y
+en curso antes de empezar a usar el sistema (no tendría sentido pedirle al
+operador que los recree mes a mes a mano). Las cuotas de meses ya
+transcurridos a la fecha de la importación se marcan solas como pagadas
+(ver importar_excel._crear_plan_pago_importado) para que el estado de
+cuenta no las muestre como pendientes.
+
 El orden de la lista importa: se importa en ese orden porque las entidades
 más adelante en la lista referencian a las anteriores (ej. Unidad necesita
 que su Edificio ya exista). Dentro de la hoja Profesional, además, los R
@@ -53,6 +61,10 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
     "Placa": ["Edificio", "Unidad", "PosicionTablero", "Profesional", "NombreGrabado", "EsPersonalizada"],
     "FechasEspeciales": ["Fecha", "Descripcion", "Tipo"],
     "Responsable": ["Nombre", "Celular", "Email", "Rol", "EsContactoPrincipal", "AptoPDF"],
+    "PlanPago": [
+        "Profesional", "MesAnoInicio", "MontoRefinanciado",
+        "PorcentajeInteresMensual", "CantidadCuotas", "Observacion",
+    ],
 }
 
 ENTIDADES_IMPORTABLES: list[str] = list(COLUMNAS_PLANTILLA.keys())
@@ -72,6 +84,10 @@ CAMPOS_FECHA = {
     "FechaNacimiento", "FechaContacto", "VigenciaInicio", "VigenciaFin", "Fecha",
 }
 
+# Columnas de período (mes+año, sin día): en la planilla se cargan como
+# MM/AAAA, se convierten a AAAA-MM antes de guardar.
+CAMPOS_PERIODO = {"MesAnoInicio"}
+
 # Columnas de referencia a otra entidad, agrupadas por entidad importada.
 # Se usan en importar_excel.py para resolver el texto legible a un IdX.
 COLUMNAS_REFERENCIA = {
@@ -80,4 +96,5 @@ COLUMNAS_REFERENCIA = {
     "Profesional": {"Profesion", "ProfesionalCabezaEquipo"},
     "ReservaRegular": {"Profesional", "Edificio", "Unidad", "Consultorio"},
     "Placa": {"Edificio", "Unidad", "Profesional"},
+    "PlanPago": {"Profesional"},
 }

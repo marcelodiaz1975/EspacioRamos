@@ -2,6 +2,7 @@ import pytest
 from openpyxl import load_workbook
 
 from app.db.init_db import init_database
+from app.db.seed import sembrar_configuracion
 from app.importacion.importar_excel import importar_planilla
 from app.importacion.plantillas import generar_plantillas
 from app.repositorio.registro import obtener_repositorio
@@ -183,6 +184,116 @@ def test_importar_fechas_especiales(conn, tmp_path):
     fecha = obtener_repositorio(conn, "FechasEspeciales").listar()[0]
     assert fecha["Fecha"] == "2026-05-25"
     assert fecha["Tipo"] == "Feriado nacional"
+
+
+# --------------------------------------------------------------- PlanPago
+
+def _fijar_fecha(conn, fecha_iso: str) -> None:
+    sembrar_configuracion(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = ? WHERE IdConfiguracion = 1",
+        (fecha_iso,),
+    )
+    conn.commit()
+
+
+def _agregar_profesional_r1(wb) -> None:
+    encabezados = [c.value for c in wb["Profesional"][1]]
+    fila = [None] * len(encabezados)
+    fila[encabezados.index("CategoriaProfesional")] = "R"
+    fila[encabezados.index("IdCodigo")] = "R1"
+    fila[encabezados.index("Apellido")] = "Lo Veci"
+    wb["Profesional"].append(fila)
+
+
+def test_importar_plan_pago_calcula_cuota_y_marca_pasadas_pagadas(conn, tmp_path):
+    """Plan acordado en mayo por 12 cuotas de $1000, importado el 15/8: las
+    cuotas de mayo/junio/julio (ya transcurridas) quedan solas como
+    pagadas, la de agosto (período actual) y las siguientes, pendientes."""
+    _fijar_fecha(conn, "2026-08-15")
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    _agregar_profesional_r1(wb)
+    wb["PlanPago"].append(["R1", "05/2026", 12000, 0, 12, "Plan acordado antes del sistema"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert not resultados["PlanPago"].errores
+    assert resultados["PlanPago"].filas_importadas == 1
+
+    plan = obtener_repositorio(conn, "PlanPago").listar()[0]
+    assert plan["MesAnoInicio"] == "2026-05"
+    assert plan["CantidadCuotas"] == 12
+    assert plan["ImportePorCuota"] == 1000.0
+    assert plan["Estado"] == "Activo"
+
+    cuotas = {c["PeriodoImputado"]: c for c in obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=plan["IdPlan"])}
+    assert cuotas["2026-05"]["Estado"] == "Pagada"
+    assert cuotas["2026-06"]["Estado"] == "Pagada"
+    assert cuotas["2026-07"]["Estado"] == "Pagada"
+    assert cuotas["2026-08"]["Estado"] == "Pendiente"
+    assert cuotas["2026-09"]["Estado"] == "Pendiente"
+
+
+def test_importar_plan_pago_calcula_interes(conn, tmp_path):
+    _fijar_fecha(conn, "2026-08-15")
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    _agregar_profesional_r1(wb)
+    wb["PlanPago"].append(["R1", "08/2026", 10000, 5, 4, None])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert not resultados["PlanPago"].errores
+    plan = obtener_repositorio(conn, "PlanPago").listar()[0]
+    # 10000 * (1 + 0.05 * 4) = 12000 total / 4 cuotas = 3000 cada una.
+    assert plan["MontoTotalAPagar"] == 12000.0
+    assert plan["ImportePorCuota"] == 3000.0
+
+
+def test_importar_plan_pago_referencia_profesional_inexistente(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["PlanPago"].append(["R99", "05/2026", 12000, 0, 12, None])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["PlanPago"].filas_importadas == 0
+    assert "R99" in resultados["PlanPago"].errores[0]
+
+
+def test_importar_plan_pago_periodo_invalido_reporta_error(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    _agregar_profesional_r1(wb)
+    wb["PlanPago"].append(["R1", "2026-05", 12000, 0, 12, None])  # formato incorrecto
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["PlanPago"].filas_importadas == 0
+    assert "MesAnoInicio" in resultados["PlanPago"].errores[0]
+
+
+def test_importar_plan_pago_falta_columna_obligatoria(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    _agregar_profesional_r1(wb)
+    wb["PlanPago"].append(["R1", "05/2026", None, 0, 12, None])  # sin MontoRefinanciado
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["PlanPago"].filas_importadas == 0
+    assert "MontoRefinanciado" in resultados["PlanPago"].errores[0]
+
+
+def test_importar_plan_pago_ya_existe_en_plantilla(tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    assert "PlanPago" in wb.sheetnames
+    assert [c.value for c in wb["PlanPago"][1]] == [
+        "Profesional", "MesAnoInicio", "MontoRefinanciado",
+        "PorcentajeInteresMensual", "CantidadCuotas", "Observacion",
+    ]
 
 
 def test_importar_alias_banos_con_tilde(conn, tmp_path):

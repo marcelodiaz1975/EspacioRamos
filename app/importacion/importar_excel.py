@@ -26,9 +26,12 @@ from openpyxl import load_workbook
 from app.importacion.definiciones import (
     CAMPOS_BOOLEANOS,
     CAMPOS_FECHA,
+    CAMPOS_PERIODO,
     COLUMNAS_REFERENCIA,
     ENTIDADES_IMPORTABLES,
 )
+from app.negocio.dias import periodo_actual
+from app.negocio.pagos import crear_plan_pago, marcar_cuota_pagada
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -71,6 +74,23 @@ def _convertir_fecha(valor) -> str:
         raise ValueError(f"Fecha inválida (se espera DD/MM/AAAA): {valor!r}") from exc
 
 
+def _convertir_periodo(valor) -> str:
+    if isinstance(valor, (datetime, date)):
+        return f"{valor.year:04d}-{valor.month:02d}"
+    texto = str(valor).strip()
+    partes = texto.split("/")
+    if len(partes) != 2:
+        raise ValueError(f"Período inválido (se espera MM/AAAA): {valor!r}")
+    mes, anio = partes
+    try:
+        mes_i, anio_i = int(mes), int(anio)
+        if not 1 <= mes_i <= 12:
+            raise ValueError
+    except ValueError as exc:
+        raise ValueError(f"Período inválido (se espera MM/AAAA): {valor!r}") from exc
+    return f"{anio_i:04d}-{mes_i:02d}"
+
+
 def _convertir_valor(columna: str, valor):
     if valor is None or valor == "":
         return None
@@ -78,6 +98,8 @@ def _convertir_valor(columna: str, valor):
         return _convertir_booleano(valor)
     if columna in CAMPOS_FECHA:
         return _convertir_fecha(valor)
+    if columna in CAMPOS_PERIODO:
+        return _convertir_periodo(valor)
     return valor
 
 
@@ -184,7 +206,40 @@ def _resolver_referencias(conn: sqlite3.Connection, entidad: str, datos: dict) -
                 errores.append(f"No se encontró el profesional con código '{codigo}'")
             datos["IdProfesional"] = id_profesional
 
+    elif entidad == "PlanPago":
+        codigo = datos.pop("Profesional", None)
+        id_profesional = _buscar_id(conn, "Profesional", "IdCodigo", codigo)
+        if id_profesional is None:
+            errores.append(f"No se encontró el profesional con código '{codigo}'")
+        datos["IdProfesional"] = id_profesional
+
     return datos, errores
+
+
+def _crear_plan_pago_importado(conn: sqlite3.Connection, datos: dict) -> None:
+    """A diferencia del resto de las entidades importables, un PlanPago no
+    es un simple INSERT: hay que pasar por `crear_plan_pago` (calcula
+    MontoTotalAPagar/ImportePorCuota y genera las CuotaPlan) y, como el
+    plan puede venir de meses atrás (ya en curso antes de empezar a usar
+    el sistema), las cuotas de períodos anteriores al actual se marcan
+    solas como pagadas para que no queden colgadas como pendientes."""
+    faltantes = [
+        columna for columna in ("MesAnoInicio", "MontoRefinanciado", "CantidadCuotas")
+        if datos.get(columna) is None
+    ]
+    if faltantes:
+        raise ValueError(f"Faltan columnas obligatorias: {', '.join(faltantes)}")
+
+    id_plan = crear_plan_pago(
+        conn, id_profesional=datos["IdProfesional"], monto_refinanciado=datos["MontoRefinanciado"],
+        cantidad_cuotas=datos["CantidadCuotas"], mes_ano_inicio=datos["MesAnoInicio"],
+        porcentaje_interes_mensual=datos.get("PorcentajeInteresMensual") or 0.0,
+        observacion=datos.get("Observacion"),
+    )
+    periodo_hoy = periodo_actual(conn)
+    for cuota in obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=id_plan):
+        if cuota["PeriodoImputado"] < periodo_hoy:
+            marcar_cuota_pagada(conn, cuota["IdCuota"])
 
 
 def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImportacion:
@@ -221,9 +276,12 @@ def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImport
             continue
 
         try:
-            repo.crear(**datos)
+            if entidad == "PlanPago":
+                _crear_plan_pago_importado(conn, datos)
+            else:
+                repo.crear(**datos)
             resultado.filas_importadas += 1
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, ValueError) as exc:
             resultado.errores.append(f"Fila {numero_fila}: {exc}")
 
     return resultado

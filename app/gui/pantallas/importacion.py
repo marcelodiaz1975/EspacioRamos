@@ -40,8 +40,8 @@ class PantallaImportacion(QWidget):
 
         subtitulo = QLabel(
             "Carga masiva de Edificios, Unidades, Consultorios, Profesiones, Profesionales, "
-            "Reservas regulares, Llaves, Placas, Fechas especiales y Responsables desde la "
-            "planilla Excel de plantilla."
+            "Reservas regulares, Llaves, Placas, Fechas especiales, Responsables y Planes de "
+            "pago ya en curso desde la planilla Excel de plantilla."
         )
         subtitulo.setObjectName("subtitulo")
         subtitulo.setWordWrap(True)
