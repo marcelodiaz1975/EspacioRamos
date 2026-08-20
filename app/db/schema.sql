@@ -539,5 +539,6 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     CantidadDecimales INTEGER NOT NULL DEFAULT 2,
     RutaLogo TEXT,
     CarpetaBaseArchivos TEXT,
-    CarpetaBackup TEXT
+    CarpetaBackup TEXT,
+    ModoOscuro INTEGER NOT NULL DEFAULT 0
 );

@@ -50,6 +50,7 @@ _CAMPOS_BOOLEANOS = [
     ("ModulosExtendidos", "Módulos extendidos"),
     ("ModoFechaFicticia", "Modo fecha ficticia (QA)"),
     ("MensajesPlural", 'Mensajes en plural ("les avisaremos")'),
+    ("ModoOscuro", "Modo oscuro"),
 ]
 
 
@@ -117,5 +118,8 @@ class ConfiguracionGeneral(QWidget):
             valores[nombre] = 1 if self._entradas[nombre].isChecked() else 0
 
         self.repositorio.actualizar(1, **valores)
+        aplicar_tema = getattr(self.window(), "_aplicar_tema", None)
+        if aplicar_tema is not None:
+            aplicar_tema()
         QMessageBox.information(self, "Guardar configuración", "Configuración guardada.")
         self.actualizar()

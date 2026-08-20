@@ -13,6 +13,7 @@ from typing import Callable
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.estilos import HOJA_ESTILOS
+from app.gui.estilos import hoja_estilos, paleta
 
 
 @dataclass
@@ -45,7 +46,7 @@ class VentanaPrincipal(QMainWindow):
         self._secciones = secciones
         self.setWindowTitle("Sistema Espacio Ramos")
         self.resize(1200, 800)
-        self.setStyleSheet(HOJA_ESTILOS)
+        self._aplicar_tema()
 
         self._navegacion = QListWidget()
         self._navegacion.setObjectName("navegacion")
@@ -110,6 +111,21 @@ class VentanaPrincipal(QMainWindow):
         texto = seccion.ayuda or "Esta pantalla todavía no tiene ayuda contextual cargada."
         QMessageBox.information(self, f"Ayuda — {seccion.nombre}", texto)
 
+    def _aplicar_tema(self) -> None:
+        """Modo oscuro/claro (Configuracion.ModoOscuro, default claro): la
+        hoja de estilos cubre los widgets con nombre propio (títulos,
+        botón primario, etc.) y la QPalette a nivel QApplication cubre el
+        resto (campos, tablas, checkboxes, diálogos) sin tener que
+        escribir una regla por cada pantalla. Se revisa en cada cambio de
+        sección, igual que la barra de fecha ficticia, para que el
+        cambio hecho en Configuración general se vea sin reiniciar."""
+        cfg = self.conn.execute("SELECT ModoOscuro FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+        modo_oscuro = bool(cfg and cfg["ModoOscuro"])
+        app = QApplication.instance()
+        if app is not None:
+            app.setPalette(paleta(modo_oscuro))
+        self.setStyleSheet(hoja_estilos(modo_oscuro))
+
     def _actualizar_barra_fecha_ficticia(self) -> None:
         """Modo de fecha ficticia para testing (sección 2): barra bien
         visible mientras está activo, para no confundir datos de prueba
@@ -135,3 +151,4 @@ class VentanaPrincipal(QMainWindow):
             return
         self._pila.setCurrentIndex(indice_pila)
         self._actualizar_barra_fecha_ficticia()
+        self._aplicar_tema()

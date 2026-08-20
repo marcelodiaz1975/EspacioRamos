@@ -3,6 +3,7 @@ from PySide6.QtWidgets import QLabel, QMessageBox, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.estilos import hoja_estilos
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.repositorio.registro import obtener_repositorio
 
@@ -96,6 +97,32 @@ def test_f1_sin_ayuda_cargada_muestra_mensaje_generico(qtbot, conn, monkeypatch)
     ventana._mostrar_ayuda()
 
     assert llamada["texto"]
+
+
+# --------------------------------------------------------------- modo oscuro/claro
+
+def test_tema_claro_por_defecto(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    assert ventana.styleSheet() == hoja_estilos(False)
+
+
+def test_tema_oscuro_cuando_esta_activado(qtbot, conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ModoOscuro=1)
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    assert ventana.styleSheet() == hoja_estilos(True)
+
+
+def test_tema_se_actualiza_al_cambiar_de_pantalla(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    assert ventana.styleSheet() == hoja_estilos(False)
+
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ModoOscuro=1)
+    ventana._navegacion.setCurrentRow(2)
+
+    assert ventana.styleSheet() == hoja_estilos(True)
 
 
 def test_f1_sin_secciones_no_falla(qtbot, conn, monkeypatch):

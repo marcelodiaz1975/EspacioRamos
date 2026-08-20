@@ -3,6 +3,8 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.estilos import hoja_estilos
+from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 
 
@@ -60,6 +62,30 @@ def test_guardar_ruta_logo_y_decimales(qtbot, conn):
     fila = conn.execute("SELECT RutaLogo, CantidadDecimales FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     assert fila["RutaLogo"] == "/tmp/logo.png"
     assert fila["CantidadDecimales"] == 0.0
+
+
+def test_guardar_persiste_modo_oscuro(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["ModoOscuro"].setChecked(True)
+    pantalla._guardar()
+    fila = conn.execute("SELECT ModoOscuro FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    assert fila["ModoOscuro"] == 1
+
+
+def test_guardar_modo_oscuro_aplica_el_tema_sin_reiniciar(qtbot, conn):
+    """Al guardar desde la pantalla embebida en la ventana principal, el
+    cambio se ve enseguida (mismo criterio que la barra de fecha
+    ficticia) — no hace falta cambiar de sección para que se note."""
+    ventana = VentanaPrincipal(conn, [Seccion("Configuración", lambda c: ConfiguracionGeneral(c), categoria="Principal")])
+    qtbot.addWidget(ventana)
+    assert ventana.styleSheet() == hoja_estilos(False)
+
+    pantalla = ventana._pila.widget(0)
+    pantalla._entradas["ModoOscuro"].setChecked(True)
+    pantalla._guardar()
+
+    assert ventana.styleSheet() == hoja_estilos(True)
 
 
 def test_guardar_con_numero_invalido_no_persiste(qtbot, conn):
