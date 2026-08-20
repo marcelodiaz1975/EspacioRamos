@@ -244,6 +244,20 @@ def test_detalle_aislada_omite_edificio_si_las_llaves_son_de_uno_solo(conn, prof
     assert "Edificio" not in texto
 
 
+def test_detalle_aislada_sin_llaves_pero_con_mas_de_un_edificio_lo_menciona(conn, profesional_aislada_con_edificios):
+    """Un profesional sin ninguna llave todavía (recién empieza, alguien
+    más le abre la puerta la primera vez) igual necesita saber en qué
+    edificio es si el espacio tiene más de uno — confirmado por el
+    usuario, corrige el supuesto anterior de omitirlo en este caso."""
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "Edificio Ramos 1" in texto
+
+
 def test_detalle_aislada_agrega_edificio_si_tiene_llaves_de_mas_de_uno(conn, profesional_aislada_con_edificios):
     id_prof, c1, c2, id_ed1, id_ed2 = profesional_aislada_con_edificios
     id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave", Tipo="Unidad", ValorDepositoActual=5000)

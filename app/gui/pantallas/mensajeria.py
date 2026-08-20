@@ -187,19 +187,6 @@ class CentroMensajeria(QWidget):
         panel_derecho = QWidget()
         layout_derecho = QVBoxLayout(panel_derecho)
 
-        fila_incluir = QHBoxLayout()
-        self.check_incluir_consultorio = QCheckBox("Incluir consultorio")
-        self.check_incluir_consultorio.setChecked(True)
-        fila_incluir.addWidget(self.check_incluir_consultorio)
-        self.check_incluir_unidad = QCheckBox("Incluir unidad")
-        self.check_incluir_unidad.setChecked(True)
-        fila_incluir.addWidget(self.check_incluir_unidad)
-        self.check_incluir_edificio = QCheckBox("Incluir edificio")
-        self.check_incluir_edificio.setChecked(True)
-        fila_incluir.addWidget(self.check_incluir_edificio)
-        fila_incluir.addStretch()
-        layout_derecho.addLayout(fila_incluir)
-
         fila_combinar = QHBoxLayout()
         self.check_combinar_misma_unidad = QCheckBox("Combinar misma unidad")
         fila_combinar.addWidget(self.check_combinar_misma_unidad)
@@ -457,14 +444,17 @@ class CentroMensajeria(QWidget):
     def _texto_para_boton(self, profesional: sqlite3.Row, color: str | None, periodo: str) -> str:
         """DC-03 "Resumen de asignaciones", botón "Generar texto". Marrón
         y celeste disparan una transición de estado (a amarillo y azul
-        respectivamente) que queda registrada para poder deshacerse."""
+        respectivamente) que queda registrada para poder deshacerse.
+
+        Consultorio y unidad van siempre (los checks "Incluir..." son de
+        las pantallas de oferta/búsqueda, no de este mensaje); el
+        edificio se agrega solo o no según la regla del edificio
+        (`mensaje_detalle_reserva_aislada` ya la aplica sola con el
+        default `incluir_edificio=True`, no hace falta pasarlo)."""
         id_profesional = profesional["IdProfesional"]
         if profesional["CategoriaProfesional"] == "A":
             texto = mensaje_detalle_reserva_aislada(
                 self.conn, id_profesional=id_profesional, periodo=periodo,
-                incluir_consultorio=self.check_incluir_consultorio.isChecked(),
-                incluir_unidad=self.check_incluir_unidad.isChecked(),
-                incluir_edificio=self.check_incluir_edificio.isChecked(),
                 combinar_misma_unidad=self.check_combinar_misma_unidad.isChecked(),
                 combinar_distintas_unidades=self.check_combinar_distintas_unidades.isChecked(),
             )

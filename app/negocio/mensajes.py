@@ -319,8 +319,12 @@ def _incluir_edificio_efectivo(
     mención, aunque el control esté tildado; si el profesional tiene
     llaves de un solo edificio también se omite; si tiene llaves de más
     de un edificio se fuerza a incluir aunque el control esté destildado.
-    Sin profesional asociado (Mensaje 2, que no está atado a uno en
-    particular) solo aplica el primer nivel."""
+    Sin llaves todavía (recién empieza, alguien le abre la puerta la
+    primera vez) y con más de un edificio en el espacio, se incluye —
+    confirmado por el usuario, por eso `incluir_edificio` default True en
+    los llamadores de Mensaje 1 en vez de tratar "sin llaves" como
+    "omitir". Sin profesional asociado (Mensaje 2, que no está atado a
+    uno en particular) solo aplica el primer nivel."""
     if conn.execute("SELECT COUNT(*) AS n FROM Edificio").fetchone()["n"] <= 1:
         return False
     if id_profesional is not None:

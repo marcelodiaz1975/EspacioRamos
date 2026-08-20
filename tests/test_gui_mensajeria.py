@@ -418,16 +418,18 @@ def test_checks_combinar_aparecen_desmarcados_por_defecto(qtbot, conn):
     assert pantalla.check_combinar_distintas_unidades.isChecked() is False
 
 
-def test_checks_incluir_aparecen_marcados_por_defecto(qtbot, conn):
-    """Sección 5.1: los controles de incluir vienen todos marcados por default."""
+def test_no_expone_checks_de_incluir(qtbot, conn):
+    """"Incluir consultorio/unidad/edificio" son controles de las
+    pantallas de oferta/búsqueda (Disponibilidad, Lista de espera), no
+    de este formulario — confirmado por el usuario."""
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.check_incluir_consultorio.isChecked() is True
-    assert pantalla.check_incluir_unidad.isChecked() is True
-    assert pantalla.check_incluir_edificio.isChecked() is True
+    assert not hasattr(pantalla, "check_incluir_consultorio")
+    assert not hasattr(pantalla, "check_incluir_unidad")
+    assert not hasattr(pantalla, "check_incluir_edificio")
 
 
-def test_destildar_incluir_consultorio_lo_saca_del_mensaje(qtbot, conn):
+def test_mensaje_aislada_siempre_incluye_consultorio_y_unidad(qtbot, conn):
     id_consultorio = _crear_consultorio(conn, numero=7)
     id_prof = _crear_profesional(conn, categoria="A", apellido="Aislada")
     obtener_repositorio(conn, "ReservaAislada").crear(
@@ -438,10 +440,10 @@ def test_destildar_incluir_consultorio_lo_saca_del_mensaje(qtbot, conn):
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
-    pantalla.check_incluir_consultorio.setChecked(False)
     pantalla.tabla.cellWidget(0, 6).click()
 
-    assert "consul 7" not in pantalla.texto_mensaje.toPlainText()
+    assert "consul 7" in pantalla.texto_mensaje.toPlainText()
+    assert '7mo "L"' in pantalla.texto_mensaje.toPlainText()
 
 
 def test_mensaje_aislada_por_defecto_no_combina(qtbot, conn):
