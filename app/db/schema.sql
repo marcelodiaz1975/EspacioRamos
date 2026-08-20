@@ -373,19 +373,30 @@ CREATE TABLE IF NOT EXISTS ListasEditables (
 );
 
 -- 3.21 ListaEspera --------------------------------------------------------------------------
+-- Un pedido puede pedir varios bloques día(s)+horario a la vez (p. ej.
+-- "martes o jueves de 14 a 18hs" Y/O "sábado de 9 a 12hs"): TipoCombinacion
+-- acá arriba es la combinación ENTRE bloques (ListaEsperaBloque.IdPedido);
+-- la combinación entre los días DENTRO de cada bloque vive en
+-- ListaEsperaBloque.TipoCombinacionDias.
 CREATE TABLE IF NOT EXISTS ListaEspera (
     IdPedido INTEGER PRIMARY KEY AUTOINCREMENT,
     IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional),
     FechaPedido TEXT NOT NULL,
     TipoCombinacion TEXT CHECK (TipoCombinacion IN ('O','Y')),
-    Dias TEXT,
-    HorarioDesde REAL,
-    HorarioHasta REAL,
-    CantidadHorasRequeridas REAL,
     CondicionesConsultorio TEXT,
     Detalle TEXT,
     Estado TEXT NOT NULL CHECK (Estado IN ('Activo','Resuelto','Descartado')) DEFAULT 'Activo',
     ObservacionCierre TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ListaEsperaBloque (
+    IdBloque INTEGER PRIMARY KEY AUTOINCREMENT,
+    IdPedido INTEGER NOT NULL REFERENCES ListaEspera(IdPedido),
+    TipoCombinacionDias TEXT CHECK (TipoCombinacionDias IN ('O','Y')),
+    Dias TEXT,
+    HorarioDesde REAL,
+    HorarioHasta REAL,
+    CantidadHorasRequeridas REAL
 );
 
 -- 3.22 Responsable --------------------------------------------------------------------------

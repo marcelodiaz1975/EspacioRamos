@@ -605,8 +605,12 @@ def mensaje_disponibilidad_horarios(
     incluir_edificio = _incluir_edificio_efectivo(conn, incluir_edificio)
     anio, mes = (int(p) for p in periodo.split("-"))
     pedido = {
-        "Dias": json.dumps(dias), "HorarioDesde": horario_desde, "HorarioHasta": horario_hasta,
-        "TipoCombinacion": tipo_combinacion, "CondicionesConsultorio": json.dumps(condiciones_consultorio or {}),
+        "Bloques": [{
+            "Dias": json.dumps(dias), "HorarioDesde": horario_desde, "HorarioHasta": horario_hasta,
+            "TipoCombinacionDias": tipo_combinacion,
+        }],
+        "TipoCombinacion": "O",  # un solo bloque: no influye
+        "CondicionesConsultorio": json.dumps(condiciones_consultorio or {}),
     }
     coincidencia = calcular_coincidencia(conn, pedido, anio, mes)
 

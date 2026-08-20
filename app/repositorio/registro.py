@@ -33,6 +33,7 @@ TABLAS = [
     "EsquemaDescuentos",
     "ListasEditables",
     "ListaEspera",
+    "ListaEsperaBloque",
     "Responsable",
     "PlanPago",
     "CuotaPlan",

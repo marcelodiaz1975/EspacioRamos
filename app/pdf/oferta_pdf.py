@@ -64,29 +64,41 @@ def _etiqueta_franja(pedido: sqlite3.Row, indice: int) -> str:
     return pedido["Detalle"] or f"Franja horaria {indice + 1}"
 
 
-def _texto_criterios(pedido: sqlite3.Row) -> list:
+def _texto_criterios(conn: sqlite3.Connection, pedido: sqlite3.Row) -> list:
+    """Un pedido puede tener varios bloques día(s)+horario (ej. "martes o
+    jueves de 14 a 18hs" Y "sábado de 9 a 12hs") — cada uno se detalla por
+    separado, y si hay más de uno se agrega al final cómo se combinan
+    entre sí (`pedido['TipoCombinacion']`, entre bloques)."""
     condiciones = json.loads(pedido["CondicionesConsultorio"] or "{}")
-    dias = json.loads(pedido["Dias"] or "[]")
+    bloques = obtener_repositorio(conn, "ListaEsperaBloque").listar(IdPedido=pedido["IdPedido"])
     style = estilo_texto(9)
     partes_condiciones = [_NOMBRES_CONDICION[k] for k, v in condiciones.items() if v and k in _NOMBRES_CONDICION]
     if condiciones.get("tamano"):
         partes_condiciones.append(f"tamaño {condiciones['tamano']}")
 
-    desde, hasta = hora_fmt(pedido["HorarioDesde"])[:-2], hora_fmt(pedido["HorarioHasta"])
-    cantidad_horas = pedido["CantidadHorasRequeridas"]
-    if cantidad_horas:
-        texto_horario = f"{cantidad_horas:g}hs dentro del rango de {desde} a {hasta} (no hace falta que sea el rango completo)"
-    else:
-        texto_horario = f"{desde} a {hasta}"
-
-    story = [
-        Paragraph(f"<b>Días solicitados:</b> {', '.join(dias) or '—'}", style),
-        Paragraph(f"<b>Horario:</b> {texto_horario}", style),
-        Paragraph(
-            f"<b>Combinación de días:</b> {'todos los días pedidos' if pedido['TipoCombinacion'] == 'Y' else 'alcanza con uno de los días pedidos'}",
+    story = []
+    for indice, bloque in enumerate(bloques):
+        dias = json.loads(bloque["Dias"] or "[]")
+        desde, hasta = hora_fmt(bloque["HorarioDesde"])[:-2], hora_fmt(bloque["HorarioHasta"])
+        cantidad_horas = bloque["CantidadHorasRequeridas"]
+        if cantidad_horas:
+            texto_horario = f"{cantidad_horas:g}hs dentro del rango de {desde} a {hasta} (no hace falta que sea el rango completo)"
+        else:
+            texto_horario = f"{desde} a {hasta}"
+        prefijo = f"Bloque {indice + 1} — " if len(bloques) > 1 else ""
+        story.append(Paragraph(f"<b>{prefijo}Días solicitados:</b> {', '.join(dias) or '—'}", style))
+        story.append(Paragraph(f"<b>Horario:</b> {texto_horario}", style))
+        story.append(Paragraph(
+            f"<b>Combinación de días:</b> "
+            f"{'todos los días pedidos' if bloque['TipoCombinacionDias'] == 'Y' else 'alcanza con uno de los días pedidos'}",
             style,
-        ),
-    ]
+        ))
+    if len(bloques) > 1:
+        story.append(Paragraph(
+            f"<b>Combinación de bloques:</b> "
+            f"{'se necesitan todos los bloques' if pedido['TipoCombinacion'] == 'Y' else 'alcanza con uno de los bloques'}",
+            style,
+        ))
     if partes_condiciones:
         story.append(Paragraph(f"<b>Condiciones del consultorio:</b> {', '.join(partes_condiciones)}", style))
     return story
@@ -209,15 +221,15 @@ def generar_pdf_oferta_multiple(conn: sqlite3.Connection, directorio: str, ids_p
     """Genera "Oferta consultorios.pdf" combinando varios pedidos de lista
     de espera del MISMO profesional en un solo documento.
 
-    El sistema representa cada pedido con un único horario aplicado a una
-    lista de días (`ListaEspera.HorarioDesde/HorarioHasta`) — no admite
-    franjas horarias distintas por día dentro de un mismo pedido. Una
-    búsqueda con varias franjas (p. ej. "lunes a jueves de 8 a 15hs" +
-    "lunes de 8 a 12hs" + "viernes desde las 16hs") se arma como varios
-    pedidos, uno por franja, y este PDF muestra "Criterios de búsqueda" y
-    "Coincidencias" de todas juntas, con una única sección final de
-    "Consultorios que intervienen en las ofertas" (unión de los
-    consultorios ofrecidos en cualquiera de las franjas)."""
+    Un mismo pedido ya admite varios bloques día(s)+horario combinados
+    entre sí con Y/O (ListaEsperaBloque) — esta función combina, además,
+    varios PEDIDOS del mismo profesional en un solo documento (para
+    búsquedas que conviene rastrear como filas separadas en la pantalla
+    de Lista de espera en vez de como bloques de un mismo pedido). Este
+    PDF muestra "Criterios de búsqueda" y "Coincidencias" de todos los
+    pedidos juntos, con una única sección final de "Consultorios que
+    intervienen en las ofertas" (unión de los consultorios ofrecidos en
+    cualquiera de ellos)."""
     repo_pedido = obtener_repositorio(conn, "ListaEspera")
     pedidos = [repo_pedido.obtener(id_pedido) for id_pedido in ids_pedido]
     faltante = next((id_pedido for id_pedido, p in zip(ids_pedido, pedidos) if p is None), None)
@@ -261,7 +273,7 @@ def generar_pdf_oferta_multiple(conn: sqlite3.Connection, directorio: str, ids_p
             if multi_franjas:
                 story.append(encabezado(2, _etiqueta_franja(pedido, i), ancho))
                 story.append(Spacer(1, 4))
-            story.extend(_texto_criterios(pedido))
+            story.extend(_texto_criterios(conn, pedido))
             story.append(Spacer(1, 8))
 
         story.append(encabezado(1, "Coincidencias", ancho))

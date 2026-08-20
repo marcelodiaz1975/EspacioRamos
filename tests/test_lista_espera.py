@@ -49,15 +49,16 @@ def _profesional(conn):
     return obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="C", Apellido="Interesado")
 
 
+def _bloque(dias, horario_desde=14, horario_hasta=16, **extra):
+    return {"dias": dias, "horario_desde": horario_desde, "horario_hasta": horario_hasta, **extra}
+
+
 def test_verde_un_solo_consultorio_cubre_todo(conn):
     id_edificio = _crear_edificio(conn)
     id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
     id_consultorio = _crear_consultorio(conn, id_unidad, 1)
 
-    id_pedido = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O",
-        dias=["Lunes"], horario_desde=14, horario_hasta=16,
-    )
+    id_pedido = crear_pedido(conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])])
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
     coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
 
@@ -75,10 +76,7 @@ def test_amarillo_combina_consultorios_misma_unidad(conn):
     _ocupar(conn, id_a, "Lunes", 15, 16)  # A libre 14-15
     _ocupar(conn, id_b, "Lunes", 14, 15)  # B libre 15-16
 
-    id_pedido = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O",
-        dias=["Lunes"], horario_desde=14, horario_hasta=16,
-    )
+    id_pedido = crear_pedido(conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])])
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
     coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
 
@@ -96,10 +94,7 @@ def test_naranja_combina_consultorios_mismo_edificio_distinta_unidad(conn):
     _ocupar(conn, id_a, "Lunes", 15, 16)
     _ocupar(conn, id_b, "Lunes", 14, 15)
 
-    id_pedido = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O",
-        dias=["Lunes"], horario_desde=14, horario_hasta=16,
-    )
+    id_pedido = crear_pedido(conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])])
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
     coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
 
@@ -116,10 +111,7 @@ def test_rojo_combina_consultorios_distinto_edificio(conn):
     _ocupar(conn, id_a, "Lunes", 15, 16)
     _ocupar(conn, id_b, "Lunes", 14, 15)
 
-    id_pedido = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O",
-        dias=["Lunes"], horario_desde=14, horario_hasta=16,
-    )
+    id_pedido = crear_pedido(conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])])
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
     coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
 
@@ -132,10 +124,7 @@ def test_sin_color_si_no_hay_forma_de_cubrir(conn):
     id_consultorio = _crear_consultorio(conn, id_unidad, 1)
     _ocupar(conn, id_consultorio, "Lunes", 14, 16)  # el único consultorio, ocupado todo el rango pedido
 
-    id_pedido = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O",
-        dias=["Lunes"], horario_desde=14, horario_hasta=16,
-    )
+    id_pedido = crear_pedido(conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])])
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
     coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
     assert coincidencia is None
@@ -148,8 +137,8 @@ def test_tipo_o_alcanza_con_un_dia_disponible(conn):
     _ocupar(conn, id_consultorio, "Martes", 14, 16)  # martes ocupado, lunes libre
 
     id_pedido = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O",
-        dias=["Lunes", "Martes"], horario_desde=14, horario_hasta=16,
+        conn, id_profesional=_profesional(conn),
+        bloques=[_bloque(["Lunes", "Martes"], tipo_combinacion_dias="O")],
     )
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
     coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
@@ -165,8 +154,8 @@ def test_tipo_y_requiere_todos_los_dias(conn):
     _ocupar(conn, id_consultorio, "Martes", 14, 16)  # martes ocupado -> Y no puede cumplir ambos días
 
     id_pedido = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="Y",
-        dias=["Lunes", "Martes"], horario_desde=14, horario_hasta=16,
+        conn, id_profesional=_profesional(conn),
+        bloques=[_bloque(["Lunes", "Martes"], tipo_combinacion_dias="Y")],
     )
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
     coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
@@ -179,8 +168,7 @@ def test_condicion_ventana_filtra_consultorios(conn):
     _crear_consultorio(conn, id_unidad, 1, Ventana=0)  # sin ventana, no cuenta
 
     id_pedido = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O",
-        dias=["Lunes"], horario_desde=14, horario_hasta=16,
+        conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])],
         condiciones_consultorio={"ventana": True},
     )
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
@@ -188,18 +176,71 @@ def test_condicion_ventana_filtra_consultorios(conn):
     assert coincidencia is None
 
 
+def test_bloques_combinados_con_y_necesitan_los_dos(conn):
+    """Ejemplo real: "martes o jueves 3hs entre 14 y 18hs" Y "sábado de 9
+    a 12hs" — los dos bloques tienen que darse."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    _ocupar(conn, id_consultorio, "Sábado", 9, 12)  # el sábado no tiene forma de cubrirse
+
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), tipo_combinacion_bloques="Y",
+        bloques=[
+            _bloque(["Martes", "Jueves"], 14, 18, tipo_combinacion_dias="O", cantidad_horas_requeridas=3),
+            _bloque(["Sábado"], 9, 12),
+        ],
+    )
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
+    assert coincidencia is None  # falta el sábado, y era obligatorio
+
+
+def test_bloques_combinados_con_o_alcanza_con_uno(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    _ocupar(conn, id_consultorio, "Sábado", 9, 12)  # el sábado no tiene forma de cubrirse
+
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), tipo_combinacion_bloques="O",
+        bloques=[
+            _bloque(["Martes", "Jueves"], 14, 18, tipo_combinacion_dias="O", cantidad_horas_requeridas=3),
+            _bloque(["Sábado"], 9, 12),
+        ],
+    )
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
+    assert coincidencia is not None  # el bloque de martes/jueves alcanza, aunque el sábado no se cubra
+    assert "Sábado" not in coincidencia.dias_cubiertos
+    assert "Martes" in coincidencia.dias_cubiertos or "Jueves" in coincidencia.dias_cubiertos
+
+
+def test_bloques_combinados_con_y_ambos_cubiertos(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1)
+
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), tipo_combinacion_bloques="Y",
+        bloques=[
+            _bloque(["Martes", "Jueves"], 14, 18, tipo_combinacion_dias="O", cantidad_horas_requeridas=3),
+            _bloque(["Sábado"], 9, 12),
+        ],
+    )
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
+    assert coincidencia is not None
+    assert "Sábado" in coincidencia.dias_cubiertos
+    assert ("Martes" in coincidencia.dias_cubiertos) or ("Jueves" in coincidencia.dias_cubiertos)
+
+
 def test_marcar_resuelto_y_descartado(conn):
     id_edificio = _crear_edificio(conn)
     id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
     _crear_consultorio(conn, id_unidad, 1)
-    id_pedido_1 = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O",
-        dias=["Lunes"], horario_desde=14, horario_hasta=16,
-    )
-    id_pedido_2 = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O",
-        dias=["Martes"], horario_desde=14, horario_hasta=16,
-    )
+    id_pedido_1 = crear_pedido(conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])])
+    id_pedido_2 = crear_pedido(conn, id_profesional=_profesional(conn), bloques=[_bloque(["Martes"])])
 
     marcar_resuelto(conn, id_pedido_1)
     marcar_descartado(conn, id_pedido_2, observacion="no le interesó el horario")
@@ -224,8 +265,8 @@ def test_cantidad_horas_encuentra_subrango_libre_dentro_del_rango_pedido(conn):
     _ocupar(conn, id_consultorio, "Lunes", 9, 11)
 
     id_pedido = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O", dias=["Lunes"],
-        horario_desde=9, horario_hasta=13, cantidad_horas_requeridas=2,
+        conn, id_profesional=_profesional(conn),
+        bloques=[_bloque(["Lunes"], 9, 13, cantidad_horas_requeridas=2)],
     )
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
     coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
@@ -242,8 +283,8 @@ def test_cantidad_horas_sin_ningun_subrango_libre_no_da_coincidencia(conn):
     _ocupar(conn, id_consultorio, "Lunes", 9, 12)  # solo queda 1hs libre (12-13), no alcanzan las 2hs pedidas
 
     id_pedido = crear_pedido(
-        conn, id_profesional=_profesional(conn), tipo_combinacion="O", dias=["Lunes"],
-        horario_desde=9, horario_hasta=13, cantidad_horas_requeridas=2,
+        conn, id_profesional=_profesional(conn),
+        bloques=[_bloque(["Lunes"], 9, 13, cantidad_horas_requeridas=2)],
     )
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
     coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
@@ -253,6 +294,11 @@ def test_cantidad_horas_sin_ningun_subrango_libre_no_da_coincidencia(conn):
 def test_cantidad_horas_mayor_al_rango_pedido_lanza_error(conn):
     with pytest.raises(ValueError):
         crear_pedido(
-            conn, id_profesional=_profesional(conn), tipo_combinacion="O", dias=["Lunes"],
-            horario_desde=9, horario_hasta=11, cantidad_horas_requeridas=3,
+            conn, id_profesional=_profesional(conn),
+            bloques=[_bloque(["Lunes"], 9, 11, cantidad_horas_requeridas=3)],
         )
+
+
+def test_pedido_sin_bloques_lanza_error(conn):
+    with pytest.raises(ValueError):
+        crear_pedido(conn, id_profesional=_profesional(conn), bloques=[])

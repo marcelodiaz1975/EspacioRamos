@@ -3,7 +3,19 @@ pedidos y cruce automático contra la disponibilidad real del período en
 curso, reusando app.negocio.lista_espera. El mismo formulario de pedido
 también arma, sin necesidad de persistirlo, el mensaje "Disponibilidad de
 horarios regulares" (sección 5.2), con la opción de regenerar además el
-PDF de disponibilidad con fotos."""
+PDF de disponibilidad con fotos.
+
+Un pedido puede necesitar varios bloques día(s)+horario a la vez (ej.
+"martes o jueves 3hs entre 14 y 18hs" Y "sábado de 9 a 12hs"): los campos
+de día/horario/cantidad de horas/combinación de días arman UN bloque por
+vez, "Agregar bloque…" lo suma a la tabla de bloques del pedido, y
+"Combinación de bloques" define si hace falta que se den todos (Y) o
+alcanza con uno (O) — irrelevante con un solo bloque. Al crear el pedido
+se toman los bloques ya agregados a la tabla MÁS el que esté cargado en
+ese momento en el formulario (si tiene algún día tildado) — así el caso
+común de un solo bloque sigue siendo un único paso, sin tener que pasar
+por "Agregar bloque…", y agregar uno de más antes de crear tampoco se
+pierde."""
 from __future__ import annotations
 
 import json
@@ -52,6 +64,7 @@ class PantallaListaEspera(QWidget):
         super().__init__(parent)
         self.conn = conn
         self._pedidos: list[sqlite3.Row] = []
+        self._bloques_pendientes: list[dict] = []
         self._armar_ui()
         self.actualizar()
 
@@ -110,6 +123,29 @@ class PantallaListaEspera(QWidget):
         fila_cantidad_horas.addWidget(self.casilla_cantidad_horas)
         fila_cantidad_horas.addWidget(self.spin_cantidad_horas)
         form.addLayout(fila_cantidad_horas)
+
+        boton_agregar_bloque = QPushButton("Agregar bloque…")
+        boton_agregar_bloque.clicked.connect(self._agregar_bloque)
+        form.addWidget(boton_agregar_bloque)
+
+        form.addWidget(QLabel("Bloques del pedido (si no se agrega ninguno, se usa el de arriba)"))
+        self.tabla_bloques = QTableWidget()
+        self.tabla_bloques.setColumnCount(3)
+        self.tabla_bloques.setHorizontalHeaderLabels(["Días", "Horario", "Combinación de días"])
+        self.tabla_bloques.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla_bloques.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla_bloques.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla_bloques.setMaximumHeight(120)
+        form.addWidget(self.tabla_bloques)
+        boton_quitar_bloque = QPushButton("Quitar bloque")
+        boton_quitar_bloque.clicked.connect(self._quitar_bloque)
+        form.addWidget(boton_quitar_bloque)
+
+        self.combo_tipo_bloques = QComboBox()
+        self.combo_tipo_bloques.addItem("Alcanza con un bloque (O)", "O")
+        self.combo_tipo_bloques.addItem("Todos los bloques (Y)", "Y")
+        form.addWidget(QLabel("Combinación de bloques (irrelevante con uno solo)"))
+        form.addWidget(self.combo_tipo_bloques)
 
         form.addWidget(QLabel("Características pedidas"))
         self.casilla_ventana = QCheckBox("Con ventana")
@@ -193,15 +229,21 @@ class PantallaListaEspera(QWidget):
 
         self.tabla.setRowCount(len(resultado))
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
+        repo_bloque = obtener_repositorio(self.conn, "ListaEsperaBloque")
         for fila_idx, (pedido, coincidencia) in enumerate(resultado):
             profesional = repo_profesional.obtener(pedido["IdProfesional"])
             nombre = nombre_para_mensaje(profesional) if profesional else "?"
             self.tabla.setItem(fila_idx, 0, QTableWidgetItem(nombre))
 
-            dias = json.loads(pedido["Dias"]) if pedido["Dias"] else []
-            self.tabla.setItem(fila_idx, 1, QTableWidgetItem(", ".join(dias)))
+            bloques = repo_bloque.listar(IdPedido=pedido["IdPedido"])
+            separador = " Y " if pedido["TipoCombinacion"] == "Y" else " O "
             self.tabla.setItem(
-                fila_idx, 2, QTableWidgetItem(f"{pedido['HorarioDesde']:g} a {pedido['HorarioHasta']:g}")
+                fila_idx, 1,
+                QTableWidgetItem(separador.join(", ".join(json.loads(b["Dias"] or "[]")) for b in bloques)),
+            )
+            self.tabla.setItem(
+                fila_idx, 2,
+                QTableWidgetItem(separador.join(f"{b['HorarioDesde']:g} a {b['HorarioHasta']:g}" for b in bloques)),
             )
 
             color = coincidencia.color if coincidencia else None
@@ -267,17 +309,55 @@ class PantallaListaEspera(QWidget):
     def _copiar_mensaje_disponibilidad(self) -> None:
         QGuiApplication.clipboard().setText(self.texto_mensaje_disponibilidad.toPlainText())
 
+    def _bloque_del_formulario(self) -> dict:
+        return {
+            "dias": self._dias_seleccionados(), "horario_desde": self.spin_desde.value(),
+            "horario_hasta": self.spin_hasta.value(), "tipo_combinacion_dias": self.combo_tipo.currentData(),
+            "cantidad_horas_requeridas": (
+                self.spin_cantidad_horas.value() if self.casilla_cantidad_horas.isChecked() else None
+            ),
+        }
+
+    def _refrescar_tabla_bloques(self) -> None:
+        self.tabla_bloques.setRowCount(len(self._bloques_pendientes))
+        for fila_idx, bloque in enumerate(self._bloques_pendientes):
+            self.tabla_bloques.setItem(fila_idx, 0, QTableWidgetItem(", ".join(bloque["dias"])))
+            self.tabla_bloques.setItem(
+                fila_idx, 1, QTableWidgetItem(f"{bloque['horario_desde']:g} a {bloque['horario_hasta']:g}"),
+            )
+            etiqueta_tipo = "Todos los días (Y)" if bloque["tipo_combinacion_dias"] == "Y" else "Alcanza con un día (O)"
+            self.tabla_bloques.setItem(fila_idx, 2, QTableWidgetItem(etiqueta_tipo))
+        self.tabla_bloques.resizeColumnsToContents()
+
+    def _agregar_bloque(self) -> None:
+        bloque = self._bloque_del_formulario()
+        if not bloque["dias"]:
+            QMessageBox.warning(self, "Agregar bloque", "Elegí al menos un día para el bloque.")
+            return
+        self._bloques_pendientes.append(bloque)
+        self._refrescar_tabla_bloques()
+        for i in range(self.lista_dias.count()):
+            self.lista_dias.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def _quitar_bloque(self) -> None:
+        filas = self.tabla_bloques.selectionModel().selectedRows()
+        if not filas:
+            return
+        del self._bloques_pendientes[filas[0].row()]
+        self._refrescar_tabla_bloques()
+
     def _crear_pedido(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
             QMessageBox.warning(self, "Crear pedido", "No hay profesionales cargados.")
             return
+        bloques = list(self._bloques_pendientes)
+        if self._dias_seleccionados():
+            bloques.append(self._bloque_del_formulario())
         try:
             crear_pedido(
-                self.conn, id_profesional=id_profesional, tipo_combinacion=self.combo_tipo.currentData(),
-                dias=self._dias_seleccionados(), horario_desde=self.spin_desde.value(),
-                horario_hasta=self.spin_hasta.value(),
-                cantidad_horas_requeridas=self.spin_cantidad_horas.value() if self.casilla_cantidad_horas.isChecked() else None,
+                self.conn, id_profesional=id_profesional,
+                tipo_combinacion_bloques=self.combo_tipo_bloques.currentData(), bloques=bloques,
                 condiciones_consultorio=self._condiciones(),
                 detalle=self.campo_detalle.toPlainText().strip() or None,
             )
@@ -285,6 +365,8 @@ class PantallaListaEspera(QWidget):
             QMessageBox.warning(self, "Crear pedido", str(error))
             return
         self.conn.commit()
+        self._bloques_pendientes = []
+        self._refrescar_tabla_bloques()
         self.actualizar()
 
     def _fila_seleccionada_pedido(self) -> sqlite3.Row | None:

@@ -25,11 +25,14 @@ def consultorio(conn):
     )
 
 
+def _bloque(dias, horario_desde=10, horario_hasta=12, **extra):
+    return {"dias": dias, "horario_desde": horario_desde, "horario_hasta": horario_hasta, **extra}
+
+
 def _crear_pedido_para(conn, consultorio, categoria):
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional=categoria, Apellido="Prueba")
     return crear_pedido(
-        conn, id_profesional=id_prof, tipo_combinacion="O", dias=["Lunes"],
-        horario_desde=10, horario_hasta=12, condiciones_consultorio={"ventana": True},
+        conn, id_profesional=id_prof, bloques=[_bloque(["Lunes"])], condiciones_consultorio={"ventana": True},
     )
 
 
@@ -71,8 +74,7 @@ def test_coincidencia_verde_explica_cobertura_directa(conn, consultorio, tmp_pat
 def test_cantidad_horas_se_describe_en_criterios(conn, consultorio, tmp_path):
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     id_pedido = crear_pedido(
-        conn, id_profesional=id_prof, tipo_combinacion="O", dias=["Lunes"],
-        horario_desde=9, horario_hasta=13, cantidad_horas_requeridas=2,
+        conn, id_profesional=id_prof, bloques=[_bloque(["Lunes"], 9, 13, cantidad_horas_requeridas=2)],
     )
     ruta = generar_pdf_oferta(conn, str(tmp_path), id_pedido)
     texto = fitz.open(ruta)[0].get_text()
@@ -103,12 +105,8 @@ def test_orden_consultorios_activo_por_piso_y_departamento(conn, tmp_path):
     )
 
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
-    id_pedido1 = crear_pedido(
-        conn, id_profesional=id_prof, tipo_combinacion="O", dias=["Lunes"], horario_desde=10, horario_hasta=11,
-    )
-    id_pedido2 = crear_pedido(
-        conn, id_profesional=id_prof, tipo_combinacion="O", dias=["Martes"], horario_desde=10, horario_hasta=11,
-    )
+    id_pedido1 = crear_pedido(conn, id_profesional=id_prof, bloques=[_bloque(["Lunes"], 10, 11)])
+    id_pedido2 = crear_pedido(conn, id_profesional=id_prof, bloques=[_bloque(["Martes"], 10, 11)])
     ruta = generar_pdf_oferta_multiple(conn, str(tmp_path), [id_pedido1, id_pedido2])
     texto = fitz.open(ruta)[0].get_text()
     seccion = texto.split("Consultorios que intervienen en las ofertas")[1]
@@ -117,12 +115,8 @@ def test_orden_consultorios_activo_por_piso_y_departamento(conn, tmp_path):
 
 def test_multiple_combina_varios_pedidos_del_mismo_profesional_en_un_pdf(conn, consultorio, tmp_path):
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
-    id_pedido1 = crear_pedido(
-        conn, id_profesional=id_prof, tipo_combinacion="O", dias=["Lunes"], horario_desde=8, horario_hasta=12,
-    )
-    id_pedido2 = crear_pedido(
-        conn, id_profesional=id_prof, tipo_combinacion="O", dias=["Viernes"], horario_desde=16, horario_hasta=20,
-    )
+    id_pedido1 = crear_pedido(conn, id_profesional=id_prof, bloques=[_bloque(["Lunes"], 8, 12)])
+    id_pedido2 = crear_pedido(conn, id_profesional=id_prof, bloques=[_bloque(["Viernes"], 16, 20)])
     ruta = generar_pdf_oferta_multiple(conn, str(tmp_path), [id_pedido1, id_pedido2])
     texto = fitz.open(ruta)[0].get_text()
     assert texto.count("Criterios de búsqueda") == 1
@@ -136,14 +130,23 @@ def test_multiple_combina_varios_pedidos_del_mismo_profesional_en_un_pdf(conn, c
 def test_multiple_con_profesionales_distintos_lanza_error(conn, consultorio, tmp_path):
     id_prof1 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Uno")
     id_prof2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Dos")
-    id_pedido1 = crear_pedido(
-        conn, id_profesional=id_prof1, tipo_combinacion="O", dias=["Lunes"], horario_desde=8, horario_hasta=12,
-    )
-    id_pedido2 = crear_pedido(
-        conn, id_profesional=id_prof2, tipo_combinacion="O", dias=["Lunes"], horario_desde=8, horario_hasta=12,
-    )
+    id_pedido1 = crear_pedido(conn, id_profesional=id_prof1, bloques=[_bloque(["Lunes"], 8, 12)])
+    id_pedido2 = crear_pedido(conn, id_profesional=id_prof2, bloques=[_bloque(["Lunes"], 8, 12)])
     with pytest.raises(ValueError):
         generar_pdf_oferta_multiple(conn, str(tmp_path), [id_pedido1, id_pedido2])
+
+
+def test_pedido_con_dos_bloques_muestra_ambos_y_como_se_combinan(conn, consultorio, tmp_path):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    id_pedido = crear_pedido(
+        conn, id_profesional=id_prof, tipo_combinacion_bloques="Y",
+        bloques=[_bloque(["Martes", "Jueves"], 14, 18, tipo_combinacion_dias="O"), _bloque(["Sábado"], 9, 12)],
+    )
+    ruta = generar_pdf_oferta(conn, str(tmp_path), id_pedido)
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Bloque 1" in texto and "Bloque 2" in texto
+    assert "Sábado" in texto
+    assert "se necesitan todos los bloques" in texto
 
 
 def test_sin_combinar_rechaza_coincidencias_que_no_sean_verde(conn, tmp_path):
@@ -165,7 +168,7 @@ def test_sin_combinar_rechaza_coincidencias_que_no_sean_verde(conn, tmp_path):
     )
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Interesado")
     id_pedido = crear_pedido(
-        conn, id_profesional=id_prof, tipo_combinacion="O", dias=["Lunes"], horario_desde=9, horario_hasta=11,
+        conn, id_profesional=id_prof, bloques=[_bloque(["Lunes"], 9, 11)],
         condiciones_consultorio={"sinCombinar": True},
     )
     ruta = generar_pdf_oferta(conn, str(tmp_path), id_pedido)

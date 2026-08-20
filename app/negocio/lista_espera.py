@@ -1,6 +1,17 @@
 """Lista de espera (sección 3.21) — cruce automático de pedidos contra
 disponibilidad real (DC-08 §2, DC-10 §2).
 
+Un pedido puede pedir varios bloques día(s)+horario a la vez — ejemplo
+real: "martes o jueves 3hs entre 14 y 18hs" Y "sábado de 9 a 12hs" tienen
+que darse los dos; con Y/O invertido en vez de Y alcanzaría con que se dé
+uno de los dos. Cada bloque (ListaEsperaBloque) es exactamente lo que
+antes era todo el pedido: una lista de días con su propia combinación
+Y/O interna (`TipoCombinacionDias`) y un horario (+ opcionalmente
+`CantidadHorasRequeridas`). El pedido (ListaEspera) agrega arriba de eso
+un `TipoCombinacion` que ahora es la combinación ENTRE bloques, no entre
+días — un pedido de un solo bloque (el caso más común) se comporta
+exactamente igual que antes.
+
 El cruce evalúa, para cada día pedido y el horario completo solicitado,
 qué consultorios están libres TODAS las horas de ese rango (reutilizando
 la ocupación de `grilla.py`) y que además cumplen las condiciones
@@ -69,27 +80,50 @@ class Coincidencia:
     tramos_por_dia: dict[str, list[TramoCobertura]] = field(default_factory=dict)
 
 
-def crear_pedido(
-    conn: sqlite3.Connection, *, id_profesional: int, tipo_combinacion: str, dias: list[str],
-    horario_desde: float, horario_hasta: float, cantidad_horas_requeridas: float | None = None,
-    condiciones_consultorio: dict | None = None, detalle: str | None = None, fecha_pedido: str | None = None,
-) -> int:
-    if tipo_combinacion not in TIPOS_COMBINACION:
-        raise ValueError(f"tipo_combinacion inválido: {tipo_combinacion!r} (debe ser 'O' o 'Y')")
+def _validar_bloque(bloque: dict) -> None:
+    tipo_dias = bloque.get("tipo_combinacion_dias", "O")
+    if tipo_dias not in TIPOS_COMBINACION:
+        raise ValueError(f"tipo_combinacion_dias inválido: {tipo_dias!r} (debe ser 'O' o 'Y')")
+    if not bloque.get("dias"):
+        raise ValueError("Cada bloque necesita al menos un día")
+    horario_desde, horario_hasta = bloque["horario_desde"], bloque["horario_hasta"]
     if horario_hasta <= horario_desde:
         raise ValueError("HorarioHasta debe ser posterior a HorarioDesde")
-    if not dias:
-        raise ValueError("El pedido necesita al menos un día")
-    if cantidad_horas_requeridas is not None and not (0 < cantidad_horas_requeridas <= horario_hasta - horario_desde):
+    cantidad_horas = bloque.get("cantidad_horas_requeridas")
+    if cantidad_horas is not None and not (0 < cantidad_horas <= horario_hasta - horario_desde):
         raise ValueError("CantidadHorasRequeridas debe ser mayor a 0 y no superar el rango HorarioDesde-HorarioHasta")
 
-    repo = obtener_repositorio(conn, "ListaEspera")
-    return repo.crear(
+
+def crear_pedido(
+    conn: sqlite3.Connection, *, id_profesional: int, bloques: list[dict], tipo_combinacion_bloques: str = "O",
+    condiciones_consultorio: dict | None = None, detalle: str | None = None, fecha_pedido: str | None = None,
+) -> int:
+    """Cada bloque es un dict con `dias` (lista), `horario_desde`,
+    `horario_hasta`, y opcionalmente `tipo_combinacion_dias` ('O' por
+    defecto) y `cantidad_horas_requeridas`. `tipo_combinacion_bloques`
+    combina los bloques ENTRE sí (irrelevante con un solo bloque, que es
+    el caso más común)."""
+    if tipo_combinacion_bloques not in TIPOS_COMBINACION:
+        raise ValueError(f"tipo_combinacion_bloques inválido: {tipo_combinacion_bloques!r} (debe ser 'O' o 'Y')")
+    if not bloques:
+        raise ValueError("El pedido necesita al menos un bloque de día(s) + horario")
+    for bloque in bloques:
+        _validar_bloque(bloque)
+
+    repo_pedido = obtener_repositorio(conn, "ListaEspera")
+    id_pedido = repo_pedido.crear(
         IdProfesional=id_profesional, FechaPedido=fecha_pedido or fecha_actual(conn).isoformat(),
-        TipoCombinacion=tipo_combinacion, Dias=json.dumps(dias),
-        HorarioDesde=horario_desde, HorarioHasta=horario_hasta, CantidadHorasRequeridas=cantidad_horas_requeridas,
+        TipoCombinacion=tipo_combinacion_bloques,
         CondicionesConsultorio=json.dumps(condiciones_consultorio or {}), Detalle=detalle, Estado="Activo",
     )
+    repo_bloque = obtener_repositorio(conn, "ListaEsperaBloque")
+    for bloque in bloques:
+        repo_bloque.crear(
+            IdPedido=id_pedido, TipoCombinacionDias=bloque.get("tipo_combinacion_dias", "O"),
+            Dias=json.dumps(bloque["dias"]), HorarioDesde=bloque["horario_desde"],
+            HorarioHasta=bloque["horario_hasta"], CantidadHorasRequeridas=bloque.get("cantidad_horas_requeridas"),
+        )
+    return id_pedido
 
 
 def _cambiar_estado(conn: sqlite3.Connection, id_pedido: int, estado: str, observacion: str | None) -> None:
@@ -111,6 +145,17 @@ def marcar_resuelto(conn: sqlite3.Connection, id_pedido: int, observacion: str |
 def marcar_descartado(conn: sqlite3.Connection, id_pedido: int, observacion: str | None = None) -> None:
     """DC-10 §2.2 paso 4b: el operador decide no proceder con el pedido."""
     _cambiar_estado(conn, id_pedido, "Descartado", observacion)
+
+
+def eliminar_pedido(conn: sqlite3.Connection, id_pedido: int) -> None:
+    """Borra el pedido y sus bloques (ListaEsperaBloque) — hace falta
+    borrar los bloques antes por la referencia (FK), no hay ON DELETE
+    CASCADE en el schema. Lo usa la limpieza de avance de mes (DC-08
+    §2.6)."""
+    repo_bloque = obtener_repositorio(conn, "ListaEsperaBloque")
+    for bloque in repo_bloque.listar(IdPedido=id_pedido):
+        repo_bloque.eliminar(bloque["IdBloque"])
+    obtener_repositorio(conn, "ListaEspera").eliminar(id_pedido)
 
 
 def _consultorios_candidatos(conn: sqlite3.Connection, condiciones: dict) -> list[sqlite3.Row]:
@@ -215,32 +260,35 @@ def _clasificar_color(candidatos_por_id: dict, ids_consultorios: set[int]) -> st
     return ROJO
 
 
-def calcular_coincidencia(conn: sqlite3.Connection, pedido: sqlite3.Row, anio: int, mes: int) -> Coincidencia | None:
-    """Cruza un pedido contra la disponibilidad de (anio, mes). None si no
-    hay ninguna coincidencia ("sin color")."""
-    dias = json.loads(pedido["Dias"] or "[]")
-    condiciones = json.loads(pedido["CondicionesConsultorio"] or "{}")
-    candidatos = _consultorios_candidatos(conn, condiciones)
-    if not candidatos or not dias:
-        return None
-    candidatos_por_id = {c["IdConsultorio"]: c for c in candidatos}
-    ocupado = calcular_ocupacion_regular(conn, anio, mes, dias=dias)
+def _bloques_de(conn: sqlite3.Connection, pedido) -> list:
+    """`pedido` puede ser una fila real de ListaEspera (los bloques se
+    buscan en ListaEsperaBloque) o un dict armado al vuelo
+    (mensajes.mensaje_disponibilidad_horarios, que no persiste el pedido y
+    trae la lista de bloques directo en la clave "Bloques")."""
+    if "Bloques" in pedido.keys():
+        return pedido["Bloques"]
+    return obtener_repositorio(conn, "ListaEsperaBloque").listar(IdPedido=pedido["IdPedido"])
 
-    # `pedido` puede ser una fila real de ListaEspera o un dict armado al
-    # vuelo (mensajes.mensaje_disponibilidad_horarios, que no persiste el
-    # pedido) — a diferencia de un dict, sqlite3.Row no tiene `.get()`, así
-    # que el chequeo de la clave tiene que andar para los dos.
-    duracion_requerida = pedido["CantidadHorasRequeridas"] if "CantidadHorasRequeridas" in pedido.keys() else None
+
+def _coincidencia_bloque(
+    conn: sqlite3.Connection, candidatos_por_id: dict, bloque, anio: int, mes: int,
+) -> tuple[list[str], dict[str, list[TramoCobertura]]] | None:
+    dias = json.loads(bloque["Dias"] or "[]")
+    if not dias:
+        return None
+    ocupado = calcular_ocupacion_regular(conn, anio, mes, dias=dias)
+    duracion_requerida = bloque["CantidadHorasRequeridas"] if "CantidadHorasRequeridas" in bloque.keys() else None
+
     cobertura_por_dia: dict[str, list[TramoCobertura]] = {}
     for dia in dias:
         tramos = _cobertura_dia(
-            candidatos_por_id, dia, pedido["HorarioDesde"], pedido["HorarioHasta"], ocupado,
+            candidatos_por_id, dia, bloque["HorarioDesde"], bloque["HorarioHasta"], ocupado,
             duracion_requerida=duracion_requerida,
         )
         if tramos is not None:
             cobertura_por_dia[dia] = tramos
 
-    if pedido["TipoCombinacion"] == "Y":
+    if bloque["TipoCombinacionDias"] == "Y":
         if len(cobertura_por_dia) != len(dias):
             return None
         dias_cubiertos = list(dias)
@@ -249,14 +297,44 @@ def calcular_coincidencia(conn: sqlite3.Connection, pedido: sqlite3.Row, anio: i
             return None
         dias_cubiertos = [d for d in dias if d in cobertura_por_dia]
 
-    ids_consultorios = {t.id_consultorio for d in dias_cubiertos for t in cobertura_por_dia[d]}
+    return dias_cubiertos, {d: cobertura_por_dia[d] for d in dias_cubiertos}
+
+
+def calcular_coincidencia(conn: sqlite3.Connection, pedido, anio: int, mes: int) -> Coincidencia | None:
+    """Cruza un pedido (posiblemente de varios bloques día(s)+horario)
+    contra la disponibilidad de (anio, mes). None si no hay ninguna
+    coincidencia ("sin color")."""
+    condiciones = json.loads(pedido["CondicionesConsultorio"] or "{}")
+    candidatos = _consultorios_candidatos(conn, condiciones)
+    bloques = _bloques_de(conn, pedido)
+    if not candidatos or not bloques:
+        return None
+    candidatos_por_id = {c["IdConsultorio"]: c for c in candidatos}
+
+    resultados = [_coincidencia_bloque(conn, candidatos_por_id, bloque, anio, mes) for bloque in bloques]
+
+    if pedido["TipoCombinacion"] == "Y":
+        if any(r is None for r in resultados):
+            return None
+        cubiertos = resultados
+    else:
+        cubiertos = [r for r in resultados if r is not None]
+        if not cubiertos:
+            return None
+
+    dias_cubiertos: list[str] = []
+    tramos_por_dia: dict[str, list[TramoCobertura]] = {}
+    for dias_bloque, tramos_bloque in cubiertos:
+        for d in dias_bloque:
+            if d not in dias_cubiertos:
+                dias_cubiertos.append(d)
+        tramos_por_dia.update(tramos_bloque)
+
+    ids_consultorios = {t.id_consultorio for tramos in tramos_por_dia.values() for t in tramos}
     color = _clasificar_color(candidatos_por_id, ids_consultorios)
     if condiciones.get("sinCombinar") and color != VERDE:
         return None
-    return Coincidencia(
-        color=color, dias_cubiertos=dias_cubiertos,
-        tramos_por_dia={d: cobertura_por_dia[d] for d in dias_cubiertos},
-    )
+    return Coincidencia(color=color, dias_cubiertos=dias_cubiertos, tramos_por_dia=tramos_por_dia)
 
 
 def listar_pedidos_con_coincidencia(

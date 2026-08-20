@@ -53,6 +53,7 @@ from app.negocio.backup import generar_backup
 from app.negocio.dias import fecha_actual, parsear_periodo, sumar_meses, ultimo_dia_mes
 from app.negocio.estadisticas import generar_snapshot
 from app.negocio.historial_oferta import vaciar_historial
+from app.negocio.lista_espera import eliminar_pedido
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -146,7 +147,7 @@ def _limpiar_lista_espera(conn: sqlite3.Connection, *, eliminar_activos_vencidos
     repo = obtener_repositorio(conn, "ListaEspera")
     cerrados = repo.listar(Estado="Resuelto") + repo.listar(Estado="Descartado")
     for c in cerrados:
-        repo.eliminar(c["IdPedido"])
+        eliminar_pedido(conn, c["IdPedido"])
 
     vencidos_eliminados = 0
     if eliminar_activos_vencidos:
@@ -161,7 +162,7 @@ def _limpiar_lista_espera(conn: sqlite3.Connection, *, eliminar_activos_vencidos
             limite = hoy.replace(year=hoy.year - anios_retencion, day=28).isoformat()
         vencidos = [p for p in repo.listar(Estado="Activo") if p["FechaPedido"] < limite]
         for p in vencidos:
-            repo.eliminar(p["IdPedido"])
+            eliminar_pedido(conn, p["IdPedido"])
         vencidos_eliminados = len(vencidos)
 
     return len(cerrados), vencidos_eliminados

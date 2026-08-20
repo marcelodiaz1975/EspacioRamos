@@ -137,6 +137,61 @@ def test_copiar_mensaje_disponibilidad_usa_portapapeles(qtbot, conn, monkeypatch
     assert copiado == ["texto de prueba"]
 
 
+def test_agregar_bloque_lo_suma_a_la_tabla_y_limpia_dias(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+
+    pantalla._agregar_bloque()
+
+    assert len(pantalla._bloques_pendientes) == 1
+    assert pantalla.tabla_bloques.rowCount() == 1
+    assert pantalla.tabla_bloques.item(0, 0).text() == "Lunes"
+    assert pantalla._dias_seleccionados() == []  # se limpia para cargar el próximo bloque
+
+
+def test_agregar_bloque_sin_dias_no_agrega(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._agregar_bloque()
+    assert pantalla._bloques_pendientes == []
+
+
+def test_crear_pedido_con_dos_bloques_persiste_los_dos(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla.lista_dias.item(1).setCheckState(Qt.CheckState.Checked)  # Martes
+    pantalla.lista_dias.item(3).setCheckState(Qt.CheckState.Checked)  # Jueves
+    pantalla._agregar_bloque()
+    pantalla.lista_dias.item(5).setCheckState(Qt.CheckState.Checked)  # Sábado
+    pantalla.combo_tipo_bloques.setCurrentIndex(1)  # Y
+    pantalla._crear_pedido()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ListaEspera").fetchone()["c"] == 1
+    id_pedido = conn.execute("SELECT IdPedido FROM ListaEspera").fetchone()["IdPedido"]
+    assert conn.execute("SELECT COUNT(*) c FROM ListaEsperaBloque WHERE IdPedido = ?", (id_pedido,)).fetchone()["c"] == 2
+    assert conn.execute("SELECT TipoCombinacion FROM ListaEspera").fetchone()["TipoCombinacion"] == "Y"
+    assert pantalla._bloques_pendientes == []  # se limpia después de crear
+
+
+def test_quitar_bloque_lo_saca_de_la_tabla(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)
+    pantalla._agregar_bloque()
+
+    pantalla.tabla_bloques.selectRow(0)
+    pantalla._quitar_bloque()
+
+    assert pantalla._bloques_pendientes == []
+    assert pantalla.tabla_bloques.rowCount() == 0
+
+
 def test_descartar_saca_el_pedido_de_la_lista(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)

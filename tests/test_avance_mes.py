@@ -113,8 +113,8 @@ def test_plan_no_se_finaliza_si_quedan_cuotas_futuras(conn):
 
 def _crear_pedido(conn, id_prof, dia="Lunes", fecha_pedido=None):
     return crear_pedido(
-        conn, id_profesional=id_prof, tipo_combinacion="O", dias=[dia],
-        horario_desde=14, horario_hasta=16, fecha_pedido=fecha_pedido,
+        conn, id_profesional=id_prof,
+        bloques=[{"dias": [dia], "horario_desde": 14, "horario_hasta": 16}], fecha_pedido=fecha_pedido,
     )
 
 
