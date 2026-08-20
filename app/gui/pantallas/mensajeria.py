@@ -230,7 +230,11 @@ class CentroMensajeria(QWidget):
         limpiar_plazos_vencidos_o_regularizados(self.conn)
         filtro = self.combo_filtro.currentData()
         self._profesionales = self._listar_filtrados(periodo, filtro)
-        self._profesionales.sort(key=lambda p: self._clave_orden(p, periodo))
+        # Dos pasadas (sort estable): primero código descendente, después
+        # color ascendente — así, a igualdad de color, queda ordenado por
+        # código descendente (confirmado por el usuario).
+        self._profesionales.sort(key=lambda p: _clave_codigo(p["IdCodigo"]), reverse=True)
+        self._profesionales.sort(key=lambda p: _ORDEN_COLOR.get(color_profesional(self.conn, p, periodo), 99))
 
         self._actualizando_tabla = True
         try:
@@ -263,10 +267,17 @@ class CentroMensajeria(QWidget):
     def _listar_filtrados(self, periodo: str, filtro: str) -> list[sqlite3.Row]:
         """Base = profesionales de categoría R o A (las únicas con
         contenido propio en este centro de mensajería), acotada según el
-        filtro elegido (DC-02 §4)."""
+        filtro elegido (DC-02 §4). Los A sin ninguna reserva aislada del
+        mes en curso en adelante se depuran de la lista (DC-02 §2.2:
+        "los profesionales que ya no tienen reservas aisladas activas ni
+        pendientes se depuran")."""
         candidatos = [
             p for p in obtener_repositorio(self.conn, "Profesional").listar()
             if p["CategoriaProfesional"] in ("R", "A")
+        ]
+        candidatos = [
+            p for p in candidatos
+            if p["CategoriaProfesional"] != "A" or self._tiene_aisladas_vigentes(p["IdProfesional"], periodo)
         ]
         if filtro == "regulares":
             return [p for p in candidatos if p["CategoriaProfesional"] == "R"]
@@ -277,12 +288,14 @@ class CentroMensajeria(QWidget):
             return [p for p in candidatos if color_profesional(self.conn, p, periodo) in grupo]
         return candidatos  # "todos"
 
-    def _clave_orden(self, profesional: sqlite3.Row, periodo: str) -> tuple[int, tuple[str, int, str]]:
-        """Orden por color (DC-02 §2.1) y, dentro de cada color, por
-        código (confirmado por el usuario para toda la lista, no solo
-        para gris)."""
-        color = color_profesional(self.conn, profesional, periodo)
-        return (_ORDEN_COLOR.get(color, 99), _clave_codigo(profesional["IdCodigo"]))
+    def _tiene_aisladas_vigentes(self, id_profesional: int, periodo: str) -> bool:
+        anio, mes = (int(p) for p in periodo.split("-"))
+        primer_dia_periodo = f"{anio:04d}-{mes:02d}-01"
+        fila = self.conn.execute(
+            "SELECT 1 FROM ReservaAislada WHERE IdProfesional = ? AND Estado = 'Confirmada' AND Fecha >= ? LIMIT 1",
+            (id_profesional, primer_dia_periodo),
+        ).fetchone()
+        return fila is not None
 
     def _item_enviada(self, profesional: sqlite3.Row, color: str | None, periodo: str) -> QTableWidgetItem:
         """Check "Enviada" (DC-02 §3, DC-03 "Resumen de asignaciones"):
