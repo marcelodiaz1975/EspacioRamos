@@ -1,31 +1,34 @@
-"""Centro de mensajería (FA7, sección 5): lista de profesionales con su
-situación (categoría R, sección 5.3) o de reserva aislada (categoría A,
-sección 5.1) para el período elegido, arma el mensaje correspondiente
-reusando app.negocio.mensajes y permite copiarlo al portapapeles. También
-expone el mensaje grupal (sección 5.4).
+"""Centro de mensajería (DC-02, DC-03): lista de profesionales categoría R
+y A ordenada por color (marrón, verde, amarillo, naranja, rojo, violeta,
+celeste, azul, gris — DC-02 §2.1) y, dentro de cada color, por código.
+
+Cada fila tiene dos controles independientes (DC-02 §3): el check "Enviada"
+(solo habilitado para los colores que lo tienen asignado — DC-03 "Resumen
+de asignaciones") y el botón "Generar texto" (siempre disponible, carga al
+portapapeles el mensaje que corresponde al color actual). No están
+encadenados: el check cambia el estado, el botón solo genera texto.
 
 Sección 5.1: para categoría A, los 5 controles (todos marcados por
-default) que arman el detalle de reserva aislada — Incluir consultorio /
-Incluir unidad / Incluir edificio / Combinar misma unidad / Combinar
-distintas unidades.
+default salvo los "combinar") que arman el detalle de reserva aislada —
+Incluir consultorio / Incluir unidad / Incluir edificio / Combinar misma
+unidad / Combinar distintas unidades.
 
-Filtros y orden según sección 6.2: "Todos / Solo regulares / Solo
-aisladas / Solo con plan / Con deuda (default) / Liquidación enviada /
-Liquidación sin enviar", ordenado por días desde el último pago
-(descendente) y, a igualdad, por monto adeudado (descendente) — a quién
-hace falta contactar primero."""
+Filtros exactos de DC-02 §4: Todos / Pendientes de envío / Enviados /
+Solo regulares / Solo aisladas."""
 from __future__ import annotations
 
+import os
 import sqlite3
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
@@ -35,40 +38,75 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import fecha_actual, periodo_actual
-from app.negocio.liquidaciones import marcar_estado_envio
+from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
+from app.negocio.mensajeria import (
+    COLORES_ENVIADOS,
+    COLORES_PENDIENTES_ENVIO,
+    color_profesional,
+    limpiar_plazos_vencidos_o_regularizados,
+    marcar_mensaje_aislada_generado,
+    marcar_mensaje_previo_generado,
+)
 from app.negocio.mensajes import (
-    determinar_situacion,
-    dias_desde_ultimo_pago,
     liquidacion_del_periodo,
     mensaje_detalle_reserva_aislada,
+    mensaje_envio_liquidacion,
     mensaje_grupal,
-    mensaje_situacion,
+    mensaje_situacion_1,
+    mensaje_situacion_2,
+    mensaje_situacion_3,
+    mensaje_situacion_4,
+    mensaje_situacion_5,
     nombre_para_mensaje,
-    plan_activo,
 )
+from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
-_COLUMNA_ENVIADA = 3
+_COLUMNA_ENVIADA = 4
+_COLUMNA_BOTON = 5
 
-_ETIQUETA_SITUACION = {
-    "1": "1 — Deuda sobre tolerancia",
-    "2": "2 — Liquidación enviada",
-    "3": "3 — Pendiente de liquidación",
-    "4": "4 — Plan de pagos, enviada",
-    "5": "5 — Plan de pagos, pendiente",
+_ORDEN_COLOR = {
+    color: orden for orden, color in enumerate(
+        ("marron", "verde", "amarillo", "naranja", "rojo", "violeta", "celeste", "azul", "gris")
+    )
 }
+
+_ETIQUETA_COLOR = {
+    "marron": "🟤 Marrón", "verde": "🟢 Verde", "amarillo": "🟡 Amarillo",
+    "naranja": "🟠 Naranja", "rojo": "🔴 Rojo", "violeta": "🟣 Violeta",
+    "celeste": "🔵 Celeste", "azul": "🔵 Azul", "gris": "⚫ Gris",
+}
+_COLOR_FONDO = {
+    "marron": "#8D6E63", "verde": "#4CAF50", "amarillo": "#F5D547",
+    "naranja": "#E07B39", "rojo": "#C0392B", "violeta": "#8E44AD",
+    "celeste": "#5DADE2", "azul": "#2E5C8A", "gris": "#9E9E9E",
+}
+_COLOR_TEXTO_CLARO = {"amarillo", "celeste"}  # el resto usa letra blanca
+
+# DC-03 "Resumen de asignaciones": check de envío solo disponible para estos colores.
+_COLORES_CON_CHECK = {"amarillo", "verde", "naranja", "rojo", "violeta", "gris"}
 
 _FILTROS = [
     ("Todos", "todos"),
+    ("Pendientes de envío", "pendientes"),
+    ("Enviados", "enviados"),
     ("Solo regulares", "regulares"),
     ("Solo aisladas", "aisladas"),
-    ("Solo con plan", "con_plan"),
-    ("Con deuda", "con_deuda"),
-    ("Liquidación enviada", "liq_enviada"),
-    ("Liquidación sin enviar", "liq_sin_enviar"),
 ]
-_FILTRO_DEFAULT = "con_deuda"
+_FILTRO_DEFAULT = "pendientes"
+
+
+def _clave_codigo(codigo: str | None) -> tuple[str, int, str]:
+    """Orden natural para IdCodigo tipo "R1".."R10" (sin ceros a la
+    izquierda): prefijo alfabético + número, no orden de texto puro."""
+    codigo = (codigo or "").strip()
+    i = 0
+    while i < len(codigo) and not codigo[i].isdigit():
+        i += 1
+    numero = codigo[i:]
+    return (codigo[:i], int(numero) if numero.isdigit() else 0, codigo)
 
 
 class CentroMensajeria(QWidget):
@@ -114,12 +152,13 @@ class CentroMensajeria(QWidget):
 
         splitter = QSplitter()
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(4)
-        self.tabla.setHorizontalHeaderLabels(["Profesional", "Saldo anterior", "Situación", "Enviada"])
+        self.tabla.setColumnCount(6)
+        self.tabla.setHorizontalHeaderLabels(
+            ["Profesional", "Código", "Color", "Saldo anterior", "Enviada", ""]
+        )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla.itemSelectionChanged.connect(self._mostrar_mensaje_seleccionado)
         self.tabla.itemChanged.connect(self._al_cambiar_enviada)
         splitter.addWidget(self.tabla)
 
@@ -129,25 +168,20 @@ class CentroMensajeria(QWidget):
         fila_incluir = QHBoxLayout()
         self.check_incluir_consultorio = QCheckBox("Incluir consultorio")
         self.check_incluir_consultorio.setChecked(True)
-        self.check_incluir_consultorio.toggled.connect(self._mostrar_mensaje_seleccionado)
         fila_incluir.addWidget(self.check_incluir_consultorio)
         self.check_incluir_unidad = QCheckBox("Incluir unidad")
         self.check_incluir_unidad.setChecked(True)
-        self.check_incluir_unidad.toggled.connect(self._mostrar_mensaje_seleccionado)
         fila_incluir.addWidget(self.check_incluir_unidad)
         self.check_incluir_edificio = QCheckBox("Incluir edificio")
         self.check_incluir_edificio.setChecked(True)
-        self.check_incluir_edificio.toggled.connect(self._mostrar_mensaje_seleccionado)
         fila_incluir.addWidget(self.check_incluir_edificio)
         fila_incluir.addStretch()
         layout_derecho.addLayout(fila_incluir)
 
         fila_combinar = QHBoxLayout()
         self.check_combinar_misma_unidad = QCheckBox("Combinar misma unidad")
-        self.check_combinar_misma_unidad.toggled.connect(self._mostrar_mensaje_seleccionado)
         fila_combinar.addWidget(self.check_combinar_misma_unidad)
         self.check_combinar_distintas_unidades = QCheckBox("Combinar distintas unidades")
-        self.check_combinar_distintas_unidades.toggled.connect(self._mostrar_mensaje_seleccionado)
         fila_combinar.addWidget(self.check_combinar_distintas_unidades)
         fila_combinar.addStretch()
         layout_derecho.addLayout(fila_combinar)
@@ -165,36 +199,46 @@ class CentroMensajeria(QWidget):
 
         self.campo_periodo.setText(periodo_actual(self.conn))
 
+    # ------------------------------------------------------------------ listado
+
     def actualizar(self) -> None:
         periodo = self._periodo()
+        limpiar_plazos_vencidos_o_regularizados(self.conn)
         filtro = self.combo_filtro.currentData()
         self._profesionales = self._listar_filtrados(periodo, filtro)
-        self._profesionales.sort(key=lambda p: self._clave_orden(p), reverse=True)
+        self._profesionales.sort(key=lambda p: self._clave_orden(p, periodo))
 
         self._actualizando_tabla = True
         try:
             self.tabla.setRowCount(len(self._profesionales))
             for fila_idx, profesional in enumerate(self._profesionales):
-                categoria = profesional["CategoriaProfesional"]
+                color = color_profesional(self.conn, profesional, periodo)
                 nombre = f"{nombre_para_mensaje(profesional)} ({profesional['Apellido']})"
                 self.tabla.setItem(fila_idx, 0, QTableWidgetItem(nombre))
-                self.tabla.setItem(fila_idx, 1, QTableWidgetItem(f"$ {profesional['SaldoCuentaAnterior']:,.2f}"))
-                if categoria == "R":
-                    situacion = determinar_situacion(self.conn, profesional["IdProfesional"], periodo)
-                    texto_situacion = _ETIQUETA_SITUACION.get(situacion, "")
-                else:
-                    texto_situacion = "Detalle de reserva"
-                self.tabla.setItem(fila_idx, 2, QTableWidgetItem(texto_situacion))
-                self.tabla.setItem(fila_idx, _COLUMNA_ENVIADA, self._item_enviada(profesional, categoria, periodo))
+                self.tabla.setItem(fila_idx, 1, QTableWidgetItem(profesional["IdCodigo"] or ""))
+                self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_ETIQUETA_COLOR.get(color, "")))
+                self.tabla.setItem(fila_idx, 3, QTableWidgetItem(f"$ {profesional['SaldoCuentaAnterior']:,.2f}"))
+                self.tabla.setItem(fila_idx, _COLUMNA_ENVIADA, self._item_enviada(profesional, color, periodo))
+
+                boton = QPushButton("Generar texto")
+                boton.clicked.connect(lambda _checked=False, p=profesional: self._generar_y_mostrar(p))
+                self.tabla.setCellWidget(fila_idx, _COLUMNA_BOTON, boton)
+
+                if color in _COLOR_FONDO:
+                    fondo = QColor(_COLOR_FONDO[color])
+                    letra = QColor("#000000" if color in _COLOR_TEXTO_CLARO else "#FFFFFF")
+                    for columna in range(4):
+                        celda = self.tabla.item(fila_idx, columna)
+                        celda.setBackground(fondo)
+                        celda.setForeground(letra)
         finally:
             self._actualizando_tabla = False
         self.tabla.resizeColumnsToContents()
-        self.texto_mensaje.clear()
 
     def _listar_filtrados(self, periodo: str, filtro: str) -> list[sqlite3.Row]:
         """Base = profesionales de categoría R o A (las únicas con
-        contenido propio en este centro de mensajería: situaciones 5.3 o
-        detalle de reservas 5.1), acotada según el filtro elegido."""
+        contenido propio en este centro de mensajería), acotada según el
+        filtro elegido (DC-02 §4)."""
         candidatos = [
             p for p in obtener_repositorio(self.conn, "Profesional").listar()
             if p["CategoriaProfesional"] in ("R", "A")
@@ -203,86 +247,139 @@ class CentroMensajeria(QWidget):
             return [p for p in candidatos if p["CategoriaProfesional"] == "R"]
         if filtro == "aisladas":
             return [p for p in candidatos if p["CategoriaProfesional"] == "A"]
-        if filtro == "con_plan":
-            return [p for p in candidatos if plan_activo(self.conn, p["IdProfesional"]) is not None]
-        if filtro == "con_deuda":
-            return [p for p in candidatos if (p["SaldoCuentaAnterior"] or 0) > 0]
-        if filtro == "liq_enviada":
-            return [
-                p for p in candidatos
-                if p["CategoriaProfesional"] == "R" and self._enviada(p["IdProfesional"], periodo)
-            ]
-        if filtro == "liq_sin_enviar":
-            return [
-                p for p in candidatos
-                if p["CategoriaProfesional"] == "R" and not self._enviada(p["IdProfesional"], periodo)
-            ]
+        if filtro in ("pendientes", "enviados"):
+            grupo = COLORES_PENDIENTES_ENVIO if filtro == "pendientes" else COLORES_ENVIADOS
+            return [p for p in candidatos if color_profesional(self.conn, p, periodo) in grupo]
         return candidatos  # "todos"
 
-    def _enviada(self, id_profesional: int, periodo: str) -> bool:
-        liquidacion = liquidacion_del_periodo(self.conn, id_profesional, periodo)
-        return liquidacion is not None and liquidacion["EstadoEnvio"] == "Enviada"
+    def _clave_orden(self, profesional: sqlite3.Row, periodo: str) -> tuple[int, tuple[str, int, str]]:
+        """Orden por color (DC-02 §2.1) y, dentro de cada color, por
+        código (confirmado por el usuario para toda la lista, no solo
+        para gris)."""
+        color = color_profesional(self.conn, profesional, periodo)
+        return (_ORDEN_COLOR.get(color, 99), _clave_codigo(profesional["IdCodigo"]))
 
-    def _clave_orden(self, profesional: sqlite3.Row) -> tuple[float, float]:
-        """Días desde el último pago (mayor a menor) y, a igualdad, monto
-        adeudado (mayor a menor) — sección 6.2. Nunca pagó = infinito, va
-        primero."""
-        dias = dias_desde_ultimo_pago(self.conn, profesional["IdProfesional"], fecha_actual(self.conn))
-        return (float("inf") if dias is None else dias, profesional["SaldoCuentaAnterior"] or 0.0)
-
-    def _item_enviada(self, profesional: sqlite3.Row, categoria: str, periodo: str) -> QTableWidgetItem:
-        """Check "enviada" del centro de mensajería (sección 6.2): marcable
-        y reversible. Solo tiene sentido para R con una liquidación ya
-        emitida en este período — sin eso no hay nada a lo que el check
-        pueda referirse, así que queda deshabilitado."""
+    def _item_enviada(self, profesional: sqlite3.Row, color: str | None, periodo: str) -> QTableWidgetItem:
+        """Check "Enviada" (DC-02 §3, DC-03 "Resumen de asignaciones"):
+        marcable y reversible, solo disponible para los colores que lo
+        tienen asignado."""
         item = QTableWidgetItem()
-        liquidacion = liquidacion_del_periodo(self.conn, profesional["IdProfesional"], periodo) if categoria == "R" else None
-        if liquidacion is None:
+        if color not in _COLORES_CON_CHECK:
             item.setFlags(Qt.ItemFlag.ItemIsSelectable)
-            item.setToolTip("Todavía no se emitió una liquidación de este período.")
-        else:
-            item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
-            item.setCheckState(Qt.CheckState.Checked if liquidacion["EstadoEnvio"] == "Enviada" else Qt.CheckState.Unchecked)
+            item.setToolTip("El check de envío no está disponible para este color.")
+            return item
+        liquidacion = liquidacion_del_periodo(self.conn, profesional["IdProfesional"], periodo)
+        enviada = liquidacion is not None and liquidacion["EstadoEnvio"] == "Enviada"
+        item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+        item.setCheckState(Qt.CheckState.Checked if enviada else Qt.CheckState.Unchecked)
         return item
+
+    def _periodo(self) -> str:
+        return self.campo_periodo.text().strip() or periodo_actual(self.conn)
+
+    # -------------------------------------------------------------- check envío
 
     def _al_cambiar_enviada(self, item: QTableWidgetItem) -> None:
         if self._actualizando_tabla or item.column() != _COLUMNA_ENVIADA:
             return
         profesional = self._profesionales[item.row()]
-        marcar_estado_envio(
-            self.conn, id_profesional=profesional["IdProfesional"], periodo=self._periodo(),
-            enviada=item.checkState() == Qt.CheckState.Checked,
-        )
+        periodo = self._periodo()
+        marcar = item.checkState() == Qt.CheckState.Checked
+        try:
+            if marcar:
+                self._marcar_como_enviada(profesional, periodo)
+            else:
+                marcar_estado_envio(
+                    self.conn, id_profesional=profesional["IdProfesional"], periodo=periodo, enviada=False,
+                )
+        except ValueError as error:
+            QMessageBox.warning(self, "Centro de mensajería", str(error))
         self.actualizar()
 
-    def _periodo(self) -> str:
-        return self.campo_periodo.text().strip() or periodo_actual(self.conn)
+    def _marcar_como_enviada(self, profesional: sqlite3.Row, periodo: str) -> None:
+        """DC-02 §2.3: al marcar el check se genera el PDF de la
+        liquidación, se carga el texto al portapapeles y el profesional
+        baja al grupo gris. Para violeta además se borra el plazo
+        extendido (DC-02 §2.4)."""
+        id_profesional = profesional["IdProfesional"]
+        color = color_profesional(self.conn, profesional, periodo)
 
-    def _mostrar_mensaje_seleccionado(self) -> None:
-        filas = self.tabla.selectionModel().selectedRows()
-        if not filas:
-            return
-        profesional = self._profesionales[filas[0].row()]
-        categoria = profesional["CategoriaProfesional"]
+        if carpeta_base(self.conn) is None:
+            raise ValueError("Configurá primero la carpeta base de archivos en Configuración general.")
+
+        id_liquidacion, liquidacion = emitir_liquidacion(
+            self.conn, id_profesional=id_profesional, periodo=periodo,
+            fecha_emision=fecha_actual(self.conn).isoformat(),
+        )
+        directorio = str(carpeta_profesional(self.conn, profesional["IdCodigo"]))
+        ruta = generar_pdf_liquidacion(self.conn, liquidacion, directorio)
+        obtener_repositorio(self.conn, "LiquidacionEmitida").actualizar(
+            id_liquidacion, NombreArchivo=os.path.basename(ruta)
+        )
+        marcar_estado_envio(self.conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+        if color == "violeta":
+            obtener_repositorio(self.conn, "Profesional").actualizar(
+                id_profesional, PlazoPagoExtendido=None, MotivoPlazoExtra=None,
+            )
+
+        texto = (
+            mensaje_situacion_2(self.conn, id_profesional, periodo) if color == "amarillo"
+            else mensaje_envio_liquidacion(self.conn, id_profesional, periodo)
+        )
+        self.texto_mensaje.setPlainText(texto)
+        QGuiApplication.clipboard().setText(texto)
+
+    # -------------------------------------------------------- botón "Generar texto"
+
+    def _generar_y_mostrar(self, profesional: sqlite3.Row) -> None:
+        periodo = self._periodo()
+        color = color_profesional(self.conn, profesional, periodo)
         try:
-            if categoria == "R":
-                texto = mensaje_situacion(self.conn, profesional["IdProfesional"], self._periodo())
-            else:
-                texto = mensaje_detalle_reserva_aislada(
-                    self.conn, id_profesional=profesional["IdProfesional"], periodo=self._periodo(),
-                    incluir_consultorio=self.check_incluir_consultorio.isChecked(),
-                    incluir_unidad=self.check_incluir_unidad.isChecked(),
-                    incluir_edificio=self.check_incluir_edificio.isChecked(),
-                    combinar_misma_unidad=self.check_combinar_misma_unidad.isChecked(),
-                    combinar_distintas_unidades=self.check_combinar_distintas_unidades.isChecked(),
-                )
+            texto = self._texto_para_boton(profesional, color, periodo)
         except ValueError as error:
             texto = str(error)
         self.texto_mensaje.setPlainText(texto)
+        QGuiApplication.clipboard().setText(texto)
+        self.actualizar()
+
+    def _texto_para_boton(self, profesional: sqlite3.Row, color: str | None, periodo: str) -> str:
+        """DC-03 "Resumen de asignaciones", botón "Generar texto"."""
+        id_profesional = profesional["IdProfesional"]
+        if profesional["CategoriaProfesional"] == "A":
+            texto = mensaje_detalle_reserva_aislada(
+                self.conn, id_profesional=id_profesional, periodo=periodo,
+                incluir_consultorio=self.check_incluir_consultorio.isChecked(),
+                incluir_unidad=self.check_incluir_unidad.isChecked(),
+                incluir_edificio=self.check_incluir_edificio.isChecked(),
+                combinar_misma_unidad=self.check_combinar_misma_unidad.isChecked(),
+                combinar_distintas_unidades=self.check_combinar_distintas_unidades.isChecked(),
+            )
+            marcar_mensaje_aislada_generado(self.conn, id_profesional, periodo)
+            return texto
+
+        hoy = fecha_actual(self.conn)
+        if color == "marron":
+            texto = mensaje_situacion_3(self.conn, id_profesional, periodo, hoy)
+            marcar_mensaje_previo_generado(self.conn, id_profesional, periodo)
+            return texto
+        if color in ("amarillo", "naranja"):
+            return mensaje_situacion_1(self.conn, id_profesional, hoy)
+        if color == "rojo":
+            liquidacion = liquidacion_del_periodo(self.conn, id_profesional, periodo)
+            if liquidacion is not None and liquidacion["EstadoEnvio"] == "Enviada":
+                return mensaje_situacion_4(self.conn, id_profesional)
+            return mensaje_situacion_5(self.conn, id_profesional, periodo)
+        if color in ("verde", "violeta", "gris"):
+            return mensaje_envio_liquidacion(self.conn, id_profesional, periodo)
+        return ""
+
+    # ------------------------------------------------------------------- varios
 
     def _copiar_mensaje(self) -> None:
         QGuiApplication.clipboard().setText(self.texto_mensaje.toPlainText())
 
     def _mostrar_mensaje_grupal(self) -> None:
-        self.texto_mensaje.setPlainText(mensaje_grupal(self.conn, self._periodo()))
+        texto = mensaje_grupal(self.conn, self._periodo())
+        self.texto_mensaje.setPlainText(texto)
+        QGuiApplication.clipboard().setText(texto)
         self.tabla.clearSelection()
