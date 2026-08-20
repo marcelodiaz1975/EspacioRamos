@@ -1,31 +1,26 @@
-"""Mensajes de WhatsApp para el centro de mensajería (Etapa 8, sección 5).
+"""Mensajes de WhatsApp para el centro de mensajería (DC-02, DC-03).
 
-El documento describe la ESTRUCTURA de cada mensaje (qué bloques van y en
-qué orden) pero no da una redacción exacta como sí pasó con el PDF de
-Liquidación (donde hubo un modelo real para copiar) — la redacción de acá
-es criterio propio sobre esa estructura, para ajustar en la revisión de
-la beta.
+DC-03 da la redacción EXACTA de cada mensaje (a diferencia del spec
+general, que solo describía la estructura) — el texto de acá es literal
+al documento, verificado además contra ejemplos reales que confirmó el
+usuario (Mensaje 1 y Mensaje 3 grupal).
 
-Situaciones del centro de mensajería (sección 5.3), solo para categoría
-R: se determinan a partir de dos señales — si el profesional arrastra
-saldo por encima de la tolerancia (mismo campo que usa
-`liquidaciones.calcular_liquidacion` para `pierde_descuento`, así las dos
-lecturas de "está atrasado" quedan consistentes) y si ya tiene un plan de
-pagos activo, que pisa el circuito normal de deuda/tolerancia. El
-documento no cubre el caso "liquidación ya enviada pero con deuda por
-encima de la tolerancia" como una situación aparte — se lo trata igual
-que la situación 2 (mensaje personal), asumiendo que la liquidación ya
-enviada es la fuente de verdad vigente y no hace falta el aviso
-automático de la situación 1 encima.
+Las 5 situaciones (DC-02 §5) ya no se determinan por tolerancia/plan
+directamente acá — se arman por color del Centro de mensajería
+(`app.negocio.mensajeria.color_profesional`), que es quien resuelve la
+máquina de estados completa (violeta, gris con reactivación, etc.). Cada
+`mensaje_situacion_N` asume que el llamador (la pantalla) ya construyó el
+mensaje correcto para el color/acción según la tabla de asignación de
+DC-03 "Resumen de asignaciones" — no vuelven a validar el color acá.
 """
 from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Callable
 
-from app.negocio.dias import DIAS_SEMANA, sumar_meses
+from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, sumar_meses, ultimo_dia_mes
 from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, hora_fmt, mes_texto, periodo_mm_aaaa
 from app.negocio.lista_espera import calcular_coincidencia
@@ -39,8 +34,10 @@ NOMBRES_CONDICION = {
 
 
 def _moneda(monto: float) -> str:
-    texto = f"{abs(monto):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
-    return f"-$ {texto}" if monto < 0 else f"$ {texto}"
+    """DC-03 reglas generales: punto como separador de miles, SIN
+    decimales, sin espacio entre "$" y el número (ej. "$4.330")."""
+    texto = f"{abs(monto):,.0f}".replace(",", ".")
+    return f"-${texto}" if monto < 0 else f"${texto}"
 
 
 def nombre_para_mensaje(profesional: sqlite3.Row) -> str:
@@ -92,142 +89,209 @@ def dias_desde_ultimo_pago(conn: sqlite3.Connection, id_profesional: int, hoy: d
     return (hoy - date.fromisoformat(ultima)).days
 
 
-def determinar_situacion(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str | None:
-    """"1".."5" (sección 5.3), o None si la categoría no tiene liquidación
-    mensual propia (solo R aplica; las aisladas usan el detalle de
-    reservas de la sección 5.1, sin situaciones)."""
+def _profesional_r(conn: sqlite3.Connection, id_profesional: int) -> sqlite3.Row:
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None or profesional["CategoriaProfesional"] not in CATEGORIAS_CON_LIQUIDACION_MENSUAL:
-        return None
-
-    plan = plan_activo(conn, id_profesional)
-    liquidacion = liquidacion_del_periodo(conn, id_profesional, periodo)
-    enviada = liquidacion is not None and liquidacion["EstadoEnvio"] == "Enviada"
-
-    if plan is not None:
-        return "4" if enviada else "5"
-
-    cfg = conn.execute("SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
-    saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
-    supera_tolerancia = saldo_anterior > tolerancia
-
-    if enviada:
-        return "2"
-    return "1" if supera_tolerancia else "3"
-
-
-_DESCRIPCION_SITUACION = {
-    "1": "Situación 1 — Deuda sobre tolerancia",
-    "2": "Situación 2 — Liquidación enviada",
-    "3": "Situación 3 — Pendiente de liquidación",
-    "4": "Situación 4 — Plan de pagos, enviada",
-    "5": "Situación 5 — Plan de pagos, pendiente",
-}
-
-# Fallback si el registro sembrado (app.db.seed.MENSAJES_PREDEFINIDOS_SITUACIONES,
-# mismo texto) fue borrado o desactivado — para que las situaciones sigan
-# funcionando aunque la biblioteca de mensajes predefinidos quede vacía.
-_TEXTO_SITUACION_DEFAULT = {
-    "1": (
-        "Hola {nombre}! Te escribimos porque registramos un saldo pendiente de {saldo}. Tenés hasta el fin de "
-        "mes ({dias_remanentes} días de margen) para regularizarlo y no perder los descuentos por horas "
-        "semanales reservadas del próximo período. Los saldos que se trasladan de un mes a otro reciben además "
-        "un ajuste del {ajuste_pct}%."
-    ),
-    "2": "Hola {nombre}! Te enviamos la liquidación del período {periodo}. Cualquier consulta, quedamos atentos.",
-    "3": (
-        "Hola {nombre}! En los próximos días vas a recibir un mensaje automático con el resumen de tu cuenta y, "
-        "apenas esté lista, te enviamos la liquidación de {periodo}."
-    ),
-    "4": (
-        "Hola {nombre}! Te enviamos la liquidación de {periodo}. Recordá que incluye la cuota de tu plan de "
-        "pagos por {monto_cuota}."
-    ),
-    "5": (
-        "Hola {nombre}! En los próximos días vas a recibir el mensaje automático con el resumen de tu cuenta. "
-        "Recordá que, al tener un plan de pagos activo, la cuota correspondiente se descuenta igual aunque "
-        "todavía no se haya enviado la liquidación."
-    ),
-}
-
-
-def _plantilla_situacion(conn: sqlite3.Connection, situacion: str) -> str | None:
-    descripcion = _DESCRIPCION_SITUACION.get(situacion)
-    filas = obtener_repositorio(conn, "MensajePredefinido").listar(Descripcion=descripcion, Activo=1)
-    return filas[0]["Mensaje"] if filas else None
-
-
-def mensaje_situacion(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:
-    """El texto sale de la biblioteca de mensajes predefinidos (sembrada
-    por app.db.seed.sembrar_mensajes_predefinidos, sección 11) cuando hay
-    un registro activo para la situación — así el operador puede ajustar
-    la redacción desde el sistema y que quede. Sin eso, usa el mismo texto
-    como fallback fijo."""
-    situacion = determinar_situacion(conn, id_profesional, periodo)
-    if situacion is None:
         raise ValueError("Las situaciones del centro de mensajería solo aplican a profesionales categoría R")
+    return profesional
 
-    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
-    nombre = nombre_para_mensaje(profesional)
-    saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
+
+def _dias_remanentes(conn: sqlite3.Connection) -> int:
     cfg = conn.execute(
-        "SELECT PorcentajeAjusteSaldoAtrasado, DiasEnvioLiquidacionesRemanentes FROM Configuracion "
-        "WHERE IdConfiguracion = 1"
+        "SELECT DiasEnvioLiquidacionesRemanentes FROM Configuracion WHERE IdConfiguracion = 1"
     ).fetchone()
-    ajuste_pct = cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0.0
-    dias_remanentes = cfg["DiasEnvioLiquidacionesRemanentes"] if cfg else 5
-
-    variables = {"nombre": nombre, "periodo": periodo_mm_aaaa(periodo)}
-    if situacion == "1":
-        variables["saldo"] = _moneda(saldo_anterior)
-        variables["dias_remanentes"] = dias_remanentes
-        variables["ajuste_pct"] = f"{ajuste_pct:g}"
-    elif situacion == "4":
-        plan = plan_activo(conn, id_profesional)
-        cuota = obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=plan["IdPlan"], PeriodoImputado=periodo)
-        monto_cuota = cuota[0]["Monto"] if cuota else plan["ImportePorCuota"]
-        variables["monto_cuota"] = _moneda(monto_cuota)
-
-    plantilla = _plantilla_situacion(conn, situacion) or _TEXTO_SITUACION_DEFAULT[situacion]
-    return sustituir_variables(plantilla, variables)
+    return cfg["DiasEnvioLiquidacionesRemanentes"] if cfg and cfg["DiasEnvioLiquidacionesRemanentes"] is not None else 5
 
 
-# ------------------------------------------------------------------- mensaje grupal (5.4)
+def _fecha_y_dia_remanente(conn: sqlite3.Connection, hoy: date) -> tuple[str, str, int]:
+    """DC-02 Situación 1: "{FechaRemanente} — fecha calculada: día actual +
+    DiasEnvioLiquidacionesRemanentes"."""
+    dias = _dias_remanentes(conn)
+    fecha_remanente = hoy + timedelta(days=dias)
+    dia_semana = DIAS_SEMANA[fecha_remanente.weekday()].lower()
+    return dia_semana, fecha_corta(fecha_remanente.isoformat()), dias
+
+
+def _cuando_remanente(dias: int, dia_semana: str, fecha: str) -> str:
+    """DC-02 Situación 3: "Hoy"/"Mañana"/"Pasado mañana" según días
+    restantes; el documento no cubre más de 2 días, así que para el resto
+    se usa la misma forma "{día} {fecha}" que ya usa Situación 1."""
+    if dias <= 0:
+        return "Hoy"
+    if dias == 1:
+        return "Mañana"
+    if dias == 2:
+        return "Pasado mañana"
+    return f"El {dia_semana} {fecha}"
+
+
+def mensaje_situacion_1(conn: sqlite3.Connection, id_profesional: int, hoy: date) -> str:
+    """Amarillo/Naranja con liquidación NO enviada, botón "Generar texto"
+    (DC-02 §5)."""
+    profesional = _profesional_r(conn, id_profesional)
+    cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or ""
+    dia_semana, fecha, _ = _fecha_y_dia_remanente(conn, hoy)
+    saldo = _moneda(profesional["SaldoCuentaAnterior"] or 0.0)
+    return (
+        "MENSAJE AUTOMATICO\n\n"
+        f"Al día de la fecha se registra un saldo de {saldo} correspondiente al período anterior, por ende se "
+        f"retiene la liquidación para ser enviada el {dia_semana} {fecha} contemplando las nuevas cancelaciones "
+        "que se vayan a realizar desde ahora hasta ese momento con el fin de que en este plazo se regularice la "
+        "situación.\n\n"
+        "Se recuerda que los descuentos por cantidad de horas semanales reservadas se realizan únicamente cuando "
+        "el saldo está al día al momento de comenzar el nuevo mes, y por otro lado los saldos atrasados que "
+        "queden al momento de enviar la nueva liquidación se ajustarán para mantener los mismos actualizados.\n\n"
+        "Por cualquier consulta o duda acerca de lo expresado en este texto responder este mensaje para con "
+        "gusto conversar todas las inquietudes que pudieran existir.\n\n"
+        f"Saludos, {nombre_espacio}."
+    )
+
+
+def mensaje_situacion_2(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:
+    """Amarillo, al activar el check de envío (DC-02 §5)."""
+    profesional = _profesional_r(conn, id_profesional)
+    anio, mes = periodo.split("-")
+    return (
+        f"Hola {nombre_para_mensaje(profesional)}, cómo estás..? Te envío la liquidación del mes de "
+        f"{mes_texto(int(mes))} en forma manual tal cual te había adelantado que iba a hacer luego del mensaje "
+        "que se disparó anteriormente en forma automática. Por cualquier cosa me escribís, saludos..!"
+    )
+
+
+def mensaje_situacion_3(conn: sqlite3.Connection, id_profesional: int, periodo: str, hoy: date) -> str:
+    """Marrón, botón "Generar texto" (al generarlo pasa a amarillo — el
+    llamador es responsable de avisarle a
+    `app.negocio.mensajeria.marcar_mensaje_previo_generado`)."""
+    profesional = _profesional_r(conn, id_profesional)
+    anio, mes = periodo.split("-")
+    dia_semana, fecha, dias = _fecha_y_dia_remanente(conn, hoy)
+    cuando = _cuando_remanente(dias, dia_semana, fecha)
+    saldo = _moneda(profesional["SaldoCuentaAnterior"] or 0.0)
+    return (
+        f"Hola {nombre_para_mensaje(profesional)}, cómo estás? {cuando} se van a mandar los archivos con las "
+        f"liquidaciones de {mes_texto(int(mes))} a los profesionales que están al día con sus saldos, en tu "
+        "caso se va a llegar un mensaje automático en lugar del PDF, esto es porque quedó un saldo pendiente de "
+        f"{saldo} correspondiente al período anterior.\n\n"
+        "Obviamente la diferencia no es significativa, yo luego de ese mensaje te mando el archivo en forma "
+        "manual con los descuentos contemplados como siempre, solo te estoy anticipando esta secuencia para que "
+        "no te sorprenda ya que todo se hace de manera automática.\n\n"
+        "Luego del mensaje te escribo, saludos..!"
+    )
+
+
+def mensaje_situacion_4(conn: sqlite3.Connection, id_profesional: int) -> str:
+    """Rojo con liquidación YA enviada, reactivado desde gris cerca de fin
+    de mes (DC-02 §5)."""
+    profesional = _profesional_r(conn, id_profesional)
+    saldo_mes_en_curso = _moneda(profesional["SaldoCuentaActual"] or 0.0)
+    return (
+        f"Hola {nombre_para_mensaje(profesional)}, cómo estás..? Te recuerdo que en unos días se va a estar "
+        f"cerrando el mes, a este momento el saldo a abonar del mes en curso incluyendo la cuota del plan de "
+        f"pago es de {saldo_mes_en_curso}, tendrías alguna cancelación para informar o para realizar antes de "
+        "que termine el mes?\n\n"
+        "Recordá que no se pueden trasladar importes atrasados al próximo período cuando hay un plan de pagos "
+        "vigente tal cual lo conversamos en su momento. Quedo atento a tu comentario, gracias."
+    )
+
+
+def mensaje_situacion_5(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:
+    """Rojo con liquidación NO enviada (DC-02 §5)."""
+    profesional = _profesional_r(conn, id_profesional)
+    anio, mes = periodo.split("-")
+    saldo = _moneda(profesional["SaldoCuentaAnterior"] or 0.0)
+    return (
+        f"Hola {nombre_para_mensaje(profesional)}, cómo estás..? El mes de {mes_texto(int(mes))} ya se "
+        "encuentra cerrado en base a tu reserva actual, te va a llegar en breve un mensaje automático "
+        "informándote que hay saldos para regularizar en lugar del archivo de la liquidación del mes.\n\n"
+        "Como te informé hace unos días no se pueden trasladar saldos de un mes a otro cuando hay un plan de "
+        f"pagos acordado. El saldo a regularizar es de {saldo}. Quedo atento a tu comentario para estar al "
+        "tanto de como tenés pensado manejar la situación, aguardo tu respuesta, gracias."
+    )
+
+
+def mensaje_envio_liquidacion(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:
+    """Mensaje 4 (DC-03): acompaña el PDF de liquidación. Asignado a
+    verde/violeta/gris (botón) y verde/naranja/rojo/violeta/gris (check)."""
+    _profesional_r(conn, id_profesional)
+    anio, mes = periodo.split("-")
+    return (
+        "MENSAJE AUTOMATICO\n"
+        "(no es necesario responder)\n\n"
+        f"* Se adjunta liquidación correspondiente al mes de {mes_texto(int(mes))}\n"
+        "* Abrir el archivo enseguida de recibirlo para que les quede en el teléfono\n"
+        "* Revisar el contenido, por cualquier duda comunicarse con el administrador"
+    )
+
+
+# ------------------------------------------------------------------- mensaje grupal (Mensaje 3, DC-03)
+
+def _texto_feriados_grupal(feriados: list[sqlite3.Row]) -> str:
+    """"lo correspondiente al {día1} DD/M por ser {tipo1}[, el {día2}...] y
+    el {díaN} DD/M por ser {tipoN}" (DC-03, construcción de la lista de
+    feriados)."""
+    piezas = []
+    for i, f in enumerate(feriados):
+        d = date.fromisoformat(f["Fecha"])
+        prefijo = "al" if i == 0 else "el"
+        piezas.append(f"{prefijo} {DIAS_SEMANA[d.weekday()].lower()} {fecha_corta(f['Fecha'])} por ser {f['Tipo'].lower()}")
+    if len(piezas) == 1:
+        return piezas[0]
+    return f"{', '.join(piezas[:-1])} y {piezas[-1]}"
+
 
 def mensaje_grupal(conn: sqlite3.Connection, periodo_liquidacion: str) -> str:
-    """"LIQUIDACIONES DE {MES SIGUIENTE} - AVISOS VARIOS" (sección 5.4):
-    `periodo_liquidacion` es el mes que se está por cerrar (cuya
-    liquidación se arma y envía "el mes siguiente" a él, según el flujo de
-    avance de mes)."""
+    """Mensaje 3 (DC-03): "LIQUIDACIONES DE {MesSiguienteMAYUS} - AVISOS
+    VARIOS", para el grupo de WhatsApp. `periodo_liquidacion` es el mes que
+    se está por cerrar (cuya liquidación se arma y envía "el mes
+    siguiente" a él, según el flujo de avance de mes)."""
     cfg = conn.execute("SELECT MensajesPlural FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    plural = bool(cfg["MensajesPlural"]) if cfg else True
-    pronombre_verbo = "les avisaremos" if plural else "te avisaré"
+    plural = bool(cfg["MensajesPlural"]) if cfg is None or cfg["MensajesPlural"] is None else bool(cfg["MensajesPlural"])
+    nos_o_me = "nos" if plural else "me"
 
+    anio, mes = (int(p) for p in periodo_liquidacion.split("-"))
+    ultimo_dia = ultimo_dia_mes(anio, mes)
     mes_siguiente = sumar_meses(periodo_liquidacion, 1)
-    mes_siguiente_2 = sumar_meses(periodo_liquidacion, 2)
+    mes_siguiente_mas1 = sumar_meses(periodo_liquidacion, 2)
     anio_sig, mes_sig = (int(p) for p in mes_siguiente.split("-"))
+    primer_dia_siguiente = date(anio_sig, mes_sig, 1)
 
-    feriados = feriados_relevantes_periodo(conn, anio_sig, mes_sig)
     lineas = [
         f"LIQUIDACIONES DE {mes_texto(mes_sig).upper()} - AVISOS VARIOS",
         "",
-        "CIERRE DE RESERVA",
-        "Recordamos que antes de que comience el mes se puede cancelar o ajustar la reserva regular; los "
-        "cambios que no se coordinen se mantienen igual que el mes anterior.",
+        "CIERRE DE RESERVA 👇",
         "",
-        "ENVIO DE LIQUIDACIONES",
-        f"Las liquidaciones de {mes_texto(mes_sig)} se van a enviar dentro de los primeros días del mes.",
+        f"* El {DIAS_SEMANA[ultimo_dia.weekday()].lower()} {fecha_corta(ultimo_dia.isoformat())} cerramos las "
+        f"reservas de {mes_texto(mes_sig)}. Por informes de pago, avisos de vacaciones o por cualquier otra "
+        "cosa relacionada con las reservas escribir por privado hasta ese día inclusive.",
+        "",
+        "ENVIO DE LIQUIDACIONES 👇",
+        "",
+        f"* El {DIAS_SEMANA[primer_dia_siguiente.weekday()].lower()} {fecha_corta(primer_dia_siguiente.isoformat())} "
+        "se enviarán a través de un programa en forma automática las liquidaciones sin otro mensaje "
+        "complementario solo a los profesionales que estén sin saldos pendientes a la fecha.",
+        "* No hace falta responder el mensaje, si se pide abrir en ese momento el archivo para que les quede "
+        "en el teléfono.",
+        "* Dichas liquidaciones contarán con los habituales descuentos por cantidad de horas semanales "
+        "reservadas.",
+        f"* El profesional que tenga alguna duda por su saldo actual puede escribir{nos_o_me} por privado para "
+        f"consultar{nos_o_me} el estado de cuenta.",
     ]
+
+    feriados = feriados_relevantes_periodo(conn, anio_sig, mes_sig)
     if feriados:
-        nombres = [f"el {f['Fecha'].split('-')[2].lstrip('0')} de {mes_texto(mes_sig)}" for f in feriados]
+        esos_ese_dias = "esos días" if len(feriados) > 1 else "ese día"
         lineas += [
             "",
-            f"FERIADOS MES DE {mes_texto(mes_sig).upper()}",
-            f"Este mes hay {'feriados' if len(feriados) > 1 else 'un feriado'} {_lista_con_y(nombres)}, que se "
-            f"{'descuentan' if len(feriados) > 1 else 'descuenta'} al 100% salvo aviso previo. La próxima "
-            f"liquidación, en este caso la de {mes_texto(int(mes_siguiente_2.split('-')[1]))}, {pronombre_verbo} "
-            f"si hay novedades.",
+            f"FERIADOS MES DE {mes_texto(mes_sig).upper()} 👇",
+            "",
+            f"* Se descontará del cálculo de la liquidación lo correspondiente {_texto_feriados_grupal(feriados)} "
+            f"dando por descontado en principio que el profesional no asiste al espacio en {esos_ese_dias}.",
+            f"* El profesional que necesite trabajar en alguno de {esos_ese_dias} {nos_o_me} avisará cerca del "
+            "momento los horarios que pudiera llegar a necesitar para ser asignados, los cuales pueden ser "
+            "distintos a los que habitualmente se tienen reservados.",
+            f"* Las que se coordinen para ser utilizadas en {esos_ese_dias} como siempre se incluirán y "
+            f"detallarán en la próxima liquidación, en este caso la de {mes_texto(int(mes_siguiente_mas1.split('-')[1]))}.",
         ]
     return "\n".join(lineas)
 
@@ -247,18 +311,42 @@ def _edificios_de_llaves_activas(conn: sqlite3.Connection, id_profesional: int) 
     return {f["IdEdificio"] for f in filas}
 
 
+def _incluir_edificio_efectivo(
+    conn: sqlite3.Connection, incluir_edificio: bool, id_profesional: int | None = None,
+) -> bool:
+    """"Regla del edificio" (DC-03, reglas generales — aplica a todos los
+    mensajes): si el espacio tiene un solo edificio se omite SIEMPRE la
+    mención, aunque el control esté tildado; si el profesional tiene
+    llaves de un solo edificio también se omite; si tiene llaves de más
+    de un edificio se fuerza a incluir aunque el control esté destildado.
+    Sin profesional asociado (Mensaje 2, que no está atado a uno en
+    particular) solo aplica el primer nivel."""
+    if conn.execute("SELECT COUNT(*) AS n FROM Edificio").fetchone()["n"] <= 1:
+        return False
+    if id_profesional is not None:
+        edificios = _edificios_de_llaves_activas(conn, id_profesional)
+        if len(edificios) == 1:
+            return False
+        if len(edificios) > 1:
+            return True
+    return incluir_edificio
+
+
 def _lugar_reserva(fila: sqlite3.Row, incluir_consultorio: bool, incluir_unidad: bool, incluir_edificio: bool) -> str:
-    """Sección 5.1: los controles están "encadenados" — si no se incluye
-    el consultorio tampoco tiene sentido mostrar unidad/edificio solos
-    (sin consultorio no queda claro a qué corresponde el importe)."""
-    partes = []
-    if incluir_consultorio:
-        partes.append(f"consul {fila['NumeroConsultorio']}")
-        if incluir_unidad:
-            partes.append(fila["Departamento"])
-        if incluir_edificio:
-            partes.append(fila["NombreEdificio"])
-    return " - ".join(partes)
+    """DC-03: "consul N del {Depto} [- Edificio {nombre}]" — el consultorio
+    y la unidad se unen con la palabra "del"; el edificio, si corresponde,
+    se agrega aparte con " - Edificio {nombre}". Los controles están
+    "encadenados": si no se incluye el consultorio tampoco tiene sentido
+    mostrar unidad/edificio solos (sin consultorio no queda claro a qué
+    corresponde el importe)."""
+    if not incluir_consultorio:
+        return ""
+    texto = f"consul {fila['NumeroConsultorio']}"
+    if incluir_unidad:
+        texto += f" del {fila['Departamento']}"
+    if incluir_edificio:
+        texto += f" - Edificio {fila['NombreEdificio']}"
+    return texto
 
 
 def _lineas_reservas_aisladas(
@@ -306,19 +394,31 @@ def _lineas_reservas_aisladas(
 
         if combinar_distintas_unidades and len(entradas) > 1 and monto_fn:
             total_dia = sum(monto for _, _, monto in entradas)
-            lineas.append(f"{dia_semana} {fecha_corta(fecha)}: {_moneda(total_dia)}")
+            lineas.append(f"+ {dia_semana} {fecha_corta(fecha)}: {_moneda(total_dia)}")
             for horarios, lugar, monto in entradas:
-                sufijo_lugar = f" - {lugar}" if lugar else ""
+                sufijo_lugar = f" {lugar}" if lugar else ""
                 lineas.append(f"  de {horarios}{sufijo_lugar}: {_moneda(monto)}")
             total += total_dia
         else:
             for horarios, lugar, monto in entradas:
-                sufijo_lugar = f" - {lugar}" if lugar else ""
-                sufijo_monto = f": {_moneda(monto)}" if monto is not None else ""
-                lineas.append(f"{dia_semana} {fecha_corta(fecha)} de {horarios}{sufijo_lugar}{sufijo_monto}")
+                sufijo_lugar = f" {lugar}" if lugar else ""
+                sufijo_monto = f" {_moneda(monto)}" if monto is not None else ""
+                lineas.append(f"+ {dia_semana} {fecha_corta(fecha)} de {horarios}{sufijo_lugar}{sufijo_monto}")
                 total += monto or 0.0
 
     return lineas, total
+
+
+def _lugar_llave(fila: sqlite3.Row, incluir_edificio: bool) -> str:
+    """DC-03: línea de depósito/reintegro de llave — "unidad {Depto} [-
+    Edificio {nombre}]" para llaves tipo Unidad; "edificio {nombre}" para
+    llaves tipo Edificio, que ya identifican el edificio sin sufijo aparte."""
+    if fila["TipoLlave"] == "Edificio":
+        return f"edificio {fila['NombreEdificio']}"
+    texto = f"unidad {fila['Departamento']}" if fila["Departamento"] else "unidad"
+    if incluir_edificio and fila["NombreEdificio"]:
+        texto += f" - Edificio {fila['NombreEdificio']}"
+    return texto
 
 
 def mensaje_detalle_reserva_aislada(
@@ -326,22 +426,23 @@ def mensaje_detalle_reserva_aislada(
     incluir_consultorio: bool = True, incluir_unidad: bool = True, incluir_edificio: bool = True,
     combinar_misma_unidad: bool = False, combinar_distintas_unidades: bool = False,
 ) -> str:
-    """"DETALLE RESERVA {MES}" (sección 5.1, categoría A). Por defecto (los
-    dos combinar en False) cada reserva aislada aparece en su propia línea
-    — es el comportamiento pedido, reserva por reserva. Ver
+    """"DETALLE RESERVA {MES}" (DC-03, Mensaje 1, categoría A). Por defecto
+    (los dos combinar en False) cada reserva aislada aparece en su propia
+    línea — es el comportamiento pedido, reserva por reserva. Ver
     `_lineas_reservas_aisladas` para el detalle de qué hace cada combinar.
 
-    "Regla edificio" (si tiene llaves de más de un edificio, se agrega el
-    edificio a cada línea aunque `incluir_edificio` esté en False) se
+    "Regla del edificio" (si tiene llaves de más de un edificio, se agrega
+    el edificio a cada línea aunque `incluir_edificio` esté en False) se
     resuelve mirando las llaves ACTIVAS (sin devolver) del profesional."""
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None:
         raise ValueError(f"No existe el profesional #{id_profesional}")
-    nombre = nombre_para_mensaje(profesional)
     anio, mes = (int(p) for p in periodo.split("-"))
 
-    if len(_edificios_de_llaves_activas(conn, id_profesional)) > 1:
-        incluir_edificio = True
+    incluir_edificio = _incluir_edificio_efectivo(conn, incluir_edificio, id_profesional)
+
+    partes_nombre = [p for p in (profesional["Tratamiento"], profesional["NombrePila"], profesional["Apellido"]) if p]
+    lineas = [f"DETALLE RESERVA {mes_texto(mes).upper()}", " ".join(partes_nombre).upper(), ""]
 
     filas = conn.execute(
         """
@@ -369,45 +470,73 @@ def mensaje_detalle_reserva_aislada(
         monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
         return monto * (1 + recargo_pct / 100) if f["AplicaRecargo"] else monto
 
-    lineas = [f"Hola {nombre}!", "", f"DETALLE RESERVA {mes_texto(mes).upper()}:", ""]
-
+    # 1. depósitos/reintegros de llaves del período: unidad primero, edificio después.
     llaves = conn.execute(
         """
-        SELECT lp.*, l.ValorDepositoActual FROM LlaveProfesional lp JOIN Llave l ON l.IdLlave = lp.IdLlave
+        SELECT lp.*, l.Tipo AS TipoLlave, u.Departamento, e.Nombre AS NombreEdificio
+        FROM LlaveProfesional lp
+        JOIN Llave l ON l.IdLlave = lp.IdLlave
+        LEFT JOIN LlaveAcceso la ON la.IdLlaveAcceso = (
+            SELECT MIN(IdLlaveAcceso) FROM LlaveAcceso WHERE IdLlave = l.IdLlave
+        )
+        LEFT JOIN Unidad u ON u.IdUnidad = la.IdUnidad
+        LEFT JOIN Edificio e ON e.IdEdificio = la.IdEdificio
         WHERE lp.IdProfesional = ? AND (lp.FechaEntrega LIKE ? OR lp.FechaDevolucion LIKE ?)
+        ORDER BY CASE l.Tipo WHEN 'Unidad' THEN 0 WHEN 'Edificio' THEN 1 ELSE 2 END, lp.IdLlaveProfesional
         """,
         (id_profesional, prefijo_mes + "%", prefijo_mes + "%"),
     ).fetchall()
-    for ll in llaves:
-        if ll["FechaEntrega"] and ll["FechaEntrega"].startswith(prefijo_mes) and ll["DepositoCobrado"]:
-            lineas.append(f"Depósito de llave: {_moneda(ll['MontoCobrado'] or ll['ValorDepositoActual'])}")
-        if ll["FechaDevolucion"] and ll["FechaDevolucion"].startswith(prefijo_mes) and ll["DepositoReintegrado"]:
-            lineas.append(f"Reintegro de llave: -{_moneda(ll['MontoReintegrado'] or ll['ValorDepositoActual'])}")
-    if llaves:
-        lineas.append("")
 
+    total_llaves = 0.0
+    for ll in llaves:
+        lugar_llave = _lugar_llave(ll, incluir_edificio)
+        if ll["FechaEntrega"] and ll["FechaEntrega"].startswith(prefijo_mes) and ll["DepositoCobrado"]:
+            monto = ll["MontoCobrado"] or 0.0
+            lineas.append(f"+ Depósito por llave {lugar_llave} {_moneda(monto)}")
+            total_llaves += monto
+        if ll["FechaDevolucion"] and ll["FechaDevolucion"].startswith(prefijo_mes) and ll["DepositoReintegrado"]:
+            monto = ll["MontoReintegrado"] or 0.0
+            lineas.append(f"- Reintegro depósito llave {lugar_llave} {_moneda(-monto)}")
+            total_llaves -= monto
+
+    # 2. reservas del mes con valor, cronológicas.
     lineas_reservas, total_reservas = _lineas_reservas_aisladas(
         del_mes, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
         incluir_edificio=incluir_edificio, combinar_misma_unidad=combinar_misma_unidad,
         combinar_distintas_unidades=combinar_distintas_unidades, monto_fn=_monto,
     )
     lineas += lineas_reservas
-    lineas.append("")
 
+    # 3. saldo pendiente/a favor del mes anterior — se omite si es cero.
     saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
-    lineas.append(f"Saldo anterior: {_moneda(saldo_anterior)}")
+    if saldo_anterior > 0:
+        lineas.append(f"+ Saldo pendiente mes anterior {_moneda(saldo_anterior)}")
+    elif saldo_anterior < 0:
+        lineas.append(f"- Saldo a favor mes anterior {_moneda(-saldo_anterior)}")
 
+    # 4. pagos registrados en el mes en curso: una sola línea con los ajustes ya incluidos
+    # (confirmado por el usuario — sin detalle pago por pago).
     pagos = conn.execute(
         "SELECT * FROM HistorialPagos WHERE IdProfesional = ? AND Fecha LIKE ? ORDER BY Fecha",
         (id_profesional, prefijo_mes + "%"),
     ).fetchall()
-    total_pagos = sum(p["Monto"] for p in pagos if not p["EsAjuste"])
-    total_ajustes = sum(p["Monto"] for p in pagos if p["EsAjuste"])
-    for p in pagos:
-        etiqueta = "Ajuste" if p["EsAjuste"] else "Pago"
-        lineas.append(f"{etiqueta} {fecha_corta(p['Fecha'])}: -{_moneda(p['Monto'])}")
+    total_pagos = sum(p["Monto"] for p in pagos)
+    if pagos:
+        lineas.append(f"- Pagos registrados en mes en curso {_moneda(abs(total_pagos))}")
 
-    saldo_a_abonar = saldo_anterior + total_reservas - total_pagos - total_ajustes
+    # 5. ítem libre opcional: CargoEspecial sin llave asociada (ajustes y bonificación
+    # unificados, decisión confirmada durante la auditoría).
+    items_libres = [
+        c for c in obtener_repositorio(conn, "CargoEspecial").listar(IdProfesional=id_profesional, PeriodoImputado=periodo)
+        if c["IdLlave"] is None
+    ]
+    total_item_libre = 0.0
+    for c in items_libres:
+        signo = "+" if c["Tipo"] == "Débito" else "-"
+        lineas.append(f"{signo} {c['Concepto']} {_moneda(abs(c['Monto']))}")
+        total_item_libre += c["Monto"] if c["Tipo"] == "Débito" else -c["Monto"]
+
+    saldo_a_abonar = saldo_anterior + total_reservas + total_llaves + total_item_libre - total_pagos
     lineas += ["", f"SALDO A ABONAR: {_moneda(saldo_a_abonar)}"]
 
     if posteriores:
@@ -416,15 +545,26 @@ def mensaje_detalle_reserva_aislada(
             incluir_edificio=incluir_edificio, combinar_misma_unidad=combinar_misma_unidad,
             combinar_distintas_unidades=combinar_distintas_unidades,
         )
-        lineas += ["", "RESERVAS POSTERIORES:"] + lineas_posteriores
+        lineas += ["", "RESERVAS POSTERIORES"] + lineas_posteriores
 
     edificios_mencionados: dict[int, sqlite3.Row] = {f["IdEdificio"]: f for f in del_mes + posteriores}
-    if incluir_edificio and edificios_mencionados:
+    if incluir_edificio and len(edificios_mencionados) > 1:
         lineas.append("")
         for e in edificios_mencionados.values():
             lineas.append(f"* Edificio {e['NombreEdificio']}: Corresponde a {e['Domicilio']}, {e['DomicilioLocalidad']}")
 
-    lineas += ["", "* Los sobres con el pago en efectivo se dejan en la recepción a nombre del espacio."]
+    pagos_sobre = [p for p in pagos if p["MedioPago"] == "Sobre en buzón" and p["FechaHoraRecogidaSobres"]]
+    if pagos_sobre:
+        ultimo = max(pagos_sobre, key=lambda p: p["FechaHoraRecogidaSobres"])
+        dt = datetime.fromisoformat(ultimo["FechaHoraRecogidaSobres"])
+        dia_semana = fecha_a_dia_semana(dt.date()).lower()
+        hora = hora_fmt(dt.hour + dt.minute / 60)
+        lineas += [
+            "",
+            f"* Nota: Se imputaron los pagos de los sobres recogidos en las unidades hasta el "
+            f"{dia_semana} {dt.day}/{dt.month} a las {hora}.",
+        ]
+
     return "\n".join(lineas)
 
 
@@ -458,6 +598,7 @@ def mensaje_disponibilidad_horarios(
     para cubrir todo el horario pedido, cada tramo se lista aparte con
     guión indentado debajo del día (sección 5.2: "combinación con punto y
     guión indentado")."""
+    incluir_edificio = _incluir_edificio_efectivo(conn, incluir_edificio)
     anio, mes = (int(p) for p in periodo.split("-"))
     pedido = {
         "Dias": json.dumps(dias), "HorarioDesde": horario_desde, "HorarioHasta": horario_hasta,
@@ -491,13 +632,13 @@ def mensaje_disponibilidad_horarios(
         if len(tramos) == 1:
             t = tramos[0]
             lugar = _lugar_reserva(consultorios[t.id_consultorio], incluir_consultorio, incluir_unidad, incluir_edificio)
-            sufijo = f" - {lugar}" if lugar else ""
+            sufijo = f" {lugar}" if lugar else ""
             lineas.append(f"· {dia} de {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)}{sufijo}")
         else:
             lineas.append(f"· {dia}:")
             for t in tramos:
                 lugar = _lugar_reserva(consultorios[t.id_consultorio], incluir_consultorio, incluir_unidad, incluir_edificio)
-                sufijo = f" - {lugar}" if lugar else ""
+                sufijo = f" {lugar}" if lugar else ""
                 lineas.append(f"  - {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)}{sufijo}")
     return "\n".join(lineas)
 
