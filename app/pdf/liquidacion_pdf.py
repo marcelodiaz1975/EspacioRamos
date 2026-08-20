@@ -64,7 +64,7 @@ from app.pdf.valores_pdf import (
 from app.repositorio.registro import obtener_repositorio
 
 
-def _nombre_archivo(periodo: str, profesional: sqlite3.Row) -> str:
+def nombre_archivo_liquidacion(periodo: str, profesional: sqlite3.Row) -> str:
     tratamiento = profesional["Tratamiento"] or ""
     nombre = profesional["NombrePila"] or ""
     apellido = profesional["Apellido"]
@@ -656,6 +656,6 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
 
         return story
 
-    ruta = os.path.join(directorio, _nombre_archivo(liquidacion.periodo, profesional))
+    ruta = os.path.join(directorio, nombre_archivo_liquidacion(liquidacion.periodo, profesional))
     construir_sin_saltos(ruta, _construir_story, altura)
     return ruta

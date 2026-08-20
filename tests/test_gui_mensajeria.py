@@ -5,8 +5,10 @@ from PySide6.QtWidgets import QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.mensajeria import CentroMensajeria
+from app.negocio.archivos_generados import carpeta_profesional
 from app.negocio.dias import periodo_actual
 from app.negocio.pagos import crear_plan_pago
+from app.pdf.liquidacion_pdf import nombre_archivo_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -417,3 +419,151 @@ def test_tildar_combinar_misma_unidad_actualiza_el_mensaje(qtbot, conn):
     pantalla.tabla.cellWidget(0, 5).click()
 
     assert "y de 14 a 16hs" in pantalla.texto_mensaje.toPlainText()
+
+
+# ------------------------------------------------------ deshacer última acción
+
+def test_deshacer_sin_acciones_no_rompe(qtbot, conn):
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._deshacer_ultima_accion()  # no debe lanzar
+
+
+def test_deshacer_marcar_enviada_sin_pdf_previo_borra_el_generado(qtbot, conn):
+    _crear_profesional(conn, saldo=0, codigo="R1")  # verde
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    liquidacion = obtener_repositorio(conn, "LiquidacionEmitida").listar()[0]
+    ruta = carpeta_profesional(conn, "R1") / liquidacion["NombreArchivo"]
+    assert ruta.exists()
+
+    pantalla._deshacer_ultima_accion()
+
+    assert obtener_repositorio(conn, "LiquidacionEmitida").listar() == []
+    assert not ruta.exists()
+    _set_filtro(pantalla, "todos")
+    assert "Verde" in pantalla.tabla.item(0, 2).text()
+    assert pantalla.tabla.item(0, 4).checkState() == Qt.CheckState.Unchecked
+
+
+def test_deshacer_marcar_enviada_restaura_el_pdf_previo(qtbot, conn):
+    id_prof = _crear_profesional(conn, saldo=0, codigo="R1")
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    periodo = periodo_actual(conn)
+    ruta = carpeta_profesional(conn, "R1") / nombre_archivo_liquidacion(periodo, profesional)
+    ruta.write_bytes(b"PDF-VIEJO")
+
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    assert ruta.read_bytes() != b"PDF-VIEJO"
+
+    pantalla._deshacer_ultima_accion()
+
+    assert ruta.read_bytes() == b"PDF-VIEJO"
+    assert obtener_repositorio(conn, "LiquidacionEmitida").listar() == []
+
+
+def test_deshacer_marcar_enviada_restaura_saldo_actual(qtbot, conn):
+    id_prof = _crear_profesional(conn, saldo=0, codigo="R1")
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaActual=1234)
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    pantalla._deshacer_ultima_accion()
+
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    assert profesional["SaldoCuentaActual"] == 1234
+
+
+def test_deshacer_marcar_enviada_violeta_restaura_plazo_extendido(qtbot, conn):
+    id_prof = _crear_profesional(conn, saldo=10000, codigo="R1")
+    obtener_repositorio(conn, "Profesional").actualizar(
+        id_prof, PlazoPagoExtendido="2099-01-01", MotivoPlazoExtra="Prometido",
+    )
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    assert profesional["PlazoPagoExtendido"] is None
+
+    pantalla._deshacer_ultima_accion()
+
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    assert profesional["PlazoPagoExtendido"] == "2099-01-01"
+    assert profesional["MotivoPlazoExtra"] == "Prometido"
+
+
+def test_deshacer_desmarcar_enviada_la_vuelve_a_marcar(qtbot, conn):
+    id_profesional = _crear_profesional(conn, saldo=0, codigo="R1")
+    periodo = periodo_actual(conn)
+    id_liquidacion = obtener_repositorio(conn, "LiquidacionEmitida").crear(
+        IdProfesional=id_profesional, Periodo=periodo, EstadoEnvio="Enviada",
+    )
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Unchecked)
+    assert obtener_repositorio(conn, "LiquidacionEmitida").obtener(id_liquidacion)["EstadoEnvio"] == "No enviada"
+
+    pantalla._deshacer_ultima_accion()
+
+    assert obtener_repositorio(conn, "LiquidacionEmitida").obtener(id_liquidacion)["EstadoEnvio"] == "Enviada"
+
+
+def test_deshacer_generar_texto_marron_vuelve_a_marron(qtbot, conn):
+    _crear_profesional(conn, saldo=1, codigo="R1")  # dentro de tolerancia -> marrón
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    pantalla.tabla.cellWidget(0, 5).click()
+    assert "Amarillo" in pantalla.tabla.item(0, 2).text()
+
+    pantalla._deshacer_ultima_accion()
+
+    assert "Marrón" in pantalla.tabla.item(0, 2).text()
+
+
+def test_deshacer_generar_texto_aislada_vuelve_a_celeste(qtbot, conn):
+    _crear_profesional(conn, categoria="A", apellido="Aislada", codigo="A1")
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "aisladas")
+
+    pantalla.tabla.cellWidget(0, 5).click()
+    assert "Azul" in pantalla.tabla.item(0, 2).text()
+
+    pantalla._deshacer_ultima_accion()
+
+    assert "Celeste" in pantalla.tabla.item(0, 2).text()
+
+
+def test_generar_texto_sin_mutacion_no_deja_nada_para_deshacer(qtbot, conn):
+    """Generar el texto de un color que no dispara ninguna transición de
+    estado (verde) no debe dejar disponible una acción anterior más
+    vieja para deshacer -> "última acción" es literal, la más reciente."""
+    _crear_profesional(conn, saldo=0, codigo="R1")  # verde
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    pantalla.tabla.item(0, 4).setCheckState(Qt.CheckState.Checked)  # acción mutante
+    assert pantalla._ultima_accion is not None
+
+    _set_filtro(pantalla, "todos")
+    pantalla.tabla.cellWidget(0, 5).click()  # generar texto de gris: no muta nada
+    assert pantalla._ultima_accion is None
+
+    pantalla._deshacer_ultima_accion()  # no debe revertir la marca como enviada
+    assert obtener_repositorio(conn, "LiquidacionEmitida").listar()[0]["EstadoEnvio"] == "Enviada"

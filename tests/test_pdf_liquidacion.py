@@ -9,8 +9,8 @@ from app.pdf.liquidacion_pdf import (
     _consultorios_y_horas,
     _items_cuenta,
     _mapa_consultorios,
-    _nombre_archivo,
     generar_pdf_liquidacion,
+    nombre_archivo_liquidacion,
 )
 from app.pdf.numeros_en_letras import en_letras_pesos, monto_en_letras
 from app.repositorio.registro import obtener_repositorio
@@ -52,7 +52,7 @@ def profesional(conn, consultorio):
 
 def test_nombre_archivo_sigue_el_formato_del_documento(conn, profesional):
     prof = obtener_repositorio(conn, "Profesional").obtener(profesional)
-    assert _nombre_archivo("2026-08", prof) == "2026-08 - Liquidación Lic. Marcela Lo Veci.pdf"
+    assert nombre_archivo_liquidacion("2026-08", prof) == "2026-08 - Liquidación Lic. Marcela Lo Veci.pdf"
 
 
 def test_items_cuenta_respeta_el_orden_de_dc01(conn, profesional):
