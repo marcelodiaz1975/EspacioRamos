@@ -94,6 +94,27 @@ def test_items_cuenta_saldo_anterior_negativo_dice_a_favor(conn, profesional):
     assert items[3][0] == "Saldo a favor del profesional de la liquidación anterior"
 
 
+def test_items_cuenta_agrupa_deposito_llave_antes_del_item_libre(conn, profesional):
+    from app.negocio.pagos import crear_cargo_especial
+
+    id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave portón", Tipo="Edificio")
+    # se cargan a propósito en orden inverso al que deberían quedar en el PDF
+    crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Débito", concepto="Bonificación acordada", monto=200,
+        periodo_imputado=PERIODO,
+    )
+    crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Débito", concepto="Depósito llave portón", monto=1000,
+        periodo_imputado=PERIODO, id_llave=id_llave,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    conceptos = [c for c, _, _ in items]
+    idx_llave = conceptos.index("Depósito llave portón")
+    idx_libre = conceptos.index("Bonificación acordada")
+    assert idx_llave < idx_libre
+
+
 def test_monto_en_letras_casos_basicos():
     assert monto_en_letras(0) == "Pesos cero con 00/100"
     assert monto_en_letras(21) == "Pesos veintiuno con 00/100"

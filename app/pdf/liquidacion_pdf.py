@@ -232,9 +232,14 @@ def _items_cuenta(
 ) -> list[tuple[str, float, bool]]:
     """(concepto, importe, es_subtotal) — DC-01 §1.10, con la redacción del
     modelo real: sin prefijos de categoría genéricos para cargos
-    especiales (se muestra el Concepto tal cual se cargó). Los ítems de
-    `descuento_licencias` deben traer ya colgado `.nombre_tipo` (ver
-    `generar_pdf_liquidacion`, que lo resuelve una sola vez)."""
+    especiales (se muestra el Concepto tal cual se cargó). Dentro de
+    cargos especiales, depósito/reintegro de llave (IdLlave) se agrupa
+    antes que el ítem libre (ajustes y bonificación unificados, sin llave
+    asociada) en vez de aparecer intercalados por orden de carga — mismo
+    criterio de separación que ya usa el Mensaje 1 de WhatsApp
+    (`mensajes.py`). Los ítems de `descuento_licencias` deben traer ya
+    colgado `.nombre_tipo` (ver `generar_pdf_liquidacion`, que lo resuelve
+    una sola vez)."""
     items: list[tuple[str, float, bool]] = []
     items.append((f"Importe bruto correspondiente a la reserva regular de {mes_actual_texto}", liquidacion.bruto, False))
     concepto_desc = (
@@ -293,7 +298,17 @@ def _items_cuenta(
         items.append((_texto_aislada(consultorios, item, "a trabajar", mes_actual_texto), item.monto, False))
     if liquidacion.ajuste_saldo_atrasado:
         items.append(("Ajuste por saldo atrasado", liquidacion.ajuste_saldo_atrasado, False))
+    # Depósito/reintegro de llave (IdLlave) primero, item libre (ajustes y
+    # bonificación unificados, sin llave asociada) después — mismo criterio
+    # de separación que ya usa el Mensaje 1 de WhatsApp (mensajes.py).
     for c in liquidacion.cargos_especiales:
+        if c["IdLlave"] is None:
+            continue
+        signo = 1 if c["Tipo"] == "Débito" else -1
+        items.append((c["Concepto"], signo * c["Monto"], False))
+    for c in liquidacion.cargos_especiales:
+        if c["IdLlave"] is not None:
+            continue
         signo = 1 if c["Tipo"] == "Débito" else -1
         items.append((c["Concepto"], signo * c["Monto"], False))
     for c in liquidacion.cuotas_plan:

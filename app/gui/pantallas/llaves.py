@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.crud_generico import Campo, PantallaCRUD
 from app.negocio.listas_editables import opciones_lista
-from app.negocio.llaves import devolver_llave, entregar_llave
+from app.negocio.llaves import agregar_acceso_llave, devolver_llave, entregar_llave
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -148,7 +148,11 @@ class PantallaLlaves(QWidget):
         dialogo = _DialogoAcceso(self.conn, self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
-        obtener_repositorio(self.conn, "LlaveAcceso").crear(IdLlave=id_llave, **dialogo.valores())
+        try:
+            agregar_acceso_llave(self.conn, id_llave=id_llave, **dialogo.valores())
+        except ValueError as error:
+            QMessageBox.warning(self, "Agregar acceso", str(error))
+            return
         self.conn.commit()
         self._actualizar_accesos()
 
@@ -292,9 +296,9 @@ class _DialogoAcceso(QDialog):
 
     def valores(self) -> dict:
         return {
-            "IdEdificio": self.combo_edificio.currentData(),
-            "IdUnidad": self.combo_unidad.currentData(),
-            "DescripcionAcceso": self.campo_descripcion.text().strip() or None,
+            "id_edificio": self.combo_edificio.currentData(),
+            "id_unidad": self.combo_unidad.currentData(),
+            "descripcion_acceso": self.campo_descripcion.text().strip() or None,
         }
 
 

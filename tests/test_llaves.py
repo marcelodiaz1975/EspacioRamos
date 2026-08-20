@@ -2,7 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.llaves import crear_llave, devolver_llave, entregar_llave
+from app.negocio.llaves import agregar_acceso_llave, crear_llave, devolver_llave, entregar_llave
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -17,6 +17,15 @@ def conn(tmp_path):
 @pytest.fixture
 def profesional(conn):
     return obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
+
+
+@pytest.fixture
+def edificios(conn):
+    repo = obtener_repositorio(conn, "Edificio")
+    return (
+        repo.crear(Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", DomicilioLocalidad="CABA"),
+        repo.crear(Nombre="Ramos 2", Domicilio="Av. Rivadavia 5678", DomicilioLocalidad="CABA"),
+    )
 
 
 def test_entregar_llave_sin_deposito(conn, profesional):
@@ -104,3 +113,50 @@ def test_devolver_llave_ya_devuelta_falla(conn, profesional):
 
     with pytest.raises(ValueError):
         devolver_llave(conn, id_entrega, fecha_devolucion="2026-08-20")
+
+
+def test_llave_tipo_edificio_no_puede_tener_acceso_a_dos_edificios_distintos(conn, edificios):
+    id_edificio_1, id_edificio_2 = edificios
+    id_llave = crear_llave(conn, tipo="Edificio")
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_1)
+
+    with pytest.raises(ValueError):
+        agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_2)
+
+
+def test_llave_tipo_edificio_admite_varios_accesos_al_mismo_edificio(conn, edificios):
+    id_edificio_1, _ = edificios
+    id_unidad_1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento='1ro "A"')
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento='2do "B"')
+    id_llave = crear_llave(conn, tipo="Edificio")
+
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_1, id_unidad=id_unidad_1)
+    id_acceso_2 = agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_1, id_unidad=id_unidad_2)
+
+    assert id_acceso_2 is not None
+
+
+def test_llave_tipo_unidad_necesita_una_unidad_puntual(conn, edificios):
+    id_edificio_1, _ = edificios
+    id_llave = crear_llave(conn, tipo="Unidad")
+
+    with pytest.raises(ValueError):
+        agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_1)
+
+
+def test_llave_tipo_unidad_con_unidad_puntual_se_agrega_bien(conn, edificios):
+    id_edificio_1, _ = edificios
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento='7mo "L"')
+    id_llave = crear_llave(conn, tipo="Unidad")
+
+    id_acceso = agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_1, id_unidad=id_unidad)
+    assert id_acceso is not None
+
+
+def test_llave_tipo_no_especificada_no_valida_alcance(conn, edificios):
+    id_edificio_1, id_edificio_2 = edificios
+    id_llave = crear_llave(conn, tipo="No especificada")
+
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_1)
+    id_acceso = agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_2)
+    assert id_acceso is not None

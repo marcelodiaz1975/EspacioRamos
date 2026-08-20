@@ -27,6 +27,35 @@ def crear_llave(
     return repo.crear(Descripcion=descripcion, Tipo=tipo, ValorDepositoActual=valor_deposito_actual, Activo=1)
 
 
+def agregar_acceso_llave(
+    conn: sqlite3.Connection, *, id_llave: int, id_edificio: int, id_unidad: int | None = None,
+    descripcion_acceso: str | None = None,
+) -> int:
+    """Sección 3.7: valida el alcance según el Tipo de la llave antes de
+    agregar el acceso (LlaveAcceso). Una llave de Tipo Edificio abre un
+    solo edificio — no puede tener accesos a más de uno distinto. Una de
+    Tipo Unidad apunta a una unidad puntual — "todas las unidades del
+    edificio" (IdUnidad NULL) no tiene sentido para ese tipo. Tipo No
+    especificada no valida nada (alcance libre)."""
+    llave = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    if llave is None:
+        raise ValueError(f"No existe la llave #{id_llave}")
+
+    if llave["Tipo"] == "Edificio":
+        edificios_actuales = {a["IdEdificio"] for a in obtener_repositorio(conn, "LlaveAcceso").listar(IdLlave=id_llave)}
+        if edificios_actuales and edificios_actuales != {id_edificio}:
+            raise ValueError(
+                "Una llave de Tipo Edificio solo puede dar acceso a un edificio; "
+                "esta ya tiene un acceso configurado a otro distinto"
+            )
+    elif llave["Tipo"] == "Unidad" and id_unidad is None:
+        raise ValueError('Una llave de Tipo Unidad necesita una unidad puntual, no "todas las unidades"')
+
+    return obtener_repositorio(conn, "LlaveAcceso").crear(
+        IdLlave=id_llave, IdEdificio=id_edificio, IdUnidad=id_unidad, DescripcionAcceso=descripcion_acceso,
+    )
+
+
 def _titular_actual(conn: sqlite3.Connection, id_llave: int) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM LlaveProfesional WHERE IdLlave = ? AND FechaDevolucion IS NULL", (id_llave,)
