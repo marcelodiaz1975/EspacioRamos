@@ -217,6 +217,8 @@ class CentroMensajeria(QWidget):
         fila_acciones.addStretch()
         layout_derecho.addLayout(fila_acciones)
         splitter.addWidget(panel_derecho)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
         layout.addWidget(splitter, stretch=1)
 
         self.campo_periodo.setText(periodo_actual(self.conn))
