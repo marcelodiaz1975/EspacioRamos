@@ -30,12 +30,17 @@ from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
 from app.negocio.pagos import (
+    abrir_tanda_sobres,
     cancelar_plan,
+    cerrar_tanda_sobres,
     crear_plan_pago,
     programar_refinanciacion,
     refinanciar_plan,
     registrar_pago,
+    subtotal_tanda_sobres,
     suspender_descuento_periodo,
+    tanda_sobres_abierta,
+    tanda_sobres_es_de_otro_dia,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -104,7 +109,7 @@ class _PanelRegistrarPago(QWidget):
         self.combo_medio_pago.setEditable(True)
         for valor in valores_lista(self.conn, "MedioPago"):
             self.combo_medio_pago.addItem(valor)
-        self.combo_medio_pago.currentTextChanged.connect(self._actualizar_visibilidad_cuenta_receptora)
+        self.combo_medio_pago.currentTextChanged.connect(self._actualizar_visibilidad_segun_medio_pago)
         form.addWidget(QLabel("Medio de pago"))
         form.addWidget(self.combo_medio_pago)
 
@@ -115,7 +120,13 @@ class _PanelRegistrarPago(QWidget):
             self.combo_cuenta_receptora.addItem(valor)
         form.addWidget(self.etiqueta_cuenta_receptora)
         form.addWidget(self.combo_cuenta_receptora)
-        self._actualizar_visibilidad_cuenta_receptora()
+
+        self.etiqueta_recogida_sobres = QLabel("Fecha y hora de recogida de sobres")
+        self.campo_recogida_sobres = QLineEdit()
+        self.campo_recogida_sobres.setPlaceholderText("AAAA-MM-DDTHH:MM")
+        form.addWidget(self.etiqueta_recogida_sobres)
+        form.addWidget(self.campo_recogida_sobres)
+        self._actualizar_visibilidad_segun_medio_pago()
 
         self.campo_periodo = QLineEdit()
         self.campo_periodo.setPlaceholderText("AAAA-MM (a qué período se imputa)")
@@ -129,6 +140,19 @@ class _PanelRegistrarPago(QWidget):
         boton.setObjectName("botonPrimario")
         boton.clicked.connect(self._registrar)
         form.addWidget(boton)
+
+        form.addWidget(QLabel("Tanda de sobres"))
+        self.etiqueta_tanda = QLabel()
+        form.addWidget(self.etiqueta_tanda)
+        fila_tanda = QHBoxLayout()
+        boton_iniciar_tanda = QPushButton("Iniciar tanda")
+        boton_iniciar_tanda.clicked.connect(self._iniciar_tanda)
+        boton_cerrar_tanda = QPushButton("Cerrar tanda")
+        boton_cerrar_tanda.clicked.connect(self._cerrar_tanda)
+        fila_tanda.addWidget(boton_iniciar_tanda)
+        fila_tanda.addWidget(boton_cerrar_tanda)
+        form.addLayout(fila_tanda)
+
         form.addStretch()
         splitter.addWidget(panel_form)
 
@@ -143,13 +167,35 @@ class _PanelRegistrarPago(QWidget):
         layout.addWidget(splitter)
 
         self.campo_fecha.setText(fecha_actual(self.conn).isoformat())
+        self._precargar_recogida_sobres()
 
-    def _actualizar_visibilidad_cuenta_receptora(self, *_args) -> None:
-        """Sección 3.6: CuentaReceptora "solo para transferencias" — se
-        oculta salvo que el medio de pago elegido sea una transferencia."""
+    def _es_sobre(self) -> bool:
+        return "sobre" in self.combo_medio_pago.currentText().lower()
+
+    def _actualizar_visibilidad_segun_medio_pago(self, *_args) -> None:
+        """Sección 3.6: CuentaReceptora "solo para transferencias"; la
+        fecha y hora de recogida de sobres solo tiene sentido para pagos
+        por sobre en buzón (DC-08 §5.2/§5.3)."""
         es_transferencia = "transferencia" in self.combo_medio_pago.currentText().lower()
         self.etiqueta_cuenta_receptora.setVisible(es_transferencia)
         self.combo_cuenta_receptora.setVisible(es_transferencia)
+        es_sobre = self._es_sobre()
+        self.etiqueta_recogida_sobres.setVisible(es_sobre)
+        self.campo_recogida_sobres.setVisible(es_sobre)
+
+    def _precargar_recogida_sobres(self) -> None:
+        cfg = self.conn.execute(
+            "SELECT FechaHoraRecogidaSobres FROM Configuracion WHERE IdConfiguracion = 1"
+        ).fetchone()
+        self.campo_recogida_sobres.setText((cfg["FechaHoraRecogidaSobres"] if cfg else None) or "")
+
+    def _actualizar_etiqueta_tanda(self) -> None:
+        apertura = tanda_sobres_abierta(self.conn)
+        if apertura is None:
+            self.etiqueta_tanda.setText("Sin tanda abierta.")
+            return
+        subtotal = subtotal_tanda_sobres(self.conn, apertura)
+        self.etiqueta_tanda.setText(f"Tanda abierta desde {apertura} — subtotal: $ {subtotal:,.2f}")
 
     def actualizar(self) -> None:
         registros = obtener_repositorio(self.conn, "HistorialPagos").listar()
@@ -164,6 +210,7 @@ class _PanelRegistrarPago(QWidget):
             self.tabla.setItem(i, 4, QTableWidgetItem(r["CuentaReceptora"] or ""))
             self.tabla.setItem(i, 5, QTableWidgetItem(r["PeriodoImputado"] or ""))
         self.tabla.resizeColumnsToContents()
+        self._actualizar_etiqueta_tanda()
 
     def _registrar(self) -> None:
         monto = self.spin_monto.value()
@@ -175,6 +222,9 @@ class _PanelRegistrarPago(QWidget):
             return
         id_profesional = self.combo_profesional.currentData()
         es_transferencia = "transferencia" in self.combo_medio_pago.currentText().lower()
+        es_sobre = self._es_sobre()
+        recogida_sobres = self.campo_recogida_sobres.text().strip() or None if es_sobre else None
+        apertura_buzon = tanda_sobres_abierta(self.conn) if es_sobre else None
         try:
             _id_pago, cruza_tolerancia = registrar_pago(
                 self.conn, id_profesional=id_profesional, monto=monto,
@@ -183,6 +233,7 @@ class _PanelRegistrarPago(QWidget):
                 cuenta_receptora=self.combo_cuenta_receptora.currentText().strip() if es_transferencia else None,
                 periodo_imputado=periodo_imputado,
                 es_ajuste=self.casilla_ajuste.isChecked(),
+                fecha_hora_recogida_sobres=recogida_sobres, fecha_hora_apertura_buzon=apertura_buzon,
             )
         except ValueError as error:
             QMessageBox.warning(self, "Registrar pago", str(error))
@@ -191,8 +242,32 @@ class _PanelRegistrarPago(QWidget):
             self._preguntar_restablecer_descuento(id_profesional, periodo_imputado)
         if periodo_imputado and periodo_imputado < periodo_actual(self.conn):
             regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_imputado)
+        if es_sobre and recogida_sobres:
+            obtener_repositorio(self.conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres=recogida_sobres)
         self.conn.commit()
         self.actualizar()
+
+    def _iniciar_tanda(self) -> None:
+        if tanda_sobres_es_de_otro_dia(self.conn):
+            respuesta = QMessageBox.question(
+                self, "Tanda de sobres",
+                "Hay una tanda abierta de otro día. ¿Querés mantenerla en vez de empezar una nueva?",
+            )
+            if respuesta == QMessageBox.StandardButton.Yes:
+                return
+        elif tanda_sobres_abierta(self.conn) is not None:
+            QMessageBox.information(self, "Tanda de sobres", "Ya hay una tanda abierta hoy.")
+            return
+        abrir_tanda_sobres(self.conn)
+        self.conn.commit()
+        self._actualizar_etiqueta_tanda()
+
+    def _cerrar_tanda(self) -> None:
+        if tanda_sobres_abierta(self.conn) is None:
+            return
+        cerrar_tanda_sobres(self.conn)
+        self.conn.commit()
+        self._actualizar_etiqueta_tanda()
 
     def _preguntar_restablecer_descuento(self, id_profesional: int, periodo_imputado: str) -> None:
         """DC-06 §5.2: el saldo del mes anterior volvió a estar dentro de

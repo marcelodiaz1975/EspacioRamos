@@ -578,5 +578,16 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     RutaLogo TEXT,
     CarpetaBaseArchivos TEXT,
     CarpetaBackup TEXT,
-    ModoOscuro INTEGER NOT NULL DEFAULT 0
+    ModoOscuro INTEGER NOT NULL DEFAULT 0,
+    -- Tanda de sobres y recogida de sobres (DC-08 §5.2/§5.3, aclarado en
+    -- conversación). FechaHoraRecogidaSobres es el valor por defecto que se
+    -- precarga al registrar un pago (HistorialPagos ya tiene su propia
+    -- columna del mismo nombre por pago; acá se guarda el último valor
+    -- usado). TandaSobresApertura identifica la tanda abierta actual: los
+    -- pagos por sobre que se registran mientras está abierta comparten ese
+    -- mismo valor en HistorialPagos.FechaHoraAperturaBuzon, que es lo que
+    -- permite sumar el subtotal en vivo sin necesitar una tabla aparte.
+    FechaHoraRecogidaSobres TEXT,
+    TandaSobresAbierta INTEGER NOT NULL DEFAULT 0,
+    TandaSobresApertura TEXT
 );

@@ -218,6 +218,78 @@ def test_cuenta_receptora_se_oculta_salvo_transferencia(qtbot, conn):
     assert panel.combo_cuenta_receptora.isHidden() is False
 
 
+def test_recogida_sobres_se_oculta_salvo_sobre_en_buzon(qtbot, conn):
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+
+    panel.combo_medio_pago.setCurrentText("Transferencia a cta Marcelo")
+    assert panel.campo_recogida_sobres.isHidden() is True
+
+    panel.combo_medio_pago.setCurrentText("Sobre en buzón")
+    assert panel.campo_recogida_sobres.isHidden() is False
+
+
+def test_recogida_sobres_se_precarga_desde_configuracion_y_se_actualiza(qtbot, conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres="2026-08-01T10:00")
+    _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    assert panel.campo_recogida_sobres.text() == "2026-08-01T10:00"
+
+    panel.combo_medio_pago.setCurrentText("Sobre en buzón")
+    panel.spin_monto.setValue(500)
+    panel.campo_recogida_sobres.setText("2026-08-15T09:30")
+    panel._registrar()
+
+    pago = conn.execute("SELECT FechaHoraRecogidaSobres FROM HistorialPagos").fetchone()
+    assert pago["FechaHoraRecogidaSobres"] == "2026-08-15T09:30"
+    cfg = obtener_repositorio(conn, "Configuracion").obtener(1)
+    assert cfg["FechaHoraRecogidaSobres"] == "2026-08-15T09:30"
+
+
+def test_iniciar_y_cerrar_tanda_de_sobres(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    assert panel.etiqueta_tanda.text() == "Sin tanda abierta."
+
+    panel._iniciar_tanda()
+    assert "Tanda abierta desde" in panel.etiqueta_tanda.text()
+
+    panel.combo_medio_pago.setCurrentText("Sobre en buzón")
+    panel.spin_monto.setValue(700)
+    panel._registrar()
+    assert "700" in panel.etiqueta_tanda.text() or "700,00" in panel.etiqueta_tanda.text()
+
+    panel._cerrar_tanda()
+    assert panel.etiqueta_tanda.text() == "Sin tanda abierta."
+
+
+def test_iniciar_tanda_de_otro_dia_pregunta_mantener_o_nueva(qtbot, conn, monkeypatch):
+    _crear_profesional(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15', "
+        "TandaSobresAbierta = 1, TandaSobresApertura = '2026-08-14T18:00:00' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel._iniciar_tanda()  # mantiene la vieja
+    cfg = obtener_repositorio(conn, "Configuracion").obtener(1)
+    assert cfg["TandaSobresApertura"] == "2026-08-14T18:00:00"
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._iniciar_tanda()  # arranca una nueva
+    cfg = obtener_repositorio(conn, "Configuracion").obtener(1)
+    assert cfg["TandaSobresApertura"] != "2026-08-14T18:00:00"
+
+
 def test_crear_plan_de_pagos_persiste_y_genera_cuotas(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaPagos(conn)

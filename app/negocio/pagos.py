@@ -34,6 +34,7 @@ def registrar_pago(
     medio_pago: str | None = None, cuenta_receptora: str | None = None,
     periodo_imputado: str | None = None, es_ajuste: bool = False, observacion: str | None = None,
     fecha_transferencia: str | None = None, hora_transferencia: str | None = None,
+    fecha_hora_recogida_sobres: str | None = None, fecha_hora_apertura_buzon: str | None = None,
 ) -> tuple[int, bool]:
     """Registra un pago recibido. Si se imputa a un período anterior al mes
     en curso descuenta de SaldoCuentaAnterior (DC-09 §8); si no, descuenta
@@ -54,6 +55,7 @@ def registrar_pago(
         CuentaReceptora=cuenta_receptora, FechaHoraCarga=datetime.now().isoformat(timespec="seconds"),
         FechaTransferencia=fecha_transferencia, HoraTransferencia=hora_transferencia,
         PeriodoImputado=periodo_imputado, EsAjuste=int(es_ajuste), Observacion=observacion,
+        FechaHoraRecogidaSobres=fecha_hora_recogida_sobres, FechaHoraAperturaBuzon=fecha_hora_apertura_buzon,
     )
 
     es_mes_anterior = bool(periodo_imputado) and periodo_imputado < periodo_actual(conn)
@@ -70,6 +72,63 @@ def registrar_pago(
         tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
         cruza_tolerancia = saldo_previo > tolerancia >= nuevo_saldo
     return id_pago, cruza_tolerancia
+
+
+# --------------------------------------------------------------- tanda de sobres (DC-08 §5.3)
+#
+# Una "tanda" no tiene tabla propia: se identifica por su FechaHoraApertura
+# (el momento en que se abrió), guardada en Configuracion mientras está
+# abierta. Cada pago por sobre registrado durante esa tanda guarda el mismo
+# valor en HistorialPagos.FechaHoraAperturaBuzon, que es lo que permite
+# sumar el subtotal en vivo sin necesitar una tabla aparte ni un ID: dos
+# pagos "pertenecen a la misma tanda" si comparten esa marca de tiempo.
+
+def tanda_sobres_abierta(conn: sqlite3.Connection) -> str | None:
+    """Fecha y hora de apertura de la tanda actual, o None si no hay
+    ninguna abierta."""
+    cfg = conn.execute(
+        "SELECT TandaSobresAbierta, TandaSobresApertura FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    if cfg and cfg["TandaSobresAbierta"]:
+        return cfg["TandaSobresApertura"]
+    return None
+
+
+def abrir_tanda_sobres(conn: sqlite3.Connection) -> str:
+    """Abre una tanda nueva (o reemplaza la que estuviera abierta: el
+    operador ya decidió no mantenerla, ver `tanda_sobres_es_de_otro_dia`).
+    Devuelve la marca de tiempo de apertura."""
+    apertura = datetime.now().isoformat(timespec="seconds")
+    obtener_repositorio(conn, "Configuracion").actualizar(
+        1, TandaSobresAbierta=1, TandaSobresApertura=apertura,
+    )
+    return apertura
+
+
+def cerrar_tanda_sobres(conn: sqlite3.Connection) -> None:
+    obtener_repositorio(conn, "Configuracion").actualizar(1, TandaSobresAbierta=0)
+
+
+def tanda_sobres_es_de_otro_dia(conn: sqlite3.Connection) -> bool:
+    """True si hay una tanda abierta pero de un día calendario distinto al
+    de hoy — el caso en que corresponde preguntarle al operador si la
+    mantiene o arranca una nueva (DC-08 §5.3)."""
+    apertura = tanda_sobres_abierta(conn)
+    if apertura is None:
+        return False
+    return apertura[:10] != fecha_actual(conn).isoformat()
+
+
+def subtotal_tanda_sobres(conn: sqlite3.Connection, apertura: str) -> float:
+    """Suma de los pagos por sobre registrados durante la tanda que abrió
+    en `apertura` — el subtotal en vivo para cuadrar contra el efectivo
+    físico al ir abriendo los sobres."""
+    fila = conn.execute(
+        "SELECT COALESCE(SUM(Monto), 0) AS total FROM HistorialPagos "
+        "WHERE MedioPago = 'Sobre en buzón' AND FechaHoraAperturaBuzon = ?",
+        (apertura,),
+    ).fetchone()
+    return fila["total"]
 
 
 def suspender_descuento_periodo(conn: sqlite3.Connection, *, id_profesional: int, periodo: str) -> None:

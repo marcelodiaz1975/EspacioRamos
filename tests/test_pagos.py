@@ -3,7 +3,9 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.pagos import (
+    abrir_tanda_sobres,
     cancelar_plan,
+    cerrar_tanda_sobres,
     crear_cargo_especial,
     crear_plan_pago,
     ejecutar_refinanciaciones_programadas,
@@ -11,6 +13,9 @@ from app.negocio.pagos import (
     programar_refinanciacion,
     refinanciar_plan,
     registrar_pago,
+    subtotal_tanda_sobres,
+    tanda_sobres_abierta,
+    tanda_sobres_es_de_otro_dia,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -270,3 +275,51 @@ def test_ejecutar_refinanciaciones_programadas_ignora_las_que_todavia_no_llegan(
     ejecutadas = ejecutar_refinanciaciones_programadas(conn, "2026-09")
     assert ejecutadas == 0
     assert len(obtener_repositorio(conn, "RefinanciacionProgramada").listar(IdProfesional=profesional)) == 1
+
+
+# --------------------------------------------------------------- tanda de sobres
+
+def test_no_hay_tanda_abierta_por_defecto(conn):
+    assert tanda_sobres_abierta(conn) is None
+
+
+def test_abrir_y_cerrar_tanda(conn):
+    apertura = abrir_tanda_sobres(conn)
+    assert tanda_sobres_abierta(conn) == apertura
+    cerrar_tanda_sobres(conn)
+    assert tanda_sobres_abierta(conn) is None
+
+
+def test_subtotal_tanda_suma_solo_pagos_por_sobre_de_esa_tanda(conn, profesional):
+    apertura = abrir_tanda_sobres(conn)
+    registrar_pago(
+        conn, id_profesional=profesional, monto=1000, medio_pago="Sobre en buzón",
+        fecha_hora_apertura_buzon=apertura,
+    )
+    registrar_pago(
+        conn, id_profesional=profesional, monto=500, medio_pago="Sobre en buzón",
+        fecha_hora_apertura_buzon=apertura,
+    )
+    # pago por otro medio, y pago por sobre de una tanda anterior: no deben sumar
+    registrar_pago(conn, id_profesional=profesional, monto=999, medio_pago="Transferencia")
+    registrar_pago(
+        conn, id_profesional=profesional, monto=999, medio_pago="Sobre en buzón",
+        fecha_hora_apertura_buzon="2020-01-01T00:00:00",
+    )
+
+    assert subtotal_tanda_sobres(conn, apertura) == pytest.approx(1500)
+
+
+def test_tanda_sobres_es_de_otro_dia(conn):
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    assert tanda_sobres_es_de_otro_dia(conn) is False  # sin tanda abierta
+
+    obtener_repositorio(conn, "Configuracion").actualizar(
+        1, TandaSobresAbierta=1, TandaSobresApertura="2026-08-14T18:00:00",
+    )
+    assert tanda_sobres_es_de_otro_dia(conn) is True
+
+    obtener_repositorio(conn, "Configuracion").actualizar(1, TandaSobresApertura="2026-08-15T09:00:00")
+    assert tanda_sobres_es_de_otro_dia(conn) is False
