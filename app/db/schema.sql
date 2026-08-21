@@ -444,6 +444,23 @@ CREATE TABLE IF NOT EXISTS CuotaPlan (
     Estado TEXT NOT NULL CHECK (Estado IN ('Pendiente','Pagada','Cerrada')) DEFAULT 'Pendiente'
 );
 
+-- RefinanciacionProgramada (DC-09 §3.6, aclarado en conversación) -------------------------
+-- Una refinanciación pedida para un MesAnoInicio futuro no se ejecuta al
+-- cargarla (cancelar el plan vigente ahora inflaría SaldoCuentaActual antes
+-- de tiempo): queda agendada acá y avance_mes.avanzar_mes la ejecuta sola
+-- (pagos.refinanciar_plan) apenas el período que arranca alcanza o supera
+-- MesAnoInicio. La fila se borra al ejecutarse.
+CREATE TABLE IF NOT EXISTS RefinanciacionProgramada (
+    IdRefinanciacion INTEGER PRIMARY KEY AUTOINCREMENT,
+    IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional),
+    MontoARefinanciar REAL NOT NULL,
+    CantidadCuotas INTEGER NOT NULL,
+    MesAnoInicio TEXT NOT NULL,
+    PorcentajeInteresMensual REAL NOT NULL DEFAULT 0,
+    Observacion TEXT,
+    FechaCreacion TEXT
+);
+
 -- 3.24 SnapshotMensual ----------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS SnapshotMensual (
     IdSnapshot INTEGER PRIMARY KEY AUTOINCREMENT,

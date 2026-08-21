@@ -225,22 +225,45 @@ def test_crear_plan_de_pagos_persiste_y_genera_cuotas(qtbot, conn):
     panel = pantalla.panel_planes
     panel.spin_monto.setValue(6000)
     panel.spin_cuotas.setValue(3)
-    panel._crear()
+    panel._guardar()
 
     assert conn.execute("SELECT COUNT(*) c FROM PlanPago").fetchone()["c"] == 1
     assert conn.execute("SELECT COUNT(*) c FROM CuotaPlan").fetchone()["c"] == 3
     assert panel.tabla.item(0, 5).text() == "Activo"
 
 
-def test_crear_segundo_plan_activo_falla(qtbot, conn):
+def test_guardar_con_plan_activo_y_mes_actual_refinancia_de_una(qtbot, conn):
+    """DC-09 §3.6: un profesional no puede tener dos planes activos — con
+    uno ya vigente, guardar de nuevo para el mes en curso refinancia
+    (cancela el viejo, crea uno nuevo) en vez de fallar."""
     _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_planes
     panel.spin_monto.setValue(6000)
-    panel._crear()
-    panel._crear()  # ya hay un plan activo -> ValueError capturado, no debe crear otro
-    assert conn.execute("SELECT COUNT(*) c FROM PlanPago").fetchone()["c"] == 1
+    panel._guardar()
+
+    panel.spin_monto.setValue(3000)
+    panel._guardar()
+
+    planes = conn.execute("SELECT Estado FROM PlanPago ORDER BY IdPlan").fetchall()
+    assert [p["Estado"] for p in planes] == ["Cancelado", "Activo"]
+
+
+def test_guardar_con_plan_activo_y_mes_futuro_programa_la_refinanciacion(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    panel.spin_monto.setValue(6000)
+    panel._guardar()  # plan activo del mes en curso
+
+    panel.spin_monto.setValue(3000)
+    panel.campo_mes_inicio.setText("2099-01")  # bien a futuro
+    panel._guardar()
+
+    assert conn.execute("SELECT Estado FROM PlanPago").fetchone()["Estado"] == "Activo"  # el viejo, sin tocar
+    assert conn.execute("SELECT COUNT(*) c FROM RefinanciacionProgramada").fetchone()["c"] == 1
 
 
 def test_cancelar_plan_devuelve_saldo_pendiente(qtbot, conn):
@@ -250,7 +273,7 @@ def test_cancelar_plan_devuelve_saldo_pendiente(qtbot, conn):
     panel = pantalla.panel_planes
     panel.spin_monto.setValue(6000)
     panel.spin_cuotas.setValue(3)
-    panel._crear()
+    panel._guardar()
 
     panel.tabla.selectRow(0)
     panel._cancelar()

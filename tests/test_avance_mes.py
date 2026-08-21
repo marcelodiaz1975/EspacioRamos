@@ -111,6 +111,24 @@ def test_plan_no_se_finaliza_si_quedan_cuotas_futuras(conn):
     assert obtener_repositorio(conn, "PlanPago").obtener(id_plan)["Estado"] == "Activo"
 
 
+def test_avanzar_mes_ejecuta_refinanciaciones_programadas_para_el_periodo_nuevo(conn):
+    from app.negocio.pagos import programar_refinanciacion
+
+    id_prof = _crear_profesional(conn)
+    id_plan_viejo = crear_plan_pago(
+        conn, id_profesional=id_prof, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
+    )
+    programar_refinanciacion(
+        conn, id_profesional=id_prof, monto_a_refinanciar=250, cantidad_cuotas=5, mes_ano_inicio="2026-09",
+    )
+
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")  # periodo nuevo: 2026-09
+
+    assert resumen.refinanciaciones_programadas_ejecutadas == 1
+    assert obtener_repositorio(conn, "PlanPago").obtener(id_plan_viejo)["Estado"] == "Cancelado"
+    assert obtener_repositorio(conn, "RefinanciacionProgramada").listar(IdProfesional=id_prof) == []
+
+
 def _crear_pedido(conn, id_prof, dia="Lunes", fecha_pedido=None):
     return crear_pedido(
         conn, id_profesional=id_prof,

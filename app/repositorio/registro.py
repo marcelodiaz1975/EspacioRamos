@@ -37,6 +37,7 @@ TABLAS = [
     "Responsable",
     "PlanPago",
     "CuotaPlan",
+    "RefinanciacionProgramada",
     "SnapshotMensual",
     "GastoOperativo",
     "Imagen",

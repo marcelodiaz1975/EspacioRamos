@@ -29,7 +29,14 @@ from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
-from app.negocio.pagos import cancelar_plan, crear_plan_pago, registrar_pago, suspender_descuento_periodo
+from app.negocio.pagos import (
+    cancelar_plan,
+    crear_plan_pago,
+    programar_refinanciacion,
+    refinanciar_plan,
+    registrar_pago,
+    suspender_descuento_periodo,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -245,9 +252,9 @@ class _PanelPlanesPago(QWidget):
         form.addWidget(QLabel("Mes de inicio"))
         form.addWidget(self.campo_mes_inicio)
 
-        boton_crear = QPushButton("Crear plan de pagos")
+        boton_crear = QPushButton("Guardar plan de pagos (crea, o refinancia si ya tiene uno activo)")
         boton_crear.setObjectName("botonPrimario")
-        boton_crear.clicked.connect(self._crear)
+        boton_crear.clicked.connect(self._guardar)
         form.addWidget(boton_crear)
 
         boton_cancelar = QPushButton("Cancelar plan seleccionado")
@@ -273,7 +280,8 @@ class _PanelPlanesPago(QWidget):
     def actualizar(self) -> None:
         self._planes = obtener_repositorio(self.conn, "PlanPago").listar()
         cache = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
-        self.tabla.setRowCount(len(self._planes))
+        programadas = obtener_repositorio(self.conn, "RefinanciacionProgramada").listar()
+        self.tabla.setRowCount(len(self._planes) + len(programadas))
         for i, p in enumerate(self._planes):
             self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache, p["IdProfesional"])))
             self.tabla.setItem(i, 1, QTableWidgetItem(f"$ {p['MontoRefinanciado']:,.2f}"))
@@ -281,21 +289,59 @@ class _PanelPlanesPago(QWidget):
             self.tabla.setItem(i, 3, QTableWidgetItem(f"$ {p['ImportePorCuota']:,.2f}"))
             self.tabla.setItem(i, 4, QTableWidgetItem(p["MesAnoInicio"]))
             self.tabla.setItem(i, 5, QTableWidgetItem(p["Estado"]))
+        for j, r in enumerate(programadas, start=len(self._planes)):
+            self.tabla.setItem(j, 0, QTableWidgetItem(_nombre_profesional(cache, r["IdProfesional"])))
+            self.tabla.setItem(j, 1, QTableWidgetItem(f"$ {r['MontoARefinanciar']:,.2f}"))
+            self.tabla.setItem(j, 2, QTableWidgetItem(str(r["CantidadCuotas"])))
+            self.tabla.setItem(j, 3, QTableWidgetItem(""))
+            self.tabla.setItem(j, 4, QTableWidgetItem(r["MesAnoInicio"]))
+            self.tabla.setItem(j, 5, QTableWidgetItem("Refinanciación programada"))
         self.tabla.resizeColumnsToContents()
 
-    def _crear(self) -> None:
+    def _guardar(self) -> None:
+        """Un profesional no puede tener más de un plan activo a la vez
+        (DC-09 §3.6): si ya tiene uno, este mismo formulario refinancia en
+        vez de crear. Si el mes de inicio pedido es el actual, refinancia
+        ya mismo y regenera la liquidación si correspondía; si es un mes
+        futuro, la refinanciación queda agendada para que el propio avance
+        de mes la aplique sola (cancelar el plan vigente ahora inflaría el
+        saldo del mes en curso antes de tiempo)."""
         monto = self.spin_monto.value()
         if monto <= 0:
-            QMessageBox.warning(self, "Crear plan de pagos", "El monto a refinanciar debe ser mayor a cero.")
+            QMessageBox.warning(self, "Guardar plan de pagos", "El monto debe ser mayor a cero.")
             return
+        id_profesional = self.combo_profesional.currentData()
+        mes_inicio = self.campo_mes_inicio.text().strip()
+        plan_activo = obtener_repositorio(self.conn, "PlanPago").listar(
+            IdProfesional=id_profesional, Estado="Activo",
+        )
         try:
-            crear_plan_pago(
-                self.conn, id_profesional=self.combo_profesional.currentData(), monto_refinanciado=monto,
-                cantidad_cuotas=self.spin_cuotas.value(), mes_ano_inicio=self.campo_mes_inicio.text().strip(),
-                porcentaje_interes_mensual=self.spin_interes.value(),
-            )
+            if not plan_activo:
+                crear_plan_pago(
+                    self.conn, id_profesional=id_profesional, monto_refinanciado=monto,
+                    cantidad_cuotas=self.spin_cuotas.value(), mes_ano_inicio=mes_inicio,
+                    porcentaje_interes_mensual=self.spin_interes.value(),
+                )
+            elif mes_inicio <= periodo_actual(self.conn):
+                refinanciar_plan(
+                    self.conn, id_profesional=id_profesional, monto_a_refinanciar=monto,
+                    cantidad_cuotas=self.spin_cuotas.value(), mes_ano_inicio=mes_inicio,
+                    porcentaje_interes_mensual=self.spin_interes.value(),
+                )
+                regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
+            else:
+                programar_refinanciacion(
+                    self.conn, id_profesional=id_profesional, monto_a_refinanciar=monto,
+                    cantidad_cuotas=self.spin_cuotas.value(), mes_ano_inicio=mes_inicio,
+                    porcentaje_interes_mensual=self.spin_interes.value(),
+                )
+                QMessageBox.information(
+                    self, "Refinanciación programada",
+                    f"Se agendó la refinanciación para {mes_inicio}: el plan vigente sigue activo hasta "
+                    "entonces, y el cambio se aplica solo al avanzar de mes.",
+                )
         except ValueError as error:
-            QMessageBox.warning(self, "Crear plan de pagos", str(error))
+            QMessageBox.warning(self, "Guardar plan de pagos", str(error))
             return
         self.conn.commit()
         self.actualizar()
@@ -304,7 +350,15 @@ class _PanelPlanesPago(QWidget):
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
             return
-        plan = self._planes[filas[0].row()]
+        fila = filas[0].row()
+        if fila >= len(self._planes):
+            QMessageBox.warning(
+                self, "Cancelar plan",
+                "Esa fila es una refinanciación programada, todavía no un plan — esperá a que se aplique "
+                "sola en el próximo avance de mes.",
+            )
+            return
+        plan = self._planes[fila]
         try:
             cancelar_plan(self.conn, plan["IdPlan"])
         except ValueError as error:

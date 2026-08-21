@@ -18,7 +18,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 
-from app.negocio.dias import periodo_actual, sumar_meses
+from app.negocio.dias import fecha_actual, periodo_actual, sumar_meses
 from app.repositorio.registro import obtener_repositorio
 
 TIPOS_CARGO = ("Débito", "Crédito")
@@ -209,6 +209,47 @@ def refinanciar_plan(
         porcentaje_interes_mensual=porcentaje_interes_mensual, observacion=observacion,
         es_refinanciacion=True, id_plan_anterior=id_plan_anterior,
     )
+
+
+def programar_refinanciacion(
+    conn: sqlite3.Connection, *, id_profesional: int, monto_a_refinanciar: float, cantidad_cuotas: int,
+    mes_ano_inicio: str, porcentaje_interes_mensual: float = 0.0, observacion: str | None = None,
+) -> int:
+    """Refinanciación pedida para un MesAnoInicio futuro (DC-09 §3.6,
+    aclarado en conversación): ejecutarla ahora mismo cancelaría el plan
+    vigente antes de tiempo, inflando SaldoCuentaActual del mes en curso
+    aunque el cambio recién debería regir el mes que viene. Se agenda acá
+    y `avance_mes.avanzar_mes` la ejecuta sola apenas corresponda. Una
+    nueva refinanciación programada para el mismo profesional reemplaza a
+    la anterior (el operador cambió de idea antes de que se ejecutara)."""
+    if mes_ano_inicio <= periodo_actual(conn):
+        raise ValueError(
+            "Para un MesAnoInicio del período en curso (o anterior) usá refinanciar_plan directamente"
+        )
+    repo = obtener_repositorio(conn, "RefinanciacionProgramada")
+    for pendiente in repo.listar(IdProfesional=id_profesional):
+        repo.eliminar(pendiente["IdRefinanciacion"])
+    return repo.crear(
+        IdProfesional=id_profesional, MontoARefinanciar=monto_a_refinanciar, CantidadCuotas=cantidad_cuotas,
+        MesAnoInicio=mes_ano_inicio, PorcentajeInteresMensual=porcentaje_interes_mensual,
+        Observacion=observacion, FechaCreacion=fecha_actual(conn).isoformat(),
+    )
+
+
+def ejecutar_refinanciaciones_programadas(conn: sqlite3.Connection, periodo_nuevo: str) -> int:
+    """Paso del avance de mes: ejecuta (`refinanciar_plan`) toda
+    refinanciación agendada cuyo MesAnoInicio ya llegó, y la saca de la
+    cola. Devuelve cuántas se ejecutaron."""
+    repo = obtener_repositorio(conn, "RefinanciacionProgramada")
+    pendientes = [p for p in repo.listar() if p["MesAnoInicio"] <= periodo_nuevo]
+    for p in pendientes:
+        refinanciar_plan(
+            conn, id_profesional=p["IdProfesional"], monto_a_refinanciar=p["MontoARefinanciar"],
+            cantidad_cuotas=p["CantidadCuotas"], mes_ano_inicio=p["MesAnoInicio"],
+            porcentaje_interes_mensual=p["PorcentajeInteresMensual"], observacion=p["Observacion"],
+        )
+        repo.eliminar(p["IdRefinanciacion"])
+    return len(pendientes)
 
 
 def marcar_cuota_pagada(conn: sqlite3.Connection, id_cuota: int) -> None:

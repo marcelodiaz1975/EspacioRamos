@@ -6,7 +6,9 @@ from app.negocio.pagos import (
     cancelar_plan,
     crear_cargo_especial,
     crear_plan_pago,
+    ejecutar_refinanciaciones_programadas,
     marcar_cuota_pagada,
+    programar_refinanciacion,
     refinanciar_plan,
     registrar_pago,
 )
@@ -192,3 +194,79 @@ def test_refinanciar_plan_cancela_el_vigente_y_descuenta_del_saldo(conn, profesi
     # saldo: 0 (viejo cancelado, +300 de cuotas pendientes) - 250 (refinanciado al plan nuevo) = 50
     profesional_actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
     assert profesional_actualizado["SaldoCuentaActual"] == pytest.approx(50)
+
+
+def _fijar_periodo_actual(conn, periodo):
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = ? WHERE IdConfiguracion = 1",
+        (f"{periodo}-15",),
+    )
+
+
+def test_programar_refinanciacion_rechaza_periodo_no_futuro(conn, profesional):
+    _fijar_periodo_actual(conn, "2026-08")
+    with pytest.raises(ValueError):
+        programar_refinanciacion(
+            conn, id_profesional=profesional, monto_a_refinanciar=250, cantidad_cuotas=5, mes_ano_inicio="2026-08",
+        )
+
+
+def test_programar_refinanciacion_no_toca_nada_hasta_el_avance_de_mes(conn, profesional):
+    """DC-09 §3.6: agendar una refinanciación para el mes que viene no
+    debe cancelar el plan vigente ni tocar el saldo todavía."""
+    _fijar_periodo_actual(conn, "2026-08")
+    id_plan_viejo = crear_plan_pago(
+        conn, id_profesional=profesional, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
+    )
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=0)
+
+    programar_refinanciacion(
+        conn, id_profesional=profesional, monto_a_refinanciar=250, cantidad_cuotas=5, mes_ano_inicio="2026-09",
+    )
+
+    assert obtener_repositorio(conn, "PlanPago").obtener(id_plan_viejo)["Estado"] == "Activo"
+    assert obtener_repositorio(conn, "Profesional").obtener(profesional)["SaldoCuentaActual"] == 0
+    assert len(obtener_repositorio(conn, "RefinanciacionProgramada").listar(IdProfesional=profesional)) == 1
+
+
+def test_programar_refinanciacion_reemplaza_la_anterior_del_mismo_profesional(conn, profesional):
+    _fijar_periodo_actual(conn, "2026-08")
+    programar_refinanciacion(
+        conn, id_profesional=profesional, monto_a_refinanciar=100, cantidad_cuotas=2, mes_ano_inicio="2026-09",
+    )
+    programar_refinanciacion(
+        conn, id_profesional=profesional, monto_a_refinanciar=250, cantidad_cuotas=5, mes_ano_inicio="2026-10",
+    )
+    pendientes = obtener_repositorio(conn, "RefinanciacionProgramada").listar(IdProfesional=profesional)
+    assert len(pendientes) == 1
+    assert pendientes[0]["MontoARefinanciar"] == pytest.approx(250)
+
+
+def test_ejecutar_refinanciaciones_programadas_aplica_las_que_ya_llegaron(conn, profesional):
+    _fijar_periodo_actual(conn, "2026-08")
+    id_plan_viejo = crear_plan_pago(
+        conn, id_profesional=profesional, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
+    )
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=0)
+    programar_refinanciacion(
+        conn, id_profesional=profesional, monto_a_refinanciar=250, cantidad_cuotas=5, mes_ano_inicio="2026-09",
+    )
+
+    ejecutadas = ejecutar_refinanciaciones_programadas(conn, "2026-09")
+
+    assert ejecutadas == 1
+    assert obtener_repositorio(conn, "PlanPago").obtener(id_plan_viejo)["Estado"] == "Cancelado"
+    planes_nuevos = obtener_repositorio(conn, "PlanPago").listar(IdProfesional=profesional, Estado="Activo")
+    assert len(planes_nuevos) == 1
+    assert planes_nuevos[0]["MontoRefinanciado"] == pytest.approx(250)
+    assert obtener_repositorio(conn, "RefinanciacionProgramada").listar(IdProfesional=profesional) == []
+
+
+def test_ejecutar_refinanciaciones_programadas_ignora_las_que_todavia_no_llegan(conn, profesional):
+    _fijar_periodo_actual(conn, "2026-08")
+    programar_refinanciacion(
+        conn, id_profesional=profesional, monto_a_refinanciar=250, cantidad_cuotas=5, mes_ano_inicio="2026-10",
+    )
+    ejecutadas = ejecutar_refinanciaciones_programadas(conn, "2026-09")
+    assert ejecutadas == 0
+    assert len(obtener_repositorio(conn, "RefinanciacionProgramada").listar(IdProfesional=profesional)) == 1
