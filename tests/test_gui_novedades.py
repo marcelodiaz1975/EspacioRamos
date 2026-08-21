@@ -4,6 +4,9 @@ from PySide6.QtWidgets import QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.novedades import PantallaNovedades
+from app.negocio.dias import periodo_actual
+from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
+from app.repositorio.registro import obtener_repositorio
 
 
 @pytest.fixture
@@ -50,6 +53,28 @@ def test_crear_vacacion_persiste(qtbot, conn):
     panel.campo_hasta.setText("2026-09-07")
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 1
+
+
+def test_crear_vacacion_regenera_liquidacion_enviada(qtbot, conn):
+    """DC-08 §4.6: registrar una vacación tiene que regenerar sola la
+    liquidación del período en curso si ya estaba Enviada."""
+    id_profesional = _preparar(conn)
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.campo_desde.setText("2026-09-01")
+    panel.campo_hasta.setText("2026-09-07")
+    panel._crear()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
     assert panel.tabla.rowCount() == 1
 
 

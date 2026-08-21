@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
 from app.negocio.dias import fecha_actual, periodo_actual
+from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
 from app.negocio.pagos import cancelar_plan, crear_plan_pago, registrar_pago, suspender_descuento_periodo
 from app.repositorio.registro import obtener_repositorio
@@ -181,6 +182,8 @@ class _PanelRegistrarPago(QWidget):
             return
         if cruza_tolerancia:
             self._preguntar_restablecer_descuento(id_profesional, periodo_imputado)
+        if periodo_imputado and periodo_imputado < periodo_actual(self.conn):
+            regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_imputado)
         self.conn.commit()
         self.actualizar()
 

@@ -611,6 +611,39 @@ def test_estado_envio_y_reemision_se_derivan_solos(conn, consultorio):
     assert liq_3["EsReemision"] == 1
 
 
+def test_id_profesional_liquidable_devuelve_al_r_para_un_e_consolidado(conn, consultorio):
+    from app.negocio.liquidaciones import id_profesional_liquidable
+
+    id_r = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    id_e = _crear_profesional(conn, categoria="E", cabeza_equipo=id_r)
+    id_b = _crear_profesional(conn, categoria="B")
+
+    assert id_profesional_liquidable(conn, id_r) == id_r
+    assert id_profesional_liquidable(conn, id_e) == id_r
+    assert id_profesional_liquidable(conn, id_b) is None
+
+
+def test_regenerar_si_corresponde_marca_no_enviada_la_liquidacion_del_r(conn, consultorio):
+    """DC-08 §3.7/§4.6/§5.4: la regeneración automática se dispara para el
+    R aunque el cambio venga de un E consolidado en su equipo, y no rompe
+    nada si el profesional es B (nunca tiene liquidación)."""
+    from app.negocio.liquidaciones import regenerar_si_corresponde
+
+    id_r = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    id_e = _crear_profesional(conn, categoria="E", cabeza_equipo=id_r)
+    id_b = _crear_profesional(conn, categoria="B")
+
+    id_liq, _ = emitir_liquidacion(conn, id_profesional=id_r, periodo=PERIODO, fecha_emision="2026-08-01")
+    obtener_repositorio(conn, "LiquidacionEmitida").actualizar(id_liq, EstadoEnvio="Enviada")
+
+    regenerar_si_corresponde(conn, id_profesional=id_e, periodo=PERIODO)  # dispara vía el E
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_r, Periodo=PERIODO)
+    assert len(emisiones) == 2
+    assert max(emisiones, key=lambda f: f["IdLiquidacion"])["EstadoEnvio"] == "Regenerada no enviada"
+
+    regenerar_si_corresponde(conn, id_profesional=id_b, periodo=PERIODO)  # no hace nada, no rompe
+
+
 def test_reemision_no_pisa_pagos_ya_registrados_contra_el_mes_en_curso(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=0, SaldoCuentaActual=0)

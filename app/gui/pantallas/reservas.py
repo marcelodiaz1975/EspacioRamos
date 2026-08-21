@@ -24,7 +24,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_fecha_es_mes_anterior
-from app.negocio.dias import DIAS_SEMANA, fecha_actual
+from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
+from app.negocio.lista_espera import marcar_resuelto
+from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.reservas import (
     ConflictoBloqueanteError,
     cancelar_reserva_aislada,
@@ -210,7 +212,30 @@ class _PanelReservasRegulares(QWidget):
         self.conn.commit()
         if advertencias:
             QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias))
+        self._ofrecer_resolver_lista_espera(datos["id_profesional"])
+        regenerar_si_corresponde(self.conn, id_profesional=datos["id_profesional"], periodo=periodo_actual(self.conn))
+        self.conn.commit()
         self.actualizar()
+
+    def _ofrecer_resolver_lista_espera(self, id_profesional: int) -> None:
+        """DC-10 §2.2 paso 5: confirmar la reserva regular en F16 tiene que
+        poder cerrar el pedido de Lista de espera que la originó. Con un
+        solo pedido Activo del profesional alcanza con preguntar; con más
+        de uno queda a criterio manual (no hay forma de saber cuál de
+        todos se acaba de cubrir)."""
+        pedidos = obtener_repositorio(self.conn, "ListaEspera").listar(
+            IdProfesional=id_profesional, Estado="Activo",
+        )
+        if len(pedidos) != 1:
+            return
+        respuesta = QMessageBox.question(
+            self, "Lista de espera",
+            "Este profesional tiene un pedido activo en Lista de espera. "
+            "¿Lo marcás como resuelto?",
+        )
+        if respuesta == QMessageBox.StandardButton.Yes:
+            marcar_resuelto(self.conn, pedidos[0]["IdPedido"])
+            self.conn.commit()
 
     def _finalizar_vigencia(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -219,6 +244,9 @@ class _PanelReservasRegulares(QWidget):
         reserva = self._reservas[filas[0].row()]
         obtener_repositorio(self.conn, "ReservaRegular").actualizar(
             reserva["IdReservaRegular"], VigenciaFin=fecha_actual(self.conn).isoformat()
+        )
+        regenerar_si_corresponde(
+            self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn),
         )
         self.conn.commit()
         self.actualizar()

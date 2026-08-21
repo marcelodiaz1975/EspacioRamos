@@ -292,6 +292,40 @@ def ids_consolidados(conn: sqlite3.Connection, id_profesional: int) -> list[int]
     return [id_profesional] + [f["IdProfesional"] for f in filas]
 
 
+def id_profesional_liquidable(conn: sqlite3.Connection, id_profesional: int) -> int | None:
+    """El profesional R dueño de la liquidación que corresponde regenerar
+    cuando algo de `id_profesional` cambia: él mismo si es R, su cabeza de
+    equipo si es E (siempre que ESA sea R), o None si es B (nunca se
+    liquida) o no tiene un R al que consolidarse."""
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    if profesional is None:
+        return None
+    if profesional["CategoriaProfesional"] == "R":
+        return id_profesional
+    if profesional["CategoriaProfesional"] == "E" and profesional["ProfesionalCabezaEquipo"]:
+        cabeza = obtener_repositorio(conn, "Profesional").obtener(profesional["ProfesionalCabezaEquipo"])
+        if cabeza is not None and cabeza["CategoriaProfesional"] == "R":
+            return profesional["ProfesionalCabezaEquipo"]
+    return None
+
+
+def regenerar_si_corresponde(conn: sqlite3.Connection, *, id_profesional: int, periodo: str) -> None:
+    """DC-08 §3.7/§4.6/§5.4: cargar/modificar/dar de baja una reserva
+    regular, registrar vacaciones, o registrar un pago imputado al mes
+    anterior tienen que regenerar sola la liquidación del R afectado y
+    dejarla marcada como no enviada (`emitir_liquidacion` ya se encarga de
+    eso solo). Si no hay un R al que regenerarle nada, o el período no se
+    puede reemitir (ya hay períodos posteriores emitidos), no hay nada que
+    hacer — no es motivo para interrumpir la operación principal."""
+    id_r = id_profesional_liquidable(conn, id_profesional)
+    if id_r is None:
+        return
+    try:
+        emitir_liquidacion(conn, id_profesional=id_r, periodo=periodo)
+    except ValueError:
+        pass
+
+
 # ------------------------------------------------------------------- reservas regulares
 
 def _reservas_regulares_del_dia(

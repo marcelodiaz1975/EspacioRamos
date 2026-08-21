@@ -27,7 +27,9 @@ from PySide6.QtWidgets import (
 
 from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
 from app.negocio.ausencias import crear_ausencia
+from app.negocio.dias import periodo_actual
 from app.negocio.licencias import crear_licencia
+from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
 from app.negocio.pagos import TIPOS_CARGO, crear_cargo_especial
 from app.negocio.vacaciones import crear_vacacion
@@ -125,9 +127,10 @@ class _PanelVacaciones(QWidget):
         self.tabla.resizeColumnsToContents()
 
     def _crear(self) -> None:
+        id_profesional = self.combo_profesional.currentData()
         try:
             _id, advertencias = crear_vacacion(
-                self.conn, id_profesional=self.combo_profesional.currentData(),
+                self.conn, id_profesional=id_profesional,
                 fecha_desde=self.campo_desde.text().strip(), fecha_hasta=self.campo_hasta.text().strip(),
             )
         except ValueError as error:
@@ -136,6 +139,8 @@ class _PanelVacaciones(QWidget):
         self.conn.commit()
         if advertencias:
             QMessageBox.information(self, "Vacación creada", "\n".join(advertencias))
+        regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
+        self.conn.commit()
         self.actualizar()
 
 

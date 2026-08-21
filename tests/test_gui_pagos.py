@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.pagos import PantallaPagos
+from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -102,6 +103,57 @@ def test_registrar_pago_periodo_imputado_mes_anterior_pide_confirmacion(qtbot, c
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
     panel._registrar()
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 1
+
+
+def test_registrar_pago_mes_anterior_regenera_liquidacion_enviada(qtbot, conn, monkeypatch):
+    """DC-08 §5.4: un pago imputado al mes anterior tiene que regenerar
+    sola la liquidación remanente de ESE período si ya estaba Enviada."""
+    id_profesional = _crear_profesional(conn, saldo=10000)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo="2026-07")
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo="2026-07", enviada=True)
+    conn.commit()
+
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    panel.spin_monto.setValue(1000)
+    panel.campo_periodo.setText("2026-07")
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+
+    panel._registrar()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_profesional, Periodo="2026-07",
+    )
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_registrar_pago_mes_en_curso_no_regenera_liquidacion_de_mes_anterior(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn, saldo=10000)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo="2026-07")
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo="2026-07", enviada=True)
+    conn.commit()
+
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    panel.spin_monto.setValue(1000)  # sin período imputado -> contra el mes en curso
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+
+    panel._registrar()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_profesional, Periodo="2026-07",
+    )
+    assert len(emisiones) == 1  # no se tocó la liquidación de julio
 
 
 def _preparar_pago_que_cruza_tolerancia(conn):
