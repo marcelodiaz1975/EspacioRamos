@@ -53,9 +53,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import date
 
-from app.negocio.dias import fecha_actual
-from app.negocio.grilla import calcular_ocupacion_fecha, calcular_ocupacion_regular
+from app.negocio.dias import fecha_actual, fecha_a_dia_semana
+from app.negocio.formato import fecha_corta, hora_fmt
+from app.negocio.grilla import aisladas_confirmadas_fecha, calcular_ocupacion_fecha, calcular_ocupacion_regular
 from app.repositorio.registro import obtener_repositorio
 
 VERDE = "verde"
@@ -78,6 +80,11 @@ class Coincidencia:
     color: str
     dias_cubiertos: list[str]
     tramos_por_dia: dict[str, list[TramoCobertura]] = field(default_factory=dict)
+    # Solo Variante B (fechas puntuales): avisos de reservas aisladas que
+    # coinciden con alguna alternativa ofrecida, para que el operador
+    # evalúe reubicarlas — NUNCA bloquean la alternativa (ver
+    # `calcular_ocupacion_fecha`).
+    alertas_aisladas: list[str] = field(default_factory=list)
 
 
 def _validar_bloque(bloque: dict) -> None:
@@ -337,14 +344,42 @@ def calcular_coincidencia(conn: sqlite3.Connection, pedido, anio: int, mes: int)
     return Coincidencia(color=color, dias_cubiertos=dias_cubiertos, tramos_por_dia=tramos_por_dia)
 
 
+def _alertas_aisladas(conn: sqlite3.Connection, fecha: str, tramos: list[TramoCobertura]) -> list[str]:
+    """Reservas aisladas que se superponen con alguna alternativa ofrecida
+    para `fecha` — para avisarle al operador, nunca para bloquear (ver
+    `calcular_ocupacion_fecha`)."""
+    aisladas = aisladas_confirmadas_fecha(conn, fecha)
+    if not aisladas:
+        return []
+    etiqueta_fecha = f"{fecha_a_dia_semana(date.fromisoformat(fecha)).lower()} {fecha_corta(fecha)}"
+    alertas = []
+    for t in tramos:
+        for a in aisladas:
+            if a["IdConsultorio"] != t.id_consultorio:
+                continue
+            if not (t.hora_inicio < a["HoraFin"] and a["HoraInicio"] < t.hora_fin):
+                continue
+            profesional = conn.execute(
+                "SELECT Apellido FROM Profesional WHERE IdProfesional = ?", (a["IdProfesional"],)
+            ).fetchone()
+            nombre = profesional["Apellido"] if profesional else "?"
+            alertas.append(
+                f"{etiqueta_fecha} de {hora_fmt(a['HoraInicio'])[:-2]} a {hora_fmt(a['HoraFin'])}: ya hay una "
+                f"reserva aislada asignada de {nombre} en ese consultorio — revisá si conviene reubicarla."
+            )
+    return alertas
+
+
 def _coincidencia_bloque_fechas(
     conn: sqlite3.Connection, candidatos_por_id: dict, bloque: dict,
-) -> tuple[list[str], dict[str, list[TramoCobertura]]] | None:
+) -> tuple[list[str], dict[str, list[TramoCobertura]], list[str]] | None:
     """Igual que `_coincidencia_bloque`, pero contra fechas puntuales
     (DC-03 Mensaje 2 Variante B) en vez de días de la semana genéricos
     promediados en un mes — cada fecha usa su ocupación real ese día
-    concreto (`calcular_ocupacion_fecha`: respeta ausencias puntuales y
-    reservas aisladas ya confirmadas esa fecha)."""
+    concreto (`calcular_ocupacion_fecha`: respeta ausencias puntuales).
+    Una reserva aislada que coincide con la alternativa NO la descarta,
+    solo suma un aviso en el tercer elemento de la tupla (ver
+    `_alertas_aisladas`)."""
     fechas = bloque.get("fechas") or []
     if not fechas:
         return None
@@ -370,7 +405,11 @@ def _coincidencia_bloque_fechas(
             return None
         fechas_cubiertas = [f for f in fechas if f in cobertura_por_fecha]
 
-    return fechas_cubiertas, {f: cobertura_por_fecha[f] for f in fechas_cubiertas}
+    alertas: list[str] = []
+    for f in fechas_cubiertas:
+        alertas.extend(_alertas_aisladas(conn, f, cobertura_por_fecha[f]))
+
+    return fechas_cubiertas, {f: cobertura_por_fecha[f] for f in fechas_cubiertas}, alertas
 
 
 def calcular_coincidencia_fechas(
@@ -403,17 +442,24 @@ def calcular_coincidencia_fechas(
 
     fechas_cubiertas: list[str] = []
     tramos_por_fecha: dict[str, list[TramoCobertura]] = {}
-    for fechas_bloque, tramos_bloque in cubiertos:
+    alertas_aisladas: list[str] = []
+    for fechas_bloque, tramos_bloque, alertas_bloque in cubiertos:
         for f in fechas_bloque:
             if f not in fechas_cubiertas:
                 fechas_cubiertas.append(f)
         tramos_por_fecha.update(tramos_bloque)
+        for alerta in alertas_bloque:
+            if alerta not in alertas_aisladas:
+                alertas_aisladas.append(alerta)
 
     ids_consultorios = {t.id_consultorio for tramos in tramos_por_fecha.values() for t in tramos}
     color = _clasificar_color(candidatos_por_id, ids_consultorios)
     if condiciones.get("sinCombinar") and color != VERDE:
         return None
-    return Coincidencia(color=color, dias_cubiertos=fechas_cubiertas, tramos_por_dia=tramos_por_fecha)
+    return Coincidencia(
+        color=color, dias_cubiertos=fechas_cubiertas, tramos_por_dia=tramos_por_fecha,
+        alertas_aisladas=alertas_aisladas,
+    )
 
 
 def listar_pedidos_con_coincidencia(

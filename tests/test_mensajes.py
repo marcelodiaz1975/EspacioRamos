@@ -539,11 +539,12 @@ def test_disponibilidad_horarios_omite_edificio_unico(conn, edificio_dos_consult
 # --------------------------------------------------- Mensaje 2 Variante B: fecha puntual (DC-03)
 
 def test_disponibilidad_fecha_alternativa_simple(conn, edificio_dos_consultorios):
-    texto = mensaje_disponibilidad_horarios_fecha(
+    texto, advertencias = mensaje_disponibilidad_horarios_fecha(
         conn, fechas=["2026-08-03"], horario_desde=10, horario_hasta=12,  # lunes
     )
     assert "Alternativas disponibles:" in texto
     assert "· lunes 3/8 de 10 a 12hs" in texto
+    assert advertencias == []
 
 
 def test_disponibilidad_fecha_sin_coincidencia(conn, edificio_dos_consultorios):
@@ -554,7 +555,9 @@ def test_disponibilidad_fecha_sin_coincidencia(conn, edificio_dos_consultorios):
             IdProfesional=otro, IdConsultorio=c, DiaSemana="Lunes", HoraInicio=10, HoraFin=12,
             VigenciaInicio="2026-01-01",
         )
-    texto = mensaje_disponibilidad_horarios_fecha(conn, fechas=["2026-08-03"], horario_desde=10, horario_hasta=12)
+    texto, _advertencias = mensaje_disponibilidad_horarios_fecha(
+        conn, fechas=["2026-08-03"], horario_desde=10, horario_hasta=12,
+    )
     assert "Sin disponibilidad para lo solicitado." in texto
 
 
@@ -572,16 +575,38 @@ def test_disponibilidad_fecha_respeta_ausencia_puntual(conn, edificio_dos_consul
     from app.negocio.ausencias import crear_ausencia
     crear_ausencia(conn, id_profesional=otro, fecha_desde="2026-08-03", fecha_hasta="2026-08-03")
 
-    texto = mensaje_disponibilidad_horarios_fecha(conn, fechas=["2026-08-03"], horario_desde=10, horario_hasta=12)
+    texto, _advertencias = mensaje_disponibilidad_horarios_fecha(
+        conn, fechas=["2026-08-03"], horario_desde=10, horario_hasta=12,
+    )
     assert "Alternativas disponibles:" in texto
 
 
 def test_disponibilidad_fecha_varias_fechas_en_el_encabezado(conn, edificio_dos_consultorios):
-    texto = mensaje_disponibilidad_horarios_fecha(
+    texto, _advertencias = mensaje_disponibilidad_horarios_fecha(
         conn, fechas=["2026-08-03", "2026-08-10"], horario_desde=10, horario_hasta=11,
     )
     assert "lunes 3/8" in texto
     assert "lunes 10/8" in texto
+
+
+def test_disponibilidad_fecha_aislada_no_bloquea_pero_avisa_para_el_operador(conn, edificio_dos_consultorios):
+    """La aislada NO aparece en el texto del mensaje (eso es para el
+    profesional, no le interesa la agenda de otro) — solo en las
+    advertencias, que son de uso interno."""
+    c1, _c2 = edificio_dos_consultorios
+    id_prof_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Puntual")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof_aislada, IdConsultorio=c1, Fecha="2026-08-03",
+        HoraInicio=10, HoraFin=12, Estado="Confirmada",
+    )
+
+    texto, advertencias = mensaje_disponibilidad_horarios_fecha(
+        conn, fechas=["2026-08-03"], horario_desde=10, horario_hasta=12,
+    )
+    assert "Alternativas disponibles:" in texto
+    assert "Puntual" not in texto
+    assert len(advertencias) == 1
+    assert "Puntual" in advertencias[0]
 
 
 # ------------------------------------------------------------- utilitarios

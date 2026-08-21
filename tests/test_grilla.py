@@ -5,7 +5,13 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.ausencias import crear_ausencia
-from app.negocio.grilla import DIAS_GRILLA_DEFAULT, calcular_grilla, calcular_ocupacion_fecha, dias_grilla
+from app.negocio.grilla import (
+    DIAS_GRILLA_DEFAULT,
+    aisladas_confirmadas_fecha,
+    calcular_grilla,
+    calcular_ocupacion_fecha,
+    dias_grilla,
+)
 from app.negocio.reservas import crear_reserva_aislada, crear_reserva_regular
 from app.repositorio.registro import obtener_repositorio
 
@@ -177,7 +183,10 @@ def test_ocupacion_fecha_libera_por_ausencia_puntual(conn, unidad_con_dos_consul
     assert ocupado_otro_lunes[(id_c1, 14)] is True
 
 
-def test_ocupacion_fecha_incluye_reserva_aislada_confirmada(conn, unidad_con_dos_consultorios):
+def test_ocupacion_fecha_no_bloquea_por_reserva_aislada_confirmada(conn, unidad_con_dos_consultorios):
+    """Una aislada es un compromiso puntual reubicable, no ocupación real:
+    no debe bloquear la búsqueda de horarios regulares (a diferencia de
+    una reserva regular vigente o una versión anterior de esta función)."""
     _, id_c1, _ = unidad_con_dos_consultorios
     id_prof_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Puntual")
     crear_reserva_aislada(
@@ -185,4 +194,17 @@ def test_ocupacion_fecha_incluye_reserva_aislada_confirmada(conn, unidad_con_dos
         hora_inicio=10, hora_fin=11,
     )
     ocupado = calcular_ocupacion_fecha(conn, "2026-08-03")
-    assert ocupado[(id_c1, 10)] is True
+    assert (id_c1, 10) not in ocupado
+
+
+def test_aisladas_confirmadas_fecha(conn, unidad_con_dos_consultorios):
+    _, id_c1, _ = unidad_con_dos_consultorios
+    id_prof_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Puntual")
+    crear_reserva_aislada(
+        conn, id_profesional=id_prof_aislada, id_consultorio=id_c1, fecha="2026-08-03",
+        hora_inicio=10, hora_fin=11,
+    )
+    aisladas = aisladas_confirmadas_fecha(conn, "2026-08-03")
+    assert len(aisladas) == 1
+    assert aisladas[0]["IdConsultorio"] == id_c1
+    assert aisladas_confirmadas_fecha(conn, "2026-08-10") == []

@@ -111,9 +111,15 @@ def calcular_ocupacion_fecha(conn: sqlite3.Connection, fecha: str) -> dict[tuple
     diferencia de `calcular_ocupacion_regular` que promedia todo un mes por
     día de semana genérico. Acá SÍ importan las excepciones de ese día
     concreto: una reserva regular no ocupa si el profesional está ausente
-    ese día (mismo criterio que `verificar_conflictos_aislada`), y una
-    reserva aislada ya confirmada esa fecha SÍ ocupa aunque no sea parte
-    de ningún patrón semanal. Devuelve {(IdConsultorio, hora): True}."""
+    ese día (mismo criterio que `verificar_conflictos_aislada`).
+
+    Las reservas aisladas NO cuentan acá como ocupación (a diferencia de
+    una primera versión de esta función): quien busca disponibilidad para
+    horarios REGULARES tiene que seguir viendo el horario como alternativa
+    aunque haya una aislada asignada — es un compromiso puntual de un solo
+    día que se puede reubicar, no una ocupación real del consultorio. Ver
+    `aisladas_confirmadas_fecha` para detectar esos casos y avisar en vez
+    de bloquear. Devuelve {(IdConsultorio, hora): True}."""
     dia_semana = fecha_a_dia_semana(date.fromisoformat(fecha))
     ocupado: dict[tuple[int, int], bool] = {}
 
@@ -126,13 +132,16 @@ def calcular_ocupacion_fecha(conn: sqlite3.Connection, fecha: str) -> dict[tuple
         for h in range(int(r["HoraInicio"]), int(r["HoraFin"])):
             ocupado[(r["IdConsultorio"], h)] = True
 
-    for r in conn.execute(
-        "SELECT * FROM ReservaAislada WHERE Fecha = ? AND Estado = 'Confirmada'", (fecha,)
-    ).fetchall():
-        for h in range(int(r["HoraInicio"]), int(r["HoraFin"])):
-            ocupado[(r["IdConsultorio"], h)] = True
-
     return ocupado
+
+
+def aisladas_confirmadas_fecha(conn: sqlite3.Connection, fecha: str) -> list[sqlite3.Row]:
+    """Reservas aisladas Confirmadas de una fecha puntual — para avisar,
+    no para bloquear, cuando se ofrece esa fecha como alternativa de
+    horario regular (ver `calcular_ocupacion_fecha`)."""
+    return conn.execute(
+        "SELECT * FROM ReservaAislada WHERE Fecha = ? AND Estado = 'Confirmada'", (fecha,)
+    ).fetchall()
 
 
 def calcular_grilla(

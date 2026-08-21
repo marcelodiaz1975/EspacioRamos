@@ -356,7 +356,7 @@ class PantallaListaEspera(QWidget):
             QMessageBox.warning(self, "Generar mensaje de disponibilidad", "Ingresá al menos una fecha (AAAA-MM-DD).")
             return
         try:
-            texto = mensaje_disponibilidad_horarios_fecha(
+            texto, advertencias = mensaje_disponibilidad_horarios_fecha(
                 self.conn, fechas=fechas,
                 horario_desde=self.spin_desde.value(), horario_hasta=self.spin_hasta.value(),
                 tipo_combinacion=self.combo_tipo_fechas.currentData(), condiciones_consultorio=self._condiciones(),
@@ -368,6 +368,12 @@ class PantallaListaEspera(QWidget):
             QMessageBox.warning(self, "Generar mensaje de disponibilidad", str(error))
             return
         self.texto_mensaje_disponibilidad.setPlainText(texto)
+        if advertencias:
+            QMessageBox.information(
+                self, "Reservas aisladas a revisar",
+                "Alguna alternativa ofrecida ya tiene una reserva aislada asignada — el mensaje no lo "
+                "menciona, es solo para vos:\n\n" + "\n".join(advertencias),
+            )
 
         if self.casilla_pdf_disponibilidad.isChecked():
             directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_DISPONIBILIDAD))

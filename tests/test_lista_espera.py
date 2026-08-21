@@ -345,7 +345,9 @@ def test_coincidencia_fechas_respeta_ausencia_puntual_esa_fecha(conn):
     assert coincidencia.color == VERDE
 
 
-def test_coincidencia_fechas_reserva_aislada_confirmada_ocupa(conn):
+def test_coincidencia_fechas_reserva_aislada_no_bloquea_pero_avisa(conn):
+    """Una aislada es reubicable, no ocupación real: la fecha se sigue
+    ofreciendo como alternativa, pero con un aviso para el operador."""
     id_edificio = _crear_edificio(conn)
     id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
     id_consultorio = _crear_consultorio(conn, id_unidad, 1)
@@ -355,7 +357,19 @@ def test_coincidencia_fechas_reserva_aislada_confirmada_ocupa(conn):
         hora_inicio=14, hora_fin=16,
     )
 
-    assert calcular_coincidencia_fechas(conn, bloques=[_bloque_fecha(["2026-08-03"])]) is None
+    coincidencia = calcular_coincidencia_fechas(conn, bloques=[_bloque_fecha(["2026-08-03"])])
+    assert coincidencia.color == VERDE
+    assert len(coincidencia.alertas_aisladas) == 1
+    assert "Puntual" in coincidencia.alertas_aisladas[0]
+
+
+def test_coincidencia_fechas_sin_aislada_no_genera_alertas(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1)
+
+    coincidencia = calcular_coincidencia_fechas(conn, bloques=[_bloque_fecha(["2026-08-03"])])
+    assert coincidencia.alertas_aisladas == []
 
 
 def test_coincidencia_fechas_no_confunde_fechas_distintas_del_mismo_dia_semana(conn):
