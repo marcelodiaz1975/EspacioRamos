@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -27,6 +28,7 @@ from app.gui.dialogos import confirmar_si_fecha_es_mes_anterior
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
 from app.negocio.lista_espera import marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
+from app.negocio.mensajes import mensaje_detalle_reserva_aislada
 from app.negocio.reservas import (
     ConflictoBloqueanteError,
     cancelar_reserva_aislada,
@@ -381,7 +383,19 @@ class _PanelReservasAisladas(QWidget):
         self.conn.commit()
         if advertencias:
             QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias))
+        self._copiar_mensaje_detalle(datos["id_profesional"], fecha)
         self.actualizar()
+
+    def _copiar_mensaje_detalle(self, id_profesional: int, fecha: str) -> None:
+        """DC-02/DC-03/DC-04: confirmar, cancelar o modificar una reserva
+        aislada carga sola el mensaje de detalle al portapapeles — sin
+        reemplazar la posibilidad de volver a generarlo a mano desde el
+        Centro de mensajería."""
+        try:
+            texto = mensaje_detalle_reserva_aislada(self.conn, id_profesional=id_profesional, periodo=fecha[:7])
+        except ValueError:
+            return
+        QGuiApplication.clipboard().setText(texto)
 
     def _cancelar(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -396,4 +410,5 @@ class _PanelReservasAisladas(QWidget):
         self.conn.commit()
         if requiere_aviso:
             QMessageBox.information(self, "Cancelar reserva", "Cancelada el mismo día: avisar al profesional.")
+        self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
         self.actualizar()

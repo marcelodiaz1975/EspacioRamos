@@ -178,6 +178,40 @@ def test_crear_reserva_aislada_sin_conflicto_persiste(qtbot, conn):
     assert pantalla.panel_aisladas.tabla.item(0, 4).text() == "Confirmada"
 
 
+def _monkeypatch_clipboard(monkeypatch):
+    copiado = []
+    monkeypatch.setattr(
+        "app.gui.pantallas.reservas.QGuiApplication.clipboard",
+        staticmethod(lambda: type("_C", (), {"setText": lambda self, t: copiado.append(t)})()),
+    )
+    return copiado
+
+
+def test_crear_reserva_aislada_copia_mensaje_de_detalle_al_portapapeles(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas._crear()
+    assert len(copiado) == 1
+    assert "DETALLE RESERVA" in copiado[0]
+
+
+def test_cancelar_reserva_aislada_copia_mensaje_de_detalle_al_portapapeles(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas.spin_desde.setValue(13)
+    pantalla.panel_aisladas.spin_hasta.setValue(14)
+    pantalla.panel_aisladas._crear()
+
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    pantalla.panel_aisladas.tabla.selectRow(0)
+    pantalla.panel_aisladas._cancelar()
+    assert len(copiado) == 1
+    assert "DETALLE RESERVA" in copiado[0]
+
+
 def test_crear_reserva_aislada_fecha_mes_anterior_pide_confirmacion(qtbot, conn, monkeypatch):
     _preparar(conn)
     conn.execute(
