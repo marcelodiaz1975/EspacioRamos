@@ -18,7 +18,7 @@ from app.negocio.avance_mes import avanzar_mes, porcentaje_aumento_del_periodo
 from app.negocio.backup import generar_backup
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.formato import mes_texto, periodo_mm_aaaa
-from app.negocio.panel_control import Alertas, calcular_alertas, puede_avanzar_mes
+from app.negocio.panel_control import Alertas, calcular_alertas
 
 _TITULOS_ALERTA = {
     "deuda_regulares": "Deuda mes anterior — profesionales regulares",
@@ -88,8 +88,6 @@ class PanelControl(QWidget):
             f"Período en curso: {mes_texto(mes).capitalize()} de {anio} ({periodo_mm_aaaa(periodo)})  ·  "
             f"Hoy: {hoy.strftime('%d/%m/%Y')}"
         )
-        self.boton_avanzar.setEnabled(puede_avanzar_mes(self.conn))
-
         alertas = calcular_alertas(self.conn)
         self._refrescar_alertas(alertas)
 

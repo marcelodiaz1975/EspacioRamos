@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.pagos import PantallaPagos
+from app.repositorio.registro import obtener_repositorio
 
 
 @pytest.fixture
@@ -81,6 +82,76 @@ def test_registrar_pago_transferencia_guarda_cuenta_receptora(qtbot, conn):
     fila = conn.execute("SELECT MedioPago, CuentaReceptora FROM HistorialPagos").fetchone()
     assert fila["MedioPago"] == "Transferencia a cta Celeste"
     assert fila["CuentaReceptora"] == "CA Banco Macro - Celeste"
+
+
+def test_registrar_pago_periodo_imputado_mes_anterior_pide_confirmacion(qtbot, conn, monkeypatch):
+    _crear_profesional(conn, saldo=10000)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    panel.spin_monto.setValue(1000)
+    panel.campo_periodo.setText("2026-07")
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._registrar()
+    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel._registrar()
+    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 1
+
+
+def _preparar_pago_que_cruza_tolerancia(conn):
+    id_profesional = _crear_profesional(conn, saldo=10000)
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=1000)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    return id_profesional
+
+
+def _responder_segun_titulo(respuesta_restablecer):
+    def _responder(_parent, titulo, *a, **k):
+        if titulo == "Restablecer descuentos":
+            return respuesta_restablecer
+        return QMessageBox.StandardButton.Yes  # confirma que la fecha del mes anterior es correcta
+
+    return staticmethod(_responder)
+
+
+def test_registrar_pago_que_cruza_tolerancia_pregunta_restablecer_descuento(qtbot, conn, monkeypatch):
+    id_profesional = _preparar_pago_que_cruza_tolerancia(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    panel.spin_monto.setValue(950)  # 1000 -> 50: cruza la tolerancia de 100
+    panel.campo_periodo.setText("2026-07")
+
+    monkeypatch.setattr(QMessageBox, "question", _responder_segun_titulo(QMessageBox.StandardButton.No))
+    panel._registrar()
+
+    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 1
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    assert actualizado["DescuentoSuspendidoPeriodo"] == "2026-07"
+
+
+def test_registrar_pago_que_cruza_tolerancia_restablece_si_responde_si(qtbot, conn, monkeypatch):
+    id_profesional = _preparar_pago_que_cruza_tolerancia(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    panel.spin_monto.setValue(950)
+    panel.campo_periodo.setText("2026-07")
+
+    monkeypatch.setattr(QMessageBox, "question", _responder_segun_titulo(QMessageBox.StandardButton.Yes))
+    panel._registrar()
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    assert actualizado["DescuentoSuspendidoPeriodo"] is None
 
 
 def test_cuenta_receptora_se_oculta_salvo_transferencia(qtbot, conn):

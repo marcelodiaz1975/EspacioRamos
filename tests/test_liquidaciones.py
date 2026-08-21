@@ -171,6 +171,37 @@ def test_no_pierde_descuento_si_saldo_anterior_dentro_de_tolerancia(conn, consul
     assert liquidacion.tramos[0].descuento_pct == pytest.approx(obtener_porcentaje_descuento(conn, 2))
 
 
+def test_suspender_descuento_periodo_mantiene_perdido_el_descuento_de_horas(conn, consultorio):
+    """DC-06 §5.2: aunque el saldo ya volvió a estar dentro de tolerancia,
+    si el operador eligió NO restablecer el descuento, sigue perdido para
+    esa liquidación puntual — pero el ajuste por saldo atrasado (mecanismo
+    aparte) no se ve afectado, porque depende solo del saldo real."""
+    from app.negocio.pagos import suspender_descuento_periodo
+
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=500)
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=100)  # ya dentro de tolerancia
+    suspender_descuento_periodo(conn, id_profesional=id_prof, periodo=PERIODO)
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion.pierde_descuento_horas is True
+    assert liquidacion.ajuste_saldo_atrasado == 0  # no se reactiva por la suspensión manual
+
+
+def test_suspender_descuento_periodo_no_afecta_otros_periodos(conn, consultorio):
+    """La decisión es por período puntual: no arrastra a los meses
+    siguientes, que se evalúan de forma independiente."""
+    from app.negocio.pagos import suspender_descuento_periodo
+
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=500)
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=100)
+    suspender_descuento_periodo(conn, id_profesional=id_prof, periodo=PERIODO_ANTERIOR)
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion.pierde_descuento_horas is False
+
+
 def test_ajuste_saldo_atrasado_por_encima_de_tolerancia(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=1000)

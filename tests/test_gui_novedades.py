@@ -96,3 +96,24 @@ def test_crear_cargo_especial_persiste(qtbot, conn):
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
     assert panel.tabla.item(0, 2).text() == "Ajuste manual"
+
+
+def test_crear_cargo_especial_periodo_mes_anterior_pide_confirmacion(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_cargos
+    panel.campo_concepto.setText("ajuste manual")
+    panel.spin_monto.setValue(1500)
+    panel.campo_periodo.setText("2026-07")
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 0
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1

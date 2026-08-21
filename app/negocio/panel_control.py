@@ -1,9 +1,10 @@
 """Pantalla principal / panel de control (Etapa 6.1 del documento).
 
 Encabezado (nombre del espacio, mes/año en curso, fecha de hoy) + botón
-"Avanzar de mes" (solo habilitado el último día del mes o el primero del
-siguiente) + 5 alertas. Este módulo calcula los datos; la pantalla en
-`app/gui` solo los muestra.
+"Avanzar de mes" (disponible en cualquier momento, no solo al principio o
+fin de mes — DC-06 §1: el operador puede necesitar adelantarlo unos días,
+por ejemplo por vacaciones propias) + 5 alertas. Este módulo calcula los
+datos; la pantalla en `app/gui` solo los muestra.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from dataclasses import dataclass, field, fields
 from datetime import timedelta
 
 from app.negocio.backup import backup_vencido as _backup_vencido
-from app.negocio.dias import fecha_actual, periodo_actual, ultimo_dia_mes
+from app.negocio.dias import fecha_actual, periodo_actual
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -35,14 +36,6 @@ class Alertas:
             valor = getattr(self, f.name)
             total += len(valor) if isinstance(valor, list) else int(bool(valor))
         return total
-
-
-def puede_avanzar_mes(conn: sqlite3.Connection) -> bool:
-    """"Solo habilitado el último día del mes o el primero del siguiente"."""
-    hoy = fecha_actual(conn)
-    if hoy.day == 1:
-        return True
-    return hoy == ultimo_dia_mes(hoy.year, hoy.month)
 
 
 def _deuda_regulares(conn: sqlite3.Connection) -> list[sqlite3.Row]:

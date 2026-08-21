@@ -34,10 +34,16 @@ def registrar_pago(
     medio_pago: str | None = None, cuenta_receptora: str | None = None,
     periodo_imputado: str | None = None, es_ajuste: bool = False, observacion: str | None = None,
     fecha_transferencia: str | None = None, hora_transferencia: str | None = None,
-) -> int:
+) -> tuple[int, bool]:
     """Registra un pago recibido. Si se imputa a un período anterior al mes
     en curso descuenta de SaldoCuentaAnterior (DC-09 §8); si no, descuenta
-    de SaldoCuentaActual. Nunca toca ambos a la vez."""
+    de SaldoCuentaActual. Nunca toca ambos a la vez.
+
+    El segundo valor devuelto (`cruza_tolerancia`) es True cuando el pago
+    imputado al mes anterior hace que ese saldo pase de estar por encima de
+    ToleranciaDeudaDescuento a estar dentro — el caso en que corresponde
+    preguntarle al operador si restablece el descuento por horas semanales
+    para la liquidación remanente de ese período puntual (DC-06 §5.2)."""
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None:
         raise ValueError(f"No existe el profesional #{id_profesional}")
@@ -50,10 +56,29 @@ def registrar_pago(
         PeriodoImputado=periodo_imputado, EsAjuste=int(es_ajuste), Observacion=observacion,
     )
 
-    campo = "SaldoCuentaAnterior" if periodo_imputado and periodo_imputado < periodo_actual(conn) else "SaldoCuentaActual"
-    nuevo_saldo = (profesional[campo] or 0.0) - monto
+    es_mes_anterior = bool(periodo_imputado) and periodo_imputado < periodo_actual(conn)
+    campo = "SaldoCuentaAnterior" if es_mes_anterior else "SaldoCuentaActual"
+    saldo_previo = profesional[campo] or 0.0
+    nuevo_saldo = saldo_previo - monto
     obtener_repositorio(conn, "Profesional").actualizar(id_profesional, **{campo: nuevo_saldo})
-    return id_pago
+
+    cruza_tolerancia = False
+    if es_mes_anterior:
+        cfg = conn.execute(
+            "SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1"
+        ).fetchone()
+        tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
+        cruza_tolerancia = saldo_previo > tolerancia >= nuevo_saldo
+    return id_pago, cruza_tolerancia
+
+
+def suspender_descuento_periodo(conn: sqlite3.Connection, *, id_profesional: int, periodo: str) -> None:
+    """DC-06 §5.2, rama "No" (la recomendada por defecto): aunque el saldo
+    anterior ya volvió a estar dentro de tolerancia, el descuento por horas
+    semanales queda perdido igual para la liquidación remanente de ese
+    período puntual — los meses siguientes se evalúan de forma
+    independiente, sin arrastrar esta decisión."""
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, DescuentoSuspendidoPeriodo=periodo)
 
 
 def crear_cargo_especial(

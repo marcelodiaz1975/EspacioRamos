@@ -25,9 +25,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.listas_editables import valores_lista
-from app.negocio.pagos import cancelar_plan, crear_plan_pago, registrar_pago
+from app.negocio.pagos import cancelar_plan, crear_plan_pago, registrar_pago, suspender_descuento_periodo
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -161,21 +162,45 @@ class _PanelRegistrarPago(QWidget):
         if monto <= 0:
             QMessageBox.warning(self, "Registrar pago", "El monto debe ser mayor a cero.")
             return
+        periodo_imputado = self.campo_periodo.text().strip() or None
+        if not confirmar_si_periodo_imputado_es_anterior(self, self.conn, periodo_imputado):
+            return
+        id_profesional = self.combo_profesional.currentData()
         es_transferencia = "transferencia" in self.combo_medio_pago.currentText().lower()
         try:
-            registrar_pago(
-                self.conn, id_profesional=self.combo_profesional.currentData(), monto=monto,
+            _id_pago, cruza_tolerancia = registrar_pago(
+                self.conn, id_profesional=id_profesional, monto=monto,
                 fecha=self.campo_fecha.text().strip() or None,
                 medio_pago=self.combo_medio_pago.currentText().strip() or None,
                 cuenta_receptora=self.combo_cuenta_receptora.currentText().strip() if es_transferencia else None,
-                periodo_imputado=self.campo_periodo.text().strip() or None,
+                periodo_imputado=periodo_imputado,
                 es_ajuste=self.casilla_ajuste.isChecked(),
             )
         except ValueError as error:
             QMessageBox.warning(self, "Registrar pago", str(error))
             return
+        if cruza_tolerancia:
+            self._preguntar_restablecer_descuento(id_profesional, periodo_imputado)
         self.conn.commit()
         self.actualizar()
+
+    def _preguntar_restablecer_descuento(self, id_profesional: int, periodo_imputado: str) -> None:
+        """DC-06 §5.2: el saldo del mes anterior volvió a estar dentro de
+        tolerancia con este pago. Por defecto (recomendado) el descuento
+        por horas semanales queda perdido igual para esa liquidación
+        puntual — los descuentos están pensados para profesionales que
+        terminan al día, no para los que se pusieron al día a mitad de
+        camino."""
+        respuesta = QMessageBox.question(
+            self, "Restablecer descuentos",
+            f"El saldo del período {periodo_imputado} volvió a estar dentro de la tolerancia con este pago.\n\n"
+            "¿Querés restablecerle el descuento por cantidad de horas semanales reservadas "
+            "para esa liquidación?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if respuesta == QMessageBox.StandardButton.No:
+            suspender_descuento_periodo(self.conn, id_profesional=id_profesional, periodo=periodo_imputado)
 
 
 class _PanelPlanesPago(QWidget):

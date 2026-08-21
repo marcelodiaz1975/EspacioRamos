@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.dialogos import confirmar_si_fecha_es_mes_anterior
 from app.negocio.dias import DIAS_SEMANA, fecha_actual
 from app.negocio.reservas import (
     ConflictoBloqueanteError,
@@ -323,10 +324,13 @@ class _PanelReservasAisladas(QWidget):
         self.tabla.resizeColumnsToContents()
 
     def _crear(self, forzar: bool = False) -> None:
+        fecha = self.campo_fecha.text().strip() or fecha_actual(self.conn).isoformat()
+        if not forzar and not confirmar_si_fecha_es_mes_anterior(self, self.conn, fecha):
+            return
         datos = dict(
             id_profesional=self.combo_profesional.currentData(),
             id_consultorio=self.combo_consultorio.currentData(),
-            fecha=self.campo_fecha.text().strip() or fecha_actual(self.conn).isoformat(),
+            fecha=fecha,
             hora_inicio=self.spin_desde.value(),
             hora_fin=self.spin_hasta.value(),
             aplica_recargo=self.casilla_recargo.isChecked(),

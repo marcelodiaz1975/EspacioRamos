@@ -98,6 +98,11 @@ CREATE TABLE IF NOT EXISTS Profesional (
     ProfesionalCabezaEquipo INTEGER REFERENCES Profesional(IdProfesional),
     SaldoCuentaActual REAL NOT NULL DEFAULT 0,
     SaldoCuentaAnterior REAL NOT NULL DEFAULT 0,
+    -- DC-06 §5.2: si un pago imputado al mes anterior hace que el saldo
+    -- vuelva a estar dentro de la tolerancia, el operador decide si se le
+    -- restablece el descuento por horas semanales para ESA liquidación
+    -- puntual (AAAA-MM) o si queda perdido igual. No aplica a otros meses.
+    DescuentoSuspendidoPeriodo TEXT,
     PlazoPagoExtendido TEXT,
     MotivoPlazoExtra TEXT,
     DiaPlazoExtendidoAutomatico INTEGER CHECK (

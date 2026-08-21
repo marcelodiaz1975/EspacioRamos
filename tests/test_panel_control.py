@@ -2,7 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.panel_control import calcular_alertas, puede_avanzar_mes
+from app.negocio.panel_control import calcular_alertas
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -18,21 +18,6 @@ def _fijar_fecha(conn, fecha_iso):
     conn.execute(
         "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = ? WHERE IdConfiguracion = 1", (fecha_iso,)
     )
-
-
-def test_puede_avanzar_mes_ultimo_dia(conn):
-    _fijar_fecha(conn, "2026-08-31")
-    assert puede_avanzar_mes(conn) is True
-
-
-def test_puede_avanzar_mes_primer_dia(conn):
-    _fijar_fecha(conn, "2026-09-01")
-    assert puede_avanzar_mes(conn) is True
-
-
-def test_no_puede_avanzar_mes_dia_intermedio(conn):
-    _fijar_fecha(conn, "2026-08-15")
-    assert puede_avanzar_mes(conn) is False
 
 
 def test_alertas_vacias_sin_datos(conn):

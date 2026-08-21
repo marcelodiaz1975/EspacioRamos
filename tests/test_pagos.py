@@ -30,8 +30,9 @@ def profesional(conn):
 
 def test_registrar_pago_sin_periodo_descuenta_saldo_actual(conn, profesional):
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
-    id_pago = registrar_pago(conn, id_profesional=profesional, monto=400, medio_pago="Sobre en buzón")
+    id_pago, cruza_tolerancia = registrar_pago(conn, id_profesional=profesional, monto=400, medio_pago="Sobre en buzón")
     assert id_pago is not None
+    assert cruza_tolerancia is False
 
     actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
     assert actualizado["SaldoCuentaActual"] == pytest.approx(600)
@@ -46,6 +47,35 @@ def test_registrar_pago_imputado_a_mes_anterior_descuenta_saldo_anterior(conn, p
     actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
     assert actualizado["SaldoCuentaAnterior"] == pytest.approx(600)
     assert actualizado["SaldoCuentaActual"] == pytest.approx(1000)  # sin tocar
+
+
+def test_registrar_pago_cruza_tolerancia_al_regularizar_mes_anterior(conn, profesional):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
+    # paga 950: saldo pasa de 1000 (por encima de 100) a 50 (dentro de tolerancia) -> cruza
+    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=950, periodo_imputado="2026-07")
+    assert cruza is True
+
+
+def test_registrar_pago_no_cruza_tolerancia_si_ya_estaba_dentro(conn, profesional):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=50)
+    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=10, periodo_imputado="2026-07")
+    assert cruza is False
+
+
+def test_registrar_pago_no_cruza_tolerancia_si_sigue_endeudado(conn, profesional):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
+    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=200, periodo_imputado="2026-07")
+    assert cruza is False
+
+
+def test_registrar_pago_no_cruza_tolerancia_si_imputa_a_mes_en_curso(conn, profesional):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
+    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=950)  # sin periodo_imputado
+    assert cruza is False
 
 
 def test_registrar_pago_profesional_inexistente(conn):

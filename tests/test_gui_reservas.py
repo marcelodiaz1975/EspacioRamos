@@ -70,6 +70,24 @@ def test_crear_reserva_aislada_sin_conflicto_persiste(qtbot, conn):
     assert pantalla.panel_aisladas.tabla.item(0, 4).text() == "Confirmada"
 
 
+def test_crear_reserva_aislada_fecha_mes_anterior_pide_confirmacion(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas.campo_fecha.setText("2026-07-20")
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    pantalla.panel_aisladas._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 0
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    pantalla.panel_aisladas._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
+
+
 def test_cancelar_reserva_aislada_cambia_estado(qtbot, conn):
     # 13-14 cae fuera de los bloques rígidos por defecto (9-11 y 18-21) para
     # que la cancelación el mismo día no choque con esa restricción aparte.

@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.licencias import crear_licencia
 from app.negocio.listas_editables import valores_lista
@@ -372,11 +373,14 @@ class _PanelCargosEspeciales(QWidget):
         if not concepto:
             QMessageBox.warning(self, "Crear cargo especial", "El concepto es obligatorio.")
             return
+        periodo_imputado = self.campo_periodo.text().strip() or None
+        if not confirmar_si_periodo_imputado_es_anterior(self, self.conn, periodo_imputado):
+            return
         try:
             crear_cargo_especial(
                 self.conn, id_profesional=self.combo_profesional.currentData(), tipo=self.combo_tipo.currentData(),
                 concepto=concepto, monto=self.spin_monto.value(),
-                periodo_imputado=self.campo_periodo.text().strip() or None,
+                periodo_imputado=periodo_imputado,
             )
         except ValueError as error:
             QMessageBox.warning(self, "Crear cargo especial", str(error))

@@ -34,18 +34,11 @@ def test_panel_control_muestra_nombre_del_espacio(qtbot, conn):
     assert pantalla.titulo.text() == "Mi Espacio"
 
 
-def test_panel_control_boton_avanzar_deshabilitado_a_mitad_de_mes(qtbot, conn):
+def test_panel_control_boton_avanzar_habilitado_a_mitad_de_mes(qtbot, conn):
+    # DC-06 §1: el avance de mes tiene que estar disponible en cualquier
+    # momento, no solo al principio o fin de mes.
     conn.execute(
         "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
-    )
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    assert pantalla.boton_avanzar.isEnabled() is False
-
-
-def test_panel_control_boton_avanzar_habilitado_ultimo_dia(qtbot, conn):
-    conn.execute(
-        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-31' WHERE IdConfiguracion = 1"
     )
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)

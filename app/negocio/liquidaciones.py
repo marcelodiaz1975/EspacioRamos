@@ -728,12 +728,21 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
     tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
     ajuste_pct = cfg["PorcentajeAjusteSaldoAtrasado"] if cfg else 0.0
     recargo_pct = cfg["RecargoPorcentajeAisladas"] if cfg else 0.0
-    pierde_descuento = saldo_anterior > tolerancia
-    # Ajuste por saldo atrasado (DC-06 §5.2): se evalúa en vivo, igual que
-    # pierde_descuento. Si un pago imputado al mes anterior ya regularizó
-    # la situación antes de calcular esto, saldo_anterior bajó y no aplica
-    # — no hace falta ninguna reversión posterior.
-    ajuste_saldo_atrasado = saldo_anterior * ajuste_pct / 100 if pierde_descuento else 0.0
+    saldo_sigue_atrasado = saldo_anterior > tolerancia
+    # DC-06 §5.2: si un pago imputado a este período puntual hizo que el
+    # saldo volviera a estar dentro de tolerancia, pero el operador eligió
+    # NO restablecer el descuento por horas semanales (`pagos.
+    # suspender_descuento_periodo`), se seguía perdiendo igual para esta
+    # liquidación remanente. La marca es por período: no arrastra a otros
+    # meses. El ajuste por saldo atrasado (más abajo) NO se ve afectado por
+    # esta decisión — depende solo del saldo real, nunca se "restablece".
+    pierde_descuento = saldo_sigue_atrasado or profesional["DescuentoSuspendidoPeriodo"] == periodo
+    # Ajuste por saldo atrasado (DC-06 §5.2): se evalúa en vivo sobre el
+    # saldo real. Si un pago imputado al mes anterior ya regularizó la
+    # situación antes de calcular esto, saldo_anterior bajó y no aplica —
+    # no hace falta ninguna reversión posterior, y la suspensión manual del
+    # descuento por horas no lo reactiva.
+    ajuste_saldo_atrasado = saldo_anterior * ajuste_pct / 100 if saldo_sigue_atrasado else 0.0
 
     fecha_emision_este_periodo = _fecha_emision_periodo(conn, id_profesional, periodo)
     ids_tardias = _ids_reservas_tardias(conn, ids, anio, mes, fecha_emision_este_periodo)
