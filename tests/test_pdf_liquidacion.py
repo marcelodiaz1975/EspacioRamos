@@ -115,6 +115,29 @@ def test_items_cuenta_agrupa_deposito_llave_antes_del_item_libre(conn, profesion
     assert idx_llave < idx_libre
 
 
+def test_items_cuenta_desglosa_bruto_y_descuento_por_tramo_si_cambian_horas(conn, consultorio, profesional):
+    # el profesional ya tiene 3hs los lunes (fixture); agrega una reserva
+    # nueva desde el 15/8 que cambia el total de horas semanales a mitad de mes
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio, DiaSemana="Martes",
+        HoraInicio=10, HoraFin=13, VigenciaInicio="2026-08-15",
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert len(liquidacion.tramos) == 2
+
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    conceptos = [c for c, _, _ in items]
+
+    assert conceptos[0].startswith("Importe bruto tramo 1")
+    assert conceptos[1].startswith("Importe bruto tramo 2")
+    assert conceptos[2].startswith("Descuento (") and "tramo 1" in conceptos[2]
+    assert conceptos[3].startswith("Descuento (") and "tramo 2" in conceptos[3]
+    assert conceptos[4] == "Subtotal por reserva para el mes de agosto"
+    # el subtotal sigue siendo la suma exacta de los dos tramos, sin redondeo intermedio
+    assert items[4][1] == pytest.approx(liquidacion.subtotal_reserva)
+    assert items[4][1] == pytest.approx(sum(t.subtotal for t in liquidacion.tramos))
+
+
 def test_monto_en_letras_casos_basicos():
     assert monto_en_letras(0) == "Pesos cero con 00/100"
     assert monto_en_letras(21) == "Pesos veintiuno con 00/100"

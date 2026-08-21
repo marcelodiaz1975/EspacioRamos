@@ -20,6 +20,11 @@ de ValorBonificado).
 Categoría B (DC-05 §2.1): sin impacto económico — ValorBonificado se
 guarda en 0 aunque el registro sea válido (sirve solo para saber cuándo
 el consultorio queda libre).
+
+Igual que vacaciones (DC-05 §2.1), solo aplican a profesionales categoría
+R, B o E con reserva regular activa. El % de bonificación del tipo de
+licencia es el valor por defecto, pero se puede editar caso por caso al
+registrarla (DC-05 §2.2).
 """
 from __future__ import annotations
 
@@ -27,6 +32,7 @@ import sqlite3
 from datetime import date, timedelta
 
 from app.negocio.dias import fecha_actual
+from app.negocio.vacaciones import CATEGORIAS_CON_DERECHO_A_VACACIONES
 from app.negocio.valores import (
     calcular_valor_semanal_regular,
     horas_semanales_vigentes,
@@ -36,10 +42,27 @@ from app.negocio.valores import (
 from app.repositorio.registro import obtener_repositorio
 
 
+def _profesional_tiene_derecho(conn: sqlite3.Connection, id_profesional: int) -> bool:
+    prof = conn.execute(
+        "SELECT CategoriaProfesional FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
+    ).fetchone()
+    if prof is None or prof["CategoriaProfesional"] not in CATEGORIAS_CON_DERECHO_A_VACACIONES:
+        return False
+    tiene_reserva = conn.execute(
+        "SELECT 1 FROM ReservaRegular WHERE IdProfesional = ? LIMIT 1", (id_profesional,)
+    ).fetchone()
+    return tiene_reserva is not None
+
+
 def crear_licencia(
     conn: sqlite3.Connection, *, id_profesional: int, id_tipo_licencia: int,
-    fecha_desde: str, fecha_hasta: str | None = None,
+    fecha_desde: str, fecha_hasta: str | None = None, porcentaje_bonificacion: float | None = None,
 ) -> tuple[int, list[str]]:
+    if not _profesional_tiene_derecho(conn, id_profesional):
+        raise ValueError(
+            "Las licencias solo aplican a profesionales categoría R, B o E "
+            "con reservas regulares activas"
+        )
     tipo = obtener_repositorio(conn, "TipoLicencia").obtener(id_tipo_licencia)
     if tipo is None:
         raise ValueError(f"No existe el tipo de licencia #{id_tipo_licencia}")
@@ -75,7 +98,7 @@ def crear_licencia(
     descuento_pct = obtener_porcentaje_descuento(conn, horas_semanales)
     valor_semanal = calcular_valor_semanal_regular(conn, id_profesional, fecha_hoy)
 
-    porcentaje = tipo["PorcentajeBonificacion"]
+    porcentaje = porcentaje_bonificacion if porcentaje_bonificacion is not None else tipo["PorcentajeBonificacion"]
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is not None and profesional["CategoriaProfesional"] == "B":
         valor_bonificado = 0.0

@@ -270,6 +270,9 @@ class _PanelReservasAisladas(QWidget):
         self.casilla_recargo = QCheckBox("Aplica recargo")
         form.addWidget(self.casilla_recargo)
 
+        self.casilla_reubicacion = QCheckBox("Es reubicación (compensa una ausencia del profesional, no genera cargo)")
+        form.addWidget(self.casilla_reubicacion)
+
         boton_crear = QPushButton("Crear reserva aislada")
         boton_crear.setObjectName("botonPrimario")
         boton_crear.clicked.connect(self._crear)
@@ -315,7 +318,8 @@ class _PanelReservasAisladas(QWidget):
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(texto_consultorio))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(r["Fecha"]))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(f"{r['HoraInicio']:g} a {r['HoraFin']:g}"))
-            self.tabla.setItem(fila_idx, 4, QTableWidgetItem(r["Estado"]))
+            estado = f"{r['Estado']} (reubicación)" if r["EsReubicacion"] else r["Estado"]
+            self.tabla.setItem(fila_idx, 4, QTableWidgetItem(estado))
         self.tabla.resizeColumnsToContents()
 
     def _crear(self, forzar: bool = False) -> None:
@@ -326,6 +330,7 @@ class _PanelReservasAisladas(QWidget):
             hora_inicio=self.spin_desde.value(),
             hora_fin=self.spin_hasta.value(),
             aplica_recargo=self.casilla_recargo.isChecked(),
+            es_reubicacion=self.casilla_reubicacion.isChecked(),
             forzar=forzar,
         )
         try:

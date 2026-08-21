@@ -39,6 +39,8 @@ _CAMPOS_NUMERICOS = [
     ("RecargoPorcentajeAisladas", "Recargo % reservas aisladas"),
     ("PorcentajeAjusteSaldoAtrasado", "% ajuste saldo atrasado"),
     ("ToleranciaDeudaDescuento", "Tolerancia deuda para descuento"),
+    ("PorcentajeDescuentoFeriado", "% descuento por feriado nacional"),
+    ("PorcentajeDescuentoNoLaborable", "% descuento por día no laborable"),
     ("SemanasVacacionesMaximasPorAnio", "Semanas de vacaciones máximas por año"),
     ("DiasEnvioLiquidacionesRemanentes", "Días de margen para envío de liquidaciones"),
     ("RetencionHistorialListaEsperaAnios", "Retención historial lista de espera (años)"),

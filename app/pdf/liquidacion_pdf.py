@@ -241,12 +241,30 @@ def _items_cuenta(
     colgado `.nombre_tipo` (ver `generar_pdf_liquidacion`, que lo resuelve
     una sola vez)."""
     items: list[tuple[str, float, bool]] = []
-    items.append((f"Importe bruto correspondiente a la reserva regular de {mes_actual_texto}", liquidacion.bruto, False))
-    concepto_desc = (
-        f"Descuento ({liquidacion.descuento_horas_pct:g}%) por cantidad de horas semanales "
-        f"reservadas ({liquidacion.horas_semanales:g}hs)"
-    )
-    items.append((concepto_desc, -(liquidacion.bruto - liquidacion.subtotal_reserva), False))
+    tramos = liquidacion.tramos
+    multi_tramo = len(tramos) > 1
+    if multi_tramo:
+        # DC-01 §1.2/§1.10: si cambiaron las horas semanales (y por lo tanto
+        # el % de descuento) a mitad de mes, se desglosan todos los brutos
+        # primero y todos los descuentos después — no intercalados — para
+        # que el profesional vea claro qué corresponde a cada tramo.
+        for i, t in enumerate(tramos, start=1):
+            desde, hasta = fecha_corta(t.fecha_desde), fecha_corta(t.fecha_hasta)
+            items.append((f"Importe bruto tramo {i} ({desde} al {hasta})", t.bruto, False))
+        for i, t in enumerate(tramos, start=1):
+            desde, hasta = fecha_corta(t.fecha_desde), fecha_corta(t.fecha_hasta)
+            concepto_desc = (
+                f"Descuento ({t.descuento_pct:g}%) por cantidad de horas semanales reservadas "
+                f"({t.horas_semanales:g}hs) tramo {i} ({desde} al {hasta})"
+            )
+            items.append((concepto_desc, -(t.bruto - t.subtotal), False))
+    else:
+        items.append((f"Importe bruto correspondiente a la reserva regular de {mes_actual_texto}", liquidacion.bruto, False))
+        concepto_desc = (
+            f"Descuento ({liquidacion.descuento_horas_pct:g}%) por cantidad de horas semanales "
+            f"reservadas ({liquidacion.horas_semanales:g}hs)"
+        )
+        items.append((concepto_desc, -(liquidacion.bruto - liquidacion.subtotal_reserva), False))
     items.append((f"Subtotal por reserva para el mes de {mes_actual_texto}", liquidacion.subtotal_reserva, True))
     if liquidacion.saldo_anterior > 0:
         concepto_saldo = "Saldo pendiente de la liquidación anterior"

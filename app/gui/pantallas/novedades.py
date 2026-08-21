@@ -158,8 +158,16 @@ class _PanelLicencias(QWidget):
         self.combo_tipo = QComboBox()
         for t in obtener_repositorio(self.conn, "TipoLicencia").listar(Activo=1):
             self.combo_tipo.addItem(t["Nombre"], t["IdTipoLicencia"])
+        self.combo_tipo.currentIndexChanged.connect(self._precargar_porcentaje)
         form.addWidget(QLabel("Tipo de licencia"))
         form.addWidget(self.combo_tipo)
+
+        self.spin_porcentaje = QDoubleSpinBox()
+        self.spin_porcentaje.setRange(0, 100)
+        self.spin_porcentaje.setSuffix(" %")
+        form.addWidget(QLabel("% de bonificación (editable caso por caso)"))
+        form.addWidget(self.spin_porcentaje)
+        self._precargar_porcentaje()
 
         self.campo_desde = QLineEdit()
         self.campo_desde.setPlaceholderText("AAAA-MM-DD")
@@ -183,6 +191,11 @@ class _PanelLicencias(QWidget):
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
+
+    def _precargar_porcentaje(self) -> None:
+        id_tipo = self.combo_tipo.currentData()
+        tipo = obtener_repositorio(self.conn, "TipoLicencia").obtener(id_tipo) if id_tipo is not None else None
+        self.spin_porcentaje.setValue(tipo["PorcentajeBonificacion"] if tipo else 0)
 
     def actualizar(self) -> None:
         registros = obtener_repositorio(self.conn, "Licencia").listar()
@@ -208,6 +221,7 @@ class _PanelLicencias(QWidget):
             _id, advertencias = crear_licencia(
                 self.conn, id_profesional=self.combo_profesional.currentData(), id_tipo_licencia=id_tipo,
                 fecha_desde=self.campo_desde.text().strip(), fecha_hasta=self.campo_hasta.text().strip() or None,
+                porcentaje_bonificacion=self.spin_porcentaje.value(),
             )
         except ValueError as error:
             QMessageBox.warning(self, "Crear licencia", str(error))

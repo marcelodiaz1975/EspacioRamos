@@ -389,15 +389,30 @@ def _fecha_emision_periodo(conn: sqlite3.Connection, id_profesional: int, period
     return max(fechas) if fechas else None
 
 
+def _porcentajes_tipo_fecha(conn: sqlite3.Connection) -> dict[str, float]:
+    """DC-01 §1.3: feriados nacionales y días no laborables tienen
+    parámetros de porcentaje independientes en Configuracion — hoy ambos
+    al 100% por defecto, pero modificables por separado."""
+    cfg = conn.execute(
+        "SELECT PorcentajeDescuentoFeriado, PorcentajeDescuentoNoLaborable FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    return {
+        "Feriado nacional": cfg["PorcentajeDescuentoFeriado"] if cfg else 100.0,
+        "Día no laborable": cfg["PorcentajeDescuentoNoLaborable"] if cfg else 100.0,
+    }
+
+
 def _monto_feriado_dia(
     conn: sqlite3.Connection, ids: list[int], fecha: str, ids_excluir: frozenset[int], pierde_descuento: bool,
+    porcentaje_tipo: float = 100.0,
 ) -> float:
     """Valor descontado de las horas regulares reservadas para ese día de
-    feriado, con el % de descuento por horas semanales vigente ese día."""
+    feriado, con el % de descuento por horas semanales vigente ese día,
+    multiplicado por el % del tipo de fecha (feriado/no laborable)."""
     dia = date.fromisoformat(fecha)
     pct = _descuento_pct_en_fecha(conn, ids, fecha, ids_excluir, pierde_descuento)
     return sum(
-        (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"] * (1 - pct / 100)
+        (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"] * (1 - pct / 100) * (porcentaje_tipo / 100)
         for f in _reservas_regulares_del_dia(conn, ids, dia, ids_excluir)
     )
 
@@ -407,9 +422,12 @@ def _calcular_descuentos_feriados(
     ids_excluir: frozenset[int], pierde_descuento: bool,
 ) -> tuple[list[ItemFeriado], list[ItemFeriado]]:
     feriados = feriados_relevantes_periodo(conn, anio, mes)
+    porcentajes = _porcentajes_tipo_fecha(conn)
     nacionales, no_laborables = [], []
     for feriado in feriados:
-        monto = _monto_feriado_dia(conn, ids, feriado["Fecha"], ids_excluir, pierde_descuento)
+        monto = _monto_feriado_dia(
+            conn, ids, feriado["Fecha"], ids_excluir, pierde_descuento, porcentajes[feriado["Tipo"]],
+        )
         if monto <= 0:
             continue
         item = ItemFeriado(fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto)
@@ -428,11 +446,14 @@ def _calcular_feriados_pendientes(
     if fecha_emision_ant is None:
         return []
     anio_ant, mes_ant = parsear_periodo(periodo_anterior)
+    porcentajes = _porcentajes_tipo_fecha(conn)
     pendientes = []
     for feriado in feriados_relevantes_periodo(conn, anio_ant, mes_ant):
         if feriado["Fecha"] <= fecha_emision_ant:
             continue  # ya estaba en la lista cuando se emitió esa liquidación
-        monto = _monto_feriado_dia(conn, ids, feriado["Fecha"], ids_excluir, pierde_descuento)
+        monto = _monto_feriado_dia(
+            conn, ids, feriado["Fecha"], ids_excluir, pierde_descuento, porcentajes[feriado["Tipo"]],
+        )
         if monto > 0:
             pendientes.append(ItemFeriado(fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto))
     return pendientes
@@ -652,7 +673,7 @@ def _aisladas_periodo(
     filas = conn.execute(
         f"""
         SELECT ra.IdReservaAislada, ra.IdConsultorio, ra.Fecha, ra.HoraInicio, ra.HoraFin,
-               ra.AplicaRecargo, c.ValorHoraAisladaActual
+               ra.AplicaRecargo, ra.EsReubicacion, c.ValorHoraAisladaActual
         FROM ReservaAislada ra
         JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
         WHERE ra.IdProfesional IN ({placeholders}) AND ra.Estado = 'Confirmada' AND ra.Fecha LIKE ?
@@ -662,9 +683,14 @@ def _aisladas_periodo(
 
     items = []
     for f in filas:
-        monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
-        if f["AplicaRecargo"]:
-            monto *= 1 + recargo_pct / 100
+        if f["EsReubicacion"]:
+            # compensa una ausencia del mismo profesional en otro horario —
+            # ocupa el consultorio pero no genera cargo (confirmado por el usuario).
+            monto = 0.0
+        else:
+            monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
+            if f["AplicaRecargo"]:
+                monto *= 1 + recargo_pct / 100
         items.append(ItemAislada(
             id_reserva_aislada=f["IdReservaAislada"], id_consultorio=f["IdConsultorio"], fecha=f["Fecha"],
             hora_inicio=f["HoraInicio"], hora_fin=f["HoraFin"], monto=monto,

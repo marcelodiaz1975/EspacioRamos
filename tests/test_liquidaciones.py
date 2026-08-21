@@ -224,6 +224,27 @@ def test_descuento_feriado_nacional_se_lista_por_dia(conn, consultorio):
     assert liquidacion.total == pytest.approx(liquidacion.subtotal_reserva - monto_esperado)
 
 
+def test_porcentaje_de_feriado_es_independiente_del_no_laborable(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    conn.execute(
+        "UPDATE Configuracion SET PorcentajeDescuentoFeriado = 50, PorcentajeDescuentoNoLaborable = 100 "
+        "WHERE IdConfiguracion = 1"
+    )
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-08-17", Descripcion="Feriado de prueba", Tipo="Feriado nacional",
+    )
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-08-24", Descripcion="No laborable de prueba", Tipo="Día no laborable",
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+
+    descuento_pct = obtener_porcentaje_descuento(conn, 2)
+    monto_completo = 2 * VALOR_HORA_REGULAR * (1 - descuento_pct / 100)
+
+    assert liquidacion.descuentos_feriados[0].monto == pytest.approx(monto_completo * 0.5)
+    assert liquidacion.descuentos_no_laborables[0].monto == pytest.approx(monto_completo)
+
+
 def test_descuento_dia_no_laborable_va_en_lista_separada(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     obtener_repositorio(conn, "FechasEspeciales").crear(
@@ -266,6 +287,7 @@ def test_feriado_conocido_antes_de_emitir_no_queda_pendiente(conn, consultorio):
 
 def test_aisladas_mes_en_curso_y_mes_anterior(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    conn.execute("UPDATE Configuracion SET RecargoPorcentajeAisladas = 10 WHERE IdConfiguracion = 1")
     obtener_repositorio(conn, "ReservaAislada").crear(
         IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-08-05",
         HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
@@ -285,6 +307,16 @@ def test_reserva_aislada_cancelada_no_se_factura(conn, consultorio):
     obtener_repositorio(conn, "ReservaAislada").crear(
         IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-08-05",
         HoraInicio=9, HoraFin=11, Estado="Cancelada", AplicaRecargo=0,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion.total_aisladas_mes_en_curso == 0
+
+
+def test_reserva_aislada_de_reubicacion_no_genera_cargo(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=1, EsReubicacion=1,
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
     assert liquidacion.total_aisladas_mes_en_curso == 0

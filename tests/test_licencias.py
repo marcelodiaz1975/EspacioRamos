@@ -133,6 +133,38 @@ def test_licencia_no_bonifica_dia_sin_reserva(conn, profesional_con_reserva):
     assert licencia["ValorBonificado"] == pytest.approx(0.0)
 
 
+def test_licencia_rechaza_profesional_sin_categoria_r_b_o_e(conn):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Sin Derecho")
+    id_tipo = _id_tipo(conn, "Licencia médica")
+    with pytest.raises(ValueError, match="categoría R, B o E"):
+        crear_licencia(
+            conn, id_profesional=id_prof, id_tipo_licencia=id_tipo,
+            fecha_desde="2026-08-03", fecha_hasta="2026-08-03",
+        )
+
+
+def test_licencia_rechaza_profesional_sin_reserva_regular_activa(conn):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Sin Reserva")
+    id_tipo = _id_tipo(conn, "Licencia médica")
+    with pytest.raises(ValueError, match="categoría R, B o E"):
+        crear_licencia(
+            conn, id_profesional=id_prof, id_tipo_licencia=id_tipo,
+            fecha_desde="2026-08-03", fecha_hasta="2026-08-03",
+        )
+
+
+def test_licencia_porcentaje_bonificacion_editable_caso_por_caso(conn, profesional_con_reserva):
+    id_tipo = _id_tipo(conn, "Licencia por maternidad")  # 50% por defecto
+    id_licencia, _ = crear_licencia(
+        conn, id_profesional=profesional_con_reserva, id_tipo_licencia=id_tipo,
+        fecha_desde="2026-08-03", fecha_hasta="2026-08-03", porcentaje_bonificacion=75,
+    )
+    licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
+    assert licencia["PorcentajeBonificacionAplicado"] == 75
+    esperado = _valor_bonificado_esperado(conn, "2026-08-03", "2026-08-03", 75)
+    assert licencia["ValorBonificado"] == pytest.approx(esperado)
+
+
 def test_licencia_categoria_b_no_genera_descuento(conn):
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')

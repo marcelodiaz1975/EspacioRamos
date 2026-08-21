@@ -450,7 +450,7 @@ def mensaje_detalle_reserva_aislada(
 
     filas = conn.execute(
         """
-        SELECT ra.IdReservaAislada, ra.Fecha, ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo,
+        SELECT ra.IdReservaAislada, ra.Fecha, ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo, ra.EsReubicacion,
                c.IdConsultorio, c.NumeroConsultorio, c.ValorHoraAisladaActual, u.Departamento,
                e.IdEdificio, e.Nombre AS NombreEdificio, e.Domicilio, e.DomicilioLocalidad
         FROM ReservaAislada ra
@@ -471,6 +471,10 @@ def mensaje_detalle_reserva_aislada(
     posteriores = [f for f in filas if f["Fecha"] > f"{anio:04d}-{mes:02d}-31"]
 
     def _monto(f: sqlite3.Row) -> float:
+        if f["EsReubicacion"]:
+            # compensa una ausencia del mismo profesional en otro horario —
+            # no genera cargo (confirmado por el usuario).
+            return 0.0
         monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
         return monto * (1 + recargo_pct / 100) if f["AplicaRecargo"] else monto
 

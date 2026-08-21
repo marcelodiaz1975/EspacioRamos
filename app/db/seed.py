@@ -291,7 +291,7 @@ def sembrar_configuracion(conn: sqlite3.Connection) -> None:
         "DiasAntesFinMesRecordatorioPlan, DiasAntesFinMesRecordatorioGeneral, "
         "RetencionHistorialListaEsperaAnios, ModulosExtendidos, TamanoMaximoImagenMB, "
         "ModoFechaFicticia, MensajesPlural) "
-        "VALUES (1, 8, 22, ?, 30, 8, 10, 0, ?, ?, 3, 2, 5, 5, 3, 5, 0, 5, 0, 1)",
+        "VALUES (1, 8, 22, ?, 30, 8, 0, 0, ?, ?, 3, 2, 5, 5, 3, 5, 0, 5, 0, 1)",
         (json.dumps(DIAS_LUNES_A_SABADO), "Bimestral", json.dumps([2, 4, 6, 8, 10, 12])),
     )
     conn.commit()

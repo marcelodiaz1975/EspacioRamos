@@ -189,6 +189,17 @@ def test_detalle_aislada_calcula_saldo_a_abonar(conn, profesional_aislada_con_ed
     assert "- Pagos registrados en mes en curso $500" in texto
 
 
+def test_detalle_aislada_de_reubicacion_no_genera_cargo(conn, profesional_aislada_con_edificios):
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=1, EsReubicacion=1,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    # saldo_anterior 1000 sin cargo adicional por la reubicación
+    assert "SALDO A ABONAR: $1.000" in texto
+
+
 def test_detalle_aislada_omite_saldo_anterior_si_es_cero(conn, profesional_aislada_con_edificios):
     id_prof, c1, _, _, _ = profesional_aislada_con_edificios
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=0)
