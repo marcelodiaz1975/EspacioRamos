@@ -2,7 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.ausencias import crear_ausencia, esta_ausente
+from app.negocio.ausencias import cancelar_ausencia, crear_ausencia, esta_ausente
 from app.negocio.reservas import crear_reserva_aislada, crear_reserva_regular
 from app.repositorio.registro import obtener_repositorio
 
@@ -57,3 +57,47 @@ def test_ausencia_libera_consultorio_para_aislada_de_otro_profesional(conn, prof
     )
     assert id_reserva is not None
     assert advertencias == []
+
+
+def test_cancelar_ausencia_sin_aisladas_se_elimina(conn, profesional):
+    id_ausencia = crear_ausencia(conn, id_profesional=profesional, fecha_desde="2026-08-10", fecha_hasta="2026-08-14")
+    cancelar_ausencia(conn, id_ausencia)
+    assert obtener_repositorio(conn, "Ausencia").obtener(id_ausencia) is None
+
+
+def test_cancelar_ausencia_bloqueada_por_aislada_ya_asignada(conn, profesional, consultorio):
+    """DC-04 §3.2/§3.3, aclarado en conversación: si ya se asignó una
+    aislada a otro profesional aprovechando el consultorio liberado, no
+    se puede anular la ausencia — chocaría con la reserva regular que
+    vuelve a regir."""
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Gomez")
+    crear_reserva_regular(
+        conn, id_profesional=profesional, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    id_ausencia = crear_ausencia(conn, id_profesional=profesional, fecha_desde="2026-08-10", fecha_hasta="2026-08-10")
+    crear_reserva_aislada(
+        conn, id_profesional=otro_profesional, id_consultorio=consultorio,
+        fecha="2026-08-10", hora_inicio=14, hora_fin=15,
+    )
+
+    with pytest.raises(ValueError):
+        cancelar_ausencia(conn, id_ausencia)
+    assert obtener_repositorio(conn, "Ausencia").obtener(id_ausencia) is not None
+
+
+def test_cancelar_ausencia_no_bloquea_por_aislada_de_otro_horario(conn, profesional, consultorio):
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Gomez")
+    crear_reserva_regular(
+        conn, id_profesional=profesional, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    id_ausencia = crear_ausencia(conn, id_profesional=profesional, fecha_desde="2026-08-10", fecha_hasta="2026-08-10")
+    # aislada fuera del horario que la ausencia libera -> no debería chocar
+    crear_reserva_aislada(
+        conn, id_profesional=otro_profesional, id_consultorio=consultorio,
+        fecha="2026-08-10", hora_inicio=10, hora_fin=11,
+    )
+
+    cancelar_ausencia(conn, id_ausencia)
+    assert obtener_repositorio(conn, "Ausencia").obtener(id_ausencia) is None

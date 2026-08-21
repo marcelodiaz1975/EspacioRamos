@@ -31,6 +31,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, timedelta
 
+from app.negocio.conflictos_aisladas import aisladas_bloqueadas_por_anulacion, mensaje_conflicto_aislada
 from app.negocio.dias import fecha_actual
 from app.negocio.vacaciones import CATEGORIAS_CON_DERECHO_A_VACACIONES
 from app.negocio.valores import (
@@ -114,3 +115,33 @@ def crear_licencia(
         ValorSemanalAlMomentoDelRegistro=valor_semanal, ValorBonificado=valor_bonificado,
     )
     return id_licencia, advertencias
+
+
+def tiene_licencia(conn: sqlite3.Connection, id_profesional: int, fecha: str) -> bool:
+    """True si el profesional tiene una licencia registrada que cubre esa
+    fecha (DC-05 §2.1: libera TODOS sus consultorios para asignar
+    aisladas a otros profesionales, igual que una Ausencia)."""
+    fila = conn.execute(
+        "SELECT 1 FROM Licencia WHERE IdProfesional = ? AND FechaDesde <= ? AND FechaHasta >= ? LIMIT 1",
+        (id_profesional, fecha, fecha),
+    ).fetchone()
+    return fila is not None
+
+
+def cancelar_licencia(conn: sqlite3.Connection, id_licencia: int) -> None:
+    """Anula una licencia (DC-04 §3.2/§3.3, aclarado en conversación):
+    bloquea si ya se asignó una reserva aislada a otro profesional
+    aprovechando algún consultorio que esta licencia liberaba, porque
+    anularla haría chocar esa aislada con la reserva regular que vuelve a
+    regir."""
+    repo = obtener_repositorio(conn, "Licencia")
+    licencia = repo.obtener(id_licencia)
+    if licencia is None:
+        raise ValueError(f"No existe la licencia #{id_licencia}")
+    conflictos = aisladas_bloqueadas_por_anulacion(
+        conn, id_profesional=licencia["IdProfesional"], fecha_desde=licencia["FechaDesde"],
+        fecha_hasta=licencia["FechaHasta"],
+    )
+    if conflictos:
+        raise ValueError(mensaje_conflicto_aislada(conflictos))
+    repo.eliminar(id_licencia)

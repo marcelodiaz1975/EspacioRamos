@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from app.negocio.conflictos_aisladas import aisladas_bloqueadas_por_anulacion, mensaje_conflicto_aislada
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -23,6 +24,25 @@ def crear_ausencia(
         IdProfesional=id_profesional, IdConsultorio=id_consultorio,
         FechaDesde=fecha_desde, FechaHasta=fecha_hasta, Motivo=motivo, Observacion=observacion,
     )
+
+
+def cancelar_ausencia(conn: sqlite3.Connection, id_ausencia: int) -> None:
+    """Anula una ausencia (DC-04 §3.2/§3.3, aclarado en conversación):
+    bloquea si ya se asignó una reserva aislada a otro profesional
+    aprovechando el consultorio que esta ausencia liberaba, porque
+    anularla haría chocar esa aislada con la reserva regular que vuelve a
+    regir."""
+    repo = obtener_repositorio(conn, "Ausencia")
+    ausencia = repo.obtener(id_ausencia)
+    if ausencia is None:
+        raise ValueError(f"No existe la ausencia #{id_ausencia}")
+    conflictos = aisladas_bloqueadas_por_anulacion(
+        conn, id_profesional=ausencia["IdProfesional"], fecha_desde=ausencia["FechaDesde"],
+        fecha_hasta=ausencia["FechaHasta"], id_consultorio=ausencia["IdConsultorio"],
+    )
+    if conflictos:
+        raise ValueError(mensaje_conflicto_aislada(conflictos))
+    repo.eliminar(id_ausencia)
 
 
 def esta_ausente(

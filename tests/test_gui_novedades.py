@@ -6,6 +6,7 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.novedades import PantallaNovedades
 from app.negocio.dias import periodo_actual
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
+from app.negocio.reservas import crear_reserva_aislada
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -100,6 +101,140 @@ def test_crear_ausencia_persiste(qtbot, conn):
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
     assert panel.tabla.item(0, 3).text() == "Congreso"
+
+
+def test_cancelar_vacacion_seleccionada_elimina(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setText("2026-09-07")
+    panel.campo_hasta.setText("2026-09-07")
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 1
+
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 0
+
+
+def test_cancelar_vacacion_bloqueada_por_aislada_muestra_advertencia(qtbot, conn, monkeypatch):
+    """DC-04 §3.2/§3.3: si ya hay una aislada de otro profesional asignada
+    en el consultorio que la vacación liberó, anularla tiene que avisar y
+    no borrar el registro."""
+    id_profesional = _preparar(conn)
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
+    conn.commit()
+
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setText("2026-09-07")
+    panel.campo_hasta.setText("2026-09-07")
+    panel._crear()
+    crear_reserva_aislada(
+        conn, id_profesional=otro_profesional, id_consultorio=id_consultorio,
+        fecha="2026-09-07", hora_inicio=9, hora_fin=10,
+    )
+    conn.commit()
+
+    avisos = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda self, titulo, texto: avisos.append(texto)))
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+    assert len(avisos) == 1
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 1
+
+
+def test_cancelar_licencia_seleccionada_elimina(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setText("2026-09-07")
+    panel.campo_hasta.setText("2026-09-07")
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
+
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 0
+
+
+def test_cancelar_licencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
+    conn.commit()
+
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setText("2026-09-07")
+    panel.campo_hasta.setText("2026-09-07")
+    panel._crear()
+    crear_reserva_aislada(
+        conn, id_profesional=otro_profesional, id_consultorio=id_consultorio,
+        fecha="2026-09-07", hora_inicio=9, hora_fin=10,
+    )
+    conn.commit()
+
+    avisos = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda self, titulo, texto: avisos.append(texto)))
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+    assert len(avisos) == 1
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
+
+
+def test_cancelar_ausencia_seleccionada_elimina(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setText("2026-09-07")
+    panel.campo_hasta.setText("2026-09-07")
+    panel.combo_motivo.setEditText("Congreso")
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
+
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 0
+
+
+def test_cancelar_ausencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
+    conn.commit()
+
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setText("2026-09-07")
+    panel.campo_hasta.setText("2026-09-07")
+    panel.combo_motivo.setEditText("Congreso")
+    panel._crear()
+    crear_reserva_aislada(
+        conn, id_profesional=otro_profesional, id_consultorio=id_consultorio,
+        fecha="2026-09-07", hora_inicio=9, hora_fin=10,
+    )
+    conn.commit()
+
+    avisos = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda self, titulo, texto: avisos.append(texto)))
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+    assert len(avisos) == 1
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
 
 
 def test_crear_cargo_especial_sin_concepto_no_persiste(qtbot, conn):

@@ -4,7 +4,8 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.licencias import crear_licencia
+from app.negocio.licencias import cancelar_licencia, crear_licencia
+from app.negocio.reservas import crear_reserva_aislada
 from app.negocio.valores import obtener_porcentaje_descuento
 from app.repositorio.registro import obtener_repositorio
 
@@ -183,3 +184,57 @@ def test_licencia_categoria_b_no_genera_descuento(conn):
     )
     licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
     assert licencia["ValorBonificado"] == 0.0
+
+
+def _id_consultorio_de(conn, id_prof):
+    return conn.execute(
+        "SELECT IdConsultorio FROM ReservaRegular WHERE IdProfesional = ?", (id_prof,)
+    ).fetchone()["IdConsultorio"]
+
+
+def test_licencia_libera_consultorio_para_aislada_de_otro_profesional(conn, profesional_con_reserva):
+    """DC-05 §2.1, confirmado por el usuario: una licencia libera el
+    consultorio para asignar aisladas a otro profesional, igual que una
+    Ausencia."""
+    id_consultorio = _id_consultorio_de(conn, profesional_con_reserva)
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Gomez")
+    id_tipo = _id_tipo(conn, "Licencia médica")
+    crear_licencia(
+        conn, id_profesional=profesional_con_reserva, id_tipo_licencia=id_tipo,
+        fecha_desde="2026-08-03", fecha_hasta="2026-08-03",
+    )
+
+    id_reserva, advertencias = crear_reserva_aislada(
+        conn, id_profesional=otro_profesional, id_consultorio=id_consultorio,
+        fecha="2026-08-03", hora_inicio=10, hora_fin=11,
+    )
+    assert id_reserva is not None
+    assert advertencias == []
+
+
+def test_cancelar_licencia_sin_aisladas_se_elimina(conn, profesional_con_reserva):
+    id_tipo = _id_tipo(conn, "Licencia médica")
+    id_licencia, _ = crear_licencia(
+        conn, id_profesional=profesional_con_reserva, id_tipo_licencia=id_tipo,
+        fecha_desde="2026-08-03", fecha_hasta="2026-08-03",
+    )
+    cancelar_licencia(conn, id_licencia)
+    assert obtener_repositorio(conn, "Licencia").obtener(id_licencia) is None
+
+
+def test_cancelar_licencia_bloqueada_por_aislada_ya_asignada(conn, profesional_con_reserva):
+    id_consultorio = _id_consultorio_de(conn, profesional_con_reserva)
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Gomez")
+    id_tipo = _id_tipo(conn, "Licencia médica")
+    id_licencia, _ = crear_licencia(
+        conn, id_profesional=profesional_con_reserva, id_tipo_licencia=id_tipo,
+        fecha_desde="2026-08-03", fecha_hasta="2026-08-03",
+    )
+    crear_reserva_aislada(
+        conn, id_profesional=otro_profesional, id_consultorio=id_consultorio,
+        fecha="2026-08-03", hora_inicio=10, hora_fin=11,
+    )
+
+    with pytest.raises(ValueError):
+        cancelar_licencia(conn, id_licencia)
+    assert obtener_repositorio(conn, "Licencia").obtener(id_licencia) is not None

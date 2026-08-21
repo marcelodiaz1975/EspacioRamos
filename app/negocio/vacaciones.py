@@ -39,6 +39,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
+from app.negocio.conflictos_aisladas import aisladas_bloqueadas_por_anulacion, mensaje_conflicto_aislada
 from app.negocio.dias import fecha_actual
 from app.negocio.valores import (
     calcular_valor_semanal_regular,
@@ -154,3 +155,33 @@ def crear_vacacion(
         CupoRestantePorcentaje=cupo_restante_pct,
     )
     return id_vacacion, advertencias
+
+
+def tiene_vacacion(conn: sqlite3.Connection, id_profesional: int, fecha: str) -> bool:
+    """True si el profesional tiene una vacación registrada que cubre esa
+    fecha (DC-05 §1.1: libera TODOS sus consultorios para asignar
+    aisladas a otros profesionales, igual que una Ausencia)."""
+    fila = conn.execute(
+        "SELECT 1 FROM Vacacion WHERE IdProfesional = ? AND FechaDesde <= ? AND FechaHasta >= ? LIMIT 1",
+        (id_profesional, fecha, fecha),
+    ).fetchone()
+    return fila is not None
+
+
+def cancelar_vacacion(conn: sqlite3.Connection, id_vacacion: int) -> None:
+    """Anula una vacación (DC-04 §3.2/§3.3, aclarado en conversación):
+    bloquea si ya se asignó una reserva aislada a otro profesional
+    aprovechando algún consultorio que esta vacación liberaba, porque
+    anularla haría chocar esa aislada con la reserva regular que vuelve a
+    regir."""
+    repo = obtener_repositorio(conn, "Vacacion")
+    vacacion = repo.obtener(id_vacacion)
+    if vacacion is None:
+        raise ValueError(f"No existe la vacación #{id_vacacion}")
+    conflictos = aisladas_bloqueadas_por_anulacion(
+        conn, id_profesional=vacacion["IdProfesional"], fecha_desde=vacacion["FechaDesde"],
+        fecha_hasta=vacacion["FechaHasta"],
+    )
+    if conflictos:
+        raise ValueError(mensaje_conflicto_aislada(conflictos))
+    repo.eliminar(id_vacacion)

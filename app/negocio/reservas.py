@@ -24,6 +24,8 @@ from datetime import date
 from app.negocio.ausencias import esta_ausente
 from app.negocio.dias import fecha_a_dia_semana
 from app.negocio.dias import fecha_actual as _fecha_actual_sistema
+from app.negocio.licencias import tiene_licencia
+from app.negocio.vacaciones import tiene_vacacion
 from app.repositorio.registro import obtener_repositorio
 
 FIN_INDEFINIDO = "9999-12-31"
@@ -110,16 +112,6 @@ def verificar_bloques_rigidos(conn: sqlite3.Connection, dia_semana: str, hora_in
     return problemas
 
 
-def _horario_en_bloque_rigido(conn: sqlite3.Connection, dia_semana: str, hora_inicio: float, hora_fin: float) -> bool:
-    for fila in conn.execute("SELECT * FROM BloqueRigido WHERE Activo = 1").fetchall():
-        dias = json.loads(fila["DiasVisualizacion"] or fila["DiasLogica"] or "[]")
-        if dia_semana not in dias:
-            continue
-        if _solapan(hora_inicio, hora_fin, fila["HoraInicio"], fila["HoraFin"]):
-            return True
-    return False
-
-
 # -------------------------------------------------------- verificación de conflictos
 
 def verificar_conflictos_regular(
@@ -186,7 +178,11 @@ def verificar_conflictos_aislada(
             continue
         if not _vigencias_solapan(fecha, fecha, fila["VigenciaInicio"], fila["VigenciaFin"]):
             continue
-        if esta_ausente(conn, fila["IdProfesional"], fecha, id_consultorio):
+        if (
+            esta_ausente(conn, fila["IdProfesional"], fecha, id_consultorio)
+            or tiene_vacacion(conn, fila["IdProfesional"], fecha)
+            or tiene_licencia(conn, fila["IdProfesional"], fecha)
+        ):
             continue  # el profesional regular no va a estar: el consultorio queda libre
         bloqueante = not _relacion_equipo(conn, id_profesional, fila["IdProfesional"])
         conflictos.append(Conflicto(
@@ -278,13 +274,15 @@ def crear_reserva_aislada(
     hora_inicio: float, hora_fin: float, aplica_recargo: bool | None = None,
     es_reubicacion: bool = False, observacion: str | None = None, forzar: bool = False,
 ) -> tuple[int, list[str]]:
+    """Las reservas aisladas no tienen ninguna restricción de bloques
+    rígidos (DC-04 §2.2, confirmado por el usuario): esos bloques son una
+    regla pensada para reservas regulares, no para compromisos de un solo
+    día."""
     _validar_fraccion_grilla(conn, hora_inicio, hora_fin)
     conflictos = verificar_conflictos_aislada(
         conn, id_consultorio=id_consultorio, fecha=fecha,
         hora_inicio=hora_inicio, hora_fin=hora_fin, id_profesional=id_profesional,
     )
-    dia_semana = fecha_a_dia_semana(date.fromisoformat(fecha))
-    problemas_rigidos = verificar_bloques_rigidos(conn, dia_semana, hora_inicio, hora_fin)
     bloqueantes = [c for c in conflictos if c.bloqueante]
     if bloqueantes and not forzar:
         raise ConflictoBloqueanteError(bloqueantes)
@@ -301,7 +299,7 @@ def crear_reserva_aislada(
         HoraInicio=hora_inicio, HoraFin=hora_fin, Estado="Confirmada",
         AplicaRecargo=int(aplica_recargo), EsReubicacion=int(es_reubicacion), Observacion=observacion,
     )
-    advertencias = [c.mensaje for c in conflictos if not c.bloqueante] + problemas_rigidos
+    advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
     if forzar:
         advertencias += [c.mensaje for c in bloqueantes]
     return id_reserva, advertencias
@@ -310,26 +308,17 @@ def crear_reserva_aislada(
 def cancelar_reserva_aislada(
     conn: sqlite3.Connection, id_reserva_aislada: int, fecha_actual: str | None = None,
 ) -> bool:
-    """Cancela una reserva aislada. Devuelve True si la cancelación requiere
-    aviso (porque fue el mismo día). Lanza ValueError si el horario cae
-    dentro de un bloque rígido y se está cancelando el mismo día."""
+    """Cancela una reserva aislada. Devuelve True si la cancelación
+    requiere aviso (porque fue el mismo día) — nunca bloquea, ni siquiera
+    si el horario cae dentro de un bloque rígido (DC-04 §4.3, confirmado
+    por el usuario)."""
     repo = obtener_repositorio(conn, "ReservaAislada")
     reserva = repo.obtener(id_reserva_aislada)
     if reserva is None:
         raise ValueError(f"No existe la reserva aislada #{id_reserva_aislada}")
 
     fecha_actual = fecha_actual or _fecha_actual_sistema(conn).isoformat()
-    mismo_dia = fecha_actual == reserva["Fecha"]
-    requiere_aviso = False
-
-    if mismo_dia:
-        dia_semana = fecha_a_dia_semana(date.fromisoformat(reserva["Fecha"]))
-        if _horario_en_bloque_rigido(conn, dia_semana, reserva["HoraInicio"], reserva["HoraFin"]):
-            raise ValueError(
-                f"No se puede cancelar la reserva #{id_reserva_aislada} el mismo día: "
-                "el horario cae dentro de un bloque rígido"
-            )
-        requiere_aviso = True
+    requiere_aviso = fecha_actual == reserva["Fecha"]
 
     repo.actualizar(id_reserva_aislada, Estado="Cancelada")
     return requiere_aviso

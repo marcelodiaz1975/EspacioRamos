@@ -26,13 +26,13 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
-from app.negocio.ausencias import crear_ausencia
+from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
 from app.negocio.dias import periodo_actual
-from app.negocio.licencias import crear_licencia
+from app.negocio.licencias import cancelar_licencia, crear_licencia
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
 from app.negocio.pagos import TIPOS_CARGO, crear_cargo_especial
-from app.negocio.vacaciones import crear_vacacion
+from app.negocio.vacaciones import cancelar_vacacion, crear_vacacion
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -77,6 +77,7 @@ class _PanelVacaciones(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
+        self._registros: list[sqlite3.Row] = []
         self._armar_ui()
         self.actualizar()
 
@@ -101,6 +102,9 @@ class _PanelVacaciones(QWidget):
         boton.setObjectName("botonPrimario")
         boton.clicked.connect(self._crear)
         form.addWidget(boton)
+        boton_cancelar = QPushButton("Anular vacación seleccionada")
+        boton_cancelar.clicked.connect(self._cancelar)
+        form.addWidget(boton_cancelar)
         form.addStretch()
         splitter.addWidget(panel_form)
 
@@ -108,15 +112,17 @@ class _PanelVacaciones(QWidget):
         self.tabla.setColumnCount(5)
         self.tabla.setHorizontalHeaderLabels(["Profesional", "Desde", "Hasta", "Valor bonificado", "Cupo restante %"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
 
     def actualizar(self) -> None:
-        registros = obtener_repositorio(self.conn, "Vacacion").listar()
+        self._registros = obtener_repositorio(self.conn, "Vacacion").listar()
         cache = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
-        self.tabla.setRowCount(len(registros))
-        for i, r in enumerate(registros):
+        self.tabla.setRowCount(len(self._registros))
+        for i, r in enumerate(self._registros):
             self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache, r["IdProfesional"])))
             self.tabla.setItem(i, 1, QTableWidgetItem(r["FechaDesde"]))
             self.tabla.setItem(i, 2, QTableWidgetItem(r["FechaHasta"]))
@@ -143,11 +149,29 @@ class _PanelVacaciones(QWidget):
         self.conn.commit()
         self.actualizar()
 
+    def _cancelar(self) -> None:
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return
+        registro = self._registros[filas[0].row()]
+        try:
+            cancelar_vacacion(self.conn, registro["IdVacacion"])
+        except ValueError as error:
+            QMessageBox.warning(self, "Anular vacación", str(error))
+            return
+        self.conn.commit()
+        regenerar_si_corresponde(
+            self.conn, id_profesional=registro["IdProfesional"], periodo=periodo_actual(self.conn),
+        )
+        self.conn.commit()
+        self.actualizar()
+
 
 class _PanelLicencias(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
+        self._registros: list[sqlite3.Row] = []
         self._armar_ui()
         self.actualizar()
 
@@ -187,6 +211,9 @@ class _PanelLicencias(QWidget):
         boton.setObjectName("botonPrimario")
         boton.clicked.connect(self._crear)
         form.addWidget(boton)
+        boton_cancelar = QPushButton("Anular licencia seleccionada")
+        boton_cancelar.clicked.connect(self._cancelar)
+        form.addWidget(boton_cancelar)
         form.addStretch()
         splitter.addWidget(panel_form)
 
@@ -194,6 +221,8 @@ class _PanelLicencias(QWidget):
         self.tabla.setColumnCount(5)
         self.tabla.setHorizontalHeaderLabels(["Profesional", "Tipo", "Desde", "Hasta", "Valor bonificado"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
@@ -204,11 +233,11 @@ class _PanelLicencias(QWidget):
         self.spin_porcentaje.setValue(tipo["PorcentajeBonificacion"] if tipo else 0)
 
     def actualizar(self) -> None:
-        registros = obtener_repositorio(self.conn, "Licencia").listar()
+        self._registros = obtener_repositorio(self.conn, "Licencia").listar()
         cache_prof = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
         cache_tipo = {t["IdTipoLicencia"]: t for t in obtener_repositorio(self.conn, "TipoLicencia").listar()}
-        self.tabla.setRowCount(len(registros))
-        for i, r in enumerate(registros):
+        self.tabla.setRowCount(len(self._registros))
+        for i, r in enumerate(self._registros):
             self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache_prof, r["IdProfesional"])))
             tipo = cache_tipo.get(r["IdTipoLicencia"])
             self.tabla.setItem(i, 1, QTableWidgetItem(tipo["Nombre"] if tipo else "?"))
@@ -237,11 +266,25 @@ class _PanelLicencias(QWidget):
             QMessageBox.information(self, "Licencia creada", "\n".join(advertencias))
         self.actualizar()
 
+    def _cancelar(self) -> None:
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return
+        registro = self._registros[filas[0].row()]
+        try:
+            cancelar_licencia(self.conn, registro["IdLicencia"])
+        except ValueError as error:
+            QMessageBox.warning(self, "Anular licencia", str(error))
+            return
+        self.conn.commit()
+        self.actualizar()
+
 
 class _PanelAusencias(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
+        self._registros: list[sqlite3.Row] = []
         self._armar_ui()
         self.actualizar()
 
@@ -273,6 +316,9 @@ class _PanelAusencias(QWidget):
         boton.setObjectName("botonPrimario")
         boton.clicked.connect(self._crear)
         form.addWidget(boton)
+        boton_cancelar = QPushButton("Anular ausencia seleccionada")
+        boton_cancelar.clicked.connect(self._cancelar)
+        form.addWidget(boton_cancelar)
         form.addStretch()
         splitter.addWidget(panel_form)
 
@@ -280,15 +326,17 @@ class _PanelAusencias(QWidget):
         self.tabla.setColumnCount(4)
         self.tabla.setHorizontalHeaderLabels(["Profesional", "Desde", "Hasta", "Motivo"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
 
     def actualizar(self) -> None:
-        registros = obtener_repositorio(self.conn, "Ausencia").listar()
+        self._registros = obtener_repositorio(self.conn, "Ausencia").listar()
         cache = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
-        self.tabla.setRowCount(len(registros))
-        for i, r in enumerate(registros):
+        self.tabla.setRowCount(len(self._registros))
+        for i, r in enumerate(self._registros):
             self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache, r["IdProfesional"])))
             self.tabla.setItem(i, 1, QTableWidgetItem(r["FechaDesde"]))
             self.tabla.setItem(i, 2, QTableWidgetItem(r["FechaHasta"]))
@@ -304,6 +352,19 @@ class _PanelAusencias(QWidget):
             )
         except ValueError as error:
             QMessageBox.warning(self, "Crear ausencia", str(error))
+            return
+        self.conn.commit()
+        self.actualizar()
+
+    def _cancelar(self) -> None:
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return
+        registro = self._registros[filas[0].row()]
+        try:
+            cancelar_ausencia(self.conn, registro["IdAusencia"])
+        except ValueError as error:
+            QMessageBox.warning(self, "Anular ausencia", str(error))
             return
         self.conn.commit()
         self.actualizar()

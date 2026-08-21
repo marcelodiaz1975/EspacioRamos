@@ -236,14 +236,30 @@ def test_cancelar_reserva_aislada_mismo_dia_requiere_aviso(conn, consultorio, pr
     assert requiere_aviso is True
 
 
-def test_cancelar_reserva_aislada_mismo_dia_en_bloque_rigido_falla(conn, consultorio, profesional_factory):
+def test_cancelar_reserva_aislada_mismo_dia_en_bloque_rigido_no_bloquea(conn, consultorio, profesional_factory):
+    """DC-04 §4.3, confirmado por el usuario: las aisladas no tienen
+    ninguna restricción de bloques rígidos, ni siquiera al cancelar el
+    mismo día — solo el aviso normal de "mismo día", nunca bloqueo."""
     id_prof = profesional_factory("Lo Veci")
     id_reserva, _ = crear_reserva_aislada(
         conn, id_profesional=id_prof, id_consultorio=consultorio,
         fecha="2026-08-20", hora_inicio=9, hora_fin=11,
     )
-    with pytest.raises(ValueError):
-        cancelar_reserva_aislada(conn, id_reserva, fecha_actual="2026-08-20")
+    requiere_aviso = cancelar_reserva_aislada(conn, id_reserva, fecha_actual="2026-08-20")
+    assert requiere_aviso is True
+    assert obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)["Estado"] == "Cancelada"
+
+
+def test_crear_reserva_aislada_en_bloque_rigido_no_advierte(conn, consultorio, profesional_factory):
+    """DC-04 §2.2, confirmado por el usuario: crear una aislada dentro de
+    un bloque rígido no genera ninguna advertencia (a diferencia de una
+    reserva regular parcial en el mismo horario)."""
+    id_prof = profesional_factory("Lo Veci")
+    _id_reserva, advertencias = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio,
+        fecha="2026-08-10", hora_inicio=9, hora_fin=10,  # parcial dentro del bloque 9-11
+    )
+    assert advertencias == []
 
 
 # ---------------------------------------------- reserva regular sobre aisladas futuras (DC-04 §1.3)

@@ -2,7 +2,8 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.vacaciones import crear_vacacion
+from app.negocio.reservas import crear_reserva_aislada
+from app.negocio.vacaciones import cancelar_vacacion, crear_vacacion
 from app.negocio.valores import obtener_porcentaje_descuento
 from app.repositorio.registro import obtener_repositorio
 
@@ -157,3 +158,41 @@ def test_cupo_por_anio_no_se_mezcla(conn, consultorio):
     vacacion = obtener_repositorio(conn, "Vacacion").obtener(id_vacacion)
     assert advertencias == []
     assert vacacion["CupoConsumidoPorcentaje"] == pytest.approx(50.0)
+
+
+def test_vacacion_libera_consultorio_para_aislada_de_otro_profesional(conn, consultorio):
+    """DC-05 §1.1, confirmado por el usuario: una vacación libera el
+    consultorio para asignar aisladas a otro profesional, igual que una
+    Ausencia."""
+    id_prof = _profesional_con_reserva(conn, consultorio)  # Lunes 10-12
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Gomez")
+    crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-10", fecha_hasta="2026-08-10")
+
+    id_reserva, advertencias = crear_reserva_aislada(
+        conn, id_profesional=otro_profesional, id_consultorio=consultorio,
+        fecha="2026-08-10", hora_inicio=10, hora_fin=11,
+    )
+    assert id_reserva is not None
+    assert advertencias == []
+
+
+def test_cancelar_vacacion_sin_aisladas_se_elimina(conn, consultorio):
+    id_prof = _profesional_con_reserva(conn, consultorio)
+    id_vacacion, _ = crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-10", fecha_hasta="2026-08-10")
+    cancelar_vacacion(conn, id_vacacion)
+    assert obtener_repositorio(conn, "Vacacion").obtener(id_vacacion) is None
+
+
+def test_cancelar_vacacion_bloqueada_por_aislada_ya_asignada(conn, consultorio):
+    """DC-04 §3.2/§3.3, aclarado en conversación."""
+    id_prof = _profesional_con_reserva(conn, consultorio)  # Lunes 10-12
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Gomez")
+    id_vacacion, _ = crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-10", fecha_hasta="2026-08-10")
+    crear_reserva_aislada(
+        conn, id_profesional=otro_profesional, id_consultorio=consultorio,
+        fecha="2026-08-10", hora_inicio=10, hora_fin=11,
+    )
+
+    with pytest.raises(ValueError):
+        cancelar_vacacion(conn, id_vacacion)
+    assert obtener_repositorio(conn, "Vacacion").obtener(id_vacacion) is not None
