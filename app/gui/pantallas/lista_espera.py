@@ -53,7 +53,11 @@ from PySide6.QtWidgets import (
 from app.negocio.archivos_generados import SUBCARPETA_DISPONIBILIDAD, carpeta_archivos_varios
 from app.negocio.dias import DIAS_SEMANA, periodo_actual
 from app.negocio.lista_espera import crear_pedido, listar_pedidos_con_coincidencia, marcar_descartado, marcar_resuelto
-from app.negocio.mensajes import mensaje_disponibilidad_horarios, nombre_para_mensaje
+from app.negocio.mensajes import (
+    mensaje_disponibilidad_horarios,
+    mensaje_disponibilidad_horarios_fecha,
+    nombre_para_mensaje,
+)
 from app.pdf.disponibilidad_pdf import generar_pdfs_disponibilidad_por_localidad
 from app.repositorio.registro import obtener_repositorio
 
@@ -192,9 +196,21 @@ class PantallaListaEspera(QWidget):
 
         self.casilla_pdf_disponibilidad = QCheckBox("Generar también como PDF con fotos")
         form.addWidget(self.casilla_pdf_disponibilidad)
-        boton_mensaje_disponibilidad = QPushButton("Generar mensaje de disponibilidad")
+        boton_mensaje_disponibilidad = QPushButton("Generar mensaje de disponibilidad (por día de semana)")
         boton_mensaje_disponibilidad.clicked.connect(self._generar_mensaje_disponibilidad)
         form.addWidget(boton_mensaje_disponibilidad)
+
+        form.addWidget(QLabel("Variante B: disponibilidad por fecha(s) puntual(es) en vez de día de semana"))
+        self.campo_fechas = QLineEdit()
+        self.campo_fechas.setPlaceholderText("AAAA-MM-DD, AAAA-MM-DD, … (separadas por coma)")
+        form.addWidget(self.campo_fechas)
+        self.combo_tipo_fechas = QComboBox()
+        self.combo_tipo_fechas.addItem("Alcanza con una fecha (O)", "O")
+        self.combo_tipo_fechas.addItem("Todas las fechas (Y)", "Y")
+        form.addWidget(self.combo_tipo_fechas)
+        boton_mensaje_disponibilidad_fecha = QPushButton("Generar mensaje de disponibilidad (por fecha puntual)")
+        boton_mensaje_disponibilidad_fecha.clicked.connect(self._generar_mensaje_disponibilidad_fecha)
+        form.addWidget(boton_mensaje_disponibilidad_fecha)
 
         form.addStretch()
         splitter.addWidget(panel_form)
@@ -310,6 +326,40 @@ class PantallaListaEspera(QWidget):
                 self.conn, periodo=periodo_actual(self.conn), dias=dias,
                 horario_desde=self.spin_desde.value(), horario_hasta=self.spin_hasta.value(),
                 tipo_combinacion=self.combo_tipo.currentData(), condiciones_consultorio=self._condiciones(),
+                incluir_consultorio=self.casilla_incluir_consultorio.isChecked(),
+                incluir_unidad=self.casilla_incluir_unidad.isChecked(),
+                incluir_edificio=self.casilla_incluir_edificio.isChecked(),
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Generar mensaje de disponibilidad", str(error))
+            return
+        self.texto_mensaje_disponibilidad.setPlainText(texto)
+
+        if self.casilla_pdf_disponibilidad.isChecked():
+            directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_DISPONIBILIDAD))
+            rutas = generar_pdfs_disponibilidad_por_localidad(self.conn, directorio)
+            QMessageBox.information(
+                self, "PDF de disponibilidad",
+                f"Se generó {len(rutas)} archivo(s) en:\n{directorio}",
+            )
+
+    def _fechas_ingresadas(self) -> list[str]:
+        return [f.strip() for f in self.campo_fechas.text().split(",") if f.strip()]
+
+    def _generar_mensaje_disponibilidad_fecha(self) -> None:
+        """Variante B del Mensaje 2 (DC-03 sección 5.2): igual que
+        `_generar_mensaje_disponibilidad`, pero cruzando fecha(s) puntual(es)
+        contra la ocupación real de cada una (respeta ausencias puntuales y
+        reservas aisladas ya confirmadas), no el patrón semanal genérico."""
+        fechas = self._fechas_ingresadas()
+        if not fechas:
+            QMessageBox.warning(self, "Generar mensaje de disponibilidad", "Ingresá al menos una fecha (AAAA-MM-DD).")
+            return
+        try:
+            texto = mensaje_disponibilidad_horarios_fecha(
+                self.conn, fechas=fechas,
+                horario_desde=self.spin_desde.value(), horario_hasta=self.spin_hasta.value(),
+                tipo_combinacion=self.combo_tipo_fechas.currentData(), condiciones_consultorio=self._condiciones(),
                 incluir_consultorio=self.casilla_incluir_consultorio.isChecked(),
                 incluir_unidad=self.casilla_incluir_unidad.isChecked(),
                 incluir_edificio=self.casilla_incluir_edificio.isChecked(),

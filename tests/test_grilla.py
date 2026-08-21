@@ -4,8 +4,9 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.grilla import DIAS_GRILLA_DEFAULT, calcular_grilla, dias_grilla
-from app.negocio.reservas import crear_reserva_regular
+from app.negocio.ausencias import crear_ausencia
+from app.negocio.grilla import DIAS_GRILLA_DEFAULT, calcular_grilla, calcular_ocupacion_fecha, dias_grilla
+from app.negocio.reservas import crear_reserva_aislada, crear_reserva_regular
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -146,3 +147,42 @@ def test_calcular_grilla_respeta_dias_configurados(conn, unidad_con_dos_consulto
     grilla = calcular_grilla(conn, 2026, 8)
     assert (id_unidad, "Miércoles", 15) not in grilla
     assert (id_unidad, "Lunes", 15) in grilla
+
+
+def test_ocupacion_fecha_marca_reserva_regular_vigente_esa_fecha(conn, unidad_con_dos_consultorios, profesional):
+    _, id_c1, _ = unidad_con_dos_consultorios
+    crear_reserva_regular(
+        conn, id_profesional=profesional, id_consultorio=id_c1, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    ocupado = calcular_ocupacion_fecha(conn, "2026-08-03")  # lunes
+    assert ocupado[(id_c1, 14)] is True
+    assert (id_c1, 16) not in ocupado
+
+
+def test_ocupacion_fecha_libera_por_ausencia_puntual(conn, unidad_con_dos_consultorios, profesional):
+    """A diferencia de la grilla mensual, la ocupación por fecha puntual sí
+    tiene en cuenta las ausencias de ese día concreto."""
+    _, id_c1, _ = unidad_con_dos_consultorios
+    crear_reserva_regular(
+        conn, id_profesional=profesional, id_consultorio=id_c1, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    crear_ausencia(conn, id_profesional=profesional, fecha_desde="2026-08-03", fecha_hasta="2026-08-03")
+    ocupado = calcular_ocupacion_fecha(conn, "2026-08-03")
+    assert (id_c1, 14) not in ocupado
+
+    # otro lunes cualquiera, sin ausencia, sigue ocupado
+    ocupado_otro_lunes = calcular_ocupacion_fecha(conn, "2026-08-10")
+    assert ocupado_otro_lunes[(id_c1, 14)] is True
+
+
+def test_ocupacion_fecha_incluye_reserva_aislada_confirmada(conn, unidad_con_dos_consultorios):
+    _, id_c1, _ = unidad_con_dos_consultorios
+    id_prof_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Puntual")
+    crear_reserva_aislada(
+        conn, id_profesional=id_prof_aislada, id_consultorio=id_c1, fecha="2026-08-03",
+        hora_inicio=10, hora_fin=11,
+    )
+    ocupado = calcular_ocupacion_fecha(conn, "2026-08-03")
+    assert ocupado[(id_c1, 10)] is True

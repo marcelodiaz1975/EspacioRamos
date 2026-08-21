@@ -95,6 +95,26 @@ def test_generar_mensaje_disponibilidad_sin_dias_no_completa_texto(qtbot, conn):
     assert pantalla.texto_mensaje_disponibilidad.toPlainText() == ""
 
 
+def test_generar_mensaje_disponibilidad_fecha_sin_fechas_no_completa_texto(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._generar_mensaje_disponibilidad_fecha()
+    assert pantalla.texto_mensaje_disponibilidad.toPlainText() == ""
+
+
+def test_generar_mensaje_disponibilidad_fecha_completa_texto(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.campo_fechas.setText("2026-08-03")  # lunes
+
+    pantalla._generar_mensaje_disponibilidad_fecha()
+
+    texto = pantalla.texto_mensaje_disponibilidad.toPlainText()
+    assert texto.startswith("Disponibilidad")
+    assert "lunes 3/8" in texto
+
+
 def test_generar_mensaje_disponibilidad_completa_texto(qtbot, conn):
     _crear_edificio_con_consultorio(conn)
     pantalla = PantallaListaEspera(conn)

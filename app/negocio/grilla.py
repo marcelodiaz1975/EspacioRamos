@@ -23,7 +23,8 @@ import json
 import sqlite3
 from datetime import date
 
-from app.negocio.dias import DIAS_SEMANA
+from app.negocio.ausencias import esta_ausente
+from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana
 from app.negocio.dias import primer_dia_mes as _primer_dia_mes
 from app.negocio.dias import ultimo_dia_mes as _ultimo_dia_mes
 
@@ -102,6 +103,35 @@ def calcular_ocupacion_regular(
             continue
         for h in range(int(r["HoraInicio"]), int(r["HoraFin"])):
             ocupado[(r["IdConsultorio"], r["DiaSemana"], h)] = True
+    return ocupado
+
+
+def calcular_ocupacion_fecha(conn: sqlite3.Connection, fecha: str) -> dict[tuple[int, int], bool]:
+    """Ocupación real de una fecha puntual (DC-03 Mensaje 2 Variante B), a
+    diferencia de `calcular_ocupacion_regular` que promedia todo un mes por
+    día de semana genérico. Acá SÍ importan las excepciones de ese día
+    concreto: una reserva regular no ocupa si el profesional está ausente
+    ese día (mismo criterio que `verificar_conflictos_aislada`), y una
+    reserva aislada ya confirmada esa fecha SÍ ocupa aunque no sea parte
+    de ningún patrón semanal. Devuelve {(IdConsultorio, hora): True}."""
+    dia_semana = fecha_a_dia_semana(date.fromisoformat(fecha))
+    ocupado: dict[tuple[int, int], bool] = {}
+
+    for r in conn.execute("SELECT * FROM ReservaRegular WHERE DiaSemana = ?", (dia_semana,)).fetchall():
+        vigencia_fin = r["VigenciaFin"] or "9999-12-31"
+        if not (r["VigenciaInicio"] <= fecha <= vigencia_fin):
+            continue
+        if esta_ausente(conn, r["IdProfesional"], fecha, r["IdConsultorio"]):
+            continue
+        for h in range(int(r["HoraInicio"]), int(r["HoraFin"])):
+            ocupado[(r["IdConsultorio"], h)] = True
+
+    for r in conn.execute(
+        "SELECT * FROM ReservaAislada WHERE Fecha = ? AND Estado = 'Confirmada'", (fecha,)
+    ).fetchall():
+        for h in range(int(r["HoraInicio"]), int(r["HoraFin"])):
+            ocupado[(r["IdConsultorio"], h)] = True
+
     return ocupado
 
 

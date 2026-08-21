@@ -23,7 +23,7 @@ from typing import Callable
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, sumar_meses, ultimo_dia_mes
 from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, hora_fmt, mes_texto, periodo_mm_aaaa
-from app.negocio.lista_espera import calcular_coincidencia
+from app.negocio.lista_espera import calcular_coincidencia, calcular_coincidencia_fechas
 from app.negocio.liquidaciones import CATEGORIAS_CON_LIQUIDACION_MENSUAL
 from app.repositorio.registro import obtener_repositorio
 
@@ -648,6 +648,66 @@ def mensaje_disponibilidad_horarios(
             lineas.append(f"· {dia} de {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)}{sufijo}")
         else:
             lineas.append(f"· {dia}:")
+            for t in tramos:
+                lugar = _lugar_reserva(consultorios[t.id_consultorio], incluir_consultorio, incluir_unidad, incluir_edificio)
+                sufijo = f" {lugar}" if lugar else ""
+                lineas.append(f"  - {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)}{sufijo}")
+    return "\n".join(lineas)
+
+
+def mensaje_disponibilidad_horarios_fecha(
+    conn: sqlite3.Connection, *, fechas: list[str], horario_desde: float, horario_hasta: float,
+    tipo_combinacion: str = "O", condiciones_consultorio: dict | None = None,
+    incluir_consultorio: bool = True, incluir_unidad: bool = True, incluir_edificio: bool = True,
+) -> str:
+    """Variante B del Mensaje 2 (DC-03 sección 5.2): disponibilidad por
+    fecha(s) puntual(es) en vez de días de la semana genéricos — cruza
+    contra la ocupación real de cada fecha (`lista_espera.
+    calcular_coincidencia_fechas`: respeta ausencias puntuales y reservas
+    aisladas ya confirmadas), no contra el patrón semanal promedio del mes
+    que usa la Variante A."""
+    incluir_edificio = _incluir_edificio_efectivo(conn, incluir_edificio)
+    bloque = {
+        "fechas": fechas, "horario_desde": horario_desde, "horario_hasta": horario_hasta,
+        "tipo_combinacion_dias": tipo_combinacion,
+    }
+    coincidencia = calcular_coincidencia_fechas(
+        conn, bloques=[bloque], condiciones_consultorio=condiciones_consultorio,
+    )
+
+    etiquetas_fecha = [f"{fecha_a_dia_semana(date.fromisoformat(f)).lower()} {fecha_corta(f)}" for f in fechas]
+    lineas = [
+        "Disponibilidad",
+        "",
+        f"Fechas y horarios de interés: {', '.join(etiquetas_fecha)}, de {hora_fmt(horario_desde)[:-2]} a "
+        f"{hora_fmt(horario_hasta)}",
+    ]
+    if condiciones_consultorio:
+        partes = [NOMBRES_CONDICION[k] for k, v in condiciones_consultorio.items() if v and k in NOMBRES_CONDICION]
+        if condiciones_consultorio.get("tamano"):
+            partes.append(f"tamaño {condiciones_consultorio['tamano']}")
+        if partes:
+            lineas.append(f"Características: {', '.join(partes)}")
+    lineas.append("")
+
+    if coincidencia is None:
+        lineas.append("Sin disponibilidad para lo solicitado.")
+        return "\n".join(lineas)
+
+    ids_consultorio = {t.id_consultorio for tramos in coincidencia.tramos_por_dia.values() for t in tramos}
+    consultorios = _mapa_consultorios_basico(conn, ids_consultorio)
+    etiqueta_por_fecha = dict(zip(fechas, etiquetas_fecha))
+
+    lineas.append("Alternativas disponibles:")
+    for fecha, tramos in coincidencia.tramos_por_dia.items():
+        etiqueta = etiqueta_por_fecha.get(fecha, fecha)
+        if len(tramos) == 1:
+            t = tramos[0]
+            lugar = _lugar_reserva(consultorios[t.id_consultorio], incluir_consultorio, incluir_unidad, incluir_edificio)
+            sufijo = f" {lugar}" if lugar else ""
+            lineas.append(f"· {etiqueta} de {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)}{sufijo}")
+        else:
+            lineas.append(f"· {etiqueta}:")
             for t in tramos:
                 lugar = _lugar_reserva(consultorios[t.id_consultorio], incluir_consultorio, incluir_unidad, incluir_edificio)
                 sufijo = f" {lugar}" if lugar else ""

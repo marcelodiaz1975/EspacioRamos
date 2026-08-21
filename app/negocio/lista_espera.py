@@ -55,7 +55,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from app.negocio.dias import fecha_actual
-from app.negocio.grilla import calcular_ocupacion_regular
+from app.negocio.grilla import calcular_ocupacion_fecha, calcular_ocupacion_regular
 from app.repositorio.registro import obtener_repositorio
 
 VERDE = "verde"
@@ -335,6 +335,85 @@ def calcular_coincidencia(conn: sqlite3.Connection, pedido, anio: int, mes: int)
     if condiciones.get("sinCombinar") and color != VERDE:
         return None
     return Coincidencia(color=color, dias_cubiertos=dias_cubiertos, tramos_por_dia=tramos_por_dia)
+
+
+def _coincidencia_bloque_fechas(
+    conn: sqlite3.Connection, candidatos_por_id: dict, bloque: dict,
+) -> tuple[list[str], dict[str, list[TramoCobertura]]] | None:
+    """Igual que `_coincidencia_bloque`, pero contra fechas puntuales
+    (DC-03 Mensaje 2 Variante B) en vez de días de la semana genéricos
+    promediados en un mes — cada fecha usa su ocupación real ese día
+    concreto (`calcular_ocupacion_fecha`: respeta ausencias puntuales y
+    reservas aisladas ya confirmadas esa fecha)."""
+    fechas = bloque.get("fechas") or []
+    if not fechas:
+        return None
+    duracion_requerida = bloque.get("cantidad_horas_requeridas")
+
+    cobertura_por_fecha: dict[str, list[TramoCobertura]] = {}
+    for fecha in fechas:
+        ocupado_fecha = calcular_ocupacion_fecha(conn, fecha)
+        ocupado = {(idc, fecha, h): v for (idc, h), v in ocupado_fecha.items()}
+        tramos = _cobertura_dia(
+            candidatos_por_id, fecha, bloque["horario_desde"], bloque["horario_hasta"], ocupado,
+            duracion_requerida=duracion_requerida,
+        )
+        if tramos is not None:
+            cobertura_por_fecha[fecha] = tramos
+
+    if bloque.get("tipo_combinacion_dias", "O") == "Y":
+        if len(cobertura_por_fecha) != len(fechas):
+            return None
+        fechas_cubiertas = list(fechas)
+    else:
+        if not cobertura_por_fecha:
+            return None
+        fechas_cubiertas = [f for f in fechas if f in cobertura_por_fecha]
+
+    return fechas_cubiertas, {f: cobertura_por_fecha[f] for f in fechas_cubiertas}
+
+
+def calcular_coincidencia_fechas(
+    conn: sqlite3.Connection, *, bloques: list[dict], tipo_combinacion_bloques: str = "O",
+    condiciones_consultorio: dict | None = None,
+) -> Coincidencia | None:
+    """Variante B de `calcular_coincidencia` (DC-03 Mensaje 2): cruza
+    fechas puntuales en vez de días de la semana genéricos + (anio, mes).
+    No persiste nada — igual que `mensaje_disponibilidad_horarios`, es
+    solo para armar el mensaje. Cada bloque es un dict con `fechas`
+    (lista de 'AAAA-MM-DD'), `horario_desde`, `horario_hasta`, y
+    opcionalmente `tipo_combinacion_dias` ('O' por defecto) y
+    `cantidad_horas_requeridas`."""
+    condiciones = condiciones_consultorio or {}
+    candidatos = _consultorios_candidatos(conn, condiciones)
+    if not candidatos or not bloques:
+        return None
+    candidatos_por_id = {c["IdConsultorio"]: c for c in candidatos}
+
+    resultados = [_coincidencia_bloque_fechas(conn, candidatos_por_id, bloque) for bloque in bloques]
+
+    if tipo_combinacion_bloques == "Y":
+        if any(r is None for r in resultados):
+            return None
+        cubiertos = resultados
+    else:
+        cubiertos = [r for r in resultados if r is not None]
+        if not cubiertos:
+            return None
+
+    fechas_cubiertas: list[str] = []
+    tramos_por_fecha: dict[str, list[TramoCobertura]] = {}
+    for fechas_bloque, tramos_bloque in cubiertos:
+        for f in fechas_bloque:
+            if f not in fechas_cubiertas:
+                fechas_cubiertas.append(f)
+        tramos_por_fecha.update(tramos_bloque)
+
+    ids_consultorios = {t.id_consultorio for tramos in tramos_por_fecha.values() for t in tramos}
+    color = _clasificar_color(candidatos_por_id, ids_consultorios)
+    if condiciones.get("sinCombinar") and color != VERDE:
+        return None
+    return Coincidencia(color=color, dias_cubiertos=fechas_cubiertas, tramos_por_dia=tramos_por_fecha)
 
 
 def listar_pedidos_con_coincidencia(

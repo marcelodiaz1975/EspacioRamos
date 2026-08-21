@@ -2,16 +2,19 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.negocio.ausencias import crear_ausencia
 from app.negocio.lista_espera import (
     AMARILLO,
     NARANJA,
     ROJO,
     VERDE,
     calcular_coincidencia,
+    calcular_coincidencia_fechas,
     crear_pedido,
     marcar_descartado,
     marcar_resuelto,
 )
+from app.negocio.reservas import crear_reserva_aislada
 from app.repositorio.registro import obtener_repositorio
 
 ANIO, MES = 2026, 8
@@ -302,3 +305,79 @@ def test_cantidad_horas_mayor_al_rango_pedido_lanza_error(conn):
 def test_pedido_sin_bloques_lanza_error(conn):
     with pytest.raises(ValueError):
         crear_pedido(conn, id_profesional=_profesional(conn), bloques=[])
+
+
+# ---------------------------------------------------- Variante B: fechas puntuales (DC-03 Mensaje 2)
+
+def _bloque_fecha(fechas, horario_desde=14, horario_hasta=16, **extra):
+    return {"fechas": fechas, "horario_desde": horario_desde, "horario_hasta": horario_hasta, **extra}
+
+
+def test_coincidencia_fechas_verde_consultorio_libre(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+
+    coincidencia = calcular_coincidencia_fechas(conn, bloques=[_bloque_fecha(["2026-08-03"])])  # lunes
+
+    assert coincidencia.color == VERDE
+    assert coincidencia.dias_cubiertos == ["2026-08-03"]
+    assert coincidencia.tramos_por_dia["2026-08-03"][0].id_consultorio == id_consultorio
+
+
+def test_coincidencia_fechas_respeta_ausencia_puntual_esa_fecha(conn):
+    """A diferencia de la Variante A (por día de semana genérico), acá una
+    ausencia puntual sí libera el consultorio para esa fecha concreta."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ocupante")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=14, HoraFin=16, VigenciaInicio="2026-01-01",
+    )
+
+    # sin ausencia: ocupado, sin coincidencia
+    assert calcular_coincidencia_fechas(conn, bloques=[_bloque_fecha(["2026-08-03"])]) is None
+
+    crear_ausencia(conn, id_profesional=id_prof, fecha_desde="2026-08-03", fecha_hasta="2026-08-03")
+    coincidencia = calcular_coincidencia_fechas(conn, bloques=[_bloque_fecha(["2026-08-03"])])
+    assert coincidencia.color == VERDE
+
+
+def test_coincidencia_fechas_reserva_aislada_confirmada_ocupa(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    id_prof_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Puntual")
+    crear_reserva_aislada(
+        conn, id_profesional=id_prof_aislada, id_consultorio=id_consultorio, fecha="2026-08-03",
+        hora_inicio=14, hora_fin=16,
+    )
+
+    assert calcular_coincidencia_fechas(conn, bloques=[_bloque_fecha(["2026-08-03"])]) is None
+
+
+def test_coincidencia_fechas_no_confunde_fechas_distintas_del_mismo_dia_semana(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ocupante")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=14, HoraFin=16, VigenciaInicio="2026-01-01", VigenciaFin="2026-08-03",
+    )
+
+    # 3/8 (lunes ocupado, último día de vigencia) Y 10/8 (otro lunes, ya
+    # fuera de vigencia -> libre): con TipoCombinacionDias Y,
+    # el primero bloquea la coincidencia completa del bloque
+    resultado = calcular_coincidencia_fechas(
+        conn, bloques=[_bloque_fecha(["2026-08-03", "2026-08-10"], tipo_combinacion_dias="Y")],
+    )
+    assert resultado is None
+
+    # con O, alcanza con el 10/8 libre
+    resultado_o = calcular_coincidencia_fechas(
+        conn, bloques=[_bloque_fecha(["2026-08-03", "2026-08-10"], tipo_combinacion_dias="O")],
+    )
+    assert resultado_o.dias_cubiertos == ["2026-08-10"]

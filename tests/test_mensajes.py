@@ -9,6 +9,7 @@ from app.negocio.mensajes import (
     dias_desde_ultimo_pago,
     mensaje_detalle_reserva_aislada,
     mensaje_disponibilidad_horarios,
+    mensaje_disponibilidad_horarios_fecha,
     mensaje_envio_liquidacion,
     mensaje_grupal,
     mensaje_situacion_1,
@@ -533,6 +534,54 @@ def test_disponibilidad_horarios_omite_edificio_unico(conn, edificio_dos_consult
         conn, periodo="2026-08", dias=["Lunes"], horario_desde=10, horario_hasta=12, incluir_edificio=True,
     )
     assert "Edificio" not in texto
+
+
+# --------------------------------------------------- Mensaje 2 Variante B: fecha puntual (DC-03)
+
+def test_disponibilidad_fecha_alternativa_simple(conn, edificio_dos_consultorios):
+    texto = mensaje_disponibilidad_horarios_fecha(
+        conn, fechas=["2026-08-03"], horario_desde=10, horario_hasta=12,  # lunes
+    )
+    assert "Alternativas disponibles:" in texto
+    assert "· lunes 3/8 de 10 a 12hs" in texto
+
+
+def test_disponibilidad_fecha_sin_coincidencia(conn, edificio_dos_consultorios):
+    c1, c2 = edificio_dos_consultorios
+    otro = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
+    for c in (c1, c2):
+        obtener_repositorio(conn, "ReservaRegular").crear(
+            IdProfesional=otro, IdConsultorio=c, DiaSemana="Lunes", HoraInicio=10, HoraFin=12,
+            VigenciaInicio="2026-01-01",
+        )
+    texto = mensaje_disponibilidad_horarios_fecha(conn, fechas=["2026-08-03"], horario_desde=10, horario_hasta=12)
+    assert "Sin disponibilidad para lo solicitado." in texto
+
+
+def test_disponibilidad_fecha_respeta_ausencia_puntual(conn, edificio_dos_consultorios):
+    """La ventaja de la Variante B sobre la A: una ausencia puntual libera
+    el consultorio para esa fecha exacta, aunque el patrón semanal genérico
+    lo muestre ocupado."""
+    c1, c2 = edificio_dos_consultorios
+    otro = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
+    for c in (c1, c2):
+        obtener_repositorio(conn, "ReservaRegular").crear(
+            IdProfesional=otro, IdConsultorio=c, DiaSemana="Lunes", HoraInicio=10, HoraFin=12,
+            VigenciaInicio="2026-01-01",
+        )
+    from app.negocio.ausencias import crear_ausencia
+    crear_ausencia(conn, id_profesional=otro, fecha_desde="2026-08-03", fecha_hasta="2026-08-03")
+
+    texto = mensaje_disponibilidad_horarios_fecha(conn, fechas=["2026-08-03"], horario_desde=10, horario_hasta=12)
+    assert "Alternativas disponibles:" in texto
+
+
+def test_disponibilidad_fecha_varias_fechas_en_el_encabezado(conn, edificio_dos_consultorios):
+    texto = mensaje_disponibilidad_horarios_fecha(
+        conn, fechas=["2026-08-03", "2026-08-10"], horario_desde=10, horario_hasta=11,
+    )
+    assert "lunes 3/8" in texto
+    assert "lunes 10/8" in texto
 
 
 # ------------------------------------------------------------- utilitarios
