@@ -3,23 +3,32 @@ filtros (localidad/edificio/unidad/día de semana/profesional) + selector
 de período/rango de fechas/modo de visualización + la grilla en sí
 (encabezados apilados como en el PDF de Disponibilidad: Día de la
 semana > Localidad > Edificio > Unidad > Consultorio, omitiendo
-Localidad/Edificio cuando solo hay uno) + cuadro de texto de detalle al
-hacer clic en una celda.
+Localidad/Edificio cuando solo hay uno, más las columnas Tipo de
+bloque/Horario y las líneas gruesas estructurales, igual que el PDF) +
+cuadro de texto de detalle al hacer clic en una celda.
 
 Se monta en la pantalla "Grilla operativa" y, más adelante, en los
 formularios de reservas/vacaciones/licencias/ausencias (cada uno la
-reutiliza tal cual, según se vaya conectando)."""
+reutiliza tal cual, según se vaya conectando).
+
+Colores: verde y rojo son versiones bien claras de los que usan los PDF
+(para que el código dentro de la celda se siga leyendo con fondo de
+color) — no comparten constante con `app/pdf/estilos.py` a propósito,
+así un cambio de paleta de un lado no mueve el otro sin querer.
+Amarillo y el azul oscuro del filtro de profesional sí quedan iguales
+que en el resto de la app."""
 from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import QDate, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
     QCompleter,
+    QDateEdit,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -32,7 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.estilos import COLOR_AMARILLO, COLOR_AZUL_OSCURO, COLOR_NIVEL_1, COLOR_ROJO, COLOR_VERDE
+from app.gui.estilos import COLOR_AMARILLO, COLOR_AZUL_OSCURO, COLOR_NIVEL_1
 from app.negocio.dias import parsear_periodo, periodo_actual, sumar_meses, ultimo_dia_mes
 from app.negocio.grilla import dias_grilla
 from app.negocio.grilla_operativa import (
@@ -46,10 +55,24 @@ from app.negocio.grilla_operativa import (
     calcular_grilla_operativa,
 )
 
-_COLOR_HEX = {BLANCO: "#FFFFFF", VERDE: COLOR_VERDE, AMARILLO: COLOR_AMARILLO, ROJO: COLOR_ROJO, AZUL_OSCURO: COLOR_AZUL_OSCURO}
+_COLOR_VERDE_CLARO = "#C8E6C9"
+_COLOR_ROJO_CLARO = "#FFCDD2"
+_COLOR_HEX = {BLANCO: "#FFFFFF", VERDE: _COLOR_VERDE_CLARO, AMARILLO: COLOR_AMARILLO, ROJO: _COLOR_ROJO_CLARO, AZUL_OSCURO: COLOR_AZUL_OSCURO}
 _FUENTE_HEX = {BLANCA: "#FFFFFF"}  # "negra" es el default de _CeldaGrilla, no hace falta mapearla
 _ANCHO_CODIGO_CORTO = "A99"  # letra + 2 dígitos
 _ANCHO_CODIGO_LARGO = "A999"  # letra + 3 dígitos
+_GROSOR_GRUESO = 2  # línea estructural — mismo criterio visual que _GROSOR_GRUESO de grilla_pdf.py
+_FORMATO_FECHA = "dd-MM-yyyy"
+
+# Columnas fijas de cada fila de datos (igual que "Tipo Bloque"/"Horario" en el PDF).
+_COL_TIPO_BLOQUE = 0
+_COL_HORARIO = 1
+_COL_DATOS_INICIO = 2
+
+
+def _tipo_bloque_por_hora(conn: sqlite3.Connection, horas: list[int]) -> dict[int, str]:
+    filas = conn.execute("SELECT HoraInicio, HoraFin FROM BloqueRigido WHERE Activo = 1").fetchall()
+    return {h: ("Rígido" if any(f["HoraInicio"] <= h < f["HoraFin"] for f in filas) else "Flexible") for h in horas}
 
 
 class _CeldaGrilla(QWidget):
@@ -58,11 +81,16 @@ class _CeldaGrilla(QWidget):
     QTableWidgetItem) para poder pintar el círculo y manejar el clic sin
     un delegate aparte."""
 
-    def __init__(self, celda: CeldaGrillaOperativa, clave: tuple[int, str, int], on_click, parent=None):
+    def __init__(
+        self, celda: CeldaGrillaOperativa, clave: tuple[int, str, int], on_click,
+        borde_derecho_grueso: bool = False, borde_inferior_grueso: bool = False, parent=None,
+    ):
         super().__init__(parent)
         self.celda = celda
         self._clave = clave
         self._on_click = on_click
+        self._borde_derecho_grueso = borde_derecho_grueso
+        self._borde_inferior_grueso = borde_inferior_grueso
         self.setMinimumHeight(24)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (nombre impuesto por Qt)
@@ -87,7 +115,17 @@ class _CeldaGrilla(QWidget):
         if self.celda.codigo:
             painter.setPen(QColor(_FUENTE_HEX.get(self.celda.color_fuente, "#000000")))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.celda.codigo)
+        _dibujar_bordes_gruesos(painter, rect, self._borde_derecho_grueso, self._borde_inferior_grueso)
         painter.end()
+
+
+def _dibujar_bordes_gruesos(painter: QPainter, rect, derecho: bool, inferior: bool) -> None:
+    pen = QPen(QColor("#000000"), _GROSOR_GRUESO)
+    painter.setPen(pen)
+    if derecho:
+        painter.drawLine(rect.topRight(), rect.bottomRight())
+    if inferior:
+        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
 
 
 def _lista_multiseleccion() -> QListWidget:
@@ -177,13 +215,17 @@ class GrillaOperativaWidget(QWidget):
         fila_controles.addWidget(self.combo_periodo)
 
         fila_controles.addWidget(QLabel("Desde:"))
-        self.campo_desde = QLineEdit()
-        self.campo_desde.editingFinished.connect(self.actualizar)
+        self.campo_desde = QDateEdit()
+        self.campo_desde.setDisplayFormat(_FORMATO_FECHA)
+        self.campo_desde.setCalendarPopup(True)
+        self.campo_desde.dateChanged.connect(self.actualizar)
         fila_controles.addWidget(self.campo_desde)
 
         fila_controles.addWidget(QLabel("Hasta:"))
-        self.campo_hasta = QLineEdit()
-        self.campo_hasta.editingFinished.connect(self.actualizar)
+        self.campo_hasta = QDateEdit()
+        self.campo_hasta.setDisplayFormat(_FORMATO_FECHA)
+        self.campo_hasta.setCalendarPopup(True)
+        self.campo_hasta.dateChanged.connect(self.actualizar)
         fila_controles.addWidget(self.campo_hasta)
 
         fila_controles.addWidget(QLabel("Visualización:"))
@@ -215,8 +257,13 @@ class GrillaOperativaWidget(QWidget):
 
     def _establecer_rango_por_defecto(self, periodo: str) -> None:
         anio, mes = parsear_periodo(periodo)
-        self.campo_desde.setText(f"{anio:04d}-{mes:02d}-01")
-        self.campo_hasta.setText(ultimo_dia_mes(anio, mes).isoformat())
+        ultimo = ultimo_dia_mes(anio, mes)
+        self.campo_desde.blockSignals(True)
+        self.campo_hasta.blockSignals(True)
+        self.campo_desde.setDate(QDate(anio, mes, 1))
+        self.campo_hasta.setDate(QDate(ultimo.year, ultimo.month, ultimo.day))
+        self.campo_desde.blockSignals(False)
+        self.campo_hasta.blockSignals(False)
 
     def _periodo_cambiado(self) -> None:
         periodo = self.combo_periodo.currentData()
@@ -308,11 +355,11 @@ class GrillaOperativaWidget(QWidget):
     def actualizar(self) -> None:
         ids_unidad = _ids_seleccionados(self.lista_unidad)
         dias = self._dias_seleccionados()
-        desde = self.campo_desde.text().strip()
-        hasta = self.campo_hasta.text().strip()
+        desde = self.campo_desde.date().toPython().isoformat()
+        hasta = self.campo_hasta.date().toPython().isoformat()
         modo = self.combo_modo.currentData() or "regular"
 
-        if not ids_unidad or not dias or not desde or not hasta:
+        if not ids_unidad or not dias or desde > hasta:
             self.tabla.setRowCount(0)
             self.tabla.setColumnCount(0)
             self._resultado = {}
@@ -374,7 +421,7 @@ class GrillaOperativaWidget(QWidget):
 
         filas_encabezado = 3 + int(mostrar_localidad) + int(mostrar_edificio)  # Día [+Localidad][+Edificio] + Unidad + Consultorio
         n_filas = filas_encabezado + len(horas)
-        n_columnas = 1 + len(columnas)  # +1 columna de horario
+        n_columnas = _COL_DATOS_INICIO + len(columnas)
 
         # setRowCount(0)/setColumnCount(0) primero: QTableWidget.clear() no
         # garantiza liberar los cellWidget de la grilla anterior, y sin esto
@@ -386,44 +433,75 @@ class GrillaOperativaWidget(QWidget):
         self.tabla.setColumnCount(n_columnas)
 
         ancho_columna = self._ancho_columna(columnas, horas)
-        self.tabla.setColumnWidth(0, 78)
-        for col in range(1, n_columnas):
+        self.tabla.setColumnWidth(_COL_TIPO_BLOQUE, 45)
+        self.tabla.setColumnWidth(_COL_HORARIO, 50)
+        for col in range(_COL_DATOS_INICIO, n_columnas):
             self.tabla.setColumnWidth(col, ancho_columna)
         for fila in range(filas_encabezado):
             self.tabla.setRowHeight(fila, 26)
         for fila in range(filas_encabezado, n_filas):
             self.tabla.setRowHeight(fila, 24)
 
+        limites_dia = self._limites_dia(columnas)
+
         fila_actual = 0
-        self._agregar_encabezado_agrupado(fila_actual, columnas, lambda c: c["dia"], "Día de la semana", mayusculas=True)
+        self._agregar_encabezado_agrupado(
+            fila_actual, columnas, lambda c: c["dia"], "Día de la semana", limites_dia, mayusculas=True,
+        )
         fila_actual += 1
         if mostrar_localidad:
-            self._agregar_encabezado_agrupado(fila_actual, columnas, lambda c: (c["dia"], c["localidad"]), "Localidad")
+            self._agregar_encabezado_agrupado(
+                fila_actual, columnas, lambda c: (c["dia"], c["localidad"]), "Localidad", limites_dia,
+            )
             fila_actual += 1
         if mostrar_edificio:
             self._agregar_encabezado_agrupado(
-                fila_actual, columnas, lambda c: (c["dia"], c["localidad"], c["nombre_edificio"]), "Edificio",
+                fila_actual, columnas, lambda c: (c["dia"], c["localidad"], c["nombre_edificio"]), "Edificio", limites_dia,
             )
             fila_actual += 1
         self._agregar_encabezado_agrupado(
             fila_actual, columnas, lambda c: (c["dia"], c["localidad"], c["nombre_edificio"], c["id_unidad"]),
-            "Unidad", texto=lambda c: c["departamento"],
+            "Unidad", limites_dia, texto=lambda c: c["departamento"],
         )
         fila_actual += 1
-        self._agregar_encabezado_consultorio(fila_actual, columnas)
+        self._agregar_encabezado_consultorio(fila_actual, columnas, limites_dia)
         fila_actual += 1
+
+        tipo_por_hora = _tipo_bloque_por_hora(self.conn, horas)
+        limites_bloque = {
+            i for i, h in enumerate(horas)
+            if i == len(horas) - 1 or tipo_por_hora[h] != tipo_por_hora[horas[i + 1]]
+        }
+        self._agregar_columna_tipo_bloque(filas_encabezado, horas, tipo_por_hora)
 
         for i, hora in enumerate(horas):
             fila = filas_encabezado + i
-            self._poner_texto_encabezado(fila, 0, f"{hora}:00")
+            borde_inferior = i in limites_bloque
+            self._poner_texto_dato_fila(fila, _COL_HORARIO, f"{hora}:00", borde_inferior=borde_inferior)
             for j, columna in enumerate(columnas):
-                col = j + 1
+                col = _COL_DATOS_INICIO + j
                 clave = (columna["id_consultorio"], columna["dia"], hora)
                 celda = self._resultado.get(clave)
                 if celda is None:
                     continue
-                widget = _CeldaGrilla(celda, clave, self._mostrar_detalle)
+                widget = _CeldaGrilla(
+                    celda, clave, self._mostrar_detalle,
+                    borde_derecho_grueso=j in limites_dia, borde_inferior_grueso=borde_inferior,
+                )
                 self.tabla.setCellWidget(fila, col, widget)
+
+    def _limites_dia(self, columnas: list[dict]) -> set[int]:
+        return {i for i in range(len(columnas)) if i == len(columnas) - 1 or columnas[i]["dia"] != columnas[i + 1]["dia"]}
+
+    def _agregar_columna_tipo_bloque(self, filas_encabezado: int, horas: list[int], tipo_por_hora: dict[int, str]) -> None:
+        inicio = 0
+        for i in range(1, len(horas) + 1):
+            if i == len(horas) or tipo_por_hora[horas[i]] != tipo_por_hora[horas[inicio]]:
+                self._poner_texto_dato_fila(
+                    filas_encabezado + inicio, _COL_TIPO_BLOQUE, tipo_por_hora[horas[inicio]],
+                    span_filas=i - inicio, borde_inferior=True,
+                )
+                inicio = i
 
     def _ancho_columna(self, columnas: list[dict], horas: list[int]) -> int:
         codigos_largos = any(
@@ -436,8 +514,11 @@ class GrillaOperativaWidget(QWidget):
         texto = _ANCHO_CODIGO_LARGO if codigos_largos else _ANCHO_CODIGO_CORTO
         return metrica.horizontalAdvance(texto) + 14
 
-    def _agregar_encabezado_agrupado(self, fila: int, columnas: list[dict], clave_grupo, etiqueta_columna_0, texto=None, mayusculas: bool = False) -> None:
-        self._poner_texto_encabezado(fila, 0, etiqueta_columna_0)
+    def _agregar_encabezado_agrupado(
+        self, fila: int, columnas: list[dict], clave_grupo, etiqueta_columna_0: str, limites_dia: set[int],
+        texto=None, mayusculas: bool = False,
+    ) -> None:
+        self._poner_texto_encabezado(fila, _COL_TIPO_BLOQUE, etiqueta_columna_0, span=2)
         inicio = 0
         actual = clave_grupo(columnas[0])
         for i in range(1, len(columnas) + 1):
@@ -446,29 +527,46 @@ class GrillaOperativaWidget(QWidget):
                 texto_grupo = texto(columnas[inicio]) if texto else str(actual[-1] if isinstance(actual, tuple) else actual)
                 if mayusculas:
                     texto_grupo = texto_grupo.upper()
-                self._poner_texto_encabezado(fila, inicio + 1, texto_grupo, span=i - inicio)
+                self._poner_texto_encabezado(
+                    fila, _COL_DATOS_INICIO + inicio, texto_grupo, span=i - inicio,
+                    borde_derecho=(i - 1) in limites_dia,
+                )
                 inicio = i
                 actual = clave
 
-    def _agregar_encabezado_consultorio(self, fila: int, columnas: list[dict]) -> None:
-        self._poner_texto_encabezado(fila, 0, "Consultorio")
+    def _agregar_encabezado_consultorio(self, fila: int, columnas: list[dict], limites_dia: set[int]) -> None:
+        self._poner_texto_encabezado(fila, _COL_TIPO_BLOQUE, "Consultorio", span=2)
         for i, columna in enumerate(columnas):
-            self._poner_texto_encabezado(fila, i + 1, str(columna["numero_consultorio"]))
+            self._poner_texto_encabezado(
+                fila, _COL_DATOS_INICIO + i, str(columna["numero_consultorio"]), borde_derecho=i in limites_dia,
+            )
 
-    def _poner_texto_encabezado(self, fila: int, col: int, texto: str, span: int = 1) -> None:
+    def _poner_texto_encabezado(self, fila: int, col: int, texto: str, span: int = 1, borde_derecho: bool = False) -> None:
         etiqueta = QLabel(texto)
         etiqueta.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # La columna 0 (etiqueta de cada nivel: "Día de la semana",
-        # "Consultorio", etc.) es angosta y esos textos son largos —
-        # letra más chica ahí para que entren en 2-3 líneas en vez de
-        # desbordar la celda.
-        tamano = "9px" if col == 0 else "11px"
+        # Las columnas de etiqueta (Tipo Bloque/Horario fusionadas) tienen
+        # textos largos ("Día de la semana") — letra más chica ahí para
+        # que entren en 2-3 líneas en vez de desbordar la celda.
+        tamano = "9px" if col == _COL_TIPO_BLOQUE else "11px"
+        borde = f"border-right: {_GROSOR_GRUESO}px solid black;" if borde_derecho else ""
         etiqueta.setStyleSheet(
-            f"background-color: {COLOR_NIVEL_1}; color: white; font-weight: bold; font-size: {tamano};"
+            f"background-color: {COLOR_NIVEL_1}; color: white; font-weight: bold; font-size: {tamano}; {borde}"
         )
         etiqueta.setWordWrap(True)
         if span > 1:
             self.tabla.setSpan(fila, col, 1, span)
+        self.tabla.setCellWidget(fila, col, etiqueta)
+
+    def _poner_texto_dato_fila(
+        self, fila: int, col: int, texto: str, span_filas: int = 1, borde_inferior: bool = False,
+    ) -> None:
+        etiqueta = QLabel(texto)
+        etiqueta.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        borde = f"border-bottom: {_GROSOR_GRUESO}px solid black;" if borde_inferior else ""
+        etiqueta.setStyleSheet(f"font-weight: bold; font-size: 10px; {borde}")
+        etiqueta.setWordWrap(True)
+        if span_filas > 1:
+            self.tabla.setSpan(fila, col, span_filas, 1)
         self.tabla.setCellWidget(fila, col, etiqueta)
 
     def _mostrar_detalle(self, clave: tuple[int, str, int]) -> None:

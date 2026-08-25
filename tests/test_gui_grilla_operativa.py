@@ -56,8 +56,9 @@ def test_rango_por_defecto_es_el_mes_completo(qtbot, conn):
     _preparar(conn)
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
-    assert widget.campo_desde.text() == "2026-08-01"
-    assert widget.campo_hasta.text() == "2026-08-31"
+    assert widget.campo_desde.date().toPython().isoformat() == "2026-08-01"
+    assert widget.campo_hasta.date().toPython().isoformat() == "2026-08-31"
+    assert widget.campo_desde.displayFormat() == "dd-MM-yyyy"
 
 
 def test_grilla_muestra_codigo_de_reserva_regular(qtbot, conn):
@@ -113,7 +114,7 @@ def test_columna_se_ensancha_con_codigo_de_4_caracteres(qtbot, conn):
     qtbot.addWidget(widget)
 
     ancho_corto = widget.fontMetrics().horizontalAdvance("A99") + 14
-    assert widget.tabla.columnWidth(1) > ancho_corto
+    assert widget.tabla.columnWidth(2) > ancho_corto  # columna 0=Tipo Bloque, 1=Horario, 2+=datos
 
 
 def test_cascada_edificio_a_unidad(qtbot, conn):
