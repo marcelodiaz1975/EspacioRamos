@@ -74,7 +74,11 @@ class _CeldaGrilla(QWidget):
         rect = self.rect()
         painter.fillRect(rect, QColor(_COLOR_HEX[self.celda.color_aro]))
         if self.celda.color_centro != self.celda.color_aro:
-            lado = min(rect.width(), rect.height()) * 0.55
+            # Un punto chico y fijo (no proporcional a la celda): tiene que
+            # quedar como acento sobre el aro, no taparlo — si ocupa la
+            # mayor parte de la celda, el aro deja de leerse como tal y el
+            # código (que se dibuja arriba de todo) lo tapa casi entero.
+            lado = min(10, min(rect.width(), rect.height()) * 0.4)
             x = rect.center().x() - lado / 2
             y = rect.center().y() - lado / 2
             painter.setBrush(QColor(_COLOR_HEX[self.celda.color_centro]))
@@ -382,11 +386,11 @@ class GrillaOperativaWidget(QWidget):
         self.tabla.setColumnCount(n_columnas)
 
         ancho_columna = self._ancho_columna(columnas, horas)
-        self.tabla.setColumnWidth(0, 55)
+        self.tabla.setColumnWidth(0, 78)
         for col in range(1, n_columnas):
             self.tabla.setColumnWidth(col, ancho_columna)
         for fila in range(filas_encabezado):
-            self.tabla.setRowHeight(fila, 22)
+            self.tabla.setRowHeight(fila, 26)
         for fila in range(filas_encabezado, n_filas):
             self.tabla.setRowHeight(fila, 24)
 
@@ -454,7 +458,14 @@ class GrillaOperativaWidget(QWidget):
     def _poner_texto_encabezado(self, fila: int, col: int, texto: str, span: int = 1) -> None:
         etiqueta = QLabel(texto)
         etiqueta.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        etiqueta.setStyleSheet(f"background-color: {COLOR_NIVEL_1}; color: white; font-weight: bold;")
+        # La columna 0 (etiqueta de cada nivel: "Día de la semana",
+        # "Consultorio", etc.) es angosta y esos textos son largos —
+        # letra más chica ahí para que entren en 2-3 líneas en vez de
+        # desbordar la celda.
+        tamano = "9px" if col == 0 else "11px"
+        etiqueta.setStyleSheet(
+            f"background-color: {COLOR_NIVEL_1}; color: white; font-weight: bold; font-size: {tamano};"
+        )
         etiqueta.setWordWrap(True)
         if span > 1:
             self.tabla.setSpan(fila, col, 1, span)
