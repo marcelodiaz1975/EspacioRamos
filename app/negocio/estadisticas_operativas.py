@@ -1,5 +1,8 @@
-"""Estadísticas por unidad/edificio para la sección "Estadísticas" de la
-pantalla Grilla operativa (miscelánea, ago-2026, punto 21).
+"""Estadísticas por unidad/edificio/localidad para la sección "Estadísticas"
+de la pantalla Grilla operativa (miscelánea, ago-2026, punto 21). Los tres
+niveles (más el total general) siempre se calculan completos — es la
+pantalla la que decide si muestra el nivel localidad/edificio cuando el
+filtro aplicado abarca más de una localidad/edificio.
 
 Siempre usa `periodo_actual(conn)` — no el período que se esté mirando
 en la grilla, que puede ser uno futuro para ver disponibilidad (así lo
@@ -61,6 +64,7 @@ class EstadisticasOperativas:
     periodo: str
     por_unidad: list[EstadisticaGrupo] = field(default_factory=list)
     por_edificio: list[EstadisticaGrupo] = field(default_factory=list)
+    por_localidad: list[EstadisticaGrupo] = field(default_factory=list)
     total: EstadisticaGrupo = field(default_factory=lambda: EstadisticaGrupo(id=None, nombre="Total"))
 
 
@@ -160,7 +164,8 @@ def calcular_estadisticas_operativas(conn: sqlite3.Connection, ids_unidad: list[
     placeholders = ", ".join("?" for _ in ids_unidad)
     consultorios = conn.execute(
         f"""
-        SELECT c.IdConsultorio, u.IdUnidad, u.Departamento, e.IdEdificio, e.Nombre AS NombreEdificio
+        SELECT c.IdConsultorio, u.IdUnidad, u.Departamento, e.IdEdificio, e.Nombre AS NombreEdificio,
+               e.DomicilioLocalidad
         FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
         WHERE u.IdUnidad IN ({placeholders})
         """,
@@ -175,6 +180,7 @@ def calcular_estadisticas_operativas(conn: sqlite3.Connection, ids_unidad: list[
     }
     id_edificio_de_unidad = {c["IdUnidad"]: c["IdEdificio"] for c in consultorios}
     nombre_edificio_de = {c["IdEdificio"]: c["NombreEdificio"] for c in consultorios}
+    localidad_de_edificio = {c["IdEdificio"]: (c["DomicilioLocalidad"] or "(Sin localidad)") for c in consultorios}
 
     if ids_consultorio:
         horas_reg = _horas_regulares_por_consultorio(conn, primer_dia, ultimo_dia, ids_consultorio=ids_consultorio)
@@ -234,6 +240,25 @@ def calcular_estadisticas_operativas(conn: sqlite3.Connection, ids_unidad: list[
         agregado = ocupacion.por_edificio.get(id_edificio)
         ge.porcentaje_ocupacion = agregado.porcentaje if agregado else 0.0
 
+    grupos_localidad: dict[str, EstadisticaGrupo] = {}
+    for id_edificio, ge in grupos_edificio.items():
+        localidad = localidad_de_edificio[id_edificio]
+        gl = grupos_localidad.setdefault(localidad, EstadisticaGrupo(id=None, nombre=localidad))
+        gl.horas_regulares += ge.horas_regulares
+        gl.horas_aisladas += ge.horas_aisladas
+        gl.subtotal_regulares += ge.subtotal_regulares
+        gl.subtotal_aisladas += ge.subtotal_aisladas
+        gl.pagos_atribuidos += ge.pagos_atribuidos
+
+    ids_unidad_por_localidad: dict[str, list[int]] = {}
+    for id_unidad in grupos_unidad:
+        localidad = localidad_de_edificio[id_edificio_de_unidad[id_unidad]]
+        ids_unidad_por_localidad.setdefault(localidad, []).append(id_unidad)
+    for localidad, ids in ids_unidad_por_localidad.items():
+        slots = sum(ocupacion.por_unidad[i]._slots for i in ids)
+        ocupados = sum(ocupacion.por_unidad[i]._ocupados for i in ids)
+        grupos_localidad[localidad].porcentaje_ocupacion = (ocupados / slots * 100) if slots else 0.0
+
     total = EstadisticaGrupo(id=None, nombre="Total")
     for grupo in grupos_unidad.values():
         total.horas_regulares += grupo.horas_regulares
@@ -253,5 +278,6 @@ def calcular_estadisticas_operativas(conn: sqlite3.Connection, ids_unidad: list[
         periodo=periodo,
         por_unidad=sorted(grupos_unidad.values(), key=lambda g: g.nombre),
         por_edificio=sorted(grupos_edificio.values(), key=lambda g: g.nombre),
+        por_localidad=sorted(grupos_localidad.values(), key=lambda g: g.nombre),
         total=total,
     )

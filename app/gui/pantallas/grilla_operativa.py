@@ -1,21 +1,24 @@
 """Pantalla "Grilla operativa" (punto 21 de la miscelánea, ago-2026): tres
-secciones en solapas que comparten el mismo filtro de unidades que el
-usuario tildó en la grilla (`GrillaOperativaWidget.ids_unidad_seleccionadas`,
-sincronizado vía el callback `on_actualizar`):
+secciones apiladas en una sola pantalla con scroll (grilla arriba de todo,
+lo primero que se ve al entrar; debajo, valores y estadísticas), todas
+sincronizadas con el mismo filtro de unidades que el usuario tildó en la
+grilla (`GrillaOperativaWidget.ids_unidad_seleccionadas`, sincronizado vía
+el callback `on_actualizar`):
 
 - Grilla: la grilla filtrable en sí.
 - Valores de los consultorios: valor hora regular/aislada de cada
   consultorio de las unidades filtradas.
-- Estadísticas: por cada unidad filtrada (y agregado por edificio y
-  total general) el % de ocupación, las horas reservadas y los
-  subtotales/falta-cobrar del período actual del sistema — ver
-  `app.negocio.estadisticas_operativas`."""
+- Estadísticas: total general primero, después el desglose por localidad
+  (si el filtro abarca más de una) y por edificio (si abarca más de uno),
+  y por último el detalle por unidad — ver `app.negocio.estadisticas_operativas`."""
 from __future__ import annotations
 
 import sqlite3
 
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QGroupBox, QHeaderView, QLabel, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+)
 
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
 from app.negocio.estadisticas_operativas import EstadisticaGrupo, calcular_estadisticas_operativas
@@ -23,12 +26,13 @@ from app.negocio.formato import formatear_moneda
 
 _COLUMNAS_VALORES = ["Edificio", "Unidad", "Consultorio", "Valor hora regular", "Valor hora aislada"]
 _COLUMNAS_ESTADISTICAS = [
-    "Unidad / Edificio", "% Ocupación", "Horas regulares", "Horas aisladas",
+    "Total / Localidad / Edificio / Unidad", "% Ocupación", "Horas regulares", "Horas aisladas",
     "Subtotal regulares", "Subtotal aisladas", "Pagos del mes", "Falta cobrar",
 ]
 
-_COLOR_SUBTOTAL_EDIFICIO = QColor("#E3EAF2")
-_COLOR_TOTAL_GENERAL = QColor("#C5D3E3")
+_COLOR_TOTAL = QColor("#B7C8DC")
+_COLOR_LOCALIDAD = QColor("#D2DEEB")
+_COLOR_EDIFICIO = QColor("#E9EFF5")
 
 
 def _fmt_horas(horas: float) -> str:
@@ -49,27 +53,42 @@ class PantallaGrillaOperativa(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
-        layout = QVBoxLayout(self)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        contenedor = QWidget()
+        scroll.setWidget(contenedor)
+        layout_pantalla = QVBoxLayout(self)
+        layout_pantalla.addWidget(scroll)
+
+        layout = QVBoxLayout(contenedor)
 
         titulo = QLabel("Grilla operativa")
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
-        self._tabs = QTabWidget()
-        layout.addWidget(self._tabs, stretch=1)
-
+        grupo_valores = QGroupBox("Valores de los consultorios")
+        layout_valores = QVBoxLayout(grupo_valores)
         self.tabla_valores = _armar_tabla(_COLUMNAS_VALORES)
-        self._tabs.addTab(self.tabla_valores, "Valores de los consultorios")
+        layout_valores.addWidget(self.tabla_valores)
 
+        grupo_estadisticas = QGroupBox("Estadísticas")
+        layout_estadisticas = QVBoxLayout(grupo_estadisticas)
         self.tabla_estadisticas = _armar_tabla(_COLUMNAS_ESTADISTICAS)
-        self._tabs.addTab(self.tabla_estadisticas, "Estadísticas")
+        layout_estadisticas.addWidget(self.tabla_estadisticas)
 
-        # Se arma al final: su constructor ya dispara `actualizar()`, que a
-        # su vez llama a `_refrescar_secciones` — necesita que las tablas de
-        # arriba ya existan.
+        # La grilla se arma al final: su constructor ya dispara `actualizar()`,
+        # que a su vez llama a `_refrescar_secciones` — necesita que las
+        # tablas de arriba ya existan.
+        grupo_grilla = QGroupBox("Grilla")
+        layout_grilla = QVBoxLayout(grupo_grilla)
         self.grilla = GrillaOperativaWidget(conn, on_actualizar=self._refrescar_secciones)
-        self._tabs.insertTab(0, self.grilla, "Grilla")
-        self._tabs.setCurrentIndex(0)
+        self.grilla.setMinimumHeight(650)
+        layout_grilla.addWidget(self.grilla)
+
+        layout.addWidget(grupo_grilla)
+        layout.addWidget(grupo_valores)
+        layout.addWidget(grupo_estadisticas)
 
     # -------------------------------------------------------- sincronismo
 
@@ -107,14 +126,19 @@ class PantallaGrillaOperativa(QWidget):
         if not ids_unidad:
             return
         estadisticas = calcular_estadisticas_operativas(self.conn, ids_unidad)
-        filas: list[tuple[EstadisticaGrupo, bool]] = [(g, False) for g in estadisticas.por_unidad]
-        filas += [(g, True) for g in estadisticas.por_edificio]
-        filas.append((estadisticas.total, True))
-        self.tabla_estadisticas.setRowCount(len(filas))
-        for fila, (grupo, resaltar) in enumerate(filas):
-            self._llenar_fila_estadistica(fila, grupo, resaltar)
 
-    def _llenar_fila_estadistica(self, fila: int, grupo: EstadisticaGrupo, resaltar: bool) -> None:
+        filas: list[tuple[EstadisticaGrupo, QColor | None]] = [(estadisticas.total, _COLOR_TOTAL)]
+        if len(estadisticas.por_localidad) > 1:
+            filas += [(g, _COLOR_LOCALIDAD) for g in estadisticas.por_localidad]
+        if len(estadisticas.por_edificio) > 1:
+            filas += [(g, _COLOR_EDIFICIO) for g in estadisticas.por_edificio]
+        filas += [(g, None) for g in estadisticas.por_unidad]
+
+        self.tabla_estadisticas.setRowCount(len(filas))
+        for fila, (grupo, color) in enumerate(filas):
+            self._llenar_fila_estadistica(fila, grupo, color)
+
+    def _llenar_fila_estadistica(self, fila: int, grupo: EstadisticaGrupo, color: QColor | None) -> None:
         valores = [
             grupo.nombre,
             f"{grupo.porcentaje_ocupacion:.1f} %",
@@ -125,13 +149,11 @@ class PantallaGrillaOperativa(QWidget):
             formatear_moneda(grupo.pagos_atribuidos),
             formatear_moneda(grupo.falta_cobrar),
         ]
-        color = _COLOR_TOTAL_GENERAL if grupo.id is None else (_COLOR_SUBTOTAL_EDIFICIO if resaltar else None)
         for columna, texto in enumerate(valores):
             item = QTableWidgetItem(texto)
-            if resaltar:
+            if color is not None:
                 fuente = item.font()
                 fuente.setBold(True)
                 item.setFont(fuente)
-            if color is not None:
                 item.setBackground(color)
             self.tabla_estadisticas.setItem(fila, columna, item)

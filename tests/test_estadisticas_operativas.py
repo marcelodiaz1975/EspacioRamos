@@ -27,8 +27,8 @@ def conn(tmp_path):
     connection.close()
 
 
-def _unidad(conn, nombre_edificio="Ramos 1", departamento='7mo "L"'):
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre=nombre_edificio)
+def _unidad(conn, nombre_edificio="Ramos 1", departamento='7mo "L"', localidad=None):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre=nombre_edificio, DomicilioLocalidad=localidad)
     return obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=departamento), id_edificio
 
 
@@ -198,10 +198,46 @@ def test_agregado_por_edificio_y_total(conn):
     assert est.total.subtotal_regulares == pytest.approx(total_subtotal_esperado)
 
 
+def test_agregado_por_localidad(conn):
+    id_unidad_1, id_edificio_1 = _unidad(conn, nombre_edificio="Ramos 1", departamento="1A", localidad="Ramos Mejía")
+    id_unidad_2 = _otra_unidad_mismo_edificio(conn, id_edificio_1, departamento="2B")
+    id_unidad_3, id_edificio_3 = _unidad(conn, nombre_edificio="Haedo 1", departamento="1A", localidad="Haedo")
+    id_c1 = _consultorio(conn, id_unidad_1)
+    id_c2 = _consultorio(conn, id_unidad_2)
+    id_c3 = _consultorio(conn, id_unidad_3)
+    id_prof = _profesional(conn)
+    _reserva(conn, id_prof, id_c1, "Lunes", horas=1)
+    _reserva(conn, id_prof, id_c2, "Lunes", horas=1)
+    _reserva(conn, id_prof, id_c3, "Lunes", horas=1)
+    conn.commit()
+
+    est = calcular_estadisticas_operativas(conn, [id_unidad_1, id_unidad_2, id_unidad_3])
+    assert len(est.por_localidad) == 2
+
+    por_localidad = {g.nombre: g for g in est.por_localidad}
+    horas_ramos_mejia = sum(g.horas_regulares for g in est.por_unidad if g.id in (id_unidad_1, id_unidad_2))
+    horas_haedo = [g for g in est.por_unidad if g.id == id_unidad_3][0].horas_regulares
+    assert por_localidad["Ramos Mejía"].horas_regulares == pytest.approx(horas_ramos_mejia)
+    assert por_localidad["Haedo"].horas_regulares == pytest.approx(horas_haedo)
+
+
+def test_localidad_sin_dato_se_agrupa_como_sin_localidad(conn):
+    id_unidad, _ = _unidad(conn, localidad=None)
+    id_consultorio = _consultorio(conn, id_unidad)
+    id_prof = _profesional(conn)
+    _reserva(conn, id_prof, id_consultorio, "Lunes", horas=1)
+    conn.commit()
+
+    est = calcular_estadisticas_operativas(conn, [id_unidad])
+    assert len(est.por_localidad) == 1
+    assert est.por_localidad[0].nombre == "(Sin localidad)"
+
+
 def test_sin_unidades_devuelve_vacio(conn):
     est = calcular_estadisticas_operativas(conn, [])
     assert est.por_unidad == []
     assert est.por_edificio == []
+    assert est.por_localidad == []
     assert est.total.horas_regulares == 0.0
     assert est.periodo == PERIODO
 
