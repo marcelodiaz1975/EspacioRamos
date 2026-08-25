@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_fecha_es_mes_anterior
-from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
+from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, unidades_con_reserva_vigente
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
 from app.negocio.lista_espera import marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
@@ -104,14 +104,20 @@ class _PanelReservasRegulares(QWidget):
         self.combo_consultorio = QComboBox()
         for id_, etiqueta in _opciones_consultorio(self.conn):
             self.combo_consultorio.addItem(etiqueta, id_)
-        self.combo_consultorio.currentIndexChanged.connect(self._sincronizar_grilla)
         form.addWidget(QLabel("Consultorio"))
         form.addWidget(self.combo_consultorio)
 
-        self.combo_dia = QComboBox()
-        self.combo_dia.addItems(_DIAS_RESERVA)
-        form.addWidget(QLabel("Día"))
-        form.addWidget(self.combo_dia)
+        form.addWidget(QLabel("Días"))
+        self._checks_dia: dict[str, QCheckBox] = {}
+        contenedor_dias = QWidget()
+        layout_dias = QVBoxLayout(contenedor_dias)
+        layout_dias.setContentsMargins(0, 0, 0, 0)
+        for dia in _DIAS_RESERVA:
+            check = QCheckBox(dia)
+            check.setChecked(dia == "Lunes")
+            self._checks_dia[dia] = check
+            layout_dias.addWidget(check)
+        form.addWidget(contenedor_dias)
 
         fila_horario = QHBoxLayout()
         self.spin_desde = QDoubleSpinBox()
@@ -199,27 +205,51 @@ class _PanelReservasRegulares(QWidget):
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem(r["VigenciaInicio"] or ""))
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(r["VigenciaFin"] or ""))
         self.tabla.resizeColumnsToContents()
-        self.grilla.actualizar()
+        self._sincronizar_grilla()
 
     def _sincronizar_grilla(self) -> None:
-        """La vista previa acompaña lo que se está por reservar: acotada
-        al consultorio elegido, y con el profesional elegido pintado de
-        azul si ya tiene algo reservado en el mes actual."""
-        id_consultorio = self.combo_consultorio.currentData()
-        id_unidad = None
-        if id_consultorio is not None:
-            fila = self.conn.execute(
-                "SELECT IdUnidad FROM Consultorio WHERE IdConsultorio = ?", (id_consultorio,)
-            ).fetchone()
-            id_unidad = fila["IdUnidad"] if fila else None
-        self.grilla.filtrar_por_unidad(id_unidad)
-        self.grilla.filtrar_por_profesional(self.combo_profesional.currentData())
+        """La vista previa muestra el horario regular del profesional
+        elegido — acotada a las unidades donde ya tiene algo reservado
+        (vacía para un profesional nuevo, sin nada reservado todavía), y
+        con su propia reserva pintada de azul. Se vuelve a calcular
+        también en cada refresco de la tabla (después de cada alta/baja),
+        así queda siempre al día de lo que el profesional ya tiene
+        reservado antes de seguir cargando."""
+        id_profesional = self.combo_profesional.currentData()
+        ids_unidad = unidades_con_reserva_vigente(self.conn, id_profesional)
+        self.grilla.filtrar_por_unidades(ids_unidad)
+        self.grilla.filtrar_por_profesional(id_profesional)
 
-    def _crear(self, forzar: bool = False) -> None:
+    def _dias_seleccionados(self) -> list[str]:
+        return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
+
+    def _crear(self) -> None:
+        dias = self._dias_seleccionados()
+        if not dias:
+            QMessageBox.warning(self, "Crear reserva regular", "Elegí al menos un día.")
+            return
+        id_profesional = self.combo_profesional.currentData()
+        advertencias_totales: list[str] = []
+        algun_dia_creado = False
+        for dia in dias:
+            creado, advertencias = self._crear_un_dia(dia)
+            if creado:
+                algun_dia_creado = True
+                advertencias_totales.extend(f"{dia}: {a}" for a in advertencias)
+        if not algun_dia_creado:
+            return
+        if advertencias_totales:
+            QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias_totales))
+        self._ofrecer_resolver_lista_espera(id_profesional)
+        regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
+        self.conn.commit()
+        self.actualizar()
+
+    def _crear_un_dia(self, dia_semana: str, forzar: bool = False) -> tuple[bool, list[str]]:
         datos = dict(
             id_profesional=self.combo_profesional.currentData(),
             id_consultorio=self.combo_consultorio.currentData(),
-            dia_semana=self.combo_dia.currentText(),
+            dia_semana=dia_semana,
             hora_inicio=self.spin_desde.value(),
             hora_fin=self.spin_hasta.value(),
             vigencia_inicio=self.campo_vigencia_inicio.text().strip() or fecha_actual(self.conn).isoformat(),
@@ -232,21 +262,16 @@ class _PanelReservasRegulares(QWidget):
         except ConflictoBloqueanteError as error:
             confirmacion = QMessageBox.question(
                 self, "Conflictos detectados",
-                f"{error}\n\n¿Crear la reserva de todos modos?",
+                f"{dia_semana}: {error}\n\n¿Crear la reserva de todos modos?",
             )
             if confirmacion == QMessageBox.StandardButton.Yes:
-                self._crear(forzar=True)
-            return
+                return self._crear_un_dia(dia_semana, forzar=True)
+            return False, []
         except ValueError as error:
-            QMessageBox.warning(self, "Crear reserva regular", str(error))
-            return
+            QMessageBox.warning(self, "Crear reserva regular", f"{dia_semana}: {error}")
+            return False, []
         self.conn.commit()
-        if advertencias:
-            QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias))
-        self._ofrecer_resolver_lista_espera(datos["id_profesional"])
-        regenerar_si_corresponde(self.conn, id_profesional=datos["id_profesional"], periodo=periodo_actual(self.conn))
-        self.conn.commit()
-        self.actualizar()
+        return True, advertencias
 
     def _ofrecer_resolver_lista_espera(self, id_profesional: int) -> None:
         """DC-10 §2.2 paso 5: confirmar la reserva regular en F16 tiene que

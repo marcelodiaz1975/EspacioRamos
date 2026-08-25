@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
-from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
+from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, unidades_con_reserva_vigente
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
 from app.negocio.dias import periodo_actual
 from app.negocio.licencias import cancelar_licencia, crear_licencia
@@ -48,23 +48,6 @@ def _combo_profesionales(conn: sqlite3.Connection) -> QComboBox:
 def _nombre_profesional(cache: dict[int, sqlite3.Row], id_profesional: int) -> str:
     p = cache.get(id_profesional)
     return p["Apellido"] if p else "?"
-
-
-def _unidades_del_profesional(conn: sqlite3.Connection, id_profesional: int | None) -> list[int]:
-    """Unidades donde el profesional ya tiene alguna reserva regular —
-    con eso alcanza para acotar la vista previa de la grilla en
-    Vacaciones/Licencias/Ausencias, que no reservan un consultorio
-    puntual sino que afectan a todo lo que el profesional ya tiene
-    reservado."""
-    if id_profesional is None:
-        return []
-    filas = conn.execute(
-        "SELECT DISTINCT u.IdUnidad FROM ReservaRegular r "
-        "JOIN Consultorio c ON c.IdConsultorio = r.IdConsultorio "
-        "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE r.IdProfesional = ?",
-        (id_profesional,),
-    ).fetchall()
-    return [f["IdUnidad"] for f in filas]
 
 
 class PantallaNovedades(QWidget):
@@ -153,7 +136,8 @@ class _PanelVacaciones(QWidget):
         elegido — acotada a las unidades donde ya tiene algo reservado, y
         con su propia reserva pintada de azul."""
         id_profesional = self.combo_profesional.currentData()
-        self.grilla.filtrar_por_unidades(_unidades_del_profesional(self.conn, id_profesional))
+        ids_unidad = unidades_con_reserva_vigente(self.conn, id_profesional)
+        self.grilla.filtrar_por_unidades(ids_unidad or None)  # sin reservas -> mostrar todas
         self.grilla.filtrar_por_profesional(id_profesional)
 
     def actualizar(self) -> None:
@@ -279,7 +263,8 @@ class _PanelLicencias(QWidget):
 
     def _sincronizar_grilla(self) -> None:
         id_profesional = self.combo_profesional.currentData()
-        self.grilla.filtrar_por_unidades(_unidades_del_profesional(self.conn, id_profesional))
+        ids_unidad = unidades_con_reserva_vigente(self.conn, id_profesional)
+        self.grilla.filtrar_por_unidades(ids_unidad or None)  # sin reservas -> mostrar todas
         self.grilla.filtrar_por_profesional(id_profesional)
 
     def _precargar_porcentaje(self) -> None:
@@ -401,7 +386,8 @@ class _PanelAusencias(QWidget):
 
     def _sincronizar_grilla(self) -> None:
         id_profesional = self.combo_profesional.currentData()
-        self.grilla.filtrar_por_unidades(_unidades_del_profesional(self.conn, id_profesional))
+        ids_unidad = unidades_con_reserva_vigente(self.conn, id_profesional)
+        self.grilla.filtrar_por_unidades(ids_unidad or None)  # sin reservas -> mostrar todas
         self.grilla.filtrar_por_profesional(id_profesional)
 
     def actualizar(self) -> None:

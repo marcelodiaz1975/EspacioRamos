@@ -193,6 +193,24 @@ def _ids_seleccionados(lista: QListWidget) -> list[int]:
     return [item.data(Qt.ItemDataRole.UserRole) for item in lista.selectedItems()]
 
 
+def unidades_con_reserva_vigente(conn: sqlite3.Connection, id_profesional: int | None) -> list[int]:
+    """Unidades donde el profesional ya tiene alguna reserva regular
+    cargada — para que quien embeba la grilla como vista previa
+    (Reservas, Vacaciones, Licencias, Ausencias) la acote a "lo que el
+    profesional ya tiene reservado" sin que el operador tenga que tocar
+    el filtro de Unidad a mano. Devuelve `[]` para un profesional nuevo
+    sin nada reservado todavía."""
+    if id_profesional is None:
+        return []
+    filas = conn.execute(
+        "SELECT DISTINCT u.IdUnidad FROM ReservaRegular r "
+        "JOIN Consultorio c ON c.IdConsultorio = r.IdConsultorio "
+        "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE r.IdProfesional = ?",
+        (id_profesional,),
+    ).fetchall()
+    return [f["IdUnidad"] for f in filas]
+
+
 class GrillaOperativaWidget(QWidget):
     def __init__(
         self, conn: sqlite3.Connection, on_actualizar: Callable[[list[int]], None] | None = None, parent=None,
@@ -427,11 +445,17 @@ class GrillaOperativaWidget(QWidget):
         """Como `filtrar_por_unidad`, pero para un conjunto — para cuando
         el formulario no reserva un consultorio puntual (ej. Vacaciones/
         Licencias/Ausencias) sino que afecta a todas las unidades donde
-        el profesional ya tiene algo reservado. `None` o vacío vuelve a
-        mostrar todas."""
+        el profesional ya tiene algo reservado.
+
+        `None` (sin lista) vuelve a mostrar todas las unidades — filtro
+        libre. Una lista se toma tal cual, incluida la vacía: eso deja la
+        grilla sin ninguna unidad tildada (grilla vacía), a propósito
+        para el caso de un profesional nuevo sin nada reservado todavía.
+        Quien la llame decide cuál de las dos quiere pasando `None` o
+        `[]` según corresponda."""
         self.lista_unidad.blockSignals(True)
         self.lista_unidad.clearSelection()
-        if not ids_unidad:
+        if ids_unidad is None:
             _seleccionar_todos(self.lista_unidad)
         else:
             objetivo = set(ids_unidad)
