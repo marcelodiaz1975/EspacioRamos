@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -26,11 +27,16 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_fecha_es_mes_anterior
-from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, unidades_con_reserva_vigente
+from app.gui.widgets.grilla_operativa import (
+    GrillaOperativaWidget,
+    dias_con_reserva_vigente,
+    unidades_con_reserva_vigente,
+)
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
 from app.negocio.lista_espera import marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.mensajes import mensaje_detalle_reserva_aislada
+from app.negocio.resumen_profesional import calcular_resumen_profesional
 from app.negocio.reservas import (
     ConflictoBloqueanteError,
     cancelar_reserva_aislada,
@@ -40,6 +46,10 @@ from app.negocio.reservas import (
 from app.repositorio.registro import obtener_repositorio
 
 _DIAS_RESERVA = DIAS_SEMANA[:6]
+
+
+def _fmt_horas(horas: float) -> str:
+    return str(int(horas)) if horas == int(horas) else f"{horas:.1f}"
 
 
 def _opciones_profesional(conn: sqlite3.Connection) -> list[tuple[int, str]]:
@@ -89,14 +99,17 @@ class _PanelReservasRegulares(QWidget):
         self.actualizar()
 
     def _armar_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        splitter = QSplitter()
+        layout = QVBoxLayout(self)
+        splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
+        self.combo_profesional.addItem("Seleccionar profesional…", None)
         for id_, etiqueta in _opciones_profesional(self.conn):
             self.combo_profesional.addItem(etiqueta, id_)
+        if self.combo_profesional.count() > 1:
+            self.combo_profesional.setCurrentIndex(1)
         self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
@@ -149,10 +162,34 @@ class _PanelReservasRegulares(QWidget):
         boton_crear.setObjectName("botonPrimario")
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
-        form.addStretch()
-        splitter.addWidget(panel_form)
 
-        panel_tabla = QWidget()
+        linea_separadora = QFrame()
+        linea_separadora.setFrameShape(QFrame.Shape.HLine)
+        linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
+        form.addWidget(linea_separadora)
+
+        form.addWidget(QLabel("Datos complementarios del profesional"))
+        self.etiqueta_horas_semanales = QLabel()
+        self.etiqueta_descuento = QLabel()
+        self.etiqueta_vacaciones = QLabel()
+        form.addWidget(self.etiqueta_horas_semanales)
+        form.addWidget(self.etiqueta_descuento)
+        form.addWidget(self.etiqueta_vacaciones)
+
+        form.addStretch()
+        splitter_superior.addWidget(panel_form)
+
+        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        layout_grupo_grilla.addWidget(self.grilla)
+        splitter_superior.addWidget(grupo_grilla)
+
+        splitter_superior.setStretchFactor(0, 0)
+        splitter_superior.setStretchFactor(1, 1)
+        layout.addWidget(splitter_superior, stretch=2)
+
+        panel_tabla = QGroupBox("Horarios reservados")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(6)
@@ -170,19 +207,8 @@ class _PanelReservasRegulares(QWidget):
         fila_acciones.addWidget(boton_finalizar)
         fila_acciones.addStretch()
         layout_tabla.addLayout(fila_acciones)
-        splitter.addWidget(panel_tabla)
+        layout.addWidget(panel_tabla, stretch=1)
 
-        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
-        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
-        self.grilla = GrillaOperativaWidget(self.conn)
-        layout_grupo_grilla.addWidget(self.grilla)
-        splitter.addWidget(grupo_grilla)
-
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 2)
-
-        layout.addWidget(splitter)
         self.campo_vigencia_inicio.setText(fecha_actual(self.conn).isoformat())
         self._sincronizar_grilla()
 
@@ -209,26 +235,60 @@ class _PanelReservasRegulares(QWidget):
 
     def _sincronizar_grilla(self) -> None:
         """La vista previa muestra el horario regular del profesional
-        elegido — acotada a las unidades donde ya tiene algo reservado
-        (vacía para un profesional nuevo, sin nada reservado todavía), y
-        con su propia reserva pintada de azul. Se vuelve a calcular
-        también en cada refresco de la tabla (después de cada alta/baja),
-        así queda siempre al día de lo que el profesional ya tiene
-        reservado antes de seguir cargando."""
+        elegido — acotada a las unidades (con todos sus consultorios) y a
+        los días en los que ya tiene algo reservado (vacía para un
+        profesional nuevo, sin nada reservado todavía, o cuando no hay
+        ninguno elegido), y con su propia reserva pintada de azul. Se
+        vuelve a calcular también en cada refresco de la tabla (después
+        de cada alta/baja), así queda siempre al día de lo que el
+        profesional ya tiene reservado antes de seguir cargando."""
         id_profesional = self.combo_profesional.currentData()
         ids_unidad = unidades_con_reserva_vigente(self.conn, id_profesional)
+        dias = dias_con_reserva_vigente(self.conn, id_profesional)
         self.grilla.filtrar_por_unidades(ids_unidad)
+        self.grilla.filtrar_por_dias(dias)
         self.grilla.filtrar_por_profesional(id_profesional)
+        self._actualizar_resumen_profesional(id_profesional)
+
+    def _actualizar_resumen_profesional(self, id_profesional: int | None) -> None:
+        resumen = calcular_resumen_profesional(self.conn, id_profesional)
+        if resumen is None:
+            self.etiqueta_horas_semanales.setText("Horas semanales: —")
+            self.etiqueta_descuento.setText("% Descuento: —")
+            self.etiqueta_vacaciones.setText("% Vacaciones disponible: —")
+            return
+        self.etiqueta_horas_semanales.setText(f"Horas semanales: {_fmt_horas(resumen.horas_semanales)}")
+        self.etiqueta_descuento.setText(f"% Descuento: {resumen.porcentaje_descuento:.1f}%")
+        self.etiqueta_vacaciones.setText(f"% Vacaciones disponible: {resumen.porcentaje_vacaciones_disponible:.1f}%")
+
+    def _resetear_formulario(self) -> None:
+        """Después de aplicar un cambio, deja el formulario listo y en
+        blanco para cargar otro registro — aunque sea de otro
+        profesional (el combo vuelve al placeholder en blanco, no queda
+        pegado al que se acababa de cargar)."""
+        self.combo_profesional.setCurrentIndex(0)
+        if self.combo_consultorio.count():
+            self.combo_consultorio.setCurrentIndex(0)
+        for dia, check in self._checks_dia.items():
+            check.setChecked(dia == "Lunes")
+        self.spin_desde.setValue(9)
+        self.spin_hasta.setValue(10)
+        self.campo_vigencia_inicio.setText(fecha_actual(self.conn).isoformat())
+        self.campo_vigencia_fin.clear()
+        self.casilla_excepcion.setChecked(False)
 
     def _dias_seleccionados(self) -> list[str]:
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
 
     def _crear(self) -> None:
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            QMessageBox.warning(self, "Crear reserva regular", "Elegí un profesional.")
+            return
         dias = self._dias_seleccionados()
         if not dias:
             QMessageBox.warning(self, "Crear reserva regular", "Elegí al menos un día.")
             return
-        id_profesional = self.combo_profesional.currentData()
         advertencias_totales: list[str] = []
         algun_dia_creado = False
         for dia in dias:
@@ -244,6 +304,8 @@ class _PanelReservasRegulares(QWidget):
         regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
         self.conn.commit()
         self.actualizar()
+        self._resetear_formulario()
+        self._sincronizar_grilla()
 
     def _crear_un_dia(self, dia_semana: str, forzar: bool = False) -> tuple[bool, list[str]]:
         datos = dict(

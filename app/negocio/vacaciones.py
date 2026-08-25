@@ -80,6 +80,19 @@ def _semanas_consumidas_en_anio(conn: sqlite3.Connection, id_profesional: int, a
     return sum(f["FraccionSemanaConsumida"] or 0 for f in filas)
 
 
+def cupo_restante_actual(conn: sqlite3.Connection, id_profesional: int, fecha_referencia: str | None = None) -> float:
+    """`CupoRestantePorcentaje` "en vivo": lo que quedaría del cupo anual
+    si se consultara ahora mismo, sin necesidad de cargar una vacación
+    nueva para poder verlo (ej. el resumen del alta de reserva regular)."""
+    fecha_referencia = fecha_referencia or fecha_actual(conn).isoformat()
+    anio = date.fromisoformat(fecha_referencia).year
+    maximo = _cupo_maximo_semanas(conn)
+    if maximo <= 0:
+        return 0.0
+    consumido_pct = _semanas_consumidas_en_anio(conn, id_profesional, anio) * 100 / maximo
+    return max(0.0, 100 - consumido_pct)
+
+
 def _valor_bonificado_bruto(
     conn: sqlite3.Connection, id_profesional: int, fecha_desde: str, fecha_hasta: str, descuento_pct: float,
 ) -> float:

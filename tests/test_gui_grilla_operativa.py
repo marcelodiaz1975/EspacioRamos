@@ -177,3 +177,31 @@ def test_filtrar_por_profesional_fija_y_limpia_el_campo(qtbot, conn):
     widget.filtrar_por_profesional(None)
     assert widget.campo_profesional.text() == ""
     assert widget._resultado[clave].color_aro == VERDE
+
+
+def test_filtrar_por_dias_acota_la_seleccion(qtbot, conn):
+    id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert all(check.isChecked() for check in widget._checks_dia.values())
+
+    widget.filtrar_por_dias(["Lunes", "Martes"])
+    assert {dia for dia, check in widget._checks_dia.items() if check.isChecked()} == {"Lunes", "Martes"}
+
+    widget.filtrar_por_dias([])
+    assert all(not check.isChecked() for check in widget._checks_dia.values())
+
+    widget.filtrar_por_dias(None)
+    assert all(check.isChecked() for check in widget._checks_dia.values())
+
+
+def test_dias_con_reserva_vigente(qtbot, conn):
+    from app.gui.widgets.grilla_operativa import dias_con_reserva_vigente
+
+    id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
+    assert dias_con_reserva_vigente(conn, id_virginia) == ["Lunes"]
+    assert dias_con_reserva_vigente(conn, None) == []
+
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Sin Reserva")
+    conn.commit()
+    assert dias_con_reserva_vigente(conn, otro_profesional) == []

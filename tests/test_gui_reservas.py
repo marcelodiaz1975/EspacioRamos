@@ -163,11 +163,16 @@ def test_crear_reserva_regular_no_ofrece_resolver_con_mas_de_un_pedido_activo(qt
 
 def test_crear_reserva_regular_con_conflicto_pide_confirmacion_y_fuerza(qtbot, conn):
     _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    pantalla.panel_regulares._crear()  # primera reserva 9-10 Lunes
+    panel = pantalla.panel_regulares
+    panel._crear()  # primera reserva 9-10 Lunes
 
-    pantalla.panel_regulares._crear()  # misma reserva de nuevo -> conflicto bloqueante
+    # el alta anterior dejó el formulario en blanco -> hay que volver a
+    # elegir el profesional para la segunda carga.
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel._crear()  # misma reserva de nuevo -> conflicto bloqueante
     assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 2  # forzada por QMessageBox mockeado
 
 
@@ -299,9 +304,80 @@ def test_grilla_preview_profesional_nuevo_no_muestra_nada(qtbot, conn):
     assert panel.grilla.tabla.rowCount() == 0
 
 
+def test_grilla_preview_acota_tambien_los_dias_a_los_que_tiene_reserva(qtbot, conn):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    repo_rr = obtener_repositorio(conn, "ReservaRegular")
+    repo_rr.crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=12, VigenciaInicio="2020-01-01",
+    )
+    repo_rr.crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Jueves",
+        HoraInicio=15, HoraFin=16, VigenciaInicio="2020-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+
+    dias_tildados = {dia for dia, check in panel.grilla._checks_dia.items() if check.isChecked()}
+    assert dias_tildados == {"Lunes", "Jueves"}
+
+
+def test_formulario_vuelve_en_blanco_despues_de_crear(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.campo_vigencia_fin.setText("2026-12-31")
+    panel.casilla_excepcion.setChecked(True)
+    panel._checks_dia["Martes"].setChecked(True)
+
+    panel._crear()
+
+    assert panel.combo_profesional.currentData() is None
+    assert panel.combo_profesional.currentIndex() == 0
+    assert panel.campo_vigencia_fin.text() == ""
+    assert panel.casilla_excepcion.isChecked() is False
+    assert {dia for dia, check in panel._checks_dia.items() if check.isChecked()} == {"Lunes"}
+    assert panel.grilla.ids_unidad_seleccionadas() == []
+
+
+def test_datos_complementarios_del_profesional(qtbot, conn):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=12, VigenciaInicio="2020-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    # el único profesional (con la reserva Lunes 9-12, 3 horas, recién
+    # cargada) arranca seleccionado por defecto.
+    assert "3" in panel.etiqueta_horas_semanales.text()
+    assert "%" in panel.etiqueta_descuento.text()
+    assert "%" in panel.etiqueta_vacaciones.text()
+
+    panel.combo_profesional.setCurrentIndex(0)  # vuelve al placeholder en blanco
+    assert panel.etiqueta_horas_semanales.text() == "Horas semanales: —"
+    assert panel.etiqueta_descuento.text() == "% Descuento: —"
+    assert panel.etiqueta_vacaciones.text() == "% Vacaciones disponible: —"
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    assert panel.etiqueta_horas_semanales.text() == "Horas semanales: 3"
+
+
 def test_grilla_preview_sigue_al_profesional_no_al_consultorio_elegido(qtbot, conn):
     _preparar(conn)
     id_unidad_1 = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    id_consultorio_1 = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
     conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Sur')")
     id_otro_edificio = conn.execute("SELECT IdEdificio FROM Edificio WHERE Nombre = 'Torre Sur'").fetchone()["IdEdificio"]
     conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '2B')", (id_otro_edificio,))
@@ -309,6 +385,11 @@ def test_grilla_preview_sigue_al_profesional_no_al_consultorio_elegido(qtbot, co
     id_consultorio_2 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=1)
     id_profesional_1 = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     id_profesional_2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
+    conn.execute(
+        "INSERT INTO ReservaRegular (IdProfesional, IdConsultorio, DiaSemana, HoraInicio, HoraFin, VigenciaInicio) "
+        "VALUES (?, ?, 'Lunes', 9, 10, '2020-01-01')",
+        (id_profesional_1, id_consultorio_1),
+    )
     conn.execute(
         "INSERT INTO ReservaRegular (IdProfesional, IdConsultorio, DiaSemana, HoraInicio, HoraFin, VigenciaInicio) "
         "VALUES (?, ?, 'Martes', 10, 11, '2020-01-01')",
@@ -320,7 +401,6 @@ def test_grilla_preview_sigue_al_profesional_no_al_consultorio_elegido(qtbot, co
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_regulares
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional_1))
-    panel._crear()  # reserva Lunes 9-10 para el profesional 1, en su propio consultorio
 
     assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad_1]
 
@@ -358,6 +438,7 @@ def test_grilla_preview_pinta_azul_al_profesional_elegido(qtbot, conn):
 
 def test_grilla_preview_se_refresca_al_crear_una_reserva(qtbot, conn):
     _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_regulares
@@ -367,6 +448,9 @@ def test_grilla_preview_se_refresca_al_crear_una_reserva(qtbot, conn):
 
     panel._crear()
 
+    # el formulario queda en blanco después del alta -> hay que volver a
+    # elegir el profesional para ver reflejado lo que se acaba de cargar.
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
     clave = (id_consultorio, "Lunes", 9)
     assert panel.grilla._resultado[clave].id_profesional_mostrado is not None

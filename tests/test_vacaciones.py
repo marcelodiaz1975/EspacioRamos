@@ -3,7 +3,7 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.reservas import crear_reserva_aislada
-from app.negocio.vacaciones import cancelar_vacacion, crear_vacacion
+from app.negocio.vacaciones import cancelar_vacacion, crear_vacacion, cupo_restante_actual
 from app.negocio.valores import obtener_porcentaje_descuento
 from app.repositorio.registro import obtener_repositorio
 
@@ -196,3 +196,41 @@ def test_cancelar_vacacion_bloqueada_por_aislada_ya_asignada(conn, consultorio):
     with pytest.raises(ValueError):
         cancelar_vacacion(conn, id_vacacion)
     assert obtener_repositorio(conn, "Vacacion").obtener(id_vacacion) is not None
+
+
+def test_cupo_restante_actual_sin_vacaciones_es_100_por_ciento(conn, consultorio):
+    id_prof = _profesional_con_reserva(conn, consultorio)
+    assert cupo_restante_actual(conn, id_prof, fecha_referencia="2026-08-15") == pytest.approx(100.0)
+
+
+def test_cupo_restante_actual_baja_despues_de_cargar_una_vacacion(conn, consultorio):
+    dias = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+    id_prof = _profesional_con_reserva(conn, consultorio, dias=dias, horas_por_dia=2)
+    # semana completa -> consume 1 de 2 semanas de cupo (50%)
+    crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-03", fecha_hasta="2026-08-09")
+    assert cupo_restante_actual(conn, id_prof, fecha_referencia="2026-08-15") == pytest.approx(50.0)
+
+
+def test_cupo_restante_actual_vuelve_a_subir_al_cancelar(conn, consultorio):
+    dias = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+    id_prof = _profesional_con_reserva(conn, consultorio, dias=dias, horas_por_dia=2)
+    id_vacacion, _ = crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-03", fecha_hasta="2026-08-09")
+    assert cupo_restante_actual(conn, id_prof, fecha_referencia="2026-08-15") == pytest.approx(50.0)
+
+    cancelar_vacacion(conn, id_vacacion)
+    assert cupo_restante_actual(conn, id_prof, fecha_referencia="2026-08-15") == pytest.approx(100.0)
+
+
+def test_cupo_restante_actual_no_baja_de_cero(conn, consultorio):
+    dias = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+    id_prof = _profesional_con_reserva(conn, consultorio, dias=dias, horas_por_dia=2)
+    # dos semanas completas seguidas -> ya consume el 100% del cupo anual
+    crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-03", fecha_hasta="2026-08-16")
+    assert cupo_restante_actual(conn, id_prof, fecha_referencia="2026-08-20") == pytest.approx(0.0)
+
+
+def test_cupo_restante_actual_no_cuenta_vacaciones_de_otro_anio(conn, consultorio):
+    dias = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+    id_prof = _profesional_con_reserva(conn, consultorio, dias=dias, horas_por_dia=2)
+    crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2025-08-03", fecha_hasta="2025-08-09")
+    assert cupo_restante_actual(conn, id_prof, fecha_referencia="2026-08-15") == pytest.approx(100.0)

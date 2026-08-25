@@ -211,6 +211,19 @@ def unidades_con_reserva_vigente(conn: sqlite3.Connection, id_profesional: int |
     return [f["IdUnidad"] for f in filas]
 
 
+def dias_con_reserva_vigente(conn: sqlite3.Connection, id_profesional: int | None) -> list[str]:
+    """Días de la semana en los que el profesional ya tiene alguna
+    reserva regular cargada — mismo espíritu que `unidades_con_reserva_
+    vigente`, para acotar también el filtro de Día de la semana de la
+    vista previa y que no quede tan alargada."""
+    if id_profesional is None:
+        return []
+    filas = conn.execute(
+        "SELECT DISTINCT DiaSemana FROM ReservaRegular WHERE IdProfesional = ?", (id_profesional,)
+    ).fetchall()
+    return [f["DiaSemana"] for f in filas]
+
+
 class GrillaOperativaWidget(QWidget):
     def __init__(
         self, conn: sqlite3.Connection, on_actualizar: Callable[[list[int]], None] | None = None, parent=None,
@@ -464,6 +477,18 @@ class GrillaOperativaWidget(QWidget):
                 if item.data(Qt.ItemDataRole.UserRole) in objetivo:
                     item.setSelected(True)
         self.lista_unidad.blockSignals(False)
+        self.actualizar()
+
+    def filtrar_por_dias(self, dias: list[str] | None) -> None:
+        """Como `filtrar_por_unidades`, pero para el filtro de Día de la
+        semana: `None` tilda todos los días (sin filtro); una lista —
+        incluida la vacía — tilda exactamente esos, dejando la grilla sin
+        ningún día marcado si viene vacía."""
+        objetivo = set(self._checks_dia) if dias is None else set(dias)
+        for dia, check in self._checks_dia.items():
+            check.blockSignals(True)
+            check.setChecked(dia in objetivo)
+            check.blockSignals(False)
         self.actualizar()
 
     def filtrar_por_profesional(self, id_profesional: int | None) -> None:
