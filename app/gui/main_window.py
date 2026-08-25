@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.estilos import hoja_estilos, paleta
+from app.negocio.dias import periodo_actual
 
 
 @dataclass
@@ -76,6 +77,11 @@ class VentanaPrincipal(QMainWindow):
         self._barra_fecha_ficticia.setObjectName("barraFechaFicticia")
         self._barra_fecha_ficticia.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._barra_fecha_ficticia.hide()
+
+        self._badge_periodo = QLabel()
+        self._badge_periodo.setObjectName("badgePeriodo")
+        self.statusBar().addPermanentWidget(self._badge_periodo)
+        self._actualizar_badge_periodo()
 
         self._navegacion.currentRowChanged.connect(self._cambiar_seccion)
         if primer_item_seleccionable is not None:
@@ -142,6 +148,17 @@ class VentanaPrincipal(QMainWindow):
             )
         self._barra_fecha_ficticia.setVisible(activo)
 
+    def _actualizar_badge_periodo(self) -> None:
+        """Miscelánea (ago-2026): el período en el que está posicionado el
+        sistema tiene que estar siempre a la vista en cualquier pantalla —
+        se revisa en cada cambio de sección, igual que la barra de fecha
+        ficticia, para que un avance de mes se refleje sin reiniciar."""
+        self._badge_periodo.setText(f"Período {self._periodo_legible()}")
+
+    def _periodo_legible(self) -> str:
+        anio, mes = periodo_actual(self.conn).split("-")
+        return f"{mes}/{anio}"
+
     def _cambiar_seccion(self, fila: int) -> None:
         if fila < 0:
             return
@@ -151,4 +168,5 @@ class VentanaPrincipal(QMainWindow):
             return
         self._pila.setCurrentIndex(indice_pila)
         self._actualizar_barra_fecha_ficticia()
+        self._actualizar_badge_periodo()
         self._aplicar_tema()

@@ -125,6 +125,23 @@ def test_tema_se_actualiza_al_cambiar_de_pantalla(qtbot, conn):
     assert ventana.styleSheet() == hoja_estilos(True)
 
 
+# --------------------------------------------------------- badge de período
+
+def test_badge_periodo_muestra_el_periodo_actual(qtbot, conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ModoFechaFicticia=1, FechaFicticia="2026-08-10")
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    assert ventana._badge_periodo.text() == "Período 08/2026"
+
+
+def test_badge_periodo_se_actualiza_al_cambiar_de_pantalla(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ModoFechaFicticia=1, FechaFicticia="2026-03-15")
+    ventana._navegacion.setCurrentRow(2)
+    assert ventana._badge_periodo.text() == "Período 03/2026"
+
+
 def test_f1_sin_secciones_no_falla(qtbot, conn, monkeypatch):
     llamado = []
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: llamado.append(1)))

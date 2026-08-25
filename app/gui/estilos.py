@@ -18,6 +18,7 @@ COLOR_DIA_GRILLA = "#6B0000"  # bordó — encabezados de grilla
 COLOR_VERDE = "#4CAF50"
 COLOR_AMARILLO = "#F5D547"
 COLOR_ROJO = "#C0392B"
+COLOR_AZUL_OSCURO = "#0B2942"  # grilla operativa — celdas del profesional filtrado
 COLOR_TEXTO_CLARO = "#FFFFFF"
 
 # ------------------------------------------------------------------- claro

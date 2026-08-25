@@ -16,6 +16,7 @@ from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.estado_cuenta import PantallaEstadoCuenta
 from app.gui.pantallas.grilla import GrillaDisponibilidad
+from app.gui.pantallas.grilla_operativa import PantallaGrillaOperativa
 from app.gui.pantallas.imagenes import PantallaImagenes
 from app.gui.pantallas.importacion import PantallaImportacion
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
@@ -54,6 +55,12 @@ def construir_secciones() -> list[Seccion]:
         Seccion(
             "Reservas", lambda conn: PantallaReservas(conn), categoria="Principal",
             ayuda="Alta, edición y baja de reservas (regulares y aisladas) por profesional, consultorio y franja.",
+        ),
+        Seccion(
+            "Grilla operativa", lambda conn: PantallaGrillaOperativa(conn), categoria="Principal",
+            ayuda="Grilla filtrable por localidad/edificio/unidad/día/profesional, con período y rango de "
+            "fechas propios y dos modos de visualización (reservas regulares o aisladas). Al hacer clic en "
+            "una celda se muestra el detalle de esa hora.",
         ),
         Seccion(
             "Liquidación mensual", lambda conn: ProcesoLiquidacion(conn), categoria="Principal",
