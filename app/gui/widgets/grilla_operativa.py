@@ -76,7 +76,7 @@ def _tipo_bloque_por_hora(conn: sqlite3.Connection, horas: list[int]) -> dict[in
 
 
 class _CeldaGrilla(QWidget):
-    """Una celda de datos: fondo = color de aro, triángulo izquierdo
+    """Una celda de datos: fondo = color de aro, triángulo derecho
     (1/4 de la celda, dividida con una cruz en diagonal) = color de
     centro (si distinto del aro), código encima. Widget propio (no
     QTableWidgetItem) para poder pintar la división y manejar el clic
@@ -84,14 +84,13 @@ class _CeldaGrilla(QWidget):
 
     def __init__(
         self, celda: CeldaGrillaOperativa, clave: tuple[int, str, int], on_click,
-        borde_derecho_grueso: bool = False, borde_inferior_grueso: bool = False, parent=None,
+        bordes: frozenset[str] = frozenset(), parent=None,
     ):
         super().__init__(parent)
         self.celda = celda
         self._clave = clave
         self._on_click = on_click
-        self._borde_derecho_grueso = borde_derecho_grueso
-        self._borde_inferior_grueso = borde_inferior_grueso
+        self._bordes = bordes
         self.setMinimumHeight(24)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (nombre impuesto por Qt)
@@ -104,28 +103,37 @@ class _CeldaGrilla(QWidget):
         painter.fillRect(rect, QColor(_COLOR_HEX[self.celda.color_aro]))
         if self.celda.color_centro != self.celda.color_aro:
             # Celda dividida con una cruz en diagonal (de esquina a
-            # esquina) en 4 triángulos — arriba/derecha/abajo quedan del
-            # color de aro (3/4) y el de la izquierda pasa al color de
+            # esquina) en 4 triángulos — izquierda/arriba/abajo quedan
+            # del color de aro (3/4) y el de la derecha pasa al color de
             # centro (1/4).
             centro = rect.center()
-            triangulo_izquierdo = QPolygon([rect.topLeft(), QPoint(centro.x(), centro.y()), rect.bottomLeft()])
+            triangulo_derecho = QPolygon([rect.topRight(), QPoint(centro.x(), centro.y()), rect.bottomRight()])
             painter.setBrush(QColor(_COLOR_HEX[self.celda.color_centro]))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawPolygon(triangulo_izquierdo)
+            painter.drawPolygon(triangulo_derecho)
         if self.celda.codigo:
             painter.setPen(QColor(_FUENTE_HEX.get(self.celda.color_fuente, "#000000")))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.celda.codigo)
-        _dibujar_bordes_gruesos(painter, rect, self._borde_derecho_grueso, self._borde_inferior_grueso)
+        _dibujar_bordes_gruesos(painter, rect, self._bordes)
         painter.end()
 
 
-def _dibujar_bordes_gruesos(painter: QPainter, rect, derecho: bool, inferior: bool) -> None:
+def _dibujar_bordes_gruesos(painter: QPainter, rect, bordes: frozenset[str]) -> None:
     pen = QPen(QColor("#000000"), _GROSOR_GRUESO)
     painter.setPen(pen)
-    if derecho:
+    if "right" in bordes:
         painter.drawLine(rect.topRight(), rect.bottomRight())
-    if inferior:
+    if "bottom" in bordes:
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+    if "left" in bordes:
+        painter.drawLine(rect.topLeft(), rect.bottomLeft())
+    if "top" in bordes:
+        painter.drawLine(rect.topLeft(), rect.topRight())
+
+
+def _borde_css(bordes: frozenset[str]) -> str:
+    mapa = {"top": "border-top", "bottom": "border-bottom", "left": "border-left", "right": "border-right"}
+    return " ".join(f"{mapa[b]}: {_GROSOR_GRUESO}px solid black;" for b in bordes)
 
 
 def _lista_multiseleccion() -> QListWidget:
@@ -443,28 +451,33 @@ class GrillaOperativaWidget(QWidget):
             self.tabla.setRowHeight(fila, 24)
 
         limites_dia = self._limites_dia(columnas)
+        es_primera_fila_encabezado = 0  # la fila "Día de la semana" siempre es la fila 0
+        es_ultima_fila_encabezado = filas_encabezado - 1  # la fila "Consultorio"
 
         fila_actual = 0
         self._agregar_encabezado_agrupado(
-            fila_actual, columnas, lambda c: c["dia"], "Día de la semana", limites_dia, mayusculas=True,
+            fila_actual, columnas, lambda c: c["dia"], "Día de la semana", limites_dia,
+            es_primera_fila_encabezado, es_ultima_fila_encabezado, mayusculas=True,
         )
         fila_actual += 1
         if mostrar_localidad:
             self._agregar_encabezado_agrupado(
                 fila_actual, columnas, lambda c: (c["dia"], c["localidad"]), "Localidad", limites_dia,
+                es_primera_fila_encabezado, es_ultima_fila_encabezado,
             )
             fila_actual += 1
         if mostrar_edificio:
             self._agregar_encabezado_agrupado(
-                fila_actual, columnas, lambda c: (c["dia"], c["localidad"], c["nombre_edificio"]), "Edificio", limites_dia,
+                fila_actual, columnas, lambda c: (c["dia"], c["localidad"], c["nombre_edificio"]), "Edificio",
+                limites_dia, es_primera_fila_encabezado, es_ultima_fila_encabezado,
             )
             fila_actual += 1
         self._agregar_encabezado_agrupado(
             fila_actual, columnas, lambda c: (c["dia"], c["localidad"], c["nombre_edificio"], c["id_unidad"]),
-            "Unidad", limites_dia, texto=lambda c: c["departamento"],
+            "Unidad", limites_dia, es_primera_fila_encabezado, es_ultima_fila_encabezado, texto=lambda c: c["departamento"],
         )
         fila_actual += 1
-        self._agregar_encabezado_consultorio(fila_actual, columnas, limites_dia)
+        self._agregar_encabezado_consultorio(fila_actual, columnas, limites_dia, es_ultima_fila_encabezado)
         fila_actual += 1
 
         tipo_por_hora = _tipo_bloque_por_hora(self.conn, horas)
@@ -477,17 +490,22 @@ class GrillaOperativaWidget(QWidget):
         for i, hora in enumerate(horas):
             fila = filas_encabezado + i
             borde_inferior = i in limites_bloque
-            self._poner_texto_dato_fila(fila, _COL_HORARIO, f"{hora}:00", borde_inferior=borde_inferior)
+            bordes_horario: set[str] = {"right"}
+            if borde_inferior:
+                bordes_horario.add("bottom")
+            self._poner_texto_dato_fila(fila, _COL_HORARIO, f"{hora}:00", bordes=frozenset(bordes_horario))
             for j, columna in enumerate(columnas):
                 col = _COL_DATOS_INICIO + j
                 clave = (columna["id_consultorio"], columna["dia"], hora)
                 celda = self._resultado.get(clave)
                 if celda is None:
                     continue
-                widget = _CeldaGrilla(
-                    celda, clave, self._mostrar_detalle,
-                    borde_derecho_grueso=j in limites_dia, borde_inferior_grueso=borde_inferior,
-                )
+                bordes_dato: set[str] = set()
+                if j in limites_dia:
+                    bordes_dato.add("right")
+                if borde_inferior:
+                    bordes_dato.add("bottom")
+                widget = _CeldaGrilla(celda, clave, self._mostrar_detalle, bordes=frozenset(bordes_dato))
                 self.tabla.setCellWidget(fila, col, widget)
 
     def _limites_dia(self, columnas: list[dict]) -> set[int]:
@@ -499,7 +517,7 @@ class GrillaOperativaWidget(QWidget):
             if i == len(horas) or tipo_por_hora[horas[i]] != tipo_por_hora[horas[inicio]]:
                 self._poner_texto_dato_fila(
                     filas_encabezado + inicio, _COL_TIPO_BLOQUE, tipo_por_hora[horas[inicio]],
-                    span_filas=i - inicio, borde_inferior=True,
+                    span_filas=i - inicio, bordes=frozenset({"left", "bottom"}),
                 )
                 inicio = i
 
@@ -516,9 +534,20 @@ class GrillaOperativaWidget(QWidget):
 
     def _agregar_encabezado_agrupado(
         self, fila: int, columnas: list[dict], clave_grupo, etiqueta_columna_0: str, limites_dia: set[int],
-        texto=None, mayusculas: bool = False,
+        primera_fila: int, ultima_fila: int, texto=None, mayusculas: bool = False,
     ) -> None:
-        self._poner_texto_encabezado(fila, _COL_TIPO_BLOQUE, etiqueta_columna_0, span=2)
+        # Columna de etiqueta (Tipo Bloque/Horario fusionadas): además del
+        # recuadro de "todo lo azul junto" (arriba en la primera fila,
+        # abajo en la última), siempre lleva el borde izquierdo/derecho
+        # que la separa del resto — es el mismo recuadro que envuelve
+        # Tipo Bloque + Horario de punta a punta (encabezado y datos).
+        bordes_etiqueta = {"left", "right"}
+        if fila == primera_fila:
+            bordes_etiqueta.add("top")
+        if fila == ultima_fila:
+            bordes_etiqueta.add("bottom")
+        self._poner_texto_encabezado(fila, _COL_TIPO_BLOQUE, etiqueta_columna_0, span=2, bordes=frozenset(bordes_etiqueta))
+
         inicio = 0
         actual = clave_grupo(columnas[0])
         for i in range(1, len(columnas) + 1):
@@ -527,28 +556,44 @@ class GrillaOperativaWidget(QWidget):
                 texto_grupo = texto(columnas[inicio]) if texto else str(actual[-1] if isinstance(actual, tuple) else actual)
                 if mayusculas:
                     texto_grupo = texto_grupo.upper()
+                bordes: set[str] = set()
+                if (i - 1) in limites_dia:
+                    bordes.add("right")
+                if fila == primera_fila:
+                    bordes.add("top")
+                if fila == ultima_fila:
+                    bordes.add("bottom")
                 self._poner_texto_encabezado(
-                    fila, _COL_DATOS_INICIO + inicio, texto_grupo, span=i - inicio,
-                    borde_derecho=(i - 1) in limites_dia,
+                    fila, _COL_DATOS_INICIO + inicio, texto_grupo, span=i - inicio, bordes=frozenset(bordes),
                 )
                 inicio = i
                 actual = clave
 
-    def _agregar_encabezado_consultorio(self, fila: int, columnas: list[dict], limites_dia: set[int]) -> None:
-        self._poner_texto_encabezado(fila, _COL_TIPO_BLOQUE, "Consultorio", span=2)
+    def _agregar_encabezado_consultorio(
+        self, fila: int, columnas: list[dict], limites_dia: set[int], ultima_fila: int,
+    ) -> None:
+        bordes_etiqueta = {"left", "right", "bottom"} if fila == ultima_fila else {"left", "right"}
+        self._poner_texto_encabezado(fila, _COL_TIPO_BLOQUE, "Consultorio", span=2, bordes=frozenset(bordes_etiqueta))
         for i, columna in enumerate(columnas):
+            bordes: set[str] = set()
+            if i in limites_dia:
+                bordes.add("right")
+            if fila == ultima_fila:
+                bordes.add("bottom")
             self._poner_texto_encabezado(
-                fila, _COL_DATOS_INICIO + i, str(columna["numero_consultorio"]), borde_derecho=i in limites_dia,
+                fila, _COL_DATOS_INICIO + i, str(columna["numero_consultorio"]), bordes=frozenset(bordes),
             )
 
-    def _poner_texto_encabezado(self, fila: int, col: int, texto: str, span: int = 1, borde_derecho: bool = False) -> None:
+    def _poner_texto_encabezado(
+        self, fila: int, col: int, texto: str, span: int = 1, bordes: frozenset[str] = frozenset(),
+    ) -> None:
         etiqueta = QLabel(texto)
         etiqueta.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Las columnas de etiqueta (Tipo Bloque/Horario fusionadas) tienen
         # textos largos ("Día de la semana") — letra más chica ahí para
         # que entren en 2-3 líneas en vez de desbordar la celda.
         tamano = "9px" if col == _COL_TIPO_BLOQUE else "11px"
-        borde = f"border-right: {_GROSOR_GRUESO}px solid black;" if borde_derecho else ""
+        borde = _borde_css(bordes)
         etiqueta.setStyleSheet(
             f"background-color: {COLOR_NIVEL_1}; color: white; font-weight: bold; font-size: {tamano}; {borde}"
         )
@@ -558,11 +603,11 @@ class GrillaOperativaWidget(QWidget):
         self.tabla.setCellWidget(fila, col, etiqueta)
 
     def _poner_texto_dato_fila(
-        self, fila: int, col: int, texto: str, span_filas: int = 1, borde_inferior: bool = False,
+        self, fila: int, col: int, texto: str, span_filas: int = 1, bordes: frozenset[str] = frozenset(),
     ) -> None:
         etiqueta = QLabel(texto)
         etiqueta.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        borde = f"border-bottom: {_GROSOR_GRUESO}px solid black;" if borde_inferior else ""
+        borde = _borde_css(bordes)
         etiqueta.setStyleSheet(f"font-weight: bold; font-size: 10px; {borde}")
         etiqueta.setWordWrap(True)
         if span_filas > 1:
