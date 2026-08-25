@@ -419,8 +419,8 @@ class _PanelReservasAisladas(QWidget):
         self.actualizar()
 
     def _armar_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        splitter = QSplitter()
+        layout = QVBoxLayout(self)
+        splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
@@ -467,9 +467,20 @@ class _PanelReservasAisladas(QWidget):
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
         form.addStretch()
-        splitter.addWidget(panel_form)
+        splitter_superior.addWidget(panel_form)
 
-        panel_tabla = QWidget()
+        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        self.grilla.combo_modo.setCurrentIndex(self.grilla.combo_modo.findData("aislada"))
+        layout_grupo_grilla.addWidget(self.grilla)
+        splitter_superior.addWidget(grupo_grilla)
+
+        splitter_superior.setStretchFactor(0, 0)
+        splitter_superior.setStretchFactor(1, 1)
+        layout.addWidget(splitter_superior, stretch=2)
+
+        panel_tabla = QGroupBox("Reservas aisladas")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(5)
@@ -485,20 +496,8 @@ class _PanelReservasAisladas(QWidget):
         fila_acciones.addWidget(boton_cancelar)
         fila_acciones.addStretch()
         layout_tabla.addLayout(fila_acciones)
-        splitter.addWidget(panel_tabla)
+        layout.addWidget(panel_tabla, stretch=1)
 
-        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
-        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
-        self.grilla = GrillaOperativaWidget(self.conn)
-        self.grilla.combo_modo.setCurrentIndex(self.grilla.combo_modo.findData("aislada"))
-        layout_grupo_grilla.addWidget(self.grilla)
-        splitter.addWidget(grupo_grilla)
-
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 2)
-
-        layout.addWidget(splitter)
         self.campo_fecha.setText(fecha_actual(self.conn).isoformat())
         self._sincronizar_grilla()
 
