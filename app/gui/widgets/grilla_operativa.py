@@ -61,7 +61,7 @@ _COLOR_HEX = {BLANCO: "#FFFFFF", VERDE: _COLOR_VERDE_CLARO, AMARILLO: COLOR_AMAR
 _FUENTE_HEX = {BLANCA: "#FFFFFF"}  # "negra" es el default de _CeldaGrilla, no hace falta mapearla
 _ANCHO_CODIGO_CORTO = "A99"  # letra + 2 dígitos
 _ANCHO_CODIGO_LARGO = "A999"  # letra + 3 dígitos
-_GROSOR_GRUESO = 2  # línea estructural — mismo criterio visual que _GROSOR_GRUESO de grilla_pdf.py
+_GROSOR_GRUESO = 3  # línea estructural — mismo criterio visual que _GROSOR_GRUESO de grilla_pdf.py
 _FORMATO_FECHA = "dd-MM-yyyy"
 
 # Columnas fijas de cada fila de datos (igual que "Tipo Bloque"/"Horario" en el PDF).
@@ -119,6 +119,18 @@ class _CeldaGrilla(QWidget):
 
 
 def _dibujar_bordes_gruesos(painter: QPainter, rect, bordes: frozenset[str]) -> None:
+    # Línea fina propia en las 4 caras — reemplaza a la cuadrícula nativa
+    # de la tabla (desactivada): con "showGrid" activo, Qt le resta 1px a
+    # la altura de columnas angostas como Tipo Bloque/Horario para dejarle
+    # lugar a su propia línea, y esas celdas quedan 1px más bajas que las
+    # de datos — la línea gruesa de esa fila no se dibuja donde debería.
+    # Sin esto, drawRect hereda el brush que haya quedado seteado (el
+    # color del triángulo de centro, si esta celda tiene uno) y repinta
+    # toda la celda encima del texto ya dibujado.
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(QPen(QColor("#999999"), 1))
+    painter.drawRect(rect.adjusted(0, 0, -1, -1))
+
     pen = QPen(QColor("#000000"), _GROSOR_GRUESO)
     painter.setPen(pen)
     if "right" in bordes:
@@ -131,9 +143,37 @@ def _dibujar_bordes_gruesos(painter: QPainter, rect, bordes: frozenset[str]) -> 
         painter.drawLine(rect.topLeft(), rect.topRight())
 
 
-def _borde_css(bordes: frozenset[str]) -> str:
-    mapa = {"top": "border-top", "bottom": "border-bottom", "left": "border-left", "right": "border-right"}
-    return " ".join(f"{mapa[b]}: {_GROSOR_GRUESO}px solid black;" for b in bordes)
+class _EtiquetaGrilla(QWidget):
+    """Celda de texto (encabezado azul o etiqueta de fila) pintada a mano,
+    igual que _CeldaGrilla — un QLabel con "border" por CSS achica el
+    widget en 1px respecto de sus vecinos pintados con QPainter y las
+    líneas gruesas quedan cortadas/desalineadas en el borde; pintando
+    todo con el mismo mecanismo se evita ese desfasaje."""
+
+    def __init__(
+        self, texto: str, tamano_fuente: int, negrita: bool = True,
+        fondo: str | None = None, color_texto: str = "#000000",
+        bordes: frozenset[str] = frozenset(), parent=None,
+    ):
+        super().__init__(parent)
+        self._texto = texto
+        self._fondo = fondo
+        self._color_texto = color_texto
+        self._bordes = bordes
+        fuente = self.font()
+        fuente.setPointSize(tamano_fuente)
+        fuente.setBold(negrita)
+        self.setFont(fuente)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        rect = self.rect()
+        if self._fondo:
+            painter.fillRect(rect, QColor(self._fondo))
+        painter.setPen(QColor(self._color_texto))
+        painter.drawText(rect.adjusted(1, 1, -1, -1), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, self._texto)
+        _dibujar_bordes_gruesos(painter, rect, self._bordes)
+        painter.end()
 
 
 def _lista_multiseleccion() -> QListWidget:
@@ -251,6 +291,10 @@ class GrillaOperativaWidget(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.horizontalHeader().setVisible(False)
         self.tabla.verticalHeader().setVisible(False)
+        # La cuadrícula fina la dibuja cada celda por su cuenta (ver
+        # _dibujar_bordes_gruesos) — la nativa de Qt le resta 1px de alto
+        # a columnas angostas y desalinea las líneas gruesas.
+        self.tabla.setShowGrid(False)
         self.tabla.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         layout_grilla.addWidget(self.tabla, stretch=1)
@@ -587,17 +631,11 @@ class GrillaOperativaWidget(QWidget):
     def _poner_texto_encabezado(
         self, fila: int, col: int, texto: str, span: int = 1, bordes: frozenset[str] = frozenset(),
     ) -> None:
-        etiqueta = QLabel(texto)
-        etiqueta.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Las columnas de etiqueta (Tipo Bloque/Horario fusionadas) tienen
         # textos largos ("Día de la semana") — letra más chica ahí para
         # que entren en 2-3 líneas en vez de desbordar la celda.
-        tamano = "9px" if col == _COL_TIPO_BLOQUE else "11px"
-        borde = _borde_css(bordes)
-        etiqueta.setStyleSheet(
-            f"background-color: {COLOR_NIVEL_1}; color: white; font-weight: bold; font-size: {tamano}; {borde}"
-        )
-        etiqueta.setWordWrap(True)
+        tamano = 7 if col == _COL_TIPO_BLOQUE else 8
+        etiqueta = _EtiquetaGrilla(texto, tamano, fondo=COLOR_NIVEL_1, color_texto="#FFFFFF", bordes=bordes)
         if span > 1:
             self.tabla.setSpan(fila, col, 1, span)
         self.tabla.setCellWidget(fila, col, etiqueta)
@@ -605,11 +643,7 @@ class GrillaOperativaWidget(QWidget):
     def _poner_texto_dato_fila(
         self, fila: int, col: int, texto: str, span_filas: int = 1, bordes: frozenset[str] = frozenset(),
     ) -> None:
-        etiqueta = QLabel(texto)
-        etiqueta.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        borde = _borde_css(bordes)
-        etiqueta.setStyleSheet(f"font-weight: bold; font-size: 10px; {borde}")
-        etiqueta.setWordWrap(True)
+        etiqueta = _EtiquetaGrilla(texto, 7, bordes=bordes)
         if span_filas > 1:
             self.tabla.setSpan(fila, col, span_filas, 1)
         self.tabla.setCellWidget(fila, col, etiqueta)
