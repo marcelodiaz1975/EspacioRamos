@@ -300,12 +300,14 @@ class _PanelReservasAisladas(QWidget):
         self.combo_profesional = QComboBox()
         for id_, etiqueta in _opciones_profesional(self.conn):
             self.combo_profesional.addItem(etiqueta, id_)
+        self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
         self.combo_consultorio = QComboBox()
         for id_, etiqueta in _opciones_consultorio(self.conn):
             self.combo_consultorio.addItem(etiqueta, id_)
+        self.combo_consultorio.currentIndexChanged.connect(self._sincronizar_grilla)
         form.addWidget(QLabel("Consultorio"))
         form.addWidget(self.combo_consultorio)
 
@@ -357,10 +359,37 @@ class _PanelReservasAisladas(QWidget):
         fila_acciones.addStretch()
         layout_tabla.addLayout(fila_acciones)
         splitter.addWidget(panel_tabla)
+
+        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        self.grilla.combo_modo.setCurrentIndex(self.grilla.combo_modo.findData("aislada"))
+        layout_grupo_grilla.addWidget(self.grilla)
+        splitter.addWidget(grupo_grilla)
+
+        splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 2)
 
         layout.addWidget(splitter)
         self.campo_fecha.setText(fecha_actual(self.conn).isoformat())
+        self._sincronizar_grilla()
+
+    def _sincronizar_grilla(self) -> None:
+        """Igual que en Reservas regulares: la vista previa acompaña lo
+        que se está por reservar, acotada al consultorio elegido y con el
+        profesional elegido pintado de azul si ya tiene algo reservado en
+        el mes en curso — en modo "Reservas aisladas" porque acá interesa
+        ver qué está libre AHORA, no los conflictos futuros."""
+        id_consultorio = self.combo_consultorio.currentData()
+        id_unidad = None
+        if id_consultorio is not None:
+            fila = self.conn.execute(
+                "SELECT IdUnidad FROM Consultorio WHERE IdConsultorio = ?", (id_consultorio,)
+            ).fetchone()
+            id_unidad = fila["IdUnidad"] if fila else None
+        self.grilla.filtrar_por_unidad(id_unidad)
+        self.grilla.filtrar_por_profesional(self.combo_profesional.currentData())
 
     def actualizar(self) -> None:
         self._reservas = obtener_repositorio(self.conn, "ReservaAislada").listar()
@@ -381,6 +410,7 @@ class _PanelReservasAisladas(QWidget):
             estado = f"{r['Estado']} (reubicación)" if r["EsReubicacion"] else r["Estado"]
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem(estado))
         self.tabla.resizeColumnsToContents()
+        self.grilla.actualizar()
 
     def _crear(self, forzar: bool = False) -> None:
         fecha = self.campo_fecha.text().strip() or fecha_actual(self.conn).isoformat()

@@ -304,3 +304,89 @@ def test_cancelar_reserva_aislada_cambia_estado(qtbot, conn):
     pantalla.panel_aisladas._cancelar()
     fila = conn.execute("SELECT Estado FROM ReservaAislada").fetchone()
     assert fila["Estado"] == "Cancelada"
+
+
+def test_panel_aisladas_grilla_arranca_en_modo_aislada(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_aisladas.grilla.combo_modo.currentData() == "aislada"
+
+
+def test_panel_aisladas_grilla_preview_se_acota_al_consultorio_elegido(qtbot, conn):
+    _preparar(conn)
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Sur')")
+    id_otro_edificio = conn.execute("SELECT IdEdificio FROM Edificio WHERE Nombre = 'Torre Sur'").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '2B')", (id_otro_edificio,))
+    id_otra_unidad = conn.execute("SELECT IdUnidad FROM Unidad WHERE Departamento = '2B'").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_otra_unidad,))
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad]
+
+    indice_otro_consultorio = next(
+        i for i in range(panel.combo_consultorio.count())
+        if panel.combo_consultorio.itemData(i) != panel.combo_consultorio.currentData()
+    )
+    panel.combo_consultorio.setCurrentIndex(indice_otro_consultorio)
+    assert panel.grilla.ids_unidad_seleccionadas() == [id_otra_unidad]
+
+
+def test_panel_aisladas_grilla_preview_pinta_azul_al_profesional_elegido(qtbot, conn):
+    _preparar(conn)
+    conn.execute("UPDATE Profesional SET IdCodigo = 'R1'")  # el filtro de la grilla busca por código
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-17' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.campo_fecha.setText("2026-08-17")
+    panel._crear()  # reserva aislada 9-10 ese día
+
+    panel.combo_profesional.setCurrentIndex(
+        next(i for i in range(panel.combo_profesional.count()) if panel.combo_profesional.itemData(i) == id_profesional)
+    )
+
+    from datetime import date
+
+    from app.negocio.dias import fecha_a_dia_semana
+    from app.negocio.grilla_operativa import AZUL_OSCURO
+
+    dia = fecha_a_dia_semana(date(2026, 8, 17))
+    clave = (id_consultorio, dia, 9)
+    assert panel.grilla._resultado[clave].color_aro == AZUL_OSCURO
+
+
+def test_panel_aisladas_grilla_preview_se_refresca_al_crear_una_reserva(qtbot, conn):
+    _preparar(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-17' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.campo_fecha.setText("2026-08-17")
+
+    from datetime import date
+
+    from app.negocio.dias import fecha_a_dia_semana
+
+    dia = fecha_a_dia_semana(date(2026, 8, 17))
+    clave = (id_consultorio, dia, 9)
+    assert panel.grilla._resultado[clave].id_profesional_mostrado is None
+
+    panel._crear()
+
+    assert panel.grilla._resultado[clave].id_profesional_mostrado is not None
