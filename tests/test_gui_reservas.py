@@ -230,6 +230,67 @@ def test_crear_reserva_aislada_fecha_mes_anterior_pide_confirmacion(qtbot, conn,
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
 
 
+def test_grilla_preview_se_acota_al_consultorio_elegido(qtbot, conn):
+    _preparar(conn)
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Sur')")
+    id_otro_edificio = conn.execute("SELECT IdEdificio FROM Edificio WHERE Nombre = 'Torre Sur'").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '2B')", (id_otro_edificio,))
+    id_otra_unidad = conn.execute("SELECT IdUnidad FROM Unidad WHERE Departamento = '2B'").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_otra_unidad,))
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+
+    # el combo de consultorio ya viene con el primero seleccionado por
+    # defecto -> la grilla arranca acotada a esa unidad, no a las dos.
+    assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad]
+
+    indice_otro_consultorio = next(
+        i for i in range(panel.combo_consultorio.count())
+        if panel.combo_consultorio.itemData(i) != panel.combo_consultorio.currentData()
+    )
+    panel.combo_consultorio.setCurrentIndex(indice_otro_consultorio)
+    assert panel.grilla.ids_unidad_seleccionadas() == [id_otra_unidad]
+
+
+def test_grilla_preview_pinta_azul_al_profesional_elegido(qtbot, conn):
+    _preparar(conn)
+    conn.execute("UPDATE Profesional SET IdCodigo = 'R1'")  # el filtro de la grilla busca por código
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel._crear()  # reserva Lunes 9-10 para ese profesional/consultorio
+
+    panel.combo_profesional.setCurrentIndex(
+        next(i for i in range(panel.combo_profesional.count()) if panel.combo_profesional.itemData(i) == id_profesional)
+    )
+    from app.negocio.grilla_operativa import AZUL_OSCURO
+
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    clave = (id_consultorio, "Lunes", 9)
+    assert panel.grilla._resultado[clave].color_aro == AZUL_OSCURO
+
+
+def test_grilla_preview_se_refresca_al_crear_una_reserva(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    clave = (id_consultorio, "Lunes", 9)
+    assert panel.grilla._resultado[clave].id_profesional_mostrado is None
+
+    panel._crear()
+
+    assert panel.grilla._resultado[clave].id_profesional_mostrado is not None
+
+
 def test_cancelar_reserva_aislada_cambia_estado(qtbot, conn):
     # 13-14 cae fuera de los bloques rígidos por defecto (9-11 y 18-21) para
     # que la cancelación el mismo día no choque con esa restricción aparte.

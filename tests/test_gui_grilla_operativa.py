@@ -145,3 +145,35 @@ def test_sin_unidades_seleccionadas_deja_grilla_vacia(qtbot, conn):
     widget.lista_unidad.clearSelection()
     assert widget.tabla.rowCount() == 0
     assert widget._resultado == {}
+
+
+def test_filtrar_por_unidad_acota_la_seleccion(qtbot, conn):
+    id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    conn.commit()
+
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert set(widget.ids_unidad_seleccionadas()) == {id_unidad, otra_unidad}
+
+    widget.filtrar_por_unidad(id_unidad)
+    assert widget.ids_unidad_seleccionadas() == [id_unidad]
+
+    widget.filtrar_por_unidad(None)
+    assert set(widget.ids_unidad_seleccionadas()) == {id_unidad, otra_unidad}
+
+
+def test_filtrar_por_profesional_fija_y_limpia_el_campo(qtbot, conn):
+    id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+
+    clave = (id_consultorio, "Lunes", 9)
+    widget.filtrar_por_profesional(id_virginia)
+    assert widget._resultado[clave].color_aro == AZUL_OSCURO
+
+    widget.filtrar_por_profesional(None)
+    assert widget.campo_profesional.text() == ""
+    assert widget._resultado[clave].color_aro == VERDE

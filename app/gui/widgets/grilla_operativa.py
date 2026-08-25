@@ -415,6 +415,36 @@ class GrillaOperativaWidget(QWidget):
         que lo llama termine de guardar la referencia al widget)."""
         return _ids_seleccionados(self.lista_unidad)
 
+    def filtrar_por_unidad(self, id_unidad: int | None) -> None:
+        """Acota la selección de unidades a una sola — o la vuelve a
+        mostrar todas con `None`. Pensado para cuando otro formulario (ej.
+        el alta de una reserva) embebe la grilla como vista previa y
+        quiere mostrarla acotada al consultorio que se está por reservar,
+        sin que el usuario tenga que tocar el filtro de Unidad a mano."""
+        self.lista_unidad.blockSignals(True)
+        self.lista_unidad.clearSelection()
+        if id_unidad is None:
+            _seleccionar_todos(self.lista_unidad)
+        else:
+            for i in range(self.lista_unidad.count()):
+                item = self.lista_unidad.item(i)
+                if item.data(Qt.ItemDataRole.UserRole) == id_unidad:
+                    item.setSelected(True)
+                    break
+        self.lista_unidad.blockSignals(False)
+        self.actualizar()
+
+    def filtrar_por_profesional(self, id_profesional: int | None) -> None:
+        """Fija el filtro de profesional (el que pinta de azul su celda
+        actual) a uno puntual, o lo limpia con `None` — mismo uso que
+        `filtrar_por_unidad`."""
+        if id_profesional is None:
+            self.campo_profesional.clear()
+        else:
+            texto = next((t for t, i in self._profesionales_por_texto.items() if i == id_profesional), None)
+            self.campo_profesional.setText(texto or "")
+        self.actualizar()
+
     # ------------------------------------------------------------- grilla
 
     def actualizar(self) -> None:

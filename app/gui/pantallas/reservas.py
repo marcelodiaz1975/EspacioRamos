@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_fecha_es_mes_anterior
+from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
 from app.negocio.lista_espera import marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
@@ -95,12 +97,14 @@ class _PanelReservasRegulares(QWidget):
         self.combo_profesional = QComboBox()
         for id_, etiqueta in _opciones_profesional(self.conn):
             self.combo_profesional.addItem(etiqueta, id_)
+        self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
         self.combo_consultorio = QComboBox()
         for id_, etiqueta in _opciones_consultorio(self.conn):
             self.combo_consultorio.addItem(etiqueta, id_)
+        self.combo_consultorio.currentIndexChanged.connect(self._sincronizar_grilla)
         form.addWidget(QLabel("Consultorio"))
         form.addWidget(self.combo_consultorio)
 
@@ -161,10 +165,20 @@ class _PanelReservasRegulares(QWidget):
         fila_acciones.addStretch()
         layout_tabla.addLayout(fila_acciones)
         splitter.addWidget(panel_tabla)
+
+        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        layout_grupo_grilla.addWidget(self.grilla)
+        splitter.addWidget(grupo_grilla)
+
+        splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 2)
 
         layout.addWidget(splitter)
         self.campo_vigencia_inicio.setText(fecha_actual(self.conn).isoformat())
+        self._sincronizar_grilla()
 
     def actualizar(self) -> None:
         self._reservas = obtener_repositorio(self.conn, "ReservaRegular").listar()
@@ -185,6 +199,21 @@ class _PanelReservasRegulares(QWidget):
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem(r["VigenciaInicio"] or ""))
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(r["VigenciaFin"] or ""))
         self.tabla.resizeColumnsToContents()
+        self.grilla.actualizar()
+
+    def _sincronizar_grilla(self) -> None:
+        """La vista previa acompaña lo que se está por reservar: acotada
+        al consultorio elegido, y con el profesional elegido pintado de
+        azul si ya tiene algo reservado en el mes actual."""
+        id_consultorio = self.combo_consultorio.currentData()
+        id_unidad = None
+        if id_consultorio is not None:
+            fila = self.conn.execute(
+                "SELECT IdUnidad FROM Consultorio WHERE IdConsultorio = ?", (id_consultorio,)
+            ).fetchone()
+            id_unidad = fila["IdUnidad"] if fila else None
+        self.grilla.filtrar_por_unidad(id_unidad)
+        self.grilla.filtrar_por_profesional(self.combo_profesional.currentData())
 
     def _crear(self, forzar: bool = False) -> None:
         datos = dict(
