@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QDate, QPoint, Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -76,10 +76,11 @@ def _tipo_bloque_por_hora(conn: sqlite3.Connection, horas: list[int]) -> dict[in
 
 
 class _CeldaGrilla(QWidget):
-    """Una celda de datos: fondo = color de aro, círculo centrado = color
-    de centro (si distinto del aro), código encima. Widget propio (no
-    QTableWidgetItem) para poder pintar el círculo y manejar el clic sin
-    un delegate aparte."""
+    """Una celda de datos: fondo = color de aro, triángulo izquierdo
+    (1/4 de la celda, dividida con una cruz en diagonal) = color de
+    centro (si distinto del aro), código encima. Widget propio (no
+    QTableWidgetItem) para poder pintar la división y manejar el clic
+    sin un delegate aparte."""
 
     def __init__(
         self, celda: CeldaGrillaOperativa, clave: tuple[int, str, int], on_click,
@@ -102,16 +103,15 @@ class _CeldaGrilla(QWidget):
         rect = self.rect()
         painter.fillRect(rect, QColor(_COLOR_HEX[self.celda.color_aro]))
         if self.celda.color_centro != self.celda.color_aro:
-            # Un punto chico y fijo (no proporcional a la celda): tiene que
-            # quedar como acento sobre el aro, no taparlo — si ocupa la
-            # mayor parte de la celda, el aro deja de leerse como tal y el
-            # código (que se dibuja arriba de todo) lo tapa casi entero.
-            lado = min(10, min(rect.width(), rect.height()) * 0.4)
-            x = rect.center().x() - lado / 2
-            y = rect.center().y() - lado / 2
+            # Celda dividida con una cruz en diagonal (de esquina a
+            # esquina) en 4 triángulos — arriba/derecha/abajo quedan del
+            # color de aro (3/4) y el de la izquierda pasa al color de
+            # centro (1/4).
+            centro = rect.center()
+            triangulo_izquierdo = QPolygon([rect.topLeft(), QPoint(centro.x(), centro.y()), rect.bottomLeft()])
             painter.setBrush(QColor(_COLOR_HEX[self.celda.color_centro]))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(int(x), int(y), int(lado), int(lado))
+            painter.drawPolygon(triangulo_izquierdo)
         if self.celda.codigo:
             painter.setPen(QColor(_FUENTE_HEX.get(self.celda.color_fuente, "#000000")))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.celda.codigo)
