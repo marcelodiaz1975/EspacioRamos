@@ -20,6 +20,7 @@ que en el resto de la app."""
 from __future__ import annotations
 
 import sqlite3
+from typing import Callable
 
 from PySide6.QtCore import QDate, QPoint, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
@@ -193,9 +194,12 @@ def _ids_seleccionados(lista: QListWidget) -> list[int]:
 
 
 class GrillaOperativaWidget(QWidget):
-    def __init__(self, conn: sqlite3.Connection, parent=None):
+    def __init__(
+        self, conn: sqlite3.Connection, on_actualizar: Callable[[list[int]], None] | None = None, parent=None,
+    ):
         super().__init__(parent)
         self.conn = conn
+        self._on_actualizar = on_actualizar
         self._resultado: dict[tuple[int, str, int], CeldaGrillaOperativa] = {}
         self._armar_ui()
         self._cargar_localidades()
@@ -402,9 +406,23 @@ class GrillaOperativaWidget(QWidget):
     def _id_profesional_filtro(self) -> int | None:
         return self._profesionales_por_texto.get(self.campo_profesional.text().strip())
 
+    def ids_unidad_seleccionadas(self) -> list[int]:
+        """Unidades actualmente tildadas en el filtro — la misma lista que
+        recibe `on_actualizar` en cada refresco, para que otras secciones
+        de la pantalla (valores, estadísticas) se mantengan sincronizadas
+        con la selección de la grilla sin necesidad de leerla de vuelta
+        (el callback puede dispararse durante `__init__`, antes de que el
+        que lo llama termine de guardar la referencia al widget)."""
+        return _ids_seleccionados(self.lista_unidad)
+
     # ------------------------------------------------------------- grilla
 
     def actualizar(self) -> None:
+        self._actualizar_grilla()
+        if self._on_actualizar:
+            self._on_actualizar(self.ids_unidad_seleccionadas())
+
+    def _actualizar_grilla(self) -> None:
         ids_unidad = _ids_seleccionados(self.lista_unidad)
         dias = self._dias_seleccionados()
         desde = self.campo_desde.date().toPython().isoformat()
