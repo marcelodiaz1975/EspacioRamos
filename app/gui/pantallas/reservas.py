@@ -202,6 +202,9 @@ class _PanelReservasRegulares(QWidget):
         layout_tabla.addWidget(self.tabla, stretch=1)
 
         fila_acciones = QHBoxLayout()
+        boton_modificar = QPushButton("Modificar seleccionada")
+        boton_modificar.clicked.connect(self._modificar_seleccionada)
+        fila_acciones.addWidget(boton_modificar)
         boton_finalizar = QPushButton("Finalizar vigencia hoy")
         boton_finalizar.clicked.connect(self._finalizar_vigencia)
         fila_acciones.addWidget(boton_finalizar)
@@ -355,11 +358,13 @@ class _PanelReservasRegulares(QWidget):
             marcar_resuelto(self.conn, pedidos[0]["IdPedido"])
             self.conn.commit()
 
-    def _finalizar_vigencia(self) -> None:
+    def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            return
-        reserva = self._reservas[filas[0].row()]
+            return None
+        return self._reservas[filas[0].row()]
+
+    def _finalizar_registro(self, reserva: sqlite3.Row) -> None:
         obtener_repositorio(self.conn, "ReservaRegular").actualizar(
             reserva["IdReservaRegular"], VigenciaFin=fecha_actual(self.conn).isoformat()
         )
@@ -367,7 +372,42 @@ class _PanelReservasRegulares(QWidget):
             self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn),
         )
         self.conn.commit()
+
+    def _finalizar_vigencia(self) -> None:
+        reserva = self._fila_seleccionada()
+        if reserva is None:
+            return
+        self._finalizar_registro(reserva)
         self.actualizar()
+
+    def _modificar_seleccionada(self) -> None:
+        """No se edita la fila histórica in-place (podría desalinear una
+        liquidación ya emitida que la haya usado): finaliza su vigencia
+        hoy — igual que "Finalizar vigencia hoy" — y precarga el
+        formulario con sus datos para dar de alta la versión nueva, con
+        vigencia desde hoy. El operador ajusta lo que haga falta y
+        confirma con "Crear reserva regular", como cualquier alta."""
+        reserva = self._fila_seleccionada()
+        if reserva is None:
+            QMessageBox.warning(self, "Modificar reserva", "Elegí una fila de la tabla para modificar.")
+            return
+        self._finalizar_registro(reserva)
+        self.actualizar()
+
+        indice_profesional = self.combo_profesional.findData(reserva["IdProfesional"])
+        if indice_profesional >= 0:
+            self.combo_profesional.setCurrentIndex(indice_profesional)
+        indice_consultorio = self.combo_consultorio.findData(reserva["IdConsultorio"])
+        if indice_consultorio >= 0:
+            self.combo_consultorio.setCurrentIndex(indice_consultorio)
+        for dia, check in self._checks_dia.items():
+            check.setChecked(dia == reserva["DiaSemana"])
+        self.spin_desde.setValue(reserva["HoraInicio"])
+        self.spin_hasta.setValue(reserva["HoraFin"])
+        self.campo_vigencia_inicio.setText(fecha_actual(self.conn).isoformat())
+        self.campo_vigencia_fin.clear()
+        self.casilla_excepcion.setChecked(bool(reserva["EsExcepcion"]))
+        self._sincronizar_grilla()
 
 
 class _PanelReservasAisladas(QWidget):

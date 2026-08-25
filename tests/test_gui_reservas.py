@@ -232,6 +232,68 @@ def test_finalizar_vigencia_actualiza_vigenciafin(qtbot, conn):
     assert fila["VigenciaFin"] is not None
 
 
+def test_modificar_seleccionada_finaliza_la_vieja_y_precarga_el_formulario(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel._checks_dia["Martes"].setChecked(True)  # Lunes + Martes
+    panel.spin_desde.setValue(14)
+    panel.spin_hasta.setValue(16)
+    panel.casilla_excepcion.setChecked(True)
+    panel._crear()  # crea Lunes 14-16 y Martes 14-16, formulario queda en blanco
+
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    fila_lunes = next(
+        i for i in range(panel.tabla.rowCount())
+        if panel.tabla.item(i, 2).text() == "Lunes"
+    )
+    panel.tabla.selectRow(fila_lunes)
+    panel._modificar_seleccionada()
+
+    # la fila del Lunes quedó finalizada hoy, sin tocar la del Martes
+    filas = conn.execute("SELECT DiaSemana, VigenciaFin FROM ReservaRegular").fetchall()
+    finalizada = {f["DiaSemana"]: f["VigenciaFin"] for f in filas}
+    assert finalizada["Lunes"] is not None
+    assert finalizada["Martes"] is None
+
+    # el formulario quedó precargado con esos datos, vigencia desde hoy
+    assert panel.combo_profesional.currentData() == id_profesional
+    assert panel.combo_consultorio.currentData() == id_consultorio
+    assert {d for d, c in panel._checks_dia.items() if c.isChecked()} == {"Lunes"}
+    assert panel.spin_desde.value() == 14
+    assert panel.spin_hasta.value() == 16
+    assert panel.casilla_excepcion.isChecked() is True
+    assert panel.campo_vigencia_fin.text() == ""
+
+
+def test_modificar_seleccionada_sin_fila_no_hace_nada(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel._modificar_seleccionada()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular WHERE VigenciaFin IS NOT NULL").fetchone()["c"] == 0
+
+
+def test_modificar_seleccionada_permite_cargar_la_nueva_version(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel._crear()  # Lunes 9-10
+
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+    panel.spin_hasta.setValue(12)  # el operador ajusta el horario de la nueva versión
+    panel._crear()
+
+    vigentes = conn.execute("SELECT HoraInicio, HoraFin FROM ReservaRegular WHERE VigenciaFin IS NULL").fetchall()
+    assert len(vigentes) == 1
+    assert vigentes[0]["HoraFin"] == 12
+
+
 def test_crear_reserva_aislada_sin_conflicto_persiste(qtbot, conn):
     _preparar(conn)
     pantalla = PantallaReservas(conn)
