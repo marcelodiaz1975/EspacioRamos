@@ -237,6 +237,79 @@ def test_cancelar_ausencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
 
 
+def test_panel_vacaciones_grilla_preview_acota_y_pinta_azul(qtbot, conn):
+    id_profesional = _preparar(conn)
+    conn.execute("UPDATE Profesional SET IdCodigo = 'R1'")  # el filtro de la grilla busca por código
+    conn.commit()
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    from app.negocio.grilla_operativa import AZUL_OSCURO
+
+    assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad]
+    assert panel.grilla._resultado[(id_consultorio, "Lunes", 9)].color_aro == AZUL_OSCURO
+
+
+def test_panel_licencias_grilla_preview_acota_y_pinta_azul(qtbot, conn):
+    id_profesional = _preparar(conn)
+    conn.execute("UPDATE Profesional SET IdCodigo = 'R1'")  # el filtro de la grilla busca por código
+    conn.commit()
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    from app.negocio.grilla_operativa import AZUL_OSCURO
+
+    assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad]
+    assert panel.grilla._resultado[(id_consultorio, "Lunes", 9)].color_aro == AZUL_OSCURO
+
+
+def test_panel_ausencias_grilla_preview_acota_y_pinta_azul(qtbot, conn):
+    id_profesional = _preparar(conn)
+    conn.execute("UPDATE Profesional SET IdCodigo = 'R1'")  # el filtro de la grilla busca por código
+    conn.commit()
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    from app.negocio.grilla_operativa import AZUL_OSCURO
+
+    assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad]
+    assert panel.grilla._resultado[(id_consultorio, "Lunes", 9)].color_aro == AZUL_OSCURO
+
+
+def test_panel_vacaciones_grilla_sin_profesional_con_reservas_muestra_todo(qtbot, conn):
+    """Un profesional sin ninguna reserva regular todavía no tiene
+    unidades para acotar -> la vista previa vuelve a mostrar todas."""
+    _preparar(conn)
+    id_unidad_1 = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Sur")
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2B")
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Sin Reservas")
+    conn.commit()
+
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
+
+    assert set(panel.grilla.ids_unidad_seleccionadas()) == {id_unidad_1, id_unidad_2}
+
+
 def test_crear_cargo_especial_sin_concepto_no_persiste(qtbot, conn):
     _preparar(conn)
     pantalla = PantallaNovedades(conn)

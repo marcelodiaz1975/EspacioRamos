@@ -421,16 +421,24 @@ class GrillaOperativaWidget(QWidget):
         el alta de una reserva) embebe la grilla como vista previa y
         quiere mostrarla acotada al consultorio que se está por reservar,
         sin que el usuario tenga que tocar el filtro de Unidad a mano."""
+        self.filtrar_por_unidades([id_unidad] if id_unidad is not None else None)
+
+    def filtrar_por_unidades(self, ids_unidad: list[int] | None) -> None:
+        """Como `filtrar_por_unidad`, pero para un conjunto — para cuando
+        el formulario no reserva un consultorio puntual (ej. Vacaciones/
+        Licencias/Ausencias) sino que afecta a todas las unidades donde
+        el profesional ya tiene algo reservado. `None` o vacío vuelve a
+        mostrar todas."""
         self.lista_unidad.blockSignals(True)
         self.lista_unidad.clearSelection()
-        if id_unidad is None:
+        if not ids_unidad:
             _seleccionar_todos(self.lista_unidad)
         else:
+            objetivo = set(ids_unidad)
             for i in range(self.lista_unidad.count()):
                 item = self.lista_unidad.item(i)
-                if item.data(Qt.ItemDataRole.UserRole) == id_unidad:
+                if item.data(Qt.ItemDataRole.UserRole) in objetivo:
                     item.setSelected(True)
-                    break
         self.lista_unidad.blockSignals(False)
         self.actualizar()
 

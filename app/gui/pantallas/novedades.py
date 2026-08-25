@@ -12,6 +12,7 @@ import sqlite3
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
+from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
 from app.negocio.dias import periodo_actual
 from app.negocio.licencias import cancelar_licencia, crear_licencia
@@ -46,6 +48,23 @@ def _combo_profesionales(conn: sqlite3.Connection) -> QComboBox:
 def _nombre_profesional(cache: dict[int, sqlite3.Row], id_profesional: int) -> str:
     p = cache.get(id_profesional)
     return p["Apellido"] if p else "?"
+
+
+def _unidades_del_profesional(conn: sqlite3.Connection, id_profesional: int | None) -> list[int]:
+    """Unidades donde el profesional ya tiene alguna reserva regular —
+    con eso alcanza para acotar la vista previa de la grilla en
+    Vacaciones/Licencias/Ausencias, que no reservan un consultorio
+    puntual sino que afectan a todo lo que el profesional ya tiene
+    reservado."""
+    if id_profesional is None:
+        return []
+    filas = conn.execute(
+        "SELECT DISTINCT u.IdUnidad FROM ReservaRegular r "
+        "JOIN Consultorio c ON c.IdConsultorio = r.IdConsultorio "
+        "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE r.IdProfesional = ?",
+        (id_profesional,),
+    ).fetchall()
+    return [f["IdUnidad"] for f in filas]
 
 
 class PantallaNovedades(QWidget):
@@ -88,6 +107,7 @@ class _PanelVacaciones(QWidget):
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = _combo_profesionales(self.conn)
+        self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
         self.campo_desde = QLineEdit()
@@ -115,8 +135,26 @@ class _PanelVacaciones(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         splitter.addWidget(self.tabla)
+
+        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        layout_grupo_grilla.addWidget(self.grilla)
+        splitter.addWidget(grupo_grilla)
+
+        splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 2)
         layout.addWidget(splitter)
+        self._sincronizar_grilla()
+
+    def _sincronizar_grilla(self) -> None:
+        """La vista previa muestra el horario regular del profesional
+        elegido — acotada a las unidades donde ya tiene algo reservado, y
+        con su propia reserva pintada de azul."""
+        id_profesional = self.combo_profesional.currentData()
+        self.grilla.filtrar_por_unidades(_unidades_del_profesional(self.conn, id_profesional))
+        self.grilla.filtrar_por_profesional(id_profesional)
 
     def actualizar(self) -> None:
         self._registros = obtener_repositorio(self.conn, "Vacacion").listar()
@@ -131,6 +169,7 @@ class _PanelVacaciones(QWidget):
             cupo = r["CupoRestantePorcentaje"]
             self.tabla.setItem(i, 4, QTableWidgetItem(f"{cupo:.1f}%" if cupo is not None else ""))
         self.tabla.resizeColumnsToContents()
+        self.grilla.actualizar()
 
     def _crear(self) -> None:
         id_profesional = self.combo_profesional.currentData()
@@ -182,6 +221,7 @@ class _PanelLicencias(QWidget):
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = _combo_profesionales(self.conn)
+        self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
@@ -224,8 +264,23 @@ class _PanelLicencias(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         splitter.addWidget(self.tabla)
+
+        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        layout_grupo_grilla.addWidget(self.grilla)
+        splitter.addWidget(grupo_grilla)
+
+        splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 2)
         layout.addWidget(splitter)
+        self._sincronizar_grilla()
+
+    def _sincronizar_grilla(self) -> None:
+        id_profesional = self.combo_profesional.currentData()
+        self.grilla.filtrar_por_unidades(_unidades_del_profesional(self.conn, id_profesional))
+        self.grilla.filtrar_por_profesional(id_profesional)
 
     def _precargar_porcentaje(self) -> None:
         id_tipo = self.combo_tipo.currentData()
@@ -246,6 +301,7 @@ class _PanelLicencias(QWidget):
             valor = r["ValorBonificado"]
             self.tabla.setItem(i, 4, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
         self.tabla.resizeColumnsToContents()
+        self.grilla.actualizar()
 
     def _crear(self) -> None:
         id_tipo = self.combo_tipo.currentData()
@@ -295,6 +351,7 @@ class _PanelAusencias(QWidget):
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = _combo_profesionales(self.conn)
+        self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
@@ -329,8 +386,23 @@ class _PanelAusencias(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         splitter.addWidget(self.tabla)
+
+        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        layout_grupo_grilla.addWidget(self.grilla)
+        splitter.addWidget(grupo_grilla)
+
+        splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 2)
         layout.addWidget(splitter)
+        self._sincronizar_grilla()
+
+    def _sincronizar_grilla(self) -> None:
+        id_profesional = self.combo_profesional.currentData()
+        self.grilla.filtrar_por_unidades(_unidades_del_profesional(self.conn, id_profesional))
+        self.grilla.filtrar_por_profesional(id_profesional)
 
     def actualizar(self) -> None:
         self._registros = obtener_repositorio(self.conn, "Ausencia").listar()
@@ -342,6 +414,7 @@ class _PanelAusencias(QWidget):
             self.tabla.setItem(i, 2, QTableWidgetItem(r["FechaHasta"]))
             self.tabla.setItem(i, 3, QTableWidgetItem(r["Motivo"] or ""))
         self.tabla.resizeColumnsToContents()
+        self.grilla.actualizar()
 
     def _crear(self) -> None:
         try:
