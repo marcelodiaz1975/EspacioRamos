@@ -205,3 +205,41 @@ def test_dias_con_reserva_vigente(qtbot, conn):
     otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Sin Reserva")
     conn.commit()
     assert dias_con_reserva_vigente(conn, otro_profesional) == []
+
+
+def test_unidades_con_reserva_incluye_aisladas(qtbot, conn):
+    from app.gui.widgets.grilla_operativa import unidades_con_reserva
+
+    id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
+    # id_virginia ya tiene una reserva regular en id_unidad (armada por _preparar)
+    assert unidades_con_reserva(conn, id_virginia) == [id_unidad]
+    assert unidades_con_reserva(conn, None) == []
+
+    # un profesional sin ninguna reserva regular, solo una aislada, igual aparece
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
+    otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1)
+    solo_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Ajeno")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=solo_aislada, IdConsultorio=otro_consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=10,
+    )
+    conn.commit()
+    assert unidades_con_reserva(conn, solo_aislada) == [otra_unidad]
+
+
+def test_dias_con_reserva_incluye_aisladas(qtbot, conn):
+    from app.gui.widgets.grilla_operativa import dias_con_reserva
+
+    id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
+    assert dias_con_reserva(conn, id_virginia) == ["Lunes"]
+    assert dias_con_reserva(conn, None) == []
+
+    solo_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Ajeno")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=solo_aislada, IdConsultorio=id_consultorio, Fecha="2026-08-18", HoraInicio=9, HoraFin=10,
+    )
+    conn.commit()
+    from app.negocio.dias import fecha_a_dia_semana
+    from datetime import date
+
+    assert dias_con_reserva(conn, solo_aislada) == [fecha_a_dia_semana(date(2026, 8, 18))]

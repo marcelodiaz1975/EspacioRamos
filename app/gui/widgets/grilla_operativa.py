@@ -20,6 +20,7 @@ que en el resto de la app."""
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from typing import Callable
 
 from PySide6.QtCore import QDate, QPoint, Qt
@@ -43,7 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.estilos import COLOR_AMARILLO, COLOR_AZUL_OSCURO, COLOR_NIVEL_1
-from app.negocio.dias import parsear_periodo, periodo_actual, sumar_meses, ultimo_dia_mes
+from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_actual, sumar_meses, ultimo_dia_mes
 from app.negocio.grilla import dias_grilla
 from app.negocio.grilla_operativa import (
     AMARILLO,
@@ -222,6 +223,41 @@ def dias_con_reserva_vigente(conn: sqlite3.Connection, id_profesional: int | Non
         "SELECT DISTINCT DiaSemana FROM ReservaRegular WHERE IdProfesional = ?", (id_profesional,)
     ).fetchall()
     return [f["DiaSemana"] for f in filas]
+
+
+def unidades_con_reserva(conn: sqlite3.Connection, id_profesional: int | None) -> list[int]:
+    """Como `unidades_con_reserva_vigente`, pero considerando también las
+    reservas aisladas confirmadas — para la vista previa de Reservas
+    aisladas, donde el profesional puede no tener nunca una reserva
+    regular (ej. categoría A)."""
+    if id_profesional is None:
+        return []
+    filas = conn.execute(
+        "SELECT DISTINCT u.IdUnidad FROM ReservaRegular r "
+        "JOIN Consultorio c ON c.IdConsultorio = r.IdConsultorio "
+        "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE r.IdProfesional = ? "
+        "UNION "
+        "SELECT DISTINCT u.IdUnidad FROM ReservaAislada a "
+        "JOIN Consultorio c ON c.IdConsultorio = a.IdConsultorio "
+        "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE a.IdProfesional = ? AND a.Estado = 'Confirmada'",
+        (id_profesional, id_profesional),
+    ).fetchall()
+    return [f["IdUnidad"] for f in filas]
+
+
+def dias_con_reserva(conn: sqlite3.Connection, id_profesional: int | None) -> list[str]:
+    """Como `dias_con_reserva_vigente`, pero sumando el día de la semana
+    de cada reserva aislada confirmada del profesional (su Fecha, no un
+    patrón recurrente) — mismo uso que `unidades_con_reserva`."""
+    if id_profesional is None:
+        return []
+    dias = set(dias_con_reserva_vigente(conn, id_profesional))
+    filas = conn.execute(
+        "SELECT Fecha FROM ReservaAislada WHERE IdProfesional = ? AND Estado = 'Confirmada'", (id_profesional,)
+    ).fetchall()
+    for f in filas:
+        dias.add(fecha_a_dia_semana(date.fromisoformat(f["Fecha"])))
+    return list(dias)
 
 
 class GrillaOperativaWidget(QWidget):
