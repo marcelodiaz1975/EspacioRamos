@@ -241,7 +241,6 @@ def test_modificar_seleccionada_finaliza_la_vieja_y_precarga_el_formulario(qtbot
     panel._checks_dia["Martes"].setChecked(True)  # Lunes + Martes
     panel.spin_desde.setValue(14)
     panel.spin_hasta.setValue(16)
-    panel.casilla_excepcion.setChecked(True)
     panel._crear()  # crea Lunes 14-16 y Martes 14-16, formulario queda en blanco
 
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
@@ -265,7 +264,6 @@ def test_modificar_seleccionada_finaliza_la_vieja_y_precarga_el_formulario(qtbot
     assert {d for d, c in panel._checks_dia.items() if c.isChecked()} == {"Lunes"}
     assert panel.spin_desde.value() == 14
     assert panel.spin_hasta.value() == 16
-    assert panel.casilla_excepcion.isChecked() is True
     assert panel.campo_vigencia_fin.date() == _FECHA_SIN_DATO
 
 
@@ -301,7 +299,7 @@ def test_crear_reserva_aislada_sin_conflicto_persiste(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.panel_aisladas._crear()
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
-    assert pantalla.panel_aisladas.tabla.item(0, 4).text() == "Confirmada"
+    assert pantalla.panel_aisladas.tabla.item(0, 5).text() == "Confirmada"
 
 
 def _monkeypatch_clipboard(monkeypatch):
@@ -396,7 +394,6 @@ def test_formulario_vuelve_en_blanco_despues_de_crear(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_regulares
     panel.campo_vigencia_fin.setDate(QDate(2026, 12, 31))
-    panel.casilla_excepcion.setChecked(True)
     panel._checks_dia["Martes"].setChecked(True)
 
     panel._crear()
@@ -404,7 +401,6 @@ def test_formulario_vuelve_en_blanco_despues_de_crear(qtbot, conn):
     assert panel.combo_profesional.currentData() is None
     assert panel.combo_profesional.currentIndex() == 0
     assert panel.campo_vigencia_fin.date() == _FECHA_SIN_DATO
-    assert panel.casilla_excepcion.isChecked() is False
     assert {dia for dia, check in panel._checks_dia.items() if check.isChecked()} == {"Lunes"}
     assert panel.grilla.ids_unidad_seleccionadas() == []
 
@@ -679,6 +675,21 @@ def test_combo_profesional_muestra_tratamiento_nombre_apellido(qtbot, conn):
     assert combo.itemText(indice) == "Lic. Virginia Gómez"
 
 
+def test_combo_profesional_antepone_el_codigo_cuando_tiene(qtbot, conn):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    obtener_repositorio(conn, "Profesional").actualizar(
+        id_profesional, Tratamiento="Lic.", NombrePila="Virginia", IdCodigo="R1",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    combo = pantalla.panel_regulares.combo_profesional
+    indice = combo.findData(id_profesional)
+    assert combo.itemText(indice) == "R1 - Lic. Virginia Gómez"
+
+
 def test_filtros_edificio_unidad_acotan_el_combo_consultorio(qtbot, conn):
     _preparar(conn)
     id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Sur")
@@ -728,10 +739,14 @@ def test_tabla_aisladas_ordenada_por_fecha_y_hora(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
     filas = [
-        (panel.tabla.item(f, 2).text(), panel.tabla.item(f, 3).text())
+        (panel.tabla.item(f, 2).text(), panel.tabla.item(f, 3).text(), panel.tabla.item(f, 4).text())
         for f in range(panel.tabla.rowCount())
     ]
-    assert filas == [("18-08-2026", "9 a 10"), ("18-08-2026", "14 a 15"), ("20-08-2026", "9 a 10")]
+    assert filas == [
+        ("Martes", "18-08-2026", "9:00 a 10:00"),
+        ("Martes", "18-08-2026", "14:00 a 15:00"),
+        ("Jueves", "20-08-2026", "9:00 a 10:00"),
+    ]
 
 
 def test_tabla_aisladas_columna_valor(qtbot, conn):
@@ -754,7 +769,7 @@ def test_tabla_aisladas_columna_valor(qtbot, conn):
     panel = pantalla.panel_aisladas
     from app.negocio.formato import formatear_moneda
 
-    valores = {panel.tabla.item(f, 2).text(): panel.tabla.item(f, 5).text() for f in range(panel.tabla.rowCount())}
+    valores = {panel.tabla.item(f, 3).text(): panel.tabla.item(f, 6).text() for f in range(panel.tabla.rowCount())}
     assert valores["17-08-2026"] == formatear_moneda(2000)
     assert valores["17-09-2026"] == ""
 
@@ -857,10 +872,12 @@ def test_tablas_de_abajo_muestran_tratamiento_nombre_apellido_y_columna_ancha(qt
     tabla_r = pantalla.panel_regulares.tabla
     assert tabla_r.item(0, 0).text() == "Lic. Virginia Gómez"
     assert tabla_r.columnWidth(0) >= 180
+    assert tabla_r.item(0, 3).text() == "9:00 a 10:00"
 
     tabla_a = pantalla.panel_aisladas.tabla
     assert tabla_a.item(0, 0).text() == "Lic. Virginia Gómez"
     assert tabla_a.columnWidth(0) >= 180
+    assert tabla_a.item(0, 4).text() == "9:00 a 10:00"
 
 
 def test_reubicacion_ofrece_horario_regular_y_registra_ausencia(qtbot, conn):
@@ -920,3 +937,75 @@ def test_reubicacion_sin_elegir_horario_no_crea_ausencia(qtbot, conn):
     panel._crear()
 
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 0
+
+
+def test_regulares_ya_no_tiene_casilla_de_excepcion(qtbot, conn):
+    """"Es excepción" se sacó del formulario de Regulares: lo que
+    pretendía cubrir ahora se maneja con "Es reubicación" en Aisladas."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    assert not hasattr(pantalla.panel_regulares, "casilla_excepcion")
+
+
+def test_dia_de_la_semana_en_tabla_de_aisladas(qtbot, conn):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-08-18", HoraInicio=9, HoraFin=10,
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    assert panel.tabla.horizontalHeaderItem(2).text() == "Día"
+    assert panel.tabla.item(0, 2).text() == "Martes"
+    assert panel.tabla.item(0, 3).text() == "18-08-2026"
+
+
+def test_modificar_reserva_aislada_cancela_la_vieja_y_precarga_el_formulario(qtbot, conn):
+    """Para corregir algo de una reserva aislada ya cargada (ej. le
+    encargaron una hora más de lo que habían pedido en un principio): se
+    cancela la fila vieja (queda su historial, no se borra ni se edita
+    in-place) y se precarga el formulario para dar de alta la versión
+    corregida."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_fecha.setDate(QDate(2026, 8, 18))
+    panel.spin_desde.setValue(9)
+    panel.spin_hasta.setValue(10)
+    panel._crear()
+
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+
+    fila = conn.execute("SELECT Estado FROM ReservaAislada").fetchone()
+    assert fila["Estado"] == "Cancelada"
+
+    assert panel.combo_profesional.currentData() == id_profesional
+    assert panel.combo_consultorio.currentData() == id_consultorio
+    assert panel.campo_fecha.date() == QDate(2026, 8, 18)
+    assert panel.spin_desde.value() == 9
+    assert panel.spin_hasta.value() == 10
+
+    panel.spin_hasta.setValue(11)  # el ajuste que pedían: una hora más
+    panel._crear()
+
+    vigentes = conn.execute("SELECT HoraInicio, HoraFin FROM ReservaAislada WHERE Estado = 'Confirmada'").fetchall()
+    assert len(vigentes) == 1
+    assert vigentes[0]["HoraFin"] == 11
+
+
+def test_modificar_reserva_aislada_sin_fila_avisa(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas._modificar_seleccionada()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 0
