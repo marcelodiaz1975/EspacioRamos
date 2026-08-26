@@ -115,6 +115,22 @@ def _texto_profesional(fila: sqlite3.Row) -> str:
     return f"{codigo} - {nombre}" if codigo else nombre
 
 
+def _texto_consultorio(consultorio: sqlite3.Row, mostrar_localidad: bool, mostrar_edificio: bool) -> str:
+    """"Ramos Mejía - Ramos 1 - 7mo 'L' - 1": Localidad y Edificio se
+    omiten cuando el conjunto que se está mostrando en la tabla tiene
+    uno solo (no hace falta aclarar lo que ya es igual en todas las
+    filas) — mismo criterio que usa GrillaOperativaWidget para sus
+    encabezados agrupados."""
+    partes = []
+    if mostrar_localidad:
+        partes.append(consultorio["DomicilioLocalidad"] or "(Sin localidad)")
+    if mostrar_edificio:
+        partes.append(consultorio["NombreEdificio"])
+    partes.append(consultorio["Departamento"])
+    partes.append(str(consultorio["NumeroConsultorio"]))
+    return " - ".join(partes)
+
+
 def _opciones_profesional(conn: sqlite3.Connection, categorias: tuple[str, ...]) -> list[tuple[int, str]]:
     placeholders = ", ".join("?" for _ in categorias)
     filas = conn.execute(
@@ -148,8 +164,20 @@ def _opciones_horario_regular(conn: sqlite3.Connection, id_profesional: int | No
     ]
 
 
-def _opciones_edificio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
-    filas = conn.execute("SELECT IdEdificio, Nombre FROM Edificio ORDER BY Nombre").fetchall()
+def _opciones_localidad(conn: sqlite3.Connection) -> list[tuple[str | None, str]]:
+    filas = conn.execute("SELECT DISTINCT DomicilioLocalidad FROM Edificio ORDER BY DomicilioLocalidad").fetchall()
+    return [(f["DomicilioLocalidad"], f["DomicilioLocalidad"] or "(Sin localidad)") for f in filas]
+
+
+def _opciones_edificio(conn: sqlite3.Connection, localidad: str | None) -> list[tuple[int, str]]:
+    if localidad is None:
+        filas = conn.execute(
+            "SELECT IdEdificio, Nombre FROM Edificio WHERE DomicilioLocalidad IS NULL ORDER BY Nombre"
+        ).fetchall()
+    else:
+        filas = conn.execute(
+            "SELECT IdEdificio, Nombre FROM Edificio WHERE DomicilioLocalidad = ? ORDER BY Nombre", (localidad,)
+        ).fetchall()
     return [(f["IdEdificio"], f["Nombre"]) for f in filas]
 
 
@@ -170,6 +198,15 @@ def _opciones_consultorio_de_unidad(conn: sqlite3.Connection, id_unidad: int | N
         (id_unidad,),
     ).fetchall()
     return [(f["IdConsultorio"], f"Consultorio {f['NumeroConsultorio']}") for f in filas]
+
+
+def _recargar_edificios(conn: sqlite3.Connection, combo_localidad: QComboBox, combo_edificio: QComboBox) -> None:
+    localidad = combo_localidad.currentData()
+    combo_edificio.blockSignals(True)
+    combo_edificio.clear()
+    for id_, nombre in _opciones_edificio(conn, localidad):
+        combo_edificio.addItem(nombre, id_)
+    combo_edificio.blockSignals(False)
 
 
 def _recargar_unidades(conn: sqlite3.Connection, combo_edificio: QComboBox, combo_unidad: QComboBox) -> None:
@@ -230,15 +267,18 @@ class _PanelReservasRegulares(QWidget):
         self.combo_profesional.addItem("Seleccionar profesional…", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_REGULARES):
             self.combo_profesional.addItem(etiqueta, id_)
-        if self.combo_profesional.count() > 1:
-            self.combo_profesional.setCurrentIndex(1)
-        self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
+        self.combo_profesional.currentIndexChanged.connect(self.actualizar)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
+        self.combo_localidad = QComboBox()
+        for valor, etiqueta in _opciones_localidad(self.conn):
+            self.combo_localidad.addItem(etiqueta, valor)
+        self.combo_localidad.currentIndexChanged.connect(self._cargar_edificios)
+        form.addWidget(QLabel("Localidad"))
+        form.addWidget(self.combo_localidad)
+
         self.combo_edificio = QComboBox()
-        for id_, nombre in _opciones_edificio(self.conn):
-            self.combo_edificio.addItem(nombre, id_)
         self.combo_edificio.currentIndexChanged.connect(self._cargar_unidades)
         form.addWidget(QLabel("Edificio"))
         form.addWidget(self.combo_edificio)
@@ -351,21 +391,54 @@ class _PanelReservasRegulares(QWidget):
 
         hoy = fecha_actual(self.conn)
         self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
-        self._cargar_unidades()
+        self._cargar_edificios()
 
     def actualizar(self) -> None:
-        self._reservas = obtener_repositorio(self.conn, "ReservaRegular").listar()
+        """Sin profesional elegido, muestra todas las reservas regulares
+        VIGENTES de todos los profesionales (no tiene sentido alargar la
+        lista con lo que ya terminó); con uno elegido, se acota a las de
+        ese profesional únicamente (incluida su historia, para poder
+        revisarla). Orden: código del profesional, día de la semana,
+        hora inicial, localidad, edificio, unidad y consultorio."""
+        id_profesional_filtro = self.combo_profesional.currentData()
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
-        self.tabla.setRowCount(len(self._reservas))
-        for fila_idx, r in enumerate(self._reservas):
+        todas = obtener_repositorio(self.conn, "ReservaRegular").listar()
+        if id_profesional_filtro is not None:
+            filtradas = [r for r in todas if r["IdProfesional"] == id_profesional_filtro]
+        else:
+            hoy = fecha_actual(self.conn).isoformat()
+            filtradas = [r for r in todas if not r["VigenciaFin"] or r["VigenciaFin"] >= hoy]
+
+        filas: list[tuple[sqlite3.Row, sqlite3.Row | None, sqlite3.Row | None]] = []
+        for r in filtradas:
             profesional = repo_profesional.obtener(r["IdProfesional"])
             consultorio = self.conn.execute(
-                "SELECT c.NumeroConsultorio, u.Departamento FROM Consultorio c "
-                "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE c.IdConsultorio = ?",
+                "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio, e.DomicilioLocalidad "
+                "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+                "WHERE c.IdConsultorio = ?",
                 (r["IdConsultorio"],),
             ).fetchone()
+            filas.append((r, profesional, consultorio))
+        filas.sort(key=lambda t: (
+            t[1]["IdCodigo"] or "" if t[1] else "",
+            DIAS_SEMANA.index(t[0]["DiaSemana"]),
+            t[0]["HoraInicio"],
+            (t[2]["DomicilioLocalidad"] or "") if t[2] else "",
+            (t[2]["NombreEdificio"] or "") if t[2] else "",
+            (t[2]["Departamento"] or "") if t[2] else "",
+            t[2]["NumeroConsultorio"] if t[2] else 0,
+        ))
+        self._reservas = [t[0] for t in filas]
+
+        mostrar_localidad = len({t[2]["DomicilioLocalidad"] for t in filas if t[2]}) > 1
+        mostrar_edificio = len({t[2]["NombreEdificio"] for t in filas if t[2]}) > 1
+
+        self.tabla.setRowCount(len(filas))
+        for fila_idx, (r, profesional, consultorio) in enumerate(filas):
             self.tabla.setItem(fila_idx, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            texto_consultorio = f"{consultorio['Departamento']} - {consultorio['NumeroConsultorio']}" if consultorio else "?"
+            texto_consultorio = (
+                _texto_consultorio(consultorio, mostrar_localidad, mostrar_edificio) if consultorio else "?"
+            )
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(texto_consultorio))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(r["DiaSemana"]))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
@@ -374,6 +447,10 @@ class _PanelReservasRegulares(QWidget):
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._sincronizar_grilla()
+
+    def _cargar_edificios(self) -> None:
+        _recargar_edificios(self.conn, self.combo_localidad, self.combo_edificio)
+        self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
         _recargar_unidades(self.conn, self.combo_edificio, self.combo_unidad)
@@ -385,11 +462,15 @@ class _PanelReservasRegulares(QWidget):
 
     def _seleccionar_ubicacion(self, id_consultorio: int) -> None:
         fila = self.conn.execute(
-            "SELECT u.IdEdificio, c.IdUnidad FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad "
+            "SELECT e.DomicilioLocalidad, u.IdEdificio, c.IdUnidad FROM Consultorio c "
+            "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
             "WHERE c.IdConsultorio = ?", (id_consultorio,),
         ).fetchone()
         if fila is None:
             return
+        indice_localidad = self.combo_localidad.findData(fila["DomicilioLocalidad"])
+        if indice_localidad >= 0:
+            self.combo_localidad.setCurrentIndex(indice_localidad)
         indice_edificio = self.combo_edificio.findData(fila["IdEdificio"])
         if indice_edificio >= 0:
             self.combo_edificio.setCurrentIndex(indice_edificio)
@@ -436,9 +517,9 @@ class _PanelReservasRegulares(QWidget):
         profesional (el combo vuelve al placeholder en blanco, no queda
         pegado al que se acababa de cargar)."""
         self.combo_profesional.setCurrentIndex(0)
-        if self.combo_edificio.count():
-            self.combo_edificio.setCurrentIndex(0)
-        self._cargar_unidades()
+        if self.combo_localidad.count():
+            self.combo_localidad.setCurrentIndex(0)
+        self._cargar_edificios()
         for dia, check in self._checks_dia.items():
             check.setChecked(dia == "Lunes")
         self.spin_desde.setValue(9)
@@ -603,15 +684,18 @@ class _PanelReservasAisladas(QWidget):
         self.combo_profesional.addItem("Seleccionar profesional…", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_AISLADAS):
             self.combo_profesional.addItem(etiqueta, id_)
-        if self.combo_profesional.count() > 1:
-            self.combo_profesional.setCurrentIndex(1)
-        self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
+        self.combo_profesional.currentIndexChanged.connect(self.actualizar)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
+        self.combo_localidad = QComboBox()
+        for valor, etiqueta in _opciones_localidad(self.conn):
+            self.combo_localidad.addItem(etiqueta, valor)
+        self.combo_localidad.currentIndexChanged.connect(self._cargar_edificios)
+        form.addWidget(QLabel("Localidad"))
+        form.addWidget(self.combo_localidad)
+
         self.combo_edificio = QComboBox()
-        for id_, nombre in _opciones_edificio(self.conn):
-            self.combo_edificio.addItem(nombre, id_)
         self.combo_edificio.currentIndexChanged.connect(self._cargar_unidades)
         form.addWidget(QLabel("Edificio"))
         form.addWidget(self.combo_edificio)
@@ -728,6 +812,10 @@ class _PanelReservasAisladas(QWidget):
         hoy = fecha_actual(self.conn)
         self.campo_fecha.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self.campo_fecha_ausencia.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self._cargar_edificios()
+
+    def _cargar_edificios(self) -> None:
+        _recargar_edificios(self.conn, self.combo_localidad, self.combo_edificio)
         self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
@@ -740,11 +828,15 @@ class _PanelReservasAisladas(QWidget):
 
     def _seleccionar_ubicacion(self, id_consultorio: int) -> None:
         fila = self.conn.execute(
-            "SELECT u.IdEdificio, c.IdUnidad FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad "
+            "SELECT e.DomicilioLocalidad, u.IdEdificio, c.IdUnidad FROM Consultorio c "
+            "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
             "WHERE c.IdConsultorio = ?", (id_consultorio,),
         ).fetchone()
         if fila is None:
             return
+        indice_localidad = self.combo_localidad.findData(fila["DomicilioLocalidad"])
+        if indice_localidad >= 0:
+            self.combo_localidad.setCurrentIndex(indice_localidad)
         indice_edificio = self.combo_edificio.findData(fila["IdEdificio"])
         if indice_edificio >= 0:
             self.combo_edificio.setCurrentIndex(indice_edificio)
@@ -808,9 +900,9 @@ class _PanelReservasAisladas(QWidget):
         deja el formulario listo y en blanco para cargar otro registro,
         aunque sea de otro profesional."""
         self.combo_profesional.setCurrentIndex(0)
-        if self.combo_edificio.count():
-            self.combo_edificio.setCurrentIndex(0)
-        self._cargar_unidades()
+        if self.combo_localidad.count():
+            self.combo_localidad.setCurrentIndex(0)
+        self._cargar_edificios()
         self.spin_desde.setValue(9)
         self.spin_hasta.setValue(10)
         hoy = fecha_actual(self.conn)
@@ -832,25 +924,51 @@ class _PanelReservasAisladas(QWidget):
         return formatear_moneda(monto)
 
     def actualizar(self) -> None:
-        self._reservas = sorted(
-            obtener_repositorio(self.conn, "ReservaAislada").listar(),
-            key=lambda r: (r["Fecha"], r["HoraInicio"]),
-        )
+        """Sin profesional elegido, muestra todas las reservas aisladas de
+        todos los profesionales; con uno elegido, se acota a las de ese
+        profesional únicamente (incluida su historia — canceladas
+        incluidas — para poder revisarla). Orden: código del profesional,
+        fecha y hora inicial."""
+        id_profesional_filtro = self.combo_profesional.currentData()
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
+        todas = obtener_repositorio(self.conn, "ReservaAislada").listar()
+        if id_profesional_filtro is not None:
+            filtradas = [r for r in todas if r["IdProfesional"] == id_profesional_filtro]
+        else:
+            filtradas = todas
+
         cfg = self.conn.execute(
             "SELECT RecargoPorcentajeAisladas FROM Configuracion WHERE IdConfiguracion = 1"
         ).fetchone()
         recargo_pct = cfg["RecargoPorcentajeAisladas"] if cfg else 0.0
-        self.tabla.setRowCount(len(self._reservas))
-        for fila_idx, r in enumerate(self._reservas):
+
+        filas: list[tuple[sqlite3.Row, sqlite3.Row | None, sqlite3.Row | None]] = []
+        for r in filtradas:
             profesional = repo_profesional.obtener(r["IdProfesional"])
             consultorio = self.conn.execute(
-                "SELECT c.NumeroConsultorio, c.ValorHoraAisladaActual, u.Departamento FROM Consultorio c "
-                "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE c.IdConsultorio = ?",
+                "SELECT c.NumeroConsultorio, c.ValorHoraAisladaActual, u.Departamento, "
+                "e.Nombre AS NombreEdificio, e.DomicilioLocalidad FROM Consultorio c "
+                "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+                "WHERE c.IdConsultorio = ?",
                 (r["IdConsultorio"],),
             ).fetchone()
+            filas.append((r, profesional, consultorio))
+        filas.sort(key=lambda t: (
+            t[1]["IdCodigo"] or "" if t[1] else "",
+            t[0]["Fecha"],
+            t[0]["HoraInicio"],
+        ))
+        self._reservas = [t[0] for t in filas]
+
+        mostrar_localidad = len({t[2]["DomicilioLocalidad"] for t in filas if t[2]}) > 1
+        mostrar_edificio = len({t[2]["NombreEdificio"] for t in filas if t[2]}) > 1
+
+        self.tabla.setRowCount(len(filas))
+        for fila_idx, (r, profesional, consultorio) in enumerate(filas):
             self.tabla.setItem(fila_idx, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            texto_consultorio = f"{consultorio['Departamento']} - {consultorio['NumeroConsultorio']}" if consultorio else "?"
+            texto_consultorio = (
+                _texto_consultorio(consultorio, mostrar_localidad, mostrar_edificio) if consultorio else "?"
+            )
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(texto_consultorio))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(fecha_a_dia_semana(date.fromisoformat(r["Fecha"]))))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(_fmt_fecha(r["Fecha"])))
