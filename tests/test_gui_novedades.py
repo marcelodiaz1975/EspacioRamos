@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
@@ -9,6 +10,10 @@ from app.negocio.dias import periodo_actual
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.negocio.reservas import crear_reserva_aislada
 from app.repositorio.registro import obtener_repositorio
+
+
+def _fecha(iso: str) -> QDate:
+    return QDate.fromString(iso, "yyyy-MM-dd")
 
 
 @pytest.fixture
@@ -51,8 +56,8 @@ def test_crear_vacacion_persiste(qtbot, conn):
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_vacaciones
-    panel.campo_desde.setText("2026-09-01")
-    panel.campo_hasta.setText("2026-09-07")
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 1
 
@@ -69,8 +74,8 @@ def test_crear_vacacion_regenera_liquidacion_enviada(qtbot, conn):
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_vacaciones
-    panel.campo_desde.setText("2026-09-01")
-    panel.campo_hasta.setText("2026-09-07")
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
     panel._crear()
 
     emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
@@ -85,8 +90,8 @@ def test_crear_licencia_sin_tipo_no_falla(qtbot, conn):
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_licencias
-    panel.campo_desde.setText("2026-09-01")
-    panel.campo_hasta.setText("2026-09-03")
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-03"))
     panel._crear()  # hay tipos de licencia sembrados por defecto
     assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
 
@@ -97,8 +102,8 @@ def test_crear_ausencia_persiste(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_ausencias
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setText("2026-09-01")
-    panel.campo_hasta.setText("2026-09-03")
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-03"))
     panel.combo_motivo.setEditText("Congreso")
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
@@ -112,8 +117,8 @@ def test_cancelar_vacacion_seleccionada_elimina(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_vacaciones
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setText("2026-09-07")
-    panel.campo_hasta.setText("2026-09-07")
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 1
 
@@ -135,8 +140,8 @@ def test_cancelar_vacacion_bloqueada_por_aislada_muestra_advertencia(qtbot, conn
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_vacaciones
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setText("2026-09-07")
-    panel.campo_hasta.setText("2026-09-07")
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
     panel._crear()
     crear_reserva_aislada(
         conn, id_profesional=otro_profesional, id_consultorio=id_consultorio,
@@ -158,8 +163,8 @@ def test_cancelar_licencia_seleccionada_elimina(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_licencias
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setText("2026-09-07")
-    panel.campo_hasta.setText("2026-09-07")
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
 
@@ -178,8 +183,8 @@ def test_cancelar_licencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_licencias
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setText("2026-09-07")
-    panel.campo_hasta.setText("2026-09-07")
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
     panel._crear()
     crear_reserva_aislada(
         conn, id_profesional=otro_profesional, id_consultorio=id_consultorio,
@@ -201,8 +206,8 @@ def test_cancelar_ausencia_seleccionada_elimina(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_ausencias
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setText("2026-09-07")
-    panel.campo_hasta.setText("2026-09-07")
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
     panel.combo_motivo.setEditText("Congreso")
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
@@ -210,6 +215,74 @@ def test_cancelar_ausencia_seleccionada_elimina(qtbot, conn):
     panel.tabla.selectRow(0)
     panel._cancelar()
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 0
+
+
+def test_modificar_ausencia_sin_seleccion_no_falla(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel._modificar_seleccionada()  # nada seleccionado -> no debe romper
+
+
+def test_modificar_ausencia_seleccionada_anula_y_precarga_formulario(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel.combo_motivo.setEditText("Congreso")
+    panel.grupo_horario.setChecked(True)
+    panel.spin_hora_desde.setValue(9)
+    panel.spin_hora_hasta.setValue(10)
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
+
+    # deselecciona el profesional para confirmar que la precarga lo vuelve a fijar
+    panel.combo_profesional.setCurrentIndex(0)
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 0  # anulada, no editada in-place
+    assert panel.combo_profesional.currentData() == id_profesional
+    assert panel.combo_motivo.currentText() == "Congreso"
+    assert panel.campo_desde.date() == _fecha("2026-09-07")
+    assert panel.campo_hasta.date() == _fecha("2026-09-07")
+    assert panel.grupo_horario.isChecked() is True
+    assert (panel.spin_hora_desde.value(), panel.spin_hora_hasta.value()) == (9, 10)
+
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
+
+
+def test_modificar_ausencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
+    conn.commit()
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel.combo_motivo.setEditText("Congreso")
+    panel._crear()
+    crear_reserva_aislada(
+        conn, id_profesional=otro_profesional, id_consultorio=id_consultorio,
+        fecha="2026-09-07", hora_inicio=9, hora_fin=10,
+    )
+    conn.commit()
+
+    avisos = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda self, titulo, texto: avisos.append(texto)))
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+    assert len(avisos) == 1
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
 
 
 def test_tabla_ausencias_muestra_origen_de_reubicacion(qtbot, conn):
@@ -231,8 +304,8 @@ def test_tabla_ausencias_muestra_origen_de_reubicacion(qtbot, conn):
     panel = pantalla.panel_ausencias
     assert panel.tabla.horizontalHeaderItem(5).text() == "Origen"
     origenes = {panel.tabla.item(f, 1).text(): panel.tabla.item(f, 5).text() for f in range(panel.tabla.rowCount())}
-    assert origenes["2026-08-17"] == "Reubicación (aislada del 2026-08-10)"
-    assert origenes["2026-09-01"] == ""
+    assert origenes["17-08-2026"] == "Reubicación (aislada del 2026-08-10)"
+    assert origenes["01-09-2026"] == ""
 
 
 def test_cancelar_ausencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn, monkeypatch):
@@ -245,8 +318,8 @@ def test_cancelar_ausencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_ausencias
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setText("2026-09-07")
-    panel.campo_hasta.setText("2026-09-07")
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
     panel.combo_motivo.setEditText("Congreso")
     panel._crear()
     crear_reserva_aislada(
@@ -355,12 +428,12 @@ def test_horario_puntual_se_habilita_solo_con_un_unico_dia(qtbot, conn):
     panel = pantalla.panel_ausencias
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
 
-    panel.campo_desde.setText("2026-09-01")
-    panel.campo_hasta.setText("2026-09-05")
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-05"))
     panel._actualizar_disponibilidad_horario()
     assert panel.grupo_horario.isEnabled() is False
 
-    panel.campo_hasta.setText("2026-09-01")
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
     panel._actualizar_disponibilidad_horario()
     assert panel.grupo_horario.isEnabled() is True
 
@@ -371,8 +444,8 @@ def test_crear_ausencia_con_horario_puntual_persiste_y_se_ve_en_la_tabla(qtbot, 
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_ausencias
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setText("2026-09-01")
-    panel.campo_hasta.setText("2026-09-01")
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
     panel._actualizar_disponibilidad_horario()
     panel.grupo_horario.setChecked(True)
     panel.spin_hora_desde.setValue(9)
@@ -399,7 +472,7 @@ def test_tabla_ausencias_filtra_por_profesional_seleccionado(qtbot, conn):
 
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     assert panel.tabla.rowCount() == 1
-    assert panel.tabla.item(0, 1).text() == "2026-09-01"
+    assert panel.tabla.item(0, 1).text() == "01-09-2026"
 
 
 def test_panel_ausencias_grilla_resalta_verde_donde_hay_ausencia(qtbot, conn):

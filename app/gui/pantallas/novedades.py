@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import sqlite3
 
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QComboBox,
+    QDateEdit,
     QDoubleSpinBox,
     QFrame,
     QGroupBox,
@@ -31,14 +33,22 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
-from app.gui.pantallas.reservas import _SpinHorario, _fmt_horario, _opciones_profesional, _texto_profesional
+from app.gui.pantallas.reservas import (
+    _FECHA_SIN_DATO,
+    _FORMATO_FECHA,
+    _SpinHorario,
+    _fmt_fecha,
+    _fmt_horario,
+    _opciones_profesional,
+    _texto_profesional,
+)
 from app.gui.widgets.grilla_operativa import (
     GrillaOperativaWidget,
     pares_dia_unidad_con_reserva_vigente,
     unidades_con_reserva_vigente,
 )
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
-from app.negocio.dias import DIAS_SEMANA, periodo_actual
+from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
 from app.negocio.licencias import cancelar_licencia, crear_licencia
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
@@ -49,6 +59,27 @@ from app.repositorio.registro import obtener_repositorio
 _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
 _ANCHO_COMBO_PROFESIONAL = 220
 _ANCHO_COL_PROFESIONAL = 180
+
+
+def _campo_fecha(conn: sqlite3.Connection) -> QDateEdit:
+    """QDateEdit con el mismo formato "dd-mm-aaaa" que Reservas, precargado
+    con la fecha de hoy."""
+    campo = QDateEdit()
+    campo.setDisplayFormat(_FORMATO_FECHA)
+    campo.setCalendarPopup(True)
+    hoy = fecha_actual(conn)
+    campo.setDate(QDate(hoy.year, hoy.month, hoy.day))
+    return campo
+
+
+def _campo_fecha_opcional(conn: sqlite3.Connection) -> QDateEdit:
+    """Como `_campo_fecha`, pero admite quedar en blanco ("(sin fecha)") —
+    mismo sentinel `_FECHA_SIN_DATO` que usa Reservas para Vigencia hasta."""
+    campo = _campo_fecha(conn)
+    campo.setMinimumDate(_FECHA_SIN_DATO)
+    campo.setSpecialValueText("(sin fecha)")
+    campo.setDate(_FECHA_SIN_DATO)
+    return campo
 
 
 def _combo_profesionales(conn: sqlite3.Connection) -> QComboBox:
@@ -119,12 +150,10 @@ class _PanelVacaciones(QWidget):
         self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
-        self.campo_desde = QLineEdit()
-        self.campo_desde.setPlaceholderText("AAAA-MM-DD")
+        self.campo_desde = _campo_fecha(self.conn)
         form.addWidget(QLabel("Desde"))
         form.addWidget(self.campo_desde)
-        self.campo_hasta = QLineEdit()
-        self.campo_hasta.setPlaceholderText("AAAA-MM-DD")
+        self.campo_hasta = _campo_fecha(self.conn)
         form.addWidget(QLabel("Hasta"))
         form.addWidget(self.campo_hasta)
         boton = QPushButton("Crear vacación")
@@ -172,8 +201,8 @@ class _PanelVacaciones(QWidget):
         self.tabla.setRowCount(len(self._registros))
         for i, r in enumerate(self._registros):
             self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache, r["IdProfesional"])))
-            self.tabla.setItem(i, 1, QTableWidgetItem(r["FechaDesde"]))
-            self.tabla.setItem(i, 2, QTableWidgetItem(r["FechaHasta"]))
+            self.tabla.setItem(i, 1, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
+            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
             valor = r["ValorBonificado"]
             self.tabla.setItem(i, 3, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
             cupo = r["CupoRestantePorcentaje"]
@@ -186,7 +215,8 @@ class _PanelVacaciones(QWidget):
         try:
             _id, advertencias = crear_vacacion(
                 self.conn, id_profesional=id_profesional,
-                fecha_desde=self.campo_desde.text().strip(), fecha_hasta=self.campo_hasta.text().strip(),
+                fecha_desde=self.campo_desde.date().toPython().isoformat(),
+                fecha_hasta=self.campo_hasta.date().toPython().isoformat(),
             )
         except ValueError as error:
             QMessageBox.warning(self, "Crear vacación", str(error))
@@ -249,13 +279,11 @@ class _PanelLicencias(QWidget):
         form.addWidget(self.spin_porcentaje)
         self._precargar_porcentaje()
 
-        self.campo_desde = QLineEdit()
-        self.campo_desde.setPlaceholderText("AAAA-MM-DD")
+        self.campo_desde = _campo_fecha(self.conn)
         form.addWidget(QLabel("Desde"))
         form.addWidget(self.campo_desde)
-        self.campo_hasta = QLineEdit()
-        self.campo_hasta.setPlaceholderText("AAAA-MM-DD (vacío si el tipo la calcula sola)")
-        form.addWidget(QLabel("Hasta"))
+        self.campo_hasta = _campo_fecha_opcional(self.conn)
+        form.addWidget(QLabel("Hasta (vacío si el tipo la calcula sola)"))
         form.addWidget(self.campo_hasta)
         boton = QPushButton("Crear licencia")
         boton.setObjectName("botonPrimario")
@@ -307,8 +335,8 @@ class _PanelLicencias(QWidget):
             self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache_prof, r["IdProfesional"])))
             tipo = cache_tipo.get(r["IdTipoLicencia"])
             self.tabla.setItem(i, 1, QTableWidgetItem(tipo["Nombre"] if tipo else "?"))
-            self.tabla.setItem(i, 2, QTableWidgetItem(r["FechaDesde"]))
-            self.tabla.setItem(i, 3, QTableWidgetItem(r["FechaHasta"]))
+            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
+            self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
             valor = r["ValorBonificado"]
             self.tabla.setItem(i, 4, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
         self.tabla.resizeColumnsToContents()
@@ -322,7 +350,11 @@ class _PanelLicencias(QWidget):
         try:
             _id, advertencias = crear_licencia(
                 self.conn, id_profesional=self.combo_profesional.currentData(), id_tipo_licencia=id_tipo,
-                fecha_desde=self.campo_desde.text().strip(), fecha_hasta=self.campo_hasta.text().strip() or None,
+                fecha_desde=self.campo_desde.date().toPython().isoformat(),
+                fecha_hasta=(
+                    None if self.campo_hasta.date() == _FECHA_SIN_DATO
+                    else self.campo_hasta.date().toPython().isoformat()
+                ),
                 porcentaje_bonificacion=self.spin_porcentaje.value(),
             )
         except ValueError as error:
@@ -389,21 +421,18 @@ class _PanelAusencias(QWidget):
         form.addWidget(QLabel("Motivo"))
         form.addWidget(self.combo_motivo)
 
-        self.campo_desde = QLineEdit()
-        self.campo_desde.setPlaceholderText("AAAA-MM-DD")
-        self.campo_desde.editingFinished.connect(self._actualizar_disponibilidad_horario)
+        self.campo_desde = _campo_fecha(self.conn)
+        self.campo_desde.dateChanged.connect(self._actualizar_disponibilidad_horario)
         form.addWidget(QLabel("Desde"))
         form.addWidget(self.campo_desde)
-        self.campo_hasta = QLineEdit()
-        self.campo_hasta.setPlaceholderText("AAAA-MM-DD")
-        self.campo_hasta.editingFinished.connect(self._actualizar_disponibilidad_horario)
+        self.campo_hasta = _campo_fecha(self.conn)
+        self.campo_hasta.dateChanged.connect(self._actualizar_disponibilidad_horario)
         form.addWidget(QLabel("Hasta"))
         form.addWidget(self.campo_hasta)
 
         self.grupo_horario = QGroupBox("Horario puntual (solo si la ausencia es de un único día)")
         self.grupo_horario.setCheckable(True)
         self.grupo_horario.setChecked(False)
-        self.grupo_horario.setEnabled(False)
         fila_horario = QHBoxLayout(self.grupo_horario)
         self.spin_hora_desde = _SpinHorario()
         self.spin_hora_desde.setRange(0, 23)
@@ -416,14 +445,12 @@ class _PanelAusencias(QWidget):
         fila_horario.addWidget(QLabel("Hasta"))
         fila_horario.addWidget(self.spin_hora_hasta)
         form.addWidget(self.grupo_horario)
+        self._actualizar_disponibilidad_horario()
 
         boton = QPushButton("Crear ausencia")
         boton.setObjectName("botonPrimario")
         boton.clicked.connect(self._crear)
         form.addWidget(boton)
-        boton_cancelar = QPushButton("Anular ausencia seleccionada")
-        boton_cancelar.clicked.connect(self._cancelar)
-        form.addWidget(boton_cancelar)
         form.addStretch()
         splitter_superior.addWidget(panel_form)
 
@@ -447,6 +474,16 @@ class _PanelAusencias(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         layout_tabla.addWidget(self.tabla, stretch=1)
+
+        fila_acciones = QHBoxLayout()
+        boton_modificar = QPushButton("Modificar ausencia seleccionada")
+        boton_modificar.clicked.connect(self._modificar_seleccionada)
+        fila_acciones.addWidget(boton_modificar)
+        boton_cancelar = QPushButton("Anular ausencia seleccionada")
+        boton_cancelar.clicked.connect(self._cancelar)
+        fila_acciones.addWidget(boton_cancelar)
+        fila_acciones.addStretch()
+        layout_tabla.addLayout(fila_acciones)
         layout.addWidget(panel_tabla, stretch=1)
 
         scroll.setWidget(contenido)
@@ -461,7 +498,7 @@ class _PanelAusencias(QWidget):
         """El horario puntual solo tiene sentido para una ausencia de un
         único día — se habilita apenas Desde y Hasta coinciden, y se
         vuelve a deshabilitar (destildando) apenas dejan de coincidir."""
-        un_solo_dia = bool(self.campo_desde.text().strip()) and self.campo_desde.text().strip() == self.campo_hasta.text().strip()
+        un_solo_dia = self.campo_desde.date() == self.campo_hasta.date()
         self.grupo_horario.setEnabled(un_solo_dia)
         if not un_solo_dia:
             self.grupo_horario.setChecked(False)
@@ -513,8 +550,8 @@ class _PanelAusencias(QWidget):
         self.tabla.setRowCount(len(filas))
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            self.tabla.setItem(i, 1, QTableWidgetItem(r["FechaDesde"]))
-            self.tabla.setItem(i, 2, QTableWidgetItem(r["FechaHasta"]))
+            self.tabla.setItem(i, 1, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
+            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
             self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_horario_ausencia(r)))
             self.tabla.setItem(i, 4, QTableWidgetItem(r["Motivo"] or ""))
             self.tabla.setItem(i, 5, QTableWidgetItem(self._origen(r)))
@@ -530,7 +567,8 @@ class _PanelAusencias(QWidget):
         try:
             crear_ausencia(
                 self.conn, id_profesional=self.combo_profesional.currentData(),
-                fecha_desde=self.campo_desde.text().strip(), fecha_hasta=self.campo_hasta.text().strip(),
+                fecha_desde=self.campo_desde.date().toPython().isoformat(),
+                fecha_hasta=self.campo_hasta.date().toPython().isoformat(),
                 motivo=self.combo_motivo.currentText().strip() or None,
                 hora_inicio=hora_inicio, hora_fin=hora_fin,
             )
@@ -540,18 +578,55 @@ class _PanelAusencias(QWidget):
         self.conn.commit()
         self.actualizar()
 
-    def _cancelar(self) -> None:
+    def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            return
-        registro = self._registros[filas[0].row()]
+            return None
+        return self._registros[filas[0].row()]
+
+    def _cancelar_registro(self, registro: sqlite3.Row, titulo: str) -> bool:
         try:
             cancelar_ausencia(self.conn, registro["IdAusencia"])
         except ValueError as error:
-            QMessageBox.warning(self, "Anular ausencia", str(error))
-            return
+            QMessageBox.warning(self, titulo, str(error))
+            return False
         self.conn.commit()
         self.actualizar()
+        return True
+
+    def _cancelar(self) -> None:
+        registro = self._fila_seleccionada()
+        if registro is None:
+            return
+        self._cancelar_registro(registro, "Anular ausencia")
+
+    def _modificar_seleccionada(self) -> None:
+        """Mismo criterio que Reservas aisladas: no se edita la fila
+        histórica in-place — se anula la ausencia seleccionada (bloquea
+        si ya hay una aislada de otro profesional asignada aprovechando
+        el consultorio liberado) y se precarga el formulario con sus
+        datos para dar de alta la versión corregida. El operador ajusta
+        lo que haga falta y confirma con "Crear ausencia", como
+        cualquier alta."""
+        registro = self._fila_seleccionada()
+        if registro is None:
+            QMessageBox.warning(self, "Modificar ausencia", "Elegí una fila de la tabla para modificar.")
+            return
+        if not self._cancelar_registro(registro, "Modificar ausencia"):
+            return
+
+        indice_profesional = self.combo_profesional.findData(registro["IdProfesional"])
+        if indice_profesional >= 0:
+            self.combo_profesional.setCurrentIndex(indice_profesional)
+        self.combo_motivo.setCurrentText(registro["Motivo"] or "")
+        self.campo_desde.setDate(QDate.fromString(registro["FechaDesde"], "yyyy-MM-dd"))
+        self.campo_hasta.setDate(QDate.fromString(registro["FechaHasta"], "yyyy-MM-dd"))
+        tiene_horario = registro["HoraInicio"] is not None and registro["HoraFin"] is not None
+        self.grupo_horario.setChecked(tiene_horario)
+        if tiene_horario:
+            self.spin_hora_desde.setValue(registro["HoraInicio"])
+            self.spin_hora_hasta.setValue(registro["HoraFin"])
+        self._sincronizar_grilla()
 
 
 class _PanelCargosEspeciales(QWidget):
