@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QDate
+from PySide6.QtGui import QGuiApplication, QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDateEdit,
     QDoubleSpinBox,
     QFrame,
     QGroupBox,
@@ -34,7 +36,7 @@ from app.gui.widgets.grilla_operativa import (
     unidades_con_reserva,
     unidades_con_reserva_vigente,
 )
-from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
+from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.lista_espera import marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
@@ -49,24 +51,55 @@ from app.negocio.reservas import (
 from app.repositorio.registro import obtener_repositorio
 
 _DIAS_RESERVA = DIAS_SEMANA[:6]
+_ANCHO_COMBO_PROFESIONAL = 220
 
 
 def _fmt_horas(horas: float) -> str:
     return str(int(horas)) if horas == int(horas) else f"{horas:.1f}"
 
 
+class _SpinHorario(QDoubleSpinBox):
+    """QDoubleSpinBox que se muestra como horario ("9:00", "14:30") en vez
+    del decimal ("9,00", "14,5") que arrastra el separador de la
+    configuración regional — internamente sigue siendo el mismo float en
+    horas que espera `app.negocio.reservas` (9.0, 14.5, ...)."""
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802 (nombre impuesto por Qt)
+        horas = int(value)
+        minutos = round((value - horas) * 60)
+        return f"{horas}:{minutos:02d}"
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        texto = text.strip()
+        if ":" in texto:
+            horas_str, minutos_str = texto.split(":", 1)
+            return int(horas_str or 0) + int(minutos_str or 0) / 60
+        return float(texto.replace(",", ".") or 0)
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        return (QValidator.State.Acceptable, text, pos)
+
+
 _CATEGORIAS_REGULARES = ("R", "B", "E")
 _CATEGORIAS_AISLADAS = ("R", "A")
+
+
+def _texto_profesional(fila: sqlite3.Row) -> str:
+    """Mismo criterio que `_nombre_con_codigo` de grilla_operativa.py (sin
+    el código): "Lic. Virginia Lo Veci", con Tratamiento y NombrePila
+    opcionales si el profesional no los tiene cargados."""
+    partes = [p for p in (fila["Tratamiento"], fila["NombrePila"], fila["Apellido"]) if p]
+    return " ".join(partes) if partes else fila["Apellido"]
 
 
 def _opciones_profesional(conn: sqlite3.Connection, categorias: tuple[str, ...]) -> list[tuple[int, str]]:
     placeholders = ", ".join("?" for _ in categorias)
     filas = conn.execute(
-        f"SELECT IdProfesional, Apellido, NombrePila FROM Profesional "
+        f"SELECT IdProfesional, Tratamiento, Apellido, NombrePila FROM Profesional "
         f"WHERE CategoriaProfesional IN ({placeholders}) ORDER BY Apellido",
         categorias,
     ).fetchall()
-    return [(f["IdProfesional"], f"{f['Apellido']}, {f['NombrePila'] or ''}".strip(", ")) for f in filas]
+    return [(f["IdProfesional"], _texto_profesional(f)) for f in filas]
 
 
 def _opciones_edificio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
@@ -147,6 +180,7 @@ class _PanelReservasRegulares(QWidget):
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
+        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Seleccionar profesional…", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_REGULARES):
             self.combo_profesional.addItem(etiqueta, id_)
@@ -186,10 +220,10 @@ class _PanelReservasRegulares(QWidget):
         form.addWidget(contenedor_dias)
 
         fila_horario = QHBoxLayout()
-        self.spin_desde = QDoubleSpinBox()
+        self.spin_desde = _SpinHorario()
         self.spin_desde.setRange(0, 23)
         self.spin_desde.setValue(9)
-        self.spin_hasta = QDoubleSpinBox()
+        self.spin_hasta = _SpinHorario()
         self.spin_hasta.setRange(1, 24)
         self.spin_hasta.setValue(10)
         fila_horario.addWidget(QLabel("Desde"))
@@ -502,6 +536,7 @@ class _PanelReservasAisladas(QWidget):
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
+        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Seleccionar profesional…", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_AISLADAS):
             self.combo_profesional.addItem(etiqueta, id_)
@@ -528,17 +563,21 @@ class _PanelReservasAisladas(QWidget):
         form.addWidget(QLabel("Consultorio"))
         form.addWidget(self.combo_consultorio)
 
-        self.campo_fecha = QLineEdit()
-        self.campo_fecha.setPlaceholderText("AAAA-MM-DD")
+        self.campo_fecha = QDateEdit()
+        self.campo_fecha.setDisplayFormat("dd-MM-yyyy")
+        self.campo_fecha.setCalendarPopup(True)
+        self.campo_fecha.dateChanged.connect(self._actualizar_etiqueta_fecha)
         form.addWidget(QLabel("Fecha"))
         form.addWidget(self.campo_fecha)
+        self.etiqueta_fecha = QLabel()
+        form.addWidget(self.etiqueta_fecha)
 
         fila_horario = QHBoxLayout()
-        self.spin_desde = QDoubleSpinBox()
+        self.spin_desde = _SpinHorario()
         self.spin_desde.setRange(0, 23)
         self.spin_desde.setSingleStep(0.5)
         self.spin_desde.setValue(9)
-        self.spin_hasta = QDoubleSpinBox()
+        self.spin_hasta = _SpinHorario()
         self.spin_hasta.setRange(0.5, 24)
         self.spin_hasta.setSingleStep(0.5)
         self.spin_hasta.setValue(10)
@@ -566,13 +605,13 @@ class _PanelReservasAisladas(QWidget):
 
         form.addWidget(QLabel("Datos complementarios del profesional"))
         self.etiqueta_horas_semanales = QLabel()
+        self.etiqueta_horas_aisladas = QLabel()
         self.etiqueta_descuento = QLabel()
         self.etiqueta_vacaciones = QLabel()
-        self.etiqueta_horas_aisladas = QLabel()
         form.addWidget(self.etiqueta_horas_semanales)
+        form.addWidget(self.etiqueta_horas_aisladas)
         form.addWidget(self.etiqueta_descuento)
         form.addWidget(self.etiqueta_vacaciones)
-        form.addWidget(self.etiqueta_horas_aisladas)
 
         form.addStretch()
         splitter_superior.addWidget(panel_form)
@@ -606,7 +645,9 @@ class _PanelReservasAisladas(QWidget):
         layout_tabla.addLayout(fila_acciones)
         layout.addWidget(panel_tabla, stretch=1)
 
-        self.campo_fecha.setText(fecha_actual(self.conn).isoformat())
+        hoy = fecha_actual(self.conn)
+        self.campo_fecha.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self._actualizar_etiqueta_fecha()
         self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
@@ -653,14 +694,18 @@ class _PanelReservasAisladas(QWidget):
         resumen = calcular_resumen_profesional(self.conn, id_profesional)
         if resumen is None:
             self.etiqueta_horas_semanales.setText("Horas regulares semanales: —")
+            self.etiqueta_horas_aisladas.setText("Horas aisladas mensuales: —")
             self.etiqueta_descuento.setText("% Descuento: —")
             self.etiqueta_vacaciones.setText("% Vacaciones disponible: —")
-            self.etiqueta_horas_aisladas.setText("Horas aisladas mensuales: —")
             return
         self.etiqueta_horas_semanales.setText(f"Horas regulares semanales: {_fmt_horas(resumen.horas_semanales)}")
+        self.etiqueta_horas_aisladas.setText(f"Horas aisladas mensuales: {_fmt_horas(resumen.horas_aisladas_mensuales)}")
         self.etiqueta_descuento.setText(f"% Descuento: {resumen.porcentaje_descuento:.1f}%")
         self.etiqueta_vacaciones.setText(f"% Vacaciones disponible: {resumen.porcentaje_vacaciones_disponible:.1f}%")
-        self.etiqueta_horas_aisladas.setText(f"Horas aisladas mensuales: {_fmt_horas(resumen.horas_aisladas_mensuales)}")
+
+    def _actualizar_etiqueta_fecha(self) -> None:
+        fecha = self.campo_fecha.date().toPython()
+        self.etiqueta_fecha.setText(f"{fecha_a_dia_semana(fecha)} {fecha.strftime('%d-%m-%Y')}")
 
     def _resetear_formulario(self) -> None:
         """Igual que en Reservas regulares: después de aplicar un cambio,
@@ -672,7 +717,8 @@ class _PanelReservasAisladas(QWidget):
         self._cargar_unidades()
         self.spin_desde.setValue(9)
         self.spin_hasta.setValue(10)
-        self.campo_fecha.setText(fecha_actual(self.conn).isoformat())
+        hoy = fecha_actual(self.conn)
+        self.campo_fecha.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self.casilla_recargo.setChecked(False)
         self.casilla_reubicacion.setChecked(False)
 
@@ -724,7 +770,7 @@ class _PanelReservasAisladas(QWidget):
         if id_profesional is None:
             QMessageBox.warning(self, "Crear reserva aislada", "Elegí un profesional.")
             return
-        fecha = self.campo_fecha.text().strip() or fecha_actual(self.conn).isoformat()
+        fecha = self.campo_fecha.date().toPython().isoformat()
         if not forzar and not confirmar_si_fecha_es_mes_anterior(self, self.conn, fecha):
             return
         datos = dict(

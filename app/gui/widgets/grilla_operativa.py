@@ -555,6 +555,7 @@ class GrillaOperativaWidget(QWidget):
         if not ids_unidad or not dias or desde > hasta:
             self.tabla.setRowCount(0)
             self.tabla.setColumnCount(0)
+            self.tabla.setMinimumHeight(0)
             self._resultado = {}
             return
 
@@ -562,6 +563,7 @@ class GrillaOperativaWidget(QWidget):
         if not columnas:
             self.tabla.setRowCount(0)
             self.tabla.setColumnCount(0)
+            self.tabla.setMinimumHeight(0)
             self._resultado = {}
             return
 
@@ -692,6 +694,14 @@ class GrillaOperativaWidget(QWidget):
                     bordes_dato.add("bottom")
                 widget = _CeldaGrilla(celda, clave, self._mostrar_detalle, bordes=frozenset(bordes_dato))
                 self.tabla.setCellWidget(fila, col, widget)
+
+        # Alto mínimo = suma exacta de las filas que se acaban de armar, para
+        # que la grilla se vea siempre entera (sin scrollbar interno) y sea
+        # el contenedor que la embebe (splitter/quien la use) el que crezca
+        # para darle lugar, en vez de recortarla a un alto fijo arbitrario.
+        alto_filas_encabezado = sum(self.tabla.rowHeight(f) for f in range(filas_encabezado))
+        alto_filas_datos = sum(self.tabla.rowHeight(f) for f in range(filas_encabezado, n_filas))
+        self.tabla.setMinimumHeight(alto_filas_encabezado + alto_filas_datos + 4)
 
     def _limites_dia(self, columnas: list[dict]) -> set[int]:
         return {i for i in range(len(columnas)) if i == len(columnas) - 1 or columnas[i]["dia"] != columnas[i + 1]["dia"]}

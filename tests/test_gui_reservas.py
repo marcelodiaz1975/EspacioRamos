@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
@@ -344,7 +345,7 @@ def test_crear_reserva_aislada_fecha_mes_anterior_pide_confirmacion(qtbot, conn,
     )
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    pantalla.panel_aisladas.campo_fecha.setText("2026-07-20")
+    pantalla.panel_aisladas.campo_fecha.setDate(QDate(2026, 7, 20))
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
     pantalla.panel_aisladas._crear()
@@ -587,7 +588,7 @@ def test_panel_aisladas_grilla_preview_pinta_azul_al_profesional_elegido(qtbot, 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
-    panel.campo_fecha.setText("2026-08-17")
+    panel.campo_fecha.setDate(QDate(2026, 8, 17))
     panel._crear()  # reserva aislada 9-10 ese día
 
     panel.combo_profesional.setCurrentIndex(
@@ -616,7 +617,7 @@ def test_panel_aisladas_grilla_preview_se_refresca_al_crear_una_reserva(qtbot, c
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
-    panel.campo_fecha.setText("2026-08-17")
+    panel.campo_fecha.setDate(QDate(2026, 8, 17))
 
     # antes de la primera reserva del profesional, la vista previa está vacía
     assert panel.grilla.ids_unidad_seleccionadas() == []
@@ -637,30 +638,45 @@ def test_panel_aisladas_grilla_preview_se_refresca_al_crear_una_reserva(qtbot, c
 
 def test_combo_profesional_regulares_solo_categorias_r_b_e(qtbot, conn):
     _preparar(conn)
-    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bono")
-    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="E", Apellido="Equipo")
+    id_gomez = conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = 'Gómez'").fetchone()["IdProfesional"]
+    id_bono = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bono")
+    id_equipo = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="E", Apellido="Equipo")
     obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Ajeno")
     conn.commit()
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     combo = pantalla.panel_regulares.combo_profesional
-    apellidos = {combo.itemText(i).split(",")[0] for i in range(combo.count()) if combo.itemData(i) is not None}
-    assert apellidos == {"Gómez", "Bono", "Equipo"}
+    ids = {combo.itemData(i) for i in range(combo.count()) if combo.itemData(i) is not None}
+    assert ids == {id_gomez, id_bono, id_equipo}
 
 
 def test_combo_profesional_aisladas_solo_categorias_r_a(qtbot, conn):
     _preparar(conn)
+    id_gomez = conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = 'Gómez'").fetchone()["IdProfesional"]
     obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bono")
     obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="E", Apellido="Equipo")
-    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Ajeno")
+    id_ajeno = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Ajeno")
     conn.commit()
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     combo = pantalla.panel_aisladas.combo_profesional
-    apellidos = {combo.itemText(i).split(",")[0] for i in range(combo.count()) if combo.itemData(i) is not None}
-    assert apellidos == {"Gómez", "Ajeno"}
+    ids = {combo.itemData(i) for i in range(combo.count()) if combo.itemData(i) is not None}
+    assert ids == {id_gomez, id_ajeno}
+
+
+def test_combo_profesional_muestra_tratamiento_nombre_apellido(qtbot, conn):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, Tratamiento="Lic.", NombrePila="Virginia")
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    combo = pantalla.panel_regulares.combo_profesional
+    indice = combo.findData(id_profesional)
+    assert combo.itemText(indice) == "Lic. Virginia Gómez"
 
 
 def test_filtros_edificio_unidad_acotan_el_combo_consultorio(qtbot, conn):
@@ -690,7 +706,7 @@ def test_spin_horario_aisladas_permite_medias_horas(qtbot, conn):
     assert panel.spin_desde.singleStep() == 0.5
     assert panel.spin_hasta.singleStep() == 0.5
     panel.spin_desde.setValue(9.5)
-    panel.campo_fecha.setText("2026-08-17")
+    panel.campo_fecha.setDate(QDate(2026, 8, 17))
     panel.spin_hasta.setValue(10.5)
     panel._crear()
     fila = conn.execute("SELECT HoraInicio, HoraFin FROM ReservaAislada").fetchone()
@@ -760,3 +776,52 @@ def test_datos_complementarios_aisladas_incluye_horas_aisladas_mensuales(qtbot, 
     panel = pantalla.panel_aisladas
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     assert panel.etiqueta_horas_aisladas.text() == "Horas aisladas mensuales: 2"
+
+
+def test_spin_horario_se_muestra_como_reloj(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+
+    panel_r = pantalla.panel_regulares
+    panel_r.spin_desde.setValue(9)
+    assert panel_r.spin_desde.textFromValue(9) == "9:00"
+
+    panel_a = pantalla.panel_aisladas
+    panel_a.spin_desde.setValue(14.5)
+    assert panel_a.spin_desde.textFromValue(14.5) == "14:30"
+    assert panel_a.spin_desde.valueFromText("14:30") == 14.5
+
+
+def test_campo_fecha_aisladas_muestra_dia_de_semana(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+
+    panel.campo_fecha.setDate(QDate(2026, 8, 12))  # miércoles
+    assert panel.etiqueta_fecha.text() == "Miércoles 12-08-2026"
+
+
+def test_grilla_preview_no_tiene_scroll_interno_al_elegir_profesional(qtbot, conn):
+    """Hallazgo: la grilla se veía cortada con scrollbar interno al elegir
+    profesional. El alto mínimo de la tabla, calculado con la suma exacta
+    de sus filas, tiene que alcanzar para mostrarla entera."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    tabla = panel.grilla.tabla
+    assert tabla.rowCount() > 0
+    alto_filas = sum(tabla.rowHeight(f) for f in range(tabla.rowCount()))
+    assert tabla.minimumHeight() >= alto_filas
