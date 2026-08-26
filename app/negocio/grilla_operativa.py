@@ -182,12 +182,58 @@ def _aisladas_en_rango(
     return resultado
 
 
+def claves_con_ausencia(
+    conn: sqlite3.Connection, id_profesional: int, ids_consultorio: list[int], dias: list[str],
+    hora_ini: int, hora_fin: int, fecha_desde: str, fecha_hasta: str,
+) -> set[tuple[int, str, int]]:
+    """{(IdConsultorio, dia, hora)} donde el profesional tiene una
+    ausencia registrada dentro de [fecha_desde, fecha_hasta], recortado a
+    lo que todavía no pasó (>= hoy) igual que el resto de la grilla.
+    Respeta el horario puntual de la ausencia (HoraInicio/HoraFin) cuando
+    está presente; si no, cubre todas las horas del rango consultado.
+    Pensado para pasarse como `ausente_en` a `calcular_grilla_operativa`."""
+    hoy = fecha_actual(conn)
+    fecha_desde_rango = date.fromisoformat(fecha_desde)
+    fecha_hasta_rango = date.fromisoformat(fecha_hasta)
+    dias_validos = [d for d in DIAS_SEMANA if d in dias]
+
+    claves: set[tuple[int, str, int]] = set()
+    for a in conn.execute("SELECT * FROM Ausencia WHERE IdProfesional = ?", (id_profesional,)).fetchall():
+        desde = max(date.fromisoformat(a["FechaDesde"]), hoy, fecha_desde_rango)
+        hasta = min(date.fromisoformat(a["FechaHasta"]), fecha_hasta_rango)
+        if desde > hasta:
+            continue
+        if a["HoraInicio"] is not None and a["HoraFin"] is not None:
+            horas = [h for h in range(int(hora_ini), int(hora_fin)) if a["HoraInicio"] <= h < a["HoraFin"]]
+        else:
+            horas = list(range(int(hora_ini), int(hora_fin)))
+        if not horas:
+            continue
+        consultorios = [a["IdConsultorio"]] if a["IdConsultorio"] is not None else ids_consultorio
+        cursor = desde
+        while cursor <= hasta:
+            dia = fecha_a_dia_semana(cursor)
+            if dia in dias_validos:
+                for id_consultorio in consultorios:
+                    for hora in horas:
+                        claves.add((id_consultorio, dia, hora))
+            cursor += timedelta(days=1)
+    return claves
+
+
 def calcular_grilla_operativa(
     conn: sqlite3.Connection, ids_consultorio: list[int], dias: list[str], hora_ini: int, hora_fin: int,
     fecha_desde: str, fecha_hasta: str, modo: ModoGrillaOperativa = "regular", id_profesional_filtro: int | None = None,
+    ausente_en: set[tuple[int, str, int]] | None = None,
 ) -> dict[tuple[int, str, int], CeldaGrillaOperativa]:
     """Devuelve {(IdConsultorio, dia, hora): CeldaGrillaOperativa} para
-    toda la grilla filtrada, evaluada contra [fecha_desde, fecha_hasta]."""
+    toda la grilla filtrada, evaluada contra [fecha_desde, fecha_hasta].
+
+    `ausente_en`, si se pasa, es el conjunto de (IdConsultorio, dia, hora)
+    donde el profesional del filtro tiene una ausencia registrada — usado
+    por la pantalla de Ausencias para resaltar en verde con letra negra
+    los horarios que de otro modo se mostrarían en azul oscuro (el
+    horario propio del profesional filtrado)."""
     hoy = fecha_actual(conn)
     fecha_desde_rango = date.fromisoformat(fecha_desde)
     fecha_hasta_rango = date.fromisoformat(fecha_hasta)
@@ -211,10 +257,17 @@ def calcular_grilla_operativa(
             for hora in range(int(hora_ini), int(hora_fin)):
                 cubren = [r for r in candidatas if r["HoraInicio"] <= hora < r["HoraFin"]]
                 actual, entrante = _clasificar_regulares(cubren, hoy)
-                resultado[(id_consultorio, dia, hora)] = _resolver_celda(
+                celda = _resolver_celda(
                     conn, id_consultorio, dia, hora, hoy, fecha_desde_rango, fecha_hasta_rango,
                     actual, entrante, profesionales, modo, id_profesional_filtro,
                 )
+                clave = (id_consultorio, dia, hora)
+                if ausente_en and celda.color_aro == AZUL_OSCURO and clave in ausente_en:
+                    celda = CeldaGrillaOperativa(
+                        VERDE, VERDE, NEGRA, celda.codigo,
+                        f"{celda.detalle} Ausente en este horario.".strip(), celda.id_profesional_mostrado,
+                    )
+                resultado[clave] = celda
     return resultado
 
 

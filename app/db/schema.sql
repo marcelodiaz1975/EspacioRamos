@@ -269,7 +269,12 @@ CREATE TABLE IF NOT EXISTS Ausencia (
     -- Reservas > reubicación (F16): de qué reserva aislada surgió esta
     -- ausencia, para poder revisarlas vinculadas. NULL en las que se
     -- cargan directamente desde la pantalla de Ausencias.
-    IdReservaAislada INTEGER REFERENCES ReservaAislada(IdReservaAislada)
+    IdReservaAislada INTEGER REFERENCES ReservaAislada(IdReservaAislada),
+    -- Horario puntual opcional (solo tiene sentido cuando FechaDesde =
+    -- FechaHasta, un único día): ambos NULL significa "todo el día",
+    -- como siempre funcionó esta tabla.
+    HoraInicio REAL,
+    HoraFin REAL
 );
 
 -- 3.15 CargoEspecial ---------------------------------------------------------------------

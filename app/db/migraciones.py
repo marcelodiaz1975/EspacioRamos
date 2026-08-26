@@ -15,6 +15,8 @@ import sqlite3
 # (tabla, columna, definición SQL de la columna — tipo + constraints)
 _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Ausencia", "IdReservaAislada", "INTEGER REFERENCES ReservaAislada(IdReservaAislada)"),
+    ("Ausencia", "HoraInicio", "REAL"),
+    ("Ausencia", "HoraFin", "REAL"),
 ]
 
 

@@ -1,10 +1,12 @@
-"""Novedades por profesional (secciones 3.12-3.15): Vacaciones, Licencias,
-Ausencias y Cargos especiales en pestañas. Son registros históricos que
-alimentan el cálculo de la liquidación (Etapa 4) — el alta reusa siempre
-las funciones de negocio (crear_vacacion/crear_licencia/crear_ausencia/
-crear_cargo_especial) para no perderse los valores derivados (bonificado,
-cupo consumido, etc.) que esas funciones calculan; no se edita ni borra
-desde acá, son historial."""
+"""Registro de ausencias por profesional (secciones 3.12-3.14): Vacaciones,
+Licencias y Ausencias en pestañas — plazos por inactividad únicamente. Los
+Cargos especiales (sección 3.15) viven en su propia pantalla
+(`PantallaCargosEspeciales`, más abajo), porque no son un plazo de
+inactividad. Son registros históricos que alimentan el cálculo de la
+liquidación (Etapa 4) — el alta reusa siempre las funciones de negocio
+(crear_vacacion/crear_licencia/crear_ausencia/crear_cargo_especial) para no
+perderse los valores derivados (bonificado, cupo consumido, etc.) que esas
+funciones calculan; no se edita ni borra desde acá, son historial."""
 from __future__ import annotations
 
 import sqlite3
@@ -12,12 +14,14 @@ import sqlite3
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -27,15 +31,24 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
-from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, unidades_con_reserva_vigente
+from app.gui.pantallas.reservas import _SpinHorario, _fmt_horario, _opciones_profesional, _texto_profesional
+from app.gui.widgets.grilla_operativa import (
+    GrillaOperativaWidget,
+    pares_dia_unidad_con_reserva_vigente,
+    unidades_con_reserva_vigente,
+)
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
-from app.negocio.dias import periodo_actual
+from app.negocio.dias import DIAS_SEMANA, periodo_actual
 from app.negocio.licencias import cancelar_licencia, crear_licencia
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
 from app.negocio.pagos import TIPOS_CARGO, crear_cargo_especial
 from app.negocio.vacaciones import cancelar_vacacion, crear_vacacion
 from app.repositorio.registro import obtener_repositorio
+
+_CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
+_ANCHO_COMBO_PROFESIONAL = 220
+_ANCHO_COL_PROFESIONAL = 180
 
 
 def _combo_profesionales(conn: sqlite3.Connection) -> QComboBox:
@@ -50,12 +63,12 @@ def _nombre_profesional(cache: dict[int, sqlite3.Row], id_profesional: int) -> s
     return p["Apellido"] if p else "?"
 
 
-class PantallaNovedades(QWidget):
+class PantallaRegistroAusencias(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
         layout = QVBoxLayout(self)
-        titulo = QLabel("Novedades")
+        titulo = QLabel("Registro de ausencias")
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
@@ -63,16 +76,29 @@ class PantallaNovedades(QWidget):
         self.panel_vacaciones = _PanelVacaciones(conn)
         self.panel_licencias = _PanelLicencias(conn)
         self.panel_ausencias = _PanelAusencias(conn)
-        self.panel_cargos = _PanelCargosEspeciales(conn)
         pestanas.addTab(self.panel_vacaciones, "Vacaciones")
         pestanas.addTab(self.panel_licencias, "Licencias")
         pestanas.addTab(self.panel_ausencias, "Ausencias")
-        pestanas.addTab(self.panel_cargos, "Cargos especiales")
         layout.addWidget(pestanas, stretch=1)
 
     def actualizar(self) -> None:
-        for panel in (self.panel_vacaciones, self.panel_licencias, self.panel_ausencias, self.panel_cargos):
+        for panel in (self.panel_vacaciones, self.panel_licencias, self.panel_ausencias):
             panel.actualizar()
+
+
+class PantallaCargosEspeciales(QWidget):
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.conn = conn
+        layout = QVBoxLayout(self)
+        titulo = QLabel("Cargos especiales")
+        titulo.setObjectName("tituloPantalla")
+        layout.addWidget(titulo)
+        self.panel = _PanelCargosEspeciales(conn)
+        layout.addWidget(self.panel, stretch=1)
+
+    def actualizar(self) -> None:
+        self.panel.actualizar()
 
 
 class _PanelVacaciones(QWidget):
@@ -321,6 +347,12 @@ class _PanelLicencias(QWidget):
         self.actualizar()
 
 
+def _fmt_horario_ausencia(registro: sqlite3.Row) -> str:
+    if registro["HoraInicio"] is None or registro["HoraFin"] is None:
+        return "Todo el día"
+    return _fmt_horario(registro["HoraInicio"], registro["HoraFin"])
+
+
 class _PanelAusencias(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -330,30 +362,61 @@ class _PanelAusencias(QWidget):
         self.actualizar()
 
     def _armar_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        splitter = QSplitter()
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        contenido = QWidget()
+        layout = QVBoxLayout(contenido)
+        splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
-        self.combo_profesional = _combo_profesionales(self.conn)
-        self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
+        self.combo_profesional = QComboBox()
+        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+            self.combo_profesional.addItem(etiqueta, id_)
+        self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
-        self.campo_desde = QLineEdit()
-        self.campo_desde.setPlaceholderText("AAAA-MM-DD")
-        form.addWidget(QLabel("Desde"))
-        form.addWidget(self.campo_desde)
-        self.campo_hasta = QLineEdit()
-        self.campo_hasta.setPlaceholderText("AAAA-MM-DD")
-        form.addWidget(QLabel("Hasta"))
-        form.addWidget(self.campo_hasta)
         self.combo_motivo = QComboBox()
         self.combo_motivo.setEditable(True)
         for valor in valores_lista(self.conn, "MotivoAusencia"):
             self.combo_motivo.addItem(valor)
         form.addWidget(QLabel("Motivo"))
         form.addWidget(self.combo_motivo)
+
+        self.campo_desde = QLineEdit()
+        self.campo_desde.setPlaceholderText("AAAA-MM-DD")
+        self.campo_desde.editingFinished.connect(self._actualizar_disponibilidad_horario)
+        form.addWidget(QLabel("Desde"))
+        form.addWidget(self.campo_desde)
+        self.campo_hasta = QLineEdit()
+        self.campo_hasta.setPlaceholderText("AAAA-MM-DD")
+        self.campo_hasta.editingFinished.connect(self._actualizar_disponibilidad_horario)
+        form.addWidget(QLabel("Hasta"))
+        form.addWidget(self.campo_hasta)
+
+        self.grupo_horario = QGroupBox("Horario puntual (solo si la ausencia es de un único día)")
+        self.grupo_horario.setCheckable(True)
+        self.grupo_horario.setChecked(False)
+        self.grupo_horario.setEnabled(False)
+        fila_horario = QHBoxLayout(self.grupo_horario)
+        self.spin_hora_desde = _SpinHorario()
+        self.spin_hora_desde.setRange(0, 23)
+        self.spin_hora_desde.setValue(9)
+        self.spin_hora_hasta = _SpinHorario()
+        self.spin_hora_hasta.setRange(1, 24)
+        self.spin_hora_hasta.setValue(10)
+        fila_horario.addWidget(QLabel("Desde"))
+        fila_horario.addWidget(self.spin_hora_desde)
+        fila_horario.addWidget(QLabel("Hasta"))
+        fila_horario.addWidget(self.spin_hora_hasta)
+        form.addWidget(self.grupo_horario)
+
         boton = QPushButton("Crear ausencia")
         boton.setObjectName("botonPrimario")
         boton.clicked.connect(self._crear)
@@ -362,32 +425,60 @@ class _PanelAusencias(QWidget):
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
         form.addStretch()
-        splitter.addWidget(panel_form)
-
-        self.tabla = QTableWidget()
-        self.tabla.setColumnCount(5)
-        self.tabla.setHorizontalHeaderLabels(["Profesional", "Desde", "Hasta", "Motivo", "Origen"])
-        self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        splitter.addWidget(self.tabla)
+        splitter_superior.addWidget(panel_form)
 
         grupo_grilla = QGroupBox("Vista previa: grilla operativa")
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         self.grilla = GrillaOperativaWidget(self.conn)
+        self.grilla.activar_resalte_ausencias(True)
         layout_grupo_grilla.addWidget(self.grilla)
-        splitter.addWidget(grupo_grilla)
+        splitter_superior.addWidget(grupo_grilla)
 
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 2)
-        layout.addWidget(splitter)
+        splitter_superior.setStretchFactor(0, 0)
+        splitter_superior.setStretchFactor(1, 1)
+        layout.addWidget(splitter_superior, stretch=2)
+
+        panel_tabla = QGroupBox("Ausencias registradas")
+        layout_tabla = QVBoxLayout(panel_tabla)
+        self.tabla = QTableWidget()
+        self.tabla.setColumnCount(6)
+        self.tabla.setHorizontalHeaderLabels(["Profesional", "Desde", "Hasta", "Horario", "Motivo", "Origen"])
+        self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        layout_tabla.addWidget(self.tabla, stretch=1)
+        layout.addWidget(panel_tabla, stretch=1)
+
+        scroll.setWidget(contenido)
+        layout_externo.addWidget(scroll)
         self._sincronizar_grilla()
 
+    def _profesional_cambio(self) -> None:
+        self._sincronizar_grilla()
+        self.actualizar()
+
+    def _actualizar_disponibilidad_horario(self) -> None:
+        """El horario puntual solo tiene sentido para una ausencia de un
+        único día — se habilita apenas Desde y Hasta coinciden, y se
+        vuelve a deshabilitar (destildando) apenas dejan de coincidir."""
+        un_solo_dia = bool(self.campo_desde.text().strip()) and self.campo_desde.text().strip() == self.campo_hasta.text().strip()
+        self.grupo_horario.setEnabled(un_solo_dia)
+        if not un_solo_dia:
+            self.grupo_horario.setChecked(False)
+
     def _sincronizar_grilla(self) -> None:
+        """Mismo criterio que la vista previa de Reservas regulares:
+        acotada a las unidades (con todos sus consultorios) y a los días
+        en los que el profesional ya tiene una reserva regular, con su
+        propio horario pintado de azul — y, adicionalmente acá, en verde
+        con letra negra donde además tiene una ausencia registrada."""
         id_profesional = self.combo_profesional.currentData()
-        ids_unidad = unidades_con_reserva_vigente(self.conn, id_profesional)
-        self.grilla.filtrar_por_unidades(ids_unidad or None)  # sin reservas -> mostrar todas
+        pares = pares_dia_unidad_con_reserva_vigente(self.conn, id_profesional)
+        ids_unidad = sorted({u for _, u in pares})
+        dias = sorted({d for d, _ in pares}, key=DIAS_SEMANA.index)
+        self.grilla.filtrar_por_unidades(ids_unidad)
+        self.grilla.filtrar_por_dias(dias)
+        self.grilla.filtrar_por_pares_unidad_dia(pares)
         self.grilla.filtrar_por_profesional(id_profesional)
 
     def _origen(self, registro: sqlite3.Row) -> str:
@@ -402,24 +493,46 @@ class _PanelAusencias(QWidget):
         return f"Reubicación (aislada del {aislada['Fecha']})"
 
     def actualizar(self) -> None:
-        self._registros = obtener_repositorio(self.conn, "Ausencia").listar()
-        cache = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
-        self.tabla.setRowCount(len(self._registros))
-        for i, r in enumerate(self._registros):
-            self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache, r["IdProfesional"])))
+        """Sin profesional elegido, muestra las ausencias de todos los
+        profesionales; con uno elegido, se acota a las de ese profesional
+        únicamente. Orden: código del profesional y luego fecha desde."""
+        id_profesional_filtro = self.combo_profesional.currentData()
+        repo_profesional = obtener_repositorio(self.conn, "Profesional")
+        todas = obtener_repositorio(self.conn, "Ausencia").listar()
+        if id_profesional_filtro is not None:
+            filtradas = [r for r in todas if r["IdProfesional"] == id_profesional_filtro]
+        else:
+            filtradas = todas
+
+        filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
+            (r, repo_profesional.obtener(r["IdProfesional"])) for r in filtradas
+        ]
+        filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else "", t[0]["FechaDesde"]))
+        self._registros = [t[0] for t in filas]
+
+        self.tabla.setRowCount(len(filas))
+        for i, (r, profesional) in enumerate(filas):
+            self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             self.tabla.setItem(i, 1, QTableWidgetItem(r["FechaDesde"]))
             self.tabla.setItem(i, 2, QTableWidgetItem(r["FechaHasta"]))
-            self.tabla.setItem(i, 3, QTableWidgetItem(r["Motivo"] or ""))
-            self.tabla.setItem(i, 4, QTableWidgetItem(self._origen(r)))
+            self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_horario_ausencia(r)))
+            self.tabla.setItem(i, 4, QTableWidgetItem(r["Motivo"] or ""))
+            self.tabla.setItem(i, 5, QTableWidgetItem(self._origen(r)))
         self.tabla.resizeColumnsToContents()
+        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self.grilla.actualizar()
 
     def _crear(self) -> None:
+        hora_inicio = hora_fin = None
+        if self.grupo_horario.isEnabled() and self.grupo_horario.isChecked():
+            hora_inicio = self.spin_hora_desde.value()
+            hora_fin = self.spin_hora_hasta.value()
         try:
             crear_ausencia(
                 self.conn, id_profesional=self.combo_profesional.currentData(),
                 fecha_desde=self.campo_desde.text().strip(), fecha_hasta=self.campo_hasta.text().strip(),
                 motivo=self.combo_motivo.currentText().strip() or None,
+                hora_inicio=hora_inicio, hora_fin=hora_fin,
             )
         except ValueError as error:
             QMessageBox.warning(self, "Crear ausencia", str(error))

@@ -16,18 +16,29 @@ from app.repositorio.registro import obtener_repositorio
 def crear_ausencia(
     conn: sqlite3.Connection, *, id_profesional: int, fecha_desde: str, fecha_hasta: str,
     id_consultorio: int | None = None, motivo: str | None = None, observacion: str | None = None,
-    id_reserva_aislada: int | None = None,
+    id_reserva_aislada: int | None = None, hora_inicio: float | None = None, hora_fin: float | None = None,
 ) -> int:
     """`id_reserva_aislada` deja vinculada la ausencia con la reserva
     aislada que la originó (F16, "Es reubicación") — opcional, en blanco
-    para las que se cargan directamente desde la pantalla de Ausencias."""
+    para las que se cargan directamente desde la pantalla de Ausencias.
+
+    `hora_inicio`/`hora_fin` acotan la ausencia a un horario puntual —
+    solo tiene sentido para un único día (FechaDesde == FechaHasta); sin
+    ellas (el caso de siempre), la ausencia cubre el día completo."""
     if fecha_hasta < fecha_desde:
         raise ValueError("FechaHasta debe ser posterior o igual a FechaDesde")
+    if (hora_inicio is None) != (hora_fin is None):
+        raise ValueError("HoraInicio y HoraFin van juntas: las dos o ninguna")
+    if hora_inicio is not None:
+        if fecha_desde != fecha_hasta:
+            raise ValueError("El horario puntual solo se puede usar cuando la ausencia es de un único día")
+        if hora_fin <= hora_inicio:
+            raise ValueError("HoraFin debe ser posterior a HoraInicio")
     repo = obtener_repositorio(conn, "Ausencia")
     return repo.crear(
         IdProfesional=id_profesional, IdConsultorio=id_consultorio,
         FechaDesde=fecha_desde, FechaHasta=fecha_hasta, Motivo=motivo, Observacion=observacion,
-        IdReservaAislada=id_reserva_aislada,
+        IdReservaAislada=id_reserva_aislada, HoraInicio=hora_inicio, HoraFin=hora_fin,
     )
 
 
@@ -52,15 +63,26 @@ def cancelar_ausencia(conn: sqlite3.Connection, id_ausencia: int) -> None:
 
 def esta_ausente(
     conn: sqlite3.Connection, id_profesional: int, fecha: str, id_consultorio: int | None = None,
+    hora: float | None = None,
 ) -> bool:
     """True si el profesional tiene una ausencia activa esa fecha que cubre
-    ese consultorio (o todos, si la ausencia no especifica uno)."""
+    ese consultorio (o todos, si la ausencia no especifica uno).
+
+    Si se pasa `hora` y la ausencia encontrada tiene horario puntual
+    (HoraInicio/HoraFin, solo posible en ausencias de un único día), solo
+    cuenta cuando `hora` cae dentro de ese rango. Sin `hora`, o cuando la
+    ausencia no tiene horario puntual (cubre el día completo), se
+    comporta como siempre."""
     filas = conn.execute(
-        "SELECT IdConsultorio FROM Ausencia WHERE IdProfesional = ? "
+        "SELECT IdConsultorio, HoraInicio, HoraFin FROM Ausencia WHERE IdProfesional = ? "
         "AND FechaDesde <= ? AND FechaHasta >= ?",
         (id_profesional, fecha, fecha),
     ).fetchall()
     for fila in filas:
-        if fila["IdConsultorio"] is None or fila["IdConsultorio"] == id_consultorio:
-            return True
+        if fila["IdConsultorio"] is not None and fila["IdConsultorio"] != id_consultorio:
+            continue
+        if hora is not None and fila["HoraInicio"] is not None and fila["HoraFin"] is not None:
+            if not (fila["HoraInicio"] <= hora < fila["HoraFin"]):
+                continue
+        return True
     return False

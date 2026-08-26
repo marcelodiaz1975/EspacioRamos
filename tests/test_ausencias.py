@@ -105,6 +105,44 @@ def test_cancelar_ausencia_bloqueada_por_aislada_ya_asignada(conn, profesional, 
     assert obtener_repositorio(conn, "Ausencia").obtener(id_ausencia) is not None
 
 
+def test_crear_ausencia_con_horario_puntual_persiste(conn, profesional):
+    id_ausencia = crear_ausencia(
+        conn, id_profesional=profesional, fecha_desde="2026-08-10", fecha_hasta="2026-08-10",
+        hora_inicio=9, hora_fin=10,
+    )
+    ausencia = obtener_repositorio(conn, "Ausencia").obtener(id_ausencia)
+    assert ausencia["HoraInicio"] == 9
+    assert ausencia["HoraFin"] == 10
+
+
+def test_crear_ausencia_horario_puntual_en_varios_dias_rechaza(conn, profesional):
+    with pytest.raises(ValueError):
+        crear_ausencia(
+            conn, id_profesional=profesional, fecha_desde="2026-08-10", fecha_hasta="2026-08-14",
+            hora_inicio=9, hora_fin=10,
+        )
+
+
+def test_crear_ausencia_hora_fin_no_posterior_a_hora_inicio_rechaza(conn, profesional):
+    with pytest.raises(ValueError):
+        crear_ausencia(
+            conn, id_profesional=profesional, fecha_desde="2026-08-10", fecha_hasta="2026-08-10",
+            hora_inicio=10, hora_fin=9,
+        )
+
+
+def test_esta_ausente_con_horario_puntual_solo_cubre_ese_rango(conn, profesional):
+    crear_ausencia(
+        conn, id_profesional=profesional, fecha_desde="2026-08-10", fecha_hasta="2026-08-10",
+        hora_inicio=9, hora_fin=10,
+    )
+    assert esta_ausente(conn, profesional, "2026-08-10", hora=9) is True
+    assert esta_ausente(conn, profesional, "2026-08-10", hora=10) is False
+    assert esta_ausente(conn, profesional, "2026-08-10", hora=11) is False
+    # sin `hora`, se sigue comportando como "todo el día" (compatibilidad con los llamadores existentes)
+    assert esta_ausente(conn, profesional, "2026-08-10") is True
+
+
 def test_cancelar_ausencia_no_bloquea_por_aislada_de_otro_horario(conn, profesional, consultorio):
     otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Gomez")
     crear_reserva_regular(

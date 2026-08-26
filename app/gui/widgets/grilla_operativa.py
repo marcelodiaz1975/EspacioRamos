@@ -55,6 +55,7 @@ from app.negocio.grilla_operativa import (
     VERDE,
     CeldaGrillaOperativa,
     calcular_grilla_operativa,
+    claves_con_ausencia,
 )
 
 _COLOR_VERDE_CLARO = "#C8E6C9"
@@ -307,6 +308,7 @@ class GrillaOperativaWidget(QWidget):
         self._on_actualizar = on_actualizar
         self._resultado: dict[tuple[int, str, int], CeldaGrillaOperativa] = {}
         self._pares_dia_unidad: set[tuple[str, int]] | None = None
+        self._resaltar_ausencias = False
         self._armar_ui()
         self._cargar_localidades()
         self.actualizar()
@@ -585,6 +587,15 @@ class GrillaOperativaWidget(QWidget):
         self._pares_dia_unidad = set(pares) if pares is not None else None
         self.actualizar()
 
+    def activar_resalte_ausencias(self, activar: bool = True) -> None:
+        """Enciende el resalte en verde con letra negra de los horarios
+        propios del profesional filtrado (celda azul oscuro) donde además
+        tiene una ausencia registrada — solo lo usa la pantalla de
+        Ausencias, el resto de las que embeben esta grilla queda con el
+        comportamiento de siempre."""
+        self._resaltar_ausencias = activar
+        self.actualizar()
+
     def filtrar_por_profesional(self, id_profesional: int | None) -> None:
         """Fija el filtro de profesional (el que pinta de azul su celda
         actual) a uno puntual, o lo limpia con `None` — mismo uso que
@@ -633,9 +644,15 @@ class GrillaOperativaWidget(QWidget):
         horas = list(range(hora_ini, hora_fin))
 
         ids_consultorio = sorted({c["id_consultorio"] for c in columnas})
+        id_profesional_filtro = self._id_profesional_filtro()
+        ausente_en = None
+        if self._resaltar_ausencias and id_profesional_filtro is not None:
+            ausente_en = claves_con_ausencia(
+                self.conn, id_profesional_filtro, ids_consultorio, dias, hora_ini, hora_fin, desde, hasta,
+            )
         self._resultado = calcular_grilla_operativa(
             self.conn, ids_consultorio, dias, hora_ini, hora_fin, desde, hasta,
-            modo=modo, id_profesional_filtro=self._id_profesional_filtro(),
+            modo=modo, id_profesional_filtro=id_profesional_filtro, ausente_en=ausente_en,
         )
         self._construir_tabla(columnas, horas)
 

@@ -24,7 +24,7 @@ from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.pantallas.llaves import PantallaLlaves
 from app.gui.pantallas.mensajeria import CentroMensajeria
 from app.gui.pantallas.mensajes_predefinidos import pantalla_mensajes_predefinidos
-from app.gui.pantallas.novedades import PantallaNovedades
+from app.gui.pantallas.novedades import PantallaCargosEspeciales, PantallaRegistroAusencias
 from app.gui.pantallas.oferta import PantallaOferta
 from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.pantallas.panel_control import PanelControl
@@ -93,8 +93,13 @@ def construir_secciones() -> list[Seccion]:
             "(Propuesta, Disponibilidad, Placas) y el manual de usuario.",
         ),
         Seccion(
-            "Novedades", lambda conn: PantallaNovedades(conn), categoria="Principal",
-            ayuda="Registro de novedades/incidentes cargados manualmente sobre profesionales o unidades.",
+            "Registro de ausencias", lambda conn: PantallaRegistroAusencias(conn), categoria="Principal",
+            ayuda="Plazos por inactividad de un profesional (vacaciones, licencias y ausencias) cargados "
+            "manualmente, con su vista previa de la grilla operativa.",
+        ),
+        Seccion(
+            "Cargos especiales", lambda conn: PantallaCargosEspeciales(conn), categoria="Principal",
+            ayuda="Cargos extraordinarios (ajustes puntuales) que se suman a la liquidación de un profesional.",
         ),
         Seccion(
             "Pagos", lambda conn: PantallaPagos(conn), categoria="Principal",

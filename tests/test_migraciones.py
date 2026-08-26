@@ -8,6 +8,8 @@ def test_base_nueva_ya_tiene_las_columnas_migradas(tmp_path):
     conn = init_database(tmp_path / "test.db")
     columnas = {f["name"] for f in conn.execute("PRAGMA table_info(Ausencia)").fetchall()}
     assert "IdReservaAislada" in columnas
+    assert "HoraInicio" in columnas
+    assert "HoraFin" in columnas
     conn.close()
 
 

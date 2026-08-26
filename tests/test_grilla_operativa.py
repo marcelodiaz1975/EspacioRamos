@@ -7,9 +7,11 @@ from app.negocio.grilla_operativa import (
     AZUL_OSCURO,
     BLANCA,
     BLANCO,
+    NEGRA,
     ROJO,
     VERDE,
     calcular_grilla_operativa,
+    claves_con_ausencia,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -244,6 +246,53 @@ def test_aislada_filtro_pinta_azul(conn, consultorio, eugenia):
     )
     celda = _celda(conn, consultorio, modo="aislada", id_profesional_filtro=eugenia)
     assert (celda.color_aro, celda.color_centro, celda.color_fuente) == (AZUL_OSCURO, AZUL_OSCURO, BLANCA)
+
+
+# --------------------------------------------------------- ausente_en (F.Registro de ausencias)
+
+def test_claves_con_ausencia_dia_completo(conn, consultorio, virginia):
+    obtener_repositorio(conn, "Ausencia").crear(
+        IdProfesional=virginia, FechaDesde="2026-08-17", FechaHasta="2026-08-17",
+    )
+    claves = claves_con_ausencia(conn, virginia, [consultorio], ["Lunes"], 9, 10, "2026-08-01", "2026-08-31")
+    assert claves == {(consultorio, "Lunes", 9)}
+
+
+def test_claves_con_ausencia_horario_puntual_acota_la_hora(conn, consultorio, virginia):
+    obtener_repositorio(conn, "Ausencia").crear(
+        IdProfesional=virginia, FechaDesde="2026-08-17", FechaHasta="2026-08-17", HoraInicio=9, HoraFin=10,
+    )
+    claves = claves_con_ausencia(conn, virginia, [consultorio], ["Lunes"], 9, 11, "2026-08-01", "2026-08-31")
+    assert claves == {(consultorio, "Lunes", 9)}  # la hora 10 queda fuera del horario puntual
+
+
+def test_ausente_en_pinta_verde_con_letra_negra_sobre_celda_azul(conn, consultorio, virginia):
+    """El horario propio del profesional filtrado se pinta de azul oscuro
+    — si además tiene una ausencia registrada ahí, pasa a verde con letra
+    negra en vez de azul (Registro de ausencias)."""
+    _regular(conn, virginia, consultorio, vigencia_fin="2026-12-31")
+    ausente_en = {(consultorio, "Lunes", 9)}
+    grilla = calcular_grilla_operativa(
+        conn, [consultorio], ["Lunes"], 9, 10, "2026-08-01", "2026-08-31",
+        modo="regular", id_profesional_filtro=virginia, ausente_en=ausente_en,
+    )
+    celda = grilla[(consultorio, "Lunes", 9)]
+    assert (celda.color_aro, celda.color_centro, celda.color_fuente) == (VERDE, VERDE, NEGRA)
+    assert celda.codigo == "R1"
+
+
+def test_ausente_en_no_afecta_celdas_que_no_son_del_profesional_filtrado(conn, consultorio, virginia, eugenia):
+    """`ausente_en` solo pisa el azul oscuro del profesional filtrado — una
+    celda roja (conflicto con otro profesional) no se ve afectada aunque
+    su clave esté en el conjunto."""
+    _regular(conn, eugenia, consultorio, vigencia_inicio="2026-09-03")
+    ausente_en = {(consultorio, "Lunes", 9)}
+    grilla = calcular_grilla_operativa(
+        conn, [consultorio], ["Lunes"], 9, 10, "2026-08-01", "2026-08-31",
+        modo="regular", id_profesional_filtro=virginia, ausente_en=ausente_en,
+    )
+    celda = grilla[(consultorio, "Lunes", 9)]
+    assert (celda.color_aro, celda.color_centro) == (ROJO, ROJO)
 
 
 def test_aislada_dos_reservas_muestra_la_mas_proxima(conn, consultorio, virginia, eugenia):
