@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.novedades import PantallaNovedades
+from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import periodo_actual
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.negocio.reservas import crear_reserva_aislada
@@ -207,6 +208,29 @@ def test_cancelar_ausencia_seleccionada_elimina(qtbot, conn):
     panel.tabla.selectRow(0)
     panel._cancelar()
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 0
+
+
+def test_tabla_ausencias_muestra_origen_de_reubicacion(qtbot, conn):
+    id_profesional = _preparar(conn)
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_profesional, id_consultorio=id_consultorio,
+        fecha="2026-08-10", hora_inicio=9, hora_fin=10,
+    )
+    crear_ausencia(
+        conn, id_profesional=id_profesional, fecha_desde="2026-08-17", fecha_hasta="2026-08-17",
+        id_consultorio=id_consultorio, motivo="Reubicación", id_reserva_aislada=id_reserva,
+    )
+    crear_ausencia(conn, id_profesional=id_profesional, fecha_desde="2026-09-01", fecha_hasta="2026-09-05")
+    conn.commit()
+
+    pantalla = PantallaNovedades(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    assert panel.tabla.horizontalHeaderItem(4).text() == "Origen"
+    origenes = {panel.tabla.item(f, 1).text(): panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())}
+    assert origenes["2026-08-17"] == "Reubicación (aislada del 2026-08-10)"
+    assert origenes["2026-09-01"] == ""
 
 
 def test_cancelar_ausencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn, monkeypatch):

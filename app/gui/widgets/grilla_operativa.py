@@ -225,6 +225,44 @@ def dias_con_reserva_vigente(conn: sqlite3.Connection, id_profesional: int | Non
     return [f["DiaSemana"] for f in filas]
 
 
+def pares_dia_unidad_con_reserva_vigente(conn: sqlite3.Connection, id_profesional: int | None) -> set[tuple[str, int]]:
+    """Combinaciones (día, unidad) donde el profesional tiene efectivamente
+    alguna reserva regular — más preciso que cruzar `unidades_con_reserva_
+    vigente` con `dias_con_reserva_vigente` por separado: ese cruce
+    muestra TODAS las unidades del profesional en TODOS sus días, aunque
+    en un día puntual solo tenga reservado uno de esos lugares. Se usa
+    para acotar la grilla exactamente a lo que el profesional tiene
+    reservado (`GrillaOperativaWidget.filtrar_por_pares_unidad_dia`)."""
+    if id_profesional is None:
+        return set()
+    filas = conn.execute(
+        "SELECT DISTINCT r.DiaSemana, u.IdUnidad FROM ReservaRegular r "
+        "JOIN Consultorio c ON c.IdConsultorio = r.IdConsultorio "
+        "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE r.IdProfesional = ?",
+        (id_profesional,),
+    ).fetchall()
+    return {(f["DiaSemana"], f["IdUnidad"]) for f in filas}
+
+
+def pares_dia_unidad_con_reserva(conn: sqlite3.Connection, id_profesional: int | None) -> set[tuple[str, int]]:
+    """Como `pares_dia_unidad_con_reserva_vigente`, pero sumando también
+    las reservas aisladas confirmadas (su Fecha, no un patrón recurrente)
+    — mismo criterio que `unidades_con_reserva`/`dias_con_reserva`, para
+    la vista previa de Reservas aisladas."""
+    if id_profesional is None:
+        return set()
+    pares = set(pares_dia_unidad_con_reserva_vigente(conn, id_profesional))
+    filas = conn.execute(
+        "SELECT DISTINCT a.Fecha, u.IdUnidad FROM ReservaAislada a "
+        "JOIN Consultorio c ON c.IdConsultorio = a.IdConsultorio "
+        "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE a.IdProfesional = ? AND a.Estado = 'Confirmada'",
+        (id_profesional,),
+    ).fetchall()
+    for f in filas:
+        pares.add((fecha_a_dia_semana(date.fromisoformat(f["Fecha"])), f["IdUnidad"]))
+    return pares
+
+
 def unidades_con_reserva(conn: sqlite3.Connection, id_profesional: int | None) -> list[int]:
     """Como `unidades_con_reserva_vigente`, pero considerando también las
     reservas aisladas confirmadas — para la vista previa de Reservas
@@ -268,6 +306,7 @@ class GrillaOperativaWidget(QWidget):
         self.conn = conn
         self._on_actualizar = on_actualizar
         self._resultado: dict[tuple[int, str, int], CeldaGrillaOperativa] = {}
+        self._pares_dia_unidad: set[tuple[str, int]] | None = None
         self._armar_ui()
         self._cargar_localidades()
         self.actualizar()
@@ -533,6 +572,19 @@ class GrillaOperativaWidget(QWidget):
             check.blockSignals(False)
         self.actualizar()
 
+    def filtrar_por_pares_unidad_dia(self, pares: set[tuple[str, int]] | None) -> None:
+        """Restringe las columnas mostradas a los (día, unidad) donde el
+        profesional tiene efectivamente algo reservado — más preciso que
+        cruzar el filtro de Unidad con el de Día (que muestra TODAS las
+        unidades elegidas en TODOS los días elegidos, aunque el
+        profesional no tenga nada en esa combinación puntual: ej. no
+        mostrar el edificio del miércoles también el lunes si ese lunes
+        no tiene nada ahí). `None` saca la restricción — vuelve al cruce
+        completo. Los consultorios de cada unidad se siguen mostrando
+        todos, aunque tenga reservado solo uno."""
+        self._pares_dia_unidad = set(pares) if pares is not None else None
+        self.actualizar()
+
     def filtrar_por_profesional(self, id_profesional: int | None) -> None:
         """Fija el filtro de profesional (el que pinta de azul su celda
         actual) a uno puntual, o lo limpia con `None` — mismo uso que
@@ -611,6 +663,8 @@ class GrillaOperativaWidget(QWidget):
         columnas = []
         for dia in dias:
             for base_col in base:
+                if self._pares_dia_unidad is not None and (dia, base_col["id_unidad"]) not in self._pares_dia_unidad:
+                    continue
                 columnas.append({**base_col, "dia": dia})
         return columnas
 

@@ -243,3 +243,84 @@ def test_dias_con_reserva_incluye_aisladas(qtbot, conn):
     from datetime import date
 
     assert dias_con_reserva(conn, solo_aislada) == [fecha_a_dia_semana(date(2026, 8, 18))]
+
+
+def test_pares_dia_unidad_con_reserva_vigente(qtbot, conn):
+    from app.gui.widgets.grilla_operativa import pares_dia_unidad_con_reserva_vigente
+
+    id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
+    otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_virginia, IdConsultorio=otro_consultorio, DiaSemana="Miércoles",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    # _preparar ya cargó Lunes en id_unidad; sumamos Miércoles en otra_unidad
+    assert pares_dia_unidad_con_reserva_vigente(conn, id_virginia) == {
+        ("Lunes", id_unidad), ("Miércoles", otra_unidad),
+    }
+    assert pares_dia_unidad_con_reserva_vigente(conn, None) == set()
+
+
+def test_pares_dia_unidad_con_reserva_incluye_aisladas(qtbot, conn):
+    from app.gui.widgets.grilla_operativa import pares_dia_unidad_con_reserva
+
+    id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
+    otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_virginia, IdConsultorio=otro_consultorio, Fecha="2026-08-18", HoraInicio=9, HoraFin=10,
+    )
+    conn.commit()
+
+    from app.negocio.dias import fecha_a_dia_semana
+    from datetime import date
+
+    dia_aislada = fecha_a_dia_semana(date(2026, 8, 18))
+    assert pares_dia_unidad_con_reserva(conn, id_virginia) == {
+        ("Lunes", id_unidad), (dia_aislada, otra_unidad),
+    }
+    assert pares_dia_unidad_con_reserva(conn, None) == set()
+
+
+def test_filtrar_por_pares_unidad_dia_evita_combinaciones_fantasma(qtbot, conn):
+    """Sin la restricción por pares, cruzar el filtro de Unidad (ambas)
+    con el de Día (ambos) mostraría también la unidad del miércoles bajo
+    la columna del lunes (y viceversa), aunque el profesional no tenga
+    nada ahí ese día — la restricción por pares evita esas columnas
+    fantasma."""
+    from app.negocio.dias import DIAS_SEMANA
+    from app.gui.widgets.grilla_operativa import pares_dia_unidad_con_reserva_vigente
+
+    id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
+    otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_virginia, IdConsultorio=otro_consultorio, DiaSemana="Miércoles",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+
+    pares = pares_dia_unidad_con_reserva_vigente(conn, id_virginia)
+    ids_unidad = sorted({u for _, u in pares})
+    dias = sorted({d for d, _ in pares}, key=DIAS_SEMANA.index)
+    widget.filtrar_por_unidades(ids_unidad)
+    widget.filtrar_por_dias(dias)
+
+    # sin restricción por pares: cruce completo, 2 unidades x 2 días = 4 columnas de datos
+    assert widget.tabla.columnCount() - 2 == 4
+
+    widget.filtrar_por_pares_unidad_dia(pares)
+    # con la restricción: solo las 2 combinaciones reales
+    assert widget.tabla.columnCount() - 2 == 2
+
+    widget.filtrar_por_pares_unidad_dia(None)
+    assert widget.tabla.columnCount() - 2 == 4

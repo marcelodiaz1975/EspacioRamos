@@ -265,7 +265,11 @@ CREATE TABLE IF NOT EXISTS Ausencia (
     FechaDesde TEXT NOT NULL,
     FechaHasta TEXT NOT NULL,
     Motivo TEXT,
-    Observacion TEXT
+    Observacion TEXT,
+    -- Reservas > reubicación (F16): de qué reserva aislada surgió esta
+    -- ausencia, para poder revisarlas vinculadas. NULL en las que se
+    -- cargan directamente desde la pantalla de Ausencias.
+    IdReservaAislada INTEGER REFERENCES ReservaAislada(IdReservaAislada)
 );
 
 -- 3.15 CargoEspecial ---------------------------------------------------------------------

@@ -16,13 +16,18 @@ from app.repositorio.registro import obtener_repositorio
 def crear_ausencia(
     conn: sqlite3.Connection, *, id_profesional: int, fecha_desde: str, fecha_hasta: str,
     id_consultorio: int | None = None, motivo: str | None = None, observacion: str | None = None,
+    id_reserva_aislada: int | None = None,
 ) -> int:
+    """`id_reserva_aislada` deja vinculada la ausencia con la reserva
+    aislada que la originó (F16, "Es reubicación") — opcional, en blanco
+    para las que se cargan directamente desde la pantalla de Ausencias."""
     if fecha_hasta < fecha_desde:
         raise ValueError("FechaHasta debe ser posterior o igual a FechaDesde")
     repo = obtener_repositorio(conn, "Ausencia")
     return repo.crear(
         IdProfesional=id_profesional, IdConsultorio=id_consultorio,
         FechaDesde=fecha_desde, FechaHasta=fecha_hasta, Motivo=motivo, Observacion=observacion,
+        IdReservaAislada=id_reserva_aislada,
     )
 
 

@@ -958,6 +958,10 @@ def test_reubicacion_ofrece_horario_regular_y_registra_ausencia(qtbot, conn):
     assert ausencia["FechaDesde"] == "2026-08-24"
     assert ausencia["FechaHasta"] == "2026-08-24"
     assert ausencia["Motivo"] == "Reubicación"
+    reserva_aislada = conn.execute(
+        "SELECT IdReservaAislada FROM ReservaAislada WHERE IdConsultorio = ?", (otro_consultorio,)
+    ).fetchone()
+    assert ausencia["IdReservaAislada"] == reserva_aislada["IdReservaAislada"]
 
     # el formulario queda en blanco y el cuadro de reubicación oculto de nuevo
     assert panel.casilla_reubicacion.isChecked() is False

@@ -65,6 +65,25 @@ def test_cancelar_ausencia_sin_aisladas_se_elimina(conn, profesional):
     assert obtener_repositorio(conn, "Ausencia").obtener(id_ausencia) is None
 
 
+def test_crear_ausencia_queda_vinculada_a_la_reserva_aislada_que_la_origino(conn, profesional, consultorio):
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=profesional, id_consultorio=consultorio,
+        fecha="2026-08-10", hora_inicio=9, hora_fin=10,
+    )
+    id_ausencia = crear_ausencia(
+        conn, id_profesional=profesional, fecha_desde="2026-08-17", fecha_hasta="2026-08-17",
+        id_consultorio=consultorio, motivo="Reubicación", id_reserva_aislada=id_reserva,
+    )
+    ausencia = obtener_repositorio(conn, "Ausencia").obtener(id_ausencia)
+    assert ausencia["IdReservaAislada"] == id_reserva
+
+
+def test_crear_ausencia_sin_reserva_aislada_queda_sin_vincular(conn, profesional):
+    id_ausencia = crear_ausencia(conn, id_profesional=profesional, fecha_desde="2026-08-10", fecha_hasta="2026-08-14")
+    ausencia = obtener_repositorio(conn, "Ausencia").obtener(id_ausencia)
+    assert ausencia["IdReservaAislada"] is None
+
+
 def test_cancelar_ausencia_bloqueada_por_aislada_ya_asignada(conn, profesional, consultorio):
     """DC-04 §3.2/§3.3, aclarado en conversación: si ya se asignó una
     aislada a otro profesional aprovechando el consultorio liberado, no

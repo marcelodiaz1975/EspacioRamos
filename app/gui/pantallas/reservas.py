@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTabWidget,
     QTableWidget,
@@ -31,10 +32,8 @@ from PySide6.QtWidgets import (
 from app.gui.dialogos import confirmar_si_fecha_es_mes_anterior
 from app.gui.widgets.grilla_operativa import (
     GrillaOperativaWidget,
-    dias_con_reserva,
-    dias_con_reserva_vigente,
-    unidades_con_reserva,
-    unidades_con_reserva_vigente,
+    pares_dia_unidad_con_reserva,
+    pares_dia_unidad_con_reserva_vigente,
 )
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, ultimo_dia_mes
@@ -257,7 +256,13 @@ class _PanelReservasRegulares(QWidget):
         self.actualizar()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        contenido = QWidget()
+        layout = QVBoxLayout(contenido)
         splitter_superior = QSplitter()
 
         panel_form = QWidget()
@@ -391,6 +396,9 @@ class _PanelReservasRegulares(QWidget):
 
         hoy = fecha_actual(self.conn)
         self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
+
+        scroll.setWidget(contenido)
+        layout_externo.addWidget(scroll)
         self._cargar_edificios()
 
     def actualizar(self) -> None:
@@ -491,10 +499,12 @@ class _PanelReservasRegulares(QWidget):
         de cada alta/baja), así queda siempre al día de lo que el
         profesional ya tiene reservado antes de seguir cargando."""
         id_profesional = self.combo_profesional.currentData()
-        ids_unidad = unidades_con_reserva_vigente(self.conn, id_profesional)
-        dias = dias_con_reserva_vigente(self.conn, id_profesional)
+        pares = pares_dia_unidad_con_reserva_vigente(self.conn, id_profesional)
+        ids_unidad = sorted({u for _, u in pares})
+        dias = sorted({d for d, _ in pares}, key=DIAS_SEMANA.index)
         self.grilla.filtrar_por_unidades(ids_unidad)
         self.grilla.filtrar_por_dias(dias)
+        self.grilla.filtrar_por_pares_unidad_dia(pares)
         self.grilla.filtrar_por_profesional(id_profesional)
         self._actualizar_resumen_profesional(id_profesional)
 
@@ -674,7 +684,13 @@ class _PanelReservasAisladas(QWidget):
         self.actualizar()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        contenido = QWidget()
+        layout = QVBoxLayout(contenido)
         splitter_superior = QSplitter()
 
         panel_form = QWidget()
@@ -812,6 +828,9 @@ class _PanelReservasAisladas(QWidget):
         hoy = fecha_actual(self.conn)
         self.campo_fecha.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self.campo_fecha_ausencia.setDate(QDate(hoy.year, hoy.month, hoy.day))
+
+        scroll.setWidget(contenido)
+        layout_externo.addWidget(scroll)
         self._cargar_edificios()
 
     def _cargar_edificios(self) -> None:
@@ -855,10 +874,12 @@ class _PanelReservasAisladas(QWidget):
         pintada de azul — en modo "Reservas aisladas" porque acá
         interesa ver qué está libre AHORA, no los conflictos futuros."""
         id_profesional = self.combo_profesional.currentData()
-        ids_unidad = unidades_con_reserva(self.conn, id_profesional)
-        dias = dias_con_reserva(self.conn, id_profesional)
+        pares = pares_dia_unidad_con_reserva(self.conn, id_profesional)
+        ids_unidad = sorted({u for _, u in pares})
+        dias = sorted({d for d, _ in pares}, key=DIAS_SEMANA.index)
         self.grilla.filtrar_por_unidades(ids_unidad)
         self.grilla.filtrar_por_dias(dias)
+        self.grilla.filtrar_por_pares_unidad_dia(pares)
         self.grilla.filtrar_por_profesional(id_profesional)
         self._actualizar_resumen_profesional(id_profesional)
         if self.casilla_reubicacion.isChecked():
@@ -1015,7 +1036,7 @@ class _PanelReservasAisladas(QWidget):
             return
         self.conn.commit()
         if datos["es_reubicacion"]:
-            self._registrar_ausencia_por_reubicacion(id_profesional, fecha)
+            self._registrar_ausencia_por_reubicacion(id_profesional, fecha, _id)
         if advertencias:
             QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias))
         self._copiar_mensaje_detalle(datos["id_profesional"], fecha)
@@ -1023,13 +1044,14 @@ class _PanelReservasAisladas(QWidget):
         self._resetear_formulario()
         self._sincronizar_grilla()
 
-    def _registrar_ausencia_por_reubicacion(self, id_profesional: int, fecha_aislada: str) -> None:
+    def _registrar_ausencia_por_reubicacion(self, id_profesional: int, fecha_aislada: str, id_reserva_aislada: int) -> None:
         """Si al marcar "Es reubicación" el operador indicó cuál de los
         horarios regulares del profesional no va a usar, deja registrada
-        la Ausencia de ese consultorio en la fecha indicada — así queda
-        libre para que otro profesional lo tome como aislada, sin afectar
-        la reserva regular ni la grilla visual (mismo criterio que ya usa
-        la pantalla de Ausencias)."""
+        la Ausencia de ese consultorio en la fecha indicada — vinculada a
+        la reserva aislada que la originó, así queda libre para que otro
+        profesional lo tome como aislada, sin afectar la reserva regular
+        ni la grilla visual (mismo criterio que ya usa la pantalla de
+        Ausencias)."""
         id_consultorio_no_usado = self.combo_horario_no_usado.currentData()
         if id_consultorio_no_usado is None:
             return
@@ -1038,6 +1060,7 @@ class _PanelReservasAisladas(QWidget):
             self.conn, id_profesional=id_profesional, fecha_desde=fecha_ausencia, fecha_hasta=fecha_ausencia,
             id_consultorio=id_consultorio_no_usado, motivo="Reubicación",
             observacion=f"Compensada por la reserva aislada del {fecha_aislada}",
+            id_reserva_aislada=id_reserva_aislada,
         )
         self.conn.commit()
 

@@ -365,8 +365,8 @@ class _PanelAusencias(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(4)
-        self.tabla.setHorizontalHeaderLabels(["Profesional", "Desde", "Hasta", "Motivo"])
+        self.tabla.setColumnCount(5)
+        self.tabla.setHorizontalHeaderLabels(["Profesional", "Desde", "Hasta", "Motivo", "Origen"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -390,6 +390,17 @@ class _PanelAusencias(QWidget):
         self.grilla.filtrar_por_unidades(ids_unidad or None)  # sin reservas -> mostrar todas
         self.grilla.filtrar_por_profesional(id_profesional)
 
+    def _origen(self, registro: sqlite3.Row) -> str:
+        """En blanco para las que se cargan directamente acá; si vienen
+        de "Es reubicación" en Reservas aisladas, queda a la vista de
+        cuál reserva puntual surgieron (F16)."""
+        if not registro["IdReservaAislada"]:
+            return ""
+        aislada = obtener_repositorio(self.conn, "ReservaAislada").obtener(registro["IdReservaAislada"])
+        if aislada is None:
+            return "Reubicación (reserva aislada eliminada)"
+        return f"Reubicación (aislada del {aislada['Fecha']})"
+
     def actualizar(self) -> None:
         self._registros = obtener_repositorio(self.conn, "Ausencia").listar()
         cache = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
@@ -399,6 +410,7 @@ class _PanelAusencias(QWidget):
             self.tabla.setItem(i, 1, QTableWidgetItem(r["FechaDesde"]))
             self.tabla.setItem(i, 2, QTableWidgetItem(r["FechaHasta"]))
             self.tabla.setItem(i, 3, QTableWidgetItem(r["Motivo"] or ""))
+            self.tabla.setItem(i, 4, QTableWidgetItem(self._origen(r)))
         self.tabla.resizeColumnsToContents()
         self.grilla.actualizar()
 
