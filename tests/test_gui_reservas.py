@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.reservas import PantallaReservas
+from app.gui.pantallas.reservas import _FECHA_SIN_DATO, PantallaReservas
 from app.negocio.dias import periodo_actual
 from app.negocio.lista_espera import crear_pedido
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
@@ -266,7 +266,7 @@ def test_modificar_seleccionada_finaliza_la_vieja_y_precarga_el_formulario(qtbot
     assert panel.spin_desde.value() == 14
     assert panel.spin_hasta.value() == 16
     assert panel.casilla_excepcion.isChecked() is True
-    assert panel.campo_vigencia_fin.text() == ""
+    assert panel.campo_vigencia_fin.date() == _FECHA_SIN_DATO
 
 
 def test_modificar_seleccionada_sin_fila_no_hace_nada(qtbot, conn):
@@ -395,7 +395,7 @@ def test_formulario_vuelve_en_blanco_despues_de_crear(qtbot, conn):
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_regulares
-    panel.campo_vigencia_fin.setText("2026-12-31")
+    panel.campo_vigencia_fin.setDate(QDate(2026, 12, 31))
     panel.casilla_excepcion.setChecked(True)
     panel._checks_dia["Martes"].setChecked(True)
 
@@ -403,7 +403,7 @@ def test_formulario_vuelve_en_blanco_despues_de_crear(qtbot, conn):
 
     assert panel.combo_profesional.currentData() is None
     assert panel.combo_profesional.currentIndex() == 0
-    assert panel.campo_vigencia_fin.text() == ""
+    assert panel.campo_vigencia_fin.date() == _FECHA_SIN_DATO
     assert panel.casilla_excepcion.isChecked() is False
     assert {dia for dia, check in panel._checks_dia.items() if check.isChecked()} == {"Lunes"}
     assert panel.grilla.ids_unidad_seleccionadas() == []
@@ -731,7 +731,7 @@ def test_tabla_aisladas_ordenada_por_fecha_y_hora(qtbot, conn):
         (panel.tabla.item(f, 2).text(), panel.tabla.item(f, 3).text())
         for f in range(panel.tabla.rowCount())
     ]
-    assert filas == [("2026-08-18", "9 a 10"), ("2026-08-18", "14 a 15"), ("2026-08-20", "9 a 10")]
+    assert filas == [("18-08-2026", "9 a 10"), ("18-08-2026", "14 a 15"), ("20-08-2026", "9 a 10")]
 
 
 def test_tabla_aisladas_columna_valor(qtbot, conn):
@@ -755,8 +755,8 @@ def test_tabla_aisladas_columna_valor(qtbot, conn):
     from app.negocio.formato import formatear_moneda
 
     valores = {panel.tabla.item(f, 2).text(): panel.tabla.item(f, 5).text() for f in range(panel.tabla.rowCount())}
-    assert valores["2026-08-17"] == formatear_moneda(2000)
-    assert valores["2026-09-17"] == ""
+    assert valores["17-08-2026"] == formatear_moneda(2000)
+    assert valores["17-09-2026"] == ""
 
 
 def test_datos_complementarios_aisladas_incluye_horas_aisladas_mensuales(qtbot, conn):
@@ -793,14 +793,24 @@ def test_spin_horario_se_muestra_como_reloj(qtbot, conn):
     assert panel_a.spin_desde.valueFromText("14:30") == 14.5
 
 
-def test_campo_fecha_aisladas_muestra_dia_de_semana(qtbot, conn):
+def test_campos_de_fecha_usan_formato_dd_mm_yyyy(qtbot, conn):
+    """El selector de fecha (con calendario) ya deja ver el día de la
+    semana por su cuenta, así que no hace falta una aclaración aparte
+    debajo — alcanza con que el formato de todos los campos de fecha sea
+    consistente en las dos solapas."""
     _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    panel = pantalla.panel_aisladas
 
-    panel.campo_fecha.setDate(QDate(2026, 8, 12))  # miércoles
-    assert panel.etiqueta_fecha.text() == "Miércoles 12-08-2026"
+    panel_r = pantalla.panel_regulares
+    assert panel_r.campo_vigencia_inicio.displayFormat() == "dd-MM-yyyy"
+    assert panel_r.campo_vigencia_fin.displayFormat() == "dd-MM-yyyy"
+    assert panel_r.campo_vigencia_inicio.calendarPopup() is True
+
+    panel_a = pantalla.panel_aisladas
+    assert panel_a.campo_fecha.displayFormat() == "dd-MM-yyyy"
+    assert panel_a.campo_fecha.calendarPopup() is True
+    assert panel_a.campo_fecha_ausencia.displayFormat() == "dd-MM-yyyy"
 
 
 def test_grilla_preview_no_tiene_scroll_interno_al_elegir_profesional(qtbot, conn):
@@ -825,3 +835,88 @@ def test_grilla_preview_no_tiene_scroll_interno_al_elegir_profesional(qtbot, con
     assert tabla.rowCount() > 0
     alto_filas = sum(tabla.rowHeight(f) for f in range(tabla.rowCount()))
     assert tabla.minimumHeight() >= alto_filas
+
+
+def test_tablas_de_abajo_muestran_tratamiento_nombre_apellido_y_columna_ancha(qtbot, conn):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, Tratamiento="Lic.", NombrePila="Virginia")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=10,
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+
+    tabla_r = pantalla.panel_regulares.tabla
+    assert tabla_r.item(0, 0).text() == "Lic. Virginia Gómez"
+    assert tabla_r.columnWidth(0) >= 180
+
+    tabla_a = pantalla.panel_aisladas.tabla
+    assert tabla_a.item(0, 0).text() == "Lic. Virginia Gómez"
+    assert tabla_a.columnWidth(0) >= 180
+
+
+def test_reubicacion_ofrece_horario_regular_y_registra_ausencia(qtbot, conn):
+    """Al marcar "Es reubicación" en Aisladas, el formulario tiene que
+    ofrecer elegir cuál de los horarios regulares del profesional no va a
+    usar esta vez, y al confirmar dejarlo registrado como Ausencia de ese
+    consultorio en la fecha indicada (así queda libre para otro
+    profesional, sin tocar la reserva regular)."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=2)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2020-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.combo_consultorio.setCurrentIndex(panel.combo_consultorio.findData(otro_consultorio))
+    panel.campo_fecha.setDate(QDate(2026, 8, 22))  # sábado: no choca con el regular del lunes
+
+    panel.casilla_reubicacion.setChecked(True)
+    assert panel.contenedor_reubicacion.isHidden() is False
+    indice = panel.combo_horario_no_usado.findData(id_consultorio)
+    assert indice > 0  # existe una opción con el consultorio de la reserva regular
+    panel.combo_horario_no_usado.setCurrentIndex(indice)
+    panel.campo_fecha_ausencia.setDate(QDate(2026, 8, 24))  # el lunes siguiente que se va a saltear
+
+    panel._crear()
+
+    ausencia = conn.execute("SELECT * FROM Ausencia WHERE IdProfesional = ?", (id_profesional,)).fetchone()
+    assert ausencia is not None
+    assert ausencia["IdConsultorio"] == id_consultorio
+    assert ausencia["FechaDesde"] == "2026-08-24"
+    assert ausencia["FechaHasta"] == "2026-08-24"
+    assert ausencia["Motivo"] == "Reubicación"
+
+    # el formulario queda en blanco y el cuadro de reubicación oculto de nuevo
+    assert panel.casilla_reubicacion.isChecked() is False
+    assert panel.contenedor_reubicacion.isHidden() is True
+
+
+def test_reubicacion_sin_elegir_horario_no_crea_ausencia(qtbot, conn):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.casilla_reubicacion.setChecked(True)  # "Sin especificar" queda seleccionado por defecto
+
+    panel._crear()
+
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 0

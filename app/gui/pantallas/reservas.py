@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QPushButton,
     QSplitter,
@@ -36,7 +35,8 @@ from app.gui.widgets.grilla_operativa import (
     unidades_con_reserva,
     unidades_con_reserva_vigente,
 )
-from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual
+from app.negocio.ausencias import crear_ausencia
+from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.lista_espera import marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
@@ -52,10 +52,19 @@ from app.repositorio.registro import obtener_repositorio
 
 _DIAS_RESERVA = DIAS_SEMANA[:6]
 _ANCHO_COMBO_PROFESIONAL = 220
+_ANCHO_COL_PROFESIONAL = 180
+_FORMATO_FECHA = "dd-MM-yyyy"
+_FECHA_SIN_DATO = QDate(2000, 1, 1)  # sentinel de QDateEdit.setSpecialValueText: "sin fecha"
 
 
 def _fmt_horas(horas: float) -> str:
     return str(int(horas)) if horas == int(horas) else f"{horas:.1f}"
+
+
+def _fmt_fecha(fecha_iso: str | None) -> str:
+    if not fecha_iso:
+        return ""
+    return QDate.fromString(fecha_iso, "yyyy-MM-dd").toString(_FORMATO_FECHA)
 
 
 class _SpinHorario(QDoubleSpinBox):
@@ -100,6 +109,29 @@ def _opciones_profesional(conn: sqlite3.Connection, categorias: tuple[str, ...])
         categorias,
     ).fetchall()
     return [(f["IdProfesional"], _texto_profesional(f)) for f in filas]
+
+
+def _opciones_horario_regular(conn: sqlite3.Connection, id_profesional: int | None) -> list[tuple[int, str]]:
+    """Horarios regulares vigentes del profesional — para que, al marcar
+    "Es reubicación" en el alta de una reserva aislada, el operador pueda
+    elegir cuál de ellos no va a usar esta vez."""
+    if id_profesional is None:
+        return []
+    filas = conn.execute(
+        "SELECT r.IdConsultorio, r.DiaSemana, r.HoraInicio, r.HoraFin, u.Departamento, c.NumeroConsultorio "
+        "FROM ReservaRegular r JOIN Consultorio c ON c.IdConsultorio = r.IdConsultorio "
+        "JOIN Unidad u ON u.IdUnidad = c.IdUnidad "
+        "WHERE r.IdProfesional = ? AND (r.VigenciaFin IS NULL OR r.VigenciaFin >= ?) "
+        "ORDER BY r.DiaSemana, r.HoraInicio",
+        (id_profesional, fecha_actual(conn).isoformat()),
+    ).fetchall()
+    return [
+        (
+            f["IdConsultorio"],
+            f"{f['DiaSemana']} {f['HoraInicio']:g} a {f['HoraFin']:g} - {f['Departamento']} - {f['NumeroConsultorio']}",
+        )
+        for f in filas
+    ]
 
 
 def _opciones_edificio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
@@ -232,14 +264,19 @@ class _PanelReservasRegulares(QWidget):
         fila_horario.addWidget(self.spin_hasta)
         form.addLayout(fila_horario)
 
-        self.campo_vigencia_inicio = QLineEdit()
-        self.campo_vigencia_inicio.setPlaceholderText("AAAA-MM-DD")
+        self.campo_vigencia_inicio = QDateEdit()
+        self.campo_vigencia_inicio.setDisplayFormat(_FORMATO_FECHA)
+        self.campo_vigencia_inicio.setCalendarPopup(True)
         form.addWidget(QLabel("Vigencia desde"))
         form.addWidget(self.campo_vigencia_inicio)
 
-        self.campo_vigencia_fin = QLineEdit()
-        self.campo_vigencia_fin.setPlaceholderText("AAAA-MM-DD (opcional)")
-        form.addWidget(QLabel("Vigencia hasta"))
+        self.campo_vigencia_fin = QDateEdit()
+        self.campo_vigencia_fin.setDisplayFormat(_FORMATO_FECHA)
+        self.campo_vigencia_fin.setCalendarPopup(True)
+        self.campo_vigencia_fin.setMinimumDate(_FECHA_SIN_DATO)
+        self.campo_vigencia_fin.setSpecialValueText("(sin fecha)")
+        self.campo_vigencia_fin.setDate(_FECHA_SIN_DATO)
+        form.addWidget(QLabel("Vigencia hasta (opcional)"))
         form.addWidget(self.campo_vigencia_fin)
 
         self.casilla_excepcion = QCheckBox("Es excepción")
@@ -299,7 +336,8 @@ class _PanelReservasRegulares(QWidget):
         layout_tabla.addLayout(fila_acciones)
         layout.addWidget(panel_tabla, stretch=1)
 
-        self.campo_vigencia_inicio.setText(fecha_actual(self.conn).isoformat())
+        hoy = fecha_actual(self.conn)
+        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self._cargar_unidades()
 
     def actualizar(self) -> None:
@@ -313,14 +351,15 @@ class _PanelReservasRegulares(QWidget):
                 "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE c.IdConsultorio = ?",
                 (r["IdConsultorio"],),
             ).fetchone()
-            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(profesional["Apellido"] if profesional else "?"))
+            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             texto_consultorio = f"{consultorio['Departamento']} - {consultorio['NumeroConsultorio']}" if consultorio else "?"
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(texto_consultorio))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(r["DiaSemana"]))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(f"{r['HoraInicio']:g} a {r['HoraFin']:g}"))
-            self.tabla.setItem(fila_idx, 4, QTableWidgetItem(r["VigenciaInicio"] or ""))
-            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(r["VigenciaFin"] or ""))
+            self.tabla.setItem(fila_idx, 4, QTableWidgetItem(_fmt_fecha(r["VigenciaInicio"])))
+            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(_fmt_fecha(r["VigenciaFin"])))
         self.tabla.resizeColumnsToContents()
+        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._sincronizar_grilla()
 
     def _cargar_unidades(self) -> None:
@@ -389,8 +428,9 @@ class _PanelReservasRegulares(QWidget):
             check.setChecked(dia == "Lunes")
         self.spin_desde.setValue(9)
         self.spin_hasta.setValue(10)
-        self.campo_vigencia_inicio.setText(fecha_actual(self.conn).isoformat())
-        self.campo_vigencia_fin.clear()
+        hoy = fecha_actual(self.conn)
+        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.campo_vigencia_fin.setDate(_FECHA_SIN_DATO)
         self.casilla_excepcion.setChecked(False)
 
     def _dias_seleccionados(self) -> list[str]:
@@ -430,8 +470,11 @@ class _PanelReservasRegulares(QWidget):
             dia_semana=dia_semana,
             hora_inicio=self.spin_desde.value(),
             hora_fin=self.spin_hasta.value(),
-            vigencia_inicio=self.campo_vigencia_inicio.text().strip() or fecha_actual(self.conn).isoformat(),
-            vigencia_fin=self.campo_vigencia_fin.text().strip() or None,
+            vigencia_inicio=self.campo_vigencia_inicio.date().toPython().isoformat(),
+            vigencia_fin=(
+                None if self.campo_vigencia_fin.date() == _FECHA_SIN_DATO
+                else self.campo_vigencia_fin.date().toPython().isoformat()
+            ),
             es_excepcion=self.casilla_excepcion.isChecked(),
             forzar=forzar,
         )
@@ -515,8 +558,9 @@ class _PanelReservasRegulares(QWidget):
             check.setChecked(dia == reserva["DiaSemana"])
         self.spin_desde.setValue(reserva["HoraInicio"])
         self.spin_hasta.setValue(reserva["HoraFin"])
-        self.campo_vigencia_inicio.setText(fecha_actual(self.conn).isoformat())
-        self.campo_vigencia_fin.clear()
+        hoy = fecha_actual(self.conn)
+        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.campo_vigencia_fin.setDate(_FECHA_SIN_DATO)
         self.casilla_excepcion.setChecked(bool(reserva["EsExcepcion"]))
         self._sincronizar_grilla()
 
@@ -564,13 +608,10 @@ class _PanelReservasAisladas(QWidget):
         form.addWidget(self.combo_consultorio)
 
         self.campo_fecha = QDateEdit()
-        self.campo_fecha.setDisplayFormat("dd-MM-yyyy")
+        self.campo_fecha.setDisplayFormat(_FORMATO_FECHA)
         self.campo_fecha.setCalendarPopup(True)
-        self.campo_fecha.dateChanged.connect(self._actualizar_etiqueta_fecha)
         form.addWidget(QLabel("Fecha"))
         form.addWidget(self.campo_fecha)
-        self.etiqueta_fecha = QLabel()
-        form.addWidget(self.etiqueta_fecha)
 
         fila_horario = QHBoxLayout()
         self.spin_desde = _SpinHorario()
@@ -591,7 +632,22 @@ class _PanelReservasAisladas(QWidget):
         form.addWidget(self.casilla_recargo)
 
         self.casilla_reubicacion = QCheckBox("Es reubicación (compensa una ausencia del profesional, no genera cargo)")
+        self.casilla_reubicacion.stateChanged.connect(self._alternar_reubicacion)
         form.addWidget(self.casilla_reubicacion)
+
+        self.contenedor_reubicacion = QWidget()
+        layout_reubicacion = QVBoxLayout(self.contenedor_reubicacion)
+        layout_reubicacion.setContentsMargins(0, 0, 0, 0)
+        layout_reubicacion.addWidget(QLabel("Horario que no va a usar"))
+        self.combo_horario_no_usado = QComboBox()
+        layout_reubicacion.addWidget(self.combo_horario_no_usado)
+        layout_reubicacion.addWidget(QLabel("Fecha que falta"))
+        self.campo_fecha_ausencia = QDateEdit()
+        self.campo_fecha_ausencia.setDisplayFormat(_FORMATO_FECHA)
+        self.campo_fecha_ausencia.setCalendarPopup(True)
+        layout_reubicacion.addWidget(self.campo_fecha_ausencia)
+        self.contenedor_reubicacion.setVisible(False)
+        form.addWidget(self.contenedor_reubicacion)
 
         boton_crear = QPushButton("Crear reserva aislada")
         boton_crear.setObjectName("botonPrimario")
@@ -647,7 +703,7 @@ class _PanelReservasAisladas(QWidget):
 
         hoy = fecha_actual(self.conn)
         self.campo_fecha.setDate(QDate(hoy.year, hoy.month, hoy.day))
-        self._actualizar_etiqueta_fecha()
+        self.campo_fecha_ausencia.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
@@ -689,6 +745,8 @@ class _PanelReservasAisladas(QWidget):
         self.grilla.filtrar_por_dias(dias)
         self.grilla.filtrar_por_profesional(id_profesional)
         self._actualizar_resumen_profesional(id_profesional)
+        if self.casilla_reubicacion.isChecked():
+            self._cargar_horarios_no_usados()
 
     def _actualizar_resumen_profesional(self, id_profesional: int | None) -> None:
         resumen = calcular_resumen_profesional(self.conn, id_profesional)
@@ -703,9 +761,23 @@ class _PanelReservasAisladas(QWidget):
         self.etiqueta_descuento.setText(f"% Descuento: {resumen.porcentaje_descuento:.1f}%")
         self.etiqueta_vacaciones.setText(f"% Vacaciones disponible: {resumen.porcentaje_vacaciones_disponible:.1f}%")
 
-    def _actualizar_etiqueta_fecha(self) -> None:
-        fecha = self.campo_fecha.date().toPython()
-        self.etiqueta_fecha.setText(f"{fecha_a_dia_semana(fecha)} {fecha.strftime('%d-%m-%Y')}")
+    def _alternar_reubicacion(self) -> None:
+        marcado = self.casilla_reubicacion.isChecked()
+        self.contenedor_reubicacion.setVisible(marcado)
+        if marcado:
+            self._cargar_horarios_no_usados()
+
+    def _cargar_horarios_no_usados(self) -> None:
+        """Al marcar "Es reubicación", ofrece elegir cuál de los horarios
+        regulares vigentes del profesional no va a usar esta vez — para
+        dejarlo registrado como Ausencia de ese consultorio en esa fecha
+        puntual (así queda libre para que otro profesional lo tome como
+        aislada), sin afectar la reserva regular ni la grilla visual."""
+        id_profesional = self.combo_profesional.currentData()
+        self.combo_horario_no_usado.clear()
+        self.combo_horario_no_usado.addItem("Sin especificar", None)
+        for id_consultorio, etiqueta in _opciones_horario_regular(self.conn, id_profesional):
+            self.combo_horario_no_usado.addItem(etiqueta, id_consultorio)
 
     def _resetear_formulario(self) -> None:
         """Igual que en Reservas regulares: después de aplicar un cambio,
@@ -719,6 +791,7 @@ class _PanelReservasAisladas(QWidget):
         self.spin_hasta.setValue(10)
         hoy = fecha_actual(self.conn)
         self.campo_fecha.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.campo_fecha_ausencia.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self.casilla_recargo.setChecked(False)
         self.casilla_reubicacion.setChecked(False)
 
@@ -752,16 +825,17 @@ class _PanelReservasAisladas(QWidget):
                 "JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE c.IdConsultorio = ?",
                 (r["IdConsultorio"],),
             ).fetchone()
-            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(profesional["Apellido"] if profesional else "?"))
+            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             texto_consultorio = f"{consultorio['Departamento']} - {consultorio['NumeroConsultorio']}" if consultorio else "?"
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(texto_consultorio))
-            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(r["Fecha"]))
+            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_fmt_fecha(r["Fecha"])))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(f"{r['HoraInicio']:g} a {r['HoraFin']:g}"))
             estado = f"{r['Estado']} (reubicación)" if r["EsReubicacion"] else r["Estado"]
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem(estado))
             valor_hora = consultorio["ValorHoraAisladaActual"] if consultorio else 0.0
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(self._valor_reserva(r, valor_hora, recargo_pct)))
         self.tabla.resizeColumnsToContents()
+        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._sincronizar_grilla()
         self.grilla.actualizar()
 
@@ -797,12 +871,32 @@ class _PanelReservasAisladas(QWidget):
             QMessageBox.warning(self, "Crear reserva aislada", str(error))
             return
         self.conn.commit()
+        if datos["es_reubicacion"]:
+            self._registrar_ausencia_por_reubicacion(id_profesional, fecha)
         if advertencias:
             QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias))
         self._copiar_mensaje_detalle(datos["id_profesional"], fecha)
         self.actualizar()
         self._resetear_formulario()
         self._sincronizar_grilla()
+
+    def _registrar_ausencia_por_reubicacion(self, id_profesional: int, fecha_aislada: str) -> None:
+        """Si al marcar "Es reubicación" el operador indicó cuál de los
+        horarios regulares del profesional no va a usar, deja registrada
+        la Ausencia de ese consultorio en la fecha indicada — así queda
+        libre para que otro profesional lo tome como aislada, sin afectar
+        la reserva regular ni la grilla visual (mismo criterio que ya usa
+        la pantalla de Ausencias)."""
+        id_consultorio_no_usado = self.combo_horario_no_usado.currentData()
+        if id_consultorio_no_usado is None:
+            return
+        fecha_ausencia = self.campo_fecha_ausencia.date().toPython().isoformat()
+        crear_ausencia(
+            self.conn, id_profesional=id_profesional, fecha_desde=fecha_ausencia, fecha_hasta=fecha_ausencia,
+            id_consultorio=id_consultorio_no_usado, motivo="Reubicación",
+            observacion=f"Compensada por la reserva aislada del {fecha_aislada}",
+        )
+        self.conn.commit()
 
     def _copiar_mensaje_detalle(self, id_profesional: int, fecha: str) -> None:
         """DC-02/DC-03/DC-04: confirmar, cancelar o modificar una reserva
