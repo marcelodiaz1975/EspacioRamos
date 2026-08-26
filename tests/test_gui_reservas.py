@@ -222,15 +222,23 @@ def test_finalizar_vigencia_regenera_liquidacion_enviada(qtbot, conn):
     assert ultima["EstadoEnvio"] == "Regenerada no enviada"
 
 
-def test_finalizar_vigencia_actualiza_vigenciafin(qtbot, conn):
+def test_finalizar_vigencia_actualiza_vigenciafin_a_fin_de_mes(qtbot, conn):
+    """"Finalizar reserva a fin de mes": el caso clásico — la vigencia
+    se cierra el último día del mes en curso, no el día exacto en que se
+    hace el trámite."""
+    from app.negocio.dias import ultimo_dia_mes
+
     _preparar(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-10' WHERE IdConfiguracion = 1"
+    )
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.panel_regulares._crear()
     pantalla.panel_regulares.tabla.selectRow(0)
     pantalla.panel_regulares._finalizar_vigencia()
     fila = conn.execute("SELECT VigenciaFin FROM ReservaRegular").fetchone()
-    assert fila["VigenciaFin"] is not None
+    assert fila["VigenciaFin"] == ultimo_dia_mes(2026, 8).isoformat() == "2026-08-31"
 
 
 def test_modificar_seleccionada_finaliza_la_vieja_y_precarga_el_formulario(qtbot, conn):
@@ -299,7 +307,7 @@ def test_crear_reserva_aislada_sin_conflicto_persiste(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.panel_aisladas._crear()
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
-    assert pantalla.panel_aisladas.tabla.item(0, 5).text() == "Confirmada"
+    assert pantalla.panel_aisladas.tabla.item(0, 6).text() == "Confirmada"
 
 
 def _monkeypatch_clipboard(monkeypatch):
@@ -769,7 +777,7 @@ def test_tabla_aisladas_columna_valor(qtbot, conn):
     panel = pantalla.panel_aisladas
     from app.negocio.formato import formatear_moneda
 
-    valores = {panel.tabla.item(f, 3).text(): panel.tabla.item(f, 6).text() for f in range(panel.tabla.rowCount())}
+    valores = {panel.tabla.item(f, 3).text(): panel.tabla.item(f, 7).text() for f in range(panel.tabla.rowCount())}
     assert valores["17-08-2026"] == formatear_moneda(2000)
     assert valores["17-09-2026"] == ""
 
@@ -1009,3 +1017,68 @@ def test_modificar_reserva_aislada_sin_fila_avisa(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.panel_aisladas._modificar_seleccionada()
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 0
+
+
+def test_modificar_reserva_aislada_al_confirmar_regenera_mensaje_al_portapapeles(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_fecha.setDate(QDate(2026, 8, 18))
+    panel._crear()
+
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+    panel.spin_hasta.setValue(12)  # el ajuste que pedían
+    panel._crear()
+
+    # se copia el mensaje al cancelar la vieja y de nuevo al confirmar la
+    # corregida
+    assert len(copiado) == 2
+    assert "DETALLE RESERVA" in copiado[-1]
+
+
+def test_columna_reubicacion_en_tabla_de_aisladas(qtbot, conn):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-08-18",
+        HoraInicio=9, HoraFin=10, EsReubicacion=1,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-08-19",
+        HoraInicio=9, HoraFin=10, EsReubicacion=0,
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    assert panel.tabla.horizontalHeaderItem(5).text() == "Reubicación"
+    assert panel.tabla.horizontalHeaderItem(6).text() == "Estado"
+    valores = {panel.tabla.item(f, 3).text(): panel.tabla.item(f, 5).text() for f in range(panel.tabla.rowCount())}
+    assert valores["18-08-2026"] == "Sí"
+    assert valores["19-08-2026"] == "No"
+    # el Estado ya no repite la aclaración de reubicación (queda en su propia columna)
+    assert panel.tabla.item(0, 6).text() == "Confirmada"
+
+
+def test_campo_profesional_de_la_grilla_usa_el_mismo_formato(qtbot, conn):
+    from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
+
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", DomicilioLocalidad="Ramos Mejía")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    id_virginia = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Lo Veci", NombrePila="Virginia", Tratamiento="Lic.", IdCodigo="R1",
+    )
+    conn.commit()
+
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    texto = next(t for t, i in widget._profesionales_por_texto.items() if i == id_virginia)
+    assert texto == "R1 - Lic. Virginia Lo Veci"

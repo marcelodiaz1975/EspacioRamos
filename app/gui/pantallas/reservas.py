@@ -37,7 +37,7 @@ from app.gui.widgets.grilla_operativa import (
     unidades_con_reserva_vigente,
 )
 from app.negocio.ausencias import crear_ausencia
-from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual
+from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, ultimo_dia_mes
 from app.negocio.formato import formatear_moneda
 from app.negocio.lista_espera import marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
@@ -342,7 +342,7 @@ class _PanelReservasRegulares(QWidget):
         boton_modificar = QPushButton("Modificar seleccionada")
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         fila_acciones.addWidget(boton_modificar)
-        boton_finalizar = QPushButton("Finalizar vigencia hoy")
+        boton_finalizar = QPushButton("Finalizar reserva a fin de mes")
         boton_finalizar.clicked.connect(self._finalizar_vigencia)
         fila_acciones.addWidget(boton_finalizar)
         fila_acciones.addStretch()
@@ -533,9 +533,9 @@ class _PanelReservasRegulares(QWidget):
             return None
         return self._reservas[filas[0].row()]
 
-    def _finalizar_registro(self, reserva: sqlite3.Row) -> None:
+    def _finalizar_registro(self, reserva: sqlite3.Row, fecha_fin: str) -> None:
         obtener_repositorio(self.conn, "ReservaRegular").actualizar(
-            reserva["IdReservaRegular"], VigenciaFin=fecha_actual(self.conn).isoformat()
+            reserva["IdReservaRegular"], VigenciaFin=fecha_fin
         )
         regenerar_si_corresponde(
             self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn),
@@ -543,24 +543,31 @@ class _PanelReservasRegulares(QWidget):
         self.conn.commit()
 
     def _finalizar_vigencia(self) -> None:
+        """"Finalizar reserva a fin de mes": el caso clásico (95% de las
+        bajas se cierran a fin de mes), no el día exacto en que se
+        gestiona la baja."""
         reserva = self._fila_seleccionada()
         if reserva is None:
             return
-        self._finalizar_registro(reserva)
+        hoy = fecha_actual(self.conn)
+        fin_de_mes = ultimo_dia_mes(hoy.year, hoy.month)
+        self._finalizar_registro(reserva, fin_de_mes.isoformat())
         self.actualizar()
 
     def _modificar_seleccionada(self) -> None:
         """No se edita la fila histórica in-place (podría desalinear una
         liquidación ya emitida que la haya usado): finaliza su vigencia
-        hoy — igual que "Finalizar vigencia hoy" — y precarga el
-        formulario con sus datos para dar de alta la versión nueva, con
-        vigencia desde hoy. El operador ajusta lo que haga falta y
-        confirma con "Crear reserva regular", como cualquier alta."""
+        hoy (no a fin de mes — acá la versión nueva arranca hoy mismo, y
+        dejarla superpuesta con la vieja hasta fin de mes rompería la
+        validación de solapamiento) y precarga el formulario con sus
+        datos para dar de alta la versión nueva. El operador ajusta lo
+        que haga falta y confirma con "Crear reserva regular", como
+        cualquier alta."""
         reserva = self._fila_seleccionada()
         if reserva is None:
             QMessageBox.warning(self, "Modificar reserva", "Elegí una fila de la tabla para modificar.")
             return
-        self._finalizar_registro(reserva)
+        self._finalizar_registro(reserva, fecha_actual(self.conn).isoformat())
         self.actualizar()
 
         indice_profesional = self.combo_profesional.findData(reserva["IdProfesional"])
@@ -698,9 +705,9 @@ class _PanelReservasAisladas(QWidget):
         panel_tabla = QGroupBox("Reservas aisladas")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(7)
+        self.tabla.setColumnCount(8)
         self.tabla.setHorizontalHeaderLabels(
-            ["Profesional", "Consultorio", "Día", "Fecha", "Horario", "Estado", "Valor"]
+            ["Profesional", "Consultorio", "Día", "Fecha", "Horario", "Reubicación", "Estado", "Valor"]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -848,10 +855,10 @@ class _PanelReservasAisladas(QWidget):
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(fecha_a_dia_semana(date.fromisoformat(r["Fecha"]))))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(_fmt_fecha(r["Fecha"])))
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
-            estado = f"{r['Estado']} (reubicación)" if r["EsReubicacion"] else r["Estado"]
-            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(estado))
+            self.tabla.setItem(fila_idx, 5, QTableWidgetItem("Sí" if r["EsReubicacion"] else "No"))
+            self.tabla.setItem(fila_idx, 6, QTableWidgetItem(r["Estado"]))
             valor_hora = consultorio["ValorHoraAisladaActual"] if consultorio else 0.0
-            self.tabla.setItem(fila_idx, 6, QTableWidgetItem(self._valor_reserva(r, valor_hora, recargo_pct)))
+            self.tabla.setItem(fila_idx, 7, QTableWidgetItem(self._valor_reserva(r, valor_hora, recargo_pct)))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._sincronizar_grilla()

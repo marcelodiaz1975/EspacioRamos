@@ -395,12 +395,18 @@ class GrillaOperativaWidget(QWidget):
         self.actualizar()
 
     def _cargar_completador_profesionales(self) -> None:
+        """"R1 - Lic. Virginia Lo Veci": mismo formato que usan los
+        formularios de Reservas (código + Tratamiento + NombrePila +
+        Apellido) — acá siempre con código porque solo entran los
+        profesionales que tienen uno cargado."""
         textos = []
         for p in self.conn.execute(
-            "SELECT IdProfesional, IdCodigo, Apellido, NombrePila FROM Profesional WHERE IdCodigo IS NOT NULL "
-            "ORDER BY IdCodigo"
+            "SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila FROM Profesional "
+            "WHERE IdCodigo IS NOT NULL ORDER BY IdCodigo"
         ).fetchall():
-            texto = f"{p['IdCodigo']} - {p['Apellido']}, {p['NombrePila'] or ''}".rstrip(", ")
+            partes = [x for x in (p["Tratamiento"], p["NombrePila"], p["Apellido"]) if x]
+            nombre = " ".join(partes) if partes else p["Apellido"]
+            texto = f"{p['IdCodigo']} - {nombre}"
             self._profesionales_por_texto[texto] = p["IdProfesional"]
             textos.append(texto)
         completador = QCompleter(textos)
