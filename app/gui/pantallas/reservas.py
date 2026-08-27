@@ -106,6 +106,7 @@ class _SpinHorario(QDoubleSpinBox):
 _CATEGORIAS_REGULARES = ("R", "B", "E")
 _CATEGORIAS_AISLADAS = ("R", "A")
 _ORDEN_CATEGORIA_REGULAR = {"B": 0, "R": 1, "E": 2}
+_ORDEN_CATEGORIA_AISLADA = {cat: i for i, cat in enumerate(_CATEGORIAS_AISLADAS)}
 _SIN_ELEGIR = object()  # sentinel del placeholder "Seleccionar…" de Localidad (None ya es un valor real: "sin localidad")
 
 
@@ -127,22 +128,6 @@ def _texto_profesional(fila: sqlite3.Row) -> str:
     nombre = " ".join(partes) if partes else fila["Apellido"]
     codigo = fila["IdCodigo"]
     return f"{codigo} - {nombre}" if codigo else nombre
-
-
-def _texto_consultorio(consultorio: sqlite3.Row, mostrar_localidad: bool, mostrar_edificio: bool) -> str:
-    """"Ramos Mejía - Ramos 1 - 7mo 'L' - 1": Localidad y Edificio se
-    omiten cuando el conjunto que se está mostrando en la tabla tiene
-    uno solo (no hace falta aclarar lo que ya es igual en todas las
-    filas) — mismo criterio que usa GrillaOperativaWidget para sus
-    encabezados agrupados."""
-    partes = []
-    if mostrar_localidad:
-        partes.append(consultorio["DomicilioLocalidad"] or "(Sin localidad)")
-    if mostrar_edificio:
-        partes.append(consultorio["NombreEdificio"])
-    partes.append(consultorio["Departamento"])
-    partes.append(str(consultorio["NumeroConsultorio"]))
-    return " - ".join(partes)
 
 
 def _opciones_profesional(conn: sqlite3.Connection, categorias: tuple[str, ...]) -> list[tuple[int, str]]:
@@ -214,15 +199,6 @@ def _opciones_consultorio_de_unidad(conn: sqlite3.Connection, id_unidad: int | N
     return [(f["IdConsultorio"], f"Consultorio {f['NumeroConsultorio']}") for f in filas]
 
 
-def _recargar_edificios(conn: sqlite3.Connection, combo_localidad: QComboBox, combo_edificio: QComboBox) -> None:
-    localidad = combo_localidad.currentData()
-    combo_edificio.blockSignals(True)
-    combo_edificio.clear()
-    for id_, nombre in _opciones_edificio(conn, localidad):
-        combo_edificio.addItem(nombre, id_)
-    combo_edificio.blockSignals(False)
-
-
 def _recargar_unidades(conn: sqlite3.Connection, combo_edificio: QComboBox, combo_unidad: QComboBox) -> None:
     id_edificio = combo_edificio.currentData()
     combo_unidad.blockSignals(True)
@@ -250,12 +226,12 @@ class PantallaReservas(QWidget):
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
-        pestanas = QTabWidget()
+        self.pestanas = QTabWidget()
         self.panel_regulares = _PanelReservasRegulares(conn)
         self.panel_aisladas = _PanelReservasAisladas(conn)
-        pestanas.addTab(self.panel_regulares, "Regulares")
-        pestanas.addTab(self.panel_aisladas, "Aisladas")
-        layout.addWidget(pestanas, stretch=1)
+        self.pestanas.addTab(self.panel_regulares, "Regulares")
+        self.pestanas.addTab(self.panel_aisladas, "Aisladas")
+        layout.addWidget(self.pestanas, stretch=1)
 
     def actualizar(self) -> None:
         self.panel_regulares.actualizar()
@@ -513,11 +489,10 @@ class _PanelReservasRegulares(QWidget):
         return claves[columna]
 
     def _cargar_edificios(self) -> None:
-        """A diferencia de Reservas aisladas (que reusa `_recargar_edificios`
-        tal cual), acá Localidad/Edificio fuerzan una elección explícita
-        cuando hay más de una opción — "Seleccionar…" habilitado, en vez
-        de quedarse en la primera opción sin que el operador la haya
-        elegido a propósito."""
+        """Localidad/Edificio fuerzan una elección explícita cuando hay
+        más de una opción — "Seleccionar…" habilitado, en vez de quedarse
+        en la primera opción sin que el operador la haya elegido a
+        propósito."""
         localidad = self.combo_localidad.currentData()
         self.combo_edificio.blockSignals(True)
         self.combo_edificio.clear()
@@ -812,6 +787,15 @@ class _PanelReservasAisladas(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Mismo motivo que en Reservas regulares: `setFocus()` durante la
+        construcción no alcanza a "pegar" porque el QTabWidget contenedor
+        todavía no está mostrado."""
+        super().showEvent(event)
+        self._orden.reiniciar()
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
@@ -826,7 +810,7 @@ class _PanelReservasAisladas(QWidget):
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_AISLADAS):
             self.combo_profesional.addItem(etiqueta, id_)
         self.combo_profesional.currentIndexChanged.connect(self.actualizar)
@@ -834,8 +818,12 @@ class _PanelReservasAisladas(QWidget):
         form.addWidget(self.combo_profesional)
 
         self.combo_localidad = QComboBox()
-        for valor, etiqueta in _opciones_localidad(self.conn):
+        opciones_localidad = _opciones_localidad(self.conn)
+        if len(opciones_localidad) > 1:
+            self.combo_localidad.addItem("Seleccionar…", _SIN_ELEGIR)
+        for valor, etiqueta in opciones_localidad:
             self.combo_localidad.addItem(etiqueta, valor)
+        self.combo_localidad.setEnabled(len(opciones_localidad) > 1)
         self.combo_localidad.currentIndexChanged.connect(self._cargar_edificios)
         form.addWidget(QLabel("Localidad"))
         form.addWidget(self.combo_localidad)
@@ -901,21 +889,27 @@ class _PanelReservasAisladas(QWidget):
         boton_crear.setObjectName("botonPrimario")
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
+        boton_modificar = QPushButton("Modificar reserva")
+        boton_modificar.clicked.connect(self._modificar_seleccionada)
+        form.addWidget(boton_modificar)
+        boton_cancelar = QPushButton("Cancelar reserva")
+        boton_cancelar.clicked.connect(self._cancelar)
+        form.addWidget(boton_cancelar)
+        boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.clicked.connect(self._deshacer_ultimo)
+        form.addWidget(boton_deshacer)
 
         linea_separadora = QFrame()
         linea_separadora.setFrameShape(QFrame.Shape.HLine)
         linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
         form.addWidget(linea_separadora)
 
-        form.addWidget(QLabel("Datos complementarios del profesional"))
         self.etiqueta_horas_semanales = QLabel()
         self.etiqueta_horas_aisladas = QLabel()
         self.etiqueta_descuento = QLabel()
-        self.etiqueta_vacaciones = QLabel()
         form.addWidget(self.etiqueta_horas_semanales)
         form.addWidget(self.etiqueta_horas_aisladas)
         form.addWidget(self.etiqueta_descuento)
-        form.addWidget(self.etiqueta_vacaciones)
 
         form.addStretch()
         splitter_superior.addWidget(panel_form)
@@ -924,6 +918,7 @@ class _PanelReservasAisladas(QWidget):
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.combo_modo.setCurrentIndex(self.grilla.combo_modo.findData("aislada"))
+        self.grilla.activar_filtro_exclusivo_profesional(True)
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -934,24 +929,18 @@ class _PanelReservasAisladas(QWidget):
         panel_tabla = QGroupBox("Reservas aisladas")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(8)
+        self.tabla.setColumnCount(11)
         self.tabla.setHorizontalHeaderLabels(
-            ["Profesional", "Consultorio", "Día", "Fecha", "Horario", "Reubicación", "Estado", "Valor"]
+            [
+                "Profesional", "Localidad", "Edificio", "Unidad", "Consultorio", "Día", "Fecha", "Horario",
+                "Reubicación", "Estado", "Valor",
+            ]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
-
-        fila_acciones = QHBoxLayout()
-        boton_modificar = QPushButton("Modificar reserva")
-        boton_modificar.clicked.connect(self._modificar_seleccionada)
-        fila_acciones.addWidget(boton_modificar)
-        boton_cancelar = QPushButton("Cancelar reserva")
-        boton_cancelar.clicked.connect(self._cancelar)
-        fila_acciones.addWidget(boton_cancelar)
-        fila_acciones.addStretch()
-        layout_tabla.addLayout(fila_acciones)
         layout.addWidget(panel_tabla, stretch=1)
 
         hoy = fecha_actual(self.conn)
@@ -961,9 +950,35 @@ class _PanelReservasAisladas(QWidget):
         scroll.setWidget(contenido)
         layout_externo.addWidget(scroll)
         self._cargar_edificios()
+        self._foco = instalar_enter_avanza_foco(
+            [
+                self.combo_profesional, self.combo_localidad, self.combo_edificio, self.combo_unidad,
+                self.combo_consultorio, self.campo_fecha, self.spin_desde, self.spin_hasta,
+                self.casilla_recargo, self.casilla_reubicacion, self.combo_horario_no_usado,
+                self.campo_fecha_ausencia, boton_crear,
+            ]
+        )
 
     def _cargar_edificios(self) -> None:
-        _recargar_edificios(self.conn, self.combo_localidad, self.combo_edificio)
+        """Mismo criterio que en Reservas regulares: Localidad/Edificio
+        fuerzan una elección explícita cuando hay más de una opción —
+        "Seleccionar…" habilitado, en vez de quedarse en la primera
+        opción sin que el operador la haya elegido a propósito."""
+        localidad = self.combo_localidad.currentData()
+        self.combo_edificio.blockSignals(True)
+        self.combo_edificio.clear()
+        if localidad is _SIN_ELEGIR:
+            self.combo_edificio.blockSignals(False)
+            self.combo_edificio.setEnabled(False)
+            self._cargar_unidades()
+            return
+        opciones_edificio = _opciones_edificio(self.conn, localidad)
+        if len(opciones_edificio) > 1:
+            self.combo_edificio.addItem("Seleccionar…", None)
+        for id_, nombre in opciones_edificio:
+            self.combo_edificio.addItem(nombre, id_)
+        self.combo_edificio.blockSignals(False)
+        self.combo_edificio.setEnabled(len(opciones_edificio) > 1)
         self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
@@ -1001,15 +1016,23 @@ class _PanelReservasAisladas(QWidget):
         reserva regular, ej. categoría A): acotada a las unidades y días
         en los que ya tiene algo reservado, con su propia reserva
         pintada de azul — en modo "Reservas aisladas" porque acá
-        interesa ver qué está libre AHORA, no los conflictos futuros."""
+        interesa ver qué está libre AHORA, no los conflictos futuros. Con
+        "Todos los profesionales" no tiene sentido acotar a nada — se
+        saca cualquier filtro y queda la grilla completa."""
         id_profesional = self.combo_profesional.currentData()
-        pares = pares_dia_unidad_con_reserva(self.conn, id_profesional)
-        ids_unidad = sorted({u for _, u in pares})
-        dias = sorted({d for d, _ in pares}, key=DIAS_SEMANA.index)
-        self.grilla.filtrar_por_unidades(ids_unidad)
-        self.grilla.filtrar_por_dias(dias)
-        self.grilla.filtrar_por_pares_unidad_dia(pares)
-        self.grilla.filtrar_por_profesional(id_profesional)
+        if id_profesional is None:
+            self.grilla.filtrar_por_unidades(None)
+            self.grilla.filtrar_por_dias(None)
+            self.grilla.filtrar_por_pares_unidad_dia(None)
+            self.grilla.filtrar_por_profesional(None)
+        else:
+            pares = pares_dia_unidad_con_reserva(self.conn, id_profesional)
+            ids_unidad = sorted({u for _, u in pares})
+            dias = sorted({d for d, _ in pares}, key=DIAS_SEMANA.index)
+            self.grilla.filtrar_por_unidades(ids_unidad)
+            self.grilla.filtrar_por_dias(dias)
+            self.grilla.filtrar_por_pares_unidad_dia(pares)
+            self.grilla.filtrar_por_profesional(id_profesional)
         self._actualizar_resumen_profesional(id_profesional)
         if self.casilla_reubicacion.isChecked():
             self._cargar_horarios_no_usados()
@@ -1020,12 +1043,10 @@ class _PanelReservasAisladas(QWidget):
             self.etiqueta_horas_semanales.setText("Horas regulares semanales: —")
             self.etiqueta_horas_aisladas.setText("Horas aisladas mensuales: —")
             self.etiqueta_descuento.setText("% Descuento: —")
-            self.etiqueta_vacaciones.setText("% Vacaciones disponible: —")
             return
         self.etiqueta_horas_semanales.setText(f"Horas regulares semanales: {_fmt_horas(resumen.horas_semanales)}")
         self.etiqueta_horas_aisladas.setText(f"Horas aisladas mensuales: {_fmt_horas(resumen.horas_aisladas_mensuales)}")
         self.etiqueta_descuento.setText(f"% Descuento: {resumen.porcentaje_descuento:.1f}%")
-        self.etiqueta_vacaciones.setText(f"% Vacaciones disponible: {resumen.porcentaje_vacaciones_disponible:.1f}%")
 
     def _alternar_reubicacion(self) -> None:
         marcado = self.casilla_reubicacion.isChecked()
@@ -1077,8 +1098,10 @@ class _PanelReservasAisladas(QWidget):
         """Sin profesional elegido, muestra todas las reservas aisladas de
         todos los profesionales; con uno elegido, se acota a las de ese
         profesional únicamente (incluida su historia — canceladas
-        incluidas — para poder revisarla). Orden: código del profesional,
-        fecha y hora inicial."""
+        incluidas — para poder revisarla). Orden por defecto: categoría
+        del profesional (R, A, en ese orden fijo — no alfabético), número
+        de profesional, fecha y hora de inicio — overridable haciendo
+        click en el título de una columna (ver `OrdenTabla`)."""
         id_profesional_filtro = self.combo_profesional.currentData()
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
         todas = obtener_repositorio(self.conn, "ReservaAislada").listar()
@@ -1104,38 +1127,63 @@ class _PanelReservasAisladas(QWidget):
             ).fetchone()
             filas.append((r, profesional, consultorio))
         filas.sort(key=lambda t: (
-            t[1]["IdCodigo"] or "" if t[1] else "",
+            _ORDEN_CATEGORIA_AISLADA.get(t[1]["CategoriaProfesional"], 99) if t[1] else 99,
+            _numero_codigo(t[1]["IdCodigo"] if t[1] else None),
             t[0]["Fecha"],
             t[0]["HoraInicio"],
         ))
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._reservas = [t[0] for t in filas]
-
-        mostrar_localidad = len({t[2]["DomicilioLocalidad"] for t in filas if t[2]}) > 1
-        mostrar_edificio = len({t[2]["NombreEdificio"] for t in filas if t[2]}) > 1
 
         self.tabla.setRowCount(len(filas))
         for fila_idx, (r, profesional, consultorio) in enumerate(filas):
             self.tabla.setItem(fila_idx, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            texto_consultorio = (
-                _texto_consultorio(consultorio, mostrar_localidad, mostrar_edificio) if consultorio else "?"
+            self.tabla.setItem(
+                fila_idx, 1,
+                QTableWidgetItem((consultorio["DomicilioLocalidad"] or "(Sin localidad)") if consultorio else "?"),
             )
-            self.tabla.setItem(fila_idx, 1, QTableWidgetItem(texto_consultorio))
-            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(fecha_a_dia_semana(date.fromisoformat(r["Fecha"]))))
-            self.tabla.setItem(fila_idx, 3, QTableWidgetItem(_fmt_fecha(r["Fecha"])))
-            self.tabla.setItem(fila_idx, 4, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
-            self.tabla.setItem(fila_idx, 5, QTableWidgetItem("Sí" if r["EsReubicacion"] else "No"))
-            self.tabla.setItem(fila_idx, 6, QTableWidgetItem(r["Estado"]))
+            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(consultorio["NombreEdificio"] if consultorio else "?"))
+            self.tabla.setItem(fila_idx, 3, QTableWidgetItem(consultorio["Departamento"] if consultorio else "?"))
+            self.tabla.setItem(
+                fila_idx, 4, QTableWidgetItem(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
+            )
+            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(fecha_a_dia_semana(date.fromisoformat(r["Fecha"]))))
+            self.tabla.setItem(fila_idx, 6, QTableWidgetItem(_fmt_fecha(r["Fecha"])))
+            self.tabla.setItem(fila_idx, 7, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
+            self.tabla.setItem(fila_idx, 8, QTableWidgetItem("Sí" if r["EsReubicacion"] else "No"))
+            self.tabla.setItem(fila_idx, 9, QTableWidgetItem(r["Estado"]))
             valor_hora = consultorio["ValorHoraAisladaActual"] if consultorio else 0.0
-            self.tabla.setItem(fila_idx, 7, QTableWidgetItem(self._valor_reserva(r, valor_hora, recargo_pct)))
+            self.tabla.setItem(fila_idx, 10, QTableWidgetItem(self._valor_reserva(r, valor_hora, recargo_pct)))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._sincronizar_grilla()
         self.grilla.actualizar()
 
+    @staticmethod
+    def _clave_orden(columna: int):
+        claves = {
+            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            1: lambda t: (t[2]["DomicilioLocalidad"] or "") if t[2] else "",
+            2: lambda t: (t[2]["NombreEdificio"] or "") if t[2] else "",
+            3: lambda t: (t[2]["Departamento"] or "") if t[2] else "",
+            4: lambda t: (t[2]["NumeroConsultorio"] if t[2] else 0),
+            5: lambda t: date.fromisoformat(t[0]["Fecha"]).weekday(),
+            6: lambda t: t[0]["Fecha"],
+            7: lambda t: t[0]["HoraInicio"],
+            8: lambda t: bool(t[0]["EsReubicacion"]),
+            9: lambda t: t[0]["Estado"],
+            10: lambda t: t[0]["HoraFin"] - t[0]["HoraInicio"],
+        }
+        return claves[columna]
+
     def _crear(self, forzar: bool = False) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
             QMessageBox.warning(self, "Crear reserva aislada", "Elegí un profesional.")
+            return
+        if self.combo_consultorio.currentData() is None:
+            QMessageBox.warning(self, "Crear reserva aislada", "Elegí localidad, edificio, unidad y consultorio.")
             return
         fecha = self.campo_fecha.date().toPython().isoformat()
         if not forzar and not confirmar_si_fecha_es_mes_anterior(self, self.conn, fecha):
@@ -1228,6 +1276,41 @@ class _PanelReservasAisladas(QWidget):
         if reserva is None:
             return
         self._cancelar_registro(reserva, "Cancelar reserva")
+
+    def _deshacer_ultimo(self) -> None:
+        """A diferencia de Vacaciones/Licencias/Ausencias, acá nunca se
+        borra una reserva aislada (se cancela, para conservar el
+        historial) — "Deshacer" entonces solo cubre el caso seguro: si la
+        última reserva aislada cargada en el sistema (mayor
+        IdReservaAislada) todavía está Confirmada, se la cancela sin más.
+        Si ya está Cancelada (por un "Cancelar" o un "Modificar"
+        posterior a su alta), ese tipo de cambio no se puede deshacer
+        automáticamente — hay que corregirlo a mano."""
+        todas = obtener_repositorio(self.conn, "ReservaAislada").listar()
+        if not todas:
+            QMessageBox.warning(self, "Deshacer último movimiento", "No hay reservas aisladas cargadas para deshacer.")
+            return
+        ultima = max(todas, key=lambda r: r["IdReservaAislada"])
+        if ultima["Estado"] == "Cancelada":
+            QMessageBox.warning(
+                self, "Deshacer último movimiento",
+                "La última reserva aislada cargada ya está cancelada (por un \"Cancelar\" o \"Modificar\" "
+                "posterior) y ese tipo de cambio no se puede deshacer automáticamente. "
+                "Corregilo a mano desde la tabla.",
+            )
+            return
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(ultima["IdProfesional"])
+        respuesta = QMessageBox.question(
+            self, "Deshacer último movimiento",
+            "¿Deshacer el alta de la última reserva aislada cargada en el sistema?\n"
+            f"{_texto_profesional(profesional) if profesional else '?'}: "
+            f"{_fmt_fecha(ultima['Fecha'])} {_fmt_horario(ultima['HoraInicio'], ultima['HoraFin'])}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+        self._cancelar_registro(ultima, "Deshacer último movimiento")
+        self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
         """Mismo criterio que en Reservas regulares: no se edita la fila

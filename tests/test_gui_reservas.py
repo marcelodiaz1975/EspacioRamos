@@ -400,7 +400,7 @@ def test_crear_reserva_aislada_sin_conflicto_persiste(qtbot, conn):
     pantalla.panel_aisladas.combo_profesional.setCurrentIndex(1)
     pantalla.panel_aisladas._crear()
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
-    assert pantalla.panel_aisladas.tabla.item(0, 6).text() == "Confirmada"
+    assert pantalla.panel_aisladas.tabla.item(0, 9).text() == "Confirmada"
 
 
 def _monkeypatch_clipboard(monkeypatch):
@@ -743,8 +743,10 @@ def test_panel_aisladas_grilla_preview_se_refresca_al_crear_una_reserva(qtbot, c
     panel = pantalla.panel_aisladas
     panel.campo_fecha.setDate(QDate(2026, 8, 17))
 
-    # antes de la primera reserva del profesional, la vista previa está vacía
-    assert panel.grilla.ids_unidad_seleccionadas() == []
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    # con "Todos los profesionales" (el default), la vista previa muestra
+    # la grilla completa, no una acotada al profesional que se va a elegir
+    assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad]
 
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     panel._crear()
@@ -996,7 +998,7 @@ def test_tabla_aisladas_ordenada_por_fecha_y_hora(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
     filas = [
-        (panel.tabla.item(f, 2).text(), panel.tabla.item(f, 3).text(), panel.tabla.item(f, 4).text())
+        (panel.tabla.item(f, 5).text(), panel.tabla.item(f, 6).text(), panel.tabla.item(f, 7).text())
         for f in range(panel.tabla.rowCount())
     ]
     assert filas == [
@@ -1026,7 +1028,7 @@ def test_tabla_aisladas_columna_valor(qtbot, conn):
     panel = pantalla.panel_aisladas
     from app.negocio.formato import formatear_moneda
 
-    valores = {panel.tabla.item(f, 3).text(): panel.tabla.item(f, 7).text() for f in range(panel.tabla.rowCount())}
+    valores = {panel.tabla.item(f, 6).text(): panel.tabla.item(f, 10).text() for f in range(panel.tabla.rowCount())}
     assert valores["17-08-2026"] == formatear_moneda(2000)
     assert valores["17-09-2026"] == ""
 
@@ -1134,7 +1136,7 @@ def test_tablas_de_abajo_muestran_tratamiento_nombre_apellido_y_columna_ancha(qt
     tabla_a = pantalla.panel_aisladas.tabla
     assert tabla_a.item(0, 0).text() == "Lic. Virginia Gómez"
     assert tabla_a.columnWidth(0) >= 180
-    assert tabla_a.item(0, 4).text() == "9:00 a 10:00"
+    assert tabla_a.item(0, 7).text() == "9:00 a 10:00"
 
 
 def test_reubicacion_ofrece_horario_regular_y_registra_ausencia(qtbot, conn):
@@ -1221,9 +1223,9 @@ def test_dia_de_la_semana_en_tabla_de_aisladas(qtbot, conn):
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
-    assert panel.tabla.horizontalHeaderItem(2).text() == "Día"
-    assert panel.tabla.item(0, 2).text() == "Martes"
-    assert panel.tabla.item(0, 3).text() == "18-08-2026"
+    assert panel.tabla.horizontalHeaderItem(5).text() == "Día"
+    assert panel.tabla.item(0, 5).text() == "Martes"
+    assert panel.tabla.item(0, 6).text() == "18-08-2026"
 
 
 def test_modificar_reserva_aislada_cancela_la_vieja_y_precarga_el_formulario(qtbot, conn):
@@ -1311,13 +1313,13 @@ def test_columna_reubicacion_en_tabla_de_aisladas(qtbot, conn):
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
-    assert panel.tabla.horizontalHeaderItem(5).text() == "Reubicación"
-    assert panel.tabla.horizontalHeaderItem(6).text() == "Estado"
-    valores = {panel.tabla.item(f, 3).text(): panel.tabla.item(f, 5).text() for f in range(panel.tabla.rowCount())}
+    assert panel.tabla.horizontalHeaderItem(8).text() == "Reubicación"
+    assert panel.tabla.horizontalHeaderItem(9).text() == "Estado"
+    valores = {panel.tabla.item(f, 6).text(): panel.tabla.item(f, 8).text() for f in range(panel.tabla.rowCount())}
     assert valores["18-08-2026"] == "Sí"
     assert valores["19-08-2026"] == "No"
     # el Estado ya no repite la aclaración de reubicación (queda en su propia columna)
-    assert panel.tabla.item(0, 6).text() == "Confirmada"
+    assert panel.tabla.item(0, 9).text() == "Confirmada"
 
 
 def test_campo_profesional_de_la_grilla_usa_el_mismo_formato(qtbot, conn):
@@ -1361,10 +1363,10 @@ def test_combo_localidad_filtra_el_combo_edificio_en_ambas_solapas(qtbot, conn):
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    # Regulares agrega un placeholder "Seleccionar…" cuando hay más de una
-    # localidad (fuerza la elección); Aisladas no cambió ese criterio.
+    # Ambas solapas agregan un placeholder "Seleccionar…" cuando hay más
+    # de una localidad (fuerza la elección).
     assert pantalla.panel_regulares.combo_localidad.count() == 3
-    assert pantalla.panel_aisladas.combo_localidad.count() == 2
+    assert pantalla.panel_aisladas.combo_localidad.count() == 3
 
     for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
         indice = panel.combo_localidad.findData("Haedo")
@@ -1537,25 +1539,30 @@ def test_tabla_aisladas_con_profesional_acota_a_sus_reservas(qtbot, conn):
     panel = pantalla.panel_aisladas
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional_1))
     assert panel.tabla.rowCount() == 1
-    assert panel.tabla.item(0, 3).text() == "18-08-2026"
+    assert panel.tabla.item(0, 6).text() == "18-08-2026"
 
 
-def test_tabla_aisladas_orden_por_codigo_fecha_y_hora(qtbot, conn):
+def test_tabla_aisladas_orden_por_defecto_categoria_numero_fecha_hora(qtbot, conn):
+    """Orden por defecto: categoría en el orden fijo R, A (no alfabético
+    inverso); dentro de la misma categoría, por número de profesional
+    (numérico: "R2" antes que "R10", no alfabético); luego fecha y hora
+    de inicio de la reserva."""
     _preparar(conn)
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
-    conn.execute("UPDATE Profesional SET IdCodigo = 'B1'")
-    id_a1 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ajeno", IdCodigo="A1")
-    id_b1 = conn.execute("SELECT IdProfesional FROM Profesional WHERE IdCodigo = 'B1'").fetchone()["IdProfesional"]
+    repo_prof = obtener_repositorio(conn, "Profesional")
+    id_a1 = repo_prof.crear(CategoriaProfesional="A", Apellido="Ajeno", IdCodigo="A1")
+    id_r10 = repo_prof.crear(CategoriaProfesional="R", Apellido="Regular Diez", IdCodigo="R10")
+    id_r2 = repo_prof.crear(CategoriaProfesional="R", Apellido="Regular Dos", IdCodigo="R2")
     repo = obtener_repositorio(conn, "ReservaAislada")
-    repo.crear(IdProfesional=id_b1, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=10)
-    repo.crear(IdProfesional=id_a1, IdConsultorio=id_consultorio, Fecha="2026-08-19", HoraInicio=9, HoraFin=10)
+    for id_prof in (id_a1, id_r10, id_r2):
+        repo.crear(IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=10)
     conn.commit()
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
     codigos = [panel.tabla.item(f, 0).text().split(" - ")[0] for f in range(panel.tabla.rowCount())]
-    assert codigos == ["A1", "B1"]
+    assert codigos == ["R2", "R10", "A1"]
 
 
 def test_combo_profesional_arranca_en_blanco_en_ambas_solapas(qtbot, conn):
@@ -1570,3 +1577,136 @@ def test_combo_profesional_arranca_en_blanco_en_ambas_solapas(qtbot, conn):
     assert pantalla.panel_regulares.combo_profesional.currentData() is None
     assert pantalla.panel_aisladas.combo_profesional.currentIndex() == 0
     assert pantalla.panel_aisladas.combo_profesional.currentData() is None
+
+
+def test_panel_aisladas_recibe_foco_en_profesional_al_mostrarse(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.pestanas.setCurrentWidget(pantalla.panel_aisladas)
+    qtbot.waitUntil(lambda: pantalla.panel_aisladas.combo_profesional.hasFocus())
+
+
+def test_tabla_aisladas_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
+    _preparar(conn)
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    repo = obtener_repositorio(conn, "ReservaAislada")
+    repo.crear(IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-08-20", HoraInicio=9, HoraFin=10)
+    repo.crear(IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=10)
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    assert panel.tabla.rowCount() == 2
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(6)  # "Fecha" ascendente
+    fechas_asc = [panel.tabla.item(f, 6).text() for f in range(panel.tabla.rowCount())]
+    assert fechas_asc == ["17-08-2026", "20-08-2026"]
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(6)  # de nuevo -> descendente
+    fechas_desc = [panel.tabla.item(f, 6).text() for f in range(panel.tabla.rowCount())]
+    assert fechas_desc == ["20-08-2026", "17-08-2026"]
+
+
+def test_deshacer_ultimo_movimiento_aislada_sin_registros_no_falla(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas._deshacer_ultimo()  # no debe intentar confirmar ni romper
+
+
+def test_deshacer_ultimo_movimiento_aislada_cancela_el_alta_reciente(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+    assert conn.execute("SELECT Estado FROM ReservaAislada").fetchone()["Estado"] == "Confirmada"
+
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT Estado FROM ReservaAislada").fetchone()["Estado"] == "Cancelada"
+
+
+def test_deshacer_ultimo_movimiento_aislada_cancelado_por_usuario_no_cancela(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT Estado FROM ReservaAislada").fetchone()["Estado"] == "Confirmada"
+
+
+def test_deshacer_ultimo_movimiento_aislada_ya_cancelada_avisa_y_no_hace_nada(qtbot, conn):
+    """Si la última reserva aislada cargada ya está cancelada (por un
+    "Cancelar" o "Modificar" posterior), ese tipo de cambio no se puede
+    deshacer automáticamente."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT Estado FROM ReservaAislada").fetchone()["Estado"] == "Cancelada"
+
+
+def test_crear_reserva_aislada_sin_elegir_consultorio_avisa_y_no_crea(qtbot, conn):
+    """Con más de una localidad y ninguna elegida todavía, "Crear reserva
+    aislada" no puede completar el alta sin explotar — avisa y no hace
+    nada, en vez de intentar guardar con IdConsultorio en blanco."""
+    _preparar_dos_localidades(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 0
+
+
+def test_crear_reserva_aislada_eligiendo_localidad_y_edificio_persiste(qtbot, conn):
+    id_edificio_1, id_consultorio_1, _, _, id_profesional = _preparar_dos_localidades(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.combo_localidad.setCurrentIndex(panel.combo_localidad.findData("Ramos Mejía"))
+    panel.combo_edificio.setCurrentIndex(panel.combo_edificio.findData(id_edificio_1))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
+    assert conn.execute("SELECT IdConsultorio FROM ReservaAislada").fetchone()["IdConsultorio"] == id_consultorio_1
+
+
+def test_grilla_preview_aisladas_filtro_exclusivo_no_muestra_otros_profesionales(qtbot, conn):
+    """Con R2 elegido, la vista previa solo muestra sus propias celdas —
+    aunque otro profesional (A1) tenga algo reservado el mismo día en la
+    misma unidad, a otra hora."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Norte")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    repo_prof = obtener_repositorio(conn, "Profesional")
+    id_r2 = repo_prof.crear(CategoriaProfesional="R", Apellido="Lo Veci", IdCodigo="R2")
+    id_a1 = repo_prof.crear(CategoriaProfesional="A", Apellido="Ajeno", IdCodigo="A1")
+    repo = obtener_repositorio(conn, "ReservaAislada")
+    repo.crear(IdProfesional=id_r2, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=10)
+    repo.crear(IdProfesional=id_a1, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=14, HoraFin=15)
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_r2))
+
+    codigos = {c.codigo for c in panel.grilla._resultado.values() if c.codigo}
+    assert codigos == {"R2"}
