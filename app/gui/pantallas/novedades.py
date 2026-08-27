@@ -10,7 +10,6 @@ funciones calculan; no se edita ni borra desde acá, son historial."""
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
 
 from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
@@ -217,8 +216,10 @@ class _PanelVacaciones(QWidget):
         panel_tabla = QGroupBox("Vacaciones tomadas")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(5)
-        self.tabla.setHorizontalHeaderLabels(["Profesional", "Desde", "Hasta", "Valor bonificado", "Cupo restante %"])
+        self.tabla.setColumnCount(6)
+        self.tabla.setHorizontalHeaderLabels(
+            ["Profesional", "Desde", "Hasta", "Valor bonificado", "Cupo utilizado %", "Cupo restante %"]
+        )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -295,8 +296,10 @@ class _PanelVacaciones(QWidget):
             self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
             valor = r["ValorBonificado"]
             self.tabla.setItem(i, 3, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
-            cupo = r["CupoRestantePorcentaje"]
-            self.tabla.setItem(i, 4, QTableWidgetItem(f"{cupo:.1f}%" if cupo is not None else ""))
+            cupo_utilizado = r["CupoConsumidoPorcentaje"]
+            self.tabla.setItem(i, 4, QTableWidgetItem(f"{cupo_utilizado:.1f}%" if cupo_utilizado is not None else ""))
+            cupo_restante = r["CupoRestantePorcentaje"]
+            self.tabla.setItem(i, 5, QTableWidgetItem(f"{cupo_restante:.1f}%" if cupo_restante is not None else ""))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._actualizar_cupo()
@@ -435,12 +438,6 @@ class _PanelLicencias(QWidget):
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
 
-        form.addWidget(_linea_divisoria())
-        self.etiqueta_cupo_utilizado = QLabel()
-        self.etiqueta_cupo_disponible = QLabel()
-        form.addWidget(self.etiqueta_cupo_utilizado)
-        form.addWidget(self.etiqueta_cupo_disponible)
-
         form.addStretch()
         splitter_superior.addWidget(panel_form)
 
@@ -504,39 +501,6 @@ class _PanelLicencias(QWidget):
         tipo = obtener_repositorio(self.conn, "TipoLicencia").obtener(id_tipo) if id_tipo is not None else None
         self.spin_porcentaje.setValue(tipo["PorcentajeBonificacion"] if tipo else 0)
 
-    def _actualizar_cupo(self) -> None:
-        """A diferencia de vacaciones, las licencias no tienen un cupo
-        anual compartido — el tope es la duración máxima de CADA tipo de
-        licencia (TipoLicencia.DuracionMaximaDias). Por eso acá el
-        "cupo" se calcula por tipo de licencia elegido: días tomados de
-        ese tipo en el año / duración máxima de ese tipo. Tipos sin
-        duración máxima (manuales o sin tope) no tienen cupo que mostrar."""
-        id_profesional = self.combo_profesional.currentData()
-        id_tipo = self.combo_tipo.currentData()
-        if id_profesional is None or id_tipo is None:
-            self.etiqueta_cupo_utilizado.setText("Porcentaje cupo utilizado: —")
-            self.etiqueta_cupo_disponible.setText("Porcentaje cupo disponible: —")
-            return
-        tipo = obtener_repositorio(self.conn, "TipoLicencia").obtener(id_tipo)
-        dias_maximos = tipo["DuracionMaximaDias"] if tipo else None
-        if not dias_maximos:
-            self.etiqueta_cupo_utilizado.setText("Porcentaje cupo utilizado: no aplica (este tipo no tiene tope de días)")
-            self.etiqueta_cupo_disponible.setText("Porcentaje cupo disponible: no aplica (este tipo no tiene tope de días)")
-            return
-        anio = str(self.spin_anio.value())
-        filas = self.conn.execute(
-            "SELECT FechaDesde, FechaHasta FROM Licencia WHERE IdProfesional = ? AND IdTipoLicencia = ? "
-            "AND substr(FechaDesde, 1, 4) = ?",
-            (id_profesional, id_tipo, anio),
-        ).fetchall()
-        dias_usados = sum(
-            (date.fromisoformat(f["FechaHasta"]) - date.fromisoformat(f["FechaDesde"])).days + 1 for f in filas
-        )
-        utilizado_pct = min(100.0, dias_usados / dias_maximos * 100)
-        disponible_pct = max(0.0, 100 - utilizado_pct)
-        self.etiqueta_cupo_utilizado.setText(f"Porcentaje cupo utilizado: {utilizado_pct:.1f}%")
-        self.etiqueta_cupo_disponible.setText(f"Porcentaje cupo disponible: {disponible_pct:.1f}%")
-
     def actualizar(self) -> None:
         id_profesional_filtro = self.combo_profesional.currentData()
         anio = str(self.spin_anio.value())
@@ -564,7 +528,6 @@ class _PanelLicencias(QWidget):
             self.tabla.setItem(i, 4, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
-        self._actualizar_cupo()
         self.grilla.actualizar()
 
     def _crear(self) -> None:

@@ -190,6 +190,23 @@ def test_tabla_vacaciones_filtra_por_anio_y_profesional(qtbot, conn):
     assert panel.tabla.item(0, 1).text() == f"01-09-{anio_actual}"
 
 
+def test_tabla_vacaciones_muestra_cupo_utilizado_junto_al_restante(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    anio_actual = panel.spin_anio.value()
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
+    panel._crear()
+
+    assert panel.tabla.horizontalHeaderItem(4).text() == "Cupo utilizado %"
+    assert panel.tabla.horizontalHeaderItem(5).text() == "Cupo restante %"
+    assert panel.tabla.item(0, 4).text() == "50.0%"
+    assert panel.tabla.item(0, 5).text() == "50.0%"
+
+
 def test_cupo_vacaciones_se_actualiza_con_profesional_y_anio(qtbot, conn):
     id_profesional = _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)
@@ -332,30 +349,16 @@ def test_crear_licencia_anio_ya_terminado_no_persiste(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 0
 
 
-def test_cupo_licencias_es_por_tipo_y_no_aplica_sin_tope(qtbot, conn):
-    """"Licencia médica" (la sembrada por defecto, primera del combo) no
-    tiene DuracionMaximaDias -> no hay cupo que mostrar. "Licencia por
-    duelo" sí tiene tope (5 días) -> ahí el cupo se calcula normalmente."""
-    id_profesional = _preparar(conn)
+def test_licencias_no_tiene_seccion_de_cupo(qtbot, conn):
+    """A diferencia de Vacaciones, Licencias no tiene un cupo anual que
+    mostrar (no aplica en el modelo de negocio) — no debería quedar ni la
+    línea divisoria ni las etiquetas de cupo."""
+    _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_licencias
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-
-    assert panel.combo_tipo.currentText() == "Licencia médica"
-    assert "no aplica" in panel.etiqueta_cupo_utilizado.text()
-
-    indice_duelo = panel.combo_tipo.findText("Licencia por duelo")
-    panel.combo_tipo.setCurrentIndex(indice_duelo)
-    assert "0.0%" in panel.etiqueta_cupo_utilizado.text()
-    assert "100.0%" in panel.etiqueta_cupo_disponible.text()
-
-    anio_actual = panel.spin_anio.value()
-    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
-    panel.campo_hasta.setDate(QDate(anio_actual, 9, 3))  # 3 de los 5 días del tope
-    panel._crear()
-    assert "60.0%" in panel.etiqueta_cupo_utilizado.text()
-    assert "40.0%" in panel.etiqueta_cupo_disponible.text()
+    assert not hasattr(panel, "etiqueta_cupo_utilizado")
+    assert not hasattr(panel, "etiqueta_cupo_disponible")
 
 
 def test_modificar_licencia_seleccionada_anula_y_precarga_formulario(qtbot, conn):
