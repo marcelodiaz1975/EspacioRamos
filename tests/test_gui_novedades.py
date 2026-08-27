@@ -477,6 +477,67 @@ def test_crear_licencia_cruza_de_anio_y_persiste(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
 
 
+def test_tabla_licencias_muestra_columna_bonificacion(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
+    panel._crear()
+
+    assert panel.tabla.horizontalHeaderItem(4).text() == "Bonificación"
+    assert panel.tabla.horizontalHeaderItem(5).text() == "Valor bonificado"
+    assert panel.tabla.item(0, 4).text() == f"{panel.spin_porcentaje.value():.1f}%"
+
+
+def test_crear_licencia_con_porcentaje_default_no_pide_confirmacion(qtbot, conn):
+    """Si no se toca el % preestablecido del tipo, no hace falta ninguna
+    confirmación extra al crear (y no debe intentar mostrar el diálogo,
+    que en este test no está mockeado — colgaría si se llamara)."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
+
+
+def test_crear_licencia_con_porcentaje_editado_pide_confirmacion(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
+    panel.spin_porcentaje.setValue(50)
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
+    assert panel.tabla.item(0, 4).text() == "50.0%"
+
+
+def test_crear_licencia_con_porcentaje_editado_cancelado_no_persiste(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
+    panel.spin_porcentaje.setValue(50)
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 0
+
+
 def test_tabla_licencias_orden_por_defecto_fecha_mas_nueva_primero(qtbot, conn):
     id_profesional = _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)

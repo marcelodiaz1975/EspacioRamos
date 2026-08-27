@@ -539,8 +539,10 @@ class _PanelLicencias(QWidget):
         panel_tabla = QGroupBox("Licencias tomadas")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(5)
-        self.tabla.setHorizontalHeaderLabels(["Profesional", "Tipo", "Desde", "Hasta", "Valor bonificado"])
+        self.tabla.setColumnCount(6)
+        self.tabla.setHorizontalHeaderLabels(
+            ["Profesional", "Tipo", "Desde", "Hasta", "Bonificación", "Valor bonificado"]
+        )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -616,8 +618,10 @@ class _PanelLicencias(QWidget):
             self.tabla.setItem(i, 1, QTableWidgetItem(tipo["Nombre"] if tipo else "?"))
             self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
             self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
+            porcentaje = r["PorcentajeBonificacionAplicado"]
+            self.tabla.setItem(i, 4, QTableWidgetItem(f"{porcentaje:.1f}%" if porcentaje is not None else ""))
             valor = r["ValorBonificado"]
-            self.tabla.setItem(i, 4, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
+            self.tabla.setItem(i, 5, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self.grilla.actualizar()
@@ -629,7 +633,8 @@ class _PanelLicencias(QWidget):
             1: lambda t: (cache_tipo.get(t[0]["IdTipoLicencia"]) or {}).get("Nombre", ""),
             2: lambda t: t[0]["FechaDesde"],
             3: lambda t: t[0]["FechaHasta"],
-            4: lambda t: t[0]["ValorBonificado"] or 0,
+            4: lambda t: t[0]["PorcentajeBonificacionAplicado"] or 0,
+            5: lambda t: t[0]["ValorBonificado"] or 0,
         }
         return claves[columna]
 
@@ -638,6 +643,17 @@ class _PanelLicencias(QWidget):
         if id_tipo is None:
             QMessageBox.warning(self, "Crear licencia", "Primero hay que cargar un tipo de licencia.")
             return
+        tipo = obtener_repositorio(self.conn, "TipoLicencia").obtener(id_tipo)
+        porcentaje_tipo = tipo["PorcentajeBonificacion"] if tipo else 0
+        if self.spin_porcentaje.value() != porcentaje_tipo:
+            respuesta = QMessageBox.question(
+                self, "Crear licencia",
+                f"El porcentaje de bonificación de '{tipo['Nombre']}' es {porcentaje_tipo:.1f}% en realidad, "
+                f"pero se va a cargar con {self.spin_porcentaje.value():.1f}%. ¿Confirmar de todas formas?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+            )
+            if respuesta != QMessageBox.StandardButton.Yes:
+                return
         try:
             _id, advertencias = crear_licencia(
                 self.conn, id_profesional=self.combo_profesional.currentData(), id_tipo_licencia=id_tipo,
