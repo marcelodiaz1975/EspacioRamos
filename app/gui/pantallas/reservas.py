@@ -410,7 +410,8 @@ class _PanelReservasRegulares(QWidget):
         self._foco = instalar_enter_avanza_foco(
             [
                 self.combo_profesional, self.combo_localidad, self.combo_edificio, self.combo_unidad,
-                self.combo_consultorio, self.spin_desde, self.spin_hasta,
+                self.combo_consultorio, *(self._checks_dia[dia] for dia in _DIAS_RESERVA),
+                self.spin_desde, self.spin_hasta,
                 self.campo_vigencia_inicio, self.campo_vigencia_fin, boton_crear,
             ]
         )
