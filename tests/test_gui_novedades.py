@@ -52,10 +52,11 @@ def _preparar(conn):
 
 
 def test_crear_vacacion_persiste(qtbot, conn):
-    _preparar(conn)
+    id_profesional = _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     panel.campo_desde.setDate(_fecha("2026-09-01"))
     panel.campo_hasta.setDate(_fecha("2026-09-07"))
     panel._crear()
@@ -74,6 +75,7 @@ def test_crear_vacacion_regenera_liquidacion_enviada(qtbot, conn):
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     panel.campo_desde.setDate(_fecha("2026-09-01"))
     panel.campo_hasta.setDate(_fecha("2026-09-07"))
     panel._crear()
@@ -223,7 +225,7 @@ def test_crear_vacacion_anio_ya_terminado_no_persiste(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 0
 
 
-def test_tabla_vacaciones_filtra_por_anio_y_profesional(qtbot, conn):
+def test_tabla_vacaciones_muestra_todos_los_anios_y_filtra_por_profesional(qtbot, conn):
     id_profesional = _preparar(conn)
     otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
     conn.commit()
@@ -244,12 +246,18 @@ def test_tabla_vacaciones_filtra_por_anio_y_profesional(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 2
 
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
-    assert panel.tabla.rowCount() == 0  # año siguiente, sin nada del otro profesional
+    assert panel.tabla.rowCount() == 0  # sin nada del otro profesional, en ningún año
 
-    panel.spin_anio.setValue(anio_actual)
+    # La lista es el historial completo: sin filtrar por profesional
+    # aparecen las vacaciones de ambos años juntas, distinguidas por la
+    # columna "Año calendario".
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    assert panel.tabla.rowCount() == 1
-    assert panel.tabla.item(0, 1).text() == f"01-09-{anio_actual}"
+    assert panel.tabla.rowCount() == 2
+    assert panel.tabla.horizontalHeaderItem(1).text() == "Año calendario"
+    assert panel.tabla.item(0, 1).text() == str(anio_actual)
+    assert panel.tabla.item(0, 2).text() == f"01-09-{anio_actual}"
+    assert panel.tabla.item(1, 1).text() == str(anio_actual + 1)
+    assert panel.tabla.item(1, 2).text() == f"05-01-{anio_actual + 1}"
 
 
 def test_tabla_vacaciones_muestra_cupo_utilizado_junto_al_restante(qtbot, conn):
@@ -263,10 +271,10 @@ def test_tabla_vacaciones_muestra_cupo_utilizado_junto_al_restante(qtbot, conn):
     panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
     panel._crear()
 
-    assert panel.tabla.horizontalHeaderItem(4).text() == "Cupo utilizado %"
-    assert panel.tabla.horizontalHeaderItem(5).text() == "Cupo restante %"
-    assert panel.tabla.item(0, 4).text() == "50.0%"
+    assert panel.tabla.horizontalHeaderItem(5).text() == "Cupo utilizado %"
+    assert panel.tabla.horizontalHeaderItem(6).text() == "Cupo restante %"
     assert panel.tabla.item(0, 5).text() == "50.0%"
+    assert panel.tabla.item(0, 6).text() == "50.0%"
 
 
 def test_cupo_vacaciones_se_actualiza_con_profesional_y_anio(qtbot, conn):

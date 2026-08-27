@@ -102,6 +102,20 @@ def _valor_bonificado_bruto(
     return bruto * (1 - descuento_pct / 100)
 
 
+def _validar_periodo_no_cruza_mes(fecha_desde: str, fecha_hasta: str) -> None:
+    """Una vacación no puede cruzar de un mes a otro ni de un año a otro:
+    se carga hasta fin de mes y el resto del período va en un registro
+    nuevo. Separado en su propia función porque el prorrateo por mes de
+    `_calcular_descuento_vacaciones` (liquidaciones.py) sigue necesitando
+    funcionar bien con registros viejos/importados que sí cruzan de mes,
+    de antes de esta regla."""
+    if fecha_hasta[:7] != fecha_desde[:7]:
+        raise ValueError(
+            "El período de vacaciones no puede cruzar de un mes a otro (ni de un año a otro): "
+            "cargá hasta fin de mes y agregá un registro nuevo para el resto del período"
+        )
+
+
 def crear_vacacion(
     conn: sqlite3.Connection, *, id_profesional: int, fecha_desde: str, fecha_hasta: str,
 ) -> tuple[int, list[str]]:
@@ -112,6 +126,7 @@ def crear_vacacion(
         )
     if fecha_hasta < fecha_desde:
         raise ValueError("FechaHasta debe ser posterior o igual a FechaDesde")
+    _validar_periodo_no_cruza_mes(fecha_desde, fecha_hasta)
 
     fecha_hoy = fecha_actual(conn).isoformat()
     horas_semanales = horas_semanales_vigentes(conn, [id_profesional], fecha_hoy)

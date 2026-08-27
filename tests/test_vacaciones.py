@@ -56,6 +56,23 @@ def test_sin_reserva_regular_no_tiene_derecho(conn):
         crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-01", fecha_hasta="2026-08-07")
 
 
+def test_vacacion_no_puede_cruzar_de_un_mes_a_otro(conn, consultorio):
+    id_prof = _profesional_con_reserva(conn, consultorio)
+    with pytest.raises(ValueError):
+        crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-25", fecha_hasta="2026-09-05")
+
+
+def test_vacacion_no_puede_cruzar_de_un_anio_a_otro(conn, consultorio):
+    id_prof = _profesional_con_reserva(conn, consultorio)
+    with pytest.raises(ValueError):
+        crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-12-28", fecha_hasta="2027-01-04")
+
+
+def test_vacacion_dentro_del_mismo_mes_no_falla(conn, consultorio):
+    id_prof = _profesional_con_reserva(conn, consultorio)
+    crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-01", fecha_hasta="2026-08-31")
+
+
 def test_vacacion_cubre_todos_los_dias_reservados_de_la_semana(conn, consultorio):
     # reserva los 7 días de la semana, 2hs cada uno -> 14hs/semana
     dias = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")

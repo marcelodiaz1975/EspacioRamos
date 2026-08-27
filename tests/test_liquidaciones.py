@@ -353,7 +353,13 @@ def test_reserva_aislada_de_reubicacion_no_genera_cargo(conn, consultorio):
     assert liquidacion.total_aisladas_mes_en_curso == 0
 
 
-def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_mes(conn, consultorio):
+def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_mes(conn, consultorio, monkeypatch):
+    # Una vacación ya no puede cargarse cruzando de mes (regla nueva en
+    # crear_vacacion), pero el prorrateo de liquidaciones tiene que seguir
+    # funcionando bien con registros viejos/importados de antes de esa
+    # regla que sí cruzan de mes — se simula ese caso salteando la
+    # validación acá.
+    monkeypatch.setattr("app.negocio.vacaciones._validar_periodo_no_cruza_mes", lambda *a, **k: None)
     dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     id_prof = _crear_profesional(conn)
     for dia in dias:
@@ -390,8 +396,10 @@ def test_descuento_licencias_dia_por_dia(conn, consultorio):
     assert suma == pytest.approx(licencia["ValorBonificado"])
 
 
-def test_descuento_vacaciones_respeta_tope_de_cupo_sin_duplicar(conn, consultorio):
+def test_descuento_vacaciones_respeta_tope_de_cupo_sin_duplicar(conn, consultorio, monkeypatch):
     # cupo chico a propósito para forzar que la vacación exceda y se prorratee
+    # (registro cruzando de mes: ver comentario en el test anterior)
+    monkeypatch.setattr("app.negocio.vacaciones._validar_periodo_no_cruza_mes", lambda *a, **k: None)
     obtener_repositorio(conn, "Configuracion").actualizar(1, SemanasVacacionesMaximasPorAnio=0.5)
     dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     id_prof = _crear_profesional(conn)

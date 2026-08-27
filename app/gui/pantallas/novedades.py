@@ -176,7 +176,11 @@ class _PanelVacaciones(QWidget):
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
-        self.combo_profesional = _combo_profesionales(self.conn)
+        self.combo_profesional = QComboBox()
+        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+            self.combo_profesional.addItem(etiqueta, id_)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
@@ -229,9 +233,9 @@ class _PanelVacaciones(QWidget):
         panel_tabla = QGroupBox("Vacaciones tomadas")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(6)
+        self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
-            ["Profesional", "Desde", "Hasta", "Valor bonificado", "Cupo utilizado %", "Cupo restante %"]
+            ["Profesional", "Año calendario", "Desde", "Hasta", "Valor bonificado", "Cupo utilizado %", "Cupo restante %"]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -287,15 +291,18 @@ class _PanelVacaciones(QWidget):
         self.etiqueta_cupo_disponible.setText(f"Porcentaje cupo disponible: {disponible:.1f}%")
 
     def actualizar(self) -> None:
-        """Igual que Ausencias: sin profesional elegido muestra las
-        vacaciones de todos, con uno elegido se acota a las suyas — y en
-        ambos casos, solo las del año elegido en "Año calendario a
-        imputar" (Orden: código del profesional y luego fecha desde)."""
+        """La lista de abajo es el historial completo de vacaciones
+        registradas (todos los años) — sin profesional elegido muestra
+        las de todos, con uno elegido se acota a las suyas. El año de
+        "Año calendario a imputar" solo controla qué se va a crear y el
+        cupo mostrado más abajo, por eso la lista lleva su propia
+        columna "Año calendario" para distinguir a qué período
+        corresponde cada fila (Orden: código del profesional y luego
+        fecha desde, que ya trae el año)."""
         id_profesional_filtro = self.combo_profesional.currentData()
-        anio = str(self.spin_anio.value())
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
         todas = obtener_repositorio(self.conn, "Vacacion").listar()
-        filtradas = [r for r in todas if r["FechaDesde"][:4] == anio]
+        filtradas = todas
         if id_profesional_filtro is not None:
             filtradas = [r for r in filtradas if r["IdProfesional"] == id_profesional_filtro]
 
@@ -308,14 +315,15 @@ class _PanelVacaciones(QWidget):
         self.tabla.setRowCount(len(filas))
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            self.tabla.setItem(i, 1, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
-            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
+            self.tabla.setItem(i, 1, QTableWidgetItem(r["FechaDesde"][:4]))
+            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
+            self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
             valor = r["ValorBonificado"]
-            self.tabla.setItem(i, 3, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
+            self.tabla.setItem(i, 4, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
             cupo_utilizado = r["CupoConsumidoPorcentaje"]
-            self.tabla.setItem(i, 4, QTableWidgetItem(f"{cupo_utilizado:.1f}%" if cupo_utilizado is not None else ""))
+            self.tabla.setItem(i, 5, QTableWidgetItem(f"{cupo_utilizado:.1f}%" if cupo_utilizado is not None else ""))
             cupo_restante = r["CupoRestantePorcentaje"]
-            self.tabla.setItem(i, 5, QTableWidgetItem(f"{cupo_restante:.1f}%" if cupo_restante is not None else ""))
+            self.tabla.setItem(i, 6, QTableWidgetItem(f"{cupo_restante:.1f}%" if cupo_restante is not None else ""))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._actualizar_cupo()
