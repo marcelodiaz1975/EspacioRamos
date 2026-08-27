@@ -127,6 +127,110 @@ def test_cancelar_vacacion_seleccionada_elimina(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 0
 
 
+def test_spin_anio_vacaciones_arranca_en_el_anio_actual(qtbot, conn):
+    from app.negocio.dias import fecha_actual
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    assert panel.spin_anio.value() == fecha_actual(conn).year
+    assert panel.boton_crear.isEnabled() is True
+
+    panel.spin_anio.setValue(panel.spin_anio.value() - 1)
+    assert panel.boton_crear.isEnabled() is False
+
+    panel.spin_anio.setValue(panel.spin_anio.value() + 2)
+    assert panel.boton_crear.isEnabled() is True
+
+
+def test_crear_vacacion_anio_ya_terminado_no_persiste(qtbot, conn):
+    """"Del año anterior solo consulta": ni siquiera llamando _crear a
+    mano (esquivando el botón deshabilitado) se puede imputar al año
+    pasado."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    anio_pasado = panel.spin_anio.value() - 1
+    panel.spin_anio.setValue(anio_pasado)
+    panel.campo_desde.setDate(QDate(anio_pasado, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_pasado, 9, 7))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 0
+
+
+def test_tabla_vacaciones_filtra_por_anio_y_profesional(qtbot, conn):
+    id_profesional = _preparar(conn)
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
+    conn.commit()
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    anio_actual = panel.spin_anio.value()
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
+    panel._crear()
+    panel.campo_desde.setDate(QDate(anio_actual + 1, 1, 5))
+    panel.campo_hasta.setDate(QDate(anio_actual + 1, 1, 10))
+    panel.spin_anio.setValue(anio_actual + 1)
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 2
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
+    assert panel.tabla.rowCount() == 0  # año siguiente, sin nada del otro profesional
+
+    panel.spin_anio.setValue(anio_actual)
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 1).text() == f"01-09-{anio_actual}"
+
+
+def test_cupo_vacaciones_se_actualiza_con_profesional_y_anio(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    assert "100.0%" in panel.etiqueta_cupo_disponible.text()
+    assert "0.0%" in panel.etiqueta_cupo_utilizado.text()
+
+    anio_actual = panel.spin_anio.value()
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
+    panel._crear()
+    assert "100.0%" not in panel.etiqueta_cupo_disponible.text()
+
+
+def test_modificar_vacacion_seleccionada_anula_y_precarga_formulario(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    anio_actual = panel.spin_anio.value()
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 1
+
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 0
+    assert panel.combo_profesional.currentData() == id_profesional
+    assert panel.campo_desde.date() == QDate(anio_actual, 9, 1)
+    assert panel.campo_hasta.date() == QDate(anio_actual, 9, 7)
+
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 1
+
+
 def test_cancelar_vacacion_bloqueada_por_aislada_muestra_advertencia(qtbot, conn, monkeypatch):
     """DC-04 §3.2/§3.3: si ya hay una aislada de otro profesional asignada
     en el consultorio que la vacación liberó, anularla tiene que avisar y
@@ -197,6 +301,87 @@ def test_cancelar_licencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn
     panel.tabla.selectRow(0)
     panel._cancelar()
     assert len(avisos) == 1
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
+
+
+def test_spin_anio_licencias_arranca_en_el_anio_actual(qtbot, conn):
+    from app.negocio.dias import fecha_actual
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    assert panel.spin_anio.value() == fecha_actual(conn).year
+    assert panel.boton_crear.isEnabled() is True
+
+    panel.spin_anio.setValue(panel.spin_anio.value() - 1)
+    assert panel.boton_crear.isEnabled() is False
+
+
+def test_crear_licencia_anio_ya_terminado_no_persiste(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    anio_pasado = panel.spin_anio.value() - 1
+    panel.spin_anio.setValue(anio_pasado)
+    panel.campo_desde.setDate(QDate(anio_pasado, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_pasado, 9, 3))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 0
+
+
+def test_cupo_licencias_es_por_tipo_y_no_aplica_sin_tope(qtbot, conn):
+    """"Licencia médica" (la sembrada por defecto, primera del combo) no
+    tiene DuracionMaximaDias -> no hay cupo que mostrar. "Licencia por
+    duelo" sí tiene tope (5 días) -> ahí el cupo se calcula normalmente."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    assert panel.combo_tipo.currentText() == "Licencia médica"
+    assert "no aplica" in panel.etiqueta_cupo_utilizado.text()
+
+    indice_duelo = panel.combo_tipo.findText("Licencia por duelo")
+    panel.combo_tipo.setCurrentIndex(indice_duelo)
+    assert "0.0%" in panel.etiqueta_cupo_utilizado.text()
+    assert "100.0%" in panel.etiqueta_cupo_disponible.text()
+
+    anio_actual = panel.spin_anio.value()
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 3))  # 3 de los 5 días del tope
+    panel._crear()
+    assert "60.0%" in panel.etiqueta_cupo_utilizado.text()
+    assert "40.0%" in panel.etiqueta_cupo_disponible.text()
+
+
+def test_modificar_licencia_seleccionada_anula_y_precarga_formulario(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    indice_duelo = panel.combo_tipo.findText("Licencia por duelo")
+    panel.combo_tipo.setCurrentIndex(indice_duelo)
+    anio_actual = panel.spin_anio.value()
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 3))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
+
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 0
+    assert panel.combo_profesional.currentData() == id_profesional
+    assert panel.combo_tipo.currentText() == "Licencia por duelo"
+    assert panel.campo_desde.date() == QDate(anio_actual, 9, 1)
+    assert panel.campo_hasta.date() == QDate(anio_actual, 9, 3)
+
+    panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
 
 
@@ -390,10 +575,12 @@ def test_panel_ausencias_grilla_preview_acota_y_pinta_azul(qtbot, conn):
     assert panel.grilla._resultado[(id_consultorio, "Lunes", 9)].color_aro == AZUL_OSCURO
 
 
-def test_panel_vacaciones_grilla_sin_profesional_con_reservas_muestra_todo(qtbot, conn):
-    """Un profesional sin ninguna reserva regular todavía no tiene
-    unidades para acotar -> la vista previa vuelve a mostrar todas."""
-    _preparar(conn)
+def test_panel_vacaciones_grilla_profesional_sin_reservas_queda_vacia(qtbot, conn):
+    """Mismo criterio que Ausencias: la grilla se acota a lo que el
+    profesional elegido realmente tiene reservado — uno sin ninguna
+    reserva regular no tiene nada que mostrar (ya no "todas las
+    unidades", que era el criterio viejo)."""
+    id_profesional = _preparar(conn)
     id_unidad_1 = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
     otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Sur")
     id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2B")
@@ -404,9 +591,11 @@ def test_panel_vacaciones_grilla_sin_profesional_con_reservas_muestra_todo(qtbot
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_vacaciones
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad_1]
 
-    assert set(panel.grilla.ids_unidad_seleccionadas()) == {id_unidad_1, id_unidad_2}
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
+    assert panel.grilla.ids_unidad_seleccionadas() == []
 
 
 def test_combo_profesional_ausencias_usa_formato_de_reservas(qtbot, conn):

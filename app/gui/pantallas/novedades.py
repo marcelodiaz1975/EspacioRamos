@@ -10,6 +10,7 @@ funciones calculan; no se edita ni borra desde acá, son historial."""
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 
 from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -42,18 +44,14 @@ from app.gui.pantallas.reservas import (
     _opciones_profesional,
     _texto_profesional,
 )
-from app.gui.widgets.grilla_operativa import (
-    GrillaOperativaWidget,
-    pares_dia_unidad_con_reserva_vigente,
-    unidades_con_reserva_vigente,
-)
+from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
 from app.negocio.licencias import cancelar_licencia, crear_licencia
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
 from app.negocio.pagos import TIPOS_CARGO, crear_cargo_especial
-from app.negocio.vacaciones import cancelar_vacacion, crear_vacacion
+from app.negocio.vacaciones import cancelar_vacacion, crear_vacacion, cupo_restante_actual
 from app.repositorio.registro import obtener_repositorio
 
 _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
@@ -80,6 +78,23 @@ def _campo_fecha_opcional(conn: sqlite3.Connection) -> QDateEdit:
     campo.setSpecialValueText("(sin fecha)")
     campo.setDate(_FECHA_SIN_DATO)
     return campo
+
+
+def _spin_anio(conn: sqlite3.Connection) -> QSpinBox:
+    """"Año calendario a imputar": arranca en el año actual, pero se puede
+    cambiar libremente a cualquier otro (para consultar años anteriores o
+    cargar por adelantado el que viene)."""
+    spin = QSpinBox()
+    spin.setRange(2000, 2100)
+    spin.setValue(fecha_actual(conn).year)
+    return spin
+
+
+def _linea_divisoria() -> QFrame:
+    linea = QFrame()
+    linea.setFrameShape(QFrame.Shape.HLine)
+    linea.setFrameShadow(QFrame.Shadow.Sunken)
+    return linea
 
 
 def _combo_profesionales(conn: sqlite3.Connection) -> QComboBox:
@@ -141,66 +156,141 @@ class _PanelVacaciones(QWidget):
         self.actualizar()
 
     def _armar_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        splitter = QSplitter()
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        contenido = QWidget()
+        layout = QVBoxLayout(contenido)
+        splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = _combo_profesionales(self.conn)
-        self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
+        self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
+
+        self.spin_anio = _spin_anio(self.conn)
+        self.spin_anio.valueChanged.connect(self._anio_cambio)
+        form.addWidget(QLabel("Año calendario a imputar"))
+        form.addWidget(self.spin_anio)
+
         self.campo_desde = _campo_fecha(self.conn)
         form.addWidget(QLabel("Desde"))
         form.addWidget(self.campo_desde)
         self.campo_hasta = _campo_fecha(self.conn)
         form.addWidget(QLabel("Hasta"))
         form.addWidget(self.campo_hasta)
-        boton = QPushButton("Crear vacación")
-        boton.setObjectName("botonPrimario")
-        boton.clicked.connect(self._crear)
-        form.addWidget(boton)
-        boton_cancelar = QPushButton("Anular vacación seleccionada")
+
+        self.boton_crear = QPushButton("Crear vacaciones")
+        self.boton_crear.setObjectName("botonPrimario")
+        self.boton_crear.clicked.connect(self._crear)
+        form.addWidget(self.boton_crear)
+        boton_modificar = QPushButton("Modificar vacaciones")
+        boton_modificar.clicked.connect(self._modificar_seleccionada)
+        form.addWidget(boton_modificar)
+        boton_cancelar = QPushButton("Anular vacaciones")
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
-        form.addStretch()
-        splitter.addWidget(panel_form)
 
+        form.addWidget(_linea_divisoria())
+        self.etiqueta_cupo_utilizado = QLabel()
+        self.etiqueta_cupo_disponible = QLabel()
+        form.addWidget(self.etiqueta_cupo_utilizado)
+        form.addWidget(self.etiqueta_cupo_disponible)
+
+        form.addStretch()
+        splitter_superior.addWidget(panel_form)
+
+        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        layout_grupo_grilla.addWidget(self.grilla)
+        splitter_superior.addWidget(grupo_grilla)
+
+        splitter_superior.setStretchFactor(0, 0)
+        splitter_superior.setStretchFactor(1, 1)
+        layout.addWidget(splitter_superior, stretch=2)
+
+        panel_tabla = QGroupBox("Vacaciones tomadas")
+        layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(5)
         self.tabla.setHorizontalHeaderLabels(["Profesional", "Desde", "Hasta", "Valor bonificado", "Cupo restante %"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        splitter.addWidget(self.tabla)
+        layout_tabla.addWidget(self.tabla, stretch=1)
+        layout.addWidget(panel_tabla, stretch=1)
 
-        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
-        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
-        self.grilla = GrillaOperativaWidget(self.conn)
-        layout_grupo_grilla.addWidget(self.grilla)
-        splitter.addWidget(grupo_grilla)
-
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 2)
-        layout.addWidget(splitter)
+        scroll.setWidget(contenido)
+        layout_externo.addWidget(scroll)
+        self._actualizar_disponibilidad_crear()
         self._sincronizar_grilla()
 
+    def _profesional_cambio(self) -> None:
+        self._sincronizar_grilla()
+        self.actualizar()
+
+    def _anio_cambio(self) -> None:
+        self._actualizar_disponibilidad_crear()
+        self.actualizar()
+
+    def _actualizar_disponibilidad_crear(self) -> None:
+        """"Del año anterior solo consulta": el año elegido para imputar
+        ya terminado deja "Crear vacaciones" deshabilitado — se puede
+        seguir viendo la tabla y el cupo de ese año, pero no cargar nada
+        nuevo ahí."""
+        anio_actual = fecha_actual(self.conn).year
+        self.boton_crear.setEnabled(self.spin_anio.value() >= anio_actual)
+
     def _sincronizar_grilla(self) -> None:
-        """La vista previa muestra el horario regular del profesional
-        elegido — acotada a las unidades donde ya tiene algo reservado, y
-        con su propia reserva pintada de azul."""
+        """Mismo criterio que Ausencias: acotada a las unidades (con
+        todos sus consultorios) y a los días en los que el profesional ya
+        tiene una reserva regular, con su propio horario pintado de azul."""
         id_profesional = self.combo_profesional.currentData()
-        ids_unidad = unidades_con_reserva_vigente(self.conn, id_profesional)
-        self.grilla.filtrar_por_unidades(ids_unidad or None)  # sin reservas -> mostrar todas
+        pares = pares_dia_unidad_con_reserva_vigente(self.conn, id_profesional)
+        ids_unidad = sorted({u for _, u in pares})
+        dias = sorted({d for d, _ in pares}, key=DIAS_SEMANA.index)
+        self.grilla.filtrar_por_unidades(ids_unidad)
+        self.grilla.filtrar_por_dias(dias)
+        self.grilla.filtrar_por_pares_unidad_dia(pares)
         self.grilla.filtrar_por_profesional(id_profesional)
 
+    def _actualizar_cupo(self) -> None:
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            self.etiqueta_cupo_utilizado.setText("Porcentaje cupo utilizado: —")
+            self.etiqueta_cupo_disponible.setText("Porcentaje cupo disponible: —")
+            return
+        disponible = cupo_restante_actual(self.conn, id_profesional, fecha_referencia=f"{self.spin_anio.value()}-01-01")
+        self.etiqueta_cupo_utilizado.setText(f"Porcentaje cupo utilizado: {100 - disponible:.1f}%")
+        self.etiqueta_cupo_disponible.setText(f"Porcentaje cupo disponible: {disponible:.1f}%")
+
     def actualizar(self) -> None:
-        self._registros = obtener_repositorio(self.conn, "Vacacion").listar()
-        cache = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
-        self.tabla.setRowCount(len(self._registros))
-        for i, r in enumerate(self._registros):
-            self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache, r["IdProfesional"])))
+        """Igual que Ausencias: sin profesional elegido muestra las
+        vacaciones de todos, con uno elegido se acota a las suyas — y en
+        ambos casos, solo las del año elegido en "Año calendario a
+        imputar" (Orden: código del profesional y luego fecha desde)."""
+        id_profesional_filtro = self.combo_profesional.currentData()
+        anio = str(self.spin_anio.value())
+        repo_profesional = obtener_repositorio(self.conn, "Profesional")
+        todas = obtener_repositorio(self.conn, "Vacacion").listar()
+        filtradas = [r for r in todas if r["FechaDesde"][:4] == anio]
+        if id_profesional_filtro is not None:
+            filtradas = [r for r in filtradas if r["IdProfesional"] == id_profesional_filtro]
+
+        filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
+            (r, repo_profesional.obtener(r["IdProfesional"])) for r in filtradas
+        ]
+        filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else "", t[0]["FechaDesde"]))
+        self._registros = [t[0] for t in filas]
+
+        self.tabla.setRowCount(len(filas))
+        for i, (r, profesional) in enumerate(filas):
+            self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             self.tabla.setItem(i, 1, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
             self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
             valor = r["ValorBonificado"]
@@ -208,10 +298,18 @@ class _PanelVacaciones(QWidget):
             cupo = r["CupoRestantePorcentaje"]
             self.tabla.setItem(i, 4, QTableWidgetItem(f"{cupo:.1f}%" if cupo is not None else ""))
         self.tabla.resizeColumnsToContents()
+        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+        self._actualizar_cupo()
         self.grilla.actualizar()
 
     def _crear(self) -> None:
         id_profesional = self.combo_profesional.currentData()
+        anio_actual = fecha_actual(self.conn).year
+        if self.spin_anio.value() < anio_actual:
+            QMessageBox.warning(
+                self, "Crear vacaciones", "No se puede imputar una vacación a un año calendario que ya terminó.",
+            )
+            return
         try:
             _id, advertencias = crear_vacacion(
                 self.conn, id_profesional=id_profesional,
@@ -219,7 +317,7 @@ class _PanelVacaciones(QWidget):
                 fecha_hasta=self.campo_hasta.date().toPython().isoformat(),
             )
         except ValueError as error:
-            QMessageBox.warning(self, "Crear vacación", str(error))
+            QMessageBox.warning(self, "Crear vacaciones", str(error))
             return
         self.conn.commit()
         if advertencias:
@@ -228,22 +326,51 @@ class _PanelVacaciones(QWidget):
         self.conn.commit()
         self.actualizar()
 
-    def _cancelar(self) -> None:
+    def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            return
-        registro = self._registros[filas[0].row()]
+            return None
+        return self._registros[filas[0].row()]
+
+    def _cancelar_registro(self, registro: sqlite3.Row, titulo: str) -> bool:
         try:
             cancelar_vacacion(self.conn, registro["IdVacacion"])
         except ValueError as error:
-            QMessageBox.warning(self, "Anular vacación", str(error))
-            return
+            QMessageBox.warning(self, titulo, str(error))
+            return False
         self.conn.commit()
         regenerar_si_corresponde(
             self.conn, id_profesional=registro["IdProfesional"], periodo=periodo_actual(self.conn),
         )
         self.conn.commit()
         self.actualizar()
+        return True
+
+    def _cancelar(self) -> None:
+        registro = self._fila_seleccionada()
+        if registro is None:
+            return
+        self._cancelar_registro(registro, "Anular vacaciones")
+
+    def _modificar_seleccionada(self) -> None:
+        """Mismo criterio que Ausencias: anula la vacación seleccionada
+        (bloquea si ya hay una aislada de otro profesional asignada
+        aprovechando el consultorio liberado) y precarga el formulario
+        con sus datos para dar de alta la versión corregida."""
+        registro = self._fila_seleccionada()
+        if registro is None:
+            QMessageBox.warning(self, "Modificar vacaciones", "Elegí una fila de la tabla para modificar.")
+            return
+        if not self._cancelar_registro(registro, "Modificar vacaciones"):
+            return
+
+        indice_profesional = self.combo_profesional.findData(registro["IdProfesional"])
+        if indice_profesional >= 0:
+            self.combo_profesional.setCurrentIndex(indice_profesional)
+        self.campo_desde.setDate(QDate.fromString(registro["FechaDesde"], "yyyy-MM-dd"))
+        self.campo_hasta.setDate(QDate.fromString(registro["FechaHasta"], "yyyy-MM-dd"))
+        self.spin_anio.setValue(int(registro["FechaDesde"][:4]))
+        self._sincronizar_grilla()
 
 
 class _PanelLicencias(QWidget):
@@ -255,20 +382,31 @@ class _PanelLicencias(QWidget):
         self.actualizar()
 
     def _armar_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        splitter = QSplitter()
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        contenido = QWidget()
+        layout = QVBoxLayout(contenido)
+        splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = _combo_profesionales(self.conn)
-        self.combo_profesional.currentIndexChanged.connect(self._sincronizar_grilla)
+        self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
+
+        self.spin_anio = _spin_anio(self.conn)
+        self.spin_anio.valueChanged.connect(self._anio_cambio)
+        form.addWidget(QLabel("Año calendario a imputar"))
+        form.addWidget(self.spin_anio)
 
         self.combo_tipo = QComboBox()
         for t in obtener_repositorio(self.conn, "TipoLicencia").listar(Activo=1):
             self.combo_tipo.addItem(t["Nombre"], t["IdTipoLicencia"])
-        self.combo_tipo.currentIndexChanged.connect(self._precargar_porcentaje)
+        self.combo_tipo.currentIndexChanged.connect(self._tipo_cambio)
         form.addWidget(QLabel("Tipo de licencia"))
         form.addWidget(self.combo_tipo)
 
@@ -285,40 +423,80 @@ class _PanelLicencias(QWidget):
         self.campo_hasta = _campo_fecha_opcional(self.conn)
         form.addWidget(QLabel("Hasta (vacío si el tipo la calcula sola)"))
         form.addWidget(self.campo_hasta)
-        boton = QPushButton("Crear licencia")
-        boton.setObjectName("botonPrimario")
-        boton.clicked.connect(self._crear)
-        form.addWidget(boton)
-        boton_cancelar = QPushButton("Anular licencia seleccionada")
+
+        self.boton_crear = QPushButton("Crear licencia")
+        self.boton_crear.setObjectName("botonPrimario")
+        self.boton_crear.clicked.connect(self._crear)
+        form.addWidget(self.boton_crear)
+        boton_modificar = QPushButton("Modificar licencia")
+        boton_modificar.clicked.connect(self._modificar_seleccionada)
+        form.addWidget(boton_modificar)
+        boton_cancelar = QPushButton("Anular licencia")
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
-        form.addStretch()
-        splitter.addWidget(panel_form)
 
+        form.addWidget(_linea_divisoria())
+        self.etiqueta_cupo_utilizado = QLabel()
+        self.etiqueta_cupo_disponible = QLabel()
+        form.addWidget(self.etiqueta_cupo_utilizado)
+        form.addWidget(self.etiqueta_cupo_disponible)
+
+        form.addStretch()
+        splitter_superior.addWidget(panel_form)
+
+        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        layout_grupo_grilla.addWidget(self.grilla)
+        splitter_superior.addWidget(grupo_grilla)
+
+        splitter_superior.setStretchFactor(0, 0)
+        splitter_superior.setStretchFactor(1, 1)
+        layout.addWidget(splitter_superior, stretch=2)
+
+        panel_tabla = QGroupBox("Licencias tomadas")
+        layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(5)
         self.tabla.setHorizontalHeaderLabels(["Profesional", "Tipo", "Desde", "Hasta", "Valor bonificado"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        splitter.addWidget(self.tabla)
+        layout_tabla.addWidget(self.tabla, stretch=1)
+        layout.addWidget(panel_tabla, stretch=1)
 
-        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
-        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
-        self.grilla = GrillaOperativaWidget(self.conn)
-        layout_grupo_grilla.addWidget(self.grilla)
-        splitter.addWidget(grupo_grilla)
-
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 2)
-        layout.addWidget(splitter)
+        scroll.setWidget(contenido)
+        layout_externo.addWidget(scroll)
+        self._actualizar_disponibilidad_crear()
         self._sincronizar_grilla()
 
+    def _profesional_cambio(self) -> None:
+        self._sincronizar_grilla()
+        self.actualizar()
+
+    def _anio_cambio(self) -> None:
+        self._actualizar_disponibilidad_crear()
+        self.actualizar()
+
+    def _tipo_cambio(self) -> None:
+        self._precargar_porcentaje()
+        self.actualizar()
+
+    def _actualizar_disponibilidad_crear(self) -> None:
+        anio_actual = fecha_actual(self.conn).year
+        self.boton_crear.setEnabled(self.spin_anio.value() >= anio_actual)
+
     def _sincronizar_grilla(self) -> None:
+        """Mismo criterio que Ausencias: acotada a las unidades (con
+        todos sus consultorios) y a los días en los que el profesional ya
+        tiene una reserva regular, con su propio horario pintado de azul."""
         id_profesional = self.combo_profesional.currentData()
-        ids_unidad = unidades_con_reserva_vigente(self.conn, id_profesional)
-        self.grilla.filtrar_por_unidades(ids_unidad or None)  # sin reservas -> mostrar todas
+        pares = pares_dia_unidad_con_reserva_vigente(self.conn, id_profesional)
+        ids_unidad = sorted({u for _, u in pares})
+        dias = sorted({d for d, _ in pares}, key=DIAS_SEMANA.index)
+        self.grilla.filtrar_por_unidades(ids_unidad)
+        self.grilla.filtrar_por_dias(dias)
+        self.grilla.filtrar_por_pares_unidad_dia(pares)
         self.grilla.filtrar_por_profesional(id_profesional)
 
     def _precargar_porcentaje(self) -> None:
@@ -326,13 +504,58 @@ class _PanelLicencias(QWidget):
         tipo = obtener_repositorio(self.conn, "TipoLicencia").obtener(id_tipo) if id_tipo is not None else None
         self.spin_porcentaje.setValue(tipo["PorcentajeBonificacion"] if tipo else 0)
 
+    def _actualizar_cupo(self) -> None:
+        """A diferencia de vacaciones, las licencias no tienen un cupo
+        anual compartido — el tope es la duración máxima de CADA tipo de
+        licencia (TipoLicencia.DuracionMaximaDias). Por eso acá el
+        "cupo" se calcula por tipo de licencia elegido: días tomados de
+        ese tipo en el año / duración máxima de ese tipo. Tipos sin
+        duración máxima (manuales o sin tope) no tienen cupo que mostrar."""
+        id_profesional = self.combo_profesional.currentData()
+        id_tipo = self.combo_tipo.currentData()
+        if id_profesional is None or id_tipo is None:
+            self.etiqueta_cupo_utilizado.setText("Porcentaje cupo utilizado: —")
+            self.etiqueta_cupo_disponible.setText("Porcentaje cupo disponible: —")
+            return
+        tipo = obtener_repositorio(self.conn, "TipoLicencia").obtener(id_tipo)
+        dias_maximos = tipo["DuracionMaximaDias"] if tipo else None
+        if not dias_maximos:
+            self.etiqueta_cupo_utilizado.setText("Porcentaje cupo utilizado: no aplica (este tipo no tiene tope de días)")
+            self.etiqueta_cupo_disponible.setText("Porcentaje cupo disponible: no aplica (este tipo no tiene tope de días)")
+            return
+        anio = str(self.spin_anio.value())
+        filas = self.conn.execute(
+            "SELECT FechaDesde, FechaHasta FROM Licencia WHERE IdProfesional = ? AND IdTipoLicencia = ? "
+            "AND substr(FechaDesde, 1, 4) = ?",
+            (id_profesional, id_tipo, anio),
+        ).fetchall()
+        dias_usados = sum(
+            (date.fromisoformat(f["FechaHasta"]) - date.fromisoformat(f["FechaDesde"])).days + 1 for f in filas
+        )
+        utilizado_pct = min(100.0, dias_usados / dias_maximos * 100)
+        disponible_pct = max(0.0, 100 - utilizado_pct)
+        self.etiqueta_cupo_utilizado.setText(f"Porcentaje cupo utilizado: {utilizado_pct:.1f}%")
+        self.etiqueta_cupo_disponible.setText(f"Porcentaje cupo disponible: {disponible_pct:.1f}%")
+
     def actualizar(self) -> None:
-        self._registros = obtener_repositorio(self.conn, "Licencia").listar()
-        cache_prof = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
+        id_profesional_filtro = self.combo_profesional.currentData()
+        anio = str(self.spin_anio.value())
+        repo_profesional = obtener_repositorio(self.conn, "Profesional")
         cache_tipo = {t["IdTipoLicencia"]: t for t in obtener_repositorio(self.conn, "TipoLicencia").listar()}
-        self.tabla.setRowCount(len(self._registros))
-        for i, r in enumerate(self._registros):
-            self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache_prof, r["IdProfesional"])))
+        todas = obtener_repositorio(self.conn, "Licencia").listar()
+        filtradas = [r for r in todas if r["FechaDesde"][:4] == anio]
+        if id_profesional_filtro is not None:
+            filtradas = [r for r in filtradas if r["IdProfesional"] == id_profesional_filtro]
+
+        filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
+            (r, repo_profesional.obtener(r["IdProfesional"])) for r in filtradas
+        ]
+        filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else "", t[0]["FechaDesde"]))
+        self._registros = [t[0] for t in filas]
+
+        self.tabla.setRowCount(len(filas))
+        for i, (r, profesional) in enumerate(filas):
+            self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             tipo = cache_tipo.get(r["IdTipoLicencia"])
             self.tabla.setItem(i, 1, QTableWidgetItem(tipo["Nombre"] if tipo else "?"))
             self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
@@ -340,12 +563,20 @@ class _PanelLicencias(QWidget):
             valor = r["ValorBonificado"]
             self.tabla.setItem(i, 4, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
         self.tabla.resizeColumnsToContents()
+        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+        self._actualizar_cupo()
         self.grilla.actualizar()
 
     def _crear(self) -> None:
         id_tipo = self.combo_tipo.currentData()
         if id_tipo is None:
             QMessageBox.warning(self, "Crear licencia", "Primero hay que cargar un tipo de licencia.")
+            return
+        anio_actual = fecha_actual(self.conn).year
+        if self.spin_anio.value() < anio_actual:
+            QMessageBox.warning(
+                self, "Crear licencia", "No se puede imputar una licencia a un año calendario que ya terminó.",
+            )
             return
         try:
             _id, advertencias = crear_licencia(
@@ -365,18 +596,47 @@ class _PanelLicencias(QWidget):
             QMessageBox.information(self, "Licencia creada", "\n".join(advertencias))
         self.actualizar()
 
-    def _cancelar(self) -> None:
+    def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            return
-        registro = self._registros[filas[0].row()]
+            return None
+        return self._registros[filas[0].row()]
+
+    def _cancelar_registro(self, registro: sqlite3.Row, titulo: str) -> bool:
         try:
             cancelar_licencia(self.conn, registro["IdLicencia"])
         except ValueError as error:
-            QMessageBox.warning(self, "Anular licencia", str(error))
-            return
+            QMessageBox.warning(self, titulo, str(error))
+            return False
         self.conn.commit()
         self.actualizar()
+        return True
+
+    def _cancelar(self) -> None:
+        registro = self._fila_seleccionada()
+        if registro is None:
+            return
+        self._cancelar_registro(registro, "Anular licencia")
+
+    def _modificar_seleccionada(self) -> None:
+        registro = self._fila_seleccionada()
+        if registro is None:
+            QMessageBox.warning(self, "Modificar licencia", "Elegí una fila de la tabla para modificar.")
+            return
+        if not self._cancelar_registro(registro, "Modificar licencia"):
+            return
+
+        indice_profesional = self.combo_profesional.findData(registro["IdProfesional"])
+        if indice_profesional >= 0:
+            self.combo_profesional.setCurrentIndex(indice_profesional)
+        indice_tipo = self.combo_tipo.findData(registro["IdTipoLicencia"])
+        if indice_tipo >= 0:
+            self.combo_tipo.setCurrentIndex(indice_tipo)
+        self.spin_porcentaje.setValue(registro["PorcentajeBonificacionAplicado"] or 0)
+        self.campo_desde.setDate(QDate.fromString(registro["FechaDesde"], "yyyy-MM-dd"))
+        self.campo_hasta.setDate(QDate.fromString(registro["FechaHasta"], "yyyy-MM-dd"))
+        self.spin_anio.setValue(int(registro["FechaDesde"][:4]))
+        self._sincronizar_grilla()
 
 
 def _fmt_horario_ausencia(registro: sqlite3.Row) -> str:
