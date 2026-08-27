@@ -764,6 +764,17 @@ class _PanelAusencias(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """`setFocus()` durante la construcción no alcanza a "pegar":
+        el QTabWidget contenedor todavía no está mostrado y se termina
+        quedando el foco en su tab bar. Al mostrarse la pestaña (al
+        abrir la pantalla o volver a esta solapa) se repite el pedido
+        de foco en Profesional, que es cuando realmente surte efecto."""
+        super().showEvent(event)
+        self._orden.reiniciar()
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
@@ -828,6 +839,9 @@ class _PanelAusencias(QWidget):
         boton_cancelar = QPushButton("Anular ausencia seleccionada")
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
+        boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.clicked.connect(self._deshacer_ultimo)
+        form.addWidget(boton_deshacer)
         form.addStretch()
         splitter_superior.addWidget(panel_form)
 
@@ -850,12 +864,16 @@ class _PanelAusencias(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout.addWidget(panel_tabla, stretch=1)
 
         scroll.setWidget(contenido)
         layout_externo.addWidget(scroll)
         self._sincronizar_grilla()
+        self._foco = instalar_enter_avanza_foco(
+            [self.combo_profesional, self.combo_motivo, self.campo_desde, self.campo_hasta, boton]
+        )
 
     def _profesional_cambio(self) -> None:
         self._sincronizar_grilla()
@@ -912,6 +930,8 @@ class _PanelAusencias(QWidget):
             (r, repo_profesional.obtener(r["IdProfesional"])) for r in filtradas
         ]
         filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else "", t[0]["FechaDesde"]))
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._registros = [t[0] for t in filas]
 
         self.tabla.setRowCount(len(filas))
@@ -925,6 +945,17 @@ class _PanelAusencias(QWidget):
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self.grilla.actualizar()
+
+    def _clave_orden(self, columna: int):
+        claves = {
+            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            1: lambda t: t[0]["FechaDesde"],
+            2: lambda t: t[0]["FechaHasta"],
+            3: lambda t: _fmt_horario_ausencia(t[0]),
+            4: lambda t: t[0]["Motivo"] or "",
+            5: lambda t: self._origen(t[0]),
+        }
+        return claves[columna]
 
     def _crear(self) -> None:
         hora_inicio = hora_fin = None
@@ -944,6 +975,7 @@ class _PanelAusencias(QWidget):
             return
         self.conn.commit()
         self.actualizar()
+        self.combo_profesional.setFocus()
 
     def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -965,7 +997,29 @@ class _PanelAusencias(QWidget):
         registro = self._fila_seleccionada()
         if registro is None:
             return
-        self._cancelar_registro(registro, "Anular ausencia")
+        if self._cancelar_registro(registro, "Anular ausencia"):
+            self.combo_profesional.setFocus()
+
+    def _deshacer_ultimo(self) -> None:
+        """Anula la última ausencia cargada en el sistema (la de mayor
+        IdAusencia), sin importar de qué profesional sea ni cuál esté
+        elegido en el filtro."""
+        todas = obtener_repositorio(self.conn, "Ausencia").listar()
+        if not todas:
+            QMessageBox.warning(self, "Deshacer último movimiento", "No hay ausencias cargadas para deshacer.")
+            return
+        ultima = max(todas, key=lambda v: v["IdAusencia"])
+        respuesta = QMessageBox.question(
+            self, "Deshacer último movimiento",
+            "¿Deshacer la última ausencia cargada en el sistema?\n"
+            f"{_texto_profesional(obtener_repositorio(self.conn, 'Profesional').obtener(ultima['IdProfesional']))}: "
+            f"{_fmt_fecha(ultima['FechaDesde'])} a {_fmt_fecha(ultima['FechaHasta'])}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+        if self._cancelar_registro(ultima, "Deshacer último movimiento"):
+            self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
         """Mismo criterio que Reservas aisladas: no se edita la fila

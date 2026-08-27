@@ -743,6 +743,86 @@ def test_cancelar_ausencia_seleccionada_elimina(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 0
 
 
+def test_deshacer_ultimo_movimiento_ausencia_sin_registros_no_falla(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel._deshacer_ultimo()  # no debe intentar confirmar ni romper: no hay nada que deshacer
+
+
+def test_deshacer_ultimo_movimiento_ausencia_anula_la_ultima_sin_importar_filtro(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
+    conn.commit()
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel._crear()
+    panel.campo_desde.setDate(_fecha("2026-09-14"))
+    panel.campo_hasta.setDate(_fecha("2026-09-14"))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 2
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
+    panel._deshacer_ultimo()
+    restantes = obtener_repositorio(conn, "Ausencia").listar()
+    assert len(restantes) == 1
+    assert restantes[0]["FechaDesde"] == "2026-09-07"
+
+
+def test_deshacer_ultimo_movimiento_ausencia_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel._crear()
+
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
+
+
+def test_panel_ausencias_recibe_foco_en_profesional_al_mostrar_la_solapa(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.pestanas.setCurrentWidget(pantalla.panel_ausencias)
+    qtbot.waitUntil(lambda: pantalla.panel_ausencias.combo_profesional.hasFocus())
+
+
+def test_tabla_ausencias_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
+    panel._crear()
+    panel.campo_desde.setDate(_fecha("2026-09-15"))
+    panel.campo_hasta.setDate(_fecha("2026-09-15"))
+    panel._crear()
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(1)  # "Desde" ascendente
+    assert panel.tabla.item(0, 1).text() == "01-09-2026"
+    assert panel.tabla.item(1, 1).text() == "15-09-2026"
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(1)  # de nuevo -> descendente
+    assert panel.tabla.item(0, 1).text() == "15-09-2026"
+    assert panel.tabla.item(1, 1).text() == "01-09-2026"
+
+
 def test_modificar_ausencia_sin_seleccion_no_falla(qtbot, conn):
     _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)
