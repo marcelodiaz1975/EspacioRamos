@@ -4,6 +4,7 @@ bloques rígidos y ausencias) y la cancelación de aisladas, en vez de
 escribir directamente en las tablas."""
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import date
 
@@ -104,6 +105,17 @@ class _SpinHorario(QDoubleSpinBox):
 
 _CATEGORIAS_REGULARES = ("R", "B", "E")
 _CATEGORIAS_AISLADAS = ("R", "A")
+_ORDEN_CATEGORIA_REGULAR = {"B": 0, "R": 1, "E": 2}
+
+
+def _numero_codigo(codigo: str | None) -> int:
+    """El número de "R12" -> 12, para ordenar numéricamente en vez de
+    alfabéticamente (que pondría "R10" antes que "R2"). Sin código, o sin
+    ningún dígito en él, se manda al final."""
+    if not codigo:
+        return 10**9
+    coincidencia = re.search(r"\d+", codigo)
+    return int(coincidencia.group()) if coincidencia else 10**9
 
 
 def _texto_profesional(fila: sqlite3.Row) -> str:
@@ -292,6 +304,7 @@ class _PanelReservasRegulares(QWidget):
         self.combo_localidad = QComboBox()
         for valor, etiqueta in _opciones_localidad(self.conn):
             self.combo_localidad.addItem(etiqueta, valor)
+        self.combo_localidad.setEnabled(self.combo_localidad.count() > 1)
         self.combo_localidad.currentIndexChanged.connect(self._cargar_edificios)
         form.addWidget(QLabel("Localidad"))
         form.addWidget(self.combo_localidad)
@@ -355,21 +368,27 @@ class _PanelReservasRegulares(QWidget):
         boton_crear.setObjectName("botonPrimario")
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
+        boton_modificar = QPushButton("Modificar seleccionada")
+        boton_modificar.clicked.connect(self._modificar_seleccionada)
+        form.addWidget(boton_modificar)
+        boton_finalizar = QPushButton("Finalizar reserva a fin de mes")
+        boton_finalizar.clicked.connect(self._finalizar_vigencia)
+        form.addWidget(boton_finalizar)
+        boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.clicked.connect(self._deshacer_ultimo)
+        form.addWidget(boton_deshacer)
 
         linea_separadora = QFrame()
         linea_separadora.setFrameShape(QFrame.Shape.HLine)
         linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
         form.addWidget(linea_separadora)
 
-        form.addWidget(QLabel("Datos complementarios del profesional"))
         self.etiqueta_horas_semanales = QLabel()
         self.etiqueta_horas_aisladas = QLabel()
         self.etiqueta_descuento = QLabel()
-        self.etiqueta_vacaciones = QLabel()
         form.addWidget(self.etiqueta_horas_semanales)
         form.addWidget(self.etiqueta_horas_aisladas)
         form.addWidget(self.etiqueta_descuento)
-        form.addWidget(self.etiqueta_vacaciones)
 
         form.addStretch()
         splitter_superior.addWidget(panel_form)
@@ -387,28 +406,18 @@ class _PanelReservasRegulares(QWidget):
         panel_tabla = QGroupBox("Horarios reservados")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(6)
+        self.tabla.setColumnCount(9)
         self.tabla.setHorizontalHeaderLabels(
-            ["Profesional", "Consultorio", "Día", "Horario", "Vigencia desde", "Vigencia hasta"]
+            [
+                "Profesional", "Localidad", "Edificio", "Unidad", "Consultorio", "Día", "Horario",
+                "Vigencia desde", "Vigencia hasta",
+            ]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
-
-        fila_acciones = QHBoxLayout()
-        boton_modificar = QPushButton("Modificar seleccionada")
-        boton_modificar.clicked.connect(self._modificar_seleccionada)
-        fila_acciones.addWidget(boton_modificar)
-        boton_finalizar = QPushButton("Finalizar reserva a fin de mes")
-        boton_finalizar.clicked.connect(self._finalizar_vigencia)
-        fila_acciones.addWidget(boton_finalizar)
-        boton_deshacer = QPushButton("Deshacer último movimiento")
-        boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        fila_acciones.addWidget(boton_deshacer)
-        fila_acciones.addStretch()
-        layout_tabla.addLayout(fila_acciones)
         layout.addWidget(panel_tabla, stretch=1)
 
         hoy = fecha_actual(self.conn)
@@ -430,8 +439,10 @@ class _PanelReservasRegulares(QWidget):
         VIGENTES de todos los profesionales (no tiene sentido alargar la
         lista con lo que ya terminó); con uno elegido, se acota a las de
         ese profesional únicamente (incluida su historia, para poder
-        revisarla). Orden: código del profesional, día de la semana,
-        hora inicial, localidad, edificio, unidad y consultorio."""
+        revisarla). Orden por defecto: categoría del profesional (B, R,
+        E, en ese orden fijo — no alfabético), número de profesional,
+        día de la semana y hora de inicio del bloque — overridable
+        haciendo click en el título de una columna (ver `OrdenTabla`)."""
         id_profesional_filtro = self.combo_profesional.currentData()
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
         todas = obtener_repositorio(self.conn, "ReservaRegular").listar()
@@ -452,32 +463,31 @@ class _PanelReservasRegulares(QWidget):
             ).fetchone()
             filas.append((r, profesional, consultorio))
         filas.sort(key=lambda t: (
-            t[1]["IdCodigo"] or "" if t[1] else "",
+            _ORDEN_CATEGORIA_REGULAR.get(t[1]["CategoriaProfesional"], 99) if t[1] else 99,
+            _numero_codigo(t[1]["IdCodigo"] if t[1] else None),
             DIAS_SEMANA.index(t[0]["DiaSemana"]),
             t[0]["HoraInicio"],
-            (t[2]["DomicilioLocalidad"] or "") if t[2] else "",
-            (t[2]["NombreEdificio"] or "") if t[2] else "",
-            (t[2]["Departamento"] or "") if t[2] else "",
-            t[2]["NumeroConsultorio"] if t[2] else 0,
         ))
         if self._orden.columna is not None:
             filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._reservas = [t[0] for t in filas]
 
-        mostrar_localidad = len({t[2]["DomicilioLocalidad"] for t in filas if t[2]}) > 1
-        mostrar_edificio = len({t[2]["NombreEdificio"] for t in filas if t[2]}) > 1
-
         self.tabla.setRowCount(len(filas))
         for fila_idx, (r, profesional, consultorio) in enumerate(filas):
             self.tabla.setItem(fila_idx, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            texto_consultorio = (
-                _texto_consultorio(consultorio, mostrar_localidad, mostrar_edificio) if consultorio else "?"
+            self.tabla.setItem(
+                fila_idx, 1,
+                QTableWidgetItem((consultorio["DomicilioLocalidad"] or "(Sin localidad)") if consultorio else "?"),
             )
-            self.tabla.setItem(fila_idx, 1, QTableWidgetItem(texto_consultorio))
-            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(r["DiaSemana"]))
-            self.tabla.setItem(fila_idx, 3, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
-            self.tabla.setItem(fila_idx, 4, QTableWidgetItem(_fmt_fecha(r["VigenciaInicio"])))
-            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(_fmt_fecha(r["VigenciaFin"])))
+            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(consultorio["NombreEdificio"] if consultorio else "?"))
+            self.tabla.setItem(fila_idx, 3, QTableWidgetItem(consultorio["Departamento"] if consultorio else "?"))
+            self.tabla.setItem(
+                fila_idx, 4, QTableWidgetItem(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
+            )
+            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(r["DiaSemana"]))
+            self.tabla.setItem(fila_idx, 6, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
+            self.tabla.setItem(fila_idx, 7, QTableWidgetItem(_fmt_fecha(r["VigenciaInicio"])))
+            self.tabla.setItem(fila_idx, 8, QTableWidgetItem(_fmt_fecha(r["VigenciaFin"])))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._sincronizar_grilla()
@@ -486,16 +496,20 @@ class _PanelReservasRegulares(QWidget):
     def _clave_orden(columna: int):
         claves = {
             0: lambda t: _texto_profesional(t[1]) if t[1] else "",
-            1: lambda t: (t[2]["NumeroConsultorio"] if t[2] else 0),
-            2: lambda t: DIAS_SEMANA.index(t[0]["DiaSemana"]),
-            3: lambda t: t[0]["HoraInicio"],
-            4: lambda t: t[0]["VigenciaInicio"] or "",
-            5: lambda t: t[0]["VigenciaFin"] or "",
+            1: lambda t: (t[2]["DomicilioLocalidad"] or "") if t[2] else "",
+            2: lambda t: (t[2]["NombreEdificio"] or "") if t[2] else "",
+            3: lambda t: (t[2]["Departamento"] or "") if t[2] else "",
+            4: lambda t: (t[2]["NumeroConsultorio"] if t[2] else 0),
+            5: lambda t: DIAS_SEMANA.index(t[0]["DiaSemana"]),
+            6: lambda t: t[0]["HoraInicio"],
+            7: lambda t: t[0]["VigenciaInicio"] or "",
+            8: lambda t: t[0]["VigenciaFin"] or "",
         }
         return claves[columna]
 
     def _cargar_edificios(self) -> None:
         _recargar_edificios(self.conn, self.combo_localidad, self.combo_edificio)
+        self.combo_edificio.setEnabled(self.combo_edificio.count() > 1)
         self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
@@ -528,22 +542,31 @@ class _PanelReservasRegulares(QWidget):
             self.combo_consultorio.setCurrentIndex(indice_consultorio)
 
     def _sincronizar_grilla(self) -> None:
-        """La vista previa muestra el horario regular del profesional
-        elegido — acotada a las unidades (con todos sus consultorios) y a
-        los días en los que ya tiene algo reservado (vacía para un
-        profesional nuevo, sin nada reservado todavía, o cuando no hay
-        ninguno elegido), y con su propia reserva pintada de azul. Se
+        """Con un profesional elegido, la vista previa muestra su horario
+        regular — acotada a las unidades (con todos sus consultorios) y a
+        los días en los que ya tiene algo reservado (vacía para uno nuevo,
+        sin nada reservado todavía), con su propia reserva pintada de
+        azul. Con "Todos los profesionales" no tiene sentido acotar a
+        nada — se saca cualquier filtro y queda la grilla completa (todas
+        las localidades/edificios/unidades/consultorios), con los mismos
+        criterios de colores que la pantalla de Grilla operativa. Se
         vuelve a calcular también en cada refresco de la tabla (después
         de cada alta/baja), así queda siempre al día de lo que el
         profesional ya tiene reservado antes de seguir cargando."""
         id_profesional = self.combo_profesional.currentData()
-        pares = pares_dia_unidad_con_reserva_vigente(self.conn, id_profesional)
-        ids_unidad = sorted({u for _, u in pares})
-        dias = sorted({d for d, _ in pares}, key=DIAS_SEMANA.index)
-        self.grilla.filtrar_por_unidades(ids_unidad)
-        self.grilla.filtrar_por_dias(dias)
-        self.grilla.filtrar_por_pares_unidad_dia(pares)
-        self.grilla.filtrar_por_profesional(id_profesional)
+        if id_profesional is None:
+            self.grilla.filtrar_por_unidades(None)
+            self.grilla.filtrar_por_dias(None)
+            self.grilla.filtrar_por_pares_unidad_dia(None)
+            self.grilla.filtrar_por_profesional(None)
+        else:
+            pares = pares_dia_unidad_con_reserva_vigente(self.conn, id_profesional)
+            ids_unidad = sorted({u for _, u in pares})
+            dias = sorted({d for d, _ in pares}, key=DIAS_SEMANA.index)
+            self.grilla.filtrar_por_unidades(ids_unidad)
+            self.grilla.filtrar_por_dias(dias)
+            self.grilla.filtrar_por_pares_unidad_dia(pares)
+            self.grilla.filtrar_por_profesional(id_profesional)
         self._actualizar_resumen_profesional(id_profesional)
 
     def _actualizar_resumen_profesional(self, id_profesional: int | None) -> None:
@@ -552,12 +575,10 @@ class _PanelReservasRegulares(QWidget):
             self.etiqueta_horas_semanales.setText("Horas regulares semanales: —")
             self.etiqueta_horas_aisladas.setText("Horas aisladas mensuales: —")
             self.etiqueta_descuento.setText("% Descuento: —")
-            self.etiqueta_vacaciones.setText("% Vacaciones disponible: —")
             return
         self.etiqueta_horas_semanales.setText(f"Horas regulares semanales: {_fmt_horas(resumen.horas_semanales)}")
         self.etiqueta_horas_aisladas.setText(f"Horas aisladas mensuales: {_fmt_horas(resumen.horas_aisladas_mensuales)}")
         self.etiqueta_descuento.setText(f"% Descuento: {resumen.porcentaje_descuento:.1f}%")
-        self.etiqueta_vacaciones.setText(f"% Vacaciones disponible: {resumen.porcentaje_vacaciones_disponible:.1f}%")
 
     def _resetear_formulario(self) -> None:
         """Después de aplicar un cambio, deja el formulario listo y en
