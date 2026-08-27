@@ -185,6 +185,17 @@ class _PanelRegistrarPago(QWidget):
         form.addWidget(QLabel("Cuenta receptora"))
         form.addWidget(self.combo_cuenta_receptora)
 
+        self.boton_registrar = QPushButton("Registrar pago")
+        self.boton_registrar.setObjectName("botonPrimario")
+        self.boton_registrar.clicked.connect(self._registrar)
+        form.addWidget(self.boton_registrar)
+        boton_modificar = QPushButton("Modificar pago")
+        boton_modificar.clicked.connect(self._modificar)
+        form.addWidget(boton_modificar)
+        boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.clicked.connect(self._deshacer_ultimo)
+        form.addWidget(boton_deshacer)
+
         form.addWidget(_linea_divisoria())
         self.etiqueta_saldo_actual = QLabel()
         self.etiqueta_nuevo_saldo = QLabel()
@@ -215,18 +226,6 @@ class _PanelRegistrarPago(QWidget):
         form.addWidget(self.campo_recogida_sobres)
         self._precargar_recogida_sobres()
 
-        form.addWidget(_linea_divisoria())
-        self.boton_registrar = QPushButton("Registrar pago")
-        self.boton_registrar.setObjectName("botonPrimario")
-        self.boton_registrar.clicked.connect(self._registrar)
-        form.addWidget(self.boton_registrar)
-        boton_modificar = QPushButton("Modificar pago")
-        boton_modificar.clicked.connect(self._modificar)
-        form.addWidget(boton_modificar)
-        boton_deshacer = QPushButton("Deshacer último movimiento")
-        boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        form.addWidget(boton_deshacer)
-
         form.addStretch()
         splitter.addWidget(panel_form)
 
@@ -249,7 +248,7 @@ class _PanelRegistrarPago(QWidget):
         self._actualizar_saldos()
         self._foco = instalar_enter_avanza_foco([
             self.campo_periodo, self.combo_profesional, self.spin_monto, self.combo_medio_pago,
-            self.combo_cuenta_receptora, self.campo_recogida_sobres, self.boton_registrar,
+            self.combo_cuenta_receptora, self.boton_registrar,
         ])
 
     def _es_sobre(self) -> bool:
