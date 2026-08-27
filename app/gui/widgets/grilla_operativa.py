@@ -51,6 +51,7 @@ from app.negocio.grilla_operativa import (
     AZUL_OSCURO,
     BLANCA,
     BLANCO,
+    NEGRA,
     ROJO,
     VERDE,
     CeldaGrillaOperativa,
@@ -71,6 +72,9 @@ _FORMATO_FECHA = "dd-MM-yyyy"
 _COL_TIPO_BLOQUE = 0
 _COL_HORARIO = 1
 _COL_DATOS_INICIO = 2
+_CELDA_VACIA = CeldaGrillaOperativa(
+    color_aro=BLANCO, color_centro=BLANCO, color_fuente=NEGRA, codigo=None, detalle="", id_profesional_mostrado=None,
+)
 
 
 def _tipo_bloque_por_hora(conn: sqlite3.Connection, horas: list[int]) -> dict[int, str]:
@@ -309,6 +313,7 @@ class GrillaOperativaWidget(QWidget):
         self._resultado: dict[tuple[int, str, int], CeldaGrillaOperativa] = {}
         self._pares_dia_unidad: set[tuple[str, int]] | None = None
         self._resaltar_ausencias = False
+        self._filtro_exclusivo_profesional = False
         self._armar_ui()
         self._cargar_localidades()
         self.actualizar()
@@ -596,6 +601,17 @@ class GrillaOperativaWidget(QWidget):
         self._resaltar_ausencias = activar
         self.actualizar()
 
+    def activar_filtro_exclusivo_profesional(self, activar: bool = True) -> None:
+        """Con un profesional elegido en el filtro, no alcanza con
+        pintarlo de azul entre lo demás — hay que mostrar ÚNICAMENTE sus
+        propias celdas, dejando en blanco cualquier otra (aunque el
+        consultorio esté ocupado por otro profesional a otra hora). Pensado
+        para los usos "vista previa" embebidos (Reservas, Vacaciones,
+        Licencias, Ausencias): la pantalla de Grilla operativa standalone
+        no activa esto, ahí sí importa ver quién más ocupa cada lugar."""
+        self._filtro_exclusivo_profesional = activar
+        self.actualizar()
+
     def filtrar_por_profesional(self, id_profesional: int | None) -> None:
         """Fija el filtro de profesional (el que pinta de azul su celda
         actual) a uno puntual, o lo limpia con `None` — mismo uso que
@@ -654,6 +670,11 @@ class GrillaOperativaWidget(QWidget):
             self.conn, ids_consultorio, dias, hora_ini, hora_fin, desde, hasta,
             modo=modo, id_profesional_filtro=id_profesional_filtro, ausente_en=ausente_en,
         )
+        if self._filtro_exclusivo_profesional and id_profesional_filtro is not None:
+            self._resultado = {
+                clave: celda if celda.id_profesional_mostrado == id_profesional_filtro else _CELDA_VACIA
+                for clave, celda in self._resultado.items()
+            }
         self._construir_tabla(columnas, horas)
 
     def _columnas(self, ids_unidad: list[int], dias: list[str]) -> list[dict]:

@@ -869,6 +869,102 @@ def test_combo_edificio_habilitado_con_varios_edificios_en_la_misma_localidad(qt
     assert panel.combo_edificio.isEnabled() is True
 
 
+def test_combo_localidad_con_una_sola_opcion_la_completa_sola(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    assert panel.combo_localidad.currentText() == "(Sin localidad)"
+    assert panel.combo_edificio.currentText() == "Torre Norte"
+
+
+def test_combo_localidad_con_varias_opciones_arranca_en_seleccionar(qtbot, conn):
+    """Con más de una localidad, el campo no se queda pegado a la primera
+    en orden alfabético: arranca en "Seleccionar…", habilitado, obligando
+    a elegir. Edificio (y en cascada Unidad/Consultorio) quedan vacíos
+    hasta que se elija una localidad real."""
+    _preparar_dos_localidades(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    assert panel.combo_localidad.currentText() == "Seleccionar…"
+    assert panel.combo_localidad.currentData() is not None
+    assert panel.combo_edificio.count() == 0
+    assert panel.combo_edificio.isEnabled() is False
+    assert panel.combo_unidad.count() == 0
+    assert panel.combo_consultorio.count() == 0
+
+
+def test_combo_edificio_con_varias_opciones_arranca_en_seleccionar(qtbot, conn):
+    _preparar(conn)
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Sur")
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    assert panel.combo_edificio.currentText() == "Seleccionar…"
+    assert panel.combo_edificio.currentData() is None
+    assert panel.combo_unidad.count() == 0
+    assert panel.combo_consultorio.count() == 0
+
+
+def test_crear_reserva_regular_sin_elegir_consultorio_avisa_y_no_crea(qtbot, conn):
+    """Con más de una localidad y ninguna elegida todavía, "Crear reserva
+    regular" no puede completar el alta sin explotar — avisa y no hace
+    nada, en vez de intentar guardar con IdConsultorio en blanco."""
+    _preparar_dos_localidades(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 0
+
+
+def test_crear_reserva_regular_eligiendo_localidad_y_edificio_persiste(qtbot, conn):
+    id_edificio_1, id_consultorio_1, _, _, id_profesional = _preparar_dos_localidades(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.combo_localidad.setCurrentIndex(panel.combo_localidad.findData("Ramos Mejía"))
+    panel.combo_edificio.setCurrentIndex(panel.combo_edificio.findData(id_edificio_1))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+    assert conn.execute("SELECT IdConsultorio FROM ReservaRegular").fetchone()["IdConsultorio"] == id_consultorio_1
+
+
+def test_grilla_preview_filtro_exclusivo_no_muestra_otros_profesionales(qtbot, conn):
+    """Con R2 elegido, la vista previa solo muestra sus propias celdas —
+    aunque otro profesional (B1) tenga algo reservado en el mismo día y
+    unidad, a otra hora."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Norte")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    repo_prof = obtener_repositorio(conn, "Profesional")
+    id_r2 = repo_prof.crear(CategoriaProfesional="R", Apellido="Lo Veci", IdCodigo="R2")
+    id_b1 = repo_prof.crear(CategoriaProfesional="B", Apellido="Bono", IdCodigo="B1")
+    repo = obtener_repositorio(conn, "ReservaRegular")
+    repo.crear(
+        IdProfesional=id_r2, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2020-01-01",
+    )
+    repo.crear(
+        IdProfesional=id_b1, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=14, HoraFin=15, VigenciaInicio="2020-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_r2))
+
+    codigos = {c.codigo for c in panel.grilla._resultado.values() if c.codigo}
+    assert codigos == {"R2"}
+
+
 def test_spin_horario_aisladas_permite_medias_horas(qtbot, conn):
     _preparar(conn)
     pantalla = PantallaReservas(conn)
@@ -1265,9 +1361,12 @@ def test_combo_localidad_filtra_el_combo_edificio_en_ambas_solapas(qtbot, conn):
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
-        assert panel.combo_localidad.count() == 2
+    # Regulares agrega un placeholder "Seleccionar…" cuando hay más de una
+    # localidad (fuerza la elección); Aisladas no cambió ese criterio.
+    assert pantalla.panel_regulares.combo_localidad.count() == 3
+    assert pantalla.panel_aisladas.combo_localidad.count() == 2
 
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
         indice = panel.combo_localidad.findData("Haedo")
         panel.combo_localidad.setCurrentIndex(indice)
         assert panel.combo_edificio.count() == 1

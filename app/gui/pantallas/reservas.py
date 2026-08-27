@@ -106,6 +106,7 @@ class _SpinHorario(QDoubleSpinBox):
 _CATEGORIAS_REGULARES = ("R", "B", "E")
 _CATEGORIAS_AISLADAS = ("R", "A")
 _ORDEN_CATEGORIA_REGULAR = {"B": 0, "R": 1, "E": 2}
+_SIN_ELEGIR = object()  # sentinel del placeholder "Seleccionar…" de Localidad (None ya es un valor real: "sin localidad")
 
 
 def _numero_codigo(codigo: str | None) -> int:
@@ -302,9 +303,12 @@ class _PanelReservasRegulares(QWidget):
         form.addWidget(self.combo_profesional)
 
         self.combo_localidad = QComboBox()
-        for valor, etiqueta in _opciones_localidad(self.conn):
+        opciones_localidad = _opciones_localidad(self.conn)
+        if len(opciones_localidad) > 1:
+            self.combo_localidad.addItem("Seleccionar…", _SIN_ELEGIR)
+        for valor, etiqueta in opciones_localidad:
             self.combo_localidad.addItem(etiqueta, valor)
-        self.combo_localidad.setEnabled(self.combo_localidad.count() > 1)
+        self.combo_localidad.setEnabled(len(opciones_localidad) > 1)
         self.combo_localidad.currentIndexChanged.connect(self._cargar_edificios)
         form.addWidget(QLabel("Localidad"))
         form.addWidget(self.combo_localidad)
@@ -396,6 +400,7 @@ class _PanelReservasRegulares(QWidget):
         grupo_grilla = QGroupBox("Vista previa: grilla operativa")
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         self.grilla = GrillaOperativaWidget(self.conn)
+        self.grilla.activar_filtro_exclusivo_profesional(True)
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -508,8 +513,26 @@ class _PanelReservasRegulares(QWidget):
         return claves[columna]
 
     def _cargar_edificios(self) -> None:
-        _recargar_edificios(self.conn, self.combo_localidad, self.combo_edificio)
-        self.combo_edificio.setEnabled(self.combo_edificio.count() > 1)
+        """A diferencia de Reservas aisladas (que reusa `_recargar_edificios`
+        tal cual), acá Localidad/Edificio fuerzan una elección explícita
+        cuando hay más de una opción — "Seleccionar…" habilitado, en vez
+        de quedarse en la primera opción sin que el operador la haya
+        elegido a propósito."""
+        localidad = self.combo_localidad.currentData()
+        self.combo_edificio.blockSignals(True)
+        self.combo_edificio.clear()
+        if localidad is _SIN_ELEGIR:
+            self.combo_edificio.blockSignals(False)
+            self.combo_edificio.setEnabled(False)
+            self._cargar_unidades()
+            return
+        opciones_edificio = _opciones_edificio(self.conn, localidad)
+        if len(opciones_edificio) > 1:
+            self.combo_edificio.addItem("Seleccionar…", None)
+        for id_, nombre in opciones_edificio:
+            self.combo_edificio.addItem(nombre, id_)
+        self.combo_edificio.blockSignals(False)
+        self.combo_edificio.setEnabled(len(opciones_edificio) > 1)
         self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
@@ -605,6 +628,9 @@ class _PanelReservasRegulares(QWidget):
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
             QMessageBox.warning(self, "Crear reserva regular", "Elegí un profesional.")
+            return
+        if self.combo_consultorio.currentData() is None:
+            QMessageBox.warning(self, "Crear reserva regular", "Elegí localidad, edificio, unidad y consultorio.")
             return
         dias = self._dias_seleccionados()
         if not dias:

@@ -108,6 +108,36 @@ def test_filtro_profesional_pinta_azul(qtbot, conn):
     assert widget._resultado[clave].color_aro == AZUL_OSCURO
 
 
+def test_filtro_exclusivo_profesional_oculta_a_los_demas(qtbot, conn):
+    """Sin activar el filtro exclusivo, la celda de otro profesional en
+    otro horario del mismo consultorio se sigue viendo normal. Al
+    activarlo con un profesional elegido, esa celda ajena queda en
+    blanco — solo se ve lo del profesional filtrado."""
+    id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
+    id_otro = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Otro", IdCodigo="R9",
+    )
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_otro, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=14, HoraFin=15, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    texto = next(t for t, i in widget._profesionales_por_texto.items() if i == id_virginia)
+    widget.campo_profesional.setText(texto)
+    widget.actualizar()
+
+    clave_propia = (id_consultorio, "Lunes", 9)
+    clave_ajena = (id_consultorio, "Lunes", 14)
+    assert widget._resultado[clave_ajena].codigo == "R9"  # sin filtro exclusivo, se ve
+
+    widget.activar_filtro_exclusivo_profesional(True)
+    assert widget._resultado[clave_propia].codigo == "R1"
+    assert widget._resultado[clave_ajena].codigo is None  # con el filtro exclusivo, desaparece
+
+
 def test_columna_se_ensancha_con_codigo_de_4_caracteres(qtbot, conn):
     _preparar(conn, codigo_virginia="R123")
     widget = GrillaOperativaWidget(conn)
