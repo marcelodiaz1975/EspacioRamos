@@ -97,6 +97,17 @@ def _spin_anio(conn: sqlite3.Connection) -> QSpinBox:
     return spin
 
 
+def _texto_valor_bonificado(valor: float | None, fecha_desde: str, periodo_en_curso: str) -> str:
+    """En blanco para los períodos futuros (posteriores al mes en curso):
+    el monto ya está calculado y congelado en la base (así funciona el
+    prorrateo mensual de liquidaciones, DC-05 §1.3), pero mostrarlo en la
+    lista antes de tiempo podría ser engañoso — los valores de referencia
+    de esos meses (aumentos, etc.) todavía pueden no estar definidos."""
+    if fecha_desde[:7] > periodo_en_curso:
+        return ""
+    return f"$ {valor:,.2f}" if valor is not None else ""
+
+
 def _linea_divisoria() -> QFrame:
     linea = QFrame()
     linea.setFrameShape(QFrame.Shape.HLine)
@@ -324,14 +335,15 @@ class _PanelVacaciones(QWidget):
             filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._registros = [t[0] for t in filas]
 
+        periodo_en_curso = periodo_actual(self.conn)
         self.tabla.setRowCount(len(filas))
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             self.tabla.setItem(i, 1, QTableWidgetItem(r["FechaDesde"][:4]))
             self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
             self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
-            valor = r["ValorBonificado"]
-            self.tabla.setItem(i, 4, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
+            texto_valor = _texto_valor_bonificado(r["ValorBonificado"], r["FechaDesde"], periodo_en_curso)
+            self.tabla.setItem(i, 4, QTableWidgetItem(texto_valor))
             cupo_utilizado = r["CupoConsumidoPorcentaje"]
             self.tabla.setItem(i, 5, QTableWidgetItem(f"{cupo_utilizado:.1f}%" if cupo_utilizado is not None else ""))
             cupo_restante = r["CupoRestantePorcentaje"]
@@ -611,6 +623,7 @@ class _PanelLicencias(QWidget):
             filas.sort(key=clave, reverse=not self._orden.ascendente)
         self._registros = [t[0] for t in filas]
 
+        periodo_en_curso = periodo_actual(self.conn)
         self.tabla.setRowCount(len(filas))
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
@@ -620,8 +633,8 @@ class _PanelLicencias(QWidget):
             self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
             porcentaje = r["PorcentajeBonificacionAplicado"]
             self.tabla.setItem(i, 4, QTableWidgetItem(f"{porcentaje:.1f}%" if porcentaje is not None else ""))
-            valor = r["ValorBonificado"]
-            self.tabla.setItem(i, 5, QTableWidgetItem(f"$ {valor:,.2f}" if valor is not None else ""))
+            texto_valor = _texto_valor_bonificado(r["ValorBonificado"], r["FechaDesde"], periodo_en_curso)
+            self.tabla.setItem(i, 5, QTableWidgetItem(texto_valor))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self.grilla.actualizar()

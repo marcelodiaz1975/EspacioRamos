@@ -278,6 +278,32 @@ def test_tabla_vacaciones_muestra_cupo_utilizado_junto_al_restante(qtbot, conn):
     assert panel.tabla.item(0, 6).text() == "50.0%"
 
 
+def test_tabla_vacaciones_oculta_valor_bonificado_de_meses_futuros(qtbot, conn):
+    """El monto ya está calculado y guardado, pero no se muestra en la
+    lista para períodos posteriores al mes en curso: todavía pueden no
+    estar definidos los valores de referencia de esos meses."""
+    id_profesional = _preparar(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-10' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-08-03"))
+    panel.campo_hasta.setDate(_fecha("2026-08-09"))
+    panel._crear()
+    panel.campo_desde.setDate(_fecha("2026-10-05"))
+    panel.campo_hasta.setDate(_fecha("2026-10-11"))
+    panel._crear()
+
+    assert panel.tabla.rowCount() == 2
+    filas = {panel.tabla.item(f, 2).text(): panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())}
+    assert filas["03-08-2026"] != ""  # mes en curso: se ve el monto
+    assert filas["05-10-2026"] == ""  # mes futuro: en blanco
+
+
 def test_cupo_vacaciones_se_actualiza_con_profesional_y_anio(qtbot, conn):
     id_profesional = _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)
@@ -490,6 +516,33 @@ def test_tabla_licencias_muestra_columna_bonificacion(qtbot, conn):
     assert panel.tabla.horizontalHeaderItem(4).text() == "Bonificación"
     assert panel.tabla.horizontalHeaderItem(5).text() == "Valor bonificado"
     assert panel.tabla.item(0, 4).text() == f"{panel.spin_porcentaje.value():.1f}%"
+
+
+def test_tabla_licencias_oculta_valor_bonificado_de_meses_futuros(qtbot, conn):
+    id_profesional = _preparar(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-10' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-08-03"))
+    panel.campo_hasta.setDate(_fecha("2026-08-03"))
+    panel._crear()
+    panel.campo_desde.setDate(_fecha("2026-10-05"))
+    panel.campo_hasta.setDate(_fecha("2026-10-05"))
+    panel._crear()
+
+    assert panel.tabla.rowCount() == 2
+    filas = {panel.tabla.item(f, 2).text(): panel.tabla.item(f, 5).text() for f in range(panel.tabla.rowCount())}
+    assert filas["03-08-2026"] != ""  # mes en curso: se ve el monto
+    assert filas["05-10-2026"] == ""  # mes futuro: en blanco
+    # La columna "Bonificación" (el % elegido) sigue mostrándose siempre,
+    # solo se oculta el monto en pesos ya calculado para meses futuros.
+    porcentajes = {panel.tabla.item(f, 2).text(): panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())}
+    assert porcentajes["05-10-2026"] != ""
 
 
 def test_crear_licencia_con_porcentaje_default_no_pide_confirmacion(qtbot, conn):
