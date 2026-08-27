@@ -453,32 +453,122 @@ def test_cancelar_licencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn
     assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
 
 
-def test_spin_anio_licencias_arranca_en_el_anio_actual(qtbot, conn):
-    from app.negocio.dias import fecha_actual
-
+def test_licencias_no_tiene_campo_de_anio_a_imputar(qtbot, conn):
+    """Los cupos de licencia no son anuales como los de vacaciones — no
+    tiene sentido pedir un "año calendario a imputar" acá."""
     _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_licencias
-    assert panel.spin_anio.value() == fecha_actual(conn).year
-    assert panel.boton_crear.isEnabled() is True
-
-    panel.spin_anio.setValue(panel.spin_anio.value() - 1)
-    assert panel.boton_crear.isEnabled() is False
+    assert not hasattr(panel, "spin_anio")
 
 
-def test_crear_licencia_anio_ya_terminado_no_persiste(qtbot, conn):
+def test_crear_licencia_cruza_de_anio_y_persiste(qtbot, conn):
+    """A diferencia de vacaciones (cupo anual), una licencia sí puede
+    cruzar de un año calendario a otro en un único registro."""
     id_profesional = _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_licencias
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    anio_pasado = panel.spin_anio.value() - 1
-    panel.spin_anio.setValue(anio_pasado)
-    panel.campo_desde.setDate(QDate(anio_pasado, 9, 1))
-    panel.campo_hasta.setDate(QDate(anio_pasado, 9, 3))
+    panel.campo_desde.setDate(QDate(2026, 12, 28))
+    panel.campo_hasta.setDate(QDate(2027, 1, 3))
     panel._crear()
-    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 0
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
+
+
+def test_tabla_licencias_orden_por_defecto_fecha_mas_nueva_primero(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
+    panel._crear()
+    panel.campo_desde.setDate(_fecha("2026-09-15"))
+    panel.campo_hasta.setDate(_fecha("2026-09-15"))
+    panel._crear()
+
+    assert panel.tabla.rowCount() == 2
+    assert panel.tabla.item(0, 2).text() == "15-09-2026"
+    assert panel.tabla.item(1, 2).text() == "01-09-2026"
+
+
+def test_tabla_licencias_todos_ordena_por_fecha_y_luego_profesional(qtbot, conn):
+    id_a = _preparar(conn)
+    conn.execute("UPDATE Profesional SET IdCodigo = 'R1' WHERE IdProfesional = ?", (id_a,))
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_b = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Aaronson", IdCodigo="A1")
+    conn.execute(
+        "INSERT INTO ReservaRegular (IdProfesional, IdConsultorio, DiaSemana, HoraInicio, HoraFin, VigenciaInicio) "
+        "VALUES (?, ?, 'Martes', 9, 12, '2020-01-01')",
+        (id_b, id_consultorio),
+    )
+    conn.commit()
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_a))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
+    panel._crear()
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_b))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
+    panel._crear()
+
+    panel.combo_profesional.setCurrentIndex(0)  # Todos los profesionales
+    assert panel.tabla.rowCount() == 2
+    # Misma fecha en las dos -> desempata por profesional (código A1 antes que R1)
+    assert panel.tabla.item(0, 0).text().startswith("A1")
+    assert panel.tabla.item(1, 0).text().startswith("R1")
+
+
+def test_tabla_licencias_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
+    panel._crear()
+    panel.campo_desde.setDate(_fecha("2026-09-15"))
+    panel.campo_hasta.setDate(_fecha("2026-09-15"))
+    panel._crear()
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # "Desde" ascendente
+    assert panel.tabla.item(0, 2).text() == "01-09-2026"
+    assert panel.tabla.item(1, 2).text() == "15-09-2026"
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # de nuevo -> descendente
+    assert panel.tabla.item(0, 2).text() == "15-09-2026"
+    assert panel.tabla.item(1, 2).text() == "01-09-2026"
+
+
+def test_tabla_licencias_vuelve_al_orden_por_defecto_al_reabrir_la_solapa(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-01"))
+    panel._crear()
+    panel.campo_desde.setDate(_fecha("2026-09-15"))
+    panel.campo_hasta.setDate(_fecha("2026-09-15"))
+    panel._crear()
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # "Desde" ascendente
+    assert panel.tabla.item(0, 2).text() == "01-09-2026"
+
+    pantalla.pestanas.setCurrentWidget(pantalla.panel_vacaciones)
+    pantalla.pestanas.setCurrentWidget(panel)
+    assert panel._orden.columna is None
+    assert panel.tabla.item(0, 2).text() == "15-09-2026"
 
 
 def test_licencias_no_tiene_seccion_de_cupo(qtbot, conn):
@@ -499,9 +589,11 @@ def test_modificar_licencia_seleccionada_anula_y_precarga_formulario(qtbot, conn
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_licencias
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    from app.negocio.dias import fecha_actual
+
     indice_duelo = panel.combo_tipo.findText("Licencia por duelo")
     panel.combo_tipo.setCurrentIndex(indice_duelo)
-    anio_actual = panel.spin_anio.value()
+    anio_actual = fecha_actual(conn).year
     panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
     panel.campo_hasta.setDate(QDate(anio_actual, 9, 3))
     panel._crear()
@@ -740,7 +832,7 @@ def test_combo_profesional_ausencias_usa_formato_de_reservas(qtbot, conn):
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_ausencias
-    assert panel.combo_profesional.itemText(0) == "Seleccionar profesional…"
+    assert panel.combo_profesional.itemText(0) == "Todos los profesionales"
     assert panel.combo_profesional.itemData(0) is None
     assert panel.combo_profesional.itemText(1) == "R1 - Lic. Gómez"
 

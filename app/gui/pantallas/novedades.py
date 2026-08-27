@@ -6,7 +6,13 @@ inactividad. Son registros históricos que alimentan el cálculo de la
 liquidación (Etapa 4) — el alta reusa siempre las funciones de negocio
 (crear_vacacion/crear_licencia/crear_ausencia/crear_cargo_especial) para no
 perderse los valores derivados (bonificado, cupo consumido, etc.) que esas
-funciones calculan; no se edita ni borra desde acá, son historial."""
+funciones calculan; no se edita ni borra desde acá, son historial.
+
+Números de formulario (revisión uno por uno con la clienta): Vacaciones es
+F19 (confirmado). Licencias es F20 — asignado por nosotros en esa revisión,
+entre F19 (Vacaciones) y F21 (Pagos), porque no había un número confirmado
+para esta pestaña en ningún documento del proyecto; si la planilla original
+de la clienta ya le tenía otro número, hay que corregirlo acá."""
 from __future__ import annotations
 
 import sqlite3
@@ -45,6 +51,7 @@ from app.gui.pantallas.reservas import (
 )
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
+from app.gui.widgets.orden_tabla import OrdenTabla
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
 from app.negocio.licencias import cancelar_licencia, crear_licencia
@@ -162,6 +169,8 @@ class _PanelVacaciones(QWidget):
         abrir la pantalla o volver a esta solapa) se repite el pedido
         de foco en Profesional, que es cuando realmente surte efecto."""
         super().showEvent(event)
+        self._orden.reiniciar()
+        self.actualizar()
         self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
@@ -178,7 +187,7 @@ class _PanelVacaciones(QWidget):
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
@@ -240,6 +249,7 @@ class _PanelVacaciones(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout.addWidget(panel_tabla, stretch=1)
 
@@ -310,6 +320,8 @@ class _PanelVacaciones(QWidget):
             (r, repo_profesional.obtener(r["IdProfesional"])) for r in filtradas
         ]
         filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else "", t[0]["FechaDesde"]))
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._registros = [t[0] for t in filas]
 
         self.tabla.setRowCount(len(filas))
@@ -328,6 +340,19 @@ class _PanelVacaciones(QWidget):
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._actualizar_cupo()
         self.grilla.actualizar()
+
+    @staticmethod
+    def _clave_orden(columna: int):
+        claves = {
+            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            1: lambda t: t[0]["FechaDesde"][:4],
+            2: lambda t: t[0]["FechaDesde"],
+            3: lambda t: t[0]["FechaHasta"],
+            4: lambda t: t[0]["ValorBonificado"] or 0,
+            5: lambda t: t[0]["CupoConsumidoPorcentaje"] or 0,
+            6: lambda t: t[0]["CupoRestantePorcentaje"] or 0,
+        }
+        return claves[columna]
 
     def _crear(self) -> None:
         id_profesional = self.combo_profesional.currentData()
@@ -438,6 +463,8 @@ class _PanelLicencias(QWidget):
         abrir la pantalla o volver a esta solapa) se repite el pedido
         de foco en Profesional, que es cuando realmente surte efecto."""
         super().showEvent(event)
+        self._orden.reiniciar()
+        self.actualizar()
         self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
@@ -454,17 +481,12 @@ class _PanelLicencias(QWidget):
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
-
-        self.spin_anio = _spin_anio(self.conn)
-        self.spin_anio.valueChanged.connect(self._anio_cambio)
-        form.addWidget(QLabel("Año calendario a imputar"))
-        form.addWidget(self.spin_anio)
 
         self.combo_tipo = QComboBox()
         for t in obtener_repositorio(self.conn, "TipoLicencia").listar(Activo=1):
@@ -522,16 +544,16 @@ class _PanelLicencias(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout.addWidget(panel_tabla, stretch=1)
 
         scroll.setWidget(contenido)
         layout_externo.addWidget(scroll)
-        self._actualizar_disponibilidad_crear()
         self._sincronizar_grilla()
         self._foco = instalar_enter_avanza_foco(
             [
-                self.combo_profesional, self.spin_anio, self.combo_tipo, self.spin_porcentaje,
+                self.combo_profesional, self.combo_tipo, self.spin_porcentaje,
                 self.campo_desde, self.campo_hasta, self.boton_crear,
             ]
         )
@@ -540,17 +562,9 @@ class _PanelLicencias(QWidget):
         self._sincronizar_grilla()
         self.actualizar()
 
-    def _anio_cambio(self) -> None:
-        self._actualizar_disponibilidad_crear()
-        self.actualizar()
-
     def _tipo_cambio(self) -> None:
         self._precargar_porcentaje()
         self.actualizar()
-
-    def _actualizar_disponibilidad_crear(self) -> None:
-        anio_actual = fecha_actual(self.conn).year
-        self.boton_crear.setEnabled(self.spin_anio.value() >= anio_actual)
 
     def _sincronizar_grilla(self) -> None:
         """Mismo criterio que Ausencias: acotada a las unidades (con
@@ -571,19 +585,28 @@ class _PanelLicencias(QWidget):
         self.spin_porcentaje.setValue(tipo["PorcentajeBonificacion"] if tipo else 0)
 
     def actualizar(self) -> None:
+        """Sin profesional elegido ("Todos los profesionales") muestra
+        las licencias de todos; con uno elegido, todas las de ese
+        profesional (no hay filtro de año: los cupos de licencia no son
+        anuales). Orden por defecto: más nueva primero y, a igualdad de
+        fecha, por profesional — overridable haciendo click en el
+        título de una columna (ver `OrdenTabla`)."""
         id_profesional_filtro = self.combo_profesional.currentData()
-        anio = str(self.spin_anio.value())
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
         cache_tipo = {t["IdTipoLicencia"]: t for t in obtener_repositorio(self.conn, "TipoLicencia").listar()}
         todas = obtener_repositorio(self.conn, "Licencia").listar()
-        filtradas = [r for r in todas if r["FechaDesde"][:4] == anio]
+        filtradas = todas
         if id_profesional_filtro is not None:
             filtradas = [r for r in filtradas if r["IdProfesional"] == id_profesional_filtro]
 
         filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
             (r, repo_profesional.obtener(r["IdProfesional"])) for r in filtradas
         ]
-        filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else "", t[0]["FechaDesde"]))
+        filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else ""))
+        filas.sort(key=lambda t: t[0]["FechaDesde"], reverse=True)
+        if self._orden.columna is not None:
+            clave = self._clave_orden(self._orden.columna, cache_tipo)
+            filas.sort(key=clave, reverse=not self._orden.ascendente)
         self._registros = [t[0] for t in filas]
 
         self.tabla.setRowCount(len(filas))
@@ -599,16 +622,21 @@ class _PanelLicencias(QWidget):
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self.grilla.actualizar()
 
+    @staticmethod
+    def _clave_orden(columna: int, cache_tipo: dict):
+        claves = {
+            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            1: lambda t: (cache_tipo.get(t[0]["IdTipoLicencia"]) or {}).get("Nombre", ""),
+            2: lambda t: t[0]["FechaDesde"],
+            3: lambda t: t[0]["FechaHasta"],
+            4: lambda t: t[0]["ValorBonificado"] or 0,
+        }
+        return claves[columna]
+
     def _crear(self) -> None:
         id_tipo = self.combo_tipo.currentData()
         if id_tipo is None:
             QMessageBox.warning(self, "Crear licencia", "Primero hay que cargar un tipo de licencia.")
-            return
-        anio_actual = fecha_actual(self.conn).year
-        if self.spin_anio.value() < anio_actual:
-            QMessageBox.warning(
-                self, "Crear licencia", "No se puede imputar una licencia a un año calendario que ya terminó.",
-            )
             return
         try:
             _id, advertencias = crear_licencia(
@@ -690,7 +718,6 @@ class _PanelLicencias(QWidget):
         self.spin_porcentaje.setValue(registro["PorcentajeBonificacionAplicado"] or 0)
         self.campo_desde.setDate(QDate.fromString(registro["FechaDesde"], "yyyy-MM-dd"))
         self.campo_hasta.setDate(QDate.fromString(registro["FechaHasta"], "yyyy-MM-dd"))
-        self.spin_anio.setValue(int(registro["FechaDesde"][:4]))
         self._sincronizar_grilla()
 
 
@@ -722,7 +749,7 @@ class _PanelAusencias(QWidget):
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)

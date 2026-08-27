@@ -56,10 +56,9 @@ def test_sin_reserva_regular_no_tiene_derecho(conn):
         crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-01", fecha_hasta="2026-08-07")
 
 
-def test_vacacion_no_puede_cruzar_de_un_mes_a_otro(conn, consultorio):
+def test_vacacion_puede_cruzar_de_un_mes_a_otro_dentro_del_mismo_anio(conn, consultorio):
     id_prof = _profesional_con_reserva(conn, consultorio)
-    with pytest.raises(ValueError):
-        crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-25", fecha_hasta="2026-09-05")
+    crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-25", fecha_hasta="2026-09-05")
 
 
 def test_vacacion_no_puede_cruzar_de_un_anio_a_otro(conn, consultorio):

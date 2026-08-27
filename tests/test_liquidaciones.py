@@ -353,13 +353,7 @@ def test_reserva_aislada_de_reubicacion_no_genera_cargo(conn, consultorio):
     assert liquidacion.total_aisladas_mes_en_curso == 0
 
 
-def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_mes(conn, consultorio, monkeypatch):
-    # Una vacación ya no puede cargarse cruzando de mes (regla nueva en
-    # crear_vacacion), pero el prorrateo de liquidaciones tiene que seguir
-    # funcionando bien con registros viejos/importados de antes de esa
-    # regla que sí cruzan de mes — se simula ese caso salteando la
-    # validación acá.
-    monkeypatch.setattr("app.negocio.vacaciones._validar_periodo_no_cruza_mes", lambda *a, **k: None)
+def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_mes(conn, consultorio):
     dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     id_prof = _crear_profesional(conn)
     for dia in dias:
@@ -376,6 +370,32 @@ def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_mes(conn, consultor
     assert liq_agosto.total_descuento_vacaciones > 0
     assert liq_septiembre.total_descuento_vacaciones > 0
     suma = liq_agosto.total_descuento_vacaciones + liq_septiembre.total_descuento_vacaciones
+    assert suma == pytest.approx(vacacion["ValorBonificado"])
+
+
+def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_anio_en_registro_viejo(conn, consultorio, monkeypatch):
+    # Una vacación no puede cargarse cruzando de año calendario (el cupo es
+    # anual), pero el prorrateo de liquidaciones tiene que seguir
+    # funcionando bien con registros viejos/importados de antes de esa
+    # regla que sí cruzan de año — se simula ese caso salteando la
+    # validación acá.
+    monkeypatch.setattr("app.negocio.vacaciones._validar_periodo_no_cruza_anio", lambda *a, **k: None)
+    dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    id_prof = _crear_profesional(conn)
+    for dia in dias:
+        _crear_reserva(conn, id_prof, consultorio, dia, horas=2)
+    from app.negocio.vacaciones import crear_vacacion
+    id_vacacion, _ = crear_vacacion(
+        conn, id_profesional=id_prof, fecha_desde="2026-12-28", fecha_hasta="2027-01-03",
+    )
+    vacacion = obtener_repositorio(conn, "Vacacion").obtener(id_vacacion)
+
+    liq_diciembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-12")
+    liq_enero = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2027-01")
+
+    assert liq_diciembre.total_descuento_vacaciones > 0
+    assert liq_enero.total_descuento_vacaciones > 0
+    suma = liq_diciembre.total_descuento_vacaciones + liq_enero.total_descuento_vacaciones
     assert suma == pytest.approx(vacacion["ValorBonificado"])
 
 
@@ -396,10 +416,29 @@ def test_descuento_licencias_dia_por_dia(conn, consultorio):
     assert suma == pytest.approx(licencia["ValorBonificado"])
 
 
-def test_descuento_vacaciones_respeta_tope_de_cupo_sin_duplicar(conn, consultorio, monkeypatch):
+def test_descuento_licencias_puede_cruzar_de_anio_a_otro(conn, consultorio):
+    # A diferencia de vacaciones, las licencias no tienen cupo anual: se
+    # puede cargar un único registro cruzando de año calendario y el
+    # sistema reparte el ValorBonificado mes a mes igual que cuando cruza
+    # de mes dentro del mismo año.
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    from app.negocio.licencias import crear_licencia
+    id_tipo = obtener_repositorio(conn, "TipoLicencia").listar(Nombre="Licencia médica")[0]["IdTipoLicencia"]
+    id_licencia, _ = crear_licencia(
+        conn, id_profesional=id_prof, id_tipo_licencia=id_tipo,
+        fecha_desde="2026-12-28", fecha_hasta="2027-01-03",
+    )
+    licencia = obtener_repositorio(conn, "Licencia").obtener(id_licencia)
+    assert licencia["ValorBonificado"] > 0
+
+    liq_diciembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-12")
+    liq_enero = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2027-01")
+    suma = liq_diciembre.total_descuento_licencias + liq_enero.total_descuento_licencias
+    assert suma == pytest.approx(licencia["ValorBonificado"])
+
+
+def test_descuento_vacaciones_respeta_tope_de_cupo_sin_duplicar(conn, consultorio):
     # cupo chico a propósito para forzar que la vacación exceda y se prorratee
-    # (registro cruzando de mes: ver comentario en el test anterior)
-    monkeypatch.setattr("app.negocio.vacaciones._validar_periodo_no_cruza_mes", lambda *a, **k: None)
     obtener_repositorio(conn, "Configuracion").actualizar(1, SemanasVacacionesMaximasPorAnio=0.5)
     dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     id_prof = _crear_profesional(conn)
