@@ -30,11 +30,13 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_fecha_es_mes_anterior
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
     GrillaOperativaWidget,
     pares_dia_unidad_con_reserva,
     pares_dia_unidad_con_reserva_vigente,
 )
+from app.gui.widgets.orden_tabla import OrdenTabla
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, ultimo_dia_mes
 from app.negocio.formato import formatear_moneda
@@ -255,6 +257,17 @@ class _PanelReservasRegulares(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """`setFocus()` durante la construcción no alcanza a "pegar":
+        el QTabWidget contenedor todavía no está mostrado y se termina
+        quedando el foco en su tab bar. Al mostrarse la pestaña (al
+        abrir la pantalla o volver a esta solapa) se repite el pedido
+        de foco en Profesional, que es cuando realmente surte efecto."""
+        super().showEvent(event)
+        self._orden.reiniciar()
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
@@ -269,7 +282,7 @@ class _PanelReservasRegulares(QWidget):
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_REGULARES):
             self.combo_profesional.addItem(etiqueta, id_)
         self.combo_profesional.currentIndexChanged.connect(self.actualizar)
@@ -381,6 +394,7 @@ class _PanelReservasRegulares(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
 
         fila_acciones = QHBoxLayout()
@@ -390,6 +404,9 @@ class _PanelReservasRegulares(QWidget):
         boton_finalizar = QPushButton("Finalizar reserva a fin de mes")
         boton_finalizar.clicked.connect(self._finalizar_vigencia)
         fila_acciones.addWidget(boton_finalizar)
+        boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.clicked.connect(self._deshacer_ultimo)
+        fila_acciones.addWidget(boton_deshacer)
         fila_acciones.addStretch()
         layout_tabla.addLayout(fila_acciones)
         layout.addWidget(panel_tabla, stretch=1)
@@ -400,6 +417,13 @@ class _PanelReservasRegulares(QWidget):
         scroll.setWidget(contenido)
         layout_externo.addWidget(scroll)
         self._cargar_edificios()
+        self._foco = instalar_enter_avanza_foco(
+            [
+                self.combo_profesional, self.combo_localidad, self.combo_edificio, self.combo_unidad,
+                self.combo_consultorio, self.spin_desde, self.spin_hasta,
+                self.campo_vigencia_inicio, self.campo_vigencia_fin, boton_crear,
+            ]
+        )
 
     def actualizar(self) -> None:
         """Sin profesional elegido, muestra todas las reservas regulares
@@ -436,6 +460,8 @@ class _PanelReservasRegulares(QWidget):
             (t[2]["Departamento"] or "") if t[2] else "",
             t[2]["NumeroConsultorio"] if t[2] else 0,
         ))
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._reservas = [t[0] for t in filas]
 
         mostrar_localidad = len({t[2]["DomicilioLocalidad"] for t in filas if t[2]}) > 1
@@ -455,6 +481,18 @@ class _PanelReservasRegulares(QWidget):
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._sincronizar_grilla()
+
+    @staticmethod
+    def _clave_orden(columna: int):
+        claves = {
+            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            1: lambda t: (t[2]["NumeroConsultorio"] if t[2] else 0),
+            2: lambda t: DIAS_SEMANA.index(t[0]["DiaSemana"]),
+            3: lambda t: t[0]["HoraInicio"],
+            4: lambda t: t[0]["VigenciaInicio"] or "",
+            5: lambda t: t[0]["VigenciaFin"] or "",
+        }
+        return claves[columna]
 
     def _cargar_edificios(self) -> None:
         _recargar_edificios(self.conn, self.combo_localidad, self.combo_edificio)
@@ -537,6 +575,7 @@ class _PanelReservasRegulares(QWidget):
         hoy = fecha_actual(self.conn)
         self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self.campo_vigencia_fin.setDate(_FECHA_SIN_DATO)
+        self.combo_profesional.setFocus()
 
     def _dias_seleccionados(self) -> list[str]:
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
@@ -644,6 +683,49 @@ class _PanelReservasRegulares(QWidget):
         fin_de_mes = ultimo_dia_mes(hoy.year, hoy.month)
         self._finalizar_registro(reserva, fin_de_mes.isoformat())
         self.actualizar()
+        self.combo_profesional.setFocus()
+
+    def _deshacer_ultimo(self) -> None:
+        """A diferencia de Vacaciones/Licencias/Ausencias, acá nunca se
+        borra una reserva (podría desalinear una liquidación que ya la
+        usó) — solo se le cierra la vigencia. "Deshacer" entonces solo
+        cubre el caso seguro: si la última reserva regular cargada en el
+        sistema (mayor IdReservaRegular) todavía nunca tuvo su vigencia
+        cerrada, se puede borrar sin más porque es imposible que ya haya
+        sido usada en una liquidación. Si ya tiene VigenciaFin (un
+        Finalizar o Modificar posterior a su alta), ese tipo de cambio no
+        se puede deshacer automáticamente — hay que corregirlo a mano."""
+        todas = obtener_repositorio(self.conn, "ReservaRegular").listar()
+        if not todas:
+            QMessageBox.warning(self, "Deshacer último movimiento", "No hay reservas regulares cargadas para deshacer.")
+            return
+        ultima = max(todas, key=lambda r: r["IdReservaRegular"])
+        if ultima["VigenciaFin"]:
+            QMessageBox.warning(
+                self, "Deshacer último movimiento",
+                "La última reserva regular cargada ya tiene la vigencia cerrada (por un \"Finalizar\" o "
+                "\"Modificar\" posterior) y ese tipo de cambio no se puede deshacer automáticamente. "
+                "Corregilo a mano desde la tabla.",
+            )
+            return
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(ultima["IdProfesional"])
+        respuesta = QMessageBox.question(
+            self, "Deshacer último movimiento",
+            "¿Deshacer el alta de la última reserva regular cargada en el sistema?\n"
+            f"{_texto_profesional(profesional) if profesional else '?'}: "
+            f"{ultima['DiaSemana']} {_fmt_horario(ultima['HoraInicio'], ultima['HoraFin'])} "
+            f"desde {_fmt_fecha(ultima['VigenciaInicio'])}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+        obtener_repositorio(self.conn, "ReservaRegular").eliminar(ultima["IdReservaRegular"])
+        regenerar_si_corresponde(
+            self.conn, id_profesional=ultima["IdProfesional"], periodo=periodo_actual(self.conn),
+        )
+        self.conn.commit()
+        self.actualizar()
+        self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
         """No se edita la fila histórica in-place (podría desalinear una

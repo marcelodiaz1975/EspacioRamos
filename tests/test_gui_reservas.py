@@ -254,6 +254,83 @@ def test_finalizar_vigencia_actualiza_vigenciafin_a_fin_de_mes(qtbot, conn):
     assert fila["VigenciaFin"] == ultimo_dia_mes(2026, 8).isoformat() == "2026-08-31"
 
 
+def test_deshacer_ultimo_movimiento_regular_sin_registros_no_falla(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_regulares._deshacer_ultimo()  # no debe intentar confirmar ni romper
+
+
+def test_deshacer_ultimo_movimiento_regular_borra_el_alta_reciente(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 0
+
+
+def test_deshacer_ultimo_movimiento_regular_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+
+
+def test_deshacer_ultimo_movimiento_regular_con_vigencia_cerrada_avisa_y_no_borra(qtbot, conn):
+    """Si la última reserva ya tiene la vigencia cerrada (por Finalizar o
+    Modificar), ese tipo de cambio no se puede deshacer automáticamente."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+    panel.tabla.selectRow(0)
+    panel._finalizar_vigencia()
+
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+
+
+def test_panel_regulares_recibe_foco_en_profesional_al_mostrarse(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.panel_regulares.combo_profesional.hasFocus())
+
+
+def test_tabla_regulares_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._checks_dia["Miércoles"].setChecked(True)  # Lunes + Miércoles
+    panel._crear()
+    assert panel.tabla.rowCount() == 2
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # "Día" ascendente
+    dias_asc = [panel.tabla.item(f, 2).text() for f in range(panel.tabla.rowCount())]
+    assert dias_asc == ["Lunes", "Miércoles"]
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # de nuevo -> descendente
+    dias_desc = [panel.tabla.item(f, 2).text() for f in range(panel.tabla.rowCount())]
+    assert dias_desc == ["Miércoles", "Lunes"]
+
+
 def test_modificar_seleccionada_finaliza_la_vieja_y_precarga_el_formulario(qtbot, conn):
     _preparar(conn)
     pantalla = PantallaReservas(conn)
