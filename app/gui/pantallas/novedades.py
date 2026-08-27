@@ -12,7 +12,10 @@ Números de formulario (revisión uno por uno con la clienta): Vacaciones es
 F19 (confirmado). Licencias es F20 — asignado por nosotros en esa revisión,
 entre F19 (Vacaciones) y F21 (Pagos), porque no había un número confirmado
 para esta pestaña en ningún documento del proyecto; si la planilla original
-de la clienta ya le tenía otro número, hay que corregirlo acá."""
+de la clienta ya le tenía otro número, hay que corregirlo acá. Ausencias
+es F27 — también asignado por nosotros (la clienta confirmó que no hace
+falta que sea correlativo con Vacaciones/Licencias), lógica y diseño ya
+aprobados."""
 from __future__ import annotations
 
 import sqlite3
