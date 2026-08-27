@@ -88,10 +88,11 @@ def test_crear_vacacion_regenera_liquidacion_enviada(qtbot, conn):
 
 
 def test_crear_licencia_sin_tipo_no_falla(qtbot, conn):
-    _preparar(conn)
+    id_profesional = _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     panel.campo_desde.setDate(_fecha("2026-09-01"))
     panel.campo_hasta.setDate(_fecha("2026-09-03"))
     panel._crear()  # hay tipos de licencia sembrados por defecto
@@ -362,6 +363,67 @@ def test_cancelar_licencia_seleccionada_elimina(qtbot, conn):
     panel.tabla.selectRow(0)
     panel._cancelar()
     assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 0
+
+
+def test_deshacer_ultimo_movimiento_licencia_sin_registros_no_falla(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel._deshacer_ultimo()  # no debe intentar confirmar ni romper: no hay nada que deshacer
+
+
+def test_deshacer_ultimo_movimiento_licencia_anula_la_ultima_sin_importar_filtro(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
+    conn.commit()
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel._crear()
+    panel.campo_desde.setDate(_fecha("2026-09-14"))
+    panel.campo_hasta.setDate(_fecha("2026-09-14"))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 2
+
+    # El filtro queda en un profesional sin licencias cargadas, pero deshacer
+    # debe anular la última licencia del sistema igual (la segunda creada arriba).
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
+    panel._deshacer_ultimo()
+    restantes = obtener_repositorio(conn, "Licencia").listar()
+    assert len(restantes) == 1
+    assert restantes[0]["FechaDesde"] == "2026-09-07"
+
+
+def test_deshacer_ultimo_movimiento_licencia_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel._crear()
+
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
+
+
+def test_panel_licencias_recibe_foco_en_profesional_al_mostrar_la_solapa(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.pestanas.setCurrentWidget(pantalla.panel_licencias)
+    qtbot.waitUntil(lambda: pantalla.panel_licencias.combo_profesional.hasFocus())
 
 
 def test_cancelar_licencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn, monkeypatch):

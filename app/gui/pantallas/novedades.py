@@ -118,14 +118,14 @@ class PantallaRegistroAusencias(QWidget):
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
-        pestanas = QTabWidget()
+        self.pestanas = QTabWidget()
         self.panel_vacaciones = _PanelVacaciones(conn)
         self.panel_licencias = _PanelLicencias(conn)
         self.panel_ausencias = _PanelAusencias(conn)
-        pestanas.addTab(self.panel_vacaciones, "Vacaciones")
-        pestanas.addTab(self.panel_licencias, "Licencias")
-        pestanas.addTab(self.panel_ausencias, "Ausencias")
-        layout.addWidget(pestanas, stretch=1)
+        self.pestanas.addTab(self.panel_vacaciones, "Vacaciones")
+        self.pestanas.addTab(self.panel_licencias, "Licencias")
+        self.pestanas.addTab(self.panel_ausencias, "Ausencias")
+        layout.addWidget(self.pestanas, stretch=1)
 
     def actualizar(self) -> None:
         for panel in (self.panel_vacaciones, self.panel_licencias, self.panel_ausencias):
@@ -431,6 +431,15 @@ class _PanelLicencias(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """`setFocus()` durante la construcción no alcanza a "pegar":
+        el QTabWidget contenedor todavía no está mostrado y se termina
+        quedando el foco en su tab bar. Al mostrarse la pestaña (al
+        abrir la pantalla o volver a esta solapa) se repite el pedido
+        de foco en Profesional, que es cuando realmente surte efecto."""
+        super().showEvent(event)
+        self.combo_profesional.setFocus()
+
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
@@ -443,7 +452,11 @@ class _PanelLicencias(QWidget):
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
-        self.combo_profesional = _combo_profesionales(self.conn)
+        self.combo_profesional = QComboBox()
+        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+            self.combo_profesional.addItem(etiqueta, id_)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
@@ -484,6 +497,9 @@ class _PanelLicencias(QWidget):
         boton_cancelar = QPushButton("Anular licencia")
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
+        boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.clicked.connect(self._deshacer_ultimo)
+        form.addWidget(boton_deshacer)
 
         form.addStretch()
         splitter_superior.addWidget(panel_form)
@@ -513,6 +529,12 @@ class _PanelLicencias(QWidget):
         layout_externo.addWidget(scroll)
         self._actualizar_disponibilidad_crear()
         self._sincronizar_grilla()
+        self._foco = instalar_enter_avanza_foco(
+            [
+                self.combo_profesional, self.spin_anio, self.combo_tipo, self.spin_porcentaje,
+                self.campo_desde, self.campo_hasta, self.boton_crear,
+            ]
+        )
 
     def _profesional_cambio(self) -> None:
         self._sincronizar_grilla()
@@ -605,6 +627,7 @@ class _PanelLicencias(QWidget):
         if advertencias:
             QMessageBox.information(self, "Licencia creada", "\n".join(advertencias))
         self.actualizar()
+        self.combo_profesional.setFocus()
 
     def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -626,7 +649,29 @@ class _PanelLicencias(QWidget):
         registro = self._fila_seleccionada()
         if registro is None:
             return
-        self._cancelar_registro(registro, "Anular licencia")
+        if self._cancelar_registro(registro, "Anular licencia"):
+            self.combo_profesional.setFocus()
+
+    def _deshacer_ultimo(self) -> None:
+        """Anula la última licencia cargada en el sistema (la de mayor
+        IdLicencia), sin importar de qué profesional sea ni cuál esté
+        elegido en el filtro."""
+        todas = obtener_repositorio(self.conn, "Licencia").listar()
+        if not todas:
+            QMessageBox.warning(self, "Deshacer último movimiento", "No hay licencias cargadas para deshacer.")
+            return
+        ultima = max(todas, key=lambda v: v["IdLicencia"])
+        respuesta = QMessageBox.question(
+            self, "Deshacer último movimiento",
+            "¿Deshacer la última licencia cargada en el sistema?\n"
+            f"{_texto_profesional(obtener_repositorio(self.conn, 'Profesional').obtener(ultima['IdProfesional']))}: "
+            f"{_fmt_fecha(ultima['FechaDesde'])} a {_fmt_fecha(ultima['FechaHasta'])}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+        if self._cancelar_registro(ultima, "Deshacer último movimiento"):
+            self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
         registro = self._fila_seleccionada()
