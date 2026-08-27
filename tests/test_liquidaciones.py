@@ -229,7 +229,7 @@ def test_pago_imputado_a_mes_anterior_regulariza_antes_de_calcular_y_evita_ajust
     assert liquidacion_antes.pierde_descuento_horas is True
 
     # paga el saldo del mes anterior (2026-07) antes de que se calcule/emita la liquidación
-    registrar_pago(conn, id_profesional=id_prof, monto=1000, periodo_imputado=PERIODO_ANTERIOR)
+    registrar_pago(conn, id_profesional=id_prof, monto=-1000, periodo_imputado=PERIODO_ANTERIOR)
 
     liquidacion_despues = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
     assert liquidacion_despues.saldo_anterior == 0
@@ -649,7 +649,7 @@ def test_reemision_no_pisa_pagos_ya_registrados_contra_el_mes_en_curso(conn, con
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=0, SaldoCuentaActual=0)
 
     _, liq_1 = emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
-    registrar_pago(conn, id_profesional=id_prof, monto=500)  # pago contra el mes en curso
+    registrar_pago(conn, id_profesional=id_prof, monto=-500)  # pago contra el mes en curso
 
     saldo_tras_pago = obtener_repositorio(conn, "Profesional").obtener(id_prof)["SaldoCuentaActual"]
     assert saldo_tras_pago == pytest.approx(liq_1.monto_generado - 500)

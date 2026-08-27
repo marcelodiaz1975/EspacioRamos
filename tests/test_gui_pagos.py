@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import QDateTime, Qt
 from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
@@ -31,36 +32,80 @@ def _crear_profesional(conn, saldo=10000):
     return conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
 
 
+def _seleccionar_profesional(panel, id_profesional):
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+
 def test_registrar_pago_sin_monto_no_persiste(qtbot, conn):
-    _crear_profesional(conn)
+    id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
+    _seleccionar_profesional(pantalla.panel_pagos, id_profesional)
     pantalla.panel_pagos._registrar()
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
 
 
-def test_registrar_pago_descuenta_saldo_actual(qtbot, conn):
+def test_registrar_pago_sin_profesional_no_persiste(qtbot, conn):
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_pagos.spin_monto.setValue(-1000)
+    pantalla.panel_pagos._registrar()
+    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
+
+
+def test_registrar_pago_negativo_descuenta_saldo_actual(qtbot, conn):
     id_profesional = _crear_profesional(conn, saldo=10000)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
-    pantalla.panel_pagos.spin_monto.setValue(3000)
-    pantalla.panel_pagos._registrar()
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-3000)
+    panel._registrar()
 
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 1
     saldo = conn.execute(
         "SELECT SaldoCuentaActual FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
     ).fetchone()["SaldoCuentaActual"]
     assert saldo == 7000
-    assert pantalla.panel_pagos.tabla.rowCount() == 1
+    assert panel.tabla.rowCount() == 1
 
 
-def test_registrar_pago_medio_no_transferencia_no_guarda_cuenta_receptora(qtbot, conn):
-    _crear_profesional(conn)
+def test_registrar_pago_positivo_suma_saldo_actual(qtbot, conn):
+    id_profesional = _crear_profesional(conn, saldo=1000)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(500)
+    panel._registrar()
+
+    saldo = conn.execute(
+        "SELECT SaldoCuentaActual FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
+    ).fetchone()["SaldoCuentaActual"]
+    assert saldo == 1500
+
+
+def test_registrar_pago_formulario_se_resetea_y_vuelve_foco_a_profesional(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-500)
+    panel._registrar()
+
+    assert panel.combo_profesional.currentData() is None
+    assert panel.spin_monto.value() == 0
+
+
+def test_registrar_pago_medio_no_transferencia_no_guarda_cuenta_receptora(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
     panel.combo_medio_pago.setCurrentText("Sobre en buzón")
-    panel.spin_monto.setValue(1000)
+    panel.spin_monto.setValue(-1000)
 
     panel._registrar()
 
@@ -70,13 +115,14 @@ def test_registrar_pago_medio_no_transferencia_no_guarda_cuenta_receptora(qtbot,
 
 
 def test_registrar_pago_transferencia_guarda_cuenta_receptora(qtbot, conn):
-    _crear_profesional(conn)
+    id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
     panel.combo_medio_pago.setCurrentText("Transferencia a cta Celeste")
     panel.combo_cuenta_receptora.setCurrentText("CA Banco Macro - Celeste")
-    panel.spin_monto.setValue(1000)
+    panel.spin_monto.setValue(-1000)
 
     panel._registrar()
 
@@ -85,15 +131,30 @@ def test_registrar_pago_transferencia_guarda_cuenta_receptora(qtbot, conn):
     assert fila["CuentaReceptora"] == "CA Banco Macro - Celeste"
 
 
+def test_registrar_pago_transferencia_sin_cuenta_receptora_no_persiste(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.combo_medio_pago.setCurrentText("Transferencia a cta Celeste")
+    panel.spin_monto.setValue(-1000)
+
+    panel._registrar()
+
+    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
+
+
 def test_registrar_pago_periodo_imputado_mes_anterior_pide_confirmacion(qtbot, conn, monkeypatch):
-    _crear_profesional(conn, saldo=10000)
+    id_profesional = _crear_profesional(conn, saldo=10000)
     conn.execute(
         "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
     )
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
-    panel.spin_monto.setValue(1000)
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-1000)
     panel.campo_periodo.setText("2026-07")
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
@@ -101,6 +162,9 @@ def test_registrar_pago_periodo_imputado_mes_anterior_pide_confirmacion(qtbot, c
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-1000)
+    panel.campo_periodo.setText("2026-07")
     panel._registrar()
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 1
 
@@ -119,7 +183,8 @@ def test_registrar_pago_mes_anterior_regenera_liquidacion_enviada(qtbot, conn, m
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
-    panel.spin_monto.setValue(1000)
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-1000)
     panel.campo_periodo.setText("2026-07")
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
 
@@ -145,7 +210,8 @@ def test_registrar_pago_mes_en_curso_no_regenera_liquidacion_de_mes_anterior(qtb
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
-    panel.spin_monto.setValue(1000)  # sin período imputado -> contra el mes en curso
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-1000)  # período imputado por defecto -> mes en curso
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
 
     panel._registrar()
@@ -180,7 +246,8 @@ def test_registrar_pago_que_cruza_tolerancia_pregunta_restablecer_descuento(qtbo
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
-    panel.spin_monto.setValue(950)  # 1000 -> 50: cruza la tolerancia de 100
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-950)  # 1000 -> 50: cruza la tolerancia de 100
     panel.campo_periodo.setText("2026-07")
 
     monkeypatch.setattr(QMessageBox, "question", _responder_segun_titulo(QMessageBox.StandardButton.No))
@@ -196,7 +263,8 @@ def test_registrar_pago_que_cruza_tolerancia_restablece_si_responde_si(qtbot, co
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
-    panel.spin_monto.setValue(950)
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-950)
     panel.campo_periodo.setText("2026-07")
 
     monkeypatch.setattr(QMessageBox, "question", _responder_segun_titulo(QMessageBox.StandardButton.Yes))
@@ -206,66 +274,57 @@ def test_registrar_pago_que_cruza_tolerancia_restablece_si_responde_si(qtbot, co
     assert actualizado["DescuentoSuspendidoPeriodo"] is None
 
 
-def test_cuenta_receptora_se_oculta_salvo_transferencia(qtbot, conn):
+def test_cuenta_receptora_se_deshabilita_salvo_transferencia(qtbot, conn):
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
 
     panel.combo_medio_pago.setCurrentText("Sobre en buzón")
-    assert panel.combo_cuenta_receptora.isHidden() is True
+    assert panel.combo_cuenta_receptora.isEnabled() is False
+    assert panel.combo_cuenta_receptora.isHidden() is False  # ya no se oculta, solo se deshabilita
 
     panel.combo_medio_pago.setCurrentText("Transferencia a cta Marcelo")
-    assert panel.combo_cuenta_receptora.isHidden() is False
-
-
-def test_recogida_sobres_se_oculta_salvo_sobre_en_buzon(qtbot, conn):
-    pantalla = PantallaPagos(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_pagos
-
-    panel.combo_medio_pago.setCurrentText("Transferencia a cta Marcelo")
-    assert panel.campo_recogida_sobres.isHidden() is True
-
-    panel.combo_medio_pago.setCurrentText("Sobre en buzón")
-    assert panel.campo_recogida_sobres.isHidden() is False
+    assert panel.combo_cuenta_receptora.isEnabled() is True
 
 
 def test_recogida_sobres_se_precarga_desde_configuracion_y_se_actualiza(qtbot, conn):
-    obtener_repositorio(conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres="2026-08-01T10:00")
-    _crear_profesional(conn)
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres="2026-08-01T10:00:00")
+    id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
-    assert panel.campo_recogida_sobres.text() == "2026-08-01T10:00"
+    assert panel.campo_recogida_sobres.dateTime() == QDateTime.fromString("2026-08-01T10:00:00", Qt.DateFormat.ISODate)
 
+    _seleccionar_profesional(panel, id_profesional)
     panel.combo_medio_pago.setCurrentText("Sobre en buzón")
-    panel.spin_monto.setValue(500)
-    panel.campo_recogida_sobres.setText("2026-08-15T09:30")
+    panel.spin_monto.setValue(-500)
+    panel.campo_recogida_sobres.setDateTime(QDateTime.fromString("2026-08-15T09:30:00", Qt.DateFormat.ISODate))
     panel._registrar()
 
     pago = conn.execute("SELECT FechaHoraRecogidaSobres FROM HistorialPagos").fetchone()
-    assert pago["FechaHoraRecogidaSobres"] == "2026-08-15T09:30"
+    assert pago["FechaHoraRecogidaSobres"] == "2026-08-15T09:30:00"
     cfg = obtener_repositorio(conn, "Configuracion").obtener(1)
-    assert cfg["FechaHoraRecogidaSobres"] == "2026-08-15T09:30"
+    assert cfg["FechaHoraRecogidaSobres"] == "2026-08-15T09:30:00"
 
 
 def test_iniciar_y_cerrar_tanda_de_sobres(qtbot, conn):
-    _crear_profesional(conn)
+    id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
-    assert panel.etiqueta_tanda.text() == "Sin tanda abierta."
+    assert panel.etiqueta_estado_tanda.text() == "Sin tanda abierta"
 
     panel._iniciar_tanda()
-    assert "Tanda abierta desde" in panel.etiqueta_tanda.text()
+    assert panel.etiqueta_estado_tanda.text() == "Con tanda abierta"
 
+    _seleccionar_profesional(panel, id_profesional)
     panel.combo_medio_pago.setCurrentText("Sobre en buzón")
-    panel.spin_monto.setValue(700)
+    panel.spin_monto.setValue(-700)
     panel._registrar()
-    assert "700" in panel.etiqueta_tanda.text() or "700,00" in panel.etiqueta_tanda.text()
+    assert "700" in panel.etiqueta_total_tanda.text()
 
     panel._cerrar_tanda()
-    assert panel.etiqueta_tanda.text() == "Sin tanda abierta."
+    assert panel.etiqueta_estado_tanda.text() == "Sin tanda abierta"
 
 
 def test_iniciar_tanda_de_otro_dia_pregunta_mantener_o_nueva(qtbot, conn, monkeypatch):
@@ -288,6 +347,116 @@ def test_iniciar_tanda_de_otro_dia_pregunta_mantener_o_nueva(qtbot, conn, monkey
     panel._iniciar_tanda()  # arranca una nueva
     cfg = obtener_repositorio(conn, "Configuracion").obtener(1)
     assert cfg["TandaSobresApertura"] != "2026-08-14T18:00:00"
+
+
+# ------------------------------------------------------- modificar / deshacer
+
+def test_seleccionar_fila_precarga_formulario(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    periodo = panel.campo_periodo.text()  # queda en el período actual por defecto
+    _seleccionar_profesional(panel, id_profesional)
+    panel.combo_medio_pago.setCurrentText("Transferencia a cta Celeste")
+    panel.combo_cuenta_receptora.setCurrentText("CA Banco Macro - Celeste")
+    panel.spin_monto.setValue(-500)
+    panel._registrar()
+
+    panel.tabla.selectRow(0)
+
+    assert panel.combo_profesional.currentData() == id_profesional
+    assert panel.spin_monto.value() == -500
+    assert panel.campo_periodo.text() == periodo
+    assert panel.combo_medio_pago.currentText() == "Transferencia a cta Celeste"
+    assert panel.combo_cuenta_receptora.currentText() == "CA Banco Macro - Celeste"
+
+
+def test_modificar_pago_seleccionado_ajusta_saldo_y_marca_modificado(qtbot, conn):
+    id_profesional = _crear_profesional(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()  # saldo: 600
+
+    panel.tabla.selectRow(0)
+    panel.spin_monto.setValue(-600)  # se corrige el monto cargado
+    panel._modificar()
+
+    saldo = obtener_repositorio(conn, "Profesional").obtener(id_profesional)["SaldoCuentaActual"]
+    assert saldo == 400
+    fila = conn.execute("SELECT Monto, RegistroModificado FROM HistorialPagos").fetchone()
+    assert fila["Monto"] == -600
+    assert fila["RegistroModificado"] == 1
+
+
+def test_modificar_pago_sin_seleccion_no_falla(qtbot, conn):
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_pagos._modificar()  # nada seleccionado -> no debe romper
+
+
+def test_deshacer_ultimo_movimiento_revierte_y_borra(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel._deshacer_ultimo()
+
+    saldo = obtener_repositorio(conn, "Profesional").obtener(id_profesional)["SaldoCuentaActual"]
+    assert saldo == 1000
+    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
+
+
+def test_deshacer_ultimo_movimiento_sin_confirmar_no_hace_nada(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._deshacer_ultimo()
+
+    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 1
+
+
+def test_deshacer_ultimo_movimiento_sin_pagos_no_falla(qtbot, conn):
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    panel._deshacer_ultimo()  # sin QMessageBox.question mockeado a Yes -> ni siquiera llega a preguntar mal
+
+
+def test_tabla_pagos_columnas_y_orden(qtbot, conn):
+    id_profesional = _crear_profesional(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
+        "Fecha de carga", "Profesional", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
+        "Saldo anterior", "Nuevo saldo", "Registro modificado", "Es ajuste",
+    ]
+
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-100)
+    panel._registrar()
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-200)
+    panel._registrar()
+
+    # más nuevo arriba
+    assert panel.tabla.item(0, 3).text() == "-$ 200,00"
+    assert panel.tabla.item(1, 3).text() == "-$ 100,00"
 
 
 def test_crear_plan_de_pagos_persiste_y_genera_cuotas(qtbot, conn):

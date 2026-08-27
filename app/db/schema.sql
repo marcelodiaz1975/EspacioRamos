@@ -140,7 +140,16 @@ CREATE TABLE IF NOT EXISTS HistorialPagos (
     FechaHoraAperturaBuzon TEXT,
     FechaHoraRecogidaSobres TEXT,
     EsAjuste INTEGER NOT NULL DEFAULT 0,
-    Observacion TEXT
+    Observacion TEXT,
+    -- Saldo del profesional (en el campo que corresponda, Actual o
+    -- Anterior según el período imputado) antes y después de este
+    -- movimiento — snapshot histórico para la columna de la lista, no se
+    -- recalcula después.
+    SaldoAnterior REAL,
+    SaldoNuevo REAL,
+    -- 1 si el registro se editó con "Modificar pago" después de creado
+    -- (en ese caso conserva su FechaHoraCarga original).
+    RegistroModificado INTEGER NOT NULL DEFAULT 0
 );
 
 -- 3.7 Llave / LlaveAcceso / LlaveProfesional -----------------------------------

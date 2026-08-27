@@ -10,6 +10,20 @@ def test_base_nueva_ya_tiene_las_columnas_migradas(tmp_path):
     assert "IdReservaAislada" in columnas
     assert "HoraInicio" in columnas
     assert "HoraFin" in columnas
+    columnas_pagos = {f["name"] for f in conn.execute("PRAGMA table_info(HistorialPagos)").fetchall()}
+    assert "SaldoAnterior" in columnas_pagos
+    assert "SaldoNuevo" in columnas_pagos
+    assert "RegistroModificado" in columnas_pagos
+    conn.close()
+
+
+def test_aplicar_migraciones_ignora_tabla_que_no_existe_todavia(tmp_path):
+    """Una base vieja de verdad puede no tener ni siquiera alguna de las
+    tablas que ganaron columnas nuevas más adelante — no debería romper,
+    solo salteársela (nada que migrarle todavía)."""
+    conn = sqlite3.connect(tmp_path / "sin_tabla.db")
+    conn.row_factory = sqlite3.Row
+    aplicar_migraciones(conn)  # no debe lanzar excepción
     conn.close()
 
 

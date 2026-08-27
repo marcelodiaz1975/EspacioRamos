@@ -8,8 +8,10 @@ from app.negocio.pagos import (
     cerrar_tanda_sobres,
     crear_cargo_especial,
     crear_plan_pago,
+    deshacer_ultimo_pago,
     ejecutar_refinanciaciones_programadas,
     marcar_cuota_pagada,
+    modificar_pago,
     programar_refinanciacion,
     refinanciar_plan,
     registrar_pago,
@@ -37,7 +39,7 @@ def profesional(conn):
 
 def test_registrar_pago_sin_periodo_descuenta_saldo_actual(conn, profesional):
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
-    id_pago, cruza_tolerancia = registrar_pago(conn, id_profesional=profesional, monto=400, medio_pago="Sobre en buzón")
+    id_pago, cruza_tolerancia = registrar_pago(conn, id_profesional=profesional, monto=-400, medio_pago="Sobre en buzón")
     assert id_pago is not None
     assert cruza_tolerancia is False
 
@@ -49,7 +51,7 @@ def test_registrar_pago_sin_periodo_descuenta_saldo_actual(conn, profesional):
 def test_registrar_pago_imputado_a_mes_anterior_descuenta_saldo_anterior(conn, profesional):
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
     # hoy (fecha real de sistema) cae en 2026-08 en este entorno de test
-    registrar_pago(conn, id_profesional=profesional, monto=400, periodo_imputado="2026-07")
+    registrar_pago(conn, id_profesional=profesional, monto=-400, periodo_imputado="2026-07")
 
     actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
     assert actualizado["SaldoCuentaAnterior"] == pytest.approx(600)
@@ -60,29 +62,113 @@ def test_registrar_pago_cruza_tolerancia_al_regularizar_mes_anterior(conn, profe
     obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
     # paga 950: saldo pasa de 1000 (por encima de 100) a 50 (dentro de tolerancia) -> cruza
-    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=950, periodo_imputado="2026-07")
+    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=-950, periodo_imputado="2026-07")
     assert cruza is True
 
 
 def test_registrar_pago_no_cruza_tolerancia_si_ya_estaba_dentro(conn, profesional):
     obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=50)
-    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=10, periodo_imputado="2026-07")
+    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=-10, periodo_imputado="2026-07")
     assert cruza is False
 
 
 def test_registrar_pago_no_cruza_tolerancia_si_sigue_endeudado(conn, profesional):
     obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
-    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=200, periodo_imputado="2026-07")
+    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=-200, periodo_imputado="2026-07")
     assert cruza is False
 
 
 def test_registrar_pago_no_cruza_tolerancia_si_imputa_a_mes_en_curso(conn, profesional):
     obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
-    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=950)  # sin periodo_imputado
+    _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=-950)  # sin periodo_imputado
     assert cruza is False
+
+
+def test_registrar_pago_positivo_suma_al_saldo(conn, profesional):
+    """Un monto positivo es un cargo (aumenta lo que debe), no un pago."""
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=100)
+    registrar_pago(conn, id_profesional=profesional, monto=250)
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(350)
+
+
+def test_registrar_pago_default_fecha_a_hoy(conn, profesional):
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-100)
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["Fecha"] is not None
+
+
+def test_registrar_pago_guarda_saldo_anterior_y_nuevo(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=1000)
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-400)
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["SaldoAnterior"] == pytest.approx(1000)
+    assert pago["SaldoNuevo"] == pytest.approx(600)
+    assert pago["RegistroModificado"] == 0
+
+
+# --------------------------------------------------------------- modificar / deshacer
+
+def test_modificar_pago_ajusta_monto_y_marca_modificado(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=1000)
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-400)  # saldo: 600
+
+    modificar_pago(conn, id_pago, monto=-600)  # se corrige a -600: saldo debería quedar en 400
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(400)
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["Monto"] == pytest.approx(-600)
+    assert pago["RegistroModificado"] == 1
+    assert pago["SaldoAnterior"] == pytest.approx(1000)
+    assert pago["SaldoNuevo"] == pytest.approx(400)
+
+
+def test_modificar_pago_mantiene_fecha_de_carga_original(conn, profesional):
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-100)
+    fecha_carga_original = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)["FechaHoraCarga"]
+
+    modificar_pago(conn, id_pago, monto=-150)
+
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["FechaHoraCarga"] == fecha_carga_original
+
+
+def test_modificar_pago_reimputa_a_otro_periodo(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=1000, SaldoCuentaAnterior=500)
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-100)  # contra el mes en curso
+
+    modificar_pago(conn, id_pago, periodo_imputado="2026-07")  # se corrige: era del mes anterior
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(1000)  # revertido
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(400)  # aplicado ahí
+
+
+def test_modificar_pago_inexistente_rechaza(conn):
+    with pytest.raises(ValueError):
+        modificar_pago(conn, 9999, monto=-100)
+
+
+def test_deshacer_ultimo_pago_revierte_saldo_y_borra(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=1000)
+    registrar_pago(conn, id_profesional=profesional, monto=-300)
+    id_pago_2, _ = registrar_pago(conn, id_profesional=profesional, monto=-200)  # saldo: 500
+
+    deshecho = deshacer_ultimo_pago(conn)
+
+    assert deshecho["IdPago"] == id_pago_2
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(700)  # el segundo pago revertido, el primero queda
+    assert obtener_repositorio(conn, "HistorialPagos").obtener(id_pago_2) is None
+
+
+def test_deshacer_ultimo_pago_sin_movimientos_rechaza(conn):
+    with pytest.raises(ValueError):
+        deshacer_ultimo_pago(conn)
 
 
 def test_registrar_pago_profesional_inexistente(conn):

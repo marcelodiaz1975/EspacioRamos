@@ -36,9 +36,17 @@ def registrar_pago(
     fecha_transferencia: str | None = None, hora_transferencia: str | None = None,
     fecha_hora_recogida_sobres: str | None = None, fecha_hora_apertura_buzon: str | None = None,
 ) -> tuple[int, bool]:
-    """Registra un pago recibido. Si se imputa a un período anterior al mes
-    en curso descuenta de SaldoCuentaAnterior (DC-09 §8); si no, descuenta
-    de SaldoCuentaActual. Nunca toca ambos a la vez.
+    """Registra un movimiento de cuenta (pago o ajuste). `monto` es un
+    valor con signo: negativo se resta de la cuenta del profesional (un
+    pago recibido, que reduce lo que debe), positivo se suma (un cargo,
+    que aumenta lo que debe) — `nuevo_saldo = saldo_previo + monto`. Si
+    se imputa a un período anterior al mes en curso afecta
+    SaldoCuentaAnterior (DC-09 §8); si no, SaldoCuentaActual. Nunca toca
+    ambos a la vez.
+
+    `fecha`, si no se pasa, toma la fecha de hoy (antes era un campo que
+    cargaba el operador a mano; con el rediseño del formulario de Pagos
+    ese dato pasó a ser siempre "ahora", igual que FechaHoraCarga).
 
     El segundo valor devuelto (`cruza_tolerancia`) es True cuando el pago
     imputado al mes anterior hace que ese saldo pase de estar por encima de
@@ -49,20 +57,22 @@ def registrar_pago(
     if profesional is None:
         raise ValueError(f"No existe el profesional #{id_profesional}")
 
-    repo = obtener_repositorio(conn, "HistorialPagos")
-    id_pago = repo.crear(
-        IdProfesional=id_profesional, Fecha=fecha, Monto=monto, MedioPago=medio_pago,
-        CuentaReceptora=cuenta_receptora, FechaHoraCarga=datetime.now().isoformat(timespec="seconds"),
-        FechaTransferencia=fecha_transferencia, HoraTransferencia=hora_transferencia,
-        PeriodoImputado=periodo_imputado, EsAjuste=int(es_ajuste), Observacion=observacion,
-        FechaHoraRecogidaSobres=fecha_hora_recogida_sobres, FechaHoraAperturaBuzon=fecha_hora_apertura_buzon,
-    )
-
     es_mes_anterior = bool(periodo_imputado) and periodo_imputado < periodo_actual(conn)
     campo = "SaldoCuentaAnterior" if es_mes_anterior else "SaldoCuentaActual"
     saldo_previo = profesional[campo] or 0.0
-    nuevo_saldo = saldo_previo - monto
+    nuevo_saldo = saldo_previo + monto
     obtener_repositorio(conn, "Profesional").actualizar(id_profesional, **{campo: nuevo_saldo})
+
+    repo = obtener_repositorio(conn, "HistorialPagos")
+    id_pago = repo.crear(
+        IdProfesional=id_profesional, Fecha=fecha or fecha_actual(conn).isoformat(), Monto=monto,
+        MedioPago=medio_pago, CuentaReceptora=cuenta_receptora,
+        FechaHoraCarga=datetime.now().isoformat(timespec="seconds"),
+        FechaTransferencia=fecha_transferencia, HoraTransferencia=hora_transferencia,
+        PeriodoImputado=periodo_imputado, EsAjuste=int(es_ajuste), Observacion=observacion,
+        FechaHoraRecogidaSobres=fecha_hora_recogida_sobres, FechaHoraAperturaBuzon=fecha_hora_apertura_buzon,
+        SaldoAnterior=saldo_previo, SaldoNuevo=nuevo_saldo, RegistroModificado=0,
+    )
 
     cruza_tolerancia = False
     if es_mes_anterior:
@@ -72,6 +82,77 @@ def registrar_pago(
         tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
         cruza_tolerancia = saldo_previo > tolerancia >= nuevo_saldo
     return id_pago, cruza_tolerancia
+
+
+def _campo_saldo(conn: sqlite3.Connection, periodo_imputado: str | None) -> str:
+    es_mes_anterior = bool(periodo_imputado) and periodo_imputado < periodo_actual(conn)
+    return "SaldoCuentaAnterior" if es_mes_anterior else "SaldoCuentaActual"
+
+
+def modificar_pago(
+    conn: sqlite3.Connection, id_pago: int, *, monto: float | None = None, medio_pago: str | None = None,
+    cuenta_receptora: str | None = None, periodo_imputado: str | None = None,
+    fecha_hora_recogida_sobres: str | None = None,
+) -> None:
+    """Edita un pago ya cargado in-place (a diferencia de Vacaciones/
+    Licencias/Ausencias, acá no se anula y se recrea): revierte el efecto
+    que tenía sobre el saldo del profesional y aplica el nuevo, conserva
+    FechaHoraCarga tal cual quedó la primera vez, y marca
+    RegistroModificado. Los parámetros en None dejan ese campo como
+    estaba — pasar explícitamente el valor actual si se quiere "no
+    cambiarlo" pero de todos modos tocar otro campo."""
+    repo = obtener_repositorio(conn, "HistorialPagos")
+    pago = repo.obtener(id_pago)
+    if pago is None:
+        raise ValueError(f"No existe el pago #{id_pago}")
+    repo_prof = obtener_repositorio(conn, "Profesional")
+    profesional = repo_prof.obtener(pago["IdProfesional"])
+    if profesional is None:
+        raise ValueError(f"No existe el profesional #{pago['IdProfesional']}")
+
+    campo_viejo = _campo_saldo(conn, pago["PeriodoImputado"])
+    repo_prof.actualizar(pago["IdProfesional"], **{campo_viejo: (profesional[campo_viejo] or 0.0) - pago["Monto"]})
+
+    nuevo_monto = monto if monto is not None else pago["Monto"]
+    nuevo_periodo = periodo_imputado if periodo_imputado is not None else pago["PeriodoImputado"]
+    campo_nuevo = _campo_saldo(conn, nuevo_periodo)
+    profesional = repo_prof.obtener(pago["IdProfesional"])
+    saldo_previo = profesional[campo_nuevo] or 0.0
+    nuevo_saldo = saldo_previo + nuevo_monto
+    repo_prof.actualizar(pago["IdProfesional"], **{campo_nuevo: nuevo_saldo})
+
+    repo.actualizar(
+        id_pago, Monto=nuevo_monto,
+        MedioPago=medio_pago if medio_pago is not None else pago["MedioPago"],
+        CuentaReceptora=cuenta_receptora if cuenta_receptora is not None else pago["CuentaReceptora"],
+        PeriodoImputado=nuevo_periodo,
+        FechaHoraRecogidaSobres=(
+            fecha_hora_recogida_sobres if fecha_hora_recogida_sobres is not None else pago["FechaHoraRecogidaSobres"]
+        ),
+        SaldoAnterior=saldo_previo, SaldoNuevo=nuevo_saldo, RegistroModificado=1,
+    )
+
+
+def deshacer_ultimo_pago(conn: sqlite3.Connection) -> sqlite3.Row:
+    """Revierte por completo el último movimiento registrado en
+    HistorialPagos (el de IdPago más alto): le devuelve al profesional el
+    saldo que tenía antes de ese movimiento y borra el registro. Devuelve
+    la fila borrada, para que quien la llame pueda avisar qué se
+    deshizo."""
+    repo = obtener_repositorio(conn, "HistorialPagos")
+    todos = repo.listar()
+    if not todos:
+        raise ValueError("No hay ningún movimiento para deshacer")
+    ultimo = max(todos, key=lambda p: p["IdPago"])
+
+    repo_prof = obtener_repositorio(conn, "Profesional")
+    profesional = repo_prof.obtener(ultimo["IdProfesional"])
+    if profesional is not None:
+        campo = _campo_saldo(conn, ultimo["PeriodoImputado"])
+        repo_prof.actualizar(ultimo["IdProfesional"], **{campo: (profesional[campo] or 0.0) - ultimo["Monto"]})
+
+    repo.eliminar(ultimo["IdPago"])
+    return ultimo
 
 
 # --------------------------------------------------------------- tanda de sobres (DC-08 §5.3)
