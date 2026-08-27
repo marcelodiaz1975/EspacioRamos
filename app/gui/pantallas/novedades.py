@@ -43,6 +43,7 @@ from app.gui.pantallas.reservas import (
     _opciones_profesional,
     _texto_profesional,
 )
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
@@ -154,6 +155,15 @@ class _PanelVacaciones(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """`setFocus()` durante la construcción no alcanza a "pegar":
+        el QTabWidget contenedor todavía no está mostrado y se termina
+        quedando el foco en su tab bar. Al mostrarse la pestaña (al
+        abrir la pantalla o volver a esta solapa) se repite el pedido
+        de foco en Profesional, que es cuando realmente surte efecto."""
+        super().showEvent(event)
+        self.combo_profesional.setFocus()
+
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
@@ -193,6 +203,9 @@ class _PanelVacaciones(QWidget):
         boton_cancelar = QPushButton("Anular vacaciones")
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
+        boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.clicked.connect(self._deshacer_ultimo)
+        form.addWidget(boton_deshacer)
 
         form.addWidget(_linea_divisoria())
         self.etiqueta_cupo_utilizado = QLabel()
@@ -230,6 +243,9 @@ class _PanelVacaciones(QWidget):
         layout_externo.addWidget(scroll)
         self._actualizar_disponibilidad_crear()
         self._sincronizar_grilla()
+        self._foco = instalar_enter_avanza_foco(
+            [self.combo_profesional, self.spin_anio, self.campo_desde, self.campo_hasta, self.boton_crear]
+        )
 
     def _profesional_cambio(self) -> None:
         self._sincronizar_grilla()
@@ -328,6 +344,7 @@ class _PanelVacaciones(QWidget):
         regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
         self.conn.commit()
         self.actualizar()
+        self.combo_profesional.setFocus()
 
     def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -353,7 +370,29 @@ class _PanelVacaciones(QWidget):
         registro = self._fila_seleccionada()
         if registro is None:
             return
-        self._cancelar_registro(registro, "Anular vacaciones")
+        if self._cancelar_registro(registro, "Anular vacaciones"):
+            self.combo_profesional.setFocus()
+
+    def _deshacer_ultimo(self) -> None:
+        """Anula la última vacación cargada en el sistema (la de mayor
+        IdVacacion), sin importar de qué profesional sea ni cuál esté
+        elegido en el filtro."""
+        todas = obtener_repositorio(self.conn, "Vacacion").listar()
+        if not todas:
+            QMessageBox.warning(self, "Deshacer último movimiento", "No hay vacaciones cargadas para deshacer.")
+            return
+        ultima = max(todas, key=lambda v: v["IdVacacion"])
+        respuesta = QMessageBox.question(
+            self, "Deshacer último movimiento",
+            "¿Deshacer la última vacación cargada en el sistema?\n"
+            f"{_texto_profesional(obtener_repositorio(self.conn, 'Profesional').obtener(ultima['IdProfesional']))}: "
+            f"{_fmt_fecha(ultima['FechaDesde'])} a {_fmt_fecha(ultima['FechaHasta'])}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+        if self._cancelar_registro(ultima, "Deshacer último movimiento"):
+            self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
         """Mismo criterio que Ausencias: anula la vacación seleccionada

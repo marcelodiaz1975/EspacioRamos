@@ -127,6 +127,68 @@ def test_cancelar_vacacion_seleccionada_elimina(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 0
 
 
+def test_deshacer_ultimo_movimiento_vacaciones_sin_registros_no_falla(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel._deshacer_ultimo()  # no debe intentar confirmar ni romper: no hay nada que deshacer
+
+
+def test_deshacer_ultimo_movimiento_vacaciones_anula_la_ultima_sin_importar_filtro(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
+    conn.commit()
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    anio_actual = panel.spin_anio.value()
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
+    panel._crear()
+    panel.campo_desde.setDate(QDate(anio_actual, 10, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 10, 7))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 2
+
+    # El filtro queda en un profesional sin vacaciones cargadas, pero deshacer
+    # debe anular la última vacación del sistema igual (la segunda creada arriba).
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
+    panel._deshacer_ultimo()
+    restantes = obtener_repositorio(conn, "Vacacion").listar()
+    assert len(restantes) == 1
+    assert restantes[0]["FechaDesde"] == f"{anio_actual}-09-01"
+
+
+def test_deshacer_ultimo_movimiento_vacaciones_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel._crear()
+
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 1
+
+
+def test_panel_vacaciones_arranca_con_foco_en_profesional(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.panel_vacaciones.combo_profesional.hasFocus())
+
+
 def test_spin_anio_vacaciones_arranca_en_el_anio_actual(qtbot, conn):
     from app.negocio.dias import fecha_actual
 

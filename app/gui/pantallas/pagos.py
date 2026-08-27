@@ -136,6 +136,14 @@ class _PanelRegistrarPago(QWidget):
         self._registros: list[sqlite3.Row] = []
         self._armar_ui()
         self.actualizar()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """`setFocus()` durante la construcción no alcanza a "pegar":
+        el QTabWidget contenedor todavía no está mostrado y se termina
+        quedando el foco en su tab bar. Al mostrarse la pestaña (al
+        abrir la pantalla o volver a esta solapa) se repite el pedido
+        de foco en Profesional, que es cuando realmente surte efecto."""
+        super().showEvent(event)
         self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
