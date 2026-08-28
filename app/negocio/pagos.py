@@ -372,16 +372,23 @@ def plan_activo_de(conn: sqlite3.Connection, id_profesional: int) -> sqlite3.Row
     return activos[0] if activos else None
 
 
-def cuotas_pendientes_plan(conn: sqlite3.Connection, id_plan: int) -> float:
-    """Suma de las cuotas del plan que todavía no cerró el avance de mes
-    (`avance_mes._cerrar_cuotas` las pasa a Estado="Cerrada" al cerrar el
-    período al que estaban imputadas, cobradas o no vía la liquidación de
-    ese mes) — son las que de verdad quedan sin abonar, incluida la del
-    período en curso si todavía no se cerró."""
-    return conn.execute(
-        "SELECT COALESCE(SUM(Monto), 0) AS total FROM CuotaPlan WHERE IdPlan = ? AND Estado != 'Cerrada'",
+def cuotas_restantes_plan(conn: sqlite3.Connection, id_plan: int) -> tuple[int, float]:
+    """Cantidad y monto de las cuotas del plan que todavía no cerró el
+    avance de mes (`avance_mes._cerrar_cuotas` las pasa a Estado="Cerrada"
+    al cerrar el período al que estaban imputadas, cobradas o no vía la
+    liquidación de ese mes) — son las que de verdad quedan sin abonar,
+    incluida la del período en curso si todavía no se cerró."""
+    fila = conn.execute(
+        "SELECT COUNT(*) AS cantidad, COALESCE(SUM(Monto), 0) AS total FROM CuotaPlan "
+        "WHERE IdPlan = ? AND Estado != 'Cerrada'",
         (id_plan,),
-    ).fetchone()["total"]
+    ).fetchone()
+    return fila["cantidad"], fila["total"]
+
+
+def cuotas_pendientes_plan(conn: sqlite3.Connection, id_plan: int) -> float:
+    """Ver `cuotas_restantes_plan` — esto es solo el monto."""
+    return cuotas_restantes_plan(conn, id_plan)[1]
 
 
 def cancelar_plan(conn: sqlite3.Connection, id_plan: int) -> None:

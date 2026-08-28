@@ -46,6 +46,7 @@ from app.negocio.pagos import (
     cerrar_tanda_sobres,
     crear_plan_pago,
     cuotas_pendientes_plan,
+    cuotas_restantes_plan,
     deshacer_ultimo_pago,
     eliminar_pago,
     modificar_pago,
@@ -628,8 +629,11 @@ class _PanelPlanesPago(QWidget):
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
-        self.label_mes_inicio = QLabel(f"Mes de inicio: {periodo_actual(self.conn)}")
-        form.addWidget(self.label_mes_inicio)
+        self.campo_mes_inicio = QLineEdit(periodo_actual(self.conn))
+        self.campo_mes_inicio.setReadOnly(True)
+        self.campo_mes_inicio.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        form.addWidget(QLabel("Mes de inicio"))
+        form.addWidget(self.campo_mes_inicio)
 
         self.spin_monto = QDoubleSpinBox()
         self.spin_monto.setMaximum(100_000_000)
@@ -666,9 +670,10 @@ class _PanelPlanesPago(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(6)
+        self.tabla.setColumnCount(8)
         self.tabla.setHorizontalHeaderLabels(
-            ["Profesional", "Monto refinanciado", "Cuotas", "Importe por cuota", "Inicio", "Estado"]
+            ["Profesional", "Inicio", "Monto refinanciado", "Cuotas del plan", "Importe por cuota",
+             "Cuotas restantes", "Saldo restante", "Estado"]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -717,24 +722,29 @@ class _PanelPlanesPago(QWidget):
         if id_profesional_filtro is not None:
             planes = [p for p in planes if p["IdProfesional"] == id_profesional_filtro]
 
-        filas = [
-            (repo_profesional.obtener(p["IdProfesional"]), p["MontoRefinanciado"], p["CantidadCuotas"],
-             p["ImportePorCuota"], p["MesAnoInicio"], p["Estado"], p)
-            for p in planes
-        ]
-        filas.sort(key=lambda t: (_texto_profesional(t[0]) if t[0] else "", t[4]))
+        filas = []
+        for p in planes:
+            cuotas_restantes, saldo_restante = cuotas_restantes_plan(self.conn, p["IdPlan"])
+            filas.append((
+                repo_profesional.obtener(p["IdProfesional"]), p["MesAnoInicio"], p["MontoRefinanciado"],
+                p["CantidadCuotas"], p["ImportePorCuota"], cuotas_restantes, saldo_restante, p["Estado"], p,
+            ))
+        filas.sort(key=lambda t: (_texto_profesional(t[0]) if t[0] else "", t[1]))
         if self._orden.columna is not None:
             filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._planes = filas
 
         self.tabla.setRowCount(len(filas))
-        for i, (profesional, monto, cuotas, importe, inicio, estado, _dato) in enumerate(filas):
+        for i, (profesional, inicio, monto, cuotas, importe, cuotas_restantes, saldo_restante, estado, _dato) \
+                in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            self.tabla.setItem(i, 1, QTableWidgetItem(formatear_moneda(monto)))
-            self.tabla.setItem(i, 2, QTableWidgetItem(str(cuotas)))
-            self.tabla.setItem(i, 3, QTableWidgetItem(formatear_moneda(importe) if importe is not None else ""))
-            self.tabla.setItem(i, 4, QTableWidgetItem(inicio))
-            self.tabla.setItem(i, 5, QTableWidgetItem(estado))
+            self.tabla.setItem(i, 1, QTableWidgetItem(inicio))
+            self.tabla.setItem(i, 2, QTableWidgetItem(formatear_moneda(monto)))
+            self.tabla.setItem(i, 3, QTableWidgetItem(str(cuotas)))
+            self.tabla.setItem(i, 4, QTableWidgetItem(formatear_moneda(importe) if importe is not None else ""))
+            self.tabla.setItem(i, 5, QTableWidgetItem(str(cuotas_restantes)))
+            self.tabla.setItem(i, 6, QTableWidgetItem(formatear_moneda(saldo_restante)))
+            self.tabla.setItem(i, 7, QTableWidgetItem(estado))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
 
@@ -744,9 +754,11 @@ class _PanelPlanesPago(QWidget):
             0: lambda t: _texto_profesional(t[0]) if t[0] else "",
             1: lambda t: t[1],
             2: lambda t: t[2],
-            3: lambda t: t[3] if t[3] is not None else -1,
-            4: lambda t: t[4],
+            3: lambda t: t[3],
+            4: lambda t: t[4] if t[4] is not None else -1,
             5: lambda t: t[5],
+            6: lambda t: t[6],
+            7: lambda t: t[7],
         }
         return claves[columna]
 

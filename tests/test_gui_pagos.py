@@ -511,7 +511,9 @@ def test_crear_plan_de_pagos_persiste_y_genera_cuotas(qtbot, conn):
 
     assert conn.execute("SELECT COUNT(*) c FROM PlanPago").fetchone()["c"] == 1
     assert conn.execute("SELECT COUNT(*) c FROM CuotaPlan").fetchone()["c"] == 3
-    assert panel.tabla.item(0, 5).text() == "Activo"
+    assert panel.tabla.item(0, 7).text() == "Activo"
+    assert panel.tabla.item(0, 5).text() == "3"  # cuotas restantes
+    assert panel.tabla.item(0, 6).text() == formatear_moneda(6000)  # saldo restante
 
 
 def test_botones_planes_pago_segun_si_hay_plan_activo(qtbot, conn):
@@ -724,12 +726,12 @@ def test_tabla_planes_pago_muestra_todos_los_r_y_ordena_por_columna(qtbot, conn)
     panel.combo_profesional.setCurrentIndex(0)  # "Seleccionar profesional…": ve la tabla completa
     assert panel.tabla.rowCount() == 2
 
-    panel.tabla.horizontalHeader().sectionClicked.emit(1)  # "Monto refinanciado" ascendente
-    montos_asc = [panel.tabla.item(f, 1).text() for f in range(panel.tabla.rowCount())]
+    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # "Monto refinanciado" ascendente
+    montos_asc = [panel.tabla.item(f, 2).text() for f in range(panel.tabla.rowCount())]
     assert montos_asc == [formatear_moneda(3000), formatear_moneda(6000)]
 
-    panel.tabla.horizontalHeader().sectionClicked.emit(1)  # de nuevo -> descendente
-    montos_desc = [panel.tabla.item(f, 1).text() for f in range(panel.tabla.rowCount())]
+    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # de nuevo -> descendente
+    montos_desc = [panel.tabla.item(f, 2).text() for f in range(panel.tabla.rowCount())]
     assert montos_desc == [formatear_moneda(6000), formatear_moneda(3000)]
 
 
