@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.pagos import PantallaPagos
+from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.repositorio.registro import obtener_repositorio
 
@@ -499,10 +500,11 @@ def test_tabla_pagos_columnas_y_orden(qtbot, conn):
 
 
 def test_crear_plan_de_pagos_persiste_y_genera_cuotas(qtbot, conn):
-    _crear_profesional(conn)
+    id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(6000)
     panel.spin_cuotas.setValue(3)
     panel._guardar()
@@ -516,10 +518,11 @@ def test_guardar_con_plan_activo_y_mes_actual_refinancia_de_una(qtbot, conn):
     """DC-09 §3.6: un profesional no puede tener dos planes activos — con
     uno ya vigente, guardar de nuevo para el mes en curso refinancia
     (cancela el viejo, crea uno nuevo) en vez de fallar."""
-    _crear_profesional(conn)
+    id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(6000)
     panel._guardar()
 
@@ -531,10 +534,11 @@ def test_guardar_con_plan_activo_y_mes_actual_refinancia_de_una(qtbot, conn):
 
 
 def test_guardar_con_plan_activo_y_mes_futuro_programa_la_refinanciacion(qtbot, conn):
-    _crear_profesional(conn)
+    id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(6000)
     panel._guardar()  # plan activo del mes en curso
 
@@ -551,6 +555,7 @@ def test_cancelar_plan_devuelve_saldo_pendiente(qtbot, conn):
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(6000)
     panel.spin_cuotas.setValue(3)
     panel._guardar()
@@ -564,3 +569,115 @@ def test_cancelar_plan_devuelve_saldo_pendiente(qtbot, conn):
         "SELECT SaldoCuentaActual FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
     ).fetchone()["SaldoCuentaActual"]
     assert saldo == 6000
+
+
+def test_combo_profesional_registrar_pago_filtra_la_tabla(qtbot, conn):
+    id_profesional_1 = _crear_profesional(conn)
+    id_profesional_2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional_1)
+    panel.spin_monto.setValue(-100)
+    panel._registrar()
+
+    _seleccionar_profesional(panel, id_profesional_2)
+    panel.spin_monto.setValue(-200)
+    panel._registrar()
+
+    assert panel.tabla.rowCount() == 2  # "Todos los profesionales" tras resetear el formulario
+
+    _seleccionar_profesional(panel, id_profesional_1)
+    assert panel.tabla.rowCount() == 1
+
+
+def test_tabla_registrar_pago_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    for medio in ("Efectivo", "Cheque"):
+        panel.combo_medio_pago.setCurrentText(medio)
+        panel.spin_monto.setValue(-100)
+        _seleccionar_profesional(panel, id_profesional)
+        panel._registrar()
+    assert panel.tabla.rowCount() == 2
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(4)  # "Medio de pago" ascendente
+    medios_asc = [panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())]
+    assert medios_asc == ["Cheque", "Efectivo"]
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(4)  # de nuevo -> descendente
+    medios_desc = [panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())]
+    assert medios_desc == ["Efectivo", "Cheque"]
+
+
+def test_panel_registrar_pago_recibe_foco_en_profesional_al_mostrarse(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.panel_pagos.combo_profesional.hasFocus())
+
+
+def test_combo_profesional_planes_pago_arranca_en_blanco(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    assert panel.combo_profesional.currentIndex() == 0
+    assert panel.combo_profesional.currentData() is None
+
+
+def test_guardar_plan_sin_elegir_profesional_avisa_y_no_crea(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    panel.spin_monto.setValue(6000)
+    panel._guardar()
+    assert conn.execute("SELECT COUNT(*) c FROM PlanPago").fetchone()["c"] == 0
+
+
+def test_tabla_planes_pago_usa_formato_canonico_de_profesional(qtbot, conn):
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido, NombrePila, Tratamiento, IdCodigo) "
+                 "VALUES ('R', 'Lo Veci', 'Virginia', 'Lic.', 'R1')")
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(6000)
+    panel._guardar()
+    assert panel.tabla.item(0, 0).text() == "R1 - Lic. Virginia Lo Veci"
+
+
+def test_tabla_planes_pago_mezcla_planes_y_programadas_y_ordena_por_columna(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(6000)
+    panel._guardar()  # plan activo
+
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(3000)
+    panel.campo_mes_inicio.setText("2099-01")
+    panel._guardar()  # ya tiene uno activo y el inicio es a futuro -> queda programada, sin tocar el activo
+
+    assert panel.tabla.rowCount() == 2
+    assert {panel.tabla.item(f, 5).text() for f in range(panel.tabla.rowCount())} == {
+        "Activo", "Refinanciación programada",
+    }
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(1)  # "Monto refinanciado" ascendente
+    montos_asc = [panel.tabla.item(f, 1).text() for f in range(panel.tabla.rowCount())]
+    assert montos_asc == [formatear_moneda(3000), formatear_moneda(6000)]
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(1)  # de nuevo -> descendente
+    montos_desc = [panel.tabla.item(f, 1).text() for f in range(panel.tabla.rowCount())]
+    assert montos_desc == [formatear_moneda(6000), formatear_moneda(3000)]

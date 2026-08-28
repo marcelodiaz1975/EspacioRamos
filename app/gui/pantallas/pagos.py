@@ -2,7 +2,10 @@
 pagos y administrar planes de pago reusando app.negocio.pagos, para que
 los descuentos de saldo (SaldoCuentaActual/SaldoCuentaAnterior según el
 período imputado) y la generación de cuotas se calculen siempre igual que
-por código."""
+por código.
+
+Es F21 (confirmado — ya referenciado así en AUDITORIA_DC01-DC10.md y en
+la revisión de Novedades)."""
 from __future__ import annotations
 
 import sqlite3
@@ -32,6 +35,7 @@ from PySide6.QtWidgets import (
 from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.orden_tabla import OrdenTabla
 from app.negocio.dias import fecha_a_dia_semana, periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import regenerar_si_corresponde
@@ -56,18 +60,6 @@ from app.repositorio.registro import obtener_repositorio
 _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
 _ANCHO_COMBO_PROFESIONAL = 220
 _ANCHO_COL_PROFESIONAL = 180
-
-
-def _combo_profesionales(conn: sqlite3.Connection) -> QComboBox:
-    combo = QComboBox()
-    for f in conn.execute("SELECT IdProfesional, Apellido, NombrePila FROM Profesional ORDER BY Apellido"):
-        combo.addItem(f"{f['Apellido']}, {f['NombrePila'] or ''}".strip(", "), f["IdProfesional"])
-    return combo
-
-
-def _nombre_profesional(cache: dict[int, sqlite3.Row], id_profesional: int) -> str:
-    p = cache.get(id_profesional)
-    return p["Apellido"] if p else "?"
 
 
 def _linea_divisoria() -> QFrame:
@@ -144,6 +136,8 @@ class _PanelRegistrarPago(QWidget):
         abrir la pantalla o volver a esta solapa) se repite el pedido
         de foco en Profesional, que es cuando realmente surte efecto."""
         super().showEvent(event)
+        self._orden.reiniciar()
+        self.actualizar()
         self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
@@ -161,10 +155,10 @@ class _PanelRegistrarPago(QWidget):
 
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
-        self.combo_profesional.currentIndexChanged.connect(self._actualizar_saldos)
+        self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
@@ -247,6 +241,7 @@ class _PanelRegistrarPago(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._precargar_seleccion)
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
@@ -256,8 +251,13 @@ class _PanelRegistrarPago(QWidget):
         self._actualizar_saldos()
         self._foco = instalar_enter_avanza_foco([
             self.campo_periodo, self.combo_profesional, self.spin_monto, self.combo_medio_pago,
-            self.combo_cuenta_receptora, self.boton_registrar,
+            self.combo_cuenta_receptora, self.boton_registrar, boton_modificar, boton_deshacer,
+            boton_iniciar_tanda, boton_cerrar_tanda, self.campo_recogida_sobres,
         ])
+
+    def _profesional_cambio(self) -> None:
+        self._actualizar_saldos()
+        self.actualizar()
 
     def _es_sobre(self) -> bool:
         return "sobre" in self.combo_medio_pago.currentText().lower()
@@ -321,20 +321,29 @@ class _PanelRegistrarPago(QWidget):
         self.tabla.setItem(fila, col, item)
 
     def actualizar(self) -> None:
-        """Orden: fecha y hora de carga, lo más nuevo arriba (y, dentro
-        de un mismo instante, por profesional) — IdPago ya es un orden
-        total equivalente a FechaHoraCarga, así que alcanza con eso."""
+        """Sin profesional elegido, muestra los pagos de todos; con uno
+        elegido, se acota a los suyos. Orden por defecto: fecha y hora de
+        carga, lo más nuevo arriba — IdPago ya es un orden total
+        equivalente a FechaHoraCarga, así que alcanza con eso —
+        overridable haciendo click en el título de una columna."""
+        id_profesional_filtro = self.combo_profesional.currentData()
+        repo_profesional = obtener_repositorio(self.conn, "Profesional")
         todos = obtener_repositorio(self.conn, "HistorialPagos").listar()
-        cache = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
-        filas = sorted(
-            todos,
-            key=lambda r: (-r["IdPago"], _texto_profesional(cache[r["IdProfesional"]]) if r["IdProfesional"] in cache else ""),
-        )
-        self._registros = filas
+        if id_profesional_filtro is not None:
+            registros = [r for r in todos if r["IdProfesional"] == id_profesional_filtro]
+        else:
+            registros = todos
+
+        filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
+            (r, repo_profesional.obtener(r["IdProfesional"])) for r in registros
+        ]
+        filas.sort(key=lambda t: -t[0]["IdPago"])
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
+        self._registros = [t[0] for t in filas]
 
         self.tabla.setRowCount(len(filas))
-        for i, r in enumerate(filas):
-            profesional = cache.get(r["IdProfesional"])
+        for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_fmt_fecha_hora_larga(r["FechaHoraCarga"])))
             self.tabla.setItem(i, 1, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             self.tabla.setItem(i, 2, QTableWidgetItem(r["PeriodoImputado"] or ""))
@@ -349,6 +358,22 @@ class _PanelRegistrarPago(QWidget):
         self.tabla.setColumnWidth(1, max(self.tabla.columnWidth(1), _ANCHO_COL_PROFESIONAL))
         self._actualizar_tanda()
         self._actualizar_saldos()
+
+    @staticmethod
+    def _clave_orden(columna: int):
+        claves = {
+            0: lambda t: t[0]["FechaHoraCarga"] or "",
+            1: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            2: lambda t: t[0]["PeriodoImputado"] or "",
+            3: lambda t: t[0]["Monto"],
+            4: lambda t: t[0]["MedioPago"] or "",
+            5: lambda t: t[0]["CuentaReceptora"] or "",
+            6: lambda t: t[0]["SaldoAnterior"] or 0,
+            7: lambda t: t[0]["SaldoNuevo"] or 0,
+            8: lambda t: bool(t[0]["RegistroModificado"]),
+            9: lambda t: bool(t[0]["EsAjuste"]),
+        }
+        return claves[columna]
 
     def _resetear_formulario(self) -> None:
         self.combo_profesional.setCurrentIndex(0)
@@ -527,9 +552,17 @@ class _PanelPlanesPago(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
-        self._planes: list[sqlite3.Row] = []
+        self._filas: list[tuple] = []
         self._armar_ui()
         self.actualizar()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Mismo motivo que en la solapa "Registrar pago": `setFocus()`
+        durante la construcción no alcanza a "pegar"."""
+        super().showEvent(event)
+        self._orden.reiniciar()
+        self.actualizar()
+        self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -537,7 +570,11 @@ class _PanelPlanesPago(QWidget):
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
-        self.combo_profesional = _combo_profesionales(self.conn)
+        self.combo_profesional = QComboBox()
+        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+            self.combo_profesional.addItem(etiqueta, id_)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
@@ -581,32 +618,66 @@ class _PanelPlanesPago(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
 
         self.campo_mes_inicio.setText(periodo_actual(self.conn))
+        self._foco = instalar_enter_avanza_foco(
+            [self.combo_profesional, self.spin_monto, self.spin_cuotas, self.spin_interes,
+             self.campo_mes_inicio, boton_crear, boton_cancelar]
+        )
 
     def actualizar(self) -> None:
-        self._planes = obtener_repositorio(self.conn, "PlanPago").listar()
-        cache = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
+        """Une planes activos/cancelados y refinanciaciones programadas en
+        una sola lista para poder ordenarlas juntas por cualquier columna
+        (antes quedaban en dos bloques separados en la tabla, planes
+        primero y programadas después, sin poder mezclarse). `es_plan`
+        distingue de cuál de las dos se trata para "Cancelar", que solo
+        aplica a un plan ya activo."""
+        repo_profesional = obtener_repositorio(self.conn, "Profesional")
+        planes = obtener_repositorio(self.conn, "PlanPago").listar()
         programadas = obtener_repositorio(self.conn, "RefinanciacionProgramada").listar()
-        self.tabla.setRowCount(len(self._planes) + len(programadas))
-        for i, p in enumerate(self._planes):
-            self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache, p["IdProfesional"])))
-            self.tabla.setItem(i, 1, QTableWidgetItem(f"$ {p['MontoRefinanciado']:,.2f}"))
-            self.tabla.setItem(i, 2, QTableWidgetItem(str(p["CantidadCuotas"])))
-            self.tabla.setItem(i, 3, QTableWidgetItem(f"$ {p['ImportePorCuota']:,.2f}"))
-            self.tabla.setItem(i, 4, QTableWidgetItem(p["MesAnoInicio"]))
-            self.tabla.setItem(i, 5, QTableWidgetItem(p["Estado"]))
-        for j, r in enumerate(programadas, start=len(self._planes)):
-            self.tabla.setItem(j, 0, QTableWidgetItem(_nombre_profesional(cache, r["IdProfesional"])))
-            self.tabla.setItem(j, 1, QTableWidgetItem(f"$ {r['MontoARefinanciar']:,.2f}"))
-            self.tabla.setItem(j, 2, QTableWidgetItem(str(r["CantidadCuotas"])))
-            self.tabla.setItem(j, 3, QTableWidgetItem(""))
-            self.tabla.setItem(j, 4, QTableWidgetItem(r["MesAnoInicio"]))
-            self.tabla.setItem(j, 5, QTableWidgetItem("Refinanciación programada"))
+
+        filas: list[tuple] = []
+        for p in planes:
+            filas.append((
+                repo_profesional.obtener(p["IdProfesional"]), p["MontoRefinanciado"], p["CantidadCuotas"],
+                p["ImportePorCuota"], p["MesAnoInicio"], p["Estado"], True, p,
+            ))
+        for r in programadas:
+            filas.append((
+                repo_profesional.obtener(r["IdProfesional"]), r["MontoARefinanciar"], r["CantidadCuotas"],
+                None, r["MesAnoInicio"], "Refinanciación programada", False, r,
+            ))
+        filas.sort(key=lambda t: (_texto_profesional(t[0]) if t[0] else "", t[4]))
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
+        self._filas = filas
+
+        self.tabla.setRowCount(len(filas))
+        for i, (profesional, monto, cuotas, importe, inicio, estado, _es_plan, _dato) in enumerate(filas):
+            self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
+            self.tabla.setItem(i, 1, QTableWidgetItem(formatear_moneda(monto)))
+            self.tabla.setItem(i, 2, QTableWidgetItem(str(cuotas)))
+            self.tabla.setItem(i, 3, QTableWidgetItem(formatear_moneda(importe) if importe is not None else ""))
+            self.tabla.setItem(i, 4, QTableWidgetItem(inicio))
+            self.tabla.setItem(i, 5, QTableWidgetItem(estado))
         self.tabla.resizeColumnsToContents()
+        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+
+    @staticmethod
+    def _clave_orden(columna: int):
+        claves = {
+            0: lambda t: _texto_profesional(t[0]) if t[0] else "",
+            1: lambda t: t[1],
+            2: lambda t: t[2],
+            3: lambda t: t[3] if t[3] is not None else -1,
+            4: lambda t: t[4],
+            5: lambda t: t[5],
+        }
+        return claves[columna]
 
     def _guardar(self) -> None:
         """Un profesional no puede tener más de un plan activo a la vez
@@ -616,11 +687,14 @@ class _PanelPlanesPago(QWidget):
         futuro, la refinanciación queda agendada para que el propio avance
         de mes la aplique sola (cancelar el plan vigente ahora inflaría el
         saldo del mes en curso antes de tiempo)."""
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            QMessageBox.warning(self, "Guardar plan de pagos", "Elegí un profesional.")
+            return
         monto = self.spin_monto.value()
         if monto <= 0:
             QMessageBox.warning(self, "Guardar plan de pagos", "El monto debe ser mayor a cero.")
             return
-        id_profesional = self.combo_profesional.currentData()
         mes_inicio = self.campo_mes_inicio.text().strip()
         plan_activo = obtener_repositorio(self.conn, "PlanPago").listar(
             IdProfesional=id_profesional, Estado="Activo",
@@ -660,17 +734,16 @@ class _PanelPlanesPago(QWidget):
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
             return
-        fila = filas[0].row()
-        if fila >= len(self._planes):
+        _profesional, _monto, _cuotas, _importe, _inicio, _estado, es_plan, dato = self._filas[filas[0].row()]
+        if not es_plan:
             QMessageBox.warning(
                 self, "Cancelar plan",
                 "Esa fila es una refinanciación programada, todavía no un plan — esperá a que se aplique "
                 "sola en el próximo avance de mes.",
             )
             return
-        plan = self._planes[fila]
         try:
-            cancelar_plan(self.conn, plan["IdPlan"])
+            cancelar_plan(self.conn, dato["IdPlan"])
         except ValueError as error:
             QMessageBox.warning(self, "Cancelar plan", str(error))
             return
