@@ -3,7 +3,13 @@ genérico, sus accesos (LlaveAcceso — a qué edificio/unidad abre, sección
 3.7) y, para la llave seleccionada, su historial de entregas y
 devoluciones — reusa app.negocio.llaves.entregar_llave/devolver_llave en
 vez de tocar LlaveProfesional a mano, para no saltarse la validación de
-"un titular por vez" ni el cargo especial de depósito que generan."""
+"un titular por vez" ni el cargo especial de depósito que generan.
+
+Es F18 — asignado por nosotros en la revisión uno por uno con la
+clienta: es el único número sin usar entre F16 (Reservas regulares) y
+F27 (Ausencias), y no había ninguno confirmado para esta pantalla en
+ningún documento del proyecto; si la planilla original de la clienta ya
+le tenía otro número, hay que corregirlo acá."""
 from __future__ import annotations
 
 import sqlite3

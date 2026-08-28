@@ -593,8 +593,8 @@ class _PanelRegistrarPago(QWidget):
 
 
 class _PanelPlanesPago(QWidget):
-    """F23 (propuesto — sin número confirmado todavía en la documentación
-    del cliente). Solo profesionales de Categoría R (DC-09 §3.6). Se arma,
+    """F23 (confirmado con la clienta en la revisión uno por uno). Solo
+    profesionales de Categoría R (DC-09 §3.6). Se arma,
     refinancia o cancela siempre a principio del mes en curso — por eso
     "Mes de inicio" es un dato visual, no un campo editable: no existe la
     posibilidad de programar una refinanciación a futuro."""
