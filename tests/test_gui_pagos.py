@@ -681,3 +681,123 @@ def test_tabla_planes_pago_mezcla_planes_y_programadas_y_ordena_por_columna(qtbo
     panel.tabla.horizontalHeader().sectionClicked.emit(1)  # de nuevo -> descendente
     montos_desc = [panel.tabla.item(f, 1).text() for f in range(panel.tabla.rowCount())]
     assert montos_desc == [formatear_moneda(6000), formatear_moneda(3000)]
+
+
+def test_fecha_de_carga_muestra_segundos(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-500)
+    panel._registrar()
+
+    fecha_carga = conn.execute("SELECT FechaHoraCarga FROM HistorialPagos").fetchone()["FechaHoraCarga"]
+    segundos = fecha_carga.split(":")[-1]
+    assert f":{segundos}hs" in panel.tabla.item(0, 0).text()
+
+
+def test_saldo_anterior_y_nuevo_saldo_no_se_colorean_en_negativo(qtbot, conn):
+    from PySide6.QtGui import QColor
+
+    id_profesional = _crear_profesional(conn, saldo=100)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-500)  # deja el saldo en negativo
+    panel._registrar()
+
+    assert panel.tabla.item(0, 6).foreground().color() != QColor("red")
+    assert panel.tabla.item(0, 7).foreground().color() != QColor("red")
+    assert panel.tabla.item(0, 3).foreground().color() == QColor("red")  # el Monto sí
+
+
+def test_eliminar_pago_seleccionado_revierte_saldo(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()  # saldo: 600
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel.tabla.selectRow(0)
+    panel._eliminar()
+
+    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
+    saldo = conn.execute(
+        "SELECT SaldoCuentaActual FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
+    ).fetchone()["SaldoCuentaActual"]
+    assert saldo == 1000
+
+
+def test_eliminar_pago_sin_seleccion_no_falla(qtbot, conn):
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_pagos._eliminar()  # nada seleccionado -> no debe romper
+
+
+def test_eliminar_pago_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbot, conn, monkeypatch):
+    """Mismo criterio que Modificar: si se elimina un pago que afectaba el
+    saldo anterior, hay que regenerar y marcar como no enviada la
+    liquidación del mes en curso, que es la que arrastra ese saldo."""
+    id_profesional = _crear_profesional(conn, saldo=10000)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo="2026-08")
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo="2026-08", enviada=True)
+    conn.commit()
+
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-1000)
+    panel.campo_periodo.setText("2026-07")
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel._registrar()
+
+    panel.tabla.selectRow(0)
+    panel._eliminar()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_profesional, Periodo="2026-08",
+    )
+    # 1) la original, 2) la que ya regeneró el propio _registrar al imputar
+    # al mes anterior, 3) la que regenera _eliminar al revertir ese efecto
+    # (ya no es "Regenerada no enviada" porque lo que reemplaza no estaba
+    # "Enviada" — pero tiene que seguir sin quedar marcada como enviada).
+    assert len(emisiones) == 3
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] != "Enviada"
+
+
+def test_deshacer_ultimo_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn, saldo=10000)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo="2026-08")
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo="2026-08", enviada=True)
+    conn.commit()
+
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-1000)
+    panel.campo_periodo.setText("2026-07")
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel._registrar()
+
+    panel._deshacer_ultimo()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_profesional, Periodo="2026-08",
+    )
+    assert len(emisiones) == 3
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] != "Enviada"

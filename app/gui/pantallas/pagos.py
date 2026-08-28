@@ -46,6 +46,7 @@ from app.negocio.pagos import (
     cerrar_tanda_sobres,
     crear_plan_pago,
     deshacer_ultimo_pago,
+    eliminar_pago,
     modificar_pago,
     programar_refinanciacion,
     refinanciar_plan,
@@ -70,13 +71,16 @@ def _linea_divisoria() -> QFrame:
 
 
 def _fmt_fecha_hora_larga(iso: str | None) -> str:
-    """"lunes 10-08-2026 14:30hs" — mismo criterio de nombre de día en
-    español que usa el resto de la app (no depende del locale del SO)."""
+    """"lunes 10-08-2026 14:30:05hs" — mismo criterio de nombre de día en
+    español que usa el resto de la app (no depende del locale del SO). Acá,
+    a diferencia de otras pantallas, se muestran también los segundos: la
+    clienta los usa para controlar el orden real en que apiló los sobres
+    físicos cuando varios pagos quedan con la misma hora y minuto."""
     if not iso:
         return ""
     dt = datetime.fromisoformat(iso)
     dia = fecha_a_dia_semana(dt.date()).lower()
-    return f"{dia} {dt.day:02d}-{dt.month:02d}-{dt.year} {dt.hour:02d}:{dt.minute:02d}hs"
+    return f"{dia} {dt.day:02d}-{dt.month:02d}-{dt.year} {dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}hs"
 
 
 class _SpinMonto(QDoubleSpinBox):
@@ -147,12 +151,6 @@ class _PanelRegistrarPago(QWidget):
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
 
-        self.campo_periodo = QLineEdit()
-        self.campo_periodo.setPlaceholderText("aaaa-mm")
-        self.campo_periodo.setText(periodo_actual(self.conn))
-        form.addWidget(QLabel("Período imputado"))
-        form.addWidget(self.campo_periodo)
-
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
@@ -161,6 +159,12 @@ class _PanelRegistrarPago(QWidget):
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
+
+        self.campo_periodo = QLineEdit()
+        self.campo_periodo.setPlaceholderText("aaaa-mm")
+        self.campo_periodo.setText(periodo_actual(self.conn))
+        form.addWidget(QLabel("Período imputado"))
+        form.addWidget(self.campo_periodo)
 
         self.spin_monto = _SpinMonto()
         self.spin_monto.setRange(-100_000_000, 100_000_000)
@@ -194,6 +198,9 @@ class _PanelRegistrarPago(QWidget):
         boton_modificar = QPushButton("Modificar pago")
         boton_modificar.clicked.connect(self._modificar)
         form.addWidget(boton_modificar)
+        boton_eliminar = QPushButton("Eliminar pago")
+        boton_eliminar.clicked.connect(self._eliminar)
+        form.addWidget(boton_eliminar)
         boton_deshacer = QPushButton("Deshacer último movimiento")
         boton_deshacer.clicked.connect(self._deshacer_ultimo)
         form.addWidget(boton_deshacer)
@@ -250,9 +257,9 @@ class _PanelRegistrarPago(QWidget):
         self._actualizar_color_monto()
         self._actualizar_saldos()
         self._foco = instalar_enter_avanza_foco([
-            self.campo_periodo, self.combo_profesional, self.spin_monto, self.combo_medio_pago,
-            self.combo_cuenta_receptora, self.boton_registrar, boton_modificar, boton_deshacer,
-            boton_iniciar_tanda, boton_cerrar_tanda, self.campo_recogida_sobres,
+            self.combo_profesional, self.campo_periodo, self.spin_monto, self.combo_medio_pago,
+            self.combo_cuenta_receptora, self.boton_registrar, boton_modificar, boton_eliminar,
+            boton_deshacer, boton_iniciar_tanda, boton_cerrar_tanda,
         ])
 
     def _profesional_cambio(self) -> None:
@@ -350,8 +357,8 @@ class _PanelRegistrarPago(QWidget):
             self._poner_item_monto(i, 3, r["Monto"])
             self.tabla.setItem(i, 4, QTableWidgetItem(r["MedioPago"] or ""))
             self.tabla.setItem(i, 5, QTableWidgetItem(r["CuentaReceptora"] or ""))
-            self._poner_item_monto(i, 6, r["SaldoAnterior"])
-            self._poner_item_monto(i, 7, r["SaldoNuevo"])
+            self.tabla.setItem(i, 6, QTableWidgetItem(formatear_moneda(r["SaldoAnterior"] or 0.0)))
+            self.tabla.setItem(i, 7, QTableWidgetItem(formatear_moneda(r["SaldoNuevo"] or 0.0)))
             self.tabla.setItem(i, 8, QTableWidgetItem("Sí" if r["RegistroModificado"] else "No"))
             self.tabla.setItem(i, 9, QTableWidgetItem("Sí" if r["EsAjuste"] else "No"))
         self.tabla.resizeColumnsToContents()
@@ -480,8 +487,40 @@ class _PanelRegistrarPago(QWidget):
         # si el pago afectaba (o pasa a afectar) el saldo anterior, eso repercute
         # en la liquidación del mes en curso, que arrastra ese saldo — hay que
         # regenerarla y dejarla marcada como no enviada.
-        if (periodo_viejo and periodo_viejo < periodo_actual(self.conn)) or periodo_imputado < periodo_actual(self.conn):
-            regenerar_si_corresponde(self.conn, id_profesional=registro["IdProfesional"], periodo=periodo_actual(self.conn))
+        self._regenerar_si_afecta_mes_anterior(registro["IdProfesional"], periodo_viejo)
+        self._regenerar_si_afecta_mes_anterior(registro["IdProfesional"], periodo_imputado)
+        self.conn.commit()
+        self.actualizar()
+        self._resetear_formulario()
+
+    def _regenerar_si_afecta_mes_anterior(self, id_profesional: int, periodo_imputado: str | None) -> None:
+        """Mismo criterio que al registrar/modificar: si el pago que se
+        acaba de eliminar (o deshacer) afectaba el saldo anterior, eso
+        repercute en la liquidación del mes en curso, que arrastra ese
+        saldo — hay que regenerarla y dejarla marcada como no enviada."""
+        if periodo_imputado and periodo_imputado < periodo_actual(self.conn):
+            regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
+
+    def _eliminar(self) -> None:
+        registro = self._fila_seleccionada()
+        if registro is None:
+            QMessageBox.warning(self, "Eliminar pago", "Elegí una fila de la tabla para eliminar.")
+            return
+        respuesta = QMessageBox.question(
+            self, "Eliminar pago",
+            "Esto revierte por completo el efecto de este pago (le devuelve el saldo al profesional) y "
+            "borra el registro. ¿Confirmás?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            eliminado = eliminar_pago(self.conn, registro["IdPago"])
+        except ValueError as error:
+            QMessageBox.warning(self, "Eliminar pago", str(error))
+            return
+        self._regenerar_si_afecta_mes_anterior(eliminado["IdProfesional"], eliminado["PeriodoImputado"])
         self.conn.commit()
         self.actualizar()
         self._resetear_formulario()
@@ -500,10 +539,11 @@ class _PanelRegistrarPago(QWidget):
         if respuesta != QMessageBox.StandardButton.Yes:
             return
         try:
-            deshacer_ultimo_pago(self.conn)
+            deshecho = deshacer_ultimo_pago(self.conn)
         except ValueError as error:
             QMessageBox.warning(self, "Deshacer último movimiento", str(error))
             return
+        self._regenerar_si_afecta_mes_anterior(deshecho["IdProfesional"], deshecho["PeriodoImputado"])
         self.conn.commit()
         self.actualizar()
 

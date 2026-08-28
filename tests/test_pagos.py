@@ -11,6 +11,7 @@ from app.negocio.pagos import (
     crear_plan_pago,
     deshacer_ultimo_pago,
     ejecutar_refinanciaciones_programadas,
+    eliminar_pago,
     marcar_cuota_pagada,
     modificar_pago,
     programar_refinanciacion,
@@ -178,6 +179,27 @@ def test_deshacer_ultimo_pago_revierte_saldo_y_borra(conn, profesional):
 def test_deshacer_ultimo_pago_sin_movimientos_rechaza(conn):
     with pytest.raises(ValueError):
         deshacer_ultimo_pago(conn)
+
+
+def test_eliminar_pago_arbitrario_revierte_saldo_y_borra(conn, profesional):
+    """A diferencia de `deshacer_ultimo_pago` (siempre el de IdPago más
+    alto), `eliminar_pago` puede revertir cualquiera de los pagos
+    cargados, no solo el último."""
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=1000)
+    id_pago_1, _ = registrar_pago(conn, id_profesional=profesional, monto=-300)
+    registrar_pago(conn, id_profesional=profesional, monto=-200)  # saldo: 500
+
+    eliminado = eliminar_pago(conn, id_pago_1)
+
+    assert eliminado["IdPago"] == id_pago_1
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(800)  # el primer pago revertido, el segundo queda
+    assert obtener_repositorio(conn, "HistorialPagos").obtener(id_pago_1) is None
+
+
+def test_eliminar_pago_inexistente_rechaza(conn):
+    with pytest.raises(ValueError):
+        eliminar_pago(conn, 9999)
 
 
 def test_registrar_pago_profesional_inexistente(conn):

@@ -137,26 +137,37 @@ def modificar_pago(
     )
 
 
-def deshacer_ultimo_pago(conn: sqlite3.Connection) -> sqlite3.Row:
-    """Revierte por completo el último movimiento registrado en
-    HistorialPagos (el de IdPago más alto): le devuelve al profesional el
-    saldo que tenía antes de ese movimiento y borra el registro. Devuelve
-    la fila borrada, para que quien la llame pueda avisar qué se
-    deshizo."""
+def eliminar_pago(conn: sqlite3.Connection, id_pago: int) -> sqlite3.Row:
+    """Revierte por completo un movimiento de HistorialPagos: le devuelve
+    al profesional el saldo que tenía antes de ese movimiento y borra el
+    registro. Devuelve la fila borrada, para que quien la llame pueda
+    avisar qué se eliminó (y, si corresponde, regenerar la liquidación del
+    mes en curso — eso queda a cargo de quien llama, igual que ya hace
+    `modificar_pago` vía la pantalla)."""
     repo = obtener_repositorio(conn, "HistorialPagos")
-    todos = repo.listar()
+    pago = repo.obtener(id_pago)
+    if pago is None:
+        raise ValueError(f"No existe el pago #{id_pago}")
+
+    repo_prof = obtener_repositorio(conn, "Profesional")
+    profesional = repo_prof.obtener(pago["IdProfesional"])
+    if profesional is not None:
+        campo = _campo_saldo(conn, pago["PeriodoImputado"])
+        repo_prof.actualizar(pago["IdProfesional"], **{campo: (profesional[campo] or 0.0) - pago["Monto"]})
+
+    repo.eliminar(id_pago)
+    return pago
+
+
+def deshacer_ultimo_pago(conn: sqlite3.Connection) -> sqlite3.Row:
+    """Como `eliminar_pago`, pero sobre el último movimiento registrado en
+    HistorialPagos (el de IdPago más alto), sin necesidad de elegirlo a
+    mano."""
+    todos = obtener_repositorio(conn, "HistorialPagos").listar()
     if not todos:
         raise ValueError("No hay ningún movimiento para deshacer")
     ultimo = max(todos, key=lambda p: p["IdPago"])
-
-    repo_prof = obtener_repositorio(conn, "Profesional")
-    profesional = repo_prof.obtener(ultimo["IdProfesional"])
-    if profesional is not None:
-        campo = _campo_saldo(conn, ultimo["PeriodoImputado"])
-        repo_prof.actualizar(ultimo["IdProfesional"], **{campo: (profesional[campo] or 0.0) - ultimo["Monto"]})
-
-    repo.eliminar(ultimo["IdPago"])
-    return ultimo
+    return eliminar_pago(conn, ultimo["IdPago"])
 
 
 # --------------------------------------------------------------- tanda de sobres (DC-08 §5.3)
