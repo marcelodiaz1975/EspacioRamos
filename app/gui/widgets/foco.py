@@ -2,7 +2,11 @@
 presionar Enter en cualquier campo, el foco pasa al siguiente campo del
 formulario (salteando los que estén ocultos o deshabilitados) en vez de
 disparar la acción por defecto — como Tab, pero con la tecla que se usa
-por costumbre al cargar datos fila por fila. Arranca en Pagos > Registrar
+por costumbre al cargar datos fila por fila. En un botón, la Barra
+espaciadora lo acciona (comportamiento nativo de Qt, sin tocar) y Enter
+sigue la cadena en vez de accionarlo. Si el Enter cae en el último
+elemento de la cadena, vuelve al principio (confirmado por la clienta:
+mismo criterio en todos los formularios). Arranca en Pagos > Registrar
 pago; pensado para reutilizarse en los demás formularios de carga."""
 from __future__ import annotations
 
@@ -30,7 +34,10 @@ class _EnterAvanzaFoco(QObject):
             indice = self._orden.index(actual)
         except ValueError:
             return
-        for candidato in self._orden[indice + 1:]:
+        # lo que sigue después del actual, y si no hay nada más visible/habilitado
+        # ahí, se envuelve al principio de la cadena (sin volver a incluir al actual).
+        candidatos = self._orden[indice + 1:] + self._orden[:indice]
+        for candidato in candidatos:
             if candidato.isVisible() and candidato.isEnabled():
                 candidato.setFocus()
                 if hasattr(candidato, "selectAll"):
