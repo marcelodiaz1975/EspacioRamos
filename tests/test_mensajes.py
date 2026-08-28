@@ -21,7 +21,7 @@ from app.negocio.mensajes import (
     plan_activo,
     sustituir_variables,
 )
-from app.negocio.pagos import crear_cargo_especial, crear_plan_pago, registrar_pago
+from app.negocio.pagos import crear_cargo_especial, crear_plan_pago_historico, registrar_pago
 from app.repositorio.registro import obtener_repositorio
 
 PERIODO = "2026-08"
@@ -650,7 +650,7 @@ def test_plan_activo_devuelve_none_sin_plan(conn, consultorio):
 
 def test_plan_activo_devuelve_el_plan_activo(conn, consultorio):
     id_prof = _crear_regular(conn, consultorio)
-    id_plan = crear_plan_pago(
+    id_plan = crear_plan_pago_historico(
         conn, id_profesional=id_prof, monto_refinanciado=1000, porcentaje_interes_mensual=0,
         cantidad_cuotas=2, mes_ano_inicio=PERIODO,
     )

@@ -514,10 +514,46 @@ def test_crear_plan_de_pagos_persiste_y_genera_cuotas(qtbot, conn):
     assert panel.tabla.item(0, 5).text() == "Activo"
 
 
-def test_guardar_con_plan_activo_y_mes_actual_refinancia_de_una(qtbot, conn):
-    """DC-09 §3.6: un profesional no puede tener dos planes activos — con
-    uno ya vigente, guardar de nuevo para el mes en curso refinancia
-    (cancela el viejo, crea uno nuevo) en vez de fallar."""
+def test_botones_planes_pago_segun_si_hay_plan_activo(qtbot, conn):
+    """"Guardar nuevo plan de pagos" se bloquea (no solo falla después del
+    clic) si el profesional elegido ya tiene un plan vigente; "Refinanciar"
+    y "Cancelar" recién se habilitan en ese caso."""
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    assert panel.boton_guardar.isEnabled()
+    assert not panel.boton_refinanciar.isEnabled()
+    assert not panel.boton_cancelar.isEnabled()
+
+    panel.spin_monto.setValue(6000)
+    panel._guardar()
+
+    assert not panel.boton_guardar.isEnabled()
+    assert panel.boton_refinanciar.isEnabled()
+    assert panel.boton_cancelar.isEnabled()
+
+
+def test_guardar_con_plan_activo_no_crea_un_segundo(qtbot, conn):
+    """DC-09 §3.6: un profesional no puede tener dos planes activos. El
+    botón ya viene bloqueado (test de arriba); esto cubre que la
+    validación de negocio también sostiene el bloqueo si se llama igual."""
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(6000)
+    panel._guardar()
+
+    panel._guardar()  # el profesional ya tiene un plan activo
+
+    planes = conn.execute("SELECT Estado FROM PlanPago").fetchall()
+    assert [p["Estado"] for p in planes] == ["Activo"]
+
+
+def test_refinanciar_plan_cancela_el_vigente_y_crea_uno_nuevo(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
@@ -527,48 +563,64 @@ def test_guardar_con_plan_activo_y_mes_actual_refinancia_de_una(qtbot, conn):
     panel._guardar()
 
     panel.spin_monto.setValue(3000)
-    panel._guardar()
+    panel._refinanciar()
 
     planes = conn.execute("SELECT Estado FROM PlanPago ORDER BY IdPlan").fetchall()
     assert [p["Estado"] for p in planes] == ["Cancelado", "Activo"]
 
 
-def test_guardar_con_plan_activo_y_mes_futuro_programa_la_refinanciacion(qtbot, conn):
+def test_refinanciar_sin_plan_activo_avisa_y_no_crea(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_planes
     _seleccionar_profesional(panel, id_profesional)
-    panel.spin_monto.setValue(6000)
-    panel._guardar()  # plan activo del mes en curso
-
     panel.spin_monto.setValue(3000)
-    panel.campo_mes_inicio.setText("2099-01")  # bien a futuro
-    panel._guardar()
-
-    assert conn.execute("SELECT Estado FROM PlanPago").fetchone()["Estado"] == "Activo"  # el viejo, sin tocar
-    assert conn.execute("SELECT COUNT(*) c FROM RefinanciacionProgramada").fetchone()["c"] == 1
+    panel._refinanciar()
+    assert conn.execute("SELECT COUNT(*) c FROM PlanPago").fetchone()["c"] == 0
 
 
-def test_cancelar_plan_devuelve_saldo_pendiente(qtbot, conn):
+def test_cancelar_plan_suma_pendientes_al_saldo_anterior(qtbot, conn):
     id_profesional = _crear_profesional(conn, saldo=0)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=6000)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_planes
     _seleccionar_profesional(panel, id_profesional)
-    panel.spin_monto.setValue(6000)
     panel.spin_cuotas.setValue(3)
-    panel._guardar()
+    panel._guardar()  # descuenta 6000 de SaldoCuentaAnterior -> queda en 0
 
-    panel.tabla.selectRow(0)
     panel._cancelar()
 
     estado = conn.execute("SELECT Estado FROM PlanPago").fetchone()["Estado"]
     assert estado == "Cancelado"
     saldo = conn.execute(
-        "SELECT SaldoCuentaActual FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
-    ).fetchone()["SaldoCuentaActual"]
-    assert saldo == 6000
+        "SELECT SaldoCuentaAnterior FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
+    ).fetchone()["SaldoCuentaAnterior"]
+    assert saldo == pytest.approx(6000)  # las 3 cuotas pendientes vuelven a ser saldo atrasado
+
+
+def test_cancelar_sin_plan_activo_avisa_y_no_falla(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    panel._cancelar()  # no debe fallar aunque no haya plan activo
+
+
+def test_monto_a_refinanciar_se_sugiere_segun_saldo_atrasado_y_plan_activo(qtbot, conn):
+    id_profesional = _crear_profesional(conn, saldo=0)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=6000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    assert panel.spin_monto.value() == pytest.approx(6000)  # sin plan activo: el saldo atrasado tal cual
+
+    panel.spin_cuotas.setValue(3)
+    panel._guardar()  # deja SaldoCuentaAnterior en 0, con 6000 en cuotas pendientes, y ya recalcula el sugerido
+    assert panel.spin_monto.value() == pytest.approx(6000)  # 0 de saldo + 6000 de cuotas del plan a reemplazar
 
 
 def test_combo_profesional_registrar_pago_filtra_la_tabla(qtbot, conn):
@@ -655,24 +707,22 @@ def test_tabla_planes_pago_usa_formato_canonico_de_profesional(qtbot, conn):
     assert panel.tabla.item(0, 0).text() == "R1 - Lic. Virginia Lo Veci"
 
 
-def test_tabla_planes_pago_mezcla_planes_y_programadas_y_ordena_por_columna(qtbot, conn):
-    id_profesional = _crear_profesional(conn)
+def test_tabla_planes_pago_muestra_todos_los_r_y_ordena_por_columna(qtbot, conn):
+    id_profesional_1 = _crear_profesional(conn)
+    id_profesional_2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_planes
-    _seleccionar_profesional(panel, id_profesional)
+    _seleccionar_profesional(panel, id_profesional_1)
     panel.spin_monto.setValue(6000)
-    panel._guardar()  # plan activo
+    panel._guardar()
 
-    _seleccionar_profesional(panel, id_profesional)
+    _seleccionar_profesional(panel, id_profesional_2)
     panel.spin_monto.setValue(3000)
-    panel.campo_mes_inicio.setText("2099-01")
-    panel._guardar()  # ya tiene uno activo y el inicio es a futuro -> queda programada, sin tocar el activo
+    panel._guardar()
 
+    panel.combo_profesional.setCurrentIndex(0)  # "Seleccionar profesional…": ve la tabla completa
     assert panel.tabla.rowCount() == 2
-    assert {panel.tabla.item(f, 5).text() for f in range(panel.tabla.rowCount())} == {
-        "Activo", "Refinanciación programada",
-    }
 
     panel.tabla.horizontalHeader().sectionClicked.emit(1)  # "Monto refinanciado" ascendente
     montos_asc = [panel.tabla.item(f, 1).text() for f in range(panel.tabla.rowCount())]
@@ -681,6 +731,26 @@ def test_tabla_planes_pago_mezcla_planes_y_programadas_y_ordena_por_columna(qtbo
     panel.tabla.horizontalHeader().sectionClicked.emit(1)  # de nuevo -> descendente
     montos_desc = [panel.tabla.item(f, 1).text() for f in range(panel.tabla.rowCount())]
     assert montos_desc == [formatear_moneda(6000), formatear_moneda(3000)]
+
+
+def test_combo_profesional_planes_pago_filtra_la_tabla(qtbot, conn):
+    id_profesional_1 = _crear_profesional(conn)
+    id_profesional_2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional_1)
+    panel.spin_monto.setValue(6000)
+    panel._guardar()
+
+    _seleccionar_profesional(panel, id_profesional_2)
+    panel.spin_monto.setValue(3000)
+    panel._guardar()
+
+    assert panel.tabla.rowCount() == 1  # sigue filtrado al profesional 2, recién guardado
+
+    _seleccionar_profesional(panel, id_profesional_1)
+    assert panel.tabla.rowCount() == 1
 
 
 def test_fecha_de_carga_muestra_segundos(qtbot, conn):

@@ -25,6 +25,13 @@ def _crear_profesional(conn, categoria="R", saldo_actual=0.0, saldo_anterior=0.0
     )
 
 
+def _fijar_periodo_actual(conn, periodo):
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = ? WHERE IdConfiguracion = 1",
+        (f"{periodo}-15",),
+    )
+
+
 def test_traspaso_de_saldo(conn):
     id_prof = _crear_profesional(conn, saldo_actual=500, saldo_anterior=999)
     avanzar_mes(conn, periodo_cerrado="2026-08")
@@ -77,9 +84,8 @@ def test_plazo_extendido_automatico_no_aplica_a_categoria_a(conn):
 
 def test_cierre_de_cuotas_marca_cerrada_pagas_e_impagas(conn):
     id_prof = _crear_profesional(conn)
-    id_plan = crear_plan_pago(
-        conn, id_profesional=id_prof, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
-    )
+    _fijar_periodo_actual(conn, "2026-08")
+    id_plan = crear_plan_pago(conn, id_profesional=id_prof, monto_refinanciado=300, cantidad_cuotas=3)
     cuotas = sorted(obtener_repositorio(conn, "CuotaPlan").listar(IdPlan=id_plan), key=lambda c: c["NumeroCuota"])
     obtener_repositorio(conn, "CuotaPlan").actualizar(cuotas[0]["IdCuota"], Pagado=1, Estado="Pagada")
 
@@ -93,9 +99,8 @@ def test_cierre_de_cuotas_marca_cerrada_pagas_e_impagas(conn):
 
 def test_plan_se_finaliza_si_todas_las_cuotas_quedan_cerradas(conn):
     id_prof = _crear_profesional(conn)
-    id_plan = crear_plan_pago(
-        conn, id_profesional=id_prof, monto_refinanciado=100, cantidad_cuotas=1, mes_ano_inicio="2026-08",
-    )
+    _fijar_periodo_actual(conn, "2026-08")
+    id_plan = crear_plan_pago(conn, id_profesional=id_prof, monto_refinanciado=100, cantidad_cuotas=1)
     resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
     assert id_plan in resumen.planes_finalizados
     assert obtener_repositorio(conn, "PlanPago").obtener(id_plan)["Estado"] == "Finalizado"
@@ -103,30 +108,11 @@ def test_plan_se_finaliza_si_todas_las_cuotas_quedan_cerradas(conn):
 
 def test_plan_no_se_finaliza_si_quedan_cuotas_futuras(conn):
     id_prof = _crear_profesional(conn)
-    id_plan = crear_plan_pago(
-        conn, id_profesional=id_prof, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
-    )
+    _fijar_periodo_actual(conn, "2026-08")
+    id_plan = crear_plan_pago(conn, id_profesional=id_prof, monto_refinanciado=300, cantidad_cuotas=3)
     resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
     assert id_plan not in resumen.planes_finalizados
     assert obtener_repositorio(conn, "PlanPago").obtener(id_plan)["Estado"] == "Activo"
-
-
-def test_avanzar_mes_ejecuta_refinanciaciones_programadas_para_el_periodo_nuevo(conn):
-    from app.negocio.pagos import programar_refinanciacion
-
-    id_prof = _crear_profesional(conn)
-    id_plan_viejo = crear_plan_pago(
-        conn, id_profesional=id_prof, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
-    )
-    programar_refinanciacion(
-        conn, id_profesional=id_prof, monto_a_refinanciar=250, cantidad_cuotas=5, mes_ano_inicio="2026-09",
-    )
-
-    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")  # periodo nuevo: 2026-09
-
-    assert resumen.refinanciaciones_programadas_ejecutadas == 1
-    assert obtener_repositorio(conn, "PlanPago").obtener(id_plan_viejo)["Estado"] == "Cancelado"
-    assert obtener_repositorio(conn, "RefinanciacionProgramada").listar(IdProfesional=id_prof) == []
 
 
 def _crear_pedido(conn, id_prof, dia="Lunes", fecha_pedido=None):

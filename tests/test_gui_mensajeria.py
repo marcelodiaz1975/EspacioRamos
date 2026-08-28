@@ -8,7 +8,7 @@ from app.gui.pantallas.mensajeria import CentroMensajeria
 from app.negocio.archivos_generados import carpeta_profesional
 from app.negocio.dias import periodo_actual
 from app.negocio.mensajeria import color_profesional, marcar_mensaje_previo_generado
-from app.negocio.pagos import crear_plan_pago
+from app.negocio.pagos import crear_plan_pago_historico
 from app.pdf.liquidacion_pdf import nombre_archivo_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
@@ -369,12 +369,12 @@ def test_filtro_solo_aisladas(qtbot, conn):
 def test_orden_por_color_y_dentro_de_cada_color_por_codigo(qtbot, conn):
     _crear_profesional(conn, apellido="RojoDos", saldo=10000, codigo="R2")
     id_rojo1 = _crear_profesional(conn, apellido="RojoUno", saldo=10000, codigo="R1")
-    crear_plan_pago(
+    crear_plan_pago_historico(
         conn, id_profesional=id_rojo1, monto_refinanciado=10000, cantidad_cuotas=2,
         mes_ano_inicio=periodo_actual(conn),
     )
     id_rojo2 = obtener_repositorio(conn, "Profesional").listar(Apellido="RojoDos")[0]["IdProfesional"]
-    crear_plan_pago(
+    crear_plan_pago_historico(
         conn, id_profesional=id_rojo2, monto_refinanciado=10000, cantidad_cuotas=2,
         mes_ano_inicio=periodo_actual(conn),
     )

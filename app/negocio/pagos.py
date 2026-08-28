@@ -286,16 +286,52 @@ def _generar_cuotas(conn: sqlite3.Connection, id_plan: int, monto_total_a_pagar:
         )
 
 
-def crear_plan_pago(
-    conn: sqlite3.Connection, *, id_profesional: int, monto_refinanciado: float, cantidad_cuotas: int,
-    mes_ano_inicio: str, porcentaje_interes_mensual: float = 0.0, observacion: str | None = None,
-) -> int:
+def _validar_sin_plan_activo(conn: sqlite3.Connection, id_profesional: int) -> None:
     plan_activo = obtener_repositorio(conn, "PlanPago").listar(IdProfesional=id_profesional, Estado="Activo")
     if plan_activo:
         raise ValueError(
             f"El profesional #{id_profesional} ya tiene un plan de pagos activo "
             f"(#{plan_activo[0]['IdPlan']}); hay que cancelarlo o refinanciarlo, no puede haber dos a la vez"
         )
+
+
+def crear_plan_pago(
+    conn: sqlite3.Connection, *, id_profesional: int, monto_refinanciado: float, cantidad_cuotas: int,
+    porcentaje_interes_mensual: float = 0.0, observacion: str | None = None,
+) -> int:
+    """Formulario de "Guardar nuevo plan de pagos" (DC-09 §3.6, aclarado en
+    conversación): se arma siempre a principio del mes en curso.
+    `monto_refinanciado` sale del saldo atrasado (SaldoCuentaAnterior), que
+    se descuenta acá — deja de ser deuda suelta y pasa a pagarse en cuotas.
+    La primera cuota queda imputada al período actual y se cobra sola en
+    la próxima liquidación de este mes, junto con lo demás
+    (`calcular_liquidacion` ya suma las CuotaPlan pendientes del período)."""
+    _validar_sin_plan_activo(conn, id_profesional)
+    repo_prof = obtener_repositorio(conn, "Profesional")
+    profesional = repo_prof.obtener(id_profesional)
+    if profesional is None:
+        raise ValueError(f"No existe el profesional #{id_profesional}")
+    repo_prof.actualizar(
+        id_profesional, SaldoCuentaAnterior=(profesional["SaldoCuentaAnterior"] or 0.0) - monto_refinanciado
+    )
+    return _crear_plan_pago(
+        conn, id_profesional=id_profesional, monto_refinanciado=monto_refinanciado,
+        cantidad_cuotas=cantidad_cuotas, mes_ano_inicio=periodo_actual(conn),
+        porcentaje_interes_mensual=porcentaje_interes_mensual, observacion=observacion,
+    )
+
+
+def crear_plan_pago_historico(
+    conn: sqlite3.Connection, *, id_profesional: int, monto_refinanciado: float, cantidad_cuotas: int,
+    mes_ano_inicio: str, porcentaje_interes_mensual: float = 0.0, observacion: str | None = None,
+) -> int:
+    """Para reconstruir un plan que ya venía en curso antes de empezar a
+    usar el sistema (importación de Excel, `importar_excel.
+    _crear_plan_pago_importado`): a diferencia de `crear_plan_pago`, no
+    toca SaldoCuentaAnterior — ese estado ya viene reflejado aparte en el
+    saldo importado del profesional — y admite cualquier MesAnoInicio,
+    no solo el período actual."""
+    _validar_sin_plan_activo(conn, id_profesional)
     return _crear_plan_pago(
         conn, id_profesional=id_profesional, monto_refinanciado=monto_refinanciado,
         cantidad_cuotas=cantidad_cuotas, mes_ano_inicio=mes_ano_inicio,
@@ -329,10 +365,30 @@ def _crear_plan_pago(
     return id_plan
 
 
+def plan_activo_de(conn: sqlite3.Connection, id_profesional: int) -> sqlite3.Row | None:
+    """El plan de pagos Activo del profesional, si tiene uno (nunca puede
+    haber más de uno a la vez)."""
+    activos = obtener_repositorio(conn, "PlanPago").listar(IdProfesional=id_profesional, Estado="Activo")
+    return activos[0] if activos else None
+
+
+def cuotas_pendientes_plan(conn: sqlite3.Connection, id_plan: int) -> float:
+    """Suma de las cuotas del plan que todavía no cerró el avance de mes
+    (`avance_mes._cerrar_cuotas` las pasa a Estado="Cerrada" al cerrar el
+    período al que estaban imputadas, cobradas o no vía la liquidación de
+    ese mes) — son las que de verdad quedan sin abonar, incluida la del
+    período en curso si todavía no se cerró."""
+    return conn.execute(
+        "SELECT COALESCE(SUM(Monto), 0) AS total FROM CuotaPlan WHERE IdPlan = ? AND Estado != 'Cerrada'",
+        (id_plan,),
+    ).fetchone()["total"]
+
+
 def cancelar_plan(conn: sqlite3.Connection, id_plan: int) -> None:
-    """Cancela un plan activo. Las cuotas pendientes se suman a
-    SaldoCuentaActual: el saldo no desaparece, pasa a ser deuda normal
-    (DC-09 §3.5)."""
+    """Cancela un plan activo. Las cuotas que todavía quedaban sin abonar
+    (incluida la del mes en curso si no se cerró) se suman a
+    SaldoCuentaAnterior: vuelven a ser saldo atrasado, tal como estaban
+    antes de armar el plan (DC-09 §3.5, aclarado en conversación)."""
     repo_plan = obtener_repositorio(conn, "PlanPago")
     plan = repo_plan.obtener(id_plan)
     if plan is None:
@@ -340,86 +396,47 @@ def cancelar_plan(conn: sqlite3.Connection, id_plan: int) -> None:
     if plan["Estado"] != "Activo":
         raise ValueError(f"El plan #{id_plan} no está activo (Estado={plan['Estado']!r})")
 
-    pendientes = conn.execute(
-        "SELECT COALESCE(SUM(Monto), 0) AS total FROM CuotaPlan WHERE IdPlan = ? AND Pagado = 0", (id_plan,)
-    ).fetchone()["total"]
+    pendientes = cuotas_pendientes_plan(conn, id_plan)
     repo_plan.actualizar(id_plan, Estado="Cancelado")
     if pendientes:
         repo_prof = obtener_repositorio(conn, "Profesional")
         profesional = repo_prof.obtener(plan["IdProfesional"])
         repo_prof.actualizar(
-            plan["IdProfesional"], SaldoCuentaActual=(profesional["SaldoCuentaActual"] or 0.0) + pendientes
+            plan["IdProfesional"], SaldoCuentaAnterior=(profesional["SaldoCuentaAnterior"] or 0.0) + pendientes
         )
 
 
 def refinanciar_plan(
     conn: sqlite3.Connection, *, id_profesional: int, monto_a_refinanciar: float, cantidad_cuotas: int,
-    mes_ano_inicio: str, porcentaje_interes_mensual: float = 0.0, cancelar_plan_vigente: bool = True,
-    observacion: str | None = None,
+    porcentaje_interes_mensual: float = 0.0, observacion: str | None = None,
 ) -> int:
-    """Formulario de refinanciación (DC-09 §3.6): cancela el plan vigente
-    (si hay y se pide), descuenta el monto a refinanciar del saldo general
-    (pasa a pagarse a través del plan nuevo) y crea el plan nuevo."""
+    """Formulario de refinanciación (DC-09 §3.6, aclarado en conversación):
+    se arma siempre a principio del mes en curso. Cancela el plan vigente
+    (las cuotas que le quedaban, incluida la de este mes, se suman a
+    SaldoCuentaAnterior — ver `cancelar_plan`), descuenta de ahí
+    `monto_a_refinanciar` (que en la pantalla ya viene sugerido como ese
+    mismo saldo atrasado, con las cuotas del plan viejo incluidas) y arma
+    el plan nuevo con eso."""
     plan_activo = obtener_repositorio(conn, "PlanPago").listar(IdProfesional=id_profesional, Estado="Activo")
-    id_plan_anterior = plan_activo[0]["IdPlan"] if plan_activo else None
-    if id_plan_anterior is not None and cancelar_plan_vigente:
-        cancelar_plan(conn, id_plan_anterior)
+    if not plan_activo:
+        raise ValueError(f"El profesional #{id_profesional} no tiene un plan de pagos activo para refinanciar")
+    id_plan_anterior = plan_activo[0]["IdPlan"]
+    cancelar_plan(conn, id_plan_anterior)
 
     repo_prof = obtener_repositorio(conn, "Profesional")
     profesional = repo_prof.obtener(id_profesional)
     if profesional is None:
         raise ValueError(f"No existe el profesional #{id_profesional}")
     repo_prof.actualizar(
-        id_profesional, SaldoCuentaActual=(profesional["SaldoCuentaActual"] or 0.0) - monto_a_refinanciar
+        id_profesional, SaldoCuentaAnterior=(profesional["SaldoCuentaAnterior"] or 0.0) - monto_a_refinanciar
     )
 
     return _crear_plan_pago(
         conn, id_profesional=id_profesional, monto_refinanciado=monto_a_refinanciar,
-        cantidad_cuotas=cantidad_cuotas, mes_ano_inicio=mes_ano_inicio,
+        cantidad_cuotas=cantidad_cuotas, mes_ano_inicio=periodo_actual(conn),
         porcentaje_interes_mensual=porcentaje_interes_mensual, observacion=observacion,
         es_refinanciacion=True, id_plan_anterior=id_plan_anterior,
     )
-
-
-def programar_refinanciacion(
-    conn: sqlite3.Connection, *, id_profesional: int, monto_a_refinanciar: float, cantidad_cuotas: int,
-    mes_ano_inicio: str, porcentaje_interes_mensual: float = 0.0, observacion: str | None = None,
-) -> int:
-    """Refinanciación pedida para un MesAnoInicio futuro (DC-09 §3.6,
-    aclarado en conversación): ejecutarla ahora mismo cancelaría el plan
-    vigente antes de tiempo, inflando SaldoCuentaActual del mes en curso
-    aunque el cambio recién debería regir el mes que viene. Se agenda acá
-    y `avance_mes.avanzar_mes` la ejecuta sola apenas corresponda. Una
-    nueva refinanciación programada para el mismo profesional reemplaza a
-    la anterior (el operador cambió de idea antes de que se ejecutara)."""
-    if mes_ano_inicio <= periodo_actual(conn):
-        raise ValueError(
-            "Para un MesAnoInicio del período en curso (o anterior) usá refinanciar_plan directamente"
-        )
-    repo = obtener_repositorio(conn, "RefinanciacionProgramada")
-    for pendiente in repo.listar(IdProfesional=id_profesional):
-        repo.eliminar(pendiente["IdRefinanciacion"])
-    return repo.crear(
-        IdProfesional=id_profesional, MontoARefinanciar=monto_a_refinanciar, CantidadCuotas=cantidad_cuotas,
-        MesAnoInicio=mes_ano_inicio, PorcentajeInteresMensual=porcentaje_interes_mensual,
-        Observacion=observacion, FechaCreacion=fecha_actual(conn).isoformat(),
-    )
-
-
-def ejecutar_refinanciaciones_programadas(conn: sqlite3.Connection, periodo_nuevo: str) -> int:
-    """Paso del avance de mes: ejecuta (`refinanciar_plan`) toda
-    refinanciación agendada cuyo MesAnoInicio ya llegó, y la saca de la
-    cola. Devuelve cuántas se ejecutaron."""
-    repo = obtener_repositorio(conn, "RefinanciacionProgramada")
-    pendientes = [p for p in repo.listar() if p["MesAnoInicio"] <= periodo_nuevo]
-    for p in pendientes:
-        refinanciar_plan(
-            conn, id_profesional=p["IdProfesional"], monto_a_refinanciar=p["MontoARefinanciar"],
-            cantidad_cuotas=p["CantidadCuotas"], mes_ano_inicio=p["MesAnoInicio"],
-            porcentaje_interes_mensual=p["PorcentajeInteresMensual"], observacion=p["Observacion"],
-        )
-        repo.eliminar(p["IdRefinanciacion"])
-    return len(pendientes)
 
 
 def marcar_cuota_pagada(conn: sqlite3.Connection, id_cuota: int) -> None:

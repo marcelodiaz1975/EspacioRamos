@@ -9,7 +9,7 @@ from app.negocio.mensajeria import (
     marcar_mensaje_aislada_generado,
     marcar_mensaje_previo_generado,
 )
-from app.negocio.pagos import crear_plan_pago
+from app.negocio.pagos import crear_plan_pago_historico
 from app.repositorio.registro import obtener_repositorio
 
 PERIODO = "2026-08"
@@ -75,7 +75,7 @@ def test_saldo_fuera_de_tolerancia_sin_plan_es_naranja(conn):
 
 def test_saldo_fuera_de_tolerancia_con_plan_es_rojo(conn):
     p = _crear_r(conn, saldo_anterior=10000)
-    crear_plan_pago(
+    crear_plan_pago_historico(
         conn, id_profesional=p["IdProfesional"], monto_refinanciado=10000,
         cantidad_cuotas=2, mes_ano_inicio=PERIODO,
     )
@@ -91,7 +91,7 @@ def test_liquidacion_enviada_es_gris(conn):
 
 def test_gris_reactiva_a_rojo_cerca_de_fin_de_mes_con_deuda(conn):
     p = _crear_r(conn, saldo_anterior=0, saldo_actual=10000)
-    crear_plan_pago(
+    crear_plan_pago_historico(
         conn, id_profesional=p["IdProfesional"], monto_refinanciado=10000,
         cantidad_cuotas=2, mes_ano_inicio=PERIODO,
     )
@@ -104,7 +104,7 @@ def test_gris_reactiva_a_rojo_cerca_de_fin_de_mes_con_deuda(conn):
 
 def test_gris_no_reactiva_lejos_de_fin_de_mes(conn):
     p = _crear_r(conn, saldo_anterior=0, saldo_actual=10000)
-    crear_plan_pago(
+    crear_plan_pago_historico(
         conn, id_profesional=p["IdProfesional"], monto_refinanciado=10000,
         cantidad_cuotas=2, mes_ano_inicio=PERIODO,
     )

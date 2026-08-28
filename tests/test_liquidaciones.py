@@ -7,7 +7,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.dias import fecha_a_dia_semana
 from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion, marcar_estado_envio
-from app.negocio.pagos import crear_cargo_especial, crear_plan_pago, marcar_cuota_pagada, registrar_pago
+from app.negocio.pagos import crear_cargo_especial, crear_plan_pago_historico, marcar_cuota_pagada, registrar_pago
 from app.negocio.valores import obtener_porcentaje_descuento
 from app.repositorio.registro import obtener_repositorio
 
@@ -606,7 +606,7 @@ def test_cargos_especiales_suman_con_signo(conn, consultorio):
 
 def test_cuotas_de_plan_pendientes_del_periodo_se_incluyen(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
-    id_plan = crear_plan_pago(
+    id_plan = crear_plan_pago_historico(
         conn, id_profesional=id_prof, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio="2026-08",
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)

@@ -31,7 +31,7 @@ from app.importacion.definiciones import (
     ENTIDADES_IMPORTABLES,
 )
 from app.negocio.dias import periodo_actual
-from app.negocio.pagos import crear_plan_pago, marcar_cuota_pagada
+from app.negocio.pagos import crear_plan_pago_historico, marcar_cuota_pagada
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -230,7 +230,7 @@ def _crear_plan_pago_importado(conn: sqlite3.Connection, datos: dict) -> None:
     if faltantes:
         raise ValueError(f"Faltan columnas obligatorias: {', '.join(faltantes)}")
 
-    id_plan = crear_plan_pago(
+    id_plan = crear_plan_pago_historico(
         conn, id_profesional=datos["IdProfesional"], monto_refinanciado=datos["MontoRefinanciado"],
         cantidad_cuotas=datos["CantidadCuotas"], mes_ano_inicio=datos["MesAnoInicio"],
         porcentaje_interes_mensual=datos.get("PorcentajeInteresMensual") or 0.0,

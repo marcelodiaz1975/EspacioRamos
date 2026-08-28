@@ -54,7 +54,6 @@ from app.negocio.dias import fecha_actual, parsear_periodo, sumar_meses, ultimo_
 from app.negocio.estadisticas import generar_snapshot
 from app.negocio.historial_oferta import vaciar_historial
 from app.negocio.lista_espera import eliminar_pedido
-from app.negocio.pagos import ejecutar_refinanciaciones_programadas
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -68,7 +67,6 @@ class ResumenAvanceMes:
     plazos_extendidos_automaticos_aplicados: int = 0
     cuotas_cerradas: int = 0
     planes_finalizados: list[int] = field(default_factory=list)
-    refinanciaciones_programadas_ejecutadas: int = 0
     pedidos_lista_espera_eliminados: int = 0
     pedidos_activos_vencidos_eliminados: int = 0
     archivos_varios_regenerados: bool = False
@@ -250,9 +248,6 @@ def avanzar_mes(
         conn, sumar_meses(periodo_cerrado, 1),
     )
     resumen.cuotas_cerradas, resumen.planes_finalizados = _cerrar_cuotas(conn, periodo_cerrado)
-    resumen.refinanciaciones_programadas_ejecutadas = ejecutar_refinanciaciones_programadas(
-        conn, sumar_meses(periodo_cerrado, 1),
-    )
     resumen.pedidos_lista_espera_eliminados, resumen.pedidos_activos_vencidos_eliminados = _limpiar_lista_espera(
         conn, eliminar_activos_vencidos=eliminar_activos_vencidos_lista_espera,
     )
