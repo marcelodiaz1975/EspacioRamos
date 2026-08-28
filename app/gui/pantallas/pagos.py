@@ -442,6 +442,7 @@ class _PanelRegistrarPago(QWidget):
         recogida_sobres = (
             self.campo_recogida_sobres.dateTime().toString(Qt.DateFormat.ISODate) if es_sobre else None
         )
+        periodo_viejo = registro["PeriodoImputado"]
         try:
             modificar_pago(
                 self.conn, registro["IdPago"], monto=monto, medio_pago=medio_pago,
@@ -451,6 +452,11 @@ class _PanelRegistrarPago(QWidget):
         except ValueError as error:
             QMessageBox.warning(self, "Modificar pago", str(error))
             return
+        # si el pago afectaba (o pasa a afectar) el saldo anterior, eso repercute
+        # en la liquidación del mes en curso, que arrastra ese saldo — hay que
+        # regenerarla y dejarla marcada como no enviada.
+        if (periodo_viejo and periodo_viejo < periodo_actual(self.conn)) or periodo_imputado < periodo_actual(self.conn):
+            regenerar_si_corresponde(self.conn, id_profesional=registro["IdProfesional"], periodo=periodo_actual(self.conn))
         self.conn.commit()
         self.actualizar()
         self._resetear_formulario()

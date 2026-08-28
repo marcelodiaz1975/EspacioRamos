@@ -1420,3 +1420,27 @@ def test_modificar_cargo_especial_sin_llave_lo_precarga_para_recrear(qtbot, conn
 
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
+
+
+def test_tabla_cargos_especiales_encabezado_periodo_imputado(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    assert panel.tabla.horizontalHeaderItem(5).text() == "Período imputado"
+
+
+def test_spin_monto_cargos_especiales_se_pone_rojo_en_negativo(qtbot, conn):
+    from app.gui.estilos import COLOR_ROJO
+
+    _preparar(conn)
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    assert COLOR_ROJO not in panel.spin_monto.styleSheet()
+
+    panel.spin_monto.setValue(-100)
+    assert COLOR_ROJO in panel.spin_monto.styleSheet()
+
+    panel.spin_monto.setValue(100)
+    assert COLOR_ROJO not in panel.spin_monto.styleSheet()

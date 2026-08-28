@@ -1106,6 +1106,7 @@ class _PanelCargosEspeciales(QWidget):
 
         self.spin_monto = QDoubleSpinBox()
         self.spin_monto.setRange(-100_000_000, 100_000_000)
+        self.spin_monto.valueChanged.connect(self._actualizar_color_monto)
         form.addWidget(QLabel("Monto (Débito positivo, Crédito negativo)"))
         form.addWidget(self.spin_monto)
 
@@ -1132,7 +1133,9 @@ class _PanelCargosEspeciales(QWidget):
 
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(6)
-        self.tabla.setHorizontalHeaderLabels(["Fecha", "Profesional", "Tipo", "Concepto", "Monto", "Período"])
+        self.tabla.setHorizontalHeaderLabels(
+            ["Fecha", "Profesional", "Tipo", "Concepto", "Monto", "Período imputado"]
+        )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -1141,8 +1144,17 @@ class _PanelCargosEspeciales(QWidget):
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
         self._foco = instalar_enter_avanza_foco(
-            [self.combo_profesional, self.combo_tipo, self.campo_concepto, self.spin_monto, self.campo_periodo, boton]
+            [
+                self.combo_profesional, self.combo_tipo, self.campo_concepto, self.spin_monto, self.campo_periodo,
+                boton, boton_modificar, boton_eliminar, boton_deshacer,
+            ]
         )
+
+    def _actualizar_color_monto(self) -> None:
+        """Mismo criterio que la tabla: negativo en rojo, positivo en
+        negro, ya mientras se está cargando el monto (no recién después de
+        confirmar)."""
+        self.spin_monto.setStyleSheet(f"color: {COLOR_ROJO};" if self.spin_monto.value() < 0 else "")
 
     def actualizar(self) -> None:
         """Sin profesional elegido, muestra los cargos especiales de todos

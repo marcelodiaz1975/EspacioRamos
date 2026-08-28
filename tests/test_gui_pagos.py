@@ -405,6 +405,38 @@ def test_modificar_pago_sin_seleccion_no_falla(qtbot, conn):
     pantalla.panel_pagos._modificar()  # nada seleccionado -> no debe romper
 
 
+def test_modificar_pago_a_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbot, conn):
+    """Igual que al registrar un pago nuevo: si la modificación hace que el
+    pago pase a afectar el saldo anterior (imputado al mes anterior), la
+    liquidación del mes EN CURSO (no la de ese período) se regenera y
+    queda marcada como no enviada."""
+    id_profesional = _crear_profesional(conn, saldo=10000)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo="2026-08")
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo="2026-08", enviada=True)
+    conn.commit()
+
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-1000)
+    panel._registrar()  # imputado al mes en curso, todavía no toca julio
+
+    panel.tabla.selectRow(0)
+    panel.campo_periodo.setText("2026-07")  # se corrige: era del mes anterior
+    panel._modificar()
+
+    emisiones_agosto = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_profesional, Periodo="2026-08",
+    )
+    assert len(emisiones_agosto) == 2
+    ultima = max(emisiones_agosto, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
 def test_deshacer_ultimo_movimiento_revierte_y_borra(qtbot, conn, monkeypatch):
     id_profesional = _crear_profesional(conn, saldo=1000)
     pantalla = PantallaPagos(conn)
