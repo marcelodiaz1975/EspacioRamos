@@ -507,13 +507,15 @@ def test_crear_plan_de_pagos_persiste_y_genera_cuotas(qtbot, conn):
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(6000)
     panel.spin_cuotas.setValue(3)
+    panel.spin_interes.setValue(5)
     panel._guardar()
 
     assert conn.execute("SELECT COUNT(*) c FROM PlanPago").fetchone()["c"] == 1
     assert conn.execute("SELECT COUNT(*) c FROM CuotaPlan").fetchone()["c"] == 3
-    assert panel.tabla.item(0, 7).text() == "Activo"
-    assert panel.tabla.item(0, 5).text() == "3"  # cuotas restantes
-    assert panel.tabla.item(0, 6).text() == formatear_moneda(6000)  # saldo restante
+    assert panel.tabla.item(0, 8).text() == "Activo"
+    assert panel.tabla.item(0, 4).text() == "5.0%"  # interés mensual
+    assert panel.tabla.item(0, 6).text() == "3"  # cuotas restantes
+    assert panel.tabla.item(0, 7).text() == formatear_moneda(6900)  # saldo restante (con interés)
 
 
 def test_botones_planes_pago_segun_si_hay_plan_activo(qtbot, conn):
