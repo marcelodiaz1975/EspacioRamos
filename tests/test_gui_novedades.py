@@ -1123,6 +1123,7 @@ def test_crear_cargo_especial_persiste(qtbot, conn):
     pantalla = PantallaCargosEspeciales(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel
+    panel.combo_profesional.setCurrentIndex(1)
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
     panel._crear()
@@ -1138,6 +1139,7 @@ def test_crear_cargo_especial_periodo_mes_anterior_pide_confirmacion(qtbot, conn
     pantalla = PantallaCargosEspeciales(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel
+    panel.combo_profesional.setCurrentIndex(1)
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
     panel.campo_periodo.setText("2026-07")
@@ -1148,4 +1150,109 @@ def test_crear_cargo_especial_periodo_mes_anterior_pide_confirmacion(qtbot, conn
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
     panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
+
+
+def test_combo_profesional_cargos_especiales_arranca_en_blanco(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    assert panel.combo_profesional.currentIndex() == 0
+    assert panel.combo_profesional.currentData() is None
+
+
+def test_crear_cargo_especial_sin_elegir_profesional_avisa_y_no_crea(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    panel.campo_concepto.setText("ajuste manual")
+    panel.spin_monto.setValue(1500)
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 0
+
+
+def test_tabla_cargos_especiales_usa_formato_canonico_de_profesional(qtbot, conn):
+    _preparar(conn)
+    conn.execute("UPDATE Profesional SET IdCodigo = 'R1', Tratamiento = 'Lic.', NombrePila = 'Virginia'")
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_concepto.setText("ajuste manual")
+    panel.spin_monto.setValue(1500)
+    panel._crear()
+    assert panel.tabla.item(0, 0).text() == "R1 - Lic. Virginia Gómez"
+
+
+def test_panel_cargos_especiales_recibe_foco_en_profesional_al_mostrarse(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.panel.combo_profesional.hasFocus())
+
+
+def test_tabla_cargos_especiales_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    for concepto, monto in (("bbb", 100), ("aaa", 200)):
+        panel.campo_concepto.setText(concepto)
+        panel.spin_monto.setValue(monto)
+        panel._crear()
+    assert panel.tabla.rowCount() == 2
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # "Concepto" ascendente
+    conceptos_asc = [panel.tabla.item(f, 2).text() for f in range(panel.tabla.rowCount())]
+    assert conceptos_asc == ["Aaa", "Bbb"]
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # de nuevo -> descendente
+    conceptos_desc = [panel.tabla.item(f, 2).text() for f in range(panel.tabla.rowCount())]
+    assert conceptos_desc == ["Bbb", "Aaa"]
+
+
+def test_deshacer_ultimo_movimiento_cargo_especial_sin_registros_no_falla(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel._deshacer_ultimo()  # no debe intentar confirmar ni romper
+
+
+def test_deshacer_ultimo_movimiento_cargo_especial_borra_el_ultimo_cargado(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_concepto.setText("ajuste manual")
+    panel.spin_monto.setValue(1500)
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
+
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 0
+
+
+def test_deshacer_ultimo_movimiento_cargo_especial_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_concepto.setText("ajuste manual")
+    panel.spin_monto.setValue(1500)
+    panel._crear()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._deshacer_ultimo()
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1

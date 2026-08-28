@@ -118,18 +118,6 @@ def _linea_divisoria() -> QFrame:
     return linea
 
 
-def _combo_profesionales(conn: sqlite3.Connection) -> QComboBox:
-    combo = QComboBox()
-    for f in conn.execute("SELECT IdProfesional, Apellido, NombrePila FROM Profesional ORDER BY Apellido"):
-        combo.addItem(f"{f['Apellido']}, {f['NombrePila'] or ''}".strip(", "), f["IdProfesional"])
-    return combo
-
-
-def _nombre_profesional(cache: dict[int, sqlite3.Row], id_profesional: int) -> str:
-    p = cache.get(id_profesional)
-    return p["Apellido"] if p else "?"
-
-
 class PantallaRegistroAusencias(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -1057,8 +1045,17 @@ class _PanelCargosEspeciales(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
+        self._registros: list[sqlite3.Row] = []
         self._armar_ui()
         self.actualizar()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Mismo motivo que en las demás pestañas de esta pantalla:
+        `setFocus()` durante la construcción no alcanza a "pegar"."""
+        super().showEvent(event)
+        self._orden.reiniciar()
+        self.actualizar()
+        self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -1066,7 +1063,11 @@ class _PanelCargosEspeciales(QWidget):
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
-        self.combo_profesional = _combo_profesionales(self.conn)
+        self.combo_profesional = QComboBox()
+        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+            self.combo_profesional.addItem(etiqueta, id_)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
@@ -1094,6 +1095,9 @@ class _PanelCargosEspeciales(QWidget):
         boton.setObjectName("botonPrimario")
         boton.clicked.connect(self._crear)
         form.addWidget(boton)
+        boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.clicked.connect(self._deshacer_ultimo)
+        form.addWidget(boton_deshacer)
         form.addStretch()
         splitter.addWidget(panel_form)
 
@@ -1101,23 +1105,53 @@ class _PanelCargosEspeciales(QWidget):
         self.tabla.setColumnCount(5)
         self.tabla.setHorizontalHeaderLabels(["Profesional", "Tipo", "Concepto", "Monto", "Período"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
+        self._foco = instalar_enter_avanza_foco(
+            [self.combo_profesional, self.combo_tipo, self.campo_concepto, self.spin_monto, self.campo_periodo, boton]
+        )
 
     def actualizar(self) -> None:
+        repo_profesional = obtener_repositorio(self.conn, "Profesional")
         registros = obtener_repositorio(self.conn, "CargoEspecial").listar()
-        cache = {p["IdProfesional"]: p for p in obtener_repositorio(self.conn, "Profesional").listar()}
-        self.tabla.setRowCount(len(registros))
-        for i, r in enumerate(registros):
-            self.tabla.setItem(i, 0, QTableWidgetItem(_nombre_profesional(cache, r["IdProfesional"])))
+        filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
+            (r, repo_profesional.obtener(r["IdProfesional"])) for r in registros
+        ]
+        filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else "", t[0]["IdCargo"]))
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
+        self._registros = [t[0] for t in filas]
+
+        self.tabla.setRowCount(len(filas))
+        for i, (r, profesional) in enumerate(filas):
+            self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             self.tabla.setItem(i, 1, QTableWidgetItem(r["Tipo"]))
             self.tabla.setItem(i, 2, QTableWidgetItem(r["Concepto"]))
             self.tabla.setItem(i, 3, QTableWidgetItem(f"$ {r['Monto']:,.2f}"))
             self.tabla.setItem(i, 4, QTableWidgetItem(r["PeriodoImputado"] or ""))
         self.tabla.resizeColumnsToContents()
+        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+
+    @staticmethod
+    def _clave_orden(columna: int):
+        claves = {
+            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            1: lambda t: t[0]["Tipo"],
+            2: lambda t: t[0]["Concepto"],
+            3: lambda t: t[0]["Monto"],
+            4: lambda t: t[0]["PeriodoImputado"] or "",
+        }
+        return claves[columna]
 
     def _crear(self) -> None:
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            QMessageBox.warning(self, "Crear cargo especial", "Elegí un profesional.")
+            return
         concepto = self.campo_concepto.text().strip()
         if not concepto:
             QMessageBox.warning(self, "Crear cargo especial", "El concepto es obligatorio.")
@@ -1127,7 +1161,7 @@ class _PanelCargosEspeciales(QWidget):
             return
         try:
             crear_cargo_especial(
-                self.conn, id_profesional=self.combo_profesional.currentData(), tipo=self.combo_tipo.currentData(),
+                self.conn, id_profesional=id_profesional, tipo=self.combo_tipo.currentData(),
                 concepto=concepto, monto=self.spin_monto.value(),
                 periodo_imputado=periodo_imputado,
             )
@@ -1136,3 +1170,29 @@ class _PanelCargosEspeciales(QWidget):
             return
         self.conn.commit()
         self.actualizar()
+
+    def _deshacer_ultimo(self) -> None:
+        """Como no hay forma de modificar ni anular un cargo especial ya
+        cargado desde esta pantalla (no se edita ni se borra a mano,
+        alimenta directo la liquidación): "Deshacer" borra el último
+        cargo especial cargado en el sistema (el de mayor IdCargo), sin
+        importar de qué profesional sea."""
+        todos = obtener_repositorio(self.conn, "CargoEspecial").listar()
+        if not todos:
+            QMessageBox.warning(self, "Deshacer último movimiento", "No hay cargos especiales cargados para deshacer.")
+            return
+        ultimo = max(todos, key=lambda c: c["IdCargo"])
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(ultimo["IdProfesional"])
+        respuesta = QMessageBox.question(
+            self, "Deshacer último movimiento",
+            "¿Deshacer el último cargo especial cargado en el sistema?\n"
+            f"{_texto_profesional(profesional) if profesional else '?'}: "
+            f"{ultimo['Tipo']} - {ultimo['Concepto']} - $ {ultimo['Monto']:,.2f}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+        obtener_repositorio(self.conn, "CargoEspecial").eliminar(ultimo["IdCargo"])
+        self.conn.commit()
+        self.actualizar()
+        self.combo_profesional.setFocus()
