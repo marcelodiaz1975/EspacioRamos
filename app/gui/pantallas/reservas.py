@@ -413,7 +413,8 @@ class _PanelReservasRegulares(QWidget):
                 self.combo_consultorio, *(self._checks_dia[dia] for dia in _DIAS_RESERVA),
                 self.spin_desde, self.spin_hasta,
                 self.campo_vigencia_inicio, self.campo_vigencia_fin, boton_crear,
-            ]
+            ],
+            parent=self,
         )
 
     def actualizar(self) -> None:
@@ -957,7 +958,8 @@ class _PanelReservasAisladas(QWidget):
                 self.combo_consultorio, self.campo_fecha, self.spin_desde, self.spin_hasta,
                 self.casilla_recargo, self.casilla_reubicacion, self.combo_horario_no_usado,
                 self.campo_fecha_ausencia, boton_crear,
-            ]
+            ],
+            parent=self,
         )
 
     def _cargar_edificios(self) -> None:

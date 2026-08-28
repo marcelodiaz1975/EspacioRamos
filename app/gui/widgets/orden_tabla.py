@@ -10,17 +10,31 @@ esta clase solo lleva el estado de qué columna/sentido eligió el usuario y
 avisa cuándo hay que volver a armar la tabla con ese criterio."""
 from __future__ import annotations
 
+import weakref
 from typing import Callable
 
+from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QTableWidget
 
 
-class OrdenTabla:
+class OrdenTabla(QObject):
     def __init__(self, tabla: QTableWidget, al_cambiar: Callable[[], None]):
+        super().__init__(tabla)
         self._tabla = tabla
         self.columna: int | None = None
         self.ascendente = True
-        self._al_cambiar = al_cambiar
+        # Referencia débil: `al_cambiar` casi siempre es un método atado
+        # (ej. `self.actualizar`) del panel dueño de `tabla` — guardarlo
+        # fuerte crearía un ciclo panel -> OrdenTabla -> panel que solo el
+        # recolector cíclico de Python puede romper, y si ese recolector
+        # corre mientras Qt ya venía destruyendo el árbol de widgets en su
+        # propio orden (ej. al cerrar muchos paneles seguidos, como en los
+        # tests), terminaba tocando un wrapper ya muerto del lado C++ y
+        # reventando el proceso entero (segfault, no una excepción
+        # atrapable). Con referencia débil, este objeto no sostiene la
+        # vida del panel — su propia vida ya la garantiza el parentesco Qt
+        # con `tabla` pasado arriba.
+        self._al_cambiar = weakref.WeakMethod(al_cambiar) if hasattr(al_cambiar, "__self__") else weakref.ref(al_cambiar)
         header = tabla.horizontalHeader()
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self._clic)
@@ -32,7 +46,9 @@ class OrdenTabla:
             self.columna = columna
             self.ascendente = True
         self._actualizar_indicador()
-        self._al_cambiar()
+        al_cambiar = self._al_cambiar()
+        if al_cambiar is not None:
+            al_cambiar()
 
     def _actualizar_indicador(self) -> None:
         from PySide6.QtCore import Qt

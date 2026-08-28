@@ -263,7 +263,7 @@ class _PanelRegistrarPago(QWidget):
             self.combo_profesional, self.campo_periodo, self.spin_monto, self.combo_medio_pago,
             self.combo_cuenta_receptora, self.boton_registrar, boton_modificar, boton_eliminar,
             boton_deshacer, boton_iniciar_tanda, boton_cerrar_tanda,
-        ])
+        ], parent=self)
 
     def _profesional_cambio(self) -> None:
         self._actualizar_saldos()
@@ -685,7 +685,8 @@ class _PanelPlanesPago(QWidget):
 
         self._foco = instalar_enter_avanza_foco(
             [self.combo_profesional, self.spin_monto, self.spin_cuotas, self.spin_interes,
-             self.boton_guardar, self.boton_refinanciar, self.boton_cancelar]
+             self.boton_guardar, self.boton_refinanciar, self.boton_cancelar],
+            parent=self,
         )
 
     def _plan_activo_seleccionado(self):

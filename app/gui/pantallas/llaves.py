@@ -9,7 +9,15 @@ Es F18 — asignado por nosotros en la revisión uno por uno con la
 clienta: es el único número sin usar entre F16 (Reservas regulares) y
 F27 (Ausencias), y no había ninguno confirmado para esta pantalla en
 ningún documento del proyecto; si la planilla original de la clienta ya
-le tenía otro número, hay que corregirlo acá."""
+le tenía otro número, hay que corregirlo acá.
+
+"Deshacer último movimiento" (pedido explícito en la revisión): a
+diferencia de las demás pantallas, acá cubre CUALQUIER acción hecha en
+el formulario, sin importar de cuál se trate — dar de alta/modificar/
+eliminar una llave (parte genérica), agregar/quitar un acceso, entregar
+o devolver. Se guarda un solo registro de "qué fue lo último" (se pisa
+con cada acción nueva) y el botón lo revierte por completo, incluido el
+cargo especial de depósito/reintegro si esa acción generó uno."""
 from __future__ import annotations
 
 import sqlite3
@@ -34,9 +42,14 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.crud_generico import Campo, PantallaCRUD
+from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
+from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.orden_tabla import OrdenTabla
 from app.negocio.listas_editables import opciones_lista
 from app.negocio.llaves import agregar_acceso_llave, devolver_llave, entregar_llave
 from app.repositorio.registro import obtener_repositorio
+
+_CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
 
 
 class PantallaLlaves(QWidget):
@@ -44,7 +57,19 @@ class PantallaLlaves(QWidget):
         super().__init__(parent)
         self.conn = conn
         self._tenencias: list[sqlite3.Row] = []
+        self._accesos_actuales: list[sqlite3.Row] = []
+        self._ultimo: dict | None = None
         self._armar_ui()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """`setFocus()` durante la construcción no alcanza a "pegar": el
+        widget todavía no está mostrado en ese momento."""
+        super().showEvent(event)
+        self._orden_accesos.reiniciar()
+        self._orden_tenencias.reiniciar()
+        self._actualizar_tenencias()
+        self._actualizar_accesos()
+        self.crud_llaves.boton_nuevo.setFocus()
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -60,7 +85,11 @@ class PantallaLlaves(QWidget):
             Campo("ValorDepositoAnterior", "Depósito anterior", tipo="numero"),
             Campo("Activo", "Activo", tipo="booleano"),
         ]
-        self.crud_llaves = PantallaCRUD(self.conn, "Llave", "", campos)
+        self.crud_llaves = PantallaCRUD(
+            self.conn, "Llave", "", campos, instalar_foco=False,
+            al_crear=self._on_crear_llave, al_actualizar=self._on_modificar_llave,
+            al_eliminar=self._on_eliminar_llave,
+        )
         self.crud_llaves.tabla_widget.itemSelectionChanged.connect(self._actualizar_tenencias)
         self.crud_llaves.tabla_widget.itemSelectionChanged.connect(self._actualizar_accesos)
         splitter.addWidget(self.crud_llaves)
@@ -76,6 +105,7 @@ class PantallaLlaves(QWidget):
         self.tabla_accesos.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_accesos.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla_accesos.setMaximumHeight(140)
+        self._orden_accesos = OrdenTabla(self.tabla_accesos, self._actualizar_accesos)
         layout_tenencias.addWidget(self.tabla_accesos)
 
         fila_accesos = QHBoxLayout()
@@ -95,6 +125,7 @@ class PantallaLlaves(QWidget):
             ["Profesional", "Entrega", "Devolución", "Depósito cobrado", "Depósito reintegrado"]
         )
         self.tabla_tenencias.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._orden_tenencias = OrdenTabla(self.tabla_tenencias, self._actualizar_tenencias)
         layout_tenencias.addWidget(self.tabla_tenencias, stretch=1)
 
         fila_acciones = QHBoxLayout()
@@ -103,8 +134,12 @@ class PantallaLlaves(QWidget):
         self.boton_entregar.clicked.connect(self._entregar)
         self.boton_devolver = QPushButton("Registrar devolución…")
         self.boton_devolver.clicked.connect(self._devolver)
+        self.boton_deshacer = QPushButton("Deshacer último movimiento")
+        self.boton_deshacer.clicked.connect(self._deshacer_ultimo)
+        self.boton_deshacer.setEnabled(False)
         fila_acciones.addWidget(self.boton_entregar)
         fila_acciones.addWidget(self.boton_devolver)
+        fila_acciones.addWidget(self.boton_deshacer)
         fila_acciones.addStretch()
         layout_tenencias.addLayout(fila_acciones)
         splitter.addWidget(panel_tenencias)
@@ -113,10 +148,18 @@ class PantallaLlaves(QWidget):
         self._actualizar_tenencias()
         self._actualizar_accesos()
 
+        self._foco = instalar_enter_avanza_foco([
+            self.crud_llaves.boton_nuevo, self.crud_llaves.boton_editar, self.crud_llaves.boton_eliminar,
+            self.boton_agregar_acceso, self.boton_eliminar_acceso,
+            self.boton_entregar, self.boton_devolver, self.boton_deshacer,
+        ], parent=self)
+
     def actualizar(self) -> None:
         self.crud_llaves.actualizar()
         self._actualizar_tenencias()
         self._actualizar_accesos()
+
+    # ------------------------------------------------------------- accesos
 
     def _accesos(self, id_llave: int) -> list[sqlite3.Row]:
         return self.conn.execute(
@@ -130,17 +173,32 @@ class PantallaLlaves(QWidget):
             (id_llave,),
         ).fetchall()
 
+    @staticmethod
+    def _clave_orden_accesos(columna: int):
+        claves = {
+            0: lambda a: a["NombreEdificio"] or "",
+            1: lambda a: a["Departamento"] or "",
+            2: lambda a: a["DescripcionAcceso"] or "",
+        }
+        return claves[columna]
+
     def _actualizar_accesos(self) -> None:
         id_llave = self.crud_llaves.fila_seleccionada_id()
         self.boton_agregar_acceso.setEnabled(id_llave is not None)
         self.boton_eliminar_acceso.setEnabled(False)
-        self._accesos_actuales: list[sqlite3.Row] = []
+        self._accesos_actuales = []
         self.tabla_accesos.setRowCount(0)
         if id_llave is None:
             return
-        self._accesos_actuales = self._accesos(id_llave)
-        self.tabla_accesos.setRowCount(len(self._accesos_actuales))
-        for fila_idx, a in enumerate(self._accesos_actuales):
+        accesos = self._accesos(id_llave)
+        if self._orden_accesos.columna is not None:
+            accesos = sorted(
+                accesos, key=self._clave_orden_accesos(self._orden_accesos.columna),
+                reverse=not self._orden_accesos.ascendente,
+            )
+        self._accesos_actuales = accesos
+        self.tabla_accesos.setRowCount(len(accesos))
+        for fila_idx, a in enumerate(accesos):
             self.tabla_accesos.setItem(fila_idx, 0, QTableWidgetItem(a["NombreEdificio"]))
             self.tabla_accesos.setItem(fila_idx, 1, QTableWidgetItem(a["Departamento"] or "Todas"))
             self.tabla_accesos.setItem(fila_idx, 2, QTableWidgetItem(a["DescripcionAcceso"] or ""))
@@ -155,12 +213,14 @@ class PantallaLlaves(QWidget):
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            agregar_acceso_llave(self.conn, id_llave=id_llave, **dialogo.valores())
+            id_acceso = agregar_acceso_llave(self.conn, id_llave=id_llave, **dialogo.valores())
         except ValueError as error:
             QMessageBox.warning(self, "Agregar acceso", str(error))
             return
         self.conn.commit()
+        self._marcar_ultimo({"tipo": "agregar_acceso", "id_acceso": id_acceso})
         self._actualizar_accesos()
+        self.crud_llaves.boton_nuevo.setFocus()
 
     def _eliminar_acceso(self) -> None:
         filas = self.tabla_accesos.selectionModel().selectedRows()
@@ -168,9 +228,25 @@ class PantallaLlaves(QWidget):
             QMessageBox.information(self, "Eliminar acceso", "Seleccioná un acceso para eliminar.")
             return
         acceso = self._accesos_actuales[filas[0].row()]
+        valores_previos = {k: acceso[k] for k in acceso.keys() if k != "IdLlaveAcceso"}
         obtener_repositorio(self.conn, "LlaveAcceso").eliminar(acceso["IdLlaveAcceso"])
         self.conn.commit()
+        self._marcar_ultimo({"tipo": "eliminar_acceso", "valores_previos": valores_previos})
         self._actualizar_accesos()
+        self.crud_llaves.boton_nuevo.setFocus()
+
+    # ----------------------------------------------------------- tenencias
+
+    @staticmethod
+    def _clave_orden_tenencias(columna: int):
+        claves = {
+            0: lambda par: _texto_profesional(par[1]) if par[1] else "",
+            1: lambda par: par[0]["FechaEntrega"] or "",
+            2: lambda par: par[0]["FechaDevolucion"] or "",
+            3: lambda par: bool(par[0]["DepositoCobrado"]),
+            4: lambda par: bool(par[0]["DepositoReintegrado"]),
+        }
+        return claves[columna]
 
     def _actualizar_tenencias(self) -> None:
         id_llave = self.crud_llaves.fila_seleccionada_id()
@@ -181,18 +257,24 @@ class PantallaLlaves(QWidget):
         if id_llave is None:
             return
 
-        self._tenencias = self.conn.execute(
-            """
-            SELECT lp.*, p.Apellido, p.NombrePila FROM LlaveProfesional lp
-            JOIN Profesional p ON p.IdProfesional = lp.IdProfesional
-            WHERE lp.IdLlave = ? ORDER BY lp.FechaEntrega DESC
-            """,
-            (id_llave,),
-        ).fetchall()
-        self.tabla_tenencias.setRowCount(len(self._tenencias))
+        repo_profesional = obtener_repositorio(self.conn, "Profesional")
+        tenencias = obtener_repositorio(self.conn, "LlaveProfesional").listar(IdLlave=id_llave)
+        filas = [(t, repo_profesional.obtener(t["IdProfesional"])) for t in tenencias]
+        if self._orden_tenencias.columna is not None:
+            filas.sort(
+                key=self._clave_orden_tenencias(self._orden_tenencias.columna),
+                reverse=not self._orden_tenencias.ascendente,
+            )
+        else:
+            filas.sort(key=lambda par: par[0]["FechaEntrega"] or "", reverse=True)
+        self._tenencias = [t for t, _p in filas]
+
+        self.tabla_tenencias.setRowCount(len(filas))
         hay_titular_activo = False
-        for fila_idx, t in enumerate(self._tenencias):
-            self.tabla_tenencias.setItem(fila_idx, 0, QTableWidgetItem(f"{t['Apellido']}, {t['NombrePila'] or ''}"))
+        for fila_idx, (t, profesional) in enumerate(filas):
+            self.tabla_tenencias.setItem(
+                fila_idx, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?")
+            )
             self.tabla_tenencias.setItem(fila_idx, 1, QTableWidgetItem(t["FechaEntrega"] or ""))
             self.tabla_tenencias.setItem(fila_idx, 2, QTableWidgetItem(t["FechaDevolucion"] or ""))
             self.tabla_tenencias.setItem(fila_idx, 3, QTableWidgetItem("Sí" if t["DepositoCobrado"] else "No"))
@@ -202,6 +284,17 @@ class PantallaLlaves(QWidget):
         self.tabla_tenencias.resizeColumnsToContents()
         self.boton_devolver.setEnabled(hay_titular_activo)
 
+    def _cargo_especial_creado(self, id_llave: int, cargos_antes: set[int]) -> sqlite3.Row | None:
+        """El depósito/reintegro genera como mucho un CargoEspecial nuevo
+        por acción — se detecta por diferencia de conjunto en vez de
+        duplicar acá la condición exacta que usa entregar_llave/
+        devolver_llave para decidir si correspondía crear uno."""
+        return next(
+            (c for c in obtener_repositorio(self.conn, "CargoEspecial").listar(IdLlave=id_llave)
+             if c["IdCargo"] not in cargos_antes),
+            None,
+        )
+
     def _entregar(self) -> None:
         id_llave = self.crud_llaves.fila_seleccionada_id()
         if id_llave is None:
@@ -209,13 +302,20 @@ class PantallaLlaves(QWidget):
         dialogo = _DialogoEntrega(self.conn, self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
+        cargos_antes = {c["IdCargo"] for c in obtener_repositorio(self.conn, "CargoEspecial").listar(IdLlave=id_llave)}
         try:
-            entregar_llave(self.conn, id_llave=id_llave, **dialogo.valores())
+            id_llave_profesional = entregar_llave(self.conn, id_llave=id_llave, **dialogo.valores())
         except ValueError as error:
             QMessageBox.warning(self, "Entregar llave", str(error))
             return
         self.conn.commit()
+        cargo_nuevo = self._cargo_especial_creado(id_llave, cargos_antes)
+        self._marcar_ultimo({
+            "tipo": "entregar", "id_llave_profesional": id_llave_profesional,
+            "id_cargo_especial": cargo_nuevo["IdCargo"] if cargo_nuevo else None,
+        })
         self._actualizar_tenencias()
+        self.crud_llaves.boton_nuevo.setFocus()
 
     def _devolver(self) -> None:
         activa = next((t for t in self._tenencias if t["FechaDevolucion"] is None), None)
@@ -224,13 +324,84 @@ class PantallaLlaves(QWidget):
         dialogo = _DialogoDevolucion(activa, self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
+        id_llave = activa["IdLlave"]
+        cargos_antes = {c["IdCargo"] for c in obtener_repositorio(self.conn, "CargoEspecial").listar(IdLlave=id_llave)}
         try:
             devolver_llave(self.conn, activa["IdLlaveProfesional"], **dialogo.valores())
         except ValueError as error:
             QMessageBox.warning(self, "Registrar devolución", str(error))
             return
         self.conn.commit()
+        cargo_nuevo = self._cargo_especial_creado(id_llave, cargos_antes)
+        self._marcar_ultimo({
+            "tipo": "devolver", "id_llave_profesional": activa["IdLlaveProfesional"],
+            "id_cargo_especial": cargo_nuevo["IdCargo"] if cargo_nuevo else None,
+        })
         self._actualizar_tenencias()
+        self.crud_llaves.boton_nuevo.setFocus()
+
+    # -------------------------------------------------- deshacer (genérico)
+
+    def _on_crear_llave(self, id_nuevo: int, valores: dict) -> None:
+        self._marcar_ultimo({"tipo": "crear_llave", "id_llave": id_nuevo})
+
+    def _on_modificar_llave(self, registro_anterior: sqlite3.Row, valores_nuevos: dict) -> None:
+        self._marcar_ultimo({
+            "tipo": "modificar_llave", "id_llave": registro_anterior["IdLlave"],
+            "valores_previos": {k: registro_anterior[k] for k in valores_nuevos},
+        })
+
+    def _on_eliminar_llave(self, registro: sqlite3.Row) -> None:
+        valores_previos = {k: registro[k] for k in registro.keys() if k != "IdLlave"}
+        self._marcar_ultimo({"tipo": "eliminar_llave", "valores_previos": valores_previos})
+
+    def _marcar_ultimo(self, movimiento: dict) -> None:
+        self._ultimo = movimiento
+        self.boton_deshacer.setEnabled(True)
+
+    def _deshacer_ultimo(self) -> None:
+        if self._ultimo is None:
+            QMessageBox.warning(self, "Deshacer último movimiento", "No hay ningún movimiento para deshacer.")
+            return
+        respuesta = QMessageBox.question(
+            self, "Deshacer último movimiento",
+            "Esto revierte por completo el último movimiento hecho en este formulario (alta/edición/baja de "
+            "llave, acceso, entrega o devolución), incluido cualquier cargo especial que haya generado. "
+            "¿Confirmás?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+
+        movimiento = self._ultimo
+        tipo = movimiento["tipo"]
+        if tipo == "crear_llave":
+            obtener_repositorio(self.conn, "Llave").eliminar(movimiento["id_llave"])
+        elif tipo == "modificar_llave":
+            obtener_repositorio(self.conn, "Llave").actualizar(movimiento["id_llave"], **movimiento["valores_previos"])
+        elif tipo == "eliminar_llave":
+            obtener_repositorio(self.conn, "Llave").crear(**movimiento["valores_previos"])
+        elif tipo == "agregar_acceso":
+            obtener_repositorio(self.conn, "LlaveAcceso").eliminar(movimiento["id_acceso"])
+        elif tipo == "eliminar_acceso":
+            obtener_repositorio(self.conn, "LlaveAcceso").crear(**movimiento["valores_previos"])
+        elif tipo == "entregar":
+            obtener_repositorio(self.conn, "LlaveProfesional").eliminar(movimiento["id_llave_profesional"])
+            if movimiento["id_cargo_especial"] is not None:
+                obtener_repositorio(self.conn, "CargoEspecial").eliminar(movimiento["id_cargo_especial"])
+        elif tipo == "devolver":
+            obtener_repositorio(self.conn, "LlaveProfesional").actualizar(
+                movimiento["id_llave_profesional"], FechaDevolucion=None, DepositoReintegrado=0,
+                MontoReintegrado=None,
+            )
+            if movimiento["id_cargo_especial"] is not None:
+                obtener_repositorio(self.conn, "CargoEspecial").eliminar(movimiento["id_cargo_especial"])
+
+        self._ultimo = None
+        self.boton_deshacer.setEnabled(False)
+        self.conn.commit()
+        self.actualizar()
+        self.crud_llaves.boton_nuevo.setFocus()
 
 
 class _DialogoEntrega(QDialog):
@@ -240,8 +411,8 @@ class _DialogoEntrega(QDialog):
         layout = QFormLayout(self)
 
         self.combo_profesional = QComboBox()
-        for f in conn.execute("SELECT IdProfesional, Apellido, NombrePila FROM Profesional ORDER BY Apellido"):
-            self.combo_profesional.addItem(f"{f['Apellido']}, {f['NombrePila'] or ''}".strip(", "), f["IdProfesional"])
+        for id_, etiqueta in _opciones_profesional(conn, _CATEGORIAS_TODAS):
+            self.combo_profesional.addItem(etiqueta, id_)
         layout.addRow("Profesional", self.combo_profesional)
 
         self.casilla_deposito = QCheckBox("Cobrar depósito")
@@ -254,6 +425,17 @@ class _DialogoEntrega(QDialog):
         botones.accepted.connect(self.accept)
         botones.rejected.connect(self.reject)
         layout.addRow(botones)
+
+        boton_ok = botones.button(QDialogButtonBox.StandardButton.Ok)
+        boton_cancelar = botones.button(QDialogButtonBox.StandardButton.Cancel)
+        self._foco = instalar_enter_avanza_foco(
+            [self.combo_profesional, self.casilla_deposito, self.spin_monto, boton_ok, boton_cancelar],
+            parent=self,
+        )
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.combo_profesional.setFocus()
 
     def valores(self) -> dict:
         return {
@@ -288,6 +470,17 @@ class _DialogoAcceso(QDialog):
         botones.accepted.connect(self.accept)
         botones.rejected.connect(self.reject)
         layout.addRow(botones)
+
+        boton_ok = botones.button(QDialogButtonBox.StandardButton.Ok)
+        boton_cancelar = botones.button(QDialogButtonBox.StandardButton.Cancel)
+        self._foco = instalar_enter_avanza_foco(
+            [self.combo_edificio, self.combo_unidad, self.campo_descripcion, boton_ok, boton_cancelar],
+            parent=self,
+        )
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.combo_edificio.setFocus()
 
     def _cargar_unidades(self) -> None:
         self.combo_unidad.clear()
@@ -326,6 +519,16 @@ class _DialogoDevolucion(QDialog):
         botones.accepted.connect(self.accept)
         botones.rejected.connect(self.reject)
         layout.addRow(botones)
+
+        boton_ok = botones.button(QDialogButtonBox.StandardButton.Ok)
+        boton_cancelar = botones.button(QDialogButtonBox.StandardButton.Cancel)
+        self._foco = instalar_enter_avanza_foco(
+            [self.casilla_reintegro, self.spin_monto, boton_ok, boton_cancelar], parent=self,
+        )
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.casilla_reintegro.setFocus()
 
     def valores(self) -> dict:
         return {

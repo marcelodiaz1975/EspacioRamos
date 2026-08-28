@@ -45,13 +45,26 @@ class _EnterAvanzaFoco(QObject):
                 return
 
 
-def instalar_enter_avanza_foco(orden: list[QWidget]) -> QObject:
+def instalar_enter_avanza_foco(orden: list[QWidget], parent: QObject | None = None) -> QObject:
     """Instala el filtro de Enter-avanza-foco sobre los widgets de
     `orden`, en ese orden. Quien lo llame tiene que guardar la referencia
     devuelta (ej. `self._foco = instalar_enter_avanza_foco(...)`) para que
     no la recolecte el garbage collector de Python mientras el panel
-    sigue vivo."""
-    filtro = _EnterAvanzaFoco(orden)
+    sigue vivo.
+
+    `parent` debería ser siempre el panel/diálogo dueño de los widgets de
+    `orden` (normalmente `self`, quien llama): sin un padre Qt, el filtro
+    queda a merced del orden en que el garbage collector de Python decide
+    recolectarlo — en pantallas creadas y destruidas muy seguido (ej. los
+    tests de PantallaCRUD, una instancia nueva por catálogo) eso podía
+    cerrar con Qt llamando a un filtro cuyo lado Python ya se liberó y
+    reventar el proceso entero (segfault, no una excepción atrapable).
+    Parentarlo al panel entero hace que Qt lo destruya en el momento
+    correcto, junto con el resto de su árbol de widgets — parentarlo a
+    uno de los widgets de `orden` en particular no alcanza, porque ese
+    widget puede destruirse antes que los demás que el filtro todavía
+    está observando."""
+    filtro = _EnterAvanzaFoco(orden, parent=parent)
     for widget in orden:
         widget.installEventFilter(filtro)
         if isinstance(widget, QComboBox) and widget.isEditable() and widget.lineEdit() is not None:

@@ -282,7 +282,8 @@ class _PanelVacaciones(QWidget):
         self._actualizar_disponibilidad_crear()
         self._sincronizar_grilla()
         self._foco = instalar_enter_avanza_foco(
-            [self.combo_profesional, self.spin_anio, self.campo_desde, self.campo_hasta, self.boton_crear]
+            [self.combo_profesional, self.spin_anio, self.campo_desde, self.campo_hasta, self.boton_crear],
+            parent=self,
         )
 
     def _profesional_cambio(self) -> None:
@@ -582,7 +583,8 @@ class _PanelLicencias(QWidget):
             [
                 self.combo_profesional, self.combo_tipo, self.spin_porcentaje,
                 self.campo_desde, self.campo_hasta, self.boton_crear,
-            ]
+            ],
+            parent=self,
         )
 
     def _profesional_cambio(self) -> None:
@@ -885,7 +887,8 @@ class _PanelAusencias(QWidget):
         layout_externo.addWidget(scroll)
         self._sincronizar_grilla()
         self._foco = instalar_enter_avanza_foco(
-            [self.combo_profesional, self.combo_motivo, self.campo_desde, self.campo_hasta, boton]
+            [self.combo_profesional, self.combo_motivo, self.campo_desde, self.campo_hasta, boton],
+            parent=self,
         )
 
     def _profesional_cambio(self) -> None:
@@ -1147,7 +1150,8 @@ class _PanelCargosEspeciales(QWidget):
             [
                 self.combo_profesional, self.combo_tipo, self.campo_concepto, self.spin_monto, self.campo_periodo,
                 boton, boton_modificar, boton_eliminar, boton_deshacer,
-            ]
+            ],
+            parent=self,
         )
 
     def _actualizar_color_monto(self) -> None:
