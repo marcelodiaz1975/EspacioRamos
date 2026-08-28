@@ -19,8 +19,10 @@ aprobados."""
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 
 from PySide6.QtCore import QDate
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -42,13 +44,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
+from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import (
     _FECHA_SIN_DATO,
     _FORMATO_FECHA,
     _SpinHorario,
     _fmt_fecha,
     _fmt_horario,
+    _numero_codigo,
     _opciones_profesional,
     _texto_profesional,
 )
@@ -56,7 +59,8 @@ from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
-from app.negocio.dias import DIAS_SEMANA, fecha_actual, periodo_actual
+from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual
+from app.negocio.formato import formatear_moneda
 from app.negocio.licencias import cancelar_licencia, crear_licencia
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
@@ -65,6 +69,7 @@ from app.negocio.vacaciones import cancelar_vacacion, crear_vacacion, cupo_resta
 from app.repositorio.registro import obtener_repositorio
 
 _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
+_ORDEN_CATEGORIA_CARGOS = {"B": 0, "R": 1, "A": 2, "E": 3}
 _ANCHO_COMBO_PROFESIONAL = 220
 _ANCHO_COL_PROFESIONAL = 180
 
@@ -116,6 +121,23 @@ def _linea_divisoria() -> QFrame:
     linea.setFrameShape(QFrame.Shape.HLine)
     linea.setFrameShadow(QFrame.Shadow.Sunken)
     return linea
+
+
+def _fmt_fecha_dia(fecha_iso: str) -> str:
+    """"Lunes 27-08-2026": día de la semana + fecha, para columnas de
+    tablas donde interesa ver de un vistazo qué día se cargó el registro."""
+    dia = fecha_a_dia_semana(date.fromisoformat(fecha_iso))
+    return f"{dia} {_fmt_fecha(fecha_iso)}"
+
+
+def _item_monto(valor: float) -> QTableWidgetItem:
+    """Importes negativos en rojo, positivos en negro (criterio confirmado
+    por la clienta para Cargos especiales; se va a ir extendiendo al resto
+    de las pantallas a medida que las revisemos)."""
+    item = QTableWidgetItem(formatear_moneda(valor))
+    if valor < 0:
+        item.setForeground(QColor(COLOR_ROJO))
+    return item
 
 
 class PantallaRegistroAusencias(QWidget):
@@ -1065,9 +1087,10 @@ class _PanelCargosEspeciales(QWidget):
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
+        self.combo_profesional.currentIndexChanged.connect(self.actualizar)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
@@ -1082,12 +1105,12 @@ class _PanelCargosEspeciales(QWidget):
         form.addWidget(self.campo_concepto)
 
         self.spin_monto = QDoubleSpinBox()
-        self.spin_monto.setMaximum(100_000_000)
-        form.addWidget(QLabel("Monto"))
+        self.spin_monto.setRange(-100_000_000, 100_000_000)
+        form.addWidget(QLabel("Monto (Débito positivo, Crédito negativo)"))
         form.addWidget(self.spin_monto)
 
         self.campo_periodo = QLineEdit()
-        self.campo_periodo.setPlaceholderText("AAAA-MM (opcional)")
+        self.campo_periodo.setText(periodo_actual(self.conn))
         form.addWidget(QLabel("Período imputado"))
         form.addWidget(self.campo_periodo)
 
@@ -1095,6 +1118,12 @@ class _PanelCargosEspeciales(QWidget):
         boton.setObjectName("botonPrimario")
         boton.clicked.connect(self._crear)
         form.addWidget(boton)
+        boton_modificar = QPushButton("Modificar cargo especial")
+        boton_modificar.clicked.connect(self._modificar_seleccionada)
+        form.addWidget(boton_modificar)
+        boton_eliminar = QPushButton("Eliminar cargo especial")
+        boton_eliminar.clicked.connect(self._eliminar)
+        form.addWidget(boton_eliminar)
         boton_deshacer = QPushButton("Deshacer último movimiento")
         boton_deshacer.clicked.connect(self._deshacer_ultimo)
         form.addWidget(boton_deshacer)
@@ -1102,8 +1131,8 @@ class _PanelCargosEspeciales(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(5)
-        self.tabla.setHorizontalHeaderLabels(["Profesional", "Tipo", "Concepto", "Monto", "Período"])
+        self.tabla.setColumnCount(6)
+        self.tabla.setHorizontalHeaderLabels(["Fecha", "Profesional", "Tipo", "Concepto", "Monto", "Período"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -1116,34 +1145,51 @@ class _PanelCargosEspeciales(QWidget):
         )
 
     def actualizar(self) -> None:
+        """Sin profesional elegido, muestra los cargos especiales de todos
+        los profesionales; con uno elegido, se acota a los suyos. Orden
+        por defecto: fecha de carga (lo más nuevo arriba), categoría del
+        profesional (B, R, A, E — orden fijo específico de esta pantalla,
+        no el mismo que usa Reservas regulares) y número de profesional."""
+        id_profesional_filtro = self.combo_profesional.currentData()
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
-        registros = obtener_repositorio(self.conn, "CargoEspecial").listar()
+        todos = obtener_repositorio(self.conn, "CargoEspecial").listar()
+        if id_profesional_filtro is not None:
+            registros = [r for r in todos if r["IdProfesional"] == id_profesional_filtro]
+        else:
+            registros = todos
+
         filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
             (r, repo_profesional.obtener(r["IdProfesional"])) for r in registros
         ]
-        filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else "", t[0]["IdCargo"]))
+        filas.sort(key=lambda t: (
+            _ORDEN_CATEGORIA_CARGOS.get(t[1]["CategoriaProfesional"], 99) if t[1] else 99,
+            _numero_codigo(t[1]["IdCodigo"] if t[1] else None),
+        ))
+        filas.sort(key=lambda t: t[0]["Fecha"] or "", reverse=True)  # más nuevo arriba, estable sobre lo anterior
         if self._orden.columna is not None:
             filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._registros = [t[0] for t in filas]
 
         self.tabla.setRowCount(len(filas))
         for i, (r, profesional) in enumerate(filas):
-            self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            self.tabla.setItem(i, 1, QTableWidgetItem(r["Tipo"]))
-            self.tabla.setItem(i, 2, QTableWidgetItem(r["Concepto"]))
-            self.tabla.setItem(i, 3, QTableWidgetItem(f"$ {r['Monto']:,.2f}"))
-            self.tabla.setItem(i, 4, QTableWidgetItem(r["PeriodoImputado"] or ""))
+            self.tabla.setItem(i, 0, QTableWidgetItem(_fmt_fecha_dia(r["Fecha"]) if r["Fecha"] else ""))
+            self.tabla.setItem(i, 1, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
+            self.tabla.setItem(i, 2, QTableWidgetItem(r["Tipo"]))
+            self.tabla.setItem(i, 3, QTableWidgetItem(r["Concepto"]))
+            self.tabla.setItem(i, 4, _item_monto(r["Monto"]))
+            self.tabla.setItem(i, 5, QTableWidgetItem(r["PeriodoImputado"] or ""))
         self.tabla.resizeColumnsToContents()
-        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+        self.tabla.setColumnWidth(1, max(self.tabla.columnWidth(1), _ANCHO_COL_PROFESIONAL))
 
     @staticmethod
     def _clave_orden(columna: int):
         claves = {
-            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
-            1: lambda t: t[0]["Tipo"],
-            2: lambda t: t[0]["Concepto"],
-            3: lambda t: t[0]["Monto"],
-            4: lambda t: t[0]["PeriodoImputado"] or "",
+            0: lambda t: t[0]["Fecha"] or "",
+            1: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            2: lambda t: t[0]["Tipo"],
+            3: lambda t: t[0]["Concepto"],
+            4: lambda t: t[0]["Monto"],
+            5: lambda t: t[0]["PeriodoImputado"] or "",
         }
         return claves[columna]
 
@@ -1156,14 +1202,11 @@ class _PanelCargosEspeciales(QWidget):
         if not concepto:
             QMessageBox.warning(self, "Crear cargo especial", "El concepto es obligatorio.")
             return
-        periodo_imputado = self.campo_periodo.text().strip() or None
-        if not confirmar_si_periodo_imputado_es_anterior(self, self.conn, periodo_imputado):
-            return
+        periodo_imputado = self.campo_periodo.text().strip()
         try:
             crear_cargo_especial(
                 self.conn, id_profesional=id_profesional, tipo=self.combo_tipo.currentData(),
-                concepto=concepto, monto=self.spin_monto.value(),
-                periodo_imputado=periodo_imputado,
+                concepto=concepto, monto=self.spin_monto.value(), periodo_imputado=periodo_imputado,
             )
         except ValueError as error:
             QMessageBox.warning(self, "Crear cargo especial", str(error))
@@ -1171,23 +1214,78 @@ class _PanelCargosEspeciales(QWidget):
         self.conn.commit()
         self.actualizar()
 
+    def _fila_seleccionada(self) -> sqlite3.Row | None:
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return None
+        return self._registros[filas[0].row()]
+
+    def _bloqueado_por_llave(self, registro: sqlite3.Row, titulo: str) -> bool:
+        """Un cargo especial ligado a una llave (IdLlave) se generó solo
+        desde la pantalla de Llaves al entregarla o devolverla — tocarlo
+        acá (modificarlo, eliminarlo o deshacerlo) desincronizaría la
+        tenencia registrada en LlaveProfesional, así que se bloquea y se
+        indica corregirlo desde la pantalla de Llaves."""
+        if registro["IdLlave"] is None:
+            return False
+        QMessageBox.warning(
+            self, titulo,
+            "Este cargo especial viene de un depósito o reintegro de llave — corregilo desde la pantalla de Llaves.",
+        )
+        return True
+
+    def _eliminar(self) -> None:
+        registro = self._fila_seleccionada()
+        if registro is None:
+            QMessageBox.warning(self, "Eliminar cargo especial", "Elegí una fila de la tabla para eliminar.")
+            return
+        if self._bloqueado_por_llave(registro, "Eliminar cargo especial"):
+            return
+        obtener_repositorio(self.conn, "CargoEspecial").eliminar(registro["IdCargo"])
+        self.conn.commit()
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
+    def _modificar_seleccionada(self) -> None:
+        """No se edita la fila in-place: se elimina la seleccionada y se
+        precarga el formulario con sus datos para dar de alta la versión
+        corregida, como en Vacaciones/Licencias/Ausencias."""
+        registro = self._fila_seleccionada()
+        if registro is None:
+            QMessageBox.warning(self, "Modificar cargo especial", "Elegí una fila de la tabla para modificar.")
+            return
+        if self._bloqueado_por_llave(registro, "Modificar cargo especial"):
+            return
+        obtener_repositorio(self.conn, "CargoEspecial").eliminar(registro["IdCargo"])
+        self.conn.commit()
+        self.actualizar()
+
+        indice_profesional = self.combo_profesional.findData(registro["IdProfesional"])
+        if indice_profesional >= 0:
+            self.combo_profesional.setCurrentIndex(indice_profesional)
+        self.combo_tipo.setCurrentIndex(self.combo_tipo.findData(registro["Tipo"]))
+        self.campo_concepto.setText(registro["Concepto"])
+        self.spin_monto.setValue(registro["Monto"])
+        self.campo_periodo.setText(registro["PeriodoImputado"] or periodo_actual(self.conn))
+
     def _deshacer_ultimo(self) -> None:
-        """Como no hay forma de modificar ni anular un cargo especial ya
-        cargado desde esta pantalla (no se edita ni se borra a mano,
-        alimenta directo la liquidación): "Deshacer" borra el último
-        cargo especial cargado en el sistema (el de mayor IdCargo), sin
-        importar de qué profesional sea."""
+        """Como no hay forma de anular un cargo especial (se elimina
+        directo, sin dejar estado): "Deshacer" borra el último cargo
+        especial cargado en el sistema (el de mayor IdCargo), sin importar
+        de qué profesional sea."""
         todos = obtener_repositorio(self.conn, "CargoEspecial").listar()
         if not todos:
             QMessageBox.warning(self, "Deshacer último movimiento", "No hay cargos especiales cargados para deshacer.")
             return
         ultimo = max(todos, key=lambda c: c["IdCargo"])
+        if self._bloqueado_por_llave(ultimo, "Deshacer último movimiento"):
+            return
         profesional = obtener_repositorio(self.conn, "Profesional").obtener(ultimo["IdProfesional"])
         respuesta = QMessageBox.question(
             self, "Deshacer último movimiento",
             "¿Deshacer el último cargo especial cargado en el sistema?\n"
             f"{_texto_profesional(profesional) if profesional else '?'}: "
-            f"{ultimo['Tipo']} - {ultimo['Concepto']} - $ {ultimo['Monto']:,.2f}",
+            f"{ultimo['Tipo']} - {ultimo['Concepto']} - {formatear_moneda(ultimo['Monto'])}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
         )
         if respuesta != QMessageBox.StandardButton.Yes:

@@ -239,7 +239,10 @@ class Liquidacion:
 
     @property
     def total_cargos_especiales(self) -> float:
-        return sum(c["Monto"] if c["Tipo"] == "Débito" else -c["Monto"] for c in self.cargos_especiales)
+        """`Monto` ya viene con el signo que le corresponde al Tipo (Débito
+        positivo, Crédito negativo — validado al crear el cargo), así que
+        alcanza con sumarlo tal cual."""
+        return sum(c["Monto"] for c in self.cargos_especiales)
 
     @property
     def total_cuotas_plan(self) -> float:

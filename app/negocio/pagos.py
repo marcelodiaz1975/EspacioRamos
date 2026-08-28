@@ -56,6 +56,8 @@ def registrar_pago(
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None:
         raise ValueError(f"No existe el profesional #{id_profesional}")
+    if periodo_imputado and periodo_imputado < sumar_meses(periodo_actual(conn), -1):
+        raise ValueError("Un pago no se puede imputar a más de un mes anterior al mes en curso")
 
     es_mes_anterior = bool(periodo_imputado) and periodo_imputado < periodo_actual(conn)
     campo = "SaldoCuentaAnterior" if es_mes_anterior else "SaldoCuentaActual"
@@ -109,6 +111,8 @@ def modificar_pago(
     profesional = repo_prof.obtener(pago["IdProfesional"])
     if profesional is None:
         raise ValueError(f"No existe el profesional #{pago['IdProfesional']}")
+    if periodo_imputado and periodo_imputado < sumar_meses(periodo_actual(conn), -1):
+        raise ValueError("Un pago no se puede imputar a más de un mes anterior al mes en curso")
 
     campo_viejo = _campo_saldo(conn, pago["PeriodoImputado"])
     repo_prof.actualizar(pago["IdProfesional"], **{campo_viejo: (profesional[campo_viejo] or 0.0) - pago["Monto"]})
@@ -223,18 +227,33 @@ def suspender_descuento_periodo(conn: sqlite3.Connection, *, id_profesional: int
 
 def crear_cargo_especial(
     conn: sqlite3.Connection, *, id_profesional: int, tipo: str, concepto: str, monto: float,
-    periodo_imputado: str | None = None, id_llave: int | None = None, id_unidad: int | None = None,
+    periodo_imputado: str, id_llave: int | None = None, id_unidad: int | None = None,
     observacion: str | None = None,
 ) -> int:
+    """A diferencia de Pagos (que sí puede corregir hasta un mes atrás), un
+    cargo especial nunca se imputa a un período ya cerrado — ajustes,
+    bonificaciones y depósitos/reintegros de llave se cargan siempre al mes
+    en curso o a uno posterior, para no tener que reabrir una liquidación
+    ya emitida (confirmado por la clienta). El monto lleva directo el
+    signo que le corresponde al Tipo (Débito positivo, Crédito negativo)
+    — Tipo queda como una validación cruzada de ese signo, no hace falta
+    derivarlo aparte en ningún lado que sume estos montos."""
     if tipo not in TIPOS_CARGO:
         raise ValueError(f"Tipo de cargo inválido: {tipo!r} (debe ser Débito o Crédito)")
-    if monto <= 0:
-        raise ValueError("El monto del cargo especial debe ser positivo")
+    if not periodo_imputado:
+        raise ValueError("El período imputado es obligatorio")
+    if periodo_imputado < periodo_actual(conn):
+        raise ValueError("No se puede imputar un cargo especial a un período anterior al mes en curso")
+    if tipo == "Débito" and monto <= 0:
+        raise ValueError("Un cargo especial Débito debe cargarse con un monto positivo")
+    if tipo == "Crédito" and monto >= 0:
+        raise ValueError("Un cargo especial Crédito debe cargarse con un monto negativo")
 
     repo = obtener_repositorio(conn, "CargoEspecial")
     return repo.crear(
         IdProfesional=id_profesional, Tipo=tipo, Concepto=_capitalizar(concepto), Monto=monto,
-        PeriodoImputado=periodo_imputado, IdLlave=id_llave, IdUnidad=id_unidad, Observacion=observacion,
+        Fecha=fecha_actual(conn).isoformat(), PeriodoImputado=periodo_imputado,
+        IdLlave=id_llave, IdUnidad=id_unidad, Observacion=observacion,
     )
 
 

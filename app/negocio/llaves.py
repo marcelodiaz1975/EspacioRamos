@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from app.negocio.dias import fecha_actual
+from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.pagos import crear_cargo_especial
 from app.repositorio.registro import obtener_repositorio
 
@@ -92,7 +92,7 @@ def entregar_llave(
         crear_cargo_especial(
             conn, id_profesional=id_profesional, tipo="Débito",
             concepto=f"depósito llave {llave['Descripcion'] or id_llave}", monto=monto_cobrado,
-            periodo_imputado=periodo_imputado, id_llave=id_llave,
+            periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=id_llave,
         )
     return id_llave_profesional
 
@@ -121,6 +121,6 @@ def devolver_llave(
         llave = obtener_repositorio(conn, "Llave").obtener(tenencia["IdLlave"])
         crear_cargo_especial(
             conn, id_profesional=tenencia["IdProfesional"], tipo="Crédito",
-            concepto=f"reintegro llave {llave['Descripcion'] or tenencia['IdLlave']}", monto=monto_reintegrado,
-            periodo_imputado=periodo_imputado, id_llave=tenencia["IdLlave"],
+            concepto=f"reintegro llave {llave['Descripcion'] or tenencia['IdLlave']}", monto=-monto_reintegrado,
+            periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=tenencia["IdLlave"],
         )

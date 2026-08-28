@@ -293,6 +293,7 @@ CREATE TABLE IF NOT EXISTS CargoEspecial (
     Tipo TEXT NOT NULL CHECK (Tipo IN ('Débito','Crédito')),
     Concepto TEXT NOT NULL,
     Monto REAL NOT NULL,
+    Fecha TEXT,
     PeriodoImputado TEXT,
     IdLlave INTEGER REFERENCES Llave(IdLlave),
     IdUnidad INTEGER REFERENCES Unidad(IdUnidad),

@@ -169,9 +169,11 @@ def test_registrar_pago_periodo_imputado_mes_anterior_pide_confirmacion(qtbot, c
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 1
 
 
-def test_registrar_pago_mes_anterior_regenera_liquidacion_enviada(qtbot, conn, monkeypatch):
-    """DC-08 §5.4: un pago imputado al mes anterior tiene que regenerar
-    sola la liquidación remanente de ESE período si ya estaba Enviada."""
+def test_registrar_pago_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbot, conn, monkeypatch):
+    """La liquidación del mes anterior ya emitida no se reabre — el pago
+    corrige el saldo anterior, y es la liquidación del mes EN CURSO la que
+    arrastra ese saldo corregido y se regenera/marca como no enviada
+    (confirmado por la clienta: no se corrigen liquidaciones ya emitidas)."""
     id_profesional = _crear_profesional(conn, saldo=10000)
     conn.execute(
         "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
@@ -190,12 +192,17 @@ def test_registrar_pago_mes_anterior_regenera_liquidacion_enviada(qtbot, conn, m
 
     panel._registrar()
 
-    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+    emisiones_julio = obtener_repositorio(conn, "LiquidacionEmitida").listar(
         IdProfesional=id_profesional, Periodo="2026-07",
     )
-    assert len(emisiones) == 2
-    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
-    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+    assert len(emisiones_julio) == 1  # la de julio no se toca
+    assert emisiones_julio[0]["EstadoEnvio"] == "Enviada"
+
+    emisiones_agosto = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_profesional, Periodo="2026-08",
+    )
+    assert len(emisiones_agosto) == 1
+    assert emisiones_agosto[0]["EstadoEnvio"] == "No enviada"
 
 
 def test_registrar_pago_mes_en_curso_no_regenera_liquidacion_de_mes_anterior(qtbot, conn, monkeypatch):

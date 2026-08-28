@@ -598,7 +598,7 @@ def test_cargos_especiales_suman_con_signo(conn, consultorio):
     )
     crear_cargo_especial(
         conn, id_profesional=id_prof, tipo="Crédito", concepto="ajuste manual",
-        monto=200, periodo_imputado=PERIODO,
+        monto=-200, periodo_imputado=PERIODO,
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
     assert liquidacion.total_cargos_especiales == pytest.approx(300)

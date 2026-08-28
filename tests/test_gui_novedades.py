@@ -1128,10 +1128,13 @@ def test_crear_cargo_especial_persiste(qtbot, conn):
     panel.spin_monto.setValue(1500)
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
-    assert panel.tabla.item(0, 2).text() == "Ajuste manual"
+    assert panel.tabla.item(0, 3).text() == "Ajuste manual"
 
 
-def test_crear_cargo_especial_periodo_mes_anterior_pide_confirmacion(qtbot, conn, monkeypatch):
+def test_crear_cargo_especial_periodo_mes_anterior_se_rechaza(qtbot, conn):
+    """A diferencia de Pagos (que sí puede corregir hasta un mes atrás), un
+    cargo especial nunca se imputa a un período anterior al mes en curso
+    — no hay confirmación posible, se rechaza directo."""
     _preparar(conn)
     conn.execute(
         "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
@@ -1144,11 +1147,10 @@ def test_crear_cargo_especial_periodo_mes_anterior_pide_confirmacion(qtbot, conn
     panel.spin_monto.setValue(1500)
     panel.campo_periodo.setText("2026-07")
 
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 0
 
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel.campo_periodo.setText("2026-08")
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
 
@@ -1185,7 +1187,7 @@ def test_tabla_cargos_especiales_usa_formato_canonico_de_profesional(qtbot, conn
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
     panel._crear()
-    assert panel.tabla.item(0, 0).text() == "R1 - Lic. Virginia Gómez"
+    assert panel.tabla.item(0, 1).text() == "R1 - Lic. Virginia Gómez"
 
 
 def test_panel_cargos_especiales_recibe_foco_en_profesional_al_mostrarse(qtbot, conn):
@@ -1210,12 +1212,12 @@ def test_tabla_cargos_especiales_click_en_columna_ordena_y_alterna_sentido(qtbot
         panel._crear()
     assert panel.tabla.rowCount() == 2
 
-    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # "Concepto" ascendente
-    conceptos_asc = [panel.tabla.item(f, 2).text() for f in range(panel.tabla.rowCount())]
+    panel.tabla.horizontalHeader().sectionClicked.emit(3)  # "Concepto" ascendente
+    conceptos_asc = [panel.tabla.item(f, 3).text() for f in range(panel.tabla.rowCount())]
     assert conceptos_asc == ["Aaa", "Bbb"]
 
-    panel.tabla.horizontalHeader().sectionClicked.emit(2)  # de nuevo -> descendente
-    conceptos_desc = [panel.tabla.item(f, 2).text() for f in range(panel.tabla.rowCount())]
+    panel.tabla.horizontalHeader().sectionClicked.emit(3)  # de nuevo -> descendente
+    conceptos_desc = [panel.tabla.item(f, 3).text() for f in range(panel.tabla.rowCount())]
     assert conceptos_desc == ["Bbb", "Aaa"]
 
 
@@ -1255,4 +1257,166 @@ def test_deshacer_ultimo_movimiento_cargo_especial_cancelado_por_usuario_no_borr
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
     panel._deshacer_ultimo()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
+
+
+def test_combo_profesional_cargos_especiales_filtra_la_tabla(qtbot, conn):
+    from app.negocio.pagos import crear_cargo_especial
+
+    _preparar(conn)
+    id_profesional_1 = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_profesional_2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
+    crear_cargo_especial(
+        conn, id_profesional=id_profesional_1, tipo="Débito", concepto="propio", monto=100,
+        periodo_imputado=periodo_actual(conn),
+    )
+    crear_cargo_especial(
+        conn, id_profesional=id_profesional_2, tipo="Débito", concepto="ajeno", monto=100,
+        periodo_imputado=periodo_actual(conn),
+    )
+    conn.commit()
+
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    assert panel.tabla.rowCount() == 2  # "Todos los profesionales" por defecto
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional_1))
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 3).text() == "Propio"
+
+
+def test_tabla_cargos_especiales_incluye_columna_fecha_con_formato_dia(qtbot, conn):
+    _preparar(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-17' WHERE IdConfiguracion = 1"
+    )
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_concepto.setText("ajuste manual")
+    panel.spin_monto.setValue(1500)
+    panel._crear()
+    assert panel.tabla.horizontalHeaderItem(0).text() == "Fecha"
+    assert panel.tabla.item(0, 0).text() == "Lunes 17-08-2026"
+
+
+def test_tabla_cargos_especiales_monto_con_signo_y_color(qtbot, conn):
+    from app.negocio.pagos import crear_cargo_especial
+
+    from app.gui.estilos import COLOR_ROJO
+
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    crear_cargo_especial(
+        conn, id_profesional=id_profesional, tipo="Débito", concepto="a favor", monto=100,
+        periodo_imputado=periodo_actual(conn),
+    )
+    crear_cargo_especial(
+        conn, id_profesional=id_profesional, tipo="Crédito", concepto="en contra", monto=-50,
+        periodo_imputado=periodo_actual(conn),
+    )
+    conn.commit()
+
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    valores = {panel.tabla.item(f, 3).text(): panel.tabla.item(f, 4) for f in range(panel.tabla.rowCount())}
+    assert "$" in valores["A favor"].text()
+    assert valores["A favor"].foreground().color().name() != COLOR_ROJO.lower()
+    assert valores["En contra"].text().startswith("-")
+    assert valores["En contra"].foreground().color().name() == COLOR_ROJO.lower()
+
+
+def test_tabla_cargos_especiales_orden_por_defecto_fecha_categoria_codigo(qtbot, conn):
+    from app.negocio.pagos import crear_cargo_especial
+
+    _preparar(conn)
+    repo_prof = obtener_repositorio(conn, "Profesional")
+    id_b1 = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    repo_prof.actualizar(id_b1, CategoriaProfesional="B", IdCodigo="B1")
+    id_r2 = repo_prof.crear(CategoriaProfesional="R", Apellido="Otro", IdCodigo="R2")
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-17' WHERE IdConfiguracion = 1"
+    )
+    for id_prof in (id_b1, id_r2):
+        crear_cargo_especial(
+            conn, id_profesional=id_prof, tipo="Débito", concepto="x", monto=100,
+            periodo_imputado=periodo_actual(conn),
+        )
+    conn.commit()
+
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    # mismo día -> desempata por categoría (B antes que R)
+    codigos = [panel.tabla.item(f, 1).text().split(" - ")[0] for f in range(panel.tabla.rowCount())]
+    assert codigos == ["B1", "R2"]
+
+
+def test_cargo_ligado_a_llave_bloquea_modificar_eliminar_y_deshacer(qtbot, conn, monkeypatch):
+    from app.negocio.llaves import crear_llave, entregar_llave
+
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_llave = crear_llave(conn, valor_deposito_actual=5000)
+    entregar_llave(conn, id_llave=id_llave, id_profesional=id_profesional, cobrar_deposito=True)
+    conn.commit()
+
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    assert panel.tabla.rowCount() == 1  # se ve en la tabla...
+
+    panel.tabla.selectRow(0)
+    panel._eliminar()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1  # ...pero no se puede tocar
+
+    panel._modificar_seleccionada()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel._deshacer_ultimo()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
+
+
+def test_eliminar_cargo_especial_sin_llave_lo_borra(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_concepto.setText("ajuste manual")
+    panel.spin_monto.setValue(1500)
+    panel._crear()
+
+    panel.tabla.selectRow(0)
+    panel._eliminar()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 0
+
+
+def test_modificar_cargo_especial_sin_llave_lo_precarga_para_recrear(qtbot, conn):
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.combo_tipo.setCurrentIndex(panel.combo_tipo.findData("Crédito"))
+    panel.campo_concepto.setText("bonificación")
+    panel.spin_monto.setValue(-300)
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
+
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 0  # se borró la vieja
+
+    assert panel.combo_profesional.currentData() == id_profesional
+    assert panel.combo_tipo.currentData() == "Crédito"
+    assert panel.campo_concepto.text() == "Bonificación"
+    assert panel.spin_monto.value() == -300
+
+    panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1

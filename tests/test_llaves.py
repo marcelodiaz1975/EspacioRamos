@@ -90,7 +90,7 @@ def test_devolver_llave_con_reintegro_genera_cargo_especial_credito(conn, profes
     assert len(cargos) == 2
     credito, debito = sorted(cargos, key=lambda c: c["Tipo"])
     assert credito["Tipo"] == "Crédito"
-    assert credito["Monto"] == pytest.approx(5000)
+    assert credito["Monto"] == pytest.approx(-5000)
     assert debito["Tipo"] == "Débito"
 
     tenencia = obtener_repositorio(conn, "LlaveProfesional").obtener(id_entrega)

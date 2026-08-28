@@ -319,7 +319,7 @@ def test_detalle_aislada_reintegro_de_llave_se_muestra_negativo(conn, profesiona
 def test_detalle_aislada_item_libre_debito_y_credito(conn, profesional_aislada_con_edificios):
     id_prof, _, _, _, _ = profesional_aislada_con_edificios
     crear_cargo_especial(conn, id_profesional=id_prof, tipo="Débito", concepto="ajuste manual", monto=200, periodo_imputado="2026-08")
-    crear_cargo_especial(conn, id_profesional=id_prof, tipo="Crédito", concepto="bonificación", monto=100, periodo_imputado="2026-08")
+    crear_cargo_especial(conn, id_profesional=id_prof, tipo="Crédito", concepto="bonificación", monto=-100, periodo_imputado="2026-08")
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
     assert "+ Ajuste manual $200" in texto
     assert "- Bonificación $100" in texto

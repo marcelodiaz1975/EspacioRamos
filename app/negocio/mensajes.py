@@ -540,9 +540,9 @@ def mensaje_detalle_reserva_aislada(
     ]
     total_item_libre = 0.0
     for c in items_libres:
-        signo = "+" if c["Tipo"] == "Débito" else "-"
+        signo = "+" if c["Monto"] >= 0 else "-"
         lineas.append(f"{signo} {c['Concepto']} {_moneda(abs(c['Monto']))}")
-        total_item_libre += c["Monto"] if c["Tipo"] == "Débito" else -c["Monto"]
+        total_item_libre += c["Monto"]
 
     saldo_a_abonar = saldo_anterior + total_reservas + total_llaves + total_item_libre - total_pagos
     lineas += ["", f"SALDO A ABONAR: {_moneda(saldo_a_abonar)}"]

@@ -390,7 +390,11 @@ class _PanelRegistrarPago(QWidget):
         if cruza_tolerancia:
             self._preguntar_restablecer_descuento(id_profesional, periodo_imputado)
         if periodo_imputado < periodo_actual(self.conn):
-            regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_imputado)
+            # El pago corrige el saldo anterior, pero no se reabre la liquidación
+            # ya emitida de ese período — lo que hay que regenerar y marcar como
+            # no enviada es la liquidación del mes en curso, que es la que arrastra
+            # ese saldo corregido.
+            regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
         if es_sobre and recogida_sobres:
             obtener_repositorio(self.conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres=recogida_sobres)
         self.conn.commit()

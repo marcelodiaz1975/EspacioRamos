@@ -322,13 +322,11 @@ def _items_cuenta(
     for c in liquidacion.cargos_especiales:
         if c["IdLlave"] is None:
             continue
-        signo = 1 if c["Tipo"] == "Débito" else -1
-        items.append((c["Concepto"], signo * c["Monto"], False))
+        items.append((c["Concepto"], c["Monto"], False))
     for c in liquidacion.cargos_especiales:
         if c["IdLlave"] is not None:
             continue
-        signo = 1 if c["Tipo"] == "Débito" else -1
-        items.append((c["Concepto"], signo * c["Monto"], False))
+        items.append((c["Concepto"], c["Monto"], False))
     for c in liquidacion.cuotas_plan:
         items.append((f"Cuota {c['NumeroCuota']} del plan de pagos", c["Monto"], False))
     items.append((f"Liquidación a abonar por el profesional en el mes de {mes_actual_texto}", liquidacion.total, True))

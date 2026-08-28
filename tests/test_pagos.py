@@ -2,6 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.negocio.dias import periodo_actual
 from app.negocio.pagos import (
     abrir_tanda_sobres,
     cancelar_plan,
@@ -56,6 +57,14 @@ def test_registrar_pago_imputado_a_mes_anterior_descuenta_saldo_anterior(conn, p
     actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
     assert actualizado["SaldoCuentaAnterior"] == pytest.approx(600)
     assert actualizado["SaldoCuentaActual"] == pytest.approx(1000)  # sin tocar
+
+
+def test_registrar_pago_rechaza_mas_de_un_mes_atras(conn, profesional):
+    """Un pago puede corregir a lo sumo el mes inmediatamente anterior —
+    más atrás que eso obligaría a reabrir más de una liquidación ya
+    cerrada (confirmado por la clienta)."""
+    with pytest.raises(ValueError):
+        registrar_pago(conn, id_profesional=profesional, monto=-400, periodo_imputado="2026-06")
 
 
 def test_registrar_pago_cruza_tolerancia_al_regularizar_mes_anterior(conn, profesional):
@@ -179,19 +188,67 @@ def test_registrar_pago_profesional_inexistente(conn):
 def test_crear_cargo_especial_capitaliza_concepto(conn, profesional):
     id_cargo = crear_cargo_especial(
         conn, id_profesional=profesional, tipo="Débito", concepto="reintegro de llave", monto=500,
+        periodo_imputado=periodo_actual(conn),
     )
     cargo = obtener_repositorio(conn, "CargoEspecial").obtener(id_cargo)
     assert cargo["Concepto"] == "Reintegro de llave"
 
 
+def test_crear_cargo_especial_completa_la_fecha_sola(conn, profesional):
+    id_cargo = crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=100,
+        periodo_imputado=periodo_actual(conn),
+    )
+    cargo = obtener_repositorio(conn, "CargoEspecial").obtener(id_cargo)
+    assert cargo["Fecha"] is not None
+
+
 def test_crear_cargo_especial_rechaza_tipo_invalido(conn, profesional):
     with pytest.raises(ValueError):
-        crear_cargo_especial(conn, id_profesional=profesional, tipo="Otro", concepto="x", monto=100)
+        crear_cargo_especial(
+            conn, id_profesional=profesional, tipo="Otro", concepto="x", monto=100,
+            periodo_imputado=periodo_actual(conn),
+        )
 
 
-def test_crear_cargo_especial_rechaza_monto_no_positivo(conn, profesional):
+def test_crear_cargo_especial_rechaza_periodo_en_blanco(conn, profesional):
     with pytest.raises(ValueError):
-        crear_cargo_especial(conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=0)
+        crear_cargo_especial(conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=100, periodo_imputado="")
+
+
+def test_crear_cargo_especial_rechaza_periodo_anterior(conn, profesional):
+    with pytest.raises(ValueError):
+        crear_cargo_especial(
+            conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=100,
+            periodo_imputado="2000-01",
+        )
+
+
+def test_crear_cargo_especial_debito_rechaza_monto_no_positivo(conn, profesional):
+    with pytest.raises(ValueError):
+        crear_cargo_especial(
+            conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=0,
+            periodo_imputado=periodo_actual(conn),
+        )
+
+
+def test_crear_cargo_especial_credito_rechaza_monto_positivo(conn, profesional):
+    """El monto de un Crédito tiene que cargarse en negativo — Tipo queda
+    como una validación cruzada de ese signo (confirmado por la clienta)."""
+    with pytest.raises(ValueError):
+        crear_cargo_especial(
+            conn, id_profesional=profesional, tipo="Crédito", concepto="x", monto=100,
+            periodo_imputado=periodo_actual(conn),
+        )
+
+
+def test_crear_cargo_especial_credito_acepta_monto_negativo(conn, profesional):
+    id_cargo = crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Crédito", concepto="x", monto=-100,
+        periodo_imputado=periodo_actual(conn),
+    )
+    cargo = obtener_repositorio(conn, "CargoEspecial").obtener(id_cargo)
+    assert cargo["Monto"] == -100
 
 
 def test_crear_plan_pago_sin_interes_genera_cuotas_iguales(conn, profesional):

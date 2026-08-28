@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.negocio.formato import formatear_moneda
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -136,7 +137,7 @@ class PantallaEstadoCuenta(QWidget):
         for i, r in enumerate(registros):
             self.tabla_cargos.setItem(i, 0, QTableWidgetItem(r["Tipo"]))
             self.tabla_cargos.setItem(i, 1, QTableWidgetItem(r["Concepto"]))
-            self.tabla_cargos.setItem(i, 2, QTableWidgetItem(f"$ {r['Monto']:,.2f}"))
+            self.tabla_cargos.setItem(i, 2, QTableWidgetItem(formatear_moneda(r["Monto"])))
             self.tabla_cargos.setItem(i, 3, QTableWidgetItem(r["PeriodoImputado"] or ""))
             self.tabla_cargos.setItem(i, 4, QTableWidgetItem(r["Observacion"] or ""))
         self.tabla_cargos.resizeColumnsToContents()
