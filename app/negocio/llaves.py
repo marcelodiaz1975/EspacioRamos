@@ -1,14 +1,25 @@
-"""Llaves (sección 3.7 del documento).
+"""Llaves (sección 3.7 del documento, modelo aclarado en conversación con la
+clienta).
 
-Un titular por llave a la vez — no se puede entregar una llave que ya
-tiene un titular sin devolución registrada (FechaDevolucion IS NULL). Alta
-de la llave posible en el momento mismo de la entrega, sin stock previo
-cargado.
+Llave es el TIPO de llave (el patrón/combinación): define Tipo
+(Edificio/Unidad/No especificada), a qué edificio(s)/unidad(es) abre
+(LlaveAcceso) y su propio valor de depósito. Nunca se entrega directamente.
+Las de Tipo Edificio nunca se repiten (un tipo = un edificio, sin compartir
+con otro). Las de Tipo Unidad sí pueden repetirse entre sí — el mismo tipo
+puede dar acceso a más de una unidad (incluso de edificios distintos) si se
+preparó una cerradura gemela.
+
+De cada tipo se sacan copias físicas (LlaveCopia) y esas son las que
+circulan de verdad: se entregan y se devuelven (LlaveProfesional cuelga de
+la copia, no del tipo), porque puede haber varias copias del mismo tipo
+repartidas a distintos profesionales a la vez — un titular por COPIA a la
+vez, no por tipo.
 
 El depósito cobrado y el reintegro se reflejan en la liquidación del
-profesional como CargoEspecial (Débito/Crédito) ligado a IdLlave — es el
-mismo mecanismo genérico de la sección 3.15 (ya usado en Etapa 4), no hace
-falta un camino de facturación aparte para las llaves.
+profesional como CargoEspecial (Débito/Crédito) ligado a IdLlave (el tipo,
+no la copia puntual — el valor de depósito es una propiedad del tipo) — es
+el mismo mecanismo genérico de la sección 3.15 (ya usado en Etapa 4), no
+hace falta un camino de facturación aparte para las llaves.
 """
 from __future__ import annotations
 
@@ -56,34 +67,51 @@ def agregar_acceso_llave(
     )
 
 
-def _titular_actual(conn: sqlite3.Connection, id_llave: int) -> sqlite3.Row | None:
+def crear_copia_llave(conn: sqlite3.Connection, *, id_llave: int, identificador: str | None = None) -> int:
+    """Da de alta una copia física nueva de un tipo de llave ya existente.
+    Si no se da un identificador, se sugiere uno correlativo ("Copia N")
+    según cuántas copias tiene ya ese tipo — el operador lo puede
+    reemplazar por el que use físicamente (número de llavero, etc.)."""
+    llave = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    if llave is None:
+        raise ValueError(f"No existe la llave #{id_llave}")
+    if identificador is None:
+        cantidad = len(obtener_repositorio(conn, "LlaveCopia").listar(IdLlave=id_llave))
+        identificador = f"Copia {cantidad + 1}"
+    return obtener_repositorio(conn, "LlaveCopia").crear(IdLlave=id_llave, Identificador=identificador, Activo=1)
+
+
+def _titular_actual(conn: sqlite3.Connection, id_copia: int) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT * FROM LlaveProfesional WHERE IdLlave = ? AND FechaDevolucion IS NULL", (id_llave,)
+        "SELECT * FROM LlaveProfesional WHERE IdLlaveCopia = ? AND FechaDevolucion IS NULL", (id_copia,)
     ).fetchone()
 
 
 def entregar_llave(
-    conn: sqlite3.Connection, *, id_llave: int, id_profesional: int, fecha_entrega: str | None = None,
+    conn: sqlite3.Connection, *, id_copia: int, id_profesional: int, fecha_entrega: str | None = None,
     cobrar_deposito: bool = False, monto_cobrado: float | None = None,
     periodo_imputado: str | None = None, observacion: str | None = None,
 ) -> int:
-    titular = _titular_actual(conn, id_llave)
+    titular = _titular_actual(conn, id_copia)
     if titular is not None:
         raise ValueError(
-            f"La llave #{id_llave} ya tiene un titular (profesional #{titular['IdProfesional']}); "
+            f"La copia #{id_copia} ya tiene un titular (profesional #{titular['IdProfesional']}); "
             "hay que registrar la devolución antes de entregarla a otro profesional"
         )
 
-    llave = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    copia = obtener_repositorio(conn, "LlaveCopia").obtener(id_copia)
+    if copia is None:
+        raise ValueError(f"No existe la copia #{id_copia}")
+    llave = obtener_repositorio(conn, "Llave").obtener(copia["IdLlave"])
     if llave is None:
-        raise ValueError(f"No existe la llave #{id_llave}")
+        raise ValueError(f"No existe la llave #{copia['IdLlave']}")
 
     if cobrar_deposito and monto_cobrado is None:
         monto_cobrado = llave["ValorDepositoActual"]
 
     repo = obtener_repositorio(conn, "LlaveProfesional")
     id_llave_profesional = repo.crear(
-        IdLlave=id_llave, IdProfesional=id_profesional,
+        IdLlaveCopia=id_copia, IdProfesional=id_profesional,
         FechaEntrega=fecha_entrega or fecha_actual(conn).isoformat(),
         DepositoCobrado=int(cobrar_deposito), MontoCobrado=monto_cobrado, Observacion=observacion,
     )
@@ -91,8 +119,8 @@ def entregar_llave(
     if cobrar_deposito and monto_cobrado:
         crear_cargo_especial(
             conn, id_profesional=id_profesional, tipo="Débito",
-            concepto=f"depósito llave {llave['Descripcion'] or id_llave}", monto=monto_cobrado,
-            periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=id_llave,
+            concepto=f"depósito llave {llave['Descripcion'] or llave['IdLlave']}", monto=monto_cobrado,
+            periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=llave["IdLlave"],
         )
     return id_llave_profesional
 
@@ -118,9 +146,10 @@ def devolver_llave(
     )
 
     if reintegrar_deposito and monto_reintegrado:
-        llave = obtener_repositorio(conn, "Llave").obtener(tenencia["IdLlave"])
+        copia = obtener_repositorio(conn, "LlaveCopia").obtener(tenencia["IdLlaveCopia"])
+        llave = obtener_repositorio(conn, "Llave").obtener(copia["IdLlave"])
         crear_cargo_especial(
             conn, id_profesional=tenencia["IdProfesional"], tipo="Crédito",
-            concepto=f"reintegro llave {llave['Descripcion'] or tenencia['IdLlave']}", monto=-monto_reintegrado,
-            periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=tenencia["IdLlave"],
+            concepto=f"reintegro llave {llave['Descripcion'] or llave['IdLlave']}", monto=-monto_reintegrado,
+            periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=llave["IdLlave"],
         )

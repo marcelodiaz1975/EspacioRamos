@@ -303,7 +303,8 @@ def _edificios_de_llaves_activas(conn: sqlite3.Connection, id_profesional: int) 
         """
         SELECT DISTINCT la.IdEdificio
         FROM LlaveProfesional lp
-        JOIN LlaveAcceso la ON la.IdLlave = lp.IdLlave
+        JOIN LlaveCopia lc ON lc.IdLlaveCopia = lp.IdLlaveCopia
+        JOIN LlaveAcceso la ON la.IdLlave = lc.IdLlave
         WHERE lp.IdProfesional = ? AND lp.FechaDevolucion IS NULL
         """,
         (id_profesional,),
@@ -483,7 +484,8 @@ def mensaje_detalle_reserva_aislada(
         """
         SELECT lp.*, l.Tipo AS TipoLlave, u.Departamento, e.Nombre AS NombreEdificio
         FROM LlaveProfesional lp
-        JOIN Llave l ON l.IdLlave = lp.IdLlave
+        JOIN LlaveCopia lc ON lc.IdLlaveCopia = lp.IdLlaveCopia
+        JOIN Llave l ON l.IdLlave = lc.IdLlave
         LEFT JOIN LlaveAcceso la ON la.IdLlaveAcceso = (
             SELECT MIN(IdLlaveAcceso) FROM LlaveAcceso WHERE IdLlave = l.IdLlave
         )

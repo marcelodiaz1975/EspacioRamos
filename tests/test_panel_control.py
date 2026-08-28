@@ -58,8 +58,9 @@ def test_alerta_fechas_especiales_proximas_respeta_ventana(conn):
 def test_alerta_categoria_x_con_llaves_pendientes(conn):
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="X", Apellido="Inactivo")
     id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave")
+    id_copia = obtener_repositorio(conn, "LlaveCopia").crear(IdLlave=id_llave, Identificador="Copia 1")
     obtener_repositorio(conn, "LlaveProfesional").crear(
-        IdLlave=id_llave, IdProfesional=id_prof, FechaEntrega="2026-01-01",
+        IdLlaveCopia=id_copia, IdProfesional=id_prof, FechaEntrega="2026-01-01",
     )
     alertas = calcular_alertas(conn)
     assert len(alertas.categoria_x_con_llaves_pendientes) == 1

@@ -2,7 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.llaves import agregar_acceso_llave, crear_llave, devolver_llave, entregar_llave
+from app.negocio.llaves import agregar_acceso_llave, crear_copia_llave, crear_llave, devolver_llave, entregar_llave
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -28,9 +28,33 @@ def edificios(conn):
     )
 
 
+def test_crear_copia_llave_sugiere_identificador_correlativo(conn):
+    id_llave = crear_llave(conn, descripcion="Llave edificio")
+    id_copia_1 = crear_copia_llave(conn, id_llave=id_llave)
+    id_copia_2 = crear_copia_llave(conn, id_llave=id_llave)
+
+    copia_1 = obtener_repositorio(conn, "LlaveCopia").obtener(id_copia_1)
+    copia_2 = obtener_repositorio(conn, "LlaveCopia").obtener(id_copia_2)
+    assert copia_1["Identificador"] == "Copia 1"
+    assert copia_2["Identificador"] == "Copia 2"
+
+
+def test_crear_copia_llave_admite_identificador_propio(conn):
+    id_llave = crear_llave(conn)
+    id_copia = crear_copia_llave(conn, id_llave=id_llave, identificador="Llavero rojo")
+    copia = obtener_repositorio(conn, "LlaveCopia").obtener(id_copia)
+    assert copia["Identificador"] == "Llavero rojo"
+
+
+def test_crear_copia_llave_de_tipo_inexistente_rechaza(conn):
+    with pytest.raises(ValueError):
+        crear_copia_llave(conn, id_llave=999)
+
+
 def test_entregar_llave_sin_deposito(conn, profesional):
     id_llave = crear_llave(conn, descripcion="Llave unidad 7mo L", tipo="Unidad")
-    id_entrega = entregar_llave(conn, id_llave=id_llave, id_profesional=profesional, fecha_entrega="2026-08-01")
+    id_copia = crear_copia_llave(conn, id_llave=id_llave)
+    id_entrega = entregar_llave(conn, id_copia=id_copia, id_profesional=profesional, fecha_entrega="2026-08-01")
 
     tenencia = obtener_repositorio(conn, "LlaveProfesional").obtener(id_entrega)
     assert tenencia["FechaEntrega"] == "2026-08-01"
@@ -40,8 +64,9 @@ def test_entregar_llave_sin_deposito(conn, profesional):
 
 def test_entregar_llave_con_deposito_genera_cargo_especial(conn, profesional):
     id_llave = crear_llave(conn, descripcion="Llave edificio", tipo="Edificio", valor_deposito_actual=5000)
+    id_copia = crear_copia_llave(conn, id_llave=id_llave)
     entregar_llave(
-        conn, id_llave=id_llave, id_profesional=profesional, cobrar_deposito=True, periodo_imputado="2026-08",
+        conn, id_copia=id_copia, id_profesional=profesional, cobrar_deposito=True, periodo_imputado="2026-08",
     )
 
     cargos = obtener_repositorio(conn, "CargoEspecial").listar(IdProfesional=profesional)
@@ -53,34 +78,61 @@ def test_entregar_llave_con_deposito_genera_cargo_especial(conn, profesional):
 
 def test_entregar_llave_con_deposito_manual_distinto_al_default(conn, profesional):
     id_llave = crear_llave(conn, valor_deposito_actual=5000)
-    entregar_llave(conn, id_llave=id_llave, id_profesional=profesional, cobrar_deposito=True, monto_cobrado=3000)
+    id_copia = crear_copia_llave(conn, id_llave=id_llave)
+    entregar_llave(conn, id_copia=id_copia, id_profesional=profesional, cobrar_deposito=True, monto_cobrado=3000)
 
     cargos = obtener_repositorio(conn, "CargoEspecial").listar(IdProfesional=profesional)
     assert cargos[0]["Monto"] == pytest.approx(3000)
 
 
-def test_no_se_puede_entregar_llave_con_titular_activo(conn, profesional):
+def test_no_se_puede_entregar_la_misma_copia_con_titular_activo(conn, profesional):
     id_llave = crear_llave(conn)
+    id_copia = crear_copia_llave(conn, id_llave=id_llave)
     otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gomez")
-    entregar_llave(conn, id_llave=id_llave, id_profesional=profesional)
+    entregar_llave(conn, id_copia=id_copia, id_profesional=profesional)
 
     with pytest.raises(ValueError):
-        entregar_llave(conn, id_llave=id_llave, id_profesional=otro_profesional)
+        entregar_llave(conn, id_copia=id_copia, id_profesional=otro_profesional)
 
 
-def test_se_puede_reentregar_llave_luego_de_devuelta(conn, profesional):
-    id_llave = crear_llave(conn)
+def test_dos_copias_del_mismo_tipo_pueden_estar_entregadas_a_la_vez(conn, profesional):
+    """El motivo entero de separar tipo de llave y copia física: la
+    clienta reparte varias copias del mismo tipo (ej. la llave que abre
+    un edificio entero) entre distintos profesionales al mismo tiempo."""
+    id_llave = crear_llave(conn, descripcion="Llave edificio", tipo="Edificio")
+    id_copia_1 = crear_copia_llave(conn, id_llave=id_llave)
+    id_copia_2 = crear_copia_llave(conn, id_llave=id_llave)
     otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gomez")
-    id_entrega = entregar_llave(conn, id_llave=id_llave, id_profesional=profesional)
+
+    entregar_llave(conn, id_copia=id_copia_1, id_profesional=profesional)
+    id_entrega_2 = entregar_llave(conn, id_copia=id_copia_2, id_profesional=otro_profesional)
+
+    assert id_entrega_2 is not None
+    tenencias = obtener_repositorio(conn, "LlaveProfesional").listar()
+    assert len(tenencias) == 2
+    assert {t["IdProfesional"] for t in tenencias} == {profesional, otro_profesional}
+
+
+def test_se_puede_reentregar_copia_luego_de_devuelta(conn, profesional):
+    id_llave = crear_llave(conn)
+    id_copia = crear_copia_llave(conn, id_llave=id_llave)
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gomez")
+    id_entrega = entregar_llave(conn, id_copia=id_copia, id_profesional=profesional)
     devolver_llave(conn, id_entrega, fecha_devolucion="2026-08-10")
 
-    id_entrega_2 = entregar_llave(conn, id_llave=id_llave, id_profesional=otro_profesional)
+    id_entrega_2 = entregar_llave(conn, id_copia=id_copia, id_profesional=otro_profesional)
     assert id_entrega_2 is not None
+
+
+def test_entregar_copia_inexistente_rechaza(conn, profesional):
+    with pytest.raises(ValueError):
+        entregar_llave(conn, id_copia=999, id_profesional=profesional)
 
 
 def test_devolver_llave_con_reintegro_genera_cargo_especial_credito(conn, profesional):
     id_llave = crear_llave(conn, valor_deposito_actual=5000)
-    id_entrega = entregar_llave(conn, id_llave=id_llave, id_profesional=profesional, cobrar_deposito=True)
+    id_copia = crear_copia_llave(conn, id_llave=id_llave)
+    id_entrega = entregar_llave(conn, id_copia=id_copia, id_profesional=profesional, cobrar_deposito=True)
 
     devolver_llave(
         conn, id_entrega, fecha_devolucion="2026-08-15", reintegrar_deposito=True, periodo_imputado="2026-08",
@@ -100,7 +152,8 @@ def test_devolver_llave_con_reintegro_genera_cargo_especial_credito(conn, profes
 
 def test_devolver_llave_sin_reintegro_no_genera_cargo(conn, profesional):
     id_llave = crear_llave(conn)
-    id_entrega = entregar_llave(conn, id_llave=id_llave, id_profesional=profesional)
+    id_copia = crear_copia_llave(conn, id_llave=id_llave)
+    id_entrega = entregar_llave(conn, id_copia=id_copia, id_profesional=profesional)
     devolver_llave(conn, id_entrega, fecha_devolucion="2026-08-15")
 
     assert obtener_repositorio(conn, "CargoEspecial").listar() == []
@@ -108,7 +161,8 @@ def test_devolver_llave_sin_reintegro_no_genera_cargo(conn, profesional):
 
 def test_devolver_llave_ya_devuelta_falla(conn, profesional):
     id_llave = crear_llave(conn)
-    id_entrega = entregar_llave(conn, id_llave=id_llave, id_profesional=profesional)
+    id_copia = crear_copia_llave(conn, id_llave=id_llave)
+    id_entrega = entregar_llave(conn, id_copia=id_copia, id_profesional=profesional)
     devolver_llave(conn, id_entrega, fecha_devolucion="2026-08-15")
 
     with pytest.raises(ValueError):

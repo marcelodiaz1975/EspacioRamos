@@ -15,6 +15,7 @@ TABLAS = [
     "HistorialPagos",
     "Llave",
     "LlaveAcceso",
+    "LlaveCopia",
     "LlaveProfesional",
     "Placa",
     "ReservaRegular",

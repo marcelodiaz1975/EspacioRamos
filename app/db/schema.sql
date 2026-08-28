@@ -152,7 +152,14 @@ CREATE TABLE IF NOT EXISTS HistorialPagos (
     RegistroModificado INTEGER NOT NULL DEFAULT 0
 );
 
--- 3.7 Llave / LlaveAcceso / LlaveProfesional -----------------------------------
+-- 3.7 Llave / LlaveAcceso / LlaveCopia / LlaveProfesional -----------------------
+-- Llave es el TIPO de llave (el patrón/combinación): define a qué
+-- edificio(s)/unidad(es) abre (LlaveAcceso) y su valor de depósito. Nunca se
+-- entrega directamente. De cada tipo se sacan copias físicas (LlaveCopia) —
+-- esas son las que de verdad circulan, se entregan y se devuelven
+-- (LlaveProfesional ahora cuelga de la copia, no del tipo), porque puede
+-- haber varias copias del mismo tipo repartidas a distintos profesionales a
+-- la vez (aclarado en conversación con la clienta).
 CREATE TABLE IF NOT EXISTS Llave (
     IdLlave INTEGER PRIMARY KEY AUTOINCREMENT,
     Descripcion TEXT,
@@ -170,9 +177,16 @@ CREATE TABLE IF NOT EXISTS LlaveAcceso (
     DescripcionAcceso TEXT
 );
 
+CREATE TABLE IF NOT EXISTS LlaveCopia (
+    IdLlaveCopia INTEGER PRIMARY KEY AUTOINCREMENT,
+    IdLlave INTEGER NOT NULL REFERENCES Llave(IdLlave),
+    Identificador TEXT,
+    Activo INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS LlaveProfesional (
     IdLlaveProfesional INTEGER PRIMARY KEY AUTOINCREMENT,
-    IdLlave INTEGER NOT NULL REFERENCES Llave(IdLlave),
+    IdLlaveCopia INTEGER NOT NULL REFERENCES LlaveCopia(IdLlaveCopia),
     IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional),
     FechaEntrega TEXT,
     FechaDevolucion TEXT,
