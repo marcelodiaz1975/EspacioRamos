@@ -546,6 +546,7 @@ class _PanelRegistrarPago(QWidget):
         self._regenerar_si_afecta_mes_anterior(deshecho["IdProfesional"], deshecho["PeriodoImputado"])
         self.conn.commit()
         self.actualizar()
+        self._resetear_formulario()
 
     def _iniciar_tanda(self) -> None:
         if tanda_sobres_es_de_otro_dia(self.conn):
@@ -769,6 +770,7 @@ class _PanelPlanesPago(QWidget):
             return
         self.conn.commit()
         self.actualizar()
+        self.combo_profesional.setFocus()
 
     def _cancelar(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -789,3 +791,4 @@ class _PanelPlanesPago(QWidget):
             return
         self.conn.commit()
         self.actualizar()
+        self.combo_profesional.setFocus()

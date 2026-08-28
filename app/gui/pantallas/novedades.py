@@ -1225,6 +1225,7 @@ class _PanelCargosEspeciales(QWidget):
             return
         self.conn.commit()
         self.actualizar()
+        self.combo_profesional.setFocus()
 
     def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -1305,4 +1306,5 @@ class _PanelCargosEspeciales(QWidget):
         obtener_repositorio(self.conn, "CargoEspecial").eliminar(ultimo["IdCargo"])
         self.conn.commit()
         self.actualizar()
+        self.combo_profesional.setFocus()
         self.combo_profesional.setFocus()

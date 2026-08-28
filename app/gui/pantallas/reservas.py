@@ -1276,7 +1276,8 @@ class _PanelReservasAisladas(QWidget):
         reserva = self._fila_seleccionada()
         if reserva is None:
             return
-        self._cancelar_registro(reserva, "Cancelar reserva")
+        if self._cancelar_registro(reserva, "Cancelar reserva"):
+            self.combo_profesional.setFocus()
 
     def _deshacer_ultimo(self) -> None:
         """A diferencia de Vacaciones/Licencias/Ausencias, acá nunca se
