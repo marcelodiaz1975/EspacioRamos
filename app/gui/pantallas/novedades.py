@@ -15,7 +15,10 @@ para esta pestaña en ningún documento del proyecto; si la planilla original
 de la clienta ya le tenía otro número, hay que corregirlo acá. Ausencias
 es F27 — también asignado por nosotros (la clienta confirmó que no hace
 falta que sea correlativo con Vacaciones/Licencias), lógica y diseño ya
-aprobados."""
+aprobados. Cargos especiales es F28 — la clienta confirmó que se mantiene
+como formulario independiente (no se reubica dentro de otra pantalla); F28
+es el siguiente número libre después de F27 (Ausencias), ya que tampoco
+tenía un número confirmado en ningún documento del proyecto."""
 from __future__ import annotations
 
 import sqlite3
