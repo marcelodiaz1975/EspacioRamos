@@ -97,6 +97,9 @@ def test_items_cuenta_saldo_anterior_negativo_dice_a_favor(conn, profesional):
 def test_items_cuenta_agrupa_deposito_llave_antes_del_item_libre(conn, profesional):
     from app.negocio.pagos import crear_cargo_especial
 
+    # fija la fecha ficticia dentro de PERIODO -- crear_cargo_especial no admite
+    # imputar a un período ya transcurrido según el reloj real.
+    conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15'")
     id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave portón", Tipo="Edificio")
     # se cargan a propósito en orden inverso al que deberían quedar en el PDF
     crear_cargo_especial(
