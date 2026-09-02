@@ -97,7 +97,7 @@ def test_items_cuenta_saldo_anterior_negativo_dice_a_favor(conn, profesional):
 def test_items_cuenta_agrupa_deposito_llave_antes_del_item_libre(conn, profesional):
     from app.negocio.pagos import crear_cargo_especial
 
-    id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave portón", Tipo="Edificio")
+    id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave portón", Tipo="Edificio")
     # se cargan a propósito en orden inverso al que deberían quedar en el PDF
     crear_cargo_especial(
         conn, id_profesional=profesional, tipo="Débito", concepto="Bonificación acordada", monto=200,

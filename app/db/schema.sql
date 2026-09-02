@@ -152,20 +152,33 @@ CREATE TABLE IF NOT EXISTS HistorialPagos (
     RegistroModificado INTEGER NOT NULL DEFAULT 0
 );
 
--- 3.7 Llave / LlaveAcceso / LlaveCopia / LlaveProfesional -----------------------
+-- 3.7 Llave / LlaveAcceso / LlaveMovimiento -----------------------
 -- Llave es el TIPO de llave (el patrón/combinación): define a qué
--- edificio(s)/unidad(es) abre (LlaveAcceso) y su valor de depósito. Nunca se
--- entrega directamente. De cada tipo se sacan copias físicas (LlaveCopia) —
--- esas son las que de verdad circulan, se entregan y se devuelven
--- (LlaveProfesional ahora cuelga de la copia, no del tipo), porque puede
--- haber varias copias del mismo tipo repartidas a distintos profesionales a
--- la vez (aclarado en conversación con la clienta).
+-- edificio(s)/unidad(es) abre (LlaveAcceso) y su valor de depósito. Nombre
+-- se arma solo ("Tipo llave E1"/"U3"/...) a partir de Tipo + un correlativo
+-- por letra, para que la clienta pueda identificar rápido de qué llave se
+-- habla; no es editable a mano ni cambia si se edita el registro.
+--
+-- Reemplantado en conversación con la clienta (Etapa F18, segunda vuelta):
+-- las copias físicas dejaron de tener identidad individual ("Copia 1",
+-- "Copia 2") porque para ella son todas iguales -- se entregan sueltas, sin
+-- distinguir cuál es cuál. En cambio, LlaveMovimiento es un libro único de
+-- movimientos por Tipo de llave: Ingreso (entra stock nuevo, Cantidad puede
+-- ser > 1 para cargar varias copias de una), Asignación (se le da una
+-- copia a un profesional), Devolución (vuelve al stock) y Pérdida (se da
+-- de baja para siempre, el depósito cobrado queda perdido sin reintegro).
+-- Una Devolución/Pérdida referencia en IdAsignacion la fila de Asignación
+-- que cierra; una Asignación sin ninguna fila que la referencie está
+-- "abierta" (esa copia sigue en poder del profesional). Copias asignadas =
+-- asignaciones abiertas; Copias disponibles = (suma Cantidad de Ingreso -
+-- cantidad de Pérdida) - asignadas.
 CREATE TABLE IF NOT EXISTS Llave (
     IdLlave INTEGER PRIMARY KEY AUTOINCREMENT,
-    Descripcion TEXT,
+    Nombre TEXT,
     Tipo TEXT CHECK (Tipo IN ('Edificio','Unidad','No especificada')),
     ValorDepositoActual REAL NOT NULL DEFAULT 0,
     ValorDepositoAnterior REAL NOT NULL DEFAULT 0,
+    Observacion TEXT,
     Activo INTEGER NOT NULL DEFAULT 1
 );
 
@@ -174,22 +187,18 @@ CREATE TABLE IF NOT EXISTS LlaveAcceso (
     IdLlave INTEGER NOT NULL REFERENCES Llave(IdLlave),
     IdEdificio INTEGER NOT NULL REFERENCES Edificio(IdEdificio),
     IdUnidad INTEGER REFERENCES Unidad(IdUnidad),
-    DescripcionAcceso TEXT
+    Nombre TEXT,
+    Observacion TEXT
 );
 
-CREATE TABLE IF NOT EXISTS LlaveCopia (
-    IdLlaveCopia INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS LlaveMovimiento (
+    IdMovimiento INTEGER PRIMARY KEY AUTOINCREMENT,
     IdLlave INTEGER NOT NULL REFERENCES Llave(IdLlave),
-    Identificador TEXT,
-    Activo INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS LlaveProfesional (
-    IdLlaveProfesional INTEGER PRIMARY KEY AUTOINCREMENT,
-    IdLlaveCopia INTEGER NOT NULL REFERENCES LlaveCopia(IdLlaveCopia),
-    IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional),
-    FechaEntrega TEXT,
-    FechaDevolucion TEXT,
+    Tipo TEXT NOT NULL CHECK (Tipo IN ('Ingreso','Asignación','Devolución','Pérdida')),
+    Fecha TEXT NOT NULL,
+    IdProfesional INTEGER REFERENCES Profesional(IdProfesional),
+    Cantidad INTEGER NOT NULL DEFAULT 1,
+    IdAsignacion INTEGER REFERENCES LlaveMovimiento(IdMovimiento),
     DepositoCobrado INTEGER NOT NULL DEFAULT 0,
     MontoCobrado REAL,
     DepositoReintegrado INTEGER NOT NULL DEFAULT 0,

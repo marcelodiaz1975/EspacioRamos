@@ -31,6 +31,7 @@ from app.importacion.definiciones import (
     ENTIDADES_IMPORTABLES,
 )
 from app.negocio.dias import periodo_actual
+from app.negocio.llaves import siguiente_nombre_llave
 from app.negocio.pagos import crear_plan_pago_historico, marcar_cuota_pagada
 from app.repositorio.registro import obtener_repositorio
 
@@ -278,6 +279,9 @@ def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImport
         try:
             if entidad == "PlanPago":
                 _crear_plan_pago_importado(conn, datos)
+            elif entidad == "Llave":
+                datos["Nombre"] = siguiente_nombre_llave(conn, datos["Tipo"])
+                repo.crear(**datos)
             else:
                 repo.crear(**datos)
             resultado.filas_importadas += 1

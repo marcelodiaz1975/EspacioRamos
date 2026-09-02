@@ -302,10 +302,10 @@ def _edificios_de_llaves_activas(conn: sqlite3.Connection, id_profesional: int) 
     filas = conn.execute(
         """
         SELECT DISTINCT la.IdEdificio
-        FROM LlaveProfesional lp
-        JOIN LlaveCopia lc ON lc.IdLlaveCopia = lp.IdLlaveCopia
-        JOIN LlaveAcceso la ON la.IdLlave = lc.IdLlave
-        WHERE lp.IdProfesional = ? AND lp.FechaDevolucion IS NULL
+        FROM LlaveMovimiento asig
+        JOIN LlaveAcceso la ON la.IdLlave = asig.IdLlave
+        WHERE asig.IdProfesional = ? AND asig.Tipo = 'Asignación'
+          AND NOT EXISTS (SELECT 1 FROM LlaveMovimiento cierre WHERE cierre.IdAsignacion = asig.IdMovimiento)
         """,
         (id_profesional,),
     ).fetchall()
@@ -482,29 +482,28 @@ def mensaje_detalle_reserva_aislada(
     # 1. depósitos/reintegros de llaves del período: unidad primero, edificio después.
     llaves = conn.execute(
         """
-        SELECT lp.*, l.Tipo AS TipoLlave, u.Departamento, e.Nombre AS NombreEdificio
-        FROM LlaveProfesional lp
-        JOIN LlaveCopia lc ON lc.IdLlaveCopia = lp.IdLlaveCopia
-        JOIN Llave l ON l.IdLlave = lc.IdLlave
+        SELECT m.*, l.Tipo AS TipoLlave, u.Departamento, e.Nombre AS NombreEdificio
+        FROM LlaveMovimiento m
+        JOIN Llave l ON l.IdLlave = m.IdLlave
         LEFT JOIN LlaveAcceso la ON la.IdLlaveAcceso = (
             SELECT MIN(IdLlaveAcceso) FROM LlaveAcceso WHERE IdLlave = l.IdLlave
         )
         LEFT JOIN Unidad u ON u.IdUnidad = la.IdUnidad
         LEFT JOIN Edificio e ON e.IdEdificio = la.IdEdificio
-        WHERE lp.IdProfesional = ? AND (lp.FechaEntrega LIKE ? OR lp.FechaDevolucion LIKE ?)
-        ORDER BY CASE l.Tipo WHEN 'Unidad' THEN 0 WHEN 'Edificio' THEN 1 ELSE 2 END, lp.IdLlaveProfesional
+        WHERE m.IdProfesional = ? AND m.Tipo IN ('Asignación', 'Devolución') AND m.Fecha LIKE ?
+        ORDER BY CASE l.Tipo WHEN 'Unidad' THEN 0 WHEN 'Edificio' THEN 1 ELSE 2 END, m.IdMovimiento
         """,
-        (id_profesional, prefijo_mes + "%", prefijo_mes + "%"),
+        (id_profesional, prefijo_mes + "%"),
     ).fetchall()
 
     total_llaves = 0.0
     for ll in llaves:
         lugar_llave = _lugar_llave(ll, incluir_edificio)
-        if ll["FechaEntrega"] and ll["FechaEntrega"].startswith(prefijo_mes) and ll["DepositoCobrado"]:
+        if ll["Tipo"] == "Asignación" and ll["DepositoCobrado"]:
             monto = ll["MontoCobrado"] or 0.0
             lineas.append(f"+ Depósito por llave {lugar_llave} {_moneda(monto)}")
             total_llaves += monto
-        if ll["FechaDevolucion"] and ll["FechaDevolucion"].startswith(prefijo_mes) and ll["DepositoReintegrado"]:
+        if ll["Tipo"] == "Devolución" and ll["DepositoReintegrado"]:
             monto = ll["MontoReintegrado"] or 0.0
             lineas.append(f"- Reintegro depósito llave {lugar_llave} {_moneda(-monto)}")
             total_llaves -= monto

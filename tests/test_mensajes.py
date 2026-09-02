@@ -245,10 +245,11 @@ def test_detalle_aislada_un_solo_edificio_en_el_espacio_nunca_lo_menciona(conn):
 
 def test_detalle_aislada_omite_edificio_si_las_llaves_son_de_uno_solo(conn, profesional_aislada_con_edificios):
     id_prof, c1, c2, id_ed1, _ = profesional_aislada_con_edificios
-    id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave", Tipo="Unidad", ValorDepositoActual=5000)
+    id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave", Tipo="Unidad", ValorDepositoActual=5000)
     obtener_repositorio(conn, "LlaveAcceso").crear(IdLlave=id_llave, IdEdificio=id_ed1)
-    id_copia = obtener_repositorio(conn, "LlaveCopia").crear(IdLlave=id_llave, Identificador="Copia 1")
-    obtener_repositorio(conn, "LlaveProfesional").crear(IdLlaveCopia=id_copia, IdProfesional=id_prof, FechaEntrega="2026-07-02")
+    obtener_repositorio(conn, "LlaveMovimiento").crear(
+        IdLlave=id_llave, Tipo="Asignación", IdProfesional=id_prof, Fecha="2026-07-02",
+    )
     obtener_repositorio(conn, "ReservaAislada").crear(
         IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
         Estado="Confirmada", AplicaRecargo=0,
@@ -273,11 +274,12 @@ def test_detalle_aislada_sin_llaves_pero_con_mas_de_un_edificio_lo_menciona(conn
 
 def test_detalle_aislada_agrega_edificio_si_tiene_llaves_de_mas_de_uno(conn, profesional_aislada_con_edificios):
     id_prof, c1, c2, id_ed1, id_ed2 = profesional_aislada_con_edificios
-    id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave", Tipo="Unidad", ValorDepositoActual=5000)
+    id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave", Tipo="Unidad", ValorDepositoActual=5000)
     obtener_repositorio(conn, "LlaveAcceso").crear(IdLlave=id_llave, IdEdificio=id_ed1)
     obtener_repositorio(conn, "LlaveAcceso").crear(IdLlave=id_llave, IdEdificio=id_ed2)
-    id_copia = obtener_repositorio(conn, "LlaveCopia").crear(IdLlave=id_llave, Identificador="Copia 1")
-    obtener_repositorio(conn, "LlaveProfesional").crear(IdLlaveCopia=id_copia, IdProfesional=id_prof, FechaEntrega="2026-07-02")
+    obtener_repositorio(conn, "LlaveMovimiento").crear(
+        IdLlave=id_llave, Tipo="Asignación", IdProfesional=id_prof, Fecha="2026-07-02",
+    )
     obtener_repositorio(conn, "ReservaAislada").crear(
         IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
         Estado="Confirmada", AplicaRecargo=0,
@@ -294,11 +296,10 @@ def test_detalle_aislada_agrega_edificio_si_tiene_llaves_de_mas_de_uno(conn, pro
 
 def test_detalle_aislada_deposito_de_llave_del_mes(conn, profesional_aislada_con_edificios):
     id_prof, c1, _, id_ed1, _ = profesional_aislada_con_edificios
-    id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave", Tipo="Unidad", ValorDepositoActual=5000)
+    id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave", Tipo="Unidad", ValorDepositoActual=5000)
     obtener_repositorio(conn, "LlaveAcceso").crear(IdLlave=id_llave, IdEdificio=id_ed1, IdUnidad=None)
-    id_copia = obtener_repositorio(conn, "LlaveCopia").crear(IdLlave=id_llave, Identificador="Copia 1")
-    obtener_repositorio(conn, "LlaveProfesional").crear(
-        IdLlaveCopia=id_copia, IdProfesional=id_prof, FechaEntrega="2026-08-02",
+    obtener_repositorio(conn, "LlaveMovimiento").crear(
+        IdLlave=id_llave, Tipo="Asignación", IdProfesional=id_prof, Fecha="2026-08-02",
         DepositoCobrado=1, MontoCobrado=5000,
     )
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
@@ -307,12 +308,15 @@ def test_detalle_aislada_deposito_de_llave_del_mes(conn, profesional_aislada_con
 
 def test_detalle_aislada_reintegro_de_llave_se_muestra_negativo(conn, profesional_aislada_con_edificios):
     id_prof, _, _, id_ed1, _ = profesional_aislada_con_edificios
-    id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave", Tipo="Unidad", ValorDepositoActual=5000)
+    id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave", Tipo="Unidad", ValorDepositoActual=5000)
     obtener_repositorio(conn, "LlaveAcceso").crear(IdLlave=id_llave, IdEdificio=id_ed1, IdUnidad=None)
-    id_copia = obtener_repositorio(conn, "LlaveCopia").crear(IdLlave=id_llave, Identificador="Copia 1")
-    obtener_repositorio(conn, "LlaveProfesional").crear(
-        IdLlaveCopia=id_copia, IdProfesional=id_prof, FechaEntrega="2026-07-01", FechaDevolucion="2026-08-02",
-        DepositoCobrado=1, MontoCobrado=5000, DepositoReintegrado=1, MontoReintegrado=5000,
+    id_asignacion = obtener_repositorio(conn, "LlaveMovimiento").crear(
+        IdLlave=id_llave, Tipo="Asignación", IdProfesional=id_prof, Fecha="2026-07-01",
+        DepositoCobrado=1, MontoCobrado=5000,
+    )
+    obtener_repositorio(conn, "LlaveMovimiento").crear(
+        IdLlave=id_llave, Tipo="Devolución", IdProfesional=id_prof, Fecha="2026-08-02", IdAsignacion=id_asignacion,
+        DepositoReintegrado=1, MontoReintegrado=5000,
     )
     # ya devuelta al momento de generar el mensaje -> no cuenta como llave "en
     # poder" del profesional, así que la regla del edificio no la suprime.
@@ -333,7 +337,7 @@ def test_detalle_aislada_item_libre_no_incluye_cargos_de_llave(conn, profesional
     """Los CargoEspecial ligados a IdLlave (depósito/reintegro) no se
     listan de nuevo como ítem libre — ya se muestran vía LlaveProfesional."""
     id_prof, _, _, id_ed1, _ = profesional_aislada_con_edificios
-    id_llave = obtener_repositorio(conn, "Llave").crear(Descripcion="Llave", Tipo="Unidad", ValorDepositoActual=5000)
+    id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave", Tipo="Unidad", ValorDepositoActual=5000)
     crear_cargo_especial(
         conn, id_profesional=id_prof, tipo="Débito", concepto="depósito llave", monto=5000,
         periodo_imputado="2026-08", id_llave=id_llave,

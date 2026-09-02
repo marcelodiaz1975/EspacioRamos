@@ -1,25 +1,32 @@
-"""Llaves (sección 3.7 del documento, modelo aclarado en conversación con la
-clienta).
+"""Llaves (sección 3.7 del documento, replanteado en conversación con la
+clienta — segunda vuelta).
 
 Llave es el TIPO de llave (el patrón/combinación): define Tipo
 (Edificio/Unidad/No especificada), a qué edificio(s)/unidad(es) abre
-(LlaveAcceso) y su propio valor de depósito. Nunca se entrega directamente.
-Las de Tipo Edificio nunca se repiten (un tipo = un edificio, sin compartir
-con otro). Las de Tipo Unidad sí pueden repetirse entre sí — el mismo tipo
-puede dar acceso a más de una unidad (incluso de edificios distintos) si se
-preparó una cerradura gemela.
+(LlaveAcceso) y su propio valor de depósito. Su Nombre se arma solo
+("Tipo llave E1"/"U3"/...) a partir de Tipo + un correlativo por letra —
+no es editable a mano.
 
-De cada tipo se sacan copias físicas (LlaveCopia) y esas son las que
-circulan de verdad: se entregan y se devuelven (LlaveProfesional cuelga de
-la copia, no del tipo), porque puede haber varias copias del mismo tipo
-repartidas a distintos profesionales a la vez — un titular por COPIA a la
-vez, no por tipo.
+Las copias físicas no tienen identidad individual (para la clienta son
+todas iguales, se entregan sueltas). LlaveMovimiento es un libro único de
+movimientos por Tipo de llave:
 
-El depósito cobrado y el reintegro se reflejan en la liquidación del
-profesional como CargoEspecial (Débito/Crédito) ligado a IdLlave (el tipo,
-no la copia puntual — el valor de depósito es una propiedad del tipo) — es
-el mismo mecanismo genérico de la sección 3.15 (ya usado en Etapa 4), no
-hace falta un camino de facturación aparte para las llaves.
+- Ingreso: entra stock nuevo (Cantidad puede ser > 1, para cargar varias
+  copias de una sola vez).
+- Asignación: se le da una copia a un profesional (requiere que haya
+  copias disponibles).
+- Devolución: la copia vuelve al stock — cierra una Asignación abierta
+  (referenciada en IdAsignacion), con reintegro de depósito opcional.
+- Pérdida: la copia se da de baja para siempre — también cierra una
+  Asignación abierta, pero nunca reintegra el depósito (es responsabilidad
+  del profesional cuidar su juego; si se le da una copia nueva, es una
+  Asignación nueva e independiente que vuelve a cobrar depósito).
+
+Una Asignación sin ninguna Devolución/Pérdida que la referencie está
+"abierta" (esa copia sigue en poder del profesional). El depósito cobrado
+y el reintegro se reflejan en la liquidación del profesional como
+CargoEspecial (Débito/Crédito) ligado a IdLlave (el tipo, no el
+movimiento puntual) — es el mismo mecanismo genérico de la sección 3.15.
 """
 from __future__ import annotations
 
@@ -29,18 +36,33 @@ from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.pagos import crear_cargo_especial
 from app.repositorio.registro import obtener_repositorio
 
+_LETRA_POR_TIPO = {"Edificio": "E", "Unidad": "U", "No especificada": "N"}
+
+
+def siguiente_nombre_llave(conn: sqlite3.Connection, tipo: str) -> str:
+    """Arma el nombre correlativo por letra ("Tipo llave E1", "Tipo llave
+    U3", ...) que le va a corresponder al próximo Tipo de llave que se cree
+    con ese Tipo. Expuesto aparte de crear_llave para que la pantalla
+    pueda mostrarlo como previsualización antes de confirmar el alta."""
+    letra = _LETRA_POR_TIPO[tipo]
+    cantidad = len(obtener_repositorio(conn, "Llave").listar(Tipo=tipo))
+    return f"Tipo llave {letra}{cantidad + 1}"
+
 
 def crear_llave(
-    conn: sqlite3.Connection, *, descripcion: str | None = None, tipo: str = "No especificada",
-    valor_deposito_actual: float = 0.0,
+    conn: sqlite3.Connection, *, tipo: str = "No especificada", valor_deposito_actual: float = 0.0,
+    observacion: str | None = None,
 ) -> int:
+    nombre = siguiente_nombre_llave(conn, tipo)
     repo = obtener_repositorio(conn, "Llave")
-    return repo.crear(Descripcion=descripcion, Tipo=tipo, ValorDepositoActual=valor_deposito_actual, Activo=1)
+    return repo.crear(
+        Nombre=nombre, Tipo=tipo, ValorDepositoActual=valor_deposito_actual, Observacion=observacion, Activo=1,
+    )
 
 
 def agregar_acceso_llave(
     conn: sqlite3.Connection, *, id_llave: int, id_edificio: int, id_unidad: int | None = None,
-    descripcion_acceso: str | None = None,
+    nombre: str | None = None, observacion: str | None = None,
 ) -> int:
     """Sección 3.7: valida el alcance según el Tipo de la llave antes de
     agregar el acceso (LlaveAcceso). Una llave de Tipo Edificio abre un
@@ -63,93 +85,123 @@ def agregar_acceso_llave(
         raise ValueError('Una llave de Tipo Unidad necesita una unidad puntual, no "todas las unidades"')
 
     return obtener_repositorio(conn, "LlaveAcceso").crear(
-        IdLlave=id_llave, IdEdificio=id_edificio, IdUnidad=id_unidad, DescripcionAcceso=descripcion_acceso,
+        IdLlave=id_llave, IdEdificio=id_edificio, IdUnidad=id_unidad, Nombre=nombre, Observacion=observacion,
     )
 
 
-def crear_copia_llave(conn: sqlite3.Connection, *, id_llave: int, identificador: str | None = None) -> int:
-    """Da de alta una copia física nueva de un tipo de llave ya existente.
-    Si no se da un identificador, se sugiere uno correlativo ("Copia N")
-    según cuántas copias tiene ya ese tipo — el operador lo puede
-    reemplazar por el que use físicamente (número de llavero, etc.)."""
+def _asignaciones_cerradas(conn: sqlite3.Connection) -> set[int]:
+    return {
+        f["IdAsignacion"] for f in conn.execute(
+            "SELECT IdAsignacion FROM LlaveMovimiento WHERE IdAsignacion IS NOT NULL"
+        ).fetchall()
+    }
+
+
+def resumen_stock(conn: sqlite3.Connection, id_llave: int) -> dict:
+    """Ingresadas/perdidas/existentes/asignadas/disponibles de un Tipo de
+    llave, calculadas en vivo a partir del libro de movimientos (no se
+    guardan como campos aparte, para que nunca puedan desincronizarse)."""
+    movimientos = obtener_repositorio(conn, "LlaveMovimiento").listar(IdLlave=id_llave)
+    ingresadas = sum(m["Cantidad"] for m in movimientos if m["Tipo"] == "Ingreso")
+    perdidas = sum(m["Cantidad"] for m in movimientos if m["Tipo"] == "Pérdida")
+    cerradas = _asignaciones_cerradas(conn)
+    asignadas = sum(1 for m in movimientos if m["Tipo"] == "Asignación" and m["IdMovimiento"] not in cerradas)
+    existentes = ingresadas - perdidas
+    return {
+        "ingresadas": ingresadas, "perdidas": perdidas, "existentes": existentes,
+        "asignadas": asignadas, "disponibles": existentes - asignadas,
+    }
+
+
+def ingresar_copias(
+    conn: sqlite3.Connection, *, id_llave: int, cantidad: int = 1, fecha: str | None = None,
+    observacion: str | None = None,
+) -> int:
+    if cantidad < 1:
+        raise ValueError("La cantidad a ingresar tiene que ser al menos 1")
     llave = obtener_repositorio(conn, "Llave").obtener(id_llave)
     if llave is None:
         raise ValueError(f"No existe la llave #{id_llave}")
-    if identificador is None:
-        cantidad = len(obtener_repositorio(conn, "LlaveCopia").listar(IdLlave=id_llave))
-        identificador = f"Copia {cantidad + 1}"
-    return obtener_repositorio(conn, "LlaveCopia").crear(IdLlave=id_llave, Identificador=identificador, Activo=1)
+    return obtener_repositorio(conn, "LlaveMovimiento").crear(
+        IdLlave=id_llave, Tipo="Ingreso", Fecha=fecha or fecha_actual(conn).isoformat(),
+        Cantidad=cantidad, Observacion=observacion,
+    )
 
 
-def _titular_actual(conn: sqlite3.Connection, id_copia: int) -> sqlite3.Row | None:
-    return conn.execute(
-        "SELECT * FROM LlaveProfesional WHERE IdLlaveCopia = ? AND FechaDevolucion IS NULL", (id_copia,)
-    ).fetchone()
-
-
-def entregar_llave(
-    conn: sqlite3.Connection, *, id_copia: int, id_profesional: int, fecha_entrega: str | None = None,
+def asignar_llave(
+    conn: sqlite3.Connection, *, id_llave: int, id_profesional: int, fecha: str | None = None,
     cobrar_deposito: bool = False, monto_cobrado: float | None = None,
     periodo_imputado: str | None = None, observacion: str | None = None,
 ) -> int:
-    titular = _titular_actual(conn, id_copia)
-    if titular is not None:
-        raise ValueError(
-            f"La copia #{id_copia} ya tiene un titular (profesional #{titular['IdProfesional']}); "
-            "hay que registrar la devolución antes de entregarla a otro profesional"
-        )
-
-    copia = obtener_repositorio(conn, "LlaveCopia").obtener(id_copia)
-    if copia is None:
-        raise ValueError(f"No existe la copia #{id_copia}")
-    llave = obtener_repositorio(conn, "Llave").obtener(copia["IdLlave"])
+    llave = obtener_repositorio(conn, "Llave").obtener(id_llave)
     if llave is None:
-        raise ValueError(f"No existe la llave #{copia['IdLlave']}")
+        raise ValueError(f"No existe la llave #{id_llave}")
+    if resumen_stock(conn, id_llave)["disponibles"] <= 0:
+        raise ValueError(f"No hay copias disponibles de {llave['Nombre']} para asignar")
 
     if cobrar_deposito and monto_cobrado is None:
         monto_cobrado = llave["ValorDepositoActual"]
 
-    repo = obtener_repositorio(conn, "LlaveProfesional")
-    id_llave_profesional = repo.crear(
-        IdLlaveCopia=id_copia, IdProfesional=id_profesional,
-        FechaEntrega=fecha_entrega or fecha_actual(conn).isoformat(),
+    repo = obtener_repositorio(conn, "LlaveMovimiento")
+    id_movimiento = repo.crear(
+        IdLlave=id_llave, Tipo="Asignación", Fecha=fecha or fecha_actual(conn).isoformat(),
+        IdProfesional=id_profesional, Cantidad=1,
         DepositoCobrado=int(cobrar_deposito), MontoCobrado=monto_cobrado, Observacion=observacion,
     )
 
     if cobrar_deposito and monto_cobrado:
         crear_cargo_especial(
             conn, id_profesional=id_profesional, tipo="Débito",
-            concepto=f"depósito llave {llave['Descripcion'] or llave['IdLlave']}", monto=monto_cobrado,
-            periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=llave["IdLlave"],
+            concepto=f"depósito {llave['Nombre']}", monto=monto_cobrado,
+            periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=id_llave,
         )
-    return id_llave_profesional
+    return id_movimiento
+
+
+def _asignacion_abierta(conn: sqlite3.Connection, id_asignacion: int) -> sqlite3.Row:
+    asignacion = obtener_repositorio(conn, "LlaveMovimiento").obtener(id_asignacion)
+    if asignacion is None or asignacion["Tipo"] != "Asignación":
+        raise ValueError(f"No existe la asignación #{id_asignacion}")
+    if id_asignacion in _asignaciones_cerradas(conn):
+        raise ValueError(f"La asignación #{id_asignacion} ya tiene una devolución o pérdida registrada")
+    return asignacion
 
 
 def devolver_llave(
-    conn: sqlite3.Connection, id_llave_profesional: int, *, fecha_devolucion: str | None = None,
+    conn: sqlite3.Connection, id_asignacion: int, *, fecha: str | None = None,
     reintegrar_deposito: bool = False, monto_reintegrado: float | None = None,
-    periodo_imputado: str | None = None,
-) -> None:
-    repo = obtener_repositorio(conn, "LlaveProfesional")
-    tenencia = repo.obtener(id_llave_profesional)
-    if tenencia is None:
-        raise ValueError(f"No existe la entrega de llave #{id_llave_profesional}")
-    if tenencia["FechaDevolucion"] is not None:
-        raise ValueError(f"La entrega #{id_llave_profesional} ya tiene devolución registrada")
+    periodo_imputado: str | None = None, observacion: str | None = None,
+) -> int:
+    asignacion = _asignacion_abierta(conn, id_asignacion)
+    llave = obtener_repositorio(conn, "Llave").obtener(asignacion["IdLlave"])
 
     if reintegrar_deposito and monto_reintegrado is None:
-        monto_reintegrado = tenencia["MontoCobrado"] or 0.0
+        monto_reintegrado = asignacion["MontoCobrado"] or 0.0
 
-    repo.actualizar(
-        id_llave_profesional, FechaDevolucion=fecha_devolucion or fecha_actual(conn).isoformat(),
-        DepositoReintegrado=int(reintegrar_deposito), MontoReintegrado=monto_reintegrado,
+    id_movimiento = obtener_repositorio(conn, "LlaveMovimiento").crear(
+        IdLlave=asignacion["IdLlave"], Tipo="Devolución", Fecha=fecha or fecha_actual(conn).isoformat(),
+        IdProfesional=asignacion["IdProfesional"], Cantidad=1, IdAsignacion=id_asignacion,
+        DepositoReintegrado=int(reintegrar_deposito), MontoReintegrado=monto_reintegrado, Observacion=observacion,
     )
 
     if reintegrar_deposito and monto_reintegrado:
-        copia = obtener_repositorio(conn, "LlaveCopia").obtener(tenencia["IdLlaveCopia"])
-        llave = obtener_repositorio(conn, "Llave").obtener(copia["IdLlave"])
         crear_cargo_especial(
-            conn, id_profesional=tenencia["IdProfesional"], tipo="Crédito",
-            concepto=f"reintegro llave {llave['Descripcion'] or llave['IdLlave']}", monto=-monto_reintegrado,
+            conn, id_profesional=asignacion["IdProfesional"], tipo="Crédito",
+            concepto=f"reintegro {llave['Nombre']}", monto=-monto_reintegrado,
             periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=llave["IdLlave"],
         )
+    return id_movimiento
+
+
+def registrar_perdida(
+    conn: sqlite3.Connection, id_asignacion: int, *, fecha: str | None = None, observacion: str | None = None,
+) -> int:
+    """El depósito cobrado en la asignación queda perdido, nunca se
+    reintegra (responsabilidad del profesional cuidar su juego de
+    llaves). Si más adelante se le da una copia nueva, es una asignación
+    nueva e independiente que vuelve a cobrar depósito."""
+    asignacion = _asignacion_abierta(conn, id_asignacion)
+    return obtener_repositorio(conn, "LlaveMovimiento").crear(
+        IdLlave=asignacion["IdLlave"], Tipo="Pérdida", Fecha=fecha or fecha_actual(conn).isoformat(),
+        IdProfesional=asignacion["IdProfesional"], Cantidad=1, IdAsignacion=id_asignacion, Observacion=observacion,
+    )

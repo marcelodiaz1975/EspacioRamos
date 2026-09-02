@@ -76,8 +76,10 @@ def _fechas_especiales_proximas(conn: sqlite3.Connection, dias_ventana: int = 15
 def _categoria_x_con_llaves_pendientes(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     filas = conn.execute(
         """
-        SELECT DISTINCT p.* FROM Profesional p JOIN LlaveProfesional lp ON lp.IdProfesional = p.IdProfesional
-        WHERE p.CategoriaProfesional = 'X' AND lp.FechaDevolucion IS NULL
+        SELECT DISTINCT p.* FROM Profesional p
+        JOIN LlaveMovimiento asig ON asig.IdProfesional = p.IdProfesional AND asig.Tipo = 'Asignación'
+        WHERE p.CategoriaProfesional = 'X'
+          AND NOT EXISTS (SELECT 1 FROM LlaveMovimiento cierre WHERE cierre.IdAsignacion = asig.IdMovimiento)
         """
     ).fetchall()
     return filas

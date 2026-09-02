@@ -1356,13 +1356,13 @@ def test_tabla_cargos_especiales_orden_por_defecto_fecha_categoria_codigo(qtbot,
 
 
 def test_cargo_ligado_a_llave_bloquea_modificar_eliminar_y_deshacer(qtbot, conn, monkeypatch):
-    from app.negocio.llaves import crear_copia_llave, crear_llave, entregar_llave
+    from app.negocio.llaves import asignar_llave, crear_llave, ingresar_copias
 
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     id_llave = crear_llave(conn, valor_deposito_actual=5000)
-    id_copia = crear_copia_llave(conn, id_llave=id_llave)
-    entregar_llave(conn, id_copia=id_copia, id_profesional=id_profesional, cobrar_deposito=True)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+    asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional, cobrar_deposito=True)
     conn.commit()
 
     pantalla = PantallaCargosEspeciales(conn)

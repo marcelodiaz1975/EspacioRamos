@@ -1239,10 +1239,10 @@ class _PanelCargosEspeciales(QWidget):
 
     def _bloqueado_por_llave(self, registro: sqlite3.Row, titulo: str) -> bool:
         """Un cargo especial ligado a una llave (IdLlave) se generó solo
-        desde la pantalla de Llaves al entregarla o devolverla — tocarlo
-        acá (modificarlo, eliminarlo o deshacerlo) desincronizaría la
-        tenencia registrada en LlaveProfesional, así que se bloquea y se
-        indica corregirlo desde la pantalla de Llaves."""
+        desde la pantalla de Llaves al asignarla, devolverla o perderla —
+        tocarlo acá (modificarlo, eliminarlo o deshacerlo) desincronizaría
+        el movimiento registrado en LlaveMovimiento, así que se bloquea y
+        se indica corregirlo desde la pantalla de Llaves."""
         if registro["IdLlave"] is None:
             return False
         QMessageBox.warning(
