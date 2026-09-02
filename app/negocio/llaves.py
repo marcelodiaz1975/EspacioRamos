@@ -17,10 +17,13 @@ movimientos por Tipo de llave:
   copias disponibles).
 - Devolución: la copia vuelve al stock — cierra una Asignación abierta
   (referenciada en IdAsignacion), con reintegro de depósito opcional.
-- Pérdida: la copia se da de baja para siempre — también cierra una
-  Asignación abierta, pero nunca reintegra el depósito (es responsabilidad
-  del profesional cuidar su juego; si se le da una copia nueva, es una
-  Asignación nueva e independiente que vuelve a cobrar depósito).
+- Pérdida: la copia se da de baja para siempre. Si tenía un profesional a
+  cargo (cierra esa Asignación abierta) nunca reintegra el depósito (es
+  responsabilidad del profesional cuidar su juego; si se le da una copia
+  nueva, es una Asignación nueva e independiente que vuelve a cobrar
+  depósito); si todavía era stock sin asignar (ej. se traspapela en el
+  cajón), se da de baja directo del stock disponible, sin profesional ni
+  depósito de por medio.
 
 Una Asignación sin ninguna Devolución/Pérdida que la referencie está
 "abierta" (esa copia sigue en poder del profesional). El depósito cobrado
@@ -194,14 +197,35 @@ def devolver_llave(
 
 
 def registrar_perdida(
-    conn: sqlite3.Connection, id_asignacion: int, *, fecha: str | None = None, observacion: str | None = None,
+    conn: sqlite3.Connection, *, id_asignacion: int | None = None, id_llave: int | None = None,
+    cantidad: int = 1, fecha: str | None = None, observacion: str | None = None,
 ) -> int:
-    """El depósito cobrado en la asignación queda perdido, nunca se
-    reintegra (responsabilidad del profesional cuidar su juego de
-    llaves). Si más adelante se le da una copia nueva, es una asignación
-    nueva e independiente que vuelve a cobrar depósito."""
-    asignacion = _asignacion_abierta(conn, id_asignacion)
+    """Dos formas de perder una copia:
+
+    - `id_asignacion`: la tenía un profesional (cierra esa Asignación,
+      igual que una Devolución). El depósito cobrado queda perdido, nunca
+      se reintegra (responsabilidad del profesional cuidar su juego de
+      llaves). Si más adelante se le da una copia nueva, es una
+      asignación nueva e independiente que vuelve a cobrar depósito.
+    - `id_llave` + `cantidad`: se pierde/extravía stock que todavía no se
+      había asignado a nadie (ej. se traspapelan copias en el cajón) — no
+      hay profesional ni depósito involucrado, solo se da de baja del
+      stock disponible."""
+    if id_asignacion is not None:
+        asignacion = _asignacion_abierta(conn, id_asignacion)
+        return obtener_repositorio(conn, "LlaveMovimiento").crear(
+            IdLlave=asignacion["IdLlave"], Tipo="Pérdida", Fecha=fecha or fecha_actual(conn).isoformat(),
+            IdProfesional=asignacion["IdProfesional"], Cantidad=1, IdAsignacion=id_asignacion,
+            Observacion=observacion,
+        )
+    if id_llave is None:
+        raise ValueError("Hay que indicar una asignación abierta o un Tipo de llave")
+    if cantidad < 1:
+        raise ValueError("La cantidad a dar de baja tiene que ser al menos 1")
+    disponibles = resumen_stock(conn, id_llave)["disponibles"]
+    if cantidad > disponibles:
+        raise ValueError(f"Solo hay {disponibles} copias disponibles para dar de baja")
     return obtener_repositorio(conn, "LlaveMovimiento").crear(
-        IdLlave=asignacion["IdLlave"], Tipo="Pérdida", Fecha=fecha or fecha_actual(conn).isoformat(),
-        IdProfesional=asignacion["IdProfesional"], Cantidad=1, IdAsignacion=id_asignacion, Observacion=observacion,
+        IdLlave=id_llave, Tipo="Pérdida", Fecha=fecha or fecha_actual(conn).isoformat(),
+        Cantidad=cantidad, Observacion=observacion,
     )

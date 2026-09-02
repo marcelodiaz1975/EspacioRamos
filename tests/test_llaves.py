@@ -196,7 +196,7 @@ def test_registrar_perdida_no_reintegra_y_deposito_queda_perdido(conn, profesion
     ingresar_copias(conn, id_llave=id_llave, cantidad=1)
     id_asignacion = asignar_llave(conn, id_llave=id_llave, id_profesional=profesional, cobrar_deposito=True)
 
-    registrar_perdida(conn, id_asignacion, fecha="2026-08-20")
+    registrar_perdida(conn, id_asignacion=id_asignacion, fecha="2026-08-20")
 
     cargos = obtener_repositorio(conn, "CargoEspecial").listar(IdProfesional=profesional)
     assert len(cargos) == 1  # solo el débito original, ningún crédito de reintegro
@@ -215,7 +215,7 @@ def test_registrar_perdida_permite_reasignar_pagando_deposito_de_nuevo(conn, pro
     id_llave = crear_llave(conn, valor_deposito_actual=5000)
     ingresar_copias(conn, id_llave=id_llave, cantidad=1)
     id_asignacion = asignar_llave(conn, id_llave=id_llave, id_profesional=profesional, cobrar_deposito=True)
-    registrar_perdida(conn, id_asignacion)
+    registrar_perdida(conn, id_asignacion=id_asignacion)
 
     ingresar_copias(conn, id_llave=id_llave, cantidad=1)
     asignar_llave(conn, id_llave=id_llave, id_profesional=profesional, cobrar_deposito=True)
@@ -231,7 +231,35 @@ def test_registrar_perdida_de_asignacion_ya_cerrada_falla(conn, profesional):
     devolver_llave(conn, id_asignacion)
 
     with pytest.raises(ValueError):
-        registrar_perdida(conn, id_asignacion)
+        registrar_perdida(conn, id_asignacion=id_asignacion)
+
+
+def test_registrar_perdida_de_stock_sin_asignar(conn):
+    """Copias que se pierden/traspapelan antes de ser asignadas a nadie
+    (ej. en el cajón) — sin profesional ni depósito involucrado."""
+    id_llave = crear_llave(conn, valor_deposito_actual=5000)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=3)
+
+    registrar_perdida(conn, id_llave=id_llave, cantidad=2)
+
+    resumen = resumen_stock(conn, id_llave)
+    assert resumen["perdidas"] == 2
+    assert resumen["existentes"] == 1
+    assert resumen["disponibles"] == 1
+    assert obtener_repositorio(conn, "CargoEspecial").listar() == []
+
+
+def test_registrar_perdida_de_stock_sin_cantidad_disponible_rechaza(conn):
+    id_llave = crear_llave(conn)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+
+    with pytest.raises(ValueError):
+        registrar_perdida(conn, id_llave=id_llave, cantidad=2)
+
+
+def test_registrar_perdida_sin_id_asignacion_ni_id_llave_rechaza(conn):
+    with pytest.raises(ValueError):
+        registrar_perdida(conn)
 
 
 def test_llave_tipo_edificio_no_puede_tener_acceso_a_dos_edificios_distintos(conn, edificios):

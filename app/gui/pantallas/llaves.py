@@ -71,7 +71,8 @@ _DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado",
 
 def _fecha_larga(iso: str) -> str:
     d = date.fromisoformat(iso)
-    return f"{_DIAS_SEMANA[d.weekday()]} {d.strftime('%d-%m-%Y')}"
+    dia = _DIAS_SEMANA[d.weekday()]
+    return f"{dia[0].upper()}{dia[1:]} {d.strftime('%d-%m-%Y')}"
 
 
 def _moneda(monto: float) -> str:
@@ -128,14 +129,15 @@ class PantallaLlaves(QWidget):
         self.tabla_tipos.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_tipos.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_tipos.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla_tipos.setColumnWidth(0, 190)
-        self.tabla_tipos.setColumnWidth(1, 65)
-        self.tabla_tipos.setColumnWidth(2, 115)
-        self.tabla_tipos.setColumnWidth(3, 85)
-        self.tabla_tipos.setColumnWidth(4, 90)
-        self.tabla_tipos.setColumnWidth(5, 60)
+        self.tabla_tipos.setColumnWidth(0, 200)
+        self.tabla_tipos.setColumnWidth(1, 70)
+        self.tabla_tipos.setColumnWidth(2, 120)
+        self.tabla_tipos.setColumnWidth(3, 90)
+        self.tabla_tipos.setColumnWidth(4, 95)
+        self.tabla_tipos.setColumnWidth(5, 65)
         self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_accesos)
         self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_observacion_tipo)
+        self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_botones_movimiento)
         self._orden_tipos = OrdenTabla(self.tabla_tipos, self._actualizar_tipos)
         layout_izq.addWidget(self.tabla_tipos, stretch=1)
 
@@ -182,7 +184,8 @@ class PantallaLlaves(QWidget):
         fila_accesos.addStretch()
         layout_izq.addLayout(fila_accesos)
 
-        panel_izq.setMaximumWidth(660)
+        panel_izq.setMaximumWidth(720)
+        panel_izq.setMinimumWidth(700)
         splitter.addWidget(panel_izq)
 
         # ------------------------------------------------------- derecha
@@ -558,14 +561,22 @@ class PantallaLlaves(QWidget):
         obtener_repositorio(self.conn, "LlaveMovimiento").actualizar(movimiento["IdMovimiento"], Observacion=texto)
         self.conn.commit()
 
-    def _actualizar_botones_movimiento(self) -> None:
+    def _asignacion_abierta_seleccionada(self) -> bool:
         movimiento = self._movimiento_seleccionado()
-        es_asignacion_abierta = (
+        return (
             movimiento is not None and movimiento["Tipo"] == "Asignación"
             and movimiento["IdMovimiento"] not in self._asignaciones_cerradas()
         )
+
+    def _actualizar_botones_movimiento(self) -> None:
+        es_asignacion_abierta = self._asignacion_abierta_seleccionada()
         self.boton_devolver.setEnabled(es_asignacion_abierta)
-        self.boton_perdida.setEnabled(es_asignacion_abierta)
+        tipo = self._tipo_seleccionado()
+        # "Registrar pérdida…" cubre dos casos: cerrar la asignación abierta
+        # seleccionada, o (sin ninguna seleccionada) dar de baja stock
+        # disponible del Tipo seleccionado que se perdió antes de asignarse.
+        disponibles_tipo = resumen_stock(self.conn, tipo["IdLlave"])["disponibles"] if tipo else 0
+        self.boton_perdida.setEnabled(es_asignacion_abierta or disponibles_tipo > 0)
 
     def _cargo_especial_creado(self, id_llave: int, cargos_antes: set[int]) -> sqlite3.Row | None:
         """El depósito/reintegro genera como mucho un CargoEspecial nuevo
@@ -645,17 +656,39 @@ class PantallaLlaves(QWidget):
         self.boton_nuevo_tipo.setFocus()
 
     def _registrar_perdida(self) -> None:
-        movimiento = self._movimiento_seleccionado()
-        if movimiento is None:
-            return
-        dialogo = _DialogoPerdida(movimiento, self)
-        if dialogo.exec() != QDialog.DialogCode.Accepted:
-            return
-        try:
-            id_perdida = registrar_perdida(self.conn, movimiento["IdMovimiento"], **dialogo.valores())
-        except ValueError as error:
-            QMessageBox.warning(self, "Registrar pérdida", str(error))
-            return
+        if self._asignacion_abierta_seleccionada():
+            movimiento = self._movimiento_seleccionado()
+            dialogo = _DialogoPerdida(movimiento, self)
+            if dialogo.exec() != QDialog.DialogCode.Accepted:
+                return
+            try:
+                id_perdida = registrar_perdida(
+                    self.conn, id_asignacion=movimiento["IdMovimiento"], **dialogo.valores(),
+                )
+            except ValueError as error:
+                QMessageBox.warning(self, "Registrar pérdida", str(error))
+                return
+        else:
+            tipo = self._tipo_seleccionado()
+            if tipo is None:
+                QMessageBox.information(
+                    self, "Registrar pérdida", "Seleccioná una asignación abierta o un Tipo de llave.",
+                )
+                return
+            disponibles = resumen_stock(self.conn, tipo["IdLlave"])["disponibles"]
+            if disponibles <= 0:
+                QMessageBox.warning(
+                    self, "Registrar pérdida", f"No hay copias disponibles de {tipo['Nombre']} para dar de baja.",
+                )
+                return
+            dialogo = _DialogoPerdidaStock(tipo, disponibles, self)
+            if dialogo.exec() != QDialog.DialogCode.Accepted:
+                return
+            try:
+                id_perdida = registrar_perdida(self.conn, id_llave=tipo["IdLlave"], **dialogo.valores())
+            except ValueError as error:
+                QMessageBox.warning(self, "Registrar pérdida", str(error))
+                return
         self.conn.commit()
         self._marcar_ultimo({"tipo": "perdida", "id_movimiento": id_perdida})
         self._actualizar_tipos()
@@ -1015,6 +1048,53 @@ class _DialogoPerdida(QDialog):
 
     def valores(self) -> dict:
         return {
+            "fecha": self.campo_fecha.date().toString(Qt.DateFormat.ISODate),
+            "observacion": self.campo_observacion.text().strip() or None,
+        }
+
+
+class _DialogoPerdidaStock(QDialog):
+    """Pérdida de copias que todavía estaban en stock, sin asignar a
+    ningún profesional (ej. se traspapelan en el cajón) — a diferencia de
+    _DialogoPerdida, acá no hay depósito ni profesional involucrado."""
+
+    def __init__(self, tipo: sqlite3.Row, disponibles: int, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Registrar pérdida")
+        layout = QFormLayout(self)
+        copia_o_copias = "copia disponible" if disponibles == 1 else "copias disponibles"
+        layout.addRow(QLabel(f"{tipo['Nombre']}  —  {disponibles} {copia_o_copias}, sin asignar"))
+
+        self.campo_fecha = _fecha_edit()
+        layout.addRow("Fecha", self.campo_fecha)
+
+        self.spin_cantidad = QSpinBox()
+        self.spin_cantidad.setMinimum(1)
+        self.spin_cantidad.setMaximum(disponibles)
+        self.spin_cantidad.setValue(1)
+        layout.addRow("Cantidad", self.spin_cantidad)
+
+        self.campo_observacion = QLineEdit()
+        layout.addRow("Observación", self.campo_observacion)
+
+        botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        botones.accepted.connect(self.accept)
+        botones.rejected.connect(self.reject)
+        layout.addRow(botones)
+
+        boton_ok = botones.button(QDialogButtonBox.StandardButton.Ok)
+        boton_cancelar = botones.button(QDialogButtonBox.StandardButton.Cancel)
+        self._foco = instalar_enter_avanza_foco(
+            [self.campo_fecha, self.spin_cantidad, self.campo_observacion, boton_ok, boton_cancelar], parent=self,
+        )
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.campo_fecha.setFocus()
+
+    def valores(self) -> dict:
+        return {
+            "cantidad": self.spin_cantidad.value(),
             "fecha": self.campo_fecha.date().toString(Qt.DateFormat.ISODate),
             "observacion": self.campo_observacion.text().strip() or None,
         }

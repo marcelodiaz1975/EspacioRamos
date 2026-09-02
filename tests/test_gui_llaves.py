@@ -10,6 +10,7 @@ from app.gui.pantallas.llaves import (
     _DialogoDevolucion,
     _DialogoIngreso,
     _DialogoPerdida,
+    _DialogoPerdidaStock,
     _DialogoTipo,
 )
 from app.negocio.llaves import crear_llave, ingresar_copias
@@ -239,14 +240,59 @@ def test_asignar_crea_movimiento_y_cargo_especial(qtbot, conn, monkeypatch):
     assert cargo["IdLlave"] == id_llave
 
 
-def test_registrar_devolucion_y_perdida_deshabilitados_sin_asignacion_abierta(qtbot, conn):
+def test_registrar_devolucion_deshabilitado_sin_asignacion_abierta(qtbot, conn):
     _crear_tipo_con_copia(conn)
     pantalla = PantallaLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     assert pantalla.tabla_movimientos.rowCount() == 1  # el Ingreso, sin ninguna Asignación todavía
+    assert pantalla.boton_devolver.isEnabled() is False
     pantalla._registrar_devolucion()  # nada seleccionado, no debe fallar
+
+
+def test_perdida_habilitado_con_stock_disponible_sin_asignacion(qtbot, conn):
+    """Con un Tipo seleccionado que tiene copias disponibles (pero
+    ninguna asignación abierta), Registrar pérdida se habilita para dar
+    de baja stock sin asignar — Registrar devolución no tiene sentido en
+    ese caso y sigue deshabilitado."""
+    _crear_tipo_con_copia(conn)
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+
+    assert pantalla.boton_perdida.isEnabled() is True
+    assert pantalla.boton_devolver.isEnabled() is False
+
+
+def test_perdida_deshabilitado_sin_seleccion(qtbot, conn):
+    crear_llave(conn)  # sin stock ingresado
+    conn.commit()
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+    assert pantalla.boton_perdida.isEnabled() is False
+    pantalla._registrar_perdida()  # nada que hacer, no debe fallar
+
+
+def test_registrar_perdida_de_stock_sin_asignar_via_boton(qtbot, conn, monkeypatch):
+    id_llave = _crear_tipo_con_copia(conn)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+    conn.commit()
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+    assert pantalla.tabla_tipos.item(0, 4).text() == "2"  # Disponibles
+
+    def _perder_una(self, *a, **k):
+        self.spin_cantidad.setValue(1)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoPerdidaStock, "exec", _perder_una)
     pantalla._registrar_perdida()
+
+    assert pantalla.tabla_tipos.item(0, 4).text() == "1"  # Disponibles bajó
+    assert pantalla.tabla_tipos.item(0, 3).text() == "0"  # Asignadas sin cambios
+    assert obtener_repositorio(conn, "CargoEspecial").listar() == []
 
 
 def test_flujo_completo_asignar_y_devolver(qtbot, conn, monkeypatch):
