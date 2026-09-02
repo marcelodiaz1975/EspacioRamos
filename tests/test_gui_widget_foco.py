@@ -3,6 +3,7 @@ a nivel del widget en sí, en vez de repetirlos en cada pantalla que lo usa —
 la garantía es la misma en todos los formularios porque es la misma clase."""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from app.gui.widgets.foco import instalar_enter_avanza_foco
@@ -94,3 +95,52 @@ def test_enter_no_rompe_si_nada_mas_esta_habilitado(qtbot):
     qtbot.waitUntil(lambda: campo_1.hasFocus())
     _enter(campo_1)  # no debe lanzar ninguna excepción
     assert campo_1.hasFocus()
+
+
+def test_tab_sigue_la_misma_cadena_que_enter(qtbot):
+    """Pedido explícito de la clienta en la revisión de Llaves: no puede
+    haber una cadena para Enter y otra distinta para Tab. Se simulan
+    pulsaciones reales de Tab (no alcanza con mirar nextInFocusChain(): esa
+    API de bajo nivel incluye widgets no enfocables como el contenedor,
+    que Tab saltea solo, así que sigue el orden real que ve el usuario)."""
+    contenedor = QWidget()
+    layout = QVBoxLayout(contenedor)
+    campo_1 = QLineEdit()
+    campo_2 = QLineEdit()
+    boton = QPushButton("Crear")
+    for w in (campo_1, campo_2, boton):
+        layout.addWidget(w)
+    foco = instalar_enter_avanza_foco([campo_1, campo_2, boton])
+    contenedor._foco = foco
+    _mostrar(qtbot, contenedor)
+
+    campo_1.setFocus()
+    qtbot.waitUntil(lambda: campo_1.hasFocus())
+    QTest.keyClick(campo_1, Qt.Key.Key_Tab)
+    qtbot.waitUntil(lambda: campo_2.hasFocus())
+    QTest.keyClick(campo_2, Qt.Key.Key_Tab)
+    qtbot.waitUntil(lambda: boton.hasFocus())
+    QTest.keyClick(boton, Qt.Key.Key_Tab)
+    qtbot.waitUntil(lambda: campo_1.hasFocus())  # último -> primero, igual que Enter
+
+
+def test_shift_tab_retrocede_en_la_misma_cadena(qtbot):
+    contenedor = QWidget()
+    layout = QVBoxLayout(contenedor)
+    campo_1 = QLineEdit()
+    campo_2 = QLineEdit()
+    boton = QPushButton("Crear")
+    for w in (campo_1, campo_2, boton):
+        layout.addWidget(w)
+    foco = instalar_enter_avanza_foco([campo_1, campo_2, boton])
+    contenedor._foco = foco
+    _mostrar(qtbot, contenedor)
+
+    campo_1.setFocus()
+    qtbot.waitUntil(lambda: campo_1.hasFocus())
+    QTest.keyClick(campo_1, Qt.Key.Key_Backtab)
+    qtbot.waitUntil(lambda: boton.hasFocus())  # primero -> último, en reversa
+    QTest.keyClick(boton, Qt.Key.Key_Backtab)
+    qtbot.waitUntil(lambda: campo_2.hasFocus())
+    QTest.keyClick(campo_2, Qt.Key.Key_Backtab)
+    qtbot.waitUntil(lambda: campo_1.hasFocus())
