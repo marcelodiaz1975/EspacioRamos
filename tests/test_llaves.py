@@ -262,6 +262,53 @@ def test_registrar_perdida_sin_id_asignacion_ni_id_llave_rechaza(conn):
         registrar_perdida(conn)
 
 
+def test_concepto_deposito_llave_tipo_edificio(conn, profesional, edificios):
+    id_edificio_1, _ = edificios
+    id_llave = crear_llave(conn, tipo="Edificio", valor_deposito_actual=5000)
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_1)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+
+    asignar_llave(conn, id_llave=id_llave, id_profesional=profesional, cobrar_deposito=True)
+
+    cargo = obtener_repositorio(conn, "CargoEspecial").listar(IdProfesional=profesional)[0]
+    assert cargo["Concepto"] == "Depósito llave edificio Ramos 1"
+
+
+def test_concepto_deposito_y_reintegro_llave_tipo_unidad_con_un_solo_acceso(conn, profesional, edificios):
+    id_edificio_1, _ = edificios
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento='7mo "L"')
+    id_llave = crear_llave(conn, tipo="Unidad", valor_deposito_actual=3000)
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_1, id_unidad=id_unidad)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+
+    id_asignacion = asignar_llave(conn, id_llave=id_llave, id_profesional=profesional, cobrar_deposito=True)
+    devolver_llave(conn, id_asignacion, reintegrar_deposito=True)
+
+    cargos = obtener_repositorio(conn, "CargoEspecial").listar(IdProfesional=profesional)
+    debito = next(c for c in cargos if c["Tipo"] == "Débito")
+    credito = next(c for c in cargos if c["Tipo"] == "Crédito")
+    assert debito["Concepto"] == 'Depósito llave unidad del 7mo "L" del edificio Ramos 1'
+    assert credito["Concepto"] == 'Reintegro depósito llave unidad del 7mo "L" del edificio Ramos 1'
+
+
+def test_concepto_llave_tipo_unidad_con_varios_accesos_queda_generico(conn, profesional, edificios):
+    """Una llave que abre más de una unidad a la vez (cerradura gemela,
+    del mismo edificio o de otro) no se puede nombrar sin ambigüedad, así
+    que el concepto queda genérico."""
+    id_edificio_1, id_edificio_2 = edificios
+    id_unidad_1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento='EP "K"')
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento='5to "G"')
+    id_llave = crear_llave(conn, tipo="Unidad", valor_deposito_actual=3000)
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_1, id_unidad=id_unidad_1)
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_2, id_unidad=id_unidad_2)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+
+    asignar_llave(conn, id_llave=id_llave, id_profesional=profesional, cobrar_deposito=True)
+
+    cargo = obtener_repositorio(conn, "CargoEspecial").listar(IdProfesional=profesional)[0]
+    assert cargo["Concepto"] == "Depósito llave unidad"
+
+
 def test_llave_tipo_edificio_no_puede_tener_acceso_a_dos_edificios_distintos(conn, edificios):
     id_edificio_1, id_edificio_2 = edificios
     id_llave = crear_llave(conn, tipo="Edificio")

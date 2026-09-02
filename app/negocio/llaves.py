@@ -52,6 +52,32 @@ def siguiente_nombre_llave(conn: sqlite3.Connection, tipo: str) -> str:
     return f"Tipo llave {letra}{cantidad + 1}"
 
 
+def _lugar_llave_texto(conn: sqlite3.Connection, llave: sqlite3.Row) -> str:
+    """Texto que describe a qué abre un Tipo de llave, para el profesional
+    en el concepto de depósito/reintegro de la liquidación — distinto del
+    Nombre interno ("Tipo llave U1"), que es solo para uso administrativo
+    en pantalla. Si el tipo abre más de una unidad a la vez (cerradura
+    gemela, sea del mismo edificio o de otro) no se puede nombrar una
+    sola sin ambigüedad, así que queda genérico ("unidad", sin precisar
+    cuál) — confirmado por la clienta."""
+    accesos = obtener_repositorio(conn, "LlaveAcceso").listar(IdLlave=llave["IdLlave"])
+    if llave["Tipo"] == "Edificio":
+        if not accesos:
+            return "edificio"
+        edificio = obtener_repositorio(conn, "Edificio").obtener(accesos[0]["IdEdificio"])
+        return f"edificio {edificio['Nombre']}" if edificio else "edificio"
+    if llave["Tipo"] == "Unidad":
+        if len(accesos) != 1 or accesos[0]["IdUnidad"] is None:
+            return "unidad"
+        acceso = accesos[0]
+        edificio = obtener_repositorio(conn, "Edificio").obtener(acceso["IdEdificio"])
+        unidad = obtener_repositorio(conn, "Unidad").obtener(acceso["IdUnidad"])
+        if unidad is None or edificio is None:
+            return "unidad"
+        return f"unidad del {unidad['Departamento']} del edificio {edificio['Nombre']}"
+    return ""
+
+
 def crear_llave(
     conn: sqlite3.Connection, *, tipo: str = "No especificada", valor_deposito_actual: float = 0.0,
     observacion: str | None = None,
@@ -153,9 +179,10 @@ def asignar_llave(
     )
 
     if cobrar_deposito and monto_cobrado:
+        concepto = f"Depósito llave {_lugar_llave_texto(conn, llave)}".rstrip()
         crear_cargo_especial(
             conn, id_profesional=id_profesional, tipo="Débito",
-            concepto=f"depósito {llave['Nombre']}", monto=monto_cobrado,
+            concepto=concepto, monto=monto_cobrado,
             periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=id_llave,
         )
     return id_movimiento
@@ -188,9 +215,10 @@ def devolver_llave(
     )
 
     if reintegrar_deposito and monto_reintegrado:
+        concepto = f"Reintegro depósito llave {_lugar_llave_texto(conn, llave)}".rstrip()
         crear_cargo_especial(
             conn, id_profesional=asignacion["IdProfesional"], tipo="Crédito",
-            concepto=f"reintegro {llave['Nombre']}", monto=-monto_reintegrado,
+            concepto=concepto, monto=-monto_reintegrado,
             periodo_imputado=periodo_imputado or periodo_actual(conn), id_llave=llave["IdLlave"],
         )
     return id_movimiento
