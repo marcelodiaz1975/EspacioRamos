@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
+from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import OrdenTabla
@@ -290,10 +291,10 @@ class _PanelRegistrarPago(QWidget):
                 self.campo_recogida_sobres.setFocus()
 
     def _actualizar_color_monto(self) -> None:
-        self.spin_monto.setStyleSheet("color: red;" if self.spin_monto.value() < 0 else "")
+        self.spin_monto.setStyleSheet(f"color: {COLOR_ROJO};" if self.spin_monto.value() < 0 else "")
 
     def _fmt_saldo_label(self, prefijo: str, valor: float) -> str:
-        color = "red" if valor < 0 else "black"
+        color = COLOR_ROJO if valor < 0 else "black"
         return f'{prefijo}: <span style="color:{color};">{formatear_moneda(valor)}</span>'
 
     def _actualizar_saldos(self) -> None:
@@ -329,7 +330,7 @@ class _PanelRegistrarPago(QWidget):
     def _poner_item_monto(self, fila: int, col: int, valor: float | None) -> None:
         item = QTableWidgetItem(formatear_moneda(valor or 0.0))
         if (valor or 0.0) < 0:
-            item.setForeground(QColor("red"))
+            item.setForeground(QColor(COLOR_ROJO))
         self.tabla.setItem(fila, col, item)
 
     def actualizar(self) -> None:

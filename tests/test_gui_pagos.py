@@ -785,8 +785,11 @@ def test_fecha_de_carga_muestra_segundos(qtbot, conn):
 
 def test_saldo_anterior_y_nuevo_saldo_se_colorean_en_negativo(qtbot, conn):
     """Confirmado por la clienta: Saldo anterior y Nuevo saldo respetan el
-    mismo color rojo-si-negativo que Monto, igual que en todo el sistema."""
+    mismo color rojo-si-negativo que Monto, igual que en todo el sistema
+    (COLOR_ROJO, no el "red" puro que usaba antes esta tabla)."""
     from PySide6.QtGui import QColor
+
+    from app.gui.estilos import COLOR_ROJO
 
     id_profesional = _crear_profesional(conn, saldo=100)
     pantalla = PantallaPagos(conn)
@@ -796,9 +799,9 @@ def test_saldo_anterior_y_nuevo_saldo_se_colorean_en_negativo(qtbot, conn):
     panel.spin_monto.setValue(-500)  # deja el saldo en negativo
     panel._registrar()
 
-    assert panel.tabla.item(0, 6).foreground().color() != QColor("red")  # saldo anterior: 100, positivo
-    assert panel.tabla.item(0, 7).foreground().color() == QColor("red")  # nuevo saldo: -400, negativo
-    assert panel.tabla.item(0, 3).foreground().color() == QColor("red")  # el Monto también
+    assert panel.tabla.item(0, 6).foreground().color() != QColor(COLOR_ROJO)  # saldo anterior: 100, positivo
+    assert panel.tabla.item(0, 7).foreground().color() == QColor(COLOR_ROJO)  # nuevo saldo: -400, negativo
+    assert panel.tabla.item(0, 3).foreground().color() == QColor(COLOR_ROJO)  # el Monto también
 
 
 def test_eliminar_pago_seleccionado_revierte_saldo(qtbot, conn, monkeypatch):

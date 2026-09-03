@@ -3,6 +3,7 @@ from PySide6.QtCore import Qt
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.estado_cuenta import PantallaEstadoCuenta
 from app.negocio.formato import formatear_moneda
 from app.negocio.pagos import registrar_pago
@@ -34,36 +35,62 @@ def _seleccionar_profesional(pantalla, id_profesional):
 def test_sin_profesionales_no_falla(qtbot, conn):
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.etiqueta_datos_profesional.text() == (
-        "Saldo actual: — - Saldo anterior: — - "
-        "Pagos imputados al mes actual: — - Pagos imputados al mes anterior: —"
-    )
+    assert pantalla.etiqueta_datos_profesional.text() == "Saldo actual: — - Saldo anterior: —"
 
 
 def test_muestra_saldos_del_profesional_seleccionado(qtbot, conn):
+    """Por defecto (solapa Liquidaciones activa) el resumen solo trae
+    saldo actual/anterior, con signo real y rojo si es negativo."""
     _crear_profesional(conn, saldo_actual=1234.5, saldo_anterior=-678.9)
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.etiqueta_datos_profesional.text() == (
         'Saldo actual: <span style="color:black;">$ 1.234,50</span> - '
-        'Saldo anterior: <span style="color:red;">-$ 678,90</span> - '
-        'Pagos imputados al mes actual: <span style="color:black;">$ 0,00</span> - '
-        'Pagos imputados al mes anterior: <span style="color:black;">$ 0,00</span>'
+        f'Saldo anterior: <span style="color:{COLOR_ROJO};">-$ 678,90</span>'
     )
 
 
-def test_pagos_imputados_al_mes_actual_y_anterior_respetan_signo_y_color(qtbot, conn):
+def test_pagos_imputados_al_mes_actual_y_anterior_solo_en_solapa_pagos(qtbot, conn):
     """Confirmado por la clienta: los pagos (con signo negativo, tal como
     se guardan) se muestran con su signo real y en rojo si son negativos —
-    no en valor absoluto."""
+    no en valor absoluto — y solo aparecen en el resumen cuando la solapa
+    Pagos está activa."""
     id_prof = _crear_profesional(conn)
     registrar_pago(conn, id_profesional=id_prof, monto=-12000, medio_pago="Transferencia", periodo_imputado="2026-09")
     registrar_pago(conn, id_profesional=id_prof, monto=-5000, medio_pago="Transferencia", periodo_imputado="2026-08")
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
+    assert "Pagos imputados" not in pantalla.etiqueta_datos_profesional.text()
+
+    pantalla.pestanas.setCurrentWidget(pantalla.tabla_pagos)
     texto = pantalla.etiqueta_datos_profesional.text()
-    assert 'Pagos imputados al mes actual: <span style="color:red;">-$ 12.000,00</span>' in texto
-    assert 'Pagos imputados al mes anterior: <span style="color:red;">-$ 5.000,00</span>' in texto
+    assert f'Pagos imputados al mes actual: <span style="color:{COLOR_ROJO};">-$ 12.000,00</span>' in texto
+    assert f'Pagos imputados al mes anterior: <span style="color:{COLOR_ROJO};">-$ 5.000,00</span>' in texto
+
+
+def test_cargos_especiales_imputados_al_mes_actual_y_anterior_solo_en_esa_solapa(qtbot, conn):
+    """Misma lógica que Pagos, ahora para Cargos especiales: signo real,
+    rojo si es negativo, y solo aparece con esa solapa activa."""
+    id_prof = _crear_profesional(conn)
+    obtener_repositorio(conn, "CargoEspecial").crear(
+        IdProfesional=id_prof, Tipo="Débito", Concepto="Ajuste", Monto=8000,
+        Fecha="2026-09-01", PeriodoImputado="2026-09",
+    )
+    obtener_repositorio(conn, "CargoEspecial").crear(
+        IdProfesional=id_prof, Tipo="Crédito", Concepto="Bonificación", Monto=-3000,
+        Fecha="2026-08-01", PeriodoImputado="2026-08",
+    )
+    pantalla = PantallaEstadoCuenta(conn)
+    qtbot.addWidget(pantalla)
+    assert "Cargos especiales imputados" not in pantalla.etiqueta_datos_profesional.text()
+
+    pantalla.pestanas.setCurrentWidget(pantalla.tabla_cargos)
+    texto = pantalla.etiqueta_datos_profesional.text()
+    assert 'Cargos especiales imputados al mes actual: <span style="color:black;">$ 8.000,00</span>' in texto
+    assert (
+        f'Cargos especiales imputados al mes anterior: <span style="color:{COLOR_ROJO};">-$ 3.000,00</span>'
+        in texto
+    )
 
 
 def test_combo_profesional_usa_formato_canonico(qtbot, conn):
@@ -129,17 +156,23 @@ def test_tabla_pagos_columnas_y_formato_igual_a_registrar_pago(qtbot, conn):
     assert pantalla.tabla_pagos.item(0, 8).text() == "No"
 
 
-def test_lista_cargos_especiales_del_profesional(qtbot, conn):
+def test_tabla_cargos_columnas_y_formato_igual_a_cargos_especiales(qtbot, conn):
     id_prof = _crear_profesional(conn)
     obtener_repositorio(conn, "CargoEspecial").crear(
         IdProfesional=id_prof, Tipo="Débito", Concepto="Depósito llave", Monto=2000,
+        Fecha="2026-09-02", PeriodoImputado="2026-09",
     )
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
 
+    assert [pantalla.tabla_cargos.horizontalHeaderItem(i).text() for i in range(pantalla.tabla_cargos.columnCount())] == [
+        "Fecha", "Tipo", "Concepto", "Monto", "Período imputado",
+    ]
     assert pantalla.tabla_cargos.rowCount() == 1
-    assert pantalla.tabla_cargos.item(0, 1).text() == "Depósito llave"
-    assert pantalla.tabla_cargos.item(0, 2).text() == formatear_moneda(2000)
+    assert pantalla.tabla_cargos.item(0, 1).text() == "Débito"
+    assert pantalla.tabla_cargos.item(0, 2).text() == "Depósito llave"
+    assert pantalla.tabla_cargos.item(0, 3).text() == formatear_moneda(2000)
+    assert pantalla.tabla_cargos.item(0, 4).text() == "2026-09"
 
 
 def test_no_mezcla_datos_de_otros_profesionales(qtbot, conn):
