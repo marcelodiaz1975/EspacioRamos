@@ -116,7 +116,7 @@ def _texto_valor_bonificado(valor: float | None, fecha_desde: str, periodo_en_cu
     de esos meses (aumentos, etc.) todavía pueden no estar definidos."""
     if fecha_desde[:7] > periodo_en_curso:
         return ""
-    return f"$ {valor:,.2f}" if valor is not None else ""
+    return formatear_moneda(valor) if valor is not None else ""
 
 
 def _linea_divisoria() -> QFrame:

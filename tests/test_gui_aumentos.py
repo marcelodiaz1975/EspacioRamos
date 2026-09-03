@@ -52,7 +52,7 @@ def test_diferencia_se_calcula_automaticamente(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.spin_porcentaje.setValue(10)
     pantalla._simular()
-    assert pantalla.tabla.item(0, 3).text() == "+100.00"
+    assert pantalla.tabla.item(0, 3).text() == "+100,00"
 
 
 def test_editar_celda_recalcula_diferencia(qtbot, conn):
@@ -63,7 +63,7 @@ def test_editar_celda_recalcula_diferencia(qtbot, conn):
     pantalla._simular()
 
     pantalla.tabla.item(0, 2).setText("1200.00")  # override manual del valor regular nuevo
-    assert pantalla.tabla.item(0, 3).text() == "+200.00"
+    assert pantalla.tabla.item(0, 3).text() == "+200,00"
 
 
 def test_confirmar_sin_simular_no_falla(qtbot, conn):

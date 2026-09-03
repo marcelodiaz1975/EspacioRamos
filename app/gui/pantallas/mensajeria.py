@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import fecha_actual, periodo_actual
+from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.negocio.mensajeria import (
     COLORES_ENVIADOS,
@@ -232,8 +233,8 @@ class CentroMensajeria(QWidget):
                 self.tabla.setItem(fila_idx, 0, QTableWidgetItem(_nombre_apellido(profesional)))
                 self.tabla.setItem(fila_idx, 1, QTableWidgetItem(profesional["IdCodigo"] or ""))
                 self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_ESTADO_TEXTO.get(color, "")))
-                self.tabla.setItem(fila_idx, 3, QTableWidgetItem(f"$ {profesional['SaldoCuentaAnterior']:,.2f}"))
-                self.tabla.setItem(fila_idx, 4, QTableWidgetItem(f"$ {saldo_actual:,.2f}"))
+                self.tabla.setItem(fila_idx, 3, QTableWidgetItem(formatear_moneda(profesional["SaldoCuentaAnterior"])))
+                self.tabla.setItem(fila_idx, 4, QTableWidgetItem(formatear_moneda(saldo_actual)))
                 self.tabla.setItem(fila_idx, _COLUMNA_ENVIADA, self._item_enviada(profesional, color, periodo))
 
                 boton = QPushButton("Generar texto")

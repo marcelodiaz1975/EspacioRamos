@@ -11,6 +11,7 @@ import sqlite3
 from PySide6.QtWidgets import QMessageBox
 
 from app.gui.crud_generico import Campo, PantallaCRUD
+from app.negocio.formato import formatear_moneda
 from app.negocio.gastos_operativos import gasto_en_conflicto
 from app.negocio.listas_editables import opciones_lista
 from app.repositorio.registro import obtener_repositorio
@@ -196,7 +197,7 @@ def _resolver_conflicto_gasto(parent, conn: sqlite3.Connection, valores: dict, r
     respuesta = QMessageBox.question(
         parent, "Conflicto de origen",
         f"Ya existe un gasto operativo \"{conflicto['Concepto']}\" del período {conflicto['Periodo']} con "
-        f"origen \"{conflicto['Origen']}\" (${conflicto['Monto']:,.2f}). No pueden convivir un origen Manual "
+        f"origen \"{conflicto['Origen']}\" ({formatear_moneda(conflicto['Monto'])}). No pueden convivir un origen Manual "
         f"y uno Importado para el mismo concepto y período.\n\n¿Reemplazarlo por este nuevo valor "
         f"(\"{valores.get('Origen')}\")?",
     )

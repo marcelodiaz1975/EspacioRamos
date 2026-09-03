@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from app.negocio.avance_mes import avanzar_mes, porcentaje_aumento_del_periodo
 from app.negocio.backup import generar_backup
 from app.negocio.dias import fecha_actual, periodo_actual
-from app.negocio.formato import mes_texto, periodo_mm_aaaa
+from app.negocio.formato import formatear_moneda, mes_texto, periodo_mm_aaaa
 from app.negocio.panel_control import Alertas, calcular_alertas
 
 _TITULOS_ALERTA = {
@@ -30,8 +30,8 @@ _TITULOS_ALERTA = {
 }
 
 _ETIQUETA_FILA = {
-    "deuda_regulares": lambda f: f"{f['Apellido']} — saldo anterior $ {f['SaldoCuentaAnterior']:,.2f}",
-    "deuda_aisladas": lambda f: f"{f['Apellido']} — saldo anterior $ {f['SaldoCuentaAnterior']:,.2f}",
+    "deuda_regulares": lambda f: f"{f['Apellido']} — saldo anterior {formatear_moneda(f['SaldoCuentaAnterior'])}",
+    "deuda_aisladas": lambda f: f"{f['Apellido']} — saldo anterior {formatear_moneda(f['SaldoCuentaAnterior'])}",
     "liquidaciones_regeneradas_no_enviadas": lambda f: f"Liquidación #{f['IdLiquidacion']} — período {f['Periodo']}",
     "planes_con_cuotas_vencidas": lambda f: f"Plan #{f['IdPlan']}",
     "fechas_especiales_proximas": lambda f: f"{f['Fecha']} — {f['Descripcion'] or f['Tipo']}",

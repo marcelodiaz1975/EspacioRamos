@@ -1,8 +1,11 @@
 import pytest
+from PySide6.QtCore import Qt
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.estado_cuenta import PantallaEstadoCuenta
+from app.negocio.formato import formatear_moneda
+from app.negocio.pagos import registrar_pago
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -10,28 +13,79 @@ from app.repositorio.registro import obtener_repositorio
 def conn(tmp_path):
     connection = init_database(tmp_path / "test.db")
     sembrar_valores_por_defecto(connection)
+    connection.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-09-05' WHERE IdConfiguracion = 1"
+    )
     yield connection
     connection.close()
 
 
-def _crear_profesional(conn, apellido="Gómez", saldo_actual=100.0, saldo_anterior=50.0):
+def _crear_profesional(conn, apellido="Gómez", saldo_actual=100.0, saldo_anterior=50.0, id_codigo=None):
     return obtener_repositorio(conn, "Profesional").crear(
-        CategoriaProfesional="R", Apellido=apellido, SaldoCuentaActual=saldo_actual, SaldoCuentaAnterior=saldo_anterior,
+        CategoriaProfesional="R", Apellido=apellido, SaldoCuentaActual=saldo_actual,
+        SaldoCuentaAnterior=saldo_anterior, IdCodigo=id_codigo,
     )
+
+
+def _seleccionar_profesional(pantalla, id_profesional):
+    pantalla.combo_profesional.setCurrentIndex(pantalla.combo_profesional.findData(id_profesional))
 
 
 def test_sin_profesionales_no_falla(qtbot, conn):
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.etiqueta_saldo_actual.text() == "Saldo actual: —"
+    assert pantalla.etiqueta_datos_profesional.text() == (
+        "Saldo actual: — - Saldo anterior: — - "
+        "Pagos imputados al mes actual: — - Pagos imputados al mes anterior: —"
+    )
 
 
 def test_muestra_saldos_del_profesional_seleccionado(qtbot, conn):
-    _crear_profesional(conn, saldo_actual=1234.5, saldo_anterior=678.9)
+    _crear_profesional(conn, saldo_actual=1234.5, saldo_anterior=-678.9)
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.etiqueta_saldo_actual.text() == "Saldo actual: $ 1,234.50"
-    assert pantalla.etiqueta_saldo_anterior.text() == "Saldo anterior: $ 678.90"
+    assert pantalla.etiqueta_datos_profesional.text() == (
+        "Saldo actual: $ 1.234,50 - Saldo anterior: -$ 678,90 - "
+        "Pagos imputados al mes actual: $ 0,00 - Pagos imputados al mes anterior: $ 0,00"
+    )
+
+
+def test_pagos_imputados_al_mes_actual_y_anterior_se_suman_en_valor_absoluto(qtbot, conn):
+    id_prof = _crear_profesional(conn)
+    registrar_pago(conn, id_profesional=id_prof, monto=-12000, medio_pago="Transferencia", periodo_imputado="2026-09")
+    registrar_pago(conn, id_profesional=id_prof, monto=-5000, medio_pago="Transferencia", periodo_imputado="2026-08")
+    pantalla = PantallaEstadoCuenta(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.etiqueta_datos_profesional.text()
+    assert "Pagos imputados al mes actual: $ 12.000,00" in texto
+    assert "Pagos imputados al mes anterior: $ 5.000,00" in texto
+
+
+def test_combo_profesional_usa_formato_canonico(qtbot, conn):
+    _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    pantalla = PantallaEstadoCuenta(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.combo_profesional.currentText() == "R1 - Lo Veci"
+
+
+def test_combo_profesional_busca_por_codigo_o_nombre(qtbot, conn):
+    """Además del formato canónico, el filtro del completer tiene que matchear
+    en cualquier parte del texto (no solo desde el principio) para que buscar
+    por nombre encuentre resultados aunque el código vaya primero."""
+    pantalla = PantallaEstadoCuenta(conn)
+    qtbot.addWidget(pantalla)
+    completador = pantalla.combo_profesional.completer()
+    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert completador.caseSensitivity() == Qt.CaseSensitivity.CaseInsensitive
+
+
+def test_texto_invalido_vuelve_al_formato_de_la_seleccion_vigente(qtbot, conn):
+    _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    pantalla = PantallaEstadoCuenta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_profesional.setEditText("texto suelto que no matchea")
+    pantalla.combo_profesional.lineEdit().editingFinished.emit()
+    assert pantalla.combo_profesional.currentText() == "R1 - Lo Veci"
 
 
 def test_lista_liquidaciones_del_profesional(qtbot, conn):
@@ -50,18 +104,24 @@ def test_lista_liquidaciones_del_profesional(qtbot, conn):
     assert pantalla.tabla_liquidaciones.rowCount() == 2
     assert pantalla.tabla_liquidaciones.item(0, 0).text() == "2026-08"  # más reciente primero
     assert pantalla.tabla_liquidaciones.item(1, 0).text() == "2026-07"
+    assert pantalla.tabla_liquidaciones.item(0, 2).text() == formatear_moneda(1100)
 
 
-def test_lista_pagos_del_profesional(qtbot, conn):
+def test_tabla_pagos_columnas_y_formato_igual_a_registrar_pago(qtbot, conn):
     id_prof = _crear_profesional(conn)
-    obtener_repositorio(conn, "HistorialPagos").crear(
-        IdProfesional=id_prof, Fecha="2026-08-01", Monto=500, MedioPago="Transferencia a cta Celeste",
-    )
+    registrar_pago(conn, id_profesional=id_prof, monto=-500, medio_pago="Transferencia a cta Celeste", periodo_imputado="2026-09")
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
 
+    assert [pantalla.tabla_pagos.horizontalHeaderItem(i).text() for i in range(pantalla.tabla_pagos.columnCount())] == [
+        "Fecha de carga", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
+        "Saldo anterior", "Nuevo saldo", "Registro modificado", "Es ajuste",
+    ]
     assert pantalla.tabla_pagos.rowCount() == 1
-    assert pantalla.tabla_pagos.item(0, 1).text() == "$ 500.00"
+    assert pantalla.tabla_pagos.item(0, 2).text() == "-$ 500,00"
+    assert pantalla.tabla_pagos.item(0, 3).text() == "Transferencia a cta Celeste"
+    assert pantalla.tabla_pagos.item(0, 7).text() == "No"
+    assert pantalla.tabla_pagos.item(0, 8).text() == "No"
 
 
 def test_lista_cargos_especiales_del_profesional(qtbot, conn):
@@ -74,6 +134,7 @@ def test_lista_cargos_especiales_del_profesional(qtbot, conn):
 
     assert pantalla.tabla_cargos.rowCount() == 1
     assert pantalla.tabla_cargos.item(0, 1).text() == "Depósito llave"
+    assert pantalla.tabla_cargos.item(0, 2).text() == formatear_moneda(2000)
 
 
 def test_no_mezcla_datos_de_otros_profesionales(qtbot, conn):
@@ -83,8 +144,7 @@ def test_no_mezcla_datos_de_otros_profesionales(qtbot, conn):
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
 
-    indice_gomez = pantalla.combo_profesional.findData(id_prof1)
-    pantalla.combo_profesional.setCurrentIndex(indice_gomez)
+    _seleccionar_profesional(pantalla, id_prof1)
     assert pantalla.tabla_cargos.rowCount() == 0
 
 
@@ -95,12 +155,10 @@ def test_cambiar_de_profesional_actualiza_las_tablas(qtbot, conn):
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
 
-    indice_perez = pantalla.combo_profesional.findData(id_prof2)
-    pantalla.combo_profesional.setCurrentIndex(indice_perez)
+    _seleccionar_profesional(pantalla, id_prof2)
     assert pantalla.tabla_cargos.rowCount() == 1
 
-    indice_gomez = pantalla.combo_profesional.findData(id_prof1)
-    pantalla.combo_profesional.setCurrentIndex(indice_gomez)
+    _seleccionar_profesional(pantalla, id_prof1)
     assert pantalla.tabla_cargos.rowCount() == 0
 
 
@@ -110,9 +168,7 @@ def test_actualizar_conserva_la_seleccion(qtbot, conn):
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
 
-    indice_gomez = pantalla.combo_profesional.findData(id_prof1)
-    pantalla.combo_profesional.setCurrentIndex(indice_gomez)
-
+    _seleccionar_profesional(pantalla, id_prof1)
     pantalla.actualizar()
 
     assert pantalla.combo_profesional.currentData() == id_prof1

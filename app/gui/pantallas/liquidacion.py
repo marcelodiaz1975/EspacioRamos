@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import fecha_actual, periodo_actual
+from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion
 from app.negocio.mensajes import nombre_para_mensaje
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
@@ -91,13 +92,13 @@ class ProcesoLiquidacion(QWidget):
 
             nombre = f"{nombre_para_mensaje(profesional)} ({profesional['Apellido']})"
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(nombre))
-            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(f"$ {profesional['SaldoCuentaAnterior']:,.2f}"))
+            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(formatear_moneda(profesional["SaldoCuentaAnterior"])))
 
             try:
                 liquidacion = calcular_liquidacion(
                     self.conn, id_profesional=profesional["IdProfesional"], periodo=periodo
                 )
-                monto_texto = f"$ {liquidacion.monto_generado:,.2f}"
+                monto_texto = formatear_moneda(liquidacion.monto_generado)
             except ValueError as error:
                 monto_texto = str(error)
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(monto_texto))

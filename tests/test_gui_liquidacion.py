@@ -37,7 +37,7 @@ def test_calcula_monto_a_generar_sin_reservas(qtbot, conn):
     conn.commit()
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.tabla.item(0, 3).text() == "$ 0.00"
+    assert pantalla.tabla.item(0, 3).text() == "$ 0,00"
     assert pantalla.tabla.item(0, 4).text() == "Sin emitir"
 
 

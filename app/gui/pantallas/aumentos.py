@@ -32,11 +32,19 @@ from PySide6.QtWidgets import (
 
 from app.negocio.aumentos import confirmar_aumento, simular_aumento
 from app.negocio.dias import periodo_actual
+from app.negocio.formato import formatear_moneda
 from app.repositorio.registro import obtener_repositorio
 
 _ID_CONSULTORIO = Qt.ItemDataRole.UserRole
 _COL_REGULAR_NUEVO = 2
 _COL_AISLADA_NUEVO = 5
+
+
+def _fmt_diferencia(valor: float) -> str:
+    """Signo "+"/"-" explícito (a diferencia de `formatear_moneda`, que
+    nunca antepone "+") y sin símbolo "$" — es un delta, no un monto."""
+    texto = f"{abs(valor):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    return f"{'-' if valor < 0 else '+'}{texto}"
 
 
 class PantallaAumentos(QWidget):
@@ -135,16 +143,23 @@ class PantallaAumentos(QWidget):
             item_consultorio.setData(_ID_CONSULTORIO, f.id_consultorio)
             self.tabla.setItem(i, 0, item_consultorio)
 
-            self._celda_fija(i, 1, f"$ {f.valor_regular_actual:,.2f}")
+            self._celda_fija(i, 1, formatear_moneda(f.valor_regular_actual), valor=f.valor_regular_actual)
             self._celda_editable(i, _COL_REGULAR_NUEVO, f"{f.valor_regular_nuevo:.2f}")
-            self._celda_fija(i, 4, f"$ {f.valor_aislada_actual:,.2f}")
+            self._celda_fija(i, 4, formatear_moneda(f.valor_aislada_actual), valor=f.valor_aislada_actual)
             self._celda_editable(i, _COL_AISLADA_NUEVO, f"{f.valor_aislada_nuevo:.2f}")
         self._recalcular_diferencias()
         self.tabla.resizeColumnsToContents()
 
-    def _celda_fija(self, fila: int, columna: int, texto: str) -> None:
+    def _celda_fija(self, fila: int, columna: int, texto: str, valor: float | None = None) -> None:
+        """`valor`, si se pasa, guarda el número crudo detrás del texto ya
+        formateado (separadores "." de miles y "," de decimales) — así
+        `_recalcular_diferencias` no tiene que volver a parsear el texto
+        mostrado, cosa que además ya no sería ambigua (el "." dejó de
+        significar siempre decimal)."""
         item = QTableWidgetItem(texto)
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        if valor is not None:
+            item.setData(Qt.ItemDataRole.UserRole, valor)
         self.tabla.setItem(fila, columna, item)
 
     def _celda_editable(self, fila: int, columna: int, texto: str) -> None:
@@ -160,14 +175,16 @@ class PantallaAumentos(QWidget):
         try:
             for i in range(self.tabla.rowCount()):
                 try:
-                    actual_reg = float(self.tabla.item(i, 1).text().replace("$", "").replace(",", "").strip())
+                    actual_reg = self.tabla.item(i, 1).data(Qt.ItemDataRole.UserRole)
                     nuevo_reg = float(self.tabla.item(i, _COL_REGULAR_NUEVO).text())
-                    actual_ais = float(self.tabla.item(i, 4).text().replace("$", "").replace(",", "").strip())
+                    actual_ais = self.tabla.item(i, 4).data(Qt.ItemDataRole.UserRole)
                     nuevo_ais = float(self.tabla.item(i, _COL_AISLADA_NUEVO).text())
                 except (ValueError, AttributeError):
                     continue
-                self._celda_fija(i, 3, f"{nuevo_reg - actual_reg:+,.2f}")
-                self._celda_fija(i, 6, f"{nuevo_ais - actual_ais:+,.2f}")
+                if actual_reg is None or actual_ais is None:
+                    continue
+                self._celda_fija(i, 3, _fmt_diferencia(nuevo_reg - actual_reg))
+                self._celda_fija(i, 6, _fmt_diferencia(nuevo_ais - actual_ais))
         finally:
             self.tabla.blockSignals(False)
 

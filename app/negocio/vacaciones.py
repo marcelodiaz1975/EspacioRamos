@@ -41,6 +41,7 @@ from datetime import date
 
 from app.negocio.conflictos_aisladas import aisladas_bloqueadas_por_anulacion, mensaje_conflicto_aislada
 from app.negocio.dias import fecha_actual
+from app.negocio.formato import formatear_moneda
 from app.negocio.valores import (
     calcular_valor_semanal_regular,
     horas_semanales_vigentes,
@@ -151,7 +152,7 @@ def crear_vacacion(
         valor_excedente = valor_bonificado_bruto - valor_bonificado
         advertencias.append(
             "La vacación excede el cupo disponible: se bonifican "
-            f"{fraccion_consumida:.2f} semana(s) (cupo agotado) y ${valor_excedente:,.2f} "
+            f"{fraccion_consumida:.2f} semana(s) (cupo agotado) y {formatear_moneda(valor_excedente)} "
             "del período se facturan normalmente en la liquidación"
         )
     else:

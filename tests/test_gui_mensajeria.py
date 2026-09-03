@@ -92,8 +92,8 @@ def test_centro_mensajeria_saldo_actual_suma_anterior_y_actual(qtbot, conn):
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
-    assert pantalla.tabla.item(0, 3).text() == "$ 1,000.00"
-    assert pantalla.tabla.item(0, 4).text() == "$ 1,500.00"
+    assert pantalla.tabla.item(0, 3).text() == "$ 1.000,00"
+    assert pantalla.tabla.item(0, 4).text() == "$ 1.500,00"
 
 
 def test_centro_mensajeria_cambia_a_categoria_aislada(qtbot, conn):
