@@ -627,6 +627,18 @@ def test_monto_a_refinanciar_se_sugiere_segun_saldo_atrasado_y_plan_activo(qtbot
     assert panel.spin_monto.value() == pytest.approx(6000)  # 0 de saldo + 6000 de cuotas del plan a reemplazar
 
 
+def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
+    """Confirmado por la clienta: el selector de profesional buscable
+    corre en todos los formularios del sistema, este incluido — tanto en
+    Registrar pago como en Planes de pago."""
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_pagos, pantalla.panel_planes):
+        completador = panel.combo_profesional.completer()
+        assert completador.filterMode() == Qt.MatchFlag.MatchContains
+        assert completador.caseSensitivity() == Qt.CaseSensitivity.CaseInsensitive
+
+
 def test_combo_profesional_registrar_pago_filtra_la_tabla(qtbot, conn):
     id_profesional_1 = _crear_profesional(conn)
     id_profesional_2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
@@ -771,7 +783,9 @@ def test_fecha_de_carga_muestra_segundos(qtbot, conn):
     assert f":{segundos}hs" in panel.tabla.item(0, 0).text()
 
 
-def test_saldo_anterior_y_nuevo_saldo_no_se_colorean_en_negativo(qtbot, conn):
+def test_saldo_anterior_y_nuevo_saldo_se_colorean_en_negativo(qtbot, conn):
+    """Confirmado por la clienta: Saldo anterior y Nuevo saldo respetan el
+    mismo color rojo-si-negativo que Monto, igual que en todo el sistema."""
     from PySide6.QtGui import QColor
 
     id_profesional = _crear_profesional(conn, saldo=100)
@@ -782,9 +796,9 @@ def test_saldo_anterior_y_nuevo_saldo_no_se_colorean_en_negativo(qtbot, conn):
     panel.spin_monto.setValue(-500)  # deja el saldo en negativo
     panel._registrar()
 
-    assert panel.tabla.item(0, 6).foreground().color() != QColor("red")
-    assert panel.tabla.item(0, 7).foreground().color() != QColor("red")
-    assert panel.tabla.item(0, 3).foreground().color() == QColor("red")  # el Monto sí
+    assert panel.tabla.item(0, 6).foreground().color() != QColor("red")  # saldo anterior: 100, positivo
+    assert panel.tabla.item(0, 7).foreground().color() == QColor("red")  # nuevo saldo: -400, negativo
+    assert panel.tabla.item(0, 3).foreground().color() == QColor("red")  # el Monto también
 
 
 def test_eliminar_pago_seleccionado_revierte_saldo(qtbot, conn, monkeypatch):

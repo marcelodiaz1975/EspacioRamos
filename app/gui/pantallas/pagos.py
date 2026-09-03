@@ -36,6 +36,7 @@ from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import fecha_a_dia_semana, periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import regenerar_si_corresponde
@@ -159,6 +160,7 @@ class _PanelRegistrarPago(QWidget):
         self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
@@ -360,8 +362,8 @@ class _PanelRegistrarPago(QWidget):
             self._poner_item_monto(i, 3, r["Monto"])
             self.tabla.setItem(i, 4, QTableWidgetItem(r["MedioPago"] or ""))
             self.tabla.setItem(i, 5, QTableWidgetItem(r["CuentaReceptora"] or ""))
-            self.tabla.setItem(i, 6, QTableWidgetItem(formatear_moneda(r["SaldoAnterior"] or 0.0)))
-            self.tabla.setItem(i, 7, QTableWidgetItem(formatear_moneda(r["SaldoNuevo"] or 0.0)))
+            self._poner_item_monto(i, 6, r["SaldoAnterior"])
+            self._poner_item_monto(i, 7, r["SaldoNuevo"])
             self.tabla.setItem(i, 8, QTableWidgetItem("Sí" if r["RegistroModificado"] else "No"))
             self.tabla.setItem(i, 9, QTableWidgetItem("Sí" if r["EsAjuste"] else "No"))
         self.tabla.resizeColumnsToContents()
@@ -625,6 +627,7 @@ class _PanelPlanesPago(QWidget):
         self.combo_profesional.addItem("Seleccionar profesional…", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIA_R):
             self.combo_profesional.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)

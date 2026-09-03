@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
@@ -49,6 +49,24 @@ def _preparar(conn):
     )
     conn.commit()
     return id_profesional
+
+
+def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
+    """Confirmado por la clienta: el selector de profesional buscable
+    corre en todos los formularios del sistema — Vacaciones, Licencias,
+    Ausencias y Cargos especiales incluidos."""
+    pantalla_ausencias = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla_ausencias)
+    for panel in (
+        pantalla_ausencias.panel_vacaciones, pantalla_ausencias.panel_licencias, pantalla_ausencias.panel_ausencias,
+    ):
+        completador = panel.combo_profesional.completer()
+        assert completador.filterMode() == Qt.MatchFlag.MatchContains
+
+    pantalla_cargos = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla_cargos)
+    completador = pantalla_cargos.panel.combo_profesional.completer()
+    assert completador.filterMode() == Qt.MatchFlag.MatchContains
 
 
 def test_crear_vacacion_persiste(qtbot, conn):

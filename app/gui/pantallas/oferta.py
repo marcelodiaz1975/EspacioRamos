@@ -48,6 +48,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.pantallas.reservas import _opciones_profesional
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import SUBCARPETA_OFERTA, carpeta_archivos_varios
 from app.negocio.dias import DIAS_SEMANA, fecha_actual
 from app.negocio.historial_oferta import guardar_busqueda, regenerar_pdf, regenerar_texto
@@ -166,6 +168,7 @@ class PantallaOferta(QWidget):
         form.addWidget(QLabel("Nueva búsqueda"))
 
         self.combo_profesional = QComboBox()
+        habilitar_busqueda_profesional(self.combo_profesional)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
@@ -316,9 +319,8 @@ class PantallaOferta(QWidget):
 
     def _cargar_profesionales(self) -> None:
         self.combo_profesional.clear()
-        for f in self.conn.execute("SELECT IdProfesional, Apellido, NombrePila FROM Profesional ORDER BY Apellido"):
-            nombre = f"{f['Apellido']}, {f['NombrePila'] or ''}".strip(", ")
-            self.combo_profesional.addItem(nombre, f["IdProfesional"])
+        for id_, etiqueta in _opciones_profesional(self.conn):
+            self.combo_profesional.addItem(etiqueta, id_)
 
     def _cargar_edificios(self) -> None:
         self.lista_edificios.clear()

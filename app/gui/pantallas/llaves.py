@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.listas_editables import opciones_lista
 from app.negocio.llaves import (
     agregar_acceso_llave,
@@ -921,6 +922,7 @@ class _DialogoAsignar(QDialog):
         self.combo_profesional = QComboBox()
         for id_, etiqueta in _opciones_profesional(conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_profesional)
         layout.addRow("Profesional", self.combo_profesional)
 
         self.campo_fecha = _fecha_edit()

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -27,7 +26,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.pantallas.pagos import _fmt_fecha_hora_larga
-from app.gui.pantallas.reservas import _texto_profesional
+from app.gui.pantallas.reservas import _opciones_profesional
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import periodo_actual, periodo_anterior
 from app.negocio.formato import formatear_moneda
 from app.repositorio.registro import obtener_repositorio
@@ -35,18 +35,19 @@ from app.repositorio.registro import obtener_repositorio
 _ANCHO_COMBO_PROFESIONAL = 260
 
 
-def _opciones_profesional(conn: sqlite3.Connection) -> list[tuple[int, str]]:
-    filas = conn.execute(
-        "SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila FROM Profesional ORDER BY Apellido"
-    ).fetchall()
-    return [(f["IdProfesional"], _texto_profesional(f)) for f in filas]
-
-
 def _item_monto(valor: float | None) -> QTableWidgetItem:
     item = QTableWidgetItem(formatear_moneda(valor or 0.0))
     if (valor or 0.0) < 0:
         item.setForeground(QColor("red"))
     return item
+
+
+def _fmt_dato(prefijo: str, valor: float) -> str:
+    """Mismo criterio de color que el resto del sistema: negativo en
+    rojo (span de texto enriquecido, como ya hace Pagos - Registrar pago
+    con Saldo actual/Nuevo saldo)."""
+    color = "red" if valor < 0 else "black"
+    return f'{prefijo}: <span style="color:{color};">{formatear_moneda(valor)}</span>'
 
 
 class PantallaEstadoCuenta(QWidget):
@@ -64,13 +65,9 @@ class PantallaEstadoCuenta(QWidget):
 
         fila_profesional = QHBoxLayout()
         self.combo_profesional = QComboBox()
-        self.combo_profesional.setEditable(True)
-        self.combo_profesional.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self.combo_profesional.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._actualizar_datos)
-        self.combo_profesional.lineEdit().editingFinished.connect(self._confirmar_texto_profesional)
         fila_profesional.addWidget(QLabel("Profesional:"))
         fila_profesional.addWidget(self.combo_profesional, stretch=1)
         layout.addLayout(fila_profesional)
@@ -98,22 +95,6 @@ class PantallaEstadoCuenta(QWidget):
         tabla.setHorizontalHeaderLabels(encabezados)
         tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         return tabla
-
-    def _confirmar_texto_profesional(self) -> None:
-        """Con el combo editable (búsqueda por código o nombre), si lo que
-        quedó tipeado no coincide exacto con ninguna opción, vuelve al
-        texto de la selección vigente en vez de dejar un texto suelto que
-        no se corresponde con ningún profesional."""
-        texto = self.combo_profesional.currentText()
-        indice = self.combo_profesional.findText(texto, Qt.MatchFlag.MatchFixedString)
-        if indice >= 0:
-            if indice != self.combo_profesional.currentIndex():
-                self.combo_profesional.setCurrentIndex(indice)
-            return
-        indice_actual = self.combo_profesional.currentIndex()
-        self.combo_profesional.setEditText(
-            self.combo_profesional.itemText(indice_actual) if indice_actual >= 0 else ""
-        )
 
     def actualizar(self) -> None:
         """Repuebla el combo de profesionales (por si se cargó alguno
@@ -147,10 +128,12 @@ class PantallaEstadoCuenta(QWidget):
         pagos_mes_actual = sum(p["Monto"] for p in pagos if p["PeriodoImputado"] == periodo_act)
         pagos_mes_anterior = sum(p["Monto"] for p in pagos if p["PeriodoImputado"] == periodo_ant)
         self.etiqueta_datos_profesional.setText(
-            f"Saldo actual: {formatear_moneda(profesional['SaldoCuentaActual'] or 0.0)} - "
-            f"Saldo anterior: {formatear_moneda(profesional['SaldoCuentaAnterior'] or 0.0)} - "
-            f"Pagos imputados al mes actual: {formatear_moneda(abs(pagos_mes_actual))} - "
-            f"Pagos imputados al mes anterior: {formatear_moneda(abs(pagos_mes_anterior))}"
+            " - ".join([
+                _fmt_dato("Saldo actual", profesional["SaldoCuentaActual"] or 0.0),
+                _fmt_dato("Saldo anterior", profesional["SaldoCuentaAnterior"] or 0.0),
+                _fmt_dato("Pagos imputados al mes actual", pagos_mes_actual),
+                _fmt_dato("Pagos imputados al mes anterior", pagos_mes_anterior),
+            ])
         )
 
         self._actualizar_liquidaciones(id_profesional)
@@ -188,8 +171,8 @@ class PantallaEstadoCuenta(QWidget):
             self.tabla_pagos.setItem(i, 2, _item_monto(r["Monto"]))
             self.tabla_pagos.setItem(i, 3, QTableWidgetItem(r["MedioPago"] or ""))
             self.tabla_pagos.setItem(i, 4, QTableWidgetItem(r["CuentaReceptora"] or ""))
-            self.tabla_pagos.setItem(i, 5, QTableWidgetItem(formatear_moneda(r["SaldoAnterior"] or 0.0)))
-            self.tabla_pagos.setItem(i, 6, QTableWidgetItem(formatear_moneda(r["SaldoNuevo"] or 0.0)))
+            self.tabla_pagos.setItem(i, 5, _item_monto(r["SaldoAnterior"]))
+            self.tabla_pagos.setItem(i, 6, _item_monto(r["SaldoNuevo"]))
             self.tabla_pagos.setItem(i, 7, QTableWidgetItem("Sí" if r["RegistroModificado"] else "No"))
             self.tabla_pagos.setItem(i, 8, QTableWidgetItem("Sí" if r["EsAjuste"] else "No"))
         self.tabla_pagos.resizeColumnsToContents()

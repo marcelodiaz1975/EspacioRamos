@@ -45,20 +45,25 @@ def test_muestra_saldos_del_profesional_seleccionado(qtbot, conn):
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.etiqueta_datos_profesional.text() == (
-        "Saldo actual: $ 1.234,50 - Saldo anterior: -$ 678,90 - "
-        "Pagos imputados al mes actual: $ 0,00 - Pagos imputados al mes anterior: $ 0,00"
+        'Saldo actual: <span style="color:black;">$ 1.234,50</span> - '
+        'Saldo anterior: <span style="color:red;">-$ 678,90</span> - '
+        'Pagos imputados al mes actual: <span style="color:black;">$ 0,00</span> - '
+        'Pagos imputados al mes anterior: <span style="color:black;">$ 0,00</span>'
     )
 
 
-def test_pagos_imputados_al_mes_actual_y_anterior_se_suman_en_valor_absoluto(qtbot, conn):
+def test_pagos_imputados_al_mes_actual_y_anterior_respetan_signo_y_color(qtbot, conn):
+    """Confirmado por la clienta: los pagos (con signo negativo, tal como
+    se guardan) se muestran con su signo real y en rojo si son negativos —
+    no en valor absoluto."""
     id_prof = _crear_profesional(conn)
     registrar_pago(conn, id_profesional=id_prof, monto=-12000, medio_pago="Transferencia", periodo_imputado="2026-09")
     registrar_pago(conn, id_profesional=id_prof, monto=-5000, medio_pago="Transferencia", periodo_imputado="2026-08")
     pantalla = PantallaEstadoCuenta(conn)
     qtbot.addWidget(pantalla)
     texto = pantalla.etiqueta_datos_profesional.text()
-    assert "Pagos imputados al mes actual: $ 12.000,00" in texto
-    assert "Pagos imputados al mes anterior: $ 5.000,00" in texto
+    assert 'Pagos imputados al mes actual: <span style="color:red;">-$ 12.000,00</span>' in texto
+    assert 'Pagos imputados al mes anterior: <span style="color:red;">-$ 5.000,00</span>' in texto
 
 
 def test_combo_profesional_usa_formato_canonico(qtbot, conn):

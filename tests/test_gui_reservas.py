@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
@@ -34,6 +34,16 @@ def _preparar(conn):
     conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
     conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Gómez')")
     conn.commit()
+
+
+def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
+    """Confirmado por la clienta: el selector de profesional buscable
+    corre en todos los formularios del sistema, Reservas incluido."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+        completador = panel.combo_profesional.completer()
+        assert completador.filterMode() == Qt.MatchFlag.MatchContains
 
 
 def test_crear_reserva_regular_sin_conflicto_persiste(qtbot, conn):

@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from app.db.init_db import init_database
@@ -37,6 +38,17 @@ def _crear_tipo_con_copia(conn, tipo="Unidad", valor_deposito_actual=3000):
     ingresar_copias(conn, id_llave=id_llave, cantidad=1)
     conn.commit()
     return id_llave
+
+
+def test_combo_profesional_asignar_es_buscable_por_codigo_o_nombre(qtbot, conn):
+    """Confirmado por la clienta: el selector de profesional buscable
+    corre en todos los formularios del sistema, Llaves incluido."""
+    id_llave = _crear_tipo_con_copia(conn)
+    tipo = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    dialogo = _DialogoAsignar(conn, tipo, 1)
+    qtbot.addWidget(dialogo)
+    completador = dialogo.combo_profesional.completer()
+    assert completador.filterMode() == Qt.MatchFlag.MatchContains
 
 
 def _crear_edificio_con_unidad(conn, nombre="Ramos 1", departamento="1ro A"):

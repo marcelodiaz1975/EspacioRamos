@@ -61,6 +61,7 @@ from app.gui.pantallas.reservas import (
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
 from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual
 from app.negocio.formato import formatear_moneda
@@ -217,6 +218,7 @@ class _PanelVacaciones(QWidget):
         self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
@@ -513,6 +515,7 @@ class _PanelLicencias(QWidget):
         self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
@@ -810,6 +813,7 @@ class _PanelAusencias(QWidget):
         self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
@@ -1096,6 +1100,7 @@ class _PanelCargosEspeciales(QWidget):
         self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self.actualizar)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)

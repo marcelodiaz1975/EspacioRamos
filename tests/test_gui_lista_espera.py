@@ -30,6 +30,23 @@ def _crear_profesional(conn, apellido="Gómez"):
     ]
 
 
+def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn):
+    """Confirmado por la clienta: el selector de profesional buscable
+    corre en todos los formularios del sistema, Lista de espera incluida
+    — y con el mismo formato canónico "{código} - {tratamiento} {nombre}
+    {apellido}" que el resto (antes mostraba "Apellido, Nombre")."""
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido, NombrePila, IdCodigo) "
+        "VALUES ('R', 'Lo Veci', 'Virginia', 'R1')"
+    )
+    conn.commit()
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    completador = pantalla.combo_profesional.completer()
+    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert pantalla.combo_profesional.itemText(0) == "R1 - Virginia Lo Veci"
+
+
 def test_crear_pedido_sin_dias_no_persiste(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)

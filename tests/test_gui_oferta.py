@@ -45,6 +45,17 @@ def profesional_y_consultorio(conn):
     return id_prof, id_edificio
 
 
+def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn, profesional_y_consultorio):
+    """Confirmado por la clienta: el selector de profesional buscable
+    corre en todos los formularios del sistema, Oferta incluida — con el
+    mismo formato canónico que el resto (antes mostraba "Apellido, Nombre")."""
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    completador = pantalla.combo_profesional.completer()
+    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert pantalla.combo_profesional.itemText(0) == "Lic. Virginia Lo Veci"
+
+
 def test_sin_dias_no_genera_ni_guarda_historial(qtbot, conn, profesional_y_consultorio):
     pantalla = PantallaOferta(conn)
     qtbot.addWidget(pantalla)
