@@ -37,6 +37,7 @@ from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, texto_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import fecha_a_dia_semana, periodo_actual
 from app.negocio.formato import formatear_moneda
@@ -121,13 +122,16 @@ class PantallaPagos(QWidget):
         pestanas = QTabWidget()
         self.panel_pagos = _PanelRegistrarPago(conn)
         self.panel_planes = _PanelPlanesPago(conn)
+        self.panel_estado_cuenta = _PanelEstadoCuentaPagos(conn)
         pestanas.addTab(self.panel_pagos, "Registrar pago")
         pestanas.addTab(self.panel_planes, "Planes de pago")
+        pestanas.addTab(self.panel_estado_cuenta, "Estado de cuenta")
         layout.addWidget(pestanas, stretch=1)
 
     def actualizar(self) -> None:
         self.panel_pagos.actualizar()
         self.panel_planes.actualizar()
+        self.panel_estado_cuenta.actualizar()
 
 
 class _PanelRegistrarPago(QWidget):
@@ -837,3 +841,76 @@ class _PanelPlanesPago(QWidget):
         self.actualizar()
         self._profesional_cambio()
         self.combo_profesional.setFocus()
+
+
+class _PanelEstadoCuentaPagos(QWidget):
+    """Antes vivía en la pantalla separada "Estado de cuenta" (F25),
+    suprimida — mismos campos y formatos que Registrar pago, sin la
+    columna Profesional (ya fija en el selector de arriba)."""
+
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.conn = conn
+        self._armar_ui()
+        self.actualizar()
+
+    def _armar_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        fila_profesional = QHBoxLayout()
+        self.combo_profesional = QComboBox()
+        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        habilitar_busqueda_profesional(self.combo_profesional)
+        self.combo_profesional.currentIndexChanged.connect(self._actualizar_datos)
+        fila_profesional.addWidget(QLabel("Profesional:"))
+        fila_profesional.addWidget(self.combo_profesional, stretch=1)
+        layout.addLayout(fila_profesional)
+
+        self.etiqueta_resumen = QLabel()
+        layout.addWidget(self.etiqueta_resumen)
+
+        self.tabla = QTableWidget()
+        self.tabla.setColumnCount(9)
+        self.tabla.setHorizontalHeaderLabels([
+            "Fecha de carga", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
+            "Saldo anterior", "Nuevo saldo", "Registro modificado", "Es ajuste",
+        ])
+        self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        layout.addWidget(self.tabla, stretch=1)
+
+    def actualizar(self) -> None:
+        id_anterior = self.combo_profesional.currentData()
+        self.combo_profesional.blockSignals(True)
+        self.combo_profesional.clear()
+        for id_, etiqueta in _opciones_profesional(self.conn):
+            self.combo_profesional.addItem(etiqueta, id_)
+        indice = self.combo_profesional.findData(id_anterior)
+        self.combo_profesional.setCurrentIndex(indice if indice >= 0 else 0)
+        self.combo_profesional.blockSignals(False)
+        self._actualizar_datos()
+
+    def _actualizar_datos(self) -> None:
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            self.etiqueta_resumen.setText(TEXTO_SIN_PROFESIONAL)
+            self.tabla.setRowCount(0)
+            return
+        self.etiqueta_resumen.setText(
+            texto_resumen(self.conn, id_profesional, entidad_imputado="HistorialPagos", etiqueta_imputado="Pagos")
+        )
+        registros = sorted(
+            obtener_repositorio(self.conn, "HistorialPagos").listar(IdProfesional=id_profesional),
+            key=lambda r: -r["IdPago"],
+        )
+        self.tabla.setRowCount(len(registros))
+        for i, r in enumerate(registros):
+            self.tabla.setItem(i, 0, QTableWidgetItem(_fmt_fecha_hora_larga(r["FechaHoraCarga"])))
+            self.tabla.setItem(i, 1, QTableWidgetItem(r["PeriodoImputado"] or ""))
+            self.tabla.setItem(i, 2, item_monto(r["Monto"]))
+            self.tabla.setItem(i, 3, QTableWidgetItem(r["MedioPago"] or ""))
+            self.tabla.setItem(i, 4, QTableWidgetItem(r["CuentaReceptora"] or ""))
+            self.tabla.setItem(i, 5, item_monto(r["SaldoAnterior"]))
+            self.tabla.setItem(i, 6, item_monto(r["SaldoNuevo"]))
+            self.tabla.setItem(i, 7, QTableWidgetItem("Sí" if r["RegistroModificado"] else "No"))
+            self.tabla.setItem(i, 8, QTableWidgetItem("Sí" if r["EsAjuste"] else "No"))
+        self.tabla.resizeColumnsToContents()

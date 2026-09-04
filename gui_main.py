@@ -14,7 +14,6 @@ from app.gui.pantallas.aumentos import PantallaAumentos
 from app.gui.pantallas.bloques_rigidos import PantallaBloquesRigidos
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
-from app.gui.pantallas.estado_cuenta import PantallaEstadoCuenta
 from app.gui.pantallas.grilla import GrillaDisponibilidad
 from app.gui.pantallas.grilla_operativa import PantallaGrillaOperativa
 from app.gui.pantallas.imagenes import PantallaImagenes
@@ -65,7 +64,8 @@ def construir_secciones() -> list[Seccion]:
         Seccion(
             "Liquidación mensual", lambda conn: ProcesoLiquidacion(conn), categoria="Principal",
             ayuda="Genera la liquidación PDF de cada profesional para el período seleccionado, con "
-            "descuentos por feriados/licencias/vacaciones ya aplicados.",
+            "descuentos por feriados/licencias/vacaciones ya aplicados, y el estado de cuenta con su "
+            "historial de liquidaciones emitidas.",
         ),
         Seccion(
             "Centro de mensajería", lambda conn: CentroMensajeria(conn), categoria="Principal",
@@ -99,15 +99,13 @@ def construir_secciones() -> list[Seccion]:
         ),
         Seccion(
             "Cargos especiales", lambda conn: PantallaCargosEspeciales(conn), categoria="Principal",
-            ayuda="Cargos extraordinarios (ajustes puntuales) que se suman a la liquidación de un profesional.",
+            ayuda="Cargos extraordinarios (ajustes puntuales) que se suman a la liquidación de un profesional, "
+            "y el estado de cuenta con su historial de cargos especiales.",
         ),
         Seccion(
             "Pagos", lambda conn: PantallaPagos(conn), categoria="Principal",
-            ayuda="Registro de pagos recibidos y planes de pago con refinanciación e interés por saldos atrasados.",
-        ),
-        Seccion(
-            "Estado de cuenta", lambda conn: PantallaEstadoCuenta(conn), categoria="Principal",
-            ayuda="Historial de liquidaciones y pagos de un profesional, con el saldo acumulado a la fecha.",
+            ayuda="Registro de pagos recibidos, planes de pago con refinanciación e interés por saldos "
+            "atrasados, y estado de cuenta del profesional.",
         ),
         Seccion(
             "Estadísticas", lambda conn: PantallaEstadisticas(conn), categoria="Principal",

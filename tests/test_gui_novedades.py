@@ -1463,3 +1463,51 @@ def test_spin_monto_cargos_especiales_se_pone_rojo_en_negativo(qtbot, conn):
 
     panel.spin_monto.setValue(100)
     assert COLOR_ROJO not in panel.spin_monto.styleSheet()
+
+
+def test_solapa_estado_cuenta_cargos_es_segunda_solapa(qtbot, conn):
+    """Antes vivía en la pantalla separada "Estado de cuenta" (F25),
+    suprimida — ahora es la segunda solapa de Cargos especiales."""
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_estado_cuenta is not None
+    assert pantalla.pestanas.tabText(0) == "Registro de cargos especiales"
+    assert pantalla.pestanas.tabText(1) == "Estado de cuenta"
+
+
+def test_solapa_estado_cuenta_cargos_muestra_saldos_y_tabla_igual_a_registro(qtbot, conn):
+    from app.gui.estilos import COLOR_ROJO
+    from app.negocio.formato import formatear_moneda
+
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Lo Veci", SaldoCuentaActual=1234.5, SaldoCuentaAnterior=-678.9,
+    )
+    conn.execute(
+        "INSERT INTO CargoEspecial (IdProfesional, Tipo, Concepto, Monto, Fecha, PeriodoImputado) "
+        "VALUES (?, 'Débito', 'Depósito llave', 2000, '2026-09-01', ?)",
+        (id_profesional, periodo_actual(conn)),
+    )
+    conn.commit()
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_estado_cuenta
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    texto = panel.etiqueta_resumen.text()
+    assert f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5)}</span>' in texto
+    assert f'Saldo anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>' in texto
+
+    assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
+        "Fecha", "Tipo", "Concepto", "Monto", "Período imputado",
+    ]
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 1).text() == "Débito"
+    assert panel.tabla.item(0, 2).text() == "Depósito llave"
+    assert panel.tabla.item(0, 3).text() == formatear_moneda(2000)
+
+
+def test_solapa_estado_cuenta_cargos_combo_es_buscable_por_codigo_o_nombre(qtbot, conn):
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    completador = pantalla.panel_estado_cuenta.combo_profesional.completer()
+    assert completador.filterMode() == Qt.MatchFlag.MatchContains

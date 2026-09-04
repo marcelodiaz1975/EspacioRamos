@@ -61,6 +61,7 @@ from app.gui.pantallas.reservas import (
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
 from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, texto_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual
@@ -168,6 +169,11 @@ class PantallaRegistroAusencias(QWidget):
 
 
 class PantallaCargosEspeciales(QWidget):
+    """Dos solapas: "Registro de cargos especiales" (F28, lo de siempre)
+    y "Estado de cuenta" (F25 — antes vivía en la pantalla separada
+    "Estado de cuenta", suprimida; ver también Pagos F21/F25 y
+    Liquidación mensual F22/F26, confirmado por la clienta)."""
+
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
@@ -175,11 +181,17 @@ class PantallaCargosEspeciales(QWidget):
         titulo = QLabel("Cargos especiales")
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
+
+        self.pestanas = QTabWidget()
         self.panel = _PanelCargosEspeciales(conn)
-        layout.addWidget(self.panel, stretch=1)
+        self.panel_estado_cuenta = _PanelEstadoCuentaCargos(conn)
+        self.pestanas.addTab(self.panel, "Registro de cargos especiales")
+        self.pestanas.addTab(self.panel_estado_cuenta, "Estado de cuenta")
+        layout.addWidget(self.pestanas, stretch=1)
 
     def actualizar(self) -> None:
         self.panel.actualizar()
+        self.panel_estado_cuenta.actualizar()
 
 
 class _PanelVacaciones(QWidget):
@@ -1320,3 +1332,72 @@ class _PanelCargosEspeciales(QWidget):
         self.actualizar()
         self.combo_profesional.setFocus()
         self.combo_profesional.setFocus()
+
+
+class _PanelEstadoCuentaCargos(QWidget):
+    """Antes vivía en la pantalla separada "Estado de cuenta" (F25),
+    suprimida — mismos campos y formatos que Registro de cargos
+    especiales, sin la columna Profesional (ya fija en el selector de
+    arriba)."""
+
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.conn = conn
+        self._armar_ui()
+        self.actualizar()
+
+    def _armar_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        fila_profesional = QHBoxLayout()
+        self.combo_profesional = QComboBox()
+        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        habilitar_busqueda_profesional(self.combo_profesional)
+        self.combo_profesional.currentIndexChanged.connect(self._actualizar_datos)
+        fila_profesional.addWidget(QLabel("Profesional:"))
+        fila_profesional.addWidget(self.combo_profesional, stretch=1)
+        layout.addLayout(fila_profesional)
+
+        self.etiqueta_resumen = QLabel()
+        layout.addWidget(self.etiqueta_resumen)
+
+        self.tabla = QTableWidget()
+        self.tabla.setColumnCount(5)
+        self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Concepto", "Monto", "Período imputado"])
+        self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        layout.addWidget(self.tabla, stretch=1)
+
+    def actualizar(self) -> None:
+        id_anterior = self.combo_profesional.currentData()
+        self.combo_profesional.blockSignals(True)
+        self.combo_profesional.clear()
+        for id_, etiqueta in _opciones_profesional(self.conn):
+            self.combo_profesional.addItem(etiqueta, id_)
+        indice = self.combo_profesional.findData(id_anterior)
+        self.combo_profesional.setCurrentIndex(indice if indice >= 0 else 0)
+        self.combo_profesional.blockSignals(False)
+        self._actualizar_datos()
+
+    def _actualizar_datos(self) -> None:
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            self.etiqueta_resumen.setText(TEXTO_SIN_PROFESIONAL)
+            self.tabla.setRowCount(0)
+            return
+        self.etiqueta_resumen.setText(
+            texto_resumen(
+                self.conn, id_profesional, entidad_imputado="CargoEspecial", etiqueta_imputado="Cargos especiales",
+            )
+        )
+        registros = sorted(
+            obtener_repositorio(self.conn, "CargoEspecial").listar(IdProfesional=id_profesional),
+            key=lambda r: r["Fecha"] or "", reverse=True,
+        )
+        self.tabla.setRowCount(len(registros))
+        for i, r in enumerate(registros):
+            self.tabla.setItem(i, 0, QTableWidgetItem(_fmt_fecha_dia(r["Fecha"]) if r["Fecha"] else ""))
+            self.tabla.setItem(i, 1, QTableWidgetItem(r["Tipo"]))
+            self.tabla.setItem(i, 2, QTableWidgetItem(r["Concepto"]))
+            self.tabla.setItem(i, 3, _item_monto(r["Monto"]))
+            self.tabla.setItem(i, 4, QTableWidgetItem(r["PeriodoImputado"] or ""))
+        self.tabla.resizeColumnsToContents()

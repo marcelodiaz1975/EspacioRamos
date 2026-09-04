@@ -1,12 +1,16 @@
 import pytest
 from PySide6.QtCore import QDateTime, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.pagos import PantallaPagos
+from app.negocio.dias import periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
+from app.negocio.pagos import registrar_pago
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -892,3 +896,48 @@ def test_deshacer_ultimo_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbo
     assert len(emisiones) == 3
     ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
     assert ultima["EstadoEnvio"] != "Enviada"
+
+
+def test_solapa_estado_cuenta_es_tercera_solapa(qtbot, conn):
+    """Antes vivía en la pantalla separada "Estado de cuenta" (F25),
+    suprimida — ahora es la tercera solapa de Pagos."""
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_estado_cuenta is not None
+
+
+def test_solapa_estado_cuenta_muestra_saldos_y_tabla_igual_a_registrar_pago(qtbot, conn):
+    id_profesional = _crear_profesional(conn, saldo=1234.5)
+    conn.execute(
+        "UPDATE Profesional SET SaldoCuentaAnterior = -678.9 WHERE IdProfesional = ?", (id_profesional,)
+    )
+    conn.commit()
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_estado_cuenta
+    _seleccionar_profesional(panel, id_profesional)
+
+    texto = panel.etiqueta_resumen.text()
+    assert f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5)}</span>' in texto
+    assert f'Saldo anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>' in texto
+
+    assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
+        "Fecha de carga", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
+        "Saldo anterior", "Nuevo saldo", "Registro modificado", "Es ajuste",
+    ]
+
+    registrar_pago(
+        conn, id_profesional=id_profesional, monto=-500, medio_pago="Transferencia",
+        periodo_imputado=periodo_actual(conn),
+    )
+    panel.actualizar()
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 2).text() == "-$ 500,00"
+    assert panel.tabla.item(0, 2).foreground().color() == QColor(COLOR_ROJO)
+
+
+def test_solapa_estado_cuenta_combo_es_buscable_por_codigo_o_nombre(qtbot, conn):
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    completador = pantalla.panel_estado_cuenta.combo_profesional.completer()
+    assert completador.filterMode() == Qt.MatchFlag.MatchContains
