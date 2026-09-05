@@ -1345,8 +1345,8 @@ def test_campo_profesional_de_la_grilla_usa_el_mismo_formato(qtbot, conn):
 
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
-    texto = next(t for t, i in widget._profesionales_por_texto.items() if i == id_virginia)
-    assert texto == "R1 - Lic. Virginia Lo Veci"
+    indice = widget.campo_profesional.findData(id_virginia)
+    assert widget.campo_profesional.itemText(indice) == "R1 - Lic. Virginia Lo Veci"
 
 
 def _preparar_dos_localidades(conn):

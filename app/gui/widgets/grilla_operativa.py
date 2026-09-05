@@ -29,12 +29,10 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
-    QCompleter,
     QDateEdit,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QTableWidget,
@@ -44,6 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.estilos import COLOR_AMARILLO, COLOR_AZUL_OSCURO, COLOR_NIVEL_1
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_actual, sumar_meses, ultimo_dia_mes
 from app.negocio.grilla import dias_grilla
 from app.negocio.grilla_operativa import (
@@ -303,6 +302,23 @@ def dias_con_reserva(conn: sqlite3.Connection, id_profesional: int | None) -> li
     return list(dias)
 
 
+def _opciones_profesional_grilla(conn: sqlite3.Connection) -> list[tuple[int, str]]:
+    """Mismo formato canónico "{código} - {tratamiento} {nombre}
+    {apellido}" que `reservas._texto_profesional` — duplicado acá (en
+    vez de importado) porque `reservas.py` ya importa este módulo y
+    crearía un import circular."""
+    filas = conn.execute(
+        "SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila FROM Profesional ORDER BY Apellido"
+    ).fetchall()
+    opciones = []
+    for p in filas:
+        partes = [x for x in (p["Tratamiento"], p["NombrePila"], p["Apellido"]) if x]
+        nombre = " ".join(partes) if partes else p["Apellido"]
+        texto = f"{p['IdCodigo']} - {nombre}" if p["IdCodigo"] else nombre
+        opciones.append((p["IdProfesional"], texto))
+    return opciones
+
+
 class GrillaOperativaWidget(QWidget):
     def __init__(
         self, conn: sqlite3.Connection, on_actualizar: Callable[[list[int]], None] | None = None, parent=None,
@@ -355,13 +371,14 @@ class GrillaOperativaWidget(QWidget):
             layout_dias.addWidget(check)
         layout_filtros.addWidget(contenedor_dias)
 
-        layout_filtros.addWidget(QLabel("Profesional (código o nombre)"))
-        self.campo_profesional = QLineEdit()
-        self.campo_profesional.setPlaceholderText("Sin selección")
-        self.campo_profesional.editingFinished.connect(self.actualizar)
+        layout_filtros.addWidget(QLabel("Profesional"))
+        self.campo_profesional = QComboBox()
+        self.campo_profesional.addItem("Sin selección", None)
+        for id_, etiqueta in _opciones_profesional_grilla(self.conn):
+            self.campo_profesional.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.campo_profesional)
+        self.campo_profesional.currentIndexChanged.connect(self.actualizar)
         layout_filtros.addWidget(self.campo_profesional)
-        self._profesionales_por_texto: dict[str, int] = {}
-        self._cargar_completador_profesionales()
 
         layout_filtros.addStretch()
         layout_principal.addWidget(panel_filtros)
@@ -440,25 +457,6 @@ class GrillaOperativaWidget(QWidget):
             self._establecer_rango_por_defecto(periodo)
         self.actualizar()
 
-    def _cargar_completador_profesionales(self) -> None:
-        """"R1 - Lic. Virginia Lo Veci": mismo formato que usan los
-        formularios de Reservas (código + Tratamiento + NombrePila +
-        Apellido) — acá siempre con código porque solo entran los
-        profesionales que tienen uno cargado."""
-        textos = []
-        for p in self.conn.execute(
-            "SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila FROM Profesional "
-            "WHERE IdCodigo IS NOT NULL ORDER BY IdCodigo"
-        ).fetchall():
-            partes = [x for x in (p["Tratamiento"], p["NombrePila"], p["Apellido"]) if x]
-            nombre = " ".join(partes) if partes else p["Apellido"]
-            texto = f"{p['IdCodigo']} - {nombre}"
-            self._profesionales_por_texto[texto] = p["IdProfesional"]
-            textos.append(texto)
-        completador = QCompleter(textos)
-        completador.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.campo_profesional.setCompleter(completador)
-
     # ------------------------------------------------------------ filtros
 
     def _cargar_localidades(self) -> None:
@@ -523,7 +521,7 @@ class GrillaOperativaWidget(QWidget):
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
 
     def _id_profesional_filtro(self) -> int | None:
-        return self._profesionales_por_texto.get(self.campo_profesional.text().strip())
+        return self.campo_profesional.currentData()
 
     def ids_unidad_seleccionadas(self) -> list[int]:
         """Unidades actualmente tildadas en el filtro — la misma lista que
@@ -616,11 +614,10 @@ class GrillaOperativaWidget(QWidget):
         """Fija el filtro de profesional (el que pinta de azul su celda
         actual) a uno puntual, o lo limpia con `None` — mismo uso que
         `filtrar_por_unidad`."""
-        if id_profesional is None:
-            self.campo_profesional.clear()
-        else:
-            texto = next((t for t, i in self._profesionales_por_texto.items() if i == id_profesional), None)
-            self.campo_profesional.setText(texto or "")
+        indice = self.campo_profesional.findData(id_profesional)
+        self.campo_profesional.blockSignals(True)
+        self.campo_profesional.setCurrentIndex(indice if indice >= 0 else 0)
+        self.campo_profesional.blockSignals(False)
         self.actualizar()
 
     # ------------------------------------------------------------- grilla

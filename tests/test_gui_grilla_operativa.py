@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import Qt
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -48,7 +49,7 @@ def test_filtros_por_defecto_incluyen_todo(qtbot, conn):
     assert widget.lista_unidad.count() == 1
     assert len(widget.lista_unidad.selectedItems()) == 1
     assert all(check.isChecked() for check in widget._checks_dia.values())
-    assert widget.campo_profesional.text() == ""
+    assert widget.campo_profesional.currentData() is None
     assert widget.combo_modo.currentData() == "regular"
 
 
@@ -95,14 +96,24 @@ def test_cambiar_modo_a_aisladas_recalcula(qtbot, conn):
     assert widget._resultado[clave].color_aro == ROJO  # bloqueado por la reserva regular
 
 
+def test_campo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn):
+    """Confirmado por la clienta: el selector de profesional buscable
+    corre en todos los formularios del sistema, Grilla operativa
+    incluida."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    completador = widget.campo_profesional.completer()
+    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+
+
 def test_filtro_profesional_pinta_azul(qtbot, conn):
     id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
 
-    texto = next(t for t, i in widget._profesionales_por_texto.items() if i == id_virginia)
-    widget.campo_profesional.setText(texto)
-    widget.actualizar()
+    indice = widget.campo_profesional.findData(id_virginia)
+    widget.campo_profesional.setCurrentIndex(indice)
 
     clave = (id_consultorio, "Lunes", 9)
     assert widget._resultado[clave].color_aro == AZUL_OSCURO
@@ -125,9 +136,8 @@ def test_filtro_exclusivo_profesional_oculta_a_los_demas(qtbot, conn):
 
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
-    texto = next(t for t, i in widget._profesionales_por_texto.items() if i == id_virginia)
-    widget.campo_profesional.setText(texto)
-    widget.actualizar()
+    indice = widget.campo_profesional.findData(id_virginia)
+    widget.campo_profesional.setCurrentIndex(indice)
 
     clave_propia = (id_consultorio, "Lunes", 9)
     clave_ajena = (id_consultorio, "Lunes", 14)
@@ -205,7 +215,7 @@ def test_filtrar_por_profesional_fija_y_limpia_el_campo(qtbot, conn):
     assert widget._resultado[clave].color_aro == AZUL_OSCURO
 
     widget.filtrar_por_profesional(None)
-    assert widget.campo_profesional.text() == ""
+    assert widget.campo_profesional.currentData() is None
     assert widget._resultado[clave].color_aro == VERDE
 
 

@@ -14,7 +14,6 @@ from app.gui.pantallas.aumentos import PantallaAumentos
 from app.gui.pantallas.bloques_rigidos import PantallaBloquesRigidos
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
-from app.gui.pantallas.grilla import GrillaDisponibilidad
 from app.gui.pantallas.grilla_operativa import PantallaGrillaOperativa
 from app.gui.pantallas.imagenes import PantallaImagenes
 from app.gui.pantallas.importacion import PantallaImportacion
@@ -45,11 +44,6 @@ def construir_secciones() -> list[Seccion]:
         Seccion(
             "Panel de control", lambda conn: PanelControl(conn), categoria="Principal",
             ayuda="Resumen del estado actual del espacio: ocupación, próximos vencimientos y alertas.",
-        ),
-        Seccion(
-            "Disponibilidad operativa", lambda conn: GrillaDisponibilidad(conn), categoria="Principal",
-            ayuda="Grilla de disponibilidad de todos los consultorios, día por franja horaria. "
-            "Desde acá también se cargan reservas haciendo clic en una celda libre.",
         ),
         Seccion(
             "Reservas", lambda conn: PantallaReservas(conn), categoria="Principal",
