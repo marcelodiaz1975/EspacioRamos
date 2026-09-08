@@ -1,62 +1,87 @@
 """Motor de cálculo de la "Grilla Operativa" (miscelánea, ago-2026,
-segunda versión — reemplaza por completo el primer diseño basado en un
-horizonte fijo de 2 meses).
+tercera versión — reemplaza el esquema de rango de fechas explícito por
+un único "Período" AAAA-MM, y rediseña por completo las reglas de color
+del modo "regular").
 
 Grilla semanal (consultorio x día de la semana x hora), evaluada contra
-un RANGO DE FECHAS explícito que elige quien consulta (por defecto el
-mes del período activo completo, pero se puede acotar). Se usa como
-widget compartido en Reservas aisladas, Reservas regulares, Vacaciones,
-Licencias, Ausencias y en una pantalla propia "Grilla operativa".
+un ÚNICO PERÍODO que elige quien consulta (por defecto el mes en curso
+al entrar a la pantalla). Se usa como widget compartido en Reservas
+aisladas, Reservas regulares, Vacaciones, Licencias, Ausencias y en una
+pantalla propia "Grilla operativa".
 
 Dos modos de visualización con reglas de color propias:
 
-MODO "regular" — pensado para responder "¿quién tiene este horario?":
-  - Blanco completo: caso base — sin reserva regular relevante en el
-    rango (sin código), o con una reserva regular activa que no dispara
-    ninguna de las reglas siguientes (con código).
-  - Verde completo: hay una reserva regular activa HOY que no se libera
-    dentro del rango (VigenciaFin nulo o posterior al fin del rango).
-  - Rojo completo: hay una reserva regular que todavía no arrancó hoy
-    (arranque dentro o después del rango, da lo mismo) para un
-    profesional distinto al que ocupa el horario ahora (o para
-    cualquier profesional, si ahora no lo ocupa nadie).
-  - Rojo con centro amarillo: igual que el anterior + ya hay una o más
-    reservas aisladas asignadas dentro del rango.
-  - Blanco con centro verde: reservado en forma regular dentro del
-    rango, pero el profesional que lo tiene libera algún día suelto
-    dentro de ese rango por vacaciones/licencia/ausencia (todavía sin
-    tomar por una aislada).
-  - Blanco con centro amarillo: igual que el anterior, pero ese hueco
-    ya tiene una reserva aislada confirmada adentro.
-  - Amarillo completo: libre de reserva regular en todo el rango, pero
-    ya hay una aislada asignada en algún día del rango.
+MODO "regular" — pensado para responder "¿quién tiene este horario, y
+qué va a cambiar?" (rediseño ago-2026, confirmado por la clienta con
+mockup):
+  - Blanco liso: sin circunstancias para destacar (vacaciones, ausencias,
+    licencias, reservas entrantes, aisladas) dentro del mes en curso o
+    los meses posteriores — con el código de quien lo tiene reservado
+    hoy, si hay alguien.
+  - Verde liso: hay una reserva activa hoy con fecha de liberación
+    conocida (VigenciaFin cargada) — se va a liberar en algún momento.
+  - Rojo liso: el horario tiene una reserva regular que todavía no
+    arrancó (cargada a futuro), sin aisladas asignadas dentro del mes en
+    curso. Si además hay alguien ocupándolo hoy, se lo menciona en el
+    detalle, pero el color pasa a rojo igual (aviso de cambio próximo).
+  - Amarillo liso: no hay ninguna reserva regular (ni activa ni
+    entrante) pero ya hay una hora aislada confirmada, desde hoy en
+    adelante (dentro del mes en curso o en meses posteriores).
+  - Rojo con triángulo derecho amarillo: como "Rojo liso", pero además
+    ya hay una o más aisladas confirmadas dentro del mes en curso.
+  - Blanco con triángulo derecho verde: hay una reserva activa hoy, pero
+    su titular libera un hueco puntual dentro del mes en curso (por
+    vacaciones/licencia/ausencia), todavía sin tomar.
+  - Blanco con triángulo derecho amarillo: igual que el anterior, pero
+    ese hueco ya tiene una aislada confirmada adentro.
 
-MODO "aislada" — pensado para responder "¿puedo poner una hora aislada
-acá?": no le importan las reservas regulares que todavía no arrancaron
-(un profesional "entrante" no bloquea nada hasta que efectivamente
-empieza), solo lo que está activo HOY.
-  - Rojo completo: bloqueado en todo el rango por una reserva regular
+  Interpretación de "meses posteriores" para Verde/Rojo liso: no se exige
+  que el corte de mes ya haya pasado — alcanza con que la reserva activa
+  tenga una fecha de baja cargada (Verde) o con que exista una reserva
+  entrante cargada a futuro (Rojo), sin importar si esa fecha cae más
+  adelante este mismo mes o en uno posterior. Es la misma lógica de
+  corte "todo lo de hoy en adelante" que ya se usaba en el diseño
+  anterior de esta grilla — más simple y consistente con el resto de las
+  reglas, que si distinguiera "este mes" de "meses futuros" para estos
+  dos casos puntuales.
+
+  Regla del código (independiente del color, confirmada por la clienta):
+  el código del profesional aparece ÚNICAMENTE cuando el horario está
+  ocupado por una reserva regular vigente HOY dentro del período
+  consultado — nunca por una reserva entrante (todavía no vigente) ni
+  por una aislada (no es una reserva regular). El color de fondo puede
+  cambiar sin que esto se altere.
+
+MODO "aislada" — sin cambios de reglas todavía (a definir por la
+clienta) — pensado para responder "¿puedo poner una hora aislada acá?":
+no le importan las reservas regulares que todavía no arrancaron (un
+profesional "entrante" no bloquea nada hasta que efectivamente empieza),
+solo lo que está activo HOY. El rango que antes elegía el usuario a mano
+(Desde/Hasta) ahora es siempre el mes completo del período seleccionado.
+  - Rojo completo: bloqueado en todo el mes por una reserva regular
     activa sin ningún hueco.
-  - Verde completo: libre de reserva regular en todo el rango.
-  - Rojo con centro verde: reservado en forma regular dentro del rango,
-    pero libera algún hueco dentro de ese rango por vacaciones/licencia
+  - Verde completo: libre de reserva regular en todo el mes.
+  - Rojo con centro verde: reservado en forma regular dentro del mes,
+    pero libera algún hueco dentro de ese mes por vacaciones/licencia
     /ausencia (todavía sin tomar).
   - Rojo con centro amarillo: igual que el anterior, pero el hueco ya
     tiene una aislada confirmada adentro.
-  - Amarillo completo: libre de reserva regular en todo el rango + ya
-    hay una aislada asignada dentro del rango.
+  - Amarillo completo: libre de reserva regular en todo el mes + ya hay
+    una aislada asignada dentro del mes.
 
-Regla común a los dos modos: si el profesional del filtro de la grilla
-es el que se está mostrando (el código que aparece en la celda), la
-celda pasa a Azul oscuro con fuente blanca, pisando cualquier otro
-color.
+Regla común a los dos modos, y de prioridad máxima sobre cualquier otro
+color (confirmado por la clienta): si el profesional del filtro de la
+grilla es el que tiene el código mostrado en la celda, esa celda pasa a
+Azul oscuro con fuente blanca, pisando cualquier otro color — incluida
+la propia regla del código: en modo "regular" esto solo puede pasar en
+una celda que YA muestra código (reserva vigente hoy), nunca en una
+celda "Amarillo liso" (aislada sin reserva regular), porque ahí no hay
+código para resaltar.
 
 "Fecha de corte" (aclarado en conversación): todo se evalúa tomando HOY
 como referencia — una vacación/licencia/ausencia que ya terminó ayer no
 cuenta, una que termina hoy sí. Una reserva regular que todavía no
-arrancó hoy nunca cuenta como "la reserva actual", sin importar si su
-inicio cae dentro o después del rango seleccionado (en ambos casos se
-trata igual: dispara la regla de "rojo").
+arrancó hoy nunca cuenta como "la reserva actual".
 """
 from __future__ import annotations
 
@@ -65,7 +90,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Literal
 
-from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual
+from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, parsear_periodo, primer_dia_mes, ultimo_dia_mes
 
 AZUL_OSCURO = "azul_oscuro"
 BLANCO = "blanco"
@@ -223,11 +248,12 @@ def claves_con_ausencia(
 
 def calcular_grilla_operativa(
     conn: sqlite3.Connection, ids_consultorio: list[int], dias: list[str], hora_ini: int, hora_fin: int,
-    fecha_desde: str, fecha_hasta: str, modo: ModoGrillaOperativa = "regular", id_profesional_filtro: int | None = None,
+    periodo: str, modo: ModoGrillaOperativa = "regular", id_profesional_filtro: int | None = None,
     ausente_en: set[tuple[int, str, int]] | None = None,
 ) -> dict[tuple[int, str, int], CeldaGrillaOperativa]:
     """Devuelve {(IdConsultorio, dia, hora): CeldaGrillaOperativa} para
-    toda la grilla filtrada, evaluada contra [fecha_desde, fecha_hasta].
+    toda la grilla filtrada, evaluada contra el mes del `periodo`
+    (AAAA-MM) consultado.
 
     `ausente_en`, si se pasa, es el conjunto de (IdConsultorio, dia, hora)
     donde el profesional del filtro tiene una ausencia registrada — usado
@@ -235,8 +261,9 @@ def calcular_grilla_operativa(
     los horarios que de otro modo se mostrarían en azul oscuro (el
     horario propio del profesional filtrado)."""
     hoy = fecha_actual(conn)
-    fecha_desde_rango = date.fromisoformat(fecha_desde)
-    fecha_hasta_rango = date.fromisoformat(fecha_hasta)
+    anio, mes = parsear_periodo(periodo)
+    mes_actual_inicio = primer_dia_mes(anio, mes)
+    mes_actual_fin = ultimo_dia_mes(anio, mes)
     dias = [d for d in DIAS_SEMANA if d in dias]
 
     profesionales = {p["IdProfesional"]: p for p in conn.execute("SELECT * FROM Profesional").fetchall()}
@@ -257,10 +284,16 @@ def calcular_grilla_operativa(
             for hora in range(int(hora_ini), int(hora_fin)):
                 cubren = [r for r in candidatas if r["HoraInicio"] <= hora < r["HoraFin"]]
                 actual, entrante = _clasificar_regulares(cubren, hoy)
-                celda = _resolver_celda(
-                    conn, id_consultorio, dia, hora, hoy, fecha_desde_rango, fecha_hasta_rango,
-                    actual, entrante, profesionales, modo, id_profesional_filtro,
-                )
+                if modo == "regular":
+                    celda = _resolver_regular(
+                        conn, id_consultorio, dia, hora, hoy, mes_actual_inicio, mes_actual_fin,
+                        actual, entrante, profesionales, id_profesional_filtro,
+                    )
+                else:
+                    celda = _resolver_aislada(
+                        conn, id_consultorio, dia, hora, hoy, mes_actual_inicio, mes_actual_fin,
+                        actual, profesionales, id_profesional_filtro,
+                    )
                 clave = (id_consultorio, dia, hora)
                 if ausente_en and celda.color_aro == AZUL_OSCURO and clave in ausente_en:
                     celda = CeldaGrillaOperativa(
@@ -291,82 +324,68 @@ def _clasificar_regulares(
     return actual, entrante
 
 
-def _resolver_celda(
-    conn: sqlite3.Connection, id_consultorio: int, dia: str, hora: int, hoy: date,
-    fecha_desde_rango: date, fecha_hasta_rango: date, actual: sqlite3.Row | None, entrante: sqlite3.Row | None,
-    profesionales: dict[int, sqlite3.Row], modo: ModoGrillaOperativa, id_profesional_filtro: int | None,
-) -> CeldaGrillaOperativa:
-    aisladas = _aisladas_en_rango(conn, id_consultorio, dia, hora, hoy, fecha_desde_rango, fecha_hasta_rango, profesionales)
-    hay_aisladas = bool(aisladas)
-
-    novedades_actual: list[tuple[str, str]] = []
-    if actual is not None:
-        novedades_actual = _novedades_profesional(
-            conn, actual["IdProfesional"], dia, id_consultorio, hoy, fecha_desde_rango, fecha_hasta_rango,
-        )
-    hay_novedad_actual = bool(novedades_actual)
-
-    if modo == "regular":
-        return _resolver_regular(
-            actual, entrante, hay_aisladas, aisladas, hay_novedad_actual, novedades_actual,
-            fecha_hasta_rango, profesionales, id_profesional_filtro,
-        )
-    return _resolver_aislada(
-        actual, hay_aisladas, aisladas, hay_novedad_actual, novedades_actual, profesionales, id_profesional_filtro,
-    )
+# ------------------------------------------------------------ modo regular
 
 
 def _resolver_regular(
-    actual: sqlite3.Row | None, entrante: sqlite3.Row | None, hay_aisladas: bool, aisladas: list[tuple[str, int, str]],
-    hay_novedad: bool, novedades: list[tuple[str, str]], fecha_hasta_rango: date,
+    conn: sqlite3.Connection, id_consultorio: int, dia: str, hora: int, hoy: date,
+    mes_actual_inicio: date, mes_actual_fin: date, actual: sqlite3.Row | None, entrante: sqlite3.Row | None,
     profesionales: dict[int, sqlite3.Row], id_profesional_filtro: int | None,
 ) -> CeldaGrillaOperativa:
-    nombre_actual = _nombre_con_codigo(profesionales[actual["IdProfesional"]]) if actual else None
-    codigo_actual = profesionales[actual["IdProfesional"]]["IdCodigo"] if actual else None
-    base = f"Horario reservado por {nombre_actual}." if actual else None
+    codigo = profesionales[actual["IdProfesional"]]["IdCodigo"] if actual is not None else None
+    id_mostrado = actual["IdProfesional"] if actual is not None else None
+    base = f"Horario reservado por {_nombre_con_codigo(profesionales[actual['IdProfesional']])}." if actual is not None else None
 
+    # Regla de prioridad máxima: el filtro pinta azul cualquier celda
+    # donde su código quede mostrado — que, por la regla del código, solo
+    # puede pasar sobre una reserva vigente hoy.
     if actual is not None and id_profesional_filtro is not None and actual["IdProfesional"] == id_profesional_filtro:
-        return CeldaGrillaOperativa(AZUL_OSCURO, AZUL_OSCURO, BLANCA, codigo_actual, base, actual["IdProfesional"])
+        return CeldaGrillaOperativa(AZUL_OSCURO, AZUL_OSCURO, BLANCA, codigo, base, id_mostrado)
 
-    conflicto = entrante is not None and (actual is None or entrante["IdProfesional"] != actual["IdProfesional"])
-    if conflicto:
+    if entrante is not None:
         nombre_entrante = _nombre_con_codigo(profesionales[entrante["IdProfesional"]])
         clausula_entrante = f"Horario reservado por {nombre_entrante} a partir del {_fecha_dia_texto(entrante['VigenciaInicio'])}."
         texto = " ".join(([base] if base else []) + [clausula_entrante])
-        if hay_aisladas:
-            texto = " ".join([texto] + [t for _, _, t in aisladas])
-            return CeldaGrillaOperativa(ROJO, AMARILLO, NEGRA, codigo_actual, texto, actual["IdProfesional"] if actual else None)
-        return CeldaGrillaOperativa(ROJO, ROJO, NEGRA, codigo_actual, texto, actual["IdProfesional"] if actual else None)
+        aisladas_mes = _aisladas_en_rango(conn, id_consultorio, dia, hora, hoy, mes_actual_inicio, mes_actual_fin, profesionales)
+        if aisladas_mes:
+            texto = " ".join([texto] + [t for _, _, t in aisladas_mes])
+            return CeldaGrillaOperativa(ROJO, AMARILLO, NEGRA, codigo, texto, id_mostrado)
+        return CeldaGrillaOperativa(ROJO, ROJO, NEGRA, codigo, texto, id_mostrado)
 
     if actual is not None:
-        if hay_novedad:
+        novedades = _novedades_profesional(conn, actual["IdProfesional"], dia, id_consultorio, hoy, mes_actual_inicio, mes_actual_fin)
+        if novedades:
             texto = " ".join([base] + [t for _, t in novedades])
-            if hay_aisladas:
-                texto = " ".join([texto] + [t for _, _, t in aisladas])
-                return CeldaGrillaOperativa(BLANCO, AMARILLO, NEGRA, codigo_actual, texto, actual["IdProfesional"])
-            return CeldaGrillaOperativa(BLANCO, VERDE, NEGRA, codigo_actual, texto, actual["IdProfesional"])
+            aisladas_mes = _aisladas_en_rango(conn, id_consultorio, dia, hora, hoy, mes_actual_inicio, mes_actual_fin, profesionales)
+            if aisladas_mes:
+                texto = " ".join([texto] + [t for _, _, t in aisladas_mes])
+                return CeldaGrillaOperativa(BLANCO, AMARILLO, NEGRA, codigo, texto, id_mostrado)
+            return CeldaGrillaOperativa(BLANCO, VERDE, NEGRA, codigo, texto, id_mostrado)
 
-        vigencia_fin = date.fromisoformat(actual["VigenciaFin"]) if actual["VigenciaFin"] else None
-        if vigencia_fin is None or vigencia_fin > fecha_hasta_rango:
-            return CeldaGrillaOperativa(VERDE, VERDE, NEGRA, codigo_actual, base, actual["IdProfesional"])
-        return CeldaGrillaOperativa(BLANCO, BLANCO, NEGRA, codigo_actual, base, actual["IdProfesional"])
+        if actual["VigenciaFin"]:
+            texto = f"{base} Se libera el {_fecha_dia_texto(actual['VigenciaFin'])}."
+            return CeldaGrillaOperativa(VERDE, VERDE, NEGRA, codigo, texto, id_mostrado)
 
-    if hay_aisladas:
-        texto = " ".join(t for _, _, t in aisladas)
-        codigo = profesionales[aisladas[0][1]]["IdCodigo"]
-        id_prof = aisladas[0][1]
-        if id_profesional_filtro is not None and id_prof == id_profesional_filtro:
-            return CeldaGrillaOperativa(AZUL_OSCURO, AZUL_OSCURO, BLANCA, codigo, texto, id_prof)
-        return CeldaGrillaOperativa(AMARILLO, AMARILLO, NEGRA, codigo, texto, id_prof)
+        return CeldaGrillaOperativa(BLANCO, BLANCO, NEGRA, codigo, base, id_mostrado)
+
+    aisladas_desde_hoy = _aisladas_en_rango(conn, id_consultorio, dia, hora, hoy, hoy, date.max, profesionales)
+    if aisladas_desde_hoy:
+        texto = " ".join(t for _, _, t in aisladas_desde_hoy)
+        return CeldaGrillaOperativa(AMARILLO, AMARILLO, NEGRA, None, texto, None)
 
     return CeldaGrillaOperativa(BLANCO, BLANCO, NEGRA, None, "Horario disponible.", None)
 
 
+# ------------------------------------------------------------ modo aislada
+
+
 def _resolver_aislada(
-    actual: sqlite3.Row | None, hay_aisladas: bool, aisladas: list[tuple[str, int, str]],
-    hay_novedad: bool, novedades: list[tuple[str, str]],
+    conn: sqlite3.Connection, id_consultorio: int, dia: str, hora: int, hoy: date,
+    mes_actual_inicio: date, mes_actual_fin: date, actual: sqlite3.Row | None,
     profesionales: dict[int, sqlite3.Row], id_profesional_filtro: int | None,
 ) -> CeldaGrillaOperativa:
+    aisladas = _aisladas_en_rango(conn, id_consultorio, dia, hora, hoy, mes_actual_inicio, mes_actual_fin, profesionales)
+    hay_aisladas = bool(aisladas)
     codigo = profesionales[aisladas[0][1]]["IdCodigo"] if hay_aisladas else None
     id_prof_mostrado = aisladas[0][1] if hay_aisladas else None
     texto_aisladas = " ".join(t for _, _, t in aisladas)
@@ -377,7 +396,8 @@ def _resolver_aislada(
     if actual is not None:
         nombre_actual = _nombre_con_codigo(profesionales[actual["IdProfesional"]])
         base = f"Horario reservado en forma regular por {nombre_actual}."
-        if hay_novedad:
+        novedades = _novedades_profesional(conn, actual["IdProfesional"], dia, id_consultorio, hoy, mes_actual_inicio, mes_actual_fin)
+        if novedades:
             texto = " ".join([base] + [t for _, t in novedades])
             if hay_aisladas:
                 texto = " ".join([texto] + [t for _, _, t in aisladas])

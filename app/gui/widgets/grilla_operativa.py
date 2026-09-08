@@ -1,6 +1,7 @@
 """Widget reutilizable de la "Grilla Operativa" (miscelánea, ago-2026):
 filtros (localidad/edificio/unidad/día de semana/profesional) + selector
-de período/rango de fechas/modo de visualización + la grilla en sí
+de período (mes en curso por defecto, sin rango Desde/Hasta — la clienta
+pidió sacarlo) + modo de visualización + la grilla en sí
 (encabezados apilados como en el PDF de Disponibilidad: Día de la
 semana > Localidad > Edificio > Unidad > Consultorio, omitiendo
 Localidad/Edificio cuando solo hay uno, más las columnas Tipo de
@@ -23,13 +24,12 @@ import sqlite3
 from datetime import date
 from typing import Callable
 
-from PySide6.QtCore import QDate, QPoint, Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
-    QDateEdit,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.estilos import COLOR_AMARILLO, COLOR_AZUL_OSCURO, COLOR_NIVEL_1
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
-from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_actual, sumar_meses, ultimo_dia_mes
+from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_actual, primer_dia_mes, sumar_meses, ultimo_dia_mes
 from app.negocio.grilla import dias_grilla
 from app.negocio.grilla_operativa import (
     AMARILLO,
@@ -65,7 +65,6 @@ _FUENTE_HEX = {BLANCA: "#FFFFFF"}  # "negra" es el default de _CeldaGrilla, no h
 _ANCHO_CODIGO_CORTO = "A99"  # letra + 2 dígitos
 _ANCHO_CODIGO_LARGO = "A999"  # letra + 3 dígitos
 _GROSOR_GRUESO = 3  # línea estructural — mismo criterio visual que _GROSOR_GRUESO de grilla_pdf.py
-_FORMATO_FECHA = "dd-MM-yyyy"
 
 # Columnas fijas de cada fila de datos (igual que "Tipo Bloque"/"Horario" en el PDF).
 _COL_TIPO_BLOQUE = 0
@@ -396,20 +395,6 @@ class GrillaOperativaWidget(QWidget):
         self.combo_periodo.currentIndexChanged.connect(self._periodo_cambiado)
         fila_controles.addWidget(self.combo_periodo)
 
-        fila_controles.addWidget(QLabel("Desde:"))
-        self.campo_desde = QDateEdit()
-        self.campo_desde.setDisplayFormat(_FORMATO_FECHA)
-        self.campo_desde.setCalendarPopup(True)
-        self.campo_desde.dateChanged.connect(self.actualizar)
-        fila_controles.addWidget(self.campo_desde)
-
-        fila_controles.addWidget(QLabel("Hasta:"))
-        self.campo_hasta = QDateEdit()
-        self.campo_hasta.setDisplayFormat(_FORMATO_FECHA)
-        self.campo_hasta.setCalendarPopup(True)
-        self.campo_hasta.dateChanged.connect(self.actualizar)
-        fila_controles.addWidget(self.campo_hasta)
-
         fila_controles.addWidget(QLabel("Visualización:"))
         self.combo_modo = QComboBox()
         self.combo_modo.addItem("Reservas regulares", "regular")
@@ -418,8 +403,6 @@ class GrillaOperativaWidget(QWidget):
         fila_controles.addWidget(self.combo_modo)
         fila_controles.addStretch()
         layout_grilla.addLayout(fila_controles)
-
-        self._establecer_rango_por_defecto(periodo_base)
 
         self.tabla = QTableWidget()
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -441,20 +424,7 @@ class GrillaOperativaWidget(QWidget):
 
         layout_principal.addWidget(panel_grilla, stretch=1)
 
-    def _establecer_rango_por_defecto(self, periodo: str) -> None:
-        anio, mes = parsear_periodo(periodo)
-        ultimo = ultimo_dia_mes(anio, mes)
-        self.campo_desde.blockSignals(True)
-        self.campo_hasta.blockSignals(True)
-        self.campo_desde.setDate(QDate(anio, mes, 1))
-        self.campo_hasta.setDate(QDate(ultimo.year, ultimo.month, ultimo.day))
-        self.campo_desde.blockSignals(False)
-        self.campo_hasta.blockSignals(False)
-
     def _periodo_cambiado(self) -> None:
-        periodo = self.combo_periodo.currentData()
-        if periodo:
-            self._establecer_rango_por_defecto(periodo)
         self.actualizar()
 
     # ------------------------------------------------------------ filtros
@@ -630,11 +600,10 @@ class GrillaOperativaWidget(QWidget):
     def _actualizar_grilla(self) -> None:
         ids_unidad = _ids_seleccionados(self.lista_unidad)
         dias = self._dias_seleccionados()
-        desde = self.campo_desde.date().toPython().isoformat()
-        hasta = self.campo_hasta.date().toPython().isoformat()
+        periodo = self.combo_periodo.currentData()
         modo = self.combo_modo.currentData() or "regular"
 
-        if not ids_unidad or not dias or desde > hasta:
+        if not ids_unidad or not dias or not periodo:
             self.tabla.setRowCount(0)
             self.tabla.setColumnCount(0)
             self.tabla.setMinimumHeight(0)
@@ -660,11 +629,14 @@ class GrillaOperativaWidget(QWidget):
         id_profesional_filtro = self._id_profesional_filtro()
         ausente_en = None
         if self._resaltar_ausencias and id_profesional_filtro is not None:
+            anio, mes = parsear_periodo(periodo)
+            desde = primer_dia_mes(anio, mes).isoformat()
+            hasta = ultimo_dia_mes(anio, mes).isoformat()
             ausente_en = claves_con_ausencia(
                 self.conn, id_profesional_filtro, ids_consultorio, dias, hora_ini, hora_fin, desde, hasta,
             )
         self._resultado = calcular_grilla_operativa(
-            self.conn, ids_consultorio, dias, hora_ini, hora_fin, desde, hasta,
+            self.conn, ids_consultorio, dias, hora_ini, hora_fin, periodo,
             modo=modo, id_profesional_filtro=id_profesional_filtro, ausente_en=ausente_en,
         )
         if self._filtro_exclusivo_profesional and id_profesional_filtro is not None:

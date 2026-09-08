@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
-from app.negocio.grilla_operativa import AZUL_OSCURO, ROJO, VERDE
+from app.negocio.grilla_operativa import AZUL_OSCURO, BLANCO, ROJO
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -53,13 +53,13 @@ def test_filtros_por_defecto_incluyen_todo(qtbot, conn):
     assert widget.combo_modo.currentData() == "regular"
 
 
-def test_rango_por_defecto_es_el_mes_completo(qtbot, conn):
+def test_periodo_por_defecto_es_el_mes_en_curso(qtbot, conn):
     _preparar(conn)
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
-    assert widget.campo_desde.date().toPython().isoformat() == "2026-08-01"
-    assert widget.campo_hasta.date().toPython().isoformat() == "2026-08-31"
-    assert widget.campo_desde.displayFormat() == "dd-MM-yyyy"
+    assert widget.combo_periodo.currentData() == "2026-08"
+    assert not hasattr(widget, "campo_desde")
+    assert not hasattr(widget, "campo_hasta")
 
 
 def test_grilla_muestra_codigo_de_reserva_regular(qtbot, conn):
@@ -70,7 +70,7 @@ def test_grilla_muestra_codigo_de_reserva_regular(qtbot, conn):
     clave = (id_consultorio, "Lunes", 9)
     assert clave in widget._resultado
     assert widget._resultado[clave].codigo == "R1"
-    assert widget._resultado[clave].color_aro == VERDE
+    assert widget._resultado[clave].color_aro == BLANCO  # sin fecha de liberación cargada: blanco liso
 
 
 def test_clic_en_celda_muestra_detalle(qtbot, conn):
@@ -216,7 +216,7 @@ def test_filtrar_por_profesional_fija_y_limpia_el_campo(qtbot, conn):
 
     widget.filtrar_por_profesional(None)
     assert widget.campo_profesional.currentData() is None
-    assert widget._resultado[clave].color_aro == VERDE
+    assert widget._resultado[clave].color_aro == BLANCO
 
 
 def test_filtrar_por_dias_acota_la_seleccion(qtbot, conn):
