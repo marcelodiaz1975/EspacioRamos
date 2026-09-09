@@ -110,6 +110,7 @@ class _ItemNumerico(QTableWidgetItem):
     def __init__(self, texto: str, valor: float):
         super().__init__(texto)
         self._valor = valor
+        self.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
     def __lt__(self, other: object) -> bool:
         if isinstance(other, _ItemNumerico):

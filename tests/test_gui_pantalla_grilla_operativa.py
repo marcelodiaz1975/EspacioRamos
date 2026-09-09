@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import Qt
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -87,6 +88,21 @@ def test_valores_se_completan_al_iniciar(qtbot, conn):
     assert pantalla.tabla_valores.item(0, 2).text() == '7mo "L"'
     assert pantalla.tabla_valores.item(0, 4).text() == formatear_moneda(1500)
     assert pantalla.tabla_valores.item(0, 5).text() == formatear_moneda(700)
+
+
+def test_columnas_de_valores_numericas_alineadas_a_la_derecha(qtbot, conn):
+    _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"', valor_regular=1500, valor_aislada=700)
+    pantalla = PantallaGrillaOperativa(conn)
+    qtbot.addWidget(pantalla)
+
+    alineacion_derecha = int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    # Localidad/Edificio/Unidad (texto) siguen a la izquierda; Consultorio/
+    # Valor hora regular/Valor hora aislada (numéricas) van a la derecha.
+    assert pantalla.tabla_valores.item(0, 0).textAlignment() != alineacion_derecha
+    for columna in (3, 4, 5):
+        assert pantalla.tabla_valores.item(0, columna).textAlignment() == alineacion_derecha
+    assert pantalla.promedios_valores.tabla.item(0, 3).textAlignment() == alineacion_derecha
+    assert pantalla.promedios_valores.tabla.item(0, 4).textAlignment() == alineacion_derecha
 
 
 def test_tabla_de_valores_tiene_titulo_propio(qtbot, conn):
