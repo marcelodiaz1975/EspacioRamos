@@ -237,5 +237,6 @@ def test_subtotal_regulares_coincide_con_el_motor_de_estadisticas(qtbot, conn):
     # coincide con esa unidad.
     esperado = calcular_estadisticas_operativas(conn, [id_unidad]).total
     assert pantalla.tabla_estadisticas.item(0, 0).text() == "Total"
-    assert pantalla.tabla_estadisticas.item(0, 6).text() == formatear_moneda(esperado.subtotal_regulares)
+    assert pantalla.tabla_estadisticas.item(0, 5).text() == formatear_moneda(esperado.subtotal_regulares)
+    assert pantalla.tabla_estadisticas.item(0, 7).text() == formatear_moneda(esperado.total_regular_y_aislada)
     assert pantalla.tabla_estadisticas.item(0, 9).text() == formatear_moneda(esperado.falta_cobrar)

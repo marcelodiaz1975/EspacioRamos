@@ -61,7 +61,11 @@ def _cantidad_dia(anio: int, mes: int, dia_semana: str) -> int:
     )
 
 
-def test_horas_regulares_cuenta_ocurrencias_del_mes(conn):
+def test_horas_semanales_cuenta_la_franja_una_vez_por_semana(conn):
+    """Confirmado por la clienta: "horas semanales" es la franja fija
+    vigente hoy, UNA vez por semana — no multiplicada por cuántas veces
+    ocurre ese día dentro del mes (a diferencia del reparto proporcional
+    de los subtotales en pesos, que sigue sin cambios)."""
     id_unidad, _ = _unidad(conn)
     id_consultorio = _consultorio(conn, id_unidad)
     id_prof = _profesional(conn)
@@ -69,8 +73,18 @@ def test_horas_regulares_cuenta_ocurrencias_del_mes(conn):
     conn.commit()
 
     est = calcular_estadisticas_operativas(conn, [id_unidad])
-    esperado = _cantidad_dia(2026, 8, "Lunes") * 2
-    assert est.por_unidad[0].horas_regulares == esperado
+    assert est.por_unidad[0].horas_semanales == 2
+
+
+def test_horas_semanales_ignora_reserva_todavia_no_vigente(conn):
+    id_unidad, _ = _unidad(conn)
+    id_consultorio = _consultorio(conn, id_unidad)
+    id_prof = _profesional(conn)
+    _reserva(conn, id_prof, id_consultorio, "Lunes", horas=2, vigencia_inicio="2026-09-01")  # hoy es 2026-08-10
+    conn.commit()
+
+    est = calcular_estadisticas_operativas(conn, [id_unidad])
+    assert est.por_unidad[0].horas_semanales == 0
 
 
 def test_subtotal_regulares_coincide_con_liquidacion_un_solo_consultorio(conn):
@@ -93,7 +107,7 @@ def test_categoria_b_cuenta_horas_pero_no_genera_subtotal(conn):
     conn.commit()
 
     est = calcular_estadisticas_operativas(conn, [id_unidad])
-    assert est.por_unidad[0].horas_regulares > 0
+    assert est.por_unidad[0].horas_semanales > 0
     assert est.por_unidad[0].subtotal_regulares == 0.0
 
 
@@ -107,7 +121,6 @@ def test_subtotal_aisladas_exacto(conn):
     conn.commit()
 
     est = calcular_estadisticas_operativas(conn, [id_unidad])
-    assert est.por_unidad[0].horas_aisladas == 2
     assert est.por_unidad[0].subtotal_aisladas == pytest.approx(2 * VALOR_HORA_AISLADA)
 
 
@@ -184,16 +197,16 @@ def test_agregado_por_edificio_y_total(conn):
     assert len(est.por_edificio) == 2
 
     por_edificio = {g.id: g for g in est.por_edificio}
-    assert por_edificio[id_edificio_1].horas_regulares == pytest.approx(
-        est.por_unidad[[g.id for g in est.por_unidad].index(id_unidad_1)].horas_regulares
-        + [g for g in est.por_unidad if g.id == id_unidad_2][0].horas_regulares
+    assert por_edificio[id_edificio_1].horas_semanales == pytest.approx(
+        est.por_unidad[[g.id for g in est.por_unidad].index(id_unidad_1)].horas_semanales
+        + [g for g in est.por_unidad if g.id == id_unidad_2][0].horas_semanales
     )
-    assert por_edificio[id_edificio_3].horas_regulares == pytest.approx(
-        [g for g in est.por_unidad if g.id == id_unidad_3][0].horas_regulares
+    assert por_edificio[id_edificio_3].horas_semanales == pytest.approx(
+        [g for g in est.por_unidad if g.id == id_unidad_3][0].horas_semanales
     )
 
-    total_horas_esperado = sum(g.horas_regulares for g in est.por_unidad)
-    assert est.total.horas_regulares == pytest.approx(total_horas_esperado)
+    total_horas_esperado = sum(g.horas_semanales for g in est.por_unidad)
+    assert est.total.horas_semanales == pytest.approx(total_horas_esperado)
     total_subtotal_esperado = sum(g.subtotal_regulares for g in est.por_unidad)
     assert est.total.subtotal_regulares == pytest.approx(total_subtotal_esperado)
 
@@ -215,10 +228,10 @@ def test_agregado_por_localidad(conn):
     assert len(est.por_localidad) == 2
 
     por_localidad = {g.nombre: g for g in est.por_localidad}
-    horas_ramos_mejia = sum(g.horas_regulares for g in est.por_unidad if g.id in (id_unidad_1, id_unidad_2))
-    horas_haedo = [g for g in est.por_unidad if g.id == id_unidad_3][0].horas_regulares
-    assert por_localidad["Ramos Mejía"].horas_regulares == pytest.approx(horas_ramos_mejia)
-    assert por_localidad["Haedo"].horas_regulares == pytest.approx(horas_haedo)
+    horas_ramos_mejia = sum(g.horas_semanales for g in est.por_unidad if g.id in (id_unidad_1, id_unidad_2))
+    horas_haedo = [g for g in est.por_unidad if g.id == id_unidad_3][0].horas_semanales
+    assert por_localidad["Ramos Mejía"].horas_semanales == pytest.approx(horas_ramos_mejia)
+    assert por_localidad["Haedo"].horas_semanales == pytest.approx(horas_haedo)
 
 
 def test_localidad_sin_dato_se_agrupa_como_sin_localidad(conn):
@@ -238,7 +251,7 @@ def test_sin_unidades_devuelve_vacio(conn):
     assert est.por_unidad == []
     assert est.por_edificio == []
     assert est.por_localidad == []
-    assert est.total.horas_regulares == 0.0
+    assert est.total.horas_semanales == 0.0
     assert est.periodo == PERIODO
 
 

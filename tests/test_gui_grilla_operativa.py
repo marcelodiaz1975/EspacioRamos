@@ -38,16 +38,18 @@ def _preparar(conn, codigo_virginia="R1"):
 
 
 def test_filtros_por_defecto_incluyen_todo(qtbot, conn):
+    """Confirmado por la clienta: por defecto solo queda tildado el ítem
+    "Todas las X" de cada lista, no cada valor real uno por uno."""
     _preparar(conn)
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
 
-    assert widget.lista_localidad.count() == 1
-    assert len(widget.lista_localidad.selectedItems()) == 1
-    assert widget.lista_edificio.count() == 1
-    assert len(widget.lista_edificio.selectedItems()) == 1
-    assert widget.lista_unidad.count() == 1
-    assert len(widget.lista_unidad.selectedItems()) == 1
+    assert widget.lista_localidad.count() == 2  # "Todas las localidades" + 1 real
+    assert [i.text() for i in widget.lista_localidad.selectedItems()] == ["Todas las localidades"]
+    assert widget.lista_edificio.count() == 2  # "Todos los edificios" + 1 real
+    assert [i.text() for i in widget.lista_edificio.selectedItems()] == ["Todos los edificios"]
+    assert widget.lista_unidad.count() == 2  # "Todas las unidades" + 1 real
+    assert [i.text() for i in widget.lista_unidad.selectedItems()] == ["Todas las unidades"]
     assert all(check.isChecked() for check in widget._checks_dia.values())
     assert widget.campo_profesional.currentData() is None
     assert widget.combo_modo.currentData() == "regular"
@@ -169,7 +171,9 @@ def test_lista_unidad_ordena_por_piso_pb_ep_numerico(qtbot, conn):
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
     nombres = [widget.lista_unidad.item(i).text() for i in range(widget.lista_unidad.count())]
-    assert nombres == ['Ramos 1 - PB "D"', 'Ramos 1 - EP "K"', 'Ramos 1 - 1ro "A"', 'Ramos 1 - 7mo "L"']
+    assert nombres == [
+        "Todas las unidades", 'Ramos 1 - PB "D"', 'Ramos 1 - EP "K"', 'Ramos 1 - 1ro "A"', 'Ramos 1 - 7mo "L"',
+    ]
 
 
 def test_grilla_ordena_columnas_por_piso_pb_ep_numerico(qtbot, conn):
@@ -196,16 +200,16 @@ def test_cascada_edificio_a_unidad(qtbot, conn):
 
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
-    assert widget.lista_edificio.count() == 2
-    assert widget.lista_unidad.count() == 2
+    assert widget.lista_edificio.count() == 3  # "Todos los edificios" + 2 reales
+    assert widget.lista_unidad.count() == 3  # "Todas las unidades" + 2 reales
 
     widget.lista_edificio.clearSelection()
     for i in range(widget.lista_edificio.count()):
         if widget.lista_edificio.item(i).text() == "Ramos 1":
             widget.lista_edificio.item(i).setSelected(True)
 
-    assert widget.lista_unidad.count() == 1
-    assert widget.lista_unidad.item(0).text() == 'Ramos 1 - 7mo "L"'
+    assert widget.lista_unidad.count() == 2  # "Todas las unidades" + 1 real
+    assert widget.lista_unidad.item(1).text() == 'Ramos 1 - 7mo "L"'
 
 
 def test_sin_unidades_seleccionadas_deja_grilla_vacia(qtbot, conn):

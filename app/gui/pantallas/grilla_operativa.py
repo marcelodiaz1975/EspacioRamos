@@ -25,7 +25,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
-    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QScrollArea, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, _CeldaGrilla
@@ -37,8 +37,8 @@ from app.pdf.estilos import clave_orden_unidad
 
 _COLUMNAS_VALORES = ["Localidad", "Edificio", "Unidad", "Consultorio", "Valor hora regular", "Valor hora aislada"]
 _COLUMNAS_ESTADISTICAS = [
-    "Localidad", "Edificio", "Unidad", "% Ocupación", "Horas regulares", "Horas aisladas",
-    "Subtotal regulares", "Subtotal aisladas", "Pagos del mes", "Falta cobrar",
+    "Localidad", "Edificio", "Unidad", "% Ocupación", "Horas semanales",
+    "Subtotal regulares", "Subtotal aisladas", "Total", "Pagos del mes", "Falta cobrar",
 ]
 
 _COLOR_TOTAL = QColor("#B7C8DC")
@@ -100,14 +100,43 @@ def _fmt_horas(horas: float) -> str:
     return str(int(horas)) if horas == int(horas) else f"{horas:.1f}"
 
 
+class _ItemNumerico(QTableWidgetItem):
+    """QTableWidgetItem que ordena por un valor numérico propio en vez de
+    comparar el texto formateado ("$ 1.234,00", "67,8 %") como si fuera
+    texto — para que el clic en el título de una columna numérica de
+    verdad ordene de mayor a menor y viceversa."""
+
+    def __init__(self, texto: str, valor: float):
+        super().__init__(texto)
+        self._valor = valor
+
+    def __lt__(self, other: object) -> bool:
+        if isinstance(other, _ItemNumerico):
+            return self._valor < other._valor
+        return super().__lt__(other)
+
+
 def _armar_tabla(columnas: list[str]) -> QTableWidget:
+    """Filas seleccionables completas y sombreadas, con scroll cuando no
+    entra todo, y columnas pinchables para ordenar ascendente/descendente
+    (confirmado por la clienta) — `setSortingEnabled` hay que
+    desactivarlo mientras se repuebla la tabla (ver los `_refrescar_*`),
+    si no Qt reordena fila por fila a medida que se van cargando."""
     tabla = QTableWidget()
     tabla.setColumnCount(len(columnas))
     tabla.setHorizontalHeaderLabels(columnas)
     tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     tabla.verticalHeader().setVisible(False)
-    tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+    tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+    tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    tabla.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    tabla.setSortingEnabled(True)
     return tabla
+
+
+_TODOS = object()  # sentinel del ítem "Todas las X" — mismo criterio que app.gui.widgets.grilla_operativa.TODOS
 
 
 def _lista_multiseleccion() -> QListWidget:
@@ -117,13 +146,57 @@ def _lista_multiseleccion() -> QListWidget:
     return lista
 
 
+def _agregar_item_todos(lista: QListWidget, etiqueta: str) -> None:
+    item = QListWidgetItem(etiqueta)
+    fuente = item.font()
+    fuente.setBold(True)
+    item.setFont(fuente)
+    item.setData(Qt.ItemDataRole.UserRole, _TODOS)
+    lista.addItem(item)
+
+
+def _corregir_seleccion_todos(lista: QListWidget) -> None:
+    """Mutuamente excluyente con los ítems reales — ver la misma función
+    en app.gui.widgets.grilla_operativa (duplicada acá, no importada, con
+    su propio sentinel: son dos módulos que no necesitan compartir más
+    que el criterio)."""
+    seleccionados = lista.selectedItems()
+    if len(seleccionados) <= 1:
+        return
+    item_todos = next((it for it in seleccionados if it.data(Qt.ItemDataRole.UserRole) is _TODOS), None)
+    if item_todos is not None:
+        lista.blockSignals(True)
+        item_todos.setSelected(False)
+        lista.blockSignals(False)
+
+
 def _seleccionar_todos(lista: QListWidget) -> None:
     for i in range(lista.count()):
-        lista.item(i).setSelected(True)
+        item = lista.item(i)
+        item.setSelected(item.data(Qt.ItemDataRole.UserRole) is _TODOS)
 
 
 def _ids_seleccionados(lista: QListWidget) -> list:
-    return [item.data(Qt.ItemDataRole.UserRole) for item in lista.selectedItems()]
+    """[] con "Todas las X" tildado — para un nivel intermedio de la
+    cascada, donde "sin filtro" ya significa "no restringir"."""
+    return [
+        item.data(Qt.ItemDataRole.UserRole) for item in lista.selectedItems()
+        if item.data(Qt.ItemDataRole.UserRole) is not _TODOS
+    ]
+
+
+def _ids_reales(lista: QListWidget) -> list:
+    """Como `_ids_seleccionados`, pero resolviendo "Todas las X" al
+    conjunto real completo de la lista — para los métodos públicos
+    `ids_unidad_seleccionadas`/`ids_consultorio_seleccionados`, que
+    alimentan consultas donde una lista vacía significa "nada", no "todo"."""
+    seleccionados = lista.selectedItems()
+    if any(item.data(Qt.ItemDataRole.UserRole) is _TODOS for item in seleccionados):
+        return [
+            lista.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lista.count())
+            if lista.item(i).data(Qt.ItemDataRole.UserRole) is not _TODOS
+        ]
+    return [item.data(Qt.ItemDataRole.UserRole) for item in seleccionados]
 
 
 class _PanelFiltrosJerarquico(QGroupBox):
@@ -169,6 +242,7 @@ class _PanelFiltrosJerarquico(QGroupBox):
     def _cargar_localidades(self) -> None:
         self.lista_localidad.blockSignals(True)
         self.lista_localidad.clear()
+        _agregar_item_todos(self.lista_localidad, "Todas las localidades")
         filas = self.conn.execute("SELECT DISTINCT DomicilioLocalidad FROM Edificio ORDER BY DomicilioLocalidad").fetchall()
         for fila in filas:
             valor = fila["DomicilioLocalidad"]
@@ -180,9 +254,11 @@ class _PanelFiltrosJerarquico(QGroupBox):
         self._cargar_edificios()
 
     def _cargar_edificios(self) -> None:
+        _corregir_seleccion_todos(self.lista_localidad)
         localidades = _ids_seleccionados(self.lista_localidad)
         self.lista_edificio.blockSignals(True)
         self.lista_edificio.clear()
+        _agregar_item_todos(self.lista_edificio, "Todos los edificios")
         sql = "SELECT IdEdificio, Nombre FROM Edificio"
         parametros: list = []
         if localidades:
@@ -204,9 +280,11 @@ class _PanelFiltrosJerarquico(QGroupBox):
         self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
+        _corregir_seleccion_todos(self.lista_edificio)
         ids_edificio = _ids_seleccionados(self.lista_edificio)
         self.lista_unidad.blockSignals(True)
         self.lista_unidad.clear()
+        _agregar_item_todos(self.lista_unidad, "Todas las unidades")
         sql = "SELECT u.IdUnidad, u.Departamento, e.Nombre AS NombreEdificio FROM Unidad u JOIN Edificio e ON e.IdEdificio = u.IdEdificio"
         parametros: list = []
         if ids_edificio:
@@ -224,9 +302,11 @@ class _PanelFiltrosJerarquico(QGroupBox):
         self._cargar_consultorios()
 
     def _cargar_consultorios(self) -> None:
-        ids_unidad = _ids_seleccionados(self.lista_unidad)
+        _corregir_seleccion_todos(self.lista_unidad)
+        ids_unidad = _ids_reales(self.lista_unidad)
         self.lista_consultorio.blockSignals(True)
         self.lista_consultorio.clear()
+        _agregar_item_todos(self.lista_consultorio, "Todos los consultorios")
         if ids_unidad:
             placeholders = ", ".join("?" for _ in ids_unidad)
             filas = self.conn.execute(
@@ -243,14 +323,15 @@ class _PanelFiltrosJerarquico(QGroupBox):
         self._emitir_cambio()
 
     def _emitir_cambio(self) -> None:
+        _corregir_seleccion_todos(self.lista_consultorio)
         if self._on_cambiar:
             self._on_cambiar(self)
 
     def ids_unidad_seleccionadas(self) -> list[int]:
-        return _ids_seleccionados(self.lista_unidad)
+        return _ids_reales(self.lista_unidad)
 
     def ids_consultorio_seleccionados(self) -> list[int]:
-        return _ids_seleccionados(self.lista_consultorio)
+        return _ids_reales(self.lista_consultorio)
 
 
 class _PanelPromedios(QGroupBox):
@@ -272,10 +353,11 @@ class _PanelPromedios(QGroupBox):
             filas += [(g.nombre, g.promedio_valor_hora_regular, _COLOR_EDIFICIO) for g in promedios.por_edificio]
         filas += [(g.nombre, g.promedio_valor_hora_regular, None) for g in promedios.por_unidad]
 
+        self.tabla.setSortingEnabled(False)
         self.tabla.setRowCount(len(filas))
         for fila, (nombre, valor, color) in enumerate(filas):
             item_nombre = QTableWidgetItem(nombre)
-            item_valor = QTableWidgetItem(formatear_moneda(valor))
+            item_valor = _ItemNumerico(formatear_moneda(valor), valor)
             if color is not None:
                 for item in (item_nombre, item_valor):
                     fuente = item.font()
@@ -284,6 +366,7 @@ class _PanelPromedios(QGroupBox):
                     item.setBackground(color)
             self.tabla.setItem(fila, 0, item_nombre)
             self.tabla.setItem(fila, 1, item_valor)
+        self.tabla.setSortingEnabled(True)
 
 
 class PantallaGrillaOperativa(QWidget):
@@ -315,7 +398,15 @@ class PantallaGrillaOperativa(QWidget):
         layout_grilla.addWidget(self.grilla, stretch=1)
         self._leyenda = _LeyendaColores()
         layout_grilla.addWidget(self._leyenda)
-        tabs.addTab(panel_grilla, "Grilla semanal")
+        # Con el horario configurado hoy, la grilla entra entera sin
+        # scroll — si más adelante se configuran más horas de
+        # visualización y ya no entra, este QScrollArea (no la tabla en
+        # sí) es el que muestra la barra vertical, dejando que la grilla
+        # se pinte siempre a su alto natural completo.
+        scroll_grilla = QScrollArea()
+        scroll_grilla.setWidgetResizable(True)
+        scroll_grilla.setWidget(panel_grilla)
+        tabs.addTab(scroll_grilla, "Grilla semanal")
 
         panel_valores = QWidget()
         layout_valores = QHBoxLayout(panel_valores)
@@ -341,8 +432,10 @@ class PantallaGrillaOperativa(QWidget):
 
     def _refrescar_valores(self, panel: _PanelFiltrosJerarquico) -> None:
         ids_consultorio = panel.ids_consultorio_seleccionados()
+        self.tabla_valores.setSortingEnabled(False)
         self.tabla_valores.setRowCount(0)
         if not ids_consultorio:
+            self.tabla_valores.setSortingEnabled(True)
             self.promedios_valores.actualizar(PromediosValorHora())
             return
         placeholders = ", ".join("?" for _ in ids_consultorio)
@@ -361,21 +454,25 @@ class PantallaGrillaOperativa(QWidget):
         ))
         self.tabla_valores.setRowCount(len(filas))
         for fila, f in enumerate(filas):
-            valores = [
-                f["DomicilioLocalidad"] or "(Sin localidad)", f["NombreEdificio"], f["Departamento"], str(f["NumeroConsultorio"]),
-                formatear_moneda(f["ValorHoraRegularActual"] or 0),
-                formatear_moneda(f["ValorHoraAisladaActual"] or 0),
-            ]
-            for columna, texto in enumerate(valores):
-                self.tabla_valores.setItem(fila, columna, QTableWidgetItem(texto))
+            valor_regular = f["ValorHoraRegularActual"] or 0
+            valor_aislada = f["ValorHoraAisladaActual"] or 0
+            self.tabla_valores.setItem(fila, 0, QTableWidgetItem(f["DomicilioLocalidad"] or "(Sin localidad)"))
+            self.tabla_valores.setItem(fila, 1, QTableWidgetItem(f["NombreEdificio"]))
+            self.tabla_valores.setItem(fila, 2, QTableWidgetItem(f["Departamento"]))
+            self.tabla_valores.setItem(fila, 3, _ItemNumerico(str(f["NumeroConsultorio"]), f["NumeroConsultorio"]))
+            self.tabla_valores.setItem(fila, 4, _ItemNumerico(formatear_moneda(valor_regular), valor_regular))
+            self.tabla_valores.setItem(fila, 5, _ItemNumerico(formatear_moneda(valor_aislada), valor_aislada))
+        self.tabla_valores.setSortingEnabled(True)
 
         self.promedios_valores.actualizar(calcular_promedios_valor_hora_regular(self.conn, ids_consultorio))
 
     def _refrescar_estadisticas(self, panel: _PanelFiltrosJerarquico) -> None:
         ids_unidad = panel.ids_unidad_seleccionadas()
         ids_consultorio = panel.ids_consultorio_seleccionados()
+        self.tabla_estadisticas.setSortingEnabled(False)
         self.tabla_estadisticas.setRowCount(0)
         if not ids_unidad or not ids_consultorio:
+            self.tabla_estadisticas.setSortingEnabled(True)
             return
         estadisticas = calcular_estadisticas_operativas(self.conn, ids_unidad, ids_consultorio_filtro=ids_consultorio)
 
@@ -389,25 +486,25 @@ class PantallaGrillaOperativa(QWidget):
         self.tabla_estadisticas.setRowCount(len(filas))
         for fila, (grupo, color) in enumerate(filas):
             self._llenar_fila_estadistica(fila, grupo, color)
+        self.tabla_estadisticas.setSortingEnabled(True)
 
     def _llenar_fila_estadistica(self, fila: int, grupo: EstadisticaGrupo, color: QColor | None) -> None:
-        valores = [
-            grupo.localidad if grupo.localidad is not None else grupo.nombre,  # el total no tiene localidad propia
-            grupo.edificio or "",
-            grupo.unidad or "",
-            f"{grupo.porcentaje_ocupacion:.1f} %",
-            _fmt_horas(grupo.horas_regulares),
-            _fmt_horas(grupo.horas_aisladas),
-            formatear_moneda(grupo.subtotal_regulares),
-            formatear_moneda(grupo.subtotal_aisladas),
-            formatear_moneda(grupo.pagos_atribuidos),
-            formatear_moneda(grupo.falta_cobrar),
+        columnas: list[QTableWidgetItem] = [
+            QTableWidgetItem(grupo.localidad if grupo.localidad is not None else grupo.nombre),  # el total no tiene localidad propia
+            QTableWidgetItem(grupo.edificio or ""),
+            QTableWidgetItem(grupo.unidad or ""),
+            _ItemNumerico(f"{grupo.porcentaje_ocupacion:.1f} %", grupo.porcentaje_ocupacion),
+            _ItemNumerico(_fmt_horas(grupo.horas_semanales), grupo.horas_semanales),
+            _ItemNumerico(formatear_moneda(grupo.subtotal_regulares), grupo.subtotal_regulares),
+            _ItemNumerico(formatear_moneda(grupo.subtotal_aisladas), grupo.subtotal_aisladas),
+            _ItemNumerico(formatear_moneda(grupo.total_regular_y_aislada), grupo.total_regular_y_aislada),
+            _ItemNumerico(formatear_moneda(grupo.pagos_atribuidos), grupo.pagos_atribuidos),
+            _ItemNumerico(formatear_moneda(grupo.falta_cobrar), grupo.falta_cobrar),
         ]
-        for columna, texto in enumerate(valores):
-            item = QTableWidgetItem(texto)
+        for indice, item in enumerate(columnas):
             if color is not None:
                 fuente = item.font()
                 fuente.setBold(True)
                 item.setFont(fuente)
                 item.setBackground(color)
-            self.tabla_estadisticas.setItem(fila, columna, item)
+            self.tabla_estadisticas.setItem(fila, indice, item)

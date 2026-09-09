@@ -182,6 +182,9 @@ class _EtiquetaGrilla(QWidget):
         painter.end()
 
 
+TODOS = object()  # sentinel del ítem "Todas las X" de los filtros en cascada (Localidad/Edificio/Unidad)
+
+
 def _lista_multiseleccion() -> QListWidget:
     lista = QListWidget()
     lista.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -189,13 +192,64 @@ def _lista_multiseleccion() -> QListWidget:
     return lista
 
 
+def _agregar_item_todos(lista: QListWidget, etiqueta: str) -> QListWidgetItem:
+    """Ítem "Todas las X" — tildado por defecto (confirmado por la
+    clienta), en vez de tildar uno por uno cada valor real de la lista."""
+    item = QListWidgetItem(etiqueta)
+    fuente = item.font()
+    fuente.setBold(True)
+    item.setFont(fuente)
+    item.setData(Qt.ItemDataRole.UserRole, TODOS)
+    lista.addItem(item)
+    return item
+
+
+def _corregir_seleccion_todos(lista: QListWidget) -> None:
+    """Mutuamente excluyente con los ítems reales: si al tildar algo real
+    queda el ítem "Todas las X" tildado junto con otros (ej. Ctrl+clic),
+    se destilda "Todas las X" y quedan los reales — un clic simple ya lo
+    resuelve solo (Qt selecciona en exclusiva al clickear sin Ctrl)."""
+    seleccionados = lista.selectedItems()
+    if len(seleccionados) <= 1:
+        return
+    item_todos = next((it for it in seleccionados if it.data(Qt.ItemDataRole.UserRole) is TODOS), None)
+    if item_todos is not None:
+        lista.blockSignals(True)
+        item_todos.setSelected(False)
+        lista.blockSignals(False)
+
+
 def _seleccionar_todos(lista: QListWidget) -> None:
+    """Vuelve al estado por defecto: solo tildado el ítem "Todas las X"."""
     for i in range(lista.count()):
-        lista.item(i).setSelected(True)
+        item = lista.item(i)
+        item.setSelected(item.data(Qt.ItemDataRole.UserRole) is TODOS)
 
 
 def _ids_seleccionados(lista: QListWidget) -> list[int]:
-    return [item.data(Qt.ItemDataRole.UserRole) for item in lista.selectedItems()]
+    """[] si está tildado "Todas las X" (sin filtro) — para usar como
+    condición de un WHERE de un nivel intermedio de la cascada (Localidad/
+    Edificio), donde "sin filtro" ya significa "no restringir"."""
+    return [
+        item.data(Qt.ItemDataRole.UserRole) for item in lista.selectedItems()
+        if item.data(Qt.ItemDataRole.UserRole) is not TODOS
+    ]
+
+
+def _ids_reales(lista: QListWidget) -> list[int]:
+    """Como `_ids_seleccionados`, pero para el nivel hoja del filtro (acá,
+    Unidad): con "Todas las X" tildado, devuelve el conjunto real
+    COMPLETO de la lista en vez de [] — al contrario que el nivel
+    intermedio, acá [] tiene que seguir significando "nada tildado" (el
+    caso especial de un profesional nuevo sin nada reservado todavía,
+    ver `filtrar_por_unidades`)."""
+    seleccionados = lista.selectedItems()
+    if any(item.data(Qt.ItemDataRole.UserRole) is TODOS for item in seleccionados):
+        return [
+            lista.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lista.count())
+            if lista.item(i).data(Qt.ItemDataRole.UserRole) is not TODOS
+        ]
+    return [item.data(Qt.ItemDataRole.UserRole) for item in seleccionados]
 
 
 def unidades_con_reserva_vigente(conn: sqlite3.Connection, id_profesional: int | None) -> list[int]:
@@ -355,7 +409,7 @@ class GrillaOperativaWidget(QWidget):
 
         layout_filtros.addWidget(QLabel("Unidad"))
         self.lista_unidad = _lista_multiseleccion()
-        self.lista_unidad.itemSelectionChanged.connect(self.actualizar)
+        self.lista_unidad.itemSelectionChanged.connect(self._unidad_seleccion_cambio)
         layout_filtros.addWidget(self.lista_unidad)
 
         layout_filtros.addWidget(QLabel("Día de la semana"))
@@ -433,6 +487,7 @@ class GrillaOperativaWidget(QWidget):
     def _cargar_localidades(self) -> None:
         self.lista_localidad.blockSignals(True)
         self.lista_localidad.clear()
+        _agregar_item_todos(self.lista_localidad, "Todas las localidades")
         localidades = self.conn.execute(
             "SELECT DISTINCT DomicilioLocalidad FROM Edificio ORDER BY DomicilioLocalidad"
         ).fetchall()
@@ -446,9 +501,11 @@ class GrillaOperativaWidget(QWidget):
         self._cargar_edificios()
 
     def _cargar_edificios(self) -> None:
+        _corregir_seleccion_todos(self.lista_localidad)
         localidades = _ids_seleccionados(self.lista_localidad)
         self.lista_edificio.blockSignals(True)
         self.lista_edificio.clear()
+        _agregar_item_todos(self.lista_edificio, "Todos los edificios")
         sql = "SELECT IdEdificio, Nombre FROM Edificio"
         parametros: list = []
         if localidades:
@@ -470,9 +527,11 @@ class GrillaOperativaWidget(QWidget):
         self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
+        _corregir_seleccion_todos(self.lista_edificio)
         ids_edificio = _ids_seleccionados(self.lista_edificio)
         self.lista_unidad.blockSignals(True)
         self.lista_unidad.clear()
+        _agregar_item_todos(self.lista_unidad, "Todas las unidades")
         sql = "SELECT u.IdUnidad, u.Departamento, e.Nombre AS NombreEdificio FROM Unidad u JOIN Edificio e ON e.IdEdificio = u.IdEdificio"
         parametros: list = []
         if ids_edificio:
@@ -505,7 +564,7 @@ class GrillaOperativaWidget(QWidget):
         con la selección de la grilla sin necesidad de leerla de vuelta
         (el callback puede dispararse durante `__init__`, antes de que el
         que lo llama termine de guardar la referencia al widget)."""
-        return _ids_seleccionados(self.lista_unidad)
+        return _ids_reales(self.lista_unidad)
 
     def filtrar_por_unidad(self, id_unidad: int | None) -> None:
         """Acota la selección de unidades a una sola — o la vuelve a
@@ -597,13 +656,17 @@ class GrillaOperativaWidget(QWidget):
 
     # ------------------------------------------------------------- grilla
 
+    def _unidad_seleccion_cambio(self) -> None:
+        _corregir_seleccion_todos(self.lista_unidad)
+        self.actualizar()
+
     def actualizar(self) -> None:
         self._actualizar_grilla()
         if self._on_actualizar:
             self._on_actualizar(self.ids_unidad_seleccionadas())
 
     def _actualizar_grilla(self) -> None:
-        ids_unidad = _ids_seleccionados(self.lista_unidad)
+        ids_unidad = _ids_reales(self.lista_unidad)
         dias = self._dias_seleccionados()
         periodo = self.combo_periodo.currentData()
         modo = self.combo_modo.currentData() or "regular"

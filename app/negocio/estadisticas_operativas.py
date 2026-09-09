@@ -22,8 +22,14 @@ aisladas sí vienen con su propio consultorio ya identificado en
 reparten con el mismo criterio de proporción.
 
 Categoría B nunca se liquida (`id_profesional_liquidable` da None): sus
-horas cuentan para ocupación y para "horas reservadas", pero el
+horas cuentan para ocupación y para "horas semanales", pero el
 subtotal en pesos les queda en $0, como corresponde.
+
+"Horas semanales" (confirmado por la clienta) es la suma de franjas de
+reserva regular VIGENTES HOY, una vez por consultorio y por semana — no
+las ocurrencias reales dentro del mes (eso lo sigue usando, sin cambios,
+el reparto proporcional de los subtotales en pesos entre consultorios,
+más abajo).
 
 No se persiste ningún subtotal acá: se recalcula cada vez que se abre o
 refresca la sección — evita mantener sincronizado un caché contra los
@@ -37,7 +43,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_actual, primer_dia_mes, ultimo_dia_mes
+from app.negocio.dias import fecha_a_dia_semana, fecha_actual, parsear_periodo, periodo_actual, primer_dia_mes, ultimo_dia_mes
 from app.negocio.estadisticas import calcular_ocupacion
 from app.negocio.liquidaciones import calcular_liquidacion, id_profesional_liquidable
 from app.pdf.estilos import clave_orden_unidad
@@ -56,15 +62,18 @@ class EstadisticaGrupo:
     edificio: str | None = None
     unidad: str | None = None
     porcentaje_ocupacion: float = 0.0
-    horas_regulares: float = 0.0
-    horas_aisladas: float = 0.0
+    horas_semanales: float = 0.0
     subtotal_regulares: float = 0.0
     subtotal_aisladas: float = 0.0
     pagos_atribuidos: float = 0.0
 
     @property
+    def total_regular_y_aislada(self) -> float:
+        return self.subtotal_regulares + self.subtotal_aisladas
+
+    @property
     def falta_cobrar(self) -> float:
-        return self.subtotal_regulares + self.subtotal_aisladas - self.pagos_atribuidos
+        return self.total_regular_y_aislada - self.pagos_atribuidos
 
 
 @dataclass
@@ -117,18 +126,23 @@ def _horas_regulares_por_consultorio(
     return horas
 
 
-def _horas_aisladas_por_consultorio(
-    conn: sqlite3.Connection, periodo: str, ids_consultorio: list[int] | None = None,
-) -> dict[int, float]:
-    sql = "SELECT * FROM ReservaAislada WHERE Estado = 'Confirmada' AND Fecha LIKE ?"
-    parametros: list = [f"{periodo}-%"]
-    if ids_consultorio:
-        placeholders = ", ".join("?" for _ in ids_consultorio)
-        sql += f" AND IdConsultorio IN ({placeholders})"
-        parametros.extend(ids_consultorio)
-
+def _horas_semanales_por_consultorio(conn: sqlite3.Connection, hoy: date, ids_consultorio: list[int]) -> dict[int, float]:
+    """{IdConsultorio: horas reservadas por semana completa} — cuenta cada
+    reserva regular VIGENTE HOY una sola vez (una franja fija que se
+    repite una vez por semana), sin importar cuántas veces ocurra ese día
+    dentro del mes — a diferencia de `_horas_regulares_por_consultorio`
+    (que sí cuenta ocurrencias del mes y es la base del reparto
+    proporcional de los subtotales en pesos, que no cambia acá)."""
+    if not ids_consultorio:
+        return {}
+    placeholders = ", ".join("?" for _ in ids_consultorio)
+    filas = conn.execute(
+        f"SELECT * FROM ReservaRegular WHERE IdConsultorio IN ({placeholders}) "
+        "AND VigenciaInicio <= ? AND (VigenciaFin IS NULL OR VigenciaFin >= ?)",
+        (*ids_consultorio, hoy.isoformat(), hoy.isoformat()),
+    ).fetchall()
     horas: dict[int, float] = {}
-    for r in conn.execute(sql, parametros).fetchall():
+    for r in filas:
         horas[r["IdConsultorio"]] = horas.get(r["IdConsultorio"], 0.0) + (r["HoraFin"] - r["HoraInicio"])
     return horas
 
@@ -171,6 +185,7 @@ def calcular_estadisticas_operativas(
     if not ids_unidad:
         return EstadisticasOperativas(periodo=periodo)
 
+    hoy = fecha_actual(conn)
     anio, mes = parsear_periodo(periodo)
     primer_dia, ultimo_dia = primer_dia_mes(anio, mes), ultimo_dia_mes(anio, mes)
 
@@ -206,12 +221,9 @@ def calcular_estadisticas_operativas(
     }
 
     if ids_consultorio:
-        horas_reg = _horas_regulares_por_consultorio(conn, primer_dia, ultimo_dia, ids_consultorio=ids_consultorio)
-        horas_ais = _horas_aisladas_por_consultorio(conn, periodo, ids_consultorio=ids_consultorio)
-        for id_consultorio, horas in horas_reg.items():
-            grupos_unidad[id_unidad_de[id_consultorio]].horas_regulares += horas
-        for id_consultorio, horas in horas_ais.items():
-            grupos_unidad[id_unidad_de[id_consultorio]].horas_aisladas += horas
+        horas_sem = _horas_semanales_por_consultorio(conn, hoy, ids_consultorio)
+        for id_consultorio, horas in horas_sem.items():
+            grupos_unidad[id_unidad_de[id_consultorio]].horas_semanales += horas
 
     ocupacion = calcular_ocupacion(conn, anio, mes)
     for id_unidad, grupo in grupos_unidad.items():
@@ -256,8 +268,7 @@ def calcular_estadisticas_operativas(
             id=id_edificio, nombre=nombre_edificio_de[id_edificio],
             localidad=localidad_de_edificio[id_edificio], edificio=nombre_edificio_de[id_edificio],
         ))
-        ge.horas_regulares += grupo.horas_regulares
-        ge.horas_aisladas += grupo.horas_aisladas
+        ge.horas_semanales += grupo.horas_semanales
         ge.subtotal_regulares += grupo.subtotal_regulares
         ge.subtotal_aisladas += grupo.subtotal_aisladas
         ge.pagos_atribuidos += grupo.pagos_atribuidos
@@ -270,8 +281,7 @@ def calcular_estadisticas_operativas(
     for id_edificio, ge in grupos_edificio.items():
         localidad = localidad_de_edificio[id_edificio]
         gl = grupos_localidad.setdefault(localidad, EstadisticaGrupo(id=None, nombre=localidad, localidad=localidad))
-        gl.horas_regulares += ge.horas_regulares
-        gl.horas_aisladas += ge.horas_aisladas
+        gl.horas_semanales += ge.horas_semanales
         gl.subtotal_regulares += ge.subtotal_regulares
         gl.subtotal_aisladas += ge.subtotal_aisladas
         gl.pagos_atribuidos += ge.pagos_atribuidos
@@ -287,8 +297,7 @@ def calcular_estadisticas_operativas(
 
     total = EstadisticaGrupo(id=None, nombre="Total")
     for grupo in grupos_unidad.values():
-        total.horas_regulares += grupo.horas_regulares
-        total.horas_aisladas += grupo.horas_aisladas
+        total.horas_semanales += grupo.horas_semanales
         total.subtotal_regulares += grupo.subtotal_regulares
         total.subtotal_aisladas += grupo.subtotal_aisladas
         total.pagos_atribuidos += grupo.pagos_atribuidos
