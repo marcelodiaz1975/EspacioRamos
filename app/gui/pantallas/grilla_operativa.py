@@ -1,11 +1,13 @@
-"""Pantalla "Grilla operativa" (punto 21 de la miscelánea, ago-2026): tres
-secciones apiladas en una sola pantalla con scroll (grilla arriba de todo,
-lo primero que se ve al entrar; debajo, valores y estadísticas), todas
-sincronizadas con el mismo filtro de unidades que el usuario tildó en la
-grilla (`GrillaOperativaWidget.ids_unidad_seleccionadas`, sincronizado vía
-el callback `on_actualizar`):
+"""Pantalla "Vista rápida" (ex "Grilla operativa", punto 21 de la
+miscelánea, ago-2026, renombrada y reorganizada en solapas a pedido de la
+clienta): tres solapas, cada una sincronizada con el mismo filtro de
+unidades que el usuario tildó en la grilla
+(`GrillaOperativaWidget.ids_unidad_seleccionadas`, sincronizado vía el
+callback `on_actualizar`):
 
-- Grilla: la grilla filtrable en sí.
+- Grilla: la grilla filtrable en sí (el widget compartido
+  `GrillaOperativaWidget`, sin modificar — lo siguen usando tal cual el
+  resto de los formularios que la embeben) + referencias de colores.
 - Valores de los consultorios: valor hora regular/aislada de cada
   consultorio de las unidades filtradas.
 - Estadísticas: total general primero, después el desglose por localidad
@@ -17,12 +19,13 @@ import sqlite3
 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QGroupBox, QHeaderView, QLabel, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QGridLayout, QGroupBox, QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
+from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, _CeldaGrilla
 from app.negocio.estadisticas_operativas import EstadisticaGrupo, calcular_estadisticas_operativas
 from app.negocio.formato import formatear_moneda
+from app.negocio.grilla_operativa import AMARILLO, AZUL_OSCURO, BLANCA, BLANCO, NEGRA, ROJO, VERDE, CeldaGrillaOperativa
 
 _COLUMNAS_VALORES = ["Edificio", "Unidad", "Consultorio", "Valor hora regular", "Valor hora aislada"]
 _COLUMNAS_ESTADISTICAS = [
@@ -33,6 +36,56 @@ _COLUMNAS_ESTADISTICAS = [
 _COLOR_TOTAL = QColor("#B7C8DC")
 _COLOR_LOCALIDAD = QColor("#D2DEEB")
 _COLOR_EDIFICIO = QColor("#E9EFF5")
+
+_REFERENCIAS_REGULAR: list[tuple[CeldaGrillaOperativa, str]] = [
+    (CeldaGrillaOperativa(BLANCO, BLANCO, NEGRA, None, "", None), "Sin novedades (el código, si lo hay, sigue vigente)."),
+    (CeldaGrillaOperativa(VERDE, VERDE, NEGRA, None, "", None), "Se libera en el futuro."),
+    (CeldaGrillaOperativa(ROJO, ROJO, NEGRA, None, "", None), "Reservado a futuro (todavía no vigente)."),
+    (CeldaGrillaOperativa(AMARILLO, AMARILLO, NEGRA, None, "", None), "Libre de regular, con hora aislada asignada."),
+    (CeldaGrillaOperativa(ROJO, AMARILLO, NEGRA, None, "", None), "Reservado a futuro + aislada confirmada este mes."),
+    (CeldaGrillaOperativa(BLANCO, VERDE, NEGRA, None, "", None), "Reservado, pero libre por ausencia/vacación/licencia."),
+    (CeldaGrillaOperativa(BLANCO, AMARILLO, NEGRA, None, "", None), "Igual, con aislada confirmada en ese hueco."),
+    (CeldaGrillaOperativa(AZUL_OSCURO, AZUL_OSCURO, BLANCA, None, "", None), "Profesional filtrado."),
+]
+
+_REFERENCIAS_AISLADA: list[tuple[CeldaGrillaOperativa, str]] = [
+    (CeldaGrillaOperativa(ROJO, ROJO, NEGRA, None, "", None), "Bloqueado por una reserva regular."),
+    (CeldaGrillaOperativa(VERDE, VERDE, NEGRA, None, "", None), "Libre de reserva regular."),
+    (CeldaGrillaOperativa(ROJO, VERDE, NEGRA, None, "", None), "Reservado, pero libera un hueco por ausencia/vacación/licencia."),
+    (CeldaGrillaOperativa(ROJO, AMARILLO, NEGRA, None, "", None), "Igual, con aislada confirmada en ese hueco."),
+    (CeldaGrillaOperativa(AMARILLO, AMARILLO, NEGRA, None, "", None), "Libre + aislada asignada."),
+    (CeldaGrillaOperativa(AZUL_OSCURO, AZUL_OSCURO, BLANCA, None, "", None), "Profesional filtrado."),
+]
+
+
+class _LeyendaColores(QGroupBox):
+    """Referencia de qué significa cada color/combinación — reusa
+    `_CeldaGrilla` (la misma clase que pinta la grilla real) para que la
+    muestra sea pixel a pixel igual a lo que se ve arriba, en vez de
+    reimplementar el dibujo del triángulo acá aparte."""
+
+    def __init__(self, parent=None):
+        super().__init__("Referencias de colores", parent)
+        self._layout = QGridLayout(self)
+        self.actualizar("regular")
+
+    def actualizar(self, modo: str) -> None:
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        referencias = _REFERENCIAS_REGULAR if modo == "regular" else _REFERENCIAS_AISLADA
+        columnas = 2
+        for i, (celda, texto) in enumerate(referencias):
+            fila, columna = divmod(i, columnas)
+            muestra = _CeldaGrilla(celda, (0, "Lunes", 0), lambda *_: None)
+            muestra.setFixedSize(40, 24)
+            self._layout.addWidget(muestra, fila, columna * 2)
+            etiqueta = QLabel(texto)
+            etiqueta.setWordWrap(True)
+            self._layout.addWidget(etiqueta, fila, columna * 2 + 1)
 
 
 def _fmt_horas(horas: float) -> str:
@@ -54,43 +107,44 @@ class PantallaGrillaOperativa(QWidget):
         super().__init__(parent)
         self.conn = conn
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        contenedor = QWidget()
-        scroll.setWidget(contenedor)
-        layout_pantalla = QVBoxLayout(self)
-        layout_pantalla.addWidget(scroll)
+        layout = QVBoxLayout(self)
 
-        layout = QVBoxLayout(contenedor)
-
-        titulo = QLabel("Grilla operativa")
+        titulo = QLabel("Vista rápida")
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
-        grupo_valores = QGroupBox("Valores de los consultorios")
-        layout_valores = QVBoxLayout(grupo_valores)
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+
+        # La grilla se arma primero: su constructor ya dispara
+        # `actualizar()`, que a su vez llama a `_refrescar_secciones` —
+        # necesita que las tablas de las otras solapas ya existan.
         self.tabla_valores = _armar_tabla(_COLUMNAS_VALORES)
-        layout_valores.addWidget(self.tabla_valores)
-
-        grupo_estadisticas = QGroupBox("Estadísticas")
-        layout_estadisticas = QVBoxLayout(grupo_estadisticas)
         self.tabla_estadisticas = _armar_tabla(_COLUMNAS_ESTADISTICAS)
-        layout_estadisticas.addWidget(self.tabla_estadisticas)
 
-        # La grilla se arma al final: su constructor ya dispara `actualizar()`,
-        # que a su vez llama a `_refrescar_secciones` — necesita que las
-        # tablas de arriba ya existan.
-        grupo_grilla = QGroupBox("Grilla")
-        layout_grilla = QVBoxLayout(grupo_grilla)
+        panel_grilla = QWidget()
+        layout_grilla = QVBoxLayout(panel_grilla)
         self.grilla = GrillaOperativaWidget(conn, on_actualizar=self._refrescar_secciones)
-        self.grilla.setMinimumHeight(650)
-        layout_grilla.addWidget(self.grilla)
+        self.grilla.combo_modo.currentIndexChanged.connect(self._actualizar_leyenda)
+        layout_grilla.addWidget(self.grilla, stretch=1)
+        self._leyenda = _LeyendaColores()
+        layout_grilla.addWidget(self._leyenda)
+        tabs.addTab(panel_grilla, "Grilla")
 
-        layout.addWidget(grupo_grilla)
-        layout.addWidget(grupo_valores)
-        layout.addWidget(grupo_estadisticas)
+        panel_valores = QWidget()
+        layout_valores = QVBoxLayout(panel_valores)
+        layout_valores.addWidget(self.tabla_valores)
+        tabs.addTab(panel_valores, "Valores de los consultorios")
+
+        panel_estadisticas = QWidget()
+        layout_estadisticas = QVBoxLayout(panel_estadisticas)
+        layout_estadisticas.addWidget(self.tabla_estadisticas)
+        tabs.addTab(panel_estadisticas, "Estadísticas")
 
     # -------------------------------------------------------- sincronismo
+
+    def _actualizar_leyenda(self) -> None:
+        self._leyenda.actualizar(self.grilla.combo_modo.currentData() or "regular")
 
     def _refrescar_secciones(self, ids_unidad: list[int]) -> None:
         self._refrescar_valores(ids_unidad)

@@ -144,11 +144,14 @@ def _rango_intersecta_dia_semana(
 
 
 def _novedades_profesional(
-    conn: sqlite3.Connection, id_profesional: int, dia_semana: str, id_consultorio: int,
+    conn: sqlite3.Connection, id_profesional: int, dia_semana: str, id_consultorio: int, hora: float,
     hoy: date, fecha_desde_rango: date, fecha_hasta_rango: date,
 ) -> list[tuple[str, str]]:
     """[(fecha_orden, texto)] de vacaciones, licencias y ausencias del
-    profesional que caen en ese día de la semana dentro del rango."""
+    profesional que caen en ese día de la semana dentro del rango. Las
+    ausencias con horario puntual (HoraInicio/HoraFin) solo cuentan para
+    la `hora` consultada — sin horario puntual (ambos None) cubren todo
+    el día, igual que vacaciones y licencias (que no tienen ese campo)."""
     clausulas: list[tuple[str, str]] = []
 
     for v in conn.execute("SELECT * FROM Vacacion WHERE IdProfesional = ?", (id_profesional,)).fetchall():
@@ -169,6 +172,8 @@ def _novedades_profesional(
 
     for a in conn.execute("SELECT * FROM Ausencia WHERE IdProfesional = ?", (id_profesional,)).fetchall():
         if a["IdConsultorio"] is not None and a["IdConsultorio"] != id_consultorio:
+            continue
+        if a["HoraInicio"] is not None and a["HoraFin"] is not None and not (a["HoraInicio"] <= hora < a["HoraFin"]):
             continue
         if not _rango_intersecta_dia_semana(a["FechaDesde"], a["FechaHasta"], dia_semana, hoy, fecha_desde_rango, fecha_hasta_rango):
             continue
@@ -353,7 +358,7 @@ def _resolver_regular(
         return CeldaGrillaOperativa(ROJO, ROJO, NEGRA, codigo, texto, id_mostrado)
 
     if actual is not None:
-        novedades = _novedades_profesional(conn, actual["IdProfesional"], dia, id_consultorio, hoy, mes_actual_inicio, mes_actual_fin)
+        novedades = _novedades_profesional(conn, actual["IdProfesional"], dia, id_consultorio, hora, hoy, mes_actual_inicio, mes_actual_fin)
         if novedades:
             texto = " ".join([base] + [t for _, t in novedades])
             aisladas_mes = _aisladas_en_rango(conn, id_consultorio, dia, hora, hoy, mes_actual_inicio, mes_actual_fin, profesionales)
@@ -396,7 +401,7 @@ def _resolver_aislada(
     if actual is not None:
         nombre_actual = _nombre_con_codigo(profesionales[actual["IdProfesional"]])
         base = f"Horario reservado en forma regular por {nombre_actual}."
-        novedades = _novedades_profesional(conn, actual["IdProfesional"], dia, id_consultorio, hoy, mes_actual_inicio, mes_actual_fin)
+        novedades = _novedades_profesional(conn, actual["IdProfesional"], dia, id_consultorio, hora, hoy, mes_actual_inicio, mes_actual_fin)
         if novedades:
             texto = " ".join([base] + [t for _, t in novedades])
             if hay_aisladas:

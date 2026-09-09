@@ -50,10 +50,11 @@ def construir_secciones() -> list[Seccion]:
             ayuda="Alta, edición y baja de reservas (regulares y aisladas) por profesional, consultorio y franja.",
         ),
         Seccion(
-            "Grilla operativa", lambda conn: PantallaGrillaOperativa(conn), categoria="Principal",
-            ayuda="Grilla filtrable por localidad/edificio/unidad/día/profesional, con período y rango de "
-            "fechas propios y dos modos de visualización (reservas regulares o aisladas). Al hacer clic en "
-            "una celda se muestra el detalle de esa hora.",
+            "Vista rápida", lambda conn: PantallaGrillaOperativa(conn), categoria="Principal",
+            ayuda="Solapa Grilla: grilla filtrable por localidad/edificio/unidad/día/profesional, con período "
+            "propio y dos modos de visualización (reservas regulares o aisladas), más referencias de colores. "
+            "Al hacer clic en una celda se muestra el detalle de esa hora. Solapas Valores de los consultorios "
+            "y Estadísticas, sincronizadas con el mismo filtro de unidades.",
         ),
         Seccion(
             "Liquidación mensual", lambda conn: ProcesoLiquidacion(conn), categoria="Principal",

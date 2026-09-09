@@ -168,6 +168,36 @@ def test_regular_con_hueco_ya_tomado_es_blanco_con_triangulo_amarillo(conn, cons
     assert "Hora aislada reservada por Lic. Eugenia Viegas (R2) para el lunes 17/8." in celda.detalle
 
 
+def test_regular_ausencia_con_horario_puntual_no_afecta_otras_horas(conn, consultorio, virginia):
+    """La ausencia solo tiene HoraInicio/HoraFin 9-10 — el mismo profesional
+    también tiene una reserva regular a las 11 en otro consultorio, y esa
+    NO tiene que verse afectada (bug real: antes de este fix, una ausencia
+    con horario puntual se aplicaba a todas las horas reservadas del
+    profesional ese día, no solo a la suya)."""
+    _regular(conn, virginia, consultorio)
+    otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=obtener_repositorio(conn, "Unidad").crear(
+            IdEdificio=obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2"), Departamento="2B",
+        ),
+        NumeroConsultorio=1, ValorHoraRegularActual=1000,
+    )
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=virginia, IdConsultorio=otro_consultorio, DiaSemana="Lunes",
+        HoraInicio=11, HoraFin=12, VigenciaInicio="2026-01-01",
+    )
+    obtener_repositorio(conn, "Ausencia").crear(
+        IdProfesional=virginia, FechaDesde="2026-08-17", FechaHasta="2026-08-17", HoraInicio=9, HoraFin=10,
+    )
+    conn.commit()
+
+    celda_con_ausencia = _celda(conn, consultorio)
+    assert (celda_con_ausencia.color_aro, celda_con_ausencia.color_centro) == (BLANCO, VERDE)
+
+    grilla_otro_horario = calcular_grilla_operativa(conn, [otro_consultorio], ["Lunes"], 11, 12, "2026-08")
+    celda_otro_horario = grilla_otro_horario[(otro_consultorio, "Lunes", 11)]
+    assert (celda_otro_horario.color_aro, celda_otro_horario.color_centro) == (BLANCO, BLANCO)
+
+
 def test_regular_solo_aislada_en_mes_actual_es_amarillo_liso(conn, consultorio, eugenia):
     obtener_repositorio(conn, "ReservaAislada").crear(
         IdProfesional=eugenia, IdConsultorio=consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=10,
