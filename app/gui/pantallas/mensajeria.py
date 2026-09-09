@@ -237,9 +237,21 @@ class CentroMensajeria(QWidget):
                 self.tabla.setItem(fila_idx, 4, QTableWidgetItem(formatear_moneda(saldo_actual)))
                 self.tabla.setItem(fila_idx, _COLUMNA_ENVIADA, self._item_enviada(profesional, color, periodo))
 
-                boton = QPushButton("Generar texto")
+                # Reusa el botón si la fila ya tenía uno (ej. al cambiar de
+                # filtro) en vez de destruirlo y crear uno nuevo en la misma
+                # celda: reemplazar un cellWidget in situ es un bug real de
+                # Qt (comprobado con capturas) — el botón viejo puede seguir
+                # pintado, superpuesto o angosto, hasta que el próximo
+                # refresco de la tabla lo termina de limpiar. Igual criterio
+                # que la leyenda de colores de Vista rápida, resuelto acá
+                # evitando directamente el reemplazo en vez de ocultarlo.
+                boton = self.tabla.cellWidget(fila_idx, _COLUMNA_BOTON)
+                if boton is None:
+                    boton = QPushButton("Generar texto")
+                    self.tabla.setCellWidget(fila_idx, _COLUMNA_BOTON, boton)
+                else:
+                    boton.clicked.disconnect()
                 boton.clicked.connect(lambda _checked=False, p=profesional: self._generar_y_mostrar(p))
-                self.tabla.setCellWidget(fila_idx, _COLUMNA_BOTON, boton)
 
                 if color in _COLOR_FONDO:
                     fondo = QColor(_COLOR_FONDO[color])

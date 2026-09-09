@@ -157,6 +157,33 @@ def test_generar_texto_marron_pasa_a_amarillo(qtbot, conn):
     assert _color(conn, id_prof) == "amarillo"
 
 
+def test_refrescar_reusa_el_boton_sin_duplicar_la_conexion(qtbot, conn):
+    """Bug real: reemplazar el cellWidget de una fila que ya tenía uno
+    (ej. al cambiar de filtro) podía dejar el botón viejo pintado por
+    encima del nuevo hasta el próximo refresco de la tabla — se resuelve
+    reusando el widget en vez de destruirlo y crear uno nuevo en su
+    lugar. Acá se confirma que reusarlo no deja la conexión vieja
+    sonando en paralelo (dispararía el mensaje del profesional
+    equivocado, o dos veces, al hacer clic)."""
+    id_uno = _crear_profesional(conn, apellido="Uno", saldo=1, codigo="R1")
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    fila_uno = pantalla._profesionales.index(next(p for p in pantalla._profesionales if p["IdProfesional"] == id_uno))
+    boton = pantalla.tabla.cellWidget(fila_uno, 6)
+
+    id_dos = _crear_profesional(conn, apellido="Dos", saldo=1, codigo="R2")
+    pantalla.actualizar()
+    assert pantalla.tabla.cellWidget(fila_uno, 6) is boton  # se reusa, no se recrea
+
+    llamadas = []
+    pantalla._generar_y_mostrar = lambda p: llamadas.append(p["IdProfesional"])
+    fila_dos = pantalla._profesionales.index(next(p for p in pantalla._profesionales if p["IdProfesional"] == id_dos))
+    pantalla.tabla.cellWidget(fila_dos, 6).click()
+
+    assert llamadas == [id_dos]  # una sola vez, y por el profesional que hoy ocupa esa fila
+
+
 def test_generar_texto_aislada_pasa_a_azul(qtbot, conn):
     id_prof = _crear_profesional(conn, categoria="A", apellido="Aislada")
     _hacer_visible_aislada(conn, id_prof)
