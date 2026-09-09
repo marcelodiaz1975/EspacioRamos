@@ -752,6 +752,15 @@ class GrillaOperativaWidget(QWidget):
         self._resaltar_ausencias = activar
         self.actualizar()
 
+    def fijar_modo(self, modo: str) -> None:
+        """Deja la grilla siempre en `modo` ("regular"/"aislada") y
+        bloquea el combo de "Visualización" — para los usos "vista
+        previa" embebidos donde el modo tiene que coincidir siempre con
+        el contexto (Reservas: cada solapa fuerza el suyo) y no tiene
+        sentido dejar que el usuario lo cambie a mano."""
+        self.combo_modo.setCurrentIndex(self.combo_modo.findData(modo))
+        self.combo_modo.setEnabled(False)
+
     def mostrar_leyenda_colores(self) -> None:
         """Revela la leyenda de referencias de colores en el panel de
         Filtros, debajo del combo de Profesional — pensado para los usos

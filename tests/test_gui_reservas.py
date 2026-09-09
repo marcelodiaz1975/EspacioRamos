@@ -477,6 +477,26 @@ def _textos_leyenda_visibles(leyenda) -> list[str]:
     return [lbl.text() for lbl in leyenda.findChildren(QLabel) if not lbl.isHidden()]
 
 
+def test_grilla_preview_regulares_bloquea_la_visualizacion_en_regular(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+
+    assert panel.grilla.combo_modo.currentData() == "regular"
+    assert panel.grilla.combo_modo.isEnabled() is False
+
+
+def test_grilla_preview_aisladas_bloquea_la_visualizacion_en_aislada(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+
+    assert panel.grilla.combo_modo.currentData() == "aislada"
+    assert panel.grilla.combo_modo.isEnabled() is False
+
+
 def test_grilla_preview_regulares_muestra_leyenda_de_colores_de_regular(qtbot, conn):
     """Pedido de la clienta: en Reservas, la leyenda de colores va debajo
     del selector de Profesional del panel de Filtros de la vista previa

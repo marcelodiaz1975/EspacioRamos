@@ -423,6 +423,17 @@ def test_filtrar_por_pares_unidad_dia_evita_combinaciones_fantasma(qtbot, conn):
     assert widget.tabla.columnCount() - 2 == 4
 
 
+def test_fijar_modo_deja_el_modo_y_bloquea_el_combo(qtbot, conn):
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+
+    widget.fijar_modo("aislada")
+
+    assert widget.combo_modo.currentData() == "aislada"
+    assert widget.combo_modo.isEnabled() is False
+
+
 # ----------------------------------------------------------- leyenda de colores
 
 def test_leyenda_colores_oculta_por_defecto(qtbot, conn):
