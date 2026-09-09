@@ -146,6 +146,20 @@ def test_regular_entrante_mas_aislada_en_mes_posterior_no_dispara_el_triangulo(c
     assert (celda.color_aro, celda.color_centro) == (ROJO, ROJO)
 
 
+def test_regular_entrante_mas_aislada_pasada_no_dispara_el_triangulo(conn, consultorio, eugenia):
+    """Fix confirmado por la clienta: una aislada de una fecha ya pasada
+    (2026-08-03, antes del "hoy" ficticio 2026-08-10) no es una
+    referencia útil aunque caiga dentro del mes en curso — se omite y la
+    celda sigue rojo liso, sin el triángulo amarillo."""
+    _regular(conn, eugenia, consultorio, vigencia_inicio="2026-09-03")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=eugenia, IdConsultorio=consultorio, Fecha="2026-08-03", HoraInicio=9, HoraFin=10,
+    )
+    celda = _celda(conn, consultorio)
+    assert (celda.color_aro, celda.color_centro) == (ROJO, ROJO)
+    assert "aislada" not in celda.detalle.lower()
+
+
 def test_regular_con_hueco_por_vacacion_es_blanco_con_triangulo_verde(conn, consultorio, virginia):
     _regular(conn, virginia, consultorio)
     obtener_repositorio(conn, "Vacacion").crear(IdProfesional=virginia, FechaDesde="2026-08-15", FechaHasta="2026-08-25")
@@ -166,6 +180,17 @@ def test_regular_con_hueco_ya_tomado_es_blanco_con_triangulo_amarillo(conn, cons
     assert celda.codigo == "R1"
     assert "De vacaciones desde el sábado 15/8 hasta el martes 25/8." in celda.detalle
     assert "Hora aislada reservada por Lic. Eugenia Viegas (R2) para el lunes 17/8." in celda.detalle
+
+
+def test_regular_hueco_con_aislada_pasada_no_dispara_el_triangulo(conn, consultorio, virginia, eugenia):
+    _regular(conn, virginia, consultorio)
+    obtener_repositorio(conn, "Vacacion").crear(IdProfesional=virginia, FechaDesde="2026-08-01", FechaHasta="2026-08-25")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=eugenia, IdConsultorio=consultorio, Fecha="2026-08-03", HoraInicio=9, HoraFin=10,
+    )
+    celda = _celda(conn, consultorio)
+    assert (celda.color_aro, celda.color_centro) == (BLANCO, VERDE)
+    assert "aislada" not in celda.detalle.lower()
 
 
 def test_regular_ausencia_con_horario_puntual_no_afecta_otras_horas(conn, consultorio, virginia):
@@ -274,6 +299,19 @@ def test_aislada_con_hueco_ya_tomado(conn, consultorio, virginia, eugenia):
     celda = _celda(conn, consultorio, modo="aislada")
     assert (celda.color_aro, celda.color_centro) == (ROJO, AMARILLO)
     assert celda.codigo == "R2"
+
+
+def test_aislada_con_hueco_y_aislada_pasada_no_cuenta(conn, consultorio, virginia, eugenia):
+    """Mismo fix que en modo regular: una aislada de una fecha ya pasada
+    no cuenta como "hueco ya tomado" — sigue mostrando el hueco libre."""
+    _regular(conn, virginia, consultorio, vigencia_fin="2026-12-31")
+    obtener_repositorio(conn, "Vacacion").crear(IdProfesional=virginia, FechaDesde="2026-08-01", FechaHasta="2026-08-25")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=eugenia, IdConsultorio=consultorio, Fecha="2026-08-03", HoraInicio=9, HoraFin=10,
+    )
+    celda = _celda(conn, consultorio, modo="aislada")
+    assert (celda.color_aro, celda.color_centro) == (ROJO, VERDE)
+    assert celda.codigo is None
 
 
 def test_aislada_libre_con_aislada_asignada(conn, consultorio, eugenia):

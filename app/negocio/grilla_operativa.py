@@ -52,22 +52,29 @@ mockup):
   por una aislada (no es una reserva regular). El color de fondo puede
   cambiar sin que esto se altere.
 
-MODO "aislada" — sin cambios de reglas todavía (a definir por la
-clienta) — pensado para responder "¿puedo poner una hora aislada acá?":
-no le importan las reservas regulares que todavía no arrancaron (un
-profesional "entrante" no bloquea nada hasta que efectivamente empieza),
-solo lo que está activo HOY. El rango que antes elegía el usuario a mano
-(Desde/Hasta) ahora es siempre el mes completo del período seleccionado.
-  - Rojo completo: bloqueado en todo el mes por una reserva regular
-    activa sin ningún hueco.
-  - Verde completo: libre de reserva regular en todo el mes.
-  - Rojo con centro verde: reservado en forma regular dentro del mes,
-    pero libera algún hueco dentro de ese mes por vacaciones/licencia
-    /ausencia (todavía sin tomar).
-  - Rojo con centro amarillo: igual que el anterior, pero el hueco ya
-    tiene una aislada confirmada adentro.
-  - Amarillo completo: libre de reserva regular en todo el mes + ya hay
-    una aislada asignada dentro del mes.
+MODO "aislada" — reglas confirmadas por la clienta — pensado para
+responder "¿puedo poner una hora aislada acá?": no le importan las
+reservas regulares que todavía no arrancaron (un profesional "entrante"
+no bloquea nada hasta que efectivamente empieza), solo lo que está
+activo HOY. El rango que antes elegía el usuario a mano (Desde/Hasta)
+ahora es siempre el mes completo del período seleccionado.
+  - Rojo liso: bloqueado en todo el mes por una reserva regular activa
+    sin ningún hueco.
+  - Verde liso: libre de reserva regular en todo el mes.
+  - Rojo con triángulo derecho verde: reservado en forma regular dentro
+    del mes, pero libera algún hueco dentro de ese mes por
+    vacaciones/licencia/ausencia (todavía sin tomar).
+  - Rojo con triángulo derecho amarillo: igual que el anterior, pero el
+    hueco ya tiene una aislada confirmada adentro.
+  - Amarillo liso: libre de reserva regular en todo el mes + ya hay una
+    aislada asignada dentro del mes.
+
+  Regla del código (confirmada por la clienta): el código del
+  profesional aparece únicamente cuando el horario tiene alguna reserva
+  aislada asignada (nunca por la reserva regular, que no es lo que se
+  está por reservar en este modo); si hay más de una aislada confirmada
+  en el rango (de distintos profesionales), se muestra la del
+  profesional cuya fecha está más cerca de hoy.
 
 Regla común a los dos modos, y de prioridad máxima sobre cualquier otro
 color (confirmado por la clienta): si el profesional del filtro de la
@@ -78,10 +85,13 @@ una celda que YA muestra código (reserva vigente hoy), nunca en una
 celda "Amarillo liso" (aislada sin reserva regular), porque ahí no hay
 código para resaltar.
 
-"Fecha de corte" (aclarado en conversación): todo se evalúa tomando HOY
-como referencia — una vacación/licencia/ausencia que ya terminó ayer no
-cuenta, una que termina hoy sí. Una reserva regular que todavía no
-arrancó hoy nunca cuenta como "la reserva actual".
+"Fecha de corte" (aclarado en conversación, vale para los dos modos):
+todo se evalúa tomando HOY como referencia — una vacación/licencia/
+ausencia que ya terminó ayer no cuenta, una que termina hoy sí; una
+aislada confirmada para una fecha ya pasada tampoco es una referencia
+útil y se omite, aunque el rango consultado (ej. el mes completo) la
+abarque. Una reserva regular que todavía no arrancó hoy nunca cuenta
+como "la reserva actual".
 """
 from __future__ import annotations
 
@@ -193,8 +203,13 @@ def _aisladas_en_rango(
     cache_profesionales: dict[int, sqlite3.Row],
 ) -> list[tuple[str, int, str]]:
     """[(Fecha, IdProfesional, texto)] de aisladas Confirmadas dentro del
-    rango que caen en ese día de la semana, ordenadas por cercanía a hoy
-    (incluye aisladas ya pasadas si el rango consultado las abarca)."""
+    rango que caen en ese día de la semana, recortado a lo que todavía no
+    pasó (>= hoy) igual que vacaciones/licencias/ausencias — una aislada
+    de ayer no es una referencia útil aunque el rango consultado (ej. el
+    mes completo) la abarque — ordenadas por cercanía a hoy."""
+    fecha_desde_rango = max(fecha_desde_rango, hoy)
+    if fecha_desde_rango > fecha_hasta_rango:
+        return []
     filas = conn.execute(
         "SELECT * FROM ReservaAislada WHERE IdConsultorio = ? AND Estado = 'Confirmada' "
         "AND Fecha BETWEEN ? AND ? AND HoraInicio <= ? AND HoraFin > ?",
