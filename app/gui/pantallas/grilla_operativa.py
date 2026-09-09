@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, _CeldaGrilla, _FiltroColapsable
-from app.negocio.estadisticas_operativas import EstadisticaGrupo, calcular_estadisticas_operativas
+from app.negocio.estadisticas_operativas import EstadisticaGrupo, EstadisticasOperativas, calcular_estadisticas_operativas
 from app.negocio.formato import formatear_moneda
 from app.negocio.grilla_operativa import AMARILLO, AZUL_OSCURO, BLANCA, BLANCO, NEGRA, ROJO, VERDE, CeldaGrillaOperativa
 from app.negocio.valores_operativos import PromediosValorHora, calcular_promedios_valor_hora
@@ -40,6 +40,19 @@ _COLUMNAS_VALORES = ["Localidad", "Edificio", "Unidad", "Consultorio", "Valor ho
 _COLUMNAS_ESTADISTICAS = [
     "Localidad", "Edificio", "Unidad", "% Ocupación", "Horas semanales",
     "Subtotal regulares", "Subtotal aisladas", "Total", "Pagos del mes", "Falta cobrar",
+]
+
+_VALOR_ESTADISTICA_POR_COLUMNA = [
+    lambda g: g.localidad or g.nombre or "",
+    lambda g: g.edificio or "",
+    lambda g: g.unidad or "",
+    lambda g: g.porcentaje_ocupacion,
+    lambda g: g.horas_semanales,
+    lambda g: g.subtotal_regulares,
+    lambda g: g.subtotal_aisladas,
+    lambda g: g.total_regular_y_aislada,
+    lambda g: g.pagos_atribuidos,
+    lambda g: g.falta_cobrar,
 ]
 
 _COLOR_TOTAL = QColor("#B7C8DC")
@@ -118,12 +131,19 @@ class _ItemNumerico(QTableWidgetItem):
         return super().__lt__(other)
 
 
-def _armar_tabla(columnas: list[str]) -> QTableWidget:
+def _armar_tabla(columnas: list[str], *, ordenable_nativo: bool = True) -> QTableWidget:
     """Filas seleccionables completas y sombreadas, con scroll cuando no
     entra todo, y columnas pinchables para ordenar ascendente/descendente
-    (confirmado por la clienta) — `setSortingEnabled` hay que
-    desactivarlo mientras se repuebla la tabla (ver los `_refrescar_*`),
-    si no Qt reordena fila por fila a medida que se van cargando."""
+    (confirmado por la clienta).
+
+    `ordenable_nativo=True` (Valores: tabla plana, sin jerarquía) deja que
+    Qt ordene solo (`setSortingEnabled` hay que desactivarlo mientras se
+    repuebla, si no reordena fila por fila a medida que se van cargando).
+    `ordenable_nativo=False` (Promedios/Estadísticas: filas Total/
+    Localidad/Edificio/Unidad con jerarquía) solo deja el clic disponible
+    y la flechita de orden — quien arma la tabla escucha `sectionClicked`
+    y reconstruye las filas a mano con `_ordenar_grupos_jerarquico`, para
+    no perder el agrupamiento al ordenar."""
     tabla = QTableWidget()
     tabla.setColumnCount(len(columnas))
     tabla.setHorizontalHeaderLabels(columnas)
@@ -134,8 +154,39 @@ def _armar_tabla(columnas: list[str]) -> QTableWidget:
     tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
     tabla.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-    tabla.setSortingEnabled(True)
+    if ordenable_nativo:
+        tabla.setSortingEnabled(True)
+    else:
+        tabla.horizontalHeader().setSectionsClickable(True)
+        tabla.horizontalHeader().setSortIndicatorShown(True)
     return tabla
+
+
+def _ordenar_grupos_jerarquico(por_localidad, por_edificio, por_unidad, valor_fn, ascendente: bool):
+    """Ordena las 3 listas (localidad/edificio/unidad de `EstadisticaGrupo`
+    o `PromedioGrupo`, da igual — alcanza con que tengan `.localidad`/
+    `.edificio`) por el valor que da `valor_fn` para cada renglón, sin
+    perder el agrupamiento jerárquico: primero se ordenan las localidades
+    entre sí; los edificios se ordenan por ese mismo valor DENTRO de cada
+    localidad (no todos mezclados); las unidades, dentro de cada
+    edificio. Doble sort estable en vez de una clave compuesta: ordena
+    por valor primero y por el rango del grupo padre después — el
+    segundo sort (estable) no pierde el orden por valor ya establecido
+    entre elementos del mismo grupo."""
+    localidades = sorted(por_localidad, key=valor_fn, reverse=not ascendente)
+    rango_localidad = {g.localidad: i for i, g in enumerate(localidades)}
+
+    edificios = sorted(
+        sorted(por_edificio, key=valor_fn, reverse=not ascendente),
+        key=lambda g: rango_localidad.get(g.localidad, len(rango_localidad)),
+    )
+    rango_edificio = {(g.localidad, g.edificio): i for i, g in enumerate(edificios)}
+
+    unidades = sorted(
+        sorted(por_unidad, key=valor_fn, reverse=not ascendente),
+        key=lambda g: rango_edificio.get((g.localidad, g.edificio), len(rango_edificio)),
+    )
+    return localidades, edificios, unidades
 
 
 _TODOS = object()  # sentinel del ítem "Todas las X" — mismo criterio que app.gui.widgets.grilla_operativa.TODOS
@@ -355,41 +406,80 @@ class _PanelFiltrosJerarquico(QGroupBox):
 
 _COLUMNAS_PROMEDIOS = ["Localidad", "Edificio", "Unidad", "Promedio hora regular", "Promedio hora aislada"]
 
+_VALOR_PROMEDIO_POR_COLUMNA = [
+    lambda g: g.localidad or "",
+    lambda g: g.edificio or "",
+    lambda g: g.unidad or "",
+    lambda g: g.promedio_valor_hora_regular,
+    lambda g: g.promedio_valor_hora_aislada,
+]
+
 
 class _PanelPromedios(QGroupBox):
     """Promedio de valor hora regular Y hora aislada por localidad/
     edificio/unidad, para la solapa "Valores de los consultorios" —
     mismas 3 columnas separadas y mismo criterio de "mostrar el desglose
-    solo si hay más de uno" y de orden que usa Estadísticas."""
+    solo si hay más de uno" y de orden que usa Estadísticas.
+
+    El renglón "General" queda siempre primero, sin ordenar — el clic en
+    una columna reordena las localidades/edificios/unidades entre sí de
+    forma jerárquica (ver `_ordenar_grupos_jerarquico`), sin usar el
+    `setSortingEnabled` nativo de Qt (que aplanaría todo, mezclando
+    niveles)."""
 
     def __init__(self, parent=None):
         super().__init__("Promedios de valor hora regular y aislada", parent)
         self.setMinimumWidth(720)
         self.setMaximumWidth(780)
         layout = QVBoxLayout(self)
-        self.tabla = _armar_tabla(_COLUMNAS_PROMEDIOS)
+        self.tabla = _armar_tabla(_COLUMNAS_PROMEDIOS, ordenable_nativo=False)
+        self.tabla.horizontalHeader().sectionClicked.connect(self._ordenar_por_columna)
         layout.addWidget(self.tabla)
+        self._promedios = PromediosValorHora()
+        self._columna_orden: int | None = None
+        self._orden_ascendente = True
 
     def actualizar(self, promedios: PromediosValorHora) -> None:
+        self._promedios = promedios
+        self._columna_orden = None
+        self.tabla.horizontalHeader().setSortIndicatorShown(False)
+        self._reconstruir_filas(promedios.por_localidad, promedios.por_edificio, promedios.por_unidad)
+
+    def _ordenar_por_columna(self, columna: int) -> None:
+        if columna == self._columna_orden:
+            self._orden_ascendente = not self._orden_ascendente
+        else:
+            self._columna_orden = columna
+            self._orden_ascendente = True
+        localidades, edificios, unidades = _ordenar_grupos_jerarquico(
+            self._promedios.por_localidad, self._promedios.por_edificio, self._promedios.por_unidad,
+            _VALOR_PROMEDIO_POR_COLUMNA[columna], self._orden_ascendente,
+        )
+        orden = Qt.SortOrder.AscendingOrder if self._orden_ascendente else Qt.SortOrder.DescendingOrder
+        self.tabla.horizontalHeader().setSortIndicatorShown(True)
+        self.tabla.horizontalHeader().setSortIndicator(columna, orden)
+        self._reconstruir_filas(localidades, edificios, unidades)
+
+    def _reconstruir_filas(self, por_localidad, por_edificio, por_unidad) -> None:
+        promedios = self._promedios
         filas: list[tuple[str, str, str, float, float, QColor | None]] = [
             ("General", "", "", promedios.general_regular, promedios.general_aislada, _COLOR_TOTAL),
         ]
-        if len(promedios.por_localidad) > 1:
+        if len(por_localidad) > 1:
             filas += [
                 (g.localidad, "", "", g.promedio_valor_hora_regular, g.promedio_valor_hora_aislada, _COLOR_LOCALIDAD)
-                for g in promedios.por_localidad
+                for g in por_localidad
             ]
-        if len(promedios.por_edificio) > 1:
+        if len(por_edificio) > 1:
             filas += [
                 (g.localidad, g.edificio, "", g.promedio_valor_hora_regular, g.promedio_valor_hora_aislada, _COLOR_EDIFICIO)
-                for g in promedios.por_edificio
+                for g in por_edificio
             ]
         filas += [
             (g.localidad, g.edificio, g.unidad, g.promedio_valor_hora_regular, g.promedio_valor_hora_aislada, None)
-            for g in promedios.por_unidad
+            for g in por_unidad
         ]
 
-        self.tabla.setSortingEnabled(False)
         self.tabla.setRowCount(len(filas))
         for fila, (localidad, edificio, unidad, valor_regular, valor_aislada, color) in enumerate(filas):
             columnas = [
@@ -405,7 +495,6 @@ class _PanelPromedios(QGroupBox):
                     item.setBackground(color)
             for indice, item in enumerate(columnas):
                 self.tabla.setItem(fila, indice, item)
-        self.tabla.setSortingEnabled(True)
 
 
 class PantallaGrillaOperativa(QWidget):
@@ -427,7 +516,11 @@ class PantallaGrillaOperativa(QWidget):
         # una vez (con todo tildado por defecto), y ese refresco necesita
         # que las tablas ya existan.
         self.tabla_valores = _armar_tabla(_COLUMNAS_VALORES)
-        self.tabla_estadisticas = _armar_tabla(_COLUMNAS_ESTADISTICAS)
+        self.tabla_estadisticas = _armar_tabla(_COLUMNAS_ESTADISTICAS, ordenable_nativo=False)
+        self.tabla_estadisticas.horizontalHeader().sectionClicked.connect(self._ordenar_estadisticas_por_columna)
+        self._estadisticas = EstadisticasOperativas(periodo="")
+        self._columna_orden_estadisticas: int | None = None
+        self._orden_ascendente_estadisticas = True
         self.promedios_valores = _PanelPromedios()
 
         panel_grilla = QWidget()
@@ -509,24 +602,43 @@ class PantallaGrillaOperativa(QWidget):
     def _refrescar_estadisticas(self, panel: _PanelFiltrosJerarquico) -> None:
         ids_unidad = panel.ids_unidad_seleccionadas()
         ids_consultorio = panel.ids_consultorio_seleccionados()
-        self.tabla_estadisticas.setSortingEnabled(False)
-        self.tabla_estadisticas.setRowCount(0)
+        self._columna_orden_estadisticas = None
+        self.tabla_estadisticas.horizontalHeader().setSortIndicatorShown(False)
         if not ids_unidad or not ids_consultorio:
-            self.tabla_estadisticas.setSortingEnabled(True)
+            self._estadisticas = EstadisticasOperativas(periodo="")
+            self.tabla_estadisticas.setRowCount(0)
             return
-        estadisticas = calcular_estadisticas_operativas(self.conn, ids_unidad, ids_consultorio_filtro=ids_consultorio)
+        self._estadisticas = calcular_estadisticas_operativas(self.conn, ids_unidad, ids_consultorio_filtro=ids_consultorio)
+        self._reconstruir_filas_estadisticas(
+            self._estadisticas.por_localidad, self._estadisticas.por_edificio, self._estadisticas.por_unidad,
+        )
 
-        filas: list[tuple[EstadisticaGrupo, QColor | None]] = [(estadisticas.total, _COLOR_TOTAL)]
-        if len(estadisticas.por_localidad) > 1:
-            filas += [(g, _COLOR_LOCALIDAD) for g in estadisticas.por_localidad]
-        if len(estadisticas.por_edificio) > 1:
-            filas += [(g, _COLOR_EDIFICIO) for g in estadisticas.por_edificio]
-        filas += [(g, None) for g in estadisticas.por_unidad]
+    def _ordenar_estadisticas_por_columna(self, columna: int) -> None:
+        if columna == self._columna_orden_estadisticas:
+            self._orden_ascendente_estadisticas = not self._orden_ascendente_estadisticas
+        else:
+            self._columna_orden_estadisticas = columna
+            self._orden_ascendente_estadisticas = True
+        localidades, edificios, unidades = _ordenar_grupos_jerarquico(
+            self._estadisticas.por_localidad, self._estadisticas.por_edificio, self._estadisticas.por_unidad,
+            _VALOR_ESTADISTICA_POR_COLUMNA[columna], self._orden_ascendente_estadisticas,
+        )
+        orden = Qt.SortOrder.AscendingOrder if self._orden_ascendente_estadisticas else Qt.SortOrder.DescendingOrder
+        self.tabla_estadisticas.horizontalHeader().setSortIndicatorShown(True)
+        self.tabla_estadisticas.horizontalHeader().setSortIndicator(columna, orden)
+        self._reconstruir_filas_estadisticas(localidades, edificios, unidades)
+
+    def _reconstruir_filas_estadisticas(self, por_localidad, por_edificio, por_unidad) -> None:
+        filas: list[tuple[EstadisticaGrupo, QColor | None]] = [(self._estadisticas.total, _COLOR_TOTAL)]
+        if len(por_localidad) > 1:
+            filas += [(g, _COLOR_LOCALIDAD) for g in por_localidad]
+        if len(por_edificio) > 1:
+            filas += [(g, _COLOR_EDIFICIO) for g in por_edificio]
+        filas += [(g, None) for g in por_unidad]
 
         self.tabla_estadisticas.setRowCount(len(filas))
         for fila, (grupo, color) in enumerate(filas):
             self._llenar_fila_estadistica(fila, grupo, color)
-        self.tabla_estadisticas.setSortingEnabled(True)
 
     def _llenar_fila_estadistica(self, fila: int, grupo: EstadisticaGrupo, color: QColor | None) -> None:
         columnas: list[QTableWidgetItem] = [

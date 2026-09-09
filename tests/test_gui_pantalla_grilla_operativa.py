@@ -289,6 +289,61 @@ def test_sin_unidades_seleccionadas_vacia_estadisticas(qtbot, conn):
     assert pantalla.tabla_estadisticas.rowCount() == 0
 
 
+def test_click_en_columna_de_promedios_ordena_localidades_edificios_y_unidades(qtbot, conn):
+    """El clic en una columna no debe aplanar la tabla (lo que haría el
+    sort nativo de Qt, mezclando niveles): tiene que reordenar las
+    localidades entre sí, y dentro de cada una los edificios, y dentro
+    de cada edificio las unidades — todo por el mismo valor clickeado."""
+    _unidad_con_consultorio(conn, "Haedo 1", "1A", valor_regular=5000, localidad="Haedo")
+    _unidad_con_consultorio(conn, "Ramos 1", "2B", valor_regular=1000, localidad="Ramos Mejía")
+    conn.commit()
+
+    pantalla = PantallaGrillaOperativa(conn)
+    qtbot.addWidget(pantalla)
+    tabla = pantalla.promedios_valores.tabla
+
+    # orden por defecto: alfabético -> Haedo antes que Ramos Mejía
+    assert [tabla.item(f, 0).text() for f in (1, 2)] == ["Haedo", "Ramos Mejía"]
+
+    tabla.horizontalHeader().sectionClicked.emit(3)  # Promedio hora regular, ascendente
+    assert tabla.item(0, 0).text() == "General"  # el total nunca se reordena
+    assert [tabla.item(f, 0).text() for f in (1, 2)] == ["Ramos Mejía", "Haedo"]  # 1000 antes que 5000
+    assert [tabla.item(f, 1).text() for f in (3, 4)] == ["Ramos 1", "Haedo 1"]
+    assert [tabla.item(f, 2).text() for f in (5, 6)] == ["2B", "1A"]
+
+    tabla.horizontalHeader().sectionClicked.emit(3)  # mismo clic de nuevo -> descendente
+    assert [tabla.item(f, 0).text() for f in (1, 2)] == ["Haedo", "Ramos Mejía"]
+
+
+def test_click_en_columna_de_estadisticas_ordena_localidades_edificios_y_unidades(qtbot, conn):
+    _, _, id_consultorio_haedo = _unidad_con_consultorio(conn, "Haedo 1", "1A", localidad="Haedo")
+    _, _, id_consultorio_ramos = _unidad_con_consultorio(conn, "Ramos 1", "2B", localidad="Ramos Mejía")
+    id_prof_haedo = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Uno")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof_haedo, IdConsultorio=id_consultorio_haedo, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=17, VigenciaInicio="2026-01-01",
+    )
+    id_prof_ramos = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Dos")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof_ramos, IdConsultorio=id_consultorio_ramos, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaGrillaOperativa(conn)
+    qtbot.addWidget(pantalla)
+    tabla = pantalla.tabla_estadisticas
+
+    assert [tabla.item(f, 0).text() for f in (1, 2)] == ["Haedo", "Ramos Mejía"]
+
+    tabla.horizontalHeader().sectionClicked.emit(5)  # Subtotal regulares, ascendente
+    assert tabla.item(0, 0).text() == "Total"  # el total nunca se reordena
+    # Haedo reservó 8hs, Ramos Mejía 1hs -> Ramos Mejía tiene el subtotal menor.
+    assert [tabla.item(f, 0).text() for f in (1, 2)] == ["Ramos Mejía", "Haedo"]
+    assert [tabla.item(f, 1).text() for f in (3, 4)] == ["Ramos 1", "Haedo 1"]
+    assert [tabla.item(f, 2).text() for f in (5, 6)] == ["2B", "1A"]
+
+
 def test_subtotal_regulares_coincide_con_el_motor_de_estadisticas(qtbot, conn):
     from app.negocio.estadisticas_operativas import calcular_estadisticas_operativas
 
