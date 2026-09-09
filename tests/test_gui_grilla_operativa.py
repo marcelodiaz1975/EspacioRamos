@@ -37,6 +37,28 @@ def _preparar(conn, codigo_virginia="R1"):
     return id_edificio, id_unidad, id_consultorio, id_virginia
 
 
+def test_filtros_arrancan_colapsados_con_el_resumen_correcto(qtbot, conn):
+    """Confirmado por la clienta: la lista no se ve desplegada, solo un
+    botón-resumen ("Todas las X") que la abre al pincharlo. Bug real
+    encontrado al implementar esto: la población inicial corre con
+    `blockSignals(True)`, así que el resumen no se actualizaba solo con
+    la señal — hace falta refrescarlo a mano."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+
+    assert widget.lista_localidad.isHidden() is True
+    assert widget.lista_edificio.isHidden() is True
+    assert widget.lista_unidad.isHidden() is True
+    assert widget._filtro_localidad._boton.text() == "Todas las localidades"
+    assert widget._filtro_edificio._boton.text() == "Todos los edificios"
+    assert widget._filtro_unidad._boton.text() == "Todas las unidades"
+
+    widget._filtro_unidad._boton.setChecked(True)
+    widget._filtro_unidad._alternar()
+    assert widget.lista_unidad.isHidden() is False
+
+
 def test_filtros_por_defecto_incluyen_todo(qtbot, conn):
     """Confirmado por la clienta: por defecto solo queda tildado el ítem
     "Todas las X" de cada lista, no cada valor real uno por uno."""

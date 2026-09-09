@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
     QTableWidget,
     QTextEdit,
     QVBoxLayout,
@@ -252,6 +253,44 @@ def _ids_reales(lista: QListWidget) -> list[int]:
     return [item.data(Qt.ItemDataRole.UserRole) for item in seleccionados]
 
 
+class _FiltroColapsable(QWidget):
+    """Envuelve una QListWidget de multiselección (Localidad/Edificio/
+    Unidad/Consultorio) para que arranque colapsada — mostrando solo un
+    botón-resumen de la selección vigente ("Todas las localidades", "2
+    seleccionadas") — y recién se despliegue al pincharla, en vez de
+    mostrar la lista entera siempre abierta (confirmado por la clienta)."""
+
+    def __init__(self, lista: QListWidget, parent=None):
+        super().__init__(parent)
+        self._lista = lista
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        self._boton = QPushButton()
+        self._boton.setCheckable(True)
+        self._boton.clicked.connect(self._alternar)
+        layout.addWidget(self._boton)
+        layout.addWidget(lista)
+        lista.setVisible(False)
+        lista.itemSelectionChanged.connect(self.actualizar_resumen)
+        self.actualizar_resumen()
+
+    def _alternar(self) -> None:
+        self._lista.setVisible(self._boton.isChecked())
+
+    def actualizar_resumen(self) -> None:
+        """Público: hay que llamarlo a mano después de repoblar la lista
+        con `blockSignals(True)` (como hacen los `_cargar_*` en cascada),
+        porque en ese tramo `itemSelectionChanged` no dispara solo."""
+        seleccionados = self._lista.selectedItems()
+        if len(seleccionados) == 1:
+            self._boton.setText(seleccionados[0].text())
+        elif not seleccionados:
+            self._boton.setText("(nada seleccionado)")
+        else:
+            self._boton.setText(f"{len(seleccionados)} seleccionadas")
+
+
 def unidades_con_reserva_vigente(conn: sqlite3.Connection, id_profesional: int | None) -> list[int]:
     """Unidades donde el profesional ya tiene alguna reserva regular
     cargada — para que quien embeba la grilla como vista previa
@@ -400,17 +439,20 @@ class GrillaOperativaWidget(QWidget):
         layout_filtros.addWidget(QLabel("Localidad"))
         self.lista_localidad = _lista_multiseleccion()
         self.lista_localidad.itemSelectionChanged.connect(self._cargar_edificios)
-        layout_filtros.addWidget(self.lista_localidad)
+        self._filtro_localidad = _FiltroColapsable(self.lista_localidad)
+        layout_filtros.addWidget(self._filtro_localidad)
 
         layout_filtros.addWidget(QLabel("Edificio"))
         self.lista_edificio = _lista_multiseleccion()
         self.lista_edificio.itemSelectionChanged.connect(self._cargar_unidades)
-        layout_filtros.addWidget(self.lista_edificio)
+        self._filtro_edificio = _FiltroColapsable(self.lista_edificio)
+        layout_filtros.addWidget(self._filtro_edificio)
 
         layout_filtros.addWidget(QLabel("Unidad"))
         self.lista_unidad = _lista_multiseleccion()
         self.lista_unidad.itemSelectionChanged.connect(self._unidad_seleccion_cambio)
-        layout_filtros.addWidget(self.lista_unidad)
+        self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
+        layout_filtros.addWidget(self._filtro_unidad)
 
         layout_filtros.addWidget(QLabel("Día de la semana"))
         self._checks_dia: dict[str, QCheckBox] = {}
@@ -498,10 +540,12 @@ class GrillaOperativaWidget(QWidget):
             self.lista_localidad.addItem(item)
         _seleccionar_todos(self.lista_localidad)
         self.lista_localidad.blockSignals(False)
+        self._filtro_localidad.actualizar_resumen()
         self._cargar_edificios()
 
     def _cargar_edificios(self) -> None:
         _corregir_seleccion_todos(self.lista_localidad)
+        self._filtro_localidad.actualizar_resumen()
         localidades = _ids_seleccionados(self.lista_localidad)
         self.lista_edificio.blockSignals(True)
         self.lista_edificio.clear()
@@ -524,10 +568,12 @@ class GrillaOperativaWidget(QWidget):
             self.lista_edificio.addItem(item)
         _seleccionar_todos(self.lista_edificio)
         self.lista_edificio.blockSignals(False)
+        self._filtro_edificio.actualizar_resumen()
         self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
         _corregir_seleccion_todos(self.lista_edificio)
+        self._filtro_edificio.actualizar_resumen()
         ids_edificio = _ids_seleccionados(self.lista_edificio)
         self.lista_unidad.blockSignals(True)
         self.lista_unidad.clear()
@@ -549,6 +595,7 @@ class GrillaOperativaWidget(QWidget):
             self.lista_unidad.addItem(item)
         _seleccionar_todos(self.lista_unidad)
         self.lista_unidad.blockSignals(False)
+        self._filtro_unidad.actualizar_resumen()
         self.actualizar()
 
     def _dias_seleccionados(self) -> list[str]:
@@ -597,6 +644,7 @@ class GrillaOperativaWidget(QWidget):
                 if item.data(Qt.ItemDataRole.UserRole) in objetivo:
                     item.setSelected(True)
         self.lista_unidad.blockSignals(False)
+        self._filtro_unidad.actualizar_resumen()
         self.actualizar()
 
     def filtrar_por_dias(self, dias: list[str] | None) -> None:
@@ -658,6 +706,7 @@ class GrillaOperativaWidget(QWidget):
 
     def _unidad_seleccion_cambio(self) -> None:
         _corregir_seleccion_todos(self.lista_unidad)
+        self._filtro_unidad.actualizar_resumen()
         self.actualizar()
 
     def actualizar(self) -> None:

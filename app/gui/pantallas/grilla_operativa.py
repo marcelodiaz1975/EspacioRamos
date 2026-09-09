@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, _CeldaGrilla
+from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, _CeldaGrilla, _FiltroColapsable
 from app.negocio.estadisticas_operativas import EstadisticaGrupo, calcular_estadisticas_operativas
 from app.negocio.formato import formatear_moneda
 from app.negocio.grilla_operativa import AMARILLO, AZUL_OSCURO, BLANCA, BLANCO, NEGRA, ROJO, VERDE, CeldaGrillaOperativa
@@ -219,22 +219,26 @@ class _PanelFiltrosJerarquico(QGroupBox):
         layout.addWidget(QLabel("Localidad"))
         self.lista_localidad = _lista_multiseleccion()
         self.lista_localidad.itemSelectionChanged.connect(self._cargar_edificios)
-        layout.addWidget(self.lista_localidad)
+        self._filtro_localidad = _FiltroColapsable(self.lista_localidad)
+        layout.addWidget(self._filtro_localidad)
 
         layout.addWidget(QLabel("Edificio"))
         self.lista_edificio = _lista_multiseleccion()
         self.lista_edificio.itemSelectionChanged.connect(self._cargar_unidades)
-        layout.addWidget(self.lista_edificio)
+        self._filtro_edificio = _FiltroColapsable(self.lista_edificio)
+        layout.addWidget(self._filtro_edificio)
 
         layout.addWidget(QLabel("Unidad"))
         self.lista_unidad = _lista_multiseleccion()
         self.lista_unidad.itemSelectionChanged.connect(self._cargar_consultorios)
-        layout.addWidget(self.lista_unidad)
+        self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
+        layout.addWidget(self._filtro_unidad)
 
         layout.addWidget(QLabel("Consultorio"))
         self.lista_consultorio = _lista_multiseleccion()
         self.lista_consultorio.itemSelectionChanged.connect(self._emitir_cambio)
-        layout.addWidget(self.lista_consultorio)
+        self._filtro_consultorio = _FiltroColapsable(self.lista_consultorio)
+        layout.addWidget(self._filtro_consultorio)
 
         layout.addStretch()
         self._cargar_localidades()
@@ -251,10 +255,12 @@ class _PanelFiltrosJerarquico(QGroupBox):
             self.lista_localidad.addItem(item)
         _seleccionar_todos(self.lista_localidad)
         self.lista_localidad.blockSignals(False)
+        self._filtro_localidad.actualizar_resumen()
         self._cargar_edificios()
 
     def _cargar_edificios(self) -> None:
         _corregir_seleccion_todos(self.lista_localidad)
+        self._filtro_localidad.actualizar_resumen()
         localidades = _ids_seleccionados(self.lista_localidad)
         self.lista_edificio.blockSignals(True)
         self.lista_edificio.clear()
@@ -277,10 +283,12 @@ class _PanelFiltrosJerarquico(QGroupBox):
             self.lista_edificio.addItem(item)
         _seleccionar_todos(self.lista_edificio)
         self.lista_edificio.blockSignals(False)
+        self._filtro_edificio.actualizar_resumen()
         self._cargar_unidades()
 
     def _cargar_unidades(self) -> None:
         _corregir_seleccion_todos(self.lista_edificio)
+        self._filtro_edificio.actualizar_resumen()
         ids_edificio = _ids_seleccionados(self.lista_edificio)
         self.lista_unidad.blockSignals(True)
         self.lista_unidad.clear()
@@ -299,10 +307,12 @@ class _PanelFiltrosJerarquico(QGroupBox):
             self.lista_unidad.addItem(item)
         _seleccionar_todos(self.lista_unidad)
         self.lista_unidad.blockSignals(False)
+        self._filtro_unidad.actualizar_resumen()
         self._cargar_consultorios()
 
     def _cargar_consultorios(self) -> None:
         _corregir_seleccion_todos(self.lista_unidad)
+        self._filtro_unidad.actualizar_resumen()
         ids_unidad = _ids_reales(self.lista_unidad)
         self.lista_consultorio.blockSignals(True)
         self.lista_consultorio.clear()
@@ -310,20 +320,27 @@ class _PanelFiltrosJerarquico(QGroupBox):
         if ids_unidad:
             placeholders = ", ".join("?" for _ in ids_unidad)
             filas = self.conn.execute(
-                f"SELECT IdConsultorio, NumeroConsultorio FROM Consultorio WHERE IdUnidad IN ({placeholders}) "
-                "ORDER BY NumeroConsultorio",
+                f"SELECT c.IdConsultorio, c.NumeroConsultorio, u.Departamento FROM Consultorio c "
+                f"JOIN Unidad u ON u.IdUnidad = c.IdUnidad WHERE c.IdUnidad IN ({placeholders})",
                 ids_unidad,
             ).fetchall()
+            # Por piso de la unidad (mismo criterio que el resto de los
+            # filtros) y, dentro de cada una, por número de consultorio —
+            # un ORDER BY NumeroConsultorio a secas (como antes) mezclaba
+            # los consultorios de distintas unidades ignorando el piso.
+            filas = sorted(filas, key=lambda f: (clave_orden_unidad(f["Departamento"]), f["NumeroConsultorio"]))
             for fila in filas:
                 item = QListWidgetItem(str(fila["NumeroConsultorio"]))
                 item.setData(Qt.ItemDataRole.UserRole, fila["IdConsultorio"])
                 self.lista_consultorio.addItem(item)
         _seleccionar_todos(self.lista_consultorio)
         self.lista_consultorio.blockSignals(False)
+        self._filtro_consultorio.actualizar_resumen()
         self._emitir_cambio()
 
     def _emitir_cambio(self) -> None:
         _corregir_seleccion_todos(self.lista_consultorio)
+        self._filtro_consultorio.actualizar_resumen()
         if self._on_cambiar:
             self._on_cambiar(self)
 
@@ -334,38 +351,47 @@ class _PanelFiltrosJerarquico(QGroupBox):
         return _ids_reales(self.lista_consultorio)
 
 
+_COLUMNAS_PROMEDIOS = ["Localidad", "Edificio", "Unidad", "Promedio"]
+
+
 class _PanelPromedios(QGroupBox):
     """Promedio de valor hora regular por localidad/edificio/unidad, para
-    la solapa "Valores de los consultorios" — mismo criterio de "mostrar
-    el desglose solo si hay más de uno" que usa Estadísticas."""
+    la solapa "Valores de los consultorios" — mismas 3 columnas separadas
+    y mismo criterio de "mostrar el desglose solo si hay más de uno" y de
+    orden que usa Estadísticas."""
 
     def __init__(self, parent=None):
         super().__init__("Promedios de valor hora regular", parent)
+        self.setMaximumWidth(340)
         layout = QVBoxLayout(self)
-        self.tabla = _armar_tabla(["Nivel", "Promedio"])
+        self.tabla = _armar_tabla(_COLUMNAS_PROMEDIOS)
         layout.addWidget(self.tabla)
 
     def actualizar(self, promedios: PromediosValorHora) -> None:
-        filas: list[tuple[str, float, QColor | None]] = [("General", promedios.general, _COLOR_TOTAL)]
+        filas: list[tuple[str, str, str, float, QColor | None]] = [("General", "", "", promedios.general, _COLOR_TOTAL)]
         if len(promedios.por_localidad) > 1:
-            filas += [(g.nombre, g.promedio_valor_hora_regular, _COLOR_LOCALIDAD) for g in promedios.por_localidad]
+            filas += [(g.localidad, "", "", g.promedio_valor_hora_regular, _COLOR_LOCALIDAD) for g in promedios.por_localidad]
         if len(promedios.por_edificio) > 1:
-            filas += [(g.nombre, g.promedio_valor_hora_regular, _COLOR_EDIFICIO) for g in promedios.por_edificio]
-        filas += [(g.nombre, g.promedio_valor_hora_regular, None) for g in promedios.por_unidad]
+            filas += [
+                (g.localidad, g.edificio, "", g.promedio_valor_hora_regular, _COLOR_EDIFICIO) for g in promedios.por_edificio
+            ]
+        filas += [(g.localidad, g.edificio, g.unidad, g.promedio_valor_hora_regular, None) for g in promedios.por_unidad]
 
         self.tabla.setSortingEnabled(False)
         self.tabla.setRowCount(len(filas))
-        for fila, (nombre, valor, color) in enumerate(filas):
-            item_nombre = QTableWidgetItem(nombre)
-            item_valor = _ItemNumerico(formatear_moneda(valor), valor)
+        for fila, (localidad, edificio, unidad, valor, color) in enumerate(filas):
+            columnas = [
+                QTableWidgetItem(localidad), QTableWidgetItem(edificio), QTableWidgetItem(unidad),
+                _ItemNumerico(formatear_moneda(valor), valor),
+            ]
             if color is not None:
-                for item in (item_nombre, item_valor):
+                for item in columnas:
                     fuente = item.font()
                     fuente.setBold(True)
                     item.setFont(fuente)
                     item.setBackground(color)
-            self.tabla.setItem(fila, 0, item_nombre)
-            self.tabla.setItem(fila, 1, item_valor)
+            for indice, item in enumerate(columnas):
+                self.tabla.setItem(fila, indice, item)
         self.tabla.setSortingEnabled(True)
 
 
@@ -395,7 +421,7 @@ class PantallaGrillaOperativa(QWidget):
         layout_grilla = QVBoxLayout(panel_grilla)
         self.grilla = GrillaOperativaWidget(conn)
         self.grilla.combo_modo.currentIndexChanged.connect(self._actualizar_leyenda)
-        layout_grilla.addWidget(self.grilla, stretch=1)
+        layout_grilla.addWidget(self.grilla)
         self._leyenda = _LeyendaColores()
         layout_grilla.addWidget(self._leyenda)
         # Con el horario configurado hoy, la grilla entra entera sin
@@ -412,10 +438,8 @@ class PantallaGrillaOperativa(QWidget):
         layout_valores = QHBoxLayout(panel_valores)
         self.filtros_valores = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_valores)
         layout_valores.addWidget(self.filtros_valores)
-        columna_valores = QVBoxLayout()
-        columna_valores.addWidget(self.promedios_valores)
-        columna_valores.addWidget(self.tabla_valores, stretch=1)
-        layout_valores.addLayout(columna_valores, stretch=1)
+        layout_valores.addWidget(self.promedios_valores)
+        layout_valores.addWidget(self.tabla_valores, stretch=1)
         tabs.addTab(panel_valores, "Valores de los consultorios")
 
         panel_estadisticas = QWidget()

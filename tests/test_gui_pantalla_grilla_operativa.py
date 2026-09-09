@@ -47,6 +47,35 @@ def test_solapas_correctas(qtbot, conn):
     ]
 
 
+def test_filtros_de_valores_arrancan_colapsados_con_resumen(qtbot, conn):
+    _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"')
+    conn.commit()
+
+    pantalla = PantallaGrillaOperativa(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.filtros_valores
+    assert panel.lista_localidad.isHidden() is True
+    assert panel.lista_consultorio.isHidden() is True
+    assert panel._filtro_localidad._boton.text() == "Todas las localidades"
+    assert panel._filtro_edificio._boton.text() == "Todos los edificios"
+    assert panel._filtro_unidad._boton.text() == "Todas las unidades"
+    assert panel._filtro_consultorio._boton.text() == "Todos los consultorios"
+
+
+def test_filtro_consultorio_ordena_por_piso_de_la_unidad(qtbot, conn):
+    """Bug real: un ORDER BY NumeroConsultorio a secas mezclaba los
+    consultorios de distintas unidades ignorando el piso de cada una."""
+    id_edificio, id_unidad_7mo, _ = _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"', numero=5)
+    id_unidad_pb = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='PB "D"')
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_pb, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    conn.commit()
+
+    pantalla = PantallaGrillaOperativa(conn)
+    qtbot.addWidget(pantalla)
+    numeros = [pantalla.filtros_valores.lista_consultorio.item(i).text() for i in range(1, pantalla.filtros_valores.lista_consultorio.count())]
+    assert numeros == ["1", "5"]  # PB (consultorio 1) antes que 7mo (consultorio 5), aunque 5 > 1
+
+
 def test_valores_se_completan_al_iniciar(qtbot, conn):
     _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"', valor_regular=1500, valor_aislada=700)
     pantalla = PantallaGrillaOperativa(conn)
@@ -82,7 +111,7 @@ def test_promedios_se_completan_al_iniciar(qtbot, conn):
     pantalla = PantallaGrillaOperativa(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.promedios_valores.tabla.item(0, 0).text() == "General"
-    assert pantalla.promedios_valores.tabla.item(0, 1).text() == formatear_moneda(1500)
+    assert pantalla.promedios_valores.tabla.item(0, 3).text() == formatear_moneda(1500)
 
 
 def test_valores_siguen_su_propio_filtro_de_unidad(qtbot, conn):
@@ -121,7 +150,7 @@ def test_sin_unidades_en_el_filtro_vacia_valores_y_promedios(qtbot, conn):
     pantalla.filtros_valores.lista_unidad.clearSelection()
 
     assert pantalla.tabla_valores.rowCount() == 0
-    assert pantalla.promedios_valores.tabla.item(0, 1).text() == formatear_moneda(0)
+    assert pantalla.promedios_valores.tabla.item(0, 3).text() == formatear_moneda(0)
 
 
 def test_filtro_por_consultorio_puntual_acota_valores(qtbot, conn):
