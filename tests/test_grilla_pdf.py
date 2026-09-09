@@ -6,7 +6,7 @@ from reportlab.platypus import Paragraph, Table
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.grilla import DIAS_GRILLA_DEFAULT
-from app.pdf.estilos import COLOR_NIVEL_1, FUENTE, FUENTE_NEGRITA
+from app.pdf.estilos import COLOR_NIVEL_1, FUENTE, FUENTE_NEGRITA, clave_orden_unidad
 from app.pdf.grilla_pdf import (
     _CeldaDosTonos,
     _partir_etiqueta_unidad,
@@ -206,6 +206,14 @@ def test_secciones_disponibilidad_ordena_unidades_por_piso_y_letra(conn):
         [c.getPlainText() for c in tabla._cellvalues[3][2:2 + 4]],
     ))
     assert piso_letra == [("EP", "K"), ("7", "L"), ("9", "C"), ("15", "H")]
+
+
+def test_clave_orden_unidad_pb_antes_que_ep_antes_que_numericos():
+    """Confirmado por la clienta: si existen ambos, PB va primero, después
+    EP, y recién después los pisos numéricos ascendentes."""
+    etiquetas = ['7mo "L"', 'EP "K"', 'PB "D"', '1ro "A"']
+    orden = sorted(etiquetas, key=clave_orden_unidad)
+    assert orden == ['PB "D"', 'EP "K"', '1ro "A"', '7mo "L"']
 
 
 def test_orden_a_igualdad_de_piso_es_alfabetico_por_letra(conn):

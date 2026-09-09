@@ -158,13 +158,20 @@ def partir_etiqueta_unidad(etiqueta: str) -> tuple[str, str]:
 
 
 def clave_orden_unidad(etiqueta: str) -> tuple[float, str]:
-    """Orden pedido para listar unidades: piso ascendente y, a igualdad de
-    piso, la letra del departamento alfabéticamente — los pisos no
-    numéricos (ej. "EP"/"PB") valen 0 y quedan primero. Usado tanto en
-    "Valores de los consultorios" como en las grillas de disponibilidad
-    (girada o no) para que las dos secciones ordenen igual."""
+    """Orden pedido para listar unidades: PB primero, después EP, después
+    los pisos numéricos en orden ascendente — a igualdad de piso, la
+    letra del departamento alfabéticamente. Usado tanto en "Valores de
+    los consultorios" como en las grillas de disponibilidad (girada o
+    no) y en la pantalla "Vista rápida", para que ordenen todas igual."""
     piso, letra = partir_etiqueta_unidad(etiqueta)
-    piso_num = float(piso) if piso.isdigit() else 0.0
+    if piso.isdigit():
+        piso_num = float(piso)
+    elif piso.upper() == "PB":
+        piso_num = -2.0
+    elif piso.upper() == "EP":
+        piso_num = -1.0
+    else:
+        piso_num = 0.0
     return piso_num, letra
 
 

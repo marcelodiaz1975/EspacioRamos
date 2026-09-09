@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 from app.gui.estilos import COLOR_AMARILLO, COLOR_AZUL_OSCURO, COLOR_NIVEL_1
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_actual, primer_dia_mes, sumar_meses, ultimo_dia_mes
+from app.pdf.estilos import clave_orden_unidad
 from app.negocio.grilla import dias_grilla
 from app.negocio.grilla_operativa import (
     AMARILLO,
@@ -478,8 +479,12 @@ class GrillaOperativaWidget(QWidget):
             placeholders = ", ".join("?" for _ in ids_edificio)
             sql += f" WHERE u.IdEdificio IN ({placeholders})"
             parametros = ids_edificio
-        sql += " ORDER BY e.Nombre, u.Departamento"
-        for fila in self.conn.execute(sql, parametros).fetchall():
+        filas = self.conn.execute(sql, parametros).fetchall()
+        # Orden por edificio (alfabético) y, dentro de cada uno, por piso
+        # (PB, después EP, después ascendente numérico) — clave_orden_unidad
+        # no se puede expresar en el ORDER BY de SQL.
+        filas = sorted(filas, key=lambda f: (f["NombreEdificio"], clave_orden_unidad(f["Departamento"])))
+        for fila in filas:
             item = QListWidgetItem(f"{fila['NombreEdificio']} - {fila['Departamento']}")
             item.setData(Qt.ItemDataRole.UserRole, fila["IdUnidad"])
             self.lista_unidad.addItem(item)
@@ -654,7 +659,6 @@ class GrillaOperativaWidget(QWidget):
                    e.IdEdificio, e.Nombre AS NombreEdificio, e.DomicilioLocalidad
             FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
             WHERE u.IdUnidad IN ({placeholders})
-            ORDER BY e.DomicilioLocalidad, e.Nombre, u.Departamento, c.NumeroConsultorio
             """,
             ids_unidad,
         ).fetchall()
@@ -667,6 +671,10 @@ class GrillaOperativaWidget(QWidget):
             }
             for f in filas
         ]
+        # Localidad/Edificio alfabético (ya lo hacía SQL); Unidad por piso
+        # (PB, EP, ascendente numérico — clave_orden_unidad, no expresable
+        # en SQL) y Consultorio numérico ascendente.
+        base.sort(key=lambda c: (c["localidad"], c["nombre_edificio"], clave_orden_unidad(c["departamento"]), c["numero_consultorio"]))
         columnas = []
         for dia in dias:
             for base_col in base:

@@ -157,6 +157,36 @@ def test_columna_se_ensancha_con_codigo_de_4_caracteres(qtbot, conn):
     assert widget.tabla.columnWidth(2) > ancho_corto  # columna 0=Tipo Bloque, 1=Horario, 2+=datos
 
 
+def test_lista_unidad_ordena_por_piso_pb_ep_numerico(qtbot, conn):
+    """Confirmado por la clienta: PB primero, después EP, después los
+    pisos numéricos ascendentes (acá, alfabético dentro del mismo edificio
+    ya que las unidades no comparten piso)."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    for departamento in ['7mo "L"', 'EP "K"', 'PB "D"', '1ro "A"']:
+        obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=departamento)
+    conn.commit()
+
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    nombres = [widget.lista_unidad.item(i).text() for i in range(widget.lista_unidad.count())]
+    assert nombres == ['Ramos 1 - PB "D"', 'Ramos 1 - EP "K"', 'Ramos 1 - 1ro "A"', 'Ramos 1 - 7mo "L"']
+
+
+def test_grilla_ordena_columnas_por_piso_pb_ep_numerico(qtbot, conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    ids_unidad = []
+    for departamento in ['7mo "L"', 'PB "D"', 'EP "K"']:
+        id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=departamento)
+        obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+        ids_unidad.append(id_unidad)
+    conn.commit()
+
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    columnas = widget._columnas(ids_unidad, ["Lunes"])
+    assert [c["departamento"] for c in columnas] == ['PB "D"', 'EP "K"', '7mo "L"']
+
+
 def test_cascada_edificio_a_unidad(qtbot, conn):
     id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
     otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")

@@ -40,13 +40,21 @@ from datetime import date, timedelta
 from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_actual, primer_dia_mes, ultimo_dia_mes
 from app.negocio.estadisticas import calcular_ocupacion
 from app.negocio.liquidaciones import calcular_liquidacion, id_profesional_liquidable
+from app.pdf.estilos import clave_orden_unidad
 
 
 @dataclass
 class EstadisticaGrupo:
-    """Un renglón agregado (unidad, edificio, o el total general)."""
+    """Un renglón agregado (unidad, edificio, localidad, o el total
+    general). `localidad`/`edificio`/`unidad` van poblados solo hasta el
+    nivel que corresponde (ej. un renglón de edificio trae localidad y
+    edificio, pero no unidad) — la pantalla los usa para las 3 columnas
+    separadas en vez de un único nombre combinado."""
     id: int | None
     nombre: str
+    localidad: str | None = None
+    edificio: str | None = None
+    unidad: str | None = None
     porcentaje_ocupacion: float = 0.0
     horas_regulares: float = 0.0
     horas_aisladas: float = 0.0
@@ -153,7 +161,12 @@ def _pagos_del_periodo(conn: sqlite3.Connection, id_profesional: int, periodo: s
     return fila["total"] or 0.0
 
 
-def calcular_estadisticas_operativas(conn: sqlite3.Connection, ids_unidad: list[int]) -> EstadisticasOperativas:
+def calcular_estadisticas_operativas(
+    conn: sqlite3.Connection, ids_unidad: list[int], ids_consultorio_filtro: list[int] | None = None,
+) -> EstadisticasOperativas:
+    """`ids_consultorio_filtro`, si se pasa, acota además a esos
+    consultorios puntuales dentro de las unidades dadas — para cuando
+    quien filtra baja hasta el nivel de Consultorio, no solo Unidad."""
     periodo = periodo_actual(conn)
     if not ids_unidad:
         return EstadisticasOperativas(periodo=periodo)
@@ -171,16 +184,26 @@ def calcular_estadisticas_operativas(conn: sqlite3.Connection, ids_unidad: list[
         """,
         ids_unidad,
     ).fetchall()
+    if ids_consultorio_filtro is not None:
+        objetivo = set(ids_consultorio_filtro)
+        consultorios = [c for c in consultorios if c["IdConsultorio"] in objetivo]
+    if not consultorios:
+        return EstadisticasOperativas(periodo=periodo)
+
     id_unidad_de = {c["IdConsultorio"]: c["IdUnidad"] for c in consultorios}
     ids_consultorio = list(id_unidad_de)
 
-    grupos_unidad: dict[int, EstadisticaGrupo] = {
-        c["IdUnidad"]: EstadisticaGrupo(id=c["IdUnidad"], nombre=f"{c['NombreEdificio']} - {c['Departamento']}")
-        for c in consultorios
-    }
     id_edificio_de_unidad = {c["IdUnidad"]: c["IdEdificio"] for c in consultorios}
     nombre_edificio_de = {c["IdEdificio"]: c["NombreEdificio"] for c in consultorios}
     localidad_de_edificio = {c["IdEdificio"]: (c["DomicilioLocalidad"] or "(Sin localidad)") for c in consultorios}
+
+    grupos_unidad: dict[int, EstadisticaGrupo] = {
+        c["IdUnidad"]: EstadisticaGrupo(
+            id=c["IdUnidad"], nombre=f"{c['NombreEdificio']} - {c['Departamento']}",
+            localidad=localidad_de_edificio[c["IdEdificio"]], edificio=c["NombreEdificio"], unidad=c["Departamento"],
+        )
+        for c in consultorios
+    }
 
     if ids_consultorio:
         horas_reg = _horas_regulares_por_consultorio(conn, primer_dia, ultimo_dia, ids_consultorio=ids_consultorio)
@@ -229,7 +252,10 @@ def calcular_estadisticas_operativas(conn: sqlite3.Connection, ids_unidad: list[
     grupos_edificio: dict[int, EstadisticaGrupo] = {}
     for id_unidad, grupo in grupos_unidad.items():
         id_edificio = id_edificio_de_unidad[id_unidad]
-        ge = grupos_edificio.setdefault(id_edificio, EstadisticaGrupo(id=id_edificio, nombre=nombre_edificio_de[id_edificio]))
+        ge = grupos_edificio.setdefault(id_edificio, EstadisticaGrupo(
+            id=id_edificio, nombre=nombre_edificio_de[id_edificio],
+            localidad=localidad_de_edificio[id_edificio], edificio=nombre_edificio_de[id_edificio],
+        ))
         ge.horas_regulares += grupo.horas_regulares
         ge.horas_aisladas += grupo.horas_aisladas
         ge.subtotal_regulares += grupo.subtotal_regulares
@@ -243,7 +269,7 @@ def calcular_estadisticas_operativas(conn: sqlite3.Connection, ids_unidad: list[
     grupos_localidad: dict[str, EstadisticaGrupo] = {}
     for id_edificio, ge in grupos_edificio.items():
         localidad = localidad_de_edificio[id_edificio]
-        gl = grupos_localidad.setdefault(localidad, EstadisticaGrupo(id=None, nombre=localidad))
+        gl = grupos_localidad.setdefault(localidad, EstadisticaGrupo(id=None, nombre=localidad, localidad=localidad))
         gl.horas_regulares += ge.horas_regulares
         gl.horas_aisladas += ge.horas_aisladas
         gl.subtotal_regulares += ge.subtotal_regulares
@@ -274,10 +300,13 @@ def calcular_estadisticas_operativas(conn: sqlite3.Connection, ids_unidad: list[
     ocupados_totales = sum(ocupacion.por_unidad[id_unidad]._ocupados for id_unidad in grupos_unidad)
     total.porcentaje_ocupacion = (ocupados_totales / slots_totales * 100) if slots_totales else 0.0
 
+    # Mismo criterio de orden que "Grilla semanal"/"Valores de los
+    # consultorios": Localidad y Edificio alfabético, Unidad por piso
+    # (PB, EP, ascendente numérico).
     return EstadisticasOperativas(
         periodo=periodo,
-        por_unidad=sorted(grupos_unidad.values(), key=lambda g: g.nombre),
-        por_edificio=sorted(grupos_edificio.values(), key=lambda g: g.nombre),
-        por_localidad=sorted(grupos_localidad.values(), key=lambda g: g.nombre),
+        por_unidad=sorted(grupos_unidad.values(), key=lambda g: (g.localidad, g.edificio, clave_orden_unidad(g.unidad))),
+        por_edificio=sorted(grupos_edificio.values(), key=lambda g: (g.localidad, g.edificio)),
+        por_localidad=sorted(grupos_localidad.values(), key=lambda g: g.localidad),
         total=total,
     )
