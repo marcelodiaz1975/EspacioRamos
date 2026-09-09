@@ -89,6 +89,31 @@ def test_valores_se_completan_al_iniciar(qtbot, conn):
     assert pantalla.tabla_valores.item(0, 5).text() == formatear_moneda(700)
 
 
+def test_tabla_de_valores_tiene_titulo_propio(qtbot, conn):
+    _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"')
+    conn.commit()
+
+    pantalla = PantallaGrillaOperativa(conn)
+    qtbot.addWidget(pantalla)
+    grupo = pantalla.tabla_valores.parentWidget()
+    assert grupo.title() == "Valores vigentes por horas regulares y aisladas"
+
+
+def test_promedios_incluye_hora_regular_y_aislada(qtbot, conn):
+    _unidad_con_consultorio(conn, "Ramos 1", "1A", valor_regular=1000, valor_aislada=400)
+    _unidad_con_consultorio(conn, "Ramos 1", "2B", valor_regular=2000, valor_aislada=800)
+    conn.commit()
+
+    pantalla = PantallaGrillaOperativa(conn)
+    qtbot.addWidget(pantalla)
+    tabla = pantalla.promedios_valores.tabla
+    assert tabla.horizontalHeaderItem(3).text() == "Promedio hora regular"
+    assert tabla.horizontalHeaderItem(4).text() == "Promedio hora aislada"
+    assert tabla.item(0, 0).text() == "General"
+    assert tabla.item(0, 3).text() == formatear_moneda(1500)
+    assert tabla.item(0, 4).text() == formatear_moneda(600)
+
+
 def test_valores_ordena_unidades_por_piso(qtbot, conn):
     id_edificio, _, _ = _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"')
     obtener_repositorio(conn, "Consultorio").crear(

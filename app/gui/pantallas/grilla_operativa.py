@@ -8,7 +8,8 @@ clienta): tres solapas independientes, cada una con su propio filtro:
 - Valores de los consultorios: valor hora regular/aislada de cada
   consultorio, con su propio filtro en cascada Localidad/Edificio/
   Unidad/Consultorio (`_PanelFiltrosJerarquico`, un nivel más profundo
-  que el de la grilla) + un resumen de promedios de valor hora regular.
+  que el de la grilla) + un resumen de promedios de valor hora regular
+  y aislada.
 - Estadísticas: mismo filtro en cascada; total general primero, después
   el desglose por localidad (si el filtro abarca más de una) y por
   edificio (si abarca más de uno), y por último el detalle por unidad —
@@ -32,7 +33,7 @@ from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, _CeldaGrilla
 from app.negocio.estadisticas_operativas import EstadisticaGrupo, calcular_estadisticas_operativas
 from app.negocio.formato import formatear_moneda
 from app.negocio.grilla_operativa import AMARILLO, AZUL_OSCURO, BLANCA, BLANCO, NEGRA, ROJO, VERDE, CeldaGrillaOperativa
-from app.negocio.valores_operativos import PromediosValorHora, calcular_promedios_valor_hora_regular
+from app.negocio.valores_operativos import PromediosValorHora, calcular_promedios_valor_hora
 from app.pdf.estilos import clave_orden_unidad
 
 _COLUMNAS_VALORES = ["Localidad", "Edificio", "Unidad", "Consultorio", "Valor hora regular", "Valor hora aislada"]
@@ -351,38 +352,48 @@ class _PanelFiltrosJerarquico(QGroupBox):
         return _ids_reales(self.lista_consultorio)
 
 
-_COLUMNAS_PROMEDIOS = ["Localidad", "Edificio", "Unidad", "Promedio"]
+_COLUMNAS_PROMEDIOS = ["Localidad", "Edificio", "Unidad", "Promedio hora regular", "Promedio hora aislada"]
 
 
 class _PanelPromedios(QGroupBox):
-    """Promedio de valor hora regular por localidad/edificio/unidad, para
-    la solapa "Valores de los consultorios" — mismas 3 columnas separadas
-    y mismo criterio de "mostrar el desglose solo si hay más de uno" y de
-    orden que usa Estadísticas."""
+    """Promedio de valor hora regular Y hora aislada por localidad/
+    edificio/unidad, para la solapa "Valores de los consultorios" —
+    mismas 3 columnas separadas y mismo criterio de "mostrar el desglose
+    solo si hay más de uno" y de orden que usa Estadísticas."""
 
     def __init__(self, parent=None):
-        super().__init__("Promedios de valor hora regular", parent)
-        self.setMaximumWidth(340)
+        super().__init__("Promedios de valor hora regular y aislada", parent)
+        self.setMaximumWidth(420)
         layout = QVBoxLayout(self)
         self.tabla = _armar_tabla(_COLUMNAS_PROMEDIOS)
         layout.addWidget(self.tabla)
 
     def actualizar(self, promedios: PromediosValorHora) -> None:
-        filas: list[tuple[str, str, str, float, QColor | None]] = [("General", "", "", promedios.general, _COLOR_TOTAL)]
+        filas: list[tuple[str, str, str, float, float, QColor | None]] = [
+            ("General", "", "", promedios.general_regular, promedios.general_aislada, _COLOR_TOTAL),
+        ]
         if len(promedios.por_localidad) > 1:
-            filas += [(g.localidad, "", "", g.promedio_valor_hora_regular, _COLOR_LOCALIDAD) for g in promedios.por_localidad]
+            filas += [
+                (g.localidad, "", "", g.promedio_valor_hora_regular, g.promedio_valor_hora_aislada, _COLOR_LOCALIDAD)
+                for g in promedios.por_localidad
+            ]
         if len(promedios.por_edificio) > 1:
             filas += [
-                (g.localidad, g.edificio, "", g.promedio_valor_hora_regular, _COLOR_EDIFICIO) for g in promedios.por_edificio
+                (g.localidad, g.edificio, "", g.promedio_valor_hora_regular, g.promedio_valor_hora_aislada, _COLOR_EDIFICIO)
+                for g in promedios.por_edificio
             ]
-        filas += [(g.localidad, g.edificio, g.unidad, g.promedio_valor_hora_regular, None) for g in promedios.por_unidad]
+        filas += [
+            (g.localidad, g.edificio, g.unidad, g.promedio_valor_hora_regular, g.promedio_valor_hora_aislada, None)
+            for g in promedios.por_unidad
+        ]
 
         self.tabla.setSortingEnabled(False)
         self.tabla.setRowCount(len(filas))
-        for fila, (localidad, edificio, unidad, valor, color) in enumerate(filas):
+        for fila, (localidad, edificio, unidad, valor_regular, valor_aislada, color) in enumerate(filas):
             columnas = [
                 QTableWidgetItem(localidad), QTableWidgetItem(edificio), QTableWidgetItem(unidad),
-                _ItemNumerico(formatear_moneda(valor), valor),
+                _ItemNumerico(formatear_moneda(valor_regular), valor_regular),
+                _ItemNumerico(formatear_moneda(valor_aislada), valor_aislada),
             ]
             if color is not None:
                 for item in columnas:
@@ -439,7 +450,10 @@ class PantallaGrillaOperativa(QWidget):
         self.filtros_valores = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_valores)
         layout_valores.addWidget(self.filtros_valores)
         layout_valores.addWidget(self.promedios_valores)
-        layout_valores.addWidget(self.tabla_valores, stretch=1)
+        grupo_valores = QGroupBox("Valores vigentes por horas regulares y aisladas")
+        layout_grupo_valores = QVBoxLayout(grupo_valores)
+        layout_grupo_valores.addWidget(self.tabla_valores)
+        layout_valores.addWidget(grupo_valores, stretch=1)
         tabs.addTab(panel_valores, "Valores de los consultorios")
 
         panel_estadisticas = QWidget()
@@ -488,7 +502,7 @@ class PantallaGrillaOperativa(QWidget):
             self.tabla_valores.setItem(fila, 5, _ItemNumerico(formatear_moneda(valor_aislada), valor_aislada))
         self.tabla_valores.setSortingEnabled(True)
 
-        self.promedios_valores.actualizar(calcular_promedios_valor_hora_regular(self.conn, ids_consultorio))
+        self.promedios_valores.actualizar(calcular_promedios_valor_hora(self.conn, ids_consultorio))
 
     def _refrescar_estadisticas(self, panel: _PanelFiltrosJerarquico) -> None:
         ids_unidad = panel.ids_unidad_seleccionadas()

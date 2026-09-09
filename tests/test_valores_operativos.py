@@ -2,7 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.valores_operativos import calcular_promedios_valor_hora_regular
+from app.negocio.valores_operativos import calcular_promedios_valor_hora
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -19,15 +19,17 @@ def _unidad(conn, nombre_edificio="Ramos 1", departamento='7mo "L"', localidad=N
     return obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=departamento), id_edificio
 
 
-def _consultorio(conn, id_unidad, numero=1, valor_regular=1000):
+def _consultorio(conn, id_unidad, numero=1, valor_regular=1000, valor_aislada=500):
     return obtener_repositorio(conn, "Consultorio").crear(
-        IdUnidad=id_unidad, NumeroConsultorio=numero, ValorHoraRegularActual=valor_regular,
+        IdUnidad=id_unidad, NumeroConsultorio=numero,
+        ValorHoraRegularActual=valor_regular, ValorHoraAisladaActual=valor_aislada,
     )
 
 
 def test_sin_consultorios_devuelve_vacio(conn):
-    promedios = calcular_promedios_valor_hora_regular(conn, [])
-    assert promedios.general == 0.0
+    promedios = calcular_promedios_valor_hora(conn, [])
+    assert promedios.general_regular == 0.0
+    assert promedios.general_aislada == 0.0
     assert promedios.por_localidad == []
     assert promedios.por_edificio == []
     assert promedios.por_unidad == []
@@ -35,31 +37,36 @@ def test_sin_consultorios_devuelve_vacio(conn):
 
 def test_promedio_general_simple(conn):
     id_unidad, _ = _unidad(conn)
-    id_c1 = _consultorio(conn, id_unidad, numero=1, valor_regular=1000)
-    id_c2 = _consultorio(conn, id_unidad, numero=2, valor_regular=2000)
+    id_c1 = _consultorio(conn, id_unidad, numero=1, valor_regular=1000, valor_aislada=400)
+    id_c2 = _consultorio(conn, id_unidad, numero=2, valor_regular=2000, valor_aislada=800)
     conn.commit()
 
-    promedios = calcular_promedios_valor_hora_regular(conn, [id_c1, id_c2])
-    assert promedios.general == pytest.approx(1500)
+    promedios = calcular_promedios_valor_hora(conn, [id_c1, id_c2])
+    assert promedios.general_regular == pytest.approx(1500)
+    assert promedios.general_aislada == pytest.approx(600)
     assert len(promedios.por_unidad) == 1
     assert promedios.por_unidad[0].promedio_valor_hora_regular == pytest.approx(1500)
+    assert promedios.por_unidad[0].promedio_valor_hora_aislada == pytest.approx(600)
 
 
 def test_promedio_por_edificio_y_localidad(conn):
     id_unidad_1, id_edificio_1 = _unidad(conn, nombre_edificio="Ramos 1", departamento="1A", localidad="Ramos Mejía")
     id_unidad_2, id_edificio_2 = _unidad(conn, nombre_edificio="Ramos 2", departamento="1A", localidad="Ramos Mejía")
     id_unidad_3, id_edificio_3 = _unidad(conn, nombre_edificio="Haedo 1", departamento="1A", localidad="Haedo")
-    id_c1 = _consultorio(conn, id_unidad_1, valor_regular=1000)
-    id_c2 = _consultorio(conn, id_unidad_2, valor_regular=2000)
-    id_c3 = _consultorio(conn, id_unidad_3, valor_regular=4000)
+    id_c1 = _consultorio(conn, id_unidad_1, valor_regular=1000, valor_aislada=100)
+    id_c2 = _consultorio(conn, id_unidad_2, valor_regular=2000, valor_aislada=200)
+    id_c3 = _consultorio(conn, id_unidad_3, valor_regular=4000, valor_aislada=400)
     conn.commit()
 
-    promedios = calcular_promedios_valor_hora_regular(conn, [id_c1, id_c2, id_c3])
+    promedios = calcular_promedios_valor_hora(conn, [id_c1, id_c2, id_c3])
     assert len(promedios.por_edificio) == 3
     assert len(promedios.por_localidad) == 2
-    por_localidad = {g.nombre: g.promedio_valor_hora_regular for g in promedios.por_localidad}
-    assert por_localidad["Ramos Mejía"] == pytest.approx(1500)
-    assert por_localidad["Haedo"] == pytest.approx(4000)
+    por_localidad_regular = {g.nombre: g.promedio_valor_hora_regular for g in promedios.por_localidad}
+    por_localidad_aislada = {g.nombre: g.promedio_valor_hora_aislada for g in promedios.por_localidad}
+    assert por_localidad_regular["Ramos Mejía"] == pytest.approx(1500)
+    assert por_localidad_regular["Haedo"] == pytest.approx(4000)
+    assert por_localidad_aislada["Ramos Mejía"] == pytest.approx(150)
+    assert por_localidad_aislada["Haedo"] == pytest.approx(400)
 
 
 def test_localidad_sin_dato_se_agrupa_como_sin_localidad(conn):
@@ -67,7 +74,7 @@ def test_localidad_sin_dato_se_agrupa_como_sin_localidad(conn):
     id_c = _consultorio(conn, id_unidad, valor_regular=1000)
     conn.commit()
 
-    promedios = calcular_promedios_valor_hora_regular(conn, [id_c])
+    promedios = calcular_promedios_valor_hora(conn, [id_c])
     assert promedios.por_localidad[0].nombre == "(Sin localidad)"
 
 
@@ -77,8 +84,8 @@ def test_filtro_por_consultorio_puntual_no_incluye_los_demas_de_la_unidad(conn):
     _consultorio(conn, id_unidad, numero=2, valor_regular=5000)
     conn.commit()
 
-    promedios = calcular_promedios_valor_hora_regular(conn, [id_c1])
-    assert promedios.general == pytest.approx(1000)
+    promedios = calcular_promedios_valor_hora(conn, [id_c1])
+    assert promedios.general_regular == pytest.approx(1000)
 
 
 def test_orden_por_unidad_sigue_criterio_de_piso(conn):
@@ -91,5 +98,5 @@ def test_orden_por_unidad_sigue_criterio_de_piso(conn):
     id_c3 = _consultorio(conn, id_u_ep)
     conn.commit()
 
-    promedios = calcular_promedios_valor_hora_regular(conn, [id_c1, id_c2, id_c3])
+    promedios = calcular_promedios_valor_hora(conn, [id_c1, id_c2, id_c3])
     assert [g.unidad for g in promedios.por_unidad] == ['PB "D"', 'EP "K"', '7mo "L"']
