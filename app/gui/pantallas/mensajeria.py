@@ -107,12 +107,13 @@ _FILTROS = [
 _FILTRO_DEFAULT = "pendientes"
 
 
-def _nombre_apellido(profesional: sqlite3.Row) -> str:
-    """Columna "Profesional" de la grilla: nombre y apellido tal cual,
-    para que el operador identifique a la persona sin ambigüedad — a
-    diferencia de `nombre_para_mensaje` (Apodo/NombrePila/Tratamiento),
-    pensado para el texto que recibe el profesional, no para esta lista."""
-    partes = [p for p in (profesional["NombrePila"], profesional["Apellido"]) if p]
+def _nombre_con_tratamiento(profesional: sqlite3.Row) -> str:
+    """Columna "Profesional" de la grilla: tratamiento, nombre y apellido
+    tal cual (ej. "Lic. Virginia Lo Veci"), para que el operador
+    identifique a la persona sin ambigüedad — a diferencia de
+    `nombre_para_mensaje` (Apodo/NombrePila/Tratamiento), pensado para el
+    texto que recibe el profesional, no para esta lista."""
+    partes = [p for p in (profesional["Tratamiento"], profesional["NombrePila"], profesional["Apellido"]) if p]
     return " ".join(partes)
 
 
@@ -125,6 +126,31 @@ def _clave_codigo(codigo: str | None) -> tuple[str, int, str]:
         i += 1
     numero = codigo[i:]
     return (codigo[:i], int(numero) if numero.isdigit() else 0, codigo)
+
+
+class _ItemCodigo(QTableWidgetItem):
+    """Ordena la columna "Código" con el mismo criterio natural que ya
+    usa el orden por defecto (`_clave_codigo`) — comparar como texto
+    pondría "R10" antes que "R2"."""
+
+    def __lt__(self, other: object) -> bool:
+        if isinstance(other, _ItemCodigo):
+            return _clave_codigo(self.text()) < _clave_codigo(other.text())
+        return super().__lt__(other)
+
+
+class _ItemMoneda(QTableWidgetItem):
+    """Ordena las columnas "Saldo anterior"/"Saldo actual" por el valor
+    numérico real, no por el texto ya formateado ("$ 1.234,00")."""
+
+    def __init__(self, texto: str, valor: float):
+        super().__init__(texto)
+        self._valor = valor
+
+    def __lt__(self, other: object) -> bool:
+        if isinstance(other, _ItemMoneda):
+            return self._valor < other._valor
+        return super().__lt__(other)
 
 
 class CentroMensajeria(QWidget):
@@ -177,11 +203,15 @@ class CentroMensajeria(QWidget):
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
-            ["Profesional", "Código", "Estado", "Saldo anterior", "Saldo actual", "Enviada", ""]
+            ["Código", "Profesional", "Estado", "Saldo anterior", "Saldo actual", "Enviada", ""]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        # Por defecto queda en el orden de siempre (por color); un clic en
+        # un título la ordena por esa columna hasta el próximo refresco
+        # (`actualizar()` vuelve a dejarla en el orden por color).
+        self.tabla.setSortingEnabled(True)
         self.tabla.itemChanged.connect(self._al_cambiar_enviada)
         splitter.addWidget(self.tabla)
 
@@ -224,17 +254,24 @@ class CentroMensajeria(QWidget):
         self._profesionales.sort(key=lambda p: _clave_codigo(p["IdCodigo"]), reverse=True)
         self._profesionales.sort(key=lambda p: _ORDEN_COLOR.get(color_profesional(self.conn, p, periodo), 99))
 
+        # Desactivada mientras se repuebla: si no, un clic previo en un
+        # título reordenaría filas fila por fila a medida que se van
+        # cargando, mezclando el índice de `self._profesionales` con la
+        # tabla — se vuelve a activar recién al final, ya en el orden por
+        # color de siempre.
+        self.tabla.setSortingEnabled(False)
         self._actualizando_tabla = True
         try:
             self.tabla.setRowCount(len(self._profesionales))
             for fila_idx, profesional in enumerate(self._profesionales):
                 color = color_profesional(self.conn, profesional, periodo)
-                saldo_actual = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
-                self.tabla.setItem(fila_idx, 0, QTableWidgetItem(_nombre_apellido(profesional)))
-                self.tabla.setItem(fila_idx, 1, QTableWidgetItem(profesional["IdCodigo"] or ""))
+                saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
+                saldo_actual = saldo_anterior + (profesional["SaldoCuentaActual"] or 0.0)
+                self.tabla.setItem(fila_idx, 0, _ItemCodigo(profesional["IdCodigo"] or ""))
+                self.tabla.setItem(fila_idx, 1, QTableWidgetItem(_nombre_con_tratamiento(profesional)))
                 self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_ESTADO_TEXTO.get(color, "")))
-                self.tabla.setItem(fila_idx, 3, QTableWidgetItem(formatear_moneda(profesional["SaldoCuentaAnterior"])))
-                self.tabla.setItem(fila_idx, 4, QTableWidgetItem(formatear_moneda(saldo_actual)))
+                self.tabla.setItem(fila_idx, 3, _ItemMoneda(formatear_moneda(saldo_anterior), saldo_anterior))
+                self.tabla.setItem(fila_idx, 4, _ItemMoneda(formatear_moneda(saldo_actual), saldo_actual))
                 self.tabla.setItem(fila_idx, _COLUMNA_ENVIADA, self._item_enviada(profesional, color, periodo))
 
                 # Reusa el botón si la fila ya tenía uno (ej. al cambiar de
@@ -262,6 +299,7 @@ class CentroMensajeria(QWidget):
                         celda.setForeground(letra)
         finally:
             self._actualizando_tabla = False
+        self.tabla.setSortingEnabled(True)
         self.tabla.resizeColumnsToContents()
 
     def _listar_filtrados(self, periodo: str, filtro: str) -> list[sqlite3.Row]:
@@ -300,8 +338,11 @@ class CentroMensajeria(QWidget):
     def _item_enviada(self, profesional: sqlite3.Row, color: str | None, periodo: str) -> QTableWidgetItem:
         """Check "Enviada" (DC-02 §3, DC-03 "Resumen de asignaciones"):
         marcable y reversible, solo disponible para los colores que lo
-        tienen asignado."""
+        tienen asignado. Guarda el IdProfesional en el propio ítem: con
+        los títulos ordenables, la fila que ve el usuario al tildar ya no
+        tiene por qué coincidir con su posición en `self._profesionales`."""
         item = QTableWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, profesional["IdProfesional"])
         if color not in _COLORES_CON_CHECK:
             item.setFlags(Qt.ItemFlag.ItemIsSelectable)
             item.setToolTip("El check de envío no está disponible para este color.")
@@ -320,7 +361,8 @@ class CentroMensajeria(QWidget):
     def _al_cambiar_enviada(self, item: QTableWidgetItem) -> None:
         if self._actualizando_tabla or item.column() != _COLUMNA_ENVIADA:
             return
-        profesional = self._profesionales[item.row()]
+        id_profesional = item.data(Qt.ItemDataRole.UserRole)
+        profesional = next(p for p in self._profesionales if p["IdProfesional"] == id_profesional)
         periodo = self._periodo()
         marcar = item.checkState() == Qt.CheckState.Checked
         self._ultima_accion = None

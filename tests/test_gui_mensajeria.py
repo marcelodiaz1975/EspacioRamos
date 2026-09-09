@@ -66,7 +66,7 @@ def test_centro_mensajeria_lista_profesionales_categoria_r(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     assert pantalla.tabla.rowCount() == 1
-    assert "Gómez" in pantalla.tabla.item(0, 0).text()
+    assert "Gómez" in pantalla.tabla.item(0, 1).text()
 
 
 def test_centro_mensajeria_muestra_estado_en_columna_propia(qtbot, conn):
@@ -83,7 +83,7 @@ def test_centro_mensajeria_muestra_nombre_y_apellido_sin_apodo(qtbot, conn):
     pantalla = CentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
-    assert pantalla.tabla.item(0, 0).text() == "Marcela Lo Veci"
+    assert pantalla.tabla.item(0, 1).text() == "Marcela Lo Veci"
 
 
 def test_centro_mensajeria_saldo_actual_suma_anterior_y_actual(qtbot, conn):
@@ -343,7 +343,7 @@ def test_filtro_pendientes_es_el_default(qtbot, conn):
 
     assert pantalla.combo_filtro.currentData() == "pendientes"
     assert pantalla.tabla.rowCount() == 1
-    assert "Verde" in pantalla.tabla.item(0, 0).text()
+    assert "Verde" in pantalla.tabla.item(0, 1).text()
 
 
 def test_filtro_enviados(qtbot, conn):
@@ -356,7 +356,7 @@ def test_filtro_enviados(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "enviados")
     assert pantalla.tabla.rowCount() == 1
-    assert "Gris" in pantalla.tabla.item(0, 0).text()
+    assert "Gris" in pantalla.tabla.item(0, 1).text()
 
 
 def test_filtro_todos_incluye_regulares_y_aisladas(qtbot, conn):
@@ -377,7 +377,7 @@ def test_filtro_solo_regulares(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "regulares")
     assert pantalla.tabla.rowCount() == 1
-    assert "Regular" in pantalla.tabla.item(0, 0).text()
+    assert "Regular" in pantalla.tabla.item(0, 1).text()
 
 
 def test_filtro_solo_aisladas(qtbot, conn):
@@ -388,7 +388,7 @@ def test_filtro_solo_aisladas(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     assert pantalla.tabla.rowCount() == 1
-    assert "Aislada" in pantalla.tabla.item(0, 0).text()
+    assert "Aislada" in pantalla.tabla.item(0, 1).text()
 
 
 # ---------------------------------------------------------------------------- orden
@@ -411,7 +411,7 @@ def test_orden_por_color_y_dentro_de_cada_color_por_codigo(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    nombres = [pantalla.tabla.item(i, 0).text() for i in range(pantalla.tabla.rowCount())]
+    nombres = [pantalla.tabla.item(i, 1).text() for i in range(pantalla.tabla.rowCount())]
     # verde va antes que rojo (DC-02 §2.1); entre los dos rojos, R2 antes que R1 (código descendente).
     assert nombres.index("Verde") < nombres.index("RojoDos")
     assert nombres.index("RojoDos") < nombres.index("RojoUno")
@@ -424,8 +424,82 @@ def test_orden_codigo_natural_descendente_r10_antes_de_r2(qtbot, conn):
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
-    nombres = [pantalla.tabla.item(i, 0).text() for i in range(pantalla.tabla.rowCount())]
+    nombres = [pantalla.tabla.item(i, 1).text() for i in range(pantalla.tabla.rowCount())]
     assert nombres.index("Diez") < nombres.index("Dos")
+
+
+def test_columna_profesional_incluye_el_tratamiento(qtbot, conn):
+    id_prof = _crear_profesional(conn, apellido="Lo Veci", saldo=0)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, NombrePila="Virginia", Tratamiento="Lic.")
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    assert pantalla.tabla.item(0, 1).text() == "Lic. Virginia Lo Veci"
+
+
+def test_columna_codigo_va_primero(qtbot, conn):
+    _crear_profesional(conn, apellido="Lo Veci", saldo=0, codigo="R1")
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.horizontalHeaderItem(0).text() == "Código"
+    assert pantalla.tabla.horizontalHeaderItem(1).text() == "Profesional"
+    assert pantalla.tabla.item(0, 0).text() == "R1"
+
+
+def test_click_en_titulo_ordena_por_esa_columna(qtbot, conn):
+    _crear_profesional(conn, apellido="Bajo", saldo=100, codigo="R9")
+    _crear_profesional(conn, apellido="Alto", saldo=9000, codigo="R1")
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    pantalla.tabla.sortByColumn(3, Qt.SortOrder.AscendingOrder)  # Saldo anterior
+    saldos = [pantalla.tabla.item(i, 3).text() for i in range(pantalla.tabla.rowCount())]
+    assert saldos == ["$ 100,00", "$ 9.000,00"]  # numérico, no alfabético ("100" < "9000")
+
+
+def test_click_en_titulo_codigo_usa_orden_natural(qtbot, conn):
+    _crear_profesional(conn, apellido="Diez", saldo=0, codigo="R10")
+    _crear_profesional(conn, apellido="Dos", saldo=0, codigo="R2")
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    pantalla.tabla.sortByColumn(0, Qt.SortOrder.AscendingOrder)  # Código
+    codigos = [pantalla.tabla.item(i, 0).text() for i in range(pantalla.tabla.rowCount())]
+    assert codigos == ["R2", "R10"]  # natural, no alfabético puro ("R10" < "R2" como texto)
+
+
+def test_actualizar_despues_de_ordenar_vuelve_al_orden_por_color(qtbot, conn):
+    _crear_profesional(conn, apellido="Bajo", saldo=100, codigo="R9")
+    _crear_profesional(conn, apellido="Alto", saldo=9000, codigo="R1")
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    orden_original = [pantalla.tabla.item(i, 1).text() for i in range(pantalla.tabla.rowCount())]
+
+    pantalla.tabla.sortByColumn(3, Qt.SortOrder.AscendingOrder)
+    pantalla.actualizar()
+
+    assert [pantalla.tabla.item(i, 1).text() for i in range(pantalla.tabla.rowCount())] == orden_original
+
+
+def test_tildar_enviada_despues_de_ordenar_afecta_al_profesional_correcto(qtbot, conn):
+    """Bug potencial al agregar el orden por clic: `item.row()` ya no
+    identifica de forma confiable al profesional si el usuario ordenó la
+    tabla — el check tiene que guiarse por el IdProfesional guardado en
+    el propio ítem, no por su posición visual."""
+    _crear_profesional(conn, apellido="Bajo", saldo=1, codigo="R9")  # marrón
+    id_alto = _crear_profesional(conn, apellido="Alto", saldo=0, codigo="R1")  # verde
+    pantalla = CentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    pantalla.tabla.sortByColumn(1, Qt.SortOrder.AscendingOrder)  # Profesional: Alto antes que Bajo
+    fila_alto = next(f for f in range(pantalla.tabla.rowCount()) if pantalla.tabla.item(f, 1).text() == "Alto")
+    pantalla.tabla.item(fila_alto, 5).setCheckState(Qt.CheckState.Checked)
+
+    assert _color(conn, id_alto) == "gris"
 
 
 # ------------------------------------------------- combinar reservas aisladas (5.1)
