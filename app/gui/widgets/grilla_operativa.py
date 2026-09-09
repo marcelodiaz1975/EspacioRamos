@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -412,6 +413,67 @@ def _opciones_profesional_grilla(conn: sqlite3.Connection) -> list[tuple[int, st
     return opciones
 
 
+REFERENCIAS_REGULAR: list[tuple[CeldaGrillaOperativa, str]] = [
+    (CeldaGrillaOperativa(BLANCO, BLANCO, NEGRA, None, "", None), "Sin novedades (el código, si lo hay, sigue vigente)."),
+    (CeldaGrillaOperativa(VERDE, VERDE, NEGRA, None, "", None), "Se libera en el futuro."),
+    (CeldaGrillaOperativa(ROJO, ROJO, NEGRA, None, "", None), "Reservado a futuro (todavía no vigente)."),
+    (CeldaGrillaOperativa(AMARILLO, AMARILLO, NEGRA, None, "", None), "Libre de regular, con hora aislada asignada."),
+    (CeldaGrillaOperativa(ROJO, AMARILLO, NEGRA, None, "", None), "Reservado a futuro + aislada confirmada este mes."),
+    (CeldaGrillaOperativa(BLANCO, VERDE, NEGRA, None, "", None), "Reservado, pero libre por ausencia/vacación/licencia."),
+    (CeldaGrillaOperativa(BLANCO, AMARILLO, NEGRA, None, "", None), "Igual, con aislada confirmada en ese hueco."),
+    (CeldaGrillaOperativa(AZUL_OSCURO, AZUL_OSCURO, BLANCA, None, "", None), "Profesional filtrado."),
+]
+
+REFERENCIAS_AISLADA: list[tuple[CeldaGrillaOperativa, str]] = [
+    (CeldaGrillaOperativa(ROJO, ROJO, NEGRA, None, "", None), "Bloqueado por una reserva regular."),
+    (CeldaGrillaOperativa(VERDE, VERDE, NEGRA, None, "", None), "Libre de reserva regular."),
+    (CeldaGrillaOperativa(ROJO, VERDE, NEGRA, None, "", None), "Reservado, pero libera un hueco por ausencia/vacación/licencia."),
+    (CeldaGrillaOperativa(ROJO, AMARILLO, NEGRA, None, "", None), "Igual, con aislada confirmada en ese hueco."),
+    (CeldaGrillaOperativa(AMARILLO, AMARILLO, NEGRA, None, "", None), "Libre + aislada asignada."),
+    (CeldaGrillaOperativa(AZUL_OSCURO, AZUL_OSCURO, BLANCA, None, "", None), "Profesional filtrado."),
+]
+
+
+class LeyendaColores(QGroupBox):
+    """Referencia de qué significa cada color/combinación — reusa
+    `_CeldaGrilla` (la misma clase que pinta la grilla real) para que la
+    muestra sea pixel a pixel igual a lo que se ve arriba, en vez de
+    reimplementar el dibujo del triángulo acá aparte. Pública porque la
+    usan tanto la pantalla "Vista rápida" (debajo de la grilla completa,
+    a 2 columnas) como el propio `GrillaOperativaWidget` embebido en
+    Reservas (a 1 columna, en el panel de Filtros — ver
+    `mostrar_leyenda_colores`)."""
+
+    def __init__(self, columnas: int = 2, parent=None):
+        super().__init__("Referencias de colores", parent)
+        self._columnas = columnas
+        self._layout = QGridLayout(self)
+        self.actualizar("regular")
+
+    def actualizar(self, modo: str) -> None:
+        # `deleteLater` sola no alcanza: la destrucción real queda diferida
+        # al próximo paso del loop de eventos, así que el widget viejo
+        # seguía visible (superpuesto con el nuevo) hasta ese momento —
+        # bug real, visible al cambiar de "Reservas regulares" a
+        # "Reservas aisladas" en caliente. `hide()` lo saca de pantalla ya.
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.deleteLater()
+
+        referencias = REFERENCIAS_REGULAR if modo == "regular" else REFERENCIAS_AISLADA
+        for i, (celda, texto) in enumerate(referencias):
+            fila, columna = divmod(i, self._columnas)
+            muestra = _CeldaGrilla(celda, (0, "Lunes", 0), lambda *_: None)
+            muestra.setFixedSize(40, 24)
+            self._layout.addWidget(muestra, fila, columna * 2)
+            etiqueta = QLabel(texto)
+            etiqueta.setWordWrap(True)
+            self._layout.addWidget(etiqueta, fila, columna * 2 + 1)
+
+
 class GrillaOperativaWidget(QWidget):
     def __init__(
         self, conn: sqlite3.Connection, on_actualizar: Callable[[list[int]], None] | None = None, parent=None,
@@ -476,6 +538,14 @@ class GrillaOperativaWidget(QWidget):
         self.campo_profesional.currentIndexChanged.connect(self.actualizar)
         layout_filtros.addWidget(self.campo_profesional)
 
+        # Oculta por defecto: la pantalla "Vista rápida" ya trae su propia
+        # leyenda (debajo de la grilla completa) y no la necesita acá —
+        # la muestra quien la pida (Reservas) llamando a
+        # `mostrar_leyenda_colores()`.
+        self._leyenda_colores = LeyendaColores(columnas=1)
+        self._leyenda_colores.hide()
+        layout_filtros.addWidget(self._leyenda_colores)
+
         layout_filtros.addStretch()
         layout_principal.addWidget(panel_filtros)
 
@@ -497,6 +567,7 @@ class GrillaOperativaWidget(QWidget):
         self.combo_modo.addItem("Reservas regulares", "regular")
         self.combo_modo.addItem("Reservas aisladas", "aislada")
         self.combo_modo.currentIndexChanged.connect(self.actualizar)
+        self.combo_modo.currentIndexChanged.connect(self._actualizar_leyenda_colores)
         fila_controles.addWidget(self.combo_modo)
         fila_controles.addStretch()
         layout_grilla.addLayout(fila_controles)
@@ -680,6 +751,18 @@ class GrillaOperativaWidget(QWidget):
         comportamiento de siempre."""
         self._resaltar_ausencias = activar
         self.actualizar()
+
+    def mostrar_leyenda_colores(self) -> None:
+        """Revela la leyenda de referencias de colores en el panel de
+        Filtros, debajo del combo de Profesional — pensado para los usos
+        "vista previa" embebidos (Reservas) donde conviene tenerla a mano
+        ahí mismo; "Vista rápida" no la llama porque ya trae la suya
+        propia, debajo de la grilla completa."""
+        self._actualizar_leyenda_colores()
+        self._leyenda_colores.show()
+
+    def _actualizar_leyenda_colores(self) -> None:
+        self._leyenda_colores.actualizar(self.combo_modo.currentData() or "regular")
 
     def activar_filtro_exclusivo_profesional(self, activar: bool = True) -> None:
         """Con un profesional elegido en el filtro, no alcanza con

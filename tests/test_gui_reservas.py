@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -466,6 +466,43 @@ def test_crear_reserva_aislada_fecha_mes_anterior_pide_confirmacion(qtbot, conn,
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
     pantalla.panel_aisladas._crear()
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
+
+
+def _textos_leyenda_visibles(leyenda) -> list[str]:
+    """`takeAt()` + `hide()` + `deleteLater()` (ver `LeyendaColores.
+    actualizar`) saca los QLabel viejos de pantalla al toque, pero siguen
+    siendo hijos de Qt hasta que el loop de eventos procesa el
+    `deleteLater` — así que `findChildren` los sigue devolviendo. Filtrar
+    por `isHidden()` es lo que realmente ve el usuario."""
+    return [lbl.text() for lbl in leyenda.findChildren(QLabel) if not lbl.isHidden()]
+
+
+def test_grilla_preview_regulares_muestra_leyenda_de_colores_de_regular(qtbot, conn):
+    """Pedido de la clienta: en Reservas, la leyenda de colores va debajo
+    del selector de Profesional del panel de Filtros de la vista previa
+    (no debajo de toda la grilla, como en Vista rápida) — y tiene que
+    coincidir con el modo de la solapa."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+
+    assert panel.grilla._leyenda_colores.isHidden() is False
+    textos = _textos_leyenda_visibles(panel.grilla._leyenda_colores)
+    assert "Se libera en el futuro." in textos  # propia de "regular"
+    assert "Libre de reserva regular." not in textos  # propia de "aislada"
+
+
+def test_grilla_preview_aisladas_muestra_leyenda_de_colores_de_aislada(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+
+    assert panel.grilla._leyenda_colores.isHidden() is False
+    textos = _textos_leyenda_visibles(panel.grilla._leyenda_colores)
+    assert "Libre de reserva regular." in textos  # propia de "aislada"
+    assert "Se libera en el futuro." not in textos  # propia de "regular"
 
 
 def test_grilla_preview_profesional_nuevo_no_muestra_nada(qtbot, conn):

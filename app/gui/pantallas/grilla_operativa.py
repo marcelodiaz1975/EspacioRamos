@@ -25,14 +25,13 @@ import sqlite3
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
+    QAbstractItemView, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
     QScrollArea, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, _CeldaGrilla, _FiltroColapsable
+from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, LeyendaColores, _FiltroColapsable
 from app.negocio.estadisticas_operativas import EstadisticaGrupo, EstadisticasOperativas, calcular_estadisticas_operativas
 from app.negocio.formato import formatear_moneda
-from app.negocio.grilla_operativa import AMARILLO, AZUL_OSCURO, BLANCA, BLANCO, NEGRA, ROJO, VERDE, CeldaGrillaOperativa
 from app.negocio.valores_operativos import PromediosValorHora, calcular_promedios_valor_hora
 from app.pdf.estilos import clave_orden_unidad
 
@@ -58,63 +57,6 @@ _VALOR_ESTADISTICA_POR_COLUMNA = [
 _COLOR_TOTAL = QColor("#B7C8DC")
 _COLOR_LOCALIDAD = QColor("#D2DEEB")
 _COLOR_EDIFICIO = QColor("#E9EFF5")
-
-_REFERENCIAS_REGULAR: list[tuple[CeldaGrillaOperativa, str]] = [
-    (CeldaGrillaOperativa(BLANCO, BLANCO, NEGRA, None, "", None), "Sin novedades (el código, si lo hay, sigue vigente)."),
-    (CeldaGrillaOperativa(VERDE, VERDE, NEGRA, None, "", None), "Se libera en el futuro."),
-    (CeldaGrillaOperativa(ROJO, ROJO, NEGRA, None, "", None), "Reservado a futuro (todavía no vigente)."),
-    (CeldaGrillaOperativa(AMARILLO, AMARILLO, NEGRA, None, "", None), "Libre de regular, con hora aislada asignada."),
-    (CeldaGrillaOperativa(ROJO, AMARILLO, NEGRA, None, "", None), "Reservado a futuro + aislada confirmada este mes."),
-    (CeldaGrillaOperativa(BLANCO, VERDE, NEGRA, None, "", None), "Reservado, pero libre por ausencia/vacación/licencia."),
-    (CeldaGrillaOperativa(BLANCO, AMARILLO, NEGRA, None, "", None), "Igual, con aislada confirmada en ese hueco."),
-    (CeldaGrillaOperativa(AZUL_OSCURO, AZUL_OSCURO, BLANCA, None, "", None), "Profesional filtrado."),
-]
-
-_REFERENCIAS_AISLADA: list[tuple[CeldaGrillaOperativa, str]] = [
-    (CeldaGrillaOperativa(ROJO, ROJO, NEGRA, None, "", None), "Bloqueado por una reserva regular."),
-    (CeldaGrillaOperativa(VERDE, VERDE, NEGRA, None, "", None), "Libre de reserva regular."),
-    (CeldaGrillaOperativa(ROJO, VERDE, NEGRA, None, "", None), "Reservado, pero libera un hueco por ausencia/vacación/licencia."),
-    (CeldaGrillaOperativa(ROJO, AMARILLO, NEGRA, None, "", None), "Igual, con aislada confirmada en ese hueco."),
-    (CeldaGrillaOperativa(AMARILLO, AMARILLO, NEGRA, None, "", None), "Libre + aislada asignada."),
-    (CeldaGrillaOperativa(AZUL_OSCURO, AZUL_OSCURO, BLANCA, None, "", None), "Profesional filtrado."),
-]
-
-
-class _LeyendaColores(QGroupBox):
-    """Referencia de qué significa cada color/combinación — reusa
-    `_CeldaGrilla` (la misma clase que pinta la grilla real) para que la
-    muestra sea pixel a pixel igual a lo que se ve arriba, en vez de
-    reimplementar el dibujo del triángulo acá aparte."""
-
-    def __init__(self, parent=None):
-        super().__init__("Referencias de colores", parent)
-        self._layout = QGridLayout(self)
-        self.actualizar("regular")
-
-    def actualizar(self, modo: str) -> None:
-        # `deleteLater` sola no alcanza: la destrucción real queda diferida
-        # al próximo paso del loop de eventos, así que el widget viejo
-        # seguía visible (superpuesto con el nuevo) hasta ese momento —
-        # bug real, visible al cambiar de "Reservas regulares" a
-        # "Reservas aisladas" en caliente. `hide()` lo saca de pantalla ya.
-        while self._layout.count():
-            item = self._layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.hide()
-                widget.deleteLater()
-
-        referencias = _REFERENCIAS_REGULAR if modo == "regular" else _REFERENCIAS_AISLADA
-        columnas = 2
-        for i, (celda, texto) in enumerate(referencias):
-            fila, columna = divmod(i, columnas)
-            muestra = _CeldaGrilla(celda, (0, "Lunes", 0), lambda *_: None)
-            muestra.setFixedSize(40, 24)
-            self._layout.addWidget(muestra, fila, columna * 2)
-            etiqueta = QLabel(texto)
-            etiqueta.setWordWrap(True)
-            self._layout.addWidget(etiqueta, fila, columna * 2 + 1)
-
 
 def _fmt_horas(horas: float) -> str:
     return str(int(horas)) if horas == int(horas) else f"{horas:.1f}"
@@ -534,7 +476,7 @@ class PantallaGrillaOperativa(QWidget):
         self.grilla = GrillaOperativaWidget(conn)
         self.grilla.combo_modo.currentIndexChanged.connect(self._actualizar_leyenda)
         layout_grilla.addWidget(self.grilla)
-        self._leyenda = _LeyendaColores()
+        self._leyenda = LeyendaColores()
         layout_grilla.addWidget(self._leyenda)
         # Con el horario configurado hoy, la grilla entra entera sin
         # scroll — si más adelante se configuran más horas de

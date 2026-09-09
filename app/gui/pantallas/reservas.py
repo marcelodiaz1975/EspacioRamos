@@ -389,6 +389,7 @@ class _PanelReservasRegulares(QWidget):
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.activar_filtro_exclusivo_profesional(True)
+        self.grilla.mostrar_leyenda_colores()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -934,6 +935,7 @@ class _PanelReservasAisladas(QWidget):
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.combo_modo.setCurrentIndex(self.grilla.combo_modo.findData("aislada"))
         self.grilla.activar_filtro_exclusivo_profesional(True)
+        self.grilla.mostrar_leyenda_colores()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 

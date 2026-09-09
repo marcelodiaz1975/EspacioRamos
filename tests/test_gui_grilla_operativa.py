@@ -1,5 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -420,3 +421,49 @@ def test_filtrar_por_pares_unidad_dia_evita_combinaciones_fantasma(qtbot, conn):
 
     widget.filtrar_por_pares_unidad_dia(None)
     assert widget.tabla.columnCount() - 2 == 4
+
+
+# ----------------------------------------------------------- leyenda de colores
+
+def test_leyenda_colores_oculta_por_defecto(qtbot, conn):
+    """"Vista rápida" ya trae su propia leyenda debajo de la grilla
+    completa — la que va embebida en el panel de Filtros del widget
+    compartido arranca oculta, la revela quien la necesite (Reservas)."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget._leyenda_colores.isHidden() is True
+
+
+def _textos_leyenda_visibles(leyenda) -> list[str]:
+    """`takeAt()` + `hide()` + `deleteLater()` (ver `LeyendaColores.
+    actualizar`) saca los QLabel viejos de pantalla al toque, pero siguen
+    siendo hijos de Qt hasta que el loop de eventos procesa el
+    `deleteLater` — así que `findChildren` los sigue devolviendo. Filtrar
+    por `isHidden()` es lo que realmente ve el usuario."""
+    return [lbl.text() for lbl in leyenda.findChildren(QLabel) if not lbl.isHidden()]
+
+
+def test_mostrar_leyenda_colores_la_revela_con_las_referencias_de_regular(qtbot, conn):
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.mostrar_leyenda_colores()
+    assert widget._leyenda_colores.isHidden() is False
+    textos = _textos_leyenda_visibles(widget._leyenda_colores)
+    assert "Profesional filtrado." in textos
+    assert "Se libera en el futuro." in textos  # propia de "regular"
+    assert "Libre de reserva regular." not in textos  # propia de "aislada"
+
+
+def test_leyenda_colores_sigue_al_cambio_de_modo(qtbot, conn):
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.mostrar_leyenda_colores()
+
+    widget.combo_modo.setCurrentIndex(widget.combo_modo.findData("aislada"))
+
+    textos = _textos_leyenda_visibles(widget._leyenda_colores)
+    assert "Libre de reserva regular." in textos
+    assert "Se libera en el futuro." not in textos
