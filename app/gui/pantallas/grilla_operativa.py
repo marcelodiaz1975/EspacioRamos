@@ -363,7 +363,8 @@ class _PanelPromedios(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Promedios de valor hora regular y aislada", parent)
-        self.setMaximumWidth(420)
+        self.setMinimumWidth(720)
+        self.setMaximumWidth(780)
         layout = QVBoxLayout(self)
         self.tabla = _armar_tabla(_COLUMNAS_PROMEDIOS)
         layout.addWidget(self.tabla)
