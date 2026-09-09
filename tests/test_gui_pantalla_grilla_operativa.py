@@ -289,6 +289,22 @@ def test_sin_unidades_seleccionadas_vacia_estadisticas(qtbot, conn):
     assert pantalla.tabla_estadisticas.rowCount() == 0
 
 
+def test_cambiar_modo_de_visualizacion_oculta_la_leyenda_anterior(qtbot, conn):
+    """Bug real: `deleteLater()` sola no saca el widget de pantalla al
+    toque (la destrucción queda diferida al loop de eventos) — al pasar
+    de "Reservas regulares" a "Reservas aisladas" la leyenda vieja
+    quedaba superpuesta con la nueva, con el texto ilegible."""
+    pantalla = PantallaGrillaOperativa(conn)
+    qtbot.addWidget(pantalla)
+    leyenda = pantalla._leyenda
+    widgets_regular = [leyenda._layout.itemAt(i).widget() for i in range(leyenda._layout.count())]
+    assert widgets_regular  # la leyenda de "regular" arranca poblada
+
+    pantalla.grilla.combo_modo.setCurrentIndex(1)  # Reservas aisladas
+
+    assert all(w.isHidden() for w in widgets_regular)
+
+
 def test_click_en_columna_de_promedios_ordena_localidades_edificios_y_unidades(qtbot, conn):
     """El clic en una columna no debe aplanar la tabla (lo que haría el
     sort nativo de Qt, mezclando niveles): tiene que reordenar las

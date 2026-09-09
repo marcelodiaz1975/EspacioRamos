@@ -92,10 +92,16 @@ class _LeyendaColores(QGroupBox):
         self.actualizar("regular")
 
     def actualizar(self, modo: str) -> None:
+        # `deleteLater` sola no alcanza: la destrucción real queda diferida
+        # al próximo paso del loop de eventos, así que el widget viejo
+        # seguía visible (superpuesto con el nuevo) hasta ese momento —
+        # bug real, visible al cambiar de "Reservas regulares" a
+        # "Reservas aisladas" en caliente. `hide()` lo saca de pantalla ya.
         while self._layout.count():
             item = self._layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
 
         referencias = _REFERENCIAS_REGULAR if modo == "regular" else _REFERENCIAS_AISLADA
