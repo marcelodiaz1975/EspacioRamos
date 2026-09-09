@@ -53,6 +53,11 @@ def construir_secciones() -> list[Seccion]:
             "y Estadísticas, sincronizadas con el mismo filtro de unidades.",
         ),
         Seccion(
+            "Centro de mensajería", lambda conn: CentroMensajeria(conn), categoria="Principal",
+            ayuda="Arma los mensajes de WhatsApp predefinidos (individuales o grupales) para las "
+            "distintas situaciones habituales de comunicación con los profesionales.",
+        ),
+        Seccion(
             "Reservas", lambda conn: PantallaReservas(conn), categoria="Principal",
             ayuda="Alta, edición y baja de reservas (regulares y aisladas) por profesional, consultorio y franja.",
         ),
@@ -61,11 +66,6 @@ def construir_secciones() -> list[Seccion]:
             ayuda="Genera la liquidación PDF de cada profesional para el período seleccionado, con "
             "descuentos por feriados/licencias/vacaciones ya aplicados, y el estado de cuenta con su "
             "historial de liquidaciones emitidas.",
-        ),
-        Seccion(
-            "Centro de mensajería", lambda conn: CentroMensajeria(conn), categoria="Principal",
-            ayuda="Arma los mensajes de WhatsApp predefinidos (individuales o grupales) para las "
-            "distintas situaciones habituales de comunicación con los profesionales.",
         ),
         Seccion(
             "Llaves", lambda conn: PantallaLlaves(conn), categoria="Principal",
