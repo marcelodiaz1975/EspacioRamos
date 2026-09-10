@@ -35,6 +35,7 @@ import math
 import sqlite3
 
 from PySide6.QtCore import QDate, QLocale, Qt
+from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -99,6 +100,35 @@ _UNION_FRANJAS = [
     ("Alcanza con esta franja sola (O)", "O"),
     ("Hace falta también la próxima (Y)", "Y"),
 ]
+
+
+class _SpinHora(QDoubleSpinBox):
+    """QDoubleSpinBox que se muestra como horario ("12:00hs", "9:30hs")
+    en vez del decimal con punto que arrastra Qt por defecto — sigue
+    siendo el mismo float por dentro (9.5 = 9:30) que espera
+    `app.negocio.oferta_busqueda.Busqueda`, mismo criterio que
+    `_SpinMonto` en Pagos."""
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802 (nombre impuesto por Qt)
+        horas = int(value)
+        minutos = round((value - horas) * 60)
+        return f"{horas}:{minutos:02d}hs"
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        texto = text.strip().lower().replace("hs", "").strip()
+        if ":" in texto:
+            horas_str, minutos_str = texto.split(":", 1)
+            try:
+                return float(horas_str or 0) + float(minutos_str or 0) / 60
+            except ValueError:
+                return 0.0
+        try:
+            return float(texto) if texto else 0.0
+        except ValueError:
+            return 0.0
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        return (QValidator.State.Acceptable, text, pos)
 
 
 class _DialogoTexto(QDialog):
@@ -214,6 +244,7 @@ class PantallaOferta(QWidget):
         fila_fechas.addWidget(self.campo_fecha_desde)
         fila_fechas.addWidget(QLabel("Hasta (solo Aislada)"))
         fila_fechas.addWidget(self.campo_fecha_hasta)
+        fila_fechas.addStretch()
         form.addLayout(fila_fechas)
 
         form.addWidget(QLabel("Localidad"))
@@ -252,16 +283,17 @@ class PantallaOferta(QWidget):
         form.addWidget(contenedor_dias)
 
         fila_horario = QHBoxLayout()
-        self.spin_desde = QDoubleSpinBox()
+        self.spin_desde = _SpinHora()
         self.spin_desde.setRange(0, 23)
         self.spin_desde.setValue(9)
-        self.spin_hasta = QDoubleSpinBox()
+        self.spin_hasta = _SpinHora()
         self.spin_hasta.setRange(1, 24)
         self.spin_hasta.setValue(12)
         fila_horario.addWidget(QLabel("Desde"))
         fila_horario.addWidget(self.spin_desde)
         fila_horario.addWidget(QLabel("Hasta"))
         fila_horario.addWidget(self.spin_hasta)
+        fila_horario.addStretch()
         form.addLayout(fila_horario)
 
         fila_horas_minimas = QHBoxLayout()

@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -82,6 +82,33 @@ def test_fecha_muestra_el_dia_de_la_semana_abreviado(qtbot, conn, profesional_y_
 
     pantalla.campo_fecha_desde.setDate(QDate(2026, 9, 9))  # miércoles
     assert pantalla.campo_fecha_desde.text().startswith("mié")
+
+
+def test_fecha_queda_pegada_a_su_etiqueta_sin_hueco(qtbot, conn, profesional_y_consultorio):
+    """Sin un `addStretch()` al final de la fila, QHBoxLayout reparte el
+    espacio sobrante entre los 4 widgets por igual — cada etiqueta queda
+    mucho más ancha que su propio texto y dejaba un hueco antes del
+    selector de fecha correspondiente."""
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    etiquetas = {lbl.text(): lbl for lbl in pantalla.findChildren(QLabel)}
+    etiqueta_desde = etiquetas["Desde"]
+    etiqueta_hasta = etiquetas["Hasta (solo Aislada)"]
+    assert etiqueta_desde.width() <= etiqueta_desde.sizeHint().width() + 2
+    assert etiqueta_hasta.width() <= etiqueta_hasta.sizeHint().width() + 2
+
+
+def test_horario_muestra_formato_hs(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.spin_desde.setValue(9)
+    assert pantalla.spin_desde.text() == "9:00hs"
+
+    pantalla.spin_hasta.setValue(12.5)
+    assert pantalla.spin_hasta.text() == "12:30hs"
 
 
 def test_localidad_edificio_unidad_arrancan_en_todas(qtbot, conn, profesional_y_consultorio):

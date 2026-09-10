@@ -63,7 +63,7 @@ QLabel#tituloPantalla {{
 QLabel#subtitulo {{ font-size: 11px; color: {'#AAAAAA' if modo_oscuro else '#555555'}; }}
 QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {COLOR_NIVEL_1}; padding: 4px 0px; }}
 QGroupBox#panelFiltrosGrilla::title {{
-    font-size: 15px; font-weight: bold; color: {COLOR_NIVEL_1};
+    font-size: 15px; font-weight: bold; color: {t['texto']};
     subcontrol-origin: margin; padding: 4px 0px;
 }}
 
