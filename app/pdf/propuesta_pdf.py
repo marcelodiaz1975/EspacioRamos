@@ -127,7 +127,7 @@ def _tabla_detalle_unidades(conn: sqlite3.Connection, id_edificio: int, ancho: f
 
 def _tabla_consultorios(filas_bd: list[sqlite3.Row], ancho: float) -> Table:
     encabezados = [
-        "Consultorio", "Medidas en metros", "Ventana", "Balcón", "Ladrillos de vidrio",
+        "Consultorio", "Medidas en metros", "Ventana", "Balcón", "Placard",
         "Aire acondicionado", "Sillón / Diván", "Apto camilla",
     ]
     filas = [_encabezados_tabla(encabezados, tamano=7)]
@@ -135,7 +135,7 @@ def _tabla_consultorios(filas_bd: list[sqlite3.Row], ancho: float) -> Table:
         medidas = f"{_medida(c['Largo'])}x{_medida(c['Ancho'])}" if c["Largo"] and c["Ancho"] else "—"
         filas.append([
             str(c["NumeroConsultorio"]), medidas, _si_no(c["Ventana"]), _si_no(c["Balcon"]),
-            _si_no(c["PanelVidrioLuzNatural"]), _si_no(c["AireAcondicionado"]), _si_no(c["Sillones"]),
+            _si_no(c["Placard"]), _si_no(c["AireAcondicionado"]), _si_no(c["Sillones"]),
             _si_no(c["AptoCamilla"]),
         ])
     ancho_consultorio = ancho * 0.12
@@ -160,7 +160,7 @@ def _detalle_consultorios_edificio(conn: sqlite3.Connection, id_edificio: int, a
     story = []
     for i, u in enumerate(unidades):
         filas_bd = conn.execute(
-            "SELECT NumeroConsultorio, Largo, Ancho, Ventana, Balcon, PanelVidrioLuzNatural, AireAcondicionado, "
+            "SELECT NumeroConsultorio, Largo, Ancho, Ventana, Balcon, Placard, AireAcondicionado, "
             "Sillones, AptoCamilla FROM Consultorio WHERE IdUnidad = ? ORDER BY NumeroConsultorio",
             (u["IdUnidad"],),
         ).fetchall()

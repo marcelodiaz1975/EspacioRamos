@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS Consultorio (
     Ancho REAL,
     TamanoClasificacion TEXT,
     Ventana INTEGER NOT NULL DEFAULT 0,
-    PanelVidrioLuzNatural INTEGER NOT NULL DEFAULT 0,
+    Placard INTEGER NOT NULL DEFAULT 0,
     AireAcondicionado INTEGER NOT NULL DEFAULT 0,
     VentiladorTecho INTEGER NOT NULL DEFAULT 0,
     Sillones INTEGER NOT NULL DEFAULT 0,

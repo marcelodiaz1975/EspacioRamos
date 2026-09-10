@@ -77,6 +77,23 @@ def test_aplicar_migraciones_borra_historial_oferta_de_una_base_vieja(tmp_path):
     conn.close()
 
 
+def test_aplicar_migraciones_reemplaza_panel_de_vidrio_por_placard(tmp_path):
+    """Panel de vidrio/luz natural se saca como característica a cargar
+    del consultorio; Placard ocupa su lugar (decisión de la clienta) —
+    no es un simple cambio de nombre, así que el valor viejo no se
+    traslada a la columna nueva."""
+    conn = init_database(tmp_path / "test.db")
+    conn.execute("ALTER TABLE Consultorio ADD COLUMN PanelVidrioLuzNatural INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    columnas = {f["name"] for f in conn.execute("PRAGMA table_info(Consultorio)").fetchall()}
+    assert "Placard" in columnas
+    assert "PanelVidrioLuzNatural" not in columnas
+    conn.close()
+
+
 def test_aplicar_migraciones_normaliza_tamano_de_consultorio(tmp_path):
     """Consultorio.TamanoClasificacion pasó de texto libre a catálogo
     cerrado (Grande/Intermedio/Chico): una base vieja con mayúsculas

@@ -36,7 +36,7 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
     ],
     "Consultorio": [
         "Edificio", "Unidad", "NumeroConsultorio", "Largo", "Ancho",
-        "TamanoClasificacion", "Ventana", "PanelVidrioLuzNatural",
+        "TamanoClasificacion", "Ventana", "Placard",
         "AireAcondicionado", "VentiladorTecho", "Sillones", "AptoCamilla",
         "Balcon", "ValorHoraRegularActual", "ValorHoraAisladaActual",
     ],
@@ -73,7 +73,7 @@ ENTIDADES_IMPORTABLES: list[str] = list(COLUMNAS_PLANTILLA.keys())
 CAMPOS_BOOLEANOS = {
     "Cocina", "SalaDeEspera", "AreaGuardado", "AreaDescanso", "AreaFumadores",
     "Recepcionista", "BalconComun", "EntradaProfesionalExclusiva", "WiFi",
-    "Ventana", "PanelVidrioLuzNatural", "AireAcondicionado", "VentiladorTecho",
+    "Ventana", "Placard", "AireAcondicionado", "VentiladorTecho",
     "Sillones", "AptoCamilla", "Balcon", "EsContactoPrincipal", "AptoPDF",
     "TieneMultiplesTratamientos", "EsExcepcion", "EsPersonalizada",
 }

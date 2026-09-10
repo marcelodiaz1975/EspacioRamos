@@ -83,7 +83,7 @@ def pantalla_consultorios(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Ancho", "Ancho (m)", tipo="numero"),
         Campo("TamanoClasificacion", "Clasificación", tipo="combo", opciones=_opciones_tamano),
         Campo("Ventana", "Ventana", tipo="booleano"),
-        Campo("PanelVidrioLuzNatural", "Panel de vidrio / luz natural", tipo="booleano"),
+        Campo("Placard", "Placard", tipo="booleano"),
         Campo("AireAcondicionado", "Aire acondicionado", tipo="booleano"),
         Campo("VentiladorTecho", "Ventilador de techo", tipo="booleano"),
         Campo("Sillones", "Sillones", tipo="booleano"),
