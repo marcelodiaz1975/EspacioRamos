@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.widgets.items_tabla import item_numero
 from app.negocio.dias import periodo_actual
 from app.negocio.estadisticas import calcular_ocupacion
 from app.repositorio.registro import obtener_repositorio
@@ -102,20 +103,20 @@ class PantallaEstadisticas(QWidget):
         self.tabla_edificios.setRowCount(len(ocupacion.por_edificio))
         for i, agregado in enumerate(ocupacion.por_edificio.values()):
             self.tabla_edificios.setItem(i, 0, QTableWidgetItem(agregado.nombre))
-            self.tabla_edificios.setItem(i, 1, QTableWidgetItem(f"{agregado.porcentaje:.1f}%"))
+            self.tabla_edificios.setItem(i, 1, item_numero(f"{agregado.porcentaje:.1f}%"))
         self.tabla_edificios.resizeColumnsToContents()
 
         self.tabla_unidades.setRowCount(len(ocupacion.por_unidad))
         for i, agregado in enumerate(ocupacion.por_unidad.values()):
             self.tabla_unidades.setItem(i, 0, QTableWidgetItem(agregado.nombre))
-            self.tabla_unidades.setItem(i, 1, QTableWidgetItem(f"{agregado.porcentaje:.1f}%"))
+            self.tabla_unidades.setItem(i, 1, item_numero(f"{agregado.porcentaje:.1f}%"))
         self.tabla_unidades.resizeColumnsToContents()
 
         self.tabla_consultorios.setRowCount(len(ocupacion.por_consultorio))
         for i, c in enumerate(ocupacion.por_consultorio.values()):
             etiqueta = f"{c.edificio} - {c.unidad} - Consultorio {c.numero}"
             self.tabla_consultorios.setItem(i, 0, QTableWidgetItem(etiqueta))
-            self.tabla_consultorios.setItem(i, 1, QTableWidgetItem(f"{c.porcentaje:.1f}%"))
+            self.tabla_consultorios.setItem(i, 1, item_numero(f"{c.porcentaje:.1f}%"))
         self.tabla_consultorios.resizeColumnsToContents()
 
     def _actualizar_snapshots(self) -> None:
@@ -126,7 +127,7 @@ class PantallaEstadisticas(QWidget):
             self.tabla_snapshots.setItem(i, 0, QTableWidgetItem(s["Periodo"]))
             self.tabla_snapshots.setItem(i, 1, QTableWidgetItem(s["FechaGeneracion"] or ""))
             general = s["PorcentajeOcupacionGeneral"]
-            self.tabla_snapshots.setItem(i, 2, QTableWidgetItem(f"{general:.1f}%" if general is not None else ""))
+            self.tabla_snapshots.setItem(i, 2, item_numero(f"{general:.1f}%" if general is not None else ""))
             aumento = s["PorcentajeAumentoAplicado"]
-            self.tabla_snapshots.setItem(i, 3, QTableWidgetItem(f"{aumento:.1f}%" if aumento is not None else ""))
+            self.tabla_snapshots.setItem(i, 3, item_numero(f"{aumento:.1f}%" if aumento is not None else ""))
         self.tabla_snapshots.resizeColumnsToContents()

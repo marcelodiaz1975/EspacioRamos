@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QTableWidgetItem
 
@@ -20,7 +21,12 @@ TEXTO_SIN_PROFESIONAL = "Saldo actual: — - Saldo anterior: —"
 
 
 def item_monto(valor: float | None) -> QTableWidgetItem:
+    """Confirmado por la clienta en la revisión uno por uno: cualquier
+    importe/número de una tabla va alineado a la derecha de su celda,
+    en todo el sistema — acá queda resuelto para todos los que ya pasan
+    por este helper compartido."""
     item = QTableWidgetItem(formatear_moneda(valor or 0.0))
+    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     if (valor or 0.0) < 0:
         item.setForeground(QColor(COLOR_ROJO))
     return item

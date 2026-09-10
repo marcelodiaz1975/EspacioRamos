@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.widgets.items_tabla import item_numero
 from app.negocio.imagenes import (
     agregar_imagen,
     alternar_activo,
@@ -124,7 +125,7 @@ class PantallaImagenes(QWidget):
             self._imagenes = imagenes_del_alcance(self.conn, *self._ids_alcance())
         self.tabla.setRowCount(len(self._imagenes))
         for fila_idx, img in enumerate(self._imagenes):
-            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(str(img["NumeroOrden"])))
+            self.tabla.setItem(fila_idx, 0, item_numero(str(img["NumeroOrden"])))
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(img["Descripcion"] or ""))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(img["Tipo"] or ""))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem("Sí" if img["Activo"] else "No"))

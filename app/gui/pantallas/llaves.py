@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.listas_editables import opciones_lista
@@ -283,11 +284,9 @@ class PantallaLlaves(QWidget):
         for fila_idx, (t, resumen) in enumerate(filas):
             self.tabla_tipos.setItem(fila_idx, 0, QTableWidgetItem(t["Nombre"]))
             self.tabla_tipos.setItem(fila_idx, 1, QTableWidgetItem(t["Tipo"]))
-            self.tabla_tipos.setItem(fila_idx, 2, QTableWidgetItem(_moneda(t["ValorDepositoActual"])))
+            self.tabla_tipos.setItem(fila_idx, 2, item_numero(_moneda(t["ValorDepositoActual"])))
             for col, clave in ((3, "asignadas"), (4, "disponibles"), (5, "existentes")):
-                item = QTableWidgetItem(str(resumen[clave]))
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.tabla_tipos.setItem(fila_idx, col, item)
+                self.tabla_tipos.setItem(fila_idx, col, item_numero(str(resumen[clave])))
             if t["IdLlave"] == tipo_seleccionado_id:
                 fila_a_reseleccionar = fila_idx
         if fila_a_reseleccionar is not None:
@@ -531,18 +530,14 @@ class PantallaLlaves(QWidget):
             self.tabla_movimientos.setItem(fila_idx, 1, QTableWidgetItem(m["Tipo"]))
             self.tabla_movimientos.setItem(fila_idx, 2, QTableWidgetItem(m["_texto_profesional"]))
             self.tabla_movimientos.setItem(fila_idx, 3, QTableWidgetItem(m["_nombre_llave"]))
-            item_cant = QTableWidgetItem(str(m["Cantidad"]))
-            item_cant.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.tabla_movimientos.setItem(fila_idx, 4, item_cant)
+            self.tabla_movimientos.setItem(fila_idx, 4, item_numero(str(m["Cantidad"])))
             cobrado = _moneda(m["MontoCobrado"]) if m["Tipo"] == "Asignación" and m["DepositoCobrado"] else ""
-            self.tabla_movimientos.setItem(fila_idx, 5, QTableWidgetItem(cobrado))
+            self.tabla_movimientos.setItem(fila_idx, 5, item_numero(cobrado))
             if m["Tipo"] == "Pérdida":
-                reintegrado = "No corresponde"
-            elif m["Tipo"] == "Devolución" and m["DepositoReintegrado"]:
-                reintegrado = _moneda(m["MontoReintegrado"])
+                self.tabla_movimientos.setItem(fila_idx, 6, QTableWidgetItem("No corresponde"))
             else:
-                reintegrado = ""
-            self.tabla_movimientos.setItem(fila_idx, 6, QTableWidgetItem(reintegrado))
+                reintegrado = _moneda(m["MontoReintegrado"]) if m["Tipo"] == "Devolución" and m["DepositoReintegrado"] else ""
+                self.tabla_movimientos.setItem(fila_idx, 6, item_numero(reintegrado))
         self.tabla_movimientos.resizeColumnsToContents()
         self._actualizar_observacion_movimiento()
         self._actualizar_botones_movimiento()

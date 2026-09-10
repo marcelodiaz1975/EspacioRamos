@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.widgets.items_tabla import item_numero
 from app.importacion.importar_excel import importar_planilla
 from app.importacion.informe_integridad import generar_informe_integridad
 
@@ -100,8 +101,8 @@ class PantallaImportacion(QWidget):
         lineas_error = []
         for i, r in enumerate(resultados):
             self.tabla_resultados.setItem(i, 0, QTableWidgetItem(r.entidad))
-            self.tabla_resultados.setItem(i, 1, QTableWidgetItem(str(r.filas_importadas)))
-            self.tabla_resultados.setItem(i, 2, QTableWidgetItem(str(len(r.errores))))
+            self.tabla_resultados.setItem(i, 1, item_numero(str(r.filas_importadas)))
+            self.tabla_resultados.setItem(i, 2, item_numero(str(len(r.errores))))
             for err in r.errores:
                 lineas_error.append(f"[{r.entidad}] {err}")
         self.tabla_resultados.resizeColumnsToContents()

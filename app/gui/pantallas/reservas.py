@@ -37,6 +37,7 @@ from app.gui.widgets.grilla_operativa import (
     pares_dia_unidad_con_reserva,
     pares_dia_unidad_con_reserva_vigente,
 )
+from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.ausencias import crear_ausencia
@@ -479,7 +480,7 @@ class _PanelReservasRegulares(QWidget):
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(consultorio["NombreEdificio"] if consultorio else "?"))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(consultorio["Departamento"] if consultorio else "?"))
             self.tabla.setItem(
-                fila_idx, 4, QTableWidgetItem(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
+                fila_idx, 4, item_numero(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
             )
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(r["DiaSemana"]))
             self.tabla.setItem(fila_idx, 6, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
@@ -1165,7 +1166,7 @@ class _PanelReservasAisladas(QWidget):
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(consultorio["NombreEdificio"] if consultorio else "?"))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(consultorio["Departamento"] if consultorio else "?"))
             self.tabla.setItem(
-                fila_idx, 4, QTableWidgetItem(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
+                fila_idx, 4, item_numero(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
             )
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(fecha_a_dia_semana(date.fromisoformat(r["Fecha"]))))
             self.tabla.setItem(fila_idx, 6, QTableWidgetItem(_fmt_fecha(r["Fecha"])))
@@ -1173,7 +1174,7 @@ class _PanelReservasAisladas(QWidget):
             self.tabla.setItem(fila_idx, 8, QTableWidgetItem("Sí" if r["EsReubicacion"] else "No"))
             self.tabla.setItem(fila_idx, 9, QTableWidgetItem(r["Estado"]))
             valor_hora = consultorio["ValorHoraAisladaActual"] if consultorio else 0.0
-            self.tabla.setItem(fila_idx, 10, QTableWidgetItem(self._valor_reserva(r, valor_hora, recargo_pct)))
+            self.tabla.setItem(fila_idx, 10, item_numero(self._valor_reserva(r, valor_hora, recargo_pct)))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._sincronizar_grilla()

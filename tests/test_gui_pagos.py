@@ -521,6 +521,9 @@ def test_crear_plan_de_pagos_persiste_y_genera_cuotas(qtbot, conn):
     assert panel.tabla.item(0, 4).text() == "5.0%"  # interés mensual
     assert panel.tabla.item(0, 6).text() == "3"  # cuotas restantes
     assert panel.tabla.item(0, 7).text() == formatear_moneda(6900)  # saldo restante (con interés)
+    alineacion_derecha = int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    for columna in (2, 3, 4, 5, 6, 7):  # monto, cuotas, interés, importe, cuotas restantes, saldo
+        assert panel.tabla.item(0, columna).textAlignment() == alineacion_derecha
 
 
 def test_botones_planes_pago_segun_si_hay_plan_activo(qtbot, conn):

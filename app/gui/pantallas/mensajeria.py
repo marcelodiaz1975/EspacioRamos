@@ -141,11 +141,14 @@ class _ItemCodigo(QTableWidgetItem):
 
 class _ItemMoneda(QTableWidgetItem):
     """Ordena las columnas "Saldo anterior"/"Saldo actual" por el valor
-    numérico real, no por el texto ya formateado ("$ 1.234,00")."""
+    numérico real, no por el texto ya formateado ("$ 1.234,00"), y va
+    alineado a la derecha (confirmado por la clienta para todo el
+    sistema)."""
 
     def __init__(self, texto: str, valor: float):
         super().__init__(texto)
         self._valor = valor
+        self.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
     def __lt__(self, other: object) -> bool:
         if isinstance(other, _ItemMoneda):

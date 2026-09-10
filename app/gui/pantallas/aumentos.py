@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.widgets.items_tabla import item_numero
 from app.negocio.aumentos import confirmar_aumento, simular_aumento
 from app.negocio.dias import periodo_actual
 from app.negocio.formato import formatear_moneda
@@ -158,6 +159,7 @@ class PantallaAumentos(QWidget):
         significar siempre decimal)."""
         item = QTableWidgetItem(texto)
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         if valor is not None:
             item.setData(Qt.ItemDataRole.UserRole, valor)
         self.tabla.setItem(fila, columna, item)
@@ -165,6 +167,7 @@ class PantallaAumentos(QWidget):
     def _celda_editable(self, fila: int, columna: int, texto: str) -> None:
         item = QTableWidgetItem(texto)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.tabla.setItem(fila, columna, item)
 
     def _recalcular_diferencias(self, *_args) -> None:
@@ -201,9 +204,9 @@ class PantallaAumentos(QWidget):
     def _agregar_fila_tramo(self, desde: float = 0, hasta: float = 0, porcentaje: float = 0) -> None:
         fila = self.tabla_esquema.rowCount()
         self.tabla_esquema.insertRow(fila)
-        self.tabla_esquema.setItem(fila, 0, QTableWidgetItem(str(desde)))
-        self.tabla_esquema.setItem(fila, 1, QTableWidgetItem(str(hasta)))
-        self.tabla_esquema.setItem(fila, 2, QTableWidgetItem(str(porcentaje)))
+        self.tabla_esquema.setItem(fila, 0, item_numero(str(desde)))
+        self.tabla_esquema.setItem(fila, 1, item_numero(str(hasta)))
+        self.tabla_esquema.setItem(fila, 2, item_numero(str(porcentaje)))
 
     def _agregar_tramo(self) -> None:
         self._agregar_fila_tramo()

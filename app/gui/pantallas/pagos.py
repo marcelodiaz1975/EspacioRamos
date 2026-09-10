@@ -36,6 +36,7 @@ from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, texto_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
@@ -333,6 +334,7 @@ class _PanelRegistrarPago(QWidget):
 
     def _poner_item_monto(self, fila: int, col: int, valor: float | None) -> None:
         item = QTableWidgetItem(formatear_moneda(valor or 0.0))
+        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         if (valor or 0.0) < 0:
             item.setForeground(QColor(COLOR_ROJO))
         self.tabla.setItem(fila, col, item)
@@ -749,12 +751,12 @@ class _PanelPlanesPago(QWidget):
                  _dato) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             self.tabla.setItem(i, 1, QTableWidgetItem(inicio))
-            self.tabla.setItem(i, 2, QTableWidgetItem(formatear_moneda(monto)))
-            self.tabla.setItem(i, 3, QTableWidgetItem(str(cuotas)))
-            self.tabla.setItem(i, 4, QTableWidgetItem(f"{interes or 0.0:.1f}%"))
-            self.tabla.setItem(i, 5, QTableWidgetItem(formatear_moneda(importe) if importe is not None else ""))
-            self.tabla.setItem(i, 6, QTableWidgetItem(str(cuotas_restantes)))
-            self.tabla.setItem(i, 7, QTableWidgetItem(formatear_moneda(saldo_restante)))
+            self.tabla.setItem(i, 2, item_numero(formatear_moneda(monto)))
+            self.tabla.setItem(i, 3, item_numero(str(cuotas)))
+            self.tabla.setItem(i, 4, item_numero(f"{interes or 0.0:.1f}%"))
+            self.tabla.setItem(i, 5, item_numero(formatear_moneda(importe) if importe is not None else ""))
+            self.tabla.setItem(i, 6, item_numero(str(cuotas_restantes)))
+            self.tabla.setItem(i, 7, item_numero(formatear_moneda(saldo_restante)))
             self.tabla.setItem(i, 8, QTableWidgetItem(estado))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))

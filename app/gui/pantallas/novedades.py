@@ -24,7 +24,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -60,6 +60,7 @@ from app.gui.pantallas.reservas import (
 )
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
+from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, texto_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
@@ -138,8 +139,10 @@ def _fmt_fecha_dia(fecha_iso: str) -> str:
 def _item_monto(valor: float) -> QTableWidgetItem:
     """Importes negativos en rojo, positivos en negro (criterio confirmado
     por la clienta para Cargos especiales; se va a ir extendiendo al resto
-    de las pantallas a medida que las revisemos)."""
+    de las pantallas a medida que las revisemos), alineados a la derecha
+    (confirmado para todo el sistema)."""
     item = QTableWidgetItem(formatear_moneda(valor))
+    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     if valor < 0:
         item.setForeground(QColor(COLOR_ROJO))
     return item
@@ -370,15 +373,15 @@ class _PanelVacaciones(QWidget):
         self.tabla.setRowCount(len(filas))
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            self.tabla.setItem(i, 1, QTableWidgetItem(r["FechaDesde"][:4]))
+            self.tabla.setItem(i, 1, item_numero(r["FechaDesde"][:4]))
             self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
             self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
             texto_valor = _texto_valor_bonificado(r["ValorBonificado"], r["FechaDesde"], periodo_en_curso)
-            self.tabla.setItem(i, 4, QTableWidgetItem(texto_valor))
+            self.tabla.setItem(i, 4, item_numero(texto_valor))
             cupo_utilizado = r["CupoConsumidoPorcentaje"]
-            self.tabla.setItem(i, 5, QTableWidgetItem(f"{cupo_utilizado:.1f}%" if cupo_utilizado is not None else ""))
+            self.tabla.setItem(i, 5, item_numero(f"{cupo_utilizado:.1f}%" if cupo_utilizado is not None else ""))
             cupo_restante = r["CupoRestantePorcentaje"]
-            self.tabla.setItem(i, 6, QTableWidgetItem(f"{cupo_restante:.1f}%" if cupo_restante is not None else ""))
+            self.tabla.setItem(i, 6, item_numero(f"{cupo_restante:.1f}%" if cupo_restante is not None else ""))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._actualizar_cupo()
@@ -665,9 +668,9 @@ class _PanelLicencias(QWidget):
             self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
             self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
             porcentaje = r["PorcentajeBonificacionAplicado"]
-            self.tabla.setItem(i, 4, QTableWidgetItem(f"{porcentaje:.1f}%" if porcentaje is not None else ""))
+            self.tabla.setItem(i, 4, item_numero(f"{porcentaje:.1f}%" if porcentaje is not None else ""))
             texto_valor = _texto_valor_bonificado(r["ValorBonificado"], r["FechaDesde"], periodo_en_curso)
-            self.tabla.setItem(i, 5, QTableWidgetItem(texto_valor))
+            self.tabla.setItem(i, 5, item_numero(texto_valor))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self.grilla.actualizar()
