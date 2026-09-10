@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -31,19 +32,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import _numero_codigo, _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
-from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, texto_resumen
+from app.gui.widgets.resumen_saldo import fmt_dato, item_monto
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
-from app.negocio.dias import fecha_actual, periodo_actual
+from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual
+from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion
 from app.negocio.valores import horas_semanales_vigentes
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
 _ANCHO_PANEL_FILTROS = 280
+_ANCHO_PANEL_FILTROS_ESTADO_CUENTA = 340
 
 _ESTADOS_FILTRO = [
     ("Cualquier estado", None),
@@ -56,6 +60,19 @@ _ESTADOS_FILTRO = [
 
 def _fmt_horas(horas: float) -> str:
     return str(int(horas)) if horas == int(horas) else f"{horas:.1f}"
+
+
+def _fmt_fecha_hora_generacion(iso: str | None) -> str:
+    """"Martes 10/08/2026 14:30hs" — nombre de día en español (ya viene
+    capitalizado de `fecha_a_dia_semana`), fecha con barras y sin
+    segundos, a diferencia de `_fmt_fecha_hora_larga` de Pagos (que usa
+    guiones y sí los muestra: ahí importa el orden real de los sobres
+    físicos, acá no)."""
+    if not iso:
+        return ""
+    dt = datetime.fromisoformat(iso)
+    dia = fecha_a_dia_semana(dt.date())
+    return f"{dia} {dt.day:02d}/{dt.month:02d}/{dt.year} {dt.hour:02d}:{dt.minute:02d}hs"
 
 
 class ProcesoLiquidacion(QWidget):
@@ -269,7 +286,8 @@ class _PanelEmisionArchivos(QWidget):
                 directorio = str(carpeta_profesional(self.conn, profesional["IdCodigo"]))
                 ruta = generar_pdf_liquidacion(self.conn, liquidacion, directorio)
                 obtener_repositorio(self.conn, "LiquidacionEmitida").actualizar(
-                    id_liquidacion, NombreArchivo=os.path.basename(ruta)
+                    id_liquidacion, NombreArchivo=os.path.basename(ruta),
+                    FechaHoraGeneracion=datetime.now().isoformat(timespec="seconds"),
                 )
                 emitidas += 1
             except ValueError as error:
@@ -335,7 +353,7 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         layout_externo = QHBoxLayout(self)
 
         panel_filtros = QWidget()
-        panel_filtros.setMaximumWidth(_ANCHO_PANEL_FILTROS)
+        panel_filtros.setMaximumWidth(_ANCHO_PANEL_FILTROS_ESTADO_CUENTA)
         layout_filtros = QVBoxLayout(panel_filtros)
 
         layout_filtros.addWidget(QLabel("Profesional:"))
@@ -353,18 +371,27 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         self.etiqueta_resumen.setWordWrap(True)
         layout_filtros.addWidget(self.etiqueta_resumen)
 
+        layout_filtros.addWidget(QLabel("Saldo anterior:"))
+        self.campo_saldo_anterior = QLineEdit()
+        self.campo_saldo_anterior.setReadOnly(True)
+        layout_filtros.addWidget(self.campo_saldo_anterior)
+
         layout_filtros.addStretch()
         layout_externo.addWidget(panel_filtros)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(6)
-        self.tabla.setHorizontalHeaderLabels(
-            ["Período", "Fecha emisión", "Monto generado", "Reemisión", "Estado de envío", "Archivo"]
-        )
+        self.tabla.setColumnCount(7)
+        self.tabla.setHorizontalHeaderLabels([
+            "Período", "Fecha emisión", "Monto generado", "Reemisión", "Estado de envío", "Archivo",
+            "Fecha y hora generación del archivo",
+        ])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout_externo.addWidget(self.tabla, stretch=1)
 
     def actualizar(self) -> None:
+        # El profesional elegido se conserva aunque se salga y se vuelva
+        # a entrar a este formulario: se busca de nuevo por su id
+        # después de repoblar el combo, en vez de resetear a "ninguno".
         id_anterior = self.combo_profesional.currentData()
         self.combo_profesional.blockSignals(True)
         self.combo_profesional.clear()
@@ -378,10 +405,16 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
     def _actualizar_datos(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
-            self.etiqueta_resumen.setText(TEXTO_SIN_PROFESIONAL)
+            self.etiqueta_resumen.setText("Saldo actual: —")
+            self.campo_saldo_anterior.setStyleSheet("")
+            self.campo_saldo_anterior.setText("—")
             self.tabla.setRowCount(0)
             return
-        self.etiqueta_resumen.setText(texto_resumen(self.conn, id_profesional))
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        self.etiqueta_resumen.setText(fmt_dato("Saldo actual", profesional["SaldoCuentaActual"] or 0.0))
+        saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
+        self.campo_saldo_anterior.setText(formatear_moneda(saldo_anterior))
+        self.campo_saldo_anterior.setStyleSheet(f"color: {COLOR_ROJO};" if saldo_anterior < 0 else "")
         registros = sorted(
             obtener_repositorio(self.conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional),
             key=lambda r: r["Periodo"], reverse=True,
@@ -394,4 +427,5 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
             self.tabla.setItem(i, 3, QTableWidgetItem("Sí" if r["EsReemision"] else "No"))
             self.tabla.setItem(i, 4, QTableWidgetItem(r["EstadoEnvio"]))
             self.tabla.setItem(i, 5, QTableWidgetItem(r["NombreArchivo"] or ""))
+            self.tabla.setItem(i, 6, QTableWidgetItem(_fmt_fecha_hora_generacion(r["FechaHoraGeneracion"])))
         self.tabla.resizeColumnsToContents()

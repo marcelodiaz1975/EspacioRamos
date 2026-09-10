@@ -330,6 +330,7 @@ CREATE TABLE IF NOT EXISTS LiquidacionEmitida (
     Periodo TEXT NOT NULL,
     FechaEmision TEXT,
     NombreArchivo TEXT,
+    FechaHoraGeneracion TEXT,
     EsReemision INTEGER NOT NULL DEFAULT 0,
     EstadoEnvio TEXT NOT NULL CHECK (EstadoEnvio IN ('Enviada','No enviada','Regenerada no enviada')) DEFAULT 'No enviada',
     -- Monto que ESTA emisión aportó a SaldoCuentaActual (total sin el saldo

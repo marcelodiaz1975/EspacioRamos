@@ -21,6 +21,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("HistorialPagos", "SaldoNuevo", "REAL"),
     ("HistorialPagos", "RegistroModificado", "INTEGER NOT NULL DEFAULT 0"),
     ("CargoEspecial", "Fecha", "TEXT"),
+    ("LiquidacionEmitida", "FechaHoraGeneracion", "TEXT"),
 ]
 
 

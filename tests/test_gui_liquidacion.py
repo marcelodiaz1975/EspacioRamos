@@ -371,3 +371,74 @@ def test_solapa_estado_cuenta_combo_es_buscable_por_codigo_o_nombre(qtbot, conn)
     qtbot.addWidget(pantalla)
     completador = pantalla.panel_estado_cuenta.combo_profesional.completer()
     assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
+
+
+def test_solapa_estado_cuenta_tiene_columna_de_fecha_y_hora_de_generacion(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    id_prof = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    conn.commit()
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel_emision = pantalla.panel_emision
+
+    panel_emision.tabla.item(0, 0).setCheckState(Qt.CheckState.Checked)
+    panel_emision._emitir_seleccionadas()
+
+    panel = pantalla.panel_estado_cuenta
+    panel.actualizar()
+    indice = panel.combo_profesional.findData(id_prof)
+    panel.combo_profesional.setCurrentIndex(indice)
+
+    assert panel.tabla.horizontalHeaderItem(6).text() == "Fecha y hora generación del archivo"
+    texto = panel.tabla.item(0, 6).text()
+    assert texto != ""
+    assert texto.endswith("hs")
+    assert "/" in texto
+
+
+def test_solapa_estado_cuenta_muestra_solo_saldo_actual_en_el_resumen(qtbot, conn):
+    id_prof = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    obtener_repositorio(conn, "Profesional").actualizar(
+        id_prof, SaldoCuentaActual=1500, SaldoCuentaAnterior=-300,
+    )
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_estado_cuenta
+    indice = panel.combo_profesional.findData(id_prof)
+    panel.combo_profesional.setCurrentIndex(indice)
+
+    assert "Saldo actual" in panel.etiqueta_resumen.text()
+    assert "Saldo anterior" not in panel.etiqueta_resumen.text()
+
+
+def test_solapa_estado_cuenta_saldo_anterior_en_cuadro_de_texto_de_solo_lectura(qtbot, conn):
+    id_prof = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    obtener_repositorio(conn, "Profesional").actualizar(
+        id_prof, SaldoCuentaActual=1500, SaldoCuentaAnterior=-300,
+    )
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_estado_cuenta
+    indice = panel.combo_profesional.findData(id_prof)
+    panel.combo_profesional.setCurrentIndex(indice)
+
+    assert panel.campo_saldo_anterior.isReadOnly()
+    assert panel.campo_saldo_anterior.text() == formatear_moneda(-300)
+    assert COLOR_ROJO in panel.campo_saldo_anterior.styleSheet()
+
+
+def test_solapa_estado_cuenta_conserva_el_profesional_elegido_al_refrescar(qtbot, conn):
+    """Simula salir y volver a entrar al formulario: `actualizar()` es lo
+    que se dispara al reconstruir/repoblar la pantalla, y no debe
+    resetear la selección hecha por el operador."""
+    id_prof = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    _crear_profesional(conn, apellido="Quito", id_codigo="R3")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_estado_cuenta
+    indice = panel.combo_profesional.findData(id_prof)
+    panel.combo_profesional.setCurrentIndex(indice)
+
+    panel.actualizar()
+
+    assert panel.combo_profesional.currentData() == id_prof
