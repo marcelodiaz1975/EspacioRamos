@@ -1,17 +1,11 @@
-"""Lista de espera (F12, sección 3.21 y DC-08 §2 / DC-10 §2): alta de
-pedidos y cruce automático contra la disponibilidad real del período en
-curso, reusando app.negocio.lista_espera. El mismo formulario de pedido
-también arma, sin necesidad de persistirlo, el mensaje "Disponibilidad de
-horarios regulares" (sección 5.2, Mensaje 2 de DC-03), con la opción de
-regenerar además el PDF de disponibilidad con fotos.
-
-A diferencia del Mensaje 1 (detalle de aisladas, que decide solo si
-mencionar el edificio según las llaves del profesional — no hay
-checkboxes ahí), el Mensaje 2 no está atado a un profesional en
-particular, así que la "regla del edificio" (`mensajes._incluir_edificio_efectivo`)
-solo aplica el primer nivel (un solo edificio en el espacio -> se omite
-siempre) y para el resto queda a criterio manual del operador: de ahí los
-tres checkboxes "Incluir consultorio/unidad/edificio" de acá abajo.
+"""Lista de espera (F12, sección 3.21 y DC-08 §2 / DC-10 §2): agenda lo
+que piden los profesionales (activos en el espacio o no, de cualquier
+categoría — incluidos X/inactivos y C/contacto-prospecto) y cruza cada
+pedido automáticamente contra la disponibilidad real del período en
+curso, reusando app.negocio.lista_espera. El texto o PDF de oferta para
+mandarle a un profesional se arma aparte, en Oferta de consultorios
+(`app.gui.pantallas.oferta`) — que funciona igual tenga o no el
+profesional algo cargado acá.
 
 Un pedido puede necesitar varios bloques día(s)+horario a la vez (ej.
 "martes o jueves 3hs entre 14 y 18hs" Y "sábado de 9 a 12hs"): los campos
@@ -30,7 +24,7 @@ import json
 import sqlite3
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -52,15 +46,9 @@ from PySide6.QtWidgets import (
 
 from app.gui.pantallas.reservas import _opciones_profesional
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
-from app.negocio.archivos_generados import SUBCARPETA_DISPONIBILIDAD, carpeta_archivos_varios
 from app.negocio.dias import DIAS_SEMANA, periodo_actual
 from app.negocio.lista_espera import crear_pedido, listar_pedidos_con_coincidencia, marcar_descartado, marcar_resuelto
-from app.negocio.mensajes import (
-    mensaje_disponibilidad_horarios,
-    mensaje_disponibilidad_horarios_fecha,
-    nombre_para_mensaje,
-)
-from app.pdf.disponibilidad_pdf import generar_pdfs_disponibilidad_por_localidad
+from app.negocio.mensajes import nombre_para_mensaje
 from app.repositorio.registro import obtener_repositorio
 
 _COLOR_CELDA = {"verde": "#4CAF50", "amarillo": "#F5D547", "naranja": "#E07B39", "rojo": "#C0392B"}
@@ -187,34 +175,6 @@ class PantallaListaEspera(QWidget):
         boton_crear.clicked.connect(self._crear_pedido)
         form.addWidget(boton_crear)
 
-        form.addWidget(QLabel("Mensaje de disponibilidad — qué incluir en cada alternativa"))
-        self.casilla_incluir_consultorio = QCheckBox("Incluir consultorio")
-        self.casilla_incluir_consultorio.setChecked(True)
-        self.casilla_incluir_unidad = QCheckBox("Incluir unidad")
-        self.casilla_incluir_unidad.setChecked(True)
-        self.casilla_incluir_edificio = QCheckBox("Incluir edificio")
-        self.casilla_incluir_edificio.setChecked(True)
-        for casilla in (self.casilla_incluir_consultorio, self.casilla_incluir_unidad, self.casilla_incluir_edificio):
-            form.addWidget(casilla)
-
-        self.casilla_pdf_disponibilidad = QCheckBox("Generar también como PDF con fotos")
-        form.addWidget(self.casilla_pdf_disponibilidad)
-        boton_mensaje_disponibilidad = QPushButton("Generar mensaje de disponibilidad (por día de semana)")
-        boton_mensaje_disponibilidad.clicked.connect(self._generar_mensaje_disponibilidad)
-        form.addWidget(boton_mensaje_disponibilidad)
-
-        form.addWidget(QLabel("Variante B: disponibilidad por fecha(s) puntual(es) en vez de día de semana"))
-        self.campo_fechas = QLineEdit()
-        self.campo_fechas.setPlaceholderText("AAAA-MM-DD, AAAA-MM-DD, … (separadas por coma)")
-        form.addWidget(self.campo_fechas)
-        self.combo_tipo_fechas = QComboBox()
-        self.combo_tipo_fechas.addItem("Alcanza con una fecha (O)", "O")
-        self.combo_tipo_fechas.addItem("Todas las fechas (Y)", "Y")
-        form.addWidget(self.combo_tipo_fechas)
-        boton_mensaje_disponibilidad_fecha = QPushButton("Generar mensaje de disponibilidad (por fecha puntual)")
-        boton_mensaje_disponibilidad_fecha.clicked.connect(self._generar_mensaje_disponibilidad_fecha)
-        form.addWidget(boton_mensaje_disponibilidad_fecha)
-
         form.addStretch()
         splitter.addWidget(panel_form)
 
@@ -237,14 +197,6 @@ class PantallaListaEspera(QWidget):
         fila_acciones.addWidget(boton_descartar)
         fila_acciones.addStretch()
         layout_tabla.addLayout(fila_acciones)
-
-        layout_tabla.addWidget(QLabel("Mensaje de disponibilidad generado (a partir del formulario de arriba)"))
-        self.texto_mensaje_disponibilidad = QPlainTextEdit()
-        self.texto_mensaje_disponibilidad.setFixedHeight(120)
-        layout_tabla.addWidget(self.texto_mensaje_disponibilidad)
-        boton_copiar_disponibilidad = QPushButton("Copiar mensaje")
-        boton_copiar_disponibilidad.clicked.connect(self._copiar_mensaje_disponibilidad)
-        layout_tabla.addWidget(boton_copiar_disponibilidad)
 
         splitter.addWidget(panel_tabla)
         splitter.setStretchFactor(1, 1)
@@ -312,81 +264,6 @@ class PantallaListaEspera(QWidget):
         if self.campo_tamano.text().strip():
             condiciones["tamano"] = self.campo_tamano.text().strip()
         return condiciones
-
-    def _generar_mensaje_disponibilidad(self) -> None:
-        """Sección 5.2: arma "Disponibilidad período {MM/AAAA}" con los
-        mismos campos del formulario de pedido, sin necesidad de crear un
-        pedido en Lista de espera. El checkbox "PDF con fotos" además
-        regenera el PDF de disponibilidad general (Archivos varios) para
-        adjuntar junto al mensaje."""
-        dias = self._dias_seleccionados()
-        if not dias:
-            QMessageBox.warning(self, "Generar mensaje de disponibilidad", "Elegí al menos un día.")
-            return
-        try:
-            texto = mensaje_disponibilidad_horarios(
-                self.conn, periodo=periodo_actual(self.conn), dias=dias,
-                horario_desde=self.spin_desde.value(), horario_hasta=self.spin_hasta.value(),
-                tipo_combinacion=self.combo_tipo.currentData(), condiciones_consultorio=self._condiciones(),
-                incluir_consultorio=self.casilla_incluir_consultorio.isChecked(),
-                incluir_unidad=self.casilla_incluir_unidad.isChecked(),
-                incluir_edificio=self.casilla_incluir_edificio.isChecked(),
-            )
-        except ValueError as error:
-            QMessageBox.warning(self, "Generar mensaje de disponibilidad", str(error))
-            return
-        self.texto_mensaje_disponibilidad.setPlainText(texto)
-
-        if self.casilla_pdf_disponibilidad.isChecked():
-            directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_DISPONIBILIDAD))
-            rutas = generar_pdfs_disponibilidad_por_localidad(self.conn, directorio)
-            QMessageBox.information(
-                self, "PDF de disponibilidad",
-                f"Se generó {len(rutas)} archivo(s) en:\n{directorio}",
-            )
-
-    def _fechas_ingresadas(self) -> list[str]:
-        return [f.strip() for f in self.campo_fechas.text().split(",") if f.strip()]
-
-    def _generar_mensaje_disponibilidad_fecha(self) -> None:
-        """Variante B del Mensaje 2 (DC-03 sección 5.2): igual que
-        `_generar_mensaje_disponibilidad`, pero cruzando fecha(s) puntual(es)
-        contra la ocupación real de cada una (respeta ausencias puntuales y
-        reservas aisladas ya confirmadas), no el patrón semanal genérico."""
-        fechas = self._fechas_ingresadas()
-        if not fechas:
-            QMessageBox.warning(self, "Generar mensaje de disponibilidad", "Ingresá al menos una fecha (AAAA-MM-DD).")
-            return
-        try:
-            texto, advertencias = mensaje_disponibilidad_horarios_fecha(
-                self.conn, fechas=fechas,
-                horario_desde=self.spin_desde.value(), horario_hasta=self.spin_hasta.value(),
-                tipo_combinacion=self.combo_tipo_fechas.currentData(), condiciones_consultorio=self._condiciones(),
-                incluir_consultorio=self.casilla_incluir_consultorio.isChecked(),
-                incluir_unidad=self.casilla_incluir_unidad.isChecked(),
-                incluir_edificio=self.casilla_incluir_edificio.isChecked(),
-            )
-        except ValueError as error:
-            QMessageBox.warning(self, "Generar mensaje de disponibilidad", str(error))
-            return
-        self.texto_mensaje_disponibilidad.setPlainText(texto)
-        if advertencias:
-            QMessageBox.information(
-                self, "Reservas aisladas a revisar",
-                "Alguna alternativa ofrecida ya tiene una reserva aislada asignada — el mensaje no lo "
-                "menciona, es solo para vos:\n\n" + "\n".join(advertencias),
-            )
-
-        if self.casilla_pdf_disponibilidad.isChecked():
-            directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_DISPONIBILIDAD))
-            rutas = generar_pdfs_disponibilidad_por_localidad(self.conn, directorio)
-            QMessageBox.information(
-                self, "PDF de disponibilidad",
-                f"Se generó {len(rutas)} archivo(s) en:\n{directorio}",
-            )
-
-    def _copiar_mensaje_disponibilidad(self) -> None:
-        QGuiApplication.clipboard().setText(self.texto_mensaje_disponibilidad.toPlainText())
 
     def _bloque_del_formulario(self) -> dict:
         return {

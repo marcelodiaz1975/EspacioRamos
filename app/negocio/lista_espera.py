@@ -269,9 +269,8 @@ def _clasificar_color(candidatos_por_id: dict, ids_consultorios: set[int]) -> st
 
 def _bloques_de(conn: sqlite3.Connection, pedido) -> list:
     """`pedido` puede ser una fila real de ListaEspera (los bloques se
-    buscan en ListaEsperaBloque) o un dict armado al vuelo
-    (mensajes.mensaje_disponibilidad_horarios, que no persiste el pedido y
-    trae la lista de bloques directo en la clave "Bloques")."""
+    buscan en ListaEsperaBloque) o un dict armado al vuelo sin persistir,
+    con la lista de bloques directo en la clave "Bloques"."""
     if "Bloques" in pedido.keys():
         return pedido["Bloques"]
     return obtener_repositorio(conn, "ListaEsperaBloque").listar(IdPedido=pedido["IdPedido"])
@@ -416,11 +415,10 @@ def calcular_coincidencia_fechas(
     conn: sqlite3.Connection, *, bloques: list[dict], tipo_combinacion_bloques: str = "O",
     condiciones_consultorio: dict | None = None,
 ) -> Coincidencia | None:
-    """Variante B de `calcular_coincidencia` (DC-03 Mensaje 2): cruza
-    fechas puntuales en vez de días de la semana genéricos + (anio, mes).
-    No persiste nada — igual que `mensaje_disponibilidad_horarios`, es
-    solo para armar el mensaje. Cada bloque es un dict con `fechas`
-    (lista de 'AAAA-MM-DD'), `horario_desde`, `horario_hasta`, y
+    """Variante B de `calcular_coincidencia`: cruza fechas puntuales en
+    vez de días de la semana genéricos + (anio, mes). No persiste nada,
+    es solo para armar un mensaje al vuelo. Cada bloque es un dict con
+    `fechas` (lista de 'AAAA-MM-DD'), `horario_desde`, `horario_hasta`, y
     opcionalmente `tipo_combinacion_dias` ('O' por defecto) y
     `cantidad_horas_requeridas`."""
     condiciones = condiciones_consultorio or {}
