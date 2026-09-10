@@ -62,6 +62,10 @@ QLabel#tituloPantalla {{
 }}
 QLabel#subtitulo {{ font-size: 11px; color: {'#AAAAAA' if modo_oscuro else '#555555'}; }}
 QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {COLOR_NIVEL_1}; padding: 4px 0px; }}
+QGroupBox#panelFiltrosGrilla::title {{
+    font-size: 15px; font-weight: bold; color: {COLOR_NIVEL_1};
+    subcontrol-origin: margin; padding: 4px 0px;
+}}
 
 QPushButton#botonPrimario {{
     background-color: {COLOR_NIVEL_1}; color: {COLOR_TEXTO_CLARO};
@@ -73,10 +77,10 @@ QPushButton#botonPrimario:hover:!disabled {{ background-color: #256a89; }}
 QPushButton#botonAccion {{ padding: 8px 16px; }}
 
 QPushButton#botonDestacado {{
-    background-color: {COLOR_NIVEL_2}; color: {COLOR_TEXTO_CLARO};
+    background-color: {COLOR_NIVEL_1}; color: {COLOR_TEXTO_CLARO};
     border: none; border-radius: 4px; padding: 10px 18px; font-weight: bold; font-size: 14px;
 }}
-QPushButton#botonDestacado:hover {{ background-color: #c96a2e; }}
+QPushButton#botonDestacado:hover {{ background-color: #256a89; }}
 
 QFrame#tarjetaAlerta {{
     background-color: {t['superficie']}; border: 1px solid {t['borde']}; border-radius: 4px;

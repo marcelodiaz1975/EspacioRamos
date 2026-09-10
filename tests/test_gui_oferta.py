@@ -226,6 +226,34 @@ def test_grilla_embebida_tiene_titulo_grilla_semanal(qtbot, conn, profesional_y_
     assert pantalla.grilla._panel_filtros.title() == "Grilla semanal"
 
 
+def test_foco_inicial_queda_en_profesional(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.combo_profesional.hasFocus())
+
+
+def test_lista_franjas_es_scroleable_con_muchas_franjas(qtbot, conn, profesional_y_consultorio):
+    """El campo tiene una altura fija (no crece con el formulario) y
+    hereda el scroll propio de QListWidget — si se cargan muchas
+    franjas, quedan navegables con la barra en vez de estirar la
+    pantalla."""
+    from PySide6.QtCore import Qt as _Qt
+
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    for i in range(20):
+        pantalla._checks_dia["Lunes"].setChecked(True)
+        pantalla.spin_desde.setValue(9)
+        pantalla.spin_hasta.setValue(10 + i % 10 * 0.1 + 1)
+        pantalla._agregar_franja()
+
+    assert pantalla.lista_franjas.count() == 20
+    assert pantalla.lista_franjas.maximumHeight() == 90
+    assert pantalla.lista_franjas.verticalScrollBarPolicy() != _Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+
 def test_grilla_operativa_embebida_sigue_el_tipo_de_busqueda(qtbot, conn, profesional_y_consultorio):
     pantalla = PantallaOferta(conn)
     qtbot.addWidget(pantalla)

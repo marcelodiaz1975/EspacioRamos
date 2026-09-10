@@ -423,6 +423,30 @@ def test_filtrar_por_pares_unidad_dia_evita_combinaciones_fantasma(qtbot, conn):
     assert widget.tabla.columnCount() - 2 == 4
 
 
+def test_fijar_titulo_filtros_cambia_el_titulo_del_panel(qtbot, conn):
+    """Pensado para Oferta de consultorios, donde el panel funciona como
+    referencia visual completa de la semana, no solo como filtros."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget._panel_filtros.title() == "Filtros"
+
+    widget.fijar_titulo_filtros("Grilla semanal")
+
+    assert widget._panel_filtros.title() == "Grilla semanal"
+
+
+def test_filtro_colapsable_foco_widget_es_el_boton_resumen(qtbot, conn):
+    """La lista de multiselección arranca oculta (colapsada) — un
+    widget invisible se saltea siempre en una cadena de Enter-avanza-
+    foco, así que el que tiene que recibirlo es el botón-resumen,
+    siempre visible."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget._filtro_localidad.foco_widget() is widget._filtro_localidad._boton
+
+
 def test_fijar_modo_deja_el_modo_y_bloquea_el_combo(qtbot, conn):
     _preparar(conn)
     widget = GrillaOperativaWidget(conn)

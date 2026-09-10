@@ -279,6 +279,13 @@ class _FiltroColapsable(QWidget):
     def _alternar(self) -> None:
         self._lista.setVisible(self._boton.isChecked())
 
+    def foco_widget(self) -> QWidget:
+        """El widget que recibe el foco cuando este filtro forma parte de
+        una cadena de Enter-avanza-foco: el botón-resumen, no la lista
+        (que arranca oculta y quedaría siempre salteada, al no estar
+        `isVisible()`)."""
+        return self._boton
+
     def actualizar_resumen(self) -> None:
         """Público: hay que llamarlo a mano después de repoblar la lista
         con `blockSignals(True)` (como hacen los `_cargar_*` en cascada),
@@ -495,6 +502,7 @@ class GrillaOperativaWidget(QWidget):
         layout_principal = QHBoxLayout(self)
 
         panel_filtros = QGroupBox("Filtros")
+        panel_filtros.setObjectName("panelFiltrosGrilla")
         panel_filtros.setMaximumWidth(260)
         self._panel_filtros = panel_filtros
         layout_filtros = QVBoxLayout(panel_filtros)

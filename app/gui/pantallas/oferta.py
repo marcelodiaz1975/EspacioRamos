@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.pantallas.reservas import _opciones_profesional
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
     GrillaOperativaWidget,
     _agregar_item_todos,
@@ -316,37 +317,37 @@ class PantallaOferta(QWidget):
         form.addWidget(self.combo_union_franja)
 
         fila_franja = QHBoxLayout()
-        boton_agregar_franja = QPushButton("Agregar franja a la búsqueda")
-        boton_agregar_franja.clicked.connect(self._agregar_franja)
-        boton_quitar_franja = QPushButton("Quitar franja seleccionada")
-        boton_quitar_franja.clicked.connect(self._quitar_franja_seleccionada)
-        fila_franja.addWidget(boton_agregar_franja)
-        fila_franja.addWidget(boton_quitar_franja)
+        self.boton_agregar_franja = QPushButton("Agregar franja a la búsqueda")
+        self.boton_agregar_franja.clicked.connect(self._agregar_franja)
+        self.boton_quitar_franja = QPushButton("Quitar franja seleccionada")
+        self.boton_quitar_franja.clicked.connect(self._quitar_franja_seleccionada)
+        fila_franja.addWidget(self.boton_agregar_franja)
+        fila_franja.addWidget(self.boton_quitar_franja)
         form.addLayout(fila_franja)
 
         form.addWidget(QLabel(
             "Franjas agregadas a esta búsqueda (si no agregás ninguna, se usa lo cargado arriba como franja única)"
         ))
         self.lista_franjas = QListWidget()
-        self.lista_franjas.setMaximumHeight(90)
+        self.lista_franjas.setMaximumHeight(90)  # ya viene con scroll propio si hay muchas franjas
         form.addWidget(self.lista_franjas)
 
         self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
         form.addWidget(self.casilla_detalle_reducido)
 
         fila_botones = QHBoxLayout()
-        boton_pdf = QPushButton("Generar PDF")
-        boton_pdf.setObjectName("botonAccion")
-        boton_pdf.clicked.connect(self._generar_pdf)
-        boton_texto = QPushButton("Generar texto WhatsApp")
-        boton_texto.setObjectName("botonAccion")
-        boton_texto.clicked.connect(self._generar_texto)
-        boton_nueva = QPushButton("Nueva búsqueda")
-        boton_nueva.setObjectName("botonDestacado")
-        boton_nueva.clicked.connect(self._nueva_busqueda)
-        fila_botones.addWidget(boton_pdf)
-        fila_botones.addWidget(boton_texto)
-        fila_botones.addWidget(boton_nueva)
+        self.boton_pdf = QPushButton("Generar PDF")
+        self.boton_pdf.setObjectName("botonAccion")
+        self.boton_pdf.clicked.connect(self._generar_pdf)
+        self.boton_texto = QPushButton("Generar texto WhatsApp")
+        self.boton_texto.setObjectName("botonAccion")
+        self.boton_texto.clicked.connect(self._generar_texto)
+        self.boton_nueva = QPushButton("Nueva búsqueda")
+        self.boton_nueva.setObjectName("botonDestacado")
+        self.boton_nueva.clicked.connect(self._nueva_busqueda)
+        fila_botones.addWidget(self.boton_pdf)
+        fila_botones.addWidget(self.boton_texto)
+        fila_botones.addWidget(self.boton_nueva)
         form.addLayout(fila_botones)
         form.addStretch()
         splitter.addWidget(panel_form)
@@ -359,6 +360,28 @@ class PantallaOferta(QWidget):
 
         layout.addWidget(splitter, stretch=1)
         self._al_cambiar_tipo()
+
+        self._foco = instalar_enter_avanza_foco(
+            [
+                self.combo_profesional, self.combo_tipo, self.campo_fecha_desde, self.campo_fecha_hasta,
+                self._filtro_localidad.foco_widget(), self._filtro_edificio.foco_widget(),
+                self._filtro_unidad.foco_widget(),
+                *(self._checks_dia[dia] for dia in _DIAS_BUSQUEDA),
+                self.spin_desde, self.spin_hasta, self.casilla_horas_minimas, self.spin_horas_minimas,
+                self.combo_combinacion, self.casilla_ventana, self.casilla_camilla, self.casilla_sillones,
+                self.casilla_tamano, self.combo_tamano, self.casilla_valor_maximo, self.spin_valor_maximo,
+                self.combo_union_franja, self.boton_agregar_franja, self.boton_quitar_franja,
+                self.casilla_detalle_reducido, self.boton_pdf, self.boton_texto, self.boton_nueva,
+            ],
+            parent=self,
+        )
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Mismo motivo que Reservas: `setFocus()` durante la
+        construcción no alcanza a "pegar" porque la pantalla todavía no
+        está mostrada en ese momento."""
+        super().showEvent(event)
+        self.combo_profesional.setFocus()
 
     def _cargar_profesionales(self) -> None:
         self.combo_profesional.clear()
