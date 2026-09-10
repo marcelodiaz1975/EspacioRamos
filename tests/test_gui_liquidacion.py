@@ -114,11 +114,61 @@ def test_hay_tres_botones_de_emision(qtbot, conn):
     assert "Emitir todas las liquidaciones" in textos
 
 
+def test_ningun_boton_de_emision_queda_resaltado_y_son_del_mismo_tamano(qtbot, conn):
+    from PySide6.QtWidgets import QPushButton
+
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    botones = [
+        b for b in pantalla.panel_emision.findChildren(QPushButton)
+        if b.text().startswith("Emitir ")
+    ]
+    assert len(botones) == 3
+    assert all(b.objectName() == "botonAccion" for b in botones)
+
+
+def test_orden_de_los_botones_es_pendientes_seleccionadas_todas(qtbot, conn):
+    from PySide6.QtWidgets import QPushButton
+
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    botones = [
+        b for b in pantalla.panel_emision.findChildren(QPushButton)
+        if b.text().startswith("Emitir ")
+    ]
+    assert [b.text() for b in botones] == [
+        "Emitir liquidaciones pendientes", "Emitir liquidaciones seleccionadas", "Emitir todas las liquidaciones",
+    ]
+
+
+def test_check_incluir_queda_centrado_en_la_celda(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    item = pantalla.panel_emision.tabla.item(0, 0)
+    assert item.textAlignment() == int(Qt.AlignmentFlag.AlignCenter)
+
+
+def test_tabla_se_puede_ordenar_haciendo_clic_en_los_titulos(qtbot, conn):
+    _crear_profesional(conn, apellido="Zeta", id_codigo="R9")
+    _crear_profesional(conn, apellido="Alfa", id_codigo="R1")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    tabla = pantalla.panel_emision.tabla
+
+    assert tabla.isSortingEnabled()
+    tabla.sortItems(1, Qt.SortOrder.AscendingOrder)  # clic en "Profesional"
+
+    assert tabla.item(0, 1).text() == "R1 - Alfa"
+    assert tabla.item(1, 1).text() == "R9 - Zeta"
+
+
 def test_ningun_profesional_seleccionado_por_defecto(qtbot, conn):
     _crear_profesional(conn)
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
-    assert all(not casilla.isChecked() for casilla in pantalla.panel_emision._casillas)
+    tabla = pantalla.panel_emision.tabla
+    assert all(tabla.item(fila, 0).checkState() == Qt.CheckState.Unchecked for fila in range(tabla.rowCount()))
 
 
 def test_orden_no_enviadas_arriba_y_luego_por_codigo(qtbot, conn, tmp_path):
@@ -225,7 +275,7 @@ def test_emitir_seleccionadas_persiste_liquidacion_y_genera_pdf(qtbot, conn, tmp
     conn.commit()
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
-    pantalla.panel_emision._casillas[0].setChecked(True)
+    pantalla.panel_emision.tabla.item(0, 0).setCheckState(Qt.CheckState.Checked)
 
     pantalla.panel_emision._emitir_seleccionadas()
 

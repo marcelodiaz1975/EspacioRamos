@@ -14,8 +14,8 @@ from __future__ import annotations
 import os
 import sqlite3
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -85,7 +85,6 @@ class _PanelEmisionArchivos(QWidget):
         super().__init__(parent)
         self.conn = conn
         self._filas: list[dict] = []
-        self._casillas: list[QCheckBox] = []
         self._armar_ui()
         self.actualizar()
 
@@ -134,14 +133,16 @@ class _PanelEmisionArchivos(QWidget):
         linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
         layout_filtros.addWidget(linea_separadora)
 
-        boton_emitir_seleccionadas = QPushButton("Emitir liquidaciones seleccionadas")
-        boton_emitir_seleccionadas.setObjectName("botonPrimario")
-        boton_emitir_seleccionadas.clicked.connect(self._emitir_seleccionadas)
-        layout_filtros.addWidget(boton_emitir_seleccionadas)
         boton_emitir_pendientes = QPushButton("Emitir liquidaciones pendientes")
+        boton_emitir_pendientes.setObjectName("botonAccion")
         boton_emitir_pendientes.clicked.connect(self._emitir_pendientes)
         layout_filtros.addWidget(boton_emitir_pendientes)
+        boton_emitir_seleccionadas = QPushButton("Emitir liquidaciones seleccionadas")
+        boton_emitir_seleccionadas.setObjectName("botonAccion")
+        boton_emitir_seleccionadas.clicked.connect(self._emitir_seleccionadas)
+        layout_filtros.addWidget(boton_emitir_seleccionadas)
         boton_emitir_todas = QPushButton("Emitir todas las liquidaciones")
+        boton_emitir_todas.setObjectName("botonAccion")
         boton_emitir_todas.clicked.connect(self._emitir_todas)
         layout_filtros.addWidget(boton_emitir_todas)
 
@@ -155,6 +156,11 @@ class _PanelEmisionArchivos(QWidget):
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        # Por defecto queda en el orden de siempre (no enviadas primero,
+        # luego por código); un clic en un título la ordena por esa
+        # columna hasta el próximo refresco, que la vuelve a dejar así
+        # (mismo criterio que Centro de mensajería).
+        self.tabla.setSortingEnabled(True)
         layout_externo.addWidget(self.tabla, stretch=1)
 
         self.campo_periodo.setText(periodo_actual(self.conn))
@@ -203,15 +209,15 @@ class _PanelEmisionArchivos(QWidget):
         filas.sort(key=lambda f: f["estado"] == "Enviada")  # estable: no enviadas arriba
         self._filas = filas
 
-        self._casillas = []
+        # Se apaga mientras se repuebla la tabla: si no, un clic previo en
+        # un título la reordenaría fila por fila a medida que se cargan
+        # las filas nuevas, mezclando el índice de `filas` con la tabla —
+        # se reactiva al final, ya en el orden fijo de siempre.
+        self.tabla.setSortingEnabled(False)
         self.tabla.setRowCount(len(filas))
         for fila_idx, f in enumerate(filas):
             profesional = f["profesional"]
-            casilla = QCheckBox()
-            casilla.setChecked(False)
-            self.tabla.setCellWidget(fila_idx, 0, casilla)
-            self._casillas.append(casilla)
-
+            self.tabla.setItem(fila_idx, 0, self._item_incluir(profesional["IdProfesional"]))
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(_texto_profesional(profesional)))
             self.tabla.setItem(fila_idx, 2, item_numero(_fmt_horas(f["horas_semanales"])))
             self.tabla.setItem(fila_idx, 3, item_monto(profesional["SaldoCuentaAnterior"]))
@@ -220,7 +226,24 @@ class _PanelEmisionArchivos(QWidget):
             else:
                 self.tabla.setItem(fila_idx, 4, item_monto(f["monto_generado"]))
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(f["estado"]))
+        self.tabla.setSortingEnabled(True)
         self.tabla.resizeColumnsToContents()
+
+    @staticmethod
+    def _item_incluir(id_profesional: int) -> QTableWidgetItem:
+        """Checkbox nativo del ítem (en vez de un QCheckBox como
+        cellWidget): así queda centrado en la celda y, con los títulos
+        ordenables, viaja con su fila al reordenar — un cellWidget no lo
+        hace, se queda pegado a la posición visual. Guarda el
+        IdProfesional para poder identificar la fila al leer la
+        selección, igual criterio que el check "Enviada" de Centro de
+        mensajería."""
+        item = QTableWidgetItem()
+        item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        item.setCheckState(Qt.CheckState.Unchecked)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setData(Qt.ItemDataRole.UserRole, id_profesional)
+        return item
 
     def _emitir(self, seleccionados: list[sqlite3.Row], mensaje_confirmacion: str) -> None:
         periodo = self._periodo()
@@ -265,7 +288,12 @@ class _PanelEmisionArchivos(QWidget):
         — si alguna ya estaba emitida (o enviada), se reemite: queda una
         liquidación nueva y pasa a "Regenerada no enviada" (o "No
         enviada" si nunca se había enviado)."""
-        seleccionados = [f["profesional"] for f, casilla in zip(self._filas, self._casillas) if casilla.isChecked()]
+        ids_incluidos = {
+            self.tabla.item(fila, 0).data(Qt.ItemDataRole.UserRole)
+            for fila in range(self.tabla.rowCount())
+            if self.tabla.item(fila, 0).checkState() == Qt.CheckState.Checked
+        }
+        seleccionados = [f["profesional"] for f in self._filas if f["profesional"]["IdProfesional"] in ids_incluidos]
         self._emitir(
             seleccionados,
             f"¿Confirmás emitir la liquidación de {self._periodo()} para {len(seleccionados)} "

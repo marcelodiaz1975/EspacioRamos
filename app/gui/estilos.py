@@ -69,6 +69,8 @@ QPushButton#botonPrimario {{
 QPushButton#botonPrimario:disabled {{ background-color: #A0AEC0; }}
 QPushButton#botonPrimario:hover:!disabled {{ background-color: #256a89; }}
 
+QPushButton#botonAccion {{ padding: 8px 16px; }}
+
 QFrame#tarjetaAlerta {{
     background-color: {t['superficie']}; border: 1px solid {t['borde']}; border-radius: 4px;
 }}
