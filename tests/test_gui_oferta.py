@@ -1,5 +1,3 @@
-import json
-
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QMessageBox
@@ -57,14 +55,110 @@ def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn, profesio
     assert pantalla.combo_profesional.itemText(0) == "Lic. Virginia Lo Veci"
 
 
-def test_sin_dias_no_genera_ni_guarda_historial(qtbot, conn, profesional_y_consultorio):
+def test_fechas_se_muestran_en_formato_dd_mm_aaaa(qtbot, conn, profesional_y_consultorio):
     pantalla = PantallaOferta(conn)
     qtbot.addWidget(pantalla)
+    assert pantalla.campo_fecha_desde.displayFormat() == "dd-MM-yyyy"
+    assert pantalla.campo_fecha_hasta.displayFormat() == "dd-MM-yyyy"
+
+
+def test_fecha_hasta_solo_habilitada_para_aislada(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    assert not pantalla.campo_fecha_hasta.isEnabled()  # Regular es el tipo por defecto
+
+    indice_aislada = pantalla.combo_tipo.findData("Aislada")
+    pantalla.combo_tipo.setCurrentIndex(indice_aislada)
+    assert pantalla.campo_fecha_hasta.isEnabled()
+
+
+def test_tamano_arranca_deshabilitado_y_se_habilita_con_el_check(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    assert not pantalla.combo_tamano.isEnabled()
+    assert pantalla.combo_tamano.currentText() == "Cualquier tamaño"
+
+    pantalla.casilla_tamano.setChecked(True)
+    assert pantalla.combo_tamano.isEnabled()
+
+    indice_grande = pantalla.combo_tamano.findData("Grande")
+    pantalla.combo_tamano.setCurrentIndex(indice_grande)
+    busqueda = pantalla._armar_busqueda_actual()
+    assert busqueda is None  # sin días marcados
+
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)
+    busqueda = pantalla._armar_busqueda_actual()
+    assert busqueda.tamano == "Grande"
+
+
+def test_tamano_desmarcado_no_filtra_por_tamano(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)
+    busqueda = pantalla._armar_busqueda_actual()
+    assert busqueda.tamano is None
+
+
+def test_hay_tres_botones_y_no_esta_resaltado_ni_pdf_ni_texto(qtbot, conn, profesional_y_consultorio):
+    from PySide6.QtWidgets import QPushButton
+
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    botones = {b.text(): b for b in pantalla.findChildren(QPushButton) if b.text() in (
+        "Generar PDF", "Generar texto WhatsApp", "Nueva búsqueda",
+    )}
+    assert set(botones) == {"Generar PDF", "Generar texto WhatsApp", "Nueva búsqueda"}
+    assert botones["Generar PDF"].objectName() == "botonAccion"
+    assert botones["Generar texto WhatsApp"].objectName() == "botonAccion"
+    assert botones["Nueva búsqueda"].objectName() == "botonPrimario"
+
+
+def test_nueva_busqueda_resetea_el_formulario_y_enfoca_profesional(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)
+    pantalla.casilla_ventana.setChecked(True)
+    pantalla.casilla_tamano.setChecked(True)
+    pantalla._agregar_franja()  # deja además una franja cargada
+
+    pantalla._nueva_busqueda()
+
+    assert pantalla._dias_seleccionados() == []
+    assert not pantalla.casilla_ventana.isChecked()
+    assert not pantalla.casilla_tamano.isChecked()
+    assert pantalla._franjas == []
+    assert pantalla.lista_franjas.count() == 0
+    qtbot.waitUntil(lambda: pantalla.combo_profesional.hasFocus())
+
+
+def test_grilla_operativa_embebida_sigue_el_tipo_de_busqueda(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.grilla.combo_modo.currentData() == "regular"
+    assert not pantalla.grilla.combo_modo.isEnabled()
+
+    indice_aislada = pantalla.combo_tipo.findData("Aislada")
+    pantalla.combo_tipo.setCurrentIndex(indice_aislada)
+    assert pantalla.grilla.combo_modo.currentData() == "aislada"
+
+
+def test_generar_pdf_guarda_en_archivos_varios_oferta(qtbot, conn, tmp_path, profesional_y_consultorio):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+
     pantalla._generar_pdf()
-    assert obtener_repositorio(conn, "HistorialOferta").listar() == []
+
+    generados = list((tmp_path / "Archivos varios" / "Oferta").iterdir())
+    assert len(generados) == 1
+    assert generados[0].name.startswith("Oferta de consultorios - Lic. Virginia Lo Veci")
 
 
-def test_generar_texto_guarda_historial_y_muestra_dialogo(qtbot, conn, tmp_path, monkeypatch, profesional_y_consultorio):
+def test_generar_texto_muestra_dialogo_con_el_texto(qtbot, conn, tmp_path, monkeypatch, profesional_y_consultorio):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
     pantalla = PantallaOferta(conn)
@@ -81,23 +175,16 @@ def test_generar_texto_guarda_historial_y_muestra_dialogo(qtbot, conn, tmp_path,
 
     pantalla._generar_texto()
 
-    assert obtener_repositorio(conn, "HistorialOferta").listar() != []
     assert "Búsqueda requerida por el profesional" in capturado["texto"]
-    assert pantalla.tabla_historial.rowCount() == 1
 
 
-def test_generar_pdf_guarda_en_archivos_varios_oferta(qtbot, conn, tmp_path, profesional_y_consultorio):
+def test_sin_dias_no_genera_archivo(qtbot, conn, tmp_path, profesional_y_consultorio):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
     pantalla = PantallaOferta(conn)
     qtbot.addWidget(pantalla)
-    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
-
     pantalla._generar_pdf()
-
-    generados = list((tmp_path / "Archivos varios" / "Oferta").iterdir())
-    assert len(generados) == 1
-    assert generados[0].name.startswith("Oferta de consultorios - Lic. Virginia Lo Veci")
+    assert not (tmp_path / "Archivos varios" / "Oferta").exists()
 
 
 def test_agregar_franja_la_suma_a_la_lista_y_limpia_dias(qtbot, conn, profesional_y_consultorio):
@@ -133,7 +220,7 @@ def test_quitar_franja_seleccionada(qtbot, conn, profesional_y_consultorio):
     assert pantalla.lista_franjas.count() == 0
 
 
-def test_generar_con_dos_franjas_guarda_ambas_en_el_historial(qtbot, conn, tmp_path, profesional_y_consultorio):
+def test_generar_con_dos_franjas_genera_un_solo_documento(qtbot, conn, tmp_path, profesional_y_consultorio):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
     pantalla = PantallaOferta(conn)
@@ -149,17 +236,16 @@ def test_generar_con_dos_franjas_guarda_ambas_en_el_historial(qtbot, conn, tmp_p
 
     pantalla._generar_pdf()
 
-    fila = obtener_repositorio(conn, "HistorialOferta").listar()[0]
-    criterios = json.loads(fila["CriteriosJSON"])
-    assert len(criterios["busquedas"]) == 2
-    assert criterios["busquedas"][0]["dias"] == ["Lunes"]
-    assert criterios["busquedas"][1]["dias"] == ["Viernes"]
+    generados = list((tmp_path / "Archivos varios" / "Oferta").iterdir())
+    assert len(generados) == 1
     # se limpia la lista de franjas para la próxima búsqueda
     assert pantalla._franjas == []
     assert pantalla.lista_franjas.count() == 0
 
 
-def test_cancelar_previsualizacion_no_genera_ni_guarda_historial(qtbot, conn, monkeypatch, profesional_y_consultorio):
+def test_cancelar_previsualizacion_no_genera_archivo(qtbot, conn, tmp_path, monkeypatch, profesional_y_consultorio):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
     monkeypatch.setattr(_DialogoPrevisualizacion, "exec", lambda self: QDialog.DialogCode.Rejected)
     pantalla = PantallaOferta(conn)
     qtbot.addWidget(pantalla)
@@ -167,7 +253,7 @@ def test_cancelar_previsualizacion_no_genera_ni_guarda_historial(qtbot, conn, mo
 
     pantalla._generar_pdf()
 
-    assert obtener_repositorio(conn, "HistorialOferta").listar() == []
+    assert not (tmp_path / "Archivos varios" / "Oferta").exists()
 
 
 def test_previsualizacion_muestra_una_fila_por_opcion(qtbot, conn, monkeypatch, profesional_y_consultorio):
@@ -188,7 +274,7 @@ def test_previsualizacion_muestra_una_fila_por_opcion(qtbot, conn, monkeypatch, 
     assert "consultorio 1" in capturado["filas"][0][3]
 
 
-def test_destildar_una_opcion_en_la_previsualizacion_la_excluye_del_historial(
+def test_destildar_una_opcion_en_la_previsualizacion_la_excluye_del_documento(
     qtbot, conn, tmp_path, monkeypatch, profesional_y_consultorio,
 ):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
@@ -205,11 +291,17 @@ def test_destildar_una_opcion_en_la_previsualizacion_la_excluye_del_historial(
     qtbot.addWidget(pantalla)
     pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
 
-    pantalla._generar_pdf()
+    capturado = {}
 
-    fila = obtener_repositorio(conn, "HistorialOferta").listar()[0]
-    criterios = json.loads(fila["CriteriosJSON"])
-    assert criterios["excluir"] == [[0, 0, 0]]
+    def _dialogo_falso(texto, parent=None):
+        capturado["texto"] = texto
+        return _FalsoDialogo()
+
+    monkeypatch.setattr("app.gui.pantallas.oferta._DialogoTexto", _dialogo_falso)
+
+    pantalla._generar_texto()
+
+    assert "Sin disponibilidad para esta búsqueda" in capturado["texto"]
 
 
 def test_sin_alternativas_la_previsualizacion_permite_generar_igual(qtbot, conn, tmp_path, profesional_y_consultorio):
@@ -222,7 +314,8 @@ def test_sin_alternativas_la_previsualizacion_permite_generar_igual(qtbot, conn,
 
     pantalla._generar_pdf()
 
-    assert obtener_repositorio(conn, "HistorialOferta").listar() != []
+    generados = list((tmp_path / "Archivos varios" / "Oferta").iterdir())
+    assert len(generados) == 1
 
 
 def test_paquete_y_con_franja_sin_cobertura_no_muestra_nada_en_la_previsualizacion(

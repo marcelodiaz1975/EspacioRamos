@@ -239,21 +239,6 @@ def test_avanzar_mes_regenera_archivos_varios_y_limpia_liquidaciones_antiguas(co
     assert any((tmp_path / "Archivos varios" / "Placas").iterdir())
 
 
-def test_avanzar_mes_vacia_historial_de_oferta(conn):
-    from app.negocio.oferta_busqueda import Busqueda, CriteriosGlobales
-    from app.negocio.historial_oferta import guardar_busqueda
-
-    id_prof = _crear_profesional(conn)
-    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[])
-    busqueda = Busqueda(fecha_desde="2026-09-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11)
-    guardar_busqueda(conn, id_prof, globales, [busqueda], set(), "2026-08-01")
-
-    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
-
-    assert resumen.historial_oferta_eliminado == 1
-    assert obtener_repositorio(conn, "HistorialOferta").listar() == []
-
-
 def test_avanzar_mes_sin_carpeta_backup_no_falla(conn):
     resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
     assert resumen.backup_generado is False

@@ -52,7 +52,6 @@ from app.negocio.archivos_generados import (
 from app.negocio.backup import generar_backup
 from app.negocio.dias import fecha_actual, parsear_periodo, sumar_meses, ultimo_dia_mes
 from app.negocio.estadisticas import generar_snapshot
-from app.negocio.historial_oferta import vaciar_historial
 from app.negocio.lista_espera import eliminar_pedido
 from app.repositorio.registro import obtener_repositorio
 
@@ -72,7 +71,6 @@ class ResumenAvanceMes:
     archivos_varios_regenerados: bool = False
     liquidaciones_antiguas_eliminadas: int = 0
     ofertas_eliminadas: int = 0
-    historial_oferta_eliminado: int = 0
 
 
 def _traspasar_saldos(conn: sqlite3.Connection) -> int:
@@ -256,5 +254,4 @@ def avanzar_mes(
     resumen.liquidaciones_antiguas_eliminadas = _limpiar_liquidaciones_antiguas_todos(conn, fecha_actual(conn))
     if carpeta_base(conn) is not None:
         resumen.ofertas_eliminadas = vaciar_carpeta(carpeta_archivos_varios(conn, SUBCARPETA_OFERTA))
-    resumen.historial_oferta_eliminado = vaciar_historial(conn)
     return resumen

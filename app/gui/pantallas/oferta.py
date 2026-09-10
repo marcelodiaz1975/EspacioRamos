@@ -1,10 +1,9 @@
 """Oferta de consultorios (Etapa 9, motor ad-hoc `app.negocio.oferta_busqueda`):
 arma una búsqueda para un profesional puntual y genera el PDF o el texto de
-WhatsApp con las alternativas encontradas. Cada búsqueda generada queda en
-el historial (`app.negocio.historial_oferta`) con sus criterios completos,
-así se puede volver a generar más adelante sin tener que cargarla de
-nuevo — la regeneración vuelve a resolver contra la disponibilidad vigente
-en ese momento, no repite el resultado congelado del día que se armó.
+WhatsApp con las alternativas encontradas, siempre resuelta contra la
+disponibilidad vigente en el momento — no se guarda ningún historial de
+búsquedas (decisión de la clienta: "búsqueda realizada es búsqueda
+terminada", si hace falta se vuelve a generar en el momento).
 
 Un documento puede tener varias franjas (una por cada característica de
 búsqueda distinta, p. ej. "lunes y miércoles de mañana" + "viernes de
@@ -20,39 +19,45 @@ Antes de generar, se muestra una previsualización
 (`_DialogoPrevisualizacion`) con todas las alternativas encontradas y un
 casillero por opción para destildar puntualmente las que no se quieran
 ofrecer (p. ej. porque se prefiere guardar ese consultorio libre para
-otro profesional) sin descartar el resto de la búsqueda."""
+otro profesional) sin descartar el resto de la búsqueda.
+
+En el lugar donde antes vivía el historial va la grilla operativa
+(`GrillaOperativaWidget`) como referencia visual mientras se arma la
+búsqueda, con sus propios filtros — el modo (regular/aislada) queda
+fijado según el "Tipo de búsqueda" elegido, igual criterio que las
+solapas de Reservas. El formulario no se resetea solo: lo cargado queda
+tal cual si se sale de la pantalla y se vuelve a entrar (el widget sigue
+vivo en memoria), y "Nueva búsqueda" es la única forma de limpiarlo a
+propósito."""
 from __future__ import annotations
 
-import json
 import sqlite3
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDateEdit,
     QDialog,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from app.gui.pantallas.reservas import _opciones_profesional
+from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import SUBCARPETA_OFERTA, carpeta_archivos_varios
-from app.negocio.dias import DIAS_SEMANA, fecha_actual
-from app.negocio.historial_oferta import guardar_busqueda, regenerar_pdf, regenerar_texto
+from app.negocio.dias import DIAS_SEMANA
 from app.negocio.oferta_busqueda import (
     COMBINAR_MISMA_UNIDAD,
     COMBINAR_MISMO_EDIFICIO,
@@ -64,9 +69,16 @@ from app.negocio.oferta_busqueda import (
     fecha_fin_default,
     fecha_inicio_default,
 )
-from app.negocio.mensajes import nombre_para_mensaje
 from app.negocio.oferta_busqueda_texto import previsualizar_documento, resumen_busqueda
-from app.repositorio.registro import obtener_repositorio
+from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
+from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
+
+_TAMANOS = [
+    ("Cualquier tamaño", None),
+    ("Grande", "Grande"),
+    ("Intermedio", "Intermedio"),
+    ("Chico", "Chico"),
+]
 
 _COMBINACIONES = [
     ("Sin combinación de consultorios", SIN_COMBINAR),
@@ -148,12 +160,10 @@ class PantallaOferta(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
-        self._historial: list[sqlite3.Row] = []
         self._franjas: list[Busqueda] = []
         self._armar_ui()
         self._cargar_profesionales()
         self._cargar_edificios()
-        self.actualizar()
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -180,9 +190,13 @@ class PantallaOferta(QWidget):
         form.addWidget(self.combo_tipo)
 
         fila_fechas = QHBoxLayout()
-        self.campo_fecha_desde = QLineEdit()
-        self.campo_fecha_hasta = QLineEdit()
-        fila_fechas.addWidget(QLabel("Desde (AAAA-MM-DD)"))
+        self.campo_fecha_desde = QDateEdit()
+        self.campo_fecha_desde.setCalendarPopup(True)
+        self.campo_fecha_desde.setDisplayFormat("dd-MM-yyyy")
+        self.campo_fecha_hasta = QDateEdit()
+        self.campo_fecha_hasta.setCalendarPopup(True)
+        self.campo_fecha_hasta.setDisplayFormat("dd-MM-yyyy")
+        fila_fechas.addWidget(QLabel("Desde"))
         fila_fechas.addWidget(self.campo_fecha_desde)
         fila_fechas.addWidget(QLabel("Hasta (solo Aislada)"))
         fila_fechas.addWidget(self.campo_fecha_hasta)
@@ -240,9 +254,17 @@ class PantallaOferta(QWidget):
         self.casilla_sillones = QCheckBox("Con sillones")
         for casilla in (self.casilla_ventana, self.casilla_camilla, self.casilla_sillones):
             form.addWidget(casilla)
-        self.campo_tamano = QLineEdit()
-        self.campo_tamano.setPlaceholderText("Tamaño (opcional)")
-        form.addWidget(self.campo_tamano)
+
+        fila_tamano = QHBoxLayout()
+        self.casilla_tamano = QCheckBox("Tamaño")
+        self.combo_tamano = QComboBox()
+        for etiqueta, valor in _TAMANOS:
+            self.combo_tamano.addItem(etiqueta, valor)
+        self.combo_tamano.setEnabled(False)
+        self.casilla_tamano.toggled.connect(self.combo_tamano.setEnabled)
+        fila_tamano.addWidget(self.casilla_tamano)
+        fila_tamano.addWidget(self.combo_tamano)
+        form.addLayout(fila_tamano)
 
         fila_valor_maximo = QHBoxLayout()
         self.casilla_valor_maximo = QCheckBox("Valor máximo por hora regular")
@@ -253,9 +275,6 @@ class PantallaOferta(QWidget):
         fila_valor_maximo.addWidget(self.casilla_valor_maximo)
         fila_valor_maximo.addWidget(self.spin_valor_maximo)
         form.addLayout(fila_valor_maximo)
-
-        self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
-        form.addWidget(self.casilla_detalle_reducido)
 
         self.combo_union_franja = QComboBox()
         for etiqueta, valor in _UNION_FRANJAS:
@@ -279,39 +298,29 @@ class PantallaOferta(QWidget):
         self.lista_franjas.setMaximumHeight(90)
         form.addWidget(self.lista_franjas)
 
+        self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
+        form.addWidget(self.casilla_detalle_reducido)
+
         fila_botones = QHBoxLayout()
         boton_pdf = QPushButton("Generar PDF")
-        boton_pdf.setObjectName("botonPrimario")
+        boton_pdf.setObjectName("botonAccion")
         boton_pdf.clicked.connect(self._generar_pdf)
         boton_texto = QPushButton("Generar texto WhatsApp")
+        boton_texto.setObjectName("botonAccion")
         boton_texto.clicked.connect(self._generar_texto)
+        boton_nueva = QPushButton("Nueva búsqueda")
+        boton_nueva.setObjectName("botonPrimario")
+        boton_nueva.clicked.connect(self._nueva_busqueda)
         fila_botones.addWidget(boton_pdf)
         fila_botones.addWidget(boton_texto)
+        fila_botones.addWidget(boton_nueva)
         form.addLayout(fila_botones)
         form.addStretch()
         splitter.addWidget(panel_form)
 
-        panel_historial = QWidget()
-        layout_historial = QVBoxLayout(panel_historial)
-        layout_historial.addWidget(QLabel("Historial de búsquedas"))
-        self.tabla_historial = QTableWidget()
-        self.tabla_historial.setColumnCount(3)
-        self.tabla_historial.setHorizontalHeaderLabels(["Fecha", "Profesional", "Tipo"])
-        self.tabla_historial.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.tabla_historial.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.tabla_historial.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        layout_historial.addWidget(self.tabla_historial, stretch=1)
-
-        fila_regenerar = QHBoxLayout()
-        boton_regenerar_pdf = QPushButton("Regenerar PDF")
-        boton_regenerar_pdf.clicked.connect(self._regenerar_pdf_seleccionado)
-        boton_regenerar_texto = QPushButton("Regenerar texto WhatsApp")
-        boton_regenerar_texto.clicked.connect(self._regenerar_texto_seleccionado)
-        fila_regenerar.addWidget(boton_regenerar_pdf)
-        fila_regenerar.addWidget(boton_regenerar_texto)
-        fila_regenerar.addStretch()
-        layout_historial.addLayout(fila_regenerar)
-        splitter.addWidget(panel_historial)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        self.grilla.mostrar_leyenda_colores()
+        splitter.addWidget(self.grilla)
         splitter.setStretchFactor(1, 1)
 
         layout.addWidget(splitter, stretch=1)
@@ -333,9 +342,13 @@ class PantallaOferta(QWidget):
 
     def _al_cambiar_tipo(self) -> None:
         tipo = self.combo_tipo.currentData()
-        self.campo_fecha_desde.setText(fecha_inicio_default(self.conn, tipo))
-        self.campo_fecha_hasta.setText(fecha_fin_default(tipo, self.campo_fecha_desde.text()) or "")
+        desde_iso = fecha_inicio_default(self.conn, tipo)
+        self.campo_fecha_desde.setDate(QDate.fromString(desde_iso, Qt.DateFormat.ISODate))
+        hasta_iso = fecha_fin_default(tipo, desde_iso)
+        if hasta_iso:
+            self.campo_fecha_hasta.setDate(QDate.fromString(hasta_iso, Qt.DateFormat.ISODate))
         self.campo_fecha_hasta.setEnabled(tipo == TIPO_AISLADA)
+        self.grilla.fijar_modo("regular" if tipo == TIPO_REGULAR else "aislada")
 
     def _dias_seleccionados(self) -> list[str]:
         return [
@@ -359,9 +372,10 @@ class PantallaOferta(QWidget):
             QMessageBox.warning(self, "Oferta de consultorios", "Elegí al menos un día.")
             return None
         tipo = self.combo_tipo.currentData()
+        fecha_hasta = self.campo_fecha_hasta.date().toString(Qt.DateFormat.ISODate)
         return Busqueda(
-            fecha_desde=self.campo_fecha_desde.text().strip(),
-            fecha_hasta=(self.campo_fecha_hasta.text().strip() or None) if tipo == TIPO_AISLADA else None,
+            fecha_desde=self.campo_fecha_desde.date().toString(Qt.DateFormat.ISODate),
+            fecha_hasta=fecha_hasta if tipo == TIPO_AISLADA else None,
             dias=dias,
             hora_desde=self.spin_desde.value(),
             hora_hasta=self.spin_hasta.value(),
@@ -369,7 +383,7 @@ class PantallaOferta(QWidget):
             apto_camilla=self.casilla_camilla.isChecked(),
             ventana=self.casilla_ventana.isChecked(),
             sillones=self.casilla_sillones.isChecked(),
-            tamano=self.campo_tamano.text().strip() or None,
+            tamano=self.combo_tamano.currentData() if self.casilla_tamano.isChecked() else None,
             valor_maximo_hora=self.spin_valor_maximo.value() if self.casilla_valor_maximo.isChecked() else None,
             cantidad_horas_minimas=self.spin_horas_minimas.value() if self.casilla_horas_minimas.isChecked() else None,
         )
@@ -419,7 +433,7 @@ class PantallaOferta(QWidget):
         self._franjas = []
         self.lista_franjas.clear()
 
-    def _guardar_y_generar(self, generador) -> None:
+    def _generar_y_mostrar(self, generador) -> None:
         armado = self._armar_criterios()
         if armado is None:
             return
@@ -437,69 +451,49 @@ class PantallaOferta(QWidget):
         excluir = dialogo.excluidas()
 
         try:
-            id_historial = guardar_busqueda(
-                self.conn, id_profesional, globales, busquedas, excluir, fecha_actual(self.conn).isoformat(),
-            )
-            generador(id_historial)
+            generador(id_profesional, globales, busquedas, excluir)
         except ValueError as error:
             QMessageBox.warning(self, "Oferta de consultorios", str(error))
             return
         self._limpiar_franjas()
-        self.actualizar()
 
     def _generar_pdf(self) -> None:
-        def hacer(id_historial: int) -> None:
+        def hacer(id_profesional, globales, busquedas, excluir) -> None:
             directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_OFERTA))
-            ruta = regenerar_pdf(self.conn, id_historial, directorio)
+            ruta = generar_pdf_oferta_busqueda(self.conn, directorio, id_profesional, globales, busquedas, excluir)
             QMessageBox.information(self, "Oferta de consultorios", f"Se generó:\n{ruta}")
-        self._guardar_y_generar(hacer)
+        self._generar_y_mostrar(hacer)
 
     def _generar_texto(self) -> None:
-        def hacer(id_historial: int) -> None:
-            texto = regenerar_texto(self.conn, id_historial)
+        def hacer(id_profesional, globales, busquedas, excluir) -> None:
+            texto = generar_texto_oferta_busqueda(self.conn, id_profesional, globales, busquedas, excluir)
             _DialogoTexto(texto, self).exec()
-        self._guardar_y_generar(hacer)
+        self._generar_y_mostrar(hacer)
 
-    def actualizar(self) -> None:
-        self._historial = obtener_repositorio(self.conn, "HistorialOferta").listar()
-        self._historial.sort(key=lambda h: h["IdHistorialOferta"], reverse=True)
-        repo_profesional = obtener_repositorio(self.conn, "Profesional")
-        self.tabla_historial.setRowCount(len(self._historial))
-        for fila_idx, h in enumerate(self._historial):
-            profesional = repo_profesional.obtener(h["IdProfesional"])
-            nombre = nombre_para_mensaje(profesional) if profesional else "?"
-            self.tabla_historial.setItem(fila_idx, 0, QTableWidgetItem(h["FechaGeneracion"] or ""))
-            self.tabla_historial.setItem(fila_idx, 1, QTableWidgetItem(nombre))
-            tipo = json.loads(h["CriteriosJSON"])["globales"]["tipo_busqueda"]
-            self.tabla_historial.setItem(fila_idx, 2, QTableWidgetItem(tipo))
-        self.tabla_historial.resizeColumnsToContents()
-
-    def _historial_seleccionado(self) -> sqlite3.Row | None:
-        filas = self.tabla_historial.selectionModel().selectedRows()
-        if not filas:
-            QMessageBox.information(self, "Oferta de consultorios", "Seleccioná una búsqueda del historial.")
-            return None
-        return self._historial[filas[0].row()]
-
-    def _regenerar_pdf_seleccionado(self) -> None:
-        h = self._historial_seleccionado()
-        if h is None:
-            return
-        try:
-            directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_OFERTA))
-            ruta = regenerar_pdf(self.conn, h["IdHistorialOferta"], directorio)
-        except ValueError as error:
-            QMessageBox.warning(self, "Oferta de consultorios", str(error))
-            return
-        QMessageBox.information(self, "Oferta de consultorios", f"Se regeneró:\n{ruta}")
-
-    def _regenerar_texto_seleccionado(self) -> None:
-        h = self._historial_seleccionado()
-        if h is None:
-            return
-        try:
-            texto = regenerar_texto(self.conn, h["IdHistorialOferta"])
-        except ValueError as error:
-            QMessageBox.warning(self, "Oferta de consultorios", str(error))
-            return
-        _DialogoTexto(texto, self).exec()
+    def _nueva_busqueda(self) -> None:
+        """Único punto que limpia el formulario a propósito — entrar y
+        salir de la pantalla NO lo resetea (confirmado por la clienta:
+        la última búsqueda queda cargada tal cual se la dejó)."""
+        self.combo_profesional.setCurrentIndex(0)
+        self.combo_tipo.setCurrentIndex(0)
+        self._al_cambiar_tipo()
+        for i in range(self.lista_edificios.count()):
+            self.lista_edificios.item(i).setCheckState(Qt.CheckState.Unchecked)
+        for i in range(self.lista_dias.count()):
+            self.lista_dias.item(i).setCheckState(Qt.CheckState.Unchecked)
+        self.spin_desde.setValue(9)
+        self.spin_hasta.setValue(12)
+        self.casilla_horas_minimas.setChecked(False)
+        self.spin_horas_minimas.setValue(1)
+        self.combo_combinacion.setCurrentIndex(2)
+        self.casilla_ventana.setChecked(False)
+        self.casilla_camilla.setChecked(False)
+        self.casilla_sillones.setChecked(False)
+        self.casilla_tamano.setChecked(False)
+        self.combo_tamano.setCurrentIndex(0)
+        self.casilla_valor_maximo.setChecked(False)
+        self.spin_valor_maximo.setValue(0)
+        self.casilla_detalle_reducido.setChecked(False)
+        self.combo_union_franja.setCurrentIndex(0)
+        self._limpiar_franjas()
+        self.combo_profesional.setFocus()

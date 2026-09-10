@@ -10,8 +10,9 @@ formato de WhatsApp en `app.negocio.oferta_busqueda_whatsapp`).
 Nombre de archivo "Oferta de consultorios - {Tratamiento} {Nombre}
 {Apellido}.pdf" (o "- {NombreEspacio}.pdf" si es categoría C, ver
 `app.negocio.oferta_busqueda_texto.nombre_archivo_oferta`): al ser el
-mismo profesional siempre sobrescribe el anterior, el historial de
-búsquedas hechas se guarda aparte (`HistorialOferta`), no como archivos.
+mismo profesional siempre sobrescribe el anterior. No se guarda ningún
+historial de búsquedas — decisión de la clienta: cada búsqueda se
+resuelve al momento y, si hace falta, se vuelve a generar de cero.
 
 Anonimización: depende de la categoría del profesional al que va dirigida
 la búsqueda — R/A/E/X/B muestran el departamento real (piso y letra), C
