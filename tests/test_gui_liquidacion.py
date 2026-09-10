@@ -396,7 +396,7 @@ def test_solapa_estado_cuenta_tiene_columna_de_fecha_y_hora_de_generacion(qtbot,
     assert "/" in texto
 
 
-def test_solapa_estado_cuenta_muestra_solo_saldo_actual_en_el_resumen(qtbot, conn):
+def test_solapa_estado_cuenta_muestra_solo_saldo_actual_en_un_cuadro_de_solo_lectura(qtbot, conn):
     id_prof = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
     obtener_repositorio(conn, "Profesional").actualizar(
         id_prof, SaldoCuentaActual=1500, SaldoCuentaAnterior=-300,
@@ -407,24 +407,21 @@ def test_solapa_estado_cuenta_muestra_solo_saldo_actual_en_el_resumen(qtbot, con
     indice = panel.combo_profesional.findData(id_prof)
     panel.combo_profesional.setCurrentIndex(indice)
 
-    assert "Saldo actual" in panel.etiqueta_resumen.text()
-    assert "Saldo anterior" not in panel.etiqueta_resumen.text()
+    assert panel.campo_saldo_actual.isReadOnly()
+    assert panel.campo_saldo_actual.text() == f"Saldo actual: {formatear_moneda(1500)}"
+    assert not hasattr(panel, "campo_saldo_anterior")
 
 
-def test_solapa_estado_cuenta_saldo_anterior_en_cuadro_de_texto_de_solo_lectura(qtbot, conn):
+def test_solapa_estado_cuenta_saldo_actual_negativo_se_colorea_en_rojo(qtbot, conn):
     id_prof = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
-    obtener_repositorio(conn, "Profesional").actualizar(
-        id_prof, SaldoCuentaActual=1500, SaldoCuentaAnterior=-300,
-    )
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaActual=-500)
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_estado_cuenta
     indice = panel.combo_profesional.findData(id_prof)
     panel.combo_profesional.setCurrentIndex(indice)
 
-    assert panel.campo_saldo_anterior.isReadOnly()
-    assert panel.campo_saldo_anterior.text() == formatear_moneda(-300)
-    assert COLOR_ROJO in panel.campo_saldo_anterior.styleSheet()
+    assert COLOR_ROJO in panel.campo_saldo_actual.styleSheet()
 
 
 def test_solapa_estado_cuenta_conserva_el_profesional_elegido_al_refrescar(qtbot, conn):

@@ -36,7 +36,7 @@ from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import _numero_codigo, _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
-from app.gui.widgets.resumen_saldo import fmt_dato, item_monto
+from app.gui.widgets.resumen_saldo import item_monto
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual
@@ -367,14 +367,9 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
         layout_filtros.addWidget(linea_separadora)
 
-        self.etiqueta_resumen = QLabel()
-        self.etiqueta_resumen.setWordWrap(True)
-        layout_filtros.addWidget(self.etiqueta_resumen)
-
-        layout_filtros.addWidget(QLabel("Saldo anterior:"))
-        self.campo_saldo_anterior = QLineEdit()
-        self.campo_saldo_anterior.setReadOnly(True)
-        layout_filtros.addWidget(self.campo_saldo_anterior)
+        self.campo_saldo_actual = QLineEdit()
+        self.campo_saldo_actual.setReadOnly(True)
+        layout_filtros.addWidget(self.campo_saldo_actual)
 
         layout_filtros.addStretch()
         layout_externo.addWidget(panel_filtros)
@@ -405,16 +400,14 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
     def _actualizar_datos(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
-            self.etiqueta_resumen.setText("Saldo actual: —")
-            self.campo_saldo_anterior.setStyleSheet("")
-            self.campo_saldo_anterior.setText("—")
+            self.campo_saldo_actual.setStyleSheet("")
+            self.campo_saldo_actual.setText("Saldo actual: —")
             self.tabla.setRowCount(0)
             return
         profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
-        self.etiqueta_resumen.setText(fmt_dato("Saldo actual", profesional["SaldoCuentaActual"] or 0.0))
-        saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
-        self.campo_saldo_anterior.setText(formatear_moneda(saldo_anterior))
-        self.campo_saldo_anterior.setStyleSheet(f"color: {COLOR_ROJO};" if saldo_anterior < 0 else "")
+        saldo_actual = profesional["SaldoCuentaActual"] or 0.0
+        self.campo_saldo_actual.setText(f"Saldo actual: {formatear_moneda(saldo_actual)}")
+        self.campo_saldo_actual.setStyleSheet(f"color: {COLOR_ROJO};" if saldo_actual < 0 else "")
         registros = sorted(
             obtener_repositorio(self.conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional),
             key=lambda r: r["Periodo"], reverse=True,
