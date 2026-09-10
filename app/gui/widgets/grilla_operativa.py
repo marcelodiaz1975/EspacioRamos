@@ -496,6 +496,7 @@ class GrillaOperativaWidget(QWidget):
 
         panel_filtros = QGroupBox("Filtros")
         panel_filtros.setMaximumWidth(260)
+        self._panel_filtros = panel_filtros
         layout_filtros = QVBoxLayout(panel_filtros)
 
         layout_filtros.addWidget(QLabel("Localidad"))
@@ -760,6 +761,13 @@ class GrillaOperativaWidget(QWidget):
         sentido dejar que el usuario lo cambie a mano."""
         self.combo_modo.setCurrentIndex(self.combo_modo.findData(modo))
         self.combo_modo.setEnabled(False)
+
+    def fijar_titulo_filtros(self, titulo: str) -> None:
+        """Cambia el título del panel de Filtros — pensado para usos
+        embebidos donde tiene más sentido otro nombre (ej. Oferta de
+        consultorios: "Grilla semanal", porque ahí funciona como
+        referencia visual completa de la semana, no solo como filtros)."""
+        self._panel_filtros.setTitle(titulo)
 
     def mostrar_leyenda_colores(self) -> None:
         """Revela la leyenda de referencias de colores en el panel de

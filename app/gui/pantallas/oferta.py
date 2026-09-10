@@ -31,9 +31,10 @@ vivo en memoria), y "Nueva búsqueda" es la única forma de limpiarlo a
 propósito."""
 from __future__ import annotations
 
+import math
 import sqlite3
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QLocale, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -41,6 +42,7 @@ from PySide6.QtWidgets import (
     QDateEdit,
     QDialog,
     QDoubleSpinBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -85,10 +87,7 @@ from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 
 _TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
 
-_ABREV_DIA = {
-    "Lunes": "Lun", "Martes": "Mar", "Miércoles": "Mie", "Jueves": "Jue",
-    "Viernes": "Vie", "Sábado": "Sab", "Domingo": "Dom",
-}
+_DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
 
 _COMBINACIONES = [
     ("Sin combinación de consultorios", SIN_COMBINAR),
@@ -185,7 +184,9 @@ class PantallaOferta(QWidget):
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
-        form.addWidget(QLabel("Nueva búsqueda"))
+        titulo_busqueda = QLabel("Nueva búsqueda")
+        titulo_busqueda.setObjectName("subtituloSeccion")
+        form.addWidget(titulo_busqueda)
 
         self.combo_profesional = QComboBox()
         habilitar_busqueda_profesional(self.combo_profesional)
@@ -202,19 +203,15 @@ class PantallaOferta(QWidget):
         fila_fechas = QHBoxLayout()
         self.campo_fecha_desde = QDateEdit()
         self.campo_fecha_desde.setCalendarPopup(True)
-        self.campo_fecha_desde.setDisplayFormat("dd-MM-yyyy")
-        self.campo_fecha_desde.dateChanged.connect(self._actualizar_dias_semana)
-        self.etiqueta_dia_desde = QLabel()
+        self.campo_fecha_desde.setLocale(QLocale(QLocale.Language.Spanish))
+        self.campo_fecha_desde.setDisplayFormat("ddd dd-MM-yyyy")
         self.campo_fecha_hasta = QDateEdit()
         self.campo_fecha_hasta.setCalendarPopup(True)
-        self.campo_fecha_hasta.setDisplayFormat("dd-MM-yyyy")
-        self.campo_fecha_hasta.dateChanged.connect(self._actualizar_dias_semana)
-        self.etiqueta_dia_hasta = QLabel()
+        self.campo_fecha_hasta.setLocale(QLocale(QLocale.Language.Spanish))
+        self.campo_fecha_hasta.setDisplayFormat("ddd dd-MM-yyyy")
         fila_fechas.addWidget(QLabel("Desde"))
-        fila_fechas.addWidget(self.etiqueta_dia_desde)
         fila_fechas.addWidget(self.campo_fecha_desde)
         fila_fechas.addWidget(QLabel("Hasta (solo Aislada)"))
-        fila_fechas.addWidget(self.etiqueta_dia_hasta)
         fila_fechas.addWidget(self.campo_fecha_hasta)
         form.addLayout(fila_fechas)
 
@@ -237,14 +234,21 @@ class PantallaOferta(QWidget):
         form.addWidget(self._filtro_unidad)
 
         form.addWidget(QLabel("Días"))
-        self.lista_dias = QListWidget()
-        for dia in DIAS_SEMANA:
-            item = QListWidgetItem(dia)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked)
-            self.lista_dias.addItem(item)
-        self.lista_dias.setMaximumHeight(140)
-        form.addWidget(self.lista_dias)
+        contenedor_dias = QWidget()
+        grid_dias = QGridLayout(contenedor_dias)
+        grid_dias.setContentsMargins(0, 0, 0, 0)
+        self._checks_dia: dict[str, QCheckBox] = {}
+        # En una sola tanda de filas (mitad arriba, mitad abajo) en vez de
+        # una lista vertical larga — más legible. Se arma para la cantidad
+        # de días que haya en `_DIAS_BUSQUEDA`, así que si el día domingo
+        # se suma más adelante como opción de reserva, esto se adapta solo
+        # (7 días -> 4 arriba y 3 abajo) sin tocar el layout a mano.
+        columnas = math.ceil(len(_DIAS_BUSQUEDA) / 2)
+        for i, dia in enumerate(_DIAS_BUSQUEDA):
+            check = QCheckBox(dia)
+            self._checks_dia[dia] = check
+            grid_dias.addWidget(check, i // columnas, i % columnas)
+        form.addWidget(contenedor_dias)
 
         fila_horario = QHBoxLayout()
         self.spin_desde = QDoubleSpinBox()
@@ -338,7 +342,7 @@ class PantallaOferta(QWidget):
         boton_texto.setObjectName("botonAccion")
         boton_texto.clicked.connect(self._generar_texto)
         boton_nueva = QPushButton("Nueva búsqueda")
-        boton_nueva.setObjectName("botonPrimario")
+        boton_nueva.setObjectName("botonDestacado")
         boton_nueva.clicked.connect(self._nueva_busqueda)
         fila_botones.addWidget(boton_pdf)
         fila_botones.addWidget(boton_texto)
@@ -349,6 +353,7 @@ class PantallaOferta(QWidget):
 
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.mostrar_leyenda_colores()
+        self.grilla.fijar_titulo_filtros("Grilla semanal")
         splitter.addWidget(self.grilla)
         splitter.setStretchFactor(1, 1)
 
@@ -443,10 +448,6 @@ class PantallaOferta(QWidget):
     def _ids_unidad_seleccionadas(self) -> list[int]:
         return _ids_reales(self.lista_unidad)
 
-    def _actualizar_dias_semana(self) -> None:
-        self.etiqueta_dia_desde.setText(_ABREV_DIA[DIAS_SEMANA[self.campo_fecha_desde.date().dayOfWeek() - 1]])
-        self.etiqueta_dia_hasta.setText(_ABREV_DIA[DIAS_SEMANA[self.campo_fecha_hasta.date().dayOfWeek() - 1]])
-
     def _al_cambiar_tipo(self) -> None:
         tipo = self.combo_tipo.currentData()
         desde_iso = fecha_inicio_default(self.conn, tipo)
@@ -455,15 +456,10 @@ class PantallaOferta(QWidget):
         if hasta_iso:
             self.campo_fecha_hasta.setDate(QDate.fromString(hasta_iso, Qt.DateFormat.ISODate))
         self.campo_fecha_hasta.setEnabled(tipo == TIPO_AISLADA)
-        self._actualizar_dias_semana()
         self.grilla.fijar_modo("regular" if tipo == TIPO_REGULAR else "aislada")
 
     def _dias_seleccionados(self) -> list[str]:
-        return [
-            self.lista_dias.item(i).text()
-            for i in range(self.lista_dias.count())
-            if self.lista_dias.item(i).checkState() == Qt.CheckState.Checked
-        ]
+        return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
 
     def _armar_busqueda_actual(self) -> Busqueda | None:
         """Arma la franja a partir de lo cargado en el formulario ahora
@@ -499,8 +495,8 @@ class PantallaOferta(QWidget):
         if busqueda.combinacion_con_siguiente == "Y":
             resumen += " (Y con la próxima)"
         self.lista_franjas.addItem(resumen)
-        for i in range(self.lista_dias.count()):
-            self.lista_dias.item(i).setCheckState(Qt.CheckState.Unchecked)
+        for check in self._checks_dia.values():
+            check.setChecked(False)
 
     def _quitar_franja_seleccionada(self) -> None:
         fila = self.lista_franjas.currentRow()
@@ -580,8 +576,8 @@ class PantallaOferta(QWidget):
         self.combo_tipo.setCurrentIndex(0)
         self._al_cambiar_tipo()
         self._cargar_localidades()  # vuelve la cascada a "Todas las..." en los tres niveles
-        for i in range(self.lista_dias.count()):
-            self.lista_dias.item(i).setCheckState(Qt.CheckState.Unchecked)
+        for check in self._checks_dia.values():
+            check.setChecked(False)
         self.spin_desde.setValue(9)
         self.spin_hasta.setValue(12)
         self.casilla_horas_minimas.setChecked(False)
