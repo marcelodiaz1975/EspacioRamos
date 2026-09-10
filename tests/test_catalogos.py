@@ -110,6 +110,24 @@ def test_fechas_especiales_tipo_es_combo_cerrado(qtbot, conn):
     assert textos[0] == "Feriado nacional"
 
 
+def test_consultorios_tamano_es_combo_cerrado_con_los_tres_predefinidos(qtbot, conn):
+    """Antes era texto libre: el filtro de tamaño de Oferta de
+    consultorios compara por igualdad exacta, un valor fuera de catálogo
+    ahí (ej. "Pequeño" en vez de "Chico") rompe la coincidencia en
+    silencio, mismo motivo que Tipo de fecha especial."""
+    pantalla = catalogos.pantalla_consultorios(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    combo_tamano = dialogo._entradas["TamanoClasificacion"]
+    assert combo_tamano.isEditable() is False
+    textos = [combo_tamano.itemText(i) for i in range(combo_tamano.count())]
+    assert textos == ["Sin clasificar", "Grande", "Intermedio", "Chico"]
+
+    combo_tamano.setCurrentIndex(combo_tamano.findData("Grande"))
+    assert dialogo.valores()["TamanoClasificacion"] == "Grande"
+
+
 def test_responsables_rol_es_combo_editable(qtbot, conn):
     """Rol es un catálogo abierto (sección 8.2): sugiere los valores
     sembrados pero admite texto libre, a diferencia de Tipo de fecha

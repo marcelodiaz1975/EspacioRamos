@@ -72,6 +72,73 @@ def test_fecha_hasta_solo_habilitada_para_aislada(qtbot, conn, profesional_y_con
     assert pantalla.campo_fecha_hasta.isEnabled()
 
 
+def test_fecha_muestra_el_dia_de_la_semana_abreviado(qtbot, conn, profesional_y_consultorio):
+    from PySide6.QtCore import QDate
+
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.campo_fecha_desde.setDate(QDate(2026, 9, 11))  # viernes
+    assert pantalla.etiqueta_dia_desde.text() == "Vie"
+
+    pantalla.campo_fecha_desde.setDate(QDate(2026, 9, 9))  # miércoles
+    assert pantalla.etiqueta_dia_desde.text() == "Mie"
+
+
+def test_localidad_edificio_unidad_arrancan_en_todas(qtbot, conn, profesional_y_consultorio):
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla._filtro_localidad._boton.text() == "Todas las localidades"
+    assert pantalla._filtro_edificio._boton.text() == "Todos los edificios"
+    assert pantalla._filtro_unidad._boton.text() == "Todas las unidades"
+    # sin nada tildado a mano, la búsqueda no se restringe (lista completa)
+    assert len(pantalla._ids_unidad_seleccionadas()) == 1
+
+
+def test_elegir_una_localidad_acota_las_opciones_de_edificio(qtbot, conn, profesional_y_consultorio):
+    id_prof, id_edificio = profesional_y_consultorio
+    conn.execute("UPDATE Edificio SET DomicilioLocalidad = 'Recoleta' WHERE IdEdificio = ?", (id_edificio,))
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Palermo")
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento="2do B")
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    conn.commit()
+
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._cargar_localidades()  # repuebla ya con los dos edificios/localidades de arriba
+    assert pantalla.lista_localidad.count() == 3  # "Todas" + Recoleta + Palermo
+
+    indice_recoleta = next(
+        i for i in range(pantalla.lista_localidad.count())
+        if pantalla.lista_localidad.item(i).text() == "Recoleta"
+    )
+    pantalla.lista_localidad.clearSelection()
+    pantalla.lista_localidad.item(indice_recoleta).setSelected(True)
+
+    assert pantalla.lista_edificio.count() == 2  # "Todos" + solo el de Recoleta
+
+
+def test_elegir_un_edificio_puntual_acota_las_unidades_de_la_busqueda(qtbot, conn, profesional_y_consultorio):
+    id_prof, id_edificio = profesional_y_consultorio
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2")
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento="2do B")
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    conn.commit()
+
+    pantalla = PantallaOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._cargar_localidades()
+    assert len(pantalla._ids_unidad_seleccionadas()) == 2  # "Todas las unidades": las dos
+
+    pantalla.lista_edificio.clearSelection()
+    for i in range(pantalla.lista_edificio.count()):
+        if pantalla.lista_edificio.item(i).text() == "Ramos 1":
+            pantalla.lista_edificio.item(i).setSelected(True)
+
+    assert pantalla._ids_unidad_seleccionadas() == [
+        pantalla.lista_unidad.item(1).data(Qt.ItemDataRole.UserRole)
+    ]
+
+
 def test_tamano_arranca_deshabilitado_y_se_habilita_con_el_check(qtbot, conn, profesional_y_consultorio):
     pantalla = PantallaOferta(conn)
     qtbot.addWidget(pantalla)

@@ -54,7 +54,16 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.pantallas.reservas import _opciones_profesional
-from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
+from app.gui.widgets.grilla_operativa import (
+    GrillaOperativaWidget,
+    _agregar_item_todos,
+    _corregir_seleccion_todos,
+    _FiltroColapsable,
+    _ids_reales,
+    _ids_seleccionados,
+    _lista_multiseleccion,
+    _seleccionar_todos,
+)
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import SUBCARPETA_OFERTA, carpeta_archivos_varios
 from app.negocio.dias import DIAS_SEMANA
@@ -62,6 +71,7 @@ from app.negocio.oferta_busqueda import (
     COMBINAR_MISMA_UNIDAD,
     COMBINAR_MISMO_EDIFICIO,
     SIN_COMBINAR,
+    TAMANOS_CONSULTORIO,
     TIPO_AISLADA,
     TIPO_REGULAR,
     Busqueda,
@@ -73,12 +83,12 @@ from app.negocio.oferta_busqueda_texto import previsualizar_documento, resumen_b
 from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
 from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 
-_TAMANOS = [
-    ("Cualquier tamaño", None),
-    ("Grande", "Grande"),
-    ("Intermedio", "Intermedio"),
-    ("Chico", "Chico"),
-]
+_TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
+
+_ABREV_DIA = {
+    "Lunes": "Lun", "Martes": "Mar", "Miércoles": "Mie", "Jueves": "Jue",
+    "Viernes": "Vie", "Sábado": "Sab", "Domingo": "Dom",
+}
 
 _COMBINACIONES = [
     ("Sin combinación de consultorios", SIN_COMBINAR),
@@ -163,7 +173,7 @@ class PantallaOferta(QWidget):
         self._franjas: list[Busqueda] = []
         self._armar_ui()
         self._cargar_profesionales()
-        self._cargar_edificios()
+        self._cargar_localidades()
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -193,19 +203,38 @@ class PantallaOferta(QWidget):
         self.campo_fecha_desde = QDateEdit()
         self.campo_fecha_desde.setCalendarPopup(True)
         self.campo_fecha_desde.setDisplayFormat("dd-MM-yyyy")
+        self.campo_fecha_desde.dateChanged.connect(self._actualizar_dias_semana)
+        self.etiqueta_dia_desde = QLabel()
         self.campo_fecha_hasta = QDateEdit()
         self.campo_fecha_hasta.setCalendarPopup(True)
         self.campo_fecha_hasta.setDisplayFormat("dd-MM-yyyy")
+        self.campo_fecha_hasta.dateChanged.connect(self._actualizar_dias_semana)
+        self.etiqueta_dia_hasta = QLabel()
         fila_fechas.addWidget(QLabel("Desde"))
+        fila_fechas.addWidget(self.etiqueta_dia_desde)
         fila_fechas.addWidget(self.campo_fecha_desde)
         fila_fechas.addWidget(QLabel("Hasta (solo Aislada)"))
+        fila_fechas.addWidget(self.etiqueta_dia_hasta)
         fila_fechas.addWidget(self.campo_fecha_hasta)
         form.addLayout(fila_fechas)
 
-        form.addWidget(QLabel("Edificios (ninguno tildado = todos)"))
-        self.lista_edificios = QListWidget()
-        self.lista_edificios.setMaximumHeight(100)
-        form.addWidget(self.lista_edificios)
+        form.addWidget(QLabel("Localidad"))
+        self.lista_localidad = _lista_multiseleccion()
+        self.lista_localidad.itemSelectionChanged.connect(self._cargar_edificios)
+        self._filtro_localidad = _FiltroColapsable(self.lista_localidad)
+        form.addWidget(self._filtro_localidad)
+
+        form.addWidget(QLabel("Edificio"))
+        self.lista_edificio = _lista_multiseleccion()
+        self.lista_edificio.itemSelectionChanged.connect(self._cargar_unidades)
+        self._filtro_edificio = _FiltroColapsable(self.lista_edificio)
+        form.addWidget(self._filtro_edificio)
+
+        form.addWidget(QLabel("Unidad"))
+        self.lista_unidad = _lista_multiseleccion()
+        self.lista_unidad.itemSelectionChanged.connect(self._unidad_seleccion_cambio)
+        self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
+        form.addWidget(self._filtro_unidad)
 
         form.addWidget(QLabel("Días"))
         self.lista_dias = QListWidget()
@@ -331,14 +360,92 @@ class PantallaOferta(QWidget):
         for id_, etiqueta in _opciones_profesional(self.conn):
             self.combo_profesional.addItem(etiqueta, id_)
 
+    def _cargar_localidades(self) -> None:
+        """Cascada Localidad -> Edificio -> Unidad, mismo patrón compacto
+        (con "Todas las X" tildado por defecto y colapsada hasta que se
+        la abre) que ya usa `GrillaOperativaWidget` — reusa sus mismos
+        helpers en vez de reimplementar la cascada acá."""
+        self.lista_localidad.blockSignals(True)
+        self.lista_localidad.clear()
+        _agregar_item_todos(self.lista_localidad, "Todas las localidades")
+        localidades = self.conn.execute(
+            "SELECT DISTINCT DomicilioLocalidad FROM Edificio ORDER BY DomicilioLocalidad"
+        ).fetchall()
+        for fila in localidades:
+            valor = fila["DomicilioLocalidad"]
+            item = QListWidgetItem(valor or "(Sin localidad)")
+            item.setData(Qt.ItemDataRole.UserRole, valor)
+            self.lista_localidad.addItem(item)
+        _seleccionar_todos(self.lista_localidad)
+        self.lista_localidad.blockSignals(False)
+        self._filtro_localidad.actualizar_resumen()
+        self._cargar_edificios()
+
     def _cargar_edificios(self) -> None:
-        self.lista_edificios.clear()
-        for f in self.conn.execute("SELECT IdEdificio, Nombre FROM Edificio ORDER BY Nombre"):
-            item = QListWidgetItem(f["Nombre"])
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked)
-            item.setData(Qt.ItemDataRole.UserRole, f["IdEdificio"])
-            self.lista_edificios.addItem(item)
+        _corregir_seleccion_todos(self.lista_localidad)
+        self._filtro_localidad.actualizar_resumen()
+        localidades = _ids_seleccionados(self.lista_localidad)
+        self.lista_edificio.blockSignals(True)
+        self.lista_edificio.clear()
+        _agregar_item_todos(self.lista_edificio, "Todos los edificios")
+        sql = "SELECT IdEdificio, Nombre FROM Edificio"
+        parametros: list = []
+        if localidades:
+            marcas = []
+            for loc in localidades:
+                if loc is None:
+                    marcas.append("DomicilioLocalidad IS NULL")
+                else:
+                    marcas.append("DomicilioLocalidad = ?")
+                    parametros.append(loc)
+            sql += " WHERE " + " OR ".join(marcas)
+        sql += " ORDER BY Nombre"
+        for fila in self.conn.execute(sql, parametros).fetchall():
+            item = QListWidgetItem(fila["Nombre"])
+            item.setData(Qt.ItemDataRole.UserRole, fila["IdEdificio"])
+            self.lista_edificio.addItem(item)
+        _seleccionar_todos(self.lista_edificio)
+        self.lista_edificio.blockSignals(False)
+        self._filtro_edificio.actualizar_resumen()
+        self._cargar_unidades()
+
+    def _cargar_unidades(self) -> None:
+        _corregir_seleccion_todos(self.lista_edificio)
+        self._filtro_edificio.actualizar_resumen()
+        ids_edificio = _ids_seleccionados(self.lista_edificio)
+        self.lista_unidad.blockSignals(True)
+        self.lista_unidad.clear()
+        _agregar_item_todos(self.lista_unidad, "Todas las unidades")
+        sql = (
+            "SELECT u.IdUnidad, u.Departamento, e.Nombre AS NombreEdificio FROM Unidad u "
+            "JOIN Edificio e ON e.IdEdificio = u.IdEdificio"
+        )
+        parametros: list = []
+        if ids_edificio:
+            placeholders = ", ".join("?" for _ in ids_edificio)
+            sql += f" WHERE u.IdEdificio IN ({placeholders})"
+            parametros = ids_edificio
+        filas = sorted(
+            self.conn.execute(sql, parametros).fetchall(), key=lambda f: (f["NombreEdificio"], f["Departamento"]),
+        )
+        for fila in filas:
+            item = QListWidgetItem(f"{fila['NombreEdificio']} - {fila['Departamento']}")
+            item.setData(Qt.ItemDataRole.UserRole, fila["IdUnidad"])
+            self.lista_unidad.addItem(item)
+        _seleccionar_todos(self.lista_unidad)
+        self.lista_unidad.blockSignals(False)
+        self._filtro_unidad.actualizar_resumen()
+
+    def _unidad_seleccion_cambio(self) -> None:
+        _corregir_seleccion_todos(self.lista_unidad)
+        self._filtro_unidad.actualizar_resumen()
+
+    def _ids_unidad_seleccionadas(self) -> list[int]:
+        return _ids_reales(self.lista_unidad)
+
+    def _actualizar_dias_semana(self) -> None:
+        self.etiqueta_dia_desde.setText(_ABREV_DIA[DIAS_SEMANA[self.campo_fecha_desde.date().dayOfWeek() - 1]])
+        self.etiqueta_dia_hasta.setText(_ABREV_DIA[DIAS_SEMANA[self.campo_fecha_hasta.date().dayOfWeek() - 1]])
 
     def _al_cambiar_tipo(self) -> None:
         tipo = self.combo_tipo.currentData()
@@ -348,6 +455,7 @@ class PantallaOferta(QWidget):
         if hasta_iso:
             self.campo_fecha_hasta.setDate(QDate.fromString(hasta_iso, Qt.DateFormat.ISODate))
         self.campo_fecha_hasta.setEnabled(tipo == TIPO_AISLADA)
+        self._actualizar_dias_semana()
         self.grilla.fijar_modo("regular" if tipo == TIPO_REGULAR else "aislada")
 
     def _dias_seleccionados(self) -> list[str]:
@@ -355,13 +463,6 @@ class PantallaOferta(QWidget):
             self.lista_dias.item(i).text()
             for i in range(self.lista_dias.count())
             if self.lista_dias.item(i).checkState() == Qt.CheckState.Checked
-        ]
-
-    def _ids_edificio_seleccionados(self) -> list[int]:
-        return [
-            self.lista_edificios.item(i).data(Qt.ItemDataRole.UserRole)
-            for i in range(self.lista_edificios.count())
-            if self.lista_edificios.item(i).checkState() == Qt.CheckState.Checked
         ]
 
     def _armar_busqueda_actual(self) -> Busqueda | None:
@@ -424,7 +525,8 @@ class PantallaOferta(QWidget):
 
         globales = CriteriosGlobales(
             tipo_busqueda=self.combo_tipo.currentData(),
-            ids_edificio=self._ids_edificio_seleccionados(),
+            ids_edificio=[],
+            ids_unidad=self._ids_unidad_seleccionadas(),
             detalle_reducido=self.casilla_detalle_reducido.isChecked(),
         )
         return id_profesional, globales, busquedas
@@ -477,8 +579,7 @@ class PantallaOferta(QWidget):
         self.combo_profesional.setCurrentIndex(0)
         self.combo_tipo.setCurrentIndex(0)
         self._al_cambiar_tipo()
-        for i in range(self.lista_edificios.count()):
-            self.lista_edificios.item(i).setCheckState(Qt.CheckState.Unchecked)
+        self._cargar_localidades()  # vuelve la cascada a "Todas las..." en los tres niveles
         for i in range(self.lista_dias.count()):
             self.lista_dias.item(i).setCheckState(Qt.CheckState.Unchecked)
         self.spin_desde.setValue(9)

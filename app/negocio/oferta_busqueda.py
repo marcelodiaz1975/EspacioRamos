@@ -75,6 +75,12 @@ from app.negocio.grilla import calcular_ocupacion_regular
 TIPO_REGULAR = "Regular"
 TIPO_AISLADA = "Aislada"
 
+# Tamaños predefinidos de consultorio (Consultorio.TamanoClasificacion,
+# catálogo cerrado): usados tanto por el campo de la ficha del consultorio
+# como por el filtro de tamaño de Oferta de consultorios, para que el
+# filtro siempre pueda encontrar coincidencia exacta.
+TAMANOS_CONSULTORIO = ["Grande", "Intermedio", "Chico"]
+
 SALIDA_PDF = "PDF"
 SALIDA_TEXTO = "Texto"
 

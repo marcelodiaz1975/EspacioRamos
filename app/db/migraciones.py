@@ -35,6 +35,36 @@ _TABLAS_ELIMINADAS: list[str] = [
     "HistorialOferta",
 ]
 
+# Consultorio.TamanoClasificacion pasó de texto libre a catálogo cerrado
+# (mismos 3 valores que app.negocio.oferta_busqueda.TAMANOS_CONSULTORIO,
+# duplicados acá en vez de importados para no hacer que la capa de base
+# de datos dependa de la de negocio). Normaliza mayúsculas/espacios de lo
+# que ya coincide y vacía cualquier otro valor viejo (ej. "Pequeño") que
+# haya quedado cargado de cuando el campo era libre — así el filtro de
+# tamaño de Oferta de consultorios, que compara por igualdad exacta,
+# encuentra coincidencia con cualquier consultorio ya cargado.
+_TAMANOS_CONSULTORIO = ["Grande", "Intermedio", "Chico"]
+
+
+def _normalizar_tamanos_consultorio(conn: sqlite3.Connection) -> None:
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Consultorio'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    for valor in _TAMANOS_CONSULTORIO:
+        conn.execute(
+            "UPDATE Consultorio SET TamanoClasificacion = ? "
+            "WHERE TamanoClasificacion IS NOT NULL AND LOWER(TRIM(TamanoClasificacion)) = ?",
+            (valor, valor.lower()),
+        )
+    placeholders = ", ".join("?" for _ in _TAMANOS_CONSULTORIO)
+    conn.execute(
+        "UPDATE Consultorio SET TamanoClasificacion = NULL "
+        f"WHERE TamanoClasificacion IS NOT NULL AND TamanoClasificacion NOT IN ({placeholders})",
+        _TAMANOS_CONSULTORIO,
+    )
+
 
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
@@ -48,4 +78,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {definicion}")
     for tabla in _TABLAS_ELIMINADAS:
         conn.execute(f"DROP TABLE IF EXISTS {tabla}")
+    _normalizar_tamanos_consultorio(conn)
     conn.commit()

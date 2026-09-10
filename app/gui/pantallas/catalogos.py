@@ -14,7 +14,12 @@ from app.gui.crud_generico import Campo, PantallaCRUD
 from app.negocio.formato import formatear_moneda
 from app.negocio.gastos_operativos import gasto_en_conflicto
 from app.negocio.listas_editables import opciones_lista
+from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
 from app.repositorio.registro import obtener_repositorio
+
+
+def _opciones_tamano(conn: sqlite3.Connection) -> list[tuple[str | None, str]]:
+    return [(None, "Sin clasificar")] + [(t, t) for t in TAMANOS_CONSULTORIO]
 
 
 def _opciones_edificio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
@@ -76,7 +81,7 @@ def pantalla_consultorios(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("NumeroConsultorio", "Número", requerido=True),
         Campo("Largo", "Largo (m)", tipo="numero"),
         Campo("Ancho", "Ancho (m)", tipo="numero"),
-        Campo("TamanoClasificacion", "Clasificación"),
+        Campo("TamanoClasificacion", "Clasificación", tipo="combo", opciones=_opciones_tamano),
         Campo("Ventana", "Ventana", tipo="booleano"),
         Campo("PanelVidrioLuzNatural", "Panel de vidrio / luz natural", tipo="booleano"),
         Campo("AireAcondicionado", "Aire acondicionado", tipo="booleano"),

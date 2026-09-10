@@ -55,3 +55,55 @@ def test_aplicar_migraciones_es_idempotente(tmp_path):
     columnas = [f["name"] for f in conn.execute("PRAGMA table_info(Ausencia)").fetchall()]
     assert columnas.count("IdReservaAislada") == 1
     conn.close()
+
+
+def test_aplicar_migraciones_borra_historial_oferta_de_una_base_vieja(tmp_path):
+    """Decisión de la clienta: no se guarda ningún historial de búsquedas
+    de Oferta de consultorios — una base vieja que todavía tenga la
+    tabla la pierde al abrirse con esta versión."""
+    conn = init_database(tmp_path / "test.db")
+    conn.execute(
+        "CREATE TABLE HistorialOferta (IdHistorialOferta INTEGER PRIMARY KEY, "
+        "IdProfesional INTEGER NOT NULL, FechaGeneracion TEXT NOT NULL, CriteriosJSON TEXT NOT NULL)"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'HistorialOferta'"
+    ).fetchone()
+    assert tabla is None
+    conn.close()
+
+
+def test_aplicar_migraciones_normaliza_tamano_de_consultorio(tmp_path):
+    """Consultorio.TamanoClasificacion pasó de texto libre a catálogo
+    cerrado (Grande/Intermedio/Chico): una base vieja con mayúsculas
+    distintas se corrige, y cualquier otro valor viejo se vacía — si no,
+    el filtro de tamaño de Oferta de consultorios (que compara por
+    igualdad exacta) nunca encontraría coincidencia con esos registros."""
+    conn = init_database(tmp_path / "test.db")
+    id_edificio = conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Ramos 1')").lastrowid
+    id_unidad = conn.execute(
+        "INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,)
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio, TamanoClasificacion) VALUES (?, 1, 'grande')",
+        (id_unidad,),
+    )
+    conn.execute(
+        "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio, TamanoClasificacion) VALUES (?, 2, 'Pequeño')",
+        (id_unidad,),
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    valores = {
+        f["NumeroConsultorio"]: f["TamanoClasificacion"]
+        for f in conn.execute("SELECT NumeroConsultorio, TamanoClasificacion FROM Consultorio").fetchall()
+    }
+    assert valores[1] == "Grande"
+    assert valores[2] is None
+    conn.close()
