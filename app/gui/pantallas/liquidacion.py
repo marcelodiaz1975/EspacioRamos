@@ -14,10 +14,10 @@ from __future__ import annotations
 import os
 import sqlite3
 
-from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.pantallas.reservas import _numero_codigo, _opciones_profesional, _texto_profesional
+from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, texto_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
@@ -41,8 +43,16 @@ from app.negocio.valores import horas_semanales_vigentes
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
-_COLOR_RESALTADO = QColor("#D9D9D9")
 _ANCHO_COMBO_PROFESIONAL = 260
+_ANCHO_PANEL_FILTROS = 280
+
+_ESTADOS_FILTRO = [
+    ("Cualquier estado", None),
+    ("Sin emitir", "Sin emitir"),
+    ("No enviada", "No enviada"),
+    ("Regenerada no enviada", "Regenerada no enviada"),
+    ("Enviada", "Enviada"),
+]
 
 
 def _fmt_horas(horas: float) -> str:
@@ -76,34 +86,67 @@ class _PanelEmisionArchivos(QWidget):
         self.conn = conn
         self._filas: list[dict] = []
         self._casillas: list[QCheckBox] = []
-        self._id_resaltado: int | None = None
         self._armar_ui()
         self.actualizar()
 
-    def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Mismo motivo que en Reservas: `setFocus()` durante la
+        construcción no alcanza a "pegar" porque el QTabWidget
+        contenedor todavía no está mostrado — se repite el pedido de
+        foco en Período al mostrarse la solapa."""
+        super().showEvent(event)
+        self.campo_periodo.setFocus()
 
-        fila_filtros = QHBoxLayout()
-        fila_filtros.addWidget(QLabel("Período:"))
+    def _armar_ui(self) -> None:
+        layout_externo = QHBoxLayout(self)
+
+        panel_filtros = QWidget()
+        panel_filtros.setMaximumWidth(_ANCHO_PANEL_FILTROS)
+        layout_filtros = QVBoxLayout(panel_filtros)
+
+        layout_filtros.addWidget(QLabel("Período:"))
         self.campo_periodo = QLineEdit()
         self.campo_periodo.editingFinished.connect(self.actualizar)
-        fila_filtros.addWidget(self.campo_periodo)
+        layout_filtros.addWidget(self.campo_periodo)
 
-        boton_calcular = QPushButton("Calcular")
-        boton_calcular.clicked.connect(self.actualizar)
-        fila_filtros.addWidget(boton_calcular)
-
-        fila_filtros.addWidget(QLabel("Buscar profesional:"))
-        self.combo_buscar = QComboBox()
-        self.combo_buscar.addItem("", None)
+        layout_filtros.addWidget(QLabel("Profesional:"))
+        self.combo_profesional_filtro = QComboBox()
+        self.combo_profesional_filtro.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, ("R",)):
-            self.combo_buscar.addItem(etiqueta, id_)
-        habilitar_busqueda_profesional(self.combo_buscar)
-        self.combo_buscar.currentIndexChanged.connect(self._resaltar_buscado)
-        fila_filtros.addWidget(self.combo_buscar)
+            self.combo_profesional_filtro.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_profesional_filtro)
+        self.combo_profesional_filtro.currentIndexChanged.connect(self.actualizar)
+        layout_filtros.addWidget(self.combo_profesional_filtro)
 
-        fila_filtros.addStretch()
-        layout.addLayout(fila_filtros)
+        layout_filtros.addWidget(QLabel("Estado de la liquidación:"))
+        self.combo_estado_filtro = QComboBox()
+        for etiqueta, _valor in _ESTADOS_FILTRO:
+            self.combo_estado_filtro.addItem(etiqueta)
+        self.combo_estado_filtro.currentIndexChanged.connect(self.actualizar)
+        layout_filtros.addWidget(self.combo_estado_filtro)
+
+        self.boton_calcular = QPushButton("Calcular")
+        self.boton_calcular.clicked.connect(self.actualizar)
+        layout_filtros.addWidget(self.boton_calcular)
+
+        linea_separadora = QFrame()
+        linea_separadora.setFrameShape(QFrame.Shape.HLine)
+        linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
+        layout_filtros.addWidget(linea_separadora)
+
+        boton_emitir_seleccionadas = QPushButton("Emitir liquidaciones seleccionadas")
+        boton_emitir_seleccionadas.setObjectName("botonPrimario")
+        boton_emitir_seleccionadas.clicked.connect(self._emitir_seleccionadas)
+        layout_filtros.addWidget(boton_emitir_seleccionadas)
+        boton_emitir_pendientes = QPushButton("Emitir liquidaciones pendientes")
+        boton_emitir_pendientes.clicked.connect(self._emitir_pendientes)
+        layout_filtros.addWidget(boton_emitir_pendientes)
+        boton_emitir_todas = QPushButton("Emitir todas las liquidaciones")
+        boton_emitir_todas.clicked.connect(self._emitir_todas)
+        layout_filtros.addWidget(boton_emitir_todas)
+
+        layout_filtros.addStretch()
+        layout_externo.addWidget(panel_filtros)
 
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(6)
@@ -112,22 +155,13 @@ class _PanelEmisionArchivos(QWidget):
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.tabla, stretch=1)
-
-        fila_botones = QHBoxLayout()
-        boton_emitir_seleccionadas = QPushButton("Emitir liquidaciones seleccionadas")
-        boton_emitir_seleccionadas.setObjectName("botonPrimario")
-        boton_emitir_seleccionadas.clicked.connect(self._emitir_seleccionadas)
-        fila_botones.addWidget(boton_emitir_seleccionadas)
-        boton_emitir_pendientes = QPushButton("Emitir liquidaciones pendientes")
-        boton_emitir_pendientes.clicked.connect(self._emitir_pendientes)
-        fila_botones.addWidget(boton_emitir_pendientes)
-        boton_emitir_todas = QPushButton("Emitir todas las liquidaciones")
-        boton_emitir_todas.clicked.connect(self._emitir_todas)
-        fila_botones.addWidget(boton_emitir_todas)
-        layout.addLayout(fila_botones)
+        layout_externo.addWidget(self.tabla, stretch=1)
 
         self.campo_periodo.setText(periodo_actual(self.conn))
+        self._foco = instalar_enter_avanza_foco(
+            [self.campo_periodo, self.combo_profesional_filtro, self.combo_estado_filtro, self.boton_calcular],
+            parent=self,
+        )
 
     def _periodo(self) -> str:
         return self.campo_periodo.text().strip() or periodo_actual(self.conn)
@@ -138,7 +172,11 @@ class _PanelEmisionArchivos(QWidget):
         profesional — confirmado por la clienta."""
         periodo = self._periodo()
         hoy = fecha_actual(self.conn).isoformat()
+        id_profesional_filtro = self.combo_profesional_filtro.currentData()
+        estado_filtro = _ESTADOS_FILTRO[self.combo_estado_filtro.currentIndex()][1]
         profesionales = obtener_repositorio(self.conn, "Profesional").listar(CategoriaProfesional="R")
+        if id_profesional_filtro is not None:
+            profesionales = [p for p in profesionales if p["IdProfesional"] == id_profesional_filtro]
         filas: list[dict] = []
         for profesional in profesionales:
             try:
@@ -154,6 +192,8 @@ class _PanelEmisionArchivos(QWidget):
                 (profesional["IdProfesional"], periodo),
             ).fetchone()
             estado = ultima["EstadoEnvio"] if ultima else "Sin emitir"
+            if estado_filtro is not None and estado != estado_filtro:
+                continue
             horas_semanales = horas_semanales_vigentes(self.conn, [profesional["IdProfesional"]], hoy)
             filas.append({
                 "profesional": profesional, "monto_generado": monto_generado, "monto_error": monto_error,
@@ -173,7 +213,7 @@ class _PanelEmisionArchivos(QWidget):
             self._casillas.append(casilla)
 
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(_texto_profesional(profesional)))
-            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_fmt_horas(f["horas_semanales"])))
+            self.tabla.setItem(fila_idx, 2, item_numero(_fmt_horas(f["horas_semanales"])))
             self.tabla.setItem(fila_idx, 3, item_monto(profesional["SaldoCuentaAnterior"]))
             if f["monto_error"] is not None:
                 self.tabla.setItem(fila_idx, 4, QTableWidgetItem(f["monto_error"]))
@@ -181,24 +221,6 @@ class _PanelEmisionArchivos(QWidget):
                 self.tabla.setItem(fila_idx, 4, item_monto(f["monto_generado"]))
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(f["estado"]))
         self.tabla.resizeColumnsToContents()
-        self._aplicar_resaltado()
-
-    def _resaltar_buscado(self) -> None:
-        self._id_resaltado = self.combo_buscar.currentData()
-        self._aplicar_resaltado()
-
-    def _aplicar_resaltado(self) -> None:
-        """El buscador de profesional es solo para ubicarlo de un
-        vistazo (una fila gris) — nunca filtra ni cambia la selección de
-        checkboxes, confirmado por la clienta."""
-        for fila_idx, f in enumerate(self._filas):
-            resaltar = (
-                self._id_resaltado is not None and f["profesional"]["IdProfesional"] == self._id_resaltado
-            )
-            for col in range(1, 6):
-                item = self.tabla.item(fila_idx, col)
-                if item is not None:
-                    item.setBackground(_COLOR_RESALTADO if resaltar else QBrush())
 
     def _emitir(self, seleccionados: list[sqlite3.Row], mensaje_confirmacion: str) -> None:
         periodo = self._periodo()

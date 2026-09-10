@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 
@@ -88,7 +89,9 @@ def test_columna_horas_semanales_suma_las_reservas_regulares_vigentes(qtbot, con
     conn.commit()
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.panel_emision.tabla.item(0, 2).text() == "2"
+    item = pantalla.panel_emision.tabla.item(0, 2)
+    assert item.text() == "2"
+    assert item.textAlignment() == int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
 
 def test_saldo_anterior_negativo_se_colorea_en_rojo(qtbot, conn):
@@ -140,22 +143,72 @@ def test_orden_no_enviadas_arriba_y_luego_por_codigo(qtbot, conn, tmp_path):
     assert codigos == ["R2", "R10", "R5"]
 
 
-def test_buscar_profesional_resalta_fila_sin_filtrar(qtbot, conn):
+def test_filtro_profesional_por_defecto_muestra_todos(qtbot, conn):
     _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
     _crear_profesional(conn, apellido="Quito", id_codigo="R3")
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_emision
 
+    assert panel.combo_profesional_filtro.currentText() == "Todos los profesionales"
     assert panel.tabla.rowCount() == 2
-    indice = panel.combo_buscar.findData(panel._filas[1]["profesional"]["IdProfesional"])
-    panel.combo_buscar.setCurrentIndex(indice)
 
-    assert panel.tabla.rowCount() == 2  # no filtra
-    from app.gui.pantallas.liquidacion import _COLOR_RESALTADO
 
-    assert panel.tabla.item(1, 1).background().color() == _COLOR_RESALTADO
-    assert panel.tabla.item(0, 1).background().color() != _COLOR_RESALTADO
+def test_filtro_profesional_deja_solo_el_seleccionado(qtbot, conn):
+    _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    id_r3 = _crear_profesional(conn, apellido="Quito", id_codigo="R3")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_emision
+
+    indice = panel.combo_profesional_filtro.findData(id_r3)
+    panel.combo_profesional_filtro.setCurrentIndex(indice)
+
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 1).text() == "R3 - Quito"
+
+
+def test_filtro_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    completador = pantalla.panel_emision.combo_profesional_filtro.completer()
+    assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
+
+
+def test_filtro_estado_por_defecto_es_cualquier_estado(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_emision.combo_estado_filtro.currentText() == "Cualquier estado"
+
+
+def test_filtro_estado_deja_solo_las_del_estado_elegido(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    id_r1 = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    _crear_profesional(conn, apellido="Quito", id_codigo="R3")
+    conn.commit()
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_emision
+
+    from app.negocio.liquidaciones import emitir_liquidacion
+
+    emitir_liquidacion(conn, id_profesional=id_r1, periodo=panel._periodo())  # queda "No enviada"
+    conn.commit()
+    panel.actualizar()
+
+    indice = panel.combo_estado_filtro.findText("Sin emitir")
+    panel.combo_estado_filtro.setCurrentIndex(indice)
+
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 1).text() == "R3 - Quito"
+
+
+def test_foco_inicial_queda_en_periodo(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.panel_emision.campo_periodo.hasFocus())
 
 
 def test_emitir_sin_carpeta_base_no_falla_ni_emite(qtbot, conn):
