@@ -43,7 +43,6 @@ from app.negocio.valores import horas_semanales_vigentes
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
-_ANCHO_COMBO_PROFESIONAL = 260
 _ANCHO_PANEL_FILTROS = 280
 
 _ESTADOS_FILTRO = [
@@ -333,19 +332,29 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         self.actualizar()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        layout_externo = QHBoxLayout(self)
 
-        fila_profesional = QHBoxLayout()
+        panel_filtros = QWidget()
+        panel_filtros.setMaximumWidth(_ANCHO_PANEL_FILTROS)
+        layout_filtros = QVBoxLayout(panel_filtros)
+
+        layout_filtros.addWidget(QLabel("Profesional:"))
         self.combo_profesional = QComboBox()
-        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._actualizar_datos)
-        fila_profesional.addWidget(QLabel("Profesional:"))
-        fila_profesional.addWidget(self.combo_profesional, stretch=1)
-        layout.addLayout(fila_profesional)
+        layout_filtros.addWidget(self.combo_profesional)
+
+        linea_separadora = QFrame()
+        linea_separadora.setFrameShape(QFrame.Shape.HLine)
+        linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
+        layout_filtros.addWidget(linea_separadora)
 
         self.etiqueta_resumen = QLabel()
-        layout.addWidget(self.etiqueta_resumen)
+        self.etiqueta_resumen.setWordWrap(True)
+        layout_filtros.addWidget(self.etiqueta_resumen)
+
+        layout_filtros.addStretch()
+        layout_externo.addWidget(panel_filtros)
 
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(6)
@@ -353,7 +362,7 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
             ["Período", "Fecha emisión", "Monto generado", "Reemisión", "Estado de envío", "Archivo"]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        layout.addWidget(self.tabla, stretch=1)
+        layout_externo.addWidget(self.tabla, stretch=1)
 
     def actualizar(self) -> None:
         id_anterior = self.combo_profesional.currentData()
