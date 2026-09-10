@@ -62,6 +62,43 @@ def test_combo_profesional_incluye_inactivos_y_contactos(qtbot, conn):
     assert "Prospecto" in textos
 
 
+def test_horario_muestra_formato_hs(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.spin_desde.setValue(9)
+    assert pantalla.spin_desde.text() == "9:00hs"
+    pantalla.spin_hasta.setValue(12.5)
+    assert pantalla.spin_hasta.text() == "12:30hs"
+
+
+def test_tamano_es_combo_cerrado_deshabilitado_hasta_tildar_la_casilla(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert not pantalla.combo_tamano.isEnabled()
+    textos = [pantalla.combo_tamano.itemText(i) for i in range(pantalla.combo_tamano.count())]
+    assert textos == ["Cualquier tamaño", "Grande", "Intermedio", "Chico"]
+
+    pantalla.casilla_tamano.setChecked(True)
+    assert pantalla.combo_tamano.isEnabled()
+
+
+def test_crear_pedido_con_tamano_persiste_la_condicion(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+    pantalla.casilla_tamano.setChecked(True)
+    pantalla.combo_tamano.setCurrentIndex(pantalla.combo_tamano.findData("Grande"))
+
+    pantalla._crear_pedido()
+
+    id_pedido = conn.execute("SELECT IdPedido FROM ListaEspera").fetchone()["IdPedido"]
+    condiciones = conn.execute(
+        "SELECT CondicionesConsultorio FROM ListaEspera WHERE IdPedido = ?", (id_pedido,)
+    ).fetchone()["CondicionesConsultorio"]
+    assert '"tamano": "Grande"' in condiciones
+
+
 def test_crear_pedido_sin_dias_no_persiste(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)

@@ -24,14 +24,13 @@ import json
 import sqlite3
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -49,6 +48,7 @@ from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import DIAS_SEMANA, periodo_actual
 from app.negocio.lista_espera import crear_pedido, listar_pedidos_con_coincidencia, marcar_descartado, marcar_resuelto
 from app.negocio.mensajes import nombre_para_mensaje
+from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
 from app.repositorio.registro import obtener_repositorio
 
 _COLOR_CELDA = {"verde": "#4CAF50", "amarillo": "#F5D547", "naranja": "#E07B39", "rojo": "#C0392B"}
@@ -59,6 +59,36 @@ _ETIQUETA_COLOR = {
     "rojo": "Combinar, distinto edificio",
 }
 _DIAS_PEDIDO = DIAS_SEMANA[:6]
+_TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
+
+
+class _SpinHora(QDoubleSpinBox):
+    """QDoubleSpinBox que se muestra como horario ("12:00hs", "9:30hs")
+    en vez del decimal con punto que arrastra Qt por defecto — sigue
+    siendo el mismo float por dentro (9.5 = 9:30) que espera
+    `app.negocio.lista_espera`, mismo criterio que `_SpinMonto` en Pagos
+    y `_SpinHora` en Oferta de consultorios."""
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802 (nombre impuesto por Qt)
+        horas = int(value)
+        minutos = round((value - horas) * 60)
+        return f"{horas}:{minutos:02d}hs"
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        texto = text.strip().lower().replace("hs", "").strip()
+        if ":" in texto:
+            horas_str, minutos_str = texto.split(":", 1)
+            try:
+                return float(horas_str or 0) + float(minutos_str or 0) / 60
+            except ValueError:
+                return 0.0
+        try:
+            return float(texto) if texto else 0.0
+        except ValueError:
+            return 0.0
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        return (QValidator.State.Acceptable, text, pos)
 
 
 class PantallaListaEspera(QWidget):
@@ -104,16 +134,18 @@ class PantallaListaEspera(QWidget):
         form.addWidget(self.lista_dias)
 
         fila_horario = QHBoxLayout()
-        self.spin_desde = QDoubleSpinBox()
+        self.spin_desde = _SpinHora()
         self.spin_desde.setRange(0, 23)
         self.spin_desde.setValue(9)
-        self.spin_hasta = QDoubleSpinBox()
+        self.spin_hasta = _SpinHora()
         self.spin_hasta.setRange(1, 24)
         self.spin_hasta.setValue(12)
         fila_horario.addWidget(QLabel("Desde"))
         fila_horario.addWidget(self.spin_desde)
+        fila_horario.addStretch()
         fila_horario.addWidget(QLabel("Hasta"))
         fila_horario.addWidget(self.spin_hasta)
+        fila_horario.addStretch()
         form.addLayout(fila_horario)
 
         fila_cantidad_horas = QHBoxLayout()
@@ -161,9 +193,17 @@ class PantallaListaEspera(QWidget):
             self.casilla_sin_combinar,
         ):
             form.addWidget(casilla)
-        self.campo_tamano = QLineEdit()
-        self.campo_tamano.setPlaceholderText("Tamaño (opcional)")
-        form.addWidget(self.campo_tamano)
+        fila_tamano = QHBoxLayout()
+        self.casilla_tamano = QCheckBox("Tamaño")
+        self.combo_tamano = QComboBox()
+        for etiqueta, valor in _TAMANOS:
+            self.combo_tamano.addItem(etiqueta, valor)
+        self.combo_tamano.setEnabled(False)
+        self.casilla_tamano.toggled.connect(self.combo_tamano.setEnabled)
+        fila_tamano.addWidget(self.casilla_tamano)
+        fila_tamano.addWidget(self.combo_tamano)
+        fila_tamano.addStretch()
+        form.addLayout(fila_tamano)
 
         self.campo_detalle = QPlainTextEdit()
         self.campo_detalle.setFixedHeight(60)
@@ -261,8 +301,8 @@ class PantallaListaEspera(QWidget):
             condiciones["aire"] = True
         if self.casilla_sin_combinar.isChecked():
             condiciones["sinCombinar"] = True
-        if self.campo_tamano.text().strip():
-            condiciones["tamano"] = self.campo_tamano.text().strip()
+        if self.casilla_tamano.isChecked():
+            condiciones["tamano"] = self.combo_tamano.currentData()
         return condiciones
 
     def _bloque_del_formulario(self) -> dict:
