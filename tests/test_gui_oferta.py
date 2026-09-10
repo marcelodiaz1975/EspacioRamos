@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QDialog, QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.oferta import PantallaOferta, _DialogoPrevisualizacion
+from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -52,7 +53,7 @@ def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn, profesio
     pantalla = PantallaOferta(conn)
     qtbot.addWidget(pantalla)
     completador = pantalla.combo_profesional.completer()
-    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
     assert pantalla.combo_profesional.itemText(0) == "Lic. Virginia Lo Veci"
 
 

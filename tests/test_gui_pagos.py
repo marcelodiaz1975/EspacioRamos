@@ -7,6 +7,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.pagos import PantallaPagos
+from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
@@ -639,8 +640,7 @@ def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
     qtbot.addWidget(pantalla)
     for panel in (pantalla.panel_pagos, pantalla.panel_planes):
         completador = panel.combo_profesional.completer()
-        assert completador.filterMode() == Qt.MatchFlag.MatchContains
-        assert completador.caseSensitivity() == Qt.CaseSensitivity.CaseInsensitive
+        assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
 
 
 def test_combo_profesional_registrar_pago_filtra_la_tabla(qtbot, conn):
@@ -940,4 +940,4 @@ def test_solapa_estado_cuenta_combo_es_buscable_por_codigo_o_nombre(qtbot, conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     completador = pantalla.panel_estado_cuenta.combo_profesional.completer()
-    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)

@@ -1,10 +1,11 @@
 import pytest
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.reservas import _FECHA_SIN_DATO, PantallaReservas
+from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
 from app.negocio.lista_espera import crear_pedido
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
@@ -43,7 +44,7 @@ def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
     qtbot.addWidget(pantalla)
     for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
         completador = panel.combo_profesional.completer()
-        assert completador.filterMode() == Qt.MatchFlag.MatchContains
+        assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
 
 
 def test_crear_reserva_regular_sin_conflicto_persiste(qtbot, conn):

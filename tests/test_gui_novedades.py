@@ -1,10 +1,11 @@
 import pytest
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.novedades import PantallaCargosEspeciales, PantallaRegistroAusencias
+from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import periodo_actual
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
@@ -61,12 +62,12 @@ def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
         pantalla_ausencias.panel_vacaciones, pantalla_ausencias.panel_licencias, pantalla_ausencias.panel_ausencias,
     ):
         completador = panel.combo_profesional.completer()
-        assert completador.filterMode() == Qt.MatchFlag.MatchContains
+        assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
 
     pantalla_cargos = PantallaCargosEspeciales(conn)
     qtbot.addWidget(pantalla_cargos)
     completador = pantalla_cargos.panel.combo_profesional.completer()
-    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
 
 
 def test_crear_vacacion_persiste(qtbot, conn):
@@ -1510,4 +1511,4 @@ def test_solapa_estado_cuenta_cargos_combo_es_buscable_por_codigo_o_nombre(qtbot
     pantalla = PantallaCargosEspeciales(conn)
     qtbot.addWidget(pantalla)
     completador = pantalla.panel_estado_cuenta.combo_profesional.completer()
-    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)

@@ -37,11 +37,16 @@ from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion
+from app.negocio.valores import horas_semanales_vigentes
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
 _COLOR_RESALTADO = QColor("#D9D9D9")
 _ANCHO_COMBO_PROFESIONAL = 260
+
+
+def _fmt_horas(horas: float) -> str:
+    return str(int(horas)) if horas == int(horas) else f"{horas:.1f}"
 
 
 class ProcesoLiquidacion(QWidget):
@@ -101,22 +106,25 @@ class _PanelEmisionArchivos(QWidget):
         layout.addLayout(fila_filtros)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(5)
+        self.tabla.setColumnCount(6)
         self.tabla.setHorizontalHeaderLabels(
-            ["Incluir", "Profesional", "Saldo anterior", "Monto a generar", "Estado"]
+            ["Incluir", "Profesional", "Horas semanales", "Saldo anterior", "Monto a generar", "Estado"]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.tabla, stretch=1)
 
         fila_botones = QHBoxLayout()
-        boton_emitir = QPushButton("Emitir liquidaciones seleccionadas y generar PDFs")
-        boton_emitir.setObjectName("botonPrimario")
-        boton_emitir.clicked.connect(self._emitir_seleccionadas)
-        fila_botones.addWidget(boton_emitir)
-        boton_emitir_no_enviadas = QPushButton("Emitir todas las liquidaciones que no se hayan enviado")
-        boton_emitir_no_enviadas.clicked.connect(self._emitir_no_enviadas)
-        fila_botones.addWidget(boton_emitir_no_enviadas)
+        boton_emitir_seleccionadas = QPushButton("Emitir liquidaciones seleccionadas")
+        boton_emitir_seleccionadas.setObjectName("botonPrimario")
+        boton_emitir_seleccionadas.clicked.connect(self._emitir_seleccionadas)
+        fila_botones.addWidget(boton_emitir_seleccionadas)
+        boton_emitir_pendientes = QPushButton("Emitir liquidaciones pendientes")
+        boton_emitir_pendientes.clicked.connect(self._emitir_pendientes)
+        fila_botones.addWidget(boton_emitir_pendientes)
+        boton_emitir_todas = QPushButton("Emitir todas las liquidaciones")
+        boton_emitir_todas.clicked.connect(self._emitir_todas)
+        fila_botones.addWidget(boton_emitir_todas)
         layout.addLayout(fila_botones)
 
         self.campo_periodo.setText(periodo_actual(self.conn))
@@ -129,6 +137,7 @@ class _PanelEmisionArchivos(QWidget):
         propósito) y orden fijo: no enviadas primero, luego por código de
         profesional — confirmado por la clienta."""
         periodo = self._periodo()
+        hoy = fecha_actual(self.conn).isoformat()
         profesionales = obtener_repositorio(self.conn, "Profesional").listar(CategoriaProfesional="R")
         filas: list[dict] = []
         for profesional in profesionales:
@@ -145,9 +154,10 @@ class _PanelEmisionArchivos(QWidget):
                 (profesional["IdProfesional"], periodo),
             ).fetchone()
             estado = ultima["EstadoEnvio"] if ultima else "Sin emitir"
+            horas_semanales = horas_semanales_vigentes(self.conn, [profesional["IdProfesional"]], hoy)
             filas.append({
                 "profesional": profesional, "monto_generado": monto_generado, "monto_error": monto_error,
-                "estado": estado,
+                "estado": estado, "horas_semanales": horas_semanales,
             })
         filas.sort(key=lambda f: _numero_codigo(f["profesional"]["IdCodigo"]))
         filas.sort(key=lambda f: f["estado"] == "Enviada")  # estable: no enviadas arriba
@@ -163,12 +173,13 @@ class _PanelEmisionArchivos(QWidget):
             self._casillas.append(casilla)
 
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(_texto_profesional(profesional)))
-            self.tabla.setItem(fila_idx, 2, item_monto(profesional["SaldoCuentaAnterior"]))
+            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_fmt_horas(f["horas_semanales"])))
+            self.tabla.setItem(fila_idx, 3, item_monto(profesional["SaldoCuentaAnterior"]))
             if f["monto_error"] is not None:
-                self.tabla.setItem(fila_idx, 3, QTableWidgetItem(f["monto_error"]))
+                self.tabla.setItem(fila_idx, 4, QTableWidgetItem(f["monto_error"]))
             else:
-                self.tabla.setItem(fila_idx, 3, item_monto(f["monto_generado"]))
-            self.tabla.setItem(fila_idx, 4, QTableWidgetItem(f["estado"]))
+                self.tabla.setItem(fila_idx, 4, item_monto(f["monto_generado"]))
+            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(f["estado"]))
         self.tabla.resizeColumnsToContents()
         self._aplicar_resaltado()
 
@@ -184,12 +195,12 @@ class _PanelEmisionArchivos(QWidget):
             resaltar = (
                 self._id_resaltado is not None and f["profesional"]["IdProfesional"] == self._id_resaltado
             )
-            for col in range(1, 5):
+            for col in range(1, 6):
                 item = self.tabla.item(fila_idx, col)
                 if item is not None:
                     item.setBackground(_COLOR_RESALTADO if resaltar else QBrush())
 
-    def _emitir(self, seleccionados: list[sqlite3.Row]) -> None:
+    def _emitir(self, seleccionados: list[sqlite3.Row], mensaje_confirmacion: str) -> None:
         periodo = self._periodo()
         if carpeta_base(self.conn) is None:
             QMessageBox.warning(
@@ -199,11 +210,7 @@ class _PanelEmisionArchivos(QWidget):
         if not seleccionados:
             QMessageBox.information(self, "Emitir liquidaciones", "No hay profesionales seleccionados.")
             return
-        confirmacion = QMessageBox.question(
-            self, "Emitir liquidaciones",
-            f"¿Confirmás emitir la liquidación de {periodo} para {len(seleccionados)} profesional(es) "
-            f"y generar sus PDF?",
-        )
+        confirmacion = QMessageBox.question(self, "Emitir liquidaciones", mensaje_confirmacion)
         if confirmacion != QMessageBox.StandardButton.Yes:
             return
 
@@ -232,12 +239,40 @@ class _PanelEmisionArchivos(QWidget):
         self.actualizar()
 
     def _emitir_seleccionadas(self) -> None:
+        """Emite lo tildado con los checks, sea cual sea su estado actual
+        — si alguna ya estaba emitida (o enviada), se reemite: queda una
+        liquidación nueva y pasa a "Regenerada no enviada" (o "No
+        enviada" si nunca se había enviado)."""
         seleccionados = [f["profesional"] for f, casilla in zip(self._filas, self._casillas) if casilla.isChecked()]
-        self._emitir(seleccionados)
+        self._emitir(
+            seleccionados,
+            f"¿Confirmás emitir la liquidación de {self._periodo()} para {len(seleccionados)} "
+            "profesional(es) seleccionado(s) y generar sus PDF?",
+        )
 
-    def _emitir_no_enviadas(self) -> None:
-        seleccionados = [f["profesional"] for f in self._filas if f["estado"] != "Enviada"]
-        self._emitir(seleccionados)
+    def _emitir_pendientes(self) -> None:
+        """Solo las que todavía no se generaron ninguna vez este período
+        (estado "Sin emitir") — no toca las que ya están emitidas,
+        enviadas o no."""
+        seleccionados = [f["profesional"] for f in self._filas if f["estado"] == "Sin emitir"]
+        self._emitir(
+            seleccionados,
+            f"¿Confirmás emitir la liquidación de {self._periodo()} para {len(seleccionados)} "
+            "profesional(es) pendientes (sin emitir) y generar sus PDF?",
+        )
+
+    def _emitir_todas(self) -> None:
+        """Reemite absolutamente a todos, sin importar el estado actual
+        — incluidas las ya enviadas, que vuelven a "Regenerada no
+        enviada". Acción más drástica que las otras dos, con una
+        confirmación bien explícita."""
+        seleccionados = [f["profesional"] for f in self._filas]
+        self._emitir(
+            seleccionados,
+            f"Esto vuelve a generar la liquidación de TODOS los profesionales del período {self._periodo()} "
+            f"({len(seleccionados)} en total), incluidas las que ya se emitieron o enviaron — todas quedan "
+            "marcadas como no enviadas de nuevo.\n\n¿Confirmás continuar?",
+        )
 
 
 class _PanelEstadoCuentaLiquidaciones(QWidget):

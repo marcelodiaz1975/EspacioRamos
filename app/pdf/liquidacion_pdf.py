@@ -69,7 +69,8 @@ def nombre_archivo_liquidacion(periodo: str, profesional: sqlite3.Row) -> str:
     nombre = profesional["NombrePila"] or ""
     apellido = profesional["Apellido"]
     partes = " ".join(p for p in (tratamiento, nombre, apellido) if p)
-    return f"{periodo} - Liquidación {partes}.pdf"
+    sufijo_codigo = f" - {profesional['IdCodigo']}" if profesional["IdCodigo"] else ""
+    return f"{periodo} - Liquidación {partes}{sufijo_codigo}.pdf"
 
 
 def _nombre_completo(profesional: sqlite3.Row) -> str:

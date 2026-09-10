@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.lista_espera import PantallaListaEspera
+from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 
 
 @pytest.fixture
@@ -43,7 +44,7 @@ def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn):
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
     completador = pantalla.combo_profesional.completer()
-    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
     assert pantalla.combo_profesional.itemText(0) == "R1 - Virginia Lo Veci"
 
 

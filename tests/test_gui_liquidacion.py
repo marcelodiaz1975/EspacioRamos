@@ -6,6 +6,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
+from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.repositorio.registro import obtener_repositorio
@@ -65,21 +66,49 @@ def test_calcula_monto_a_generar_sin_reservas(qtbot, conn):
     _crear_profesional(conn)
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.panel_emision.tabla.item(0, 3).text() == "$ 0,00"
-    assert pantalla.panel_emision.tabla.item(0, 4).text() == "Sin emitir"
+    assert pantalla.panel_emision.tabla.item(0, 4).text() == "$ 0,00"
+    assert pantalla.panel_emision.tabla.item(0, 5).text() == "Sin emitir"
     assert [
         pantalla.panel_emision.tabla.horizontalHeaderItem(i).text()
         for i in range(pantalla.panel_emision.tabla.columnCount())
-    ] == ["Incluir", "Profesional", "Saldo anterior", "Monto a generar", "Estado"]
+    ] == ["Incluir", "Profesional", "Horas semanales", "Saldo anterior", "Monto a generar", "Estado"]
+
+
+def test_columna_horas_semanales_suma_las_reservas_regulares_vigentes(qtbot, conn):
+    id_prof = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000,
+    )
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=11, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_emision.tabla.item(0, 2).text() == "2"
 
 
 def test_saldo_anterior_negativo_se_colorea_en_rojo(qtbot, conn):
     _crear_profesional(conn, saldo_anterior=-500)
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
-    item = pantalla.panel_emision.tabla.item(0, 2)
+    item = pantalla.panel_emision.tabla.item(0, 3)
     assert item.text() == formatear_moneda(-500)
     assert item.foreground().color() == QColor(COLOR_ROJO)
+
+
+def test_hay_tres_botones_de_emision(qtbot, conn):
+    from PySide6.QtWidgets import QPushButton
+
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    textos = {b.text() for b in pantalla.panel_emision.findChildren(QPushButton)}
+    assert "Emitir liquidaciones seleccionadas" in textos
+    assert "Emitir liquidaciones pendientes" in textos
+    assert "Emitir todas las liquidaciones" in textos
 
 
 def test_ningun_profesional_seleccionado_por_defecto(qtbot, conn):
@@ -165,7 +194,10 @@ def test_emitir_sin_seleccionados_no_emite(qtbot, conn, tmp_path):
     assert conn.execute("SELECT COUNT(*) c FROM LiquidacionEmitida").fetchone()["c"] == 0
 
 
-def test_emitir_no_enviadas_emite_las_sin_emitir_y_las_no_enviadas(qtbot, conn, tmp_path):
+def test_emitir_pendientes_no_reemite_las_que_ya_estaban_emitidas(qtbot, conn, tmp_path):
+    """"Emitir liquidaciones pendientes" es solo para las "Sin emitir" —
+    a diferencia del viejo botón único, no debe tocar una que ya se
+    generó (aunque todavía no se haya enviado)."""
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     id_r1 = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
     id_r3 = _crear_profesional(conn, apellido="Quito", id_codigo="R3")
@@ -181,12 +213,35 @@ def test_emitir_no_enviadas_emite_las_sin_emitir_y_las_no_enviadas(qtbot, conn, 
     conn.commit()
     panel.actualizar()
 
-    panel._emitir_no_enviadas()
+    panel._emitir_pendientes()
 
-    filas = obtener_repositorio(conn, "LiquidacionEmitida").listar()
-    profesionales_emitidos = {f["IdProfesional"] for f in filas}
-    assert id_r1 in profesionales_emitidos
-    assert id_r3 in profesionales_emitidos
+    repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
+    assert len(repo_liq.listar(IdProfesional=id_r1)) == 1  # no se reemitió: ya no está "Sin emitir"
+    assert len(repo_liq.listar(IdProfesional=id_r3)) == 1  # esta sí, estaba pendiente
+
+
+def test_emitir_todas_reemite_incluso_las_ya_enviadas(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    id_r1 = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    conn.commit()
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_emision
+
+    from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
+
+    periodo = panel._periodo()
+    emitir_liquidacion(conn, id_profesional=id_r1, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_r1, periodo=periodo, enviada=True)
+    conn.commit()
+    panel.actualizar()
+
+    panel._emitir_todas()
+
+    filas = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_r1)
+    assert len(filas) == 2  # se reemitió aunque ya estaba enviada
+    ultima = max(filas, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
 
 
 def test_solapa_estado_cuenta_lista_liquidaciones_del_profesional(qtbot, conn):
@@ -209,9 +264,7 @@ def test_solapa_estado_cuenta_lista_liquidaciones_del_profesional(qtbot, conn):
 
 
 def test_solapa_estado_cuenta_combo_es_buscable_por_codigo_o_nombre(qtbot, conn):
-    from PySide6.QtCore import Qt
-
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
     completador = pantalla.panel_estado_cuenta.combo_profesional.completer()
-    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)

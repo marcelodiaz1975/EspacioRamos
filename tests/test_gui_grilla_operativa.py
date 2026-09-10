@@ -1,10 +1,10 @@
 import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
+from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.grilla_operativa import AZUL_OSCURO, BLANCO, ROJO
 from app.repositorio.registro import obtener_repositorio
 
@@ -129,7 +129,7 @@ def test_campo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn):
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
     completador = widget.campo_profesional.completer()
-    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
 
 
 def test_filtro_profesional_pinta_azul(qtbot, conn):

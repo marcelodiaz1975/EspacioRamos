@@ -1,5 +1,4 @@
 import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from app.db.init_db import init_database
@@ -14,6 +13,7 @@ from app.gui.pantallas.llaves import (
     _DialogoPerdidaStock,
     _DialogoTipo,
 )
+from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.llaves import crear_llave, ingresar_copias
 from app.repositorio.registro import obtener_repositorio
 
@@ -48,7 +48,7 @@ def test_combo_profesional_asignar_es_buscable_por_codigo_o_nombre(qtbot, conn):
     dialogo = _DialogoAsignar(conn, tipo, 1)
     qtbot.addWidget(dialogo)
     completador = dialogo.combo_profesional.completer()
-    assert completador.filterMode() == Qt.MatchFlag.MatchContains
+    assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
 
 
 def _crear_edificio_con_unidad(conn, nombre="Ramos 1", departamento="1ro A"):

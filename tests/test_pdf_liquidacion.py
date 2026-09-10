@@ -41,7 +41,7 @@ def consultorio(conn):
 @pytest.fixture
 def profesional(conn, consultorio):
     id_prof = obtener_repositorio(conn, "Profesional").crear(
-        CategoriaProfesional="R", Apellido="Lo Veci", NombrePila="Marcela", Tratamiento="Lic.",
+        CategoriaProfesional="R", Apellido="Lo Veci", NombrePila="Marcela", Tratamiento="Lic.", IdCodigo="R1",
     )
     obtener_repositorio(conn, "ReservaRegular").crear(
         IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana="Lunes",
@@ -52,7 +52,15 @@ def profesional(conn, consultorio):
 
 def test_nombre_archivo_sigue_el_formato_del_documento(conn, profesional):
     prof = obtener_repositorio(conn, "Profesional").obtener(profesional)
-    assert nombre_archivo_liquidacion("2026-08", prof) == "2026-08 - Liquidación Lic. Marcela Lo Veci.pdf"
+    assert nombre_archivo_liquidacion("2026-08", prof) == "2026-08 - Liquidación Lic. Marcela Lo Veci - R1.pdf"
+
+
+def test_nombre_archivo_sin_codigo_no_agrega_sufijo(conn, consultorio):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Sosa", NombrePila="Pablo", Tratamiento="Lic.",
+    )
+    prof = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    assert nombre_archivo_liquidacion("2026-08", prof) == "2026-08 - Liquidación Lic. Pablo Sosa.pdf"
 
 
 def test_items_cuenta_respeta_el_orden_de_dc01(conn, profesional):
