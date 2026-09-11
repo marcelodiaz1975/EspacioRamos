@@ -235,6 +235,8 @@ def _consultorios_candidatos(conn: sqlite3.Connection, condiciones: dict) -> lis
             continue
         if condiciones.get("aire") and not c["AireAcondicionado"]:
             continue
+        if condiciones.get("placard") and not c["Placard"]:
+            continue
         tamano_minimo = condiciones.get("tamano")
         if tamano_minimo:
             rango_consultorio = _JERARQUIA_TAMANO.get(c["TamanoClasificacion"])

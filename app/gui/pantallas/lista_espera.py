@@ -10,21 +10,30 @@ profesional algo cargado acá.
 Un pedido puede necesitar varios bloques día(s)+horario a la vez (ej.
 "martes o jueves 3hs entre 14 y 18hs" Y "sábado de 9 a 12hs"): los campos
 de día/horario/cantidad de horas/combinación de días arman UN bloque por
-vez, "Agregar bloque…" lo suma a la tabla de bloques del pedido, y
-"Combinación de bloques" define si hace falta que se den todos (Y) o
-alcanza con uno (O) — irrelevante con un solo bloque. Al crear el pedido
-se toman los bloques ya agregados a la tabla MÁS el que esté cargado en
-ese momento en el formulario (si tiene algún día tildado) — así el caso
-común de un solo bloque sigue siendo un único paso, sin tener que pasar
-por "Agregar bloque…", y agregar uno de más antes de crear tampoco se
-pierde.
+vez, "Agregar bloque…" lo suma a la tabla de bloques del pedido —
+confirmado por la clienta: es obligatorio pasar por ese botón, no hay
+fallback que tome lo cargado en el formulario si no se agregó ningún
+bloque. Con un solo bloque, "Combinación de bloques" muestra "Bloque
+único" fijo (sin sentido elegir O/Y con uno solo); recién con más de uno
+se habilita para elegir si hace falta que se den TODOS (Y) o alcanza con
+uno (O).
 
 Localidad/Edificio/Unidad es la misma cascada compacta y colapsable de
 Oferta de consultorios (reusa sus mismos helpers privados en
 `app.gui.widgets.grilla_operativa`) para el caso de un profesional que
 pide expresamente una unidad puntual — o localidad/edificio, si el
 sistema llega a tener más de uno — en vez de "cualquiera"; por defecto
-arranca en "Todas/Todos" en los tres niveles."""
+arranca en "Todas/Todos" en los tres niveles.
+
+Un profesional no puede tener dos pedidos Activos a la vez (confirmado
+por la clienta): al intentar crear uno para alguien que ya tiene uno, se
+ofrece editar el existente en su lugar en vez de bloquear sin más — ver
+`_crear_pedido`. Esto se resuelve en la pantalla (para poder ofrecer la
+alternativa de editar); `crear_pedido` en `app.negocio.lista_espera` no
+lo valida a nivel de datos porque `avance_mes` necesita poder dejar más
+de un pedido Activo del mismo profesional en escenarios de limpieza de
+fin de mes (ver sus tests) — si se quiere blindar también a nivel de
+datos, hay que revisar antes esos casos."""
 from __future__ import annotations
 
 import json
@@ -40,6 +49,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QListWidgetItem,
     QMessageBox,
@@ -109,6 +119,15 @@ def _texto_condiciones(conn: sqlite3.Connection, condiciones: dict) -> str:
         palabra = "unidad" if len(ids_unidad) == 1 else "unidades"
         partes.append(f"Restringido a {len(ids_unidad)} {palabra}")
     return "; ".join(partes) if partes else "Sin condiciones"
+
+
+def _item_con_tooltip(texto: str) -> QTableWidgetItem:
+    """Mismo texto como tooltip: al pasar el mouse por una celda con
+    contenido recortado (columna angosta, texto largo) se puede leer
+    completo sin tener que agrandar la columna a mano."""
+    item = QTableWidgetItem(texto)
+    item.setToolTip(texto)
+    return item
 
 
 def _texto_profesional_con_contacto(profesional: sqlite3.Row) -> str:
@@ -195,10 +214,6 @@ class PantallaListaEspera(QWidget):
         self.lista_unidad.itemSelectionChanged.connect(self._unidad_seleccion_cambio)
         self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
         col_quien.addWidget(self._filtro_unidad)
-        col_quien.addStretch()
-
-        col_cuando = QVBoxLayout()
-        col_cuando.addWidget(QLabel("Combinación de días y horarios"))
 
         contenedor_dias = QWidget()
         grid_dias = QGridLayout(contenedor_dias)
@@ -209,12 +224,12 @@ class PantallaListaEspera(QWidget):
             check = QCheckBox(dia)
             self._checks_dia[dia] = check
             grid_dias.addWidget(check, i // columnas, i % columnas)
-        col_cuando.addWidget(contenedor_dias)
+        col_quien.addWidget(contenedor_dias)
 
         self.combo_tipo = QComboBox()
         self.combo_tipo.addItem("Alcanza con un día (O)", "O")
         self.combo_tipo.addItem("Todos los días (Y)", "Y")
-        col_cuando.addWidget(self.combo_tipo)
+        col_quien.addWidget(self.combo_tipo)
 
         fila_horario = QHBoxLayout()
         self.spin_desde = _SpinHora()
@@ -229,7 +244,7 @@ class PantallaListaEspera(QWidget):
         fila_horario.addWidget(QLabel("Hasta"))
         fila_horario.addWidget(self.spin_hasta)
         fila_horario.addStretch()
-        col_cuando.addLayout(fila_horario)
+        col_quien.addLayout(fila_horario)
 
         fila_cantidad_horas = QHBoxLayout()
         self.casilla_cantidad_horas = QCheckBox("Cantidad de horas dentro del rango (en vez del rango completo)")
@@ -240,44 +255,44 @@ class PantallaListaEspera(QWidget):
         self.casilla_cantidad_horas.toggled.connect(self.spin_cantidad_horas.setEnabled)
         fila_cantidad_horas.addWidget(self.casilla_cantidad_horas)
         fila_cantidad_horas.addWidget(self.spin_cantidad_horas)
-        col_cuando.addLayout(fila_cantidad_horas)
+        col_quien.addLayout(fila_cantidad_horas)
 
         boton_agregar_bloque = QPushButton("Agregar bloque…")
         boton_agregar_bloque.clicked.connect(self._agregar_bloque)
-        col_cuando.addWidget(boton_agregar_bloque)
+        col_quien.addWidget(boton_agregar_bloque)
+        col_quien.addStretch()
 
-        col_cuando.addWidget(QLabel("Bloques del pedido (si no se agrega ninguno, se usa el de arriba)"))
+        col_cuando = QVBoxLayout()
+        col_cuando.addWidget(QLabel("Bloques del pedido"))
         self.tabla_bloques = QTableWidget()
-        self.tabla_bloques.setColumnCount(3)
-        self.tabla_bloques.setHorizontalHeaderLabels(["Días", "Horario", "Combinación de días"])
+        self.tabla_bloques.setColumnCount(4)
+        self.tabla_bloques.setHorizontalHeaderLabels(["Días", "Horario", "Comb. días", "Horas mínimas"])
         self.tabla_bloques.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_bloques.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_bloques.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla_bloques.setMaximumHeight(120)
+        self.tabla_bloques.setMaximumHeight(160)
+        self.tabla_bloques.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla_bloques.itemSelectionChanged.connect(self._actualizar_boton_quitar_bloque)
         col_cuando.addWidget(self.tabla_bloques)
-        boton_quitar_bloque = QPushButton("Quitar bloque")
-        boton_quitar_bloque.clicked.connect(self._quitar_bloque)
-        col_cuando.addWidget(boton_quitar_bloque)
 
+        col_cuando.addWidget(QLabel("Combinación de bloques"))
         self.combo_tipo_bloques = QComboBox()
-        self.combo_tipo_bloques.addItem("Alcanza con un bloque (O)", "O")
-        self.combo_tipo_bloques.addItem("Todos los bloques (Y)", "Y")
-        col_cuando.addWidget(QLabel("Combinación de bloques (irrelevante con uno solo)"))
         col_cuando.addWidget(self.combo_tipo_bloques)
+
+        self.boton_quitar_bloque = QPushButton("Quitar bloque")
+        self.boton_quitar_bloque.setEnabled(False)
+        self.boton_quitar_bloque.clicked.connect(self._quitar_bloque)
+        col_cuando.addWidget(self.boton_quitar_bloque)
         col_cuando.addStretch()
 
         col_condiciones = QVBoxLayout()
-        col_condiciones.addWidget(QLabel("Características pedidas"))
-        contenedor_caracteristicas = QWidget()
-        grid_caracteristicas = QGridLayout(contenedor_caracteristicas)
-        grid_caracteristicas.setContentsMargins(0, 0, 0, 0)
+        col_condiciones.addWidget(QLabel("Características de los consultorios"))
         self.casilla_ventana = QCheckBox("Con ventana")
         self.casilla_camilla = QCheckBox("Apto camilla")
-        self.casilla_sin_combinar = QCheckBox("Sin combinación de consultorios")
+        col_condiciones.addWidget(self.casilla_ventana)
+        col_condiciones.addWidget(self.casilla_camilla)
 
-        contenedor_tamano = QWidget()
-        fila_tamano = QHBoxLayout(contenedor_tamano)
-        fila_tamano.setContentsMargins(0, 0, 0, 0)
+        fila_tamano = QHBoxLayout()
         self.casilla_tamano = QCheckBox("Tamaño mínimo")
         self.combo_tamano = QComboBox()
         for etiqueta, valor in _TAMANOS_MINIMOS:
@@ -286,37 +301,30 @@ class PantallaListaEspera(QWidget):
         self.casilla_tamano.toggled.connect(self.combo_tamano.setEnabled)
         fila_tamano.addWidget(self.casilla_tamano)
         fila_tamano.addWidget(self.combo_tamano)
+        col_condiciones.addLayout(fila_tamano)
 
-        grid_caracteristicas.addWidget(self.casilla_ventana, 0, 0)
-        grid_caracteristicas.addWidget(self.casilla_camilla, 0, 1)
-        grid_caracteristicas.addWidget(contenedor_tamano, 1, 0)
-        grid_caracteristicas.addWidget(self.casilla_sin_combinar, 1, 1)
-        col_condiciones.addWidget(contenedor_caracteristicas)
+        self.casilla_placard = QCheckBox("Con placard")
+        self.casilla_aire = QCheckBox("Con aire acondicionado")
+        self.casilla_sin_combinar = QCheckBox("Sin combinación de consultorios")
+        col_condiciones.addWidget(self.casilla_placard)
+        col_condiciones.addWidget(self.casilla_aire)
+        col_condiciones.addWidget(self.casilla_sin_combinar)
 
         self.campo_detalle = QPlainTextEdit()
         self.campo_detalle.setFixedHeight(60)
         col_condiciones.addWidget(QLabel("Comentarios"))
         col_condiciones.addWidget(self.campo_detalle)
+
+        self.boton_crear = QPushButton("Crear pedido")
+        self.boton_crear.setObjectName("botonPrimario")
+        self.boton_crear.clicked.connect(self._crear_pedido)
+        col_condiciones.addWidget(self.boton_crear)
         col_condiciones.addStretch()
 
         fila_columnas.addLayout(col_quien, 1)
         fila_columnas.addLayout(col_cuando, 1)
         fila_columnas.addLayout(col_condiciones, 1)
         layout.addLayout(fila_columnas)
-
-        fila_botones = QHBoxLayout()
-        self.boton_crear = QPushButton("Crear pedido")
-        self.boton_crear.setObjectName("botonPrimario")
-        self.boton_crear.clicked.connect(self._crear_pedido)
-        boton_descartar = QPushButton("Descartar pedido")
-        boton_descartar.clicked.connect(self._descartar)
-        boton_editar = QPushButton("Editar pedido")
-        boton_editar.clicked.connect(self._editar_pedido)
-        fila_botones.addWidget(self.boton_crear)
-        fila_botones.addWidget(boton_descartar)
-        fila_botones.addWidget(boton_editar)
-        fila_botones.addStretch()
-        layout.addLayout(fila_botones)
 
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(9)
@@ -328,7 +336,18 @@ class PantallaListaEspera(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._mostrar_cobertura)
+        self.tabla.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.tabla, stretch=1)
+
+        fila_botones = QHBoxLayout()
+        boton_descartar = QPushButton("Descartar pedido")
+        boton_descartar.clicked.connect(self._descartar)
+        boton_editar = QPushButton("Editar pedido")
+        boton_editar.clicked.connect(self._editar_pedido)
+        fila_botones.addStretch()
+        fila_botones.addWidget(boton_descartar)
+        fila_botones.addWidget(boton_editar)
+        layout.addLayout(fila_botones)
 
         layout.addWidget(QLabel("Cobertura de la coincidencia seleccionada"))
         self.texto_cobertura = QPlainTextEdit()
@@ -336,6 +355,7 @@ class PantallaListaEspera(QWidget):
         self.texto_cobertura.setFixedHeight(110)
         layout.addWidget(self.texto_cobertura)
 
+        self._actualizar_combo_tipo_bloques()
         self._cargar_profesionales()
         self._cargar_localidades()
 
@@ -440,39 +460,39 @@ class PantallaListaEspera(QWidget):
         repo_bloque = obtener_repositorio(self.conn, "ListaEsperaBloque")
         for fila_idx, (pedido, coincidencia) in enumerate(resultado):
             fecha = date.fromisoformat(pedido["FechaPedido"]).strftime("%d-%m-%Y")
-            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(fecha))
+            self.tabla.setItem(fila_idx, 0, _item_con_tooltip(fecha))
 
             profesional = repo_profesional.obtener(pedido["IdProfesional"])
             nombre = _texto_profesional_con_contacto(profesional) if profesional else "?"
-            self.tabla.setItem(fila_idx, 1, QTableWidgetItem(nombre))
+            self.tabla.setItem(fila_idx, 1, _item_con_tooltip(nombre))
 
             bloques = repo_bloque.listar(IdPedido=pedido["IdPedido"])
             separador = " Y " if pedido["TipoCombinacion"] == "Y" else " O "
             self.tabla.setItem(
                 fila_idx, 2,
-                QTableWidgetItem(separador.join(", ".join(json.loads(b["Dias"] or "[]")) for b in bloques)),
+                _item_con_tooltip(separador.join(", ".join(json.loads(b["Dias"] or "[]")) for b in bloques)),
             )
             self.tabla.setItem(
                 fila_idx, 3,
-                QTableWidgetItem(
+                _item_con_tooltip(
                     separador.join(_horario_texto(b["HorarioDesde"], b["HorarioHasta"]) for b in bloques)
                 ),
             )
             self.tabla.setItem(
-                fila_idx, 4, QTableWidgetItem(" / ".join(b["TipoCombinacionDias"] for b in bloques)),
+                fila_idx, 4, _item_con_tooltip(" / ".join(b["TipoCombinacionDias"] for b in bloques)),
             )
             etiqueta_bloques = "Todos los bloques (Y)" if pedido["TipoCombinacion"] == "Y" else "Alcanza con un bloque (O)"
-            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(etiqueta_bloques))
+            self.tabla.setItem(fila_idx, 5, _item_con_tooltip(etiqueta_bloques))
 
             condiciones = json.loads(pedido["CondicionesConsultorio"] or "{}")
-            self.tabla.setItem(fila_idx, 6, QTableWidgetItem(_texto_condiciones(self.conn, condiciones)))
+            self.tabla.setItem(fila_idx, 6, _item_con_tooltip(_texto_condiciones(self.conn, condiciones)))
 
             color = coincidencia.color if coincidencia else None
-            item_color = QTableWidgetItem(_ETIQUETA_COLOR.get(color, "Sin cobertura"))
+            item_color = _item_con_tooltip(_ETIQUETA_COLOR.get(color, "Sin cobertura"))
             if color:
                 item_color.setBackground(QColor(_COLOR_CELDA[color]))
             self.tabla.setItem(fila_idx, 7, item_color)
-            self.tabla.setItem(fila_idx, 8, QTableWidgetItem(pedido["Detalle"] or ""))
+            self.tabla.setItem(fila_idx, 8, _item_con_tooltip(pedido["Detalle"] or ""))
         self.tabla.resizeColumnsToContents()
 
     def _mostrar_cobertura(self) -> None:
@@ -517,6 +537,10 @@ class PantallaListaEspera(QWidget):
             condiciones["ventana"] = True
         if self.casilla_camilla.isChecked():
             condiciones["aptoCamilla"] = True
+        if self.casilla_placard.isChecked():
+            condiciones["placard"] = True
+        if self.casilla_aire.isChecked():
+            condiciones["aire"] = True
         if self.casilla_sin_combinar.isChecked():
             condiciones["sinCombinar"] = True
         if self.casilla_tamano.isChecked():
@@ -540,9 +564,36 @@ class PantallaListaEspera(QWidget):
             self.tabla_bloques.setItem(
                 fila_idx, 1, QTableWidgetItem(_horario_texto(bloque["horario_desde"], bloque["horario_hasta"])),
             )
-            etiqueta_tipo = "Todos los días (Y)" if bloque["tipo_combinacion_dias"] == "Y" else "Alcanza con un día (O)"
+            etiqueta_tipo = "Y" if bloque["tipo_combinacion_dias"] == "Y" else "O"
             self.tabla_bloques.setItem(fila_idx, 2, QTableWidgetItem(etiqueta_tipo))
-        self.tabla_bloques.resizeColumnsToContents()
+            cantidad_horas = bloque.get("cantidad_horas_requeridas")
+            texto_horas = hora_fmt(cantidad_horas) if cantidad_horas else "Completo"
+            self.tabla_bloques.setItem(fila_idx, 3, QTableWidgetItem(texto_horas))
+        self._actualizar_combo_tipo_bloques()
+        self._actualizar_boton_quitar_bloque()
+
+    def _actualizar_combo_tipo_bloques(self) -> None:
+        """Con un solo bloque (o ninguno) la combinación entre bloques no
+        tiene sentido — el combo se deshabilita mostrando "Bloque único"
+        en gris. Recién con más de uno se habilita para elegir entre
+        "Alcanza con un bloque (O)" y "Necesarios todos los bloques (Y)"."""
+        valor_actual = self.combo_tipo_bloques.currentData()
+        self.combo_tipo_bloques.blockSignals(True)
+        self.combo_tipo_bloques.clear()
+        if len(self._bloques_pendientes) <= 1:
+            self.combo_tipo_bloques.addItem("Bloque único", "O")
+            self.combo_tipo_bloques.setEnabled(False)
+        else:
+            self.combo_tipo_bloques.addItem("Alcanza con un bloque (O)", "O")
+            self.combo_tipo_bloques.addItem("Necesarios todos los bloques (Y)", "Y")
+            indice = self.combo_tipo_bloques.findData(valor_actual)
+            self.combo_tipo_bloques.setCurrentIndex(indice if indice >= 0 else 0)
+            self.combo_tipo_bloques.setEnabled(True)
+        self.combo_tipo_bloques.blockSignals(False)
+
+    def _actualizar_boton_quitar_bloque(self) -> None:
+        filas = self.tabla_bloques.selectionModel().selectedRows()
+        self.boton_quitar_bloque.setEnabled(bool(filas))
 
     def _agregar_bloque(self) -> None:
         bloque = self._bloque_del_formulario()
@@ -568,9 +619,25 @@ class PantallaListaEspera(QWidget):
         if id_profesional is None:
             QMessageBox.warning(self, titulo, "No hay profesionales cargados.")
             return
+        if not self._bloques_pendientes:
+            QMessageBox.warning(self, titulo, 'Agregá al menos un bloque con "Agregar bloque…" antes de continuar.')
+            return
+
+        if not en_edicion:
+            pedidos_activos = obtener_repositorio(self.conn, "ListaEspera").listar(
+                IdProfesional=id_profesional, Estado="Activo",
+            )
+            if pedidos_activos:
+                respuesta = QMessageBox.question(
+                    self, titulo,
+                    "Este profesional ya tiene un pedido activo — no puede haber dos al mismo tiempo. "
+                    "¿Querés editarlo en su lugar?",
+                )
+                if respuesta == QMessageBox.StandardButton.Yes:
+                    self._cargar_pedido_en_formulario(pedidos_activos[0])
+                return
+
         bloques = list(self._bloques_pendientes)
-        if self._dias_seleccionados():
-            bloques.append(self._bloque_del_formulario())
         try:
             if en_edicion:
                 editar_pedido(
@@ -612,7 +679,13 @@ class PantallaListaEspera(QWidget):
         if pedido is None:
             QMessageBox.warning(self, "Editar pedido", "Elegí un pedido de la tabla para editar.")
             return
+        self._cargar_pedido_en_formulario(pedido)
 
+    def _cargar_pedido_en_formulario(self, pedido: sqlite3.Row) -> None:
+        """Comparte la carga entre "Editar pedido" y el aviso de "Crear
+        pedido" cuando el profesional ya tiene uno activo (ver
+        `_crear_pedido`) — en los dos casos hay que dejar el formulario
+        listo para editar el mismo pedido existente."""
         indice_profesional = self.combo_profesional.findData(pedido["IdProfesional"])
         if indice_profesional >= 0:
             self.combo_profesional.setCurrentIndex(indice_profesional)
@@ -620,6 +693,8 @@ class PantallaListaEspera(QWidget):
         condiciones = json.loads(pedido["CondicionesConsultorio"] or "{}")
         self.casilla_ventana.setChecked(bool(condiciones.get("ventana")))
         self.casilla_camilla.setChecked(bool(condiciones.get("aptoCamilla")))
+        self.casilla_placard.setChecked(bool(condiciones.get("placard")))
+        self.casilla_aire.setChecked(bool(condiciones.get("aire")))
         self.casilla_sin_combinar.setChecked(bool(condiciones.get("sinCombinar")))
         tamano = condiciones.get("tamano")
         self.casilla_tamano.setChecked(bool(tamano))

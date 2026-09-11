@@ -184,6 +184,20 @@ def test_condicion_ventana_filtra_consultorios(conn):
     assert coincidencia is None
 
 
+def test_condicion_placard_filtra_consultorios(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1, Placard=0)  # sin placard, no cuenta
+
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])],
+        condiciones_consultorio={"placard": True},
+    )
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
+    assert coincidencia is None
+
+
 def test_tamano_minimo_acepta_clasificaciones_mayores_a_la_pedida(conn):
     """"Tamaño mínimo" no es un match exacto: pedir "Intermedio" tiene que
     aceptar un consultorio "Grande" (Chico < Intermedio < Grande)."""
