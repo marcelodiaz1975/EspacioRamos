@@ -11,6 +11,7 @@ from app.negocio.lista_espera import (
     calcular_coincidencia,
     calcular_coincidencia_fechas,
     crear_pedido,
+    listar_pedidos_con_coincidencia,
     marcar_descartado,
     marcar_resuelto,
 )
@@ -320,6 +321,28 @@ def test_marcar_resuelto_y_descartado(conn):
 
     with pytest.raises(ValueError):
         marcar_resuelto(conn, id_pedido_1)  # ya no está Activo
+
+
+def test_listar_pedidos_ordena_mas_reciente_arriba_y_por_codigo_a_igual_fecha(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1)
+
+    def _profesional_con_codigo(codigo):
+        return obtener_repositorio(conn, "Profesional").crear(
+            CategoriaProfesional="C", Apellido="Interesado", IdCodigo=codigo,
+        )
+
+    id_temprano = _profesional_con_codigo("R5")
+    id_r2 = _profesional_con_codigo("R2")
+    id_r10 = _profesional_con_codigo("R10")
+    crear_pedido(conn, id_profesional=id_temprano, bloques=[_bloque(["Lunes"])], fecha_pedido="2026-01-01")
+    crear_pedido(conn, id_profesional=id_r10, bloques=[_bloque(["Lunes"])], fecha_pedido="2026-03-05")
+    crear_pedido(conn, id_profesional=id_r2, bloques=[_bloque(["Lunes"])], fecha_pedido="2026-03-05")
+
+    resultado = listar_pedidos_con_coincidencia(conn, ANIO, MES)
+    ids_en_orden = [pedido["IdProfesional"] for pedido, _ in resultado]
+    assert ids_en_orden == [id_r2, id_r10, id_temprano]
 
 
 def test_cantidad_horas_encuentra_subrango_libre_dentro_del_rango_pedido(conn):

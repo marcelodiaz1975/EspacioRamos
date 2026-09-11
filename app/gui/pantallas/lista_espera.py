@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+from datetime import date
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QValidator
@@ -51,7 +52,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.pantallas.reservas import _opciones_profesional
+from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.grilla_operativa import (
     _agregar_item_todos,
     _corregir_seleccion_todos,
@@ -63,8 +64,8 @@ from app.gui.widgets.grilla_operativa import (
 )
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import DIAS_SEMANA, periodo_actual
+from app.negocio.formato import hora_fmt
 from app.negocio.lista_espera import crear_pedido, listar_pedidos_con_coincidencia, marcar_descartado, marcar_resuelto
-from app.negocio.mensajes import nombre_para_mensaje
 from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
 from app.repositorio.registro import obtener_repositorio
 
@@ -80,6 +81,13 @@ _DIAS_PEDIDO = DIAS_SEMANA[:6]
 # `app.negocio.lista_espera._JERARQUIA_TAMANO`) — al revés que en Oferta
 # de consultorios, donde el combo elige un tamaño exacto.
 _TAMANOS_MINIMOS = [(t, t) for t in reversed(TAMANOS_CONSULTORIO)]
+
+
+def _horario_texto(desde: float, hasta: float) -> str:
+    """"9 a 12hs" / "9:30 a 12hs" — un solo "hs" al final en vez de uno
+    por número, mismo criterio que ya usa `_alertas_aisladas` en
+    `app.negocio.lista_espera`."""
+    return f"{hora_fmt(desde)[:-2]} a {hora_fmt(hasta)}"
 
 
 class _SpinHora(QDoubleSpinBox):
@@ -116,6 +124,7 @@ class PantallaListaEspera(QWidget):
         super().__init__(parent)
         self.conn = conn
         self._pedidos: list[sqlite3.Row] = []
+        self._coincidencias: list = []
         self._bloques_pendientes: list[dict] = []
         self._armar_ui()
         self.actualizar()
@@ -155,12 +164,6 @@ class PantallaListaEspera(QWidget):
         self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
         form.addWidget(self._filtro_unidad)
 
-        self.combo_tipo = QComboBox()
-        self.combo_tipo.addItem("Alcanza con un día (O)", "O")
-        self.combo_tipo.addItem("Todos los días (Y)", "Y")
-        form.addWidget(QLabel("Combinación de días"))
-        form.addWidget(self.combo_tipo)
-
         form.addWidget(QLabel("Días"))
         contenedor_dias = QWidget()
         grid_dias = QGridLayout(contenedor_dias)
@@ -172,6 +175,12 @@ class PantallaListaEspera(QWidget):
             self._checks_dia[dia] = check
             grid_dias.addWidget(check, i // columnas, i % columnas)
         form.addWidget(contenedor_dias)
+
+        self.combo_tipo = QComboBox()
+        self.combo_tipo.addItem("Alcanza con un día (O)", "O")
+        self.combo_tipo.addItem("Todos los días (Y)", "Y")
+        form.addWidget(QLabel("Combinación de días y horarios"))
+        form.addWidget(self.combo_tipo)
 
         fila_horario = QHBoxLayout()
         self.spin_desde = _SpinHora()
@@ -250,7 +259,7 @@ class PantallaListaEspera(QWidget):
 
         self.campo_detalle = QPlainTextEdit()
         self.campo_detalle.setFixedHeight(60)
-        form.addWidget(QLabel("Detalle"))
+        form.addWidget(QLabel("Comentarios"))
         form.addWidget(self.campo_detalle)
 
         boton_crear = QPushButton("Crear pedido")
@@ -264,12 +273,21 @@ class PantallaListaEspera(QWidget):
         panel_tabla = QWidget()
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(5)
-        self.tabla.setHorizontalHeaderLabels(["Profesional", "Días", "Horario", "Coincidencia", "Detalle"])
+        self.tabla.setColumnCount(6)
+        self.tabla.setHorizontalHeaderLabels(
+            ["Fecha", "Profesional", "Días", "Horario", "Coincidencia", "Comentarios"]
+        )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla.itemSelectionChanged.connect(self._mostrar_cobertura)
         layout_tabla.addWidget(self.tabla, stretch=1)
+
+        layout_tabla.addWidget(QLabel("Cobertura de la coincidencia seleccionada"))
+        self.texto_cobertura = QPlainTextEdit()
+        self.texto_cobertura.setReadOnly(True)
+        self.texto_cobertura.setFixedHeight(110)
+        layout_tabla.addWidget(self.texto_cobertura)
 
         fila_acciones = QHBoxLayout()
         boton_resolver = QPushButton("Marcar resuelto")
@@ -381,33 +399,73 @@ class PantallaListaEspera(QWidget):
         anio, mes = (int(p) for p in periodo.split("-"))
         resultado = listar_pedidos_con_coincidencia(self.conn, anio, mes)
         self._pedidos = [p for p, _ in resultado]
+        self._coincidencias = [c for _, c in resultado]
+        self.texto_cobertura.clear()
 
         self.tabla.setRowCount(len(resultado))
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
         repo_bloque = obtener_repositorio(self.conn, "ListaEsperaBloque")
         for fila_idx, (pedido, coincidencia) in enumerate(resultado):
+            fecha = date.fromisoformat(pedido["FechaPedido"]).strftime("%d-%m-%Y")
+            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(fecha))
+
             profesional = repo_profesional.obtener(pedido["IdProfesional"])
-            nombre = nombre_para_mensaje(profesional) if profesional else "?"
-            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(nombre))
+            nombre = _texto_profesional(profesional) if profesional else "?"
+            self.tabla.setItem(fila_idx, 1, QTableWidgetItem(nombre))
 
             bloques = repo_bloque.listar(IdPedido=pedido["IdPedido"])
             separador = " Y " if pedido["TipoCombinacion"] == "Y" else " O "
             self.tabla.setItem(
-                fila_idx, 1,
+                fila_idx, 2,
                 QTableWidgetItem(separador.join(", ".join(json.loads(b["Dias"] or "[]")) for b in bloques)),
             )
             self.tabla.setItem(
-                fila_idx, 2,
-                QTableWidgetItem(separador.join(f"{b['HorarioDesde']:g} a {b['HorarioHasta']:g}" for b in bloques)),
+                fila_idx, 3,
+                QTableWidgetItem(
+                    separador.join(_horario_texto(b["HorarioDesde"], b["HorarioHasta"]) for b in bloques)
+                ),
             )
 
             color = coincidencia.color if coincidencia else None
             item_color = QTableWidgetItem(_ETIQUETA_COLOR.get(color, "Sin cobertura"))
             if color:
                 item_color.setBackground(QColor(_COLOR_CELDA[color]))
-            self.tabla.setItem(fila_idx, 3, item_color)
-            self.tabla.setItem(fila_idx, 4, QTableWidgetItem(pedido["Detalle"] or ""))
+            self.tabla.setItem(fila_idx, 4, item_color)
+            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(pedido["Detalle"] or ""))
         self.tabla.resizeColumnsToContents()
+
+    def _mostrar_cobertura(self) -> None:
+        """Al seleccionar un pedido con coincidencia, qué bloques/días y
+        qué consultorio(s) puntuales la cubren — antes esto solo se podía
+        inferir indirectamente desde el color."""
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            self.texto_cobertura.clear()
+            return
+        coincidencia = self._coincidencias[filas[0].row()]
+        if coincidencia is None:
+            self.texto_cobertura.setPlainText("Sin cobertura: no hay forma de cubrir todo el horario pedido.")
+            return
+
+        lineas = []
+        for dia in DIAS_SEMANA:
+            tramos = coincidencia.tramos_por_dia.get(dia)
+            if not tramos:
+                continue
+            lineas.append(f"{dia}:")
+            for tramo in sorted(tramos, key=lambda t: t.hora_inicio):
+                fila_consultorio = self.conn.execute(
+                    "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio FROM Consultorio c "
+                    "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+                    "WHERE c.IdConsultorio = ?", (tramo.id_consultorio,),
+                ).fetchone()
+                etiqueta = (
+                    f"{fila_consultorio['NombreEdificio']} - {fila_consultorio['Departamento']} - "
+                    f"Consultorio {fila_consultorio['NumeroConsultorio']}"
+                    if fila_consultorio else f"Consultorio #{tramo.id_consultorio}"
+                )
+                lineas.append(f"    {_horario_texto(tramo.hora_inicio, tramo.hora_fin)} — {etiqueta}")
+        self.texto_cobertura.setPlainText("\n".join(lineas))
 
     def _dias_seleccionados(self) -> list[str]:
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
@@ -439,7 +497,7 @@ class PantallaListaEspera(QWidget):
         for fila_idx, bloque in enumerate(self._bloques_pendientes):
             self.tabla_bloques.setItem(fila_idx, 0, QTableWidgetItem(", ".join(bloque["dias"])))
             self.tabla_bloques.setItem(
-                fila_idx, 1, QTableWidgetItem(f"{bloque['horario_desde']:g} a {bloque['horario_hasta']:g}"),
+                fila_idx, 1, QTableWidgetItem(_horario_texto(bloque["horario_desde"], bloque["horario_hasta"])),
             )
             etiqueta_tipo = "Todos los días (Y)" if bloque["tipo_combinacion_dias"] == "Y" else "Alcanza con un día (O)"
             self.tabla_bloques.setItem(fila_idx, 2, QTableWidgetItem(etiqueta_tipo))

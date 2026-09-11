@@ -1,10 +1,11 @@
 import pytest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
+from app.negocio.lista_espera import crear_pedido
 
 
 @pytest.fixture
@@ -22,12 +23,29 @@ def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
 
 
-def _crear_profesional(conn, apellido="Gómez"):
-    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', ?)", (apellido,))
+def _crear_profesional(conn, apellido="Gómez", codigo=None):
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido, IdCodigo) VALUES ('R', ?, ?)", (apellido, codigo),
+    )
     conn.commit()
     return conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = ?", (apellido,)).fetchone()[
         "IdProfesional"
     ]
+
+
+def _crear_edificio_con_consultorio(conn, nombre="Torre Norte", departamento="1A"):
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES (?)", (nombre,))
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio WHERE Nombre = ?", (nombre,)).fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, ?)", (id_edificio, departamento))
+    id_unidad = conn.execute(
+        "SELECT IdUnidad FROM Unidad WHERE IdEdificio = ? AND Departamento = ?", (id_edificio, departamento)
+    ).fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
+    conn.commit()
+
+
+def _bloque_lunes():
+    return {"dias": ["Lunes"], "horario_desde": 9, "horario_hasta": 12}
 
 
 def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn):
@@ -131,6 +149,105 @@ def test_horario_muestra_formato_hs(qtbot, conn):
     assert pantalla.spin_hasta.text() == "12:30hs"
 
 
+def test_combinacion_de_dias_y_horarios_va_debajo_de_los_checks_de_dias(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    assert pantalla._checks_dia["Lunes"].y() < pantalla.combo_tipo.y()
+
+
+def test_comentarios_reemplaza_a_detalle_como_etiqueta(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    etiquetas = {lbl.text() for lbl in pantalla.findChildren(QLabel)}
+    assert "Comentarios" in etiquetas
+    assert "Detalle" not in etiquetas
+    assert pantalla.tabla.horizontalHeaderItem(5).text() == "Comentarios"
+
+
+def test_tabla_primera_columna_es_la_fecha_en_formato_dd_mm_aaaa(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(
+        conn, id_profesional=id_profesional, bloques=[_bloque_lunes()], fecha_pedido="2026-03-05",
+    )
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.horizontalHeaderItem(0).text() == "Fecha"
+    assert pantalla.tabla.item(0, 0).text() == "05-03-2026"
+
+
+def test_tabla_ordena_mas_reciente_arriba_y_por_codigo_a_igual_fecha(qtbot, conn):
+    id_temprano = _crear_profesional(conn, apellido="Antiguo", codigo="R5")
+    id_r2 = _crear_profesional(conn, apellido="Dos", codigo="R2")
+    id_r10 = _crear_profesional(conn, apellido="Diez", codigo="R10")
+    crear_pedido(conn, id_profesional=id_temprano, bloques=[_bloque_lunes()], fecha_pedido="2026-01-01")
+    crear_pedido(conn, id_profesional=id_r10, bloques=[_bloque_lunes()], fecha_pedido="2026-03-05")
+    crear_pedido(conn, id_profesional=id_r2, bloques=[_bloque_lunes()], fecha_pedido="2026-03-05")
+
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+
+    nombres = [pantalla.tabla.item(fila, 1).text() for fila in range(pantalla.tabla.rowCount())]
+    assert nombres == ["R2 - Dos", "R10 - Diez", "R5 - Antiguo"]
+
+
+def test_profesional_se_muestra_en_formato_codigo_tratamiento_nombre_apellido(qtbot, conn):
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido, NombrePila, Tratamiento, IdCodigo) "
+        "VALUES ('R', 'Lo Veci', 'Virginia', 'Lic.', 'R1')"
+    )
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional WHERE IdCodigo = 'R1'").fetchone()[
+        "IdProfesional"
+    ]
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.item(0, 1).text() == "R1 - Lic. Virginia Lo Veci"
+
+
+def test_horario_de_la_tabla_termina_en_hs(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.item(0, 3).text() == "9 a 12hs"
+
+
+def test_cobertura_vacia_sin_seleccion(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.texto_cobertura.toPlainText() == ""
+
+
+def test_cobertura_muestra_dia_horario_y_consultorio_al_seleccionar_verde(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla.selectRow(0)
+
+    texto = pantalla.texto_cobertura.toPlainText()
+    assert "Lunes:" in texto
+    assert "9 a 12hs" in texto
+    assert "Torre Norte - 1A - Consultorio 1" in texto
+
+
+def test_cobertura_indica_sin_cobertura_cuando_no_hay_color(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])  # sin ningún consultorio cargado
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla.selectRow(0)
+    assert "Sin cobertura" in pantalla.texto_cobertura.toPlainText()
+
+
 def test_tamano_minimo_es_combo_cerrado_deshabilitado_hasta_tildar_la_casilla(qtbot, conn):
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
@@ -178,7 +295,7 @@ def test_crear_pedido_con_dias_persiste_y_aparece_en_tabla(qtbot, conn):
 
     assert conn.execute("SELECT COUNT(*) c FROM ListaEspera").fetchone()["c"] == 1
     assert pantalla.tabla.rowCount() == 1
-    assert "Lunes" in pantalla.tabla.item(0, 1).text()
+    assert "Lunes" in pantalla.tabla.item(0, 2).text()
 
 
 def test_sin_cobertura_muestra_etiqueta_sin_color(qtbot, conn):
@@ -187,7 +304,7 @@ def test_sin_cobertura_muestra_etiqueta_sin_color(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._crear_pedido()
-    assert pantalla.tabla.item(0, 3).text() == "Sin cobertura"
+    assert pantalla.tabla.item(0, 4).text() == "Sin cobertura"
 
 
 def test_marcar_resuelto_saca_el_pedido_de_la_lista(qtbot, conn):

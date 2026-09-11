@@ -55,6 +55,7 @@ pocas horas por bloque y pocos consultorios candidatos.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
@@ -478,10 +479,31 @@ def calcular_coincidencia_fechas(
     )
 
 
+def _numero_codigo(codigo: str | None) -> int:
+    """El número de "R12" -> 12, para ordenar numéricamente en vez de
+    alfabéticamente (que pondría "R10" antes que "R2"). Sin código, o sin
+    ningún dígito en él, se manda al final — mismo criterio que
+    `app.gui.pantallas.reservas._numero_codigo`."""
+    if not codigo:
+        return 10**9
+    coincidencia = re.search(r"\d+", codigo)
+    return int(coincidencia.group()) if coincidencia else 10**9
+
+
 def listar_pedidos_con_coincidencia(
     conn: sqlite3.Connection, anio: int, mes: int,
 ) -> list[tuple[sqlite3.Row, Coincidencia | None]]:
     """DC-08 §2.1: todos los pedidos Activos con su coincidencia calculada,
-    para pintar la pantalla F12 de un saque."""
+    para pintar la pantalla F12 de un saque — pedido más reciente arriba,
+    a igual fecha por código de profesional."""
     pedidos = obtener_repositorio(conn, "ListaEspera").listar(Estado="Activo")
-    return [(p, calcular_coincidencia(conn, p, anio, mes)) for p in pedidos]
+    repo_profesional = obtener_repositorio(conn, "Profesional")
+    resultado = [(p, calcular_coincidencia(conn, p, anio, mes)) for p in pedidos]
+
+    def _codigo_de(pedido: sqlite3.Row) -> str | None:
+        profesional = repo_profesional.obtener(pedido["IdProfesional"])
+        return profesional["IdCodigo"] if profesional else None
+
+    resultado.sort(key=lambda item: _numero_codigo(_codigo_de(item[0])))
+    resultado.sort(key=lambda item: item[0]["FechaPedido"], reverse=True)  # sort estable: preserva el desempate
+    return resultado
