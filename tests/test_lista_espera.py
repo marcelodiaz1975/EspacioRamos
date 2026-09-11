@@ -179,6 +179,71 @@ def test_condicion_ventana_filtra_consultorios(conn):
     assert coincidencia is None
 
 
+def test_tamano_minimo_acepta_clasificaciones_mayores_a_la_pedida(conn):
+    """"Tamaño mínimo" no es un match exacto: pedir "Intermedio" tiene que
+    aceptar un consultorio "Grande" (Chico < Intermedio < Grande)."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1, TamanoClasificacion="Grande")
+
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])],
+        condiciones_consultorio={"tamano": "Intermedio"},
+    )
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
+    assert coincidencia.color == VERDE
+
+
+def test_tamano_minimo_rechaza_clasificaciones_menores_a_la_pedida(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1, TamanoClasificacion="Chico")
+
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])],
+        condiciones_consultorio={"tamano": "Intermedio"},
+    )
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
+    assert coincidencia is None
+
+
+def test_tamano_minimo_rechaza_consultorio_sin_clasificar(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1)  # TamanoClasificacion sin definir
+
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])],
+        condiciones_consultorio={"tamano": "Chico"},
+    )
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
+    assert coincidencia is None
+
+
+def test_condicion_ids_unidad_restringe_a_las_unidades_pedidas(conn):
+    """Un profesional que pide expresamente una unidad puntual: el
+    consultorio de otra unidad no debería contar aunque esté libre."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad_pedida = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_unidad_otra = _crear_unidad(conn, id_edificio, 'EP "K"')
+    _crear_consultorio(conn, id_unidad_pedida, 1)
+    _crear_consultorio(conn, id_unidad_otra, 1)
+
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])],
+        condiciones_consultorio={"idsUnidad": [id_unidad_pedida]},
+    )
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    coincidencia = calcular_coincidencia(conn, pedido, ANIO, MES)
+    assert coincidencia.color == VERDE
+    assert coincidencia.tramos_por_dia["Lunes"][0].id_consultorio == (
+        obtener_repositorio(conn, "Consultorio").listar(IdUnidad=id_unidad_pedida)[0]["IdConsultorio"]
+    )
+
+
 def test_bloques_combinados_con_y_necesitan_los_dos(conn):
     """Ejemplo real: "martes o jueves 3hs entre 14 y 18hs" Y "sábado de 9
     a 12hs" — los dos bloques tienen que darse."""

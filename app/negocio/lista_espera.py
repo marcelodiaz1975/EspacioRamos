@@ -15,7 +15,11 @@ exactamente igual que antes.
 El cruce evalúa, para cada día pedido y el horario completo solicitado,
 qué consultorios están libres TODAS las horas de ese rango (reutilizando
 la ocupación de `grilla.py`) y que además cumplen las condiciones
-opcionales pedidas (ventana, camilla, tamaño, balcón, aire). Con eso arma
+opcionales pedidas: ventana, camilla, tamaño mínimo (ver
+`_JERARQUIA_TAMANO` — pedir "Intermedio" acepta Intermedio o Grande, no
+solo Intermedio), sin combinar, y opcionalmente restringido a un
+subconjunto de unidades (`idsUnidad`, cuando el pedido es para una
+localidad/edificio/unidad puntual en vez de "cualquiera"). Con eso arma
 la jerarquía de color:
 
     Verde    — un solo consultorio cubre todo el horario pedido.
@@ -165,12 +169,22 @@ def eliminar_pedido(conn: sqlite3.Connection, id_pedido: int) -> None:
     obtener_repositorio(conn, "ListaEspera").eliminar(id_pedido)
 
 
+_JERARQUIA_TAMANO = {"Chico": 0, "Intermedio": 1, "Grande": 2}
+
+
 def _consultorios_candidatos(conn: sqlite3.Connection, condiciones: dict) -> list[sqlite3.Row]:
     """Consultorios que cumplen las condiciones opcionales pedidas. Si no
-    se pidió ninguna condición, cualquier consultorio cuenta."""
+    se pidió ninguna condición, cualquier consultorio cuenta.
+
+    `tamano` es un MÍNIMO, no un valor exacto: pedir "Intermedio" acepta
+    consultorios Intermedio o Grande, no solo Intermedio (`_JERARQUIA_TAMANO`
+    define el orden Chico < Intermedio < Grande). Un consultorio sin
+    clasificar no puede garantizar que cumple el mínimo, así que queda
+    afuera cuando se pide alguno."""
     filas = conn.execute(
         "SELECT c.*, u.IdEdificio AS IdEdificioReal FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad"
     ).fetchall()
+    ids_unidad = condiciones.get("idsUnidad")
     resultado = []
     for c in filas:
         if condiciones.get("ventana") and not c["Ventana"]:
@@ -181,8 +195,12 @@ def _consultorios_candidatos(conn: sqlite3.Connection, condiciones: dict) -> lis
             continue
         if condiciones.get("aire") and not c["AireAcondicionado"]:
             continue
-        tamano = condiciones.get("tamano")
-        if tamano and (c["TamanoClasificacion"] or "").strip().lower() != str(tamano).strip().lower():
+        tamano_minimo = condiciones.get("tamano")
+        if tamano_minimo:
+            rango_consultorio = _JERARQUIA_TAMANO.get(c["TamanoClasificacion"])
+            if rango_consultorio is None or rango_consultorio < _JERARQUIA_TAMANO[tamano_minimo]:
+                continue
+        if ids_unidad and c["IdUnidad"] not in ids_unidad:
             continue
         resultado.append(c)
     return resultado

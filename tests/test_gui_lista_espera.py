@@ -1,5 +1,4 @@
 import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
@@ -62,6 +61,67 @@ def test_combo_profesional_incluye_inactivos_y_contactos(qtbot, conn):
     assert "Prospecto" in textos
 
 
+def test_dias_son_checkboxes_horizontales_no_lista(qtbot, conn):
+    """Mismo formato horizontal (checkboxes en grilla) que usa Oferta de
+    consultorios, en vez de la lista vertical tildable de antes."""
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert set(pantalla._checks_dia.keys()) == {"Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"}
+    assert all(check.isChecked() is False for check in pantalla._checks_dia.values())
+
+
+def test_caracteristicas_pedidas_ya_no_tiene_balcon_ni_aire(qtbot, conn):
+    """Confirmado por la clienta: de "Características pedidas" solo quedan
+    Con ventana, Apto camilla, Tamaño mínimo y Sin combinación —
+    balcón y aire acondicionado se sacan de este formulario."""
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert not hasattr(pantalla, "casilla_balcon")
+    assert not hasattr(pantalla, "casilla_aire")
+
+
+def test_localidad_edificio_unidad_arrancan_en_todas(qtbot, conn):
+    conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Norte', 'Palermo')")
+    conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Sur', 'Belgrano')")
+    conn.commit()
+    id_norte = conn.execute("SELECT IdEdificio FROM Edificio WHERE Nombre = 'Torre Norte'").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_norte,))
+    conn.commit()
+
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+
+    assert pantalla._filtro_localidad._boton.text() == "Todas las localidades"
+    assert pantalla._filtro_edificio._boton.text() == "Todos los edificios"
+    assert pantalla._filtro_unidad._boton.text() == "Todas las unidades"
+    # "Todas" -> ninguna restricción real, así que ids_unidad_seleccionadas
+    # devuelve el universo completo de unidades existentes.
+    assert len(pantalla._ids_unidad_seleccionadas()) == 1
+
+
+def test_elegir_un_edificio_puntual_acota_las_unidades_de_la_busqueda(qtbot, conn):
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Sur')")
+    conn.commit()
+    id_norte = conn.execute("SELECT IdEdificio FROM Edificio WHERE Nombre = 'Torre Norte'").fetchone()["IdEdificio"]
+    id_sur = conn.execute("SELECT IdEdificio FROM Edificio WHERE Nombre = 'Torre Sur'").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_norte,))
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '2A')", (id_sur,))
+    conn.commit()
+    id_unidad_norte = conn.execute("SELECT IdUnidad FROM Unidad WHERE Departamento = '1A'").fetchone()["IdUnidad"]
+
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla.lista_edificio.clearSelection()
+    for i in range(pantalla.lista_edificio.count()):
+        if pantalla.lista_edificio.item(i).text() == "Torre Norte":
+            pantalla.lista_edificio.item(i).setSelected(True)
+            break
+
+    assert pantalla._ids_unidad_seleccionadas() == [id_unidad_norte]
+
+
 def test_horario_muestra_formato_hs(qtbot, conn):
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
@@ -71,12 +131,13 @@ def test_horario_muestra_formato_hs(qtbot, conn):
     assert pantalla.spin_hasta.text() == "12:30hs"
 
 
-def test_tamano_es_combo_cerrado_deshabilitado_hasta_tildar_la_casilla(qtbot, conn):
+def test_tamano_minimo_es_combo_cerrado_deshabilitado_hasta_tildar_la_casilla(qtbot, conn):
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
+    assert pantalla.casilla_tamano.text() == "Tamaño mínimo"
     assert not pantalla.combo_tamano.isEnabled()
     textos = [pantalla.combo_tamano.itemText(i) for i in range(pantalla.combo_tamano.count())]
-    assert textos == ["Cualquier tamaño", "Grande", "Intermedio", "Chico"]
+    assert textos == ["Chico", "Intermedio", "Grande"]
 
     pantalla.casilla_tamano.setChecked(True)
     assert pantalla.combo_tamano.isEnabled()
@@ -86,7 +147,7 @@ def test_crear_pedido_con_tamano_persiste_la_condicion(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
-    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+    pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla.casilla_tamano.setChecked(True)
     pantalla.combo_tamano.setCurrentIndex(pantalla.combo_tamano.findData("Grande"))
 
@@ -112,7 +173,7 @@ def test_crear_pedido_con_dias_persiste_y_aparece_en_tabla(qtbot, conn):
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
 
-    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+    pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
     pantalla._crear_pedido()
 
     assert conn.execute("SELECT COUNT(*) c FROM ListaEspera").fetchone()["c"] == 1
@@ -124,7 +185,7 @@ def test_sin_cobertura_muestra_etiqueta_sin_color(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
-    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)
+    pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._crear_pedido()
     assert pantalla.tabla.item(0, 3).text() == "Sin cobertura"
 
@@ -133,7 +194,7 @@ def test_marcar_resuelto_saca_el_pedido_de_la_lista(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
-    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)
+    pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._crear_pedido()
 
     pantalla.tabla.selectRow(0)
@@ -148,7 +209,7 @@ def test_agregar_bloque_lo_suma_a_la_tabla_y_limpia_dias(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
-    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)  # Lunes
+    pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
 
     pantalla._agregar_bloque()
 
@@ -171,10 +232,10 @@ def test_crear_pedido_con_dos_bloques_persiste_los_dos(qtbot, conn):
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
 
-    pantalla.lista_dias.item(1).setCheckState(Qt.CheckState.Checked)  # Martes
-    pantalla.lista_dias.item(3).setCheckState(Qt.CheckState.Checked)  # Jueves
+    pantalla._checks_dia["Martes"].setChecked(True)  # Martes
+    pantalla._checks_dia["Jueves"].setChecked(True)  # Jueves
     pantalla._agregar_bloque()
-    pantalla.lista_dias.item(5).setCheckState(Qt.CheckState.Checked)  # Sábado
+    pantalla._checks_dia["Sábado"].setChecked(True)  # Sábado
     pantalla.combo_tipo_bloques.setCurrentIndex(1)  # Y
     pantalla._crear_pedido()
 
@@ -189,7 +250,7 @@ def test_quitar_bloque_lo_saca_de_la_tabla(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
-    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)
+    pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._agregar_bloque()
 
     pantalla.tabla_bloques.selectRow(0)
@@ -203,7 +264,7 @@ def test_descartar_saca_el_pedido_de_la_lista(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
-    pantalla.lista_dias.item(0).setCheckState(Qt.CheckState.Checked)
+    pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._crear_pedido()
 
     pantalla.tabla.selectRow(0)

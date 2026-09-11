@@ -17,10 +17,18 @@ se toman los bloques ya agregados a la tabla MÁS el que esté cargado en
 ese momento en el formulario (si tiene algún día tildado) — así el caso
 común de un solo bloque sigue siendo un único paso, sin tener que pasar
 por "Agregar bloque…", y agregar uno de más antes de crear tampoco se
-pierde."""
+pierde.
+
+Localidad/Edificio/Unidad es la misma cascada compacta y colapsable de
+Oferta de consultorios (reusa sus mismos helpers privados en
+`app.gui.widgets.grilla_operativa`) para el caso de un profesional que
+pide expresamente una unidad puntual — o localidad/edificio, si el
+sistema llega a tener más de uno — en vez de "cualquiera"; por defecto
+arranca en "Todas/Todos" en los tres niveles."""
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 
 from PySide6.QtCore import Qt
@@ -29,9 +37,9 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
@@ -44,6 +52,15 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.pantallas.reservas import _opciones_profesional
+from app.gui.widgets.grilla_operativa import (
+    _agregar_item_todos,
+    _corregir_seleccion_todos,
+    _FiltroColapsable,
+    _ids_reales,
+    _ids_seleccionados,
+    _lista_multiseleccion,
+    _seleccionar_todos,
+)
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import DIAS_SEMANA, periodo_actual
 from app.negocio.lista_espera import crear_pedido, listar_pedidos_con_coincidencia, marcar_descartado, marcar_resuelto
@@ -59,7 +76,10 @@ _ETIQUETA_COLOR = {
     "rojo": "Combinar, distinto edificio",
 }
 _DIAS_PEDIDO = DIAS_SEMANA[:6]
-_TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
+# De menor a mayor porque acá el combo elige un MÍNIMO (ver
+# `app.negocio.lista_espera._JERARQUIA_TAMANO`) — al revés que en Oferta
+# de consultorios, donde el combo elige un tamaño exacto.
+_TAMANOS_MINIMOS = [(t, t) for t in reversed(TAMANOS_CONSULTORIO)]
 
 
 class _SpinHora(QDoubleSpinBox):
@@ -117,6 +137,24 @@ class PantallaListaEspera(QWidget):
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
+        form.addWidget(QLabel("Localidad"))
+        self.lista_localidad = _lista_multiseleccion()
+        self.lista_localidad.itemSelectionChanged.connect(self._cargar_edificios)
+        self._filtro_localidad = _FiltroColapsable(self.lista_localidad)
+        form.addWidget(self._filtro_localidad)
+
+        form.addWidget(QLabel("Edificio"))
+        self.lista_edificio = _lista_multiseleccion()
+        self.lista_edificio.itemSelectionChanged.connect(self._cargar_unidades)
+        self._filtro_edificio = _FiltroColapsable(self.lista_edificio)
+        form.addWidget(self._filtro_edificio)
+
+        form.addWidget(QLabel("Unidad"))
+        self.lista_unidad = _lista_multiseleccion()
+        self.lista_unidad.itemSelectionChanged.connect(self._unidad_seleccion_cambio)
+        self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
+        form.addWidget(self._filtro_unidad)
+
         self.combo_tipo = QComboBox()
         self.combo_tipo.addItem("Alcanza con un día (O)", "O")
         self.combo_tipo.addItem("Todos los días (Y)", "Y")
@@ -124,14 +162,16 @@ class PantallaListaEspera(QWidget):
         form.addWidget(self.combo_tipo)
 
         form.addWidget(QLabel("Días"))
-        self.lista_dias = QListWidget()
-        for dia in _DIAS_PEDIDO:
-            item = QListWidgetItem(dia)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked)
-            self.lista_dias.addItem(item)
-        self.lista_dias.setMaximumHeight(140)
-        form.addWidget(self.lista_dias)
+        contenedor_dias = QWidget()
+        grid_dias = QGridLayout(contenedor_dias)
+        grid_dias.setContentsMargins(0, 0, 0, 0)
+        self._checks_dia: dict[str, QCheckBox] = {}
+        columnas = math.ceil(len(_DIAS_PEDIDO) / 2)
+        for i, dia in enumerate(_DIAS_PEDIDO):
+            check = QCheckBox(dia)
+            self._checks_dia[dia] = check
+            grid_dias.addWidget(check, i // columnas, i % columnas)
+        form.addWidget(contenedor_dias)
 
         fila_horario = QHBoxLayout()
         self.spin_desde = _SpinHora()
@@ -183,27 +223,30 @@ class PantallaListaEspera(QWidget):
         form.addWidget(self.combo_tipo_bloques)
 
         form.addWidget(QLabel("Características pedidas"))
+        contenedor_caracteristicas = QWidget()
+        grid_caracteristicas = QGridLayout(contenedor_caracteristicas)
+        grid_caracteristicas.setContentsMargins(0, 0, 0, 0)
         self.casilla_ventana = QCheckBox("Con ventana")
         self.casilla_camilla = QCheckBox("Apto camilla")
-        self.casilla_balcon = QCheckBox("Con balcón")
-        self.casilla_aire = QCheckBox("Con aire acondicionado")
         self.casilla_sin_combinar = QCheckBox("Sin combinación de consultorios")
-        for casilla in (
-            self.casilla_ventana, self.casilla_camilla, self.casilla_balcon, self.casilla_aire,
-            self.casilla_sin_combinar,
-        ):
-            form.addWidget(casilla)
-        fila_tamano = QHBoxLayout()
-        self.casilla_tamano = QCheckBox("Tamaño")
+
+        contenedor_tamano = QWidget()
+        fila_tamano = QHBoxLayout(contenedor_tamano)
+        fila_tamano.setContentsMargins(0, 0, 0, 0)
+        self.casilla_tamano = QCheckBox("Tamaño mínimo")
         self.combo_tamano = QComboBox()
-        for etiqueta, valor in _TAMANOS:
+        for etiqueta, valor in _TAMANOS_MINIMOS:
             self.combo_tamano.addItem(etiqueta, valor)
         self.combo_tamano.setEnabled(False)
         self.casilla_tamano.toggled.connect(self.combo_tamano.setEnabled)
         fila_tamano.addWidget(self.casilla_tamano)
         fila_tamano.addWidget(self.combo_tamano)
-        fila_tamano.addStretch()
-        form.addLayout(fila_tamano)
+
+        grid_caracteristicas.addWidget(self.casilla_ventana, 0, 0)
+        grid_caracteristicas.addWidget(self.casilla_camilla, 0, 1)
+        grid_caracteristicas.addWidget(contenedor_tamano, 1, 0)
+        grid_caracteristicas.addWidget(self.casilla_sin_combinar, 1, 1)
+        form.addWidget(contenedor_caracteristicas)
 
         self.campo_detalle = QPlainTextEdit()
         self.campo_detalle.setFixedHeight(60)
@@ -243,11 +286,95 @@ class PantallaListaEspera(QWidget):
 
         layout.addWidget(splitter, stretch=1)
         self._cargar_profesionales()
+        self._cargar_localidades()
 
     def _cargar_profesionales(self) -> None:
         self.combo_profesional.clear()
         for id_, etiqueta in _opciones_profesional(self.conn):
             self.combo_profesional.addItem(etiqueta, id_)
+
+    def _cargar_localidades(self) -> None:
+        """Cascada Localidad -> Edificio -> Unidad, mismo patrón compacto
+        (con "Todas las X" tildado por defecto y colapsada hasta que se
+        la abre) que usa Oferta de consultorios — reusa sus mismos
+        helpers en vez de reimplementar la cascada acá."""
+        self.lista_localidad.blockSignals(True)
+        self.lista_localidad.clear()
+        _agregar_item_todos(self.lista_localidad, "Todas las localidades")
+        localidades = self.conn.execute(
+            "SELECT DISTINCT DomicilioLocalidad FROM Edificio ORDER BY DomicilioLocalidad"
+        ).fetchall()
+        for fila in localidades:
+            valor = fila["DomicilioLocalidad"]
+            item = QListWidgetItem(valor or "(Sin localidad)")
+            item.setData(Qt.ItemDataRole.UserRole, valor)
+            self.lista_localidad.addItem(item)
+        _seleccionar_todos(self.lista_localidad)
+        self.lista_localidad.blockSignals(False)
+        self._filtro_localidad.actualizar_resumen()
+        self._cargar_edificios()
+
+    def _cargar_edificios(self) -> None:
+        _corregir_seleccion_todos(self.lista_localidad)
+        self._filtro_localidad.actualizar_resumen()
+        localidades = _ids_seleccionados(self.lista_localidad)
+        self.lista_edificio.blockSignals(True)
+        self.lista_edificio.clear()
+        _agregar_item_todos(self.lista_edificio, "Todos los edificios")
+        sql = "SELECT IdEdificio, Nombre FROM Edificio"
+        parametros: list = []
+        if localidades:
+            marcas = []
+            for loc in localidades:
+                if loc is None:
+                    marcas.append("DomicilioLocalidad IS NULL")
+                else:
+                    marcas.append("DomicilioLocalidad = ?")
+                    parametros.append(loc)
+            sql += " WHERE " + " OR ".join(marcas)
+        sql += " ORDER BY Nombre"
+        for fila in self.conn.execute(sql, parametros).fetchall():
+            item = QListWidgetItem(fila["Nombre"])
+            item.setData(Qt.ItemDataRole.UserRole, fila["IdEdificio"])
+            self.lista_edificio.addItem(item)
+        _seleccionar_todos(self.lista_edificio)
+        self.lista_edificio.blockSignals(False)
+        self._filtro_edificio.actualizar_resumen()
+        self._cargar_unidades()
+
+    def _cargar_unidades(self) -> None:
+        _corregir_seleccion_todos(self.lista_edificio)
+        self._filtro_edificio.actualizar_resumen()
+        ids_edificio = _ids_seleccionados(self.lista_edificio)
+        self.lista_unidad.blockSignals(True)
+        self.lista_unidad.clear()
+        _agregar_item_todos(self.lista_unidad, "Todas las unidades")
+        sql = (
+            "SELECT u.IdUnidad, u.Departamento, e.Nombre AS NombreEdificio FROM Unidad u "
+            "JOIN Edificio e ON e.IdEdificio = u.IdEdificio"
+        )
+        parametros: list = []
+        if ids_edificio:
+            placeholders = ", ".join("?" for _ in ids_edificio)
+            sql += f" WHERE u.IdEdificio IN ({placeholders})"
+            parametros = ids_edificio
+        filas = sorted(
+            self.conn.execute(sql, parametros).fetchall(), key=lambda f: (f["NombreEdificio"], f["Departamento"]),
+        )
+        for fila in filas:
+            item = QListWidgetItem(f"{fila['NombreEdificio']} - {fila['Departamento']}")
+            item.setData(Qt.ItemDataRole.UserRole, fila["IdUnidad"])
+            self.lista_unidad.addItem(item)
+        _seleccionar_todos(self.lista_unidad)
+        self.lista_unidad.blockSignals(False)
+        self._filtro_unidad.actualizar_resumen()
+
+    def _unidad_seleccion_cambio(self) -> None:
+        _corregir_seleccion_todos(self.lista_unidad)
+        self._filtro_unidad.actualizar_resumen()
+
+    def _ids_unidad_seleccionadas(self) -> list[int]:
+        return _ids_reales(self.lista_unidad)
 
     def actualizar(self) -> None:
         periodo = periodo_actual(self.conn)
@@ -283,11 +410,7 @@ class PantallaListaEspera(QWidget):
         self.tabla.resizeColumnsToContents()
 
     def _dias_seleccionados(self) -> list[str]:
-        return [
-            self.lista_dias.item(i).text()
-            for i in range(self.lista_dias.count())
-            if self.lista_dias.item(i).checkState() == Qt.CheckState.Checked
-        ]
+        return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
 
     def _condiciones(self) -> dict:
         condiciones = {}
@@ -295,14 +418,11 @@ class PantallaListaEspera(QWidget):
             condiciones["ventana"] = True
         if self.casilla_camilla.isChecked():
             condiciones["aptoCamilla"] = True
-        if self.casilla_balcon.isChecked():
-            condiciones["balcon"] = True
-        if self.casilla_aire.isChecked():
-            condiciones["aire"] = True
         if self.casilla_sin_combinar.isChecked():
             condiciones["sinCombinar"] = True
         if self.casilla_tamano.isChecked():
             condiciones["tamano"] = self.combo_tamano.currentData()
+        condiciones["idsUnidad"] = self._ids_unidad_seleccionadas()
         return condiciones
 
     def _bloque_del_formulario(self) -> dict:
@@ -332,8 +452,8 @@ class PantallaListaEspera(QWidget):
             return
         self._bloques_pendientes.append(bloque)
         self._refrescar_tabla_bloques()
-        for i in range(self.lista_dias.count()):
-            self.lista_dias.item(i).setCheckState(Qt.CheckState.Unchecked)
+        for check in self._checks_dia.values():
+            check.setChecked(False)
 
     def _quitar_bloque(self) -> None:
         filas = self.tabla_bloques.selectionModel().selectedRows()
