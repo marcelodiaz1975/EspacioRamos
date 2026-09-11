@@ -90,6 +90,18 @@ def _horario_texto(desde: float, hasta: float) -> str:
     return f"{hora_fmt(desde)[:-2]} a {hora_fmt(hasta)}"
 
 
+def _texto_profesional_con_contacto(profesional: sqlite3.Row) -> str:
+    """`_texto_profesional` (formato canónico "Cod - Trat Nombre
+    Apellido", ya omite los datos que falten) + la fecha de contacto al
+    final, si está cargada — para poder ubicar al profesional del mismo
+    modo en que la clienta ya lo tiene agendado en el teléfono."""
+    nombre = _texto_profesional(profesional)
+    if not profesional["FechaContacto"]:
+        return nombre
+    fecha_contacto = date.fromisoformat(profesional["FechaContacto"]).strftime("%d-%m-%Y")
+    return f"{nombre} — {fecha_contacto}"
+
+
 class _SpinHora(QDoubleSpinBox):
     """QDoubleSpinBox que se muestra como horario ("12:00hs", "9:30hs")
     en vez del decimal con punto que arrastra Qt por defecto — sigue
@@ -164,6 +176,8 @@ class PantallaListaEspera(QWidget):
         self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
         form.addWidget(self._filtro_unidad)
 
+        form.addWidget(QLabel("Combinación de días y horarios"))
+
         form.addWidget(QLabel("Días"))
         contenedor_dias = QWidget()
         grid_dias = QGridLayout(contenedor_dias)
@@ -179,7 +193,6 @@ class PantallaListaEspera(QWidget):
         self.combo_tipo = QComboBox()
         self.combo_tipo.addItem("Alcanza con un día (O)", "O")
         self.combo_tipo.addItem("Todos los días (Y)", "Y")
-        form.addWidget(QLabel("Combinación de días y horarios"))
         form.addWidget(self.combo_tipo)
 
         fila_horario = QHBoxLayout()
@@ -275,7 +288,7 @@ class PantallaListaEspera(QWidget):
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(6)
         self.tabla.setHorizontalHeaderLabels(
-            ["Fecha", "Profesional", "Días", "Horario", "Coincidencia", "Comentarios"]
+            ["Fecha pedido", "Profesional", "Días", "Horario", "Coincidencia", "Comentarios"]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -410,7 +423,7 @@ class PantallaListaEspera(QWidget):
             self.tabla.setItem(fila_idx, 0, QTableWidgetItem(fecha))
 
             profesional = repo_profesional.obtener(pedido["IdProfesional"])
-            nombre = _texto_profesional(profesional) if profesional else "?"
+            nombre = _texto_profesional_con_contacto(profesional) if profesional else "?"
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(nombre))
 
             bloques = repo_bloque.listar(IdPedido=pedido["IdPedido"])

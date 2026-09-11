@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QLabel, QMessageBox
 
 from app.db.init_db import init_database
@@ -149,12 +150,35 @@ def test_horario_muestra_formato_hs(qtbot, conn):
     assert pantalla.spin_hasta.text() == "12:30hs"
 
 
+def _y_absoluta(widget, pantalla) -> int:
+    """`.y()` es relativo al padre inmediato — no comparable entre
+    widgets anidados en contenedores distintos. Mapear al widget raíz
+    de la pantalla da una posición vertical comparable entre todos."""
+    return widget.mapTo(pantalla, QPoint(0, 0)).y()
+
+
 def test_combinacion_de_dias_y_horarios_va_debajo_de_los_checks_de_dias(qtbot, conn):
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
-    assert pantalla._checks_dia["Lunes"].y() < pantalla.combo_tipo.y()
+    assert _y_absoluta(pantalla._checks_dia["Lunes"], pantalla) < _y_absoluta(pantalla.combo_tipo, pantalla)
+
+
+def test_titulo_combinacion_de_dias_y_horarios_va_despues_de_la_unidad(qtbot, conn):
+    """El título de la sección se separó de su selector: pasa a estar
+    justo después del filtro de Unidad (antes de los checks de días),
+    mientras que el selector "Alcanza con un día (O)" en sí se queda
+    donde estaba, debajo de los checks."""
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    titulo = next(lbl for lbl in pantalla.findChildren(QLabel) if lbl.text() == "Combinación de días y horarios")
+    assert (
+        _y_absoluta(pantalla._filtro_unidad, pantalla) < _y_absoluta(titulo, pantalla)
+        < _y_absoluta(pantalla._checks_dia["Lunes"], pantalla)
+    )
 
 
 def test_comentarios_reemplaza_a_detalle_como_etiqueta(qtbot, conn):
@@ -173,7 +197,7 @@ def test_tabla_primera_columna_es_la_fecha_en_formato_dd_mm_aaaa(qtbot, conn):
     )
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.tabla.horizontalHeaderItem(0).text() == "Fecha"
+    assert pantalla.tabla.horizontalHeaderItem(0).text() == "Fecha pedido"
     assert pantalla.tabla.item(0, 0).text() == "05-03-2026"
 
 
@@ -206,6 +230,47 @@ def test_profesional_se_muestra_en_formato_codigo_tratamiento_nombre_apellido(qt
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.item(0, 1).text() == "R1 - Lic. Virginia Lo Veci"
+
+
+def test_profesional_sin_tratamiento_ni_nombre_omite_esos_datos(qtbot, conn):
+    """Sin Tratamiento ni NombrePila cargados, el nombre no debe quedar
+    con espacios de más ni "None" — se omite lo que falte, no solo el
+    apellido (obligatorio en la base) del ejemplo de la clienta."""
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido, IdCodigo) VALUES ('R', 'Paz', 'R3')")
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional WHERE IdCodigo = 'R3'").fetchone()[
+        "IdProfesional"
+    ]
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.item(0, 1).text() == "R3 - Paz"
+
+
+def test_fecha_contacto_se_agrega_despues_del_nombre_si_esta_cargada(qtbot, conn):
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido, IdCodigo, FechaContacto) "
+        "VALUES ('R', 'Paz', 'R3', '2024-11-20')"
+    )
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional WHERE IdCodigo = 'R3'").fetchone()[
+        "IdProfesional"
+    ]
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.item(0, 1).text() == "R3 - Paz — 20-11-2024"
+
+
+def test_fecha_contacto_se_omite_si_no_esta_cargada(qtbot, conn):
+    id_profesional = _crear_profesional(conn, codigo="R3")
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert "—" not in pantalla.tabla.item(0, 1).text()
 
 
 def test_horario_de_la_tabla_termina_en_hs(qtbot, conn):
