@@ -10,7 +10,7 @@ profesional algo cargado acá.
 Un pedido puede necesitar varios bloques día(s)+horario a la vez (ej.
 "martes o jueves 3hs entre 14 y 18hs" Y "sábado de 9 a 12hs"): los campos
 de día/horario/cantidad de horas/combinación de días arman UN bloque por
-vez, "Agregar bloque…" lo suma a la tabla de bloques del pedido —
+vez, "Agregar bloque" lo suma a la tabla de bloques del pedido —
 confirmado por la clienta: es obligatorio pasar por ese botón, no hay
 fallback que tome lo cargado en el formulario si no se agregó ningún
 bloque. Con un solo bloque, "Combinación de bloques" muestra "Bloque
@@ -130,18 +130,6 @@ def _item_con_tooltip(texto: str) -> QTableWidgetItem:
     return item
 
 
-def _texto_profesional_con_contacto(profesional: sqlite3.Row) -> str:
-    """`_texto_profesional` (formato canónico "Cod - Trat Nombre
-    Apellido", ya omite los datos que falten) + la fecha de contacto al
-    final, si está cargada — para poder ubicar al profesional del mismo
-    modo en que la clienta ya lo tiene agendado en el teléfono."""
-    nombre = _texto_profesional(profesional)
-    if not profesional["FechaContacto"]:
-        return nombre
-    fecha_contacto = date.fromisoformat(profesional["FechaContacto"]).strftime("%d-%m-%Y")
-    return f"{nombre} — {fecha_contacto}"
-
-
 class _SpinHora(QDoubleSpinBox):
     """QDoubleSpinBox que se muestra como horario ("12:00hs", "9:30hs")
     en vez del decimal con punto que arrastra Qt por defecto — sigue
@@ -257,7 +245,8 @@ class PantallaListaEspera(QWidget):
         fila_cantidad_horas.addWidget(self.spin_cantidad_horas)
         col_quien.addLayout(fila_cantidad_horas)
 
-        boton_agregar_bloque = QPushButton("Agregar bloque…")
+        boton_agregar_bloque = QPushButton("Agregar bloque")
+        boton_agregar_bloque.setObjectName("botonAccion")
         boton_agregar_bloque.clicked.connect(self._agregar_bloque)
         col_quien.addWidget(boton_agregar_bloque)
         col_quien.addStretch()
@@ -270,7 +259,7 @@ class PantallaListaEspera(QWidget):
         self.tabla_bloques.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_bloques.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_bloques.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla_bloques.setMaximumHeight(160)
+        self.tabla_bloques.setMinimumHeight(260)
         self.tabla_bloques.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla_bloques.itemSelectionChanged.connect(self._actualizar_boton_quitar_bloque)
         col_cuando.addWidget(self.tabla_bloques)
@@ -280,6 +269,7 @@ class PantallaListaEspera(QWidget):
         col_cuando.addWidget(self.combo_tipo_bloques)
 
         self.boton_quitar_bloque = QPushButton("Quitar bloque")
+        self.boton_quitar_bloque.setObjectName("botonAccion")
         self.boton_quitar_bloque.setEnabled(False)
         self.boton_quitar_bloque.clicked.connect(self._quitar_bloque)
         col_cuando.addWidget(self.boton_quitar_bloque)
@@ -287,12 +277,16 @@ class PantallaListaEspera(QWidget):
 
         col_condiciones = QVBoxLayout()
         col_condiciones.addWidget(QLabel("Características de los consultorios"))
+        grid_caracteristicas = QGridLayout()
         self.casilla_ventana = QCheckBox("Con ventana")
         self.casilla_camilla = QCheckBox("Apto camilla")
-        col_condiciones.addWidget(self.casilla_ventana)
-        col_condiciones.addWidget(self.casilla_camilla)
+        self.casilla_placard = QCheckBox("Con placard")
+        self.casilla_aire = QCheckBox("Con aire acondicionado")
+        self.casilla_sin_combinar = QCheckBox("Sin combinación de consultorios")
 
-        fila_tamano = QHBoxLayout()
+        contenedor_tamano = QWidget()
+        fila_tamano = QHBoxLayout(contenedor_tamano)
+        fila_tamano.setContentsMargins(0, 0, 0, 0)
         self.casilla_tamano = QCheckBox("Tamaño mínimo")
         self.combo_tamano = QComboBox()
         for etiqueta, valor in _TAMANOS_MINIMOS:
@@ -301,14 +295,14 @@ class PantallaListaEspera(QWidget):
         self.casilla_tamano.toggled.connect(self.combo_tamano.setEnabled)
         fila_tamano.addWidget(self.casilla_tamano)
         fila_tamano.addWidget(self.combo_tamano)
-        col_condiciones.addLayout(fila_tamano)
 
-        self.casilla_placard = QCheckBox("Con placard")
-        self.casilla_aire = QCheckBox("Con aire acondicionado")
-        self.casilla_sin_combinar = QCheckBox("Sin combinación de consultorios")
-        col_condiciones.addWidget(self.casilla_placard)
-        col_condiciones.addWidget(self.casilla_aire)
-        col_condiciones.addWidget(self.casilla_sin_combinar)
+        grid_caracteristicas.addWidget(self.casilla_ventana, 0, 0)
+        grid_caracteristicas.addWidget(self.casilla_camilla, 0, 1)
+        grid_caracteristicas.addWidget(contenedor_tamano, 1, 0, 1, 2)
+        grid_caracteristicas.addWidget(self.casilla_placard, 2, 0)
+        grid_caracteristicas.addWidget(self.casilla_aire, 2, 1)
+        grid_caracteristicas.addWidget(self.casilla_sin_combinar, 3, 0, 1, 2)
+        col_condiciones.addLayout(grid_caracteristicas)
 
         self.campo_detalle = QPlainTextEdit()
         self.campo_detalle.setFixedHeight(60)
@@ -341,8 +335,10 @@ class PantallaListaEspera(QWidget):
 
         fila_botones = QHBoxLayout()
         boton_descartar = QPushButton("Descartar pedido")
+        boton_descartar.setObjectName("botonAccion")
         boton_descartar.clicked.connect(self._descartar)
         boton_editar = QPushButton("Editar pedido")
+        boton_editar.setObjectName("botonAccion")
         boton_editar.clicked.connect(self._editar_pedido)
         fila_botones.addStretch()
         fila_botones.addWidget(boton_descartar)
@@ -463,7 +459,7 @@ class PantallaListaEspera(QWidget):
             self.tabla.setItem(fila_idx, 0, _item_con_tooltip(fecha))
 
             profesional = repo_profesional.obtener(pedido["IdProfesional"])
-            nombre = _texto_profesional_con_contacto(profesional) if profesional else "?"
+            nombre = _texto_profesional(profesional) if profesional else "?"
             self.tabla.setItem(fila_idx, 1, _item_con_tooltip(nombre))
 
             bloques = repo_bloque.listar(IdPedido=pedido["IdPedido"])
@@ -479,7 +475,13 @@ class PantallaListaEspera(QWidget):
                 ),
             )
             self.tabla.setItem(
-                fila_idx, 4, _item_con_tooltip(" / ".join(b["TipoCombinacionDias"] for b in bloques)),
+                fila_idx, 4,
+                _item_con_tooltip(
+                    separador.join(
+                        ("Todos los días (Y)" if b["TipoCombinacionDias"] == "Y" else "Alcanza con un día (O)")
+                        for b in bloques
+                    )
+                ),
             )
             etiqueta_bloques = "Todos los bloques (Y)" if pedido["TipoCombinacion"] == "Y" else "Alcanza con un bloque (O)"
             self.tabla.setItem(fila_idx, 5, _item_con_tooltip(etiqueta_bloques))
@@ -494,6 +496,8 @@ class PantallaListaEspera(QWidget):
             self.tabla.setItem(fila_idx, 7, item_color)
             self.tabla.setItem(fila_idx, 8, _item_con_tooltip(pedido["Detalle"] or ""))
         self.tabla.resizeColumnsToContents()
+        if self.tabla.columnWidth(2) < 180:  # "Días" — que entren varios días sin recortar
+            self.tabla.setColumnWidth(2, 180)
 
     def _mostrar_cobertura(self) -> None:
         """Al seleccionar un pedido con coincidencia, qué bloques/días y
@@ -620,7 +624,7 @@ class PantallaListaEspera(QWidget):
             QMessageBox.warning(self, titulo, "No hay profesionales cargados.")
             return
         if not self._bloques_pendientes:
-            QMessageBox.warning(self, titulo, 'Agregá al menos un bloque con "Agregar bloque…" antes de continuar.')
+            QMessageBox.warning(self, titulo, 'Agregá al menos un bloque con "Agregar bloque" antes de continuar.')
             return
 
         if not en_edicion:

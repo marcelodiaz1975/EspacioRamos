@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QLabel, QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -101,6 +101,48 @@ def test_caracteristicas_de_los_consultorios_tiene_los_seis_checks(qtbot, conn):
         "casilla_sin_combinar",
     ):
         assert hasattr(pantalla, atributo)
+
+
+def test_caracteristicas_quedan_de_a_dos_por_linea(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    assert _y_absoluta(pantalla.casilla_ventana, pantalla) == _y_absoluta(pantalla.casilla_camilla, pantalla)
+    assert _y_absoluta(pantalla.casilla_placard, pantalla) == _y_absoluta(pantalla.casilla_aire, pantalla)
+    assert pantalla.casilla_ventana.x() < pantalla.casilla_camilla.x()
+    assert pantalla.casilla_placard.x() < pantalla.casilla_aire.x()
+
+
+def test_botones_de_bloques_dicen_agregar_bloque_sin_puntos_suspensivos(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    botones = {b.text(): b for b in pantalla.findChildren(QPushButton)}
+    assert "Agregar bloque" in botones
+    assert "Agregar bloque…" not in botones
+
+
+def test_botones_secundarios_usan_el_mismo_tamano_que_crear_pedido(qtbot, conn):
+    """"Agregar bloque", "Quitar bloque", "Descartar pedido" y "Editar
+    pedido" no llevan el azul de "Crear pedido" (botonPrimario), pero sí
+    su mismo padding (botonAccion) para quedar del mismo tamaño."""
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    botones = {b.text(): b for b in pantalla.findChildren(QPushButton)}
+    for texto in ("Agregar bloque", "Quitar bloque", "Descartar pedido", "Editar pedido"):
+        assert botones[texto].objectName() == "botonAccion"
+    assert pantalla.boton_crear.objectName() == "botonPrimario"
+
+
+def test_tabla_columna_dias_tiene_ancho_minimo(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(
+        conn, id_profesional=id_profesional,
+        bloques=[{"dias": ["Lunes", "Martes", "Miércoles", "Jueves"], "horario_desde": 9, "horario_hasta": 12}],
+    )
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.columnWidth(2) >= 180
 
 
 def test_localidad_edificio_unidad_arrancan_en_todas(qtbot, conn):
@@ -254,7 +296,10 @@ def test_profesional_sin_tratamiento_ni_nombre_omite_esos_datos(qtbot, conn):
     assert pantalla.tabla.item(0, 1).text() == "R3 - Paz"
 
 
-def test_fecha_contacto_se_agrega_despues_del_nombre_si_esta_cargada(qtbot, conn):
+def test_fecha_contacto_no_se_agrega_al_nombre_aunque_este_cargada(qtbot, conn):
+    """Confirmado por la clienta: para cargar un pedido el profesional
+    obligatoriamente ya tiene código asignado, y con eso alcanza para
+    identificarlo — se saca la fecha de contacto de la concatenación."""
     conn.execute(
         "INSERT INTO Profesional (CategoriaProfesional, Apellido, IdCodigo, FechaContacto) "
         "VALUES ('R', 'Paz', 'R3', '2024-11-20')"
@@ -267,16 +312,7 @@ def test_fecha_contacto_se_agrega_despues_del_nombre_si_esta_cargada(qtbot, conn
 
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.tabla.item(0, 1).text() == "R3 - Paz — 20-11-2024"
-
-
-def test_fecha_contacto_se_omite_si_no_esta_cargada(qtbot, conn):
-    id_profesional = _crear_profesional(conn, codigo="R3")
-    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
-
-    pantalla = PantallaListaEspera(conn)
-    qtbot.addWidget(pantalla)
-    assert "—" not in pantalla.tabla.item(0, 1).text()
+    assert pantalla.tabla.item(0, 1).text() == "R3 - Paz"
 
 
 def test_horario_de_la_tabla_termina_en_hs(qtbot, conn):
@@ -521,7 +557,7 @@ def test_tabla_muestra_columnas_de_combinacion_y_condiciones(qtbot, conn):
         "Fecha pedido", "Profesional", "Días", "Horario", "Combinación días", "Combinación bloques",
         "Condiciones", "Coincidencia", "Comentarios",
     ]
-    assert pantalla.tabla.item(0, 4).text() == "O"
+    assert pantalla.tabla.item(0, 4).text() == "Alcanza con un día (O)"
     assert pantalla.tabla.item(0, 5).text() == "Alcanza con un bloque (O)"
     assert pantalla.tabla.item(0, 6).text() == "Con ventana"
 

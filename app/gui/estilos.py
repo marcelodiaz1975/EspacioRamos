@@ -28,6 +28,7 @@ _CLARO = {
     "texto": "#1A1A1A",
     "borde": "#DDDDDD",
     "hover_nav": "#3A6EA5",
+    "resalte_seleccion": "#D6D6D6",
 }
 
 # ------------------------------------------------------------------ oscuro
@@ -37,6 +38,7 @@ _OSCURO = {
     "texto": "#E8E6E3",
     "borde": "#3F454C",
     "hover_nav": "#3A6EA5",
+    "resalte_seleccion": "#5A5F66",
 }
 
 
@@ -106,8 +108,18 @@ QHeaderView::section {{
 def paleta(modo_oscuro: bool = False) -> QPalette:
     """QPalette aplicada a nivel QApplication: cubre los widgets estándar
     (QLineEdit, QComboBox, QTableWidget, QCheckBox, QMessageBox, etc.) que
-    no tienen una regla propia en `hoja_estilos`."""
+    no tienen una regla propia en `hoja_estilos`.
+
+    El color de selección (Highlight) se fuerza a gris en los dos modos
+    -no es solo cosa del modo oscuro- porque el celeste/azul por defecto
+    del sistema para la fila/ítem seleccionado se confunde con el azul
+    de los títulos (COLOR_NIVEL_1); confirmado por la clienta para
+    cualquier tabla o lista de toda la aplicación, no solo esta
+    pantalla."""
+    t = _OSCURO if modo_oscuro else _CLARO
     p = QPalette()
+    p.setColor(QPalette.ColorRole.Highlight, QColor(t["resalte_seleccion"]))
+    p.setColor(QPalette.ColorRole.HighlightedText, QColor(t["texto"]))
     if not modo_oscuro:
         return p
 
@@ -115,7 +127,7 @@ def paleta(modo_oscuro: bool = False) -> QPalette:
     superficie = QColor(_OSCURO["superficie"])
     texto = QColor(_OSCURO["texto"])
     texto_apagado = QColor("#8A8F98")
-    resalte = QColor(COLOR_NIVEL_1)
+    azul = QColor(COLOR_NIVEL_1)
 
     p.setColor(QPalette.ColorRole.Window, fondo)
     p.setColor(QPalette.ColorRole.WindowText, texto)
@@ -128,9 +140,7 @@ def paleta(modo_oscuro: bool = False) -> QPalette:
     p.setColor(QPalette.ColorRole.ToolTipBase, superficie)
     p.setColor(QPalette.ColorRole.ToolTipText, texto)
     p.setColor(QPalette.ColorRole.PlaceholderText, texto_apagado)
-    p.setColor(QPalette.ColorRole.Highlight, resalte)
-    p.setColor(QPalette.ColorRole.HighlightedText, QColor(COLOR_TEXTO_CLARO))
-    p.setColor(QPalette.ColorRole.Link, resalte)
+    p.setColor(QPalette.ColorRole.Link, azul)
     p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, texto_apagado)
     p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, texto_apagado)
     p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, texto_apagado)
