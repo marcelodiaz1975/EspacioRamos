@@ -35,3 +35,11 @@ def test_paleta_oscura_tiene_fondo_oscuro():
 def test_paleta_oscura_tambien_tiene_resalte_gris():
     p = paleta(True)
     assert p.color(QPalette.ColorRole.Highlight).name() == "#5a5f66"
+
+
+def test_hoja_estilos_tiene_boton_secundario_celeste_suave():
+    """botonSecundario: mismo padding que botonAccion, pero con un
+    celeste suave — para botones que necesitan destacarse un poco sin
+    llegar al azul fuerte de botonPrimario."""
+    assert "botonSecundario" in hoja_estilos(False)
+    assert "botonSecundario" in hoja_estilos(True)

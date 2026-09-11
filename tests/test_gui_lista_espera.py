@@ -89,18 +89,34 @@ def test_dias_son_checkboxes_horizontales_no_lista(qtbot, conn):
     assert all(check.isChecked() is False for check in pantalla._checks_dia.values())
 
 
-def test_caracteristicas_de_los_consultorios_tiene_los_seis_checks(qtbot, conn):
+def test_caracteristicas_de_los_consultorios_tiene_los_checks_esperados(qtbot, conn):
     """Confirmado por la clienta: "Características de los consultorios"
-    tiene ventana, camilla, tamaño mínimo, placard, aire acondicionado y
-    sin combinación — "Con balcón" no vuelve, quedó descartado."""
+    tiene ventana, camilla, tamaño mínimo, placard y aire acondicionado
+    — "Con balcón" no vuelve, quedó descartado. "Sin/Con combinación de
+    consultorios" se mudó a un combo en la segunda columna."""
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert not hasattr(pantalla, "casilla_balcon")
-    for atributo in (
-        "casilla_ventana", "casilla_camilla", "casilla_tamano", "casilla_placard", "casilla_aire",
-        "casilla_sin_combinar",
-    ):
+    assert not hasattr(pantalla, "casilla_sin_combinar")
+    for atributo in ("casilla_ventana", "casilla_camilla", "casilla_tamano", "casilla_placard", "casilla_aire"):
         assert hasattr(pantalla, atributo)
+
+
+def test_tamano_minimo_es_la_primera_fila_de_caracteristicas(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    assert _y_absoluta(pantalla.casilla_tamano, pantalla) < _y_absoluta(pantalla.casilla_ventana, pantalla)
+
+
+def test_combo_sin_combinar_arranca_en_sin_combinacion(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.combo_sin_combinar.currentText() == "Sin combinación de consultorios"
+    assert pantalla.combo_sin_combinar.currentData() is True
+    textos = [pantalla.combo_sin_combinar.itemText(i) for i in range(pantalla.combo_sin_combinar.count())]
+    assert textos == ["Sin combinación de consultorios", "Con combinación de consultorios"]
 
 
 def test_caracteristicas_quedan_de_a_dos_por_linea(qtbot, conn):
@@ -124,14 +140,30 @@ def test_botones_de_bloques_dicen_agregar_bloque_sin_puntos_suspensivos(qtbot, c
 
 def test_botones_secundarios_usan_el_mismo_tamano_que_crear_pedido(qtbot, conn):
     """"Agregar bloque", "Quitar bloque", "Descartar pedido" y "Editar
-    pedido" no llevan el azul de "Crear pedido" (botonPrimario), pero sí
-    su mismo padding (botonAccion) para quedar del mismo tamaño."""
+    pedido" van en celeste suave (botonSecundario) en vez del azul de
+    "Crear pedido" (botonPrimario), pero con el mismo padding para
+    quedar del mismo tamaño."""
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
     botones = {b.text(): b for b in pantalla.findChildren(QPushButton)}
     for texto in ("Agregar bloque", "Quitar bloque", "Descartar pedido", "Editar pedido"):
-        assert botones[texto].objectName() == "botonAccion"
+        assert botones[texto].objectName() == "botonSecundario"
     assert pantalla.boton_crear.objectName() == "botonPrimario"
+
+
+def test_agregar_quitar_y_crear_pedido_quedan_a_la_misma_altura(qtbot, conn):
+    """"Agregar bloque" (primera columna), "Quitar bloque" (segunda) y
+    "Crear pedido" (tercera) tienen que alinearse horizontalmente —
+    ajustado agrandando el cuadro de bloques y el de comentarios."""
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    y_agregar = _y_absoluta(pantalla.boton_agregar_bloque, pantalla)
+    y_quitar = _y_absoluta(pantalla.boton_quitar_bloque, pantalla)
+    y_crear = _y_absoluta(pantalla.boton_crear, pantalla)
+    assert abs(y_agregar - y_quitar) <= 2
+    assert abs(y_agregar - y_crear) <= 2
 
 
 def test_tabla_columna_dias_tiene_ancho_minimo(qtbot, conn):
@@ -235,7 +267,7 @@ def test_comentarios_reemplaza_a_detalle_como_etiqueta(qtbot, conn):
     etiquetas = {lbl.text() for lbl in pantalla.findChildren(QLabel)}
     assert "Comentarios" in etiquetas
     assert "Detalle" not in etiquetas
-    assert pantalla.tabla.horizontalHeaderItem(8).text() == "Comentarios"
+    assert pantalla.tabla.horizontalHeaderItem(9).text() == "Comentarios"
 
 
 def test_tabla_primera_columna_es_la_fecha_en_formato_dd_mm_aaaa(qtbot, conn):
@@ -385,6 +417,39 @@ def test_crear_pedido_con_tamano_persiste_la_condicion(qtbot, conn):
     assert '"tamano": "Grande"' in condiciones
 
 
+def test_crear_pedido_por_defecto_persiste_sin_combinar(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    pantalla._agregar_bloque()
+
+    pantalla._crear_pedido()
+
+    id_pedido = conn.execute("SELECT IdPedido FROM ListaEspera").fetchone()["IdPedido"]
+    condiciones = conn.execute(
+        "SELECT CondicionesConsultorio FROM ListaEspera WHERE IdPedido = ?", (id_pedido,)
+    ).fetchone()["CondicionesConsultorio"]
+    assert '"sinCombinar": true' in condiciones
+
+
+def test_elegir_con_combinacion_no_persiste_sincombinar(qtbot, conn):
+    _crear_profesional(conn)
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    pantalla._agregar_bloque()
+    pantalla.combo_sin_combinar.setCurrentIndex(pantalla.combo_sin_combinar.findData(False))
+
+    pantalla._crear_pedido()
+
+    id_pedido = conn.execute("SELECT IdPedido FROM ListaEspera").fetchone()["IdPedido"]
+    condiciones = conn.execute(
+        "SELECT CondicionesConsultorio FROM ListaEspera WHERE IdPedido = ?", (id_pedido,)
+    ).fetchone()["CondicionesConsultorio"]
+    assert "sinCombinar" not in condiciones
+
+
 def test_crear_pedido_sin_dias_no_persiste(qtbot, conn):
     _crear_profesional(conn)
     pantalla = PantallaListaEspera(conn)
@@ -414,7 +479,7 @@ def test_sin_cobertura_muestra_etiqueta_sin_color(qtbot, conn):
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._agregar_bloque()
     pantalla._crear_pedido()
-    assert pantalla.tabla.item(0, 7).text() == "Sin cobertura"
+    assert pantalla.tabla.item(0, 8).text() == "Sin cobertura"
 
 
 def test_agregar_bloque_lo_suma_a_la_tabla_y_limpia_dias(qtbot, conn):
@@ -512,6 +577,7 @@ def test_editar_pedido_carga_el_formulario_y_pone_en_modo_edicion(qtbot, conn):
 
     assert pantalla.combo_profesional.currentData() == id_profesional
     assert pantalla.casilla_ventana.isChecked()
+    assert pantalla.combo_sin_combinar.currentData() is False  # no vino "sinCombinar" en la condición original
     assert pantalla._bloques_pendientes == [{
         "dias": ["Martes"], "horario_desde": 10, "horario_hasta": 14,
         "tipo_combinacion_dias": "O", "cantidad_horas_requeridas": None,
@@ -555,11 +621,23 @@ def test_tabla_muestra_columnas_de_combinacion_y_condiciones(qtbot, conn):
     encabezados = [pantalla.tabla.horizontalHeaderItem(i).text() for i in range(pantalla.tabla.columnCount())]
     assert encabezados == [
         "Fecha pedido", "Profesional", "Días", "Horario", "Combinación días", "Combinación bloques",
-        "Condiciones", "Coincidencia", "Comentarios",
+        "Combinación consultorios", "Condiciones", "Coincidencia", "Comentarios",
     ]
     assert pantalla.tabla.item(0, 4).text() == "Alcanza con un día (O)"
     assert pantalla.tabla.item(0, 5).text() == "Alcanza con un bloque (O)"
-    assert pantalla.tabla.item(0, 6).text() == "Con ventana"
+    assert pantalla.tabla.item(0, 6).text() == "Con combinación de consultorios"
+    assert pantalla.tabla.item(0, 7).text() == "Con ventana"
+
+
+def test_tabla_columna_combinacion_consultorios_refleja_sin_combinar(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(
+        conn, id_profesional=id_profesional, bloques=[_bloque_lunes()],
+        condiciones_consultorio={"sinCombinar": True},
+    )
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.item(0, 6).text() == "Sin combinación de consultorios"
 
 
 def test_tabla_tiene_tooltip_con_el_texto_completo_de_cada_celda(qtbot, conn):

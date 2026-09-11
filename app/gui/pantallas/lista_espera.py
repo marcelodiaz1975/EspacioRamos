@@ -101,15 +101,19 @@ def _horario_texto(desde: float, hasta: float) -> str:
 
 def _texto_condiciones(conn: sqlite3.Connection, condiciones: dict) -> str:
     """Resumen legible de las condiciones/filtros marcados en la
-    búsqueda del pedido — ventana/camilla/tamaño mínimo/sin combinar y,
-    si se restringió a un subconjunto de unidades, cuántas."""
+    búsqueda del pedido — ventana/camilla/placard/aire/tamaño mínimo y,
+    si se restringió a un subconjunto de unidades, cuántas. La
+    combinación de consultorios tiene su propia columna en la tabla
+    (ver "Combinación consultorios"), así que no se repite acá."""
     partes = []
     if condiciones.get("ventana"):
         partes.append("Con ventana")
     if condiciones.get("aptoCamilla"):
         partes.append("Apto camilla")
-    if condiciones.get("sinCombinar"):
-        partes.append("Sin combinar")
+    if condiciones.get("placard"):
+        partes.append("Con placard")
+    if condiciones.get("aire"):
+        partes.append("Con aire acondicionado")
     tamano = condiciones.get("tamano")
     if tamano:
         partes.append(f"Tamaño mínimo: {tamano}")
@@ -245,10 +249,10 @@ class PantallaListaEspera(QWidget):
         fila_cantidad_horas.addWidget(self.spin_cantidad_horas)
         col_quien.addLayout(fila_cantidad_horas)
 
-        boton_agregar_bloque = QPushButton("Agregar bloque")
-        boton_agregar_bloque.setObjectName("botonAccion")
-        boton_agregar_bloque.clicked.connect(self._agregar_bloque)
-        col_quien.addWidget(boton_agregar_bloque)
+        self.boton_agregar_bloque = QPushButton("Agregar bloque")
+        self.boton_agregar_bloque.setObjectName("botonSecundario")
+        self.boton_agregar_bloque.clicked.connect(self._agregar_bloque)
+        col_quien.addWidget(self.boton_agregar_bloque)
         col_quien.addStretch()
 
         col_cuando = QVBoxLayout()
@@ -259,17 +263,22 @@ class PantallaListaEspera(QWidget):
         self.tabla_bloques.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_bloques.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_bloques.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla_bloques.setMinimumHeight(260)
+        self.tabla_bloques.setMinimumHeight(226)
         self.tabla_bloques.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla_bloques.itemSelectionChanged.connect(self._actualizar_boton_quitar_bloque)
         col_cuando.addWidget(self.tabla_bloques)
 
-        col_cuando.addWidget(QLabel("Combinación de bloques"))
+        col_cuando.addWidget(QLabel("Combinación de bloques y consultorios"))
         self.combo_tipo_bloques = QComboBox()
         col_cuando.addWidget(self.combo_tipo_bloques)
 
+        self.combo_sin_combinar = QComboBox()
+        self.combo_sin_combinar.addItem("Sin combinación de consultorios", True)
+        self.combo_sin_combinar.addItem("Con combinación de consultorios", False)
+        col_cuando.addWidget(self.combo_sin_combinar)
+
         self.boton_quitar_bloque = QPushButton("Quitar bloque")
-        self.boton_quitar_bloque.setObjectName("botonAccion")
+        self.boton_quitar_bloque.setObjectName("botonSecundario")
         self.boton_quitar_bloque.setEnabled(False)
         self.boton_quitar_bloque.clicked.connect(self._quitar_bloque)
         col_cuando.addWidget(self.boton_quitar_bloque)
@@ -278,11 +287,6 @@ class PantallaListaEspera(QWidget):
         col_condiciones = QVBoxLayout()
         col_condiciones.addWidget(QLabel("Características de los consultorios"))
         grid_caracteristicas = QGridLayout()
-        self.casilla_ventana = QCheckBox("Con ventana")
-        self.casilla_camilla = QCheckBox("Apto camilla")
-        self.casilla_placard = QCheckBox("Con placard")
-        self.casilla_aire = QCheckBox("Con aire acondicionado")
-        self.casilla_sin_combinar = QCheckBox("Sin combinación de consultorios")
 
         contenedor_tamano = QWidget()
         fila_tamano = QHBoxLayout(contenedor_tamano)
@@ -296,16 +300,20 @@ class PantallaListaEspera(QWidget):
         fila_tamano.addWidget(self.casilla_tamano)
         fila_tamano.addWidget(self.combo_tamano)
 
-        grid_caracteristicas.addWidget(self.casilla_ventana, 0, 0)
-        grid_caracteristicas.addWidget(self.casilla_camilla, 0, 1)
-        grid_caracteristicas.addWidget(contenedor_tamano, 1, 0, 1, 2)
+        self.casilla_ventana = QCheckBox("Con ventana")
+        self.casilla_camilla = QCheckBox("Apto camilla")
+        self.casilla_placard = QCheckBox("Con placard")
+        self.casilla_aire = QCheckBox("Con aire acondicionado")
+
+        grid_caracteristicas.addWidget(contenedor_tamano, 0, 0, 1, 2)
+        grid_caracteristicas.addWidget(self.casilla_ventana, 1, 0)
+        grid_caracteristicas.addWidget(self.casilla_camilla, 1, 1)
         grid_caracteristicas.addWidget(self.casilla_placard, 2, 0)
         grid_caracteristicas.addWidget(self.casilla_aire, 2, 1)
-        grid_caracteristicas.addWidget(self.casilla_sin_combinar, 3, 0, 1, 2)
         col_condiciones.addLayout(grid_caracteristicas)
 
         self.campo_detalle = QPlainTextEdit()
-        self.campo_detalle.setFixedHeight(60)
+        self.campo_detalle.setFixedHeight(204)
         col_condiciones.addWidget(QLabel("Comentarios"))
         col_condiciones.addWidget(self.campo_detalle)
 
@@ -321,10 +329,10 @@ class PantallaListaEspera(QWidget):
         layout.addLayout(fila_columnas)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(9)
+        self.tabla.setColumnCount(10)
         self.tabla.setHorizontalHeaderLabels([
             "Fecha pedido", "Profesional", "Días", "Horario", "Combinación días", "Combinación bloques",
-            "Condiciones", "Coincidencia", "Comentarios",
+            "Combinación consultorios", "Condiciones", "Coincidencia", "Comentarios",
         ])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -334,15 +342,15 @@ class PantallaListaEspera(QWidget):
         layout.addWidget(self.tabla, stretch=1)
 
         fila_botones = QHBoxLayout()
-        boton_descartar = QPushButton("Descartar pedido")
-        boton_descartar.setObjectName("botonAccion")
-        boton_descartar.clicked.connect(self._descartar)
-        boton_editar = QPushButton("Editar pedido")
-        boton_editar.setObjectName("botonAccion")
-        boton_editar.clicked.connect(self._editar_pedido)
+        self.boton_descartar = QPushButton("Descartar pedido")
+        self.boton_descartar.setObjectName("botonSecundario")
+        self.boton_descartar.clicked.connect(self._descartar)
+        self.boton_editar = QPushButton("Editar pedido")
+        self.boton_editar.setObjectName("botonSecundario")
+        self.boton_editar.clicked.connect(self._editar_pedido)
         fila_botones.addStretch()
-        fila_botones.addWidget(boton_descartar)
-        fila_botones.addWidget(boton_editar)
+        fila_botones.addWidget(self.boton_descartar)
+        fila_botones.addWidget(self.boton_editar)
         layout.addLayout(fila_botones)
 
         layout.addWidget(QLabel("Cobertura de la coincidencia seleccionada"))
@@ -487,14 +495,19 @@ class PantallaListaEspera(QWidget):
             self.tabla.setItem(fila_idx, 5, _item_con_tooltip(etiqueta_bloques))
 
             condiciones = json.loads(pedido["CondicionesConsultorio"] or "{}")
-            self.tabla.setItem(fila_idx, 6, _item_con_tooltip(_texto_condiciones(self.conn, condiciones)))
+            etiqueta_combinacion_consultorios = (
+                "Sin combinación de consultorios" if condiciones.get("sinCombinar")
+                else "Con combinación de consultorios"
+            )
+            self.tabla.setItem(fila_idx, 6, _item_con_tooltip(etiqueta_combinacion_consultorios))
+            self.tabla.setItem(fila_idx, 7, _item_con_tooltip(_texto_condiciones(self.conn, condiciones)))
 
             color = coincidencia.color if coincidencia else None
             item_color = _item_con_tooltip(_ETIQUETA_COLOR.get(color, "Sin cobertura"))
             if color:
                 item_color.setBackground(QColor(_COLOR_CELDA[color]))
-            self.tabla.setItem(fila_idx, 7, item_color)
-            self.tabla.setItem(fila_idx, 8, _item_con_tooltip(pedido["Detalle"] or ""))
+            self.tabla.setItem(fila_idx, 8, item_color)
+            self.tabla.setItem(fila_idx, 9, _item_con_tooltip(pedido["Detalle"] or ""))
         self.tabla.resizeColumnsToContents()
         if self.tabla.columnWidth(2) < 180:  # "Días" — que entren varios días sin recortar
             self.tabla.setColumnWidth(2, 180)
@@ -545,7 +558,7 @@ class PantallaListaEspera(QWidget):
             condiciones["placard"] = True
         if self.casilla_aire.isChecked():
             condiciones["aire"] = True
-        if self.casilla_sin_combinar.isChecked():
+        if self.combo_sin_combinar.currentData():
             condiciones["sinCombinar"] = True
         if self.casilla_tamano.isChecked():
             condiciones["tamano"] = self.combo_tamano.currentData()
@@ -699,7 +712,9 @@ class PantallaListaEspera(QWidget):
         self.casilla_camilla.setChecked(bool(condiciones.get("aptoCamilla")))
         self.casilla_placard.setChecked(bool(condiciones.get("placard")))
         self.casilla_aire.setChecked(bool(condiciones.get("aire")))
-        self.casilla_sin_combinar.setChecked(bool(condiciones.get("sinCombinar")))
+        indice_sin_combinar = self.combo_sin_combinar.findData(bool(condiciones.get("sinCombinar")))
+        if indice_sin_combinar >= 0:
+            self.combo_sin_combinar.setCurrentIndex(indice_sin_combinar)
         tamano = condiciones.get("tamano")
         self.casilla_tamano.setChecked(bool(tamano))
         if tamano:
