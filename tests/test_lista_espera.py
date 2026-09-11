@@ -1,3 +1,6 @@
+import json
+from datetime import date
+
 import pytest
 
 from app.db.init_db import init_database
@@ -11,6 +14,7 @@ from app.negocio.lista_espera import (
     calcular_coincidencia,
     calcular_coincidencia_fechas,
     crear_pedido,
+    editar_pedido,
     listar_pedidos_con_coincidencia,
     marcar_descartado,
     marcar_resuelto,
@@ -321,6 +325,47 @@ def test_marcar_resuelto_y_descartado(conn):
 
     with pytest.raises(ValueError):
         marcar_resuelto(conn, id_pedido_1)  # ya no está Activo
+
+
+def test_editar_pedido_reemplaza_bloques_condiciones_y_actualiza_fecha_a_hoy(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1)
+    id_pedido = crear_pedido(
+        conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])], fecha_pedido="2020-01-01",
+    )
+
+    editar_pedido(
+        conn, id_pedido, bloques=[_bloque(["Martes"], horario_desde=10, horario_hasta=14)],
+        tipo_combinacion_bloques="O", condiciones_consultorio={"ventana": True}, detalle="nuevo comentario",
+    )
+
+    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
+    assert pedido["FechaPedido"] == date.today().isoformat()
+    assert pedido["Detalle"] == "nuevo comentario"
+    assert json.loads(pedido["CondicionesConsultorio"]) == {"ventana": True}
+
+    bloques = obtener_repositorio(conn, "ListaEsperaBloque").listar(IdPedido=id_pedido)
+    assert len(bloques) == 1
+    assert json.loads(bloques[0]["Dias"]) == ["Martes"]
+    assert bloques[0]["HorarioDesde"] == 10
+    assert bloques[0]["HorarioHasta"] == 14
+
+
+def test_editar_pedido_falla_si_ya_no_esta_activo(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1)
+    id_pedido = crear_pedido(conn, id_profesional=_profesional(conn), bloques=[_bloque(["Lunes"])])
+    marcar_descartado(conn, id_pedido)
+
+    with pytest.raises(ValueError):
+        editar_pedido(conn, id_pedido, bloques=[_bloque(["Martes"])])
+
+
+def test_editar_pedido_inexistente_lanza_error(conn):
+    with pytest.raises(ValueError):
+        editar_pedido(conn, 999, bloques=[_bloque(["Martes"])])
 
 
 def test_listar_pedidos_ordena_mas_reciente_arriba_y_por_codigo_a_igual_fecha(conn):

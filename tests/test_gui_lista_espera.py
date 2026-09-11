@@ -165,20 +165,18 @@ def test_combinacion_de_dias_y_horarios_va_debajo_de_los_checks_de_dias(qtbot, c
     assert _y_absoluta(pantalla._checks_dia["Lunes"], pantalla) < _y_absoluta(pantalla.combo_tipo, pantalla)
 
 
-def test_titulo_combinacion_de_dias_y_horarios_va_despues_de_la_unidad(qtbot, conn):
-    """El título de la sección se separó de su selector: pasa a estar
-    justo después del filtro de Unidad (antes de los checks de días),
-    mientras que el selector "Alcanza con un día (O)" en sí se queda
-    donde estaba, debajo de los checks."""
+def test_titulo_combinacion_de_dias_y_horarios_encabeza_su_columna(qtbot, conn):
+    """El título de la sección encabeza la columna "Cuándo" (por encima
+    de los checks de días), y el selector "Alcanza con un día (O)" en sí
+    se queda donde estaba, debajo de los checks — separado de su propio
+    título, que ahora es el encabezado de toda la columna."""
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
     titulo = next(lbl for lbl in pantalla.findChildren(QLabel) if lbl.text() == "Combinación de días y horarios")
-    assert (
-        _y_absoluta(pantalla._filtro_unidad, pantalla) < _y_absoluta(titulo, pantalla)
-        < _y_absoluta(pantalla._checks_dia["Lunes"], pantalla)
-    )
+    assert _y_absoluta(titulo, pantalla) < _y_absoluta(pantalla._checks_dia["Lunes"], pantalla)
+    assert "Días" not in {lbl.text() for lbl in pantalla.findChildren(QLabel)}
 
 
 def test_comentarios_reemplaza_a_detalle_como_etiqueta(qtbot, conn):
@@ -187,7 +185,7 @@ def test_comentarios_reemplaza_a_detalle_como_etiqueta(qtbot, conn):
     etiquetas = {lbl.text() for lbl in pantalla.findChildren(QLabel)}
     assert "Comentarios" in etiquetas
     assert "Detalle" not in etiquetas
-    assert pantalla.tabla.horizontalHeaderItem(5).text() == "Comentarios"
+    assert pantalla.tabla.horizontalHeaderItem(8).text() == "Comentarios"
 
 
 def test_tabla_primera_columna_es_la_fecha_en_formato_dd_mm_aaaa(qtbot, conn):
@@ -369,22 +367,7 @@ def test_sin_cobertura_muestra_etiqueta_sin_color(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._crear_pedido()
-    assert pantalla.tabla.item(0, 4).text() == "Sin cobertura"
-
-
-def test_marcar_resuelto_saca_el_pedido_de_la_lista(qtbot, conn):
-    _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
-    qtbot.addWidget(pantalla)
-    pantalla._checks_dia["Lunes"].setChecked(True)
-    pantalla._crear_pedido()
-
-    pantalla.tabla.selectRow(0)
-    pantalla._resolver()
-
-    assert pantalla.tabla.rowCount() == 0
-    estado = conn.execute("SELECT Estado FROM ListaEspera").fetchone()["Estado"]
-    assert estado == "Resuelto"
+    assert pantalla.tabla.item(0, 7).text() == "Sin cobertura"
 
 
 def test_agregar_bloque_lo_suma_a_la_tabla_y_limpia_dias(qtbot, conn):
@@ -455,3 +438,76 @@ def test_descartar_saca_el_pedido_de_la_lista(qtbot, conn):
     assert pantalla.tabla.rowCount() == 0
     estado = conn.execute("SELECT Estado FROM ListaEspera").fetchone()["Estado"]
     assert estado == "Descartado"
+
+
+def test_editar_pedido_sin_seleccion_avisa_y_no_rompe(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._editar_pedido()  # no debe lanzar excepción
+    assert pantalla._id_pedido_en_edicion is None
+    assert pantalla.boton_crear.text() == "Crear pedido"
+
+
+def test_editar_pedido_carga_el_formulario_y_pone_en_modo_edicion(qtbot, conn):
+    id_profesional = _crear_profesional(conn, apellido="Paz", codigo="R3")
+    crear_pedido(
+        conn, id_profesional=id_profesional,
+        bloques=[{"dias": ["Martes"], "horario_desde": 10, "horario_hasta": 14}],
+        condiciones_consultorio={"ventana": True}, detalle="pedido original",
+    )
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla.selectRow(0)
+
+    pantalla._editar_pedido()
+
+    assert pantalla.combo_profesional.currentData() == id_profesional
+    assert pantalla.casilla_ventana.isChecked()
+    assert pantalla._bloques_pendientes == [{
+        "dias": ["Martes"], "horario_desde": 10, "horario_hasta": 14,
+        "tipo_combinacion_dias": "O", "cantidad_horas_requeridas": None,
+    }]
+    assert pantalla.campo_detalle.toPlainText() == "pedido original"
+    assert pantalla._id_pedido_en_edicion is not None
+    assert pantalla.boton_crear.text() == "Guardar cambios"
+
+
+def test_confirmar_edicion_actualiza_el_pedido_existente_y_lo_manda_arriba(qtbot, conn):
+    id_profesional = _crear_profesional(conn, apellido="Paz", codigo="R3")
+    id_pedido = crear_pedido(
+        conn, id_profesional=id_profesional, bloques=[_bloque_lunes()], fecha_pedido="2020-01-01",
+    )
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla.selectRow(0)
+    pantalla._editar_pedido()
+
+    pantalla._checks_dia["Miércoles"].setChecked(True)
+    pantalla.campo_detalle.setPlainText("comentario actualizado")
+    pantalla._crear_pedido()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ListaEspera").fetchone()["c"] == 1  # no creó uno nuevo
+    pedido = conn.execute("SELECT * FROM ListaEspera WHERE IdPedido = ?", (id_pedido,)).fetchone()
+    assert pedido["Detalle"] == "comentario actualizado"
+    assert pedido["FechaPedido"] != "2020-01-01"
+    assert pantalla._id_pedido_en_edicion is None
+    assert pantalla.boton_crear.text() == "Crear pedido"
+
+
+def test_tabla_muestra_columnas_de_combinacion_y_condiciones(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(
+        conn, id_profesional=id_profesional, bloques=[_bloque_lunes()],
+        condiciones_consultorio={"ventana": True}, tipo_combinacion_bloques="O",
+    )
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+
+    encabezados = [pantalla.tabla.horizontalHeaderItem(i).text() for i in range(pantalla.tabla.columnCount())]
+    assert encabezados == [
+        "Fecha pedido", "Profesional", "Días", "Horario", "Combinación días", "Combinación bloques",
+        "Condiciones", "Coincidencia", "Comentarios",
+    ]
+    assert pantalla.tabla.item(0, 4).text() == "O"
+    assert pantalla.tabla.item(0, 5).text() == "Alcanza con un bloque (O)"
+    assert pantalla.tabla.item(0, 6).text() == "Con ventana"

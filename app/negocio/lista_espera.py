@@ -106,6 +106,25 @@ def _validar_bloque(bloque: dict) -> None:
         raise ValueError("CantidadHorasRequeridas debe ser mayor a 0 y no superar el rango HorarioDesde-HorarioHasta")
 
 
+def _validar_bloques(tipo_combinacion_bloques: str, bloques: list[dict]) -> None:
+    if tipo_combinacion_bloques not in TIPOS_COMBINACION:
+        raise ValueError(f"tipo_combinacion_bloques inválido: {tipo_combinacion_bloques!r} (debe ser 'O' o 'Y')")
+    if not bloques:
+        raise ValueError("El pedido necesita al menos un bloque de día(s) + horario")
+    for bloque in bloques:
+        _validar_bloque(bloque)
+
+
+def _crear_bloques(conn: sqlite3.Connection, id_pedido: int, bloques: list[dict]) -> None:
+    repo_bloque = obtener_repositorio(conn, "ListaEsperaBloque")
+    for bloque in bloques:
+        repo_bloque.crear(
+            IdPedido=id_pedido, TipoCombinacionDias=bloque.get("tipo_combinacion_dias", "O"),
+            Dias=json.dumps(bloque["dias"]), HorarioDesde=bloque["horario_desde"],
+            HorarioHasta=bloque["horario_hasta"], CantidadHorasRequeridas=bloque.get("cantidad_horas_requeridas"),
+        )
+
+
 def crear_pedido(
     conn: sqlite3.Connection, *, id_profesional: int, bloques: list[dict], tipo_combinacion_bloques: str = "O",
     condiciones_consultorio: dict | None = None, detalle: str | None = None, fecha_pedido: str | None = None,
@@ -115,12 +134,7 @@ def crear_pedido(
     defecto) y `cantidad_horas_requeridas`. `tipo_combinacion_bloques`
     combina los bloques ENTRE sí (irrelevante con un solo bloque, que es
     el caso más común)."""
-    if tipo_combinacion_bloques not in TIPOS_COMBINACION:
-        raise ValueError(f"tipo_combinacion_bloques inválido: {tipo_combinacion_bloques!r} (debe ser 'O' o 'Y')")
-    if not bloques:
-        raise ValueError("El pedido necesita al menos un bloque de día(s) + horario")
-    for bloque in bloques:
-        _validar_bloque(bloque)
+    _validar_bloques(tipo_combinacion_bloques, bloques)
 
     repo_pedido = obtener_repositorio(conn, "ListaEspera")
     id_pedido = repo_pedido.crear(
@@ -128,14 +142,39 @@ def crear_pedido(
         TipoCombinacion=tipo_combinacion_bloques,
         CondicionesConsultorio=json.dumps(condiciones_consultorio or {}), Detalle=detalle, Estado="Activo",
     )
-    repo_bloque = obtener_repositorio(conn, "ListaEsperaBloque")
-    for bloque in bloques:
-        repo_bloque.crear(
-            IdPedido=id_pedido, TipoCombinacionDias=bloque.get("tipo_combinacion_dias", "O"),
-            Dias=json.dumps(bloque["dias"]), HorarioDesde=bloque["horario_desde"],
-            HorarioHasta=bloque["horario_hasta"], CantidadHorasRequeridas=bloque.get("cantidad_horas_requeridas"),
-        )
+    _crear_bloques(conn, id_pedido, bloques)
     return id_pedido
+
+
+def editar_pedido(
+    conn: sqlite3.Connection, id_pedido: int, *, bloques: list[dict], tipo_combinacion_bloques: str = "O",
+    condiciones_consultorio: dict | None = None, detalle: str | None = None,
+) -> None:
+    """Reemplaza los bloques y condiciones de un pedido Activo existente
+    y le actualiza `FechaPedido` a hoy — "lo manda arriba" en
+    `listar_pedidos_con_coincidencia` (más reciente primero), igual que
+    si el profesional hubiera vuelto a pedir lo mismo hoy. No cambia
+    `IdProfesional`: para pedir a nombre de otro profesional se crea un
+    pedido nuevo, no se edita uno existente."""
+    _validar_bloques(tipo_combinacion_bloques, bloques)
+
+    repo_pedido = obtener_repositorio(conn, "ListaEspera")
+    pedido = repo_pedido.obtener(id_pedido)
+    if pedido is None:
+        raise ValueError(f"No existe el pedido #{id_pedido}")
+    if pedido["Estado"] != "Activo":
+        raise ValueError(f"El pedido #{id_pedido} ya está {pedido['Estado']}, no está Activo")
+
+    repo_bloque = obtener_repositorio(conn, "ListaEsperaBloque")
+    for bloque_existente in repo_bloque.listar(IdPedido=id_pedido):
+        repo_bloque.eliminar(bloque_existente["IdBloque"])
+    _crear_bloques(conn, id_pedido, bloques)
+
+    repo_pedido.actualizar(
+        id_pedido, TipoCombinacion=tipo_combinacion_bloques,
+        CondicionesConsultorio=json.dumps(condiciones_consultorio or {}), Detalle=detalle,
+        FechaPedido=fecha_actual(conn).isoformat(),
+    )
 
 
 def _cambiar_estado(conn: sqlite3.Connection, id_pedido: int, estado: str, observacion: str | None) -> None:
