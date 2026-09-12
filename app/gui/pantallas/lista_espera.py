@@ -93,6 +93,11 @@ _DIAS_PEDIDO = DIAS_SEMANA[:6]
 # `app.negocio.lista_espera._JERARQUIA_TAMANO`) — al revés que en Oferta
 # de consultorios, donde el combo elige un tamaño exacto.
 _TAMANOS_MINIMOS = [(t, t) for t in reversed(TAMANOS_CONSULTORIO)]
+# "Agregar bloque"/"Quitar bloque"/"Crear pedido" no ocupan todo el ancho
+# de su columna (a diferencia de "Descartar pedido"/"Editar pedido", que
+# ya tienen su tamaño natural por estar en una fila propia) — mismo ancho
+# fijo entre los tres para que no queden dispares por el largo del texto.
+_ANCHO_BOTON_COLUMNA = 190
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -279,8 +284,9 @@ class PantallaListaEspera(QWidget):
 
         self.boton_agregar_bloque = QPushButton("Agregar bloque")
         self.boton_agregar_bloque.setObjectName("botonSecundario")
+        self.boton_agregar_bloque.setFixedWidth(_ANCHO_BOTON_COLUMNA)
         self.boton_agregar_bloque.clicked.connect(self._agregar_bloque)
-        col_quien.addWidget(self.boton_agregar_bloque)
+        col_quien.addWidget(self.boton_agregar_bloque, alignment=Qt.AlignmentFlag.AlignLeft)
         col_quien.addStretch()
 
         col_cuando = QVBoxLayout()
@@ -314,8 +320,9 @@ class PantallaListaEspera(QWidget):
         self.boton_quitar_bloque = QPushButton("Quitar bloque")
         self.boton_quitar_bloque.setObjectName("botonSecundario")
         self.boton_quitar_bloque.setEnabled(False)
+        self.boton_quitar_bloque.setFixedWidth(_ANCHO_BOTON_COLUMNA)
         self.boton_quitar_bloque.clicked.connect(self._quitar_bloque)
-        col_cuando.addWidget(self.boton_quitar_bloque)
+        col_cuando.addWidget(self.boton_quitar_bloque, alignment=Qt.AlignmentFlag.AlignLeft)
         col_cuando.addStretch()
 
         col_condiciones = QVBoxLayout()
@@ -353,8 +360,9 @@ class PantallaListaEspera(QWidget):
 
         self.boton_crear = QPushButton("Crear pedido")
         self.boton_crear.setObjectName("botonPrimario")
+        self.boton_crear.setFixedWidth(_ANCHO_BOTON_COLUMNA)
         self.boton_crear.clicked.connect(self._crear_pedido)
-        col_condiciones.addWidget(self.boton_crear)
+        col_condiciones.addWidget(self.boton_crear, alignment=Qt.AlignmentFlag.AlignLeft)
         col_condiciones.addStretch()
 
         fila_columnas.addLayout(col_quien, 1)
@@ -374,7 +382,8 @@ class PantallaListaEspera(QWidget):
         self.tabla.itemSelectionChanged.connect(self._mostrar_cobertura)
         self.tabla.horizontalHeader().setStretchLastSection(True)
         self.tabla.setItemDelegateForColumn(8, _DelegadoSinResaltarSeleccion(self.tabla))
-        layout.addWidget(self.tabla, stretch=1)
+        self.tabla.setMaximumHeight(260)  # más corta y escroleable, para que los botones y la cobertura entren solos
+        layout.addWidget(self.tabla)
 
         fila_botones = QHBoxLayout()
         self.boton_descartar = QPushButton("Descartar pedido")
@@ -391,8 +400,9 @@ class PantallaListaEspera(QWidget):
         layout.addWidget(_titulo_campo("Cobertura de la coincidencia seleccionada"))
         self.texto_cobertura = QPlainTextEdit()
         self.texto_cobertura.setReadOnly(True)
-        self.texto_cobertura.setFixedHeight(110)
+        self.texto_cobertura.setFixedHeight(50)  # ~2 líneas — el contenido ahora es un solo renglón con ";"
         layout.addWidget(self.texto_cobertura)
+        layout.addStretch()  # el espacio sobrante va acá abajo de todo, no filtrado hacia las columnas de arriba
 
         self._actualizar_combo_tipo_bloques()
         self._cargar_profesionales()
@@ -560,12 +570,11 @@ class PantallaListaEspera(QWidget):
             self.texto_cobertura.setPlainText("Sin cobertura: no hay forma de cubrir todo el horario pedido.")
             return
 
-        lineas = []
+        partes = []
         for dia in DIAS_SEMANA:
             tramos = coincidencia.tramos_por_dia.get(dia)
             if not tramos:
                 continue
-            lineas.append(f"{dia}:")
             for tramo in sorted(tramos, key=lambda t: t.hora_inicio):
                 fila_consultorio = self.conn.execute(
                     "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio FROM Consultorio c "
@@ -577,8 +586,8 @@ class PantallaListaEspera(QWidget):
                     f"Consultorio {fila_consultorio['NumeroConsultorio']}"
                     if fila_consultorio else f"Consultorio #{tramo.id_consultorio}"
                 )
-                lineas.append(f"    {_horario_texto(tramo.hora_inicio, tramo.hora_fin)} — {etiqueta}")
-        self.texto_cobertura.setPlainText("\n".join(lineas))
+                partes.append(f"{dia}: {_horario_texto(tramo.hora_inicio, tramo.hora_fin)} — {etiqueta}")
+        self.texto_cobertura.setPlainText("; ".join(partes))
 
     def _dias_seleccionados(self) -> list[str]:
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]

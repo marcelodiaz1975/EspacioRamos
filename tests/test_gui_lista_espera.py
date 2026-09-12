@@ -228,6 +228,26 @@ def test_jerarquia_de_titulos_del_formulario(qtbot, conn):
     assert etiquetas_por_texto["Hasta"].objectName() != "subtituloCampo"
 
 
+def test_agregar_quitar_y_crear_pedido_no_ocupan_todo_el_ancho_de_su_columna(qtbot, conn):
+    """A diferencia de antes (donde estiraban a todo el ancho de la
+    columna), ahora tienen un ancho fijo e igual entre los tres, y
+    claramente menor que el ancho real de la columna una vez mostrada
+    la pantalla en una ventana ancha."""
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1850, 1100)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    assert pantalla.boton_agregar_bloque.width() == pantalla.boton_quitar_bloque.width() == pantalla.boton_crear.width()
+    assert pantalla.boton_agregar_bloque.width() < pantalla.combo_profesional.width()
+
+
+def test_tabla_de_pedidos_tiene_alto_maximo_para_ser_escroleable(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.maximumHeight() <= 260
+
+
 def test_localidad_edificio_unidad_arrancan_en_todas(qtbot, conn):
     conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Norte', 'Palermo')")
     conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Sur', 'Belgrano')")
@@ -427,6 +447,28 @@ def test_cobertura_muestra_dia_horario_y_consultorio_al_seleccionar_verde(qtbot,
     assert "Lunes:" in texto
     assert "9 a 12hs" in texto
     assert "Torre Norte - 1A - Consultorio 1" in texto
+
+
+def test_cobertura_con_varios_dias_los_separa_con_punto_y_coma(qtbot, conn):
+    """Confirmado por la clienta: el cuadro de cobertura pasa a ser más
+    corto (2 líneas) y el contenido, en vez de un bloque por línea, va
+    todo en un renglón separado por ";"."""
+    _crear_edificio_con_consultorio(conn)
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(
+        conn, id_profesional=id_profesional,
+        bloques=[{"dias": ["Lunes", "Miércoles"], "horario_desde": 9, "horario_hasta": 12}],
+    )
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla.selectRow(0)
+
+    texto = pantalla.texto_cobertura.toPlainText()
+    assert texto == (
+        "Lunes: 9 a 12hs — Torre Norte - 1A - Consultorio 1; "
+        "Miércoles: 9 a 12hs — Torre Norte - 1A - Consultorio 1"
+    )
+    assert "\n" not in texto
 
 
 def test_cobertura_indica_sin_cobertura_cuando_no_hay_color(qtbot, conn):

@@ -13,13 +13,16 @@ Jerarquía de títulos dentro de una pantalla (definida y probada primero
 en Lista de espera, a replicar en el resto de a poco):
     Jerarquía 1 — título de la pantalla entera (ej. "Lista de espera"):
         objectName "tituloPantalla". Mismo tamaño de siempre (18px),
-        negrita, MAYÚSCULA e itálica. La mayúscula hay que escribirla
+        negrita, MAYÚSCULA e itálica, en color de texto normal (negro
+        en modo claro) en vez de azul — probado primero en azul, la
+        clienta pidió pasarlo a negro. La mayúscula hay que escribirla
         en el texto (`.upper()` al armar el QLabel): Qt Style Sheets no
         soporta la propiedad CSS text-transform.
     Jerarquía 2 — nombre de la solapa/sección dentro del formulario
         (ej. "Nuevo pedido"; se pone igual aunque haya una sola solapa):
         objectName "subtituloSeccion". Más grande que el texto normal
-        pero menor que jerarquía 1, negrita, sin itálica.
+        pero menor que jerarquía 1, negrita, sin itálica, mismo color
+        de texto normal que jerarquía 1 (no azul).
     Jerarquía 3 — subtítulo de un campo/selector/cuadro puntual (ej.
         "Profesional" arriba de su combo): objectName "subtituloCampo".
         Mismo tamaño/color que el texto normal, solo que en negrita.
@@ -82,11 +85,11 @@ QListWidget#navegacion::item:selected {{ background-color: {COLOR_DIA_GRILLA}; }
 QListWidget#navegacion::item:hover {{ background-color: {t['hover_nav']}; }}
 
 QLabel#tituloPantalla {{
-    font-size: 18px; font-weight: bold; font-style: italic; color: {COLOR_NIVEL_1};
+    font-size: 18px; font-weight: bold; font-style: italic; color: {t['texto']};
     padding: 6px 0px;
 }}
 QLabel#subtitulo {{ font-size: 11px; color: {'#AAAAAA' if modo_oscuro else '#555555'}; }}
-QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {COLOR_NIVEL_1}; padding: 4px 0px; }}
+QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {t['texto']}; padding: 4px 0px; }}
 QLabel#subtituloCampo {{ font-weight: bold; }}
 QGroupBox#panelFiltrosGrilla::title {{
     font-size: 15px; font-weight: bold; color: {t['texto']};

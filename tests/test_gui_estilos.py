@@ -70,3 +70,18 @@ def test_encabezado_de_tabla_usa_azul_mas_oscuro_que_boton_primario():
     assert COLOR_NIVEL_1_OSCURO != COLOR_NIVEL_1
     hoja = hoja_estilos(False)
     assert COLOR_NIVEL_1_OSCURO in hoja.split("QHeaderView::section {")[1].split("}")[0]
+
+
+def test_titulo_pantalla_y_subtitulo_seccion_son_negros_no_azules():
+    """Jerarquía 1 y 2 probadas primero en azul (COLOR_NIVEL_1), la
+    clienta pidió pasarlas a negro (color de texto normal) — es un
+    cambio global, no solo de Lista de espera, porque tituloPantalla y
+    subtituloSeccion ya las usan todas las pantallas."""
+    from app.gui.estilos import COLOR_NIVEL_1
+
+    bloque_titulo = hoja_estilos(False).split("QLabel#tituloPantalla {")[1].split("}")[0]
+    bloque_solapa = hoja_estilos(False).split("QLabel#subtituloSeccion {")[1].split("}")[0]
+    assert COLOR_NIVEL_1 not in bloque_titulo
+    assert COLOR_NIVEL_1 not in bloque_solapa
+    assert "#1A1A1A" in bloque_titulo
+    assert "#1A1A1A" in bloque_solapa
