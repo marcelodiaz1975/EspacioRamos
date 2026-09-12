@@ -97,6 +97,21 @@ def test_qtabbar_tab_tiene_el_mismo_formato_de_jerarquia_2():
     assert "#1A1A1A" in bloque
 
 
+def test_encabezado_de_columna_esta_en_negrita():
+    bloque = hoja_estilos(False).split("QHeaderView::section {")[1].split("}")[0]
+    assert "font-weight: bold" in bloque
+
+
+def test_numeros_de_fila_quedan_centrados_globalmente():
+    """Pedido de la clienta al revisar Llaves: los números de fila
+    (encabezado vertical) centrados en cualquier tabla que se toque —
+    QSS no soporta text-align para QHeaderView::section, así que se usa
+    qproperty-defaultAlignment sobre QHeaderView:vertical."""
+    hoja = hoja_estilos(False)
+    bloque = hoja.split("QHeaderView:vertical {")[1].split("}")[0]
+    assert "qproperty-defaultAlignment: AlignCenter" in bloque
+
+
 def test_solapa_y_panel_comparten_el_mismo_fondo_que_la_pantalla():
     """Pedido de la clienta: que no se note diferencia de relleno entre
     la pestañita ("Nuevo pedido") y el resto del formulario debajo — por

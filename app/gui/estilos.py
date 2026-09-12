@@ -43,7 +43,15 @@ para la acción más importante/definitiva del formulario; "botonSecundario"
 (celeste suave) para el resto de las acciones, no tan definitivas (ej.
 "Agregar bloque", "Descartar pedido"). Los encabezados de columna de
 cualquier tabla (QHeaderView::section) usan un azul más oscuro que
-botonPrimario para no confundirse con un botón."""
+botonPrimario para no confundirse con un botón, y van en negrita.
+
+Números de fila (encabezado vertical de cualquier tabla): centrados,
+global vía `QHeaderView:vertical { qproperty-defaultAlignment: ... }`
+en vez de tocar cada pantalla — Qt Style Sheets no soporta `text-align`
+para QHeaderView::section (probado y descartado), pero sí permite
+setear cualquier Q_PROPERTY del widget con `qproperty-<nombre>`, y acá
+`:vertical` alcanza a distinguir el encabezado de filas del de
+columnas (que sigue con su alineación normal, sin tocar)."""
 from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
@@ -151,8 +159,10 @@ QLabel#barraFechaFicticia {{
 
 QTableView {{ gridline-color: {t['borde']}; }}
 QHeaderView::section {{
-    background-color: {COLOR_NIVEL_1_OSCURO}; color: {COLOR_TEXTO_CLARO}; padding: 4px; border: none;
+    background-color: {COLOR_NIVEL_1_OSCURO}; color: {COLOR_TEXTO_CLARO};
+    font-weight: bold; padding: 4px; border: none;
 }}
+QHeaderView:vertical {{ qproperty-defaultAlignment: AlignCenter; }}
 """
 
 

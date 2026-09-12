@@ -552,6 +552,11 @@ class PantallaLlaves(QWidget):
                 reintegrado = _moneda(m["MontoReintegrado"]) if m["Tipo"] == "Devolución" and m["DepositoReintegrado"] else ""
                 self.tabla_movimientos.setItem(fila_idx, 6, item_numero(reintegrado))
         self.tabla_movimientos.resizeColumnsToContents()
+        if self.tabla_movimientos.columnWidth(2) < 180:
+            self.tabla_movimientos.setColumnWidth(2, 180)
+        ancho_deposito = max(self.tabla_movimientos.columnWidth(5), self.tabla_movimientos.columnWidth(6))
+        self.tabla_movimientos.setColumnWidth(5, ancho_deposito)
+        self.tabla_movimientos.setColumnWidth(6, ancho_deposito)
         self._actualizar_observacion_movimiento()
         self._actualizar_botones_movimiento()
 

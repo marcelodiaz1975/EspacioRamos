@@ -65,6 +65,31 @@ def test_botones_secundarios_de_llaves_tienen_el_objectname_esperado(qtbot, conn
         assert boton.objectName() == "botonSecundario"
 
 
+def test_columna_profesional_de_movimientos_tiene_ancho_minimo(qtbot, conn):
+    _crear_tipo_con_copia(conn)
+    conn.commit()
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+    assert pantalla.tabla_movimientos.columnWidth(2) >= 180
+
+
+def test_columnas_de_deposito_cobrado_y_reintegrado_tienen_el_mismo_ancho(qtbot, conn):
+    """Pedido de la clienta: mismo ancho para las dos, el necesario para
+    ver completo el título más largo ("Depósito reintegrado")."""
+    _crear_tipo_con_copia(conn)
+    conn.commit()
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+    ancho_cobrado = pantalla.tabla_movimientos.columnWidth(5)
+    ancho_reintegrado = pantalla.tabla_movimientos.columnWidth(6)
+    assert ancho_cobrado == ancho_reintegrado
+    header = pantalla.tabla_movimientos.horizontalHeader()
+    ancho_minimo_titulo = header.fontMetrics().horizontalAdvance("Depósito reintegrado")
+    assert ancho_cobrado >= ancho_minimo_titulo
+
+
 def test_combo_profesional_asignar_es_buscable_por_codigo_o_nombre(qtbot, conn):
     """Confirmado por la clienta: el selector de profesional buscable
     corre en todos los formularios del sistema, Llaves incluido."""
