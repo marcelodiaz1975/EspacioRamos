@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton
+from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -203,10 +203,11 @@ def test_columna_coincidencia_de_la_tabla_tiene_delegado_propio(qtbot, conn):
 
 def test_jerarquia_de_titulos_del_formulario(qtbot, conn):
     """Jerarquía 1 (título de pantalla): MAYÚSCULA. Jerarquía 2 (nombre
-    de la única solapa, "Nuevo pedido"): objectName subtituloSeccion.
-    Jerarquía 3 (subtítulo de un campo puntual, ej. "Profesional"):
-    objectName subtituloCampo — pero "Desde"/"Hasta", al lado del
-    spinbox de horario en vez de arriba, no cuentan como jerarquía 3."""
+    de la única solapa, "Nuevo pedido"): solapa real de un QTabWidget,
+    visible aunque haya una sola (sin tabBarAutoHide). Jerarquía 3
+    (subtítulo de un campo puntual, ej. "Profesional"): objectName
+    subtituloCampo — pero "Desde"/"Hasta", al lado del spinbox de
+    horario en vez de arriba, no cuentan como jerarquía 3."""
     pantalla = PantallaListaEspera(conn)
     qtbot.addWidget(pantalla)
 
@@ -214,8 +215,11 @@ def test_jerarquia_de_titulos_del_formulario(qtbot, conn):
     titulo = etiquetas_por_texto["LISTA DE ESPERA"]
     assert titulo.objectName() == "tituloPantalla"
 
-    solapa = etiquetas_por_texto["Nuevo pedido"]
-    assert solapa.objectName() == "subtituloSeccion"
+    solapas = pantalla.findChild(QTabWidget)
+    assert solapas is not None
+    assert solapas.count() == 1
+    assert solapas.tabText(0) == "Nuevo pedido"
+    assert solapas.tabBarAutoHide() is False  # se ve siempre, aunque haya una sola solapa
 
     for texto in (
         "Profesional", "Localidad", "Edificio", "Unidad", "Bloques del pedido",

@@ -60,6 +60,7 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -211,10 +212,13 @@ class PantallaListaEspera(QWidget):
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
-        subtitulo_solapa = QLabel("Nuevo pedido")
-        subtitulo_solapa.setObjectName("subtituloSeccion")
-        layout.addWidget(subtitulo_solapa)
-        fila_columnas = QHBoxLayout()
+        # QTabWidget muestra la solapa aunque tenga una sola (a diferencia
+        # de un QLabel simulándola) — Qt solo la esconde si se activa
+        # tabBarAutoHide, que acá no se usa a propósito.
+        solapas = QTabWidget()
+        panel_nuevo_pedido = QWidget()
+        fila_columnas = QHBoxLayout(panel_nuevo_pedido)
+        solapas.addTab(panel_nuevo_pedido, "Nuevo pedido")
 
         col_quien = QVBoxLayout()
         self.combo_profesional = QComboBox()
@@ -286,7 +290,7 @@ class PantallaListaEspera(QWidget):
         self.boton_agregar_bloque.setObjectName("botonSecundario")
         self.boton_agregar_bloque.setFixedWidth(_ANCHO_BOTON_COLUMNA)
         self.boton_agregar_bloque.clicked.connect(self._agregar_bloque)
-        col_quien.addWidget(self.boton_agregar_bloque, alignment=Qt.AlignmentFlag.AlignLeft)
+        col_quien.addWidget(self.boton_agregar_bloque, alignment=Qt.AlignmentFlag.AlignHCenter)
         col_quien.addStretch()
 
         col_cuando = QVBoxLayout()
@@ -322,7 +326,7 @@ class PantallaListaEspera(QWidget):
         self.boton_quitar_bloque.setEnabled(False)
         self.boton_quitar_bloque.setFixedWidth(_ANCHO_BOTON_COLUMNA)
         self.boton_quitar_bloque.clicked.connect(self._quitar_bloque)
-        col_cuando.addWidget(self.boton_quitar_bloque, alignment=Qt.AlignmentFlag.AlignLeft)
+        col_cuando.addWidget(self.boton_quitar_bloque, alignment=Qt.AlignmentFlag.AlignHCenter)
         col_cuando.addStretch()
 
         col_condiciones = QVBoxLayout()
@@ -362,13 +366,13 @@ class PantallaListaEspera(QWidget):
         self.boton_crear.setObjectName("botonPrimario")
         self.boton_crear.setFixedWidth(_ANCHO_BOTON_COLUMNA)
         self.boton_crear.clicked.connect(self._crear_pedido)
-        col_condiciones.addWidget(self.boton_crear, alignment=Qt.AlignmentFlag.AlignLeft)
+        col_condiciones.addWidget(self.boton_crear, alignment=Qt.AlignmentFlag.AlignHCenter)
         col_condiciones.addStretch()
 
         fila_columnas.addLayout(col_quien, 1)
         fila_columnas.addLayout(col_cuando, 1)
         fila_columnas.addLayout(col_condiciones, 1)
-        layout.addLayout(fila_columnas)
+        layout.addWidget(solapas)
 
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(10)

@@ -85,3 +85,13 @@ def test_titulo_pantalla_y_subtitulo_seccion_son_negros_no_azules():
     assert COLOR_NIVEL_1 not in bloque_solapa
     assert "#1A1A1A" in bloque_titulo
     assert "#1A1A1A" in bloque_solapa
+
+
+def test_qtabbar_tab_tiene_el_mismo_formato_de_jerarquia_2():
+    """Jerarquía 2 pasó a implementarse como una solapa real de
+    QTabWidget (QTabBar::tab) en vez de solo un QLabel simulándola —
+    mismo tamaño/negrita/color que subtituloSeccion."""
+    bloque = hoja_estilos(False).split("QTabBar::tab {")[1].split("}")[0]
+    assert "font-size: 15px" in bloque
+    assert "font-weight: bold" in bloque
+    assert "#1A1A1A" in bloque

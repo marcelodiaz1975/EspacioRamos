@@ -19,10 +19,16 @@ en Lista de espera, a replicar en el resto de a poco):
         en el texto (`.upper()` al armar el QLabel): Qt Style Sheets no
         soporta la propiedad CSS text-transform.
     Jerarquía 2 — nombre de la solapa/sección dentro del formulario
-        (ej. "Nuevo pedido"; se pone igual aunque haya una sola solapa):
-        objectName "subtituloSeccion". Más grande que el texto normal
-        pero menor que jerarquía 1, negrita, sin itálica, mismo color
-        de texto normal que jerarquía 1 (no azul).
+        (ej. "Nuevo pedido"): es una solapa real de un QTabWidget, no
+        una etiqueta simulándola — Qt muestra la barra de solapas
+        aunque haya una sola mientras no se active `tabBarAutoHide`
+        (que acá no se usa a propósito, así se ve siempre). El texto de
+        la solapa (QTabBar::tab) usa el mismo criterio: más grande que
+        el texto normal pero menor que jerarquía 1, negrita, sin
+        itálica, mismo color de texto normal que jerarquía 1 (no azul).
+        Como referencia visual suelta (ej. un título de sección que no
+        amerita ser una solapa real), objectName "subtituloSeccion" da
+        el mismo formato en un QLabel.
     Jerarquía 3 — subtítulo de un campo/selector/cuadro puntual (ej.
         "Profesional" arriba de su combo): objectName "subtituloCampo".
         Mismo tamaño/color que el texto normal, solo que en negrita.
@@ -91,6 +97,10 @@ QLabel#tituloPantalla {{
 QLabel#subtitulo {{ font-size: 11px; color: {'#AAAAAA' if modo_oscuro else '#555555'}; }}
 QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {t['texto']}; padding: 4px 0px; }}
 QLabel#subtituloCampo {{ font-weight: bold; }}
+QTabBar::tab {{
+    font-size: 15px; font-weight: bold; color: {t['texto']};
+    padding: 6px 14px;
+}}
 QGroupBox#panelFiltrosGrilla::title {{
     font-size: 15px; font-weight: bold; color: {t['texto']};
     subcontrol-origin: margin; padding: 4px 0px;
