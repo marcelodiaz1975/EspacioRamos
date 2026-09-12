@@ -3,7 +3,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.pdf.placas_pdf import generar_pdf_placas
+from app.pdf.placas_pdf import generar_pdf_placas, generar_pdf_placas_seleccionadas
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -109,3 +109,45 @@ def test_filtra_por_ids_edificio(conn, tmp_path):
     texto = fitz.open(ruta)[0].get_text()
     assert "Uno" in texto
     assert "Dos" not in texto
+
+
+def _crear_profesional(conn, apellido="Lo Veci", nombre_pila="Virginia", tratamiento="Lic."):
+    return obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido=apellido, NombrePila=nombre_pila, Tratamiento=tratamiento,
+    )
+
+
+def test_seleccionadas_sin_ids_lanza_error(conn, tmp_path):
+    with pytest.raises(ValueError):
+        generar_pdf_placas_seleccionadas(conn, str(tmp_path), [])
+
+
+def test_seleccionadas_genera_una_celda_por_profesional(conn, tmp_path):
+    id_1 = _crear_profesional(conn, apellido="Lo Veci")
+    id_2 = _crear_profesional(conn, apellido="Gómez", nombre_pila="Martín", tratamiento="Dr.")
+
+    ruta = generar_pdf_placas_seleccionadas(conn, str(tmp_path), [id_1, id_2])
+
+    assert ruta.endswith(".pdf")
+    assert "Placas para imprimir" in ruta
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Lic. Virginia Lo Veci" in texto
+    assert "Dr. Martín Gómez" in texto
+
+
+def test_seleccionadas_ignora_ids_de_profesionales_inexistentes(conn, tmp_path):
+    id_1 = _crear_profesional(conn)
+    ruta = generar_pdf_placas_seleccionadas(conn, str(tmp_path), [id_1, 99999])
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Lic. Virginia Lo Veci" in texto
+
+
+def test_seleccionadas_paginan_22_por_hoja(conn, tmp_path):
+    ids = [_crear_profesional(conn, apellido=f"Apellido{i}") for i in range(25)]
+
+    ruta = generar_pdf_placas_seleccionadas(conn, str(tmp_path), ids)
+
+    documento = fitz.open(ruta)
+    assert documento.page_count == 2
+    assert documento[0].get_text().count("Apellido") == 22
+    assert documento[1].get_text().count("Apellido") == 3

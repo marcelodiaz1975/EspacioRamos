@@ -1,21 +1,35 @@
-"""PDF de impresión de placas (FA6, sección 3.8): una fila por posición
-activa del tablero de cada unidad, con el nombre grabado — para mandar a
-fabricar o tener una referencia impresa de cómo queda el tablero.
+"""PDFs de placas (FA6, sección 3.8): dos documentos independientes.
 
-Nombre de archivo fijo ("Placas {NombreEspacio}[ - Localidad].pdf"):
-siempre se sobrescribe, sin historial de versiones — igual que Propuesta
-y Disponibilidad, es un documento de trabajo del estado actual, no un
-archivo por versión."""
+`generar_pdf_placas` — una fila por posición activa del tablero de cada
+unidad, con el nombre grabado: referencia de cómo queda el tablero
+completo, se regenera solo en el avance de mes y con nombre de archivo
+fijo ("Placas {NombreEspacio}[ - Localidad].pdf", siempre se
+sobrescribe, sin historial — igual que Propuesta y Disponibilidad).
+
+`generar_pdf_placas_seleccionadas` — a pedido de la clienta: una hoja
+para cortar e imprimir con SOLO las placas que se van juntando en el
+buscador de la pantalla de Placas (independiente de qué posición del
+tablero ocupen, o si todavía no ocupan ninguna). A diferencia del resto
+de los PDFs del sistema (Etapa 7: "página única continua"), éste SÍ
+pagina de verdad — se imprime tal cual sobre la plancha física, una
+hoja A4 por página — así que arma el documento con `crear_documento` +
+`doc.build` en vez de `construir_sin_saltos`."""
 from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import datetime
 
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
+from app.negocio.placas import nombre_estandar
 from app.pdf.edificios_pdf import edificios_incluidos, sufijo_localidad
-from app.pdf.estilos import FUENTE, construir_sin_saltos, encabezado, encabezado_espacio, estilo_texto
+from app.pdf.estilos import FUENTE, FUENTE_NEGRITA, construir_sin_saltos, crear_documento, encabezado, encabezado_espacio, estilo_texto
+from app.repositorio.registro import obtener_repositorio
 
 
 def _placas_por_unidad(conn: sqlite3.Connection, ids_edificio: list[int]) -> dict[int, list[sqlite3.Row]]:
@@ -101,4 +115,54 @@ def generar_pdf_placas(conn: sqlite3.Connection, directorio: str, ids_edificio: 
 
     ruta = os.path.join(directorio, nombre_archivo)
     construir_sin_saltos(ruta, _construir_story, altura)
+    return ruta
+
+
+_COLUMNAS_GRILLA = 2
+_ALTO_CELDA = 2.3 * cm  # 2 columnas x 11 filas = 22 por hoja A4, como la plantilla de Excel que usaba la clienta antes
+
+
+def _tabla_grilla_placas(nombres: list[str], ancho: float) -> Table:
+    estilo_celda = ParagraphStyle(
+        "placa", fontName=FUENTE_NEGRITA, fontSize=13, alignment=TA_CENTER, leading=16,
+    )
+    celdas = [Paragraph(nombre, estilo_celda) for nombre in nombres]
+    faltantes = (-len(celdas)) % _COLUMNAS_GRILLA
+    celdas.extend([Paragraph("", estilo_celda)] * faltantes)
+
+    filas = [celdas[i:i + _COLUMNAS_GRILLA] for i in range(0, len(celdas), _COLUMNAS_GRILLA)]
+    ancho_columna = ancho / _COLUMNAS_GRILLA
+    tabla = Table(filas, colWidths=[ancho_columna] * _COLUMNAS_GRILLA, rowHeights=[_ALTO_CELDA] * len(filas))
+    tabla.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+    ]))
+    return tabla
+
+
+def generar_pdf_placas_seleccionadas(conn: sqlite3.Connection, directorio: str, ids_profesional: list[int]) -> str:
+    """Hoja para cortar e imprimir con las placas seleccionadas puntualmente
+    (buscador de profesional en la pantalla de Placas) — 2 columnas x 11
+    filas por hoja A4, sin importar si el profesional ya tiene o no una
+    posición asignada en algún tablero. El nombre de archivo lleva fecha
+    y hora porque, a diferencia de Propuesta/Disponibilidad/el PDF de
+    referencia de Placas, cada tanda de impresión es un documento
+    distinto que no reemplaza al anterior."""
+    if not ids_profesional:
+        raise ValueError("No hay ninguna placa seleccionada para imprimir.")
+    repo_profesional = obtener_repositorio(conn, "Profesional")
+    nombres = []
+    for id_profesional in ids_profesional:
+        profesional = repo_profesional.obtener(id_profesional)
+        if profesional is not None:
+            nombres.append(nombre_estandar(profesional))
+    if not nombres:
+        raise ValueError("Ninguno de los profesionales seleccionados existe.")
+
+    nombre_archivo = datetime.now().strftime("Placas para imprimir %Y-%m-%d %Hh%M.pdf")
+    ruta = os.path.join(directorio, nombre_archivo)
+    doc, ancho = crear_documento(ruta)
+    doc.build([_tabla_grilla_placas(nombres, ancho)])
     return ruta

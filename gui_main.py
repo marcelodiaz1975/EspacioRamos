@@ -26,6 +26,7 @@ from app.gui.pantallas.novedades import PantallaCargosEspeciales, PantallaRegist
 from app.gui.pantallas.oferta import PantallaOferta
 from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.pantallas.panel_control import PanelControl
+from app.gui.pantallas.placas import PantallaPlacas
 from app.gui.pantallas.profesionales import pantalla_profesionales
 from app.gui.pantallas.reservas import PantallaReservas
 from app.negocio.backup import restaurar_backup
@@ -73,6 +74,13 @@ def construir_secciones() -> list[Seccion]:
             "da acceso cada llave (panel Accesos).",
         ),
         Seccion(
+            "Placas", lambda conn: PantallaPlacas(conn), categoria="Principal",
+            ayuda="Solapa Buscar y asignar placas: qué profesional tiene placa en qué posición del "
+            "tablero de cada unidad, filtrable por localidad/edificio/unidad/profesional. Solapa "
+            "Imprimir placas: arma una selección puntual de profesionales y genera la hoja para "
+            "cortar e imprimir.",
+        ),
+        Seccion(
             "Lista de espera", lambda conn: PantallaListaEspera(conn), categoria="Principal",
             ayuda="Profesionales interesados en un horario que hoy está ocupado — el sistema avisa "
             "automáticamente cuando ese horario se libera.",
@@ -85,7 +93,7 @@ def construir_secciones() -> list[Seccion]:
         Seccion(
             "Archivos varios", lambda conn: PantallaArchivosVarios(conn, secciones), categoria="Principal",
             ayuda="Regenerar a demanda los documentos que ya se generan solos en el avance de mes "
-            "(Propuesta, Disponibilidad, Placas) y el manual de usuario.",
+            "(Propuesta, Disponibilidad) y el manual de usuario.",
         ),
         Seccion(
             "Registro de ausencias", lambda conn: PantallaRegistroAusencias(conn), categoria="Principal",
