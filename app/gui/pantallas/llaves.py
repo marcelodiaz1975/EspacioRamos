@@ -111,11 +111,16 @@ class PantallaLlaves(QWidget):
     @staticmethod
     def _titulo_seccion(texto: str) -> QLabel:
         etiqueta = QLabel(texto)
-        etiqueta.setStyleSheet("font-size: 13px; font-weight: bold;")
+        etiqueta.setObjectName("subtituloSeccion")
         return etiqueta
 
     def _armar_ui(self) -> None:
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
+
+        titulo = QLabel("Llaves".upper())
+        titulo.setObjectName("tituloPantalla")
+        layout.addWidget(titulo)
+
         splitter = QSplitter()
 
         # ------------------------------------------------------- izquierda
@@ -152,8 +157,10 @@ class PantallaLlaves(QWidget):
         self.boton_nuevo_tipo.setObjectName("botonPrimario")
         self.boton_nuevo_tipo.clicked.connect(self._nuevo_tipo)
         self.boton_editar_tipo = QPushButton("Editar")
+        self.boton_editar_tipo.setObjectName("botonSecundario")
         self.boton_editar_tipo.clicked.connect(self._editar_tipo)
         self.boton_eliminar_tipo = QPushButton("Eliminar")
+        self.boton_eliminar_tipo.setObjectName("botonSecundario")
         self.boton_eliminar_tipo.clicked.connect(self._eliminar_tipo)
         fila_botones_tipo.addWidget(self.boton_nuevo_tipo)
         fila_botones_tipo.addWidget(self.boton_editar_tipo)
@@ -178,8 +185,10 @@ class PantallaLlaves(QWidget):
 
         fila_accesos = QHBoxLayout()
         self.boton_agregar_acceso = QPushButton("Agregar acceso…")
+        self.boton_agregar_acceso.setObjectName("botonSecundario")
         self.boton_agregar_acceso.clicked.connect(self._agregar_acceso)
         self.boton_eliminar_acceso = QPushButton("Eliminar acceso")
+        self.boton_eliminar_acceso.setObjectName("botonSecundario")
         self.boton_eliminar_acceso.clicked.connect(self._eliminar_acceso)
         fila_accesos.addWidget(self.boton_agregar_acceso)
         fila_accesos.addWidget(self.boton_eliminar_acceso)
@@ -214,15 +223,19 @@ class PantallaLlaves(QWidget):
 
         fila_acciones = QHBoxLayout()
         self.boton_ingresar = QPushButton("Ingresar copia…")
+        self.boton_ingresar.setObjectName("botonSecundario")
         self.boton_ingresar.clicked.connect(self._ingresar_copia)
         self.boton_asignar = QPushButton("Asignar…")
         self.boton_asignar.setObjectName("botonPrimario")
         self.boton_asignar.clicked.connect(self._asignar)
         self.boton_devolver = QPushButton("Registrar devolución…")
+        self.boton_devolver.setObjectName("botonSecundario")
         self.boton_devolver.clicked.connect(self._registrar_devolucion)
         self.boton_perdida = QPushButton("Registrar pérdida…")
+        self.boton_perdida.setObjectName("botonSecundario")
         self.boton_perdida.clicked.connect(self._registrar_perdida)
         self.boton_deshacer = QPushButton("Deshacer último movimiento")
+        self.boton_deshacer.setObjectName("botonSecundario")
         self.boton_deshacer.clicked.connect(self._deshacer_ultimo)
         self.boton_deshacer.setEnabled(False)
         fila_acciones.addWidget(self.boton_ingresar)
@@ -234,7 +247,7 @@ class PantallaLlaves(QWidget):
         layout_der.addLayout(fila_acciones)
 
         splitter.addWidget(panel_der)
-        layout.addWidget(splitter)
+        layout.addWidget(splitter, stretch=1)
 
         self._foco = instalar_enter_avanza_foco([
             self.campo_observacion_tipo, self.boton_nuevo_tipo, self.boton_editar_tipo, self.boton_eliminar_tipo,

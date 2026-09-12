@@ -26,6 +26,11 @@ en Lista de espera, a replicar en el resto de a poco):
         la solapa (QTabBar::tab) usa el mismo criterio: más grande que
         el texto normal pero menor que jerarquía 1, negrita, sin
         itálica, mismo color de texto normal que jerarquía 1 (no azul).
+        La solapita y el panel (QTabWidget::pane) se pintan con el mismo
+        fondo (`t['fondo']`, el mismo que usa QMainWindow) para que no se
+        note un color de relleno distinto entre la pestaña y el resto
+        del formulario debajo — por defecto el estilo Fusion las pinta
+        con el gris de botón, distinto del fondo de la pantalla.
         Como referencia visual suelta (ej. un título de sección que no
         amerita ser una solapa real), objectName "subtituloSeccion" da
         el mismo formato en un QLabel.
@@ -97,9 +102,12 @@ QLabel#tituloPantalla {{
 QLabel#subtitulo {{ font-size: 11px; color: {'#AAAAAA' if modo_oscuro else '#555555'}; }}
 QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {t['texto']}; padding: 4px 0px; }}
 QLabel#subtituloCampo {{ font-weight: bold; }}
+QTabWidget::pane {{ background-color: {t['fondo']}; border: none; }}
 QTabBar::tab {{
     font-size: 15px; font-weight: bold; color: {t['texto']};
+    background-color: {t['fondo']};
     padding: 6px 14px;
+    border: none;
 }}
 QGroupBox#panelFiltrosGrilla::title {{
     font-size: 15px; font-weight: bold; color: {t['texto']};

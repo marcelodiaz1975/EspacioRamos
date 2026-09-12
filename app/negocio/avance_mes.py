@@ -136,6 +136,32 @@ def _cerrar_cuotas(conn: sqlite3.Connection, periodo_cerrado: str) -> tuple[int,
     return len(cuotas), finalizados
 
 
+def _limite_retencion_activos(conn: sqlite3.Connection) -> tuple[int, str]:
+    cfg = conn.execute(
+        "SELECT RetencionHistorialListaEsperaAnios FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    anios_retencion = cfg["RetencionHistorialListaEsperaAnios"] if cfg else 5
+    hoy = fecha_actual(conn)
+    try:
+        limite = hoy.replace(year=hoy.year - anios_retencion).isoformat()
+    except ValueError:  # 29 de febrero sin año bisiesto equivalente
+        limite = hoy.replace(year=hoy.year - anios_retencion, day=28).isoformat()
+    return anios_retencion, limite
+
+
+def pedidos_activos_vencidos(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Activos con más de RetencionHistorialListaEsperaAnios de antigüedad —
+    expuesto aparte para que la pantalla de avance de mes pueda avisar y
+    pedir confirmación ANTES de llamar a `avanzar_mes` (confirmado por la
+    clienta: si llegan a este lapso, se avisa al avanzar de mes y ahí se
+    confirma si se borran o se conservan un tiempo más; independientemente
+    de esto, un pedido Activo se puede sacar de la lista en cualquier
+    momento a mano con "Descartar pedido")."""
+    _anios, limite = _limite_retencion_activos(conn)
+    repo = obtener_repositorio(conn, "ListaEspera")
+    return [p for p in repo.listar(Estado="Activo") if p["FechaPedido"] < limite]
+
+
 def _limpiar_lista_espera(conn: sqlite3.Connection, *, eliminar_activos_vencidos: bool) -> tuple[int, int]:
     """Paso 6 (DC-06, DC-08 §2.6): Resueltos y Descartados se eliminan
     siempre. Los Activos con más de RetencionHistorialListaEsperaAnios de
@@ -149,16 +175,7 @@ def _limpiar_lista_espera(conn: sqlite3.Connection, *, eliminar_activos_vencidos
 
     vencidos_eliminados = 0
     if eliminar_activos_vencidos:
-        cfg = conn.execute(
-            "SELECT RetencionHistorialListaEsperaAnios FROM Configuracion WHERE IdConfiguracion = 1"
-        ).fetchone()
-        anios_retencion = cfg["RetencionHistorialListaEsperaAnios"] if cfg else 5
-        hoy = fecha_actual(conn)
-        try:
-            limite = hoy.replace(year=hoy.year - anios_retencion).isoformat()
-        except ValueError:  # 29 de febrero sin año bisiesto equivalente
-            limite = hoy.replace(year=hoy.year - anios_retencion, day=28).isoformat()
-        vencidos = [p for p in repo.listar(Estado="Activo") if p["FechaPedido"] < limite]
+        vencidos = pedidos_activos_vencidos(conn)
         for p in vencidos:
             eliminar_pedido(conn, p["IdPedido"])
         vencidos_eliminados = len(vencidos)

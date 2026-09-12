@@ -5,6 +5,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.panel_control import PanelControl
+from app.negocio.lista_espera import crear_pedido
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -168,6 +169,63 @@ def test_avanzar_mes_no_pregunta_por_aumento_si_ya_se_confirmo_uno(qtbot, conn, 
     assert "evaluar un aumento" not in preguntas[0]
     snapshots = obtener_repositorio(conn, "SnapshotMensual").listar()
     assert snapshots[0]["PorcentajeAumentoAplicado"] == 5.0
+
+
+def _crear_pedido_vencido(conn) -> int:
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="C", Apellido="Vencido")
+    return crear_pedido(
+        conn, id_profesional=id_prof,
+        bloques=[{"dias": ["Lunes"], "horario_desde": 14, "horario_hasta": 16}], fecha_pedido="2015-01-01",
+    )
+
+
+def test_avanzar_mes_avisa_de_vencidos_y_los_elimina_si_se_confirma(qtbot, conn, monkeypatch):
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-31' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    id_pedido = _crear_pedido_vencido(conn)
+    conn.commit()
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+
+    # "No" a evaluar aumentos (saltear), "Sí" a confirmar el avance, "Sí" a eliminar los vencidos.
+    preguntas = []
+    respuestas = iter([
+        QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Yes,
+    ])
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda self, titulo, texto, *a, **k: (preguntas.append(texto), next(respuestas))[1]),
+    )
+
+    pantalla._avanzar_mes()
+
+    assert any("vencidos" in p.lower() for p in preguntas)
+    assert obtener_repositorio(conn, "ListaEspera").obtener(id_pedido) is None
+
+
+def test_avanzar_mes_conserva_vencidos_si_no_se_confirma(qtbot, conn, monkeypatch):
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-31' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    id_pedido = _crear_pedido_vencido(conn)
+    conn.commit()
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+
+    # "Sí" a saltear aumentos y confirmar el avance, "No" a eliminar los vencidos.
+    respuestas = iter([
+        QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No,
+    ])
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: next(respuestas)))
+
+    pantalla._avanzar_mes()
+
+    assert obtener_repositorio(conn, "ListaEspera").obtener(id_pedido) is not None
+    snapshots = obtener_repositorio(conn, "SnapshotMensual").listar()
+    assert len(snapshots) == 1  # el avance de mes se ejecutó igual
 
 
 def test_ventana_principal_navega_entre_secciones(qtbot, conn):

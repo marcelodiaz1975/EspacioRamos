@@ -95,3 +95,16 @@ def test_qtabbar_tab_tiene_el_mismo_formato_de_jerarquia_2():
     assert "font-size: 15px" in bloque
     assert "font-weight: bold" in bloque
     assert "#1A1A1A" in bloque
+
+
+def test_solapa_y_panel_comparten_el_mismo_fondo_que_la_pantalla():
+    """Pedido de la clienta: que no se note diferencia de relleno entre
+    la pestañita ("Nuevo pedido") y el resto del formulario debajo — por
+    defecto Fusion pinta la solapa con el gris de botón, distinto del
+    fondo de la pantalla, así que se fuerzan los dos al mismo color."""
+    for modo_oscuro, fondo in ((False, "#F5F5F5"), (True, "#1E2124")):
+        hoja = hoja_estilos(modo_oscuro)
+        bloque_panel = hoja.split("QTabWidget::pane {")[1].split("}")[0]
+        bloque_tab = hoja.split("QTabBar::tab {")[1].split("}")[0]
+        assert fondo in bloque_panel
+        assert fondo in bloque_tab

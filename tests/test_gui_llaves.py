@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -38,6 +38,31 @@ def _crear_tipo_con_copia(conn, tipo="Unidad", valor_deposito_actual=3000):
     ingresar_copias(conn, id_llave=id_llave, cantidad=1)
     conn.commit()
     return id_llave
+
+
+def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
+    """Preview de la jerarquía de títulos definida en Lista de espera,
+    aplicada acá antes de la revisión uno por uno de esta pantalla."""
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    titulo = pantalla.findChild(QLabel, "tituloPantalla")
+    assert titulo is not None
+    assert titulo.text() == "LLAVES"
+
+
+def test_botones_secundarios_de_llaves_tienen_el_objectname_esperado(qtbot, conn):
+    """"Nuevo" y "Asignar…" quedan como jerarquía 1 (acciones más
+    definitivas de cada sección); el resto pasa a botonSecundario."""
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_nuevo_tipo.objectName() == "botonPrimario"
+    assert pantalla.boton_asignar.objectName() == "botonPrimario"
+    for boton in (
+        pantalla.boton_editar_tipo, pantalla.boton_eliminar_tipo, pantalla.boton_agregar_acceso,
+        pantalla.boton_eliminar_acceso, pantalla.boton_ingresar, pantalla.boton_devolver,
+        pantalla.boton_perdida, pantalla.boton_deshacer,
+    ):
+        assert boton.objectName() == "botonSecundario"
 
 
 def test_combo_profesional_asignar_es_buscable_por_codigo_o_nombre(qtbot, conn):

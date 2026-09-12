@@ -4,7 +4,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.avance_mes import avanzar_mes, porcentaje_aumento_del_periodo
+from app.negocio.avance_mes import avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo
 from app.negocio.lista_espera import crear_pedido, marcar_descartado, marcar_resuelto
 from app.negocio.pagos import crear_plan_pago
 from app.repositorio.registro import obtener_repositorio
@@ -159,6 +159,18 @@ def test_lista_espera_elimina_activos_vencidos_si_se_confirma(conn):
     assert resumen.pedidos_activos_vencidos_eliminados == 1
     assert obtener_repositorio(conn, "ListaEspera").obtener(id_viejo) is None
     assert obtener_repositorio(conn, "ListaEspera").obtener(id_reciente) is not None
+
+
+def test_pedidos_activos_vencidos_devuelve_solo_los_que_superan_la_retencion(conn):
+    """Expuesta aparte de `avanzar_mes` para que la pantalla de avance de
+    mes pueda avisar y pedir confirmación ANTES de ejecutar el avance."""
+    id_prof = _crear_profesional(conn, categoria="C")
+    id_viejo = _crear_pedido(conn, id_prof, fecha_pedido="2015-01-01")
+    _crear_pedido(conn, id_prof, dia="Martes", fecha_pedido="2026-01-01")
+
+    vencidos = pedidos_activos_vencidos(conn)
+
+    assert [p["IdPedido"] for p in vencidos] == [id_viejo]
 
 
 def test_avanzar_mes_genera_snapshot(conn):

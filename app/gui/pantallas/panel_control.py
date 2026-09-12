@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.negocio.avance_mes import avanzar_mes, porcentaje_aumento_del_periodo
+from app.negocio.avance_mes import avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo
 from app.negocio.backup import generar_backup
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.formato import formatear_moneda, mes_texto, periodo_mm_aaaa
@@ -167,7 +167,24 @@ class PanelControl(QWidget):
         )
         if confirmacion != QMessageBox.StandardButton.Yes:
             return
-        resumen = avanzar_mes(self.conn, periodo_cerrado=periodo)
+
+        vencidos = pedidos_activos_vencidos(self.conn)
+        eliminar_vencidos = False
+        if vencidos:
+            cantidad = len(vencidos)
+            pedido_o_pedidos = "pedido" if cantidad == 1 else "pedidos"
+            respuesta_vencidos = QMessageBox.question(
+                self, "Lista de espera — pedidos vencidos",
+                f"Hay {cantidad} {pedido_o_pedidos} Activo(s) en Lista de espera vencidos: superaron la "
+                "retención configurada en Configuración. ¿Confirmás eliminarlos ahora?\n\n"
+                "Si elegís \"No\" se conservan un tiempo más: podés eliminarlos a mano cuando quieras "
+                "(descartando el pedido) o esperar a que se vuelva a avisar en un próximo avance de mes.",
+            )
+            eliminar_vencidos = respuesta_vencidos == QMessageBox.StandardButton.Yes
+
+        resumen = avanzar_mes(
+            self.conn, periodo_cerrado=periodo, eliminar_activos_vencidos_lista_espera=eliminar_vencidos,
+        )
         self.conn.commit()
         mensaje_backup = (
             f"Backup previo generado en:\n{resumen.ruta_backup}\n\n" if resumen.backup_generado
