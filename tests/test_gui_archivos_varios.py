@@ -32,15 +32,25 @@ def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
 
 
 def test_botones_de_regenerar_son_jerarquia_2(qtbot, conn):
-    """Ninguno de los cuatro es más definitivo que los otros (regenerar
+    """Ninguno de los tres es más definitivo que los otros (regenerar
     un documento es una acción no destructiva e idempotente), así que
-    los cuatro pasan a botonSecundario en vez de tener un botonPrimario."""
+    los tres pasan a botonSecundario en vez de tener un botonPrimario."""
     pantalla = PantallaArchivosVarios(conn)
     qtbot.addWidget(pantalla)
     botones = pantalla.findChildren(QPushButton)
-    assert len(botones) == 4
+    assert len(botones) == 3
     for boton in botones:
         assert boton.objectName() == "botonSecundario"
+
+
+def test_no_tiene_boton_de_regenerar_placas(qtbot, conn):
+    """Sacado a pedido de la clienta: el armado de placas va a tener su
+    propia pantalla, todavía a definir (formulario independiente o
+    solapa dentro de otra pantalla existente)."""
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    textos = [b.text() for b in pantalla.findChildren(QPushButton)]
+    assert "Regenerar Placas" not in textos
 
 
 def test_regenerar_sin_carpeta_base_no_falla(qtbot, conn):
@@ -75,19 +85,6 @@ def test_regenerar_disponibilidad_genera_archivo(qtbot, conn, tmp_path):
     generados = list((tmp_path / "Archivos varios" / "Disponibilidad").iterdir())
     assert len(generados) == 1
     assert generados[0].name.startswith("Disponibilidad Espacio Ramos Consultorios")
-
-
-def test_regenerar_placas_genera_archivo(qtbot, conn, tmp_path):
-    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
-    conn.commit()
-    pantalla = PantallaArchivosVarios(conn)
-    qtbot.addWidget(pantalla)
-
-    pantalla._regenerar_placas()
-
-    generados = list((tmp_path / "Archivos varios" / "Placas").iterdir())
-    assert len(generados) == 1
-    assert generados[0].name.startswith("Placas Espacio Ramos")
 
 
 def test_regenerar_manual_sin_secciones_avisa_y_no_falla(qtbot, conn):

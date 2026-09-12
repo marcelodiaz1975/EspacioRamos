@@ -1,10 +1,18 @@
 """Archivos varios (Etapa 9): regenerar a demanda, contra el estado actual
-del sistema, los documentos únicos del espacio en general — Propuesta,
-Disponibilidad y Placas — que se guardan en su subcarpeta bajo Archivos
-varios en la carpeta base configurada. También se regeneran solos en el
-avance de mes (`app.negocio.avance_mes`); esta pantalla es para cuando
-hace falta actualizarlos en el medio del mes (p. ej. después de dar de
-alta un edificio nuevo)."""
+del sistema, los documentos únicos del espacio en general — Propuesta y
+Disponibilidad — que se guardan en su subcarpeta bajo Archivos varios en
+la carpeta base configurada. También se regeneran solos en el avance de
+mes (`app.negocio.avance_mes`); esta pantalla es para cuando hace falta
+actualizarlos en el medio del mes (p. ej. después de dar de alta un
+edificio nuevo).
+
+Placas (Etapa 9 originalmente, sacado de acá a pedido de la clienta):
+"Regenerar Placas" dejó de estar en esta pantalla — el armado de placas
+va a necesitar su propia pantalla (agenda de qué profesional tiene placa
+en qué unidad/posición, selección puntual de cuáles imprimir, etc.), a
+definir si queda como formulario independiente o como solapa dentro de
+otra pantalla existente. `app.pdf.placas_pdf.generar_pdf_placas` sigue
+existiendo tal cual y se sigue regenerando solo en el avance de mes."""
 from __future__ import annotations
 
 import sqlite3
@@ -15,18 +23,12 @@ from app.gui.main_window import Seccion
 from app.negocio.archivos_generados import (
     SUBCARPETA_DISPONIBILIDAD,
     SUBCARPETA_MANUAL,
-    SUBCARPETA_PLACAS,
     SUBCARPETA_PROPUESTA,
     carpeta_archivos_varios,
 )
 from app.pdf.disponibilidad_pdf import generar_pdfs_disponibilidad_por_localidad
 from app.pdf.manual_pdf import generar_pdf_manual
-from app.pdf.placas_pdf import generar_pdf_placas
 from app.pdf.propuesta_pdf import generar_pdfs_propuesta_por_localidad
-
-
-def _generar_pdfs_placas(conn, directorio: str) -> list[str]:
-    return [generar_pdf_placas(conn, directorio)]
 
 
 class PantallaArchivosVarios(QWidget):
@@ -62,11 +64,6 @@ class PantallaArchivosVarios(QWidget):
         boton_disponibilidad.clicked.connect(self._regenerar_disponibilidad)
         fila.addWidget(boton_disponibilidad)
 
-        boton_placas = QPushButton("Regenerar Placas")
-        boton_placas.setObjectName("botonSecundario")
-        boton_placas.clicked.connect(self._regenerar_placas)
-        fila.addWidget(boton_placas)
-
         boton_manual = QPushButton("Regenerar Manual de usuario")
         boton_manual.setObjectName("botonSecundario")
         boton_manual.clicked.connect(self._regenerar_manual)
@@ -84,9 +81,6 @@ class PantallaArchivosVarios(QWidget):
         self._regenerar(
             "Disponibilidad", SUBCARPETA_DISPONIBILIDAD, generar_pdfs_disponibilidad_por_localidad,
         )
-
-    def _regenerar_placas(self) -> None:
-        self._regenerar("Placas", SUBCARPETA_PLACAS, _generar_pdfs_placas)
 
     def _regenerar_manual(self) -> None:
         if not self._secciones:
