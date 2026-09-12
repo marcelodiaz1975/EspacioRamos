@@ -7,12 +7,35 @@ hoja de estilos con los nombres de objeto propios de la app
 (tituloPantalla, botonPrimario, etc.), se arma una QPalette para que los
 widgets estándar sin estilo propio (QLineEdit, QComboBox, QTableWidget,
 QCheckBox, diálogos) seas consistentes sin tener que escribir una regla
-QSS por cada pantalla."""
+QSS por cada pantalla.
+
+Jerarquía de títulos dentro de una pantalla (definida y probada primero
+en Lista de espera, a replicar en el resto de a poco):
+    Jerarquía 1 — título de la pantalla entera (ej. "Lista de espera"):
+        objectName "tituloPantalla". Mismo tamaño de siempre (18px),
+        negrita, MAYÚSCULA e itálica. La mayúscula hay que escribirla
+        en el texto (`.upper()` al armar el QLabel): Qt Style Sheets no
+        soporta la propiedad CSS text-transform.
+    Jerarquía 2 — nombre de la solapa/sección dentro del formulario
+        (ej. "Nuevo pedido"; se pone igual aunque haya una sola solapa):
+        objectName "subtituloSeccion". Más grande que el texto normal
+        pero menor que jerarquía 1, negrita, sin itálica.
+    Jerarquía 3 — subtítulo de un campo/selector/cuadro puntual (ej.
+        "Profesional" arriba de su combo): objectName "subtituloCampo".
+        Mismo tamaño/color que el texto normal, solo que en negrita.
+
+Jerarquía de botones: "botonPrimario" (azul fuerte, ej. "Crear pedido")
+para la acción más importante/definitiva del formulario; "botonSecundario"
+(celeste suave) para el resto de las acciones, no tan definitivas (ej.
+"Agregar bloque", "Descartar pedido"). Los encabezados de columna de
+cualquier tabla (QHeaderView::section) usan un azul más oscuro que
+botonPrimario para no confundirse con un botón."""
 from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
 
 COLOR_NIVEL_1 = "#2E86AB"  # azul — encabezados principales, botón primario
+COLOR_NIVEL_1_OSCURO = "#1F5F7A"  # azul más oscuro — encabezados de tabla, para diferenciarse del botón primario
 COLOR_NIVEL_2 = "#E07B39"  # naranja — sub-encabezados
 COLOR_DIA_GRILLA = "#6B0000"  # bordó — encabezados de grilla
 COLOR_VERDE = "#4CAF50"
@@ -28,7 +51,7 @@ _CLARO = {
     "texto": "#1A1A1A",
     "borde": "#DDDDDD",
     "hover_nav": "#3A6EA5",
-    "resalte_seleccion": "#D6D6D6",
+    "resalte_seleccion": "#F2C4A0",
 }
 
 # ------------------------------------------------------------------ oscuro
@@ -38,7 +61,7 @@ _OSCURO = {
     "texto": "#E8E6E3",
     "borde": "#3F454C",
     "hover_nav": "#3A6EA5",
-    "resalte_seleccion": "#5A5F66",
+    "resalte_seleccion": "#8A5A32",
 }
 
 
@@ -59,11 +82,12 @@ QListWidget#navegacion::item:selected {{ background-color: {COLOR_DIA_GRILLA}; }
 QListWidget#navegacion::item:hover {{ background-color: {t['hover_nav']}; }}
 
 QLabel#tituloPantalla {{
-    font-size: 18px; font-weight: bold; color: {COLOR_NIVEL_1};
+    font-size: 18px; font-weight: bold; font-style: italic; color: {COLOR_NIVEL_1};
     padding: 6px 0px;
 }}
 QLabel#subtitulo {{ font-size: 11px; color: {'#AAAAAA' if modo_oscuro else '#555555'}; }}
 QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {COLOR_NIVEL_1}; padding: 4px 0px; }}
+QLabel#subtituloCampo {{ font-weight: bold; }}
 QGroupBox#panelFiltrosGrilla::title {{
     font-size: 15px; font-weight: bold; color: {t['texto']};
     subcontrol-origin: margin; padding: 4px 0px;
@@ -71,7 +95,7 @@ QGroupBox#panelFiltrosGrilla::title {{
 
 QPushButton#botonPrimario {{
     background-color: {COLOR_NIVEL_1}; color: {COLOR_TEXTO_CLARO};
-    border: none; border-radius: 4px; padding: 8px 16px; font-weight: bold;
+    border: 1px solid #000000; border-radius: 4px; padding: 8px 16px; font-weight: bold;
 }}
 QPushButton#botonPrimario:disabled {{ background-color: #A0AEC0; }}
 QPushButton#botonPrimario:hover:!disabled {{ background-color: #256a89; }}
@@ -80,7 +104,7 @@ QPushButton#botonAccion {{ padding: 8px 16px; }}
 
 QPushButton#botonSecundario {{
     background-color: #BFE3F5; color: #14324A;
-    border: none; border-radius: 4px; padding: 8px 16px; font-weight: bold;
+    border: 1px solid #000000; border-radius: 4px; padding: 8px 16px; font-weight: bold;
 }}
 QPushButton#botonSecundario:hover:!disabled {{ background-color: #A6D6EF; }}
 QPushButton#botonSecundario:disabled {{ background-color: #DDDDDD; color: #9A9A9A; }}
@@ -106,7 +130,7 @@ QLabel#barraFechaFicticia {{
 
 QTableView {{ gridline-color: {t['borde']}; }}
 QHeaderView::section {{
-    background-color: {COLOR_NIVEL_1}; color: {COLOR_TEXTO_CLARO}; padding: 4px; border: none;
+    background-color: {COLOR_NIVEL_1_OSCURO}; color: {COLOR_TEXTO_CLARO}; padding: 4px; border: none;
 }}
 """
 
@@ -117,12 +141,13 @@ def paleta(modo_oscuro: bool = False) -> QPalette:
     (QLineEdit, QComboBox, QTableWidget, QCheckBox, QMessageBox, etc.) que
     no tienen una regla propia en `hoja_estilos`.
 
-    El color de selección (Highlight) se fuerza a gris en los dos modos
-    -no es solo cosa del modo oscuro- porque el celeste/azul por defecto
-    del sistema para la fila/ítem seleccionado se confunde con el azul
-    de los títulos (COLOR_NIVEL_1); confirmado por la clienta para
-    cualquier tabla o lista de toda la aplicación, no solo esta
-    pantalla."""
+    El color de selección (Highlight) se fuerza a un naranja suave en
+    los dos modos -no es solo cosa del modo oscuro- porque el celeste/
+    azul por defecto del sistema para la fila/ítem seleccionado se
+    confunde con el azul de los títulos (COLOR_NIVEL_1); confirmado por
+    la clienta para cualquier tabla o lista de toda la aplicación, no
+    solo una pantalla puntual (probado primero en gris, después
+    cambiado a este naranja suave a pedido de la clienta)."""
     t = _OSCURO if modo_oscuro else _CLARO
     p = QPalette()
     p.setColor(QPalette.ColorRole.Highlight, QColor(t["resalte_seleccion"]))

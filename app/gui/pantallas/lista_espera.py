@@ -55,6 +55,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -90,6 +93,16 @@ _DIAS_PEDIDO = DIAS_SEMANA[:6]
 # `app.negocio.lista_espera._JERARQUIA_TAMANO`) — al revés que en Oferta
 # de consultorios, donde el combo elige un tamaño exacto.
 _TAMANOS_MINIMOS = [(t, t) for t in reversed(TAMANOS_CONSULTORIO)]
+
+
+def _titulo_campo(texto: str) -> QLabel:
+    """Subtítulo de jerarquía 3 (ver docstring de `app.gui.estilos`):
+    mismo tamaño/color que el texto normal, solo que en negrita — para
+    el nombre de un campo/selector/cuadro puntual del formulario (ej.
+    "Profesional" arriba de su combo)."""
+    etiqueta = QLabel(texto)
+    etiqueta.setObjectName("subtituloCampo")
+    return etiqueta
 
 
 def _horario_texto(desde: float, hasta: float) -> str:
@@ -163,6 +176,19 @@ class _SpinHora(QDoubleSpinBox):
         return (QValidator.State.Acceptable, text, pos)
 
 
+class _DelegadoSinResaltarSeleccion(QStyledItemDelegate):
+    """Pinta la columna Coincidencia ignorando el estado de selección
+    de la fila — confirmado por la clienta: el color de esa celda
+    (verde/amarillo/naranja/rojo/blanco) tiene que seguir mostrando el
+    criterio de cobertura tal cual, esté la fila seleccionada o no, en
+    vez de taparse con el naranja de selección."""
+
+    def paint(self, painter, option, index) -> None:  # noqa: N802
+        opcion = QStyleOptionViewItem(option)
+        opcion.state &= ~QStyle.StateFlag.State_Selected
+        super().paint(painter, opcion, index)
+
+
 class PantallaListaEspera(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -176,32 +202,34 @@ class PantallaListaEspera(QWidget):
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
-        titulo = QLabel("Lista de espera")
+        titulo = QLabel("Lista de espera".upper())
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
-        layout.addWidget(QLabel("Nuevo pedido"))
+        subtitulo_solapa = QLabel("Nuevo pedido")
+        subtitulo_solapa.setObjectName("subtituloSeccion")
+        layout.addWidget(subtitulo_solapa)
         fila_columnas = QHBoxLayout()
 
         col_quien = QVBoxLayout()
         self.combo_profesional = QComboBox()
         habilitar_busqueda_profesional(self.combo_profesional)
-        col_quien.addWidget(QLabel("Profesional"))
+        col_quien.addWidget(_titulo_campo("Profesional"))
         col_quien.addWidget(self.combo_profesional)
 
-        col_quien.addWidget(QLabel("Localidad"))
+        col_quien.addWidget(_titulo_campo("Localidad"))
         self.lista_localidad = _lista_multiseleccion()
         self.lista_localidad.itemSelectionChanged.connect(self._cargar_edificios)
         self._filtro_localidad = _FiltroColapsable(self.lista_localidad)
         col_quien.addWidget(self._filtro_localidad)
 
-        col_quien.addWidget(QLabel("Edificio"))
+        col_quien.addWidget(_titulo_campo("Edificio"))
         self.lista_edificio = _lista_multiseleccion()
         self.lista_edificio.itemSelectionChanged.connect(self._cargar_unidades)
         self._filtro_edificio = _FiltroColapsable(self.lista_edificio)
         col_quien.addWidget(self._filtro_edificio)
 
-        col_quien.addWidget(QLabel("Unidad"))
+        col_quien.addWidget(_titulo_campo("Unidad"))
         self.lista_unidad = _lista_multiseleccion()
         self.lista_unidad.itemSelectionChanged.connect(self._unidad_seleccion_cambio)
         self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
@@ -256,19 +284,25 @@ class PantallaListaEspera(QWidget):
         col_quien.addStretch()
 
         col_cuando = QVBoxLayout()
-        col_cuando.addWidget(QLabel("Bloques del pedido"))
+        col_cuando.addWidget(_titulo_campo("Bloques del pedido"))
         self.tabla_bloques = QTableWidget()
         self.tabla_bloques.setColumnCount(4)
         self.tabla_bloques.setHorizontalHeaderLabels(["Días", "Horario", "Comb. días", "Horas mínimas"])
         self.tabla_bloques.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_bloques.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_bloques.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla_bloques.setMinimumHeight(226)
-        self.tabla_bloques.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla_bloques.setMinimumHeight(218)
+        encabezado_bloques = self.tabla_bloques.horizontalHeader()
+        encabezado_bloques.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Días — para que quepan varios
+        for columna in (1, 2, 3):
+            encabezado_bloques.setSectionResizeMode(columna, QHeaderView.ResizeMode.Fixed)
+        self.tabla_bloques.setColumnWidth(1, 90)
+        self.tabla_bloques.setColumnWidth(2, 95)
+        self.tabla_bloques.setColumnWidth(3, 115)
         self.tabla_bloques.itemSelectionChanged.connect(self._actualizar_boton_quitar_bloque)
         col_cuando.addWidget(self.tabla_bloques)
 
-        col_cuando.addWidget(QLabel("Combinación de bloques y consultorios"))
+        col_cuando.addWidget(_titulo_campo("Combinación de bloques y consultorios"))
         self.combo_tipo_bloques = QComboBox()
         col_cuando.addWidget(self.combo_tipo_bloques)
 
@@ -285,7 +319,7 @@ class PantallaListaEspera(QWidget):
         col_cuando.addStretch()
 
         col_condiciones = QVBoxLayout()
-        col_condiciones.addWidget(QLabel("Características de los consultorios"))
+        col_condiciones.addWidget(_titulo_campo("Características de los consultorios"))
         grid_caracteristicas = QGridLayout()
 
         contenedor_tamano = QWidget()
@@ -313,8 +347,8 @@ class PantallaListaEspera(QWidget):
         col_condiciones.addLayout(grid_caracteristicas)
 
         self.campo_detalle = QPlainTextEdit()
-        self.campo_detalle.setFixedHeight(204)
-        col_condiciones.addWidget(QLabel("Comentarios"))
+        self.campo_detalle.setFixedHeight(196)
+        col_condiciones.addWidget(_titulo_campo("Comentarios"))
         col_condiciones.addWidget(self.campo_detalle)
 
         self.boton_crear = QPushButton("Crear pedido")
@@ -339,6 +373,7 @@ class PantallaListaEspera(QWidget):
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._mostrar_cobertura)
         self.tabla.horizontalHeader().setStretchLastSection(True)
+        self.tabla.setItemDelegateForColumn(8, _DelegadoSinResaltarSeleccion(self.tabla))
         layout.addWidget(self.tabla, stretch=1)
 
         fila_botones = QHBoxLayout()
@@ -353,7 +388,7 @@ class PantallaListaEspera(QWidget):
         fila_botones.addWidget(self.boton_editar)
         layout.addLayout(fila_botones)
 
-        layout.addWidget(QLabel("Cobertura de la coincidencia seleccionada"))
+        layout.addWidget(_titulo_campo("Cobertura de la coincidencia seleccionada"))
         self.texto_cobertura = QPlainTextEdit()
         self.texto_cobertura.setReadOnly(True)
         self.texto_cobertura.setFixedHeight(110)
