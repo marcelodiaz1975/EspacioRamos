@@ -39,7 +39,7 @@ class PantallaArchivosVarios(QWidget):
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        titulo = QLabel("Archivos varios")
+        titulo = QLabel("Archivos varios".upper())
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
@@ -53,18 +53,22 @@ class PantallaArchivosVarios(QWidget):
 
         fila = QHBoxLayout()
         boton_propuesta = QPushButton("Regenerar Propuesta")
+        boton_propuesta.setObjectName("botonSecundario")
         boton_propuesta.clicked.connect(self._regenerar_propuesta)
         fila.addWidget(boton_propuesta)
 
         boton_disponibilidad = QPushButton("Regenerar Disponibilidad")
+        boton_disponibilidad.setObjectName("botonSecundario")
         boton_disponibilidad.clicked.connect(self._regenerar_disponibilidad)
         fila.addWidget(boton_disponibilidad)
 
         boton_placas = QPushButton("Regenerar Placas")
+        boton_placas.setObjectName("botonSecundario")
         boton_placas.clicked.connect(self._regenerar_placas)
         fila.addWidget(boton_placas)
 
         boton_manual = QPushButton("Regenerar Manual de usuario")
+        boton_manual.setObjectName("botonSecundario")
         boton_manual.clicked.connect(self._regenerar_manual)
         fila.addWidget(boton_manual)
         fila.addStretch()

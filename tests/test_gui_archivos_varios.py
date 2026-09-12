@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -20,6 +20,27 @@ def conn(tmp_path):
 def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+
+
+def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
+    """Preview de la jerarquía de títulos definida en Lista de espera."""
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    titulo = pantalla.findChild(QLabel, "tituloPantalla")
+    assert titulo is not None
+    assert titulo.text() == "ARCHIVOS VARIOS"
+
+
+def test_botones_de_regenerar_son_jerarquia_2(qtbot, conn):
+    """Ninguno de los cuatro es más definitivo que los otros (regenerar
+    un documento es una acción no destructiva e idempotente), así que
+    los cuatro pasan a botonSecundario en vez de tener un botonPrimario."""
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    botones = pantalla.findChildren(QPushButton)
+    assert len(botones) == 4
+    for boton in botones:
+        assert boton.objectName() == "botonSecundario"
 
 
 def test_regenerar_sin_carpeta_base_no_falla(qtbot, conn):
