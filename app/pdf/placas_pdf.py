@@ -131,8 +131,8 @@ def generar_pdf_placas(conn: sqlite3.Connection, directorio: str, ids_edificio: 
 ANCHO_PLACA = 7.6 * cm
 ALTO_PLACA = 2.2 * cm
 MARGEN_INTERNO_PLACA = 0.3 * cm
-_GAP_ENTRE_COLUMNAS = 0.6 * cm
-_GAP_ENTRE_FILAS = 0.2 * cm  # ajustado para que 11 filas (22 placas) entren en una hoja A4 con los márgenes estándar
+GAP_ENTRE_COLUMNAS = 0.6 * cm
+GAP_ENTRE_FILAS = 0.2 * cm  # ajustado para que 11 filas (22 placas) entren en una hoja A4 con los márgenes estándar
 FUENTE_PLACA = FUENTE_NEGRITA_ITALICA  # reemplazo de Calibri, ver docstring del módulo
 TAMANO_FUENTE_PLACA = 20
 
@@ -167,7 +167,7 @@ def _fila_de_placas(textos: list[str]) -> Table:
     alto_fila = max(ALTO_PLACA, _altura_necesaria(izquierda), _altura_necesaria(derecha) if derecha else 0)
 
     fila = Table(
-        [[izquierda, "", derecha or ""]], colWidths=[ANCHO_PLACA, _GAP_ENTRE_COLUMNAS, ANCHO_PLACA],
+        [[izquierda, "", derecha or ""]], colWidths=[ANCHO_PLACA, GAP_ENTRE_COLUMNAS, ANCHO_PLACA],
         rowHeights=[alto_fila],
     )
     estilo = [
@@ -209,7 +209,7 @@ def generar_pdf_placas_seleccionadas(conn: sqlite3.Connection, directorio: str, 
     story = []
     for i in range(0, len(textos), 2):
         if i:
-            story.append(Spacer(1, _GAP_ENTRE_FILAS))
+            story.append(Spacer(1, GAP_ENTRE_FILAS))
         story.append(_fila_de_placas(textos[i:i + 2]))
     doc.build(story)
     return ruta

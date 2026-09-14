@@ -10,13 +10,10 @@ independiente o como solapa dentro de otra pantalla existente (ej.
 Liquidaciones) — por ahora se registra sola en la navegación, como F18
 (Llaves) en su momento.
 
-Estilo de las solapas EXPERIMENTAL, solo en esta pantalla (a pedido de
-la clienta: "probemos primero acá, si queda bien lo aplicamos al
-resto"): contorno negro en la solapa y fondo del panel más claro que la
-solapa en sí, con un tamaño de letra un poco menor que el resto de las
-pantallas — aplicado con un `setStyleSheet` en la instancia del
-QTabWidget de acá, NO en `app/gui/estilos.py`, así que no afecta a
-ninguna otra pantalla todavía."""
+La apariencia de "ficha de papel" de las solapas se probó primero acá
+y, aprobada por la clienta, pasó a `app/gui/estilos.py` (jerarquía 2)
+para todas las pantallas — no queda nada de eso local en este
+archivo."""
 from __future__ import annotations
 
 import sqlite3
@@ -30,6 +27,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -64,39 +62,38 @@ from app.negocio.placas import (
     posiciones_libres,
     texto_para_imprimir,
 )
-from app.pdf.placas_pdf import generar_pdf_placas_seleccionadas
+from app.pdf.placas_pdf import (
+    ALTO_PLACA,
+    ANCHO_PLACA,
+    GAP_ENTRE_COLUMNAS,
+    GAP_ENTRE_FILAS,
+    MARGEN_INTERNO_PLACA,
+    TAMANO_FUENTE_PLACA,
+    generar_pdf_placas_seleccionadas,
+)
 from app.repositorio.registro import obtener_repositorio
 
-# Vista previa de impresión: escala real a ~96dpi (1cm = 37.8px) para que
-# las proporciones se acerquen a las del PDF — no pretende ser exacta
-# (Qt y reportlab miden texto distinto), solo una referencia visual.
-_PX_POR_CM = 37.8
-_PREVIA_ANCHO_PX = round(7.6 * _PX_POR_CM)
-_PREVIA_ALTO_PX = round(2.2 * _PX_POR_CM)
-_PREVIA_MARGEN_PX = round(0.3 * _PX_POR_CM)
-_PREVIA_GAP_COLUMNAS_PX = round(0.6 * _PX_POR_CM)
-_PREVIA_GAP_FILAS_PX = round(0.3 * _PX_POR_CM)
+_PT_POR_PUNTO_REPORTLAB = 96 / 72  # reportlab mide en puntos (1/72"); Qt en px a ~96dpi
 
-_ESTILO_SOLAPAS_PREVIA = """
-QTabWidget::pane {
-    background-color: #FFFFFF;
-    border: 1px solid #000000;
-    top: -1px;
-}
-QTabBar::tab {
-    font-size: 14px; font-weight: bold; color: #1A1A1A;
-    background-color: #F5F5F5;
-    border: 1px solid #000000;
-    padding: 6px 14px;
-}
-QTabBar::tab:selected {
-    background-color: #FFFFFF;
-    border-bottom-color: #FFFFFF;
-}
-QTabBar::tab:!selected {
-    margin-top: 2px;
-}
-"""
+
+def _pt_a_px(valor_puntos: float) -> int:
+    """Convierte una medida en puntos de reportlab (`cm` de reportlab.lib.
+    units ya da puntos) a píxeles a ~96dpi, para que la vista previa en
+    pantalla use EXACTAMENTE las mismas medidas que el PDF
+    (ANCHO_PLACA/ALTO_PLACA/MARGEN_INTERNO_PLACA/GAP_* de
+    app.pdf.placas_pdf) en vez de duplicar constantes que se puedan
+    desincronizar si se vuelven a ajustar allá."""
+    return round(valor_puntos * _PT_POR_PUNTO_REPORTLAB)
+
+
+_PREVIA_ANCHO_PX = _pt_a_px(ANCHO_PLACA)
+_PREVIA_ALTO_PX = _pt_a_px(ALTO_PLACA)
+_PREVIA_MARGEN_PX = _pt_a_px(MARGEN_INTERNO_PLACA)
+_PREVIA_GAP_COLUMNAS_PX = _pt_a_px(GAP_ENTRE_COLUMNAS)
+_PREVIA_GAP_FILAS_PX = _pt_a_px(GAP_ENTRE_FILAS)
+
+_ANCHO_BOTON_IMPRESION = 180  # Agregar a impresión / Quitar de la lista / Generar PDF, los tres iguales
+_ANCHO_MINIMO_PANEL_FILTROS = 300
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -126,7 +123,6 @@ class PantallaPlacas(QWidget):
         layout.addWidget(titulo)
 
         solapas = QTabWidget()
-        solapas.setStyleSheet(_ESTILO_SOLAPAS_PREVIA)
         solapas.addTab(self._armar_panel_buscar(), "Buscar y asignar placas")
         solapas.addTab(self._armar_panel_imprimir(), "Imprimir placas")
         layout.addWidget(solapas)
@@ -139,7 +135,10 @@ class PantallaPlacas(QWidget):
         panel = QWidget()
         layout_principal = QHBoxLayout(panel)
 
-        columna_filtros = QVBoxLayout()
+        panel_filtros = QWidget()
+        panel_filtros.setMinimumWidth(_ANCHO_MINIMO_PANEL_FILTROS)
+        columna_filtros = QVBoxLayout(panel_filtros)
+        columna_filtros.setContentsMargins(0, 0, 0, 0)
         columna_filtros.addWidget(_titulo_campo("Profesional"))
         self.combo_profesional_filtro = QComboBox()
         self.combo_profesional_filtro.addItem("Todos los profesionales", None)
@@ -168,7 +167,7 @@ class PantallaPlacas(QWidget):
         columna_filtros.addWidget(self._filtro_unidad)
 
         columna_filtros.addStretch()
-        layout_principal.addLayout(columna_filtros)
+        layout_principal.addWidget(panel_filtros)
 
         columna_tabla = QVBoxLayout()
         self.tabla = QTableWidget()
@@ -180,7 +179,9 @@ class PantallaPlacas(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones_tabla)
-        self.tabla.horizontalHeader().setStretchLastSection(True)
+        # Todas las columnas se reparten el ancho disponible por igual —
+        # pedido de la clienta, en vez de ajustarse al contenido.
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._orden = OrdenTabla(self.tabla, self._actualizar_tabla)
         columna_tabla.addWidget(self.tabla, stretch=1)
 
@@ -319,9 +320,9 @@ class PantallaPlacas(QWidget):
         if self._orden.columna is not None:
             enriquecidos.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         else:
-            # Localidad, Edificio, Unidad, Profesional (sort estable: se ordena
+            # Localidad, Edificio, Unidad, Posición (sort estable: se ordena
             # primero por la clave menos significativa, pedido de la clienta).
-            enriquecidos.sort(key=lambda e: e["texto_profesional"])
+            enriquecidos.sort(key=lambda e: e["placa"]["PosicionTablero"] or 0)
             enriquecidos.sort(key=lambda e: e["unidad"])
             enriquecidos.sort(key=lambda e: e["edificio"])
             enriquecidos.sort(key=lambda e: e["localidad"])
@@ -339,9 +340,6 @@ class PantallaPlacas(QWidget):
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem(e["texto_profesional"]))
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(e["nombre"]))
             self.tabla.setItem(fila_idx, 6, QTableWidgetItem("Sí" if placa["EsPersonalizada"] else "No"))
-        self.tabla.resizeColumnsToContents()
-        if self.tabla.columnWidth(4) < 220:
-            self.tabla.setColumnWidth(4, 220)
         self._actualizar_botones_tabla()
 
     def _fila_seleccionada_placa(self) -> sqlite3.Row | None:
@@ -400,16 +398,15 @@ class PantallaPlacas(QWidget):
 
     def _armar_panel_imprimir(self) -> QWidget:
         panel = QWidget()
-        layout = QVBoxLayout(panel)
+        layout_principal = QHBoxLayout(panel)
 
-        layout.addWidget(_titulo_campo("Buscar profesional"))
-        fila_busqueda = QHBoxLayout()
+        columna_izquierda = QVBoxLayout()
+        columna_izquierda.addWidget(_titulo_campo("Buscar profesional"))
         self.combo_profesional_imprimir = QComboBox()
         for id_profesional, etiqueta in _opciones_profesional(self.conn):
             self.combo_profesional_imprimir.addItem(etiqueta, id_profesional)
         habilitar_busqueda_profesional(self.combo_profesional_imprimir)
-        fila_busqueda.addWidget(self.combo_profesional_imprimir, stretch=1)
-        layout.addLayout(fila_busqueda)
+        columna_izquierda.addWidget(self.combo_profesional_imprimir)
 
         fila_personalizada = QHBoxLayout()
         self.casilla_personalizar_impresion = QCheckBox("Personalizar texto de la placa")
@@ -424,33 +421,43 @@ class PantallaPlacas(QWidget):
         fila_personalizada.addWidget(self.casilla_personalizar_impresion)
         fila_personalizada.addWidget(self.campo_linea1_impresion)
         fila_personalizada.addWidget(self.campo_linea2_impresion)
-        layout.addLayout(fila_personalizada)
+        columna_izquierda.addLayout(fila_personalizada)
 
+        fila_agregar = QHBoxLayout()
         self.boton_agregar_impresion = QPushButton("Agregar a impresión")
         self.boton_agregar_impresion.setObjectName("botonSecundario")
+        self.boton_agregar_impresion.setFixedWidth(_ANCHO_BOTON_IMPRESION)
         self.boton_agregar_impresion.clicked.connect(self._agregar_a_impresion)
-        layout.addWidget(self.boton_agregar_impresion)
+        fila_agregar.addStretch()
+        fila_agregar.addWidget(self.boton_agregar_impresion)
+        fila_agregar.addStretch()
+        columna_izquierda.addLayout(fila_agregar)
 
-        layout.addWidget(_titulo_campo("Placas a imprimir"))
+        columna_izquierda.addWidget(_titulo_campo("Placas a imprimir"))
         self.lista_impresion = QListWidget()
-        layout.addWidget(self.lista_impresion)
+        columna_izquierda.addWidget(self.lista_impresion, stretch=1)
 
         fila_botones = QHBoxLayout()
         self.boton_quitar_impresion = QPushButton("Quitar de la lista")
         self.boton_quitar_impresion.setObjectName("botonSecundario")
+        self.boton_quitar_impresion.setFixedWidth(_ANCHO_BOTON_IMPRESION)
         self.boton_quitar_impresion.clicked.connect(self._quitar_de_impresion)
         self.boton_generar_pdf = QPushButton("Generar PDF")
         self.boton_generar_pdf.setObjectName("botonPrimario")
+        self.boton_generar_pdf.setFixedWidth(_ANCHO_BOTON_IMPRESION)
         self.boton_generar_pdf.clicked.connect(self._generar_pdf_impresion)
-        fila_botones.addWidget(self.boton_quitar_impresion)
         fila_botones.addStretch()
+        fila_botones.addWidget(self.boton_quitar_impresion)
         fila_botones.addWidget(self.boton_generar_pdf)
-        layout.addLayout(fila_botones)
+        columna_izquierda.addLayout(fila_botones)
+        layout_principal.addLayout(columna_izquierda, stretch=1)
 
-        layout.addWidget(_titulo_campo("Vista previa"))
+        columna_derecha = QVBoxLayout()
+        columna_derecha.addWidget(_titulo_campo("Vista previa"))
         self.area_previa = QScrollArea()
         self.area_previa.setWidgetResizable(True)
-        layout.addWidget(self.area_previa, stretch=1)
+        columna_derecha.addWidget(self.area_previa, stretch=1)
+        layout_principal.addLayout(columna_derecha, stretch=1)
         self._actualizar_vista_previa()
 
         return panel
@@ -507,7 +514,7 @@ class PantallaPlacas(QWidget):
             etiqueta.setMinimumSize(_PREVIA_ANCHO_PX, _PREVIA_ALTO_PX)
             etiqueta.setMaximumWidth(_PREVIA_ANCHO_PX)
             etiqueta.setStyleSheet(
-                "border: 1px solid black; font-family: 'Calibri', sans-serif; font-size: 20pt; "
+                f"border: 1px solid black; font-family: 'Calibri', sans-serif; font-size: {TAMANO_FUENTE_PLACA}pt; "
                 f"font-weight: bold; font-style: italic; padding: {_PREVIA_MARGEN_PX}px;"
             )
             fila, columna = divmod(indice, 2)

@@ -22,15 +22,30 @@ en Lista de espera, a replicar en el resto de a poco):
         (ej. "Nuevo pedido"): es una solapa real de un QTabWidget, no
         una etiqueta simulándola — Qt muestra la barra de solapas
         aunque haya una sola mientras no se active `tabBarAutoHide`
-        (que acá no se usa a propósito, así se ve siempre). El texto de
-        la solapa (QTabBar::tab) usa el mismo criterio: más grande que
-        el texto normal pero menor que jerarquía 1, negrita, sin
-        itálica, mismo color de texto normal que jerarquía 1 (no azul).
-        La solapita y el panel (QTabWidget::pane) se pintan con el mismo
-        fondo (`t['fondo']`, el mismo que usa QMainWindow) para que no se
-        note un color de relleno distinto entre la pestaña y el resto
-        del formulario debajo — por defecto el estilo Fusion las pinta
-        con el gris de botón, distinto del fondo de la pantalla.
+        (que acá no se usa a propósito, así se ve siempre — inclusive
+        con una sola solapa se quiere la misma apariencia de "ficha" de
+        abajo, y como esa única solapa siempre está seleccionada, el
+        CSS de `:selected` ya le da ese aspecto sin hacer nada especial).
+        El texto de la solapa (QTabBar::tab) usa el mismo criterio: más
+        grande que el texto normal pero menor que jerarquía 1 (14px),
+        negrita, sin itálica, mismo color de texto normal que jerarquía
+        1 (no azul).
+
+        Apariencia de "ficha de papel" (probada primero en Placas,
+        aprobada por la clienta y llevada acá para todas las
+        pantallas): la solapa ACTIVA funde su fondo con el panel de
+        contenido (QTabWidget::pane, mismo `t['superficie']`) y pierde
+        el borde de abajo (`border-bottom-color` igual al fondo del
+        panel) — la línea negra la envuelve arriba/izquierda/derecha
+        nada más, como si el panel fuera la continuación de la solapa.
+        La solapa INACTIVA conserva su fondo (`t['fondo']`, más oscuro
+        que `t['superficie']`) y su borde completo incluida la línea de
+        abajo, y baja 2px (`margin-top`) para quedar visualmente
+        "detrás" de la activa, como una ficha de fichero de papel.
+        `QTabWidget::pane` sube 1px (`top: -1px`) para que su borde
+        superior quede tapado exactamente donde se apoya la solapa
+        activa, sin una línea doble ahí.
+
         Como referencia visual suelta (ej. un título de sección que no
         amerita ser una solapa real), objectName "subtituloSeccion" da
         el mismo formato en un QLabel.
@@ -110,12 +125,23 @@ QLabel#tituloPantalla {{
 QLabel#subtitulo {{ font-size: 11px; color: {'#AAAAAA' if modo_oscuro else '#555555'}; }}
 QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {t['texto']}; padding: 4px 0px; }}
 QLabel#subtituloCampo {{ font-weight: bold; }}
-QTabWidget::pane {{ background-color: {t['fondo']}; border: none; }}
+QTabWidget::pane {{
+    background-color: {t['superficie']};
+    border: 1px solid #000000;
+    top: -1px;
+}}
 QTabBar::tab {{
-    font-size: 15px; font-weight: bold; color: {t['texto']};
+    font-size: 14px; font-weight: bold; color: {t['texto']};
     background-color: {t['fondo']};
+    border: 1px solid #000000;
     padding: 6px 14px;
-    border: none;
+}}
+QTabBar::tab:selected {{
+    background-color: {t['superficie']};
+    border-bottom-color: {t['superficie']};
+}}
+QTabBar::tab:!selected {{
+    margin-top: 2px;
 }}
 QGroupBox#panelFiltrosGrilla::title {{
     font-size: 15px; font-weight: bold; color: {t['texto']};

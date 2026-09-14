@@ -89,10 +89,11 @@ def test_titulo_pantalla_y_subtitulo_seccion_son_negros_no_azules():
 
 def test_qtabbar_tab_tiene_el_mismo_formato_de_jerarquia_2():
     """Jerarquía 2 pasó a implementarse como una solapa real de
-    QTabWidget (QTabBar::tab) en vez de solo un QLabel simulándola —
-    mismo tamaño/negrita/color que subtituloSeccion."""
+    QTabWidget (QTabBar::tab) en vez de solo un QLabel simulándola.
+    Tamaño (14px) probado primero en Placas y aprobado por la clienta:
+    más chico que antes (15px), sigue más grande que el texto normal."""
     bloque = hoja_estilos(False).split("QTabBar::tab {")[1].split("}")[0]
-    assert "font-size: 15px" in bloque
+    assert "font-size: 14px" in bloque
     assert "font-weight: bold" in bloque
     assert "#1A1A1A" in bloque
 
@@ -112,14 +113,21 @@ def test_numeros_de_fila_quedan_centrados_globalmente():
     assert "qproperty-defaultAlignment: AlignCenter" in bloque
 
 
-def test_solapa_y_panel_comparten_el_mismo_fondo_que_la_pantalla():
-    """Pedido de la clienta: que no se note diferencia de relleno entre
-    la pestañita ("Nuevo pedido") y el resto del formulario debajo — por
-    defecto Fusion pinta la solapa con el gris de botón, distinto del
-    fondo de la pantalla, así que se fuerzan los dos al mismo color."""
-    for modo_oscuro, fondo in ((False, "#F5F5F5"), (True, "#1E2124")):
+def test_solapas_tienen_apariencia_de_ficha_de_papel():
+    """Probado primero en Placas y aprobado por la clienta para todas
+    las pantallas: la solapa activa funde su fondo con el panel de
+    contenido y pierde la línea de abajo (border-bottom-color igual al
+    fondo del panel) — la línea negra la envuelve arriba/izquierda/
+    derecha nada más. La inactiva conserva su fondo y su borde de abajo,
+    y baja unos px para quedar "detrás" de la activa, como una ficha."""
+    for modo_oscuro, superficie in ((False, "#FFFFFF"), (True, "#2A2E33")):
         hoja = hoja_estilos(modo_oscuro)
         bloque_panel = hoja.split("QTabWidget::pane {")[1].split("}")[0]
-        bloque_tab = hoja.split("QTabBar::tab {")[1].split("}")[0]
-        assert fondo in bloque_panel
-        assert fondo in bloque_tab
+        bloque_seleccionada = hoja.split("QTabBar::tab:selected {")[1].split("}")[0]
+        bloque_inactiva = hoja.split("QTabBar::tab:!selected {")[1].split("}")[0]
+        assert superficie in bloque_panel
+        assert "border: 1px solid #000000" in bloque_panel
+        assert "top: -1px" in bloque_panel
+        assert superficie in bloque_seleccionada
+        assert f"border-bottom-color: {superficie}" in bloque_seleccionada
+        assert "margin-top: 2px" in bloque_inactiva

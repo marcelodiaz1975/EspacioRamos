@@ -55,26 +55,6 @@ def test_tiene_dos_solapas(qtbot, conn):
     assert solapas.tabText(1) == "Imprimir placas"
 
 
-def test_estilo_de_solapas_tiene_apariencia_de_ficha(qtbot, conn):
-    """Prueba pedida por la clienta solo acá antes de decidir si se
-    aplica al resto: la solapa activa se funde con el panel (mismo
-    fondo, sin línea abajo) y "envuelve" arriba/izquierda/derecha; la
-    inactiva queda con su línea de abajo visible, como una ficha detrás
-    de la activa. Vía setStyleSheet propio del QTabWidget — no toca
-    app/gui/estilos.py, así que Lista de espera y Llaves no cambian."""
-    pantalla = PantallaPlacas(conn)
-    qtbot.addWidget(pantalla)
-    solapas = pantalla.findChild(QTabWidget)
-    hoja = solapas.styleSheet()
-    assert "border: 1px solid #000000" in hoja
-    assert "font-size: 14px" in hoja
-    assert "border-bottom-color: #FFFFFF" in hoja  # solapa activa: sin línea abajo, funde con el panel
-    assert "margin-top: 2px" in hoja  # solapa inactiva: queda "detrás"
-
-    from app.gui.estilos import hoja_estilos
-    assert "border: 1px solid #000000" not in hoja_estilos(False).split("QTabBar::tab {")[1].split("}")[0]
-
-
 def test_columnas_de_la_tabla_arrancan_con_localidad(qtbot, conn):
     pantalla = PantallaPlacas(conn)
     qtbot.addWidget(pantalla)
@@ -84,13 +64,16 @@ def test_columnas_de_la_tabla_arrancan_con_localidad(qtbot, conn):
     ]
 
 
-def test_columna_profesional_tiene_ancho_minimo(qtbot, conn):
-    _, id_unidad = _crear_unidad(conn)
-    id_profesional = _crear_profesional(conn)
-    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+def test_columnas_de_la_tabla_se_reparten_el_ancho_por_igual(qtbot, conn):
+    """Pedido de la clienta: en vez de ajustar cada columna a su
+    contenido, las 7 se reparten el ancho disponible por igual."""
     pantalla = PantallaPlacas(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.tabla.columnWidth(4) >= 220
+    pantalla.resize(1400, 700)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    anchos = [pantalla.tabla.columnWidth(i) for i in range(pantalla.tabla.columnCount())]
+    assert max(anchos) - min(anchos) <= 2  # redondeo de Qt al repartir
 
 
 def test_posicion_queda_centrada(qtbot, conn):
@@ -110,9 +93,38 @@ def test_panel_de_filtros_queda_a_la_izquierda_de_la_tabla(qtbot, conn):
     pantalla.show()
     qtbot.waitExposed(pantalla)
     assert pantalla.combo_profesional_filtro.x() < pantalla.tabla.x()
+    assert pantalla.combo_profesional_filtro.parentWidget().width() >= 300
 
 
-def test_orden_por_defecto_es_localidad_edificio_unidad_profesional(qtbot, conn):
+def test_botones_de_impresion_son_del_mismo_tamano_y_agregar_queda_centrado(qtbot, conn):
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1400, 700)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.findChild(QTabWidget).setCurrentIndex(1)
+    assert pantalla.boton_agregar_impresion.width() == pantalla.boton_quitar_impresion.width()
+    assert pantalla.boton_agregar_impresion.width() == pantalla.boton_generar_pdf.width()
+
+    centro_boton = pantalla.boton_agregar_impresion.x() + pantalla.boton_agregar_impresion.width() / 2
+    mitad_izquierda = pantalla.lista_impresion.x() + pantalla.lista_impresion.width() / 2
+    assert abs(centro_boton - mitad_izquierda) <= 2
+
+
+def test_botones_quitar_y_generar_quedan_a_la_derecha(qtbot, conn):
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1400, 700)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.findChild(QTabWidget).setCurrentIndex(1)
+    fin_lista = pantalla.lista_impresion.x() + pantalla.lista_impresion.width()
+    fin_generar = pantalla.boton_generar_pdf.x() + pantalla.boton_generar_pdf.width()
+    assert abs(fin_generar - fin_lista) <= 2
+    assert pantalla.boton_quitar_impresion.x() < pantalla.boton_generar_pdf.x()
+
+
+def test_orden_por_defecto_es_localidad_edificio_unidad_posicion(qtbot, conn):
     _, id_unidad_z = _crear_unidad(conn, nombre_edificio="Z Torre", departamento="1A", localidad="Ramos Mejía")
     _, id_unidad_a = _crear_unidad(conn, nombre_edificio="A Torre", departamento="1A", localidad="Ramos Mejía")
     _, id_unidad_haedo = _crear_unidad(conn, nombre_edificio="Torre", departamento="1A", localidad="Haedo")
@@ -128,6 +140,23 @@ def test_orden_por_defecto_es_localidad_edificio_unidad_profesional(qtbot, conn)
     edificios = [pantalla.tabla.item(f, 1).text() for f in range(pantalla.tabla.rowCount())]
     assert localidades == ["Haedo", "Ramos Mejía", "Ramos Mejía"]
     assert edificios[1:] == ["A Torre", "Z Torre"]
+
+
+def test_orden_por_defecto_desempata_por_posicion(qtbot, conn):
+    """La última clave del orden por defecto es Posición, no Profesional
+    (pedido de la clienta): dos placas en la misma localidad/edificio/
+    unidad quedan ordenadas por su número de posición."""
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=3, id_profesional=id_profesional)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=2, id_profesional=id_profesional)
+
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+
+    posiciones = [pantalla.tabla.item(f, 3).text() for f in range(pantalla.tabla.rowCount())]
+    assert posiciones == ["1", "2", "3"]
 
 
 def test_click_en_encabezado_ordena_por_esa_columna(qtbot, conn):
@@ -319,6 +348,28 @@ def test_dialogo_reasignar_precarga_datos_existentes(qtbot, conn):
     valores = dialogo.valores()
     assert valores["id_unidad"] == id_unidad
     assert valores["posicion"] == 1
+
+
+def test_vista_previa_es_proporcional_a_la_placa_real():
+    """Pedido de la clienta: la vista previa tiene que ser proporcional a
+    lo que se va a imprimir — se calcula desde las mismas constantes que
+    usa el PDF (app.pdf.placas_pdf), no valores propios duplicados."""
+    from app.gui.pantallas.placas import _PREVIA_ALTO_PX, _PREVIA_ANCHO_PX
+    from app.pdf.placas_pdf import ALTO_PLACA, ANCHO_PLACA
+
+    proporcion_pdf = ANCHO_PLACA / ALTO_PLACA
+    proporcion_previa = _PREVIA_ANCHO_PX / _PREVIA_ALTO_PX
+    assert proporcion_previa == pytest.approx(proporcion_pdf, rel=0.02)
+
+
+def test_vista_previa_queda_a_la_derecha_de_la_busqueda(qtbot, conn):
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1400, 700)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.findChild(QTabWidget).setCurrentIndex(1)
+    assert pantalla.lista_impresion.x() < pantalla.area_previa.x()
 
 
 def test_agregar_y_quitar_de_la_cola_de_impresion(qtbot, conn):
