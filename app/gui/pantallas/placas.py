@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
@@ -41,6 +42,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from reportlab.lib.pagesizes import A4
 
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.grilla_operativa import (
@@ -62,6 +64,7 @@ from app.negocio.placas import (
     posiciones_libres,
     texto_para_imprimir,
 )
+from app.pdf.estilos import MARGEN
 from app.pdf.placas_pdf import (
     ALTO_PLACA,
     ANCHO_PLACA,
@@ -73,27 +76,34 @@ from app.pdf.placas_pdf import (
 )
 from app.repositorio.registro import obtener_repositorio
 
-_PT_POR_PUNTO_REPORTLAB = 96 / 72  # reportlab mide en puntos (1/72"); Qt en px a ~96dpi
+# Vista previa = una miniatura de la hoja A4 real, todo escalado con el
+# MISMO factor (página, márgenes, placas, espacios Y tamaño de fuente) a
+# partir de las medidas reales que usa el PDF (app.pdf.placas_pdf) — así
+# se mantienen las proporciones de verdad en vez de una conversión cm/px
+# aparte (la de antes no escalaba la fuente junto con la caja, así que
+# el texto quedaba grande para el recuadro y las cajas se veían más
+# "cuadradas" de lo que son en realidad).
+_PAGINA_ANCHO_PX = 650
+_ESCALA_PREVIA = _PAGINA_ANCHO_PX / A4[0]
 
 
 def _pt_a_px(valor_puntos: float) -> int:
-    """Convierte una medida en puntos de reportlab (`cm` de reportlab.lib.
-    units ya da puntos) a píxeles a ~96dpi, para que la vista previa en
-    pantalla use EXACTAMENTE las mismas medidas que el PDF
-    (ANCHO_PLACA/ALTO_PLACA/MARGEN_INTERNO_PLACA/GAP_* de
-    app.pdf.placas_pdf) en vez de duplicar constantes que se puedan
-    desincronizar si se vuelven a ajustar allá."""
-    return round(valor_puntos * _PT_POR_PUNTO_REPORTLAB)
+    return round(valor_puntos * _ESCALA_PREVIA)
 
 
+_PAGINA_ALTO_PX = _pt_a_px(A4[1])
+_PAGINA_MARGEN_PX = _pt_a_px(MARGEN)
 _PREVIA_ANCHO_PX = _pt_a_px(ANCHO_PLACA)
 _PREVIA_ALTO_PX = _pt_a_px(ALTO_PLACA)
 _PREVIA_MARGEN_PX = _pt_a_px(MARGEN_INTERNO_PLACA)
 _PREVIA_GAP_COLUMNAS_PX = _pt_a_px(GAP_ENTRE_COLUMNAS)
 _PREVIA_GAP_FILAS_PX = _pt_a_px(GAP_ENTRE_FILAS)
+_PREVIA_FUENTE_PX = max(_pt_a_px(TAMANO_FUENTE_PLACA), 6)
+_PLACAS_POR_PAGINA = 22  # 2 columnas x 11 filas, igual que generar_pdf_placas_seleccionadas
 
 _ANCHO_BOTON_IMPRESION = 180  # Agregar a impresión / Quitar de la lista / Generar PDF, los tres iguales
 _ANCHO_MINIMO_PANEL_FILTROS = 300
+_ANCHO_BOTON_BUSCAR = 290  # Asignar posición placa nueva / Reasignar.../ Liberar posición, los tres iguales
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -186,14 +196,17 @@ class PantallaPlacas(QWidget):
         columna_tabla.addWidget(self.tabla, stretch=1)
 
         fila_botones = QHBoxLayout()
-        self.boton_asignar_nueva = QPushButton("Asignar placa nueva…")
+        self.boton_asignar_nueva = QPushButton("Asignar posición placa nueva")
         self.boton_asignar_nueva.setObjectName("botonPrimario")
+        self.boton_asignar_nueva.setFixedWidth(_ANCHO_BOTON_BUSCAR)
         self.boton_asignar_nueva.clicked.connect(self._asignar_nueva)
-        self.boton_reasignar = QPushButton("Reasignar…")
+        self.boton_reasignar = QPushButton("Reasignar posición placa existente")
         self.boton_reasignar.setObjectName("botonSecundario")
+        self.boton_reasignar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
         self.boton_reasignar.clicked.connect(self._reasignar)
         self.boton_liberar = QPushButton("Liberar posición")
         self.boton_liberar.setObjectName("botonSecundario")
+        self.boton_liberar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
         self.boton_liberar.clicked.connect(self._liberar)
         fila_botones.addWidget(self.boton_asignar_nueva)
         fila_botones.addWidget(self.boton_reasignar)
@@ -333,13 +346,17 @@ class PantallaPlacas(QWidget):
             placa = e["placa"]
             self.tabla.setItem(fila_idx, 0, QTableWidgetItem(e["localidad"]))
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(e["edificio"]))
-            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(e["unidad"]))
+            item_unidad = QTableWidgetItem(e["unidad"])
+            item_unidad.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tabla.setItem(fila_idx, 2, item_unidad)
             item_posicion = QTableWidgetItem(str(placa["PosicionTablero"]))
             item_posicion.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tabla.setItem(fila_idx, 3, item_posicion)
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem(e["texto_profesional"]))
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(e["nombre"]))
-            self.tabla.setItem(fila_idx, 6, QTableWidgetItem("Sí" if placa["EsPersonalizada"] else "No"))
+            item_personalizada = QTableWidgetItem("Sí" if placa["EsPersonalizada"] else "No")
+            item_personalizada.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tabla.setItem(fila_idx, 6, item_personalizada)
         self._actualizar_botones_tabla()
 
     def _fila_seleccionada_placa(self) -> sqlite3.Row | None:
@@ -495,30 +512,60 @@ class PantallaPlacas(QWidget):
         del self._cola_impresion[fila]
         self._actualizar_vista_previa()
 
-    def _actualizar_vista_previa(self) -> None:
-        contenedor = QWidget()
-        grid = QGridLayout(contenedor)
-        grid.setHorizontalSpacing(_PREVIA_GAP_COLUMNAS_PX)
-        grid.setVerticalSpacing(_PREVIA_GAP_FILAS_PX)
-        grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+    def _textos_cola_impresion(self) -> list[str]:
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
-        for indice, entrada in enumerate(self._cola_impresion):
+        textos = []
+        for entrada in self._cola_impresion:
             profesional = repo_profesional.obtener(entrada["id_profesional"])
             if profesional is None:
                 continue
-            texto = texto_para_imprimir(profesional, linea1=entrada["linea1"], linea2=entrada["linea2"])
-            etiqueta = QLabel(texto.replace("\n", "<br/>"))
-            etiqueta.setTextFormat(Qt.TextFormat.RichText)
-            etiqueta.setWordWrap(True)
-            etiqueta.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-            etiqueta.setMinimumSize(_PREVIA_ANCHO_PX, _PREVIA_ALTO_PX)
-            etiqueta.setMaximumWidth(_PREVIA_ANCHO_PX)
-            etiqueta.setStyleSheet(
-                f"border: 1px solid black; font-family: 'Calibri', sans-serif; font-size: {TAMANO_FUENTE_PLACA}pt; "
-                f"font-weight: bold; font-style: italic; padding: {_PREVIA_MARGEN_PX}px;"
-            )
+            textos.append(texto_para_imprimir(profesional, linea1=entrada["linea1"], linea2=entrada["linea2"]))
+        return textos
+
+    @staticmethod
+    def _armar_placa_previa(texto: str) -> QLabel:
+        etiqueta = QLabel(texto.replace("\n", "<br/>"))
+        etiqueta.setTextFormat(Qt.TextFormat.RichText)
+        etiqueta.setWordWrap(True)
+        etiqueta.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        etiqueta.setMinimumSize(_PREVIA_ANCHO_PX, _PREVIA_ALTO_PX)
+        etiqueta.setMaximumWidth(_PREVIA_ANCHO_PX)
+        etiqueta.setStyleSheet(
+            f"border: 1px solid black; font-family: 'Calibri', sans-serif; font-size: {_PREVIA_FUENTE_PX}px; "
+            f"font-weight: bold; font-style: italic; padding: {_PREVIA_MARGEN_PX}px;"
+        )
+        return etiqueta
+
+    @staticmethod
+    def _armar_pagina_previa(textos_pagina: list[str]) -> QFrame:
+        """Una "hoja" A4 en miniatura (mismas proporciones reales) con
+        hasta 22 placas — igual paginado que generar_pdf_placas_
+        seleccionadas — para que la vista previa simule de verdad la
+        hoja que va a salir impresa, no una lista suelta de recuadros."""
+        pagina = QFrame()
+        pagina.setFixedWidth(_PAGINA_ANCHO_PX)
+        pagina.setMinimumHeight(_PAGINA_ALTO_PX)  # alto real de una A4 a esta escala; crece si hace falta más lugar
+        pagina.setStyleSheet("background-color: #FFFFFF; border: 1px solid #999999;")
+        grid = QGridLayout(pagina)
+        grid.setContentsMargins(_PAGINA_MARGEN_PX, _PAGINA_MARGEN_PX, _PAGINA_MARGEN_PX, _PAGINA_MARGEN_PX)
+        grid.setHorizontalSpacing(_PREVIA_GAP_COLUMNAS_PX)
+        grid.setVerticalSpacing(_PREVIA_GAP_FILAS_PX)
+        grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        for indice, texto in enumerate(textos_pagina):
             fila, columna = divmod(indice, 2)
-            grid.addWidget(etiqueta, fila, columna)
+            grid.addWidget(PantallaPlacas._armar_placa_previa(texto), fila, columna)
+        return pagina
+
+    def _actualizar_vista_previa(self) -> None:
+        contenedor = QWidget()
+        layout_paginas = QVBoxLayout(contenedor)
+        layout_paginas.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        layout_paginas.setSpacing(16)
+
+        textos = self._textos_cola_impresion()
+        for inicio in range(0, len(textos), _PLACAS_POR_PAGINA):
+            layout_paginas.addWidget(self._armar_pagina_previa(textos[inicio:inicio + _PLACAS_POR_PAGINA]))
+
         self.area_previa.setWidget(contenedor)
 
     def _generar_pdf_impresion(self) -> None:

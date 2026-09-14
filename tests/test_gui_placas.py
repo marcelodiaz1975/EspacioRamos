@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QScrollArea, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -246,6 +246,26 @@ def test_filtro_por_profesional_reduce_la_tabla(qtbot, conn):
     assert pantalla.tabla.rowCount() == 1
 
 
+def test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar(qtbot, conn):
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_asignar_nueva.text() == "Asignar posición placa nueva"
+    assert pantalla.boton_reasignar.text() == "Reasignar posición placa existente"
+    assert pantalla.boton_liberar.text() == "Liberar posición"
+    assert pantalla.boton_asignar_nueva.width() == pantalla.boton_reasignar.width()
+    assert pantalla.boton_asignar_nueva.width() == pantalla.boton_liberar.width()
+
+
+def test_columnas_unidad_y_personalizada_quedan_centradas(qtbot, conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.item(0, 2).textAlignment() & Qt.AlignmentFlag.AlignHCenter
+    assert pantalla.tabla.item(0, 6).textAlignment() & Qt.AlignmentFlag.AlignHCenter
+
+
 def test_botones_reasignar_y_liberar_arrancan_deshabilitados(qtbot, conn):
     _, id_unidad = _crear_unidad(conn)
     id_profesional = _crear_profesional(conn)
@@ -360,6 +380,42 @@ def test_vista_previa_es_proporcional_a_la_placa_real():
     proporcion_pdf = ANCHO_PLACA / ALTO_PLACA
     proporcion_previa = _PREVIA_ANCHO_PX / _PREVIA_ALTO_PX
     assert proporcion_previa == pytest.approx(proporcion_pdf, rel=0.02)
+
+
+def test_vista_previa_pagina_es_proporcional_a_una_hoja_a4():
+    """La "hoja" de la vista previa tiene que tener las proporciones
+    reales de una A4, para simular de verdad la hoja que se imprime."""
+    from reportlab.lib.pagesizes import A4
+
+    from app.gui.pantallas.placas import _PAGINA_ALTO_PX, _PAGINA_ANCHO_PX
+
+    proporcion_a4 = A4[0] / A4[1]
+    proporcion_previa = _PAGINA_ANCHO_PX / _PAGINA_ALTO_PX
+    assert proporcion_previa == pytest.approx(proporcion_a4, rel=0.02)
+
+
+def test_vista_previa_arma_una_pagina_por_cada_22_placas(qtbot, conn):
+    from app.gui.pantallas.placas import _PLACAS_POR_PAGINA
+
+    assert _PLACAS_POR_PAGINA == 22
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
+    pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
+    for _ in range(25):
+        pantalla._agregar_a_impresion()
+
+    # QLabel también hereda de QFrame en Qt, así que se cuentan los hijos
+    # directos del layout de páginas en vez de findChildren(QFrame).
+    assert pantalla.area_previa.widget().layout().count() == 2
+
+
+def test_vista_previa_es_escroleable(qtbot, conn):
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    assert isinstance(pantalla.area_previa, QScrollArea)
+    assert pantalla.area_previa.widgetResizable() is True
 
 
 def test_vista_previa_queda_a_la_derecha_de_la_busqueda(qtbot, conn):
