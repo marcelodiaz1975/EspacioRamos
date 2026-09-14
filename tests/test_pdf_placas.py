@@ -4,13 +4,15 @@ from reportlab.lib.units import cm
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from reportlab.pdfbase.pdfmetrics import stringWidth
+
 from app.pdf.placas_pdf import (
     ALTO_PLACA,
     ANCHO_PLACA,
+    FUENTE_PLACA,
     MARGEN_INTERNO_PLACA,
     TAMANO_FUENTE_PLACA,
-    TAMANO_FUENTE_MINIMO,
-    _tamano_ajustado,
+    _caja_placa,
     generar_pdf_placas,
     generar_pdf_placas_seleccionadas,
 )
@@ -189,27 +191,36 @@ def test_seleccionadas_sin_personalizar_usa_el_nombre_estandar(conn, tmp_path):
 
 def test_medidas_de_la_placa_son_las_del_modelo_fisico():
     """Modelo pasado por la clienta: 7,6 cm x 2,2 cm, margen interno 0,3
-    cm, fuente a 20pt (Calibri pedido, sustituida por Helvetica-
-    BoldOblique — ver docstring del módulo)."""
+    cm, fuente a 17pt (Calibri pedido a 20pt, sustituida por Helvetica-
+    BoldOblique — más ancha, así que el tamaño se calibró a 17pt para
+    que el corte de línea coincida con el sistema físico de la clienta
+    — ver docstring del módulo)."""
     assert ANCHO_PLACA == pytest.approx(7.6 * cm)
     assert ALTO_PLACA == pytest.approx(2.2 * cm)
     assert MARGEN_INTERNO_PLACA == pytest.approx(0.3 * cm)
-    assert TAMANO_FUENTE_PLACA == 20
+    assert TAMANO_FUENTE_PLACA == 17
 
 
-def test_fuente_se_achica_si_el_texto_no_entra_a_tamano_maximo():
-    """Una placa personalizada larga (ej. "Equipo \"Sol terapias\"" con
-    la fuente sustituta, más ancha que la Calibri pedida) no crece ni
-    se corta: se achica la fuente lo necesario para que entre completa
-    — la placa tiene un tamaño físico FIJO, no se puede agrandar."""
-    corta = _tamano_ajustado(["Lic. Sol Difalco"])
-    larga = _tamano_ajustado(
-        ["Lic. Silvina Pugliese", 'Equipo "Sol terapias" con un texto bien largo para forzar el ajuste']
-    )
-    assert corta == TAMANO_FUENTE_PLACA
-    assert larga < TAMANO_FUENTE_PLACA
-    assert larga >= TAMANO_FUENTE_MINIMO
+def test_calibracion_replica_el_corte_de_linea_del_sistema_fisico_de_la_clienta():
+    """Referencia exacta que dio la clienta de su sistema actual: "Lic.
+    Agustina Viavattene" (24 caracteres) entra en una sola línea; una
+    letra más la baja a dos líneas. El tamaño de fuente es FIJO (no se
+    achica por placa), así que esta calibración se hace una sola vez
+    contra el ancho disponible de texto dentro de la placa."""
+    ancho_disponible = ANCHO_PLACA - 2 * MARGEN_INTERNO_PLACA
+    entra = stringWidth("Lic. Agustina Viavattene", FUENTE_PLACA, TAMANO_FUENTE_PLACA)
+    no_entra = stringWidth("Lic. Agustina Viavattenee", FUENTE_PLACA, TAMANO_FUENTE_PLACA)
+    assert entra <= ancho_disponible
+    assert no_entra > ancho_disponible
 
 
-def test_una_sola_linea_corta_usa_el_tamano_maximo_de_fuente():
-    assert _tamano_ajustado(["Lic. Lucía Franco"]) == TAMANO_FUENTE_PLACA
+def test_mismo_tamano_de_fuente_para_texto_corto_y_largo():
+    """La clienta rechazó explícitamente el achique automático por
+    placa: pidió que la fuente sea IGUAL ya sea que el texto entre en
+    una línea o en dos. `_caja_placa` ya no calcula ningún tamaño por
+    placa — usa siempre TAMANO_FUENTE_PLACA — así que alcanza con
+    confirmar que ese valor es fijo en el módulo."""
+    corta = _caja_placa("Lic. Lucía Franco")
+    larga = _caja_placa('Lic. Silvina Pugliese\nEquipo "Sol terapias"')
+    assert corta.style.fontSize == TAMANO_FUENTE_PLACA
+    assert larga.style.fontSize == TAMANO_FUENTE_PLACA

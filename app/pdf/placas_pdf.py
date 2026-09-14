@@ -25,12 +25,18 @@ instalada en este entorno (no se puede registrar sin el archivo .ttf),
 así que se usa Helvetica-BoldOblique como reemplazo más parecido
 disponible; si la clienta consigue el .ttf de Calibri se puede
 registrar para usar la fuente exacta. Ese reemplazo es notablemente más
-ancho que Calibri, así que un texto que en Calibri entra en una línea
-a 20pt puede no entrar acá — en vez de agrandar la placa (no se puede,
-es un tamaño físico fijo) o cortar el texto, se achica la fuente lo
-que haga falta (nunca por debajo de un mínimo legible) para que cada
-línea entre siempre completa, sin cortar ninguna palabra ni volcarse a
-una línea de más."""
+ancho que Calibri, así que el tamaño que se usa acá no es 20pt sino
+TAMANO_FUENTE_PLACA (17pt) — un tamaño FIJO e IGUAL para todas las
+placas (probado antes con achique automático por placa, pero eso hacía
+que un nombre corto se viera gigante al lado de uno largo; la clienta
+pidió una sola fuente uniforme). Se calibró para que el corte de línea
+coincida con el sistema físico que la clienta ya usa: confirmó que
+"Lic. Agustina Viavattene" (24 caracteres) entra en una sola línea en
+sus placas actuales, y que agregarle una letra más la baja a dos
+líneas — a 17pt con Helvetica-BoldOblique pasa exactamente eso. Cada
+línea que no entra completa en el ancho de la placa se parte con el
+salto de palabra natural de reportlab (Paragraph), nunca cortando una
+palabra a la mitad."""
 from __future__ import annotations
 
 import os
@@ -41,7 +47,6 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.placas import texto_para_imprimir
@@ -142,35 +147,20 @@ MARGEN_INTERNO_PLACA = 0.3 * cm
 GAP_ENTRE_COLUMNAS = 0.6 * cm
 GAP_ENTRE_FILAS = 0.2 * cm  # ajustado para que 11 filas (22 placas) entren en una hoja A4 con los márgenes estándar
 FUENTE_PLACA = FUENTE_NEGRITA_ITALICA  # reemplazo de Calibri, ver docstring del módulo
-TAMANO_FUENTE_PLACA = 20
-TAMANO_FUENTE_MINIMO = 6
+TAMANO_FUENTE_PLACA = 17  # calibrado contra el sistema físico de la clienta, ver docstring del módulo
 _INTERLINEADO = 1.1
-_ANCHO_TEXTO_PLACA = ANCHO_PLACA - 2 * MARGEN_INTERNO_PLACA
-_ALTO_TEXTO_PLACA = ALTO_PLACA - 2 * MARGEN_INTERNO_PLACA
-
-
-def _tamano_ajustado(lineas: list[str]) -> float:
-    """El tamaño de fuente más grande (hasta TAMANO_FUENTE_PLACA, nunca
-    por debajo de TAMANO_FUENTE_MINIMO) que hace entrar cada línea de
-    `lineas` completa —sin cortar ninguna palabra— en el ancho y alto
-    disponibles de la placa. La placa tiene un tamaño físico FIJO, así
-    que ante texto largo se achica la fuente en vez de agrandar la
-    placa o partir una línea en dos."""
-    tamano = TAMANO_FUENTE_PLACA
-    while tamano > TAMANO_FUENTE_MINIMO:
-        ancho_maximo = max(stringWidth(linea, FUENTE_PLACA, tamano) for linea in lineas)
-        alto_total = len(lineas) * tamano * _INTERLINEADO
-        if ancho_maximo <= _ANCHO_TEXTO_PLACA and alto_total <= _ALTO_TEXTO_PLACA:
-            return tamano
-        tamano -= 0.5
-    return TAMANO_FUENTE_MINIMO
 
 
 def _caja_placa(texto: str) -> Paragraph:
+    """Tamaño de fuente FIJO (TAMANO_FUENTE_PLACA) e igual en todas las
+    placas — no se achica según el texto. Cada línea de `texto` (una
+    sola, salvo en una placa personalizada con línea 2) se envuelve en
+    la caja con el salto de palabra natural de reportlab si no entra
+    completa en el ancho de la placa."""
     lineas = texto.split("\n")
-    tamano = _tamano_ajustado(lineas)
     estilo = ParagraphStyle(
-        "placa", fontName=FUENTE_PLACA, fontSize=tamano, leading=tamano * _INTERLINEADO, alignment=TA_LEFT,
+        "placa", fontName=FUENTE_PLACA, fontSize=TAMANO_FUENTE_PLACA,
+        leading=TAMANO_FUENTE_PLACA * _INTERLINEADO, alignment=TA_LEFT,
     )
     return Paragraph("<br/>".join(lineas), estilo)
 

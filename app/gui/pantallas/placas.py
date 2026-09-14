@@ -19,7 +19,6 @@ from __future__ import annotations
 import sqlite3
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -72,8 +71,6 @@ from app.pdf.placas_pdf import (
     GAP_ENTRE_COLUMNAS,
     GAP_ENTRE_FILAS,
     MARGEN_INTERNO_PLACA,
-    TAMANO_FUENTE_MINIMO,
-    TAMANO_FUENTE_PLACA,
     generar_pdf_placas_seleccionadas,
 )
 from app.repositorio.registro import obtener_repositorio
@@ -100,36 +97,18 @@ _PREVIA_ALTO_PX = _pt_a_px(ALTO_PLACA)
 _PREVIA_MARGEN_PX = _pt_a_px(MARGEN_INTERNO_PLACA)
 _PREVIA_GAP_COLUMNAS_PX = _pt_a_px(GAP_ENTRE_COLUMNAS)
 _PREVIA_GAP_FILAS_PX = _pt_a_px(GAP_ENTRE_FILAS)
-_PREVIA_FUENTE_MAXIMA_PX = _pt_a_px(TAMANO_FUENTE_PLACA)
-_PREVIA_FUENTE_MINIMA_PX = max(_pt_a_px(TAMANO_FUENTE_MINIMO), 1)
-_PREVIA_INTERLINEADO = 1.1
+# Tamaño de fuente FIJO e igual para todas las placas (no se achica según el
+# texto: la clienta lo pidió así, para que no salten diferencias visuales
+# entre una placa con un nombre corto y una con uno largo). Calibrado
+# independiente del de app.pdf.placas_pdf (17pt): Qt sustituye "Calibri" por
+# una fuente propia del sistema, que mide distinto que la Helvetica-
+# BoldOblique de reportlab, así que escalar 17pt con _pt_a_px no reproduce el
+# mismo corte de línea — se calibró por separado, en píxeles de esta vista
+# previa, contra la misma referencia de la clienta: "Lic. Agustina
+# Viavattene" (24 caracteres) entra en una sola línea; una letra más la baja
+# a dos líneas.
+_PREVIA_FUENTE_PX = 15
 _PLACAS_POR_PAGINA = 22  # 2 columnas x 11 filas, igual que generar_pdf_placas_seleccionadas
-
-
-def _tamano_fuente_previa(lineas: list[str]) -> int:
-    """Mismo criterio que `_tamano_ajustado` de app.pdf.placas_pdf —acá
-    medido con QFontMetrics en vez de reportlab— para que la vista
-    previa también achique la fuente en vez de dejar que la placa (de
-    tamaño físico fijo) recorte texto o lo vuelque a una línea de más."""
-    ancho_disponible = _PREVIA_ANCHO_PX - 2 * _PREVIA_MARGEN_PX
-    alto_disponible = _PREVIA_ALTO_PX - 2 * _PREVIA_MARGEN_PX
-    fuente = QFont("Calibri")
-    fuente.setBold(True)
-    fuente.setItalic(True)
-    tamano = _PREVIA_FUENTE_MAXIMA_PX
-    while tamano > _PREVIA_FUENTE_MINIMA_PX:
-        fuente.setPixelSize(tamano)
-        metricas = QFontMetrics(fuente)
-        # boundingRect (no horizontalAdvance): en itálica el tilde/la cola de
-        # un carácter final (ej. una comilla de cierre) puede sobresalir más
-        # allá del ancho de avance, y con horizontalAdvance ese sobrante
-        # quedaba recortado contra el borde de la placa.
-        ancho_maximo = max(metricas.boundingRect(linea).width() for linea in lineas)
-        alto_total = len(lineas) * tamano * _PREVIA_INTERLINEADO
-        if ancho_maximo <= ancho_disponible and alto_total <= alto_disponible:
-            return tamano
-        tamano -= 1
-    return _PREVIA_FUENTE_MINIMA_PX
 
 _ANCHO_BOTON_IMPRESION = 180  # Agregar a impresión / Quitar de la lista / Generar PDF, los tres iguales
 _ANCHO_MINIMO_PANEL_FILTROS = 300
@@ -554,18 +533,16 @@ class PantallaPlacas(QWidget):
 
     @staticmethod
     def _armar_placa_previa(texto: str) -> QLabel:
-        lineas = texto.split("\n")
-        tamano_fuente = _tamano_fuente_previa(lineas)
-        # Texto plano con "\n" (no RichText/"<br/>"): QLabel en modo RichText
-        # arma el layout con QTextDocument, que no mide exactamente igual que
-        # QFontMetrics (el que se usó para ajustar tamano_fuente) — con texto
-        # plano, la propia QFontMetrics es la que dibuja, así que coincide.
-        etiqueta = QLabel("\n".join(lineas))
-        etiqueta.setWordWrap(False)  # cada línea ya entra sola: el tamaño de fuente se ajustó para eso
+        # Texto plano con "\n" (no RichText/"<br/>"): preserva el salto de
+        # línea explícito de una placa personalizada (línea 1 / línea 2) y a
+        # la vez deja que Qt envuelva cada una por separado si no entra en el
+        # ancho de la placa (setWordWrap), igual que hace reportlab en el PDF.
+        etiqueta = QLabel(texto)
+        etiqueta.setWordWrap(True)
         etiqueta.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         etiqueta.setFixedSize(_PREVIA_ANCHO_PX, _PREVIA_ALTO_PX)  # tamaño físico fijo, como la placa real
         etiqueta.setStyleSheet(
-            f"border: 1px solid black; font-family: 'Calibri', sans-serif; font-size: {tamano_fuente}px; "
+            f"border: 1px solid black; font-family: 'Calibri', sans-serif; font-size: {_PREVIA_FUENTE_PX}px; "
             f"font-weight: bold; font-style: italic; padding: {_PREVIA_MARGEN_PX}px;"
         )
         return etiqueta

@@ -370,19 +370,42 @@ def test_dialogo_reasignar_precarga_datos_existentes(qtbot, conn):
     assert valores["posicion"] == 1
 
 
-def test_previa_fuente_se_achica_si_el_texto_no_entra_a_tamano_maximo(qtbot):
-    """Mismo criterio que el PDF: la placa tiene tamaño físico fijo, así
-    que ante texto largo se achica la fuente en vez de partir una línea
-    en dos o recortarla contra el borde."""
-    from app.gui.pantallas.placas import _PREVIA_FUENTE_MAXIMA_PX, _PREVIA_FUENTE_MINIMA_PX, _tamano_fuente_previa
+def test_previa_usa_la_misma_fuente_fija_para_texto_corto_y_largo(qtbot):
+    """La clienta rechazó el achique automático por placa ("está muy
+    grande Lucía Franco. La fuente tendría que ser igual en tamaño, ya
+    sea en una linea o en dos lineas"): ahora el tamaño de fuente de la
+    vista previa es FIJO, no depende del largo del texto."""
+    from app.gui.pantallas.placas import PantallaPlacas, _PREVIA_FUENTE_PX
 
-    corta = _tamano_fuente_previa(["Lic. Lucía Franco"])
-    larga = _tamano_fuente_previa(
-        ["Lic. Silvina Pugliese", 'Equipo "Sol terapias" con un texto bien largo para forzar el ajuste']
-    )
-    assert corta == _PREVIA_FUENTE_MAXIMA_PX
-    assert larga < _PREVIA_FUENTE_MAXIMA_PX
-    assert larga >= _PREVIA_FUENTE_MINIMA_PX
+    corta = PantallaPlacas._armar_placa_previa("Lic. Lucía Franco")
+    larga = PantallaPlacas._armar_placa_previa('Lic. Silvina Pugliese\nEquipo "Sol terapias"')
+    qtbot.addWidget(corta)
+    qtbot.addWidget(larga)
+    assert f"font-size: {_PREVIA_FUENTE_PX}px" in corta.styleSheet()
+    assert f"font-size: {_PREVIA_FUENTE_PX}px" in larga.styleSheet()
+
+
+def test_previa_calibracion_replica_el_corte_de_linea_del_sistema_fisico_de_la_clienta(qtbot):
+    """Referencia exacta que dio la clienta de su sistema físico actual:
+    "Lic. Agustina Viavattene" (24 caracteres) entra en una sola línea;
+    una letra más la baja a dos líneas. El tamaño fijo de la vista
+    previa (_PREVIA_FUENTE_PX) se calibró aparte del de reportlab
+    porque Qt sustituye "Calibri" por una fuente propia del sistema que
+    mide distinto que Helvetica-BoldOblique."""
+    from PySide6.QtGui import QFont, QFontMetrics
+
+    from app.gui.pantallas.placas import _PREVIA_ANCHO_PX, _PREVIA_FUENTE_PX, _PREVIA_MARGEN_PX
+
+    ancho_disponible = _PREVIA_ANCHO_PX - 2 * _PREVIA_MARGEN_PX
+    fuente = QFont("Calibri")
+    fuente.setBold(True)
+    fuente.setItalic(True)
+    fuente.setPixelSize(_PREVIA_FUENTE_PX)
+    metricas = QFontMetrics(fuente)
+    entra = metricas.boundingRect("Lic. Agustina Viavattene").width()
+    no_entra = metricas.boundingRect("Lic. Agustina Viavattenee").width()
+    assert entra <= ancho_disponible
+    assert no_entra > ancho_disponible
 
 
 def test_vista_previa_es_proporcional_a_la_placa_real():
