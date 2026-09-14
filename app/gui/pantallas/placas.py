@@ -53,7 +53,6 @@ from app.gui.widgets.grilla_operativa import (
     _lista_multiseleccion,
     _seleccionar_todos,
 )
-from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import SUBCARPETA_PLACAS, carpeta_archivos_varios
@@ -79,14 +78,24 @@ _PREVIA_GAP_COLUMNAS_PX = round(0.6 * _PX_POR_CM)
 _PREVIA_GAP_FILAS_PX = round(0.3 * _PX_POR_CM)
 
 _ESTILO_SOLAPAS_PREVIA = """
+QTabWidget::pane {
+    background-color: #FFFFFF;
+    border: 1px solid #000000;
+    top: -1px;
+}
 QTabBar::tab {
     font-size: 14px; font-weight: bold; color: #1A1A1A;
     background-color: #F5F5F5;
     border: 1px solid #000000;
     padding: 6px 14px;
 }
-QTabBar::tab:selected { background-color: #F5F5F5; }
-QTabWidget::pane { background-color: #FFFFFF; }
+QTabBar::tab:selected {
+    background-color: #FFFFFF;
+    border-bottom-color: #FFFFFF;
+}
+QTabBar::tab:!selected {
+    margin-top: 2px;
+}
 """
 
 
@@ -130,37 +139,6 @@ class PantallaPlacas(QWidget):
         panel = QWidget()
         layout_principal = QHBoxLayout(panel)
 
-        columna_tabla = QVBoxLayout()
-        self.tabla = QTableWidget()
-        self.tabla.setColumnCount(7)
-        self.tabla.setHorizontalHeaderLabels(
-            ["Localidad", "Edificio", "Unidad", "Posición", "Profesional", "Nombre grabado", "Personalizada"]
-        )
-        self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla.itemSelectionChanged.connect(self._actualizar_botones_tabla)
-        self.tabla.horizontalHeader().setStretchLastSection(True)
-        self._orden = OrdenTabla(self.tabla, self._actualizar_tabla)
-        columna_tabla.addWidget(self.tabla, stretch=1)
-
-        fila_botones = QHBoxLayout()
-        self.boton_asignar_nueva = QPushButton("Asignar placa nueva…")
-        self.boton_asignar_nueva.setObjectName("botonPrimario")
-        self.boton_asignar_nueva.clicked.connect(self._asignar_nueva)
-        self.boton_reasignar = QPushButton("Reasignar…")
-        self.boton_reasignar.setObjectName("botonSecundario")
-        self.boton_reasignar.clicked.connect(self._reasignar)
-        self.boton_liberar = QPushButton("Liberar posición")
-        self.boton_liberar.setObjectName("botonSecundario")
-        self.boton_liberar.clicked.connect(self._liberar)
-        fila_botones.addWidget(self.boton_asignar_nueva)
-        fila_botones.addWidget(self.boton_reasignar)
-        fila_botones.addWidget(self.boton_liberar)
-        fila_botones.addStretch()
-        columna_tabla.addLayout(fila_botones)
-        layout_principal.addLayout(columna_tabla, stretch=1)
-
         columna_filtros = QVBoxLayout()
         columna_filtros.addWidget(_titulo_campo("Profesional"))
         self.combo_profesional_filtro = QComboBox()
@@ -191,6 +169,37 @@ class PantallaPlacas(QWidget):
 
         columna_filtros.addStretch()
         layout_principal.addLayout(columna_filtros)
+
+        columna_tabla = QVBoxLayout()
+        self.tabla = QTableWidget()
+        self.tabla.setColumnCount(7)
+        self.tabla.setHorizontalHeaderLabels(
+            ["Localidad", "Edificio", "Unidad", "Posición", "Profesional", "Nombre grabado", "Personalizada"]
+        )
+        self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla.itemSelectionChanged.connect(self._actualizar_botones_tabla)
+        self.tabla.horizontalHeader().setStretchLastSection(True)
+        self._orden = OrdenTabla(self.tabla, self._actualizar_tabla)
+        columna_tabla.addWidget(self.tabla, stretch=1)
+
+        fila_botones = QHBoxLayout()
+        self.boton_asignar_nueva = QPushButton("Asignar placa nueva…")
+        self.boton_asignar_nueva.setObjectName("botonPrimario")
+        self.boton_asignar_nueva.clicked.connect(self._asignar_nueva)
+        self.boton_reasignar = QPushButton("Reasignar…")
+        self.boton_reasignar.setObjectName("botonSecundario")
+        self.boton_reasignar.clicked.connect(self._reasignar)
+        self.boton_liberar = QPushButton("Liberar posición")
+        self.boton_liberar.setObjectName("botonSecundario")
+        self.boton_liberar.clicked.connect(self._liberar)
+        fila_botones.addWidget(self.boton_asignar_nueva)
+        fila_botones.addWidget(self.boton_reasignar)
+        fila_botones.addWidget(self.boton_liberar)
+        fila_botones.addStretch()
+        columna_tabla.addLayout(fila_botones)
+        layout_principal.addLayout(columna_tabla, stretch=1)
 
         self._actualizar_botones_tabla()
         return panel
@@ -324,11 +333,15 @@ class PantallaPlacas(QWidget):
             self.tabla.setItem(fila_idx, 0, QTableWidgetItem(e["localidad"]))
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(e["edificio"]))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(e["unidad"]))
-            self.tabla.setItem(fila_idx, 3, item_numero(str(placa["PosicionTablero"])))
+            item_posicion = QTableWidgetItem(str(placa["PosicionTablero"]))
+            item_posicion.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tabla.setItem(fila_idx, 3, item_posicion)
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem(e["texto_profesional"]))
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(e["nombre"]))
             self.tabla.setItem(fila_idx, 6, QTableWidgetItem("Sí" if placa["EsPersonalizada"] else "No"))
         self.tabla.resizeColumnsToContents()
+        if self.tabla.columnWidth(4) < 220:
+            self.tabla.setColumnWidth(4, 220)
         self._actualizar_botones_tabla()
 
     def _fila_seleccionada_placa(self) -> sqlite3.Row | None:

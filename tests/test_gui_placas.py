@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QTabWidget
 
 from app.db.init_db import init_database
@@ -54,10 +55,12 @@ def test_tiene_dos_solapas(qtbot, conn):
     assert solapas.tabText(1) == "Imprimir placas"
 
 
-def test_estilo_de_solapas_es_local_de_esta_pantalla(qtbot, conn):
+def test_estilo_de_solapas_tiene_apariencia_de_ficha(qtbot, conn):
     """Prueba pedida por la clienta solo acá antes de decidir si se
-    aplica al resto: contorno negro en la solapa y fondo del panel más
-    claro, vía un setStyleSheet propio del QTabWidget — no toca
+    aplica al resto: la solapa activa se funde con el panel (mismo
+    fondo, sin línea abajo) y "envuelve" arriba/izquierda/derecha; la
+    inactiva queda con su línea de abajo visible, como una ficha detrás
+    de la activa. Vía setStyleSheet propio del QTabWidget — no toca
     app/gui/estilos.py, así que Lista de espera y Llaves no cambian."""
     pantalla = PantallaPlacas(conn)
     qtbot.addWidget(pantalla)
@@ -65,6 +68,8 @@ def test_estilo_de_solapas_es_local_de_esta_pantalla(qtbot, conn):
     hoja = solapas.styleSheet()
     assert "border: 1px solid #000000" in hoja
     assert "font-size: 14px" in hoja
+    assert "border-bottom-color: #FFFFFF" in hoja  # solapa activa: sin línea abajo, funde con el panel
+    assert "margin-top: 2px" in hoja  # solapa inactiva: queda "detrás"
 
     from app.gui.estilos import hoja_estilos
     assert "border: 1px solid #000000" not in hoja_estilos(False).split("QTabBar::tab {")[1].split("}")[0]
@@ -77,6 +82,34 @@ def test_columnas_de_la_tabla_arrancan_con_localidad(qtbot, conn):
     assert encabezados == [
         "Localidad", "Edificio", "Unidad", "Posición", "Profesional", "Nombre grabado", "Personalizada",
     ]
+
+
+def test_columna_profesional_tiene_ancho_minimo(qtbot, conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.columnWidth(4) >= 220
+
+
+def test_posicion_queda_centrada(qtbot, conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    alineacion = pantalla.tabla.item(0, 3).textAlignment()
+    assert alineacion & Qt.AlignmentFlag.AlignHCenter
+
+
+def test_panel_de_filtros_queda_a_la_izquierda_de_la_tabla(qtbot, conn):
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1200, 700)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    assert pantalla.combo_profesional_filtro.x() < pantalla.tabla.x()
 
 
 def test_orden_por_defecto_es_localidad_edificio_unidad_profesional(qtbot, conn):
