@@ -54,6 +54,86 @@ def test_tiene_dos_solapas(qtbot, conn):
     assert solapas.tabText(1) == "Imprimir placas"
 
 
+def test_estilo_de_solapas_es_local_de_esta_pantalla(qtbot, conn):
+    """Prueba pedida por la clienta solo acá antes de decidir si se
+    aplica al resto: contorno negro en la solapa y fondo del panel más
+    claro, vía un setStyleSheet propio del QTabWidget — no toca
+    app/gui/estilos.py, así que Lista de espera y Llaves no cambian."""
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    solapas = pantalla.findChild(QTabWidget)
+    hoja = solapas.styleSheet()
+    assert "border: 1px solid #000000" in hoja
+    assert "font-size: 14px" in hoja
+
+    from app.gui.estilos import hoja_estilos
+    assert "border: 1px solid #000000" not in hoja_estilos(False).split("QTabBar::tab {")[1].split("}")[0]
+
+
+def test_columnas_de_la_tabla_arrancan_con_localidad(qtbot, conn):
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    encabezados = [pantalla.tabla.horizontalHeaderItem(i).text() for i in range(pantalla.tabla.columnCount())]
+    assert encabezados == [
+        "Localidad", "Edificio", "Unidad", "Posición", "Profesional", "Nombre grabado", "Personalizada",
+    ]
+
+
+def test_orden_por_defecto_es_localidad_edificio_unidad_profesional(qtbot, conn):
+    _, id_unidad_z = _crear_unidad(conn, nombre_edificio="Z Torre", departamento="1A", localidad="Ramos Mejía")
+    _, id_unidad_a = _crear_unidad(conn, nombre_edificio="A Torre", departamento="1A", localidad="Ramos Mejía")
+    _, id_unidad_haedo = _crear_unidad(conn, nombre_edificio="Torre", departamento="1A", localidad="Haedo")
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad_z, posicion=1, id_profesional=id_profesional)
+    asignar_placa(conn, id_unidad=id_unidad_a, posicion=1, id_profesional=id_profesional)
+    asignar_placa(conn, id_unidad=id_unidad_haedo, posicion=1, id_profesional=id_profesional)
+
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+
+    localidades = [pantalla.tabla.item(f, 0).text() for f in range(pantalla.tabla.rowCount())]
+    edificios = [pantalla.tabla.item(f, 1).text() for f in range(pantalla.tabla.rowCount())]
+    assert localidades == ["Haedo", "Ramos Mejía", "Ramos Mejía"]
+    assert edificios[1:] == ["A Torre", "Z Torre"]
+
+
+def test_click_en_encabezado_ordena_por_esa_columna(qtbot, conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_z = _crear_profesional(conn, apellido="Zeta")
+    id_a = _crear_profesional(conn, apellido="Alfa")
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_z)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=2, id_profesional=id_a)
+
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla.tabla.horizontalHeader().sectionClicked.emit(4)  # columna Profesional
+    assert "Alfa" in pantalla.tabla.item(0, 4).text()
+
+    pantalla.tabla.horizontalHeader().sectionClicked.emit(4)  # segundo click: invierte
+    assert "Zeta" in pantalla.tabla.item(0, 4).text()
+
+
+def test_reingresar_a_la_pantalla_resetea_filtros(qtbot, conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_1 = _crear_profesional(conn, apellido="Uno")
+    id_2 = _crear_profesional(conn, apellido="Dos")
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_1)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=2, id_profesional=id_2)
+
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    indice = pantalla.combo_profesional_filtro.findData(id_1)
+    pantalla.combo_profesional_filtro.setCurrentIndex(indice)
+    assert pantalla.tabla.rowCount() == 1
+
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    assert pantalla.combo_profesional_filtro.currentIndex() == 0
+    assert pantalla.tabla.rowCount() == 2
+
+
 def test_tabla_arranca_con_todas_las_placas(qtbot, conn):
     _, id_unidad = _crear_unidad(conn)
     id_profesional = _crear_profesional(conn)
@@ -63,7 +143,7 @@ def test_tabla_arranca_con_todas_las_placas(qtbot, conn):
     qtbot.addWidget(pantalla)
 
     assert pantalla.tabla.rowCount() == 1
-    assert pantalla.tabla.item(0, 3).text() == "Lic. Virginia Lo Veci"
+    assert pantalla.tabla.item(0, 4).text() == "Lic. Virginia Lo Veci"
 
 
 def test_filtro_por_unidad_reduce_la_tabla(qtbot, conn):
@@ -84,7 +164,7 @@ def test_filtro_por_unidad_reduce_la_tabla(qtbot, conn):
             break
 
     assert pantalla.tabla.rowCount() == 1
-    assert pantalla.tabla.item(0, 0).text() == "Torre A"
+    assert pantalla.tabla.item(0, 1).text() == "Torre A"
 
 
 def test_filtro_por_profesional_reduce_la_tabla(qtbot, conn):
@@ -218,13 +298,55 @@ def test_agregar_y_quitar_de_la_cola_de_impresion(qtbot, conn):
     pantalla._agregar_a_impresion()
     assert pantalla.lista_impresion.count() == 1
 
-    pantalla._agregar_a_impresion()  # no duplica
+    # A diferencia de v1, permite agregar el mismo profesional más de una
+    # vez (ej. dos copias, o una estándar y otra personalizada más tarde).
+    pantalla._agregar_a_impresion()
+    assert pantalla.lista_impresion.count() == 2
+
+    pantalla.lista_impresion.setCurrentRow(0)
+    pantalla._quitar_de_impresion()
     assert pantalla.lista_impresion.count() == 1
+    assert len(pantalla._cola_impresion) == 1
 
     pantalla.lista_impresion.setCurrentRow(0)
     pantalla._quitar_de_impresion()
     assert pantalla.lista_impresion.count() == 0
     assert pantalla._cola_impresion == []
+
+
+def test_personalizar_impresion_requiere_linea1(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
+    pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
+    pantalla.casilla_personalizar_impresion.setChecked(True)
+
+    pantalla._agregar_a_impresion()
+
+    assert pantalla.lista_impresion.count() == 0
+
+
+def test_personalizar_impresion_guarda_las_dos_lineas(qtbot, conn):
+    id_profesional = _crear_profesional(conn, apellido="Pugliese", nombre_pila="Silvina")
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
+    pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
+    pantalla.casilla_personalizar_impresion.setChecked(True)
+    pantalla.campo_linea1_impresion.setText("Lic. Silvina Pugliese")
+    pantalla.campo_linea2_impresion.setText('Equipo "Sol terapias"')
+
+    pantalla._agregar_a_impresion()
+
+    assert pantalla.lista_impresion.count() == 1
+    assert "(personalizada)" in pantalla.lista_impresion.item(0).text()
+    entrada = pantalla._cola_impresion[0]
+    assert entrada["linea1"] == "Lic. Silvina Pugliese"
+    assert entrada["linea2"] == 'Equipo "Sol terapias"'
+    # se limpian los campos y se destilda el check después de agregar
+    assert pantalla.casilla_personalizar_impresion.isChecked() is False
+    assert pantalla.campo_linea1_impresion.text() == ""
 
 
 def test_generar_pdf_sin_carpeta_base_no_falla(qtbot, conn):

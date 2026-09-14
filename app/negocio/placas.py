@@ -50,6 +50,23 @@ def nombre_estandar(profesional: sqlite3.Row) -> str:
     return " ".join(partes) if partes else profesional["Apellido"]
 
 
+def texto_para_imprimir(profesional: sqlite3.Row, *, linea1: str | None = None, linea2: str | None = None) -> str:
+    """Texto a grabar en una placa de la hoja de impresión puntual
+    (independiente de si el profesional ya tiene o no una posición
+    asignada en algún tablero, y del nombre grabado que tenga ahí si la
+    tiene). Con `linea1` cargado se usa tal cual (más `linea2` si
+    también se cargó) — para el caso personalizado, ej. "Equipo Sol
+    terapias" en dos renglones definidos a mano. Sin `linea1`, se usa el
+    nombre estándar del profesional en una sola línea de texto: el
+    renderizador (Paragraph de reportlab en el PDF, QLabel con
+    word-wrap en la vista previa) la parte solo si no entra completa en
+    el ancho de la placa — nunca a mitad de palabra."""
+    if linea1:
+        lineas = [linea1] + ([linea2] if linea2 else [])
+        return "\n".join(lineas)
+    return nombre_estandar(profesional)
+
+
 def nombre_grabado(placa: sqlite3.Row, profesional: sqlite3.Row) -> str:
     if placa["EsPersonalizada"] and placa["NombreGrabado"]:
         return placa["NombreGrabado"]

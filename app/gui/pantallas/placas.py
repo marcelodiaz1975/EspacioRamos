@@ -8,7 +8,15 @@ posición del tablero tiene como mucho una placa a la vez.
 Todavía no está decidido si esta pantalla queda como formulario
 independiente o como solapa dentro de otra pantalla existente (ej.
 Liquidaciones) — por ahora se registra sola en la navegación, como F18
-(Llaves) en su momento."""
+(Llaves) en su momento.
+
+Estilo de las solapas EXPERIMENTAL, solo en esta pantalla (a pedido de
+la clienta: "probemos primero acá, si queda bien lo aplicamos al
+resto"): contorno negro en la solapa y fondo del panel más claro que la
+solapa en sí, con un tamaño de letra un poco menor que el resto de las
+pantallas — aplicado con un `setStyleSheet` en la instancia del
+QTabWidget de acá, NO en `app/gui/estilos.py`, así que no afecta a
+ninguna otra pantalla todavía."""
 from __future__ import annotations
 
 import sqlite3
@@ -20,6 +28,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -27,6 +36,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -44,11 +54,40 @@ from app.gui.widgets.grilla_operativa import (
     _seleccionar_todos,
 )
 from app.gui.widgets.items_tabla import item_numero
+from app.gui.widgets.orden_tabla import OrdenTabla
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import SUBCARPETA_PLACAS, carpeta_archivos_varios
-from app.negocio.placas import asignar_placa, liberar_posicion, listar_placas, nombre_grabado, posiciones_libres
+from app.negocio.placas import (
+    asignar_placa,
+    liberar_posicion,
+    listar_placas,
+    nombre_grabado,
+    posiciones_libres,
+    texto_para_imprimir,
+)
 from app.pdf.placas_pdf import generar_pdf_placas_seleccionadas
 from app.repositorio.registro import obtener_repositorio
+
+# Vista previa de impresión: escala real a ~96dpi (1cm = 37.8px) para que
+# las proporciones se acerquen a las del PDF — no pretende ser exacta
+# (Qt y reportlab miden texto distinto), solo una referencia visual.
+_PX_POR_CM = 37.8
+_PREVIA_ANCHO_PX = round(7.6 * _PX_POR_CM)
+_PREVIA_ALTO_PX = round(2.2 * _PX_POR_CM)
+_PREVIA_MARGEN_PX = round(0.3 * _PX_POR_CM)
+_PREVIA_GAP_COLUMNAS_PX = round(0.6 * _PX_POR_CM)
+_PREVIA_GAP_FILAS_PX = round(0.3 * _PX_POR_CM)
+
+_ESTILO_SOLAPAS_PREVIA = """
+QTabBar::tab {
+    font-size: 14px; font-weight: bold; color: #1A1A1A;
+    background-color: #F5F5F5;
+    border: 1px solid #000000;
+    padding: 6px 14px;
+}
+QTabBar::tab:selected { background-color: #F5F5F5; }
+QTabWidget::pane { background-color: #FFFFFF; }
+"""
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -62,8 +101,14 @@ class PantallaPlacas(QWidget):
         super().__init__(parent)
         self.conn = conn
         self._placas_actuales: list[sqlite3.Row] = []
-        self._cola_impresion: list[tuple[int, str]] = []
+        self._cola_impresion: list[dict] = []
         self._armar_ui()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._orden.reiniciar()
+        self.combo_profesional_filtro.setCurrentIndex(0)
+        self._cargar_localidades()
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -72,6 +117,7 @@ class PantallaPlacas(QWidget):
         layout.addWidget(titulo)
 
         solapas = QTabWidget()
+        solapas.setStyleSheet(_ESTILO_SOLAPAS_PREVIA)
         solapas.addTab(self._armar_panel_buscar(), "Buscar y asignar placas")
         solapas.addTab(self._armar_panel_imprimir(), "Imprimir placas")
         layout.addWidget(solapas)
@@ -82,58 +128,21 @@ class PantallaPlacas(QWidget):
 
     def _armar_panel_buscar(self) -> QWidget:
         panel = QWidget()
-        layout = QVBoxLayout(panel)
+        layout_principal = QHBoxLayout(panel)
 
-        fila_filtros = QHBoxLayout()
-
-        col_localidad = QVBoxLayout()
-        col_localidad.addWidget(_titulo_campo("Localidad"))
-        self.lista_localidad = _lista_multiseleccion()
-        self.lista_localidad.itemSelectionChanged.connect(self._cargar_edificios)
-        self._filtro_localidad = _FiltroColapsable(self.lista_localidad)
-        col_localidad.addWidget(self._filtro_localidad)
-        fila_filtros.addLayout(col_localidad)
-
-        col_edificio = QVBoxLayout()
-        col_edificio.addWidget(_titulo_campo("Edificio"))
-        self.lista_edificio = _lista_multiseleccion()
-        self.lista_edificio.itemSelectionChanged.connect(self._cargar_unidades)
-        self._filtro_edificio = _FiltroColapsable(self.lista_edificio)
-        col_edificio.addWidget(self._filtro_edificio)
-        fila_filtros.addLayout(col_edificio)
-
-        col_unidad = QVBoxLayout()
-        col_unidad.addWidget(_titulo_campo("Unidad"))
-        self.lista_unidad = _lista_multiseleccion()
-        self.lista_unidad.itemSelectionChanged.connect(self._filtro_unidad_cambio)
-        self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
-        col_unidad.addWidget(self._filtro_unidad)
-        fila_filtros.addLayout(col_unidad)
-
-        col_profesional = QVBoxLayout()
-        col_profesional.addWidget(_titulo_campo("Profesional"))
-        self.combo_profesional_filtro = QComboBox()
-        self.combo_profesional_filtro.addItem("Todos los profesionales", None)
-        for id_profesional, etiqueta in _opciones_profesional(self.conn):
-            self.combo_profesional_filtro.addItem(etiqueta, id_profesional)
-        habilitar_busqueda_profesional(self.combo_profesional_filtro)
-        self.combo_profesional_filtro.currentIndexChanged.connect(self._actualizar_tabla)
-        col_profesional.addWidget(self.combo_profesional_filtro)
-        fila_filtros.addLayout(col_profesional)
-
-        layout.addLayout(fila_filtros)
-
+        columna_tabla = QVBoxLayout()
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(6)
+        self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
-            ["Edificio", "Unidad", "Posición", "Profesional", "Nombre grabado", "Personalizada"]
+            ["Localidad", "Edificio", "Unidad", "Posición", "Profesional", "Nombre grabado", "Personalizada"]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones_tabla)
         self.tabla.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.tabla, stretch=1)
+        self._orden = OrdenTabla(self.tabla, self._actualizar_tabla)
+        columna_tabla.addWidget(self.tabla, stretch=1)
 
         fila_botones = QHBoxLayout()
         self.boton_asignar_nueva = QPushButton("Asignar placa nueva…")
@@ -149,7 +158,39 @@ class PantallaPlacas(QWidget):
         fila_botones.addWidget(self.boton_reasignar)
         fila_botones.addWidget(self.boton_liberar)
         fila_botones.addStretch()
-        layout.addLayout(fila_botones)
+        columna_tabla.addLayout(fila_botones)
+        layout_principal.addLayout(columna_tabla, stretch=1)
+
+        columna_filtros = QVBoxLayout()
+        columna_filtros.addWidget(_titulo_campo("Profesional"))
+        self.combo_profesional_filtro = QComboBox()
+        self.combo_profesional_filtro.addItem("Todos los profesionales", None)
+        for id_profesional, etiqueta in _opciones_profesional(self.conn):
+            self.combo_profesional_filtro.addItem(etiqueta, id_profesional)
+        habilitar_busqueda_profesional(self.combo_profesional_filtro)
+        self.combo_profesional_filtro.currentIndexChanged.connect(self._actualizar_tabla)
+        columna_filtros.addWidget(self.combo_profesional_filtro)
+
+        columna_filtros.addWidget(_titulo_campo("Localidad"))
+        self.lista_localidad = _lista_multiseleccion()
+        self.lista_localidad.itemSelectionChanged.connect(self._cargar_edificios)
+        self._filtro_localidad = _FiltroColapsable(self.lista_localidad)
+        columna_filtros.addWidget(self._filtro_localidad)
+
+        columna_filtros.addWidget(_titulo_campo("Edificio"))
+        self.lista_edificio = _lista_multiseleccion()
+        self.lista_edificio.itemSelectionChanged.connect(self._cargar_unidades)
+        self._filtro_edificio = _FiltroColapsable(self.lista_edificio)
+        columna_filtros.addWidget(self._filtro_edificio)
+
+        columna_filtros.addWidget(_titulo_campo("Unidad"))
+        self.lista_unidad = _lista_multiseleccion()
+        self.lista_unidad.itemSelectionChanged.connect(self._filtro_unidad_cambio)
+        self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
+        columna_filtros.addWidget(self._filtro_unidad)
+
+        columna_filtros.addStretch()
+        layout_principal.addLayout(columna_filtros)
 
         self._actualizar_botones_tabla()
         return panel
@@ -232,8 +273,21 @@ class PantallaPlacas(QWidget):
         self._filtro_unidad.actualizar_resumen()
         self._actualizar_tabla()
 
+    @staticmethod
+    def _clave_orden(columna: int):
+        claves = {
+            0: lambda e: e["localidad"],
+            1: lambda e: e["edificio"],
+            2: lambda e: e["unidad"],
+            3: lambda e: e["placa"]["PosicionTablero"] or 0,
+            4: lambda e: e["texto_profesional"],
+            5: lambda e: e["nombre"],
+            6: lambda e: e["placa"]["EsPersonalizada"],
+        }
+        return claves[columna]
+
     def _actualizar_tabla(self) -> None:
-        self._placas_actuales = listar_placas(
+        placas = listar_placas(
             self.conn,
             ids_localidad=_ids_seleccionados(self.lista_localidad) or None,
             ids_edificio=_ids_seleccionados(self.lista_edificio) or None,
@@ -241,16 +295,39 @@ class PantallaPlacas(QWidget):
             id_profesional=self.combo_profesional_filtro.currentData(),
         )
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
-        self.tabla.setRowCount(len(self._placas_actuales))
-        for fila_idx, placa in enumerate(self._placas_actuales):
+        enriquecidos = []
+        for placa in placas:
             profesional = repo_profesional.obtener(placa["IdProfesional"]) if placa["IdProfesional"] else None
-            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(placa["NombreEdificio"]))
-            self.tabla.setItem(fila_idx, 1, QTableWidgetItem(placa["Departamento"]))
-            self.tabla.setItem(fila_idx, 2, item_numero(str(placa["PosicionTablero"])))
-            self.tabla.setItem(fila_idx, 3, QTableWidgetItem(_texto_profesional(profesional) if profesional else ""))
-            nombre = nombre_grabado(placa, profesional) if profesional else (placa["NombreGrabado"] or "")
-            self.tabla.setItem(fila_idx, 4, QTableWidgetItem(nombre))
-            self.tabla.setItem(fila_idx, 5, QTableWidgetItem("Sí" if placa["EsPersonalizada"] else "No"))
+            enriquecidos.append({
+                "placa": placa,
+                "localidad": placa["DomicilioLocalidad"] or "",
+                "edificio": placa["NombreEdificio"],
+                "unidad": placa["Departamento"],
+                "texto_profesional": _texto_profesional(profesional) if profesional else "",
+                "nombre": nombre_grabado(placa, profesional) if profesional else (placa["NombreGrabado"] or ""),
+            })
+
+        if self._orden.columna is not None:
+            enriquecidos.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
+        else:
+            # Localidad, Edificio, Unidad, Profesional (sort estable: se ordena
+            # primero por la clave menos significativa, pedido de la clienta).
+            enriquecidos.sort(key=lambda e: e["texto_profesional"])
+            enriquecidos.sort(key=lambda e: e["unidad"])
+            enriquecidos.sort(key=lambda e: e["edificio"])
+            enriquecidos.sort(key=lambda e: e["localidad"])
+
+        self._placas_actuales = [e["placa"] for e in enriquecidos]
+        self.tabla.setRowCount(len(enriquecidos))
+        for fila_idx, e in enumerate(enriquecidos):
+            placa = e["placa"]
+            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(e["localidad"]))
+            self.tabla.setItem(fila_idx, 1, QTableWidgetItem(e["edificio"]))
+            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(e["unidad"]))
+            self.tabla.setItem(fila_idx, 3, item_numero(str(placa["PosicionTablero"])))
+            self.tabla.setItem(fila_idx, 4, QTableWidgetItem(e["texto_profesional"]))
+            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(e["nombre"]))
+            self.tabla.setItem(fila_idx, 6, QTableWidgetItem("Sí" if placa["EsPersonalizada"] else "No"))
         self.tabla.resizeColumnsToContents()
         self._actualizar_botones_tabla()
 
@@ -319,15 +396,31 @@ class PantallaPlacas(QWidget):
             self.combo_profesional_imprimir.addItem(etiqueta, id_profesional)
         habilitar_busqueda_profesional(self.combo_profesional_imprimir)
         fila_busqueda.addWidget(self.combo_profesional_imprimir, stretch=1)
+        layout.addLayout(fila_busqueda)
+
+        fila_personalizada = QHBoxLayout()
+        self.casilla_personalizar_impresion = QCheckBox("Personalizar texto de la placa")
+        self.campo_linea1_impresion = QLineEdit()
+        self.campo_linea1_impresion.setPlaceholderText("Línea 1")
+        self.campo_linea1_impresion.setEnabled(False)
+        self.campo_linea2_impresion = QLineEdit()
+        self.campo_linea2_impresion.setPlaceholderText("Línea 2 (opcional)")
+        self.campo_linea2_impresion.setEnabled(False)
+        self.casilla_personalizar_impresion.toggled.connect(self.campo_linea1_impresion.setEnabled)
+        self.casilla_personalizar_impresion.toggled.connect(self.campo_linea2_impresion.setEnabled)
+        fila_personalizada.addWidget(self.casilla_personalizar_impresion)
+        fila_personalizada.addWidget(self.campo_linea1_impresion)
+        fila_personalizada.addWidget(self.campo_linea2_impresion)
+        layout.addLayout(fila_personalizada)
+
         self.boton_agregar_impresion = QPushButton("Agregar a impresión")
         self.boton_agregar_impresion.setObjectName("botonSecundario")
         self.boton_agregar_impresion.clicked.connect(self._agregar_a_impresion)
-        fila_busqueda.addWidget(self.boton_agregar_impresion)
-        layout.addLayout(fila_busqueda)
+        layout.addWidget(self.boton_agregar_impresion)
 
         layout.addWidget(_titulo_campo("Placas a imprimir"))
         self.lista_impresion = QListWidget()
-        layout.addWidget(self.lista_impresion, stretch=1)
+        layout.addWidget(self.lista_impresion)
 
         fila_botones = QHBoxLayout()
         self.boton_quitar_impresion = QPushButton("Quitar de la lista")
@@ -341,17 +434,38 @@ class PantallaPlacas(QWidget):
         fila_botones.addWidget(self.boton_generar_pdf)
         layout.addLayout(fila_botones)
 
+        layout.addWidget(_titulo_campo("Vista previa"))
+        self.area_previa = QScrollArea()
+        self.area_previa.setWidgetResizable(True)
+        layout.addWidget(self.area_previa, stretch=1)
+        self._actualizar_vista_previa()
+
         return panel
 
     def _agregar_a_impresion(self) -> None:
         id_profesional = self.combo_profesional_imprimir.currentData()
         if id_profesional is None:
             return
-        if any(id_ == id_profesional for id_, _ in self._cola_impresion):
+        personalizar = self.casilla_personalizar_impresion.isChecked()
+        linea1 = self.campo_linea1_impresion.text().strip() or None
+        linea2 = self.campo_linea2_impresion.text().strip() or None
+        if personalizar and not linea1:
+            QMessageBox.warning(self, "Agregar a impresión", "Cargá al menos la línea 1 para una placa personalizada.")
             return
-        etiqueta = self.combo_profesional_imprimir.currentText()
-        self._cola_impresion.append((id_profesional, etiqueta))
-        self.lista_impresion.addItem(etiqueta)
+        if not personalizar:
+            linea1 = None
+            linea2 = None
+
+        etiqueta_base = self.combo_profesional_imprimir.currentText()
+        etiqueta_lista = f"{etiqueta_base} (personalizada)" if personalizar else etiqueta_base
+        self._cola_impresion.append({
+            "id_profesional": id_profesional, "linea1": linea1, "linea2": linea2, "etiqueta_lista": etiqueta_lista,
+        })
+        self.lista_impresion.addItem(etiqueta_lista)
+        self.casilla_personalizar_impresion.setChecked(False)
+        self.campo_linea1_impresion.clear()
+        self.campo_linea2_impresion.clear()
+        self._actualizar_vista_previa()
 
     def _quitar_de_impresion(self) -> None:
         fila = self.lista_impresion.currentRow()
@@ -359,6 +473,33 @@ class PantallaPlacas(QWidget):
             return
         self.lista_impresion.takeItem(fila)
         del self._cola_impresion[fila]
+        self._actualizar_vista_previa()
+
+    def _actualizar_vista_previa(self) -> None:
+        contenedor = QWidget()
+        grid = QGridLayout(contenedor)
+        grid.setHorizontalSpacing(_PREVIA_GAP_COLUMNAS_PX)
+        grid.setVerticalSpacing(_PREVIA_GAP_FILAS_PX)
+        grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        repo_profesional = obtener_repositorio(self.conn, "Profesional")
+        for indice, entrada in enumerate(self._cola_impresion):
+            profesional = repo_profesional.obtener(entrada["id_profesional"])
+            if profesional is None:
+                continue
+            texto = texto_para_imprimir(profesional, linea1=entrada["linea1"], linea2=entrada["linea2"])
+            etiqueta = QLabel(texto.replace("\n", "<br/>"))
+            etiqueta.setTextFormat(Qt.TextFormat.RichText)
+            etiqueta.setWordWrap(True)
+            etiqueta.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+            etiqueta.setMinimumSize(_PREVIA_ANCHO_PX, _PREVIA_ALTO_PX)
+            etiqueta.setMaximumWidth(_PREVIA_ANCHO_PX)
+            etiqueta.setStyleSheet(
+                "border: 1px solid black; font-family: 'Calibri', sans-serif; font-size: 20pt; "
+                f"font-weight: bold; font-style: italic; padding: {_PREVIA_MARGEN_PX}px;"
+            )
+            fila, columna = divmod(indice, 2)
+            grid.addWidget(etiqueta, fila, columna)
+        self.area_previa.setWidget(contenedor)
 
     def _generar_pdf_impresion(self) -> None:
         if not self._cola_impresion:
@@ -366,15 +507,18 @@ class PantallaPlacas(QWidget):
             return
         try:
             directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_PLACAS))
-            ruta = generar_pdf_placas_seleccionadas(
-                self.conn, directorio, [id_profesional for id_profesional, _ in self._cola_impresion],
-            )
+            entradas = [
+                {"id_profesional": e["id_profesional"], "linea1": e["linea1"], "linea2": e["linea2"]}
+                for e in self._cola_impresion
+            ]
+            ruta = generar_pdf_placas_seleccionadas(self.conn, directorio, entradas)
         except ValueError as error:
             QMessageBox.warning(self, "Generar PDF", str(error))
             return
         QMessageBox.information(self, "Generar PDF", f"Se generó el PDF en:\n{ruta}")
         self._cola_impresion.clear()
         self.lista_impresion.clear()
+        self._actualizar_vista_previa()
 
 
 class _DialogoPlaca(QDialog):

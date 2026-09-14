@@ -13,7 +13,17 @@ tablero ocupen, o si todavía no ocupan ninguna). A diferencia del resto
 de los PDFs del sistema (Etapa 7: "página única continua"), éste SÍ
 pagina de verdad — se imprime tal cual sobre la plancha física, una
 hoja A4 por página — así que arma el documento con `crear_documento` +
-`doc.build` en vez de `construir_sin_saltos`."""
+`doc.build` en vez de `construir_sin_saltos`.
+
+Medidas de cada placa (modelo físico que pasó la clienta): 7,6 cm x 2,2
+cm, margen interno 0,3 cm, texto centrado verticalmente, 2 columnas por
+hoja con separación en blanco entre placa y placa (para poder cortarlas
+sin que se peguen los bordes). Fuente pedida: Calibri 20pt negrita
+itálica — Calibri no es una de las 14 fuentes base de PDF y no está
+instalada en este entorno (no se puede registrar sin el archivo .ttf),
+así que se usa Helvetica-BoldOblique como reemplazo más parecido
+disponible; si la clienta consigue el .ttf de Calibri se puede
+registrar para usar la fuente exacta."""
 from __future__ import annotations
 
 import os
@@ -21,14 +31,14 @@ import sqlite3
 from datetime import datetime
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
-from app.negocio.placas import nombre_estandar
+from app.negocio.placas import texto_para_imprimir
 from app.pdf.edificios_pdf import edificios_incluidos, sufijo_localidad
-from app.pdf.estilos import FUENTE, FUENTE_NEGRITA, construir_sin_saltos, crear_documento, encabezado, encabezado_espacio, estilo_texto
+from app.pdf.estilos import FUENTE, FUENTE_NEGRITA_ITALICA, construir_sin_saltos, crear_documento, encabezado, encabezado_espacio, estilo_texto
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -118,51 +128,88 @@ def generar_pdf_placas(conn: sqlite3.Connection, directorio: str, ids_edificio: 
     return ruta
 
 
-_COLUMNAS_GRILLA = 2
-_ALTO_CELDA = 2.3 * cm  # 2 columnas x 11 filas = 22 por hoja A4, como la plantilla de Excel que usaba la clienta antes
+ANCHO_PLACA = 7.6 * cm
+ALTO_PLACA = 2.2 * cm
+MARGEN_INTERNO_PLACA = 0.3 * cm
+_GAP_ENTRE_COLUMNAS = 0.6 * cm
+_GAP_ENTRE_FILAS = 0.2 * cm  # ajustado para que 11 filas (22 placas) entren en una hoja A4 con los márgenes estándar
+FUENTE_PLACA = FUENTE_NEGRITA_ITALICA  # reemplazo de Calibri, ver docstring del módulo
+TAMANO_FUENTE_PLACA = 20
+
+_ESTILO_PLACA = ParagraphStyle(
+    "placa", fontName=FUENTE_PLACA, fontSize=TAMANO_FUENTE_PLACA, leading=TAMANO_FUENTE_PLACA * 1.1,
+    alignment=TA_LEFT,
+)
 
 
-def _tabla_grilla_placas(nombres: list[str], ancho: float) -> Table:
-    estilo_celda = ParagraphStyle(
-        "placa", fontName=FUENTE_NEGRITA, fontSize=13, alignment=TA_CENTER, leading=16,
+def _caja_placa(texto: str) -> Paragraph:
+    return Paragraph(texto.replace("\n", "<br/>"), _ESTILO_PLACA)
+
+
+def _altura_necesaria(parrafo: Paragraph) -> float:
+    """Alto real que ocupa el texto de la placa al ancho disponible
+    (ANCHO_PLACA menos el margen interno a cada lado) — para que una
+    placa con más texto del que entra en ALTO_PLACA a TAMANO_FUENTE_PLACA
+    (ej. una personalizada de 2 líneas donde alguna se autoparte por ser
+    larga) crezca en vez de recortarse silenciosamente contra el borde."""
+    ancho_texto = ANCHO_PLACA - 2 * MARGEN_INTERNO_PLACA
+    _ancho_usado, alto = parrafo.wrap(ancho_texto, 1000 * cm)
+    return alto + 2 * MARGEN_INTERNO_PLACA
+
+
+def _fila_de_placas(textos: list[str]) -> Table:
+    """Una fila de hasta 2 placas lado a lado, con una columna angosta sin
+    contenido ni borde en el medio a modo de separación (para que las
+    cajas no queden pegadas). Si la fila tiene una sola placa (cantidad
+    impar en la última fila), la segunda columna queda vacía."""
+    izquierda = _caja_placa(textos[0])
+    derecha = _caja_placa(textos[1]) if len(textos) > 1 else None
+    alto_fila = max(ALTO_PLACA, _altura_necesaria(izquierda), _altura_necesaria(derecha) if derecha else 0)
+
+    fila = Table(
+        [[izquierda, "", derecha or ""]], colWidths=[ANCHO_PLACA, _GAP_ENTRE_COLUMNAS, ANCHO_PLACA],
+        rowHeights=[alto_fila],
     )
-    celdas = [Paragraph(nombre, estilo_celda) for nombre in nombres]
-    faltantes = (-len(celdas)) % _COLUMNAS_GRILLA
-    celdas.extend([Paragraph("", estilo_celda)] * faltantes)
-
-    filas = [celdas[i:i + _COLUMNAS_GRILLA] for i in range(0, len(celdas), _COLUMNAS_GRILLA)]
-    ancho_columna = ancho / _COLUMNAS_GRILLA
-    tabla = Table(filas, colWidths=[ancho_columna] * _COLUMNAS_GRILLA, rowHeights=[_ALTO_CELDA] * len(filas))
-    tabla.setStyle(TableStyle([
-        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
-        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
+    estilo = [
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-    ]))
-    return tabla
+        ("LEFTPADDING", (0, 0), (-1, -1), MARGEN_INTERNO_PLACA), ("RIGHTPADDING", (0, 0), (-1, -1), MARGEN_INTERNO_PLACA),
+        ("TOPPADDING", (0, 0), (-1, -1), MARGEN_INTERNO_PLACA), ("BOTTOMPADDING", (0, 0), (-1, -1), MARGEN_INTERNO_PLACA),
+        ("BOX", (0, 0), (0, 0), 0.75, colors.black),
+    ]
+    if derecha:
+        estilo.append(("BOX", (2, 0), (2, 0), 0.75, colors.black))
+    fila.setStyle(TableStyle(estilo))
+    return fila
 
 
-def generar_pdf_placas_seleccionadas(conn: sqlite3.Connection, directorio: str, ids_profesional: list[int]) -> str:
+def generar_pdf_placas_seleccionadas(conn: sqlite3.Connection, directorio: str, entradas: list[dict]) -> str:
     """Hoja para cortar e imprimir con las placas seleccionadas puntualmente
-    (buscador de profesional en la pantalla de Placas) — 2 columnas x 11
-    filas por hoja A4, sin importar si el profesional ya tiene o no una
-    posición asignada en algún tablero. El nombre de archivo lleva fecha
-    y hora porque, a diferencia de Propuesta/Disponibilidad/el PDF de
-    referencia de Placas, cada tanda de impresión es un documento
-    distinto que no reemplaza al anterior."""
-    if not ids_profesional:
+    en la pantalla de Placas, sin importar si el profesional ya tiene o
+    no una posición asignada en algún tablero. Cada entrada de
+    `entradas` es {"id_profesional": int, "linea1": str | None,
+    "linea2": str | None} — ver `app.negocio.placas.texto_para_imprimir`
+    para el criterio de qué texto sale en cada placa. El nombre de
+    archivo lleva fecha y hora porque, a diferencia de Propuesta/
+    Disponibilidad/el PDF de referencia de Placas, cada tanda de
+    impresión es un documento distinto que no reemplaza al anterior."""
+    if not entradas:
         raise ValueError("No hay ninguna placa seleccionada para imprimir.")
     repo_profesional = obtener_repositorio(conn, "Profesional")
-    nombres = []
-    for id_profesional in ids_profesional:
-        profesional = repo_profesional.obtener(id_profesional)
+    textos = []
+    for entrada in entradas:
+        profesional = repo_profesional.obtener(entrada["id_profesional"])
         if profesional is not None:
-            nombres.append(nombre_estandar(profesional))
-    if not nombres:
+            textos.append(texto_para_imprimir(profesional, linea1=entrada.get("linea1"), linea2=entrada.get("linea2")))
+    if not textos:
         raise ValueError("Ninguno de los profesionales seleccionados existe.")
 
     nombre_archivo = datetime.now().strftime("Placas para imprimir %Y-%m-%d %Hh%M.pdf")
     ruta = os.path.join(directorio, nombre_archivo)
-    doc, ancho = crear_documento(ruta)
-    doc.build([_tabla_grilla_placas(nombres, ancho)])
+    doc, _ancho = crear_documento(ruta)
+    story = []
+    for i in range(0, len(textos), 2):
+        if i:
+            story.append(Spacer(1, _GAP_ENTRE_FILAS))
+        story.append(_fila_de_placas(textos[i:i + 2]))
+    doc.build(story)
     return ruta

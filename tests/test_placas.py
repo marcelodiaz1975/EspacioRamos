@@ -9,6 +9,7 @@ from app.negocio.placas import (
     nombre_estandar,
     nombre_grabado,
     posiciones_libres,
+    texto_para_imprimir,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -60,6 +61,25 @@ def test_nombre_grabado_no_personalizada_usa_el_estandar(conn):
     placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     assert nombre_grabado(placa, profesional) == "Lic. Virginia Lo Veci"
+
+
+def test_texto_para_imprimir_sin_lineas_usa_el_estandar(conn):
+    id_profesional = _crear_profesional(conn)
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    assert texto_para_imprimir(profesional) == "Lic. Virginia Lo Veci"
+
+
+def test_texto_para_imprimir_con_una_linea(conn):
+    id_profesional = _crear_profesional(conn)
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    assert texto_para_imprimir(profesional, linea1="Virginia") == "Virginia"
+
+
+def test_texto_para_imprimir_con_dos_lineas(conn):
+    id_profesional = _crear_profesional(conn)
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    texto = texto_para_imprimir(profesional, linea1="Lic. Silvina Pugliese", linea2='Equipo "Sol terapias"')
+    assert texto == 'Lic. Silvina Pugliese\nEquipo "Sol terapias"'
 
 
 def test_asignar_placa_rechaza_posicion_fuera_de_rango(conn):
