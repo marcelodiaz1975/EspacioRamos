@@ -9,8 +9,8 @@ from app.pdf.placas_pdf import (
     ANCHO_PLACA,
     MARGEN_INTERNO_PLACA,
     TAMANO_FUENTE_PLACA,
-    _altura_necesaria,
-    _caja_placa,
+    TAMANO_FUENTE_MINIMO,
+    _tamano_ajustado,
     generar_pdf_placas,
     generar_pdf_placas_seleccionadas,
 )
@@ -176,10 +176,7 @@ def test_seleccionadas_personalizada_usa_las_lineas_cargadas(conn, tmp_path):
 
     texto = fitz.open(ruta)[0].get_text()
     assert "Lic. Silvina Pugliese" in texto
-    # la fuente sustituta de Calibri es más ancha, así que "Equipo "Sol
-    # terapias"" puede no entrar en una sola línea — igual tiene que
-    # aparecer completo, sin cortar palabras.
-    assert "Equipo" in texto and "Sol" in texto and "terapias" in texto
+    assert 'Equipo "Sol terapias"' in texto
     assert "Lic. Silvina Pugliese Lo Veci" not in texto  # no mezcla con el nombre estándar del profesional
 
 
@@ -200,11 +197,19 @@ def test_medidas_de_la_placa_son_las_del_modelo_fisico():
     assert TAMANO_FUENTE_PLACA == 20
 
 
-def test_altura_crece_si_el_texto_no_entra_en_el_alto_de_placa():
-    """Una placa personalizada larga (ej. "Equipo \"Sol terapias\"" en la
-    fuente sustituta, más ancha que la Calibri pedida) no se recorta
-    contra el borde: la fila crece en vez de solaparse."""
-    corta = _caja_placa("Lic. Sol Difalco")
-    larga = _caja_placa("Lic. Silvina Pugliese\nEquipo \"Sol terapias\" con un texto bien largo para forzar el ajuste")
-    assert _altura_necesaria(corta) < ALTO_PLACA
-    assert _altura_necesaria(larga) > ALTO_PLACA
+def test_fuente_se_achica_si_el_texto_no_entra_a_tamano_maximo():
+    """Una placa personalizada larga (ej. "Equipo \"Sol terapias\"" con
+    la fuente sustituta, más ancha que la Calibri pedida) no crece ni
+    se corta: se achica la fuente lo necesario para que entre completa
+    — la placa tiene un tamaño físico FIJO, no se puede agrandar."""
+    corta = _tamano_ajustado(["Lic. Sol Difalco"])
+    larga = _tamano_ajustado(
+        ["Lic. Silvina Pugliese", 'Equipo "Sol terapias" con un texto bien largo para forzar el ajuste']
+    )
+    assert corta == TAMANO_FUENTE_PLACA
+    assert larga < TAMANO_FUENTE_PLACA
+    assert larga >= TAMANO_FUENTE_MINIMO
+
+
+def test_una_sola_linea_corta_usa_el_tamano_maximo_de_fuente():
+    assert _tamano_ajustado(["Lic. Lucía Franco"]) == TAMANO_FUENTE_PLACA

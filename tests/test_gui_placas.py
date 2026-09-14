@@ -370,6 +370,21 @@ def test_dialogo_reasignar_precarga_datos_existentes(qtbot, conn):
     assert valores["posicion"] == 1
 
 
+def test_previa_fuente_se_achica_si_el_texto_no_entra_a_tamano_maximo(qtbot):
+    """Mismo criterio que el PDF: la placa tiene tamaño físico fijo, así
+    que ante texto largo se achica la fuente en vez de partir una línea
+    en dos o recortarla contra el borde."""
+    from app.gui.pantallas.placas import _PREVIA_FUENTE_MAXIMA_PX, _PREVIA_FUENTE_MINIMA_PX, _tamano_fuente_previa
+
+    corta = _tamano_fuente_previa(["Lic. Lucía Franco"])
+    larga = _tamano_fuente_previa(
+        ["Lic. Silvina Pugliese", 'Equipo "Sol terapias" con un texto bien largo para forzar el ajuste']
+    )
+    assert corta == _PREVIA_FUENTE_MAXIMA_PX
+    assert larga < _PREVIA_FUENTE_MAXIMA_PX
+    assert larga >= _PREVIA_FUENTE_MINIMA_PX
+
+
 def test_vista_previa_es_proporcional_a_la_placa_real():
     """Pedido de la clienta: la vista previa tiene que ser proporcional a
     lo que se va a imprimir — se calcula desde las mismas constantes que

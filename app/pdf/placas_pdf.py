@@ -16,14 +16,21 @@ hoja A4 por página — así que arma el documento con `crear_documento` +
 `doc.build` en vez de `construir_sin_saltos`.
 
 Medidas de cada placa (modelo físico que pasó la clienta): 7,6 cm x 2,2
-cm, margen interno 0,3 cm, texto centrado verticalmente, 2 columnas por
+cm — un tamaño FIJO, como la placa física real — margen interno 0,3 cm,
+texto alineado a la izquierda y centrado verticalmente, 2 columnas por
 hoja con separación en blanco entre placa y placa (para poder cortarlas
 sin que se peguen los bordes). Fuente pedida: Calibri 20pt negrita
 itálica — Calibri no es una de las 14 fuentes base de PDF y no está
 instalada en este entorno (no se puede registrar sin el archivo .ttf),
 así que se usa Helvetica-BoldOblique como reemplazo más parecido
 disponible; si la clienta consigue el .ttf de Calibri se puede
-registrar para usar la fuente exacta."""
+registrar para usar la fuente exacta. Ese reemplazo es notablemente más
+ancho que Calibri, así que un texto que en Calibri entra en una línea
+a 20pt puede no entrar acá — en vez de agrandar la placa (no se puede,
+es un tamaño físico fijo) o cortar el texto, se achica la fuente lo
+que haga falta (nunca por debajo de un mínimo legible) para que cada
+línea entre siempre completa, sin cortar ninguna palabra ni volcarse a
+una línea de más."""
 from __future__ import annotations
 
 import os
@@ -34,6 +41,7 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.placas import texto_para_imprimir
@@ -135,40 +143,50 @@ GAP_ENTRE_COLUMNAS = 0.6 * cm
 GAP_ENTRE_FILAS = 0.2 * cm  # ajustado para que 11 filas (22 placas) entren en una hoja A4 con los márgenes estándar
 FUENTE_PLACA = FUENTE_NEGRITA_ITALICA  # reemplazo de Calibri, ver docstring del módulo
 TAMANO_FUENTE_PLACA = 20
+TAMANO_FUENTE_MINIMO = 6
+_INTERLINEADO = 1.1
+_ANCHO_TEXTO_PLACA = ANCHO_PLACA - 2 * MARGEN_INTERNO_PLACA
+_ALTO_TEXTO_PLACA = ALTO_PLACA - 2 * MARGEN_INTERNO_PLACA
 
-_ESTILO_PLACA = ParagraphStyle(
-    "placa", fontName=FUENTE_PLACA, fontSize=TAMANO_FUENTE_PLACA, leading=TAMANO_FUENTE_PLACA * 1.1,
-    alignment=TA_LEFT,
-)
+
+def _tamano_ajustado(lineas: list[str]) -> float:
+    """El tamaño de fuente más grande (hasta TAMANO_FUENTE_PLACA, nunca
+    por debajo de TAMANO_FUENTE_MINIMO) que hace entrar cada línea de
+    `lineas` completa —sin cortar ninguna palabra— en el ancho y alto
+    disponibles de la placa. La placa tiene un tamaño físico FIJO, así
+    que ante texto largo se achica la fuente en vez de agrandar la
+    placa o partir una línea en dos."""
+    tamano = TAMANO_FUENTE_PLACA
+    while tamano > TAMANO_FUENTE_MINIMO:
+        ancho_maximo = max(stringWidth(linea, FUENTE_PLACA, tamano) for linea in lineas)
+        alto_total = len(lineas) * tamano * _INTERLINEADO
+        if ancho_maximo <= _ANCHO_TEXTO_PLACA and alto_total <= _ALTO_TEXTO_PLACA:
+            return tamano
+        tamano -= 0.5
+    return TAMANO_FUENTE_MINIMO
 
 
 def _caja_placa(texto: str) -> Paragraph:
-    return Paragraph(texto.replace("\n", "<br/>"), _ESTILO_PLACA)
-
-
-def _altura_necesaria(parrafo: Paragraph) -> float:
-    """Alto real que ocupa el texto de la placa al ancho disponible
-    (ANCHO_PLACA menos el margen interno a cada lado) — para que una
-    placa con más texto del que entra en ALTO_PLACA a TAMANO_FUENTE_PLACA
-    (ej. una personalizada de 2 líneas donde alguna se autoparte por ser
-    larga) crezca en vez de recortarse silenciosamente contra el borde."""
-    ancho_texto = ANCHO_PLACA - 2 * MARGEN_INTERNO_PLACA
-    _ancho_usado, alto = parrafo.wrap(ancho_texto, 1000 * cm)
-    return alto + 2 * MARGEN_INTERNO_PLACA
+    lineas = texto.split("\n")
+    tamano = _tamano_ajustado(lineas)
+    estilo = ParagraphStyle(
+        "placa", fontName=FUENTE_PLACA, fontSize=tamano, leading=tamano * _INTERLINEADO, alignment=TA_LEFT,
+    )
+    return Paragraph("<br/>".join(lineas), estilo)
 
 
 def _fila_de_placas(textos: list[str]) -> Table:
     """Una fila de hasta 2 placas lado a lado, con una columna angosta sin
     contenido ni borde en el medio a modo de separación (para que las
     cajas no queden pegadas). Si la fila tiene una sola placa (cantidad
-    impar en la última fila), la segunda columna queda vacía."""
+    impar en la última fila), la segunda columna queda vacía. Las dos
+    cajas de la fila miden siempre ALTO_PLACA — nunca crecen — porque el
+    tamaño de fuente ya se ajustó en `_caja_placa` para entrar ahí."""
     izquierda = _caja_placa(textos[0])
-    derecha = _caja_placa(textos[1]) if len(textos) > 1 else None
-    alto_fila = max(ALTO_PLACA, _altura_necesaria(izquierda), _altura_necesaria(derecha) if derecha else 0)
+    derecha = _caja_placa(textos[1]) if len(textos) > 1 else ""
 
     fila = Table(
-        [[izquierda, "", derecha or ""]], colWidths=[ANCHO_PLACA, GAP_ENTRE_COLUMNAS, ANCHO_PLACA],
-        rowHeights=[alto_fila],
+        [[izquierda, "", derecha]], colWidths=[ANCHO_PLACA, GAP_ENTRE_COLUMNAS, ANCHO_PLACA], rowHeights=[ALTO_PLACA],
     )
     estilo = [
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
