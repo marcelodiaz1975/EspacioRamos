@@ -108,6 +108,7 @@ class PantallaCRUD(QWidget):
         instalar_foco: bool = True,
         compacto: bool = False,
         panel_extra_izquierda: QWidget | None = None,
+        etiqueta_buscar: str = "Buscar",
     ):
         super().__init__(parent)
         self.conn = conn
@@ -169,6 +170,11 @@ class PantallaCRUD(QWidget):
         # del profesional seleccionado). Solo aplica al layout nuevo (se
         # ignora en modo compacto, que no tiene panel izquierdo).
         self.panel_extra_izquierda = panel_extra_izquierda
+        # etiqueta_buscar: texto del título arriba del campo Buscar — default
+        # genérico "Buscar", pero un catálogo puede pedir uno más específico
+        # (ej. Profesionales: "Buscar profesional") sin cambiar el criterio
+        # de filtrado en sí (sigue siendo substring por cualquier columna).
+        self.etiqueta_buscar = etiqueta_buscar
         self.campo_buscar: QLineEdit | None = None
         self.boton_nuevo = self.boton_editar = self.boton_eliminar = None
         self._armar_ui(titulo)
@@ -204,7 +210,7 @@ class PantallaCRUD(QWidget):
 
             panel_izquierda = QWidget()
             form = QVBoxLayout(panel_izquierda)
-            form.addWidget(_titulo_campo("Buscar"))
+            form.addWidget(_titulo_campo(self.etiqueta_buscar))
             self.campo_buscar = QLineEdit()
             self.campo_buscar.setFixedWidth(_ANCHO_CAMPO)
             self.campo_buscar.textChanged.connect(self._aplicar_filtro_busqueda)

@@ -9,6 +9,7 @@ import sqlite3
 
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -39,6 +40,13 @@ _CATEGORIAS = [
 _SEXOS = [("Masculino", "Masculino"), ("Femenino", "Femenino"), ("No binario", "No binario")]
 
 
+def _linea_divisoria() -> QFrame:
+    linea = QFrame()
+    linea.setFrameShape(QFrame.Shape.HLine)
+    linea.setFrameShadow(QFrame.Shadow.Sunken)
+    return linea
+
+
 def _opciones_categoria(conn: sqlite3.Connection) -> list[tuple[str, str]]:
     return _CATEGORIAS
 
@@ -59,14 +67,18 @@ def _opciones_profesional(conn: sqlite3.Connection) -> list[tuple[int, str]]:
 
 def _campos_profesional() -> list[Campo]:
     return [
-        Campo("CategoriaProfesional", "Categoría", tipo="combo", opciones=_opciones_categoria, requerido=True),
-        Campo("Apellido", "Apellido", requerido=True),
-        Campo("NombreCompleto", "Nombre completo"),
-        Campo("NombrePila", "Nombre"),
-        Campo("Apodo", "Apodo"),
-        Campo("Tratamiento", "Tratamiento", tipo="combo", opciones=lambda conn: [], combo_editable=True),
-        Campo("Sexo", "Sexo", tipo="combo", opciones=_opciones_sexo),
+        # Primeras 4 columnas en el mismo orden que el formato canónico
+        # "Código - Tratamiento Nombre Apellido" que se usa en los
+        # selectores de profesional de todo el sistema (pedido puntual de
+        # la clienta para esta pantalla, no una regla general de Campo).
         Campo("IdCodigo", "Código"),
+        Campo("Tratamiento", "Tratamiento", tipo="combo", opciones=lambda conn: [], combo_editable=True),
+        Campo("NombrePila", "Nombre"),
+        Campo("Apellido", "Apellido", requerido=True),
+        Campo("CategoriaProfesional", "Categoría", tipo="combo", opciones=_opciones_categoria, requerido=True),
+        Campo("NombreCompleto", "Nombre completo"),
+        Campo("Apodo", "Apodo"),
+        Campo("Sexo", "Sexo", tipo="combo", opciones=_opciones_sexo),
         Campo("DNI", "DNI"),
         Campo("CUIT", "CUIT", normalizar=normalizar_cuit),
         Campo(
@@ -170,6 +182,7 @@ class PantallaProfesionales(QWidget):
         panel_doc = QWidget()
         layout_doc = QVBoxLayout(panel_doc)
         layout_doc.setContentsMargins(0, 0, 0, 0)
+        layout_doc.addWidget(_linea_divisoria())
         titulo_doc = QLabel("Documentación del profesional seleccionado")
         titulo_doc.setObjectName("subtituloSeccion")
         titulo_doc.setWordWrap(True)
@@ -179,12 +192,12 @@ class PantallaProfesionales(QWidget):
         self.lista_documentos.setMinimumHeight(150)
         layout_doc.addWidget(self.lista_documentos)
 
-        boton_agregar = QPushButton("Agregar archivo…")
+        boton_agregar = QPushButton("Agregar archivo")
         boton_agregar.setObjectName("botonPrimario")
         boton_agregar.setFixedWidth(_ANCHO_CAMPO)
         boton_agregar.clicked.connect(self._agregar_documento)
         layout_doc.addWidget(boton_agregar)
-        boton_eliminar = QPushButton("Eliminar")
+        boton_eliminar = QPushButton("Eliminar archivo")
         boton_eliminar.setObjectName("botonSecundario")
         boton_eliminar.setFixedWidth(_ANCHO_CAMPO)
         boton_eliminar.clicked.connect(self._eliminar_documento)
@@ -200,6 +213,7 @@ class PantallaProfesionales(QWidget):
             al_actualizar=self._al_actualizar_profesional,
             al_abrir_dialogo=_al_abrir_dialogo,
             panel_extra_izquierda=panel_doc,
+            etiqueta_buscar="Buscar profesional",
         )
         self.crud_profesionales.tabla_widget.itemSelectionChanged.connect(self._actualizar_documentacion)
         layout.addWidget(self.crud_profesionales, stretch=1)

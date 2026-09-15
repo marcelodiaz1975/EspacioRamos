@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QScrollArea, QTabWidget
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QPushButton, QScrollArea, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -29,7 +29,7 @@ def test_pantalla_profesionales_lista_existentes(qtbot, conn):
     pantalla = pantalla_profesionales(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.crud_profesionales.tabla_widget.rowCount() == 1
-    assert pantalla.crud_profesionales.tabla_widget.item(0, 1).text() == "Gómez"
+    assert pantalla.crud_profesionales.tabla_widget.item(0, 3).text() == "Gómez"
 
 
 def test_pantalla_profesionales_muestra_etiqueta_de_categoria(qtbot, conn):
@@ -37,7 +37,7 @@ def test_pantalla_profesionales_muestra_etiqueta_de_categoria(qtbot, conn):
     conn.commit()
     pantalla = pantalla_profesionales(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.crud_profesionales.tabla_widget.item(0, 0).text() == "R - Regular"
+    assert pantalla.crud_profesionales.tabla_widget.item(0, 4).text() == "R - Regular"
 
 
 def test_pantalla_profesionales_muestra_cabeza_de_equipo(qtbot, conn):
@@ -51,7 +51,7 @@ def test_pantalla_profesionales_muestra_cabeza_de_equipo(qtbot, conn):
     pantalla = pantalla_profesionales(conn)
     qtbot.addWidget(pantalla)
     fila_equipo = next(
-        i for i in range(pantalla.crud_profesionales.tabla_widget.rowCount()) if pantalla.crud_profesionales.tabla_widget.item(i, 1).text() == "Ruiz"
+        i for i in range(pantalla.crud_profesionales.tabla_widget.rowCount()) if pantalla.crud_profesionales.tabla_widget.item(i, 3).text() == "Ruiz"
     )
     assert "Gómez" in pantalla.crud_profesionales.tabla_widget.item(fila_equipo, 21).text()
 
@@ -200,7 +200,7 @@ def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_p
 
     pantalla = pantalla_profesionales(conn)
     qtbot.addWidget(pantalla)
-    fila = next(i for i in range(pantalla.crud_profesionales.tabla_widget.rowCount()) if pantalla.crud_profesionales.tabla_widget.item(i, 1).text() == "Ramos")
+    fila = next(i for i in range(pantalla.crud_profesionales.tabla_widget.rowCount()) if pantalla.crud_profesionales.tabla_widget.item(i, 3).text() == "Ramos")
     pantalla.crud_profesionales.tabla_widget.selectRow(fila)
 
     def _dialogo_cambia_codigo(self, *a, **k):
@@ -310,3 +310,33 @@ def test_pantalla_profesionales_documentacion_va_bajo_los_botones_del_crud(qtbot
     # el panel de documentación queda dentro del mismo panel izquierdo del CRUD, no en un splitter aparte
     assert crud.panel_extra_izquierda is not None
     assert crud.panel_extra_izquierda.isAncestorOf(pantalla.lista_documentos)
+
+
+def test_pantalla_profesionales_buscar_dice_buscar_profesional(qtbot, conn):
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.crud_profesionales.etiqueta_buscar == "Buscar profesional"
+
+
+def test_pantalla_profesionales_botones_de_documentacion_dicen_agregar_y_eliminar_archivo(qtbot, conn):
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    textos = [b.text() for b in pantalla.findChildren(QPushButton)]
+    assert "Agregar archivo" in textos
+    assert "Eliminar archivo" in textos
+
+
+def test_pantalla_profesionales_tiene_linea_divisoria_arriba_de_documentacion(qtbot, conn):
+    from PySide6.QtWidgets import QFrame
+
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    lineas = [w for w in pantalla.crud_profesionales.panel_extra_izquierda.findChildren(QFrame)]
+    assert any(w.frameShape() == QFrame.Shape.HLine for w in lineas)
+
+
+def test_pantalla_profesionales_columnas_en_orden_codigo_tratamiento_nombre_apellido(qtbot, conn):
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    etiquetas = [c.etiqueta for c in pantalla.crud_profesionales.campos[:4]]
+    assert etiquetas == ["Código", "Tratamiento", "Nombre", "Apellido"]

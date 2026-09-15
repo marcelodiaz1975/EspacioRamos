@@ -126,14 +126,28 @@ catálogos nuevos.
 Cuando un catálogo necesita una sección propia además de Nuevo/Editar/
 Eliminar (ej. Profesionales: documentación del profesional seleccionado),
 esa sección va DEBAJO de esos tres botones, en el mismo panel izquierdo
-— no al costado en un splitter aparte. Se arma pasándole a `PantallaCRUD`
-un widget ya armado (con sus propios botones/conexiones) por
-`panel_extra_izquierda`; sus botones (ej. "Agregar archivo…" en
-`botonPrimario`, "Eliminar" en `botonSecundario`) usan el mismo ancho fijo
-que el resto del panel (`crud_generico._ANCHO_CAMPO`, 240px) y sus propios
-métodos atados de la pantalla compuesta (que a su vez usan
-`self.crud_profesionales`, construido después — el binding funciona
-porque el click llega mucho después de que todo ya está armado).
+— no al costado en un splitter aparte, y con una línea divisoria propia
+arriba (separándola de los tres botones del CRUD). Se arma pasándole a
+`PantallaCRUD` un widget ya armado (con sus propios botones/conexiones)
+por `panel_extra_izquierda`; sus botones (ej. "Agregar archivo"/
+"Eliminar archivo" en Profesionales — sin puntos suspensivos, la clienta
+los sacó al revisar esta pantalla) usan `botonPrimario`/`botonSecundario`
+y el mismo ancho fijo que el resto del panel (`crud_generico._ANCHO_
+CAMPO`, 240px), y sus propios métodos atados de la pantalla compuesta
+(que a su vez usan `self.crud_profesionales`, construido después — el
+binding funciona porque el click llega mucho después de que todo ya
+está armado).
+
+El título del campo Buscar es "Buscar" por default, pero se puede
+personalizar por catálogo con `etiqueta_buscar` (ej. Profesionales:
+"Buscar profesional") sin cambiar el criterio de filtrado en sí (sigue
+siendo substring por cualquier columna visible, no restringido a
+campos puntuales). En Profesionales además el orden de columnas
+arranca con Código/Tratamiento/Nombre/Apellido (el mismo orden que el
+formato canónico "{código} - {tratamiento} {nombre} {apellido}" de los
+selectores de profesional del resto del sistema) — pedido puntual de
+esa pantalla, cada catálogo define el orden de sus propias columnas
+según lo que tenga más sentido mostrar primero, no hay una regla única.
 
 Solo `Mensajes predefinidos` sigue en `compacto=True` por ahora (filtro
 de categoría propio arriba de la tabla, en vez de a la izquierda) — no
