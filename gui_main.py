@@ -184,10 +184,6 @@ def construir_secciones() -> list[Seccion]:
             "ningún sitio externo, para poder darle a cada fecha el tratamiento que corresponda.",
         ),
         Seccion(
-            "Esquema de descuentos", catalogos.pantalla_esquema_descuentos, categoria="Catálogos",
-            ayuda="Porcentajes de descuento aplicados por cada tipo de licencia/feriado en la liquidación.",
-        ),
-        Seccion(
             "Bloques rígidos", lambda conn: PantallaBloquesRigidos(conn), categoria="Catálogos",
             ayuda="Franjas horarias que quedan bloqueadas de forma fija, sin poder reservarse.",
         ),

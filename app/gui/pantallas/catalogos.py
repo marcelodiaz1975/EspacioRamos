@@ -1,9 +1,12 @@
 """Pantallas de catálogo (Edificios, Unidades, Consultorios, Responsables,
 Tipos de licencia, Listas editables, Condiciones y normas, Profesiones,
-Gastos operativos, Placas, Fechas especiales, Esquema de descuentos) —
-todas construidas sobre PantallaCRUD, sin código bespoke por tabla.
+Gastos operativos, Placas, Fechas especiales) — todas construidas sobre
+PantallaCRUD, sin código bespoke por tabla.
 ("Mensajes predefinidos" vive aparte, en mensajes_predefinidos.py — tiene
-filtro y vista previa propios, sección 5.5.)"""
+filtro y vista previa propios, sección 5.5. El esquema de descuentos NO
+tiene pantalla de catálogo propia — se maneja y se visualiza únicamente
+desde la solapa "Esquema de descuentos" de Aumentos y descuentos, ver
+app/gui/pantallas/aumentos.py.)"""
 from __future__ import annotations
 
 import sqlite3
@@ -236,18 +239,3 @@ def pantalla_fechas_especiales(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Activo", "Activo", tipo="booleano"),
     ]
     return PantallaCRUD(conn, "FechasEspeciales", "Fechas especiales", campos)
-
-
-def pantalla_esquema_descuentos(conn: sqlite3.Connection) -> PantallaCRUD:
-    """Sección 3.18: "solo modificable al ejecutar análisis de aumentos" —
-    acá se muestra en solo lectura (vigente + historial, vía Activo); la
-    única forma de cambiarlo es la pantalla Aumentos y descuentos, que
-    reusa app.negocio.aumentos.actualizar_esquema_descuentos."""
-    campos = [
-        Campo("HorasSemanalesDesde", "Horas semanales desde", tipo="numero", requerido=True),
-        Campo("HorasSemanalesHasta", "Horas semanales hasta", tipo="numero", requerido=True),
-        Campo("PorcentajeDescuento", "% Descuento", tipo="numero", requerido=True),
-        Campo("FechaVigenciaDesde", "Vigencia desde (AAAA-MM-DD)"),
-        Campo("Activo", "Activo", tipo="booleano"),
-    ]
-    return PantallaCRUD(conn, "EsquemaDescuentos", "Esquema de descuentos (solo lectura)", campos, solo_lectura=True)
