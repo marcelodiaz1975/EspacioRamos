@@ -239,6 +239,33 @@ def test_estadisticas_con_un_solo_edificio_omite_el_nivel_edificio(qtbot, conn):
     assert pantalla.tabla_estadisticas.item(1, 2).text() == '7mo "L"'
 
 
+def test_estadisticas_localidad_y_edificio_quedan_mas_anchas_que_el_resto(qtbot, conn):
+    """A pedido de la clienta: Localidad y Edificio (las dos primeras
+    columnas) llevan un padding de más sobre su ancho natural; el resto
+    de las columnas sigue ajustándose solo al contenido."""
+    from PySide6.QtWidgets import QHeaderView
+
+    from app.gui.pantallas.grilla_operativa import _PADDING_COLUMNAS_ESTADISTICAS
+
+    _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"')
+    pantalla = PantallaGrillaOperativa(conn)
+    qtbot.addWidget(pantalla)
+
+    tabla = pantalla.tabla_estadisticas
+    header = tabla.horizontalHeader()
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Interactive
+    assert header.sectionResizeMode(1) == QHeaderView.ResizeMode.Interactive
+    assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.ResizeToContents
+
+    for columna in (0, 1):
+        ancho_con_padding = tabla.columnWidth(columna)
+        header.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
+        ancho_natural = tabla.columnWidth(columna)
+        assert ancho_con_padding == ancho_natural + _PADDING_COLUMNAS_ESTADISTICAS
+        header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Interactive)
+        tabla.setColumnWidth(columna, ancho_con_padding)  # deja la tabla como estaba
+
+
 def test_estadisticas_con_dos_edificios_de_la_misma_localidad_muestra_nivel_edificio(qtbot, conn):
     _unidad_con_consultorio(conn, "Ramos 1", "1A")
     _unidad_con_consultorio(conn, "Ramos 2", "2B")

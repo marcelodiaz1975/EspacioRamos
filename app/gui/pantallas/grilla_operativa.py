@@ -40,6 +40,7 @@ _COLUMNAS_ESTADISTICAS = [
     "Localidad", "Edificio", "Unidad", "% Ocupación", "Horas semanales",
     "Subtotal regulares", "Subtotal aisladas", "Total", "Pagos del mes", "Falta cobrar",
 ]
+_PADDING_COLUMNAS_ESTADISTICAS = 30  # de más para Localidad y Edificio, a pedido de la clienta — el resto sin tocar
 
 _VALOR_ESTADISTICA_POR_COLUMNA = [
     lambda g: g.localidad or g.nombre or "",
@@ -590,6 +591,22 @@ class PantallaGrillaOperativa(QWidget):
         self.tabla_estadisticas.setRowCount(len(filas))
         for fila, (grupo, color) in enumerate(filas):
             self._llenar_fila_estadistica(fila, grupo, color)
+        self._ensanchar_columnas_localidad_edificio()
+
+    def _ensanchar_columnas_localidad_edificio(self) -> None:
+        """A pedido de la clienta: Localidad y Edificio (las dos primeras
+        columnas) quedan con un poco más de aire que el resto, que sigue
+        ajustándose solo al contenido (`ResizeToContents`). Hay que volver
+        a `ResizeToContents` primero para que recalcule el ancho natural
+        contra los datos de la tabla actual (cambian con cada filtro), y
+        recién ahí pasar a `Interactive` para poder sumarle el padding sin
+        que Qt lo vuelva a achicar."""
+        header = self.tabla_estadisticas.horizontalHeader()
+        for columna in (0, 1):
+            header.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
+            ancho_natural = self.tabla_estadisticas.columnWidth(columna)
+            header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Interactive)
+            self.tabla_estadisticas.setColumnWidth(columna, ancho_natural + _PADDING_COLUMNAS_ESTADISTICAS)
 
     def _llenar_fila_estadistica(self, fila: int, grupo: EstadisticaGrupo, color: QColor | None) -> None:
         columnas: list[QTableWidgetItem] = [
