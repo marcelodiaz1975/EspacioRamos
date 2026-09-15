@@ -51,6 +51,17 @@ def test_registrar_pago_sin_monto_no_persiste(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
 
 
+def test_registrar_pago_periodo_invalido_no_persiste(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    _seleccionar_profesional(pantalla.panel_pagos, id_profesional)
+    pantalla.panel_pagos.spin_monto.setValue(-1000)
+    pantalla.panel_pagos.campo_periodo.setText("no es un período")
+    pantalla.panel_pagos._registrar()
+    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
+
+
 def test_registrar_pago_sin_profesional_no_persiste(qtbot, conn):
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)

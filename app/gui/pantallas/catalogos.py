@@ -18,6 +18,14 @@ from app.negocio.formato import formatear_moneda
 from app.negocio.gastos_operativos import gasto_en_conflicto
 from app.negocio.listas_editables import opciones_lista
 from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
+from app.negocio.validaciones import (
+    FORMATO_EMAIL,
+    FORMATO_FECHA,
+    FORMATO_PERIODO,
+    es_email_valido,
+    es_fecha_valida,
+    es_periodo_valido,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -104,7 +112,7 @@ def pantalla_responsables(conn: sqlite3.Connection) -> PantallaCRUD:
     campos = [
         Campo("Nombre", "Nombre", requerido=True),
         Campo("Celular", "Celular"),
-        Campo("Email", "Email"),
+        Campo("Email", "Email", validador=es_email_valido, formato_esperado=FORMATO_EMAIL),
         Campo("Rol", "Rol", tipo="combo", opciones=opciones_lista("RolResponsable"), combo_editable=True),
         Campo("EsContactoPrincipal", "Contacto principal", tipo="booleano"),
         Campo("AptoPDF", "Apto para figurar en PDF", tipo="booleano"),
@@ -179,7 +187,10 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
         return [("Manual", "Manual"), ("Importado", "Importado")]
 
     campos = [
-        Campo("Periodo", "Período (AAAA-MM)", requerido=True),
+        Campo(
+            "Periodo", "Período (AAAA-MM)", requerido=True,
+            validador=es_periodo_valido, formato_esperado=FORMATO_PERIODO,
+        ),
         Campo("Categoria", "Categoría"),
         Campo("Concepto", "Concepto"),
         Campo("Monto", "Monto", tipo="numero", requerido=True),
@@ -233,7 +244,10 @@ def pantalla_placas(conn: sqlite3.Connection) -> PantallaCRUD:
 
 def pantalla_fechas_especiales(conn: sqlite3.Connection) -> PantallaCRUD:
     campos = [
-        Campo("Fecha", "Fecha (AAAA-MM-DD)", requerido=True),
+        Campo(
+            "Fecha", "Fecha (AAAA-MM-DD)", requerido=True,
+            validador=es_fecha_valida, formato_esperado=FORMATO_FECHA,
+        ),
         Campo("Descripcion", "Descripción"),
         Campo("Tipo", "Tipo", tipo="combo", opciones=opciones_lista("TipoFechaEspecial")),
         Campo("Activo", "Activo", tipo="booleano"),

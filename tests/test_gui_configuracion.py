@@ -100,3 +100,40 @@ def test_guardar_con_numero_invalido_no_persiste(qtbot, conn):
 
     fila = conn.execute("SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     assert fila["ToleranciaDeudaDescuento"] == valor_original
+
+
+def test_guardar_con_fecha_ficticia_invalida_no_persiste(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    valor_original = conn.execute(
+        "SELECT FechaFicticia FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()["FechaFicticia"]
+
+    pantalla._entradas["FechaFicticia"].setText("31-13-2026")
+    pantalla._guardar()
+
+    fila = conn.execute("SELECT FechaFicticia FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    assert fila["FechaFicticia"] == valor_original
+
+
+def test_guardar_con_fecha_ficticia_valida_persiste(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["FechaFicticia"].setText("2026-09-15")
+    pantalla._guardar()
+    fila = conn.execute("SELECT FechaFicticia FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    assert fila["FechaFicticia"] == "2026-09-15"
+
+
+def test_guardar_con_json_invalido_no_persiste(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    valor_original = conn.execute(
+        "SELECT DiasGrilla FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()["DiasGrilla"]
+
+    pantalla._entradas["DiasGrilla"].setText("{esto no es json}")
+    pantalla._guardar()
+
+    fila = conn.execute("SELECT DiasGrilla FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    assert fila["DiasGrilla"] == valor_original

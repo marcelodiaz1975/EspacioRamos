@@ -25,6 +25,16 @@ from app.negocio.dias import fecha_actual
 from app.negocio.documentacion_profesional import agregar_documento, eliminar_documento, listar_documentos
 from app.negocio.listas_editables import opciones_lista
 from app.negocio.profesionales import normalizar_cuit, opciones_tratamiento, sugerir_codigo, tratamiento_sugerido
+from app.negocio.validaciones import (
+    FORMATO_CUIT,
+    FORMATO_DNI,
+    FORMATO_EMAIL,
+    FORMATO_FECHA,
+    es_cuit_valido,
+    es_dni_valido,
+    es_email_valido,
+    es_fecha_valida,
+)
 from app.repositorio.registro import obtener_repositorio
 
 _ANCHO_CAMPO = 240  # mismo ancho que el panel izquierdo de PantallaCRUD (ver crud_generico._ANCHO_CAMPO)
@@ -79,22 +89,28 @@ def _campos_profesional() -> list[Campo]:
         Campo("NombreCompleto", "Nombre completo"),
         Campo("Apodo", "Apodo"),
         Campo("Sexo", "Sexo", tipo="combo", opciones=_opciones_sexo),
-        Campo("DNI", "DNI"),
-        Campo("CUIT", "CUIT", normalizar=normalizar_cuit),
+        Campo("DNI", "DNI", validador=es_dni_valido, formato_esperado=FORMATO_DNI),
+        Campo("CUIT", "CUIT", normalizar=normalizar_cuit, validador=es_cuit_valido, formato_esperado=FORMATO_CUIT),
         Campo(
             "CondicionFiscal", "Condición fiscal", tipo="combo",
             opciones=opciones_lista("CondicionFiscal"), combo_editable=True,
         ),
-        Campo("FechaNacimiento", "Fecha de nacimiento (AAAA-MM-DD)"),
+        Campo(
+            "FechaNacimiento", "Fecha de nacimiento (AAAA-MM-DD)",
+            validador=es_fecha_valida, formato_esperado=FORMATO_FECHA,
+        ),
         Campo("Domicilio", "Domicilio"),
         Campo("DomicilioLocalidad", "Localidad"),
         Campo("TelefonoParticular", "Teléfono particular"),
         Campo("Celular", "Celular"),
-        Campo("Email", "Email"),
+        Campo("Email", "Email", validador=es_email_valido, formato_esperado=FORMATO_EMAIL),
         Campo("IdProfesion", "Profesión", tipo="combo", opciones=_opciones_profesion),
         Campo("MatriculaNacional", "Matrícula nacional"),
         Campo("MatriculaProvincial", "Matrícula provincial"),
-        Campo("FechaContacto", "Fecha de contacto (AAAA-MM-DD)"),
+        Campo(
+            "FechaContacto", "Fecha de contacto (AAAA-MM-DD)",
+            validador=es_fecha_valida, formato_esperado=FORMATO_FECHA,
+        ),
         Campo("ProfesionalCabezaEquipo", "Cabeza de equipo", tipo="combo", opciones=_opciones_profesional),
         Campo("SaldoCuentaActual", "Saldo cuenta actual", tipo="numero"),
         Campo("SaldoCuentaAnterior", "Saldo cuenta anterior", tipo="numero"),

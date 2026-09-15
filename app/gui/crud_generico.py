@@ -94,6 +94,16 @@ class Campo:
     normalizar: Callable[[str], str] | None = None
     """Solo para tipo="texto": transforma el texto tipeado antes de
     guardarlo (p. ej. CUIT sin guiones — sección 3.4)."""
+    validador: Callable[[str], bool] | None = None
+    """Solo para tipo="texto": valida el texto ya normalizado (si hay
+    `normalizar`) antes de guardar — si devuelve False, se avisa con
+    `formato_esperado` y el diálogo no se cierra. Ver
+    `app.negocio.validaciones` para los validadores ya armados (fecha,
+    período, email, DNI, CUIT); campos vacíos y no obligatorios no se
+    validan (ver `_validar_y_aceptar`)."""
+    formato_esperado: str | None = None
+    """Descripción corta del formato esperado, para el cartel de aviso
+    cuando `validador` rechaza el valor (ej. "AAAA-MM-DD")."""
 
 
 class PantallaCRUD(QWidget):
@@ -490,6 +500,17 @@ class _DialogoRegistro(QDialog):
                         float(texto)
                     except ValueError:
                         QMessageBox.warning(self, "Dato inválido", f"El campo «{campo.etiqueta}» tiene que ser un número.")
+                        entrada.setFocus()
+                        return
+            if campo.tipo == "texto" and campo.validador is not None:
+                texto = entrada.text().strip()
+                if texto:
+                    valor = campo.normalizar(texto) if campo.normalizar else texto
+                    if not campo.validador(valor):
+                        QMessageBox.warning(
+                            self, "Dato inválido",
+                            f"El campo «{campo.etiqueta}» no tiene el formato esperado ({campo.formato_esperado}).",
+                        )
                         entrada.setFocus()
                         return
             if not campo.requerido:

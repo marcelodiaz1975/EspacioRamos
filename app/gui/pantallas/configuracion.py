@@ -3,6 +3,7 @@ Configuracion — pantalla de formulario simple en vez del CRUD genérico de
 lista, porque no tiene sentido crear/eliminar filas de esta tabla."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from PySide6.QtWidgets import (
@@ -17,7 +18,27 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.negocio.validaciones import FORMATO_FECHA, es_fecha_valida
 from app.repositorio.registro import obtener_repositorio
+
+FORMATO_JSON = "JSON válido"
+
+
+def _es_json_valido(texto: str) -> bool:
+    try:
+        json.loads(texto)
+        return True
+    except json.JSONDecodeError:
+        return False
+
+
+# (nombre, validador, descripción del formato esperado para el cartel de aviso)
+_VALIDADORES_TEXTO: dict[str, tuple[callable, str]] = {
+    "DiasGrilla": (_es_json_valido, FORMATO_JSON),
+    "MesesPeriodoActualizacion": (_es_json_valido, FORMATO_JSON),
+    "RangosEstadisticasOcupacion": (_es_json_valido, FORMATO_JSON),
+    "FechaFicticia": (es_fecha_valida, FORMATO_FECHA),
+}
 
 _CAMPOS_TEXTO = [
     ("NombreEspacio", "Nombre del espacio"),
@@ -113,8 +134,16 @@ class ConfiguracionGeneral(QWidget):
             except ValueError:
                 QMessageBox.warning(self, "Guardar configuración", f"«{etiqueta}» debe ser un número.")
                 return
-        for nombre, _ in _CAMPOS_TEXTO:
+        for nombre, etiqueta in _CAMPOS_TEXTO:
             texto = self._entradas[nombre].text().strip()
+            if texto and nombre in _VALIDADORES_TEXTO:
+                validador, formato_esperado = _VALIDADORES_TEXTO[nombre]
+                if not validador(texto):
+                    QMessageBox.warning(
+                        self, "Guardar configuración",
+                        f"«{etiqueta}» no tiene el formato esperado ({formato_esperado}).",
+                    )
+                    return
             valores[nombre] = texto or None
         for nombre, _ in _CAMPOS_BOOLEANOS:
             valores[nombre] = 1 if self._entradas[nombre].isChecked() else 0

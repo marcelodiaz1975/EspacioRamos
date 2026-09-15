@@ -44,6 +44,7 @@ from app.negocio.dias import fecha_a_dia_semana, periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
+from app.negocio.validaciones import FORMATO_PERIODO, es_periodo_valido
 from app.negocio.pagos import (
     abrir_tanda_sobres,
     cancelar_plan,
@@ -424,6 +425,9 @@ class _PanelRegistrarPago(QWidget):
         if id_profesional is None or not periodo_imputado or monto == 0 or not medio_pago:
             QMessageBox.warning(self, "Registrar pago", "Completá profesional, período, monto y medio de pago.")
             return
+        if not es_periodo_valido(periodo_imputado):
+            QMessageBox.warning(self, "Registrar pago", f"El período imputado no tiene el formato esperado ({FORMATO_PERIODO}).")
+            return
         es_transferencia = "transferencia" in medio_pago.lower()
         if es_transferencia and not self.combo_cuenta_receptora.currentText().strip():
             QMessageBox.warning(self, "Registrar pago", "Elegí una cuenta receptora para la transferencia.")
@@ -491,6 +495,9 @@ class _PanelRegistrarPago(QWidget):
         medio_pago = self.combo_medio_pago.currentText().strip()
         if not periodo_imputado or monto == 0 or not medio_pago:
             QMessageBox.warning(self, "Modificar pago", "Completá período, monto y medio de pago.")
+            return
+        if not es_periodo_valido(periodo_imputado):
+            QMessageBox.warning(self, "Modificar pago", f"El período imputado no tiene el formato esperado ({FORMATO_PERIODO}).")
             return
         es_transferencia = "transferencia" in medio_pago.lower()
         if es_transferencia and not self.combo_cuenta_receptora.currentText().strip():
