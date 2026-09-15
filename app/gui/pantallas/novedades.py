@@ -75,11 +75,13 @@ from app.repositorio.registro import obtener_repositorio
 
 _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
 _ORDEN_CATEGORIA_CARGOS = {"B": 0, "R": 1, "A": 2, "E": 3}
-_ANCHO_CAMPO = 230  # ancho compartido por todo lo que va en la columna izquierda de las tres solapas
+_ANCHO_CAMPO = 265  # ancho compartido por todo lo que va en la columna izquierda de las tres solapas
                     # (combos, fechas y botones), para que las tres queden del mismo ancho — el valor
-                    # alcanza para "Modificar ausencia seleccionada", el botón más largo del formulario
+                    # alcanza para "Modificar ausencia seleccionada" con el padding de botonSecundario
+                    # (8px 16px, más ancho que el botón sin estilo de antes)
 _ANCHO_COMBO_PROFESIONAL = _ANCHO_CAMPO
 _ANCHO_COL_PROFESIONAL = 180
+_PADDING_COLUMNA = 30  # pedido de la clienta: las columnas se veían apretadas, sobraba ancho de sobra
 _LOCALE_ES = QLocale(QLocale.Language.Spanish)
 _FORMATO_FECHA_DIA = "ddd dd-MM-yyyy"  # ej. "lun 07-09-2026" — pedido de la clienta al revisar esta
                                        # pantalla, para las fechas Desde/Hasta y el contenido de las
@@ -88,11 +90,24 @@ _FORMATO_FECHA_DIA = "ddd dd-MM-yyyy"  # ej. "lun 07-09-2026" — pedido de la c
 
 
 def _titulo_campo(texto: str) -> QLabel:
-    """Jerarquía 3 (subtituloCampo, negrita): mismo criterio que Placas
-    para los títulos que van arriba de un selector."""
+    """Jerarquía 3 (subtituloCampo): mismo criterio que Placas para los
+    títulos que van arriba de un selector. Se probó en negrita, pero la
+    clienta pidió sacarla al revisar esta pantalla — queda con el
+    objectName nada más, por si hace falta diferenciarla más adelante."""
     etiqueta = QLabel(texto)
     etiqueta.setObjectName("subtituloCampo")
     return etiqueta
+
+
+def _ajustar_columnas(tabla: QTableWidget) -> None:
+    """`resizeColumnsToContents` deja las columnas al ancho justo del
+    contenido — la clienta pidió más aire, dado que suele sobrar ancho
+    en el panel: se les agrega `_PADDING_COLUMNA` de más a cada una,
+    manteniendo sus anchos relativos (no las iguala como en Placas)."""
+    tabla.resizeColumnsToContents()
+    for columna in range(tabla.columnCount()):
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
+    tabla.setColumnWidth(0, max(tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
 
 
 def _campo_fecha(conn: sqlite3.Connection) -> QDateEdit:
@@ -175,6 +190,15 @@ def _item_monto(valor: float) -> QTableWidgetItem:
     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     if valor < 0:
         item.setForeground(QColor(COLOR_ROJO))
+    return item
+
+
+def _item_centrado(texto: str) -> QTableWidgetItem:
+    """A pedido de la clienta: "Año calendario" (un año suelto, no un
+    importe) queda centrado en vez de alineado a la derecha como el
+    resto de las columnas numéricas."""
+    item = QTableWidgetItem(texto)
+    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
     return item
 
 
@@ -288,14 +312,17 @@ class _PanelVacaciones(QWidget):
         self.boton_crear.clicked.connect(self._crear)
         form.addWidget(self.boton_crear)
         boton_modificar = QPushButton("Modificar vacaciones")
+        boton_modificar.setObjectName("botonSecundario")
         boton_modificar.setFixedWidth(_ANCHO_CAMPO)
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
         boton_cancelar = QPushButton("Anular vacaciones")
+        boton_cancelar.setObjectName("botonSecundario")
         boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
         boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.setObjectName("botonSecundario")
         boton_deshacer.setFixedWidth(_ANCHO_CAMPO)
         boton_deshacer.clicked.connect(self._deshacer_ultimo)
         form.addWidget(boton_deshacer)
@@ -409,7 +436,7 @@ class _PanelVacaciones(QWidget):
         self.tabla.setRowCount(len(filas))
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            self.tabla.setItem(i, 1, item_numero(r["FechaDesde"][:4]))
+            self.tabla.setItem(i, 1, _item_centrado(r["FechaDesde"][:4]))
             self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaDesde"])))
             self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaHasta"])))
             texto_valor = _texto_valor_bonificado(r["ValorBonificado"], r["FechaDesde"], periodo_en_curso)
@@ -418,8 +445,7 @@ class _PanelVacaciones(QWidget):
             self.tabla.setItem(i, 5, item_numero(f"{cupo_utilizado:.1f}%" if cupo_utilizado is not None else ""))
             cupo_restante = r["CupoRestantePorcentaje"]
             self.tabla.setItem(i, 6, item_numero(f"{cupo_restante:.1f}%" if cupo_restante is not None else ""))
-        self.tabla.resizeColumnsToContents()
-        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+        _ajustar_columnas(self.tabla)
         self._actualizar_cupo()
         self.grilla.actualizar()
 
@@ -601,14 +627,17 @@ class _PanelLicencias(QWidget):
         self.boton_crear.clicked.connect(self._crear)
         form.addWidget(self.boton_crear)
         boton_modificar = QPushButton("Modificar licencia")
+        boton_modificar.setObjectName("botonSecundario")
         boton_modificar.setFixedWidth(_ANCHO_CAMPO)
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
         boton_cancelar = QPushButton("Anular licencia")
+        boton_cancelar.setObjectName("botonSecundario")
         boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
         boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.setObjectName("botonSecundario")
         boton_deshacer.setFixedWidth(_ANCHO_CAMPO)
         boton_deshacer.clicked.connect(self._deshacer_ultimo)
         form.addWidget(boton_deshacer)
@@ -714,8 +743,7 @@ class _PanelLicencias(QWidget):
             self.tabla.setItem(i, 4, item_numero(f"{porcentaje:.1f}%" if porcentaje is not None else ""))
             texto_valor = _texto_valor_bonificado(r["ValorBonificado"], r["FechaDesde"], periodo_en_curso)
             self.tabla.setItem(i, 5, item_numero(texto_valor))
-        self.tabla.resizeColumnsToContents()
-        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+        _ajustar_columnas(self.tabla)
         self.grilla.actualizar()
 
     @staticmethod
@@ -917,14 +945,17 @@ class _PanelAusencias(QWidget):
         boton.clicked.connect(self._crear)
         form.addWidget(boton)
         boton_modificar = QPushButton("Modificar ausencia seleccionada")
+        boton_modificar.setObjectName("botonSecundario")
         boton_modificar.setFixedWidth(_ANCHO_CAMPO)
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
         boton_cancelar = QPushButton("Anular ausencia seleccionada")
+        boton_cancelar.setObjectName("botonSecundario")
         boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
         boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.setObjectName("botonSecundario")
         boton_deshacer.setFixedWidth(_ANCHO_CAMPO)
         boton_deshacer.clicked.connect(self._deshacer_ultimo)
         form.addWidget(boton_deshacer)
@@ -1029,8 +1060,7 @@ class _PanelAusencias(QWidget):
             self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_horario_ausencia(r)))
             self.tabla.setItem(i, 4, QTableWidgetItem(r["Motivo"] or ""))
             self.tabla.setItem(i, 5, QTableWidgetItem(self._origen(r)))
-        self.tabla.resizeColumnsToContents()
-        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+        _ajustar_columnas(self.tabla)
         self.grilla.actualizar()
 
     def _clave_orden(self, columna: int):

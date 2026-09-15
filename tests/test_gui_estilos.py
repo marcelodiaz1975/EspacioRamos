@@ -61,8 +61,11 @@ def test_titulo_pantalla_es_italica():
     assert "font-style: italic" in hoja_estilos(False).split("QLabel#tituloPantalla {")[1].split("}")[0]
 
 
-def test_subtitulo_campo_es_negrita():
-    assert "font-weight: bold" in hoja_estilos(False).split("QLabel#subtituloCampo {")[1].split("}")[0]
+def test_subtitulo_campo_no_es_negrita():
+    """Se probó en negrita, pero la clienta pidió sacarla al revisar
+    Registro de ausencias: jerarquía 3 queda con el mismo peso que el
+    texto normal."""
+    assert "font-weight: bold" not in hoja_estilos(False).split("QLabel#subtituloCampo {")[1].split("}")[0]
 
 
 def test_encabezado_de_tabla_usa_azul_mas_oscuro_que_boton_primario():

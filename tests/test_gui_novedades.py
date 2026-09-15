@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
@@ -68,6 +68,66 @@ def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
     qtbot.addWidget(pantalla_cargos)
     completador = pantalla_cargos.panel.combo_profesional.completer()
     assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
+
+
+def test_botones_secundarios_de_las_tres_solapas_son_celestes(qtbot, conn):
+    """Modificar/Anular/Deshacer quedaban con el gris por defecto del
+    sistema operativo; ahora usan "botonSecundario" (celeste, jerarquía
+    2 de botones) como el resto de las pantallas (Llaves, Lista de
+    espera, Placas) — mismo alto que el botón principal porque
+    comparte su mismo padding en la hoja de estilos."""
+    from PySide6.QtWidgets import QPushButton
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+
+    textos_secundarios = {
+        "Modificar vacaciones", "Anular vacaciones",
+        "Modificar licencia", "Anular licencia",
+        "Modificar ausencia seleccionada", "Anular ausencia seleccionada",
+    }
+    botones = pantalla.findChildren(QPushButton)
+    encontrados = {b.text() for b in botones if b.objectName() == "botonSecundario" and b.text() in textos_secundarios}
+    assert encontrados == textos_secundarios
+
+    deshacer = [b for b in botones if b.text() == "Deshacer último movimiento"]
+    assert len(deshacer) == 3
+    assert all(b.objectName() == "botonSecundario" for b in deshacer)
+
+
+def test_columna_anio_calendario_de_vacaciones_queda_centrada(qtbot, conn):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel._crear()
+
+    assert panel.tabla.item(0, 1).textAlignment() == Qt.AlignmentFlag.AlignCenter
+
+
+def test_ajustar_columnas_agrega_padding_sobre_el_ancho_natural(qtbot):
+    """La clienta pidió más aire en las columnas de las tablas de esta
+    pantalla: `_ajustar_columnas` le suma `_PADDING_COLUMNA` al ancho
+    que ya calcula `resizeColumnsToContents`, sin igualar las columnas
+    entre sí (a diferencia de Placas)."""
+    from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
+
+    from app.gui.pantallas.novedades import _PADDING_COLUMNA, _ajustar_columnas
+
+    # Columna 1, no la 0: la 0 tiene además un ancho mínimo propio
+    # (_ANCHO_COL_PROFESIONAL) que taparía el efecto del padding acá.
+    tabla = QTableWidget(1, 2)
+    tabla.setItem(0, 0, QTableWidgetItem("Profesional"))
+    tabla.setItem(0, 1, QTableWidgetItem("Texto"))
+    qtbot.addWidget(tabla)
+    tabla.resizeColumnsToContents()
+    ancho_natural = tabla.columnWidth(1)
+
+    _ajustar_columnas(tabla)
+    assert tabla.columnWidth(1) == ancho_natural + _PADDING_COLUMNA
 
 
 def test_crear_vacacion_persiste(qtbot, conn):

@@ -68,7 +68,11 @@ en Lista de espera, a replicar en el resto de a poco):
         el mismo formato en un QLabel.
     Jerarquía 3 — subtítulo de un campo/selector/cuadro puntual (ej.
         "Profesional" arriba de su combo): objectName "subtituloCampo".
-        Mismo tamaño/color que el texto normal, solo que en negrita.
+        Se probó en negrita, pero la clienta pidió sacarla al revisar
+        Registro de ausencias — queda con el mismo peso que el texto
+        normal, sin nada que la distinga visualmente; el objectName se
+        mantiene igual como gancho por si hace falta diferenciarla más
+        adelante.
 
 Jerarquía de botones: "botonPrimario" (azul fuerte, ej. "Crear pedido")
 para la acción más importante/definitiva del formulario; "botonSecundario"
@@ -141,7 +145,7 @@ QLabel#tituloPantalla {{
 }}
 QLabel#subtitulo {{ font-size: 11px; color: {'#AAAAAA' if modo_oscuro else '#555555'}; }}
 QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {t['texto']}; padding: 4px 0px; }}
-QLabel#subtituloCampo {{ font-weight: bold; }}
+QLabel#subtituloCampo {{ }}
 QTabWidget::pane {{
     background-color: {t['superficie']};
     border: 1px solid {t['fondo']};
