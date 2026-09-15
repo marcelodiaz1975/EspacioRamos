@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QDialog, QMessageBox, QScrollArea, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.crud_generico import Campo, PantallaCRUD
+from app.gui.crud_generico import Campo, PantallaCRUD, _DialogoRegistro
 
 
 @pytest.fixture
@@ -53,6 +53,29 @@ def test_pantalla_crud_nuevo_crea_registro_via_dialogo(qtbot, conn, monkeypatch)
     pantalla._nuevo()
     assert pantalla.tabla_widget.rowCount() == 1
     assert pantalla.repositorio.listar()[0]["Nombre"] == "Torre Sur"
+
+
+def test_dialogo_registro_numero_invalido_no_revienta_y_avisa(qtbot, conn, monkeypatch):
+    campos = [Campo("SaldoCuentaActual", "Saldo", tipo="numero")]
+    dialogo = _DialogoRegistro(conn, campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    avisos = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: avisos.append(a[2])))
+
+    dialogo._entradas["SaldoCuentaActual"].setText("abc")
+    dialogo._validar_y_aceptar()
+
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+    assert avisos and "número" in avisos[0]
+
+
+def test_dialogo_registro_numero_valido_se_acepta(qtbot, conn):
+    campos = [Campo("SaldoCuentaActual", "Saldo", tipo="numero")]
+    dialogo = _DialogoRegistro(conn, campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    dialogo._entradas["SaldoCuentaActual"].setText("123.45")
+    dialogo._validar_y_aceptar()
+    assert dialogo.valores()["SaldoCuentaActual"] == 123.45
 
 
 def test_pantalla_crud_eliminar_sin_seleccion_no_falla(qtbot, conn):

@@ -482,15 +482,25 @@ class _DialogoRegistro(QDialog):
 
     def _validar_y_aceptar(self) -> None:
         for campo in self.campos:
+            entrada = self._entradas[campo.nombre]
+            if campo.tipo == "numero":
+                texto = entrada.text().strip()
+                if texto:
+                    try:
+                        float(texto)
+                    except ValueError:
+                        QMessageBox.warning(self, "Dato inválido", f"El campo «{campo.etiqueta}» tiene que ser un número.")
+                        entrada.setFocus()
+                        return
             if not campo.requerido:
                 continue
-            entrada = self._entradas[campo.nombre]
             vacio = (
                 (campo.tipo == "texto" and not entrada.text().strip())
                 or (campo.tipo == "texto_largo" and not entrada.toPlainText().strip())
             )
             if vacio:
                 QMessageBox.warning(self, "Datos incompletos", f"El campo «{campo.etiqueta}» es obligatorio.")
+                entrada.setFocus()
                 return
         self.accept()
 
