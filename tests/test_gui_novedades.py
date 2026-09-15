@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.novedades import PantallaCargosEspeciales, PantallaRegistroAusencias
+from app.gui.pantallas.novedades import PantallaCargosEspeciales, PantallaRegistroAusencias, _fmt_fecha_dia_abrev
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import periodo_actual
@@ -275,9 +275,9 @@ def test_tabla_vacaciones_muestra_todos_los_anios_y_filtra_por_profesional(qtbot
     assert panel.tabla.rowCount() == 2
     assert panel.tabla.horizontalHeaderItem(1).text() == "Año calendario"
     assert panel.tabla.item(0, 1).text() == str(anio_actual)
-    assert panel.tabla.item(0, 2).text() == f"01-09-{anio_actual}"
+    assert panel.tabla.item(0, 2).text() == _fmt_fecha_dia_abrev(f"{anio_actual}-09-01")
     assert panel.tabla.item(1, 1).text() == str(anio_actual + 1)
-    assert panel.tabla.item(1, 2).text() == f"05-01-{anio_actual + 1}"
+    assert panel.tabla.item(1, 2).text() == _fmt_fecha_dia_abrev(f"{anio_actual + 1}-01-05")
 
 
 def test_tabla_vacaciones_muestra_cupo_utilizado_junto_al_restante(qtbot, conn):
@@ -319,8 +319,8 @@ def test_tabla_vacaciones_oculta_valor_bonificado_de_meses_futuros(qtbot, conn):
 
     assert panel.tabla.rowCount() == 2
     filas = {panel.tabla.item(f, 2).text(): panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())}
-    assert filas["03-08-2026"] != ""  # mes en curso: se ve el monto
-    assert filas["05-10-2026"] == ""  # mes futuro: en blanco
+    assert filas["lun 03-08-2026"] != ""  # mes en curso: se ve el monto
+    assert filas["lun 05-10-2026"] == ""  # mes futuro: en blanco
 
 
 def test_cupo_vacaciones_se_actualiza_con_profesional_y_anio(qtbot, conn):
@@ -556,12 +556,12 @@ def test_tabla_licencias_oculta_valor_bonificado_de_meses_futuros(qtbot, conn):
 
     assert panel.tabla.rowCount() == 2
     filas = {panel.tabla.item(f, 2).text(): panel.tabla.item(f, 5).text() for f in range(panel.tabla.rowCount())}
-    assert filas["03-08-2026"] != ""  # mes en curso: se ve el monto
-    assert filas["05-10-2026"] == ""  # mes futuro: en blanco
+    assert filas["lun 03-08-2026"] != ""  # mes en curso: se ve el monto
+    assert filas["lun 05-10-2026"] == ""  # mes futuro: en blanco
     # La columna "Bonificación" (el % elegido) sigue mostrándose siempre,
     # solo se oculta el monto en pesos ya calculado para meses futuros.
     porcentajes = {panel.tabla.item(f, 2).text(): panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())}
-    assert porcentajes["05-10-2026"] != ""
+    assert porcentajes["lun 05-10-2026"] != ""
 
 
 def test_crear_licencia_con_porcentaje_default_no_pide_confirmacion(qtbot, conn):
@@ -624,8 +624,8 @@ def test_tabla_licencias_orden_por_defecto_fecha_mas_nueva_primero(qtbot, conn):
     panel._crear()
 
     assert panel.tabla.rowCount() == 2
-    assert panel.tabla.item(0, 2).text() == "15-09-2026"
-    assert panel.tabla.item(1, 2).text() == "01-09-2026"
+    assert panel.tabla.item(0, 2).text() == "mar 15-09-2026"
+    assert panel.tabla.item(1, 2).text() == "mar 01-09-2026"
 
 
 def test_tabla_licencias_todos_ordena_por_fecha_y_luego_profesional(qtbot, conn):
@@ -673,12 +673,12 @@ def test_tabla_licencias_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
     panel._crear()
 
     panel.tabla.horizontalHeader().sectionClicked.emit(2)  # "Desde" ascendente
-    assert panel.tabla.item(0, 2).text() == "01-09-2026"
-    assert panel.tabla.item(1, 2).text() == "15-09-2026"
+    assert panel.tabla.item(0, 2).text() == "mar 01-09-2026"
+    assert panel.tabla.item(1, 2).text() == "mar 15-09-2026"
 
     panel.tabla.horizontalHeader().sectionClicked.emit(2)  # de nuevo -> descendente
-    assert panel.tabla.item(0, 2).text() == "15-09-2026"
-    assert panel.tabla.item(1, 2).text() == "01-09-2026"
+    assert panel.tabla.item(0, 2).text() == "mar 15-09-2026"
+    assert panel.tabla.item(1, 2).text() == "mar 01-09-2026"
 
 
 def test_tabla_licencias_vuelve_al_orden_por_defecto_al_reabrir_la_solapa(qtbot, conn):
@@ -696,12 +696,12 @@ def test_tabla_licencias_vuelve_al_orden_por_defecto_al_reabrir_la_solapa(qtbot,
     panel._crear()
 
     panel.tabla.horizontalHeader().sectionClicked.emit(2)  # "Desde" ascendente
-    assert panel.tabla.item(0, 2).text() == "01-09-2026"
+    assert panel.tabla.item(0, 2).text() == "mar 01-09-2026"
 
     pantalla.pestanas.setCurrentWidget(pantalla.panel_vacaciones)
     pantalla.pestanas.setCurrentWidget(panel)
     assert panel._orden.columna is None
-    assert panel.tabla.item(0, 2).text() == "15-09-2026"
+    assert panel.tabla.item(0, 2).text() == "mar 15-09-2026"
 
 
 def test_licencias_no_tiene_seccion_de_cupo(qtbot, conn):
@@ -834,12 +834,12 @@ def test_tabla_ausencias_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
     panel._crear()
 
     panel.tabla.horizontalHeader().sectionClicked.emit(1)  # "Desde" ascendente
-    assert panel.tabla.item(0, 1).text() == "01-09-2026"
-    assert panel.tabla.item(1, 1).text() == "15-09-2026"
+    assert panel.tabla.item(0, 1).text() == "mar 01-09-2026"
+    assert panel.tabla.item(1, 1).text() == "mar 15-09-2026"
 
     panel.tabla.horizontalHeader().sectionClicked.emit(1)  # de nuevo -> descendente
-    assert panel.tabla.item(0, 1).text() == "15-09-2026"
-    assert panel.tabla.item(1, 1).text() == "01-09-2026"
+    assert panel.tabla.item(0, 1).text() == "mar 15-09-2026"
+    assert panel.tabla.item(1, 1).text() == "mar 01-09-2026"
 
 
 def test_modificar_ausencia_sin_seleccion_no_falla(qtbot, conn):
@@ -929,8 +929,8 @@ def test_tabla_ausencias_muestra_origen_de_reubicacion(qtbot, conn):
     panel = pantalla.panel_ausencias
     assert panel.tabla.horizontalHeaderItem(5).text() == "Origen"
     origenes = {panel.tabla.item(f, 1).text(): panel.tabla.item(f, 5).text() for f in range(panel.tabla.rowCount())}
-    assert origenes["17-08-2026"] == "Reubicación (aislada del 2026-08-10)"
-    assert origenes["01-09-2026"] == ""
+    assert origenes["lun 17-08-2026"] == "Reubicación (aislada del 2026-08-10)"
+    assert origenes["mar 01-09-2026"] == ""
 
 
 def test_cancelar_ausencia_bloqueada_por_aislada_muestra_advertencia(qtbot, conn, monkeypatch):
@@ -1101,7 +1101,7 @@ def test_tabla_ausencias_filtra_por_profesional_seleccionado(qtbot, conn):
 
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     assert panel.tabla.rowCount() == 1
-    assert panel.tabla.item(0, 1).text() == "01-09-2026"
+    assert panel.tabla.item(0, 1).text() == "mar 01-09-2026"
 
 
 def test_panel_ausencias_grilla_resalta_verde_donde_hay_ausencia(qtbot, conn):

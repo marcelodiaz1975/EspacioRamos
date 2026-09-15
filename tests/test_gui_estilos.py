@@ -117,17 +117,37 @@ def test_solapas_tienen_apariencia_de_ficha_de_papel():
     """Probado primero en Placas y aprobado por la clienta para todas
     las pantallas: la solapa activa funde su fondo con el panel de
     contenido y pierde la línea de abajo (border-bottom-color igual al
-    fondo del panel) — la línea negra la envuelve arriba/izquierda/
-    derecha nada más. La inactiva conserva su fondo y su borde de abajo,
-    y baja unos px para quedar "detrás" de la activa, como una ficha."""
-    for modo_oscuro, superficie in ((False, "#FFFFFF"), (True, "#2A2E33")):
+    fondo del panel) — el borde la envuelve arriba/izquierda/derecha
+    nada más. La inactiva conserva su fondo y su borde de abajo, y baja
+    unos px para quedar "detrás" de la activa, como una ficha. El borde
+    (pane y solapas) usa el tono oscuro (`fondo`), no negro — corregido
+    a pedido de la clienta al revisar Registro de ausencias, que pidió
+    dos tonos de gris (claro para la activa/el contenido, oscuro para
+    la inactiva y el borde) en vez de un borde negro."""
+    for modo_oscuro, superficie, fondo in (
+        (False, "#FFFFFF", "#F5F5F5"), (True, "#2A2E33", "#1E2124"),
+    ):
         hoja = hoja_estilos(modo_oscuro)
         bloque_panel = hoja.split("QTabWidget::pane {")[1].split("}")[0]
+        bloque_tab = hoja.split("QTabBar::tab {")[1].split("}")[0]
         bloque_seleccionada = hoja.split("QTabBar::tab:selected {")[1].split("}")[0]
         bloque_inactiva = hoja.split("QTabBar::tab:!selected {")[1].split("}")[0]
         assert superficie in bloque_panel
-        assert "border: 1px solid #000000" in bloque_panel
+        assert f"border: 1px solid {fondo}" in bloque_panel
         assert "top: -1px" in bloque_panel
+        assert f"border: 1px solid {fondo}" in bloque_tab
         assert superficie in bloque_seleccionada
         assert f"border-bottom-color: {superficie}" in bloque_seleccionada
         assert "margin-top: 2px" in bloque_inactiva
+
+
+def test_panel_dentro_de_una_solapa_hereda_el_mismo_fondo_claro():
+    """El widget que se agrega con addTab() no hereda el fondo del
+    QTabWidget::pane solo (Qt lo pinta transparente por defecto, así
+    que en la práctica se ve el fondo de la ventana) — necesita el
+    objectName "panelSolapa" para que esta regla lo pinte del mismo
+    tono claro que la solapa activa y el pane."""
+    for modo_oscuro, superficie in ((False, "#FFFFFF"), (True, "#2A2E33")):
+        hoja = hoja_estilos(modo_oscuro)
+        bloque = hoja.split("QWidget#panelSolapa {")[1].split("}")[0]
+        assert superficie in bloque

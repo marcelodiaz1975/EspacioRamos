@@ -24,7 +24,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QLocale, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -50,7 +50,6 @@ from PySide6.QtWidgets import (
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import (
     _FECHA_SIN_DATO,
-    _FORMATO_FECHA,
     _SpinHorario,
     _fmt_fecha,
     _fmt_horario,
@@ -76,16 +75,34 @@ from app.repositorio.registro import obtener_repositorio
 
 _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
 _ORDEN_CATEGORIA_CARGOS = {"B": 0, "R": 1, "A": 2, "E": 3}
-_ANCHO_COMBO_PROFESIONAL = 220
+_ANCHO_CAMPO = 230  # ancho compartido por todo lo que va en la columna izquierda de las tres solapas
+                    # (combos, fechas y botones), para que las tres queden del mismo ancho — el valor
+                    # alcanza para "Modificar ausencia seleccionada", el botón más largo del formulario
+_ANCHO_COMBO_PROFESIONAL = _ANCHO_CAMPO
 _ANCHO_COL_PROFESIONAL = 180
+_LOCALE_ES = QLocale(QLocale.Language.Spanish)
+_FORMATO_FECHA_DIA = "ddd dd-MM-yyyy"  # ej. "lun 07-09-2026" — pedido de la clienta al revisar esta
+                                       # pantalla, para las fechas Desde/Hasta y el contenido de las
+                                       # tablas de las tres solapas (no toca Cargos especiales, que ya
+                                       # tenía su propio formato con el nombre del día completo)
+
+
+def _titulo_campo(texto: str) -> QLabel:
+    """Jerarquía 3 (subtituloCampo, negrita): mismo criterio que Placas
+    para los títulos que van arriba de un selector."""
+    etiqueta = QLabel(texto)
+    etiqueta.setObjectName("subtituloCampo")
+    return etiqueta
 
 
 def _campo_fecha(conn: sqlite3.Connection) -> QDateEdit:
-    """QDateEdit con el mismo formato "dd-mm-aaaa" que Reservas, precargado
-    con la fecha de hoy."""
+    """QDateEdit con el día de la semana abreviado + "dd-mm-aaaa"
+    (`_FORMATO_FECHA_DIA`), precargado con la fecha de hoy."""
     campo = QDateEdit()
-    campo.setDisplayFormat(_FORMATO_FECHA)
+    campo.setDisplayFormat(_FORMATO_FECHA_DIA)
+    campo.setLocale(_LOCALE_ES)
     campo.setCalendarPopup(True)
+    campo.setFixedWidth(_ANCHO_CAMPO)
     hoy = fecha_actual(conn)
     campo.setDate(QDate(hoy.year, hoy.month, hoy.day))
     return campo
@@ -134,6 +151,19 @@ def _fmt_fecha_dia(fecha_iso: str) -> str:
     tablas donde interesa ver de un vistazo qué día se cargó el registro."""
     dia = fecha_a_dia_semana(date.fromisoformat(fecha_iso))
     return f"{dia} {_fmt_fecha(fecha_iso)}"
+
+
+def _fmt_fecha_dia_abrev(fecha_iso: str | None) -> str:
+    """"lun 07-09-2026": mismo formato que `_FORMATO_FECHA_DIA` de los
+    campos Desde/Hasta de Vacaciones/Licencias/Ausencias, para que las
+    columnas Desde/Hasta de esas tres tablas muestren exactamente lo
+    mismo que se eligió en el formulario — a diferencia de
+    `_fmt_fecha_dia` (nombre completo del día, "Lunes"), acá va
+    abreviado ("lun"), a pedido puntual de la clienta para esta
+    pantalla."""
+    if not fecha_iso:
+        return ""
+    return _LOCALE_ES.toString(QDate.fromString(fecha_iso, "yyyy-MM-dd"), _FORMATO_FECHA_DIA)
 
 
 def _item_monto(valor: float) -> QTableWidgetItem:
@@ -223,44 +253,50 @@ class _PanelVacaciones(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
+        contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
         splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
-        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
-        form.addWidget(QLabel("Profesional"))
+        form.addWidget(_titulo_campo("Profesional"))
         form.addWidget(self.combo_profesional)
 
         self.spin_anio = _spin_anio(self.conn)
+        self.spin_anio.setFixedWidth(_ANCHO_CAMPO)
         self.spin_anio.valueChanged.connect(self._anio_cambio)
-        form.addWidget(QLabel("Año calendario a imputar"))
+        form.addWidget(_titulo_campo("Año calendario a imputar"))
         form.addWidget(self.spin_anio)
 
         self.campo_desde = _campo_fecha(self.conn)
-        form.addWidget(QLabel("Desde"))
+        form.addWidget(_titulo_campo("Desde"))
         form.addWidget(self.campo_desde)
         self.campo_hasta = _campo_fecha(self.conn)
-        form.addWidget(QLabel("Hasta"))
+        form.addWidget(_titulo_campo("Hasta"))
         form.addWidget(self.campo_hasta)
 
         self.boton_crear = QPushButton("Crear vacaciones")
         self.boton_crear.setObjectName("botonPrimario")
+        self.boton_crear.setFixedWidth(_ANCHO_CAMPO)
         self.boton_crear.clicked.connect(self._crear)
         form.addWidget(self.boton_crear)
         boton_modificar = QPushButton("Modificar vacaciones")
+        boton_modificar.setFixedWidth(_ANCHO_CAMPO)
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
         boton_cancelar = QPushButton("Anular vacaciones")
+        boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
         boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.setFixedWidth(_ANCHO_CAMPO)
         boton_deshacer.clicked.connect(self._deshacer_ultimo)
         form.addWidget(boton_deshacer)
 
@@ -374,8 +410,8 @@ class _PanelVacaciones(QWidget):
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             self.tabla.setItem(i, 1, item_numero(r["FechaDesde"][:4]))
-            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
-            self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
+            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaDesde"])))
+            self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaHasta"])))
             texto_valor = _texto_valor_bonificado(r["ValorBonificado"], r["FechaDesde"], periodo_en_curso)
             self.tabla.setItem(i, 4, item_numero(texto_valor))
             cupo_utilizado = r["CupoConsumidoPorcentaje"]
@@ -520,53 +556,60 @@ class _PanelLicencias(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
+        contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
         splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
-        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
-        form.addWidget(QLabel("Profesional"))
+        form.addWidget(_titulo_campo("Profesional"))
         form.addWidget(self.combo_profesional)
 
         self.combo_tipo = QComboBox()
+        self.combo_tipo.setFixedWidth(_ANCHO_CAMPO)
         for t in obtener_repositorio(self.conn, "TipoLicencia").listar(Activo=1):
             self.combo_tipo.addItem(t["Nombre"], t["IdTipoLicencia"])
         self.combo_tipo.currentIndexChanged.connect(self._tipo_cambio)
-        form.addWidget(QLabel("Tipo de licencia"))
+        form.addWidget(_titulo_campo("Tipo de licencia"))
         form.addWidget(self.combo_tipo)
 
         self.spin_porcentaje = QDoubleSpinBox()
         self.spin_porcentaje.setRange(0, 100)
         self.spin_porcentaje.setSuffix(" %")
-        form.addWidget(QLabel("% de bonificación (editable caso por caso)"))
+        self.spin_porcentaje.setFixedWidth(_ANCHO_CAMPO)
+        form.addWidget(_titulo_campo("% de bonificación (editable caso por caso)"))
         form.addWidget(self.spin_porcentaje)
         self._precargar_porcentaje()
 
         self.campo_desde = _campo_fecha(self.conn)
-        form.addWidget(QLabel("Desde"))
+        form.addWidget(_titulo_campo("Desde"))
         form.addWidget(self.campo_desde)
         self.campo_hasta = _campo_fecha_opcional(self.conn)
-        form.addWidget(QLabel("Hasta (vacío si el tipo la calcula sola)"))
+        form.addWidget(_titulo_campo("Hasta (vacío si el tipo la calcula sola)"))
         form.addWidget(self.campo_hasta)
 
         self.boton_crear = QPushButton("Crear licencia")
         self.boton_crear.setObjectName("botonPrimario")
+        self.boton_crear.setFixedWidth(_ANCHO_CAMPO)
         self.boton_crear.clicked.connect(self._crear)
         form.addWidget(self.boton_crear)
         boton_modificar = QPushButton("Modificar licencia")
+        boton_modificar.setFixedWidth(_ANCHO_CAMPO)
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
         boton_cancelar = QPushButton("Anular licencia")
+        boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
         boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.setFixedWidth(_ANCHO_CAMPO)
         boton_deshacer.clicked.connect(self._deshacer_ultimo)
         form.addWidget(boton_deshacer)
 
@@ -665,8 +708,8 @@ class _PanelLicencias(QWidget):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             tipo = cache_tipo.get(r["IdTipoLicencia"])
             self.tabla.setItem(i, 1, QTableWidgetItem(tipo["Nombre"] if tipo else "?"))
-            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
-            self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
+            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaDesde"])))
+            self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaHasta"])))
             porcentaje = r["PorcentajeBonificacionAplicado"]
             self.tabla.setItem(i, 4, item_numero(f"{porcentaje:.1f}%" if porcentaje is not None else ""))
             texto_valor = _texto_valor_bonificado(r["ValorBonificado"], r["FechaDesde"], periodo_en_curso)
@@ -818,38 +861,40 @@ class _PanelAusencias(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
+        contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
         splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
-        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
-        form.addWidget(QLabel("Profesional"))
+        form.addWidget(_titulo_campo("Profesional"))
         form.addWidget(self.combo_profesional)
 
         self.combo_motivo = QComboBox()
         self.combo_motivo.setEditable(True)
+        self.combo_motivo.setFixedWidth(_ANCHO_CAMPO)
         for valor in valores_lista(self.conn, "MotivoAusencia"):
             self.combo_motivo.addItem(valor)
-        form.addWidget(QLabel("Motivo"))
+        form.addWidget(_titulo_campo("Motivo"))
         form.addWidget(self.combo_motivo)
 
         self.campo_desde = _campo_fecha(self.conn)
         self.campo_desde.dateChanged.connect(self._actualizar_disponibilidad_horario)
-        form.addWidget(QLabel("Desde"))
+        form.addWidget(_titulo_campo("Desde"))
         form.addWidget(self.campo_desde)
         self.campo_hasta = _campo_fecha(self.conn)
         self.campo_hasta.dateChanged.connect(self._actualizar_disponibilidad_horario)
-        form.addWidget(QLabel("Hasta"))
+        form.addWidget(_titulo_campo("Hasta"))
         form.addWidget(self.campo_hasta)
 
-        self.grupo_horario = QGroupBox("Horario puntual (solo si la ausencia es de un único día)")
+        self.grupo_horario = QGroupBox("Horario puntual (solo si es por un día)")
         self.grupo_horario.setCheckable(True)
         self.grupo_horario.setChecked(False)
         fila_horario = QHBoxLayout(self.grupo_horario)
@@ -859,24 +904,28 @@ class _PanelAusencias(QWidget):
         self.spin_hora_hasta = _SpinHorario()
         self.spin_hora_hasta.setRange(1, 24)
         self.spin_hora_hasta.setValue(10)
-        fila_horario.addWidget(QLabel("Desde"))
+        fila_horario.addWidget(_titulo_campo("Desde"))
         fila_horario.addWidget(self.spin_hora_desde)
-        fila_horario.addWidget(QLabel("Hasta"))
+        fila_horario.addWidget(_titulo_campo("Hasta"))
         fila_horario.addWidget(self.spin_hora_hasta)
         form.addWidget(self.grupo_horario)
         self._actualizar_disponibilidad_horario()
 
         boton = QPushButton("Crear ausencia")
         boton.setObjectName("botonPrimario")
+        boton.setFixedWidth(_ANCHO_CAMPO)
         boton.clicked.connect(self._crear)
         form.addWidget(boton)
         boton_modificar = QPushButton("Modificar ausencia seleccionada")
+        boton_modificar.setFixedWidth(_ANCHO_CAMPO)
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
         boton_cancelar = QPushButton("Anular ausencia seleccionada")
+        boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
         boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.setFixedWidth(_ANCHO_CAMPO)
         boton_deshacer.clicked.connect(self._deshacer_ultimo)
         form.addWidget(boton_deshacer)
         form.addStretch()
@@ -975,8 +1024,8 @@ class _PanelAusencias(QWidget):
         self.tabla.setRowCount(len(filas))
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            self.tabla.setItem(i, 1, QTableWidgetItem(_fmt_fecha(r["FechaDesde"])))
-            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha(r["FechaHasta"])))
+            self.tabla.setItem(i, 1, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaDesde"])))
+            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaHasta"])))
             self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_horario_ausencia(r)))
             self.tabla.setItem(i, 4, QTableWidgetItem(r["Motivo"] or ""))
             self.tabla.setItem(i, 5, QTableWidgetItem(self._origen(r)))

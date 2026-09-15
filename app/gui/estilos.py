@@ -33,18 +33,35 @@ en Lista de espera, a replicar en el resto de a poco):
 
         Apariencia de "ficha de papel" (probada primero en Placas,
         aprobada por la clienta y llevada acá para todas las
-        pantallas): la solapa ACTIVA funde su fondo con el panel de
-        contenido (QTabWidget::pane, mismo `t['superficie']`) y pierde
+        pantallas), en dos tonos de gris (ya no negro, a pedido de la
+        clienta al revisar Registro de ausencias): la solapa ACTIVA usa
+        el tono CLARO (`t['superficie']`) tanto de fondo como de borde,
+        y ese mismo fondo claro es el que también funde con el panel de
+        contenido (QTabWidget::pane, mismo `t['superficie']`) — pierde
         el borde de abajo (`border-bottom-color` igual al fondo del
-        panel) — la línea negra la envuelve arriba/izquierda/derecha
+        panel) para que el borde la envuelva arriba/izquierda/derecha
         nada más, como si el panel fuera la continuación de la solapa.
-        La solapa INACTIVA conserva su fondo (`t['fondo']`, más oscuro
-        que `t['superficie']`) y su borde completo incluida la línea de
-        abajo, y baja 2px (`margin-top`) para quedar visualmente
-        "detrás" de la activa, como una ficha de fichero de papel.
-        `QTabWidget::pane` sube 1px (`top: -1px`) para que su borde
-        superior quede tapado exactamente donde se apoya la solapa
-        activa, sin una línea doble ahí.
+        La solapa INACTIVA usa el tono OSCURO (`t['fondo']`) de fondo Y
+        de borde, con su borde completo incluida la línea de abajo, y
+        baja 2px (`margin-top`) para quedar visualmente "detrás" de la
+        activa, como una ficha de fichero de papel; el borde de
+        `QTabWidget::pane` (lo que enmarca el contenido) usa ese mismo
+        tono oscuro, en vez de negro. `QTabWidget::pane` sube 1px
+        (`top: -1px`) para que su borde superior quede tapado
+        exactamente donde se apoya la solapa activa, sin una línea
+        doble ahí.
+
+        El fondo claro de la solapa activa NO llega solo por estar
+        dentro del `QTabWidget::pane`: el widget que se agrega con
+        `addTab(...)` pinta encima con su propio fondo (transparente
+        por defecto, así que en la práctica termina mostrando el fondo
+        de la ventana, más oscuro, no el de la solapa) — hay que
+        pedírselo explícitamente con objectName "panelSolapa" en el
+        widget de más afuera de cada pestaña (el que se le pasa a
+        `addTab`, o el widget interno que ocupa todo un QScrollArea si
+        la pestaña scrollea) para que la regla de acá (`QWidget#
+        panelSolapa`) lo pinte del mismo `t['superficie']` que la
+        solapa activa y el pane.
 
         Como referencia visual suelta (ej. un título de sección que no
         amerita ser una solapa real), objectName "subtituloSeccion" da
@@ -127,13 +144,13 @@ QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {t['texto'
 QLabel#subtituloCampo {{ font-weight: bold; }}
 QTabWidget::pane {{
     background-color: {t['superficie']};
-    border: 1px solid #000000;
+    border: 1px solid {t['fondo']};
     top: -1px;
 }}
 QTabBar::tab {{
     font-size: 14px; font-weight: bold; color: {t['texto']};
     background-color: {t['fondo']};
-    border: 1px solid #000000;
+    border: 1px solid {t['fondo']};
     padding: 6px 14px;
 }}
 QTabBar::tab:selected {{
@@ -143,6 +160,7 @@ QTabBar::tab:selected {{
 QTabBar::tab:!selected {{
     margin-top: 2px;
 }}
+QWidget#panelSolapa {{ background-color: {t['superficie']}; }}
 QGroupBox#panelFiltrosGrilla::title {{
     font-size: 15px; font-weight: bold; color: {t['texto']};
     subcontrol-origin: margin; padding: 4px 0px;
