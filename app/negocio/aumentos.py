@@ -77,9 +77,12 @@ def _es_correccion_del_mes(conn: sqlite3.Connection, periodo: str) -> bool:
 
 
 def _redondear_a_multiplo(valor: float, multiplo: float | None) -> float:
+    """Siempre para arriba (pedido de la clienta) — nunca al más cercano
+    ni para abajo, así el redondeo nunca deja un valor nuevo por debajo
+    de lo que daría el cálculo exacto."""
     if not multiplo:
         return valor
-    return round(valor / multiplo) * multiplo
+    return math.ceil(valor / multiplo) * multiplo
 
 
 def simular_aumento(
@@ -97,7 +100,8 @@ def simular_aumento(
 
     `redondear_a`, si se pasa (1/10/100/1000, checkbox "Redondear
     valores" de la solapa "Aumentos"), redondea el valor nuevo calculado
-    al múltiplo más cercano de ese número.
+    al múltiplo de ese número — siempre PARA ARRIBA, nunca al más
+    cercano (pedido de la clienta).
 
     Si ya se corrió un aumento este mismo mes (`periodo`, default el mes en
     curso), el % (general o diferencial) se aplica sobre ValorHoraXAnterior

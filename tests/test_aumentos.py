@@ -144,11 +144,17 @@ def test_simular_aumento_respeta_porcentaje_diferencial_por_consultorio(conn, co
     assert fila.valor_aislada_nuevo == pytest.approx(750)
 
 
-def test_simular_aumento_redondea_a_multiplo(conn, consultorio):
+def test_simular_aumento_redondea_a_multiplo_siempre_para_arriba(conn, consultorio):
     filas = simular_aumento(conn, porcentaje_general=13.37, redondear_a=10)
     fila = filas[0]
-    assert fila.valor_regular_nuevo == pytest.approx(1130)  # 1133.7 -> más cercano a 1130 que a 1140
+    assert fila.valor_regular_nuevo == pytest.approx(1140)  # 1133.7 -> para arriba, no al más cercano (1130)
     assert fila.valor_aislada_nuevo % 10 == 0
+
+
+def test_redondeo_no_baja_ni_siquiera_estando_mas_cerca_del_multiplo_de_abajo(conn, consultorio):
+    # 1131 está mucho más cerca de 1130 que de 1140 — igual tiene que redondear para arriba.
+    filas = simular_aumento(conn, porcentaje_general=13.1, redondear_a=10)
+    assert filas[0].valor_regular_nuevo == pytest.approx(1140)
 
 
 def test_simular_aumento_sin_redondear_a_conserva_centavos(conn, consultorio):

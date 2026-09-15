@@ -143,8 +143,8 @@ def test_redondear_a_multiplo_de_100_redondea_los_valores_nuevos(qtbot, conn):
     panel._radios_multiplo[100].setChecked(True)
     panel._simular()
     valor = panel.tabla.item(0, _COL_REGULAR_NUEVO).text()
-    # 1000 * 1.1337 = 1133.70 -> redondeado a múltiplo de 100 -> 1100
-    assert valor == "$ 1.100,00"
+    # 1000 * 1.1337 = 1133.70 -> redondeado para arriba a múltiplo de 100 -> 1200
+    assert valor == "$ 1.200,00"
 
 
 def test_sin_redondear_conserva_los_centavos(qtbot, conn):
