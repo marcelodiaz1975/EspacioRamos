@@ -2,8 +2,9 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.aumentos import confirmar_aumento, simular_aumento
+from app.negocio.aumentos import confirmar_aumento, deshacer_ultimo_aumento, generar_tramos_esquema, simular_aumento
 from app.negocio.liquidaciones import emitir_liquidacion
+from app.negocio.valores import obtener_porcentaje_descuento
 from app.repositorio.registro import obtener_repositorio
 
 VALOR_REGULAR = 1000
@@ -126,3 +127,111 @@ def test_confirmar_aumento_liquidacion_enviada_pasa_a_regenerada_no_enviada(conn
         key=lambda f: f["IdLiquidacion"],
     )
     assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_simular_aumento_respeta_porcentaje_diferencial_por_consultorio(conn, consultorio):
+    filas = simular_aumento(
+        conn, porcentaje_general=10, porcentajes_override={consultorio: 50},
+    )
+    fila = filas[0]
+    assert fila.valor_regular_nuevo == pytest.approx(1500)
+    assert fila.valor_aislada_nuevo == pytest.approx(750)
+
+
+def test_confirmar_aumento_aplica_porcentaje_diferencial(conn, consultorio):
+    confirmar_aumento(conn, porcentaje_general=10, porcentajes_override={consultorio: 50}, periodo=PERIODO)
+    c = obtener_repositorio(conn, "Consultorio").obtener(consultorio)
+    assert c["ValorHoraRegularActual"] == pytest.approx(1500)
+
+
+def test_generar_tramos_esquema_menos_de_dos_horas_es_cero_por_ciento():
+    # Corrección explícita de la clienta: de 0 a 2hs (con los parámetros
+    # por defecto) es 0%, no 1% como daba la fórmula vieja.
+    tramos = generar_tramos_esquema(cantidad_horas=2, porcentaje_descuento=1, porcentaje_tope=25)
+    assert tramos[0] == (0, 2, 0)
+    assert tramos[1] == (2, 4, 1)
+    assert tramos[2] == (4, 6, 2)
+    assert tramos[3] == (6, 8, 3)
+
+
+def test_generar_tramos_esquema_topa_en_el_porcentaje_tope():
+    tramos = generar_tramos_esquema(cantidad_horas=2, porcentaje_descuento=1, porcentaje_tope=25)
+    assert tramos[-1][2] == 25
+    assert all(t[2] <= 25 for t in tramos)
+
+
+def test_generar_tramos_esquema_respeta_parametros_no_default():
+    tramos = generar_tramos_esquema(cantidad_horas=5, porcentaje_descuento=2, porcentaje_tope=10)
+    assert tramos[0] == (0, 5, 0)
+    assert tramos[1] == (5, 10, 2)
+    assert tramos[-1][2] == 10
+
+
+def test_generar_tramos_esquema_es_coherente_con_obtener_porcentaje_descuento(conn):
+    tramos = generar_tramos_esquema(cantidad_horas=2, porcentaje_descuento=1, porcentaje_tope=25)
+    from app.negocio.aumentos import actualizar_esquema_descuentos
+    actualizar_esquema_descuentos(conn, tramos)
+    assert obtener_porcentaje_descuento(conn, 2) == 0
+    assert obtener_porcentaje_descuento(conn, 2.5) == 1
+    assert obtener_porcentaje_descuento(conn, 4) == 1
+    assert obtener_porcentaje_descuento(conn, 4.5) == 2
+
+
+def test_deshacer_sin_aumentos_lanza_error(conn):
+    with pytest.raises(ValueError):
+        deshacer_ultimo_aumento(conn)
+
+
+def test_deshacer_ultimo_aumento_restaura_valores_de_consultorio(conn, consultorio):
+    confirmar_aumento(conn, porcentaje_general=10, periodo=PERIODO)
+    c = obtener_repositorio(conn, "Consultorio").obtener(consultorio)
+    assert c["ValorHoraRegularActual"] == pytest.approx(1100)
+
+    resumen = deshacer_ultimo_aumento(conn)
+    assert resumen.consultorios_revertidos == 1
+
+    c = obtener_repositorio(conn, "Consultorio").obtener(consultorio)
+    assert c["ValorHoraRegularActual"] == pytest.approx(VALOR_REGULAR)
+    assert c["ValorHoraRegularAnterior"] == pytest.approx(0)  # no había ningún aumento previo que la congelara
+    assert obtener_repositorio(conn, "AumentoAplicado").listar() == []
+
+
+def test_deshacer_ultimo_aumento_revierte_esquema_y_preserva_lo_anterior(conn, consultorio):
+    activos_antes = {a["IdEsquemaDescuento"] for a in obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1)}
+    ids_antes = {a["IdEsquemaDescuento"] for a in obtener_repositorio(conn, "EsquemaDescuentos").listar()}
+
+    confirmar_aumento(
+        conn, porcentaje_general=0, periodo=PERIODO,
+        nuevo_esquema_descuentos=[(0, 10, 2), (10, 999, 5)],
+    )
+    ids_nuevos = {
+        a["IdEsquemaDescuento"] for a in obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1)
+    } - activos_antes
+    assert len(ids_nuevos) == 2
+
+    deshacer_ultimo_aumento(conn)
+
+    activos_despues = {a["IdEsquemaDescuento"] for a in obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1)}
+    assert activos_despues == activos_antes
+    # Los tramos que había creado la corrida deshecha no quedan dando vueltas como historial.
+    ids_despues = {a["IdEsquemaDescuento"] for a in obtener_repositorio(conn, "EsquemaDescuentos").listar()}
+    assert ids_despues == ids_antes
+
+
+def test_deshacer_ultimo_aumento_revierte_liquidaciones_regeneradas(conn, consultorio):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio="2026-01-01",
+    )
+    _, liq_original = emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+
+    confirmar_aumento(conn, porcentaje_general=10, periodo=PERIODO)
+    resumen = deshacer_ultimo_aumento(conn)
+    assert resumen.liquidaciones_regeneradas == [id_prof]
+
+    ultima = max(
+        obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_prof, Periodo=PERIODO),
+        key=lambda f: f["IdLiquidacion"],
+    )
+    assert ultima["MontoGenerado"] == pytest.approx(liq_original.monto_generado)

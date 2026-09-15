@@ -28,6 +28,9 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("CargoEspecial", "Fecha", "TEXT"),
     ("LiquidacionEmitida", "FechaHoraGeneracion", "TEXT"),
     ("Consultorio", "Placard", "INTEGER NOT NULL DEFAULT 0"),
+    ("AumentoAplicado", "EsquemaNuevosIds", "TEXT"),
+    ("AumentoAplicado", "EsquemaAnterioresIds", "TEXT"),
+    ("AumentoAplicado", "LiquidacionesRegeneradasJson", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja

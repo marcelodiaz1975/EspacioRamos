@@ -115,7 +115,7 @@ def construir_secciones() -> list[Seccion]:
             ayuda="Indicadores generales del espacio: ocupación, ingresos y otras métricas agregadas.",
         ),
         Seccion(
-            "Análisis de aumentos", lambda conn: PantallaAumentos(conn), categoria="Principal",
+            "Aumentos y descuentos", lambda conn: PantallaAumentos(conn), categoria="Principal",
             ayuda="Simula el impacto de un aumento de valores antes de confirmarlo, y aplica el "
             "aumento confirmado a todos los valores correspondientes.",
         ),

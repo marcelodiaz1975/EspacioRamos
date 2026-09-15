@@ -155,7 +155,7 @@ class PanelControl(QWidget):
             if respuesta_aumento == QMessageBox.StandardButton.Yes:
                 QMessageBox.information(
                     self, "Avanzar de mes",
-                    "Se canceló el avance. Confirmá el aumento desde \"Análisis de aumentos\" y volvé "
+                    "Se canceló el avance. Confirmá el aumento desde \"Aumentos y descuentos\" y volvé "
                     "a \"Avanzar de mes\" cuando termines.",
                 )
                 return

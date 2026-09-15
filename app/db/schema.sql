@@ -389,7 +389,22 @@ CREATE TABLE IF NOT EXISTS AumentoAplicado (
     Periodo TEXT NOT NULL,
     PorcentajeGeneral REAL NOT NULL,
     FechaAplicacion TEXT,
-    Observacion TEXT
+    Observacion TEXT,
+    EsquemaNuevosIds TEXT,
+    EsquemaAnterioresIds TEXT,
+    LiquidacionesRegeneradasJson TEXT
+);
+
+-- Foto de los valores de cada consultorio justo antes de una corrida de
+-- confirmar_aumento, para poder deshacerla (ver app.negocio.aumentos).
+CREATE TABLE IF NOT EXISTS AumentoAplicadoDetalle (
+    IdAumentoDetalle INTEGER PRIMARY KEY AUTOINCREMENT,
+    IdAumento INTEGER NOT NULL REFERENCES AumentoAplicado(IdAumento),
+    IdConsultorio INTEGER NOT NULL REFERENCES Consultorio(IdConsultorio),
+    ValorRegularActualPrevio REAL NOT NULL,
+    ValorRegularAnteriorPrevio REAL NOT NULL,
+    ValorAisladaActualPrevio REAL NOT NULL,
+    ValorAisladaAnteriorPrevio REAL NOT NULL
 );
 
 -- 3.17 FechasEspeciales --------------------------------------------------------------------

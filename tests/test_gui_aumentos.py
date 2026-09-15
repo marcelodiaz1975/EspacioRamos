@@ -3,7 +3,19 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.aumentos import PantallaAumentos
+from app.gui.pantallas.aumentos import (
+    _COL_CONSULTORIO,
+    _COL_DIF_REGULAR,
+    _COL_EDIFICIO,
+    _COL_LOCALIDAD,
+    _COL_PORCENTAJE_DIFERENCIAL,
+    _COL_PORCENTAJE_GENERAL,
+    _COL_REGULAR_ACTUAL,
+    _COL_REGULAR_NUEVO,
+    _COL_UNIDAD,
+    _GUION,
+    PantallaAumentos,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -22,121 +34,220 @@ def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
 
 
-def _crear_edificio_con_consultorio(conn, valor_regular=1000, valor_aislada=1500):
-    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
-    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
-    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
-    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
-    conn.execute(
-        "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio, ValorHoraRegularActual, ValorHoraAisladaActual) "
-        "VALUES (?, 1, ?, ?)",
-        (id_unidad, valor_regular, valor_aislada),
+def _crear_edificio_con_consultorio(
+    conn, valor_regular=1000, valor_aislada=1500, localidad="Ramos Mejía", nombre_edificio="Torre Norte",
+):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre=nombre_edificio, DomicilioLocalidad=localidad)
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    return obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1,
+        ValorHoraRegularActual=valor_regular, ValorHoraAisladaActual=valor_aislada,
     )
-    conn.commit()
-    return conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
 
 
-def test_simular_llena_la_tabla_sin_recursion_infinita(qtbot, conn):
+def test_pestanas(qtbot, conn):
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_aumentos is not None
+    assert pantalla.panel_esquema is not None
+
+
+def test_tabla_arranca_poblada_con_todos_los_consultorios(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    _crear_edificio_con_consultorio(conn, nombre_edificio="Torre Sur")
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_aumentos.tabla.rowCount() == 2
+
+
+def test_columnas_localidad_edificio_unidad_consultorio_separadas(qtbot, conn):
+    id_consultorio = _crear_edificio_con_consultorio(conn)
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    tabla = pantalla.panel_aumentos.tabla
+    assert tabla.item(0, _COL_LOCALIDAD).text() == "Ramos Mejía"
+    assert tabla.item(0, _COL_EDIFICIO).text() == "Torre Norte"
+    assert tabla.item(0, _COL_UNIDAD).text() == "1A"
+    assert tabla.item(0, _COL_CONSULTORIO).text() == "1"
+    assert id_consultorio is not None
+
+
+def test_simular_calcula_regular_nuevo(qtbot, conn):
+    _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aumentos
+    panel.spin_porcentaje.setValue(10)
+    panel._simular()
+    assert panel.tabla.item(0, _COL_REGULAR_ACTUAL).text() == "$ 1.000,00"
+    assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.100,00"
+    assert panel.tabla.item(0, _COL_DIF_REGULAR).text() == "$ 100,00"
+
+
+def test_porcentaje_general_se_muestra_en_la_columna(qtbot, conn):
     _crear_edificio_con_consultorio(conn)
     pantalla = PantallaAumentos(conn)
     qtbot.addWidget(pantalla)
-    pantalla.spin_porcentaje.setValue(10)
-    pantalla._simular()  # antes del fix esto podía entrar en recursión infinita vía itemChanged
-    assert pantalla.tabla.rowCount() == 1
-    assert pantalla.tabla.item(0, 2).text() == "1100.00"
+    panel = pantalla.panel_aumentos
+    panel.spin_porcentaje.setValue(15)
+    panel._simular()
+    assert panel.tabla.item(0, _COL_PORCENTAJE_GENERAL).text() == "15,00%"
+    assert panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).text() == _GUION
 
 
-def test_diferencia_se_calcula_automaticamente(qtbot, conn):
+def test_diferencial_pisa_al_general_y_muestra_rayita_cruzada(qtbot, conn):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aumentos
+    panel.spin_porcentaje.setValue(10)
+    panel._diferenciales[id_consultorio] = 50
+    panel._simular()
+
+    assert panel.tabla.item(0, _COL_PORCENTAJE_GENERAL).text() == _GUION
+    assert panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).text() == "50,00%"
+    assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.500,00"
+
+
+def test_columna_diferencial_no_editable_sin_tildar_editar(qtbot, conn):
     _crear_edificio_con_consultorio(conn)
     pantalla = PantallaAumentos(conn)
     qtbot.addWidget(pantalla)
-    pantalla.spin_porcentaje.setValue(10)
-    pantalla._simular()
-    assert pantalla.tabla.item(0, 3).text() == "+100,00"
+    panel = pantalla.panel_aumentos
+    from PySide6.QtCore import Qt
+    item = panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL)
+    assert not bool(item.flags() & Qt.ItemFlag.ItemIsEditable)
 
 
-def test_editar_celda_recalcula_diferencia(qtbot, conn):
+def test_boton_editar_habilita_columna_diferencial(qtbot, conn):
     _crear_edificio_con_consultorio(conn)
     pantalla = PantallaAumentos(conn)
     qtbot.addWidget(pantalla)
-    pantalla.spin_porcentaje.setValue(10)
-    pantalla._simular()
+    panel = pantalla.panel_aumentos
+    panel.boton_editar.setChecked(True)
+    from PySide6.QtCore import Qt
+    item = panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL)
+    assert bool(item.flags() & Qt.ItemFlag.ItemIsEditable)
 
-    pantalla.tabla.item(0, 2).setText("1200.00")  # override manual del valor regular nuevo
-    assert pantalla.tabla.item(0, 3).text() == "+200,00"
+
+def test_editar_celda_diferencial_actualiza_simulacion(qtbot, conn):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aumentos
+    panel.spin_porcentaje.setValue(10)
+    panel._simular()
+    panel.boton_editar.setChecked(True)
+
+    panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("30")
+    assert panel._diferenciales[id_consultorio] == 30
+    assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.300,00"
+
+    panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("")
+    assert id_consultorio not in panel._diferenciales
+    assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.100,00"
+
+
+def test_filtro_localidad_solo_oculta_filas_no_cambia_el_conjunto_confirmado(qtbot, conn):
+    _crear_edificio_con_consultorio(conn, localidad="Ramos Mejía", nombre_edificio="Torre Norte")
+    _crear_edificio_con_consultorio(conn, localidad="Haedo", nombre_edificio="Torre Sur")
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aumentos
+
+    indice = panel.combo_localidad.findText("Haedo")
+    panel.combo_localidad.setCurrentIndex(indice)
+
+    assert panel.tabla.rowCount() == 2  # las filas siguen ahí
+    ocultas = [panel.tabla.isRowHidden(f) for f in range(panel.tabla.rowCount())]
+    assert ocultas.count(True) == 1
+    assert len(panel._filas) == 2  # el filtro no recorta lo que se simuló/confirmaría
 
 
 def test_confirmar_sin_simular_no_falla(qtbot, conn):
     pantalla = PantallaAumentos(conn)
     qtbot.addWidget(pantalla)
-    pantalla._confirmar()  # tabla vacía -> solo advierte, no debe lanzar excepción
-
-
-def test_tabla_esquema_oculta_por_defecto(qtbot, conn):
-    pantalla = PantallaAumentos(conn)
-    qtbot.addWidget(pantalla)
-    assert pantalla.tabla_esquema.isHidden() is True
-
-
-def test_tildar_actualizar_esquema_precarga_tramos_vigentes(qtbot, conn):
-    pantalla = PantallaAumentos(conn)
-    qtbot.addWidget(pantalla)
-    filas_esperadas = len(obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1))
-    assert filas_esperadas > 0
-
-    pantalla.check_actualizar_esquema.setChecked(True)
-    assert pantalla.tabla_esquema.isHidden() is False
-    assert pantalla.tabla_esquema.rowCount() == filas_esperadas
-
-
-def test_confirmar_sin_tildar_esquema_no_lo_modifica(qtbot, conn):
-    _crear_edificio_con_consultorio(conn)
-    esquema_antes = [dict(f) for f in obtener_repositorio(conn, "EsquemaDescuentos").listar()]
-    pantalla = PantallaAumentos(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.spin_porcentaje.setValue(10)
-    pantalla._simular()
-    pantalla._confirmar()
-
-    esquema_despues = [dict(f) for f in obtener_repositorio(conn, "EsquemaDescuentos").listar()]
-    assert esquema_despues == esquema_antes
-
-
-def test_confirmar_con_esquema_tildado_reemplaza_tramos_y_preserva_historial(qtbot, conn):
-    _crear_edificio_con_consultorio(conn)
-    cantidad_original = len(obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1))
-    assert cantidad_original > 0
-
-    pantalla = PantallaAumentos(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.spin_porcentaje.setValue(10)
-    pantalla._simular()
-
-    pantalla.check_actualizar_esquema.setChecked(True)
-    pantalla.tabla_esquema.setRowCount(0)
-    pantalla._agregar_fila_tramo(0, 10, 5)
-    pantalla._agregar_fila_tramo(10, 999, 15)
-    pantalla._confirmar()
-
-    activos = obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1)
-    assert len(activos) == 2
-    assert {f["PorcentajeDescuento"] for f in activos} == {5.0, 15.0}
-    inactivos = obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=0)
-    assert len(inactivos) == cantidad_original
+    pantalla.panel_aumentos._confirmar()
 
 
 def test_confirmar_actualiza_valores_de_consultorio(qtbot, conn):
     id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000, valor_aislada=1500)
     pantalla = PantallaAumentos(conn)
     qtbot.addWidget(pantalla)
-    pantalla.spin_porcentaje.setValue(10)
-    pantalla._simular()
-    pantalla._confirmar()
+    panel = pantalla.panel_aumentos
+    panel.spin_porcentaje.setValue(10)
+    panel._simular()
+    panel._confirmar()
 
     fila = conn.execute(
-        "SELECT ValorHoraRegularActual, ValorHoraRegularAnterior FROM Consultorio WHERE IdConsultorio = ?",
-        (id_consultorio,),
+        "SELECT ValorHoraRegularActual FROM Consultorio WHERE IdConsultorio = ?", (id_consultorio,),
     ).fetchone()
-    assert fila["ValorHoraRegularActual"] == 1100.0
-    assert fila["ValorHoraRegularAnterior"] == 1000.0
-    assert conn.execute("SELECT COUNT(*) c FROM AumentoAplicado").fetchone()["c"] == 1
+    assert fila["ValorHoraRegularActual"] == pytest.approx(1100)
+
+
+def test_deshacer_ultimo_movimiento_revierte(qtbot, conn):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aumentos
+    panel.spin_porcentaje.setValue(10)
+    panel._simular()
+    panel._confirmar()
+
+    panel._deshacer_ultimo()
+
+    fila = conn.execute(
+        "SELECT ValorHoraRegularActual FROM Consultorio WHERE IdConsultorio = ?", (id_consultorio,),
+    ).fetchone()
+    assert fila["ValorHoraRegularActual"] == pytest.approx(1000)
+
+
+def test_deshacer_sin_movimientos_no_falla(qtbot, conn):
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aumentos._deshacer_ultimo()
+
+
+def test_esquema_arranca_con_valores_por_defecto(qtbot, conn):
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_esquema
+    assert panel.spin_horas.value() == 2.0
+    assert panel.spin_porcentaje_descuento.value() == 1.0
+    assert panel.spin_porcentaje_tope.value() == 25.0
+    assert panel.boton_confirmar.isEnabled() is False
+
+
+def test_esquema_preview_refleja_los_parametros(qtbot, conn):
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_esquema
+    assert panel.tabla_preview.item(0, 2).text() == "0,00%"
+    assert panel.tabla_preview.item(1, 2).text() == "1,00%"
+
+
+def test_esquema_cambiar_parametro_habilita_confirmar(qtbot, conn):
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_esquema
+    panel.spin_horas.setValue(4)
+    assert panel.boton_confirmar.isEnabled() is True
+
+
+def test_esquema_confirmar_cambios_reemplaza_el_vigente(qtbot, conn):
+    activos_antes = obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1)
+    assert len(activos_antes) > 0
+
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_esquema
+    panel.spin_horas.setValue(5)
+    panel.spin_porcentaje_descuento.setValue(2)
+    panel.spin_porcentaje_tope.setValue(10)
+    panel._confirmar_cambios()
+
+    activos_despues = obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1)
+    assert {a["PorcentajeDescuento"] for a in activos_despues} == {0, 2, 4, 6, 8, 10}
+    assert panel.boton_confirmar.isEnabled() is False
+    inactivos = obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=0)
+    assert len(inactivos) == len(activos_antes)

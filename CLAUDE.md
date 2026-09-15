@@ -36,8 +36,8 @@ por pantalla), salvo que se diga explícitamente que es solo para una.
     regla `QWidget#panelSolapa` lo pinte. Ya aplicado a todas las
     pantallas con solapas del sistema (Registro de ausencias, Cargos
     especiales, Pagos, Lista de espera, Liquidación mensual, Reservas,
-    Placas, Vista rápida) — cualquier pantalla nueva con `QTabWidget`
-    tiene que sumarlo también.
+    Placas, Vista rápida, Aumentos y descuentos) — cualquier pantalla
+    nueva con `QTabWidget` tiene que sumarlo también.
   - Como referencia suelta (sin ser una solapa real), objectName
     `subtituloSeccion` da el mismo formato en un QLabel.
 - **Nivel 3** — título de un campo/selector puntual (objectName
@@ -78,6 +78,27 @@ por pantalla), salvo que se diga explícitamente que es solo para una.
   se igualan todas con `QHeaderView.ResizeMode.Stretch` porque son pocas
   columnas y todas de importancia pareja — el criterio se elige por
   pantalla, no es una regla única.
+
+## Filtros que solo afectan la visualización
+
+Patrón usado en Vista rápida (Estadísticas/Valores) y en Aumentos y
+descuentos: un panel de filtros (Localidad/Edificio/Unidad, en cascada)
+oculta filas de la tabla (`setRowHidden`) pero nunca cambia el conjunto
+de datos sobre el que opera un botón de acción (simular/confirmar) — ese
+conjunto es siempre TODO, se esté viendo filtrado o no. Se resuelve
+guardando el id real de cada fila (`Qt.ItemDataRole.UserRole` en la
+primera celda) y comparando contra lo elegido en los combos, con un
+sentinel propio (objeto único) para "Todas/Todos" en vez de `None` —
+`None` puede ser un valor real (ej. una Localidad sin cargar) y no debe
+confundirse con "sin filtro".
+
+## Columna "un valor u otro, nunca los dos"
+
+Patrón usado en Aumentos (columnas "% general"/"% diferencial"): cuando
+dos columnas representan alternativas mutuamente excluyentes para la
+misma fila (un % puntual pisa al % general), solo una de las dos muestra
+el valor real por fila — la otra siempre muestra una rayita "-" — para
+que nunca se pueda leer un valor de más y quede ambiguo cuál rige.
 
 ## Selectores y fecha
 

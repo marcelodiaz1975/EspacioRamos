@@ -29,6 +29,7 @@ TABLAS = [
     "EstadoMensajeriaPeriodo",
     "FeriadoTrabajado",
     "AumentoAplicado",
+    "AumentoAplicadoDetalle",
     "FechasEspeciales",
     "EsquemaDescuentos",
     "ListasEditables",

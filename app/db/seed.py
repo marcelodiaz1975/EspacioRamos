@@ -321,15 +321,14 @@ def sembrar_tipos_licencia(conn: sqlite3.Connection) -> None:
 
 
 def sembrar_esquema_descuentos(conn: sqlite3.Connection) -> None:
-    """Default: 1% cada 2hs semanales, tope 25%."""
+    """Default: 0% hasta 2hs semanales, +1% cada 2hs de más, tope 25%
+    (mismos parámetros por defecto que la solapa "Esquema de
+    descuentos")."""
     if not _tabla_vacia(conn, "EsquemaDescuentos"):
         return
-    tramos = []
-    horas = 2
-    while horas <= 52:
-        porcentaje = min(horas // 2, 25)
-        tramos.append((horas - 2, horas, porcentaje))
-        horas += 2
+    from app.negocio.aumentos import generar_tramos_esquema
+
+    tramos = generar_tramos_esquema(cantidad_horas=2, porcentaje_descuento=1, porcentaje_tope=25)
     conn.executemany(
         "INSERT INTO EsquemaDescuentos (HorasSemanalesDesde, HorasSemanalesHasta, PorcentajeDescuento, Activo) "
         "VALUES (?, ?, ?, 1)",

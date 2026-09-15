@@ -241,7 +241,7 @@ def pantalla_fechas_especiales(conn: sqlite3.Connection) -> PantallaCRUD:
 def pantalla_esquema_descuentos(conn: sqlite3.Connection) -> PantallaCRUD:
     """Sección 3.18: "solo modificable al ejecutar análisis de aumentos" —
     acá se muestra en solo lectura (vigente + historial, vía Activo); la
-    única forma de cambiarlo es la pantalla Análisis de aumentos, que
+    única forma de cambiarlo es la pantalla Aumentos y descuentos, que
     reusa app.negocio.aumentos.actualizar_esquema_descuentos."""
     campos = [
         Campo("HorasSemanalesDesde", "Horas semanales desde", tipo="numero", requerido=True),
