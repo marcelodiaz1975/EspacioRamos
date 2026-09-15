@@ -1,19 +1,19 @@
 """Pantalla de Profesionales (F06/F07, sección 3.4) sobre PantallaCRUD, con
 un panel de documentación (archivos sueltos en Profesionales/{código}/
-Documentación) para el profesional seleccionado."""
+Documentación) para el profesional seleccionado — va debajo de Nuevo/
+Editar/Eliminar en el panel izquierdo (`panel_extra_izquierda` de
+PantallaCRUD), mismo formato solapa que el resto de los catálogos."""
 from __future__ import annotations
 
 import sqlite3
 
 from PySide6.QtWidgets import (
     QFileDialog,
-    QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -25,6 +25,8 @@ from app.negocio.documentacion_profesional import agregar_documento, eliminar_do
 from app.negocio.listas_editables import opciones_lista
 from app.negocio.profesionales import normalizar_cuit, opciones_tratamiento, sugerir_codigo, tratamiento_sugerido
 from app.repositorio.registro import obtener_repositorio
+
+_ANCHO_CAMPO = 240  # mismo ancho que el panel izquierdo de PantallaCRUD (ver crud_generico._ANCHO_CAMPO)
 
 _CATEGORIAS = [
     ("R", "R - Regular"),
@@ -164,36 +166,43 @@ class PantallaProfesionales(QWidget):
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
-        splitter = QSplitter()
 
+        panel_doc = QWidget()
+        layout_doc = QVBoxLayout(panel_doc)
+        layout_doc.setContentsMargins(0, 0, 0, 0)
+        titulo_doc = QLabel("Documentación del profesional seleccionado")
+        titulo_doc.setObjectName("subtituloSeccion")
+        titulo_doc.setWordWrap(True)
+        layout_doc.addWidget(titulo_doc)
+        self.lista_documentos = QListWidget()
+        self.lista_documentos.setFixedWidth(_ANCHO_CAMPO)
+        self.lista_documentos.setMinimumHeight(150)
+        layout_doc.addWidget(self.lista_documentos)
+
+        boton_agregar = QPushButton("Agregar archivo…")
+        boton_agregar.setObjectName("botonPrimario")
+        boton_agregar.setFixedWidth(_ANCHO_CAMPO)
+        boton_agregar.clicked.connect(self._agregar_documento)
+        layout_doc.addWidget(boton_agregar)
+        boton_eliminar = QPushButton("Eliminar")
+        boton_eliminar.setObjectName("botonSecundario")
+        boton_eliminar.setFixedWidth(_ANCHO_CAMPO)
+        boton_eliminar.clicked.connect(self._eliminar_documento)
+        layout_doc.addWidget(boton_eliminar)
+
+        # panel_doc va debajo de Nuevo/Editar/Eliminar en el panel izquierdo
+        # de PantallaCRUD (formato solapa, mismo criterio que todo catálogo
+        # a partir de ahora) — sus botones referencian self.crud_profesionales
+        # por método atado (_agregar_documento/_eliminar_documento), así que
+        # alcanza con que exista para cuando se hagan clic, no ya en este punto.
         self.crud_profesionales = PantallaCRUD(
             self.conn, "Profesional", "Profesionales", _campos_profesional(),
             al_actualizar=self._al_actualizar_profesional,
             al_abrir_dialogo=_al_abrir_dialogo,
-            compacto=True,
+            panel_extra_izquierda=panel_doc,
         )
         self.crud_profesionales.tabla_widget.itemSelectionChanged.connect(self._actualizar_documentacion)
-        splitter.addWidget(self.crud_profesionales)
-
-        panel_doc = QWidget()
-        layout_doc = QVBoxLayout(panel_doc)
-        layout_doc.addWidget(QLabel("Documentación del profesional seleccionado"))
-        self.lista_documentos = QListWidget()
-        layout_doc.addWidget(self.lista_documentos, stretch=1)
-
-        fila_botones = QHBoxLayout()
-        boton_agregar = QPushButton("Agregar archivo…")
-        boton_agregar.setObjectName("botonPrimario")
-        boton_agregar.clicked.connect(self._agregar_documento)
-        boton_eliminar = QPushButton("Eliminar")
-        boton_eliminar.clicked.connect(self._eliminar_documento)
-        fila_botones.addWidget(boton_agregar)
-        fila_botones.addWidget(boton_eliminar)
-        fila_botones.addStretch()
-        layout_doc.addLayout(fila_botones)
-        splitter.addWidget(panel_doc)
-
-        layout.addWidget(splitter, stretch=1)
+        layout.addWidget(self.crud_profesionales, stretch=1)
 
     def _al_actualizar_profesional(self, registro_anterior: sqlite3.Row, valores_nuevos: dict) -> None:
         try:

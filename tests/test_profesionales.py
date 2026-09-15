@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QScrollArea, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -287,3 +287,26 @@ def test_eliminar_documento(qtbot, conn, tmp_path, monkeypatch):
 
     assert pantalla.lista_documentos.count() == 0
     assert not (tmp_path / "base" / "Profesionales" / "R3" / "Documentación" / "dni.pdf").exists()
+
+
+def test_pantalla_profesionales_usa_formato_solapa(qtbot, conn):
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    tabs = pantalla.findChildren(QTabWidget)
+    assert len(tabs) == 1
+    assert tabs[0].tabText(0) == "Listado"
+    scrolls = pantalla.findChildren(QScrollArea)
+    assert len(scrolls) == 1
+    assert scrolls[0].widget().objectName() == "panelSolapa"
+
+
+def test_pantalla_profesionales_documentacion_va_bajo_los_botones_del_crud(qtbot, conn):
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    crud = pantalla.crud_profesionales
+    assert crud.campo_buscar is not None
+    assert crud.boton_nuevo.objectName() == "botonPrimario"
+    assert crud.boton_editar.objectName() == "botonSecundario"
+    # el panel de documentación queda dentro del mismo panel izquierdo del CRUD, no en un splitter aparte
+    assert crud.panel_extra_izquierda is not None
+    assert crud.panel_extra_izquierda.isAncestorOf(pantalla.lista_documentos)

@@ -107,6 +107,7 @@ class PantallaCRUD(QWidget):
         solo_lectura: bool = False,
         instalar_foco: bool = True,
         compacto: bool = False,
+        panel_extra_izquierda: QWidget | None = None,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -152,14 +153,22 @@ class PantallaCRUD(QWidget):
         self.al_guardar = al_guardar
         # compacto: layout viejo (título + fila de botones arriba de la
         # tabla, sin solapa/filtro) — para cuando una pantalla compuesta
-        # (Profesionales, Mensajes predefinidos) inserta este CRUD como un
-        # componente más dentro de su propia composición (con su propio
-        # título/filtro/paneles alrededor), en vez de usarlo como pantalla
-        # de catálogo independiente. Las pantallas de catálogo comunes usan
+        # (ej. Mensajes predefinidos) inserta este CRUD como un componente
+        # más dentro de su propia composición (con su propio título/
+        # filtro/paneles alrededor), en vez de usarlo como pantalla de
+        # catálogo independiente. Las pantallas de catálogo comunes usan
         # el layout nuevo (default): solapa "Listado" (ficha, como el resto
         # del sistema), panel de Buscar + botones a la izquierda, tabla a
         # la derecha, todo dentro de un QScrollArea.
         self.compacto = compacto
+        # panel_extra_izquierda: widget ya armado (con sus propios botones/
+        # conexiones) que se agrega debajo de Nuevo/Editar/Eliminar en el
+        # panel izquierdo, antes del stretch final — para catálogos que
+        # necesitan una sección extra ahí sin dejar de ser una pantalla de
+        # catálogo "de verdad" (ej. Profesionales: panel de documentación
+        # del profesional seleccionado). Solo aplica al layout nuevo (se
+        # ignora en modo compacto, que no tiene panel izquierdo).
+        self.panel_extra_izquierda = panel_extra_izquierda
         self.campo_buscar: QLineEdit | None = None
         self.boton_nuevo = self.boton_editar = self.boton_eliminar = None
         self._armar_ui(titulo)
@@ -201,6 +210,8 @@ class PantallaCRUD(QWidget):
             self.campo_buscar.textChanged.connect(self._aplicar_filtro_busqueda)
             form.addWidget(self.campo_buscar)
             self._armar_botones_y_tabla(form, ancho_botones=_ANCHO_CAMPO)
+            if self.panel_extra_izquierda is not None:
+                form.addWidget(self.panel_extra_izquierda)
             form.addStretch()
             layout_solapa.addWidget(panel_izquierda)
 

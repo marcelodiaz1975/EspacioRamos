@@ -117,17 +117,27 @@ debajo; tabla a la derecha; todo el panel dentro de un `QScrollArea`. La
 selección de fila ya se pinta del naranja suave definido en `paleta()`
 (es la paleta de selección de toda la aplicación, no algo puntual de acá).
 
-Dos pantallas (Profesionales, Mensajes predefinidos) insertan
-`PantallaCRUD` como un componente más dentro de su propia composición
-(un panel de documentación al lado, un filtro de categoría propio,
-etc.) en vez de usarla como pantalla de catálogo independiente — para
-esas se pasa `compacto=True`, que mantiene el layout viejo (título +
-fila de botones arriba de la tabla, sin solapa ni Buscar) para no
-romper su composición; los botones ahí sí llevan los mismos objectName
-compartidos (`botonPrimario`/`botonSecundario`), solo cambia la
-disposición. Si más adelante se quiere llevar esas dos también al
-formato solapa, hay que rediseñar su panel extra a mano, no alcanza con
-sacarles `compacto=True`.
+Pedido explícito de la clienta: "todo catálogo que pida desde ahora" pasa
+a este formato solapa (el mismo de Edificios), aunque tenga un panel
+extra propio (ver Profesionales abajo) — `compacto=True` queda reservado
+para las pantallas que todavía no se revisaron una por una, no para
+catálogos nuevos.
+
+Cuando un catálogo necesita una sección propia además de Nuevo/Editar/
+Eliminar (ej. Profesionales: documentación del profesional seleccionado),
+esa sección va DEBAJO de esos tres botones, en el mismo panel izquierdo
+— no al costado en un splitter aparte. Se arma pasándole a `PantallaCRUD`
+un widget ya armado (con sus propios botones/conexiones) por
+`panel_extra_izquierda`; sus botones (ej. "Agregar archivo…" en
+`botonPrimario`, "Eliminar" en `botonSecundario`) usan el mismo ancho fijo
+que el resto del panel (`crud_generico._ANCHO_CAMPO`, 240px) y sus propios
+métodos atados de la pantalla compuesta (que a su vez usan
+`self.crud_profesionales`, construido después — el binding funciona
+porque el click llega mucho después de que todo ya está armado).
+
+Solo `Mensajes predefinidos` sigue en `compacto=True` por ahora (filtro
+de categoría propio arriba de la tabla, en vez de a la izquierda) — no
+se tocó todavía en la revisión uno por uno.
 
 ## Selectores y fecha
 
