@@ -29,6 +29,7 @@ emitir (ahora con los valores ya revertidos, así quedan como antes)."""
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from dataclasses import dataclass, field
 
@@ -139,6 +140,40 @@ def generar_tramos_esquema(
         tramos.append((n * cantidad_horas, (n + 1) * cantidad_horas, porcentaje))
         n += 1
     return tramos
+
+
+def detectar_parametros_esquema(tramos: list[tuple[float, float, float]]) -> tuple[float, float, float] | None:
+    """Intenta reconstruir los 3 parámetros ("Cantidad de horas",
+    "Porcentaje descuento", "Porcentaje tope descuento") que generarían
+    exactamente estos `tramos` — para que la solapa "Esquema de
+    descuentos" pueda mostrar en sus 3 campos el esquema vigente al
+    entrar, en vez de arrancar siempre en los valores por defecto.
+
+    No siempre es posible: el esquema vigente puede tener tramos que no
+    salen de ningún juego de estos 3 parámetros (ej. un historial viejo
+    cargado a mano, de cuando la pantalla todavía tenía el editor libre
+    de tramos). En ese caso devuelve None y quien llame decide qué
+    mostrar (los valores por defecto, con un aviso). Se verifica por
+    "ida y vuelta": se extraen los 3 parámetros candidatos de los
+    primeros tramos y se regeneran con `generar_tramos_esquema` — si el
+    resultado no coincide exactamente con `tramos`, no hay forma
+    confiable de que sean "los mismos" parámetros."""
+    if not tramos:
+        return None
+    ordenados = sorted(tramos, key=lambda t: t[0])
+    cantidad_horas = ordenados[0][1] - ordenados[0][0]
+    if ordenados[0][0] != 0 or ordenados[0][2] != 0 or cantidad_horas <= 0:
+        return None
+    porcentaje_tope = ordenados[-1][2]
+    porcentaje_descuento = ordenados[1][2] if len(ordenados) > 1 else 0
+    candidato = generar_tramos_esquema(
+        cantidad_horas=cantidad_horas, porcentaje_descuento=porcentaje_descuento, porcentaje_tope=porcentaje_tope,
+    )
+    if len(candidato) != len(ordenados) or any(
+        not math.isclose(a, b, abs_tol=1e-9) for fc, fo in zip(candidato, ordenados) for a, b in zip(fc, fo)
+    ):
+        return None
+    return (cantidad_horas, porcentaje_descuento, porcentaje_tope)
 
 
 def actualizar_esquema_descuentos(conn: sqlite3.Connection, tramos: list[tuple[float, float, float]]) -> list[int]:

@@ -2,7 +2,13 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.aumentos import confirmar_aumento, deshacer_ultimo_aumento, generar_tramos_esquema, simular_aumento
+from app.negocio.aumentos import (
+    confirmar_aumento,
+    deshacer_ultimo_aumento,
+    detectar_parametros_esquema,
+    generar_tramos_esquema,
+    simular_aumento,
+)
 from app.negocio.liquidaciones import emitir_liquidacion
 from app.negocio.valores import obtener_porcentaje_descuento
 from app.repositorio.registro import obtener_repositorio
@@ -175,6 +181,27 @@ def test_generar_tramos_esquema_es_coherente_con_obtener_porcentaje_descuento(co
     assert obtener_porcentaje_descuento(conn, 2.5) == 1
     assert obtener_porcentaje_descuento(conn, 4) == 1
     assert obtener_porcentaje_descuento(conn, 4.5) == 2
+
+
+def test_detectar_parametros_esquema_reconoce_lo_que_genero_el_mismo_formula():
+    tramos = generar_tramos_esquema(cantidad_horas=2, porcentaje_descuento=1, porcentaje_tope=25)
+    assert detectar_parametros_esquema(tramos) == (2, 1, 25)
+
+
+def test_detectar_parametros_esquema_reconoce_parametros_no_default():
+    tramos = generar_tramos_esquema(cantidad_horas=5, porcentaje_descuento=2, porcentaje_tope=10)
+    assert detectar_parametros_esquema(tramos) == (5, 2, 10)
+
+
+def test_detectar_parametros_esquema_no_reconoce_tramos_libres():
+    # Esquema histórico armado a mano (con el editor libre de tramos que existía antes
+    # del rediseño): no corresponde a ningún (cantidad_horas, %descuento, %tope).
+    tramos = [(0, 10, 2), (10, 999, 5)]
+    assert detectar_parametros_esquema(tramos) is None
+
+
+def test_detectar_parametros_esquema_vacio_devuelve_none():
+    assert detectar_parametros_esquema([]) is None
 
 
 def test_deshacer_sin_aumentos_lanza_error(conn):

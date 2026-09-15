@@ -16,6 +16,7 @@ from app.gui.pantallas.aumentos import (
     _GUION,
     PantallaAumentos,
 )
+from app.negocio.aumentos import actualizar_esquema_descuentos, generar_tramos_esquema
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -232,6 +233,42 @@ def test_esquema_cambiar_parametro_habilita_confirmar(qtbot, conn):
     panel = pantalla.panel_esquema
     panel.spin_horas.setValue(4)
     assert panel.boton_confirmar.isEnabled() is True
+
+
+def test_esquema_detecta_parametros_no_default_del_vigente(qtbot, conn):
+    actualizar_esquema_descuentos(conn, generar_tramos_esquema(cantidad_horas=5, porcentaje_descuento=2, porcentaje_tope=10))
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_esquema
+    assert panel.spin_horas.value() == 5.0
+    assert panel.spin_porcentaje_descuento.value() == 2.0
+    assert panel.spin_porcentaje_tope.value() == 10.0
+    assert panel.boton_confirmar.isEnabled() is False
+    assert panel.etiqueta_aviso.isHidden() is True
+
+
+def test_esquema_no_reconocido_muestra_aviso_y_tramos_vigentes_en_preview(qtbot, conn):
+    actualizar_esquema_descuentos(conn, [(0, 10, 2), (10, 999, 5)])
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_esquema
+
+    assert panel.etiqueta_aviso.isHidden() is False
+    assert panel.spin_horas.value() == 2.0  # default, no se pudo reconocer
+    assert panel.tabla_preview.rowCount() == 2
+    assert panel.tabla_preview.item(0, 1).text() == "10.0"
+    assert panel.tabla_preview.item(1, 2).text() == "5,00%"
+
+
+def test_esquema_editar_un_campo_oculta_el_aviso_y_pasa_a_vista_generada(qtbot, conn):
+    actualizar_esquema_descuentos(conn, [(0, 10, 2), (10, 999, 5)])
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_esquema
+
+    panel.spin_horas.setValue(3)
+    assert panel.etiqueta_aviso.isHidden() is True
+    assert panel.tabla_preview.item(0, 1).text() == "3.0"  # ahora es la vista previa generada, no la vigente
 
 
 def test_esquema_confirmar_cambios_reemplaza_el_vigente(qtbot, conn):

@@ -20,11 +20,18 @@ de aumentos"; la pantalla de catálogo lo muestra en solo lectura). En vez
 del editor libre de tramos (Desde/Hasta/%) de la versión anterior, ahora
 se arma con 3 parámetros ("Cantidad de horas", "Porcentaje descuento",
 "Porcentaje tope descuento" — ver app.negocio.aumentos.generar_tramos_
-esquema) que siempre arrancan en sus valores por defecto (2 / 1% / 25%)
-al entrar a la pantalla, no en lo que haya vigente — el esquema vigente
-puede tener tramos que no vengan de estos 3 parámetros (ej. historial
-viejo cargado a mano), así que no hay una forma confiable de "deshacer"
-la fórmula para precargar los campos con eso."""
+esquema). Al entrar a la pantalla se intenta reconocer esos 3 parámetros
+a partir del esquema vigente (app.negocio.aumentos.detectar_parametros_
+esquema, por "ida y vuelta": si regenerarlos con los 3 candidatos da
+exactamente los mismos tramos, son esos) para precargar los campos y la
+vista previa con lo que está vigente de verdad. Si no se puede reconocer (ej. un historial viejo cargado a mano con el
+editor libre que existía antes, que no corresponde a ningún juego de
+estos 3 parámetros) se avisa con un cartel, los 3 campos quedan en sus
+valores por defecto (2/1/25) pero la vista previa muestra los tramos
+vigentes TAL CUAL (no los que generarían esos 3 default) hasta que se
+edite algún campo — recién ahí la vista previa pasa a mostrar en vivo lo
+que se generaría. "Confirmar cambios" pide la misma confirmación que un
+aumento (avisa que se modifican valores en el sistema)."""
 from __future__ import annotations
 
 import sqlite3
@@ -53,10 +60,12 @@ from app.negocio.aumentos import (
     actualizar_esquema_descuentos,
     confirmar_aumento,
     deshacer_ultimo_aumento,
+    detectar_parametros_esquema,
     generar_tramos_esquema,
     simular_aumento,
 )
 from app.negocio.dias import periodo_actual
+from app.repositorio.registro import obtener_repositorio
 
 _ID_CONSULTORIO = Qt.ItemDataRole.UserRole
 _COL_LOCALIDAD = 0
@@ -510,6 +519,15 @@ class _PanelEsquemaDescuentos(QWidget):
         self.boton_confirmar.clicked.connect(self._confirmar_cambios)
         form.addWidget(self.boton_confirmar)
 
+        self.etiqueta_aviso = QLabel(
+            "No se pudieron reconocer estos 3 parámetros a partir del esquema vigente (viene de tramos cargados "
+            "a mano). Se muestran los valores por defecto; la vista previa de la derecha sí es la vigente real."
+        )
+        self.etiqueta_aviso.setWordWrap(True)
+        self.etiqueta_aviso.setFixedWidth(_ANCHO_CAMPO)
+        self.etiqueta_aviso.setVisible(False)
+        form.addWidget(self.etiqueta_aviso)
+
         form.addStretch()
         layout.addWidget(panel_form)
 
@@ -524,29 +542,44 @@ class _PanelEsquemaDescuentos(QWidget):
         ], parent=self)
 
     def actualizar(self) -> None:
+        tramos_vigentes = [
+            (t["HorasSemanalesDesde"], t["HorasSemanalesHasta"], t["PorcentajeDescuento"])
+            for t in obtener_repositorio(self.conn, "EsquemaDescuentos").listar(Activo=1)
+        ]
+        detectados = detectar_parametros_esquema(tramos_vigentes)
+        valores = detectados or (_HORAS_DEFAULT, _PORCENTAJE_DESCUENTO_DEFAULT, _PORCENTAJE_TOPE_DEFAULT)
+
         self.spin_horas.blockSignals(True)
         self.spin_porcentaje_descuento.blockSignals(True)
         self.spin_porcentaje_tope.blockSignals(True)
-        self.spin_horas.setValue(_HORAS_DEFAULT)
-        self.spin_porcentaje_descuento.setValue(_PORCENTAJE_DESCUENTO_DEFAULT)
-        self.spin_porcentaje_tope.setValue(_PORCENTAJE_TOPE_DEFAULT)
+        self.spin_horas.setValue(valores[0])
+        self.spin_porcentaje_descuento.setValue(valores[1])
+        self.spin_porcentaje_tope.setValue(valores[2])
         self.spin_horas.blockSignals(False)
         self.spin_porcentaje_descuento.blockSignals(False)
         self.spin_porcentaje_tope.blockSignals(False)
-        self._valores_cargados = (_HORAS_DEFAULT, _PORCENTAJE_DESCUENTO_DEFAULT, _PORCENTAJE_TOPE_DEFAULT)
+        self._valores_cargados = valores
         self.boton_confirmar.setEnabled(False)
-        self._actualizar_preview()
+        self.etiqueta_aviso.setVisible(detectados is None and bool(tramos_vigentes))
+        if detectados is None:
+            self._mostrar_tramos(sorted(tramos_vigentes, key=lambda t: t[0]))
+        else:
+            self._actualizar_preview()
 
     def _valores_actuales(self) -> tuple[float, float, float]:
         return (self.spin_horas.value(), self.spin_porcentaje_descuento.value(), self.spin_porcentaje_tope.value())
 
     def _al_cambiar_parametros(self, *_args) -> None:
         self.boton_confirmar.setEnabled(self._valores_actuales() != self._valores_cargados)
+        self.etiqueta_aviso.setVisible(False)
         self._actualizar_preview()
 
     def _actualizar_preview(self) -> None:
         horas, porcentaje, tope = self._valores_actuales()
         tramos = generar_tramos_esquema(cantidad_horas=horas, porcentaje_descuento=porcentaje, porcentaje_tope=tope)
+        self._mostrar_tramos(tramos)
+
+    def _mostrar_tramos(self, tramos: list[tuple[float, float, float]]) -> None:
         self.tabla_preview.setRowCount(len(tramos))
         for fila, (desde, hasta, pct) in enumerate(tramos):
             self.tabla_preview.setItem(fila, 0, item_numero(str(desde)))
@@ -558,7 +591,8 @@ class _PanelEsquemaDescuentos(QWidget):
         horas, porcentaje, tope = self._valores_actuales()
         confirmacion = QMessageBox.question(
             self, "Confirmar cambios",
-            "¿Confirmás el nuevo esquema de descuentos? Reemplaza el vigente (que queda como historial).",
+            "¿Confirmás el nuevo esquema de descuentos? Al confirmar se modifican valores en el sistema: el "
+            "esquema vigente queda reemplazado (pasa a historial).",
         )
         if confirmacion != QMessageBox.StandardButton.Yes:
             return
@@ -568,3 +602,4 @@ class _PanelEsquemaDescuentos(QWidget):
         QMessageBox.information(self, "Esquema de descuentos", "Se actualizó el esquema de descuentos.")
         self._valores_cargados = (horas, porcentaje, tope)
         self.boton_confirmar.setEnabled(False)
+        self.etiqueta_aviso.setVisible(False)
