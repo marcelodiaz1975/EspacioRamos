@@ -16,27 +16,35 @@ hoja A4 por página — así que arma el documento con `crear_documento` +
 `doc.build` en vez de `construir_sin_saltos`.
 
 Medidas de cada placa (modelo físico que pasó la clienta): 7,6 cm x 2,2
-cm — un tamaño FIJO, como la placa física real — margen interno 0,3 cm,
-texto alineado a la izquierda y centrado verticalmente, 2 columnas por
-hoja con separación en blanco entre placa y placa (para poder cortarlas
-sin que se peguen los bordes). Fuente pedida: Calibri 20pt negrita
-itálica — Calibri no es una de las 14 fuentes base de PDF y no está
-instalada en este entorno (no se puede registrar sin el archivo .ttf),
-así que se usa Helvetica-BoldOblique como reemplazo más parecido
-disponible; si la clienta consigue el .ttf de Calibri se puede
-registrar para usar la fuente exacta. Ese reemplazo es notablemente más
-ancho que Calibri, así que el tamaño que se usa acá no es 20pt sino
-TAMANO_FUENTE_PLACA (17pt) — un tamaño FIJO e IGUAL para todas las
-placas (probado antes con achique automático por placa, pero eso hacía
-que un nombre corto se viera gigante al lado de uno largo; la clienta
-pidió una sola fuente uniforme). Se calibró para que el corte de línea
-coincida con el sistema físico que la clienta ya usa: confirmó que
-"Lic. Agustina Viavattene" (24 caracteres) entra en una sola línea en
-sus placas actuales, y que agregarle una letra más la baja a dos
-líneas — a 17pt con Helvetica-BoldOblique pasa exactamente eso. Cada
-línea que no entra completa en el ancho de la placa se parte con el
-salto de palabra natural de reportlab (Paragraph), nunca cortando una
-palabra a la mitad."""
+cm — un tamaño FIJO, como la placa física real — texto alineado a la
+izquierda y centrado verticalmente, 2 columnas por hoja con separación
+en blanco entre placa y placa (para poder cortarlas sin que se peguen
+los bordes). Margen interno: 0,3 cm arriba/abajo (MARGEN_INTERNO_PLACA,
+el del modelo físico original, se mantiene para no perder el centrado
+vertical) pero solo 0,1 cm a izquierda/derecha
+(MARGEN_INTERNO_HORIZONTAL_PLACA) — la clienta pidió achicar el margen
+horizontal para ganar ancho de texto y poder agrandar un poco la
+fuente sin perder el corte de línea de su sistema físico.
+
+Fuente pedida: Calibri 20pt negrita itálica — Calibri no es una de las
+14 fuentes base de PDF y no está instalada en este entorno (no se
+puede registrar sin el archivo .ttf), así que se usa Helvetica-
+BoldOblique como reemplazo más parecido disponible; si la clienta
+consigue el .ttf de Calibri se puede registrar para usar la fuente
+exacta. Ese reemplazo es notablemente más ancho que Calibri, así que el
+tamaño que se usa acá no es 20pt sino TAMANO_FUENTE_PLACA (18pt) — un
+tamaño FIJO e IGUAL para todas las placas (probado antes con achique
+automático por placa, pero eso hacía que un nombre corto se viera
+gigante al lado de uno largo; la clienta pidió una sola fuente
+uniforme). Se calibró para que el corte de línea coincida con el
+sistema físico que la clienta ya usa: confirmó que "Lic. Agustina
+Viavattene" (24 caracteres) entra en una sola línea en sus placas
+actuales, y que agregarle una letra más la baja a dos líneas — a 18pt
+con Helvetica-BoldOblique y el margen horizontal reducido pasa
+exactamente eso (a 0,3 cm de margen horizontal, como al principio, el
+máximo que entraba era 17pt). Cada línea que no entra completa en el
+ancho de la placa se parte con el salto de palabra natural de
+reportlab (Paragraph), nunca cortando una palabra a la mitad."""
 from __future__ import annotations
 
 import os
@@ -143,11 +151,12 @@ def generar_pdf_placas(conn: sqlite3.Connection, directorio: str, ids_edificio: 
 
 ANCHO_PLACA = 7.6 * cm
 ALTO_PLACA = 2.2 * cm
-MARGEN_INTERNO_PLACA = 0.3 * cm
+MARGEN_INTERNO_PLACA = 0.3 * cm  # arriba/abajo, el del modelo físico original
+MARGEN_INTERNO_HORIZONTAL_PLACA = 0.1 * cm  # izquierda/derecha, achicado a pedido de la clienta, ver docstring
 GAP_ENTRE_COLUMNAS = 0.6 * cm
 GAP_ENTRE_FILAS = 0.2 * cm  # ajustado para que 11 filas (22 placas) entren en una hoja A4 con los márgenes estándar
 FUENTE_PLACA = FUENTE_NEGRITA_ITALICA  # reemplazo de Calibri, ver docstring del módulo
-TAMANO_FUENTE_PLACA = 17  # calibrado contra el sistema físico de la clienta, ver docstring del módulo
+TAMANO_FUENTE_PLACA = 18  # calibrado contra el sistema físico de la clienta, ver docstring del módulo
 _INTERLINEADO = 1.1
 
 
@@ -180,7 +189,8 @@ def _fila_de_placas(textos: list[str]) -> Table:
     )
     estilo = [
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), MARGEN_INTERNO_PLACA), ("RIGHTPADDING", (0, 0), (-1, -1), MARGEN_INTERNO_PLACA),
+        ("LEFTPADDING", (0, 0), (-1, -1), MARGEN_INTERNO_HORIZONTAL_PLACA),
+        ("RIGHTPADDING", (0, 0), (-1, -1), MARGEN_INTERNO_HORIZONTAL_PLACA),
         ("TOPPADDING", (0, 0), (-1, -1), MARGEN_INTERNO_PLACA), ("BOTTOMPADDING", (0, 0), (-1, -1), MARGEN_INTERNO_PLACA),
         ("BOX", (0, 0), (0, 0), 0.75, colors.black),
     ]

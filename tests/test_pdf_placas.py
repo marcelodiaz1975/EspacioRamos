@@ -1,15 +1,15 @@
 import fitz
 import pytest
 from reportlab.lib.units import cm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from reportlab.pdfbase.pdfmetrics import stringWidth
-
 from app.pdf.placas_pdf import (
     ALTO_PLACA,
     ANCHO_PLACA,
     FUENTE_PLACA,
+    MARGEN_INTERNO_HORIZONTAL_PLACA,
     MARGEN_INTERNO_PLACA,
     TAMANO_FUENTE_PLACA,
     _caja_placa,
@@ -191,14 +191,24 @@ def test_seleccionadas_sin_personalizar_usa_el_nombre_estandar(conn, tmp_path):
 
 def test_medidas_de_la_placa_son_las_del_modelo_fisico():
     """Modelo pasado por la clienta: 7,6 cm x 2,2 cm, margen interno 0,3
-    cm, fuente a 17pt (Calibri pedido a 20pt, sustituida por Helvetica-
-    BoldOblique — más ancha, así que el tamaño se calibró a 17pt para
-    que el corte de línea coincida con el sistema físico de la clienta
-    — ver docstring del módulo)."""
+    cm arriba/abajo. Fuente a 18pt (Calibri pedido a 20pt, sustituida
+    por Helvetica-BoldOblique — más ancha, así que el tamaño se calibró
+    para que el corte de línea coincida con el sistema físico de la
+    clienta — ver docstring del módulo)."""
     assert ANCHO_PLACA == pytest.approx(7.6 * cm)
     assert ALTO_PLACA == pytest.approx(2.2 * cm)
     assert MARGEN_INTERNO_PLACA == pytest.approx(0.3 * cm)
-    assert TAMANO_FUENTE_PLACA == 17
+    assert TAMANO_FUENTE_PLACA == 18
+
+
+def test_margen_horizontal_es_mas_chico_que_el_vertical():
+    """La clienta pidió agrandar la fuente sin perder el corte de línea
+    de "Lic. Agustina Viavattene": para ganar ese ancho sin tocar el
+    modelo físico original (0,3 cm en las 4 direcciones), se achicó
+    solo el margen izquierdo/derecho — el de arriba/abajo, que no hace
+    falta para ganar ancho, se deja como estaba."""
+    assert MARGEN_INTERNO_HORIZONTAL_PLACA < MARGEN_INTERNO_PLACA
+    assert MARGEN_INTERNO_HORIZONTAL_PLACA == pytest.approx(0.1 * cm)
 
 
 def test_calibracion_replica_el_corte_de_linea_del_sistema_fisico_de_la_clienta():
@@ -207,7 +217,7 @@ def test_calibracion_replica_el_corte_de_linea_del_sistema_fisico_de_la_clienta(
     letra más la baja a dos líneas. El tamaño de fuente es FIJO (no se
     achica por placa), así que esta calibración se hace una sola vez
     contra el ancho disponible de texto dentro de la placa."""
-    ancho_disponible = ANCHO_PLACA - 2 * MARGEN_INTERNO_PLACA
+    ancho_disponible = ANCHO_PLACA - 2 * MARGEN_INTERNO_HORIZONTAL_PLACA
     entra = stringWidth("Lic. Agustina Viavattene", FUENTE_PLACA, TAMANO_FUENTE_PLACA)
     no_entra = stringWidth("Lic. Agustina Viavattenee", FUENTE_PLACA, TAMANO_FUENTE_PLACA)
     assert entra <= ancho_disponible

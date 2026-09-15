@@ -70,6 +70,7 @@ from app.pdf.placas_pdf import (
     ANCHO_PLACA,
     GAP_ENTRE_COLUMNAS,
     GAP_ENTRE_FILAS,
+    MARGEN_INTERNO_HORIZONTAL_PLACA,
     MARGEN_INTERNO_PLACA,
     generar_pdf_placas_seleccionadas,
 )
@@ -94,20 +95,21 @@ _PAGINA_ALTO_PX = _pt_a_px(A4[1])
 _PAGINA_MARGEN_PX = _pt_a_px(MARGEN)
 _PREVIA_ANCHO_PX = _pt_a_px(ANCHO_PLACA)
 _PREVIA_ALTO_PX = _pt_a_px(ALTO_PLACA)
-_PREVIA_MARGEN_PX = _pt_a_px(MARGEN_INTERNO_PLACA)
+_PREVIA_MARGEN_PX = _pt_a_px(MARGEN_INTERNO_PLACA)  # arriba/abajo
+_PREVIA_MARGEN_HORIZONTAL_PX = max(_pt_a_px(MARGEN_INTERNO_HORIZONTAL_PLACA), 1)  # izquierda/derecha
 _PREVIA_GAP_COLUMNAS_PX = _pt_a_px(GAP_ENTRE_COLUMNAS)
 _PREVIA_GAP_FILAS_PX = _pt_a_px(GAP_ENTRE_FILAS)
 # Tamaño de fuente FIJO e igual para todas las placas (no se achica según el
 # texto: la clienta lo pidió así, para que no salten diferencias visuales
 # entre una placa con un nombre corto y una con uno largo). Calibrado
-# independiente del de app.pdf.placas_pdf (17pt): Qt sustituye "Calibri" por
+# independiente del de app.pdf.placas_pdf (18pt): Qt sustituye "Calibri" por
 # una fuente propia del sistema, que mide distinto que la Helvetica-
-# BoldOblique de reportlab, así que escalar 17pt con _pt_a_px no reproduce el
+# BoldOblique de reportlab, así que escalar 18pt con _pt_a_px no reproduce el
 # mismo corte de línea — se calibró por separado, en píxeles de esta vista
 # previa, contra la misma referencia de la clienta: "Lic. Agustina
 # Viavattene" (24 caracteres) entra en una sola línea; una letra más la baja
 # a dos líneas.
-_PREVIA_FUENTE_PX = 15
+_PREVIA_FUENTE_PX = 16
 _PLACAS_POR_PAGINA = 22  # 2 columnas x 11 filas, igual que generar_pdf_placas_seleccionadas
 
 _ANCHO_BOTON_IMPRESION = 180  # Agregar a impresión / Quitar de la lista / Generar PDF, los tres iguales
@@ -543,7 +545,8 @@ class PantallaPlacas(QWidget):
         etiqueta.setFixedSize(_PREVIA_ANCHO_PX, _PREVIA_ALTO_PX)  # tamaño físico fijo, como la placa real
         etiqueta.setStyleSheet(
             f"border: 1px solid black; font-family: 'Calibri', sans-serif; font-size: {_PREVIA_FUENTE_PX}px; "
-            f"font-weight: bold; font-style: italic; padding: {_PREVIA_MARGEN_PX}px;"
+            f"font-weight: bold; font-style: italic; "
+            f"padding: {_PREVIA_MARGEN_PX}px {_PREVIA_MARGEN_HORIZONTAL_PX}px;"
         )
         return etiqueta
 

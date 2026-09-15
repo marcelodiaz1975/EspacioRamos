@@ -394,9 +394,9 @@ def test_previa_calibracion_replica_el_corte_de_linea_del_sistema_fisico_de_la_c
     mide distinto que Helvetica-BoldOblique."""
     from PySide6.QtGui import QFont, QFontMetrics
 
-    from app.gui.pantallas.placas import _PREVIA_ANCHO_PX, _PREVIA_FUENTE_PX, _PREVIA_MARGEN_PX
+    from app.gui.pantallas.placas import _PREVIA_ANCHO_PX, _PREVIA_FUENTE_PX, _PREVIA_MARGEN_HORIZONTAL_PX
 
-    ancho_disponible = _PREVIA_ANCHO_PX - 2 * _PREVIA_MARGEN_PX
+    ancho_disponible = _PREVIA_ANCHO_PX - 2 * _PREVIA_MARGEN_HORIZONTAL_PX
     fuente = QFont("Calibri")
     fuente.setBold(True)
     fuente.setItalic(True)
