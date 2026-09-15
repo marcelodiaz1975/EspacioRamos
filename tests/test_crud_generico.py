@@ -160,6 +160,29 @@ def test_pantalla_crud_editar_campo_numerico_not_null_vacio_no_rompe(qtbot, conn
     assert obtener_repositorio(conn, "Unidad").obtener(id_unidad)["CantLimitePlacas"] == 3
 
 
+def test_pantalla_crud_campo_numerico_obligatorio_vacio_avisa_y_no_crea(qtbot, conn, monkeypatch):
+    """La marca `requerido=True` en un Campo tipo="numero" no se chequeaba
+    (el chequeo de "obligatorio" solo miraba tipo texto/texto_largo) —
+    dejarlo vacío pasaba la validación y recién reventaba al guardar
+    contra una columna NOT NULL sin default."""
+    campos = [
+        Campo("IdEdificio", "Edificio", tipo="combo", opciones=lambda c: [], requerido=True),
+        Campo("Departamento", "Departamento", requerido=True),
+        Campo("CantLimitePlacas", "Límite de placas", tipo="numero", requerido=True),
+    ]
+    pantalla = PantallaCRUD(conn, "Unidad", "Unidades", campos)
+    qtbot.addWidget(pantalla)
+
+    def _dialogo_sin_limite(self, *a, **k):
+        self._entradas["Departamento"].setText("PB")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_sin_limite)
+    pantalla._nuevo()
+
+    assert pantalla.tabla_widget.rowCount() == 0
+
+
 def test_pantalla_crud_usa_formato_solapa_con_panel_izquierdo(qtbot, conn):
     pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
     qtbot.addWidget(pantalla)

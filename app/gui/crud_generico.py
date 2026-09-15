@@ -524,7 +524,7 @@ class _DialogoRegistro(QDialog):
             if not campo.requerido:
                 continue
             vacio = (
-                (campo.tipo == "texto" and not entrada.text().strip())
+                (campo.tipo in ("texto", "numero") and not entrada.text().strip())
                 or (campo.tipo == "texto_largo" and not entrada.toPlainText().strip())
             )
             if vacio:

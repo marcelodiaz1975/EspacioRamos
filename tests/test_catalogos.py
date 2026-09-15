@@ -114,6 +114,26 @@ def test_pantalla_consultorios_muestra_edificio_y_unidad(qtbot, conn):
     assert pantalla.tabla_widget.item(0, 1).text() == "3"
 
 
+def test_pantalla_consultorios_numero_no_numerico_no_persiste(qtbot, conn, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    conn.commit()
+
+    pantalla = catalogos.pantalla_consultorios(conn)
+    qtbot.addWidget(pantalla)
+
+    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    dialogo._entradas["IdUnidad"].setCurrentIndex(0)
+    dialogo._entradas["NumeroConsultorio"].setText("uno")
+    dialogo._validar_y_aceptar()
+
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+    assert conn.execute("SELECT COUNT(*) c FROM Consultorio").fetchone()["c"] == 0
+
+
 def test_pantalla_placas_muestra_unidad_y_profesional(qtbot, conn):
     conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]

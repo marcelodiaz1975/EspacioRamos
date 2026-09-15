@@ -97,7 +97,7 @@ def pantalla_unidades(conn: sqlite3.Connection) -> PantallaCRUD:
 def pantalla_consultorios(conn: sqlite3.Connection) -> PantallaCRUD:
     campos = [
         Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad, requerido=True),
-        Campo("NumeroConsultorio", "Número", requerido=True),
+        Campo("NumeroConsultorio", "Número", tipo="numero", requerido=True),
         Campo("Largo", "Largo (m)", tipo="numero"),
         Campo("Ancho", "Ancho (m)", tipo="numero"),
         Campo("TamanoClasificacion", "Clasificación", tipo="combo", opciones=_opciones_tamano),
