@@ -40,6 +40,7 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
         "TamanoClasificacion", "Ventana", "Placard",
         "AireAcondicionado", "VentiladorTecho", "Sillones", "AptoCamilla",
         "Balcon", "ValorHoraRegularActual", "ValorHoraAisladaActual",
+        "CampoLibre1", "CampoLibre2", "CampoLibre3",
     ],
     "Profesion": [
         "Nombre", "NombreMasculino", "NombreFemenino", "NombreNeutro",

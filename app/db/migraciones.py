@@ -37,6 +37,9 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Edificio", "CampoLibre1", "TEXT"),
     ("Edificio", "CampoLibre2", "TEXT"),
     ("Edificio", "CampoLibre3", "TEXT"),
+    ("Consultorio", "CampoLibre1", "TEXT"),
+    ("Consultorio", "CampoLibre2", "TEXT"),
+    ("Consultorio", "CampoLibre3", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja

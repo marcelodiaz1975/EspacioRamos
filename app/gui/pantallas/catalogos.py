@@ -112,6 +112,9 @@ def pantalla_consultorios(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("ValorHoraRegularAnterior", "Valor hora regular anterior", tipo="numero"),
         Campo("ValorHoraAisladaActual", "Valor hora aislada actual", tipo="numero"),
         Campo("ValorHoraAisladaAnterior", "Valor hora aislada anterior", tipo="numero"),
+        Campo("CampoLibre1", "Campo libre 1"),
+        Campo("CampoLibre2", "Campo libre 2"),
+        Campo("CampoLibre3", "Campo libre 3"),
     ]
     return PantallaCRUD(conn, "Consultorio", "Consultorios", campos)
 

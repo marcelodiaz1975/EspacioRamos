@@ -60,7 +60,10 @@ CREATE TABLE IF NOT EXISTS Consultorio (
     ValorHoraRegularActual REAL NOT NULL DEFAULT 0,
     ValorHoraRegularAnterior REAL NOT NULL DEFAULT 0,
     ValorHoraAisladaActual REAL NOT NULL DEFAULT 0,
-    ValorHoraAisladaAnterior REAL NOT NULL DEFAULT 0
+    ValorHoraAisladaAnterior REAL NOT NULL DEFAULT 0,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.20 Profesion (antes de Profesional porque este la referencia) ----------

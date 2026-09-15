@@ -134,6 +134,15 @@ def test_pantalla_consultorios_numero_no_numerico_no_persiste(qtbot, conn, monke
     assert conn.execute("SELECT COUNT(*) c FROM Consultorio").fetchone()["c"] == 0
 
 
+def test_pantalla_consultorios_tiene_tres_campos_libres(qtbot, conn):
+    pantalla = catalogos.pantalla_consultorios(conn)
+    qtbot.addWidget(pantalla)
+    nombres = [c.nombre for c in pantalla.campos]
+    assert nombres.count("CampoLibre1") == 1
+    assert nombres.count("CampoLibre2") == 1
+    assert nombres.count("CampoLibre3") == 1
+
+
 def test_pantalla_placas_muestra_unidad_y_profesional(qtbot, conn):
     conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
