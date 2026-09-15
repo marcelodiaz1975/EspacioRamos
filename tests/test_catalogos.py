@@ -73,6 +73,33 @@ def test_pantalla_unidades_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre3") == 1
 
 
+def test_pantalla_edificios_tiene_tres_campos_libres(qtbot, conn):
+    pantalla = catalogos.pantalla_edificios(conn)
+    qtbot.addWidget(pantalla)
+    nombres = [c.nombre for c in pantalla.campos]
+    assert nombres.count("CampoLibre1") == 1
+    assert nombres.count("CampoLibre2") == 1
+    assert nombres.count("CampoLibre3") == 1
+
+
+def test_pantalla_edificios_campo_libre_se_guarda_y_se_ve_en_la_tabla(qtbot, conn):
+    pantalla = catalogos.pantalla_edificios(conn)
+    qtbot.addWidget(pantalla)
+
+    def _dialogo_con_nombre_y_campo_libre(self, *a, **k):
+        self._entradas["Nombre"].setText("Torre Norte")
+        self._entradas["CampoLibre1"].setText("Dato extra")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_con_nombre_y_campo_libre)
+    pantalla._nuevo()
+    monkeypatch.undo()
+
+    columna_campo_libre = next(i for i, c in enumerate(pantalla.campos) if c.nombre == "CampoLibre1")
+    assert pantalla.tabla_widget.item(0, columna_campo_libre).text() == "Dato extra"
+
+
 def test_pantalla_consultorios_muestra_edificio_y_unidad(qtbot, conn):
     conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]

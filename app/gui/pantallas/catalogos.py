@@ -63,6 +63,9 @@ def pantalla_edificios(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Nombre", "Nombre", requerido=True),
         Campo("Domicilio", "Domicilio"),
         Campo("DomicilioLocalidad", "Localidad"),
+        Campo("CampoLibre1", "Campo libre 1"),
+        Campo("CampoLibre2", "Campo libre 2"),
+        Campo("CampoLibre3", "Campo libre 3"),
     ]
     return PantallaCRUD(conn, "Edificio", "Edificios", campos)
 

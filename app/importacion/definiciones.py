@@ -28,7 +28,7 @@ antes en la misma planilla.
 # Las columnas que refieren a otra entidad (ej. "Edificio", "Profesional")
 # se resuelven a su IdX correspondiente en importar_excel.py.
 COLUMNAS_PLANTILLA: dict[str, list[str]] = {
-    "Edificio": ["Nombre", "Domicilio", "DomicilioLocalidad"],
+    "Edificio": ["Nombre", "Domicilio", "DomicilioLocalidad", "CampoLibre1", "CampoLibre2", "CampoLibre3"],
     "Unidad": [
         "Edificio", "Departamento", "Cocina", "SalaDeEspera", "Banos",
         "AreaGuardado", "AreaDescanso", "AreaFumadores", "Recepcionista",

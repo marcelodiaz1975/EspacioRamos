@@ -15,7 +15,10 @@ CREATE TABLE IF NOT EXISTS Edificio (
     IdEdificio INTEGER PRIMARY KEY AUTOINCREMENT,
     Nombre TEXT NOT NULL,
     Domicilio TEXT,
-    DomicilioLocalidad TEXT
+    DomicilioLocalidad TEXT,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.2 Unidad ----------------------------------------------------------------
