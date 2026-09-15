@@ -312,6 +312,17 @@ def test_pantalla_profesionales_documentacion_va_bajo_los_botones_del_crud(qtbot
     assert crud.panel_extra_izquierda.isAncestorOf(pantalla.lista_documentos)
 
 
+def test_pantalla_profesionales_lista_documentos_se_estira_con_la_ventana(qtbot, conn):
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1300, 700)
+    pantalla.show()
+    qtbot.wait(50)
+    # con una ventana alta, la lista tiene que crecer más allá de su mínimo
+    # (150px) para llegar al pie del panel, a la par de la tabla de la derecha
+    assert pantalla.lista_documentos.height() > 150
+
+
 def test_pantalla_profesionales_buscar_dice_buscar_profesional(qtbot, conn):
     pantalla = pantalla_profesionales(conn)
     qtbot.addWidget(pantalla)

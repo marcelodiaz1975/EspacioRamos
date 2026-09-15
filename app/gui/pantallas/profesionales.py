@@ -190,7 +190,7 @@ class PantallaProfesionales(QWidget):
         self.lista_documentos = QListWidget()
         self.lista_documentos.setFixedWidth(_ANCHO_CAMPO)
         self.lista_documentos.setMinimumHeight(150)
-        layout_doc.addWidget(self.lista_documentos)
+        layout_doc.addWidget(self.lista_documentos, stretch=1)
 
         boton_agregar = QPushButton("Agregar archivo")
         boton_agregar.setObjectName("botonPrimario")

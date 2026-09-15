@@ -217,8 +217,15 @@ class PantallaCRUD(QWidget):
             form.addWidget(self.campo_buscar)
             self._armar_botones_y_tabla(form, ancho_botones=_ANCHO_CAMPO)
             if self.panel_extra_izquierda is not None:
-                form.addWidget(self.panel_extra_izquierda)
-            form.addStretch()
+                # con stretch para que ocupe el resto del alto disponible (ej.
+                # Profesionales: la lista de documentación se estira hasta el
+                # pie del panel, a la par de la barra de desplazamiento
+                # horizontal de la tabla) — sin esto quedaba pegado arriba,
+                # del alto justo de su contenido, con todo el resto en blanco
+                # abajo.
+                form.addWidget(self.panel_extra_izquierda, stretch=1)
+            else:
+                form.addStretch()
             layout_solapa.addWidget(panel_izquierda)
 
             layout_solapa.addWidget(self.tabla_widget, stretch=1)
