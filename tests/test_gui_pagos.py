@@ -547,6 +547,34 @@ def test_botones_planes_pago_segun_si_hay_plan_activo(qtbot, conn):
     assert panel.boton_cancelar.isEnabled()
 
 
+def test_botones_secundarios_de_pagos_son_celestes(qtbot, conn):
+    """Mismo criterio que Registro de ausencias/Cargos especiales: los
+    botones "aparte" del principal de cada solapa usan "botonSecundario"
+    (celeste, mismo alto que el botón principal)."""
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    from PySide6.QtWidgets import QPushButton
+
+    textos_secundarios_registrar = {"Modificar pago", "Eliminar pago", "Deshacer último movimiento"}
+    encontrados = {
+        b.text() for b in pantalla.panel_pagos.findChildren(QPushButton)
+        if b.objectName() == "botonSecundario" and b.text() in textos_secundarios_registrar
+    }
+    assert encontrados == textos_secundarios_registrar
+
+    assert pantalla.panel_planes.boton_refinanciar.objectName() == "botonSecundario"
+    assert pantalla.panel_planes.boton_cancelar.objectName() == "botonSecundario"
+    assert pantalla.panel_planes.boton_guardar.objectName() == "botonPrimario"
+
+
+def test_paneles_de_pagos_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_pagos.objectName() == "panelSolapa"
+    assert pantalla.panel_planes.objectName() == "panelSolapa"
+    assert pantalla.panel_estado_cuenta.objectName() == "panelSolapa"
+
+
 def test_guardar_con_plan_activo_no_crea_un_segundo(qtbot, conn):
     """DC-09 §3.6: un profesional no puede tener dos planes activos. El
     botón ya viene bloqueado (test de arriba); esto cubre que la
@@ -790,6 +818,28 @@ def test_fecha_de_carga_muestra_segundos(qtbot, conn):
     assert f":{segundos}hs" in panel.tabla.item(0, 0).text()
 
 
+def test_fecha_de_carga_usa_dia_de_la_semana_abreviado(qtbot, conn):
+    """Antes iba con el nombre completo del día ("martes"), la clienta
+    pidió abreviarlo ("mar") al revisar esta pantalla."""
+    from datetime import datetime
+
+    from app.negocio.dias import fecha_a_dia_semana
+
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-500)
+    panel._registrar()
+
+    fecha_carga = conn.execute("SELECT FechaHoraCarga FROM HistorialPagos").fetchone()["FechaHoraCarga"]
+    dia_completo = fecha_a_dia_semana(datetime.fromisoformat(fecha_carga).date())
+    texto = panel.tabla.item(0, 0).text()
+    assert texto.startswith(dia_completo[:3].lower() + " ")
+    assert dia_completo.lower() not in texto
+
+
 def test_saldo_anterior_y_nuevo_saldo_se_colorean_en_negativo(qtbot, conn):
     """Confirmado por la clienta: Saldo anterior y Nuevo saldo respetan el
     mismo color rojo-si-negativo que Monto, igual que en todo el sistema
@@ -920,9 +970,12 @@ def test_solapa_estado_cuenta_muestra_saldos_y_tabla_igual_a_registrar_pago(qtbo
     panel = pantalla.panel_estado_cuenta
     _seleccionar_profesional(panel, id_profesional)
 
-    texto = panel.etiqueta_resumen.text()
-    assert f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5)}</span>' in texto
-    assert f'Saldo anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>' in texto
+    assert panel.etiquetas_resumen[0].text() == (
+        f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5)}</span>'
+    )
+    assert panel.etiquetas_resumen[1].text() == (
+        f'Saldo anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>'
+    )
 
     assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
         "Fecha de carga", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
@@ -944,3 +997,12 @@ def test_solapa_estado_cuenta_combo_es_buscable_por_codigo_o_nombre(qtbot, conn)
     qtbot.addWidget(pantalla)
     completador = pantalla.panel_estado_cuenta.combo_profesional.completer()
     assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
+
+
+def test_estado_cuenta_pagos_tiene_filtro_a_la_izquierda_y_datos_uno_por_linea(qtbot, conn):
+    """A pedido de la clienta: mismo rediseño que Estado de cuenta de
+    Cargos especiales — el filtro de profesional a la izquierda y cada
+    dato del resumen en su propia línea."""
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    assert len(pantalla.panel_estado_cuenta.etiquetas_resumen) == 4

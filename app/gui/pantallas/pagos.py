@@ -38,7 +38,7 @@ from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
-from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, texto_resumen
+from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, partes_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import fecha_a_dia_semana, periodo_actual
 from app.negocio.formato import formatear_moneda
@@ -77,16 +77,26 @@ def _linea_divisoria() -> QFrame:
     return linea
 
 
+def _titulo_campo(texto: str) -> QLabel:
+    """Jerarquía 3 (subtituloCampo): mismo criterio que el resto de las
+    pantallas para los títulos que van arriba de un selector."""
+    etiqueta = QLabel(texto)
+    etiqueta.setObjectName("subtituloCampo")
+    return etiqueta
+
+
 def _fmt_fecha_hora_larga(iso: str | None) -> str:
-    """"lunes 10-08-2026 14:30:05hs" — mismo criterio de nombre de día en
-    español que usa el resto de la app (no depende del locale del SO). Acá,
-    a diferencia de otras pantallas, se muestran también los segundos: la
-    clienta los usa para controlar el orden real en que apiló los sobres
-    físicos cuando varios pagos quedan con la misma hora y minuto."""
+    """"mar 10-08-2026 14:30:05hs" — día de la semana abreviado (las tres
+    primeras letras de `DIAS_SEMANA`, no depende del locale del SO; antes
+    iba con el nombre completo, "martes", la clienta pidió abreviarlo al
+    revisar esta pantalla). A diferencia de otras pantallas, se muestran
+    también los segundos: la clienta los usa para controlar el orden real
+    en que apiló los sobres físicos cuando varios pagos quedan con la
+    misma hora y minuto."""
     if not iso:
         return ""
     dt = datetime.fromisoformat(iso)
-    dia = fecha_a_dia_semana(dt.date()).lower()
+    dia = fecha_a_dia_semana(dt.date())[:3].lower()
     return f"{dia} {dt.day:02d}-{dt.month:02d}-{dt.year} {dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}hs"
 
 
@@ -138,6 +148,7 @@ class PantallaPagos(QWidget):
 class _PanelRegistrarPago(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._registros: list[sqlite3.Row] = []
         self._armar_ui()
@@ -207,12 +218,15 @@ class _PanelRegistrarPago(QWidget):
         self.boton_registrar.clicked.connect(self._registrar)
         form.addWidget(self.boton_registrar)
         boton_modificar = QPushButton("Modificar pago")
+        boton_modificar.setObjectName("botonSecundario")
         boton_modificar.clicked.connect(self._modificar)
         form.addWidget(boton_modificar)
         boton_eliminar = QPushButton("Eliminar pago")
+        boton_eliminar.setObjectName("botonSecundario")
         boton_eliminar.clicked.connect(self._eliminar)
         form.addWidget(boton_eliminar)
         boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.setObjectName("botonSecundario")
         boton_deshacer.clicked.connect(self._deshacer_ultimo)
         form.addWidget(boton_deshacer)
 
@@ -610,6 +624,7 @@ class _PanelPlanesPago(QWidget):
 
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._planes: list[tuple] = []
         self._armar_ui()
@@ -668,11 +683,13 @@ class _PanelPlanesPago(QWidget):
         form.addWidget(self.boton_guardar)
 
         self.boton_refinanciar = QPushButton("Refinanciar plan seleccionado")
+        self.boton_refinanciar.setObjectName("botonSecundario")
         self.boton_refinanciar.clicked.connect(self._refinanciar)
         self.boton_refinanciar.setEnabled(False)
         form.addWidget(self.boton_refinanciar)
 
         self.boton_cancelar = QPushButton("Cancelar plan seleccionado")
+        self.boton_cancelar.setObjectName("botonSecundario")
         self.boton_cancelar.clicked.connect(self._cancelar)
         self.boton_cancelar.setEnabled(False)
         form.addWidget(self.boton_cancelar)
@@ -852,24 +869,36 @@ class _PanelEstadoCuentaPagos(QWidget):
 
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._armar_ui()
         self.actualizar()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
+        splitter = QSplitter()
 
-        fila_profesional = QHBoxLayout()
+        panel_form = QWidget()
+        form = QVBoxLayout(panel_form)
+        form.addWidget(_titulo_campo("Profesional"))
         self.combo_profesional = QComboBox()
-        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._actualizar_datos)
-        fila_profesional.addWidget(QLabel("Profesional:"))
-        fila_profesional.addWidget(self.combo_profesional, stretch=1)
-        layout.addLayout(fila_profesional)
+        form.addWidget(self.combo_profesional)
 
-        self.etiqueta_resumen = QLabel()
-        layout.addWidget(self.etiqueta_resumen)
+        form.addWidget(_linea_divisoria())
+
+        # Cada dato de `partes_resumen` en su propia línea (Saldo actual /
+        # Saldo anterior / Pagos imputados al mes actual / al mes anterior)
+        # en vez de todo corrido en un único renglón — mismo criterio que
+        # Cargos especiales.
+        self.etiquetas_resumen = [QLabel() for _ in range(4)]
+        for etiqueta in self.etiquetas_resumen:
+            form.addWidget(etiqueta)
+
+        form.addStretch()
+        splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(9)
@@ -878,7 +907,9 @@ class _PanelEstadoCuentaPagos(QWidget):
             "Saldo anterior", "Nuevo saldo", "Registro modificado", "Es ajuste",
         ])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        layout.addWidget(self.tabla, stretch=1)
+        splitter.addWidget(self.tabla)
+        splitter.setStretchFactor(1, 1)
+        layout.addWidget(splitter)
 
     def actualizar(self) -> None:
         id_anterior = self.combo_profesional.currentData()
@@ -894,12 +925,14 @@ class _PanelEstadoCuentaPagos(QWidget):
     def _actualizar_datos(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
-            self.etiqueta_resumen.setText(TEXTO_SIN_PROFESIONAL)
+            self.etiquetas_resumen[0].setText(TEXTO_SIN_PROFESIONAL)
+            for etiqueta in self.etiquetas_resumen[1:]:
+                etiqueta.clear()
             self.tabla.setRowCount(0)
             return
-        self.etiqueta_resumen.setText(
-            texto_resumen(self.conn, id_profesional, entidad_imputado="HistorialPagos", etiqueta_imputado="Pagos")
-        )
+        partes = partes_resumen(self.conn, id_profesional, entidad_imputado="HistorialPagos", etiqueta_imputado="Pagos")
+        for etiqueta, parte in zip(self.etiquetas_resumen, partes):
+            etiqueta.setText(parte)
         registros = sorted(
             obtener_repositorio(self.conn, "HistorialPagos").listar(IdProfesional=id_profesional),
             key=lambda r: -r["IdPago"],
