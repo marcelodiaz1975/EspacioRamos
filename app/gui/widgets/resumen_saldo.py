@@ -37,15 +37,14 @@ def fmt_dato(prefijo: str, valor: float) -> str:
     return f'{prefijo}: <span style="color:{color};">{formatear_moneda(valor)}</span>'
 
 
-def texto_resumen(
+def partes_resumen(
     conn: sqlite3.Connection, id_profesional: int, *,
     entidad_imputado: str | None = None, etiqueta_imputado: str | None = None,
-) -> str:
-    """`entidad_imputado` es el nombre de repositorio a sumar por
-    período (HistorialPagos o CargoEspecial, ambos con columnas
-    IdProfesional/Monto/PeriodoImputado) — si se pasa, agrega la
-    cuarta y quinta parte "<etiqueta_imputado> imputados al mes
-    actual/anterior"."""
+) -> list[str]:
+    """Las mismas partes que arma `texto_resumen`, sueltas en una lista
+    en vez de ya unidas en un único string — para pantallas que
+    prefieren mostrar cada dato en su propia línea (ej. Cargos
+    especiales) en vez de todo corrido en un renglón."""
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     partes = [
         fmt_dato("Saldo actual", profesional["SaldoCuentaActual"] or 0.0),
@@ -59,4 +58,18 @@ def texto_resumen(
         monto_anterior = sum(r["Monto"] for r in registros if r["PeriodoImputado"] == periodo_ant)
         partes.append(fmt_dato(f"{etiqueta_imputado} imputados al mes actual", monto_actual))
         partes.append(fmt_dato(f"{etiqueta_imputado} imputados al mes anterior", monto_anterior))
-    return " - ".join(partes)
+    return partes
+
+
+def texto_resumen(
+    conn: sqlite3.Connection, id_profesional: int, *,
+    entidad_imputado: str | None = None, etiqueta_imputado: str | None = None,
+) -> str:
+    """`entidad_imputado` es el nombre de repositorio a sumar por
+    período (HistorialPagos o CargoEspecial, ambos con columnas
+    IdProfesional/Monto/PeriodoImputado) — si se pasa, agrega la
+    cuarta y quinta parte "<etiqueta_imputado> imputados al mes
+    actual/anterior"."""
+    return " - ".join(partes_resumen(
+        conn, id_profesional, entidad_imputado=entidad_imputado, etiqueta_imputado=etiqueta_imputado,
+    ))

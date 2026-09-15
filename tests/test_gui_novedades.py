@@ -1536,6 +1536,40 @@ def test_solapa_estado_cuenta_cargos_es_segunda_solapa(qtbot, conn):
     assert pantalla.pestanas.tabText(1) == "Estado de cuenta"
 
 
+def test_botones_secundarios_de_cargos_especiales_son_celestes(qtbot, conn):
+    """Mismo criterio que Vacaciones/Licencias/Ausencias: Modificar/
+    Eliminar/Deshacer usan "botonSecundario" (celeste, mismo alto que
+    el botón principal) en vez del gris por defecto del sistema."""
+    from PySide6.QtWidgets import QPushButton
+
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    textos_secundarios = {"Modificar cargo especial", "Eliminar cargo especial", "Deshacer último movimiento"}
+    encontrados = {
+        b.text() for b in pantalla.panel.findChildren(QPushButton)
+        if b.objectName() == "botonSecundario" and b.text() in textos_secundarios
+    }
+    assert encontrados == textos_secundarios
+
+
+def test_paneles_de_cargos_especiales_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel.objectName() == "panelSolapa"
+    assert pantalla.panel_estado_cuenta.objectName() == "panelSolapa"
+
+
+def test_estado_cuenta_cargos_tiene_filtro_a_la_izquierda_y_datos_uno_por_linea(qtbot, conn):
+    """A pedido de la clienta: el selector de profesional (el único
+    filtro de esta solapa) pasa a un panel a la izquierda, como el
+    resto de las pantallas, con una línea divisoria abajo y cada dato
+    del resumen en su propia línea en vez de todo corrido."""
+    pantalla = PantallaCargosEspeciales(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_estado_cuenta
+    assert len(panel.etiquetas_resumen) == 4
+
+
 def test_solapa_estado_cuenta_cargos_muestra_saldos_y_tabla_igual_a_registro(qtbot, conn):
     from app.gui.estilos import COLOR_ROJO
     from app.negocio.formato import formatear_moneda
@@ -1554,9 +1588,12 @@ def test_solapa_estado_cuenta_cargos_muestra_saldos_y_tabla_igual_a_registro(qtb
     panel = pantalla.panel_estado_cuenta
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
 
-    texto = panel.etiqueta_resumen.text()
-    assert f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5)}</span>' in texto
-    assert f'Saldo anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>' in texto
+    assert panel.etiquetas_resumen[0].text() == (
+        f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5)}</span>'
+    )
+    assert panel.etiquetas_resumen[1].text() == (
+        f'Saldo anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>'
+    )
 
     assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
         "Fecha", "Tipo", "Concepto", "Monto", "Período imputado",

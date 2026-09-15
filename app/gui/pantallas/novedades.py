@@ -61,7 +61,7 @@ from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
-from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, texto_resumen
+from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, partes_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual
@@ -1170,6 +1170,7 @@ class _PanelAusencias(QWidget):
 class _PanelCargosEspeciales(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._registros: list[sqlite3.Row] = []
         self._armar_ui()
@@ -1225,12 +1226,15 @@ class _PanelCargosEspeciales(QWidget):
         boton.clicked.connect(self._crear)
         form.addWidget(boton)
         boton_modificar = QPushButton("Modificar cargo especial")
+        boton_modificar.setObjectName("botonSecundario")
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
         boton_eliminar = QPushButton("Eliminar cargo especial")
+        boton_eliminar.setObjectName("botonSecundario")
         boton_eliminar.clicked.connect(self._eliminar)
         form.addWidget(boton_eliminar)
         boton_deshacer = QPushButton("Deshacer último movimiento")
+        boton_deshacer.setObjectName("botonSecundario")
         boton_deshacer.clicked.connect(self._deshacer_ultimo)
         form.addWidget(boton_deshacer)
         form.addStretch()
@@ -1424,30 +1428,43 @@ class _PanelEstadoCuentaCargos(QWidget):
 
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._armar_ui()
         self.actualizar()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
+        splitter = QSplitter()
 
-        fila_profesional = QHBoxLayout()
+        panel_form = QWidget()
+        form = QVBoxLayout(panel_form)
+        form.addWidget(_titulo_campo("Profesional"))
         self.combo_profesional = QComboBox()
-        self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
+        self.combo_profesional.setFixedWidth(_ANCHO_CAMPO)
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._actualizar_datos)
-        fila_profesional.addWidget(QLabel("Profesional:"))
-        fila_profesional.addWidget(self.combo_profesional, stretch=1)
-        layout.addLayout(fila_profesional)
+        form.addWidget(self.combo_profesional)
 
-        self.etiqueta_resumen = QLabel()
-        layout.addWidget(self.etiqueta_resumen)
+        form.addWidget(_linea_divisoria())
+
+        # Cada dato de `partes_resumen` en su propia línea (Saldo actual /
+        # Saldo anterior / Cargos especiales imputados al mes actual / al
+        # mes anterior) en vez de todo corrido en un único renglón.
+        self.etiquetas_resumen = [QLabel() for _ in range(4)]
+        for etiqueta in self.etiquetas_resumen:
+            form.addWidget(etiqueta)
+
+        form.addStretch()
+        splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(5)
         self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Concepto", "Monto", "Período imputado"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        layout.addWidget(self.tabla, stretch=1)
+        splitter.addWidget(self.tabla)
+        splitter.setStretchFactor(1, 1)
+        layout.addWidget(splitter)
 
     def actualizar(self) -> None:
         id_anterior = self.combo_profesional.currentData()
@@ -1463,14 +1480,16 @@ class _PanelEstadoCuentaCargos(QWidget):
     def _actualizar_datos(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
-            self.etiqueta_resumen.setText(TEXTO_SIN_PROFESIONAL)
+            self.etiquetas_resumen[0].setText(TEXTO_SIN_PROFESIONAL)
+            for etiqueta in self.etiquetas_resumen[1:]:
+                etiqueta.clear()
             self.tabla.setRowCount(0)
             return
-        self.etiqueta_resumen.setText(
-            texto_resumen(
-                self.conn, id_profesional, entidad_imputado="CargoEspecial", etiqueta_imputado="Cargos especiales",
-            )
+        partes = partes_resumen(
+            self.conn, id_profesional, entidad_imputado="CargoEspecial", etiqueta_imputado="Cargos especiales",
         )
+        for etiqueta, parte in zip(self.etiquetas_resumen, partes):
+            etiqueta.setText(parte)
         registros = sorted(
             obtener_repositorio(self.conn, "CargoEspecial").listar(IdProfesional=id_profesional),
             key=lambda r: r["Fecha"] or "", reverse=True,
