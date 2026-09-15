@@ -381,8 +381,8 @@ def test_previa_usa_la_misma_fuente_fija_para_texto_corto_y_largo(qtbot):
     larga = PantallaPlacas._armar_placa_previa('Lic. Silvina Pugliese\nEquipo "Sol terapias"')
     qtbot.addWidget(corta)
     qtbot.addWidget(larga)
-    assert f"font-size: {_PREVIA_FUENTE_PX}px" in corta.styleSheet()
-    assert f"font-size: {_PREVIA_FUENTE_PX}px" in larga.styleSheet()
+    assert corta.font().pixelSize() == _PREVIA_FUENTE_PX
+    assert larga.font().pixelSize() == _PREVIA_FUENTE_PX
 
 
 def test_previa_calibracion_replica_el_corte_de_linea_del_sistema_fisico_de_la_clienta(qtbot):
@@ -406,6 +406,26 @@ def test_previa_calibracion_replica_el_corte_de_linea_del_sistema_fisico_de_la_c
     no_entra = metricas.boundingRect("Lic. Agustina Viavattenee").width()
     assert entra <= ancho_disponible
     assert no_entra > ancho_disponible
+
+
+def test_previa_placa_replica_el_corte_de_linea_del_sistema_fisico_de_la_clienta(qtbot):
+    """Regresión: QLabel.setWordWrap(True) arma un QTextDocument interno
+    con un margen propio no configurable, así que cortaba antes de lo
+    que sugería QFontMetrics (la misma clase de desajuste que ya se
+    había visto con RichText/"<br/>") — "Lic. Agustina Viavattene"
+    terminaba en dos líneas en la placa real aunque la calibración de
+    _PREVIA_FUENTE_PX decía que entraba en una. Ahora `_armar_placa_previa`
+    envuelve el texto a mano (`_envolver_lineas_previa`) con la misma
+    métrica que calibró el tamaño de fuente, así que la placa se
+    comporta igual que la calibración."""
+    from app.gui.pantallas.placas import PantallaPlacas
+
+    entra = PantallaPlacas._armar_placa_previa("Lic. Agustina Viavattene")
+    no_entra = PantallaPlacas._armar_placa_previa("Lic. Agustina Viavattenee")
+    qtbot.addWidget(entra)
+    qtbot.addWidget(no_entra)
+    assert "\n" not in entra.text()
+    assert "\n" in no_entra.text()
 
 
 def test_vista_previa_es_proporcional_a_la_placa_real():

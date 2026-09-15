@@ -19,6 +19,7 @@ from __future__ import annotations
 import sqlite3
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -111,6 +112,41 @@ _PREVIA_GAP_FILAS_PX = _pt_a_px(GAP_ENTRE_FILAS)
 # a dos líneas.
 _PREVIA_FUENTE_PX = 16
 _PLACAS_POR_PAGINA = 22  # 2 columnas x 11 filas, igual que generar_pdf_placas_seleccionadas
+
+
+def _fuente_placa_previa() -> QFont:
+    fuente = QFont("Calibri")
+    fuente.setBold(True)
+    fuente.setItalic(True)
+    fuente.setPixelSize(_PREVIA_FUENTE_PX)
+    return fuente
+
+
+def _envolver_lineas_previa(texto: str) -> list[str]:
+    """Envuelve cada línea de `texto` a mano con QFontMetrics en vez de
+    dejar el salto de palabra en manos de QLabel.setWordWrap: esa opción
+    arma un QTextDocument interno (aun con texto plano) que suma su
+    propio margen no configurable desde QLabel, así que corta antes de
+    lo que sugiere QFontMetrics — la misma clase de desajuste que ya se
+    había visto con RichText/"<br/>" en una ronda anterior. Envolviendo
+    a mano, con la misma métrica que calibró _PREVIA_FUENTE_PX, el corte
+    de línea coincide con la ficha real (nunca corta una palabra a la
+    mitad, igual que el salto de línea natural de reportlab en el PDF)."""
+    metricas = QFontMetrics(_fuente_placa_previa())
+    ancho_disponible = _PREVIA_ANCHO_PX - 2 * _PREVIA_MARGEN_HORIZONTAL_PX
+    resultado = []
+    for linea in texto.split("\n"):
+        actual = ""
+        for palabra in linea.split(" "):
+            candidato = f"{actual} {palabra}".strip()
+            if actual and metricas.boundingRect(candidato).width() > ancho_disponible:
+                resultado.append(actual)
+                actual = palabra
+            else:
+                actual = candidato
+        resultado.append(actual)
+    return resultado
+
 
 _ANCHO_BOTON_IMPRESION = 180  # Agregar a impresión / Quitar de la lista / Generar PDF, los tres iguales
 _ANCHO_MINIMO_PANEL_FILTROS = 300
@@ -535,18 +571,20 @@ class PantallaPlacas(QWidget):
 
     @staticmethod
     def _armar_placa_previa(texto: str) -> QLabel:
-        # Texto plano con "\n" (no RichText/"<br/>"): preserva el salto de
-        # línea explícito de una placa personalizada (línea 1 / línea 2) y a
-        # la vez deja que Qt envuelva cada una por separado si no entra en el
-        # ancho de la placa (setWordWrap), igual que hace reportlab en el PDF.
-        etiqueta = QLabel(texto)
-        etiqueta.setWordWrap(True)
+        # El salto de línea NO se deja en manos de QLabel.setWordWrap: esa
+        # opción arma internamente un QTextDocument (aun con texto plano)
+        # que suma su propio margen interno no configurable desde QLabel, y
+        # con eso corta antes de lo que sugiere QFontMetrics — la misma
+        # clase de desajuste que ya se había visto con RichText/"<br/>". Se
+        # envuelve a mano línea por línea con la MISMA QFontMetrics que
+        # calibró _PREVIA_FUENTE_PX, para que coincida con la ficha real.
+        etiqueta = QLabel("\n".join(_envolver_lineas_previa(texto)))
+        etiqueta.setWordWrap(False)
+        etiqueta.setFont(_fuente_placa_previa())
         etiqueta.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         etiqueta.setFixedSize(_PREVIA_ANCHO_PX, _PREVIA_ALTO_PX)  # tamaño físico fijo, como la placa real
         etiqueta.setStyleSheet(
-            f"border: 1px solid black; font-family: 'Calibri', sans-serif; font-size: {_PREVIA_FUENTE_PX}px; "
-            f"font-weight: bold; font-style: italic; "
-            f"padding: {_PREVIA_MARGEN_PX}px {_PREVIA_MARGEN_HORIZONTAL_PX}px;"
+            f"border: 1px solid black; padding: {_PREVIA_MARGEN_PX}px {_PREVIA_MARGEN_HORIZONTAL_PX}px;"
         )
         return etiqueta
 
