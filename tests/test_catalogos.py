@@ -51,6 +51,28 @@ def test_pantalla_unidades_muestra_nombre_de_edificio(qtbot, conn):
     assert pantalla.tabla_widget.item(0, 1).text() == "1A"
 
 
+def test_pantalla_unidades_banos_es_cantidad_no_booleano(qtbot, conn):
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento, Banos) VALUES (?, '1A', 2)", (id_edificio,))
+    conn.commit()
+
+    pantalla = catalogos.pantalla_unidades(conn)
+    qtbot.addWidget(pantalla)
+    columna_banos = next(i for i, c in enumerate(pantalla.campos) if c.nombre == "Banos")
+    assert pantalla.campos[columna_banos].tipo == "numero"
+    assert pantalla.tabla_widget.item(0, columna_banos).text() == "2"
+
+
+def test_pantalla_unidades_tiene_tres_campos_libres(qtbot, conn):
+    pantalla = catalogos.pantalla_unidades(conn)
+    qtbot.addWidget(pantalla)
+    nombres = [c.nombre for c in pantalla.campos]
+    assert nombres.count("CampoLibre1") == 1
+    assert nombres.count("CampoLibre2") == 1
+    assert nombres.count("CampoLibre3") == 1
+
+
 def test_pantalla_consultorios_muestra_edificio_y_unidad(qtbot, conn):
     conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]

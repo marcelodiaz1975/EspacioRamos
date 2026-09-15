@@ -73,7 +73,9 @@ def pantalla_unidades(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Departamento", "Departamento", requerido=True),
         Campo("Cocina", "Cocina", tipo="booleano"),
         Campo("SalaDeEspera", "Sala de espera", tipo="booleano"),
-        Campo("Banos", "Baños", tipo="booleano"),
+        # Cantidad, no Sí/No: una unidad puede tener más de un baño
+        # (pedido puntual de la clienta al revisar este catálogo).
+        Campo("Banos", "Cantidad de baños", tipo="numero"),
         Campo("AreaGuardado", "Área de guardado", tipo="booleano"),
         Campo("AreaDescanso", "Área de descanso", tipo="booleano"),
         Campo("AreaFumadores", "Área de fumadores", tipo="booleano"),
@@ -82,6 +84,9 @@ def pantalla_unidades(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("EntradaProfesionalExclusiva", "Entrada exclusiva", tipo="booleano"),
         Campo("WiFi", "WiFi", tipo="booleano"),
         Campo("CantLimitePlacas", "Límite de placas", tipo="numero"),
+        Campo("CampoLibre1", "Campo libre 1"),
+        Campo("CampoLibre2", "Campo libre 2"),
+        Campo("CampoLibre3", "Campo libre 3"),
     ]
     return PantallaCRUD(conn, "Unidad", "Unidades", campos)
 

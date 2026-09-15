@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QDialog, QMessageBox, QScrollArea, QTabWidget
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.crud_generico import Campo, PantallaCRUD, _DialogoRegistro
+from app.repositorio.registro import obtener_repositorio
 
 
 @pytest.fixture
@@ -129,6 +130,34 @@ def test_pantalla_crud_eliminar_con_dependientes_no_rompe(qtbot, conn):
 
     pantalla._eliminar()  # FK activa: debe fallar con IntegrityError y no propagarlo
     assert conn.execute("SELECT COUNT(*) c FROM Edificio").fetchone()["c"] == 1
+
+
+def test_pantalla_crud_editar_campo_numerico_not_null_vacio_no_rompe(qtbot, conn, monkeypatch):
+    """CantLimitePlacas es NOT NULL DEFAULT 0 en la base — dejarlo vacío
+    al editar mandaría NULL, que antes reventaba con un IntegrityError
+    sin atrapar en vez de avisar."""
+    campos = [
+        Campo("IdEdificio", "Edificio", tipo="combo", opciones=lambda c: [], requerido=True),
+        Campo("Departamento", "Departamento", requerido=True),
+        Campo("CantLimitePlacas", "Límite de placas", tipo="numero"),
+    ]
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB", CantLimitePlacas=3)
+    conn.commit()
+
+    pantalla = PantallaCRUD(conn, "Unidad", "Unidades", campos)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_widget.selectRow(0)
+
+    def _dialogo_con_limite_vacio(self, *a, **k):
+        self._entradas["CantLimitePlacas"].setText("")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_con_limite_vacio)
+    pantalla._editar()  # no debe lanzar excepción — avisa y no guarda
+
+    assert obtener_repositorio(conn, "Unidad").obtener(id_unidad)["CantLimitePlacas"] == 3
 
 
 def test_pantalla_crud_usa_formato_solapa_con_panel_izquierdo(qtbot, conn):

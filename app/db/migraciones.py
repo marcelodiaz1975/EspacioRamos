@@ -31,6 +31,9 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("AumentoAplicado", "EsquemaNuevosIds", "TEXT"),
     ("AumentoAplicado", "EsquemaAnterioresIds", "TEXT"),
     ("AumentoAplicado", "LiquidacionesRegeneradasJson", "TEXT"),
+    ("Unidad", "CampoLibre1", "TEXT"),
+    ("Unidad", "CampoLibre2", "TEXT"),
+    ("Unidad", "CampoLibre3", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja

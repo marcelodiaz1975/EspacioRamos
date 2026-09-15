@@ -369,7 +369,11 @@ class PantallaCRUD(QWidget):
                 valores = self.al_guardar(valores, None)
                 if valores is None:
                     return
-            id_nuevo = self.repositorio.crear(**valores)
+            try:
+                id_nuevo = self.repositorio.crear(**valores)
+            except sqlite3.IntegrityError as error:
+                QMessageBox.warning(self, "Nuevo registro", f"No se pudo guardar: {error}")
+                return
             al_crear = self._al_crear()
             if al_crear:
                 al_crear(id_nuevo, valores)
@@ -392,7 +396,11 @@ class PantallaCRUD(QWidget):
                 valores = self.al_guardar(valores, registro)
                 if valores is None:
                     return
-            self.repositorio.actualizar(id_valor, **valores)
+            try:
+                self.repositorio.actualizar(id_valor, **valores)
+            except sqlite3.IntegrityError as error:
+                QMessageBox.warning(self, "Editar registro", f"No se pudo guardar: {error}")
+                return
             al_actualizar = self._al_actualizar()
             if al_actualizar:
                 al_actualizar(registro, valores)

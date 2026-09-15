@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS Unidad (
     BalconComun INTEGER NOT NULL DEFAULT 0,
     EntradaProfesionalExclusiva INTEGER NOT NULL DEFAULT 0,
     WiFi INTEGER NOT NULL DEFAULT 0,
-    CantLimitePlacas INTEGER NOT NULL DEFAULT 0
+    CantLimitePlacas INTEGER NOT NULL DEFAULT 0,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.3 Consultorio -----------------------------------------------------------
