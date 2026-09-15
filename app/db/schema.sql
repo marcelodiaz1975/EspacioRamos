@@ -559,6 +559,7 @@ CREATE TABLE IF NOT EXISTS GastoOperativo (
 CREATE TABLE IF NOT EXISTS Imagen (
     IdImagen INTEGER PRIMARY KEY AUTOINCREMENT,
     Tipo TEXT,
+    Localidad TEXT,
     IdEdificio INTEGER REFERENCES Edificio(IdEdificio),
     IdUnidad INTEGER REFERENCES Unidad(IdUnidad),
     IdConsultorio INTEGER REFERENCES Consultorio(IdConsultorio),

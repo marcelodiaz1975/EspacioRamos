@@ -10,7 +10,8 @@ CarpetaBaseArchivos), en subcarpetas fijas:
     {base}/Archivos varios/Placas/
     {base}/Profesionales/{IdCodigo}/
     {base}/Profesionales/{IdCodigo}/Documentación/
-    {base}/Imagenes/{Alcance}_{Id}/
+    {base}/Imagenes/Espacio/
+    {base}/Imagenes/{Alcance}_{Id}/  (Localidad, Edificio, Unidad, Consultorio)
 
 Los tres primeros son documentos únicos del espacio en general: cada
 regeneración sobrescribe el anterior, no se acumula historial de archivos.
@@ -76,10 +77,15 @@ def carpeta_documentacion_profesional(conn: sqlite3.Connection, codigo: str) -> 
     return carpeta
 
 
-def carpeta_imagenes(conn: sqlite3.Connection, alcance: str, id_valor: int) -> Path:
-    """"Imagenes/{Alcance}_{Id}" bajo la carpeta base (alcance: "Edificio",
-    "Unidad" o "Consultorio"). La crea si hace falta."""
-    carpeta = _requerir_carpeta_base(conn) / "Imagenes" / f"{alcance}_{id_valor}"
+def carpeta_imagenes(conn: sqlite3.Connection, alcance: str, id_valor: int | str | None = None) -> Path:
+    """"Imagenes/{Alcance}" (alcance "Espacio", sin id: imágenes generales
+    del sistema) o "Imagenes/{Alcance}_{Id}" (alcance "Localidad",
+    "Edificio", "Unidad" o "Consultorio") bajo la carpeta base. Para
+    "Localidad", `id_valor` es el texto de la localidad ya sanitizado por
+    `app.negocio.imagenes` (no un ID estable como en el resto). La crea
+    si hace falta."""
+    nombre = alcance if id_valor is None else f"{alcance}_{id_valor}"
+    carpeta = _requerir_carpeta_base(conn) / "Imagenes" / nombre
     carpeta.mkdir(parents=True, exist_ok=True)
     return carpeta
 

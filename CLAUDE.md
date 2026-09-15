@@ -163,6 +163,36 @@ correspondiente en `_COLUMNAS_NUEVAS` de `migraciones.py` (para las bases
 ya creadas) y, si el catálogo tiene plantilla de importación Excel, las
 tres columnas al final de su entrada en `COLUMNAS_PLANTILLA`.
 
+## Imágenes (administrador de archivos, no un catálogo)
+
+`app/gui/pantallas/imagenes.py` sigue el mismo lenguaje visual que los
+catálogos (solapa "Listado", filtros a la izquierda, tabla escroleable a
+la derecha, botones debajo de los filtros) pero NO usa `PantallaCRUD`:
+no hay un cuadro de diálogo con campos de un registro, es un
+administrador de los archivos de imagen guardados por alcance. Por lo
+mismo no lleva los tres campos libres — no es un registro de catálogo.
+
+El alcance (`app.negocio.imagenes.ALCANCES`) tiene 5 niveles: "Espacio"
+(imágenes generales del sistema, sin atarse a ningún edificio — pensado
+en principio para cosas como el logo, a confirmar con la clienta),
+"Localidad" (agrupa por el texto libre de Edificio.DomicilioLocalidad —
+no tiene tabla propia, así que a diferencia de los demás usa el texto
+directamente en vez de un ID estable), "Edificio", "Unidad" y
+"Consultorio". El combo Alcance define hasta qué nivel de la cadena
+Localidad → Edificio → Unidad → Consultorio hace falta elegir un valor
+concreto: los combos de nivel superior al elegido quedan deshabilitados
+(si Alcance = "Espacio" los cuatro quedan grises; si Alcance = "Unidad"
+se puede setear Localidad/Edificio/Unidad pero no Consultorio). El valor
+que efectivamente determina qué imágenes se listan/agregan es el del
+combo en el nivel EXACTO del alcance elegido — los de niveles
+inferiores solo acotan en cascada las opciones de ese combo (mismo
+criterio de cascada que Aumentos y descuentos).
+
+En disco, cada alcance guarda sus archivos en una carpeta separada
+(`app.negocio.archivos_generados.carpeta_imagenes`): `Imagenes/Espacio`
+para el nivel general, `Imagenes/{Alcance}_{Id}` para el resto —
+Localidad usa el texto (sanitizado) en vez de un ID.
+
 ## Selectores y fecha
 
 - Selector de profesional: combo buscable por código o nombre

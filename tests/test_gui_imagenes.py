@@ -26,10 +26,18 @@ def _sin_dialogos_modales(monkeypatch):
 
 
 @pytest.fixture
-def consultorio(conn):
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
-    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
-    return obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+def edificio(conn):
+    return obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", DomicilioLocalidad="Rosario")
+
+
+@pytest.fixture
+def unidad(conn, edificio):
+    return obtener_repositorio(conn, "Unidad").crear(IdEdificio=edificio, Departamento='7mo "L"')
+
+
+@pytest.fixture
+def consultorio(conn, unidad):
+    return obtener_repositorio(conn, "Consultorio").crear(IdUnidad=unidad, NumeroConsultorio=1)
 
 
 def _archivo_jpg(tmp_path, nombre="foto.jpg") -> str:
@@ -38,21 +46,55 @@ def _archivo_jpg(tmp_path, nombre="foto.jpg") -> str:
     return str(ruta)
 
 
-def test_lista_edificios_por_defecto(qtbot, conn):
+def _elegir_consultorio(pantalla, edificio, unidad, consultorio) -> None:
+    pantalla.combo_alcance.setCurrentText("Consultorio")
+    pantalla.combo_localidad.setCurrentText("Rosario")
+    pantalla.combo_edificio.setCurrentIndex(pantalla.combo_edificio.findData(edificio))
+    pantalla.combo_unidad.setCurrentIndex(pantalla.combo_unidad.findData(unidad))
+    pantalla.combo_consultorio.setCurrentIndex(pantalla.combo_consultorio.findData(consultorio))
+
+
+def test_alcance_por_defecto_es_espacio_con_filtros_deshabilitados(qtbot, conn):
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.combo_alcance.currentText() == "Edificio"
+    assert pantalla.combo_alcance.currentText() == "Espacio"
+    assert not pantalla.combo_localidad.isEnabled()
+    assert not pantalla.combo_edificio.isEnabled()
+    assert not pantalla.combo_unidad.isEnabled()
+    assert not pantalla.combo_consultorio.isEnabled()
 
 
-def test_cambiar_alcance_a_consultorio_carga_combo(qtbot, conn, consultorio):
+def test_alcance_unidad_habilita_localidad_edificio_y_unidad_pero_no_consultorio(qtbot, conn, edificio, unidad):
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Unidad")
+    assert pantalla.combo_localidad.isEnabled()
+    assert pantalla.combo_edificio.isEnabled()
+    assert pantalla.combo_unidad.isEnabled()
+    assert not pantalla.combo_consultorio.isEnabled()
+
+
+def test_alcance_consultorio_habilita_los_cuatro_filtros(qtbot, conn, edificio, unidad, consultorio):
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
     pantalla.combo_alcance.setCurrentText("Consultorio")
-    assert pantalla.combo_entidad.count() == 1
-    assert "Consultorio 1" in pantalla.combo_entidad.currentText()
+    assert pantalla.combo_localidad.isEnabled()
+    assert pantalla.combo_edificio.isEnabled()
+    assert pantalla.combo_unidad.isEnabled()
+    assert pantalla.combo_consultorio.isEnabled()
 
 
-def test_agregar_imagen_via_dialogo(qtbot, conn, consultorio, tmp_path, monkeypatch):
+def test_combo_edificio_se_acota_por_localidad_elegida(qtbot, conn, edificio, unidad, consultorio):
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Otro edificio", DomicilioLocalidad="Buenos Aires")
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Edificio")
+    pantalla.combo_localidad.setCurrentText("Rosario")
+    nombres = [pantalla.combo_edificio.itemText(i) for i in range(pantalla.combo_edificio.count())]
+    assert nombres == ["Ramos 1"]
+
+
+def test_agregar_imagen_via_dialogo(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog
 
     ruta = _archivo_jpg(tmp_path)
@@ -60,7 +102,7 @@ def test_agregar_imagen_via_dialogo(qtbot, conn, consultorio, tmp_path, monkeypa
 
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
-    pantalla.combo_alcance.setCurrentText("Consultorio")
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
 
     pantalla._agregar()
 
@@ -68,20 +110,34 @@ def test_agregar_imagen_via_dialogo(qtbot, conn, consultorio, tmp_path, monkeypa
     assert pantalla.tabla.item(0, 1).text() == "Vista general"
 
 
-def test_agregar_sin_elegir_archivo_no_agrega_nada(qtbot, conn, consultorio, monkeypatch):
+def test_agregar_imagen_de_espacio_no_pide_ningun_filtro(qtbot, conn, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    ruta = _archivo_jpg(tmp_path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (ruta, "")))
+
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla._agregar()
+
+    assert pantalla.tabla.rowCount() == 1
+
+
+def test_agregar_sin_elegir_archivo_no_agrega_nada(qtbot, conn, edificio, unidad, consultorio, monkeypatch):
     from PySide6.QtWidgets import QFileDialog
 
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("", "")))
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
-    pantalla.combo_alcance.setCurrentText("Consultorio")
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
 
     pantalla._agregar()
 
     assert pantalla.tabla.rowCount() == 0
 
 
-def test_reordenar_subir_baja_intercambia_orden(qtbot, conn, consultorio, tmp_path, monkeypatch):
+def test_reordenar_subir_baja_intercambia_orden(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog
 
     rutas = iter([_archivo_jpg(tmp_path, "a.jpg"), _archivo_jpg(tmp_path, "b.jpg")])
@@ -89,7 +145,7 @@ def test_reordenar_subir_baja_intercambia_orden(qtbot, conn, consultorio, tmp_pa
 
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
-    pantalla.combo_alcance.setCurrentText("Consultorio")
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
     pantalla._agregar()
     pantalla._agregar()
 
@@ -100,13 +156,13 @@ def test_reordenar_subir_baja_intercambia_orden(qtbot, conn, consultorio, tmp_pa
     assert pantalla.tabla.rowCount() == 2
 
 
-def test_alternar_activo_actualiza_la_tabla(qtbot, conn, consultorio, tmp_path, monkeypatch):
+def test_alternar_activo_actualiza_la_tabla(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog
 
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (_archivo_jpg(tmp_path), "")))
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
-    pantalla.combo_alcance.setCurrentText("Consultorio")
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
     pantalla._agregar()
 
     pantalla.tabla.selectRow(0)
@@ -115,13 +171,13 @@ def test_alternar_activo_actualiza_la_tabla(qtbot, conn, consultorio, tmp_path, 
     assert pantalla.tabla.item(0, 3).text() == "No"
 
 
-def test_eliminar_imagen(qtbot, conn, consultorio, tmp_path, monkeypatch):
+def test_eliminar_imagen(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog
 
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (_archivo_jpg(tmp_path), "")))
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
-    pantalla.combo_alcance.setCurrentText("Consultorio")
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
     pantalla._agregar()
 
     pantalla.tabla.selectRow(0)

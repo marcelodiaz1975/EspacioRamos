@@ -34,10 +34,34 @@ def _configurar_carpeta_base(conn, ruta) -> None:
     obtener_repositorio(conn, "Configuracion").actualizar(1, CarpetaBaseArchivos=str(ruta))
 
 
-def test_agregar_imagen_sin_alcance_falla(conn, tmp_path):
-    _configurar_carpeta_base(conn, tmp_path)
-    with pytest.raises(ValueError):
-        agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path))
+def test_agregar_imagen_sin_alcance_es_espacio_y_se_guarda(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path / "base")
+    id_imagen = agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen"))
+
+    fila = obtener_repositorio(conn, "Imagen").obtener(id_imagen)
+    assert fila["Localidad"] is None
+    assert fila["IdEdificio"] is None
+    assert fila["IdUnidad"] is None
+    assert fila["IdConsultorio"] is None
+    assert Path(fila["RutaArchivo"]).parent.name == "Espacio"
+
+
+def test_agregar_imagen_de_localidad_usa_el_texto_como_carpeta(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path / "base")
+    id_imagen = agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen"), localidad="Rosario")
+
+    fila = obtener_repositorio(conn, "Imagen").obtener(id_imagen)
+    assert fila["Localidad"] == "Rosario"
+    assert Path(fila["RutaArchivo"]).parent.name == "Localidad_Rosario"
+
+
+def test_imagenes_del_alcance_espacio_no_incluye_las_de_localidad(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path / "base")
+    agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen", "a.jpg"))
+    agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen", "b.jpg"), localidad="Rosario")
+
+    assert len(imagenes_del_alcance(conn)) == 1
+    assert len(imagenes_del_alcance(conn, localidad="Rosario")) == 1
 
 
 def test_agregar_imagen_con_dos_alcances_falla(conn, consultorio, tmp_path):
@@ -149,5 +173,5 @@ def test_imagenes_del_alcance_trae_activas_e_inactivas(conn, consultorio, tmp_pa
     _configurar_carpeta_base(conn, tmp_path)
     id_imagen = agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen"), id_consultorio=consultorio)
     alternar_activo(conn, id_imagen)
-    filas = imagenes_del_alcance(conn, None, None, consultorio)
+    filas = imagenes_del_alcance(conn, id_consultorio=consultorio)
     assert len(filas) == 1
