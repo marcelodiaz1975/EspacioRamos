@@ -74,19 +74,12 @@ en Lista de espera, a replicar en el resto de a poco):
         mantiene igual como gancho por si hace falta diferenciarla más
         adelante.
 
-Jerarquía de botones: "botonPrimario" (gris oscuro fijo, `COLOR_BOTON_
-PRIMARIO`, con texto blanco — probado primero en azul fuerte, la
-clienta pidió pasarlo a gris al revisar Registro de ausencias) para la
-acción más importante/definitiva del formulario, ej. "Crear pedido";
-"botonSecundario" para el resto de las acciones, no tan definitivas
-(ej. "Agregar bloque", "Descartar pedido") — probado primero en celeste
-suave, pasa al mismo gris que queda POR FUERA del panel del formulario
-(`t['fondo']`, el mismo tono que la solapa inactiva) en la misma
-revisión, para que se lea como "el gris de afuera se metió acá" en vez
-de un color propio. Los encabezados de columna de cualquier tabla
-(QHeaderView::section) siguen con el azul más oscuro de siempre
-(`COLOR_NIVEL_1_OSCURO`, no tocado por este cambio) para no confundirse
-con un botón, y van en negrita.
+Jerarquía de botones: "botonPrimario" (azul fuerte, ej. "Crear pedido")
+para la acción más importante/definitiva del formulario; "botonSecundario"
+(celeste suave) para el resto de las acciones, no tan definitivas (ej.
+"Agregar bloque", "Descartar pedido"). Los encabezados de columna de
+cualquier tabla (QHeaderView::section) usan un azul más oscuro que
+botonPrimario para no confundirse con un botón, y van en negrita.
 
 Números de fila (encabezado vertical de cualquier tabla): centrados,
 global vía `QHeaderView:vertical { qproperty-defaultAlignment: ... }`
@@ -99,8 +92,8 @@ from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
 
-COLOR_NIVEL_1 = "#2E86AB"  # azul — encabezados principales, navegación
-COLOR_NIVEL_1_OSCURO = "#1F5F7A"  # azul más oscuro — encabezados de tabla
+COLOR_NIVEL_1 = "#2E86AB"  # azul — encabezados principales, botón primario
+COLOR_NIVEL_1_OSCURO = "#1F5F7A"  # azul más oscuro — encabezados de tabla, para diferenciarse del botón primario
 COLOR_NIVEL_2 = "#E07B39"  # naranja — sub-encabezados
 COLOR_DIA_GRILLA = "#6B0000"  # bordó — encabezados de grilla
 COLOR_VERDE = "#4CAF50"
@@ -108,11 +101,6 @@ COLOR_AMARILLO = "#F5D547"
 COLOR_ROJO = "#C0392B"
 COLOR_AZUL_OSCURO = "#0B2942"  # grilla operativa — celdas del profesional filtrado
 COLOR_TEXTO_CLARO = "#FFFFFF"
-# botonPrimario probado primero en azul (COLOR_NIVEL_1), la clienta pidió pasarlo a un gris oscuro
-# (con el mismo texto blanco) al revisar Registro de ausencias — no toca COLOR_NIVEL_1 en sí, que
-# sigue usándose en la navegación y los encabezados de tabla.
-COLOR_BOTON_PRIMARIO = "#4A4A4A"
-COLOR_BOTON_PRIMARIO_HOVER = "#333333"
 
 # ------------------------------------------------------------------- claro
 _CLARO = {
@@ -183,19 +171,19 @@ QGroupBox#panelFiltrosGrilla::title {{
 }}
 
 QPushButton#botonPrimario {{
-    background-color: {COLOR_BOTON_PRIMARIO}; color: {COLOR_TEXTO_CLARO};
+    background-color: {COLOR_NIVEL_1}; color: {COLOR_TEXTO_CLARO};
     border: 1px solid #000000; border-radius: 4px; padding: 8px 16px; font-weight: bold;
 }}
 QPushButton#botonPrimario:disabled {{ background-color: #A0AEC0; }}
-QPushButton#botonPrimario:hover:!disabled {{ background-color: {COLOR_BOTON_PRIMARIO_HOVER}; }}
+QPushButton#botonPrimario:hover:!disabled {{ background-color: #256a89; }}
 
 QPushButton#botonAccion {{ padding: 8px 16px; }}
 
 QPushButton#botonSecundario {{
-    background-color: {t['fondo']}; color: {t['texto']};
+    background-color: #BFE3F5; color: #14324A;
     border: 1px solid #000000; border-radius: 4px; padding: 8px 16px; font-weight: bold;
 }}
-QPushButton#botonSecundario:hover:!disabled {{ background-color: {t['borde']}; }}
+QPushButton#botonSecundario:hover:!disabled {{ background-color: #A6D6EF; }}
 QPushButton#botonSecundario:disabled {{ background-color: #DDDDDD; color: #9A9A9A; }}
 
 QPushButton#botonDestacado {{
