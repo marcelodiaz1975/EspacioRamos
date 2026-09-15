@@ -82,6 +82,7 @@ class PantallaMensajesPredefinidos(QWidget):
 
         self.crud = PantallaCRUD(
             self.conn, "MensajePredefinido", "Mensajes predefinidos", _campos_mensaje_predefinido(),
+            compacto=True,
         )
         self.crud.tabla_widget.itemSelectionChanged.connect(self._actualizar_vista_previa)
         layout.addWidget(self.crud, stretch=1)

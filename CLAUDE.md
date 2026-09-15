@@ -36,8 +36,8 @@ por pantalla), salvo que se diga explícitamente que es solo para una.
     regla `QWidget#panelSolapa` lo pinte. Ya aplicado a todas las
     pantallas con solapas del sistema (Registro de ausencias, Cargos
     especiales, Pagos, Lista de espera, Liquidación mensual, Reservas,
-    Placas, Vista rápida, Aumentos y descuentos) — cualquier pantalla
-    nueva con `QTabWidget` tiene que sumarlo también.
+    Placas, Vista rápida, Aumentos y descuentos, Catálogos) — cualquier
+    pantalla nueva con `QTabWidget` tiene que sumarlo también.
   - Como referencia suelta (sin ser una solapa real), objectName
     `subtituloSeccion` da el mismo formato en un QLabel.
 - **Nivel 3** — título de un campo/selector puntual (objectName
@@ -99,6 +99,35 @@ dos columnas representan alternativas mutuamente excluyentes para la
 misma fila (un % puntual pisa al % general), solo una de las dos muestra
 el valor real por fila — la otra siempre muestra una rayita "-" — para
 que nunca se pueda leer un valor de más y quede ambiguo cuál rige.
+
+## Catálogos (PantallaCRUD genérica)
+
+Los catálogos simples (Edificios, Unidades, Consultorios, Responsables,
+Tipos de licencia, Listas editables, Condiciones y normas, Profesiones,
+Gastos operativos, Placas, Fechas especiales, Esquema de descuentos,
+Detalles complementarios, etc.) se arman todos con la misma clase
+genérica (`app/gui/crud_generico.py::PantallaCRUD`), así que el layout
+estándar se define UNA vez ahí y aplica a todos de una. Formato: solapa
+única "Listado" (`panelSolapa`, mismo criterio "ficha" que el resto),
+panel izquierdo con "Buscar" (filtro de texto libre — solo oculta filas,
+mismo criterio que "Filtros que solo afectan la visualización" — sin
+distinguir mayúsculas ni acentos) y, si no es de solo lectura, los
+botones Nuevo (`botonPrimario`), Editar y Eliminar (`botonSecundario`)
+debajo; tabla a la derecha; todo el panel dentro de un `QScrollArea`. La
+selección de fila ya se pinta del naranja suave definido en `paleta()`
+(es la paleta de selección de toda la aplicación, no algo puntual de acá).
+
+Dos pantallas (Profesionales, Mensajes predefinidos) insertan
+`PantallaCRUD` como un componente más dentro de su propia composición
+(un panel de documentación al lado, un filtro de categoría propio,
+etc.) en vez de usarla como pantalla de catálogo independiente — para
+esas se pasa `compacto=True`, que mantiene el layout viejo (título +
+fila de botones arriba de la tabla, sin solapa ni Buscar) para no
+romper su composición; los botones ahí sí llevan los mismos objectName
+compartidos (`botonPrimario`/`botonSecundario`), solo cambia la
+disposición. Si más adelante se quiere llevar esas dos también al
+formato solapa, hay que rediseñar su panel extra a mano, no alcanza con
+sacarles `compacto=True`.
 
 ## Selectores y fecha
 

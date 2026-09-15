@@ -170,6 +170,7 @@ class PantallaProfesionales(QWidget):
             self.conn, "Profesional", "Profesionales", _campos_profesional(),
             al_actualizar=self._al_actualizar_profesional,
             al_abrir_dialogo=_al_abrir_dialogo,
+            compacto=True,
         )
         self.crud_profesionales.tabla_widget.itemSelectionChanged.connect(self._actualizar_documentacion)
         splitter.addWidget(self.crud_profesionales)

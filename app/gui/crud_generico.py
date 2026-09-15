@@ -6,6 +6,7 @@ usa el Repositorio genérico (app/repositorio/base.py) para leer y escribir."""
 from __future__ import annotations
 
 import sqlite3
+import unicodedata
 import weakref
 from dataclasses import dataclass
 from typing import Callable
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -35,6 +37,28 @@ from app.gui.widgets.orden_tabla import OrdenTabla
 from app.repositorio.registro import obtener_repositorio
 
 _ID_REGISTRO = Qt.ItemDataRole.UserRole
+_ANCHO_CAMPO = 240  # ancho compartido por el panel izquierdo (buscar + botones), mismo criterio que otras pantallas
+
+
+def _titulo_campo(texto: str) -> QLabel:
+    """Jerarquía 3 (subtituloCampo): mismo criterio que el resto de las
+    pantallas para los títulos que van arriba de un selector."""
+    etiqueta = QLabel(texto)
+    etiqueta.setObjectName("subtituloCampo")
+    return etiqueta
+
+
+def _sin_acentos(texto: str) -> str:
+    """Mismo criterio que `selector_profesional._sin_acentos` (duplicado
+    acá, no importado: son dominios sin relación) — saca tildes
+    descomponiendo cada letra en base + diacrítico y quedándose con la
+    base."""
+    descompuesto = unicodedata.normalize("NFKD", texto)
+    return "".join(c for c in descompuesto if not unicodedata.combining(c))
+
+
+def _normalizar_busqueda(texto: str) -> str:
+    return _sin_acentos(texto).casefold()
 
 
 def _referencia_debil(funcion):
@@ -82,6 +106,7 @@ class PantallaCRUD(QWidget):
         al_guardar: Callable[[dict, sqlite3.Row | None], dict | None] | None = None,
         solo_lectura: bool = False,
         instalar_foco: bool = True,
+        compacto: bool = False,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -125,6 +150,17 @@ class PantallaCRUD(QWidget):
         # resolver (p. ej. Gastos operativos: no puede convivir un origen
         # Manual y uno Importado para el mismo concepto y período).
         self.al_guardar = al_guardar
+        # compacto: layout viejo (título + fila de botones arriba de la
+        # tabla, sin solapa/filtro) — para cuando una pantalla compuesta
+        # (Profesionales, Mensajes predefinidos) inserta este CRUD como un
+        # componente más dentro de su propia composición (con su propio
+        # título/filtro/paneles alrededor), en vez de usarlo como pantalla
+        # de catálogo independiente. Las pantallas de catálogo comunes usan
+        # el layout nuevo (default): solapa "Listado" (ficha, como el resto
+        # del sistema), panel de Buscar + botones a la izquierda, tabla a
+        # la derecha, todo dentro de un QScrollArea.
+        self.compacto = compacto
+        self.campo_buscar: QLineEdit | None = None
         self.boton_nuevo = self.boton_editar = self.boton_eliminar = None
         self._armar_ui(titulo)
         self.actualizar()
@@ -136,7 +172,7 @@ class PantallaCRUD(QWidget):
         self._orden.reiniciar()
         self.actualizar()
         if self.instalar_foco:
-            self.boton_nuevo.setFocus()
+            (self.campo_buscar or self.boton_nuevo).setFocus()
 
     def _armar_ui(self, titulo: str) -> None:
         layout = QVBoxLayout(self)
@@ -145,20 +181,72 @@ class PantallaCRUD(QWidget):
         etiqueta_titulo.setObjectName("tituloPantalla")
         layout.addWidget(etiqueta_titulo)
 
+        if self.compacto:
+            self._armar_botones_y_tabla(layout)
+            if self.instalar_foco:
+                self._foco = instalar_enter_avanza_foco(
+                    [self.boton_nuevo, self.boton_editar, self.boton_eliminar], parent=self,
+                )
+        else:
+            solapas = QTabWidget()
+            panel_solapa = QWidget()
+            panel_solapa.setObjectName("panelSolapa")
+            layout_solapa = QHBoxLayout(panel_solapa)
+
+            panel_izquierda = QWidget()
+            form = QVBoxLayout(panel_izquierda)
+            form.addWidget(_titulo_campo("Buscar"))
+            self.campo_buscar = QLineEdit()
+            self.campo_buscar.setFixedWidth(_ANCHO_CAMPO)
+            self.campo_buscar.textChanged.connect(self._aplicar_filtro_busqueda)
+            form.addWidget(self.campo_buscar)
+            self._armar_botones_y_tabla(form, ancho_botones=_ANCHO_CAMPO)
+            form.addStretch()
+            layout_solapa.addWidget(panel_izquierda)
+
+            layout_solapa.addWidget(self.tabla_widget, stretch=1)
+
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(panel_solapa)
+            solapas.addTab(scroll, "Listado")
+            layout.addWidget(solapas, stretch=1)
+
+            orden_foco = [self.campo_buscar, self.boton_nuevo, self.boton_editar, self.boton_eliminar]
+            if self.instalar_foco:
+                self._foco = instalar_enter_avanza_foco([w for w in orden_foco if w is not None], parent=self)
+
+        self._orden = OrdenTabla(self.tabla_widget, self.actualizar)
+
+    def _armar_botones_y_tabla(self, layout, ancho_botones: int | None = None) -> None:
+        """Arma los botones Nuevo/Editar/Eliminar (si no es de solo
+        lectura) y la tabla, y los agrega a `layout` — compartido entre el
+        layout compacto (fila de botones horizontal) y el nuevo (columna
+        vertical en el panel izquierdo, con ancho fijo)."""
         if not self.solo_lectura:
-            fila_botones = QHBoxLayout()
             self.boton_nuevo = QPushButton("Nuevo")
             self.boton_nuevo.setObjectName("botonPrimario")
             self.boton_nuevo.clicked.connect(self._nuevo)
             self.boton_editar = QPushButton("Editar")
+            self.boton_editar.setObjectName("botonSecundario")
             self.boton_editar.clicked.connect(self._editar)
             self.boton_eliminar = QPushButton("Eliminar")
+            self.boton_eliminar.setObjectName("botonSecundario")
             self.boton_eliminar.clicked.connect(self._eliminar)
-            fila_botones.addWidget(self.boton_nuevo)
-            fila_botones.addWidget(self.boton_editar)
-            fila_botones.addWidget(self.boton_eliminar)
-            fila_botones.addStretch()
-            layout.addLayout(fila_botones)
+            if ancho_botones is not None:
+                self.boton_nuevo.setFixedWidth(ancho_botones)
+                self.boton_editar.setFixedWidth(ancho_botones)
+                self.boton_eliminar.setFixedWidth(ancho_botones)
+                layout.addWidget(self.boton_nuevo)
+                layout.addWidget(self.boton_editar)
+                layout.addWidget(self.boton_eliminar)
+            else:
+                fila_botones = QHBoxLayout()
+                fila_botones.addWidget(self.boton_nuevo)
+                fila_botones.addWidget(self.boton_editar)
+                fila_botones.addWidget(self.boton_eliminar)
+                fila_botones.addStretch()
+                layout.addLayout(fila_botones)
 
         self.tabla_widget = QTableWidget()
         self.tabla_widget.setColumnCount(len(self.campos))
@@ -168,13 +256,28 @@ class PantallaCRUD(QWidget):
         self.tabla_widget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         if not self.solo_lectura:
             self.tabla_widget.doubleClicked.connect(self._editar)
-        layout.addWidget(self.tabla_widget, stretch=1)
+        if ancho_botones is None:
+            layout.addWidget(self.tabla_widget, stretch=1)
 
-        if self.instalar_foco:
-            self._foco = instalar_enter_avanza_foco(
-                [self.boton_nuevo, self.boton_editar, self.boton_eliminar], parent=self,
+    def _aplicar_filtro_busqueda(self, *_args) -> None:
+        """Solo cambia qué filas se ven — mismo criterio que los filtros
+        de Vista rápida/Aumentos (ver CLAUDE.md, "Filtros que solo afectan
+        la visualización"). Busca por cualquier parte del texto de
+        cualquier columna visible, sin distinguir mayúsculas ni acentos
+        (mismo criterio que el buscador de profesional)."""
+        if self.campo_buscar is None:
+            return
+        buscado = _normalizar_busqueda(self.campo_buscar.text().strip())
+        for fila in range(self.tabla_widget.rowCount()):
+            if not buscado:
+                self.tabla_widget.setRowHidden(fila, False)
+                continue
+            texto_fila = " ".join(
+                self.tabla_widget.item(fila, col).text()
+                for col in range(self.tabla_widget.columnCount())
+                if self.tabla_widget.item(fila, col) is not None
             )
-        self._orden = OrdenTabla(self.tabla_widget, self.actualizar)
+            self.tabla_widget.setRowHidden(fila, buscado not in _normalizar_busqueda(texto_fila))
 
     def actualizar(self) -> None:
         registros = self.repositorio.listar()
@@ -190,6 +293,7 @@ class PantallaCRUD(QWidget):
                     item.setData(_ID_REGISTRO, registro[self.repositorio.clave_primaria])
                 self.tabla_widget.setItem(fila_idx, col_idx, item)
         self.tabla_widget.resizeColumnsToContents()
+        self._aplicar_filtro_busqueda()
 
     def _clave_orden(self, columna: int):
         campo = self.campos[columna]

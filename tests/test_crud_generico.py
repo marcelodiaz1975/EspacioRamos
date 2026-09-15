@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox, QScrollArea, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -106,3 +106,63 @@ def test_pantalla_crud_eliminar_con_dependientes_no_rompe(qtbot, conn):
 
     pantalla._eliminar()  # FK activa: debe fallar con IntegrityError y no propagarlo
     assert conn.execute("SELECT COUNT(*) c FROM Edificio").fetchone()["c"] == 1
+
+
+def test_pantalla_crud_usa_formato_solapa_con_panel_izquierdo(qtbot, conn):
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
+    qtbot.addWidget(pantalla)
+    tabs = pantalla.findChildren(QTabWidget)
+    assert len(tabs) == 1
+    assert tabs[0].tabText(0) == "Listado"
+    scrolls = pantalla.findChildren(QScrollArea)
+    assert len(scrolls) == 1
+    assert scrolls[0].widget().objectName() == "panelSolapa"
+
+
+def test_pantalla_crud_botones_tienen_los_estilos_compartidos(qtbot, conn):
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_nuevo.objectName() == "botonPrimario"
+    assert pantalla.boton_editar.objectName() == "botonSecundario"
+    assert pantalla.boton_eliminar.objectName() == "botonSecundario"
+
+
+def test_pantalla_crud_buscar_filtra_filas_por_cualquier_columna(qtbot, conn):
+    conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Norte', 'Ramos Mejía')")
+    conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Sur', 'Haedo')")
+    conn.commit()
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
+    qtbot.addWidget(pantalla)
+
+    pantalla.campo_buscar.setText("haedo")
+    ocultas = [pantalla.tabla_widget.isRowHidden(f) for f in range(pantalla.tabla_widget.rowCount())]
+    assert ocultas.count(True) == 1
+
+    pantalla.campo_buscar.setText("")
+    assert all(not pantalla.tabla_widget.isRowHidden(f) for f in range(pantalla.tabla_widget.rowCount()))
+
+
+def test_pantalla_crud_buscar_ignora_mayusculas_y_acentos(qtbot, conn):
+    conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Norte', 'Ramos Mejía')")
+    conn.commit()
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
+    qtbot.addWidget(pantalla)
+    pantalla.campo_buscar.setText("MEJIA")
+    assert pantalla.tabla_widget.isRowHidden(0) is False
+
+
+def test_pantalla_crud_solo_lectura_no_tiene_botones_pero_si_buscar(qtbot, conn):
+    pantalla = PantallaCRUD(conn, "EsquemaDescuentos", "Esquema de descuentos", [
+        Campo("HorasSemanalesDesde", "Desde", tipo="numero"),
+    ], solo_lectura=True)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_nuevo is None
+    assert pantalla.campo_buscar is not None
+
+
+def test_pantalla_crud_compacto_mantiene_el_layout_viejo(qtbot, conn):
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio(), compacto=True)
+    qtbot.addWidget(pantalla)
+    assert pantalla.findChildren(QTabWidget) == []
+    assert pantalla.campo_buscar is None
+    assert pantalla.boton_editar.objectName() == "botonSecundario"
