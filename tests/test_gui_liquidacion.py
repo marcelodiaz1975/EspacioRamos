@@ -56,6 +56,13 @@ def test_lista_solo_profesionales_categoria_r(qtbot, conn):
     assert "Gómez" in pantalla.panel_emision.tabla.item(0, 1).text()
 
 
+def test_paneles_de_liquidacion_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_emision.objectName() == "panelSolapa"
+    assert pantalla.panel_estado_cuenta.objectName() == "panelSolapa"
+
+
 def test_nombre_profesional_usa_formato_canonico(qtbot, conn):
     _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
     pantalla = ProcesoLiquidacion(conn)

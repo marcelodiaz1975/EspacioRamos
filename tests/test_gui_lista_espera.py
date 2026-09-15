@@ -66,6 +66,13 @@ def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn):
     assert pantalla.combo_profesional.itemText(0) == "R1 - Virginia Lo Veci"
 
 
+def test_panel_nuevo_pedido_usa_el_fondo_claro_de_la_solapa(qtbot, conn):
+    pantalla = PantallaListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    solapas = pantalla.findChild(QTabWidget)
+    assert solapas.widget(0).objectName() == "panelSolapa"
+
+
 def test_combo_profesional_incluye_inactivos_y_contactos(qtbot, conn):
     """Confirmado por la clienta: acá se agenda lo que pide CUALQUIER
     profesional, esté activo en el espacio o no — categoría X (inactivo)

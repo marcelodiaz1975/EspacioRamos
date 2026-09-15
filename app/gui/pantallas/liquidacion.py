@@ -99,6 +99,7 @@ class ProcesoLiquidacion(QWidget):
 class _PanelEmisionArchivos(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._filas: list[dict] = []
         self._armar_ui()
@@ -345,6 +346,7 @@ class _PanelEmisionArchivos(QWidget):
 class _PanelEstadoCuentaLiquidaciones(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._armar_ui()
         self.actualizar()

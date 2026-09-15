@@ -190,6 +190,7 @@ class PantallaPlacas(QWidget):
 
     def _armar_panel_buscar(self) -> QWidget:
         panel = QWidget()
+        panel.setObjectName("panelSolapa")
         layout_principal = QHBoxLayout(panel)
 
         panel_filtros = QWidget()
@@ -462,6 +463,7 @@ class PantallaPlacas(QWidget):
 
     def _armar_panel_imprimir(self) -> QWidget:
         panel = QWidget()
+        panel.setObjectName("panelSolapa")
         layout_principal = QHBoxLayout(panel)
 
         columna_izquierda = QVBoxLayout()

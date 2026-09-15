@@ -48,6 +48,17 @@ def test_solapas_correctas(qtbot, conn):
     ]
 
 
+def test_paneles_de_las_tres_solapas_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
+    """La solapa "Grilla semanal" es un QScrollArea — el que necesita el
+    objectName "panelSolapa" es su widget interno, no el QScrollArea."""
+    pantalla = PantallaGrillaOperativa(conn)
+    qtbot.addWidget(pantalla)
+    tabs = pantalla.layout().itemAt(1).widget()
+    assert tabs.widget(0).widget().objectName() == "panelSolapa"
+    assert tabs.widget(1).objectName() == "panelSolapa"
+    assert tabs.widget(2).objectName() == "panelSolapa"
+
+
 def test_filtros_de_valores_arrancan_colapsados_con_resumen(qtbot, conn):
     _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"')
     conn.commit()

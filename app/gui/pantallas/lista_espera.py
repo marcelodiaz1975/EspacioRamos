@@ -217,6 +217,7 @@ class PantallaListaEspera(QWidget):
         # tabBarAutoHide, que acá no se usa a propósito.
         solapas = QTabWidget()
         panel_nuevo_pedido = QWidget()
+        panel_nuevo_pedido.setObjectName("panelSolapa")
         fila_columnas = QHBoxLayout(panel_nuevo_pedido)
         solapas.addTab(panel_nuevo_pedido, "Nuevo pedido")
 

@@ -123,22 +123,20 @@ def test_solapas_tienen_apariencia_de_ficha_de_papel():
     fondo del panel) — el borde la envuelve arriba/izquierda/derecha
     nada más. La inactiva conserva su fondo y su borde de abajo, y baja
     unos px para quedar "detrás" de la activa, como una ficha. El borde
-    (pane y solapas) usa el tono oscuro (`fondo`), no negro — corregido
-    a pedido de la clienta al revisar Registro de ausencias, que pidió
-    dos tonos de gris (claro para la activa/el contenido, oscuro para
-    la inactiva y el borde) en vez de un borde negro."""
-    for modo_oscuro, superficie, fondo in (
-        (False, "#FFFFFF", "#F5F5F5"), (True, "#2A2E33", "#1E2124"),
-    ):
+    (pane y solapas) es negro — se probó en un gris oscuro a tono con
+    el fondo de la inactiva al revisar Registro de ausencias, pero la
+    clienta pidió volver al negro al revisar Vista rápida/Estadísticas,
+    para todas las pantallas ("como está en Lista de espera")."""
+    for modo_oscuro, superficie in ((False, "#FFFFFF"), (True, "#2A2E33")):
         hoja = hoja_estilos(modo_oscuro)
         bloque_panel = hoja.split("QTabWidget::pane {")[1].split("}")[0]
         bloque_tab = hoja.split("QTabBar::tab {")[1].split("}")[0]
         bloque_seleccionada = hoja.split("QTabBar::tab:selected {")[1].split("}")[0]
         bloque_inactiva = hoja.split("QTabBar::tab:!selected {")[1].split("}")[0]
         assert superficie in bloque_panel
-        assert f"border: 1px solid {fondo}" in bloque_panel
+        assert "border: 1px solid #000000" in bloque_panel
         assert "top: -1px" in bloque_panel
-        assert f"border: 1px solid {fondo}" in bloque_tab
+        assert "border: 1px solid #000000" in bloque_tab
         assert superficie in bloque_seleccionada
         assert f"border-bottom-color: {superficie}" in bloque_seleccionada
         assert "margin-top: 2px" in bloque_inactiva

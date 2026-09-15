@@ -33,23 +33,25 @@ en Lista de espera, a replicar en el resto de a poco):
 
         Apariencia de "ficha de papel" (probada primero en Placas,
         aprobada por la clienta y llevada acá para todas las
-        pantallas), en dos tonos de gris (ya no negro, a pedido de la
-        clienta al revisar Registro de ausencias): la solapa ACTIVA usa
-        el tono CLARO (`t['superficie']`) tanto de fondo como de borde,
-        y ese mismo fondo claro es el que también funde con el panel de
-        contenido (QTabWidget::pane, mismo `t['superficie']`) — pierde
-        el borde de abajo (`border-bottom-color` igual al fondo del
-        panel) para que el borde la envuelva arriba/izquierda/derecha
-        nada más, como si el panel fuera la continuación de la solapa.
-        La solapa INACTIVA usa el tono OSCURO (`t['fondo']`) de fondo Y
-        de borde, con su borde completo incluida la línea de abajo, y
-        baja 2px (`margin-top`) para quedar visualmente "detrás" de la
-        activa, como una ficha de fichero de papel; el borde de
-        `QTabWidget::pane` (lo que enmarca el contenido) usa ese mismo
-        tono oscuro, en vez de negro. `QTabWidget::pane` sube 1px
-        (`top: -1px`) para que su borde superior quede tapado
-        exactamente donde se apoya la solapa activa, sin una línea
-        doble ahí.
+        pantallas): el FONDO usa dos tonos de gris — la solapa ACTIVA
+        usa el tono CLARO (`t['superficie']`), que es el mismo fondo que
+        el panel de contenido (QTabWidget::pane, también
+        `t['superficie']`) — pierde el borde de abajo
+        (`border-bottom-color` igual al fondo del panel) para que el
+        borde la envuelva arriba/izquierda/derecha nada más, como si el
+        panel fuera la continuación de la solapa. La solapa INACTIVA usa
+        el tono OSCURO (`t['fondo']`, el mismo fondo que el resto de la
+        ventana — "el exterior") de fondo, con su borde completo incluida
+        la línea de abajo, y baja 2px (`margin-top`) para quedar
+        visualmente "detrás" de la activa, como una ficha de fichero de
+        papel. El BORDE (pane y las dos solapas) es negro
+        (`#000000`) — se probó en un gris oscuro a tono con el fondo de
+        la solapa inactiva al revisar Registro de ausencias, pero la
+        clienta pidió volver al negro al revisar Vista rápida/
+        Estadísticas, para todas las pantallas ("como está en Lista de
+        espera"). `QTabWidget::pane` sube 1px (`top: -1px`) para que su
+        borde superior quede tapado exactamente donde se apoya la solapa
+        activa, sin una línea doble ahí.
 
         El fondo claro de la solapa activa NO llega solo por estar
         dentro del `QTabWidget::pane`: el widget que se agrega con
@@ -148,13 +150,13 @@ QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {t['texto'
 QLabel#subtituloCampo {{ }}
 QTabWidget::pane {{
     background-color: {t['superficie']};
-    border: 1px solid {t['fondo']};
+    border: 1px solid #000000;
     top: -1px;
 }}
 QTabBar::tab {{
     font-size: 14px; font-weight: bold; color: {t['texto']};
     background-color: {t['fondo']};
-    border: 1px solid {t['fondo']};
+    border: 1px solid #000000;
     padding: 6px 14px;
 }}
 QTabBar::tab:selected {{

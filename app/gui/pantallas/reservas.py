@@ -253,6 +253,7 @@ class PantallaReservas(QWidget):
 class _PanelReservasRegulares(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._reservas: list[sqlite3.Row] = []
         self._armar_ui()
@@ -799,6 +800,7 @@ class _PanelReservasRegulares(QWidget):
 class _PanelReservasAisladas(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._reservas: list[sqlite3.Row] = []
         self._armar_ui()

@@ -47,6 +47,13 @@ def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
         assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
 
 
+def test_paneles_de_reservas_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_regulares.objectName() == "panelSolapa"
+    assert pantalla.panel_aisladas.objectName() == "panelSolapa"
+
+
 def test_crear_reserva_regular_sin_conflicto_persiste(qtbot, conn):
     _preparar(conn)
     pantalla = PantallaReservas(conn)

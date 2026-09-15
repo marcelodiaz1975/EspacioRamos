@@ -16,19 +16,28 @@ por pantalla), salvo que se diga explícitamente que es solo para una.
 - **Nivel 2** — nombre de la solapa/sección (una solapa real de
   `QTabWidget`, no una etiqueta simulándola; se muestra la barra de
   solapas aunque haya una sola). Texto 14px, negrita, sin itálica, color
-  de texto normal. Apariencia de "ficha de papel", dos tonos de gris (NO
-  negro):
-  - Solapa ACTIVA: fondo y borde en tono CLARO (`t['superficie']`), sin
-    borde abajo (se funde con el panel de contenido).
-  - Solapa INACTIVA: fondo y borde en tono OSCURO (`t['fondo']`), con
-    todo el borde, y baja 2px para quedar "detrás" de la activa.
-  - El panel de contenido (`QTabWidget::pane`) usa el mismo tono claro y
-    el mismo borde oscuro que la solapa activa.
-  - **Importante:** ese fondo claro NO llega solo al widget de cada
-    pestaña — hay que darle objectName `"panelSolapa"` al widget de más
-    afuera que se pasa a `addTab(...)` (o al widget interno de un
-    `QScrollArea` si la pestaña scrollea) para que la regla
-    `QWidget#panelSolapa` lo pinte.
+  de texto normal. Apariencia de "ficha de papel":
+  - Solapa ACTIVA: fondo en tono CLARO (`t['superficie']`), sin borde
+    abajo (se funde con el panel de contenido).
+  - Solapa INACTIVA: fondo en tono OSCURO (`t['fondo']`, el mismo fondo
+    que el resto de la ventana), con todo el borde, y baja 2px para
+    quedar "detrás" de la activa.
+  - El panel de contenido (`QTabWidget::pane`) usa el mismo tono claro
+    que la solapa activa.
+  - Borde (pane y las dos solapas): NEGRO (`#000000`) — se probó en un
+    gris oscuro a tono con la solapa inactiva al revisar Registro de
+    ausencias, pero la clienta pidió volver al negro para todas las
+    pantallas al revisar Vista rápida/Estadísticas ("como está en Lista
+    de espera", la referencia visual del estilo).
+  - **Importante:** el fondo claro de la solapa activa NO llega solo al
+    widget de cada pestaña — hay que darle objectName `"panelSolapa"` al
+    widget de más afuera que se pasa a `addTab(...)` (o al widget
+    interno de un `QScrollArea` si la pestaña scrollea) para que la
+    regla `QWidget#panelSolapa` lo pinte. Ya aplicado a todas las
+    pantallas con solapas del sistema (Registro de ausencias, Cargos
+    especiales, Pagos, Lista de espera, Liquidación mensual, Reservas,
+    Placas, Vista rápida) — cualquier pantalla nueva con `QTabWidget`
+    tiene que sumarlo también.
   - Como referencia suelta (sin ser una solapa real), objectName
     `subtituloSeccion` da el mismo formato en un QLabel.
 - **Nivel 3** — título de un campo/selector puntual (objectName

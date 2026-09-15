@@ -472,6 +472,7 @@ class PantallaGrillaOperativa(QWidget):
         self.promedios_valores = _PanelPromedios()
 
         panel_grilla = QWidget()
+        panel_grilla.setObjectName("panelSolapa")
         layout_grilla = QVBoxLayout(panel_grilla)
         self.grilla = GrillaOperativaWidget(conn)
         self.grilla.combo_modo.currentIndexChanged.connect(self._actualizar_leyenda)
@@ -489,6 +490,7 @@ class PantallaGrillaOperativa(QWidget):
         tabs.addTab(scroll_grilla, "Grilla semanal")
 
         panel_valores = QWidget()
+        panel_valores.setObjectName("panelSolapa")
         layout_valores = QHBoxLayout(panel_valores)
         self.filtros_valores = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_valores)
         layout_valores.addWidget(self.filtros_valores)
@@ -500,6 +502,7 @@ class PantallaGrillaOperativa(QWidget):
         tabs.addTab(panel_valores, "Valores de los consultorios")
 
         panel_estadisticas = QWidget()
+        panel_estadisticas.setObjectName("panelSolapa")
         layout_estadisticas = QHBoxLayout(panel_estadisticas)
         self.filtros_estadisticas = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_estadisticas)
         layout_estadisticas.addWidget(self.filtros_estadisticas)

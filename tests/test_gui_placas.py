@@ -55,6 +55,14 @@ def test_tiene_dos_solapas(qtbot, conn):
     assert solapas.tabText(1) == "Imprimir placas"
 
 
+def test_paneles_de_placas_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
+    pantalla = PantallaPlacas(conn)
+    qtbot.addWidget(pantalla)
+    solapas = pantalla.findChild(QTabWidget)
+    assert solapas.widget(0).objectName() == "panelSolapa"
+    assert solapas.widget(1).objectName() == "panelSolapa"
+
+
 def test_columnas_de_la_tabla_arrancan_con_localidad(qtbot, conn):
     pantalla = PantallaPlacas(conn)
     qtbot.addWidget(pantalla)
