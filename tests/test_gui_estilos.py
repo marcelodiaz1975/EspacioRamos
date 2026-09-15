@@ -38,12 +38,28 @@ def test_paleta_oscura_tambien_tiene_resalte_naranja_suave():
     assert p.color(QPalette.ColorRole.Highlight).name() == "#8a5a32"
 
 
-def test_hoja_estilos_tiene_boton_secundario_celeste_suave():
-    """botonSecundario: mismo padding que botonAccion, pero con un
-    celeste suave — para botones que necesitan destacarse un poco sin
-    llegar al azul fuerte de botonPrimario."""
-    assert "botonSecundario" in hoja_estilos(False)
-    assert "botonSecundario" in hoja_estilos(True)
+def test_boton_secundario_usa_el_mismo_gris_de_fuera_del_panel():
+    """botonSecundario: mismo padding que botonAccion. Probado primero
+    en celeste suave, pasa al mismo gris que queda por fuera del panel
+    del formulario (`t['fondo']`, texto `t['texto']`) al revisar
+    Registro de ausencias — se lee como "el gris de afuera metido acá"
+    en vez de un color propio."""
+    for modo_oscuro, fondo, texto in ((False, "#F5F5F5", "#1A1A1A"), (True, "#1E2124", "#E8E6E3")):
+        bloque = hoja_estilos(modo_oscuro).split("QPushButton#botonSecundario {")[1].split("}")[0]
+        assert f"background-color: {fondo}" in bloque
+        assert f"color: {texto}" in bloque
+
+
+def test_boton_primario_usa_gris_oscuro_fijo_con_texto_blanco():
+    """Probado primero en azul fuerte (COLOR_NIVEL_1), la clienta pidió
+    pasarlo a un gris oscuro fijo (no depende del modo claro/oscuro,
+    igual que antes con el azul) manteniendo el texto blanco."""
+    from app.gui.estilos import COLOR_BOTON_PRIMARIO, COLOR_TEXTO_CLARO
+
+    for modo_oscuro in (False, True):
+        bloque = hoja_estilos(modo_oscuro).split("QPushButton#botonPrimario {")[1].split("}")[0]
+        assert f"background-color: {COLOR_BOTON_PRIMARIO}" in bloque
+        assert f"color: {COLOR_TEXTO_CLARO}" in bloque
 
 
 def test_boton_primario_y_secundario_tienen_borde_negro_finito():
