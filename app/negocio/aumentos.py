@@ -76,16 +76,28 @@ def _es_correccion_del_mes(conn: sqlite3.Connection, periodo: str) -> bool:
     return bool(obtener_repositorio(conn, "AumentoAplicado").listar(Periodo=periodo))
 
 
+def _redondear_a_multiplo(valor: float, multiplo: float | None) -> float:
+    if not multiplo:
+        return valor
+    return round(valor / multiplo) * multiplo
+
+
 def simular_aumento(
     conn: sqlite3.Connection, *, porcentaje_general: float, valores_override: dict[int, dict] | None = None,
-    porcentajes_override: dict[int, float] | None = None, periodo: str | None = None,
+    porcentajes_override: dict[int, float] | None = None, redondear_a: float | None = None,
+    periodo: str | None = None,
 ) -> list[FilaSimulacion]:
     """Tabla de vista previa (DC-10 §1.2 pasos 2-4): valor actual y valor
     nuevo de cada consultorio, calculado con el % general salvo que el
     consultorio tenga su propio % puntual (`porcentajes_override`, la
     solapa "Aumentos" lo llama "porcentaje diferencial" — pisa al general
     para ese consultorio) o, más específico todavía, un valor final ya
-    calculado a mano (`valores_override`, en $ directos).
+    calculado a mano (`valores_override`, en $ directos, que se toma tal
+    cual y no pasa por `redondear_a`).
+
+    `redondear_a`, si se pasa (1/10/100/1000, checkbox "Redondear
+    valores" de la solapa "Aumentos"), redondea el valor nuevo calculado
+    al múltiplo más cercano de ese número.
 
     Si ya se corrió un aumento este mismo mes (`periodo`, default el mes en
     curso), el % (general o diferencial) se aplica sobre ValorHoraXAnterior
@@ -104,10 +116,10 @@ def simular_aumento(
         override = valores_override.get(c["IdConsultorio"], {})
         valor_reg_nuevo = override.get("regular")
         if valor_reg_nuevo is None:
-            valor_reg_nuevo = base_regular * (1 + porcentaje / 100)
+            valor_reg_nuevo = _redondear_a_multiplo(base_regular * (1 + porcentaje / 100), redondear_a)
         valor_ais_nuevo = override.get("aislada")
         if valor_ais_nuevo is None:
-            valor_ais_nuevo = base_aislada * (1 + porcentaje / 100)
+            valor_ais_nuevo = _redondear_a_multiplo(base_aislada * (1 + porcentaje / 100), redondear_a)
         filas.append(FilaSimulacion(
             id_consultorio=c["IdConsultorio"],
             valor_regular_actual=c["ValorHoraRegularActual"], valor_regular_nuevo=valor_reg_nuevo,
@@ -199,7 +211,7 @@ def actualizar_esquema_descuentos(conn: sqlite3.Connection, tramos: list[tuple[f
 
 def confirmar_aumento(
     conn: sqlite3.Connection, *, porcentaje_general: float, valores_override: dict[int, dict] | None = None,
-    porcentajes_override: dict[int, float] | None = None,
+    porcentajes_override: dict[int, float] | None = None, redondear_a: float | None = None,
     nuevo_esquema_descuentos: list[tuple[float, float, float]] | None = None,
     periodo: str | None = None, observacion: str | None = None,
 ) -> ResumenAumento:
@@ -212,7 +224,7 @@ def confirmar_aumento(
 
     filas = simular_aumento(
         conn, porcentaje_general=porcentaje_general, valores_override=valores_override,
-        porcentajes_override=porcentajes_override, periodo=periodo,
+        porcentajes_override=porcentajes_override, redondear_a=redondear_a, periodo=periodo,
     )
     hoy = fecha_actual(conn).isoformat()
     id_aumento = obtener_repositorio(conn, "AumentoAplicado").crear(

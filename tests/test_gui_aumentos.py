@@ -110,6 +110,54 @@ def test_diferencial_pisa_al_general_y_muestra_rayita_cruzada(qtbot, conn):
     assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.500,00"
 
 
+def test_boton_editar_tiene_el_texto_pedido(qtbot, conn):
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_aumentos.boton_editar.text() == "Editar porcentaje diferencial"
+
+
+def test_redondear_valores_activado_por_defecto_en_multiplos_de_1(qtbot, conn):
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aumentos
+    assert panel.check_redondear.isChecked() is True
+    assert panel._radios_multiplo[1].isChecked() is True
+    assert panel.panel_multiplo.isEnabled() is True
+
+
+def test_destildar_redondear_deshabilita_selector_de_multiplo(qtbot, conn):
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aumentos
+    panel.check_redondear.setChecked(False)
+    assert panel.panel_multiplo.isEnabled() is False
+    assert panel._redondear_a() is None
+
+
+def test_redondear_a_multiplo_de_100_redondea_los_valores_nuevos(qtbot, conn):
+    _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aumentos
+    panel.spin_porcentaje.setValue(13.37)
+    panel._radios_multiplo[100].setChecked(True)
+    panel._simular()
+    valor = panel.tabla.item(0, _COL_REGULAR_NUEVO).text()
+    # 1000 * 1.1337 = 1133.70 -> redondeado a múltiplo de 100 -> 1100
+    assert valor == "$ 1.100,00"
+
+
+def test_sin_redondear_conserva_los_centavos(qtbot, conn):
+    _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    pantalla = PantallaAumentos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aumentos
+    panel.check_redondear.setChecked(False)
+    panel.spin_porcentaje.setValue(13.37)
+    panel._simular()
+    assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.133,70"
+
+
 def test_columna_diferencial_no_editable_sin_tildar_editar(qtbot, conn):
     _crear_edificio_con_consultorio(conn)
     pantalla = PantallaAumentos(conn)
@@ -256,7 +304,8 @@ def test_esquema_no_reconocido_muestra_aviso_y_tramos_vigentes_en_preview(qtbot,
     assert panel.etiqueta_aviso.isHidden() is False
     assert panel.spin_horas.value() == 2.0  # default, no se pudo reconocer
     assert panel.tabla_preview.rowCount() == 2
-    assert panel.tabla_preview.item(0, 1).text() == "10.0"
+    assert panel.tabla_preview.item(0, 1).text() == "10hs"
+    assert panel.tabla_preview.item(1, 0).text() == "Más de 10hs"  # última fila: fusionada
     assert panel.tabla_preview.item(1, 2).text() == "5,00%"
 
 
@@ -268,7 +317,7 @@ def test_esquema_editar_un_campo_oculta_el_aviso_y_pasa_a_vista_generada(qtbot, 
 
     panel.spin_horas.setValue(3)
     assert panel.etiqueta_aviso.isHidden() is True
-    assert panel.tabla_preview.item(0, 1).text() == "3.0"  # ahora es la vista previa generada, no la vigente
+    assert panel.tabla_preview.item(0, 1).text() == "3hs"  # ahora es la vista previa generada, no la vigente
 
 
 def test_esquema_confirmar_cambios_reemplaza_el_vigente(qtbot, conn):

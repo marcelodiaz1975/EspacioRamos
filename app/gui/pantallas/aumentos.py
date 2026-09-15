@@ -4,33 +4,44 @@
 consultorios (filtrables por Localidad/Edificio/Unidad SOLO para la
 visualización — el aumento que se confirma siempre alcanza a todos los
 consultorios, se estén viendo o no) y permite, fila por fila, pisar ese %
-general con un "porcentaje diferencial" propio (botón "Editar" habilita
-esa columna) — nunca se muestran los dos valores juntos en una fila, el
-que no aplica queda con una rayita "-". Confirmar reusa
-app.negocio.aumentos.confirmar_aumento, que además regenera (dejándolas
-"Regenerada no enviada") las liquidaciones ya emitidas del período
-afectado. "Deshacer último movimiento" reusa
+general con un "porcentaje diferencial" propio (botón "Editar porcentaje
+diferencial" habilita esa columna) — nunca se muestran los dos valores
+juntos en una fila, el que no aplica queda con una rayita "-". El
+checkbox "Redondear valores" (activado por defecto, a múltiplo de 1)
+redondea los valores nuevos calculados al múltiplo elegido (1/10/100/
+1000) — no afecta los valores fijados a mano (override en $, no en
+%). Confirmar reusa app.negocio.aumentos.confirmar_aumento, que además
+regenera (dejándolas "Regenerada no enviada") las liquidaciones ya
+emitidas del período afectado. "Deshacer último movimiento" reusa
 app.negocio.aumentos.deshacer_ultimo_aumento, que revierte la corrida más
 reciente completa (valores de consultorio, esquema de descuentos si lo
 había tocado, y liquidaciones regeneradas).
 
 "Esquema de descuentos" es el único lugar desde donde se puede tocar el
 esquema de descuentos (DC-10 §1.1: "solo modificable al ejecutar análisis
-de aumentos"; la pantalla de catálogo lo muestra en solo lectura). En vez
-del editor libre de tramos (Desde/Hasta/%) de la versión anterior, ahora
-se arma con 3 parámetros ("Cantidad de horas", "Porcentaje descuento",
-"Porcentaje tope descuento" — ver app.negocio.aumentos.generar_tramos_
-esquema). Al entrar a la pantalla se intenta reconocer esos 3 parámetros
-a partir del esquema vigente (app.negocio.aumentos.detectar_parametros_
-esquema, por "ida y vuelta": si regenerarlos con los 3 candidatos da
-exactamente los mismos tramos, son esos) para precargar los campos y la
-vista previa con lo que está vigente de verdad. Si no se puede reconocer (ej. un historial viejo cargado a mano con el
-editor libre que existía antes, que no corresponde a ningún juego de
-estos 3 parámetros) se avisa con un cartel, los 3 campos quedan en sus
-valores por defecto (2/1/25) pero la vista previa muestra los tramos
-vigentes TAL CUAL (no los que generarían esos 3 default) hasta que se
-edite algún campo — recién ahí la vista previa pasa a mostrar en vivo lo
-que se generaría. "Confirmar cambios" pide la misma confirmación que un
+de aumentos"; la pantalla de catálogo lo muestra en solo lectura), y la
+única forma de armarlo es con estos 3 parámetros ("Cantidad de horas",
+"Porcentaje descuento", "Porcentaje tope descuento" — ver
+app.negocio.aumentos.generar_tramos_esquema): no hay (ni va a haber) un
+editor de tramos libres como en la versión vieja de esta pantalla. Al
+entrar a la pantalla se intenta reconocer esos 3 parámetros a partir del
+esquema vigente (app.negocio.aumentos.detectar_parametros_esquema, por
+"ida y vuelta": si regenerarlos con los 3 candidatos da exactamente los
+mismos tramos, son esos) para precargar los campos y la vista previa con
+lo que está vigente de verdad — de acá en adelante esto siempre va a
+poder reconocerse, porque el propio seed y esta pantalla son las únicas
+fuentes de tramos. El único caso en que no se puede reconocer es una
+base que ya traía un esquema viejo cargado a mano con el editor libre
+que existía ANTES de este cambio: ahí se avisa con un cartel, los 3
+campos quedan en sus valores por defecto (2/1/25) pero la vista previa
+muestra los tramos vigentes TAL CUAL (no los que generarían esos 3
+default) hasta que se edite algún campo — recién ahí la vista previa
+pasa a mostrar en vivo lo que se generaría. La vista previa muestra
+"Xhs" (sin decimales) en Horas desde/Horas hasta, salvo la última fila
+(la que llega al tope): esa queda fusionada como "Más de Xhs", porque en
+los hechos ese tramo es abierto (el descuento se queda topado más allá,
+ver `valores.obtener_porcentaje_descuento`) y repetir un "Hasta" ahí no
+significaría nada. "Confirmar cambios" pide la misma confirmación que un
 aumento (avisa que se modifican valores en el sistema)."""
 from __future__ import annotations
 
@@ -38,14 +49,18 @@ import sqlite3
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -81,7 +96,8 @@ _COL_AISLADA_ACTUAL = 9
 _COL_AISLADA_NUEVO = 10
 _COL_DIF_AISLADA = 11
 
-_ANCHO_CAMPO = 260  # ancho compartido por todo lo que va en el panel izquierdo de "Aumentos"
+_ANCHO_CAMPO = 300  # ancho compartido por todo lo que va en el panel izquierdo de "Aumentos"
+_MULTIPLOS_REDONDEO = (1, 10, 100, 1000)
 _GUION = "-"
 _TODAS = object()  # sentinel para "Todas/Todos" en los combos de filtro, distinto de una localidad real en None
 
@@ -107,6 +123,10 @@ def _titulo_campo(texto: str) -> QLabel:
 
 def _fmt_porcentaje(valor: float) -> str:
     return f"{valor:.2f}".replace(".", ",") + "%"
+
+
+def _fmt_horas(valor: float) -> str:
+    return f"{round(valor):d}hs"
 
 
 def _celda_no_editable(texto: str) -> QTableWidgetItem:
@@ -198,6 +218,26 @@ class _PanelAumentos(QWidget):
         self.spin_porcentaje.setSuffix(" %")
         form.addWidget(self.spin_porcentaje)
 
+        self.check_redondear = QCheckBox("Redondear valores")
+        self.check_redondear.setChecked(True)
+        self.check_redondear.toggled.connect(self._al_tildar_redondear)
+        form.addWidget(self.check_redondear)
+
+        panel_multiplo = QWidget()
+        grilla_multiplo = QGridLayout(panel_multiplo)
+        grilla_multiplo.setContentsMargins(0, 0, 0, 0)
+        self._grupo_multiplo = QButtonGroup(self)
+        self._radios_multiplo: dict[int, QRadioButton] = {}
+        for indice, multiplo in enumerate(_MULTIPLOS_REDONDEO):
+            radio = QRadioButton(f"Múltiplos de {multiplo}")
+            radio.setChecked(multiplo == 1)
+            radio.toggled.connect(self._al_cambiar_multiplo)
+            self._grupo_multiplo.addButton(radio)
+            self._radios_multiplo[multiplo] = radio
+            grilla_multiplo.addWidget(radio, indice // 2, indice % 2)
+        form.addWidget(panel_multiplo)
+        self.panel_multiplo = panel_multiplo
+
         self.boton_simular = QPushButton("Simular")
         self.boton_simular.setObjectName("botonSecundario")
         self.boton_simular.setFixedWidth(_ANCHO_CAMPO)
@@ -210,7 +250,7 @@ class _PanelAumentos(QWidget):
         self.boton_confirmar.clicked.connect(self._confirmar)
         form.addWidget(self.boton_confirmar)
 
-        self.boton_editar = QPushButton("Editar")
+        self.boton_editar = QPushButton("Editar porcentaje diferencial")
         self.boton_editar.setObjectName("botonSecundario")
         self.boton_editar.setFixedWidth(_ANCHO_CAMPO)
         self.boton_editar.setCheckable(True)
@@ -237,8 +277,8 @@ class _PanelAumentos(QWidget):
 
         self._foco = instalar_enter_avanza_foco([
             self.campo_periodo, self.combo_localidad, self.combo_edificio, self.combo_unidad,
-            self.spin_porcentaje, self.boton_simular, self.boton_confirmar, self.boton_editar,
-            self.boton_deshacer,
+            self.spin_porcentaje, self.check_redondear, *self._radios_multiplo.values(),
+            self.boton_simular, self.boton_confirmar, self.boton_editar, self.boton_deshacer,
         ], parent=self)
 
     def actualizar(self) -> None:
@@ -247,9 +287,28 @@ class _PanelAumentos(QWidget):
         self._editando_diferencial = False
         self.boton_editar.setChecked(False)
         self.spin_porcentaje.setValue(0)
+        self.check_redondear.setChecked(True)
+        self._radios_multiplo[1].setChecked(True)
         self._cargar_consultorios_info()
         self._cargar_combo_localidad()
         self._simular()
+
+    def _redondear_a(self) -> int | None:
+        if not self.check_redondear.isChecked():
+            return None
+        boton = self._grupo_multiplo.checkedButton()
+        for multiplo, radio in self._radios_multiplo.items():
+            if radio is boton:
+                return multiplo
+        return None
+
+    def _al_tildar_redondear(self, tildado: bool) -> None:
+        self.panel_multiplo.setEnabled(tildado)
+        self._simular()
+
+    def _al_cambiar_multiplo(self, tildado: bool) -> None:
+        if tildado:
+            self._simular()
 
     def _cargar_consultorios_info(self) -> None:
         filas = self.conn.execute(
@@ -349,7 +408,7 @@ class _PanelAumentos(QWidget):
         periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
         filas = simular_aumento(
             self.conn, porcentaje_general=self.spin_porcentaje.value(),
-            porcentajes_override=self._diferenciales, periodo=periodo,
+            porcentajes_override=self._diferenciales, redondear_a=self._redondear_a(), periodo=periodo,
         )
         self._filas = {f.id_consultorio: f for f in filas}
         self._renderizar_tabla()
@@ -433,7 +492,7 @@ class _PanelAumentos(QWidget):
 
         resumen = confirmar_aumento(
             self.conn, porcentaje_general=self.spin_porcentaje.value(),
-            porcentajes_override=dict(self._diferenciales), periodo=periodo,
+            porcentajes_override=dict(self._diferenciales), redondear_a=self._redondear_a(), periodo=periodo,
         )
         self.conn.commit()
         mensaje = f"Se actualizaron {resumen.consultorios_actualizados} consultorio(s)."
@@ -580,10 +639,28 @@ class _PanelEsquemaDescuentos(QWidget):
         self._mostrar_tramos(tramos)
 
     def _mostrar_tramos(self, tramos: list[tuple[float, float, float]]) -> None:
+        """La última fila (la que llega al tope) es, en los hechos, un
+        tramo abierto — el descuento se queda topado ahí por más horas
+        que se sumen (ver `obtener_porcentaje_descuento`, que usa el
+        tramo más alto como resto por cualquier valor que supere a todos
+        los definidos). Por eso se muestra fusionada como "Más de Xhs" en
+        vez de repetir el "Hasta" de ese último tramo, que no significa
+        nada por sí solo."""
         self.tabla_preview.setRowCount(len(tramos))
+        ultima_fila = len(tramos) - 1
         for fila, (desde, hasta, pct) in enumerate(tramos):
-            self.tabla_preview.setItem(fila, 0, item_numero(str(desde)))
-            self.tabla_preview.setItem(fila, 1, item_numero(str(hasta)))
+            if self.tabla_preview.columnSpan(fila, 0) > 1:  # limpia un "Más de Xhs" fusionado de un render anterior
+                self.tabla_preview.setSpan(fila, 0, 1, 1)
+            if fila == ultima_fila:
+                self.tabla_preview.setSpan(fila, 0, 1, 2)
+                item_mas_de = QTableWidgetItem(f"Más de {round(desde):d}hs")
+                item_mas_de.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item_mas_de.setFlags(item_mas_de.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.tabla_preview.setItem(fila, 0, item_mas_de)
+                self.tabla_preview.setItem(fila, 1, item_numero(""))
+            else:
+                self.tabla_preview.setItem(fila, 0, item_numero(_fmt_horas(desde)))
+                self.tabla_preview.setItem(fila, 1, item_numero(_fmt_horas(hasta)))
             self.tabla_preview.setItem(fila, 2, item_numero(_fmt_porcentaje(pct)))
         self.tabla_preview.resizeColumnsToContents()
 

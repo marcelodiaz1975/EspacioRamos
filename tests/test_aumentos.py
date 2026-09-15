@@ -144,6 +144,31 @@ def test_simular_aumento_respeta_porcentaje_diferencial_por_consultorio(conn, co
     assert fila.valor_aislada_nuevo == pytest.approx(750)
 
 
+def test_simular_aumento_redondea_a_multiplo(conn, consultorio):
+    filas = simular_aumento(conn, porcentaje_general=13.37, redondear_a=10)
+    fila = filas[0]
+    assert fila.valor_regular_nuevo == pytest.approx(1130)  # 1133.7 -> más cercano a 1130 que a 1140
+    assert fila.valor_aislada_nuevo % 10 == 0
+
+
+def test_simular_aumento_sin_redondear_a_conserva_centavos(conn, consultorio):
+    filas = simular_aumento(conn, porcentaje_general=13.37)
+    assert filas[0].valor_regular_nuevo == pytest.approx(1133.7)
+
+
+def test_simular_aumento_redondeo_no_afecta_valor_override_absoluto(conn, consultorio):
+    filas = simular_aumento(
+        conn, porcentaje_general=13.37, valores_override={consultorio: {"regular": 1234.56}}, redondear_a=100,
+    )
+    assert filas[0].valor_regular_nuevo == pytest.approx(1234.56)
+
+
+def test_confirmar_aumento_aplica_redondeo(conn, consultorio):
+    confirmar_aumento(conn, porcentaje_general=13.37, redondear_a=100, periodo=PERIODO)
+    c = obtener_repositorio(conn, "Consultorio").obtener(consultorio)
+    assert c["ValorHoraRegularActual"] % 100 == 0
+
+
 def test_confirmar_aumento_aplica_porcentaje_diferencial(conn, consultorio):
     confirmar_aumento(conn, porcentaje_general=10, porcentajes_override={consultorio: 50}, periodo=PERIODO)
     c = obtener_repositorio(conn, "Consultorio").obtener(consultorio)
