@@ -1,9 +1,9 @@
 import pytest
-from PySide6.QtWidgets import QInputDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.imagenes import PantallaImagenes
+from app.gui.pantallas.imagenes import PantallaImagenes, _DialogoAgregarImagen
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -22,7 +22,10 @@ def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
-    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("Vista general", True)))
+    # Por defecto acepta el diálogo de "Agregar imagen" con la primera
+    # categoría de la lista y sin marcar principal — los tests que
+    # necesiten otra cosa lo pisan explícitamente.
+    monkeypatch.setattr(_DialogoAgregarImagen, "exec", lambda self: QDialog.DialogCode.Accepted)
 
 
 @pytest.fixture
@@ -59,10 +62,21 @@ def _elegir_consultorio(pantalla, edificio, unidad, consultorio) -> None:
     pantalla.combo_consultorio.setCurrentIndex(pantalla.combo_consultorio.findData(consultorio))
 
 
-def test_alcance_por_defecto_es_espacio_con_filtros_deshabilitados(qtbot, conn):
+def test_alcance_por_defecto_es_todos_los_archivos(qtbot, conn):
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.combo_alcance.currentText() == "Espacio"
+    assert pantalla.combo_alcance.currentText() == "Todos los archivos"
+    assert not pantalla.combo_localidad.isEnabled()
+    assert not pantalla.boton_agregar.isEnabled()
+    assert not pantalla.boton_subir.isEnabled()
+    assert not pantalla.boton_principal.isEnabled()
+
+
+def test_alcance_espacio_deshabilita_los_cuatro_filtros(qtbot, conn):
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Espacio")
+    assert pantalla.boton_agregar.isEnabled()
     assert not pantalla.combo_localidad.isEnabled()
     assert not pantalla.combo_edificio.isEnabled()
     assert not pantalla.combo_unidad.isEnabled()
@@ -101,8 +115,6 @@ def test_combo_edificio_se_acota_por_localidad_elegida(qtbot, conn, edificio, un
 
 
 def test_agregar_imagen_via_dialogo(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
-
     ruta = _archivo_jpg(tmp_path)
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (ruta, "")))
 
@@ -113,17 +125,37 @@ def test_agregar_imagen_via_dialogo(qtbot, conn, edificio, unidad, consultorio, 
     pantalla._agregar()
 
     assert pantalla.tabla.rowCount() == 1
-    assert pantalla.tabla.item(0, 1).text() == "Vista general"
+    # Descripción, categoría y "principal" se arman solos
+    assert pantalla.tabla.item(0, 1).text() == "Consultorio - Foto general - 1"
+    assert pantalla.tabla.item(0, 2).text() == "Foto general"
+    assert pantalla.tabla.item(0, 3).text() == "Sí"
+
+
+def test_agregar_imagen_elige_categoria_del_dialogo(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
+    ruta = _archivo_jpg(tmp_path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (ruta, "")))
+
+    def _elegir_ventana(self):
+        self.combo_categoria.setCurrentText("Ventana")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAgregarImagen, "exec", _elegir_ventana)
+
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+
+    assert pantalla.tabla.item(0, 2).text() == "Ventana"
 
 
 def test_agregar_imagen_de_espacio_no_pide_ningun_filtro(qtbot, conn, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
-
     ruta = _archivo_jpg(tmp_path)
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (ruta, "")))
 
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Espacio")
 
     pantalla._agregar()
 
@@ -131,8 +163,6 @@ def test_agregar_imagen_de_espacio_no_pide_ningun_filtro(qtbot, conn, tmp_path, 
 
 
 def test_agregar_sin_elegir_archivo_no_agrega_nada(qtbot, conn, edificio, unidad, consultorio, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
-
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("", "")))
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
@@ -143,9 +173,26 @@ def test_agregar_sin_elegir_archivo_no_agrega_nada(qtbot, conn, edificio, unidad
     assert pantalla.tabla.rowCount() == 0
 
 
-def test_reordenar_subir_baja_intercambia_orden(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
+def test_marcar_como_principal_promueve_la_seleccionada(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
+    rutas = iter([_archivo_jpg(tmp_path, "a.jpg"), _archivo_jpg(tmp_path, "b.jpg")])
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (next(rutas), "")))
 
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+    pantalla._agregar()
+
+    pantalla.tabla.selectRow(1)
+    pantalla._marcar_principal()
+
+    # Al promover la segunda, el orden se reordena: ahora ella es la fila 0
+    assert pantalla.tabla.item(0, 1).text() == "Consultorio - Foto general - 1"
+    assert pantalla.tabla.item(0, 3).text() == "Sí"
+    assert pantalla.tabla.item(1, 3).text() == "No"
+
+
+def test_reordenar_subir_baja_intercambia_orden(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
     rutas = iter([_archivo_jpg(tmp_path, "a.jpg"), _archivo_jpg(tmp_path, "b.jpg")])
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (next(rutas), "")))
 
@@ -163,8 +210,6 @@ def test_reordenar_subir_baja_intercambia_orden(qtbot, conn, edificio, unidad, c
 
 
 def test_alternar_activo_actualiza_la_tabla(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
-
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (_archivo_jpg(tmp_path), "")))
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
@@ -174,12 +219,10 @@ def test_alternar_activo_actualiza_la_tabla(qtbot, conn, edificio, unidad, consu
     pantalla.tabla.selectRow(0)
     pantalla._alternar_activo()
 
-    assert pantalla.tabla.item(0, 3).text() == "No"
+    assert pantalla.tabla.item(0, 4).text() == "No"
 
 
 def test_eliminar_imagen(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
-
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (_archivo_jpg(tmp_path), "")))
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
@@ -191,3 +234,39 @@ def test_eliminar_imagen(qtbot, conn, edificio, unidad, consultorio, tmp_path, m
 
     assert pantalla.tabla.rowCount() == 0
     assert obtener_repositorio(conn, "Imagen").listar() == []
+
+
+def test_descargar_copia_el_archivo_al_destino_elegido(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (_archivo_jpg(tmp_path), "")))
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+    pantalla.tabla.selectRow(0)
+
+    destino = tmp_path / "descargas" / "copia.jpg"
+    destino.parent.mkdir()
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(destino), "")))
+
+    pantalla._descargar()
+
+    assert destino.is_file()
+
+
+def test_todos_los_archivos_muestra_imagenes_de_todos_los_niveles(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
+    rutas = iter([_archivo_jpg(tmp_path, "a.jpg"), _archivo_jpg(tmp_path, "b.jpg")])
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (next(rutas), "")))
+
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Espacio")
+    pantalla._agregar()
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+
+    pantalla.combo_alcance.setCurrentText("Todos los archivos")
+
+    assert pantalla.tabla.rowCount() == 2
+    assert pantalla.tabla.item(0, 0).text() == "Espacio"
+    assert pantalla.tabla.item(1, 0).text() == "Consultorio"
+    assert pantalla.tabla.item(1, 2).text() == "Ramos 1"

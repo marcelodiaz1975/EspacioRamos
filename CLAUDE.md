@@ -206,24 +206,71 @@ criterio que `novedades._ajustar_columnas`, con la columna Descripción
 todavía más generosa) pero NO usa `PantallaCRUD`: no hay un cuadro de
 diálogo con campos de un registro, es un administrador de los archivos
 de imagen guardados por alcance. Por lo mismo no lleva los tres campos
-libres — no es un registro de catálogo.
+libres — no es un registro de catálogo. A la derecha de la tabla hay un
+panel fijo de vista previa (miniatura de la imagen seleccionada).
 
 El alcance (`app.negocio.imagenes.ALCANCES`) tiene 5 niveles: "Espacio"
-(imágenes generales del sistema, sin atarse a ningún edificio — pensado
-en principio para cosas como el logo, a confirmar con la clienta),
-"Localidad" (referencia el catálogo `Localidad` de arriba — mismo
-criterio de ID estable que el resto, a diferencia de antes que usaba el
-texto directamente), "Edificio", "Unidad" y "Consultorio". El combo
-Alcance define hasta qué nivel de la cadena Localidad → Edificio →
-Unidad → Consultorio hace falta elegir un valor concreto: los combos de
-nivel superior al elegido quedan deshabilitados (si Alcance = "Espacio"
-los cuatro quedan grises; si Alcance = "Unidad" se puede setear
-Localidad/Edificio/Unidad pero no Consultorio). El valor que
-efectivamente determina qué imágenes se listan/agregan es el del combo
-en el nivel EXACTO del alcance elegido — los de niveles inferiores solo
-acotan en cascada las opciones de ese combo (mismo criterio de cascada
-que Aumentos y descuentos). El combo Localidad lista el catálogo
-completo (no solo las localidades que ya tienen algún Edificio cargado).
+(imágenes generales del sistema, sin atarse a ningún edificio — logos,
+flyers, banners), "Localidad" (referencia el catálogo `Localidad` de
+arriba — mismo criterio de ID estable que el resto), "Edificio",
+"Unidad" y "Consultorio". El combo Alcance define hasta qué nivel de la
+cadena Localidad → Edificio → Unidad → Consultorio hace falta elegir un
+valor concreto: los combos de nivel superior al elegido quedan
+deshabilitados (si Alcance = "Espacio" los cuatro quedan grises; si
+Alcance = "Unidad" se puede setear Localidad/Edificio/Unidad pero no
+Consultorio). El valor que efectivamente determina qué imágenes se
+listan/agregan es el del combo en el nivel EXACTO del alcance elegido —
+los de niveles inferiores solo acotan en cascada las opciones de ese
+combo (mismo criterio de cascada que Aumentos y descuentos). El combo
+Localidad lista el catálogo completo (no solo las localidades que ya
+tienen algún Edificio cargado).
+
+El combo Alcance tiene además, como primera opción, "Todos los
+archivos": lista TODAS las imágenes del sistema sin filtrar (Espacio,
+todas las Localidades, todos los Edificios/Unidades/Consultorios
+juntos), ordenadas por nivel (Espacio, Localidad, Edificio, Unidad,
+Consultorio, en ese orden) y después por Descripción —
+`app.negocio.imagenes.imagenes_todas`, con columnas propias (Alcance,
+Localidad, Edificio, Unidad, Consultorio, además de Descripción/
+Categoría/Principal/Activo) para poder distinguir cada fila. En este
+modo los filtros en cascada y los botones Agregar/Subir/Bajar/Marcar
+como principal quedan deshabilitados — no tiene sentido agregar o
+reordenar sin haber elegido un alcance puntual; Eliminar/Activar-
+Desactivar/Descargar siguen funcionando sobre la fila seleccionada.
+
+Categoría y principal (pedido de la clienta al revisar esta pantalla):
+cada alcance tiene su propia lista cerrada de categorías
+(`app.negocio.imagenes.CATEGORIAS_POR_ALCANCE`, ej. Edificio: "Fachada",
+"Ascensor"...; Consultorio: "Sillón profesional", "Ventana"..., siempre
+terminando en "Otros archivos") que se elige en el cuadro "Agregar
+imagen" (`_DialogoAgregarImagen`) junto con un check "Marcar como
+principal" — no hay campo de descripción libre, se arma sola. Dentro de
+cada (alcance, entidad, categoría) puede haber varias imágenes
+cargadas, pero solo una es la "principal" (`NumeroOrden = 1`): las
+demás quedan de respaldo. Para promover una ya cargada sin volver a
+subirla está el botón "Marcar como principal" en la lista (intercambia
+el orden con la que era principal, que no se borra, solo pasa a ser una
+más — `app.negocio.imagenes.marcar_principal`). La Descripción y el
+nombre del archivo en disco se arman solos como
+"{Alcance} - {Categoría} - {Orden}" (`_descripcion_automatica`) y se
+recalculan/renombran solos cada vez que el orden cambia (Subir/Bajar,
+Marcar como principal) — pasando los archivos por un nombre temporal
+primero para que un intercambio 1↔2 no pise el nombre del otro antes de
+liberarlo (`_intercambiar_orden`).
+
+`app.negocio.imagenes.obtener_principal(conn, categoria, ...)`: para
+cuando algún PDF necesite buscar, por ejemplo, el logo — devuelve la
+imagen principal de esa categoría en el nivel más específico indicado;
+si es alcance Localidad y esa localidad no tiene ninguna marcada ahí,
+cae al alcance Espacio (el logo general pisa por defecto, pero una
+localidad con su propio logo usa el suyo). Edificio/Unidad/Consultorio
+no tienen ese respaldo: si no cargaste una Fachada para ese edificio
+puntual, no hay ninguna.
+
+Botón "Descargar": copia el archivo de la imagen seleccionada a donde
+elija el operador (selector nativo "Guardar como") — las imágenes en sí
+siguen viviendo solo dentro de la carpeta base configurada, esto es
+para sacar una copia hacia afuera cuando hace falta.
 
 En disco, cada alcance guarda sus archivos en una carpeta separada
 (`app.negocio.archivos_generados.carpeta_imagenes`): `Imagenes/Espacio`
