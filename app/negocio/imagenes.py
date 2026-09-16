@@ -1,32 +1,43 @@
-"""Gestión de imágenes (FA4, sección 3.26): fotos de edificios, unidades y
-consultorios que aparecen en Propuesta, Disponibilidad, Liquidación y
-Oferta de consultorios (`app.pdf.fotos_pdf`) — hoy solo se muestran las de
-consultorio (`app.pdf.fotos_pdf.imagenes_de_consultorios`), las de
-edificio/unidad/localidad/espacio quedan guardadas para cuando algún
+"""Gestión de archivos (FA4, sección 3.26) de la solapa "Archivos del
+espacio" del Gestor de archivos: fotos y documentos de edificios,
+unidades y consultorios. Las fotos de consultorio son las únicas que
+hoy se muestran en algún documento (`app.pdf.fotos_pdf.
+imagenes_de_consultorios`, usado en Propuesta/Disponibilidad/
+Liquidación/Oferta) — el resto queda guardado para cuando algún
 documento las use.
 
 Alcance (`ALCANCES`): además de Edificio/Unidad/Consultorio hay dos
 niveles más generales, pedidos por la clienta al revisar esta pantalla:
-- "Espacio": imágenes generales del sistema, sin atarse a ningún
-  edificio en particular (logos, flyers, banners). Es el alcance que
-  resulta cuando no se pasa ninguno de los otros cuatro parámetros.
+- "Espacio": archivos generales del sistema, sin atarse a ningún
+  edificio en particular (logos, flyers, banners, manual del usuario).
+  Es el alcance que resulta cuando no se pasa ninguno de los otros
+  cuatro parámetros.
 - "Localidad": referencia la tabla `Localidad` (catálogo propio, con
   Partido/Provincia/País como datos adicionales) en vez de Edificio/
   Unidad/Consultorio — mismo criterio de ID estable que el resto.
 
-Categoría (`CATEGORIAS_POR_ALCANCE`): cada alcance tiene su propia lista
-cerrada de categorías (ej. Edificio: "Fachada", "Ascensor"...; Unidad:
-"Cocina", "Baño"...) elegida en el cuadro de diálogo al agregar una
-imagen — se guarda en `Imagen.Tipo`. Dentro de cada (alcance, entidad,
-categoría) las imágenes tienen un `NumeroOrden` propio: la de orden 1 es
-la "principal" (puede haber varias de la misma categoría cargadas como
-respaldo, pero solo una principal a la vez — `marcar_principal`
-intercambia el orden con la que tenía el 1). La Descripción y el nombre
-del archivo en disco se arman solos a partir de Alcance + Categoría +
+Tipo de archivo: Imagen (JPG/PNG) o Documento (PDF/Word/TXT) — se
+distingue únicamente por la extensión (`es_imagen`/`es_documento`), no
+hay una columna propia en la base. Cada alcance tiene, para cada tipo,
+su propia lista cerrada de categorías (`CATEGORIAS_IMAGEN_POR_ALCANCE`/
+`CATEGORIAS_DOCUMENTO_POR_ALCANCE`, ej. Edificio-Imagen: "Fachada",
+"Ascensor"...; Unidad-Documento: "Planos de instalación",
+"Habilitación"...) elegida en el cuadro de diálogo al agregar un
+archivo — se guarda en `Imagen.Tipo`. Las categorías "Otras imágenes" y
+"Otros documentos" (siempre las últimas de su lista) piden además una
+etiqueta libre (`Imagen.EtiquetaLibre`) que se sujeta a la Descripción y
+al nombre de archivo para poder identificarlas.
+
+Dentro de cada (alcance, entidad, categoría) los archivos tienen un
+`NumeroOrden` propio: el de orden 1 es el "principal" (puede haber
+varios de la misma categoría cargados como respaldo, pero solo uno
+principal a la vez — `marcar_principal` intercambia el orden con el que
+tenía el 1). La Descripción y el nombre del archivo en disco se arman
+solos a partir de Alcance + Categoría (+ etiqueta libre, si aplica) +
 Orden (`_descripcion_automatica`) — no se cargan a mano.
 
-`obtener_principal`: para un (categoría, alcance) dado, si el alcance
-es Localidad y no hay ninguna imagen principal ahí, cae al alcance
+`obtener_principal`: para una (categoría, alcance) dada, si el alcance
+es Localidad y no hay ningún archivo principal ahí, cae al alcance
 Espacio (ej. el logo general del sistema) — así una localidad sin su
 propio logo cargado usa el del espacio, pero si tiene uno propio ese
 pisa al general.
@@ -47,27 +58,61 @@ from uuid import uuid4
 from app.negocio.archivos_generados import carpeta_imagenes, destino_sin_colision
 from app.repositorio.registro import obtener_repositorio
 
-EXTENSIONES_VALIDAS = (".jpg", ".jpeg", ".png")
+EXTENSIONES_IMAGEN = (".jpg", ".jpeg", ".png")
+EXTENSIONES_DOCUMENTO = (".pdf", ".doc", ".docx", ".txt")
+EXTENSIONES_VALIDAS = EXTENSIONES_IMAGEN + EXTENSIONES_DOCUMENTO
 ALCANCES = ("Espacio", "Localidad", "Edificio", "Unidad", "Consultorio")
 
-CATEGORIAS_POR_ALCANCE: dict[str, list[str]] = {
-    "Espacio": ["Logo PDF", "Logo WhatsApp", "Logo redes sociales", "Flyer", "Banner", "Otros archivos"],
+CATEGORIA_OTRAS_IMAGENES = "Otras imágenes"
+CATEGORIA_OTROS_DOCUMENTOS = "Otros documentos"
+CATEGORIAS_CON_ETIQUETA_LIBRE = {CATEGORIA_OTRAS_IMAGENES, CATEGORIA_OTROS_DOCUMENTOS}
+
+CATEGORIAS_IMAGEN_POR_ALCANCE: dict[str, list[str]] = {
+    "Espacio": ["Logo PDF", "Logo WhatsApp", "Logo redes sociales", "Flyer", "Banner", CATEGORIA_OTRAS_IMAGENES],
     "Localidad": [
-        "Mapa ubicación", "Logo PDF", "Logo WhatsApp", "Logo redes sociales", "Flyer", "Banner", "Otros archivos",
+        "Mapa ubicación", "Logo PDF", "Logo WhatsApp", "Logo redes sociales", "Flyer", "Banner",
+        CATEGORIA_OTRAS_IMAGENES,
     ],
-    "Edificio": ["Mapa ubicación", "Fachada", "Ascensor", "Pasillo", "Recepción", "Portero", "Otros archivos"],
+    "Edificio": [
+        "Mapa ubicación", "Fachada", "Ascensor", "Pasillo", "Recepción", "Portero", CATEGORIA_OTRAS_IMAGENES,
+    ],
     "Unidad": [
         "Plano", "Cocina", "Baño", "Sala de espera", "Office", "Área de guardado", "Pasillo",
         "Puerta de entrada", "Balcón", "Encendido luz común", "Caja para pagos", "Panel de luces testigo",
-        "Otros archivos",
+        CATEGORIA_OTRAS_IMAGENES,
     ],
     "Consultorio": [
         "Foto general", "Sillón profesional", "Sillón paciente", "Escritorio", "Aire acondicionado",
-        "Control de aire acondicionado", "Ventana", "Otros archivos",
+        "Control de aire acondicionado", "Ventana", CATEGORIA_OTRAS_IMAGENES,
     ],
 }
 
+CATEGORIAS_DOCUMENTO_POR_ALCANCE: dict[str, list[str]] = {
+    "Espacio": ["Manual del usuario", CATEGORIA_OTROS_DOCUMENTOS],
+    "Localidad": [CATEGORIA_OTROS_DOCUMENTOS],
+    "Edificio": [CATEGORIA_OTROS_DOCUMENTOS],
+    "Unidad": ["Planos de instalación", "Habilitación", CATEGORIA_OTROS_DOCUMENTOS],
+    "Consultorio": [CATEGORIA_OTROS_DOCUMENTOS],
+}
+
+TIPOS_ARCHIVO = ("Imagen", "Documento")
+
 _CARACTERES_INVALIDOS_ARCHIVO = re.compile(r'[\\/:*?"<>|]')
+
+
+def es_imagen(ruta: str) -> bool:
+    return Path(ruta).suffix.lower() in EXTENSIONES_IMAGEN
+
+
+def es_documento(ruta: str) -> bool:
+    return Path(ruta).suffix.lower() in EXTENSIONES_DOCUMENTO
+
+
+def categorias_por_alcance(alcance: str, tipo_archivo: str) -> list[str]:
+    """La lista cerrada de categorías de ese alcance para "Imagen" o
+    "Documento"."""
+    tabla = CATEGORIAS_IMAGEN_POR_ALCANCE if tipo_archivo == "Imagen" else CATEGORIAS_DOCUMENTO_POR_ALCANCE
+    return tabla.get(alcance, [CATEGORIA_OTROS_DOCUMENTOS])
 
 
 def _nombre_archivo_valido(texto: str) -> str:
@@ -79,7 +124,7 @@ def _nombre_archivo_valido(texto: str) -> str:
 def _alcance(
     id_localidad: int | None, id_edificio: int | None, id_unidad: int | None, id_consultorio: int | None,
 ) -> tuple[str, int | None]:
-    """A qué nivel pertenece la imagen a partir de cuál de los cuatro
+    """A qué nivel pertenece el archivo a partir de cuál de los cuatro
     parámetros vino cargado. Si ninguno vino cargado, el alcance es
     "Espacio"."""
     seleccionados = [
@@ -90,7 +135,7 @@ def _alcance(
     ]
     if len(seleccionados) > 1:
         raise ValueError(
-            "Elegí un único alcance para la imagen: localidad, edificio, unidad o consultorio "
+            "Elegí un único alcance para el archivo: localidad, edificio, unidad o consultorio "
             "(o ninguno de los cuatro para Espacio)."
         )
     if not seleccionados:
@@ -109,7 +154,9 @@ def _condicion_alcance_categoria(alcance: str, valor: int | None, categoria: str
     return f"{condicion} AND Tipo = ?", [*parametros, categoria]
 
 
-def _descripcion_automatica(alcance: str, categoria: str, numero_orden: int) -> str:
+def _descripcion_automatica(alcance: str, categoria: str, numero_orden: int, etiqueta_libre: str | None) -> str:
+    if categoria in CATEGORIAS_CON_ETIQUETA_LIBRE and etiqueta_libre:
+        return f"{alcance} - {categoria} - {etiqueta_libre} - {numero_orden}"
     return f"{alcance} - {categoria} - {numero_orden}"
 
 
@@ -119,9 +166,9 @@ def _tamano_maximo_mb(conn: sqlite3.Connection) -> float:
 
 
 def imagenes_del_grupo(conn: sqlite3.Connection, imagen: sqlite3.Row) -> list[sqlite3.Row]:
-    """Las imágenes que comparten alcance, entidad y categoría con
-    `imagen` (incluida ella misma), ordenadas por NumeroOrden — el
-    "grupo" dentro del cual el número 1 es la principal."""
+    """Los archivos que comparten alcance, entidad y categoría con
+    `imagen` (incluida ella misma), ordenados por NumeroOrden — el
+    "grupo" dentro del cual el número 1 es el principal."""
     alcance, valor = _alcance(imagen["IdLocalidad"], imagen["IdEdificio"], imagen["IdUnidad"], imagen["IdConsultorio"])
     condicion, parametros = _condicion_alcance_categoria(alcance, valor, imagen["Tipo"])
     filas = conn.execute(f"SELECT * FROM Imagen WHERE {condicion}", parametros).fetchall()
@@ -137,15 +184,16 @@ def _mover_a_temporal(ruta: Path) -> Path:
 
 
 def _sincronizar_descripcion_y_archivo(conn: sqlite3.Connection, id_imagen: int) -> None:
-    """Recalcula la Descripción (Alcance + Categoría + Orden) y, si
-    cambió, renombra el archivo en disco para que coincida — se llama
-    después de crear una imagen o de cualquier cambio de NumeroOrden."""
+    """Recalcula la Descripción (Alcance + Categoría [+ etiqueta libre]
+    + Orden) y, si cambió, renombra el archivo en disco para que
+    coincida — se llama después de crear un archivo o de cualquier
+    cambio de NumeroOrden."""
     repo = obtener_repositorio(conn, "Imagen")
     imagen = repo.obtener(id_imagen)
     if imagen is None:
         return
     alcance, _ = _alcance(imagen["IdLocalidad"], imagen["IdEdificio"], imagen["IdUnidad"], imagen["IdConsultorio"])
-    descripcion = _descripcion_automatica(alcance, imagen["Tipo"], imagen["NumeroOrden"])
+    descripcion = _descripcion_automatica(alcance, imagen["Tipo"], imagen["NumeroOrden"], imagen["EtiquetaLibre"])
     ruta_actual = Path(imagen["RutaArchivo"])
     nombre_nuevo = f"{_nombre_archivo_valido(descripcion)}{ruta_actual.suffix.lower()}"
     if ruta_actual.name != nombre_nuevo and ruta_actual.is_file():
@@ -156,7 +204,7 @@ def _sincronizar_descripcion_y_archivo(conn: sqlite3.Connection, id_imagen: int)
 
 
 def _intercambiar_orden(conn: sqlite3.Connection, id_imagen_1: int, id_imagen_2: int) -> None:
-    """Intercambia NumeroOrden entre dos imágenes y actualiza su
+    """Intercambia NumeroOrden entre dos archivos y actualiza su
     Descripción/nombre de archivo. Pasa los dos archivos por un nombre
     temporal antes de asignarles el nombre final: un intercambio directo
     (ej. "Fachada - 1.jpg" <-> "Fachada - 2.jpg") pisaría el nombre del
@@ -173,25 +221,30 @@ def _intercambiar_orden(conn: sqlite3.Connection, id_imagen_1: int, id_imagen_2:
 
 
 def agregar_imagen(
-    conn: sqlite3.Connection, *, ruta_origen: str, categoria: str, principal: bool = False,
-    id_localidad: int | None = None, id_edificio: int | None = None, id_unidad: int | None = None,
-    id_consultorio: int | None = None,
+    conn: sqlite3.Connection, *, ruta_origen: str, categoria: str, etiqueta_libre: str | None = None,
+    principal: bool = False, id_localidad: int | None = None, id_edificio: int | None = None,
+    id_unidad: int | None = None, id_consultorio: int | None = None,
 ) -> int:
-    """Copia `ruta_origen` a la carpeta del alcance elegido y registra la
-    fila en Imagen, al final del orden existente para esa categoría
-    dentro de ese alcance — o como principal (orden 1, desplazando a la
-    que tenía ese lugar) si `principal=True`. La Descripción y el nombre
-    de archivo se arman solos. Devuelve el IdImagen creado."""
+    """Copia `ruta_origen` (imagen o documento) a la carpeta del alcance
+    elegido y registra la fila en Imagen, al final del orden existente
+    para esa categoría dentro de ese alcance — o como principal (orden
+    1, desplazando a la que tenía ese lugar) si `principal=True`. Para
+    las categorías "Otras imágenes"/"Otros documentos", `etiqueta_libre`
+    es obligatoria (identifica de qué se trata, ya que la categoría en
+    sí no lo dice). La Descripción y el nombre de archivo se arman
+    solos. Devuelve el IdImagen creado."""
     alcance, valor = _alcance(id_localidad, id_edificio, id_unidad, id_consultorio)
     origen = Path(ruta_origen)
     if not origen.is_file():
         raise ValueError(f"No se encuentra el archivo: {ruta_origen}")
     if origen.suffix.lower() not in EXTENSIONES_VALIDAS:
-        raise ValueError("Formato no soportado: usá JPG o PNG.")
+        raise ValueError("Formato no soportado: usá JPG, PNG, PDF, Word o TXT.")
+    if categoria in CATEGORIAS_CON_ETIQUETA_LIBRE and not (etiqueta_libre or "").strip():
+        raise ValueError(f"«{categoria}» necesita una descripción propia para poder identificarlo.")
     tamano_mb = origen.stat().st_size / (1024 * 1024)
     maximo = _tamano_maximo_mb(conn)
     if tamano_mb > maximo:
-        raise ValueError(f"La imagen pesa {tamano_mb:.1f}MB, el máximo configurado es {maximo:g}MB.")
+        raise ValueError(f"El archivo pesa {tamano_mb:.1f}MB, el máximo configurado es {maximo:g}MB.")
 
     destino = destino_sin_colision(carpeta_imagenes(conn, alcance, valor), origen.name)
     shutil.copy2(origen, destino)
@@ -202,8 +255,9 @@ def agregar_imagen(
     ).fetchone()[0]
     repo = obtener_repositorio(conn, "Imagen")
     id_imagen = repo.crear(
-        Tipo=categoria, IdLocalidad=id_localidad, IdEdificio=id_edificio, IdUnidad=id_unidad,
-        IdConsultorio=id_consultorio, NumeroOrden=orden_actual + 1, RutaArchivo=str(destino), Activo=1,
+        Tipo=categoria, EtiquetaLibre=(etiqueta_libre or "").strip() or None, IdLocalidad=id_localidad,
+        IdEdificio=id_edificio, IdUnidad=id_unidad, IdConsultorio=id_consultorio, NumeroOrden=orden_actual + 1,
+        RutaArchivo=str(destino), Activo=1,
     )
     _sincronizar_descripcion_y_archivo(conn, id_imagen)
     if principal:
@@ -228,16 +282,19 @@ def imagenes_del_alcance(
     conn: sqlite3.Connection, id_localidad: int | None = None, id_edificio: int | None = None,
     id_unidad: int | None = None, id_consultorio: int | None = None,
 ) -> list[sqlite3.Row]:
-    """Todas las imágenes (activas e inactivas) del alcance elegido,
-    agrupadas por categoría (en el orden de `CATEGORIAS_POR_ALCANCE`) y,
-    dentro de cada una, por NumeroOrden (la principal primero). Sin
+    """Todos los archivos (activos e inactivos, imágenes y documentos
+    juntos) del alcance elegido, agrupados por categoría (en el orden de
+    `CATEGORIAS_IMAGEN_POR_ALCANCE`/`CATEGORIAS_DOCUMENTO_POR_ALCANCE`)
+    y, dentro de cada una, por NumeroOrden (el principal primero). Sin
     ningún parámetro, trae las de alcance "Espacio". Para la pantalla de
     gestión — a diferencia de `app.pdf.fotos_pdf.imagenes_de_
     consultorios`, que solo trae las activas para los documentos."""
     alcance, valor = _alcance(id_localidad, id_edificio, id_unidad, id_consultorio)
     condicion, parametros = _condicion_alcance(alcance, valor)
     filas = conn.execute(f"SELECT * FROM Imagen WHERE {condicion}", parametros).fetchall()
-    orden_categorias = CATEGORIAS_POR_ALCANCE.get(alcance, [])
+    orden_categorias = [
+        *CATEGORIAS_IMAGEN_POR_ALCANCE.get(alcance, []), *CATEGORIAS_DOCUMENTO_POR_ALCANCE.get(alcance, []),
+    ]
 
     def clave(fila: sqlite3.Row):
         tipo = fila["Tipo"] or ""
@@ -248,9 +305,9 @@ def imagenes_del_alcance(
 
 
 def imagenes_todas(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Todas las imágenes del sistema, sea cual sea su alcance, con la
+    """Todos los archivos del sistema, sea cual sea su alcance, con la
     ubicación textual resuelta (LocalidadTexto/EdificioTexto/
-    UnidadTexto/ConsultorioNumero, según a qué nivel esté cada una) para
+    UnidadTexto/ConsultorioNumero, según a qué nivel esté cada uno) para
     la vista "Todos los archivos" de la pantalla. Orden: nivel (Espacio,
     Localidad, Edificio, Unidad, Consultorio, en ese orden) y después
     por Descripción."""
@@ -286,7 +343,7 @@ def imagenes_todas(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def reordenar(conn: sqlite3.Connection, id_imagen: int, delta: int) -> None:
-    """Mueve una imagen un lugar dentro del orden de su mismo grupo
+    """Mueve un archivo un lugar dentro del orden de su mismo grupo
     (alcance + entidad + categoría) — delta -1 sube, +1 baja."""
     repo = obtener_repositorio(conn, "Imagen")
     imagen = repo.obtener(id_imagen)
@@ -301,9 +358,9 @@ def reordenar(conn: sqlite3.Connection, id_imagen: int, delta: int) -> None:
 
 
 def marcar_principal(conn: sqlite3.Connection, id_imagen: int) -> None:
-    """Pone a esta imagen en el orden 1 de su grupo (alcance + entidad +
-    categoría) — la que tenía ese lugar pasa a ocupar el suyo, sin
-    borrarse: queda como una imagen más, de respaldo."""
+    """Pone a este archivo en el orden 1 de su grupo (alcance + entidad
+    + categoría) — el que tenía ese lugar pasa a ocupar el suyo, sin
+    borrarse: queda como uno más, de respaldo."""
     repo = obtener_repositorio(conn, "Imagen")
     imagen = repo.obtener(id_imagen)
     if imagen is None or imagen["NumeroOrden"] == 1:
@@ -321,12 +378,12 @@ def obtener_principal(
     conn: sqlite3.Connection, categoria: str, *, id_localidad: int | None = None,
     id_edificio: int | None = None, id_unidad: int | None = None, id_consultorio: int | None = None,
 ) -> sqlite3.Row | None:
-    """La imagen principal (NumeroOrden = 1) de esa categoría en el
-    nivel más específico indicado. Para Localidad, si no hay ninguna
-    marcada ahí, cae al alcance Espacio (ej. el logo general del
+    """El archivo principal (NumeroOrden = 1) de esa categoría en el
+    nivel más específico indicado. Para Localidad, si no hay ninguno
+    marcado ahí, cae al alcance Espacio (ej. el logo general del
     sistema pisa por defecto, pero una localidad con su propio logo usa
     el suyo) — para el resto de los niveles no hay ese respaldo: si no
-    cargaste una Fachada para ESE edificio puntual, no hay ninguna."""
+    cargaste una Fachada para ese edificio puntual, no hay ninguna."""
     alcance, valor = _alcance(id_localidad, id_edificio, id_unidad, id_consultorio)
     condicion, parametros = _condicion_alcance_categoria(alcance, valor, categoria)
     fila = conn.execute(f"SELECT * FROM Imagen WHERE {condicion} AND NumeroOrden = 1", parametros).fetchone()

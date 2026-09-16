@@ -8,9 +8,13 @@ from __future__ import annotations
 import sqlite3
 
 from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFrame,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -22,7 +26,13 @@ from PySide6.QtWidgets import (
 from app.gui.crud_generico import Campo, PantallaCRUD
 from app.negocio.archivos_generados import aplicar_cambio_codigo
 from app.negocio.dias import fecha_actual
-from app.negocio.documentacion_profesional import agregar_documento, eliminar_documento, listar_documentos
+from app.negocio.documentacion_profesional import (
+    CATEGORIAS_DOCUMENTACION_PROFESIONAL,
+    agregar_documento,
+    eliminar_documento,
+    listar_documentos,
+)
+from app.negocio.imagenes import CATEGORIA_OTRAS_IMAGENES, CATEGORIA_OTROS_DOCUMENTOS
 from app.negocio.listas_editables import opciones_lista
 from app.negocio.profesionales import normalizar_cuit, opciones_tratamiento, sugerir_codigo, tratamiento_sugerido
 from app.negocio.validaciones import (
@@ -55,6 +65,62 @@ def _linea_divisoria() -> QFrame:
     linea.setFrameShape(QFrame.Shape.HLine)
     linea.setFrameShadow(QFrame.Shadow.Sunken)
     return linea
+
+
+def _titulo_campo(texto: str) -> QLabel:
+    etiqueta = QLabel(texto)
+    etiqueta.setObjectName("subtituloCampo")
+    return etiqueta
+
+
+class _DialogoCategoriaDocumento(QDialog):
+    """Categoría del archivo (lista cerrada, ver
+    `documentacion_profesional.CATEGORIAS_DOCUMENTACION_PROFESIONAL`) —
+    el archivo se guarda con ese nombre en vez del original. "Otras
+    imágenes"/"Otros documentos" no tienen nombre propio: piden además
+    un detalle libre para poder identificarlos."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Agregar archivo")
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(_titulo_campo("Categoría"))
+        self.combo_categoria = QComboBox()
+        self.combo_categoria.addItems(CATEGORIAS_DOCUMENTACION_PROFESIONAL)
+        self.combo_categoria.currentTextChanged.connect(self._actualizar_visibilidad_detalle)
+        layout.addWidget(self.combo_categoria)
+
+        self.etiqueta_detalle = _titulo_campo("Detalle (para identificarlo)")
+        layout.addWidget(self.etiqueta_detalle)
+        self.campo_detalle = QLineEdit()
+        layout.addWidget(self.campo_detalle)
+
+        botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        botones.accepted.connect(self._validar_y_aceptar)
+        botones.rejected.connect(self.reject)
+        layout.addWidget(botones)
+
+        self._actualizar_visibilidad_detalle(self.combo_categoria.currentText())
+
+    def _actualizar_visibilidad_detalle(self, categoria: str) -> None:
+        requiere_detalle = categoria in (CATEGORIA_OTRAS_IMAGENES, CATEGORIA_OTROS_DOCUMENTOS)
+        self.etiqueta_detalle.setVisible(requiere_detalle)
+        self.campo_detalle.setVisible(requiere_detalle)
+
+    def _validar_y_aceptar(self) -> None:
+        categoria = self.combo_categoria.currentText()
+        if categoria in (CATEGORIA_OTRAS_IMAGENES, CATEGORIA_OTROS_DOCUMENTOS) and not self.campo_detalle.text().strip():
+            QMessageBox.warning(self, "Agregar archivo", "Ingresá un detalle para identificar este archivo.")
+            self.campo_detalle.setFocus()
+            return
+        self.accept()
+
+    def categoria(self) -> str:
+        return self.combo_categoria.currentText()
+
+    def etiqueta_libre(self) -> str | None:
+        return self.campo_detalle.text().strip() or None
 
 
 def _opciones_categoria(conn: sqlite3.Connection) -> list[tuple[str, str]]:
@@ -267,17 +333,17 @@ class PantallaProfesionales(QWidget):
         if not codigo:
             QMessageBox.information(self, "Documentación", "Seleccioná un profesional con código cargado.")
             return
-        rutas, _ = QFileDialog.getOpenFileNames(self, "Elegir documentación", "", "PDF e imágenes (*.pdf *.jpg *.jpeg *.png)")
-        if not rutas:
+        ruta, _ = QFileDialog.getOpenFileName(self, "Elegir documentación", "", "PDF e imágenes (*.pdf *.jpg *.jpeg *.png)")
+        if not ruta:
             return
-        errores = []
-        for ruta in rutas:
-            try:
-                agregar_documento(self.conn, codigo, ruta)
-            except ValueError as error:
-                errores.append(str(error))
-        if errores:
-            QMessageBox.warning(self, "Documentación", "\n".join(errores))
+        dialogo = _DialogoCategoriaDocumento(parent=self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            agregar_documento(self.conn, codigo, ruta, dialogo.categoria(), dialogo.etiqueta_libre())
+        except ValueError as error:
+            QMessageBox.warning(self, "Documentación", str(error))
+            return
         self._actualizar_documentacion()
 
     def _eliminar_documento(self) -> None:

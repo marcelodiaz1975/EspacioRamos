@@ -1,41 +1,58 @@
-"""Gestión de imágenes (FA4, sección 3.26): fotos de edificios, unidades y
-consultorios (app.negocio.imagenes) que se muestran en Propuesta,
-Disponibilidad, Liquidación y Oferta de consultorios.
+"""Gestor de archivos (FA4, sección 3.26), solapa "Archivos del espacio":
+fotos y documentos de edificios, unidades y consultorios
+(app.negocio.imagenes) que se muestran en Propuesta, Disponibilidad,
+Liquidación y Oferta de consultorios.
 
-Mismo formato que los catálogos (solapa "Listado", filtros a la izquierda,
-tabla escroleable a la derecha, botones debajo de los filtros) aunque no
-usa `PantallaCRUD` porque no es un catálogo de registros con un cuadro de
-diálogo: es un administrador de archivos por alcance. El combo "Alcance"
-tiene un primer valor especial "Todos los archivos" (lista completa, sin
-filtros, ordenada por nivel y Descripción — ver `_TODOS`) y después los 5
-niveles reales (Espacio/Localidad/Edificio/Unidad/Consultorio — ver
-`app.negocio.imagenes.ALCANCES`), que definen hasta qué nivel de la
-cadena Localidad → Edificio → Unidad → Consultorio hace falta elegir un
-valor concreto: los combos de nivel superior al elegido quedan
-deshabilitados (`_al_cambiar_alcance`) — el que efectivamente determina
-qué imágenes se listan/agregan es el del nivel exacto del alcance
-elegido; los de niveles inferiores solo acotan en cascada sus opciones
-(mismo criterio de cascada que Aumentos y descuentos). No lleva campos
-libres: no es un registro de catálogo, es una carpeta de archivos.
+Mismo formato que los catálogos (solapa "Archivos del espacio", filtros
+a la izquierda, tabla escroleable a la derecha, botones debajo de los
+filtros) aunque no usa `PantallaCRUD` porque no es un catálogo de
+registros con un cuadro de diálogo: es un administrador de archivos por
+alcance. El combo "Alcance" tiene un primer valor especial "Todos los
+archivos" (lista completa, sin filtros, ordenada por nivel y
+Descripción — ver `_TODOS`) y después los 5 niveles reales (Espacio/
+Localidad/Edificio/Unidad/Consultorio — ver `app.negocio.imagenes.
+ALCANCES`), que definen hasta qué nivel de la cadena Localidad →
+Edificio → Unidad → Consultorio hace falta elegir un valor concreto:
+los combos de nivel superior al elegido quedan deshabilitados
+(`_al_cambiar_alcance`) — el que efectivamente determina qué archivos
+se listan/agregan es el del nivel exacto del alcance elegido; los de
+niveles inferiores solo acotan en cascada sus opciones (mismo criterio
+de cascada que Aumentos y descuentos). No lleva campos libres: no es un
+registro de catálogo, es una carpeta de archivos.
+
+Justo debajo de Alcance va el combo "Tipo de archivo" (Imagen/
+Documento, pedido de la clienta): filtra la tabla y decide qué lista de
+categorías se ofrece al agregar (ver `app.negocio.imagenes.
+categorias_por_alcance`) y con qué extensiones se abre el selector de
+archivo.
 
 El combo Localidad lista el catálogo `Localidad` (`catalogos.
 pantalla_localidades`) completo, no solo las que ya tienen algún
-Edificio cargado — se puede guardar una imagen de alcance Localidad
+Edificio cargado — se puede guardar un archivo de alcance Localidad
 (ej. el logo de esa localidad) antes de cargar ningún edificio ahí.
 
 Categoría, principal y descripción automática: ver el docstring de
-`app.negocio.imagenes`. El cuadro "Agregar imagen" (`_DialogoAgregarImagen`)
-pide la categoría (combo cerrado, según el alcance elegido) y un check
-"Marcar como principal" — no hay campo de descripción libre, se arma
-sola. "Marcar como principal" también existe como botón aparte en la
-lista, para promover una imagen ya cargada sin tener que recargarla."""
+`app.negocio.imagenes`. El cuadro "Agregar archivo" (`_DialogoAgregarArchivo`)
+pide la categoría (combo cerrado, según alcance + tipo elegidos), un
+campo de detalle libre — obligatorio solo para "Otras imágenes"/"Otros
+documentos", únicas categorías sin nombre propio — y un check "Marcar
+como principal". "Marcar como principal" también existe como botón
+aparte en la lista, para promover un archivo ya cargado sin tener que
+recargarlo.
+
+Vista previa: imágenes con QPixmap directo; PDF renderizando la primera
+página con PyMuPDF (opcional en tiempo de ejecución — si no está
+instalado, cae al mensaje de "sin vista"); TXT mostrando las primeras
+líneas como texto. Word (.doc/.docx) no tiene vista previa disponible
+todavía — mismo mensaje "No hay vista disponible" que cualquier archivo
+que no se pudo leer."""
 from __future__ import annotations
 
 import shutil
 import sqlite3
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -45,6 +62,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -57,10 +75,16 @@ from PySide6.QtWidgets import (
 
 from app.gui.widgets.items_tabla import item_numero
 from app.negocio.imagenes import (
-    CATEGORIAS_POR_ALCANCE,
+    CATEGORIAS_CON_ETIQUETA_LIBRE,
+    EXTENSIONES_DOCUMENTO,
+    EXTENSIONES_IMAGEN,
+    TIPOS_ARCHIVO,
     agregar_imagen,
     alternar_activo,
+    categorias_por_alcance,
     eliminar_imagen,
+    es_documento,
+    es_imagen,
     imagenes_del_alcance,
     imagenes_todas,
     marcar_principal,
@@ -74,11 +98,17 @@ _ALCANCES = [_TODOS, *_NIVEL_ALCANCE]
 _PADDING_COLUMNA = 30  # mismo criterio que novedades._ajustar_columnas
 _ANCHO_MINIMO_DESCRIPCION = 260  # la clienta pidió más aire acá en particular
 _ANCHO_PREVISUALIZACION = 220
+_LINEAS_PREVIEW_TXT = 12
 
 _COLUMNAS_NORMAL = ["Orden", "Descripción", "Categoría", "Principal", "Activo"]
 _COLUMNAS_TODOS = [
     "Alcance", "Localidad", "Edificio", "Unidad", "Consultorio", "Descripción", "Categoría", "Principal", "Activo",
 ]
+
+_FILTRO_ARCHIVO = {
+    "Imagen": "Imágenes (" + " ".join(f"*{ext}" for ext in EXTENSIONES_IMAGEN) + ")",
+    "Documento": "Documentos (" + " ".join(f"*{ext}" for ext in EXTENSIONES_DOCUMENTO) + ")",
+}
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -106,31 +136,93 @@ def _ajustar_columnas(tabla: QTableWidget, indice_descripcion: int) -> None:
     tabla.setColumnWidth(indice_descripcion, max(tabla.columnWidth(indice_descripcion), _ANCHO_MINIMO_DESCRIPCION))
 
 
-class _DialogoAgregarImagen(QDialog):
-    """Categoría (según el alcance elegido) + "Marcar como principal" —
-    la Descripción se arma sola a partir de Alcance + Categoría + Orden,
-    no se pide acá."""
+def _pixmap_primera_pagina_pdf(ruta: str) -> QPixmap | None:
+    """Miniatura de la primera página de un PDF con PyMuPDF — es una
+    dependencia opcional en tiempo de ejecución: si no está instalada o
+    el archivo no se puede abrir, no hay vista previa (no rompe la
+    pantalla)."""
+    try:
+        import fitz
+    except ImportError:
+        return None
+    try:
+        with fitz.open(ruta) as documento:
+            pagina = documento[0]
+            mapa_pixeles = pagina.get_pixmap(matrix=fitz.Matrix(0.6, 0.6))
+        formato = QImage.Format.Format_RGBA8888 if mapa_pixeles.alpha else QImage.Format.Format_RGB888
+        imagen = QImage(mapa_pixeles.samples, mapa_pixeles.width, mapa_pixeles.height, mapa_pixeles.stride, formato)
+        return QPixmap.fromImage(imagen.copy())
+    except Exception:
+        return None
+
+
+def _texto_primeras_lineas(ruta: str) -> str | None:
+    try:
+        with open(ruta, encoding="utf-8", errors="replace") as archivo:
+            lineas = [next(archivo) for _ in range(_LINEAS_PREVIEW_TXT)]
+    except StopIteration:
+        pass
+    except OSError:
+        return None
+    else:
+        return "".join(lineas)
+    try:
+        with open(ruta, encoding="utf-8", errors="replace") as archivo:
+            return archivo.read()
+    except OSError:
+        return None
+
+
+class _DialogoAgregarArchivo(QDialog):
+    """Categoría (según alcance + tipo elegidos), un detalle libre
+    (obligatorio solo para "Otras imágenes"/"Otros documentos" — las
+    únicas categorías sin nombre propio) y "Marcar como principal" — la
+    Descripción se arma sola a partir de Alcance + Categoría [+ detalle]
+    + Orden, no se pide acá."""
 
     def __init__(self, categorias: list[str], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Agregar imagen")
+        self.setWindowTitle("Agregar archivo")
         layout = QVBoxLayout(self)
 
         layout.addWidget(_titulo_campo("Categoría"))
         self.combo_categoria = QComboBox()
         self.combo_categoria.addItems(categorias)
+        self.combo_categoria.currentTextChanged.connect(self._actualizar_visibilidad_detalle)
         layout.addWidget(self.combo_categoria)
+
+        self.etiqueta_detalle = _titulo_campo("Detalle (para identificarlo)")
+        layout.addWidget(self.etiqueta_detalle)
+        self.campo_detalle = QLineEdit()
+        layout.addWidget(self.campo_detalle)
 
         self.check_principal = QCheckBox("Marcar como principal")
         layout.addWidget(self.check_principal)
 
         botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        botones.accepted.connect(self.accept)
+        botones.accepted.connect(self._validar_y_aceptar)
         botones.rejected.connect(self.reject)
         layout.addWidget(botones)
 
+        self._actualizar_visibilidad_detalle(self.combo_categoria.currentText())
+
+    def _actualizar_visibilidad_detalle(self, categoria: str) -> None:
+        requiere_detalle = categoria in CATEGORIAS_CON_ETIQUETA_LIBRE
+        self.etiqueta_detalle.setVisible(requiere_detalle)
+        self.campo_detalle.setVisible(requiere_detalle)
+
+    def _validar_y_aceptar(self) -> None:
+        if self.combo_categoria.currentText() in CATEGORIAS_CON_ETIQUETA_LIBRE and not self.campo_detalle.text().strip():
+            QMessageBox.warning(self, "Agregar archivo", "Ingresá un detalle para identificar este archivo.")
+            self.campo_detalle.setFocus()
+            return
+        self.accept()
+
     def categoria(self) -> str:
         return self.combo_categoria.currentText()
+
+    def etiqueta_libre(self) -> str | None:
+        return self.campo_detalle.text().strip() or None
 
     def principal(self) -> bool:
         return self.check_principal.isChecked()
@@ -147,7 +239,7 @@ class PantallaImagenes(QWidget):
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
-        titulo = QLabel("Imágenes del sistema")
+        titulo = QLabel("Gestor de archivos")
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
@@ -165,6 +257,13 @@ class PantallaImagenes(QWidget):
         self.combo_alcance.setFixedWidth(_ANCHO_CAMPO)
         self.combo_alcance.currentIndexChanged.connect(self._al_cambiar_alcance)
         form.addWidget(self.combo_alcance)
+
+        form.addWidget(_titulo_campo("Tipo de archivo"))
+        self.combo_tipo = QComboBox()
+        self.combo_tipo.addItems(TIPOS_ARCHIVO)
+        self.combo_tipo.setFixedWidth(_ANCHO_CAMPO)
+        self.combo_tipo.currentIndexChanged.connect(self.actualizar)
+        form.addWidget(self.combo_tipo)
 
         form.addWidget(_titulo_campo("Localidad"))
         self.combo_localidad = QComboBox()
@@ -192,7 +291,7 @@ class PantallaImagenes(QWidget):
 
         form.addWidget(_linea_divisoria())
 
-        self.boton_agregar = QPushButton("Agregar imagen")
+        self.boton_agregar = QPushButton("Agregar archivo")
         self.boton_agregar.setObjectName("botonPrimario")
         self.boton_agregar.setFixedWidth(_ANCHO_CAMPO)
         self.boton_agregar.clicked.connect(self._agregar)
@@ -248,7 +347,7 @@ class PantallaImagenes(QWidget):
         panel_preview = QWidget()
         layout_preview = QVBoxLayout(panel_preview)
         layout_preview.addWidget(_titulo_campo("Vista previa"))
-        self.etiqueta_preview = QLabel("Seleccioná una imagen para verla acá.")
+        self.etiqueta_preview = QLabel("Seleccioná un archivo para verlo acá.")
         self.etiqueta_preview.setObjectName("previsualizacionImagen")
         self.etiqueta_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.etiqueta_preview.setWordWrap(True)
@@ -261,7 +360,7 @@ class PantallaImagenes(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(panel_solapa)
-        solapas.addTab(scroll, "Listado")
+        solapas.addTab(scroll, "Archivos del espacio")
         layout.addWidget(solapas, stretch=1)
 
     def _al_cambiar_alcance(self, *_args) -> None:
@@ -354,17 +453,21 @@ class PantallaImagenes(QWidget):
             return {"id_unidad": self.combo_unidad.currentData()}
         return {"id_consultorio": self.combo_consultorio.currentData()}
 
+    def _filtrar_por_tipo(self, filas: list[sqlite3.Row]) -> list[sqlite3.Row]:
+        comprobar = es_imagen if self.combo_tipo.currentText() == "Imagen" else es_documento
+        return [f for f in filas if f["RutaArchivo"] and comprobar(f["RutaArchivo"])]
+
     def actualizar(self, *_args) -> None:
         alcance = self.combo_alcance.currentText()
         if alcance == _TODOS:
-            self._imagenes = imagenes_todas(self.conn)
+            self._imagenes = self._filtrar_por_tipo(imagenes_todas(self.conn))
             self._llenar_tabla_todos()
         else:
             parametros = self._parametros_alcance()
             if any(valor is None for valor in parametros.values()):
                 self._imagenes = []
             else:
-                self._imagenes = imagenes_del_alcance(self.conn, **parametros)
+                self._imagenes = self._filtrar_por_tipo(imagenes_del_alcance(self.conn, **parametros))
             self._llenar_tabla_normal()
         self._actualizar_previsualizacion()
 
@@ -397,15 +500,38 @@ class PantallaImagenes(QWidget):
     def _actualizar_previsualizacion(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            self.etiqueta_preview.setPixmap(QPixmap())
-            self.etiqueta_preview.setText("Seleccioná una imagen para verla acá.")
+            self._mostrar_preview_texto("Seleccioná un archivo para verlo acá.")
             return
         img = self._imagenes[filas[0].row()]
-        pixmap = QPixmap(img["RutaArchivo"]) if img["RutaArchivo"] else QPixmap()
-        if pixmap.isNull():
-            self.etiqueta_preview.setPixmap(QPixmap())
-            self.etiqueta_preview.setText("No se pudo cargar la imagen.")
+        ruta = img["RutaArchivo"]
+        if not ruta:
+            self._mostrar_preview_texto("No hay vista disponible.")
             return
+        if es_imagen(ruta):
+            pixmap = QPixmap(ruta)
+            if pixmap.isNull():
+                self._mostrar_preview_texto("No hay vista disponible.")
+                return
+            self._mostrar_preview_pixmap(pixmap)
+            return
+        if ruta.lower().endswith(".pdf"):
+            pixmap = _pixmap_primera_pagina_pdf(ruta)
+            if pixmap is not None:
+                self._mostrar_preview_pixmap(pixmap)
+                return
+            self._mostrar_preview_texto("No hay vista disponible.")
+            return
+        if ruta.lower().endswith(".txt"):
+            texto = _texto_primeras_lineas(ruta)
+            self._mostrar_preview_texto(texto if texto else "No hay vista disponible.")
+            return
+        self._mostrar_preview_texto("No hay vista disponible.")
+
+    def _mostrar_preview_texto(self, texto: str) -> None:
+        self.etiqueta_preview.setPixmap(QPixmap())
+        self.etiqueta_preview.setText(texto)
+
+    def _mostrar_preview_pixmap(self, pixmap: QPixmap) -> None:
         self.etiqueta_preview.setText("")
         self.etiqueta_preview.setPixmap(
             pixmap.scaled(
@@ -416,28 +542,30 @@ class PantallaImagenes(QWidget):
     def _imagen_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
-            QMessageBox.information(self, "Imágenes", "Seleccioná una imagen de la lista.")
+            QMessageBox.information(self, "Gestor de archivos", "Seleccioná un archivo de la lista.")
             return None
         return self._imagenes[filas[0].row()]
 
     def _agregar(self) -> None:
         parametros = self._parametros_alcance()
         if any(valor is None for valor in parametros.values()):
-            QMessageBox.warning(self, "Imágenes", "No hay ningún registro cargado para este alcance.")
+            QMessageBox.warning(self, "Gestor de archivos", "No hay ningún registro cargado para este alcance.")
             return
-        categorias = CATEGORIAS_POR_ALCANCE[self.combo_alcance.currentText()]
-        ruta, _ = QFileDialog.getOpenFileName(self, "Elegir imagen", "", "Imágenes (*.jpg *.jpeg *.png)")
+        tipo = self.combo_tipo.currentText()
+        categorias = categorias_por_alcance(self.combo_alcance.currentText(), tipo)
+        ruta, _ = QFileDialog.getOpenFileName(self, "Elegir archivo", "", _FILTRO_ARCHIVO[tipo])
         if not ruta:
             return
-        dialogo = _DialogoAgregarImagen(categorias, parent=self)
+        dialogo = _DialogoAgregarArchivo(categorias, parent=self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
         try:
             agregar_imagen(
-                self.conn, ruta_origen=ruta, categoria=dialogo.categoria(), principal=dialogo.principal(), **parametros,
+                self.conn, ruta_origen=ruta, categoria=dialogo.categoria(), etiqueta_libre=dialogo.etiqueta_libre(),
+                principal=dialogo.principal(), **parametros,
             )
         except ValueError as error:
-            QMessageBox.warning(self, "Imágenes", str(error))
+            QMessageBox.warning(self, "Gestor de archivos", str(error))
             return
         self.conn.commit()
         self.actualizar()
@@ -471,23 +599,23 @@ class PantallaImagenes(QWidget):
         if img is None:
             return
         if not img["RutaArchivo"]:
-            QMessageBox.warning(self, "Imágenes", "Esta imagen no tiene un archivo asociado.")
+            QMessageBox.warning(self, "Gestor de archivos", "Este archivo no tiene un archivo asociado.")
             return
-        nombre_sugerido = img["Descripcion"] or "imagen"
+        nombre_sugerido = img["Descripcion"] or "archivo"
         extension = "." + img["RutaArchivo"].rsplit(".", 1)[-1] if "." in img["RutaArchivo"] else ""
-        destino, _ = QFileDialog.getSaveFileName(self, "Descargar imagen", f"{nombre_sugerido}{extension}")
+        destino, _ = QFileDialog.getSaveFileName(self, "Descargar archivo", f"{nombre_sugerido}{extension}")
         if not destino:
             return
         try:
             shutil.copy2(img["RutaArchivo"], destino)
         except OSError as error:
-            QMessageBox.warning(self, "Imágenes", f"No se pudo descargar el archivo: {error}")
+            QMessageBox.warning(self, "Gestor de archivos", f"No se pudo descargar el archivo: {error}")
 
     def _eliminar(self) -> None:
         img = self._imagen_seleccionada()
         if img is None:
             return
-        confirmacion = QMessageBox.question(self, "Eliminar imagen", "¿Confirmás eliminar la imagen seleccionada?")
+        confirmacion = QMessageBox.question(self, "Eliminar archivo", "¿Confirmás eliminar el archivo seleccionado?")
         if confirmacion != QMessageBox.StandardButton.Yes:
             return
         eliminar_imagen(self.conn, img["IdImagen"])

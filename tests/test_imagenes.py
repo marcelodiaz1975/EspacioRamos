@@ -5,7 +5,10 @@ import pytest
 from app.negocio.imagenes import (
     agregar_imagen,
     alternar_activo,
+    categorias_por_alcance,
     eliminar_imagen,
+    es_documento,
+    es_imagen,
     imagenes_del_alcance,
     imagenes_todas,
     marcar_principal,
@@ -105,7 +108,7 @@ def test_agregar_imagen_copia_el_archivo_y_arma_la_descripcion_sola(conn, consul
 
 def test_agregar_imagen_formato_no_soportado_falla(conn, consultorio, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
-    ruta = tmp_path / "documento.pdf"
+    ruta = tmp_path / "documento.xlsx"
     ruta.write_bytes(b"x")
     with pytest.raises(ValueError):
         agregar_imagen(conn, ruta_origen=str(ruta), categoria="Foto general", id_consultorio=consultorio)
@@ -295,3 +298,61 @@ def test_imagenes_del_alcance_trae_activas_e_inactivas(conn, consultorio, tmp_pa
     alternar_activo(conn, id_imagen)
     filas = imagenes_del_alcance(conn, id_consultorio=consultorio)
     assert len(filas) == 1
+
+
+def _archivo_pdf(tmp_path, nombre="doc.pdf") -> str:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    ruta = tmp_path / nombre
+    ruta.write_bytes(b"%PDF-1.4 contenido de prueba")
+    return str(ruta)
+
+
+def test_es_imagen_y_es_documento_por_extension():
+    assert es_imagen("foto.jpg") and not es_documento("foto.jpg")
+    assert es_documento("manual.pdf") and not es_imagen("manual.pdf")
+    assert es_documento("planos.docx")
+    assert es_documento("notas.txt")
+
+
+def test_categorias_por_alcance_imagen_y_documento():
+    assert "Fachada" in categorias_por_alcance("Edificio", "Imagen")
+    assert "Planos de instalación" in categorias_por_alcance("Unidad", "Documento")
+    assert "Habilitación" in categorias_por_alcance("Unidad", "Documento")
+    assert "Manual del usuario" in categorias_por_alcance("Espacio", "Documento")
+    assert categorias_por_alcance("Localidad", "Documento") == ["Otros documentos"]
+
+
+def test_agregar_documento_pdf_se_guarda_como_documento(conn, consultorio, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path / "base")
+    id_imagen = agregar_imagen(
+        conn, ruta_origen=_archivo_pdf(tmp_path / "origen"), categoria="Otros documentos",
+        etiqueta_libre="Habilitación municipal", id_consultorio=consultorio,
+    )
+    fila = obtener_repositorio(conn, "Imagen").obtener(id_imagen)
+    assert fila["Descripcion"] == "Consultorio - Otros documentos - Habilitación municipal - 1"
+    assert Path(fila["RutaArchivo"]).suffix == ".pdf"
+    assert es_documento(fila["RutaArchivo"])
+
+
+def test_agregar_otros_documentos_sin_etiqueta_falla(conn, consultorio, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path)
+    with pytest.raises(ValueError):
+        agregar_imagen(
+            conn, ruta_origen=_archivo_pdf(tmp_path), categoria="Otros documentos", id_consultorio=consultorio,
+        )
+
+
+def test_agregar_word_y_txt_son_formatos_soportados(conn, consultorio, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path / "base")
+    origen_docx = tmp_path / "origen" / "manual.docx"
+    origen_docx.parent.mkdir(parents=True, exist_ok=True)
+    origen_docx.write_bytes(b"contenido")
+    origen_txt = tmp_path / "origen" / "notas.txt"
+    origen_txt.write_text("hola")
+
+    id_docx = agregar_imagen(conn, ruta_origen=str(origen_docx), categoria="Foto general", id_consultorio=consultorio)
+    id_txt = agregar_imagen(conn, ruta_origen=str(origen_txt), categoria="Foto general", id_consultorio=consultorio)
+
+    repo = obtener_repositorio(conn, "Imagen")
+    assert Path(repo.obtener(id_docx)["RutaArchivo"]).suffix == ".docx"
+    assert Path(repo.obtener(id_txt)["RutaArchivo"]).suffix == ".txt"

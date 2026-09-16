@@ -585,6 +585,7 @@ CREATE TABLE IF NOT EXISTS Imagen (
     IdConsultorio INTEGER REFERENCES Consultorio(IdConsultorio),
     NumeroOrden INTEGER,
     Descripcion TEXT,
+    EtiquetaLibre TEXT,
     RutaArchivo TEXT,
     Activo INTEGER NOT NULL DEFAULT 1
 );

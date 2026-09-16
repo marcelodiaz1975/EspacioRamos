@@ -23,16 +23,17 @@ def test_listar_documentos_carpeta_vacia(conn, tmp_path):
     assert listar_documentos(conn, "R1") == []
 
 
-def test_agregar_documento_pdf_lo_copia(conn, tmp_path):
+def test_agregar_documento_pdf_lo_copia_con_el_nombre_de_la_categoria(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path / "base")
     origen = tmp_path / "origen" / "dni.pdf"
     origen.parent.mkdir()
     origen.write_bytes(b"contenido")
 
-    destino = agregar_documento(conn, "R1", str(origen))
+    destino = agregar_documento(conn, "R1", str(origen), "DNI completo")
 
     assert destino.is_file()
     assert destino != origen
+    assert destino.name == "DNI completo.pdf"
     assert destino.read_bytes() == b"contenido"
     assert listar_documentos(conn, "R1") == [destino]
 
@@ -42,8 +43,9 @@ def test_agregar_documento_imagen_tambien_se_acepta(conn, tmp_path):
     origen = tmp_path / "origen" / "matricula.jpg"
     origen.parent.mkdir()
     origen.write_bytes(b"x")
-    destino = agregar_documento(conn, "R1", str(origen))
+    destino = agregar_documento(conn, "R1", str(origen), "Matrícula nacional")
     assert destino.is_file()
+    assert destino.name == "Matrícula nacional.jpg"
 
 
 def test_agregar_documento_formato_no_soportado_falla(conn, tmp_path):
@@ -51,22 +53,38 @@ def test_agregar_documento_formato_no_soportado_falla(conn, tmp_path):
     origen = tmp_path / "datos.xlsx"
     origen.write_bytes(b"x")
     with pytest.raises(ValueError):
-        agregar_documento(conn, "R1", str(origen))
+        agregar_documento(conn, "R1", str(origen), "DNI completo")
 
 
 def test_agregar_documento_inexistente_falla(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     with pytest.raises(ValueError):
-        agregar_documento(conn, "R1", str(tmp_path / "no-existe.pdf"))
+        agregar_documento(conn, "R1", str(tmp_path / "no-existe.pdf"), "DNI completo")
+
+
+def test_agregar_otras_imagenes_sin_detalle_falla(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path)
+    origen = tmp_path / "foto.jpg"
+    origen.write_bytes(b"x")
+    with pytest.raises(ValueError):
+        agregar_documento(conn, "R1", str(origen), "Otras imágenes")
+
+
+def test_agregar_otros_documentos_con_detalle_arma_el_nombre(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path / "base")
+    origen = tmp_path / "cualquiera.pdf"
+    origen.write_bytes(b"x")
+    destino = agregar_documento(conn, "R1", str(origen), "Otros documentos", "Convenio de alquiler")
+    assert destino.name == "Otros documentos - Convenio de alquiler.pdf"
 
 
 def test_agregar_mismo_nombre_no_pisa_el_anterior(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path / "base")
     origen = tmp_path / "dni.pdf"
     origen.write_bytes(b"primero")
-    d1 = agregar_documento(conn, "R1", str(origen))
+    d1 = agregar_documento(conn, "R1", str(origen), "DNI completo")
     origen.write_bytes(b"segundo")
-    d2 = agregar_documento(conn, "R1", str(origen))
+    d2 = agregar_documento(conn, "R1", str(origen), "DNI completo")
 
     assert d1 != d2
     assert d1.read_bytes() == b"primero"
@@ -78,7 +96,7 @@ def test_eliminar_documento(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path / "base")
     origen = tmp_path / "dni.pdf"
     origen.write_bytes(b"x")
-    destino = agregar_documento(conn, "R1", str(origen))
+    destino = agregar_documento(conn, "R1", str(origen), "DNI completo")
 
     eliminar_documento(conn, "R1", destino.name)
 
@@ -95,5 +113,5 @@ def test_documentos_de_distintos_profesionales_no_se_mezclan(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path / "base")
     origen = tmp_path / "dni.pdf"
     origen.write_bytes(b"x")
-    agregar_documento(conn, "R1", str(origen))
+    agregar_documento(conn, "R1", str(origen), "DNI completo")
     assert listar_documentos(conn, "R2") == []

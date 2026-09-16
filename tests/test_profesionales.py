@@ -4,7 +4,12 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QPushButton, QS
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.crud_generico import _DialogoRegistro
-from app.gui.pantallas.profesionales import _al_abrir_dialogo, _campos_profesional, pantalla_profesionales
+from app.gui.pantallas.profesionales import (
+    _al_abrir_dialogo,
+    _campos_profesional,
+    _DialogoCategoriaDocumento,
+    pantalla_profesionales,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -13,6 +18,9 @@ def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    # Por defecto acepta el diálogo de "Agregar archivo" con la primera
+    # categoría de la lista — los tests que necesiten otra la pisan.
+    monkeypatch.setattr(_DialogoCategoriaDocumento, "exec", lambda self: QDialog.DialogCode.Accepted)
 
 
 @pytest.fixture
@@ -256,7 +264,7 @@ def test_agregar_documento_lo_copia_y_lo_lista(qtbot, conn, tmp_path, monkeypatc
     conn.commit()
     origen = tmp_path / "dni.pdf"
     origen.write_bytes(b"x")
-    monkeypatch.setattr(QFileDialog, "getOpenFileNames", staticmethod(lambda *a, **k: ([str(origen)], "")))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(origen), "")))
 
     pantalla = pantalla_profesionales(conn)
     qtbot.addWidget(pantalla)
@@ -265,8 +273,11 @@ def test_agregar_documento_lo_copia_y_lo_lista(qtbot, conn, tmp_path, monkeypatc
     pantalla._agregar_documento()
 
     assert pantalla.lista_documentos.count() == 1
-    assert pantalla.lista_documentos.item(0).text() == "dni.pdf"
-    assert (tmp_path / "base" / "Profesionales" / "R3" / "Documentación" / "dni.pdf").exists()
+    # El archivo se guarda con el nombre de la categoría elegida (la
+    # primera de la lista, "DNI completo" — mockeada por defecto), no
+    # con el nombre original.
+    assert pantalla.lista_documentos.item(0).text() == "DNI completo.pdf"
+    assert (tmp_path / "base" / "Profesionales" / "R3" / "Documentación" / "DNI completo.pdf").exists()
 
 
 def test_eliminar_documento(qtbot, conn, tmp_path, monkeypatch):
@@ -275,7 +286,7 @@ def test_eliminar_documento(qtbot, conn, tmp_path, monkeypatch):
     conn.commit()
     origen = tmp_path / "dni.pdf"
     origen.write_bytes(b"x")
-    monkeypatch.setattr(QFileDialog, "getOpenFileNames", staticmethod(lambda *a, **k: ([str(origen)], "")))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(origen), "")))
 
     pantalla = pantalla_profesionales(conn)
     qtbot.addWidget(pantalla)
@@ -286,7 +297,76 @@ def test_eliminar_documento(qtbot, conn, tmp_path, monkeypatch):
     pantalla._eliminar_documento()
 
     assert pantalla.lista_documentos.count() == 0
-    assert not (tmp_path / "base" / "Profesionales" / "R3" / "Documentación" / "dni.pdf").exists()
+    assert not (tmp_path / "base" / "Profesionales" / "R3" / "Documentación" / "DNI completo.pdf").exists()
+
+
+def test_agregar_documento_elige_categoria_del_dialogo(qtbot, conn, tmp_path, monkeypatch):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path / "base"),))
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ramos", IdCodigo="R3")
+    conn.commit()
+    origen = tmp_path / "titulo.pdf"
+    origen.write_bytes(b"x")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(origen), "")))
+
+    def _elegir_titulo(self):
+        self.combo_categoria.setCurrentText("Título")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoCategoriaDocumento, "exec", _elegir_titulo)
+
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud_profesionales.tabla_widget.selectRow(0)
+    pantalla._agregar_documento()
+
+    assert pantalla.lista_documentos.item(0).text() == "Título.pdf"
+
+
+def test_agregar_otras_imagenes_sin_detalle_no_agrega(qtbot, conn, tmp_path, monkeypatch):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path / "base"),))
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ramos", IdCodigo="R3")
+    conn.commit()
+    origen = tmp_path / "otra.jpg"
+    origen.write_bytes(b"x")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(origen), "")))
+
+    def _elegir_otras_sin_detalle(self):
+        self.combo_categoria.setCurrentText("Otras imágenes")
+        self.campo_detalle.setText("")
+        self._validar_y_aceptar()
+        return self.result()
+
+    monkeypatch.setattr(_DialogoCategoriaDocumento, "exec", _elegir_otras_sin_detalle)
+
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud_profesionales.tabla_widget.selectRow(0)
+    pantalla._agregar_documento()
+
+    assert pantalla.lista_documentos.count() == 0
+
+
+def test_agregar_otras_imagenes_con_detalle_nombra_el_archivo(qtbot, conn, tmp_path, monkeypatch):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path / "base"),))
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ramos", IdCodigo="R3")
+    conn.commit()
+    origen = tmp_path / "otra.jpg"
+    origen.write_bytes(b"x")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(origen), "")))
+
+    def _elegir_otras_con_detalle(self):
+        self.combo_categoria.setCurrentText("Otras imágenes")
+        self.campo_detalle.setText("Foto del consultorio alquilado")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoCategoriaDocumento, "exec", _elegir_otras_con_detalle)
+
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud_profesionales.tabla_widget.selectRow(0)
+    pantalla._agregar_documento()
+
+    assert pantalla.lista_documentos.item(0).text() == "Otras imágenes - Foto del consultorio alquilado.jpg"
 
 
 def test_pantalla_profesionales_usa_formato_solapa(qtbot, conn):

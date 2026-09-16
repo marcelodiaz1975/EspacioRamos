@@ -138,6 +138,21 @@ CAMPO`, 240px), y sus propios métodos atados de la pantalla compuesta
 binding funciona porque el click llega mucho después de que todo ya
 está armado).
 
+Se evaluó centralizar la documentación de Profesionales en el Gestor de
+archivos (agregando una segunda solapa "Archivos de los profesionales")
+pero la clienta pidió dejarla como estaba, solo mejorando el nombrado:
+"Agregar archivo" ahora abre `_DialogoCategoriaDocumento` (lista cerrada
+`app.negocio.documentacion_profesional.
+CATEGORIAS_DOCUMENTACION_PROFESIONAL` — DNI completo/frente/dorso,
+Título, Curso, Capacitación, Seguro mala praxis, Matrícula nacional/
+provincial, más las dos categorías libres "Otras imágenes"/"Otros
+documentos", compartidas por nombre con las de Gestor de archivos) y el
+archivo se guarda con el nombre de esa categoría (o "{categoría} -
+{detalle}" para las dos libres) en vez del nombre original — sigue
+siendo pura gestión de archivos en carpeta, sin fila propia en la base,
+sin concepto de "principal" ni de orden: es deliberadamente más simple
+que Gestor de archivos.
+
 El título del campo Buscar es "Buscar" por default, pero se puede
 personalizar por catálogo con `etiqueta_buscar` (ej. Profesionales:
 "Buscar profesional") sin cambiar el criterio de filtrado en sí (sigue
@@ -196,18 +211,33 @@ consulta (así el código que ya leía esa clave de la fila no necesitó
 tocarse) — solo cambiaron las consultas SQL, no los `dict`/`Row` que
 consume cada pantalla.
 
-## Imágenes (administrador de archivos, no un catálogo)
+## Gestor de archivos (administrador de archivos, no un catálogo)
 
-`app/gui/pantallas/imagenes.py` (título "Imágenes del sistema") sigue el
-mismo lenguaje visual que los catálogos (solapa "Listado", filtros a la
-izquierda, tabla escroleable a la derecha, botones debajo de los
-filtros, con más ancho que el `resizeColumnsToContents` justo — mismo
-criterio que `novedades._ajustar_columnas`, con la columna Descripción
-todavía más generosa) pero NO usa `PantallaCRUD`: no hay un cuadro de
-diálogo con campos de un registro, es un administrador de los archivos
-de imagen guardados por alcance. Por lo mismo no lleva los tres campos
-libres — no es un registro de catálogo. A la derecha de la tabla hay un
-panel fijo de vista previa (miniatura de la imagen seleccionada).
+`app/gui/pantallas/imagenes.py` (título "Gestor de archivos", solapa
+"Archivos del espacio" — hoy es la única; una eventual "Archivos de los
+profesionales" quedó descartada, ver más abajo el criterio que se siguió
+para la documentación de Profesionales en su lugar) sigue el mismo
+lenguaje visual que los catálogos (filtros a la izquierda, tabla
+escroleable a la derecha, botones debajo de los filtros, con más ancho
+que el `resizeColumnsToContents` justo — mismo criterio que `novedades.
+_ajustar_columnas`, con la columna Descripción todavía más generosa)
+pero NO usa `PantallaCRUD`: no hay un cuadro de diálogo con campos de un
+registro, es un administrador de archivos por alcance. Por lo mismo no
+lleva los tres campos libres — no es un registro de catálogo. A la
+derecha de la tabla hay un panel fijo de vista previa.
+
+Tipo de archivo: además de imágenes (JPG/PNG) se pueden cargar
+documentos (PDF/Word/TXT) — combo "Tipo de archivo" justo debajo de
+Alcance (Imagen/Documento), que filtra la tabla y decide con qué
+extensiones se abre el selector de archivo y qué lista de categorías se
+ofrece al agregar. La distinción es pura extensión (`app.negocio.
+imagenes.es_imagen`/`es_documento`), no hay columna propia en la base.
+Vista previa: imágenes con QPixmap directo, PDF renderizando la primera
+página con PyMuPDF (dependencia opcional en tiempo de ejecución — si no
+está instalado cae al mensaje de "sin vista", no rompe la pantalla), TXT
+mostrando las primeras líneas como texto. Word no tiene vista previa
+todavía — mismo cartel "No hay vista disponible" que cualquier archivo
+que no se pudo leer.
 
 El alcance (`app.negocio.imagenes.ALCANCES`) tiene 5 niveles: "Espacio"
 (imágenes generales del sistema, sin atarse a ningún edificio — logos,
@@ -239,24 +269,31 @@ reordenar sin haber elegido un alcance puntual; Eliminar/Activar-
 Desactivar/Descargar siguen funcionando sobre la fila seleccionada.
 
 Categoría y principal (pedido de la clienta al revisar esta pantalla):
-cada alcance tiene su propia lista cerrada de categorías
-(`app.negocio.imagenes.CATEGORIAS_POR_ALCANCE`, ej. Edificio: "Fachada",
-"Ascensor"...; Consultorio: "Sillón profesional", "Ventana"..., siempre
-terminando en "Otros archivos") que se elige en el cuadro "Agregar
-imagen" (`_DialogoAgregarImagen`) junto con un check "Marcar como
-principal" — no hay campo de descripción libre, se arma sola. Dentro de
-cada (alcance, entidad, categoría) puede haber varias imágenes
-cargadas, pero solo una es la "principal" (`NumeroOrden = 1`): las
-demás quedan de respaldo. Para promover una ya cargada sin volver a
-subirla está el botón "Marcar como principal" en la lista (intercambia
-el orden con la que era principal, que no se borra, solo pasa a ser una
-más — `app.negocio.imagenes.marcar_principal`). La Descripción y el
-nombre del archivo en disco se arman solos como
-"{Alcance} - {Categoría} - {Orden}" (`_descripcion_automatica`) y se
-recalculan/renombran solos cada vez que el orden cambia (Subir/Bajar,
-Marcar como principal) — pasando los archivos por un nombre temporal
-primero para que un intercambio 1↔2 no pise el nombre del otro antes de
-liberarlo (`_intercambiar_orden`).
+cada alcance tiene, para cada tipo (Imagen/Documento), su propia lista
+cerrada de categorías (`app.negocio.imagenes.
+CATEGORIAS_IMAGEN_POR_ALCANCE`/`CATEGORIAS_DOCUMENTO_POR_ALCANCE`, ej.
+Edificio-Imagen: "Fachada", "Ascensor"...; Unidad-Documento: "Planos de
+instalación", "Habilitación"...; Espacio-Documento: "Manual del
+usuario"...) que se elige en el cuadro "Agregar archivo"
+(`_DialogoAgregarArchivo`) junto con un check "Marcar como principal".
+Las categorías "Otras imágenes"/"Otros documentos" (siempre las últimas
+de su lista, una por tipo) no tienen nombre propio: piden además un
+detalle libre (`Imagen.EtiquetaLibre`) que se suma a la Descripción y al
+nombre de archivo para poder identificarlas — el resto de las
+categorías arma la Descripción sola, sin pedir nada más.
+
+Dentro de cada (alcance, entidad, categoría) puede haber varios archivos
+cargados, pero solo uno es el "principal" (`NumeroOrden = 1`): los demás
+quedan de respaldo. Para promover uno ya cargado sin volver a subirlo
+está el botón "Marcar como principal" en la lista (intercambia el orden
+con el que era principal, que no se borra, solo pasa a ser uno más —
+`app.negocio.imagenes.marcar_principal`). La Descripción y el nombre del
+archivo en disco se arman solos como "{Alcance} - {Categoría} [-
+{detalle}] - {Orden}" (`_descripcion_automatica`) y se recalculan/
+renombran solos cada vez que el orden cambia (Subir/Bajar, Marcar como
+principal) — pasando los archivos por un nombre temporal primero para
+que un intercambio 1↔2 no pise el nombre del otro antes de liberarlo
+(`_intercambiar_orden`).
 
 `app.negocio.imagenes.obtener_principal(conn, categoria, ...)`: para
 cuando algún PDF necesite buscar, por ejemplo, el logo — devuelve la

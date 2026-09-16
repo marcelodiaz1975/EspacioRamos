@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.imagenes import PantallaImagenes, _DialogoAgregarImagen
+from app.gui.pantallas.imagenes import PantallaImagenes, _DialogoAgregarArchivo
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -25,7 +25,7 @@ def _sin_dialogos_modales(monkeypatch):
     # Por defecto acepta el diálogo de "Agregar imagen" con la primera
     # categoría de la lista y sin marcar principal — los tests que
     # necesiten otra cosa lo pisan explícitamente.
-    monkeypatch.setattr(_DialogoAgregarImagen, "exec", lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", lambda self: QDialog.DialogCode.Accepted)
 
 
 @pytest.fixture
@@ -51,6 +51,12 @@ def consultorio(conn, unidad):
 def _archivo_jpg(tmp_path, nombre="foto.jpg") -> str:
     ruta = tmp_path / nombre
     ruta.write_bytes(b"x" * 50)
+    return str(ruta)
+
+
+def _archivo_txt(tmp_path, nombre="doc.txt", contenido="Contenido de prueba") -> str:
+    ruta = tmp_path / nombre
+    ruta.write_text(contenido)
     return str(ruta)
 
 
@@ -139,7 +145,7 @@ def test_agregar_imagen_elige_categoria_del_dialogo(qtbot, conn, edificio, unida
         self.combo_categoria.setCurrentText("Ventana")
         return QDialog.DialogCode.Accepted
 
-    monkeypatch.setattr(_DialogoAgregarImagen, "exec", _elegir_ventana)
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _elegir_ventana)
 
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
@@ -270,3 +276,149 @@ def test_todos_los_archivos_muestra_imagenes_de_todos_los_niveles(qtbot, conn, e
     assert pantalla.tabla.item(0, 0).text() == "Espacio"
     assert pantalla.tabla.item(1, 0).text() == "Consultorio"
     assert pantalla.tabla.item(1, 2).text() == "Ramos 1"
+
+
+def test_tipo_documento_muestra_categorias_de_documento(qtbot, conn, edificio, unidad, consultorio):
+    from app.negocio.imagenes import categorias_por_alcance
+
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla.combo_tipo.setCurrentText("Documento")
+
+    dialogo = _DialogoAgregarArchivo(categorias_por_alcance("Consultorio", "Documento"))
+    opciones = [dialogo.combo_categoria.itemText(i) for i in range(dialogo.combo_categoria.count())]
+    assert opciones == ["Otros documentos"]
+
+
+def test_agregar_documento_pdf_via_dialogo(qtbot, conn, edificio, unidad, tmp_path, monkeypatch):
+    ruta = tmp_path / "manual.pdf"
+    ruta.write_bytes(b"%PDF-1.4 contenido de prueba")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(ruta), "")))
+
+    def _elegir_manual(self):
+        self.combo_categoria.setCurrentText("Manual del usuario")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _elegir_manual)
+
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Espacio")
+    pantalla.combo_tipo.setCurrentText("Documento")
+    pantalla._agregar()
+
+    assert pantalla.tabla.rowCount() == 1
+    assert pantalla.tabla.item(0, 1).text() == "Espacio - Manual del usuario - 1"
+
+
+def test_tipo_filtra_la_tabla_por_imagen_o_documento(qtbot, conn, tmp_path, monkeypatch):
+    rutas = iter([_archivo_jpg(tmp_path), str(tmp_path / "manual.pdf")])
+    (tmp_path / "manual.pdf").write_bytes(b"%PDF-1.4")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (next(rutas), "")))
+
+    def _elegir_manual(self):
+        self.combo_categoria.setCurrentText("Manual del usuario")
+        return QDialog.DialogCode.Accepted
+
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Espacio")
+    pantalla._agregar()  # Imagen (tipo por defecto), categoría por defecto
+
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _elegir_manual)
+    pantalla.combo_tipo.setCurrentText("Documento")
+    pantalla._agregar()
+
+    assert pantalla.tabla.rowCount() == 1
+    assert pantalla.tabla.item(0, 2).text() == "Manual del usuario"
+
+    pantalla.combo_tipo.setCurrentText("Imagen")
+    assert pantalla.tabla.rowCount() == 1
+    assert pantalla.tabla.item(0, 2).text() == "Logo PDF"
+
+
+def test_agregar_otros_documentos_sin_detalle_no_agrega(qtbot, conn, monkeypatch, tmp_path):
+    ruta = tmp_path / "cualquiera.pdf"
+    ruta.write_bytes(b"%PDF-1.4")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(ruta), "")))
+
+    def _elegir_otros_sin_detalle(self):
+        self.combo_categoria.setCurrentText("Otros documentos")
+        self.campo_detalle.setText("")
+        self._validar_y_aceptar()
+        return self.result()
+
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _elegir_otros_sin_detalle)
+
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Espacio")
+    pantalla.combo_tipo.setCurrentText("Documento")
+    pantalla._agregar()
+
+    assert pantalla.tabla.rowCount() == 0
+
+
+def test_agregar_otros_documentos_con_detalle_arma_la_descripcion(qtbot, conn, monkeypatch, tmp_path):
+    ruta = tmp_path / "cualquiera.pdf"
+    ruta.write_bytes(b"%PDF-1.4")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(ruta), "")))
+
+    def _elegir_otros_con_detalle(self):
+        self.combo_categoria.setCurrentText("Otros documentos")
+        self.campo_detalle.setText("Presupuesto de obra")
+        self._validar_y_aceptar()
+        return self.result()
+
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _elegir_otros_con_detalle)
+
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Espacio")
+    pantalla.combo_tipo.setCurrentText("Documento")
+    pantalla._agregar()
+
+    assert pantalla.tabla.rowCount() == 1
+    assert pantalla.tabla.item(0, 1).text() == "Espacio - Otros documentos - Presupuesto de obra - 1"
+
+
+def test_previsualizacion_txt_muestra_el_contenido(qtbot, conn, monkeypatch, tmp_path):
+    ruta = _archivo_txt(tmp_path, contenido="Primera línea de prueba")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (ruta, "")))
+
+    def _elegir_manual(self):
+        self.combo_categoria.setCurrentText("Manual del usuario")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _elegir_manual)
+
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Espacio")
+    pantalla.combo_tipo.setCurrentText("Documento")
+    pantalla._agregar()
+    pantalla.tabla.selectRow(0)
+
+    assert "Primera línea de prueba" in pantalla.etiqueta_preview.text()
+
+
+def test_previsualizacion_sin_soporte_avisa_que_no_hay_vista(qtbot, conn, monkeypatch, tmp_path):
+    ruta = tmp_path / "contrato.docx"
+    ruta.write_bytes(b"contenido binario cualquiera")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(ruta), "")))
+
+    def _elegir_manual(self):
+        self.combo_categoria.setCurrentText("Manual del usuario")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _elegir_manual)
+
+    pantalla = PantallaImagenes(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_alcance.setCurrentText("Espacio")
+    pantalla.combo_tipo.setCurrentText("Documento")
+    pantalla._agregar()
+    pantalla.tabla.selectRow(0)
+
+    assert pantalla.etiqueta_preview.text() == "No hay vista disponible."
