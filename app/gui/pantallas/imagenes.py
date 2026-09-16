@@ -96,7 +96,7 @@ _TODOS = "Todos los archivos"
 _NIVEL_ALCANCE = {"Espacio": 0, "Localidad": 1, "Edificio": 2, "Unidad": 3, "Consultorio": 4}
 _ALCANCES = [_TODOS, *_NIVEL_ALCANCE]
 _PADDING_COLUMNA = 30  # mismo criterio que novedades._ajustar_columnas
-_ANCHO_MINIMO_DESCRIPCION = 260  # la clienta pidió más aire acá en particular
+_ANCHO_MINIMO_DESCRIPCION = 300  # la clienta pidió más aire acá en particular
 _ANCHO_PREVISUALIZACION = 220
 _LINEAS_PREVIEW_TXT = 12
 
@@ -129,11 +129,16 @@ def _linea_divisoria() -> QFrame:
 def _ajustar_columnas(tabla: QTableWidget, indice_descripcion: int) -> None:
     """Mismo criterio que `novedades._ajustar_columnas`: más aire que el
     ancho justo de `resizeColumnsToContents`, con Descripción todavía
-    más generosa — pedido puntual de la clienta al revisar esta pantalla."""
+    más generosa — pedido puntual de la clienta al revisar esta pantalla.
+    El ancho final de la tabla queda fijo a la suma de sus columnas (sin
+    stretch) para que no quede un espacio en blanco antes del panel de
+    vista previa, que es el que se estira y ocupa el resto del ancho."""
     tabla.resizeColumnsToContents()
     for columna in range(tabla.columnCount()):
         tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
     tabla.setColumnWidth(indice_descripcion, max(tabla.columnWidth(indice_descripcion), _ANCHO_MINIMO_DESCRIPCION))
+    ancho_total = tabla.verticalHeader().width() + tabla.horizontalHeader().length() + 2 * tabla.frameWidth() + 4
+    tabla.setFixedWidth(ancho_total)
 
 
 def _pixmap_primera_pagina_pdf(ruta: str) -> QPixmap | None:
@@ -339,10 +344,11 @@ class PantallaImagenes(QWidget):
         self.tabla = QTableWidget()
         self._configurar_columnas(es_todos=True)  # "Todos los archivos" es la primera opción del combo Alcance
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._actualizar_previsualizacion)
-        layout_solapa.addWidget(self.tabla, stretch=1)
+        layout_solapa.addWidget(self.tabla)
 
         panel_preview = QWidget()
         layout_preview = QVBoxLayout(panel_preview)
@@ -355,7 +361,7 @@ class PantallaImagenes(QWidget):
         self.etiqueta_preview.setStyleSheet("border: 1px solid #000000;")
         layout_preview.addWidget(self.etiqueta_preview)
         layout_preview.addStretch()
-        layout_solapa.addWidget(panel_preview)
+        layout_solapa.addWidget(panel_preview, stretch=1)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

@@ -223,8 +223,11 @@ que el `resizeColumnsToContents` justo — mismo criterio que `novedades.
 _ajustar_columnas`, con la columna Descripción todavía más generosa)
 pero NO usa `PantallaCRUD`: no hay un cuadro de diálogo con campos de un
 registro, es un administrador de archivos por alcance. Por lo mismo no
-lleva los tres campos libres — no es un registro de catálogo. A la
-derecha de la tabla hay un panel fijo de vista previa.
+lleva los tres campos libres — no es un registro de catálogo. La tabla
+tiene el ancho justo de sus columnas (sin stretch); el panel de vista
+previa a la derecha es el que se estira y come el resto del ancho
+disponible, para que no quede un espacio en blanco entre el final de la
+tabla y el panel — pedido puntual de la clienta al revisar esta pantalla.
 
 Tipo de archivo: además de imágenes (JPG/PNG) se pueden cargar
 documentos (PDF/Word/TXT) — combo "Tipo de archivo" justo debajo de
