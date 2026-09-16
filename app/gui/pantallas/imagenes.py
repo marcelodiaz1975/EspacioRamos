@@ -97,7 +97,7 @@ _NIVEL_ALCANCE = {"Espacio": 0, "Localidad": 1, "Edificio": 2, "Unidad": 3, "Con
 _ALCANCES = [_TODOS, *_NIVEL_ALCANCE]
 _PADDING_COLUMNA = 30  # mismo criterio que novedades._ajustar_columnas
 _ANCHO_MINIMO_DESCRIPCION = 300  # la clienta pidió más aire acá en particular
-_ANCHO_PREVISUALIZACION = 220
+_ANCHO_PREVISUALIZACION = 400
 _LINEAS_PREVIEW_TXT = 12
 
 _COLUMNAS_NORMAL = ["Orden", "Descripción", "Categoría", "Principal", "Activo"]
