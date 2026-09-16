@@ -10,12 +10,32 @@
 
 PRAGMA foreign_keys = ON;
 
+-- 3.0 Localidad -------------------------------------------------------------
+-- Catálogo propio (pedido de la clienta al revisar Imágenes): antes
+-- Edificio.DomicilioLocalidad era texto libre, ahora es una referencia a
+-- esta tabla — le da a cada localidad un ID estable, necesario para las
+-- rutas de archivos por localidad (ver app.negocio.imagenes) y para que
+-- un futuro armado de PDF por localidad pueda buscar, por ejemplo, un
+-- logo propio de esa localidad. Partido/Provincia/País se guardan como
+-- dato de referencia; el sistema hoy no filtra ni agrupa por ellos, solo
+-- por Localidad.
+CREATE TABLE IF NOT EXISTS Localidad (
+    IdLocalidad INTEGER PRIMARY KEY AUTOINCREMENT,
+    Localidad TEXT NOT NULL,
+    Partido TEXT,
+    Provincia TEXT,
+    Pais TEXT,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
+);
+
 -- 3.1 Edificio ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS Edificio (
     IdEdificio INTEGER PRIMARY KEY AUTOINCREMENT,
     Nombre TEXT NOT NULL,
     Domicilio TEXT,
-    DomicilioLocalidad TEXT,
+    IdLocalidad INTEGER REFERENCES Localidad(IdLocalidad),
     CampoLibre1 TEXT,
     CampoLibre2 TEXT,
     CampoLibre3 TEXT
@@ -559,7 +579,7 @@ CREATE TABLE IF NOT EXISTS GastoOperativo (
 CREATE TABLE IF NOT EXISTS Imagen (
     IdImagen INTEGER PRIMARY KEY AUTOINCREMENT,
     Tipo TEXT,
-    Localidad TEXT,
+    IdLocalidad INTEGER REFERENCES Localidad(IdLocalidad),
     IdEdificio INTEGER REFERENCES Edificio(IdEdificio),
     IdUnidad INTEGER REFERENCES Unidad(IdUnidad),
     IdConsultorio INTEGER REFERENCES Consultorio(IdConsultorio),

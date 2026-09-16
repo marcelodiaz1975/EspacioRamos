@@ -151,8 +151,10 @@ def test_mensaje_grupal_con_varios_feriados_concuerda_en_plural(conn):
 
 @pytest.fixture
 def profesional_aislada_con_edificios(conn):
-    id_ed1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", DomicilioLocalidad="CABA")
-    id_ed2 = obtener_repositorio(conn, "Edificio").crear(Nombre="San Justo 1", Domicilio="Belgrano 500", DomicilioLocalidad="San Justo")
+    id_caba = obtener_repositorio(conn, "Localidad").crear(Localidad="CABA")
+    id_san_justo = obtener_repositorio(conn, "Localidad").crear(Localidad="San Justo")
+    id_ed1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", IdLocalidad=id_caba)
+    id_ed2 = obtener_repositorio(conn, "Edificio").crear(Nombre="San Justo 1", Domicilio="Belgrano 500", IdLocalidad=id_san_justo)
     id_un1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_ed1, Departamento='7mo "L"')
     id_un2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_ed2, Departamento='3ro "B"')
     c1 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_un1, NumeroConsultorio=1, ValorHoraAisladaActual=500)
@@ -229,7 +231,8 @@ def test_detalle_aislada_separa_reservas_posteriores_sin_dos_puntos(conn, profes
 def test_detalle_aislada_un_solo_edificio_en_el_espacio_nunca_lo_menciona(conn):
     """Regla del edificio, primer nivel: con un solo edificio en todo el
     espacio se omite siempre, aunque el control esté tildado."""
-    id_ed = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", Domicilio="Rivadavia 1", DomicilioLocalidad="CABA")
+    id_caba = obtener_repositorio(conn, "Localidad").crear(Localidad="CABA")
+    id_ed = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", Domicilio="Rivadavia 1", IdLocalidad=id_caba)
     id_un = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_ed, Departamento='7mo "L"')
     c1 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_un, NumeroConsultorio=1, ValorHoraAisladaActual=500)
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Aislada")

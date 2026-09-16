@@ -29,7 +29,7 @@ def _campos_edificio():
     return [
         Campo("Nombre", "Nombre", requerido=True),
         Campo("Domicilio", "Domicilio"),
-        Campo("DomicilioLocalidad", "Localidad"),
+        Campo("CampoLibre1", "Campo libre 1"),
     ]
 
 
@@ -203,8 +203,8 @@ def test_pantalla_crud_botones_tienen_los_estilos_compartidos(qtbot, conn):
 
 
 def test_pantalla_crud_buscar_filtra_filas_por_cualquier_columna(qtbot, conn):
-    conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Norte', 'Ramos Mejía')")
-    conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Sur', 'Haedo')")
+    conn.execute("INSERT INTO Edificio (Nombre, CampoLibre1) VALUES ('Torre Norte', 'Ramos Mejía')")
+    conn.execute("INSERT INTO Edificio (Nombre, CampoLibre1) VALUES ('Torre Sur', 'Haedo')")
     conn.commit()
     pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
     qtbot.addWidget(pantalla)
@@ -218,7 +218,7 @@ def test_pantalla_crud_buscar_filtra_filas_por_cualquier_columna(qtbot, conn):
 
 
 def test_pantalla_crud_buscar_ignora_mayusculas_y_acentos(qtbot, conn):
-    conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Norte', 'Ramos Mejía')")
+    conn.execute("INSERT INTO Edificio (Nombre, CampoLibre1) VALUES ('Torre Norte', 'Ramos Mejía')")
     conn.commit()
     pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
     qtbot.addWidget(pantalla)

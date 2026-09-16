@@ -14,7 +14,12 @@ concreto: los combos de nivel superior al elegido quedan deshabilitados
 listan/agregan es el del nivel exacto del alcance elegido; los de
 niveles inferiores solo acotan en cascada sus opciones (mismo criterio
 de cascada que Aumentos y descuentos). No lleva campos libres: no es un
-registro de catálogo, es una carpeta de archivos."""
+registro de catálogo, es una carpeta de archivos.
+
+El combo Localidad lista el catálogo `Localidad` (`catalogos.
+pantalla_localidades`) completo, no solo las que ya tienen algún
+Edificio cargado — se puede guardar una imagen de alcance Localidad
+(ej. el logo de esa localidad) antes de cargar ningún edificio ahí."""
 from __future__ import annotations
 
 import sqlite3
@@ -48,6 +53,8 @@ from app.negocio.imagenes import (
 _ANCHO_CAMPO = 240
 _NIVEL_ALCANCE = {"Espacio": 0, "Localidad": 1, "Edificio": 2, "Unidad": 3, "Consultorio": 4}
 _ALCANCES = list(_NIVEL_ALCANCE)
+_PADDING_COLUMNA = 30  # mismo criterio que novedades._ajustar_columnas
+_ANCHO_MINIMO_DESCRIPCION = 260  # la clienta pidió más aire acá en particular
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -65,6 +72,17 @@ def _linea_divisoria() -> QFrame:
     return linea
 
 
+def _ajustar_columnas(tabla: QTableWidget) -> None:
+    """Mismo criterio que `novedades._ajustar_columnas`: más aire que el
+    ancho justo de `resizeColumnsToContents`, con Descripción (índice 1)
+    todavía más generosa — pedido puntual de la clienta al revisar esta
+    pantalla."""
+    tabla.resizeColumnsToContents()
+    for columna in range(tabla.columnCount()):
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
+    tabla.setColumnWidth(1, max(tabla.columnWidth(1), _ANCHO_MINIMO_DESCRIPCION))
+
+
 class PantallaImagenes(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -76,7 +94,7 @@ class PantallaImagenes(QWidget):
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
-        titulo = QLabel("Imágenes de edificios, unidades y consultorios")
+        titulo = QLabel("Imágenes del sistema")
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
@@ -179,25 +197,21 @@ class PantallaImagenes(QWidget):
     def _cargar_combo_localidad(self) -> None:
         self.combo_localidad.blockSignals(True)
         self.combo_localidad.clear()
-        filas = self.conn.execute(
-            "SELECT DISTINCT DomicilioLocalidad FROM Edificio "
-            "WHERE DomicilioLocalidad IS NOT NULL AND TRIM(DomicilioLocalidad) != '' "
-            "ORDER BY DomicilioLocalidad"
-        ).fetchall()
+        filas = self.conn.execute("SELECT IdLocalidad, Localidad FROM Localidad ORDER BY Localidad").fetchall()
         for f in filas:
-            self.combo_localidad.addItem(f["DomicilioLocalidad"], f["DomicilioLocalidad"])
+            self.combo_localidad.addItem(f["Localidad"], f["IdLocalidad"])
         self.combo_localidad.blockSignals(False)
         self._cargar_combo_edificio()
 
     def _cargar_combo_edificio(self) -> None:
         self.combo_edificio.blockSignals(True)
         self.combo_edificio.clear()
-        localidad = self.combo_localidad.currentData()
+        id_localidad = self.combo_localidad.currentData()
         sql = "SELECT IdEdificio, Nombre FROM Edificio"
         parametros: list = []
-        if localidad is not None:
-            sql += " WHERE DomicilioLocalidad = ?"
-            parametros.append(localidad)
+        if id_localidad is not None:
+            sql += " WHERE IdLocalidad = ?"
+            parametros.append(id_localidad)
         sql += " ORDER BY Nombre"
         for f in self.conn.execute(sql, parametros).fetchall():
             self.combo_edificio.addItem(f["Nombre"], f["IdEdificio"])
@@ -243,7 +257,7 @@ class PantallaImagenes(QWidget):
         if alcance == "Espacio":
             return {}
         if alcance == "Localidad":
-            return {"localidad": self.combo_localidad.currentData()}
+            return {"id_localidad": self.combo_localidad.currentData()}
         if alcance == "Edificio":
             return {"id_edificio": self.combo_edificio.currentData()}
         if alcance == "Unidad":
@@ -262,7 +276,7 @@ class PantallaImagenes(QWidget):
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(img["Descripcion"] or ""))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(img["Tipo"] or ""))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem("Sí" if img["Activo"] else "No"))
-        self.tabla.resizeColumnsToContents()
+        _ajustar_columnas(self.tabla)
 
     def _imagen_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()

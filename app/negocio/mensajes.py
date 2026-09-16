@@ -451,11 +451,12 @@ def mensaje_detalle_reserva_aislada(
         """
         SELECT ra.IdReservaAislada, ra.Fecha, ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo, ra.EsReubicacion,
                c.IdConsultorio, c.NumeroConsultorio, c.ValorHoraAisladaActual, u.Departamento,
-               e.IdEdificio, e.Nombre AS NombreEdificio, e.Domicilio, e.DomicilioLocalidad
+               e.IdEdificio, e.Nombre AS NombreEdificio, e.Domicilio, loc.Localidad AS DomicilioLocalidad
         FROM ReservaAislada ra
         JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
         JOIN Unidad u ON u.IdUnidad = c.IdUnidad
         JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
         WHERE ra.IdProfesional = ? AND ra.Estado = 'Confirmada'
         ORDER BY ra.Fecha, ra.HoraInicio
         """,

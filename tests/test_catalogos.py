@@ -17,6 +17,7 @@ def conn(tmp_path):
 
 
 _FABRICAS = [
+    catalogos.pantalla_localidades,
     catalogos.pantalla_edificios,
     catalogos.pantalla_unidades,
     catalogos.pantalla_consultorios,
@@ -71,6 +72,35 @@ def test_pantalla_unidades_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre1") == 1
     assert nombres.count("CampoLibre2") == 1
     assert nombres.count("CampoLibre3") == 1
+
+
+def test_pantalla_localidades_tiene_tres_campos_libres(qtbot, conn):
+    pantalla = catalogos.pantalla_localidades(conn)
+    qtbot.addWidget(pantalla)
+    nombres = [c.nombre for c in pantalla.campos]
+    assert nombres.count("CampoLibre1") == 1
+    assert nombres.count("CampoLibre2") == 1
+    assert nombres.count("CampoLibre3") == 1
+
+
+def test_pantalla_localidades_localidad_es_requerida(qtbot, conn):
+    pantalla = catalogos.pantalla_localidades(conn)
+    qtbot.addWidget(pantalla)
+    campo = next(c for c in pantalla.campos if c.nombre == "Localidad")
+    assert campo.requerido is True
+
+
+def test_pantalla_edificios_usa_combo_de_localidad(qtbot, conn):
+    conn.execute(
+        "INSERT INTO Localidad (Localidad, Partido, Provincia, Pais) VALUES (?, ?, ?, ?)",
+        ("Ramos Mejía", "La Matanza", "Buenos Aires", "Argentina"),
+    )
+    conn.commit()
+    pantalla = catalogos.pantalla_edificios(conn)
+    qtbot.addWidget(pantalla)
+    campo = next(c for c in pantalla.campos if c.nombre == "IdLocalidad")
+    assert campo.tipo == "combo"
+    assert "Ramos Mejía" in dict(campo.opciones(conn)).values()
 
 
 def test_pantalla_edificios_tiene_tres_campos_libres(qtbot, conn):

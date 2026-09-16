@@ -1005,7 +1005,7 @@ def test_crear_reserva_regular_eligiendo_localidad_y_edificio_persiste(qtbot, co
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_regulares
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.combo_localidad.setCurrentIndex(panel.combo_localidad.findData("Ramos Mejía"))
+    panel.combo_localidad.setCurrentIndex(panel.combo_localidad.findData(_id_localidad(conn, "Ramos Mejía")))
     panel.combo_edificio.setCurrentIndex(panel.combo_edificio.findData(id_edificio_1))
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
@@ -1397,10 +1397,17 @@ def test_columna_reubicacion_en_tabla_de_aisladas(qtbot, conn):
     assert panel.tabla.item(0, 9).text() == "Confirmada"
 
 
+def _id_localidad(conn, nombre: str) -> int:
+    fila = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = ?", (nombre,)).fetchone()
+    return fila["IdLocalidad"] if fila else obtener_repositorio(conn, "Localidad").crear(Localidad=nombre)
+
+
 def test_campo_profesional_de_la_grilla_usa_el_mismo_formato(qtbot, conn):
     from app.gui.widgets.grilla_operativa import GrillaOperativaWidget
 
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", DomicilioLocalidad="Ramos Mejía")
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 1", IdLocalidad=_id_localidad(conn, "Ramos Mejía")
+    )
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
     obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
     id_virginia = obtener_repositorio(conn, "Profesional").crear(
@@ -1418,11 +1425,15 @@ def _preparar_dos_localidades(conn):
     """Dos localidades, cada una con un edificio y un consultorio —
     para probar el filtro de Localidad y el formato "Localidad -
     Edificio - Unidad - Consultorio" de la columna Consultorio."""
-    id_edificio_1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", DomicilioLocalidad="Ramos Mejía")
+    id_edificio_1 = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 1", IdLocalidad=_id_localidad(conn, "Ramos Mejía")
+    )
     id_unidad_1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento='7mo "L"')
     id_consultorio_1 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_1, NumeroConsultorio=1)
 
-    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Haedo Centro", DomicilioLocalidad="Haedo")
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Haedo Centro", IdLocalidad=_id_localidad(conn, "Haedo")
+    )
     id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento="PB")
     id_consultorio_2 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=1)
 
@@ -1444,12 +1455,12 @@ def test_combo_localidad_filtra_el_combo_edificio_en_ambas_solapas(qtbot, conn):
     assert pantalla.panel_aisladas.combo_localidad.count() == 3
 
     for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
-        indice = panel.combo_localidad.findData("Haedo")
+        indice = panel.combo_localidad.findData(_id_localidad(conn, "Haedo"))
         panel.combo_localidad.setCurrentIndex(indice)
         assert panel.combo_edificio.count() == 1
         assert panel.combo_edificio.currentData() == id_edificio_2
 
-        indice = panel.combo_localidad.findData("Ramos Mejía")
+        indice = panel.combo_localidad.findData(_id_localidad(conn, "Ramos Mejía"))
         panel.combo_localidad.setCurrentIndex(indice)
         assert panel.combo_edificio.count() == 1
         assert panel.combo_edificio.currentData() == id_edificio_1
@@ -1756,7 +1767,7 @@ def test_crear_reserva_aislada_eligiendo_localidad_y_edificio_persiste(qtbot, co
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.combo_localidad.setCurrentIndex(panel.combo_localidad.findData("Ramos Mejía"))
+    panel.combo_localidad.setCurrentIndex(panel.combo_localidad.findData(_id_localidad(conn, "Ramos Mejía")))
     panel.combo_edificio.setCurrentIndex(panel.combo_edificio.findData(id_edificio_1))
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1

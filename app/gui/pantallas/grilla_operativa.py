@@ -249,11 +249,13 @@ class _PanelFiltrosJerarquico(QGroupBox):
         self.lista_localidad.blockSignals(True)
         self.lista_localidad.clear()
         _agregar_item_todos(self.lista_localidad, "Todas las localidades")
-        filas = self.conn.execute("SELECT DISTINCT DomicilioLocalidad FROM Edificio ORDER BY DomicilioLocalidad").fetchall()
+        filas = self.conn.execute(
+            "SELECT DISTINCT e.IdLocalidad, loc.Localidad FROM Edificio e "
+            "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad ORDER BY loc.Localidad"
+        ).fetchall()
         for fila in filas:
-            valor = fila["DomicilioLocalidad"]
-            item = QListWidgetItem(valor or "(Sin localidad)")
-            item.setData(Qt.ItemDataRole.UserRole, valor)
+            item = QListWidgetItem(fila["Localidad"] or "(Sin localidad)")
+            item.setData(Qt.ItemDataRole.UserRole, fila["IdLocalidad"])
             self.lista_localidad.addItem(item)
         _seleccionar_todos(self.lista_localidad)
         self.lista_localidad.blockSignals(False)
@@ -273,9 +275,9 @@ class _PanelFiltrosJerarquico(QGroupBox):
             marcas = []
             for loc in localidades:
                 if loc is None:
-                    marcas.append("DomicilioLocalidad IS NULL")
+                    marcas.append("IdLocalidad IS NULL")
                 else:
-                    marcas.append("DomicilioLocalidad = ?")
+                    marcas.append("IdLocalidad = ?")
                     parametros.append(loc)
             sql += " WHERE " + " OR ".join(marcas)
         sql += " ORDER BY Nombre"
@@ -526,9 +528,10 @@ class PantallaGrillaOperativa(QWidget):
         placeholders = ", ".join("?" for _ in ids_consultorio)
         filas = self.conn.execute(
             f"""
-            SELECT e.DomicilioLocalidad, e.Nombre AS NombreEdificio, u.Departamento, c.NumeroConsultorio,
-                   c.ValorHoraRegularActual, c.ValorHoraAisladaActual
+            SELECT loc.Localidad AS DomicilioLocalidad, e.Nombre AS NombreEdificio, u.Departamento,
+                   c.NumeroConsultorio, c.ValorHoraRegularActual, c.ValorHoraAisladaActual
             FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+            LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
             WHERE c.IdConsultorio IN ({placeholders})
             """,
             ids_consultorio,

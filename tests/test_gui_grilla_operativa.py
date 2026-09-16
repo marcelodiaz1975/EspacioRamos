@@ -21,8 +21,15 @@ def conn(tmp_path):
     connection.close()
 
 
+def _id_localidad(conn, nombre: str) -> int:
+    fila = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = ?", (nombre,)).fetchone()
+    return fila["IdLocalidad"] if fila else obtener_repositorio(conn, "Localidad").crear(Localidad=nombre)
+
+
 def _preparar(conn, codigo_virginia="R1"):
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", DomicilioLocalidad="Ramos Mejía")
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 1", IdLocalidad=_id_localidad(conn, "Ramos Mejía")
+    )
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
     id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
         IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000,
@@ -216,7 +223,9 @@ def test_grilla_ordena_columnas_por_piso_pb_ep_numerico(qtbot, conn):
 
 def test_cascada_edificio_a_unidad(qtbot, conn):
     id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
-    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 2", IdLocalidad=_id_localidad(conn, "Ramos Mejía")
+    )
     otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
     obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
     conn.commit()
@@ -246,7 +255,9 @@ def test_sin_unidades_seleccionadas_deja_grilla_vacia(qtbot, conn):
 
 def test_filtrar_por_unidad_acota_la_seleccion(qtbot, conn):
     id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
-    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 2", IdLocalidad=_id_localidad(conn, "Ramos Mejía")
+    )
     otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
     obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
     conn.commit()
@@ -313,7 +324,9 @@ def test_unidades_con_reserva_incluye_aisladas(qtbot, conn):
     assert unidades_con_reserva(conn, None) == []
 
     # un profesional sin ninguna reserva regular, solo una aislada, igual aparece
-    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 2", IdLocalidad=_id_localidad(conn, "Ramos Mejía")
+    )
     otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
     otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1)
     solo_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Ajeno")
@@ -346,7 +359,9 @@ def test_pares_dia_unidad_con_reserva_vigente(qtbot, conn):
     from app.gui.widgets.grilla_operativa import pares_dia_unidad_con_reserva_vigente
 
     id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
-    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 2", IdLocalidad=_id_localidad(conn, "Ramos Mejía")
+    )
     otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
     otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1)
     obtener_repositorio(conn, "ReservaRegular").crear(
@@ -366,7 +381,9 @@ def test_pares_dia_unidad_con_reserva_incluye_aisladas(qtbot, conn):
     from app.gui.widgets.grilla_operativa import pares_dia_unidad_con_reserva
 
     id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
-    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 2", IdLocalidad=_id_localidad(conn, "Ramos Mejía")
+    )
     otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
     otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1)
     obtener_repositorio(conn, "ReservaAislada").crear(
@@ -394,7 +411,9 @@ def test_filtrar_por_pares_unidad_dia_evita_combinaciones_fantasma(qtbot, conn):
     from app.gui.widgets.grilla_operativa import pares_dia_unidad_con_reserva_vigente
 
     id_edificio, id_unidad, id_consultorio, id_virginia = _preparar(conn)
-    otro_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Ramos Mejía")
+    otro_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 2", IdLocalidad=_id_localidad(conn, "Ramos Mejía")
+    )
     otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=otro_edificio, Departamento="2do B")
     otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=otra_unidad, NumeroConsultorio=1)
     obtener_repositorio(conn, "ReservaRegular").crear(

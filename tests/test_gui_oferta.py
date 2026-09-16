@@ -123,8 +123,10 @@ def test_localidad_edificio_unidad_arrancan_en_todas(qtbot, conn, profesional_y_
 
 def test_elegir_una_localidad_acota_las_opciones_de_edificio(qtbot, conn, profesional_y_consultorio):
     id_prof, id_edificio = profesional_y_consultorio
-    conn.execute("UPDATE Edificio SET DomicilioLocalidad = 'Recoleta' WHERE IdEdificio = ?", (id_edificio,))
-    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", DomicilioLocalidad="Palermo")
+    id_recoleta = obtener_repositorio(conn, "Localidad").crear(Localidad="Recoleta")
+    conn.execute("UPDATE Edificio SET IdLocalidad = ? WHERE IdEdificio = ?", (id_recoleta, id_edificio))
+    id_palermo = obtener_repositorio(conn, "Localidad").crear(Localidad="Palermo")
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", IdLocalidad=id_palermo)
     id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento="2do B")
     obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=1, ValorHoraRegularActual=1000)
     conn.commit()

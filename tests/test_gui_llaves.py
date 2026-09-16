@@ -217,9 +217,9 @@ def test_observacion_tipo_se_guarda_al_perder_foco(qtbot, conn):
 
 def test_agregar_acceso_completa_localidad_desde_edificio(qtbot, conn, monkeypatch):
     crear_llave(conn)
-    conn.execute(
-        "INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Ramos 1', 'CABA')"
-    )
+    conn.execute("INSERT INTO Localidad (Localidad) VALUES ('CABA')")
+    id_caba = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = 'CABA'").fetchone()["IdLocalidad"]
+    conn.execute("INSERT INTO Edificio (Nombre, IdLocalidad) VALUES ('Ramos 1', ?)", (id_caba,))
     conn.commit()
     pantalla = PantallaLlaves(conn)
     qtbot.addWidget(pantalla)

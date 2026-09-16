@@ -427,12 +427,12 @@ class PantallaListaEspera(QWidget):
         self.lista_localidad.clear()
         _agregar_item_todos(self.lista_localidad, "Todas las localidades")
         localidades = self.conn.execute(
-            "SELECT DISTINCT DomicilioLocalidad FROM Edificio ORDER BY DomicilioLocalidad"
+            "SELECT DISTINCT e.IdLocalidad, loc.Localidad FROM Edificio e "
+            "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad ORDER BY loc.Localidad"
         ).fetchall()
         for fila in localidades:
-            valor = fila["DomicilioLocalidad"]
-            item = QListWidgetItem(valor or "(Sin localidad)")
-            item.setData(Qt.ItemDataRole.UserRole, valor)
+            item = QListWidgetItem(fila["Localidad"] or "(Sin localidad)")
+            item.setData(Qt.ItemDataRole.UserRole, fila["IdLocalidad"])
             self.lista_localidad.addItem(item)
         _seleccionar_todos(self.lista_localidad)
         self.lista_localidad.blockSignals(False)
@@ -452,9 +452,9 @@ class PantallaListaEspera(QWidget):
             marcas = []
             for loc in localidades:
                 if loc is None:
-                    marcas.append("DomicilioLocalidad IS NULL")
+                    marcas.append("IdLocalidad IS NULL")
                 else:
-                    marcas.append("DomicilioLocalidad = ?")
+                    marcas.append("IdLocalidad = ?")
                     parametros.append(loc)
             sql += " WHERE " + " OR ".join(marcas)
         sql += " ORDER BY Nombre"

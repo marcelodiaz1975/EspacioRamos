@@ -31,9 +31,10 @@ def profesional(conn):
 @pytest.fixture
 def edificios(conn):
     repo = obtener_repositorio(conn, "Edificio")
+    id_caba = obtener_repositorio(conn, "Localidad").crear(Localidad="CABA")
     return (
-        repo.crear(Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", DomicilioLocalidad="CABA"),
-        repo.crear(Nombre="Ramos 2", Domicilio="Av. Rivadavia 5678", DomicilioLocalidad="CABA"),
+        repo.crear(Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", IdLocalidad=id_caba),
+        repo.crear(Nombre="Ramos 2", Domicilio="Av. Rivadavia 5678", IdLocalidad=id_caba),
     )
 
 

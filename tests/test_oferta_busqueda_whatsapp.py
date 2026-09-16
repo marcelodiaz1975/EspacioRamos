@@ -94,11 +94,12 @@ def test_viñetas_usan_guion_no_asterisco(conn, edificio_con_consultorio, tmp_pa
 
 
 def test_comentario_enumera_edificios_cuando_hay_mas_de_uno(conn, tmp_path):
+    id_ramos_mejia = obtener_repositorio(conn, "Localidad").crear(Localidad="Ramos Mejía")
     id_edificio1 = obtener_repositorio(conn, "Edificio").crear(
-        Nombre="Ramos 1", Domicilio="Av. Rivadavia 13876", DomicilioLocalidad="Ramos Mejía",
+        Nombre="Ramos 1", Domicilio="Av. Rivadavia 13876", IdLocalidad=id_ramos_mejia,
     )
     id_edificio2 = obtener_repositorio(conn, "Edificio").crear(
-        Nombre="Ramos 2", Domicilio="Alvear 856", DomicilioLocalidad="Ramos Mejía",
+        Nombre="Ramos 2", Domicilio="Alvear 856", IdLocalidad=id_ramos_mejia,
     )
     id_unidad1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio1, Departamento='7mo "L"')
     obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad1, NumeroConsultorio=1, ValorHoraRegularActual=1000)

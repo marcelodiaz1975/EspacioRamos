@@ -15,9 +15,16 @@ def conn(tmp_path):
     connection.close()
 
 
+def _id_localidad(conn, nombre: str | None) -> int | None:
+    if nombre is None:
+        return None
+    fila = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = ?", (nombre,)).fetchone()
+    return fila["IdLocalidad"] if fila else obtener_repositorio(conn, "Localidad").crear(Localidad=nombre)
+
+
 def _crear_edificio(conn, nombre, localidad=None, domicilio=None, con_foto=False, apto_camilla=False):
     id_edificio = obtener_repositorio(conn, "Edificio").crear(
-        Nombre=nombre, Domicilio=domicilio, DomicilioLocalidad=localidad,
+        Nombre=nombre, Domicilio=domicilio, IdLocalidad=_id_localidad(conn, localidad),
     )
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1ro A")
     id_consultorio = obtener_repositorio(conn, "Consultorio").crear(

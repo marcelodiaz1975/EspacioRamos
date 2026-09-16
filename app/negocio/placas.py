@@ -74,7 +74,7 @@ def nombre_grabado(placa: sqlite3.Row, profesional: sqlite3.Row) -> str:
 
 
 def listar_placas(
-    conn: sqlite3.Connection, *, ids_localidad: list[str | None] | None = None,
+    conn: sqlite3.Connection, *, ids_localidad: list[int | None] | None = None,
     ids_edificio: list[int] | None = None, ids_unidad: list[int] | None = None,
     id_profesional: int | None = None,
 ) -> list[sqlite3.Row]:
@@ -82,21 +82,22 @@ def listar_placas(
     — localidad/edificio/unidad amplían o reducen el rango de búsqueda,
     profesional puntual responde "¿en qué unidades tiene placa?"."""
     sql = """
-        SELECT p.*, u.Departamento, u.IdEdificio, e.Nombre AS NombreEdificio, e.DomicilioLocalidad
+        SELECT p.*, u.Departamento, u.IdEdificio, e.Nombre AS NombreEdificio, loc.Localidad AS DomicilioLocalidad
         FROM Placa p
         JOIN Unidad u ON u.IdUnidad = p.IdUnidad
         JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
         WHERE 1=1
     """
     parametros: list = []
     if ids_localidad:
         marcas = []
-        for localidad in ids_localidad:
-            if localidad is None:
-                marcas.append("e.DomicilioLocalidad IS NULL")
+        for id_localidad in ids_localidad:
+            if id_localidad is None:
+                marcas.append("e.IdLocalidad IS NULL")
             else:
-                marcas.append("e.DomicilioLocalidad = ?")
-                parametros.append(localidad)
+                marcas.append("e.IdLocalidad = ?")
+                parametros.append(id_localidad)
         sql += " AND (" + " OR ".join(marcas) + ")"
     if ids_edificio:
         placeholders = ", ".join("?" for _ in ids_edificio)

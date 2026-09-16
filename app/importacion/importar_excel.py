@@ -142,7 +142,15 @@ def _resolver_referencias(conn: sqlite3.Connection, entidad: str, datos: dict) -
     if not referencias:
         return datos, errores
 
-    if entidad == "Unidad":
+    if entidad == "Edificio":
+        nombre_loc = datos.pop("Localidad", None)
+        if nombre_loc is not None:
+            id_localidad = _buscar_id(conn, "Localidad", "Localidad", nombre_loc)
+            if id_localidad is None:
+                errores.append(f"No se encontró la localidad '{nombre_loc}'")
+            datos["IdLocalidad"] = id_localidad
+
+    elif entidad == "Unidad":
         nombre_ed = datos.pop("Edificio", None)
         id_edificio = _buscar_id(conn, "Edificio", "Nombre", nombre_ed)
         if id_edificio is None:

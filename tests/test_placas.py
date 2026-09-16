@@ -22,8 +22,17 @@ def conn(tmp_path):
     connection.close()
 
 
+def _id_localidad(conn, nombre: str | None) -> int | None:
+    if nombre is None:
+        return None
+    fila = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = ?", (nombre,)).fetchone()
+    return fila["IdLocalidad"] if fila else obtener_repositorio(conn, "Localidad").crear(Localidad=nombre)
+
+
 def _crear_unidad(conn, nombre_edificio="Ramos 1", departamento="1ro A", localidad=None, limite_placas=10):
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre=nombre_edificio, DomicilioLocalidad=localidad)
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre=nombre_edificio, IdLocalidad=_id_localidad(conn, localidad)
+    )
     id_unidad = obtener_repositorio(conn, "Unidad").crear(
         IdEdificio=id_edificio, Departamento=departamento, CantLimitePlacas=limite_placas,
     )
@@ -186,7 +195,7 @@ def test_listar_placas_filtra_por_localidad_edificio_y_unidad(conn):
     asignar_placa(conn, id_unidad=id_unidad_a, posicion=1, id_profesional=id_profesional)
     asignar_placa(conn, id_unidad=id_unidad_b, posicion=1, id_profesional=id_profesional)
 
-    assert len(listar_placas(conn, ids_localidad=["Ramos Mejía"])) == 1
+    assert len(listar_placas(conn, ids_localidad=[_id_localidad(conn, "Ramos Mejía")])) == 1
     assert len(listar_placas(conn, ids_edificio=[id_edificio_b])) == 1
     assert len(listar_placas(conn, ids_unidad=[id_unidad_a])) == 1
     assert len(listar_placas(conn)) == 2

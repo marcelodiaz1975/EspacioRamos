@@ -313,17 +313,18 @@ class _PanelAumentos(QWidget):
     def _cargar_consultorios_info(self) -> None:
         filas = self.conn.execute(
             "SELECT c.IdConsultorio, c.NumeroConsultorio, u.IdUnidad, u.Departamento, "
-            "e.IdEdificio, e.Nombre AS NombreEdificio, e.DomicilioLocalidad "
+            "e.IdEdificio, e.Nombre AS NombreEdificio, e.IdLocalidad, loc.Localidad AS NombreLocalidad "
             "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad "
             "JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
-            "ORDER BY e.DomicilioLocalidad, e.Nombre, u.Departamento, c.NumeroConsultorio"
+            "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad "
+            "ORDER BY loc.Localidad, e.Nombre, u.Departamento, c.NumeroConsultorio"
         ).fetchall()
         self._consultorios_info = {}
         self._orden_consultorios = []
         for f in filas:
             self._consultorios_info[f["IdConsultorio"]] = {
-                "localidad_raw": f["DomicilioLocalidad"],
-                "localidad": f["DomicilioLocalidad"] or "(Sin localidad)",
+                "localidad_raw": f["IdLocalidad"],
+                "localidad": f["NombreLocalidad"] or "(Sin localidad)",
                 "id_edificio": f["IdEdificio"],
                 "edificio": f["NombreEdificio"],
                 "id_unidad": f["IdUnidad"],
@@ -337,11 +338,11 @@ class _PanelAumentos(QWidget):
         self.combo_localidad.clear()
         self.combo_localidad.addItem("Todas las localidades", _TODAS)
         filas = self.conn.execute(
-            "SELECT DISTINCT DomicilioLocalidad FROM Edificio ORDER BY DomicilioLocalidad"
+            "SELECT DISTINCT e.IdLocalidad, loc.Localidad FROM Edificio e "
+            "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad ORDER BY loc.Localidad"
         ).fetchall()
         for f in filas:
-            valor = f["DomicilioLocalidad"]
-            self.combo_localidad.addItem(valor or "(Sin localidad)", valor)
+            self.combo_localidad.addItem(f["Localidad"] or "(Sin localidad)", f["IdLocalidad"])
         self.combo_localidad.setCurrentIndex(0)
         self.combo_localidad.blockSignals(False)
         self._cargar_combo_edificio()
@@ -354,7 +355,7 @@ class _PanelAumentos(QWidget):
         sql = "SELECT IdEdificio, Nombre FROM Edificio"
         parametros: list = []
         if loc is not _TODAS:
-            sql += " WHERE DomicilioLocalidad IS NULL" if loc is None else " WHERE DomicilioLocalidad = ?"
+            sql += " WHERE IdLocalidad IS NULL" if loc is None else " WHERE IdLocalidad = ?"
             if loc is not None:
                 parametros.append(loc)
         sql += " ORDER BY Nombre"

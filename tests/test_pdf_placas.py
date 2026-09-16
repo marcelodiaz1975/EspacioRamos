@@ -28,7 +28,8 @@ def conn(tmp_path):
 
 
 def _crear_unidad(conn, nombre_edificio="Ramos 1", departamento="1ro A", localidad=None):
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre=nombre_edificio, DomicilioLocalidad=localidad)
+    id_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad=localidad) if localidad else None
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre=nombre_edificio, IdLocalidad=id_localidad)
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento=departamento)
     return id_edificio, id_unidad
 

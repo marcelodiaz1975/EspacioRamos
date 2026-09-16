@@ -260,8 +260,12 @@ def test_tabla_de_pedidos_tiene_alto_maximo_para_ser_escroleable(qtbot, conn):
 
 
 def test_localidad_edificio_unidad_arrancan_en_todas(qtbot, conn):
-    conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Norte', 'Palermo')")
-    conn.execute("INSERT INTO Edificio (Nombre, DomicilioLocalidad) VALUES ('Torre Sur', 'Belgrano')")
+    conn.execute("INSERT INTO Localidad (Localidad) VALUES ('Palermo')")
+    id_palermo = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = 'Palermo'").fetchone()["IdLocalidad"]
+    conn.execute("INSERT INTO Localidad (Localidad) VALUES ('Belgrano')")
+    id_belgrano = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = 'Belgrano'").fetchone()["IdLocalidad"]
+    conn.execute("INSERT INTO Edificio (Nombre, IdLocalidad) VALUES ('Torre Norte', ?)", (id_palermo,))
+    conn.execute("INSERT INTO Edificio (Nombre, IdLocalidad) VALUES ('Torre Sur', ?)", (id_belgrano,))
     conn.commit()
     id_norte = conn.execute("SELECT IdEdificio FROM Edificio WHERE Nombre = 'Torre Norte'").fetchone()["IdEdificio"]
     conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_norte,))

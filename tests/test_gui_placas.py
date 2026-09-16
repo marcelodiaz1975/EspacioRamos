@@ -24,8 +24,17 @@ def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
 
 
+def _id_localidad(conn, nombre: str | None) -> int | None:
+    if nombre is None:
+        return None
+    fila = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = ?", (nombre,)).fetchone()
+    return fila["IdLocalidad"] if fila else obtener_repositorio(conn, "Localidad").crear(Localidad=nombre)
+
+
 def _crear_unidad(conn, nombre_edificio="Ramos 1", departamento="1ro A", localidad=None, limite_placas=10):
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre=nombre_edificio, DomicilioLocalidad=localidad)
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre=nombre_edificio, IdLocalidad=_id_localidad(conn, localidad)
+    )
     id_unidad = obtener_repositorio(conn, "Unidad").crear(
         IdEdificio=id_edificio, Departamento=departamento, CantLimitePlacas=limite_placas,
     )

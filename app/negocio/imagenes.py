@@ -5,17 +5,19 @@ consultorio (`app.pdf.fotos_pdf.imagenes_de_consultorios`), las de
 edificio/unidad/localidad/espacio quedan guardadas para cuando algún
 documento las use.
 
-Alcance (`ALCANCES`): además de Edificio/Unidad/Consultorio (usan el ID
-interno de su tabla) hay dos niveles más generales, pedidos por la
-clienta al revisar esta pantalla:
+Alcance (`ALCANCES`): además de Edificio/Unidad/Consultorio hay dos
+niveles más generales, pedidos por la clienta al revisar esta pantalla:
 - "Espacio": imágenes generales del sistema, sin atarse a ningún
   edificio en particular (ej. el logo, si no termina necesitando su
-  propia categoría aparte — a definir con la clienta). Es el alcance que
-  resulta cuando no se pasa ninguno de los otros cuatro parámetros.
-- "Localidad": agrupa por el texto libre de Edificio.DomicilioLocalidad
-  — a diferencia de los demás, no tiene tabla propia con un ID estable,
-  así que tanto el filtro (columna `Imagen.Localidad`) como la carpeta
-  en disco usan directamente ese texto (ver `_nombre_carpeta_localidad`).
+  propia categoría aparte). Es el alcance que resulta cuando no se pasa
+  ninguno de los otros cuatro parámetros.
+- "Localidad": referencia la tabla `Localidad` (catálogo propio, con
+  Partido/Provincia/País como datos adicionales) en vez de Edificio/
+  Unidad/Consultorio — mismo criterio de ID estable que el resto, así
+  que las rutas de archivo no dependen de que el operador no le cambie
+  el nombre a la localidad más adelante (a diferencia de Edificio/Unidad/
+  Consultorio, esto sí puede pasar con Localidad, pero ya no rompe la
+  ruta: la carpeta usa el ID, no el texto).
 
 Los archivos se copian a Imagenes/{Alcance} o Imagenes/{Alcance}_{Id}
 bajo la carpeta base en vez de referenciar la ubicación original en la
@@ -24,7 +26,6 @@ datos e imágenes juntas" (sección 2 de la especificación) puede
 respaldar todo desde un único lugar conocido."""
 from __future__ import annotations
 
-import re
 import shutil
 import sqlite3
 from pathlib import Path
@@ -35,26 +36,16 @@ from app.repositorio.registro import obtener_repositorio
 EXTENSIONES_VALIDAS = (".jpg", ".jpeg", ".png")
 ALCANCES = ("Espacio", "Localidad", "Edificio", "Unidad", "Consultorio")
 
-_CARACTERES_INVALIDOS_CARPETA = re.compile(r'[\\/:*?"<>|]')
-
-
-def _nombre_carpeta_localidad(localidad: str) -> str:
-    """Nombres de carpeta en Windows (donde se empaqueta con PyInstaller)
-    no admiten \\/:*?"<>| — a diferencia de Edificio/Unidad/Consultorio,
-    que usan su ID interno, Localidad es texto libre y puede traer
-    cualquiera de esos caracteres."""
-    return _CARACTERES_INVALIDOS_CARPETA.sub("_", localidad).strip() or "Sin nombre"
-
 
 def _alcance(
-    localidad: str | None, id_edificio: int | None, id_unidad: int | None, id_consultorio: int | None,
-) -> tuple[str, str | int | None]:
+    id_localidad: int | None, id_edificio: int | None, id_unidad: int | None, id_consultorio: int | None,
+) -> tuple[str, int | None]:
     """A qué nivel pertenece la imagen a partir de cuál de los cuatro
     parámetros vino cargado. Si ninguno vino cargado, el alcance es
     "Espacio"."""
     seleccionados = [
         (alcance, valor) for alcance, valor in (
-            ("Localidad", localidad), ("Edificio", id_edificio), ("Unidad", id_unidad), ("Consultorio", id_consultorio),
+            ("Localidad", id_localidad), ("Edificio", id_edificio), ("Unidad", id_unidad), ("Consultorio", id_consultorio),
         )
         if valor is not None
     ]
@@ -68,11 +59,10 @@ def _alcance(
     return seleccionados[0]
 
 
-def _condicion_alcance(alcance: str, valor: str | int | None) -> tuple[str, list]:
+def _condicion_alcance(alcance: str, valor: int | None) -> tuple[str, list]:
     if alcance == "Espacio":
-        return "Localidad IS NULL AND IdEdificio IS NULL AND IdUnidad IS NULL AND IdConsultorio IS NULL", []
-    columna = "Localidad" if alcance == "Localidad" else f"Id{alcance}"
-    return f"{columna} = ?", [valor]
+        return "IdLocalidad IS NULL AND IdEdificio IS NULL AND IdUnidad IS NULL AND IdConsultorio IS NULL", []
+    return f"Id{alcance} = ?", [valor]
 
 
 def _tamano_maximo_mb(conn: sqlite3.Connection) -> float:
@@ -82,13 +72,13 @@ def _tamano_maximo_mb(conn: sqlite3.Connection) -> float:
 
 def agregar_imagen(
     conn: sqlite3.Connection, *, ruta_origen: str, descripcion: str | None = None, tipo: str | None = None,
-    localidad: str | None = None, id_edificio: int | None = None, id_unidad: int | None = None,
+    id_localidad: int | None = None, id_edificio: int | None = None, id_unidad: int | None = None,
     id_consultorio: int | None = None,
 ) -> int:
     """Copia `ruta_origen` a la carpeta del alcance elegido y registra la
     fila en Imagen, al final del orden existente para ese alcance.
     Devuelve el IdImagen creado."""
-    alcance, valor = _alcance(localidad, id_edificio, id_unidad, id_consultorio)
+    alcance, valor = _alcance(id_localidad, id_edificio, id_unidad, id_consultorio)
     origen = Path(ruta_origen)
     if not origen.is_file():
         raise ValueError(f"No se encuentra el archivo: {ruta_origen}")
@@ -99,8 +89,7 @@ def agregar_imagen(
     if tamano_mb > maximo:
         raise ValueError(f"La imagen pesa {tamano_mb:.1f}MB, el máximo configurado es {maximo:g}MB.")
 
-    nombre_carpeta = _nombre_carpeta_localidad(valor) if alcance == "Localidad" else valor
-    destino = destino_sin_colision(carpeta_imagenes(conn, alcance, nombre_carpeta), origen.name)
+    destino = destino_sin_colision(carpeta_imagenes(conn, alcance, valor), origen.name)
     shutil.copy2(origen, destino)
 
     condicion, parametros = _condicion_alcance(alcance, valor)
@@ -109,7 +98,7 @@ def agregar_imagen(
     ).fetchone()[0]
     repo = obtener_repositorio(conn, "Imagen")
     return repo.crear(
-        Tipo=tipo, Localidad=localidad, IdEdificio=id_edificio, IdUnidad=id_unidad, IdConsultorio=id_consultorio,
+        Tipo=tipo, IdLocalidad=id_localidad, IdEdificio=id_edificio, IdUnidad=id_unidad, IdConsultorio=id_consultorio,
         NumeroOrden=orden_actual + 1, Descripcion=descripcion, RutaArchivo=str(destino), Activo=1,
     )
 
@@ -128,7 +117,7 @@ def eliminar_imagen(conn: sqlite3.Connection, id_imagen: int) -> None:
 
 
 def imagenes_del_alcance(
-    conn: sqlite3.Connection, localidad: str | None = None, id_edificio: int | None = None,
+    conn: sqlite3.Connection, id_localidad: int | None = None, id_edificio: int | None = None,
     id_unidad: int | None = None, id_consultorio: int | None = None,
 ) -> list[sqlite3.Row]:
     """Todas las imágenes (activas e inactivas) del alcance elegido, en
@@ -136,7 +125,7 @@ def imagenes_del_alcance(
     pantalla de gestión — a diferencia de
     `app.pdf.fotos_pdf.imagenes_de_consultorios`, que solo trae las
     activas para los documentos."""
-    alcance, valor = _alcance(localidad, id_edificio, id_unidad, id_consultorio)
+    alcance, valor = _alcance(id_localidad, id_edificio, id_unidad, id_consultorio)
     condicion, parametros = _condicion_alcance(alcance, valor)
     filas = conn.execute(f"SELECT * FROM Imagen WHERE {condicion}", parametros).fetchall()
     return sorted(filas, key=lambda i: i["NumeroOrden"])
@@ -150,7 +139,7 @@ def reordenar(conn: sqlite3.Connection, id_imagen: int, delta: int) -> None:
     if imagen is None:
         return
     vecinas = imagenes_del_alcance(
-        conn, localidad=imagen["Localidad"], id_edificio=imagen["IdEdificio"],
+        conn, id_localidad=imagen["IdLocalidad"], id_edificio=imagen["IdEdificio"],
         id_unidad=imagen["IdUnidad"], id_consultorio=imagen["IdConsultorio"],
     )
     indice = next(i for i, v in enumerate(vecinas) if v["IdImagen"] == id_imagen)

@@ -125,6 +125,11 @@ def construir_secciones() -> list[Seccion]:
             "documentación adjunta de cada uno.",
         ),
         Seccion(
+            "Localidades", catalogos.pantalla_localidades, categoria="Catálogos",
+            ayuda="Alta, baja y edición de las localidades (Partido, Provincia, País) donde "
+            "están los edificios del espacio.",
+        ),
+        Seccion(
             "Edificios", catalogos.pantalla_edificios, categoria="Catálogos",
             ayuda="Alta, baja y edición de los edificios que integran el espacio.",
         ),

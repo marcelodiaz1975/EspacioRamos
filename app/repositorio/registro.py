@@ -6,6 +6,7 @@ import sqlite3
 from app.repositorio.base import Repositorio
 
 TABLAS = [
+    "Localidad",
     "Edificio",
     "Unidad",
     "Consultorio",

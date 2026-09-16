@@ -157,41 +157,78 @@ Pedido explícito de la clienta (al revisar Consultorios): a partir de
 ahora, TODO catálogo que se revise de acá en adelante suma tres campos
 libres (`CampoLibre1/2/3`, texto opcional, sin validación) al final de
 su lista de `Campo` — no solo cuando lo pide puntualmente. Ya aplicado a
-Edificios, Unidades y Consultorios; falta sumarlo al resto a medida que
-se van revisando. Cada uno necesita el campo en `schema.sql`, la entrada
-correspondiente en `_COLUMNAS_NUEVAS` de `migraciones.py` (para las bases
-ya creadas) y, si el catálogo tiene plantilla de importación Excel, las
-tres columnas al final de su entrada en `COLUMNAS_PLANTILLA`.
+Localidades, Edificios, Unidades y Consultorios; falta sumarlo al resto
+a medida que se van revisando. Cada uno necesita el campo en
+`schema.sql`, la entrada correspondiente en `_COLUMNAS_NUEVAS` de
+`migraciones.py` (para las bases ya creadas) y, si el catálogo tiene
+plantilla de importación Excel, las tres columnas al final de su
+entrada en `COLUMNAS_PLANTILLA`.
+
+## Localidad (catálogo propio, con ID estable)
+
+Pedido de la clienta al revisar Imágenes: `Edificio.DomicilioLocalidad`
+pasó de texto libre a una referencia (`Edificio.IdLocalidad`) a un
+catálogo propio `Localidad` (campos Localidad, Partido, Provincia, País
++ los tres campos libres de siempre) — le da a cada localidad un ID
+estable, necesario para las rutas de archivos por localidad (ver
+Imágenes abajo) y para que un futuro armado de PDF por localidad pueda
+buscar, por ejemplo, un logo propio de esa localidad ("LogoPDF_
+{IdLocalidad}.jpg"). Partido/Provincia/País son datos de referencia
+nomás — hoy el sistema no filtra ni agrupa por ellos, solo por Localidad.
+
+El catálogo se edita desde `pantalla_localidades` (formato estándar,
+igual al resto) y el Edificio lo referencia con un combo (`Campo(
+"IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad)`)
+en vez de un campo de texto — para cargar una localidad nueva hay que
+darla de alta primero en su propio catálogo. La migración de bases
+viejas (`app.db.migraciones._migrar_localidad_texto_a_tabla`) crea (o
+reusa) una fila de Localidad por cada texto distinto que ya estaba
+cargado en Edificio.DomicilioLocalidad (e Imagen.Localidad, ver abajo)
+antes de sacar esas columnas de texto.
+
+Todas las pantallas/PDFs que antes agrupaban o filtraban por el texto de
+Edificio.DomicilioLocalidad (Aumentos, Lista de espera, Oferta de
+consultorios, Placas, Reservas, Grilla operativa/Vista rápida, Llaves,
+Mensajes, Propuesta/Disponibilidad/Liquidación) ahora lo hacen por
+`Edificio.IdLocalidad`, resolviendo el texto a mostrar con un
+`LEFT JOIN Localidad` aliased de vuelta a `DomicilioLocalidad` en la
+consulta (así el código que ya leía esa clave de la fila no necesitó
+tocarse) — solo cambiaron las consultas SQL, no los `dict`/`Row` que
+consume cada pantalla.
 
 ## Imágenes (administrador de archivos, no un catálogo)
 
-`app/gui/pantallas/imagenes.py` sigue el mismo lenguaje visual que los
-catálogos (solapa "Listado", filtros a la izquierda, tabla escroleable a
-la derecha, botones debajo de los filtros) pero NO usa `PantallaCRUD`:
-no hay un cuadro de diálogo con campos de un registro, es un
-administrador de los archivos de imagen guardados por alcance. Por lo
-mismo no lleva los tres campos libres — no es un registro de catálogo.
+`app/gui/pantallas/imagenes.py` (título "Imágenes del sistema") sigue el
+mismo lenguaje visual que los catálogos (solapa "Listado", filtros a la
+izquierda, tabla escroleable a la derecha, botones debajo de los
+filtros, con más ancho que el `resizeColumnsToContents` justo — mismo
+criterio que `novedades._ajustar_columnas`, con la columna Descripción
+todavía más generosa) pero NO usa `PantallaCRUD`: no hay un cuadro de
+diálogo con campos de un registro, es un administrador de los archivos
+de imagen guardados por alcance. Por lo mismo no lleva los tres campos
+libres — no es un registro de catálogo.
 
 El alcance (`app.negocio.imagenes.ALCANCES`) tiene 5 niveles: "Espacio"
 (imágenes generales del sistema, sin atarse a ningún edificio — pensado
 en principio para cosas como el logo, a confirmar con la clienta),
-"Localidad" (agrupa por el texto libre de Edificio.DomicilioLocalidad —
-no tiene tabla propia, así que a diferencia de los demás usa el texto
-directamente en vez de un ID estable), "Edificio", "Unidad" y
-"Consultorio". El combo Alcance define hasta qué nivel de la cadena
-Localidad → Edificio → Unidad → Consultorio hace falta elegir un valor
-concreto: los combos de nivel superior al elegido quedan deshabilitados
-(si Alcance = "Espacio" los cuatro quedan grises; si Alcance = "Unidad"
-se puede setear Localidad/Edificio/Unidad pero no Consultorio). El valor
-que efectivamente determina qué imágenes se listan/agregan es el del
-combo en el nivel EXACTO del alcance elegido — los de niveles
-inferiores solo acotan en cascada las opciones de ese combo (mismo
-criterio de cascada que Aumentos y descuentos).
+"Localidad" (referencia el catálogo `Localidad` de arriba — mismo
+criterio de ID estable que el resto, a diferencia de antes que usaba el
+texto directamente), "Edificio", "Unidad" y "Consultorio". El combo
+Alcance define hasta qué nivel de la cadena Localidad → Edificio →
+Unidad → Consultorio hace falta elegir un valor concreto: los combos de
+nivel superior al elegido quedan deshabilitados (si Alcance = "Espacio"
+los cuatro quedan grises; si Alcance = "Unidad" se puede setear
+Localidad/Edificio/Unidad pero no Consultorio). El valor que
+efectivamente determina qué imágenes se listan/agregan es el del combo
+en el nivel EXACTO del alcance elegido — los de niveles inferiores solo
+acotan en cascada las opciones de ese combo (mismo criterio de cascada
+que Aumentos y descuentos). El combo Localidad lista el catálogo
+completo (no solo las localidades que ya tienen algún Edificio cargado).
 
 En disco, cada alcance guarda sus archivos en una carpeta separada
 (`app.negocio.archivos_generados.carpeta_imagenes`): `Imagenes/Espacio`
-para el nivel general, `Imagenes/{Alcance}_{Id}` para el resto —
-Localidad usa el texto (sanitizado) en vez de un ID.
+para el nivel general, `Imagenes/{Alcance}_{Id}` para el resto (Id =
+el ID interno de la tabla correspondiente, Localidad incluida).
 
 ## Selectores y fecha
 

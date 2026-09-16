@@ -6,10 +6,11 @@ import sqlite3
 
 
 def edificios_incluidos(conn: sqlite3.Connection, ids_edificio: list[int] | None) -> list[sqlite3.Row]:
+    sql = "SELECT e.*, loc.Localidad AS DomicilioLocalidad FROM Edificio e LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad"
     if ids_edificio:
         placeholders = ", ".join("?" for _ in ids_edificio)
-        return conn.execute(f"SELECT * FROM Edificio WHERE IdEdificio IN ({placeholders})", ids_edificio).fetchall()
-    return conn.execute("SELECT * FROM Edificio").fetchall()
+        return conn.execute(f"{sql} WHERE e.IdEdificio IN ({placeholders})", ids_edificio).fetchall()
+    return conn.execute(sql).fetchall()
 
 
 def ids_consultorio_de_edificios(conn: sqlite3.Connection, ids_edificio: list[int]) -> list[int]:
@@ -50,8 +51,12 @@ def hay_multiples_localidades(conn: sqlite3.Connection) -> bool:
     edificios en más de una localidad" (en TODO el sistema, no solo en
     los edificios de este PDF puntual) — con una sola, aclararla es
     redundante."""
-    todas = {f["DomicilioLocalidad"] for f in conn.execute("SELECT DomicilioLocalidad FROM Edificio").fetchall()
-             if f["DomicilioLocalidad"]}
+    todas = {
+        f["Localidad"] for f in conn.execute(
+            "SELECT loc.Localidad FROM Edificio e JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad"
+        ).fetchall()
+        if f["Localidad"]
+    }
     return len(todas) > 1
 
 

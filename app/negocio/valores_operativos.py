@@ -43,8 +43,9 @@ def calcular_promedios_valor_hora(conn: sqlite3.Connection, ids_consultorio: lis
     filas = conn.execute(
         f"""
         SELECT c.ValorHoraRegularActual, c.ValorHoraAisladaActual, u.IdUnidad, u.Departamento, e.IdEdificio,
-               e.Nombre AS NombreEdificio, e.DomicilioLocalidad
+               e.Nombre AS NombreEdificio, loc.Localidad AS DomicilioLocalidad
         FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
         WHERE c.IdConsultorio IN ({placeholders})
         """,
         ids_consultorio,

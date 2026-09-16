@@ -26,8 +26,13 @@ def _sin_dialogos_modales(monkeypatch):
 
 
 @pytest.fixture
-def edificio(conn):
-    return obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", DomicilioLocalidad="Rosario")
+def localidad(conn):
+    return obtener_repositorio(conn, "Localidad").crear(Localidad="Rosario")
+
+
+@pytest.fixture
+def edificio(conn, localidad):
+    return obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", IdLocalidad=localidad)
 
 
 @pytest.fixture
@@ -85,7 +90,8 @@ def test_alcance_consultorio_habilita_los_cuatro_filtros(qtbot, conn, edificio, 
 
 
 def test_combo_edificio_se_acota_por_localidad_elegida(qtbot, conn, edificio, unidad, consultorio):
-    obtener_repositorio(conn, "Edificio").crear(Nombre="Otro edificio", DomicilioLocalidad="Buenos Aires")
+    id_otra_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Buenos Aires")
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Otro edificio", IdLocalidad=id_otra_localidad)
     pantalla = PantallaImagenes(conn)
     qtbot.addWidget(pantalla)
     pantalla.combo_alcance.setCurrentText("Edificio")

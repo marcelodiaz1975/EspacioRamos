@@ -193,8 +193,9 @@ def calcular_estadisticas_operativas(
     consultorios = conn.execute(
         f"""
         SELECT c.IdConsultorio, u.IdUnidad, u.Departamento, e.IdEdificio, e.Nombre AS NombreEdificio,
-               e.DomicilioLocalidad
+               loc.Localidad AS DomicilioLocalidad
         FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
         WHERE u.IdUnidad IN ({placeholders})
         """,
         ids_unidad,

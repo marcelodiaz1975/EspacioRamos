@@ -190,7 +190,9 @@ def edificios_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[i
         return []
     placeholders = ", ".join("?" for _ in ids_edificio_resultado)
     filas = conn.execute(
-        f"SELECT Nombre, Domicilio, DomicilioLocalidad FROM Edificio WHERE IdEdificio IN ({placeholders}) ORDER BY IdEdificio",
+        f"SELECT e.Nombre, e.Domicilio, loc.Localidad AS DomicilioLocalidad FROM Edificio e "
+        f"LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad "
+        f"WHERE e.IdEdificio IN ({placeholders}) ORDER BY e.IdEdificio",
         list(ids_edificio_resultado),
     ).fetchall()
     return [_texto_edificio_comentario(f) for f in filas]

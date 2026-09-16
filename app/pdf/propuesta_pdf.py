@@ -376,8 +376,8 @@ def generar_pdfs_propuesta_por_localidad(conn: sqlite3.Connection, directorio: s
     mezcla edificios de distintas localidades en el mismo archivo. Los
     edificios sin localidad cargada quedan agrupados aparte, en un único
     archivo sin sufijo de localidad. Devuelve las rutas generadas."""
-    filas = conn.execute("SELECT IdEdificio, DomicilioLocalidad FROM Edificio").fetchall()
-    grupos: dict[str | None, list[int]] = {}
+    filas = conn.execute("SELECT IdEdificio, IdLocalidad FROM Edificio").fetchall()
+    grupos: dict[int | None, list[int]] = {}
     for f in filas:
-        grupos.setdefault(f["DomicilioLocalidad"], []).append(f["IdEdificio"])
+        grupos.setdefault(f["IdLocalidad"], []).append(f["IdEdificio"])
     return [generar_pdf_propuesta(conn, directorio, ids_edificio=ids) for ids in grupos.values()]

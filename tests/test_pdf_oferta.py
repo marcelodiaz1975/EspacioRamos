@@ -18,7 +18,8 @@ def conn(tmp_path):
 
 @pytest.fixture
 def consultorio(conn):
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", DomicilioLocalidad="CABA")
+    id_caba = obtener_repositorio(conn, "Localidad").crear(Localidad="CABA")
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", IdLocalidad=id_caba)
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
     return id_unidad, obtener_repositorio(conn, "Consultorio").crear(
         IdUnidad=id_unidad, NumeroConsultorio=1, Ventana=1, ValorHoraRegularActual=1000,

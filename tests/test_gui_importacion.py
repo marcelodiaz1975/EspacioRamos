@@ -26,8 +26,8 @@ def _planilla_minima(tmp_path):
     wb = Workbook()
     wb.remove(wb.active)
     ws = wb.create_sheet("Edificio")
-    ws.append(["Nombre", "Domicilio", "DomicilioLocalidad"])
-    ws.append(["Torre Norte", "Calle 1", "Ramos Mejía"])
+    ws.append(["Nombre", "Domicilio"])
+    ws.append(["Torre Norte", "Calle 1"])
     ruta = tmp_path / "planilla.xlsx"
     wb.save(ruta)
     return str(ruta)

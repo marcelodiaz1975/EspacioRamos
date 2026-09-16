@@ -20,9 +20,11 @@ def test_generar_plantilla_crea_una_hoja_por_entidad(tmp_path):
     assert ruta.exists()
 
     wb = load_workbook(ruta)
+    assert "Localidad" in wb.sheetnames
     assert "Edificio" in wb.sheetnames
     assert "Unidad" in wb.sheetnames
     assert "Consultorio" in wb.sheetnames
+    assert wb["Localidad"][1][0].value == "Localidad"
     assert wb["Edificio"][1][0].value == "Nombre"
 
 
@@ -30,6 +32,7 @@ def test_importar_edificio_unidad_consultorio(conn, tmp_path):
     ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
     wb = load_workbook(ruta)
 
+    wb["Localidad"].append(["Ramos Mejía", "La Matanza", "Buenos Aires", "Argentina"])
     wb["Edificio"].append(["Ramos 1", "Av. Rivadavia 13876", "Ramos Mejía"])
 
     wb["Unidad"].append(
@@ -59,6 +62,24 @@ def test_importar_edificio_unidad_consultorio(conn, tmp_path):
     assert consultorio["IdUnidad"] == unidad["IdUnidad"]
     assert consultorio["NumeroConsultorio"] == 3
 
+    localidad = obtener_repositorio(conn, "Localidad").listar()[0]
+    assert localidad["Localidad"] == "Ramos Mejía"
+    assert localidad["Partido"] == "La Matanza"
+    assert edificio["IdLocalidad"] == localidad["IdLocalidad"]
+
+
+def test_importar_edificio_con_localidad_inexistente_reporta_error(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["Edificio"].append(["Ramos 1", "Av. Rivadavia 13876", "Localidad Que No Existe"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+
+    assert resultados["Edificio"].filas_importadas == 0
+    assert len(resultados["Edificio"].errores) == 1
+    assert "Localidad Que No Existe" in resultados["Edificio"].errores[0]
+
 
 def test_importar_referencia_inexistente_reporta_error(conn, tmp_path):
     ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
@@ -79,6 +100,7 @@ def test_importar_referencia_inexistente_reporta_error(conn, tmp_path):
 def test_importar_convierte_fecha_dd_mm_aaaa_a_iso(conn, tmp_path):
     ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
     wb = load_workbook(ruta)
+    wb["Localidad"].append(["Ramos Mejía", "La Matanza", "Buenos Aires", "Argentina"])
     wb["Edificio"].append(["Ramos 1", "Av. Rivadavia 13876", "Ramos Mejía"])
     wb["Unidad"].append(
         ["Ramos 1", '7mo "L"', "SI", "SI", 2, "NO", "NO", "NO", "NO", "NO", "NO", "SI", 60]
@@ -109,6 +131,7 @@ def test_importar_convierte_fecha_dd_mm_aaaa_a_iso(conn, tmp_path):
 def test_importar_fecha_invalida_reporta_error_de_fila(conn, tmp_path):
     ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
     wb = load_workbook(ruta)
+    wb["Localidad"].append(["Ramos Mejía", "La Matanza", "Buenos Aires", "Argentina"])
     wb["Edificio"].append(["Ramos 1", "Av. Rivadavia 13876", "Ramos Mejía"])
     wb["Unidad"].append(
         ["Ramos 1", '7mo "L"', "SI", "SI", 2, "NO", "NO", "NO", "NO", "NO", "NO", "SI", 60]
@@ -299,6 +322,7 @@ def test_importar_plan_pago_ya_existe_en_plantilla(tmp_path):
 def test_importar_alias_banos_con_tilde(conn, tmp_path):
     ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
     wb = load_workbook(ruta)
+    wb["Localidad"].append(["Ramos Mejía", "La Matanza", "Buenos Aires", "Argentina"])
     wb["Edificio"].append(["Ramos 1", "Av. Rivadavia 13876", "Ramos Mejía"])
     ws_unidad = wb["Unidad"]
     ws_unidad.cell(row=1, column=5, value="Baños")  # encabezado con tilde, en vez de "Banos"

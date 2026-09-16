@@ -49,8 +49,8 @@ def _armar_hoja_instrucciones(ws: Worksheet) -> None:
     ws.append(["- Las cuotas de meses anteriores al de hoy se marcan solas como ya pagadas; no hace"])
     ws.append(["  falta indicar en qué cuota está el profesional actualmente."])
     ws.append([])
-    ws.append(["Orden recomendado de carga: Edificio, Unidad, Consultorio, Profesion, Profesional,"])
-    ws.append(["ReservaRegular, Llave, Placa, FechasEspeciales, Responsable, PlanPago."])
+    ws.append(["Orden recomendado de carga: Localidad, Edificio, Unidad, Consultorio, Profesion,"])
+    ws.append(["Profesional, ReservaRegular, Llave, Placa, FechasEspeciales, Responsable, PlanPago."])
     ws.column_dimensions["A"].width = 100
 
 

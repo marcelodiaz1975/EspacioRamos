@@ -388,11 +388,12 @@ class PantallaLlaves(QWidget):
     def _accesos(self, id_llave: int) -> list[sqlite3.Row]:
         return self.conn.execute(
             """
-            SELECT la.*, e.Nombre AS NombreEdificio, e.DomicilioLocalidad AS Localidad, u.Departamento
+            SELECT la.*, e.Nombre AS NombreEdificio, loc.Localidad AS Localidad, u.Departamento
             FROM LlaveAcceso la
             JOIN Edificio e ON e.IdEdificio = la.IdEdificio
+            LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
             LEFT JOIN Unidad u ON u.IdUnidad = la.IdUnidad
-            WHERE la.IdLlave = ? ORDER BY e.DomicilioLocalidad, e.Nombre, u.Departamento
+            WHERE la.IdLlave = ? ORDER BY loc.Localidad, e.Nombre, u.Departamento
             """,
             (id_llave,),
         ).fetchall()

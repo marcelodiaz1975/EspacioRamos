@@ -19,9 +19,10 @@ def test_todas_las_tablas_se_crean(conn):
 
 
 def test_crud_edificio(conn):
+    id_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Ramos Mejía")
     repo = obtener_repositorio(conn, "Edificio")
     id_edificio = repo.crear(
-        Nombre="Ramos 1", Domicilio="Av. Rivadavia 13876", DomicilioLocalidad="Ramos Mejía"
+        Nombre="Ramos 1", Domicilio="Av. Rivadavia 13876", IdLocalidad=id_localidad
     )
 
     edificio = repo.obtener(id_edificio)

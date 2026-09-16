@@ -1,7 +1,7 @@
-"""Pantallas de catálogo (Edificios, Unidades, Consultorios, Responsables,
-Tipos de licencia, Listas editables, Condiciones y normas, Profesiones,
-Gastos operativos, Placas, Fechas especiales) — todas construidas sobre
-PantallaCRUD, sin código bespoke por tabla.
+"""Pantallas de catálogo (Localidades, Edificios, Unidades, Consultorios,
+Responsables, Tipos de licencia, Listas editables, Condiciones y normas,
+Profesiones, Gastos operativos, Placas, Fechas especiales) — todas
+construidas sobre PantallaCRUD, sin código bespoke por tabla.
 ("Mensajes predefinidos" vive aparte, en mensajes_predefinidos.py — tiene
 filtro y vista previa propios, sección 5.5. El esquema de descuentos NO
 tiene pantalla de catálogo propia — se maneja y se visualiza únicamente
@@ -33,6 +33,11 @@ def _opciones_tamano(conn: sqlite3.Connection) -> list[tuple[str | None, str]]:
     return [(None, "Sin clasificar")] + [(t, t) for t in TAMANOS_CONSULTORIO]
 
 
+def _opciones_localidad(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    filas = conn.execute("SELECT IdLocalidad, Localidad FROM Localidad ORDER BY Localidad").fetchall()
+    return [(None, "Sin localidad")] + [(f["IdLocalidad"], f["Localidad"]) for f in filas]
+
+
 def _opciones_edificio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
     filas = conn.execute("SELECT IdEdificio, Nombre FROM Edificio ORDER BY Nombre").fetchall()
     return [(f["IdEdificio"], f["Nombre"]) for f in filas]
@@ -58,11 +63,24 @@ def _opciones_consultorio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
     ]
 
 
+def pantalla_localidades(conn: sqlite3.Connection) -> PantallaCRUD:
+    campos = [
+        Campo("Localidad", "Localidad", requerido=True),
+        Campo("Partido", "Partido"),
+        Campo("Provincia", "Provincia"),
+        Campo("Pais", "País"),
+        Campo("CampoLibre1", "Campo libre 1"),
+        Campo("CampoLibre2", "Campo libre 2"),
+        Campo("CampoLibre3", "Campo libre 3"),
+    ]
+    return PantallaCRUD(conn, "Localidad", "Localidades", campos)
+
+
 def pantalla_edificios(conn: sqlite3.Connection) -> PantallaCRUD:
     campos = [
         Campo("Nombre", "Nombre", requerido=True),
         Campo("Domicilio", "Domicilio"),
-        Campo("DomicilioLocalidad", "Localidad"),
+        Campo("IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad),
         Campo("CampoLibre1", "Campo libre 1"),
         Campo("CampoLibre2", "Campo libre 2"),
         Campo("CampoLibre3", "Campo libre 3"),

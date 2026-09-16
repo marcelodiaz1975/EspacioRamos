@@ -175,19 +175,22 @@ def _opciones_horario_regular(conn: sqlite3.Connection, id_profesional: int | No
     ]
 
 
-def _opciones_localidad(conn: sqlite3.Connection) -> list[tuple[str | None, str]]:
-    filas = conn.execute("SELECT DISTINCT DomicilioLocalidad FROM Edificio ORDER BY DomicilioLocalidad").fetchall()
-    return [(f["DomicilioLocalidad"], f["DomicilioLocalidad"] or "(Sin localidad)") for f in filas]
+def _opciones_localidad(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    filas = conn.execute(
+        "SELECT DISTINCT e.IdLocalidad, loc.Localidad FROM Edificio e "
+        "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad ORDER BY loc.Localidad"
+    ).fetchall()
+    return [(f["IdLocalidad"], f["Localidad"] or "(Sin localidad)") for f in filas]
 
 
-def _opciones_edificio(conn: sqlite3.Connection, localidad: str | None) -> list[tuple[int, str]]:
-    if localidad is None:
+def _opciones_edificio(conn: sqlite3.Connection, id_localidad: int | None) -> list[tuple[int, str]]:
+    if id_localidad is None:
         filas = conn.execute(
-            "SELECT IdEdificio, Nombre FROM Edificio WHERE DomicilioLocalidad IS NULL ORDER BY Nombre"
+            "SELECT IdEdificio, Nombre FROM Edificio WHERE IdLocalidad IS NULL ORDER BY Nombre"
         ).fetchall()
     else:
         filas = conn.execute(
-            "SELECT IdEdificio, Nombre FROM Edificio WHERE DomicilioLocalidad = ? ORDER BY Nombre", (localidad,)
+            "SELECT IdEdificio, Nombre FROM Edificio WHERE IdLocalidad = ? ORDER BY Nombre", (id_localidad,)
         ).fetchall()
     return [(f["IdEdificio"], f["Nombre"]) for f in filas]
 
@@ -455,8 +458,10 @@ class _PanelReservasRegulares(QWidget):
         for r in filtradas:
             profesional = repo_profesional.obtener(r["IdProfesional"])
             consultorio = self.conn.execute(
-                "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio, e.DomicilioLocalidad "
+                "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio, "
+                "loc.Localidad AS DomicilioLocalidad "
                 "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+                "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad "
                 "WHERE c.IdConsultorio = ?",
                 (r["IdConsultorio"],),
             ).fetchone()
@@ -538,13 +543,13 @@ class _PanelReservasRegulares(QWidget):
 
     def _seleccionar_ubicacion(self, id_consultorio: int) -> None:
         fila = self.conn.execute(
-            "SELECT e.DomicilioLocalidad, u.IdEdificio, c.IdUnidad FROM Consultorio c "
+            "SELECT e.IdLocalidad, u.IdEdificio, c.IdUnidad FROM Consultorio c "
             "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
             "WHERE c.IdConsultorio = ?", (id_consultorio,),
         ).fetchone()
         if fila is None:
             return
-        indice_localidad = self.combo_localidad.findData(fila["DomicilioLocalidad"])
+        indice_localidad = self.combo_localidad.findData(fila["IdLocalidad"])
         if indice_localidad >= 0:
             self.combo_localidad.setCurrentIndex(indice_localidad)
         indice_edificio = self.combo_edificio.findData(fila["IdEdificio"])
@@ -1013,13 +1018,13 @@ class _PanelReservasAisladas(QWidget):
 
     def _seleccionar_ubicacion(self, id_consultorio: int) -> None:
         fila = self.conn.execute(
-            "SELECT e.DomicilioLocalidad, u.IdEdificio, c.IdUnidad FROM Consultorio c "
+            "SELECT e.IdLocalidad, u.IdEdificio, c.IdUnidad FROM Consultorio c "
             "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
             "WHERE c.IdConsultorio = ?", (id_consultorio,),
         ).fetchone()
         if fila is None:
             return
-        indice_localidad = self.combo_localidad.findData(fila["DomicilioLocalidad"])
+        indice_localidad = self.combo_localidad.findData(fila["IdLocalidad"])
         if indice_localidad >= 0:
             self.combo_localidad.setCurrentIndex(indice_localidad)
         indice_edificio = self.combo_edificio.findData(fila["IdEdificio"])
@@ -1142,8 +1147,9 @@ class _PanelReservasAisladas(QWidget):
             profesional = repo_profesional.obtener(r["IdProfesional"])
             consultorio = self.conn.execute(
                 "SELECT c.NumeroConsultorio, c.ValorHoraAisladaActual, u.Departamento, "
-                "e.Nombre AS NombreEdificio, e.DomicilioLocalidad FROM Consultorio c "
+                "e.Nombre AS NombreEdificio, loc.Localidad AS DomicilioLocalidad FROM Consultorio c "
                 "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+                "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad "
                 "WHERE c.IdConsultorio = ?",
                 (r["IdConsultorio"],),
             ).fetchone()

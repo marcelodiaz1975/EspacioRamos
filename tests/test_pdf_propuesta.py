@@ -15,10 +15,15 @@ def conn(tmp_path):
     connection.close()
 
 
+def _id_localidad(conn, nombre: str) -> int:
+    fila = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = ?", (nombre,)).fetchone()
+    return fila["IdLocalidad"] if fila else obtener_repositorio(conn, "Localidad").crear(Localidad=nombre)
+
+
 @pytest.fixture
 def edificio_con_consultorio_y_foto(conn):
     id_edificio = obtener_repositorio(conn, "Edificio").crear(
-        Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", DomicilioLocalidad="CABA"
+        Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", IdLocalidad=_id_localidad(conn, "CABA")
     )
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
     id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
@@ -60,7 +65,7 @@ def test_por_localidad_genera_un_archivo_separado_por_cada_una(conn, edificio_co
     """Nunca mezcla edificios de distintas localidades en el mismo PDF: un
     edificio en San Justo no debe terminar en el mismo archivo que uno en
     CABA (el de la fixture)."""
-    id_ed2 = obtener_repositorio(conn, "Edificio").crear(Nombre="San Justo 1", DomicilioLocalidad="San Justo")
+    id_ed2 = obtener_repositorio(conn, "Edificio").crear(Nombre="San Justo 1", IdLocalidad=_id_localidad(conn, "San Justo"))
     id_unidad2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_ed2, Departamento="1ro A")
     obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad2, NumeroConsultorio=1, ValorHoraRegularActual=500)
 

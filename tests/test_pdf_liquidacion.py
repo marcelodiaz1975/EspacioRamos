@@ -26,10 +26,15 @@ def conn(tmp_path):
     connection.close()
 
 
+def _id_localidad(conn, nombre: str) -> int:
+    fila = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = ?", (nombre,)).fetchone()
+    return fila["IdLocalidad"] if fila else obtener_repositorio(conn, "Localidad").crear(Localidad=nombre)
+
+
 @pytest.fixture
 def consultorio(conn):
     id_edificio = obtener_repositorio(conn, "Edificio").crear(
-        Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", DomicilioLocalidad="CABA"
+        Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", IdLocalidad=_id_localidad(conn, "CABA")
     )
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
     return obtener_repositorio(conn, "Consultorio").crear(
@@ -266,7 +271,7 @@ def test_consultorios_y_horas_ordenados_por_edificio_y_numero(conn, profesional,
 
 def test_valores_incluye_edificios_de_la_misma_localidad_aunque_no_reserve_ahi(conn, profesional, tmp_path):
     obtener_repositorio(conn, "Edificio").crear(
-        Nombre="Ramos 2", Domicilio="Av. Rivadavia 8050", DomicilioLocalidad="CABA",
+        Nombre="Ramos 2", Domicilio="Av. Rivadavia 8050", IdLocalidad=_id_localidad(conn, "CABA"),
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
@@ -313,7 +318,7 @@ def test_valor_con_descuento_va_sin_descuento_cuando_se_pierde(conn, profesional
 
 def test_valores_no_incluye_edificios_de_otra_localidad(conn, profesional, tmp_path):
     obtener_repositorio(conn, "Edificio").crear(
-        Nombre="San Justo Norte", Domicilio="Av. San Martín 100", DomicilioLocalidad="San Justo",
+        Nombre="San Justo Norte", Domicilio="Av. San Martín 100", IdLocalidad=_id_localidad(conn, "San Justo"),
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))

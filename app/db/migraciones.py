@@ -41,6 +41,8 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Consultorio", "CampoLibre2", "TEXT"),
     ("Consultorio", "CampoLibre3", "TEXT"),
     ("Imagen", "Localidad", "TEXT"),
+    ("Edificio", "IdLocalidad", "INTEGER REFERENCES Localidad(IdLocalidad)"),
+    ("Imagen", "IdLocalidad", "INTEGER REFERENCES Localidad(IdLocalidad)"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja
@@ -49,6 +51,8 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
 # no es un simple cambio de nombre, así que el valor viejo no se traslada.
 _COLUMNAS_ELIMINADAS: list[tuple[str, str]] = [
     ("Consultorio", "PanelVidrioLuzNatural"),
+    ("Edificio", "DomicilioLocalidad"),
+    ("Imagen", "Localidad"),
 ]
 
 # Tablas que existían en versiones anteriores y se dieron de baja del todo
@@ -68,6 +72,61 @@ _TABLAS_ELIMINADAS: list[str] = [
 # tamaño de Oferta de consultorios, que compara por igualdad exacta,
 # encuentra coincidencia con cualquier consultorio ya cargado.
 _TAMANOS_CONSULTORIO = ["Grande", "Intermedio", "Chico"]
+
+# Edificio.DomicilioLocalidad e Imagen.Localidad pasaron de texto libre a
+# una referencia a la tabla Localidad (id propio — la clienta lo pidió
+# para poder armar rutas de archivos estables, ver app.negocio.imagenes),
+# que además suma Partido/Provincia/País como datos de referencia.
+_TABLAS_LOCALIDAD_TEXTO = (
+    ("Edificio", "DomicilioLocalidad", "IdLocalidad"),
+    ("Imagen", "Localidad", "IdLocalidad"),
+)
+
+
+def _obtener_o_crear_localidad(conn: sqlite3.Connection, texto: str, cache: dict[str, int]) -> int:
+    if texto in cache:
+        return cache[texto]
+    fila = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = ?", (texto,)).fetchone()
+    if fila:
+        id_localidad = fila["IdLocalidad"]
+    else:
+        cur = conn.execute("INSERT INTO Localidad (Localidad) VALUES (?)", (texto,))
+        id_localidad = cur.lastrowid
+    cache[texto] = id_localidad
+    return id_localidad
+
+
+def _migrar_localidad_texto_a_tabla(conn: sqlite3.Connection) -> None:
+    """Antes de sacar las columnas de texto viejas (ver
+    `_COLUMNAS_ELIMINADAS`), crea (o reusa) una fila de Localidad por cada
+    texto distinto ya cargado en Edificio.DomicilioLocalidad o
+    Imagen.Localidad y apunta cada fila vieja a esa fila — mismo texto,
+    misma fila de Localidad, para las dos tablas."""
+    existe_localidad = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Localidad'"
+    ).fetchone()
+    if not existe_localidad:
+        return
+    cache: dict[str, int] = {}
+    for tabla, columna_texto, columna_id in _TABLAS_LOCALIDAD_TEXTO:
+        existe_tabla = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (tabla,)
+        ).fetchone()
+        if not existe_tabla:
+            continue
+        columnas = {f["name"] for f in conn.execute(f"PRAGMA table_info({tabla})").fetchall()}
+        if columna_texto not in columnas or columna_id not in columnas:
+            continue
+        filas = conn.execute(
+            f"SELECT DISTINCT {columna_texto} AS texto FROM {tabla} "
+            f"WHERE {columna_texto} IS NOT NULL AND TRIM({columna_texto}) != '' AND {columna_id} IS NULL"
+        ).fetchall()
+        for f in filas:
+            id_localidad = _obtener_o_crear_localidad(conn, f["texto"], cache)
+            conn.execute(
+                f"UPDATE {tabla} SET {columna_id} = ? WHERE {columna_texto} = ? AND {columna_id} IS NULL",
+                (id_localidad, f["texto"]),
+            )
 
 
 def _normalizar_tamanos_consultorio(conn: sqlite3.Connection) -> None:
@@ -100,6 +159,7 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
         columnas_existentes = {f["name"] for f in conn.execute(f"PRAGMA table_info({tabla})").fetchall()}
         if columna not in columnas_existentes:
             conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {definicion}")
+    _migrar_localidad_texto_a_tabla(conn)
     for tabla, columna in _COLUMNAS_ELIMINADAS:
         existe_tabla = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (tabla,)

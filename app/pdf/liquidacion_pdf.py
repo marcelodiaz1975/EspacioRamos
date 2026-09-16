@@ -86,9 +86,10 @@ def _mapa_consultorios(conn: sqlite3.Connection) -> dict[int, sqlite3.Row]:
         SELECT c.IdConsultorio, c.NumeroConsultorio, c.Ventana,
                c.ValorHoraRegularActual, c.ValorHoraAisladaActual,
                u.IdUnidad, u.Departamento, e.IdEdificio, e.Nombre AS NombreEdificio,
-               e.Domicilio, e.DomicilioLocalidad
+               e.Domicilio, e.IdLocalidad, loc.Localidad AS DomicilioLocalidad
         FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad
         JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
         """
     ).fetchall()
     return {f["IdConsultorio"]: f for f in filas}
@@ -120,11 +121,12 @@ def _bloques_horarios(conn: sqlite3.Connection, ids: list[int]) -> list[sqlite3.
         f"""
         SELECT rr.DiaSemana, rr.HoraInicio, rr.HoraFin, rr.VigenciaInicio, rr.VigenciaFin,
                c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio, e.IdEdificio,
-               e.Domicilio, e.DomicilioLocalidad
+               e.Domicilio, e.IdLocalidad, loc.Localidad AS DomicilioLocalidad
         FROM ReservaRegular rr
         JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
         JOIN Unidad u ON u.IdUnidad = c.IdUnidad
         JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
         WHERE rr.IdProfesional IN ({placeholders})
         """,
         ids,
@@ -160,14 +162,16 @@ def _edificios_para_valores(conn: sqlite3.Connection, edificios_reservados: dict
     en otro edificio de esa misma localidad, ya tiene sus valores a mano.
     Los edificios sin localidad cargada no se pueden agrupar por
     localidad, así que solo entran si el profesional reserva ahí."""
-    localidades = {info["DomicilioLocalidad"] for info in edificios_reservados.values() if info["DomicilioLocalidad"]}
+    ids_localidad = {info["IdLocalidad"] for info in edificios_reservados.values() if info["IdLocalidad"]}
     resultado = {id_ed: info for id_ed, info in edificios_reservados.items()}
-    if localidades:
-        placeholders = ", ".join("?" for _ in localidades)
+    if ids_localidad:
+        placeholders = ", ".join("?" for _ in ids_localidad)
         filas = conn.execute(
-            f"SELECT IdEdificio, Nombre AS NombreEdificio, Domicilio, DomicilioLocalidad FROM Edificio "
-            f"WHERE DomicilioLocalidad IN ({placeholders})",
-            list(localidades),
+            f"SELECT e.IdEdificio, e.Nombre AS NombreEdificio, e.Domicilio, e.IdLocalidad, "
+            f"loc.Localidad AS DomicilioLocalidad FROM Edificio e "
+            f"LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad "
+            f"WHERE e.IdLocalidad IN ({placeholders})",
+            list(ids_localidad),
         ).fetchall()
         for f in filas:
             resultado.setdefault(f["IdEdificio"], f)

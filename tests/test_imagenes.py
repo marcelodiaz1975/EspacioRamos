@@ -39,29 +39,31 @@ def test_agregar_imagen_sin_alcance_es_espacio_y_se_guarda(conn, tmp_path):
     id_imagen = agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen"))
 
     fila = obtener_repositorio(conn, "Imagen").obtener(id_imagen)
-    assert fila["Localidad"] is None
+    assert fila["IdLocalidad"] is None
     assert fila["IdEdificio"] is None
     assert fila["IdUnidad"] is None
     assert fila["IdConsultorio"] is None
     assert Path(fila["RutaArchivo"]).parent.name == "Espacio"
 
 
-def test_agregar_imagen_de_localidad_usa_el_texto_como_carpeta(conn, tmp_path):
+def test_agregar_imagen_de_localidad_usa_el_id_como_carpeta(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path / "base")
-    id_imagen = agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen"), localidad="Rosario")
+    id_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Rosario")
+    id_imagen = agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen"), id_localidad=id_localidad)
 
     fila = obtener_repositorio(conn, "Imagen").obtener(id_imagen)
-    assert fila["Localidad"] == "Rosario"
-    assert Path(fila["RutaArchivo"]).parent.name == "Localidad_Rosario"
+    assert fila["IdLocalidad"] == id_localidad
+    assert Path(fila["RutaArchivo"]).parent.name == f"Localidad_{id_localidad}"
 
 
 def test_imagenes_del_alcance_espacio_no_incluye_las_de_localidad(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path / "base")
+    id_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Rosario")
     agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen", "a.jpg"))
-    agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen", "b.jpg"), localidad="Rosario")
+    agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen", "b.jpg"), id_localidad=id_localidad)
 
     assert len(imagenes_del_alcance(conn)) == 1
-    assert len(imagenes_del_alcance(conn, localidad="Rosario")) == 1
+    assert len(imagenes_del_alcance(conn, id_localidad=id_localidad)) == 1
 
 
 def test_agregar_imagen_con_dos_alcances_falla(conn, consultorio, tmp_path):

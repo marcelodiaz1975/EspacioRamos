@@ -77,13 +77,11 @@ def carpeta_documentacion_profesional(conn: sqlite3.Connection, codigo: str) -> 
     return carpeta
 
 
-def carpeta_imagenes(conn: sqlite3.Connection, alcance: str, id_valor: int | str | None = None) -> Path:
+def carpeta_imagenes(conn: sqlite3.Connection, alcance: str, id_valor: int | None = None) -> Path:
     """"Imagenes/{Alcance}" (alcance "Espacio", sin id: imágenes generales
     del sistema) o "Imagenes/{Alcance}_{Id}" (alcance "Localidad",
-    "Edificio", "Unidad" o "Consultorio") bajo la carpeta base. Para
-    "Localidad", `id_valor` es el texto de la localidad ya sanitizado por
-    `app.negocio.imagenes` (no un ID estable como en el resto). La crea
-    si hace falta."""
+    "Edificio", "Unidad" o "Consultorio", con el ID interno de su tabla)
+    bajo la carpeta base. La crea si hace falta."""
     nombre = alcance if id_valor is None else f"{alcance}_{id_valor}"
     carpeta = _requerir_carpeta_base(conn) / "Imagenes" / nombre
     carpeta.mkdir(parents=True, exist_ok=True)
