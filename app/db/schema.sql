@@ -500,7 +500,10 @@ CREATE TABLE IF NOT EXISTS Responsable (
     Rol TEXT,
     EsContactoPrincipal INTEGER NOT NULL DEFAULT 0,
     AptoPDF INTEGER NOT NULL DEFAULT 0,
-    Activo INTEGER NOT NULL DEFAULT 1
+    Activo INTEGER NOT NULL DEFAULT 1,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.23 PlanPago / CuotaPlan -----------------------------------------------------------------

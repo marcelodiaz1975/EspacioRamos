@@ -146,6 +146,9 @@ def pantalla_responsables(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("EsContactoPrincipal", "Contacto principal", tipo="booleano"),
         Campo("AptoPDF", "Apto para figurar en PDF", tipo="booleano"),
         Campo("Activo", "Activo", tipo="booleano"),
+        Campo("CampoLibre1", "Campo libre 1"),
+        Campo("CampoLibre2", "Campo libre 2"),
+        Campo("CampoLibre3", "Campo libre 3"),
     ]
     return PantallaCRUD(conn, "Responsable", "Responsables", campos)
 

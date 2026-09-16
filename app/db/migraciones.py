@@ -44,6 +44,9 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Edificio", "IdLocalidad", "INTEGER REFERENCES Localidad(IdLocalidad)"),
     ("Imagen", "IdLocalidad", "INTEGER REFERENCES Localidad(IdLocalidad)"),
     ("Imagen", "EtiquetaLibre", "TEXT"),
+    ("Responsable", "CampoLibre1", "TEXT"),
+    ("Responsable", "CampoLibre2", "TEXT"),
+    ("Responsable", "CampoLibre3", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja
