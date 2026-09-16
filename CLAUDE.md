@@ -172,10 +172,11 @@ Pedido explícito de la clienta (al revisar Consultorios): a partir de
 ahora, TODO catálogo que se revise de acá en adelante suma tres campos
 libres (`CampoLibre1/2/3`, texto opcional, sin validación) al final de
 su lista de `Campo` — no solo cuando lo pide puntualmente. Ya aplicado a
-Localidades, Edificios, Unidades, Consultorios y Responsables; falta
-sumarlo al resto a medida que se van revisando. Cada uno necesita el campo en
-`schema.sql`, la entrada correspondiente en `_COLUMNAS_NUEVAS` de
-`migraciones.py` (para las bases ya creadas) y, si el catálogo tiene
+Localidades, Edificios, Unidades, Consultorios, Responsables y Tipos de
+licencia; falta sumarlo al resto a medida que se van revisando. Cada uno
+necesita el campo en `schema.sql`, la entrada correspondiente en
+`_COLUMNAS_NUEVAS` de `migraciones.py` (para las bases ya creadas) y, si
+el catálogo tiene
 plantilla de importación Excel, las tres columnas al final de su
 entrada en `COLUMNAS_PLANTILLA`.
 

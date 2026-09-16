@@ -244,6 +244,15 @@ def test_pantalla_responsables_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre3") == 1
 
 
+def test_pantalla_tipos_licencia_tiene_tres_campos_libres(qtbot, conn):
+    pantalla = catalogos.pantalla_tipos_licencia(conn)
+    qtbot.addWidget(pantalla)
+    nombres = [c.nombre for c in pantalla.campos]
+    assert nombres.count("CampoLibre1") == 1
+    assert nombres.count("CampoLibre2") == 1
+    assert nombres.count("CampoLibre3") == 1
+
+
 def test_responsables_rol_es_combo_editable(qtbot, conn):
     """Rol es un catálogo abierto (sección 8.2): sugiere los valores
     sembrados pero admite texto libre, a diferencia de Tipo de fecha

@@ -160,6 +160,9 @@ def pantalla_tipos_licencia(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("DuracionMaximaDias", "Duración máxima (días)", tipo="numero"),
         Campo("EsManual", "Carga manual", tipo="booleano"),
         Campo("Activo", "Activo", tipo="booleano"),
+        Campo("CampoLibre1", "Campo libre 1"),
+        Campo("CampoLibre2", "Campo libre 2"),
+        Campo("CampoLibre3", "Campo libre 3"),
     ]
     return PantallaCRUD(conn, "TipoLicencia", "Tipos de licencia", campos)
 

@@ -304,7 +304,10 @@ CREATE TABLE IF NOT EXISTS TipoLicencia (
     PorcentajeBonificacion REAL NOT NULL DEFAULT 100,
     DuracionMaximaDias INTEGER,
     EsManual INTEGER NOT NULL DEFAULT 1,
-    Activo INTEGER NOT NULL DEFAULT 1
+    Activo INTEGER NOT NULL DEFAULT 1,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 CREATE TABLE IF NOT EXISTS Licencia (
