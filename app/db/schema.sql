@@ -601,6 +601,7 @@ CREATE TABLE IF NOT EXISTS MensajePredefinido (
     IdMensaje INTEGER PRIMARY KEY AUTOINCREMENT,
     Categoria TEXT,
     Descripcion TEXT,
+    IdLocalidad INTEGER REFERENCES Localidad(IdLocalidad),
     IdEdificio INTEGER REFERENCES Edificio(IdEdificio),
     IdUnidad INTEGER REFERENCES Unidad(IdUnidad),
     IdConsultorio INTEGER REFERENCES Consultorio(IdConsultorio),

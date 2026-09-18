@@ -138,6 +138,13 @@ CAMPO`, 240px), y sus propios métodos atados de la pantalla compuesta
 binding funciona porque el click llega mucho después de que todo ya
 está armado).
 
+Cuando la sección propia tiene que quedar ARRIBA de los botones en vez
+de debajo (ej. Mensajes predefinidos: el filtro de Categoría, pedido de
+la clienta al revisar esa pantalla), se usa el hermano de ese parámetro,
+`panel_extra_superior_izquierda` — va entre Buscar y Nuevo/Editar/
+Eliminar. Un catálogo puede usar los dos a la vez (uno arriba, otro
+abajo de los botones); ninguno de los dos existe en modo `compacto`.
+
 Se evaluó centralizar la documentación de Profesionales en el Gestor de
 archivos (agregando una segunda solapa "Archivos de los profesionales")
 pero la clienta pidió dejarla como estaba, solo mejorando el nombrado:
@@ -164,11 +171,39 @@ selectores de profesional del resto del sistema) — pedido puntual de
 esa pantalla, cada catálogo define el orden de sus propias columnas
 según lo que tenga más sentido mostrar primero, no hay una regla única.
 
-Solo `Mensajes predefinidos` sigue en `compacto=True` por ahora (filtro
-de categoría propio arriba de la tabla, en vez de a la izquierda) — el
-formato solapa/`panelSolapa` todavía no se tocó ahí, pero sí sumó los
-tres campos libres (`_campos_mensaje_predefinido(conn)`, pedido de la
-clienta) al pasar por la revisión uno por uno.
+## Mensajes predefinidos (ya en formato estándar, con dos paneles propios)
+
+Pasó de `compacto=True` (filtro de categoría en una fila propia arriba
+de la tabla) al formato solapa estándar al revisar esta pantalla, con
+dos secciones propias en el panel izquierdo: "Categoría"
+(`panel_extra_superior_izquierda`, arriba de Nuevo/Editar/Eliminar — es
+un filtro que solo afecta la visualización, oculta filas igual que
+antes) y, debajo de los botones, "Dirigido a" (`panel_extra_izquierda`,
+ver abajo).
+
+Categoría es un catálogo abierto (mismo criterio que Responsable.Rol):
+sugiere los valores de Listas editables (`TipoLista="CategoriaMensaje"`)
+pero admite tipear uno nuevo ahí mismo, sin tener que darlo de alta
+primero en ese catálogo.
+
+Localidad/Edificio/Unidad/Consultorio (Localidad es campo nuevo, pedido
+de la clienta, va antes que Edificio): cuatro campos independientes, sin
+cascada entre ellos. Si los cuatro quedan sin seleccionar, el mensaje se
+entiende general (pedido de la clienta) — por eso Edificio/Unidad/
+Consultorio en esta pantalla usan su propia versión de las opciones con
+un primer valor en blanco (`_opciones_edificio_o_ninguno` y análogas en
+`mensajes_predefinidos.py`, no las de `catalogos.py`, que ahí son
+`requerido=True` y no tienen ni necesitan esa opción en blanco).
+
+"Dirigido a": selector de profesional buscable (mismo criterio de
+siempre, `habilitar_busqueda_profesional`), default "Nadie en
+particular" — NO es parte del registro guardado, es solo contexto para
+la Vista previa de abajo: si el mensaje usa `{apodo}` en su texto (ej.
+"Hola {apodo}, mañana no hay agua"), al elegir un profesional ahí la
+vista previa lo reemplaza por su Apodo (`Profesional.Apodo`), igual que
+ya hacía con `{edificio}`/`{unidad}`/`{consultorio}` a partir del
+vínculo propio del mensaje — cambiar "Dirigido a" no filtra la lista,
+solo recalcula la vista previa del mensaje seleccionado.
 
 Pedido explícito de la clienta (al revisar Consultorios): a partir de
 ahora, TODO catálogo que se revise de acá en adelante suma tres campos

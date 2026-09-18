@@ -2,33 +2,83 @@
 mensajes ad hoc (a diferencia de las 5 situaciones automáticas del Centro
 de mensajería, sección 5.3, que también viven en MensajePredefinido pero
 bajo la categoría fija "Situaciones centro de mensajería" — ver
-app.negocio.mensajes._DESCRIPCION_SITUACION). Además del alta/baja/edición
-genérica (PantallaCRUD), expone lo que pide la spec: un filtro por
-categoría y un botón "Copiar" que arma una vista previa sustituyendo
-{edificio}/{unidad}/{consultorio} por los nombres reales del vínculo
-elegido en el mensaje, antes de copiarlo al portapapeles."""
+app.negocio.mensajes._DESCRIPCION_SITUACION). Formato estándar de
+catálogo (solapa "Listado", Buscar + Nuevo/Editar/Eliminar a la
+izquierda) con dos secciones propias en ese mismo panel (pedido de la
+clienta al revisar esta pantalla): el combo "Categoría" arriba de los
+botones (`panel_extra_superior_izquierda`, un filtro que solo afecta la
+visualización, mismo criterio que el resto del sistema) y, debajo de los
+botones, "Dirigido a" (`panel_extra_izquierda`) con un selector de
+profesional para la vista previa (ver más abajo). Debajo de toda la
+pantalla queda la vista previa que sustituye {edificio}/{unidad}/
+{consultorio} por el vínculo elegido en el mensaje y {apodo} por el
+profesional elegido en "Dirigido a", más un botón "Copiar" que la manda
+al portapapeles.
+
+Categoría es un catálogo abierto (mismo criterio que Responsable.Rol):
+sugiere los valores de Listas editables (TipoLista="CategoriaMensaje")
+pero admite tipear uno nuevo ahí mismo sin tener que darlo de alta antes
+en ese catálogo.
+
+Localidad/Edificio/Unidad/Consultorio son cuatro campos independientes
+(no encadenados en cascada): si los cuatro quedan sin seleccionar, el
+mensaje se entiende general (pedido de la clienta) — por eso acá, a
+diferencia de `catalogos.pantalla_unidades`/`pantalla_consultorios`
+(donde Edificio/Unidad son obligatorios), los combos de Edificio/Unidad/
+Consultorio necesitan su propia versión con una opción en blanco al
+principio (`_opciones_edificio_o_ninguno` y análogas) — las de
+`catalogos.py` no la tienen porque ahí esos campos son obligatorios."""
 from __future__ import annotations
 
 import sqlite3
 
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QFrame, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
-from app.gui.pantallas.catalogos import _opciones_consultorio, _opciones_edificio, _opciones_unidad
+from app.gui.pantallas.catalogos import _opciones_consultorio, _opciones_edificio, _opciones_localidad, _opciones_unidad
+from app.gui.pantallas.reservas import _opciones_profesional
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
+from app.negocio.listas_editables import opciones_lista
 from app.negocio.mensajes import sustituir_variables
 from app.repositorio.registro import obtener_repositorio
 
 _TODAS = "__todas__"
 
 
+def _titulo_campo(texto: str) -> QLabel:
+    etiqueta = QLabel(texto)
+    etiqueta.setObjectName("subtituloCampo")
+    return etiqueta
+
+
+def _linea_divisoria() -> QFrame:
+    linea = QFrame()
+    linea.setFrameShape(QFrame.Shape.HLine)
+    linea.setFrameShadow(QFrame.Shadow.Sunken)
+    return linea
+
+
+def _opciones_edificio_o_ninguno(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    return [(None, "Sin edificio")] + _opciones_edificio(conn)
+
+
+def _opciones_unidad_o_ninguna(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    return [(None, "Sin unidad")] + _opciones_unidad(conn)
+
+
+def _opciones_consultorio_o_ninguno(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    return [(None, "Sin consultorio")] + _opciones_consultorio(conn)
+
+
 def _campos_mensaje_predefinido(conn: sqlite3.Connection) -> list[Campo]:
     return [
-        Campo("Categoria", "Categoría"),
+        Campo("Categoria", "Categoría", tipo="combo", opciones=opciones_lista("CategoriaMensaje"), combo_editable=True),
         Campo("Descripcion", "Descripción"),
-        Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio),
-        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad),
-        Campo("IdConsultorio", "Consultorio", tipo="combo", opciones=_opciones_consultorio),
+        Campo("IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad),
+        Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio_o_ninguno),
+        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad_o_ninguna),
+        Campo("IdConsultorio", "Consultorio", tipo="combo", opciones=_opciones_consultorio_o_ninguno),
         Campo("Mensaje", "Mensaje", tipo="texto_largo"),
         Campo("Activo", "Activo", tipo="booleano"),
         *campos_libres(conn),
@@ -69,21 +119,33 @@ class PantallaMensajesPredefinidos(QWidget):
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
-        titulo = QLabel("Mensajes predefinidos")
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
 
-        fila_filtro = QHBoxLayout()
-        fila_filtro.addWidget(QLabel("Categoría:"))
+        panel_categoria = QWidget()
+        layout_categoria = QVBoxLayout(panel_categoria)
+        layout_categoria.setContentsMargins(0, 0, 0, 0)
+        layout_categoria.addWidget(_titulo_campo("Categoría"))
         self.combo_filtro = QComboBox()
         self.combo_filtro.currentIndexChanged.connect(self._aplicar_filtro)
-        fila_filtro.addWidget(self.combo_filtro)
-        fila_filtro.addStretch()
-        layout.addLayout(fila_filtro)
+        layout_categoria.addWidget(self.combo_filtro)
+
+        panel_dirigido_a = QWidget()
+        layout_dirigido_a = QVBoxLayout(panel_dirigido_a)
+        layout_dirigido_a.setContentsMargins(0, 0, 0, 0)
+        layout_dirigido_a.addWidget(_linea_divisoria())
+        layout_dirigido_a.addWidget(_titulo_campo("Dirigido a"))
+        self.combo_dirigido_a = QComboBox()
+        self.combo_dirigido_a.addItem("Nadie en particular", None)
+        for id_profesional, etiqueta in _opciones_profesional(self.conn):
+            self.combo_dirigido_a.addItem(etiqueta, id_profesional)
+        habilitar_busqueda_profesional(self.combo_dirigido_a)
+        self.combo_dirigido_a.currentIndexChanged.connect(self._actualizar_vista_previa)
+        layout_dirigido_a.addWidget(self.combo_dirigido_a)
+        layout_dirigido_a.addStretch()
 
         self.crud = PantallaCRUD(
             self.conn, "MensajePredefinido", "Mensajes predefinidos", _campos_mensaje_predefinido(self.conn),
-            compacto=True,
+            panel_extra_superior_izquierda=panel_categoria,
+            panel_extra_izquierda=panel_dirigido_a,
         )
         self.crud.tabla_widget.itemSelectionChanged.connect(self._actualizar_vista_previa)
         layout.addWidget(self.crud, stretch=1)
@@ -98,7 +160,10 @@ class PantallaMensajesPredefinidos(QWidget):
         self.crud.actualizar = _actualizar_con_filtro
         self.crud.actualizar()
 
-        layout.addWidget(QLabel("Vista previa (sustituye {edificio}/{unidad}/{consultorio} por el vínculo elegido)"))
+        layout.addWidget(QLabel(
+            "Vista previa (sustituye {edificio}/{unidad}/{consultorio} por el vínculo elegido en el mensaje, "
+            "y {apodo} por el profesional elegido en \"Dirigido a\")"
+        ))
         self.texto_vista_previa = QPlainTextEdit()
         self.texto_vista_previa.setReadOnly(True)
         self.texto_vista_previa.setFixedHeight(100)
@@ -138,7 +203,15 @@ class PantallaMensajesPredefinidos(QWidget):
             self.texto_vista_previa.clear()
             return
         variables = _variables_vinculo(self.conn, mensaje)
+        variables["apodo"] = self._apodo_dirigido_a()
         self.texto_vista_previa.setPlainText(sustituir_variables(mensaje["Mensaje"] or "", variables))
+
+    def _apodo_dirigido_a(self) -> str:
+        id_profesional = self.combo_dirigido_a.currentData()
+        if id_profesional is None:
+            return ""
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        return (profesional["Apodo"] or "") if profesional else ""
 
     def _copiar_mensaje(self) -> None:
         QGuiApplication.clipboard().setText(self.texto_vista_previa.toPlainText())

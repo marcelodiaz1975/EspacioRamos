@@ -136,6 +136,7 @@ class PantallaCRUD(QWidget):
         instalar_foco: bool = True,
         compacto: bool = False,
         panel_extra_izquierda: QWidget | None = None,
+        panel_extra_superior_izquierda: QWidget | None = None,
         etiqueta_buscar: str = "Buscar",
     ):
         super().__init__(parent)
@@ -198,6 +199,14 @@ class PantallaCRUD(QWidget):
         # del profesional seleccionado). Solo aplica al layout nuevo (se
         # ignora en modo compacto, que no tiene panel izquierdo).
         self.panel_extra_izquierda = panel_extra_izquierda
+        # panel_extra_superior_izquierda: widget ya armado que se agrega
+        # ENTRE Buscar y Nuevo/Editar/Eliminar — para un filtro propio de
+        # visualización que tiene que quedar arriba de los botones en vez
+        # de debajo (ej. Mensajes predefinidos: combo de Categoría).
+        # Distinto de panel_extra_izquierda (que va debajo de los
+        # botones); un catálogo puede usar los dos a la vez. Solo aplica
+        # al layout nuevo (se ignora en modo compacto).
+        self.panel_extra_superior_izquierda = panel_extra_superior_izquierda
         # etiqueta_buscar: texto del título arriba del campo Buscar — default
         # genérico "Buscar", pero un catálogo puede pedir uno más específico
         # (ej. Profesionales: "Buscar profesional") sin cambiar el criterio
@@ -243,6 +252,8 @@ class PantallaCRUD(QWidget):
             self.campo_buscar.setFixedWidth(_ANCHO_CAMPO)
             self.campo_buscar.textChanged.connect(self._aplicar_filtro_busqueda)
             form.addWidget(self.campo_buscar)
+            if self.panel_extra_superior_izquierda is not None:
+                form.addWidget(self.panel_extra_superior_izquierda)
             self._armar_botones_y_tabla(form, ancho_botones=_ANCHO_CAMPO)
             if self.panel_extra_izquierda is not None:
                 # con stretch para que ocupe el resto del alto disponible (ej.

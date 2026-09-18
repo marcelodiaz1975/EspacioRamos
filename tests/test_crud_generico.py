@@ -43,6 +43,19 @@ def test_campos_libres_se_ocultan_si_se_apaga_en_configuracion(conn):
     assert campos_libres(conn) == []
 
 
+def test_panel_extra_superior_izquierda_queda_entre_buscar_y_nuevo(qtbot, conn):
+    from PySide6.QtWidgets import QLabel
+
+    etiqueta = QLabel("Filtro propio")
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio(), panel_extra_superior_izquierda=etiqueta)
+    qtbot.addWidget(pantalla)
+    assert etiqueta.parent() is not None
+    padre = pantalla.campo_buscar.parentWidget()
+    layout = padre.layout()
+    indices = {layout.itemAt(i).widget(): i for i in range(layout.count()) if layout.itemAt(i).widget() is not None}
+    assert indices[pantalla.campo_buscar] < indices[etiqueta] < indices[pantalla.boton_nuevo]
+
+
 def test_pantalla_crud_lista_registros_existentes(qtbot, conn):
     conn.execute("INSERT INTO Edificio (Nombre, Domicilio) VALUES ('Torre Norte', 'Calle 1')")
     conn.commit()
