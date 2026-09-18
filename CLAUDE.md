@@ -175,11 +175,17 @@ según lo que tenga más sentido mostrar primero, no hay una regla única.
 
 Pasó de `compacto=True` (filtro de categoría en una fila propia arriba
 de la tabla) al formato solapa estándar al revisar esta pantalla, con
-dos secciones propias en el panel izquierdo: "Categoría"
-(`panel_extra_superior_izquierda`, arriba de Nuevo/Editar/Eliminar — es
-un filtro que solo afecta la visualización, oculta filas igual que
-antes) y, debajo de los botones, "Dirigido a" (`panel_extra_izquierda`,
-ver abajo).
+todo lo propio agrupado en un solo `panel_extra_superior_izquierda`
+(arriba de Nuevo/Editar/Eliminar), de arriba abajo: "Categoría" (combo,
+filtro que solo afecta la visualización, oculta filas igual que antes),
+"Dirigido a" (ver abajo) y el botón "Copiar mensaje" — pedido explícito
+de la clienta sobre el orden ("Copiar mensaje" arriba de "Nuevo", y
+"Dirigido a" arriba de "Copiar mensaje"). "Copiar mensaje" es
+`botonPrimario` acá (es la acción más importante de esta pantalla), así
+que "Nuevo" pasa a `botonSecundario` vía el parámetro nuevo
+`nuevo_secundario=True` de `PantallaCRUD` (pinta "Nuevo" en secundario
+en vez de primario, para cuando otra acción del panel es más importante
+que dar de alta un registro).
 
 Categoría es un catálogo abierto (mismo criterio que Responsable.Rol):
 sugiere los valores de Listas editables (`TipoLista="CategoriaMensaje"`)

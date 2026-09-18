@@ -45,6 +45,23 @@ def test_pantalla_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre3") == 1
 
 
+def test_orden_del_panel_izquierdo_categoria_dirigido_a_copiar_nuevo(qtbot, conn):
+    """Pedido de la clienta: "Copiar mensaje" arriba de "Nuevo" (como
+    acción principal de la pantalla), y "Dirigido a" arriba de "Copiar
+    mensaje"."""
+    pantalla = PantallaMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    boton_copiar = next(
+        w for w in pantalla.findChildren(type(pantalla.crud.boton_nuevo)) if w.text() == "Copiar mensaje"
+    )
+    padre = pantalla.combo_filtro.parentWidget()
+    layout = padre.layout()
+    indices = {layout.itemAt(i).widget(): i for i in range(layout.count()) if layout.itemAt(i).widget() is not None}
+    assert indices[pantalla.combo_filtro] < indices[pantalla.combo_dirigido_a] < indices[boton_copiar]
+    assert boton_copiar.objectName() == "botonPrimario"
+    assert pantalla.crud.boton_nuevo.objectName() == "botonSecundario"
+
+
 def test_pantalla_tiene_campo_localidad_antes_de_edificio(qtbot, conn):
     pantalla = PantallaMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)

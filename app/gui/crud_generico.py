@@ -138,6 +138,7 @@ class PantallaCRUD(QWidget):
         panel_extra_izquierda: QWidget | None = None,
         panel_extra_superior_izquierda: QWidget | None = None,
         etiqueta_buscar: str = "Buscar",
+        nuevo_secundario: bool = False,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -212,6 +213,10 @@ class PantallaCRUD(QWidget):
         # (ej. Profesionales: "Buscar profesional") sin cambiar el criterio
         # de filtrado en sí (sigue siendo substring por cualquier columna).
         self.etiqueta_buscar = etiqueta_buscar
+        # nuevo_secundario: pinta "Nuevo" en botonSecundario en vez de
+        # botonPrimario — para catálogos donde otra acción del panel es la
+        # más importante (ej. Mensajes predefinidos: "Copiar mensaje").
+        self.nuevo_secundario = nuevo_secundario
         self.campo_buscar: QLineEdit | None = None
         self.boton_nuevo = self.boton_editar = self.boton_eliminar = None
         self._armar_ui(titulo)
@@ -288,7 +293,7 @@ class PantallaCRUD(QWidget):
         vertical en el panel izquierdo, con ancho fijo)."""
         if not self.solo_lectura:
             self.boton_nuevo = QPushButton("Nuevo")
-            self.boton_nuevo.setObjectName("botonPrimario")
+            self.boton_nuevo.setObjectName("botonSecundario" if self.nuevo_secundario else "botonPrimario")
             self.boton_nuevo.clicked.connect(self._nuevo)
             self.boton_editar = QPushButton("Editar")
             self.boton_editar.setObjectName("botonSecundario")

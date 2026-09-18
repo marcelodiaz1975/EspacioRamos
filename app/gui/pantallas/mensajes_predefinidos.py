@@ -3,17 +3,18 @@ mensajes ad hoc (a diferencia de las 5 situaciones automáticas del Centro
 de mensajería, sección 5.3, que también viven en MensajePredefinido pero
 bajo la categoría fija "Situaciones centro de mensajería" — ver
 app.negocio.mensajes._DESCRIPCION_SITUACION). Formato estándar de
-catálogo (solapa "Listado", Buscar + Nuevo/Editar/Eliminar a la
-izquierda) con dos secciones propias en ese mismo panel (pedido de la
-clienta al revisar esta pantalla): el combo "Categoría" arriba de los
-botones (`panel_extra_superior_izquierda`, un filtro que solo afecta la
-visualización, mismo criterio que el resto del sistema) y, debajo de los
-botones, "Dirigido a" (`panel_extra_izquierda`) con un selector de
-profesional para la vista previa (ver más abajo). Debajo de toda la
-pantalla queda la vista previa que sustituye {edificio}/{unidad}/
-{consultorio} por el vínculo elegido en el mensaje y {apodo} por el
-profesional elegido en "Dirigido a", más un botón "Copiar" que la manda
-al portapapeles.
+catálogo (solapa "Listado", Buscar a la izquierda) con todo lo propio de
+esta pantalla agrupado ARRIBA de Nuevo/Editar/Eliminar
+(`panel_extra_superior_izquierda`, pedido de la clienta al revisar esta
+pantalla), de arriba abajo: el combo "Categoría" (filtro que solo afecta
+la visualización, mismo criterio que el resto del sistema), "Dirigido a"
+(selector de profesional para la vista previa, ver más abajo) y el botón
+"Copiar mensaje" (`botonPrimario` — es la acción más importante de esta
+pantalla, por eso "Nuevo" pasa a `botonSecundario` acá vía
+`nuevo_secundario=True`). Debajo de toda la pantalla queda la vista
+previa (de solo lectura) que sustituye {edificio}/{unidad}/{consultorio}
+por el vínculo elegido en el mensaje y {apodo} por el profesional
+elegido en "Dirigido a" — "Copiar mensaje" la manda al portapapeles.
 
 Categoría es un catálogo abierto (mismo criterio que Responsable.Rol):
 sugiere los valores de Listas editables (TipoLista="CategoriaMensaje")
@@ -120,32 +121,34 @@ class PantallaMensajesPredefinidos(QWidget):
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        panel_categoria = QWidget()
-        layout_categoria = QVBoxLayout(panel_categoria)
-        layout_categoria.setContentsMargins(0, 0, 0, 0)
-        layout_categoria.addWidget(_titulo_campo("Categoría"))
+        panel_superior = QWidget()
+        layout_superior = QVBoxLayout(panel_superior)
+        layout_superior.setContentsMargins(0, 0, 0, 0)
+
+        layout_superior.addWidget(_titulo_campo("Categoría"))
         self.combo_filtro = QComboBox()
         self.combo_filtro.currentIndexChanged.connect(self._aplicar_filtro)
-        layout_categoria.addWidget(self.combo_filtro)
+        layout_superior.addWidget(self.combo_filtro)
 
-        panel_dirigido_a = QWidget()
-        layout_dirigido_a = QVBoxLayout(panel_dirigido_a)
-        layout_dirigido_a.setContentsMargins(0, 0, 0, 0)
-        layout_dirigido_a.addWidget(_linea_divisoria())
-        layout_dirigido_a.addWidget(_titulo_campo("Dirigido a"))
+        layout_superior.addWidget(_linea_divisoria())
+        layout_superior.addWidget(_titulo_campo("Dirigido a"))
         self.combo_dirigido_a = QComboBox()
         self.combo_dirigido_a.addItem("Nadie en particular", None)
         for id_profesional, etiqueta in _opciones_profesional(self.conn):
             self.combo_dirigido_a.addItem(etiqueta, id_profesional)
         habilitar_busqueda_profesional(self.combo_dirigido_a)
         self.combo_dirigido_a.currentIndexChanged.connect(self._actualizar_vista_previa)
-        layout_dirigido_a.addWidget(self.combo_dirigido_a)
-        layout_dirigido_a.addStretch()
+        layout_superior.addWidget(self.combo_dirigido_a)
+
+        boton_copiar = QPushButton("Copiar mensaje")
+        boton_copiar.setObjectName("botonPrimario")
+        boton_copiar.clicked.connect(self._copiar_mensaje)
+        layout_superior.addWidget(boton_copiar)
 
         self.crud = PantallaCRUD(
             self.conn, "MensajePredefinido", "Mensajes predefinidos", _campos_mensaje_predefinido(self.conn),
-            panel_extra_superior_izquierda=panel_categoria,
-            panel_extra_izquierda=panel_dirigido_a,
+            panel_extra_superior_izquierda=panel_superior,
+            nuevo_secundario=True,
         )
         self.crud.tabla_widget.itemSelectionChanged.connect(self._actualizar_vista_previa)
         layout.addWidget(self.crud, stretch=1)
@@ -168,9 +171,6 @@ class PantallaMensajesPredefinidos(QWidget):
         self.texto_vista_previa.setReadOnly(True)
         self.texto_vista_previa.setFixedHeight(100)
         layout.addWidget(self.texto_vista_previa)
-        boton_copiar = QPushButton("Copiar mensaje")
-        boton_copiar.clicked.connect(self._copiar_mensaje)
-        layout.addWidget(boton_copiar)
 
     def _refrescar_categorias(self) -> None:
         categoria_actual = self.combo_filtro.currentData()
