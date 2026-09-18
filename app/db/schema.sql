@@ -605,7 +605,10 @@ CREATE TABLE IF NOT EXISTS MensajePredefinido (
     IdUnidad INTEGER REFERENCES Unidad(IdUnidad),
     IdConsultorio INTEGER REFERENCES Consultorio(IdConsultorio),
     Mensaje TEXT,
-    Activo INTEGER NOT NULL DEFAULT 1
+    Activo INTEGER NOT NULL DEFAULT 1,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.29 CondicionNorma (Etapa 7, sección 4.5: los 21 puntos editables de "Condiciones y
@@ -629,7 +632,10 @@ CREATE TABLE IF NOT EXISTS DetalleComplementarioPropuesta (
     Orden INTEGER NOT NULL,
     Titulo TEXT NOT NULL,
     Texto TEXT NOT NULL,
-    Activo INTEGER NOT NULL DEFAULT 1
+    Activo INTEGER NOT NULL DEFAULT 1,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.28 Configuracion (tabla de una sola fila, IdConfiguracion siempre = 1) -------------------

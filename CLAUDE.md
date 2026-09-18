@@ -165,16 +165,18 @@ esa pantalla, cada catálogo define el orden de sus propias columnas
 según lo que tenga más sentido mostrar primero, no hay una regla única.
 
 Solo `Mensajes predefinidos` sigue en `compacto=True` por ahora (filtro
-de categoría propio arriba de la tabla, en vez de a la izquierda) — no
-se tocó todavía en la revisión uno por uno.
+de categoría propio arriba de la tabla, en vez de a la izquierda) — el
+formato solapa/`panelSolapa` todavía no se tocó ahí, pero sí sumó los
+tres campos libres (`_campos_mensaje_predefinido(conn)`, pedido de la
+clienta) al pasar por la revisión uno por uno.
 
 Pedido explícito de la clienta (al revisar Consultorios): a partir de
 ahora, TODO catálogo que se revise de acá en adelante suma tres campos
 libres (`CampoLibre1/2/3`, texto opcional, sin validación) al final de
 su lista de `Campo` — no solo cuando lo pide puntualmente. Ya aplicado a
 Localidades, Edificios, Unidades, Consultorios, Responsables, Tipos de
-licencia y Condiciones y normas; falta sumarlo al resto a medida que se
-van revisando. Cada uno
+licencia, Condiciones y normas y Detalles complementarios (Propuesta);
+falta sumarlo al resto a medida que se van revisando. Cada uno
 necesita el campo en `schema.sql`, la entrada correspondiente en
 `_COLUMNAS_NUEVAS` de `migraciones.py` (para las bases ya creadas) y, si
 el catálogo tiene plantilla de importación Excel, las tres columnas al
@@ -223,17 +225,25 @@ final de su lista. Si una edición además cambia el TipoLista de una fila
 existente, primero cierra el hueco que deja en la lista de la que sale
 (`_renumerar`) antes de ubicarla en la nueva.
 
-## Condiciones y normas (N° también se reacomoda solo)
+## Condiciones y normas / Detalles complementarios (posición que se reacomoda sola)
 
 Mismo criterio que el Orden de Listas editables (pedido de la clienta al
-revisar este catálogo): el campo N° (`CondicionNorma.Numero`, el orden
-en que `app.pdf.valores_pdf` los imprime) es una posición dentro de toda
-la lista, 1-based, no un número suelto.
-`app.negocio.condiciones_normas.reordenar_al_guardar`, enganchado como
-hook `al_guardar`, corre a las demás filas para dejar libre el N°
-elegido (clampeado entre 1 y "última posición + 1") cada vez que se
-guarda un alta o una edición. A diferencia de Listas editables no hay
-un TipoLista que agrupe — acá el reacomodo es sobre toda la tabla.
+revisar Condiciones y normas, aplicado después también a Detalles
+complementarios): el campo de posición (`CondicionNorma.Numero` — el
+orden en que `app.pdf.valores_pdf` los imprime — y
+`DetalleComplementarioPropuesta.Orden`, para el PDF de Propuesta) es un
+lugar dentro de toda la lista, 1-based, no un número suelto. A
+diferencia de Listas editables acá no hay un TipoLista que agrupe — el
+reacomodo es sobre toda la tabla — así que ambos catálogos comparten un
+mismo helper genérico, `app.negocio.posicion.reordenar_posicion_al_guardar`
+(parametrizado por tabla/clave primaria/columna de posición), en vez de
+duplicar el algoritmo: `app.negocio.condiciones_normas.reordenar_al_guardar`
+y `app.negocio.detalles_complementarios.reordenar_al_guardar` son
+wrappers de una línea sobre ese helper, enganchados como hook
+`al_guardar` de `PantallaCRUD`. Corre a las demás filas para dejar libre
+la posición elegida (clampeada entre 1 y "última posición + 1") cada vez
+que se guarda un alta o una edición; dejar el campo vacío en un alta
+manda el ítem al final de la lista.
 
 ## Localidad (catálogo propio, con ID estable)
 

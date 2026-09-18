@@ -54,6 +54,12 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("CondicionNorma", "CampoLibre1", "TEXT"),
     ("CondicionNorma", "CampoLibre2", "TEXT"),
     ("CondicionNorma", "CampoLibre3", "TEXT"),
+    ("DetalleComplementarioPropuesta", "CampoLibre1", "TEXT"),
+    ("DetalleComplementarioPropuesta", "CampoLibre2", "TEXT"),
+    ("DetalleComplementarioPropuesta", "CampoLibre3", "TEXT"),
+    ("MensajePredefinido", "CampoLibre1", "TEXT"),
+    ("MensajePredefinido", "CampoLibre2", "TEXT"),
+    ("MensajePredefinido", "CampoLibre3", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja

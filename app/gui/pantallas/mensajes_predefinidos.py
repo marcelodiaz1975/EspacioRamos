@@ -14,7 +14,7 @@ import sqlite3
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
-from app.gui.crud_generico import Campo, PantallaCRUD
+from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.pantallas.catalogos import _opciones_consultorio, _opciones_edificio, _opciones_unidad
 from app.negocio.mensajes import sustituir_variables
 from app.repositorio.registro import obtener_repositorio
@@ -22,7 +22,7 @@ from app.repositorio.registro import obtener_repositorio
 _TODAS = "__todas__"
 
 
-def _campos_mensaje_predefinido() -> list[Campo]:
+def _campos_mensaje_predefinido(conn: sqlite3.Connection) -> list[Campo]:
     return [
         Campo("Categoria", "Categoría"),
         Campo("Descripcion", "Descripción"),
@@ -31,6 +31,7 @@ def _campos_mensaje_predefinido() -> list[Campo]:
         Campo("IdConsultorio", "Consultorio", tipo="combo", opciones=_opciones_consultorio),
         Campo("Mensaje", "Mensaje", tipo="texto_largo"),
         Campo("Activo", "Activo", tipo="booleano"),
+        *campos_libres(conn),
     ]
 
 
@@ -81,7 +82,7 @@ class PantallaMensajesPredefinidos(QWidget):
         layout.addLayout(fila_filtro)
 
         self.crud = PantallaCRUD(
-            self.conn, "MensajePredefinido", "Mensajes predefinidos", _campos_mensaje_predefinido(),
+            self.conn, "MensajePredefinido", "Mensajes predefinidos", _campos_mensaje_predefinido(self.conn),
             compacto=True,
         )
         self.crud.tabla_widget.itemSelectionChanged.connect(self._actualizar_vista_previa)

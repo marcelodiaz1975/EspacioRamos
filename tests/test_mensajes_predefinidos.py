@@ -35,6 +35,15 @@ def test_pantalla_se_arma_con_los_sembrados(qtbot, conn):
     assert pantalla.crud.tabla_widget.rowCount() == len(obtener_repositorio(conn, "MensajePredefinido").listar())
 
 
+def test_pantalla_tiene_tres_campos_libres(qtbot, conn):
+    pantalla = PantallaMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    nombres = [c.nombre for c in pantalla.crud.campos]
+    assert nombres.count("CampoLibre1") == 1
+    assert nombres.count("CampoLibre2") == 1
+    assert nombres.count("CampoLibre3") == 1
+
+
 def test_combo_filtro_incluye_todas_y_las_categorias_sembradas(qtbot, conn):
     obtener_repositorio(conn, "MensajePredefinido").crear(
         Categoria="Recordatorios", Descripcion="Aviso", Mensaje="Hola {edificio}", Activo=1,
