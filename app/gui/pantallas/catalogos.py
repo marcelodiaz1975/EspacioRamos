@@ -155,9 +155,18 @@ def pantalla_tipos_licencia(conn: sqlite3.Connection) -> PantallaCRUD:
     return PantallaCRUD(conn, "TipoLicencia", "Tipos de licencia", campos)
 
 
+def _opciones_tipo_lista(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """Solo los tipos que ya existen — esta pantalla es para sumar
+    valores a una lista ya usada por otro formulario (CondicionFiscal,
+    MedioPago, etc.), no para inventar un tipo nuevo que ningún combo del
+    sistema vaya a leer (pedido de la clienta al revisar este catálogo)."""
+    filas = conn.execute("SELECT DISTINCT TipoLista FROM ListasEditables ORDER BY TipoLista").fetchall()
+    return [(f["TipoLista"], f["TipoLista"]) for f in filas]
+
+
 def pantalla_listas_editables(conn: sqlite3.Connection) -> PantallaCRUD:
     campos = [
-        Campo("TipoLista", "Tipo de lista", requerido=True),
+        Campo("TipoLista", "Tipo de lista", tipo="combo", opciones=_opciones_tipo_lista, requerido=True),
         Campo("Valor", "Valor", requerido=True),
         Campo("Orden", "Orden", tipo="numero"),
         Campo("Activo", "Activo", tipo="booleano"),

@@ -199,6 +199,18 @@ sin ningún ajuste extra. Se agregó también a `_campos_profesional`
 (Profesionales) con el mismo mecanismo, aunque esa pantalla no forma
 parte de la revisión "uno por uno" de catálogos.
 
+## Listas editables (agregar valores, no tipos)
+
+Pedido de la clienta al revisar este catálogo: "Tipo de lista" pasó de
+texto libre a un combo cerrado (`catalogos._opciones_tipo_lista`, sin
+`combo_editable`) con los tipos que ya existen en la tabla (`SELECT
+DISTINCT TipoLista`) — esta pantalla es para sumar valores a una lista
+que algún otro formulario ya lee por `opciones_lista(tipo_lista)`
+(CondicionFiscal, MedioPago, CuentaReceptora, TipoFechaEspecial, etc.),
+no para inventar un tipo nuevo que ningún combo del sistema vaya a leer.
+Si hace falta un tipo realmente nuevo, hoy no hay forma de darlo de alta
+desde la GUI (habría que cargar la primera fila por código/migración).
+
 ## Localidad (catálogo propio, con ID estable)
 
 Pedido de la clienta al revisar Imágenes: `Edificio.DomicilioLocalidad`

@@ -235,6 +235,21 @@ def test_consultorios_tamano_es_combo_cerrado_con_los_tres_predefinidos(qtbot, c
     assert dialogo.valores()["TamanoClasificacion"] == "Grande"
 
 
+def test_listas_editables_tipo_lista_es_combo_cerrado_a_los_existentes(qtbot, conn):
+    """No se pueden inventar tipos de lista nuevos acá — solo sumar
+    valores a un tipo ya usado por algún combo del sistema (pedido de la
+    clienta al revisar este catálogo)."""
+    pantalla = catalogos.pantalla_listas_editables(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    combo_tipo = dialogo._entradas["TipoLista"]
+    assert combo_tipo.isEditable() is False
+    tipos = {combo_tipo.itemText(i) for i in range(combo_tipo.count())}
+    assert "CondicionFiscal" in tipos
+    assert "MedioPago" in tipos
+
+
 def test_campos_libres_apagados_los_saca_de_todos_los_catalogos(qtbot, conn):
     """Un solo parámetro (Configuracion.VisualizarCamposLibres) controla
     los tres campos libres en todos los catálogos a la vez, porque todos
