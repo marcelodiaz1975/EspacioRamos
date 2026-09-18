@@ -211,6 +211,17 @@ no para inventar un tipo nuevo que ningún combo del sistema vaya a leer.
 Si hace falta un tipo realmente nuevo, hoy no hay forma de darlo de alta
 desde la GUI (habría que cargar la primera fila por código/migración).
 
+Orden es una posición, no un número suelto (pedido de la clienta:
+"arrastrar y soltar", no que convivan huecos o dos filas con el mismo
+número). `app.negocio.listas_editables.reordenar_al_guardar`, enganchado
+como hook `al_guardar` de `PantallaCRUD`, corre a las demás filas del
+mismo TipoLista para dejar libre el Orden elegido (clampeado a un rango
+válido) cada vez que se guarda un alta o una edición — nunca hay que
+tocarlas a mano. Dejar el campo Orden vacío en un alta manda el ítem al
+final de su lista. Si una edición además cambia el TipoLista de una fila
+existente, primero cierra el hueco que deja en la lista de la que sale
+(`_renumerar`) antes de ubicarla en la nueva.
+
 ## Localidad (catálogo propio, con ID estable)
 
 Pedido de la clienta al revisar Imágenes: `Edificio.DomicilioLocalidad`

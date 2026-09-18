@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QMessageBox
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.negocio.formato import formatear_moneda
 from app.negocio.gastos_operativos import gasto_en_conflicto
-from app.negocio.listas_editables import opciones_lista
+from app.negocio.listas_editables import opciones_lista, reordenar_al_guardar
 from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
 from app.negocio.validaciones import (
     FORMATO_EMAIL,
@@ -171,7 +171,9 @@ def pantalla_listas_editables(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Orden", "Orden", tipo="numero"),
         Campo("Activo", "Activo", tipo="booleano"),
     ]
-    return PantallaCRUD(conn, "ListasEditables", "Listas editables", campos)
+    pantalla = PantallaCRUD(conn, "ListasEditables", "Listas editables", campos)
+    pantalla.al_guardar = lambda valores, registro: reordenar_al_guardar(conn, valores, registro)
+    return pantalla
 
 
 def pantalla_condiciones_normas(conn: sqlite3.Connection) -> PantallaCRUD:
