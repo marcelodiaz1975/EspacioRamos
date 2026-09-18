@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QMessageBox
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.negocio.formato import formatear_moneda
 from app.negocio.gastos_operativos import gasto_en_conflicto
+from app.negocio.condiciones_normas import reordenar_al_guardar as reordenar_condiciones_al_guardar
 from app.negocio.listas_editables import opciones_lista, reordenar_al_guardar
 from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
 from app.negocio.validaciones import (
@@ -182,8 +183,11 @@ def pantalla_condiciones_normas(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Titulo", "Título", requerido=True),
         Campo("Texto", "Texto", tipo="texto_largo", requerido=True),
         Campo("Activo", "Activo", tipo="booleano"),
+        *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "CondicionNorma", "Condiciones y normas", campos)
+    pantalla = PantallaCRUD(conn, "CondicionNorma", "Condiciones y normas", campos)
+    pantalla.al_guardar = lambda valores, registro: reordenar_condiciones_al_guardar(conn, valores, registro)
+    return pantalla
 
 
 def pantalla_detalles_complementarios_propuesta(conn: sqlite3.Connection) -> PantallaCRUD:

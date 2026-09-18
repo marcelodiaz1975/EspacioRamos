@@ -615,7 +615,10 @@ CREATE TABLE IF NOT EXISTS CondicionNorma (
     Numero INTEGER NOT NULL,
     Titulo TEXT NOT NULL,
     Texto TEXT NOT NULL,
-    Activo INTEGER NOT NULL DEFAULT 1
+    Activo INTEGER NOT NULL DEFAULT 1,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.30 DetalleComplementarioPropuesta (Etapa 7, sección 4.3: los ítems editables y
