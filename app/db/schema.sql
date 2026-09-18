@@ -673,5 +673,9 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     -- permite sumar el subtotal en vivo sin necesitar una tabla aparte.
     FechaHoraRecogidaSobres TEXT,
     TandaSobresAbierta INTEGER NOT NULL DEFAULT 0,
-    TandaSobresApertura TEXT
+    TandaSobresApertura TEXT,
+    -- Muestra/oculta los tres campos libres (CampoLibre1/2/3) en todos los
+    -- catálogos a la vez (ver crud_generico.campos_libres) — apagarlo no
+    -- borra los valores ya cargados, solo deja de mostrarlos y de pedirlos.
+    VisualizarCamposLibres INTEGER NOT NULL DEFAULT 1
 );

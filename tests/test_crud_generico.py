@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QDialog, QMessageBox, QScrollArea, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.crud_generico import Campo, PantallaCRUD, _DialogoRegistro
+from app.gui.crud_generico import Campo, PantallaCRUD, _DialogoRegistro, campos_libres
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -31,6 +31,16 @@ def _campos_edificio():
         Campo("Domicilio", "Domicilio"),
         Campo("CampoLibre1", "Campo libre 1"),
     ]
+
+
+def test_campos_libres_visibles_por_defecto(conn):
+    nombres = [c.nombre for c in campos_libres(conn)]
+    assert nombres == ["CampoLibre1", "CampoLibre2", "CampoLibre3"]
+
+
+def test_campos_libres_se_ocultan_si_se_apaga_en_configuracion(conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, VisualizarCamposLibres=0)
+    assert campos_libres(conn) == []
 
 
 def test_pantalla_crud_lista_registros_existentes(qtbot, conn):

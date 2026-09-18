@@ -176,9 +176,28 @@ Localidades, Edificios, Unidades, Consultorios, Responsables y Tipos de
 licencia; falta sumarlo al resto a medida que se van revisando. Cada uno
 necesita el campo en `schema.sql`, la entrada correspondiente en
 `_COLUMNAS_NUEVAS` de `migraciones.py` (para las bases ya creadas) y, si
-el catálogo tiene
-plantilla de importación Excel, las tres columnas al final de su
-entrada en `COLUMNAS_PLANTILLA`.
+el catálogo tiene plantilla de importación Excel, las tres columnas al
+final de su entrada en `COLUMNAS_PLANTILLA` (la plantilla siempre las
+incluye, sin importar el parámetro de abajo — es para migrar datos, no
+para uso día a día).
+
+Cada catálogo arma esos tres campos con `app.gui.crud_generico.
+campos_libres(conn)` en vez de escribir las tres líneas de `Campo(...)` a
+mano — un solo lugar sirve para todos. Pedido de la clienta: agregó un
+parámetro en Configuración general, "Visualizar campos libres"
+(`Configuracion.VisualizarCamposLibres`, Sí por defecto), que apaga los
+tres campos en TODOS los catálogos a la vez con un solo click —
+`campos_libres` devuelve la lista vacía si está en "No". Como tabla y
+diálogo Nuevo/Editar arman sus columnas/campos a partir de la misma
+lista de `Campo` (`app/gui/crud_generico.py`), sacarlos de esa lista
+alcanza para que desaparezcan de los dos lugares a la vez. Los valores
+ya cargados no se borran: la columna sigue en la base, el parámetro solo
+controla si se muestran y se piden. Como el alto del cuadro de diálogo
+se calcula en función de `len(campos)` (`_DialogoRegistro.__init__`,
+`60 + 40px por campo`), el diálogo también se achica o se agranda solo,
+sin ningún ajuste extra. Se agregó también a `_campos_profesional`
+(Profesionales) con el mismo mecanismo, aunque esa pantalla no forma
+parte de la revisión "uno por uno" de catálogos.
 
 ## Localidad (catálogo propio, con ID estable)
 

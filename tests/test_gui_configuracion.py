@@ -73,6 +73,15 @@ def test_guardar_persiste_modo_oscuro(qtbot, conn):
     assert fila["ModoOscuro"] == 1
 
 
+def test_guardar_persiste_visualizar_campos_libres(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["VisualizarCamposLibres"].setChecked(False)
+    pantalla._guardar()
+    fila = conn.execute("SELECT VisualizarCamposLibres FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    assert fila["VisualizarCamposLibres"] == 0
+
+
 def test_guardar_modo_oscuro_aplica_el_tema_sin_reiniciar(qtbot, conn):
     """Al guardar desde la pantalla embebida en la ventana principal, el
     cambio se ve enseguida (mismo criterio que la barra de fecha

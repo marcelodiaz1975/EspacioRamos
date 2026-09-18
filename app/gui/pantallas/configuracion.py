@@ -74,6 +74,7 @@ _CAMPOS_BOOLEANOS = [
     ("ModoFechaFicticia", "Modo fecha ficticia (QA)"),
     ("MensajesPlural", 'Mensajes en plural ("les avisaremos")'),
     ("ModoOscuro", "Modo oscuro"),
+    ("VisualizarCamposLibres", "Visualizar campos libres (en todos los catálogos)"),
 ]
 
 

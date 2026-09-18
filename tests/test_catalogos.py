@@ -235,6 +235,23 @@ def test_consultorios_tamano_es_combo_cerrado_con_los_tres_predefinidos(qtbot, c
     assert dialogo.valores()["TamanoClasificacion"] == "Grande"
 
 
+def test_campos_libres_apagados_los_saca_de_todos_los_catalogos(qtbot, conn):
+    """Un solo parámetro (Configuracion.VisualizarCamposLibres) controla
+    los tres campos libres en todos los catálogos a la vez, porque todos
+    arman su lista de Campo con `crud_generico.campos_libres(conn)`."""
+    obtener_repositorio(conn, "Configuracion").actualizar(1, VisualizarCamposLibres=0)
+    for fabrica in [
+        catalogos.pantalla_localidades, catalogos.pantalla_edificios, catalogos.pantalla_unidades,
+        catalogos.pantalla_consultorios, catalogos.pantalla_responsables, catalogos.pantalla_tipos_licencia,
+    ]:
+        pantalla = fabrica(conn)
+        qtbot.addWidget(pantalla)
+        nombres = [c.nombre for c in pantalla.campos]
+        assert "CampoLibre1" not in nombres
+        assert "CampoLibre2" not in nombres
+        assert "CampoLibre3" not in nombres
+
+
 def test_pantalla_responsables_tiene_tres_campos_libres(qtbot, conn):
     pantalla = catalogos.pantalla_responsables(conn)
     qtbot.addWidget(pantalla)

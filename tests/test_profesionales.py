@@ -64,6 +64,14 @@ def test_pantalla_profesionales_muestra_cabeza_de_equipo(qtbot, conn):
     assert "Gómez" in pantalla.crud_profesionales.tabla_widget.item(fila_equipo, 21).text()
 
 
+def test_campos_libres_apagados_los_saca_de_profesionales(qtbot, conn):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, VisualizarCamposLibres=0)
+    pantalla = pantalla_profesionales(conn)
+    qtbot.addWidget(pantalla)
+    nombres = [c.nombre for c in pantalla.crud_profesionales.campos]
+    assert "CampoLibre1" not in nombres
+
+
 def test_condicion_fiscal_es_combo_editable_con_default_consumidor_final(qtbot, conn):
     pantalla = pantalla_profesionales(conn)
     qtbot.addWidget(pantalla)
@@ -77,7 +85,7 @@ def test_condicion_fiscal_es_combo_editable_con_default_consumidor_final(qtbot, 
 
 
 def _nuevo_dialogo_con_hook(conn, qtbot):
-    dialogo = _DialogoRegistro(conn, _campos_profesional(), "Nuevo registro")
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Nuevo registro")
     qtbot.addWidget(dialogo)
     _al_abrir_dialogo(dialogo)
     return dialogo
@@ -136,7 +144,7 @@ def test_editar_profesional_repuebla_desplegable_tratamiento_sin_perder_valor(qt
         CategoriaProfesional="R", Apellido="Pérez", IdProfesion=id_fono, Sexo="Femenino", Tratamiento="Lic.",
     )
     registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
-    dialogo = _DialogoRegistro(conn, _campos_profesional(), "Editar registro", registro=registro)
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Editar registro", registro=registro)
     qtbot.addWidget(dialogo)
     _al_abrir_dialogo(dialogo)
 
@@ -172,7 +180,7 @@ def test_editar_desde_pantalla_invoca_al_abrir_dialogo(qtbot, conn, monkeypatch)
 
 
 def test_cuit_se_normaliza_al_guardar(qtbot, conn):
-    dialogo = _DialogoRegistro(conn, _campos_profesional(), "Nuevo registro")
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Nuevo registro")
     qtbot.addWidget(dialogo)
     dialogo._entradas["Apellido"].setText("Gómez")
     dialogo._entradas["CUIT"].setText("20-12345678-9")
@@ -180,7 +188,7 @@ def test_cuit_se_normaliza_al_guardar(qtbot, conn):
 
 
 def test_nombre_completo_se_puede_cargar_y_editar_a_mano(qtbot, conn):
-    dialogo = _DialogoRegistro(conn, _campos_profesional(), "Nuevo registro")
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Nuevo registro")
     qtbot.addWidget(dialogo)
     dialogo._entradas["Apellido"].setText("Gómez")
     dialogo._entradas["NombreCompleto"].setText("Gómez, Juan Carlos")

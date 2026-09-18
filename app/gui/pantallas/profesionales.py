@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.crud_generico import Campo, PantallaCRUD
+from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.negocio.archivos_generados import aplicar_cambio_codigo
 from app.negocio.dias import fecha_actual
 from app.negocio.documentacion_profesional import (
@@ -141,7 +141,7 @@ def _opciones_profesional(conn: sqlite3.Connection) -> list[tuple[int, str]]:
     return [(f["IdProfesional"], f"{f['Apellido']}, {f['NombrePila'] or ''}".strip(", ")) for f in filas]
 
 
-def _campos_profesional() -> list[Campo]:
+def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
     return [
         # Primeras 4 columnas en el mismo orden que el formato canónico
         # "Código - Tratamiento Nombre Apellido" que se usa en los
@@ -187,9 +187,7 @@ def _campos_profesional() -> list[Campo]:
             "Día del mes para plazo extendido automático (1-31, dejar vacío si no aplica)",
             tipo="numero",
         ),
-        Campo("CampoLibre1", "Campo libre 1"),
-        Campo("CampoLibre2", "Campo libre 2"),
-        Campo("CampoLibre3", "Campo libre 3"),
+        *campos_libres(conn),
     ]
 
 
@@ -291,7 +289,7 @@ class PantallaProfesionales(QWidget):
         # por método atado (_agregar_documento/_eliminar_documento), así que
         # alcanza con que exista para cuando se hagan clic, no ya en este punto.
         self.crud_profesionales = PantallaCRUD(
-            self.conn, "Profesional", "Profesionales", _campos_profesional(),
+            self.conn, "Profesional", "Profesionales", _campos_profesional(self.conn),
             al_actualizar=self._al_actualizar_profesional,
             al_abrir_dialogo=_al_abrir_dialogo,
             panel_extra_izquierda=panel_doc,

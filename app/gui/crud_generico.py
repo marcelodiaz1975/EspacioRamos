@@ -106,6 +106,24 @@ class Campo:
     cuando `validador` rechaza el valor (ej. "AAAA-MM-DD")."""
 
 
+def campos_libres(conn: sqlite3.Connection) -> list[Campo]:
+    """Los tres campos libres (CampoLibre1/2/3) que se suman al final de
+    todo catálogo revisado desde Consultorios en adelante (ver CLAUDE.md).
+    La clienta los puede ocultar en todos los catálogos a la vez apagando
+    "Visualizar campos libres" en Configuración general
+    (Configuracion.VisualizarCamposLibres) — no borra los valores ya
+    cargados, solo deja de mostrarlos y de pedirlos (tabla y diálogo Nuevo/
+    Editar toman esta misma lista, así que alcanza con no incluirlos acá)."""
+    fila = conn.execute("SELECT VisualizarCamposLibres FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    if fila is not None and not fila["VisualizarCamposLibres"]:
+        return []
+    return [
+        Campo("CampoLibre1", "Campo libre 1"),
+        Campo("CampoLibre2", "Campo libre 2"),
+        Campo("CampoLibre3", "Campo libre 3"),
+    ]
+
+
 class PantallaCRUD(QWidget):
     def __init__(
         self, conn: sqlite3.Connection, tabla: str, titulo: str, campos: list[Campo], parent=None,

@@ -13,7 +13,7 @@ import sqlite3
 
 from PySide6.QtWidgets import QMessageBox
 
-from app.gui.crud_generico import Campo, PantallaCRUD
+from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.negocio.formato import formatear_moneda
 from app.negocio.gastos_operativos import gasto_en_conflicto
 from app.negocio.listas_editables import opciones_lista
@@ -69,9 +69,7 @@ def pantalla_localidades(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Partido", "Partido"),
         Campo("Provincia", "Provincia"),
         Campo("Pais", "País"),
-        Campo("CampoLibre1", "Campo libre 1"),
-        Campo("CampoLibre2", "Campo libre 2"),
-        Campo("CampoLibre3", "Campo libre 3"),
+        *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "Localidad", "Localidades", campos)
 
@@ -81,9 +79,7 @@ def pantalla_edificios(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Nombre", "Nombre", requerido=True),
         Campo("Domicilio", "Domicilio"),
         Campo("IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad),
-        Campo("CampoLibre1", "Campo libre 1"),
-        Campo("CampoLibre2", "Campo libre 2"),
-        Campo("CampoLibre3", "Campo libre 3"),
+        *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "Edificio", "Edificios", campos)
 
@@ -105,9 +101,7 @@ def pantalla_unidades(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("EntradaProfesionalExclusiva", "Entrada exclusiva", tipo="booleano"),
         Campo("WiFi", "WiFi", tipo="booleano"),
         Campo("CantLimitePlacas", "Límite de placas", tipo="numero"),
-        Campo("CampoLibre1", "Campo libre 1"),
-        Campo("CampoLibre2", "Campo libre 2"),
-        Campo("CampoLibre3", "Campo libre 3"),
+        *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "Unidad", "Unidades", campos)
 
@@ -130,9 +124,7 @@ def pantalla_consultorios(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("ValorHoraRegularAnterior", "Valor hora regular anterior", tipo="numero"),
         Campo("ValorHoraAisladaActual", "Valor hora aislada actual", tipo="numero"),
         Campo("ValorHoraAisladaAnterior", "Valor hora aislada anterior", tipo="numero"),
-        Campo("CampoLibre1", "Campo libre 1"),
-        Campo("CampoLibre2", "Campo libre 2"),
-        Campo("CampoLibre3", "Campo libre 3"),
+        *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "Consultorio", "Consultorios", campos)
 
@@ -146,9 +138,7 @@ def pantalla_responsables(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("EsContactoPrincipal", "Contacto principal", tipo="booleano"),
         Campo("AptoPDF", "Apto para figurar en PDF", tipo="booleano"),
         Campo("Activo", "Activo", tipo="booleano"),
-        Campo("CampoLibre1", "Campo libre 1"),
-        Campo("CampoLibre2", "Campo libre 2"),
-        Campo("CampoLibre3", "Campo libre 3"),
+        *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "Responsable", "Responsables", campos)
 
@@ -160,9 +150,7 @@ def pantalla_tipos_licencia(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("DuracionMaximaDias", "Duración máxima (días)", tipo="numero"),
         Campo("EsManual", "Carga manual", tipo="booleano"),
         Campo("Activo", "Activo", tipo="booleano"),
-        Campo("CampoLibre1", "Campo libre 1"),
-        Campo("CampoLibre2", "Campo libre 2"),
-        Campo("CampoLibre3", "Campo libre 3"),
+        *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "TipoLicencia", "Tipos de licencia", campos)
 
