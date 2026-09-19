@@ -242,6 +242,7 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad),
         Campo("Origen", "Origen", tipo="combo", opciones=opciones_origen),
         Campo("Observacion", "Observación", tipo="texto_largo"),
+        *campos_libres(conn),
     ]
     pantalla = PantallaCRUD(conn, "GastoOperativo", "Gastos operativos", campos)
     pantalla.al_guardar = lambda valores, registro: _resolver_conflicto_gasto(pantalla, conn, valores, registro)

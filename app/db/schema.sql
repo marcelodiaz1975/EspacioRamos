@@ -581,7 +581,10 @@ CREATE TABLE IF NOT EXISTS GastoOperativo (
     IdEdificio INTEGER REFERENCES Edificio(IdEdificio),
     IdUnidad INTEGER REFERENCES Unidad(IdUnidad),
     Origen TEXT CHECK (Origen IN ('Manual','Importado')),
-    Observacion TEXT
+    Observacion TEXT,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.26 Imagen -------------------------------------------------------------------------------
