@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.negocio.formato import formatear_moneda
-from app.negocio.gastos_operativos import gasto_en_conflicto
+from app.negocio.gastos_operativos import ALCANCES_GASTO, gasto_en_conflicto, sanear_alcance
 from app.negocio.condiciones_normas import reordenar_al_guardar as reordenar_condiciones_al_guardar
 from app.negocio.detalles_complementarios import reordenar_al_guardar as reordenar_detalles_al_guardar
 from app.negocio.listas_editables import opciones_lista, reordenar_al_guardar
@@ -222,9 +222,42 @@ def pantalla_profesiones(conn: sqlite3.Connection) -> PantallaCRUD:
     return PantallaCRUD(conn, "Profesion", "Profesiones", campos)
 
 
+def _opciones_edificio_o_ninguno_gasto(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    return [(None, "Sin edificio")] + _opciones_edificio(conn)
+
+
+def _opciones_unidad_o_ninguna_gasto(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    return [(None, "Sin unidad")] + _opciones_unidad(conn)
+
+
+def _al_abrir_dialogo_gasto(dialogo) -> None:
+    """El Alcance (Espacio general/Edificio/Unidad) define cuál de los
+    otros dos combos aplica: el que no corresponde queda deshabilitado y
+    se limpia, para que nunca convivan un Alcance "Espacio general" con
+    un Edificio cargado (o análogo) — mismo criterio de fondo que
+    `gastos_operativos.sanear_alcance`, que hace la misma limpieza del
+    lado de los datos por si el gasto se termina cargando por otra vía
+    (ej. una futura importación) que no pase por este diálogo."""
+    combo_alcance = dialogo._entradas["Alcance"]
+    combo_edificio = dialogo._entradas["IdEdificio"]
+    combo_unidad = dialogo._entradas["IdUnidad"]
+
+    def _actualizar(*_args) -> None:
+        alcance = combo_alcance.currentData()
+        combo_edificio.setEnabled(alcance == "Edificio")
+        combo_unidad.setEnabled(alcance == "Unidad")
+        if alcance != "Edificio":
+            combo_edificio.setCurrentIndex(0)
+        if alcance != "Unidad":
+            combo_unidad.setCurrentIndex(0)
+
+    combo_alcance.currentIndexChanged.connect(_actualizar)
+    _actualizar()
+
+
 def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
     def opciones_alcance(c):
-        return [("Espacio general", "Espacio general"), ("Edificio", "Edificio"), ("Unidad", "Unidad")]
+        return [(a, a) for a in ALCANCES_GASTO]
 
     def opciones_origen(c):
         return [("Manual", "Manual"), ("Importado", "Importado")]
@@ -234,22 +267,25 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
             "Periodo", "Período (AAAA-MM)", requerido=True,
             validador=es_periodo_valido, formato_esperado=FORMATO_PERIODO,
         ),
-        Campo("Categoria", "Categoría"),
+        Campo("Categoria", "Categoría", tipo="combo", opciones=opciones_lista("CategoriaGasto"), combo_editable=True),
         Campo("Concepto", "Concepto"),
         Campo("Monto", "Monto", tipo="numero", requerido=True),
         Campo("Alcance", "Alcance", tipo="combo", opciones=opciones_alcance),
-        Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio),
-        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad),
+        Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio_o_ninguno_gasto),
+        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad_o_ninguna_gasto),
         Campo("Origen", "Origen", tipo="combo", opciones=opciones_origen),
         Campo("Observacion", "Observación", tipo="texto_largo"),
         *campos_libres(conn),
     ]
-    pantalla = PantallaCRUD(conn, "GastoOperativo", "Gastos operativos", campos)
+    pantalla = PantallaCRUD(
+        conn, "GastoOperativo", "Gastos operativos", campos, al_abrir_dialogo=_al_abrir_dialogo_gasto,
+    )
     pantalla.al_guardar = lambda valores, registro: _resolver_conflicto_gasto(pantalla, conn, valores, registro)
     return pantalla
 
 
 def _resolver_conflicto_gasto(parent, conn: sqlite3.Connection, valores: dict, registro) -> dict | None:
+    valores = sanear_alcance(valores)
     id_actual = registro["IdGasto"] if registro is not None else None
     conflicto = gasto_en_conflicto(
         conn, periodo=valores.get("Periodo"), concepto=valores.get("Concepto"),

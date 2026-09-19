@@ -305,6 +305,42 @@ def test_pantalla_gastos_operativos_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre3") == 1
 
 
+def test_gasto_categoria_es_combo_editable_con_valores_de_listas_editables(qtbot, conn):
+    obtener_repositorio(conn, "ListasEditables").crear(TipoLista="CategoriaGasto", Valor="Servicios", Orden=0)
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    combo_categoria = dialogo._entradas["Categoria"]
+    assert combo_categoria.isEditable() is True
+    opciones = [combo_categoria.itemText(i) for i in range(combo_categoria.count())]
+    assert opciones == ["Servicios"]
+    combo_categoria.setEditText("Categoría inventada")
+    assert dialogo.valores()["Categoria"] == "Categoría inventada"
+
+
+def test_gasto_alcance_edificio_habilita_solo_edificio(qtbot, conn):
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Norte")
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    catalogos._al_abrir_dialogo_gasto(dialogo)
+
+    combo_alcance = dialogo._entradas["Alcance"]
+    combo_edificio = dialogo._entradas["IdEdificio"]
+    combo_unidad = dialogo._entradas["IdUnidad"]
+
+    combo_alcance.setCurrentIndex(combo_alcance.findData("Edificio"))
+    assert combo_edificio.isEnabled() is True
+    assert combo_unidad.isEnabled() is False
+    assert combo_unidad.currentData() is None
+
+    combo_alcance.setCurrentIndex(combo_alcance.findData("Espacio general"))
+    assert combo_edificio.isEnabled() is False
+    assert combo_edificio.currentData() is None
+
+
 def test_pantalla_responsables_tiene_tres_campos_libres(qtbot, conn):
     pantalla = catalogos.pantalla_responsables(conn)
     qtbot.addWidget(pantalla)

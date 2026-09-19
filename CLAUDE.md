@@ -275,6 +275,35 @@ sin ningún ajuste extra. Se agregó también a `_campos_profesional`
 (Profesionales) con el mismo mecanismo, aunque esa pantalla no forma
 parte de la revisión "uno por uno" de catálogos.
 
+## Gastos operativos (Categoría abierta, Alcance excluyente)
+
+Categoría pasa a combo abierto (mismo criterio que Responsable.Rol y la
+Categoría de Mensajes predefinidos): sugiere los valores de Listas
+editables (`TipoLista="CategoriaGasto"`) pero admite tipear uno nuevo
+ahí mismo.
+
+Alcance (Espacio general/Edificio/Unidad, sección 3.25) es excluyente:
+un gasto está asociado a UNO solo de los tres niveles, nunca a más de
+uno a la vez. `catalogos._al_abrir_dialogo_gasto` conecta el combo
+Alcance para que, al cambiarlo, el campo del nivel que no corresponde
+quede deshabilitado y se limpie (Edificio/Unidad usan acá su propia
+versión de las opciones con un valor en blanco al principio,
+`_opciones_edificio_o_ninguno_gasto`/análoga — las de `catalogos.py` no
+la tienen porque en otros catálogos esos campos son obligatorios).
+Pedido explícito de la clienta: no hace falta un nivel Localidad ni
+Consultorio para gastos (a diferencia de Mensajes predefinidos) — dejó
+la puerta abierta a sumarlo en el futuro si hiciera falta, pero no lo
+ve necesario, así que no se agregó.
+
+La limpieza de los campos que no corresponden también vive del lado de
+los datos, no solo en la reactividad del diálogo:
+`app.negocio.gastos_operativos.sanear_alcance(valores)` fuerza a None
+IdEdificio/IdUnidad según el Alcance, y se llama desde
+`_resolver_conflicto_gasto` antes de guardar. Motivo (pedido de la
+clienta): esta tabla se puede cargar tanto a mano como, a futuro,
+importada desde un módulo extendido — la limpieza no puede depender
+únicamente de que la carga haya pasado por este diálogo en particular.
+
 ## Listas editables (agregar valores, no tipos)
 
 Pedido de la clienta al revisar este catálogo: "Tipo de lista" pasó de
