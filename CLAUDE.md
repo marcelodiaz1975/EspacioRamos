@@ -568,6 +568,31 @@ el ID interno de la tabla correspondiente, Localidad incluida).
   resto de los catálogos con un campo de fecha en texto libre sigue como
   estaba hasta que se revisen y se les aplique el mismo tipo.
 
+## Centro de mensajería (formato solapa, filtros a la izquierda)
+
+Pasó del layout viejo (fila de filtros arriba + `QSplitter` tabla/panel de
+texto) al formato solapa estándar (`panelSolapa` dentro de un
+`QTabWidget` de una sola pestaña, "Listado", envuelto en `QScrollArea`
+con `setDrawBase(False)`/`NoFrame` como el resto). Todo lo que antes
+estaba repartido entre la fila de arriba y el panel derecho del splitter
+(Filtro, Período, Actualizar, Mensaje grupal, Deshacer última acción,
+los dos checks Combinar, y el panel de Vista previa con su texto y
+"Copiar mensaje") pasó a una sola columna izquierda de ancho fijo
+(220px, boxes y botones), con la tabla ocupando el resto del ancho a la
+derecha — mismo criterio de columna izquierda que Gastos operativos/
+catálogos genéricos. La Vista previa quedó al final de esa misma
+columna, debajo de los checks (pedido explícito de la clienta,
+"en principio": puede reubicarse más adelante si al usarla no queda
+cómoda ahí).
+
+De paso quedaron con estilo los botones que no lo tenían: "Actualizar",
+"Deshacer última acción" y "Copiar mensaje" pasan a `botonSecundario`
+(antes salían con el gris nativo de Qt, sin `objectName`); "Mensaje
+grupal" se mantiene `botonPrimario`, es la acción más importante de la
+pantalla. No se tocó la cadena de foco Enter/Tab: esta pantalla no
+tenía una armada antes de esta ronda y no se sumó en esta — queda
+pendiente para una ronda futura si hace falta.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

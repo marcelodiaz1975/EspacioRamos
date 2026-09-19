@@ -25,15 +25,17 @@ from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QSplitter,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -105,6 +107,20 @@ _FILTROS = [
     ("Solo aisladas", "aisladas"),
 ]
 _FILTRO_DEFAULT = "pendientes"
+_ANCHO_CAMPO = 220  # combo Filtro, campo Período y los botones del panel izquierdo
+
+
+def _titulo_campo(texto: str) -> QLabel:
+    etiqueta = QLabel(texto)
+    etiqueta.setObjectName("subtituloCampo")
+    return etiqueta
+
+
+def _linea_divisoria() -> QFrame:
+    linea = QFrame()
+    linea.setFrameShape(QFrame.Shape.HLine)
+    linea.setFrameShadow(QFrame.Shadow.Sunken)
+    return linea
 
 
 def _nombre_con_tratamiento(profesional: sqlite3.Row) -> str:
@@ -173,36 +189,68 @@ class CentroMensajeria(QWidget):
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
-        fila_filtros = QHBoxLayout()
-        fila_filtros.addWidget(QLabel("Filtro:"))
+        solapas = QTabWidget()
+        panel_solapa = QWidget()
+        panel_solapa.setObjectName("panelSolapa")
+        layout_solapa = QHBoxLayout(panel_solapa)
+
+        panel_izquierda = QWidget()
+        columna = QVBoxLayout(panel_izquierda)
+        columna.setContentsMargins(0, 0, 0, 0)
+
+        columna.addWidget(_titulo_campo("Filtro"))
         self.combo_filtro = QComboBox()
         for etiqueta, clave in _FILTROS:
             self.combo_filtro.addItem(etiqueta, clave)
         self.combo_filtro.setCurrentIndex([clave for _, clave in _FILTROS].index(_FILTRO_DEFAULT))
         self.combo_filtro.currentIndexChanged.connect(self.actualizar)
-        fila_filtros.addWidget(self.combo_filtro)
+        self.combo_filtro.setFixedWidth(_ANCHO_CAMPO)
+        columna.addWidget(self.combo_filtro)
 
-        fila_filtros.addWidget(QLabel("Período:"))
+        columna.addWidget(_titulo_campo("Período"))
         self.campo_periodo = QLineEdit()
         self.campo_periodo.editingFinished.connect(self.actualizar)
-        fila_filtros.addWidget(self.campo_periodo)
+        self.campo_periodo.setFixedWidth(_ANCHO_CAMPO)
+        columna.addWidget(self.campo_periodo)
 
         boton_actualizar = QPushButton("Actualizar")
+        boton_actualizar.setObjectName("botonSecundario")
         boton_actualizar.clicked.connect(self.actualizar)
-        fila_filtros.addWidget(boton_actualizar)
+        columna.addWidget(boton_actualizar)
 
         boton_grupal = QPushButton("Mensaje grupal")
         boton_grupal.setObjectName("botonPrimario")
         boton_grupal.clicked.connect(self._mostrar_mensaje_grupal)
-        fila_filtros.addWidget(boton_grupal)
+        columna.addWidget(boton_grupal)
 
         boton_deshacer = QPushButton("Deshacer última acción")
+        boton_deshacer.setObjectName("botonSecundario")
         boton_deshacer.clicked.connect(self._deshacer_ultima_accion)
-        fila_filtros.addWidget(boton_deshacer)
-        fila_filtros.addStretch()
-        layout.addLayout(fila_filtros)
+        columna.addWidget(boton_deshacer)
 
-        splitter = QSplitter()
+        for boton in (boton_actualizar, boton_grupal, boton_deshacer):
+            boton.setFixedWidth(_ANCHO_CAMPO)
+
+        self.check_combinar_misma_unidad = QCheckBox("Combinar misma unidad")
+        columna.addWidget(self.check_combinar_misma_unidad)
+        self.check_combinar_distintas_unidades = QCheckBox("Combinar distintas unidades")
+        columna.addWidget(self.check_combinar_distintas_unidades)
+
+        columna.addWidget(_linea_divisoria())
+        columna.addWidget(_titulo_campo("Vista previa"))
+        self.texto_mensaje = QPlainTextEdit()
+        self.texto_mensaje.setFixedWidth(_ANCHO_CAMPO)
+        self.texto_mensaje.setFixedHeight(220)
+        columna.addWidget(self.texto_mensaje)
+        boton_copiar = QPushButton("Copiar mensaje")
+        boton_copiar.setObjectName("botonSecundario")
+        boton_copiar.setFixedWidth(_ANCHO_CAMPO)
+        boton_copiar.clicked.connect(self._copiar_mensaje)
+        columna.addWidget(boton_copiar)
+
+        columna.addStretch()
+        layout_solapa.addWidget(panel_izquierda)
+
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
@@ -216,31 +264,15 @@ class CentroMensajeria(QWidget):
         # (`actualizar()` vuelve a dejarla en el orden por color).
         self.tabla.setSortingEnabled(True)
         self.tabla.itemChanged.connect(self._al_cambiar_enviada)
-        splitter.addWidget(self.tabla)
+        layout_solapa.addWidget(self.tabla, stretch=1)
 
-        panel_derecho = QWidget()
-        layout_derecho = QVBoxLayout(panel_derecho)
-
-        fila_combinar = QHBoxLayout()
-        self.check_combinar_misma_unidad = QCheckBox("Combinar misma unidad")
-        fila_combinar.addWidget(self.check_combinar_misma_unidad)
-        self.check_combinar_distintas_unidades = QCheckBox("Combinar distintas unidades")
-        fila_combinar.addWidget(self.check_combinar_distintas_unidades)
-        fila_combinar.addStretch()
-        layout_derecho.addLayout(fila_combinar)
-
-        self.texto_mensaje = QPlainTextEdit()
-        layout_derecho.addWidget(self.texto_mensaje, stretch=1)
-        fila_acciones = QHBoxLayout()
-        boton_copiar = QPushButton("Copiar mensaje")
-        boton_copiar.clicked.connect(self._copiar_mensaje)
-        fila_acciones.addWidget(boton_copiar)
-        fila_acciones.addStretch()
-        layout_derecho.addLayout(fila_acciones)
-        splitter.addWidget(panel_derecho)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        layout.addWidget(splitter, stretch=1)
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(panel_solapa)
+        solapas.addTab(scroll, "Listado")
+        solapas.tabBar().setDrawBase(False)
+        layout.addWidget(solapas, stretch=1)
 
         self.campo_periodo.setText(periodo_actual(self.conn))
 
