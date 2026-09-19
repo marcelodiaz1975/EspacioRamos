@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QDateEdit,
     QDialog,
     QDoubleSpinBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -51,7 +52,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -88,6 +91,7 @@ from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
 from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 
 _TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
+_ANCHO_BOTON_ACCION = 220  # Generar PDF / Generar texto WhatsApp / Nueva búsqueda, los tres iguales
 
 _DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
 
@@ -215,9 +219,6 @@ class PantallaOferta(QWidget):
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
-        titulo_busqueda = QLabel("Nueva búsqueda")
-        titulo_busqueda.setObjectName("subtituloSeccion")
-        form.addWidget(titulo_busqueda)
 
         self.combo_profesional = QComboBox()
         habilitar_busqueda_profesional(self.combo_profesional)
@@ -371,17 +372,20 @@ class PantallaOferta(QWidget):
 
         fila_botones = QHBoxLayout()
         self.boton_pdf = QPushButton("Generar PDF")
-        self.boton_pdf.setObjectName("botonAccion")
+        self.boton_pdf.setObjectName("botonSecundario")
         self.boton_pdf.clicked.connect(self._generar_pdf)
         self.boton_texto = QPushButton("Generar texto WhatsApp")
-        self.boton_texto.setObjectName("botonAccion")
+        self.boton_texto.setObjectName("botonSecundario")
         self.boton_texto.clicked.connect(self._generar_texto)
         self.boton_nueva = QPushButton("Nueva búsqueda")
-        self.boton_nueva.setObjectName("botonDestacado")
+        self.boton_nueva.setObjectName("botonSecundario")
         self.boton_nueva.clicked.connect(self._nueva_busqueda)
+        for boton in (self.boton_pdf, self.boton_texto, self.boton_nueva):
+            boton.setFixedWidth(_ANCHO_BOTON_ACCION)
         fila_botones.addWidget(self.boton_pdf)
         fila_botones.addWidget(self.boton_texto)
         fila_botones.addWidget(self.boton_nueva)
+        fila_botones.addStretch()
         form.addLayout(fila_botones)
         form.addStretch()
         splitter.addWidget(panel_form)
@@ -392,7 +396,21 @@ class PantallaOferta(QWidget):
         splitter.addWidget(self.grilla)
         splitter.setStretchFactor(1, 1)
 
-        layout.addWidget(splitter, stretch=1)
+        panel_solapa = QWidget()
+        panel_solapa.setObjectName("panelSolapa")
+        layout_solapa = QVBoxLayout(panel_solapa)
+        layout_solapa.setContentsMargins(0, 0, 0, 0)
+        layout_solapa.addWidget(splitter)
+
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(panel_solapa)
+
+        solapas = QTabWidget()
+        solapas.addTab(scroll, "Nueva búsqueda")
+        solapas.tabBar().setDrawBase(False)
+        layout.addWidget(solapas, stretch=1)
         self._al_cambiar_tipo()
 
         self._foco = instalar_enter_avanza_foco(

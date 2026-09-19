@@ -46,8 +46,9 @@ from app.negocio.valores import horas_semanales_vigentes
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
-_ANCHO_PANEL_FILTROS = 280
+_ANCHO_PANEL_FILTROS = 300
 _ANCHO_PANEL_FILTROS_ESTADO_CUENTA = 340
+_ANCHO_BOTON_EMISION = 275  # Calcular / los tres Emitir..., todos iguales
 
 _ESTADOS_FILTRO = [
     ("Cualquier estado", None),
@@ -142,6 +143,7 @@ class _PanelEmisionArchivos(QWidget):
         layout_filtros.addWidget(self.combo_estado_filtro)
 
         self.boton_calcular = QPushButton("Calcular")
+        self.boton_calcular.setObjectName("botonSecundario")
         self.boton_calcular.clicked.connect(self.actualizar)
         layout_filtros.addWidget(self.boton_calcular)
 
@@ -151,17 +153,22 @@ class _PanelEmisionArchivos(QWidget):
         layout_filtros.addWidget(linea_separadora)
 
         boton_emitir_pendientes = QPushButton("Emitir liquidaciones pendientes")
-        boton_emitir_pendientes.setObjectName("botonAccion")
+        boton_emitir_pendientes.setObjectName("botonSecundario")
         boton_emitir_pendientes.clicked.connect(self._emitir_pendientes)
         layout_filtros.addWidget(boton_emitir_pendientes)
         boton_emitir_seleccionadas = QPushButton("Emitir liquidaciones seleccionadas")
-        boton_emitir_seleccionadas.setObjectName("botonAccion")
+        boton_emitir_seleccionadas.setObjectName("botonSecundario")
         boton_emitir_seleccionadas.clicked.connect(self._emitir_seleccionadas)
         layout_filtros.addWidget(boton_emitir_seleccionadas)
         boton_emitir_todas = QPushButton("Emitir todas las liquidaciones")
-        boton_emitir_todas.setObjectName("botonAccion")
+        boton_emitir_todas.setObjectName("botonSecundario")
         boton_emitir_todas.clicked.connect(self._emitir_todas)
         layout_filtros.addWidget(boton_emitir_todas)
+
+        for boton in (
+            self.boton_calcular, boton_emitir_pendientes, boton_emitir_seleccionadas, boton_emitir_todas,
+        ):
+            boton.setFixedWidth(_ANCHO_BOTON_EMISION)
 
         layout_filtros.addStretch()
         layout_externo.addWidget(panel_filtros)

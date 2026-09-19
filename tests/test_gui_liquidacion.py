@@ -131,7 +131,7 @@ def test_ningun_boton_de_emision_queda_resaltado_y_son_del_mismo_tamano(qtbot, c
         if b.text().startswith("Emitir ")
     ]
     assert len(botones) == 3
-    assert all(b.objectName() == "botonAccion" for b in botones)
+    assert all(b.objectName() == "botonSecundario" for b in botones)
 
 
 def test_orden_de_los_botones_es_pendientes_seleccionadas_todas(qtbot, conn):

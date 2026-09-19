@@ -39,7 +39,7 @@ def test_paleta_oscura_tambien_tiene_resalte_naranja_suave():
 
 
 def test_hoja_estilos_tiene_boton_secundario_celeste_suave():
-    """botonSecundario: mismo padding que botonAccion, pero con un
+    """botonSecundario: mismo padding que botonPrimario, pero con un
     celeste suave — para botones que necesitan destacarse un poco sin
     llegar al azul fuerte de botonPrimario."""
     assert "botonSecundario" in hoja_estilos(False)

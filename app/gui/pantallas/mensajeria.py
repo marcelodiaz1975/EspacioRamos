@@ -182,6 +182,15 @@ class CentroMensajeria(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """`setFocus()` durante la construcción no alcanza a "pegar":
+        el QTabWidget contenedor todavía no está mostrado y el foco se
+        queda en su tab bar. Al mostrarse la solapa se repite el pedido
+        de foco en Filtro, que es cuando realmente surte efecto (mismo
+        motivo que Reservas/Liquidación)."""
+        super().showEvent(event)
+        self.combo_filtro.setFocus()
+
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
 

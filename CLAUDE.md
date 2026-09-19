@@ -590,10 +590,13 @@ pasó de primario a secundario al dejar de ser la acción principal),
 línea divisoria, "Vista previa" y su texto. "Copiar mensaje" quedó
 lejos del texto que copia (armado antes que la Vista previa en la
 columna) pero sigue operando sobre `self.texto_mensaje` igual que
-siempre, así que el corrimiento es puramente visual. No se tocó la
-cadena de foco Enter/Tab: esta pantalla no tenía una armada antes de
-esta revisión y no se sumó todavía — pendiente para una ronda futura si
-hace falta.
+siempre, así que el corrimiento es puramente visual. No se armó una
+cadena de foco Enter/Tab propia (no la tenía y sigue sin tenerla), pero
+sí se agregó `showEvent` con `self.combo_filtro.setFocus()` (mismo
+motivo que Reservas/Liquidación: al construir el `QTabWidget` el foco
+queda en la tab bar hasta que la solapa se muestra de verdad) para que
+al entrar a la pantalla el foco arranque en Filtro y el Tab nativo baje
+desde ahí en el orden en que están los widgets en la columna.
 
 El check "Enviada" de la tabla (`_item_enviada`) ahora centra su
 `QTableWidgetItem` con `setTextAlignment(Qt.AlignmentFlag.AlignCenter)`
@@ -601,6 +604,39 @@ El check "Enviada" de la tabla (`_item_enviada`) ahora centra su
 el check Enviada de Centro de mensajería" para su propio check, pero
 acá nunca se le había puesto ese alineado: quedó corregido para que la
 frase sea cierta.
+
+## Oferta de consultorios (formato solapa, botones unificados)
+
+Pasó del `QSplitter` suelto (formulario / grilla operativa de referencia
+/ detalle) a formato solapa: una sola pestaña "Nueva búsqueda"
+(`panelSolapa` dentro de `QScrollArea`, `setDrawBase(False)`/`NoFrame`
+como el resto) que envuelve ese mismo splitter tal cual estaba — no se
+tocó la distribución interna (formulario a la izquierda, grilla de
+referencia con sus propios filtros al medio, detalle a la derecha),
+solo se le puso el marco de solapa por fuera. Se sacó el `QLabel`
+"Nueva búsqueda" (`subtituloSeccion`) que quedaba adentro del
+formulario: quedaba redundante contra el nombre de la solapa.
+
+Los tres botones de abajo del formulario (`Generar PDF`, `Generar texto
+WhatsApp`, `Nueva búsqueda`) usaban `botonAccion`/`botonDestacado` —
+convención vieja, de antes de que se estandarizaran `botonPrimario`/
+`botonSecundario`. Pasan los tres a `botonSecundario`, mismo ancho fijo
+(`_ANCHO_BOTON_ACCION = 220`) — pedido explícito de la clienta: ninguno
+queda resaltado por sobre los otros dos.
+
+Mismo criterio aplicado de una en Liquidación mensual
+(`_PanelEmisionArchivos`): "Calcular" (sin estilo antes) y los tres
+"Emitir..." (`botonAccion`) pasan todos a `botonSecundario`, ancho fijo
+`_ANCHO_BOTON_EMISION = 275` — hubo que subir `_ANCHO_PANEL_FILTROS` de
+280 a 300 porque "Emitir liquidaciones seleccionadas" no entraba en el
+ancho de botón que hacía falta dentro del panel viejo.
+
+Como resultado de las dos migraciones no quedó ningún botón usando
+`botonAccion`/`botonDestacado` en todo el sistema, esas dos reglas se
+sacaron de `estilos.py` (muertas, no las usaba nadie más) — si en algún
+momento hace falta un tercer nivel de énfasis de botón además de
+`botonPrimario`/`botonSecundario`, se define de nuevo ahí mismo en vez
+de reactivar las viejas.
 
 ## Metodología de trabajo
 

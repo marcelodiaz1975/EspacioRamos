@@ -204,9 +204,9 @@ def test_hay_tres_botones_y_no_esta_resaltado_ni_pdf_ni_texto(qtbot, conn, profe
         "Generar PDF", "Generar texto WhatsApp", "Nueva búsqueda",
     )}
     assert set(botones) == {"Generar PDF", "Generar texto WhatsApp", "Nueva búsqueda"}
-    assert botones["Generar PDF"].objectName() == "botonAccion"
-    assert botones["Generar texto WhatsApp"].objectName() == "botonAccion"
-    assert botones["Nueva búsqueda"].objectName() == "botonDestacado"
+    assert botones["Generar PDF"].objectName() == "botonSecundario"
+    assert botones["Generar texto WhatsApp"].objectName() == "botonSecundario"
+    assert botones["Nueva búsqueda"].objectName() == "botonSecundario"
 
 
 def test_nueva_busqueda_resetea_el_formulario_y_enfoca_profesional(qtbot, conn, profesional_y_consultorio):
