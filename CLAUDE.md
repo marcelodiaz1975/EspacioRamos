@@ -575,23 +575,32 @@ texto) al formato solapa estándar (`panelSolapa` dentro de un
 `QTabWidget` de una sola pestaña, "Listado", envuelto en `QScrollArea`
 con `setDrawBase(False)`/`NoFrame` como el resto). Todo lo que antes
 estaba repartido entre la fila de arriba y el panel derecho del splitter
-(Filtro, Período, Actualizar, Mensaje grupal, Deshacer última acción,
-los dos checks Combinar, y el panel de Vista previa con su texto y
-"Copiar mensaje") pasó a una sola columna izquierda de ancho fijo
-(220px, boxes y botones), con la tabla ocupando el resto del ancho a la
-derecha — mismo criterio de columna izquierda que Gastos operativos/
-catálogos genéricos. La Vista previa quedó al final de esa misma
-columna, debajo de los checks (pedido explícito de la clienta,
-"en principio": puede reubicarse más adelante si al usarla no queda
-cómoda ahí).
+pasó a una sola columna izquierda de ancho fijo (280px, campos y
+botones — subido de 220 a pedido de la clienta, quedaba justo), con la
+tabla ocupando el resto del ancho a la derecha — mismo criterio de
+columna izquierda que Gastos operativos/catálogos genéricos.
 
-De paso quedaron con estilo los botones que no lo tenían: "Actualizar",
-"Deshacer última acción" y "Copiar mensaje" pasan a `botonSecundario`
-(antes salían con el gris nativo de Qt, sin `objectName`); "Mensaje
-grupal" se mantiene `botonPrimario`, es la acción más importante de la
-pantalla. No se tocó la cadena de foco Enter/Tab: esta pantalla no
-tenía una armada antes de esta ronda y no se sumó en esta — queda
-pendiente para una ronda futura si hace falta.
+Orden final de la columna izquierda (de arriba abajo, pedido explícito
+de la clienta sobre dos rondas de ajuste): Filtro, Período, los dos
+checks "Combinar" (debajo de Período, no de los botones), "Copiar
+mensaje" (`botonPrimario` — es la acción más importante de esta
+pantalla, arriba de "Actualizar"), "Actualizar", "Mensaje grupal" y
+"Deshacer última acción" (los tres `botonSecundario` — "Mensaje grupal"
+pasó de primario a secundario al dejar de ser la acción principal),
+línea divisoria, "Vista previa" y su texto. "Copiar mensaje" quedó
+lejos del texto que copia (armado antes que la Vista previa en la
+columna) pero sigue operando sobre `self.texto_mensaje` igual que
+siempre, así que el corrimiento es puramente visual. No se tocó la
+cadena de foco Enter/Tab: esta pantalla no tenía una armada antes de
+esta revisión y no se sumó todavía — pendiente para una ronda futura si
+hace falta.
+
+El check "Enviada" de la tabla (`_item_enviada`) ahora centra su
+`QTableWidgetItem` con `setTextAlignment(Qt.AlignmentFlag.AlignCenter)`
+— `liquidacion.py` ya tenía un comentario diciendo "mismo criterio que
+el check Enviada de Centro de mensajería" para su propio check, pero
+acá nunca se le había puesto ese alineado: quedó corregido para que la
+frase sea cierta.
 
 ## Metodología de trabajo
 

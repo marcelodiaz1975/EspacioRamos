@@ -107,7 +107,7 @@ _FILTROS = [
     ("Solo aisladas", "aisladas"),
 ]
 _FILTRO_DEFAULT = "pendientes"
-_ANCHO_CAMPO = 220  # combo Filtro, campo Período y los botones del panel izquierdo
+_ANCHO_CAMPO = 280  # combo Filtro, campo Período y los botones del panel izquierdo
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -213,13 +213,23 @@ class CentroMensajeria(QWidget):
         self.campo_periodo.setFixedWidth(_ANCHO_CAMPO)
         columna.addWidget(self.campo_periodo)
 
+        self.check_combinar_misma_unidad = QCheckBox("Combinar misma unidad")
+        columna.addWidget(self.check_combinar_misma_unidad)
+        self.check_combinar_distintas_unidades = QCheckBox("Combinar distintas unidades")
+        columna.addWidget(self.check_combinar_distintas_unidades)
+
+        boton_copiar = QPushButton("Copiar mensaje")
+        boton_copiar.setObjectName("botonPrimario")
+        boton_copiar.clicked.connect(self._copiar_mensaje)
+        columna.addWidget(boton_copiar)
+
         boton_actualizar = QPushButton("Actualizar")
         boton_actualizar.setObjectName("botonSecundario")
         boton_actualizar.clicked.connect(self.actualizar)
         columna.addWidget(boton_actualizar)
 
         boton_grupal = QPushButton("Mensaje grupal")
-        boton_grupal.setObjectName("botonPrimario")
+        boton_grupal.setObjectName("botonSecundario")
         boton_grupal.clicked.connect(self._mostrar_mensaje_grupal)
         columna.addWidget(boton_grupal)
 
@@ -228,13 +238,8 @@ class CentroMensajeria(QWidget):
         boton_deshacer.clicked.connect(self._deshacer_ultima_accion)
         columna.addWidget(boton_deshacer)
 
-        for boton in (boton_actualizar, boton_grupal, boton_deshacer):
+        for boton in (boton_copiar, boton_actualizar, boton_grupal, boton_deshacer):
             boton.setFixedWidth(_ANCHO_CAMPO)
-
-        self.check_combinar_misma_unidad = QCheckBox("Combinar misma unidad")
-        columna.addWidget(self.check_combinar_misma_unidad)
-        self.check_combinar_distintas_unidades = QCheckBox("Combinar distintas unidades")
-        columna.addWidget(self.check_combinar_distintas_unidades)
 
         columna.addWidget(_linea_divisoria())
         columna.addWidget(_titulo_campo("Vista previa"))
@@ -242,11 +247,6 @@ class CentroMensajeria(QWidget):
         self.texto_mensaje.setFixedWidth(_ANCHO_CAMPO)
         self.texto_mensaje.setFixedHeight(220)
         columna.addWidget(self.texto_mensaje)
-        boton_copiar = QPushButton("Copiar mensaje")
-        boton_copiar.setObjectName("botonSecundario")
-        boton_copiar.setFixedWidth(_ANCHO_CAMPO)
-        boton_copiar.clicked.connect(self._copiar_mensaje)
-        columna.addWidget(boton_copiar)
 
         columna.addStretch()
         layout_solapa.addWidget(panel_izquierda)
@@ -377,6 +377,7 @@ class CentroMensajeria(QWidget):
         los títulos ordenables, la fila que ve el usuario al tildar ya no
         tiene por qué coincidir con su posición en `self._profesionales`."""
         item = QTableWidgetItem()
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         item.setData(Qt.ItemDataRole.UserRole, profesional["IdProfesional"])
         if color not in _COLORES_CON_CHECK:
             item.setFlags(Qt.ItemFlag.ItemIsSelectable)
