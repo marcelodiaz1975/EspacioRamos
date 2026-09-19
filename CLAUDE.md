@@ -303,6 +303,21 @@ IdEdificio/IdUnidad según el Alcance, y se llama desde
 clienta): esta tabla se puede cargar tanto a mano como, a futuro,
 importada desde un módulo extendido — la limpieza no puede depender
 únicamente de que la carga haya pasado por este diálogo en particular.
+Por el mismo motivo, un gasto Manual puede pasar a Origen "Importado"
+en cualquier momento con solo editarlo — `gasto_en_conflicto` excluye al
+propio registro (`id_gasto_actual`), así que cambiarle el origen a uno
+mismo nunca dispara el cartel de conflicto contra sí mismo.
+
+Filtro "Período actual" (`panel_extra_superior_izquierda`, arriba de
+Nuevo/Editar/Eliminar): arranca en `app.negocio.dias.periodo_actual(conn)`
+(el mes en curso, respeta la fecha ficticia de QA) pero se puede
+cambiar a mano — oculta filas de otros períodos, mismo criterio que
+cualquier "filtro que solo afecta la visualización". Debajo de los
+botones (`panel_extra_izquierda`, con su línea divisoria propia arriba,
+pedido explícito de la clienta) va "Subtotal del período": la suma de
+Monto de todos los gastos de ese período (no solo los visibles después
+de "Buscar", que es un filtro aparte) — se recalcula cada vez que
+cambia el período o se crea/edita/elimina un gasto.
 
 ## Listas editables (agregar valores, no tipos)
 

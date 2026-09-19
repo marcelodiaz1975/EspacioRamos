@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QMessageBox, QVBoxLayout, QWidget
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
+from app.negocio.dias import periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.gastos_operativos import ALCANCES_GASTO, gasto_en_conflicto, sanear_alcance
 from app.negocio.condiciones_normas import reordenar_al_guardar as reordenar_condiciones_al_guardar
@@ -29,6 +30,19 @@ from app.negocio.validaciones import (
     es_periodo_valido,
 )
 from app.repositorio.registro import obtener_repositorio
+
+
+def _titulo_campo(texto: str) -> QLabel:
+    etiqueta = QLabel(texto)
+    etiqueta.setObjectName("subtituloCampo")
+    return etiqueta
+
+
+def _linea_divisoria() -> QFrame:
+    linea = QFrame()
+    linea.setFrameShape(QFrame.Shape.HLine)
+    linea.setFrameShadow(QFrame.Shadow.Sunken)
+    return linea
 
 
 def _opciones_tamano(conn: sqlite3.Connection) -> list[tuple[str | None, str]]:
@@ -277,10 +291,50 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Observacion", "Observación", tipo="texto_largo"),
         *campos_libres(conn),
     ]
+
+    panel_periodo = QWidget()
+    layout_periodo = QVBoxLayout(panel_periodo)
+    layout_periodo.setContentsMargins(0, 0, 0, 0)
+    layout_periodo.addWidget(_titulo_campo("Período actual"))
+    campo_periodo_filtro = QLineEdit()
+    campo_periodo_filtro.setText(periodo_actual(conn))
+    layout_periodo.addWidget(campo_periodo_filtro)
+
+    panel_subtotal = QWidget()
+    layout_subtotal = QVBoxLayout(panel_subtotal)
+    layout_subtotal.setContentsMargins(0, 0, 0, 0)
+    layout_subtotal.addWidget(_linea_divisoria())
+    layout_subtotal.addWidget(_titulo_campo("Subtotal del período"))
+    etiqueta_subtotal = QLabel()
+    layout_subtotal.addWidget(etiqueta_subtotal)
+    layout_subtotal.addStretch()
+
     pantalla = PantallaCRUD(
         conn, "GastoOperativo", "Gastos operativos", campos, al_abrir_dialogo=_al_abrir_dialogo_gasto,
+        panel_extra_superior_izquierda=panel_periodo, panel_extra_izquierda=panel_subtotal,
     )
     pantalla.al_guardar = lambda valores, registro: _resolver_conflicto_gasto(pantalla, conn, valores, registro)
+
+    def _aplicar_filtro_periodo() -> None:
+        periodo = campo_periodo_filtro.text().strip() or periodo_actual(conn)
+        tabla = pantalla.tabla_widget
+        for fila in range(tabla.rowCount()):
+            item_periodo = tabla.item(fila, 0)
+            texto = item_periodo.text() if item_periodo else ""
+            tabla.setRowHidden(fila, texto != periodo)
+        gastos_del_periodo = obtener_repositorio(conn, "GastoOperativo").listar(Periodo=periodo)
+        subtotal = sum(g["Monto"] or 0 for g in gastos_del_periodo)
+        etiqueta_subtotal.setText(formatear_moneda(subtotal))
+
+    campo_periodo_filtro.editingFinished.connect(_aplicar_filtro_periodo)
+    actualizar_original = pantalla.actualizar
+
+    def _actualizar_con_periodo() -> None:
+        actualizar_original()
+        _aplicar_filtro_periodo()
+
+    pantalla.actualizar = _actualizar_con_periodo
+    pantalla.actualizar()
     return pantalla
 
 

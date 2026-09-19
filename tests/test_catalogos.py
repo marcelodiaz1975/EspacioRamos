@@ -341,6 +341,63 @@ def test_gasto_alcance_edificio_habilita_solo_edificio(qtbot, conn):
     assert combo_edificio.currentData() is None
 
 
+def test_gasto_periodo_filtro_arranca_en_el_periodo_actual(qtbot, conn):
+    from PySide6.QtWidgets import QLineEdit
+
+    from app.negocio.dias import periodo_actual
+
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    campo_periodo_filtro = next(w for w in pantalla.findChildren(QLineEdit) if w.text() == periodo_actual(conn))
+    assert campo_periodo_filtro.text() == periodo_actual(conn)
+
+
+def test_gasto_periodo_filtro_oculta_otros_periodos_y_calcula_subtotal(qtbot, conn):
+    from PySide6.QtWidgets import QLabel, QLineEdit
+
+    from app.negocio.dias import periodo_actual
+    from app.negocio.formato import formatear_moneda
+
+    periodo = periodo_actual(conn)
+    obtener_repositorio(conn, "GastoOperativo").crear(Periodo=periodo, Concepto="Luz", Monto=1000, Origen="Manual")
+    obtener_repositorio(conn, "GastoOperativo").crear(Periodo=periodo, Concepto="Agua", Monto=500, Origen="Manual")
+    obtener_repositorio(conn, "GastoOperativo").crear(Periodo="2020-01", Concepto="Viejo", Monto=999, Origen="Manual")
+
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+
+    tabla = pantalla.tabla_widget
+    ocultas = [tabla.isRowHidden(f) for f in range(tabla.rowCount())]
+    periodos_filas = [tabla.item(f, 0).text() for f in range(tabla.rowCount())]
+    for oculta, per in zip(ocultas, periodos_filas):
+        assert oculta == (per != periodo)
+
+    etiquetas = [w for w in pantalla.findChildren(QLabel) if w.text() == formatear_moneda(1500)]
+    assert etiquetas, "no se encontró la etiqueta con el subtotal esperado"
+
+    campo_periodo_filtro = next(w for w in pantalla.findChildren(QLineEdit) if w.text() == periodo)
+    campo_periodo_filtro.setText("2020-01")
+    campo_periodo_filtro.editingFinished.emit()
+
+    etiquetas = [w for w in pantalla.findChildren(QLabel) if w.text() == formatear_moneda(999)]
+    assert etiquetas, "no se actualizó el subtotal al cambiar el período"
+
+
+def test_gasto_manual_puede_cambiar_a_importado_en_cualquier_momento(conn):
+    """Pedido de la clienta: un gasto cargado manualmente tiene que poder
+    pasar a origen Importado en cualquier momento, editándolo — no puede
+    quedar bloqueado por su propio conflicto (mismo Periodo+Concepto)."""
+    id_gasto = obtener_repositorio(conn, "GastoOperativo").crear(
+        Periodo="2026-09", Concepto="Luz", Monto=1000, Origen="Manual",
+    )
+    registro = obtener_repositorio(conn, "GastoOperativo").obtener(id_gasto)
+    valores = catalogos._resolver_conflicto_gasto(
+        None, conn, {"Periodo": "2026-09", "Concepto": "Luz", "Origen": "Importado"}, registro,
+    )
+    assert valores is not None
+    assert valores["Origen"] == "Importado"
+
+
 def test_pantalla_responsables_tiene_tres_campos_libres(qtbot, conn):
     pantalla = catalogos.pantalla_responsables(conn)
     qtbot.addWidget(pantalla)
