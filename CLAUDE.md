@@ -256,10 +256,11 @@ marco propio del `QScrollArea` de la solapa, ninguno de los dos
 controlable solo con QSS. Se corrigió ahí (afecta a todos los
 catálogos): `solapas.tabBar().setDrawBase(False)` +
 `scroll.setFrameShape(QFrame.Shape.NoFrame)`. Las pantallas con su
-propio `QTabWidget` armado a mano (Placas, Liquidación, Aumentos y
-descuentos, Grilla operativa, Novedades, Reservas, Pagos, Gestor de
-archivos, Lista de espera) no se tocaron todavía — si al revisarlas se
-ve el mismo defecto, aplicarles el mismo combo ahí.
+propio `QTabWidget` armado a mano (Placas, Aumentos y descuentos,
+Grilla operativa, Novedades, Reservas, Pagos, Gestor de archivos, Lista
+de espera) no se tocaron todavía — si al revisarlas se ve el mismo
+defecto, aplicarles el mismo combo ahí. Liquidación mensual ya lo tiene
+(ver su sección más abajo).
 
 Pedido explícito de la clienta (al revisar Consultorios): a partir de
 ahora, TODO catálogo que se revise de acá en adelante suma tres campos
@@ -671,6 +672,34 @@ sacaron de `estilos.py` (muertas, no las usaba nadie más) — si en algún
 momento hace falta un tercer nivel de énfasis de botón además de
 `botonPrimario`/`botonSecundario`, se define de nuevo ahí mismo en vez
 de reactivar las viejas.
+
+## Liquidación mensual (foco completo, línea de solapa)
+
+Al revisar esta pantalla contra la regla general de foco (ver más
+arriba) aparecieron dos huecos:
+- "Emisión de archivos": la cadena de `instalar_enter_avanza_foco` se
+  armaba con `[Período, Profesional, Estado, Calcular]` nada más —
+  faltaban los tres botones "Emitir...", así que un Tab desde
+  "Calcular" volvía directo a Período en vez de seguir bajando. Se
+  sumaron los tres al final de la lista, en el mismo orden visual
+  (Pendientes → Seleccionadas → Todas).
+- "Estado de cuenta" no tenía ningún `showEvent`/foco inicial armado.
+  Se agregó uno que enfoca "Profesional" al mostrarse la solapa — es el
+  único control interactivo de ese panel (el campo de saldo es de solo
+  lectura), así que no hace falta una cadena Enter/Tab completa, alcanza
+  con el foco inicial.
+
+De paso se sumó `self.pestanas.tabBar().setDrawBase(False)` en
+`ProcesoLiquidacion` (la línea tenue debajo de la barra de solapas que
+ya se había corregido en los catálogos genéricos — ver más arriba —
+pero seguía pendiente acá).
+
+Los cuatro botones de "Emisión de archivos" (`Calcular` + los tres
+`Emitir...`) quedan los cuatro en `botonSecundario`, sin ninguno
+resaltado — a diferencia de Oferta de consultorios, acá todavía no está
+definido si conviene subir alguno a `botonPrimario` (candidato natural:
+"Emitir liquidaciones pendientes", el caso de uso más habitual) — queda
+pendiente de que la clienta lo confirme.
 
 ## Metodología de trabajo
 

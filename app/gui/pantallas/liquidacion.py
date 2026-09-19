@@ -90,6 +90,7 @@ class ProcesoLiquidacion(QWidget):
         self.panel_estado_cuenta = _PanelEstadoCuentaLiquidaciones(conn)
         self.pestanas.addTab(self.panel_emision, "Emisión de archivos")
         self.pestanas.addTab(self.panel_estado_cuenta, "Estado de cuenta")
+        self.pestanas.tabBar().setDrawBase(False)
         layout.addWidget(self.pestanas, stretch=1)
 
     def actualizar(self) -> None:
@@ -189,7 +190,10 @@ class _PanelEmisionArchivos(QWidget):
 
         self.campo_periodo.setText(periodo_actual(self.conn))
         self._foco = instalar_enter_avanza_foco(
-            [self.campo_periodo, self.combo_profesional_filtro, self.combo_estado_filtro, self.boton_calcular],
+            [
+                self.campo_periodo, self.combo_profesional_filtro, self.combo_estado_filtro, self.boton_calcular,
+                boton_emitir_pendientes, boton_emitir_seleccionadas, boton_emitir_todas,
+            ],
             parent=self,
         )
 
@@ -357,6 +361,13 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         self.conn = conn
         self._armar_ui()
         self.actualizar()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Mismo motivo que en Emisión de archivos: al mostrarse la
+        solapa (recién ahí "pega" el foco) lo manda a Profesional, el
+        único control con el que se interactúa en este panel."""
+        super().showEvent(event)
+        self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
         layout_externo = QHBoxLayout(self)

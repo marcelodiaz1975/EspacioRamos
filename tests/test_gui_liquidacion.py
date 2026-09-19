@@ -268,6 +268,32 @@ def test_foco_inicial_queda_en_periodo(qtbot, conn):
     qtbot.waitUntil(lambda: pantalla.panel_emision.campo_periodo.hasFocus())
 
 
+def test_cadena_de_foco_de_emision_incluye_los_tres_botones_de_emitir(qtbot, conn):
+    from PySide6.QtWidgets import QPushButton
+
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_emision
+    botones_emitir = [
+        b for b in panel.findChildren(QPushButton) if b.text().startswith("Emitir ")
+    ]
+    assert len(botones_emitir) == 3
+    orden = panel._foco._orden
+    assert orden == [
+        panel.campo_periodo, panel.combo_profesional_filtro, panel.combo_estado_filtro, panel.boton_calcular,
+        *botones_emitir,
+    ]
+
+
+def test_foco_inicial_de_estado_de_cuenta_queda_en_profesional(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.pestanas.setCurrentWidget(pantalla.panel_estado_cuenta)
+    qtbot.waitUntil(lambda: pantalla.panel_estado_cuenta.combo_profesional.hasFocus())
+
+
 def test_emitir_sin_carpeta_base_no_falla_ni_emite(qtbot, conn):
     _crear_profesional(conn, id_codigo="R1")
     pantalla = ProcesoLiquidacion(conn)
