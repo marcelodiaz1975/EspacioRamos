@@ -1,6 +1,6 @@
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QMessageBox, QScrollArea, QTabWidget
+from PySide6.QtCore import QDate, QLocale, Qt
+from PySide6.QtWidgets import QDateEdit, QDialog, QMessageBox, QScrollArea, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -276,3 +276,55 @@ def test_pantalla_crud_compacto_mantiene_el_layout_viejo(qtbot, conn):
     assert pantalla.findChildren(QTabWidget) == []
     assert pantalla.campo_buscar is None
     assert pantalla.boton_editar.objectName() == "botonSecundario"
+
+
+def _campos_fecha_especial():
+    return [Campo("Fecha", "Fecha", tipo="fecha"), Campo("Descripcion", "Descripción")]
+
+
+def test_campo_fecha_widget_es_qdateedit_con_dia_abreviado_en_espanol(qtbot, conn):
+    dialogo = _DialogoRegistro(conn, _campos_fecha_especial(), "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    entrada = dialogo._entradas["Fecha"]
+    assert isinstance(entrada, QDateEdit)
+    assert entrada.displayFormat() == "ddd dd-MM-yyyy"
+    assert entrada.locale().language() == QLocale.Language.Spanish
+    assert entrada.calendarPopup() is True
+
+
+def test_campo_fecha_precarga_el_valor_guardado(qtbot, conn):
+    conn.execute("INSERT INTO FechasEspeciales (Fecha, Descripcion) VALUES ('2026-12-25', 'Navidad')")
+    conn.commit()
+    registro = conn.execute("SELECT * FROM FechasEspeciales").fetchone()
+    dialogo = _DialogoRegistro(conn, _campos_fecha_especial(), "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    assert dialogo._entradas["Fecha"].date() == QDate(2026, 12, 25)
+
+
+def test_campo_fecha_guarda_como_aaaa_mm_dd(qtbot, conn):
+    dialogo = _DialogoRegistro(conn, _campos_fecha_especial(), "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    dialogo._entradas["Fecha"].setDate(QDate(2026, 9, 7))
+    assert dialogo.valores()["Fecha"] == "2026-09-07"
+
+
+def test_campo_fecha_se_muestra_en_tabla_con_dia_abreviado(qtbot, conn):
+    conn.execute("INSERT INTO FechasEspeciales (Fecha, Descripcion) VALUES ('2026-09-07', 'Feriado de prueba')")
+    conn.commit()
+    pantalla = PantallaCRUD(conn, "FechasEspeciales", "Fechas especiales", _campos_fecha_especial())
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla_widget.item(0, 0).text() == "lun 07-09-2026"
+
+
+def test_campo_fecha_ordena_cronologicamente_no_por_texto_mostrado(qtbot, conn):
+    """"vie 02-01-2026" y "lun 01-06-2026" en orden alfabético de texto
+    quedarían "lun..." antes que "vie..." aunque enero es anterior a
+    junio — la columna tiene que ordenar por el AAAA-MM-DD real."""
+    conn.execute("INSERT INTO FechasEspeciales (Fecha, Descripcion) VALUES ('2026-06-01', 'Junio')")
+    conn.execute("INSERT INTO FechasEspeciales (Fecha, Descripcion) VALUES ('2026-01-02', 'Enero')")
+    conn.commit()
+    pantalla = PantallaCRUD(conn, "FechasEspeciales", "Fechas especiales", _campos_fecha_especial())
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_widget.horizontalHeader().sectionClicked.emit(0)
+    assert pantalla.tabla_widget.item(0, 1).text() == "Enero"
+    assert pantalla.tabla_widget.item(1, 1).text() == "Junio"

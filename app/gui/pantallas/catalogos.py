@@ -24,10 +24,8 @@ from app.negocio.listas_editables import opciones_lista, reordenar_al_guardar
 from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
 from app.negocio.validaciones import (
     FORMATO_EMAIL,
-    FORMATO_FECHA,
     FORMATO_PERIODO,
     es_email_valido,
-    es_fecha_valida,
     es_periodo_valido,
 )
 from app.repositorio.registro import obtener_repositorio
@@ -404,12 +402,10 @@ def pantalla_placas(conn: sqlite3.Connection) -> PantallaCRUD:
 
 def pantalla_fechas_especiales(conn: sqlite3.Connection) -> PantallaCRUD:
     campos = [
-        Campo(
-            "Fecha", "Fecha (AAAA-MM-DD)", requerido=True,
-            validador=es_fecha_valida, formato_esperado=FORMATO_FECHA,
-        ),
+        Campo("Fecha", "Fecha", tipo="fecha"),
         Campo("Descripcion", "Descripción"),
         Campo("Tipo", "Tipo", tipo="combo", opciones=opciones_lista("TipoFechaEspecial")),
         Campo("Activo", "Activo", tipo="booleano"),
+        *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "FechasEspeciales", "Fechas especiales", campos)

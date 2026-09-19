@@ -63,7 +63,7 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
     ],
     "Llave": ["Tipo", "ValorDepositoActual"],
     "Placa": ["Edificio", "Unidad", "PosicionTablero", "Profesional", "NombreGrabado", "EsPersonalizada"],
-    "FechasEspeciales": ["Fecha", "Descripcion", "Tipo"],
+    "FechasEspeciales": ["Fecha", "Descripcion", "Tipo", "CampoLibre1", "CampoLibre2", "CampoLibre3"],
     "Responsable": [
         "Nombre", "Celular", "Email", "Rol", "EsContactoPrincipal", "AptoPDF",
         "CampoLibre1", "CampoLibre2", "CampoLibre3",

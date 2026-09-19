@@ -448,7 +448,10 @@ CREATE TABLE IF NOT EXISTS FechasEspeciales (
     Fecha TEXT NOT NULL,
     Descripcion TEXT,
     Tipo TEXT,
-    Activo INTEGER NOT NULL DEFAULT 1
+    Activo INTEGER NOT NULL DEFAULT 1,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.18 EsquemaDescuentos -------------------------------------------------------------------

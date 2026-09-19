@@ -248,8 +248,8 @@ libres (`CampoLibre1/2/3`, texto opcional, sin validación) al final de
 su lista de `Campo` — no solo cuando lo pide puntualmente. Ya aplicado a
 Localidades, Edificios, Unidades, Consultorios, Responsables, Tipos de
 licencia, Condiciones y normas, Detalles complementarios (Propuesta),
-Profesiones y Gastos operativos; falta sumarlo al resto a medida que se
-van revisando. Cada uno
+Profesiones, Gastos operativos y Fechas especiales; falta sumarlo al
+resto a medida que se van revisando. Cada uno
 necesita el campo en `schema.sql`, la entrada correspondiente en
 `_COLUMNAS_NUEVAS` de `migraciones.py` (para las bases ya creadas) y, si
 el catálogo tiene plantilla de importación Excel, las tres columnas al
@@ -336,6 +336,26 @@ pantalla arma su propia cadena que combina estos tres botones con los
 suyos") y arma la suya propia con `instalar_enter_avanza_foco` pisando
 `pantalla._foco`, incluyendo el campo de período en el lugar que le
 corresponde.
+
+## Fechas especiales (Fecha con selector de calendario)
+
+Al revisar este catálogo, el campo Fecha pasó de texto libre validado
+contra AAAA-MM-DD a un selector de calendario real, con el mismo formato
+"día de la semana abreviado" que Registro de ausencias (ej.
+"lun 07-09-2026") — pedido de la clienta para que se vea igual en toda
+la pantalla, listado incluido. Esto generalizó ese formato desde
+`novedades.py` a `crud_generico.py` como `Campo(tipo="fecha")` (ver
+"Selectores y fecha" más arriba): cualquier catálogo genérico puede
+sumarlo de la misma forma, aunque por ahora solo lo usa esta pantalla —
+el resto de los campos de fecha en texto libre de otros catálogos sigue
+como estaba hasta que se revisen. La tabla sigue guardando AAAA-MM-DD
+en la base (ningún PDF ni cálculo de negocio se tocó); el orden por
+click en el encabezado ordena por ese valor real, no por el texto con
+el día de la semana (ese orden alfabético no coincide con el
+cronológico).
+
+Suma también los tres campos libres, como el resto de los catálogos
+revisados desde Consultorios en adelante.
 
 ## Listas editables (agregar valores, no tipos)
 
@@ -527,7 +547,26 @@ el ID interno de la tabla correspondiente, Localidad incluida).
   usa además el día de la semana abreviado (`ddd dd-MM-yyyy` con
   `QLocale(QLocale.Language.Spanish)`, ej. "lun 07-09-2026") en los
   campos Desde/Hasta y en las columnas Desde/Hasta de sus tablas — pedido
-  puntual de esa pantalla, no aplicado (todavía) al resto.
+  puntual de esa pantalla en su momento, generalizado después (ver abajo).
+- `app/gui/crud_generico.py` (`PantallaCRUD`/`Campo`) suma `tipo="fecha"`
+  (pedido de la clienta al revisar Fechas especiales): en vez del texto
+  libre validado contra AAAA-MM-DD que usaban antes los catálogos
+  genéricos, el diálogo Nuevo/Editar arma un `QDateEdit` con el mismo
+  `ddd dd-MM-yyyy` + `QLocale` español de Registro de ausencias, y la
+  tabla del catálogo muestra ese mismo formato en la celda — coherente
+  con el resto del sistema, ya no hace falta un `validador`/
+  `formato_esperado` para este tipo de campo (`QDateEdit` no admite un
+  valor mal formado). El AAAA-MM-DD sigue siendo lo que se guarda en la
+  base (`entrada.date().toString("yyyy-MM-dd")` al guardar) — ningún PDF
+  ni cálculo de negocio que ya leía esa columna como texto tuvo que
+  tocarse. El orden por click en el encabezado (`OrdenTabla`) ordena por
+  ese AAAA-MM-DD real, no por el texto mostrado: alfabéticamente "lun..."
+  queda antes que "vie..." aunque la fecha "vie" sea cronológicamente
+  anterior, así que había que evitar que la columna se ordenara como
+  string. Primer catálogo genérico en usarlo: Fechas especiales
+  (`Campo("Fecha", "Fecha", tipo="fecha")`, sin más parámetros) — el
+  resto de los catálogos con un campo de fecha en texto libre sigue como
+  estaba hasta que se revisen y se les aplique el mismo tipo.
 
 ## Metodología de trabajo
 

@@ -11,10 +11,11 @@ import weakref
 from dataclasses import dataclass
 from typing import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, QLocale, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDateEdit,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -39,6 +40,12 @@ from app.repositorio.registro import obtener_repositorio
 
 _ID_REGISTRO = Qt.ItemDataRole.UserRole
 _ANCHO_CAMPO = 240  # ancho compartido por el panel izquierdo (buscar + botones), mismo criterio que otras pantallas
+_LOCALE_ES = QLocale(QLocale.Language.Spanish)
+# "lun 07-09-2026" — mismo formato que los campos Desde/Hasta de Registro de
+# ausencias (app/gui/pantallas/novedades.py), generalizado acá para
+# tipo="fecha" en vez de duplicarlo pantalla por pantalla (pedido de la
+# clienta al revisar Fechas especiales).
+_FORMATO_FECHA_DIA = "ddd dd-MM-yyyy"
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -62,6 +69,17 @@ def _normalizar_busqueda(texto: str) -> str:
     return _sin_acentos(texto).casefold()
 
 
+def _fmt_fecha_dia(fecha_iso: str | None) -> str:
+    """"lun 07-09-2026" a partir del AAAA-MM-DD guardado — ver
+    `_FORMATO_FECHA_DIA`. Si el valor no es una fecha válida (no debería
+    pasar, viene siempre de un QDateEdit) se muestra tal cual en vez de
+    romper."""
+    if not fecha_iso:
+        return ""
+    fecha_qt = QDate.fromString(fecha_iso, "yyyy-MM-dd")
+    return _LOCALE_ES.toString(fecha_qt, _FORMATO_FECHA_DIA) if fecha_qt.isValid() else fecha_iso
+
+
 def _referencia_debil(funcion):
     """Envuelve un callback en una referencia débil (mismo motivo que
     OrdenTabla, ver app/gui/widgets/orden_tabla.py): `al_crear`/
@@ -83,7 +101,7 @@ def _referencia_debil(funcion):
 class Campo:
     nombre: str
     etiqueta: str
-    tipo: str = "texto"  # "texto" | "texto_largo" | "numero" | "booleano" | "combo"
+    tipo: str = "texto"  # "texto" | "texto_largo" | "numero" | "booleano" | "combo" | "fecha"
     opciones: Callable[[sqlite3.Connection], list[tuple]] | None = None
     requerido: bool = False
     combo_editable: bool = False
@@ -375,6 +393,11 @@ class PantallaCRUD(QWidget):
                 return valor if valor is not None else float("-inf")
             if campo.tipo == "booleano":
                 return bool(valor)
+            if campo.tipo == "fecha":
+                # Ordena por el AAAA-MM-DD guardado, no por el texto mostrado
+                # ("lun 07-09-2026"): ese orden lexicográfico no coincide con
+                # el cronológico (empieza por el día de la semana).
+                return valor or ""
             return self._texto_celda(registro, campo)
 
         return clave
@@ -383,6 +406,8 @@ class PantallaCRUD(QWidget):
         valor = registro[campo.nombre]
         if campo.tipo == "booleano":
             return "Sí" if valor else "No"
+        if campo.tipo == "fecha":
+            return _fmt_fecha_dia(valor)
         if campo.tipo == "combo" and campo.opciones:
             opciones = dict(campo.opciones(self.conn))
             return opciones.get(valor, "" if valor is None else str(valor))
@@ -530,6 +555,14 @@ class _DialogoRegistro(QDialog):
             entrada.setPlainText("" if valor is None else str(valor))
             entrada.setFixedHeight(80)
             return entrada
+        if campo.tipo == "fecha":
+            entrada = QDateEdit()
+            entrada.setDisplayFormat(_FORMATO_FECHA_DIA)
+            entrada.setLocale(_LOCALE_ES)
+            entrada.setCalendarPopup(True)
+            fecha_qt = QDate.fromString(valor, "yyyy-MM-dd") if valor else QDate()
+            entrada.setDate(fecha_qt if fecha_qt.isValid() else QDate.currentDate())
+            return entrada
         entrada = QLineEdit()
         if valor is not None:
             entrada.setText(str(valor))
@@ -588,6 +621,8 @@ class _DialogoRegistro(QDialog):
             elif campo.tipo == "numero":
                 texto = entrada.text().strip()
                 resultado[campo.nombre] = float(texto) if texto else None
+            elif campo.tipo == "fecha":
+                resultado[campo.nombre] = entrada.date().toString("yyyy-MM-dd")
             else:
                 texto = entrada.text().strip()
                 if texto and campo.normalizar:
