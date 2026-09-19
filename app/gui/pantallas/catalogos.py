@@ -217,6 +217,7 @@ def pantalla_profesiones(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("TieneMultiplesTratamientos", "Tiene múltiples tratamientos", tipo="booleano"),
         Campo("OpcionesTratamientoMasculino", "Opciones de tratamiento (masculino, separadas por coma)"),
         Campo("OpcionesTratamientoFemenino", "Opciones de tratamiento (femenino, separadas por coma)"),
+        *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "Profesion", "Profesiones", campos)
 

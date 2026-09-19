@@ -97,7 +97,10 @@ CREATE TABLE IF NOT EXISTS Profesion (
     TratamientoDefaultFemenino TEXT,
     TieneMultiplesTratamientos INTEGER NOT NULL DEFAULT 0,
     OpcionesTratamientoMasculino TEXT,
-    OpcionesTratamientoFemenino TEXT
+    OpcionesTratamientoFemenino TEXT,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.4 Profesional -------------------------------------------------------------

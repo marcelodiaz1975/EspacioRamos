@@ -61,6 +61,9 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("MensajePredefinido", "CampoLibre2", "TEXT"),
     ("MensajePredefinido", "CampoLibre3", "TEXT"),
     ("MensajePredefinido", "IdLocalidad", "INTEGER REFERENCES Localidad(IdLocalidad)"),
+    ("Profesion", "CampoLibre1", "TEXT"),
+    ("Profesion", "CampoLibre2", "TEXT"),
+    ("Profesion", "CampoLibre3", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja
