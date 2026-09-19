@@ -47,8 +47,8 @@ def test_pantalla_tiene_tres_campos_libres(qtbot, conn):
 
 def test_orden_del_panel_izquierdo_categoria_dirigido_a_copiar_nuevo(qtbot, conn):
     """Pedido de la clienta: "Copiar mensaje" arriba de "Nuevo" (como
-    acción principal de la pantalla), y "Dirigido a" arriba de "Copiar
-    mensaje"."""
+    acción principal de la pantalla), y "Dirigido a" (+ los cuatro
+    selectores de contexto) arriba de "Copiar mensaje"."""
     pantalla = PantallaMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     boton_copiar = next(
@@ -57,9 +57,24 @@ def test_orden_del_panel_izquierdo_categoria_dirigido_a_copiar_nuevo(qtbot, conn
     padre = pantalla.combo_filtro.parentWidget()
     layout = padre.layout()
     indices = {layout.itemAt(i).widget(): i for i in range(layout.count()) if layout.itemAt(i).widget() is not None}
-    assert indices[pantalla.combo_filtro] < indices[pantalla.combo_dirigido_a] < indices[boton_copiar]
+    assert indices[pantalla.combo_filtro] < indices[pantalla.combo_dirigido_a]
+    assert indices[pantalla.combo_dirigido_a] < indices[pantalla.combo_localidad_contexto]
+    assert indices[pantalla.combo_localidad_contexto] < indices[pantalla.combo_edificio_contexto]
+    assert indices[pantalla.combo_edificio_contexto] < indices[pantalla.combo_unidad_contexto]
+    assert indices[pantalla.combo_unidad_contexto] < indices[pantalla.combo_consultorio_contexto]
+    assert indices[pantalla.combo_consultorio_contexto] < indices[boton_copiar]
     assert boton_copiar.objectName() == "botonPrimario"
     assert pantalla.crud.boton_nuevo.objectName() == "botonSecundario"
+
+
+def test_sin_linea_divisoria_entre_categoria_y_dirigido_a(qtbot, conn):
+    from PySide6.QtWidgets import QFrame
+
+    pantalla = PantallaMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    padre = pantalla.combo_filtro.parentWidget()
+    lineas = [w for w in padre.findChildren(QFrame) if w.frameShape() == QFrame.Shape.HLine]
+    assert lineas == []
 
 
 def test_pantalla_tiene_campo_localidad_antes_de_edificio(qtbot, conn):
@@ -87,18 +102,71 @@ def test_edificio_unidad_consultorio_admiten_dejarlos_sin_seleccionar(qtbot, con
     """Si Localidad/Edificio/Unidad/Consultorio quedan todos sin
     seleccionar, el mensaje es general (pedido de la clienta) — para eso
     estos combos, a diferencia de los de catalogos.py, tienen que poder
-    quedar en blanco."""
+    quedar en blanco. La etiqueta de ese valor en blanco es "En general"
+    en los cuatro, tanto acá como en los selectores de contexto."""
     _crear_consultorio(conn)
     pantalla = PantallaMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     dialogo = _DialogoRegistro(conn, pantalla.crud.campos, "Nuevo registro")
     qtbot.addWidget(dialogo)
-    assert dialogo._entradas["IdEdificio"].itemData(0) is None
-    assert dialogo._entradas["IdUnidad"].itemData(0) is None
-    assert dialogo._entradas["IdConsultorio"].itemData(0) is None
+    for campo in ("IdLocalidad", "IdEdificio", "IdUnidad", "IdConsultorio"):
+        combo = dialogo._entradas[campo]
+        assert combo.itemData(0) is None
+        assert combo.itemText(0) == "En general"
     assert dialogo.valores()["IdEdificio"] is None
     assert dialogo.valores()["IdUnidad"] is None
     assert dialogo.valores()["IdConsultorio"] is None
+
+
+def test_selectores_de_contexto_arrancan_en_general(qtbot, conn):
+    pantalla = PantallaMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    for combo in (
+        pantalla.combo_localidad_contexto, pantalla.combo_edificio_contexto,
+        pantalla.combo_unidad_contexto, pantalla.combo_consultorio_contexto,
+    ):
+        assert combo.currentText() == "En general"
+        assert combo.currentData() is None
+
+
+def test_contexto_edificio_pisa_al_vinculo_del_mensaje_general(qtbot, conn):
+    """Un mensaje general (sin edificio propio) se puede previsualizar
+    como si fuera para un edificio puntual, eligiéndolo en el selector de
+    contexto — sin tener que editar el mensaje."""
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Norte")
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Sur")
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Avisos", Descripcion="Corte de luz", Mensaje="Se corta la luz en {edificio}.", Activo=1,
+    )
+    pantalla = PantallaMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+
+    fila = next(
+        f for f in range(pantalla.crud.tabla_widget.rowCount())
+        if pantalla.crud.tabla_widget.item(f, 1).text() == "Corte de luz"
+    )
+    pantalla.crud.tabla_widget.selectRow(fila)
+    assert pantalla.texto_vista_previa.toPlainText() == "Se corta la luz en ."
+
+    indice = pantalla.combo_edificio_contexto.findData(id_edificio)
+    pantalla.combo_edificio_contexto.setCurrentIndex(indice)
+    assert pantalla.texto_vista_previa.toPlainText() == "Se corta la luz en Torre Sur."
+
+
+def test_contexto_en_general_no_pisa_el_vinculo_propio_del_mensaje(qtbot, conn):
+    id_consultorio = _crear_consultorio(conn)
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Avisos", Descripcion="Aviso puntual", IdConsultorio=id_consultorio,
+        Mensaje="Te esperamos en {edificio}.", Activo=1,
+    )
+    pantalla = PantallaMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    fila = next(
+        f for f in range(pantalla.crud.tabla_widget.rowCount())
+        if pantalla.crud.tabla_widget.item(f, 1).text() == "Aviso puntual"
+    )
+    pantalla.crud.tabla_widget.selectRow(fila)
+    assert pantalla.texto_vista_previa.toPlainText() == "Te esperamos en Torre Norte."
 
 
 def test_dirigido_a_por_defecto_es_nadie_en_particular(qtbot, conn):

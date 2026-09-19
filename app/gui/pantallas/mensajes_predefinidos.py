@@ -8,33 +8,49 @@ esta pantalla agrupado ARRIBA de Nuevo/Editar/Eliminar
 (`panel_extra_superior_izquierda`, pedido de la clienta al revisar esta
 pantalla), de arriba abajo: el combo "Categoría" (filtro que solo afecta
 la visualización, mismo criterio que el resto del sistema), "Dirigido a"
-(selector de profesional para la vista previa, ver más abajo) y el botón
-"Copiar mensaje" (`botonPrimario` — es la acción más importante de esta
-pantalla, por eso "Nuevo" pasa a `botonSecundario` acá vía
-`nuevo_secundario=True`). Debajo de toda la pantalla queda la vista
-previa (de solo lectura) que sustituye {edificio}/{unidad}/{consultorio}
-por el vínculo elegido en el mensaje y {apodo} por el profesional
-elegido en "Dirigido a" — "Copiar mensaje" la manda al portapapeles.
+más los cuatro selectores de contexto Localidad/Edificio/Unidad/
+Consultorio (ver más abajo) y el botón "Copiar mensaje" (`botonPrimario`
+— es la acción más importante de esta pantalla, por eso "Nuevo" pasa a
+`botonSecundario` acá vía `nuevo_secundario=True`). Debajo de toda la
+pantalla queda la vista previa (de solo lectura) que sustituye
+{edificio}/{unidad}/{consultorio} y {apodo} según el contexto elegido —
+"Copiar mensaje" la manda al portapapeles.
 
 Categoría es un catálogo abierto (mismo criterio que Responsable.Rol):
 sugiere los valores de Listas editables (TipoLista="CategoriaMensaje")
 pero admite tipear uno nuevo ahí mismo sin tener que darlo de alta antes
 en ese catálogo.
 
-Localidad/Edificio/Unidad/Consultorio son cuatro campos independientes
-(no encadenados en cascada): si los cuatro quedan sin seleccionar, el
-mensaje se entiende general (pedido de la clienta) — por eso acá, a
-diferencia de `catalogos.pantalla_unidades`/`pantalla_consultorios`
-(donde Edificio/Unidad son obligatorios), los combos de Edificio/Unidad/
-Consultorio necesitan su propia versión con una opción en blanco al
-principio (`_opciones_edificio_o_ninguno` y análogas) — las de
-`catalogos.py` no la tienen porque ahí esos campos son obligatorios."""
+Localidad/Edificio/Unidad/Consultorio del MENSAJE (en el cuadro de
+diálogo) son cuatro campos independientes (no encadenados en cascada):
+si los cuatro quedan sin seleccionar, el mensaje se entiende general
+(pedido de la clienta) — "En general" es la etiqueta de ese valor en
+blanco en los cuatro combos, tanto acá como en los selectores de
+contexto de abajo. Por eso, a diferencia de
+`catalogos.pantalla_unidades`/`pantalla_consultorios` (donde Edificio/
+Unidad son obligatorios), los combos de Edificio/Unidad/Consultorio acá
+necesitan su propia versión con esa opción en blanco al principio
+(`_opciones_edificio_o_general` y análogas) — las de `catalogos.py` no
+la tienen porque ahí esos campos son obligatorios.
+
+Selectores de contexto (Dirigido a + Localidad/Edificio/Unidad/
+Consultorio, debajo de "Categoría"): NO son parte del registro
+guardado, son solo contexto para la Vista previa del mensaje
+seleccionado en la tabla. Todos arrancan en su valor "general" (Nadie en
+particular / En general) — cuando quedan así, la vista previa usa el
+vínculo propio del mensaje tal cual está guardado; elegir algo puntual
+ahí lo pisa campo por campo (ver `_actualizar_vista_previa`), para poder
+previsualizar, por ejemplo, un mensaje general como si fuera para un
+edificio puntual sin tener que editar el mensaje. Localidad no tiene
+ninguna variable propia todavía ({edificio}/{unidad}/{consultorio}/
+{apodo} son las únicas) — queda ahí por paridad con el cuadro de
+diálogo, listo para el día que haga falta un {localidad}."""
 from __future__ import annotations
 
 import sqlite3
 
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QComboBox, QFrame, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.pantallas.catalogos import _opciones_consultorio, _opciones_edificio, _opciones_localidad, _opciones_unidad
@@ -53,60 +69,63 @@ def _titulo_campo(texto: str) -> QLabel:
     return etiqueta
 
 
-def _linea_divisoria() -> QFrame:
-    linea = QFrame()
-    linea.setFrameShape(QFrame.Shape.HLine)
-    linea.setFrameShadow(QFrame.Shadow.Sunken)
-    return linea
+def _opciones_localidad_o_general(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    return [(None, "En general")] + _opciones_localidad(conn)[1:]
 
 
-def _opciones_edificio_o_ninguno(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
-    return [(None, "Sin edificio")] + _opciones_edificio(conn)
+def _opciones_edificio_o_general(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    return [(None, "En general")] + _opciones_edificio(conn)
 
 
-def _opciones_unidad_o_ninguna(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
-    return [(None, "Sin unidad")] + _opciones_unidad(conn)
+def _opciones_unidad_o_general(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    return [(None, "En general")] + _opciones_unidad(conn)
 
 
-def _opciones_consultorio_o_ninguno(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
-    return [(None, "Sin consultorio")] + _opciones_consultorio(conn)
+def _opciones_consultorio_o_general(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    return [(None, "En general")] + _opciones_consultorio(conn)
 
 
 def _campos_mensaje_predefinido(conn: sqlite3.Connection) -> list[Campo]:
     return [
         Campo("Categoria", "Categoría", tipo="combo", opciones=opciones_lista("CategoriaMensaje"), combo_editable=True),
         Campo("Descripcion", "Descripción"),
-        Campo("IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad),
-        Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio_o_ninguno),
-        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad_o_ninguna),
-        Campo("IdConsultorio", "Consultorio", tipo="combo", opciones=_opciones_consultorio_o_ninguno),
+        Campo("IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad_o_general),
+        Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio_o_general),
+        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad_o_general),
+        Campo("IdConsultorio", "Consultorio", tipo="combo", opciones=_opciones_consultorio_o_general),
         Campo("Mensaje", "Mensaje", tipo="texto_largo"),
         Campo("Activo", "Activo", tipo="booleano"),
         *campos_libres(conn),
     ]
 
 
-def _variables_vinculo(conn: sqlite3.Connection, mensaje: sqlite3.Row) -> dict[str, str]:
+def _variables_ubicacion(
+    conn: sqlite3.Connection, id_edificio: int | None, id_unidad: int | None, id_consultorio: int | None,
+) -> dict[str, str]:
+    """El más específico de los tres gana — usado tanto con el vínculo
+    propio del mensaje como, en la vista previa, con los valores que
+    hayan quedado tras aplicar las selecciones de contexto (que pisan al
+    vínculo del mensaje campo por campo, ver `_actualizar_vista_previa`)."""
     variables = {"edificio": "", "unidad": "", "consultorio": ""}
-    if mensaje["IdConsultorio"] is not None:
+    if id_consultorio is not None:
         fila = conn.execute(
             "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS Edificio "
             "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad "
             "JOIN Edificio e ON e.IdEdificio = u.IdEdificio WHERE c.IdConsultorio = ?",
-            (mensaje["IdConsultorio"],),
+            (id_consultorio,),
         ).fetchone()
         if fila:
             variables = {"edificio": fila["Edificio"], "unidad": fila["Departamento"], "consultorio": str(fila["NumeroConsultorio"])}
-    elif mensaje["IdUnidad"] is not None:
+    elif id_unidad is not None:
         fila = conn.execute(
             "SELECT u.Departamento, e.Nombre AS Edificio FROM Unidad u "
             "JOIN Edificio e ON e.IdEdificio = u.IdEdificio WHERE u.IdUnidad = ?",
-            (mensaje["IdUnidad"],),
+            (id_unidad,),
         ).fetchone()
         if fila:
             variables = {"edificio": fila["Edificio"], "unidad": fila["Departamento"], "consultorio": ""}
-    elif mensaje["IdEdificio"] is not None:
-        fila = conn.execute("SELECT Nombre FROM Edificio WHERE IdEdificio = ?", (mensaje["IdEdificio"],)).fetchone()
+    elif id_edificio is not None:
+        fila = conn.execute("SELECT Nombre FROM Edificio WHERE IdEdificio = ?", (id_edificio,)).fetchone()
         if fila:
             variables = {"edificio": fila["Nombre"], "unidad": "", "consultorio": ""}
     return variables
@@ -130,7 +149,6 @@ class PantallaMensajesPredefinidos(QWidget):
         self.combo_filtro.currentIndexChanged.connect(self._aplicar_filtro)
         layout_superior.addWidget(self.combo_filtro)
 
-        layout_superior.addWidget(_linea_divisoria())
         layout_superior.addWidget(_titulo_campo("Dirigido a"))
         self.combo_dirigido_a = QComboBox()
         self.combo_dirigido_a.addItem("Nadie en particular", None)
@@ -139,6 +157,34 @@ class PantallaMensajesPredefinidos(QWidget):
         habilitar_busqueda_profesional(self.combo_dirigido_a)
         self.combo_dirigido_a.currentIndexChanged.connect(self._actualizar_vista_previa)
         layout_superior.addWidget(self.combo_dirigido_a)
+
+        layout_superior.addWidget(_titulo_campo("Localidad"))
+        self.combo_localidad_contexto = QComboBox()
+        for id_localidad, etiqueta in _opciones_localidad_o_general(self.conn):
+            self.combo_localidad_contexto.addItem(etiqueta, id_localidad)
+        self.combo_localidad_contexto.currentIndexChanged.connect(self._actualizar_vista_previa)
+        layout_superior.addWidget(self.combo_localidad_contexto)
+
+        layout_superior.addWidget(_titulo_campo("Edificio"))
+        self.combo_edificio_contexto = QComboBox()
+        for id_edificio, etiqueta in _opciones_edificio_o_general(self.conn):
+            self.combo_edificio_contexto.addItem(etiqueta, id_edificio)
+        self.combo_edificio_contexto.currentIndexChanged.connect(self._actualizar_vista_previa)
+        layout_superior.addWidget(self.combo_edificio_contexto)
+
+        layout_superior.addWidget(_titulo_campo("Unidad"))
+        self.combo_unidad_contexto = QComboBox()
+        for id_unidad, etiqueta in _opciones_unidad_o_general(self.conn):
+            self.combo_unidad_contexto.addItem(etiqueta, id_unidad)
+        self.combo_unidad_contexto.currentIndexChanged.connect(self._actualizar_vista_previa)
+        layout_superior.addWidget(self.combo_unidad_contexto)
+
+        layout_superior.addWidget(_titulo_campo("Consultorio"))
+        self.combo_consultorio_contexto = QComboBox()
+        for id_consultorio, etiqueta in _opciones_consultorio_o_general(self.conn):
+            self.combo_consultorio_contexto.addItem(etiqueta, id_consultorio)
+        self.combo_consultorio_contexto.currentIndexChanged.connect(self._actualizar_vista_previa)
+        layout_superior.addWidget(self.combo_consultorio_contexto)
 
         boton_copiar = QPushButton("Copiar mensaje")
         boton_copiar.setObjectName("botonPrimario")
@@ -202,7 +248,16 @@ class PantallaMensajesPredefinidos(QWidget):
         if mensaje is None:
             self.texto_vista_previa.clear()
             return
-        variables = _variables_vinculo(self.conn, mensaje)
+        id_edificio = self.combo_edificio_contexto.currentData()
+        if id_edificio is None:
+            id_edificio = mensaje["IdEdificio"]
+        id_unidad = self.combo_unidad_contexto.currentData()
+        if id_unidad is None:
+            id_unidad = mensaje["IdUnidad"]
+        id_consultorio = self.combo_consultorio_contexto.currentData()
+        if id_consultorio is None:
+            id_consultorio = mensaje["IdConsultorio"]
+        variables = _variables_ubicacion(self.conn, id_edificio, id_unidad, id_consultorio)
         variables["apodo"] = self._apodo_dirigido_a()
         self.texto_vista_previa.setPlainText(sustituir_variables(mensaje["Mensaje"] or "", variables))
 

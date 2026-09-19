@@ -176,40 +176,71 @@ según lo que tenga más sentido mostrar primero, no hay una regla única.
 Pasó de `compacto=True` (filtro de categoría en una fila propia arriba
 de la tabla) al formato solapa estándar al revisar esta pantalla, con
 todo lo propio agrupado en un solo `panel_extra_superior_izquierda`
-(arriba de Nuevo/Editar/Eliminar), de arriba abajo: "Categoría" (combo,
-filtro que solo afecta la visualización, oculta filas igual que antes),
-"Dirigido a" (ver abajo) y el botón "Copiar mensaje" — pedido explícito
-de la clienta sobre el orden ("Copiar mensaje" arriba de "Nuevo", y
-"Dirigido a" arriba de "Copiar mensaje"). "Copiar mensaje" es
-`botonPrimario` acá (es la acción más importante de esta pantalla), así
-que "Nuevo" pasa a `botonSecundario` vía el parámetro nuevo
-`nuevo_secundario=True` de `PantallaCRUD` (pinta "Nuevo" en secundario
-en vez de primario, para cuando otra acción del panel es más importante
-que dar de alta un registro).
+(arriba de Nuevo/Editar/Eliminar, sin línea divisoria entre secciones —
+se probó una entre Categoría y Dirigido a y la clienta la sacó), de
+arriba abajo: "Categoría" (combo, filtro que solo afecta la
+visualización, oculta filas igual que antes), "Dirigido a" + los cuatro
+selectores de contexto Localidad/Edificio/Unidad/Consultorio (ver abajo)
+y el botón "Copiar mensaje" — pedido explícito de la clienta sobre el
+orden ("Copiar mensaje" arriba de "Nuevo", "Dirigido a" arriba de
+"Copiar mensaje", y los cuatro selectores de contexto después de
+"Dirigido a"). "Copiar mensaje" es `botonPrimario` acá (es la acción más
+importante de esta pantalla), así que "Nuevo" pasa a `botonSecundario`
+vía el parámetro nuevo `nuevo_secundario=True` de `PantallaCRUD` (pinta
+"Nuevo" en secundario en vez de primario, para cuando otra acción del
+panel es más importante que dar de alta un registro).
 
 Categoría es un catálogo abierto (mismo criterio que Responsable.Rol):
 sugiere los valores de Listas editables (`TipoLista="CategoriaMensaje"`)
 pero admite tipear uno nuevo ahí mismo, sin tener que darlo de alta
 primero en ese catálogo.
 
-Localidad/Edificio/Unidad/Consultorio (Localidad es campo nuevo, pedido
-de la clienta, va antes que Edificio): cuatro campos independientes, sin
-cascada entre ellos. Si los cuatro quedan sin seleccionar, el mensaje se
-entiende general (pedido de la clienta) — por eso Edificio/Unidad/
-Consultorio en esta pantalla usan su propia versión de las opciones con
-un primer valor en blanco (`_opciones_edificio_o_ninguno` y análogas en
+Localidad/Edificio/Unidad/Consultorio DEL MENSAJE (en el cuadro de
+diálogo Nuevo/Editar; Localidad es campo nuevo, pedido de la clienta, va
+antes que Edificio): cuatro campos independientes, sin cascada entre
+ellos. Si los cuatro quedan sin seleccionar, el mensaje se entiende
+general (pedido de la clienta) — "En general" es la etiqueta de ese
+valor en blanco (antes "Sin edificio"/"Sin localidad"/etc., unificado a
+pedido de la clienta para que coincida con la de los selectores de
+contexto de abajo). Por eso Edificio/Unidad/Consultorio en esta pantalla
+usan su propia versión de las opciones con ese valor en blanco al
+principio (`_opciones_edificio_o_general` y análogas en
 `mensajes_predefinidos.py`, no las de `catalogos.py`, que ahí son
-`requerido=True` y no tienen ni necesitan esa opción en blanco).
+`requerido=True` y no tienen ni necesitan esa opción).
 
-"Dirigido a": selector de profesional buscable (mismo criterio de
-siempre, `habilitar_busqueda_profesional`), default "Nadie en
-particular" — NO es parte del registro guardado, es solo contexto para
-la Vista previa de abajo: si el mensaje usa `{apodo}` en su texto (ej.
-"Hola {apodo}, mañana no hay agua"), al elegir un profesional ahí la
-vista previa lo reemplaza por su Apodo (`Profesional.Apodo`), igual que
-ya hacía con `{edificio}`/`{unidad}`/`{consultorio}` a partir del
-vínculo propio del mensaje — cambiar "Dirigido a" no filtra la lista,
-solo recalcula la vista previa del mensaje seleccionado.
+Selectores de CONTEXTO (Dirigido a + Localidad/Edificio/Unidad/
+Consultorio, debajo de "Categoría"): ninguno es parte del registro
+guardado — son solo contexto para la Vista previa del mensaje
+seleccionado en la tabla, todos arrancan en su valor "general" ("Nadie
+en particular" / "En general") y cambiarlos nunca filtra la lista, solo
+recalcula la vista previa.
+- "Dirigido a": selector de profesional buscable (mismo criterio de
+  siempre, `habilitar_busqueda_profesional`). Si el mensaje usa
+  `{apodo}` (ej. "Hola {apodo}, mañana no hay agua"), sustituye por el
+  Apodo del profesional elegido.
+- Localidad/Edificio/Unidad/Consultorio de contexto: cuando alguno
+  queda en "En general", la vista previa usa el valor de ESE campo tal
+  cual está guardado en el mensaje; elegir algo puntual lo pisa campo
+  por campo (`_actualizar_vista_previa` arma un id efectivo por campo:
+  el de contexto si no es None, si no el del mensaje) antes de resolver
+  `{edificio}`/`{unidad}`/`{consultorio}` con el mismo criterio de
+  "el más específico gana" (`_variables_ubicacion`). Sirve para
+  previsualizar, por ejemplo, un mensaje general como si fuera para un
+  edificio puntual, sin tener que editar el mensaje. El de Localidad no
+  tiene ninguna variable propia todavía (no existe `{localidad}`) — está
+  ahí por paridad con el cuadro de diálogo.
+
+`crud_generico.PantallaCRUD` tenía una línea tenue justo debajo de la
+solapa "Listado" en TODOS los catálogos (detectado al revisar esta
+pantalla, no es puntual de acá): el borde nativo del `QTabBar` más el
+marco propio del `QScrollArea` de la solapa, ninguno de los dos
+controlable solo con QSS. Se corrigió ahí (afecta a todos los
+catálogos): `solapas.tabBar().setDrawBase(False)` +
+`scroll.setFrameShape(QFrame.Shape.NoFrame)`. Las pantallas con su
+propio `QTabWidget` armado a mano (Placas, Liquidación, Aumentos y
+descuentos, Grilla operativa, Novedades, Reservas, Pagos, Gestor de
+archivos, Lista de espera) no se tocaron todavía — si al revisarlas se
+ve el mismo defecto, aplicarles el mismo combo ahí.
 
 Pedido explícito de la clienta (al revisar Consultorios): a partir de
 ahora, TODO catálogo que se revise de acá en adelante suma tres campos

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -275,9 +276,11 @@ class PantallaCRUD(QWidget):
             layout_solapa.addWidget(self.tabla_widget, stretch=1)
 
             scroll = QScrollArea()
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
             scroll.setWidgetResizable(True)
             scroll.setWidget(panel_solapa)
             solapas.addTab(scroll, "Listado")
+            solapas.tabBar().setDrawBase(False)
             layout.addWidget(solapas, stretch=1)
 
             orden_foco = [self.campo_buscar, self.boton_nuevo, self.boton_editar, self.boton_eliminar]
