@@ -60,7 +60,26 @@ por pantalla), salvo que se diga explícitamente que es solo para una.
   cortarse — nunca se dejan con el ancho automático de cada uno.
 - Borde negro fino (`1px solid #000000`) en ambos.
 
-## Tablas
+## Foco (Enter/Tab): orden general
+
+Regla general (no puntual de una pantalla, vale para toda revisión de
+acá en adelante — se viene armando pantalla por pantalla, pero la
+clienta la subió a regla general al revisar Oferta de consultorios): el
+foco arranca en el control que esté más arriba de todo (selector, campo,
+lo que sea) y de ahí baja. Cuando en algún punto de la cadena hay varios
+controles a la misma altura (una fila con dos o más campos, una grilla
+de checks tipo "Días" en Oferta), los recorre de izquierda a derecha
+antes de seguir bajando a la fila siguiente. Al llegar al final de la
+cadena, vuelve al primero — esto último ya lo da gratis
+`instalar_enter_avanza_foco` (`app/gui/widgets/foco.py`), no hace falta
+ningún código extra para el "wrap-around".
+
+En la práctica, para que el foco realmente arranque en el primero de la
+cadena al entrar a la pantalla (y no en la barra de una solapa, si la
+pantalla tiene `QTabWidget`) hace falta un `showEvent` que llame
+`.setFocus()` sobre ese primer control — patrón ya usado en Reservas,
+Liquidación, Centro de mensajería y Oferta de consultorios (que ya lo
+tenía de antes y sigue vigente con la solapa nueva).
 
 - Números de fila (encabezado vertical) centrados globalmente
   (`QHeaderView:vertical { qproperty-defaultAlignment: AlignCenter }`).
@@ -620,9 +639,24 @@ formulario: quedaba redundante contra el nombre de la solapa.
 Los tres botones de abajo del formulario (`Generar PDF`, `Generar texto
 WhatsApp`, `Nueva búsqueda`) usaban `botonAccion`/`botonDestacado` —
 convención vieja, de antes de que se estandarizaran `botonPrimario`/
-`botonSecundario`. Pasan los tres a `botonSecundario`, mismo ancho fijo
-(`_ANCHO_BOTON_ACCION = 220`) — pedido explícito de la clienta: ninguno
-queda resaltado por sobre los otros dos.
+`botonSecundario`. Primero pasaron los tres a `botonSecundario` (ninguno
+resaltado); en la siguiente ronda la clienta pidió puntualmente
+`botonPrimario` para "Nueva búsqueda" (es la acción que arranca todo de
+nuevo, la más "definitiva" de las tres), así que quedó: "Generar PDF" y
+"Generar texto WhatsApp" en `botonSecundario`, "Nueva búsqueda" en
+`botonPrimario` — mismo ancho fijo los tres (`_ANCHO_BOTON_ACCION =
+220`), el estilo no cambia el ancho.
+
+La cadena de foco de este formulario ya bajaba de arriba a abajo y
+recorría de izquierda a derecha las filas con más de un control
+(fechas Desde/Hasta, la grilla de checks de Días, horario, etc.) desde
+antes de esta revisión — quedó confirmado que ya cumple la regla
+general de foco (ver más arriba) sin tocar nada del armado de
+`instalar_enter_avanza_foco`; el `showEvent` que ya tenía (enfoca
+Profesional) sigue funcionando igual con la solapa nueva porque
+`PantallaOferta` es la pantalla completa, no el contenido de una
+pestaña individual (a diferencia de Reservas/Liquidación, donde cada
+panel-solapa tiene su propio `showEvent`).
 
 Mismo criterio aplicado de una en Liquidación mensual
 (`_PanelEmisionArchivos`): "Calcular" (sin estilo antes) y los tres

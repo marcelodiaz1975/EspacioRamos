@@ -378,7 +378,7 @@ class PantallaOferta(QWidget):
         self.boton_texto.setObjectName("botonSecundario")
         self.boton_texto.clicked.connect(self._generar_texto)
         self.boton_nueva = QPushButton("Nueva búsqueda")
-        self.boton_nueva.setObjectName("botonSecundario")
+        self.boton_nueva.setObjectName("botonPrimario")
         self.boton_nueva.clicked.connect(self._nueva_busqueda)
         for boton in (self.boton_pdf, self.boton_texto, self.boton_nueva):
             boton.setFixedWidth(_ANCHO_BOTON_ACCION)

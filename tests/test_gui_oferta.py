@@ -195,7 +195,7 @@ def test_tamano_desmarcado_no_filtra_por_tamano(qtbot, conn, profesional_y_consu
     assert busqueda.tamano is None
 
 
-def test_hay_tres_botones_y_no_esta_resaltado_ni_pdf_ni_texto(qtbot, conn, profesional_y_consultorio):
+def test_hay_tres_botones_y_nueva_busqueda_es_la_principal(qtbot, conn, profesional_y_consultorio):
     from PySide6.QtWidgets import QPushButton
 
     pantalla = PantallaOferta(conn)
@@ -206,7 +206,7 @@ def test_hay_tres_botones_y_no_esta_resaltado_ni_pdf_ni_texto(qtbot, conn, profe
     assert set(botones) == {"Generar PDF", "Generar texto WhatsApp", "Nueva búsqueda"}
     assert botones["Generar PDF"].objectName() == "botonSecundario"
     assert botones["Generar texto WhatsApp"].objectName() == "botonSecundario"
-    assert botones["Nueva búsqueda"].objectName() == "botonSecundario"
+    assert botones["Nueva búsqueda"].objectName() == "botonPrimario"
 
 
 def test_nueva_busqueda_resetea_el_formulario_y_enfoca_profesional(qtbot, conn, profesional_y_consultorio):
