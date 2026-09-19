@@ -144,14 +144,9 @@ class _PanelEmisionArchivos(QWidget):
         layout_filtros.addWidget(self.combo_estado_filtro)
 
         self.boton_calcular = QPushButton("Calcular")
-        self.boton_calcular.setObjectName("botonSecundario")
+        self.boton_calcular.setObjectName("botonPrimario")
         self.boton_calcular.clicked.connect(self.actualizar)
         layout_filtros.addWidget(self.boton_calcular)
-
-        linea_separadora = QFrame()
-        linea_separadora.setFrameShape(QFrame.Shape.HLine)
-        linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
-        layout_filtros.addWidget(linea_separadora)
 
         boton_emitir_pendientes = QPushButton("Emitir liquidaciones pendientes")
         boton_emitir_pendientes.setObjectName("botonSecundario")
@@ -373,7 +368,7 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         layout_externo = QHBoxLayout(self)
 
         panel_filtros = QWidget()
-        panel_filtros.setMaximumWidth(_ANCHO_PANEL_FILTROS_ESTADO_CUENTA)
+        panel_filtros.setFixedWidth(_ANCHO_PANEL_FILTROS_ESTADO_CUENTA)
         layout_filtros = QVBoxLayout(panel_filtros)
 
         layout_filtros.addWidget(QLabel("Profesional:"))

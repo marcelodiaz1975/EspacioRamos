@@ -694,12 +694,24 @@ De paso se sumó `self.pestanas.tabBar().setDrawBase(False)` en
 ya se había corregido en los catálogos genéricos — ver más arriba —
 pero seguía pendiente acá).
 
-Los cuatro botones de "Emisión de archivos" (`Calcular` + los tres
-`Emitir...`) quedan los cuatro en `botonSecundario`, sin ninguno
-resaltado — a diferencia de Oferta de consultorios, acá todavía no está
-definido si conviene subir alguno a `botonPrimario` (candidato natural:
-"Emitir liquidaciones pendientes", el caso de uso más habitual) — queda
-pendiente de que la clienta lo confirme.
+"Calcular" pasa a `botonPrimario` (pedido explícito de la clienta,
+distinto del candidato que se había barajado antes —
+"Emitir liquidaciones pendientes"—); los tres `Emitir...` se mantienen
+en `botonSecundario`. Se sacó también la línea divisoria que separaba
+"Calcular" de los tres `Emitir...`: quedan los cuatro botones seguidos,
+sin ningún corte visual entre ellos.
+
+El selector de Profesional de las dos solapas ya era buscable por
+código o nombre (`habilitar_busqueda_profesional`) antes de esta
+revisión — ya estaba cubierto por la regla general de "Selectores y
+fecha" más arriba, no hizo falta ningún cambio.
+
+El panel de filtros de "Estado de cuenta" pasó de
+`setMaximumWidth(_ANCHO_PANEL_FILTROS_ESTADO_CUENTA)` a
+`setFixedWidth(...)`: con solo un máximo, el panel se achicaba al ancho
+natural de sus widgets (Profesional + el campo de saldo, ninguno con
+ancho propio) y quedaba angosto pese al límite de 340px — con
+`setFixedWidth` ahora sí ocupa ese ancho completo.
 
 ## Metodología de trabajo
 

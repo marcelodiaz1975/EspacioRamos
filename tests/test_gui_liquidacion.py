@@ -134,6 +134,12 @@ def test_ningun_boton_de_emision_queda_resaltado_y_son_del_mismo_tamano(qtbot, c
     assert all(b.objectName() == "botonSecundario" for b in botones)
 
 
+def test_boton_calcular_es_el_principal(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_emision.boton_calcular.objectName() == "botonPrimario"
+
+
 def test_orden_de_los_botones_es_pendientes_seleccionadas_todas(qtbot, conn):
     from PySide6.QtWidgets import QPushButton
 
