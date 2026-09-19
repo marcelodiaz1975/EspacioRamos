@@ -314,10 +314,28 @@ Nuevo/Editar/Eliminar): arranca en `app.negocio.dias.periodo_actual(conn)`
 cambiar a mano — oculta filas de otros períodos, mismo criterio que
 cualquier "filtro que solo afecta la visualización". Debajo de los
 botones (`panel_extra_izquierda`, con su línea divisoria propia arriba,
-pedido explícito de la clienta) va "Subtotal del período": la suma de
-Monto de todos los gastos de ese período (no solo los visibles después
-de "Buscar", que es un filtro aparte) — se recalcula cada vez que
-cambia el período o se crea/edita/elimina un gasto.
+pedido explícito de la clienta) va el título "Subtotal gastos período
+{MM-AAAA}" (`_titulo_subtotal_periodo` — el período se guarda AAAA-MM
+pero se muestra invertido acá, pedido de la clienta) seguido de la suma
+de Monto de todos los gastos de ese período (no solo los visibles
+después de "Buscar", que es un filtro aparte) — título y monto se
+recalculan cada vez que cambia el período o se crea/edita/elimina un
+gasto.
+
+Edificio/Unidad de este catálogo: la opción en blanco (cuando el
+Alcance no es ese nivel) dice "Sin relación a edificio específico"/"Sin
+relación a unidad específica" (pedido de la clienta, más explícito que
+"Sin edificio"/"Sin unidad").
+
+Cadena de foco (Enter/Tab, ver `app.gui.widgets.foco`) propia de esta
+pantalla: Buscar → Período actual → Nuevo → Editar → Eliminar → vuelve a
+Buscar. Como "Período actual" no es uno de los widgets que
+`PantallaCRUD` conoce, esta pantalla se construye con
+`instalar_foco=False` (mismo criterio que Llaves: "apagalo cuando una
+pantalla arma su propia cadena que combina estos tres botones con los
+suyos") y arma la suya propia con `instalar_enter_avanza_foco` pisando
+`pantalla._foco`, incluyendo el campo de período en el lugar que le
+corresponde.
 
 ## Listas editables (agregar valores, no tipos)
 

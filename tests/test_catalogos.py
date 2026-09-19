@@ -383,6 +383,58 @@ def test_gasto_periodo_filtro_oculta_otros_periodos_y_calcula_subtotal(qtbot, co
     assert etiquetas, "no se actualizó el subtotal al cambiar el período"
 
 
+def test_gasto_titulo_subtotal_muestra_el_periodo_invertido_mm_aaaa(qtbot, conn):
+    from PySide6.QtWidgets import QLabel, QLineEdit
+
+    from app.negocio.dias import periodo_actual
+
+    periodo = periodo_actual(conn)
+    anio, mes = periodo.split("-")
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+
+    etiquetas = [w for w in pantalla.findChildren(QLabel) if w.text() == f"Subtotal gastos período {mes}-{anio}"]
+    assert etiquetas, "no se encontró el título del subtotal con el período actual"
+
+    campo_periodo_filtro = next(w for w in pantalla.findChildren(QLineEdit) if w.text() == periodo)
+    campo_periodo_filtro.setText("2020-01")
+    campo_periodo_filtro.editingFinished.emit()
+
+    etiquetas = [w for w in pantalla.findChildren(QLabel) if w.text() == "Subtotal gastos período 01-2020"]
+    assert etiquetas, "el título del subtotal no se actualizó al cambiar el período"
+
+
+def test_gasto_edificio_unidad_texto_de_sin_relacion(qtbot, conn):
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    assert dialogo._entradas["IdEdificio"].itemText(0) == "Sin relación a edificio específico"
+    assert dialogo._entradas["IdUnidad"].itemText(0) == "Sin relación a unidad específica"
+
+
+def test_gasto_cadena_de_foco_incluye_periodo_actual_y_da_la_vuelta(qtbot, conn):
+    from PySide6.QtWidgets import QLineEdit
+
+    from app.negocio.dias import periodo_actual
+
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    campo_periodo_filtro = next(w for w in pantalla.findChildren(QLineEdit) if w.text() == periodo_actual(conn))
+
+    orden = pantalla._foco._orden
+    assert orden == [
+        pantalla.campo_buscar, campo_periodo_filtro, pantalla.boton_nuevo, pantalla.boton_editar, pantalla.boton_eliminar,
+    ]
+
+    pantalla.boton_eliminar.setFocus()
+    qtbot.waitUntil(lambda: pantalla.boton_eliminar.hasFocus())
+    pantalla._foco._mover(pantalla.boton_eliminar, retroceder=False, seleccionar_todo=False)
+    qtbot.waitUntil(lambda: pantalla.campo_buscar.hasFocus())
+
+
 def test_gasto_manual_puede_cambiar_a_importado_en_cualquier_momento(conn):
     """Pedido de la clienta: un gasto cargado manualmente tiene que poder
     pasar a origen Importado en cualquier momento, editándolo — no puede

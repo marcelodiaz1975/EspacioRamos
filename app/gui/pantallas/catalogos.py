@@ -14,6 +14,7 @@ import sqlite3
 from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QMessageBox, QVBoxLayout, QWidget
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.dias import periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.gastos_operativos import ALCANCES_GASTO, gasto_en_conflicto, sanear_alcance
@@ -237,11 +238,24 @@ def pantalla_profesiones(conn: sqlite3.Connection) -> PantallaCRUD:
 
 
 def _opciones_edificio_o_ninguno_gasto(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
-    return [(None, "Sin edificio")] + _opciones_edificio(conn)
+    return [(None, "Sin relación a edificio específico")] + _opciones_edificio(conn)
 
 
 def _opciones_unidad_o_ninguna_gasto(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
-    return [(None, "Sin unidad")] + _opciones_unidad(conn)
+    return [(None, "Sin relación a unidad específica")] + _opciones_unidad(conn)
+
+
+def _titulo_subtotal_periodo(periodo: str) -> str:
+    """"Subtotal gastos período 09-2026": el período se guarda como
+    AAAA-MM (`es_periodo_valido`) pero acá se muestra invertido, MM-AAAA
+    (pedido de la clienta) — si el texto tipeado en el filtro todavía no
+    tiene ese formato (mientras se está escribiendo), se muestra tal
+    cual en vez de romper."""
+    partes = periodo.split("-")
+    if len(partes) == 2:
+        anio, mes = partes
+        return f"Subtotal gastos período {mes}-{anio}"
+    return f"Subtotal gastos período {periodo}"
 
 
 def _al_abrir_dialogo_gasto(dialogo) -> None:
@@ -304,7 +318,8 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
     layout_subtotal = QVBoxLayout(panel_subtotal)
     layout_subtotal.setContentsMargins(0, 0, 0, 0)
     layout_subtotal.addWidget(_linea_divisoria())
-    layout_subtotal.addWidget(_titulo_campo("Subtotal del período"))
+    etiqueta_titulo_subtotal = _titulo_campo("")
+    layout_subtotal.addWidget(etiqueta_titulo_subtotal)
     etiqueta_subtotal = QLabel()
     layout_subtotal.addWidget(etiqueta_subtotal)
     layout_subtotal.addStretch()
@@ -312,8 +327,18 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
     pantalla = PantallaCRUD(
         conn, "GastoOperativo", "Gastos operativos", campos, al_abrir_dialogo=_al_abrir_dialogo_gasto,
         panel_extra_superior_izquierda=panel_periodo, panel_extra_izquierda=panel_subtotal,
+        instalar_foco=False,
     )
     pantalla.al_guardar = lambda valores, registro: _resolver_conflicto_gasto(pantalla, conn, valores, registro)
+    # instalar_foco=False acá arriba: esta pantalla arma su propia cadena
+    # de Enter/Tab-avanza-foco (igual criterio que Llaves) para meter
+    # "Período actual" entre Buscar y Nuevo, en vez de que PantallaCRUD
+    # instale la suya de siempre (que no conoce ese campo extra) — dos
+    # filtros de evento distintos sobre los mismos botones no puede ser.
+    pantalla._foco = instalar_enter_avanza_foco(
+        [pantalla.campo_buscar, campo_periodo_filtro, pantalla.boton_nuevo, pantalla.boton_editar, pantalla.boton_eliminar],
+        parent=pantalla,
+    )
 
     def _aplicar_filtro_periodo() -> None:
         periodo = campo_periodo_filtro.text().strip() or periodo_actual(conn)
@@ -324,6 +349,7 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
             tabla.setRowHidden(fila, texto != periodo)
         gastos_del_periodo = obtener_repositorio(conn, "GastoOperativo").listar(Periodo=periodo)
         subtotal = sum(g["Monto"] or 0 for g in gastos_del_periodo)
+        etiqueta_titulo_subtotal.setText(_titulo_subtotal_periodo(periodo))
         etiqueta_subtotal.setText(formatear_moneda(subtotal))
 
     campo_periodo_filtro.editingFinished.connect(_aplicar_filtro_periodo)
