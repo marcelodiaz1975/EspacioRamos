@@ -15,17 +15,18 @@ otra pantalla existente. `app.pdf.placas_pdf.generar_pdf_placas` sigue
 existiendo tal cual y se sigue regenerando solo en el avance de mes.
 
 Formato solapa (revisión uno por uno): columna izquierda de ancho fijo
-con cuatro botones, todos `botonSecundario` (ninguno es más
-"definitivo" que los otros). Los primeros tres ("Propuesta",
-"Disponibilidad", "Manual del usuario") NO regeneran nada — solo eligen
-qué documento mirar y muestran en el cuadro de la derecha la vista
-previa del archivo que ya existe en su carpeta (el primero, si hay más
-de uno — Propuesta/Disponibilidad arman uno por localidad). El cuarto,
-"Regenerar documento", es el único que efectivamente vuelve a generar
-el archivo — actúa sobre el tipo elegido con los primeros tres, y
-después refresca la vista previa con el resultado. Separar "elegir/ver"
-de "regenerar" evita que mirar qué hay cargado dispare, de paso, una
-regeneración no pedida."""
+con cuatro botones. Los primeros tres ("Propuesta", "Disponibilidad",
+"Manual del usuario", `botonSecundario` — ninguno es más "definitivo"
+que los otros) NO regeneran nada — solo eligen qué documento mirar y
+muestran en el cuadro de la derecha la vista previa del archivo que ya
+existe en su carpeta (el primero, si hay más de uno —
+Propuesta/Disponibilidad arman uno por localidad). El cuarto,
+"Regenerar documento" (`botonPrimario`: es la acción más importante de
+esta pantalla, la única que efectivamente escribe algo), vuelve a
+generar el archivo del tipo elegido con los primeros tres y refresca la
+vista previa con el resultado. Separar "elegir/ver" de "regenerar"
+evita que mirar qué hay cargado dispare, de paso, una regeneración no
+pedida."""
 from __future__ import annotations
 
 import sqlite3
@@ -47,6 +48,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.main_window import Seccion
 from app.gui.pantallas.imagenes import _pixmap_primera_pagina_pdf
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.archivos_generados import (
     SUBCARPETA_DISPONIBILIDAD,
     SUBCARPETA_MANUAL,
@@ -144,7 +146,7 @@ class PantallaArchivosVarios(QWidget):
         columna.addWidget(self.boton_manual)
 
         self.boton_regenerar = QPushButton("Regenerar documento")
-        self.boton_regenerar.setObjectName("botonSecundario")
+        self.boton_regenerar.setObjectName("botonPrimario")
         self.boton_regenerar.clicked.connect(self._regenerar_seleccionado)
         columna.addWidget(self.boton_regenerar)
 
@@ -153,6 +155,11 @@ class PantallaArchivosVarios(QWidget):
 
         columna.addStretch()
         layout_solapa.addWidget(panel_izquierda)
+
+        self._foco = instalar_enter_avanza_foco(
+            [self.boton_propuesta, self.boton_disponibilidad, self.boton_manual, self.boton_regenerar],
+            parent=self,
+        )
 
         columna_derecha = QVBoxLayout()
         columna_derecha.addWidget(_titulo_campo("Vista previa"))

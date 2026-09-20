@@ -722,20 +722,26 @@ resto), columna izquierda con el subtítulo explicativo y los botones,
 columna derecha con un cuadro "Vista previa".
 
 Los primeros tres botones ("Propuesta", "Disponibilidad", "Manual del
-usuario" — antes "Regenerar Propuesta"/etc.) cambiaron de
-comportamiento en una segunda vuelta de esta pantalla: ya NO regeneran
-nada, solo eligen qué documento mirar (`self._tipo_seleccionado`) y
-muestran en Vista previa el primer archivo que YA existe en su
-subcarpeta (`_primer_archivo_existente`, ordena por nombre y devuelve
-el primero — Propuesta/Disponibilidad arman uno por localidad) sin
-generar nada nuevo. Un cuarto botón, "Regenerar documento", es el único
-que efectivamente llama al generador — actúa sobre el tipo elegido con
-los otros tres y refresca la Vista previa con el resultado. Separar
-"elegir/ver" de "regenerar" evita que simplemente mirar qué hay cargado
-dispare, de paso, una regeneración no pedida. Los cuatro comparten un
-mismo ancho fijo (`_ANCHO_BOTON = 200`, recalculado para las etiquetas
-más cortas de esta vuelta — la más larga ahora es "Regenerar
-documento"). `showEvent` enfoca "Propuesta" al entrar a la pantalla.
+usuario" — antes "Regenerar Propuesta"/etc., `botonSecundario`)
+cambiaron de comportamiento en una segunda vuelta de esta pantalla: ya
+NO regeneran nada, solo eligen qué documento mirar
+(`self._tipo_seleccionado`) y muestran en Vista previa el primer
+archivo que YA existe en su subcarpeta (`_primer_archivo_existente`,
+ordena por nombre y devuelve el primero — Propuesta/Disponibilidad
+arman uno por localidad) sin generar nada nuevo. Un cuarto botón,
+"Regenerar documento" (`botonPrimario` — pedido explícito de la
+clienta: es la única de las cuatro acciones que efectivamente escribe
+algo), llama al generador sobre el tipo elegido con los otros tres y
+refresca la Vista previa con el resultado. Separar "elegir/ver" de
+"regenerar" evita que simplemente mirar qué hay cargado dispare, de
+paso, una regeneración no pedida. Los cuatro comparten un mismo ancho
+fijo (`_ANCHO_BOTON = 200`, recalculado para las etiquetas más cortas
+de esta vuelta — la más larga ahora es "Regenerar documento").
+`showEvent` enfoca "Propuesta" al entrar a la pantalla, y una cadena
+`instalar_enter_avanza_foco` explícita ([Propuesta → Disponibilidad →
+Manual del usuario → Regenerar documento], con vuelta al principio)
+cubre la regla general de foco de arriba a abajo — antes de esta vuelta
+no había cadena armada, solo el orden nativo de Tab.
 
 La Vista previa reusa `_pixmap_primera_pagina_pdf` de
 `app/gui/pantallas/imagenes.py` (import directo del helper privado,

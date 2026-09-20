@@ -31,17 +31,18 @@ def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
     assert titulo.text() == "ARCHIVOS VARIOS"
 
 
-def test_hay_cuatro_botones_todos_jerarquia_2(qtbot, conn):
-    """Ninguno de los cuatro es más definitivo que los otros: elegir un
-    documento (los primeros tres) solo cambia la vista previa, y
-    regenerar (el cuarto) es una acción no destructiva e idempotente —
-    los cuatro quedan en botonSecundario, sin ningún botonPrimario."""
+def test_hay_cuatro_botones_y_regenerar_es_el_principal(qtbot, conn):
+    """Elegir un documento (los primeros tres) solo cambia la vista
+    previa, ninguno más "definitivo" que el otro; "Regenerar documento"
+    es la única acción que escribe algo, así que es la principal."""
     pantalla = PantallaArchivosVarios(conn)
     qtbot.addWidget(pantalla)
     botones = pantalla.findChildren(QPushButton)
     assert len(botones) == 4
-    for boton in botones:
-        assert boton.objectName() == "botonSecundario"
+    assert pantalla.boton_propuesta.objectName() == "botonSecundario"
+    assert pantalla.boton_disponibilidad.objectName() == "botonSecundario"
+    assert pantalla.boton_manual.objectName() == "botonSecundario"
+    assert pantalla.boton_regenerar.objectName() == "botonPrimario"
 
 
 def test_textos_de_los_botones(qtbot, conn):
@@ -75,6 +76,20 @@ def test_foco_inicial_queda_en_boton_propuesta(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.boton_propuesta.hasFocus())
+
+
+def test_cadena_de_foco_baja_de_arriba_a_abajo_y_da_la_vuelta(qtbot, conn):
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla._foco._orden == [
+        pantalla.boton_propuesta, pantalla.boton_disponibilidad, pantalla.boton_manual, pantalla.boton_regenerar,
+    ]
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.boton_regenerar.setFocus()
+    qtbot.waitUntil(lambda: pantalla.boton_regenerar.hasFocus())
+    pantalla._foco._mover(pantalla.boton_regenerar, retroceder=False, seleccionar_todo=False)
     qtbot.waitUntil(lambda: pantalla.boton_propuesta.hasFocus())
 
 
