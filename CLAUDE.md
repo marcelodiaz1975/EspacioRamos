@@ -713,6 +713,32 @@ natural de sus widgets (Profesional + el campo de saldo, ninguno con
 ancho propio) y quedaba angosto pese al límite de 340px — con
 `setFixedWidth` ahora sí ocupa ese ancho completo.
 
+## Archivos varios (formato solapa, vista previa del PDF regenerado)
+
+Pasó de tres botones sueltos en una fila (sin formato solapa, sin
+`showEvent`) al formato estándar: solapa única "Documentos"
+(`panelSolapa`/`QScrollArea`, `setDrawBase(False)`/`NoFrame` como el
+resto), columna izquierda con el subtítulo explicativo y los tres
+botones "Regenerar..." apilados (antes en fila horizontal), columna
+derecha con un cuadro "Vista previa". Los tres botones ya eran
+`botonSecundario` (ninguno es más "definitivo" que los otros —
+regenerar un documento es no destructivo e idempotente) y ahora además
+comparten un mismo ancho fijo (`_ANCHO_BOTON = 240`, calculado para
+"Regenerar Manual de usuario", el texto más largo) — antes cada uno
+quedaba con su ancho automático. `showEvent` enfoca "Regenerar
+Propuesta" al entrar a la pantalla, mismo criterio que el resto.
+
+La Vista previa reusa `_pixmap_primera_pagina_pdf` de
+`app/gui/pantallas/imagenes.py` (import directo del helper privado,
+mismo criterio que otros imports cruzados del sistema, ej.
+`_opciones_profesional`/`_texto_profesional` de `reservas.py`): al
+regenerar un documento, se busca el primer archivo de la lista que
+devuelve el generador (Propuesta/Disponibilidad arman uno por
+localidad; Manual arma uno solo) y se muestra la miniatura de su
+primera página. Si PyMuPDF no está instalado, o no se generó ningún
+archivo, cae a un mensaje de texto en el mismo cuadro en vez de romper
+— mismo criterio de "vista previa opcional" que Gestor de archivos.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

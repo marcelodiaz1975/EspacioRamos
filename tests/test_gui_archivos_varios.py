@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton
+from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QTabWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -41,6 +41,30 @@ def test_botones_de_regenerar_son_jerarquia_2(qtbot, conn):
     assert len(botones) == 3
     for boton in botones:
         assert boton.objectName() == "botonSecundario"
+
+
+def test_tiene_formato_solapa(qtbot, conn):
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    solapas = pantalla.findChild(QTabWidget)
+    assert solapas is not None
+    assert solapas.tabText(0) == "Documentos"
+    assert pantalla.findChild(QWidget, "panelSolapa") is not None
+
+
+def test_botones_comparten_el_mismo_ancho_fijo(qtbot, conn):
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    anchos = {b.width() for b in (pantalla.boton_propuesta, pantalla.boton_disponibilidad, pantalla.boton_manual)}
+    assert len(anchos) == 1
+
+
+def test_foco_inicial_queda_en_boton_propuesta(qtbot, conn):
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.boton_propuesta.hasFocus())
 
 
 def test_no_tiene_boton_de_regenerar_placas(qtbot, conn):
@@ -105,3 +129,35 @@ def test_regenerar_manual_genera_archivo(qtbot, conn, tmp_path):
     generados = list((tmp_path / "Archivos varios" / "Manual").iterdir())
     assert len(generados) == 1
     assert generados[0].name == "Manual de usuario.pdf"
+
+
+def test_preview_muestra_texto_de_ayuda_antes_de_regenerar_nada(qtbot, conn):
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.etiqueta_preview.text() == "Regenerá un documento para ver acá su primera página."
+    assert pantalla.etiqueta_preview.pixmap().isNull()
+
+
+def test_regenerar_actualiza_la_vista_previa(qtbot, conn, tmp_path):
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla._regenerar_propuesta()
+
+    assert pantalla.etiqueta_preview.text() != "Regenerá un documento para ver acá su primera página."
+
+
+def test_regenerar_sin_archivos_generados_no_rompe_la_vista_previa(qtbot, conn, monkeypatch):
+    pantalla = PantallaArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    monkeypatch.setattr(
+        "app.gui.pantallas.archivos_varios.carpeta_archivos_varios", lambda conn, subcarpeta: "/tmp",
+    )
+    monkeypatch.setattr(
+        "app.gui.pantallas.archivos_varios.generar_pdfs_propuesta_por_localidad", lambda conn, directorio: [],
+    )
+    pantalla._regenerar_propuesta()
+    assert pantalla.etiqueta_preview.text() == "No se generó ningún archivo para previsualizar."
