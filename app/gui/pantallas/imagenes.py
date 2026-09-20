@@ -141,11 +141,13 @@ def _ajustar_columnas(tabla: QTableWidget, indice_descripcion: int) -> None:
     tabla.setFixedWidth(ancho_total)
 
 
-def _pixmap_primera_pagina_pdf(ruta: str) -> QPixmap | None:
+def _pixmap_primera_pagina_pdf(ruta: str, escala: float = 0.6) -> QPixmap | None:
     """Miniatura de la primera página de un PDF con PyMuPDF — es una
     dependencia opcional en tiempo de ejecución: si no está instalada o
     el archivo no se puede abrir, no hay vista previa (no rompe la
-    pantalla)."""
+    pantalla). `escala` default 0.6 (el tamaño de siempre acá); Archivos
+    varios pide una escala mayor para que se vea más grande en su cuadro
+    de vista previa, más ancho que el de esta pantalla."""
     try:
         import fitz
     except ImportError:
@@ -153,7 +155,7 @@ def _pixmap_primera_pagina_pdf(ruta: str) -> QPixmap | None:
     try:
         with fitz.open(ruta) as documento:
             pagina = documento[0]
-            mapa_pixeles = pagina.get_pixmap(matrix=fitz.Matrix(0.6, 0.6))
+            mapa_pixeles = pagina.get_pixmap(matrix=fitz.Matrix(escala, escala))
         formato = QImage.Format.Format_RGBA8888 if mapa_pixeles.alpha else QImage.Format.Format_RGB888
         imagen = QImage(mapa_pixeles.samples, mapa_pixeles.width, mapa_pixeles.height, mapa_pixeles.stride, formato)
         return QPixmap.fromImage(imagen.copy())

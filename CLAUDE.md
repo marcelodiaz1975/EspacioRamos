@@ -713,31 +713,50 @@ natural de sus widgets (Profesional + el campo de saldo, ninguno con
 ancho propio) y quedaba angosto pese al límite de 340px — con
 `setFixedWidth` ahora sí ocupa ese ancho completo.
 
-## Archivos varios (formato solapa, vista previa del PDF regenerado)
+## Archivos varios (formato solapa, elegir/ver separado de regenerar)
 
 Pasó de tres botones sueltos en una fila (sin formato solapa, sin
 `showEvent`) al formato estándar: solapa única "Documentos"
 (`panelSolapa`/`QScrollArea`, `setDrawBase(False)`/`NoFrame` como el
-resto), columna izquierda con el subtítulo explicativo y los tres
-botones "Regenerar..." apilados (antes en fila horizontal), columna
-derecha con un cuadro "Vista previa". Los tres botones ya eran
-`botonSecundario` (ninguno es más "definitivo" que los otros —
-regenerar un documento es no destructivo e idempotente) y ahora además
-comparten un mismo ancho fijo (`_ANCHO_BOTON = 240`, calculado para
-"Regenerar Manual de usuario", el texto más largo) — antes cada uno
-quedaba con su ancho automático. `showEvent` enfoca "Regenerar
-Propuesta" al entrar a la pantalla, mismo criterio que el resto.
+resto), columna izquierda con el subtítulo explicativo y los botones,
+columna derecha con un cuadro "Vista previa".
+
+Los primeros tres botones ("Propuesta", "Disponibilidad", "Manual del
+usuario" — antes "Regenerar Propuesta"/etc.) cambiaron de
+comportamiento en una segunda vuelta de esta pantalla: ya NO regeneran
+nada, solo eligen qué documento mirar (`self._tipo_seleccionado`) y
+muestran en Vista previa el primer archivo que YA existe en su
+subcarpeta (`_primer_archivo_existente`, ordena por nombre y devuelve
+el primero — Propuesta/Disponibilidad arman uno por localidad) sin
+generar nada nuevo. Un cuarto botón, "Regenerar documento", es el único
+que efectivamente llama al generador — actúa sobre el tipo elegido con
+los otros tres y refresca la Vista previa con el resultado. Separar
+"elegir/ver" de "regenerar" evita que simplemente mirar qué hay cargado
+dispare, de paso, una regeneración no pedida. Los cuatro comparten un
+mismo ancho fijo (`_ANCHO_BOTON = 200`, recalculado para las etiquetas
+más cortas de esta vuelta — la más larga ahora es "Regenerar
+documento"). `showEvent` enfoca "Propuesta" al entrar a la pantalla.
 
 La Vista previa reusa `_pixmap_primera_pagina_pdf` de
 `app/gui/pantallas/imagenes.py` (import directo del helper privado,
 mismo criterio que otros imports cruzados del sistema, ej.
-`_opciones_profesional`/`_texto_profesional` de `reservas.py`): al
-regenerar un documento, se busca el primer archivo de la lista que
-devuelve el generador (Propuesta/Disponibilidad arman uno por
-localidad; Manual arma uno solo) y se muestra la miniatura de su
-primera página. Si PyMuPDF no está instalado, o no se generó ningún
-archivo, cae a un mensaje de texto en el mismo cuadro en vez de romper
-— mismo criterio de "vista previa opcional" que Gestor de archivos.
+`_opciones_profesional`/`_texto_profesional` de `reservas.py`), que
+ahora acepta un parámetro `escala` (default 0.6, sin tocar el
+comportamiento de Gestor de archivos) — Archivos varios pide
+`escala=1.3` para que se vea más grande y clara en su cuadro, más ancho
+que el de esa otra pantalla. El pixmap además se escala con
+`QPixmap.scaledToWidth` al ancho disponible del viewport (menos 24px de
+margen, reservados para cuando aparece la barra de scroll vertical —
+sin ese margen, la barra le come ancho al viewport recién DESPUÉS de
+escalar y aparece una horizontal de sobra) y se fija con
+`etiqueta_preview.setMinimumSize(pixmap.size())`: sin esto, el
+`QScrollArea` (`widgetResizable=True`) achica la etiqueta al alto del
+viewport y la imagen queda recortada en vez de poder bajarla con la
+barra — forzar el mínimo al tamaño real de la imagen es lo que habilita
+el scroll vertical. Si PyMuPDF no está instalado, o no hay ningún
+archivo generado todavía, cae a un mensaje de texto en el mismo cuadro
+en vez de romper — mismo criterio de "vista previa opcional" que Gestor
+de archivos.
 
 ## Metodología de trabajo
 
