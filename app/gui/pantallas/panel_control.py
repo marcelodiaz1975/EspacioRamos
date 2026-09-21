@@ -1,14 +1,20 @@
 """Pantalla principal / panel de control (Etapa 6.1, FA1).
 
-Revisión "uno por uno" (ver CLAUDE.md): pasó a formato solapa (una sola
-pestaña, "Resumen"), con "Avanzar de mes" y "Generar backup ahora" como
-`botonSecundario` los dos (pedido explícito de la clienta — esta
-pantalla ya no tiene una acción "más importante" que la otra) en una
-columna a la izquierda, cada uno con una leyenda de estado arriba
-("Período actual"/"Último backup") y separados por una línea divisoria;
-a la derecha, un cuadro de texto fijo que explica qué hace cada botón.
-Las alertas siguen debajo, en su propia área con scroll (puede ser una
-lista larga)."""
+Segunda vuelta de la revisión "uno por uno" (ver CLAUDE.md): las dos
+leyendas de estado que iban arriba de cada botón ("Período actual"/
+"Último backup") y el subtítulo del encabezado (período en curso + hoy)
+se sacaron — esa información ahora vive, más completa, en los cuadritos
+de abajo. La solapa pasa a llamarse "Panel de control" (va a terminar
+viviendo dentro de otro formulario más adelante, todavía a definir).
+Los botones se invierten ("Generar backup ahora" arriba, "Avanzar de
+mes" abajo) y "Avanzar de mes" vuelve a ser `botonPrimario` (el otro
+queda `botonSecundario`) — sigue siendo la acción más "definitiva" de
+esta pantalla. Debajo de los botones, una grilla de cuadritos
+informativos ocupa el resto del espacio: reloj en vivo, período actual,
+estado del backup, fechas especiales de los próximos dos meses,
+estadísticas de profesionales, estadísticas de ocupación/horas, y las
+alertas de siempre (mismo mecanismo de antes, ahora como un cuadrito
+más en vez de una lista aparte)."""
 from __future__ import annotations
 
 import sqlite3
@@ -16,25 +22,35 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtCore import QTimer
 
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.avance_mes import avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo
-from app.negocio.backup import generar_backup, ultimo_backup
+from app.negocio.backup import backup_vencido, carpeta_backup, generar_backup, ultimo_backup
 from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual
 from app.negocio.formato import formatear_moneda, mes_texto, periodo_mm_aaaa
-from app.negocio.panel_control import Alertas, calcular_alertas
+from app.negocio.panel_control import (
+    Alertas,
+    calcular_alertas,
+    calcular_estadisticas_ocupacion,
+    calcular_estadisticas_profesionales,
+    fechas_especiales_mes_actual_y_siguiente,
+)
 
 _ANCHO_PANEL_IZQUIERDA = 240
 _ANCHO_BOTON = 220
+_COLUMNAS_GRILLA = 3
 
 _TEXTO_EXPLICACION = (
     '"Avanzar de mes" traspasa el saldo de cada profesional, cierra las cuotas de planes de pago que '
@@ -63,20 +79,30 @@ _ETIQUETA_FILA = {
 }
 
 
-def _linea_divisoria() -> QFrame:
-    linea = QFrame()
-    linea.setFrameShape(QFrame.Shape.HLine)
-    linea.setFrameShadow(QFrame.Shadow.Sunken)
-    return linea
-
-
-def _texto_fecha_hora(momento: datetime) -> str:
+def _texto_fecha_hora(momento: datetime, *, con_segundos: bool = False) -> str:
     """"vie 25-08-2026 14:45hs" — mismo criterio que las fechas de
     Registro de ausencias/Pagos (día de la semana abreviado + dd-MM-yyyy
     + hora), armado a mano porque acá el dato es un `datetime` de Python,
     no un campo de formulario con su propio `QDateEdit`."""
     dia = fecha_a_dia_semana(momento.date())[:3].lower()
-    return f"{dia} {momento.day:02d}-{momento.month:02d}-{momento.year} {momento.hour:02d}:{momento.minute:02d}hs"
+    hora = f"{momento.hour:02d}:{momento.minute:02d}"
+    if con_segundos:
+        hora += f":{momento.second:02d}"
+    return f"{dia} {momento.day:02d}-{momento.month:02d}-{momento.year} {hora}hs"
+
+
+def _tarjeta(titulo: str) -> tuple[QFrame, QVBoxLayout]:
+    """Cuadrito informativo genérico de la grilla de abajo: borde negro
+    (mismo criterio que el cuadro de texto de los botones) con un título
+    en negrita arriba — cada llamador arma su propio contenido debajo."""
+    tarjeta = QFrame()
+    tarjeta.setStyleSheet("QFrame { border: 1px solid black; }")
+    tarjeta.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    layout = QVBoxLayout(tarjeta)
+    encabezado = QLabel(titulo)
+    encabezado.setObjectName("subtituloCampo")
+    layout.addWidget(encabezado)
+    return tarjeta, layout
 
 
 class PanelControl(QWidget):
@@ -91,7 +117,7 @@ class PanelControl(QWidget):
         pedido durante la construcción no alcanza a "pegar" porque el
         QTabWidget contenedor todavía no está mostrado en ese momento."""
         super().showEvent(event)
-        self.boton_avanzar.setFocus()
+        self.boton_backup.setFocus()
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -99,10 +125,6 @@ class PanelControl(QWidget):
         self.titulo = QLabel()
         self.titulo.setObjectName("tituloPantalla")
         layout.addWidget(self.titulo)
-
-        self.subtitulo = QLabel()
-        self.subtitulo.setObjectName("subtitulo")
-        layout.addWidget(self.subtitulo)
 
         solapas = QTabWidget()
         panel_solapa = QWidget()
@@ -115,27 +137,20 @@ class PanelControl(QWidget):
         columna = QVBoxLayout(panel_izquierda)
         columna.setContentsMargins(0, 0, 0, 0)
 
-        self.leyenda_periodo = QLabel()
-        self.leyenda_periodo.setObjectName("subtitulo")
-        columna.addWidget(self.leyenda_periodo)
-
-        self.boton_avanzar = QPushButton("Avanzar de mes")
-        self.boton_avanzar.setObjectName("botonSecundario")
-        self.boton_avanzar.setFixedWidth(_ANCHO_BOTON)
-        self.boton_avanzar.clicked.connect(self._avanzar_mes)
-        columna.addWidget(self.boton_avanzar)
-
-        columna.addWidget(_linea_divisoria())
-
-        self.leyenda_backup = QLabel()
-        self.leyenda_backup.setObjectName("subtitulo")
-        columna.addWidget(self.leyenda_backup)
-
+        # Orden invertido a pedido de la clienta: "Generar backup ahora"
+        # arriba, "Avanzar de mes" abajo — y este último vuelve a ser el
+        # botonPrimario de la pantalla (el otro queda botonSecundario).
         self.boton_backup = QPushButton("Generar backup ahora")
         self.boton_backup.setObjectName("botonSecundario")
         self.boton_backup.setFixedWidth(_ANCHO_BOTON)
         self.boton_backup.clicked.connect(self._generar_backup)
         columna.addWidget(self.boton_backup)
+
+        self.boton_avanzar = QPushButton("Avanzar de mes")
+        self.boton_avanzar.setObjectName("botonPrimario")
+        self.boton_avanzar.setFixedWidth(_ANCHO_BOTON)
+        self.boton_avanzar.clicked.connect(self._avanzar_mes)
+        columna.addWidget(self.boton_avanzar)
 
         columna.addStretch()
         fila_superior.addWidget(panel_izquierda)
@@ -146,38 +161,146 @@ class PanelControl(QWidget):
         fila_superior.addWidget(texto_explicacion, stretch=1)
         layout_solapa.addLayout(fila_superior)
 
+        grilla = QGridLayout()
+        tarjetas = [
+            self._armar_tarjeta_reloj(),
+            self._armar_tarjeta_periodo(),
+            self._armar_tarjeta_backup(),
+            self._armar_tarjeta_fechas_especiales(),
+            self._armar_tarjeta_profesionales(),
+            self._armar_tarjeta_ocupacion(),
+            self._armar_tarjeta_alertas(),
+        ]
+        for indice, tarjeta in enumerate(tarjetas):
+            grilla.addWidget(tarjeta, indice // _COLUMNAS_GRILLA, indice % _COLUMNAS_GRILLA)
+        for columna_grilla in range(_COLUMNAS_GRILLA):
+            grilla.setColumnStretch(columna_grilla, 1)
+        filas_grilla = -(-len(tarjetas) // _COLUMNAS_GRILLA)  # redondeo hacia arriba sin importar math
+        for fila_grilla in range(filas_grilla):
+            grilla.setRowStretch(fila_grilla, 1)
+        layout_solapa.addLayout(grilla, stretch=1)
+
+        solapas.addTab(panel_solapa, "Panel de control")
+        solapas.tabBar().setDrawBase(False)
+        layout.addWidget(solapas, stretch=1)
+
+        self._foco = instalar_enter_avanza_foco([self.boton_backup, self.boton_avanzar], parent=self)
+
+        self._timer_reloj = QTimer(self)
+        self._timer_reloj.timeout.connect(self._actualizar_reloj)
+        self._timer_reloj.start(1000)
+        self._actualizar_reloj()
+
+    # ------------------------------------------------------------ tarjetas
+
+    def _armar_tarjeta_reloj(self) -> QFrame:
+        tarjeta, layout = _tarjeta("Fecha y hora actual")
+        self.etiqueta_reloj = QLabel()
+        layout.addWidget(self.etiqueta_reloj)
+        layout.addStretch()
+        return tarjeta
+
+    def _actualizar_reloj(self) -> None:
+        """Hora real del sistema, no la fecha ficticia de QA — un reloj en
+        vivo tiene que mostrar la hora real para orientar al operador,
+        aunque el resto de la pantalla esté calculando sobre una fecha
+        simulada."""
+        self.etiqueta_reloj.setText(_texto_fecha_hora(datetime.now(), con_segundos=True))
+
+    def _armar_tarjeta_periodo(self) -> QFrame:
+        tarjeta, layout = _tarjeta("Período actual")
+        self.etiqueta_periodo = QLabel()
+        layout.addWidget(self.etiqueta_periodo)
+        layout.addStretch()
+        return tarjeta
+
+    def _armar_tarjeta_backup(self) -> QFrame:
+        tarjeta, layout = _tarjeta("Último backup")
+        self.etiqueta_backup = QLabel()
+        self.etiqueta_backup.setWordWrap(True)
+        layout.addWidget(self.etiqueta_backup)
+        layout.addStretch()
+        return tarjeta
+
+    def _armar_tarjeta_fechas_especiales(self) -> QFrame:
+        tarjeta, layout = _tarjeta("Feriados y fechas especiales (este mes y el próximo)")
+        self.etiqueta_fechas_especiales = QLabel()
+        self.etiqueta_fechas_especiales.setWordWrap(True)
+        layout.addWidget(self.etiqueta_fechas_especiales)
+        layout.addStretch()
+        return tarjeta
+
+    def _armar_tarjeta_profesionales(self) -> QFrame:
+        tarjeta, layout = _tarjeta("Profesionales")
+        self.etiqueta_profesionales = QLabel()
+        self.etiqueta_profesionales.setWordWrap(True)
+        layout.addWidget(self.etiqueta_profesionales)
+        layout.addStretch()
+        return tarjeta
+
+    def _armar_tarjeta_ocupacion(self) -> QFrame:
+        tarjeta, layout = _tarjeta("Ocupación y horas")
+        self.etiqueta_ocupacion = QLabel()
+        self.etiqueta_ocupacion.setWordWrap(True)
+        layout.addWidget(self.etiqueta_ocupacion)
+        layout.addStretch()
+        return tarjeta
+
+    def _armar_tarjeta_alertas(self) -> QFrame:
+        tarjeta, layout = _tarjeta("Alertas")
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.contenedor_alertas = QWidget()
         self.layout_alertas = QVBoxLayout(self.contenedor_alertas)
         self.layout_alertas.addStretch()
         scroll.setWidget(self.contenedor_alertas)
-        layout_solapa.addWidget(scroll, stretch=1)
-
-        solapas.addTab(panel_solapa, "Resumen")
-        solapas.tabBar().setDrawBase(False)
-        layout.addWidget(solapas, stretch=1)
-
-        self._foco = instalar_enter_avanza_foco([self.boton_avanzar, self.boton_backup], parent=self)
+        layout.addWidget(scroll)
+        return tarjeta
 
     def actualizar(self) -> None:
         cfg = self.conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
         nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos"
+        self.titulo.setText(nombre_espacio)
+
         periodo = periodo_actual(self.conn)
         anio, mes = (int(p) for p in periodo.split("-"))
-        hoy = fecha_actual(self.conn)
-
-        self.titulo.setText(nombre_espacio)
-        self.subtitulo.setText(
-            f"Período en curso: {mes_texto(mes).capitalize()} de {anio} ({periodo_mm_aaaa(periodo)})  ·  "
-            f"Hoy: {hoy.strftime('%d/%m/%Y')}"
-        )
-        self.leyenda_periodo.setText(f"Período actual {mes:02d}-{anio}")
+        self.etiqueta_periodo.setText(f"{mes_texto(mes).capitalize()} de {anio} ({periodo_mm_aaaa(periodo)})")
 
         momento_backup = ultimo_backup(self.conn)
-        self.leyenda_backup.setText(
-            f"Último backup {_texto_fecha_hora(momento_backup)}" if momento_backup is not None
-            else "Todavía no se generó ningún backup."
+        frecuencia = self.conn.execute(
+            "SELECT FrecuenciaBackupDrive FROM Configuracion WHERE IdConfiguracion = 1"
+        ).fetchone()["FrecuenciaBackupDrive"]
+        lineas_backup = [
+            f"Último backup: {_texto_fecha_hora(momento_backup)}" if momento_backup is not None
+            else "Todavía no se generó ningún backup.",
+            f"Frecuencia configurada: {frecuencia}" if frecuencia else "Frecuencia configurada: sin definir",
+        ]
+        if carpeta_backup(self.conn) is not None:
+            lineas_backup.append("Estado: vencido" if backup_vencido(self.conn, fecha_actual(self.conn)) else "Estado: al día")
+        self.etiqueta_backup.setText("\n".join(lineas_backup))
+
+        fechas = fechas_especiales_mes_actual_y_siguiente(self.conn)
+        if fechas:
+            texto_fechas = "\n".join(f"•  {f['Fecha']} — {f['Descripcion'] or f['Tipo'] or 'Sin descripción'}" for f in fechas)
+        else:
+            texto_fechas = "Sin fechas especiales cargadas para este mes ni el próximo."
+        self.etiqueta_fechas_especiales.setText(texto_fechas)
+
+        prof = calcular_estadisticas_profesionales(self.conn)
+        self.etiqueta_profesionales.setText(
+            f"Con plan de pago vigente: {prof.con_plan_pago_vigente}\n"
+            f"Con saldo fuera de tolerancia: {prof.con_saldo_fuera_de_tolerancia}\n"
+            f"Con reservas regulares activas: {prof.con_reservas_regulares_activas}"
+        )
+
+        ocup = calcular_estadisticas_ocupacion(self.conn)
+        self.etiqueta_ocupacion.setText(
+            f"Ocupación regular general: {ocup.ocupacion_regular_pct:.1f}%\n"
+            f"Horas regulares reservadas por semana: {ocup.horas_regulares_semanales:.1f}hs\n"
+            f"Horas aisladas reservadas este mes: {ocup.horas_aisladas_mes:.1f}hs\n"
+            f"Monto generado por esas horas aisladas: {formatear_moneda(ocup.monto_aisladas_mes)}\n"
+            f"Saldo pendiente de cobro este mes: {formatear_moneda(ocup.saldo_pendiente_mes)}"
         )
 
         alertas = calcular_alertas(self.conn)

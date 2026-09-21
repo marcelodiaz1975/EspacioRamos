@@ -1003,48 +1003,81 @@ quedado pendientes:
   (`é` decodifica a "é" igual), pero se mostraba crudo en esta
   pantalla en vez de "Miércoles"/"Sábado".
 
-## Panel de control (formato solapa, botones secundarios con leyenda propia)
+## Panel de control (formato solapa + grilla de cuadritos informativos)
 
-Pasó de dos botones sueltos en una fila (uno primario, "Avanzar de
-mes"; el otro sin ningún estilo asignado, "Generar backup ahora") a
-formato solapa (una sola pestaña, "Resumen") con los dos botones ahora
-`botonSecundario` — pedido explícito de la clienta: esta pantalla ya no
-tiene una acción más "importante" que la otra.
+Primera vuelta: pasó de dos botones sueltos en una fila (uno primario,
+el otro sin estilo) a formato solapa con los dos como `botonSecundario`
+y una leyenda de estado propia arriba de cada uno. Segunda vuelta
+(pedido explícito de la clienta sobre esa primera versión): esas dos
+leyendas y el subtítulo del encabezado (período en curso + hoy) se
+sacaron — la información que daban ahora vive, más completa, en una
+grilla de cuadritos informativos debajo de los botones. También se
+invirtió el orden de los botones ("Generar backup ahora" arriba,
+"Avanzar de mes" abajo) y "Avanzar de mes" volvió a ser `botonPrimario`
+(el otro queda `botonSecundario`) — sigue siendo la acción más
+"definitiva" de la pantalla. La solapa pasó a llamarse "Panel de
+control" (antes "Resumen") y, a futuro, va a terminar viviendo dentro
+de otro formulario todavía sin definir — no se tocó nada de la
+estructura pensando en eso, es solo un aviso para cuando se defina.
 
-Columna izquierda (ancho fijo, mismo criterio que el resto de las
-pantallas con panel de filtros a la izquierda), de arriba abajo:
-leyenda "Período actual {MM-AAAA}" (`leyenda_periodo`), botón "Avanzar
-de mes", línea divisoria, leyenda "Último backup {día abreviado
-dd-MM-yyyy HH:MMhs}" o "Todavía no se generó ningún backup." si nunca
-se generó uno (`leyenda_backup`, `app.negocio.backup.ultimo_backup` —
-nueva función, arma el `datetime` completo a partir del nombre de la
-subcarpeta de backup más reciente, mismo criterio que la ya existente
-`backup_vencido` pero sin descartar la hora), botón "Generar backup
-ahora". El formato de fecha de `leyenda_backup` es a mano (`_texto_
-fecha_hora`, día de la semana abreviado + `dd-MM-yyyy` + hora) porque
-acá el dato es un `datetime` de Python, no un campo de formulario con
-su propio `QDateEdit` — mismo criterio visual que las fechas de
-Registro de ausencias/Pagos, sin ser el mismo mecanismo. Las dos
-leyendas y `_generar_backup`/`_avanzar_mes` se refrescan solos después
-de cada acción (ya llamaban a `actualizar()` al terminar, o se sumó la
-llamada — ver `_generar_backup`).
+Columna izquierda (ancho fijo): "Generar backup ahora" arriba,
+"Avanzar de mes" abajo. A la derecha, el mismo cuadro de texto fijo de
+la primera vuelta (borde negro) explicando qué hace cada botón — no se
+tocó, la clienta solo pidió sacar las leyendas, no esta explicación.
 
-A la derecha de esa columna, un cuadro de texto fijo (borde negro,
-mismo criterio que otros "cuadros" del sistema, ej. la vista previa de
-Placas) que explica en texto corrido qué hace cada uno de los dos
-botones — pedido explícito de la clienta, para que quede claro de qué
-se trata cada acción sin tener que abrir un cartel de confirmación
-para enterarse.
+Debajo, una `QGridLayout` de 3 columnas con siete cuadritos (`_tarjeta`,
+borde negro + título en negrita arriba, `QSizePolicy.Expanding` en los
+dos ejes + `setColumnStretch`/`setRowStretch` a 1 en toda la grilla
+para que ocupen todo el espacio disponible, pedido explícito de la
+clienta — "que quede todo ocupado de alguna manera"):
 
-Las alertas siguen exactamente igual que antes (tarjetas simples, no
-tabla — no se forzó ningún cambio ahí), debajo de la fila de
-botones/leyenda, en su propio `QScrollArea` (pueden ser muchas). El
-título de la pantalla sigue mostrando el nombre del espacio tal cual
-está cargado en Configuración general (sin `.upper()`) — quedó
+1. **Fecha y hora actual**: reloj en vivo (`QTimer` cada 1000ms,
+   `_actualizar_reloj`) con segundos — a propósito la hora REAL del
+   sistema (`datetime.now()`), no la fecha ficticia de QA: un reloj en
+   vivo tiene que orientar al operador con la hora real aunque el resto
+   de la pantalla esté calculando sobre una fecha simulada.
+2. **Período actual**: mismo texto que mostraba antes el subtítulo del
+   encabezado ("Septiembre de 2026 (09/2026)"), ahora en su propio
+   cuadrito.
+3. **Último backup**: fecha/hora del backup más reciente (`app.negocio.
+   backup.ultimo_backup`, nueva función — arma el `datetime` completo a
+   partir del nombre de la subcarpeta, mismo criterio que la ya
+   existente `backup_vencido` pero sin descartar la hora), frecuencia
+   configurada y estado (al día/vencido, reusando `backup_vencido`)
+   — "información completa", pedido explícito de la clienta.
+4. **Feriados y fechas especiales (este mes y el próximo)**: ventana
+   CALENDARIO (primer día del mes en curso al último día del siguiente,
+   `app.negocio.panel_control.fechas_especiales_mes_actual_y_siguiente`
+   — nueva función, distinta de la que ya existía para la alerta de
+   "próximos 15 días corridos", que sigue como estaba).
+5. **Profesionales** (`calcular_estadisticas_profesionales`, nueva
+   función): cantidad con plan de pago vigente (`PlanPago.Estado =
+   'Activo'`), cantidad con saldo fuera de tolerancia (mismo criterio
+   que las alertas de deuda, sumando regulares + aisladas en un solo
+   número acá), cantidad con reservas regulares activas hoy.
+6. **Ocupación y horas** (`calcular_estadisticas_ocupacion`, nueva
+   función, reusa `calcular_ocupacion`/`monto_bruto_aislada_periodo` de
+   `app.negocio.estadisticas`): % de ocupación regular general, horas
+   regulares reservadas por semana en este momento, horas aisladas
+   confirmadas del mes en curso, monto que generaron esas horas
+   aisladas (bruto, mismo criterio que Estadísticas), y "saldo pendiente
+   de cobro este mes" — interpretado como lo facturado del período
+   (`LiquidacionEmitida.MontoGenerado`) menos lo ya cobrado imputado a
+   ese mismo período (`HistorialPagos.Monto`); no hay una única forma
+   de calcular esto último en el resto del sistema, así que quedó
+   documentado como interpretación propia a confirmar con la clienta.
+7. **Alertas**: el mecanismo de siempre (`Alertas`/`calcular_alertas`,
+   `_tarjeta_alerta`/`_tarjeta_alerta_simple`, `self.contenedor_alertas`/
+   `self.layout_alertas` con los mismos nombres de atributo que antes)
+   sin cambios funcionales — pasó de ser una lista aparte debajo de todo
+   a ser, en sí misma, uno de los siete cuadritos ("algo más que se te
+   ocurra": en vez de inventar contenido nuevo para este séptimo
+   cuadrito, se reaprovechó lo que ya existía).
+
+El título de la pantalla sigue mostrando el nombre del espacio tal cual
+está cargado en Configuración general (sin `.upper()`) — sigue
 pendiente de definir con la clienta si tiene sentido aplicarle el
-formato Nivel 1 a un nombre propio o si conviene separar un título de
-pantalla fijo del saludo con el nombre del espacio; no se tocó en esta
-vuelta.
+formato Nivel 1 a un nombre propio; no se tocó en esta vuelta tampoco.
 
 ## Metodología de trabajo
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import pytest
-from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget, QWidget
+from PySide6.QtWidgets import QGridLayout, QLabel, QMessageBox, QTabWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -251,14 +251,14 @@ def test_tiene_formato_solapa_con_una_pestana(qtbot, conn):
     qtbot.addWidget(pantalla)
     solapas = pantalla.findChild(QTabWidget)
     assert solapas is not None
-    assert solapas.tabText(0) == "Resumen"
+    assert solapas.tabText(0) == "Panel de control"
     assert pantalla.findChild(QWidget, "panelSolapa") is not None
 
 
-def test_los_dos_botones_son_secundarios(qtbot, conn):
+def test_avanzar_de_mes_es_primario_y_backup_secundario(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.boton_avanzar.objectName() == "botonSecundario"
+    assert pantalla.boton_avanzar.objectName() == "botonPrimario"
     assert pantalla.boton_backup.objectName() == "botonSecundario"
 
 
@@ -268,53 +268,144 @@ def test_los_dos_botones_comparten_el_mismo_ancho_fijo(qtbot, conn):
     assert pantalla.boton_avanzar.width() == pantalla.boton_backup.width()
 
 
-def test_leyenda_periodo_actual(qtbot, conn):
+def test_no_quedan_las_leyendas_ni_el_subtitulo_viejos(qtbot, conn):
+    """Se sacaron a pedido de la clienta: esa información ahora vive en
+    los cuadritos de abajo."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert not hasattr(pantalla, "subtitulo")
+    assert not hasattr(pantalla, "leyenda_periodo")
+    assert not hasattr(pantalla, "leyenda_backup")
+
+
+def test_tarjeta_reloj_muestra_fecha_y_hora_real_con_segundos(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.etiqueta_reloj.text()
+    assert texto.count(":") == 2  # HH:MM:SS
+    assert texto.endswith("hs")
+
+
+def test_tarjeta_reloj_se_actualiza_con_el_timer(qtbot, conn, monkeypatch):
+    momentos = iter([datetime(2026, 8, 25, 14, 45, 0), datetime(2026, 8, 25, 14, 45, 1)])
+    monkeypatch.setattr(
+        "app.gui.pantallas.panel_control.datetime",
+        type("_FakeDatetime", (), {"now": staticmethod(lambda: next(momentos))}),
+    )
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.etiqueta_reloj.text() == "mar 25-08-2026 14:45:00hs"
+    pantalla._actualizar_reloj()
+    assert pantalla.etiqueta_reloj.text() == "mar 25-08-2026 14:45:01hs"
+
+
+def test_tarjeta_periodo_actual(qtbot, conn):
     conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1")
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.leyenda_periodo.text() == "Período actual 08-2026"
+    assert pantalla.etiqueta_periodo.text() == "Agosto de 2026 (08/2026)"
 
 
-def test_leyenda_backup_sin_ninguno_generado(qtbot, conn):
+def test_tarjeta_backup_sin_ninguno_generado(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.leyenda_backup.text() == "Todavía no se generó ningún backup."
+    assert "Todavía no se generó ningún backup." in pantalla.etiqueta_backup.text()
 
 
-def test_leyenda_backup_con_uno_ya_generado(qtbot, conn, tmp_path, monkeypatch):
-    obtener_repositorio(conn, "Configuracion").actualizar(1, CarpetaBackup=str(tmp_path / "backups"))
+def test_tarjeta_backup_con_uno_ya_generado(qtbot, conn, tmp_path):
+    obtener_repositorio(conn, "Configuracion").actualizar(
+        1, CarpetaBackup=str(tmp_path / "backups"), FrecuenciaBackupDrive="Semanal",
+    )
     generar_backup(conn, momento=datetime(2026, 8, 25, 14, 45))
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.leyenda_backup.text() == "Último backup mar 25-08-2026 14:45hs"
+    texto = pantalla.etiqueta_backup.text()
+    assert "Último backup: mar 25-08-2026 14:45hs" in texto
+    assert "Frecuencia configurada: Semanal" in texto
+    assert "Estado:" in texto
 
 
-def test_generar_backup_actualiza_la_leyenda(qtbot, conn, tmp_path):
+def test_generar_backup_actualiza_la_tarjeta(qtbot, conn, tmp_path):
     obtener_repositorio(conn, "Configuracion").actualizar(1, CarpetaBackup=str(tmp_path / "backups"))
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.leyenda_backup.text() == "Todavía no se generó ningún backup."
+    assert "Todavía no se generó ningún backup." in pantalla.etiqueta_backup.text()
 
     pantalla._generar_backup()
 
-    assert pantalla.leyenda_backup.text().startswith("Último backup")
+    assert "Último backup:" in pantalla.etiqueta_backup.text()
 
 
-def test_foco_inicial_queda_en_avanzar_de_mes(qtbot, conn):
+def test_tarjeta_fechas_especiales_sin_datos(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert "Sin fechas especiales cargadas" in pantalla.etiqueta_fechas_especiales.text()
+
+
+def test_tarjeta_fechas_especiales_lista_mes_actual_y_siguiente(qtbot, conn):
+    conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1")
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-20", Descripcion="Feriado puente", Activo=1)
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-10-05", Descripcion="Fuera de rango", Activo=1)
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.etiqueta_fechas_especiales.text()
+    assert "2026-08-20" in texto
+    assert "Feriado puente" in texto
+    assert "2026-10-05" not in texto
+
+
+def test_tarjeta_profesionales_muestra_los_tres_conteos(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.etiqueta_profesionales.text()
+    assert "Con plan de pago vigente: 0" in texto
+    assert "Con saldo fuera de tolerancia: 0" in texto
+    assert "Con reservas regulares activas: 0" in texto
+
+
+def test_tarjeta_ocupacion_muestra_las_cinco_metricas(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.etiqueta_ocupacion.text()
+    assert "Ocupación regular general:" in texto
+    assert "Horas regulares reservadas por semana:" in texto
+    assert "Horas aisladas reservadas este mes:" in texto
+    assert "Monto generado por esas horas aisladas:" in texto
+    assert "Saldo pendiente de cobro este mes:" in texto
+
+
+def test_tarjeta_alertas_sigue_mostrando_las_alertas_de_siempre(qtbot, conn):
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Deudor", SaldoCuentaAnterior=99999,
+    )
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert any("Deudor" in t for t in _textos_visibles(pantalla.contenedor_alertas))
+
+
+def test_hay_siete_tarjetas_en_la_grilla(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    grilla = pantalla.findChild(QGridLayout)
+    assert grilla is not None
+    assert grilla.count() == 7
+
+
+def test_foco_inicial_queda_en_generar_backup(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
-    qtbot.waitUntil(lambda: pantalla.boton_avanzar.hasFocus())
+    qtbot.waitUntil(lambda: pantalla.boton_backup.hasFocus())
 
 
 def test_cadena_de_foco_entre_los_dos_botones_da_la_vuelta(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla._foco._orden == [pantalla.boton_avanzar, pantalla.boton_backup]
+    assert pantalla._foco._orden == [pantalla.boton_backup, pantalla.boton_avanzar]
     pantalla.show()
     qtbot.waitExposed(pantalla)
-    pantalla.boton_backup.setFocus()
-    qtbot.waitUntil(lambda: pantalla.boton_backup.hasFocus())
-    pantalla._foco._mover(pantalla.boton_backup, retroceder=False, seleccionar_todo=False)
+    pantalla.boton_avanzar.setFocus()
     qtbot.waitUntil(lambda: pantalla.boton_avanzar.hasFocus())
+    pantalla._foco._mover(pantalla.boton_avanzar, retroceder=False, seleccionar_todo=False)
+    qtbot.waitUntil(lambda: pantalla.boton_backup.hasFocus())
