@@ -1199,6 +1199,11 @@ dos cosas existía antes de esta revisión. Se sacó de paso una quinta
 columna sin usar en la tabla (`""`, encabezado vacío que `actualizar()`
 nunca llenaba — resabio sin efecto visible, no un bug reportado).
 
+Segunda vuelta: las columnas de la tabla suman `_PADDING_COLUMNA` (30px,
+mismo criterio y mismo valor que `novedades._ajustar_columnas`) sobre lo
+que deja `resizeColumnsToContents()` — quedaban apretadas, sobraba ancho
+en el panel.
+
 ## Importar planilla (botones a la izquierda, planilla modelo descargable)
 
 Mismo pasaje de layout que el resto de las pantallas de esta revisión:
@@ -1207,27 +1212,35 @@ a formato solapa (única pestaña "Importación") con una columna
 izquierda de ancho fijo (`_ANCHO_BOTON = 260`, calculado para que entre
 "Descargar planilla importación" sin cortarse) y los tres cuadros de
 resultado (tabla por hoja, errores, informe de integridad) a la
-derecha. Orden de la columna izquierda, pedido explícito de la clienta:
-"Elegir archivo..." (`botonSecundario`) con el archivo elegido
-mostrado debajo (`self.campo_ruta`, sigue siendo un `QLineEdit`
-de solo lectura — no cambió de tipo, solo de posición, para no romper
-los tests que lo cargan directo con `.setText()` salteando el selector
-de archivo), "Importar" (`botonPrimario` — es la única de las tres
-acciones que efectivamente escribe algo en la base) y, nuevo,
-"Descargar planilla importación" (`botonSecundario`).
+derecha. "Importar" es `botonPrimario` (es la única de las tres
+acciones que efectivamente escribe algo en la base); "Elegir archivo"
+y "Descargar planilla importación" quedan en `botonSecundario`.
 
-Este último botón es la primera vez que `app.importacion.plantillas.
-generar_plantillas` se cuelga de la GUI: antes solo estaba disponible
-por línea de comandos (`main.py generar-plantillas`). Abre un selector
-nativo "Guardar como" (`QFileDialog.getSaveFileName`, sugiere
+"Descargar planilla importación" es la primera vez que
+`app.importacion.plantillas.generar_plantillas` se cuelga de la GUI:
+antes solo estaba disponible por línea de comandos (`main.py
+generar-plantillas`). Abre un selector nativo "Guardar como"
+(`QFileDialog.getSaveFileName`, sugiere
 "Plantilla_Importacion_EspacioRamos.xlsx") y genera ahí el mismo libro
 Excel con la hoja de instrucciones y una hoja por entidad importable —
 mismo criterio de "Descargar" que Gestor de archivos (copia hacia
 afuera, no toca nada de lo que ya está cargado en el sistema).
 
-Cadena de foco Enter/Tab (nueva, no existía antes de esta revisión):
-Elegir archivo → Importar → Descargar planilla importación, con
-`showEvent` enfocando "Elegir archivo" al entrar a la pantalla.
+Orden final de la columna izquierda (pedido explícito de la clienta en
+una segunda vuelta, invirtiendo el orden de la primera): "Descargar
+planilla importación" primero, después "Elegir archivo..." con el
+archivo elegido mostrado debajo (`self.campo_ruta`, sigue siendo un
+`QLineEdit` de solo lectura — no cambió de tipo, solo de posición, para
+no romper los tests que lo cargan directo con `.setText()` salteando
+el selector de archivo) y por último "Importar". La cadena de foco
+Enter/Tab sigue ese mismo orden (Descargar planilla importación →
+Elegir archivo → Importar, con `showEvent` enfocando el primero al
+entrar a la pantalla) — la posición en la columna manda sobre cuál es
+primario/secundario, son dos decisiones independientes.
+
+Las columnas de "Resultado por hoja" suman también `_PADDING_COLUMNA`
+(30px, mismo criterio que `novedades._ajustar_columnas`) sobre lo que
+deja `resizeColumnsToContents()`.
 
 ## Metodología de trabajo
 

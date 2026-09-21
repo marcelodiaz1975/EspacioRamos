@@ -6,13 +6,13 @@ profesional duplicados y reservas regulares superpuestas — que la carga
 masiva no bloquea a propósito (ver el docstring de ese módulo).
 
 Formato solapa (revisión uno por uno): columna izquierda de ancho fijo
-con "Elegir archivo", "Importar" (`botonPrimario` — es la acción que
-efectivamente escribe algo) y "Descargar planilla importación"
-(`botonSecundario`, primera vez que `app.importacion.plantillas.
-generar_plantillas` se cuelga de la GUI — antes solo estaba disponible
-por línea de comandos, `main.py generar-plantillas`); a la derecha, los
-tres cuadros de resultado (tabla por hoja, errores, informe de
-integridad)."""
+con "Descargar planilla importación" primero (`botonSecundario`,
+primera vez que `app.importacion.plantillas.generar_plantillas` se
+cuelga de la GUI — antes solo estaba disponible por línea de comandos,
+`main.py generar-plantillas`), después "Elegir archivo" y "Importar"
+(`botonPrimario` — es la acción que efectivamente escribe algo); a la
+derecha, los tres cuadros de resultado (tabla por hoja, errores,
+informe de integridad)."""
 from __future__ import annotations
 
 import sqlite3
@@ -41,12 +41,22 @@ from app.importacion.informe_integridad import generar_informe_integridad
 from app.importacion.plantillas import generar_plantillas
 
 _ANCHO_BOTON = 260  # "Descargar planilla importación", el texto más largo de la columna
+_PADDING_COLUMNA = 30  # mismo criterio que `novedades._ajustar_columnas`: más aire que el ancho justo
 
 
 def _titulo_campo(texto: str) -> QLabel:
     etiqueta = QLabel(texto)
     etiqueta.setObjectName("subtituloCampo")
     return etiqueta
+
+
+def _ajustar_columnas(tabla: QTableWidget) -> None:
+    """Mismo criterio que `novedades._ajustar_columnas`: `resizeColumnsToContents`
+    deja las columnas al ancho justo del contenido — se les agrega
+    `_PADDING_COLUMNA` de más a cada una, sin igualarlas entre sí."""
+    tabla.resizeColumnsToContents()
+    for columna in range(tabla.columnCount()):
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
 
 
 class PantallaImportacion(QWidget):
@@ -60,7 +70,7 @@ class PantallaImportacion(QWidget):
         QTabWidget contenedor todavía no está mostrado en ese momento
         (mismo motivo que Reservas/Liquidación/Archivos varios)."""
         super().showEvent(event)
-        self.boton_elegir.setFocus()
+        self.boton_descargar_plantilla.setFocus()
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -87,6 +97,11 @@ class PantallaImportacion(QWidget):
         subtitulo.setFixedWidth(_ANCHO_BOTON)
         columna.addWidget(subtitulo)
 
+        self.boton_descargar_plantilla = QPushButton("Descargar planilla importación")
+        self.boton_descargar_plantilla.setObjectName("botonSecundario")
+        self.boton_descargar_plantilla.clicked.connect(self._descargar_plantilla)
+        columna.addWidget(self.boton_descargar_plantilla)
+
         self.boton_elegir = QPushButton("Elegir archivo...")
         self.boton_elegir.setObjectName("botonSecundario")
         self.boton_elegir.clicked.connect(self._elegir_archivo)
@@ -103,19 +118,14 @@ class PantallaImportacion(QWidget):
         self.boton_importar.clicked.connect(self._importar)
         columna.addWidget(self.boton_importar)
 
-        self.boton_descargar_plantilla = QPushButton("Descargar planilla importación")
-        self.boton_descargar_plantilla.setObjectName("botonSecundario")
-        self.boton_descargar_plantilla.clicked.connect(self._descargar_plantilla)
-        columna.addWidget(self.boton_descargar_plantilla)
-
-        for widget in (self.boton_elegir, self.campo_ruta, self.boton_importar, self.boton_descargar_plantilla):
+        for widget in (self.boton_descargar_plantilla, self.boton_elegir, self.campo_ruta, self.boton_importar):
             widget.setFixedWidth(_ANCHO_BOTON)
 
         columna.addStretch()
         layout_solapa.addWidget(panel_izquierda)
 
         self._foco = instalar_enter_avanza_foco(
-            [self.boton_elegir, self.boton_importar, self.boton_descargar_plantilla], parent=self,
+            [self.boton_descargar_plantilla, self.boton_elegir, self.boton_importar], parent=self,
         )
 
         columna_derecha = QVBoxLayout()
@@ -185,7 +195,7 @@ class PantallaImportacion(QWidget):
             self.tabla_resultados.setItem(i, 2, item_numero(str(len(r.errores))))
             for err in r.errores:
                 lineas_error.append(f"[{r.entidad}] {err}")
-        self.tabla_resultados.resizeColumnsToContents()
+        _ajustar_columnas(self.tabla_resultados)
         self.texto_errores.setPlainText("\n".join(lineas_error))
 
         informe = generar_informe_integridad(self.conn)

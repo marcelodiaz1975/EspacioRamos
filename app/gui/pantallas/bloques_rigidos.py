@@ -50,6 +50,7 @@ from app.repositorio.registro import obtener_repositorio
 
 _ID_REGISTRO = Qt.ItemDataRole.UserRole
 _ANCHO_CAMPO = 240  # mismo ancho que el panel izquierdo de los catálogos genéricos
+_PADDING_COLUMNA = 30  # mismo criterio que `novedades._ajustar_columnas`: más aire que el ancho justo
 
 
 def _resumen_dias(dias: list[str]) -> str:
@@ -68,6 +69,15 @@ def _fmt_hora(valor: float) -> str:
 
 def _fmt_horario(hora_inicio: float, hora_fin: float) -> str:
     return f"{_fmt_hora(hora_inicio)} a {_fmt_hora(hora_fin)}"
+
+
+def _ajustar_columnas(tabla: QTableWidget) -> None:
+    """Mismo criterio que `novedades._ajustar_columnas`: `resizeColumnsToContents`
+    deja las columnas al ancho justo del contenido — se les agrega
+    `_PADDING_COLUMNA` de más a cada una, sin igualarlas entre sí."""
+    tabla.resizeColumnsToContents()
+    for columna in range(tabla.columnCount()):
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
 
 
 class _SpinHora(QDoubleSpinBox):
@@ -292,7 +302,7 @@ class PantallaBloquesRigidos(QWidget):
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(_resumen_dias(json.loads(r["DiasLogica"] or "[]"))))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_resumen_dias(json.loads(r["DiasVisualizacion"] or "[]"))))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem("Sí" if r["Activo"] else "No"))
-        self.tabla.resizeColumnsToContents()
+        _ajustar_columnas(self.tabla)
         self._aplicar_filtro_busqueda()
 
     def _fila_seleccionada_id(self):

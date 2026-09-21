@@ -100,20 +100,20 @@ def test_importar_es_primario_elegir_y_descargar_son_secundarios(qtbot, conn):
     assert pantalla.boton_descargar_plantilla.objectName() == "botonSecundario"
 
 
-def test_orden_de_los_botones_es_elegir_importar_descargar(qtbot, conn):
+def test_orden_de_los_botones_es_descargar_elegir_importar(qtbot, conn):
     pantalla = PantallaImportacion(conn)
     qtbot.addWidget(pantalla)
     assert pantalla._foco._orden == [
-        pantalla.boton_elegir, pantalla.boton_importar, pantalla.boton_descargar_plantilla,
+        pantalla.boton_descargar_plantilla, pantalla.boton_elegir, pantalla.boton_importar,
     ]
 
 
-def test_foco_inicial_queda_en_elegir_archivo(qtbot, conn):
+def test_foco_inicial_queda_en_descargar_planilla(qtbot, conn):
     pantalla = PantallaImportacion(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
-    qtbot.waitUntil(lambda: pantalla.boton_elegir.hasFocus())
+    qtbot.waitUntil(lambda: pantalla.boton_descargar_plantilla.hasFocus())
 
 
 def test_descargar_plantilla_genera_el_excel_en_el_destino_elegido(qtbot, conn, tmp_path, monkeypatch):
@@ -135,3 +135,17 @@ def test_descargar_plantilla_cancelada_no_genera_nada(qtbot, conn, tmp_path, mon
     pantalla._descargar_plantilla()
 
     assert list(tmp_path.glob("*.xlsx")) == []
+
+
+def test_columnas_de_resultado_tienen_mas_ancho_que_el_ajuste_justo(qtbot, conn, tmp_path):
+    pantalla = PantallaImportacion(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.campo_ruta.setText(_planilla_minima(tmp_path))
+    pantalla._importar()
+
+    tabla = pantalla.tabla_resultados
+    anchos_con_padding = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
+    tabla.resizeColumnsToContents()
+    anchos_justos = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
+
+    assert all(con > justo for con, justo in zip(anchos_con_padding, anchos_justos))

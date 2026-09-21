@@ -161,3 +161,14 @@ def test_buscar_filtra_por_horario_sin_afectar_la_base(qtbot, conn):
     ocultas = [pantalla.tabla.isRowHidden(i) for i in range(pantalla.tabla.rowCount())]
     assert ocultas.count(True) == 1
     assert len(obtener_repositorio(conn, "BloqueRigido").listar()) == 2
+
+
+def test_columnas_de_la_tabla_tienen_mas_ancho_que_el_ajuste_justo(qtbot, conn):
+    pantalla = PantallaBloquesRigidos(conn)
+    qtbot.addWidget(pantalla)
+    tabla = pantalla.tabla
+    anchos_con_padding = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
+    tabla.resizeColumnsToContents()
+    anchos_justos = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
+
+    assert all(con > justo for con, justo in zip(anchos_con_padding, anchos_justos))
