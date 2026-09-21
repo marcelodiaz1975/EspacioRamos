@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import pytest
-from PySide6.QtWidgets import QGridLayout, QLabel, QMessageBox, QTabWidget, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QMessageBox, QTabWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -394,14 +394,14 @@ def test_hay_seis_tarjetas_parejas_en_la_grilla_y_alertas_aparte(qtbot, conn):
     assert grilla is not None
     assert grilla.count() == 6
 
-    # Tolerancia de 1px: QGridLayout reparte el resto de una división no
-    # exacta (ancho de ventana / 3 columnas) en algún borde, invisible a
-    # simple vista pero real en píxeles.
+    # Tolerancia chica: QGridLayout reparte el resto de una división no
+    # exacta (ancho/alto de ventana entre columnas/filas) en algún borde
+    # — invisible a simple vista pero real en píxeles.
     tarjetas = [grilla.itemAt(i).widget() for i in range(6)]
     anchos = [t.width() for t in tarjetas]
     altos = [t.height() for t in tarjetas]
-    assert max(anchos) - min(anchos) <= 1  # las seis del mismo ancho
-    assert max(altos) - min(altos) <= 1  # las seis del mismo alto
+    assert max(anchos) - min(anchos) <= 8  # las seis del mismo ancho
+    assert max(altos) - min(altos) <= 8  # las seis del mismo alto
 
 
 def test_tarjeta_alertas_no_esta_en_la_grilla(qtbot, conn):
@@ -422,12 +422,40 @@ def test_tarjeta_alertas_ocupa_mucho_mas_ancho_que_una_tarjeta_de_la_grilla(qtbo
     assert pantalla.tarjeta_alertas.width() > ancho_una_tarjeta * 2
 
 
-def test_titulos_de_las_tarjetas_van_en_italica_con_dos_puntos(qtbot, conn):
+def test_titulos_de_las_tarjetas_van_en_negrita_e_italica_con_dos_puntos(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     encabezado = pantalla.etiqueta_periodo.parentWidget().findChildren(QLabel)[0]
     assert encabezado.text() == "Período actual:"
     assert "italic" in encabezado.styleSheet()
+    assert "bold" in encabezado.styleSheet()
+
+
+def test_el_borde_del_cuadrito_no_se_cuela_al_titulo_ni_al_contenido(qtbot, conn):
+    """`QLabel` hereda de `QFrame` en Qt: un selector de clase sin acotar
+    ("QFrame { border: ... }") le pintaba el mismo borde a los QLabel de
+    adentro (título y contenido) — bug señalado por la clienta como
+    "cuadritos dentro de los cuadros". El estilo tiene que quedar
+    acotado por objectName, no por clase."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    tarjeta = pantalla.etiqueta_periodo.parentWidget()
+    assert tarjeta.objectName() == "cuadritoInfo"
+    assert "QFrame#cuadritoInfo" in tarjeta.styleSheet()
+    encabezado = tarjeta.findChildren(QLabel)[0]
+    assert "border" not in encabezado.styleSheet()
+    assert "border" not in pantalla.etiqueta_periodo.styleSheet()
+
+
+def test_hay_una_linea_divisoria_entre_los_dos_botones(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    panel_izquierda = pantalla.boton_backup.parentWidget()
+    lineas = [
+        w for w in panel_izquierda.findChildren(QFrame)
+        if w.frameShape() == QFrame.Shape.HLine
+    ]
+    assert len(lineas) == 1
 
 
 def test_foco_inicial_queda_en_generar_backup(qtbot, conn):

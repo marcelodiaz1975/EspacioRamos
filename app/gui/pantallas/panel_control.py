@@ -19,7 +19,15 @@ como un cuadrito aparte en vez de una lista suelta). Tercera vuelta:
 los seis cuadritos principales quedan parejos (mismo ancho y alto,
 `_ALTO_MINIMO_TARJETA`), el título de cada cuadrito pasa a itálica y
 termina en ":" (`_tarjeta`), y ni el título ni el contenido de abajo
-tienen caja propia — un solo borde por cuadrito, el de afuera."""
+tienen caja propia — un solo borde por cuadrito, el de afuera. Cuarta
+vuelta: el borde de `_tarjeta` en realidad SÍ se colaba al título y al
+contenido de abajo — `QLabel` hereda de `QFrame` en Qt, así que el
+selector de clase `QFrame { border: ... }` de la vuelta anterior
+también les pintaba el borde a esos `QLabel` hijos ("cuadritos dentro
+de los cuadros", como lo señaló la clienta); se corrigió acotando el
+estilo por objectName (`QFrame#cuadritoInfo`). El título de cada
+cuadrito pasa además a negrita (ya estaba en itálica), y se suma una
+línea divisoria entre los dos botones de la columna izquierda."""
 from __future__ import annotations
 
 import sqlite3
@@ -85,6 +93,13 @@ _ETIQUETA_FILA = {
 }
 
 
+def _linea_divisoria() -> QFrame:
+    linea = QFrame()
+    linea.setFrameShape(QFrame.Shape.HLine)
+    linea.setFrameShadow(QFrame.Shadow.Sunken)
+    return linea
+
+
 def _texto_fecha_hora(momento: datetime, *, con_segundos: bool = False) -> str:
     """"vie 25-08-2026 14:45hs" — mismo criterio que las fechas de
     Registro de ausencias/Pagos (día de la semana abreviado + dd-MM-yyyy
@@ -101,17 +116,23 @@ def _tarjeta(titulo: str) -> tuple[QFrame, QVBoxLayout]:
     """Cuadrito informativo: UN solo borde negro alrededor de todo el
     cuadrito (mismo criterio que el cuadro de texto de los botones) — el
     título y el contenido de abajo son texto plano sin caja propia,
-    nunca cuadritos anidados. Título en itálica y terminado en ":",
-    pedido explícito de la clienta; altura mínima pareja para que los
-    seis cuadritos principales queden del mismo alto sin importar cuánto
-    contenido tenga cada uno."""
+    nunca cuadritos anidados. El estilo se aplica con un selector por
+    objectName (`QFrame#cuadritoInfo`), no por clase (`QFrame` a secas):
+    `QLabel` hereda de `QFrame` en Qt, así que un selector de clase sin
+    acotar terminaba pintándole el mismo borde a los QLabel de adentro
+    (título y contenido) — el bug que la clienta señaló como "cuadritos
+    dentro de los cuadros". Título en negrita e itálica y terminado en
+    ":", pedido explícito de la clienta; altura mínima pareja para que
+    los seis cuadritos principales queden del mismo alto sin importar
+    cuánto contenido tenga cada uno."""
     tarjeta = QFrame()
-    tarjeta.setStyleSheet("QFrame { border: 1px solid black; }")
+    tarjeta.setObjectName("cuadritoInfo")
+    tarjeta.setStyleSheet("QFrame#cuadritoInfo { border: 1px solid black; }")
     tarjeta.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     tarjeta.setMinimumHeight(_ALTO_MINIMO_TARJETA)
     layout = QVBoxLayout(tarjeta)
     encabezado = QLabel(f"{titulo}:")
-    encabezado.setStyleSheet("font-style: italic;")
+    encabezado.setStyleSheet("font-style: italic; font-weight: bold;")
     layout.addWidget(encabezado)
     return tarjeta, layout
 
@@ -156,6 +177,8 @@ class PanelControl(QWidget):
         self.boton_backup.setFixedWidth(_ANCHO_BOTON)
         self.boton_backup.clicked.connect(self._generar_backup)
         columna.addWidget(self.boton_backup)
+
+        columna.addWidget(_linea_divisoria())
 
         self.boton_avanzar = QPushButton("Avanzar de mes")
         self.boton_avanzar.setObjectName("botonPrimario")

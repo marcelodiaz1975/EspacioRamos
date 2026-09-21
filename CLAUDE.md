@@ -1098,12 +1098,31 @@ solo (`setColumnStretch` a 1 en las tres columnas).
 Dentro de cada cuadrito (`_tarjeta`, la función que arma el título y
 devuelve el layout para que cada uno cargue su contenido): el título
 pasa a itálica (`QLabel` con `font-style: italic;` en el stylesheet, en
-vez de negrita) y termina en ":" — pedido explícito de la clienta. Ni
-el título ni el contenido de abajo tienen su propia caja: siguen siendo
-`QLabel` de texto plano, un solo borde por cuadrito (el del `QFrame`
-de afuera) — esto ya era así antes de esta vuelta, la clienta lo pidió
-de nuevo como aclaración/refuerzo, no había ningún cuadrito anidado que
-sacar en la práctica.
+vez de negrita) y termina en ":" — pedido explícito de la clienta.
+
+Cuarta vuelta: la clienta señaló, con captura en mano, que SÍ había
+"cuadritos dentro de los cuadros" — el título y el contenido de cada
+cuadrito tenían su propio recuadro además del borde exterior. La causa:
+`_tarjeta` pintaba el borde con un selector de clase sin acotar
+(`"QFrame { border: 1px solid black; }"`), y en Qt `QLabel` HEREDA de
+`QFrame` — ese selector de clase le pintaba el mismo borde a cualquier
+`QLabel` hijo del cuadrito (el título y el contenido), no solo al
+`QFrame` de afuera. Se corrigió acotando el estilo por objectName
+(`tarjeta.setObjectName("cuadritoInfo")` +
+`"QFrame#cuadritoInfo { border: ... }"`, selector por id en vez de por
+clase) — mismo criterio que ya usaban `QFrame#tarjetaAlerta`/
+`QLabel#tituloPantalla`/etc. en `estilos.py`, que por eso nunca habían
+tenido este problema. Ojo para el futuro: cualquier regla QSS que
+apunte a `QFrame` (o a cualquier clase de la que `QLabel` herede) sin
+acotar por objectName corre el mismo riesgo de colarse a los `QLabel`
+de adentro.
+
+De paso, el título de cada cuadrito pasa también a NEGRITA (además de
+la itálica que ya tenía), y se suma una línea divisoria
+(`_linea_divisoria`, mismo `QFrame.Shape.HLine` que el resto del
+sistema) entre los dos botones de la columna izquierda — se había
+sacado sin querer en la segunda vuelta al eliminar las leyendas que
+tenía al lado, y la clienta la pidió de vuelta.
 
 ## Metodología de trabajo
 
