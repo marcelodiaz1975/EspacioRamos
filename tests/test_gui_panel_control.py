@@ -342,16 +342,20 @@ def test_tarjeta_fechas_especiales_sin_datos(qtbot, conn):
     assert "Sin fechas especiales cargadas" in pantalla.etiqueta_fechas_especiales.text()
 
 
-def test_tarjeta_fechas_especiales_lista_mes_actual_y_siguiente(qtbot, conn):
+def test_tarjeta_fechas_especiales_lista_lo_que_falta_del_mes_y_los_dos_siguientes(qtbot, conn):
     conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1")
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-01", Descripcion="Ya pasó", Activo=1)
     obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-20", Descripcion="Feriado puente", Activo=1)
-    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-10-05", Descripcion="Fuera de rango", Activo=1)
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-10-05", Descripcion="Dentro de rango", Activo=1)
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-11-01", Descripcion="Fuera de rango", Activo=1)
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     texto = pantalla.etiqueta_fechas_especiales.text()
+    assert "2026-08-01" not in texto
     assert "2026-08-20" in texto
     assert "Feriado puente" in texto
-    assert "2026-10-05" not in texto
+    assert "2026-10-05" in texto
+    assert "2026-11-01" not in texto
 
 
 def test_tarjeta_profesionales_muestra_los_tres_conteos(qtbot, conn):
@@ -456,6 +460,33 @@ def test_hay_una_linea_divisoria_entre_los_dos_botones(qtbot, conn):
         if w.frameShape() == QFrame.Shape.HLine
     ]
     assert len(lineas) == 1
+
+
+def test_cada_boton_tiene_su_propia_explicacion_al_lado(qtbot, conn):
+    """Antes había un único cuadro de texto para los dos botones; ahora
+    cada uno tiene el suyo, en la misma fila que su botón — pedido
+    explícito de la clienta ("a la par del botón correspondiente")."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+
+    assert "Generar backup ahora copia la base de datos" in pantalla.etiqueta_explicacion_backup.text()
+    assert pantalla.etiqueta_explicacion_avanzar.text() == (
+        "Avanzar de mes realiza el pase de un mes a otro en el sistema. Este proceso ubica virtualmente al "
+        "operador en el nuevo período cualquier sea la fecha real del día."
+    )
+    # Misma fila que su botón: ambos comparten padre directo (el QHBoxLayout
+    # de esa fila reparenta sus widgets al mismo widget dueño del layout).
+    assert pantalla.etiqueta_explicacion_backup.parentWidget() is pantalla.boton_backup.parentWidget()
+    assert pantalla.etiqueta_explicacion_avanzar.parentWidget() is pantalla.boton_avanzar.parentWidget()
+
+
+def test_titulo_de_fechas_especiales_es_corto(qtbot, conn):
+    """Título largo anterior forzaba esa columna de la grilla más ancha
+    que las otras dos — se acortó, pedido explícito de la clienta."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    encabezado = pantalla.etiqueta_fechas_especiales.parentWidget().findChildren(QLabel)[0]
+    assert encabezado.text() == "Feriados y fechas especiales próximas:"
 
 
 def test_foco_inicial_queda_en_generar_backup(qtbot, conn):

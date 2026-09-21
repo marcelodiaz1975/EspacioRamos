@@ -1124,6 +1124,44 @@ sistema) entre los dos botones de la columna izquierda — se había
 sacado sin querer en la segunda vuelta al eliminar las leyendas que
 tenía al lado, y la clienta la pidió de vuelta.
 
+Quinta vuelta: la clienta notó que la columna de "Fecha y hora actual"
+quedaba más ancha que las otras dos. Causa real: `QGridLayout` calcula
+el ancho mínimo de cada columna a partir del contenido más ancho que
+tenga adentro, y RECIÉN DESPUÉS reparte el espacio sobrante según
+`setColumnStretch` — con las tres columnas en 1 de stretch por igual,
+la que tenía el título más largo ("Feriados y fechas especiales (este
+mes y el próximo)") arrancaba con un mínimo más alto que las otras dos,
+así que terminaba más ancha aunque el stretch fuera parejo. Se acortó
+el título a "Feriados y fechas especiales próximas" (pedido explícito
+de la clienta) y las tres columnas quedaron parejas (comprobado:
+~381-382px las tres, contra una diferencia real de 4px antes del
+cambio — ver `test_hay_seis_tarjetas_parejas_en_la_grilla_y_alertas_
+aparte`).
+
+De paso cambió la lógica de ese cuadrito (`app.negocio.panel_control.
+fechas_especiales_proximas_dos_meses`, renombrada desde `fechas_
+especiales_mes_actual_y_siguiente`): antes arrancaba en el día 1 del
+mes en curso (mostraba fechas ya pasadas de ese mes) y llegaba hasta el
+último día del mes siguiente; ahora arranca en HOY (lo que ya pasó del
+mes no se muestra) y llega hasta el último día del SEGUNDO mes
+siguiente — "lo que queda de este mes, más los dos próximos meses",
+pedido explícito de la clienta.
+
+Las explicaciones de los botones dejan de ser un único cuadro de texto
+compartido y pasan a ser una por botón (`self.etiqueta_explicacion_
+backup`/`self.etiqueta_explicacion_avanzar`, `_texto_explicacion`),
+cada una en la misma fila que su botón correspondiente (`fila_backup`/
+`fila_avanzar`, con el botón alineado arriba —
+`Qt.AlignmentFlag.AlignTop` — para que no se estire ni quede centrado
+raro contra un texto de varias líneas) — "que queden a la par del botón
+correspondiente", pedido explícito de la clienta. El texto de "Avanzar
+de mes" se reescribió con la redacción exacta que dio la clienta
+("Avanzar de mes realiza el pase de un mes a otro en el sistema. Este
+proceso ubica virtualmente al operador en el nuevo período cualquier
+sea la fecha real del día."); el de "Generar backup ahora" es el mismo
+texto de siempre, solo que ahora en su propio cuadro en vez de
+compartido.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

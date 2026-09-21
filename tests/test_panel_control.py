@@ -6,7 +6,7 @@ from app.negocio.panel_control import (
     calcular_alertas,
     calcular_estadisticas_ocupacion,
     calcular_estadisticas_profesionales,
-    fechas_especiales_mes_actual_y_siguiente,
+    fechas_especiales_proximas_dos_meses,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -193,17 +193,31 @@ def test_estadisticas_ocupacion_saldo_pendiente_es_facturado_menos_cobrado(conn)
     assert calcular_estadisticas_ocupacion(conn).saldo_pendiente_mes == pytest.approx(6000.0)
 
 
-def test_fechas_especiales_mes_actual_y_siguiente_incluye_los_dos_meses(conn):
+def test_fechas_especiales_proximas_dos_meses_excluye_las_que_ya_pasaron_este_mes(conn):
     _fijar_fecha(conn, "2026-08-15")
     obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-01", Tipo="Feriado nacional", Activo=1)
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-14", Tipo="Feriado nacional", Activo=1)
+    assert fechas_especiales_proximas_dos_meses(conn) == []
+
+
+def test_fechas_especiales_proximas_dos_meses_incluye_hoy_y_lo_que_falta_del_mes(conn):
+    _fijar_fecha(conn, "2026-08-15")
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-15", Tipo="Feriado nacional", Activo=1)
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-31", Tipo="Feriado nacional", Activo=1)
+    fechas = fechas_especiales_proximas_dos_meses(conn)
+    assert [f["Fecha"] for f in fechas] == ["2026-08-15", "2026-08-31"]
+
+
+def test_fechas_especiales_proximas_dos_meses_incluye_los_dos_meses_siguientes(conn):
+    _fijar_fecha(conn, "2026-08-15")
     obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-09-30", Tipo="Feriado nacional", Activo=1)
-    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-10-01", Tipo="Feriado nacional", Activo=1)
-    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-07-31", Tipo="Feriado nacional", Activo=1)
-    fechas = fechas_especiales_mes_actual_y_siguiente(conn)
-    assert [f["Fecha"] for f in fechas] == ["2026-08-01", "2026-09-30"]
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-10-31", Tipo="Feriado nacional", Activo=1)
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-11-01", Tipo="Feriado nacional", Activo=1)
+    fechas = fechas_especiales_proximas_dos_meses(conn)
+    assert [f["Fecha"] for f in fechas] == ["2026-09-30", "2026-10-31"]
 
 
-def test_fechas_especiales_mes_actual_y_siguiente_ignora_inactivas(conn):
+def test_fechas_especiales_proximas_dos_meses_ignora_inactivas(conn):
     _fijar_fecha(conn, "2026-08-15")
     obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-20", Tipo="Feriado nacional", Activo=0)
-    assert fechas_especiales_mes_actual_y_siguiente(conn) == []
+    assert fechas_especiales_proximas_dos_meses(conn) == []

@@ -27,12 +27,26 @@ también les pintaba el borde a esos `QLabel` hijos ("cuadritos dentro
 de los cuadros", como lo señaló la clienta); se corrigió acotando el
 estilo por objectName (`QFrame#cuadritoInfo`). El título de cada
 cuadrito pasa además a negrita (ya estaba en itálica), y se suma una
-línea divisoria entre los dos botones de la columna izquierda."""
+línea divisoria entre los dos botones de la columna izquierda.
+
+Quinta vuelta: el título de la tarjeta de fechas especiales se acorta
+("Feriados y fechas especiales próximas") porque era el más largo y
+forzaba esa columna de la grilla más ancha que las otras dos; su lógica
+cambia de "desde el día 1 del mes en curso" a "desde hoy" (lo que ya
+pasó del mes no se muestra) hasta el último día del SEGUNDO mes
+siguiente (antes solo llegaba al primero) —
+`app.negocio.panel_control.fechas_especiales_proximas_dos_meses`,
+renombrada para reflejar el nuevo alcance. Las explicaciones de los
+botones dejan de ser un único cuadro de texto y pasan a ser una por
+botón, alineada al lado de su botón correspondiente (`fila_backup`/
+`fila_avanzar`) — el texto de "Avanzar de mes" además se reescribe con
+la redacción exacta pedida por la clienta."""
 from __future__ import annotations
 
 import sqlite3
 from datetime import datetime
 
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -46,7 +60,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import QTimer
 
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.avance_mes import avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo
@@ -58,20 +71,20 @@ from app.negocio.panel_control import (
     calcular_alertas,
     calcular_estadisticas_ocupacion,
     calcular_estadisticas_profesionales,
-    fechas_especiales_mes_actual_y_siguiente,
+    fechas_especiales_proximas_dos_meses,
 )
 
-_ANCHO_PANEL_IZQUIERDA = 240
 _ANCHO_BOTON = 220
 _COLUMNAS_GRILLA = 3
 _ALTO_MINIMO_TARJETA = 140  # deja lugar de sobra al cuadrito con más líneas ("Ocupación y horas")
 
-_TEXTO_EXPLICACION = (
-    '"Avanzar de mes" traspasa el saldo de cada profesional, cierra las cuotas de planes de pago que '
-    "correspondan y genera el snapshot mensual de ocupación — se puede usar en cualquier momento, no hace "
-    "falta esperar a que termine o empiece el mes.\n\n"
-    '"Generar backup ahora" copia la base de datos y toda la carpeta de archivos generados a la carpeta de '
+_TEXTO_EXPLICACION_BACKUP = (
+    "Generar backup ahora copia la base de datos y toda la carpeta de archivos generados a la carpeta de "
     "backup configurada, sin esperar a que se cumpla la frecuencia automática."
+)
+_TEXTO_EXPLICACION_AVANZAR = (
+    "Avanzar de mes realiza el pase de un mes a otro en el sistema. Este proceso ubica virtualmente al "
+    "operador en el nuevo período cualquier sea la fecha real del día."
 )
 
 _TITULOS_ALERTA = {
@@ -98,6 +111,16 @@ def _linea_divisoria() -> QFrame:
     linea.setFrameShape(QFrame.Shape.HLine)
     linea.setFrameShadow(QFrame.Shadow.Sunken)
     return linea
+
+
+def _texto_explicacion(texto: str) -> QLabel:
+    """Cuadro de texto fijo (borde negro) que explica un botón puntual —
+    antes había uno solo para los dos botones, ahora hay uno por botón,
+    alineado a su lado ("a la par del botón correspondiente")."""
+    etiqueta = QLabel(texto)
+    etiqueta.setWordWrap(True)
+    etiqueta.setStyleSheet("border: 1px solid black; padding: 8px;")
+    return etiqueta
 
 
 def _texto_fecha_hora(momento: datetime, *, con_segundos: bool = False) -> str:
@@ -163,37 +186,33 @@ class PanelControl(QWidget):
         panel_solapa.setObjectName("panelSolapa")
         layout_solapa = QVBoxLayout(panel_solapa)
 
-        fila_superior = QHBoxLayout()
-        panel_izquierda = QWidget()
-        panel_izquierda.setFixedWidth(_ANCHO_PANEL_IZQUIERDA)
-        columna = QVBoxLayout(panel_izquierda)
-        columna.setContentsMargins(0, 0, 0, 0)
-
         # Orden invertido a pedido de la clienta: "Generar backup ahora"
         # arriba, "Avanzar de mes" abajo — y este último vuelve a ser el
         # botonPrimario de la pantalla (el otro queda botonSecundario).
+        # Cada botón va en su propia fila junto con SU explicación (antes
+        # era un único cuadro de texto para los dos) — pedido explícito
+        # de la clienta: "que queden a la par del botón correspondiente".
         self.boton_backup = QPushButton("Generar backup ahora")
         self.boton_backup.setObjectName("botonSecundario")
         self.boton_backup.setFixedWidth(_ANCHO_BOTON)
         self.boton_backup.clicked.connect(self._generar_backup)
-        columna.addWidget(self.boton_backup)
-
-        columna.addWidget(_linea_divisoria())
+        self.etiqueta_explicacion_backup = _texto_explicacion(_TEXTO_EXPLICACION_BACKUP)
+        fila_backup = QHBoxLayout()
+        fila_backup.addWidget(self.boton_backup, alignment=Qt.AlignmentFlag.AlignTop)
+        fila_backup.addWidget(self.etiqueta_explicacion_backup, stretch=1)
 
         self.boton_avanzar = QPushButton("Avanzar de mes")
         self.boton_avanzar.setObjectName("botonPrimario")
         self.boton_avanzar.setFixedWidth(_ANCHO_BOTON)
         self.boton_avanzar.clicked.connect(self._avanzar_mes)
-        columna.addWidget(self.boton_avanzar)
+        self.etiqueta_explicacion_avanzar = _texto_explicacion(_TEXTO_EXPLICACION_AVANZAR)
+        fila_avanzar = QHBoxLayout()
+        fila_avanzar.addWidget(self.boton_avanzar, alignment=Qt.AlignmentFlag.AlignTop)
+        fila_avanzar.addWidget(self.etiqueta_explicacion_avanzar, stretch=1)
 
-        columna.addStretch()
-        fila_superior.addWidget(panel_izquierda)
-
-        texto_explicacion = QLabel(_TEXTO_EXPLICACION)
-        texto_explicacion.setWordWrap(True)
-        texto_explicacion.setStyleSheet("border: 1px solid black; padding: 8px;")
-        fila_superior.addWidget(texto_explicacion, stretch=1)
-        layout_solapa.addLayout(fila_superior)
+        layout_solapa.addLayout(fila_backup)
+        layout_solapa.addWidget(_linea_divisoria())
+        layout_solapa.addLayout(fila_avanzar)
 
         # Seis cuadritos principales, todos del mismo ancho y alto (grilla
         # pareja 3x2 — sin la de Alertas, que va aparte ocupando todo el
@@ -264,7 +283,7 @@ class PanelControl(QWidget):
         return tarjeta
 
     def _armar_tarjeta_fechas_especiales(self) -> QFrame:
-        tarjeta, layout = _tarjeta("Feriados y fechas especiales (este mes y el próximo)")
+        tarjeta, layout = _tarjeta("Feriados y fechas especiales próximas")
         self.etiqueta_fechas_especiales = QLabel()
         self.etiqueta_fechas_especiales.setWordWrap(True)
         layout.addWidget(self.etiqueta_fechas_especiales)
@@ -321,11 +340,11 @@ class PanelControl(QWidget):
             lineas_backup.append("Estado: vencido" if backup_vencido(self.conn, fecha_actual(self.conn)) else "Estado: al día")
         self.etiqueta_backup.setText("\n".join(lineas_backup))
 
-        fechas = fechas_especiales_mes_actual_y_siguiente(self.conn)
+        fechas = fechas_especiales_proximas_dos_meses(self.conn)
         if fechas:
             texto_fechas = "\n".join(f"•  {f['Fecha']} — {f['Descripcion'] or f['Tipo'] or 'Sin descripción'}" for f in fechas)
         else:
-            texto_fechas = "Sin fechas especiales cargadas para este mes ni el próximo."
+            texto_fechas = "Sin fechas especiales cargadas para lo que resta del período."
         self.etiqueta_fechas_especiales.setText(texto_fechas)
 
         prof = calcular_estadisticas_profesionales(self.conn)

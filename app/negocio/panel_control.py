@@ -188,13 +188,15 @@ def calcular_estadisticas_ocupacion(conn: sqlite3.Connection) -> EstadisticasOcu
     )
 
 
-def fechas_especiales_mes_actual_y_siguiente(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Feriados/fechas especiales activas entre el primer día del mes en
-    curso y el último del mes siguiente — ventana calendario, distinta de
+def fechas_especiales_proximas_dos_meses(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Feriados/fechas especiales activas desde HOY (lo que ya pasó del
+    mes en curso no se muestra) hasta el último día del segundo mes
+    siguiente — "lo que queda de este mes más los dos próximos meses",
+    pedido explícito de la clienta. Ventana calendario, distinta de
     `_fechas_especiales_proximas` (15 días corridos, para la alerta)."""
     hoy = fecha_actual(conn)
-    desde = primer_dia_mes(hoy.year, hoy.month).isoformat()
-    anio_siguiente, mes_siguiente = parsear_periodo(sumar_meses(f"{hoy.year:04d}-{hoy.month:02d}", 1))
-    hasta = ultimo_dia_mes(anio_siguiente, mes_siguiente).isoformat()
+    desde = hoy.isoformat()
+    anio_limite, mes_limite = parsear_periodo(sumar_meses(f"{hoy.year:04d}-{hoy.month:02d}", 2))
+    hasta = ultimo_dia_mes(anio_limite, mes_limite).isoformat()
     filas = obtener_repositorio(conn, "FechasEspeciales").listar(Activo=1)
     return sorted((f for f in filas if desde <= f["Fecha"] <= hasta), key=lambda f: f["Fecha"])
