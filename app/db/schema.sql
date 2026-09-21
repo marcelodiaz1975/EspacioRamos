@@ -570,7 +570,10 @@ CREATE TABLE IF NOT EXISTS SnapshotMensual (
     PorOcupUnidad TEXT,
     PorOcupConsultorio TEXT,
     ValoresConsultorios TEXT,
-    PorcentajeAumentoAplicado REAL
+    PorcentajeAumentoAplicado REAL,
+    HorasRegularesSemanales REAL,
+    MontoHorasRegulares REAL,
+    MontoHorasAisladas REAL
 );
 
 -- 3.25 GastoOperativo -----------------------------------------------------------------------

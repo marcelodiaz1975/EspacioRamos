@@ -764,6 +764,135 @@ archivo generado todavía, cae a un mensaje de texto en el mismo cuadro
 en vez de romper — mismo criterio de "vista previa opcional" que Gestor
 de archivos.
 
+## Estadísticas (dos solapas, historial guardado vs. todo en vivo)
+
+Pasó de una sola pantalla con un formulario Año/Mes + tres tablas de
+ocupación en vivo + un historial de snapshots en texto plano, a formato
+solapa estándar con dos pestañas que comparten las mismas 11 columnas
+pero difieren en fuente de datos y filtros — pedido explícito de la
+clienta, en el mismo mensaje que definió toda la pantalla de punta a
+punta. Toda la lógica de cálculo vive en `app.negocio.estadisticas`
+(dataclass `FilaEstadistica` + `historial_general`/`estadisticas_varias`
++ los helpers que arman cada columna); la GUI (`app/gui/pantallas/
+estadisticas.py`) solo arma filtros, llama a esas funciones y pinta la
+tabla.
+
+Columnas (las mismas en las dos solapas): Período, Porcentaje Ocupación,
+Horas regulares semanales, Variación sobre período anterior, Monto por
+horas regulares, Monto por horas aisladas, Monto total (no se guarda,
+es `monto_regular + monto_aislada` calculado al leer), Localidades,
+Edificios, Unidades, Consultorios.
+
+Tres decisiones de la clienta a tener siempre presentes (ver también el
+docstring de `app.negocio.estadisticas`):
+
+- **Montos = "monto real facturado", pero a nivel BRUTO.** No hay forma
+  de leer un monto histórico neto por categoría: `LiquidacionEmitida.
+  MontoGenerado` es un total ya combinado (regular + aisladas + cargos +
+  ajustes, todo junto, sin desglose guardado), y los descuentos por
+  volumen de horas semanales (`app.negocio.valores.
+  obtener_porcentaje_descuento`) se calculan por profesional sobre TODAS
+  sus reservas del sistema, así que no hay un criterio no inventado para
+  repartirlos de vuelta a un edificio/unidad/consultorio puntual. Se
+  optó por un cálculo bruto (antes de esos descuentos y ajustes), día
+  por día del período, a los valores vigentes de cada consultorio —
+  mismo criterio que `app.negocio.valores.valor_regular_por_rango_dias`,
+  acá acotado por consultorio en vez de por profesional
+  (`monto_bruto_regular_periodo`/`monto_bruto_aislada_periodo`). Queda
+  pendiente de confirmar con la clienta si este nivel "bruto" le sirve
+  o si prefiere que se acote el alcance de otra forma.
+- **"Horas regulares semanales" es un promedio ponderado día a día, NO
+  un promedio por profesional.** Ejemplo textual de la clienta: un
+  consultorio con 30hs reservadas la primera quincena de un mes de 30
+  días, se liberan 10hs a mitad de mes y quedan 20hs la segunda
+  quincena → el promedio del mes es 25hs (15 días a 30hs + 15 días a
+  20hs, no una división por cantidad de profesionales ni de reservas).
+  `horas_regulares_semanales_promedio` recorre el período día por día
+  sumando el total de horas semanales vigentes ese día
+  (`_horas_regulares_semanales_en_fecha`, mismo criterio que
+  `app.negocio.valores.horas_semanales_vigentes` pero sin acotar por
+  profesional) y divide por la cantidad de días del período.
+- **Localidades/Edificios/Unidades/Consultorios son siempre el conteo
+  ACTUAL**, para cualquier fila (pasada o presente): ninguna de esas
+  cuatro tablas guarda de baja lógica ni fecha de alta, así que no hay
+  forma de reconstruir cuántas había en un período anterior — pedido de
+  la clienta sobre este punto puntual: "sería lo actual o lo último si
+  se trata de un período anterior al vigente" (`conteo_entidades`).
+
+### Solapa "Historial general"
+
+Filtros a la izquierda: dos `QCheckBox` excluyentes "Por mes"/"Por año"
+(agrupados en un `QButtonGroup` exclusivo — evita destildar el marcado
+sin marcar el otro, sin necesitar lógica propia; arranca en "Por mes")
+más el botón "Actualizar tabla" (`botonPrimario`, vuelve el check a "Por
+mes" y reinicia el orden de la tabla — "como si se entrara al
+formulario"). La info "surge de los snapshots mensuales": cada fila
+sale de un `SnapshotMensual` ya generado (uno por avance de mes), más el
+mes en curso, calculado en vivo porque todavía no se cerró
+(`historial_general`). Los snapshots generados ANTES de esta revisión no
+tienen `HorasRegularesSemanales`/`MontoHorasRegulares`/
+`MontoHorasAisladas` cargados (esas columnas no existían) — esas celdas
+quedan en blanco en vez de recalcularse por fuera de lo guardado, límite
+aceptado y documentado, no un bug. `generar_snapshot` ya calcula y
+persiste las tres columnas nuevas para los avances de mes de acá en
+adelante.
+
+"Por año" agrupa los meses de cada año con dato: Ocupación% y Horas
+regulares semanales se PROMEDIAN entre esos meses, los tres montos se
+SUMAN — pedido explícito de la clienta ("mixto según la columna"); los
+conteos de entidades siguen siendo siempre el actual (ver arriba). La
+"Variación sobre período anterior" en modo año compara contra el
+promedio de horas del año anterior, mismo criterio.
+
+### Solapa "Estadísticas varias"
+
+Filtros a la izquierda: Año, Mes, Localidad, Edificio, Unidad,
+Consultorio — los seis por defecto en "Todos", todos combos indepen-
+dientes (no una selección tipo Alcance de Gestor de archivos), pero
+Localidad/Edificio/Unidad/Consultorio se acotan en cascada al elegir uno
+de nivel superior (mismo criterio de cascada que Gestor de archivos:
+elegir una Localidad limita las opciones de Edificio a los de esa
+localidad, y así en cadena). El botón "Actualizar tabla" (`botonPrimario`)
+vuelve los seis filtros a "Todos" y reinicia el orden de la tabla. Año
+se puebla desde el primer período con alguna reserva cargada
+(`_periodo_mas_antiguo_con_datos`) hasta el año actual.
+
+100% en vivo (no lee `SnapshotMensual`): sin ningún filtro de ubicación
+es todo el sistema, sin filtro de período muestra una fila por cada mes
+desde el primer dato hasta el actual (`_periodos_para_filtro`). Entre
+Localidad/Edificio/Unidad/Consultorio "el más específico manda" — elegir
+un Consultorio puntual fija el alcance a ese consultorio solo, sin
+importar qué haya elegido (o no) en los combos de nivel superior
+(`_ids_consultorio_del_alcance`/`estadisticas_varias`). Cualquier
+combinación de filtros dispara un recálculo real de la tabla (no un
+`setRowHidden` como el patrón de "Filtros que solo afectan la
+visualización" — acá cambiar el alcance realmente recalcula ocupación,
+horas y montos para ESE alcance, no solo oculta filas de un cálculo ya
+hecho para todo el sistema).
+
+### Detalles compartidos por las dos solapas
+
+Tabla ordenable por click en cualquier título (`OrdenTabla`, mismo
+criterio que Llaves/Reservas/Placas/Pagos/Novedades — no el
+`setSortingEnabled` nativo de Qt, que compararía las celdas ya
+formateadas como texto y ordenaría mal los montos/porcentajes/horas);
+por defecto, sin ningún click todavía, las dos quedan ordenadas por
+Período de más nuevo a más viejo. Cada solapa es su propia clase
+(`_PanelHistorialGeneral`/`_PanelEstadisticasVarias`, mismo patrón que
+`ProcesoLiquidacion`/`_PanelEmisionArchivos` en Liquidación mensual y
+`_PanelReservasRegulares`/`_PanelReservasAisladas` en Reservas) con
+`objectName="panelSolapa"` y su propio `showEvent` — necesario porque
+cada pestaña necesita enfocar su propio primer control al mostrarse (no
+alcanza con uno solo en la pantalla contenedora), y ese patrón solo
+funciona pasando el panel directamente a `addTab(...)` (no envuelto en
+un `QScrollArea` externo, que rompería la propagación del evento).
+
+Celdas: "Variación sobre período anterior" en rojo cuando es negativa
+(mismo criterio que "Importes negativos en rojo" de la sección de
+tablas, aplicado acá a un delta de horas en vez de a un monto). Un valor
+faltante (snapshot viejo sin las columnas nuevas) se muestra en blanco,
+nunca como 0 — un cero sería un dato real distinto de "no lo sabemos".
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
