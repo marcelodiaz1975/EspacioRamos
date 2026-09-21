@@ -270,12 +270,12 @@ def sembrar_bloques_rigidos(conn: sqlite3.Connection) -> None:
     conn.execute(
         "INSERT INTO BloqueRigido (HoraInicio, HoraFin, DiasLogica, DiasVisualizacion, Activo) "
         "VALUES (9, 11, ?, ?, 1)",
-        (json.dumps(DIAS_LUNES_A_SABADO), json.dumps(DIAS_LUNES_A_SABADO)),
+        (json.dumps(DIAS_LUNES_A_SABADO, ensure_ascii=False), json.dumps(DIAS_LUNES_A_SABADO, ensure_ascii=False)),
     )
     conn.execute(
         "INSERT INTO BloqueRigido (HoraInicio, HoraFin, DiasLogica, DiasVisualizacion, Activo) "
         "VALUES (18, 21, ?, ?, 1)",
-        (json.dumps(DIAS_LUNES_A_VIERNES), json.dumps(DIAS_LUNES_A_SABADO)),
+        (json.dumps(DIAS_LUNES_A_VIERNES, ensure_ascii=False), json.dumps(DIAS_LUNES_A_SABADO, ensure_ascii=False)),
     )
     conn.commit()
 
@@ -292,7 +292,7 @@ def sembrar_configuracion(conn: sqlite3.Connection) -> None:
         "RetencionHistorialListaEsperaAnios, ModulosExtendidos, TamanoMaximoImagenMB, "
         "ModoFechaFicticia, MensajesPlural) "
         "VALUES (1, 8, 22, ?, 30, 8, 0, 0, ?, ?, 3, 2, 5, 5, 3, 5, 0, 5, 0, 1)",
-        (json.dumps(DIAS_LUNES_A_SABADO), "Bimestral", json.dumps([2, 4, 6, 8, 10, 12])),
+        (json.dumps(DIAS_LUNES_A_SABADO, ensure_ascii=False), "Bimestral", json.dumps([2, 4, 6, 8, 10, 12])),
     )
     conn.commit()
 

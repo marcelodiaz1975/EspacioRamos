@@ -963,17 +963,45 @@ mostrarse — mismo motivo que en Estadísticas/Liquidación/Reservas: un
 `setFocus()` durante la construcción no alcanza a pegar antes de que el
 `QTabWidget` contenedor esté realmente mostrado.
 
-Pendiente para una próxima vuelta (detectado en esta revisión, no
-resuelto todavía porque no era parte de lo pedido): los campos
-numéricos siguen siendo `QLineEdit` de texto libre con parseo manual a
-`float` (no `QSpinBox`/`QDoubleSpinBox`), "Fecha ficticia" sigue en
-texto libre validado contra AAAA-MM-DD (no el selector de calendario ya
-generalizado en otros catálogos), "Ruta del logo"/"Carpeta base de
-archivos"/"Carpeta de backup" siguen tipeadas a mano sin un botón para
-elegir archivo/carpeta, y "Días de grilla" muestra el JSON con
-caracteres escapados (`Miércoles`) porque el `json.dumps` que arma
-el valor por defecto en `app/db/seed.py` no pasa `ensure_ascii=False`
-— ninguno de estos cuatro puntos se tocó en esta vuelta.
+Segunda vuelta sobre esta misma pantalla ("arreglá todo lo que te
+parezca de esos últimos comentarios"), los cuatro puntos que habían
+quedado pendientes:
+
+- **Campos numéricos**: pasaron de `QLineEdit` con parseo manual a
+  `float` a `QSpinBox`/`QDoubleSpinBox` (`_crear_spin_numerico`) — ya no
+  hay forma de dejarlos en un estado inválido, así que `_guardar` dejó
+  de necesitar el try/except de conversión para estos catorce campos.
+  Los de hora (`HoraInicioGrilla`/`HoraFinGrilla`) muestran "8:00hs" en
+  vez del decimal (`_SpinHora`, mismo criterio que Oferta/Reservas/Lista
+  de espera, duplicado acá); los de porcentaje suman sufijo "%"; el de
+  tolerancia de deuda (`ToleranciaDeudaDescuento`) se muestra como
+  moneda (`_SpinMoneda`, mismo criterio que `_SpinMonto` de Pagos);
+  "Tamaño máximo de imagen" suma sufijo " MB"; el resto son enteros
+  simples. Los rangos (`_RANGOS_NUMERICOS`) se eligieron generosos a
+  propósito — nunca deben recortar un valor ya guardado en la base al
+  cargar la pantalla (`setValue()` clampea en silencio sin avisar).
+- **Fecha ficticia**: pasó al mismo `QDateEdit` con calendario que el
+  resto del sistema ("Selectores y fecha" más arriba). Como un
+  `QDateEdit` siempre tiene algún valor concreto (a diferencia del
+  `QLineEdit` de antes, que podía quedar vacío), un valor NULL en la
+  base (base nueva, todavía sin guardar nada acá) carga la fecha real de
+  hoy como default de visualización nomás — `ModoFechaFicticia`
+  (el check aparte) sigue siendo lo único que decide si esa fecha se usa
+  de verdad en `app.negocio.dias.fecha_actual`, así que este cambio no
+  altera ningún comportamiento existente.
+- **Ruta del logo / Carpeta base de archivos / Carpeta de backup**:
+  suman un botón "Elegir" (`_CampoRuta`, `QFileDialog` nativo — archivo
+  para el logo, carpeta para las otras dos) al lado del campo de texto,
+  en vez de tipear la ruta a mano. El campo de texto interno sigue
+  siendo un `QLineEdit` común (`entradas[nombre]` apunta a ÉL, no al
+  contenedor), así que `actualizar`/`_guardar` no necesitaron cambiar
+  nada para estos tres campos — cancelar el selector deja el valor que
+  ya había, no lo borra.
+- **"Días de grilla" con caracteres escapados**: los tres `json.dumps`
+  de `app/db/seed.py` que arman los valores por defecto de `DiasGrilla`
+  ahora pasan `ensure_ascii=False` — el JSON seguía siendo válido antes
+  (`é` decodifica a "é" igual), pero se mostraba crudo en esta
+  pantalla en vez de "Miércoles"/"Sábado".
 
 ## Metodología de trabajo
 

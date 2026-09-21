@@ -1,5 +1,6 @@
 import pytest
-from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget, QWidget
+from PySide6.QtCore import QDate
+from PySide6.QtWidgets import QDateEdit, QDoubleSpinBox, QFileDialog, QLabel, QMessageBox, QSpinBox, QTabWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -7,9 +8,11 @@ from app.gui.estilos import hoja_estilos
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.configuracion import (
     _CAMPOS_BOOLEANOS,
+    _CAMPOS_FECHA,
     _CAMPOS_NUMERICOS,
     _CAMPOS_TEXTO,
     _GRUPOS,
+    _CampoRuta,
     ConfiguracionGeneral,
 )
 
@@ -34,14 +37,14 @@ def test_carga_valores_existentes(qtbot, conn):
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
     assert pantalla._entradas["NombreEspacio"].text() == "Mi Espacio"
-    assert pantalla._entradas["HoraInicioGrilla"].text() == "7.0"
+    assert pantalla._entradas["HoraInicioGrilla"].value() == 7.0
 
 
 def test_guardar_persiste_texto_y_numero(qtbot, conn):
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
     pantalla._entradas["NombreEspacio"].setText("Espacio Nuevo")
-    pantalla._entradas["ToleranciaDeudaDescuento"].setText("500")
+    pantalla._entradas["ToleranciaDeudaDescuento"].setValue(500)
     pantalla._guardar()
 
     fila = conn.execute("SELECT * FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
@@ -62,7 +65,7 @@ def test_guardar_ruta_logo_y_decimales(qtbot, conn):
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
     pantalla._entradas["RutaLogo"].setText("/tmp/logo.png")
-    pantalla._entradas["CantidadDecimales"].setText("0")
+    pantalla._entradas["CantidadDecimales"].setValue(0)
     pantalla._guardar()
 
     fila = conn.execute("SELECT RutaLogo, CantidadDecimales FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
@@ -103,41 +106,100 @@ def test_guardar_modo_oscuro_aplica_el_tema_sin_reiniciar(qtbot, conn):
     assert ventana.styleSheet() == hoja_estilos(True)
 
 
-def test_guardar_con_numero_invalido_no_persiste(qtbot, conn):
+def test_tolerancia_deuda_es_un_spinbox_y_nunca_queda_en_estado_invalido(qtbot, conn):
+    """Antes era un QLineEdit de texto libre que había que parsear a
+    mano; ahora es un QDoubleSpinBox, así que ya no existe la posibilidad
+    de tipear "no es un número" — Qt ni siquiera lo deja escribir."""
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
-    valor_original = conn.execute(
-        "SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1"
-    ).fetchone()["ToleranciaDeudaDescuento"]
-
-    pantalla._entradas["ToleranciaDeudaDescuento"].setText("no es un número")
-    pantalla._guardar()
-
-    fila = conn.execute("SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    assert fila["ToleranciaDeudaDescuento"] == valor_original
+    assert isinstance(pantalla._entradas["ToleranciaDeudaDescuento"], QDoubleSpinBox)
 
 
-def test_guardar_con_fecha_ficticia_invalida_no_persiste(qtbot, conn):
+def test_spinboxes_de_porcentaje_no_admiten_mas_de_cien_por_ciento(qtbot, conn):
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
-    valor_original = conn.execute(
-        "SELECT FechaFicticia FROM Configuracion WHERE IdConfiguracion = 1"
-    ).fetchone()["FechaFicticia"]
-
-    pantalla._entradas["FechaFicticia"].setText("31-13-2026")
-    pantalla._guardar()
-
-    fila = conn.execute("SELECT FechaFicticia FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    assert fila["FechaFicticia"] == valor_original
+    campo = pantalla._entradas["PorcentajeDescuentoFeriado"]
+    campo.setValue(500)
+    assert campo.value() == 100.0
 
 
-def test_guardar_con_fecha_ficticia_valida_persiste(qtbot, conn):
+def test_hora_inicio_grilla_se_muestra_como_horario(qtbot, conn):
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
-    pantalla._entradas["FechaFicticia"].setText("2026-09-15")
+    campo = pantalla._entradas["HoraInicioGrilla"]
+    campo.setValue(8.5)
+    assert campo.textFromValue(campo.value()) == "8:30hs"
+
+
+def test_cantidad_decimales_es_un_spinbox_entero(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    assert isinstance(pantalla._entradas["CantidadDecimales"], QSpinBox)
+
+
+def test_fecha_ficticia_es_un_selector_de_calendario(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    campo = pantalla._entradas["FechaFicticia"]
+    assert isinstance(campo, QDateEdit)
+    assert campo.calendarPopup()
+
+
+def test_fecha_ficticia_null_en_la_base_carga_la_fecha_de_hoy(qtbot, conn):
+    conn.execute("UPDATE Configuracion SET FechaFicticia = NULL WHERE IdConfiguracion = 1")
+    conn.commit()
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla._entradas["FechaFicticia"].date() == QDate.currentDate()
+
+
+def test_guardar_con_fecha_ficticia_persiste_en_formato_iso(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["FechaFicticia"].setDate(QDate(2026, 9, 15))
     pantalla._guardar()
     fila = conn.execute("SELECT FechaFicticia FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     assert fila["FechaFicticia"] == "2026-09-15"
+
+
+def _campo_ruta_de(pantalla: ConfiguracionGeneral, nombre: str) -> _CampoRuta:
+    entrada = pantalla._entradas[nombre]
+    return next(w for w in pantalla.findChildren(_CampoRuta) if w.campo is entrada)
+
+
+def test_ruta_logo_tiene_boton_elegir_que_abre_selector_de_archivo(qtbot, conn, monkeypatch, tmp_path):
+    archivo = tmp_path / "logo.png"
+    archivo.write_bytes(b"")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(archivo), "")))
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+
+    campo_ruta = _campo_ruta_de(pantalla, "RutaLogo")
+    assert campo_ruta.boton.text() == "Elegir"
+    campo_ruta.boton.click()
+
+    assert pantalla._entradas["RutaLogo"].text() == str(archivo)
+
+
+def test_ruta_logo_cancelar_el_selector_no_borra_lo_que_ya_habia(qtbot, conn, monkeypatch):
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("", "")))
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["RutaLogo"].setText("/ya/cargado/logo.png")
+
+    _campo_ruta_de(pantalla, "RutaLogo").boton.click()
+
+    assert pantalla._entradas["RutaLogo"].text() == "/ya/cargado/logo.png"
+
+
+def test_carpeta_base_archivos_tiene_boton_elegir_que_abre_selector_de_carpeta(qtbot, conn, monkeypatch, tmp_path):
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: str(tmp_path)))
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+
+    _campo_ruta_de(pantalla, "CarpetaBaseArchivos").boton.click()
+
+    assert pantalla._entradas["CarpetaBaseArchivos"].text() == str(tmp_path)
 
 
 def test_guardar_con_json_invalido_no_persiste(qtbot, conn):
@@ -177,19 +239,21 @@ def test_tiene_formato_solapa_con_las_cinco_pestanas(qtbot, conn):
 def test_todos_los_campos_estan_agrupados_una_sola_vez(qtbot, conn):
     """Ningún campo se pierde ni queda duplicado al pasar del formulario
     plano a los cinco grupos temáticos."""
-    todos = {nombre for nombre, _ in _CAMPOS_TEXTO + _CAMPOS_NUMERICOS + _CAMPOS_BOOLEANOS}
+    todos = {nombre for nombre, _ in _CAMPOS_TEXTO + _CAMPOS_NUMERICOS + _CAMPOS_BOOLEANOS + _CAMPOS_FECHA}
     agrupados: list[str] = [nombre for _titulo, campos in _GRUPOS for nombre in campos]
     assert sorted(agrupados) == sorted(todos)
     assert len(agrupados) == len(set(agrupados))
 
 
 def test_cada_solapa_carga_todos_sus_campos(qtbot, conn):
+    """Los campos "ruta" suman un control más a la cadena de foco (el
+    botón "Elegir"), así que la comprobación es "está en algún lado de
+    `orden`", no una correspondencia 1 a 1 por posición."""
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
     for panel, (_titulo, nombres) in zip(pantalla._paneles, _GRUPOS):
-        assert len(panel.orden) == len(nombres)
-        for nombre, entrada in zip(nombres, panel.orden):
-            assert pantalla._entradas[nombre] is entrada
+        for nombre in nombres:
+            assert pantalla._entradas[nombre] in panel.orden
 
 
 def test_foco_inicial_queda_en_el_primer_campo_de_la_primera_solapa(qtbot, conn):

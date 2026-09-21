@@ -8,31 +8,47 @@ pestañas temáticas (agrupamiento a criterio propio, aprobado por la
 clienta — "cualquier cosa se reevalúa más adelante"). El botón "Guardar"
 queda FUERA del `QTabWidget`, compartido por las cinco solapas (guarda
 todos los campos juntos, no solo los de la pestaña visible — sigue
-siendo una única fila de configuración)."""
+siendo una única fila de configuración).
+
+Segunda vuelta sobre esta misma pantalla: los campos numéricos pasaron
+de `QLineEdit` con parseo manual a `float` a `QSpinBox`/`QDoubleSpinBox`
+(no hay forma de dejarlos en un estado inválido); "Fecha ficticia" pasó
+al mismo selector de calendario que el resto del sistema
+("Selectores y fecha"); "Ruta del logo"/"Carpeta base de archivos"/
+"Carpeta de backup" suman un botón "Elegir" que abre el selector nativo
+de archivo/carpeta en vez de tipear la ruta a mano."""
 from __future__ import annotations
 
 import json
 import sqlite3
 
+from PySide6.QtCore import QDate, QLocale
+from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDateEdit,
+    QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.negocio.validaciones import FORMATO_FECHA, es_fecha_valida
+from app.negocio.formato import formatear_moneda
 from app.repositorio.registro import obtener_repositorio
 
 FORMATO_JSON = "JSON válido"
+_FORMATO_FECHA_DIA = "ddd dd-MM-yyyy"  # mismo criterio que crud_generico.py (tipo="fecha")
 
 
 def _es_json_valido(texto: str) -> bool:
@@ -48,7 +64,6 @@ _VALIDADORES_TEXTO: dict[str, tuple[callable, str]] = {
     "DiasGrilla": (_es_json_valido, FORMATO_JSON),
     "MesesPeriodoActualizacion": (_es_json_valido, FORMATO_JSON),
     "RangosEstadisticasOcupacion": (_es_json_valido, FORMATO_JSON),
-    "FechaFicticia": (es_fecha_valida, FORMATO_FECHA),
 }
 
 _CAMPOS_TEXTO = [
@@ -58,7 +73,6 @@ _CAMPOS_TEXTO = [
     ("MesesPeriodoActualizacion", "Meses del período de actualización (JSON)"),
     ("RangosEstadisticasOcupacion", "Rangos de estadísticas de ocupación (JSON)"),
     ("FrecuenciaBackupDrive", "Frecuencia de backup a Drive"),
-    ("FechaFicticia", "Fecha ficticia (AAAA-MM-DD)"),
     ("RutaLogo", "Ruta del archivo de logo (PNG/JPG)"),
     ("CarpetaBaseArchivos", "Carpeta base de archivos generados"),
     ("CarpetaBackup", "Carpeta de backup (sincronizada con Google Drive)"),
@@ -87,9 +101,48 @@ _CAMPOS_BOOLEANOS = [
     ("ModoOscuro", "Modo oscuro"),
     ("VisualizarCamposLibres", "Visualizar campos libres (en todos los catálogos)"),
 ]
+_CAMPOS_FECHA = [
+    ("FechaFicticia", "Fecha ficticia"),
+]
 
-_ETIQUETAS: dict[str, str] = dict(_CAMPOS_TEXTO + _CAMPOS_NUMERICOS + _CAMPOS_BOOLEANOS)
+_ETIQUETAS: dict[str, str] = dict(_CAMPOS_TEXTO + _CAMPOS_NUMERICOS + _CAMPOS_BOOLEANOS + _CAMPOS_FECHA)
 _NOMBRES_BOOLEANOS = {nombre for nombre, _ in _CAMPOS_BOOLEANOS}
+_NOMBRES_NUMERICOS = {nombre for nombre, _ in _CAMPOS_NUMERICOS}
+_NOMBRES_FECHA = {nombre for nombre, _ in _CAMPOS_FECHA}
+
+# Campos de texto que en vez de tipearse a mano eligen archivo/carpeta con
+# un botón "Elegir" (QFileDialog) — la clave es el filtro de archivo para
+# los de tipo archivo, `None` para los de carpeta.
+_CAMPOS_RUTA_ARCHIVO: dict[str, str] = {"RutaLogo": "Imágenes (*.png *.jpg *.jpeg)"}
+_CAMPOS_RUTA_CARPETA = {"CarpetaBaseArchivos", "CarpetaBackup"}
+
+# (mínimo, máximo) por campo numérico — generosos a propósito: nunca deben
+# recortar un valor ya guardado en la base (setValue() clampea en
+# silencio), así que se prefiere de más a arriesgar perder precisión de
+# un valor cargado antes de esta revisión.
+_RANGOS_NUMERICOS: dict[str, tuple[float, float]] = {
+    "HoraInicioGrilla": (0, 24),
+    "HoraFinGrilla": (0, 24),
+    "FraccionGrilla": (1, 120),
+    "UmbralGiroGrilla": (1, 50),
+    "RecargoPorcentajeAisladas": (0, 1000),
+    "PorcentajeAjusteSaldoAtrasado": (0, 1000),
+    "ToleranciaDeudaDescuento": (0, 100_000_000),
+    "PorcentajeDescuentoFeriado": (0, 100),
+    "PorcentajeDescuentoNoLaborable": (0, 100),
+    "SemanasVacacionesMaximasPorAnio": (0, 52),
+    "DiasEnvioLiquidacionesRemanentes": (0, 60),
+    "RetencionHistorialListaEsperaAnios": (0, 50),
+    "TamanoMaximoImagenMB": (0.1, 500),
+    "CantidadDecimales": (0, 4),
+}
+_CAMPOS_HORA = {"HoraInicioGrilla", "HoraFinGrilla"}
+_CAMPOS_PORCENTAJE = {
+    "RecargoPorcentajeAisladas", "PorcentajeAjusteSaldoAtrasado",
+    "PorcentajeDescuentoFeriado", "PorcentajeDescuentoNoLaborable",
+}
+_CAMPOS_MONEDA = {"ToleranciaDeudaDescuento"}
+_CAMPOS_MB = {"TamanoMaximoImagenMB"}
 
 # Agrupamiento en solapas (a criterio propio, aprobado por la clienta —
 # "cualquier cosa se reevalúa más adelante"). Cada nombre de campo
@@ -120,6 +173,152 @@ _GRUPOS: list[tuple[str, list[str]]] = [
 ]
 
 
+class _SpinHora(QDoubleSpinBox):
+    """QDoubleSpinBox que se muestra como horario ("8:00hs") en vez del
+    decimal con punto que arrastra Qt por defecto — mismo criterio que
+    `_SpinHora`/`_SpinHorario` de Oferta/Reservas/Lista de espera
+    (duplicado acá, no importado: son pantallas sin relación entre sí)."""
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802 (nombre impuesto por Qt)
+        horas = int(value)
+        minutos = round((value - horas) * 60)
+        return f"{horas}:{minutos:02d}hs"
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        texto = text.strip().lower().replace("hs", "").strip()
+        if ":" in texto:
+            horas_str, minutos_str = texto.split(":", 1)
+            try:
+                return float(horas_str or 0) + float(minutos_str or 0) / 60
+            except ValueError:
+                return 0.0
+        try:
+            return float(texto) if texto else 0.0
+        except ValueError:
+            return 0.0
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        return (QValidator.State.Acceptable, text, pos)
+
+
+class _SpinMoneda(QDoubleSpinBox):
+    """QDoubleSpinBox que se muestra como moneda ("$ 1.234,56") — mismo
+    criterio que `_SpinMonto` de Pagos/Novedades/Llaves (duplicado acá,
+    no importado)."""
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802
+        return formatear_moneda(value)
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        texto = text.strip().replace("$", "").replace(".", "").replace(",", ".").strip()
+        try:
+            return float(texto) if texto else 0.0
+        except ValueError:
+            return 0.0
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        return (QValidator.State.Acceptable, text, pos)
+
+
+def _crear_spin_numerico(nombre: str) -> QWidget:
+    minimo, maximo = _RANGOS_NUMERICOS[nombre]
+    if nombre in _CAMPOS_HORA:
+        spin = _SpinHora()
+        spin.setSingleStep(0.5)
+    elif nombre in _CAMPOS_PORCENTAJE:
+        spin = QDoubleSpinBox()
+        spin.setDecimals(1)
+        spin.setSuffix("%")
+    elif nombre in _CAMPOS_MONEDA:
+        spin = _SpinMoneda()
+        spin.setDecimals(2)
+    elif nombre in _CAMPOS_MB:
+        spin = QDoubleSpinBox()
+        spin.setDecimals(1)
+        spin.setSuffix(" MB")
+    else:
+        spin = QSpinBox()
+    spin.setRange(minimo, maximo)
+    return spin
+
+
+class _CampoRuta(QWidget):
+    """Campo de ruta de archivo/carpeta con un botón "Elegir" al lado
+    (`QFileDialog` nativo) en vez de tipear la ruta a mano. `self.campo`
+    es un `QLineEdit` común — el resto de la pantalla (`actualizar`/
+    `_guardar`) lo trata exactamente igual que cualquier otro campo de
+    texto, sin necesidad de distinguirlo."""
+
+    def __init__(self, *, es_carpeta: bool, filtro: str = "", parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.campo = QLineEdit()
+        layout.addWidget(self.campo, stretch=1)
+
+        self.boton = QPushButton("Elegir")
+        self.boton.setObjectName("botonSecundario")
+        layout.addWidget(self.boton)
+
+        self._filtro = filtro
+        self.boton.clicked.connect(self._elegir_carpeta if es_carpeta else self._elegir_archivo)
+
+    def _elegir_carpeta(self) -> None:
+        carpeta = QFileDialog.getExistingDirectory(self, "Elegir carpeta", self.campo.text())
+        if carpeta:
+            self.campo.setText(carpeta)
+
+    def _elegir_archivo(self) -> None:
+        archivo, _filtro = QFileDialog.getOpenFileName(self, "Elegir archivo", self.campo.text(), self._filtro)
+        if archivo:
+            self.campo.setText(archivo)
+
+
+def _crear_campo_fecha() -> QDateEdit:
+    entrada = QDateEdit()
+    entrada.setCalendarPopup(True)
+    entrada.setDisplayFormat(_FORMATO_FECHA_DIA)
+    entrada.setLocale(QLocale(QLocale.Language.Spanish))
+    return entrada
+
+
+def _construir_campo(nombre: str, entradas: dict[str, QWidget]) -> tuple[QWidget, list[QWidget]]:
+    """Arma el widget (o los widgets) de un campo y registra en
+    `entradas` el que expone la interfaz que `actualizar`/`_guardar`
+    esperan (`.text()`, `.value()`, `.isChecked()` o `.date()`). Devuelve
+    (widget para la fila del formulario, widgets para la cadena de foco
+    — más de uno cuando hay un botón al lado, ej. "Elegir")."""
+    if nombre in _NOMBRES_BOOLEANOS:
+        entrada = QCheckBox()
+        entradas[nombre] = entrada
+        return entrada, [entrada]
+
+    if nombre in _NOMBRES_NUMERICOS:
+        entrada = _crear_spin_numerico(nombre)
+        entradas[nombre] = entrada
+        return entrada, [entrada]
+
+    if nombre in _NOMBRES_FECHA:
+        entrada = _crear_campo_fecha()
+        entradas[nombre] = entrada
+        return entrada, [entrada]
+
+    if nombre in _CAMPOS_RUTA_CARPETA:
+        campo_ruta = _CampoRuta(es_carpeta=True)
+        entradas[nombre] = campo_ruta.campo
+        return campo_ruta, [campo_ruta.campo, campo_ruta.boton]
+
+    if nombre in _CAMPOS_RUTA_ARCHIVO:
+        campo_ruta = _CampoRuta(es_carpeta=False, filtro=_CAMPOS_RUTA_ARCHIVO[nombre])
+        entradas[nombre] = campo_ruta.campo
+        return campo_ruta, [campo_ruta.campo, campo_ruta.boton]
+
+    entrada = QLineEdit()
+    entradas[nombre] = entrada
+    return entrada, [entrada]
+
+
 class _PanelCampos(QWidget):
     """Una solapa: formulario (`QFormLayout`) con los campos de un grupo,
     envuelto en un `QScrollArea` interno (mismo patrón que `_PanelReservasRegulares`
@@ -140,10 +339,9 @@ class _PanelCampos(QWidget):
         contenido = QWidget()
         formulario = QFormLayout(contenido)
         for nombre in nombres:
-            entrada = QCheckBox() if nombre in _NOMBRES_BOOLEANOS else QLineEdit()
-            entradas[nombre] = entrada
-            formulario.addRow(_ETIQUETAS[nombre], entrada)
-            self.orden.append(entrada)
+            fila_widget, controles = _construir_campo(nombre, entradas)
+            formulario.addRow(_ETIQUETAS[nombre], fila_widget)
+            self.orden.extend(controles)
 
         scroll.setWidget(contenido)
         layout_externo.addWidget(scroll)
@@ -202,23 +400,25 @@ class ConfiguracionGeneral(QWidget):
         registro = self.repositorio.obtener(1)
         if registro is None:
             return
-        for nombre, _ in _CAMPOS_TEXTO + _CAMPOS_NUMERICOS:
+        for nombre, _ in _CAMPOS_TEXTO:
             valor = registro[nombre]
             self._entradas[nombre].setText("" if valor is None else str(valor))
+        for nombre, _ in _CAMPOS_NUMERICOS:
+            valor = registro[nombre]
+            self._entradas[nombre].setValue(valor if valor is not None else 0)
         for nombre, _ in _CAMPOS_BOOLEANOS:
             self._entradas[nombre].setChecked(bool(registro[nombre]))
 
+        valor_fecha = registro["FechaFicticia"]
+        fecha = QDate.fromString(valor_fecha, "yyyy-MM-dd") if valor_fecha else QDate()
+        if not fecha.isValid():
+            fecha = QDate.currentDate()
+        self._entradas["FechaFicticia"].setDate(fecha)
+
     def _guardar(self) -> None:
         valores = {}
-        for nombre, etiqueta in _CAMPOS_NUMERICOS:
-            texto = self._entradas[nombre].text().strip()
-            if not texto:
-                continue
-            try:
-                valores[nombre] = float(texto)
-            except ValueError:
-                QMessageBox.warning(self, "Guardar configuración", f"«{etiqueta}» debe ser un número.")
-                return
+        for nombre, _ in _CAMPOS_NUMERICOS:
+            valores[nombre] = self._entradas[nombre].value()
         for nombre, etiqueta in _CAMPOS_TEXTO:
             texto = self._entradas[nombre].text().strip()
             if texto and nombre in _VALIDADORES_TEXTO:
@@ -232,6 +432,7 @@ class ConfiguracionGeneral(QWidget):
             valores[nombre] = texto or None
         for nombre, _ in _CAMPOS_BOOLEANOS:
             valores[nombre] = 1 if self._entradas[nombre].isChecked() else 0
+        valores["FechaFicticia"] = self._entradas["FechaFicticia"].date().toString("yyyy-MM-dd")
 
         self.repositorio.actualizar(1, **valores)
         aplicar_tema = getattr(self.window(), "_aplicar_tema", None)
