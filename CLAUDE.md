@@ -1069,15 +1069,41 @@ clienta — "que quede todo ocupado de alguna manera"):
 7. **Alertas**: el mecanismo de siempre (`Alertas`/`calcular_alertas`,
    `_tarjeta_alerta`/`_tarjeta_alerta_simple`, `self.contenedor_alertas`/
    `self.layout_alertas` con los mismos nombres de atributo que antes)
-   sin cambios funcionales — pasó de ser una lista aparte debajo de todo
-   a ser, en sí misma, uno de los siete cuadritos ("algo más que se te
-   ocurra": en vez de inventar contenido nuevo para este séptimo
-   cuadrito, se reaprovechó lo que ya existía).
+   sin cambios funcionales ("algo más que se te ocurra": en vez de
+   inventar contenido nuevo para este último cuadrito, se reaprovechó lo
+   que ya existía).
 
 El título de la pantalla sigue mostrando el nombre del espacio tal cual
 está cargado en Configuración general (sin `.upper()`) — sigue
 pendiente de definir con la clienta si tiene sentido aplicarle el
 formato Nivel 1 a un nombre propio; no se tocó en esta vuelta tampoco.
+
+Tercera vuelta (ajustes sobre la grilla de cuadritos de la vuelta
+anterior): "Alertas" deja de ser un cuadrito más de la grilla 3x2 —
+pasa a su propio `QFrame` aparte, ABAJO de la grilla, ocupando todo el
+ancho de la pantalla (`layout_solapa.addWidget(self.tarjeta_alertas,
+stretch=1)`, fuera del `QGridLayout`) y quedándose con todo el
+`QScrollArea` que ya tenía (puede ser una lista larga) — pedido
+explícito de la clienta. Los seis cuadritos que quedan en la grilla
+(reloj, período, backup, fechas especiales, profesionales, ocupación)
+tienen que ser todos del mismo ancho Y del mismo alto: `_ALTO_MINIMO_
+TARJETA` (140px) fuerza un piso de altura parejo en las seis, para que
+el cuadrito con más líneas de contenido ("Ocupación y horas", 5 líneas)
+no termine desparejando el resto — sin ese piso, cada fila de la
+grilla toma la altura de su contenido más alto ANTES de repartir el
+espacio sobrante por `setRowStretch`, así que dos filas con contenido
+de distinto largo quedaban de distinto alto. El ancho ya salía parejo
+solo (`setColumnStretch` a 1 en las tres columnas).
+
+Dentro de cada cuadrito (`_tarjeta`, la función que arma el título y
+devuelve el layout para que cada uno cargue su contenido): el título
+pasa a itálica (`QLabel` con `font-style: italic;` en el stylesheet, en
+vez de negrita) y termina en ":" — pedido explícito de la clienta. Ni
+el título ni el contenido de abajo tienen su propia caja: siguen siendo
+`QLabel` de texto plano, un solo borde por cuadrito (el del `QFrame`
+de afuera) — esto ya era así antes de esta vuelta, la clienta lo pidió
+de nuevo como aclaración/refuerzo, no había ningún cuadrito anidado que
+sacar en la práctica.
 
 ## Metodología de trabajo
 

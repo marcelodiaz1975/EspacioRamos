@@ -383,12 +383,51 @@ def test_tarjeta_alertas_sigue_mostrando_las_alertas_de_siempre(qtbot, conn):
     assert any("Deudor" in t for t in _textos_visibles(pantalla.contenedor_alertas))
 
 
-def test_hay_siete_tarjetas_en_la_grilla(qtbot, conn):
+def test_hay_seis_tarjetas_parejas_en_la_grilla_y_alertas_aparte(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1200, 800)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    grilla = pantalla.findChild(QGridLayout)
+    assert grilla is not None
+    assert grilla.count() == 6
+
+    # Tolerancia de 1px: QGridLayout reparte el resto de una división no
+    # exacta (ancho de ventana / 3 columnas) en algún borde, invisible a
+    # simple vista pero real en píxeles.
+    tarjetas = [grilla.itemAt(i).widget() for i in range(6)]
+    anchos = [t.width() for t in tarjetas]
+    altos = [t.height() for t in tarjetas]
+    assert max(anchos) - min(anchos) <= 1  # las seis del mismo ancho
+    assert max(altos) - min(altos) <= 1  # las seis del mismo alto
+
+
+def test_tarjeta_alertas_no_esta_en_la_grilla(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     grilla = pantalla.findChild(QGridLayout)
-    assert grilla is not None
-    assert grilla.count() == 7
+    assert all(grilla.itemAt(i).widget() is not pantalla.tarjeta_alertas for i in range(grilla.count()))
+
+
+def test_tarjeta_alertas_ocupa_mucho_mas_ancho_que_una_tarjeta_de_la_grilla(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1200, 800)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    grilla = pantalla.findChild(QGridLayout)
+    ancho_una_tarjeta = grilla.itemAt(0).widget().width()
+    assert pantalla.tarjeta_alertas.width() > ancho_una_tarjeta * 2
+
+
+def test_titulos_de_las_tarjetas_van_en_italica_con_dos_puntos(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    encabezado = pantalla.etiqueta_periodo.parentWidget().findChildren(QLabel)[0]
+    assert encabezado.text() == "Período actual:"
+    assert "italic" in encabezado.styleSheet()
 
 
 def test_foco_inicial_queda_en_generar_backup(qtbot, conn):

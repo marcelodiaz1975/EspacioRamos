@@ -9,12 +9,17 @@ viviendo dentro de otro formulario más adelante, todavía a definir).
 Los botones se invierten ("Generar backup ahora" arriba, "Avanzar de
 mes" abajo) y "Avanzar de mes" vuelve a ser `botonPrimario` (el otro
 queda `botonSecundario`) — sigue siendo la acción más "definitiva" de
-esta pantalla. Debajo de los botones, una grilla de cuadritos
-informativos ocupa el resto del espacio: reloj en vivo, período actual,
-estado del backup, fechas especiales de los próximos dos meses,
-estadísticas de profesionales, estadísticas de ocupación/horas, y las
-alertas de siempre (mismo mecanismo de antes, ahora como un cuadrito
-más en vez de una lista aparte)."""
+esta pantalla. Debajo de los botones, seis cuadritos informativos del
+mismo ancho y alto (reloj en vivo, período actual, estado del backup,
+fechas especiales de los próximos dos meses, estadísticas de
+profesionales, estadísticas de ocupación/horas) en una grilla 3x2, y
+las alertas de siempre debajo de esos seis, ocupando todo el ancho de
+la pantalla y con su propio scroll (mismo mecanismo de antes, ahora
+como un cuadrito aparte en vez de una lista suelta). Tercera vuelta:
+los seis cuadritos principales quedan parejos (mismo ancho y alto,
+`_ALTO_MINIMO_TARJETA`), el título de cada cuadrito pasa a itálica y
+termina en ":" (`_tarjeta`), y ni el título ni el contenido de abajo
+tienen caja propia — un solo borde por cuadrito, el de afuera."""
 from __future__ import annotations
 
 import sqlite3
@@ -51,6 +56,7 @@ from app.negocio.panel_control import (
 _ANCHO_PANEL_IZQUIERDA = 240
 _ANCHO_BOTON = 220
 _COLUMNAS_GRILLA = 3
+_ALTO_MINIMO_TARJETA = 140  # deja lugar de sobra al cuadrito con más líneas ("Ocupación y horas")
 
 _TEXTO_EXPLICACION = (
     '"Avanzar de mes" traspasa el saldo de cada profesional, cierra las cuotas de planes de pago que '
@@ -92,15 +98,20 @@ def _texto_fecha_hora(momento: datetime, *, con_segundos: bool = False) -> str:
 
 
 def _tarjeta(titulo: str) -> tuple[QFrame, QVBoxLayout]:
-    """Cuadrito informativo genérico de la grilla de abajo: borde negro
-    (mismo criterio que el cuadro de texto de los botones) con un título
-    en negrita arriba — cada llamador arma su propio contenido debajo."""
+    """Cuadrito informativo: UN solo borde negro alrededor de todo el
+    cuadrito (mismo criterio que el cuadro de texto de los botones) — el
+    título y el contenido de abajo son texto plano sin caja propia,
+    nunca cuadritos anidados. Título en itálica y terminado en ":",
+    pedido explícito de la clienta; altura mínima pareja para que los
+    seis cuadritos principales queden del mismo alto sin importar cuánto
+    contenido tenga cada uno."""
     tarjeta = QFrame()
     tarjeta.setStyleSheet("QFrame { border: 1px solid black; }")
     tarjeta.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    tarjeta.setMinimumHeight(_ALTO_MINIMO_TARJETA)
     layout = QVBoxLayout(tarjeta)
-    encabezado = QLabel(titulo)
-    encabezado.setObjectName("subtituloCampo")
+    encabezado = QLabel(f"{titulo}:")
+    encabezado.setStyleSheet("font-style: italic;")
     layout.addWidget(encabezado)
     return tarjeta, layout
 
@@ -161,6 +172,9 @@ class PanelControl(QWidget):
         fila_superior.addWidget(texto_explicacion, stretch=1)
         layout_solapa.addLayout(fila_superior)
 
+        # Seis cuadritos principales, todos del mismo ancho y alto (grilla
+        # pareja 3x2 — sin la de Alertas, que va aparte ocupando todo el
+        # ancho de la pantalla, ver abajo).
         grilla = QGridLayout()
         tarjetas = [
             self._armar_tarjeta_reloj(),
@@ -169,7 +183,6 @@ class PanelControl(QWidget):
             self._armar_tarjeta_fechas_especiales(),
             self._armar_tarjeta_profesionales(),
             self._armar_tarjeta_ocupacion(),
-            self._armar_tarjeta_alertas(),
         ]
         for indice, tarjeta in enumerate(tarjetas):
             grilla.addWidget(tarjeta, indice // _COLUMNAS_GRILLA, indice % _COLUMNAS_GRILLA)
@@ -178,7 +191,12 @@ class PanelControl(QWidget):
         filas_grilla = -(-len(tarjetas) // _COLUMNAS_GRILLA)  # redondeo hacia arriba sin importar math
         for fila_grilla in range(filas_grilla):
             grilla.setRowStretch(fila_grilla, 1)
-        layout_solapa.addLayout(grilla, stretch=1)
+        layout_solapa.addLayout(grilla)
+
+        # Alertas ocupa todo el ancho de la pantalla, con scroll propio
+        # (puede ser una lista larga) — pedido explícito de la clienta,
+        # a diferencia de los seis cuadritos parejos de arriba.
+        layout_solapa.addWidget(self._armar_tarjeta_alertas(), stretch=1)
 
         solapas.addTab(panel_solapa, "Panel de control")
         solapas.tabBar().setDrawBase(False)
@@ -247,7 +265,7 @@ class PanelControl(QWidget):
         return tarjeta
 
     def _armar_tarjeta_alertas(self) -> QFrame:
-        tarjeta, layout = _tarjeta("Alertas")
+        self.tarjeta_alertas, layout = _tarjeta("Alertas")
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -256,7 +274,7 @@ class PanelControl(QWidget):
         self.layout_alertas.addStretch()
         scroll.setWidget(self.contenedor_alertas)
         layout.addWidget(scroll)
-        return tarjeta
+        return self.tarjeta_alertas
 
     def actualizar(self) -> None:
         cfg = self.conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
