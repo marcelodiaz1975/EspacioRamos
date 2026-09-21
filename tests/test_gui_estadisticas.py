@@ -50,8 +50,8 @@ def test_las_dos_tablas_tienen_las_once_columnas(qtbot, conn):
     pantalla = PantallaEstadisticas(conn)
     qtbot.addWidget(pantalla)
     columnas = [
-        "Período", "Porcentaje Ocupación", "Horas regulares semanales", "Variación sobre período anterior",
-        "Monto por horas regulares", "Monto por horas aisladas", "Monto total",
+        "Período", "Porcentaje\nOcupación", "Horas regulares\nsemanales", "Variación sobre\nperíodo anterior",
+        "Monto por horas\nregulares", "Monto por horas\naisladas", "Monto total",
         "Localidades", "Edificios", "Unidades", "Consultorios",
     ]
     for tabla in (pantalla.panel_historial.tabla, pantalla.panel_varias.tabla):
@@ -179,10 +179,11 @@ def test_estadisticas_varias_arranca_con_todos_los_filtros_en_todos(qtbot, conn)
     pantalla = PantallaEstadisticas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_varias
-    for combo in (
-        panel.combo_anio, panel.combo_mes, panel.combo_localidad,
-        panel.combo_edificio, panel.combo_unidad, panel.combo_consultorio,
-    ):
+    assert panel.combo_desde.currentText() == "Todo el historial"
+    assert panel.combo_desde.currentData() is None
+    assert panel.combo_hasta.currentText() == "Todo el historial"
+    assert panel.combo_hasta.currentData() is None
+    for combo in (panel.combo_localidad, panel.combo_edificio, panel.combo_unidad, panel.combo_consultorio):
         assert combo.currentText() == "Todos"
         assert combo.currentData() is None
 
@@ -219,8 +220,8 @@ def test_estadisticas_varias_recalcula_al_elegir_un_filtro(qtbot, conn):
     pantalla = PantallaEstadisticas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_varias
-    panel.combo_anio.setCurrentIndex(panel.combo_anio.findData(2026))
-    panel.combo_mes.setCurrentIndex(panel.combo_mes.findData(8))
+    panel.combo_desde.setCurrentIndex(panel.combo_desde.findData("2026-08"))
+    panel.combo_hasta.setCurrentIndex(panel.combo_hasta.findData("2026-08"))
     assert panel.tabla.rowCount() == 1
     fila_sin_filtro = panel.tabla.item(0, 2).text()
 
@@ -232,12 +233,21 @@ def test_estadisticas_varias_recalcula_al_elegir_un_filtro(qtbot, conn):
 
 def test_estadisticas_varias_boton_actualizar_restablece_todos_los_filtros(qtbot, conn):
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Test")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=11, VigenciaInicio="2026-01-01",
+    )
     conn.commit()
     pantalla = PantallaEstadisticas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_varias
     panel.combo_edificio.setCurrentIndex(panel.combo_edificio.findData(id_edificio))
     assert panel.combo_edificio.currentData() == id_edificio
+    panel.combo_desde.setCurrentIndex(panel.combo_desde.findData("2026-01"))
+    assert panel.combo_desde.currentData() == "2026-01"
 
     from PySide6.QtWidgets import QPushButton
     boton_actualizar = next(b for b in panel.findChildren(QPushButton) if b.text() == "Actualizar tabla")
@@ -245,14 +255,24 @@ def test_estadisticas_varias_boton_actualizar_restablece_todos_los_filtros(qtbot
 
     assert panel.combo_edificio.currentData() is None
     assert panel.combo_localidad.currentData() is None
-    assert panel.combo_anio.currentData() is None
+    assert panel.combo_desde.currentData() is None
+    assert panel.combo_hasta.currentData() is None
 
 
 def test_estadisticas_varias_se_puede_ordenar_por_columna(qtbot, conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Test")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=11, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
     pantalla = PantallaEstadisticas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_varias
-    panel.combo_anio.setCurrentIndex(panel.combo_anio.findData(2026))
+    panel.combo_desde.setCurrentIndex(panel.combo_desde.findData("2026-01"))
     assert panel.tabla.item(0, 0).text() == periodo_actual(conn) and panel.tabla.rowCount() >= 2
 
     panel.tabla.horizontalHeader().sectionClicked.emit(0)  # clic en "Período" -> ascendente
@@ -268,7 +288,7 @@ def test_foco_inicial_de_estadisticas_varias(qtbot, conn):
     pantalla.pestanas.setCurrentIndex(1)
     pantalla.show()
     qtbot.waitExposed(pantalla)
-    qtbot.waitUntil(lambda: pantalla.panel_varias.combo_anio.hasFocus())
+    qtbot.waitUntil(lambda: pantalla.panel_varias.combo_desde.hasFocus())
 
 
 def test_cadena_de_foco_de_estadisticas_varias(qtbot, conn):
@@ -278,6 +298,6 @@ def test_cadena_de_foco_de_estadisticas_varias(qtbot, conn):
     from PySide6.QtWidgets import QPushButton
     boton_actualizar = next(b for b in panel.findChildren(QPushButton) if b.text() == "Actualizar tabla")
     assert panel._foco._orden == [
-        panel.combo_anio, panel.combo_mes, panel.combo_localidad, panel.combo_edificio,
+        panel.combo_desde, panel.combo_hasta, panel.combo_localidad, panel.combo_edificio,
         panel.combo_unidad, panel.combo_consultorio, boton_actualizar,
     ]

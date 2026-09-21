@@ -846,16 +846,21 @@ promedio de horas del año anterior, mismo criterio.
 
 ### Solapa "Estadísticas varias"
 
-Filtros a la izquierda: Año, Mes, Localidad, Edificio, Unidad,
-Consultorio — los seis por defecto en "Todos", todos combos indepen-
-dientes (no una selección tipo Alcance de Gestor de archivos), pero
-Localidad/Edificio/Unidad/Consultorio se acotan en cascada al elegir uno
-de nivel superior (mismo criterio de cascada que Gestor de archivos:
-elegir una Localidad limita las opciones de Edificio a los de esa
-localidad, y así en cadena). El botón "Actualizar tabla" (`botonPrimario`)
-vuelve los seis filtros a "Todos" y reinicia el orden de la tabla. Año
-se puebla desde el primer período con alguna reserva cargada
-(`_periodo_mas_antiguo_con_datos`) hasta el año actual.
+Filtros a la izquierda: Desde, Hasta, Localidad, Edificio, Unidad,
+Consultorio. Desde/Hasta reemplazaron a los combos separados de Año y
+Mes de la primera vuelta (pedido de la clienta: "para que uno pueda
+elegir un período más específico") — son dos combos de período
+("AAAA-MM", poblados con `_periodo_mas_antiguo_con_datos` hasta el
+período actual) que arrancan en "Todo el historial" (`None`) cada uno;
+dejar los dos así trae todo el historial, elegir cualquier combinación
+acota el rango (inclusive en las dos puntas). Los otros cuatro filtros
+(Localidad/Edificio/Unidad/Consultorio) siguen en "Todos" por defecto,
+combos independientes (no una selección tipo Alcance de Gestor de
+archivos) que se acotan en cascada al elegir uno de nivel superior
+(mismo criterio de cascada que Gestor de archivos: elegir una Localidad
+limita las opciones de Edificio a los de esa localidad, y así en
+cadena). El botón "Actualizar tabla" (`botonPrimario`) vuelve los seis
+filtros a su default y reinicia el orden de la tabla.
 
 100% en vivo (no lee `SnapshotMensual`): sin ningún filtro de ubicación
 es todo el sistema, sin filtro de período muestra una fila por cada mes
@@ -892,6 +897,15 @@ Celdas: "Variación sobre período anterior" en rojo cuando es negativa
 tablas, aplicado acá a un delta de horas en vez de a un monto). Un valor
 faltante (snapshot viejo sin las columnas nuevas) se muestra en blanco,
 nunca como 0 — un cero sería un dato real distinto de "no lo sabemos".
+
+Títulos de columna largos ("Variación sobre período anterior", "Monto
+por horas regulares/aisladas", etc.) van partidos en dos líneas con un
+`"\n"` literal en el texto del encabezado (pedido de la clienta: más
+alto, menos ancho) — `QHeaderView` ya soporta esto solo, agranda el alto
+de la fila de encabezados y `resizeColumnsToContents()` angosta la
+columna a la línea más larga de las dos, sin ningún código extra. Nada
+puntual de Estadísticas: cualquier tabla nueva con un título largo puede
+usar el mismo recurso.
 
 ## Metodología de trabajo
 

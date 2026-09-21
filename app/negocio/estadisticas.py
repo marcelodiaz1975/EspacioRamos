@@ -425,36 +425,21 @@ def _periodo_mas_antiguo_con_datos(conn: sqlite3.Connection) -> str:
     return f"{fecha_min.year:04d}-{fecha_min.month:02d}"
 
 
-def _periodos_para_filtro(conn: sqlite3.Connection, *, anio: int | None, mes: int | None) -> list[str]:
+def _periodos_para_filtro(conn: sqlite3.Connection, *, desde: str | None, hasta: str | None) -> list[str]:
     """Períodos ("AAAA-MM") a listar en "Estadísticas varias" para el
-    filtro Año/Mes elegido, del más nuevo al más viejo, nunca más allá
-    del período actual (un mes que todavía no llegó no tiene nada que
-    mostrar)."""
+    rango Desde/Hasta elegido, del más nuevo al más viejo. `hasta` nunca
+    pasa del período actual (un mes que todavía no llegó no tiene nada
+    que mostrar) y `desde` nunca antes del primer dato cargado; ambos en
+    blanco es "todo el historial" (pedido de la clienta)."""
     actual = periodo_actual(conn)
-    anio_actual, mes_actual = parsear_periodo(actual)
-
-    if anio is not None and mes is not None:
-        periodo = f"{anio:04d}-{mes:02d}"
-        return [periodo] if periodo <= actual else []
-
-    if anio is not None:
-        if anio > anio_actual:
-            return []
-        ultimo_mes = mes_actual if anio == anio_actual else 12
-        return [f"{anio:04d}-{m:02d}" for m in range(ultimo_mes, 0, -1)]
-
-    anio_desde, mes_desde = parsear_periodo(_periodo_mas_antiguo_con_datos(conn))
-    limite = f"{anio_desde:04d}-{mes_desde:02d}"
-
-    if mes is not None:
-        return [
-            f"{a:04d}-{mes:02d}" for a in range(anio_actual, anio_desde - 1, -1)
-            if limite <= f"{a:04d}-{mes:02d}" <= actual
-        ]
+    hasta_efectivo = hasta if hasta is not None and hasta <= actual else actual
+    desde_efectivo = desde if desde is not None else _periodo_mas_antiguo_con_datos(conn)
+    if desde_efectivo > hasta_efectivo:
+        return []
 
     periodos = []
-    cursor = actual
-    while cursor >= limite:
+    cursor = hasta_efectivo
+    while cursor >= desde_efectivo:
         periodos.append(cursor)
         cursor = periodo_anterior(cursor)
     return periodos
@@ -549,15 +534,16 @@ def historial_general(conn: sqlite3.Connection, *, por_anio: bool) -> list[FilaE
 
 def estadisticas_varias(
     conn: sqlite3.Connection, *,
-    anio: int | None = None, mes: int | None = None,
+    desde: str | None = None, hasta: str | None = None,
     id_localidad: int | None = None, id_edificio: int | None = None,
     id_unidad: int | None = None, id_consultorio: int | None = None,
 ) -> list[FilaEstadistica]:
-    """Solapa "Estadísticas varias": 100% en vivo (no lee SnapshotMensual),
-    sin filtro de período muestra todo desde el primer dato hasta el mes
-    en curso; sin filtro de ubicación es todo el sistema. "El más
-    específico manda" entre Localidad/Edificio/Unidad/Consultorio, mismo
-    criterio que el Alcance de Gestor de archivos."""
+    """Solapa "Estadísticas varias": 100% en vivo (no lee SnapshotMensual).
+    `desde`/`hasta` ("AAAA-MM", ambos opcionales) acotan el rango de
+    períodos a mostrar — los dos en blanco es todo el historial, desde el
+    primer dato hasta el mes en curso. Sin filtro de ubicación es todo el
+    sistema; "el más específico manda" entre Localidad/Edificio/Unidad/
+    Consultorio, mismo criterio que el Alcance de Gestor de archivos."""
     ids_consultorio = _ids_consultorio_del_alcance(
         conn, id_localidad=id_localidad, id_edificio=id_edificio, id_unidad=id_unidad, id_consultorio=id_consultorio,
     )
@@ -566,7 +552,7 @@ def estadisticas_varias(
     )
 
     filas = []
-    for periodo in _periodos_para_filtro(conn, anio=anio, mes=mes):
+    for periodo in _periodos_para_filtro(conn, desde=desde, hasta=hasta):
         p_anio, p_mes = parsear_periodo(periodo)
         horas = horas_regulares_semanales_promedio(conn, p_anio, p_mes, ids_consultorio)
         a_anio, a_mes = parsear_periodo(periodo_anterior(periodo))

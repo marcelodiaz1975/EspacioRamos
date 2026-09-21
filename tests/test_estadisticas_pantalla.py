@@ -206,19 +206,17 @@ def test_periodo_mas_antiguo_con_datos_toma_el_minimo_entre_regulares_y_aisladas
     assert _periodo_mas_antiguo_con_datos(conn) == "2026-01"
 
 
-def test_periodos_para_filtro_anio_y_mes_puntual(conn, fecha_actual_agosto_2026):
-    assert _periodos_para_filtro(conn, anio=2026, mes=3) == ["2026-03"]
-    assert _periodos_para_filtro(conn, anio=2030, mes=3) == []  # futuro: nada que mostrar
+def test_periodos_para_filtro_desde_y_hasta_puntual(conn, fecha_actual_agosto_2026):
+    assert _periodos_para_filtro(conn, desde="2026-03", hasta="2026-03") == ["2026-03"]
+    assert _periodos_para_filtro(conn, desde="2026-03", hasta="2026-05") == ["2026-05", "2026-04", "2026-03"]
 
 
-def test_periodos_para_filtro_solo_anio_no_pasa_del_mes_actual(conn, fecha_actual_agosto_2026):
-    periodos = _periodos_para_filtro(conn, anio=2026, mes=None)
-    assert periodos == [f"2026-{m:02d}" for m in range(8, 0, -1)]
+def test_periodos_para_filtro_hasta_futuro_se_recorta_al_periodo_actual(conn, fecha_actual_agosto_2026):
+    assert _periodos_para_filtro(conn, desde="2026-07", hasta="2030-01") == ["2026-08", "2026-07"]
 
 
-def test_periodos_para_filtro_anio_pasado_trae_los_doce_meses(conn, fecha_actual_agosto_2026):
-    periodos = _periodos_para_filtro(conn, anio=2025, mes=None)
-    assert periodos == [f"2025-{m:02d}" for m in range(12, 0, -1)]
+def test_periodos_para_filtro_desde_posterior_a_hasta_no_trae_nada(conn, fecha_actual_agosto_2026):
+    assert _periodos_para_filtro(conn, desde="2026-08", hasta="2026-03") == []
 
 
 def test_periodos_para_filtro_sin_nada_va_desde_el_primer_dato_hasta_hoy(
@@ -231,7 +229,7 @@ def test_periodos_para_filtro_sin_nada_va_desde_el_primer_dato_hasta_hoy(
         HoraInicio=9, HoraFin=11, VigenciaInicio="2026-06-01",
     )
     conn.commit()
-    assert _periodos_para_filtro(conn, anio=None, mes=None) == ["2026-08", "2026-07", "2026-06"]
+    assert _periodos_para_filtro(conn, desde=None, hasta=None) == ["2026-08", "2026-07", "2026-06"]
 
 
 # ------------------------------------------------------- historial general
@@ -326,9 +324,12 @@ def test_estadisticas_varias_sin_filtros_trae_todos_los_periodos_con_datos(
     assert [f.periodo for f in filas] == ["2026-08", "2026-07"]
 
 
-def test_estadisticas_varias_filtra_por_anio_y_mes(conn, fecha_actual_agosto_2026):
-    filas = estadisticas_varias(conn, anio=2026, mes=3)
+def test_estadisticas_varias_filtra_por_desde_y_hasta(conn, fecha_actual_agosto_2026):
+    filas = estadisticas_varias(conn, desde="2026-03", hasta="2026-03")
     assert [f.periodo for f in filas] == ["2026-03"]
+
+    filas_rango = estadisticas_varias(conn, desde="2026-02", hasta="2026-04")
+    assert [f.periodo for f in filas_rango] == ["2026-04", "2026-03", "2026-02"]
 
 
 def test_estadisticas_varias_refresca_segun_el_alcance_elegido(
@@ -343,9 +344,9 @@ def test_estadisticas_varias_refresca_segun_el_alcance_elegido(
     )
     conn.commit()
 
-    fila_consultorio_1 = estadisticas_varias(conn, anio=2026, mes=8, id_consultorio=id_consultorio)[0]
-    fila_consultorio_2 = estadisticas_varias(conn, anio=2026, mes=8, id_consultorio=otro_consultorio)[0]
-    fila_edificio = estadisticas_varias(conn, anio=2026, mes=8, id_edificio=id_edificio)[0]
+    fila_consultorio_1 = estadisticas_varias(conn, desde="2026-08", hasta="2026-08", id_consultorio=id_consultorio)[0]
+    fila_consultorio_2 = estadisticas_varias(conn, desde="2026-08", hasta="2026-08", id_consultorio=otro_consultorio)[0]
+    fila_edificio = estadisticas_varias(conn, desde="2026-08", hasta="2026-08", id_edificio=id_edificio)[0]
 
     assert fila_consultorio_1.horas_regulares_semanales == 0.0
     assert fila_consultorio_2.horas_regulares_semanales == pytest.approx(10.0)

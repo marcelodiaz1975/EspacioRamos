@@ -30,21 +30,25 @@ from app.gui.estilos import COLOR_ROJO
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
-from app.negocio.dias import parsear_periodo, periodo_actual
+from app.negocio.dias import periodo_actual, periodo_anterior
 from app.negocio.estadisticas import (
     FilaEstadistica,
     _periodo_mas_antiguo_con_datos,
     estadisticas_varias,
     historial_general,
 )
-from app.negocio.formato import formatear_moneda, mes_texto
+from app.negocio.formato import formatear_moneda
 
 _ANCHO_PANEL_FILTROS = 240
 _ANCHO_CAMPO = 220
 
+# Títulos partidos en dos líneas (pedido de la clienta: más alto, menos
+# ancho) donde alcanza con eso para acortar la columna sin recortar la
+# palabra a mitad de camino — QHeaderView ya soporta "\n" y agranda solo
+# el alto de la fila de encabezados, sin que haga falta nada más.
 _COLUMNAS = [
-    "Período", "Porcentaje Ocupación", "Horas regulares semanales", "Variación sobre período anterior",
-    "Monto por horas regulares", "Monto por horas aisladas", "Monto total",
+    "Período", "Porcentaje\nOcupación", "Horas regulares\nsemanales", "Variación sobre\nperíodo anterior",
+    "Monto por horas\nregulares", "Monto por horas\naisladas", "Monto total",
     "Localidades", "Edificios", "Unidades", "Consultorios",
 ]
 
@@ -113,6 +117,21 @@ def _llenar_fila(tabla: QTableWidget, fila_idx: int, f: FilaEstadistica) -> None
     tabla.setItem(fila_idx, 8, item_numero(str(f.cant_edificios)))
     tabla.setItem(fila_idx, 9, item_numero(str(f.cant_unidades)))
     tabla.setItem(fila_idx, 10, item_numero(str(f.cant_consultorios)))
+
+
+def _opciones_periodo(conn: sqlite3.Connection) -> list[str]:
+    """Todos los períodos ("AAAA-MM") con algún dato, del más viejo al
+    más nuevo — para poblar los combos "Desde"/"Hasta" de Estadísticas
+    varias."""
+    hasta = periodo_actual(conn)
+    desde = _periodo_mas_antiguo_con_datos(conn)
+    periodos = []
+    cursor = hasta
+    while cursor >= desde:
+        periodos.append(cursor)
+        cursor = periodo_anterior(cursor)
+    periodos.reverse()
+    return periodos
 
 
 def _armar_tabla() -> QTableWidget:
@@ -230,7 +249,7 @@ class _PanelEstadisticasVarias(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
-        self.combo_anio.setFocus()
+        self.combo_desde.setFocus()
 
     def _armar_ui(self) -> None:
         layout_externo = QHBoxLayout(self)
@@ -239,21 +258,25 @@ class _PanelEstadisticasVarias(QWidget):
         panel_filtros.setFixedWidth(_ANCHO_PANEL_FILTROS)
         columna = QVBoxLayout(panel_filtros)
 
-        columna.addWidget(_titulo_campo("Año"))
-        self.combo_anio = QComboBox()
-        self.combo_anio.setFixedWidth(_ANCHO_CAMPO)
-        self._cargar_combo_anio()
-        self.combo_anio.currentIndexChanged.connect(self.actualizar)
-        columna.addWidget(self.combo_anio)
+        opciones_periodo = _opciones_periodo(self.conn)
 
-        columna.addWidget(_titulo_campo("Mes"))
-        self.combo_mes = QComboBox()
-        self.combo_mes.setFixedWidth(_ANCHO_CAMPO)
-        self.combo_mes.addItem("Todos", None)
-        for mes in range(1, 13):
-            self.combo_mes.addItem(mes_texto(mes).capitalize(), mes)
-        self.combo_mes.currentIndexChanged.connect(self.actualizar)
-        columna.addWidget(self.combo_mes)
+        columna.addWidget(_titulo_campo("Desde"))
+        self.combo_desde = QComboBox()
+        self.combo_desde.setFixedWidth(_ANCHO_CAMPO)
+        self.combo_desde.addItem("Todo el historial", None)
+        for periodo in opciones_periodo:
+            self.combo_desde.addItem(periodo, periodo)
+        self.combo_desde.currentIndexChanged.connect(self.actualizar)
+        columna.addWidget(self.combo_desde)
+
+        columna.addWidget(_titulo_campo("Hasta"))
+        self.combo_hasta = QComboBox()
+        self.combo_hasta.setFixedWidth(_ANCHO_CAMPO)
+        self.combo_hasta.addItem("Todo el historial", None)
+        for periodo in opciones_periodo:
+            self.combo_hasta.addItem(periodo, periodo)
+        self.combo_hasta.currentIndexChanged.connect(self.actualizar)
+        columna.addWidget(self.combo_hasta)
 
         columna.addWidget(_titulo_campo("Localidad"))
         self.combo_localidad = QComboBox()
@@ -295,23 +318,13 @@ class _PanelEstadisticasVarias(QWidget):
         self._cargar_combo_localidad()
         self._foco = instalar_enter_avanza_foco(
             [
-                self.combo_anio, self.combo_mes, self.combo_localidad, self.combo_edificio,
+                self.combo_desde, self.combo_hasta, self.combo_localidad, self.combo_edificio,
                 self.combo_unidad, self.combo_consultorio, boton_actualizar,
             ],
             parent=self,
         )
 
     # ------------------------------------------------------- combos
-
-    def _cargar_combo_anio(self) -> None:
-        self.combo_anio.blockSignals(True)
-        self.combo_anio.clear()
-        self.combo_anio.addItem("Todos", None)
-        anio_desde, _mes = parsear_periodo(_periodo_mas_antiguo_con_datos(self.conn))
-        anio_actual, _mes_actual = parsear_periodo(periodo_actual(self.conn))
-        for anio in range(anio_actual, anio_desde - 1, -1):
-            self.combo_anio.addItem(str(anio), anio)
-        self.combo_anio.blockSignals(False)
 
     def _cargar_combo_localidad(self) -> None:
         self.combo_localidad.blockSignals(True)
@@ -374,12 +387,12 @@ class _PanelEstadisticasVarias(QWidget):
 
     def _restablecer(self) -> None:
         self._orden.reiniciar()
-        self.combo_anio.blockSignals(True)
-        self.combo_anio.setCurrentIndex(0)
-        self.combo_anio.blockSignals(False)
-        self.combo_mes.blockSignals(True)
-        self.combo_mes.setCurrentIndex(0)
-        self.combo_mes.blockSignals(False)
+        self.combo_desde.blockSignals(True)
+        self.combo_desde.setCurrentIndex(0)
+        self.combo_desde.blockSignals(False)
+        self.combo_hasta.blockSignals(True)
+        self.combo_hasta.setCurrentIndex(0)
+        self.combo_hasta.blockSignals(False)
         self.combo_localidad.blockSignals(True)
         self.combo_localidad.setCurrentIndex(0)
         self.combo_localidad.blockSignals(False)
@@ -388,8 +401,8 @@ class _PanelEstadisticasVarias(QWidget):
     def actualizar(self) -> None:
         self._filas = estadisticas_varias(
             self.conn,
-            anio=self.combo_anio.currentData(),
-            mes=self.combo_mes.currentData(),
+            desde=self.combo_desde.currentData(),
+            hasta=self.combo_hasta.currentData(),
             id_localidad=self.combo_localidad.currentData(),
             id_edificio=self.combo_edificio.currentData(),
             id_unidad=self.combo_unidad.currentData(),
