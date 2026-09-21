@@ -1238,9 +1238,13 @@ Elegir archivo → Importar, con `showEvent` enfocando el primero al
 entrar a la pantalla) — la posición en la columna manda sobre cuál es
 primario/secundario, son dos decisiones independientes.
 
-Las columnas de "Resultado por hoja" suman también `_PADDING_COLUMNA`
-(30px, mismo criterio que `novedades._ajustar_columnas`) sobre lo que
-deja `resizeColumnsToContents()`.
+Las columnas de "Resultado por hoja" (Hoja/Filas importadas/Errores)
+pasaron del padding fijo (30px sobre `resizeColumnsToContents()`, que
+en un cuadro angosto de tres columnas cortas dejaba espacio en blanco
+sin usar a la derecha) a `QHeaderView.ResizeMode.Stretch` — mismo
+criterio que Placas: pocas columnas, todas de importancia pareja, se
+reparten todo el ancho disponible del cuadro en vez de ajustarse al
+contenido.
 
 ## Metodología de trabajo
 

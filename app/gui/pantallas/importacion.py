@@ -12,7 +12,10 @@ cuelga de la GUI — antes solo estaba disponible por línea de comandos,
 `main.py generar-plantillas`), después "Elegir archivo" y "Importar"
 (`botonPrimario` — es la acción que efectivamente escribe algo); a la
 derecha, los tres cuadros de resultado (tabla por hoja, errores,
-informe de integridad)."""
+informe de integridad). La tabla "Resultado por hoja" estira sus tres
+columnas para ocupar todo el ancho del cuadro (`QHeaderView.ResizeMode.
+Stretch`) — mismo criterio que Placas: pocas columnas, todas de
+importancia pareja."""
 from __future__ import annotations
 
 import sqlite3
@@ -21,6 +24,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -41,22 +45,12 @@ from app.importacion.informe_integridad import generar_informe_integridad
 from app.importacion.plantillas import generar_plantillas
 
 _ANCHO_BOTON = 260  # "Descargar planilla importación", el texto más largo de la columna
-_PADDING_COLUMNA = 30  # mismo criterio que `novedades._ajustar_columnas`: más aire que el ancho justo
 
 
 def _titulo_campo(texto: str) -> QLabel:
     etiqueta = QLabel(texto)
     etiqueta.setObjectName("subtituloCampo")
     return etiqueta
-
-
-def _ajustar_columnas(tabla: QTableWidget) -> None:
-    """Mismo criterio que `novedades._ajustar_columnas`: `resizeColumnsToContents`
-    deja las columnas al ancho justo del contenido — se les agrega
-    `_PADDING_COLUMNA` de más a cada una, sin igualarlas entre sí."""
-    tabla.resizeColumnsToContents()
-    for columna in range(tabla.columnCount()):
-        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
 
 
 class PantallaImportacion(QWidget):
@@ -134,6 +128,7 @@ class PantallaImportacion(QWidget):
         self.tabla_resultados.setColumnCount(3)
         self.tabla_resultados.setHorizontalHeaderLabels(["Hoja", "Filas importadas", "Errores"])
         self.tabla_resultados.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla_resultados.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         columna_derecha.addWidget(self.tabla_resultados)
 
         self.texto_errores = QPlainTextEdit()
@@ -195,7 +190,6 @@ class PantallaImportacion(QWidget):
             self.tabla_resultados.setItem(i, 2, item_numero(str(len(r.errores))))
             for err in r.errores:
                 lineas_error.append(f"[{r.entidad}] {err}")
-        _ajustar_columnas(self.tabla_resultados)
         self.texto_errores.setPlainText("\n".join(lineas_error))
 
         informe = generar_informe_integridad(self.conn)

@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QFileDialog, QHeaderView, QMessageBox, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -137,15 +137,9 @@ def test_descargar_plantilla_cancelada_no_genera_nada(qtbot, conn, tmp_path, mon
     assert list(tmp_path.glob("*.xlsx")) == []
 
 
-def test_columnas_de_resultado_tienen_mas_ancho_que_el_ajuste_justo(qtbot, conn, tmp_path):
+def test_columnas_de_resultado_se_estiran_para_ocupar_todo_el_ancho(qtbot, conn):
     pantalla = PantallaImportacion(conn)
     qtbot.addWidget(pantalla)
-    pantalla.campo_ruta.setText(_planilla_minima(tmp_path))
-    pantalla._importar()
-
-    tabla = pantalla.tabla_resultados
-    anchos_con_padding = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
-    tabla.resizeColumnsToContents()
-    anchos_justos = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
-
-    assert all(con > justo for con, justo in zip(anchos_con_padding, anchos_justos))
+    header = pantalla.tabla_resultados.horizontalHeader()
+    for columna in range(pantalla.tabla_resultados.columnCount()):
+        assert header.sectionResizeMode(columna) == QHeaderView.ResizeMode.Stretch
