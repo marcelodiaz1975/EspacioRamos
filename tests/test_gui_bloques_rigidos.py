@@ -2,7 +2,7 @@ import json
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -35,7 +35,7 @@ def test_resumen_de_dias_todos_los_dias(qtbot, conn):
     pantalla = PantallaBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     fila_9_11 = next(
-        i for i in range(pantalla.tabla.rowCount()) if pantalla.tabla.item(i, 0).text().startswith("9 a 11")
+        i for i in range(pantalla.tabla.rowCount()) if pantalla.tabla.item(i, 0).text().startswith("9:00hs")
     )
     assert pantalla.tabla.item(fila_9_11, 1).text() == "Lunes, Martes, Miércoles, Jueves, Viernes, Sábado"
 
@@ -108,3 +108,56 @@ def test_eliminar_bloque(qtbot, conn):
     pantalla._eliminar()
 
     assert pantalla.tabla.rowCount() == 1
+
+
+# ---------------------------------------- formato solapa (revisión "uno por uno")
+
+
+def test_tiene_formato_solapa_con_una_pestana_listado(qtbot, conn):
+    pantalla = PantallaBloquesRigidos(conn)
+    qtbot.addWidget(pantalla)
+    solapas = pantalla.findChild(QTabWidget)
+    assert solapas is not None
+    assert solapas.count() == 1
+    assert solapas.tabText(0) == "Listado"
+
+
+def test_editar_y_eliminar_son_secundarios_nuevo_es_primario(qtbot, conn):
+    pantalla = PantallaBloquesRigidos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_nuevo.objectName() == "botonPrimario"
+    assert pantalla.boton_editar.objectName() == "botonSecundario"
+    assert pantalla.boton_eliminar.objectName() == "botonSecundario"
+
+
+def test_horario_se_muestra_en_formato_hs_no_decimal(qtbot, conn):
+    pantalla = PantallaBloquesRigidos(conn)
+    qtbot.addWidget(pantalla)
+    textos = [pantalla.tabla.item(i, 0).text() for i in range(pantalla.tabla.rowCount())]
+    assert "9:00hs a 11:00hs" in textos
+    assert "18:00hs a 21:00hs" in textos
+
+
+def test_cadena_de_foco_va_de_buscar_a_los_tres_botones(qtbot, conn):
+    pantalla = PantallaBloquesRigidos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla._foco._orden == [
+        pantalla.campo_buscar, pantalla.boton_nuevo, pantalla.boton_editar, pantalla.boton_eliminar,
+    ]
+
+
+def test_foco_inicial_queda_en_buscar(qtbot, conn):
+    pantalla = PantallaBloquesRigidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.campo_buscar.hasFocus())
+
+
+def test_buscar_filtra_por_horario_sin_afectar_la_base(qtbot, conn):
+    pantalla = PantallaBloquesRigidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.campo_buscar.setText("18:00")
+    ocultas = [pantalla.tabla.isRowHidden(i) for i in range(pantalla.tabla.rowCount())]
+    assert ocultas.count(True) == 1
+    assert len(obtener_repositorio(conn, "BloqueRigido").listar()) == 2

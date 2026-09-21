@@ -1162,6 +1162,73 @@ sea la fecha real del día."); el de "Generar backup ahora" es el mismo
 texto de siempre, solo que ahora en su propio cuadro en vez de
 compartido.
 
+## Bloques rígidos (formato solapa a mano, no PantallaCRUD)
+
+Pasó del layout plano (título + fila de botones sin estilo arriba de la
+tabla) al mismo lenguaje visual que los catálogos genéricos (solapa
+única "Listado", `panelSolapa`/`QScrollArea` con `setDrawBase(False)`/
+`NoFrame`, columna izquierda de ancho fijo con Buscar + Nuevo/Editar/
+Eliminar, tabla ordenable a la derecha) — pero SIN construirse sobre
+`PantallaCRUD`, a diferencia del resto de los catálogos: el diálogo
+Nuevo/Editar necesita dos listas de días con checks (`_ListaDias`, una
+para la restricción lógica y otra para la visualización en la grilla),
+un tipo de control que `crud_generico.Campo` no contempla
+(`tipo="texto"|"texto_largo"|"numero"|"booleano"|"combo"|"fecha"`).
+Sumar un tipo nuevo ahí serviría a esta única pantalla, así que se
+armó a mano en su lugar — mismo criterio ya documentado para Gestor de
+archivos ("sigue el mismo lenguaje visual que los catálogos... pero NO
+usa `PantallaCRUD`"). El diálogo en sí no cambió de contenido, solo de
+formato de horario (ver abajo); Buscar filtra sin distinguir mayúsculas
+ni acentos por cualquier columna visible, mismo criterio que "Filtros
+que solo afectan la visualización" (reusa `_normalizar_busqueda` de
+`crud_generico`, import cruzado de un símbolo privado — mismo criterio
+que otros imports cruzados del sistema).
+
+Editar/Eliminar pasan a `botonSecundario` (antes sin estilo), Nuevo
+sigue en `botonPrimario`, los tres al mismo ancho fijo que Buscar. La
+columna "Horario" de la tabla y los dos `QDoubleSpinBox` de Hora
+inicio/fin del diálogo pasan de un decimal con coma ("18,5") a formato
+horario con sufijo ("18:00hs a 21:00hs", `_SpinHora`/`_fmt_hora` —
+mismo criterio que Configuración general/Oferta/Reservas/Lista de
+espera, duplicado acá porque son pantallas sin relación entre sí). La
+tabla también suma orden por click en el encabezado (`OrdenTabla`,
+mismo criterio que el resto de las tablas del sistema) y una cadena de
+foco Enter/Tab explícita (Buscar → Nuevo → Editar → Eliminar, con
+`showEvent` enfocando Buscar al entrar a la pantalla) — ninguna de las
+dos cosas existía antes de esta revisión. Se sacó de paso una quinta
+columna sin usar en la tabla (`""`, encabezado vacío que `actualizar()`
+nunca llenaba — resabio sin efecto visible, no un bug reportado).
+
+## Importar planilla (botones a la izquierda, planilla modelo descargable)
+
+Mismo pasaje de layout que el resto de las pantallas de esta revisión:
+de una fila horizontal de controles arriba de los cuadros de resultado,
+a formato solapa (única pestaña "Importación") con una columna
+izquierda de ancho fijo (`_ANCHO_BOTON = 260`, calculado para que entre
+"Descargar planilla importación" sin cortarse) y los tres cuadros de
+resultado (tabla por hoja, errores, informe de integridad) a la
+derecha. Orden de la columna izquierda, pedido explícito de la clienta:
+"Elegir archivo..." (`botonSecundario`) con el archivo elegido
+mostrado debajo (`self.campo_ruta`, sigue siendo un `QLineEdit`
+de solo lectura — no cambió de tipo, solo de posición, para no romper
+los tests que lo cargan directo con `.setText()` salteando el selector
+de archivo), "Importar" (`botonPrimario` — es la única de las tres
+acciones que efectivamente escribe algo en la base) y, nuevo,
+"Descargar planilla importación" (`botonSecundario`).
+
+Este último botón es la primera vez que `app.importacion.plantillas.
+generar_plantillas` se cuelga de la GUI: antes solo estaba disponible
+por línea de comandos (`main.py generar-plantillas`). Abre un selector
+nativo "Guardar como" (`QFileDialog.getSaveFileName`, sugiere
+"Plantilla_Importacion_EspacioRamos.xlsx") y genera ahí el mismo libro
+Excel con la hoja de instrucciones y una hoja por entidad importable —
+mismo criterio de "Descargar" que Gestor de archivos (copia hacia
+afuera, no toca nada de lo que ya está cargado en el sistema).
+
+Cadena de foco Enter/Tab (nueva, no existía antes de esta revisión):
+Elegir archivo → Importar → Descargar planilla importación, con
+`showEvent` enfocando "Elegir archivo" al entrar a la pantalla.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

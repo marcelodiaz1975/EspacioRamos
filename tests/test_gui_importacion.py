@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -78,3 +78,60 @@ def test_informe_muestra_codigo_duplicado(qtbot, conn, tmp_path):
 
     assert "R1" in pantalla.texto_integridad.toPlainText()
     assert "duplicado" in pantalla.texto_integridad.toPlainText()
+
+
+# ---------------------------------------- formato solapa (revisión "uno por uno")
+
+
+def test_tiene_formato_solapa_con_una_pestana(qtbot, conn):
+    pantalla = PantallaImportacion(conn)
+    qtbot.addWidget(pantalla)
+    solapas = pantalla.findChild(QTabWidget)
+    assert solapas is not None
+    assert solapas.count() == 1
+    assert solapas.tabText(0) == "Importación"
+
+
+def test_importar_es_primario_elegir_y_descargar_son_secundarios(qtbot, conn):
+    pantalla = PantallaImportacion(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_importar.objectName() == "botonPrimario"
+    assert pantalla.boton_elegir.objectName() == "botonSecundario"
+    assert pantalla.boton_descargar_plantilla.objectName() == "botonSecundario"
+
+
+def test_orden_de_los_botones_es_elegir_importar_descargar(qtbot, conn):
+    pantalla = PantallaImportacion(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla._foco._orden == [
+        pantalla.boton_elegir, pantalla.boton_importar, pantalla.boton_descargar_plantilla,
+    ]
+
+
+def test_foco_inicial_queda_en_elegir_archivo(qtbot, conn):
+    pantalla = PantallaImportacion(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.boton_elegir.hasFocus())
+
+
+def test_descargar_plantilla_genera_el_excel_en_el_destino_elegido(qtbot, conn, tmp_path, monkeypatch):
+    destino = tmp_path / "plantilla.xlsx"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(destino), "")))
+    pantalla = PantallaImportacion(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla._descargar_plantilla()
+
+    assert destino.is_file()
+
+
+def test_descargar_plantilla_cancelada_no_genera_nada(qtbot, conn, tmp_path, monkeypatch):
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: ("", "")))
+    pantalla = PantallaImportacion(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla._descargar_plantilla()
+
+    assert list(tmp_path.glob("*.xlsx")) == []

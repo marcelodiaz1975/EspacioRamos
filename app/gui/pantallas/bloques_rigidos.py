@@ -3,39 +3,97 @@ reservan, tienen que cubrirse enteras (no parcialmente) — la validación
 la aplica `app.negocio.reservas.verificar_bloques_rigidos` sobre
 DiasLogica; DiasVisualizacion es el conjunto de días en que la grilla
 muestra ese horario como bloque rígido (puede ser más amplio que
-DiasLogica, como el default de 18-21hs: lógica L-V, visualización L-S)."""
+DiasLogica, como el default de 18-21hs: lógica L-V, visualización L-S).
+
+No usa `PantallaCRUD` (ver CLAUDE.md, "Catálogos"): el diálogo Nuevo/
+Editar necesita dos listas de días con checks (lógica y visualización),
+un tipo de control que `crud_generico.Campo` no contempla — armar un
+tipo nuevo ahí serviría solo a esta pantalla, así que se arma a mano
+siguiendo el mismo lenguaje visual que los catálogos genéricos (mismo
+criterio que Gestor de archivos): solapa única "Listado", Buscar +
+Nuevo/Editar/Eliminar en una columna izquierda de ancho fijo, tabla
+ordenable a la derecha."""
 from __future__ import annotations
 
 import json
 import sqlite3
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from app.gui.crud_generico import _normalizar_busqueda
+from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.orden_tabla import OrdenTabla
 from app.negocio.dias import DIAS_SEMANA
 from app.repositorio.registro import obtener_repositorio
+
+_ID_REGISTRO = Qt.ItemDataRole.UserRole
+_ANCHO_CAMPO = 240  # mismo ancho que el panel izquierdo de los catálogos genéricos
 
 
 def _resumen_dias(dias: list[str]) -> str:
     if dias == DIAS_SEMANA:
         return "Todos los días"
     return ", ".join(dias) if dias else "(sin días)"
+
+
+def _fmt_hora(valor: float) -> str:
+    """"18:00hs" — mismo criterio que `_SpinHora`/`_fmt_hora` de
+    Configuración general/Reservas/Oferta/Lista de espera."""
+    horas = int(valor)
+    minutos = round((valor - horas) * 60)
+    return f"{horas}:{minutos:02d}hs"
+
+
+def _fmt_horario(hora_inicio: float, hora_fin: float) -> str:
+    return f"{_fmt_hora(hora_inicio)} a {_fmt_hora(hora_fin)}"
+
+
+class _SpinHora(QDoubleSpinBox):
+    """QDoubleSpinBox que se muestra como horario ("18:00hs") en vez del
+    decimal con punto que arrastra Qt por defecto — mismo criterio que
+    `_SpinHora` de Configuración general/Oferta/Reservas/Lista de espera
+    (duplicado acá, no importado: son pantallas sin relación entre sí)."""
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802 (nombre impuesto por Qt)
+        return _fmt_hora(value)
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        texto = text.strip().lower().replace("hs", "").strip()
+        if ":" in texto:
+            horas_str, minutos_str = texto.split(":", 1)
+            try:
+                return float(horas_str or 0) + float(minutos_str or 0) / 60
+            except ValueError:
+                return 0.0
+        try:
+            return float(texto) if texto else 0.0
+        except ValueError:
+            return 0.0
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        return (QValidator.State.Acceptable, text, pos)
 
 
 class _ListaDias(QListWidget):
@@ -65,13 +123,13 @@ class _DialogoBloque(QDialog):
         dias_logica = json.loads(bloque["DiasLogica"]) if bloque and bloque["DiasLogica"] else []
         dias_visualizacion = json.loads(bloque["DiasVisualizacion"]) if bloque and bloque["DiasVisualizacion"] else dias_logica
 
-        self.spin_desde = QDoubleSpinBox()
+        self.spin_desde = _SpinHora()
         self.spin_desde.setRange(0, 23.5)
         self.spin_desde.setSingleStep(0.5)
         self.spin_desde.setValue(bloque["HoraInicio"] if bloque else 9)
         layout.addRow("Hora inicio", self.spin_desde)
 
-        self.spin_hasta = QDoubleSpinBox()
+        self.spin_hasta = _SpinHora()
         self.spin_hasta.setRange(0.5, 24)
         self.spin_hasta.setSingleStep(0.5)
         self.spin_hasta.setValue(bloque["HoraFin"] if bloque else 11)
@@ -124,58 +182,131 @@ class PantallaBloquesRigidos(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """`setFocus()` durante la construcción no alcanza a "pegar": el
+        widget todavía no está mostrado en ese momento."""
+        super().showEvent(event)
+        self._orden.reiniciar()
+        self.actualizar()
+        self.campo_buscar.setFocus()
+
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
         titulo = QLabel("Bloques rígidos")
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
-        fila_botones = QHBoxLayout()
-        boton_nuevo = QPushButton("Nuevo")
-        boton_nuevo.setObjectName("botonPrimario")
-        boton_nuevo.clicked.connect(self._nuevo)
-        boton_editar = QPushButton("Editar")
-        boton_editar.clicked.connect(self._editar)
-        boton_eliminar = QPushButton("Eliminar")
-        boton_eliminar.clicked.connect(self._eliminar)
-        fila_botones.addWidget(boton_nuevo)
-        fila_botones.addWidget(boton_editar)
-        fila_botones.addWidget(boton_eliminar)
-        fila_botones.addStretch()
-        layout.addLayout(fila_botones)
+        solapas = QTabWidget()
+        panel_solapa = QWidget()
+        panel_solapa.setObjectName("panelSolapa")
+        layout_solapa = QHBoxLayout(panel_solapa)
+
+        panel_izquierda = QWidget()
+        columna = QVBoxLayout(panel_izquierda)
+        etiqueta_buscar = QLabel("Buscar")
+        etiqueta_buscar.setObjectName("subtituloCampo")
+        columna.addWidget(etiqueta_buscar)
+        self.campo_buscar = QLineEdit()
+        self.campo_buscar.setFixedWidth(_ANCHO_CAMPO)
+        self.campo_buscar.textChanged.connect(self._aplicar_filtro_busqueda)
+        columna.addWidget(self.campo_buscar)
+
+        self.boton_nuevo = QPushButton("Nuevo")
+        self.boton_nuevo.setObjectName("botonPrimario")
+        self.boton_nuevo.setFixedWidth(_ANCHO_CAMPO)
+        self.boton_nuevo.clicked.connect(self._nuevo)
+        self.boton_editar = QPushButton("Editar")
+        self.boton_editar.setObjectName("botonSecundario")
+        self.boton_editar.setFixedWidth(_ANCHO_CAMPO)
+        self.boton_editar.clicked.connect(self._editar)
+        self.boton_eliminar = QPushButton("Eliminar")
+        self.boton_eliminar.setObjectName("botonSecundario")
+        self.boton_eliminar.setFixedWidth(_ANCHO_CAMPO)
+        self.boton_eliminar.clicked.connect(self._eliminar)
+        columna.addWidget(self.boton_nuevo)
+        columna.addWidget(self.boton_editar)
+        columna.addWidget(self.boton_eliminar)
+        columna.addStretch()
+        layout_solapa.addWidget(panel_izquierda)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(5)
-        self.tabla.setHorizontalHeaderLabels(["Horario", "Días (restricción)", "Días (grilla)", "Activo", ""])
+        self.tabla.setColumnCount(4)
+        self.tabla.setHorizontalHeaderLabels(["Horario", "Días (restricción)", "Días (grilla)", "Activo"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.doubleClicked.connect(self._editar)
-        layout.addWidget(self.tabla, stretch=1)
+        layout_solapa.addWidget(self.tabla, stretch=1)
+
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(panel_solapa)
+        solapas.addTab(scroll, "Listado")
+        solapas.tabBar().setDrawBase(False)
+        layout.addWidget(solapas, stretch=1)
+
+        self._foco = instalar_enter_avanza_foco(
+            [self.campo_buscar, self.boton_nuevo, self.boton_editar, self.boton_eliminar], parent=self,
+        )
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
+
+    def _aplicar_filtro_busqueda(self, *_args) -> None:
+        """Mismo criterio que "Filtros que solo afectan la visualización"
+        de los catálogos genéricos: solo oculta filas, sin distinguir
+        mayúsculas ni acentos, por cualquier columna visible."""
+        buscado = _normalizar_busqueda(self.campo_buscar.text().strip())
+        for fila in range(self.tabla.rowCount()):
+            if not buscado:
+                self.tabla.setRowHidden(fila, False)
+                continue
+            texto_fila = " ".join(
+                self.tabla.item(fila, col).text()
+                for col in range(self.tabla.columnCount())
+                if self.tabla.item(fila, col) is not None
+            )
+            self.tabla.setRowHidden(fila, buscado not in _normalizar_busqueda(texto_fila))
+
+    def _clave_orden(self, registros: list[sqlite3.Row], columna: int):
+        def clave(r: sqlite3.Row):
+            if columna == 0:
+                return r["HoraInicio"]
+            if columna == 1:
+                return _resumen_dias(json.loads(r["DiasLogica"] or "[]"))
+            if columna == 2:
+                return _resumen_dias(json.loads(r["DiasVisualizacion"] or "[]"))
+            return bool(r["Activo"])
+        return clave
 
     def actualizar(self) -> None:
         registros = self.repositorio.listar()
+        if self._orden.columna is not None:
+            registros = sorted(
+                registros, key=self._clave_orden(registros, self._orden.columna), reverse=not self._orden.ascendente
+            )
         self.tabla.setRowCount(len(registros))
         for fila_idx, r in enumerate(registros):
-            item = QTableWidgetItem(f"{r['HoraInicio']:g} a {r['HoraFin']:g}hs")
-            item.setData(Qt.ItemDataRole.UserRole, r["IdBloqueRigido"])
+            item = QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"]))
+            item.setData(_ID_REGISTRO, r["IdBloqueRigido"])
             self.tabla.setItem(fila_idx, 0, item)
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(_resumen_dias(json.loads(r["DiasLogica"] or "[]"))))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_resumen_dias(json.loads(r["DiasVisualizacion"] or "[]"))))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem("Sí" if r["Activo"] else "No"))
         self.tabla.resizeColumnsToContents()
+        self._aplicar_filtro_busqueda()
 
     def _fila_seleccionada_id(self):
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
             return None
-        return self.tabla.item(filas[0].row(), 0).data(Qt.ItemDataRole.UserRole)
+        return self.tabla.item(filas[0].row(), 0).data(_ID_REGISTRO)
 
     def _nuevo(self) -> None:
         dialogo = _DialogoBloque(parent=self)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             self.repositorio.crear(**dialogo.valores())
             self.actualizar()
+            self.boton_nuevo.setFocus()
 
     def _editar(self) -> None:
         id_valor = self._fila_seleccionada_id()
@@ -187,6 +318,7 @@ class PantallaBloquesRigidos(QWidget):
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             self.repositorio.actualizar(id_valor, **dialogo.valores())
             self.actualizar()
+            self.boton_nuevo.setFocus()
 
     def _eliminar(self) -> None:
         id_valor = self._fila_seleccionada_id()
@@ -198,3 +330,4 @@ class PantallaBloquesRigidos(QWidget):
             return
         self.repositorio.eliminar(id_valor)
         self.actualizar()
+        self.boton_nuevo.setFocus()
