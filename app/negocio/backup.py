@@ -79,13 +79,31 @@ def buscar_backup_mas_reciente(carpeta: Path) -> Path | None:
     return candidatos[-1] if candidatos else None
 
 
-def _fecha_backup(carpeta: Path) -> date | None:
-    """Fecha codificada en el nombre "Backup AAAA-MM-DD HHhMM" de una
-    subcarpeta de backup generada por `generar_backup`."""
+def _fecha_hora_backup(carpeta: Path) -> datetime | None:
+    """Fecha y hora codificadas en el nombre "Backup AAAA-MM-DD HHhMM" de
+    una subcarpeta de backup generada por `generar_backup`."""
     try:
-        return datetime.strptime(carpeta.name, "Backup %Y-%m-%d %Hh%M").date()
+        return datetime.strptime(carpeta.name, "Backup %Y-%m-%d %Hh%M")
     except ValueError:
         return None
+
+
+def _fecha_backup(carpeta: Path) -> date | None:
+    momento = _fecha_hora_backup(carpeta)
+    return momento.date() if momento is not None else None
+
+
+def ultimo_backup(conn: sqlite3.Connection) -> datetime | None:
+    """Fecha y hora del backup más reciente ya generado (Panel de
+    control, leyenda arriba de "Generar backup ahora") — `None` sin
+    carpeta de backup configurada o si todavía no se generó ninguno."""
+    carpeta = carpeta_backup(conn)
+    if carpeta is None:
+        return None
+    carpeta_mas_reciente = buscar_backup_mas_reciente(carpeta)
+    if carpeta_mas_reciente is None:
+        return None
+    return _fecha_hora_backup(carpeta_mas_reciente)
 
 
 def backup_vencido(conn: sqlite3.Connection, hoy: date) -> bool:

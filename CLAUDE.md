@@ -1003,6 +1003,49 @@ quedado pendientes:
   (`é` decodifica a "é" igual), pero se mostraba crudo en esta
   pantalla en vez de "Miércoles"/"Sábado".
 
+## Panel de control (formato solapa, botones secundarios con leyenda propia)
+
+Pasó de dos botones sueltos en una fila (uno primario, "Avanzar de
+mes"; el otro sin ningún estilo asignado, "Generar backup ahora") a
+formato solapa (una sola pestaña, "Resumen") con los dos botones ahora
+`botonSecundario` — pedido explícito de la clienta: esta pantalla ya no
+tiene una acción más "importante" que la otra.
+
+Columna izquierda (ancho fijo, mismo criterio que el resto de las
+pantallas con panel de filtros a la izquierda), de arriba abajo:
+leyenda "Período actual {MM-AAAA}" (`leyenda_periodo`), botón "Avanzar
+de mes", línea divisoria, leyenda "Último backup {día abreviado
+dd-MM-yyyy HH:MMhs}" o "Todavía no se generó ningún backup." si nunca
+se generó uno (`leyenda_backup`, `app.negocio.backup.ultimo_backup` —
+nueva función, arma el `datetime` completo a partir del nombre de la
+subcarpeta de backup más reciente, mismo criterio que la ya existente
+`backup_vencido` pero sin descartar la hora), botón "Generar backup
+ahora". El formato de fecha de `leyenda_backup` es a mano (`_texto_
+fecha_hora`, día de la semana abreviado + `dd-MM-yyyy` + hora) porque
+acá el dato es un `datetime` de Python, no un campo de formulario con
+su propio `QDateEdit` — mismo criterio visual que las fechas de
+Registro de ausencias/Pagos, sin ser el mismo mecanismo. Las dos
+leyendas y `_generar_backup`/`_avanzar_mes` se refrescan solos después
+de cada acción (ya llamaban a `actualizar()` al terminar, o se sumó la
+llamada — ver `_generar_backup`).
+
+A la derecha de esa columna, un cuadro de texto fijo (borde negro,
+mismo criterio que otros "cuadros" del sistema, ej. la vista previa de
+Placas) que explica en texto corrido qué hace cada uno de los dos
+botones — pedido explícito de la clienta, para que quede claro de qué
+se trata cada acción sin tener que abrir un cartel de confirmación
+para enterarse.
+
+Las alertas siguen exactamente igual que antes (tarjetas simples, no
+tabla — no se forzó ningún cambio ahí), debajo de la fila de
+botones/leyenda, en su propio `QScrollArea` (pueden ser muchas). El
+título de la pantalla sigue mostrando el nombre del espacio tal cual
+está cargado en Configuración general (sin `.upper()`) — quedó
+pendiente de definir con la clienta si tiene sentido aplicarle el
+formato Nivel 1 a un nombre propio o si conviene separar un título de
+pantalla fijo del saludo con el nombre del espacio; no se tocó en esta
+vuelta.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

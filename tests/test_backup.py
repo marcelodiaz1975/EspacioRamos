@@ -11,6 +11,7 @@ from app.negocio.backup import (
     carpeta_backup,
     generar_backup,
     restaurar_backup,
+    ultimo_backup,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -196,6 +197,24 @@ def test_backup_vencido_usa_el_backup_mas_reciente(conn, tmp_path):
     generar_backup(conn, momento=datetime(2026, 7, 1, 9, 0))
     generar_backup(conn, momento=datetime(2026, 8, 14, 9, 0))
     assert backup_vencido(conn, date(2026, 8, 15)) is False  # 1 día desde el más reciente
+
+
+# ------------------------------------------------------------- ultimo_backup (Panel de control)
+
+def test_ultimo_backup_sin_carpeta_configurada_es_none(conn):
+    assert ultimo_backup(conn) is None
+
+
+def test_ultimo_backup_sin_ningun_backup_generado_es_none(conn, tmp_path):
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    assert ultimo_backup(conn) is None
+
+
+def test_ultimo_backup_devuelve_fecha_y_hora_del_mas_reciente(conn, tmp_path):
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    generar_backup(conn, momento=datetime(2026, 7, 1, 9, 0))
+    generar_backup(conn, momento=datetime(2026, 8, 14, 16, 45))
+    assert ultimo_backup(conn) == datetime(2026, 8, 14, 16, 45)
 
 
 def test_backup_vencido_frecuencia_no_distingue_mayusculas(conn, tmp_path):

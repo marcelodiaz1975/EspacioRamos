@@ -1,10 +1,13 @@
+from datetime import datetime
+
 import pytest
-from PySide6.QtWidgets import QLabel, QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.panel_control import PanelControl
+from app.negocio.backup import generar_backup
 from app.negocio.lista_espera import crear_pedido
 from app.repositorio.registro import obtener_repositorio
 
@@ -238,3 +241,80 @@ def test_ventana_principal_navega_entre_secciones(qtbot, conn):
     assert ventana._pila.count() == 2
     ventana._navegacion.setCurrentRow(2)  # fila 0 = separador, 1 = primera, 2 = segunda
     assert ventana._pila.currentIndex() == 1
+
+
+# --------------------------------------------------------- formato solapa
+
+
+def test_tiene_formato_solapa_con_una_pestana(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    solapas = pantalla.findChild(QTabWidget)
+    assert solapas is not None
+    assert solapas.tabText(0) == "Resumen"
+    assert pantalla.findChild(QWidget, "panelSolapa") is not None
+
+
+def test_los_dos_botones_son_secundarios(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_avanzar.objectName() == "botonSecundario"
+    assert pantalla.boton_backup.objectName() == "botonSecundario"
+
+
+def test_los_dos_botones_comparten_el_mismo_ancho_fijo(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_avanzar.width() == pantalla.boton_backup.width()
+
+
+def test_leyenda_periodo_actual(qtbot, conn):
+    conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1")
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.leyenda_periodo.text() == "Período actual 08-2026"
+
+
+def test_leyenda_backup_sin_ninguno_generado(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.leyenda_backup.text() == "Todavía no se generó ningún backup."
+
+
+def test_leyenda_backup_con_uno_ya_generado(qtbot, conn, tmp_path, monkeypatch):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, CarpetaBackup=str(tmp_path / "backups"))
+    generar_backup(conn, momento=datetime(2026, 8, 25, 14, 45))
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.leyenda_backup.text() == "Último backup mar 25-08-2026 14:45hs"
+
+
+def test_generar_backup_actualiza_la_leyenda(qtbot, conn, tmp_path):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, CarpetaBackup=str(tmp_path / "backups"))
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.leyenda_backup.text() == "Todavía no se generó ningún backup."
+
+    pantalla._generar_backup()
+
+    assert pantalla.leyenda_backup.text().startswith("Último backup")
+
+
+def test_foco_inicial_queda_en_avanzar_de_mes(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.boton_avanzar.hasFocus())
+
+
+def test_cadena_de_foco_entre_los_dos_botones_da_la_vuelta(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla._foco._orden == [pantalla.boton_avanzar, pantalla.boton_backup]
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.boton_backup.setFocus()
+    qtbot.waitUntil(lambda: pantalla.boton_backup.hasFocus())
+    pantalla._foco._mover(pantalla.boton_backup, retroceder=False, seleccionar_todo=False)
+    qtbot.waitUntil(lambda: pantalla.boton_avanzar.hasFocus())

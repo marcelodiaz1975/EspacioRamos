@@ -1,7 +1,18 @@
-"""Pantalla principal / panel de control (Etapa 6.1, FA1)."""
+"""Pantalla principal / panel de control (Etapa 6.1, FA1).
+
+Revisión "uno por uno" (ver CLAUDE.md): pasó a formato solapa (una sola
+pestaña, "Resumen"), con "Avanzar de mes" y "Generar backup ahora" como
+`botonSecundario` los dos (pedido explícito de la clienta — esta
+pantalla ya no tiene una acción "más importante" que la otra) en una
+columna a la izquierda, cada uno con una leyenda de estado arriba
+("Período actual"/"Último backup") y separados por una línea divisoria;
+a la derecha, un cuadro de texto fijo que explica qué hace cada botón.
+Las alertas siguen debajo, en su propia área con scroll (puede ser una
+lista larga)."""
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QFrame,
@@ -10,15 +21,28 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.avance_mes import avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo
-from app.negocio.backup import generar_backup
-from app.negocio.dias import fecha_actual, periodo_actual
+from app.negocio.backup import generar_backup, ultimo_backup
+from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual
 from app.negocio.formato import formatear_moneda, mes_texto, periodo_mm_aaaa
 from app.negocio.panel_control import Alertas, calcular_alertas
+
+_ANCHO_PANEL_IZQUIERDA = 240
+_ANCHO_BOTON = 220
+
+_TEXTO_EXPLICACION = (
+    '"Avanzar de mes" traspasa el saldo de cada profesional, cierra las cuotas de planes de pago que '
+    "correspondan y genera el snapshot mensual de ocupación — se puede usar en cualquier momento, no hace "
+    "falta esperar a que termine o empiece el mes.\n\n"
+    '"Generar backup ahora" copia la base de datos y toda la carpeta de archivos generados a la carpeta de '
+    "backup configurada, sin esperar a que se cumpla la frecuencia automática."
+)
 
 _TITULOS_ALERTA = {
     "deuda_regulares": "Deuda mes anterior — profesionales regulares",
@@ -39,12 +63,35 @@ _ETIQUETA_FILA = {
 }
 
 
+def _linea_divisoria() -> QFrame:
+    linea = QFrame()
+    linea.setFrameShape(QFrame.Shape.HLine)
+    linea.setFrameShadow(QFrame.Shadow.Sunken)
+    return linea
+
+
+def _texto_fecha_hora(momento: datetime) -> str:
+    """"vie 25-08-2026 14:45hs" — mismo criterio que las fechas de
+    Registro de ausencias/Pagos (día de la semana abreviado + dd-MM-yyyy
+    + hora), armado a mano porque acá el dato es un `datetime` de Python,
+    no un campo de formulario con su propio `QDateEdit`."""
+    dia = fecha_a_dia_semana(momento.date())[:3].lower()
+    return f"{dia} {momento.day:02d}-{momento.month:02d}-{momento.year} {momento.hour:02d}:{momento.minute:02d}hs"
+
+
 class PanelControl(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
         self._armar_ui()
         self.actualizar()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Mismo motivo que en Estadísticas/Liquidación/Reservas: el foco
+        pedido durante la construcción no alcanza a "pegar" porque el
+        QTabWidget contenedor todavía no está mostrado en ese momento."""
+        super().showEvent(event)
+        self.boton_avanzar.setFocus()
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -57,16 +104,47 @@ class PanelControl(QWidget):
         self.subtitulo.setObjectName("subtitulo")
         layout.addWidget(self.subtitulo)
 
-        fila_boton = QHBoxLayout()
+        solapas = QTabWidget()
+        panel_solapa = QWidget()
+        panel_solapa.setObjectName("panelSolapa")
+        layout_solapa = QVBoxLayout(panel_solapa)
+
+        fila_superior = QHBoxLayout()
+        panel_izquierda = QWidget()
+        panel_izquierda.setFixedWidth(_ANCHO_PANEL_IZQUIERDA)
+        columna = QVBoxLayout(panel_izquierda)
+        columna.setContentsMargins(0, 0, 0, 0)
+
+        self.leyenda_periodo = QLabel()
+        self.leyenda_periodo.setObjectName("subtitulo")
+        columna.addWidget(self.leyenda_periodo)
+
         self.boton_avanzar = QPushButton("Avanzar de mes")
-        self.boton_avanzar.setObjectName("botonPrimario")
+        self.boton_avanzar.setObjectName("botonSecundario")
+        self.boton_avanzar.setFixedWidth(_ANCHO_BOTON)
         self.boton_avanzar.clicked.connect(self._avanzar_mes)
-        fila_boton.addWidget(self.boton_avanzar)
-        boton_backup = QPushButton("Generar backup ahora")
-        boton_backup.clicked.connect(self._generar_backup)
-        fila_boton.addWidget(boton_backup)
-        fila_boton.addStretch()
-        layout.addLayout(fila_boton)
+        columna.addWidget(self.boton_avanzar)
+
+        columna.addWidget(_linea_divisoria())
+
+        self.leyenda_backup = QLabel()
+        self.leyenda_backup.setObjectName("subtitulo")
+        columna.addWidget(self.leyenda_backup)
+
+        self.boton_backup = QPushButton("Generar backup ahora")
+        self.boton_backup.setObjectName("botonSecundario")
+        self.boton_backup.setFixedWidth(_ANCHO_BOTON)
+        self.boton_backup.clicked.connect(self._generar_backup)
+        columna.addWidget(self.boton_backup)
+
+        columna.addStretch()
+        fila_superior.addWidget(panel_izquierda)
+
+        texto_explicacion = QLabel(_TEXTO_EXPLICACION)
+        texto_explicacion.setWordWrap(True)
+        texto_explicacion.setStyleSheet("border: 1px solid black; padding: 8px;")
+        fila_superior.addWidget(texto_explicacion, stretch=1)
+        layout_solapa.addLayout(fila_superior)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -74,7 +152,13 @@ class PanelControl(QWidget):
         self.layout_alertas = QVBoxLayout(self.contenedor_alertas)
         self.layout_alertas.addStretch()
         scroll.setWidget(self.contenedor_alertas)
-        layout.addWidget(scroll, stretch=1)
+        layout_solapa.addWidget(scroll, stretch=1)
+
+        solapas.addTab(panel_solapa, "Resumen")
+        solapas.tabBar().setDrawBase(False)
+        layout.addWidget(solapas, stretch=1)
+
+        self._foco = instalar_enter_avanza_foco([self.boton_avanzar, self.boton_backup], parent=self)
 
     def actualizar(self) -> None:
         cfg = self.conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
@@ -88,6 +172,14 @@ class PanelControl(QWidget):
             f"Período en curso: {mes_texto(mes).capitalize()} de {anio} ({periodo_mm_aaaa(periodo)})  ·  "
             f"Hoy: {hoy.strftime('%d/%m/%Y')}"
         )
+        self.leyenda_periodo.setText(f"Período actual {mes:02d}-{anio}")
+
+        momento_backup = ultimo_backup(self.conn)
+        self.leyenda_backup.setText(
+            f"Último backup {_texto_fecha_hora(momento_backup)}" if momento_backup is not None
+            else "Todavía no se generó ningún backup."
+        )
+
         alertas = calcular_alertas(self.conn)
         self._refrescar_alertas(alertas)
 
@@ -209,3 +301,4 @@ class PanelControl(QWidget):
             QMessageBox.warning(self, "Generar backup", str(error))
             return
         QMessageBox.information(self, "Generar backup", f"Backup generado en:\n{ruta}")
+        self.actualizar()
