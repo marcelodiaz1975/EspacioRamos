@@ -907,6 +907,74 @@ columna a la línea más larga de las dos, sin ningún código extra. Nada
 puntual de Estadísticas: cualquier tabla nueva con un título largo puede
 usar el mismo recurso.
 
+## Configuración general (formulario plano -> 5 solapas temáticas)
+
+Pasó de un `QFormLayout` con los 30 campos de `Configuracion` seguidos,
+uno abajo del otro sin ningún agrupamiento, a formato solapa con 5
+pestañas temáticas. El agrupamiento lo armé a criterio propio (pedido
+explícito de la clienta: "separalo por solapas por temas a tu
+criterio") y lo mostré armado antes de tocar código para que lo
+aprobara — "en principio está bien así, cualquier cosa se reevalúa más
+adelante" — así que el criterio de agrupamiento en sí queda abierto a
+cambios puntuales más adelante, no es definitivo:
+
+- **General**: Nombre del espacio, Ruta del logo, Modo oscuro, Mensajes
+  en plural, Módulos extendidos, Visualizar campos libres, Cantidad de
+  decimales.
+- **Grilla y ocupación**: Días de grilla, Hora inicio/fin de grilla,
+  Fracción de grilla, Umbral de giro de grilla, Rangos de estadísticas
+  de ocupación.
+- **Valores y liquidación**: Frecuencia/meses de actualización de
+  valores, Recargo % aisladas (+ el check "activo por defecto"), %
+  ajuste saldo atrasado, Tolerancia deuda para descuento, % descuento
+  feriado/no laborable, Semanas de vacaciones máximas, Días de margen
+  para envío de liquidaciones, Retención historial lista de espera.
+- **Archivos y backup**: Frecuencia de backup a Drive, Carpeta base de
+  archivos, Carpeta de backup, Tamaño máximo de imagen.
+- **Modo QA**: Fecha ficticia, Modo fecha ficticia.
+
+`_GRUPOS` (`app/gui/pantallas/configuracion.py`) es la única fuente de
+este agrupamiento — mover un campo de solapa es cambiar una lista, no
+tocar el resto de la pantalla. Un test (`test_todos_los_campos_estan_
+agrupados_una_sola_vez`) verifica que `_GRUPOS` cubre exactamente los
+mismos campos que `_CAMPOS_TEXTO`/`_CAMPOS_NUMERICOS`/`_CAMPOS_
+BOOLEANOS` (ninguno se pierde ni queda duplicado) para que un futuro
+cambio de agrupamiento no pueda dejar un campo afuera sin que un test
+lo note.
+
+El botón "Guardar" queda FUERA del `QTabWidget` (no es de ninguna
+solapa en particular): sigue guardando los 30 campos juntos de una sola
+vez, no solo los de la pestaña que se esté viendo — sigue siendo una
+única fila de configuración, el agrupamiento es puramente visual. Por
+ser compartido por las cinco solapas, la cadena de foco Enter/Tab
+(`_actualizar_cadena_foco`) se reinstala cada vez que se cambia de
+pestaña (`QTabWidget.currentChanged`) con los campos de ESA solapa +
+"Guardar" al final — necesario porque instalar las cinco cadenas de una
+sola vez dejaría a "Guardar" respondiendo siempre según la última
+cadena instalada (la de la solapa construida al final), sin importar
+cuál esté realmente visible en pantalla.
+
+Cada solapa (`_PanelCampos`) sigue el mismo patrón que `_PanelReservas
+Regulares` de Reservas: el propio widget con `objectName="panelSolapa"`
+es el que se pasa a `addTab(...)` (no envuelto desde afuera en un
+`QScrollArea`), con su `QScrollArea` interno para el formulario y su
+propio `showEvent` que enfoca el primer campo de esa solapa al
+mostrarse — mismo motivo que en Estadísticas/Liquidación/Reservas: un
+`setFocus()` durante la construcción no alcanza a pegar antes de que el
+`QTabWidget` contenedor esté realmente mostrado.
+
+Pendiente para una próxima vuelta (detectado en esta revisión, no
+resuelto todavía porque no era parte de lo pedido): los campos
+numéricos siguen siendo `QLineEdit` de texto libre con parseo manual a
+`float` (no `QSpinBox`/`QDoubleSpinBox`), "Fecha ficticia" sigue en
+texto libre validado contra AAAA-MM-DD (no el selector de calendario ya
+generalizado en otros catálogos), "Ruta del logo"/"Carpeta base de
+archivos"/"Carpeta de backup" siguen tipeadas a mano sin un botón para
+elegir archivo/carpeta, y "Días de grilla" muestra el JSON con
+caracteres escapados (`Miércoles`) porque el `json.dumps` que arma
+el valor por defecto en `app/db/seed.py` no pasa `ensure_ascii=False`
+— ninguno de estos cuatro puntos se tocó en esta vuelta.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

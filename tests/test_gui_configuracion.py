@@ -1,11 +1,17 @@
 import pytest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import hoja_estilos
 from app.gui.main_window import Seccion, VentanaPrincipal
-from app.gui.pantallas.configuracion import ConfiguracionGeneral
+from app.gui.pantallas.configuracion import (
+    _CAMPOS_BOOLEANOS,
+    _CAMPOS_NUMERICOS,
+    _CAMPOS_TEXTO,
+    _GRUPOS,
+    ConfiguracionGeneral,
+)
 
 
 @pytest.fixture
@@ -146,3 +152,84 @@ def test_guardar_con_json_invalido_no_persiste(qtbot, conn):
 
     fila = conn.execute("SELECT DiasGrilla FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     assert fila["DiasGrilla"] == valor_original
+
+
+# --------------------------------------------------------- formato solapa
+
+
+def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    titulo = pantalla.findChild(QLabel, "tituloPantalla")
+    assert titulo is not None
+    assert titulo.text() == "CONFIGURACIÓN GENERAL"
+
+
+def test_tiene_formato_solapa_con_las_cinco_pestanas(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    solapas = pantalla.findChild(QTabWidget)
+    assert solapas is not None
+    assert [solapas.tabText(i) for i in range(solapas.count())] == [titulo for titulo, _campos in _GRUPOS]
+    assert len(pantalla.findChildren(QWidget, "panelSolapa")) == len(_GRUPOS)
+
+
+def test_todos_los_campos_estan_agrupados_una_sola_vez(qtbot, conn):
+    """Ningún campo se pierde ni queda duplicado al pasar del formulario
+    plano a los cinco grupos temáticos."""
+    todos = {nombre for nombre, _ in _CAMPOS_TEXTO + _CAMPOS_NUMERICOS + _CAMPOS_BOOLEANOS}
+    agrupados: list[str] = [nombre for _titulo, campos in _GRUPOS for nombre in campos]
+    assert sorted(agrupados) == sorted(todos)
+    assert len(agrupados) == len(set(agrupados))
+
+
+def test_cada_solapa_carga_todos_sus_campos(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    for panel, (_titulo, nombres) in zip(pantalla._paneles, _GRUPOS):
+        assert len(panel.orden) == len(nombres)
+        for nombre, entrada in zip(nombres, panel.orden):
+            assert pantalla._entradas[nombre] is entrada
+
+
+def test_foco_inicial_queda_en_el_primer_campo_de_la_primera_solapa(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    primer_campo = pantalla._paneles[0].orden[0]
+    qtbot.waitUntil(lambda: primer_campo.hasFocus())
+
+
+def test_cambiar_de_solapa_enfoca_el_primer_campo_de_la_nueva(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    pantalla.pestanas.setCurrentIndex(1)
+    primer_campo_grilla = pantalla._paneles[1].orden[0]
+    qtbot.waitUntil(lambda: primer_campo_grilla.hasFocus())
+
+
+def test_cadena_de_foco_de_una_solapa_termina_en_guardar_y_vuelve_al_principio(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    panel = pantalla._paneles[0]
+    assert pantalla._foco._orden == panel.orden + [pantalla.boton_guardar]
+
+    pantalla.boton_guardar.setFocus()
+    qtbot.waitUntil(lambda: pantalla.boton_guardar.hasFocus())
+    pantalla._foco._mover(pantalla.boton_guardar, retroceder=False, seleccionar_todo=False)
+    qtbot.waitUntil(lambda: panel.orden[0].hasFocus())
+
+
+def test_cadena_de_foco_se_reinstala_al_cambiar_de_solapa(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.pestanas.setCurrentIndex(2)
+    panel = pantalla._paneles[2]
+    assert pantalla._foco._orden == panel.orden + [pantalla.boton_guardar]
