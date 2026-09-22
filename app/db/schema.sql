@@ -699,5 +699,65 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     -- Muestra/oculta los tres campos libres (CampoLibre1/2/3) en todos los
     -- catálogos a la vez (ver crud_generico.campos_libres) — apagarlo no
     -- borra los valores ya cargados, solo deja de mostrarlos y de pedirlos.
-    VisualizarCamposLibres INTEGER NOT NULL DEFAULT 1
+    VisualizarCamposLibres INTEGER NOT NULL DEFAULT 1,
+    -- Seguridad (login, bloqueo por inactividad y niveles de acceso — ver
+    -- app.negocio.seguridad): minutos sin actividad del mouse/teclado antes
+    -- de bloquear la pantalla (no cierra sesión, solo pide la contraseña
+    -- de nuevo para desbloquear). La contraseña maestra es la red de
+    -- seguridad para cuando se pierde el acceso de TODOS los usuarios
+    -- Administrador a la vez — nunca se pide en el uso normal del sistema.
+    MinutosInactividadBloqueo INTEGER NOT NULL DEFAULT 15,
+    ContrasenaMaestraHash TEXT,
+    ContrasenaMaestraSalt TEXT
+);
+
+-- 3.31 NivelAcceso (Seguridad: catálogo de niveles de acceso — Orden define el
+-- ranking para comparar "alcanza o no alcanza" contra el nivel mínimo que
+-- pida cada pantalla en PermisoPantalla; mayor Orden = más privilegios) ------
+CREATE TABLE IF NOT EXISTS NivelAcceso (
+    IdNivelAcceso INTEGER PRIMARY KEY AUTOINCREMENT,
+    Nombre TEXT NOT NULL,
+    Orden INTEGER NOT NULL,
+    Activo INTEGER NOT NULL DEFAULT 1,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
+);
+
+-- 3.32 Usuario (Seguridad: login del sistema) ---------------------------------------
+CREATE TABLE IF NOT EXISTS Usuario (
+    IdUsuario INTEGER PRIMARY KEY AUTOINCREMENT,
+    NombreUsuario TEXT NOT NULL UNIQUE,
+    HashContrasena TEXT NOT NULL,
+    Salt TEXT NOT NULL,
+    IdNivelAcceso INTEGER NOT NULL REFERENCES NivelAcceso(IdNivelAcceso),
+    Activo INTEGER NOT NULL DEFAULT 1,
+    FechaCreacion TEXT NOT NULL,
+    UltimoIngreso TEXT,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
+);
+
+-- 3.33 HistorialContrasenas (Seguridad: auditoría de cambios de contraseña —
+-- guarda el hash/salt ANTERIOR al cambio, nunca la contraseña en texto plano,
+-- ni siquiera la nueva) --------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS HistorialContrasenas (
+    IdHistorialContrasena INTEGER PRIMARY KEY AUTOINCREMENT,
+    IdUsuario INTEGER NOT NULL REFERENCES Usuario(IdUsuario),
+    FechaHora TEXT NOT NULL,
+    HashContrasenaAnterior TEXT NOT NULL,
+    SaltAnterior TEXT NOT NULL,
+    Motivo TEXT NOT NULL,
+    IdUsuarioQueRealizoElCambio INTEGER REFERENCES Usuario(IdUsuario)
+);
+
+-- 3.34 PermisoPantalla (Seguridad: nivel mínimo requerido para ver cada
+-- pantalla del menú — NombrePantalla coincide con Seccion.nombre de
+-- gui_main.construir_secciones(); se asegura una fila por pantalla al
+-- arrancar la GUI, ver app.negocio.seguridad.asegurar_permisos_pantalla,
+-- editable después desde la pantalla de Seguridad) ----------------------------------
+CREATE TABLE IF NOT EXISTS PermisoPantalla (
+    NombrePantalla TEXT PRIMARY KEY,
+    IdNivelAcceso INTEGER NOT NULL REFERENCES NivelAcceso(IdNivelAcceso)
 );

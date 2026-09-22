@@ -47,6 +47,10 @@ TABLAS = [
     "Configuracion",
     "CondicionNorma",
     "DetalleComplementarioPropuesta",
+    "NivelAcceso",
+    "Usuario",
+    "HistorialContrasenas",
+    "PermisoPantalla",
 ]
 
 
