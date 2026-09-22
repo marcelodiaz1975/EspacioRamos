@@ -1253,6 +1253,69 @@ criterio que Placas: pocas columnas, todas de importancia pareja, se
 reparten todo el ancho disponible del cuadro en vez de ajustarse al
 contenido.
 
+## Llaves (solapa, botones a la izquierda, tablas apiladas a la derecha)
+
+Última pantalla sin revisar del sistema. Pasó del `QSplitter` viejo de
+dos paneles anchos (Tipos+Accesos a la izquierda, Movimientos a la
+derecha, cada tabla con sus propios botones al lado) a formato solapa
+única "Llaves" (`panelSolapa`/`QScrollArea`, `setDrawBase(False)`/
+`NoFrame` como el resto) con una separación total entre botones y
+tablas: columna izquierda de ancho fijo (`_ANCHO_BOTON = 280`,
+calculado para "Devolución copia del profesional") con los diez
+botones de las tres secciones, sin ninguna tabla; columna derecha con
+las tres tablas apiladas una arriba de la otra (Tipos, Accesos,
+Movimientos, en ese orden) — pedido explícito de la clienta sobre el
+`QSplitter` viejo.
+
+Los diez botones, de arriba a abajo (todos `botonSecundario` salvo el
+último, pedido explícito de la clienta — antes "Nuevo" y "Asignar…"
+eran los dos `botonPrimario` de la pantalla):
+"Nuevo tipo de llave" / "Editar tipo de llave" / "Eliminar tipo de
+llave", línea divisoria, "Agregar acceso de llave" / "Eliminar acceso
+de llave", línea divisoria, "Ingresar copia al stock" / "Registrar
+pérdida" / "Devolución copia del profesional" / "Asignar copia a
+profesional" (`botonPrimario` — la única acción que la clienta marcó
+como "más definitiva" de la pantalla). Los nombres también cambiaron
+(ninguno lleva ya puntos suspensivos, mismo criterio que Profesionales
+al sacárselos a "Agregar archivo") y el orden de los cuatro botones de
+Movimientos se invirtió respecto de antes (Ingresar → Pérdida →
+Devolución → Asignar, en vez de Ingresar → Asignar → Devolución →
+Pérdida).
+
+"Deshacer último movimiento" (cubría cualquier alta/edición/baja de
+esta pantalla, con su propio mecanismo genérico `_marcar_ultimo`/
+`_ultimo`) se sacó por completo a pedido explícito de la clienta al
+darle la lista final de diez botones — confirmado aparte, porque no
+estaba en la lista y es una pérdida de funcionalidad real, no solo
+estética. Se borró también todo el código que solo existía para
+alimentarlo: `_cargo_especial_creado` y el cómputo de `cargos_antes`/
+`cargo_nuevo` en `_asignar`/`_registrar_devolucion` no tenían ningún
+otro uso.
+
+Alto de las tablas (pedido explícito de la clienta, distinto del
+`stretch=1` parejo que tenían las tres antes): Tipos y Accesos quedan
+con un alto FIJO calculado para mostrar 6 y 3 filas respectivamente sin
+scroll (`_alto_para_filas`, a partir de `verticalHeader().
+defaultSectionSize()` + el alto del encabezado — ambas tablas siguen
+siendo scrolleables si hay más filas de las que entran, el alto fijo
+solo define cuántas se ven sin tener que scrollear), y Movimientos se
+queda con `stretch=1`, es decir todo el alto que sobra en la pantalla
+después de las otras dos. Cada tabla conserva su campo de observación
+(`campo_observacion_tipo`/`_acceso`/`_movimiento`) inmediatamente
+debajo, en la misma columna derecha — no son botones, así que no
+tenían lugar en la columna de botones y quedaron junto a su tabla, que
+es de donde toman y a donde guardan el valor.
+
+La cadena de foco Enter/Tab no sigue el orden puramente visual esta
+vez (los botones y los campos de observación quedaron en columnas
+separadas): se mantuvo el mismo orden lógico por sección que ya tenía
+la pantalla antes de esta revisión (observación de Tipo → sus tres
+botones → observación de Acceso → sus dos botones → observación de
+Movimiento → sus cuatro botones, sin Deshacer), interpretación propia
+ante la ambigüedad de qué es "más arriba" cuando dos columnas
+independientes tienen contenido a la misma altura — a confirmar con la
+clienta si prefiere otro criterio.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

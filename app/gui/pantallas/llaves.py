@@ -15,13 +15,14 @@ Es F18 — asignado por nosotros en la revisión uno por uno con la
 clienta: es el único número sin usar entre F16 (Reservas regulares) y
 F27 (Ausencias), confirmado con ella.
 
-"Deshacer último movimiento" (pedido explícito en la revisión): cubre
-CUALQUIER acción hecha en el formulario, sin importar de cuál se trate —
-dar de alta/modificar/eliminar un Tipo de llave, agregar/quitar un
-acceso, ingresar copias, asignar, devolver o registrar una pérdida. Se
-guarda un solo registro de "qué fue lo último" (se pisa con cada acción
-nueva) y el botón lo revierte por completo, incluido el cargo especial
-de depósito/reintegro si esa acción generó uno."""
+Formato solapa (revisión uno por uno de esta pantalla): pasó del
+`QSplitter` de dos paneles anchos (Tipos+Accesos a la izquierda,
+Movimientos a la derecha) a una columna izquierda de ancho fijo con
+los diez botones de las tres secciones (sin tablas) y una columna
+derecha con las tres tablas apiladas una arriba de la otra — pedido
+explícito de la clienta. "Deshacer último movimiento" (que existía
+hasta esta revisión, cubría cualquier acción del formulario) se sacó
+de la pantalla a pedido de la clienta al reordenar los botones."""
 from __future__ import annotations
 
 import sqlite3
@@ -36,15 +37,17 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
-    QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -69,6 +72,26 @@ from app.repositorio.registro import obtener_repositorio
 
 _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
 _DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+_ANCHO_BOTON = 280  # "Devolución copia del profesional", el texto más largo de la columna
+_FILAS_VISIBLES_TIPOS = 6
+_FILAS_VISIBLES_ACCESOS = 3
+
+
+def _linea_divisoria() -> QFrame:
+    linea = QFrame()
+    linea.setFrameShape(QFrame.Shape.HLine)
+    linea.setFrameShadow(QFrame.Shadow.Sunken)
+    return linea
+
+
+def _alto_para_filas(tabla: QTableWidget, filas: int) -> int:
+    """Alto fijo para que se vean exactamente `filas` filas sin scroll
+    (la tabla sigue siendo scrolleable para el resto) — pedido explícito
+    de la clienta: Tipos muestra 6, Accesos 3, Movimientos se queda con
+    el resto del alto disponible en la pantalla."""
+    alto_fila = tabla.verticalHeader().defaultSectionSize()
+    alto_header = tabla.horizontalHeader().sizeHint().height()
+    return alto_header + alto_fila * filas + 2 * tabla.frameWidth()
 
 
 def _fecha_larga(iso: str) -> str:
@@ -97,7 +120,6 @@ class PantallaLlaves(QWidget):
         self._tipos_actuales: list[sqlite3.Row] = []
         self._accesos_actuales: list[sqlite3.Row] = []
         self._movimientos_actuales: list[sqlite3.Row] = []
-        self._ultimo: dict | None = None
         self._armar_ui()
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -121,13 +143,73 @@ class PantallaLlaves(QWidget):
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
-        splitter = QSplitter()
+        solapas = QTabWidget()
+        panel_solapa = QWidget()
+        panel_solapa.setObjectName("panelSolapa")
+        layout_solapa = QHBoxLayout(panel_solapa)
 
-        # ------------------------------------------------------- izquierda
+        # ------------------------------------------------------- izquierda (solo botones)
         panel_izq = QWidget()
-        layout_izq = QVBoxLayout(panel_izq)
+        columna = QVBoxLayout(panel_izq)
 
-        layout_izq.addWidget(self._titulo_seccion("Tipos de llaves"))
+        self.boton_nuevo_tipo = QPushButton("Nuevo tipo de llave")
+        self.boton_nuevo_tipo.setObjectName("botonSecundario")
+        self.boton_nuevo_tipo.clicked.connect(self._nuevo_tipo)
+        self.boton_editar_tipo = QPushButton("Editar tipo de llave")
+        self.boton_editar_tipo.setObjectName("botonSecundario")
+        self.boton_editar_tipo.clicked.connect(self._editar_tipo)
+        self.boton_eliminar_tipo = QPushButton("Eliminar tipo de llave")
+        self.boton_eliminar_tipo.setObjectName("botonSecundario")
+        self.boton_eliminar_tipo.clicked.connect(self._eliminar_tipo)
+        columna.addWidget(self.boton_nuevo_tipo)
+        columna.addWidget(self.boton_editar_tipo)
+        columna.addWidget(self.boton_eliminar_tipo)
+
+        columna.addWidget(_linea_divisoria())
+
+        self.boton_agregar_acceso = QPushButton("Agregar acceso de llave")
+        self.boton_agregar_acceso.setObjectName("botonSecundario")
+        self.boton_agregar_acceso.clicked.connect(self._agregar_acceso)
+        self.boton_eliminar_acceso = QPushButton("Eliminar acceso de llave")
+        self.boton_eliminar_acceso.setObjectName("botonSecundario")
+        self.boton_eliminar_acceso.clicked.connect(self._eliminar_acceso)
+        columna.addWidget(self.boton_agregar_acceso)
+        columna.addWidget(self.boton_eliminar_acceso)
+
+        columna.addWidget(_linea_divisoria())
+
+        self.boton_ingresar = QPushButton("Ingresar copia al stock")
+        self.boton_ingresar.setObjectName("botonSecundario")
+        self.boton_ingresar.clicked.connect(self._ingresar_copia)
+        self.boton_perdida = QPushButton("Registrar pérdida")
+        self.boton_perdida.setObjectName("botonSecundario")
+        self.boton_perdida.clicked.connect(self._registrar_perdida)
+        self.boton_devolver = QPushButton("Devolución copia del profesional")
+        self.boton_devolver.setObjectName("botonSecundario")
+        self.boton_devolver.clicked.connect(self._registrar_devolucion)
+        self.boton_asignar = QPushButton("Asignar copia a profesional")
+        self.boton_asignar.setObjectName("botonPrimario")
+        self.boton_asignar.clicked.connect(self._asignar)
+        columna.addWidget(self.boton_ingresar)
+        columna.addWidget(self.boton_perdida)
+        columna.addWidget(self.boton_devolver)
+        columna.addWidget(self.boton_asignar)
+
+        for boton in (
+            self.boton_nuevo_tipo, self.boton_editar_tipo, self.boton_eliminar_tipo,
+            self.boton_agregar_acceso, self.boton_eliminar_acceso,
+            self.boton_ingresar, self.boton_perdida, self.boton_devolver, self.boton_asignar,
+        ):
+            boton.setFixedWidth(_ANCHO_BOTON)
+
+        columna.addStretch()
+        layout_solapa.addWidget(panel_izq)
+
+        # ------------------------------------------------------- derecha (las tres tablas apiladas)
+        panel_der = QWidget()
+        layout_der = QVBoxLayout(panel_der)
+
+        layout_der.addWidget(self._titulo_seccion("Tipos de llaves"))
         self.tabla_tipos = QTableWidget()
         self.tabla_tipos.setColumnCount(6)
         self.tabla_tipos.setHorizontalHeaderLabels(
@@ -142,66 +224,32 @@ class PantallaLlaves(QWidget):
         self.tabla_tipos.setColumnWidth(3, 90)
         self.tabla_tipos.setColumnWidth(4, 95)
         self.tabla_tipos.setColumnWidth(5, 65)
+        self.tabla_tipos.setFixedHeight(_alto_para_filas(self.tabla_tipos, _FILAS_VISIBLES_TIPOS))
         self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_accesos)
         self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_observacion_tipo)
         self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_botones_movimiento)
         self._orden_tipos = OrdenTabla(self.tabla_tipos, self._actualizar_tipos)
-        layout_izq.addWidget(self.tabla_tipos, stretch=1)
+        layout_der.addWidget(self.tabla_tipos)
 
         self.campo_observacion_tipo = QLineEdit()
         self.campo_observacion_tipo.editingFinished.connect(self._guardar_observacion_tipo)
-        layout_izq.addWidget(self.campo_observacion_tipo)
+        layout_der.addWidget(self.campo_observacion_tipo)
 
-        fila_botones_tipo = QHBoxLayout()
-        self.boton_nuevo_tipo = QPushButton("Nuevo")
-        self.boton_nuevo_tipo.setObjectName("botonPrimario")
-        self.boton_nuevo_tipo.clicked.connect(self._nuevo_tipo)
-        self.boton_editar_tipo = QPushButton("Editar")
-        self.boton_editar_tipo.setObjectName("botonSecundario")
-        self.boton_editar_tipo.clicked.connect(self._editar_tipo)
-        self.boton_eliminar_tipo = QPushButton("Eliminar")
-        self.boton_eliminar_tipo.setObjectName("botonSecundario")
-        self.boton_eliminar_tipo.clicked.connect(self._eliminar_tipo)
-        fila_botones_tipo.addWidget(self.boton_nuevo_tipo)
-        fila_botones_tipo.addWidget(self.boton_editar_tipo)
-        fila_botones_tipo.addWidget(self.boton_eliminar_tipo)
-        fila_botones_tipo.addStretch()
-        layout_izq.addLayout(fila_botones_tipo)
-
-        layout_izq.addWidget(self._titulo_seccion("Accesos habilitados con la llave"))
+        layout_der.addWidget(self._titulo_seccion("Accesos habilitados con la llave"))
         self.tabla_accesos = QTableWidget()
         self.tabla_accesos.setColumnCount(4)
         self.tabla_accesos.setHorizontalHeaderLabels(["Localidad", "Edificio", "Unidad", "Nombre"])
         self.tabla_accesos.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_accesos.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_accesos.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla_accesos.setFixedHeight(_alto_para_filas(self.tabla_accesos, _FILAS_VISIBLES_ACCESOS))
         self.tabla_accesos.itemSelectionChanged.connect(self._actualizar_observacion_acceso)
         self._orden_accesos = OrdenTabla(self.tabla_accesos, self._actualizar_accesos)
-        layout_izq.addWidget(self.tabla_accesos, stretch=1)
+        layout_der.addWidget(self.tabla_accesos)
 
         self.campo_observacion_acceso = QLineEdit()
         self.campo_observacion_acceso.editingFinished.connect(self._guardar_observacion_acceso)
-        layout_izq.addWidget(self.campo_observacion_acceso)
-
-        fila_accesos = QHBoxLayout()
-        self.boton_agregar_acceso = QPushButton("Agregar acceso…")
-        self.boton_agregar_acceso.setObjectName("botonSecundario")
-        self.boton_agregar_acceso.clicked.connect(self._agregar_acceso)
-        self.boton_eliminar_acceso = QPushButton("Eliminar acceso")
-        self.boton_eliminar_acceso.setObjectName("botonSecundario")
-        self.boton_eliminar_acceso.clicked.connect(self._eliminar_acceso)
-        fila_accesos.addWidget(self.boton_agregar_acceso)
-        fila_accesos.addWidget(self.boton_eliminar_acceso)
-        fila_accesos.addStretch()
-        layout_izq.addLayout(fila_accesos)
-
-        panel_izq.setMaximumWidth(720)
-        panel_izq.setMinimumWidth(700)
-        splitter.addWidget(panel_izq)
-
-        # ------------------------------------------------------- derecha
-        panel_der = QWidget()
-        layout_der = QVBoxLayout(panel_der)
+        layout_der.addWidget(self.campo_observacion_acceso)
 
         layout_der.addWidget(self._titulo_seccion("Movimientos de llaves"))
         self.tabla_movimientos = QTableWidget()
@@ -221,39 +269,21 @@ class PantallaLlaves(QWidget):
         self.campo_observacion_movimiento.editingFinished.connect(self._guardar_observacion_movimiento)
         layout_der.addWidget(self.campo_observacion_movimiento)
 
-        fila_acciones = QHBoxLayout()
-        self.boton_ingresar = QPushButton("Ingresar copia…")
-        self.boton_ingresar.setObjectName("botonSecundario")
-        self.boton_ingresar.clicked.connect(self._ingresar_copia)
-        self.boton_asignar = QPushButton("Asignar…")
-        self.boton_asignar.setObjectName("botonPrimario")
-        self.boton_asignar.clicked.connect(self._asignar)
-        self.boton_devolver = QPushButton("Registrar devolución…")
-        self.boton_devolver.setObjectName("botonSecundario")
-        self.boton_devolver.clicked.connect(self._registrar_devolucion)
-        self.boton_perdida = QPushButton("Registrar pérdida…")
-        self.boton_perdida.setObjectName("botonSecundario")
-        self.boton_perdida.clicked.connect(self._registrar_perdida)
-        self.boton_deshacer = QPushButton("Deshacer último movimiento")
-        self.boton_deshacer.setObjectName("botonSecundario")
-        self.boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        self.boton_deshacer.setEnabled(False)
-        fila_acciones.addWidget(self.boton_ingresar)
-        fila_acciones.addWidget(self.boton_asignar)
-        fila_acciones.addWidget(self.boton_devolver)
-        fila_acciones.addWidget(self.boton_perdida)
-        fila_acciones.addWidget(self.boton_deshacer)
-        fila_acciones.addStretch()
-        layout_der.addLayout(fila_acciones)
+        layout_solapa.addWidget(panel_der, stretch=1)
 
-        splitter.addWidget(panel_der)
-        layout.addWidget(splitter, stretch=1)
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(panel_solapa)
+        solapas.addTab(scroll, "Llaves")
+        solapas.tabBar().setDrawBase(False)
+        layout.addWidget(solapas, stretch=1)
 
         self._foco = instalar_enter_avanza_foco([
             self.campo_observacion_tipo, self.boton_nuevo_tipo, self.boton_editar_tipo, self.boton_eliminar_tipo,
             self.campo_observacion_acceso, self.boton_agregar_acceso, self.boton_eliminar_acceso,
             self.campo_observacion_movimiento,
-            self.boton_ingresar, self.boton_asignar, self.boton_devolver, self.boton_perdida, self.boton_deshacer,
+            self.boton_ingresar, self.boton_perdida, self.boton_devolver, self.boton_asignar,
         ], parent=self)
 
         self.actualizar()
@@ -335,7 +365,6 @@ class PantallaLlaves(QWidget):
         if not valores["activo"]:
             obtener_repositorio(self.conn, "Llave").actualizar(id_nuevo, Activo=0)
         self.conn.commit()
-        self._marcar_ultimo({"tipo": "crear_tipo", "id_llave": id_nuevo})
         self._actualizar_tipos()
         self.boton_nuevo_tipo.setFocus()
 
@@ -348,16 +377,11 @@ class PantallaLlaves(QWidget):
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
         valores = dialogo.valores()
-        valores_previos = {
-            "ValorDepositoActual": tipo["ValorDepositoActual"], "Observacion": tipo["Observacion"],
-            "Activo": tipo["Activo"],
-        }
         obtener_repositorio(self.conn, "Llave").actualizar(
             tipo["IdLlave"], ValorDepositoActual=valores["valor_deposito_actual"],
             Observacion=valores["observacion"], Activo=int(valores["activo"]),
         )
         self.conn.commit()
-        self._marcar_ultimo({"tipo": "editar_tipo", "id_llave": tipo["IdLlave"], "valores_previos": valores_previos})
         self._actualizar_tipos()
         self.boton_nuevo_tipo.setFocus()
 
@@ -369,7 +393,6 @@ class PantallaLlaves(QWidget):
         confirmacion = QMessageBox.question(self, "Eliminar", "¿Confirmás eliminar el Tipo de llave seleccionado?")
         if confirmacion != QMessageBox.StandardButton.Yes:
             return
-        valores_previos = {k: tipo[k] for k in tipo.keys() if k != "IdLlave"}
         try:
             obtener_repositorio(self.conn, "Llave").eliminar(tipo["IdLlave"])
         except sqlite3.IntegrityError:
@@ -379,7 +402,6 @@ class PantallaLlaves(QWidget):
             )
             return
         self.conn.commit()
-        self._marcar_ultimo({"tipo": "eliminar_tipo", "valores_previos": valores_previos})
         self._actualizar_tipos()
         self.boton_nuevo_tipo.setFocus()
 
@@ -463,12 +485,11 @@ class PantallaLlaves(QWidget):
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            id_acceso = agregar_acceso_llave(self.conn, id_llave=tipo["IdLlave"], **dialogo.valores())
+            agregar_acceso_llave(self.conn, id_llave=tipo["IdLlave"], **dialogo.valores())
         except ValueError as error:
             QMessageBox.warning(self, "Agregar acceso", str(error))
             return
         self.conn.commit()
-        self._marcar_ultimo({"tipo": "agregar_acceso", "id_acceso": id_acceso})
         self._actualizar_accesos()
         self.boton_nuevo_tipo.setFocus()
 
@@ -477,10 +498,8 @@ class PantallaLlaves(QWidget):
         if acceso is None:
             QMessageBox.information(self, "Eliminar acceso", "Seleccioná un acceso para eliminar.")
             return
-        valores_previos = {k: acceso[k] for k in ("IdLlave", "IdEdificio", "IdUnidad", "Nombre", "Observacion")}
         obtener_repositorio(self.conn, "LlaveAcceso").eliminar(acceso["IdLlaveAcceso"])
         self.conn.commit()
-        self._marcar_ultimo({"tipo": "eliminar_acceso", "valores_previos": valores_previos})
         self._actualizar_accesos()
         self.boton_nuevo_tipo.setFocus()
 
@@ -593,17 +612,6 @@ class PantallaLlaves(QWidget):
         disponibles_tipo = resumen_stock(self.conn, tipo["IdLlave"])["disponibles"] if tipo else 0
         self.boton_perdida.setEnabled(es_asignacion_abierta or disponibles_tipo > 0)
 
-    def _cargo_especial_creado(self, id_llave: int, cargos_antes: set[int]) -> sqlite3.Row | None:
-        """El depósito/reintegro genera como mucho un CargoEspecial nuevo
-        por acción — se detecta por diferencia de conjunto en vez de
-        duplicar acá la condición exacta que usa asignar_llave/
-        devolver_llave para decidir si correspondía crear uno."""
-        return next(
-            (c for c in obtener_repositorio(self.conn, "CargoEspecial").listar(IdLlave=id_llave)
-             if c["IdCargo"] not in cargos_antes),
-            None,
-        )
-
     def _ingresar_copia(self) -> None:
         tipo = self._tipo_seleccionado()
         if tipo is None:
@@ -612,9 +620,8 @@ class PantallaLlaves(QWidget):
         dialogo = _DialogoIngreso(tipo, self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
-        id_movimiento = ingresar_copias(self.conn, id_llave=tipo["IdLlave"], **dialogo.valores())
+        ingresar_copias(self.conn, id_llave=tipo["IdLlave"], **dialogo.valores())
         self.conn.commit()
-        self._marcar_ultimo({"tipo": "ingreso", "id_movimiento": id_movimiento})
         self._actualizar_tipos()
         self._actualizar_movimientos()
         self.boton_nuevo_tipo.setFocus()
@@ -631,18 +638,12 @@ class PantallaLlaves(QWidget):
         dialogo = _DialogoAsignar(self.conn, tipo, disponibles, self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
-        cargos_antes = {c["IdCargo"] for c in obtener_repositorio(self.conn, "CargoEspecial").listar(IdLlave=tipo["IdLlave"])}
         try:
-            id_movimiento = asignar_llave(self.conn, id_llave=tipo["IdLlave"], **dialogo.valores())
+            asignar_llave(self.conn, id_llave=tipo["IdLlave"], **dialogo.valores())
         except ValueError as error:
             QMessageBox.warning(self, "Asignar", str(error))
             return
         self.conn.commit()
-        cargo_nuevo = self._cargo_especial_creado(tipo["IdLlave"], cargos_antes)
-        self._marcar_ultimo({
-            "tipo": "asignacion", "id_movimiento": id_movimiento,
-            "id_cargo_especial": cargo_nuevo["IdCargo"] if cargo_nuevo else None,
-        })
         self._actualizar_tipos()
         self._actualizar_movimientos()
         self.boton_nuevo_tipo.setFocus()
@@ -654,18 +655,12 @@ class PantallaLlaves(QWidget):
         dialogo = _DialogoDevolucion(movimiento, self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
-        cargos_antes = {c["IdCargo"] for c in obtener_repositorio(self.conn, "CargoEspecial").listar(IdLlave=movimiento["IdLlave"])}
         try:
-            id_devolucion = devolver_llave(self.conn, movimiento["IdMovimiento"], **dialogo.valores())
+            devolver_llave(self.conn, movimiento["IdMovimiento"], **dialogo.valores())
         except ValueError as error:
             QMessageBox.warning(self, "Registrar devolución", str(error))
             return
         self.conn.commit()
-        cargo_nuevo = self._cargo_especial_creado(movimiento["IdLlave"], cargos_antes)
-        self._marcar_ultimo({
-            "tipo": "devolucion", "id_movimiento": id_devolucion,
-            "id_cargo_especial": cargo_nuevo["IdCargo"] if cargo_nuevo else None,
-        })
         self._actualizar_tipos()
         self._actualizar_movimientos()
         self.boton_nuevo_tipo.setFocus()
@@ -677,9 +672,7 @@ class PantallaLlaves(QWidget):
             if dialogo.exec() != QDialog.DialogCode.Accepted:
                 return
             try:
-                id_perdida = registrar_perdida(
-                    self.conn, id_asignacion=movimiento["IdMovimiento"], **dialogo.valores(),
-                )
+                registrar_perdida(self.conn, id_asignacion=movimiento["IdMovimiento"], **dialogo.valores())
             except ValueError as error:
                 QMessageBox.warning(self, "Registrar pérdida", str(error))
                 return
@@ -700,59 +693,13 @@ class PantallaLlaves(QWidget):
             if dialogo.exec() != QDialog.DialogCode.Accepted:
                 return
             try:
-                id_perdida = registrar_perdida(self.conn, id_llave=tipo["IdLlave"], **dialogo.valores())
+                registrar_perdida(self.conn, id_llave=tipo["IdLlave"], **dialogo.valores())
             except ValueError as error:
                 QMessageBox.warning(self, "Registrar pérdida", str(error))
                 return
         self.conn.commit()
-        self._marcar_ultimo({"tipo": "perdida", "id_movimiento": id_perdida})
         self._actualizar_tipos()
         self._actualizar_movimientos()
-        self.boton_nuevo_tipo.setFocus()
-
-    # -------------------------------------------------- deshacer (genérico)
-
-    def _marcar_ultimo(self, movimiento: dict) -> None:
-        self._ultimo = movimiento
-        self.boton_deshacer.setEnabled(True)
-
-    def _deshacer_ultimo(self) -> None:
-        if self._ultimo is None:
-            QMessageBox.warning(self, "Deshacer último movimiento", "No hay ningún movimiento para deshacer.")
-            return
-        respuesta = QMessageBox.question(
-            self, "Deshacer último movimiento",
-            "Esto revierte por completo el último movimiento hecho en este formulario (alta/edición/baja de "
-            "Tipo de llave, acceso, ingreso, asignación, devolución o pérdida), incluido cualquier cargo "
-            "especial que haya generado. ¿Confirmás?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
-        )
-        if respuesta != QMessageBox.StandardButton.Yes:
-            return
-
-        movimiento = self._ultimo
-        tipo = movimiento["tipo"]
-        if tipo == "crear_tipo":
-            obtener_repositorio(self.conn, "Llave").eliminar(movimiento["id_llave"])
-        elif tipo == "editar_tipo":
-            obtener_repositorio(self.conn, "Llave").actualizar(movimiento["id_llave"], **movimiento["valores_previos"])
-        elif tipo == "eliminar_tipo":
-            obtener_repositorio(self.conn, "Llave").crear(**movimiento["valores_previos"])
-        elif tipo == "agregar_acceso":
-            obtener_repositorio(self.conn, "LlaveAcceso").eliminar(movimiento["id_acceso"])
-        elif tipo == "eliminar_acceso":
-            obtener_repositorio(self.conn, "LlaveAcceso").crear(**movimiento["valores_previos"])
-        elif tipo in ("ingreso", "perdida"):
-            obtener_repositorio(self.conn, "LlaveMovimiento").eliminar(movimiento["id_movimiento"])
-        elif tipo in ("asignacion", "devolucion"):
-            obtener_repositorio(self.conn, "LlaveMovimiento").eliminar(movimiento["id_movimiento"])
-            if movimiento["id_cargo_especial"] is not None:
-                obtener_repositorio(self.conn, "CargoEspecial").eliminar(movimiento["id_cargo_especial"])
-
-        self._ultimo = None
-        self.boton_deshacer.setEnabled(False)
-        self.conn.commit()
-        self.actualizar()
         self.boton_nuevo_tipo.setFocus()
 
 

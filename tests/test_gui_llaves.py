@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QLabel, QMessageBox
+from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -50,17 +50,18 @@ def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
     assert titulo.text() == "LLAVES"
 
 
-def test_botones_secundarios_de_llaves_tienen_el_objectname_esperado(qtbot, conn):
-    """"Nuevo" y "Asignar…" quedan como jerarquía 1 (acciones más
-    definitivas de cada sección); el resto pasa a botonSecundario."""
+def test_solo_asignar_es_primario_resto_secundarios(qtbot, conn):
+    """"Asignar copia a profesional" es la única acción más definitiva
+    de la pantalla (jerarquía 1); el resto, incluido "Nuevo tipo de
+    llave", pasa a botonSecundario — pedido explícito de la clienta al
+    revisar esta pantalla."""
     pantalla = PantallaLlaves(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.boton_nuevo_tipo.objectName() == "botonPrimario"
     assert pantalla.boton_asignar.objectName() == "botonPrimario"
     for boton in (
-        pantalla.boton_editar_tipo, pantalla.boton_eliminar_tipo, pantalla.boton_agregar_acceso,
-        pantalla.boton_eliminar_acceso, pantalla.boton_ingresar, pantalla.boton_devolver,
-        pantalla.boton_perdida, pantalla.boton_deshacer,
+        pantalla.boton_nuevo_tipo, pantalla.boton_editar_tipo, pantalla.boton_eliminar_tipo,
+        pantalla.boton_agregar_acceso, pantalla.boton_eliminar_acceso,
+        pantalla.boton_ingresar, pantalla.boton_devolver, pantalla.boton_perdida,
     ):
         assert boton.objectName() == "botonSecundario"
 
@@ -416,34 +417,66 @@ def test_flujo_perdida_no_reintegra(qtbot, conn, monkeypatch):
     assert cargos[0]["Tipo"] == "Débito"
 
 
-def test_deshacer_ultimo_revierte_asignacion(qtbot, conn, monkeypatch):
-    _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
-    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
-    conn.commit()
+
+
+# ---------------------------------------- formato solapa (revisión "uno por uno")
+
+
+def test_tiene_formato_solapa_con_una_pestana_llaves(qtbot, conn):
     pantalla = PantallaLlaves(conn)
     qtbot.addWidget(pantalla)
-    pantalla.tabla_tipos.selectRow(0)
-
-    def _asignar_con_deposito(self, *a, **k):
-        indice = self.combo_profesional.findData(id_profesional)
-        self.combo_profesional.setCurrentIndex(indice)
-        self.casilla_deposito.setChecked(True)
-        return QDialog.DialogCode.Accepted
-
-    monkeypatch.setattr(_DialogoAsignar, "exec", _asignar_con_deposito)
-    pantalla._asignar()
-    assert pantalla.boton_deshacer.isEnabled() is True
-
-    pantalla._deshacer_ultimo()
-
-    movimientos_restantes = obtener_repositorio(conn, "LlaveMovimiento").listar()
-    assert len(movimientos_restantes) == 1  # queda el Ingreso original, se deshizo solo la Asignación
-    assert movimientos_restantes[0]["Tipo"] == "Ingreso"
-    assert obtener_repositorio(conn, "CargoEspecial").listar() == []
-    assert pantalla.boton_deshacer.isEnabled() is False
+    solapas = pantalla.findChild(QTabWidget)
+    assert solapas is not None
+    assert solapas.count() == 1
+    assert solapas.tabText(0) == "Llaves"
 
 
-def test_deshacer_sin_movimientos_no_falla(qtbot, conn):
+def test_no_queda_boton_deshacer(qtbot, conn):
     pantalla = PantallaLlaves(conn)
     qtbot.addWidget(pantalla)
-    pantalla._deshacer_ultimo()
+    assert not hasattr(pantalla, "boton_deshacer")
+
+
+def test_etiquetas_de_los_botones(qtbot, conn):
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_nuevo_tipo.text() == "Nuevo tipo de llave"
+    assert pantalla.boton_editar_tipo.text() == "Editar tipo de llave"
+    assert pantalla.boton_eliminar_tipo.text() == "Eliminar tipo de llave"
+    assert pantalla.boton_agregar_acceso.text() == "Agregar acceso de llave"
+    assert pantalla.boton_eliminar_acceso.text() == "Eliminar acceso de llave"
+    assert pantalla.boton_ingresar.text() == "Ingresar copia al stock"
+    assert pantalla.boton_perdida.text() == "Registrar pérdida"
+    assert pantalla.boton_devolver.text() == "Devolución copia del profesional"
+    assert pantalla.boton_asignar.text() == "Asignar copia a profesional"
+
+
+def test_orden_de_foco_sigue_el_orden_visual_de_los_botones(qtbot, conn):
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla._foco._orden == [
+        pantalla.campo_observacion_tipo, pantalla.boton_nuevo_tipo, pantalla.boton_editar_tipo,
+        pantalla.boton_eliminar_tipo, pantalla.campo_observacion_acceso, pantalla.boton_agregar_acceso,
+        pantalla.boton_eliminar_acceso, pantalla.campo_observacion_movimiento,
+        pantalla.boton_ingresar, pantalla.boton_perdida, pantalla.boton_devolver, pantalla.boton_asignar,
+    ]
+
+
+def test_todos_los_botones_comparten_el_mismo_ancho_fijo(qtbot, conn):
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    anchos = {
+        pantalla.boton_nuevo_tipo.width(), pantalla.boton_editar_tipo.width(), pantalla.boton_eliminar_tipo.width(),
+        pantalla.boton_agregar_acceso.width(), pantalla.boton_eliminar_acceso.width(),
+        pantalla.boton_ingresar.width(), pantalla.boton_perdida.width(), pantalla.boton_devolver.width(),
+        pantalla.boton_asignar.width(),
+    }
+    assert len(anchos) == 1
+
+
+def test_tabla_tipos_y_accesos_tienen_alto_fijo_movimientos_no(qtbot, conn):
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla_tipos.maximumHeight() == pantalla.tabla_tipos.minimumHeight()
+    assert pantalla.tabla_accesos.maximumHeight() == pantalla.tabla_accesos.minimumHeight()
+    assert pantalla.tabla_movimientos.maximumHeight() > pantalla.tabla_movimientos.minimumHeight()
