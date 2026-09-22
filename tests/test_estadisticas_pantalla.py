@@ -15,8 +15,8 @@ from app.negocio.estadisticas import (
     generar_snapshot,
     historial_general,
     horas_regulares_semanales_promedio,
-    monto_bruto_aislada_periodo,
-    monto_bruto_regular_periodo,
+    monto_neto_aislada_periodo,
+    monto_neto_regular_periodo,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -108,7 +108,7 @@ def test_horas_regulares_semanales_promedio_lista_vacia_es_cero(conn, localidad_
 # ---------------------------------------------------------------- montos
 
 
-def test_monto_bruto_regular_periodo_a_valores_vigentes(conn, localidad_edificio_unidad_consultorio):
+def test_monto_neto_regular_periodo_a_valores_vigentes_sin_descuento(conn, localidad_edificio_unidad_consultorio):
     _, _, _, id_consultorio = localidad_edificio_unidad_consultorio
     id_prof = _profesional(conn)
     obtener_repositorio(conn, "ReservaRegular").crear(
@@ -117,12 +117,29 @@ def test_monto_bruto_regular_periodo_a_valores_vigentes(conn, localidad_edificio
     )
     conn.commit()
 
+    # 2hs semanales -> dentro del primer tramo (0%) del esquema default.
     # Agosto 2026: lunes 3, 10, 17, 24, 31 -> 5 lunes.
-    monto = monto_bruto_regular_periodo(conn, 2026, 8)
+    monto = monto_neto_regular_periodo(conn, 2026, 8)
     assert monto == pytest.approx(5 * 2 * 1000)
 
 
-def test_monto_bruto_aislada_periodo_solo_confirmadas(conn, localidad_edificio_unidad_consultorio):
+def test_monto_neto_regular_periodo_aplica_descuento_por_volumen(conn, localidad_edificio_unidad_consultorio):
+    """4hs semanales caen en el tramo (2, 4] del esquema default (0% hasta
+    2hs, +1% cada 2hs de más) -> 1% de descuento sobre el bruto."""
+    _, _, _, id_consultorio = localidad_edificio_unidad_consultorio
+    id_prof = _profesional(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=13, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    # Agosto 2026: 5 lunes, 4hs a $1000 = $4000 bruto por lunes, neto al 1%.
+    monto = monto_neto_regular_periodo(conn, 2026, 8)
+    assert monto == pytest.approx(5 * 4 * 1000 * 0.99)
+
+
+def test_monto_neto_aislada_periodo_solo_confirmadas(conn, localidad_edificio_unidad_consultorio):
     _, _, _, id_consultorio = localidad_edificio_unidad_consultorio
     id_prof = _profesional(conn)
     repo = obtener_repositorio(conn, "ReservaAislada")
@@ -133,12 +150,43 @@ def test_monto_bruto_aislada_periodo_solo_confirmadas(conn, localidad_edificio_u
     )
     conn.commit()
 
-    assert monto_bruto_aislada_periodo(conn, 2026, 8) == pytest.approx(2 * 1500)
+    assert monto_neto_aislada_periodo(conn, 2026, 8) == pytest.approx(2 * 1500)
+
+
+def test_monto_neto_aislada_periodo_aplica_recargo_solo_cuando_corresponde(conn, localidad_edificio_unidad_consultorio):
+    _, _, _, id_consultorio = localidad_edificio_unidad_consultorio
+    id_prof = _profesional(conn)
+    obtener_repositorio(conn, "Configuracion").actualizar(1, RecargoPorcentajeAisladas=20)
+    repo = obtener_repositorio(conn, "ReservaAislada")
+    repo.crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-10", HoraInicio=9, HoraFin=11,
+        AplicaRecargo=1,
+    )
+    repo.crear(IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-11", HoraInicio=9, HoraFin=11)
+    conn.commit()
+
+    # La primera lleva recargo (2hs * $1500 * 1.20), la segunda no.
+    assert monto_neto_aislada_periodo(conn, 2026, 8) == pytest.approx(2 * 1500 * 1.20 + 2 * 1500)
+
+
+def test_monto_neto_aislada_periodo_excluye_reubicaciones(conn, localidad_edificio_unidad_consultorio):
+    _, _, _, id_consultorio = localidad_edificio_unidad_consultorio
+    id_prof = _profesional(conn)
+    repo = obtener_repositorio(conn, "ReservaAislada")
+    repo.crear(IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-10", HoraInicio=9, HoraFin=11)
+    repo.crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-11", HoraInicio=9, HoraFin=11,
+        EsReubicacion=1,
+    )
+    conn.commit()
+
+    # La reubicación no genera cargo, solo cuenta la reserva normal.
+    assert monto_neto_aislada_periodo(conn, 2026, 8) == pytest.approx(2 * 1500)
 
 
 def test_montos_lista_vacia_de_consultorios_es_cero(conn, localidad_edificio_unidad_consultorio):
-    assert monto_bruto_regular_periodo(conn, 2026, 8, []) == 0.0
-    assert monto_bruto_aislada_periodo(conn, 2026, 8, []) == 0.0
+    assert monto_neto_regular_periodo(conn, 2026, 8, []) == 0.0
+    assert monto_neto_aislada_periodo(conn, 2026, 8, []) == 0.0
 
 
 # --------------------------------------------------------------- alcance

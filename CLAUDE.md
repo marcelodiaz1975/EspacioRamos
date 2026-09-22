@@ -786,21 +786,50 @@ Edificios, Unidades, Consultorios.
 Tres decisiones de la clienta a tener siempre presentes (ver también el
 docstring de `app.negocio.estadisticas`):
 
-- **Montos = "monto real facturado", pero a nivel BRUTO.** No hay forma
-  de leer un monto histórico neto por categoría: `LiquidacionEmitida.
-  MontoGenerado` es un total ya combinado (regular + aisladas + cargos +
-  ajustes, todo junto, sin desglose guardado), y los descuentos por
-  volumen de horas semanales (`app.negocio.valores.
-  obtener_porcentaje_descuento`) se calculan por profesional sobre TODAS
-  sus reservas del sistema, así que no hay un criterio no inventado para
-  repartirlos de vuelta a un edificio/unidad/consultorio puntual. Se
-  optó por un cálculo bruto (antes de esos descuentos y ajustes), día
-  por día del período, a los valores vigentes de cada consultorio —
-  mismo criterio que `app.negocio.valores.valor_regular_por_rango_dias`,
-  acá acotado por consultorio en vez de por profesional
-  (`monto_bruto_regular_periodo`/`monto_bruto_aislada_periodo`). Queda
-  pendiente de confirmar con la clienta si este nivel "bruto" le sirve
-  o si prefiere que se acote el alcance de otra forma.
+- **Montos = "monto real facturado", NETO del descuento por volumen
+  (regulares) y del recargo (aisladas) — sin ningún otro concepto de
+  liquidación.** Primera vuelta: se había optado por un cálculo BRUTO
+  (antes de descuentos/recargos) porque el descuento por volumen de
+  horas semanales (`app.negocio.valores.obtener_porcentaje_descuento`)
+  se calcula por profesional sobre TODAS sus reservas del sistema, y
+  parecía no haber un criterio no inventado para repartirlo de vuelta a
+  un edificio/unidad/consultorio puntual. Consultada la clienta ("me
+  gustaría ver reflejado los montos reales, con descuentos aplicados"),
+  se encontró que SÍ hay forma exacta, sin prorratear nada: ese
+  descuento es un porcentaje PLANO (no escalonado por tramo de reserva)
+  que se aplica tal cual al 100% del bruto de un profesional
+  (`app.negocio.valores.calcular_valor_semanal_regular`) — como es
+  plano, el mismo % rige para cualquier subconjunto de sus horas, así
+  que se le puede aplicar sin inventar ningún criterio a la porción que
+  cae dentro de un consultorio/edificio/unidad puntual.
+  `monto_neto_regular_periodo` recorre el período día por día (mismo
+  criterio que antes, a valores vigentes de cada consultorio — ver
+  `app.negocio.valores.valor_regular_por_rango_dias`, acá acotado por
+  consultorio en vez de por profesional) y, por cada profesional que
+  reserva ese día, busca sus horas semanales totales en TODO el sistema
+  (`app.negocio.valores.horas_semanales_vigentes`) para sacar el % de
+  descuento una sola vez y aplicarlo a lo que le corresponde de ese día
+  dentro del alcance pedido. `LiquidacionEmitida.MontoGenerado` sigue
+  sin servir como fuente (total ya combinado con cargos/ajustes/etc.,
+  sin desglose guardado), así que el cálculo sigue siendo en vivo, día
+  por día, no una lectura directa de esa columna.
+
+  De paso, armar `monto_neto_aislada_periodo` para que replique
+  EXACTAMENTE `app.negocio.liquidaciones._aisladas_periodo` (la fuente
+  real de lo que se liquida) destapó que la versión bruta anterior tenía
+  un bug propio, no relacionado con el pedido de la clienta: no sumaba
+  el recargo (`Configuracion.RecargoPorcentajeAisladas`, que solo aplica
+  cuando la reserva lo tiene marcado con `AplicaRecargo`) ni excluía las
+  reubicaciones (`EsReubicacion`, que no generan cargo — compensan una
+  ausencia en vez de facturar). Quedó corregido de una junto con el
+  pasaje a neto.
+
+  Límite documentado: esto arregla el cálculo EN VIVO (`estadisticas_
+  varias`, y los snapshots que se generen de acá en adelante vía
+  `generar_snapshot`) pero NO recalcula los `SnapshotMensual` ya
+  guardados de períodos pasados en "Historial general" — esas filas
+  siguen mostrando el valor bruto con el que se generaron en su momento,
+  a menos que se regeneren aparte.
 - **"Horas regulares semanales" es un promedio ponderado día a día, NO
   un promedio por profesional.** Ejemplo textual de la clienta: un
   consultorio con 30hs reservadas la primera quincena de un mes de 30
@@ -1056,11 +1085,12 @@ clienta — "que quede todo ocupado de alguna manera"):
    que las alertas de deuda, sumando regulares + aisladas en un solo
    número acá), cantidad con reservas regulares activas hoy.
 6. **Ocupación y horas** (`calcular_estadisticas_ocupacion`, nueva
-   función, reusa `calcular_ocupacion`/`monto_bruto_aislada_periodo` de
+   función, reusa `calcular_ocupacion`/`monto_neto_aislada_periodo` de
    `app.negocio.estadisticas`): % de ocupación regular general, horas
    regulares reservadas por semana en este momento, horas aisladas
    confirmadas del mes en curso, monto que generaron esas horas
-   aisladas (bruto, mismo criterio que Estadísticas), y "saldo pendiente
+   aisladas (neto, mismo criterio que Estadísticas — ver esa sección
+   para el detalle del pasaje de bruto a neto), y "saldo pendiente
    de cobro este mes" — lo facturado del período
    (`LiquidacionEmitida.MontoGenerado`) menos lo ya cobrado imputado a
    ese mismo período (`HistorialPagos.Monto`); confirmado con la

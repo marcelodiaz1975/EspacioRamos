@@ -24,7 +24,7 @@ from app.negocio.dias import (
 from app.negocio.estadisticas import (
     _horas_regulares_semanales_en_fecha,
     calcular_ocupacion,
-    monto_bruto_aislada_periodo,
+    monto_neto_aislada_periodo,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -183,7 +183,7 @@ def calcular_estadisticas_ocupacion(conn: sqlite3.Connection) -> EstadisticasOcu
         ocupacion_regular_pct=calcular_ocupacion(conn, anio, mes).general,
         horas_regulares_semanales=_horas_regulares_semanales_en_fecha(conn, hoy.isoformat()),
         horas_aisladas_mes=_horas_aisladas_periodo(conn, anio, mes),
-        monto_aisladas_mes=monto_bruto_aislada_periodo(conn, anio, mes),
+        monto_aisladas_mes=monto_neto_aislada_periodo(conn, anio, mes),
         saldo_pendiente_mes=_saldo_pendiente_periodo(conn, periodo),
     )
 

@@ -24,15 +24,25 @@ filtrable por localidad/edificio/unidad/consultorio). Dos decisiones de
 la clienta a tener siempre presentes:
 
 - "Monto por horas regulares"/"Monto por horas aisladas" son el monto
-  real facturado, pero a nivel BRUTO (antes de descuentos por volumen de
-  horas semanales y demás ajustes de `app.negocio.liquidaciones`): esos
-  ajustes se calculan por profesional sobre el total de SUS reservas en
-  todos los consultorios del sistema, así que no hay forma de repartirlos
-  de vuelta a un edificio/unidad/consultorio puntual sin inventar un
-  criterio de prorrateo que nadie pidió. `LiquidacionEmitida.MontoGenerado`
-  tampoco sirve como fuente: es un total ya combinado (bruto regular +
-  aisladas + cargos especiales + ajustes, todo junto), no separable en
-  categorías.
+  real facturado, NETO del descuento por volumen de horas semanales
+  (regulares) y del recargo de aisladas — pero sin ningún otro concepto
+  de `app.negocio.liquidaciones` (feriados, vacaciones, licencias,
+  cargos especiales, ajustes de saldo atrasado, cuotas de plan de
+  pago), pedido explícito de la clienta. `LiquidacionEmitida.
+  MontoGenerado` no sirve como fuente: es un total ya combinado (bruto
+  regular + aisladas + todo lo anterior junto), no separable en
+  categorías. El descuento por volumen se calcula por profesional sobre
+  el total de SUS horas semanales en todo el sistema
+  (`app.negocio.valores.obtener_porcentaje_descuento`), pero es un
+  porcentaje PLANO — se le puede aplicar tal cual a la porción de esas
+  horas que cae dentro de un edificio/unidad/consultorio puntual sin
+  inventar ningún criterio de prorrateo, porque el mismo % rige para
+  cualquier subconjunto de sus reservas (`monto_neto_regular_periodo`).
+  Las aisladas replican exactamente el mismo criterio que
+  `app.negocio.liquidaciones._aisladas_periodo`: el recargo
+  (`Configuracion.RecargoPorcentajeAisladas`) solo se suma cuando la
+  reserva lo tiene marcado (`AplicaRecargo`), y una reubicación
+  (`EsReubicacion`) no genera cargo (`monto_neto_aislada_periodo`).
 - "Horas regulares semanales" de un período NO es un promedio por
   profesional: es un promedio ponderado día a día dentro del período
   (ver `horas_regulares_semanales_promedio`), para que una liberación de
@@ -63,6 +73,7 @@ from app.negocio.dias import (
     ultimo_dia_mes,
 )
 from app.negocio.grilla import calcular_ocupacion_regular
+from app.negocio.valores import horas_semanales_vigentes, obtener_porcentaje_descuento
 from app.repositorio.registro import obtener_repositorio
 
 RANGO_DEFAULT: dict[str, tuple[float, float]] = {
@@ -195,8 +206,8 @@ def generar_snapshot(
         ValoresConsultorios=json.dumps(valores_consultorios),
         PorcentajeAumentoAplicado=porcentaje_aumento_aplicado,
         HorasRegularesSemanales=horas_regulares_semanales_promedio(conn, anio, mes),
-        MontoHorasRegulares=monto_bruto_regular_periodo(conn, anio, mes),
-        MontoHorasAisladas=monto_bruto_aislada_periodo(conn, anio, mes),
+        MontoHorasRegulares=monto_neto_regular_periodo(conn, anio, mes),
+        MontoHorasAisladas=monto_neto_aislada_periodo(conn, anio, mes),
     )
 
 
@@ -246,21 +257,22 @@ def horas_regulares_semanales_promedio(
     return total / cantidad_dias if cantidad_dias else 0.0
 
 
-def monto_bruto_regular_periodo(
+def monto_neto_regular_periodo(
     conn: sqlite3.Connection, anio: int, mes: int, ids_consultorio: list[int] | None = None,
 ) -> float:
-    """Monto real facturado por horas regulares en el período, a nivel
-    BRUTO (antes de descuentos por volumen y demás ajustes de
-    `app.negocio.liquidaciones`, que se calculan por profesional sobre
-    todas sus reservas del sistema y no se pueden repartir de vuelta a un
-    alcance puntual — ver el docstring del módulo). Día por día, a los
-    valores vigentes de cada consultorio (mismo criterio que
-    `app.negocio.valores.valor_regular_por_rango_dias`, acá sin acotar
-    por profesional sino por consultorio)."""
+    """Monto real facturado por horas regulares en el período, NETO del
+    descuento por volumen de horas semanales (ver el docstring del
+    módulo). Día por día, a los valores vigentes de cada consultorio
+    (mismo criterio que `app.negocio.valores.valor_regular_por_rango_
+    dias`, acá sin acotar por profesional sino por consultorio) — el %
+    de descuento de cada profesional se busca una sola vez por día
+    (`_descuentos_del_dia`, con el total de SUS horas en todo el
+    sistema) y se aplica tal cual a lo que le corresponde de ese día
+    dentro de `ids_consultorio`."""
     if ids_consultorio is not None and not ids_consultorio:
         return 0.0
     sql = (
-        "SELECT rr.HoraInicio, rr.HoraFin, c.ValorHoraRegularActual "
+        "SELECT rr.IdProfesional, rr.HoraInicio, rr.HoraFin, c.ValorHoraRegularActual "
         "FROM ReservaRegular rr JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio "
         "WHERE rr.DiaSemana = ? AND rr.VigenciaInicio <= ? AND (rr.VigenciaFin IS NULL OR rr.VigenciaFin >= ?)"
     )
@@ -275,33 +287,49 @@ def monto_bruto_regular_periodo(
         parametros: list = [fecha_a_dia_semana(dia), fecha_iso, fecha_iso]
         if ids_consultorio is not None:
             parametros.extend(ids_consultorio)
+        descuentos_del_dia: dict[int, float] = {}
         for f in conn.execute(sql, parametros).fetchall():
-            total += (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"]
+            id_profesional = f["IdProfesional"]
+            if id_profesional not in descuentos_del_dia:
+                horas_totales = horas_semanales_vigentes(conn, [id_profesional], fecha_iso)
+                descuentos_del_dia[id_profesional] = obtener_porcentaje_descuento(conn, horas_totales)
+            bruto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraRegularActual"]
+            total += bruto * (1 - descuentos_del_dia[id_profesional] / 100)
         dia += timedelta(days=1)
     return total
 
 
-def monto_bruto_aislada_periodo(
+def monto_neto_aislada_periodo(
     conn: sqlite3.Connection, anio: int, mes: int, ids_consultorio: list[int] | None = None,
 ) -> float:
     """Monto real facturado por horas aisladas confirmadas del período, a
-    valores vigentes — mismo criterio "bruto" que `monto_bruto_regular_
-    periodo` (acá no hay descuento por volumen para restar: las aisladas
-    no entran en ese esquema, así que esto ya es el monto final de esa
-    categoría, no una aproximación)."""
+    valores vigentes — mismo criterio que
+    `app.negocio.liquidaciones._aisladas_periodo`: el recargo
+    (`Configuracion.RecargoPorcentajeAisladas`) solo se suma cuando la
+    reserva lo tiene marcado (`AplicaRecargo`), y una reubicación
+    (`EsReubicacion`) no genera cargo."""
     if ids_consultorio is not None and not ids_consultorio:
         return 0.0
+    cfg = conn.execute("SELECT RecargoPorcentajeAisladas FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    recargo_pct = cfg["RecargoPorcentajeAisladas"] if cfg else 0.0
     parametros: list = [primer_dia_mes(anio, mes).isoformat(), ultimo_dia_mes(anio, mes).isoformat()]
     sql = (
-        "SELECT ra.HoraInicio, ra.HoraFin, c.ValorHoraAisladaActual "
+        "SELECT ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo, ra.EsReubicacion, c.ValorHoraAisladaActual "
         "FROM ReservaAislada ra JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio "
         "WHERE ra.Estado = 'Confirmada' AND ra.Fecha BETWEEN ? AND ?"
     )
     if ids_consultorio is not None:
         sql += f" AND ra.IdConsultorio IN ({', '.join('?' for _ in ids_consultorio)})"
         parametros.extend(ids_consultorio)
-    filas = conn.execute(sql, parametros).fetchall()
-    return sum((f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"] for f in filas)
+    total = 0.0
+    for f in conn.execute(sql, parametros).fetchall():
+        if f["EsReubicacion"]:
+            continue
+        monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
+        if f["AplicaRecargo"]:
+            monto *= 1 + recargo_pct / 100
+        total += monto
+    return total
 
 
 def _ids_consultorio_del_alcance(
@@ -470,8 +498,8 @@ def historial_general(conn: sqlite3.Connection, *, por_anio: bool) -> list[FilaE
         datos_por_mes[periodo_en_curso] = {
             "ocupacion_pct": calcular_ocupacion(conn, anio, mes).general,
             "horas": horas_regulares_semanales_promedio(conn, anio, mes),
-            "monto_regular": monto_bruto_regular_periodo(conn, anio, mes),
-            "monto_aislada": monto_bruto_aislada_periodo(conn, anio, mes),
+            "monto_regular": monto_neto_regular_periodo(conn, anio, mes),
+            "monto_aislada": monto_neto_aislada_periodo(conn, anio, mes),
         }
 
     cant_localidades, cant_edificios, cant_unidades, cant_consultorios = conteo_entidades(conn)
@@ -562,8 +590,8 @@ def estadisticas_varias(
             ocupacion_pct=calcular_ocupacion(conn, p_anio, p_mes, ids_consultorio).general,
             horas_regulares_semanales=horas,
             variacion_horas=horas - horas_anterior,
-            monto_regular=monto_bruto_regular_periodo(conn, p_anio, p_mes, ids_consultorio),
-            monto_aislada=monto_bruto_aislada_periodo(conn, p_anio, p_mes, ids_consultorio),
+            monto_regular=monto_neto_regular_periodo(conn, p_anio, p_mes, ids_consultorio),
+            monto_aislada=monto_neto_aislada_periodo(conn, p_anio, p_mes, ids_consultorio),
             cant_localidades=cant_localidades, cant_edificios=cant_edificios,
             cant_unidades=cant_unidades, cant_consultorios=cant_consultorios,
         ))
