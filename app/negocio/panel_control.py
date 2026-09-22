@@ -163,9 +163,9 @@ def _horas_aisladas_periodo(conn: sqlite3.Connection, anio: int, mes: int) -> fl
 def _saldo_pendiente_periodo(conn: sqlite3.Connection, periodo: str) -> float:
     """"Cuánto queda por cobrar de este mes": lo facturado en el período
     (`LiquidacionEmitida.MontoGenerado`) menos lo ya cobrado imputado a
-    ese mismo período (`HistorialPagos.Monto`) — interpretación elegida
-    a falta de una única forma de calcularlo en el resto del sistema, a
-    confirmar con la clienta si no es lo que tenía en mente."""
+    ese mismo período (`HistorialPagos.Monto`) — confirmado con la
+    clienta en la revisión "uno por uno" de Panel de control, es el
+    cálculo que tenía en mente."""
     facturado = conn.execute(
         "SELECT COALESCE(SUM(MontoGenerado), 0) AS total FROM LiquidacionEmitida WHERE Periodo = ?", (periodo,),
     ).fetchone()["total"]

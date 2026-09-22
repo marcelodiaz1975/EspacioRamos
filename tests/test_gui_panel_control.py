@@ -31,11 +31,20 @@ def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
 
 
-def test_panel_control_muestra_nombre_del_espacio(qtbot, conn):
+def test_panel_control_muestra_nombre_del_espacio_en_mayuscula(qtbot, conn):
+    """Nivel 1 (ver CLAUDE.md): mismo formato MAYÚSCULA que el resto de
+    los títulos de pantalla del sistema — pedido explícito de la
+    clienta al revisar esta pantalla."""
     obtener_repositorio(conn, "Configuracion").actualizar(1, NombreEspacio="Mi Espacio")
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.titulo.text() == "Mi Espacio"
+    assert pantalla.titulo.text() == "MI ESPACIO"
+
+
+def test_panel_control_sin_nombre_configurado_usa_el_de_default(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.titulo.text() == "ESPACIO RAMOS CONSULTORIOS"
 
 
 def test_panel_control_boton_avanzar_habilitado_a_mitad_de_mes(qtbot, conn):

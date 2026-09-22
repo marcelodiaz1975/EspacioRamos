@@ -207,7 +207,7 @@ def encabezado_espacio(
     Disponibilidad/Propuesta sí, porque esos PDFs ya se generan un
     archivo distinto por localidad cuando el espacio abarca más de una."""
     cfg = conn.execute("SELECT NombreEspacio, RutaLogo FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    nombre_espacio = ((cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos").upper()
+    nombre_espacio = ((cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos Consultorios").upper()
     ruta_logo = cfg["RutaLogo"] if cfg else None
 
     story = []

@@ -36,7 +36,7 @@ def _crear_unidad(conn, nombre_edificio="Ramos 1", departamento="1ro A", localid
 
 def test_sin_placas_avisa_y_genera_pdf_valido(conn, tmp_path):
     ruta = generar_pdf_placas(conn, str(tmp_path))
-    assert ruta.endswith("Placas Espacio Ramos.pdf")
+    assert ruta.endswith("Placas Espacio Ramos Consultorios.pdf")
     texto = fitz.open(ruta)[0].get_text()
     assert "No hay placas activas cargadas." in texto
 

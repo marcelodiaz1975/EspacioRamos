@@ -1061,11 +1061,11 @@ clienta — "que quede todo ocupado de alguna manera"):
    regulares reservadas por semana en este momento, horas aisladas
    confirmadas del mes en curso, monto que generaron esas horas
    aisladas (bruto, mismo criterio que Estadísticas), y "saldo pendiente
-   de cobro este mes" — interpretado como lo facturado del período
+   de cobro este mes" — lo facturado del período
    (`LiquidacionEmitida.MontoGenerado`) menos lo ya cobrado imputado a
-   ese mismo período (`HistorialPagos.Monto`); no hay una única forma
-   de calcular esto último en el resto del sistema, así que quedó
-   documentado como interpretación propia a confirmar con la clienta.
+   ese mismo período (`HistorialPagos.Monto`); confirmado con la
+   clienta en el repaso de pendientes abiertos, es el cálculo que tenía
+   en mente.
 7. **Alertas**: el mecanismo de siempre (`Alertas`/`calcular_alertas`,
    `_tarjeta_alerta`/`_tarjeta_alerta_simple`, `self.contenedor_alertas`/
    `self.layout_alertas` con los mismos nombres de atributo que antes)
@@ -1073,10 +1073,21 @@ clienta — "que quede todo ocupado de alguna manera"):
    inventar contenido nuevo para este último cuadrito, se reaprovechó lo
    que ya existía).
 
-El título de la pantalla sigue mostrando el nombre del espacio tal cual
-está cargado en Configuración general (sin `.upper()`) — sigue
-pendiente de definir con la clienta si tiene sentido aplicarle el
-formato Nivel 1 a un nombre propio; no se tocó en esta vuelta tampoco.
+Sexta vuelta (repaso de pendientes abiertos, ya con todas las
+pantallas revisadas): el título pasa a mostrar el nombre del espacio
+con `.upper()` — pedido explícito de la clienta, mismo formato Nivel 1
+que el resto de las pantallas del sistema. De paso surgió que el
+nombre real del espacio es "Espacio Ramos Consultorios" (no "Espacio
+Ramos", el fallback que usaba el código hasta ahora cuando
+`Configuracion.NombreEspacio` está vacío) — se corrigió ese fallback
+acá y en todos los demás lugares que lo repetían igual (`app.negocio.
+oferta_busqueda_texto`, `app.pdf.estilos`, `app.pdf.oferta_pdf`,
+`app.pdf.placas_pdf`), salvo `app.pdf.propuesta_pdf`/`disponibilidad_
+pdf`, que ya arman su nombre de archivo como "{nombre_espacio}
+Consultorios" — ahí cambiar el fallback hubiera duplicado la palabra
+("...Consultorios Consultorios.pdf"), así que esos dos quedaron con el
+fallback "Espacio Ramos" de siempre (la fórmula ya arma el nombre
+completo por su cuenta).
 
 Tercera vuelta (ajustes sobre la grilla de cuadritos de la vuelta
 anterior): "Alertas" deja de ser un cuadrito más de la grilla 3x2 —

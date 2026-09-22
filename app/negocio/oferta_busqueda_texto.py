@@ -55,7 +55,7 @@ def nombre_archivo_oferta(conn: sqlite3.Connection, profesional: sqlite3.Row) ->
         partes = " ".join(p for p in (tratamiento, nombre, apellido) if p)
         return f"Oferta de consultorios - {partes}.pdf"
     cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos"
+    nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos Consultorios"
     return f"Oferta de consultorios - {nombre_espacio}.pdf"
 
 

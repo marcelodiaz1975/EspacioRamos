@@ -110,7 +110,7 @@ def generar_pdf_placas(conn: sqlite3.Connection, directorio: str, ids_edificio: 
     Sin `ids_edificio` incluye todos los edificios del sistema. Unidades
     sin ninguna placa activa no aparecen."""
     cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos"
+    nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos Consultorios"
 
     edificios = edificios_incluidos(conn, ids_edificio)
     sufijo = sufijo_localidad(conn, edificios)

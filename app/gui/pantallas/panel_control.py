@@ -320,8 +320,8 @@ class PanelControl(QWidget):
 
     def actualizar(self) -> None:
         cfg = self.conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-        nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos"
-        self.titulo.setText(nombre_espacio)
+        nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos Consultorios"
+        self.titulo.setText(nombre_espacio.upper())
 
         periodo = periodo_actual(self.conn)
         anio, mes = (int(p) for p in periodo.split("-"))
