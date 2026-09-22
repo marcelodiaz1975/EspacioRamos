@@ -13,6 +13,7 @@ from app.gui.pantallas.llaves import (
     _DialogoPerdidaStock,
     _DialogoTipo,
     _FILAS_VISIBLES_ACCESOS,
+    _PADDING_COLUMNA,
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.llaves import crear_llave, ingresar_copias
@@ -86,7 +87,9 @@ def test_columnas_de_tipos_son_mas_anchas_que_antes(qtbot, conn):
         assert pantalla.tabla_tipos.columnWidth(columna) > ancho_anterior
 
 
-def test_columnas_de_accesos_tienen_padding_sobre_el_ancho_justo(qtbot, conn, monkeypatch):
+def test_columnas_de_accesos_tienen_el_doble_del_ancho_con_padding(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: el doble de ancho para todas las
+    columnas de Accesos, sobre el ancho justo + el padding de siempre."""
     crear_llave(conn)
     _crear_edificio_con_unidad(conn)
     conn.commit()
@@ -97,11 +100,11 @@ def test_columnas_de_accesos_tienen_padding_sobre_el_ancho_justo(qtbot, conn, mo
     pantalla._agregar_acceso()
 
     tabla = pantalla.tabla_accesos
-    anchos_con_padding = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
+    anchos_actuales = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
     tabla.resizeColumnsToContents()
     anchos_justos = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
 
-    assert all(con > justo for con, justo in zip(anchos_con_padding, anchos_justos))
+    assert anchos_actuales == [(justo + _PADDING_COLUMNA) * 2 for justo in anchos_justos]
 
 
 def test_columnas_de_deposito_cobrado_y_reintegrado_tienen_el_mismo_ancho(qtbot, conn):

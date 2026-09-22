@@ -1394,6 +1394,13 @@ Tercera vuelta (cuatro pedidos más sobre esta misma pantalla):
   `novedades._ajustar_columnas`). Movimientos no se tocó — el pedido
   fue puntualmente sobre "las dos primeras tablas".
 
+Cuarta vuelta: Accesos pide directamente el DOBLE de ancho en las
+cuatro columnas (no un padding más generoso como Tipos) —
+`_ajustar_columnas` suma un parámetro `factor` (default 1, sin cambiar
+a nadie más que la llame) que multiplica el resultado de
+`resizeColumnsToContents() + _PADDING_COLUMNA`; Accesos es la única
+que lo llama con `factor=2`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

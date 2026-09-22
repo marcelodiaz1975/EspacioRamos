@@ -97,14 +97,15 @@ def _alto_hasta_primera_fila(titulo: QLabel, tabla: QTableWidget) -> int:
     return titulo.sizeHint().height() + tabla.horizontalHeader().sizeHint().height() + tabla.frameWidth()
 
 
-def _ajustar_columnas(tabla: QTableWidget) -> None:
+def _ajustar_columnas(tabla: QTableWidget, factor: int = 1) -> None:
     """Mismo criterio que `bloques_rigidos._ajustar_columnas`/`novedades.
     _ajustar_columnas`: `resizeColumnsToContents` deja las columnas al
     ancho justo del contenido — se les agrega `_PADDING_COLUMNA` de más a
-    cada una."""
+    cada una. `factor` multiplica ese resultado (Accesos pide el doble,
+    pedido explícito de la clienta)."""
     tabla.resizeColumnsToContents()
     for columna in range(tabla.columnCount()):
-        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
+        tabla.setColumnWidth(columna, (tabla.columnWidth(columna) + _PADDING_COLUMNA) * factor)
 
 
 def _fecha_larga(iso: str) -> str:
@@ -507,7 +508,7 @@ class PantallaLlaves(QWidget):
             self.tabla_accesos.setItem(fila_idx, 1, QTableWidgetItem(a["NombreEdificio"]))
             self.tabla_accesos.setItem(fila_idx, 2, QTableWidgetItem(a["Departamento"] or "Todas"))
             self.tabla_accesos.setItem(fila_idx, 3, QTableWidgetItem(a["Nombre"] or ""))
-        _ajustar_columnas(self.tabla_accesos)
+        _ajustar_columnas(self.tabla_accesos, factor=2)
         self.boton_eliminar_acceso.setEnabled(bool(self._accesos_actuales))
         self._actualizar_observacion_acceso()
 
