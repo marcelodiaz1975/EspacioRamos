@@ -1316,6 +1316,42 @@ ante la ambigüedad de qué es "más arriba" cuando dos columnas
 independientes tienen contenido a la misma altura — a confirmar con la
 clienta si prefiere otro criterio.
 
+Segunda vuelta (tres pedidos sobre esta misma pantalla):
+
+- **Títulos de sección sin negrita.** "Tipos de llaves"/"Accesos
+  habilitados con la llave"/"Movimientos de llaves" pasan de
+  `subtituloSeccion` (Nivel 2, negrita) a `subtituloCampo` (Nivel 3,
+  mismo peso que el texto normal, sin nada que lo distinga) — pedido
+  explícito de la clienta: no son solapas reales, van "como los de
+  otros formularios". El título Nivel 1 ("LLAVES") y el nombre de la
+  solapa ("Llaves") sí quedan como estaban — son los dos casos de esta
+  pantalla que sí usan una fuente realmente distinta (mayúscula
+  itálica el primero, la "ficha" de la solapa el segundo), la clienta
+  los dejó afuera del pedido.
+- **Cada grupo de botones alineado contra el título de su tabla.** Los
+  diez botones dejaron de apilarse en una sola columna corrida (las
+  tres secciones seguidas) para alinearse, grupo por grupo, contra el
+  comienzo de la barra de título de su tabla correspondiente — pedido
+  explícito de la clienta. Se resolvió con un único `QGridLayout` de 3
+  filas × 2 columnas (antes eran dos `QWidget` con su propio
+  `QVBoxLayout`, uno para todos los botones y otro para las tres
+  tablas): columna 0 = grupo de botones de esa sección
+  (`_grupo_botones`, un widget nuevo por sección con ancho fijo, sin
+  builder repetido), columna 1 = título+tabla+observación de esa
+  sección envueltos en su propio widget. Cada grupo de botones se
+  agrega con `Qt.AlignmentFlag.AlignTop` (sin ese flag, `QGridLayout`
+  estira el widget para llenar toda la fila en vez de dejarlo arriba
+  del todo) — como la fila la termina definiendo el contenido más alto
+  (la tabla, con su alto fijo o su `stretch`), el grupo de botones
+  correspondiente queda "colgado" desde arriba exactamente a la altura
+  de su título, sin necesitar ningún cálculo manual de espaciado.
+  `setRowStretch(2, 1)` en la fila de Movimientos sigue logrando que
+  esa fila (botones y tabla por igual) se quede con el resto del alto
+  disponible, mismo criterio que la vuelta anterior.
+- **Sin líneas divisorias.** Las dos que separaban los tres grupos de
+  botones se sacaron — dejaron de hacer falta al quedar cada grupo ya
+  separado visualmente por la distancia entre filas de la grilla.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

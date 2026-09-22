@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
-    QHBoxLayout,
+    QGridLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -75,13 +75,6 @@ _DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado",
 _ANCHO_BOTON = 280  # "Devolución copia del profesional", el texto más largo de la columna
 _FILAS_VISIBLES_TIPOS = 6
 _FILAS_VISIBLES_ACCESOS = 3
-
-
-def _linea_divisoria() -> QFrame:
-    linea = QFrame()
-    linea.setFrameShape(QFrame.Shape.HLine)
-    linea.setFrameShadow(QFrame.Shadow.Sunken)
-    return linea
 
 
 def _alto_para_filas(tabla: QTableWidget, filas: int) -> int:
@@ -132,9 +125,29 @@ class PantallaLlaves(QWidget):
 
     @staticmethod
     def _titulo_seccion(texto: str) -> QLabel:
+        """`subtituloCampo` (Nivel 3: mismo peso que el texto normal, sin
+        negrita) en vez de `subtituloSeccion` (Nivel 2, negrita) — pedido
+        explícito de la clienta al revisar esta pantalla: no son solapas
+        reales ni necesitan una fuente distinta, van como cualquier otro
+        título de campo/cuadro del resto del sistema."""
         etiqueta = QLabel(texto)
-        etiqueta.setObjectName("subtituloSeccion")
+        etiqueta.setObjectName("subtituloCampo")
         return etiqueta
+
+    @staticmethod
+    def _grupo_botones(*botones: QPushButton) -> QWidget:
+        """Envuelve un grupo de botones en su propio widget, con ancho fijo
+        y sin estirarse — para poder alinearlo por `QGridLayout.addWidget`
+        (`Qt.AlignmentFlag.AlignTop`) contra el comienzo de la barra de
+        título de su tabla correspondiente, en vez de apilar los diez
+        botones de las tres secciones seguidos en una sola columna."""
+        widget = QWidget()
+        columna = QVBoxLayout(widget)
+        columna.setContentsMargins(0, 0, 0, 0)
+        for boton in botones:
+            boton.setFixedWidth(_ANCHO_BOTON)
+            columna.addWidget(boton)
+        return widget
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -146,11 +159,9 @@ class PantallaLlaves(QWidget):
         solapas = QTabWidget()
         panel_solapa = QWidget()
         panel_solapa.setObjectName("panelSolapa")
-        layout_solapa = QHBoxLayout(panel_solapa)
-
-        # ------------------------------------------------------- izquierda (solo botones)
-        panel_izq = QWidget()
-        columna = QVBoxLayout(panel_izq)
+        grid = QGridLayout(panel_solapa)
+        grid.setColumnStretch(1, 1)
+        grid.setRowStretch(2, 1)  # Movimientos se queda con el resto del alto disponible
 
         self.boton_nuevo_tipo = QPushButton("Nuevo tipo de llave")
         self.boton_nuevo_tipo.setObjectName("botonSecundario")
@@ -161,11 +172,10 @@ class PantallaLlaves(QWidget):
         self.boton_eliminar_tipo = QPushButton("Eliminar tipo de llave")
         self.boton_eliminar_tipo.setObjectName("botonSecundario")
         self.boton_eliminar_tipo.clicked.connect(self._eliminar_tipo)
-        columna.addWidget(self.boton_nuevo_tipo)
-        columna.addWidget(self.boton_editar_tipo)
-        columna.addWidget(self.boton_eliminar_tipo)
-
-        columna.addWidget(_linea_divisoria())
+        grid.addWidget(
+            self._grupo_botones(self.boton_nuevo_tipo, self.boton_editar_tipo, self.boton_eliminar_tipo),
+            0, 0, Qt.AlignmentFlag.AlignTop,
+        )
 
         self.boton_agregar_acceso = QPushButton("Agregar acceso de llave")
         self.boton_agregar_acceso.setObjectName("botonSecundario")
@@ -173,10 +183,10 @@ class PantallaLlaves(QWidget):
         self.boton_eliminar_acceso = QPushButton("Eliminar acceso de llave")
         self.boton_eliminar_acceso.setObjectName("botonSecundario")
         self.boton_eliminar_acceso.clicked.connect(self._eliminar_acceso)
-        columna.addWidget(self.boton_agregar_acceso)
-        columna.addWidget(self.boton_eliminar_acceso)
-
-        columna.addWidget(_linea_divisoria())
+        grid.addWidget(
+            self._grupo_botones(self.boton_agregar_acceso, self.boton_eliminar_acceso),
+            1, 0, Qt.AlignmentFlag.AlignTop,
+        )
 
         self.boton_ingresar = QPushButton("Ingresar copia al stock")
         self.boton_ingresar.setObjectName("botonSecundario")
@@ -190,26 +200,16 @@ class PantallaLlaves(QWidget):
         self.boton_asignar = QPushButton("Asignar copia a profesional")
         self.boton_asignar.setObjectName("botonPrimario")
         self.boton_asignar.clicked.connect(self._asignar)
-        columna.addWidget(self.boton_ingresar)
-        columna.addWidget(self.boton_perdida)
-        columna.addWidget(self.boton_devolver)
-        columna.addWidget(self.boton_asignar)
+        grid.addWidget(
+            self._grupo_botones(self.boton_ingresar, self.boton_perdida, self.boton_devolver, self.boton_asignar),
+            2, 0, Qt.AlignmentFlag.AlignTop,
+        )
 
-        for boton in (
-            self.boton_nuevo_tipo, self.boton_editar_tipo, self.boton_eliminar_tipo,
-            self.boton_agregar_acceso, self.boton_eliminar_acceso,
-            self.boton_ingresar, self.boton_perdida, self.boton_devolver, self.boton_asignar,
-        ):
-            boton.setFixedWidth(_ANCHO_BOTON)
-
-        columna.addStretch()
-        layout_solapa.addWidget(panel_izq)
-
-        # ------------------------------------------------------- derecha (las tres tablas apiladas)
-        panel_der = QWidget()
-        layout_der = QVBoxLayout(panel_der)
-
-        layout_der.addWidget(self._titulo_seccion("Tipos de llaves"))
+        # ------------------------------------------------------- columna derecha (las tres tablas)
+        panel_tipos = QWidget()
+        columna_tipos = QVBoxLayout(panel_tipos)
+        columna_tipos.setContentsMargins(0, 0, 0, 0)
+        columna_tipos.addWidget(self._titulo_seccion("Tipos de llaves"))
         self.tabla_tipos = QTableWidget()
         self.tabla_tipos.setColumnCount(6)
         self.tabla_tipos.setHorizontalHeaderLabels(
@@ -229,13 +229,17 @@ class PantallaLlaves(QWidget):
         self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_observacion_tipo)
         self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_botones_movimiento)
         self._orden_tipos = OrdenTabla(self.tabla_tipos, self._actualizar_tipos)
-        layout_der.addWidget(self.tabla_tipos)
+        columna_tipos.addWidget(self.tabla_tipos)
 
         self.campo_observacion_tipo = QLineEdit()
         self.campo_observacion_tipo.editingFinished.connect(self._guardar_observacion_tipo)
-        layout_der.addWidget(self.campo_observacion_tipo)
+        columna_tipos.addWidget(self.campo_observacion_tipo)
+        grid.addWidget(panel_tipos, 0, 1)
 
-        layout_der.addWidget(self._titulo_seccion("Accesos habilitados con la llave"))
+        panel_accesos = QWidget()
+        columna_accesos = QVBoxLayout(panel_accesos)
+        columna_accesos.setContentsMargins(0, 0, 0, 0)
+        columna_accesos.addWidget(self._titulo_seccion("Accesos habilitados con la llave"))
         self.tabla_accesos = QTableWidget()
         self.tabla_accesos.setColumnCount(4)
         self.tabla_accesos.setHorizontalHeaderLabels(["Localidad", "Edificio", "Unidad", "Nombre"])
@@ -245,13 +249,17 @@ class PantallaLlaves(QWidget):
         self.tabla_accesos.setFixedHeight(_alto_para_filas(self.tabla_accesos, _FILAS_VISIBLES_ACCESOS))
         self.tabla_accesos.itemSelectionChanged.connect(self._actualizar_observacion_acceso)
         self._orden_accesos = OrdenTabla(self.tabla_accesos, self._actualizar_accesos)
-        layout_der.addWidget(self.tabla_accesos)
+        columna_accesos.addWidget(self.tabla_accesos)
 
         self.campo_observacion_acceso = QLineEdit()
         self.campo_observacion_acceso.editingFinished.connect(self._guardar_observacion_acceso)
-        layout_der.addWidget(self.campo_observacion_acceso)
+        columna_accesos.addWidget(self.campo_observacion_acceso)
+        grid.addWidget(panel_accesos, 1, 1)
 
-        layout_der.addWidget(self._titulo_seccion("Movimientos de llaves"))
+        panel_movimientos = QWidget()
+        columna_movimientos = QVBoxLayout(panel_movimientos)
+        columna_movimientos.setContentsMargins(0, 0, 0, 0)
+        columna_movimientos.addWidget(self._titulo_seccion("Movimientos de llaves"))
         self.tabla_movimientos = QTableWidget()
         self.tabla_movimientos.setColumnCount(7)
         self.tabla_movimientos.setHorizontalHeaderLabels(
@@ -263,13 +271,12 @@ class PantallaLlaves(QWidget):
         self.tabla_movimientos.itemSelectionChanged.connect(self._actualizar_observacion_movimiento)
         self.tabla_movimientos.itemSelectionChanged.connect(self._actualizar_botones_movimiento)
         self._orden_movimientos = OrdenTabla(self.tabla_movimientos, self._actualizar_movimientos)
-        layout_der.addWidget(self.tabla_movimientos, stretch=1)
+        columna_movimientos.addWidget(self.tabla_movimientos, stretch=1)
 
         self.campo_observacion_movimiento = QLineEdit()
         self.campo_observacion_movimiento.editingFinished.connect(self._guardar_observacion_movimiento)
-        layout_der.addWidget(self.campo_observacion_movimiento)
-
-        layout_solapa.addWidget(panel_der, stretch=1)
+        columna_movimientos.addWidget(self.campo_observacion_movimiento)
+        grid.addWidget(panel_movimientos, 2, 1)
 
         scroll = QScrollArea()
         scroll.setFrameShape(QFrame.Shape.NoFrame)

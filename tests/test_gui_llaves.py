@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QDialog, QFrame, QLabel, QMessageBox, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -480,3 +480,57 @@ def test_tabla_tipos_y_accesos_tienen_alto_fijo_movimientos_no(qtbot, conn):
     assert pantalla.tabla_tipos.maximumHeight() == pantalla.tabla_tipos.minimumHeight()
     assert pantalla.tabla_accesos.maximumHeight() == pantalla.tabla_accesos.minimumHeight()
     assert pantalla.tabla_movimientos.maximumHeight() > pantalla.tabla_movimientos.minimumHeight()
+
+
+# ---------------------------------------- ronda 2: títulos normales, alineación, sin divisorias
+
+
+def test_titulos_de_seccion_no_usan_fuente_distinta(qtbot, conn):
+    """Pedido explícito de la clienta: "Tipos de llaves"/"Accesos
+    habilitados con la llave"/"Movimientos de llaves" no son solapas
+    reales y van con el mismo peso y tamaño que el texto normal
+    (subtituloCampo), no en negrita (subtituloSeccion)."""
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    textos = {"Tipos de llaves", "Accesos habilitados con la llave", "Movimientos de llaves"}
+    encontrados = {
+        etiqueta.text() for etiqueta in pantalla.findChildren(QLabel, "subtituloCampo")
+        if etiqueta.text() in textos
+    }
+    assert encontrados == textos
+    assert pantalla.findChildren(QLabel, "subtituloSeccion") == []
+
+
+def test_no_quedan_lineas_divisorias_entre_grupos_de_botones(qtbot, conn):
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    lineas = [f for f in pantalla.findChildren(QFrame) if f.frameShape() == QFrame.Shape.HLine]
+    assert lineas == []
+
+
+def test_cada_grupo_de_botones_arranca_a_la_altura_de_su_tabla(qtbot, conn):
+    """"Alinealos al comienzo de la barra de títulos... de ahí para
+    abajo": el grupo de botones de cada sección tiene que empezar (en Y)
+    a la misma altura que el título de su tabla correspondiente."""
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1300, 900)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    titulo_tipos = next(
+        e for e in pantalla.findChildren(QLabel, "subtituloCampo") if e.text() == "Tipos de llaves"
+    )
+    titulo_accesos = next(
+        e for e in pantalla.findChildren(QLabel, "subtituloCampo") if e.text() == "Accesos habilitados con la llave"
+    )
+    titulo_movimientos = next(
+        e for e in pantalla.findChildren(QLabel, "subtituloCampo") if e.text() == "Movimientos de llaves"
+    )
+
+    def _y_global(widget):
+        return widget.mapToGlobal(widget.rect().topLeft()).y()
+
+    assert abs(_y_global(pantalla.boton_nuevo_tipo) - _y_global(titulo_tipos)) <= 2
+    assert abs(_y_global(pantalla.boton_agregar_acceso) - _y_global(titulo_accesos)) <= 2
+    assert abs(_y_global(pantalla.boton_ingresar) - _y_global(titulo_movimientos)) <= 2
