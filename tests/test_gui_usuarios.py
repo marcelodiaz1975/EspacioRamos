@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QTabWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -43,12 +43,13 @@ def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
     assert titulo.text() == "USUARIOS Y PERMISOS"
 
 
-def test_tiene_formato_solapa(qtbot, conn):
+def test_tiene_formato_solapa_con_dos_pestanas(qtbot, conn):
     pantalla = PantallaUsuarios(conn)
     qtbot.addWidget(pantalla)
     solapas = pantalla.findChild(QTabWidget)
     assert solapas is not None
-    assert solapas.tabText(0) == "Usuarios y permisos"
+    assert [solapas.tabText(i) for i in range(solapas.count())] == ["Usuarios", "Permisos por pantalla"]
+    assert len(pantalla.findChildren(QWidget, "panelSolapa")) == 2
 
 
 # ------------------------------------------------------------- usuarios
@@ -58,10 +59,11 @@ def test_tabla_usuarios_muestra_los_cargados(qtbot, conn):
     crear_usuario(conn, "ana", "clave123", _id_nivel(conn, "Operador"))
     pantalla = PantallaUsuarios(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.tabla_usuarios.rowCount() == 1
-    assert pantalla.tabla_usuarios.item(0, 0).text() == "ana"
-    assert pantalla.tabla_usuarios.item(0, 1).text() == "Operador"
-    assert pantalla.tabla_usuarios.item(0, 2).text() == "Sí"
+    tabla = pantalla.panel_usuarios.tabla_usuarios
+    assert tabla.rowCount() == 1
+    assert tabla.item(0, 0).text() == "ana"
+    assert tabla.item(0, 1).text() == "Operador"
+    assert tabla.item(0, 2).text() == "Sí"
 
 
 def test_nuevo_usuario_crea_uno(qtbot, conn, monkeypatch):
@@ -76,10 +78,10 @@ def test_nuevo_usuario_crea_uno(qtbot, conn, monkeypatch):
 
     pantalla = PantallaUsuarios(conn)
     qtbot.addWidget(pantalla)
-    pantalla._nuevo()
+    pantalla.panel_usuarios._nuevo()
 
     assert autenticar(conn, "ana", "clave123") is not None
-    assert pantalla.tabla_usuarios.rowCount() == 1
+    assert pantalla.panel_usuarios.tabla_usuarios.rowCount() == 1
 
 
 def test_editar_usuario_cambia_nivel_y_activo(qtbot, conn, monkeypatch):
@@ -95,8 +97,8 @@ def test_editar_usuario_cambia_nivel_y_activo(qtbot, conn, monkeypatch):
 
     pantalla = PantallaUsuarios(conn)
     qtbot.addWidget(pantalla)
-    pantalla.tabla_usuarios.selectRow(0)
-    pantalla._editar()
+    pantalla.panel_usuarios.tabla_usuarios.selectRow(0)
+    pantalla.panel_usuarios._editar()
 
     usuario = obtener_repositorio(conn, "Usuario").obtener(id_usuario)
     assert usuario["IdNivelAcceso"] == _id_nivel(conn, "Administrador")
@@ -114,8 +116,8 @@ def test_no_deja_desactivar_al_unico_administrador_activo(qtbot, conn, monkeypat
 
     pantalla = PantallaUsuarios(conn, id_usuario_actual=id_admin)
     qtbot.addWidget(pantalla)
-    pantalla.tabla_usuarios.selectRow(0)
-    pantalla._editar()
+    pantalla.panel_usuarios.tabla_usuarios.selectRow(0)
+    pantalla.panel_usuarios._editar()
 
     usuario = obtener_repositorio(conn, "Usuario").obtener(id_admin)
     assert usuario["Activo"] == 1  # no se aplicó el cambio
@@ -133,9 +135,10 @@ def test_permite_desactivar_administrador_si_hay_otro_activo(qtbot, conn, monkey
 
     pantalla = PantallaUsuarios(conn, id_usuario_actual=id_admin_1)
     qtbot.addWidget(pantalla)
-    fila_admin1 = next(f for f in range(pantalla.tabla_usuarios.rowCount()) if pantalla.tabla_usuarios.item(f, 0).text() == "admin1")
-    pantalla.tabla_usuarios.selectRow(fila_admin1)
-    pantalla._editar()
+    tabla = pantalla.panel_usuarios.tabla_usuarios
+    fila_admin1 = next(f for f in range(tabla.rowCount()) if tabla.item(f, 0).text() == "admin1")
+    tabla.selectRow(fila_admin1)
+    pantalla.panel_usuarios._editar()
 
     usuario = obtener_repositorio(conn, "Usuario").obtener(id_admin_1)
     assert usuario["Activo"] == 0
@@ -154,9 +157,10 @@ def test_resetear_contrasena_registra_quien_lo_hizo(qtbot, conn, monkeypatch):
 
     pantalla = PantallaUsuarios(conn, id_usuario_actual=id_admin)
     qtbot.addWidget(pantalla)
-    fila_ana = next(f for f in range(pantalla.tabla_usuarios.rowCount()) if pantalla.tabla_usuarios.item(f, 0).text() == "ana")
-    pantalla.tabla_usuarios.selectRow(fila_ana)
-    pantalla._resetear_contrasena()
+    tabla = pantalla.panel_usuarios.tabla_usuarios
+    fila_ana = next(f for f in range(tabla.rowCount()) if tabla.item(f, 0).text() == "ana")
+    tabla.selectRow(fila_ana)
+    pantalla.panel_usuarios._resetear_contrasena()
 
     assert autenticar(conn, "ana", "nueva123") is not None
     historial = conn.execute(
@@ -185,9 +189,10 @@ def test_ver_historial_abre_dialogo_con_las_filas_del_usuario(qtbot, conn, monke
 
     pantalla = PantallaUsuarios(conn, id_usuario_actual=id_admin)
     qtbot.addWidget(pantalla)
-    fila_ana = next(f for f in range(pantalla.tabla_usuarios.rowCount()) if pantalla.tabla_usuarios.item(f, 0).text() == "ana")
-    pantalla.tabla_usuarios.selectRow(fila_ana)
-    pantalla._ver_historial()
+    tabla = pantalla.panel_usuarios.tabla_usuarios
+    fila_ana = next(f for f in range(tabla.rowCount()) if tabla.item(f, 0).text() == "ana")
+    tabla.selectRow(fila_ana)
+    pantalla.panel_usuarios._ver_historial()
 
     assert capturado["id_usuario"] == id_usuario
     assert capturado["nombre"] == "ana"
@@ -200,7 +205,8 @@ def test_tabla_permisos_lista_las_pantallas_registradas(qtbot, conn):
     asegurar_permisos_pantalla(conn, ["Reservas", "Pagos"])
     pantalla = PantallaUsuarios(conn)
     qtbot.addWidget(pantalla)
-    nombres = {pantalla.tabla_permisos.item(f, 0).text() for f in range(pantalla.tabla_permisos.rowCount())}
+    tabla = pantalla.panel_permisos.tabla
+    nombres = {tabla.item(f, 0).text() for f in range(tabla.rowCount())}
     assert {"Reservas", "Pagos"} <= nombres
 
 
@@ -208,8 +214,9 @@ def test_cambiar_combo_de_permiso_actualiza_la_base_de_inmediato(qtbot, conn):
     asegurar_permisos_pantalla(conn, ["Reservas"])
     pantalla = PantallaUsuarios(conn)
     qtbot.addWidget(pantalla)
-    fila = next(f for f in range(pantalla.tabla_permisos.rowCount()) if pantalla.tabla_permisos.item(f, 0).text() == "Reservas")
-    combo = pantalla.tabla_permisos.cellWidget(fila, 1)
+    tabla = pantalla.panel_permisos.tabla
+    fila = next(f for f in range(tabla.rowCount()) if tabla.item(f, 0).text() == "Reservas")
+    combo = tabla.cellWidget(fila, 1)
     indice_admin = next(i for i in range(combo.count()) if combo.itemText(i) == "Administrador")
 
     combo.setCurrentIndex(indice_admin)

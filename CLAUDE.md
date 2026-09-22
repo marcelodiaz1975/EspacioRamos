@@ -1543,21 +1543,29 @@ Nueva sección del menú, categoría "Configuración" (junto a
 (mismo criterio que Bloques rígidos/Gestor de archivos): el alta
 necesita contraseña + confirmación, la edición no debería poder pisar
 la contraseña sin querer, y la segunda tabla (permisos por pantalla) no
-es un catálogo de registros propios. Solapa única, columna de botones a
-la izquierda ("Nuevo usuario" `botonPrimario`; "Editar usuario"/
-"Resetear contraseña"/"Ver historial de contraseñas" `botonSecundario`),
-dos tablas apiladas a la derecha:
+es un catálogo de registros propios.
 
-- **Usuarios**: nombre, nivel, activo, último ingreso. Editar cambia
-  nombre/nivel/activo (nunca la contraseña, para eso está "Resetear
-  contraseña" aparte, que no pide la actual). "Ver historial de
-  contraseñas" abre un diálogo de solo lectura con fecha, motivo y quién
-  hizo cada cambio del usuario seleccionado.
-- **Permisos por pantalla**: una fila por cada `NombrePantalla` ya
-  registrada, con un combo de nivel por fila — cambiar el combo escribe
-  directo a la base (`UPDATE PermisoPantalla`), sin un botón "Guardar"
-  aparte, mismo criterio inmediato que "Marcar como principal" en
-  Gestor de archivos.
+Formato solapa con DOS pestañas (pedido explícito de la clienta al
+revisar la primera versión, que apilaba las dos tablas en una sola
+solapa): mismo patrón que `_PanelHistorialGeneral`/`_PanelEstadisticasVarias`
+de Estadísticas — cada solapa (`_PanelUsuarios`/`_PanelPermisosPantalla`)
+es su propia clase con `objectName="panelSolapa"` y su propio
+`showEvent`, pasada directamente a `addTab(...)` (no envuelta en un
+`QScrollArea` externo, que rompería la propagación del evento):
+
+- **"Usuarios"**: columna de botones a la izquierda ("Nuevo usuario"
+  `botonPrimario`; "Editar usuario"/"Resetear contraseña"/"Ver
+  historial de contraseñas" `botonSecundario`), tabla a la derecha
+  (nombre, nivel, activo, último ingreso). Editar cambia nombre/nivel/
+  activo (nunca la contraseña, para eso está "Resetear contraseña"
+  aparte, que no pide la actual). "Ver historial de contraseñas" abre
+  un diálogo de solo lectura con fecha, motivo y quién hizo cada cambio
+  del usuario seleccionado.
+- **"Permisos por pantalla"**: sin botones, una tabla sola con una fila
+  por cada `NombrePantalla` ya registrada y un combo de nivel por fila
+  — cambiar el combo escribe directo a la base (`UPDATE
+  PermisoPantalla`), sin un botón "Guardar" aparte, mismo criterio
+  inmediato que "Marcar como principal" en Gestor de archivos.
 
 Guardarraíl: no se puede desactivar ni degradar (bajarle el nivel) al
 único usuario Administrador ACTIVO que quede

@@ -2,17 +2,24 @@
 
 No usa `PantallaCRUD` (mismo criterio que Bloques rígidos/Gestor de
 archivos): el alta de un usuario necesita contraseña + confirmación, la
-edición no debería exponer ni pisar la contraseña sin querer, y hay una
-segunda tabla (permisos por pantalla) que no es un catálogo de registros
-propios. Se arma a mano siguiendo el mismo lenguaje visual (solapa
-única, columna de botones a la izquierda, tablas a la derecha).
+edición no debería exponer ni pisar la contraseña sin querer, y la
+segunda tabla (permisos por pantalla) no es un catálogo de registros
+propios.
 
-Dos tablas independientes en la misma solapa:
-- **Usuarios**: alta, nivel de acceso, activo/inactivo, resetear
+Formato solapa con DOS pestañas (pedido explícito de la clienta al
+revisar la primera versión, que las apilaba las dos en una sola solapa):
+mismo patrón que `_PanelHistorialGeneral`/`_PanelEstadisticasVarias` de
+Estadísticas — cada solapa es su propia clase con
+`objectName="panelSolapa"` y su propio `showEvent` (necesario para que
+cada una enfoque su propio primer control al mostrarse), pasada
+directamente a `addTab(...)` sin envolver en un `QScrollArea` externo
+(rompería la propagación del evento):
+
+- **"Usuarios"**: alta, nivel de acceso, activo/inactivo, resetear
   contraseña (sin conocer la actual — pedido de la clienta, una de las
   dos formas de recuperar un acceso perdido) y ver el historial de
   cambios de contraseña de cada uno.
-- **Permisos por pantalla**: un combo de nivel por fila, uno por cada
+- **"Permisos por pantalla"**: un combo de nivel por fila, uno por cada
   pantalla ya registrada en `PermisoPantalla` (`asegurar_permisos_
   pantalla`, llamado al arrancar la GUI) — cambiar el combo escribe
   directo a la base, sin un botón "Guardar" aparte (mismo criterio
@@ -35,13 +42,11 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -201,9 +206,13 @@ class _DialogoHistorialContrasenas(QDialog):
         layout.addWidget(botones)
 
 
-class PantallaUsuarios(QWidget):
-    def __init__(self, conn: sqlite3.Connection, id_usuario_actual: int | None = None, parent=None):
+class _PanelUsuarios(QWidget):
+    """Solapa "Usuarios": columna de botones a la izquierda, tabla a la
+    derecha — mismo lenguaje que los catálogos genéricos."""
+
+    def __init__(self, conn: sqlite3.Connection, id_usuario_actual: int | None, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self.id_usuario_actual = id_usuario_actual
         self.repositorio = obtener_repositorio(conn, "Usuario")
@@ -217,15 +226,7 @@ class PantallaUsuarios(QWidget):
         self.boton_nuevo.setFocus()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        titulo = QLabel("Usuarios y permisos".upper())
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        solapas = QTabWidget()
-        panel = QWidget()
-        panel.setObjectName("panelSolapa")
-        layout_solapa = QHBoxLayout(panel)
+        layout_solapa = QHBoxLayout(self)
 
         columna_widget = QWidget()
         columna = QVBoxLayout(columna_widget)
@@ -252,12 +253,6 @@ class PantallaUsuarios(QWidget):
         columna.addStretch()
         layout_solapa.addWidget(columna_widget)
 
-        columna_derecha_widget = QWidget()
-        columna_derecha = QVBoxLayout(columna_derecha_widget)
-
-        titulo_usuarios = QLabel("Usuarios")
-        titulo_usuarios.setObjectName("subtituloSeccion")
-        columna_derecha.addWidget(titulo_usuarios)
         self.tabla_usuarios = QTableWidget()
         self.tabla_usuarios.setColumnCount(4)
         self.tabla_usuarios.setHorizontalHeaderLabels(["Usuario", "Nivel de acceso", "Activo", "Último ingreso"])
@@ -265,39 +260,14 @@ class PantallaUsuarios(QWidget):
         self.tabla_usuarios.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_usuarios.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla_usuarios.doubleClicked.connect(self._editar)
-        columna_derecha.addWidget(self.tabla_usuarios)
-
-        titulo_permisos = QLabel("Permisos por pantalla")
-        titulo_permisos.setObjectName("subtituloSeccion")
-        columna_derecha.addWidget(titulo_permisos)
-        self.tabla_permisos = QTableWidget()
-        self.tabla_permisos.setColumnCount(2)
-        self.tabla_permisos.setHorizontalHeaderLabels(["Pantalla", "Nivel mínimo requerido"])
-        self.tabla_permisos.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        columna_derecha.addWidget(self.tabla_permisos, stretch=1)
-
-        layout_solapa.addWidget(columna_derecha_widget, stretch=1)
-
-        scroll = QScrollArea()
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(panel)
-        solapas.addTab(scroll, "Usuarios y permisos")
-        solapas.tabBar().setDrawBase(False)
-        layout.addWidget(solapas, stretch=1)
+        layout_solapa.addWidget(self.tabla_usuarios, stretch=1)
 
         self._foco = instalar_enter_avanza_foco(
             [self.boton_nuevo, self.boton_editar, self.boton_resetear, self.boton_historial], parent=self,
         )
-        self._orden_usuarios = OrdenTabla(self.tabla_usuarios, self._actualizar_usuarios)
+        self._orden_usuarios = OrdenTabla(self.tabla_usuarios, self.actualizar)
 
-    # ------------------------------------------------------------- carga
-
-    def actualizar(self) -> None:
-        self._actualizar_usuarios()
-        self._actualizar_permisos()
-
-    def _clave_orden_usuarios(self, registros: list[sqlite3.Row], columna: int, niveles: dict[int, str]):
+    def _clave_orden(self, registros: list[sqlite3.Row], columna: int, niveles: dict[int, str]):
         def clave(r: sqlite3.Row):
             if columna == 0:
                 return r["NombreUsuario"]
@@ -308,12 +278,12 @@ class PantallaUsuarios(QWidget):
             return r["UltimoIngreso"] or ""
         return clave
 
-    def _actualizar_usuarios(self) -> None:
+    def actualizar(self) -> None:
         registros = self.repositorio.listar()
         niveles = {n["IdNivelAcceso"]: n["Nombre"] for n in obtener_repositorio(self.conn, "NivelAcceso").listar()}
         if self._orden_usuarios.columna is not None:
             registros = sorted(
-                registros, key=self._clave_orden_usuarios(registros, self._orden_usuarios.columna, niveles),
+                registros, key=self._clave_orden(registros, self._orden_usuarios.columna, niveles),
                 reverse=not self._orden_usuarios.ascendente,
             )
         self.tabla_usuarios.setRowCount(len(registros))
@@ -326,33 +296,6 @@ class PantallaUsuarios(QWidget):
             self.tabla_usuarios.setItem(fila_idx, 3, QTableWidgetItem(r["UltimoIngreso"] or "-"))
         _ajustar_columnas(self.tabla_usuarios)
 
-    def _actualizar_permisos(self) -> None:
-        filas = self.conn.execute(
-            "SELECT NombrePantalla, IdNivelAcceso FROM PermisoPantalla ORDER BY NombrePantalla"
-        ).fetchall()
-        niveles = obtener_repositorio(self.conn, "NivelAcceso").listar()
-        self.tabla_permisos.setRowCount(len(filas))
-        for fila_idx, f in enumerate(filas):
-            self.tabla_permisos.setItem(fila_idx, 0, QTableWidgetItem(f["NombrePantalla"]))
-            combo = QComboBox()
-            for nivel in niveles:
-                combo.addItem(nivel["Nombre"], nivel["IdNivelAcceso"])
-            indice = next((i for i, n in enumerate(niveles) if n["IdNivelAcceso"] == f["IdNivelAcceso"]), 0)
-            combo.setCurrentIndex(indice)
-            combo.currentIndexChanged.connect(
-                lambda _indice, pantalla=f["NombrePantalla"], c=combo: self._cambiar_nivel_pantalla(pantalla, c.currentData())
-            )
-            self.tabla_permisos.setCellWidget(fila_idx, 1, combo)
-        _ajustar_columnas(self.tabla_permisos)
-
-    def _cambiar_nivel_pantalla(self, nombre_pantalla: str, id_nivel: int) -> None:
-        self.conn.execute(
-            "UPDATE PermisoPantalla SET IdNivelAcceso = ? WHERE NombrePantalla = ?", (id_nivel, nombre_pantalla)
-        )
-        self.conn.commit()
-
-    # ------------------------------------------------------------ acciones
-
     def _fila_seleccionada_usuario(self):
         filas = self.tabla_usuarios.selectionModel().selectedRows()
         if not filas:
@@ -363,7 +306,7 @@ class PantallaUsuarios(QWidget):
         niveles = obtener_repositorio(self.conn, "NivelAcceso").listar()
         dialogo = _DialogoUsuarioNuevo(self.conn, niveles, parent=self)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
-            self._actualizar_usuarios()
+            self.actualizar()
 
     def _editar(self) -> None:
         id_usuario = self._fila_seleccionada_usuario()
@@ -398,7 +341,7 @@ class PantallaUsuarios(QWidget):
             QMessageBox.warning(self, "Editar usuario", f"Ya existe un usuario '{valores['NombreUsuario']}'.")
             return
         self.conn.commit()
-        self._actualizar_usuarios()
+        self.actualizar()
 
     def _resetear_contrasena(self) -> None:
         id_usuario = self._fila_seleccionada_usuario()
@@ -421,3 +364,70 @@ class PantallaUsuarios(QWidget):
             return
         usuario = self.repositorio.obtener(id_usuario)
         _DialogoHistorialContrasenas(self.conn, id_usuario, usuario["NombreUsuario"], parent=self).exec()
+
+
+class _PanelPermisosPantalla(QWidget):
+    """Solapa "Permisos por pantalla": una tabla con un combo de nivel
+    por fila, sin botones — cambiar el combo escribe directo a la base."""
+
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.setObjectName("panelSolapa")
+        self.conn = conn
+        self._armar_ui()
+        self.actualizar()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.actualizar()
+
+    def _armar_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        self.tabla = QTableWidget()
+        self.tabla.setColumnCount(2)
+        self.tabla.setHorizontalHeaderLabels(["Pantalla", "Nivel mínimo requerido"])
+        self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        layout.addWidget(self.tabla, stretch=1)
+
+    def actualizar(self) -> None:
+        filas = self.conn.execute(
+            "SELECT NombrePantalla, IdNivelAcceso FROM PermisoPantalla ORDER BY NombrePantalla"
+        ).fetchall()
+        niveles = obtener_repositorio(self.conn, "NivelAcceso").listar()
+        self.tabla.setRowCount(len(filas))
+        for fila_idx, f in enumerate(filas):
+            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(f["NombrePantalla"]))
+            combo = QComboBox()
+            for nivel in niveles:
+                combo.addItem(nivel["Nombre"], nivel["IdNivelAcceso"])
+            indice = next((i for i, n in enumerate(niveles) if n["IdNivelAcceso"] == f["IdNivelAcceso"]), 0)
+            combo.setCurrentIndex(indice)
+            combo.currentIndexChanged.connect(
+                lambda _indice, pantalla=f["NombrePantalla"], c=combo: self._cambiar_nivel(pantalla, c.currentData())
+            )
+            self.tabla.setCellWidget(fila_idx, 1, combo)
+        _ajustar_columnas(self.tabla)
+
+    def _cambiar_nivel(self, nombre_pantalla: str, id_nivel: int) -> None:
+        self.conn.execute(
+            "UPDATE PermisoPantalla SET IdNivelAcceso = ? WHERE NombrePantalla = ?", (id_nivel, nombre_pantalla)
+        )
+        self.conn.commit()
+
+
+class PantallaUsuarios(QWidget):
+    def __init__(self, conn: sqlite3.Connection, id_usuario_actual: int | None = None, parent=None):
+        super().__init__(parent)
+        self.conn = conn
+        layout = QVBoxLayout(self)
+        titulo = QLabel("Usuarios y permisos".upper())
+        titulo.setObjectName("tituloPantalla")
+        layout.addWidget(titulo)
+
+        self.pestanas = QTabWidget()
+        self.panel_usuarios = _PanelUsuarios(conn, id_usuario_actual)
+        self.pestanas.addTab(self.panel_usuarios, "Usuarios")
+        self.panel_permisos = _PanelPermisosPantalla(conn)
+        self.pestanas.addTab(self.panel_permisos, "Permisos por pantalla")
+        self.pestanas.tabBar().setDrawBase(False)
+        layout.addWidget(self.pestanas, stretch=1)
