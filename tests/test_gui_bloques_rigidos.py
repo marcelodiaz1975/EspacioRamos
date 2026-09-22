@@ -113,13 +113,13 @@ def test_eliminar_bloque(qtbot, conn):
 # ---------------------------------------- formato solapa (revisión "uno por uno")
 
 
-def test_tiene_formato_solapa_con_una_pestana_listado(qtbot, conn):
+def test_tiene_formato_solapa_con_una_pestana_bloques_rigidos(qtbot, conn):
     pantalla = PantallaBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     solapas = pantalla.findChild(QTabWidget)
     assert solapas is not None
     assert solapas.count() == 1
-    assert solapas.tabText(0) == "Listado"
+    assert solapas.tabText(0) == "Bloques rígidos"
 
 
 def test_editar_y_eliminar_son_secundarios_nuevo_es_primario(qtbot, conn):

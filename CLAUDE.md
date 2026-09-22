@@ -1166,9 +1166,9 @@ compartido.
 
 Pasó del layout plano (título + fila de botones sin estilo arriba de la
 tabla) al mismo lenguaje visual que los catálogos genéricos (solapa
-única "Listado", `panelSolapa`/`QScrollArea` con `setDrawBase(False)`/
-`NoFrame`, columna izquierda de ancho fijo con Buscar + Nuevo/Editar/
-Eliminar, tabla ordenable a la derecha) — pero SIN construirse sobre
+única, `panelSolapa`/`QScrollArea` con `setDrawBase(False)`/`NoFrame`,
+columna izquierda de ancho fijo con Buscar + Nuevo/Editar/Eliminar,
+tabla ordenable a la derecha) — pero SIN construirse sobre
 `PantallaCRUD`, a diferencia del resto de los catálogos: el diálogo
 Nuevo/Editar necesita dos listas de días con checks (`_ListaDias`, una
 para la restricción lógica y otra para la visualización en la grilla),
@@ -1203,6 +1203,13 @@ Segunda vuelta: las columnas de la tabla suman `_PADDING_COLUMNA` (30px,
 mismo criterio y mismo valor que `novedades._ajustar_columnas`) sobre lo
 que deja `resizeColumnsToContents()` — quedaban apretadas, sobraba ancho
 en el panel.
+
+Tercera vuelta: el título de la solapa pasa de "Listado" (el genérico
+que usan los catálogos) a "Bloques rígidos" — mismo criterio que Panel
+de control: a futuro esta pantalla va a terminar viviendo dentro de
+otro formulario todavía sin definir, así que necesita su propio nombre
+en vez del genérico de catálogo. No se tocó nada de la estructura
+pensando en eso, es solo un aviso para cuando se defina.
 
 ## Importar planilla (botones a la izquierda, planilla modelo descargable)
 

@@ -10,9 +10,13 @@ Editar necesita dos listas de días con checks (lógica y visualización),
 un tipo de control que `crud_generico.Campo` no contempla — armar un
 tipo nuevo ahí serviría solo a esta pantalla, así que se arma a mano
 siguiendo el mismo lenguaje visual que los catálogos genéricos (mismo
-criterio que Gestor de archivos): solapa única "Listado", Buscar +
-Nuevo/Editar/Eliminar en una columna izquierda de ancho fijo, tabla
-ordenable a la derecha."""
+criterio que Gestor de archivos): solapa única "Bloques rígidos", Buscar
++ Nuevo/Editar/Eliminar en una columna izquierda de ancho fijo, tabla
+ordenable a la derecha. El título de la solapa es fijo (no "Listado"
+genérico) porque, igual que Panel de control, a futuro esta pantalla va
+a terminar viviendo dentro de otro formulario todavía sin definir — no
+se tocó nada de la estructura pensando en eso, es solo un aviso para
+cuando se defina."""
 from __future__ import annotations
 
 import json
@@ -252,7 +256,7 @@ class PantallaBloquesRigidos(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
         scroll.setWidget(panel_solapa)
-        solapas.addTab(scroll, "Listado")
+        solapas.addTab(scroll, "Bloques rígidos")
         solapas.tabBar().setDrawBase(False)
         layout.addWidget(solapas, stretch=1)
 
