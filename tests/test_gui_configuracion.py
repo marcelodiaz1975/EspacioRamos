@@ -1,6 +1,16 @@
 import pytest
 from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QDateEdit, QDoubleSpinBox, QFileDialog, QLabel, QMessageBox, QSpinBox, QTabWidget, QWidget
+from PySide6.QtWidgets import (
+    QDateEdit,
+    QDialog,
+    QDoubleSpinBox,
+    QFileDialog,
+    QLabel,
+    QMessageBox,
+    QSpinBox,
+    QTabWidget,
+    QWidget,
+)
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -8,6 +18,7 @@ from app.gui.estilos import hoja_estilos
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.configuracion import (
     _CAMPOS_BOOLEANOS,
+    _CAMPOS_ESPECIALES,
     _CAMPOS_FECHA,
     _CAMPOS_NUMERICOS,
     _CAMPOS_TEXTO,
@@ -227,7 +238,7 @@ def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
     assert titulo.text() == "CONFIGURACIÓN GENERAL"
 
 
-def test_tiene_formato_solapa_con_las_cinco_pestanas(qtbot, conn):
+def test_tiene_formato_solapa_con_las_seis_pestanas(qtbot, conn):
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
     solapas = pantalla.findChild(QTabWidget)
@@ -238,8 +249,13 @@ def test_tiene_formato_solapa_con_las_cinco_pestanas(qtbot, conn):
 
 def test_todos_los_campos_estan_agrupados_una_sola_vez(qtbot, conn):
     """Ningún campo se pierde ni queda duplicado al pasar del formulario
-    plano a los cinco grupos temáticos."""
-    todos = {nombre for nombre, _ in _CAMPOS_TEXTO + _CAMPOS_NUMERICOS + _CAMPOS_BOOLEANOS + _CAMPOS_FECHA}
+    plano a los grupos temáticos — incluye los "campos especiales"
+    (ej. Contraseña maestra), que no se guardan como el resto pero
+    también tienen que aparecer agrupados una sola vez."""
+    todos = {
+        nombre
+        for nombre, _ in _CAMPOS_TEXTO + _CAMPOS_NUMERICOS + _CAMPOS_BOOLEANOS + _CAMPOS_FECHA + _CAMPOS_ESPECIALES
+    }
     agrupados: list[str] = [nombre for _titulo, campos in _GRUPOS for nombre in campos]
     assert sorted(agrupados) == sorted(todos)
     assert len(agrupados) == len(set(agrupados))
@@ -248,11 +264,16 @@ def test_todos_los_campos_estan_agrupados_una_sola_vez(qtbot, conn):
 def test_cada_solapa_carga_todos_sus_campos(qtbot, conn):
     """Los campos "ruta" suman un control más a la cadena de foco (el
     botón "Elegir"), así que la comprobación es "está en algún lado de
-    `orden`", no una correspondencia 1 a 1 por posición."""
+    `orden`", no una correspondencia 1 a 1 por posición. Los "campos
+    especiales" (ej. Contraseña maestra) no están en `_entradas` —
+    alcanza con que su botón esté en `orden`."""
+    nombres_especiales = {nombre for nombre, _ in _CAMPOS_ESPECIALES}
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
     for panel, (_titulo, nombres) in zip(pantalla._paneles, _GRUPOS):
         for nombre in nombres:
+            if nombre in nombres_especiales:
+                continue
             assert pantalla._entradas[nombre] in panel.orden
 
 
@@ -297,3 +318,76 @@ def test_cadena_de_foco_se_reinstala_al_cambiar_de_solapa(qtbot, conn):
     pantalla.pestanas.setCurrentIndex(2)
     panel = pantalla._paneles[2]
     assert pantalla._foco._orden == panel.orden + [pantalla.boton_guardar]
+
+
+# --------------------------------------------------------------- Seguridad
+
+
+def test_minutos_inactividad_persiste(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["MinutosInactividadBloqueo"].setValue(30)
+    pantalla._guardar()
+    fila = conn.execute("SELECT MinutosInactividadBloqueo FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    assert fila["MinutosInactividadBloqueo"] == 30
+
+
+def test_contrasena_maestra_no_tiene_campo_de_texto_en_entradas(qtbot, conn):
+    """No debe poder leerse/editarse como un campo de texto común — solo
+    se cambia a través de su propio diálogo."""
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    assert "ContrasenaMaestra" not in pantalla._entradas
+
+
+def test_contrasena_maestra_boton_abre_dialogo_y_persiste(qtbot, conn, monkeypatch):
+    from app.gui.pantallas.configuracion import _DialogoContrasenaMaestra
+    from app.negocio.seguridad import verificar_contrasena_maestra
+
+    monkeypatch.setattr(_DialogoContrasenaMaestra, "exec", lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(_DialogoContrasenaMaestra, "contrasena", lambda self: "maestra123")
+
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    panel_seguridad = pantalla._paneles[[titulo for titulo, _ in _GRUPOS].index("Seguridad")]
+    boton = next(w for w in panel_seguridad.orden if w.text() == "Establecer/cambiar contraseña maestra")
+    boton.click()
+
+    assert verificar_contrasena_maestra(conn, "maestra123") is True
+
+
+def test_contrasena_maestra_cancelar_no_cambia_nada(qtbot, conn, monkeypatch):
+    from app.gui.pantallas.configuracion import _DialogoContrasenaMaestra
+    from app.negocio.seguridad import verificar_contrasena_maestra
+
+    monkeypatch.setattr(_DialogoContrasenaMaestra, "exec", lambda self: QDialog.DialogCode.Rejected)
+
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    panel_seguridad = pantalla._paneles[[titulo for titulo, _ in _GRUPOS].index("Seguridad")]
+    boton = next(w for w in panel_seguridad.orden if w.text() == "Establecer/cambiar contraseña maestra")
+    boton.click()
+
+    assert verificar_contrasena_maestra(conn, "cualquiera") is False
+
+
+def test_dialogo_contrasena_maestra_rechaza_vacia_y_no_coincidente(qtbot):
+    from app.gui.pantallas.configuracion import _DialogoContrasenaMaestra
+
+    dialogo = _DialogoContrasenaMaestra()
+    qtbot.addWidget(dialogo)
+    dialogo.campo_nueva.setText("")
+    dialogo.campo_confirmar.setText("")
+    dialogo._validar_y_aceptar()
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+
+    dialogo.campo_nueva.setText("clave1")
+    dialogo.campo_confirmar.setText("clave2")
+    dialogo._validar_y_aceptar()
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+
+    dialogo.campo_nueva.setText("clave1")
+    dialogo.campo_confirmar.setText("clave1")
+    dialogo._validar_y_aceptar()
+    assert dialogo.result() == QDialog.DialogCode.Accepted
+    assert dialogo.contrasena() == "clave1"

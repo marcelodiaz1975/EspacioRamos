@@ -171,6 +171,18 @@ def asegurar_permisos_pantalla(conn: sqlite3.Connection, nombres_pantalla: list[
     conn.commit()
 
 
+def hay_otro_usuario_activo_de_nivel(conn: sqlite3.Connection, id_nivel_acceso: int, excluir_id: int) -> bool:
+    """True si existe al menos otro usuario ACTIVO con `id_nivel_acceso`,
+    aparte de `excluir_id` — usado por la pantalla de Usuarios para
+    evitar desactivar o degradar al último Administrador activo y dejar
+    el sistema sin nadie que pueda administrarlo."""
+    fila = conn.execute(
+        "SELECT 1 FROM Usuario WHERE IdNivelAcceso = ? AND Activo = 1 AND IdUsuario != ? LIMIT 1",
+        (id_nivel_acceso, excluir_id),
+    ).fetchone()
+    return fila is not None
+
+
 def nivel_alcanza(conn: sqlite3.Connection, id_nivel_usuario: int, nombre_pantalla: str) -> bool:
     """True si el nivel del usuario logueado alcanza el nivel mínimo
     requerido por `nombre_pantalla` en `PermisoPantalla`. Una pantalla

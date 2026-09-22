@@ -27,6 +27,8 @@ from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QDateEdit,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -45,6 +47,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.formato import formatear_moneda
+from app.negocio.seguridad import establecer_contrasena_maestra
 from app.repositorio.registro import obtener_repositorio
 
 FORMATO_JSON = "JSON válido"
@@ -92,6 +95,7 @@ _CAMPOS_NUMERICOS = [
     ("RetencionHistorialListaEsperaAnios", "Retención historial lista de espera (años)"),
     ("TamanoMaximoImagenMB", "Tamaño máximo de imagen (MB)"),
     ("CantidadDecimales", "Cantidad de decimales en los montos"),
+    ("MinutosInactividadBloqueo", "Minutos de inactividad para bloqueo automático"),
 ]
 _CAMPOS_BOOLEANOS = [
     ("RecargoAisladasActivoPorDefecto", "Recargo de aisladas activo por defecto"),
@@ -104,8 +108,17 @@ _CAMPOS_BOOLEANOS = [
 _CAMPOS_FECHA = [
     ("FechaFicticia", "Fecha ficticia"),
 ]
+# "Campo" especial (Seguridad): no es un valor de Configuracion que se
+# edite y guarde con el resto — es un botón que abre su propio diálogo y
+# escribe directo a la base (ver _CampoContrasenaMaestra). Solo aparece
+# en _GRUPOS/_ETIQUETAS, nunca en actualizar()/_guardar().
+_CAMPOS_ESPECIALES = [
+    ("ContrasenaMaestra", "Contraseña maestra"),
+]
 
-_ETIQUETAS: dict[str, str] = dict(_CAMPOS_TEXTO + _CAMPOS_NUMERICOS + _CAMPOS_BOOLEANOS + _CAMPOS_FECHA)
+_ETIQUETAS: dict[str, str] = dict(
+    _CAMPOS_TEXTO + _CAMPOS_NUMERICOS + _CAMPOS_BOOLEANOS + _CAMPOS_FECHA + _CAMPOS_ESPECIALES
+)
 _NOMBRES_BOOLEANOS = {nombre for nombre, _ in _CAMPOS_BOOLEANOS}
 _NOMBRES_NUMERICOS = {nombre for nombre, _ in _CAMPOS_NUMERICOS}
 _NOMBRES_FECHA = {nombre for nombre, _ in _CAMPOS_FECHA}
@@ -135,6 +148,7 @@ _RANGOS_NUMERICOS: dict[str, tuple[float, float]] = {
     "RetencionHistorialListaEsperaAnios": (0, 50),
     "TamanoMaximoImagenMB": (0.1, 500),
     "CantidadDecimales": (0, 4),
+    "MinutosInactividadBloqueo": (1, 240),
 }
 _CAMPOS_HORA = {"HoraInicioGrilla", "HoraFinGrilla"}
 _CAMPOS_PORCENTAJE = {
@@ -170,6 +184,7 @@ _GRUPOS: list[tuple[str, list[str]]] = [
         "FrecuenciaBackupDrive", "CarpetaBaseArchivos", "CarpetaBackup", "TamanoMaximoImagenMB",
     ]),
     ("Modo QA", ["FechaFicticia", "ModoFechaFicticia"]),
+    ("Seguridad", ["MinutosInactividadBloqueo", "ContrasenaMaestra"]),
 ]
 
 
@@ -275,6 +290,68 @@ class _CampoRuta(QWidget):
             self.campo.setText(archivo)
 
 
+class _DialogoContrasenaMaestra(QDialog):
+    """Pide la contraseña maestra nueva dos veces (confirmación) — nunca
+    se muestra ni se guarda en ningún campo de texto de la pantalla
+    principal, solo vive en este diálogo hasta que se confirma."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Contraseña maestra")
+        layout = QVBoxLayout(self)
+
+        formulario = QFormLayout()
+        self.campo_nueva = QLineEdit()
+        self.campo_nueva.setEchoMode(QLineEdit.EchoMode.Password)
+        self.campo_confirmar = QLineEdit()
+        self.campo_confirmar.setEchoMode(QLineEdit.EchoMode.Password)
+        formulario.addRow("Contraseña maestra nueva", self.campo_nueva)
+        formulario.addRow("Confirmar", self.campo_confirmar)
+        layout.addLayout(formulario)
+
+        botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        botones.accepted.connect(self._validar_y_aceptar)
+        botones.rejected.connect(self.reject)
+        layout.addWidget(botones)
+
+    def _validar_y_aceptar(self) -> None:
+        if not self.campo_nueva.text():
+            QMessageBox.warning(self, "Contraseña maestra", "La contraseña no puede estar vacía.")
+            return
+        if self.campo_nueva.text() != self.campo_confirmar.text():
+            QMessageBox.warning(self, "Contraseña maestra", "Las dos contraseñas no coinciden.")
+            return
+        self.accept()
+
+    def contrasena(self) -> str:
+        return self.campo_nueva.text()
+
+
+class _CampoContrasenaMaestra(QWidget):
+    """Botón que abre `_DialogoContrasenaMaestra` — a diferencia del
+    resto de los campos de esta pantalla, escribe directo a la base
+    (`establecer_contrasena_maestra`) apenas se confirma el diálogo, sin
+    pasar por "Guardar": nunca queda una contraseña pendiente de guardar
+    en memoria más tiempo del necesario."""
+
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.conn = conn
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.boton = QPushButton("Establecer/cambiar contraseña maestra")
+        self.boton.setObjectName("botonSecundario")
+        self.boton.clicked.connect(self._abrir_dialogo)
+        layout.addWidget(self.boton)
+        layout.addStretch(1)
+
+    def _abrir_dialogo(self) -> None:
+        dialogo = _DialogoContrasenaMaestra(self)
+        if dialogo.exec() == QDialog.DialogCode.Accepted:
+            establecer_contrasena_maestra(self.conn, dialogo.contrasena())
+            QMessageBox.information(self, "Contraseña maestra", "Contraseña maestra actualizada.")
+
+
 def _crear_campo_fecha() -> QDateEdit:
     entrada = QDateEdit()
     entrada.setCalendarPopup(True)
@@ -283,12 +360,20 @@ def _crear_campo_fecha() -> QDateEdit:
     return entrada
 
 
-def _construir_campo(nombre: str, entradas: dict[str, QWidget]) -> tuple[QWidget, list[QWidget]]:
+def _construir_campo(
+    nombre: str, entradas: dict[str, QWidget], conn: sqlite3.Connection,
+) -> tuple[QWidget, list[QWidget]]:
     """Arma el widget (o los widgets) de un campo y registra en
     `entradas` el que expone la interfaz que `actualizar`/`_guardar`
     esperan (`.text()`, `.value()`, `.isChecked()` o `.date()`). Devuelve
     (widget para la fila del formulario, widgets para la cadena de foco
-    — más de uno cuando hay un botón al lado, ej. "Elegir")."""
+    — más de uno cuando hay un botón al lado, ej. "Elegir"). Los campos
+    de `_CAMPOS_ESPECIALES` (ej. "ContrasenaMaestra") no se registran en
+    `entradas`: no pasan por `actualizar()`/`_guardar()`, escriben solos."""
+    if nombre == "ContrasenaMaestra":
+        campo = _CampoContrasenaMaestra(conn)
+        return campo, [campo.boton]
+
     if nombre in _NOMBRES_BOOLEANOS:
         entrada = QCheckBox()
         entradas[nombre] = entrada
@@ -325,7 +410,7 @@ class _PanelCampos(QWidget):
     en Reservas — el propio `panelSolapa` es el widget que se pasa a
     `addTab`, con su `showEvent` propio, y el scroll queda adentro)."""
 
-    def __init__(self, nombres: list[str], entradas: dict[str, QWidget], parent=None):
+    def __init__(self, nombres: list[str], entradas: dict[str, QWidget], conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.setObjectName("panelSolapa")
         self.orden: list[QWidget] = []
@@ -339,7 +424,7 @@ class _PanelCampos(QWidget):
         contenido = QWidget()
         formulario = QFormLayout(contenido)
         for nombre in nombres:
-            fila_widget, controles = _construir_campo(nombre, entradas)
+            fila_widget, controles = _construir_campo(nombre, entradas, conn)
             formulario.addRow(_ETIQUETAS[nombre], fila_widget)
             self.orden.extend(controles)
 
@@ -373,7 +458,7 @@ class ConfiguracionGeneral(QWidget):
         self.pestanas = QTabWidget()
         self._paneles: list[_PanelCampos] = []
         for titulo_solapa, nombres in _GRUPOS:
-            panel = _PanelCampos(nombres, self._entradas)
+            panel = _PanelCampos(nombres, self._entradas, self.conn)
             self.pestanas.addTab(panel, titulo_solapa)
             self._paneles.append(panel)
         self.pestanas.tabBar().setDrawBase(False)

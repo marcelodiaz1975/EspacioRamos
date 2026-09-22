@@ -1447,6 +1447,146 @@ a nadie más que la llame) que multiplica el resultado de
 `resizeColumnsToContents() + _PADDING_COLUMNA`; Accesos es la única
 que lo llama con `factor=2`.
 
+## Seguridad (login, bloqueo por inactividad, niveles de acceso)
+
+Pantalla/funcionalidad nueva pedida por la clienta después de cerrar la
+revisión "uno por uno" de las pantallas existentes — no es parte de esa
+revisión, es una funcionalidad nueva del sistema. Toda la lógica vive en
+`app.negocio.seguridad` (ver su docstring para el detalle técnico de
+hashing/historial/niveles); acá va el resumen de las decisiones de
+producto.
+
+Pedido inicial: manejo de contraseñas para ingresar al sistema, bloqueo
+automático por inactividad, historial de cambios de contraseña, y
+niveles de acceso — pensado en un primer momento para la clienta y su
+familia nomás, pero dejando la puerta abierta a que cada pantalla del
+menú requiera un nivel puntual más adelante. Antes de implementar nada
+se le consultaron tres decisiones abiertas (`AskUserQuestion`):
+
+- **Recuperación de un acceso perdido** (no hay servidor/email para
+  resetear nada, es una app de escritorio): "ambas" — un usuario
+  Administrador puede resetear la contraseña de otro sin conocer la
+  actual (pantalla de Usuarios), MÁS una contraseña maestra guardada
+  aparte en `Configuracion` (hasheada, nunca se pide en el uso normal)
+  como red de seguridad si se pierde el acceso de TODOS los
+  administradores a la vez.
+- **Qué pasa al vencer el tiempo de inactividad**: "bloquea sin cerrar
+  sesión" — la pantalla queda tapada y pide la contraseña para
+  desbloquear, pero lo que estaba cargado en cada formulario (sin
+  guardar todavía) sigue ahí al volver a entrar.
+- **Niveles de acceso**: sobre si se iba a poder ir modificando qué
+  nivel requiere cada pantalla desde el sistema mismo (no fijo en
+  código) — confirmado que sí, ese es justamente el diseño: la
+  asignación pantalla→nivel se guarda en una tabla propia
+  (`PermisoPantalla`) editable en cualquier momento desde la nueva
+  pantalla "Usuarios y permisos", nunca hay que tocar código para
+  cambiarla. Se arrancó con dos niveles (Administrador/Operador,
+  catálogo abierto a sumar un tercero si hiciera falta más adelante) en
+  vez de un número abierto 1-5: más simple de entender y de asignar por
+  pantalla mientras el uso real siga siendo ella y su familia.
+
+### Modelo de datos
+
+`NivelAcceso` (catálogo con `Orden` — mayor Orden = más privilegios,
+sembrado con Administrador=100/Operador=10), `Usuario` (login: nombre,
+hash+salt de contraseña, nivel, activo, último ingreso),
+`HistorialContrasenas` (una fila por cada cambio de contraseña: hash/
+salt ANTERIOR al cambio — nunca la contraseña en texto plano, ni
+siquiera la nueva —, fecha, motivo y quién lo hizo) y `PermisoPantalla`
+(`NombrePantalla` → nivel mínimo requerido, una fila por cada pantalla
+del menú). `Configuracion` suma `MinutosInactividadBloqueo` y la
+contraseña maestra (hasheada, dos columnas: hash y salt).
+
+Contraseñas hasheadas con PBKDF2-HMAC-SHA256 + salt aleatorio por
+usuario (`hashlib`/`secrets` de la librería estándar — no se sumó
+ninguna dependencia nueva al proyecto para esto).
+
+`PermisoPantalla` no se siembra con una lista fija de nombres de
+pantalla (eso duplicaría la lista de `gui_main.construir_secciones` en
+la capa de datos): `app.negocio.seguridad.asegurar_permisos_pantalla`
+se llama en `gui_main.main()`, después de armar la lista de secciones,
+y le crea una fila (al nivel más bajo — visible para cualquiera, para
+no restringir sin querer algo que ya se veía) a toda pantalla que
+todavía no tenga una. Así una pantalla nueva del sistema siempre nace
+visible hasta que alguien decida subirle el nivel desde "Usuarios y
+permisos".
+
+### Login y bloqueo (`app/gui/dialogos_seguridad.py`)
+
+`DialogoLogin` se muestra al arrancar `gui_main.main()`, antes de
+`VentanaPrincipal`. Si `Usuario` está vacío (primer arranque de esta
+base), muestra un alta de Administrador en vez de un login que nadie
+podría pasar. Cancelar el diálogo cierra la aplicación sin llegar a
+mostrar la ventana principal.
+
+`MonitorInactividad` se instala como event filter de la `QApplication`
+entera (`app.installEventFilter(...)`): cualquier click/tecla/scroll en
+cualquier pantalla reinicia un `QTimer` armado con
+`Configuracion.MinutosInactividadBloqueo`; al vencer sin actividad
+dispara `DialogoDesbloqueo` de forma modal — sin botón Cancelar ni X
+(`reject()` no hace nada), la única salida es tipear la contraseña del
+usuario logueado o la contraseña maestra. No cierra sesión ni destruye
+ningún estado de las pantallas: es un overlay modal encima de
+`VentanaPrincipal`, que sigue intacta debajo.
+
+`VentanaPrincipal` suma un parámetro opcional `id_nivel_usuario` (`None`
+por defecto, el que usan todos los tests de pantallas que no tienen
+nada que ver con Seguridad — no filtra nada): cuando viene informado,
+antes de armar la navegación descarta las `Seccion` cuyo
+`nivel_alcanza(conn, id_nivel_usuario, seccion.nombre)` da `False`, sin
+llegar a instanciar esas pantallas.
+
+### Pantalla "Usuarios y permisos" (`app/gui/pantallas/usuarios.py`)
+
+Nueva sección del menú, categoría "Configuración" (junto a
+"Configuración general"/"Importar planilla"). No usa `PantallaCRUD`
+(mismo criterio que Bloques rígidos/Gestor de archivos): el alta
+necesita contraseña + confirmación, la edición no debería poder pisar
+la contraseña sin querer, y la segunda tabla (permisos por pantalla) no
+es un catálogo de registros propios. Solapa única, columna de botones a
+la izquierda ("Nuevo usuario" `botonPrimario`; "Editar usuario"/
+"Resetear contraseña"/"Ver historial de contraseñas" `botonSecundario`),
+dos tablas apiladas a la derecha:
+
+- **Usuarios**: nombre, nivel, activo, último ingreso. Editar cambia
+  nombre/nivel/activo (nunca la contraseña, para eso está "Resetear
+  contraseña" aparte, que no pide la actual). "Ver historial de
+  contraseñas" abre un diálogo de solo lectura con fecha, motivo y quién
+  hizo cada cambio del usuario seleccionado.
+- **Permisos por pantalla**: una fila por cada `NombrePantalla` ya
+  registrada, con un combo de nivel por fila — cambiar el combo escribe
+  directo a la base (`UPDATE PermisoPantalla`), sin un botón "Guardar"
+  aparte, mismo criterio inmediato que "Marcar como principal" en
+  Gestor de archivos.
+
+Guardarraíl: no se puede desactivar ni degradar (bajarle el nivel) al
+único usuario Administrador ACTIVO que quede
+(`app.negocio.seguridad.hay_otro_usuario_activo_de_nivel`) — dejaría el
+sistema sin nadie que pueda administrarlo. El diálogo de edición se
+cierra igual, pero el cambio no se aplica y se avisa por qué.
+
+### Solapa "Seguridad" en Configuración general
+
+Sexta solapa (junto a General/Grilla y ocupación/Valores y liquidación/
+Archivos y backup/Modo QA — pedido explícito de la clienta: "una solapa
+más para poner dentro de configuración"), con los dos ajustes globales
+simples: minutos de inactividad para el bloqueo automático (spin
+numérico, mismo mecanismo que el resto de `_CAMPOS_NUMERICOS`) y la
+contraseña maestra. Esta última NO es un campo de texto común — es un
+"campo especial" (`_CAMPOS_ESPECIALES`, aparte de texto/numérico/
+booleano/fecha): un botón "Establecer/cambiar contraseña maestra" que
+abre su propio diálogo (nueva + confirmar) y escribe directo a la base
+apenas se confirma, sin pasar por el botón "Guardar" general de la
+pantalla — nunca queda una contraseña pendiente de guardar en memoria
+más tiempo del necesario, y nunca se muestra ni se lee el valor actual.
+
+La gestión de Usuarios y de Permisos por pantalla quedó en su propia
+sección del menú ("Usuarios y permisos", ver arriba) en vez de meterse
+en esta solapa — es una tabla de registros propios con sus propios
+diálogos, no un valor simple de `Configuracion` como el resto de las
+solapas de esta pantalla; mismo criterio que "Importar planilla" (
+también "de Configuración" pero fuera de `ConfiguracionGeneral`).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

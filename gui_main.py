@@ -1,4 +1,5 @@
 """Punto de entrada de la interfaz gráfica (Etapa 8+: ensamblado de GUI)."""
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 from app.db.connection import DB_PATH_DEFAULT
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.dialogos_seguridad import DialogoLogin, MonitorInactividad
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
@@ -29,16 +31,24 @@ from app.gui.pantallas.panel_control import PanelControl
 from app.gui.pantallas.placas import PantallaPlacas
 from app.gui.pantallas.profesionales import pantalla_profesionales
 from app.gui.pantallas.reservas import PantallaReservas
+from app.gui.pantallas.usuarios import PantallaUsuarios
 from app.negocio.backup import restaurar_backup
 from app.negocio.instancia_unica import BloqueoInstanciaUnica, InstanciaYaAbierta
+from app.negocio.seguridad import asegurar_permisos_pantalla
 
 
-def construir_secciones() -> list[Seccion]:
+def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
     # Se arma como lista mutable (en vez de un literal) porque la sección
     # "Archivos varios" necesita la lista completa para poder armar el
     # manual de usuario (junta la ayuda de todas las demás) — su fábrica
     # captura `secciones` por referencia y para cuando de verdad se llama
     # (al construir VentanaPrincipal) la lista ya está completa.
+    #
+    # `usuario` (Seguridad): el usuario ya logueado (`gui_main.main` hace
+    # el login antes de armar esta lista) — solo lo necesita "Usuarios y
+    # permisos", para poder registrar quién resetea una contraseña ajena.
+    # `None` (el default que usan los tests que llaman esta función sin
+    # loguearse) deja esa pantalla sin ese dato, ver `PantallaUsuarios`.
     secciones: list[Seccion] = []
 
     secciones.extend([
@@ -201,6 +211,14 @@ def construir_secciones() -> list[Seccion]:
             "Importar planilla", lambda conn: PantallaImportacion(conn), categoria="Configuración",
             ayuda="Importación masiva inicial de datos desde una planilla Excel.",
         ),
+        Seccion(
+            "Usuarios y permisos",
+            lambda conn: PantallaUsuarios(conn, usuario["IdUsuario"] if usuario else None),
+            categoria="Configuración",
+            ayuda="Alta y baja de usuarios del sistema, nivel de acceso de cada uno, reseteo de "
+            "contraseña, historial de cambios de contraseña, y qué nivel mínimo requiere cada "
+            "pantalla del menú.",
+        ),
     ])
     return secciones
 
@@ -247,8 +265,28 @@ def main() -> None:
     conn = init_database(db_path)
     sembrar_valores_por_defecto(conn)
 
-    ventana = VentanaPrincipal(conn, construir_secciones())
+    # Seguridad (ver CLAUDE.md): login obligatorio antes de mostrar la
+    # ventana principal — con la base recién creada, sin ningún usuario
+    # todavía, el diálogo pide de alta el primer Administrador en vez de
+    # un login que nadie podría pasar (ver DialogoLogin.hay_usuarios).
+    dialogo_login = DialogoLogin(conn)
+    if dialogo_login.exec() != DialogoLogin.DialogCode.Accepted:
+        bloqueo.liberar()
+        sys.exit(0)
+    usuario = dialogo_login.usuario
+
+    secciones = construir_secciones(usuario)
+    asegurar_permisos_pantalla(conn, [s.nombre for s in secciones])
+
+    ventana = VentanaPrincipal(conn, secciones, id_nivel_usuario=usuario["IdNivelAcceso"])
     ventana.show()
+
+    # Bloqueo por inactividad: se instala sobre la QApplication entera
+    # (cualquier click/tecla en cualquier pantalla la reinicia), así que
+    # una referencia local alcanza — vive mientras dure `app.exec()`.
+    monitor_inactividad = MonitorInactividad(conn, ventana, usuario)
+    app.installEventFilter(monitor_inactividad)
+
     codigo_salida = app.exec()
     bloqueo.liberar()
     sys.exit(codigo_salida)

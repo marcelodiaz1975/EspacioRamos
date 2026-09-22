@@ -5,6 +5,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import hoja_estilos
 from app.gui.main_window import Seccion, VentanaPrincipal
+from app.negocio.seguridad import asegurar_permisos_pantalla
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -151,3 +152,49 @@ def test_f1_sin_secciones_no_falla(qtbot, conn, monkeypatch):
     ventana._mostrar_ayuda()
 
     assert llamado == []
+
+
+# --------------------------------------------------- filtrado por nivel de acceso
+
+
+def _id_nivel(conn, nombre):
+    return conn.execute("SELECT IdNivelAcceso FROM NivelAcceso WHERE Nombre = ?", (nombre,)).fetchone()["IdNivelAcceso"]
+
+
+def test_sin_nivel_de_usuario_no_filtra_nada(qtbot, conn):
+    """El default (`id_nivel_usuario=None`, el que usan todos los tests
+    que no tienen nada que ver con Seguridad) muestra todas las
+    secciones, sin necesitar login."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    assert ventana._navegacion.count() == 3  # separador + Uno + Dos
+
+
+def test_nivel_operador_no_ve_pantalla_restringida_a_administrador(qtbot, conn):
+    asegurar_permisos_pantalla(conn, ["Uno", "Dos"])
+    conn.execute(
+        "UPDATE PermisoPantalla SET IdNivelAcceso = ? WHERE NombrePantalla = 'Dos'", (_id_nivel(conn, "Administrador"),)
+    )
+    conn.commit()
+
+    ventana = VentanaPrincipal(conn, _secciones(), id_nivel_usuario=_id_nivel(conn, "Operador"))
+    qtbot.addWidget(ventana)
+
+    nombres = [ventana._navegacion.item(i).text() for i in range(ventana._navegacion.count())]
+    assert "Uno" in nombres
+    assert "Dos" not in nombres
+
+
+def test_nivel_administrador_ve_todas_las_pantallas(qtbot, conn):
+    asegurar_permisos_pantalla(conn, ["Uno", "Dos"])
+    conn.execute(
+        "UPDATE PermisoPantalla SET IdNivelAcceso = ? WHERE NombrePantalla = 'Dos'", (_id_nivel(conn, "Administrador"),)
+    )
+    conn.commit()
+
+    ventana = VentanaPrincipal(conn, _secciones(), id_nivel_usuario=_id_nivel(conn, "Administrador"))
+    qtbot.addWidget(ventana)
+
+    nombres = [ventana._navegacion.item(i).text() for i in range(ventana._navegacion.count())]
+    assert "Uno" in nombres
+    assert "Dos" in nombres

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.estilos import hoja_estilos, paleta
 from app.negocio.dias import periodo_actual
+from app.negocio.seguridad import nivel_alcanza
 
 
 @dataclass
@@ -41,10 +42,20 @@ _INDICE_PILA = Qt.ItemDataRole.UserRole
 
 
 class VentanaPrincipal(QMainWindow):
-    def __init__(self, conn: sqlite3.Connection, secciones: list[Seccion]):
+    def __init__(self, conn: sqlite3.Connection, secciones: list[Seccion], *, id_nivel_usuario: int | None = None):
         super().__init__()
         self.conn = conn
-        self._secciones = secciones
+        # Seguridad (ver CLAUDE.md): `id_nivel_usuario` es el nivel del
+        # usuario logueado (gui_main.main arma el login antes de esta
+        # ventana). `None` — el default, el que usan todos los tests que
+        # construyen la ventana directo sin pasar por el login — no
+        # filtra nada, para no tener que loguearse en cada test de
+        # pantalla que no tiene nada que ver con Seguridad.
+        if id_nivel_usuario is None:
+            secciones_visibles = secciones
+        else:
+            secciones_visibles = [s for s in secciones if nivel_alcanza(conn, id_nivel_usuario, s.nombre)]
+        self._secciones = secciones_visibles
         self.setWindowTitle("Sistema Espacio Ramos")
         self.resize(1200, 800)
         self._aplicar_tema()
@@ -56,7 +67,7 @@ class VentanaPrincipal(QMainWindow):
 
         categoria_actual = None
         primer_item_seleccionable = None
-        for seccion in secciones:
+        for seccion in secciones_visibles:
             if seccion.categoria != categoria_actual:
                 separador = QListWidgetItem(f"— {seccion.categoria.upper()} —")
                 separador.setFlags(Qt.ItemFlag.NoItemFlags)
