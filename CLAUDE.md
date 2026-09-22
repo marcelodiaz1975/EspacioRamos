@@ -1352,6 +1352,48 @@ Segunda vuelta (tres pedidos sobre esta misma pantalla):
   botones se sacaron — dejaron de hacer falta al quedar cada grupo ya
   separado visualmente por la distancia entre filas de la grilla.
 
+Tercera vuelta (cuatro pedidos más sobre esta misma pantalla):
+
+- **Botones alineados contra el primer registro, no contra el título.**
+  Se corrigió el criterio de la vuelta anterior: el primer botón de
+  cada grupo tiene que arrancar a la altura de la primera FILA de datos
+  de su tabla (después del encabezado), no a la altura del título de la
+  sección. `_alto_hasta_primera_fila(titulo, tabla)` calcula ese salto
+  (alto del título + alto del encabezado de la tabla + su borde) y
+  `_grupo_botones` lo antepone como un widget espaciador de alto fijo
+  antes del primer botón del grupo — mismo mecanismo de `QGridLayout` +
+  `AlignTop` que la vuelta anterior, solo que ahora el "colgado desde
+  arriba" empieza más abajo. Para poder calcular el offset hizo falta
+  invertir el orden de construcción: antes se armaban los diez botones
+  y recién después las tres tablas; ahora cada sección arma primero su
+  título+tabla (columna 1) y con esos dos widgets ya construidos arma
+  después su grupo de botones (columna 0), sección por sección.
+- **Títulos en negrita, mismo tamaño.** Vuelven a la negrita que tenían
+  con `subtituloSeccion` en la revisión original, pero sin volver a ese
+  tamaño (15px) — se quedan en el tamaño normal de `subtituloCampo` (la
+  clienta pidió "ese tamaño pero en negrita"). Como ningún objectName
+  existente combina tamaño normal con negrita, `_titulo_seccion` le
+  suma un `setStyleSheet("font-weight: bold;")` puntual encima del
+  `subtituloCampo` de la vuelta anterior, en vez de sumar un objectName
+  nuevo a `estilos.py` para un caso que hoy solo usa esta pantalla.
+- **Las tres tablas ya scrolleaban internamente** (columna que
+  corresponde a esta revisión, no algo que haya hecho falta cambiar):
+  se comprobó con un diagnóstico aparte que Tipos/Accesos (alto fijo,
+  ver vuelta 1) y Movimientos (alto por `stretch`) ya mostraban su
+  propia scrollbar vertical apenas su contenido no entraba en el alto
+  asignado, sin que el `QScrollArea` externo de la solapa tuviera que
+  scrollear la página entera. Se sumaron tres tests (uno por tabla) que
+  fuerzan el desborde y confirman `verticalScrollBar().maximum() > 0`,
+  para dejar esto cubierto de acá en adelante.
+- **Más ancho en las columnas de Tipos y Accesos.** Tipos tenía anchos
+  manuales fijos (no usa `resizeColumnsToContents`, porque "Nombre del
+  tipo de llave" necesita espacio propio) — se subieron a mano
+  (200→240, 70→100, 120→150, 90→120, 95→125, 65→95). Accesos pasa de
+  `resizeColumnsToContents()` puro a sumarle `_PADDING_COLUMNA` (30px,
+  mismo criterio y mismo valor que `bloques_rigidos._ajustar_columnas`/
+  `novedades._ajustar_columnas`). Movimientos no se tocó — el pedido
+  fue puntualmente sobre "las dos primeras tablas".
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

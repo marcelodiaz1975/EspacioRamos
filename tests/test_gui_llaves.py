@@ -12,6 +12,7 @@ from app.gui.pantallas.llaves import (
     _DialogoPerdida,
     _DialogoPerdidaStock,
     _DialogoTipo,
+    _FILAS_VISIBLES_ACCESOS,
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.llaves import crear_llave, ingresar_copias
@@ -73,6 +74,34 @@ def test_columna_profesional_de_movimientos_tiene_ancho_minimo(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     assert pantalla.tabla_movimientos.columnWidth(2) >= 180
+
+
+def test_columnas_de_tipos_son_mas_anchas_que_antes(qtbot, conn):
+    """Pedido explícito de la clienta: más ancho para las columnas de
+    las dos primeras tablas (Tipos y Accesos)."""
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    anchos_anteriores = [200, 70, 120, 90, 95, 65]
+    for columna, ancho_anterior in enumerate(anchos_anteriores):
+        assert pantalla.tabla_tipos.columnWidth(columna) > ancho_anterior
+
+
+def test_columnas_de_accesos_tienen_padding_sobre_el_ancho_justo(qtbot, conn, monkeypatch):
+    crear_llave(conn)
+    _crear_edificio_con_unidad(conn)
+    conn.commit()
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+    monkeypatch.setattr(_DialogoAcceso, "exec", lambda self: QDialog.DialogCode.Accepted)
+    pantalla._agregar_acceso()
+
+    tabla = pantalla.tabla_accesos
+    anchos_con_padding = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
+    tabla.resizeColumnsToContents()
+    anchos_justos = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
+
+    assert all(con > justo for con, justo in zip(anchos_con_padding, anchos_justos))
 
 
 def test_columnas_de_deposito_cobrado_y_reintegrado_tienen_el_mismo_ancho(qtbot, conn):
@@ -485,20 +514,22 @@ def test_tabla_tipos_y_accesos_tienen_alto_fijo_movimientos_no(qtbot, conn):
 # ---------------------------------------- ronda 2: títulos normales, alineación, sin divisorias
 
 
-def test_titulos_de_seccion_no_usan_fuente_distinta(qtbot, conn):
+def test_titulos_de_seccion_mismo_tamano_normal_pero_en_negrita(qtbot, conn):
     """Pedido explícito de la clienta: "Tipos de llaves"/"Accesos
     habilitados con la llave"/"Movimientos de llaves" no son solapas
-    reales y van con el mismo peso y tamaño que el texto normal
-    (subtituloCampo), no en negrita (subtituloSeccion)."""
+    reales, van con el mismo tamaño que el texto normal (subtituloCampo,
+    no subtituloSeccion) pero en negrita — a diferencia del resto de los
+    `subtituloCampo` del sistema, que van sin negrita."""
     pantalla = PantallaLlaves(conn)
     qtbot.addWidget(pantalla)
     textos = {"Tipos de llaves", "Accesos habilitados con la llave", "Movimientos de llaves"}
-    encontrados = {
-        etiqueta.text() for etiqueta in pantalla.findChildren(QLabel, "subtituloCampo")
+    etiquetas = [
+        etiqueta for etiqueta in pantalla.findChildren(QLabel, "subtituloCampo")
         if etiqueta.text() in textos
-    }
-    assert encontrados == textos
+    ]
+    assert {e.text() for e in etiquetas} == textos
     assert pantalla.findChildren(QLabel, "subtituloSeccion") == []
+    assert all(e.font().bold() for e in etiquetas)
 
 
 def test_no_quedan_lineas_divisorias_entre_grupos_de_botones(qtbot, conn):
@@ -508,29 +539,81 @@ def test_no_quedan_lineas_divisorias_entre_grupos_de_botones(qtbot, conn):
     assert lineas == []
 
 
-def test_cada_grupo_de_botones_arranca_a_la_altura_de_su_tabla(qtbot, conn):
-    """"Alinealos al comienzo de la barra de títulos... de ahí para
-    abajo": el grupo de botones de cada sección tiene que empezar (en Y)
-    a la misma altura que el título de su tabla correspondiente."""
+def test_cada_grupo_de_botones_arranca_a_la_altura_del_primer_registro(qtbot, conn):
+    """"Los botones que queden alineados al primer registro de cada
+    tabla": el primer botón de cada grupo tiene que empezar (en Y) a la
+    misma altura que el comienzo de la primera fila de datos de su
+    tabla correspondiente (después del encabezado), no a la altura del
+    título."""
     pantalla = PantallaLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1300, 900)
     pantalla.show()
     qtbot.waitExposed(pantalla)
 
-    titulo_tipos = next(
-        e for e in pantalla.findChildren(QLabel, "subtituloCampo") if e.text() == "Tipos de llaves"
-    )
-    titulo_accesos = next(
-        e for e in pantalla.findChildren(QLabel, "subtituloCampo") if e.text() == "Accesos habilitados con la llave"
-    )
-    titulo_movimientos = next(
-        e for e in pantalla.findChildren(QLabel, "subtituloCampo") if e.text() == "Movimientos de llaves"
-    )
-
     def _y_global(widget):
         return widget.mapToGlobal(widget.rect().topLeft()).y()
 
-    assert abs(_y_global(pantalla.boton_nuevo_tipo) - _y_global(titulo_tipos)) <= 2
-    assert abs(_y_global(pantalla.boton_agregar_acceso) - _y_global(titulo_accesos)) <= 2
-    assert abs(_y_global(pantalla.boton_ingresar) - _y_global(titulo_movimientos)) <= 2
+    def _y_primera_fila(tabla):
+        header = tabla.horizontalHeader()
+        return header.mapToGlobal(header.rect().bottomLeft()).y()
+
+    assert abs(_y_global(pantalla.boton_nuevo_tipo) - _y_primera_fila(pantalla.tabla_tipos)) <= 2
+    assert abs(_y_global(pantalla.boton_agregar_acceso) - _y_primera_fila(pantalla.tabla_accesos)) <= 2
+    assert abs(_y_global(pantalla.boton_ingresar) - _y_primera_fila(pantalla.tabla_movimientos)) <= 2
+
+
+def test_tabla_tipos_escrolea_internamente_con_mas_filas_de_las_que_entran(qtbot, conn):
+    for _ in range(10):
+        crear_llave(conn, tipo="Unidad")
+    conn.commit()
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1300, 900)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    assert pantalla.tabla_tipos.rowCount() == 10
+    assert pantalla.tabla_tipos.verticalScrollBar().maximum() > 0
+
+
+def test_tabla_accesos_escrolea_internamente_con_mas_filas_de_las_que_entran(qtbot, conn):
+    crear_llave(conn)
+    id_edificio, _ = _crear_edificio_con_unidad(conn)
+    for i in range(6):
+        conn.execute(
+            "INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, ?)", (id_edificio, f"Depto {i}")
+        )
+    conn.commit()
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1300, 900)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+
+    for id_unidad in [row["IdUnidad"] for row in conn.execute("SELECT IdUnidad FROM Unidad")]:
+        obtener_repositorio(conn, "LlaveAcceso").crear(
+            IdLlave=obtener_repositorio(conn, "Llave").listar()[0]["IdLlave"],
+            IdEdificio=id_edificio, IdUnidad=id_unidad,
+        )
+    pantalla._actualizar_accesos()
+    qtbot.wait(10)
+
+    assert pantalla.tabla_accesos.rowCount() > _FILAS_VISIBLES_ACCESOS
+    assert pantalla.tabla_accesos.verticalScrollBar().maximum() > 0
+
+
+def test_tabla_movimientos_escrolea_internamente_con_mas_filas_de_las_que_entran(qtbot, conn):
+    id_llave = crear_llave(conn)
+    for _ in range(20):
+        ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+    conn.commit()
+    pantalla = PantallaLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1300, 700)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    assert pantalla.tabla_movimientos.rowCount() == 20
+    assert pantalla.tabla_movimientos.verticalScrollBar().maximum() > 0
