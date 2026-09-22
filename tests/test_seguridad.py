@@ -9,8 +9,10 @@ from app.negocio.seguridad import (
     asegurar_permisos_pantalla,
     autenticar,
     cambiar_contrasena,
+    cambiar_contrasena_maestra,
     crear_usuario,
     establecer_contrasena_maestra,
+    hay_contrasena_maestra,
     hay_usuarios,
     nivel_alcanza,
     verificar_contrasena_maestra,
@@ -147,6 +149,31 @@ def test_contrasena_maestra_configurada_se_puede_verificar(conn):
     assert verificar_contrasena_maestra(conn, "incorrecta") is False
 
 
+def test_hay_contrasena_maestra_refleja_si_ya_se_establecio(conn):
+    assert hay_contrasena_maestra(conn) is False
+    establecer_contrasena_maestra(conn, "maestra123")
+    assert hay_contrasena_maestra(conn) is True
+
+
+def test_cambiar_contrasena_maestra_primera_vez_no_pide_la_anterior(conn):
+    cambiar_contrasena_maestra(conn, "", "maestra123")
+    assert verificar_contrasena_maestra(conn, "maestra123") is True
+
+
+def test_cambiar_contrasena_maestra_exige_la_anterior_correcta(conn):
+    establecer_contrasena_maestra(conn, "maestra123")
+    with pytest.raises(ValueError):
+        cambiar_contrasena_maestra(conn, "incorrecta", "nueva456")
+    assert verificar_contrasena_maestra(conn, "maestra123") is True
+
+
+def test_cambiar_contrasena_maestra_con_la_anterior_correcta(conn):
+    establecer_contrasena_maestra(conn, "maestra123")
+    cambiar_contrasena_maestra(conn, "maestra123", "nueva456")
+    assert verificar_contrasena_maestra(conn, "maestra123") is False
+    assert verificar_contrasena_maestra(conn, "nueva456") is True
+
+
 # ------------------------------------------------------ permisos por pantalla
 
 
@@ -158,6 +185,18 @@ def test_asegurar_permisos_pantalla_crea_filas_al_nivel_mas_bajo(conn):
     }
     assert filas["Reservas"] == _id_nivel(conn, "Operador")
     assert filas["Pagos"] == _id_nivel(conn, "Operador")
+
+
+def test_asegurar_permisos_pantalla_nivel_alto_nace_en_administrador(conn):
+    asegurar_permisos_pantalla(
+        conn, ["Reservas", "Configuración general"], nombres_nivel_alto=frozenset({"Configuración general"}),
+    )
+    filas = {
+        f["NombrePantalla"]: f["IdNivelAcceso"]
+        for f in conn.execute("SELECT NombrePantalla, IdNivelAcceso FROM PermisoPantalla").fetchall()
+    }
+    assert filas["Reservas"] == _id_nivel(conn, "Operador")
+    assert filas["Configuración general"] == _id_nivel(conn, "Administrador")
 
 
 def test_asegurar_permisos_pantalla_no_pisa_una_ya_asignada(conn):

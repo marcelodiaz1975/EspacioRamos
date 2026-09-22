@@ -41,6 +41,8 @@ def test_sin_usuarios_muestra_alta_de_administrador(qtbot, conn):
     qtbot.addWidget(dialogo)
     assert dialogo._alta_inicial is True
     assert hasattr(dialogo, "campo_confirmar")
+    assert hasattr(dialogo, "campo_maestra")
+    assert hasattr(dialogo, "campo_maestra_confirmar")
 
 
 def test_con_usuarios_muestra_login_normal(qtbot, conn):
@@ -57,6 +59,8 @@ def test_alta_inicial_crea_administrador_y_autentica(qtbot, conn):
     dialogo.campo_usuario.setText("admin")
     dialogo.campo_contrasena.setText("clave123")
     dialogo.campo_confirmar.setText("clave123")
+    dialogo.campo_maestra.setText("maestra999")
+    dialogo.campo_maestra_confirmar.setText("maestra999")
 
     dialogo._confirmar()
 
@@ -64,6 +68,8 @@ def test_alta_inicial_crea_administrador_y_autentica(qtbot, conn):
     assert dialogo.usuario["NombreUsuario"] == "admin"
     assert dialogo.usuario["IdNivelAcceso"] == _id_nivel(conn, "Administrador")
     assert hay_usuarios(conn) is True
+    from app.negocio.seguridad import verificar_contrasena_maestra
+    assert verificar_contrasena_maestra(conn, "maestra999") is True
 
 
 def test_alta_inicial_rechaza_contrasenas_que_no_coinciden(qtbot, conn):
@@ -72,6 +78,38 @@ def test_alta_inicial_rechaza_contrasenas_que_no_coinciden(qtbot, conn):
     dialogo.campo_usuario.setText("admin")
     dialogo.campo_contrasena.setText("clave123")
     dialogo.campo_confirmar.setText("otraclave")
+    dialogo.campo_maestra.setText("maestra999")
+    dialogo.campo_maestra_confirmar.setText("maestra999")
+
+    dialogo._confirmar()
+
+    assert dialogo.usuario is None
+    assert hay_usuarios(conn) is False
+
+
+def test_alta_inicial_rechaza_contrasena_maestra_vacia(qtbot, conn):
+    dialogo = DialogoLogin(conn)
+    qtbot.addWidget(dialogo)
+    dialogo.campo_usuario.setText("admin")
+    dialogo.campo_contrasena.setText("clave123")
+    dialogo.campo_confirmar.setText("clave123")
+    dialogo.campo_maestra.setText("")
+    dialogo.campo_maestra_confirmar.setText("")
+
+    dialogo._confirmar()
+
+    assert dialogo.usuario is None
+    assert hay_usuarios(conn) is False
+
+
+def test_alta_inicial_rechaza_contrasenas_maestras_que_no_coinciden(qtbot, conn):
+    dialogo = DialogoLogin(conn)
+    qtbot.addWidget(dialogo)
+    dialogo.campo_usuario.setText("admin")
+    dialogo.campo_contrasena.setText("clave123")
+    dialogo.campo_confirmar.setText("clave123")
+    dialogo.campo_maestra.setText("maestra999")
+    dialogo.campo_maestra_confirmar.setText("otramaestra")
 
     dialogo._confirmar()
 

@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.formato import formatear_moneda
-from app.negocio.seguridad import establecer_contrasena_maestra
+from app.negocio.seguridad import cambiar_contrasena_maestra, hay_contrasena_maestra
 from app.repositorio.registro import obtener_repositorio
 
 FORMATO_JSON = "JSON válido"
@@ -291,16 +291,25 @@ class _CampoRuta(QWidget):
 
 
 class _DialogoContrasenaMaestra(QDialog):
-    """Pide la contraseña maestra nueva dos veces (confirmación) — nunca
-    se muestra ni se guarda en ningún campo de texto de la pantalla
-    principal, solo vive en este diálogo hasta que se confirma."""
+    """Pide la contraseña maestra ANTERIOR (salvo la primera vez que se
+    establece, que todavía no hay ninguna que pedir) más la nueva dos
+    veces (confirmación), y escribe directo a la base
+    (`cambiar_contrasena_maestra`) apenas se confirma — pedido explícito
+    de la clienta: evita que cualquiera que abra esta pantalla pueda
+    pisarla sin demostrar que ya la conocía."""
 
-    def __init__(self, parent=None):
+    def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.conn = conn
+        self._pide_actual = hay_contrasena_maestra(conn)
         self.setWindowTitle("Contraseña maestra")
         layout = QVBoxLayout(self)
 
         formulario = QFormLayout()
+        if self._pide_actual:
+            self.campo_actual = QLineEdit()
+            self.campo_actual.setEchoMode(QLineEdit.EchoMode.Password)
+            formulario.addRow("Contraseña maestra actual", self.campo_actual)
         self.campo_nueva = QLineEdit()
         self.campo_nueva.setEchoMode(QLineEdit.EchoMode.Password)
         self.campo_confirmar = QLineEdit()
@@ -321,18 +330,20 @@ class _DialogoContrasenaMaestra(QDialog):
         if self.campo_nueva.text() != self.campo_confirmar.text():
             QMessageBox.warning(self, "Contraseña maestra", "Las dos contraseñas no coinciden.")
             return
+        contrasena_actual = self.campo_actual.text() if self._pide_actual else ""
+        try:
+            cambiar_contrasena_maestra(self.conn, contrasena_actual, self.campo_nueva.text())
+        except ValueError as error:
+            QMessageBox.warning(self, "Contraseña maestra", str(error))
+            return
         self.accept()
-
-    def contrasena(self) -> str:
-        return self.campo_nueva.text()
 
 
 class _CampoContrasenaMaestra(QWidget):
-    """Botón que abre `_DialogoContrasenaMaestra` — a diferencia del
-    resto de los campos de esta pantalla, escribe directo a la base
-    (`establecer_contrasena_maestra`) apenas se confirma el diálogo, sin
-    pasar por "Guardar": nunca queda una contraseña pendiente de guardar
-    en memoria más tiempo del necesario."""
+    """Botón que abre `_DialogoContrasenaMaestra` — el diálogo mismo
+    escribe a la base apenas se confirma, sin pasar por "Guardar": nunca
+    queda una contraseña pendiente de guardar en memoria más tiempo del
+    necesario."""
 
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -346,9 +357,8 @@ class _CampoContrasenaMaestra(QWidget):
         layout.addStretch(1)
 
     def _abrir_dialogo(self) -> None:
-        dialogo = _DialogoContrasenaMaestra(self)
+        dialogo = _DialogoContrasenaMaestra(self.conn, self)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
-            establecer_contrasena_maestra(self.conn, dialogo.contrasena())
             QMessageBox.information(self, "Contraseña maestra", "Contraseña maestra actualizada.")
 
 

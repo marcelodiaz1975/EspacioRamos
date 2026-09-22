@@ -276,7 +276,14 @@ def main() -> None:
     usuario = dialogo_login.usuario
 
     secciones = construir_secciones(usuario)
-    asegurar_permisos_pantalla(conn, [s.nombre for s in secciones])
+    # "Configuración general" y "Usuarios y permisos" nacen directo en
+    # Administrador (pedido explícito de la clienta) — no visibles para
+    # cualquiera hasta que alguien las suba a mano, a diferencia del
+    # resto de las pantallas nuevas del sistema.
+    asegurar_permisos_pantalla(
+        conn, [s.nombre for s in secciones],
+        nombres_nivel_alto=frozenset({"Configuración general", "Usuarios y permisos"}),
+    )
 
     ventana = VentanaPrincipal(conn, secciones, id_nivel_usuario=usuario["IdNivelAcceso"])
     ventana.show()

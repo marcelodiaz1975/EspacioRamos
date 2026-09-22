@@ -1575,10 +1575,11 @@ numérico, mismo mecanismo que el resto de `_CAMPOS_NUMERICOS`) y la
 contraseña maestra. Esta última NO es un campo de texto común — es un
 "campo especial" (`_CAMPOS_ESPECIALES`, aparte de texto/numérico/
 booleano/fecha): un botón "Establecer/cambiar contraseña maestra" que
-abre su propio diálogo (nueva + confirmar) y escribe directo a la base
-apenas se confirma, sin pasar por el botón "Guardar" general de la
-pantalla — nunca queda una contraseña pendiente de guardar en memoria
-más tiempo del necesario, y nunca se muestra ni se lee el valor actual.
+abre su propio diálogo y escribe directo a la base apenas se confirma
+(`cambiar_contrasena_maestra`, ver segunda vuelta más abajo), sin pasar
+por el botón "Guardar" general de la pantalla — nunca queda una
+contraseña pendiente de guardar en memoria más tiempo del necesario, y
+nunca se muestra ni se lee el valor actual.
 
 La gestión de Usuarios y de Permisos por pantalla quedó en su propia
 sección del menú ("Usuarios y permisos", ver arriba) en vez de meterse
@@ -1586,6 +1587,54 @@ en esta solapa — es una tabla de registros propios con sus propios
 diálogos, no un valor simple de `Configuracion` como el resto de las
 solapas de esta pantalla; mismo criterio que "Importar planilla" (
 también "de Configuración" pero fuera de `ConfiguracionGeneral`).
+
+### Segunda vuelta: tres huecos que señaló la clienta al repasar el diseño
+
+Antes de dar por cerrada esta primera implementación, la clienta hizo
+tres preguntas puntuales sobre el comportamiento tal cual había quedado
+armado, que expusieron huecos reales (no cambios de gusto, sino casos
+sin cubrir):
+
+- **"¿Para cambiar la contraseña maestra pide algo?"** No pedía nada:
+  cualquiera que tuviera abierta "Configuración general" podía pisarla
+  sin volver a autenticarse. Se resolvió con "la contraseña maestra
+  anterior" (la opción que eligió, no "tu propia contraseña de
+  usuario"): `app.negocio.seguridad.cambiar_contrasena_maestra(conn,
+  contrasena_actual, contrasena_nueva)` exige la anterior correcta
+  ANTES de reemplazarla — salvo la primera vez que se establece
+  (`hay_contrasena_maestra` todavía `False`), que se puede fijar
+  libremente porque no hay ninguna que pedir. `_DialogoContrasenaMaestra`
+  ahora recibe `conn` y muestra el campo "Contraseña maestra actual"
+  solo cuando corresponde (`self._pide_actual`), y es el diálogo mismo
+  el que escribe a la base al confirmar (antes lo hacía
+  `_CampoContrasenaMaestra` después de leer `.contrasena()` del
+  diálogo).
+- **"¿Con qué contraseña maestra viene el sistema al instalarse?"** Con
+  ninguna — el campo nace `NULL` y así se queda hasta que alguien la
+  establece a mano. Sumado a que las pantallas nacían visibles para
+  cualquier nivel (ver el punto siguiente), esto significaba que si el
+  único Administrador se olvidaba su contraseña ANTES de que a alguien
+  se le ocurriera configurar la maestra, no había ninguna forma de
+  recuperar el sistema. Se resolvió pidiéndola en la misma alta del
+  primer Administrador: `DialogoLogin`, en su modo "alta inicial" (sin
+  usuarios cargados todavía), ahora suma dos campos más ("Contraseña
+  maestra (recuperación)"/"Confirmar contraseña maestra") y llama
+  `establecer_contrasena_maestra` junto con `crear_usuario` — la red de
+  seguridad queda puesta desde el minuto uno, no como paso opcional
+  posterior.
+- **"¿Cuántos niveles hay?"** Dos, fijos (Administrador/Operador) — la
+  respuesta en sí no cambió nada, pero al mismo tiempo se marcó que,
+  como toda pantalla nace en el nivel más bajo (Operador) hasta que se
+  la sube a mano, un usuario Operador recién creado podía entrar
+  directo a "Configuración general" (y desde ahí a la contraseña
+  maestra) o a "Usuarios y permisos" sin que nadie se lo hubiera
+  impedido. Se resolvió haciendo que esas dos pantallas puntuales nazcan
+  directo en Administrador: `asegurar_permisos_pantalla` suma un
+  parámetro `nombres_nivel_alto` (default vacío, no cambia el
+  comportamiento de ninguna otra pantalla), y `gui_main.main()` lo llama
+  con `{"Configuración general", "Usuarios y permisos"}` — el resto de
+  las pantallas del sistema sigue naciendo visible para cualquiera,
+  como antes.
 
 ## Metodología de trabajo
 

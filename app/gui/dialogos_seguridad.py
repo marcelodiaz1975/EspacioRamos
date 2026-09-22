@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from app.negocio.seguridad import (
     autenticar,
     crear_usuario,
+    establecer_contrasena_maestra,
     hay_usuarios,
     verificar_contrasena_maestra,
 )
@@ -33,7 +34,14 @@ class DialogoLogin(QDialog):
     (primer arranque de esta base), muestra un alta de Administrador en
     vez de un login que nadie podría pasar — `crear_usuario` con el
     nivel de mayor Orden disponible. Tras un login (o alta) exitoso, el
-    usuario autenticado queda en `self.usuario`."""
+    usuario autenticado queda en `self.usuario`.
+
+    El alta inicial pide también una contraseña maestra (pedido
+    explícito de la clienta): sin esto, si alguna vez se pierde el
+    acceso del único Administrador antes de que a alguien se le ocurra
+    configurar una maestra desde la solapa Seguridad, no habría ninguna
+    forma de recuperar el sistema — así queda esa red de seguridad
+    puesta desde el primer momento, no como un paso opcional posterior."""
 
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -64,6 +72,12 @@ class DialogoLogin(QDialog):
             self.campo_confirmar = QLineEdit()
             self.campo_confirmar.setEchoMode(QLineEdit.EchoMode.Password)
             formulario.addRow("Confirmar contraseña", self.campo_confirmar)
+            self.campo_maestra = QLineEdit()
+            self.campo_maestra.setEchoMode(QLineEdit.EchoMode.Password)
+            formulario.addRow("Contraseña maestra (recuperación)", self.campo_maestra)
+            self.campo_maestra_confirmar = QLineEdit()
+            self.campo_maestra_confirmar.setEchoMode(QLineEdit.EchoMode.Password)
+            formulario.addRow("Confirmar contraseña maestra", self.campo_maestra_confirmar)
         layout.addLayout(formulario)
 
         botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -98,12 +112,19 @@ class DialogoLogin(QDialog):
         if contrasena != self.campo_confirmar.text():
             QMessageBox.warning(self, "Crear administrador", "Las dos contraseñas no coinciden.")
             return
+        if not self.campo_maestra.text():
+            QMessageBox.warning(self, "Crear administrador", "La contraseña maestra no puede estar vacía.")
+            return
+        if self.campo_maestra.text() != self.campo_maestra_confirmar.text():
+            QMessageBox.warning(self, "Crear administrador", "Las dos contraseñas maestras no coinciden.")
+            return
         nivel = self.conn.execute("SELECT IdNivelAcceso FROM NivelAcceso ORDER BY Orden DESC LIMIT 1").fetchone()
         try:
             crear_usuario(self.conn, nombre, contrasena, nivel["IdNivelAcceso"])
         except ValueError as error:
             QMessageBox.warning(self, "Crear administrador", str(error))
             return
+        establecer_contrasena_maestra(self.conn, self.campo_maestra.text())
         self.usuario = autenticar(self.conn, nombre, contrasena)
         self.accept()
 

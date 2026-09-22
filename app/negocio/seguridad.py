@@ -141,6 +141,11 @@ def establecer_contrasena_maestra(conn: sqlite3.Connection, contrasena: str) -> 
     conn.commit()
 
 
+def hay_contrasena_maestra(conn: sqlite3.Connection) -> bool:
+    cfg = conn.execute("SELECT ContrasenaMaestraHash FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    return bool(cfg and cfg["ContrasenaMaestraHash"])
+
+
 def verificar_contrasena_maestra(conn: sqlite3.Connection, contrasena: str) -> bool:
     """`False` si todavía no se configuró ninguna contraseña maestra — el
     campo NULL nunca autoriza, cualquiera sea el valor tipeado."""
@@ -152,21 +157,48 @@ def verificar_contrasena_maestra(conn: sqlite3.Connection, contrasena: str) -> b
     return _hashear(contrasena, cfg["ContrasenaMaestraSalt"]) == cfg["ContrasenaMaestraHash"]
 
 
-def asegurar_permisos_pantalla(conn: sqlite3.Connection, nombres_pantalla: list[str]) -> None:
-    """Le crea una fila en `PermisoPantalla` (al nivel más bajo activo) a
-    toda pantalla de `nombres_pantalla` que todavía no tenga una — se
-    llama al arrancar la GUI con los nombres reales de
-    `gui_main.construir_secciones()`, así que una pantalla nueva del
-    sistema siempre nace visible para cualquier nivel hasta que alguien
-    decida restringirla desde la pantalla de Seguridad."""
-    nivel_defecto = conn.execute(
+def cambiar_contrasena_maestra(conn: sqlite3.Connection, contrasena_actual: str, contrasena_nueva: str) -> None:
+    """Para cambiar la contraseña maestra hace falta conocer la anterior
+    — salvo la primera vez que se establece (`hay_contrasena_maestra` es
+    `False` todavía), que se puede fijar libremente. Pedido explícito de
+    la clienta: evita que cualquiera que abra Configuración general
+    pueda pisarla sin demostrar que ya la conocía."""
+    if hay_contrasena_maestra(conn) and not verificar_contrasena_maestra(conn, contrasena_actual):
+        raise ValueError("La contraseña maestra actual es incorrecta.")
+    establecer_contrasena_maestra(conn, contrasena_nueva)
+
+
+def asegurar_permisos_pantalla(
+    conn: sqlite3.Connection, nombres_pantalla: list[str], nombres_nivel_alto: frozenset[str] = frozenset(),
+) -> None:
+    """Le crea una fila en `PermisoPantalla` a toda pantalla de
+    `nombres_pantalla` que todavía no tenga una — se llama al arrancar la
+    GUI con los nombres reales de `gui_main.construir_secciones()`. Nace
+    al nivel más bajo activo (visible para cualquiera) salvo que el
+    nombre esté en `nombres_nivel_alto`, en cuyo caso nace directo en el
+    nivel más alto (Administrador) — pedido explícito de la clienta para
+    "Configuración general"/"Usuarios y permisos": pantallas sensibles
+    que no deberían quedar abiertas a cualquiera hasta que alguien se
+    acuerde de subirlas a mano. El resto de las pantallas nuevas del
+    sistema sigue naciendo visible para cualquier nivel."""
+    nivel_bajo = conn.execute(
         "SELECT IdNivelAcceso FROM NivelAcceso WHERE Activo = 1 ORDER BY Orden ASC LIMIT 1"
     ).fetchone()
-    if nivel_defecto is None:
+    if nivel_bajo is None:
         return
+    nivel_alto = conn.execute(
+        "SELECT IdNivelAcceso FROM NivelAcceso WHERE Activo = 1 ORDER BY Orden DESC LIMIT 1"
+    ).fetchone()
+    filas = [
+        (
+            nombre,
+            nivel_alto["IdNivelAcceso"] if nombre in nombres_nivel_alto else nivel_bajo["IdNivelAcceso"],
+        )
+        for nombre in set(nombres_pantalla)
+    ]
     conn.executemany(
         "INSERT OR IGNORE INTO PermisoPantalla (NombrePantalla, IdNivelAcceso) VALUES (?, ?)",
-        [(nombre, nivel_defecto["IdNivelAcceso"]) for nombre in set(nombres_pantalla)],
+        filas,
     )
     conn.commit()
 

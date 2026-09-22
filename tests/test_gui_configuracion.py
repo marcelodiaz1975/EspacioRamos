@@ -340,12 +340,18 @@ def test_contrasena_maestra_no_tiene_campo_de_texto_en_entradas(qtbot, conn):
     assert "ContrasenaMaestra" not in pantalla._entradas
 
 
-def test_contrasena_maestra_boton_abre_dialogo_y_persiste(qtbot, conn, monkeypatch):
+def test_contrasena_maestra_primera_vez_no_pide_la_anterior_y_persiste(qtbot, conn, monkeypatch):
     from app.gui.pantallas.configuracion import _DialogoContrasenaMaestra
     from app.negocio.seguridad import verificar_contrasena_maestra
 
-    monkeypatch.setattr(_DialogoContrasenaMaestra, "exec", lambda self: QDialog.DialogCode.Accepted)
-    monkeypatch.setattr(_DialogoContrasenaMaestra, "contrasena", lambda self: "maestra123")
+    def _fake_exec(self):
+        assert not hasattr(self, "campo_actual")  # todavía no hay ninguna, no debería pedirla
+        self.campo_nueva.setText("maestra123")
+        self.campo_confirmar.setText("maestra123")
+        self._validar_y_aceptar()
+        return self.result()
+
+    monkeypatch.setattr(_DialogoContrasenaMaestra, "exec", _fake_exec)
 
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
@@ -354,6 +360,42 @@ def test_contrasena_maestra_boton_abre_dialogo_y_persiste(qtbot, conn, monkeypat
     boton.click()
 
     assert verificar_contrasena_maestra(conn, "maestra123") is True
+
+
+def test_contrasena_maestra_ya_establecida_exige_la_anterior(qtbot, conn, monkeypatch):
+    from app.gui.pantallas.configuracion import _DialogoContrasenaMaestra
+    from app.negocio.seguridad import establecer_contrasena_maestra, verificar_contrasena_maestra
+
+    establecer_contrasena_maestra(conn, "maestra123")
+
+    def _fake_exec_incorrecta(self):
+        assert hasattr(self, "campo_actual")
+        self.campo_actual.setText("incorrecta")
+        self.campo_nueva.setText("nueva456")
+        self.campo_confirmar.setText("nueva456")
+        self._validar_y_aceptar()
+        return self.result()
+
+    monkeypatch.setattr(_DialogoContrasenaMaestra, "exec", _fake_exec_incorrecta)
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    panel_seguridad = pantalla._paneles[[titulo for titulo, _ in _GRUPOS].index("Seguridad")]
+    boton = next(w for w in panel_seguridad.orden if w.text() == "Establecer/cambiar contraseña maestra")
+    boton.click()
+
+    assert verificar_contrasena_maestra(conn, "maestra123") is True  # no cambió
+
+    def _fake_exec_correcta(self):
+        self.campo_actual.setText("maestra123")
+        self.campo_nueva.setText("nueva456")
+        self.campo_confirmar.setText("nueva456")
+        self._validar_y_aceptar()
+        return self.result()
+
+    monkeypatch.setattr(_DialogoContrasenaMaestra, "exec", _fake_exec_correcta)
+    boton.click()
+
+    assert verificar_contrasena_maestra(conn, "nueva456") is True
 
 
 def test_contrasena_maestra_cancelar_no_cambia_nada(qtbot, conn, monkeypatch):
@@ -371,10 +413,11 @@ def test_contrasena_maestra_cancelar_no_cambia_nada(qtbot, conn, monkeypatch):
     assert verificar_contrasena_maestra(conn, "cualquiera") is False
 
 
-def test_dialogo_contrasena_maestra_rechaza_vacia_y_no_coincidente(qtbot):
+def test_dialogo_contrasena_maestra_rechaza_vacia_y_no_coincidente(qtbot, conn):
     from app.gui.pantallas.configuracion import _DialogoContrasenaMaestra
+    from app.negocio.seguridad import verificar_contrasena_maestra
 
-    dialogo = _DialogoContrasenaMaestra()
+    dialogo = _DialogoContrasenaMaestra(conn)
     qtbot.addWidget(dialogo)
     dialogo.campo_nueva.setText("")
     dialogo.campo_confirmar.setText("")
@@ -390,4 +433,4 @@ def test_dialogo_contrasena_maestra_rechaza_vacia_y_no_coincidente(qtbot):
     dialogo.campo_confirmar.setText("clave1")
     dialogo._validar_y_aceptar()
     assert dialogo.result() == QDialog.DialogCode.Accepted
-    assert dialogo.contrasena() == "clave1"
+    assert verificar_contrasena_maestra(conn, "clave1") is True
