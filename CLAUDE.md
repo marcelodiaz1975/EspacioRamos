@@ -1354,8 +1354,13 @@ la pantalla antes de esta revisión (observación de Tipo → sus tres
 botones → observación de Acceso → sus dos botones → observación de
 Movimiento → sus cuatro botones, sin Deshacer), interpretación propia
 ante la ambigüedad de qué es "más arriba" cuando dos columnas
-independientes tienen contenido a la misma altura — a confirmar con la
-clienta si prefiere otro criterio.
+independientes tienen contenido a la misma altura — confirmado con la
+clienta: "de arriba a abajo el foco, intuitivo", el criterio actual
+queda tal cual.
+
+Con esto, Llaves — la última pantalla de la revisión "uno por uno" —
+queda formalmente cerrada, y no quedan puntos abiertos pendientes de
+confirmación en ninguna de las pantallas del sistema.
 
 Segunda vuelta (tres pedidos sobre esta misma pantalla):
 
