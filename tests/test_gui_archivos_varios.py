@@ -1,10 +1,9 @@
 import pytest
-from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QTabWidget, QWidget
+from PySide6.QtWidgets import QMessageBox, QPushButton
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.main_window import Seccion
-from app.gui.pantallas.archivos_varios import PantallaArchivosVarios, _SIN_SELECCION
+from app.gui.pantallas.archivos_varios import _PanelArchivosVarios, _SIN_SELECCION
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -22,57 +21,46 @@ def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
 
 
-def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
-    """Preview de la jerarquía de títulos definida en Lista de espera."""
-    pantalla = PantallaArchivosVarios(conn)
+def test_es_un_panel_solapa(qtbot, conn):
+    """Reordenamiento de formularios: dejó de ser una pantalla propia con
+    su propio título/QTabWidget — ahora es la solapa "Archivos para
+    enviar" de "Disponibilidad" (ver disponibilidad.py). El botón
+    "Manual del usuario" se reubicó en Gestor de archivos del espacio
+    (ver test_gui_imagenes.py/test_gui_archivos_y_listas.py)."""
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
-    titulo = pantalla.findChild(QLabel, "tituloPantalla")
-    assert titulo is not None
-    assert titulo.text() == "ARCHIVOS VARIOS"
+    assert pantalla.objectName() == "panelSolapa"
 
 
-def test_hay_cuatro_botones_y_regenerar_es_el_principal(qtbot, conn):
-    """Elegir un documento (los primeros tres) solo cambia la vista
+def test_hay_tres_botones_y_regenerar_es_el_principal(qtbot, conn):
+    """Elegir un documento (los primeros dos) solo cambia la vista
     previa, ninguno más "definitivo" que el otro; "Regenerar documento"
     es la única acción que escribe algo, así que es la principal."""
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
     botones = pantalla.findChildren(QPushButton)
-    assert len(botones) == 4
+    assert len(botones) == 3
     assert pantalla.boton_propuesta.objectName() == "botonSecundario"
     assert pantalla.boton_disponibilidad.objectName() == "botonSecundario"
-    assert pantalla.boton_manual.objectName() == "botonSecundario"
     assert pantalla.boton_regenerar.objectName() == "botonPrimario"
 
 
 def test_textos_de_los_botones(qtbot, conn):
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
     textos = [b.text() for b in pantalla.findChildren(QPushButton)]
-    assert textos == ["Propuesta", "Disponibilidad", "Manual del usuario", "Regenerar documento"]
-
-
-def test_tiene_formato_solapa(qtbot, conn):
-    pantalla = PantallaArchivosVarios(conn)
-    qtbot.addWidget(pantalla)
-    solapas = pantalla.findChild(QTabWidget)
-    assert solapas is not None
-    assert solapas.tabText(0) == "Documentos"
-    assert pantalla.findChild(QWidget, "panelSolapa") is not None
+    assert textos == ["Propuesta", "Disponibilidad", "Regenerar documento"]
 
 
 def test_botones_comparten_el_mismo_ancho_fijo(qtbot, conn):
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
-    anchos = {
-        b.width() for b in
-        (pantalla.boton_propuesta, pantalla.boton_disponibilidad, pantalla.boton_manual, pantalla.boton_regenerar)
-    }
+    anchos = {b.width() for b in (pantalla.boton_propuesta, pantalla.boton_disponibilidad, pantalla.boton_regenerar)}
     assert len(anchos) == 1
 
 
 def test_foco_inicial_queda_en_boton_propuesta(qtbot, conn):
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
@@ -80,11 +68,9 @@ def test_foco_inicial_queda_en_boton_propuesta(qtbot, conn):
 
 
 def test_cadena_de_foco_baja_de_arriba_a_abajo_y_da_la_vuelta(qtbot, conn):
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla._foco._orden == [
-        pantalla.boton_propuesta, pantalla.boton_disponibilidad, pantalla.boton_manual, pantalla.boton_regenerar,
-    ]
+    assert pantalla._foco._orden == [pantalla.boton_propuesta, pantalla.boton_disponibilidad, pantalla.boton_regenerar]
     pantalla.show()
     qtbot.waitExposed(pantalla)
     pantalla.boton_regenerar.setFocus()
@@ -96,7 +82,7 @@ def test_cadena_de_foco_baja_de_arriba_a_abajo_y_da_la_vuelta(qtbot, conn):
 def test_elegir_documento_sin_archivos_muestra_aviso_y_no_genera_nada(qtbot, conn, tmp_path):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
 
     pantalla._seleccionar("propuesta")
@@ -109,7 +95,7 @@ def test_elegir_documento_sin_archivos_muestra_aviso_y_no_genera_nada(qtbot, con
 def test_regenerar_sin_elegir_documento_avisa_y_no_genera_nada(qtbot, conn, tmp_path):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
 
     pantalla._regenerar_seleccionado()  # no debe lanzar, solo avisar
@@ -121,7 +107,7 @@ def test_regenerar_propuesta_genera_archivo_y_actualiza_la_vista_previa(qtbot, c
     obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
 
     pantalla._seleccionar("propuesta")
@@ -137,7 +123,7 @@ def test_regenerar_disponibilidad_genera_archivo(qtbot, conn, tmp_path):
     obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
 
     pantalla._seleccionar("disponibilidad")
@@ -148,34 +134,6 @@ def test_regenerar_disponibilidad_genera_archivo(qtbot, conn, tmp_path):
     assert generados[0].name.startswith("Disponibilidad Espacio Ramos Consultorios")
 
 
-def test_regenerar_manual_sin_secciones_avisa_y_no_falla(qtbot, conn, tmp_path):
-    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
-    conn.commit()
-    pantalla = PantallaArchivosVarios(conn)
-    qtbot.addWidget(pantalla)
-
-    pantalla._seleccionar("manual")
-    pantalla._regenerar_seleccionado()  # no debe lanzar, solo avisar
-
-    carpeta = tmp_path / "Archivos varios" / "Manual"
-    assert not carpeta.exists() or list(carpeta.iterdir()) == []
-
-
-def test_regenerar_manual_genera_archivo(qtbot, conn, tmp_path):
-    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
-    conn.commit()
-    secciones = [Seccion("Alguna pantalla", lambda c: None, categoria="Principal", ayuda="Texto de ayuda.")]
-    pantalla = PantallaArchivosVarios(conn, secciones)
-    qtbot.addWidget(pantalla)
-
-    pantalla._seleccionar("manual")
-    pantalla._regenerar_seleccionado()
-
-    generados = list((tmp_path / "Archivos varios" / "Manual").iterdir())
-    assert len(generados) == 1
-    assert generados[0].name == "Manual de usuario.pdf"
-
-
 def test_seleccionar_despues_de_regenerar_muestra_el_archivo_ya_generado(qtbot, conn, tmp_path):
     """`_seleccionar` no genera nada, pero sí tiene que encontrar y
     previsualizar un archivo que ya se había generado en una vuelta
@@ -183,7 +141,7 @@ def test_seleccionar_despues_de_regenerar_muestra_el_archivo_ya_generado(qtbot, 
     obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
     pantalla._seleccionar("propuesta")
     pantalla._regenerar_seleccionado()
@@ -196,7 +154,7 @@ def test_seleccionar_despues_de_regenerar_muestra_el_archivo_ya_generado(qtbot, 
 
 
 def test_preview_muestra_texto_de_ayuda_antes_de_elegir_nada(qtbot, conn):
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.etiqueta_preview.text() == _SIN_SELECCION
     assert pantalla.etiqueta_preview.pixmap().isNull()
@@ -205,7 +163,7 @@ def test_preview_muestra_texto_de_ayuda_antes_de_elegir_nada(qtbot, conn):
 def test_regenerar_sin_archivos_generados_no_rompe_la_vista_previa(qtbot, conn, monkeypatch, tmp_path):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaArchivosVarios(conn)
+    pantalla = _PanelArchivosVarios(conn)
     qtbot.addWidget(pantalla)
     pantalla._seleccionar("propuesta")
     monkeypatch.setattr(

@@ -11,17 +11,15 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.gui.dialogos_seguridad import DialogoLogin, MonitorInactividad
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
-from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
 from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
 from app.gui.pantallas.base_datos_espacio import PantallaBaseDatosEspacio
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
+from app.gui.pantallas.disponibilidad import PantallaDisponibilidad
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla_y_mensajeria import PantallaGrillaYMensajeria
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
-from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.pantallas.llaves import PantallaLlaves
 from app.gui.pantallas.novedades import PantallaCargosEspeciales, PantallaRegistroAusencias
-from app.gui.pantallas.oferta import PantallaOferta
 from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.pantallas.panel_control import PanelControl
 from app.gui.pantallas.placas import PantallaPlacas
@@ -36,10 +34,12 @@ from app.negocio.seguridad import asegurar_permisos_pantalla
 
 def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
     # Se arma como lista mutable (en vez de un literal) porque la sección
-    # "Archivos varios" necesita la lista completa para poder armar el
-    # manual de usuario (junta la ayuda de todas las demás) — su fábrica
-    # captura `secciones` por referencia y para cuando de verdad se llama
-    # (al construir VentanaPrincipal) la lista ya está completa.
+    # "Archivos y listas" necesita la lista completa para poder armar el
+    # manual de usuario (junta la ayuda de todas las demás, vía el botón
+    # "Manual del usuario" de su solapa Gestor de archivos del espacio) —
+    # su fábrica captura `secciones` por referencia y para cuando de
+    # verdad se llama (al construir VentanaPrincipal) la lista ya está
+    # completa.
     #
     # `usuario` (Seguridad): el usuario ya logueado (`gui_main.main` hace
     # el login antes de armar esta lista) — solo lo necesita "Usuarios y
@@ -87,19 +87,13 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "cortar e imprimir.",
         ),
         Seccion(
-            "Lista de espera", lambda conn: PantallaListaEspera(conn), categoria="Principal",
-            ayuda="Profesionales interesados en un horario que hoy está ocupado — el sistema avisa "
-            "automáticamente cuando ese horario se libera.",
-        ),
-        Seccion(
-            "Oferta de consultorios", lambda conn: PantallaOferta(conn), categoria="Principal",
-            ayuda="Búsqueda de horarios libres que cumplen criterios combinados (franjas, días, "
-            "consultorio) para armar una oferta en PDF a un profesional interesado.",
-        ),
-        Seccion(
-            "Archivos varios", lambda conn: PantallaArchivosVarios(conn, secciones), categoria="Principal",
-            ayuda="Regenerar a demanda los documentos que ya se generan solos en el avance de mes "
-            "(Propuesta, Disponibilidad) y el manual de usuario.",
+            "Disponibilidad", lambda conn: PantallaDisponibilidad(conn), categoria="Principal",
+            ayuda="Solapa Oferta de consultorios: búsqueda de horarios libres que cumplen criterios "
+            "combinados (franjas, días, consultorio) para armar una oferta en PDF a un profesional "
+            "interesado. Solapa Lista de espera: profesionales interesados en un horario que hoy está "
+            "ocupado — el sistema avisa automáticamente cuando ese horario se libera. Solapa Archivos "
+            "para enviar: regenerar a demanda los documentos que ya se generan solos en el avance de "
+            "mes (Propuesta, Disponibilidad).",
         ),
         Seccion(
             "Registro de ausencias", lambda conn: PantallaRegistroAusencias(conn), categoria="Principal",
@@ -133,11 +127,12 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "documentación adjunta de cada uno.",
         ),
         Seccion(
-            "Archivos y listas", lambda conn: PantallaArchivosYListas(conn), categoria="Catálogos",
+            "Archivos y listas", lambda conn: PantallaArchivosYListas(conn, secciones), categoria="Catálogos",
             ayuda="Solapa Gestor de archivos del espacio: fotos y documentos de edificios, unidades y "
-            "consultorios usados en Propuesta/Disponibilidad/Liquidación/Oferta. Solapas Listas "
-            "editables, Condiciones y normas y Detalles complementarios de la propuesta: listas y "
-            "textos de referencia usados por otras pantallas y por el PDF de Propuesta.",
+            "consultorios usados en Propuesta/Disponibilidad/Liquidación/Oferta, más el botón "
+            "\"Manual del usuario\" para regenerarlo contra el estado actual del sistema. Solapas "
+            "Listas editables, Condiciones y normas y Detalles complementarios de la propuesta: "
+            "listas y textos de referencia usados por otras pantallas y por el PDF de Propuesta.",
         ),
         Seccion(
             "Base datos del espacio", lambda conn: PantallaBaseDatosEspacio(conn), categoria="Catálogos",

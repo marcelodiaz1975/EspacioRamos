@@ -33,7 +33,22 @@ alternativa de editar); `crear_pedido` en `app.negocio.lista_espera` no
 lo valida a nivel de datos porque `avance_mes` necesita poder dejar más
 de un pedido Activo del mismo profesional en escenarios de limpieza de
 fin de mes (ver sus tests) — si se quiere blindar también a nivel de
-datos, hay que revisar antes esos casos."""
+datos, hay que revisar antes esos casos.
+
+Reordenamiento de formularios (Excel de la clienta): dejó de ser una
+pantalla propia del menú y pasó a ser la solapa "Lista de espera" de
+"Disponibilidad" (`_PanelListaEspera`, junto a "Oferta de consultorios"
+y "Archivos para enviar" — ver `disponibilidad.py`). Por eso ya no tiene
+título Nivel 1 ni su propio `QTabWidget` externo. A diferencia del resto
+de los merges de esta reorganización, acá NO se le pone
+`objectName="panelSolapa"` al widget de más afuera (`self`): esta
+pantalla, desde antes de la reorganización, ya tenía el fondo claro de
+"ficha" acotado solo al formulario "Nuevo pedido" (`panel_nuevo_pedido`)
+— la tabla de pedidos y los botones de abajo quedaban deliberadamente
+FUERA de ese panel, sobre el fondo liso de la pantalla. Se preservó esa
+distinción tal cual estaba (objectName solo en `panel_nuevo_pedido`) en
+vez de extender el fondo claro a toda la solapa, que hubiera sido un
+cambio visual no pedido."""
 from __future__ import annotations
 
 import json
@@ -60,7 +75,6 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -195,7 +209,7 @@ class _DelegadoSinResaltarSeleccion(QStyledItemDelegate):
         super().paint(painter, opcion, index)
 
 
-class PantallaListaEspera(QWidget):
+class _PanelListaEspera(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
@@ -208,18 +222,14 @@ class PantallaListaEspera(QWidget):
 
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
-        titulo = QLabel("Lista de espera".upper())
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
 
-        # QTabWidget muestra la solapa aunque tenga una sola (a diferencia
-        # de un QLabel simulándola) — Qt solo la esconde si se activa
-        # tabBarAutoHide, que acá no se usa a propósito.
-        solapas = QTabWidget()
+        # El fondo claro de "ficha" queda acotado solo al formulario de
+        # "Nuevo pedido" (mismo criterio que tenía esta pantalla antes de
+        # sumarse a "Disponibilidad" — ver docstring del módulo): la
+        # tabla y los botones de abajo quedan fuera de este panel.
         panel_nuevo_pedido = QWidget()
         panel_nuevo_pedido.setObjectName("panelSolapa")
         fila_columnas = QHBoxLayout(panel_nuevo_pedido)
-        solapas.addTab(panel_nuevo_pedido, "Nuevo pedido")
 
         col_quien = QVBoxLayout()
         self.combo_profesional = QComboBox()
@@ -373,7 +383,7 @@ class PantallaListaEspera(QWidget):
         fila_columnas.addLayout(col_quien, 1)
         fila_columnas.addLayout(col_cuando, 1)
         fila_columnas.addLayout(col_condiciones, 1)
-        layout.addWidget(solapas)
+        layout.addWidget(panel_nuevo_pedido)
 
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(10)

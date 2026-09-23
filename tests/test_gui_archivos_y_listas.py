@@ -3,6 +3,7 @@ from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.main_window import Seccion
 from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
 from app.gui.pantallas.imagenes import _PanelGestorArchivos
 
@@ -70,3 +71,13 @@ def test_listas_editables_carga_los_valores_sembrados(qtbot, conn):
     pantalla = PantallaArchivosYListas(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.panel_listas_editables.tabla_widget.rowCount() > 0
+
+
+def test_secciones_se_reenvian_al_panel_de_gestor_de_archivos(qtbot, conn):
+    """`secciones` (lista de `Seccion` del menú) llega hasta el botón
+    "Manual del usuario" reubicado en Gestor de archivos del espacio —
+    ver imagenes.py."""
+    secciones = [Seccion("Alguna pantalla", lambda c: None, categoria="Principal", ayuda="Texto de ayuda.")]
+    pantalla = PantallaArchivosYListas(conn, secciones)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_gestor_archivos._secciones == secciones

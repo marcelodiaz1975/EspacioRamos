@@ -16,13 +16,19 @@ Mismo patrón que Usuarios y permisos/Estadísticas: título Nivel 1 fijo +
 `showEvent`/foco (los tres catálogos genéricos ya lo traen incorporado por
 `PantallaCRUD`; Gestor de archivos nunca tuvo cadena de foco propia — no
 formó parte de la revisión "uno por uno" — y no se le agregó acá, fuera del
-alcance de esta reorganización)."""
+alcance de esta reorganización).
+
+Recibe `secciones` (la lista de `Seccion` del menú, mismo dato que ya
+recibía la vieja pantalla "Archivos varios") y se la reenvía a
+`_PanelGestorArchivos`, que la necesita para el botón "Manual del
+usuario" reubicado ahí (ver `imagenes.py`)."""
 from __future__ import annotations
 
 import sqlite3
 
 from PySide6.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
 
+from app.gui.main_window import Seccion
 from app.gui.pantallas.catalogos import (
     pantalla_condiciones_normas,
     pantalla_detalles_complementarios_propuesta,
@@ -32,7 +38,7 @@ from app.gui.pantallas.imagenes import _PanelGestorArchivos
 
 
 class PantallaArchivosYListas(QWidget):
-    def __init__(self, conn: sqlite3.Connection, parent=None):
+    def __init__(self, conn: sqlite3.Connection, secciones: list[Seccion] | None = None, parent=None):
         super().__init__(parent)
         self.conn = conn
         layout = QVBoxLayout(self)
@@ -41,7 +47,7 @@ class PantallaArchivosYListas(QWidget):
         layout.addWidget(titulo)
 
         self.pestanas = QTabWidget()
-        self.panel_gestor_archivos = _PanelGestorArchivos(conn)
+        self.panel_gestor_archivos = _PanelGestorArchivos(conn, secciones)
         self.pestanas.addTab(self.panel_gestor_archivos, "Gestor de archivos del espacio")
         self.panel_listas_editables = pantalla_listas_editables(conn, anidado=True)
         self.pestanas.addTab(self.panel_listas_editables, "Listas editables")

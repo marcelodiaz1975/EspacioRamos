@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QDialog, QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.oferta import PantallaOferta, _DialogoPrevisualizacion
+from app.gui.pantallas.oferta import _PanelOferta, _DialogoPrevisualizacion
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.repositorio.registro import obtener_repositorio
 
@@ -44,11 +44,20 @@ def profesional_y_consultorio(conn):
     return id_prof, id_edificio
 
 
+def test_es_un_panel_solapa(qtbot, conn):
+    """Reordenamiento de formularios: dejó de ser una pantalla propia con
+    su propio título/QTabWidget — ahora es la solapa "Oferta de
+    consultorios" de "Disponibilidad" (ver disponibilidad.py)."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.objectName() == "panelSolapa"
+
+
 def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn, profesional_y_consultorio):
     """Confirmado por la clienta: el selector de profesional buscable
     corre en todos los formularios del sistema, Oferta incluida — con el
     mismo formato canónico que el resto (antes mostraba "Apellido, Nombre")."""
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     completador = pantalla.combo_profesional.completer()
     assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
@@ -56,14 +65,14 @@ def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn, profesio
 
 
 def test_fechas_se_muestran_en_formato_dd_mm_aaaa(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.campo_fecha_desde.displayFormat() == "ddd dd-MM-yyyy"
     assert pantalla.campo_fecha_hasta.displayFormat() == "ddd dd-MM-yyyy"
 
 
 def test_fecha_hasta_solo_habilitada_para_aislada(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     assert not pantalla.campo_fecha_hasta.isEnabled()  # Regular es el tipo por defecto
 
@@ -75,7 +84,7 @@ def test_fecha_hasta_solo_habilitada_para_aislada(qtbot, conn, profesional_y_con
 def test_fecha_muestra_el_dia_de_la_semana_abreviado(qtbot, conn, profesional_y_consultorio):
     from PySide6.QtCore import QDate
 
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla.campo_fecha_desde.setDate(QDate(2026, 9, 11))  # viernes
     assert pantalla.campo_fecha_desde.text().startswith("vie")
@@ -89,7 +98,7 @@ def test_fecha_queda_pegada_a_su_etiqueta_sin_hueco(qtbot, conn, profesional_y_c
     espacio sobrante entre los 4 widgets por igual — cada etiqueta queda
     mucho más ancha que su propio texto y dejaba un hueco antes del
     selector de fecha correspondiente."""
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
@@ -102,7 +111,7 @@ def test_fecha_queda_pegada_a_su_etiqueta_sin_hueco(qtbot, conn, profesional_y_c
 
 
 def test_horario_muestra_formato_hs(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla.spin_desde.setValue(9)
     assert pantalla.spin_desde.text() == "9:00hs"
@@ -112,7 +121,7 @@ def test_horario_muestra_formato_hs(qtbot, conn, profesional_y_consultorio):
 
 
 def test_localidad_edificio_unidad_arrancan_en_todas(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     assert pantalla._filtro_localidad._boton.text() == "Todas las localidades"
     assert pantalla._filtro_edificio._boton.text() == "Todos los edificios"
@@ -131,7 +140,7 @@ def test_elegir_una_localidad_acota_las_opciones_de_edificio(qtbot, conn, profes
     obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=1, ValorHoraRegularActual=1000)
     conn.commit()
 
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._cargar_localidades()  # repuebla ya con los dos edificios/localidades de arriba
     assert pantalla.lista_localidad.count() == 3  # "Todas" + Recoleta + Palermo
@@ -153,7 +162,7 @@ def test_elegir_un_edificio_puntual_acota_las_unidades_de_la_busqueda(qtbot, con
     obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=1, ValorHoraRegularActual=1000)
     conn.commit()
 
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._cargar_localidades()
     assert len(pantalla._ids_unidad_seleccionadas()) == 2  # "Todas las unidades": las dos
@@ -169,7 +178,7 @@ def test_elegir_un_edificio_puntual_acota_las_unidades_de_la_busqueda(qtbot, con
 
 
 def test_tamano_arranca_deshabilitado_y_se_habilita_con_el_check(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     assert not pantalla.combo_tamano.isEnabled()
     assert pantalla.combo_tamano.currentText() == "Cualquier tamaño"
@@ -188,7 +197,7 @@ def test_tamano_arranca_deshabilitado_y_se_habilita_con_el_check(qtbot, conn, pr
 
 
 def test_tamano_desmarcado_no_filtra_por_tamano(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)
     busqueda = pantalla._armar_busqueda_actual()
@@ -198,7 +207,7 @@ def test_tamano_desmarcado_no_filtra_por_tamano(qtbot, conn, profesional_y_consu
 def test_hay_tres_botones_y_nueva_busqueda_es_la_principal(qtbot, conn, profesional_y_consultorio):
     from PySide6.QtWidgets import QPushButton
 
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     botones = {b.text(): b for b in pantalla.findChildren(QPushButton) if b.text() in (
         "Generar PDF", "Generar texto WhatsApp", "Nueva búsqueda",
@@ -210,7 +219,7 @@ def test_hay_tres_botones_y_nueva_busqueda_es_la_principal(qtbot, conn, profesio
 
 
 def test_nueva_busqueda_resetea_el_formulario_y_enfoca_profesional(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
@@ -236,7 +245,7 @@ def test_dias_son_checkboxes_de_lunes_a_sabado_en_grilla_compacta(qtbot, conn, p
     larga, para que sean más legibles."""
     from PySide6.QtWidgets import QGridLayout
 
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     assert list(pantalla._checks_dia.keys()) == ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"]
     assert all(check.isChecked() is False for check in pantalla._checks_dia.values())
@@ -250,13 +259,13 @@ def test_dias_son_checkboxes_de_lunes_a_sabado_en_grilla_compacta(qtbot, conn, p
 
 
 def test_grilla_embebida_tiene_titulo_grilla_semanal(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.grilla._panel_filtros.title() == "Grilla semanal"
 
 
 def test_foco_inicial_queda_en_profesional(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
@@ -270,7 +279,7 @@ def test_lista_franjas_es_scroleable_con_muchas_franjas(qtbot, conn, profesional
     pantalla."""
     from PySide6.QtCore import Qt as _Qt
 
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     for i in range(20):
         pantalla._checks_dia["Lunes"].setChecked(True)
@@ -284,7 +293,7 @@ def test_lista_franjas_es_scroleable_con_muchas_franjas(qtbot, conn, profesional
 
 
 def test_grilla_operativa_embebida_sigue_el_tipo_de_busqueda(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.grilla.combo_modo.currentData() == "regular"
     assert not pantalla.grilla.combo_modo.isEnabled()
@@ -297,7 +306,7 @@ def test_grilla_operativa_embebida_sigue_el_tipo_de_busqueda(qtbot, conn, profes
 def test_generar_pdf_guarda_en_archivos_varios_oferta(qtbot, conn, tmp_path, profesional_y_consultorio):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
 
@@ -311,7 +320,7 @@ def test_generar_pdf_guarda_en_archivos_varios_oferta(qtbot, conn, tmp_path, pro
 def test_generar_texto_muestra_dialogo_con_el_texto(qtbot, conn, tmp_path, monkeypatch, profesional_y_consultorio):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
 
@@ -331,14 +340,14 @@ def test_generar_texto_muestra_dialogo_con_el_texto(qtbot, conn, tmp_path, monke
 def test_sin_dias_no_genera_archivo(qtbot, conn, tmp_path, profesional_y_consultorio):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._generar_pdf()
     assert not (tmp_path / "Archivos varios" / "Oferta").exists()
 
 
 def test_agregar_franja_la_suma_a_la_lista_y_limpia_dias(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
 
@@ -350,7 +359,7 @@ def test_agregar_franja_la_suma_a_la_lista_y_limpia_dias(qtbot, conn, profesiona
 
 
 def test_agregar_franja_sin_dias_no_suma_nada(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._agregar_franja()
     assert pantalla._franjas == []
@@ -358,7 +367,7 @@ def test_agregar_franja_sin_dias_no_suma_nada(qtbot, conn, profesional_y_consult
 
 
 def test_quitar_franja_seleccionada(qtbot, conn, profesional_y_consultorio):
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
     pantalla._agregar_franja()
@@ -373,7 +382,7 @@ def test_quitar_franja_seleccionada(qtbot, conn, profesional_y_consultorio):
 def test_generar_con_dos_franjas_genera_un_solo_documento(qtbot, conn, tmp_path, profesional_y_consultorio):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
 
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
@@ -397,7 +406,7 @@ def test_cancelar_previsualizacion_no_genera_archivo(qtbot, conn, tmp_path, monk
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
     monkeypatch.setattr(_DialogoPrevisualizacion, "exec", lambda self: QDialog.DialogCode.Rejected)
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
 
@@ -414,7 +423,7 @@ def test_previsualizacion_muestra_una_fila_por_opcion(qtbot, conn, monkeypatch, 
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(_DialogoPrevisualizacion, "exec", _exec_capturando)
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
 
@@ -437,7 +446,7 @@ def test_destildar_una_opcion_en_la_previsualizacion_la_excluye_del_documento(
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(_DialogoPrevisualizacion, "exec", _exec_destildando_todo)
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
 
@@ -457,7 +466,7 @@ def test_destildar_una_opcion_en_la_previsualizacion_la_excluye_del_documento(
 def test_sin_alternativas_la_previsualizacion_permite_generar_igual(qtbot, conn, tmp_path, profesional_y_consultorio):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
     pantalla.casilla_camilla.setChecked(True)  # el consultorio de la fixture no es apto camilla: sin cobertura
@@ -478,7 +487,7 @@ def test_paquete_y_con_franja_sin_cobertura_no_muestra_nada_en_la_previsualizaci
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(_DialogoPrevisualizacion, "exec", _exec_capturando)
-    pantalla = PantallaOferta(conn)
+    pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes: con cobertura
     pantalla.combo_union_franja.setCurrentIndex(1)  # Y con la próxima

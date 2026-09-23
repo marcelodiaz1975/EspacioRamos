@@ -1,10 +1,10 @@
 import pytest
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QTabWidget
+from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.lista_espera import PantallaListaEspera
+from app.gui.pantallas.lista_espera import _PanelListaEspera
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.lista_espera import crear_pedido
 
@@ -59,7 +59,7 @@ def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn):
         "VALUES ('R', 'Lo Veci', 'Virginia', 'R1')"
     )
     conn.commit()
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     completador = pantalla.combo_profesional.completer()
     assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
@@ -67,10 +67,13 @@ def test_combo_profesional_es_buscable_por_codigo_o_nombre(qtbot, conn):
 
 
 def test_panel_nuevo_pedido_usa_el_fondo_claro_de_la_solapa(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    """Reordenamiento de formularios: ya no hay un QTabWidget propio
+    envolviendo "Nuevo pedido" — el fondo claro sigue acotado solo al
+    formulario (ver docstring del módulo), ahora un QWidget suelto."""
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
-    solapas = pantalla.findChild(QTabWidget)
-    assert solapas.widget(0).objectName() == "panelSolapa"
+    panel = pantalla.findChild(QWidget, "panelSolapa")
+    assert panel is not None
 
 
 def test_combo_profesional_incluye_inactivos_y_contactos(qtbot, conn):
@@ -80,7 +83,7 @@ def test_combo_profesional_incluye_inactivos_y_contactos(qtbot, conn):
     conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('X', 'Inactivo')")
     conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('C', 'Prospecto')")
     conn.commit()
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     textos = {pantalla.combo_profesional.itemText(i) for i in range(pantalla.combo_profesional.count())}
     assert "Inactivo" in textos
@@ -90,7 +93,7 @@ def test_combo_profesional_incluye_inactivos_y_contactos(qtbot, conn):
 def test_dias_son_checkboxes_horizontales_no_lista(qtbot, conn):
     """Mismo formato horizontal (checkboxes en grilla) que usa Oferta de
     consultorios, en vez de la lista vertical tildable de antes."""
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert set(pantalla._checks_dia.keys()) == {"Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"}
     assert all(check.isChecked() is False for check in pantalla._checks_dia.values())
@@ -101,7 +104,7 @@ def test_caracteristicas_de_los_consultorios_tiene_los_checks_esperados(qtbot, c
     tiene ventana, camilla, tamaño mínimo, placard y aire acondicionado
     — "Con balcón" no vuelve, quedó descartado. "Sin/Con combinación de
     consultorios" se mudó a un combo en la segunda columna."""
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert not hasattr(pantalla, "casilla_balcon")
     assert not hasattr(pantalla, "casilla_sin_combinar")
@@ -110,7 +113,7 @@ def test_caracteristicas_de_los_consultorios_tiene_los_checks_esperados(qtbot, c
 
 
 def test_tamano_minimo_es_la_primera_fila_de_caracteristicas(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
@@ -118,7 +121,7 @@ def test_tamano_minimo_es_la_primera_fila_de_caracteristicas(qtbot, conn):
 
 
 def test_combo_sin_combinar_arranca_en_sin_combinacion(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.combo_sin_combinar.currentText() == "Sin combinación de consultorios"
     assert pantalla.combo_sin_combinar.currentData() is True
@@ -127,7 +130,7 @@ def test_combo_sin_combinar_arranca_en_sin_combinacion(qtbot, conn):
 
 
 def test_caracteristicas_quedan_de_a_dos_por_linea(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
@@ -138,7 +141,7 @@ def test_caracteristicas_quedan_de_a_dos_por_linea(qtbot, conn):
 
 
 def test_botones_de_bloques_dicen_agregar_bloque_sin_puntos_suspensivos(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     botones = {b.text(): b for b in pantalla.findChildren(QPushButton)}
     assert "Agregar bloque" in botones
@@ -150,7 +153,7 @@ def test_botones_secundarios_usan_el_mismo_tamano_que_crear_pedido(qtbot, conn):
     pedido" van en celeste suave (botonSecundario) en vez del azul de
     "Crear pedido" (botonPrimario), pero con el mismo padding para
     quedar del mismo tamaño."""
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     botones = {b.text(): b for b in pantalla.findChildren(QPushButton)}
     for texto in ("Agregar bloque", "Quitar bloque", "Descartar pedido", "Editar pedido"):
@@ -165,7 +168,7 @@ def test_agregar_quitar_y_crear_pedido_quedan_a_la_misma_altura(qtbot, conn):
     tolerancia es más ancha que un ajuste a simple vista porque este
     test no aplica la hoja de estilos de la app (negrita en los
     subtítulos, etc. cambian un poco la métrica de fuente real)."""
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
@@ -182,7 +185,7 @@ def test_tabla_columna_dias_tiene_ancho_minimo(qtbot, conn):
         conn, id_profesional=id_profesional,
         bloques=[{"dias": ["Lunes", "Martes", "Miércoles", "Jueves"], "horario_desde": 9, "horario_hasta": 12}],
     )
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.columnWidth(2) >= 180
 
@@ -191,7 +194,7 @@ def test_tabla_bloques_le_da_mas_ancho_a_dias_que_a_las_otras_columnas(qtbot, co
     """Confirmado por la clienta: "Días" (columna 0) tiene que quedar
     más ancha que Horario/Comb. días/Horas mínimas por si hay varios
     días en un mismo bloque."""
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     ancho_dias = pantalla.tabla_bloques.columnWidth(0)
     for columna in (1, 2, 3):
@@ -203,30 +206,24 @@ def test_columna_coincidencia_de_la_tabla_tiene_delegado_propio(qtbot, conn):
     resaltado de selección — su color (verde/amarillo/naranja/rojo)
     tiene que seguir el criterio de cobertura, no el naranja de la fila
     seleccionada."""
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.itemDelegateForColumn(8) is not pantalla.tabla.itemDelegate()
 
 
 def test_jerarquia_de_titulos_del_formulario(qtbot, conn):
-    """Jerarquía 1 (título de pantalla): MAYÚSCULA. Jerarquía 2 (nombre
-    de la única solapa, "Nuevo pedido"): solapa real de un QTabWidget,
-    visible aunque haya una sola (sin tabBarAutoHide). Jerarquía 3
-    (subtítulo de un campo puntual, ej. "Profesional"): objectName
-    subtituloCampo — pero "Desde"/"Hasta", al lado del spinbox de
-    horario en vez de arriba, no cuentan como jerarquía 3."""
-    pantalla = PantallaListaEspera(conn)
+    """Jerarquía 3 (subtítulo de un campo puntual, ej. "Profesional"):
+    objectName subtituloCampo — pero "Desde"/"Hasta", al lado del
+    spinbox de horario en vez de arriba, no cuentan como jerarquía 3.
+    Reordenamiento de formularios: la jerarquía 1 ("LISTA DE ESPERA") y
+    la jerarquía 2 (nombre de la solapa "Nuevo pedido") ya no existen
+    acá — la primera vive en el contenedor "Disponibilidad" (ver
+    test_gui_disponibilidad.py), la segunda desapareció junto con el
+    QTabWidget propio de esta pantalla."""
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
 
     etiquetas_por_texto = {lbl.text(): lbl for lbl in pantalla.findChildren(QLabel)}
-    titulo = etiquetas_por_texto["LISTA DE ESPERA"]
-    assert titulo.objectName() == "tituloPantalla"
-
-    solapas = pantalla.findChild(QTabWidget)
-    assert solapas is not None
-    assert solapas.count() == 1
-    assert solapas.tabText(0) == "Nuevo pedido"
-    assert solapas.tabBarAutoHide() is False  # se ve siempre, aunque haya una sola solapa
 
     for texto in (
         "Profesional", "Localidad", "Edificio", "Unidad", "Bloques del pedido",
@@ -244,7 +241,7 @@ def test_agregar_quitar_y_crear_pedido_no_ocupan_todo_el_ancho_de_su_columna(qtb
     columna), ahora tienen un ancho fijo e igual entre los tres, y
     claramente menor que el ancho real de la columna una vez mostrada
     la pantalla en una ventana ancha."""
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1850, 1100)
     pantalla.show()
@@ -254,7 +251,7 @@ def test_agregar_quitar_y_crear_pedido_no_ocupan_todo_el_ancho_de_su_columna(qtb
 
 
 def test_tabla_de_pedidos_tiene_alto_maximo_para_ser_escroleable(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.maximumHeight() <= 260
 
@@ -271,7 +268,7 @@ def test_localidad_edificio_unidad_arrancan_en_todas(qtbot, conn):
     conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_norte,))
     conn.commit()
 
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
 
     assert pantalla._filtro_localidad._boton.text() == "Todas las localidades"
@@ -293,7 +290,7 @@ def test_elegir_un_edificio_puntual_acota_las_unidades_de_la_busqueda(qtbot, con
     conn.commit()
     id_unidad_norte = conn.execute("SELECT IdUnidad FROM Unidad WHERE Departamento = '1A'").fetchone()["IdUnidad"]
 
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
 
     pantalla.lista_edificio.clearSelection()
@@ -306,7 +303,7 @@ def test_elegir_un_edificio_puntual_acota_las_unidades_de_la_busqueda(qtbot, con
 
 
 def test_horario_muestra_formato_hs(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.spin_desde.setValue(9)
     assert pantalla.spin_desde.text() == "9:00hs"
@@ -322,7 +319,7 @@ def _y_absoluta(widget, pantalla) -> int:
 
 
 def test_combinacion_de_dias_y_horarios_va_debajo_de_los_checks_de_dias(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
@@ -335,7 +332,7 @@ def test_checks_de_dias_van_debajo_de_todas_las_unidades_sin_titulo_propio(qtbot
     selector "Alcanza con un día (O)", el horario, "Cantidad de horas..."
     y "Agregar bloque…" — todo en la misma columna, un paso abajo del
     otro."""
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
@@ -348,7 +345,7 @@ def test_checks_de_dias_van_debajo_de_todas_las_unidades_sin_titulo_propio(qtbot
 
 
 def test_comentarios_reemplaza_a_detalle_como_etiqueta(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     etiquetas = {lbl.text() for lbl in pantalla.findChildren(QLabel)}
     assert "Comentarios" in etiquetas
@@ -361,7 +358,7 @@ def test_tabla_primera_columna_es_la_fecha_en_formato_dd_mm_aaaa(qtbot, conn):
     crear_pedido(
         conn, id_profesional=id_profesional, bloques=[_bloque_lunes()], fecha_pedido="2026-03-05",
     )
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.horizontalHeaderItem(0).text() == "Fecha pedido"
     assert pantalla.tabla.item(0, 0).text() == "05-03-2026"
@@ -375,7 +372,7 @@ def test_tabla_ordena_mas_reciente_arriba_y_por_codigo_a_igual_fecha(qtbot, conn
     crear_pedido(conn, id_profesional=id_r10, bloques=[_bloque_lunes()], fecha_pedido="2026-03-05")
     crear_pedido(conn, id_profesional=id_r2, bloques=[_bloque_lunes()], fecha_pedido="2026-03-05")
 
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
 
     nombres = [pantalla.tabla.item(fila, 1).text() for fila in range(pantalla.tabla.rowCount())]
@@ -393,7 +390,7 @@ def test_profesional_se_muestra_en_formato_codigo_tratamiento_nombre_apellido(qt
     ]
     crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
 
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.item(0, 1).text() == "R1 - Lic. Virginia Lo Veci"
 
@@ -409,7 +406,7 @@ def test_profesional_sin_tratamiento_ni_nombre_omite_esos_datos(qtbot, conn):
     ]
     crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
 
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.item(0, 1).text() == "R3 - Paz"
 
@@ -428,7 +425,7 @@ def test_fecha_contacto_no_se_agrega_al_nombre_aunque_este_cargada(qtbot, conn):
     ]
     crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
 
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.item(0, 1).text() == "R3 - Paz"
 
@@ -436,7 +433,7 @@ def test_fecha_contacto_no_se_agrega_al_nombre_aunque_este_cargada(qtbot, conn):
 def test_horario_de_la_tabla_termina_en_hs(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.item(0, 3).text() == "9 a 12hs"
 
@@ -444,7 +441,7 @@ def test_horario_de_la_tabla_termina_en_hs(qtbot, conn):
 def test_cobertura_vacia_sin_seleccion(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.texto_cobertura.toPlainText() == ""
 
@@ -454,7 +451,7 @@ def test_cobertura_muestra_dia_horario_y_consultorio_al_seleccionar_verde(qtbot,
     id_profesional = _crear_profesional(conn)
     crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
 
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla.selectRow(0)
 
@@ -474,7 +471,7 @@ def test_cobertura_con_varios_dias_los_separa_con_punto_y_coma(qtbot, conn):
         conn, id_profesional=id_profesional,
         bloques=[{"dias": ["Lunes", "Miércoles"], "horario_desde": 9, "horario_hasta": 12}],
     )
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla.selectRow(0)
 
@@ -489,14 +486,14 @@ def test_cobertura_con_varios_dias_los_separa_con_punto_y_coma(qtbot, conn):
 def test_cobertura_indica_sin_cobertura_cuando_no_hay_color(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])  # sin ningún consultorio cargado
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla.selectRow(0)
     assert "Sin cobertura" in pantalla.texto_cobertura.toPlainText()
 
 
 def test_tamano_minimo_es_combo_cerrado_deshabilitado_hasta_tildar_la_casilla(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.casilla_tamano.text() == "Tamaño mínimo"
     assert not pantalla.combo_tamano.isEnabled()
@@ -509,7 +506,7 @@ def test_tamano_minimo_es_combo_cerrado_deshabilitado_hasta_tildar_la_casilla(qt
 
 def test_crear_pedido_con_tamano_persiste_la_condicion(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._agregar_bloque()
@@ -527,7 +524,7 @@ def test_crear_pedido_con_tamano_persiste_la_condicion(qtbot, conn):
 
 def test_crear_pedido_por_defecto_persiste_sin_combinar(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._agregar_bloque()
@@ -543,7 +540,7 @@ def test_crear_pedido_por_defecto_persiste_sin_combinar(qtbot, conn):
 
 def test_elegir_con_combinacion_no_persiste_sincombinar(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._agregar_bloque()
@@ -560,7 +557,7 @@ def test_elegir_con_combinacion_no_persiste_sincombinar(qtbot, conn):
 
 def test_crear_pedido_sin_dias_no_persiste(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._crear_pedido()  # sin días marcados -> ValueError capturado, no debe persistir
     assert conn.execute("SELECT COUNT(*) c FROM ListaEspera").fetchone()["c"] == 0
@@ -568,7 +565,7 @@ def test_crear_pedido_sin_dias_no_persiste(qtbot, conn):
 
 def test_crear_pedido_con_dias_persiste_y_aparece_en_tabla(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
 
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
@@ -582,7 +579,7 @@ def test_crear_pedido_con_dias_persiste_y_aparece_en_tabla(qtbot, conn):
 
 def test_sin_cobertura_muestra_etiqueta_sin_color(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._agregar_bloque()
@@ -592,7 +589,7 @@ def test_sin_cobertura_muestra_etiqueta_sin_color(qtbot, conn):
 
 def test_agregar_bloque_lo_suma_a_la_tabla_y_limpia_dias(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # Lunes
 
@@ -606,7 +603,7 @@ def test_agregar_bloque_lo_suma_a_la_tabla_y_limpia_dias(qtbot, conn):
 
 def test_agregar_bloque_sin_dias_no_agrega(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._agregar_bloque()
     assert pantalla._bloques_pendientes == []
@@ -614,7 +611,7 @@ def test_agregar_bloque_sin_dias_no_agrega(qtbot, conn):
 
 def test_crear_pedido_con_dos_bloques_persiste_los_dos(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
 
     pantalla._checks_dia["Martes"].setChecked(True)  # Martes
@@ -634,7 +631,7 @@ def test_crear_pedido_con_dos_bloques_persiste_los_dos(qtbot, conn):
 
 def test_quitar_bloque_lo_saca_de_la_tabla(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._agregar_bloque()
@@ -648,7 +645,7 @@ def test_quitar_bloque_lo_saca_de_la_tabla(qtbot, conn):
 
 def test_descartar_saca_el_pedido_de_la_lista(qtbot, conn):
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._agregar_bloque()
@@ -663,7 +660,7 @@ def test_descartar_saca_el_pedido_de_la_lista(qtbot, conn):
 
 
 def test_editar_pedido_sin_seleccion_avisa_y_no_rompe(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._editar_pedido()  # no debe lanzar excepción
     assert pantalla._id_pedido_en_edicion is None
@@ -677,7 +674,7 @@ def test_editar_pedido_carga_el_formulario_y_pone_en_modo_edicion(qtbot, conn):
         bloques=[{"dias": ["Martes"], "horario_desde": 10, "horario_hasta": 14}],
         condiciones_consultorio={"ventana": True}, detalle="pedido original",
     )
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla.selectRow(0)
 
@@ -700,7 +697,7 @@ def test_confirmar_edicion_actualiza_el_pedido_existente_y_lo_manda_arriba(qtbot
     id_pedido = crear_pedido(
         conn, id_profesional=id_profesional, bloques=[_bloque_lunes()], fecha_pedido="2020-01-01",
     )
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla.selectRow(0)
     pantalla._editar_pedido()
@@ -723,7 +720,7 @@ def test_tabla_muestra_columnas_de_combinacion_y_condiciones(qtbot, conn):
         conn, id_profesional=id_profesional, bloques=[_bloque_lunes()],
         condiciones_consultorio={"ventana": True}, tipo_combinacion_bloques="O",
     )
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
 
     encabezados = [pantalla.tabla.horizontalHeaderItem(i).text() for i in range(pantalla.tabla.columnCount())]
@@ -743,7 +740,7 @@ def test_tabla_columna_combinacion_consultorios_refleja_sin_combinar(qtbot, conn
         conn, id_profesional=id_profesional, bloques=[_bloque_lunes()],
         condiciones_consultorio={"sinCombinar": True},
     )
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.item(0, 6).text() == "Sin combinación de consultorios"
 
@@ -751,7 +748,7 @@ def test_tabla_columna_combinacion_consultorios_refleja_sin_combinar(qtbot, conn
 def test_tabla_tiene_tooltip_con_el_texto_completo_de_cada_celda(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
 
     item = pantalla.tabla.item(0, 1)
@@ -762,7 +759,7 @@ def test_crear_pedido_sin_bloques_agregados_avisa_y_no_persiste(qtbot, conn):
     """Confirmado por la clienta: "Agregar bloque…" es obligatorio, no hay
     fallback que tome lo que esté cargado en el formulario."""
     _crear_profesional(conn)
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)  # cargado en el formulario, pero nunca agregado
 
@@ -772,7 +769,7 @@ def test_crear_pedido_sin_bloques_agregados_avisa_y_no_persiste(qtbot, conn):
 
 
 def test_combo_tipo_bloques_muestra_bloque_unico_deshabilitado_con_uno_solo(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.combo_tipo_bloques.currentText() == "Bloque único"
     assert not pantalla.combo_tipo_bloques.isEnabled()
@@ -784,7 +781,7 @@ def test_combo_tipo_bloques_muestra_bloque_unico_deshabilitado_con_uno_solo(qtbo
 
 
 def test_combo_tipo_bloques_se_habilita_con_mas_de_un_bloque(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla._agregar_bloque()
@@ -797,7 +794,7 @@ def test_combo_tipo_bloques_se_habilita_con_mas_de_un_bloque(qtbot, conn):
 
 
 def test_boton_quitar_bloque_solo_se_habilita_con_una_fila_seleccionada(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     assert not pantalla.boton_quitar_bloque.isEnabled()
 
@@ -820,7 +817,7 @@ def test_crear_pedido_con_profesional_que_ya_tiene_uno_activo_ofrece_editar(qtbo
     id_pedido_existente = crear_pedido(
         conn, id_profesional=id_profesional, bloques=[_bloque_lunes()], detalle="pedido original",
     )
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
 
     indice = pantalla.combo_profesional.findData(id_profesional)
@@ -841,7 +838,7 @@ def test_crear_pedido_con_profesional_duplicado_y_respuesta_no_no_hace_nada(qtbo
     crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
 
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     indice = pantalla.combo_profesional.findData(id_profesional)
     pantalla.combo_profesional.setCurrentIndex(indice)
@@ -855,7 +852,7 @@ def test_crear_pedido_con_profesional_duplicado_y_respuesta_no_no_hace_nada(qtbo
 
 
 def test_condiciones_incluye_placard_y_aire(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     pantalla.casilla_placard.setChecked(True)
     pantalla.casilla_aire.setChecked(True)
@@ -865,7 +862,7 @@ def test_condiciones_incluye_placard_y_aire(qtbot, conn):
 
 
 def test_tabla_bloques_tiene_cuatro_columnas_con_horas_minimas(qtbot, conn):
-    pantalla = PantallaListaEspera(conn)
+    pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)
     encabezados = [
         pantalla.tabla_bloques.horizontalHeaderItem(i).text() for i in range(pantalla.tabla_bloques.columnCount())

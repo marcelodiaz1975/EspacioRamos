@@ -1964,6 +1964,59 @@ nuevos, `test_gui_grilla_y_mensajeria.py`/`test_gui_valores.py`, cubren
 cada formulario nuevo (título, orden de solapas, tipo e identidad de
 cada panel).
 
+### Disponibilidad (con reubicación del botón "Manual del usuario")
+
+Segundo merge de "Operativa diaria": agrupa "Oferta de consultorios" +
+"Lista de espera" + "Archivos varios" (renombrada "Archivos para
+enviar"), las tres antes pantallas propias e independientes del menú,
+en un formulario nuevo. De paso, cumple el pedido puntual de la clienta
+sobre esta misma reorganización: el botón "Manual del usuario" se saca
+de "Archivos para enviar" (donde era uno de los botones de "elegir/ver",
+junto a Propuesta/Disponibilidad) y se reubica en Gestor de archivos del
+espacio (`imagenes.py`, formulario "Archivos y listas"), como botón
+`botonPrimario` propio, después de "Eliminar" y con una línea divisoria
+propia arriba.
+
+- `oferta.py`/`lista_espera.py`/`archivos_varios.py`: `PantallaOferta`/
+  `PantallaListaEspera`/`PantallaArchivosVarios` pasan a `_PanelOferta`/
+  `_PanelListaEspera`/`_PanelArchivosVarios` (sin título ni `QTabWidget`
+  propios). Caso especial: `_PanelListaEspera` NO le pone
+  `objectName="panelSolapa"` a `self` — esta pantalla, desde antes de la
+  reorganización, ya tenía el fondo claro de "ficha" acotado solo al
+  formulario "Nuevo pedido" (la tabla de pedidos y los botones de abajo
+  quedaban deliberadamente fuera de ese panel, sobre el fondo liso) — se
+  preservó esa distinción tal cual estaba en vez de extender el fondo
+  claro a toda la solapa, que hubiera sido un cambio visual no pedido.
+- `disponibilidad.py` (nuevo): `PantallaDisponibilidad`, mismo patrón que
+  el resto — título Nivel 1 fijo + `QTabWidget` con las tres solapas en
+  el orden del Excel.
+- Botón "Manual del usuario": `_PanelGestorArchivos` (`imagenes.py`) suma
+  un parámetro `secciones` opcional (mismo dato que ya recibía
+  `PantallaArchivosVarios` — la lista de `Seccion` del menú, para armar
+  la ayuda contextual del manual vía `app.pdf.manual_pdf.
+  generar_pdf_manual`) y un botón nuevo que, a diferencia del resto de
+  los botones de este panel (que actúan sobre la fila seleccionada en la
+  tabla), no depende de ninguna selección — siempre regenera el PDF
+  contra el estado actual del sistema. `PantallaArchivosYListas` reenvía
+  `secciones` hacia ese panel; `gui_main.py` se la pasa igual que antes
+  se la pasaba a "Archivos varios" (comentario actualizado en
+  `construir_secciones`, que arma la lista como mutable justamente por
+  esto). `_PanelArchivosVarios` pierde `_TIPOS_DOCUMENTO["manual"]`, el
+  botón y el parámetro `secciones` — ya no le hace falta.
+- `gui_main.py`: se sacan las `Seccion` "Oferta de consultorios", "Lista
+  de espera" y "Archivos varios"; se suma "Disponibilidad".
+- Tests: `test_gui_oferta.py`/`test_gui_lista_espera.py`/
+  `test_gui_archivos_varios.py` renombran la clase y suman/ajustan los
+  tests de formato (el de Lista de espera se reescribe para no asumir
+  más un `QTabWidget` ni un título propio). Los dos tests de "Manual del
+  usuario" que tenía `test_gui_archivos_varios.py` se mudan, adaptados,
+  a `test_gui_imagenes.py` (`_regenerar_manual` sobre
+  `_PanelGestorArchivos`), más un test nuevo de posición/estilo del
+  botón. `test_gui_main.py` actualiza su test de "la fábrica recibe la
+  lista completa de secciones" para apuntar a "Archivos y listas" en vez
+  de la ya inexistente "Archivos varios". `test_gui_disponibilidad.py`
+  (nuevo) cubre el formulario compuesto.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

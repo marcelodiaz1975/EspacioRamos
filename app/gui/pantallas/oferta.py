@@ -28,7 +28,15 @@ fijado según el "Tipo de búsqueda" elegido, igual criterio que las
 solapas de Reservas. El formulario no se resetea solo: lo cargado queda
 tal cual si se sale de la pantalla y se vuelve a entrar (el widget sigue
 vivo en memoria), y "Nueva búsqueda" es la única forma de limpiarlo a
-propósito."""
+propósito.
+
+Reordenamiento de formularios (Excel de la clienta): dejó de ser una
+pantalla propia del menú y pasó a ser la solapa "Oferta de consultorios"
+de "Disponibilidad" (`_PanelOferta`, junto a "Lista de espera" y
+"Archivos para enviar" — ver `disponibilidad.py`). Por eso ya no tiene
+título Nivel 1 ni su propio `QTabWidget` externo — mismo criterio que el
+resto de los merges de esta reorganización; mantiene su `QScrollArea`
+interno (mismo criterio que `_PanelCampos`/`_PanelGestorArchivos`)."""
 from __future__ import annotations
 
 import math
@@ -54,7 +62,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -200,9 +207,10 @@ class _DialogoPrevisualizacion(QDialog):
         return excluidas
 
 
-class PantallaOferta(QWidget):
+class _PanelOferta(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._franjas: list[Busqueda] = []
         self._armar_ui()
@@ -210,11 +218,6 @@ class PantallaOferta(QWidget):
         self._cargar_localidades()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        titulo = QLabel("Oferta de consultorios")
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
         splitter = QSplitter()
 
         panel_form = QWidget()
@@ -396,21 +399,17 @@ class PantallaOferta(QWidget):
         splitter.addWidget(self.grilla)
         splitter.setStretchFactor(1, 1)
 
-        panel_solapa = QWidget()
-        panel_solapa.setObjectName("panelSolapa")
-        layout_solapa = QVBoxLayout(panel_solapa)
-        layout_solapa.setContentsMargins(0, 0, 0, 0)
-        layout_solapa.addWidget(splitter)
-
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
-        scroll.setWidget(panel_solapa)
-
-        solapas = QTabWidget()
-        solapas.addTab(scroll, "Nueva búsqueda")
-        solapas.tabBar().setDrawBase(False)
-        layout.addWidget(solapas, stretch=1)
+        contenido = QWidget()
+        layout_contenido = QVBoxLayout(contenido)
+        layout_contenido.setContentsMargins(0, 0, 0, 0)
+        layout_contenido.addWidget(splitter)
+        scroll.setWidget(contenido)
+        layout_externo.addWidget(scroll)
         self._al_cambiar_tipo()
 
         self._foco = instalar_enter_avanza_foco(

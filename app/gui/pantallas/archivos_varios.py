@@ -15,18 +15,29 @@ otra pantalla existente. `app.pdf.placas_pdf.generar_pdf_placas` sigue
 existiendo tal cual y se sigue regenerando solo en el avance de mes.
 
 Formato solapa (revisión uno por uno): columna izquierda de ancho fijo
-con cuatro botones. Los primeros tres ("Propuesta", "Disponibilidad",
-"Manual del usuario", `botonSecundario` — ninguno es más "definitivo"
-que los otros) NO regeneran nada — solo eligen qué documento mirar y
-muestran en el cuadro de la derecha la vista previa del archivo que ya
-existe en su carpeta (el primero, si hay más de uno —
-Propuesta/Disponibilidad arman uno por localidad). El cuarto,
-"Regenerar documento" (`botonPrimario`: es la acción más importante de
-esta pantalla, la única que efectivamente escribe algo), vuelve a
-generar el archivo del tipo elegido con los primeros tres y refresca la
-vista previa con el resultado. Separar "elegir/ver" de "regenerar"
-evita que mirar qué hay cargado dispare, de paso, una regeneración no
-pedida."""
+con botones. Los primeros ("Propuesta", "Disponibilidad", `botonSecundario`
+— ninguno es más "definitivo" que el otro) NO regeneran nada — solo
+eligen qué documento mirar y muestran en el cuadro de la derecha la
+vista previa del archivo que ya existe en su carpeta (el primero, si hay
+más de uno — arman uno por localidad). El último, "Regenerar documento"
+(`botonPrimario`: es la acción más importante de esta pantalla, la única
+que efectivamente escribe algo), vuelve a generar el archivo del tipo
+elegido con los primeros y refresca la vista previa con el resultado.
+Separar "elegir/ver" de "regenerar" evita que mirar qué hay cargado
+dispare, de paso, una regeneración no pedida.
+
+Reordenamiento de formularios (Excel de la clienta): dejó de ser una
+pantalla propia del menú y pasó a ser la solapa "Archivos para enviar"
+de "Disponibilidad" (`_PanelArchivosVarios`, junto a "Oferta de
+consultorios" y "Lista de espera" — ver `disponibilidad.py`). Por eso ya
+no tiene título Nivel 1 ni su propio `QTabWidget`/`QScrollArea` externo
+— mismo criterio que el resto de los merges de esta reorganización. De
+paso, el botón "Manual del usuario" (antes uno de los tres botones de
+"elegir/ver" acá) se reubicó en Gestor de archivos del espacio
+(`imagenes.py`, formulario "Archivos y listas"), como botón
+`botonPrimario` propio después de "Eliminar" — pedido explícito de la
+clienta. Acá quedan solo "Propuesta"/"Disponibilidad" para elegir/ver +
+"Regenerar documento"."""
 from __future__ import annotations
 
 import sqlite3
@@ -35,42 +46,31 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from app.gui.main_window import Seccion
 from app.gui.pantallas.imagenes import _pixmap_primera_pagina_pdf
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.negocio.archivos_generados import (
-    SUBCARPETA_DISPONIBILIDAD,
-    SUBCARPETA_MANUAL,
-    SUBCARPETA_PROPUESTA,
-    carpeta_archivos_varios,
-)
+from app.negocio.archivos_generados import SUBCARPETA_DISPONIBILIDAD, SUBCARPETA_PROPUESTA, carpeta_archivos_varios
 from app.pdf.disponibilidad_pdf import generar_pdfs_disponibilidad_por_localidad
-from app.pdf.manual_pdf import generar_pdf_manual
 from app.pdf.propuesta_pdf import generar_pdfs_propuesta_por_localidad
 
-_ANCHO_BOTON = 200  # Propuesta / Disponibilidad / Manual del usuario / Regenerar documento
+_ANCHO_BOTON = 200  # Propuesta / Disponibilidad / Regenerar documento
+
 _ESCALA_PREVIEW = 1.3  # más grande que el 0.6 de Gestor de archivos: acá el cuadro es más ancho
 
-# (etiqueta para mensajes, subcarpeta) por tipo de documento — "manual" arma
-# su generador aparte porque necesita self._secciones.
 _TIPOS_DOCUMENTO = {
     "propuesta": ("Propuesta", SUBCARPETA_PROPUESTA),
     "disponibilidad": ("Disponibilidad", SUBCARPETA_DISPONIBILIDAD),
-    "manual": ("Manual del usuario", SUBCARPETA_MANUAL),
 }
 
-_SIN_SELECCION = "Elegí un documento (Propuesta, Disponibilidad o Manual del usuario) para ver su vista previa."
+_SIN_SELECCION = "Elegí un documento (Propuesta o Disponibilidad) para ver su vista previa."
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -90,11 +90,11 @@ def _primer_archivo_existente(directorio: Path) -> str | None:
     return str(archivos[0]) if archivos else None
 
 
-class PantallaArchivosVarios(QWidget):
-    def __init__(self, conn: sqlite3.Connection, secciones: list[Seccion] | None = None, parent=None):
+class _PanelArchivosVarios(QWidget):
+    def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
-        self._secciones = secciones or []
         self._tipo_seleccionado: str | None = None
         self._armar_ui()
 
@@ -106,16 +106,7 @@ class PantallaArchivosVarios(QWidget):
         self.boton_propuesta.setFocus()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
-
-        titulo = QLabel("Archivos varios".upper())
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        solapas = QTabWidget()
-        panel_solapa = QWidget()
-        panel_solapa.setObjectName("panelSolapa")
-        layout_solapa = QHBoxLayout(panel_solapa)
+        layout_solapa = QHBoxLayout(self)
 
         panel_izquierda = QWidget()
         columna = QVBoxLayout(panel_izquierda)
@@ -140,24 +131,19 @@ class PantallaArchivosVarios(QWidget):
         self.boton_disponibilidad.clicked.connect(lambda: self._seleccionar("disponibilidad"))
         columna.addWidget(self.boton_disponibilidad)
 
-        self.boton_manual = QPushButton("Manual del usuario")
-        self.boton_manual.setObjectName("botonSecundario")
-        self.boton_manual.clicked.connect(lambda: self._seleccionar("manual"))
-        columna.addWidget(self.boton_manual)
-
         self.boton_regenerar = QPushButton("Regenerar documento")
         self.boton_regenerar.setObjectName("botonPrimario")
         self.boton_regenerar.clicked.connect(self._regenerar_seleccionado)
         columna.addWidget(self.boton_regenerar)
 
-        for boton in (self.boton_propuesta, self.boton_disponibilidad, self.boton_manual, self.boton_regenerar):
+        for boton in (self.boton_propuesta, self.boton_disponibilidad, self.boton_regenerar):
             boton.setFixedWidth(_ANCHO_BOTON)
 
         columna.addStretch()
         layout_solapa.addWidget(panel_izquierda)
 
         self._foco = instalar_enter_avanza_foco(
-            [self.boton_propuesta, self.boton_disponibilidad, self.boton_manual, self.boton_regenerar],
+            [self.boton_propuesta, self.boton_disponibilidad, self.boton_regenerar],
             parent=self,
         )
 
@@ -171,14 +157,6 @@ class PantallaArchivosVarios(QWidget):
         self.area_preview.setWidget(self.etiqueta_preview)
         columna_derecha.addWidget(self.area_preview, stretch=1)
         layout_solapa.addLayout(columna_derecha, stretch=1)
-
-        scroll = QScrollArea()
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(panel_solapa)
-        solapas.addTab(scroll, "Documentos")
-        solapas.tabBar().setDrawBase(False)
-        layout.addWidget(solapas, stretch=1)
 
     # --------------------------------------------------------- elegir/ver
 
@@ -196,10 +174,7 @@ class PantallaArchivosVarios(QWidget):
     def _generador(self, clave: str):
         if clave == "propuesta":
             return generar_pdfs_propuesta_por_localidad
-        if clave == "disponibilidad":
-            return generar_pdfs_disponibilidad_por_localidad
-        tuplas = [(s.categoria, s.nombre, s.ayuda) for s in self._secciones]
-        return lambda conn, directorio: [generar_pdf_manual(conn, directorio, tuplas)]
+        return generar_pdfs_disponibilidad_por_localidad
 
     def _regenerar_seleccionado(self) -> None:
         if self._tipo_seleccionado is None:
@@ -207,11 +182,6 @@ class PantallaArchivosVarios(QWidget):
             return
         clave = self._tipo_seleccionado
         etiqueta, subcarpeta = _TIPOS_DOCUMENTO[clave]
-        if clave == "manual" and not self._secciones:
-            QMessageBox.warning(
-                self, "Regenerar documento", "No hay ayuda contextual disponible para armar el manual.",
-            )
-            return
         try:
             directorio = str(carpeta_archivos_varios(self.conn, subcarpeta))
             rutas = self._generador(clave)(self.conn, directorio)

@@ -3,6 +3,7 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.main_window import Seccion
 from app.gui.pantallas.imagenes import _PanelGestorArchivos, _DialogoAgregarArchivo
 from app.repositorio.registro import obtener_repositorio
 
@@ -75,6 +76,49 @@ def test_es_un_panel_solapa(qtbot, conn):
     pantalla = _PanelGestorArchivos(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.objectName() == "panelSolapa"
+
+
+def test_boton_manual_del_usuario_es_primario_y_va_despues_de_eliminar(qtbot, conn):
+    """Reordenamiento de formularios: el botón "Manual del usuario" se
+    reubicó acá desde la vieja pantalla "Archivos varios" (ahora
+    "Archivos para enviar" de "Disponibilidad") — pedido explícito de la
+    clienta: después de "Eliminar", con una línea divisoria propia
+    arriba, como botonPrimario."""
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_manual.text() == "Manual del usuario"
+    assert pantalla.boton_manual.objectName() == "botonPrimario"
+
+    panel_izquierda = pantalla.boton_eliminar.parentWidget()
+    form = panel_izquierda.layout()
+    widgets = [form.itemAt(i).widget() for i in range(form.count()) if form.itemAt(i).widget() is not None]
+    assert widgets.index(pantalla.boton_manual) > widgets.index(pantalla.boton_eliminar)
+
+
+def test_regenerar_manual_sin_secciones_avisa_y_no_falla(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla._regenerar_manual()  # no debe lanzar, solo avisar
+
+    carpeta = tmp_path / "Archivos varios" / "Manual"
+    assert not carpeta.exists() or list(carpeta.iterdir()) == []
+
+
+def test_regenerar_manual_genera_archivo(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    secciones = [Seccion("Alguna pantalla", lambda c: None, categoria="Principal", ayuda="Texto de ayuda.")]
+    pantalla = _PanelGestorArchivos(conn, secciones)
+    qtbot.addWidget(pantalla)
+
+    pantalla._regenerar_manual()
+
+    generados = list((tmp_path / "Archivos varios" / "Manual").iterdir())
+    assert len(generados) == 1
+    assert generados[0].name == "Manual de usuario.pdf"
 
 
 def test_alcance_por_defecto_es_todos_los_archivos(qtbot, conn):

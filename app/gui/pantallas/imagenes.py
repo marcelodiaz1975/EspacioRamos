@@ -55,7 +55,20 @@ de la propuesta — ver `catalogos.py`). Por eso ya no tiene título Nivel
 1 propio. Mantiene su `QScrollArea` interno (mismo criterio que
 `_PanelCampos` de Configuración general: el `objectName="panelSolapa"`
 va en el widget de más afuera — el que se pasa a `addTab(...)` — aunque
-el contenido scrollee adentro)."""
+el contenido scrollee adentro).
+
+De paso (misma reorganización) suma el botón "Manual del usuario",
+reubicado acá desde la vieja pantalla "Archivos varios" (ahora la solapa
+"Archivos para enviar" de "Disponibilidad" — ver `archivos_varios.py`):
+va después de "Eliminar", con una línea divisoria propia arriba, como
+`botonPrimario` (pedido explícito de la clienta) — a diferencia de los
+otros botones de este panel, que actúan sobre el archivo SELECCIONADO en
+la tabla, este no depende de ninguna selección: siempre regenera el PDF
+del manual contra el estado actual del sistema (mismo generador que
+usaba "Archivos varios", `app.pdf.manual_pdf.generar_pdf_manual`, que
+necesita la lista de `Seccion` del menú para armar la ayuda contextual —
+por eso `_PanelGestorArchivos` ahora recibe `secciones` opcional,
+reenviado desde `PantallaArchivosYListas`)."""
 from __future__ import annotations
 
 import shutil
@@ -82,7 +95,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.main_window import Seccion
 from app.gui.widgets.items_tabla import item_numero
+from app.negocio.archivos_generados import SUBCARPETA_MANUAL, carpeta_archivos_varios
 from app.negocio.imagenes import (
     CATEGORIAS_CON_ETIQUETA_LIBRE,
     EXTENSIONES_DOCUMENTO,
@@ -99,6 +114,7 @@ from app.negocio.imagenes import (
     marcar_principal,
     reordenar,
 )
+from app.pdf.manual_pdf import generar_pdf_manual
 
 _ANCHO_CAMPO = 240
 _TODOS = "Todos los archivos"
@@ -245,10 +261,11 @@ class _DialogoAgregarArchivo(QDialog):
 
 
 class _PanelGestorArchivos(QWidget):
-    def __init__(self, conn: sqlite3.Connection, parent=None):
+    def __init__(self, conn: sqlite3.Connection, secciones: list[Seccion] | None = None, parent=None):
         super().__init__(parent)
         self.setObjectName("panelSolapa")
         self.conn = conn
+        self._secciones = secciones or []
         self._imagenes: list[sqlite3.Row] = []
         self._armar_ui()
         self._cargar_combo_localidad()
@@ -347,6 +364,14 @@ class _PanelGestorArchivos(QWidget):
         self.boton_eliminar.setFixedWidth(_ANCHO_CAMPO)
         self.boton_eliminar.clicked.connect(self._eliminar)
         form.addWidget(self.boton_eliminar)
+
+        form.addWidget(_linea_divisoria())
+
+        self.boton_manual = QPushButton("Manual del usuario")
+        self.boton_manual.setObjectName("botonPrimario")
+        self.boton_manual.setFixedWidth(_ANCHO_CAMPO)
+        self.boton_manual.clicked.connect(self._regenerar_manual)
+        form.addWidget(self.boton_manual)
 
         form.addStretch()
         layout_solapa.addWidget(panel_izquierda)
@@ -634,3 +659,22 @@ class _PanelGestorArchivos(QWidget):
         eliminar_imagen(self.conn, img["IdImagen"])
         self.conn.commit()
         self.actualizar()
+
+    def _regenerar_manual(self) -> None:
+        """A diferencia del resto de los botones de este panel, no
+        depende de ninguna fila seleccionada en la tabla — siempre
+        regenera el PDF del manual contra el estado actual del sistema
+        (mismo generador que usaba la vieja pantalla "Archivos varios")."""
+        if not self._secciones:
+            QMessageBox.warning(
+                self, "Manual del usuario", "No hay ayuda contextual disponible para armar el manual.",
+            )
+            return
+        tuplas = [(s.categoria, s.nombre, s.ayuda) for s in self._secciones]
+        directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_MANUAL))
+        try:
+            ruta = generar_pdf_manual(self.conn, directorio, tuplas)
+        except ValueError as error:
+            QMessageBox.warning(self, "Manual del usuario", str(error))
+            return
+        QMessageBox.information(self, "Manual del usuario", f"Se generó el manual en:\n{ruta}")
