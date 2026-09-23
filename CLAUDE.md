@@ -1788,6 +1788,72 @@ liquidación" (7 solapas en total).
   para revisar la cadena de foco); suma un test nuevo confirmando que la
   cadena de foco NO se reinstala al entrar a "Bloques rígidos".
 
+### Archivos y listas (formulario nuevo, 4 solapas)
+
+Tercer merge de "Sistema" hecho, el primero que junta pantallas antes
+completamente independientes (sin relación entre sí) en un formulario
+nuevo. "Archivos y listas" agrupa "Gestor de archivos del espacio"
+(antes "Gestor de archivos", pantalla propia) + tres catálogos genéricos
+que antes también eran pantallas propias del menú: "Listas editables",
+"Condiciones y normas" y "Detalles complementarios de la propuesta".
+
+Esto destapó una limitación real de `PantallaCRUD` (`crud_generico.py`):
+hasta ahora solo sabía ser una pantalla de catálogo independiente
+(título Nivel 1 + su propio `QTabWidget` de una sola pestaña "Listado")
+o, en modo `compacto=True`, un componente embebido DENTRO de otra
+pantalla compuesta pero sin la fila de Buscar ni la tabla envuelta en
+solapa (pensado para catálogos como Mensajes predefinidos, con sus
+propios paneles alrededor). Ninguno de los dos servía para "este
+catálogo completo, tal cual, como una solapa más de un formulario
+ajeno" — que es exactamente lo que necesitan varios formularios del
+reordenamiento (Archivos y listas, Base datos del espacio, Profesionales
++Profesiones, Registro de ausencias +Tipos de licencia, Liquidaciones
++Fechas especiales, Placas para timbres +Placas, Balance del negocio
++Gastos operativos). Se sumó un parámetro nuevo, `anidado: bool = False`:
+cuando es `True`, `PantallaCRUD` se salta el título y el `QTabWidget`
+propio, pone `objectName="panelSolapa"` en sí misma (el widget de más
+afuera, listo para `addTab(...)`) y arma el resto (Buscar + Nuevo/
+Editar/Eliminar + tabla, con su `QScrollArea` interno) exactamente igual
+que siempre — se extrajo esa construcción a un método propio,
+`_armar_panel_izquierda_y_tabla`, compartido entre el modo estándar y el
+anidado, para no duplicar el layout. La cadena de foco Enter/Tab
+(Buscar → Nuevo → Editar → Eliminar) y el `showEvent` que la reinicia y
+enfoca el primer control siguen funcionando igual en modo anidado, sin
+ningún cambio — es la misma `PantallaCRUD` de siempre, solo sin la
+ceremonia de título/solapa propia. Los tres catálogos de este merge
+(`pantalla_listas_editables`/`pantalla_condiciones_normas`/
+`pantalla_detalles_complementarios_propuesta` en `catalogos.py`) suman
+un parámetro `anidado` propio (default `False`, no cambia nada para
+quien los siga llamando sin ese argumento) que solo reenvían a
+`PantallaCRUD`.
+
+- `app/gui/pantallas/imagenes.py`: `PantallaImagenes` pasa a
+  `_PanelGestorArchivos`, mismo criterio que el resto de los merges
+  (`objectName="panelSolapa"` en sí misma, sin título ni `QTabWidget`
+  propio) — a diferencia de `_PanelImportacion`/`_PanelBloquesRigidos`,
+  conserva un `QScrollArea` interno (mismo patrón que `_PanelCampos` de
+  Configuración general: el `objectName` va en el widget de más afuera
+  aunque el contenido scrollee adentro), porque la pantalla original ya
+  scrolleaba así. Esta pantalla nunca tuvo cadena de foco propia (no
+  formó parte de la revisión "uno por uno") y se dejó tal cual — no es
+  parte del alcance de esta reorganización agregarle una.
+- `app/gui/pantallas/archivos_y_listas.py` (nuevo): `PantallaArchivosYListas`,
+  mismo patrón que Usuarios y permisos — título Nivel 1 fijo
+  ("ARCHIVOS Y LISTAS") + `QTabWidget` con las cuatro solapas en el
+  orden del Excel de la clienta.
+- `gui_main.py`: se sacaron las cuatro `Seccion` independientes
+  ("Imágenes", "Listas editables", "Condiciones y normas", "Detalles
+  complementarios (Propuesta)") y se sumó una sola, "Archivos y listas".
+- Tests: `test_gui_imagenes.py` renombra la clase en sus imports/usos y
+  suma un test de `objectName="panelSolapa"` (mismo criterio que
+  Importación/Bloques rígidos). `test_crud_generico.py` suma dos tests
+  para el modo `anidado=True` (sin título/QTabWidget, Buscar y foco
+  intactos). `test_gui_archivos_y_listas.py` (nuevo) cubre el título, las
+  cuatro solapas en orden, que "Gestor de archivos del espacio" es un
+  `_PanelGestorArchivos` funcional y que las tres solapas de catálogo son
+  `PantallaCRUD` anidadas de verdad (sin título propio, con `anidado is
+  True`).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

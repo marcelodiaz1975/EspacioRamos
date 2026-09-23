@@ -2,7 +2,17 @@
 Unidades, Consultorios, Responsables, Tipos de licencia, Listas editables,
 Condiciones y normas, Mensajes predefinidos) sin escribir una clase por tabla.
 Se parametriza con una lista de Campo (columna, etiqueta, tipo de control) y
-usa el Repositorio genérico (app/repositorio/base.py) para leer y escribir."""
+usa el Repositorio genérico (app/repositorio/base.py) para leer y escribir.
+
+`anidado=True` (reordenamiento de formularios, Excel de la clienta): en vez
+de pantalla de catálogo independiente (título Nivel 1 + su propio
+`QTabWidget` de una sola pestaña "Listado"), el catálogo se arma como una
+solapa desnuda lista para pasarse directo a `addTab(...)` de un formulario
+compuesto (ej. "Archivos y listas", "Base datos del espacio") — mismo
+criterio `objectName="panelSolapa"` en el widget de más afuera (`self`) que
+`_PanelCampos`/`_PanelGestorArchivos`, con el mismo contenido de siempre
+(Buscar + Nuevo/Editar/Eliminar + tabla) adentro de un `QScrollArea`
+propio."""
 from __future__ import annotations
 
 import sqlite3
@@ -158,6 +168,7 @@ class PantallaCRUD(QWidget):
         panel_extra_superior_izquierda: QWidget | None = None,
         etiqueta_buscar: str = "Buscar",
         nuevo_secundario: bool = False,
+        anidado: bool = False,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -236,6 +247,9 @@ class PantallaCRUD(QWidget):
         # botonPrimario — para catálogos donde otra acción del panel es la
         # más importante (ej. Mensajes predefinidos: "Copiar mensaje").
         self.nuevo_secundario = nuevo_secundario
+        # anidado: ver docstring del módulo — sin título ni QTabWidget
+        # propio, para embeberse como solapa de un formulario compuesto.
+        self.anidado = anidado
         self.campo_buscar: QLineEdit | None = None
         self.boton_nuevo = self.boton_editar = self.boton_eliminar = None
         self._armar_ui(titulo)
@@ -251,61 +265,80 @@ class PantallaCRUD(QWidget):
             (self.campo_buscar or self.boton_nuevo).setFocus()
 
     def _armar_ui(self, titulo: str) -> None:
-        layout = QVBoxLayout(self)
-
-        etiqueta_titulo = QLabel(titulo)
-        etiqueta_titulo.setObjectName("tituloPantalla")
-        layout.addWidget(etiqueta_titulo)
-
-        if self.compacto:
-            self._armar_botones_y_tabla(layout)
-            if self.instalar_foco:
-                self._foco = instalar_enter_avanza_foco(
-                    [self.boton_nuevo, self.boton_editar, self.boton_eliminar], parent=self,
-                )
-        else:
-            solapas = QTabWidget()
-            panel_solapa = QWidget()
-            panel_solapa.setObjectName("panelSolapa")
-            layout_solapa = QHBoxLayout(panel_solapa)
-
-            panel_izquierda = QWidget()
-            form = QVBoxLayout(panel_izquierda)
-            form.addWidget(_titulo_campo(self.etiqueta_buscar))
-            self.campo_buscar = QLineEdit()
-            self.campo_buscar.setFixedWidth(_ANCHO_CAMPO)
-            self.campo_buscar.textChanged.connect(self._aplicar_filtro_busqueda)
-            form.addWidget(self.campo_buscar)
-            if self.panel_extra_superior_izquierda is not None:
-                form.addWidget(self.panel_extra_superior_izquierda)
-            self._armar_botones_y_tabla(form, ancho_botones=_ANCHO_CAMPO)
-            if self.panel_extra_izquierda is not None:
-                # con stretch para que ocupe el resto del alto disponible (ej.
-                # Profesionales: la lista de documentación se estira hasta el
-                # pie del panel, a la par de la barra de desplazamiento
-                # horizontal de la tabla) — sin esto quedaba pegado arriba,
-                # del alto justo de su contenido, con todo el resto en blanco
-                # abajo.
-                form.addWidget(self.panel_extra_izquierda, stretch=1)
-            else:
-                form.addStretch()
-            layout_solapa.addWidget(panel_izquierda)
-
-            layout_solapa.addWidget(self.tabla_widget, stretch=1)
-
+        if self.anidado:
+            self.setObjectName("panelSolapa")
+            layout_externo = QVBoxLayout(self)
+            layout_externo.setContentsMargins(0, 0, 0, 0)
             scroll = QScrollArea()
             scroll.setFrameShape(QFrame.Shape.NoFrame)
             scroll.setWidgetResizable(True)
-            scroll.setWidget(panel_solapa)
-            solapas.addTab(scroll, "Listado")
-            solapas.tabBar().setDrawBase(False)
-            layout.addWidget(solapas, stretch=1)
+            contenido = QWidget()
+            layout_solapa = QHBoxLayout(contenido)
+            self._armar_panel_izquierda_y_tabla(layout_solapa)
+            scroll.setWidget(contenido)
+            layout_externo.addWidget(scroll)
 
             orden_foco = [self.campo_buscar, self.boton_nuevo, self.boton_editar, self.boton_eliminar]
             if self.instalar_foco:
                 self._foco = instalar_enter_avanza_foco([w for w in orden_foco if w is not None], parent=self)
+        else:
+            layout = QVBoxLayout(self)
+
+            etiqueta_titulo = QLabel(titulo)
+            etiqueta_titulo.setObjectName("tituloPantalla")
+            layout.addWidget(etiqueta_titulo)
+
+            if self.compacto:
+                self._armar_botones_y_tabla(layout)
+                if self.instalar_foco:
+                    self._foco = instalar_enter_avanza_foco(
+                        [self.boton_nuevo, self.boton_editar, self.boton_eliminar], parent=self,
+                    )
+            else:
+                solapas = QTabWidget()
+                panel_solapa = QWidget()
+                panel_solapa.setObjectName("panelSolapa")
+                layout_solapa = QHBoxLayout(panel_solapa)
+                self._armar_panel_izquierda_y_tabla(layout_solapa)
+
+                scroll = QScrollArea()
+                scroll.setFrameShape(QFrame.Shape.NoFrame)
+                scroll.setWidgetResizable(True)
+                scroll.setWidget(panel_solapa)
+                solapas.addTab(scroll, "Listado")
+                solapas.tabBar().setDrawBase(False)
+                layout.addWidget(solapas, stretch=1)
+
+                orden_foco = [self.campo_buscar, self.boton_nuevo, self.boton_editar, self.boton_eliminar]
+                if self.instalar_foco:
+                    self._foco = instalar_enter_avanza_foco([w for w in orden_foco if w is not None], parent=self)
 
         self._orden = OrdenTabla(self.tabla_widget, self.actualizar)
+
+    def _armar_panel_izquierda_y_tabla(self, layout_solapa) -> None:
+        panel_izquierda = QWidget()
+        form = QVBoxLayout(panel_izquierda)
+        form.addWidget(_titulo_campo(self.etiqueta_buscar))
+        self.campo_buscar = QLineEdit()
+        self.campo_buscar.setFixedWidth(_ANCHO_CAMPO)
+        self.campo_buscar.textChanged.connect(self._aplicar_filtro_busqueda)
+        form.addWidget(self.campo_buscar)
+        if self.panel_extra_superior_izquierda is not None:
+            form.addWidget(self.panel_extra_superior_izquierda)
+        self._armar_botones_y_tabla(form, ancho_botones=_ANCHO_CAMPO)
+        if self.panel_extra_izquierda is not None:
+            # con stretch para que ocupe el resto del alto disponible (ej.
+            # Profesionales: la lista de documentación se estira hasta el
+            # pie del panel, a la par de la barra de desplazamiento
+            # horizontal de la tabla) — sin esto quedaba pegado arriba,
+            # del alto justo de su contenido, con todo el resto en blanco
+            # abajo.
+            form.addWidget(self.panel_extra_izquierda, stretch=1)
+        else:
+            form.addStretch()
+        layout_solapa.addWidget(panel_izquierda)
+
+        layout_solapa.addWidget(self.tabla_widget, stretch=1)
 
     def _armar_botones_y_tabla(self, layout, ancho_botones: int | None = None) -> None:
         """Arma los botones Nuevo/Editar/Eliminar (si no es de solo

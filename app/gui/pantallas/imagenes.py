@@ -45,7 +45,17 @@ página con PyMuPDF (opcional en tiempo de ejecución — si no está
 instalado, cae al mensaje de "sin vista"); TXT mostrando las primeras
 líneas como texto. Word (.doc/.docx) no tiene vista previa disponible
 todavía — mismo mensaje "No hay vista disponible" que cualquier archivo
-que no se pudo leer."""
+que no se pudo leer.
+
+Reordenamiento de formularios (Excel de la clienta): dejó de ser una
+pantalla propia del menú y pasó a ser la solapa "Gestor de archivos del
+espacio" del formulario "Archivos y listas" (`_PanelGestorArchivos`,
+junto a Listas editables/Condiciones y normas/Detalles complementarios
+de la propuesta — ver `catalogos.py`). Por eso ya no tiene título Nivel
+1 propio. Mantiene su `QScrollArea` interno (mismo criterio que
+`_PanelCampos` de Configuración general: el `objectName="panelSolapa"`
+va en el widget de más afuera — el que se pasa a `addTab(...)` — aunque
+el contenido scrollee adentro)."""
 from __future__ import annotations
 
 import shutil
@@ -68,7 +78,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -235,9 +244,10 @@ class _DialogoAgregarArchivo(QDialog):
         return self.check_principal.isChecked()
 
 
-class PantallaImagenes(QWidget):
+class _PanelGestorArchivos(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._imagenes: list[sqlite3.Row] = []
         self._armar_ui()
@@ -245,15 +255,13 @@ class PantallaImagenes(QWidget):
         self._al_cambiar_alcance()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        titulo = QLabel("Gestor de archivos")
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        solapas = QTabWidget()
-        panel_solapa = QWidget()
-        panel_solapa.setObjectName("panelSolapa")
-        layout_solapa = QHBoxLayout(panel_solapa)
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        contenido = QWidget()
+        layout_solapa = QHBoxLayout(contenido)
 
         panel_izquierda = QWidget()
         form = QVBoxLayout(panel_izquierda)
@@ -365,11 +373,8 @@ class PantallaImagenes(QWidget):
         layout_preview.addStretch()
         layout_solapa.addWidget(panel_preview, stretch=1)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(panel_solapa)
-        solapas.addTab(scroll, "Archivos del espacio")
-        layout.addWidget(solapas, stretch=1)
+        scroll.setWidget(contenido)
+        layout_externo.addWidget(scroll)
 
     def _al_cambiar_alcance(self, *_args) -> None:
         alcance = self.combo_alcance.currentText()

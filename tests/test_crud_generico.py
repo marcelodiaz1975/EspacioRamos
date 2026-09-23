@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import QDate, QLocale, Qt
-from PySide6.QtWidgets import QDateEdit, QDialog, QMessageBox, QScrollArea, QTabWidget
+from PySide6.QtWidgets import QDateEdit, QDialog, QLabel, QMessageBox, QScrollArea, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -276,6 +276,36 @@ def test_pantalla_crud_compacto_mantiene_el_layout_viejo(qtbot, conn):
     assert pantalla.findChildren(QTabWidget) == []
     assert pantalla.campo_buscar is None
     assert pantalla.boton_editar.objectName() == "botonSecundario"
+
+
+def test_pantalla_crud_anidado_no_tiene_titulo_ni_tabwidget_propio(qtbot, conn):
+    """anidado=True (reordenamiento de formularios): el catálogo se
+    embebe como solapa de un formulario compuesto — sin título Nivel 1
+    ni su propio QTabWidget de una sola pestaña "Listado", pero
+    conservando Buscar + Nuevo/Editar/Eliminar + tabla de siempre."""
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio(), anidado=True)
+    qtbot.addWidget(pantalla)
+    assert pantalla.objectName() == "panelSolapa"
+    assert pantalla.findChild(QLabel, "tituloPantalla") is None
+    assert pantalla.findChildren(QTabWidget) == []
+    assert pantalla.campo_buscar is not None
+    assert pantalla.boton_nuevo.objectName() == "botonPrimario"
+
+
+def test_pantalla_crud_anidado_conserva_buscar_y_foco(qtbot, conn):
+    conn.execute("INSERT INTO Edificio (Nombre, CampoLibre1) VALUES ('Torre Norte', 'Ramos Mejía')")
+    conn.execute("INSERT INTO Edificio (Nombre, CampoLibre1) VALUES ('Torre Sur', 'Haedo')")
+    conn.commit()
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio(), anidado=True)
+    qtbot.addWidget(pantalla)
+
+    pantalla.campo_buscar.setText("haedo")
+    ocultas = [pantalla.tabla_widget.isRowHidden(f) for f in range(pantalla.tabla_widget.rowCount())]
+    assert ocultas.count(True) == 1
+
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    qtbot.waitUntil(lambda: pantalla.campo_buscar.hasFocus())
 
 
 def _campos_fecha_especial():

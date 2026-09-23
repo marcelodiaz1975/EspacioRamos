@@ -12,11 +12,11 @@ from app.gui.dialogos_seguridad import DialogoLogin, MonitorInactividad
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
+from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
 from app.gui.pantallas.aumentos import PantallaAumentos
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla_operativa import PantallaGrillaOperativa
-from app.gui.pantallas.imagenes import PantallaImagenes
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
 from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.pantallas.llaves import PantallaLlaves
@@ -152,8 +152,11 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             ayuda="Alta, baja y edición de los consultorios dentro de cada unidad, con sus valores.",
         ),
         Seccion(
-            "Imágenes", lambda conn: PantallaImagenes(conn), categoria="Catálogos",
-            ayuda="Carga y ordena las fotos de edificios, unidades y consultorios usadas en Propuesta.",
+            "Archivos y listas", lambda conn: PantallaArchivosYListas(conn), categoria="Catálogos",
+            ayuda="Solapa Gestor de archivos del espacio: fotos y documentos de edificios, unidades y "
+            "consultorios usados en Propuesta/Disponibilidad/Liquidación/Oferta. Solapas Listas "
+            "editables, Condiciones y normas y Detalles complementarios de la propuesta: listas y "
+            "textos de referencia usados por otras pantallas y por el PDF de Propuesta.",
         ),
         Seccion(
             "Responsables", catalogos.pantalla_responsables, categoria="Catálogos",
@@ -162,20 +165,6 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
         Seccion(
             "Tipos de licencia", catalogos.pantalla_tipos_licencia, categoria="Catálogos",
             ayuda="Catálogo de tipos de licencia disponibles para cargarle a un profesional.",
-        ),
-        Seccion(
-            "Listas editables", catalogos.pantalla_listas_editables, categoria="Catálogos",
-            ayuda="Listas de valores editables usadas como opciones en otras pantallas del sistema.",
-        ),
-        Seccion(
-            "Condiciones y normas", catalogos.pantalla_condiciones_normas, categoria="Catálogos",
-            ayuda="Texto de condiciones y normas que se incluye en los documentos de Propuesta.",
-        ),
-        Seccion(
-            "Detalles complementarios (Propuesta)",
-            catalogos.pantalla_detalles_complementarios_propuesta,
-            categoria="Catálogos",
-            ayuda="Datos adicionales por consultorio que se muestran en el PDF de Propuesta.",
         ),
         Seccion(
             "Mensajes predefinidos", pantalla_mensajes_predefinidos, categoria="Catálogos",

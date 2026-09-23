@@ -184,19 +184,19 @@ def _opciones_tipo_lista(conn: sqlite3.Connection) -> list[tuple[str, str]]:
     return [(f["TipoLista"], f["TipoLista"]) for f in filas]
 
 
-def pantalla_listas_editables(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_listas_editables(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("TipoLista", "Tipo de lista", tipo="combo", opciones=_opciones_tipo_lista, requerido=True),
         Campo("Valor", "Valor", requerido=True),
         Campo("Orden", "Orden", tipo="numero"),
         Campo("Activo", "Activo", tipo="booleano"),
     ]
-    pantalla = PantallaCRUD(conn, "ListasEditables", "Listas editables", campos)
+    pantalla = PantallaCRUD(conn, "ListasEditables", "Listas editables", campos, anidado=anidado)
     pantalla.al_guardar = lambda valores, registro: reordenar_al_guardar(conn, valores, registro)
     return pantalla
 
 
-def pantalla_condiciones_normas(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_condiciones_normas(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Numero", "N°", requerido=True),
         Campo("Titulo", "Título", requerido=True),
@@ -204,12 +204,12 @@ def pantalla_condiciones_normas(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Activo", "Activo", tipo="booleano"),
         *campos_libres(conn),
     ]
-    pantalla = PantallaCRUD(conn, "CondicionNorma", "Condiciones y normas", campos)
+    pantalla = PantallaCRUD(conn, "CondicionNorma", "Condiciones y normas", campos, anidado=anidado)
     pantalla.al_guardar = lambda valores, registro: reordenar_condiciones_al_guardar(conn, valores, registro)
     return pantalla
 
 
-def pantalla_detalles_complementarios_propuesta(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_detalles_complementarios_propuesta(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Orden", "Orden", tipo="numero", requerido=True),
         Campo("Titulo", "Título", requerido=True),
@@ -218,7 +218,7 @@ def pantalla_detalles_complementarios_propuesta(conn: sqlite3.Connection) -> Pan
         *campos_libres(conn),
     ]
     pantalla = PantallaCRUD(
-        conn, "DetalleComplementarioPropuesta", "Detalles complementarios (Propuesta)", campos,
+        conn, "DetalleComplementarioPropuesta", "Detalles complementarios (Propuesta)", campos, anidado=anidado,
     )
     pantalla.al_guardar = lambda valores, registro: reordenar_detalles_al_guardar(conn, valores, registro)
     return pantalla
