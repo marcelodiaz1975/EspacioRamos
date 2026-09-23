@@ -13,16 +13,13 @@ from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
 from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
-from app.gui.pantallas.aumentos import PantallaAumentos
 from app.gui.pantallas.base_datos_espacio import PantallaBaseDatosEspacio
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
-from app.gui.pantallas.grilla_operativa import PantallaGrillaOperativa
+from app.gui.pantallas.grilla_y_mensajeria import PantallaGrillaYMensajeria
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
 from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.pantallas.llaves import PantallaLlaves
-from app.gui.pantallas.mensajeria import CentroMensajeria
-from app.gui.pantallas.mensajes_predefinidos import pantalla_mensajes_predefinidos
 from app.gui.pantallas.novedades import PantallaCargosEspeciales, PantallaRegistroAusencias
 from app.gui.pantallas.oferta import PantallaOferta
 from app.gui.pantallas.pagos import PantallaPagos
@@ -31,6 +28,7 @@ from app.gui.pantallas.placas import PantallaPlacas
 from app.gui.pantallas.profesionales import pantalla_profesionales
 from app.gui.pantallas.reservas import PantallaReservas
 from app.gui.pantallas.usuarios import PantallaUsuarios
+from app.gui.pantallas.valores import PantallaValores
 from app.negocio.backup import restaurar_backup
 from app.negocio.instancia_unica import BloqueoInstanciaUnica, InstanciaYaAbierta
 from app.negocio.seguridad import asegurar_permisos_pantalla
@@ -58,16 +56,13 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "Importación datos desde Excel: importación masiva inicial de datos desde una planilla Excel.",
         ),
         Seccion(
-            "Vista rápida", lambda conn: PantallaGrillaOperativa(conn), categoria="Principal",
-            ayuda="Solapa Grilla: grilla filtrable por localidad/edificio/unidad/día/profesional, con período "
-            "propio y dos modos de visualización (reservas regulares o aisladas), más referencias de colores. "
-            "Al hacer clic en una celda se muestra el detalle de esa hora. Solapas Valores de los consultorios "
-            "y Estadísticas, sincronizadas con el mismo filtro de unidades.",
-        ),
-        Seccion(
-            "Centro de mensajería", lambda conn: CentroMensajeria(conn), categoria="Principal",
-            ayuda="Arma los mensajes de WhatsApp predefinidos (individuales o grupales) para las "
-            "distintas situaciones habituales de comunicación con los profesionales.",
+            "Grilla y mensajería", lambda conn: PantallaGrillaYMensajeria(conn), categoria="Principal",
+            ayuda="Solapa Grilla semanal: grilla filtrable por localidad/edificio/unidad/día/profesional, "
+            "con período propio y dos modos de visualización (reservas regulares o aisladas), más "
+            "referencias de colores. Solapa Centro de mensajería: arma los mensajes de WhatsApp "
+            "predefinidos (individuales o grupales) para las distintas situaciones habituales de "
+            "comunicación con los profesionales. Solapa Mensajes predefinidos: plantillas de mensaje "
+            "propias, editables.",
         ),
         Seccion(
             "Reservas", lambda conn: PantallaReservas(conn), categoria="Principal",
@@ -126,9 +121,11 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             ayuda="Indicadores generales del espacio: ocupación, ingresos y otras métricas agregadas.",
         ),
         Seccion(
-            "Aumentos y descuentos", lambda conn: PantallaAumentos(conn), categoria="Principal",
-            ayuda="Simula el impacto de un aumento de valores antes de confirmarlo, y aplica el "
-            "aumento confirmado a todos los valores correspondientes.",
+            "Valores", lambda conn: PantallaValores(conn), categoria="Principal",
+            ayuda="Solapa Valores vigentes: valor hora regular/aislada de cada consultorio, filtrable, "
+            "con resumen de promedios. Solapas Aumentos/Esquema de descuentos: simula el impacto de un "
+            "aumento de valores antes de confirmarlo (y lo aplica a todos los valores correspondientes), "
+            "y define los tramos del esquema de descuentos por horas semanales.",
         ),
         Seccion(
             "Profesionales", pantalla_profesionales, categoria="Catálogos",
@@ -150,10 +147,6 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
         Seccion(
             "Tipos de licencia", catalogos.pantalla_tipos_licencia, categoria="Catálogos",
             ayuda="Catálogo de tipos de licencia disponibles para cargarle a un profesional.",
-        ),
-        Seccion(
-            "Mensajes predefinidos", pantalla_mensajes_predefinidos, categoria="Catálogos",
-            ayuda="Plantillas de mensaje usadas por el Centro de mensajería para cada situación.",
         ),
         Seccion(
             "Profesiones", catalogos.pantalla_profesiones, categoria="Catálogos",

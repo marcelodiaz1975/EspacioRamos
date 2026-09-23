@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.mensajeria import CentroMensajeria
+from app.gui.pantallas.mensajeria import _PanelCentroMensajeria
 from app.negocio.archivos_generados import carpeta_profesional
 from app.negocio.dias import periodo_actual
 from app.negocio.mensajeria import color_profesional, marcar_mensaje_previo_generado
@@ -60,9 +60,18 @@ def _hacer_visible_aislada(conn, id_profesional):
     )
 
 
+def test_es_un_panel_solapa(qtbot, conn):
+    """Reordenamiento de formularios: dejó de ser una pantalla propia con
+    su propio título/QTabWidget — ahora es la solapa "Centro de
+    mensajería" de "Grilla y mensajería" (ver grilla_y_mensajeria.py)."""
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.objectName() == "panelSolapa"
+
+
 def test_centro_mensajeria_lista_profesionales_categoria_r(qtbot, conn):
     _crear_profesional(conn, saldo=500)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     assert pantalla.tabla.rowCount() == 1
@@ -71,7 +80,7 @@ def test_centro_mensajeria_lista_profesionales_categoria_r(qtbot, conn):
 
 def test_centro_mensajeria_muestra_estado_en_columna_propia(qtbot, conn):
     _crear_profesional(conn, saldo=0)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     assert pantalla.tabla.item(0, 2).text() == "Situación regular"
@@ -80,7 +89,7 @@ def test_centro_mensajeria_muestra_estado_en_columna_propia(qtbot, conn):
 def test_centro_mensajeria_muestra_nombre_y_apellido_sin_apodo(qtbot, conn):
     id_prof = _crear_profesional(conn, apellido="Lo Veci", saldo=0)
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, NombrePila="Marcela", Apodo="Male")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     assert pantalla.tabla.item(0, 1).text() == "Marcela Lo Veci"
@@ -89,7 +98,7 @@ def test_centro_mensajeria_muestra_nombre_y_apellido_sin_apodo(qtbot, conn):
 def test_centro_mensajeria_saldo_actual_suma_anterior_y_actual(qtbot, conn):
     id_prof = _crear_profesional(conn, saldo=1000)
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaActual=500)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     assert pantalla.tabla.item(0, 3).text() == "$ 1.000,00"
@@ -99,7 +108,7 @@ def test_centro_mensajeria_saldo_actual_suma_anterior_y_actual(qtbot, conn):
 def test_centro_mensajeria_cambia_a_categoria_aislada(qtbot, conn):
     id_prof = _crear_profesional(conn, categoria="A", apellido="Pérez")
     _hacer_visible_aislada(conn, id_prof)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     assert pantalla.tabla.rowCount() == 1
@@ -110,7 +119,7 @@ def test_centro_mensajeria_aislada_sin_reservas_vigentes_no_se_muestra(qtbot, co
     """DC-02 §2.2: se depura de la lista un A sin ninguna reserva del mes
     en curso en adelante."""
     _crear_profesional(conn, categoria="A", apellido="SinHoras")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     assert pantalla.tabla.rowCount() == 0
@@ -123,21 +132,21 @@ def test_centro_mensajeria_aislada_con_reserva_pasada_no_se_muestra(qtbot, conn)
         IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2020-01-05",
         HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
     )
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     assert pantalla.tabla.rowCount() == 0
 
 
 def test_centro_mensajeria_boton_grupal_llena_texto(qtbot, conn):
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     pantalla._mostrar_mensaje_grupal()
     assert "AVISOS VARIOS" in pantalla.texto_mensaje.toPlainText()
 
 
 def test_centro_mensajeria_usa_periodo_actual_por_defecto(qtbot, conn):
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.campo_periodo.text() == periodo_actual(conn)
 
@@ -146,7 +155,7 @@ def test_centro_mensajeria_usa_periodo_actual_por_defecto(qtbot, conn):
 
 def test_generar_texto_marron_pasa_a_amarillo(qtbot, conn):
     id_prof = _crear_profesional(conn, saldo=1)  # dentro de tolerancia -> marrón
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -166,7 +175,7 @@ def test_refrescar_reusa_el_boton_sin_duplicar_la_conexion(qtbot, conn):
     sonando en paralelo (dispararía el mensaje del profesional
     equivocado, o dos veces, al hacer clic)."""
     id_uno = _crear_profesional(conn, apellido="Uno", saldo=1, codigo="R1")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     fila_uno = pantalla._profesionales.index(next(p for p in pantalla._profesionales if p["IdProfesional"] == id_uno))
@@ -187,7 +196,7 @@ def test_refrescar_reusa_el_boton_sin_duplicar_la_conexion(qtbot, conn):
 def test_generar_texto_aislada_pasa_a_azul(qtbot, conn):
     id_prof = _crear_profesional(conn, categoria="A", apellido="Aislada")
     _hacer_visible_aislada(conn, id_prof)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
 
@@ -200,7 +209,7 @@ def test_generar_texto_aislada_pasa_a_azul(qtbot, conn):
 
 def test_generar_texto_copia_al_portapapeles(qtbot, conn, monkeypatch):
     _crear_profesional(conn, saldo=0)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -217,7 +226,7 @@ def test_generar_texto_copia_al_portapapeles(qtbot, conn, monkeypatch):
 
 def test_check_enviada_deshabilitado_para_marron(qtbot, conn):
     _crear_profesional(conn, saldo=1)  # dentro de tolerancia -> marrón
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -228,7 +237,7 @@ def test_check_enviada_deshabilitado_para_marron(qtbot, conn):
 def test_check_enviada_deshabilitado_para_aislada(qtbot, conn):
     id_prof = _crear_profesional(conn, categoria="A", apellido="Pérez")
     _hacer_visible_aislada(conn, id_prof)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
 
@@ -241,7 +250,7 @@ def test_check_enviada_habilitado_para_verde_sin_liquidacion_emitida(qtbot, conn
     verde/naranja/rojo/violeta/gris aunque todavía no se haya emitido
     ninguna liquidación — es el propio check el que la genera (DC-02 §2.3)."""
     _crear_profesional(conn, saldo=0)  # verde
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -252,7 +261,7 @@ def test_check_enviada_habilitado_para_verde_sin_liquidacion_emitida(qtbot, conn
 
 def test_marcar_enviada_emite_liquidacion_genera_pdf_y_baja_a_gris(qtbot, conn):
     id_prof = _crear_profesional(conn, saldo=0, codigo="R1")  # verde
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -273,7 +282,7 @@ def test_marcar_enviada_amarillo_usa_situacion_2(qtbot, conn):
     id_prof = _crear_profesional(conn, saldo=1, codigo="R1")  # marrón -> lo subimos a mano a amarillo
     marcar_mensaje_previo_generado(conn, id_prof, periodo_actual(conn))
 
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     assert _color(conn, id_prof) == "amarillo"
@@ -287,7 +296,7 @@ def test_marcar_enviada_violeta_borra_plazo_extendido(qtbot, conn):
     obtener_repositorio(conn, "Profesional").actualizar(
         id_prof, PlazoPagoExtendido="2099-01-01", MotivoPlazoExtra="Prometido",
     )
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     assert _color(conn, id_prof) == "violeta"
@@ -306,7 +315,7 @@ def test_marcar_enviada_es_reversible(qtbot, conn):
         IdProfesional=id_profesional, Periodo=periodo, EstadoEnvio="Enviada",
     )
 
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     assert pantalla.tabla.item(0, 5).checkState() == Qt.CheckState.Checked
@@ -321,7 +330,7 @@ def test_marcar_enviada_sin_carpeta_base_avisa_y_no_rompe(qtbot, conn):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = NULL WHERE IdConfiguracion = 1")
     conn.commit()
     _crear_profesional(conn, saldo=0, codigo="R1")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -338,7 +347,7 @@ def test_filtro_pendientes_es_el_default(qtbot, conn):
         IdProfesional=1, Periodo=periodo_actual(conn), EstadoEnvio="Enviada",
     )
     _crear_profesional(conn, apellido="Verde", saldo=0, codigo="R2")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
 
     assert pantalla.combo_filtro.currentData() == "pendientes"
@@ -352,7 +361,7 @@ def test_filtro_enviados(qtbot, conn):
         IdProfesional=1, Periodo=periodo_actual(conn), EstadoEnvio="Enviada",
     )
     _crear_profesional(conn, apellido="Verde", saldo=0, codigo="R2")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "enviados")
     assert pantalla.tabla.rowCount() == 1
@@ -363,7 +372,7 @@ def test_filtro_todos_incluye_regulares_y_aisladas(qtbot, conn):
     _crear_profesional(conn, categoria="R", apellido="Regular")
     id_aislada = _crear_profesional(conn, categoria="A", apellido="Aislada")
     _hacer_visible_aislada(conn, id_aislada)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     assert pantalla.tabla.rowCount() == 2
@@ -373,7 +382,7 @@ def test_filtro_solo_regulares(qtbot, conn):
     _crear_profesional(conn, categoria="R", apellido="Regular")
     id_aislada = _crear_profesional(conn, categoria="A", apellido="Aislada")
     _hacer_visible_aislada(conn, id_aislada)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "regulares")
     assert pantalla.tabla.rowCount() == 1
@@ -384,7 +393,7 @@ def test_filtro_solo_aisladas(qtbot, conn):
     _crear_profesional(conn, categoria="R", apellido="Regular")
     id_aislada = _crear_profesional(conn, categoria="A", apellido="Aislada")
     _hacer_visible_aislada(conn, id_aislada)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     assert pantalla.tabla.rowCount() == 1
@@ -407,7 +416,7 @@ def test_orden_por_color_y_dentro_de_cada_color_por_codigo(qtbot, conn):
     )
     _crear_profesional(conn, apellido="Verde", saldo=0, codigo="R3")
 
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -420,7 +429,7 @@ def test_orden_por_color_y_dentro_de_cada_color_por_codigo(qtbot, conn):
 def test_orden_codigo_natural_descendente_r10_antes_de_r2(qtbot, conn):
     _crear_profesional(conn, apellido="Diez", saldo=0, codigo="R10")
     _crear_profesional(conn, apellido="Dos", saldo=0, codigo="R2")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -431,7 +440,7 @@ def test_orden_codigo_natural_descendente_r10_antes_de_r2(qtbot, conn):
 def test_columna_profesional_incluye_el_tratamiento(qtbot, conn):
     id_prof = _crear_profesional(conn, apellido="Lo Veci", saldo=0)
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, NombrePila="Virginia", Tratamiento="Lic.")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     assert pantalla.tabla.item(0, 1).text() == "Lic. Virginia Lo Veci"
@@ -439,7 +448,7 @@ def test_columna_profesional_incluye_el_tratamiento(qtbot, conn):
 
 def test_columna_codigo_va_primero(qtbot, conn):
     _crear_profesional(conn, apellido="Lo Veci", saldo=0, codigo="R1")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.horizontalHeaderItem(0).text() == "Código"
     assert pantalla.tabla.horizontalHeaderItem(1).text() == "Profesional"
@@ -449,7 +458,7 @@ def test_columna_codigo_va_primero(qtbot, conn):
 def test_click_en_titulo_ordena_por_esa_columna(qtbot, conn):
     _crear_profesional(conn, apellido="Bajo", saldo=100, codigo="R9")
     _crear_profesional(conn, apellido="Alto", saldo=9000, codigo="R1")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -461,7 +470,7 @@ def test_click_en_titulo_ordena_por_esa_columna(qtbot, conn):
 def test_click_en_titulo_codigo_usa_orden_natural(qtbot, conn):
     _crear_profesional(conn, apellido="Diez", saldo=0, codigo="R10")
     _crear_profesional(conn, apellido="Dos", saldo=0, codigo="R2")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -473,7 +482,7 @@ def test_click_en_titulo_codigo_usa_orden_natural(qtbot, conn):
 def test_actualizar_despues_de_ordenar_vuelve_al_orden_por_color(qtbot, conn):
     _crear_profesional(conn, apellido="Bajo", saldo=100, codigo="R9")
     _crear_profesional(conn, apellido="Alto", saldo=9000, codigo="R1")
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
     orden_original = [pantalla.tabla.item(i, 1).text() for i in range(pantalla.tabla.rowCount())]
@@ -491,7 +500,7 @@ def test_tildar_enviada_despues_de_ordenar_afecta_al_profesional_correcto(qtbot,
     el propio ítem, no por su posición visual."""
     _crear_profesional(conn, apellido="Bajo", saldo=1, codigo="R9")  # marrón
     id_alto = _crear_profesional(conn, apellido="Alto", saldo=0, codigo="R1")  # verde
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -513,7 +522,7 @@ def _crear_consultorio(conn, numero=1, valor=500):
 
 
 def test_checks_combinar_aparecen_desmarcados_por_defecto(qtbot, conn):
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.check_combinar_misma_unidad.isChecked() is False
     assert pantalla.check_combinar_distintas_unidades.isChecked() is False
@@ -523,7 +532,7 @@ def test_no_expone_checks_de_incluir(qtbot, conn):
     """"Incluir consultorio/unidad/edificio" son controles de las
     pantallas de oferta/búsqueda (Disponibilidad, Lista de espera), no
     de este formulario — confirmado por el usuario."""
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     assert not hasattr(pantalla, "check_incluir_consultorio")
     assert not hasattr(pantalla, "check_incluir_unidad")
@@ -538,7 +547,7 @@ def test_mensaje_aislada_siempre_incluye_consultorio_y_unidad(qtbot, conn):
         Estado="Confirmada", AplicaRecargo=0,
     )
 
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     pantalla.tabla.cellWidget(0, 6).click()
@@ -559,7 +568,7 @@ def test_mensaje_aislada_por_defecto_no_combina(qtbot, conn):
         Estado="Confirmada", AplicaRecargo=0,
     )
 
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     pantalla.tabla.cellWidget(0, 6).click()
@@ -579,7 +588,7 @@ def test_tildar_combinar_misma_unidad_actualiza_el_mensaje(qtbot, conn):
         Estado="Confirmada", AplicaRecargo=0,
     )
 
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
     pantalla.check_combinar_misma_unidad.setChecked(True)
@@ -591,14 +600,14 @@ def test_tildar_combinar_misma_unidad_actualiza_el_mensaje(qtbot, conn):
 # ------------------------------------------------------ deshacer última acción
 
 def test_deshacer_sin_acciones_no_rompe(qtbot, conn):
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     pantalla._deshacer_ultima_accion()  # no debe lanzar
 
 
 def test_deshacer_marcar_enviada_sin_pdf_previo_borra_el_generado(qtbot, conn):
     id_prof = _crear_profesional(conn, saldo=0, codigo="R1")  # verde
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -623,7 +632,7 @@ def test_deshacer_marcar_enviada_restaura_el_pdf_previo(qtbot, conn):
     ruta = carpeta_profesional(conn, "R1") / nombre_archivo_liquidacion(periodo, profesional)
     ruta.write_bytes(b"PDF-VIEJO")
 
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -639,7 +648,7 @@ def test_deshacer_marcar_enviada_restaura_el_pdf_previo(qtbot, conn):
 def test_deshacer_marcar_enviada_restaura_saldo_actual(qtbot, conn):
     id_prof = _crear_profesional(conn, saldo=0, codigo="R1")
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaActual=1234)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -655,7 +664,7 @@ def test_deshacer_marcar_enviada_violeta_restaura_plazo_extendido(qtbot, conn):
     obtener_repositorio(conn, "Profesional").actualizar(
         id_prof, PlazoPagoExtendido="2099-01-01", MotivoPlazoExtra="Prometido",
     )
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -676,7 +685,7 @@ def test_deshacer_desmarcar_enviada_la_vuelve_a_marcar(qtbot, conn):
     id_liquidacion = obtener_repositorio(conn, "LiquidacionEmitida").crear(
         IdProfesional=id_profesional, Periodo=periodo, EstadoEnvio="Enviada",
     )
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -690,7 +699,7 @@ def test_deshacer_desmarcar_enviada_la_vuelve_a_marcar(qtbot, conn):
 
 def test_deshacer_generar_texto_marron_vuelve_a_marron(qtbot, conn):
     id_prof = _crear_profesional(conn, saldo=1, codigo="R1")  # dentro de tolerancia -> marrón
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 
@@ -705,7 +714,7 @@ def test_deshacer_generar_texto_marron_vuelve_a_marron(qtbot, conn):
 def test_deshacer_generar_texto_aislada_vuelve_a_celeste(qtbot, conn):
     id_prof = _crear_profesional(conn, categoria="A", apellido="Aislada", codigo="A1")
     _hacer_visible_aislada(conn, id_prof)
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
 
@@ -722,7 +731,7 @@ def test_generar_texto_sin_mutacion_no_deja_nada_para_deshacer(qtbot, conn):
     estado (verde) no debe dejar disponible una acción anterior más
     vieja para deshacer -> "última acción" es literal, la más reciente."""
     _crear_profesional(conn, saldo=0, codigo="R1")  # verde
-    pantalla = CentroMensajeria(conn)
+    pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
 

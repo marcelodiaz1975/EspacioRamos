@@ -42,7 +42,17 @@ pasa a mostrar en vivo lo que se generaría. La vista previa muestra
 los hechos ese tramo es abierto (el descuento se queda topado más allá,
 ver `valores.obtener_porcentaje_descuento`) y repetir un "Hasta" ahí no
 significaría nada. "Confirmar cambios" pide la misma confirmación que un
-aumento (avisa que se modifican valores en el sistema)."""
+aumento (avisa que se modifican valores en el sistema).
+
+Reordenamiento de formularios (Excel de la clienta): "Aumentos y
+descuentos" deja de ser una pantalla propia del menú — sus dos solapas
+("Aumentos"/"Esquema de descuentos") pasan a ser la 2da y 3ra solapa de
+"Valores" (`valores.py`), junto a "Valores vigentes" (antes "Valores de
+los consultorios" de Vista rápida). El contenedor de afuera que
+envolvía estas dos solapas (`PantallaAumentos`, título propio + su
+`QTabWidget`) se retira: `_PanelAumentos`/`_PanelEsquemaDescuentos`
+quedan como las dos clases de este módulo, importadas directo (cross
+import, mismo criterio que el resto de los merges) en `valores.py`."""
 from __future__ import annotations
 
 import sqlite3
@@ -63,7 +73,6 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -139,27 +148,6 @@ def _celda_monto_fija(valor: float) -> QTableWidgetItem:
     item = item_monto(valor)
     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
     return item
-
-
-class PantallaAumentos(QWidget):
-    def __init__(self, conn: sqlite3.Connection, parent=None):
-        super().__init__(parent)
-        self.conn = conn
-        layout = QVBoxLayout(self)
-        titulo = QLabel("Aumentos y descuentos")
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        pestanas = QTabWidget()
-        self.panel_aumentos = _PanelAumentos(conn)
-        self.panel_esquema = _PanelEsquemaDescuentos(conn)
-        pestanas.addTab(self.panel_aumentos, "Aumentos")
-        pestanas.addTab(self.panel_esquema, "Esquema de descuentos")
-        layout.addWidget(pestanas, stretch=1)
-
-    def actualizar(self) -> None:
-        self.panel_aumentos.actualizar()
-        self.panel_esquema.actualizar()
 
 
 class _PanelAumentos(QWidget):

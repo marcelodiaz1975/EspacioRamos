@@ -44,7 +44,16 @@ previsualizar, por ejemplo, un mensaje general como si fuera para un
 edificio puntual sin tener que editar el mensaje. Localidad no tiene
 ninguna variable propia todavía ({edificio}/{unidad}/{consultorio}/
 {apodo} son las únicas) — queda ahí por paridad con el cuadro de
-diálogo, listo para el día que haga falta un {localidad}."""
+diálogo, listo para el día que haga falta un {localidad}.
+
+Reordenamiento de formularios (Excel de la clienta): dejó de ser una
+pantalla propia del menú y pasó a ser la solapa "Mensajes predefinidos"
+de "Grilla y mensajería" (`_PanelMensajesPredefinidos`, junto a "Grilla
+semanal" y "Centro de mensajería" — ver `grilla_y_mensajeria.py`). El
+`PantallaCRUD` interno pasa a `anidado=True` (sin su propio título ni
+`QTabWidget` "Listado") y `_PanelMensajesPredefinidos` pone
+`objectName="panelSolapa"` en sí misma — la "Vista previa" de abajo,
+fuera del `PantallaCRUD`, sigue en el mismo lugar."""
 from __future__ import annotations
 
 import sqlite3
@@ -131,9 +140,10 @@ def _variables_ubicacion(
     return variables
 
 
-class PantallaMensajesPredefinidos(QWidget):
+class _PanelMensajesPredefinidos(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._armar_ui()
 
@@ -195,6 +205,7 @@ class PantallaMensajesPredefinidos(QWidget):
             self.conn, "MensajePredefinido", "Mensajes predefinidos", _campos_mensaje_predefinido(self.conn),
             panel_extra_superior_izquierda=panel_superior,
             nuevo_secundario=True,
+            anidado=True,
         )
         self.crud.tabla_widget.itemSelectionChanged.connect(self._actualizar_vista_previa)
         layout.addWidget(self.crud, stretch=1)
@@ -270,7 +281,3 @@ class PantallaMensajesPredefinidos(QWidget):
 
     def _copiar_mensaje(self) -> None:
         QGuiApplication.clipboard().setText(self.texto_vista_previa.toPlainText())
-
-
-def pantalla_mensajes_predefinidos(conn: sqlite3.Connection) -> PantallaMensajesPredefinidos:
-    return PantallaMensajesPredefinidos(conn)

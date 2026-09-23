@@ -1,10 +1,11 @@
 """Promedios de valor hora regular y hora aislada por localidad/edificio/
-unidad, para el resumen que acompaña a "Valores de los consultorios"
-(Vista rápida). Son promedios simples (no ponderados por horas ni
-ocupación) de `Consultorio.ValorHoraRegularActual`/`ValorHoraAisladaActual`,
-acotados a los consultorios que pasa quien llama — la pantalla es la que
-resuelve ese conjunto según sus propios filtros de Localidad/Edificio/
-Unidad/Consultorio."""
+unidad, para el resumen que acompaña a la solapa "Valores vigentes" del
+formulario "Valores" (antes "Valores de los consultorios" de Vista
+rápida). Son promedios simples (no ponderados por horas ni ocupación) de
+`Consultorio.ValorHoraRegularActual`/`ValorHoraAisladaActual`, acotados a
+los consultorios que pasa quien llama — la pantalla es la que resuelve
+ese conjunto según sus propios filtros de Localidad/Edificio/Unidad/
+Consultorio."""
 from __future__ import annotations
 
 import sqlite3
@@ -16,8 +17,7 @@ from app.pdf.estilos import clave_orden_unidad
 @dataclass
 class PromedioGrupo:
     """Un renglón agregado (localidad, edificio, o unidad). `localidad`/
-    `edificio`/`unidad` van poblados solo hasta el nivel que corresponde
-    — mismo criterio que `EstadisticaGrupo`."""
+    `edificio`/`unidad` van poblados solo hasta el nivel que corresponde."""
     nombre: str
     localidad: str | None = None
     edificio: str | None = None

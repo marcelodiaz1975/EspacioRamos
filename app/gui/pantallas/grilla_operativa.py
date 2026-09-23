@@ -1,23 +1,29 @@
-"""Pantalla "Vista rápida" (ex "Grilla operativa", punto 21 de la
-miscelánea, ago-2026, renombrada y reorganizada en solapas a pedido de la
-clienta): tres solapas independientes, cada una con su propio filtro:
+"""Ex pantalla "Vista rápida" (ex "Grilla operativa", punto 21 de la
+miscelánea, ago-2026). Reordenamiento de formularios (Excel de la
+clienta): la pantalla en sí se retira — sus tres solapas se repartieron
+así:
 
-- Grilla semanal: la grilla filtrable en sí (el widget compartido
-  `GrillaOperativaWidget`, sin modificar — lo siguen usando tal cual el
-  resto de los formularios que la embeben) + referencias de colores.
-- Valores de los consultorios: valor hora regular/aislada de cada
-  consultorio, con su propio filtro en cascada Localidad/Edificio/
-  Unidad/Consultorio (`_PanelFiltrosJerarquico`, un nivel más profundo
-  que el de la grilla) + un resumen de promedios de valor hora regular
-  y aislada.
-- Estadísticas: mismo filtro en cascada; total general primero, después
-  el desglose por localidad (si el filtro abarca más de una) y por
-  edificio (si abarca más de uno), y por último el detalle por unidad —
-  ver `app.negocio.estadisticas_operativas`.
+- Grilla semanal: pasa a `_PanelGrillaSemanal`, solapa de "Grilla y
+  mensajería" (`grilla_y_mensajeria.py`, import cruzado, mismo criterio
+  que el resto de los merges de esta reorganización).
+- Valores de los consultorios: pasa a `_PanelValoresVigentes`, solapa
+  "Valores vigentes" de "Valores" (`valores.py`).
+- Estadísticas: SE SACA DEL SISTEMA por decisión explícita de la
+  clienta (`AskUserQuestion` durante el análisis del Excel de
+  reubicación: esta tabla en vivo, filtrable, quedaba redundante contra
+  la pantalla completa "Estadísticas") — se borró todo el código
+  exclusivo de esa solapa, incluido el módulo `app.negocio.
+  estadisticas_operativas` (sin otro consumidor).
 
-Las tres solapas ordenan igual (Localidad/Edificio alfabético, Unidad
-por piso — `app.pdf.estilos.clave_orden_unidad`: PB primero, después EP,
-después ascendente numérico)."""
+Quedan en este módulo los helpers y widgets que siguen usando las dos
+solapas que sobreviven: `_PanelFiltrosJerarquico` (filtro en cascada
+Localidad/Edificio/Unidad/Consultorio, un nivel más profundo que el de
+la grilla, por eso no se reusa `GrillaOperativaWidget` acá) y
+`_PanelPromedios` (resumen de promedios de valor hora regular/aislada) —
+ambos exclusivos de "Valores de los consultorios". Las dos solapas
+ordenan igual (Localidad/Edificio alfabético, Unidad por piso —
+`app.pdf.estilos.clave_orden_unidad`: PB primero, después EP, después
+ascendente numérico)."""
 from __future__ import annotations
 
 import sqlite3
@@ -26,41 +32,19 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
-    QScrollArea, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, LeyendaColores, _FiltroColapsable
-from app.negocio.estadisticas_operativas import EstadisticaGrupo, EstadisticasOperativas, calcular_estadisticas_operativas
 from app.negocio.formato import formatear_moneda
 from app.negocio.valores_operativos import PromediosValorHora, calcular_promedios_valor_hora
 from app.pdf.estilos import clave_orden_unidad
 
 _COLUMNAS_VALORES = ["Localidad", "Edificio", "Unidad", "Consultorio", "Valor hora regular", "Valor hora aislada"]
-_COLUMNAS_ESTADISTICAS = [
-    "Localidad", "Edificio", "Unidad", "% Ocupación", "Horas semanales",
-    "Subtotal regulares", "Subtotal aisladas", "Total", "Pagos del mes", "Falta cobrar",
-]
-_PADDING_COLUMNAS_ESTADISTICAS = 30  # de más para Localidad y Edificio, a pedido de la clienta — el resto sin tocar
-
-_VALOR_ESTADISTICA_POR_COLUMNA = [
-    lambda g: g.localidad or g.nombre or "",
-    lambda g: g.edificio or "",
-    lambda g: g.unidad or "",
-    lambda g: g.porcentaje_ocupacion,
-    lambda g: g.horas_semanales,
-    lambda g: g.subtotal_regulares,
-    lambda g: g.subtotal_aisladas,
-    lambda g: g.total_regular_y_aislada,
-    lambda g: g.pagos_atribuidos,
-    lambda g: g.falta_cobrar,
-]
 
 _COLOR_TOTAL = QColor("#B7C8DC")
 _COLOR_LOCALIDAD = QColor("#D2DEEB")
 _COLOR_EDIFICIO = QColor("#E9EFF5")
-
-def _fmt_horas(horas: float) -> str:
-    return str(int(horas)) if horas == int(horas) else f"{horas:.1f}"
 
 
 class _ItemNumerico(QTableWidgetItem):
@@ -203,9 +187,9 @@ def _ids_reales(lista: QListWidget) -> list:
 
 class _PanelFiltrosJerarquico(QGroupBox):
     """Filtro en cascada Localidad > Edificio > Unidad > Consultorio, para
-    las solapas "Valores de los consultorios" y "Estadísticas" — un nivel
-    más profundo que el filtro de la grilla (que llega hasta Unidad), por
-    eso no se reusa `GrillaOperativaWidget` acá. Cada nivel arranca con
+    la solapa "Valores de los consultorios" — un nivel más profundo que
+    el filtro de la grilla (que llega hasta Unidad), por eso no se reusa
+    `GrillaOperativaWidget` acá. Cada nivel arranca con
     todo tildado, mismo criterio que la grilla. `on_cambiar(self)` se
     dispara con el panel mismo (no con `self.filtros_valores` del lado de
     la pantalla, que todavía no existiría como atributo la primera vez
@@ -448,74 +432,53 @@ class _PanelPromedios(QGroupBox):
                 self.tabla.setItem(fila, indice, item)
 
 
-class PantallaGrillaOperativa(QWidget):
+class _PanelGrillaSemanal(QWidget):
+    """Solapa "Grilla semanal" de "Grilla y mensajería" — antes la
+    primera solapa de "Vista rápida". Sin filtro propio: reusa
+    `GrillaOperativaWidget` tal cual (el mismo widget compartido que usan
+    otros formularios), con su leyenda de colores debajo."""
+
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
-
         layout = QVBoxLayout(self)
-
-        titulo = QLabel("Vista rápida")
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        tabs = QTabWidget()
-        layout.addWidget(tabs)
-
-        # Las tablas se arman antes que los paneles de filtros: el
-        # constructor de `_PanelFiltrosJerarquico` ya dispara `on_cambiar`
-        # una vez (con todo tildado por defecto), y ese refresco necesita
-        # que las tablas ya existan.
-        self.tabla_valores = _armar_tabla(_COLUMNAS_VALORES)
-        self.tabla_estadisticas = _armar_tabla(_COLUMNAS_ESTADISTICAS, ordenable_nativo=False)
-        self.tabla_estadisticas.horizontalHeader().sectionClicked.connect(self._ordenar_estadisticas_por_columna)
-        self._estadisticas = EstadisticasOperativas(periodo="")
-        self._columna_orden_estadisticas: int | None = None
-        self._orden_ascendente_estadisticas = True
-        self.promedios_valores = _PanelPromedios()
-
-        panel_grilla = QWidget()
-        panel_grilla.setObjectName("panelSolapa")
-        layout_grilla = QVBoxLayout(panel_grilla)
         self.grilla = GrillaOperativaWidget(conn)
         self.grilla.combo_modo.currentIndexChanged.connect(self._actualizar_leyenda)
-        layout_grilla.addWidget(self.grilla)
+        layout.addWidget(self.grilla)
         self._leyenda = LeyendaColores()
-        layout_grilla.addWidget(self._leyenda)
-        # Con el horario configurado hoy, la grilla entra entera sin
-        # scroll — si más adelante se configuran más horas de
-        # visualización y ya no entra, este QScrollArea (no la tabla en
-        # sí) es el que muestra la barra vertical, dejando que la grilla
-        # se pinte siempre a su alto natural completo.
-        scroll_grilla = QScrollArea()
-        scroll_grilla.setWidgetResizable(True)
-        scroll_grilla.setWidget(panel_grilla)
-        tabs.addTab(scroll_grilla, "Grilla semanal")
-
-        panel_valores = QWidget()
-        panel_valores.setObjectName("panelSolapa")
-        layout_valores = QHBoxLayout(panel_valores)
-        self.filtros_valores = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_valores)
-        layout_valores.addWidget(self.filtros_valores)
-        layout_valores.addWidget(self.promedios_valores)
-        grupo_valores = QGroupBox("Valores vigentes por horas regulares y aisladas")
-        layout_grupo_valores = QVBoxLayout(grupo_valores)
-        layout_grupo_valores.addWidget(self.tabla_valores)
-        layout_valores.addWidget(grupo_valores, stretch=1)
-        tabs.addTab(panel_valores, "Valores de los consultorios")
-
-        panel_estadisticas = QWidget()
-        panel_estadisticas.setObjectName("panelSolapa")
-        layout_estadisticas = QHBoxLayout(panel_estadisticas)
-        self.filtros_estadisticas = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_estadisticas)
-        layout_estadisticas.addWidget(self.filtros_estadisticas)
-        layout_estadisticas.addWidget(self.tabla_estadisticas, stretch=1)
-        tabs.addTab(panel_estadisticas, "Estadísticas")
-
-    # -------------------------------------------------------- sincronismo
+        layout.addWidget(self._leyenda)
 
     def _actualizar_leyenda(self) -> None:
         self._leyenda.actualizar(self.grilla.combo_modo.currentData() or "regular")
+
+
+class _PanelValoresVigentes(QWidget):
+    """Solapa "Valores vigentes" de "Valores" — antes la solapa "Valores
+    de los consultorios" de "Vista rápida". Filtro en cascada
+    (`_PanelFiltrosJerarquico`) + tabla de valor hora regular/aislada por
+    consultorio + resumen de promedios (`_PanelPromedios`)."""
+
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.setObjectName("panelSolapa")
+        self.conn = conn
+        layout = QHBoxLayout(self)
+
+        # La tabla y los promedios se arman antes que el filtro: el
+        # constructor de `_PanelFiltrosJerarquico` ya dispara `on_cambiar`
+        # una vez (con todo tildado por defecto), y ese refresco necesita
+        # que ya existan.
+        self.tabla_valores = _armar_tabla(_COLUMNAS_VALORES)
+        self.promedios_valores = _PanelPromedios()
+
+        self.filtros_valores = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_valores)
+        layout.addWidget(self.filtros_valores)
+        layout.addWidget(self.promedios_valores)
+        grupo_valores = QGroupBox("Valores vigentes por horas regulares y aisladas")
+        layout_grupo_valores = QVBoxLayout(grupo_valores)
+        layout_grupo_valores.addWidget(self.tabla_valores)
+        layout.addWidget(grupo_valores, stretch=1)
 
     def _refrescar_valores(self, panel: _PanelFiltrosJerarquico) -> None:
         ids_consultorio = panel.ids_consultorio_seleccionados()
@@ -553,81 +516,3 @@ class PantallaGrillaOperativa(QWidget):
         self.tabla_valores.setSortingEnabled(True)
 
         self.promedios_valores.actualizar(calcular_promedios_valor_hora(self.conn, ids_consultorio))
-
-    def _refrescar_estadisticas(self, panel: _PanelFiltrosJerarquico) -> None:
-        ids_unidad = panel.ids_unidad_seleccionadas()
-        ids_consultorio = panel.ids_consultorio_seleccionados()
-        self._columna_orden_estadisticas = None
-        self.tabla_estadisticas.horizontalHeader().setSortIndicatorShown(False)
-        if not ids_unidad or not ids_consultorio:
-            self._estadisticas = EstadisticasOperativas(periodo="")
-            self.tabla_estadisticas.setRowCount(0)
-            return
-        self._estadisticas = calcular_estadisticas_operativas(self.conn, ids_unidad, ids_consultorio_filtro=ids_consultorio)
-        self._reconstruir_filas_estadisticas(
-            self._estadisticas.por_localidad, self._estadisticas.por_edificio, self._estadisticas.por_unidad,
-        )
-
-    def _ordenar_estadisticas_por_columna(self, columna: int) -> None:
-        if columna == self._columna_orden_estadisticas:
-            self._orden_ascendente_estadisticas = not self._orden_ascendente_estadisticas
-        else:
-            self._columna_orden_estadisticas = columna
-            self._orden_ascendente_estadisticas = True
-        localidades, edificios, unidades = _ordenar_grupos_jerarquico(
-            self._estadisticas.por_localidad, self._estadisticas.por_edificio, self._estadisticas.por_unidad,
-            _VALOR_ESTADISTICA_POR_COLUMNA[columna], self._orden_ascendente_estadisticas,
-        )
-        orden = Qt.SortOrder.AscendingOrder if self._orden_ascendente_estadisticas else Qt.SortOrder.DescendingOrder
-        self.tabla_estadisticas.horizontalHeader().setSortIndicatorShown(True)
-        self.tabla_estadisticas.horizontalHeader().setSortIndicator(columna, orden)
-        self._reconstruir_filas_estadisticas(localidades, edificios, unidades)
-
-    def _reconstruir_filas_estadisticas(self, por_localidad, por_edificio, por_unidad) -> None:
-        filas: list[tuple[EstadisticaGrupo, QColor | None]] = [(self._estadisticas.total, _COLOR_TOTAL)]
-        if len(por_localidad) > 1:
-            filas += [(g, _COLOR_LOCALIDAD) for g in por_localidad]
-        if len(por_edificio) > 1:
-            filas += [(g, _COLOR_EDIFICIO) for g in por_edificio]
-        filas += [(g, None) for g in por_unidad]
-
-        self.tabla_estadisticas.setRowCount(len(filas))
-        for fila, (grupo, color) in enumerate(filas):
-            self._llenar_fila_estadistica(fila, grupo, color)
-        self._ensanchar_columnas_localidad_edificio()
-
-    def _ensanchar_columnas_localidad_edificio(self) -> None:
-        """A pedido de la clienta: Localidad y Edificio (las dos primeras
-        columnas) quedan con un poco más de aire que el resto, que sigue
-        ajustándose solo al contenido (`ResizeToContents`). Hay que volver
-        a `ResizeToContents` primero para que recalcule el ancho natural
-        contra los datos de la tabla actual (cambian con cada filtro), y
-        recién ahí pasar a `Interactive` para poder sumarle el padding sin
-        que Qt lo vuelva a achicar."""
-        header = self.tabla_estadisticas.horizontalHeader()
-        for columna in (0, 1):
-            header.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
-            ancho_natural = self.tabla_estadisticas.columnWidth(columna)
-            header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Interactive)
-            self.tabla_estadisticas.setColumnWidth(columna, ancho_natural + _PADDING_COLUMNAS_ESTADISTICAS)
-
-    def _llenar_fila_estadistica(self, fila: int, grupo: EstadisticaGrupo, color: QColor | None) -> None:
-        columnas: list[QTableWidgetItem] = [
-            QTableWidgetItem(grupo.localidad if grupo.localidad is not None else grupo.nombre),  # el total no tiene localidad propia
-            QTableWidgetItem(grupo.edificio or ""),
-            QTableWidgetItem(grupo.unidad or ""),
-            _ItemNumerico(f"{grupo.porcentaje_ocupacion:.1f} %", grupo.porcentaje_ocupacion),
-            _ItemNumerico(_fmt_horas(grupo.horas_semanales), grupo.horas_semanales),
-            _ItemNumerico(formatear_moneda(grupo.subtotal_regulares), grupo.subtotal_regulares),
-            _ItemNumerico(formatear_moneda(grupo.subtotal_aisladas), grupo.subtotal_aisladas),
-            _ItemNumerico(formatear_moneda(grupo.total_regular_y_aislada), grupo.total_regular_y_aislada),
-            _ItemNumerico(formatear_moneda(grupo.pagos_atribuidos), grupo.pagos_atribuidos),
-            _ItemNumerico(formatear_moneda(grupo.falta_cobrar), grupo.falta_cobrar),
-        ]
-        for indice, item in enumerate(columnas):
-            if color is not None:
-                fuente = item.font()
-                fuente.setBold(True)
-                item.setFont(fuente)
-                item.setBackground(color)
-            self.tabla_estadisticas.setItem(fila, indice, item)

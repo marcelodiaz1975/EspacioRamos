@@ -14,7 +14,14 @@ Incluir consultorio / Incluir unidad / Incluir edificio / Combinar misma
 unidad / Combinar distintas unidades.
 
 Filtros exactos de DC-02 §4: Todos / Pendientes de envío / Enviados /
-Solo regulares / Solo aisladas."""
+Solo regulares / Solo aisladas.
+
+Reordenamiento de formularios (Excel de la clienta): dejó de ser una
+pantalla propia del menú y pasó a ser la solapa "Centro de mensajería"
+de "Grilla y mensajería" (`_PanelCentroMensajeria`, junto a "Grilla
+semanal" y "Mensajes predefinidos" — ver `grilla_y_mensajeria.py`). Por
+eso ya no tiene título Nivel 1 ni su propio `QTabWidget`/`QScrollArea`
+externo — mismo criterio que `_PanelImportacion`/`_PanelBloquesRigidos`."""
 from __future__ import annotations
 
 import os
@@ -32,10 +39,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -172,9 +177,10 @@ class _ItemMoneda(QTableWidgetItem):
         return super().__lt__(other)
 
 
-class CentroMensajeria(QWidget):
+class _PanelCentroMensajeria(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._profesionales: list[sqlite3.Row] = []
         self._actualizando_tabla = False
@@ -192,16 +198,7 @@ class CentroMensajeria(QWidget):
         self.combo_filtro.setFocus()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
-
-        titulo = QLabel("Centro de mensajería")
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        solapas = QTabWidget()
-        panel_solapa = QWidget()
-        panel_solapa.setObjectName("panelSolapa")
-        layout_solapa = QHBoxLayout(panel_solapa)
+        layout_solapa = QHBoxLayout(self)
 
         panel_izquierda = QWidget()
         columna = QVBoxLayout(panel_izquierda)
@@ -274,14 +271,6 @@ class CentroMensajeria(QWidget):
         self.tabla.setSortingEnabled(True)
         self.tabla.itemChanged.connect(self._al_cambiar_enviada)
         layout_solapa.addWidget(self.tabla, stretch=1)
-
-        scroll = QScrollArea()
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(panel_solapa)
-        solapas.addTab(scroll, "Listado")
-        solapas.tabBar().setDrawBase(False)
-        layout.addWidget(solapas, stretch=1)
 
         self.campo_periodo.setText(periodo_actual(self.conn))
 

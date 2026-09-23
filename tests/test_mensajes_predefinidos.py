@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.crud_generico import _DialogoRegistro
-from app.gui.pantallas.mensajes_predefinidos import PantallaMensajesPredefinidos
+from app.gui.pantallas.mensajes_predefinidos import _PanelMensajesPredefinidos
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -30,14 +30,27 @@ def _crear_consultorio(conn):
     return id_consultorio
 
 
+def test_es_un_panel_solapa_con_crud_anidado(qtbot, conn):
+    """Reordenamiento de formularios: dejó de ser una pantalla propia con
+    su propio título/QTabWidget — ahora es la solapa "Mensajes
+    predefinidos" de "Grilla y mensajería" (ver grilla_y_mensajeria.py),
+    y el PantallaCRUD interno va en modo anidado (sin título ni
+    QTabWidget "Listado" propios)."""
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.objectName() == "panelSolapa"
+    assert pantalla.crud.anidado is True
+    assert pantalla.crud.objectName() == "panelSolapa"
+
+
 def test_pantalla_se_arma_con_los_sembrados(qtbot, conn):
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.crud.tabla_widget.rowCount() == len(obtener_repositorio(conn, "MensajePredefinido").listar())
 
 
 def test_pantalla_tiene_tres_campos_libres(qtbot, conn):
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     nombres = [c.nombre for c in pantalla.crud.campos]
     assert nombres.count("CampoLibre1") == 1
@@ -49,7 +62,7 @@ def test_orden_del_panel_izquierdo_categoria_dirigido_a_copiar_nuevo(qtbot, conn
     """Pedido de la clienta: "Copiar mensaje" arriba de "Nuevo" (como
     acción principal de la pantalla), y "Dirigido a" (+ los cuatro
     selectores de contexto) arriba de "Copiar mensaje"."""
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     boton_copiar = next(
         w for w in pantalla.findChildren(type(pantalla.crud.boton_nuevo)) if w.text() == "Copiar mensaje"
@@ -70,7 +83,7 @@ def test_orden_del_panel_izquierdo_categoria_dirigido_a_copiar_nuevo(qtbot, conn
 def test_sin_linea_divisoria_entre_categoria_y_dirigido_a(qtbot, conn):
     from PySide6.QtWidgets import QFrame
 
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     padre = pantalla.combo_filtro.parentWidget()
     lineas = [w for w in padre.findChildren(QFrame) if w.frameShape() == QFrame.Shape.HLine]
@@ -78,7 +91,7 @@ def test_sin_linea_divisoria_entre_categoria_y_dirigido_a(qtbot, conn):
 
 
 def test_pantalla_tiene_campo_localidad_antes_de_edificio(qtbot, conn):
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     nombres = [c.nombre for c in pantalla.crud.campos]
     assert nombres.index("IdLocalidad") < nombres.index("IdEdificio")
@@ -86,7 +99,7 @@ def test_pantalla_tiene_campo_localidad_antes_de_edificio(qtbot, conn):
 
 def test_categoria_es_combo_editable_con_valores_de_listas_editables(qtbot, conn):
     obtener_repositorio(conn, "ListasEditables").crear(TipoLista="CategoriaMensaje", Valor="Recordatorios", Orden=0)
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     dialogo = _DialogoRegistro(conn, pantalla.crud.campos, "Nuevo registro")
     qtbot.addWidget(dialogo)
@@ -105,7 +118,7 @@ def test_edificio_unidad_consultorio_admiten_dejarlos_sin_seleccionar(qtbot, con
     quedar en blanco. La etiqueta de ese valor en blanco es "En general"
     en los cuatro, tanto acá como en los selectores de contexto."""
     _crear_consultorio(conn)
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     dialogo = _DialogoRegistro(conn, pantalla.crud.campos, "Nuevo registro")
     qtbot.addWidget(dialogo)
@@ -119,7 +132,7 @@ def test_edificio_unidad_consultorio_admiten_dejarlos_sin_seleccionar(qtbot, con
 
 
 def test_selectores_de_contexto_arrancan_en_general(qtbot, conn):
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     for combo in (
         pantalla.combo_localidad_contexto, pantalla.combo_edificio_contexto,
@@ -138,7 +151,7 @@ def test_contexto_edificio_pisa_al_vinculo_del_mensaje_general(qtbot, conn):
     obtener_repositorio(conn, "MensajePredefinido").crear(
         Categoria="Avisos", Descripcion="Corte de luz", Mensaje="Se corta la luz en {edificio}.", Activo=1,
     )
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
 
     fila = next(
@@ -159,7 +172,7 @@ def test_contexto_en_general_no_pisa_el_vinculo_propio_del_mensaje(qtbot, conn):
         Categoria="Avisos", Descripcion="Aviso puntual", IdConsultorio=id_consultorio,
         Mensaje="Te esperamos en {edificio}.", Activo=1,
     )
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     fila = next(
         f for f in range(pantalla.crud.tabla_widget.rowCount())
@@ -170,7 +183,7 @@ def test_contexto_en_general_no_pisa_el_vinculo_propio_del_mensaje(qtbot, conn):
 
 
 def test_dirigido_a_por_defecto_es_nadie_en_particular(qtbot, conn):
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.combo_dirigido_a.currentText() == "Nadie en particular"
     assert pantalla.combo_dirigido_a.currentData() is None
@@ -183,7 +196,7 @@ def test_dirigido_a_sustituye_apodo_en_la_vista_previa(qtbot, conn):
     obtener_repositorio(conn, "MensajePredefinido").crear(
         Categoria="Avisos", Descripcion="Corte de agua", Mensaje="Hola {apodo}, mañana no hay agua.", Activo=1,
     )
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
 
     fila = next(
@@ -202,7 +215,7 @@ def test_combo_filtro_incluye_todas_y_las_categorias_sembradas(qtbot, conn):
     obtener_repositorio(conn, "MensajePredefinido").crear(
         Categoria="Recordatorios", Descripcion="Aviso", Mensaje="Hola {edificio}", Activo=1,
     )
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     categorias = [pantalla.combo_filtro.itemText(i) for i in range(pantalla.combo_filtro.count())]
     assert categorias[0] == "Todas"
@@ -218,7 +231,7 @@ def test_filtrar_por_categoria_oculta_las_demas_filas(qtbot, conn):
     obtener_repositorio(conn, "MensajePredefinido").crear(
         Categoria="Bienvenida", Descripcion="Saludo", Mensaje="Hola!", Activo=1,
     )
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
 
     indice = pantalla.combo_filtro.findData("Recordatorios")
@@ -235,7 +248,7 @@ def test_filtro_todas_no_oculta_ninguna_fila(qtbot, conn):
     obtener_repositorio(conn, "MensajePredefinido").crear(
         Categoria="Recordatorios", Descripcion="Aviso", Mensaje="Hola {edificio}", Activo=1,
     )
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     tabla = pantalla.crud.tabla_widget
     assert not any(tabla.isRowHidden(f) for f in range(tabla.rowCount()))
@@ -247,7 +260,7 @@ def test_seleccionar_fila_arma_vista_previa_con_variables_sustituidas(qtbot, con
         Categoria="Recordatorios", Descripcion="Aviso", IdConsultorio=id_consultorio,
         Mensaje="Te esperamos en {edificio}, {unidad}, consultorio {consultorio}.", Activo=1,
     )
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
 
     fila = next(
@@ -260,7 +273,7 @@ def test_seleccionar_fila_arma_vista_previa_con_variables_sustituidas(qtbot, con
 
 
 def test_copiar_mensaje_usa_portapapeles(qtbot, conn, monkeypatch):
-    pantalla = PantallaMensajesPredefinidos(conn)
+    pantalla = _PanelMensajesPredefinidos(conn)
     qtbot.addWidget(pantalla)
     pantalla.texto_vista_previa.setPlainText("texto de prueba")
 

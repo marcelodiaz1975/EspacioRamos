@@ -1886,6 +1886,84 @@ renombre de categorías "Principal"/"Catálogos"/"Configuración" a
 queda para el final de toda la reorganización (junto con las pantallas
 de "Operativa diaria" que todavía faltan).
 
+### Grilla y mensajería + Valores (primeras dos de "Operativa diaria", con baja de Estadísticas en vivo)
+
+Primer merge de "Operativa diaria", y el más grande hasta ahora: la vieja
+pantalla "Vista rápida" (tres solapas: "Grilla semanal", "Valores de los
+consultorios", "Estadísticas") se retira por completo, sus solapas se
+reparten entre DOS formularios nuevos distintos, y una de las tres se
+saca del sistema — la única baja de funcionalidad completa de todo el
+reordenamiento (fuera de la reubicación del botón "Manual del usuario",
+todavía pendiente). Antes de tocar código se le preguntó a la clienta
+por este caso puntual, no contemplado en su Excel de reubicación (la
+solapa "Estadísticas" de Vista rápida — una tabla en vivo, filtrable —
+es DISTINTA de la pantalla completa "Estadísticas"): confirmó sacarla
+del sistema, queda cubierta por la pantalla completa.
+
+- **"Grilla y mensajería"** (`grilla_y_mensajeria.py`, nuevo): "Grilla
+  semanal" (de Vista rápida) + "Centro de mensajería" + "Mensajes
+  predefinidos" (antes las dos últimas, pantallas propias del menú).
+- **"Valores"** (`valores.py`, nuevo): "Valores vigentes" (antes "Valores
+  de los consultorios" de Vista rápida) + "Aumentos"/"Esquema de
+  descuentos" (antes las dos solapas de la pantalla propia "Aumentos y
+  descuentos").
+
+Mecánica de la baja de Estadísticas: en `grilla_operativa.py` se borró
+todo el código exclusivo de esa solapa (`_refrescar_estadisticas`,
+`_ordenar_estadisticas_por_columna`, `_reconstruir_filas_estadisticas`,
+`_ensanchar_columnas_localidad_edificio`, `_llenar_fila_estadistica`,
+`tabla_estadisticas`/`filtros_estadisticas`/`_estadisticas`/
+`_columna_orden_estadisticas`, las constantes `_COLUMNAS_ESTADISTICAS`/
+`_PADDING_COLUMNAS_ESTADISTICAS`/`_VALOR_ESTADISTICA_POR_COLUMNA`/
+`_fmt_horas`), junto con el módulo `app.negocio.estadisticas_operativas`
+completo (`estadisticas_operativas.py` + su test) — sin otro consumidor,
+confirmado por búsqueda antes de borrar. Lo que SÍ sigue usando ese
+módulo (`_PanelFiltrosJerarquico`/`_PanelPromedios`, exclusivos de
+"Valores de los consultorios") se quedó intacto.
+
+Las dos solapas que sobreviven pasan a clases bare (`_PanelGrillaSemanal`/
+`_PanelValoresVigentes`, ambas en `grilla_operativa.py`, mismo criterio
+`objectName="panelSolapa"` de siempre) — la vieja `PantallaGrillaOperativa`
+(título "Vista rápida" + su `QTabWidget` de tres solapas) se borra por
+completo, cada nueva solapa se importa cruzada (import cruzado de un
+símbolo privado, mismo criterio del resto de la reorganización) en el
+formulario que corresponde.
+
+`CentroMensajeria` (`mensajeria.py`) pasa a `_PanelCentroMensajeria`
+(mismo criterio `_PanelImportacion`/`_PanelBloquesRigidos`: sin título ni
+`QTabWidget`/`QScrollArea` propios). `PantallaMensajesPredefinidos`
+(`mensajes_predefinidos.py`) pasa a `_PanelMensajesPredefinidos`: el
+`PantallaCRUD` que arma internamente (con `panel_extra_superior_
+izquierda` para todo lo propio de esta pantalla) suma `anidado=True`
+(reusa el parámetro sumado en Archivos y listas); la fábrica
+`pantalla_mensajes_predefinidos` se borra (ya no tiene otro consumidor).
+
+`PantallaAumentos` (contenedor de "Aumentos y descuentos", dos solapas)
+se retira: sus dos paneles (`_PanelAumentos`/`_PanelEsquemaDescuentos`,
+ya eran clases bare desde que se armó esa pantalla) quedan como las dos
+últimas solapas de "Valores", importadas cruzadas — ya no hace falta un
+contenedor propio para ellas.
+
+`gui_main.py`: se sacan las `Seccion` "Vista rápida", "Centro de
+mensajería", "Mensajes predefinidos" y "Aumentos y descuentos"; se suman
+"Grilla y mensajería" y "Valores".
+
+Tests: `test_estadisticas_operativas.py` se borra entero (feature
+retirada). `test_gui_pantalla_grilla_operativa.py` se reescribe: se
+sacan todos los tests exclusivos de la solapa Estadísticas (8 tests) y
+uno que comparaba el filtro de Valores contra el de la Grilla (dejó de
+tener sentido: ya ni siquiera son solapas de la misma pantalla), el
+resto pasa a instanciar `_PanelGrillaSemanal`/`_PanelValoresVigentes`
+directo. `test_gui_mensajeria.py`/`test_mensajes_predefinidos.py` renombran
+la clase en sus tests y suman un test de `objectName="panelSolapa"` (el
+segundo además confirma `anidado is True` en el CRUD interno).
+`test_gui_aumentos.py` reescribe sus ~27 tests para instanciar
+`_PanelAumentos`/`_PanelEsquemaDescuentos` directo (se saca el único
+test que existía solo para el contenedor, `test_pestanas`). Dos archivos
+nuevos, `test_gui_grilla_y_mensajeria.py`/`test_gui_valores.py`, cubren
+cada formulario nuevo (título, orden de solapas, tipo e identidad de
+cada panel).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
