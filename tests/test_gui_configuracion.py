@@ -42,6 +42,21 @@ def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
 
 
+def _indice_de_solapa(pantalla, titulo: str) -> int:
+    """La solapa "Bloques rígidos" (reordenamiento de formularios) se
+    intercala entre las de `_GRUPOS`, así que el índice de una solapa por
+    título ya no coincide 1 a 1 con su posición en `_GRUPOS` — se busca
+    por el texto real de la pestaña."""
+    for i in range(pantalla.pestanas.count()):
+        if pantalla.pestanas.tabText(i) == titulo:
+            return i
+    raise AssertionError(f"No se encontró la solapa {titulo!r}")
+
+
+def _panel_de_grupo(pantalla, titulo: str):
+    return pantalla._paneles[_indice_de_solapa(pantalla, titulo)]
+
+
 def test_carga_valores_existentes(qtbot, conn):
     conn.execute("UPDATE Configuracion SET NombreEspacio = 'Mi Espacio', HoraInicioGrilla = 7 WHERE IdConfiguracion = 1")
     conn.commit()
@@ -238,13 +253,21 @@ def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
     assert titulo.text() == "CONFIGURACIÓN GENERAL"
 
 
-def test_tiene_formato_solapa_con_las_seis_pestanas(qtbot, conn):
+def test_tiene_formato_solapa_con_las_siete_pestanas(qtbot, conn):
+    """Seis solapas de campos simples (`_GRUPOS`) + "Bloques rígidos"
+    (reordenamiento de formularios), intercalada entre "Grilla y
+    ocupación" y "Valores y liquidación"."""
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
     solapas = pantalla.findChild(QTabWidget)
     assert solapas is not None
-    assert [solapas.tabText(i) for i in range(solapas.count())] == [titulo for titulo, _campos in _GRUPOS]
-    assert len(pantalla.findChildren(QWidget, "panelSolapa")) == len(_GRUPOS)
+    titulos_esperados = []
+    for titulo, _campos in _GRUPOS:
+        titulos_esperados.append(titulo)
+        if titulo == "Grilla y ocupación":
+            titulos_esperados.append("Bloques rígidos")
+    assert [solapas.tabText(i) for i in range(solapas.count())] == titulos_esperados
+    assert len(pantalla.findChildren(QWidget, "panelSolapa")) == len(_GRUPOS) + 1
 
 
 def test_todos_los_campos_estan_agrupados_una_sola_vez(qtbot, conn):
@@ -270,7 +293,8 @@ def test_cada_solapa_carga_todos_sus_campos(qtbot, conn):
     nombres_especiales = {nombre for nombre, _ in _CAMPOS_ESPECIALES}
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
-    for panel, (_titulo, nombres) in zip(pantalla._paneles, _GRUPOS):
+    for titulo, nombres in _GRUPOS:
+        panel = _panel_de_grupo(pantalla, titulo)
         for nombre in nombres:
             if nombre in nombres_especiales:
                 continue
@@ -315,9 +339,23 @@ def test_cadena_de_foco_de_una_solapa_termina_en_guardar_y_vuelve_al_principio(q
 def test_cadena_de_foco_se_reinstala_al_cambiar_de_solapa(qtbot, conn):
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
-    pantalla.pestanas.setCurrentIndex(2)
-    panel = pantalla._paneles[2]
+    indice = _indice_de_solapa(pantalla, "Valores y liquidación")
+    pantalla.pestanas.setCurrentIndex(indice)
+    panel = pantalla._paneles[indice]
     assert pantalla._foco._orden == panel.orden + [pantalla.boton_guardar]
+
+
+def test_cadena_de_foco_se_salta_en_la_solapa_bloques_rigidos(qtbot, conn):
+    """Bloques rígidos arma su propia cadena de foco (Buscar → Nuevo →
+    Editar → Eliminar) — no se suma "Guardar" al final, no tiene nada
+    que ver con los campos simples que guarda ese botón."""
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    foco_antes = pantalla._foco
+    indice = _indice_de_solapa(pantalla, "Bloques rígidos")
+    pantalla.pestanas.setCurrentIndex(indice)
+    assert pantalla._foco is foco_antes  # no se reinstaló para esta solapa
+    assert pantalla._paneles[indice] is None
 
 
 # --------------------------------------------------------------- Seguridad
@@ -355,7 +393,7 @@ def test_contrasena_maestra_primera_vez_no_pide_la_anterior_y_persiste(qtbot, co
 
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
-    panel_seguridad = pantalla._paneles[[titulo for titulo, _ in _GRUPOS].index("Seguridad")]
+    panel_seguridad = _panel_de_grupo(pantalla, "Seguridad")
     boton = next(w for w in panel_seguridad.orden if w.text() == "Establecer/cambiar contraseña maestra")
     boton.click()
 
@@ -379,7 +417,7 @@ def test_contrasena_maestra_ya_establecida_exige_la_anterior(qtbot, conn, monkey
     monkeypatch.setattr(_DialogoContrasenaMaestra, "exec", _fake_exec_incorrecta)
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
-    panel_seguridad = pantalla._paneles[[titulo for titulo, _ in _GRUPOS].index("Seguridad")]
+    panel_seguridad = _panel_de_grupo(pantalla, "Seguridad")
     boton = next(w for w in panel_seguridad.orden if w.text() == "Establecer/cambiar contraseña maestra")
     boton.click()
 
@@ -406,7 +444,7 @@ def test_contrasena_maestra_cancelar_no_cambia_nada(qtbot, conn, monkeypatch):
 
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
-    panel_seguridad = pantalla._paneles[[titulo for titulo, _ in _GRUPOS].index("Seguridad")]
+    panel_seguridad = _panel_de_grupo(pantalla, "Seguridad")
     boton = next(w for w in panel_seguridad.orden if w.text() == "Establecer/cambiar contraseña maestra")
     boton.click()
 

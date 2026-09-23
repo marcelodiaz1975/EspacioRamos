@@ -16,7 +16,19 @@ de `QLineEdit` con parseo manual a `float` a `QSpinBox`/`QDoubleSpinBox`
 al mismo selector de calendario que el resto del sistema
 ("Selectores y fecha"); "Ruta del logo"/"Carpeta base de archivos"/
 "Carpeta de backup" suman un botón "Elegir" que abre el selector nativo
-de archivo/carpeta en vez de tipear la ruta a mano."""
+de archivo/carpeta en vez de tipear la ruta a mano.
+
+Reordenamiento de formularios (Excel de la clienta): se suma una solapa
+más, "Bloques rígidos" (`_PanelBloquesRigidos`, importado desde
+`bloques_rigidos.py` — antes una pantalla propia del menú), insertada
+entre "Grilla y ocupación" y "Valores y liquidación". A diferencia de
+las demás solapas (todas `_PanelCampos` sobre campos simples de
+`Configuracion`), esta es un catálogo completo con su propia cadena de
+foco Enter/Tab (Buscar → Nuevo → Editar → Eliminar) que no tiene nada
+que ver con el botón "Guardar" compartido — `_actualizar_cadena_foco`
+salta esa solapa (un `None` en `self._paneles` en esa posición marca
+"esta solapa arma la suya propia", mismo criterio que Gastos operativos
+con `instalar_foco=False`)."""
 from __future__ import annotations
 
 import json
@@ -45,6 +57,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.pantallas.bloques_rigidos import _PanelBloquesRigidos
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.formato import formatear_moneda
 from app.negocio.seguridad import cambiar_contrasena_maestra, hay_contrasena_maestra
@@ -466,11 +479,15 @@ class ConfiguracionGeneral(QWidget):
         layout.addWidget(titulo)
 
         self.pestanas = QTabWidget()
-        self._paneles: list[_PanelCampos] = []
+        self._paneles: list[_PanelCampos | None] = []
         for titulo_solapa, nombres in _GRUPOS:
             panel = _PanelCampos(nombres, self._entradas, self.conn)
             self.pestanas.addTab(panel, titulo_solapa)
             self._paneles.append(panel)
+            if titulo_solapa == "Grilla y ocupación":
+                self.panel_bloques_rigidos = _PanelBloquesRigidos(self.conn)
+                self.pestanas.addTab(self.panel_bloques_rigidos, "Bloques rígidos")
+                self._paneles.append(None)  # arma su propia cadena de foco, ver docstring del módulo
         self.pestanas.tabBar().setDrawBase(False)
         layout.addWidget(self.pestanas, stretch=1)
 
@@ -489,6 +506,8 @@ class ConfiguracionGeneral(QWidget):
 
     def _actualizar_cadena_foco(self, indice: int) -> None:
         panel = self._paneles[indice]
+        if panel is None:
+            return  # esta solapa (Bloques rígidos) arma su propia cadena de foco
         self._foco = instalar_enter_avanza_foco(panel.orden + [self.boton_guardar], parent=self)
 
     def actualizar(self) -> None:

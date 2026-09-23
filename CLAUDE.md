@@ -1746,6 +1746,48 @@ pantalla). Mecánicamente:
   nuevos confirmando las dos solapas y que la de Importación es un
   `_PanelImportacion` funcional.
 
+### Configuración general + Bloques rígidos
+
+Segundo merge de "Sistema" hecho. "Bloques rígidos" deja de ser una
+pantalla propia del menú y pasa a ser una solapa más de "Configuración
+general", intercalada entre "Grilla y ocupación" y "Valores y
+liquidación" (7 solapas en total).
+
+- `app/gui/pantallas/bloques_rigidos.py`: `PantallaBloquesRigidos` pasa
+  a `_PanelBloquesRigidos` (mismo criterio que `_PanelImportacion`): sin
+  título Nivel 1 ni `QTabWidget`/`QScrollArea` propio, `objectName=
+  "panelSolapa"` puesto sobre sí misma, lista para `addTab(...)`. El
+  contenido (Buscar/Nuevo/Editar/Eliminar + tabla) no cambió.
+- `app/gui/pantallas/configuracion.py`: a diferencia de las otras seis
+  solapas (todas `_PanelCampos`, generadas en un loop sobre `_GRUPOS`
+  con campos simples de `Configuracion`), "Bloques rígidos" es un
+  catálogo completo con su propia lógica y su propia cadena de foco
+  Enter/Tab (Buscar → Nuevo → Editar → Eliminar) — no tiene sentido que
+  el botón "Guardar" compartido (que persiste los campos de
+  `Configuracion`) se sume al final de esa cadena. Se resolvió
+  intercalando la solapa en `_armar_ui` (después de agregar "Grilla y
+  ocupación", antes de seguir con el resto de `_GRUPOS`) y anotando un
+  `None` en la posición correspondiente de `self._paneles` — `
+  _actualizar_cadena_foco` corta temprano cuando el panel de la solapa
+  actual es `None`, dejando que `_PanelBloquesRigidos` siga manejando su
+  propia cadena de foco de siempre, sin tocarla. Mismo criterio ya
+  documentado para Gastos operativos (`instalar_foco=False`): una
+  solapa que "arma la suya propia" en vez de sumarse a la genérica.
+- `gui_main.py`: se sacó la `Seccion` propia "Bloques rígidos" y su
+  import; la ayuda de "Configuración general" se actualizó para
+  mencionar la solapa nueva.
+- Tests: `test_gui_bloques_rigidos.py` pasa a instanciar
+  `_PanelBloquesRigidos` directo, con el mismo reemplazo del test de
+  "una sola pestaña" por uno de `objectName="panelSolapa"` que en
+  Importación. `test_gui_configuracion.py` suma un helper
+  `_indice_de_solapa`/`_panel_de_grupo` (busca la solapa por su TEXTO en
+  vez de por posición fija en `_GRUPOS`, que ya no coincide 1 a 1 con el
+  índice real de cada solapa desde que se intercaló una que no viene de
+  `_GRUPOS`) y lo usa en los tests que antes indexaban `_paneles`/
+  `_GRUPOS` a mano (búsqueda de la solapa "Seguridad", cambio de solapa
+  para revisar la cadena de foco); suma un test nuevo confirmando que la
+  cadena de foco NO se reinstala al entrar a "Bloques rígidos".
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

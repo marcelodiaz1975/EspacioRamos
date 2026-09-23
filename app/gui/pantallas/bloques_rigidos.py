@@ -10,13 +10,23 @@ Editar necesita dos listas de días con checks (lógica y visualización),
 un tipo de control que `crud_generico.Campo` no contempla — armar un
 tipo nuevo ahí serviría solo a esta pantalla, así que se arma a mano
 siguiendo el mismo lenguaje visual que los catálogos genéricos (mismo
-criterio que Gestor de archivos): solapa única "Bloques rígidos", Buscar
-+ Nuevo/Editar/Eliminar en una columna izquierda de ancho fijo, tabla
-ordenable a la derecha. El título de la solapa es fijo (no "Listado"
-genérico) porque, igual que Panel de control, a futuro esta pantalla va
-a terminar viviendo dentro de otro formulario todavía sin definir — no
-se tocó nada de la estructura pensando en eso, es solo un aviso para
-cuando se defina."""
+criterio que Gestor de archivos): Buscar + Nuevo/Editar/Eliminar en una
+columna izquierda de ancho fijo, tabla ordenable a la derecha.
+
+Reordenamiento de formularios (Excel de la clienta): dejó de ser una
+pantalla propia del menú y pasó a ser la solapa "Bloques rígidos" de
+Configuración general (`_PanelBloquesRigidos`, insertada entre "Grilla y
+ocupación" y "Valores y liquidación" — ver `configuracion.py`), mismo
+criterio de import cruzado de un símbolo privado que el resto de los
+merges de esta revisión. Por eso ya no tiene título Nivel 1 ni su propio
+`QTabWidget`/`QScrollArea` externo — el panel se pasa directo a
+`addTab(...)` del `QTabWidget` de Configuración general. Mantiene su
+propia cadena de foco Enter/Tab (Buscar → Nuevo → Editar → Eliminar,
+sin sumarse a "Guardar") porque no tiene nada que ver con los campos
+simples de `Configuracion` que maneja ese botón — Configuración general
+lo trata como una solapa que "arma la suya propia" (mismo criterio que
+Gastos operativos), saltando el `boton_guardar` en la cadena de esa
+solapa puntual."""
 from __future__ import annotations
 
 import json
@@ -30,7 +40,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -38,10 +47,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -188,9 +195,10 @@ class _DialogoBloque(QDialog):
         }
 
 
-class PantallaBloquesRigidos(QWidget):
+class _PanelBloquesRigidos(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self.repositorio = obtener_repositorio(conn, "BloqueRigido")
         self._armar_ui()
@@ -198,22 +206,14 @@ class PantallaBloquesRigidos(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         """`setFocus()` durante la construcción no alcanza a "pegar": el
-        widget todavía no está mostrado en ese momento."""
+        QTabWidget contenedor todavía no está mostrado en ese momento."""
         super().showEvent(event)
         self._orden.reiniciar()
         self.actualizar()
         self.campo_buscar.setFocus()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        titulo = QLabel("Bloques rígidos")
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        solapas = QTabWidget()
-        panel_solapa = QWidget()
-        panel_solapa.setObjectName("panelSolapa")
-        layout_solapa = QHBoxLayout(panel_solapa)
+        layout_solapa = QHBoxLayout(self)
 
         panel_izquierda = QWidget()
         columna = QVBoxLayout(panel_izquierda)
@@ -251,14 +251,6 @@ class PantallaBloquesRigidos(QWidget):
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.doubleClicked.connect(self._editar)
         layout_solapa.addWidget(self.tabla, stretch=1)
-
-        scroll = QScrollArea()
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(panel_solapa)
-        solapas.addTab(scroll, "Bloques rígidos")
-        solapas.tabBar().setDrawBase(False)
-        layout.addWidget(solapas, stretch=1)
 
         self._foco = instalar_enter_avanza_foco(
             [self.campo_buscar, self.boton_nuevo, self.boton_editar, self.boton_eliminar], parent=self,

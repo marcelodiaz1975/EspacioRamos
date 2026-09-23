@@ -13,7 +13,6 @@ from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
 from app.gui.pantallas.aumentos import PantallaAumentos
-from app.gui.pantallas.bloques_rigidos import PantallaBloquesRigidos
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla_operativa import PantallaGrillaOperativa
@@ -200,13 +199,10 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "ningún sitio externo, para poder darle a cada fecha el tratamiento que corresponda.",
         ),
         Seccion(
-            "Bloques rígidos", lambda conn: PantallaBloquesRigidos(conn), categoria="Catálogos",
-            ayuda="Franjas horarias que quedan bloqueadas de forma fija, sin poder reservarse.",
-        ),
-        Seccion(
             "Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria="Configuración",
             ayuda="Datos generales del espacio (nombre, logo), carpeta base de archivos, carpeta de "
-            "backup y modo de fecha ficticia para pruebas.",
+            "backup, modo de fecha ficticia para pruebas y las franjas horarias bloqueadas de forma "
+            "fija (solapa Bloques rígidos).",
         ),
         Seccion(
             "Usuarios y permisos",

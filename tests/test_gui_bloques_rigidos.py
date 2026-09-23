@@ -2,11 +2,11 @@ import json
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.bloques_rigidos import PantallaBloquesRigidos, _DialogoBloque
+from app.gui.pantallas.bloques_rigidos import _PanelBloquesRigidos, _DialogoBloque
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -26,13 +26,13 @@ def _sin_dialogos_modales(monkeypatch):
 
 
 def test_lista_los_dos_bloques_sembrados(qtbot, conn):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.rowCount() == 2
 
 
 def test_resumen_de_dias_todos_los_dias(qtbot, conn):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     fila_9_11 = next(
         i for i in range(pantalla.tabla.rowCount()) if pantalla.tabla.item(i, 0).text().startswith("9:00hs")
@@ -41,7 +41,7 @@ def test_resumen_de_dias_todos_los_dias(qtbot, conn):
 
 
 def test_nuevo_bloque_se_agrega(qtbot, conn, monkeypatch):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
 
     def _dialogo_aceptado(self, *a, **k):
@@ -86,7 +86,7 @@ def test_editar_bloque_existente_precarga_valores(qtbot, conn):
 
 
 def test_editar_bloque_guarda_cambios(qtbot, conn, monkeypatch):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla.selectRow(0)
 
@@ -101,7 +101,7 @@ def test_editar_bloque_guarda_cambios(qtbot, conn, monkeypatch):
 
 
 def test_eliminar_bloque(qtbot, conn):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla.selectRow(0)
 
@@ -113,17 +113,17 @@ def test_eliminar_bloque(qtbot, conn):
 # ---------------------------------------- formato solapa (revisión "uno por uno")
 
 
-def test_tiene_formato_solapa_con_una_pestana_bloques_rigidos(qtbot, conn):
-    pantalla = PantallaBloquesRigidos(conn)
+def test_es_un_panel_solapa(qtbot, conn):
+    """Reordenamiento de formularios: dejó de ser una pantalla propia con
+    su propio QTabWidget — ahora es la solapa "Bloques rígidos" de
+    Configuración general (ver configuracion.py)."""
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
-    solapas = pantalla.findChild(QTabWidget)
-    assert solapas is not None
-    assert solapas.count() == 1
-    assert solapas.tabText(0) == "Bloques rígidos"
+    assert pantalla.objectName() == "panelSolapa"
 
 
 def test_editar_y_eliminar_son_secundarios_nuevo_es_primario(qtbot, conn):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.boton_nuevo.objectName() == "botonPrimario"
     assert pantalla.boton_editar.objectName() == "botonSecundario"
@@ -131,7 +131,7 @@ def test_editar_y_eliminar_son_secundarios_nuevo_es_primario(qtbot, conn):
 
 
 def test_horario_se_muestra_en_formato_hs_no_decimal(qtbot, conn):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     textos = [pantalla.tabla.item(i, 0).text() for i in range(pantalla.tabla.rowCount())]
     assert "9:00hs a 11:00hs" in textos
@@ -139,7 +139,7 @@ def test_horario_se_muestra_en_formato_hs_no_decimal(qtbot, conn):
 
 
 def test_cadena_de_foco_va_de_buscar_a_los_tres_botones(qtbot, conn):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     assert pantalla._foco._orden == [
         pantalla.campo_buscar, pantalla.boton_nuevo, pantalla.boton_editar, pantalla.boton_eliminar,
@@ -147,7 +147,7 @@ def test_cadena_de_foco_va_de_buscar_a_los_tres_botones(qtbot, conn):
 
 
 def test_foco_inicial_queda_en_buscar(qtbot, conn):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
@@ -155,7 +155,7 @@ def test_foco_inicial_queda_en_buscar(qtbot, conn):
 
 
 def test_buscar_filtra_por_horario_sin_afectar_la_base(qtbot, conn):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     pantalla.campo_buscar.setText("18:00")
     ocultas = [pantalla.tabla.isRowHidden(i) for i in range(pantalla.tabla.rowCount())]
@@ -164,7 +164,7 @@ def test_buscar_filtra_por_horario_sin_afectar_la_base(qtbot, conn):
 
 
 def test_columnas_de_la_tabla_tienen_mas_ancho_que_el_ajuste_justo(qtbot, conn):
-    pantalla = PantallaBloquesRigidos(conn)
+    pantalla = _PanelBloquesRigidos(conn)
     qtbot.addWidget(pantalla)
     tabla = pantalla.tabla
     anchos_con_padding = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
