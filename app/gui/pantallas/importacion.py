@@ -1,28 +1,37 @@
-"""Importar planilla (FA5): carga masiva de datos iniciales desde el Excel
-de plantilla (app.importacion.importar_excel) y, al terminar, corre el
-informe de integridad (app.importacion.informe_integridad) para juntar en
-un solo lugar los casos que conviene revisar a mano — códigos de
+"""Importación de planilla (FA5): carga masiva de datos iniciales desde el
+Excel de plantilla (app.importacion.importar_excel) y, al terminar, corre
+el informe de integridad (app.importacion.informe_integridad) para juntar
+en un solo lugar los casos que conviene revisar a mano — códigos de
 profesional duplicados y reservas regulares superpuestas — que la carga
 masiva no bloquea a propósito (ver el docstring de ese módulo).
 
-Formato solapa (revisión uno por uno): columna izquierda de ancho fijo
-con "Descargar planilla importación" primero (`botonSecundario`,
-primera vez que `app.importacion.plantillas.generar_plantillas` se
-cuelga de la GUI — antes solo estaba disponible por línea de comandos,
-`main.py generar-plantillas`), después "Elegir archivo" y "Importar"
-(`botonPrimario` — es la acción que efectivamente escribe algo); a la
-derecha, los tres cuadros de resultado (tabla por hoja, errores,
-informe de integridad). La tabla "Resultado por hoja" estira sus tres
-columnas para ocupar todo el ancho del cuadro (`QHeaderView.ResizeMode.
-Stretch`) — mismo criterio que Placas: pocas columnas, todas de
-importancia pareja."""
+Reordenamiento de formularios (Excel de la clienta): dejó de ser una
+pantalla propia del menú ("Importar planilla") y pasó a ser la solapa
+"Importación datos desde Excel" de Panel de control (`_PanelImportacion`,
+importado ahí — mismo criterio de import cruzado de un símbolo privado
+que `_pixmap_primera_pagina_pdf`/`_opciones_profesional` en otras
+pantallas). Por eso ya no tiene su propio título Nivel 1 ni su propio
+`QTabWidget` — el panel se pasa directo a `addTab(...)` de Panel de
+control, como cualquier otra solapa (`_PanelAvancePeriodo` en
+`panel_control.py`).
+
+Formato interno (sin cambios desde la revisión uno por uno): columna
+izquierda de ancho fijo con "Descargar planilla importación" primero
+(`botonSecundario`, primera vez que `app.importacion.plantillas.
+generar_plantillas` se cuelga de la GUI — antes solo estaba disponible
+por línea de comandos, `main.py generar-plantillas`), después "Elegir
+archivo" y "Importar" (`botonPrimario` — es la acción que efectivamente
+escribe algo); a la derecha, los tres cuadros de resultado (tabla por
+hoja, errores, informe de integridad). La tabla "Resultado por hoja"
+estira sus tres columnas para ocupar todo el ancho del cuadro
+(`QHeaderView.ResizeMode.Stretch`) — mismo criterio que Placas: pocas
+columnas, todas de importancia pareja."""
 from __future__ import annotations
 
 import sqlite3
 
 from PySide6.QtWidgets import (
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -30,10 +39,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -53,9 +60,10 @@ def _titulo_campo(texto: str) -> QLabel:
     return etiqueta
 
 
-class PantallaImportacion(QWidget):
+class _PanelImportacion(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._armar_ui()
 
@@ -67,15 +75,7 @@ class PantallaImportacion(QWidget):
         self.boton_descargar_plantilla.setFocus()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        titulo = QLabel("Importar planilla")
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        solapas = QTabWidget()
-        panel_solapa = QWidget()
-        panel_solapa.setObjectName("panelSolapa")
-        layout_solapa = QHBoxLayout(panel_solapa)
+        layout_solapa = QHBoxLayout(self)
 
         panel_izquierda = QWidget()
         columna = QVBoxLayout(panel_izquierda)
@@ -143,14 +143,6 @@ class PantallaImportacion(QWidget):
         columna_derecha.addWidget(self.texto_integridad)
 
         layout_solapa.addLayout(columna_derecha, stretch=1)
-
-        scroll = QScrollArea()
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(panel_solapa)
-        solapas.addTab(scroll, "Importación")
-        solapas.tabBar().setDrawBase(False)
-        layout.addWidget(solapas, stretch=1)
 
     def _elegir_archivo(self) -> None:
         ruta, _ = QFileDialog.getOpenFileName(self, "Elegir planilla", "", "Excel (*.xlsx)")

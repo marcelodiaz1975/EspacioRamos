@@ -40,7 +40,22 @@ renombrada para reflejar el nuevo alcance. Las explicaciones de los
 botones dejan de ser un único cuadro de texto y pasan a ser una por
 botón, alineada al lado de su botón correspondiente (`fila_backup`/
 `fila_avanzar`) — el texto de "Avanzar de mes" además se reescribe con
-la redacción exacta pedida por la clienta."""
+la redacción exacta pedida por la clienta.
+
+Reordenamiento de formularios (Excel de la clienta): "Panel de control"
+pasa a tener dos solapas en vez de una. Todo lo de arriba (botones,
+grilla de cuadritos, alertas) se movió tal cual a una clase propia,
+`_PanelAvancePeriodo` (mismo patrón `panelSolapa`/`showEvent` que el
+resto de las pantallas con solapas de esta revisión), y se le sumó una
+segunda solapa, "Importación datos desde Excel", con `_PanelImportacion`
+(antes la pantalla propia "Importar planilla" del menú — importado acá,
+mismo criterio de import cruzado de un símbolo privado que
+`_pixmap_primera_pagina_pdf`/`_opciones_profesional` en otras
+pantallas). `PanelControl` queda como el contenedor de afuera: solo el
+título Nivel 1 (nombre del espacio) y el `QTabWidget` con las dos
+solapas — `actualizar()` sigue siendo el punto de entrada externo
+(ej. después de avanzar de mes desde otro lado), y delega en
+`self.panel_avance.actualizar()` para todo lo que no sea el título."""
 from __future__ import annotations
 
 import sqlite3
@@ -61,6 +76,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.pantallas.importacion import _PanelImportacion
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.avance_mes import avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo
 from app.negocio.backup import backup_vencido, carpeta_backup, generar_backup, ultimo_backup
@@ -161,8 +177,47 @@ def _tarjeta(titulo: str) -> tuple[QFrame, QVBoxLayout]:
 
 
 class PanelControl(QWidget):
+    """Contenedor de afuera: título Nivel 1 (nombre del espacio) + las dos
+    solapas (`_PanelAvancePeriodo`/`_PanelImportacion`, ver docstring del
+    módulo)."""
+
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.conn = conn
+        self._armar_ui()
+        self.actualizar()
+
+    def _armar_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        self.titulo = QLabel()
+        self.titulo.setObjectName("tituloPantalla")
+        layout.addWidget(self.titulo)
+
+        solapas = QTabWidget()
+        self.panel_avance = _PanelAvancePeriodo(self.conn)
+        solapas.addTab(self.panel_avance, "Avance de período y backups")
+        self.panel_importacion = _PanelImportacion(self.conn)
+        solapas.addTab(self.panel_importacion, "Importación datos desde Excel")
+        solapas.tabBar().setDrawBase(False)
+        layout.addWidget(solapas, stretch=1)
+
+    def actualizar(self) -> None:
+        cfg = self.conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+        nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos Consultorios"
+        self.titulo.setText(nombre_espacio.upper())
+        self.panel_avance.actualizar()
+
+
+class _PanelAvancePeriodo(QWidget):
+    """Solapa "Avance de período y backups": todo lo que antes era el
+    contenido único de Panel de control (botones, grilla de cuadritos,
+    alertas) — ver docstring del módulo para el detalle de cada vuelta de
+    revisión."""
+
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._armar_ui()
         self.actualizar()
@@ -175,16 +230,7 @@ class PanelControl(QWidget):
         self.boton_backup.setFocus()
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
-
-        self.titulo = QLabel()
-        self.titulo.setObjectName("tituloPantalla")
-        layout.addWidget(self.titulo)
-
-        solapas = QTabWidget()
-        panel_solapa = QWidget()
-        panel_solapa.setObjectName("panelSolapa")
-        layout_solapa = QVBoxLayout(panel_solapa)
+        layout_solapa = QVBoxLayout(self)
 
         # Orden invertido a pedido de la clienta: "Generar backup ahora"
         # arriba, "Avanzar de mes" abajo — y este último vuelve a ser el
@@ -239,10 +285,6 @@ class PanelControl(QWidget):
         # (puede ser una lista larga) — pedido explícito de la clienta,
         # a diferencia de los seis cuadritos parejos de arriba.
         layout_solapa.addWidget(self._armar_tarjeta_alertas(), stretch=1)
-
-        solapas.addTab(panel_solapa, "Panel de control")
-        solapas.tabBar().setDrawBase(False)
-        layout.addWidget(solapas, stretch=1)
 
         self._foco = instalar_enter_avanza_foco([self.boton_backup, self.boton_avanzar], parent=self)
 
@@ -319,10 +361,6 @@ class PanelControl(QWidget):
         return self.tarjeta_alertas
 
     def actualizar(self) -> None:
-        cfg = self.conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-        nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos Consultorios"
-        self.titulo.setText(nombre_espacio.upper())
-
         periodo = periodo_actual(self.conn)
         anio, mes = (int(p) for p in periodo.split("-"))
         self.etiqueta_periodo.setText(f"{mes_texto(mes).capitalize()} de {anio} ({periodo_mm_aaaa(periodo)})")

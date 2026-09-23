@@ -18,7 +18,6 @@ from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla_operativa import PantallaGrillaOperativa
 from app.gui.pantallas.imagenes import PantallaImagenes
-from app.gui.pantallas.importacion import PantallaImportacion
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
 from app.gui.pantallas.lista_espera import PantallaListaEspera
 from app.gui.pantallas.llaves import PantallaLlaves
@@ -54,7 +53,9 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
     secciones.extend([
         Seccion(
             "Panel de control", lambda conn: PanelControl(conn), categoria="Principal",
-            ayuda="Resumen del estado actual del espacio: ocupación, próximos vencimientos y alertas.",
+            ayuda="Solapa Avance de período y backups: resumen del estado actual del espacio (ocupación, "
+            "próximos vencimientos y alertas), generación de backup manual y avance de mes. Solapa "
+            "Importación datos desde Excel: importación masiva inicial de datos desde una planilla Excel.",
         ),
         Seccion(
             "Vista rápida", lambda conn: PantallaGrillaOperativa(conn), categoria="Principal",
@@ -206,10 +207,6 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria="Configuración",
             ayuda="Datos generales del espacio (nombre, logo), carpeta base de archivos, carpeta de "
             "backup y modo de fecha ficticia para pruebas.",
-        ),
-        Seccion(
-            "Importar planilla", lambda conn: PantallaImportacion(conn), categoria="Configuración",
-            ayuda="Importación masiva inicial de datos desde una planilla Excel.",
         ),
         Seccion(
             "Usuarios y permisos",

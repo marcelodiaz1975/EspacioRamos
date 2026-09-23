@@ -1673,6 +1673,79 @@ estas dos en el medio de la lista no rompe ninguna planilla ya
 descargada antes de este cambio (sigue funcionando por el texto del
 encabezado que traiga esa planilla puntual).
 
+## Reordenamiento de formularios y solapas (en curso)
+
+Después de cerrar la revisión "uno por uno" de cada pantalla (incluida
+Seguridad), la clienta pidió una reorganización completa de la
+navegación: mandó un Excel con, por cada formulario nuevo del menú, sus
+solapas (en orden — la primera es la que se ve por defecto al entrar) y
+qué formulario/solapa vieja va a parar ahí, más una columna de
+modificaciones puntuales. El criterio general: varias pantallas que hoy
+son formularios propios del menú pasan a ser solapas de un formulario
+más grande y afín (ej. "Importar planilla" deja de estar en el menú y
+pasa a ser una solapa de "Panel de control"), y las categorías del menú
+se renombran de "Principal"/"Catálogos"/"Configuración" a "Sistema"/
+"Operativa diaria".
+
+Se detectaron dos casos que el Excel de la clienta no contemplaba
+(pantallas/catálogos existentes sin destino asignado), resueltos con
+ella antes de tocar código:
+- La solapa "Estadísticas" de Vista rápida (tabla de ocupación en vivo,
+  filtrable, DISTINTA de la pantalla completa "Estadísticas") — decisión:
+  sacarla del sistema, queda cubierta por la pantalla completa.
+- El catálogo "Placas" (tablero de posiciones/nombre grabado, DISTINTO
+  de la pantalla operativa "Placas") — decisión: pasa a ser la tercera
+  solapa de "Placas para timbres" (el nuevo nombre de la pantalla
+  operativa "Placas").
+
+El trabajo se hace por etapas (un merge por vez, con capturas y
+pyflakes/suite después de cada uno), empezando por los merges más
+simples de la categoría "Sistema":
+
+### Panel de control + Importación
+
+Primer merge hecho. "Importar planilla" deja de ser una pantalla propia
+del menú y pasa a ser la segunda solapa de "Panel de control"
+("Importación datos desde Excel"), junto a la primera ("Avance de
+período y backups", todo lo que antes era el contenido único de esa
+pantalla). Mecánicamente:
+
+- `app/gui/pantallas/importacion.py`: la clase pasa de `PantallaImportacion`
+  (pantalla completa, con su propio título Nivel 1 y su propio
+  `QTabWidget` de una sola pestaña) a `_PanelImportacion` (una solapa
+  desnuda — `objectName="panelSolapa"` puesto sobre sí misma, sin título
+  ni `QTabWidget` propio), lista para pasarse directo a `addTab(...)` de
+  otro formulario — mismo criterio ya usado en toda la revisión (
+  `_PanelReservasRegulares`, `_PanelHistorialGeneral`, etc.). El contenido
+  interno (botones, tabla de resultados, informe de integridad) no
+  cambió en nada.
+- `app/gui/pantallas/panel_control.py`: el contenido que antes era la
+  única solapa de `PanelControl` ("Panel de control", con los dos
+  botones, la grilla de cuadritos y las alertas) se extrajo tal cual a
+  una clase nueva, `_PanelAvancePeriodo` (mismo patrón `panelSolapa`/
+  `showEvent` propio). `PanelControl` queda como el contenedor de
+  afuera: solo el título Nivel 1 (nombre del espacio) y un `QTabWidget`
+  con las dos solapas (`_PanelAvancePeriodo` como "Avance de período y
+  backups", `_PanelImportacion` — importado cruzado, mismo criterio que
+  `_pixmap_primera_pagina_pdf`/`_opciones_profesional` en otras
+  pantallas — como "Importación datos desde Excel"). `PanelControl.
+  actualizar()` sigue siendo el punto de entrada de afuera (nada externo
+  lo llamaba salvo el propio `__init__`), y ahora hace dos cosas:
+  actualiza el título y delega en `self.panel_avance.actualizar()` para
+  todo el resto (períodos, tarjetas, alertas).
+- `gui_main.py`: se sacó la `Seccion` propia "Importar planilla" y su
+  import; la ayuda de "Panel de control" se actualizó para mencionar las
+  dos solapas.
+- Tests: `test_gui_importacion.py` pasa a instanciar `_PanelImportacion`
+  directo (dejó de tener sentido el test de "una sola pestaña", ya no
+  hay ningún `QTabWidget` propio — se reemplazó por un test más simple
+  que confirma el `objectName="panelSolapa"`). `test_gui_panel_control.py`
+  pasa todos sus accesos de `pantalla.boton_backup`/`etiqueta_*`/etc. a
+  `pantalla.panel_avance.boton_backup`/etc. (el título sigue siendo
+  `pantalla.titulo`, en el contenedor de afuera), y suma dos tests
+  nuevos confirmando las dos solapas y que la de Importación es un
+  `_PanelImportacion` funcional.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
