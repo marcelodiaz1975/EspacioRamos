@@ -1854,6 +1854,38 @@ quien los siga llamando sin ese argumento) que solo reenvían a
   `PantallaCRUD` anidadas de verdad (sin título propio, con `anidado is
   True`).
 
+### Base datos del espacio (formulario nuevo, 5 solapas)
+
+Cuarto y último merge de "Sistema": agrupa los cinco catálogos de
+estructura física/contacto del espacio — antes cinco pantallas propias
+del menú sin relación de navegación entre sí — en el orden de la cadena
+de referencias real entre las tablas (Localidad → Edificio → Unidad →
+Consultorio), más Responsables al final: "Localidades", "Edificios",
+"Unidades", "Consultorios", "Responsables".
+
+Mecánicamente el mismo patrón que Archivos y listas, reusando el
+`anidado=True` de `PantallaCRUD` sumado en ese merge:
+`pantalla_localidades`/`pantalla_edificios`/`pantalla_unidades`/
+`pantalla_consultorios`/`pantalla_responsables` (`catalogos.py`) suman
+su propio parámetro `anidado` (default `False`, sin efecto para quien ya
+los llamaba sin ese argumento) que reenvían a `PantallaCRUD`.
+`app/gui/pantallas/base_datos_espacio.py` (nuevo) define
+`PantallaBaseDatosEspacio`, título Nivel 1 fijo + `QTabWidget` con las
+cinco solapas. `gui_main.py` saca las cinco `Seccion` independientes y
+suma una sola, "Base datos del espacio". Tests nuevos en
+`test_gui_base_datos_espacio.py`, mismo criterio que Archivos y listas
+(título, orden de las cinco solapas, cada una `anidado is True` sin
+título propio, una solapa con datos reales cargados).
+
+Con este merge, las cuatro pantallas de "Sistema" del reordenamiento
+(Panel de control, Configuración general, Archivos y listas, Base datos
+del espacio) quedan completas — sigue pendiente Usuarios y permisos
+(que no necesitó ningún cambio, ya estaba en el formato final) y el
+renombre de categorías "Principal"/"Catálogos"/"Configuración" a
+"Sistema"/"Operativa diaria" en todas las `Seccion` de `gui_main.py`, que
+queda para el final de toda la reorganización (junto con las pantallas
+de "Operativa diaria" que todavía faltan).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

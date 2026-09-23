@@ -78,7 +78,7 @@ def _opciones_consultorio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
     ]
 
 
-def pantalla_localidades(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_localidades(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Localidad", "Localidad", requerido=True),
         Campo("Partido", "Partido"),
@@ -86,20 +86,20 @@ def pantalla_localidades(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Pais", "País"),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "Localidad", "Localidades", campos)
+    return PantallaCRUD(conn, "Localidad", "Localidades", campos, anidado=anidado)
 
 
-def pantalla_edificios(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_edificios(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Nombre", "Nombre", requerido=True),
         Campo("Domicilio", "Domicilio"),
         Campo("IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "Edificio", "Edificios", campos)
+    return PantallaCRUD(conn, "Edificio", "Edificios", campos, anidado=anidado)
 
 
-def pantalla_unidades(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_unidades(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio, requerido=True),
         Campo("Departamento", "Departamento", requerido=True),
@@ -118,10 +118,10 @@ def pantalla_unidades(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("CantLimitePlacas", "Límite de placas", tipo="numero"),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "Unidad", "Unidades", campos)
+    return PantallaCRUD(conn, "Unidad", "Unidades", campos, anidado=anidado)
 
 
-def pantalla_consultorios(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_consultorios(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad, requerido=True),
         Campo("NumeroConsultorio", "Número", tipo="numero", requerido=True),
@@ -146,10 +146,10 @@ def pantalla_consultorios(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("ValorHoraAisladaAnterior", "Valor hora aislada anterior", tipo="numero"),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "Consultorio", "Consultorios", campos)
+    return PantallaCRUD(conn, "Consultorio", "Consultorios", campos, anidado=anidado)
 
 
-def pantalla_responsables(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_responsables(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Nombre", "Nombre", requerido=True),
         Campo("Celular", "Celular"),
@@ -160,7 +160,7 @@ def pantalla_responsables(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Activo", "Activo", tipo="booleano"),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "Responsable", "Responsables", campos)
+    return PantallaCRUD(conn, "Responsable", "Responsables", campos, anidado=anidado)
 
 
 def pantalla_tipos_licencia(conn: sqlite3.Connection) -> PantallaCRUD:

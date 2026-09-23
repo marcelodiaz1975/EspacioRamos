@@ -14,6 +14,7 @@ from app.gui.pantallas import catalogos
 from app.gui.pantallas.archivos_varios import PantallaArchivosVarios
 from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
 from app.gui.pantallas.aumentos import PantallaAumentos
+from app.gui.pantallas.base_datos_espacio import PantallaBaseDatosEspacio
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla_operativa import PantallaGrillaOperativa
@@ -135,23 +136,6 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "documentación adjunta de cada uno.",
         ),
         Seccion(
-            "Localidades", catalogos.pantalla_localidades, categoria="Catálogos",
-            ayuda="Alta, baja y edición de las localidades (Partido, Provincia, País) donde "
-            "están los edificios del espacio.",
-        ),
-        Seccion(
-            "Edificios", catalogos.pantalla_edificios, categoria="Catálogos",
-            ayuda="Alta, baja y edición de los edificios que integran el espacio.",
-        ),
-        Seccion(
-            "Unidades", catalogos.pantalla_unidades, categoria="Catálogos",
-            ayuda="Alta, baja y edición de las unidades (departamentos) de cada edificio.",
-        ),
-        Seccion(
-            "Consultorios", catalogos.pantalla_consultorios, categoria="Catálogos",
-            ayuda="Alta, baja y edición de los consultorios dentro de cada unidad, con sus valores.",
-        ),
-        Seccion(
             "Archivos y listas", lambda conn: PantallaArchivosYListas(conn), categoria="Catálogos",
             ayuda="Solapa Gestor de archivos del espacio: fotos y documentos de edificios, unidades y "
             "consultorios usados en Propuesta/Disponibilidad/Liquidación/Oferta. Solapas Listas "
@@ -159,8 +143,9 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "textos de referencia usados por otras pantallas y por el PDF de Propuesta.",
         ),
         Seccion(
-            "Responsables", catalogos.pantalla_responsables, categoria="Catálogos",
-            ayuda="Personas de contacto/responsables asociadas a edificios o unidades.",
+            "Base datos del espacio", lambda conn: PantallaBaseDatosEspacio(conn), categoria="Catálogos",
+            ayuda="Localidades, Edificios, Unidades, Consultorios y Responsables — la estructura "
+            "física y de contacto del espacio, en el orden de la cadena de referencias entre ellos.",
         ),
         Seccion(
             "Tipos de licencia", catalogos.pantalla_tipos_licencia, categoria="Catálogos",
