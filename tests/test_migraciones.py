@@ -17,6 +17,25 @@ def test_base_nueva_ya_tiene_las_columnas_migradas(tmp_path):
     conn.close()
 
 
+def test_aplicar_migraciones_agrega_tamano_de_escritorio_a_consultorio_viejo(tmp_path):
+    """Simula una base creada antes de que existiera el tamaño del
+    escritorio: Consultorio sin esas dos columnas — confirma que
+    aplicar_migraciones las agrega solas."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE Consultorio (IdConsultorio INTEGER PRIMARY KEY, IdUnidad INTEGER NOT NULL, "
+        "NumeroConsultorio INTEGER NOT NULL, TamanoClasificacion TEXT)"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    columnas = {f["name"] for f in conn.execute("PRAGMA table_info(Consultorio)").fetchall()}
+    assert {"LargoEscritorio", "AnchoEscritorio"} <= columnas
+    conn.close()
+
+
 def test_base_nueva_tiene_las_tablas_de_seguridad(tmp_path):
     conn = init_database(tmp_path / "test.db")
     tablas = {

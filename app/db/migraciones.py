@@ -76,6 +76,8 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Configuracion", "MinutosInactividadBloqueo", "INTEGER NOT NULL DEFAULT 15"),
     ("Configuracion", "ContrasenaMaestraHash", "TEXT"),
     ("Configuracion", "ContrasenaMaestraSalt", "TEXT"),
+    ("Consultorio", "LargoEscritorio", "REAL"),
+    ("Consultorio", "AnchoEscritorio", "REAL"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja

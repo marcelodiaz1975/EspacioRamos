@@ -40,7 +40,7 @@ def test_importar_edificio_unidad_consultorio(conn, tmp_path):
     )
 
     wb["Consultorio"].append(
-        ["Ramos 1", '7mo "L"', 3, 4.2, 3.5, "intermedio", "SI", "NO", "SI", "NO", "SI", "SI", "NO", 4646, 4646]
+        ["Ramos 1", '7mo "L"', 3, 4.2, 3.5, 1.2, 0.6, "intermedio", "SI", "NO", "SI", "NO", "SI", "SI", "NO", 4646, 4646]
     )
 
     wb.save(ruta)
@@ -61,6 +61,8 @@ def test_importar_edificio_unidad_consultorio(conn, tmp_path):
     assert unidad["WiFi"] == 1
     assert consultorio["IdUnidad"] == unidad["IdUnidad"]
     assert consultorio["NumeroConsultorio"] == 3
+    assert consultorio["LargoEscritorio"] == 1.2
+    assert consultorio["AnchoEscritorio"] == 0.6
 
     localidad = obtener_repositorio(conn, "Localidad").listar()[0]
     assert localidad["Localidad"] == "Ramos Mejía"
@@ -106,7 +108,7 @@ def test_importar_convierte_fecha_dd_mm_aaaa_a_iso(conn, tmp_path):
         ["Ramos 1", '7mo "L"', "SI", "SI", 2, "NO", "NO", "NO", "NO", "NO", "NO", "SI", 60]
     )
     wb["Consultorio"].append(
-        ["Ramos 1", '7mo "L"', 3, 4.2, 3.5, "intermedio", "SI", "NO", "SI", "NO", "SI", "SI", "NO", 4646, 4646]
+        ["Ramos 1", '7mo "L"', 3, 4.2, 3.5, 1.2, 0.6, "intermedio", "SI", "NO", "SI", "NO", "SI", "SI", "NO", 4646, 4646]
     )
     wb["Profesional"].append(
         ["R", "R1", "Lo Veci", "María Virginia Lo Veci", "Virginia", "Virgi", "Femenino",
@@ -137,7 +139,7 @@ def test_importar_fecha_invalida_reporta_error_de_fila(conn, tmp_path):
         ["Ramos 1", '7mo "L"', "SI", "SI", 2, "NO", "NO", "NO", "NO", "NO", "NO", "SI", 60]
     )
     wb["Consultorio"].append(
-        ["Ramos 1", '7mo "L"', 3, 4.2, 3.5, "intermedio", "SI", "NO", "SI", "NO", "SI", "SI", "NO", 4646, 4646]
+        ["Ramos 1", '7mo "L"', 3, 4.2, 3.5, 1.2, 0.6, "intermedio", "SI", "NO", "SI", "NO", "SI", "SI", "NO", 4646, 4646]
     )
     wb["Profesional"].append(
         ["R", "R1", "Lo Veci", "María Virginia Lo Veci", "Virginia", "Virgi", "Femenino",

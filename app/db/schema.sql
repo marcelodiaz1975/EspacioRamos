@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS Consultorio (
     NumeroConsultorio INTEGER NOT NULL,
     Largo REAL,
     Ancho REAL,
+    -- Tamaño del escritorio del consultorio (mueble), distinto de Largo/
+    -- Ancho de arriba (que son del AMBIENTE) — pedido puntual de la
+    -- clienta, puramente informativo por ahora (sin filtro propio en
+    -- Oferta de consultorios, a diferencia de TamanoClasificacion).
+    LargoEscritorio REAL,
+    AnchoEscritorio REAL,
     TamanoClasificacion TEXT,
     Ventana INTEGER NOT NULL DEFAULT 0,
     Placard INTEGER NOT NULL DEFAULT 0,

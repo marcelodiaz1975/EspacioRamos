@@ -1644,6 +1644,35 @@ sin cubrir):
   las pantallas del sistema sigue naciendo visible para cualquiera,
   como antes.
 
+## Consultorios: tamaño del escritorio (Largo/Ancho del mueble)
+
+Pedido puntual de la clienta: poder cargar el tamaño del escritorio de
+cada consultorio — distinto del `Largo`/`Ancho` que ya tenía el
+consultorio, que son del AMBIENTE (la habitación), no del mueble.
+Antes de implementar se consultaron dos decisiones (`AskUserQuestion`):
+
+- **Tipo de dato**: medidas en metros (`LargoEscritorio`/
+  `AnchoEscritorio`, dos `REAL`), mismo criterio que el `Largo`/`Ancho`
+  del ambiente — no una clasificación cerrada tipo Grande/Chico ni texto
+  libre.
+- **Alcance**: puramente informativo por ahora — se carga y se ve en el
+  catálogo de Consultorios (`Campo("LargoEscritorio", "Largo escritorio
+  (m)", tipo="numero")`/análogo para Ancho, entre `Ancho` y
+  `TamanoClasificacion` en `catalogos.pantalla_consultorios`), sin sumar
+  ningún filtro nuevo a Oferta de consultorios (que si sigue filtrando
+  solo por `TamanoClasificacion`, el tamaño del AMBIENTE) ni a ninguna
+  otra pantalla — no se tocó ningún PDF (Propuesta/Disponibilidad) ni el
+  detalle de Oferta. Si más adelante hace falta mostrarlo en algún otro
+  lado, es un pedido aparte.
+
+También se sumaron a `app.importacion.definiciones.COLUMNAS_PLANTILLA
+["Consultorio"]` (entre `Ancho` y `TamanoClasificacion`, mismo orden que
+en el catálogo) — la importación resuelve las columnas por el NOMBRE del
+encabezado de la planilla real, no por posición fija, así que insertar
+estas dos en el medio de la lista no rompe ninguna planilla ya
+descargada antes de este cambio (sigue funcionando por el texto del
+encabezado que traiga esa planilla puntual).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

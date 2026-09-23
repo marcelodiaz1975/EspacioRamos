@@ -38,6 +38,7 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
     ],
     "Consultorio": [
         "Edificio", "Unidad", "NumeroConsultorio", "Largo", "Ancho",
+        "LargoEscritorio", "AnchoEscritorio",
         "TamanoClasificacion", "Ventana", "Placard",
         "AireAcondicionado", "VentiladorTecho", "Sillones", "AptoCamilla",
         "Balcon", "ValorHoraRegularActual", "ValorHoraAisladaActual",

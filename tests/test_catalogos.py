@@ -217,6 +217,34 @@ def test_fechas_especiales_tipo_es_combo_cerrado(qtbot, conn):
     assert textos[0] == "Feriado nacional"
 
 
+def test_consultorios_tiene_tamano_de_escritorio_ademas_del_ambiente(qtbot, conn):
+    """LargoEscritorio/AnchoEscritorio son el tamaño del mueble, distinto
+    de Largo/Ancho (el ambiente) — pedido puntual de la clienta, sin
+    ningún filtro propio en Oferta de consultorios todavía."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.commit()
+
+    pantalla = catalogos.pantalla_consultorios(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    dialogo._entradas["IdUnidad"].setCurrentIndex(dialogo._entradas["IdUnidad"].findData(id_unidad))
+    dialogo._entradas["NumeroConsultorio"].setText("5")
+    dialogo._entradas["Largo"].setText("4")
+    dialogo._entradas["Ancho"].setText("3")
+    dialogo._entradas["LargoEscritorio"].setText("1.2")
+    dialogo._entradas["AnchoEscritorio"].setText("0.6")
+
+    valores = dialogo.valores()
+    assert valores["Largo"] == 4.0
+    assert valores["Ancho"] == 3.0
+    assert valores["LargoEscritorio"] == 1.2
+    assert valores["AnchoEscritorio"] == 0.6
+
+
 def test_consultorios_tamano_es_combo_cerrado_con_los_tres_predefinidos(qtbot, conn):
     """Antes era texto libre: el filtro de tamaño de Oferta de
     consultorios compara por igualdad exacta, un valor fuera de catálogo

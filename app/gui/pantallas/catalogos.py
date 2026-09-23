@@ -127,6 +127,11 @@ def pantalla_consultorios(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("NumeroConsultorio", "Número", tipo="numero", requerido=True),
         Campo("Largo", "Largo (m)", tipo="numero"),
         Campo("Ancho", "Ancho (m)", tipo="numero"),
+        # Tamaño del escritorio (mueble), distinto del Largo/Ancho de
+        # arriba (que son del ambiente) — pedido puntual de la clienta,
+        # puramente informativo por ahora.
+        Campo("LargoEscritorio", "Largo escritorio (m)", tipo="numero"),
+        Campo("AnchoEscritorio", "Ancho escritorio (m)", tipo="numero"),
         Campo("TamanoClasificacion", "Clasificación", tipo="combo", opciones=_opciones_tamano),
         Campo("Ventana", "Ventana", tipo="booleano"),
         Campo("Placard", "Placard", tipo="booleano"),
