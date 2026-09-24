@@ -4,11 +4,19 @@ período, permite emitirlas (persistir en LiquidacionEmitida + acreditar
 a SaldoCuentaActual, DC-09 §2) y generar el PDF de cada una en
 Profesionales/{código} del profesional correspondiente.
 
-Dos solapas: "Emisión de archivos" (F22, lo de siempre) y "Estado de
+Tres solapas: "Emisión de archivos" (F22, lo de siempre), "Estado de
 cuenta" (F26 — antes vivía en la pantalla separada "Estado de cuenta",
 suprimida: sus tres solapas pasaron a vivir cada una en el formulario
 que ya arma ese tipo de movimiento — ver también Pagos F21/F25 y
-Cargos especiales F28/F25, confirmado por la clienta)."""
+Cargos especiales F28/F25, confirmado por la clienta) y "Feriados y
+fechas especiales" (reordenamiento de formularios, Excel de la clienta:
+el catálogo `FechasEspeciales` de `catalogos.py`, antes pantalla propia
+del menú, se suma acá anidado — están relacionados porque los feriados/
+no laborables afectan el cálculo de la liquidación). La pantalla en sí
+se renombra "Liquidaciones" (antes "Liquidación mensual" en el menú,
+"Proceso de liquidación mensual" como título Nivel 1 — mismo criterio
+que el resto de los merges de esta reorganización: el título Nivel 1
+pasa a ser el nombre nuevo del formulario)."""
 from __future__ import annotations
 
 import os
@@ -33,6 +41,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.estilos import COLOR_ROJO
+from app.gui.pantallas import catalogos
 from app.gui.pantallas.reservas import _numero_codigo, _opciones_profesional, _texto_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
@@ -81,7 +90,7 @@ class ProcesoLiquidacion(QWidget):
         super().__init__(parent)
         self.conn = conn
         layout = QVBoxLayout(self)
-        titulo = QLabel("Proceso de liquidación mensual")
+        titulo = QLabel("Liquidaciones".upper())
         titulo.setObjectName("tituloPantalla")
         layout.addWidget(titulo)
 
@@ -90,6 +99,8 @@ class ProcesoLiquidacion(QWidget):
         self.panel_estado_cuenta = _PanelEstadoCuentaLiquidaciones(conn)
         self.pestanas.addTab(self.panel_emision, "Emisión de archivos")
         self.pestanas.addTab(self.panel_estado_cuenta, "Estado de cuenta")
+        self.panel_fechas_especiales = catalogos.pantalla_fechas_especiales(conn, anidado=True)
+        self.pestanas.addTab(self.panel_fechas_especiales, "Feriados y fechas especiales")
         self.pestanas.tabBar().setDrawBase(False)
         layout.addWidget(self.pestanas, stretch=1)
 

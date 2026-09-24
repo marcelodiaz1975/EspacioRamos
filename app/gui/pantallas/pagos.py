@@ -5,7 +5,11 @@ período imputado) y la generación de cuotas se calculen siempre igual que
 por código.
 
 Es F21 (confirmado — ya referenciado así en AUDITORIA_DC01-DC10.md y en
-la revisión de Novedades)."""
+la revisión de Novedades).
+
+Reordenamiento de formularios (Excel de la clienta): la solapa
+"Registrar pago" se renombra "Registrar pagos" — la pantalla en sí sigue
+siendo la misma, sin ningún otro cambio estructural."""
 from __future__ import annotations
 
 import sqlite3
@@ -135,7 +139,7 @@ class PantallaPagos(QWidget):
         self.panel_pagos = _PanelRegistrarPago(conn)
         self.panel_planes = _PanelPlanesPago(conn)
         self.panel_estado_cuenta = _PanelEstadoCuentaPagos(conn)
-        pestanas.addTab(self.panel_pagos, "Registrar pago")
+        pestanas.addTab(self.panel_pagos, "Registrar pagos")
         pestanas.addTab(self.panel_planes, "Planes de pago")
         pestanas.addTab(self.panel_estado_cuenta, "Estado de cuenta")
         layout.addWidget(pestanas, stretch=1)
@@ -638,7 +642,7 @@ class _PanelPlanesPago(QWidget):
         self.actualizar()
 
     def showEvent(self, event) -> None:  # noqa: N802
-        """Mismo motivo que en la solapa "Registrar pago": `setFocus()`
+        """Mismo motivo que en la solapa "Registrar pagos": `setFocus()`
         durante la construcción no alcanza a "pegar"."""
         super().showEvent(event)
         self._orden.reiniciar()

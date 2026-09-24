@@ -69,10 +69,12 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             ayuda="Alta, edición y baja de reservas (regulares y aisladas) por profesional, consultorio y franja.",
         ),
         Seccion(
-            "Liquidación mensual", lambda conn: ProcesoLiquidacion(conn), categoria="Principal",
-            ayuda="Genera la liquidación PDF de cada profesional para el período seleccionado, con "
-            "descuentos por feriados/licencias/vacaciones ya aplicados, y el estado de cuenta con su "
-            "historial de liquidaciones emitidas.",
+            "Liquidaciones", lambda conn: ProcesoLiquidacion(conn), categoria="Principal",
+            ayuda="Solapas Emisión de archivos/Estado de cuenta: genera la liquidación PDF de cada "
+            "profesional para el período seleccionado, con descuentos por feriados/licencias/"
+            "vacaciones ya aplicados, y el estado de cuenta con su historial de liquidaciones "
+            "emitidas. Solapa Feriados y fechas especiales: catálogo de feriados y días no "
+            "laborables, cargados a mano.",
         ),
         Seccion(
             "Llaves", lambda conn: PantallaLlaves(conn), categoria="Principal",
@@ -151,11 +153,6 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
         Seccion(
             "Placas", catalogos.pantalla_placas, categoria="Catálogos",
             ayuda="Placas del tablero de cada unidad: posición y nombre grabado, activas o no.",
-        ),
-        Seccion(
-            "Fechas especiales", catalogos.pantalla_fechas_especiales, categoria="Catálogos",
-            ayuda="Feriados y fechas especiales, cargados a mano — el sistema no los importa de "
-            "ningún sitio externo, para poder darle a cada fecha el tratamiento que corresponda.",
         ),
         Seccion(
             "Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria="Configuración",

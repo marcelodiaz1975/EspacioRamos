@@ -1,7 +1,7 @@
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -61,6 +61,33 @@ def test_paneles_de_liquidacion_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
     qtbot.addWidget(pantalla)
     assert pantalla.panel_emision.objectName() == "panelSolapa"
     assert pantalla.panel_estado_cuenta.objectName() == "panelSolapa"
+    assert pantalla.panel_fechas_especiales.objectName() == "panelSolapa"
+
+
+def test_titulo_es_liquidaciones(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    titulo = pantalla.findChild(QLabel, "tituloPantalla")
+    assert titulo is not None
+    assert titulo.text() == "LIQUIDACIONES"
+
+
+def test_tiene_tres_solapas_en_el_orden_esperado(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.pestanas.count() == 3
+    assert pantalla.pestanas.tabText(0) == "Emisión de archivos"
+    assert pantalla.pestanas.tabText(1) == "Estado de cuenta"
+    assert pantalla.pestanas.tabText(2) == "Feriados y fechas especiales"
+
+
+def test_solapa_fechas_especiales_es_un_catalogo_anidado_sin_titulo_propio(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_fechas_especiales
+    assert panel.anidado is True
+    assert panel.findChild(QLabel, "tituloPantalla") is None
+    assert panel.campo_buscar is not None
 
 
 def test_nombre_profesional_usa_formato_canonico(qtbot, conn):

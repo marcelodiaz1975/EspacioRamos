@@ -405,7 +405,7 @@ def pantalla_placas(conn: sqlite3.Connection) -> PantallaCRUD:
     return PantallaCRUD(conn, "Placa", "Placas", campos)
 
 
-def pantalla_fechas_especiales(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_fechas_especiales(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Fecha", "Fecha", tipo="fecha"),
         Campo("Descripcion", "Descripción"),
@@ -413,4 +413,4 @@ def pantalla_fechas_especiales(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Activo", "Activo", tipo="booleano"),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "FechasEspeciales", "Fechas especiales", campos)
+    return PantallaCRUD(conn, "FechasEspeciales", "Fechas especiales", campos, anidado=anidado)

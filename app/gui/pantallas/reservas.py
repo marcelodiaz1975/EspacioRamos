@@ -1,7 +1,12 @@
 """Reservas regulares y aisladas (F16/F17, secciones 3.9-3.10): reusa
 app.negocio.reservas para el alta (con toda la validación de conflictos,
 bloques rígidos y ausencias) y la cancelación de aisladas, en vez de
-escribir directamente en las tablas."""
+escribir directamente en las tablas.
+
+Reordenamiento de formularios (Excel de la clienta): las dos solapas se
+renombran "Reservas regulares"/"Reservas aisladas" (antes "Regulares"/
+"Aisladas") — la pantalla en sí sigue siendo la misma, sin ningún otro
+cambio estructural."""
 from __future__ import annotations
 
 import re
@@ -244,8 +249,8 @@ class PantallaReservas(QWidget):
         self.pestanas = QTabWidget()
         self.panel_regulares = _PanelReservasRegulares(conn)
         self.panel_aisladas = _PanelReservasAisladas(conn)
-        self.pestanas.addTab(self.panel_regulares, "Regulares")
-        self.pestanas.addTab(self.panel_aisladas, "Aisladas")
+        self.pestanas.addTab(self.panel_regulares, "Reservas regulares")
+        self.pestanas.addTab(self.panel_aisladas, "Reservas aisladas")
         layout.addWidget(self.pestanas, stretch=1)
 
     def actualizar(self) -> None:

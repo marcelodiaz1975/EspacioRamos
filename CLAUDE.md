@@ -2050,6 +2050,45 @@ esos dos). `test_gui_profesionales_formulario.py` (nuevo) cubre el
 formulario compuesto (título, orden de solapas, tipo/objectName de cada
 panel, `anidado is True` en la solapa de Profesiones).
 
+### Reservas y Pagos (solo renombre de solapas) + Liquidaciones (+ Fechas especiales)
+
+Cuarto merge de "Operativa diaria" según el Excel de la clienta, con dos
+renombres puntuales de paso (sin ningún otro cambio estructural en esas
+dos pantallas) y un merge real en Liquidaciones:
+
+- **Reservas** (`reservas.py`): las dos solapas pasan de "Regulares"/
+  "Aisladas" a "Reservas regulares"/"Reservas aisladas" — la pantalla
+  sigue siendo la misma `PantallaReservas`, sin ningún otro cambio.
+- **Pagos** (`pagos.py`): la solapa "Registrar pago" pasa a "Registrar
+  pagos" — mismo criterio, solo texto de la pestaña (el botón interno
+  sigue diciendo "Registrar pago", eso no cambió).
+- **Liquidaciones** (antes "Liquidación mensual", `liquidacion.py`): pasa
+  a formulario de tres solapas, sumando el catálogo "Fechas especiales"
+  (antes pantalla propia del menú, categoría "Catálogos") como tercera
+  solapa "Feriados y fechas especiales" — están relacionados porque los
+  feriados/no laborables afectan el cálculo de la liquidación. Mismo
+  mecanismo `anidado=True` de siempre: `catalogos.pantalla_fechas_
+  especiales` suma su propio parámetro `anidado` (default `False`,
+  reenviado a `PantallaCRUD`). El título Nivel 1 de `ProcesoLiquidacion`
+  pasa de "Proceso de liquidación mensual" a "Liquidaciones" — mismo
+  criterio que el resto de los merges de esta reorganización (el título
+  pasa a ser el nombre nuevo del formulario), salvo Panel de control,
+  que es un caso especial documentado aparte. `gui_main.py`: se renombra
+  la `Seccion` "Liquidación mensual" a "Liquidaciones" (con la ayuda
+  actualizada mencionando las tres solapas) y se saca la `Seccion`
+  propia "Fechas especiales" — el catálogo "Placas" de esa misma
+  categoría no se tocó, es un merge aparte (pasa a ser la tercera solapa
+  de "Placas para timbres", todavía pendiente).
+
+Tests: `test_gui_reservas.py`/`test_gui_pagos.py` no tenían ningún
+assert sobre el texto de esas solapas, así que no hizo falta tocarlos.
+`test_gui_liquidacion.py` suma cuatro tests: el objectName
+`panelSolapa` de la solapa nueva (junto a los dos que ya existían para
+Emisión/Estado de cuenta), el título Nivel 1 ("LIQUIDACIONES"), el
+orden de las tres solapas, y que la solapa de Fechas especiales es un
+`PantallaCRUD` anidado de verdad (sin título propio, con `campo_buscar`
+armado) — mismo criterio que los tests de Base datos del espacio.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
