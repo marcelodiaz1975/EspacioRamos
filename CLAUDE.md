@@ -2017,6 +2017,39 @@ propia arriba.
   de la ya inexistente "Archivos varios". `test_gui_disponibilidad.py`
   (nuevo) cubre el formulario compuesto.
 
+### Profesionales (+ Profesiones y tratamientos)
+
+Tercer merge de "Operativa diaria": agrupa "Profesionales" (listado +
+documentación adjunta) con el catálogo "Profesiones" (renombrado
+"Profesiones y tratamientos" como solapa), antes ambos pantallas propias
+del menú.
+
+A diferencia de los merges anteriores, acá el nombre del formulario de
+afuera coincide con el de la pantalla vieja ("Profesionales"), así que
+`app/gui/pantallas/profesionales.py` termina con las dos versiones
+conviviendo en el mismo archivo: `PantallaProfesionales` (renombrada
+desde la vieja pantalla) pasa a `_PanelProfesionales` (solapa desnuda,
+`objectName="panelSolapa"`, sin título propio; el `PantallaCRUD` interno
+`self.crud_profesionales` suma `anidado=True`), y el nombre
+`PantallaProfesionales` queda libre para el contenedor de afuera nuevo
+— título Nivel 1 fijo + `QTabWidget` con `_PanelProfesionales` como
+"Listado de profesionales" y `catalogos.pantalla_profesiones(conn,
+anidado=True)` (que suma su propio parámetro `anidado`, mismo mecanismo
+que el resto de los catálogos) como "Profesiones y tratamientos". La
+fábrica `pantalla_profesionales` (que devolvía la vieja pantalla) se
+borra — ya no tiene otro consumidor fuera de `gui_main.py`.
+
+`gui_main.py`: se sacan las `Seccion` "Profesionales" (la vieja, sobre la
+fábrica) y "Profesiones"; se suma una sola "Profesionales" sobre
+`PantallaProfesionales(conn)`.
+
+Tests: `test_profesionales.py` renombra sus llamadas a `_PanelProfesionales`
+y reescribe el único test estructural que asumía un `QTabWidget`/
+`QScrollArea` propios del `PantallaCRUD` interno (ahora anidado, sin
+esos dos). `test_gui_profesionales_formulario.py` (nuevo) cubre el
+formulario compuesto (título, orden de solapas, tipo/objectName de cada
+panel, `anidado is True` en la solapa de Profesiones).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QPushButton, QScrollArea, QTabWidget
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QPushButton, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -8,7 +8,7 @@ from app.gui.pantallas.profesionales import (
     _al_abrir_dialogo,
     _campos_profesional,
     _DialogoCategoriaDocumento,
-    pantalla_profesionales,
+    _PanelProfesionales,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -34,7 +34,7 @@ def conn(tmp_path):
 def test_pantalla_profesionales_lista_existentes(qtbot, conn):
     conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Gómez')")
     conn.commit()
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.crud_profesionales.tabla_widget.rowCount() == 1
     assert pantalla.crud_profesionales.tabla_widget.item(0, 3).text() == "Gómez"
@@ -43,7 +43,7 @@ def test_pantalla_profesionales_lista_existentes(qtbot, conn):
 def test_pantalla_profesionales_muestra_etiqueta_de_categoria(qtbot, conn):
     conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Gómez')")
     conn.commit()
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.crud_profesionales.tabla_widget.item(0, 4).text() == "R - Regular"
 
@@ -56,7 +56,7 @@ def test_pantalla_profesionales_muestra_cabeza_de_equipo(qtbot, conn):
         (id_cabeza,),
     )
     conn.commit()
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     fila_equipo = next(
         i for i in range(pantalla.crud_profesionales.tabla_widget.rowCount()) if pantalla.crud_profesionales.tabla_widget.item(i, 3).text() == "Ruiz"
@@ -66,14 +66,14 @@ def test_pantalla_profesionales_muestra_cabeza_de_equipo(qtbot, conn):
 
 def test_campos_libres_apagados_los_saca_de_profesionales(qtbot, conn):
     obtener_repositorio(conn, "Configuracion").actualizar(1, VisualizarCamposLibres=0)
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     nombres = [c.nombre for c in pantalla.crud_profesionales.campos]
     assert "CampoLibre1" not in nombres
 
 
 def test_condicion_fiscal_es_combo_editable_con_default_consumidor_final(qtbot, conn):
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     dialogo = _DialogoRegistro(conn, pantalla.crud_profesionales.campos, "Nuevo registro")
     qtbot.addWidget(dialogo)
@@ -161,7 +161,7 @@ def test_editar_desde_pantalla_invoca_al_abrir_dialogo(qtbot, conn, monkeypatch)
     obtener_repositorio(conn, "Profesional").crear(
         CategoriaProfesional="R", Apellido="Pérez", IdProfesion=id_fono, Sexo="Femenino", Tratamiento="Lic.",
     )
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     pantalla.crud_profesionales.tabla_widget.selectRow(0)
 
@@ -197,7 +197,7 @@ def test_nombre_completo_se_puede_cargar_y_editar_a_mano(qtbot, conn):
     id_prof = obtener_repositorio(conn, "Profesional").crear(**dialogo.valores())
     assert obtener_repositorio(conn, "Profesional").obtener(id_prof)["NombreCompleto"] == "Gómez, Juan Carlos"
 
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     dialogo_edicion = _DialogoRegistro(conn, pantalla.crud_profesionales.campos, "Editar registro", registro=obtener_repositorio(conn, "Profesional").obtener(id_prof))
     qtbot.addWidget(dialogo_edicion)
@@ -214,7 +214,7 @@ def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_p
     (tmp_path / "Profesionales" / "R3" / "2026-08 - Liquidación Ramos.pdf").write_text("x")
     conn.commit()
 
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     fila = next(i for i in range(pantalla.crud_profesionales.tabla_widget.rowCount()) if pantalla.crud_profesionales.tabla_widget.item(i, 3).text() == "Ramos")
     pantalla.crud_profesionales.tabla_widget.selectRow(fila)
@@ -246,7 +246,7 @@ def test_seleccionar_profesional_muestra_su_documentacion(qtbot, conn, tmp_path)
     (tmp_path / "Profesionales" / "R3" / "Documentación" / "dni.pdf").write_text("x")
     conn.commit()
 
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     pantalla.crud_profesionales.tabla_widget.selectRow(0)
 
@@ -259,7 +259,7 @@ def test_profesional_sin_codigo_no_muestra_documentacion(qtbot, conn, tmp_path):
     obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="C", Apellido="Sin Codigo")
     conn.commit()
 
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     pantalla.crud_profesionales.tabla_widget.selectRow(0)
 
@@ -274,7 +274,7 @@ def test_agregar_documento_lo_copia_y_lo_lista(qtbot, conn, tmp_path, monkeypatc
     origen.write_bytes(b"x")
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(origen), "")))
 
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     pantalla.crud_profesionales.tabla_widget.selectRow(0)
 
@@ -296,7 +296,7 @@ def test_eliminar_documento(qtbot, conn, tmp_path, monkeypatch):
     origen.write_bytes(b"x")
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(origen), "")))
 
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     pantalla.crud_profesionales.tabla_widget.selectRow(0)
     pantalla._agregar_documento()
@@ -322,7 +322,7 @@ def test_agregar_documento_elige_categoria_del_dialogo(qtbot, conn, tmp_path, mo
 
     monkeypatch.setattr(_DialogoCategoriaDocumento, "exec", _elegir_titulo)
 
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     pantalla.crud_profesionales.tabla_widget.selectRow(0)
     pantalla._agregar_documento()
@@ -346,7 +346,7 @@ def test_agregar_otras_imagenes_sin_detalle_no_agrega(qtbot, conn, tmp_path, mon
 
     monkeypatch.setattr(_DialogoCategoriaDocumento, "exec", _elegir_otras_sin_detalle)
 
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     pantalla.crud_profesionales.tabla_widget.selectRow(0)
     pantalla._agregar_documento()
@@ -369,7 +369,7 @@ def test_agregar_otras_imagenes_con_detalle_nombra_el_archivo(qtbot, conn, tmp_p
 
     monkeypatch.setattr(_DialogoCategoriaDocumento, "exec", _elegir_otras_con_detalle)
 
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     pantalla.crud_profesionales.tabla_widget.selectRow(0)
     pantalla._agregar_documento()
@@ -378,18 +378,20 @@ def test_agregar_otras_imagenes_con_detalle_nombra_el_archivo(qtbot, conn, tmp_p
 
 
 def test_pantalla_profesionales_usa_formato_solapa(qtbot, conn):
-    pantalla = pantalla_profesionales(conn)
+    """Reordenamiento de formularios: `_PanelProfesionales` es ahora la
+    solapa "Listado de profesionales" de "Profesionales" — el
+    `PantallaCRUD` interno va en modo `anidado=True`, sin su propio
+    título ni `QTabWidget` "Listado" (ver `PantallaProfesionales`,
+    contenedor de afuera, para el `QTabWidget` real)."""
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
-    tabs = pantalla.findChildren(QTabWidget)
-    assert len(tabs) == 1
-    assert tabs[0].tabText(0) == "Listado"
-    scrolls = pantalla.findChildren(QScrollArea)
-    assert len(scrolls) == 1
-    assert scrolls[0].widget().objectName() == "panelSolapa"
+    assert pantalla.findChildren(QTabWidget) == []
+    assert pantalla.crud_profesionales.anidado is True
+    assert pantalla.crud_profesionales.objectName() == "panelSolapa"
 
 
 def test_pantalla_profesionales_documentacion_va_bajo_los_botones_del_crud(qtbot, conn):
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     crud = pantalla.crud_profesionales
     assert crud.campo_buscar is not None
@@ -401,7 +403,7 @@ def test_pantalla_profesionales_documentacion_va_bajo_los_botones_del_crud(qtbot
 
 
 def test_pantalla_profesionales_lista_documentos_se_estira_con_la_ventana(qtbot, conn):
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1300, 700)
     pantalla.show()
@@ -412,13 +414,13 @@ def test_pantalla_profesionales_lista_documentos_se_estira_con_la_ventana(qtbot,
 
 
 def test_pantalla_profesionales_buscar_dice_buscar_profesional(qtbot, conn):
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.crud_profesionales.etiqueta_buscar == "Buscar profesional"
 
 
 def test_pantalla_profesionales_botones_de_documentacion_dicen_agregar_y_eliminar_archivo(qtbot, conn):
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     textos = [b.text() for b in pantalla.findChildren(QPushButton)]
     assert "Agregar archivo" in textos
@@ -428,14 +430,14 @@ def test_pantalla_profesionales_botones_de_documentacion_dicen_agregar_y_elimina
 def test_pantalla_profesionales_tiene_linea_divisoria_arriba_de_documentacion(qtbot, conn):
     from PySide6.QtWidgets import QFrame
 
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     lineas = [w for w in pantalla.crud_profesionales.panel_extra_izquierda.findChildren(QFrame)]
     assert any(w.frameShape() == QFrame.Shape.HLine for w in lineas)
 
 
 def test_pantalla_profesionales_columnas_en_orden_codigo_tratamiento_nombre_apellido(qtbot, conn):
-    pantalla = pantalla_profesionales(conn)
+    pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     etiquetas = [c.etiqueta for c in pantalla.crud_profesionales.campos[:4]]
     assert etiquetas == ["Código", "Tratamiento", "Nombre", "Apellido"]

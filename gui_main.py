@@ -23,7 +23,7 @@ from app.gui.pantallas.novedades import PantallaCargosEspeciales, PantallaRegist
 from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.pantallas.panel_control import PanelControl
 from app.gui.pantallas.placas import PantallaPlacas
-from app.gui.pantallas.profesionales import pantalla_profesionales
+from app.gui.pantallas.profesionales import PantallaProfesionales
 from app.gui.pantallas.reservas import PantallaReservas
 from app.gui.pantallas.usuarios import PantallaUsuarios
 from app.gui.pantallas.valores import PantallaValores
@@ -122,9 +122,10 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "y define los tramos del esquema de descuentos por horas semanales.",
         ),
         Seccion(
-            "Profesionales", pantalla_profesionales, categoria="Catálogos",
-            ayuda="Alta, baja y edición de profesionales, con su categoría, código y la "
-            "documentación adjunta de cada uno.",
+            "Profesionales", lambda conn: PantallaProfesionales(conn), categoria="Catálogos",
+            ayuda="Solapa Listado de profesionales: alta, baja y edición de profesionales, con su "
+            "categoría, código y la documentación adjunta de cada uno. Solapa Profesiones y "
+            "tratamientos: catálogo de profesiones disponibles para asignarle a un profesional.",
         ),
         Seccion(
             "Archivos y listas", lambda conn: PantallaArchivosYListas(conn, secciones), categoria="Catálogos",
@@ -142,10 +143,6 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
         Seccion(
             "Tipos de licencia", catalogos.pantalla_tipos_licencia, categoria="Catálogos",
             ayuda="Catálogo de tipos de licencia disponibles para cargarle a un profesional.",
-        ),
-        Seccion(
-            "Profesiones", catalogos.pantalla_profesiones, categoria="Catálogos",
-            ayuda="Catálogo de profesiones disponibles para asignarle a un profesional.",
         ),
         Seccion(
             "Gastos operativos", catalogos.pantalla_gastos_operativos, categoria="Catálogos",

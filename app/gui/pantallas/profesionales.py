@@ -2,7 +2,16 @@
 un panel de documentación (archivos sueltos en Profesionales/{código}/
 Documentación) para el profesional seleccionado — va debajo de Nuevo/
 Editar/Eliminar en el panel izquierdo (`panel_extra_izquierda` de
-PantallaCRUD), mismo formato solapa que el resto de los catálogos."""
+PantallaCRUD), mismo formato solapa que el resto de los catálogos.
+
+Reordenamiento de formularios (Excel de la clienta): dejó de ser una
+pantalla propia del menú y pasó a ser la solapa "Listado de
+profesionales" del formulario "Profesionales" (`_PanelProfesionales`,
+junto a "Profesiones y tratamientos" — el catálogo `Profesion` de
+`catalogos.py`, construido con `anidado=True`). El `PantallaCRUD` interno
+(`self.crud_profesionales`) también pasa a `anidado=True` — sin eso,
+quedaría un título/QTabWidget "Listado" anidado dentro de la solapa del
+formulario de afuera."""
 from __future__ import annotations
 
 import sqlite3
@@ -19,11 +28,13 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
+from app.gui.pantallas import catalogos
 from app.negocio.archivos_generados import aplicar_cambio_codigo
 from app.negocio.dias import fecha_actual
 from app.negocio.documentacion_profesional import (
@@ -250,9 +261,10 @@ def _al_abrir_dialogo(dialogo) -> None:
     _actualizar_tratamiento()
 
 
-class PantallaProfesionales(QWidget):
+class _PanelProfesionales(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
+        self.setObjectName("panelSolapa")
         self.conn = conn
         self._armar_ui()
 
@@ -294,6 +306,7 @@ class PantallaProfesionales(QWidget):
             al_abrir_dialogo=_al_abrir_dialogo,
             panel_extra_izquierda=panel_doc,
             etiqueta_buscar="Buscar profesional",
+            anidado=True,
         )
         self.crud_profesionales.tabla_widget.itemSelectionChanged.connect(self._actualizar_documentacion)
         layout.addWidget(self.crud_profesionales, stretch=1)
@@ -357,5 +370,25 @@ class PantallaProfesionales(QWidget):
         self._actualizar_documentacion()
 
 
-def pantalla_profesionales(conn: sqlite3.Connection) -> PantallaProfesionales:
-    return PantallaProfesionales(conn)
+class PantallaProfesionales(QWidget):
+    """Contenedor de afuera del formulario "Profesionales" (reordenamiento
+    de formularios, Excel de la clienta): título Nivel 1 fijo + las dos
+    solapas, "Listado de profesionales" (`_PanelProfesionales`, arriba en
+    este mismo archivo) y "Profesiones y tratamientos" (el catálogo
+    `Profesion` de `catalogos.py`, anidado)."""
+
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.conn = conn
+        layout = QVBoxLayout(self)
+        titulo = QLabel("Profesionales".upper())
+        titulo.setObjectName("tituloPantalla")
+        layout.addWidget(titulo)
+
+        self.pestanas = QTabWidget()
+        self.panel_profesionales = _PanelProfesionales(conn)
+        self.pestanas.addTab(self.panel_profesionales, "Listado de profesionales")
+        self.panel_profesiones = catalogos.pantalla_profesiones(conn, anidado=True)
+        self.pestanas.addTab(self.panel_profesiones, "Profesiones y tratamientos")
+        self.pestanas.tabBar().setDrawBase(False)
+        layout.addWidget(self.pestanas, stretch=1)

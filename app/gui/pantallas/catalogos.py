@@ -224,7 +224,7 @@ def pantalla_detalles_complementarios_propuesta(conn: sqlite3.Connection, *, ani
     return pantalla
 
 
-def pantalla_profesiones(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_profesiones(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Nombre", "Nombre", requerido=True),
         Campo("NombreMasculino", "Nombre (masculino)"),
@@ -237,7 +237,7 @@ def pantalla_profesiones(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("OpcionesTratamientoFemenino", "Opciones de tratamiento (femenino, separadas por coma)"),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "Profesion", "Profesiones", campos)
+    return PantallaCRUD(conn, "Profesion", "Profesiones", campos, anidado=anidado)
 
 
 def _opciones_edificio_o_ninguno_gasto(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
