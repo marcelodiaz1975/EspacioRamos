@@ -38,6 +38,22 @@ por pantalla), salvo que se diga explícitamente que es solo para una.
     especiales, Pagos, Lista de espera, Liquidación mensual, Reservas,
     Placas, Vista rápida, Aumentos y descuentos, Catálogos) — cualquier
     pantalla nueva con `QTabWidget` tiene que sumarlo también.
+  - **Regla general, no solo del widget de más afuera** (subida a
+    convención a pedido explícito de la clienta al detectar el caso de
+    "Archivos y listas" — ver "Panel izquierdo gris" más abajo para el
+    diagnóstico técnico completo): la pestaña ACTIVA entera, y CUALQUIER
+    contenedor intermedio dentro de ella (panel izquierdo de
+    Buscar/botones, `panel_extra_*`, cualquier `QWidget` genérico sin
+    estilo propio que envuelva parte del contenido), tiene que quedar
+    del mismo tono claro que el resto del contenido — nunca más oscuro.
+    Un `QWidget` sin objectName cae al gris default de Qt aunque esté
+    anidado dentro de un widget que sí tiene `panelSolapa`, porque esa
+    regla QSS no cascada a los hijos — hay que sumarle el objectName a
+    CADA widget intermedio, no solo al de más afuera. Esto se va
+    resolviendo pantalla por pantalla a medida que se revisa cada una
+    (no un barrido completo de una sola vez, pedido explícito de la
+    clienta) — ver la lista de pantallas armadas a mano todavía
+    pendientes de este chequeo en "Panel izquierdo gris" más abajo.
   - Como referencia suelta (sin ser una solapa real), objectName
     `subtituloSeccion` da el mismo formato en un QLabel.
 - **Nivel 3** — título de un campo/selector puntual (objectName
@@ -2497,9 +2513,13 @@ su panel izquierdo a mano en vez de con `crud_generico` (Placas,
 Aumentos y descuentos, Grilla operativa, Novedades, Reservas, Pagos,
 Lista de espera, Llaves, Bloques rígidos — ver la lista ya documentada
 más arriba de "pantallas con su propio QTabWidget armado a mano") no se
-revisaron todavía por este mismo defecto — si al repasarlas aparece el
-mismo gris de más, aplicar el mismo criterio (sumarle `panelSolapa` al
-widget intermedio que le falte).
+revisaron todavía por este mismo defecto. Pedido explícito de la
+clienta: no hace falta un barrido completo ahora — se va resolviendo
+pantalla por pantalla a medida que se van revisando de acá en adelante,
+como cualquier otro ajuste de esta revisión. Si al repasar una de estas
+pantallas aparece el mismo gris de más, aplicar el mismo criterio
+(sumarle `panelSolapa` a cada widget intermedio que le falte, no solo
+al de más afuera).
 
 ## Metodología de trabajo
 
@@ -2514,3 +2534,11 @@ regresiones nuevas (los ~15 fallos preexistentes de mensajería/pagos/
 liquidaciones no están relacionados con la GUI y no se tocan acá),
 captura de pantalla con Qt offscreen/xvfb para verificar visualmente
 antes de dar la pantalla por cerrada.
+
+Las capturas que se le envían a la clienta se nombran
+"{Sección} - {Formulario} - {Solapa}.png" (pedido explícito de la
+clienta, para no tener que renombrarlas ella a mano) — ej. "Sistema -
+Panel de control - Avance de período y backups.png". Sección es
+"Sistema"/"Operativa diaria" (las dos categorías del menú), Formulario
+el nombre del `Seccion` del menú, Solapa el texto de la pestaña
+mostrada (si la pantalla no tiene solapas, se omite esa tercera parte).
