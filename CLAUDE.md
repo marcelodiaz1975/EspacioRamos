@@ -1119,6 +1119,16 @@ Consultorios" — ahí cambiar el fallback hubiera duplicado la palabra
 fallback "Espacio Ramos" de siempre (la fórmula ya arma el nombre
 completo por su cuenta).
 
+**Revertido en el reordenamiento de formularios**: al pasar Panel de
+control a ser un formulario más entre otros seis del menú de "Sistema"
+(dejó de ser conceptualmente "la portada" del sistema), el título de
+mostrar el nombre del espacio volvió a mostrar el nombre de la
+pantalla ("PANEL DE CONTROL") — pedido explícito de la clienta, para
+quedar coherente con el resto (todas las demás pantallas del sistema
+muestran su propio nombre, nunca el del espacio). El resto de lo
+corregido en esta vuelta (el fallback "Espacio Ramos Consultorios" en
+los demás lugares del código) no se tocó, sigue vigente.
+
 Tercera vuelta (ajustes sobre la grilla de cuadritos de la vuelta
 anterior): "Alertas" deja de ser un cuadrito más de la grilla 3x2 —
 pasa a su propio `QFrame` aparte, ABAJO de la grilla, ocupando todo el

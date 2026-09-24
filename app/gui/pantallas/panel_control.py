@@ -177,9 +177,17 @@ def _tarjeta(titulo: str) -> tuple[QFrame, QVBoxLayout]:
 
 
 class PanelControl(QWidget):
-    """Contenedor de afuera: título Nivel 1 (nombre del espacio) + las dos
-    solapas (`_PanelAvancePeriodo`/`_PanelImportacion`, ver docstring del
-    módulo)."""
+    """Contenedor de afuera: título Nivel 1 fijo ("Panel de control") +
+    las dos solapas (`_PanelAvancePeriodo`/`_PanelImportacion`, ver
+    docstring del módulo).
+
+    El título mostró el nombre del espacio en vez del nombre de la
+    pantalla desde la revisión "uno por uno" (pedido explícito de la
+    clienta, cuando esta pantalla funcionaba como portada del sistema)
+    hasta el reordenamiento de formularios: al pasar a ser un formulario
+    más entre otros en el menú, se volvió a "Panel de control" para
+    quedar coherente con el resto (todas las demás pantallas muestran
+    su propio nombre, no el del espacio)."""
 
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -190,7 +198,7 @@ class PanelControl(QWidget):
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        self.titulo = QLabel()
+        self.titulo = QLabel("Panel de control".upper())
         self.titulo.setObjectName("tituloPantalla")
         layout.addWidget(self.titulo)
 
@@ -203,9 +211,6 @@ class PanelControl(QWidget):
         layout.addWidget(solapas, stretch=1)
 
     def actualizar(self) -> None:
-        cfg = self.conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-        nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or "Espacio Ramos Consultorios"
-        self.titulo.setText(nombre_espacio.upper())
         self.panel_avance.actualizar()
 
 
