@@ -2717,6 +2717,37 @@ Supervisor general vía migración, solo vía seed; una base ya sembrada
 sí lo recibe vía migración; idempotencia; base sin la tabla NivelAcceso
 no rompe).
 
+## Centro de mensajería: Vista previa estirada hasta el borde de la tabla
+
+Pedido puntual de la clienta al revisar la pantalla "Grilla y
+mensajería": el cuadro de Vista previa (`self.texto_mensaje`) tenía un
+alto fijo (220px) seguido de un `columna.addStretch()` que dejaba un
+espacio en blanco sin usar entre el final del cuadro y el borde inferior
+del panel izquierdo. Se saca el alto fijo y el `addStretch()` final, y
+`self.texto_mensaje` se agrega con `stretch=1` — así ocupa todo el alto
+que le sobra a la columna, quedando su borde inferior a la misma altura
+que el de la tabla de la derecha (ambas dentro del mismo `QHBoxLayout`
+de la solapa, que ya reparte el mismo alto a los dos).
+
+## Reservas regulares: checks de Días en grilla de 2 columnas
+
+Pedido puntual de la clienta: el campo "Días" del formulario de alta
+(`_PanelReservasRegulares`) pasa de una lista vertical de un check por
+línea a una grilla de 2 columnas fijas — Lunes/Martes, Miércoles/Jueves,
+Viernes/Sábado. Distinto del criterio de la grilla de días de Oferta de
+consultorios (`math.ceil(len(dias) / 2)` columnas, mitad arriba/mitad
+abajo): acá la clienta pidió específicamente 2 columnas siempre, así que
+`grid_dias.addWidget(check, i // 2, i % 2)` no depende de `len(_DIAS_
+RESERVA)` — si se suma Domingo a esa lista más adelante, cae solo en una
+fila nueva debajo de Viernes/Sábado, sin acompañante en la segunda
+columna, en vez de reacomodar todo el resto de la grilla como pasaría
+con el criterio de Oferta.
+
+Reservas aisladas no tiene ningún campo de días de la semana (usa una
+fecha puntual, `campo_fecha`) — el pedido de la clienta mencionaba "los
+dos formularios de reservas" pero solo Reservas regulares tiene este
+campo; se aplicó únicamente ahí.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
