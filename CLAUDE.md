@@ -2790,6 +2790,38 @@ descendientes `panelSolapa` — `contenido` y `panel_tabla` — en vez de 1)
 más uno nuevo que confirma el título ausente y que `panel_tabla` queda
 fuera del `QScrollArea` de la grilla.
 
+Confirmado con la clienta después de este cambio: "todos los botones y
+todas las referencias de colores, luego de eso la tabla" — con
+`panel_tabla` ya fuera del `QScrollArea` de arriba, scrollear ESE
+`QScrollArea` (form + grilla) hasta el final muestra los tres botones
+completos y las ocho referencias de colores completas, y justo después,
+sin ningún scroll adicional, arranca "Horarios reservados"/"Reservas
+aisladas" — verificado programáticamente llevando el scrollbar a su
+`maximum()` y confirmando que todo el contenido queda visible antes de
+la tabla.
+
+## Reservas: se saca "Deshacer último movimiento"
+
+Pedido explícito de la clienta, mismo criterio que en su momento con
+Llaves ("Deshacer último movimiento" cubría cualquier alta/edición/baja
+de esa pantalla, se sacó por completo a pedido explícito porque no
+estaba en la lista final de botones que dio la clienta — pérdida de
+funcionalidad real, no solo estética). Acá el pedido fue directo: se
+borra el botón, su conexión (`clicked.connect(self._deshacer_ultimo)`)
+y el método `_deshacer_ultimo` entero, en las DOS solapas (Reservas
+regulares/aisladas — cada una tenía su propia implementación, ninguna
+compartía estado con otro método salvo los helpers ya usados por
+Modificar/Cancelar, así que no quedó código muerto de soporte). Sus 8
+tests (4 por solapa: sin registros no falla, borra/cancela el alta
+reciente, cancelado por el usuario no hace nada, con vigencia ya
+cerrada/reserva ya cancelada avisa y no hace nada) se sacan con él.
+
+De paso, sacar este botón fue lo que terminó de lograr el pedido
+anterior ("todos los botones y las referencias de colores, luego la
+tabla" — ver arriba): sin el botón de más, el contenido del panel
+superior entra en el scroll disponible junto con la tabla de abajo sin
+quedar nada a mitad de camino.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
