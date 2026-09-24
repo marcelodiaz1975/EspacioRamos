@@ -184,6 +184,28 @@ def _normalizar_tamanos_consultorio(conn: sqlite3.Connection) -> None:
     )
 
 
+def _agregar_nivel_supervisor_general(conn: sqlite3.Connection) -> None:
+    """Pedido de la clienta: sumar un tercer nivel de acceso
+    ("Supervisor general"), por encima de Administrador — sin uso
+    concreto inmediato, previsto para más adelante. Una base NUEVA ya lo
+    recibe en `app.db.seed.sembrar_niveles_acceso`; esta migración es
+    para una base YA en uso, con `NivelAcceso` ya sembrado (Administrador/
+    Operador cargados) — ahí `sembrar_niveles_acceso` no vuelve a correr
+    porque la tabla ya no está vacía, así que el nivel nuevo no le
+    llegaría sin este paso aparte."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'NivelAcceso'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    if not conn.execute("SELECT 1 FROM NivelAcceso LIMIT 1").fetchone():
+        return  # base nueva, todavía sin sembrar — lo hace seed.sembrar_niveles_acceso
+    if conn.execute("SELECT 1 FROM NivelAcceso WHERE Nombre = 'Supervisor general'").fetchone():
+        return
+    conn.execute("INSERT INTO NivelAcceso (Nombre, Orden, Activo) VALUES ('Supervisor general', 1000, 1)")
+    conn.commit()
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -207,4 +229,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla in _TABLAS_ELIMINADAS:
         conn.execute(f"DROP TABLE IF EXISTS {tabla}")
     _normalizar_tamanos_consultorio(conn)
+    _agregar_nivel_supervisor_general(conn)
     conn.commit()

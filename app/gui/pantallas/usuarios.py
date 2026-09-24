@@ -320,10 +320,20 @@ class _PanelUsuarios(QWidget):
             return
         valores = dialogo.valores()
 
-        nivel_admin = max(niveles, key=lambda n: n["Orden"])
+        # Se resuelve por NOMBRE ("Administrador"), no por `max(..., key=Orden)`:
+        # si se resolviera por el nivel más alto del catálogo, sumar un nivel
+        # todavía superior (ej. "Supervisor general") haría que esta variable
+        # deje de apuntar a Administrador, y el guardarraíl de abajo dejaría
+        # de dispararse para el último Administrador activo del sistema.
+        nivel_admin = next(n for n in niveles if n["Nombre"] == "Administrador")
+        orden_por_id = {n["IdNivelAcceso"]: n["Orden"] for n in niveles}
+
+        def _alcanza_admin(id_nivel: int) -> bool:
+            return orden_por_id.get(id_nivel, -1) >= nivel_admin["Orden"]
+
         deja_de_ser_admin_activo = (
-            usuario["IdNivelAcceso"] == nivel_admin["IdNivelAcceso"]
-            and (valores["IdNivelAcceso"] != nivel_admin["IdNivelAcceso"] or not valores["Activo"])
+            _alcanza_admin(usuario["IdNivelAcceso"])
+            and (not _alcanza_admin(valores["IdNivelAcceso"]) or not valores["Activo"])
         )
         if deja_de_ser_admin_activo and not hay_otro_usuario_activo_de_nivel(
             self.conn, nivel_admin["IdNivelAcceso"], excluir_id=id_usuario,

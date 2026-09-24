@@ -13,6 +13,7 @@ from app.negocio.seguridad import (
     crear_usuario,
     establecer_contrasena_maestra,
     hay_contrasena_maestra,
+    hay_otro_usuario_activo_de_nivel,
     hay_usuarios,
     nivel_alcanza,
     verificar_contrasena_maestra,
@@ -35,13 +36,14 @@ def _id_nivel(conn, nombre):
 # ------------------------------------------------------------- niveles
 
 
-def test_sembrado_crea_administrador_y_operador(conn):
+def test_sembrado_crea_supervisor_general_administrador_y_operador(conn):
     filas = obtener_repositorio(conn, "NivelAcceso").listar()
     nombres = {f["Nombre"] for f in filas}
-    assert nombres == {"Administrador", "Operador"}
+    assert nombres == {"Supervisor general", "Administrador", "Operador"}
+    supervisor = next(f for f in filas if f["Nombre"] == "Supervisor general")
     admin = next(f for f in filas if f["Nombre"] == "Administrador")
     operador = next(f for f in filas if f["Nombre"] == "Operador")
-    assert admin["Orden"] > operador["Orden"]
+    assert supervisor["Orden"] > admin["Orden"] > operador["Orden"]
 
 
 # ------------------------------------------------------------- usuarios
@@ -188,6 +190,11 @@ def test_asegurar_permisos_pantalla_crea_filas_al_nivel_mas_bajo(conn):
 
 
 def test_asegurar_permisos_pantalla_nivel_alto_nace_en_administrador(conn):
+    """Test de regresión: con "Supervisor general" ya sembrado por encima de
+    Administrador (ver fixture `conn`), `nivel_alto` tiene que seguir
+    resolviendo a Administrador por NOMBRE — si volviera a resolverse por
+    `ORDER BY Orden DESC` (el nivel más alto del catálogo), esta pantalla
+    sensible nacería exigiendo Supervisor general y este assert fallaría."""
     asegurar_permisos_pantalla(
         conn, ["Reservas", "Configuración general"], nombres_nivel_alto=frozenset({"Configuración general"}),
     )
@@ -197,6 +204,33 @@ def test_asegurar_permisos_pantalla_nivel_alto_nace_en_administrador(conn):
     }
     assert filas["Reservas"] == _id_nivel(conn, "Operador")
     assert filas["Configuración general"] == _id_nivel(conn, "Administrador")
+
+
+# ------------------------------------------ hay_otro_usuario_activo_de_nivel
+
+
+def test_hay_otro_usuario_activo_de_nivel_administrador_no_cuenta_a_si_mismo(conn):
+    id_admin = crear_usuario(conn, "admin", "clave123", _id_nivel(conn, "Administrador"))
+    assert hay_otro_usuario_activo_de_nivel(conn, _id_nivel(conn, "Administrador"), excluir_id=id_admin) is False
+
+
+def test_hay_otro_usuario_activo_de_nivel_supervisor_general_cuenta_como_administrador(conn):
+    """Test de regresión de la razón de ser del cambio a `Orden >=`: un
+    Supervisor general activo tiene que alcanzar para proteger al último
+    Administrador — si se comparara por `IdNivelAcceso` exacto (como antes
+    de sumar este tercer nivel), un Supervisor general no "sería"
+    Administrador y esto daría `False`, bloqueando sin necesidad la baja
+    del único Administrador aunque el sistema siga teniendo quien lo
+    administre."""
+    id_admin = crear_usuario(conn, "admin", "clave123", _id_nivel(conn, "Administrador"))
+    crear_usuario(conn, "supervisor", "clave123", _id_nivel(conn, "Supervisor general"))
+    assert hay_otro_usuario_activo_de_nivel(conn, _id_nivel(conn, "Administrador"), excluir_id=id_admin) is True
+
+
+def test_hay_otro_usuario_activo_de_nivel_operador_no_alcanza_para_administrador(conn):
+    id_admin = crear_usuario(conn, "admin", "clave123", _id_nivel(conn, "Administrador"))
+    crear_usuario(conn, "operador", "clave123", _id_nivel(conn, "Operador"))
+    assert hay_otro_usuario_activo_de_nivel(conn, _id_nivel(conn, "Administrador"), excluir_id=id_admin) is False
 
 
 def test_asegurar_permisos_pantalla_no_pisa_una_ya_asignada(conn):

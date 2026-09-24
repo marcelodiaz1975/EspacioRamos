@@ -372,17 +372,22 @@ def sembrar_detalles_complementarios_propuesta(conn: sqlite3.Connection) -> None
 
 
 def sembrar_niveles_acceso(conn: sqlite3.Connection) -> None:
-    """Dos niveles de arranque (Seguridad, ver app.negocio.seguridad):
-    Administrador (Orden más alto) y Operador (el nivel por defecto de
-    cualquier pantalla todavía sin restringir puntualmente — ver
-    `app.negocio.seguridad.asegurar_permisos_pantalla`). Es un catálogo
-    más: se puede sumar un nivel intermedio más adelante sin tocar nada
-    de la lógica de comparación, que solo mira `Orden`."""
+    """Tres niveles de arranque (Seguridad, ver app.negocio.seguridad):
+    "Supervisor general" (Orden más alto — sumado a pedido de la
+    clienta, previendo un nivel por encima de Administrador aunque hoy
+    no tenga un uso concreto: "no me imagino usarlo en lo inmediato,
+    pero prefiero preverlo"), Administrador y Operador (el nivel por
+    defecto de cualquier pantalla todavía sin restringir puntualmente —
+    ver `app.negocio.seguridad.asegurar_permisos_pantalla`). Es un
+    catálogo más: se puede sumar otro nivel más adelante sin tocar nada
+    de la lógica de comparación, que solo mira `Orden`. Para una base ya
+    sembrada (Administrador/Operador ya cargados, esta función no vuelve
+    a correr) ver `app.db.migraciones._agregar_nivel_supervisor_general`."""
     if not _tabla_vacia(conn, "NivelAcceso"):
         return
     conn.executemany(
         "INSERT INTO NivelAcceso (Nombre, Orden, Activo) VALUES (?, ?, 1)",
-        [("Administrador", 100), ("Operador", 10)],
+        [("Supervisor general", 1000), ("Administrador", 100), ("Operador", 10)],
     )
     conn.commit()
 

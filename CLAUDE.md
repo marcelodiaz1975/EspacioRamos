@@ -2612,6 +2612,111 @@ solo botón, cambia de texto y de acción según el combo
 enlace, muestra la URL como texto ("Enlace:\n{url}") en vez de intentar
 renderizar nada.
 
+## Usuarios y permisos: tercer nivel "Supervisor general"
+
+Pedido de la clienta, ya con la reorganización de formularios cerrada:
+"¿Se puede agregar una categoría más de usuario? 'Supervisor general',
+estaría por encima de las otras dos. No me imagino usarlo en lo
+inmediato, pero prefiero preverlo por si acaso." Sin caso de uso
+concreto todavía — puro future-proofing, a diferencia del resto de
+`NivelAcceso` (Administrador/Operador), que sí tienen pantallas
+puntuales atadas (`PermisoPantalla`).
+
+Mecánicamente es "un catálogo más" (`app.negocio.seguridad` ya lo
+documenta así: "se puede sumar otro nivel más adelante sin tocar nada
+de la lógica de comparación, que solo mira `Orden`"): `app.db.seed.
+sembrar_niveles_acceso` pasa a sembrar tres filas en vez de dos
+(Supervisor general=1000, Administrador=100, Operador=10) para una base
+NUEVA; `app.db.migraciones._agregar_nivel_supervisor_general` (llamada
+al final de `aplicar_migraciones`) suma la fila que falta a una base YA
+sembrada (Administrador/Operador cargados desde antes de este pedido) —
+se saltea sin hacer nada si `NivelAcceso` todavía está completamente
+vacía (base nueva, sin sembrar todavía): si insertara ahí, la tabla
+dejaría de estar vacía y `sembrar_niveles_acceso` (que solo siembra si
+está vacía) nunca llegaría a cargar Administrador/Operador en una base
+nueva — el orden real de arranque (`app.db.init_db.init_database`) crea
+las tablas y corre las migraciones ANTES de que nada llame a la siembra.
+
+**El pedido en sí no tocó ninguna lógica de negocio** (no hay ninguna
+pantalla ni comportamiento nuevo atado a "Supervisor general" más que
+poder asignárselo a un usuario desde "Usuarios y permisos" y que las
+pantallas que hoy nacen en Administrador — Configuración general,
+Usuarios y permisos — sigan siendo accesibles para él, vía
+`nivel_alcanza`'s `Orden >=`). Lo que sí generó trabajo real fue
+revisar, uno por uno, todos los lugares del código que hasta ahora
+resolvían "el nivel administrativo" como "el nivel más alto del
+catálogo" (`ORDER BY Orden DESC LIMIT 1` / `max(niveles, key=Orden)`) en
+vez de por el NOMBRE "Administrador" — con un tercer nivel por encima,
+esa resolución deja de apuntar a Administrador y apunta a Supervisor
+general, rompiendo en silencio la intención original de cada uno de
+esos lugares. Antes de tocar nada se le planteó el riesgo del primero de
+estos casos (el guardarraíl de "no dejar el sistema sin Administrador")
+a la clienta vía `AskUserQuestion`, con dos opciones; eligió la
+recomendada: "Sí, proteger siempre a Administrador o superior — nunca
+se puede dejar el sistema sin al menos un usuario activo Administrador o
+Supervisor general, exactamente el comportamiento actual, con Supervisor
+general ya incluido a futuro." Los otros dos casos (encontrados después,
+al revisar sistemáticamente todo el código que tocaba `NivelAcceso`) se
+resolvieron con el mismo criterio, sin volver a consultar por ser
+variaciones mecánicas de la misma decisión ya tomada:
+
+- **`app.gui.pantallas.usuarios._editar`** (el guardarraíl en sí, el caso
+  que motivó la pregunta): `nivel_admin = max(niveles, key=lambda n:
+  n["Orden"])` pasa a `next(n for n in niveles if n["Nombre"] ==
+  "Administrador")`, y la comparación de "¿deja de ser administrador
+  activo?" pasa de comparar `IdNivelAcceso` exacto a comparar `Orden` vía
+  un helper `_alcanza_admin(id_nivel)` (`Orden >= Orden de Administrador`)
+  — así un Supervisor general activo también cuenta como "alguien que
+  puede administrar" a los efectos de esta protección, sin que haga
+  falta que sea "exactamente" Administrador.
+- **`app.negocio.seguridad.hay_otro_usuario_activo_de_nivel`**: mismo
+  cambio, del lado de la consulta SQL — pasa de `WHERE IdNivelAcceso = ?`
+  a un `JOIN` que compara `Orden >= Orden de referencia` entre el nivel
+  del usuario candidato y el nivel pedido. Sin este cambio, un Supervisor
+  general activo NO "sería" Administrador (comparación exacta) y el
+  guardarraíl bloquearía sin necesidad la baja del único Administrador
+  aunque el sistema siguiera teniendo quien lo administre.
+- **`app.negocio.seguridad.asegurar_permisos_pantalla`** (detectado
+  después, revisando sistemáticamente el resto de los usos de
+  `NivelAcceso` — no parte de la pregunta original a la clienta): el
+  `nivel_alto` que reciben las pantallas sensibles (Configuración
+  general, Usuarios y permisos) pasa de `ORDER BY Orden DESC LIMIT 1` a
+  `WHERE Nombre = 'Administrador'` (con el `ORDER BY` viejo como
+  respaldo si por algún motivo esa fila no existiera). Sin este cambio,
+  una pantalla sensible NUEVA en una base recién creada (los tres
+  niveles se siembran juntos) nacería exigiendo Supervisor general en
+  vez de Administrador — dejando afuera a cualquier Administrador, al
+  revés de la intención original ("Administrador" está en el docstring
+  de la función desde antes de este pedido).
+- **`app.gui.dialogos_seguridad.DialogoLogin._crear_administrador`**
+  (mismo criterio, mismo motivo de detección): el primer usuario de una
+  base nueva (alta inicial, sin usuarios cargados todavía) pasa de
+  `ORDER BY Orden DESC LIMIT 1` a `WHERE Nombre = 'Administrador'` (con
+  el mismo respaldo). El método se llama literalmente
+  `_crear_administrador` — la intención siempre fue esa, nunca "dale el
+  nivel más alto que exista"; un test ya existente
+  (`test_alta_inicial_crea_administrador_y_autentica`) fijaba ese
+  comportamiento desde antes de este pedido y hubiera empezado a fallar
+  sin este cambio. Promover a alguien a Supervisor general sigue siendo
+  posible, pero es una decisión aparte, tomada después, desde "Usuarios
+  y permisos" — no algo que deba pasar en el alta inicial solo porque
+  ese nivel ya existe en el catálogo.
+
+Tests nuevos: `tests/test_seguridad.py` (siembra de tres niveles,
+`hay_otro_usuario_activo_de_nivel` con un Supervisor general activo
+alcanzando para Administrador y con un Operador activo sin alcanzar,
+`asegurar_permisos_pantalla` con nivel_alto resolviendo a Administrador
+habiendo Supervisor general en el catálogo — comentado explícitamente
+como test de regresión); `tests/test_gui_usuarios.py` (no se puede
+desactivar al único Administrador activo aun habiendo el nivel
+Supervisor general en el catálogo si nadie lo ocupa; sí se puede si hay
+un Supervisor general activo); `tests/test_gui_dialogos_seguridad.py`
+(alta inicial sigue creando Administrador con Supervisor general ya
+sembrado); `tests/test_migraciones.py` (una base nueva no recibe
+Supervisor general vía migración, solo vía seed; una base ya sembrada
+sí lo recibe vía migración; idempotencia; base sin la tabla NivelAcceso
+no rompe).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

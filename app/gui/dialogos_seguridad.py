@@ -118,7 +118,17 @@ class DialogoLogin(QDialog):
         if self.campo_maestra.text() != self.campo_maestra_confirmar.text():
             QMessageBox.warning(self, "Crear administrador", "Las dos contraseñas maestras no coinciden.")
             return
-        nivel = self.conn.execute("SELECT IdNivelAcceso FROM NivelAcceso ORDER BY Orden DESC LIMIT 1").fetchone()
+        # Por NOMBRE ("Administrador"), no por el nivel más alto del catálogo
+        # (`ORDER BY Orden DESC`): el primer usuario de una base nueva tiene
+        # que quedar Administrador, ni más ni menos, sin importar si más
+        # adelante se suma un nivel por encima (ej. "Supervisor general") —
+        # promoverlo a ese nivel es una decisión aparte, no algo que deba
+        # pasar solo porque este método arrancó antes de que existiera.
+        nivel = self.conn.execute(
+            "SELECT IdNivelAcceso FROM NivelAcceso WHERE Nombre = 'Administrador'"
+        ).fetchone() or self.conn.execute(
+            "SELECT IdNivelAcceso FROM NivelAcceso ORDER BY Orden DESC LIMIT 1"
+        ).fetchone()
         try:
             crear_usuario(self.conn, nombre, contrasena, nivel["IdNivelAcceso"])
         except ValueError as error:

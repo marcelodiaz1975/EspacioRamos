@@ -175,18 +175,29 @@ def asegurar_permisos_pantalla(
     `nombres_pantalla` que todavía no tenga una — se llama al arrancar la
     GUI con los nombres reales de `gui_main.construir_secciones()`. Nace
     al nivel más bajo activo (visible para cualquiera) salvo que el
-    nombre esté en `nombres_nivel_alto`, en cuyo caso nace directo en el
-    nivel más alto (Administrador) — pedido explícito de la clienta para
-    "Configuración general"/"Usuarios y permisos": pantallas sensibles
-    que no deberían quedar abiertas a cualquiera hasta que alguien se
-    acuerde de subirlas a mano. El resto de las pantallas nuevas del
-    sistema sigue naciendo visible para cualquier nivel."""
+    nombre esté en `nombres_nivel_alto`, en cuyo caso nace directo en
+    Administrador — pedido explícito de la clienta para "Configuración
+    general"/"Usuarios y permisos": pantallas sensibles que no deberían
+    quedar abiertas a cualquiera hasta que alguien se acuerde de
+    subirlas a mano. El resto de las pantallas nuevas del sistema sigue
+    naciendo visible para cualquier nivel.
+
+    `nivel_alto` se resuelve por NOMBRE ("Administrador"), no por
+    `ORDER BY Orden DESC` (el nivel más alto del catálogo): con
+    "Supervisor general" sumado por encima, `ORDER BY Orden DESC`
+    resolvería a ESE nivel en vez de a Administrador, y una pantalla
+    sensible nacería exigiendo Supervisor general — dejando afuera a
+    cualquier Administrador, al revés de lo que pide la clienta (que
+    entren los administradores, no que quede reservado a un nivel
+    todavía más alto que ni siquiera existía cuando se pidió esto)."""
     nivel_bajo = conn.execute(
         "SELECT IdNivelAcceso FROM NivelAcceso WHERE Activo = 1 ORDER BY Orden ASC LIMIT 1"
     ).fetchone()
     if nivel_bajo is None:
         return
     nivel_alto = conn.execute(
+        "SELECT IdNivelAcceso FROM NivelAcceso WHERE Nombre = 'Administrador' AND Activo = 1"
+    ).fetchone() or conn.execute(
         "SELECT IdNivelAcceso FROM NivelAcceso WHERE Activo = 1 ORDER BY Orden DESC LIMIT 1"
     ).fetchone()
     filas = [
@@ -204,12 +215,23 @@ def asegurar_permisos_pantalla(
 
 
 def hay_otro_usuario_activo_de_nivel(conn: sqlite3.Connection, id_nivel_acceso: int, excluir_id: int) -> bool:
-    """True si existe al menos otro usuario ACTIVO con `id_nivel_acceso`,
-    aparte de `excluir_id` — usado por la pantalla de Usuarios para
-    evitar desactivar o degradar al último Administrador activo y dejar
-    el sistema sin nadie que pueda administrarlo."""
+    """True si existe al menos otro usuario ACTIVO cuyo nivel ALCANZA
+    (Orden >= ) el de `id_nivel_acceso`, aparte de `excluir_id` — usado
+    por la pantalla de Usuarios para evitar desactivar o degradar al
+    último usuario que puede administrar el sistema.
+
+    Compara por `Orden` (no por `IdNivelAcceso` exacto) a propósito: al
+    sumar "Supervisor general" por encima de Administrador, un usuario
+    de ese nivel también tiene que contar como "alguien que puede
+    administrar" — si comparara por igualdad exacta, el único
+    Administrador activo quedaría sin esta protección apenas existiera
+    un nivel por encima (nadie sería "exactamente" ese nivel de más
+    arriba, pero tampoco se lo protegería a él)."""
     fila = conn.execute(
-        "SELECT 1 FROM Usuario WHERE IdNivelAcceso = ? AND Activo = 1 AND IdUsuario != ? LIMIT 1",
+        "SELECT 1 FROM Usuario u "
+        "JOIN NivelAcceso n_usuario ON n_usuario.IdNivelAcceso = u.IdNivelAcceso "
+        "JOIN NivelAcceso n_referencia ON n_referencia.IdNivelAcceso = ? "
+        "WHERE n_usuario.Orden >= n_referencia.Orden AND u.Activo = 1 AND u.IdUsuario != ? LIMIT 1",
         (id_nivel_acceso, excluir_id),
     ).fetchone()
     return fila is not None

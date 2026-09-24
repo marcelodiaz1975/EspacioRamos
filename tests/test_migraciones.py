@@ -168,3 +168,73 @@ def test_aplicar_migraciones_normaliza_tamano_de_consultorio(tmp_path):
     assert valores[1] == "Grande"
     assert valores[2] is None
     conn.close()
+
+
+def test_base_nueva_siembra_supervisor_general_via_seed_no_via_migracion(tmp_path):
+    """Una base recién creada (sin `sembrar_valores_por_defecto` todavía)
+    no debería recibir "Supervisor general" desde `aplicar_migraciones` —
+    eso lo hace `app.db.seed.sembrar_niveles_acceso` más adelante. Si la
+    migración insertara la fila acá, `NivelAcceso` dejaría de estar vacía
+    y `sembrar_niveles_acceso` (que solo siembra si la tabla está vacía)
+    nunca llegaría a cargar Administrador/Operador."""
+    conn = init_database(tmp_path / "test.db")
+    filas = conn.execute("SELECT Nombre FROM NivelAcceso").fetchall()
+    assert filas == []
+    conn.close()
+
+
+def test_aplicar_migraciones_agrega_supervisor_general_a_base_ya_sembrada(tmp_path):
+    """Simula una base ya en uso, con Administrador/Operador cargados
+    (como si viniera de antes de sumar el tercer nivel) — confirma que
+    aplicar_migraciones agrega la fila que falta."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE NivelAcceso (IdNivelAcceso INTEGER PRIMARY KEY, Nombre TEXT UNIQUE NOT NULL, "
+        "Orden INTEGER NOT NULL, Activo INTEGER NOT NULL DEFAULT 1)"
+    )
+    conn.executemany(
+        "INSERT INTO NivelAcceso (Nombre, Orden, Activo) VALUES (?, ?, 1)",
+        [("Administrador", 100), ("Operador", 10)],
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    filas = {f["Nombre"]: f["Orden"] for f in conn.execute("SELECT Nombre, Orden FROM NivelAcceso").fetchall()}
+    assert filas == {"Supervisor general": 1000, "Administrador": 100, "Operador": 10}
+    conn.close()
+
+
+def test_aplicar_migraciones_es_idempotente_para_supervisor_general(tmp_path):
+    """Correr aplicar_migraciones dos veces sobre la misma base no debería
+    duplicar la fila de Supervisor general."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE NivelAcceso (IdNivelAcceso INTEGER PRIMARY KEY, Nombre TEXT UNIQUE NOT NULL, "
+        "Orden INTEGER NOT NULL, Activo INTEGER NOT NULL DEFAULT 1)"
+    )
+    conn.executemany(
+        "INSERT INTO NivelAcceso (Nombre, Orden, Activo) VALUES (?, ?, 1)",
+        [("Administrador", 100), ("Operador", 10)],
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+    aplicar_migraciones(conn)
+
+    cantidad = conn.execute(
+        "SELECT COUNT(*) AS c FROM NivelAcceso WHERE Nombre = 'Supervisor general'"
+    ).fetchone()["c"]
+    assert cantidad == 1
+    conn.close()
+
+
+def test_aplicar_migraciones_ignora_nivel_acceso_que_no_existe_todavia(tmp_path):
+    """Una base sin la tabla NivelAcceso (de antes de la solapa Seguridad)
+    no debería romper — solo salteársela."""
+    conn = sqlite3.connect(tmp_path / "sin_seguridad.db")
+    conn.row_factory = sqlite3.Row
+    aplicar_migraciones(conn)  # no debe lanzar excepción
+    conn.close()

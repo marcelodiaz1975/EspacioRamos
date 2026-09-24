@@ -72,6 +72,26 @@ def test_alta_inicial_crea_administrador_y_autentica(qtbot, conn):
     assert verificar_contrasena_maestra(conn, "maestra999") is True
 
 
+def test_alta_inicial_crea_administrador_aunque_haya_nivel_supervisor_general(qtbot, conn):
+    """Test de regresión: con "Supervisor general" sembrado por encima de
+    Administrador (ver fixture `conn`), el primer usuario de una base
+    nueva tiene que seguir quedando Administrador — si se resolviera por
+    `ORDER BY Orden DESC` (el nivel más alto del catálogo) en vez de por
+    nombre, este alta pasaría a crear un Supervisor general sin que nadie
+    lo haya pedido."""
+    dialogo = DialogoLogin(conn)
+    qtbot.addWidget(dialogo)
+    dialogo.campo_usuario.setText("admin")
+    dialogo.campo_contrasena.setText("clave123")
+    dialogo.campo_confirmar.setText("clave123")
+    dialogo.campo_maestra.setText("maestra999")
+    dialogo.campo_maestra_confirmar.setText("maestra999")
+
+    dialogo._confirmar()
+
+    assert dialogo.usuario["IdNivelAcceso"] == _id_nivel(conn, "Administrador")
+
+
 def test_alta_inicial_rechaza_contrasenas_que_no_coinciden(qtbot, conn):
     dialogo = DialogoLogin(conn)
     qtbot.addWidget(dialogo)

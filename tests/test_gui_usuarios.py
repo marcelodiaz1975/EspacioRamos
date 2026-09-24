@@ -123,6 +123,57 @@ def test_no_deja_desactivar_al_unico_administrador_activo(qtbot, conn, monkeypat
     assert usuario["Activo"] == 1  # no se aplicó el cambio
 
 
+def test_no_deja_desactivar_al_unico_administrador_activo_habiendo_nivel_supervisor(qtbot, conn, monkeypatch):
+    """Test de regresión: sumar "Supervisor general" (Orden por encima de
+    Administrador) NO puede romper este guardarraíl. Antes del fix, el
+    código resolvía "el nivel administrativo" como `max(niveles, key=Orden)`
+    — con Supervisor general en el catálogo, esa variable pasaba a apuntar a
+    Supervisor general en vez de a Administrador, y la condición de abajo
+    dejaba de dispararse para un Administrador (el guardarraíl quedaba sin
+    efecto, `Activo` terminaba en 0). Acá no hay ningún usuario Supervisor
+    general activo, así que el único Administrador sigue siendo el único
+    que puede administrar el sistema — tiene que seguir protegido."""
+    id_admin = crear_usuario(conn, "admin", "clave123", _id_nivel(conn, "Administrador"))
+
+    def _fake_exec(self):
+        self.casilla_activo.setChecked(False)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoUsuarioEditar, "exec", _fake_exec)
+
+    pantalla = PantallaUsuarios(conn, id_usuario_actual=id_admin)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_usuarios.tabla_usuarios.selectRow(0)
+    pantalla.panel_usuarios._editar()
+
+    usuario = obtener_repositorio(conn, "Usuario").obtener(id_admin)
+    assert usuario["Activo"] == 1  # no se aplicó el cambio
+
+
+def test_permite_desactivar_administrador_si_hay_supervisor_general_activo(qtbot, conn, monkeypatch):
+    """Al revés del test anterior: con un Supervisor general activo, el
+    sistema SÍ sigue teniendo quien lo administre, así que desactivar al
+    único Administrador tiene que permitirse."""
+    id_admin = crear_usuario(conn, "admin", "clave123", _id_nivel(conn, "Administrador"))
+    crear_usuario(conn, "supervisor", "clave123", _id_nivel(conn, "Supervisor general"))
+
+    def _fake_exec(self):
+        self.casilla_activo.setChecked(False)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoUsuarioEditar, "exec", _fake_exec)
+
+    pantalla = PantallaUsuarios(conn, id_usuario_actual=id_admin)
+    qtbot.addWidget(pantalla)
+    tabla = pantalla.panel_usuarios.tabla_usuarios
+    fila_admin = next(f for f in range(tabla.rowCount()) if tabla.item(f, 0).text() == "admin")
+    tabla.selectRow(fila_admin)
+    pantalla.panel_usuarios._editar()
+
+    usuario = obtener_repositorio(conn, "Usuario").obtener(id_admin)
+    assert usuario["Activo"] == 0
+
+
 def test_permite_desactivar_administrador_si_hay_otro_activo(qtbot, conn, monkeypatch):
     id_admin_1 = crear_usuario(conn, "admin1", "clave123", _id_nivel(conn, "Administrador"))
     crear_usuario(conn, "admin2", "clave123", _id_nivel(conn, "Administrador"))
