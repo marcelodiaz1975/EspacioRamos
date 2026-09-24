@@ -10,8 +10,8 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.dialogos_seguridad import DialogoLogin, MonitorInactividad
 from app.gui.main_window import Seccion, VentanaPrincipal
-from app.gui.pantallas import catalogos
 from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
+from app.gui.pantallas.balance import PantallaBalanceDelNegocio
 from app.gui.pantallas.base_datos_espacio import PantallaBaseDatosEspacio
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
 from app.gui.pantallas.disponibilidad import PantallaDisponibilidad
@@ -141,8 +141,10 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "física y de contacto del espacio, en el orden de la cadena de referencias entre ellos.",
         ),
         Seccion(
-            "Gastos operativos", catalogos.pantalla_gastos_operativos, categoria="Catálogos",
-            ayuda="Gastos operativos del espacio, usados en los cálculos de estadísticas.",
+            "Balance del negocio", lambda conn: PantallaBalanceDelNegocio(conn), categoria="Catálogos",
+            ayuda="Solapa Gastos: gastos operativos del espacio, usados en los cálculos de estadísticas. "
+            "Solapa Ingresos: ingresos por horas regulares/aisladas/feriados trabajados de un período. "
+            "Solapa Resultado: ingresos menos gastos del período, para el mismo alcance de ubicación.",
         ),
         Seccion(
             "Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria="Configuración",

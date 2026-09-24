@@ -2226,6 +2226,92 @@ para_timbres.py` (nuevo) cubre el formulario compuesto completo (título,
 orden de las tres solapas, fondo claro de las dos operativas, catálogo
 anidado sin título propio).
 
+### Balance del negocio (formulario nuevo, 3 solapas — dos de informe en vivo, nunca existieron antes)
+
+Octavo merge de "Operativa diaria", el único de toda la reorganización
+que suma funcionalidad nueva de verdad (no solo reordena pantallas
+existentes): "Gastos" es el catálogo Gastos operativos de siempre
+(anidado, mismo mecanismo que el resto), pero "Ingresos" y "Resultado"
+son informes 100% en vivo que no existían en ningún lado del sistema —
+pedido explícito de la clienta al definir este formulario. Antes de
+programarlos se le consultaron tres decisiones abiertas
+(`AskUserQuestion`, ver también el docstring de `app.negocio.balance`):
+
+- **Ingresos por horas regulares/aisladas, ¿neto o bruto?** Neto —
+  mismo criterio "monto real facturado" que ya usa Estadísticas
+  (descuento por volumen y recargo de aisladas ya aplicados). Reusa
+  `app.negocio.estadisticas.monto_neto_regular_periodo`/`monto_neto_
+  aislada_periodo` tal cual, sin duplicar el cálculo.
+- **"Ingresos por reubicaciones por feriados": ¿a qué se refiere?**
+  Aclarado por la clienta: no son las reubicaciones (que no facturan,
+  compensan una ausencia). Es el cargo por "feriado trabajado" — un
+  feriado no se cobra (se descuenta de la liquidación, se asume que el
+  profesional no usa el espacio) salvo que decida usarlo, avisando
+  cerca del momento; ese cargo puede caer en la liquidación del mes del
+  feriado (si avisa antes de emitirla) o en la del mes siguiente (si
+  avisa después) — "quiero que se contemple dentro de los ingresos en
+  el período en el cual se carga en la liquidación, no importa la
+  fecha del feriado". Esa resolución de período YA existe, tal cual
+  descripta, en `app.negocio.liquidaciones._calcular_feriados_
+  trabajados` (tabla `FeriadoTrabajado`, ya usada por Liquidaciones) —
+  `app.negocio.balance.ingresos_feriados_trabajados_periodo` la reusa
+  para todos los profesionales R del sistema en vez de reimplementarla,
+  sumando el monto de cada item que efectivamente cae en el período
+  pedido.
+- **Alcance de ubicación**: mismos 4 niveles en cascada (Localidad/
+  Edificio/Unidad/Consultorio, "el más específico manda") que ya usa
+  Estadísticas Varias — confirmado. Esto generó un cruce con Gastos
+  operativos, que tiene su propio Alcance de 3 niveles (Espacio
+  general/Edificio/Unidad, sin Consultorio): consultado aparte,
+  confirmó que al elegir cualquier filtro puntual de los 4, los gastos
+  "Espacio general" quedan afuera del Resultado de ese lugar (no son
+  atribuibles a uno puntual) — solo entran cuando los cuatro filtros
+  están en su valor por defecto ("Todas"/"Todos", todo el espacio).
+  `app.negocio.balance._alcance_gastos_del_filtro` traduce un alcance
+  al otro.
+
+Simplificación deliberada, documentada, misma que ya tenía `monto_neto_
+regular_periodo`: el descuento por volumen de horas semanales se aplica
+siempre, sin replicar la suspensión por saldo atrasado (`pierde_
+descuento`) de una liquidación puntual — es un informe agregado, no una
+liquidación.
+
+`app/negocio/balance.py` (nuevo): `total_ingresos_periodo` (regulares +
+aisladas + feriados trabajados, cada uno por separado), `total_gastos_
+periodo` (con el cruce de alcance de arriba) y `resultado_periodo`
+(ingresos - gastos), todo parametrizado por período y por el alcance de
+ubicación de 4 niveles.
+
+`app/gui/pantallas/balance.py` (nuevo): `PantallaBalanceDelNegocio`
+(título Nivel 1 + `QTabWidget` con las tres solapas, en el orden
+Gastos/Ingresos/Resultado — el catálogo ya existente primero, las dos
+nuevas después). `_PanelIngresos`/`_PanelResultado`: cada uno arma su
+propio panel de filtros (Período — arranca en el actual, cambiable,
+mismo criterio que Gastos operativos — más la cascada de ubicación,
+mismo código que `_PanelEstadisticasVarias` de Estadísticas, duplicado
+acá como el resto de las pantallas del sistema que arman su propia
+cadena de filtros — `_PanelFiltrosMixin` solo evita duplicar ESE
+cableado entre los dos paneles nuevos, no es una clase base de verdad)
+y muestra el resultado en un cuadro de etiquetas (`app.gui.widgets.
+resumen_saldo.fmt_dato`, el mismo helper compartido que ya usan las
+solapas "Estado de cuenta" de Pagos/Liquidaciones/Cargos especiales
+para "rojo si es negativo").
+
+`catalogos.pantalla_gastos_operativos` suma su propio parámetro
+`anidado` (default `False`, reenviado a `PantallaCRUD`, mismo mecanismo
+que el resto de los catálogos). `gui_main.py`: se saca la `Seccion`
+propia "Gastos operativos" y se suma "Balance del negocio".
+
+Tests: `tests/test_balance.py` (nuevo) cubre la lógica de negocio (suma
+de los tres componentes de ingresos, traslado del feriado trabajado al
+período siguiente cuando se avisa tarde, filtro por consultorio,
+inclusión/exclusión de gastos generales según haya o no un filtro
+puntual, resultado = ingresos - gastos). `tests/test_gui_balance.py`
+(nuevo) cubre el formulario compuesto (título, orden de las tres
+solapas, catálogo anidado sin título propio, fondo claro de los tres
+paneles, valores por defecto de los filtros, recálculo al cambiar
+período, coloreado rojo de gastos/resultado).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

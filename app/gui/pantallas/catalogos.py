@@ -286,7 +286,7 @@ def _al_abrir_dialogo_gasto(dialogo) -> None:
     _actualizar()
 
 
-def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_gastos_operativos(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     def opciones_alcance(c):
         return [(a, a) for a in ALCANCES_GASTO]
 
@@ -330,7 +330,7 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection) -> PantallaCRUD:
     pantalla = PantallaCRUD(
         conn, "GastoOperativo", "Gastos operativos", campos, al_abrir_dialogo=_al_abrir_dialogo_gasto,
         panel_extra_superior_izquierda=panel_periodo, panel_extra_izquierda=panel_subtotal,
-        instalar_foco=False,
+        instalar_foco=False, anidado=anidado,
     )
     pantalla.al_guardar = lambda valores, registro: _resolver_conflicto_gasto(pantalla, conn, valores, registro)
     # instalar_foco=False acá arriba: esta pantalla arma su propia cadena
