@@ -52,6 +52,28 @@ def _preparar(conn):
     return id_profesional
 
 
+def test_registro_ausencias_tiene_cuatro_solapas_en_el_orden_esperado(qtbot, conn):
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.pestanas.count() == 4
+    assert pantalla.pestanas.tabText(0) == "Vacaciones"
+    assert pantalla.pestanas.tabText(1) == "Licencias"
+    assert pantalla.pestanas.tabText(2) == "Tipos de licencia"
+    assert pantalla.pestanas.tabText(3) == "Ausencias por motivos varios"
+
+
+def test_solapa_tipos_de_licencia_es_un_catalogo_anidado_sin_titulo_propio(qtbot, conn):
+    from PySide6.QtWidgets import QLabel
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_tipos_licencia
+    assert panel.objectName() == "panelSolapa"
+    assert panel.anidado is True
+    assert panel.findChild(QLabel, "tituloPantalla") is None
+    assert panel.campo_buscar is not None
+
+
 def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
     """Confirmado por la clienta: el selector de profesional buscable
     corre en todos los formularios del sistema — Vacaciones, Licencias,

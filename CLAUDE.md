@@ -2089,6 +2089,39 @@ orden de las tres solapas, y que la solapa de Fechas especiales es un
 `PantallaCRUD` anidado de verdad (sin título propio, con `campo_buscar`
 armado) — mismo criterio que los tests de Base datos del espacio.
 
+### Registro de ausencias (+ Tipos de licencia)
+
+Quinto merge de "Operativa diaria": suma el catálogo "Tipos de licencia"
+(antes pantalla propia del menú, categoría "Catálogos") como cuarta
+solapa de "Registro de ausencias", intercalada entre "Licencias" y
+"Ausencias" — están relacionados porque Licencias lee ese catálogo para
+el combo de tipo. De paso, la solapa "Ausencias" se renombra "Ausencias
+por motivos varios" (pedido del Excel de la clienta, más descriptivo
+para no confundirla con el nombre genérico de la pantalla).
+
+Mecánicamente el mismo patrón `anidado=True` de siempre:
+`catalogos.pantalla_tipos_licencia` suma su propio parámetro `anidado`
+(default `False`, sin efecto para quien ya la llamaba sin ese
+argumento) que reenvía a `PantallaCRUD`. `PantallaRegistroAusencias`
+(`app/gui/pantallas/novedades.py`) no cambia de forma — sigue siendo el
+mismo contenedor título+`QTabWidget` de siempre — solo suma
+`self.panel_tipos_licencia = catalogos.pantalla_tipos_licencia(conn,
+anidado=True)` como tercera pestaña, importando `catalogos` cruzado
+(sin ciclo: `catalogos.py` no importa `novedades.py`).
+
+`gui_main.py`: se saca la `Seccion` propia "Tipos de licencia" y se
+actualiza la ayuda de "Registro de ausencias" para mencionar las cuatro
+solapas. `PantallaCargosEspeciales` (misma pantalla vieja, en el mismo
+archivo) no se tocó en este merge — su combinación con Llaves queda
+para el próximo.
+
+Tests: `test_gui_novedades.py` suma dos tests (orden de las cuatro
+solapas; la de Tipos de licencia es un `PantallaCRUD` anidado de
+verdad, sin título propio, con `campo_buscar` armado) — mismo criterio
+que Liquidaciones/Base datos del espacio. No hizo falta tocar ningún
+test existente: ninguno hacía `tabText`/`pestanas.count()` sobre
+`PantallaRegistroAusencias` antes de este merge.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

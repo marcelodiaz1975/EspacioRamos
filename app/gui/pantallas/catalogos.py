@@ -163,7 +163,7 @@ def pantalla_responsables(conn: sqlite3.Connection, *, anidado: bool = False) ->
     return PantallaCRUD(conn, "Responsable", "Responsables", campos, anidado=anidado)
 
 
-def pantalla_tipos_licencia(conn: sqlite3.Connection) -> PantallaCRUD:
+def pantalla_tipos_licencia(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Nombre", "Nombre", requerido=True),
         Campo("PorcentajeBonificacion", "% Bonificación", tipo="numero"),
@@ -172,7 +172,7 @@ def pantalla_tipos_licencia(conn: sqlite3.Connection) -> PantallaCRUD:
         Campo("Activo", "Activo", tipo="booleano"),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "TipoLicencia", "Tipos de licencia", campos)
+    return PantallaCRUD(conn, "TipoLicencia", "Tipos de licencia", campos, anidado=anidado)
 
 
 def _opciones_tipo_lista(conn: sqlite3.Connection) -> list[tuple[str, str]]:

@@ -99,8 +99,9 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
         ),
         Seccion(
             "Registro de ausencias", lambda conn: PantallaRegistroAusencias(conn), categoria="Principal",
-            ayuda="Plazos por inactividad de un profesional (vacaciones, licencias y ausencias) cargados "
-            "manualmente, con su vista previa de la grilla operativa.",
+            ayuda="Solapas Vacaciones/Licencias/Ausencias por motivos varios: plazos por inactividad de un "
+            "profesional cargados manualmente, con su vista previa de la grilla operativa. Solapa Tipos "
+            "de licencia: catálogo de tipos de licencia disponibles para cargarle a un profesional.",
         ),
         Seccion(
             "Cargos especiales", lambda conn: PantallaCargosEspeciales(conn), categoria="Principal",
@@ -141,10 +142,6 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "Base datos del espacio", lambda conn: PantallaBaseDatosEspacio(conn), categoria="Catálogos",
             ayuda="Localidades, Edificios, Unidades, Consultorios y Responsables — la estructura "
             "física y de contacto del espacio, en el orden de la cadena de referencias entre ellos.",
-        ),
-        Seccion(
-            "Tipos de licencia", catalogos.pantalla_tipos_licencia, categoria="Catálogos",
-            ayuda="Catálogo de tipos de licencia disponibles para cargarle a un profesional.",
         ),
         Seccion(
             "Gastos operativos", catalogos.pantalla_gastos_operativos, categoria="Catálogos",

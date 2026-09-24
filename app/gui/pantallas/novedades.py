@@ -15,10 +15,15 @@ para esta pestaña en ningún documento del proyecto; si la planilla original
 de la clienta ya le tenía otro número, hay que corregirlo acá. Ausencias
 es F27 — también asignado por nosotros (la clienta confirmó que no hace
 falta que sea correlativo con Vacaciones/Licencias), lógica y diseño ya
-aprobados. Cargos especiales es F28 — la clienta confirmó que se mantiene
-como formulario independiente (no se reubica dentro de otra pantalla); F28
-es el siguiente número libre después de F27 (Ausencias), ya que tampoco
-tenía un número confirmado en ningún documento del proyecto."""
+aprobados. Cargos especiales es F28.
+
+Reordenamiento de formularios (Excel de la clienta): "Registro de
+ausencias" suma el catálogo "Tipos de licencia" (antes pantalla propia
+del menú) como cuarta solapa, anidado (`catalogos.pantalla_tipos_
+licencia(conn, anidado=True)`) — está relacionado porque Licencias lee
+ese catálogo para el combo de tipo. La solapa "Ausencias" se renombra
+"Ausencias por motivos varios" (más descriptivo, para no confundirla con
+el nombre genérico de la pantalla)."""
 from __future__ import annotations
 
 import sqlite3
@@ -48,6 +53,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.estilos import COLOR_ROJO
+from app.gui.pantallas import catalogos
 from app.gui.pantallas.reservas import (
     _FECHA_SIN_DATO,
     _SpinHorario,
@@ -215,9 +221,11 @@ class PantallaRegistroAusencias(QWidget):
         self.panel_vacaciones = _PanelVacaciones(conn)
         self.panel_licencias = _PanelLicencias(conn)
         self.panel_ausencias = _PanelAusencias(conn)
+        self.panel_tipos_licencia = catalogos.pantalla_tipos_licencia(conn, anidado=True)
         self.pestanas.addTab(self.panel_vacaciones, "Vacaciones")
         self.pestanas.addTab(self.panel_licencias, "Licencias")
-        self.pestanas.addTab(self.panel_ausencias, "Ausencias")
+        self.pestanas.addTab(self.panel_tipos_licencia, "Tipos de licencia")
+        self.pestanas.addTab(self.panel_ausencias, "Ausencias por motivos varios")
         layout.addWidget(self.pestanas, stretch=1)
 
     def actualizar(self) -> None:
