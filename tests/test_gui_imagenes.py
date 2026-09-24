@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -76,6 +76,23 @@ def test_es_un_panel_solapa(qtbot, conn):
     pantalla = _PanelGestorArchivos(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.objectName() == "panelSolapa"
+
+
+def test_panel_izquierdo_tiene_fondo_blanco_no_gris(qtbot, conn):
+    """Bug detectado al revisar capturas ("el panel izquierdo tiene un
+    relleno mas claro que el contenido"): igual que en `crud_generico.py`,
+    el panel izquierdo (filtros + botones) y el contenido interno del
+    QScrollArea nunca tenían objectName propio, así que quedaban con el
+    gris default de Qt en vez del blanco de `t['superficie']` que sí
+    pintaba `self` — `QWidget#panelSolapa` es un selector por id, no
+    cascada a los hijos. Se corrigió sumándoles el mismo objectName."""
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    paneles = [w for w in pantalla.findChildren(QWidget) if w.objectName() == "panelSolapa"]
+    # `contenido` (dentro del scroll) + el panel izquierdo anidado adentro
+    # (self mismo no cuenta: findChildren busca descendientes, no el
+    # propio widget).
+    assert len(paneles) == 2
 
 
 def test_boton_manual_del_usuario_es_primario_y_va_despues_de_eliminar(qtbot, conn):

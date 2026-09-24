@@ -2441,6 +2441,66 @@ reordenado:
   de reserva aislada") no se tocó — sigue siendo sobre
   `SaldoCuentaAnterior`, no fue parte de este pedido.
 
+### Panel izquierdo gris en vez de blanco (bug real, no solo la captura)
+
+La clienta notó, mirando capturas de "Archivos y listas", que el panel
+izquierdo (Buscar/Nuevo/Editar/Eliminar y cualquier `panel_extra_*`)
+quedaba con un relleno más OSCURO que la solapa activa y que la tabla —
+al revés de la regla ("Solapa ACTIVA: fondo CLARO... el panel de
+contenido usa el mismo tono claro", ver "Jerarquía de títulos" más
+arriba). Causa real, confirmada midiendo píxeles antes y después:
+
+- `QWidget#panelSolapa { background-color: white; }` solo pinta blanco
+  al widget que TIENE ese objectName puesto explícitamente — no
+  "hereda" hacia sus hijos aunque el widget de más afuera sí lo tenga.
+- El widget "panel izquierda" (Buscar+botones, armado en
+  `crud_generico._armar_panel_izquierda_y_tabla`, reusado por TODOS los
+  catálogos que pasan por `PantallaCRUD`) nunca tuvo ese objectName —
+  solo el widget de MÁS afuera (`self` en modo `anidado`, o
+  `panel_solapa` en modo estándar) lo tenía. Qt le pinta a ese panel
+  izquierdo el gris por defecto de un `QWidget` sin estilo (visible
+  contra el blanco de alrededor), mientras que la tabla se ve blanca
+  aparte porque `QTableWidget` usa otro rol de paleta (`Base`) que sí es
+  blanco por defecto — de ahí que solo el panel izquierdo se viera "más
+  oscuro", nunca la tabla.
+- En modo `anidado` había además un segundo widget sin ese objectName:
+  `contenido` (el que se pasa a `scroll.setWidget(...)`, sin él en
+  medio entre `self` y `panel_izquierda`) — en modo estándar ese
+  equivalente (`panel_solapa`) SÍ lo tenía puesto desde siempre, así
+  que ese modo estaba cubierto a medias.
+
+Arreglo: `crud_generico.py` suma `panel_izquierda.setObjectName(
+"panelSolapa")` en `_armar_panel_izquierda_y_tabla` (afecta a TODOS los
+catálogos que pasan por acá, `anidado` o no) y `contenido.setObjectName(
+"panelSolapa")` en el modo `anidado`. Como cualquier `panel_extra_
+superior_izquierda`/`panel_extra_izquierda` (widgets propios de cada
+catálogo, ej. "Período actual" de Gastos operativos) cuelgan DENTRO del
+panel izquierda ya arreglado, quedaron blancos de rebote sin tocarlos
+aparte — confirmado con Balance del negocio → Gastos.
+
+Mismo bug, misma causa, encontrado también en `_PanelGestorArchivos`
+(`app/gui/pantallas/imagenes.py`, armado a mano, no pasa por
+`crud_generico.py`) — mismo arreglo aplicado ahí (`contenido`/
+`panel_izquierda` propios de ese archivo suman `panelSolapa`).
+
+Tests de regresión (cuentan cuántos `QWidget` descendientes tienen
+`objectName() == "panelSolapa"`, ya que ninguno de los dos guarda
+`panel_izquierda`/`contenido` como atributo propio): en
+`test_crud_generico.py`,
+`test_pantalla_crud_panel_izquierdo_tiene_fondo_blanco_no_gris` (modo
+estándar) y `test_pantalla_crud_anidado_panel_izquierdo_tiene_fondo_
+blanco` (modo `anidado`); en `test_gui_imagenes.py`,
+`test_panel_izquierdo_tiene_fondo_blanco_no_gris`.
+
+**Pendiente, no cubierto todavía**: el resto de las pantallas que arman
+su panel izquierdo a mano en vez de con `crud_generico` (Placas,
+Aumentos y descuentos, Grilla operativa, Novedades, Reservas, Pagos,
+Lista de espera, Llaves, Bloques rígidos — ver la lista ya documentada
+más arriba de "pantallas con su propio QTabWidget armado a mano") no se
+revisaron todavía por este mismo defecto — si al repasarlas aparece el
+mismo gris de más, aplicar el mismo criterio (sumarle `panelSolapa` al
+widget intermedio que le falte).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

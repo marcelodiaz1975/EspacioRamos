@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import QDate, QLocale, Qt
-from PySide6.QtWidgets import QDateEdit, QDialog, QLabel, QMessageBox, QScrollArea, QTabWidget
+from PySide6.QtWidgets import QDateEdit, QDialog, QLabel, QMessageBox, QScrollArea, QTabWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -227,6 +227,37 @@ def test_pantalla_crud_usa_formato_solapa_con_panel_izquierdo(qtbot, conn):
     scrolls = pantalla.findChildren(QScrollArea)
     assert len(scrolls) == 1
     assert scrolls[0].widget().objectName() == "panelSolapa"
+
+
+def test_pantalla_crud_panel_izquierdo_tiene_fondo_blanco_no_gris(qtbot, conn):
+    """Bug detectado al revisar capturas ("el panel izquierdo tiene un
+    relleno mas claro que el contenido"): el panel izquierdo (Buscar +
+    Nuevo/Editar/Eliminar) nunca tenía objectName propio, así que
+    quedaba con el gris default de Qt para un QWidget genérico en vez
+    del blanco de `t['superficie']` que sí pintaba el widget que lo
+    contiene — `QWidget#panelSolapa` es un selector por id, no cascada a
+    los hijos. Se corrigió sumándole el mismo objectName al panel
+    izquierdo en `_armar_panel_izquierda_y_tabla`."""
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
+    qtbot.addWidget(pantalla)
+    paneles = [w for w in pantalla.findChildren(QWidget) if w.objectName() == "panelSolapa"]
+    # el contenido de la solapa (dentro del QScrollArea) + el panel
+    # izquierdo anidado adentro, los dos con el mismo objectName.
+    assert len(paneles) == 2
+
+
+def test_pantalla_crud_anidado_panel_izquierdo_tiene_fondo_blanco(qtbot, conn):
+    """Mismo bug, mismo arreglo, en modo `anidado=True` (formularios
+    compuestos del reordenamiento): acá `self` ya tenía el objectName
+    (es el widget de más afuera que se pasa a `addTab`), pero adentro
+    tanto `contenido` (dentro del QScrollArea) como el panel izquierdo
+    seguían sin él."""
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio(), anidado=True)
+    qtbot.addWidget(pantalla)
+    paneles = [w for w in pantalla.findChildren(QWidget) if w.objectName() == "panelSolapa"]
+    # `contenido` + el panel izquierdo anidado adentro (self mismo no
+    # cuenta: findChildren busca descendientes, no el propio widget).
+    assert len(paneles) == 2
 
 
 def test_pantalla_crud_botones_tienen_los_estilos_compartidos(qtbot, conn):

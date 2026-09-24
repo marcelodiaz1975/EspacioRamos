@@ -273,6 +273,7 @@ class PantallaCRUD(QWidget):
             scroll.setFrameShape(QFrame.Shape.NoFrame)
             scroll.setWidgetResizable(True)
             contenido = QWidget()
+            contenido.setObjectName("panelSolapa")
             layout_solapa = QHBoxLayout(contenido)
             self._armar_panel_izquierda_y_tabla(layout_solapa)
             scroll.setWidget(contenido)
@@ -317,6 +318,7 @@ class PantallaCRUD(QWidget):
 
     def _armar_panel_izquierda_y_tabla(self, layout_solapa) -> None:
         panel_izquierda = QWidget()
+        panel_izquierda.setObjectName("panelSolapa")
         form = QVBoxLayout(panel_izquierda)
         form.addWidget(_titulo_campo(self.etiqueta_buscar))
         self.campo_buscar = QLineEdit()

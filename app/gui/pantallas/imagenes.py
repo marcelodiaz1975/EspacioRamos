@@ -278,9 +278,11 @@ class _PanelGestorArchivos(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
+        contenido.setObjectName("panelSolapa")
         layout_solapa = QHBoxLayout(contenido)
 
         panel_izquierda = QWidget()
+        panel_izquierda.setObjectName("panelSolapa")
         form = QVBoxLayout(panel_izquierda)
 
         form.addWidget(_titulo_campo("Alcance"))
