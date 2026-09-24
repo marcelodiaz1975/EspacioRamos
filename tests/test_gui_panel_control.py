@@ -422,6 +422,23 @@ def test_tarjeta_alertas_sigue_mostrando_las_alertas_de_siempre(qtbot, conn):
     assert any("Deudor" in t for t in _textos_visibles(pantalla.panel_avance.contenedor_alertas))
 
 
+def test_refrescar_alertas_dos_veces_no_deja_la_tarjeta_vieja_visible(qtbot, conn):
+    """Bug detectado al revisar capturas: `_refrescar_alertas` sacaba la
+    tarjeta vieja del layout y la mandaba a `deleteLater()`, pero sin
+    ocultarla de una seguía pintada en su posición vieja hasta que el
+    event loop procesara el borrado — se veía como una tarjeta
+    "fantasma" duplicada debajo de la real."""
+    _crear_profesional_regular_con_deuda(conn, "Deudor", 99999)
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_avance
+    tarjeta_vieja = panel.layout_alertas.itemAt(0).widget()
+
+    panel.actualizar()  # mismos datos: fuerza sacar y recrear la tarjeta
+
+    assert tarjeta_vieja.isHidden()
+
+
 def test_hay_seis_tarjetas_parejas_en_la_grilla_y_alertas_aparte(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)

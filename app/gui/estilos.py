@@ -138,7 +138,9 @@ QListWidget#navegacion {{
     outline: none;
 }}
 QListWidget#navegacion::item {{ padding: 10px 14px; }}
-QListWidget#navegacion::item:selected {{ background-color: {COLOR_DIA_GRILLA}; }}
+QListWidget#navegacion::item:selected {{
+    background-color: {COLOR_DIA_GRILLA}; color: {COLOR_TEXTO_CLARO}; font-weight: bold;
+}}
 QListWidget#navegacion::item:hover {{ background-color: {t['hover_nav']}; }}
 
 QLabel#tituloPantalla {{

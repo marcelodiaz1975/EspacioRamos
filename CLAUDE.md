@@ -2365,6 +2365,36 @@ vigente hoy, y ordena el resultado por `Profesional.IdCodigo`.
 `calcular_alertas` pasa a usar `_deuda_regulares_alerta` en vez de
 `_deuda_regulares` para el campo `Alertas.deuda_regulares`.
 
+### Menú lateral: ítem seleccionado en blanco y negrita; fantasma en alertas de Panel de control
+
+Dos ajustes puntuales pedidos por la clienta al revisar capturas del
+menú ya reordenado (Sistema/Operativa diaria):
+
+- **Ítem de menú seleccionado**: el fondo bordó (`COLOR_DIA_GRILLA`) del
+  ítem activo en el menú ya estaba bien, pero el texto no tenía un
+  `color` propio en `::item:selected` — Qt caía al `HighlightedText` de
+  la paleta global (pensada para la selección de filas de tabla en todo
+  el sistema, no para esto), que en modo claro es casi negro y quedaba
+  de bajo contraste contra el bordó. `QListWidget#navegacion::item:
+  selected` (`estilos.py`) suma `color: {COLOR_TEXTO_CLARO}; font-
+  weight: bold;` — mismo fondo bordó de siempre, texto blanco y
+  negrita.
+- **Alerta "fantasma" en Panel de control**: al revisar una captura de
+  la tarjeta de alertas, se veía una segunda copia parcial (naranja sin
+  texto + una sola línea suelta) debajo de la tarjeta real. Causa real,
+  no un artefacto de la captura: `_refrescar_alertas` sacaba la tarjeta
+  vieja del layout con `takeAt(0)` y la mandaba a `deleteLater()`, pero
+  `takeAt` por sí solo NO oculta el widget — sigue siendo hijo visible
+  en su última posición hasta que el event loop procesa el borrado
+  diferido de `deleteLater`. Cualquier refresco encadenado (`showEvent`
+  + el de la construcción inicial, por ejemplo) podía dejar la tarjeta
+  vieja pintada un instante de más, superpuesta o debajo de la nueva.
+  Se corrigió sumando `item.widget().hide()` antes de `deleteLater()`
+  en ese mismo lugar — oculta al toque, sin depender de cuándo el
+  event loop procese el borrado real. Test de regresión: guarda una
+  referencia a la tarjeta antes de un segundo `actualizar()` y confirma
+  `tarjeta_vieja.isHidden()` después.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

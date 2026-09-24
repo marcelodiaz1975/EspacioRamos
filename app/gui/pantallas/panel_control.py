@@ -408,6 +408,13 @@ class _PanelAvancePeriodo(QWidget):
         while self.layout_alertas.count() > 1:
             item = self.layout_alertas.takeAt(0)
             if item.widget():
+                # `takeAt` solo lo saca del layout — sigue siendo hijo
+                # visible en su última posición hasta que `deleteLater`
+                # se procese de verdad, así que sin este `hide()` puede
+                # quedar pintado un instante de más (fantasma) si esta
+                # función se llama de nuevo antes de que el event loop
+                # llegue a borrarlo.
+                item.widget().hide()
                 item.widget().deleteLater()
 
         hubo_alertas = False
