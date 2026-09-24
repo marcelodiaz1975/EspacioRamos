@@ -251,10 +251,12 @@ class _PanelCentroMensajeria(QWidget):
         columna.addWidget(_titulo_campo("Vista previa"))
         self.texto_mensaje = QPlainTextEdit()
         self.texto_mensaje.setFixedWidth(_ANCHO_CAMPO)
-        self.texto_mensaje.setFixedHeight(220)
-        columna.addWidget(self.texto_mensaje)
-
-        columna.addStretch()
+        # Sin alto fijo: se estira con `stretch=1` para llegar hasta el
+        # mismo borde inferior que la tabla de la derecha — pedido
+        # explícito de la clienta, en vez del alto fijo (220px) + un
+        # `addStretch()` final que dejaba un espacio en blanco debajo del
+        # cuadro sin usar.
+        columna.addWidget(self.texto_mensaje, stretch=1)
         layout_solapa.addWidget(panel_izquierda)
 
         self.tabla = QTableWidget()
