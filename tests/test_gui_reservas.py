@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QLabel, QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -52,6 +52,20 @@ def test_paneles_de_reservas_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
     qtbot.addWidget(pantalla)
     assert pantalla.panel_regulares.objectName() == "panelSolapa"
     assert pantalla.panel_aisladas.objectName() == "panelSolapa"
+
+
+def test_contenido_dentro_del_scroll_tiene_fondo_claro(qtbot, conn):
+    """Bug detectado al revisar capturas: cada panel (self) tenía
+    `panelSolapa` pero `contenido` (el widget que se pasa a
+    `scroll.setWidget(...)`) no — el panel de filtros de la izquierda
+    quedaba con el gris default de Qt en vez del blanco del resto de la
+    solapa. Confirmado por muestreo de píxeles antes/después del
+    arreglo."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+        descendientes = [w for w in panel.findChildren(QWidget) if w.objectName() == "panelSolapa"]
+        assert len(descendientes) == 1  # `contenido`, el único descendiente (self no cuenta)
 
 
 def test_crear_reserva_regular_sin_conflicto_persiste(qtbot, conn):

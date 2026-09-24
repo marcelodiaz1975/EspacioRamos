@@ -285,6 +285,7 @@ class _PanelReservasRegulares(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
+        contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
         splitter_superior = QSplitter()
 
@@ -832,6 +833,7 @@ class _PanelReservasAisladas(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
+        contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
         splitter_superior = QSplitter()
 

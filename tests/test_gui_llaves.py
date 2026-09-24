@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QFrame, QLabel, QMessageBox
+from PySide6.QtWidgets import QDialog, QFrame, QLabel, QMessageBox, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -448,6 +448,18 @@ def test_usa_el_fondo_claro_de_la_solapa(qtbot, conn):
     pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.objectName() == "panelSolapa"
+
+
+def test_contenido_dentro_del_scroll_tiene_fondo_claro(qtbot, conn):
+    """Bug detectado al revisar capturas: `self` tenía `panelSolapa` pero
+    `contenido` (el widget que se pasa a `scroll.setWidget(...)`) no —
+    los botones y las tres tablas quedaban con el gris default de Qt en
+    vez del blanco de `self`. Confirmado por muestreo de píxeles antes/
+    después del arreglo."""
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    descendientes = [w for w in pantalla.findChildren(QWidget) if w.objectName() == "panelSolapa"]
+    assert len(descendientes) == 1  # `contenido`, el único descendiente (self no cuenta)
 
 
 def test_no_queda_boton_deshacer(qtbot, conn):

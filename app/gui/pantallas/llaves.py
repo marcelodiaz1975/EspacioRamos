@@ -195,6 +195,7 @@ class _PanelLlaves(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
         contenido = QWidget()
+        contenido.setObjectName("panelSolapa")
         grid = QGridLayout(contenido)
         grid.setColumnStretch(1, 1)
         grid.setRowStretch(2, 1)  # Movimientos se queda con el resto del alto disponible

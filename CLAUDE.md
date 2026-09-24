@@ -2509,27 +2509,46 @@ blanco` (modo `anidado`); en `test_gui_imagenes.py`,
 `test_panel_izquierdo_tiene_fondo_blanco_no_gris`.
 
 **Precisión sobre cuándo aparece de verdad** (surgió al revisar la
-captura de "Bloques rígidos" dentro de Configuración general): el bug
-NO afecta a cualquier panel izquierdo armado a mano — Bloques rígidos
-arma el suyo (`_armar_ui` en `bloques_rigidos.py`) colgándolo directo de
-`self` con un `QHBoxLayout`, sin ningún `QScrollArea` de por medio, y
-ahí un `QWidget` sin objectName queda transparente (se ve el blanco de
-`self` a través) — confirmado con muestreo de píxeles, `panel_izquierda`
-da `#ffffff` igual que la tabla, sin tocar nada. El patrón que sí
-produce el gris parece estar atado puntualmente a la combinación con
-`QScrollArea` (`scroll.setWidget(...)`, el mismo camino que tenían
-`crud_generico.py`/`imagenes.py` antes del arreglo): de la lista de
-pantallas con panel armado a mano, las que sí envuelven su contenido en
-un `QScrollArea` propio son Novedades, Reservas y Llaves — candidatas
-reales a revisar; Placas, Valores, Grilla operativa y Pagos no usan
-`QScrollArea` para el panel principal (Placas sí lo usa, pero solo para
-un cuadro de vista previa aparte) y es esperable que ya estén bien,
-mismo caso que Bloques rígidos, aunque no se verificaron una por una
-todavía. Pedido explícito de la clienta: no hace falta un barrido
-completo ahora — se va resolviendo pantalla por pantalla a medida que
-se van revisando de acá en adelante. Si al repasar alguna aparece el
-gris de más, aplicar el mismo criterio de siempre (sumarle `panelSolapa`
-a cada widget intermedio que le falte, no solo al de más afuera).
+captura de "Bloques rígidos" dentro de Configuración general, y se
+terminó de confirmar revisando Reservas/Llaves/Novedades a pedido de la
+clienta): el bug NO afecta a cualquier panel armado a mano — depende de
+si el widget que se pasa a `scroll.setWidget(...)` (`contenido`, en las
+pantallas que envuelven su solapa en un `QScrollArea` propio) tiene o no
+`objectName="panelSolapa"`:
+
+- **Bloques rígidos**: arma su panel directo sobre `self` con un
+  `QHBoxLayout`, sin ningún `QScrollArea` de por medio — no aplica este
+  patrón, y confirmado en blanco sin tocar nada.
+- **Novedades** (`_PanelVacaciones`/`_PanelLicencias`/`_PanelAusencias`):
+  usa `QScrollArea`, pero `contenido` YA tenía `panelSolapa` puesto desde
+  antes de esta revisión — confirmado en blanco sin tocar nada.
+- **Reservas** (`_PanelReservasRegulares`/`_PanelReservasAisladas`) y
+  **Llaves** (`_PanelLlaves`): usan `QScrollArea` y `contenido` NO tenía
+  `panelSolapa` — bug real, confirmado por muestreo de píxeles (`#efefef`
+  antes del arreglo, `#ffffff` después, en el panel de filtros/botones de
+  cada una). Corregido sumando `contenido.setObjectName("panelSolapa")`
+  en las tres construcciones (`reservas.py` ×2, `llaves.py`) — mismo
+  criterio que `crud_generico.py`/`imagenes.py`, y sin necesidad de
+  tocar los widgets nested más adentro (`panel_form`, los grupos de
+  botones de Llaves, etc.): alcanza con que `contenido` lo tenga para
+  que todo lo de adentro se vea blanco, la cascada ya la resuelve Qt en
+  este caso puntual (a diferencia de `panel_izquierda` en
+  `crud_generico.py`, que si necesitó su propio objectName aparte del de
+  `contenido`/`panel_solapa`). Tests de regresión: mismo criterio de
+  contar `QWidget` descendientes con `objectName() == "panelSolapa"`
+  (`test_contenido_dentro_del_scroll_tiene_fondo_claro` en
+  `test_gui_reservas.py`/`test_gui_llaves.py`).
+
+De la lista original de pantallas con panel armado a mano, quedan
+**Placas, Valores, Grilla operativa y Pagos** sin verificar todavía —
+no usan `QScrollArea` para su panel principal (Placas sí lo usa, pero
+solo para un cuadro de vista previa aparte), así que es esperable que ya
+estén bien (mismo caso que Bloques rígidos), pero no se confirmó pantalla
+por pantalla. Pedido explícito de la clienta: no hace falta un barrido
+completo ahora — se sigue resolviendo a medida que se revisan. Si al
+repasar alguna aparece el gris de más, el diagnóstico rápido es mirar si
+`contenido` (el widget del `scroll.setWidget(...)`) tiene `panelSolapa`
+puesto, y sumárselo si falta.
 
 ## Gestor de archivos: tipo "Enlace" (videos de YouTube, etc.)
 
