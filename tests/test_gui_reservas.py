@@ -314,55 +314,6 @@ def test_finalizar_vigencia_actualiza_vigenciafin_a_fin_de_mes(qtbot, conn):
     assert fila["VigenciaFin"] == ultimo_dia_mes(2026, 8).isoformat() == "2026-08-31"
 
 
-def test_deshacer_ultimo_movimiento_regular_sin_registros_no_falla(qtbot, conn):
-    _preparar(conn)
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.panel_regulares._deshacer_ultimo()  # no debe intentar confirmar ni romper
-
-
-def test_deshacer_ultimo_movimiento_regular_borra_el_alta_reciente(qtbot, conn):
-    _preparar(conn)
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_regulares
-    panel.combo_profesional.setCurrentIndex(1)
-    panel._crear()
-    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
-
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 0
-
-
-def test_deshacer_ultimo_movimiento_regular_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
-    _preparar(conn)
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_regulares
-    panel.combo_profesional.setCurrentIndex(1)
-    panel._crear()
-
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
-
-
-def test_deshacer_ultimo_movimiento_regular_con_vigencia_cerrada_avisa_y_no_borra(qtbot, conn):
-    """Si la última reserva ya tiene la vigencia cerrada (por Finalizar o
-    Modificar), ese tipo de cambio no se puede deshacer automáticamente."""
-    _preparar(conn)
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_regulares
-    panel.combo_profesional.setCurrentIndex(1)
-    panel._crear()
-    panel.tabla.selectRow(0)
-    panel._finalizar_vigencia()
-
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
-
-
 def test_panel_regulares_recibe_foco_en_profesional_al_mostrarse(qtbot, conn):
     _preparar(conn)
     pantalla = PantallaReservas(conn)
@@ -1738,56 +1689,6 @@ def test_tabla_aisladas_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
     panel.tabla.horizontalHeader().sectionClicked.emit(6)  # de nuevo -> descendente
     fechas_desc = [panel.tabla.item(f, 6).text() for f in range(panel.tabla.rowCount())]
     assert fechas_desc == ["20-08-2026", "17-08-2026"]
-
-
-def test_deshacer_ultimo_movimiento_aislada_sin_registros_no_falla(qtbot, conn):
-    _preparar(conn)
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.panel_aisladas._deshacer_ultimo()  # no debe intentar confirmar ni romper
-
-
-def test_deshacer_ultimo_movimiento_aislada_cancela_el_alta_reciente(qtbot, conn):
-    _preparar(conn)
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_aisladas
-    panel.combo_profesional.setCurrentIndex(1)
-    panel._crear()
-    assert conn.execute("SELECT Estado FROM ReservaAislada").fetchone()["Estado"] == "Confirmada"
-
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT Estado FROM ReservaAislada").fetchone()["Estado"] == "Cancelada"
-
-
-def test_deshacer_ultimo_movimiento_aislada_cancelado_por_usuario_no_cancela(qtbot, conn, monkeypatch):
-    _preparar(conn)
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_aisladas
-    panel.combo_profesional.setCurrentIndex(1)
-    panel._crear()
-
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT Estado FROM ReservaAislada").fetchone()["Estado"] == "Confirmada"
-
-
-def test_deshacer_ultimo_movimiento_aislada_ya_cancelada_avisa_y_no_hace_nada(qtbot, conn):
-    """Si la última reserva aislada cargada ya está cancelada (por un
-    "Cancelar" o "Modificar" posterior), ese tipo de cambio no se puede
-    deshacer automáticamente."""
-    _preparar(conn)
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_aisladas
-    panel.combo_profesional.setCurrentIndex(1)
-    panel._crear()
-    panel.tabla.selectRow(0)
-    panel._cancelar()
-
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT Estado FROM ReservaAislada").fetchone()["Estado"] == "Cancelada"
 
 
 def test_crear_reserva_aislada_sin_elegir_consultorio_avisa_y_no_crea(qtbot, conn):

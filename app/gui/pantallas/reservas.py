@@ -390,9 +390,6 @@ class _PanelReservasRegulares(QWidget):
         boton_finalizar = QPushButton("Finalizar reserva a fin de mes")
         boton_finalizar.clicked.connect(self._finalizar_vigencia)
         form.addWidget(boton_finalizar)
-        boton_deshacer = QPushButton("Deshacer último movimiento")
-        boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        form.addWidget(boton_deshacer)
 
         linea_separadora = QFrame()
         linea_separadora.setFrameShape(QFrame.Shape.HLine)
@@ -760,48 +757,6 @@ class _PanelReservasRegulares(QWidget):
         self.actualizar()
         self.combo_profesional.setFocus()
 
-    def _deshacer_ultimo(self) -> None:
-        """A diferencia de Vacaciones/Licencias/Ausencias, acá nunca se
-        borra una reserva (podría desalinear una liquidación que ya la
-        usó) — solo se le cierra la vigencia. "Deshacer" entonces solo
-        cubre el caso seguro: si la última reserva regular cargada en el
-        sistema (mayor IdReservaRegular) todavía nunca tuvo su vigencia
-        cerrada, se puede borrar sin más porque es imposible que ya haya
-        sido usada en una liquidación. Si ya tiene VigenciaFin (un
-        Finalizar o Modificar posterior a su alta), ese tipo de cambio no
-        se puede deshacer automáticamente — hay que corregirlo a mano."""
-        todas = obtener_repositorio(self.conn, "ReservaRegular").listar()
-        if not todas:
-            QMessageBox.warning(self, "Deshacer último movimiento", "No hay reservas regulares cargadas para deshacer.")
-            return
-        ultima = max(todas, key=lambda r: r["IdReservaRegular"])
-        if ultima["VigenciaFin"]:
-            QMessageBox.warning(
-                self, "Deshacer último movimiento",
-                "La última reserva regular cargada ya tiene la vigencia cerrada (por un \"Finalizar\" o "
-                "\"Modificar\" posterior) y ese tipo de cambio no se puede deshacer automáticamente. "
-                "Corregilo a mano desde la tabla.",
-            )
-            return
-        profesional = obtener_repositorio(self.conn, "Profesional").obtener(ultima["IdProfesional"])
-        respuesta = QMessageBox.question(
-            self, "Deshacer último movimiento",
-            "¿Deshacer el alta de la última reserva regular cargada en el sistema?\n"
-            f"{_texto_profesional(profesional) if profesional else '?'}: "
-            f"{ultima['DiaSemana']} {_fmt_horario(ultima['HoraInicio'], ultima['HoraFin'])} "
-            f"desde {_fmt_fecha(ultima['VigenciaInicio'])}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
-        )
-        if respuesta != QMessageBox.StandardButton.Yes:
-            return
-        obtener_repositorio(self.conn, "ReservaRegular").eliminar(ultima["IdReservaRegular"])
-        regenerar_si_corresponde(
-            self.conn, id_profesional=ultima["IdProfesional"], periodo=periodo_actual(self.conn),
-        )
-        self.conn.commit()
-        self.actualizar()
-        self.combo_profesional.setFocus()
-
     def _modificar_seleccionada(self) -> None:
         """No se edita la fila histórica in-place (podría desalinear una
         liquidación ya emitida que la haya usado): finaliza su vigencia
@@ -951,9 +906,6 @@ class _PanelReservasAisladas(QWidget):
         boton_cancelar = QPushButton("Cancelar reserva")
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
-        boton_deshacer = QPushButton("Deshacer último movimiento")
-        boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        form.addWidget(boton_deshacer)
 
         linea_separadora = QFrame()
         linea_separadora.setFrameShape(QFrame.Shape.HLine)
@@ -1344,41 +1296,6 @@ class _PanelReservasAisladas(QWidget):
             return
         if self._cancelar_registro(reserva, "Cancelar reserva"):
             self.combo_profesional.setFocus()
-
-    def _deshacer_ultimo(self) -> None:
-        """A diferencia de Vacaciones/Licencias/Ausencias, acá nunca se
-        borra una reserva aislada (se cancela, para conservar el
-        historial) — "Deshacer" entonces solo cubre el caso seguro: si la
-        última reserva aislada cargada en el sistema (mayor
-        IdReservaAislada) todavía está Confirmada, se la cancela sin más.
-        Si ya está Cancelada (por un "Cancelar" o un "Modificar"
-        posterior a su alta), ese tipo de cambio no se puede deshacer
-        automáticamente — hay que corregirlo a mano."""
-        todas = obtener_repositorio(self.conn, "ReservaAislada").listar()
-        if not todas:
-            QMessageBox.warning(self, "Deshacer último movimiento", "No hay reservas aisladas cargadas para deshacer.")
-            return
-        ultima = max(todas, key=lambda r: r["IdReservaAislada"])
-        if ultima["Estado"] == "Cancelada":
-            QMessageBox.warning(
-                self, "Deshacer último movimiento",
-                "La última reserva aislada cargada ya está cancelada (por un \"Cancelar\" o \"Modificar\" "
-                "posterior) y ese tipo de cambio no se puede deshacer automáticamente. "
-                "Corregilo a mano desde la tabla.",
-            )
-            return
-        profesional = obtener_repositorio(self.conn, "Profesional").obtener(ultima["IdProfesional"])
-        respuesta = QMessageBox.question(
-            self, "Deshacer último movimiento",
-            "¿Deshacer el alta de la última reserva aislada cargada en el sistema?\n"
-            f"{_texto_profesional(profesional) if profesional else '?'}: "
-            f"{_fmt_fecha(ultima['Fecha'])} {_fmt_horario(ultima['HoraInicio'], ultima['HoraFin'])}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
-        )
-        if respuesta != QMessageBox.StandardButton.Yes:
-            return
-        self._cancelar_registro(ultima, "Deshacer último movimiento")
-        self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
         """Mismo criterio que en Reservas regulares: no se edita la fila
