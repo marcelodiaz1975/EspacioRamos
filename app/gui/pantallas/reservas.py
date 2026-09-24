@@ -66,6 +66,12 @@ _ANCHO_COMBO_PROFESIONAL = 220
 _ANCHO_COL_PROFESIONAL = 180
 _FORMATO_FECHA = "dd-MM-yyyy"
 _FECHA_SIN_DATO = QDate(2000, 1, 1)  # sentinel de QDateEdit.setSpecialValueText: "sin fecha"
+# Pedido de la clienta: la tabla de abajo (Horarios reservados/Reservas
+# aisladas) tiene que verse, título y un par de filas, sin scrollear el
+# panel entero — ver el rearmado de `_armar_ui` en las dos clases de
+# abajo, que la saca del QScrollArea de la grilla para que quede siempre
+# visible en su propio espacio fijo.
+_ALTO_MINIMO_TABLA_INFERIOR = 230
 
 
 def _fmt_horas(horas: float) -> str:
@@ -403,7 +409,9 @@ class _PanelReservasRegulares(QWidget):
         form.addStretch()
         splitter_superior.addWidget(panel_form)
 
-        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        # Sin título (pedido de la clienta) — antes decía "Vista previa:
+        # grilla operativa".
+        grupo_grilla = QGroupBox()
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.fijar_modo("regular")
@@ -414,9 +422,23 @@ class _PanelReservasRegulares(QWidget):
 
         splitter_superior.setStretchFactor(0, 0)
         splitter_superior.setStretchFactor(1, 1)
-        layout.addWidget(splitter_superior, stretch=2)
+        layout.addWidget(splitter_superior)
+
+        hoy = fecha_actual(self.conn)
+        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
+
+        scroll.setWidget(contenido)
+        # "Horarios reservados" queda FUERA del QScrollArea de la grilla
+        # (que puede necesitar scroll propio para mostrar la grilla
+        # completa sin cortarla — ver el hallazgo documentado sobre
+        # `self.tabla.setMinimumHeight` de `GrillaOperativaWidget`) para
+        # que su título y un par de filas siempre se vean sin tener que
+        # scrollear todo el panel — pedido explícito de la clienta.
+        layout_externo.addWidget(scroll, stretch=1)
 
         panel_tabla = QGroupBox("Horarios reservados")
+        panel_tabla.setObjectName("panelSolapa")
+        panel_tabla.setMinimumHeight(_ALTO_MINIMO_TABLA_INFERIOR)
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(9)
@@ -431,13 +453,8 @@ class _PanelReservasRegulares(QWidget):
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
-        layout.addWidget(panel_tabla, stretch=1)
+        layout_externo.addWidget(panel_tabla)
 
-        hoy = fecha_actual(self.conn)
-        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
-
-        scroll.setWidget(contenido)
-        layout_externo.addWidget(scroll)
         self._cargar_edificios()
         self._foco = instalar_enter_avanza_foco(
             [
@@ -953,7 +970,9 @@ class _PanelReservasAisladas(QWidget):
         form.addStretch()
         splitter_superior.addWidget(panel_form)
 
-        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        # Sin título (pedido de la clienta) — antes decía "Vista previa:
+        # grilla operativa".
+        grupo_grilla = QGroupBox()
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.fijar_modo("aislada")
@@ -964,9 +983,21 @@ class _PanelReservasAisladas(QWidget):
 
         splitter_superior.setStretchFactor(0, 0)
         splitter_superior.setStretchFactor(1, 1)
-        layout.addWidget(splitter_superior, stretch=2)
+        layout.addWidget(splitter_superior)
+
+        hoy = fecha_actual(self.conn)
+        self.campo_fecha.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.campo_fecha_ausencia.setDate(QDate(hoy.year, hoy.month, hoy.day))
+
+        scroll.setWidget(contenido)
+        # Mismo motivo que en Reservas regulares: "Reservas aisladas"
+        # queda FUERA del QScrollArea de la grilla para que su título y
+        # un par de filas siempre se vean sin scrollear todo el panel.
+        layout_externo.addWidget(scroll, stretch=1)
 
         panel_tabla = QGroupBox("Reservas aisladas")
+        panel_tabla.setObjectName("panelSolapa")
+        panel_tabla.setMinimumHeight(_ALTO_MINIMO_TABLA_INFERIOR)
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(11)
@@ -981,14 +1012,8 @@ class _PanelReservasAisladas(QWidget):
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
-        layout.addWidget(panel_tabla, stretch=1)
+        layout_externo.addWidget(panel_tabla)
 
-        hoy = fecha_actual(self.conn)
-        self.campo_fecha.setDate(QDate(hoy.year, hoy.month, hoy.day))
-        self.campo_fecha_ausencia.setDate(QDate(hoy.year, hoy.month, hoy.day))
-
-        scroll.setWidget(contenido)
-        layout_externo.addWidget(scroll)
         self._cargar_edificios()
         self._foco = instalar_enter_avanza_foco(
             [

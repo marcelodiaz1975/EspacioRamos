@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QLabel, QMessageBox, QWidget
+from PySide6.QtWidgets import QGroupBox, QLabel, QMessageBox, QScrollArea, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -60,12 +60,40 @@ def test_contenido_dentro_del_scroll_tiene_fondo_claro(qtbot, conn):
     `scroll.setWidget(...)`) no — el panel de filtros de la izquierda
     quedaba con el gris default de Qt en vez del blanco del resto de la
     solapa. Confirmado por muestreo de píxeles antes/después del
-    arreglo."""
+    arreglo.
+
+    Dos descendientes desde que "Horarios reservados"/"Reservas
+    aisladas" quedó fuera del `QScrollArea` de la grilla (pedido de la
+    clienta, para que se vea sin scrollear todo el panel): `contenido`
+    (dentro del scroll) y el propio `panel_tabla` (fuera de él, con su
+    propio `panelSolapa` para no perder el fondo blanco al salir de
+    `contenido`)."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
         descendientes = [w for w in panel.findChildren(QWidget) if w.objectName() == "panelSolapa"]
-        assert len(descendientes) == 1  # `contenido`, el único descendiente (self no cuenta)
+        assert len(descendientes) == 2  # `contenido` y `panel_tabla` (self no cuenta)
+
+
+def test_sin_titulo_vista_previa_grilla_y_tabla_de_abajo_fuera_del_scroll(qtbot, conn):
+    """Pedido de la clienta: se saca el título "Vista previa: grilla
+    operativa" (el `QGroupBox` de la grilla queda sin título) y la tabla
+    de abajo (Horarios reservados/Reservas aisladas) queda fuera del
+    `QScrollArea` de la grilla — para que su título y un par de filas se
+    vean siempre, sin tener que scrollear el panel entero."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    for panel, titulo_tabla in (
+        (pantalla.panel_regulares, "Horarios reservados"),
+        (pantalla.panel_aisladas, "Reservas aisladas"),
+    ):
+        titulos = {gb.title() for gb in panel.findChildren(QGroupBox)}
+        assert "Vista previa: grilla operativa" not in titulos
+        assert titulo_tabla in titulos
+
+        scroll = panel.findChild(QScrollArea)
+        panel_tabla = next(gb for gb in panel.findChildren(QGroupBox) if gb.title() == titulo_tabla)
+        assert scroll.isAncestorOf(panel_tabla) is False
 
 
 def test_crear_reserva_regular_sin_conflicto_persiste(qtbot, conn):
