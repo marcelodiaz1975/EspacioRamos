@@ -2748,6 +2748,48 @@ fecha puntual, `campo_fecha`) — el pedido de la clienta mencionaba "los
 dos formularios de reservas" pero solo Reservas regulares tiene este
 campo; se aplicó únicamente ahí.
 
+## Reservas: sin título de la grilla, tabla de abajo siempre visible
+
+Dos pedidos puntuales de la clienta sobre las dos solapas (Reservas
+regulares/aisladas), aplicados juntos porque el segundo depende del
+espacio que libera el primero:
+
+- **Sin título en el `QGroupBox` de la grilla**: "Vista previa: grilla
+  operativa" se saca (`grupo_grilla = QGroupBox()`, sin texto) en las
+  dos solapas — el `QGroupBox` sigue existiendo (borde propio), solo
+  pierde el título.
+- **La tabla de abajo ("Horarios reservados"/"Reservas aisladas") queda
+  FUERA del `QScrollArea` de la grilla**, en vez de compartirlo: antes,
+  `contenido` (form + grilla + tabla, todo junto) era el único widget
+  del `QScrollArea` — si la grilla necesitaba mostrarse entera (su
+  `QTableWidget` interno fuerza un alto mínimo igual a la suma exacta
+  de sus filas, ver el hallazgo documentado en
+  `test_grilla_preview_no_tiene_scroll_interno_al_elegir_profesional`:
+  la grilla NUNCA debe recortarse con un scroll interno propio), esa
+  altura mínima arrastraba a la tabla de abajo fuera de la vista, y
+  había que scrollear TODO el panel para llegar a ella. Se resolvió
+  sacando `panel_tabla` de `contenido` (que sigue siendo lo único
+  adentro del `QScrollArea`, ahora con `splitter_superior` nomás) y
+  agregándolo aparte, directo a `layout_externo`, con
+  `setMinimumHeight(_ALTO_MINIMO_TABLA_INFERIOR)` (230px, alcanza para
+  el título + encabezado + un par de filas) — la grilla arriba puede
+  seguir necesitando SU PROPIO scroll para mostrarse entera sin
+  recortarse (eso no cambió), pero la tabla de abajo ya no depende de
+  eso: siempre tiene su franja fija visible, con su propio scroll
+  interno si hay más filas de las que entran (mismo criterio que
+  cualquier tabla del sistema, no distinto de antes).
+- Como `panel_tabla` deja de estar dentro de `contenido` (que tiene
+  `objectName="panelSolapa"`), suma su propio `panelSolapa` para no
+  perder el fondo blanco de la solapa — mismo criterio ya documentado
+  en "Panel izquierdo gris en vez de blanco" más arriba, aplicado acá a
+  un `QGroupBox` en vez de a un panel de filtros/botones.
+
+Test de regresión actualizado en `test_gui_reservas.py`
+(`test_contenido_dentro_del_scroll_tiene_fondo_claro`, ahora espera 2
+descendientes `panelSolapa` — `contenido` y `panel_tabla` — en vez de 1)
+más uno nuevo que confirma el título ausente y que `panel_tabla` queda
+fuera del `QScrollArea` de la grilla.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
