@@ -2508,18 +2508,28 @@ estándar) y `test_pantalla_crud_anidado_panel_izquierdo_tiene_fondo_
 blanco` (modo `anidado`); en `test_gui_imagenes.py`,
 `test_panel_izquierdo_tiene_fondo_blanco_no_gris`.
 
-**Pendiente, no cubierto todavía**: el resto de las pantallas que arman
-su panel izquierdo a mano en vez de con `crud_generico` (Placas,
-Aumentos y descuentos, Grilla operativa, Novedades, Reservas, Pagos,
-Lista de espera, Llaves, Bloques rígidos — ver la lista ya documentada
-más arriba de "pantallas con su propio QTabWidget armado a mano") no se
-revisaron todavía por este mismo defecto. Pedido explícito de la
-clienta: no hace falta un barrido completo ahora — se va resolviendo
-pantalla por pantalla a medida que se van revisando de acá en adelante,
-como cualquier otro ajuste de esta revisión. Si al repasar una de estas
-pantallas aparece el mismo gris de más, aplicar el mismo criterio
-(sumarle `panelSolapa` a cada widget intermedio que le falte, no solo
-al de más afuera).
+**Precisión sobre cuándo aparece de verdad** (surgió al revisar la
+captura de "Bloques rígidos" dentro de Configuración general): el bug
+NO afecta a cualquier panel izquierdo armado a mano — Bloques rígidos
+arma el suyo (`_armar_ui` en `bloques_rigidos.py`) colgándolo directo de
+`self` con un `QHBoxLayout`, sin ningún `QScrollArea` de por medio, y
+ahí un `QWidget` sin objectName queda transparente (se ve el blanco de
+`self` a través) — confirmado con muestreo de píxeles, `panel_izquierda`
+da `#ffffff` igual que la tabla, sin tocar nada. El patrón que sí
+produce el gris parece estar atado puntualmente a la combinación con
+`QScrollArea` (`scroll.setWidget(...)`, el mismo camino que tenían
+`crud_generico.py`/`imagenes.py` antes del arreglo): de la lista de
+pantallas con panel armado a mano, las que sí envuelven su contenido en
+un `QScrollArea` propio son Novedades, Reservas y Llaves — candidatas
+reales a revisar; Placas, Valores, Grilla operativa y Pagos no usan
+`QScrollArea` para el panel principal (Placas sí lo usa, pero solo para
+un cuadro de vista previa aparte) y es esperable que ya estén bien,
+mismo caso que Bloques rígidos, aunque no se verificaron una por una
+todavía. Pedido explícito de la clienta: no hace falta un barrido
+completo ahora — se va resolviendo pantalla por pantalla a medida que
+se van revisando de acá en adelante. Si al repasar alguna aparece el
+gris de más, aplicar el mismo criterio de siempre (sumarle `panelSolapa`
+a cada widget intermedio que le falte, no solo al de más afuera).
 
 ## Gestor de archivos: tipo "Enlace" (videos de YouTube, etc.)
 
