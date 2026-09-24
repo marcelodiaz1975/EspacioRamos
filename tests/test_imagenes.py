@@ -3,11 +3,13 @@ from pathlib import Path
 import pytest
 
 from app.negocio.imagenes import (
+    agregar_enlace,
     agregar_imagen,
     alternar_activo,
     categorias_por_alcance,
     eliminar_imagen,
     es_documento,
+    es_enlace,
     es_imagen,
     imagenes_del_alcance,
     imagenes_todas,
@@ -340,6 +342,95 @@ def test_agregar_otros_documentos_sin_etiqueta_falla(conn, consultorio, tmp_path
         agregar_imagen(
             conn, ruta_origen=_archivo_pdf(tmp_path), categoria="Otros documentos", id_consultorio=consultorio,
         )
+
+
+def test_es_enlace_por_prefijo_http():
+    assert es_enlace("https://youtu.be/abc123")
+    assert es_enlace("http://youtu.be/abc123")
+    assert not es_enlace("foto.jpg")
+    assert not es_enlace("")
+    assert not es_enlace(None)
+
+
+def test_categorias_por_alcance_enlace():
+    assert "Recorrido de la unidad" in categorias_por_alcance("Unidad", "Enlace")
+    assert "Recorrido del consultorio" in categorias_por_alcance("Consultorio", "Enlace")
+    assert "Otros enlaces" in categorias_por_alcance("Espacio", "Enlace")
+
+
+def test_agregar_enlace_guarda_la_url_sin_corromperla(conn, consultorio):
+    """Pasar una URL por `pathlib.Path` colapsa el "//" de "https://" a
+    un solo "/" — `agregar_enlace` no puede pasar por ese camino."""
+    url = "https://youtu.be/abc123?t=5"
+    id_imagen = agregar_enlace(conn, url=url, categoria="Recorrido del consultorio", id_consultorio=consultorio)
+
+    fila = obtener_repositorio(conn, "Imagen").obtener(id_imagen)
+    assert fila["RutaArchivo"] == url
+    assert fila["Descripcion"] == "Consultorio - Recorrido del consultorio - 1"
+    assert fila["NumeroOrden"] == 1
+
+
+def test_agregar_enlace_sin_prefijo_http_falla(conn, consultorio):
+    with pytest.raises(ValueError):
+        agregar_enlace(conn, url="youtu.be/abc123", categoria="Recorrido del consultorio", id_consultorio=consultorio)
+
+
+def test_agregar_enlace_otros_enlaces_sin_etiqueta_falla(conn, consultorio):
+    with pytest.raises(ValueError):
+        agregar_enlace(conn, url="https://youtu.be/abc123", categoria="Otros enlaces", id_consultorio=consultorio)
+
+
+def test_agregar_dos_enlaces_de_la_misma_categoria_incrementa_el_orden(conn, consultorio):
+    id1 = agregar_enlace(conn, url="https://youtu.be/a", categoria="Recorrido del consultorio", id_consultorio=consultorio)
+    id2 = agregar_enlace(conn, url="https://youtu.be/b", categoria="Recorrido del consultorio", id_consultorio=consultorio)
+
+    repo = obtener_repositorio(conn, "Imagen")
+    assert repo.obtener(id1)["NumeroOrden"] == 1
+    assert repo.obtener(id2)["NumeroOrden"] == 2
+
+
+def test_marcar_principal_intercambia_dos_enlaces_sin_corromper_las_urls(conn, consultorio):
+    id1 = agregar_enlace(conn, url="https://youtu.be/a", categoria="Recorrido del consultorio", id_consultorio=consultorio)
+    id2 = agregar_enlace(conn, url="https://youtu.be/b", categoria="Recorrido del consultorio", id_consultorio=consultorio)
+
+    marcar_principal(conn, id2)
+
+    repo = obtener_repositorio(conn, "Imagen")
+    fila1, fila2 = repo.obtener(id1), repo.obtener(id2)
+    assert fila2["NumeroOrden"] == 1
+    assert fila1["NumeroOrden"] == 2
+    assert fila1["RutaArchivo"] == "https://youtu.be/a"
+    assert fila2["RutaArchivo"] == "https://youtu.be/b"
+    assert fila2["Descripcion"] == "Consultorio - Recorrido del consultorio - 1"
+    assert fila1["Descripcion"] == "Consultorio - Recorrido del consultorio - 2"
+
+
+def test_reordenar_enlaces_no_corrompe_la_url(conn, consultorio):
+    id1 = agregar_enlace(conn, url="https://youtu.be/a", categoria="Recorrido del consultorio", id_consultorio=consultorio)
+    id2 = agregar_enlace(conn, url="https://youtu.be/b", categoria="Recorrido del consultorio", id_consultorio=consultorio)
+
+    reordenar(conn, id2, -1)  # sube el segundo enlace al primer lugar
+
+    repo = obtener_repositorio(conn, "Imagen")
+    assert repo.obtener(id2)["NumeroOrden"] == 1
+    assert repo.obtener(id2)["RutaArchivo"] == "https://youtu.be/b"
+    assert repo.obtener(id1)["RutaArchivo"] == "https://youtu.be/a"
+
+
+def test_eliminar_enlace_borra_solo_la_fila(conn, consultorio):
+    id_imagen = agregar_enlace(conn, url="https://youtu.be/a", categoria="Recorrido del consultorio", id_consultorio=consultorio)
+    eliminar_imagen(conn, id_imagen)
+    assert obtener_repositorio(conn, "Imagen").obtener(id_imagen) is None
+
+
+def test_imagenes_del_alcance_incluye_enlaces_junto_con_imagenes(conn, consultorio, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path / "base")
+    agregar_imagen(conn, ruta_origen=_archivo_jpg(tmp_path / "origen"), categoria="Foto general", id_consultorio=consultorio)
+    agregar_enlace(conn, url="https://youtu.be/a", categoria="Recorrido del consultorio", id_consultorio=consultorio)
+
+    filas = imagenes_del_alcance(conn, id_consultorio=consultorio)
+    assert len(filas) == 2
+    assert any(es_enlace(f["RutaArchivo"]) for f in filas)
 
 
 def test_agregar_word_y_txt_son_formatos_soportados(conn, consultorio, tmp_path):

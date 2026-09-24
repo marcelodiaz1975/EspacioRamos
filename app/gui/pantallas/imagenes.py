@@ -21,10 +21,23 @@ de cascada que Aumentos y descuentos). No lleva campos libres: no es un
 registro de catálogo, es una carpeta de archivos.
 
 Justo debajo de Alcance va el combo "Tipo de archivo" (Imagen/
-Documento, pedido de la clienta): filtra la tabla y decide qué lista de
-categorías se ofrece al agregar (ver `app.negocio.imagenes.
-categorias_por_alcance`) y con qué extensiones se abre el selector de
-archivo.
+Documento/Enlace, pedido de la clienta): filtra la tabla y decide qué
+lista de categorías se ofrece al agregar (ver `app.negocio.imagenes.
+categorias_por_alcance`) y, para Imagen/Documento, con qué extensiones
+se abre el selector de archivo.
+
+"Enlace" (pedido de la clienta: guardar links de YouTube con el
+recorrido en video de una unidad/consultorio en particular, que después
+pega por WhatsApp al interesado) no abre ningún selector de archivo —
+`_agregar` le pide la URL directo dentro de `_DialogoAgregarArchivo`
+(`pedir_url=True`, un campo de texto adicional arriba de Categoría) y la
+guarda con `app.negocio.imagenes.agregar_enlace`. Como un enlace no
+tiene archivo que "Descargar" ni vista previa de imagen/PDF/texto, el
+botón "Descargar" pasa a "Copiar enlace" (copia la URL al portapapeles,
+lista para pegar en WhatsApp — la única acción que la clienta pidió
+para esto, sin sumar un "Abrir enlace" aparte) cuando el "Tipo de
+archivo" elegido es Enlace, y la Vista previa muestra la URL como
+texto en vez de intentar renderizar nada.
 
 El combo Localidad lista el catálogo `Localidad` (`catalogos.
 pantalla_localidades`) completo, no solo las que ya tienen algún
@@ -77,6 +90,7 @@ import sqlite3
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -103,11 +117,13 @@ from app.negocio.imagenes import (
     EXTENSIONES_DOCUMENTO,
     EXTENSIONES_IMAGEN,
     TIPOS_ARCHIVO,
+    agregar_enlace,
     agregar_imagen,
     alternar_activo,
     categorias_por_alcance,
     eliminar_imagen,
     es_documento,
+    es_enlace,
     es_imagen,
     imagenes_del_alcance,
     imagenes_todas,
@@ -134,6 +150,8 @@ _FILTRO_ARCHIVO = {
     "Imagen": "Imágenes (" + " ".join(f"*{ext}" for ext in EXTENSIONES_IMAGEN) + ")",
     "Documento": "Documentos (" + " ".join(f"*{ext}" for ext in EXTENSIONES_DOCUMENTO) + ")",
 }
+
+_COMPROBADOR_TIPO = {"Imagen": es_imagen, "Documento": es_documento, "Enlace": es_enlace}
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -207,15 +225,25 @@ def _texto_primeras_lineas(ruta: str) -> str | None:
 
 class _DialogoAgregarArchivo(QDialog):
     """Categoría (según alcance + tipo elegidos), un detalle libre
-    (obligatorio solo para "Otras imágenes"/"Otros documentos" — las
-    únicas categorías sin nombre propio) y "Marcar como principal" — la
-    Descripción se arma sola a partir de Alcance + Categoría [+ detalle]
-    + Orden, no se pide acá."""
+    (obligatorio solo para "Otras imágenes"/"Otros documentos"/"Otros
+    enlaces" — las únicas categorías sin nombre propio) y "Marcar como
+    principal" — la Descripción se arma sola a partir de Alcance +
+    Categoría [+ detalle] + Orden, no se pide acá.
 
-    def __init__(self, categorias: list[str], parent=None):
+    `pedir_url=True` (tipo "Enlace") suma un campo de texto para la URL
+    arriba de Categoría — un enlace no pasa por ningún selector de
+    archivo, se pide acá directo."""
+
+    def __init__(self, categorias: list[str], *, pedir_url: bool = False, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Agregar archivo")
+        self.setWindowTitle("Agregar enlace" if pedir_url else "Agregar archivo")
         layout = QVBoxLayout(self)
+
+        self.campo_url: QLineEdit | None = None
+        if pedir_url:
+            layout.addWidget(_titulo_campo("Enlace (URL)"))
+            self.campo_url = QLineEdit()
+            layout.addWidget(self.campo_url)
 
         layout.addWidget(_titulo_campo("Categoría"))
         self.combo_categoria = QComboBox()
@@ -244,6 +272,12 @@ class _DialogoAgregarArchivo(QDialog):
         self.campo_detalle.setVisible(requiere_detalle)
 
     def _validar_y_aceptar(self) -> None:
+        if self.campo_url is not None and not es_enlace(self.campo_url.text()):
+            QMessageBox.warning(
+                self, "Agregar enlace", "Ingresá un enlace válido (tiene que empezar con http:// o https://).",
+            )
+            self.campo_url.setFocus()
+            return
         if self.combo_categoria.currentText() in CATEGORIAS_CON_ETIQUETA_LIBRE and not self.campo_detalle.text().strip():
             QMessageBox.warning(self, "Agregar archivo", "Ingresá un detalle para identificar este archivo.")
             self.campo_detalle.setFocus()
@@ -258,6 +292,9 @@ class _DialogoAgregarArchivo(QDialog):
 
     def principal(self) -> bool:
         return self.check_principal.isChecked()
+
+    def url(self) -> str:
+        return self.campo_url.text().strip() if self.campo_url is not None else ""
 
 
 class _PanelGestorArchivos(QWidget):
@@ -296,7 +333,7 @@ class _PanelGestorArchivos(QWidget):
         self.combo_tipo = QComboBox()
         self.combo_tipo.addItems(TIPOS_ARCHIVO)
         self.combo_tipo.setFixedWidth(_ANCHO_CAMPO)
-        self.combo_tipo.currentIndexChanged.connect(self.actualizar)
+        self.combo_tipo.currentIndexChanged.connect(self._al_cambiar_tipo)
         form.addWidget(self.combo_tipo)
 
         form.addWidget(_titulo_campo("Localidad"))
@@ -358,7 +395,7 @@ class _PanelGestorArchivos(QWidget):
         self.boton_descargar = QPushButton("Descargar")
         self.boton_descargar.setObjectName("botonSecundario")
         self.boton_descargar.setFixedWidth(_ANCHO_CAMPO)
-        self.boton_descargar.clicked.connect(self._descargar)
+        self.boton_descargar.clicked.connect(self._descargar_o_copiar)
         form.addWidget(self.boton_descargar)
 
         self.boton_eliminar = QPushButton("Eliminar")
@@ -416,6 +453,14 @@ class _PanelGestorArchivos(QWidget):
         self.boton_subir.setEnabled(not es_todos)
         self.boton_bajar.setEnabled(not es_todos)
         self._configurar_columnas(es_todos)
+        self.actualizar()
+
+    def _al_cambiar_tipo(self, *_args) -> None:
+        """El botón "Descargar" no tiene sentido para un enlace (no hay
+        archivo que copiar afuera) — pasa a "Copiar enlace" (al
+        portapapeles, la acción que pidió la clienta) mientras el Tipo
+        de archivo elegido sea Enlace."""
+        self.boton_descargar.setText("Copiar enlace" if self.combo_tipo.currentText() == "Enlace" else "Descargar")
         self.actualizar()
 
     def _configurar_columnas(self, es_todos: bool) -> None:
@@ -494,7 +539,7 @@ class _PanelGestorArchivos(QWidget):
         return {"id_consultorio": self.combo_consultorio.currentData()}
 
     def _filtrar_por_tipo(self, filas: list[sqlite3.Row]) -> list[sqlite3.Row]:
-        comprobar = es_imagen if self.combo_tipo.currentText() == "Imagen" else es_documento
+        comprobar = _COMPROBADOR_TIPO[self.combo_tipo.currentText()]
         return [f for f in filas if f["RutaArchivo"] and comprobar(f["RutaArchivo"])]
 
     def actualizar(self, *_args) -> None:
@@ -547,6 +592,9 @@ class _PanelGestorArchivos(QWidget):
         if not ruta:
             self._mostrar_preview_texto("No hay vista disponible.")
             return
+        if es_enlace(ruta):
+            self._mostrar_preview_texto(f"Enlace:\n{ruta}")
+            return
         if es_imagen(ruta):
             pixmap = QPixmap(ruta)
             if pixmap.isNull():
@@ -593,17 +641,25 @@ class _PanelGestorArchivos(QWidget):
             return
         tipo = self.combo_tipo.currentText()
         categorias = categorias_por_alcance(self.combo_alcance.currentText(), tipo)
-        ruta, _ = QFileDialog.getOpenFileName(self, "Elegir archivo", "", _FILTRO_ARCHIVO[tipo])
-        if not ruta:
-            return
-        dialogo = _DialogoAgregarArchivo(categorias, parent=self)
+        ruta = None
+        if tipo != "Enlace":
+            ruta, _ = QFileDialog.getOpenFileName(self, "Elegir archivo", "", _FILTRO_ARCHIVO[tipo])
+            if not ruta:
+                return
+        dialogo = _DialogoAgregarArchivo(categorias, pedir_url=(tipo == "Enlace"), parent=self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            agregar_imagen(
-                self.conn, ruta_origen=ruta, categoria=dialogo.categoria(), etiqueta_libre=dialogo.etiqueta_libre(),
-                principal=dialogo.principal(), **parametros,
-            )
+            if tipo == "Enlace":
+                agregar_enlace(
+                    self.conn, url=dialogo.url(), categoria=dialogo.categoria(), etiqueta_libre=dialogo.etiqueta_libre(),
+                    principal=dialogo.principal(), **parametros,
+                )
+            else:
+                agregar_imagen(
+                    self.conn, ruta_origen=ruta, categoria=dialogo.categoria(), etiqueta_libre=dialogo.etiqueta_libre(),
+                    principal=dialogo.principal(), **parametros,
+                )
         except ValueError as error:
             QMessageBox.warning(self, "Gestor de archivos", str(error))
             return
@@ -633,6 +689,21 @@ class _PanelGestorArchivos(QWidget):
         alternar_activo(self.conn, img["IdImagen"])
         self.conn.commit()
         self.actualizar()
+
+    def _descargar_o_copiar(self) -> None:
+        if self.combo_tipo.currentText() == "Enlace":
+            self._copiar_enlace()
+        else:
+            self._descargar()
+
+    def _copiar_enlace(self) -> None:
+        img = self._imagen_seleccionada()
+        if img is None:
+            return
+        if not img["RutaArchivo"]:
+            QMessageBox.warning(self, "Gestor de archivos", "Este enlace no tiene una URL asociada.")
+            return
+        QApplication.clipboard().setText(img["RutaArchivo"])
 
     def _descargar(self) -> None:
         img = self._imagen_seleccionada()

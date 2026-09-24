@@ -16,17 +16,41 @@ niveles más generales, pedidos por la clienta al revisar esta pantalla:
   Partido/Provincia/País como datos adicionales) en vez de Edificio/
   Unidad/Consultorio — mismo criterio de ID estable que el resto.
 
-Tipo de archivo: Imagen (JPG/PNG) o Documento (PDF/Word/TXT) — se
-distingue únicamente por la extensión (`es_imagen`/`es_documento`), no
-hay una columna propia en la base. Cada alcance tiene, para cada tipo,
-su propia lista cerrada de categorías (`CATEGORIAS_IMAGEN_POR_ALCANCE`/
-`CATEGORIAS_DOCUMENTO_POR_ALCANCE`, ej. Edificio-Imagen: "Fachada",
-"Ascensor"...; Unidad-Documento: "Planos de instalación",
-"Habilitación"...) elegida en el cuadro de diálogo al agregar un
-archivo — se guarda en `Imagen.Tipo`. Las categorías "Otras imágenes" y
-"Otros documentos" (siempre las últimas de su lista) piden además una
-etiqueta libre (`Imagen.EtiquetaLibre`) que se sujeta a la Descripción y
-al nombre de archivo para poder identificarlas.
+Tipo de archivo: Imagen (JPG/PNG), Documento (PDF/Word/TXT) o Enlace
+(una URL, pedido de la clienta para guardar links de YouTube con el
+recorrido en video de una unidad/consultorio/edificio en particular, que
+después pega por WhatsApp al interesado). Imagen/Documento se
+distinguen únicamente por la extensión (`es_imagen`/`es_documento`);
+Enlace se distingue por el prefijo `http://`/`https://` (`es_enlace`) —
+mismo criterio de "sin columna propia en la base" para los tres,
+`Imagen.RutaArchivo` guarda la ruta del archivo copiado O la URL tal
+cual, según el caso. Cada alcance tiene, para cada tipo, su propia lista
+cerrada de categorías (`CATEGORIAS_IMAGEN_POR_ALCANCE`/
+`CATEGORIAS_DOCUMENTO_POR_ALCANCE`/`CATEGORIAS_ENLACE_POR_ALCANCE`, ej.
+Edificio-Imagen: "Fachada", "Ascensor"...; Unidad-Documento: "Planos de
+instalación", "Habilitación"...; Unidad-Enlace: "Recorrido de la
+unidad"...) elegida en el cuadro de diálogo al agregar un archivo — se
+guarda en `Imagen.Tipo`. Las categorías "Otras imágenes", "Otros
+documentos" y "Otros enlaces" (siempre las últimas de su lista) piden
+además una etiqueta libre (`Imagen.EtiquetaLibre`) que se suma a la
+Descripción (y al nombre de archivo, si corresponde) para poder
+identificarlas.
+
+Un enlace no tiene archivo que copiar/renombrar en disco — `agregar_
+enlace` guarda la URL directo en `RutaArchivo` sin pasar por ninguna
+validación de extensión/tamaño, y `_sincronizar_descripcion_y_archivo`/
+`_intercambiar_orden` cortan camino para no tocar el archivo cuando
+`es_enlace(RutaArchivo)` da `True` — sin ese corte, pasar una URL por
+`pathlib.Path` colapsa el "//" de "https://" a un solo "/", corrompiendo
+el enlace guardado. `eliminar_imagen` no necesitó ningún cambio: ya
+comprobaba `Path(...).is_file()` antes de borrar, que para una URL da
+`False` sin más (nunca intenta `unlink` sobre algo que no es un archivo
+real). En la GUI, el botón "Descargar" (que no tiene sentido para un
+enlace) pasa a "Copiar enlace" cuando el tipo elegido es Enlace — ver
+`app/gui/pantallas/imagenes.py`. Igual que con imágenes/documentos,
+puede haber varios enlaces en la misma (alcance, entidad, categoría),
+uno marcado "principal" — mismo mecanismo de orden/`marcar_principal`
+que el resto.
 
 Dentro de cada (alcance, entidad, categoría) los archivos tienen un
 `NumeroOrden` propio: el de orden 1 es el "principal" (puede haber
@@ -65,7 +89,8 @@ ALCANCES = ("Espacio", "Localidad", "Edificio", "Unidad", "Consultorio")
 
 CATEGORIA_OTRAS_IMAGENES = "Otras imágenes"
 CATEGORIA_OTROS_DOCUMENTOS = "Otros documentos"
-CATEGORIAS_CON_ETIQUETA_LIBRE = {CATEGORIA_OTRAS_IMAGENES, CATEGORIA_OTROS_DOCUMENTOS}
+CATEGORIA_OTROS_ENLACES = "Otros enlaces"
+CATEGORIAS_CON_ETIQUETA_LIBRE = {CATEGORIA_OTRAS_IMAGENES, CATEGORIA_OTROS_DOCUMENTOS, CATEGORIA_OTROS_ENLACES}
 
 CATEGORIAS_IMAGEN_POR_ALCANCE: dict[str, list[str]] = {
     "Espacio": ["Logo PDF", "Logo WhatsApp", "Logo redes sociales", "Flyer", "Banner", CATEGORIA_OTRAS_IMAGENES],
@@ -95,7 +120,21 @@ CATEGORIAS_DOCUMENTO_POR_ALCANCE: dict[str, list[str]] = {
     "Consultorio": [CATEGORIA_OTROS_DOCUMENTOS],
 }
 
-TIPOS_ARCHIVO = ("Imagen", "Documento")
+CATEGORIAS_ENLACE_POR_ALCANCE: dict[str, list[str]] = {
+    "Espacio": ["Video institucional", CATEGORIA_OTROS_ENLACES],
+    "Localidad": ["Recorrido de la localidad", CATEGORIA_OTROS_ENLACES],
+    "Edificio": ["Recorrido del edificio", CATEGORIA_OTROS_ENLACES],
+    "Unidad": ["Recorrido de la unidad", CATEGORIA_OTROS_ENLACES],
+    "Consultorio": ["Recorrido del consultorio", CATEGORIA_OTROS_ENLACES],
+}
+
+_CATEGORIAS_POR_TIPO_ARCHIVO: dict[str, dict[str, list[str]]] = {
+    "Imagen": CATEGORIAS_IMAGEN_POR_ALCANCE,
+    "Documento": CATEGORIAS_DOCUMENTO_POR_ALCANCE,
+    "Enlace": CATEGORIAS_ENLACE_POR_ALCANCE,
+}
+
+TIPOS_ARCHIVO = ("Imagen", "Documento", "Enlace")
 
 _CARACTERES_INVALIDOS_ARCHIVO = re.compile(r'[\\/:*?"<>|]')
 
@@ -108,11 +147,14 @@ def es_documento(ruta: str) -> bool:
     return Path(ruta).suffix.lower() in EXTENSIONES_DOCUMENTO
 
 
+def es_enlace(ruta: str) -> bool:
+    return (ruta or "").strip().lower().startswith(("http://", "https://"))
+
+
 def categorias_por_alcance(alcance: str, tipo_archivo: str) -> list[str]:
-    """La lista cerrada de categorías de ese alcance para "Imagen" o
-    "Documento"."""
-    tabla = CATEGORIAS_IMAGEN_POR_ALCANCE if tipo_archivo == "Imagen" else CATEGORIAS_DOCUMENTO_POR_ALCANCE
-    return tabla.get(alcance, [CATEGORIA_OTROS_DOCUMENTOS])
+    """La lista cerrada de categorías de ese alcance para "Imagen",
+    "Documento" o "Enlace"."""
+    return _CATEGORIAS_POR_TIPO_ARCHIVO[tipo_archivo].get(alcance, [])
 
 
 def _nombre_archivo_valido(texto: str) -> str:
@@ -187,13 +229,19 @@ def _sincronizar_descripcion_y_archivo(conn: sqlite3.Connection, id_imagen: int)
     """Recalcula la Descripción (Alcance + Categoría [+ etiqueta libre]
     + Orden) y, si cambió, renombra el archivo en disco para que
     coincida — se llama después de crear un archivo o de cualquier
-    cambio de NumeroOrden."""
+    cambio de NumeroOrden. Un enlace no tiene archivo que renombrar (y
+    pasar su URL por `pathlib.Path` colapsaría el "//" de "https://" a
+    un solo "/", corrompiéndola), así que corta acá con solo la
+    Descripción actualizada."""
     repo = obtener_repositorio(conn, "Imagen")
     imagen = repo.obtener(id_imagen)
     if imagen is None:
         return
     alcance, _ = _alcance(imagen["IdLocalidad"], imagen["IdEdificio"], imagen["IdUnidad"], imagen["IdConsultorio"])
     descripcion = _descripcion_automatica(alcance, imagen["Tipo"], imagen["NumeroOrden"], imagen["EtiquetaLibre"])
+    if es_enlace(imagen["RutaArchivo"]):
+        repo.actualizar(id_imagen, Descripcion=descripcion)
+        return
     ruta_actual = Path(imagen["RutaArchivo"])
     nombre_nuevo = f"{_nombre_archivo_valido(descripcion)}{ruta_actual.suffix.lower()}"
     if ruta_actual.name != nombre_nuevo and ruta_actual.is_file():
@@ -208,14 +256,19 @@ def _intercambiar_orden(conn: sqlite3.Connection, id_imagen_1: int, id_imagen_2:
     Descripción/nombre de archivo. Pasa los dos archivos por un nombre
     temporal antes de asignarles el nombre final: un intercambio directo
     (ej. "Fachada - 1.jpg" <-> "Fachada - 2.jpg") pisaría el nombre del
-    otro antes de que se libere."""
+    otro antes de que se libere. Un enlace no pasa por ningún nombre
+    temporal (no hay archivo que mover) — solo cambia su NumeroOrden."""
     repo = obtener_repositorio(conn, "Imagen")
     img1 = repo.obtener(id_imagen_1)
     img2 = repo.obtener(id_imagen_2)
-    ruta1_temp = _mover_a_temporal(Path(img1["RutaArchivo"]))
-    ruta2_temp = _mover_a_temporal(Path(img2["RutaArchivo"]))
-    repo.actualizar(id_imagen_1, NumeroOrden=img2["NumeroOrden"], RutaArchivo=str(ruta1_temp))
-    repo.actualizar(id_imagen_2, NumeroOrden=img1["NumeroOrden"], RutaArchivo=str(ruta2_temp))
+    cambios1: dict = {"NumeroOrden": img2["NumeroOrden"]}
+    cambios2: dict = {"NumeroOrden": img1["NumeroOrden"]}
+    if not es_enlace(img1["RutaArchivo"]):
+        cambios1["RutaArchivo"] = str(_mover_a_temporal(Path(img1["RutaArchivo"])))
+    if not es_enlace(img2["RutaArchivo"]):
+        cambios2["RutaArchivo"] = str(_mover_a_temporal(Path(img2["RutaArchivo"])))
+    repo.actualizar(id_imagen_1, **cambios1)
+    repo.actualizar(id_imagen_2, **cambios2)
     _sincronizar_descripcion_y_archivo(conn, id_imagen_1)
     _sincronizar_descripcion_y_archivo(conn, id_imagen_2)
 
@@ -265,6 +318,40 @@ def agregar_imagen(
     return id_imagen
 
 
+def agregar_enlace(
+    conn: sqlite3.Connection, *, url: str, categoria: str, etiqueta_libre: str | None = None,
+    principal: bool = False, id_localidad: int | None = None, id_edificio: int | None = None,
+    id_unidad: int | None = None, id_consultorio: int | None = None,
+) -> int:
+    """Registra un enlace (ej. un video de YouTube con el recorrido de
+    una unidad/consultorio/edificio) en vez de copiar un archivo — mismo
+    mecanismo de alcance/categoría/orden/principal que `agregar_imagen`,
+    pero sin copiar nada a disco: `RutaArchivo` guarda la URL tal cual
+    (se distingue de una ruta de archivo por el prefijo http(s)://, ver
+    `es_enlace`). Devuelve el IdImagen creado."""
+    alcance, valor = _alcance(id_localidad, id_edificio, id_unidad, id_consultorio)
+    url = (url or "").strip()
+    if not es_enlace(url):
+        raise ValueError("Ingresá un enlace válido (tiene que empezar con http:// o https://).")
+    if categoria in CATEGORIAS_CON_ETIQUETA_LIBRE and not (etiqueta_libre or "").strip():
+        raise ValueError(f"«{categoria}» necesita una descripción propia para poder identificarlo.")
+
+    condicion, parametros = _condicion_alcance_categoria(alcance, valor, categoria)
+    orden_actual = conn.execute(
+        f"SELECT COALESCE(MAX(NumeroOrden), 0) FROM Imagen WHERE {condicion}", parametros
+    ).fetchone()[0]
+    repo = obtener_repositorio(conn, "Imagen")
+    id_imagen = repo.crear(
+        Tipo=categoria, EtiquetaLibre=(etiqueta_libre or "").strip() or None, IdLocalidad=id_localidad,
+        IdEdificio=id_edificio, IdUnidad=id_unidad, IdConsultorio=id_consultorio, NumeroOrden=orden_actual + 1,
+        RutaArchivo=url, Activo=1,
+    )
+    _sincronizar_descripcion_y_archivo(conn, id_imagen)
+    if principal:
+        marcar_principal(conn, id_imagen)
+    return id_imagen
+
+
 def eliminar_imagen(conn: sqlite3.Connection, id_imagen: int) -> None:
     """Borra la fila de Imagen y, si existe, el archivo copiado en disco."""
     repo = obtener_repositorio(conn, "Imagen")
@@ -294,6 +381,7 @@ def imagenes_del_alcance(
     filas = conn.execute(f"SELECT * FROM Imagen WHERE {condicion}", parametros).fetchall()
     orden_categorias = [
         *CATEGORIAS_IMAGEN_POR_ALCANCE.get(alcance, []), *CATEGORIAS_DOCUMENTO_POR_ALCANCE.get(alcance, []),
+        *CATEGORIAS_ENLACE_POR_ALCANCE.get(alcance, []),
     ]
 
     def clave(fila: sqlite3.Row):

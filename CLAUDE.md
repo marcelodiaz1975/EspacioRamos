@@ -2521,6 +2521,68 @@ pantallas aparece el mismo gris de más, aplicar el mismo criterio
 (sumarle `panelSolapa` a cada widget intermedio que le falte, no solo
 al de más afuera).
 
+## Gestor de archivos: tipo "Enlace" (videos de YouTube, etc.)
+
+Pedido de la clienta, ya con la reorganización de formularios en curso
+("¿se puede agregar tipo de archivo Enlace? Es para ir guardando los
+enlaces de videos de YouTube que voy creando, como recorrido de las
+unidades o consultorios en particular. Esos enlaces una vez
+identificados se los pego por WhatsApp al interesado"). Antes de
+implementar se consultaron tres decisiones abiertas (`AskUserQuestion`):
+
+- **Alcance**: "todos los niveles" — Espacio/Localidad/Edificio/Unidad/
+  Consultorio, los mismos 5 que Imagen/Documento (no solo Unidad/
+  Consultorio, el ejemplo puntual de la clienta).
+- **Acciones en la lista** (en vez de "Descargar" + vista previa de
+  archivo, que no aplican a un enlace): "Copiar enlace" nomás — se
+  descartó sumar además "Abrir enlace" (no lo pidió).
+- **Varios enlaces por categoría**: "sí, como con las imágenes" — mismo
+  mecanismo de orden/"principal" que Imagen/Documento, no "el nuevo
+  reemplaza al anterior".
+
+Mecánicamente (`app.negocio.imagenes`): "Enlace" se suma a
+`TIPOS_ARCHIVO` como tercer tipo, con su propia
+`CATEGORIAS_ENLACE_POR_ALCANCE` (una categoría con nombre propio por
+nivel — "Recorrido de la unidad"/"...del consultorio"/"...del
+edificio"/"...de la localidad", "Video institucional" para Espacio —
+más "Otros enlaces" al final de cada lista, mismo patrón "Otras
+imágenes"/"Otros documentos" con etiqueta libre obligatoria). Nombrado
+de categorías a criterio propio, igual que el agrupamiento de solapas
+de Configuración general en su momento — fácil de renombrar si la
+clienta prefiere otra cosa, es solo texto en un dict.
+
+Un enlace no se distingue por extensión (no tiene) sino por el prefijo
+`http://`/`https://` (`es_enlace`) — mismo criterio "sin columna propia
+en la base" que ya usaban Imagen/Documento entre sí.
+`Imagen.RutaArchivo` guarda la URL tal cual en vez de una ruta de
+archivo. `agregar_enlace` (paralela a `agregar_imagen`, sin copiar nada
+a disco ni validar extensión/tamaño) escribe la fila con el mismo
+mecanismo de orden/categoría/principal de siempre.
+
+Ojo con `pathlib.Path` sobre una URL: `_sincronizar_descripcion_y_
+archivo`/`_intercambiar_orden` (las dos únicas funciones que antes
+convertían `RutaArchivo` a `Path` para renombrar el archivo en disco)
+ahora cortan camino cuando `es_enlace(RutaArchivo)` da `True` — sin ese
+corte, pasar "https://youtu.be/xyz" por `Path(...)` colapsa el "//"
+después de "https:" a un solo "/", corrompiendo el enlace guardado
+(confirmado con un test dedicado, `test_agregar_enlace_guarda_la_url_
+sin_corromperla`). `eliminar_imagen` no necesitó ningún cambio: ya
+comprobaba `Path(...).is_file()` antes de intentar borrar el archivo,
+que para una URL da `False` sin más.
+
+GUI (`_PanelGestorArchivos`): el combo "Tipo de archivo" no abre ningún
+`QFileDialog` cuando está en "Enlace" — `_DialogoAgregarArchivo` suma un
+parámetro `pedir_url` que agrega un campo de URL arriba de Categoría (se
+pide ahí mismo, validada contra `es_enlace` antes de aceptar). El botón
+"Descargar" pasa a "Copiar enlace" (copia la URL al portapapeles,
+`QApplication.clipboard()`, mismo criterio de test que ya usaba Reservas
+para su propio "copiar al portapapeles") mientras el Tipo de archivo
+elegido sea Enlace, y vuelve a "Descargar" para Imagen/Documento — un
+solo botón, cambia de texto y de acción según el combo
+(`_al_cambiar_tipo`/`_descargar_o_copiar`). La Vista previa, para un
+enlace, muestra la URL como texto ("Enlace:\n{url}") en vez de intentar
+renderizar nada.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

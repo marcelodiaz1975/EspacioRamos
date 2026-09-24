@@ -329,6 +329,110 @@ def test_descargar_copia_el_archivo_al_destino_elegido(qtbot, conn, edificio, un
     assert destino.is_file()
 
 
+def _monkeypatch_clipboard(monkeypatch):
+    """Mismo criterio que `test_gui_reservas._monkeypatch_clipboard`."""
+    copiado = []
+    monkeypatch.setattr(
+        "app.gui.pantallas.imagenes.QApplication.clipboard",
+        staticmethod(lambda: type("_C", (), {"setText": lambda self, t: copiado.append(t)})()),
+    )
+    return copiado
+
+
+def test_agregar_enlace_via_dialogo_no_abre_ningun_selector_de_archivo(
+    qtbot, conn, edificio, unidad, consultorio, monkeypatch,
+):
+    """Un enlace no tiene archivo que elegir — `_agregar` no debería
+    llamar nunca a `QFileDialog.getOpenFileName` para el tipo Enlace."""
+    def _reventar(*a, **k):
+        raise AssertionError("no debería abrirse el selector de archivo para un enlace")
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(_reventar))
+
+    def _cargar_url(self):
+        self.campo_url.setText("https://youtu.be/abc123")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _cargar_url)
+
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla.combo_tipo.setCurrentText("Enlace")
+
+    pantalla._agregar()
+
+    assert pantalla.tabla.rowCount() == 1
+    assert pantalla.tabla.item(0, 1).text() == "Consultorio - Recorrido del consultorio - 1"
+    assert pantalla.tabla.item(0, 2).text() == "Recorrido del consultorio"
+
+
+def test_agregar_enlace_sin_url_valida_avisa_y_no_agrega(qtbot, conn, edificio, unidad, consultorio, monkeypatch):
+    def _sin_url(self):
+        return QDialog.DialogCode.Accepted  # campo_url queda vacío
+
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _sin_url)
+
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla.combo_tipo.setCurrentText("Enlace")
+
+    pantalla._agregar()
+
+    assert pantalla.tabla.rowCount() == 0
+
+
+def test_boton_descargar_pasa_a_copiar_enlace_con_tipo_enlace(qtbot, conn):
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_descargar.text() == "Descargar"
+
+    pantalla.combo_tipo.setCurrentText("Enlace")
+    assert pantalla.boton_descargar.text() == "Copiar enlace"
+
+    pantalla.combo_tipo.setCurrentText("Documento")
+    assert pantalla.boton_descargar.text() == "Descargar"
+
+
+def test_copiar_enlace_copia_la_url_al_portapapeles(qtbot, conn, edificio, unidad, consultorio, monkeypatch):
+    def _cargar_url(self):
+        self.campo_url.setText("https://youtu.be/abc123")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _cargar_url)
+
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla.combo_tipo.setCurrentText("Enlace")
+    pantalla._agregar()
+    pantalla.tabla.selectRow(0)
+
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    pantalla._descargar_o_copiar()
+
+    assert copiado == ["https://youtu.be/abc123"]
+
+
+def test_previsualizacion_de_enlace_muestra_la_url_como_texto(qtbot, conn, edificio, unidad, consultorio, monkeypatch):
+    def _cargar_url(self):
+        self.campo_url.setText("https://youtu.be/abc123")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAgregarArchivo, "exec", _cargar_url)
+
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla.combo_tipo.setCurrentText("Enlace")
+    pantalla._agregar()
+
+    pantalla.tabla.selectRow(0)
+
+    assert "https://youtu.be/abc123" in pantalla.etiqueta_preview.text()
+
+
 def test_todos_los_archivos_muestra_imagenes_de_todos_los_niveles(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
     rutas = iter([_archivo_jpg(tmp_path, "a.jpg"), _archivo_jpg(tmp_path, "b.jpg")])
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (next(rutas), "")))
