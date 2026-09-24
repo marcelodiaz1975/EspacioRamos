@@ -16,6 +16,22 @@ def _textos_visibles(widget) -> list[str]:
     return [label.text() for label in widget.findChildren(QLabel)]
 
 
+def _crear_profesional_regular_con_deuda(conn, apellido: str, saldo: float) -> int:
+    """La alerta de deuda regular (ver `panel_control._deuda_regulares_
+    alerta`) exige, además del saldo, una `ReservaRegular` vigente hoy."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido=apellido, SaldoCuentaAnterior=saldo,
+    )
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=11, VigenciaInicio="2020-01-01", VigenciaFin=None,
+    )
+    return id_profesional
+
+
 @pytest.fixture
 def conn(tmp_path):
     connection = init_database(tmp_path / "test.db")
@@ -66,9 +82,7 @@ def test_panel_control_sin_alertas_muestra_mensaje(qtbot, conn):
 
 
 def test_panel_control_alerta_de_deuda_se_muestra(qtbot, conn):
-    obtener_repositorio(conn, "Profesional").crear(
-        CategoriaProfesional="R", Apellido="Deudor", SaldoCuentaAnterior=99999,
-    )
+    _crear_profesional_regular_con_deuda(conn, "Deudor", 99999)
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     assert any("Deudor" in t for t in _textos_visibles(pantalla.panel_avance.contenedor_alertas))
@@ -402,9 +416,7 @@ def test_tarjeta_ocupacion_muestra_las_cinco_metricas(qtbot, conn):
 
 
 def test_tarjeta_alertas_sigue_mostrando_las_alertas_de_siempre(qtbot, conn):
-    obtener_repositorio(conn, "Profesional").crear(
-        CategoriaProfesional="R", Apellido="Deudor", SaldoCuentaAnterior=99999,
-    )
+    _crear_profesional_regular_con_deuda(conn, "Deudor", 99999)
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     assert any("Deudor" in t for t in _textos_visibles(pantalla.panel_avance.contenedor_alertas))

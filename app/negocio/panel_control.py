@@ -51,12 +51,37 @@ class Alertas:
 
 
 def _deuda_regulares(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Todos los profesionales R con saldo fuera de tolerancia — sigue
+    alimentando también el cuadrito "Profesionales" de más abajo
+    (`calcular_estadisticas_profesionales`), sin el filtro extra de
+    `_deuda_regulares_alerta`."""
     cfg = conn.execute("SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
     return [
         p for p in obtener_repositorio(conn, "Profesional").listar(CategoriaProfesional="R")
         if (p["SaldoCuentaAnterior"] or 0.0) > tolerancia
     ]
+
+
+def _reserva_regular_activa(conn: sqlite3.Connection, id_profesional: int, hoy: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM ReservaRegular WHERE IdProfesional = ? AND VigenciaInicio <= ? "
+        "AND (VigenciaFin IS NULL OR VigenciaFin >= ?) LIMIT 1",
+        (id_profesional, hoy, hoy),
+    ).fetchone() is not None
+
+
+def _deuda_regulares_alerta(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Primer alerta del panel (pedido de la clienta, repaso de
+    pendientes abiertos): a diferencia de `_deuda_regulares` (que
+    también alimenta el cuadrito "Profesionales", sin cambios), acá
+    además hace falta que el profesional reserve regular a este momento
+    (no cualquier categoría R con saldo, aunque hoy no tenga ninguna
+    reserva vigente) — y quedan ordenados por código."""
+    hoy = fecha_actual(conn).isoformat()
+    filas = [p for p in _deuda_regulares(conn) if _reserva_regular_activa(conn, p["IdProfesional"], hoy)]
+    filas.sort(key=lambda p: p["IdCodigo"] or "")
+    return filas
 
 
 def _deuda_aisladas(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -100,7 +125,7 @@ def _categoria_x_con_llaves_pendientes(conn: sqlite3.Connection) -> list[sqlite3
 def calcular_alertas(conn: sqlite3.Connection) -> Alertas:
     periodo = periodo_actual(conn)
     return Alertas(
-        deuda_regulares=_deuda_regulares(conn),
+        deuda_regulares=_deuda_regulares_alerta(conn),
         deuda_aisladas=_deuda_aisladas(conn),
         liquidaciones_regeneradas_no_enviadas=obtener_repositorio(conn, "LiquidacionEmitida").listar(
             EstadoEnvio="Regenerada no enviada",

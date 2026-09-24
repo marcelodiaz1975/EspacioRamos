@@ -2312,6 +2312,59 @@ solapas, catálogo anidado sin título propio, fondo claro de los tres
 paneles, valores por defecto de los filtros, recálculo al cambiar
 período, coloreado rojo de gastos/resultado).
 
+### Renombre final de categorías: Sistema / Operativa diaria
+
+Con Balance del negocio, las doce pantallas de "Operativa diaria" con
+cambio de código quedaron completas. Último paso del reordenamiento de
+formularios: las tres categorías viejas del menú ("Principal"/
+"Catálogos"/"Configuración") pasan a solo dos, "Sistema"/"Operativa
+diaria", en todas las `Seccion` de `gui_main.py`.
+
+`VentanaPrincipal` arma un separador de categoría cada vez que cambia
+respecto de la `Seccion` anterior en la lista (no agrupa por nombre
+repetido en toda la lista) — así que hizo falta REORDENAR la lista, no
+solo cambiar el string de `categoria`, para que las cinco de "Sistema"
+queden todas juntas y las doce de "Operativa diaria" también, sin
+intercalarse (si no, el menú mostraría el separador "SISTEMA" varias
+veces salteado). Dentro de cada bloque se conservó el orden relativo
+que ya tenían entre sí las Secciones (no hay un orden pedido por la
+clienta para este paso final, es criterio propio):
+
+- **Sistema** (5): Panel de control, Archivos y listas, Base datos del
+  espacio, Configuración general, Usuarios y permisos.
+- **Operativa diaria** (12): Grilla y mensajería, Reservas,
+  Liquidaciones, Llaves y otros conceptos, Placas para timbres,
+  Disponibilidad, Registro de ausencias, Pagos, Estadísticas, Valores,
+  Profesionales, Balance del negocio.
+
+Test nuevo en `test_gui_main.py`: confirma que las categorías de
+`construir_secciones()` son exactamente esas dos y que hay un solo
+cambio de categoría en toda la lista (es decir, que van contiguas).
+
+### Panel de control: primer alerta solo profesionales que reservan regular
+
+Pedido de la clienta (repaso de pendientes abiertos, Excel de la
+reorganización): "que el primer alerta sea los que deben por fuera del
+rango de tolerancia a ese momento ordenado de por código, solo los
+profesionales que reservan regular." La primera alerta ("Deuda mes
+anterior — profesionales regulares") ya se mostraba primera (el orden
+lo define `_TITULOS_ALERTA` en `app/gui/pantallas/panel_control.py`,
+dict con "deuda_regulares" como primera clave — sin cambios ahí), pero
+antes de este pedido incluía a CUALQUIER profesional categoría R con
+saldo fuera de tolerancia, sin importar si hoy tiene alguna reserva
+regular vigente, y sin ningún orden particular.
+
+`app.negocio.panel_control._deuda_regulares` (la que también alimenta
+el cuadrito "Profesionales" — "con saldo fuera de tolerancia", que
+suma regulares + aisladas) se dejó SIN CAMBIOS a propósito, para no
+alterar sin que se pidiera un cálculo de otra parte del panel. En su
+lugar se sumó `_deuda_regulares_alerta` (más `_reserva_regular_activa`,
+helper chico compartido), exclusiva para esta alerta: parte de la
+misma lista de `_deuda_regulares` pero además exige una `ReservaRegular`
+vigente hoy, y ordena el resultado por `Profesional.IdCodigo`.
+`calcular_alertas` pasa a usar `_deuda_regulares_alerta` en vez de
+`_deuda_regulares` para el campo `Alertas.deuda_regulares`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

@@ -25,22 +25,63 @@ def _fijar_fecha(conn, fecha_iso):
     )
 
 
+@pytest.fixture
+def consultorio(conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    return obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+
+
 def test_alertas_vacias_sin_datos(conn):
     alertas = calcular_alertas(conn)
     assert alertas.total == 0
 
 
-def test_alerta_deuda_regular_respeta_tolerancia(conn):
+def _crear_profesional_con_reserva_regular(conn, consultorio, **kwargs):
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", **kwargs)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=11, VigenciaInicio="2020-01-01", VigenciaFin=None,
+    )
+    return id_profesional
+
+
+def test_alerta_deuda_regular_respeta_tolerancia(conn, consultorio):
     obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=1000)
-    obtener_repositorio(conn, "Profesional").crear(
-        CategoriaProfesional="R", Apellido="Bajo saldo", SaldoCuentaAnterior=500,
-    )
-    obtener_repositorio(conn, "Profesional").crear(
-        CategoriaProfesional="R", Apellido="Alto saldo", SaldoCuentaAnterior=5000,
-    )
+    _crear_profesional_con_reserva_regular(conn, consultorio, Apellido="Bajo saldo", SaldoCuentaAnterior=500)
+    _crear_profesional_con_reserva_regular(conn, consultorio, Apellido="Alto saldo", SaldoCuentaAnterior=5000)
     alertas = calcular_alertas(conn)
     assert len(alertas.deuda_regulares) == 1
     assert alertas.deuda_regulares[0]["Apellido"] == "Alto saldo"
+
+
+def test_alerta_deuda_regular_excluye_profesionales_sin_reserva_regular_activa(conn):
+    """Pedido de la clienta: solo entran los que efectivamente reservan
+    regular a este momento, no cualquier categoría R con saldo."""
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Sin reservas", SaldoCuentaAnterior=5000,
+    )
+    alertas = calcular_alertas(conn)
+    assert alertas.deuda_regulares == []
+
+
+def test_alerta_deuda_regular_excluye_reserva_ya_vencida(conn, consultorio):
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Reserva vencida", SaldoCuentaAnterior=5000,
+    )
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=11, VigenciaInicio="2020-01-01", VigenciaFin="2020-06-30",
+    )
+    alertas = calcular_alertas(conn)
+    assert alertas.deuda_regulares == []
+
+
+def test_alerta_deuda_regular_ordena_por_codigo(conn, consultorio):
+    _crear_profesional_con_reserva_regular(conn, consultorio, Apellido="Z", SaldoCuentaAnterior=5000, IdCodigo="R9")
+    _crear_profesional_con_reserva_regular(conn, consultorio, Apellido="A", SaldoCuentaAnterior=5000, IdCodigo="R1")
+    alertas = calcular_alertas(conn)
+    assert [f["IdCodigo"] for f in alertas.deuda_regulares] == ["R1", "R9"]
 
 
 def test_alerta_deuda_aislada_no_tiene_tolerancia(conn):

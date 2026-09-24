@@ -20,6 +20,20 @@ def test_todas_las_secciones_tienen_ayuda_cargada():
     assert sin_ayuda == []
 
 
+def test_categorias_son_solo_sistema_y_operativa_diaria_y_van_contiguas():
+    """Reordenamiento de formularios: las viejas "Principal"/"Catálogos"/
+    "Configuración" quedan reemplazadas por dos categorías nomás.
+    `VentanaPrincipal` arma un separador cada vez que la categoría
+    cambia respecto de la sección anterior (no agrupa por nombre
+    repetido en toda la lista) — así que las de una misma categoría
+    tienen que quedar todas juntas, sin intercalarse con la otra."""
+    secciones = construir_secciones()
+    categorias = [s.categoria for s in secciones]
+    assert set(categorias) == {"Sistema", "Operativa diaria"}
+    cambios = sum(1 for a, b in zip(categorias, categorias[1:]) if a != b)
+    assert cambios == 1  # un solo cambio de categoría en toda la lista
+
+
 def test_archivos_y_listas_recibe_la_lista_completa_de_secciones(qtbot, conn):
     """"Manual del usuario" (reubicado en Gestor de archivos del espacio,
     ver imagenes.py) sigue necesitando la lista completa de secciones
