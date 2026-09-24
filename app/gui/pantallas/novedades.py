@@ -1,7 +1,7 @@
 """Registro de ausencias por profesional (secciones 3.12-3.14): Vacaciones,
 Licencias y Ausencias en pestañas — plazos por inactividad únicamente. Los
-Cargos especiales (sección 3.15) viven en su propia pantalla
-(`PantallaCargosEspeciales`, más abajo), porque no son un plazo de
+Cargos especiales (sección 3.15) son otra cosa (`_PanelCargosEspeciales`/
+`_PanelEstadoCuentaCargos`, más abajo), porque no son un plazo de
 inactividad. Son registros históricos que alimentan el cálculo de la
 liquidación (Etapa 4) — el alta reusa siempre las funciones de negocio
 (crear_vacacion/crear_licencia/crear_ausencia/crear_cargo_especial) para no
@@ -23,7 +23,12 @@ del menú) como cuarta solapa, anidado (`catalogos.pantalla_tipos_
 licencia(conn, anidado=True)`) — está relacionado porque Licencias lee
 ese catálogo para el combo de tipo. La solapa "Ausencias" se renombra
 "Ausencias por motivos varios" (más descriptivo, para no confundirla con
-el nombre genérico de la pantalla)."""
+el nombre genérico de la pantalla). Por separado, "Cargos especiales"
+deja de ser un formulario propio del menú: su contenedor
+(`PantallaCargosEspeciales`) se borra y sus dos solapas (`_PanelCargos
+Especiales`/`_PanelEstadoCuentaCargos`, sin cambios) se importan cruzadas
+en el nuevo formulario "Llaves y otros conceptos"
+(`llaves_y_otros_conceptos.py`), junto a la pantalla de Llaves."""
 from __future__ import annotations
 
 import sqlite3
@@ -231,32 +236,6 @@ class PantallaRegistroAusencias(QWidget):
     def actualizar(self) -> None:
         for panel in (self.panel_vacaciones, self.panel_licencias, self.panel_ausencias):
             panel.actualizar()
-
-
-class PantallaCargosEspeciales(QWidget):
-    """Dos solapas: "Registro de cargos especiales" (F28, lo de siempre)
-    y "Estado de cuenta" (F25 — antes vivía en la pantalla separada
-    "Estado de cuenta", suprimida; ver también Pagos F21/F25 y
-    Liquidación mensual F22/F26, confirmado por la clienta)."""
-
-    def __init__(self, conn: sqlite3.Connection, parent=None):
-        super().__init__(parent)
-        self.conn = conn
-        layout = QVBoxLayout(self)
-        titulo = QLabel("Cargos especiales")
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        self.pestanas = QTabWidget()
-        self.panel = _PanelCargosEspeciales(conn)
-        self.panel_estado_cuenta = _PanelEstadoCuentaCargos(conn)
-        self.pestanas.addTab(self.panel, "Registro de cargos especiales")
-        self.pestanas.addTab(self.panel_estado_cuenta, "Estado de cuenta")
-        layout.addWidget(self.pestanas, stretch=1)
-
-    def actualizar(self) -> None:
-        self.panel.actualizar()
-        self.panel_estado_cuenta.actualizar()
 
 
 class _PanelVacaciones(QWidget):

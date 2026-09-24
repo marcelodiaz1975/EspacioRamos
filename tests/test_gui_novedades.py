@@ -4,7 +4,12 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.novedades import PantallaCargosEspeciales, PantallaRegistroAusencias, _fmt_fecha_dia_abrev
+from app.gui.pantallas.novedades import (
+    PantallaRegistroAusencias,
+    _fmt_fecha_dia_abrev,
+    _PanelCargosEspeciales,
+    _PanelEstadoCuentaCargos,
+)
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import periodo_actual
@@ -86,9 +91,9 @@ def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
         completador = panel.combo_profesional.completer()
         assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
 
-    pantalla_cargos = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla_cargos)
-    completador = pantalla_cargos.panel.combo_profesional.completer()
+    panel_cargos = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel_cargos)
+    completador = panel_cargos.combo_profesional.completer()
     assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
 
 
@@ -1212,18 +1217,16 @@ def test_panel_ausencias_grilla_resalta_verde_donde_hay_ausencia(qtbot, conn):
 
 def test_crear_cargo_especial_sin_concepto_no_persiste(qtbot, conn):
     _preparar(conn)
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 0
 
 
 def test_crear_cargo_especial_persiste(qtbot, conn):
     _preparar(conn)
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
@@ -1240,9 +1243,8 @@ def test_crear_cargo_especial_periodo_mes_anterior_se_rechaza(qtbot, conn):
     conn.execute(
         "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
     )
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
@@ -1258,18 +1260,16 @@ def test_crear_cargo_especial_periodo_mes_anterior_se_rechaza(qtbot, conn):
 
 def test_combo_profesional_cargos_especiales_arranca_en_blanco(qtbot, conn):
     _preparar(conn)
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     assert panel.combo_profesional.currentIndex() == 0
     assert panel.combo_profesional.currentData() is None
 
 
 def test_crear_cargo_especial_sin_elegir_profesional_avisa_y_no_crea(qtbot, conn):
     _preparar(conn)
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
     panel._crear()
@@ -1281,9 +1281,8 @@ def test_tabla_cargos_especiales_usa_formato_canonico_de_profesional(qtbot, conn
     conn.execute("UPDATE Profesional SET IdCodigo = 'R1', Tratamiento = 'Lic.', NombrePila = 'Virginia'")
     conn.commit()
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
@@ -1293,19 +1292,18 @@ def test_tabla_cargos_especiales_usa_formato_canonico_de_profesional(qtbot, conn
 
 def test_panel_cargos_especiales_recibe_foco_en_profesional_al_mostrarse(qtbot, conn):
     _preparar(conn)
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
-    qtbot.waitUntil(lambda: pantalla.panel.combo_profesional.hasFocus())
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.show()
+    qtbot.waitExposed(panel)
+    qtbot.waitUntil(lambda: panel.combo_profesional.hasFocus())
 
 
 def test_tabla_cargos_especiales_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     for concepto, monto in (("bbb", 100), ("aaa", 200)):
         panel.campo_concepto.setText(concepto)
@@ -1324,17 +1322,16 @@ def test_tabla_cargos_especiales_click_en_columna_ordena_y_alterna_sentido(qtbot
 
 def test_deshacer_ultimo_movimiento_cargo_especial_sin_registros_no_falla(qtbot, conn):
     _preparar(conn)
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.panel._deshacer_ultimo()  # no debe intentar confirmar ni romper
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel._deshacer_ultimo()  # no debe intentar confirmar ni romper
 
 
 def test_deshacer_ultimo_movimiento_cargo_especial_borra_el_ultimo_cargado(qtbot, conn, monkeypatch):
     _preparar(conn)
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
@@ -1348,9 +1345,8 @@ def test_deshacer_ultimo_movimiento_cargo_especial_borra_el_ultimo_cargado(qtbot
 def test_deshacer_ultimo_movimiento_cargo_especial_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
     _preparar(conn)
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
@@ -1377,9 +1373,8 @@ def test_combo_profesional_cargos_especiales_filtra_la_tabla(qtbot, conn):
     )
     conn.commit()
 
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     assert panel.tabla.rowCount() == 2  # "Todos los profesionales" por defecto
 
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional_1))
@@ -1392,9 +1387,8 @@ def test_tabla_cargos_especiales_incluye_columna_fecha_con_formato_dia(qtbot, co
     conn.execute(
         "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-17' WHERE IdConfiguracion = 1"
     )
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
@@ -1420,9 +1414,8 @@ def test_tabla_cargos_especiales_monto_con_signo_y_color(qtbot, conn):
     )
     conn.commit()
 
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     valores = {panel.tabla.item(f, 3).text(): panel.tabla.item(f, 4) for f in range(panel.tabla.rowCount())}
     assert "$" in valores["A favor"].text()
     assert valores["A favor"].foreground().color().name() != COLOR_ROJO.lower()
@@ -1448,9 +1441,8 @@ def test_tabla_cargos_especiales_orden_por_defecto_fecha_categoria_codigo(qtbot,
         )
     conn.commit()
 
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     # mismo día -> desempata por categoría (B antes que R)
     codigos = [panel.tabla.item(f, 1).text().split(" - ")[0] for f in range(panel.tabla.rowCount())]
     assert codigos == ["B1", "R2"]
@@ -1466,9 +1458,8 @@ def test_cargo_ligado_a_llave_bloquea_modificar_eliminar_y_deshacer(qtbot, conn,
     asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional, cobrar_deposito=True)
     conn.commit()
 
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     assert panel.tabla.rowCount() == 1  # se ve en la tabla...
 
     panel.tabla.selectRow(0)
@@ -1485,9 +1476,8 @@ def test_cargo_ligado_a_llave_bloquea_modificar_eliminar_y_deshacer(qtbot, conn,
 
 def test_eliminar_cargo_especial_sin_llave_lo_borra(qtbot, conn):
     _preparar(conn)
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
@@ -1501,9 +1491,8 @@ def test_eliminar_cargo_especial_sin_llave_lo_borra(qtbot, conn):
 def test_modificar_cargo_especial_sin_llave_lo_precarga_para_recrear(qtbot, conn):
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
     panel.combo_tipo.setCurrentIndex(panel.combo_tipo.findData("Crédito"))
     panel.campo_concepto.setText("bonificación")
@@ -1526,9 +1515,8 @@ def test_modificar_cargo_especial_sin_llave_lo_precarga_para_recrear(qtbot, conn
 
 def test_tabla_cargos_especiales_encabezado_periodo_imputado(qtbot, conn):
     _preparar(conn)
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     assert panel.tabla.horizontalHeaderItem(5).text() == "Período imputado"
 
 
@@ -1536,9 +1524,8 @@ def test_spin_monto_cargos_especiales_se_pone_rojo_en_negativo(qtbot, conn):
     from app.gui.estilos import COLOR_ROJO
 
     _preparar(conn)
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     assert COLOR_ROJO not in panel.spin_monto.styleSheet()
 
     panel.spin_monto.setValue(-100)
@@ -1548,37 +1535,30 @@ def test_spin_monto_cargos_especiales_se_pone_rojo_en_negativo(qtbot, conn):
     assert COLOR_ROJO not in panel.spin_monto.styleSheet()
 
 
-def test_solapa_estado_cuenta_cargos_es_segunda_solapa(qtbot, conn):
-    """Antes vivía en la pantalla separada "Estado de cuenta" (F25),
-    suprimida — ahora es la segunda solapa de Cargos especiales."""
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    assert pantalla.panel_estado_cuenta is not None
-    assert pantalla.pestanas.tabText(0) == "Registro de cargos especiales"
-    assert pantalla.pestanas.tabText(1) == "Estado de cuenta"
-
-
 def test_botones_secundarios_de_cargos_especiales_son_celestes(qtbot, conn):
     """Mismo criterio que Vacaciones/Licencias/Ausencias: Modificar/
     Eliminar/Deshacer usan "botonSecundario" (celeste, mismo alto que
     el botón principal) en vez del gris por defecto del sistema."""
     from PySide6.QtWidgets import QPushButton
 
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
     textos_secundarios = {"Modificar cargo especial", "Eliminar cargo especial", "Deshacer último movimiento"}
     encontrados = {
-        b.text() for b in pantalla.panel.findChildren(QPushButton)
+        b.text() for b in panel.findChildren(QPushButton)
         if b.objectName() == "botonSecundario" and b.text() in textos_secundarios
     }
     assert encontrados == textos_secundarios
 
 
 def test_paneles_de_cargos_especiales_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    assert pantalla.panel.objectName() == "panelSolapa"
-    assert pantalla.panel_estado_cuenta.objectName() == "panelSolapa"
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    assert panel.objectName() == "panelSolapa"
+
+    panel_estado_cuenta = _PanelEstadoCuentaCargos(conn)
+    qtbot.addWidget(panel_estado_cuenta)
+    assert panel_estado_cuenta.objectName() == "panelSolapa"
 
 
 def test_estado_cuenta_cargos_tiene_filtro_a_la_izquierda_y_datos_uno_por_linea(qtbot, conn):
@@ -1586,9 +1566,8 @@ def test_estado_cuenta_cargos_tiene_filtro_a_la_izquierda_y_datos_uno_por_linea(
     filtro de esta solapa) pasa a un panel a la izquierda, como el
     resto de las pantallas, con una línea divisoria abajo y cada dato
     del resumen en su propia línea en vez de todo corrido."""
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_estado_cuenta
+    panel = _PanelEstadoCuentaCargos(conn)
+    qtbot.addWidget(panel)
     assert len(panel.etiquetas_resumen) == 4
 
 
@@ -1605,9 +1584,8 @@ def test_solapa_estado_cuenta_cargos_muestra_saldos_y_tabla_igual_a_registro(qtb
         (id_profesional, periodo_actual(conn)),
     )
     conn.commit()
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_estado_cuenta
+    panel = _PanelEstadoCuentaCargos(conn)
+    qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
 
     assert panel.etiquetas_resumen[0].text() == (
@@ -1627,7 +1605,7 @@ def test_solapa_estado_cuenta_cargos_muestra_saldos_y_tabla_igual_a_registro(qtb
 
 
 def test_solapa_estado_cuenta_cargos_combo_es_buscable_por_codigo_o_nombre(qtbot, conn):
-    pantalla = PantallaCargosEspeciales(conn)
-    qtbot.addWidget(pantalla)
-    completador = pantalla.panel_estado_cuenta.combo_profesional.completer()
+    panel = _PanelEstadoCuentaCargos(conn)
+    qtbot.addWidget(panel)
+    completador = panel.combo_profesional.completer()
     assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)

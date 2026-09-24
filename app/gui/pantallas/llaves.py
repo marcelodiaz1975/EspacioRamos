@@ -22,7 +22,17 @@ los diez botones de las tres secciones (sin tablas) y una columna
 derecha con las tres tablas apiladas una arriba de la otra — pedido
 explícito de la clienta. "Deshacer último movimiento" (que existía
 hasta esta revisión, cubría cualquier acción del formulario) se sacó
-de la pantalla a pedido de la clienta al reordenar los botones."""
+de la pantalla a pedido de la clienta al reordenar los botones.
+
+Reordenamiento de formularios (Excel de la clienta): esta pantalla deja
+de ser un formulario propio del menú y pasa a ser la primera solapa
+("Movimientos y tenencias de llaves") de "Llaves y otros conceptos",
+junto a las dos solapas de Cargos especiales — mismo criterio ya usado
+en el resto de la reorganización: `PantallaLlaves` pasa a `_PanelLlaves`
+(solapa desnuda, `objectName="panelSolapa"` en el widget de más afuera,
+sin título ni `QTabWidget` propio; conserva su `QScrollArea` interno,
+mismo criterio que `_PanelGestorArchivos`/`_PanelCampos` para pantallas
+que ya scrolleaban así)."""
 from __future__ import annotations
 
 import sqlite3
@@ -47,7 +57,6 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -127,7 +136,7 @@ def _fecha_edit(valor_iso: str | None = None) -> QDateEdit:
     return campo
 
 
-class PantallaLlaves(QWidget):
+class _PanelLlaves(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
@@ -179,16 +188,14 @@ class PantallaLlaves(QWidget):
         return widget
 
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
-
-        titulo = QLabel("Llaves".upper())
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        solapas = QTabWidget()
-        panel_solapa = QWidget()
-        panel_solapa.setObjectName("panelSolapa")
-        grid = QGridLayout(panel_solapa)
+        self.setObjectName("panelSolapa")
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        contenido = QWidget()
+        grid = QGridLayout(contenido)
         grid.setColumnStretch(1, 1)
         grid.setRowStretch(2, 1)  # Movimientos se queda con el resto del alto disponible
 
@@ -321,13 +328,8 @@ class PantallaLlaves(QWidget):
             2, 0, Qt.AlignmentFlag.AlignTop,
         )
 
-        scroll = QScrollArea()
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(panel_solapa)
-        solapas.addTab(scroll, "Llaves")
-        solapas.tabBar().setDrawBase(False)
-        layout.addWidget(solapas, stretch=1)
+        scroll.setWidget(contenido)
+        layout_externo.addWidget(scroll)
 
         self._foco = instalar_enter_avanza_foco([
             self.campo_observacion_tipo, self.boton_nuevo_tipo, self.boton_editar_tipo, self.boton_eliminar_tipo,

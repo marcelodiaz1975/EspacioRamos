@@ -2122,6 +2122,55 @@ que Liquidaciones/Base datos del espacio. No hizo falta tocar ningún
 test existente: ninguno hacía `tabText`/`pestanas.count()` sobre
 `PantallaRegistroAusencias` antes de este merge.
 
+### Llaves y otros conceptos (formulario nuevo, 3 solapas)
+
+Sexto merge de "Operativa diaria": agrupa "Llaves" (antes pantalla propia
+del menú, un único formulario con tres tablas apiladas) con las dos
+solapas que ya tenía "Cargos especiales" (también pantalla propia del
+menú) — ambas relacionadas porque un movimiento de llave (asignación/
+devolución con depósito) genera automáticamente un cargo especial. Tres
+solapas: "Movimientos y tenencias de llaves" (la vieja Llaves), "Registro
+de cargos especiales" y "Estado de cuenta" (sin cambios, mismo orden que
+ya tenían dentro de Cargos especiales).
+
+Mecánicamente el mismo criterio que el resto de la reorganización, con
+una variante nueva: acá NO se sumó ningún parámetro `anidado` (esta
+pantalla no usa `PantallaCRUD`) — en su lugar, cada pieza se convirtió a
+mano:
+
+- `app/gui/pantallas/llaves.py`: `PantallaLlaves` pasa a `_PanelLlaves`
+  (solapa desnuda, `objectName="panelSolapa"` en el widget de más
+  afuera, sin título ni `QTabWidget` propio) — conserva su `QScrollArea`
+  interno, mismo criterio que `_PanelGestorArchivos`/`_PanelCampos` para
+  pantallas que ya scrolleaban así (el contenido de las tres tablas
+  apiladas no entra siempre en el alto disponible).
+- `app/gui/pantallas/novedades.py`: se borra el contenedor
+  `PantallaCargosEspeciales` (título + `QTabWidget` propio) — sus dos
+  paneles internos, `_PanelCargosEspeciales`/`_PanelEstadoCuentaCargos`,
+  ya eran clases bare desde que se armó esa pantalla (mismo caso que
+  `_PanelAumentos`/`_PanelEsquemaDescuentos` en su momento), así que no
+  necesitaron ningún cambio propio — se importan cruzadas tal cual.
+- `app/gui/pantallas/llaves_y_otros_conceptos.py` (nuevo): 
+  `PantallaLlavesYOtrosConceptos`, mismo patrón que el resto — título
+  Nivel 1 fijo + `QTabWidget` con las tres solapas importadas cruzadas.
+
+`gui_main.py`: se sacan las `Seccion` "Llaves" y "Cargos especiales"; se
+suma una sola "Llaves y otros conceptos".
+
+Tests: `test_gui_llaves.py` renombra la clase (`_PanelLlaves`) en sus ~38
+usos y reemplaza el único test estructural que asumía un `QTabWidget`
+propio de una sola pestaña "Llaves" por uno de `objectName="panelSolapa"`
+(mismo criterio que Bloques rígidos/Importación). `test_gui_novedades.py`
+(que ya cubría Cargos especiales, al vivir en el mismo archivo fuente)
+reemplaza sus ~26 instanciaciones de `PantallaCargosEspeciales(conn)` por
+`_PanelCargosEspeciales(conn)`/`_PanelEstadoCuentaCargos(conn)` directo,
+sacando la indirección `pantalla.panel`/`pantalla.panel_estado_cuenta`; el
+test que verificaba el orden de las dos solapas dentro del contenedor
+viejo se saca de acá (perdió sentido, ya no hay contenedor) y su
+verificación pasa al nuevo `test_gui_llaves_y_otros_conceptos.py`, que
+cubre el formulario compuesto completo (título, orden de las tres
+solapas, tipo/objectName de cada panel).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

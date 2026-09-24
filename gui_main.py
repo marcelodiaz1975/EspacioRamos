@@ -18,8 +18,8 @@ from app.gui.pantallas.disponibilidad import PantallaDisponibilidad
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla_y_mensajeria import PantallaGrillaYMensajeria
 from app.gui.pantallas.liquidacion import ProcesoLiquidacion
-from app.gui.pantallas.llaves import PantallaLlaves
-from app.gui.pantallas.novedades import PantallaCargosEspeciales, PantallaRegistroAusencias
+from app.gui.pantallas.llaves_y_otros_conceptos import PantallaLlavesYOtrosConceptos
+from app.gui.pantallas.novedades import PantallaRegistroAusencias
 from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.pantallas.panel_control import PanelControl
 from app.gui.pantallas.placas import PantallaPlacas
@@ -77,9 +77,11 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "laborables, cargados a mano.",
         ),
         Seccion(
-            "Llaves", lambda conn: PantallaLlaves(conn), categoria="Principal",
-            ayuda="Entrega y devolución de llaves con depósito, y definición de a qué edificio/unidad "
-            "da acceso cada llave (panel Accesos).",
+            "Llaves y otros conceptos", lambda conn: PantallaLlavesYOtrosConceptos(conn), categoria="Principal",
+            ayuda="Solapa Movimientos y tenencias de llaves: entrega y devolución de llaves con depósito, "
+            "y definición de a qué edificio/unidad da acceso cada llave. Solapas Registro de cargos "
+            "especiales/Estado de cuenta: cargos extraordinarios (ajustes puntuales) que se suman a la "
+            "liquidación de un profesional, y su historial.",
         ),
         Seccion(
             "Placas", lambda conn: PantallaPlacas(conn), categoria="Principal",
@@ -102,11 +104,6 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             ayuda="Solapas Vacaciones/Licencias/Ausencias por motivos varios: plazos por inactividad de un "
             "profesional cargados manualmente, con su vista previa de la grilla operativa. Solapa Tipos "
             "de licencia: catálogo de tipos de licencia disponibles para cargarle a un profesional.",
-        ),
-        Seccion(
-            "Cargos especiales", lambda conn: PantallaCargosEspeciales(conn), categoria="Principal",
-            ayuda="Cargos extraordinarios (ajustes puntuales) que se suman a la liquidación de un profesional, "
-            "y el estado de cuenta con su historial de cargos especiales.",
         ),
         Seccion(
             "Pagos", lambda conn: PantallaPagos(conn), categoria="Principal",

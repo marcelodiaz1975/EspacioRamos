@@ -1,10 +1,10 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QFrame, QLabel, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QDialog, QFrame, QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.llaves import (
-    PantallaLlaves,
+    _PanelLlaves,
     _DialogoAcceso,
     _DialogoAsignar,
     _DialogoDevolucion,
@@ -42,22 +42,12 @@ def _crear_tipo_con_copia(conn, tipo="Unidad", valor_deposito_actual=3000):
     return id_llave
 
 
-def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
-    """Preview de la jerarquía de títulos definida en Lista de espera,
-    aplicada acá antes de la revisión uno por uno de esta pantalla."""
-    pantalla = PantallaLlaves(conn)
-    qtbot.addWidget(pantalla)
-    titulo = pantalla.findChild(QLabel, "tituloPantalla")
-    assert titulo is not None
-    assert titulo.text() == "LLAVES"
-
-
 def test_solo_asignar_es_primario_resto_secundarios(qtbot, conn):
     """"Asignar copia a profesional" es la única acción más definitiva
     de la pantalla (jerarquía 1); el resto, incluido "Nuevo tipo de
     llave", pasa a botonSecundario — pedido explícito de la clienta al
     revisar esta pantalla."""
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.boton_asignar.objectName() == "botonPrimario"
     for boton in (
@@ -71,7 +61,7 @@ def test_solo_asignar_es_primario_resto_secundarios(qtbot, conn):
 def test_columna_profesional_de_movimientos_tiene_ancho_minimo(qtbot, conn):
     _crear_tipo_con_copia(conn)
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     assert pantalla.tabla_movimientos.columnWidth(2) >= 180
@@ -80,7 +70,7 @@ def test_columna_profesional_de_movimientos_tiene_ancho_minimo(qtbot, conn):
 def test_columnas_de_tipos_son_mas_anchas_que_antes(qtbot, conn):
     """Pedido explícito de la clienta: más ancho para las columnas de
     las dos primeras tablas (Tipos y Accesos)."""
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     anchos_anteriores = [200, 70, 120, 90, 95, 65]
     for columna, ancho_anterior in enumerate(anchos_anteriores):
@@ -93,7 +83,7 @@ def test_columnas_de_accesos_tienen_el_doble_del_ancho_con_padding(qtbot, conn, 
     crear_llave(conn)
     _crear_edificio_con_unidad(conn)
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     monkeypatch.setattr(_DialogoAcceso, "exec", lambda self: QDialog.DialogCode.Accepted)
@@ -112,7 +102,7 @@ def test_columnas_de_deposito_cobrado_y_reintegrado_tienen_el_mismo_ancho(qtbot,
     ver completo el título más largo ("Depósito reintegrado")."""
     _crear_tipo_con_copia(conn)
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     ancho_cobrado = pantalla.tabla_movimientos.columnWidth(5)
@@ -144,7 +134,7 @@ def _crear_edificio_con_unidad(conn, nombre="Ramos 1", departamento="1ro A"):
 
 
 def test_tipo_combo_lee_valores_de_listas_editables(qtbot, conn):
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     dialogo = _DialogoTipo(conn, pantalla)
     qtbot.addWidget(dialogo)
@@ -153,7 +143,7 @@ def test_tipo_combo_lee_valores_de_listas_editables(qtbot, conn):
 
 
 def test_nuevo_tipo_arma_nombre_automatico(qtbot, conn, monkeypatch):
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
 
     def _crear_edificio(self, *a, **k):
@@ -174,7 +164,7 @@ def test_tipos_ordenados_alfabeticamente_por_defecto(qtbot, conn):
     crear_llave(conn, tipo="Unidad")
     crear_llave(conn, tipo="Edificio")
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
 
     nombres = [pantalla.tabla_tipos.item(f, 0).text() for f in range(pantalla.tabla_tipos.rowCount())]
@@ -185,7 +175,7 @@ def test_seleccionar_tipo_muestra_asignadas_disponibles_y_total(qtbot, conn):
     id_llave = _crear_tipo_con_copia(conn)
     ingresar_copias(conn, id_llave=id_llave, cantidad=1)
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
 
@@ -196,7 +186,7 @@ def test_seleccionar_tipo_muestra_asignadas_disponibles_y_total(qtbot, conn):
 
 def test_editar_tipo_bloquea_combo_y_no_cambia_nombre(qtbot, conn, monkeypatch):
     id_llave = _crear_tipo_con_copia(conn, tipo="Unidad")
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
 
@@ -218,7 +208,7 @@ def test_editar_tipo_bloquea_combo_y_no_cambia_nombre(qtbot, conn, monkeypatch):
 def test_eliminar_tipo_sin_dependientes(qtbot, conn):
     crear_llave(conn)
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     pantalla._eliminar_tipo()
@@ -227,7 +217,7 @@ def test_eliminar_tipo_sin_dependientes(qtbot, conn):
 
 def test_eliminar_tipo_con_copias_no_se_puede(qtbot, conn):
     _crear_tipo_con_copia(conn)
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     pantalla._eliminar_tipo()
@@ -237,7 +227,7 @@ def test_eliminar_tipo_con_copias_no_se_puede(qtbot, conn):
 def test_observacion_tipo_se_guarda_al_perder_foco(qtbot, conn):
     id_llave = crear_llave(conn)
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
 
@@ -254,7 +244,7 @@ def test_agregar_acceso_completa_localidad_desde_edificio(qtbot, conn, monkeypat
     id_caba = conn.execute("SELECT IdLocalidad FROM Localidad WHERE Localidad = 'CABA'").fetchone()["IdLocalidad"]
     conn.execute("INSERT INTO Edificio (Nombre, IdLocalidad) VALUES ('Ramos 1', ?)", (id_caba,))
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
 
@@ -271,7 +261,7 @@ def test_eliminar_acceso(qtbot, conn, monkeypatch):
     crear_llave(conn)
     conn.commit()
     _crear_edificio_con_unidad(conn)
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     monkeypatch.setattr(_DialogoAcceso, "exec", lambda self: QDialog.DialogCode.Accepted)
@@ -286,7 +276,7 @@ def test_eliminar_acceso(qtbot, conn, monkeypatch):
 def test_ingresar_copia_actualiza_total_y_disponibles(qtbot, conn, monkeypatch):
     crear_llave(conn)
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
 
@@ -304,7 +294,7 @@ def test_ingresar_copia_actualiza_total_y_disponibles(qtbot, conn, monkeypatch):
 def test_asignar_sin_disponibles_avisa_y_no_hace_nada(qtbot, conn):
     crear_llave(conn)
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     pantalla._asignar()  # no debe lanzar excepción
@@ -315,7 +305,7 @@ def test_asignar_crea_movimiento_y_cargo_especial(qtbot, conn, monkeypatch):
     id_llave = _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
     id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
 
@@ -337,7 +327,7 @@ def test_asignar_crea_movimiento_y_cargo_especial(qtbot, conn, monkeypatch):
 
 def test_registrar_devolucion_deshabilitado_sin_asignacion_abierta(qtbot, conn):
     _crear_tipo_con_copia(conn)
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     assert pantalla.tabla_movimientos.rowCount() == 1  # el Ingreso, sin ninguna Asignación todavía
@@ -351,7 +341,7 @@ def test_perdida_habilitado_con_stock_disponible_sin_asignacion(qtbot, conn):
     de baja stock sin asignar — Registrar devolución no tiene sentido en
     ese caso y sigue deshabilitado."""
     _crear_tipo_con_copia(conn)
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
 
@@ -362,7 +352,7 @@ def test_perdida_habilitado_con_stock_disponible_sin_asignacion(qtbot, conn):
 def test_perdida_deshabilitado_sin_seleccion(qtbot, conn):
     crear_llave(conn)  # sin stock ingresado
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     assert pantalla.boton_perdida.isEnabled() is False
@@ -373,7 +363,7 @@ def test_registrar_perdida_de_stock_sin_asignar_via_boton(qtbot, conn, monkeypat
     id_llave = _crear_tipo_con_copia(conn)
     ingresar_copias(conn, id_llave=id_llave, cantidad=1)
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     assert pantalla.tabla_tipos.item(0, 4).text() == "2"  # Disponibles
@@ -394,7 +384,7 @@ def test_flujo_completo_asignar_y_devolver(qtbot, conn, monkeypatch):
     _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
     id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
 
@@ -424,7 +414,7 @@ def test_flujo_perdida_no_reintegra(qtbot, conn, monkeypatch):
     _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
     id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
 
@@ -454,23 +444,20 @@ def test_flujo_perdida_no_reintegra(qtbot, conn, monkeypatch):
 # ---------------------------------------- formato solapa (revisión "uno por uno")
 
 
-def test_tiene_formato_solapa_con_una_pestana_llaves(qtbot, conn):
-    pantalla = PantallaLlaves(conn)
+def test_usa_el_fondo_claro_de_la_solapa(qtbot, conn):
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
-    solapas = pantalla.findChild(QTabWidget)
-    assert solapas is not None
-    assert solapas.count() == 1
-    assert solapas.tabText(0) == "Llaves"
+    assert pantalla.objectName() == "panelSolapa"
 
 
 def test_no_queda_boton_deshacer(qtbot, conn):
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     assert not hasattr(pantalla, "boton_deshacer")
 
 
 def test_etiquetas_de_los_botones(qtbot, conn):
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.boton_nuevo_tipo.text() == "Nuevo tipo de llave"
     assert pantalla.boton_editar_tipo.text() == "Editar tipo de llave"
@@ -484,7 +471,7 @@ def test_etiquetas_de_los_botones(qtbot, conn):
 
 
 def test_orden_de_foco_sigue_el_orden_visual_de_los_botones(qtbot, conn):
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     assert pantalla._foco._orden == [
         pantalla.campo_observacion_tipo, pantalla.boton_nuevo_tipo, pantalla.boton_editar_tipo,
@@ -495,7 +482,7 @@ def test_orden_de_foco_sigue_el_orden_visual_de_los_botones(qtbot, conn):
 
 
 def test_todos_los_botones_comparten_el_mismo_ancho_fijo(qtbot, conn):
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     anchos = {
         pantalla.boton_nuevo_tipo.width(), pantalla.boton_editar_tipo.width(), pantalla.boton_eliminar_tipo.width(),
@@ -507,7 +494,7 @@ def test_todos_los_botones_comparten_el_mismo_ancho_fijo(qtbot, conn):
 
 
 def test_tabla_tipos_y_accesos_tienen_alto_fijo_movimientos_no(qtbot, conn):
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla_tipos.maximumHeight() == pantalla.tabla_tipos.minimumHeight()
     assert pantalla.tabla_accesos.maximumHeight() == pantalla.tabla_accesos.minimumHeight()
@@ -523,7 +510,7 @@ def test_titulos_de_seccion_mismo_tamano_normal_pero_en_negrita(qtbot, conn):
     reales, van con el mismo tamaño que el texto normal (subtituloCampo,
     no subtituloSeccion) pero en negrita — a diferencia del resto de los
     `subtituloCampo` del sistema, que van sin negrita."""
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     textos = {"Tipos de llaves", "Accesos habilitados con la llave", "Movimientos de llaves"}
     etiquetas = [
@@ -536,7 +523,7 @@ def test_titulos_de_seccion_mismo_tamano_normal_pero_en_negrita(qtbot, conn):
 
 
 def test_no_quedan_lineas_divisorias_entre_grupos_de_botones(qtbot, conn):
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     lineas = [f for f in pantalla.findChildren(QFrame) if f.frameShape() == QFrame.Shape.HLine]
     assert lineas == []
@@ -548,7 +535,7 @@ def test_cada_grupo_de_botones_arranca_a_la_altura_del_primer_registro(qtbot, co
     misma altura que el comienzo de la primera fila de datos de su
     tabla correspondiente (después del encabezado), no a la altura del
     título."""
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1300, 900)
     pantalla.show()
@@ -570,7 +557,7 @@ def test_tabla_tipos_escrolea_internamente_con_mas_filas_de_las_que_entran(qtbot
     for _ in range(10):
         crear_llave(conn, tipo="Unidad")
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1300, 900)
     pantalla.show()
@@ -588,7 +575,7 @@ def test_tabla_accesos_escrolea_internamente_con_mas_filas_de_las_que_entran(qtb
             "INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, ?)", (id_edificio, f"Depto {i}")
         )
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1300, 900)
     pantalla.show()
@@ -612,7 +599,7 @@ def test_tabla_movimientos_escrolea_internamente_con_mas_filas_de_las_que_entran
     for _ in range(20):
         ingresar_copias(conn, id_llave=id_llave, cantidad=1)
     conn.commit()
-    pantalla = PantallaLlaves(conn)
+    pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1300, 700)
     pantalla.show()
