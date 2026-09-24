@@ -2405,6 +2405,42 @@ menú ya reordenado (Sistema/Operativa diaria):
   referencia a la tarjeta antes de un segundo `actualizar()` y confirma
   `tarjeta_vieja.isHidden()` después.
 
+### Separadores de categoría del menú en negrita con fondo azul oscuro; alerta de deuda regular mira el mes en curso
+
+Dos ajustes puntuales más, pedidos por la clienta al revisar el menú ya
+reordenado:
+
+- **Separadores "— SISTEMA —"/"— OPERATIVA DIARIA —"**: quedaban con el
+  mismo fondo azul (`COLOR_NIVEL_1`) y peso normal que cualquier ítem
+  del menú, sin distinguirse como encabezados de grupo. Como estos
+  ítems ya se arman con `Qt.ItemFlag.NoItemFlags` (deshabilitados, no
+  seleccionables — `app/gui/main_window.py`), alcanzó con sumar
+  `QListWidget#navegacion::item:disabled` en `estilos.py` (negrita +
+  `COLOR_NIVEL_1_OSCURO`, el mismo azul más oscuro que ya usan los
+  encabezados de columna de tabla) — no hizo falta tocar el código que
+  arma el menú.
+- **Alerta "Deuda mes anterior — profesionales regulares" (ahora "Deuda
+  mes en curso...")**: la clienta aclaró que esta alerta puntual tiene
+  que mirar el saldo de lo liquidado en el mes EN CURSO, no el
+  arrastrado de meses anteriores. `_deuda_regulares_alerta` (`app.
+  negocio.panel_control`) pasa a filtrar por `Profesional.
+  SaldoCuentaActual` (lo que `avance_mes.avanzar_mes` resetea a 0 al
+  arrancar un mes, `liquidaciones.emitir_liquidacion` va sumando y
+  `pagos.registrar_pago` va restando durante el mes) en vez de
+  `SaldoCuentaAnterior` — sin tocar `_deuda_regulares` (la función base,
+  sigue con `SaldoCuentaAnterior`, sigue alimentando sin cambios el
+  cuadrito "Profesionales: con saldo fuera de tolerancia"), aclarado
+  explícitamente por la clienta como algo puntual "en esta sección al
+  menos". El título de la alerta pasa de "Deuda mes anterior" a "Deuda
+  mes en curso" (quedaba engañoso mantener el nombre viejo mostrando el
+  dato nuevo) y la etiqueta de cada fila pasa de "saldo anterior" a
+  "saldo actual" (mismo nombre que usan las solapas "Estado de cuenta"
+  de Pagos/Liquidaciones/Cargos especiales para `SaldoCuentaActual`,
+  vía `app.gui.widgets.resumen_saldo.fmt_dato`). La alerta de deuda de
+  profesionales de reserva aislada ("Deuda mes anterior — profesionales
+  de reserva aislada") no se tocó — sigue siendo sobre
+  `SaldoCuentaAnterior`, no fue parte de este pedido.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

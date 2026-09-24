@@ -18,12 +18,14 @@ def _textos_visibles(widget) -> list[str]:
 
 def _crear_profesional_regular_con_deuda(conn, apellido: str, saldo: float) -> int:
     """La alerta de deuda regular (ver `panel_control._deuda_regulares_
-    alerta`) exige, además del saldo, una `ReservaRegular` vigente hoy."""
+    alerta`) exige, además del saldo del mes EN CURSO (`SaldoCuentaActual`
+    — no el arrastrado de meses anteriores), una `ReservaRegular` vigente
+    hoy."""
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
     id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
     id_profesional = obtener_repositorio(conn, "Profesional").crear(
-        CategoriaProfesional="R", Apellido=apellido, SaldoCuentaAnterior=saldo,
+        CategoriaProfesional="R", Apellido=apellido, SaldoCuentaActual=saldo,
     )
     obtener_repositorio(conn, "ReservaRegular").crear(
         IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",

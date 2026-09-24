@@ -72,14 +72,24 @@ def _reserva_regular_activa(conn: sqlite3.Connection, id_profesional: int, hoy: 
 
 
 def _deuda_regulares_alerta(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Primer alerta del panel (pedido de la clienta, repaso de
-    pendientes abiertos): a diferencia de `_deuda_regulares` (que
-    también alimenta el cuadrito "Profesionales", sin cambios), acá
-    además hace falta que el profesional reserve regular a este momento
-    (no cualquier categoría R con saldo, aunque hoy no tenga ninguna
-    reserva vigente) — y quedan ordenados por código."""
+    """Primer alerta del panel (pedido de la clienta, dos rondas de
+    ajuste sobre esta misma alerta). A diferencia de `_deuda_regulares`
+    (saldo ANTERIOR — arrastrado de meses previos —, que sigue
+    alimentando el cuadrito "Profesionales" sin cambios), esta alerta
+    puntual mira `SaldoCuentaActual`: lo que se va liquidando durante EL
+    MES EN CURSO (`avance_mes.avanzar_mes` lo resetea a 0 al arrancar un
+    mes nuevo; `liquidaciones.emitir_liquidacion` le suma lo generado;
+    `pagos.registrar_pago` le resta lo cobrado imputado a este período)
+    — no el saldo arrastrado de meses anteriores, aclarado explícitamente
+    por la clienta para esta sección. Además exige que el profesional
+    reserve regular a este momento, y queda ordenada por código."""
+    cfg = conn.execute("SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
     hoy = fecha_actual(conn).isoformat()
-    filas = [p for p in _deuda_regulares(conn) if _reserva_regular_activa(conn, p["IdProfesional"], hoy)]
+    filas = [
+        p for p in obtener_repositorio(conn, "Profesional").listar(CategoriaProfesional="R")
+        if (p["SaldoCuentaActual"] or 0.0) > tolerancia and _reserva_regular_activa(conn, p["IdProfesional"], hoy)
+    ]
     filas.sort(key=lambda p: p["IdCodigo"] or "")
     return filas
 

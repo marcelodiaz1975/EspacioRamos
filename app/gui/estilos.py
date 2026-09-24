@@ -142,6 +142,9 @@ QListWidget#navegacion::item:selected {{
     background-color: {COLOR_DIA_GRILLA}; color: {COLOR_TEXTO_CLARO}; font-weight: bold;
 }}
 QListWidget#navegacion::item:hover {{ background-color: {t['hover_nav']}; }}
+QListWidget#navegacion::item:disabled {{
+    background-color: {COLOR_NIVEL_1_OSCURO}; font-weight: bold;
+}}
 
 QLabel#tituloPantalla {{
     font-size: 18px; font-weight: bold; font-style: italic; color: {t['texto']};
