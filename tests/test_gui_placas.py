@@ -1,10 +1,10 @@
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QScrollArea, QTabWidget
+from PySide6.QtWidgets import QDialog, QMessageBox, QScrollArea
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.placas import PantallaPlacas, _DialogoPlaca
+from app.gui.pantallas.placas import _PanelPlacasOperativas, _DialogoPlaca
 from app.negocio.placas import asignar_placa
 from app.repositorio.registro import obtener_repositorio
 
@@ -47,33 +47,15 @@ def _crear_profesional(conn, apellido="Lo Veci", nombre_pila="Virginia", tratami
     )
 
 
-def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
-    pantalla = PantallaPlacas(conn)
-    qtbot.addWidget(pantalla)
-    titulo = pantalla.findChild(QLabel, "tituloPantalla")
-    assert titulo is not None
-    assert titulo.text() == "PLACAS"
-
-
-def test_tiene_dos_solapas(qtbot, conn):
-    pantalla = PantallaPlacas(conn)
-    qtbot.addWidget(pantalla)
-    solapas = pantalla.findChild(QTabWidget)
-    assert solapas.count() == 2
-    assert solapas.tabText(0) == "Buscar y asignar placas"
-    assert solapas.tabText(1) == "Imprimir placas"
-
-
 def test_paneles_de_placas_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
-    solapas = pantalla.findChild(QTabWidget)
-    assert solapas.widget(0).objectName() == "panelSolapa"
-    assert solapas.widget(1).objectName() == "panelSolapa"
+    assert pantalla.panel_buscar.objectName() == "panelSolapa"
+    assert pantalla.panel_imprimir.objectName() == "panelSolapa"
 
 
 def test_columnas_de_la_tabla_arrancan_con_localidad(qtbot, conn):
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     encabezados = [pantalla.tabla.horizontalHeaderItem(i).text() for i in range(pantalla.tabla.columnCount())]
     assert encabezados == [
@@ -84,11 +66,11 @@ def test_columnas_de_la_tabla_arrancan_con_localidad(qtbot, conn):
 def test_columnas_de_la_tabla_se_reparten_el_ancho_por_igual(qtbot, conn):
     """Pedido de la clienta: en vez de ajustar cada columna a su
     contenido, las 7 se reparten el ancho disponible por igual."""
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
-    pantalla.resize(1400, 700)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
+    pantalla.panel_buscar.resize(1400, 700)
+    pantalla.panel_buscar.show()
+    qtbot.waitExposed(pantalla.panel_buscar)
     anchos = [pantalla.tabla.columnWidth(i) for i in range(pantalla.tabla.columnCount())]
     assert max(anchos) - min(anchos) <= 2  # redondeo de Qt al repartir
 
@@ -97,29 +79,28 @@ def test_posicion_queda_centrada(qtbot, conn):
     _, id_unidad = _crear_unidad(conn)
     id_profesional = _crear_profesional(conn)
     asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     alineacion = pantalla.tabla.item(0, 3).textAlignment()
     assert alineacion & Qt.AlignmentFlag.AlignHCenter
 
 
 def test_panel_de_filtros_queda_a_la_izquierda_de_la_tabla(qtbot, conn):
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
-    pantalla.resize(1200, 700)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
+    pantalla.panel_buscar.resize(1200, 700)
+    pantalla.panel_buscar.show()
+    qtbot.waitExposed(pantalla.panel_buscar)
     assert pantalla.combo_profesional_filtro.x() < pantalla.tabla.x()
     assert pantalla.combo_profesional_filtro.parentWidget().width() >= 300
 
 
 def test_botones_de_impresion_son_del_mismo_tamano_y_agregar_queda_centrado(qtbot, conn):
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
-    pantalla.resize(1400, 700)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
-    pantalla.findChild(QTabWidget).setCurrentIndex(1)
+    pantalla.panel_imprimir.resize(1400, 700)
+    pantalla.panel_imprimir.show()
+    qtbot.waitExposed(pantalla.panel_imprimir)
     assert pantalla.boton_agregar_impresion.width() == pantalla.boton_quitar_impresion.width()
     assert pantalla.boton_agregar_impresion.width() == pantalla.boton_generar_pdf.width()
 
@@ -129,12 +110,11 @@ def test_botones_de_impresion_son_del_mismo_tamano_y_agregar_queda_centrado(qtbo
 
 
 def test_botones_quitar_y_generar_quedan_a_la_derecha(qtbot, conn):
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
-    pantalla.resize(1400, 700)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
-    pantalla.findChild(QTabWidget).setCurrentIndex(1)
+    pantalla.panel_imprimir.resize(1400, 700)
+    pantalla.panel_imprimir.show()
+    qtbot.waitExposed(pantalla.panel_imprimir)
     fin_lista = pantalla.lista_impresion.x() + pantalla.lista_impresion.width()
     fin_generar = pantalla.boton_generar_pdf.x() + pantalla.boton_generar_pdf.width()
     assert abs(fin_generar - fin_lista) <= 2
@@ -150,7 +130,7 @@ def test_orden_por_defecto_es_localidad_edificio_unidad_posicion(qtbot, conn):
     asignar_placa(conn, id_unidad=id_unidad_a, posicion=1, id_profesional=id_profesional)
     asignar_placa(conn, id_unidad=id_unidad_haedo, posicion=1, id_profesional=id_profesional)
 
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
 
     localidades = [pantalla.tabla.item(f, 0).text() for f in range(pantalla.tabla.rowCount())]
@@ -169,7 +149,7 @@ def test_orden_por_defecto_desempata_por_posicion(qtbot, conn):
     asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
     asignar_placa(conn, id_unidad=id_unidad, posicion=2, id_profesional=id_profesional)
 
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
 
     posiciones = [pantalla.tabla.item(f, 3).text() for f in range(pantalla.tabla.rowCount())]
@@ -183,7 +163,7 @@ def test_click_en_encabezado_ordena_por_esa_columna(qtbot, conn):
     asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_z)
     asignar_placa(conn, id_unidad=id_unidad, posicion=2, id_profesional=id_a)
 
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
 
     pantalla.tabla.horizontalHeader().sectionClicked.emit(4)  # columna Profesional
@@ -200,14 +180,14 @@ def test_reingresar_a_la_pantalla_resetea_filtros(qtbot, conn):
     asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_1)
     asignar_placa(conn, id_unidad=id_unidad, posicion=2, id_profesional=id_2)
 
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     indice = pantalla.combo_profesional_filtro.findData(id_1)
     pantalla.combo_profesional_filtro.setCurrentIndex(indice)
     assert pantalla.tabla.rowCount() == 1
 
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
+    pantalla.panel_buscar.show()
+    qtbot.waitExposed(pantalla.panel_buscar)
 
     assert pantalla.combo_profesional_filtro.currentIndex() == 0
     assert pantalla.tabla.rowCount() == 2
@@ -218,7 +198,7 @@ def test_tabla_arranca_con_todas_las_placas(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
 
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
 
     assert pantalla.tabla.rowCount() == 1
@@ -232,7 +212,7 @@ def test_filtro_por_unidad_reduce_la_tabla(qtbot, conn):
     asignar_placa(conn, id_unidad=id_unidad_1, posicion=1, id_profesional=id_profesional)
     asignar_placa(conn, id_unidad=id_unidad_2, posicion=1, id_profesional=id_profesional)
 
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.rowCount() == 2
 
@@ -253,7 +233,7 @@ def test_filtro_por_profesional_reduce_la_tabla(qtbot, conn):
     asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_1)
     asignar_placa(conn, id_unidad=id_unidad, posicion=2, id_profesional=id_2)
 
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.rowCount() == 2
 
@@ -264,7 +244,7 @@ def test_filtro_por_profesional_reduce_la_tabla(qtbot, conn):
 
 
 def test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar(qtbot, conn):
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.boton_asignar_nueva.text() == "Asignar posición placa nueva"
     assert pantalla.boton_reasignar.text() == "Reasignar posición placa existente"
@@ -277,7 +257,7 @@ def test_columnas_unidad_y_personalizada_quedan_centradas(qtbot, conn):
     _, id_unidad = _crear_unidad(conn)
     id_profesional = _crear_profesional(conn)
     asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.tabla.item(0, 2).textAlignment() & Qt.AlignmentFlag.AlignHCenter
     assert pantalla.tabla.item(0, 6).textAlignment() & Qt.AlignmentFlag.AlignHCenter
@@ -287,7 +267,7 @@ def test_botones_reasignar_y_liberar_arrancan_deshabilitados(qtbot, conn):
     _, id_unidad = _crear_unidad(conn)
     id_profesional = _crear_profesional(conn)
     asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.boton_reasignar.isEnabled() is False
     assert pantalla.boton_liberar.isEnabled() is False
@@ -300,7 +280,7 @@ def test_botones_reasignar_y_liberar_arrancan_deshabilitados(qtbot, conn):
 def test_asignar_placa_nueva_crea_registro(qtbot, conn, monkeypatch):
     _, id_unidad = _crear_unidad(conn)
     id_profesional = _crear_profesional(conn)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
 
     def _aceptar(self, *a, **k):
@@ -322,7 +302,7 @@ def test_reasignar_pisa_el_mismo_registro(qtbot, conn, monkeypatch):
     id_viejo = _crear_profesional(conn, apellido="Viejo")
     id_nuevo = _crear_profesional(conn, apellido="Nuevo")
     id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_viejo)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla.selectRow(0)
 
@@ -343,7 +323,7 @@ def test_liberar_posicion_borra_el_registro(qtbot, conn):
     _, id_unidad = _crear_unidad(conn)
     id_profesional = _crear_profesional(conn)
     asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla.selectRow(0)
 
@@ -392,10 +372,10 @@ def test_previa_usa_la_misma_fuente_fija_para_texto_corto_y_largo(qtbot):
     grande Lucía Franco. La fuente tendría que ser igual en tamaño, ya
     sea en una linea o en dos lineas"): ahora el tamaño de fuente de la
     vista previa es FIJO, no depende del largo del texto."""
-    from app.gui.pantallas.placas import PantallaPlacas, _PREVIA_FUENTE_PX
+    from app.gui.pantallas.placas import _PanelPlacasOperativas, _PREVIA_FUENTE_PX
 
-    corta = PantallaPlacas._armar_placa_previa("Lic. Lucía Franco")
-    larga = PantallaPlacas._armar_placa_previa('Lic. Silvina Pugliese\nEquipo "Sol terapias"')
+    corta = _PanelPlacasOperativas._armar_placa_previa("Lic. Lucía Franco")
+    larga = _PanelPlacasOperativas._armar_placa_previa('Lic. Silvina Pugliese\nEquipo "Sol terapias"')
     qtbot.addWidget(corta)
     qtbot.addWidget(larga)
     assert corta.font().pixelSize() == _PREVIA_FUENTE_PX
@@ -435,10 +415,10 @@ def test_previa_placa_replica_el_corte_de_linea_del_sistema_fisico_de_la_clienta
     envuelve el texto a mano (`_envolver_lineas_previa`) con la misma
     métrica que calibró el tamaño de fuente, así que la placa se
     comporta igual que la calibración."""
-    from app.gui.pantallas.placas import PantallaPlacas
+    from app.gui.pantallas.placas import _PanelPlacasOperativas
 
-    entra = PantallaPlacas._armar_placa_previa("Lic. Agustina Viavattene")
-    no_entra = PantallaPlacas._armar_placa_previa("Lic. Agustina Viavattenee")
+    entra = _PanelPlacasOperativas._armar_placa_previa("Lic. Agustina Viavattene")
+    no_entra = _PanelPlacasOperativas._armar_placa_previa("Lic. Agustina Viavattenee")
     qtbot.addWidget(entra)
     qtbot.addWidget(no_entra)
     assert "\n" not in entra.text()
@@ -474,7 +454,7 @@ def test_vista_previa_arma_una_pagina_por_cada_22_placas(qtbot, conn):
 
     assert _PLACAS_POR_PAGINA == 22
     id_profesional = _crear_profesional(conn)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
     pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
@@ -487,25 +467,24 @@ def test_vista_previa_arma_una_pagina_por_cada_22_placas(qtbot, conn):
 
 
 def test_vista_previa_es_escroleable(qtbot, conn):
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     assert isinstance(pantalla.area_previa, QScrollArea)
     assert pantalla.area_previa.widgetResizable() is True
 
 
 def test_vista_previa_queda_a_la_derecha_de_la_busqueda(qtbot, conn):
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
-    pantalla.resize(1400, 700)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
-    pantalla.findChild(QTabWidget).setCurrentIndex(1)
+    pantalla.panel_imprimir.resize(1400, 700)
+    pantalla.panel_imprimir.show()
+    qtbot.waitExposed(pantalla.panel_imprimir)
     assert pantalla.lista_impresion.x() < pantalla.area_previa.x()
 
 
 def test_agregar_y_quitar_de_la_cola_de_impresion(qtbot, conn):
     id_profesional = _crear_profesional(conn)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
 
     indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
@@ -531,7 +510,7 @@ def test_agregar_y_quitar_de_la_cola_de_impresion(qtbot, conn):
 
 def test_personalizar_impresion_requiere_linea1(qtbot, conn):
     id_profesional = _crear_profesional(conn)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
     pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
@@ -544,7 +523,7 @@ def test_personalizar_impresion_requiere_linea1(qtbot, conn):
 
 def test_personalizar_impresion_guarda_las_dos_lineas(qtbot, conn):
     id_profesional = _crear_profesional(conn, apellido="Pugliese", nombre_pila="Silvina")
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
     pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
@@ -566,7 +545,7 @@ def test_personalizar_impresion_guarda_las_dos_lineas(qtbot, conn):
 
 def test_generar_pdf_sin_carpeta_base_no_falla(qtbot, conn):
     id_profesional = _crear_profesional(conn)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
     pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
@@ -579,7 +558,7 @@ def test_generar_pdf_genera_archivo_y_vacia_la_cola(qtbot, conn, tmp_path):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
     id_profesional = _crear_profesional(conn)
-    pantalla = PantallaPlacas(conn)
+    pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
     pantalla.combo_profesional_imprimir.setCurrentIndex(indice)

@@ -22,7 +22,7 @@ from app.gui.pantallas.llaves_y_otros_conceptos import PantallaLlavesYOtrosConce
 from app.gui.pantallas.novedades import PantallaRegistroAusencias
 from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.pantallas.panel_control import PanelControl
-from app.gui.pantallas.placas import PantallaPlacas
+from app.gui.pantallas.placas_para_timbres import PantallaPlacasParaTimbres
 from app.gui.pantallas.profesionales import PantallaProfesionales
 from app.gui.pantallas.reservas import PantallaReservas
 from app.gui.pantallas.usuarios import PantallaUsuarios
@@ -84,11 +84,11 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "liquidación de un profesional, y su historial.",
         ),
         Seccion(
-            "Placas", lambda conn: PantallaPlacas(conn), categoria="Principal",
-            ayuda="Solapa Buscar y asignar placas: qué profesional tiene placa en qué posición del "
-            "tablero de cada unidad, filtrable por localidad/edificio/unidad/profesional. Solapa "
-            "Imprimir placas: arma una selección puntual de profesionales y genera la hoja para "
-            "cortar e imprimir.",
+            "Placas para timbres", lambda conn: PantallaPlacasParaTimbres(conn), categoria="Principal",
+            ayuda="Solapa Búsqueda y asignación de placas: qué profesional tiene placa en qué posición "
+            "del tablero de cada unidad, filtrable por localidad/edificio/unidad/profesional. Solapa "
+            "Impresión de placas en papel: arma una selección puntual de profesionales y genera la hoja "
+            "para cortar e imprimir. Solapa Placas: catálogo del tablero de posiciones/nombre grabado.",
         ),
         Seccion(
             "Disponibilidad", lambda conn: PantallaDisponibilidad(conn), categoria="Principal",
@@ -143,10 +143,6 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
         Seccion(
             "Gastos operativos", catalogos.pantalla_gastos_operativos, categoria="Catálogos",
             ayuda="Gastos operativos del espacio, usados en los cálculos de estadísticas.",
-        ),
-        Seccion(
-            "Placas", catalogos.pantalla_placas, categoria="Catálogos",
-            ayuda="Placas del tablero de cada unidad: posición y nombre grabado, activas o no.",
         ),
         Seccion(
             "Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria="Configuración",

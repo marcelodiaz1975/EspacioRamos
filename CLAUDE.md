@@ -2171,6 +2171,61 @@ verificación pasa al nuevo `test_gui_llaves_y_otros_conceptos.py`, que
 cubre el formulario compuesto completo (título, orden de las tres
 solapas, tipo/objectName de cada panel).
 
+### Placas para timbres (formulario nuevo, 3 solapas, con Buscar/Imprimir compartiendo estado)
+
+Séptimo merge de "Operativa diaria": renombra la pantalla operativa
+"Placas" a "Placas para timbres", renombra sus dos solapas ("Buscar y
+asignar placas" → "Búsqueda y asignación de placas", "Imprimir placas"
+→ "Impresión de placas en papel") y suma el catálogo "Placas" (el
+tablero de posiciones/nombre grabado, distinto de la pantalla operativa
+aunque comparten nombre) como tercera solapa — caso no contemplado en
+el Excel de la clienta, resuelto con ella: "como tercera solapa de
+'Placas para timbres'".
+
+Variante nueva sobre el patrón de conversión a solapa desnuda: acá las
+dos solapas viejas (Buscar/Imprimir) SIGUEN viviendo en una sola clase
+porque comparten estado real, no solo un archivo — "Agregar a
+impresión" en Buscar carga `_cola_impresion`, que Imprimir lee y
+consume. Separarlas en dos clases independientes hubiera significado
+inventar un canal de comunicación entre ellas que no hacía falta.
+Solución: `PantallaPlacas` pasa a `_PanelPlacasOperativas`
+(`app/gui/pantallas/placas.py`) — deja de ser, ella misma, una pantalla
+con título y `QTabWidget` propio, pasa a ser un contenedor de lógica
+compartida que expone `panel_buscar`/`panel_imprimir` (dos `QWidget`
+que YA se construían por separado, en `_armar_panel_buscar`/
+`_armar_panel_imprimir`) para que el formulario contenedor los sume
+como dos solapas propias, hermanas del catálogo. El reinicio de
+filtros al reingresar a la solapa de Buscar (antes en el `showEvent`
+de la pantalla completa) pasa a `_PanelBuscarPlacas`, una subclase
+mínima de `QWidget` solo para poder engancharle ese `showEvent` — un
+`QWidget()` liso no admite pisarle el método de instancia porque Qt
+resuelve `showEvent` por la clase, no por atributo.
+
+`app/gui/pantallas/placas_para_timbres.py` (nuevo): `PantallaPlacasParaTimbres`,
+mismo patrón que el resto — título Nivel 1 fijo + `QTabWidget` con las
+tres solapas (`panel_operativas.panel_buscar`/`panel_operativas.
+panel_imprimir`/`catalogos.pantalla_placas(conn, anidado=True)`, que
+suma su propio parámetro `anidado`).
+
+`gui_main.py`: se renombra la `Seccion` "Placas" (pantalla operativa) a
+"Placas para timbres" sobre `PantallaPlacasParaTimbres`, con la ayuda
+actualizada; se saca la `Seccion` propia del catálogo "Placas".
+
+Tests: `test_gui_placas.py` renombra la clase (`_PanelPlacasOperativas`)
+en sus ~30 usos; el test de título y el de "tiene dos solapas" se sacan
+de acá (pasan al nuevo `test_gui_placas_para_timbres.py`); el de fondo
+claro pasa a comprobar `pantalla.panel_buscar`/`pantalla.panel_imprimir`
+directo (ya no hay un `QTabWidget` interno del que sacarlos con
+`findChild`); los ~8 tests que mostraban la pantalla completa
+(`pantalla.show()`/`waitExposed`) para medir geometría real pasan a
+mostrar el panel puntual que corresponde (`pantalla.panel_buscar.show()`
+o `pantalla.panel_imprimir.show()`), sacando el `findChild(QTabWidget).
+setCurrentIndex(1)` que antes hacía falta para exponer la solapa de
+Imprimir (ya no existe ese `QTabWidget` intermedio). `test_gui_placas_
+para_timbres.py` (nuevo) cubre el formulario compuesto completo (título,
+orden de las tres solapas, fondo claro de las dos operativas, catálogo
+anidado sin título propio).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

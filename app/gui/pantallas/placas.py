@@ -5,15 +5,26 @@ imprimir. Ver el docstring de `app.negocio.placas` para el modelo
 completo — en particular, que no se lleva ningún historial: una
 posición del tablero tiene como mucho una placa a la vez.
 
-Todavía no está decidido si esta pantalla queda como formulario
-independiente o como solapa dentro de otra pantalla existente (ej.
-Liquidaciones) — por ahora se registra sola en la navegación, como F18
-(Llaves) en su momento.
-
 La apariencia de "ficha de papel" de las solapas se probó primero acá
 y, aprobada por la clienta, pasó a `app/gui/estilos.py` (jerarquía 2)
 para todas las pantallas — no queda nada de eso local en este
-archivo."""
+archivo.
+
+Reordenamiento de formularios (Excel de la clienta): esta pantalla deja
+de ser un formulario propio del menú y pasa a ser las dos primeras
+solapas ("Búsqueda y asignación de placas"/"Impresión de placas en
+papel", renombradas) de "Placas para timbres", junto al catálogo
+"Placas" (el tablero de posiciones/nombre grabado — distinto de esta
+pantalla operativa, aunque comparten nombre) como tercera solapa —
+decisión de la clienta ante un caso que el Excel no contemplaba.
+`PantallaPlacas` pasa a `_PanelPlacasOperativas`: ya no es, ella misma,
+una pantalla con título y `QTabWidget` propio, sino un contenedor de
+lógica compartida (la cola de impresión que arma Buscar y consume
+Imprimir) que expone `panel_buscar`/`panel_imprimir` para que el
+formulario contenedor los sume como solapas propias. El reinicio de
+filtros al reingresar a la solapa de Buscar, antes en el `showEvent` de
+la pantalla completa, pasa a `_PanelBuscarPlacas` (el widget que
+realmente se muestra ahora)."""
 from __future__ import annotations
 
 import sqlite3
@@ -39,7 +50,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -159,7 +169,32 @@ def _titulo_campo(texto: str) -> QLabel:
     return etiqueta
 
 
-class PantallaPlacas(QWidget):
+class _PanelBuscarPlacas(QWidget):
+    """Widget propio (en vez de un `QWidget()` liso) solo para poder
+    engancharle un `showEvent`: `_PanelPlacasOperativas` ya no es, ella
+    misma, la pantalla que se muestra (ver más abajo) — el reinicio de
+    filtros al reingresar a esta solapa tiene que vivir en el widget que
+    realmente se muestra."""
+
+    def __init__(self, contenedor: "_PanelPlacasOperativas") -> None:
+        super().__init__()
+        self._contenedor = contenedor
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._contenedor._orden.reiniciar()
+        self._contenedor.combo_profesional_filtro.setCurrentIndex(0)
+        self._contenedor._cargar_localidades()
+
+
+class _PanelPlacasOperativas(QWidget):
+    """Buscar/asignar e Imprimir placas comparten estado (la cola de
+    impresión que arma Buscar y consume Imprimir), así que siguen
+    viviendo en una sola clase — pero ya no es, ella misma, una solapa:
+    expone `panel_buscar`/`panel_imprimir` para que el formulario
+    contenedor ("Placas para timbres") los sume como dos solapas propias
+    en su `QTabWidget`, junto al catálogo Placas."""
+
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
         self.conn = conn
@@ -167,29 +202,15 @@ class PantallaPlacas(QWidget):
         self._cola_impresion: list[dict] = []
         self._armar_ui()
 
-    def showEvent(self, event) -> None:  # noqa: N802
-        super().showEvent(event)
-        self._orden.reiniciar()
-        self.combo_profesional_filtro.setCurrentIndex(0)
-        self._cargar_localidades()
-
     def _armar_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        titulo = QLabel("Placas".upper())
-        titulo.setObjectName("tituloPantalla")
-        layout.addWidget(titulo)
-
-        solapas = QTabWidget()
-        solapas.addTab(self._armar_panel_buscar(), "Buscar y asignar placas")
-        solapas.addTab(self._armar_panel_imprimir(), "Imprimir placas")
-        layout.addWidget(solapas)
-
+        self.panel_buscar = self._armar_panel_buscar()
+        self.panel_imprimir = self._armar_panel_imprimir()
         self._cargar_localidades()
 
     # --------------------------------------------------- buscar y asignar
 
     def _armar_panel_buscar(self) -> QWidget:
-        panel = QWidget()
+        panel = _PanelBuscarPlacas(self)
         panel.setObjectName("panelSolapa")
         layout_principal = QHBoxLayout(panel)
 
@@ -607,7 +628,7 @@ class PantallaPlacas(QWidget):
         grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         for indice, texto in enumerate(textos_pagina):
             fila, columna = divmod(indice, 2)
-            grid.addWidget(PantallaPlacas._armar_placa_previa(texto), fila, columna)
+            grid.addWidget(_PanelPlacasOperativas._armar_placa_previa(texto), fila, columna)
         return pagina
 
     def _actualizar_vista_previa(self) -> None:
