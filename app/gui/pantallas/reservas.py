@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QDateEdit,
     QDoubleSpinBox,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -330,13 +331,19 @@ class _PanelReservasRegulares(QWidget):
         form.addWidget(QLabel("Días"))
         self._checks_dia: dict[str, QCheckBox] = {}
         contenedor_dias = QWidget()
-        layout_dias = QVBoxLayout(contenedor_dias)
-        layout_dias.setContentsMargins(0, 0, 0, 0)
-        for dia in _DIAS_RESERVA:
+        grid_dias = QGridLayout(contenedor_dias)
+        grid_dias.setContentsMargins(0, 0, 0, 0)
+        # Dos por línea (Lunes/Martes, Miércoles/Jueves, Viernes/Sábado),
+        # pedido explícito de la clienta — a diferencia de la grilla de
+        # Oferta de consultorios (mitad arriba/mitad abajo), acá son
+        # siempre 2 columnas fijas: si se suma Domingo a `_DIAS_RESERVA`
+        # más adelante, cae solo en una fila nueva debajo de Viernes/
+        # Sábado, sin acompañante en la segunda columna.
+        for i, dia in enumerate(_DIAS_RESERVA):
             check = QCheckBox(dia)
             check.setChecked(dia == "Lunes")
             self._checks_dia[dia] = check
-            layout_dias.addWidget(check)
+            grid_dias.addWidget(check, i // 2, i % 2)
         form.addWidget(contenedor_dias)
 
         fila_horario = QHBoxLayout()
