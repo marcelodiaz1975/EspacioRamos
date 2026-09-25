@@ -662,3 +662,77 @@ def test_extraer_detalle_saca_la_etiqueta_y_el_texto_de_la_grilla(qtbot, conn):
     assert texto is widget.texto_detalle
     assert widget._layout_grilla.indexOf(widget._etiqueta_detalle) == -1
     assert widget._layout_grilla.indexOf(widget.texto_detalle) == -1
+
+
+def test_alto_natural_filtros_devuelve_el_sizehint_del_panel_de_filtros(qtbot, conn):
+    """Pensado para que quien use esta grilla (Reservas) pueda alinear la
+    columna de la grilla contra el panel de Filtros sin acceder a
+    `_panel_filtros` desde afuera — `sizeHint()`, no `.height()`, porque
+    ese panel tiene un `addStretch()` final que infla su alto real más
+    allá de su contenido visible."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+
+    assert widget.alto_natural_filtros() == widget._panel_filtros.sizeHint().height()
+
+
+def test_alto_natural_grilla_devuelve_el_sizehint_de_la_columna_de_la_grilla(qtbot, conn):
+    """Análogo a `alto_natural_filtros`, pero para esta misma columna
+    (Período/Visualización + la tabla) — pensado para pasarle a
+    `limitar_alto_grilla` un tope "igual a lo que ya mide hoy" (Reservas
+    regulares, que solo quiere dejarla scrolleable a futuro sin cambiar
+    nada visible ahora) sin tener que acceder a `_panel_grilla` desde
+    afuera."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+
+    assert widget.alto_natural_grilla() == widget._panel_grilla.sizeHint().height()
+
+
+def test_limitar_alto_grilla_con_el_alto_natural_no_cambia_nada(qtbot, conn):
+    """Tope "igual a lo que ya mide hoy" (`alto_natural_grilla()`, más
+    holgado que el alto real de la tabla porque incluye el margen de
+    `layout_grilla`) — no debe achicar la tabla por debajo de su alto
+    natural: mismo criterio que usa Reservas regulares para dejar la
+    grilla scrolleable a futuro sin tocar nada visible ahora."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    alto_tabla_antes = widget.tabla.minimumHeight()
+    alto_widget_antes = widget.sizeHint().height()
+
+    widget.limitar_alto_grilla(widget.alto_natural_grilla())
+
+    assert widget.tabla.minimumHeight() == alto_tabla_antes
+    assert widget.maximumHeight() >= alto_widget_antes
+
+
+def test_limitar_alto_grilla_con_un_tope_mas_chico_recorta_la_tabla_y_el_widget(qtbot, conn):
+    """Tope MENOR al natural (Reservas aisladas, para alinear la grilla
+    con el panel de Filtros de al lado): la tabla queda con alto fijo en
+    ese tope (descontando la fila Período/Visualización y los márgenes
+    de `layout_grilla`, que no existen del otro lado) y el widget entero
+    también queda topeado en el valor pedido — sin este último, el
+    widget seguía estirándose por fuera (ej. un `QSplitter`) más allá de
+    su contenido real, dejando un hueco muerto antes de lo que venga
+    después. Ver `test_gui_reservas.py` para la comprobación de punta a
+    punta ("Detalle" pegado debajo de la grilla en Aisladas), acá solo
+    se cubre lo que hace este método en sí."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    # La mitad del alto natural de la tabla asegura un recorte real, sin
+    # depender de cuánto de `alto_natural_grilla()` se lleva el resto de
+    # la columna (fila de controles, "Detalle" todavía sin extraer, etc.)
+    # en este widget "crudo" (sin pasar por Reservas).
+    tabla_natural = widget.tabla.minimumHeight()
+    alto_tabla_esperado = tabla_natural // 2
+    tope = widget._alto_fila_controles + alto_tabla_esperado
+
+    widget.limitar_alto_grilla(tope)
+
+    assert widget.maximumHeight() == tope
+    assert widget.tabla.maximumHeight() == alto_tabla_esperado
+    assert widget.tabla.minimumHeight() == alto_tabla_esperado

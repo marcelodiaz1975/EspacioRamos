@@ -233,7 +233,7 @@ def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
     assert grilla_regulares.texto_detalle.maximumHeight() > 90
 
     grilla_aisladas = pantalla.panel_aisladas.grilla
-    assert grilla_aisladas.texto_detalle.maximumHeight() == 40
+    assert grilla_aisladas.texto_detalle.maximumHeight() == 96
 
 
 def test_detalle_de_aisladas_ocupa_todo_el_ancho_de_la_grilla(qtbot, conn):
@@ -262,7 +262,11 @@ def test_botones_de_accion_quedan_compactos_con_su_color(qtbot, conn):
     solapa mantienen los colores de siempre (primario/secundario) pero
     bajan de alto para quedar como el resto de los controles de la
     columna (los botones-resumen de los filtros colapsables, ~22px) —
-    cambio puntual de esta pantalla, no de `estilos.py`."""
+    cambio puntual de esta pantalla, no de `estilos.py`. Los tres de
+    Aisladas (Crear/Modificar/Cancelar) vuelven a crecer en una ronda
+    posterior (`_ESTILO_BOTON_AISLADAS_ALTO`) para alinear "Horas
+    aisladas mensuales" con el cuadro "Detalle" — ver
+    `test_botones_de_aisladas_quedan_mas_altos_que_los_de_regulares`."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.setStyleSheet(hoja_estilos(modo_oscuro=False))  # solo esta ventana, no toda la app
@@ -275,6 +279,10 @@ def test_botones_de_accion_quedan_compactos_con_su_color(qtbot, conn):
         "Modificar seleccionada", "Finalizar reserva a fin de mes",
         "Modificar reserva", "Cancelar reserva",
     ]
+    alturas_esperadas = {
+        "Crear reserva regular": 22, "Modificar seleccionada": 22,
+        "Finalizar reserva a fin de mes": 22,
+    }
     for indice, panel in enumerate((pantalla.panel_regulares, pantalla.panel_aisladas)):
         pantalla.pestanas.setCurrentIndex(indice)  # solo la solapa activa tiene geometría real
         qtbot.waitExposed(pantalla)
@@ -285,7 +293,114 @@ def test_botones_de_accion_quedan_compactos_con_su_color(qtbot, conn):
                 assert boton.objectName() == "botonSecundario"
             else:
                 continue
-            assert boton.height() == 22
+            if boton.text() in alturas_esperadas:
+                assert boton.height() == alturas_esperadas[boton.text()]
+
+
+def test_botones_de_aisladas_quedan_mas_altos_que_los_de_regulares(qtbot, conn):
+    """Pedido explícito de la clienta: los tres botones de Aisladas
+    (Crear/Modificar/Cancelar) crecen lo necesario para que "Horas
+    aisladas mensuales" quede alineado con el borde inferior del cuadro
+    "Detalle" — ver `test_titulo_horas_aisladas_alineado_con_el_pie_de_
+    detalle`. Los de Regulares no fueron parte de este pedido y siguen
+    en 22px (`_ESTILO_BOTON_COMPACTO`)."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.setStyleSheet(hoja_estilos(modo_oscuro=False))
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
+    qtbot.waitExposed(pantalla)
+
+    panel_a = pantalla.panel_aisladas
+    for texto in ("Crear reserva aislada", "Modificar reserva", "Cancelar reserva"):
+        boton = next(b for b in panel_a.findChildren(QPushButton) if b.text() == texto)
+        assert boton.height() > 22
+
+
+def test_grilla_de_regulares_mantiene_el_tope_identidad_sin_achicarse(qtbot, conn):
+    """Pedido explícito de la clienta: la grilla de Reservas regulares
+    queda scrolleable a futuro (por si algún día hace falta mostrar más
+    horarios) pero SIN cambiar nada visible hoy — `limitar_alto_grilla`
+    se llama con `alto_natural_grilla()` (el propio alto natural de la
+    columna), no con un valor más chico, así que el tope no debe recortar
+    nada de lo que ya se ve."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel_r = pantalla.panel_regulares
+
+    assert panel_r.grilla.maximumHeight() == panel_r.grilla.alto_natural_grilla()
+
+
+def test_grilla_de_aisladas_termina_alineada_con_las_referencias_de_colores(qtbot, conn):
+    """Pedido explícito de la clienta: en Reservas aisladas, la grilla
+    (Período/Visualización + la tabla) termina alineada con la última
+    referencia de colores del panel de Filtros de al lado ("Profesional
+    filtrado"), en vez de imponer su propio alto natural (más alto) al
+    resto de la columna."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
+    qtbot.waitExposed(pantalla)
+
+    panel_a = pantalla.panel_aisladas
+    fondo_tabla = panel_a.grilla.tabla.mapToGlobal(panel_a.grilla.tabla.rect().bottomLeft()).y()
+    fondo_leyenda = panel_a.grilla._leyenda_colores.mapToGlobal(
+        panel_a.grilla._leyenda_colores.rect().bottomLeft()
+    ).y()
+    assert abs(fondo_tabla - fondo_leyenda) <= 5
+
+
+def test_detalle_de_aisladas_queda_pegado_debajo_de_la_grilla(qtbot, conn):
+    """Pedido explícito de la clienta ("subí el cuadro de detalle para
+    pegarlo con lo de arriba"): con la grilla ya achicada, "Detalle"
+    arranca justo debajo (solo el espaciado normal del layout, no un
+    hueco de más como cuando la grilla quedaba forzada a un alto mayor
+    por el splitter)."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
+    qtbot.waitExposed(pantalla)
+
+    panel_a = pantalla.panel_aisladas
+    etiqueta_detalle, _ = None, None
+    for hijo in panel_a.findChildren(QLabel):
+        if hijo.text() == "Detalle:":
+            etiqueta_detalle = hijo
+            break
+    assert etiqueta_detalle is not None
+    fondo_grilla = panel_a.grilla.mapToGlobal(panel_a.grilla.rect().bottomLeft()).y()
+    tope_detalle = etiqueta_detalle.mapToGlobal(etiqueta_detalle.rect().topLeft()).y()
+    assert 0 <= tope_detalle - fondo_grilla <= 15
+
+
+def test_titulo_horas_aisladas_alineado_con_el_pie_de_detalle(qtbot, conn):
+    """Pedido explícito de la clienta: los tres botones de acción crecen
+    lo necesario para que "Horas aisladas mensuales" quede alineado con
+    el borde inferior del cuadro "Detalle". El alto real de los botones
+    depende de la fuente que les da `hoja_estilos()` (mismo motivo que
+    `test_botones_de_accion_quedan_compactos_con_su_color`), así que hay
+    que aplicarla para medir lo mismo que ve la clienta."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.setStyleSheet(hoja_estilos(modo_oscuro=False))
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
+    qtbot.waitExposed(pantalla)
+
+    panel_a = pantalla.panel_aisladas
+    fondo_etiqueta = panel_a.etiqueta_horas_aisladas.mapToGlobal(
+        panel_a.etiqueta_horas_aisladas.rect().bottomLeft()
+    ).y()
+    fondo_detalle = panel_a.grilla.texto_detalle.mapToGlobal(
+        panel_a.grilla.texto_detalle.rect().bottomLeft()
+    ).y()
+    assert abs(fondo_etiqueta - fondo_detalle) <= 5
 
 
 def test_titulo_profesional_alineado_con_filtro_de_localidad(qtbot, conn):
@@ -1392,19 +1507,19 @@ def test_spin_horario_se_muestra_como_reloj(qtbot, conn):
 
 
 def test_campos_de_fecha_usan_formato_dd_mm_yyyy(qtbot, conn):
-    """El selector de fecha (con calendario) ya deja ver el día de la
-    semana por su cuenta, así que no hace falta una aclaración aparte
-    debajo — alcanza con que el formato de los campos de fecha sea
-    consistente entre sí, salvo "Fecha" en Reservas aisladas, que pasó al
-    formato con el día de la semana abreviado (pedido explícito de la
-    clienta, ver `test_campo_fecha_aisladas_muestra_dia_de_la_semana`)."""
+    """"Vigencia desde"/"Vigencia hasta" (Regulares) pasan al mismo
+    formato con día de la semana abreviado que ya tenía "Fecha" en
+    Reservas aisladas — pedido explícito de la clienta ("que se
+    comporte igual"). "Fecha que falta" (`campo_fecha_ausencia`, del
+    bloque de reubicación en Aisladas) no fue parte de este pedido y
+    sigue con el formato de siempre."""
     _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
 
     panel_r = pantalla.panel_regulares
-    assert panel_r.campo_vigencia_inicio.displayFormat() == "dd-MM-yyyy"
-    assert panel_r.campo_vigencia_fin.displayFormat() == "dd-MM-yyyy"
+    assert panel_r.campo_vigencia_inicio.displayFormat() == "ddd dd-MM-yyyy"
+    assert panel_r.campo_vigencia_fin.displayFormat() == "ddd dd-MM-yyyy"
     assert panel_r.campo_vigencia_inicio.calendarPopup() is True
 
     panel_a = pantalla.panel_aisladas

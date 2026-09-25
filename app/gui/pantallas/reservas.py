@@ -92,6 +92,15 @@ _ESPACIADO_FORM = 4
 # ~32px de alto total) — se lo pisa acá nomás, por widget, para bajarlo a
 # 22px sin perder el color/borde que ya les da el objectName.
 _ESTILO_BOTON_COMPACTO = "padding: 3px 16px;"
+# Pedido explícito de la clienta, puntual de los tres botones de acción
+# de Reservas AISLADAS (Crear/Modificar/Cancelar): en vez de quedar
+# compactos como el resto de la columna (`_ESTILO_BOTON_COMPACTO`, 22px),
+# crecen lo necesario para que "Horas aisladas mensuales" (el título que
+# sigue después del separador, al final de esta columna) quede alineado
+# con el borde inferior del cuadro "Detalle" de la grilla de al lado —
+# valor medido (`padding: 11px 16px` ≈ 38px de alto por botón, sube el
+# título ~48px en total entre los tres), no un número a ojo.
+_ESTILO_BOTON_AISLADAS_ALTO = "padding: 11px 16px;"
 # Pedido de la clienta: la tabla de abajo (Horarios reservados/Reservas
 # aisladas) tiene que verse, título y un par de filas, sin scrollear el
 # panel entero — ver el rearmado de `_armar_ui` en las dos clases de
@@ -108,7 +117,7 @@ _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 4
 # Alto máximo del cuadro "Detalle" en Reservas aisladas, ya sacado de la
 # grilla y ocupando todo el ancho de "Filtros + grid" (90px por defecto
 # en el resto de los usos) — ver `GrillaOperativaWidget.extraer_detalle`.
-_ALTO_DETALLE_AISLADAS = 40
+_ALTO_DETALLE_AISLADAS = 96
 
 
 def _alto_para_filas(tabla: QTableWidget, filas: int) -> int:
@@ -435,14 +444,20 @@ class _PanelReservasRegulares(QWidget):
         fila_horario.addWidget(self.spin_hasta)
         form.addLayout(fila_horario)
 
+        # Mismo formato "día de la semana abreviado" que "Fecha" en
+        # Reservas aisladas (pedido explícito de la clienta, "que se
+        # comporte igual") — duplicado acá, sin relación entre las dos
+        # solapas más que este formato compartido.
         self.campo_vigencia_inicio = QDateEdit()
-        self.campo_vigencia_inicio.setDisplayFormat(_FORMATO_FECHA)
+        self.campo_vigencia_inicio.setDisplayFormat(_FORMATO_FECHA_DIA)
+        self.campo_vigencia_inicio.setLocale(_LOCALE_ES)
         self.campo_vigencia_inicio.setCalendarPopup(True)
         form.addWidget(QLabel("Vigencia desde"))
         form.addWidget(self.campo_vigencia_inicio)
 
         self.campo_vigencia_fin = QDateEdit()
-        self.campo_vigencia_fin.setDisplayFormat(_FORMATO_FECHA)
+        self.campo_vigencia_fin.setDisplayFormat(_FORMATO_FECHA_DIA)
+        self.campo_vigencia_fin.setLocale(_LOCALE_ES)
         self.campo_vigencia_fin.setCalendarPopup(True)
         self.campo_vigencia_fin.setMinimumDate(_FECHA_SIN_DATO)
         self.campo_vigencia_fin.setSpecialValueText("(sin fecha)")
@@ -502,7 +517,20 @@ class _PanelReservasRegulares(QWidget):
         # misma altura que el formulario ("que quede parejo", pedido
         # explícito de la clienta), ver `dar_stretch_a_detalle`.
         self.grilla.dar_stretch_a_detalle()
+        # Tope de alto IGUAL al que ya tiene hoy (sin cambiar nada visible
+        # ahora): pedido explícito de la clienta para dejar la grilla
+        # scrolleable de acá en adelante, por si el día de mañana hace
+        # falta mostrar más horarios sin agrandar el panel — ver
+        # `limitar_alto_grilla`/`alto_natural_grilla`.
+        self.grilla.limitar_alto_grilla(self.grilla.alto_natural_grilla())
         layout_grupo_grilla.addWidget(self.grilla)
+        # `limitar_alto_grilla` le pone un tope de alto a `self.grilla` —
+        # sin este spacer, cuando el splitter le da a `grupo_grilla` más
+        # alto del que ese tope permite usar, Qt centra `self.grilla`
+        # dentro del sobrante en vez de dejarlo pegado arriba (mismo
+        # mecanismo que el `addStretch()` de `GrillaOperativaWidget.
+        # _armar_ui`, acá un nivel más afuera).
+        layout_grupo_grilla.addStretch()
         splitter_superior.addWidget(grupo_grilla)
 
         splitter_superior.setStretchFactor(0, 0)
@@ -1005,17 +1033,17 @@ class _PanelReservasAisladas(QWidget):
 
         boton_crear = QPushButton("Crear reserva aislada")
         boton_crear.setObjectName("botonPrimario")
-        boton_crear.setStyleSheet(_ESTILO_BOTON_COMPACTO)
+        boton_crear.setStyleSheet(_ESTILO_BOTON_AISLADAS_ALTO)
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
         boton_modificar = QPushButton("Modificar reserva")
         boton_modificar.setObjectName("botonSecundario")
-        boton_modificar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
+        boton_modificar.setStyleSheet(_ESTILO_BOTON_AISLADAS_ALTO)
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
         boton_cancelar = QPushButton("Cancelar reserva")
         boton_cancelar.setObjectName("botonSecundario")
-        boton_cancelar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
+        boton_cancelar.setStyleSheet(_ESTILO_BOTON_AISLADAS_ALTO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
 
@@ -1046,6 +1074,14 @@ class _PanelReservasAisladas(QWidget):
         # filtro`.
         self.grilla.fijar_titulo_filtros("")
         self.grilla.renombrar_etiquetas_filtro()
+        # La grilla termina alineada con la última referencia de colores
+        # del panel de Filtros de al lado ("Profesional filtrado"), en
+        # vez de imponer su propio alto natural (más alto que ese panel)
+        # al resto de la columna — pedido explícito de la clienta. De
+        # paso queda scrolleable, por si el día de mañana hace falta
+        # mostrar más horarios sin agrandar el panel.
+        alto_filtros = self.grilla.alto_natural_filtros()
+        self.grilla.limitar_alto_grilla(alto_filtros)
         layout_grupo_grilla.addWidget(self.grilla)
         # "Detalle" pasa a ocupar todo el ancho de esta grilla (Filtros +
         # grid juntos), debajo de todo, en vez de la columna angosta de
@@ -1053,11 +1089,23 @@ class _PanelReservasAisladas(QWidget):
         # no porque no entra", así que esto es puntual de Aisladas). Sale
         # de `self.grilla` con `extraer_detalle` y se reagrega acá, en
         # `layout_grupo_grilla` (que ya envuelve TODO el ancho de
-        # `self.grilla`, columnas de Filtros y grid incluidas).
+        # `self.grilla`, columnas de Filtros y grid incluidas) — pegado
+        # justo debajo, sin ningún hueco, ahora que la grilla quedó más
+        # baja.
         etiqueta_detalle, texto_detalle = self.grilla.extraer_detalle()
         layout_grupo_grilla.addWidget(etiqueta_detalle)
         layout_grupo_grilla.addWidget(texto_detalle)
         texto_detalle.setMaximumHeight(_ALTO_DETALLE_AISLADAS)
+        # Sin esto, el sobrante de alto que el splitter le da a
+        # `grupo_grilla` (para igualar el alto de `panel_form`, más alto
+        # que el contenido real de acá) lo repartía Qt en `etiqueta_
+        # detalle` — el único item de este layout sin un tope propio,
+        # ya que `self.grilla` y `texto_detalle` sí lo tienen — inflando
+        # el label "Detalle:" a un alto absurdo y empujando el cuadro de
+        # texto hacia abajo, en vez de pegarlo justo debajo de la grilla
+        # como pidió la clienta. Mismo mecanismo/mismo arreglo que el
+        # `addStretch()` de `GrillaOperativaWidget._armar_ui`.
+        layout_grupo_grilla.addStretch()
         splitter_superior.addWidget(grupo_grilla)
 
         splitter_superior.setStretchFactor(0, 0)

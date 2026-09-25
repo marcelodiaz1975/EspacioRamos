@@ -506,6 +506,7 @@ class GrillaOperativaWidget(QWidget):
         self._pares_dia_unidad: set[tuple[str, int]] | None = None
         self._resaltar_ausencias = False
         self._filtro_exclusivo_profesional = False
+        self._alto_maximo_grilla: int | None = None
         self._armar_ui()
         self._cargar_localidades()
         self.actualizar()
@@ -589,6 +590,7 @@ class GrillaOperativaWidget(QWidget):
         panel_grilla = QWidget()
         layout_grilla = QVBoxLayout(panel_grilla)
         self._layout_grilla = layout_grilla
+        self._panel_grilla = panel_grilla
 
         fila_controles = QHBoxLayout()
         fila_controles.addWidget(QLabel("Período:"))
@@ -609,6 +611,21 @@ class GrillaOperativaWidget(QWidget):
         fila_controles.addWidget(self.combo_modo)
         fila_controles.addStretch()
         layout_grilla.addLayout(fila_controles)
+        # Todo lo que en esta columna NO es la tabla en sí (la fila
+        # Período/Visualización + el espaciado antes de la grilla + los
+        # márgenes de `layout_grilla`, arriba y abajo) — `limitar_alto_
+        # grilla` lo descuenta del tope que le pasan (pensado para esa
+        # columna entera, no para la tabla sola) para que la grilla en sí
+        # quede alineada con la columna de al lado. Sin los márgenes acá,
+        # el tope que se le termina poniendo a `self` (el widget entero)
+        # queda MÁS CHICO que lo que su propio layout necesita de mínimo
+        # (margen + fila + tabla + margen), y el contenido desborda el
+        # tope en vez de quedar alineado.
+        margenes_grilla = layout_grilla.contentsMargins()
+        self._alto_fila_controles = (
+            margenes_grilla.top() + margenes_grilla.bottom()
+            + fila_controles.sizeHint().height() + layout_grilla.spacing()
+        )
 
         self.tabla = QTableWidget()
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -628,6 +645,16 @@ class GrillaOperativaWidget(QWidget):
         self.texto_detalle.setReadOnly(True)
         self.texto_detalle.setMaximumHeight(90)
         layout_grilla.addWidget(self.texto_detalle)
+        # Sin esto, cualquier alto de sobra que la grilla no pudiera
+        # absorber (por ejemplo, con `limitar_alto_grilla` puesto un tope)
+        # se lo repartía Qt entre el resto de los items de este layout sin
+        # stretch propio (la fila Período/Visualización, empujando la
+        # grilla hacia abajo) en vez de quedar como espacio muerto acá al
+        # final, que es invisible y no descoloca nada — no cambia el
+        # comportamiento por defecto del resto de los usos de esta grilla
+        # (`self.tabla` ya se lleva cualquier sobra primero, por su propio
+        # `stretch=1`, antes de que le toque algo a este spacer).
+        layout_grilla.addStretch()
 
         layout_principal.addWidget(panel_grilla, stretch=1)
 
@@ -915,6 +942,59 @@ class GrillaOperativaWidget(QWidget):
         self._layout_grilla.removeWidget(self.texto_detalle)
         return self._etiqueta_detalle, self.texto_detalle
 
+    def alto_natural_filtros(self) -> int:
+        """Alto natural (`sizeHint`) del panel de Filtros — pensado para
+        que quien la use pueda alinear la grilla a esa misma altura
+        (`limitar_alto_grilla`) sin tener que medirla por su cuenta ni
+        acceder a `self._panel_filtros` desde afuera."""
+        return self._panel_filtros.sizeHint().height()
+
+    def alto_natural_grilla(self) -> int:
+        """Alto natural (`sizeHint`) de esta misma columna (Período/
+        Visualización + la grilla) ANTES de aplicarle ningún tope —
+        pensado para pasarle un "tope igual a lo que ya mide hoy" a
+        `limitar_alto_grilla` (dejarla scrolleable a futuro sin cambiar
+        nada visible ahora), sin tener que acceder a `self._panel_grilla`
+        desde afuera. Hay que llamarlo con la grilla ya construida (después
+        de `fijar_modo`/`actualizar`), igual que `alto_natural_filtros`."""
+        return self._panel_grilla.sizeHint().height()
+
+    def limitar_alto_grilla(self, alto: int) -> None:
+        """Pone un tope de alto FIJO a esta columna (Período/Visualización
+        + la grilla, `self.tabla`), en vez de dejarla crecer siempre a su
+        alto natural (la suma exacta de las filas de la grilla — ver
+        `_construir_tabla`) — pensado para Reservas, que quiere que esta
+        columna termine alineada con el resto del panel de Filtros de al
+        lado (la última referencia de colores, por ejemplo) en vez de
+        imponer su propio alto al resto de la columna. `alto` es el alto
+        de TODA la columna (como la mide `alto_natural_filtros()` del
+        panel de al lado, para que sean directamente comparables) — acá
+        adentro se le descuenta la fila Período/Visualización, que no
+        existe del otro lado, antes de aplicárselo a la tabla en sí. A
+        partir de acá la grilla scrollea sola si su contenido no entra en
+        ese alto — a propósito, por si el día de mañana hace falta
+        mostrar más horarios sin agrandar el panel. Hay que llamarlo
+        ANTES de la primera construcción real de la grilla (`actualizar()`
+        /cambio de filtros) para que aplique desde la primera vez; si la
+        grilla ya tiene filas armadas, también lo aplica de una sobre el
+        alto ya calculado.
+
+        Además de topear `self.tabla`, topea el ALTO DE TODO ESTE WIDGET
+        (`self`) en `alto` — sin esto, quien lo use dentro de un
+        `QSplitter` (Reservas) lo sigue estirando a la altura de lo que
+        haya del otro lado (el formulario), y el hueco que deja adentro
+        (entre el pie de la tabla ya achicada y el borde de este widget)
+        termina siendo un espacio muerto que empuja hacia abajo a
+        cualquier cosa que se agregue DESPUÉS de esta grilla en el mismo
+        panel (ej. "Detalle" en Reservas aisladas, que la clienta pidió
+        pegado justo debajo, sin hueco)."""
+        alto_tabla = alto - self._alto_fila_controles
+        self._alto_maximo_grilla = alto_tabla
+        if self.tabla.rowCount():
+            self.tabla.setMaximumHeight(alto_tabla)
+            self.tabla.setMinimumHeight(min(self.tabla.minimumHeight(), alto_tabla))
+        self.setMaximumHeight(alto)
+
     def activar_filtro_exclusivo_profesional(self, activar: bool = True) -> None:
         """Con un profesional elegido en el filtro, no alcanza con
         pintarlo de azul entre lo demás — hay que mostrar ÚNICAMENTE sus
@@ -1121,9 +1201,20 @@ class GrillaOperativaWidget(QWidget):
         # que la grilla se vea siempre entera (sin scrollbar interno) y sea
         # el contenedor que la embebe (splitter/quien la use) el que crezca
         # para darle lugar, en vez de recortarla a un alto fijo arbitrario.
+        # Salvo que se haya pedido un tope (`limitar_alto_grilla`, pensado
+        # para Reservas): ahí la grilla queda con alto FIJO en ese tope, y
+        # es ella la que scrollea internamente si hace falta más lugar del
+        # que tiene — a futuro, si algún día hace falta mostrar más
+        # horarios en la misma altura, ya queda cubierto sin tocar nada
+        # más.
         alto_filas_encabezado = sum(self.tabla.rowHeight(f) for f in range(filas_encabezado))
         alto_filas_datos = sum(self.tabla.rowHeight(f) for f in range(filas_encabezado, n_filas))
-        self.tabla.setMinimumHeight(alto_filas_encabezado + alto_filas_datos + 4)
+        alto_natural = alto_filas_encabezado + alto_filas_datos + 4
+        if self._alto_maximo_grilla is not None:
+            self.tabla.setMinimumHeight(min(alto_natural, self._alto_maximo_grilla))
+            self.tabla.setMaximumHeight(self._alto_maximo_grilla)
+        else:
+            self.tabla.setMinimumHeight(alto_natural)
 
     def _limites_dia(self, columnas: list[dict]) -> set[int]:
         return {i for i in range(len(columnas)) if i == len(columnas) - 1 or columnas[i]["dia"] != columnas[i + 1]["dia"]}
