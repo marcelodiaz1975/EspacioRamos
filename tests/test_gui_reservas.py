@@ -6,7 +6,8 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import hoja_estilos
 from app.gui.pantallas.reservas import (
-    _ALTO_TITULO_PANEL_TABLA, _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
+    _AJUSTE_ALTO_GRILLA_AISLADAS, _ALTO_TITULO_PANEL_TABLA, _ALTO_TITULO_PANEL_TABLA_REGULARES,
+    _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
@@ -111,9 +112,16 @@ def test_tabla_de_abajo_sin_titulo_tiene_espaciador_que_compensa(qtbot, conn):
     TABLA`), compensa exactamente eso: el reparto entre scroll/tabla no
     cambia (scroll sigue del mismo alto — "sin tocar nada de lo que está
     antes de la tabla") y la tabla sí sube, con el espaciador como hueco
-    muerto al final de todo, donde no se ve."""
+    muerto al final de todo, donde no se ve. Regulares suma además el
+    ajuste de una ronda posterior (`_ALTO_TITULO_PANEL_TABLA_REGULARES`,
+    ver ese test aparte) — cada panel se compara contra su propia
+    constante, ya no comparten el mismo valor."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
+    esperado = {
+        id(pantalla.panel_regulares): _ALTO_TITULO_PANEL_TABLA_REGULARES,
+        id(pantalla.panel_aisladas): _ALTO_TITULO_PANEL_TABLA,
+    }
     for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
         panel_tabla = panel.tabla.parentWidget()
         layout = panel.layout()
@@ -122,7 +130,7 @@ def test_tabla_de_abajo_sin_titulo_tiene_espaciador_que_compensa(qtbot, conn):
         assert item_siguiente is not None
         espaciador = item_siguiente.spacerItem()
         assert espaciador is not None
-        assert espaciador.sizeHint().height() == _ALTO_TITULO_PANEL_TABLA
+        assert espaciador.sizeHint().height() == esperado[id(panel)]
 
 
 def test_tabla_de_abajo_sin_margen_superior(qtbot, conn):
@@ -140,6 +148,49 @@ def test_tabla_de_abajo_sin_margen_superior(qtbot, conn):
         assert margenes.left() == 9
         assert margenes.right() == 9
         assert margenes.bottom() == 9
+
+
+def test_regulares_tabla_de_abajo_sube_sin_mover_el_scroll_de_arriba(qtbot, conn):
+    """Pedido explícito de la clienta ("subí un poco más la tabla para
+    pegarlo a lo de arriba sin tocar el resto"): `layout_externo` de
+    Regulares saca el espaciado default de Qt (6px) entre el `QScrollArea`
+    de arriba y la tabla (`layout_externo.setSpacing(0)`), sumando esos
+    6px al espaciador final (`_ALTO_TITULO_PANEL_TABLA_REGULARES = 23 +
+    6`) para que el alto de `scroll` no cambie ni un pixel — comparado
+    contra Aisladas, que no tocó nada de esto en esta ronda y sigue con
+    el espaciado default de Qt entre sus mismos dos ítems."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_regulares.layout().spacing() == 0
+    assert pantalla.panel_aisladas.layout().spacing() != 0
+
+    espaciador_regulares = pantalla.panel_regulares.layout().itemAt(2).spacerItem()
+    assert espaciador_regulares.sizeHint().height() == _ALTO_TITULO_PANEL_TABLA_REGULARES
+
+
+def test_aisladas_grilla_ajustada_sin_scrollbar(qtbot, conn):
+    """Pedido explícito de la clienta ("ajustá un pelín la grilla para
+    que se vea el borde de abajo y que no aparezca el escrolleable"): el
+    tope "identidad" (`alto_natural_grilla()`) quedaba unos pixels por
+    debajo de lo que la tabla de la grilla realmente necesita para
+    mostrarse completa sin scroll interno — confirmado con un script de
+    geometría contra la pantalla completa (mismo criterio que
+    `shot_reservas.py`) que antes de este ajuste
+    `verticalScrollBar().maximum()` daba 1, y que sumar
+    `_AJUSTE_ALTO_GRILLA_AISLADAS` lo deja en 0. Se compara contra
+    `panel_a._alto_grilla_aplicado` (el valor efectivamente usado al
+    construir la pantalla) en vez de volver a llamar `alto_natural_
+    grilla()` acá: ese `sizeHint()` deja de ser estable una vez agrandada
+    la leyenda de colores (un paso posterior de la misma construcción),
+    así que recalcularlo en el test no da el mismo valor."""
+    _preparar(conn)
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel_a = pantalla.panel_aisladas
+
+    assert panel_a.grilla.maximumHeight() == panel_a._alto_grilla_aplicado
+    assert _AJUSTE_ALTO_GRILLA_AISLADAS > 0
 
 
 def test_panel_de_filtros_de_la_grilla_queda_compacto(qtbot, conn):

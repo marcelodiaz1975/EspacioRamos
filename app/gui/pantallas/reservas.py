@@ -138,6 +138,19 @@ _ALTO_DETALLE_AISLADAS = 54
 # espaciador como hueco muerto al final del todo, después de la tabla,
 # donde no se ve.
 _ALTO_TITULO_PANEL_TABLA = 23
+# Regulares únicamente (pedido explícito de la clienta, ronda posterior:
+# "subí un poco más la tabla para pegarlo a lo de arriba sin tocar el
+# resto"): `layout_externo` tenía además el espaciado default de Qt
+# entre widgets (6px) antes de `panel_tabla` — hueco de más entre el
+# scroll de arriba y la tabla. `layout_externo.setSpacing(0)` (solo en
+# Regulares, no en Aisladas — la clienta no pidió tocar esa solapa acá)
+# lo saca; medido con un script de geometría (mismo criterio de todo
+# este apartado, comparando `panel.height() - scroll_area.height()`
+# antes/después) que ese único cambio alcanza sumando 6px al espaciador
+# final para que el alto de `scroll` no se mueva ni un pixel ("sin tocar
+# el resto" — confirmado, `scroll` termina en la misma posición absoluta
+# que antes): `_ALTO_TITULO_PANEL_TABLA_REGULARES = 23 + 6 = 29`.
+_ALTO_TITULO_PANEL_TABLA_REGULARES = _ALTO_TITULO_PANEL_TABLA + 6
 # Cantidad de filas de "Referencias de colores" en Reservas aisladas (6
 # referencias / 2 columnas, ver `LeyendaColores.hacer_compacta`) — usado
 # para repartir en partes iguales, entre los "cuadraditos" de esa
@@ -145,6 +158,18 @@ _ALTO_TITULO_PANEL_TABLA = 23
 # contra una grilla que ahora se muestra completa (pedido explícito de
 # la clienta, ver `_PanelReservasAisladas._armar_ui`).
 _FILAS_LEYENDA_AISLADA = 3
+# Ajuste fino sobre el tope "identidad" de la grilla de Aisladas (pedido
+# explícito de la clienta, ronda posterior: "ajustá un pelín la grilla
+# para que se vea el borde de abajo y que no aparezca el escrolleable").
+# Medido con un script de geometría: `alto_natural_grilla()` (el
+# `sizeHint()` de la columna) quedaba 2px por debajo de lo que la tabla
+# realmente necesita (`sum(rowHeight) + 2 × frameWidth`, con el
+# encabezado horizontal oculto) — un desfasaje entre el `sizeHint` y el
+# alto real de renderizado, no algo que dependa de los datos cargados,
+# así que alcanza con sumarle un puñado de pixels fijo al tope antes de
+# aplicarlo. Confirmado que sube a `tabla.verticalScrollBar().maximum()
+# == 0` (antes daba 1) sin recortar el borde inferior de la grilla.
+_AJUSTE_ALTO_GRILLA_AISLADAS = 2
 
 
 def _alto_para_filas(tabla: QTableWidget, filas: int) -> int:
@@ -371,6 +396,11 @@ class _PanelReservasRegulares(QWidget):
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
+        # Sin espaciado default de Qt entre los ítems (pedido de la
+        # clienta: "subí un poco más la tabla para pegarlo a lo de
+        # arriba") — el hueco que eso saca queda compensado en el
+        # espaciador final, ver `_ALTO_TITULO_PANEL_TABLA_REGULARES`.
+        layout_externo.setSpacing(0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -620,7 +650,7 @@ class _PanelReservasRegulares(QWidget):
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla)
-        layout_externo.addSpacing(_ALTO_TITULO_PANEL_TABLA)
+        layout_externo.addSpacing(_ALTO_TITULO_PANEL_TABLA_REGULARES)
 
         self._cargar_edificios()
         self._foco = instalar_enter_avanza_foco(
@@ -1146,7 +1176,14 @@ class _PanelReservasAisladas(QWidget):
         # regulares, ver `_PanelReservasRegulares`), así que no recorta
         # nada hoy; de paso queda scrolleable, por si el día de mañana
         # hace falta mostrar más horarios sin agrandar el panel.
-        alto_grilla = self.grilla.alto_natural_grilla()
+        alto_grilla = self.grilla.alto_natural_grilla() + _AJUSTE_ALTO_GRILLA_AISLADAS
+        # Guardado aparte (no solo pasado a `limitar_alto_grilla`): el
+        # `sizeHint()` detrás de `alto_natural_grilla()` deja de ser
+        # estable una vez aplicado el tope y agrandada la leyenda más
+        # abajo — volver a llamarlo después de construir la pantalla (ej.
+        # desde un test) puede devolver otro valor. Este atributo es el
+        # que realmente se usó.
+        self._alto_grilla_aplicado = alto_grilla
         self.grilla.limitar_alto_grilla(alto_grilla)
         # El panel de Filtros de al lado (con "Referencias de colores")
         # queda más bajo que la grilla ahora que esta se ve completa —
