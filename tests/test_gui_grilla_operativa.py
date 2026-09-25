@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -521,3 +521,65 @@ def test_leyenda_colores_sigue_al_cambio_de_modo(qtbot, conn):
     textos = _textos_leyenda_visibles(widget._leyenda_colores)
     assert "Libre de reserva regular." in textos
     assert "Se libera en el futuro." not in textos
+
+
+def test_mostrar_leyenda_colores_compacta_pasa_a_dos_columnas_y_muestra_mas_chica(qtbot, conn):
+    """Pedido de la clienta al revisar Reservas: con `compacta=True` la
+    leyenda entra a 2 columnas (en vez de 1) y la muestra de color se
+    achica — para caber en el panel angosto de Filtros embebido ahí."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.mostrar_leyenda_colores(compacta=True)
+
+    assert widget._leyenda_colores._columnas == 2
+    assert widget._leyenda_colores._tamano_muestra == (28, 16)
+    textos = _textos_leyenda_visibles(widget._leyenda_colores)
+    assert "Profesional filtrado." in textos  # sigue mostrando todas las referencias
+
+
+def test_mostrar_leyenda_colores_sin_compacta_mantiene_una_columna(qtbot, conn):
+    """El resto de los usos (Oferta de consultorios) no pide `compacta` y
+    tiene que seguir viéndose igual que siempre."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.mostrar_leyenda_colores()
+
+    assert widget._leyenda_colores._columnas == 1
+    assert widget._leyenda_colores._tamano_muestra == (40, 24)
+
+
+def test_agrandar_panel_filtros_cambia_el_ancho_maximo(qtbot, conn):
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget._panel_filtros.maximumWidth() == 260
+
+    widget.agrandar_panel_filtros(290)
+
+    assert widget._panel_filtros.maximumWidth() == 290
+
+
+def test_agrupar_dias_en_pares_arma_una_grilla_de_2_columnas(qtbot, conn):
+    """Pedido de la clienta: el filtro "Día de la semana" pasa de una
+    lista vertical a una grilla de 2 columnas, sin perder ninguno de los
+    checks ya construidos (siguen siendo los mismos objetos, solo
+    cambian de contenedor)."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    checks_antes = dict(widget._checks_dia)
+
+    widget.agrupar_dias_en_pares()
+
+    assert widget._checks_dia == checks_antes
+    grid = widget._contenedor_dias.layout()
+    assert isinstance(grid, QGridLayout)
+    dias = list(widget._checks_dia)
+    for i, dia in enumerate(dias):
+        check = widget._checks_dia[dia]
+        assert isinstance(check, QCheckBox)
+        indice = grid.indexOf(check)
+        fila, columna, _, _ = grid.getItemPosition(indice)
+        assert (fila, columna) == (i // 2, i % 2)

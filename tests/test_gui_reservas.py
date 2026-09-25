@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QGroupBox, QLabel, QMessageBox, QScrollArea, QWidget
+from PySide6.QtWidgets import QGridLayout, QGroupBox, QLabel, QMessageBox, QScrollArea, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -94,6 +94,24 @@ def test_sin_titulo_vista_previa_grilla_y_tabla_de_abajo_fuera_del_scroll(qtbot,
         scroll = panel.findChild(QScrollArea)
         panel_tabla = next(gb for gb in panel.findChildren(QGroupBox) if gb.title() == titulo_tabla)
         assert scroll.isAncestorOf(panel_tabla) is False
+
+
+def test_panel_de_filtros_de_la_grilla_queda_compacto(qtbot, conn):
+    """Pedido de la clienta al revisar Reservas: la columna del formulario
+    (Profesional/Localidad/.../botones) se angosta un poco y ese ancho se
+    lo lleva el panel de Filtros de la grilla (Localidad/Edificio/Unidad/
+    Día de la semana/Profesional/Referencias de colores), que además
+    muestra sus días de a pares y la leyenda de colores a 2 columnas con
+    muestra más chica."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+        assert panel.combo_profesional.minimumWidth() == 190
+        assert panel.grilla._panel_filtros.maximumWidth() == 290
+        assert panel.grilla._leyenda_colores._columnas == 2
+        assert panel.grilla._leyenda_colores._tamano_muestra == (28, 16)
+        grid = panel.grilla._contenedor_dias.layout()
+        assert isinstance(grid, QGridLayout)
 
 
 def test_crear_reserva_regular_sin_conflicto_persiste(qtbot, conn):

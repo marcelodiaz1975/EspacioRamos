@@ -454,8 +454,22 @@ class LeyendaColores(QGroupBox):
     def __init__(self, columnas: int = 2, parent=None):
         super().__init__("Referencias de colores", parent)
         self._columnas = columnas
+        self._tamano_muestra = (40, 24)
         self._layout = QGridLayout(self)
         self.actualizar("regular")
+
+    def hacer_compacta(self) -> None:
+        """Pedido de la clienta al revisar Reservas: dos columnas de
+        referencias en vez de una, con la muestra de color y la letra más
+        chicas — para que entren dos por fila dentro del panel angosto de
+        Filtros embebido ahí, sin tener que agrandarlo demasiado. Solo la
+        usa quien la pida explícitamente (ver `GrillaOperativaWidget.
+        mostrar_leyenda_colores(compacta=True)`); "Vista rápida"/Oferta de
+        consultorios, con más ancho disponible, se quedan con el tamaño
+        normal."""
+        self._columnas = 2
+        self._tamano_muestra = (28, 16)
+        self.setStyleSheet("QLabel { font-size: 10px; }")
 
     def actualizar(self, modo: str) -> None:
         # `deleteLater` sola no alcanza: la destrucción real queda diferida
@@ -474,7 +488,7 @@ class LeyendaColores(QGroupBox):
         for i, (celda, texto) in enumerate(referencias):
             fila, columna = divmod(i, self._columnas)
             muestra = _CeldaGrilla(celda, (0, "Lunes", 0), lambda *_: None)
-            muestra.setFixedSize(40, 24)
+            muestra.setFixedSize(*self._tamano_muestra)
             self._layout.addWidget(muestra, fila, columna * 2)
             etiqueta = QLabel(texto)
             etiqueta.setWordWrap(True)
@@ -500,6 +514,15 @@ class GrillaOperativaWidget(QWidget):
 
     def _armar_ui(self) -> None:
         layout_principal = QHBoxLayout(self)
+        # Sin margen propio (pedido de la clienta al revisar Reservas: el
+        # título "Filtros" quedaba más abajo que "Profesional" en la
+        # columna de al lado) — este widget ya vive embebido dentro de
+        # otro contenedor con su propio margen, así que sumar el de acá
+        # encima solo corría el panel de Filtros hacia abajo sin ninguna
+        # necesidad. Cambio general, sin riesgo: solo achica un margen
+        # vacío, no toca contenido — aplica a todos los usos de esta
+        # grilla (Reservas, Oferta, Novedades, Grilla semanal).
+        layout_principal.setContentsMargins(0, 0, 0, 0)
 
         panel_filtros = QGroupBox("Filtros")
         panel_filtros.setObjectName("panelFiltrosGrilla")
@@ -536,6 +559,7 @@ class GrillaOperativaWidget(QWidget):
             check.stateChanged.connect(self.actualizar)
             self._checks_dia[dia] = check
             layout_dias.addWidget(check)
+        self._contenedor_dias = contenedor_dias
         layout_filtros.addWidget(contenedor_dias)
 
         layout_filtros.addWidget(QLabel("Profesional"))
@@ -777,12 +801,48 @@ class GrillaOperativaWidget(QWidget):
         referencia visual completa de la semana, no solo como filtros)."""
         self._panel_filtros.setTitle(titulo)
 
-    def mostrar_leyenda_colores(self) -> None:
+    def agrandar_panel_filtros(self, ancho: int) -> None:
+        """Sube el ancho máximo del panel de Filtros (260px por defecto)
+        — pensado para Reservas, que angosta su propia columna del
+        formulario de al lado (`_ANCHO_COMBO_PROFESIONAL`) y usa ese
+        ancho liberado acá, para que la leyenda de colores compacta (ver
+        `mostrar_leyenda_colores(compacta=True)`) entre cómoda a dos
+        columnas."""
+        self._panel_filtros.setMaximumWidth(ancho)
+
+    def agrupar_dias_en_pares(self) -> None:
+        """El filtro "Día de la semana" pasa de una lista vertical (un
+        check por línea) a una grilla de 2 columnas fijas — mismo
+        criterio ya usado en el campo "Días" del alta de Reservas
+        regulares. Pedido puntual de la clienta al revisar Reservas, para
+        ganar alto vertical en el panel de Filtros angosto embebido ahí;
+        el resto de los usos de esta grilla (Oferta, Novedades, Grilla
+        semanal) se quedan con la lista de siempre. Se arma reemplazando
+        el contenedor de los checks ya construidos en `_armar_ui` (no
+        re-crea los `QCheckBox`, solo los reubica) con `layout.
+        replaceWidget`, que no necesita saber en qué posición del layout
+        estaba el widget viejo."""
+        contenedor_nuevo = QWidget()
+        grid = QGridLayout(contenedor_nuevo)
+        grid.setContentsMargins(0, 0, 0, 0)
+        for i, dia in enumerate(self._checks_dia):
+            grid.addWidget(self._checks_dia[dia], i // 2, i % 2)
+        self._panel_filtros.layout().replaceWidget(self._contenedor_dias, contenedor_nuevo)
+        self._contenedor_dias.deleteLater()
+        self._contenedor_dias = contenedor_nuevo
+
+    def mostrar_leyenda_colores(self, compacta: bool = False) -> None:
         """Revela la leyenda de referencias de colores en el panel de
         Filtros, debajo del combo de Profesional — pensado para los usos
-        "vista previa" embebidos (Reservas) donde conviene tenerla a mano
-        ahí mismo; "Vista rápida" no la llama porque ya trae la suya
-        propia, debajo de la grilla completa."""
+        "vista previa" embebidos (Reservas, Oferta de consultorios) donde
+        conviene tenerla a mano ahí mismo; "Vista rápida" no la llama
+        porque ya trae la suya propia, debajo de la grilla completa.
+        `compacta=True` (Reservas, panel de Filtros angosto) la pasa a
+        dos columnas con muestra y letra más chicas — ver `LeyendaColores.
+        hacer_compacta`; Oferta de consultorios, con más ancho
+        disponible, se queda con el tamaño normal."""
+        if compacta:
+            self._leyenda_colores.hacer_compacta()
         self._actualizar_leyenda_colores()
         self._leyenda_colores.show()
 

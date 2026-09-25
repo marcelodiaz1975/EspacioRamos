@@ -62,7 +62,8 @@ from app.negocio.reservas import (
 from app.repositorio.registro import obtener_repositorio
 
 _DIAS_RESERVA = DIAS_SEMANA[:6]
-_ANCHO_COMBO_PROFESIONAL = 220
+_ANCHO_COMBO_PROFESIONAL = 190
+_ANCHO_PANEL_FILTROS_GRILLA = 290
 _ANCHO_COL_PROFESIONAL = 180
 _FORMATO_FECHA = "dd-MM-yyyy"
 _FECHA_SIN_DATO = QDate(2000, 1, 1)  # sentinel de QDateEdit.setSpecialValueText: "sin fecha"
@@ -410,10 +411,13 @@ class _PanelReservasRegulares(QWidget):
         # grilla operativa".
         grupo_grilla = QGroupBox()
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        layout_grupo_grilla.setContentsMargins(0, 0, 0, 0)
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.fijar_modo("regular")
         self.grilla.activar_filtro_exclusivo_profesional(True)
-        self.grilla.mostrar_leyenda_colores()
+        self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
+        self.grilla.agrupar_dias_en_pares()
+        self.grilla.mostrar_leyenda_colores(compacta=True)
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -926,10 +930,13 @@ class _PanelReservasAisladas(QWidget):
         # grilla operativa".
         grupo_grilla = QGroupBox()
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        layout_grupo_grilla.setContentsMargins(0, 0, 0, 0)
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.fijar_modo("aislada")
         self.grilla.activar_filtro_exclusivo_profesional(True)
-        self.grilla.mostrar_leyenda_colores()
+        self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
+        self.grilla.agrupar_dias_en_pares()
+        self.grilla.mostrar_leyenda_colores(compacta=True)
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
