@@ -471,6 +471,17 @@ class LeyendaColores(QGroupBox):
         self._tamano_muestra = (28, 16)
         self.setStyleSheet("QLabel { font-size: 10px; }")
 
+    def fijar_tamano_muestra(self, ancho: int, alto: int) -> None:
+        """Agranda (o achica) el tamaño de cada muestra de color —
+        pensado para Reservas aisladas, que reparte en los "cuadraditos"
+        el alto de sobra que gana el panel de Filtros al alinearse contra
+        una grilla más alta (en vez de dejarlo como espacio en blanco
+        vacío al final, que es lo que haría el `addStretch()` de
+        `layout_filtros` por su cuenta). No vuelve a llamar `actualizar`
+        — quien la use tiene que refrescar la leyenda después (ver
+        `GrillaOperativaWidget.agrandar_muestras_leyenda`)."""
+        self._tamano_muestra = (ancho, alto)
+
     def actualizar(self, modo: str) -> None:
         # `deleteLater` sola no alcanza: la destrucción real queda diferida
         # al próximo paso del loop de eventos, así que el widget viejo
@@ -893,6 +904,25 @@ class GrillaOperativaWidget(QWidget):
 
     def _actualizar_leyenda_colores(self) -> None:
         self._leyenda_colores.actualizar(self.combo_modo.currentData() or "regular")
+
+    def tamano_muestra_leyenda(self) -> tuple[int, int]:
+        """(ancho, alto) actual de cada muestra de color de "Referencias
+        de colores" — para que quien la use pueda calcular cuánto
+        agrandarlas a partir del tamaño de hoy, sin acceder a
+        `_leyenda_colores` desde afuera."""
+        return self._leyenda_colores._tamano_muestra
+
+    def agrandar_muestras_leyenda(self, ancho: int, alto: int) -> None:
+        """Agranda las muestras de color de "Referencias de colores" a
+        `(ancho, alto)` y refresca la leyenda para que tome el tamaño
+        nuevo — pensado para Reservas aisladas: cuando la grilla se
+        muestra completa (sin recortar, ver `limitar_alto_grilla`) queda
+        más alta que el panel de Filtros de al lado, y la clienta pidió
+        repartir esa diferencia entre los cuadraditos de la leyenda (no
+        dejarla como hueco en blanco) para que el panel de Filtros
+        termine a la misma altura que el borde inferior de la grilla."""
+        self._leyenda_colores.fijar_tamano_muestra(ancho, alto)
+        self._actualizar_leyenda_colores()
 
     def dar_stretch_a_detalle(self) -> None:
         """La grilla (`self.tabla`) tiene `stretch=1` por defecto: si esta

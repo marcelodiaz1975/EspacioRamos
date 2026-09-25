@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel
+from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -548,6 +548,40 @@ def test_mostrar_leyenda_colores_sin_compacta_mantiene_una_columna(qtbot, conn):
 
     assert widget._leyenda_colores._columnas == 1
     assert widget._leyenda_colores._tamano_muestra == (40, 24)
+
+
+def test_tamano_muestra_leyenda_devuelve_el_tamano_actual(qtbot, conn):
+    """Pensado para que quien la use (Reservas aisladas) pueda calcular
+    cuánto agrandar las muestras a partir del tamaño de hoy, sin acceder
+    a `_leyenda_colores` desde afuera."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.mostrar_leyenda_colores(compacta=True)
+
+    assert widget.tamano_muestra_leyenda() == (28, 16)
+
+
+def test_agrandar_muestras_leyenda_cambia_el_tamano_y_refresca(qtbot, conn):
+    """Pedido de la clienta al revisar Reservas aisladas: cuando la
+    grilla se muestra completa y queda más alta que el panel de Filtros
+    de al lado, la diferencia se reparte entre los "cuadraditos" de
+    "Referencias de colores" (no se deja como hueco en blanco al final)
+    — `agrandar_muestras_leyenda` cambia el tamaño Y refresca la leyenda
+    de una sola vez (a diferencia de `fijar_tamano_muestra`, que solo
+    guarda el valor nuevo, sin tocar lo ya dibujado)."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.mostrar_leyenda_colores(compacta=True)
+
+    widget.agrandar_muestras_leyenda(28, 30)
+
+    assert widget.tamano_muestra_leyenda() == (28, 30)
+    muestras = widget._leyenda_colores.findChildren(QWidget)
+    # Al menos una muestra ya construida con el tamaño nuevo (no solo
+    # guardado para la próxima vez).
+    assert any(m.height() == 30 and m.width() == 28 for m in muestras)
 
 
 def test_agrandar_panel_filtros_cambia_el_ancho_maximo(qtbot, conn):

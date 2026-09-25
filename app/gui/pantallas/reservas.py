@@ -117,7 +117,31 @@ _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 4
 # Alto máximo del cuadro "Detalle" en Reservas aisladas, ya sacado de la
 # grilla y ocupando todo el ancho de "Filtros + grid" (90px por defecto
 # en el resto de los usos) — ver `GrillaOperativaWidget.extraer_detalle`.
-_ALTO_DETALLE_AISLADAS = 96
+_ALTO_DETALLE_AISLADAS = 54
+# `layout_externo` (form+grilla scrolleable, stretch=1, seguido de la
+# tabla de abajo, sin stretch) reparte TODO el alto disponible entre esos
+# dos — sacarle a `panel_tabla` el alto que ocupaba su título (ver más
+# abajo, "sin título") no alcanza por sí solo para que la tabla suba: sin
+# nada más, ese alto liberado se lo lleva de vuelta el `QScrollArea` de
+# arriba (el único ítem con `stretch=1`), empujando `panel_tabla` hacia
+# ABAJO en la misma medida — la posición de la tabla queda exactamente
+# igual que antes, en vez de subir. `_ALTO_TITULO_PANEL_TABLA` (14px,
+# medido: `QGroupBox` con título vs. sin título, mismo contenido) se
+# agrega como espaciador FIJO después de `panel_tabla` — compensa
+# exactamente lo que `panel_tabla` dejó de necesitar, así el reparto
+# entre `scroll`/`panel_tabla` no cambia (scroll sigue exactamente del
+# mismo alto que antes — "sin tocar nada de lo que está antes de la
+# tabla", pedido explícito de la clienta) y la tabla sí sube esos 14px,
+# con el espaciador como hueco muerto al final del todo, después de la
+# tabla, donde no se ve.
+_ALTO_TITULO_PANEL_TABLA = 14
+# Cantidad de filas de "Referencias de colores" en Reservas aisladas (6
+# referencias / 2 columnas, ver `LeyendaColores.hacer_compacta`) — usado
+# para repartir en partes iguales, entre los "cuadraditos" de esa
+# leyenda, el alto de sobra que gana el panel de Filtros al alinearse
+# contra una grilla que ahora se muestra completa (pedido explícito de
+# la clienta, ver `_PanelReservasAisladas._armar_ui`).
+_FILAS_LEYENDA_AISLADA = 3
 
 
 def _alto_para_filas(tabla: QTableWidget, filas: int) -> int:
@@ -549,7 +573,12 @@ class _PanelReservasRegulares(QWidget):
         # scrollear todo el panel — pedido explícito de la clienta.
         layout_externo.addWidget(scroll, stretch=1)
 
-        panel_tabla = QGroupBox("Horarios reservados")
+        # Sin título (pedido de la clienta: "eliminá el título 'Horarios
+        # reservados' así la tabla puede situarse un poco más arriba") —
+        # el `QGroupBox` sigue existiendo (borde propio, `panelSolapa`),
+        # solo pierde el título, mismo criterio que `grupo_grilla` de
+        # arriba, que ya no tiene título desde una ronda anterior.
+        panel_tabla = QGroupBox()
         panel_tabla.setObjectName("panelSolapa")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
@@ -567,6 +596,7 @@ class _PanelReservasRegulares(QWidget):
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla)
+        layout_externo.addSpacing(_ALTO_TITULO_PANEL_TABLA)
 
         self._cargar_edificios()
         self._foco = instalar_enter_avanza_foco(
@@ -740,10 +770,12 @@ class _PanelReservasRegulares(QWidget):
         # profesional` para la versión completa de esta pantalla hermana.
         resumen = calcular_resumen_profesional(self.conn, id_profesional)
         if resumen is None:
-            self.etiqueta_horas_semanales.setText("Horas regulares semanales: —")
+            self.etiqueta_horas_semanales.setText("Cant. horas regulares semanales: —")
             self.etiqueta_descuento.setText("% Descuento: —")
             return
-        self.etiqueta_horas_semanales.setText(f"Horas regulares semanales: {_fmt_horas(resumen.horas_semanales)}")
+        self.etiqueta_horas_semanales.setText(
+            f"Cant. horas regulares semanales: {_fmt_horas(resumen.horas_semanales)}"
+        )
         self.etiqueta_descuento.setText(f"% Descuento: {resumen.porcentaje_descuento:.1f}%")
 
     def _resetear_formulario(self) -> None:
@@ -1074,25 +1106,42 @@ class _PanelReservasAisladas(QWidget):
         # filtro`.
         self.grilla.fijar_titulo_filtros("")
         self.grilla.renombrar_etiquetas_filtro()
-        # La grilla termina alineada con la última referencia de colores
-        # del panel de Filtros de al lado ("Profesional filtrado"), en
-        # vez de imponer su propio alto natural (más alto que ese panel)
-        # al resto de la columna — pedido explícito de la clienta. De
-        # paso queda scrolleable, por si el día de mañana hace falta
-        # mostrar más horarios sin agrandar el panel.
-        alto_filtros = self.grilla.alto_natural_filtros()
-        self.grilla.limitar_alto_grilla(alto_filtros)
-        layout_grupo_grilla.addWidget(self.grilla)
         # "Detalle" pasa a ocupar todo el ancho de esta grilla (Filtros +
         # grid juntos), debajo de todo, en vez de la columna angosta de
         # la grilla nomás — pedido explícito de la clienta ("en regulares
         # no porque no entra", así que esto es puntual de Aisladas). Sale
-        # de `self.grilla` con `extraer_detalle` y se reagrega acá, en
-        # `layout_grupo_grilla` (que ya envuelve TODO el ancho de
-        # `self.grilla`, columnas de Filtros y grid incluidas) — pegado
-        # justo debajo, sin ningún hueco, ahora que la grilla quedó más
-        # baja.
+        # de `self.grilla` con `extraer_detalle` ANTES de medir el alto
+        # natural de la columna (ver justo abajo): si se sacara después,
+        # ese alto natural todavía arrastraría el de "Detalle", que de
+        # todos modos se saca a continuación.
         etiqueta_detalle, texto_detalle = self.grilla.extraer_detalle()
+        # La grilla se muestra COMPLETA, sin recortar (pedido explícito
+        # de la clienta: "se ve cortada... dale mas alta de manera que se
+        # visualice completa") — el tope que se le pone es IGUAL a su
+        # propio alto natural (mismo criterio "identidad" que Reservas
+        # regulares, ver `_PanelReservasRegulares`), así que no recorta
+        # nada hoy; de paso queda scrolleable, por si el día de mañana
+        # hace falta mostrar más horarios sin agrandar el panel.
+        alto_grilla = self.grilla.alto_natural_grilla()
+        self.grilla.limitar_alto_grilla(alto_grilla)
+        # El panel de Filtros de al lado (con "Referencias de colores")
+        # queda más bajo que la grilla ahora que esta se ve completa —
+        # pedido explícito de la clienta: ese sobrante no se deja como
+        # hueco en blanco al final (lo que haría solo el `addStretch()`
+        # de `layout_filtros`), se reparte entre los "cuadraditos" de la
+        # leyenda para que crezcan y el panel termine exactamente a la
+        # misma altura que el borde inferior de la grilla.
+        alto_filtros = self.grilla.alto_natural_filtros()
+        diferencia = alto_grilla - alto_filtros
+        # Si la grilla no queda más alta que Filtros (ej. una base con
+        # pocos consultorios cargados), no hay nada que repartir — se
+        # deja el tamaño compacto de siempre en vez de achicar las
+        # muestras con una diferencia negativa.
+        if diferencia > 0:
+            ancho_muestra, alto_muestra = self.grilla.tamano_muestra_leyenda()
+            alto_muestra += diferencia // _FILAS_LEYENDA_AISLADA
+            self.grilla.agrandar_muestras_leyenda(ancho_muestra, alto_muestra)
+        layout_grupo_grilla.addWidget(self.grilla)
         layout_grupo_grilla.addWidget(etiqueta_detalle)
         layout_grupo_grilla.addWidget(texto_detalle)
         texto_detalle.setMaximumHeight(_ALTO_DETALLE_AISLADAS)
@@ -1122,7 +1171,10 @@ class _PanelReservasAisladas(QWidget):
         # un par de filas siempre se vean sin scrollear todo el panel.
         layout_externo.addWidget(scroll, stretch=1)
 
-        panel_tabla = QGroupBox("Reservas aisladas")
+        # Sin título (mismo pedido y mismo criterio que Regulares, ver
+        # esa solapa) — la tabla sube lo más posible sin tocar nada de
+        # lo que está arriba (form + grilla + Detalle).
+        panel_tabla = QGroupBox()
         panel_tabla.setObjectName("panelSolapa")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
@@ -1140,6 +1192,7 @@ class _PanelReservasAisladas(QWidget):
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla)
+        layout_externo.addSpacing(_ALTO_TITULO_PANEL_TABLA)
 
         self._cargar_edificios()
         self._foco = instalar_enter_avanza_foco(
@@ -1239,9 +1292,11 @@ class _PanelReservasAisladas(QWidget):
         # descuento, sin horas aisladas).
         resumen = calcular_resumen_profesional(self.conn, id_profesional)
         if resumen is None:
-            self.etiqueta_horas_aisladas.setText("Horas aisladas mensuales: —")
+            self.etiqueta_horas_aisladas.setText("Cant. horas aisladas mensuales: —")
             return
-        self.etiqueta_horas_aisladas.setText(f"Horas aisladas mensuales: {_fmt_horas(resumen.horas_aisladas_mensuales)}")
+        self.etiqueta_horas_aisladas.setText(
+            f"Cant. horas aisladas mensuales: {_fmt_horas(resumen.horas_aisladas_mensuales)}"
+        )
 
     def _alternar_reubicacion(self) -> None:
         marcado = self.casilla_reubicacion.isChecked()

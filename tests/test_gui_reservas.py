@@ -5,7 +5,9 @@ from PySide6.QtWidgets import QGridLayout, QGroupBox, QLabel, QMessageBox, QPush
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import hoja_estilos
-from app.gui.pantallas.reservas import _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas
+from app.gui.pantallas.reservas import (
+    _ALTO_TITULO_PANEL_TABLA, _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
+)
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
 from app.negocio.lista_espera import crear_pedido
@@ -79,22 +81,48 @@ def test_contenido_dentro_del_scroll_tiene_fondo_claro(qtbot, conn):
 def test_sin_titulo_vista_previa_grilla_y_tabla_de_abajo_fuera_del_scroll(qtbot, conn):
     """Pedido de la clienta: se saca el título "Vista previa: grilla
     operativa" (el `QGroupBox` de la grilla queda sin título) y la tabla
-    de abajo (Horarios reservados/Reservas aisladas) queda fuera del
-    `QScrollArea` de la grilla — para que su título y un par de filas se
-    vean siempre, sin tener que scrollear el panel entero."""
+    de abajo (antes "Horarios reservados"/"Reservas aisladas", esos dos
+    títulos también se sacaron en una ronda posterior para que la tabla
+    pudiera subir un poco más) queda fuera del `QScrollArea` de la
+    grilla — para que se vea siempre, sin tener que scrollear el panel
+    entero."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    for panel, titulo_tabla in (
-        (pantalla.panel_regulares, "Horarios reservados"),
-        (pantalla.panel_aisladas, "Reservas aisladas"),
-    ):
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
         titulos = {gb.title() for gb in panel.findChildren(QGroupBox)}
         assert "Vista previa: grilla operativa" not in titulos
-        assert titulo_tabla in titulos
 
         scroll = panel.findChild(QScrollArea)
-        panel_tabla = next(gb for gb in panel.findChildren(QGroupBox) if gb.title() == titulo_tabla)
+        panel_tabla = panel.tabla.parentWidget()
+        assert isinstance(panel_tabla, QGroupBox)
+        assert panel_tabla.title() == ""
         assert scroll.isAncestorOf(panel_tabla) is False
+
+
+def test_tabla_de_abajo_sin_titulo_tiene_espaciador_que_compensa(qtbot, conn):
+    """Pedido explícito de la clienta ("eliminá el título... así la tabla
+    puede situarse un poco más arriba"): sacar el título de la tabla de
+    abajo por sí solo NO la sube — `layout_externo` reparte todo el alto
+    disponible entre el `QScrollArea` de arriba (`stretch=1`) y esta
+    tabla, así que el alto que el título dejó de necesitar se lo volvía a
+    llevar el scroll, empujando la tabla para abajo la misma medida (la
+    posición quedaba igual que antes). Un espaciador fijo después de la
+    tabla, del mismo alto que tenía el título (`_ALTO_TITULO_PANEL_
+    TABLA`), compensa exactamente eso: el reparto entre scroll/tabla no
+    cambia (scroll sigue del mismo alto — "sin tocar nada de lo que está
+    antes de la tabla") y la tabla sí sube, con el espaciador como hueco
+    muerto al final de todo, donde no se ve."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+        panel_tabla = panel.tabla.parentWidget()
+        layout = panel.layout()
+        indice_tabla = layout.indexOf(panel_tabla)
+        item_siguiente = layout.itemAt(indice_tabla + 1)
+        assert item_siguiente is not None
+        espaciador = item_siguiente.spacerItem()
+        assert espaciador is not None
+        assert espaciador.sizeHint().height() == _ALTO_TITULO_PANEL_TABLA
 
 
 def test_panel_de_filtros_de_la_grilla_queda_compacto(qtbot, conn):
@@ -233,7 +261,7 @@ def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
     assert grilla_regulares.texto_detalle.maximumHeight() > 90
 
     grilla_aisladas = pantalla.panel_aisladas.grilla
-    assert grilla_aisladas.texto_detalle.maximumHeight() == 96
+    assert grilla_aisladas.texto_detalle.maximumHeight() == 54
 
 
 def test_detalle_de_aisladas_ocupa_todo_el_ancho_de_la_grilla(qtbot, conn):
@@ -384,7 +412,14 @@ def test_titulo_horas_aisladas_alineado_con_el_pie_de_detalle(qtbot, conn):
     el borde inferior del cuadro "Detalle". El alto real de los botones
     depende de la fuente que les da `hoja_estilos()` (mismo motivo que
     `test_botones_de_accion_quedan_compactos_con_su_color`), así que hay
-    que aplicarla para medir lo mismo que ve la clienta."""
+    que aplicarla para medir lo mismo que ve la clienta. Con `_preparar`
+    (al menos un consultorio cargado, como en cualquier base real): sin
+    ningún consultorio, la grilla no tiene columnas y su alto natural se
+    achica mucho, corriendo "Detalle" bastante más arriba de lo que
+    correspondería — mismo motivo por el que las capturas que se le
+    envían a la clienta siempre parten de datos de ejemplo, nunca de una
+    base vacía."""
+    _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.setStyleSheet(hoja_estilos(modo_oscuro=False))
@@ -970,11 +1005,11 @@ def test_datos_complementarios_del_profesional(qtbot, conn):
     assert "%" in panel.etiqueta_descuento.text()
 
     panel.combo_profesional.setCurrentIndex(0)  # vuelve al placeholder en blanco
-    assert panel.etiqueta_horas_semanales.text() == "Horas regulares semanales: —"
+    assert panel.etiqueta_horas_semanales.text() == "Cant. horas regulares semanales: —"
     assert panel.etiqueta_descuento.text() == "% Descuento: —"
 
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    assert panel.etiqueta_horas_semanales.text() == "Horas regulares semanales: 3"
+    assert panel.etiqueta_horas_semanales.text() == "Cant. horas regulares semanales: 3"
 
 
 def test_regulares_sin_horas_aisladas_mensuales_y_aisladas_solo_horas_aisladas(qtbot, conn):
@@ -1488,7 +1523,7 @@ def test_datos_complementarios_aisladas_incluye_horas_aisladas_mensuales(qtbot, 
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    assert panel.etiqueta_horas_aisladas.text() == "Horas aisladas mensuales: 2"
+    assert panel.etiqueta_horas_aisladas.text() == "Cant. horas aisladas mensuales: 2"
 
 
 def test_spin_horario_se_muestra_como_reloj(qtbot, conn):
