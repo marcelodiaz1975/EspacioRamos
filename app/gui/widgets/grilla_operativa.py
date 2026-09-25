@@ -530,25 +530,29 @@ class GrillaOperativaWidget(QWidget):
         self._panel_filtros = panel_filtros
         layout_filtros = QVBoxLayout(panel_filtros)
 
-        layout_filtros.addWidget(QLabel("Localidad"))
+        self._etiqueta_localidad = QLabel("Localidad")
+        layout_filtros.addWidget(self._etiqueta_localidad)
         self.lista_localidad = _lista_multiseleccion()
         self.lista_localidad.itemSelectionChanged.connect(self._cargar_edificios)
         self._filtro_localidad = _FiltroColapsable(self.lista_localidad)
         layout_filtros.addWidget(self._filtro_localidad)
 
-        layout_filtros.addWidget(QLabel("Edificio"))
+        self._etiqueta_edificio = QLabel("Edificio")
+        layout_filtros.addWidget(self._etiqueta_edificio)
         self.lista_edificio = _lista_multiseleccion()
         self.lista_edificio.itemSelectionChanged.connect(self._cargar_unidades)
         self._filtro_edificio = _FiltroColapsable(self.lista_edificio)
         layout_filtros.addWidget(self._filtro_edificio)
 
-        layout_filtros.addWidget(QLabel("Unidad"))
+        self._etiqueta_unidad = QLabel("Unidad")
+        layout_filtros.addWidget(self._etiqueta_unidad)
         self.lista_unidad = _lista_multiseleccion()
         self.lista_unidad.itemSelectionChanged.connect(self._unidad_seleccion_cambio)
         self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
         layout_filtros.addWidget(self._filtro_unidad)
 
-        layout_filtros.addWidget(QLabel("Día de la semana"))
+        self._etiqueta_dia = QLabel("Día de la semana")
+        layout_filtros.addWidget(self._etiqueta_dia)
         self._checks_dia: dict[str, QCheckBox] = {}
         contenedor_dias = QWidget()
         layout_dias = QVBoxLayout(contenedor_dias)
@@ -830,6 +834,18 @@ class GrillaOperativaWidget(QWidget):
         self._panel_filtros.layout().replaceWidget(self._contenedor_dias, contenedor_nuevo)
         self._contenedor_dias.deleteLater()
         self._contenedor_dias = contenedor_nuevo
+
+    def renombrar_etiquetas_filtro(self) -> None:
+        """Pedido de la clienta al revisar Reservas: sin el título
+        "Filtros" del panel (se saca aparte, con `fijar_titulo_filtros(
+        "")`), cada filtro individual pasa a nombrarse "Filtro de
+        localidad"/"Filtro de edificio"/"Filtro de unidad"/"Filtro de día
+        de la semana" — más explícito para no perder el contexto que daba
+        el título de arriba. "Profesional" queda igual, no lo pidió."""
+        self._etiqueta_localidad.setText("Filtro de localidad")
+        self._etiqueta_edificio.setText("Filtro de edificio")
+        self._etiqueta_unidad.setText("Filtro de unidad")
+        self._etiqueta_dia.setText("Filtro de día de la semana")
 
     def mostrar_leyenda_colores(self, compacta: bool = False) -> None:
         """Revela la leyenda de referencias de colores en el panel de

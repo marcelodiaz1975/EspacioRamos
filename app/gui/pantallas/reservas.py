@@ -71,8 +71,21 @@ _FECHA_SIN_DATO = QDate(2000, 1, 1)  # sentinel de QDateEdit.setSpecialValueText
 # aisladas) tiene que verse, título y un par de filas, sin scrollear el
 # panel entero — ver el rearmado de `_armar_ui` en las dos clases de
 # abajo, que la saca del QScrollArea de la grilla para que quede siempre
-# visible en su propio espacio fijo.
-_ALTO_MINIMO_TABLA_INFERIOR = 230
+# visible en su propio espacio fijo. Muestra exactamente 3 filas (ver
+# `_alto_para_filas`) y no una altura mínima aproximada: cuanto menos
+# alto se lleve, más le queda disponible al panel de arriba (formulario
+# + grilla, con su "Detalle" que antes quedaba fuera de la vista).
+_FILAS_VISIBLES_TABLA_INFERIOR = 3
+
+
+def _alto_para_filas(tabla: QTableWidget, filas: int) -> int:
+    """Alto fijo para que se vean exactamente `filas` filas sin scroll (la
+    tabla sigue siendo scrolleable para el resto) — mismo criterio que
+    `app.gui.pantallas.llaves._alto_para_filas`, duplicado acá porque son
+    pantallas sin relación entre sí."""
+    alto_fila = tabla.verticalHeader().defaultSectionSize()
+    alto_header = tabla.horizontalHeader().sizeHint().height()
+    return alto_header + alto_fila * filas + 2 * tabla.frameWidth()
 
 
 def _fmt_horas(horas: float) -> str:
@@ -418,6 +431,11 @@ class _PanelReservasRegulares(QWidget):
         self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
         self.grilla.agrupar_dias_en_pares()
         self.grilla.mostrar_leyenda_colores(compacta=True)
+        # Sin título "Filtros" (pedido de la clienta) — cada filtro pasa a
+        # nombrarse solo con "Filtro de ...", ver `renombrar_etiquetas_
+        # filtro`.
+        self.grilla.fijar_titulo_filtros("")
+        self.grilla.renombrar_etiquetas_filtro()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -439,7 +457,6 @@ class _PanelReservasRegulares(QWidget):
 
         panel_tabla = QGroupBox("Horarios reservados")
         panel_tabla.setObjectName("panelSolapa")
-        panel_tabla.setMinimumHeight(_ALTO_MINIMO_TABLA_INFERIOR)
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(9)
@@ -452,6 +469,7 @@ class _PanelReservasRegulares(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla.setFixedHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla)
@@ -882,7 +900,13 @@ class _PanelReservasAisladas(QWidget):
         self.casilla_recargo = QCheckBox("Aplica recargo")
         form.addWidget(self.casilla_recargo)
 
-        self.casilla_reubicacion = QCheckBox("Es reubicación (compensa una ausencia del profesional, no genera cargo)")
+        # Salto de línea a mano (QCheckBox no ajusta el texto solo, a
+        # diferencia de un QLabel): pedido de la clienta, la columna del
+        # formulario quedaba mucho más ancha que la del panel de Filtros
+        # de al lado por culpa de este texto largo en una sola línea.
+        self.casilla_reubicacion = QCheckBox(
+            "Es reubicación (compensa una ausencia\ndel profesional, no genera cargo)"
+        )
         self.casilla_reubicacion.stateChanged.connect(self._alternar_reubicacion)
         form.addWidget(self.casilla_reubicacion)
 
@@ -937,6 +961,11 @@ class _PanelReservasAisladas(QWidget):
         self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
         self.grilla.agrupar_dias_en_pares()
         self.grilla.mostrar_leyenda_colores(compacta=True)
+        # Sin título "Filtros" (pedido de la clienta) — cada filtro pasa a
+        # nombrarse solo con "Filtro de ...", ver `renombrar_etiquetas_
+        # filtro`.
+        self.grilla.fijar_titulo_filtros("")
+        self.grilla.renombrar_etiquetas_filtro()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -956,7 +985,6 @@ class _PanelReservasAisladas(QWidget):
 
         panel_tabla = QGroupBox("Reservas aisladas")
         panel_tabla.setObjectName("panelSolapa")
-        panel_tabla.setMinimumHeight(_ALTO_MINIMO_TABLA_INFERIOR)
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(11)
@@ -969,6 +997,7 @@ class _PanelReservasAisladas(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla.setFixedHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla)

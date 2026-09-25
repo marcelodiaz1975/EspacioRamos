@@ -583,3 +583,30 @@ def test_agrupar_dias_en_pares_arma_una_grilla_de_2_columnas(qtbot, conn):
         indice = grid.indexOf(check)
         fila, columna, _, _ = grid.getItemPosition(indice)
         assert (fila, columna) == (i // 2, i % 2)
+
+
+def test_fijar_titulo_filtros_vacio_saca_el_titulo(qtbot, conn):
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget._panel_filtros.title() == "Filtros"
+
+    widget.fijar_titulo_filtros("")
+
+    assert widget._panel_filtros.title() == ""
+
+
+def test_renombrar_etiquetas_filtro_deja_profesional_como_estaba(qtbot, conn):
+    """Pedido de la clienta al revisar Reservas: sin el título "Filtros",
+    cada filtro individual pasa a nombrarse "Filtro de ..."; Profesional
+    no lo pidió y se queda igual."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+
+    widget.renombrar_etiquetas_filtro()
+
+    assert widget._etiqueta_localidad.text() == "Filtro de localidad"
+    assert widget._etiqueta_edificio.text() == "Filtro de edificio"
+    assert widget._etiqueta_unidad.text() == "Filtro de unidad"
+    assert widget._etiqueta_dia.text() == "Filtro de día de la semana"

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QGridLayout, QGroupBox, QLabel, QMessageBox, QScro
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.pantallas.reservas import _FECHA_SIN_DATO, PantallaReservas
+from app.gui.pantallas.reservas import _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
 from app.negocio.lista_espera import crear_pedido
@@ -112,6 +112,41 @@ def test_panel_de_filtros_de_la_grilla_queda_compacto(qtbot, conn):
         assert panel.grilla._leyenda_colores._tamano_muestra == (28, 16)
         grid = panel.grilla._contenedor_dias.layout()
         assert isinstance(grid, QGridLayout)
+
+
+def test_panel_de_filtros_sin_titulo_y_con_etiquetas_renombradas(qtbot, conn):
+    """Pedido de la clienta: se saca el título "Filtros" y cada filtro
+    pasa a nombrarse "Filtro de ..." (Profesional queda igual)."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+        assert panel.grilla._panel_filtros.title() == ""
+        assert panel.grilla._etiqueta_localidad.text() == "Filtro de localidad"
+        assert panel.grilla._etiqueta_edificio.text() == "Filtro de edificio"
+        assert panel.grilla._etiqueta_unidad.text() == "Filtro de unidad"
+        assert panel.grilla._etiqueta_dia.text() == "Filtro de día de la semana"
+
+
+def test_tabla_de_abajo_tiene_alto_fijo_para_3_filas(qtbot, conn):
+    """Pedido de la clienta: "Horarios reservados"/"Reservas aisladas"
+    muestra 3 filas nada más (con su propio scroll si hay más) — para
+    dejarle más alto disponible al panel de arriba, cuyo "Detalle" antes
+    quedaba fuera de la vista."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+        alto_esperado = _alto_para_filas(panel.tabla, 3)
+        assert panel.tabla.height() == alto_esperado
+
+
+def test_checkbox_de_reubicacion_tiene_salto_de_linea(qtbot, conn):
+    """La columna del formulario de Reservas aisladas quedaba mucho más
+    ancha que la del panel de Filtros por culpa de este texto largo en
+    una sola línea — pedido de la clienta, se parte en dos con un
+    `"\\n"` a mano (QCheckBox no ajusta el texto solo)."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    assert "\n" in pantalla.panel_aisladas.casilla_reubicacion.text()
 
 
 def test_crear_reserva_regular_sin_conflicto_persiste(qtbot, conn):
