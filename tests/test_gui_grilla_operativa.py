@@ -643,3 +643,22 @@ def test_achicar_detalle_baja_el_alto_maximo(qtbot, conn):
     widget.achicar_detalle(40)
 
     assert widget.texto_detalle.maximumHeight() == 40
+
+
+def test_extraer_detalle_saca_la_etiqueta_y_el_texto_de_la_grilla(qtbot, conn):
+    """Pedido de la clienta al revisar Reservas aisladas: "Detalle" pasa a
+    ocupar todo el ancho de la grilla (Filtros + grid), en vez de la
+    columna angosta de la grilla nomás — para eso, primero hay que
+    sacarlo del layout donde vive por default."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget._layout_grilla.indexOf(widget._etiqueta_detalle) != -1
+    assert widget._layout_grilla.indexOf(widget.texto_detalle) != -1
+
+    etiqueta, texto = widget.extraer_detalle()
+
+    assert etiqueta is widget._etiqueta_detalle
+    assert texto is widget.texto_detalle
+    assert widget._layout_grilla.indexOf(widget._etiqueta_detalle) == -1
+    assert widget._layout_grilla.indexOf(widget.texto_detalle) == -1

@@ -84,6 +84,14 @@ _ALTO_TITULO_FILTROS = 21
 # alto que le suma `_ALTO_TITULO_FILTROS` de arriba, ver el comentario
 # en `_PanelReservasRegulares._armar_ui`.
 _ESPACIADO_FORM = 4
+# Pedido explícito de la clienta, solo para esta pantalla (no se toca
+# `estilos.py`): los tres botones de acción (Crear/Modificar/Finalizar-
+# Cancelar) quedaban más altos que el resto de los controles de esta
+# columna (los botones-resumen de los filtros colapsables, ~22px) por el
+# padding vertical default de `botonPrimario`/`botonSecundario` (8px,
+# ~32px de alto total) — se lo pisa acá nomás, por widget, para bajarlo a
+# 22px sin perder el color/borde que ya les da el objectName.
+_ESTILO_BOTON_COMPACTO = "padding: 3px 16px;"
 # Pedido de la clienta: la tabla de abajo (Horarios reservados/Reservas
 # aisladas) tiene que verse, título y un par de filas, sin scrollear el
 # panel entero — ver el rearmado de `_armar_ui` en las dos clases de
@@ -97,9 +105,9 @@ _ESPACIADO_FORM = 4
 # antes (pedido explícito de la clienta al revisar la captura).
 _FILAS_VISIBLES_TABLA_INFERIOR_REGULARES = 3
 _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 4
-# Alto máximo del cuadro "Detalle" de la grilla embebida en Reservas
-# aisladas (90px por defecto en el resto de los usos) — ver
-# `GrillaOperativaWidget.achicar_detalle`.
+# Alto máximo del cuadro "Detalle" en Reservas aisladas, ya sacado de la
+# grilla y ocupando todo el ancho de "Filtros + grid" (90px por defecto
+# en el resto de los usos) — ver `GrillaOperativaWidget.extraer_detalle`.
 _ALTO_DETALLE_AISLADAS = 40
 
 
@@ -444,12 +452,17 @@ class _PanelReservasRegulares(QWidget):
 
         boton_crear = QPushButton("Crear reserva regular")
         boton_crear.setObjectName("botonPrimario")
+        boton_crear.setStyleSheet(_ESTILO_BOTON_COMPACTO)
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
         boton_modificar = QPushButton("Modificar seleccionada")
+        boton_modificar.setObjectName("botonSecundario")
+        boton_modificar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
         boton_finalizar = QPushButton("Finalizar reserva a fin de mes")
+        boton_finalizar.setObjectName("botonSecundario")
+        boton_finalizar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
         boton_finalizar.clicked.connect(self._finalizar_vigencia)
         form.addWidget(boton_finalizar)
 
@@ -992,12 +1005,17 @@ class _PanelReservasAisladas(QWidget):
 
         boton_crear = QPushButton("Crear reserva aislada")
         boton_crear.setObjectName("botonPrimario")
+        boton_crear.setStyleSheet(_ESTILO_BOTON_COMPACTO)
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
         boton_modificar = QPushButton("Modificar reserva")
+        boton_modificar.setObjectName("botonSecundario")
+        boton_modificar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
         boton_cancelar = QPushButton("Cancelar reserva")
+        boton_cancelar.setObjectName("botonSecundario")
+        boton_cancelar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
 
@@ -1007,9 +1025,7 @@ class _PanelReservasAisladas(QWidget):
         form.addWidget(linea_separadora)
 
         self.etiqueta_horas_aisladas = QLabel()
-        self.etiqueta_descuento = QLabel()
         form.addWidget(self.etiqueta_horas_aisladas)
-        form.addWidget(self.etiqueta_descuento)
 
         form.addStretch()
         splitter_superior.addWidget(panel_form)
@@ -1030,14 +1046,18 @@ class _PanelReservasAisladas(QWidget):
         # filtro`.
         self.grilla.fijar_titulo_filtros("")
         self.grilla.renombrar_etiquetas_filtro()
-        # A diferencia de Reservas regulares, en esta solapa es la columna
-        # de la grilla (no la del formulario, más corta acá) la que fija
-        # cuánto hay que scrollear — achicar "Detalle" es lo que le deja
-        # lugar de sobra a la tabla de abajo para mostrar más filas sin
-        # perder de vista "Detalle"/"% Descuento" (pedido explícito de la
-        # clienta), ver `achicar_detalle`.
-        self.grilla.achicar_detalle(_ALTO_DETALLE_AISLADAS)
         layout_grupo_grilla.addWidget(self.grilla)
+        # "Detalle" pasa a ocupar todo el ancho de esta grilla (Filtros +
+        # grid juntos), debajo de todo, en vez de la columna angosta de
+        # la grilla nomás — pedido explícito de la clienta ("en regulares
+        # no porque no entra", así que esto es puntual de Aisladas). Sale
+        # de `self.grilla` con `extraer_detalle` y se reagrega acá, en
+        # `layout_grupo_grilla` (que ya envuelve TODO el ancho de
+        # `self.grilla`, columnas de Filtros y grid incluidas).
+        etiqueta_detalle, texto_detalle = self.grilla.extraer_detalle()
+        layout_grupo_grilla.addWidget(etiqueta_detalle)
+        layout_grupo_grilla.addWidget(texto_detalle)
+        texto_detalle.setMaximumHeight(_ALTO_DETALLE_AISLADAS)
         splitter_superior.addWidget(grupo_grilla)
 
         splitter_superior.setStretchFactor(0, 0)
@@ -1163,18 +1183,17 @@ class _PanelReservasAisladas(QWidget):
             self._cargar_horarios_no_usados()
 
     def _actualizar_resumen_profesional(self, id_profesional: int | None) -> None:
-        # Sin "Horas regulares semanales" (pedido explícito de la clienta):
-        # en Reservas aisladas solo importan las horas aisladas mensuales
-        # y el descuento — ver `_PanelReservasRegulares._actualizar_
-        # resumen_profesional` para la versión sin horas aisladas de la
-        # pantalla hermana.
+        # Sin "Horas regulares semanales" ni "% Descuento" (pedido
+        # explícito de la clienta, en dos vueltas): en Reservas aisladas
+        # solo importa "Horas aisladas mensuales" — ver
+        # `_PanelReservasRegulares._actualizar_resumen_profesional` para
+        # la versión de la pantalla hermana (horas regulares + %
+        # descuento, sin horas aisladas).
         resumen = calcular_resumen_profesional(self.conn, id_profesional)
         if resumen is None:
             self.etiqueta_horas_aisladas.setText("Horas aisladas mensuales: —")
-            self.etiqueta_descuento.setText("% Descuento: —")
             return
         self.etiqueta_horas_aisladas.setText(f"Horas aisladas mensuales: {_fmt_horas(resumen.horas_aisladas_mensuales)}")
-        self.etiqueta_descuento.setText(f"% Descuento: {resumen.porcentaje_descuento:.1f}%")
 
     def _alternar_reubicacion(self) -> None:
         marcado = self.casilla_reubicacion.isChecked()

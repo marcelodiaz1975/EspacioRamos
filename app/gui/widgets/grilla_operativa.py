@@ -622,7 +622,8 @@ class GrillaOperativaWidget(QWidget):
         self.tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         layout_grilla.addWidget(self.tabla, stretch=1)
 
-        layout_grilla.addWidget(QLabel("Detalle:"))
+        self._etiqueta_detalle = QLabel("Detalle:")
+        layout_grilla.addWidget(self._etiqueta_detalle)
         self.texto_detalle = QTextEdit()
         self.texto_detalle.setReadOnly(True)
         self.texto_detalle.setMaximumHeight(90)
@@ -896,6 +897,23 @@ class GrillaOperativaWidget(QWidget):
         perder de vista "Detalle"/"% Descuento" — pedido explícito de la
         clienta al ver que sobraba lugar debajo de los dos."""
         self.texto_detalle.setMaximumHeight(alto)
+
+    def extraer_detalle(self) -> tuple[QLabel, QTextEdit]:
+        """Saca la etiqueta "Detalle:" y el cuadro de texto de la columna
+        de la grilla (donde quedan angostos, con solo la mitad del ancho
+        de esta grilla disponible) y los devuelve para que quien la use
+        los reubique en otro lado con más ancho — pensado para Reservas
+        aisladas, que los pasa a ocupar todo el ancho de esta grilla
+        (Filtros + grid juntos) debajo de todo, en vez de la columna
+        angosta de la grilla nomás ("no entra" en Reservas regulares, que
+        se queda con el criterio de siempre — ver `dar_stretch_a_
+        detalle`). Devuelve los mismos objetos (no copias): `self.
+        texto_detalle` sigue siendo válido y sigue recibiendo el
+        contenido en `_actualizar_detalle`, solo cambia de padre al
+        agregarlo a otro layout."""
+        self._layout_grilla.removeWidget(self._etiqueta_detalle)
+        self._layout_grilla.removeWidget(self.texto_detalle)
+        return self._etiqueta_detalle, self.texto_detalle
 
     def activar_filtro_exclusivo_profesional(self, activar: bool = True) -> None:
         """Con un profesional elegido en el filtro, no alcanza con

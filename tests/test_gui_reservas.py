@@ -1,9 +1,10 @@
 import pytest
 from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QGridLayout, QGroupBox, QLabel, QMessageBox, QScrollArea, QWidget
+from PySide6.QtWidgets import QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.estilos import hoja_estilos
 from app.gui.pantallas.reservas import _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
@@ -200,6 +201,25 @@ def test_tabla_reservas_aisladas_escrolea_con_mas_filas_de_las_que_entran(qtbot,
     assert pantalla.panel_aisladas.tabla.verticalScrollBar().maximum() > 0
 
 
+def test_cuadro_detalle_escrolea_con_mas_texto_del_que_entra(qtbot, conn):
+    """Pedido de la clienta, repetido: el cuadro "Detalle" (no solo las
+    tablas de abajo) tiene que ser scrolleable cuando el contenido no
+    entra en el alto visible — ya lo era por default de Qt (`QTextEdit`
+    scrollea sola), en las dos solapas."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    texto_largo = "línea de detalle\n" * 30
+    for indice, panel in enumerate((pantalla.panel_regulares, pantalla.panel_aisladas)):
+        pantalla.pestanas.setCurrentIndex(indice)  # solo la solapa activa tiene geometría real
+        qtbot.waitExposed(pantalla)
+        panel.grilla.texto_detalle.setPlainText(texto_largo)
+        assert panel.grilla.texto_detalle.verticalScrollBar().maximum() > 0
+
+
 def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
     """Pedido explícito de la clienta ("que quede parejo"): en Reservas
     regulares (columna del formulario más alta, por los campos "Días" y
@@ -214,6 +234,58 @@ def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
 
     grilla_aisladas = pantalla.panel_aisladas.grilla
     assert grilla_aisladas.texto_detalle.maximumHeight() == 40
+
+
+def test_detalle_de_aisladas_ocupa_todo_el_ancho_de_la_grilla(qtbot, conn):
+    """Pedido explícito de la clienta: en Reservas aisladas, "Detalle"
+    pasa a ocupar todo el ancho de la grilla (Filtros + grid juntos, la
+    segunda y tercer columna de la pantalla), no la columna angosta de
+    la grilla nomás — "en regulares no porque no entra", así que ahí se
+    queda como estaba (dentro de la columna de la grilla)."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    panel_a = pantalla.panel_aisladas
+    assert panel_a.grilla._layout_grilla.indexOf(panel_a.grilla.texto_detalle) == -1
+    assert panel_a.grilla.texto_detalle.width() == panel_a.grilla.width()
+
+    panel_r = pantalla.panel_regulares
+    assert panel_r.grilla._layout_grilla.indexOf(panel_r.grilla.texto_detalle) != -1
+    assert panel_r.grilla.texto_detalle.width() < panel_r.grilla.width()
+
+
+def test_botones_de_accion_quedan_compactos_con_su_color(qtbot, conn):
+    """Pedido explícito de la clienta: los tres botones de acción de cada
+    solapa mantienen los colores de siempre (primario/secundario) pero
+    bajan de alto para quedar como el resto de los controles de la
+    columna (los botones-resumen de los filtros colapsables, ~22px) —
+    cambio puntual de esta pantalla, no de `estilos.py`."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.setStyleSheet(hoja_estilos(modo_oscuro=False))  # solo esta ventana, no toda la app
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    botones_primarios = ["Crear reserva regular", "Crear reserva aislada"]
+    botones_secundarios = [
+        "Modificar seleccionada", "Finalizar reserva a fin de mes",
+        "Modificar reserva", "Cancelar reserva",
+    ]
+    for indice, panel in enumerate((pantalla.panel_regulares, pantalla.panel_aisladas)):
+        pantalla.pestanas.setCurrentIndex(indice)  # solo la solapa activa tiene geometría real
+        qtbot.waitExposed(pantalla)
+        for boton in panel.findChildren(QPushButton):
+            if boton.text() in botones_primarios:
+                assert boton.objectName() == "botonPrimario"
+            elif boton.text() in botones_secundarios:
+                assert boton.objectName() == "botonSecundario"
+            else:
+                continue
+            assert boton.height() == 22
 
 
 def test_titulo_profesional_alineado_con_filtro_de_localidad(qtbot, conn):
@@ -790,20 +862,22 @@ def test_datos_complementarios_del_profesional(qtbot, conn):
     assert panel.etiqueta_horas_semanales.text() == "Horas regulares semanales: 3"
 
 
-def test_regulares_sin_horas_aisladas_mensuales_y_aisladas_sin_horas_regulares(qtbot, conn):
-    """Pedido explícito de la clienta, en dos vueltas: primero se sacó
+def test_regulares_sin_horas_aisladas_mensuales_y_aisladas_solo_horas_aisladas(qtbot, conn):
+    """Pedido explícito de la clienta, en tres vueltas: primero se sacó
     "Horas aisladas mensuales" de Reservas regulares (solo importan
-    "Horas regulares semanales" y "% Descuento" ahí); después, en la
-    vuelta siguiente, se sacó "Horas regulares semanales" de Reservas
-    aisladas (solo importan "Horas aisladas mensuales" y "% Descuento"
-    ahí) — cada solapa termina con dos títulos informativos, no tres,
-    pero DISTINTOS entre sí."""
+    "Horas regulares semanales" y "% Descuento" ahí); después se sacó
+    "Horas regulares semanales" de Reservas aisladas, y en la vuelta
+    siguiente también "% Descuento" — Aisladas termina con un solo
+    título informativo ("Horas aisladas mensuales"), Regulares con dos
+    ("Horas regulares semanales" y "% Descuento")."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     assert not hasattr(pantalla.panel_regulares, "etiqueta_horas_aisladas")
     assert hasattr(pantalla.panel_regulares, "etiqueta_horas_semanales")
+    assert hasattr(pantalla.panel_regulares, "etiqueta_descuento")
     assert hasattr(pantalla.panel_aisladas, "etiqueta_horas_aisladas")
     assert not hasattr(pantalla.panel_aisladas, "etiqueta_horas_semanales")
+    assert not hasattr(pantalla.panel_aisladas, "etiqueta_descuento")
 
 
 def test_grilla_preview_sigue_al_profesional_no_al_consultorio_elegido(qtbot, conn):
