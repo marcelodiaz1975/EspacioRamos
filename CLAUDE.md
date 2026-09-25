@@ -3392,6 +3392,70 @@ todo el cálculo fuera de rango — mismo motivo por el que las capturas
 que se le envían a la clienta siempre parten de datos de ejemplo, nunca
 de una base vacía.
 
+## Reservas: cuadraditos de referencias más grandes en regulares, tablas
+## de abajo sin hueco arriba
+
+Octava vuelta sobre la misma zona de Reservas, con dos pedidos:
+
+- **Regulares: "Referencias de colores" un poco más grande a lo alto,
+  "hay lugar para hacerlo".** Investigado con el mismo criterio de
+  medición de siempre, salió a la luz un comportamiento no documentado
+  hasta ahora de este panel: "Referencias de colores" (`_leyenda_
+  colores`, dentro de `panel_filtros`) NO cambia de alto según su propio
+  contenido — `layout_filtros` (el `QVBoxLayout` de todo el panel de
+  Filtros) le da un lugar FIJO (determinado por lo que sobra después de
+  ubicar el resto de los filtros de arriba, con un `addStretch()` final
+  absorbiendo cualquier resto), así que agrandar o achicar la muestra de
+  color NUNCA cambia el alto del `QGroupBox` en sí — solo cambia cuánto
+  de ese lugar fijo usa el contenido real, versus cuánto queda como
+  hueco en blanco debajo. Confirmado con un experimento: entre (28,16) y
+  (28,40) el propio `_leyenda_colores.height()` medido da el MISMO valor
+  exacto (262px) sin importar el tamaño de muestra pedido — el
+  `sizeHint()`/`minimumSizeHint()` sí crecen con la muestra, pero el
+  alto REAL asignado no se mueve mientras siga entrando en ese lugar
+  fijo. Recién a partir de cierto punto (~(28,50) para las 8 referencias
+  de Regulares, 4 filas) el contenido empieza a no entrar y las filas se
+  superponen/recortan de verdad (confirmado visualmente con (28,80):
+  filas literalmente pisándose unas a otras).
+  `GrillaOperativaWidget.agrandar_muestras_leyenda(28, 26)` — 26px de
+  alto por muestra, bastante por debajo del límite medido (~50px), "un
+  poquito" más grande como pidió la clienta, no al límite de lo que
+  entra. Dos piezas nuevas en `LeyendaColores`/`GrillaOperativaWidget`,
+  ambas opt-in (no tocan el resto de los usos de esta grilla compartida
+  — ya se habían sumado hermanas de estas en la ronda anterior para
+  Aisladas, ver esa sección): `LeyendaColores.fijar_tamano_muestra`
+  reusada tal cual (ya existía); esta vuelta solo suma la LLAMADA nueva
+  desde Regulares, no funciones nuevas.
+- **Las dos tablas de abajo tienen un hueco en blanco arriba, "podrán
+  arrancar más arriba, más pegado al contenido que está arriba".**
+  Medido: dentro de `panel_tabla` (el `QGroupBox` sin título de la ronda
+  anterior), `layout_tabla` tenía el margen default de Qt (9px arriba)
+  sin ninguna necesidad, dejando ese hueco entre el borde del cuadro y
+  el encabezado de la tabla. `layout_tabla.setContentsMargins(9, 0, 9,
+  9)` (arriba en 0, el resto igual) lo saca.
+
+  Mismo mecanismo de la ronda anterior, y la misma trampa: achicar
+  `panel_tabla` (acá, sacándole el margen) por sí solo NO sube la tabla
+  — `layout_externo` le vuelve a dar ese alto liberado al `QScrollArea`
+  de arriba (el único ítem con `stretch=1`), dejando la tabla en la
+  misma posición absoluta que antes. `_ALTO_TITULO_PANEL_TABLA` (el
+  espaciador fijo después de `panel_tabla` que compensa esto, sumado la
+  ronda pasada para el título) sube de 14 a 23 (14 del título + 9 de
+  este margen) para seguir compensando el total correcto — confirmado
+  midiendo que el `QScrollArea` de arriba queda exactamente en la misma
+  posición que antes de esta vuelta, y que la tabla en sí baja su
+  encabezado de 15px de hueco interno a solo 6px (el mínimo que impone
+  el propio borde del `QGroupBox`, no recortable más).
+
+Tests nuevos: `test_gui_reservas.py`
+(`test_leyenda_de_regulares_se_agranda_un_poco`,
+`test_tabla_de_abajo_sin_margen_superior`). El de "panel de Filtros
+compacto" deja de comparar `_tamano_muestra` exacto entre las dos
+solapas (ahora difiere: Regulares agranda a un valor fijo, Aisladas
+según cuánto le sobre a la grilla, puede quedar en el tamaño compacto de
+base si no hay diferencia que repartir) y pasa a comprobar solo el ancho
+(28, común a las dos).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
