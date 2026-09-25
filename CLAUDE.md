@@ -2822,6 +2822,62 @@ tabla" — ver arriba): sin el botón de más, el contenido del panel
 superior entra en el scroll disponible junto con la tabla de abajo sin
 quedar nada a mitad de camino.
 
+## Reservas: panel de Filtros de la grilla más compacto
+
+Tres pedidos puntuales de la clienta sobre la misma zona (la "Vista
+previa: grilla operativa" embebida en las dos solapas de Reservas),
+todos apuntando a lo mismo: ganar espacio para que "Referencias de
+colores" entre sin cortarse:
+
+- **La columna del formulario se angosta, el panel de Filtros crece**:
+  `_ANCHO_COMBO_PROFESIONAL` (ancho de `combo_profesional`, que de
+  rebote define el ancho de toda esa columna al ser el único campo con
+  ancho propio) pasa de 220 a 190; ese ancho liberado se lo lleva el
+  panel de Filtros de `GrillaOperativaWidget` (`panel_filtros.
+  setMaximumWidth`, de 260 a 290) — método nuevo `agrandar_panel_
+  filtros(ancho)`.
+- **"Día de la semana" de a pares**: mismo criterio que el campo "Días"
+  del alta de Reservas regulares (ver más arriba) — método nuevo
+  `agrupar_dias_en_pares()`, que reemplaza el `QVBoxLayout` de los
+  checks ya construidos por un `QGridLayout` de 2 columnas fijas vía
+  `layout.replaceWidget(viejo, nuevo)` (no hace falta re-crear los
+  `QCheckBox`, solo reubicarlos).
+- **"Referencias de colores" a 2 columnas, más chica**: `LeyendaColores`
+  suma `hacer_compacta()` (pasa a `columnas=2`, la muestra de color de
+  40×24 a 28×16, y `font-size: 10px` en sus etiquetas) y
+  `GrillaOperativaWidget.mostrar_leyenda_colores` suma un parámetro
+  `compacta: bool = False` que la invoca. En Reservas aisladas (6
+  referencias) entra completa sin necesitar scroll; en Reservas
+  regulares (8 referencias, lista más larga) sigue necesitando scroll
+  para verse entera, pero bastante menos que antes.
+
+De paso, pedido explícito de la clienta también: "subí el título
+Filtros" — el título de ese panel quedaba visiblemente más abajo que
+"Profesional" (la columna de al lado, sin `QGroupBox` de por medio).
+Causa: `GrillaOperativaWidget._armar_ui` armaba su `QHBoxLayout`
+principal SIN sacarle el margen por defecto, así que este widget sumaba
+su propio margen encima del que ya le daba el contenedor de afuera
+(`grupo_grilla`, el `QGroupBox` sin título que lo envuelve en Reservas).
+`layout_principal.setContentsMargins(0, 0, 0, 0)` — cambio general, sin
+riesgo (solo achica un margen vacío que nunca hacía falta), aplica a
+los cuatro usos de esta grilla (Reservas ×2, Oferta de consultorios,
+Novedades ×3, Grilla semanal). `layout_grupo_grilla.setContentsMargins(
+0, 0, 0, 0)`, del lado de `reservas.py`, es la mitad Reservas-específica
+del mismo ajuste.
+
+**Los tres primeros cambios (ancho del panel, días de a pares, leyenda
+compacta) son opt-in, no tocan el comportamiento por defecto**:
+`GrillaOperativaWidget` es un widget compartido (Reservas ×2, Oferta de
+consultorios, Novedades ×3, Grilla semanal) — cambiar `panel_filtros`/
+`_leyenda_colores`/los checks de día directamente en `_armar_ui` hubiera
+afectado a las seis pantallas sin que nadie lo pidiera ahí. Los tres
+métodos nuevos (`agrandar_panel_filtros`/`agrupar_dias_en_pares`/
+`mostrar_leyenda_colores(compacta=True)`) solo los llama Reservas; el
+resto de las pantallas sigue exactamente igual que antes — confirmado
+corriendo sus tests después del cambio (`test_gui_oferta.py`,
+`test_gui_novedades.py`, `test_gui_pantalla_grilla_operativa.py`, sin
+ninguna diferencia).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
