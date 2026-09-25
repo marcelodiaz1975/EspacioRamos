@@ -3098,6 +3098,85 @@ mensuales" de la ronda anterior se renombra
 regulares` y suma las dos aserciones simétricas nuevas. El de "alto fijo
 para filas visibles" actualiza su valor esperado en Aisladas de 5 a 4.
 
+## Reservas: botones compactos con color, sin "% Descuento" en aisladas, Detalle a lo ancho
+
+Quinta vuelta sobre la misma zona, con cuatro pedidos más:
+
+- **Botones de acción compactos, pero con su color.** La clienta pidió
+  que los tres botones de acción de cada solapa (Crear/Modificar/
+  Finalizar en Regulares; Crear/Modificar/Cancelar en Aisladas)
+  mantengan los colores primario/secundario de siempre, pero bajen de
+  alto para quedar como "los otros" controles de esa columna — los
+  botones-resumen de los filtros colapsables (`_FiltroColapsable._boton`
+  en `grilla_operativa.py`, sin objectName, ~22px de alto con el padding
+  default de Qt). Con `padding: 8px 16px` (el de `botonPrimario`/
+  `botonSecundario` en `estilos.py`) esos botones medían 32px. Se
+  revisó el código de los seis botones antes de tocar nada y salió a la
+  luz que "Modificar seleccionada"/"Finalizar reserva a fin de mes"
+  (Regulares) y "Modificar reserva"/"Cancelar reserva" (Aisladas) NUNCA
+  habían tenido `objectName("botonSecundario")` puesto — quedaban sin
+  colorear (gris/blanco default de Qt) desde que se armó esta pantalla,
+  algo que no se había detectado en ninguna ronda anterior. Se corrigió
+  de una junto con el pedido de esta vuelta: los cuatro suman
+  `botonSecundario`, y los seis (los cuatro más los dos "Crear reserva
+  ..." que ya eran `botonPrimario`) suman además
+  `setStyleSheet("padding: 3px 16px;")` — un override puntual por
+  widget, solo para estos seis botones de esta pantalla (constante
+  `_ESTILO_BOTON_COMPACTO`, "cambio solo para estas pantallas", pedido
+  explícito de la clienta, no se tocó `estilos.py`) que baja el alto a
+  22px sin perder el color/borde que ya les da el objectName — Qt
+  aplica el estilo del propio widget por encima del de la app para las
+  propiedades que define, dejando las demás (color, borde) como las
+  definió `estilos.py`.
+- **En aisladas se saca también "% Descuento".** Ya se le había sacado
+  "Horas regulares semanales" en la vuelta anterior; ahora se le saca
+  "% Descuento" también — Aisladas termina con un solo título
+  informativo ("Horas aisladas mensuales"), Regulares sigue con dos
+  ("Horas regulares semanales" y "% Descuento", sin tocar).
+- **Detalle a lo ancho en aisladas, no en regulares.** "El cuadro de
+  detalle en horas aisladas podés agrandarlo en horizontal, que ocupe
+  la segunda y tercer columna. En regulares no porque no entra" — hasta
+  ahora "Detalle" vivía DENTRO de la columna de la grilla (la mitad
+  derecha de `self.grilla`, al lado de la columna de Filtros), con la
+  mitad del ancho disponible nomás. Método nuevo en
+  `GrillaOperativaWidget`, `extraer_detalle()`: saca la etiqueta
+  "Detalle:" y el `QTextEdit` del layout de la columna de la grilla
+  (`self._layout_grilla.removeWidget(...)` en los dos, sin destruirlos)
+  y devuelve los mismos objetos para que el que la use los reubique en
+  otro layout — `self.texto_detalle` sigue siendo el mismo widget
+  válido, solo cambia de padre. Reservas aisladas los agrega después a
+  `layout_grupo_grilla` (el `QVBoxLayout` que ya envuelve TODO el ancho
+  de `self.grilla`, Filtros + grid juntos — la "segunda y tercer
+  columna" que pidió la clienta), quedando como una franja debajo de
+  toda la grilla en vez de a un costado. Reservas regulares no llama a
+  este método nuevo — se queda con "Detalle" adentro de la columna de
+  la grilla, como en la ronda anterior (`dar_stretch_a_detalle`, sin
+  cambios), tal como pidió la clienta explícitamente ("no entra").
+  `achicar_detalle` (el método de la ronda anterior) sigue existiendo
+  y sigue cubierto por su propio test, aunque Reservas ya no lo llama
+  para Aisladas — el alto máximo de "Detalle" ahí ahora se fija con un
+  `setMaximumHeight` directo sobre el `QTextEdit` ya extraído.
+- **Tablas y "Detalle" scrolleables, repetido.** La clienta insistió en
+  que tanto las tablas de abajo COMO el cuadro "Detalle" tienen que ser
+  scrolleables cuando el contenido no entra — las tablas ya estaban
+  cubiertas desde la ronda anterior; se sumó un test nuevo confirmando
+  que "Detalle" (un `QTextEdit`) también scrollea sola por default de
+  Qt, en las dos solapas, sin haber hecho falta ningún cambio de
+  código.
+
+Tests nuevos: `test_gui_grilla_operativa.py`
+(`test_extraer_detalle_saca_la_etiqueta_y_el_texto_de_la_grilla`);
+`test_gui_reservas.py` (`test_detalle_de_aisladas_ocupa_todo_el_ancho_
+de_la_grilla` — compara el ancho de `texto_detalle` contra el de
+`self.grilla` en las dos solapas; `test_botones_de_accion_quedan_
+compactos_con_su_color` — aplica `hoja_estilos()` a la pantalla de
+prueba, ya que esta pantalla se instancia sin pasar por
+`VentanaPrincipal` en los tests y las reglas de `estilos.py` no
+aplicarían solas; `test_cuadro_detalle_escrolea_con_mas_texto_del_que_
+entra`). El de "sin horas aisladas mensuales" se renombra otra vez,
+`test_regulares_sin_horas_aisladas_mensuales_y_aisladas_solo_horas_
+aisladas`, y suma la aserción de "% Descuento" ausente en Aisladas.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
