@@ -3456,6 +3456,87 @@ según cuánto le sobre a la grilla, puede quedar en el tamaño compacto de
 base si no hay diferencia que repartir) y pasa a comprobar solo el ancho
 (28, común a las dos).
 
+## Reservas: tabla de Regulares más pegada a lo de arriba, grilla de
+## Aisladas sin scrollbar interno
+
+Novena vuelta sobre la misma zona de Reservas, con dos pedidos puntuales
+más:
+
+- **Regulares: "subí un poco más la tabla para pegarlo a lo de arriba
+  sin tocar el resto".** Medido con el mismo criterio de todo este
+  apartado: además del margen superior de `layout_tabla` (ya sacado en
+  una ronda anterior) y del borde nativo del `QGroupBox` (~6px,
+  irreductible, confirmado de nuevo), `layout_externo` todavía tenía el
+  espaciado DEFAULT de Qt (6px) entre el `QScrollArea` de arriba y
+  `panel_tabla` — un hueco de más antes de la tabla que no era ni el
+  margen del cuadro ni el borde nativo. `layout_externo.setSpacing(0)`
+  (solo en Regulares — la clienta no pidió tocar Aisladas en este
+  pedido) lo saca; mismo mecanismo de siempre (`layout_externo` reparte
+  TODO el alto disponible entre el scroll de arriba, único ítem con
+  `stretch=1`, y el resto): sacar ese espaciado por sí solo NO sube la
+  tabla, el scroll se lo vuelve a llevar. Comparando `panel.height() -
+  scroll_area.height()` (el consumo fijo total, sin el scroll) antes y
+  después con un script de geometría, el ajuste correcto resultó ser
+  sumar 6px al espaciador final (no 12, como daría sumar ingenuamente
+  los dos espaciados de 6px que rodeaban a `panel_tabla` antes de
+  sacarlos — parte de ese espaciado ya quedaba "libre" del otro lado sin
+  necesitar compensación doble): `_ALTO_TITULO_PANEL_TABLA_REGULARES =
+  _ALTO_TITULO_PANEL_TABLA + 6 = 29`, constante nueva y propia de
+  Regulares (Aisladas se queda con `_ALTO_TITULO_PANEL_TABLA = 23` de
+  siempre, sin tocar). Confirmado con el mismo script que `scroll`
+  termina en la MISMA posición absoluta que antes de este cambio ("sin
+  tocar el resto") y que la tabla sube esos 6px.
+- **Aisladas: "ajustá un pelín la grilla para que se vea el borde de
+  abajo y que no aparezca el escrolleable".** El tope "identidad"
+  (`alto_natural_grilla()`, de la ronda anterior) dejaba
+  `tabla.verticalScrollBar().maximum()` en 1 con datos reales — un
+  desfasaje mínimo entre el `sizeHint()` de la columna (de donde sale el
+  tope) y lo que la tabla de la grilla realmente necesita para
+  mostrarse sin scroll interno (`sum(rowHeight(i)) + 2 × frameWidth`,
+  con el encabezado horizontal oculto): 2px de diferencia, medidos con
+  un script de geometría, no algo que dependa de los datos cargados.
+  `_AJUSTE_ALTO_GRILLA_AISLADAS = 2` se suma al tope antes de aplicarlo
+  (`self.grilla.alto_natural_grilla() + _AJUSTE_ALTO_GRILLA_AISLADAS`),
+  dejando `verticalScrollBar().maximum()` en 0 contra la pantalla
+  completa (mismo armado que `shot_reservas.py`) — confirmado
+  visualmente en la captura, el borde inferior de la grilla se ve
+  entero.
+
+  El valor exacto de `verticalScrollBar().maximum()` renderizado resultó
+  ser sensible al ANCHO real de la ventana (no solo al contenido): contra
+  una `PantallaReservas` armada sola con `qtbot` (sin la ventana
+  completa, como hacen el resto de los tests de este archivo) el mismo
+  ajuste no lograba bajarlo a 0 — reproducido aparte con un script de
+  geometría: el offscreen platform de Qt tira un warning conocido
+  ("This plugin does not support propagateSizeHints()") que ya viene
+  apareciendo en toda esta ronda de trabajo, y hace que el `sizeHint()`
+  de un layout no sea perfectamente estable entre una llamada y la
+  siguiente una vez que se modificó algo aguas abajo (acá, agrandar la
+  leyenda de colores DESPUÉS de aplicar el tope). Por eso el test de
+  regresión nuevo no vuelve a comparar contra `verticalScrollBar().
+  maximum()` ya renderizado (frágil, depende del ancho real de la
+  ventana en la que se mida) ni contra un nuevo llamado a
+  `alto_natural_grilla()` (tampoco estable una vez terminada la
+  construcción) — compara contra `panel._alto_grilla_aplicado`, un
+  atributo nuevo que guarda el valor efectivamente usado en el momento
+  en que se llamó a `limitar_alto_grilla`, mismo criterio de
+  determinismo que ya usaba `test_grilla_de_regulares_mantiene_el_tope_
+  identidad_sin_achicarse` (tampoco depende del scrollbar ya
+  renderizado). La verificación visual real (que el scrollbar no
+  aparece y el borde se ve completo) queda cubierta por la captura de
+  pantalla contra la ventana completa, no por este test.
+
+Tests nuevos: `test_gui_reservas.py`
+(`test_regulares_tabla_de_abajo_sube_sin_mover_el_scroll_de_arriba` —
+compara el espaciado de `layout_externo` y el tamaño del espaciador
+final de cada panel contra su propia constante, ya no comparten el
+mismo valor; `test_aisladas_grilla_ajustada_sin_scrollbar` — compara
+`panel_a.grilla.maximumHeight()` contra `panel_a._alto_grilla_aplicado`,
+el valor real usado en la construcción). El de "espaciador que compensa"
+(`test_tabla_de_abajo_sin_titulo_tiene_espaciador_que_compensa`) se
+actualiza para comparar cada panel contra su propia constante en vez de
+una sola compartida.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
