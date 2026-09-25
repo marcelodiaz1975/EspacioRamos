@@ -13,7 +13,7 @@ import re
 import sqlite3
 from datetime import date
 
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, QLocale
 from PySide6.QtGui import QGuiApplication, QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -67,6 +67,23 @@ _ANCHO_PANEL_FILTROS_GRILLA = 290
 _ANCHO_COL_PROFESIONAL = 180
 _FORMATO_FECHA = "dd-MM-yyyy"
 _FECHA_SIN_DATO = QDate(2000, 1, 1)  # sentinel de QDateEdit.setSpecialValueText: "sin fecha"
+# Pedido de la clienta: el campo "Fecha" de Reservas aisladas pasa al
+# mismo formato "día de la semana abreviado" que Registro de ausencias/
+# Fechas especiales (ej. "lun 07-09-2026") — mismo criterio, duplicado
+# acá porque son pantallas sin relación entre sí.
+_FORMATO_FECHA_DIA = "ddd dd-MM-yyyy"
+_LOCALE_ES = QLocale(QLocale.Language.Spanish)
+# Pedido de la clienta: "Profesional" (primer título de la columna del
+# formulario) tiene que arrancar a la misma altura que "Filtro de
+# localidad" (primer título del panel de Filtros de al lado, dentro de
+# un QGroupBox con su propio margen superior nativo) — 21px medido
+# programáticamente (geometría real de la ventana), no a ojo.
+_ALTO_TITULO_FILTROS = 21
+# Espaciado entre campos de la columna del formulario (6px por defecto
+# en Qt) — se achica un poco en Reservas regulares para compensar el
+# alto que le suma `_ALTO_TITULO_FILTROS` de arriba, ver el comentario
+# en `_PanelReservasRegulares._armar_ui`.
+_ESPACIADO_FORM = 4
 # Pedido de la clienta: la tabla de abajo (Horarios reservados/Reservas
 # aisladas) tiene que verse, título y un par de filas, sin scrollear el
 # panel entero — ver el rearmado de `_armar_ui` en las dos clases de
@@ -79,7 +96,7 @@ _FECHA_SIN_DATO = QDate(2000, 1, 1)  # sentinel de QDateEdit.setSpecialValueText
 # le sobraba lugar debajo de "Detalle"/"% Descuento" incluso con las 3 de
 # antes (pedido explícito de la clienta al revisar la captura).
 _FILAS_VISIBLES_TABLA_INFERIOR_REGULARES = 3
-_FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 5
+_FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 4
 # Alto máximo del cuadro "Detalle" de la grilla embebida en Reservas
 # aisladas (90px por defecto en el resto de los usos) — ver
 # `GrillaOperativaWidget.achicar_detalle`.
@@ -326,11 +343,23 @@ class _PanelReservasRegulares(QWidget):
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
-        # Sin margen arriba/abajo (mismo motivo que el de `contenido` más
-        # arriba: esta columna es la más alta de las dos y cualquier
-        # margen de sobra le resta a lo que necesitamos recuperar para que
-        # "% Descuento" se vea sin scrollear).
-        form.setContentsMargins(9, 0, 9, 0)
+        # Sin margen abajo (mismo motivo que el de `contenido` más arriba:
+        # esta columna es la más alta de las dos y cualquier margen de
+        # sobra le resta a lo que necesitamos recuperar para que "%
+        # Descuento" se vea sin scrollear). El margen de arriba, en
+        # cambio, no se saca del todo: queda en `_ALTO_TITULO_FILTROS`
+        # (21px, medido) para que "Profesional" arranque a la misma
+        # altura que "Filtro de localidad" (el título del panel de al
+        # lado, dentro de un `QGroupBox` con su propio margen superior
+        # nativo que un margen en 0 acá no puede igualar) — pedido
+        # explícito de la clienta. Ese margen nuevo hay que recuperarlo de
+        # algún lado para que "% Descuento" se siga viendo sin scrollear:
+        # `_ESPACIADO_FORM` (4px, menos que el 6px default de Qt) achica
+        # un poco el espacio entre cada campo de esta columna (son
+        # muchos: 5 combos, "Días", horario, dos vigencias, 3 botones,
+        # separador, 2 títulos informativos), alcanza para compensarlo.
+        form.setContentsMargins(9, _ALTO_TITULO_FILTROS, 9, 0)
+        form.setSpacing(_ESPACIADO_FORM)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
@@ -871,7 +900,11 @@ class _PanelReservasAisladas(QWidget):
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
-        form.setContentsMargins(9, 0, 9, 0)
+        # Margen de arriba en `_ALTO_TITULO_FILTROS` (no en 0): mismo
+        # motivo que en Reservas regulares — "Profesional" arranca a la
+        # misma altura que "Filtro de localidad", pedido explícito de la
+        # clienta.
+        form.setContentsMargins(9, _ALTO_TITULO_FILTROS, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
@@ -909,7 +942,8 @@ class _PanelReservasAisladas(QWidget):
         form.addWidget(self.combo_consultorio)
 
         self.campo_fecha = QDateEdit()
-        self.campo_fecha.setDisplayFormat(_FORMATO_FECHA)
+        self.campo_fecha.setDisplayFormat(_FORMATO_FECHA_DIA)
+        self.campo_fecha.setLocale(_LOCALE_ES)
         self.campo_fecha.setCalendarPopup(True)
         form.addWidget(QLabel("Fecha"))
         form.addWidget(self.campo_fecha)
@@ -972,10 +1006,8 @@ class _PanelReservasAisladas(QWidget):
         linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
         form.addWidget(linea_separadora)
 
-        self.etiqueta_horas_semanales = QLabel()
         self.etiqueta_horas_aisladas = QLabel()
         self.etiqueta_descuento = QLabel()
-        form.addWidget(self.etiqueta_horas_semanales)
         form.addWidget(self.etiqueta_horas_aisladas)
         form.addWidget(self.etiqueta_descuento)
 
@@ -1131,13 +1163,16 @@ class _PanelReservasAisladas(QWidget):
             self._cargar_horarios_no_usados()
 
     def _actualizar_resumen_profesional(self, id_profesional: int | None) -> None:
+        # Sin "Horas regulares semanales" (pedido explícito de la clienta):
+        # en Reservas aisladas solo importan las horas aisladas mensuales
+        # y el descuento — ver `_PanelReservasRegulares._actualizar_
+        # resumen_profesional` para la versión sin horas aisladas de la
+        # pantalla hermana.
         resumen = calcular_resumen_profesional(self.conn, id_profesional)
         if resumen is None:
-            self.etiqueta_horas_semanales.setText("Horas regulares semanales: —")
             self.etiqueta_horas_aisladas.setText("Horas aisladas mensuales: —")
             self.etiqueta_descuento.setText("% Descuento: —")
             return
-        self.etiqueta_horas_semanales.setText(f"Horas regulares semanales: {_fmt_horas(resumen.horas_semanales)}")
         self.etiqueta_horas_aisladas.setText(f"Horas aisladas mensuales: {_fmt_horas(resumen.horas_aisladas_mensuales)}")
         self.etiqueta_descuento.setText(f"% Descuento: {resumen.porcentaje_descuento:.1f}%")
 

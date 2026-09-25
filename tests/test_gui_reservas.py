@@ -132,12 +132,72 @@ def test_tabla_de_abajo_tiene_alto_fijo_para_filas_visibles(qtbot, conn):
     muestra una cantidad fija de filas (con su propio scroll si hay más)
     — para dejarle más alto disponible al panel de arriba, cuyo "Detalle"
     antes quedaba fuera de la vista. Aisladas muestra más filas que
-    Regulares (5 contra 3) porque a esa solapa le sobraba lugar debajo de
-    "Detalle"/"% Descuento" incluso con las 3 de antes."""
+    Regulares (4 contra 3) porque a esa solapa le sobraba lugar debajo de
+    "Detalle"/"% Descuento" incluso con las 3 de antes — bajada de 5 a 4
+    en la vuelta siguiente para que el cuadro "Detalle" se termine de ver
+    completo (pedido explícito de la clienta)."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.panel_regulares.tabla.height() == _alto_para_filas(pantalla.panel_regulares.tabla, 3)
-    assert pantalla.panel_aisladas.tabla.height() == _alto_para_filas(pantalla.panel_aisladas.tabla, 5)
+    assert pantalla.panel_aisladas.tabla.height() == _alto_para_filas(pantalla.panel_aisladas.tabla, 4)
+
+
+def test_tabla_horarios_reservados_escrolea_con_mas_filas_de_las_que_entran(qtbot, conn):
+    """Pedido de la clienta: las tablas de abajo tienen que ser
+    scrolleables verticalmente — ya lo eran por default de Qt (mismo
+    criterio que Llaves: `verticalScrollBar().maximum() > 0` cuando hay
+    más filas de las que entran en el alto fijo), este test lo deja
+    cubierto de acá en adelante."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
+    repo = obtener_repositorio(conn, "ReservaRegular")
+    for dia in ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"):
+        repo.crear(
+            IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana=dia,
+            HoraInicio=9, HoraFin=10, VigenciaInicio="2020-01-01",
+        )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1300, 900)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    assert pantalla.panel_regulares.tabla.rowCount() == 6
+    assert pantalla.panel_regulares.tabla.verticalScrollBar().maximum() > 0
+
+
+def test_tabla_reservas_aisladas_escrolea_con_mas_filas_de_las_que_entran(qtbot, conn):
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Pérez")
+    repo = obtener_repositorio(conn, "ReservaAislada")
+    for dia in range(1, 7):
+        repo.crear(
+            IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha=f"2026-08-0{dia}",
+            HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
+        )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1300, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)  # Reservas aisladas — no es la solapa por default
+    qtbot.waitExposed(pantalla)
+
+    assert pantalla.panel_aisladas.tabla.rowCount() == 6
+    assert pantalla.panel_aisladas.tabla.verticalScrollBar().maximum() > 0
 
 
 def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
@@ -154,6 +214,42 @@ def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
 
     grilla_aisladas = pantalla.panel_aisladas.grilla
     assert grilla_aisladas.texto_detalle.maximumHeight() == 40
+
+
+def test_titulo_profesional_alineado_con_filtro_de_localidad(qtbot, conn):
+    """Pedido explícito de la clienta: "Profesional" (primer título de la
+    columna del formulario) tiene que arrancar a la misma altura que
+    "Filtro de localidad" (primer título del panel de Filtros de al
+    lado) — en las dos solapas. El margen superior de `form` en
+    `_ALTO_TITULO_FILTROS` es lo que lo logra (`QGroupBox` le suma su
+    propio margen nativo a "Filtro de localidad", que un margen en 0 del
+    lado del formulario no podía igualar)."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+        etiqueta_profesional = next(
+            hijo for hijo in panel.combo_profesional.parentWidget().findChildren(QLabel)
+            if hijo.text() == "Profesional"
+        )
+        top_profesional = etiqueta_profesional.mapToGlobal(etiqueta_profesional.rect().topLeft()).y()
+        top_filtro = panel.grilla._etiqueta_localidad.mapToGlobal(
+            panel.grilla._etiqueta_localidad.rect().topLeft()
+        ).y()
+        assert top_profesional == top_filtro
+
+
+def test_campo_fecha_aisladas_muestra_dia_de_la_semana(qtbot, conn):
+    """Pedido explícito de la clienta: el campo "Fecha" de Reservas
+    aisladas pasa al mismo formato "día de la semana abreviado" que
+    Registro de ausencias/Fechas especiales."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.campo_fecha.setDate(QDate(2026, 9, 25))  # viernes
+    assert panel.campo_fecha.text() == "vie 25-09-2026"
 
 
 def test_checkbox_de_reubicacion_tiene_salto_de_linea(qtbot, conn):
@@ -694,15 +790,20 @@ def test_datos_complementarios_del_profesional(qtbot, conn):
     assert panel.etiqueta_horas_semanales.text() == "Horas regulares semanales: 3"
 
 
-def test_regulares_sin_horas_aisladas_mensuales(qtbot, conn):
-    """Pedido explícito de la clienta: en Reservas regulares solo importan
-    las horas regulares y el % de descuento — "Horas aisladas mensuales"
-    (que sí sigue existiendo en Reservas aisladas) se saca de esta
-    solapa."""
+def test_regulares_sin_horas_aisladas_mensuales_y_aisladas_sin_horas_regulares(qtbot, conn):
+    """Pedido explícito de la clienta, en dos vueltas: primero se sacó
+    "Horas aisladas mensuales" de Reservas regulares (solo importan
+    "Horas regulares semanales" y "% Descuento" ahí); después, en la
+    vuelta siguiente, se sacó "Horas regulares semanales" de Reservas
+    aisladas (solo importan "Horas aisladas mensuales" y "% Descuento"
+    ahí) — cada solapa termina con dos títulos informativos, no tres,
+    pero DISTINTOS entre sí."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     assert not hasattr(pantalla.panel_regulares, "etiqueta_horas_aisladas")
+    assert hasattr(pantalla.panel_regulares, "etiqueta_horas_semanales")
     assert hasattr(pantalla.panel_aisladas, "etiqueta_horas_aisladas")
+    assert not hasattr(pantalla.panel_aisladas, "etiqueta_horas_semanales")
 
 
 def test_grilla_preview_sigue_al_profesional_no_al_consultorio_elegido(qtbot, conn):
@@ -1219,8 +1320,10 @@ def test_spin_horario_se_muestra_como_reloj(qtbot, conn):
 def test_campos_de_fecha_usan_formato_dd_mm_yyyy(qtbot, conn):
     """El selector de fecha (con calendario) ya deja ver el día de la
     semana por su cuenta, así que no hace falta una aclaración aparte
-    debajo — alcanza con que el formato de todos los campos de fecha sea
-    consistente en las dos solapas."""
+    debajo — alcanza con que el formato de los campos de fecha sea
+    consistente entre sí, salvo "Fecha" en Reservas aisladas, que pasó al
+    formato con el día de la semana abreviado (pedido explícito de la
+    clienta, ver `test_campo_fecha_aisladas_muestra_dia_de_la_semana`)."""
     _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
@@ -1231,7 +1334,7 @@ def test_campos_de_fecha_usan_formato_dd_mm_yyyy(qtbot, conn):
     assert panel_r.campo_vigencia_inicio.calendarPopup() is True
 
     panel_a = pantalla.panel_aisladas
-    assert panel_a.campo_fecha.displayFormat() == "dd-MM-yyyy"
+    assert panel_a.campo_fecha.displayFormat() == "ddd dd-MM-yyyy"
     assert panel_a.campo_fecha.calendarPopup() is True
     assert panel_a.campo_fecha_ausencia.displayFormat() == "dd-MM-yyyy"
 
