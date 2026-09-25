@@ -2878,6 +2878,61 @@ corriendo sus tests después del cambio (`test_gui_oferta.py`,
 `test_gui_novedades.py`, `test_gui_pantalla_grilla_operativa.py`, sin
 ninguna diferencia).
 
+## Reservas: columna del formulario alineada, sin título Filtros, Detalle visible
+
+Tres ajustes más de la clienta sobre la misma zona (formulario + grilla
+embebida), en la misma ronda de revisión:
+
+- **Reservas aisladas, columna del formulario del mismo ancho que la de
+  Filtros**: el checkbox `casilla_reubicacion` ("Es reubicación
+  (compensa una ausencia del profesional, no genera cargo)") tiene el
+  texto más largo de todo el formulario, y `QCheckBox` NO ajusta su
+  texto solo (a diferencia de un `QLabel` con `setWordWrap`) — sin
+  wrapear, su `sizeHint` de una sola línea (468px) es lo que terminaba
+  estirando toda la columna muy por encima del ancho del panel de
+  Filtros de al lado (290px), aunque `_ANCHO_COMBO_PROFESIONAL` diga
+  190. Se resuelve con un salto de línea a mano en el texto ("...una
+  ausencia\ndel profesional..."), que Qt sí respeta para texto de
+  botón/checkbox (solo no lo AGREGA solo) — bajó el `sizeHint` a 265px,
+  quedando la columna pareja con la de Filtros. Reservas regulares no
+  tiene este checkbox (es propio del flujo de reubicación de aisladas),
+  así que no le hacía falta ningún cambio — su columna ya salía pareja
+  con la de Filtros de antes.
+- **Se saca el título "Filtros" y se renombran los filtros individuales**:
+  `GrillaOperativaWidget` suma `renombrar_etiquetas_filtro()` ("Localidad"
+  → "Filtro de localidad", "Edificio" → "Filtro de edificio", "Unidad" →
+  "Filtro de unidad", "Día de la semana" → "Filtro de día de la semana";
+  "Profesional" queda igual, no lo pidió) — las cuatro etiquetas pasan a
+  guardarse como atributos (`_etiqueta_localidad`/etc., antes `QLabel`
+  sueltos sin referencia) para poder renombrarlas después de construir
+  el panel. El título del `QGroupBox` en sí se saca con
+  `fijar_titulo_filtros("")` (el método ya existía, para ponerle OTRO
+  nombre en Oferta — acá se lo llama con string vacío). Mismo criterio
+  "opt-in" que el resto de esta sección: solo Reservas llama a estos dos
+  métodos nuevos, el resto de las pantallas que usan esta grilla
+  compartida siguen con "Filtros" tal cual.
+- **La tabla de abajo muestra 3 filas fijas, no un mínimo aproximado**:
+  `panel_tabla.setMinimumHeight(230)` (un número tanteado a ojo en la
+  ronda anterior) se reemplaza por `self.tabla.setFixedHeight(
+  _alto_para_filas(self.tabla, 3))` — mismo criterio EXACTO que
+  `app.gui.pantallas.llaves._alto_para_filas` (duplicado acá, pantallas
+  sin relación entre sí): calcula el alto justo para encabezado + 3
+  filas de datos, la tabla sigue siendo scrolleable para ver el resto.
+  Pedido explícito de la clienta ("que se vean 3 registros nada más").
+  Al ocupar bastante menos alto que el mínimo aproximado de antes, el
+  panel de arriba (formulario + grilla) queda con más alto disponible
+  dentro de la ventana — lo suficiente para que "Detalle:" (el cuadro de
+  texto al pie de la grilla, que antes quedaba fuera de la vista sin
+  scrollear más de la cuenta) se vea junto con los botones y las
+  referencias de colores, en las dos solapas, sin tener que scrollear
+  nada en la mayoría de los tamaños de ventana probados.
+
+Tests nuevos: `test_gui_grilla_operativa.py` (`fijar_titulo_filtros("")`
+saca el título; `renombrar_etiquetas_filtro` deja Profesional intacto);
+`test_gui_reservas.py` (título/etiquetas renombradas en las dos solapas;
+`panel.tabla.height()` coincide con `_alto_para_filas(tabla, 3)`; el
+checkbox de reubicación tiene un `"\n"` en su texto).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
