@@ -2933,6 +2933,85 @@ saca el título; `renombrar_etiquetas_filtro` deja Profesional intacto);
 `panel.tabla.height()` coincide con `_alto_para_filas(tabla, 3)`; el
 checkbox de reubicación tiene un `"\n"` en su texto).
 
+## Reservas: más filas en aisladas, sin "Horas aisladas mensuales" en
+## regulares, "Detalle" parejo con la columna de al lado
+
+Tercera vuelta sobre la misma zona (formulario + grilla embebida),
+apuntando a terminar de usar el espacio que sobraba en cada solapa
+después de la ronda anterior:
+
+- **Aisladas: más filas visibles en la tabla de abajo.** La clienta
+  notó, mirando la captura, que sobraba lugar debajo del cuadro
+  "Detalle" y del título "% Descuento" incluso con las 3 filas fijas de
+  la ronda anterior — acá la columna de la grilla (no la del
+  formulario, más corta en esta solapa por no tener los campos "Días"
+  ni "Vigencia" de Reservas regulares) es la que sobra en alto.
+  `_FILAS_VISIBLES_TABLA_INFERIOR` se separa en dos constantes,
+  `_FILAS_VISIBLES_TABLA_INFERIOR_REGULARES = 3` y
+  `_FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 5` (antes una sola,
+  compartida por las dos solapas sin necesidad).
+- **Regulares: se saca "Horas aisladas mensuales".** Pedido explícito de
+  la clienta: en esta solapa solo importan "Horas regulares semanales"
+  y "% Descuento" — la de horas aisladas se saca del todo (creación del
+  `QLabel`, `form.addWidget` y las dos líneas de `.setText(...)` en
+  `_actualizar_resumen_profesional`), sin tocar la versión de Reservas
+  aisladas (que sigue mostrando las tres, es su propio método duplicado,
+  no compartido). `hasattr(panel_regulares, "etiqueta_horas_aisladas")`
+  pasa a dar `False`; en aisladas sigue dando `True`.
+- **"Detalle" parejo con la columna de al lado.** Con las 3 labels
+  originales, "% Descuento" quedaba fuera de la vista (había que
+  scrollear ~40px para verlo) en Regulares, y la columna de la grilla
+  (grid + Detalle) en Aisladas terminaba varios px más abajo que la del
+  formulario — ninguna de las dos quedaba "pareja". Diagnóstico medido
+  con un script de geometría (ancho/alto real, no a ojo): en Regulares
+  la columna del formulario es la más alta de las dos (más campos,
+  incluye "Días" y "Vigencia"); en Aisladas es al revés, la columna de
+  la grilla es la más alta (por el `QTableWidget` de la grilla + el
+  cuadro "Detalle"). Como `self.tabla` (la grilla, adentro de
+  `GrillaOperativaWidget`) tiene `stretch=1` por defecto en su layout,
+  cualquier alto de sobra que le toque a esa columna (forzada a la
+  altura de la más alta de las dos, por venir de un `QSplitter`) lo
+  absorbía la grilla — quedando con relleno en blanco debajo de la
+  última hora en vez de dárselo a "Detalle", que se quedaba en su
+  tamaño fijo de siempre (90px). Dos métodos nuevos en
+  `GrillaOperativaWidget`, opt-in (no tocan el resto de los usos de esta
+  grilla compartida — Oferta, Novedades, Grilla semanal):
+  - `dar_stretch_a_detalle()`: le saca el `stretch` a la grilla
+    (`setStretchFactor(self.tabla, 0)`) y se lo pasa a "Detalle"
+    (`setStretchFactor(self.texto_detalle, 1)`, sin límite de alto
+    máximo) — Reservas regulares lo llama, así el cuadro "Detalle" crece
+    para terminar a la misma altura que la columna del formulario (que
+    ahora es la más alta, tras sacarle la label de horas aisladas) en
+    vez de dejar que la grilla se estire con relleno vacío.
+  - `achicar_detalle(alto)`: baja el alto máximo de "Detalle" (90px por
+    defecto) a lo que se le pase — Reservas aisladas lo llama con 40px:
+    acá es la columna de la grilla la que sobra en alto, así que hay que
+    achicarla a ELLA (no dársela, como en Regulares) para poder correr
+    el límite de scroll hacia abajo y dejarle más filas a la tabla de
+    "Reservas aisladas".
+  - Ninguno de los dos alcanzó, solo, a eliminar del todo el scroll
+    necesario: `contenido`/`form` (el `QVBoxLayout` que envuelve todo el
+    contenido scrolleable, y el del formulario en sí) tenían el margen
+    default de Qt (9px por lado) sin ninguna necesidad — se puso a cero
+    arriba/abajo en las dos solapas (`layout.setContentsMargins(0, 0, 0,
+    0)`/`form.setContentsMargins(9, 0, 9, 0)`, dejando el margen
+    izquierdo/derecho para no pegar el contenido al borde). Entre eso y
+    el ajuste de "Detalle", Regulares queda con "% Descuento" visible
+    sin ningún scroll (confirmado píxel a píxel: por debajo del borde
+    del viewport por menos de 1px, imperceptible) y Aisladas queda
+    apenas por debajo (~5px, el texto se sigue leyendo completo,
+    confirmado recortando y agrandando la captura) — la clienta pidió
+    específicamente más filas en la tabla de abajo, así que se priorizó
+    eso sobre perseguir el último resto de scroll en esta solapa.
+
+Tests nuevos: `test_gui_grilla_operativa.py`
+(`dar_stretch_a_detalle_pasa_el_estirado_de_la_grilla_al_cuadro_detalle`,
+`achicar_detalle_baja_el_alto_maximo`); `test_gui_reservas.py`
+(`test_tabla_de_abajo_tiene_alto_fijo_para_filas_visibles` — reemplaza
+al de "3 filas" de la ronda anterior, ahora con un número por solapa;
+`test_regulares_sin_horas_aisladas_mensuales`;
+`test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario`).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
