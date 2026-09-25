@@ -3177,6 +3177,127 @@ entra`). El de "sin horas aisladas mensuales" se renombra otra vez,
 `test_regulares_sin_horas_aisladas_mensuales_y_aisladas_solo_horas_
 aisladas`, y suma la aserción de "% Descuento" ausente en Aisladas.
 
+## Reservas: grilla de aisladas achicada, Detalle pegado, botones más
+## altos y fecha con día de semana en regulares
+
+Sexta vuelta sobre la misma zona (formulario + grilla embebida) de
+Reservas, con cinco pedidos puntuales de la clienta:
+
+- **Regulares: la tabla de abajo, si hay lugar, que arranque más
+  arriba.** Medido con un script de geometría (mismo criterio de todo
+  este apartado): a la ventana de referencia (1500×800, la misma que usa
+  `shot_reservas.py`) el `QScrollArea` de arriba (form + grilla) ya
+  ocupa, sin scrollear, prácticamente todo el alto disponible antes de
+  la tabla fija de abajo (`vscrollbar.maximum() == 0`, ni un pixel de
+  sobra) — subir la cantidad de filas visibles de esa tabla en uno solo
+  ya dispara scroll interno (`vscrollbar.maximum() == 14` al pasar de 3
+  a 4 filas). Sin margen real para ganar una fila completa sin violar
+  "sin tocar nada de los de arriba" (el pedido explícito de la clienta),
+  se dejó `_FILAS_VISIBLES_TABLA_INFERIOR_REGULARES` en 3, documentado
+  acá en vez de forzar un cambio que hubiera exigido tocar el formulario
+  o la grilla de arriba, o mostrar una fila cortada a la mitad.
+- **Aisladas: la grilla termina alineada con "Profesional filtrado".**
+  La grilla (Período/Visualización + la tabla) dejaba de tener sentido
+  que impusiera su propio alto natural (más alto que el panel de
+  Filtros de al lado) al resto de la columna — pedido explícito de la
+  clienta: que termine alineada con la última referencia de colores del
+  panel de Filtros ("Profesional filtrado"). De paso, tanto en Aisladas
+  como en Regulares, la grilla queda scrolleable de acá en adelante
+  (revirtiendo, opt-in y solo para Reservas, la regla general de
+  `_construir_tabla` de que "la grilla nunca debe recortarse con un
+  scroll interno propio") — por si el día de mañana hace falta mostrar
+  más horarios sin agrandar el panel.
+
+  Tres métodos nuevos en `GrillaOperativaWidget`, todos opt-in (no
+  tocan el resto de los usos de esta grilla compartida — Oferta,
+  Novedades, Grilla semanal):
+  - `alto_natural_filtros()`: el `sizeHint()` (no `.height()`, que ese
+    panel tiene un `addStretch()` final que infla su alto real más allá
+    de su contenido visible) del panel de Filtros — para que quien la
+    use se pueda alinear contra él sin acceder a `_panel_filtros` desde
+    afuera.
+  - `alto_natural_grilla()`: análogo, pero de esta misma columna
+    (Período/Visualización + la tabla) — pensado para pasarle a
+    `limitar_alto_grilla` un tope "igual a lo que ya mide hoy" cuando
+    solo se quiere dejarla scrolleable sin cambiar nada visible (el caso
+    de Regulares en esta misma vuelta).
+  - `limitar_alto_grilla(alto)`: pone un tope de alto FIJO a la columna
+    entera (`self`, el widget completo — no solo a `self.tabla`) en
+    `alto`, descontando primero todo lo que en esa columna NO es la
+    tabla en sí (la fila Período/Visualización, el espaciado antes de la
+    grilla y los márgenes arriba/abajo de `layout_grilla`) antes de
+    aplicárselo a `self.tabla`. A partir de acá la tabla scrollea sola
+    si su contenido no entra en ese alto.
+
+  Reservas aisladas llama `limitar_alto_grilla(alto_natural_filtros())`
+  (tope ESTRICTO, igual al panel de Filtros); Reservas regulares llama
+  `limitar_alto_grilla(alto_natural_grilla())` (tope IGUAL a lo que ya
+  mide hoy — no recorta nada, solo habilita el scroll a futuro).
+
+  Dos bugs de layout reales, no pedidos pero necesarios para que esto
+  funcionara, encontrados al medir píxel a píxel contra lo esperado:
+  - `limitar_alto_grilla` descontaba de menos al principio (le faltaban
+    los márgenes de `layout_grilla`, solo restaba la fila de controles y
+    el espaciado): el contenido real de la columna (margen + fila +
+    tabla ya recortada + margen) terminaba siendo MÁS ALTO que el tope
+    puesto al widget completo, y el exceso desbordaba en vez de quedar
+    alineado. Se corrigió sumando esos márgenes a lo que se descuenta.
+  - Poner un tope de alto a `self` (el widget entero) SIN un
+    `addStretch()` final en el layout que lo contiene hace que Qt
+    CENTRE el widget dentro del sobrante en vez de dejarlo pegado
+    arriba (mismo mecanismo, un nivel más afuera, que el
+    `addStretch()` que ya tenía `GrillaOperativaWidget._armar_ui` desde
+    la ronda de "botones compactos" — ver esa sección más arriba).
+    Esto rompió en silencio la alineación de "Profesional" contra
+    "Filtro de localidad" en Reservas REGULARES (destapado por
+    `test_titulo_profesional_alineado_con_filtro_de_localidad`, que ya
+    existía de una ronda anterior) — `self.grilla` quedaba centrado en
+    el sobrante que le daba el splitter en vez de pegado arriba. Se
+    corrigió sumando el mismo `addStretch()` al `layout_grupo_grilla`
+    de Reservas regulares (Aisladas ya lo tenía, por eso no se vio ahí).
+- **Aisladas: "Detalle" sube para pegarse a la grilla ya achicada.**
+  Con la grilla más baja, "Detalle" (extraído con `extraer_detalle` en
+  una ronda anterior) queda pegado justo debajo, sin el hueco de más
+  que tenía antes (heredado de cuando la grilla quedaba forzada a la
+  altura del panel de al lado por el splitter, con un montón de espacio
+  muerto invisible adentro). `_ALTO_DETALLE_AISLADAS` sube de 40 a 96
+  (valor medido, no a ojo) para que el cuadro, ya con su tope de alto
+  más alto, termine en la misma posición absoluta que tenía antes de
+  esta vuelta — "que se vea todo parejo", ganando una columna angosta y
+  perdiendo hueco muerto, sin cambiar el punto final.
+- **Aisladas: los tres botones crecen para alinear "Horas aisladas
+  mensuales" con el pie de "Detalle".** Nuevo estilo puntual,
+  `_ESTILO_BOTON_AISLADAS_ALTO = "padding: 11px 16px;"` (≈38px de alto),
+  que reemplaza a `_ESTILO_BOTON_COMPACTO` (22px) SOLO en los tres
+  botones de Aisladas (Crear/Modificar/Cancelar) — los de Regulares
+  siguen en 22px, no fueron parte de este pedido. Valor medido
+  iterativamente (padding candidato → medir → ajustar), no calculado a
+  ojo.
+- **Regulares: "Vigencia desde"/"Vigencia hasta" con día de la semana.**
+  Mismo formato `"ddd dd-MM-yyyy"` + `QLocale` español que ya tenía
+  "Fecha" en Aisladas desde una ronda anterior — pedido explícito de la
+  clienta ("que se comporte igual"). "Fecha que falta"
+  (`campo_fecha_ausencia`, del bloque de reubicación en Aisladas) no fue
+  parte de este pedido y sigue con el formato de siempre.
+
+Tests nuevos: `test_gui_grilla_operativa.py`
+(`test_alto_natural_filtros_devuelve_el_sizehint_del_panel_de_filtros`,
+`test_alto_natural_grilla_devuelve_el_sizehint_de_la_columna_de_la_
+grilla`, `test_limitar_alto_grilla_con_el_alto_natural_no_cambia_nada`,
+`test_limitar_alto_grilla_con_un_tope_mas_chico_recorta_la_tabla_y_el_
+widget`); `test_gui_reservas.py`
+(`test_grilla_de_regulares_mantiene_el_tope_identidad_sin_achicarse`,
+`test_grilla_de_aisladas_termina_alineada_con_las_referencias_de_
+colores`, `test_detalle_de_aisladas_queda_pegado_debajo_de_la_grilla`,
+`test_titulo_horas_aisladas_alineado_con_el_pie_de_detalle`,
+`test_botones_de_aisladas_quedan_mas_altos_que_los_de_regulares`). El
+de "botones compactos" (`test_botones_de_accion_quedan_compactos_con_
+su_color`) pasa a verificar solo los de Regulares (22px), separando el
+caso de Aisladas al test nuevo de arriba; el de "cuadro Detalle parejo"
+actualiza su valor esperado de `maximumHeight()` de 40 a 96; el de
+formato de fecha suma "ddd dd-MM-yyyy" para las dos "Vigencia" de
+Regulares.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
