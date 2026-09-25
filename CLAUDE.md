@@ -3298,6 +3298,100 @@ actualiza su valor esperado de `maximumHeight()` de 40 a 96; el de
 formato de fecha suma "ddd dd-MM-yyyy" para las dos "Vigencia" de
 Regulares.
 
+## Reservas: tablas de abajo sin título (con espaciador que compensa),
+## grilla de aisladas completa y "Cant. horas..."
+
+Séptima vuelta sobre la misma zona de Reservas, con cuatro pedidos:
+
+- **Regulares/Aisladas: se sacan los títulos "Horarios reservados"/
+  "Reservas aisladas" de la tabla de abajo, "para que la tabla pueda
+  situarse un poco más arriba".** Sacar el título por sí solo NO mueve
+  la tabla ni un pixel: `layout_externo` (el layout de cada solapa)
+  reparte TODO el alto disponible entre el `QScrollArea` de arriba
+  (`stretch=1`) y `panel_tabla` (sin stretch) — cualquier alto que
+  `panel_tabla` deje de necesitar (al perder el título) se lo vuelve a
+  llevar el scroll (el único ítem flexible), empujando `panel_tabla`
+  hacia ABAJO exactamente la misma medida. Confirmado midiendo antes/
+  después: la posición absoluta de la tabla no cambiaba un pixel al
+  sacar el título solo. Se corrigió agregando un espaciador FIJO
+  (`_ALTO_TITULO_PANEL_TABLA = 14`, valor medido — un `QGroupBox` con
+  título vs. sin título, mismo contenido, siempre difieren en 14px,
+  independiente del contenido) justo después de `panel_tabla` en
+  `layout_externo`: compensa exactamente el alto que el título dejó de
+  ocupar, así el reparto entre scroll/tabla no cambia (`scroll` termina
+  exactamente en la misma posición que antes — cumple "sin tocar nada
+  de lo que está antes de la tabla", pedido explícito de la clienta) y
+  la tabla sí sube esos 14px, con el espaciador como hueco muerto al
+  final de todo el panel, después de la tabla, donde no se nota.
+- **"Horas aisladas mensuales"/"Horas regulares semanales" pasan a
+  "Cant. horas aisladas mensuales"/"Cant. horas regulares semanales".**
+  Cambio de texto nomás, en los dos métodos `_actualizar_resumen_
+  profesional` (uno por solapa, no comparten código).
+- **Aisladas: la grilla se ve completa, ya no recortada.** La ronda
+  anterior la había capado a la altura del panel de Filtros de al lado
+  (para que "termine alineada con Profesional filtrado"), pero eso la
+  dejaba con una tabla scrolleable que en la práctica se veía "cortada"
+  — pedido explícito de la clienta: "dale mas alta de manera que se
+  visualice completa". Pasa al mismo criterio "identidad" que ya usaba
+  Regulares (`limitar_alto_grilla(alto_natural_grilla())`, sin recortar
+  nada, solo deja la infraestructura de scroll lista para el día de
+  mañana). Importa el ORDEN: `extraer_detalle()` se llama ANTES de medir
+  `alto_natural_grilla()` — si se sacara después, ese alto natural
+  todavía arrastraría el de "Detalle" (que de todos modos se saca a
+  continuación), dando un valor de referencia más alto de lo que
+  corresponde.
+- **Los "cuadraditos" de "Referencias de colores" crecen para llegar al
+  borde inferior de la grilla, ya más alta.** Con la grilla mostrándose
+  completa (más alta que antes), el panel de Filtros de al lado queda
+  más bajo — pedido explícito de la clienta: la diferencia se reparte
+  entre las muestras de color de la leyenda (no se deja como hueco en
+  blanco al final, que es lo que haría solo el `addStretch()` de
+  `layout_filtros`). Tres piezas nuevas, todas opt-in (no tocan el resto
+  de los usos de esta grilla compartida): `LeyendaColores.
+  fijar_tamano_muestra(ancho, alto)` (guarda el tamaño nuevo, no
+  redibuja); `GrillaOperativaWidget.tamano_muestra_leyenda()` (lee el
+  tamaño actual, para calcular cuánto agrandar a partir de ahí, sin
+  acceder a `_leyenda_colores` desde afuera); `GrillaOperativaWidget.
+  agrandar_muestras_leyenda(ancho, alto)` (fija el tamaño Y refresca la
+  leyenda de una sola llamada). Reservas aisladas calcula la diferencia
+  entre el alto natural de la grilla y el del panel de Filtros, la
+  reparte en partes iguales entre las 3 filas de la leyenda compacta (6
+  referencias / 2 columnas) y se lo suma al alto de muestra actual.
+  Guardarraíl: si la diferencia da negativa o cero (ej. una base con muy
+  pocos consultorios cargados, la grilla sin columnas queda más baja que
+  Filtros) no se toca nada — agrandar con un valor negativo hubiera
+  producido una muestra de tamaño inválido (confirmado con un
+  `QWidget::setMinimumSize` de alto negativo al probarlo sin este
+  guardarraíl, con una base de prueba vacía).
+- **"Detalle" recalculado.** Sigue arrancando pegado justo debajo de la
+  grilla (sin cambios en ESE mecanismo), pero como la grilla ahora
+  termina más abajo (se ve completa, más alta que el criterio "alineada
+  con Filtros" de la ronda anterior), "Detalle" arranca más tarde —
+  `_ALTO_DETALLE_AISLADAS` baja de 96 a 54 (valor medido iterativamente,
+  no calculado a ojo — el `QTextEdit` con `stretch=0` no crece
+  exactamente hasta el `maximumHeight` que se le pone, así que hizo
+  falta ajustar por aproximaciones sucesivas) para que el cuadro
+  siga terminando exactamente a la par del borde inferior de "Cant.
+  horas aisladas mensuales", como pedía la clienta ("termina a la par
+  de 'Cant. horas aisladas mensuales' para que luego pegado esté la
+  tabla").
+
+Tests nuevos: `test_gui_grilla_operativa.py`
+(`test_tamano_muestra_leyenda_devuelve_el_tamano_actual`,
+`test_agrandar_muestras_leyenda_cambia_el_tamano_y_refresca`);
+`test_gui_reservas.py`
+(`test_tabla_de_abajo_sin_titulo_tiene_espaciador_que_compensa`). El de
+"sin título de Vista previa..." se actualiza para no asumir más un
+título en la tabla de abajo (usa `panel.tabla.parentWidget()` en vez de
+buscar por texto de título). El de "cuadro Detalle parejo" actualiza su
+valor esperado de `maximumHeight()` de 96 a 54. El de alineación
+"Horas aisladas mensuales"/pie de Detalle pasa a usar `_preparar(conn)`
+(al menos un consultorio cargado): con una base totalmente vacía la
+grilla no tiene columnas y su alto natural se achica mucho, corriendo
+todo el cálculo fuera de rango — mismo motivo por el que las capturas
+que se le envían a la clienta siempre parten de datos de ejemplo, nunca
+de una base vacía.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
