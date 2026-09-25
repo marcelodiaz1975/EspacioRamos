@@ -3012,6 +3012,92 @@ al de "3 filas" de la ronda anterior, ahora con un número por solapa;
 `test_regulares_sin_horas_aisladas_mensuales`;
 `test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario`).
 
+## Reservas: título Profesional alineado, fecha con día de semana, ajustes finos
+
+Cuarta vuelta sobre la misma zona, con cinco pedidos puntuales de la
+clienta al revisar la captura de la ronda anterior:
+
+- **Aisladas: se saca "Horas regulares semanales".** Simétrico al pedido
+  de la vuelta anterior sobre Regulares (que se había sacado "Horas
+  aisladas mensuales" de ahí) — ahora Aisladas se queda solo con "Horas
+  aisladas mensuales" y "% Descuento", sacando el `QLabel`, el
+  `form.addWidget` y las dos líneas de `.setText(...)` en su propio
+  `_actualizar_resumen_profesional` (método duplicado, no compartido con
+  Regulares). Cada solapa termina con sus propios dos títulos
+  informativos, DISTINTOS entre sí — ninguna comparte las tres de antes.
+- **"Fecha" de Aisladas con día de la semana.** `self.campo_fecha` pasa
+  de `_FORMATO_FECHA` ("dd-MM-yyyy") a `_FORMATO_FECHA_DIA` ("ddd
+  dd-MM-yyyy") + `_LOCALE_ES`, mismo criterio que Registro de ausencias/
+  Fechas especiales (ej. "vie 25-09-2026") — duplicado acá porque son
+  pantallas sin relación entre sí. Puntual de ESTE campo nomás: "Fecha
+  que falta" (`campo_fecha_ausencia`, del bloque de reubicación) y las
+  dos fechas de Vigencia de Regulares no fueron parte del pedido, se
+  quedan con el formato de siempre.
+- **"Profesional" alineado con "Filtro de localidad".** La clienta pidió
+  bajar el título "Profesional" (primero de la columna del formulario)
+  para que arranque a la misma altura que "Filtro de localidad" (primero
+  del panel de Filtros de al lado) — quedaban desalineados por 21px,
+  medido programáticamente: `form` (la columna del formulario) tenía
+  margen superior en 0 desde la ronda anterior, mientras que "Filtro de
+  localidad" vive dentro de un `QGroupBox` (`panel_filtros`) que suma su
+  propio margen superior nativo para dejarle lugar a su borde/título,
+  aunque ese título esté vacío. `_ALTO_TITULO_FILTROS = 21` (constante
+  nueva, valor medido, no a ojo) pasa a ser el margen superior de `form`
+  en las dos solapas, en vez de 0.
+- **Ese margen nuevo hay que recuperarlo de algún lado.** Sumarle 21px al
+  margen superior de `form` en Regulares volvía a esconder "% Descuento"
+  fuera de la vista sin scrollear (el problema que la ronda anterior
+  había resuelto) — `_ESPACIADO_FORM = 4` (contra el spacing default de
+  Qt, 6px) achica un poco el espacio entre cada campo de esa columna
+  (son muchos: 5 combos, "Días", horario, dos vigencias, 3 botones,
+  separador, 2 títulos informativos), alcanza de sobra para compensar
+  los 21px nuevos y deja además unos px de margen extra. En Aisladas no
+  hizo falta tocar el spacing: sacar "Horas regulares semanales" (~20px)
+  ya compensaba casi exactamente los 21px nuevos del margen, dejando la
+  visibilidad de "% Descuento"/"Detalle" prácticamente en el mismo punto
+  que antes de esta vuelta.
+- **Aisladas: la tabla de abajo baja un poco (de 5 a 4 filas) para que
+  "Detalle" se vea completo.** Con los cambios de esta
+  vuelta, el cuadro "Detalle" quedaba visible por apenas 1px de margen
+  (demasiado justo, la clienta señaló que quería verlo "en forma
+  completa") — `_FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS` baja de 5 a 4:
+  la tabla de abajo pierde una fila de alto, ese alto se lo lleva de
+  vuelta el panel de arriba, y tanto "Detalle" como "% Descuento" quedan
+  con más de 10px de margen cada uno (confirmado programáticamente, no
+  a ojo). Sigue siendo una fila más que las 3 originales de dos rondas
+  atrás.
+- **Tablas de abajo escrolleables verticalmente.** Ya lo eran por
+  default de Qt (mismo criterio que Llaves: nunca hizo falta
+  `setVerticalScrollBarPolicy` explícito, `QTableWidget` ya scrollea
+  sola en cuanto su contenido no entra en el alto fijo) — se sumaron dos
+  tests de regresión (uno por tabla, forzando 6 filas contra las 3/4
+  visibles) que lo dejan cubierto de acá en adelante, sin haber hecho
+  falta ningún cambio de código.
+- **¿Estos cambios afectan la grilla de "Grilla y mensajería"?** No —
+  consultado por la clienta, confirmado revisando el diff: ninguno de
+  los cambios de esta vuelta tocó `app/gui/widgets/grilla_operativa.py`
+  (el archivo de `GrillaOperativaWidget`, compartido por Reservas ×2,
+  Oferta, Novedades ×3 y Grilla semanal) — todo vive en `reservas.py`
+  (constantes, márgenes/spacing de `panel_form`, formato de fecha,
+  cantidad de filas de la tabla), específico de las dos solapas de
+  Reservas. La solapa "Grilla semanal" de "Grilla y mensajería" usa la
+  misma `GrillaOperativaWidget` pero sin llamar a ninguno de los métodos
+  opt-in que usa Reservas (`dar_stretch_a_detalle`/`achicar_detalle`/
+  etc., de la ronda anterior) — sigue exactamente igual que antes de
+  las últimas dos vueltas de Reservas.
+
+Tests nuevos: `test_gui_reservas.py`
+(`test_titulo_profesional_alineado_con_filtro_de_localidad` — compara
+`mapToGlobal` de los dos títulos en las dos solapas;
+`test_campo_fecha_aisladas_muestra_dia_de_la_semana`;
+`test_tabla_horarios_reservados_escrolea_con_mas_filas_de_las_que_entran`/
+`test_tabla_reservas_aisladas_escrolea_con_mas_filas_de_las_que_entran`,
+mismo criterio que las tres de Llaves). El de "sin horas aisladas
+mensuales" de la ronda anterior se renombra
+`test_regulares_sin_horas_aisladas_mensuales_y_aisladas_sin_horas_
+regulares` y suma las dos aserciones simétricas nuevas. El de "alto fijo
+para filas visibles" actualiza su valor esperado en Aisladas de 5 a 4.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
