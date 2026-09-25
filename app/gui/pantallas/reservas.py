@@ -71,11 +71,19 @@ _FECHA_SIN_DATO = QDate(2000, 1, 1)  # sentinel de QDateEdit.setSpecialValueText
 # aisladas) tiene que verse, título y un par de filas, sin scrollear el
 # panel entero — ver el rearmado de `_armar_ui` en las dos clases de
 # abajo, que la saca del QScrollArea de la grilla para que quede siempre
-# visible en su propio espacio fijo. Muestra exactamente 3 filas (ver
-# `_alto_para_filas`) y no una altura mínima aproximada: cuanto menos
-# alto se lleve, más le queda disponible al panel de arriba (formulario
-# + grilla, con su "Detalle" que antes quedaba fuera de la vista).
-_FILAS_VISIBLES_TABLA_INFERIOR = 3
+# visible en su propio espacio fijo. Muestra exactamente esta cantidad de
+# filas (ver `_alto_para_filas`) y no una altura mínima aproximada: cuanto
+# menos alto se lleve, más le queda disponible al panel de arriba
+# (formulario + grilla, con su "Detalle" que antes quedaba fuera de la
+# vista). Aisladas muestra más filas que Regulares porque a esta pantalla
+# le sobraba lugar debajo de "Detalle"/"% Descuento" incluso con las 3 de
+# antes (pedido explícito de la clienta al revisar la captura).
+_FILAS_VISIBLES_TABLA_INFERIOR_REGULARES = 3
+_FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 5
+# Alto máximo del cuadro "Detalle" de la grilla embebida en Reservas
+# aisladas (90px por defecto en el resto de los usos) — ver
+# `GrillaOperativaWidget.achicar_detalle`.
+_ALTO_DETALLE_AISLADAS = 40
 
 
 def _alto_para_filas(tabla: QTableWidget, filas: int) -> int:
@@ -308,10 +316,21 @@ class _PanelReservasRegulares(QWidget):
         contenido = QWidget()
         contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
+        # Sin margen propio (pedido de la clienta: que "% Descuento" se vea
+        # sin scrollear) — panel_form/grupo_grilla ya traen su propio
+        # respiro interno, este margen extra solo le restaba alto
+        # disponible a la columna del formulario, que es la más alta de
+        # las dos y la que termina fijando cuánto hay que scrollear.
+        layout.setContentsMargins(0, 0, 0, 0)
         splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
+        # Sin margen arriba/abajo (mismo motivo que el de `contenido` más
+        # arriba: esta columna es la más alta de las dos y cualquier
+        # margen de sobra le resta a lo que necesitamos recuperar para que
+        # "% Descuento" se vea sin scrollear).
+        form.setContentsMargins(9, 0, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
@@ -411,10 +430,8 @@ class _PanelReservasRegulares(QWidget):
         form.addWidget(linea_separadora)
 
         self.etiqueta_horas_semanales = QLabel()
-        self.etiqueta_horas_aisladas = QLabel()
         self.etiqueta_descuento = QLabel()
         form.addWidget(self.etiqueta_horas_semanales)
-        form.addWidget(self.etiqueta_horas_aisladas)
         form.addWidget(self.etiqueta_descuento)
 
         form.addStretch()
@@ -436,6 +453,13 @@ class _PanelReservasRegulares(QWidget):
         # filtro`.
         self.grilla.fijar_titulo_filtros("")
         self.grilla.renombrar_etiquetas_filtro()
+        # El panel_form de al lado (con Días/Vigencia/3 botones) es más
+        # alto que esta columna — sin esto, ese sobrante lo absorbía la
+        # grilla (relleno en blanco debajo de la última hora); pasa el
+        # estirado al cuadro "Detalle" para que la columna termine a la
+        # misma altura que el formulario ("que quede parejo", pedido
+        # explícito de la clienta), ver `dar_stretch_a_detalle`.
+        self.grilla.dar_stretch_a_detalle()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -469,7 +493,7 @@ class _PanelReservasRegulares(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla.setFixedHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR))
+        self.tabla.setFixedHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_REGULARES))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla)
@@ -640,14 +664,16 @@ class _PanelReservasRegulares(QWidget):
         self._actualizar_resumen_profesional(id_profesional)
 
     def _actualizar_resumen_profesional(self, id_profesional: int | None) -> None:
+        # Sin "Horas aisladas mensuales" (pedido explícito de la clienta): en
+        # Reservas regulares solo importan las horas regulares y el
+        # descuento — ver `_PanelReservasAisladas._actualizar_resumen_
+        # profesional` para la versión completa de esta pantalla hermana.
         resumen = calcular_resumen_profesional(self.conn, id_profesional)
         if resumen is None:
             self.etiqueta_horas_semanales.setText("Horas regulares semanales: —")
-            self.etiqueta_horas_aisladas.setText("Horas aisladas mensuales: —")
             self.etiqueta_descuento.setText("% Descuento: —")
             return
         self.etiqueta_horas_semanales.setText(f"Horas regulares semanales: {_fmt_horas(resumen.horas_semanales)}")
-        self.etiqueta_horas_aisladas.setText(f"Horas aisladas mensuales: {_fmt_horas(resumen.horas_aisladas_mensuales)}")
         self.etiqueta_descuento.setText(f"% Descuento: {resumen.porcentaje_descuento:.1f}%")
 
     def _resetear_formulario(self) -> None:
@@ -836,10 +862,16 @@ class _PanelReservasAisladas(QWidget):
         contenido = QWidget()
         contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
+        # Sin margen propio (mismo motivo que en Reservas regulares): le
+        # deja más alto disponible a esta columna antes de tener que
+        # scrollear, espacio que acá se usa para mostrar más filas en la
+        # tabla de abajo sin perder de vista "Detalle"/"% Descuento".
+        layout.setContentsMargins(0, 0, 0, 0)
         splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
+        form.setContentsMargins(9, 0, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
@@ -966,6 +998,13 @@ class _PanelReservasAisladas(QWidget):
         # filtro`.
         self.grilla.fijar_titulo_filtros("")
         self.grilla.renombrar_etiquetas_filtro()
+        # A diferencia de Reservas regulares, en esta solapa es la columna
+        # de la grilla (no la del formulario, más corta acá) la que fija
+        # cuánto hay que scrollear — achicar "Detalle" es lo que le deja
+        # lugar de sobra a la tabla de abajo para mostrar más filas sin
+        # perder de vista "Detalle"/"% Descuento" (pedido explícito de la
+        # clienta), ver `achicar_detalle`.
+        self.grilla.achicar_detalle(_ALTO_DETALLE_AISLADAS)
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -997,7 +1036,7 @@ class _PanelReservasAisladas(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla.setFixedHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR))
+        self.tabla.setFixedHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla)

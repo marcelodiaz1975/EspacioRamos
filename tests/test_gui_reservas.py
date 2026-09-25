@@ -127,16 +127,33 @@ def test_panel_de_filtros_sin_titulo_y_con_etiquetas_renombradas(qtbot, conn):
         assert panel.grilla._etiqueta_dia.text() == "Filtro de día de la semana"
 
 
-def test_tabla_de_abajo_tiene_alto_fijo_para_3_filas(qtbot, conn):
+def test_tabla_de_abajo_tiene_alto_fijo_para_filas_visibles(qtbot, conn):
     """Pedido de la clienta: "Horarios reservados"/"Reservas aisladas"
-    muestra 3 filas nada más (con su propio scroll si hay más) — para
-    dejarle más alto disponible al panel de arriba, cuyo "Detalle" antes
-    quedaba fuera de la vista."""
+    muestra una cantidad fija de filas (con su propio scroll si hay más)
+    — para dejarle más alto disponible al panel de arriba, cuyo "Detalle"
+    antes quedaba fuera de la vista. Aisladas muestra más filas que
+    Regulares (5 contra 3) porque a esa solapa le sobraba lugar debajo de
+    "Detalle"/"% Descuento" incluso con las 3 de antes."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
-        alto_esperado = _alto_para_filas(panel.tabla, 3)
-        assert panel.tabla.height() == alto_esperado
+    assert pantalla.panel_regulares.tabla.height() == _alto_para_filas(pantalla.panel_regulares.tabla, 3)
+    assert pantalla.panel_aisladas.tabla.height() == _alto_para_filas(pantalla.panel_aisladas.tabla, 5)
+
+
+def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
+    """Pedido explícito de la clienta ("que quede parejo"): en Reservas
+    regulares (columna del formulario más alta, por los campos "Días" y
+    "Vigencia") el cuadro "Detalle" pasa a estirarse en vez de la grilla;
+    en Reservas aisladas (columna de la grilla más alta) es al revés, se
+    achica "Detalle" para no ser la que fuerza el scroll."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    grilla_regulares = pantalla.panel_regulares.grilla
+    assert grilla_regulares._layout_grilla.stretch(grilla_regulares._layout_grilla.indexOf(grilla_regulares.tabla)) == 0
+    assert grilla_regulares.texto_detalle.maximumHeight() > 90
+
+    grilla_aisladas = pantalla.panel_aisladas.grilla
+    assert grilla_aisladas.texto_detalle.maximumHeight() == 40
 
 
 def test_checkbox_de_reubicacion_tiene_salto_de_linea(qtbot, conn):
@@ -675,6 +692,17 @@ def test_datos_complementarios_del_profesional(qtbot, conn):
 
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     assert panel.etiqueta_horas_semanales.text() == "Horas regulares semanales: 3"
+
+
+def test_regulares_sin_horas_aisladas_mensuales(qtbot, conn):
+    """Pedido explícito de la clienta: en Reservas regulares solo importan
+    las horas regulares y el % de descuento — "Horas aisladas mensuales"
+    (que sí sigue existiendo en Reservas aisladas) se saca de esta
+    solapa."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    assert not hasattr(pantalla.panel_regulares, "etiqueta_horas_aisladas")
+    assert hasattr(pantalla.panel_aisladas, "etiqueta_horas_aisladas")
 
 
 def test_grilla_preview_sigue_al_profesional_no_al_consultorio_elegido(qtbot, conn):

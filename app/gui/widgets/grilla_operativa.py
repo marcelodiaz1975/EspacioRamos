@@ -588,6 +588,7 @@ class GrillaOperativaWidget(QWidget):
 
         panel_grilla = QWidget()
         layout_grilla = QVBoxLayout(panel_grilla)
+        self._layout_grilla = layout_grilla
 
         fila_controles = QHBoxLayout()
         fila_controles.addWidget(QLabel("Período:"))
@@ -864,6 +865,37 @@ class GrillaOperativaWidget(QWidget):
 
     def _actualizar_leyenda_colores(self) -> None:
         self._leyenda_colores.actualizar(self.combo_modo.currentData() or "regular")
+
+    def dar_stretch_a_detalle(self) -> None:
+        """La grilla (`self.tabla`) tiene `stretch=1` por defecto: si esta
+        columna queda con más alto asignado del que necesita (por ejemplo,
+        forzada por un panel_form vecino más alto, dentro de un
+        `QSplitter`), esa cede de sobra hoy la absorbe la grilla, quedando
+        con relleno en blanco debajo de la última hora — la grilla ya
+        tiene su propio alto mínimo (`setMinimumHeight`, calculado fila por
+        fila) para no recortarse, no le hace falta además estirarse de
+        más. Pensado para Reservas regulares (pedido explícito de la
+        clienta, "que quede parejo" con el formulario de al lado): pasa
+        ese sobrante al cuadro "Detalle" en su lugar, que crece en vez de
+        la grilla y así termina a la misma altura que la columna de al
+        lado — sin afectar al resto de los usos de esta grilla compartida
+        (Oferta, Novedades, Grilla semanal, Reservas aisladas), que se
+        quedan con el reparto de siempre."""
+        self._layout_grilla.setStretchFactor(self.tabla, 0)
+        self._layout_grilla.setStretchFactor(self.texto_detalle, 1)
+        self.texto_detalle.setMaximumHeight(16_777_215)  # sin límite (máximo de Qt)
+
+    def achicar_detalle(self, alto: int) -> None:
+        """Baja el alto máximo del cuadro "Detalle" (90px por defecto, con
+        un alto natural bastante más chico que eso todavía) — pensado para
+        Reservas aisladas: acá es esta columna (grilla + Detalle), no la
+        del formulario, la que termina fijando cuánto hay que scrollear
+        (el formulario es más corto, sin el campo "Días" ni "Vigencia" de
+        Reservas regulares), así que hay que achicarla a ELLA para
+        recuperar alto y poder mostrar más filas en la tabla de abajo sin
+        perder de vista "Detalle"/"% Descuento" — pedido explícito de la
+        clienta al ver que sobraba lugar debajo de los dos."""
+        self.texto_detalle.setMaximumHeight(alto)
 
     def activar_filtro_exclusivo_profesional(self, activar: bool = True) -> None:
         """Con un profesional elegido en el filtro, no alcanza con

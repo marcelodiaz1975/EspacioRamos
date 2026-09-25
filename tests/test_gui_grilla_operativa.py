@@ -610,3 +610,36 @@ def test_renombrar_etiquetas_filtro_deja_profesional_como_estaba(qtbot, conn):
     assert widget._etiqueta_edificio.text() == "Filtro de edificio"
     assert widget._etiqueta_unidad.text() == "Filtro de unidad"
     assert widget._etiqueta_dia.text() == "Filtro de día de la semana"
+
+
+def test_dar_stretch_a_detalle_pasa_el_estirado_de_la_grilla_al_cuadro_detalle(qtbot, conn):
+    """Pedido de la clienta al revisar Reservas regulares ("que quede
+    parejo" con la columna del formulario, más alta): en vez de que la
+    grilla absorba cualquier alto de sobra (quedando con relleno en
+    blanco debajo de la última hora), ese estirado pasa al cuadro
+    "Detalle", que además deja de tener un alto máximo."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget._layout_grilla.stretch(widget._layout_grilla.indexOf(widget.tabla)) == 1
+    assert widget.texto_detalle.maximumHeight() == 90
+
+    widget.dar_stretch_a_detalle()
+
+    assert widget._layout_grilla.stretch(widget._layout_grilla.indexOf(widget.tabla)) == 0
+    assert widget._layout_grilla.stretch(widget._layout_grilla.indexOf(widget.texto_detalle)) == 1
+    assert widget.texto_detalle.maximumHeight() > 90
+
+
+def test_achicar_detalle_baja_el_alto_maximo(qtbot, conn):
+    """Pedido de la clienta al revisar Reservas aisladas: acá es la
+    columna de la grilla (no la del formulario) la que sobra en alto, así
+    que se achica el cuadro "Detalle" para recuperar lugar."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget.texto_detalle.maximumHeight() == 90
+
+    widget.achicar_detalle(40)
+
+    assert widget.texto_detalle.maximumHeight() == 40
