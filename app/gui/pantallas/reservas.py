@@ -120,21 +120,24 @@ _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 4
 _ALTO_DETALLE_AISLADAS = 54
 # `layout_externo` (form+grilla scrolleable, stretch=1, seguido de la
 # tabla de abajo, sin stretch) reparte TODO el alto disponible entre esos
-# dos — sacarle a `panel_tabla` el alto que ocupaba su título (ver más
-# abajo, "sin título") no alcanza por sí solo para que la tabla suba: sin
-# nada más, ese alto liberado se lo lleva de vuelta el `QScrollArea` de
-# arriba (el único ítem con `stretch=1`), empujando `panel_tabla` hacia
-# ABAJO en la misma medida — la posición de la tabla queda exactamente
-# igual que antes, en vez de subir. `_ALTO_TITULO_PANEL_TABLA` (14px,
-# medido: `QGroupBox` con título vs. sin título, mismo contenido) se
-# agrega como espaciador FIJO después de `panel_tabla` — compensa
-# exactamente lo que `panel_tabla` dejó de necesitar, así el reparto
-# entre `scroll`/`panel_tabla` no cambia (scroll sigue exactamente del
-# mismo alto que antes — "sin tocar nada de lo que está antes de la
-# tabla", pedido explícito de la clienta) y la tabla sí sube esos 14px,
-# con el espaciador como hueco muerto al final del todo, después de la
-# tabla, donde no se ve.
-_ALTO_TITULO_PANEL_TABLA = 14
+# dos — sacarle alto a `panel_tabla` (el título, ver "sin título" más
+# abajo; y el margen superior de `layout_tabla`, ver "sin hueco arriba de
+# la tabla") no alcanza por sí solo para que la tabla suba: sin nada más,
+# ese alto liberado se lo lleva de vuelta el `QScrollArea` de arriba (el
+# único ítem con `stretch=1`), empujando `panel_tabla` hacia ABAJO en la
+# misma medida — la posición de la tabla queda exactamente igual que
+# antes, en vez de subir. `_ALTO_TITULO_PANEL_TABLA` (23px: 14 del
+# título — medido, `QGroupBox` con título vs. sin título, mismo
+# contenido — más 9 del margen superior de `layout_tabla` que se saca en
+# la misma vuelta) se agrega como espaciador FIJO después de
+# `panel_tabla` — compensa exactamente lo que `panel_tabla` dejó de
+# necesitar entre las dos rondas, así el reparto entre `scroll`/
+# `panel_tabla` no cambia (scroll sigue exactamente del mismo alto que
+# antes — "sin tocar nada de lo que está antes de la tabla", pedido
+# explícito de la clienta) y la tabla sí sube esos 23px en total, con el
+# espaciador como hueco muerto al final del todo, después de la tabla,
+# donde no se ve.
+_ALTO_TITULO_PANEL_TABLA = 23
 # Cantidad de filas de "Referencias de colores" en Reservas aisladas (6
 # referencias / 2 columnas, ver `LeyendaColores.hacer_compacta`) — usado
 # para repartir en partes iguales, entre los "cuadraditos" de esa
@@ -529,6 +532,19 @@ class _PanelReservasRegulares(QWidget):
         self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
         self.grilla.agrupar_dias_en_pares()
         self.grilla.mostrar_leyenda_colores(compacta=True)
+        # Pedido explícito de la clienta ("hace un poquito mas grande el
+        # cuadrito de las referencias a lo alto, hay lugar para
+        # hacerlo"): "Referencias de colores" ya ocupa un lugar fijo
+        # dentro del panel de Filtros (no crece ni se achica según su
+        # propio contenido — lo determina el resto de los filtros de
+        # arriba, con el sobrante yendo a un `addStretch()` interno), así
+        # que agrandar la muestra no cambia el alto del panel: solo
+        # reduce el hueco en blanco que quedaba entre el contenido y el
+        # borde inferior del cuadro. Medido: con las 8 referencias de
+        # Regulares (2 columnas, 4 filas) ese lugar fijo alcanza sin
+        # comprimir nada hasta muestras de ~50px de alto — 26px se queda
+        # con margen de sobra, "un poquito" más grande, no al límite.
+        self.grilla.agrandar_muestras_leyenda(28, 26)
         # Sin título "Filtros" (pedido de la clienta) — cada filtro pasa a
         # nombrarse solo con "Filtro de ...", ver `renombrar_etiquetas_
         # filtro`.
@@ -581,6 +597,14 @@ class _PanelReservasRegulares(QWidget):
         panel_tabla = QGroupBox()
         panel_tabla.setObjectName("panelSolapa")
         layout_tabla = QVBoxLayout(panel_tabla)
+        # Pedido explícito de la clienta ("las tablas tienen un espacio en
+        # blanco arriba... más pegado al contenido que está arriba"): sin
+        # margen superior, la tabla arranca pegada al borde de arriba del
+        # cuadro en vez de dejar el margen default de Qt (9px) como hueco
+        # en blanco antes del encabezado — el margen izquierdo/derecho/
+        # inferior se queda igual, para no pegar el resto del contenido a
+        # los otros tres bordes.
+        layout_tabla.setContentsMargins(9, 0, 9, 9)
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(9)
         self.tabla.setHorizontalHeaderLabels(
@@ -1177,6 +1201,14 @@ class _PanelReservasAisladas(QWidget):
         panel_tabla = QGroupBox()
         panel_tabla.setObjectName("panelSolapa")
         layout_tabla = QVBoxLayout(panel_tabla)
+        # Pedido explícito de la clienta ("las tablas tienen un espacio en
+        # blanco arriba... más pegado al contenido que está arriba"): sin
+        # margen superior, la tabla arranca pegada al borde de arriba del
+        # cuadro en vez de dejar el margen default de Qt (9px) como hueco
+        # en blanco antes del encabezado — el margen izquierdo/derecho/
+        # inferior se queda igual, para no pegar el resto del contenido a
+        # los otros tres bordes.
+        layout_tabla.setContentsMargins(9, 0, 9, 9)
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(11)
         self.tabla.setHorizontalHeaderLabels(

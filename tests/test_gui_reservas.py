@@ -125,22 +125,54 @@ def test_tabla_de_abajo_sin_titulo_tiene_espaciador_que_compensa(qtbot, conn):
         assert espaciador.sizeHint().height() == _ALTO_TITULO_PANEL_TABLA
 
 
+def test_tabla_de_abajo_sin_margen_superior(qtbot, conn):
+    """Pedido explícito de la clienta ("las tablas tienen un espacio en
+    blanco arriba... más pegado al contenido que está arriba"): sin
+    margen superior en el layout de la tabla de abajo, el encabezado
+    arranca pegado al borde de arriba del cuadro en vez de dejar el
+    margen default de Qt (9px) como hueco en blanco — el margen
+    izquierdo/derecho/inferior se queda igual."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+        margenes = panel.tabla.parentWidget().layout().contentsMargins()
+        assert margenes.top() == 0
+        assert margenes.left() == 9
+        assert margenes.right() == 9
+        assert margenes.bottom() == 9
+
+
 def test_panel_de_filtros_de_la_grilla_queda_compacto(qtbot, conn):
     """Pedido de la clienta al revisar Reservas: la columna del formulario
     (Profesional/Localidad/.../botones) se angosta un poco y ese ancho se
     lo lleva el panel de Filtros de la grilla (Localidad/Edificio/Unidad/
     Día de la semana/Profesional/Referencias de colores), que además
     muestra sus días de a pares y la leyenda de colores a 2 columnas con
-    muestra más chica."""
+    muestra más chica que el tamaño normal (40, 24). El alto de la
+    muestra en sí varía por solapa (Regulares la agranda un poco más,
+    "hay lugar" — ver `test_leyenda_de_regulares_se_agranda_un_poco`;
+    Aisladas la agranda según cuánto le sobre a la grilla, puede quedar
+    en el tamaño compacto de base si no hay diferencia que repartir)."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
         assert panel.combo_profesional.minimumWidth() == 190
         assert panel.grilla._panel_filtros.maximumWidth() == 290
         assert panel.grilla._leyenda_colores._columnas == 2
-        assert panel.grilla._leyenda_colores._tamano_muestra == (28, 16)
+        assert panel.grilla._leyenda_colores._tamano_muestra[0] == 28
         grid = panel.grilla._contenedor_dias.layout()
         assert isinstance(grid, QGridLayout)
+
+
+def test_leyenda_de_regulares_se_agranda_un_poco(qtbot, conn):
+    """Pedido explícito de la clienta: "hace un poquito mas grande el
+    cuadrito de las referencias a lo alto, hay lugar para hacerlo" — acá
+    "Referencias de colores" ocupa un lugar fijo dentro del panel de
+    Filtros (no cambia de alto según su propio contenido), así que hay
+    margen de sobra para agrandar la muestra sin comprimir nada más."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_regulares.grilla.tamano_muestra_leyenda() == (28, 26)
 
 
 def test_panel_de_filtros_sin_titulo_y_con_etiquetas_renombradas(qtbot, conn):
