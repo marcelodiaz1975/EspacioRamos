@@ -1,7 +1,7 @@
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QLabel, QMessageBox
+from PySide6.QtWidgets import QHeaderView, QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -577,8 +577,8 @@ def test_liquidaciones_simuladas_agregar_bloque_lo_suma_a_la_tabla(qtbot, conn):
     assert panel.tabla_bloques.rowCount() == 1
     assert panel.tabla_bloques.item(0, 0).text() == "1"
     assert panel.tabla_bloques.item(0, 1).text() == "Lunes"
-    assert panel.tabla_bloques.item(0, 2).text() == "9:00"
-    assert panel.tabla_bloques.item(0, 3).text() == "11:00"
+    assert panel.tabla_bloques.item(0, 2).text() == "9:00hs"
+    assert panel.tabla_bloques.item(0, 3).text() == "11:00hs"
     assert panel.tabla_bloques.item(0, 5).text() == "Ramos 1"
     assert panel.tabla_bloques.item(0, 6).text() == "7mo L"
     assert panel.tabla_bloques.item(0, 7).text() == "Consultorio 1"
@@ -627,7 +627,6 @@ def test_liquidaciones_simuladas_generar_sin_bloques_no_rompe(qtbot, conn):
     panel._generar()  # no debe lanzar ninguna excepción
 
     assert panel.tabla_subtotales.rowCount() == 0
-    assert panel.tabla_total_general.rowCount() == 0
 
 
 def test_liquidaciones_simuladas_generar_crea_el_pdf_y_muestra_el_resultado(qtbot, conn, tmp_path):
@@ -657,9 +656,6 @@ def test_liquidaciones_simuladas_generar_crea_el_pdf_y_muestra_el_resultado(qtbo
     fila_total = panel.tabla_subtotales.rowCount() - 1
     assert panel.tabla_subtotales.item(fila_total, 0).text() == "Total"
     assert panel.tabla_subtotales.item(fila_total, 0).background().color().name() == "#f2c4a0"
-    assert panel.tabla_total_general.rowCount() == 1
-    assert panel.tabla_total_general.item(0, 0).text() == "Total general"
-    assert panel.tabla_total_general.item(0, 6).text() == panel.tabla_subtotales.item(fila_total, 6).text()
 
 
 def test_foco_inicial_liquidaciones_simuladas_queda_en_profesional(qtbot, conn):
@@ -708,6 +704,41 @@ def test_liquidaciones_simuladas_subtotal_por_bloque_con_varios_bloques(qtbot, c
     assert panel.tabla_subtotales.item(fila_total, 0).text() == "Total"
     for columna in range(panel.tabla_subtotales.columnCount()):
         assert panel.tabla_subtotales.item(fila_total, columna).background().color().name() == "#f2c4a0"
+
+
+def test_liquidaciones_simuladas_titulo_totales_por_bloques_y_general(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    etiquetas = [e.text() for e in panel.findChildren(QLabel)]
+    assert "Totales por bloques y general:" in etiquetas
+    assert "Total general:" not in etiquetas
+
+
+def test_liquidaciones_simuladas_no_tiene_tabla_de_total_general(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    assert not hasattr(panel, "tabla_total_general")
+
+
+def test_liquidaciones_simuladas_tablas_tienen_un_piso_de_alto(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    assert panel.tabla_bloques.minimumHeight() > 0
+    assert panel.tabla_subtotales.minimumHeight() > 0
+
+
+def test_liquidaciones_simuladas_columnas_de_ubicacion_en_modo_stretch(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    header = panel.tabla_bloques.horizontalHeader()
+    for columna in (4, 5, 6, 7):
+        assert header.sectionResizeMode(columna) == QHeaderView.ResizeMode.Stretch
+    for columna in (0, 1, 2, 3):
+        assert header.sectionResizeMode(columna) != QHeaderView.ResizeMode.Stretch
 
 
 def test_liquidaciones_simuladas_botones_tienen_el_mismo_ancho_fijo(qtbot, conn):

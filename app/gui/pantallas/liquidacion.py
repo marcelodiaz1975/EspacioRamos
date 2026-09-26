@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas import catalogos
+from app.gui.pantallas.llaves import _alto_para_filas
 from app.gui.pantallas.reservas import (
     _DIAS_RESERVA,
     _SpinHorario,
@@ -82,6 +83,7 @@ _ANCHO_PANEL_FILTROS = 300
 _ANCHO_PANEL_FILTROS_ESTADO_CUENTA = 340
 _ANCHO_BOTON_EMISION = 275  # Calcular / los tres Emitir..., todos iguales
 _ANCHO_BOTON_SIMULADA = 240  # Agregar/Quitar bloque, Generar liquidación simulada
+_FILAS_VISIBLES_SIMULADAS = 8  # piso de alto de "Bloques cargados"/"Totales por bloques y general", scrolleables
 # Mismo naranja suave que `resalte_seleccion` en app.gui.estilos.paleta()
 # (la selección de fila de toda la aplicación) — se reusa acá para
 # resaltar la fila de totales, pedido explícito de la clienta.
@@ -637,9 +639,17 @@ class _PanelLiquidacionesSimuladas(QWidget):
         )
         self.tabla_bloques.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_bloques.itemSelectionChanged.connect(self._actualizar_boton_quitar_bloque)
-        layout_derecha.addWidget(self.tabla_bloques)
+        # Las cuatro últimas columnas (ubicación) se reparten el ancho
+        # sobrante del panel — pedido explícito de la clienta, "para
+        # aprovechar el ancho de la pantalla visible" — en vez de
+        # quedarse angostas al ancho justo de su contenido.
+        header_bloques = self.tabla_bloques.horizontalHeader()
+        for columna in (4, 5, 6, 7):
+            header_bloques.setSectionResizeMode(columna, QHeaderView.ResizeMode.Stretch)
+        self.tabla_bloques.setMinimumHeight(_alto_para_filas(self.tabla_bloques, _FILAS_VISIBLES_SIMULADAS))
+        layout_derecha.addWidget(self.tabla_bloques, stretch=1)
 
-        layout_derecha.addWidget(QLabel("Subtotal por bloque:"))
+        layout_derecha.addWidget(QLabel("Totales por bloques y general:"))
         self.tabla_subtotales = QTableWidget()
         self.tabla_subtotales.setColumnCount(7)
         self.tabla_subtotales.setHorizontalHeaderLabels([
@@ -647,18 +657,8 @@ class _PanelLiquidacionesSimuladas(QWidget):
             "% Descuento", "Descuento", "Importe Neto",
         ])
         self.tabla_subtotales.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla_subtotales.setMinimumHeight(_alto_para_filas(self.tabla_subtotales, _FILAS_VISIBLES_SIMULADAS))
         layout_derecha.addWidget(self.tabla_subtotales, stretch=1)
-
-        layout_derecha.addWidget(QLabel("Total general:"))
-        self.tabla_total_general = QTableWidget()
-        self.tabla_total_general.setColumnCount(7)
-        self.tabla_total_general.setHorizontalHeaderLabels([
-            "N° Bloque", "Cantidad horas semanales", "Cantidad horas mensuales", "Importe Bruto",
-            "% Descuento", "Descuento", "Importe Neto",
-        ])
-        self.tabla_total_general.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.tabla_total_general.verticalHeader().setVisible(False)
-        layout_derecha.addWidget(self.tabla_total_general)
 
         layout_externo.addWidget(panel_derecha, stretch=1)
 
@@ -728,13 +728,20 @@ class _PanelLiquidacionesSimuladas(QWidget):
             localidad, edificio, unidad, consultorio = _ubicacion_bloque(self.conn, bloque.id_consultorio)
             self.tabla_bloques.setItem(fila, 0, item_numero(str(fila + 1)))
             self.tabla_bloques.setItem(fila, 1, QTableWidgetItem(bloque.dia_semana))
-            self.tabla_bloques.setItem(fila, 2, QTableWidgetItem(_fmt_hora(bloque.hora_inicio)))
-            self.tabla_bloques.setItem(fila, 3, QTableWidgetItem(_fmt_hora(bloque.hora_fin)))
+            self.tabla_bloques.setItem(fila, 2, item_numero(f"{_fmt_hora(bloque.hora_inicio)}hs"))
+            self.tabla_bloques.setItem(fila, 3, item_numero(f"{_fmt_hora(bloque.hora_fin)}hs"))
             self.tabla_bloques.setItem(fila, 4, QTableWidgetItem(localidad))
             self.tabla_bloques.setItem(fila, 5, QTableWidgetItem(edificio))
             self.tabla_bloques.setItem(fila, 6, QTableWidgetItem(unidad))
             self.tabla_bloques.setItem(fila, 7, QTableWidgetItem(consultorio))
+        # Solo las columnas 0-3 se ajustan a su contenido — las últimas
+        # cuatro (ubicación) quedan en modo Stretch (ver `_armar_ui`), así
+        # que este resize no las toca.
         self.tabla_bloques.resizeColumnsToContents()
+        # "Día" (pedido explícito de la clienta: más ancho que el
+        # justo — mismo criterio de padding que `_PADDING_COLUMNA` en
+        # `novedades.py`/`llaves.py`, duplicado acá para una sola columna.
+        self.tabla_bloques.setColumnWidth(1, self.tabla_bloques.columnWidth(1) + 30)
         self._actualizar_boton_quitar_bloque()
 
     def _generar(self) -> None:
@@ -784,9 +791,3 @@ class _PanelLiquidacionesSimuladas(QWidget):
             item.setBackground(QColor(_COLOR_FILA_TOTAL))
             self.tabla_subtotales.setItem(len(subtotales), columna, item)
         self.tabla_subtotales.resizeColumnsToContents()
-
-        self.tabla_total_general.setRowCount(1)
-        for columna, item in enumerate(fila_total):
-            self.tabla_total_general.setItem(0, columna, item.clone())
-        self.tabla_total_general.item(0, 0).setText("Total general")
-        self.tabla_total_general.resizeColumnsToContents()
