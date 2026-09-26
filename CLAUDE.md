@@ -3931,6 +3931,26 @@ Pedido de la clienta sobre la captura de la segunda vuelta:
     columnas (N° Bloque/Día/Horario desde/Horario hasta); no afecta a
     las cuatro en modo Stretch.
 
+### Cuarta vuelta: títulos de horas más cortos, importes también en Stretch
+
+Dos ajustes más de la clienta sobre "Totales por bloques y general":
+
+- **Títulos más cortos**: "Cantidad horas semanales"/"Cantidad horas
+  mensuales" pasan a "Horas semanales"/"Horas mensuales" — cambio de
+  texto nomás, mismo criterio que la vuelta que acortó "Horas aisladas
+  mensuales" a "Cant. horas aisladas mensuales" en Reservas (ver esa
+  sección más arriba): cuando un título de columna queda largo, se
+  acorta sin tocar el dato que muestra.
+- **Importe Bruto/Descuento/Importe Neto en Stretch**: mismo mecanismo
+  y mismo pedido ("aprovechar el ancho visible de la pantalla") que las
+  columnas de ubicación de "Bloques cargados" en la vuelta anterior —
+  `header_subtotales.setSectionResizeMode(columna, QHeaderView.
+  ResizeMode.Stretch)` en las columnas 3/5/6 (los tres importes; "%
+  Descuento", columna 4, se queda en su ancho justo — no es un importe).
+  `resizeColumnsToContents()` en `_mostrar_resultado` sigue ajustando
+  las columnas 0/1/2 (N° Bloque/Horas semanales/Horas mensuales) sin
+  afectar a las tres en Stretch.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
