@@ -30,6 +30,13 @@ Una Asignación sin ninguna Devolución/Pérdida que la referencie está
 y el reintegro se reflejan en la liquidación del profesional como
 CargoEspecial (Débito/Crédito) ligado a IdLlave (el tipo, no el
 movimiento puntual) — es el mismo mecanismo genérico de la sección 3.15.
+
+`llaves_faltantes_para_reserva` (pedido de la clienta al cargar una
+reserva regular o aislada) cruza este libro contra el lugar de la
+reserva: si el profesional no tiene una Asignación abierta de ninguna
+llave que dé acceso al edificio y/o a la unidad correspondiente, lo
+reporta — pero nunca bloquea la carga (puede igual atender ahí
+haciéndose abrir por otro profesional presente), solo informa.
 """
 from __future__ import annotations
 
@@ -257,3 +264,72 @@ def registrar_perdida(
         IdLlave=id_llave, Tipo="Pérdida", Fecha=fecha or fecha_actual(conn).isoformat(),
         Cantidad=cantidad, Observacion=observacion,
     )
+
+
+def _tiene_asignacion_abierta_de_alguna(conn: sqlite3.Connection, id_profesional: int, ids_llave: set[int]) -> bool:
+    if not ids_llave:
+        return False
+    cerradas = _asignaciones_cerradas(conn)
+    repo_movimientos = obtener_repositorio(conn, "LlaveMovimiento")
+    for id_llave in ids_llave:
+        for movimiento in repo_movimientos.listar(IdLlave=id_llave, IdProfesional=id_profesional, Tipo="Asignación"):
+            if movimiento["IdMovimiento"] not in cerradas:
+                return True
+    return False
+
+
+def llaves_faltantes_para_reserva(conn: sqlite3.Connection, *, id_profesional: int, id_consultorio: int) -> list[str]:
+    """Pedido explícito de la clienta: al cargar una reserva (regular o
+    aislada), chequear si el profesional tiene las llaves de acceso al
+    edificio y a la unidad del consultorio reservado. Devuelve una
+    descripción por cada acceso que le falta (edificio y/o unidad) —
+    lista vacía si tiene todo lo necesario, o si ese lugar no tiene
+    ninguna Llave ACTIVA configurada (nada para chequear ahí).
+
+    "Tener" un acceso significa: alguna Llave activa cuyo LlaveAcceso
+    cubra ese edificio/unidad tiene una Asignación ABIERTA (sin
+    Devolución/Pérdida) a nombre de este profesional — no importa cuál
+    de las llaves que abren ese lugar sea, alcanza con una. El chequeo es
+    puramente informativo: la clienta aclaró explícitamente que un
+    profesional sin la llave puede igual atender ahí haciéndose abrir por
+    otro profesional presente en ese momento — por eso esto nunca
+    bloquea la carga, solo avisa (`_confirmar_llaves_faltantes` en
+    `reservas.py` es quien arma el cartel con Confirmar/Cancelar)."""
+    consultorio = obtener_repositorio(conn, "Consultorio").obtener(id_consultorio)
+    if consultorio is None:
+        return []
+    unidad = obtener_repositorio(conn, "Unidad").obtener(consultorio["IdUnidad"])
+    if unidad is None:
+        return []
+    edificio = obtener_repositorio(conn, "Edificio").obtener(unidad["IdEdificio"])
+    if edificio is None:
+        return []
+
+    repo_llaves = obtener_repositorio(conn, "Llave")
+
+    def _llaves_activas(accesos: list[sqlite3.Row]) -> set[int]:
+        ids = set()
+        for acceso in accesos:
+            llave = repo_llaves.obtener(acceso["IdLlave"])
+            if llave is not None and llave["Activo"]:
+                ids.add(acceso["IdLlave"])
+        return ids
+
+    repo_accesos = obtener_repositorio(conn, "LlaveAcceso")
+    # Acceso a nivel EDIFICIO: filas de LlaveAcceso de ese edificio sin
+    # unidad puntual (IdUnidad NULL) — una llave con una unidad puntual
+    # solo abre esa unidad, no el edificio entero. `.listar(IdUnidad=None)`
+    # no sirve para este filtro (una comparación SQL "= NULL" nunca es
+    # verdadera), por eso se filtra en Python sobre TODOS los accesos del
+    # edificio en vez de pedírselo al repositorio.
+    ids_llave_edificio = _llaves_activas(
+        [a for a in repo_accesos.listar(IdEdificio=unidad["IdEdificio"]) if a["IdUnidad"] is None]
+    )
+    ids_llave_unidad = _llaves_activas(repo_accesos.listar(IdUnidad=unidad["IdUnidad"]))
+
+    faltantes = []
+    if ids_llave_edificio and not _tiene_asignacion_abierta_de_alguna(conn, id_profesional, ids_llave_edificio):
+        faltantes.append(f"la llave del edificio {edificio['Nombre']}")
+    if ids_llave_unidad and not _tiene_asignacion_abierta_de_alguna(conn, id_profesional, ids_llave_unidad):
+        faltantes.append(f"la llave de la unidad {unidad['Departamento']}")
+    return faltantes

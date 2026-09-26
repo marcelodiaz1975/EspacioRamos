@@ -8,6 +8,7 @@ from app.negocio.llaves import (
     crear_llave,
     devolver_llave,
     ingresar_copias,
+    llaves_faltantes_para_reserva,
     registrar_perdida,
     resumen_stock,
     siguiente_nombre_llave,
@@ -355,3 +356,128 @@ def test_llave_tipo_no_especificada_no_valida_alcance(conn, edificios):
     agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_1)
     id_acceso = agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio_2)
     assert id_acceso is not None
+
+
+@pytest.fixture
+def consultorio(conn, edificios):
+    """Un consultorio real (edificio → unidad → consultorio) para probar
+    `llaves_faltantes_para_reserva` — devuelve los tres ids."""
+    id_edificio_1, _ = edificios
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento="7mo L")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    return id_edificio_1, id_unidad, id_consultorio
+
+
+def test_llaves_faltantes_sin_ninguna_llave_configurada_no_reporta_nada(conn, profesional, consultorio):
+    """Pedido de la clienta: el chequeo es sobre lo que hace falta, no
+    sobre lo que no se llegó a configurar — un lugar sin ninguna Llave
+    cargada no tiene nada para chequear."""
+    _, _, id_consultorio = consultorio
+    assert llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=id_consultorio) == []
+
+
+def test_llaves_faltantes_reporta_edificio_sin_asignacion_abierta(conn, profesional, consultorio):
+    id_edificio, _, id_consultorio = consultorio
+    id_llave = crear_llave(conn, tipo="Edificio")
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio)
+
+    faltantes = llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=id_consultorio)
+    assert faltantes == ["la llave del edificio Ramos 1"]
+
+
+def test_llaves_faltantes_reporta_unidad_sin_asignacion_abierta(conn, profesional, consultorio):
+    id_edificio, id_unidad, id_consultorio = consultorio
+    id_llave = crear_llave(conn, tipo="Unidad")
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio, id_unidad=id_unidad)
+
+    faltantes = llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=id_consultorio)
+    assert faltantes == ["la llave de la unidad 7mo L"]
+
+
+def test_llaves_faltantes_reporta_las_dos_si_faltan_las_dos(conn, profesional, consultorio):
+    id_edificio, id_unidad, id_consultorio = consultorio
+    id_llave_edificio = crear_llave(conn, tipo="Edificio")
+    agregar_acceso_llave(conn, id_llave=id_llave_edificio, id_edificio=id_edificio)
+    id_llave_unidad = crear_llave(conn, tipo="Unidad")
+    agregar_acceso_llave(conn, id_llave=id_llave_unidad, id_edificio=id_edificio, id_unidad=id_unidad)
+
+    faltantes = llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=id_consultorio)
+    assert faltantes == ["la llave del edificio Ramos 1", "la llave de la unidad 7mo L"]
+
+
+def test_llaves_faltantes_con_asignacion_abierta_no_reporta_nada(conn, profesional, consultorio):
+    id_edificio, id_unidad, id_consultorio = consultorio
+    id_llave_edificio = crear_llave(conn, tipo="Edificio")
+    agregar_acceso_llave(conn, id_llave=id_llave_edificio, id_edificio=id_edificio)
+    id_llave_unidad = crear_llave(conn, tipo="Unidad")
+    agregar_acceso_llave(conn, id_llave=id_llave_unidad, id_edificio=id_edificio, id_unidad=id_unidad)
+    ingresar_copias(conn, id_llave=id_llave_edificio, cantidad=1)
+    ingresar_copias(conn, id_llave=id_llave_unidad, cantidad=1)
+
+    asignar_llave(conn, id_llave=id_llave_edificio, id_profesional=profesional)
+    asignar_llave(conn, id_llave=id_llave_unidad, id_profesional=profesional)
+
+    assert llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=id_consultorio) == []
+
+
+def test_llaves_faltantes_devolucion_vuelve_a_reportar_faltante(conn, profesional, consultorio):
+    """Una Devolución cierra la Asignación — la copia deja de estar en
+    poder del profesional, así que el chequeo vuelve a marcarla faltante."""
+    id_edificio, _, id_consultorio = consultorio
+    id_llave = crear_llave(conn, tipo="Edificio")
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+    id_asignacion = asignar_llave(conn, id_llave=id_llave, id_profesional=profesional)
+    devolver_llave(conn, id_asignacion)
+
+    faltantes = llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=id_consultorio)
+    assert faltantes == ["la llave del edificio Ramos 1"]
+
+
+def test_llaves_faltantes_alcanza_con_cualquiera_de_varias_llaves_del_mismo_lugar(conn, profesional, consultorio):
+    """Si dos Tipos de llave distintos abren el mismo edificio, tener
+    asignada cualquiera de las dos alcanza — no hace falta tener todas."""
+    id_edificio, _, id_consultorio = consultorio
+    id_llave_1 = crear_llave(conn, tipo="Edificio")
+    agregar_acceso_llave(conn, id_llave=id_llave_1, id_edificio=id_edificio)
+    id_llave_2 = crear_llave(conn, tipo="Edificio")
+    ingresar_copias(conn, id_llave=id_llave_2, cantidad=1)
+    asignar_llave(conn, id_llave=id_llave_2, id_profesional=profesional)
+
+    # id_llave_2 todavía no tiene ningún LlaveAcceso a este edificio —
+    # confirmar primero que sin el acceso, sigue faltando.
+    assert llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=id_consultorio) == [
+        "la llave del edificio Ramos 1"
+    ]
+
+    agregar_acceso_llave(conn, id_llave=id_llave_2, id_edificio=id_edificio)
+    assert llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=id_consultorio) == []
+
+
+def test_llaves_faltantes_ignora_llave_inactiva(conn, profesional, consultorio):
+    """Una Llave desactivada (retirada de uso) no cuenta como "necesaria"
+    — si es la única que abre ese lugar, no hay nada para chequear."""
+    id_edificio, _, id_consultorio = consultorio
+    id_llave = crear_llave(conn, tipo="Edificio")
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio)
+    obtener_repositorio(conn, "Llave").actualizar(id_llave, Activo=0)
+
+    assert llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=id_consultorio) == []
+
+
+def test_llaves_faltantes_llave_de_unidad_puntual_no_cuenta_como_acceso_de_edificio(conn, profesional, consultorio):
+    """Una llave de Tipo Unidad (acceso con IdUnidad puntual) solo abre
+    esa unidad — no debe contar como acceso al edificio en general."""
+    id_edificio, id_unidad, id_consultorio = consultorio
+    id_llave = crear_llave(conn, tipo="Unidad")
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio, id_unidad=id_unidad)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+    asignar_llave(conn, id_llave=id_llave, id_profesional=profesional)
+
+    # Tiene la llave de la unidad, pero no hay ninguna llave de edificio
+    # configurada — nada que reportar en ese nivel.
+    assert llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=id_consultorio) == []
+
+
+def test_llaves_faltantes_consultorio_inexistente_no_rompe(conn, profesional):
+    assert llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=999999) == []

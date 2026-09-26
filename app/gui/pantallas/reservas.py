@@ -51,6 +51,7 @@ from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, peri
 from app.negocio.formato import formatear_moneda
 from app.negocio.lista_espera import marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
+from app.negocio.llaves import llaves_faltantes_para_reserva
 from app.negocio.mensajes import mensaje_detalle_reserva_aislada
 from app.negocio.resumen_profesional import calcular_resumen_profesional
 from app.negocio.reservas import (
@@ -191,6 +192,26 @@ def _fmt_hora(valor: float) -> str:
 
 def _fmt_horario(hora_inicio: float, hora_fin: float) -> str:
     return f"{_fmt_hora(hora_inicio)} a {_fmt_hora(hora_fin)}"
+
+
+def _confirmar_llaves_faltantes(parent: QWidget, faltantes: list[str]) -> bool:
+    """Pedido explícito de la clienta: al cargar una reserva (regular o
+    aislada), si `llaves_faltantes_para_reserva` encuentra que el
+    profesional no tiene alguna llave de acceso necesaria, avisa con un
+    cartel Sí/No en vez de bloquear la carga — puede igual atender ahí
+    haciéndose abrir por otro profesional presente en ese momento, "pero
+    está bueno que el sistema avise para ver cómo se maneja el acceso".
+    Devuelve True si el operador elige seguir igual (Sí), False si
+    cancela (No) — mismo criterio (`QMessageBox.question`, Sí/No) que el
+    resto de los carteles de confirmación de esta pantalla (ej.
+    `ConflictoBloqueanteError`)."""
+    respuesta = QMessageBox.question(
+        parent, "Falta acceso al lugar",
+        "Al profesional le falta " + " y ".join(faltantes) + ".\n\n"
+        "Puede atender igual si otro profesional presente le abre.\n"
+        "¿Confirmás la reserva de todos modos?",
+    )
+    return respuesta == QMessageBox.StandardButton.Yes
 
 
 class _SpinHorario(QDoubleSpinBox):
@@ -879,12 +900,20 @@ class _PanelReservasRegulares(QWidget):
         if id_profesional is None:
             QMessageBox.warning(self, "Crear reserva regular", "Elegí un profesional.")
             return
-        if self.combo_consultorio.currentData() is None:
+        id_consultorio = self.combo_consultorio.currentData()
+        if id_consultorio is None:
             QMessageBox.warning(self, "Crear reserva regular", "Elegí localidad, edificio, unidad y consultorio.")
             return
         dias = self._dias_seleccionados()
         if not dias:
             QMessageBox.warning(self, "Crear reserva regular", "Elegí al menos un día.")
+            return
+        # Pedido explícito de la clienta: chequear una sola vez por carga
+        # (no una vez por día elegido) si al profesional le falta alguna
+        # llave para entrar al lugar de la reserva — ver `_confirmar_
+        # llaves_faltantes`.
+        faltantes = llaves_faltantes_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
+        if faltantes and not _confirmar_llaves_faltantes(self, faltantes):
             return
         advertencias_totales: list[str] = []
         algun_dia_creado = False
@@ -1551,15 +1580,23 @@ class _PanelReservasAisladas(QWidget):
         if id_profesional is None:
             QMessageBox.warning(self, "Crear reserva aislada", "Elegí un profesional.")
             return
-        if self.combo_consultorio.currentData() is None:
+        id_consultorio = self.combo_consultorio.currentData()
+        if id_consultorio is None:
             QMessageBox.warning(self, "Crear reserva aislada", "Elegí localidad, edificio, unidad y consultorio.")
             return
         fecha = self.campo_fecha.date().toPython().isoformat()
         if not forzar and not confirmar_si_fecha_es_mes_anterior(self, self.conn, fecha):
             return
+        # Mismo criterio que Reservas regulares (ver esa solapa): se
+        # chequea una sola vez, no en cada reintento con `forzar=True`
+        # (ya se confirmó, o no hacía falta, la primera vez).
+        if not forzar:
+            faltantes = llaves_faltantes_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
+            if faltantes and not _confirmar_llaves_faltantes(self, faltantes):
+                return
         datos = dict(
             id_profesional=id_profesional,
-            id_consultorio=self.combo_consultorio.currentData(),
+            id_consultorio=id_consultorio,
             fecha=fecha,
             hora_inicio=self.spin_desde.value(),
             hora_fin=self.spin_hasta.value(),
