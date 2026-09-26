@@ -3888,6 +3888,49 @@ suma a los bloques cuyo día de semana coincide, sin importar el orden
 de la suma), confirmado porque los 9 tests que ya existían para
 `calcular_liquidacion_simulada` siguieron pasando sin tocarlos.
 
+### Tercera vuelta: se saca "Total general", más alto y ancho en las tablas
+
+Pedido de la clienta sobre la captura de la segunda vuelta:
+
+- **Se saca la tabla "Total general"**: "me había arrepentido" de
+  pedirla — la fila de Total ya resaltada en naranja al final de
+  "Subtotal por bloque" alcanza. Se borra `self.tabla_total_general`
+  entera (widget, `QLabel` "Total general:" y el bloque que la llenaba
+  clonando la fila de Total en `_mostrar_resultado`).
+- **"Subtotal por bloque" pasa a llamarse "Totales por bloques y
+  general"**: mismo widget (`self.tabla_subtotales`), solo cambia el
+  texto del `QLabel` de arriba — sigue teniendo una fila por bloque más
+  la fila de Total al final, eso no cambió.
+- **Las dos tablas que quedan suben de alto**: `setMinimumHeight(
+  _alto_para_filas(tabla, _FILAS_VISIBLES_SIMULADAS))` (8 filas,
+  constante nueva) en vez de dejarlas al alto mínimo que les daba el
+  layout — `_alto_para_filas`, importado cruzado de `llaves.py` (mismo
+  criterio de import cruzado de un símbolo privado que ya usa esta
+  pantalla para los helpers de `reservas.py`), calcula el alto justo
+  para N filas sin scroll; acá se usa como PISO (`setMinimumHeight`, no
+  `setFixedHeight`) para que sigan siendo scrolleables si hay más
+  bloques de los que entran, pedido explícito de la clienta ("igualmente
+  que sean escroleables"). Las dos tablas suman además `stretch=1` en
+  `layout_derecha` para repartirse el alto sobrante de la columna
+  derecha en partes iguales.
+- **"Bloques cargados": más ancho donde hace falta**. Tres ajustes:
+  - "Día" suma 30px de padding sobre lo que deja
+    `resizeColumnsToContents()` (mismo valor y criterio que
+    `_PADDING_COLUMNA` de `novedades.py`/`llaves.py`, aplicado acá a una
+    sola columna en vez de a todas).
+  - "Horario desde"/"Horario hasta" pasan de texto a la izquierda
+    ("9:00") a `item_numero` (alineado a la derecha, mismo helper que
+    importes/porcentajes) con sufijo "hs" al final ("9:00hs") — pedido
+    explícito de la clienta sobre el formato.
+  - Localidad/Edificio/Unidad/Consultorio (las últimas cuatro columnas)
+    pasan a `QHeaderView.ResizeMode.Stretch` — "para aprovechar el
+    ancho de la pantalla visible" en vez de quedarse angostas al ancho
+    justo de su contenido, mismo criterio que ya usan Placas/Importar
+    planilla para columnas parejas. `resizeColumnsToContents()` sigue
+    llamándose en cada refresco de la tabla para las primeras cuatro
+    columnas (N° Bloque/Día/Horario desde/Horario hasta); no afecta a
+    las cuatro en modo Stretch.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
