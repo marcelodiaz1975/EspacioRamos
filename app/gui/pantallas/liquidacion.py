@@ -653,10 +653,16 @@ class _PanelLiquidacionesSimuladas(QWidget):
         self.tabla_subtotales = QTableWidget()
         self.tabla_subtotales.setColumnCount(7)
         self.tabla_subtotales.setHorizontalHeaderLabels([
-            "N° Bloque", "Cantidad horas semanales", "Cantidad horas mensuales", "Importe Bruto",
+            "N° Bloque", "Horas semanales", "Horas mensuales", "Importe Bruto",
             "% Descuento", "Descuento", "Importe Neto",
         ])
         self.tabla_subtotales.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Las tres columnas de importes se reparten el ancho sobrante del
+        # panel, mismo criterio y mismo pedido que las de ubicación de
+        # "Bloques cargados" más arriba.
+        header_subtotales = self.tabla_subtotales.horizontalHeader()
+        for columna in (3, 5, 6):
+            header_subtotales.setSectionResizeMode(columna, QHeaderView.ResizeMode.Stretch)
         self.tabla_subtotales.setMinimumHeight(_alto_para_filas(self.tabla_subtotales, _FILAS_VISIBLES_SIMULADAS))
         layout_derecha.addWidget(self.tabla_subtotales, stretch=1)
 

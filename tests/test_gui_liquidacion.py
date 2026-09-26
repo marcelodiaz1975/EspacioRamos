@@ -741,6 +741,25 @@ def test_liquidaciones_simuladas_columnas_de_ubicacion_en_modo_stretch(qtbot, co
         assert header.sectionResizeMode(columna) != QHeaderView.ResizeMode.Stretch
 
 
+def test_liquidaciones_simuladas_titulos_horas_cortos(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    assert panel.tabla_subtotales.horizontalHeaderItem(1).text() == "Horas semanales"
+    assert panel.tabla_subtotales.horizontalHeaderItem(2).text() == "Horas mensuales"
+
+
+def test_liquidaciones_simuladas_columnas_de_importes_en_modo_stretch(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    header = panel.tabla_subtotales.horizontalHeader()
+    for columna in (3, 5, 6):
+        assert header.sectionResizeMode(columna) == QHeaderView.ResizeMode.Stretch
+    for columna in (0, 1, 2, 4):
+        assert header.sectionResizeMode(columna) != QHeaderView.ResizeMode.Stretch
+
+
 def test_liquidaciones_simuladas_botones_tienen_el_mismo_ancho_fijo(qtbot, conn):
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
