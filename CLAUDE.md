@@ -3692,6 +3692,139 @@ y cancela con "No" — no se crea nada; con la llave ya asignada no se
 llama a `question` en absoluto — confirmado forzando la respuesta a
 "No" y comprobando que la reserva se crea de todos modos).
 
+## Liquidaciones: cuarta solapa "Liquidaciones simuladas"
+
+Pedido de la clienta, ya con las cuatro solapas de "Liquidaciones"
+armadas y la revisión "uno por uno" de Reservas cerrada: "quisiera al
+margen agregar una cuarta solapa... el sentido es crear un archivo
+simulando una liquidación para que un profesional vea cómo se manda el
+archivo y cuánto le saldría un período determinado a modo de ejemplo".
+El caso de uso es mostrarle a un profesional que todavía NO tiene
+ninguna reserva real cargada cuánto le saldría reservar ciertos
+bloques, antes de darlos de alta de verdad.
+
+Tres decisiones explícitas de la clienta acotaron el alcance desde el
+pedido original, sin necesidad de `AskUserQuestion` (ya venían resueltas
+en su mensaje):
+
+- **Ignora la ocupación real por completo**: "el sistema ignora si el
+  consultorio está ocupado o reservado por otro profesional, no importa
+  eso" — nunca lee `ReservaRegular` ni ninguna tabla de ocupación, es
+  simulación pura sobre los bloques que el operador tipea a mano.
+- **Sí contempla feriados y fechas especiales**: "si cae algo de eso lo
+  descuenta" — mismos porcentajes que la liquidación real
+  (`Configuracion.PorcentajeDescuentoFeriado`/`PorcentajeDescuentoNoLaborable`).
+- **Nada de conceptos especiales**: "no se cargan conceptos especiales
+  como llaves y cosas así, es solo para apreciar cuánto daría una
+  reserva" — sin saldo anterior, vacaciones, licencias, ausencias,
+  cargos especiales, feriados trabajados ni reubicaciones. Deliberamente
+  mucho más simple que `app.negocio.liquidaciones` (907 líneas de
+  cascada secuencial) — se armó una lógica nueva e independiente en vez
+  de reusar/parametrizar esa, para no acoplar algo tan simple a los
+  internos de un cálculo mucho más complejo.
+
+### Cálculo (`app/negocio/liquidacion_simulada.py`)
+
+`BloqueSimulado` (día/horario/consultorio, sin persistir en ninguna
+tabla — vive solo en memoria mientras se arma la simulación) +
+`calcular_liquidacion_simulada(conn, *, id_profesional, periodo,
+bloques)`, que devuelve `LiquidacionSimulada` (bruto, horas semanales,
+% de descuento por volumen, lista de `ItemFeriadoSimulado`, con
+`neto`/`total_descuento_feriados` como propiedades calculadas). El
+bruto se calcula recorriendo el período día por día y sumando, para
+cada día, los bloques cuyo `dia_semana` coincide — no hay "vigencia"
+que vaya cambiando dentro del período como en una reserva real, los
+bloques simulados valen para el período entero. El descuento por
+volumen (`obtener_porcentaje_descuento`) se calcula una sola vez sobre
+el total de horas semanales de todos los bloques juntos. Los feriados
+del período (`feriados_relevantes_periodo`, ya excluye domingos) se
+descuentan solo si algún bloque cae ese día de la semana, con los
+mismos porcentajes por tipo que la liquidación real — reimplementados
+en una función privada propia (`_porcentajes_tipo_fecha`) en vez de
+importar la versión privada de `liquidaciones.py`, por el mismo motivo
+de desacople de arriba.
+
+### PDF (`app/pdf/liquidacion_simulada_pdf.py`)
+
+Mucho más corto que el PDF de liquidación real: encabezado del espacio,
+un párrafo en itálica aclarando "Documento de ejemplo... No representa
+una liquidación real ni una reserva confirmada", la tabla "Bloques
+simulados" (Día/Horario/Consultorio) y la tabla "Liquidación simulada"
+(Bruto, Descuento por volumen, un renglón por cada feriado descontado,
+Total simulado en negrita con línea arriba) — mismo estilo visual
+(colores, tipografía) que el resto de los PDF del sistema.
+
+Nombre de archivo pedido explícitamente por la clienta: `"{AAAA-MM} -
+Liquidación simulada {Tratamiento} {Nombre} {Apellido}.pdf"` (el
+"{yyyy-aa}" de su mensaje se interpretó como el mismo formato de
+período `AAAA-MM` que usa todo el resto del sistema, confirmado
+comparando contra el prefijo que ya arma `liquidacion_pdf.
+nombre_archivo_liquidacion` para las liquidaciones reales) — sin el
+sufijo de código que sí lleva el nombre de archivo real, no hace falta
+desambiguar contra otro archivo del mismo profesional porque viven en
+carpetas separadas.
+
+### Carpeta y retención (`app/negocio/archivos_generados.py`)
+
+Pedido explícito: "que se vayan conservando las liquidaciones de los
+últimos 3 meses y que luego se vayan eliminando a través de un proceso
+con el avance de mes". A diferencia de las liquidaciones reales (una
+carpeta `Profesionales/{código}` por profesional, retención de 1 año),
+acá es una única carpeta compartida `Liquidaciones simuladas` bajo la
+carpeta base (`carpeta_liquidaciones_simuladas`) — son ejemplos
+descartables, no hace falta separarlos por profesional ni conservarlos
+tanto tiempo. `limpiar_liquidaciones_simuladas_antiguas` compara el
+mismo prefijo `AAAA-MM` del nombre de archivo (mismo mecanismo que
+`limpiar_liquidaciones_antiguas`, pero con retención en MESES en vez de
+años) y se llama desde `avance_mes.avanzar_mes` junto con la limpieza de
+liquidaciones reales.
+
+### GUI: cuarta solapa de "Liquidaciones" (`app/gui/pantallas/liquidacion.py`)
+
+`_PanelLiquidacionesSimuladas`, mismo criterio de "controles y botones a
+la izquierda" que el resto del sistema (pedido explícito de la clienta
+para esta pantalla nueva, "fijate cómo se te ocurre armarlo, siempre con
+los controles y los botones a la izquierda con los estilos que venimos
+manejando"):
+
+- **Columna izquierda** (ancho máximo `_ANCHO_PANEL_FILTROS`, mismo
+  valor que "Emisión de archivos"): Profesional (combo buscable, solo
+  categoría R, mismo criterio que las otras tres solapas), Período a
+  simular (`QLineEdit` con el mismo formato libre `AAAA-MM` que "Emisión
+  de archivos" — por defecto `sumar_meses(periodo_actual(conn), 1)`, "el
+  mes siguiente al actual", pedido explícito de la clienta), línea
+  divisoria, la cascada Localidad→Edificio→Unidad→Consultorio (importada
+  cruzada de `reservas.py` — `_opciones_localidad`/`_opciones_edificio`/
+  `_recargar_unidades`/`_recargar_consultorios`, mismo criterio de
+  import cruzado de símbolos privados que ya usa esta pantalla para
+  `_opciones_profesional`/`_texto_profesional`/`_numero_codigo`), Día
+  (combo con `_DIAS_RESERVA`, Lunes a Sábado) y horario Desde/Hasta
+  (`_SpinHorario`, también importado cruzado), "Agregar bloque"/"Quitar
+  bloque" (`botonSecundario`, deshabilitado sin selección en la tabla de
+  bloques), línea divisoria, "Generar liquidación simulada"
+  (`botonPrimario` — la única acción que efectivamente escribe algo, un
+  PDF). Los tres botones comparten un mismo ancho fijo
+  (`_ANCHO_BOTON_SIMULADA`).
+- **Columna derecha**: "Bloques cargados" (tabla Día/Horario/Consultorio,
+  se arma en memoria con una lista de `BloqueSimulado`, sin persistir
+  nada — "Consultorio" reusa `_lugar_bloque`, importado cruzado del
+  propio módulo del PDF, para no duplicar esa consulta) y, debajo,
+  "Resultado de la última simulación generada" (tabla Concepto/Monto,
+  mismas filas que arma el PDF — Bruto, Descuento por volumen, un
+  renglón por feriado descontado, Total simulado — con `item_monto`, el
+  mismo helper compartido de "Estado de cuenta" que colorea en rojo los
+  montos negativos).
+
+"Agregar bloque" valida que haya un consultorio elegido y que el
+horario "hasta" sea posterior al "desde" antes de sumar el bloque (con
+un `QMessageBox.warning` si no); "Generar" valida profesional, período y
+que haya al menos un bloque cargado, y atrapa el `ValueError` de
+`calcular_liquidacion_simulada`/`generar_pdf_liquidacion_simulada`
+mostrándolo en un cartel en vez de romper. No hay ningún guardado en la
+base — cerrar y volver a entrar a la solapa pierde los bloques cargados,
+comportamiento aceptado porque es una herramienta de "armar y generar en
+el momento", no un registro que haya que conservar entre sesiones.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
