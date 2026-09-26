@@ -117,40 +117,28 @@ _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 4
 # Alto máximo del cuadro "Detalle" en Reservas aisladas, ya sacado de la
 # grilla y ocupando todo el ancho de "Filtros + grid" (90px por defecto
 # en el resto de los usos) — ver `GrillaOperativaWidget.extraer_detalle`.
-_ALTO_DETALLE_AISLADAS = 54
-# `layout_externo` (form+grilla scrolleable, stretch=1, seguido de la
-# tabla de abajo, sin stretch) reparte TODO el alto disponible entre esos
-# dos — sacarle alto a `panel_tabla` (el título, ver "sin título" más
-# abajo; y el margen superior de `layout_tabla`, ver "sin hueco arriba de
-# la tabla") no alcanza por sí solo para que la tabla suba: sin nada más,
-# ese alto liberado se lo lleva de vuelta el `QScrollArea` de arriba (el
-# único ítem con `stretch=1`), empujando `panel_tabla` hacia ABAJO en la
-# misma medida — la posición de la tabla queda exactamente igual que
-# antes, en vez de subir. `_ALTO_TITULO_PANEL_TABLA` (23px: 14 del
-# título — medido, `QGroupBox` con título vs. sin título, mismo
-# contenido — más 9 del margen superior de `layout_tabla` que se saca en
-# la misma vuelta) se agrega como espaciador FIJO después de
-# `panel_tabla` — compensa exactamente lo que `panel_tabla` dejó de
-# necesitar entre las dos rondas, así el reparto entre `scroll`/
-# `panel_tabla` no cambia (scroll sigue exactamente del mismo alto que
-# antes — "sin tocar nada de lo que está antes de la tabla", pedido
-# explícito de la clienta) y la tabla sí sube esos 23px en total, con el
-# espaciador como hueco muerto al final del todo, después de la tabla,
-# donde no se ve.
-_ALTO_TITULO_PANEL_TABLA = 23
-# Regulares únicamente (pedido explícito de la clienta, ronda posterior:
-# "subí un poco más la tabla para pegarlo a lo de arriba sin tocar el
-# resto"): `layout_externo` tenía además el espaciado default de Qt
-# entre widgets (6px) antes de `panel_tabla` — hueco de más entre el
-# scroll de arriba y la tabla. `layout_externo.setSpacing(0)` (solo en
-# Regulares, no en Aisladas — la clienta no pidió tocar esa solapa acá)
-# lo saca; medido con un script de geometría (mismo criterio de todo
-# este apartado, comparando `panel.height() - scroll_area.height()`
-# antes/después) que ese único cambio alcanza sumando 6px al espaciador
-# final para que el alto de `scroll` no se mueva ni un pixel ("sin tocar
-# el resto" — confirmado, `scroll` termina en la misma posición absoluta
-# que antes): `_ALTO_TITULO_PANEL_TABLA_REGULARES = 23 + 6 = 29`.
-_ALTO_TITULO_PANEL_TABLA_REGULARES = _ALTO_TITULO_PANEL_TABLA + 6
+# Sube de 54 a 64 (medido, no a ojo) en la ronda que junta el gap grilla-
+# Detalle: sacar el espaciado default de Qt ahí corrió a "Detalle" 6-10px
+# hacia arriba, rompiendo la alineación de su borde inferior contra el
+# pie de "Cant. horas aisladas mensuales" (pedido de una ronda anterior,
+# "que se vea todo parejo") — el cuadro un poco más alto la recupera.
+_ALTO_DETALLE_AISLADAS = 64
+# Hasta la ronda anterior, `layout_externo` (form+grilla scrolleable,
+# `stretch=1`, seguido de la tabla de abajo, sin stretch) le daba TODO el
+# alto sobrante de la ventana a `scroll` — cualquier alto que `panel_
+# tabla` dejara de necesitar (sacar un título, un margen) había que
+# compensarlo con un espaciador fijo al final para que no se lo llevara
+# de vuelta el scroll, empujando la tabla hacia abajo en la misma medida.
+# Pedido explícito de la clienta, ronda posterior ("ampliá el tamaño de
+# la tabla... que llegue lo más abajo posible... solo tocá la tabla"):
+# se invirtió el reparto — `scroll` pasa a un alto FIJO igual a su propio
+# mínimo (`contenido.minimumSizeHint()`, ver `_armar_ui` de las dos
+# clases) y es `panel_tabla` el que se queda con `stretch=1`, así la
+# tabla crece con TODO el sobrante en vez de que quede invisible dentro
+# del scroll. Sin nada que compensar (el sobrante ahora es tabla de
+# verdad, no hueco muerto), `_ALTO_TITULO_PANEL_TABLA`/`_ALTO_TITULO_
+# PANEL_TABLA_REGULARES` — los espaciadores fijos de las dos rondas
+# anteriores — dejaron de usarse y se sacaron.
 # Cantidad de filas de "Referencias de colores" en Reservas aisladas (6
 # referencias / 2 columnas, ver `LeyendaColores.hacer_compacta`) — usado
 # para repartir en partes iguales, entre los "cuadraditos" de esa
@@ -387,8 +375,12 @@ class _PanelReservasRegulares(QWidget):
         el QTabWidget contenedor todavía no está mostrado y se termina
         quedando el foco en su tab bar. Al mostrarse la pestaña (al
         abrir la pantalla o volver a esta solapa) se repite el pedido
-        de foco en Profesional, que es cuando realmente surte efecto."""
+        de foco en Profesional, que es cuando realmente surte efecto.
+        De paso, vuelve a fijar el alto de `_scroll_superior` (ver
+        `_armar_ui`): el `minimumSizeHint()` calculado ANTES de este
+        primer show puede quedar unos pixels desincronizado del real."""
         super().showEvent(event)
+        self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
         self._orden.reiniciar()
         self.actualizar()
         self.combo_profesional.setFocus()
@@ -397,9 +389,9 @@ class _PanelReservasRegulares(QWidget):
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
         # Sin espaciado default de Qt entre los ítems (pedido de la
-        # clienta: "subí un poco más la tabla para pegarlo a lo de
-        # arriba") — el hueco que eso saca queda compensado en el
-        # espaciador final, ver `_ALTO_TITULO_PANEL_TABLA_REGULARES`.
+        # clienta: separación mínima entre lo de arriba y la tabla) — ver
+        # más abajo cómo se reparte el alto entre `scroll` y `panel_
+        # tabla`.
         layout_externo.setSpacing(0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -611,13 +603,37 @@ class _PanelReservasRegulares(QWidget):
         self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
 
         scroll.setWidget(contenido)
-        # "Horarios reservados" queda FUERA del QScrollArea de la grilla
-        # (que puede necesitar scroll propio para mostrar la grilla
-        # completa sin cortarla — ver el hallazgo documentado sobre
-        # `self.tabla.setMinimumHeight` de `GrillaOperativaWidget`) para
-        # que su título y un par de filas siempre se vean sin tener que
-        # scrollear todo el panel — pedido explícito de la clienta.
-        layout_externo.addWidget(scroll, stretch=1)
+        # Pedido explícito de la clienta ("ampliá el tamaño de la tabla,
+        # subiéndola arriba al límite de cuando termina el cuadro de
+        # Detalle... y que llegue lo más abajo posible dentro de la
+        # pantalla que se visualiza — solo tocá la tabla, nada del
+        # resto"): antes `scroll` tenía `stretch=1` (se llevaba TODO el
+        # alto sobrante de la ventana, quedando más alto que lo que su
+        # propio contenido necesita — 585px contra un mínimo real de
+        # 569px, medido con `contenido.minimumSizeHint()`) mientras la
+        # tabla de abajo quedaba con un alto fijo de 3 filas nomás, sin
+        # importar cuánta ventana sobrara debajo. Se invierte quién se
+        # queda con el sobrante: `scroll` pasa a un alto FIJO, igual a lo
+        # que su contenido realmente necesita (sin dejarle nada de más,
+        # así el contenido de arriba — formulario, grilla, botones,
+        # Detalle — no se mueve ni un pixel, "nada del resto"), y el
+        # sobrante que eso libera se lo lleva la tabla de abajo (`stretch
+        # =1` en `panel_tabla`, ver más abajo) — la tabla crece hasta
+        # pegarse contra el borde de Detalle arriba y contra el borde de
+        # la ventana abajo. Ya no hace falta ningún espaciador que
+        # compense nada (`_ALTO_TITULO_PANEL_TABLA_REGULARES` deja de
+        # usarse acá): no hay más hueco muerto que esconder, todo el
+        # sobrante pasa a ser tabla de verdad.
+        scroll.setFixedHeight(contenido.minimumSizeHint().height())
+        # Guardados aparte: el `sizeHint()` calculado ACÁ (antes de que la
+        # pantalla se muestre de verdad) no siempre coincide con el que
+        # da el mismo widget una vez mostrado (mismo tipo de imprecisión
+        # ya documentado en Aisladas para `alto_natural_grilla()` — el
+        # offscreen platform de Qt no soporta `propagateSizeHints`) —
+        # `showEvent` vuelve a fijar el alto con el valor ya asentado.
+        self._scroll_superior = scroll
+        self._contenido_superior = contenido
+        layout_externo.addWidget(scroll)
 
         # Sin título (pedido de la clienta: "eliminá el título 'Horarios
         # reservados' así la tabla puede situarse un poco más arriba") —
@@ -646,11 +662,16 @@ class _PanelReservasRegulares(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla.setFixedHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_REGULARES))
+        # Antes `setFixedHeight` a 3 filas justas — pasa a `setMinimumHeight`
+        # (mismo cálculo de `_alto_para_filas`, ahora como piso en vez de
+        # techo) para que la tabla pueda crecer con `panel_tabla` sin dejar
+        # de mostrar al menos esas 3 filas en una ventana chica. Sigue
+        # siendo scrolleable sola si hay más filas de las que entran en el
+        # alto que le toque, sea cual sea ese alto.
+        self.tabla.setMinimumHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_REGULARES))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
-        layout_externo.addWidget(panel_tabla)
-        layout_externo.addSpacing(_ALTO_TITULO_PANEL_TABLA_REGULARES)
+        layout_externo.addWidget(panel_tabla, stretch=1)
 
         self._cargar_edificios()
         self._foco = instalar_enter_avanza_foco(
@@ -1003,8 +1024,10 @@ class _PanelReservasAisladas(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802
         """Mismo motivo que en Reservas regulares: `setFocus()` durante la
         construcción no alcanza a "pegar" porque el QTabWidget contenedor
-        todavía no está mostrado."""
+        todavía no está mostrado. De paso, vuelve a fijar el alto de
+        `_scroll_superior` (ver esa misma solapa)."""
         super().showEvent(event)
+        self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
         self._orden.reiniciar()
         self.actualizar()
         self.combo_profesional.setFocus()
@@ -1012,6 +1035,9 @@ class _PanelReservasAisladas(QWidget):
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
+        # Mismo motivo que Regulares: sin espaciado default de Qt entre
+        # `scroll` y la tabla de abajo, para una separación mínima.
+        layout_externo.setSpacing(0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -1149,6 +1175,15 @@ class _PanelReservasAisladas(QWidget):
         grupo_grilla = QGroupBox()
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         layout_grupo_grilla.setContentsMargins(0, 0, 0, 0)
+        # Sin espaciado default de Qt (6px) entre la grilla y "Detalle:"
+        # (pedido explícito de la clienta: "el título detalle... subilo
+        # un poco para que haya una separación mínima con la grilla") —
+        # el hueco que queda ahora (borde de `self.grilla` nomás) es el
+        # mínimo posible, no hace falta compensar nada más abajo porque
+        # acá no hay ningún mecanismo de "scroll que se lleva lo
+        # sobrante" de por medio, a diferencia de `layout_externo` más
+        # abajo.
+        layout_grupo_grilla.setSpacing(0)
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.fijar_modo("aislada")
         self.grilla.activar_filtro_exclusivo_profesional(True)
@@ -1227,10 +1262,21 @@ class _PanelReservasAisladas(QWidget):
         self.campo_fecha_ausencia.setDate(QDate(hoy.year, hoy.month, hoy.day))
 
         scroll.setWidget(contenido)
-        # Mismo motivo que en Reservas regulares: "Reservas aisladas"
-        # queda FUERA del QScrollArea de la grilla para que su título y
+        # Mismo mecanismo que Reservas regulares (ver esa solapa para el
+        # detalle completo): `scroll` pasa de `stretch=1` a un alto FIJO
+        # igual a lo que su contenido realmente necesita
+        # (`contenido.minimumSizeHint()`, sin dejarle nada de más), así
+        # el sobrante de la ventana se lo lleva la tabla de abajo en vez
+        # de quedar invisible dentro del scroll — "Reservas aisladas"
+        # sigue quedando FUERA de este `QScrollArea` para que su título y
         # un par de filas siempre se vean sin scrollear todo el panel.
-        layout_externo.addWidget(scroll, stretch=1)
+        scroll.setFixedHeight(contenido.minimumSizeHint().height())
+        # Guardados aparte para volver a fijar el alto en `showEvent` (ver
+        # esa solapa en Regulares) — el `minimumSizeHint()` de acá puede
+        # quedar unos pixels desincronizado hasta el primer show real.
+        self._scroll_superior = scroll
+        self._contenido_superior = contenido
+        layout_externo.addWidget(scroll)
 
         # Sin título (mismo pedido y mismo criterio que Regulares, ver
         # esa solapa) — la tabla sube lo más posible sin tocar nada de
@@ -1257,11 +1303,14 @@ class _PanelReservasAisladas(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla.setFixedHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS))
+        # Antes `setFixedHeight` a 4 filas justas — mismo cambio que
+        # Regulares, pasa a `setMinimumHeight` (piso, no techo) para que
+        # la tabla crezca con `panel_tabla` y use el sobrante que antes
+        # se quedaba invisible dentro de `scroll`.
+        self.tabla.setMinimumHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_tabla.addWidget(self.tabla, stretch=1)
-        layout_externo.addWidget(panel_tabla)
-        layout_externo.addSpacing(_ALTO_TITULO_PANEL_TABLA)
+        layout_externo.addWidget(panel_tabla, stretch=1)
 
         self._cargar_edificios()
         self._foco = instalar_enter_avanza_foco(

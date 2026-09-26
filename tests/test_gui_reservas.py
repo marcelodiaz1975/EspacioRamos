@@ -6,8 +6,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import hoja_estilos
 from app.gui.pantallas.reservas import (
-    _AJUSTE_ALTO_GRILLA_AISLADAS, _ALTO_TITULO_PANEL_TABLA, _ALTO_TITULO_PANEL_TABLA_REGULARES,
-    _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
+    _AJUSTE_ALTO_GRILLA_AISLADAS, _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
@@ -100,37 +99,38 @@ def test_sin_titulo_vista_previa_grilla_y_tabla_de_abajo_fuera_del_scroll(qtbot,
         assert scroll.isAncestorOf(panel_tabla) is False
 
 
-def test_tabla_de_abajo_sin_titulo_tiene_espaciador_que_compensa(qtbot, conn):
-    """Pedido explícito de la clienta ("eliminá el título... así la tabla
-    puede situarse un poco más arriba"): sacar el título de la tabla de
-    abajo por sí solo NO la sube — `layout_externo` reparte todo el alto
-    disponible entre el `QScrollArea` de arriba (`stretch=1`) y esta
-    tabla, así que el alto que el título dejó de necesitar se lo volvía a
-    llevar el scroll, empujando la tabla para abajo la misma medida (la
-    posición quedaba igual que antes). Un espaciador fijo después de la
-    tabla, del mismo alto que tenía el título (`_ALTO_TITULO_PANEL_
-    TABLA`), compensa exactamente eso: el reparto entre scroll/tabla no
-    cambia (scroll sigue del mismo alto — "sin tocar nada de lo que está
-    antes de la tabla") y la tabla sí sube, con el espaciador como hueco
-    muerto al final de todo, donde no se ve. Regulares suma además el
-    ajuste de una ronda posterior (`_ALTO_TITULO_PANEL_TABLA_REGULARES`,
-    ver ese test aparte) — cada panel se compara contra su propia
-    constante, ya no comparten el mismo valor."""
+def test_tabla_de_abajo_se_expande_con_el_sobrante_de_la_ventana(qtbot, conn):
+    """Pedido explícito de la clienta, ronda posterior ("ampliá el
+    tamaño de la tabla... subiéndola arriba al límite de cuando termina
+    el cuadro de Detalle... y que llegue lo más abajo posible dentro de
+    la pantalla que se visualiza — solo tocá la tabla, nada del resto"):
+    hasta la ronda anterior `layout_externo` le daba TODO el alto
+    sobrante de la ventana al `QScrollArea` de arriba (`stretch=1`) y la
+    tabla se quedaba con un alto fijo — cualquier alto que la tabla
+    dejara de necesitar (sacar el título, un margen) había que
+    compensarlo con un espaciador fijo al final para que el scroll no se
+    lo llevara de vuelta. Se invirtió el reparto: `scroll` pasa a un
+    alto FIJO igual al mínimo real de su contenido
+    (`contenido.minimumSizeHint()`, sin dejarle nada de más — así el
+    contenido de arriba no se mueve, "nada del resto") y es `panel_
+    tabla` el que pasa a `stretch=1`, llevándose todo el sobrante. Sin
+    nada que compensar, ya no queda ningún espaciador después de la
+    tabla."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    esperado = {
-        id(pantalla.panel_regulares): _ALTO_TITULO_PANEL_TABLA_REGULARES,
-        id(pantalla.panel_aisladas): _ALTO_TITULO_PANEL_TABLA,
-    }
     for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
-        panel_tabla = panel.tabla.parentWidget()
         layout = panel.layout()
+        scroll = panel.findChild(QScrollArea)
+        panel_tabla = panel.tabla.parentWidget()
+        indice_scroll = layout.indexOf(scroll)
         indice_tabla = layout.indexOf(panel_tabla)
-        item_siguiente = layout.itemAt(indice_tabla + 1)
-        assert item_siguiente is not None
-        espaciador = item_siguiente.spacerItem()
-        assert espaciador is not None
-        assert espaciador.sizeHint().height() == esperado[id(panel)]
+
+        assert layout.stretch(indice_scroll) == 0
+        assert layout.stretch(indice_tabla) == 1
+        assert scroll.minimumHeight() == scroll.maximumHeight() == scroll.height()
+        assert scroll.height() == scroll.widget().minimumSizeHint().height()
+        # Nada después de `panel_tabla`: ni espaciador ni ningún otro ítem.
+        assert layout.itemAt(indice_tabla + 1) is None
 
 
 def test_tabla_de_abajo_sin_margen_superior(qtbot, conn):
@@ -150,22 +150,39 @@ def test_tabla_de_abajo_sin_margen_superior(qtbot, conn):
         assert margenes.bottom() == 9
 
 
-def test_regulares_tabla_de_abajo_sube_sin_mover_el_scroll_de_arriba(qtbot, conn):
-    """Pedido explícito de la clienta ("subí un poco más la tabla para
-    pegarlo a lo de arriba sin tocar el resto"): `layout_externo` de
-    Regulares saca el espaciado default de Qt (6px) entre el `QScrollArea`
-    de arriba y la tabla (`layout_externo.setSpacing(0)`), sumando esos
-    6px al espaciador final (`_ALTO_TITULO_PANEL_TABLA_REGULARES = 23 +
-    6`) para que el alto de `scroll` no cambie ni un pixel — comparado
-    contra Aisladas, que no tocó nada de esto en esta ronda y sigue con
-    el espaciado default de Qt entre sus mismos dos ítems."""
+def test_layout_externo_sin_espaciado_en_las_dos_solapas(qtbot, conn):
+    """`layout_externo` no deja espaciado default de Qt entre `scroll` y
+    la tabla de abajo, en ninguna de las dos solapas — pedido explícito
+    de la clienta sobre Regulares en una ronda ("subí un poco más la
+    tabla para pegarlo a lo de arriba"), extendido a Aisladas en la
+    ronda siguiente ("el título detalle... subilo un poco para que haya
+    una separación mínima con la grilla")."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.panel_regulares.layout().spacing() == 0
-    assert pantalla.panel_aisladas.layout().spacing() != 0
+    assert pantalla.panel_aisladas.layout().spacing() == 0
 
-    espaciador_regulares = pantalla.panel_regulares.layout().itemAt(2).spacerItem()
-    assert espaciador_regulares.sizeHint().height() == _ALTO_TITULO_PANEL_TABLA_REGULARES
+
+def test_grilla_y_detalle_de_aisladas_separacion_minima(qtbot, conn):
+    """Pedido explícito de la clienta: "el título detalle... subilo un
+    poco para que haya una separación mínima con la grilla" —
+    `layout_grupo_grilla.setSpacing(0)` saca el espaciado default de Qt
+    (6px) entre el borde inferior de la grilla y "Detalle:", dejando solo
+    el borde propio de `self.grilla` como separación."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
+    qtbot.waitExposed(pantalla)
+
+    panel_a = pantalla.panel_aisladas
+    etiqueta_detalle = next(
+        hijo for hijo in panel_a.findChildren(QLabel) if hijo.text() == "Detalle:"
+    )
+    grilla_bottom = panel_a.grilla.mapToGlobal(panel_a.grilla.rect().bottomLeft()).y()
+    etiqueta_top = etiqueta_detalle.mapToGlobal(etiqueta_detalle.rect().topLeft()).y()
+    assert 0 <= etiqueta_top - grilla_bottom <= 2
 
 
 def test_aisladas_grilla_ajustada_sin_scrollbar(qtbot, conn):
@@ -239,40 +256,52 @@ def test_panel_de_filtros_sin_titulo_y_con_etiquetas_renombradas(qtbot, conn):
         assert panel.grilla._etiqueta_dia.text() == "Filtro de día de la semana"
 
 
-def test_tabla_de_abajo_tiene_alto_fijo_para_filas_visibles(qtbot, conn):
+def test_tabla_de_abajo_tiene_un_piso_de_filas_visibles(qtbot, conn):
     """Pedido de la clienta: "Horarios reservados"/"Reservas aisladas"
-    muestra una cantidad fija de filas (con su propio scroll si hay más)
-    — para dejarle más alto disponible al panel de arriba, cuyo "Detalle"
-    antes quedaba fuera de la vista. Aisladas muestra más filas que
-    Regulares (4 contra 3) porque a esa solapa le sobraba lugar debajo de
-    "Detalle"/"% Descuento" incluso con las 3 de antes — bajada de 5 a 4
-    en la vuelta siguiente para que el cuadro "Detalle" se termine de ver
-    completo (pedido explícito de la clienta)."""
+    muestra AL MENOS una cantidad fija de filas (con su propio scroll si
+    hay más) — para dejarle más alto disponible al panel de arriba, cuyo
+    "Detalle" antes quedaba fuera de la vista. Aisladas parte de más
+    filas que Regulares (4 contra 3) porque a esa solapa le sobraba lugar
+    debajo de "Detalle"/"% Descuento" incluso con las 3 de antes.
+
+    Desde la ronda de "ampliá el tamaño de la tabla... que llegue lo más
+    abajo posible", este número ya no es el alto EXACTO de la tabla (que
+    ahora crece con `stretch=1` para usar el sobrante de la ventana) sino
+    su PISO — `setMinimumHeight` en vez de `setFixedHeight` — así que acá
+    se compara con `>=`, no con `==`."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.panel_regulares.tabla.height() == _alto_para_filas(pantalla.panel_regulares.tabla, 3)
-    assert pantalla.panel_aisladas.tabla.height() == _alto_para_filas(pantalla.panel_aisladas.tabla, 4)
+    assert pantalla.panel_regulares.tabla.height() >= _alto_para_filas(pantalla.panel_regulares.tabla, 3)
+    assert pantalla.panel_aisladas.tabla.height() >= _alto_para_filas(pantalla.panel_aisladas.tabla, 4)
 
 
 def test_tabla_horarios_reservados_escrolea_con_mas_filas_de_las_que_entran(qtbot, conn):
     """Pedido de la clienta: las tablas de abajo tienen que ser
     scrolleables verticalmente — ya lo eran por default de Qt (mismo
     criterio que Llaves: `verticalScrollBar().maximum() > 0` cuando hay
-    más filas de las que entran en el alto fijo), este test lo deja
-    cubierto de acá en adelante."""
+    más filas de las que entran), este test lo deja cubierto de acá en
+    adelante. Desde que la tabla creció con `stretch=1` para usar el
+    sobrante de la ventana (ronda "ampliá el tamaño de la tabla..."),
+    hacen falta bastantes más filas que antes para forzar el desborde —
+    una por día de la semana (6) ya no alcanza con la tabla agrandada."""
     conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
     conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
     id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
     conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
-    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
+    dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"]
     repo = obtener_repositorio(conn, "ReservaRegular")
-    for dia in ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"):
-        repo.crear(
-            IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana=dia,
-            HoraInicio=9, HoraFin=10, VigenciaInicio="2020-01-01",
-        )
+    repo_prof = obtener_repositorio(conn, "Profesional")
+    cantidad_filas = 0
+    for i in range(6):
+        id_profesional = repo_prof.crear(CategoriaProfesional="R", Apellido=f"Prof{i}")
+        for dia in dias:
+            repo.crear(
+                IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana=dia,
+                HoraInicio=9, HoraFin=10, VigenciaInicio="2020-01-01",
+            )
+            cantidad_filas += 1
     conn.commit()
 
     pantalla = PantallaReservas(conn)
@@ -281,11 +310,14 @@ def test_tabla_horarios_reservados_escrolea_con_mas_filas_de_las_que_entran(qtbo
     pantalla.show()
     qtbot.waitExposed(pantalla)
 
-    assert pantalla.panel_regulares.tabla.rowCount() == 6
+    assert pantalla.panel_regulares.tabla.rowCount() == cantidad_filas
     assert pantalla.panel_regulares.tabla.verticalScrollBar().maximum() > 0
 
 
 def test_tabla_reservas_aisladas_escrolea_con_mas_filas_de_las_que_entran(qtbot, conn):
+    """Ver `test_tabla_horarios_reservados_escrolea_con_mas_filas_de_las_
+    que_entran`: desde que la tabla creció con `stretch=1`, hacen falta
+    bastantes más filas que antes para forzar el desborde."""
     conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
     conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
@@ -294,9 +326,10 @@ def test_tabla_reservas_aisladas_escrolea_con_mas_filas_de_las_que_entran(qtbot,
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
     id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Pérez")
     repo = obtener_repositorio(conn, "ReservaAislada")
-    for dia in range(1, 7):
+    cantidad_filas = 30
+    for dia in range(1, cantidad_filas + 1):
         repo.crear(
-            IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha=f"2026-08-0{dia}",
+            IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha=f"2026-{1 + dia // 28:02d}-{1 + dia % 28:02d}",
             HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
         )
     conn.commit()
@@ -308,7 +341,7 @@ def test_tabla_reservas_aisladas_escrolea_con_mas_filas_de_las_que_entran(qtbot,
     pantalla.pestanas.setCurrentIndex(1)  # Reservas aisladas — no es la solapa por default
     qtbot.waitExposed(pantalla)
 
-    assert pantalla.panel_aisladas.tabla.rowCount() == 6
+    assert pantalla.panel_aisladas.tabla.rowCount() == cantidad_filas
     assert pantalla.panel_aisladas.tabla.verticalScrollBar().maximum() > 0
 
 
@@ -344,7 +377,7 @@ def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
     assert grilla_regulares.texto_detalle.maximumHeight() > 90
 
     grilla_aisladas = pantalla.panel_aisladas.grilla
-    assert grilla_aisladas.texto_detalle.maximumHeight() == 54
+    assert grilla_aisladas.texto_detalle.maximumHeight() == 64
 
 
 def test_detalle_de_aisladas_ocupa_todo_el_ancho_de_la_grilla(qtbot, conn):
