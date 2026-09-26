@@ -3825,6 +3825,69 @@ base — cerrar y volver a entrar a la solapa pierde los bloques cargados,
 comportamiento aceptado porque es una herramienta de "armar y generar en
 el momento", no un registro que haya que conservar entre sesiones.
 
+### Segunda vuelta: desglose por bloque y "Total general"
+
+Pedido de la clienta al ver la primera captura de esta solapa nueva,
+con tres cambios sobre las dos tablas de la derecha:
+
+- **"Bloques cargados" con más columnas**: pasa de 3 columnas (Día/
+  Horario/Consultorio, este último un texto armado con
+  `_lugar_bloque` del módulo del PDF) a 8: N° Bloque, Día, Horario
+  desde, Horario hasta (separado en dos columnas, cada una con
+  `_fmt_hora` de `reservas.py`, mismo formato "9:00" que ya usan los
+  `_SpinHorario` de esta misma pantalla) y Localidad/Edificio/Unidad/
+  Consultorio por separado — `_ubicacion_bloque` (nueva, en
+  `liquidacion.py`) hace el mismo JOIN Consultorio→Unidad→Edificio→
+  Localidad que ya usa `_opciones_localidad` de `reservas.py`, con el
+  mismo "(Sin localidad)" cuando el edificio no tiene una cargada. Deja
+  de importarse `_lugar_bloque` acá (queda como uso interno del PDF
+  nomás, no se borra de ese módulo).
+- **La tabla de resultado se renombra "Subtotal por bloque"**: en vez de
+  una fila por concepto (Bruto/Descuento por volumen/cada feriado/
+  Total), ahora es una fila POR BLOQUE cargado — columnas N° Bloque,
+  Cantidad horas semanales, Cantidad horas mensuales, Importe Bruto, %
+  Descuento, Descuento, Importe Neto — más una fila de Total al final,
+  resaltada con el mismo naranja suave que ya usa toda la aplicación
+  para la fila seleccionada de cualquier tabla (`resalte_seleccion` de
+  `paleta()` en `estilos.py`, `"#F2C4A0"` — reusado tal cual, no un
+  naranja nuevo, como `_COLOR_FILA_TOTAL` en `liquidacion.py`).
+- **Tabla nueva "Total general"**: debajo de "Subtotal por bloque", una
+  tabla con las mismas 7 columnas y una única fila ("Total general" en
+  vez de un número de bloque) — mismos valores que la fila de Total ya
+  resaltada arriba, pedida como tabla aparte en vez de (o además de)
+  esa fila. `QTableWidgetItem.clone()` duplica cada celda de la fila de
+  total ya armada (un `QTableWidgetItem` no puede pertenecer a dos
+  tablas a la vez) antes de renombrar la primera celda.
+
+Esto obligó a que `app.negocio.liquidacion_simulada.
+calcular_liquidacion_simulada` calculara el desglose por bloque, no
+solo el agregado: `SubtotalBloque` (una instancia por bloque, en el
+mismo orden y numerados 1-based) con horas semanales/mensuales, bruto,
+% de descuento (el mismo para todos los bloques — se calcula una sola
+vez sobre el total de horas de TODOS los bloques juntos, como ya hacía
+`descuento_horas_pct`) y `descuento`/`neto` YA propios de ese bloque.
+Punto importante, no pedido explícitamente pero necesario para que los
+números cierren: `descuento` de un bloque no es solo su parte del
+descuento por volumen — también incluye cualquier feriado que caiga en
+el día de la semana de ESE bloque en particular (a diferencia de
+`descuentos_feriados`, la lista existente pensada para el PDF, que
+agrupa por fecha sin importar a qué bloque corresponde). Sin este
+reparto, sumar el `neto` de todos los `SubtotalBloque` no hubiera dado
+exactamente el `neto` total de la liquidación cuando hay un feriado de
+por medio.
+
+El cálculo del bruto total se aprovechó para simplificarse de paso: en
+vez de recorrer el período día por día sumando lo que le toca a cada
+bloque ese día (el `while` original), ahora se calcula directamente
+bloque por bloque — cuántas veces cae su día de la semana en el período
+(`_cantidad_dias_semana_en_periodo`, nueva, mismo criterio que el
+helper de test que ya existía en `test_liquidacion_simulada.py` con
+otro nombre) × sus horas × el valor hora de su consultorio — y se suma.
+Los dos caminos dan matemáticamente el mismo total (cada día solo le
+suma a los bloques cuyo día de semana coincide, sin importar el orden
+de la suma), confirmado porque los 9 tests que ya existían para
+`calcular_liquidacion_simulada` siguieron pasando sin tocarlos.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
