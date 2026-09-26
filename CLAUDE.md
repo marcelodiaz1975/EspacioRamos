@@ -3620,6 +3620,78 @@ visibles` (renombrado desde "...alto_fijo...", ahora compara con `>=` en
 vez de `==`); `test_cuadro_detalle_queda_parejo_con_la_columna_del_
 formulario` actualiza el valor esperado de Aisladas de 54 a 64.
 
+## Reservas: aviso si al profesional le falta la llave de acceso al cargar una reserva
+
+Pedido de la clienta, ya con la revisión "uno por uno" de pantallas
+cerrada: "cuando se intente cargar una reserva, ya sea aislada o
+regular, que el sistema chequee si el profesional tiene las llaves del
+edificio y de la unidad necesarias para ingresar... En el caso de que le
+falte alguna, que salga un alerta... con opción de confirmar/continuar y
+cancelar. Un profesional sin acceso le puedo hacer abrir por medio de
+otro profesional que esté en ese momento, por eso no es excluyente...
+pero está bueno que el sistema me avise para que en ese momento vea cómo
+manejo el tema del acceso." Explícitamente NO bloqueante — solo informa,
+nunca impide cargar la reserva.
+
+No se consultó ninguna decisión abierta antes de implementar (a
+diferencia de otras funcionalidades nuevas de esta lista): el modelo de
+datos de Llaves ya resuelve sin ambigüedad qué significa "tener acceso"
+(una Asignación abierta de una Llave activa cuyo LlaveAcceso cubre el
+lugar), y el pedido en sí ya describe el comportamiento de punta a
+punta (avisa, no bloquea, Confirmar/Cancelar) sin dejar ninguna bifurcación
+real de producto para decidir.
+
+`app.negocio.llaves.llaves_faltantes_para_reserva(conn, id_profesional,
+id_consultorio)` (nueva) resuelve Consultorio → Unidad → Edificio y
+devuelve una lista de textos ("la llave del edificio {nombre}"/"la
+llave de la unidad {departamento}") por cada nivel que le falta —
+vacía si tiene todo lo necesario, o si ese lugar no tiene ninguna Llave
+ACTIVA configurada (nada para chequear: un edificio que nunca cargó
+llaves en el sistema no tiene por qué generar alertas). "Tener" un
+acceso es: alguna Llave activa con `LlaveAcceso` a ese lugar tiene una
+`LlaveMovimiento` Tipo="Asignación" SIN Devolución/Pérdida que la cierre
+a nombre de este profesional — alcanza con cualquiera de las que abren
+ese lugar, no hace falta tener todas. El acceso a nivel EDIFICIO se
+distingue de uno a nivel UNIDAD por si el `LlaveAcceso` tiene o no
+`IdUnidad`: uno con unidad puntual solo abre esa unidad, no el edificio
+entero — `.listar(IdUnidad=None)` no sirve para este filtro (una
+comparación SQL "= NULL" nunca es verdadera), así que se filtra en
+Python sobre todos los accesos del edificio.
+
+En `app/gui/pantallas/reservas.py`, `_confirmar_llaves_faltantes` (una
+función a nivel de módulo, no un método — se comparte entre las dos
+solapas, mismo criterio que `_alto_para_filas`) arma el cartel
+`QMessageBox.question` con Sí/No ("¿Confirmás la reserva de todos
+modos?"), mismo mecanismo (`QMessageBox.question`, no un diálogo
+propio) que ya usa este archivo para `ConflictoBloqueanteError`. El
+chequeo se llama UNA sola vez por click en "Crear reserva regular"/
+"Crear reserva aislada" — en Regulares, antes del loop que crea una
+fila por cada día tildado (no tiene sentido preguntar una vez por día,
+la llave que hace falta es la misma para todos); en Aisladas, con la
+misma guarda `if not forzar` que ya protege la pregunta de "¿fecha de
+un mes anterior?" — evita volver a preguntar en el reintento automático
+con `forzar=True` que dispara `ConflictoBloqueanteError` (ya se
+confirmó, o no hacía falta, en el primer intento).
+
+"Modificar seleccionada"/"Modificar reserva" en las dos solapas no
+necesitó ningún cambio aparte: ya funcionaban finalizando/cancelando la
+reserva vieja y precargando el formulario para dar de alta la versión
+nueva por el mismo botón "Crear" (documentado desde que se armó esa
+función) — el aviso de llaves, enganchado ahí, cubre alta y
+modificación por igual sin duplicar nada.
+
+Tests nuevos: `tests/test_llaves.py` (11 tests de
+`llaves_faltantes_para_reserva` — sin ninguna llave configurada, falta
+edificio, falta unidad, faltan las dos, con Asignación abierta no
+reporta nada, una Devolución vuelve a reportarlo, alcanza con
+cualquiera de varias llaves del mismo lugar, una Llave inactiva no
+cuenta, una llave de unidad puntual no cuenta como acceso de edificio,
+consultorio inexistente no rompe); `tests/test_gui_reservas.py` (6
+tests, 3 por solapa: avisa y confirma con "Yes" — se crea igual; avisa
+y cancela con "No" — no se crea nada; con la llave ya asignada no se
+llama a `question` en absoluto — confirmado forzando la respuesta a
+"No" y comprobando que la reserva se crea de todos modos).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
