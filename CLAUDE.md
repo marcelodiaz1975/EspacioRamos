@@ -3537,6 +3537,89 @@ el valor real usado en la construcción). El de "espaciador que compensa"
 actualiza para comparar cada panel contra su propia constante en vez de
 una sola compartida.
 
+## Reservas: tablas de abajo agrandadas al máximo, separación mínima
+## grilla-Detalle en Aisladas, cuadros scrolleables como regla general
+
+Décima vuelta sobre la misma zona de Reservas, con tres pedidos:
+
+- **Regulares: "ampliá el tamaño de la tabla, subiéndola arriba al
+  límite de cuando termina el cuadro de Detalle... y que llegue lo más
+  abajo posible dentro de la pantalla que se visualiza. Solo tocá la
+  tabla, nada del resto".** Hasta la ronda anterior `layout_externo`
+  (form+grilla scrolleable, seguido de la tabla de abajo) le daba TODO
+  el alto sobrante de la ventana al `QScrollArea` de arriba
+  (`stretch=1`), mientras la tabla se quedaba con un alto fijo de 3
+  filas sin importar cuánta ventana sobrara debajo — medido con un
+  script de geometría: 585px de scroll contra un mínimo real de 569px
+  (`contenido.minimumSizeHint()`), y 73px de ventana sin usar debajo de
+  la tabla. Se invirtió el reparto: `scroll` pasa a un alto FIJO igual a
+  ese mínimo real (así el contenido de arriba no se mueve ni un pixel,
+  "nada del resto") y es `panel_tabla` el que pasa a `stretch=1` en
+  `layout_externo` — la tabla se lleva TODO el sobrante, tanto el que
+  antes quedaba invisible dentro del scroll como el que sobraba al pie
+  de la ventana. `self.tabla` pasa de `setFixedHeight` a
+  `setMinimumHeight` (mismo cálculo de `_alto_para_filas`, ahora como
+  piso en vez de techo) para poder crecer con `panel_tabla` sin dejar de
+  garantizar esas filas mínimas. Ya no hace falta ningún espaciador de
+  compensación (`_ALTO_TITULO_PANEL_TABLA`/`_ALTO_TITULO_PANEL_TABLA_
+  REGULARES`, de las dos rondas anteriores, se sacan): no hay más hueco
+  muerto que esconder, todo el sobrante pasa a ser tabla de verdad.
+  Confirmado con captura: la tabla queda mucho más grande, pegada contra
+  el borde inferior de Detalle arriba (el margen que queda, ~13px, es un
+  límite propio de la grilla — ver el punto siguiente, no se tocó) y
+  contra el borde de la pantalla abajo.
+- **Aisladas: "el título Detalle y el comienzo de la tabla... subilo un
+  poco para que haya una separación mínima con la grilla. Y la tabla de
+  abajo bajala un poco más".** Mismo mecanismo que Regulares (`scroll`
+  a alto fijo, `panel_tabla` a `stretch=1`) para la tabla de abajo. Para
+  la separación grilla-Detalle: `layout_grupo_grilla.setSpacing(0)` saca
+  el espaciado default de Qt (6px) entre el borde de `self.grilla` y
+  "Detalle:", dejando solo el borde propio de la grilla como separación
+  (de 7px a 1px, medido). Efecto secundario esperado: "Detalle" se corrió
+  hacia arriba, rompiendo la alineación de su borde inferior contra el
+  pie de "Cant. horas aisladas mensuales" que se había logrado en una
+  ronda anterior ("que se vea todo parejo") — `_ALTO_DETALLE_AISLADAS`
+  sube de 54 a 64 (medido, no a ojo) para recuperarla.
+
+  Estas dos tablas dependen de que `scroll` tenga un alto FIJO calculado
+  con `contenido.minimumSizeHint()` — ese `sizeHint()` no siempre está
+  asentado la primera vez que se calcula (mismo tipo de imprecisión ya
+  documentado para `alto_natural_grilla()` en Aisladas: el offscreen
+  platform de Qt no soporta `propagateSizeHints`). Las dos solapas
+  guardan `scroll`/`contenido` como `self._scroll_superior`/`self.
+  _contenido_superior` y vuelven a fijar el alto en `showEvent` (que ya
+  existía, para el foco inicial) con el valor ya asentado — mismo
+  criterio que otros recálculos en `showEvent` de este archivo.
+- **"Siempre todos los cuadros del sistema que sean escroleables en el
+  caso de que no se vea la información completa en la pantalla".** Regla
+  general, no puntual de esta ronda (mismo criterio que "Foco (Enter/
+  Tab): orden general" o "Selectores y fecha" más arriba: una vez que la
+  clienta la marca así, se aplica hacia adelante, no se sale a auditar
+  todo el sistema de una sola vez). Ya era el comportamiento por defecto
+  de `QTableWidget`/`QTextEdit` en todas las tablas y cuadros de texto de
+  este sistema (nunca hizo falta `setVerticalScrollBarPolicy` a mano,
+  confirmado con tests dedicados en Llaves, Reservas, etc.) — al pasar
+  las tablas de esta pantalla de un alto fijo a un piso (`setMinimumHeight`)
+  hacían falta bastantes más filas que antes para forzar el desborde en
+  los tests que ya lo cubrían (`test_tabla_horarios_reservados_escrolea_
+  con_mas_filas_de_las_que_entran`/`test_tabla_reservas_aisladas_
+  escrolea_con_mas_filas_de_las_que_entran`, ahora con 36 y 30 filas en
+  vez de 6) — confirmado que el mecanismo sigue intacto, la tabla más
+  grande simplemente tarda más filas en necesitar su propio scroll.
+
+Tests nuevos/actualizados en `test_gui_reservas.py`:
+`test_tabla_de_abajo_se_expande_con_el_sobrante_de_la_ventana` (stretch
+de `scroll`/`panel_tabla` en `layout_externo`, alto fijo de `scroll`
+igual al `minimumSizeHint()` de su contenido, sin ningún ítem después de
+`panel_tabla`, reemplaza al viejo test del espaciador que compensa);
+`test_layout_externo_sin_espaciado_en_las_dos_solapas` (spacing 0 en las
+dos, reemplaza al que comparaba contra la constante vieja de Regulares
+nomás); `test_grilla_y_detalle_de_aisladas_separacion_minima` (gap
+grilla→"Detalle:" ≤ 2px); `test_tabla_de_abajo_tiene_un_piso_de_filas_
+visibles` (renombrado desde "...alto_fijo...", ahora compara con `>=` en
+vez de `==`); `test_cuadro_detalle_queda_parejo_con_la_columna_del_
+formulario` actualiza el valor esperado de Aisladas de 54 a 64.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
