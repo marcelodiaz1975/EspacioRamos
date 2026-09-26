@@ -30,6 +30,22 @@ profesional querría reservar y el período a simular — nunca lee
   daría reservar este horario", que es la única pregunta que responde
   esta simulación.
 
+Pedido de la clienta al revisar la primera versión de la solapa: además
+del total general, quiere ver un desglose por cada bloque cargado
+("Subtotal por bloque" en la GUI) — cuánto aporta cada uno por
+separado, no solo la suma. `SubtotalBloque` (horas semanales/mensuales,
+bruto, % y monto de descuento, neto, todos por ese bloque en
+particular) se calcula sumando, para cada bloque, su propio aporte día
+por día del período — el % de descuento por volumen es el mismo
+(`descuento_horas_pct`, calculado una sola vez sobre el total de horas
+de TODOS los bloques juntos) aplicado al bruto de ESE bloque nomás. El
+descuento de un bloque incluye tanto su parte del descuento por volumen
+como cualquier feriado que caiga en su día de la semana — a diferencia
+de `descuentos_feriados` (un ítem por fecha, agregando todos los
+bloques de ese día, pensado para el PDF), acá el monto de cada feriado
+se reparte bloque por bloque para que la suma de `neto` de todos los
+`SubtotalBloque` coincida exactamente con `LiquidacionSimulada.neto`.
+
 El PDF resultante (`app.pdf.liquidacion_simulada_pdf`) se guarda en su
 propia carpeta compartida (`app.negocio.archivos_generados.
 carpeta_liquidaciones_simuladas`, NO en `Profesionales/{código}` como
@@ -65,6 +81,23 @@ class ItemFeriadoSimulado:
 
 
 @dataclass
+class SubtotalBloque:
+    """Desglose de lo que aporta UN bloque en particular (numerado
+    1-based, en el mismo orden que `LiquidacionSimulada.bloques`) —
+    `descuento` ya incluye tanto la parte de este bloque en el
+    descuento por volumen como cualquier feriado que le corresponda,
+    así que `neto` de todos los bloques suma exactamente el `neto`
+    total de la liquidación."""
+    numero: int
+    horas_semanales: float
+    horas_mensuales: float
+    bruto: float
+    descuento_pct: float
+    descuento: float
+    neto: float
+
+
+@dataclass
 class LiquidacionSimulada:
     id_profesional: int
     periodo: str
@@ -73,6 +106,7 @@ class LiquidacionSimulada:
     descuento_horas_pct: float
     bruto: float
     descuentos_feriados: list[ItemFeriadoSimulado] = field(default_factory=list)
+    subtotales_bloques: list[SubtotalBloque] = field(default_factory=list)
 
     @property
     def total_descuento_feriados(self) -> float:
@@ -99,6 +133,18 @@ def _porcentajes_tipo_fecha(conn: sqlite3.Connection) -> dict[str, float]:
     }
 
 
+def _cantidad_dias_semana_en_periodo(anio: int, mes: int, dia_semana: str) -> int:
+    """Cuántas veces cae `dia_semana` (ej. "Lunes") dentro del período
+    AAAA-MM indicado."""
+    dia_actual, ultimo_dia = primer_dia_mes(anio, mes), ultimo_dia_mes(anio, mes)
+    cantidad = 0
+    while dia_actual <= ultimo_dia:
+        if fecha_a_dia_semana(dia_actual) == dia_semana:
+            cantidad += 1
+        dia_actual += timedelta(days=1)
+    return cantidad
+
+
 def calcular_liquidacion_simulada(
     conn: sqlite3.Connection, *, id_profesional: int, periodo: str, bloques: list[BloqueSimulado],
 ) -> LiquidacionSimulada:
@@ -117,33 +163,57 @@ def calcular_liquidacion_simulada(
         valores_hora[id_consultorio] = consultorio["ValorHoraRegularActual"]
 
     anio, mes = parsear_periodo(periodo)
-    dia_actual, ultimo_dia = primer_dia_mes(anio, mes), ultimo_dia_mes(anio, mes)
-    bruto = 0.0
-    while dia_actual <= ultimo_dia:
-        dia_semana = fecha_a_dia_semana(dia_actual)
-        bruto += sum(
-            (b.hora_fin - b.hora_inicio) * valores_hora[b.id_consultorio]
-            for b in bloques if b.dia_semana == dia_semana
-        )
-        dia_actual += timedelta(days=1)
+
+    # Bruto de cada bloque por separado (en vez de un recorrido día por
+    # día del período): cuántas veces cae su día de la semana en el
+    # período × sus horas × el valor hora de su consultorio. Sumar esto
+    # bloque por bloque da exactamente el mismo total que recorrer el
+    # período día por día (cada día solo le suma a los bloques cuyo
+    # `dia_semana` coincide), pero de paso deja el aporte de cada bloque
+    # calculado aparte para el desglose que pide la GUI.
+    horas_mensuales_por_bloque = [
+        (b.hora_fin - b.hora_inicio) * _cantidad_dias_semana_en_periodo(anio, mes, b.dia_semana) for b in bloques
+    ]
+    brutos_por_bloque = [
+        horas_mensuales_por_bloque[i] * valores_hora[b.id_consultorio] for i, b in enumerate(bloques)
+    ]
+    bruto = sum(brutos_por_bloque)
 
     porcentajes_tipo = _porcentajes_tipo_fecha(conn)
     descuentos_feriados = []
+    descuentos_feriados_por_bloque = [0.0] * len(bloques)
     for feriado in feriados_relevantes_periodo(conn, anio, mes):
-        dia_semana = fecha_a_dia_semana(date.fromisoformat(feriado["Fecha"]))
-        valor_dia = sum(
-            (b.hora_fin - b.hora_inicio) * valores_hora[b.id_consultorio]
-            for b in bloques if b.dia_semana == dia_semana
+        dia_semana_feriado = fecha_a_dia_semana(date.fromisoformat(feriado["Fecha"]))
+        montos_por_bloque_este_feriado = [
+            (b.hora_fin - b.hora_inicio) * valores_hora[b.id_consultorio] * (1 - descuento_pct / 100)
+            * (porcentajes_tipo[feriado["Tipo"]] / 100)
+            if b.dia_semana == dia_semana_feriado else 0.0
+            for b in bloques
+        ]
+        monto_total_feriado = sum(montos_por_bloque_este_feriado)
+        if monto_total_feriado <= 0:
+            continue
+        descuentos_feriados.append(
+            ItemFeriadoSimulado(fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto_total_feriado)
         )
-        if valor_dia <= 0:
-            continue
-        monto = valor_dia * (1 - descuento_pct / 100) * (porcentajes_tipo[feriado["Tipo"]] / 100)
-        if monto <= 0:
-            continue
-        descuentos_feriados.append(ItemFeriadoSimulado(fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto))
+        for i, monto_bloque in enumerate(montos_por_bloque_este_feriado):
+            descuentos_feriados_por_bloque[i] += monto_bloque
+
+    subtotales_bloques = [
+        SubtotalBloque(
+            numero=i + 1,
+            horas_semanales=b.hora_fin - b.hora_inicio,
+            horas_mensuales=horas_mensuales_por_bloque[i],
+            bruto=brutos_por_bloque[i],
+            descuento_pct=descuento_pct,
+            descuento=brutos_por_bloque[i] * descuento_pct / 100 + descuentos_feriados_por_bloque[i],
+            neto=brutos_por_bloque[i] * (1 - descuento_pct / 100) - descuentos_feriados_por_bloque[i],
+        )
+        for i, b in enumerate(bloques)
+    ]
 
     return LiquidacionSimulada(
         id_profesional=id_profesional, periodo=periodo, bloques=list(bloques),
         horas_semanales=horas_semanales, descuento_horas_pct=descuento_pct, bruto=bruto,
-        descuentos_feriados=descuentos_feriados,
+        descuentos_feriados=descuentos_feriados, subtotales_bloques=subtotales_bloques,
     )

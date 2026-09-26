@@ -575,9 +575,13 @@ def test_liquidaciones_simuladas_agregar_bloque_lo_suma_a_la_tabla(qtbot, conn):
     panel._agregar_bloque()
 
     assert panel.tabla_bloques.rowCount() == 1
-    assert panel.tabla_bloques.item(0, 0).text() == "Lunes"
-    assert panel.tabla_bloques.item(0, 1).text() == "9:00 a 11:00"
-    assert "Ramos 1" in panel.tabla_bloques.item(0, 2).text()
+    assert panel.tabla_bloques.item(0, 0).text() == "1"
+    assert panel.tabla_bloques.item(0, 1).text() == "Lunes"
+    assert panel.tabla_bloques.item(0, 2).text() == "9:00"
+    assert panel.tabla_bloques.item(0, 3).text() == "11:00"
+    assert panel.tabla_bloques.item(0, 5).text() == "Ramos 1"
+    assert panel.tabla_bloques.item(0, 6).text() == "7mo L"
+    assert panel.tabla_bloques.item(0, 7).text() == "Consultorio 1"
     assert len(panel._bloques) == 1
 
 
@@ -622,7 +626,8 @@ def test_liquidaciones_simuladas_generar_sin_bloques_no_rompe(qtbot, conn):
 
     panel._generar()  # no debe lanzar ninguna excepción
 
-    assert panel.tabla_resultado.rowCount() == 0
+    assert panel.tabla_subtotales.rowCount() == 0
+    assert panel.tabla_total_general.rowCount() == 0
 
 
 def test_liquidaciones_simuladas_generar_crea_el_pdf_y_muestra_el_resultado(qtbot, conn, tmp_path):
@@ -646,8 +651,15 @@ def test_liquidaciones_simuladas_generar_crea_el_pdf_y_muestra_el_resultado(qtbo
     archivos = list(carpeta.glob("*.pdf"))
     assert len(archivos) == 1
     assert "Liquidación simulada" in archivos[0].name
-    assert panel.tabla_resultado.rowCount() >= 3  # Bruto, descuento por volumen, Total simulado
-    assert panel.tabla_resultado.item(panel.tabla_resultado.rowCount() - 1, 0).text() == "Total simulado"
+    # Un solo bloque cargado: una fila de subtotal más la fila de Total resaltada.
+    assert panel.tabla_subtotales.rowCount() == 2
+    assert panel.tabla_subtotales.item(0, 0).text() == "1"
+    fila_total = panel.tabla_subtotales.rowCount() - 1
+    assert panel.tabla_subtotales.item(fila_total, 0).text() == "Total"
+    assert panel.tabla_subtotales.item(fila_total, 0).background().color().name() == "#f2c4a0"
+    assert panel.tabla_total_general.rowCount() == 1
+    assert panel.tabla_total_general.item(0, 0).text() == "Total general"
+    assert panel.tabla_total_general.item(0, 6).text() == panel.tabla_subtotales.item(fila_total, 6).text()
 
 
 def test_foco_inicial_liquidaciones_simuladas_queda_en_profesional(qtbot, conn):
@@ -657,6 +669,45 @@ def test_foco_inicial_liquidaciones_simuladas_queda_en_profesional(qtbot, conn):
     qtbot.waitExposed(pantalla)
     pantalla.pestanas.setCurrentIndex(3)
     qtbot.waitUntil(lambda: pantalla.panel_liquidaciones_simuladas.combo_profesional.hasFocus())
+
+
+def test_liquidaciones_simuladas_bloques_cargados_muestra_sin_localidad(qtbot, conn):
+    id_consultorio = _crear_consultorio(conn)
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    _elegir_consultorio(panel, id_consultorio)
+
+    panel._agregar_bloque()
+
+    assert panel.tabla_bloques.item(0, 4).text() == "(Sin localidad)"
+
+
+def test_liquidaciones_simuladas_subtotal_por_bloque_con_varios_bloques(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    id_prof = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    id_consultorio = _crear_consultorio(conn)
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_prof))
+    _elegir_consultorio(panel, id_consultorio)
+    panel.combo_dia.setCurrentIndex(panel.combo_dia.findText("Lunes"))
+    panel._agregar_bloque()
+    panel.combo_dia.setCurrentIndex(panel.combo_dia.findText("Miércoles"))
+    panel._agregar_bloque()
+
+    panel._generar()
+
+    # 2 bloques + 1 fila de Total.
+    assert panel.tabla_subtotales.rowCount() == 3
+    assert panel.tabla_subtotales.item(0, 0).text() == "1"
+    assert panel.tabla_subtotales.item(1, 0).text() == "2"
+    fila_total = 2
+    assert panel.tabla_subtotales.item(fila_total, 0).text() == "Total"
+    for columna in range(panel.tabla_subtotales.columnCount()):
+        assert panel.tabla_subtotales.item(fila_total, columna).background().color().name() == "#f2c4a0"
 
 
 def test_liquidaciones_simuladas_botones_tienen_el_mismo_ancho_fijo(qtbot, conn):

@@ -160,3 +160,68 @@ def test_feriado_en_domingo_no_se_descuenta(conn, profesional, consultorio):
     liquidacion = calcular_liquidacion_simulada(conn, id_profesional=profesional, periodo="2026-11", bloques=[bloque])
 
     assert liquidacion.descuentos_feriados == []
+
+
+def test_subtotal_de_un_solo_bloque_coincide_con_el_total(conn, profesional, consultorio):
+    bloque = BloqueSimulado(dia_semana="Lunes", hora_inicio=9, hora_fin=11, id_consultorio=consultorio)
+    liquidacion = calcular_liquidacion_simulada(conn, id_profesional=profesional, periodo="2026-11", bloques=[bloque])
+
+    assert len(liquidacion.subtotales_bloques) == 1
+    subtotal = liquidacion.subtotales_bloques[0]
+    assert subtotal.numero == 1
+    assert subtotal.horas_semanales == pytest.approx(2)
+    cantidad_lunes = _cantidad_dia_semana_en_periodo(2026, 11, "Lunes")
+    assert subtotal.horas_mensuales == pytest.approx(2 * cantidad_lunes)
+    assert subtotal.bruto == pytest.approx(liquidacion.bruto)
+    assert subtotal.descuento_pct == liquidacion.descuento_horas_pct
+    assert subtotal.neto == pytest.approx(liquidacion.neto)
+
+
+def test_subtotales_de_varios_bloques_suman_bruto_y_neto_totales(conn, profesional):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="7mo L")
+    id_cons_1 = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000,
+    )
+    id_cons_2 = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=2, ValorHoraRegularActual=1500,
+    )
+    bloques = [
+        BloqueSimulado(dia_semana="Lunes", hora_inicio=9, hora_fin=11, id_consultorio=id_cons_1),
+        BloqueSimulado(dia_semana="Miércoles", hora_inicio=14, hora_fin=15, id_consultorio=id_cons_2),
+    ]
+    liquidacion = calcular_liquidacion_simulada(conn, id_profesional=profesional, periodo="2026-11", bloques=bloques)
+
+    assert [s.numero for s in liquidacion.subtotales_bloques] == [1, 2]
+    assert sum(s.bruto for s in liquidacion.subtotales_bloques) == pytest.approx(liquidacion.bruto)
+    assert sum(s.neto for s in liquidacion.subtotales_bloques) == pytest.approx(liquidacion.neto)
+
+
+def test_feriado_se_atribuye_solo_al_subtotal_del_bloque_de_ese_dia(conn, profesional):
+    """Un feriado que cae lunes solo tiene que afectar el descuento/neto
+    del bloque de los lunes, no el del miércoles."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="7mo L")
+    id_cons_1 = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000,
+    )
+    id_cons_2 = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=2, ValorHoraRegularActual=1500,
+    )
+    fecha_feriado = "2026-11-02"
+    assert date.fromisoformat(fecha_feriado).weekday() == 0  # lunes
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha=fecha_feriado, Descripcion="Feriado de prueba", Tipo="Feriado nacional",
+    )
+    bloques = [
+        BloqueSimulado(dia_semana="Lunes", hora_inicio=9, hora_fin=11, id_consultorio=id_cons_1),
+        BloqueSimulado(dia_semana="Miércoles", hora_inicio=14, hora_fin=15, id_consultorio=id_cons_2),
+    ]
+    liquidacion = calcular_liquidacion_simulada(conn, id_profesional=profesional, periodo="2026-11", bloques=bloques)
+
+    subtotal_lunes, subtotal_miercoles = liquidacion.subtotales_bloques
+    descuento_por_volumen_lunes = subtotal_lunes.bruto * liquidacion.descuento_horas_pct / 100
+    assert subtotal_lunes.descuento > descuento_por_volumen_lunes  # volumen + feriado
+    descuento_por_volumen_miercoles = subtotal_miercoles.bruto * liquidacion.descuento_horas_pct / 100
+    assert subtotal_miercoles.descuento == pytest.approx(descuento_por_volumen_miercoles)  # solo volumen
+    assert sum(s.neto for s in liquidacion.subtotales_bloques) == pytest.approx(liquidacion.neto)

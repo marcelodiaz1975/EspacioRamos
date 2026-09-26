@@ -28,6 +28,7 @@ import sqlite3
 from datetime import datetime
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -49,7 +50,7 @@ from app.gui.pantallas import catalogos
 from app.gui.pantallas.reservas import (
     _DIAS_RESERVA,
     _SpinHorario,
-    _fmt_horario,
+    _fmt_hora,
     _numero_codigo,
     _opciones_edificio,
     _opciones_localidad,
@@ -65,17 +66,26 @@ from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_liquidaciones_simuladas, carpeta_profesional
 from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual, sumar_meses
 from app.negocio.formato import formatear_moneda
-from app.negocio.liquidacion_simulada import BloqueSimulado, LiquidacionSimulada, calcular_liquidacion_simulada
+from app.negocio.liquidacion_simulada import (
+    BloqueSimulado,
+    LiquidacionSimulada,
+    SubtotalBloque,
+    calcular_liquidacion_simulada,
+)
 from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion
 from app.negocio.valores import horas_semanales_vigentes
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
-from app.pdf.liquidacion_simulada_pdf import _lugar_bloque, generar_pdf_liquidacion_simulada
+from app.pdf.liquidacion_simulada_pdf import generar_pdf_liquidacion_simulada
 from app.repositorio.registro import obtener_repositorio
 
 _ANCHO_PANEL_FILTROS = 300
 _ANCHO_PANEL_FILTROS_ESTADO_CUENTA = 340
 _ANCHO_BOTON_EMISION = 275  # Calcular / los tres Emitir..., todos iguales
 _ANCHO_BOTON_SIMULADA = 240  # Agregar/Quitar bloque, Generar liquidación simulada
+# Mismo naranja suave que `resalte_seleccion` en app.gui.estilos.paleta()
+# (la selección de fila de toda la aplicación) — se reusa acá para
+# resaltar la fila de totales, pedido explícito de la clienta.
+_COLOR_FILA_TOTAL = "#F2C4A0"
 
 _ESTADOS_FILTRO = [
     ("Cualquier estado", None),
@@ -470,6 +480,40 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         self.tabla.resizeColumnsToContents()
 
 
+def _ubicacion_bloque(conn: sqlite3.Connection, id_consultorio: int) -> tuple[str, str, str, str]:
+    """Localidad/Edificio/Unidad/Consultorio de un bloque simulado, para
+    la tabla "Bloques cargados" — mismo criterio "(Sin localidad)" que
+    `_opciones_localidad` de `reservas.py` cuando el edificio no tiene
+    localidad cargada."""
+    fila = conn.execute(
+        """
+        SELECT loc.Localidad AS Localidad, e.Nombre AS Edificio, u.Departamento AS Unidad, c.NumeroConsultorio AS Consultorio
+        FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
+        WHERE c.IdConsultorio = ?
+        """,
+        (id_consultorio,),
+    ).fetchone()
+    if fila is None:
+        return ("", "", "", "")
+    return (
+        fila["Localidad"] or "(Sin localidad)", fila["Edificio"], fila["Unidad"],
+        f"Consultorio {fila['Consultorio']}",
+    )
+
+
+def _fila_subtotal_bloque(subtotal: SubtotalBloque) -> list[QTableWidgetItem]:
+    return [
+        item_numero(str(subtotal.numero)),
+        item_numero(_fmt_horas(subtotal.horas_semanales)),
+        item_numero(_fmt_horas(subtotal.horas_mensuales)),
+        item_monto(subtotal.bruto),
+        item_numero(f"{subtotal.descuento_pct:g}%"),
+        item_monto(-subtotal.descuento),
+        item_monto(subtotal.neto),
+    ]
+
+
 class _PanelLiquidacionesSimuladas(QWidget):
     """Cuarta solapa de "Liquidaciones" (pedido de la clienta, ver
     `app.negocio.liquidacion_simulada` para el detalle completo de qué
@@ -587,18 +631,34 @@ class _PanelLiquidacionesSimuladas(QWidget):
 
         layout_derecha.addWidget(QLabel("Bloques cargados:"))
         self.tabla_bloques = QTableWidget()
-        self.tabla_bloques.setColumnCount(3)
-        self.tabla_bloques.setHorizontalHeaderLabels(["Día", "Horario", "Consultorio"])
+        self.tabla_bloques.setColumnCount(8)
+        self.tabla_bloques.setHorizontalHeaderLabels(
+            ["N° Bloque", "Día", "Horario desde", "Horario hasta", "Localidad", "Edificio", "Unidad", "Consultorio"]
+        )
         self.tabla_bloques.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_bloques.itemSelectionChanged.connect(self._actualizar_boton_quitar_bloque)
         layout_derecha.addWidget(self.tabla_bloques)
 
-        layout_derecha.addWidget(QLabel("Resultado de la última simulación generada:"))
-        self.tabla_resultado = QTableWidget()
-        self.tabla_resultado.setColumnCount(2)
-        self.tabla_resultado.setHorizontalHeaderLabels(["Concepto", "Monto"])
-        self.tabla_resultado.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        layout_derecha.addWidget(self.tabla_resultado, stretch=1)
+        layout_derecha.addWidget(QLabel("Subtotal por bloque:"))
+        self.tabla_subtotales = QTableWidget()
+        self.tabla_subtotales.setColumnCount(7)
+        self.tabla_subtotales.setHorizontalHeaderLabels([
+            "N° Bloque", "Cantidad horas semanales", "Cantidad horas mensuales", "Importe Bruto",
+            "% Descuento", "Descuento", "Importe Neto",
+        ])
+        self.tabla_subtotales.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        layout_derecha.addWidget(self.tabla_subtotales, stretch=1)
+
+        layout_derecha.addWidget(QLabel("Total general:"))
+        self.tabla_total_general = QTableWidget()
+        self.tabla_total_general.setColumnCount(7)
+        self.tabla_total_general.setHorizontalHeaderLabels([
+            "N° Bloque", "Cantidad horas semanales", "Cantidad horas mensuales", "Importe Bruto",
+            "% Descuento", "Descuento", "Importe Neto",
+        ])
+        self.tabla_total_general.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla_total_general.verticalHeader().setVisible(False)
+        layout_derecha.addWidget(self.tabla_total_general)
 
         layout_externo.addWidget(panel_derecha, stretch=1)
 
@@ -665,9 +725,15 @@ class _PanelLiquidacionesSimuladas(QWidget):
     def _refrescar_tabla_bloques(self) -> None:
         self.tabla_bloques.setRowCount(len(self._bloques))
         for fila, bloque in enumerate(self._bloques):
-            self.tabla_bloques.setItem(fila, 0, QTableWidgetItem(bloque.dia_semana))
-            self.tabla_bloques.setItem(fila, 1, QTableWidgetItem(_fmt_horario(bloque.hora_inicio, bloque.hora_fin)))
-            self.tabla_bloques.setItem(fila, 2, QTableWidgetItem(_lugar_bloque(self.conn, bloque.id_consultorio)))
+            localidad, edificio, unidad, consultorio = _ubicacion_bloque(self.conn, bloque.id_consultorio)
+            self.tabla_bloques.setItem(fila, 0, item_numero(str(fila + 1)))
+            self.tabla_bloques.setItem(fila, 1, QTableWidgetItem(bloque.dia_semana))
+            self.tabla_bloques.setItem(fila, 2, QTableWidgetItem(_fmt_hora(bloque.hora_inicio)))
+            self.tabla_bloques.setItem(fila, 3, QTableWidgetItem(_fmt_hora(bloque.hora_fin)))
+            self.tabla_bloques.setItem(fila, 4, QTableWidgetItem(localidad))
+            self.tabla_bloques.setItem(fila, 5, QTableWidgetItem(edificio))
+            self.tabla_bloques.setItem(fila, 6, QTableWidgetItem(unidad))
+            self.tabla_bloques.setItem(fila, 7, QTableWidgetItem(consultorio))
         self.tabla_bloques.resizeColumnsToContents()
         self._actualizar_boton_quitar_bloque()
 
@@ -696,19 +762,31 @@ class _PanelLiquidacionesSimuladas(QWidget):
         QMessageBox.information(self, "Liquidación simulada generada", f"Se generó el archivo:\n{ruta}")
 
     def _mostrar_resultado(self, liquidacion: LiquidacionSimulada) -> None:
-        filas = [
-            (f"Bruto (horas semanales: {liquidacion.horas_semanales:g})", liquidacion.bruto),
-            (
-                f"Descuento por volumen de horas ({liquidacion.descuento_horas_pct:g}%)",
-                -liquidacion.bruto * liquidacion.descuento_horas_pct / 100,
-            ),
-        ]
-        for item in liquidacion.descuentos_feriados:
-            filas.append((f"Descuento {item.tipo.lower()} ({item.fecha})", -item.monto))
-        filas.append(("Total simulado", liquidacion.neto))
+        subtotales = liquidacion.subtotales_bloques
 
-        self.tabla_resultado.setRowCount(len(filas))
-        for fila, (concepto, monto) in enumerate(filas):
-            self.tabla_resultado.setItem(fila, 0, QTableWidgetItem(concepto))
-            self.tabla_resultado.setItem(fila, 1, item_monto(monto))
-        self.tabla_resultado.resizeColumnsToContents()
+        self.tabla_subtotales.setRowCount(len(subtotales) + 1)
+        for fila, subtotal in enumerate(subtotales):
+            for columna, item in enumerate(_fila_subtotal_bloque(subtotal)):
+                self.tabla_subtotales.setItem(fila, columna, item)
+
+        total_horas_semanales = sum(s.horas_semanales for s in subtotales)
+        total_horas_mensuales = sum(s.horas_mensuales for s in subtotales)
+        total_bruto = sum(s.bruto for s in subtotales)
+        total_descuento = sum(s.descuento for s in subtotales)
+        total_neto = sum(s.neto for s in subtotales)
+
+        fila_total = [
+            QTableWidgetItem("Total"), item_numero(_fmt_horas(total_horas_semanales)),
+            item_numero(_fmt_horas(total_horas_mensuales)),
+            item_monto(total_bruto), QTableWidgetItem(""), item_monto(-total_descuento), item_monto(total_neto),
+        ]
+        for columna, item in enumerate(fila_total):
+            item.setBackground(QColor(_COLOR_FILA_TOTAL))
+            self.tabla_subtotales.setItem(len(subtotales), columna, item)
+        self.tabla_subtotales.resizeColumnsToContents()
+
+        self.tabla_total_general.setRowCount(1)
+        for columna, item in enumerate(fila_total):
+            self.tabla_total_general.setItem(0, columna, item.clone())
+        self.tabla_total_general.item(0, 0).setText("Total general")
+        self.tabla_total_general.resizeColumnsToContents()
