@@ -10,9 +10,11 @@ from app.negocio.archivos_generados import (
     carpeta_base,
     carpeta_documentacion_profesional,
     carpeta_imagenes,
+    carpeta_liquidaciones_simuladas,
     carpeta_profesional,
     destino_sin_colision,
     limpiar_liquidaciones_antiguas,
+    limpiar_liquidaciones_simuladas_antiguas,
     renombrar_carpeta_profesional,
     vaciar_carpeta,
 )
@@ -86,6 +88,30 @@ def test_limpiar_liquidaciones_antiguas_borra_mas_de_un_anio(tmp_path):
     assert borrados == 1
     assert not (tmp_path / "2025-01 - Liquidación Juan Perez.pdf").exists()
     assert (tmp_path / "2026-08 - Liquidación Juan Perez.pdf").exists()
+
+
+def test_carpeta_liquidaciones_simuladas_crea_subcarpeta_unica(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path)
+    carpeta = carpeta_liquidaciones_simuladas(conn)
+    assert carpeta == tmp_path / "Liquidaciones simuladas"
+    assert carpeta.is_dir()
+
+
+def test_limpiar_liquidaciones_simuladas_antiguas_retiene_solo_3_meses(tmp_path):
+    (tmp_path / "2026-05 - Liquidación simulada Juan Perez.pdf").write_text("x")
+    (tmp_path / "2026-06 - Liquidación simulada Juan Perez.pdf").write_text("x")
+    (tmp_path / "2026-09 - Liquidación simulada Juan Perez.pdf").write_text("x")
+
+    borrados = limpiar_liquidaciones_simuladas_antiguas(tmp_path, date(2026, 9, 15))
+
+    assert borrados == 1
+    assert not (tmp_path / "2026-05 - Liquidación simulada Juan Perez.pdf").exists()
+    assert (tmp_path / "2026-06 - Liquidación simulada Juan Perez.pdf").exists()
+    assert (tmp_path / "2026-09 - Liquidación simulada Juan Perez.pdf").exists()
+
+
+def test_limpiar_liquidaciones_simuladas_antiguas_carpeta_inexistente_no_rompe(tmp_path):
+    assert limpiar_liquidaciones_simuladas_antiguas(tmp_path / "no existe", date(2026, 9, 15)) == 0
 
 
 def test_renombrar_carpeta_profesional_conserva_archivos(conn, tmp_path):

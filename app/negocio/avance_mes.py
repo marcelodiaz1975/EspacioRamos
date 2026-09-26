@@ -45,8 +45,10 @@ from app.negocio.archivos_generados import (
     SUBCARPETA_PROPUESTA,
     carpeta_archivos_varios,
     carpeta_base,
+    carpeta_liquidaciones_simuladas,
     carpeta_profesional,
     limpiar_liquidaciones_antiguas,
+    limpiar_liquidaciones_simuladas_antiguas,
     vaciar_carpeta,
 )
 from app.negocio.backup import generar_backup
@@ -70,6 +72,7 @@ class ResumenAvanceMes:
     pedidos_activos_vencidos_eliminados: int = 0
     archivos_varios_regenerados: bool = False
     liquidaciones_antiguas_eliminadas: int = 0
+    liquidaciones_simuladas_antiguas_eliminadas: int = 0
     ofertas_eliminadas: int = 0
 
 
@@ -225,6 +228,16 @@ def _limpiar_liquidaciones_antiguas_todos(conn: sqlite3.Connection, hoy) -> int:
     return total
 
 
+def _limpiar_liquidaciones_simuladas_antiguas(conn: sqlite3.Connection, hoy) -> int:
+    """Pedido de la clienta: retención de 3 meses para "Liquidaciones
+    simuladas" (ver `app.negocio.liquidacion_simulada`), a diferencia del
+    año de retención por profesional de las liquidaciones reales — acá es
+    una única carpeta compartida, no una por profesional."""
+    if carpeta_base(conn) is None:
+        return 0
+    return limpiar_liquidaciones_simuladas_antiguas(carpeta_liquidaciones_simuladas(conn), hoy)
+
+
 def porcentaje_aumento_del_periodo(conn: sqlite3.Connection, periodo: str) -> float | None:
     """Último % de aumento confirmado (`aumentos.confirmar_aumento`) para
     `periodo` — una corrección posterior en el mismo mes reemplaza, no se
@@ -269,6 +282,9 @@ def avanzar_mes(
 
     resumen.archivos_varios_regenerados = _regenerar_archivos_varios(conn)
     resumen.liquidaciones_antiguas_eliminadas = _limpiar_liquidaciones_antiguas_todos(conn, fecha_actual(conn))
+    resumen.liquidaciones_simuladas_antiguas_eliminadas = _limpiar_liquidaciones_simuladas_antiguas(
+        conn, fecha_actual(conn),
+    )
     if carpeta_base(conn) is not None:
         resumen.ofertas_eliminadas = vaciar_carpeta(carpeta_archivos_varios(conn, SUBCARPETA_OFERTA))
     return resumen

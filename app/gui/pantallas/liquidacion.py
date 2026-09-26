@@ -4,19 +4,23 @@ período, permite emitirlas (persistir en LiquidacionEmitida + acreditar
 a SaldoCuentaActual, DC-09 §2) y generar el PDF de cada una en
 Profesionales/{código} del profesional correspondiente.
 
-Tres solapas: "Emisión de archivos" (F22, lo de siempre), "Estado de
+Cuatro solapas: "Emisión de archivos" (F22, lo de siempre), "Estado de
 cuenta" (F26 — antes vivía en la pantalla separada "Estado de cuenta",
 suprimida: sus tres solapas pasaron a vivir cada una en el formulario
 que ya arma ese tipo de movimiento — ver también Pagos F21/F25 y
-Cargos especiales F28/F25, confirmado por la clienta) y "Feriados y
+Cargos especiales F28/F25, confirmado por la clienta), "Feriados y
 fechas especiales" (reordenamiento de formularios, Excel de la clienta:
 el catálogo `FechasEspeciales` de `catalogos.py`, antes pantalla propia
 del menú, se suma acá anidado — están relacionados porque los feriados/
-no laborables afectan el cálculo de la liquidación). La pantalla en sí
-se renombra "Liquidaciones" (antes "Liquidación mensual" en el menú,
-"Proceso de liquidación mensual" como título Nivel 1 — mismo criterio
-que el resto de los merges de esta reorganización: el título Nivel 1
-pasa a ser el nombre nuevo del formulario)."""
+no laborables afectan el cálculo de la liquidación) y "Liquidaciones
+simuladas" (pedido posterior de la clienta, ver
+`app.negocio.liquidacion_simulada` para el detalle completo: un PDF de
+ejemplo para que un profesional vea cuánto le saldría un período dado,
+sin cargar ninguna reserva real). La pantalla en sí se renombra
+"Liquidaciones" (antes "Liquidación mensual" en el menú, "Proceso de
+liquidación mensual" como título Nivel 1 — mismo criterio que el resto
+de los merges de esta reorganización: el título Nivel 1 pasa a ser el
+nombre nuevo del formulario)."""
 from __future__ import annotations
 
 import os
@@ -42,22 +46,36 @@ from PySide6.QtWidgets import (
 
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas import catalogos
-from app.gui.pantallas.reservas import _numero_codigo, _opciones_profesional, _texto_profesional
+from app.gui.pantallas.reservas import (
+    _DIAS_RESERVA,
+    _SpinHorario,
+    _fmt_horario,
+    _numero_codigo,
+    _opciones_edificio,
+    _opciones_localidad,
+    _opciones_profesional,
+    _recargar_consultorios,
+    _recargar_unidades,
+    _texto_profesional,
+)
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.resumen_saldo import item_monto
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
-from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
-from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual
+from app.negocio.archivos_generados import carpeta_base, carpeta_liquidaciones_simuladas, carpeta_profesional
+from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual, sumar_meses
 from app.negocio.formato import formatear_moneda
+from app.negocio.liquidacion_simulada import BloqueSimulado, LiquidacionSimulada, calcular_liquidacion_simulada
 from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion
 from app.negocio.valores import horas_semanales_vigentes
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
+from app.pdf.liquidacion_simulada_pdf import _lugar_bloque, generar_pdf_liquidacion_simulada
 from app.repositorio.registro import obtener_repositorio
 
 _ANCHO_PANEL_FILTROS = 300
 _ANCHO_PANEL_FILTROS_ESTADO_CUENTA = 340
 _ANCHO_BOTON_EMISION = 275  # Calcular / los tres Emitir..., todos iguales
+_ANCHO_BOTON_SIMULADA = 240  # Agregar/Quitar bloque, Generar liquidación simulada
 
 _ESTADOS_FILTRO = [
     ("Cualquier estado", None),
@@ -101,6 +119,8 @@ class ProcesoLiquidacion(QWidget):
         self.pestanas.addTab(self.panel_estado_cuenta, "Estado de cuenta")
         self.panel_fechas_especiales = catalogos.pantalla_fechas_especiales(conn, anidado=True)
         self.pestanas.addTab(self.panel_fechas_especiales, "Feriados y fechas especiales")
+        self.panel_liquidaciones_simuladas = _PanelLiquidacionesSimuladas(conn)
+        self.pestanas.addTab(self.panel_liquidaciones_simuladas, "Liquidaciones simuladas")
         self.pestanas.tabBar().setDrawBase(False)
         layout.addWidget(self.pestanas, stretch=1)
 
@@ -448,3 +468,247 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
             self.tabla.setItem(i, 5, QTableWidgetItem(r["NombreArchivo"] or ""))
             self.tabla.setItem(i, 6, QTableWidgetItem(_fmt_fecha_hora_generacion(r["FechaHoraGeneracion"])))
         self.tabla.resizeColumnsToContents()
+
+
+class _PanelLiquidacionesSimuladas(QWidget):
+    """Cuarta solapa de "Liquidaciones" (pedido de la clienta, ver
+    `app.negocio.liquidacion_simulada` para el detalle completo de qué
+    contempla la simulación y qué no): el operador carga a mano, para un
+    profesional y un período, los bloques (día/horario/consultorio) que
+    ese profesional querría reservar, y genera un PDF de ejemplo que
+    muestra cuánto le saldría — sin tocar la grilla ni la disponibilidad
+    real, sin persistir nada en la base. Controles y botones a la
+    izquierda (mismo criterio de todo el sistema); a la derecha, los
+    bloques ya cargados y el resultado de la última simulación generada.
+    """
+
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.setObjectName("panelSolapa")
+        self.conn = conn
+        self._bloques: list[BloqueSimulado] = []
+        self._armar_ui()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Mismo motivo que en el resto de las solapas de esta pantalla:
+        el foco recién "pega" cuando la solapa ya se está mostrando de
+        verdad, no durante la construcción."""
+        super().showEvent(event)
+        self.combo_profesional.setFocus()
+
+    def _armar_ui(self) -> None:
+        layout_externo = QHBoxLayout(self)
+
+        panel_izquierda = QWidget()
+        panel_izquierda.setObjectName("panelSolapa")
+        panel_izquierda.setMaximumWidth(_ANCHO_PANEL_FILTROS)
+        layout_izquierda = QVBoxLayout(panel_izquierda)
+
+        layout_izquierda.addWidget(QLabel("Profesional:"))
+        self.combo_profesional = QComboBox()
+        for id_, etiqueta in _opciones_profesional(self.conn, ("R",)):
+            self.combo_profesional.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_profesional)
+        layout_izquierda.addWidget(self.combo_profesional)
+
+        layout_izquierda.addWidget(QLabel("Período a simular:"))
+        self.campo_periodo = QLineEdit()
+        # Por defecto el mes siguiente al actual (pedido explícito de la
+        # clienta) — se puede cambiar a mano para simular cualquier otro.
+        self.campo_periodo.setText(sumar_meses(periodo_actual(self.conn), 1))
+        layout_izquierda.addWidget(self.campo_periodo)
+
+        linea_1 = QFrame()
+        linea_1.setFrameShape(QFrame.Shape.HLine)
+        linea_1.setFrameShadow(QFrame.Shadow.Sunken)
+        layout_izquierda.addWidget(linea_1)
+
+        layout_izquierda.addWidget(QLabel("Localidad:"))
+        self.combo_localidad = QComboBox()
+        layout_izquierda.addWidget(self.combo_localidad)
+        layout_izquierda.addWidget(QLabel("Edificio:"))
+        self.combo_edificio = QComboBox()
+        layout_izquierda.addWidget(self.combo_edificio)
+        layout_izquierda.addWidget(QLabel("Unidad:"))
+        self.combo_unidad = QComboBox()
+        layout_izquierda.addWidget(self.combo_unidad)
+        layout_izquierda.addWidget(QLabel("Consultorio:"))
+        self.combo_consultorio = QComboBox()
+        layout_izquierda.addWidget(self.combo_consultorio)
+
+        layout_izquierda.addWidget(QLabel("Día:"))
+        self.combo_dia = QComboBox()
+        for dia in _DIAS_RESERVA:
+            self.combo_dia.addItem(dia)
+        layout_izquierda.addWidget(self.combo_dia)
+
+        fila_horario = QHBoxLayout()
+        self.spin_desde = _SpinHorario()
+        self.spin_desde.setRange(0, 23)
+        self.spin_desde.setValue(9)
+        self.spin_hasta = _SpinHorario()
+        self.spin_hasta.setRange(1, 24)
+        self.spin_hasta.setValue(10)
+        fila_horario.addWidget(QLabel("Desde"))
+        fila_horario.addWidget(self.spin_desde)
+        fila_horario.addWidget(QLabel("Hasta"))
+        fila_horario.addWidget(self.spin_hasta)
+        layout_izquierda.addLayout(fila_horario)
+
+        self.boton_agregar_bloque = QPushButton("Agregar bloque")
+        self.boton_agregar_bloque.setObjectName("botonSecundario")
+        self.boton_agregar_bloque.clicked.connect(self._agregar_bloque)
+        layout_izquierda.addWidget(self.boton_agregar_bloque)
+
+        self.boton_quitar_bloque = QPushButton("Quitar bloque")
+        self.boton_quitar_bloque.setObjectName("botonSecundario")
+        self.boton_quitar_bloque.setEnabled(False)
+        self.boton_quitar_bloque.clicked.connect(self._quitar_bloque)
+        layout_izquierda.addWidget(self.boton_quitar_bloque)
+
+        linea_2 = QFrame()
+        linea_2.setFrameShape(QFrame.Shape.HLine)
+        linea_2.setFrameShadow(QFrame.Shadow.Sunken)
+        layout_izquierda.addWidget(linea_2)
+
+        self.boton_generar = QPushButton("Generar liquidación simulada")
+        self.boton_generar.setObjectName("botonPrimario")
+        self.boton_generar.clicked.connect(self._generar)
+        layout_izquierda.addWidget(self.boton_generar)
+
+        for boton in (self.boton_agregar_bloque, self.boton_quitar_bloque, self.boton_generar):
+            boton.setFixedWidth(_ANCHO_BOTON_SIMULADA)
+
+        layout_izquierda.addStretch()
+        layout_externo.addWidget(panel_izquierda)
+
+        panel_derecha = QWidget()
+        layout_derecha = QVBoxLayout(panel_derecha)
+
+        layout_derecha.addWidget(QLabel("Bloques cargados:"))
+        self.tabla_bloques = QTableWidget()
+        self.tabla_bloques.setColumnCount(3)
+        self.tabla_bloques.setHorizontalHeaderLabels(["Día", "Horario", "Consultorio"])
+        self.tabla_bloques.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla_bloques.itemSelectionChanged.connect(self._actualizar_boton_quitar_bloque)
+        layout_derecha.addWidget(self.tabla_bloques)
+
+        layout_derecha.addWidget(QLabel("Resultado de la última simulación generada:"))
+        self.tabla_resultado = QTableWidget()
+        self.tabla_resultado.setColumnCount(2)
+        self.tabla_resultado.setHorizontalHeaderLabels(["Concepto", "Monto"])
+        self.tabla_resultado.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        layout_derecha.addWidget(self.tabla_resultado, stretch=1)
+
+        layout_externo.addWidget(panel_derecha, stretch=1)
+
+        self.combo_localidad.currentIndexChanged.connect(self._al_cambiar_localidad)
+        self.combo_edificio.currentIndexChanged.connect(self._al_cambiar_edificio)
+        self.combo_unidad.currentIndexChanged.connect(self._al_cambiar_unidad)
+        self._cargar_localidades()
+
+        self._foco = instalar_enter_avanza_foco([
+            self.combo_profesional, self.campo_periodo, self.combo_localidad, self.combo_edificio,
+            self.combo_unidad, self.combo_consultorio, self.combo_dia, self.spin_desde, self.spin_hasta,
+            self.boton_agregar_bloque, self.boton_quitar_bloque, self.boton_generar,
+        ])
+
+    def _cargar_localidades(self) -> None:
+        self.combo_localidad.clear()
+        for id_, etiqueta in _opciones_localidad(self.conn):
+            self.combo_localidad.addItem(etiqueta, id_)
+        self._al_cambiar_localidad()
+
+    def _al_cambiar_localidad(self) -> None:
+        id_localidad = self.combo_localidad.currentData()
+        self.combo_edificio.blockSignals(True)
+        self.combo_edificio.clear()
+        for id_, etiqueta in _opciones_edificio(self.conn, id_localidad):
+            self.combo_edificio.addItem(etiqueta, id_)
+        self.combo_edificio.blockSignals(False)
+        self._al_cambiar_edificio()
+
+    def _al_cambiar_edificio(self) -> None:
+        _recargar_unidades(self.conn, self.combo_edificio, self.combo_unidad)
+        self._al_cambiar_unidad()
+
+    def _al_cambiar_unidad(self) -> None:
+        _recargar_consultorios(self.conn, self.combo_unidad, self.combo_consultorio)
+
+    def _actualizar_boton_quitar_bloque(self) -> None:
+        self.boton_quitar_bloque.setEnabled(bool(self.tabla_bloques.selectedItems()))
+
+    def _agregar_bloque(self) -> None:
+        id_consultorio = self.combo_consultorio.currentData()
+        if id_consultorio is None:
+            QMessageBox.warning(self, "Falta elegir consultorio", "Elegí un consultorio antes de agregar el bloque.")
+            return
+        hora_inicio, hora_fin = self.spin_desde.value(), self.spin_hasta.value()
+        if hora_fin <= hora_inicio:
+            QMessageBox.warning(
+                self, "Horario inválido", 'El horario "hasta" tiene que ser posterior al "desde".',
+            )
+            return
+        self._bloques.append(BloqueSimulado(
+            dia_semana=self.combo_dia.currentText(), hora_inicio=hora_inicio, hora_fin=hora_fin,
+            id_consultorio=id_consultorio,
+        ))
+        self._refrescar_tabla_bloques()
+
+    def _quitar_bloque(self) -> None:
+        fila = self.tabla_bloques.currentRow()
+        if fila < 0:
+            return
+        del self._bloques[fila]
+        self._refrescar_tabla_bloques()
+
+    def _refrescar_tabla_bloques(self) -> None:
+        self.tabla_bloques.setRowCount(len(self._bloques))
+        for fila, bloque in enumerate(self._bloques):
+            self.tabla_bloques.setItem(fila, 0, QTableWidgetItem(bloque.dia_semana))
+            self.tabla_bloques.setItem(fila, 1, QTableWidgetItem(_fmt_horario(bloque.hora_inicio, bloque.hora_fin)))
+            self.tabla_bloques.setItem(fila, 2, QTableWidgetItem(_lugar_bloque(self.conn, bloque.id_consultorio)))
+        self.tabla_bloques.resizeColumnsToContents()
+        self._actualizar_boton_quitar_bloque()
+
+    def _generar(self) -> None:
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            QMessageBox.warning(self, "Falta elegir profesional", "Elegí un profesional antes de generar.")
+            return
+        periodo = self.campo_periodo.text().strip()
+        if not periodo:
+            QMessageBox.warning(self, "Falta el período", "Ingresá el período a simular (AAAA-MM).")
+            return
+        if not self._bloques:
+            QMessageBox.warning(self, "Sin bloques", "Agregá al menos un bloque antes de generar.")
+            return
+        try:
+            liquidacion = calcular_liquidacion_simulada(
+                self.conn, id_profesional=id_profesional, periodo=periodo, bloques=self._bloques,
+            )
+            carpeta = carpeta_liquidaciones_simuladas(self.conn)
+            ruta = generar_pdf_liquidacion_simulada(self.conn, liquidacion, str(carpeta))
+        except ValueError as exc:
+            QMessageBox.warning(self, "No se pudo generar", str(exc))
+            return
+        self._mostrar_resultado(liquidacion)
+        QMessageBox.information(self, "Liquidación simulada generada", f"Se generó el archivo:\n{ruta}")
+
+    def _mostrar_resultado(self, liquidacion: LiquidacionSimulada) -> None:
+        filas = [
+            (f"Bruto (horas semanales: {liquidacion.horas_semanales:g})", liquidacion.bruto),
+            (
+                f"Descuento por volumen de horas ({liquidacion.descuento_horas_pct:g}%)",
+                -liquidacion.bruto * liquidacion.descuento_horas_pct / 100,
+            ),
+        ]
+        for item in liquidacion.descuentos_feriados:
+            filas.append((f"Descuento {item.tipo.lower()} ({item.fecha})", -item.monto))
+        filas.append(("Total simulado", liquidacion.neto))
+
+        self.tabla_resultado.setRowCount(len(filas))
+        for fila, (concepto, monto) in enumerate(filas):
+            self.tabla_resultado.setItem(fila, 0, QTableWidgetItem(concepto))
+            self.tabla_resultado.setItem(fila, 1, item_monto(monto))
+        self.tabla_resultado.resizeColumnsToContents()

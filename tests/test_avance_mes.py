@@ -228,6 +228,7 @@ def test_avanzar_mes_sin_carpeta_base_no_regenera_archivos(conn):
     resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
     assert resumen.archivos_varios_regenerados is False
     assert resumen.liquidaciones_antiguas_eliminadas == 0
+    assert resumen.liquidaciones_simuladas_antiguas_eliminadas == 0
 
 
 def test_avanzar_mes_regenera_archivos_varios_y_limpia_liquidaciones_antiguas(conn, tmp_path):
@@ -249,6 +250,22 @@ def test_avanzar_mes_regenera_archivos_varios_y_limpia_liquidaciones_antiguas(co
     assert any((tmp_path / "Archivos varios" / "Propuesta").iterdir())
     assert any((tmp_path / "Archivos varios" / "Disponibilidad").iterdir())
     assert any((tmp_path / "Archivos varios" / "Placas").iterdir())
+
+
+def test_avanzar_mes_limpia_liquidaciones_simuladas_con_mas_de_3_meses(conn, tmp_path):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, CarpetaBaseArchivos=str(tmp_path))
+    _fijar_periodo_actual(conn, "2026-08")  # controla `fecha_actual`, de donde sale el límite de retención
+
+    from app.negocio.archivos_generados import carpeta_liquidaciones_simuladas
+    carpeta = carpeta_liquidaciones_simuladas(conn)
+    (carpeta / "2026-01 - Liquidación simulada Juan Perez.pdf").write_text("x")
+    (carpeta / "2026-08 - Liquidación simulada Juan Perez.pdf").write_text("x")
+
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+
+    assert resumen.liquidaciones_simuladas_antiguas_eliminadas == 1
+    assert not (carpeta / "2026-01 - Liquidación simulada Juan Perez.pdf").exists()
+    assert (carpeta / "2026-08 - Liquidación simulada Juan Perez.pdf").exists()
 
 
 def test_avanzar_mes_sin_carpeta_backup_no_falla(conn):

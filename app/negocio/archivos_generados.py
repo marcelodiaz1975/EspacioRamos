@@ -12,6 +12,7 @@ CarpetaBaseArchivos), en subcarpetas fijas:
     {base}/Profesionales/{IdCodigo}/Documentación/
     {base}/Imagenes/Espacio/
     {base}/Imagenes/{Alcance}_{Id}/  (Localidad, Edificio, Unidad, Consultorio)
+    {base}/Liquidaciones simuladas/
 
 Los tres primeros son documentos únicos del espacio en general: cada
 regeneración sobrescribe el anterior, no se acumula historial de archivos.
@@ -21,7 +22,12 @@ profesional en particular — todo bajo el mismo código, así que se muda
 entero cuando el código cambia (ver `renombrar_carpeta_profesional`).
 Imagenes/{Alcance}_{Id} usa el ID interno (no un nombre editable) para no
 depender de que el operador no le cambie el nombre al edificio/unidad más
-adelante.
+adelante. Liquidaciones simuladas (pedido de la clienta, ver `app.negocio.
+liquidacion_simulada`) es una carpeta ÚNICA compartida por todos los
+profesionales (a diferencia de Profesionales/{IdCodigo}) porque su
+retención es corta (3 meses, ver `limpiar_liquidaciones_simuladas_
+antiguas`) — son ejemplos descartables, no un historial por profesional
+que haya que conservar ni mudar si cambia el código.
 """
 from __future__ import annotations
 
@@ -30,13 +36,17 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
+from app.negocio.dias import sumar_meses
+
 SUBCARPETA_PROPUESTA = "Propuesta"
 SUBCARPETA_DISPONIBILIDAD = "Disponibilidad"
 SUBCARPETA_OFERTA = "Oferta"
 SUBCARPETA_PLACAS = "Placas"
 SUBCARPETA_MANUAL = "Manual"
+SUBCARPETA_LIQUIDACIONES_SIMULADAS = "Liquidaciones simuladas"
 
 _RETENCION_LIQUIDACIONES_ANIOS = 1
+_RETENCION_LIQUIDACIONES_SIMULADAS_MESES = 3
 
 
 def carpeta_base(conn: sqlite3.Connection) -> Path | None:
@@ -88,6 +98,17 @@ def carpeta_imagenes(conn: sqlite3.Connection, alcance: str, id_valor: int | Non
     return carpeta
 
 
+def carpeta_liquidaciones_simuladas(conn: sqlite3.Connection) -> Path:
+    """"Liquidaciones simuladas" bajo la carpeta base — carpeta ÚNICA
+    compartida por todos los profesionales (a diferencia de
+    `carpeta_profesional`, una por código): la retención acá es corta
+    (`limpiar_liquidaciones_simuladas_antiguas`), no hace falta separar
+    por profesional. La crea si hace falta."""
+    carpeta = _requerir_carpeta_base(conn) / SUBCARPETA_LIQUIDACIONES_SIMULADAS
+    carpeta.mkdir(parents=True, exist_ok=True)
+    return carpeta
+
+
 def destino_sin_colision(carpeta: Path, nombre: str) -> Path:
     """Ruta de destino para copiar `nombre` a `carpeta` sin pisar un
     archivo existente: si ya hay uno con ese nombre, agrega " (2)", " (3)"
@@ -125,6 +146,29 @@ def limpiar_liquidaciones_antiguas(carpeta: Path, hoy: date) -> int:
         return 0
     limite_anio = hoy.year - _RETENCION_LIQUIDACIONES_ANIOS
     periodo_limite = f"{limite_anio:04d}-{hoy.month:02d}"
+    borrados = 0
+    for archivo in carpeta.iterdir():
+        if not archivo.is_file() or not archivo.name.endswith(".pdf"):
+            continue
+        periodo = archivo.name[:7]
+        if len(periodo) == 7 and periodo[4] == "-" and periodo < periodo_limite:
+            archivo.unlink()
+            borrados += 1
+    return borrados
+
+
+def limpiar_liquidaciones_simuladas_antiguas(carpeta: Path, hoy: date) -> int:
+    """Pedido explícito de la clienta: "que se vayan conservando las
+    liquidaciones [simuladas] de los últimos 3 meses y que luego se
+    vayan eliminando a través de un proceso con el avance de mes" — mismo
+    mecanismo que `limpiar_liquidaciones_antiguas` (compara el prefijo
+    "AAAA-MM" del nombre de archivo, ver `app.pdf.liquidacion_simulada_
+    pdf.nombre_archivo_liquidacion_simulada`), pero con una retención en
+    MESES en vez de años, sobre la carpeta única `carpeta_liquidaciones_
+    simuladas` (no una por profesional)."""
+    if not carpeta.exists():
+        return 0
+    periodo_limite = sumar_meses(f"{hoy.year:04d}-{hoy.month:02d}", -_RETENCION_LIQUIDACIONES_SIMULADAS_MESES)
     borrados = 0
     for archivo in carpeta.iterdir():
         if not archivo.is_file() or not archivo.name.endswith(".pdf"):

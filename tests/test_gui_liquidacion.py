@@ -62,6 +62,7 @@ def test_paneles_de_liquidacion_usan_el_fondo_claro_de_la_solapa(qtbot, conn):
     assert pantalla.panel_emision.objectName() == "panelSolapa"
     assert pantalla.panel_estado_cuenta.objectName() == "panelSolapa"
     assert pantalla.panel_fechas_especiales.objectName() == "panelSolapa"
+    assert pantalla.panel_liquidaciones_simuladas.objectName() == "panelSolapa"
 
 
 def test_titulo_es_liquidaciones(qtbot, conn):
@@ -72,13 +73,14 @@ def test_titulo_es_liquidaciones(qtbot, conn):
     assert titulo.text() == "LIQUIDACIONES"
 
 
-def test_tiene_tres_solapas_en_el_orden_esperado(qtbot, conn):
+def test_tiene_cuatro_solapas_en_el_orden_esperado(qtbot, conn):
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.pestanas.count() == 3
+    assert pantalla.pestanas.count() == 4
     assert pantalla.pestanas.tabText(0) == "Emisión de archivos"
     assert pantalla.pestanas.tabText(1) == "Estado de cuenta"
     assert pantalla.pestanas.tabText(2) == "Feriados y fechas especiales"
+    assert pantalla.pestanas.tabText(3) == "Liquidaciones simuladas"
 
 
 def test_solapa_fechas_especiales_es_un_catalogo_anidado_sin_titulo_propio(qtbot, conn):
@@ -505,3 +507,161 @@ def test_solapa_estado_cuenta_conserva_el_profesional_elegido_al_refrescar(qtbot
     panel.actualizar()
 
     assert panel.combo_profesional.currentData() == id_prof
+
+
+def _crear_consultorio(conn, valor_hora=1000):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="7mo L")
+    return obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=valor_hora,
+    )
+
+
+def _elegir_consultorio(panel, id_consultorio):
+    """Recorre la cascada Localidad→Edificio→Unidad→Consultorio (que se
+    dispara sola en cadena, ver `_al_cambiar_*`) hasta dejar seleccionado
+    el consultorio pedido."""
+    indice = panel.combo_consultorio.findData(id_consultorio)
+    assert indice >= 0, "el consultorio no aparece en la cascada"
+    panel.combo_consultorio.setCurrentIndex(indice)
+
+
+def test_liquidaciones_simuladas_periodo_por_defecto_es_el_mes_siguiente_al_actual(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    from app.negocio.dias import sumar_meses
+    assert pantalla.panel_liquidaciones_simuladas.campo_periodo.text() == sumar_meses(periodo_actual(conn), 1)
+
+
+def test_liquidaciones_simuladas_lista_solo_profesionales_categoria_r(qtbot, conn):
+    _crear_profesional(conn, apellido="Gómez", id_codigo="R1")
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('A', 'Pérez')")
+    conn.commit()
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    etiquetas = [panel.combo_profesional.itemText(i) for i in range(panel.combo_profesional.count())]
+    assert any("Gómez" in e for e in etiquetas)
+    assert not any("Pérez" in e for e in etiquetas)
+
+
+def test_liquidaciones_simuladas_boton_quitar_bloque_arranca_deshabilitado(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_liquidaciones_simuladas.boton_quitar_bloque.isEnabled() is False
+
+
+def test_liquidaciones_simuladas_agregar_bloque_sin_consultorio_no_agrega_nada(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+
+    panel._agregar_bloque()
+
+    assert panel.tabla_bloques.rowCount() == 0
+
+
+def test_liquidaciones_simuladas_agregar_bloque_lo_suma_a_la_tabla(qtbot, conn):
+    id_consultorio = _crear_consultorio(conn)
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    _elegir_consultorio(panel, id_consultorio)
+    indice_lunes = panel.combo_dia.findText("Lunes")
+    panel.combo_dia.setCurrentIndex(indice_lunes)
+    panel.spin_desde.setValue(9)
+    panel.spin_hasta.setValue(11)
+
+    panel._agregar_bloque()
+
+    assert panel.tabla_bloques.rowCount() == 1
+    assert panel.tabla_bloques.item(0, 0).text() == "Lunes"
+    assert panel.tabla_bloques.item(0, 1).text() == "9:00 a 11:00"
+    assert "Ramos 1" in panel.tabla_bloques.item(0, 2).text()
+    assert len(panel._bloques) == 1
+
+
+def test_liquidaciones_simuladas_horario_invalido_no_agrega_el_bloque(qtbot, conn):
+    id_consultorio = _crear_consultorio(conn)
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    _elegir_consultorio(panel, id_consultorio)
+    panel.spin_desde.setValue(11)
+    panel.spin_hasta.setValue(9)
+
+    panel._agregar_bloque()
+
+    assert panel.tabla_bloques.rowCount() == 0
+
+
+def test_liquidaciones_simuladas_quitar_bloque_elimina_el_seleccionado(qtbot, conn):
+    id_consultorio = _crear_consultorio(conn)
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    _elegir_consultorio(panel, id_consultorio)
+    panel._agregar_bloque()
+    panel._agregar_bloque()
+    assert panel.tabla_bloques.rowCount() == 2
+    panel.tabla_bloques.setCurrentCell(0, 0)
+    assert panel.boton_quitar_bloque.isEnabled() is True
+
+    panel._quitar_bloque()
+
+    assert panel.tabla_bloques.rowCount() == 1
+    assert len(panel._bloques) == 1
+
+
+def test_liquidaciones_simuladas_generar_sin_bloques_no_rompe(qtbot, conn):
+    _crear_profesional(conn, apellido="Gómez", id_codigo="R1")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    panel.combo_profesional.setCurrentIndex(0)
+
+    panel._generar()  # no debe lanzar ninguna excepción
+
+    assert panel.tabla_resultado.rowCount() == 0
+
+
+def test_liquidaciones_simuladas_generar_crea_el_pdf_y_muestra_el_resultado(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    id_prof = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
+    id_consultorio = _crear_consultorio(conn)
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    indice_prof = panel.combo_profesional.findData(id_prof)
+    panel.combo_profesional.setCurrentIndex(indice_prof)
+    _elegir_consultorio(panel, id_consultorio)
+    indice_lunes = panel.combo_dia.findText("Lunes")
+    panel.combo_dia.setCurrentIndex(indice_lunes)
+    panel._agregar_bloque()
+
+    panel._generar()
+
+    carpeta = tmp_path / "Liquidaciones simuladas"
+    archivos = list(carpeta.glob("*.pdf"))
+    assert len(archivos) == 1
+    assert "Liquidación simulada" in archivos[0].name
+    assert panel.tabla_resultado.rowCount() >= 3  # Bruto, descuento por volumen, Total simulado
+    assert panel.tabla_resultado.item(panel.tabla_resultado.rowCount() - 1, 0).text() == "Total simulado"
+
+
+def test_foco_inicial_liquidaciones_simuladas_queda_en_profesional(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.pestanas.setCurrentIndex(3)
+    qtbot.waitUntil(lambda: pantalla.panel_liquidaciones_simuladas.combo_profesional.hasFocus())
+
+
+def test_liquidaciones_simuladas_botones_tienen_el_mismo_ancho_fijo(qtbot, conn):
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    anchos = {panel.boton_agregar_bloque.width(), panel.boton_quitar_bloque.width(), panel.boton_generar.width()}
+    assert len(anchos) == 1
