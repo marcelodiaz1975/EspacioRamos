@@ -4744,6 +4744,65 @@ esquina_del_viewport`); `test_gui_oferta.py`
 solo confirma que Oferta prende el mecanismo — el comportamiento del
 mecanismo en sí queda cubierto en los tests de arriba).
 
+### Novena vuelta: "inmovilizar paneles" en todas las pantallas con esta grilla
+
+Después de ver la captura de Oferta con columnas/encabezado fijos, la
+clienta pidió extender el mismo mecanismo a "todas las solapas del
+sistema en el cual esté presente una grilla" — cumpliendo lo que había
+quedado abierto en la ronda anterior ("solo Oferta por ahora... te pido
+el cambio a todas las solapas si quedo conforme").
+
+`GrillaOperativaWidget.activar_filas_y_columnas_fijas()` (el método
+opt-in de la ronda anterior, sin cambios en su mecánica interna) pasa a
+llamarse desde los seis usos restantes de esta grilla compartida,
+sumado a Oferta:
+
+- `reservas.py`: `_PanelReservasRegulares`/`_PanelReservasAisladas` (las
+  dos solapas de "Reservas") — se llama al final del armado de
+  `self.grilla`, después de `limitar_alto_grilla`/`agrandar_muestras_
+  leyenda` (el resto de los métodos opt-in que ya usa esta pantalla),
+  justo antes de agregar la grilla al layout. Sin ningún cambio de
+  orden necesario: `limitar_alto_grilla` ya recalcula la geometría de
+  las tablas fijas al final si el mecanismo está activo (ver el ajuste
+  de robustez de la ronda anterior), así que da igual si se llama antes
+  o después.
+- `novedades.py`: `_PanelVacaciones`/`_PanelLicencias`/`_PanelAusencias`
+  (las tres solapas con grilla de "Registro de ausencias") — estas tres
+  pantallas nunca habían llamado ningún método opt-in de esta grilla
+  compartida (ni `limitar_alto_grilla` ni `agrandar_panel_filtros`,
+  nada); se suma solo esta llamada, sin tocar nada más de su armado.
+- `grilla_operativa.py` (pantallas): `_PanelGrillaSemanal` (la solapa
+  "Grilla semanal" de "Grilla y mensajería") — mismo criterio, una sola
+  línea nueva antes de agregar la grilla al layout.
+
+Verificación: sin ningún cambio de código en `GrillaOperativaWidget`
+más allá de lo ya construido en la ronda anterior — solo se sumó el
+llamado en seis lugares nuevos — la suite completa sigue dando los
+mismos 15 fallos preexistentes de siempre (0 regresiones), confirmando
+que el mecanismo es genuinamente agnóstico de quién lo usa. Capturas de
+las cuatro pantallas (Reservas ×2, Registro de ausencias ×3 — con un
+profesional elegido para que la vista previa muestre datos reales en
+vez de quedar vacía, que es el comportamiento normal de esas tres
+pantallas sin ningún profesional seleccionado, sin relación con este
+cambio —, Grilla y mensajería) confirmaron visualmente que ninguna
+quedó distinta a como se veía antes de prender el mecanismo: al no
+necesitar scroll (todas menos Oferta caben enteras sin scrollear hoy),
+las tres tablas fijas quedan invisiblemente superpuestas mostrando
+exactamente el mismo contenido que ya se veía, listas para cuando algún
+día haga falta scrollear (más consultorios, más días, una ventana más
+chica).
+
+Tests nuevos: `test_gui_reservas.py`
+(`test_grillas_de_reservas_dejan_fijas_columnas_y_encabezado`, las dos
+solapas); `test_gui_novedades.py`
+(`test_grillas_de_registro_de_ausencias_dejan_fijas_columnas_y_
+encabezado`, las tres solapas); `test_gui_grilla_y_mensajeria.py`
+(`test_grilla_semanal_deja_fijas_columnas_y_encabezado`) — los tres
+solo confirman `grilla._filas_columnas_fijas is True` en cada panel,
+mismo criterio que el test equivalente de Oferta (el comportamiento del
+mecanismo en sí ya está cubierto a fondo en `test_gui_grilla_
+operativa.py`, no hace falta repetirlo por pantalla).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
