@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QLabel, QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -93,21 +93,23 @@ def test_fecha_muestra_el_dia_de_la_semana_abreviado(qtbot, conn, profesional_y_
     assert pantalla.campo_fecha_desde.text().startswith("mié")
 
 
-def test_fecha_queda_pegada_a_su_etiqueta_sin_hueco(qtbot, conn, profesional_y_consultorio):
-    """Sin un `addStretch()` al final de la fila, QHBoxLayout reparte el
-    espacio sobrante entre los 4 widgets por igual — cada etiqueta queda
-    mucho más ancha que su propio texto y dejaba un hueco antes del
-    selector de fecha correspondiente."""
+def test_fechas_desde_hasta_apiladas_en_vez_de_una_fila(qtbot, conn, profesional_y_consultorio):
+    """"Desde"/"Hasta (solo Aislada)" pasaron de una sola fila (con dos
+    `addStretch()`, la que más forzaba el ancho de la columna del
+    formulario — 432px de sizeHint, más que ningún otro widget) a quedar
+    apiladas en el mismo `form` (QVBoxLayout), cada una con su etiqueta
+    inmediatamente arriba — mismo criterio que "Vigencia desde"/"Vigencia
+    hasta" en Reservas. Se recorre el layout en vez de buscar por texto
+    porque "Desde" se repite (también lo usa la fila de horario)."""
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
-
-    etiquetas = {lbl.text(): lbl for lbl in pantalla.findChildren(QLabel)}
-    etiqueta_desde = etiquetas["Desde"]
-    etiqueta_hasta = etiquetas["Hasta (solo Aislada)"]
-    assert etiqueta_desde.width() <= etiqueta_desde.sizeHint().width() + 2
-    assert etiqueta_hasta.width() <= etiqueta_hasta.sizeHint().width() + 2
+    form = pantalla.combo_profesional.parentWidget().layout()
+    widgets = [form.itemAt(i).widget() for i in range(form.count()) if form.itemAt(i).widget() is not None]
+    indice_desde = widgets.index(pantalla.campo_fecha_desde)
+    indice_hasta = widgets.index(pantalla.campo_fecha_hasta)
+    assert widgets[indice_desde - 1].text() == "Desde"
+    assert widgets[indice_hasta - 1].text() == "Hasta (solo Aislada)"
+    assert indice_hasta == indice_desde + 2  # apiladas una justo después de la otra, sin nada en medio
 
 
 def test_horario_muestra_formato_hs(qtbot, conn, profesional_y_consultorio):
@@ -505,3 +507,71 @@ def test_paquete_y_con_franja_sin_cobertura_no_muestra_nada_en_la_previsualizaci
 class _FalsoDialogo:
     def exec(self):
         return None
+
+
+def test_contenido_dentro_del_scroll_tiene_fondo_claro(qtbot, conn, profesional_y_consultorio):
+    """Mismo bug ya documentado en Reservas/Llaves: el widget que se pasa
+    a `scroll.setWidget(...)` necesita su propio `objectName="panelSolapa"`
+    — sin él, Qt le pinta el gris por defecto al panel del formulario
+    aunque el widget de más afuera (`self`) sí lo tenga."""
+    from PySide6.QtWidgets import QWidget
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    descendientes_panel_solapa = [
+        w for w in pantalla.findChildren(QWidget) if w.objectName() == "panelSolapa"
+    ]
+    assert len(descendientes_panel_solapa) == 1  # "contenido", el del scroll (self ya tiene el suyo aparte)
+
+
+def test_columna_del_formulario_mas_angosta_que_antes(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: la primera columna (el formulario
+    de búsqueda) tiene que quedar más angosta, y el ancho liberado se
+    reparte entre el panel de Filtros y la grilla de la derecha — mismo
+    criterio que la columna del formulario en Reservas. Antes de este
+    cambio la columna medía 690px de sizeHint (dominada por la fila
+    horizontal de "Generar PDF"/"Generar texto WhatsApp"/"Nueva
+    búsqueda", 660px de tres botones de 220px cada uno)."""
+    from PySide6.QtWidgets import QSplitter
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    splitter = pantalla.findChildren(QSplitter)[0]
+    panel_form = splitter.widget(0)
+    assert panel_form.sizeHint().width() < 450  # bien por debajo de los 690px originales
+    assert pantalla.grilla._panel_filtros.maximumWidth() > 260  # más ancho que el default de la grilla
+
+
+def test_filtros_dias_y_referencias_como_en_reservas(qtbot, conn, profesional_y_consultorio):
+    """La grilla embebida (referencia visual "Grilla semanal") pasa a
+    manejar filtros/días/referencias con el mismo criterio compacto que
+    usa Reservas regulares/aisladas — antes se llamaba `mostrar_leyenda_
+    colores()` sin `compacta=True` y nunca se llamaba `agrupar_dias_en_
+    pares()`."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    grilla = pantalla.grilla
+    # Días de la semana de a pares (2 columnas), no en una lista vertical.
+    from PySide6.QtWidgets import QGridLayout
+    assert isinstance(grilla._contenedor_dias.layout(), QGridLayout)
+    # Referencias de colores compactas (2 columnas, muestra más chica).
+    assert grilla._leyenda_colores._columnas == 2
+    assert grilla._leyenda_colores._tamano_muestra == (28, 16)
+    assert not grilla._leyenda_colores.isHidden()
+
+
+def test_leyenda_cambia_de_referencias_segun_el_tipo_de_busqueda(qtbot, conn, profesional_y_consultorio):
+    """Elegir "Regular"/"Aislada" en "Tipo de búsqueda" tiene que cambiar
+    tanto el modo de la grilla como el set de referencias que muestra la
+    leyenda (8 para regular, 6 para aislada) — ya funcionaba antes de esta
+    ronda vía la señal de `combo_modo`, se deja cubierto con un test."""
+    from app.gui.widgets.grilla_operativa import REFERENCIAS_AISLADA, REFERENCIAS_REGULAR
+    from app.negocio.oferta_busqueda import TIPO_AISLADA, TIPO_REGULAR
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData(TIPO_REGULAR))
+    assert pantalla.grilla._leyenda_colores._layout.count() == len(REFERENCIAS_REGULAR) * 2
+
+    pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData(TIPO_AISLADA))
+    assert pantalla.grilla._leyenda_colores._layout.count() == len(REFERENCIAS_AISLADA) * 2

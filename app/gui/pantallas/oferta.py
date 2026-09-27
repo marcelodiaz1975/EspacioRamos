@@ -99,6 +99,7 @@ from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 
 _TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
 _ANCHO_BOTON_ACCION = 220  # Generar PDF / Generar texto WhatsApp / Nueva búsqueda, los tres iguales
+_ANCHO_PANEL_FILTROS_GRILLA = 290  # mismo valor que Reservas (_ANCHO_PANEL_FILTROS_GRILLA), ancho liberado al angostar el formulario
 
 _DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
 
@@ -235,7 +236,6 @@ class _PanelOferta(QWidget):
         form.addWidget(QLabel("Tipo de búsqueda"))
         form.addWidget(self.combo_tipo)
 
-        fila_fechas = QHBoxLayout()
         self.campo_fecha_desde = QDateEdit()
         self.campo_fecha_desde.setCalendarPopup(True)
         self.campo_fecha_desde.setLocale(QLocale(QLocale.Language.Spanish))
@@ -244,13 +244,15 @@ class _PanelOferta(QWidget):
         self.campo_fecha_hasta.setCalendarPopup(True)
         self.campo_fecha_hasta.setLocale(QLocale(QLocale.Language.Spanish))
         self.campo_fecha_hasta.setDisplayFormat("ddd dd-MM-yyyy")
-        fila_fechas.addWidget(QLabel("Desde"))
-        fila_fechas.addWidget(self.campo_fecha_desde)
-        fila_fechas.addStretch()
-        fila_fechas.addWidget(QLabel("Hasta (solo Aislada)"))
-        fila_fechas.addWidget(self.campo_fecha_hasta)
-        fila_fechas.addStretch()
-        form.addLayout(fila_fechas)
+        # Apiladas (label arriba, campo abajo), no en una sola fila con dos
+        # `addStretch()` — mismo criterio que "Vigencia desde"/"Vigencia
+        # hasta" de Reservas, esa fila era la que más forzaba el ancho de
+        # esta columna (432px de sizeHint, más que ningún otro widget del
+        # formulario).
+        form.addWidget(QLabel("Desde"))
+        form.addWidget(self.campo_fecha_desde)
+        form.addWidget(QLabel("Hasta (solo Aislada)"))
+        form.addWidget(self.campo_fecha_hasta)
 
         form.addWidget(QLabel("Localidad"))
         self.lista_localidad = _lista_multiseleccion()
@@ -303,7 +305,7 @@ class _PanelOferta(QWidget):
         form.addLayout(fila_horario)
 
         fila_horas_minimas = QHBoxLayout()
-        self.casilla_horas_minimas = QCheckBox("Cantidad de horas dentro del rango (en vez del rango completo)")
+        self.casilla_horas_minimas = QCheckBox("Cantidad de horas dentro del rango\n(en vez del rango completo)")
         self.spin_horas_minimas = QDoubleSpinBox()
         self.spin_horas_minimas.setRange(0.5, 24)
         self.spin_horas_minimas.setValue(1)
@@ -354,18 +356,21 @@ class _PanelOferta(QWidget):
         form.addWidget(QLabel("Combinación con la próxima franja"))
         form.addWidget(self.combo_union_franja)
 
-        fila_franja = QHBoxLayout()
         self.boton_agregar_franja = QPushButton("Agregar franja a la búsqueda")
         self.boton_agregar_franja.clicked.connect(self._agregar_franja)
         self.boton_quitar_franja = QPushButton("Quitar franja seleccionada")
         self.boton_quitar_franja.clicked.connect(self._quitar_franja_seleccionada)
-        fila_franja.addWidget(self.boton_agregar_franja)
-        fila_franja.addWidget(self.boton_quitar_franja)
-        form.addLayout(fila_franja)
+        # Apilados, no en una sola fila — mismo criterio que el resto de
+        # los botones de este formulario (ver más abajo), para no forzar
+        # el ancho de la columna con dos botones lado a lado.
+        form.addWidget(self.boton_agregar_franja)
+        form.addWidget(self.boton_quitar_franja)
 
-        form.addWidget(QLabel(
+        etiqueta_franjas = QLabel(
             "Franjas agregadas a esta búsqueda (si no agregás ninguna, se usa lo cargado arriba como franja única)"
-        ))
+        )
+        etiqueta_franjas.setWordWrap(True)
+        form.addWidget(etiqueta_franjas)
         self.lista_franjas = QListWidget()
         self.lista_franjas.setMaximumHeight(90)  # ya viene con scroll propio si hay muchas franjas
         form.addWidget(self.lista_franjas)
@@ -373,7 +378,6 @@ class _PanelOferta(QWidget):
         self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
         form.addWidget(self.casilla_detalle_reducido)
 
-        fila_botones = QHBoxLayout()
         self.boton_pdf = QPushButton("Generar PDF")
         self.boton_pdf.setObjectName("botonSecundario")
         self.boton_pdf.clicked.connect(self._generar_pdf)
@@ -385,16 +389,14 @@ class _PanelOferta(QWidget):
         self.boton_nueva.clicked.connect(self._nueva_busqueda)
         for boton in (self.boton_pdf, self.boton_texto, self.boton_nueva):
             boton.setFixedWidth(_ANCHO_BOTON_ACCION)
-        fila_botones.addWidget(self.boton_pdf)
-        fila_botones.addWidget(self.boton_texto)
-        fila_botones.addWidget(self.boton_nueva)
-        fila_botones.addStretch()
-        form.addLayout(fila_botones)
+            form.addWidget(boton)
         form.addStretch()
         splitter.addWidget(panel_form)
 
         self.grilla = GrillaOperativaWidget(self.conn)
-        self.grilla.mostrar_leyenda_colores()
+        self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
+        self.grilla.agrupar_dias_en_pares()
+        self.grilla.mostrar_leyenda_colores(compacta=True)
         self.grilla.fijar_titulo_filtros("Grilla semanal")
         splitter.addWidget(self.grilla)
         splitter.setStretchFactor(1, 1)
@@ -405,6 +407,7 @@ class _PanelOferta(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
         contenido = QWidget()
+        contenido.setObjectName("panelSolapa")
         layout_contenido = QVBoxLayout(contenido)
         layout_contenido.setContentsMargins(0, 0, 0, 0)
         layout_contenido.addWidget(splitter)
