@@ -94,10 +94,10 @@ def test_fecha_muestra_el_dia_de_la_semana_abreviado(qtbot, conn, profesional_y_
 
 
 def test_fechas_desde_hasta_en_la_misma_fila(qtbot, conn, profesional_y_consultorio):
-    """"Desde"/"Hasta (solo Aislada)" van en la misma fila (pedido
-    explícito de la clienta) — confirmado por posición vertical, ya que
-    los dos `QDateEdit` quedan a la misma altura dentro del mismo
-    `QHBoxLayout`."""
+    """"Desde"/"Hasta" (esta última, antes "Hasta (solo Aislada)") van
+    en la misma fila (pedido explícito de la clienta) — confirmado por
+    posición vertical, ya que los dos `QDateEdit` quedan a la misma
+    altura dentro del mismo `QHBoxLayout`."""
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
@@ -254,10 +254,12 @@ def test_dias_son_checkboxes_de_lunes_a_sabado_en_grilla_compacta(qtbot, conn, p
     assert grid.itemAtPosition(1, 2) is not None
 
 
-def test_grilla_embebida_tiene_titulo_grilla_semanal(qtbot, conn, profesional_y_consultorio):
+def test_grilla_embebida_sin_titulo(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: se saca el título "Grilla
+    semanal" del panel de Filtros — mismo criterio que Reservas."""
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.grilla._panel_filtros.title() == "Grilla semanal"
+    assert pantalla.grilla._panel_filtros.title() == ""
 
 
 def test_foco_inicial_queda_en_profesional(qtbot, conn, profesional_y_consultorio):
@@ -655,3 +657,63 @@ def test_botones_de_accion_viven_en_el_panel_de_filtros_de_la_grilla(qtbot, conn
     indice_texto = layout.indexOf(pantalla.boton_texto)
     indice_nueva = layout.indexOf(pantalla.boton_nueva)
     assert indice_leyenda < indice_pdf < indice_texto < indice_nueva
+
+
+def test_etiqueta_hasta_sin_aclaracion_de_aislada(qtbot, conn, profesional_y_consultorio):
+    """"Hasta (solo Aislada)" pasa a "Hasta" — pedido explícito de la
+    clienta, el comportamiento no cambia (sigue deshabilitado en modo
+    Regular, ver `_al_cambiar_tipo`)."""
+    from app.negocio.oferta_busqueda import TIPO_AISLADA, TIPO_REGULAR
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    etiquetas = [lbl.text() for lbl in pantalla.findChildren(QLabel)]
+    assert "Hasta" in etiquetas
+    assert "Hasta (solo Aislada)" not in etiquetas
+
+    pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData(TIPO_REGULAR))
+    assert not pantalla.campo_fecha_hasta.isEnabled()
+    pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData(TIPO_AISLADA))
+    assert pantalla.campo_fecha_hasta.isEnabled()
+
+
+def test_profesional_alineado_con_localidad_de_la_grilla(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: "Localidad" (primer filtro del
+    panel de Filtros de la grilla, sin título desde este cambio) tiene
+    que arrancar a la misma altura que "Profesional" (primer campo de
+    la columna del formulario)."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    etiqueta_profesional = next(
+        lbl for lbl in pantalla.combo_profesional.parentWidget().findChildren(QLabel) if lbl.text() == "Profesional"
+    )
+    etiqueta_localidad = next(
+        lbl for lbl in pantalla.grilla._panel_filtros.findChildren(QLabel) if lbl.text() == "Localidad"
+    )
+    assert etiqueta_profesional.mapToGlobal(etiqueta_profesional.rect().topLeft()).y() == (
+        etiqueta_localidad.mapToGlobal(etiqueta_localidad.rect().topLeft()).y()
+    )
+
+
+def test_detalle_pegado_debajo_de_la_grilla_sin_relleno(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: "Detalle" y su cuadro suben hasta
+    donde termina la grilla, en vez de quedar más abajo con relleno
+    vacío en la tabla — mismo método opt-in que ya usa Reservas
+    regulares (`dar_stretch_a_detalle`, le saca el stretch a la tabla y
+    se lo pasa al cuadro "Detalle")."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    layout = pantalla.grilla._layout_grilla
+    assert layout.stretch(layout.indexOf(pantalla.grilla.tabla)) == 0
+    assert layout.stretch(layout.indexOf(pantalla.grilla.texto_detalle)) == 1
+
+
+def test_panel_filtros_de_la_grilla_mas_ancho(qtbot, conn, profesional_y_consultorio):
+    """Ancho liberado al acortar "Hasta (solo Aislada)" a "Hasta" —
+    pedido explícito de la clienta, "dáselo a la segunda columna"."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.grilla._panel_filtros.maximumWidth() == 355

@@ -99,7 +99,7 @@ from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 
 _TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
 _ANCHO_BOTON_ACCION = 220  # Generar PDF / Generar texto WhatsApp / Nueva búsqueda, los tres iguales
-_ANCHO_PANEL_FILTROS_GRILLA = 290  # mismo valor que Reservas (_ANCHO_PANEL_FILTROS_GRILLA), ancho liberado al angostar el formulario
+_ANCHO_PANEL_FILTROS_GRILLA = 355  # sube desde 290 con el ancho liberado al acortar "Hasta (solo Aislada)" a "Hasta"
 
 _DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
 
@@ -223,6 +223,14 @@ class _PanelOferta(QWidget):
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
+        # Margen superior +6px (9 -> 15) para que "Profesional" arranque a
+        # la misma altura que "Localidad" (primer filtro del panel de
+        # Filtros de la grilla, sin título desde este cambio) — valor
+        # medido con un script de geometría, no a ojo. Mismo motivo que
+        # `_ALTO_TITULO_FILTROS` en Reservas, con un valor distinto
+        # porque acá `form` parte de los márgenes default de Qt (9px) en
+        # vez de 0.
+        form.setContentsMargins(9, 15, 9, 9)
 
         self.combo_profesional = QComboBox()
         habilitar_busqueda_profesional(self.combo_profesional)
@@ -248,7 +256,10 @@ class _PanelOferta(QWidget):
         fila_fechas.addWidget(QLabel("Desde"))
         fila_fechas.addWidget(self.campo_fecha_desde)
         fila_fechas.addStretch()
-        fila_fechas.addWidget(QLabel("Hasta (solo Aislada)"))
+        # "Hasta" nomás (antes "Hasta (solo Aislada)") — pedido explícito
+        # de la clienta, el comportamiento no cambia: sigue deshabilitado
+        # (gris) en modo Regular, ver `_al_cambiar_tipo`.
+        fila_fechas.addWidget(QLabel("Hasta"))
         fila_fechas.addWidget(self.campo_fecha_hasta)
         fila_fechas.addStretch()
         form.addLayout(fila_fechas)
@@ -384,7 +395,13 @@ class _PanelOferta(QWidget):
         self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
         self.grilla.agrupar_dias_en_pares()
         self.grilla.mostrar_leyenda_colores(compacta=True)
-        self.grilla.fijar_titulo_filtros("Grilla semanal")
+        # Sin título (antes "Grilla semanal") — pedido explícito de la
+        # clienta, mismo criterio que Reservas (`fijar_titulo_filtros("")`).
+        self.grilla.fijar_titulo_filtros("")
+        # "Detalle" pegado justo debajo de la grilla, en vez de dejar que
+        # la tabla se estire con relleno vacío hasta el pie de la columna
+        # — mismo método opt-in que ya usa Reservas regulares.
+        self.grilla.dar_stretch_a_detalle()
 
         # Los tres botones de acción se mudan al panel de Filtros de la
         # grilla, debajo de "Referencias de colores" — pedido explícito
