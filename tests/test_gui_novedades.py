@@ -98,11 +98,11 @@ def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):
 
 
 def test_botones_secundarios_de_las_tres_solapas_son_celestes(qtbot, conn):
-    """Modificar/Anular/Deshacer quedaban con el gris por defecto del
-    sistema operativo; ahora usan "botonSecundario" (celeste, jerarquía
-    2 de botones) como el resto de las pantallas (Llaves, Lista de
-    espera, Placas) — mismo alto que el botón principal porque
-    comparte su mismo padding en la hoja de estilos."""
+    """Modificar/Anular quedaban con el gris por defecto del sistema
+    operativo; ahora usan "botonSecundario" (celeste, jerarquía 2 de
+    botones) como el resto de las pantallas (Llaves, Lista de espera,
+    Placas) — mismo alto que el botón principal porque comparte su
+    mismo padding en la hoja de estilos."""
     from PySide6.QtWidgets import QPushButton
 
     pantalla = PantallaRegistroAusencias(conn)
@@ -116,10 +116,6 @@ def test_botones_secundarios_de_las_tres_solapas_son_celestes(qtbot, conn):
     botones = pantalla.findChildren(QPushButton)
     encontrados = {b.text() for b in botones if b.objectName() == "botonSecundario" and b.text() in textos_secundarios}
     assert encontrados == textos_secundarios
-
-    deshacer = [b for b in botones if b.text() == "Deshacer último movimiento"]
-    assert len(deshacer) == 3
-    assert all(b.objectName() == "botonSecundario" for b in deshacer)
 
 
 def test_columna_anio_calendario_de_vacaciones_queda_centrada(qtbot, conn):
@@ -234,59 +230,6 @@ def test_cancelar_vacacion_seleccionada_elimina(qtbot, conn):
     panel.tabla.selectRow(0)
     panel._cancelar()
     assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 0
-
-
-def test_deshacer_ultimo_movimiento_vacaciones_sin_registros_no_falla(qtbot, conn):
-    _preparar(conn)
-    pantalla = PantallaRegistroAusencias(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_vacaciones
-    panel._deshacer_ultimo()  # no debe intentar confirmar ni romper: no hay nada que deshacer
-
-
-def test_deshacer_ultimo_movimiento_vacaciones_anula_la_ultima_sin_importar_filtro(qtbot, conn, monkeypatch):
-    id_profesional = _preparar(conn)
-    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
-    conn.commit()
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
-
-    pantalla = PantallaRegistroAusencias(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_vacaciones
-    anio_actual = panel.spin_anio.value()
-
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
-    panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
-    panel._crear()
-    panel.campo_desde.setDate(QDate(anio_actual, 10, 1))
-    panel.campo_hasta.setDate(QDate(anio_actual, 10, 7))
-    panel._crear()
-    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 2
-
-    # El filtro queda en un profesional sin vacaciones cargadas, pero deshacer
-    # debe anular la última vacación del sistema igual (la segunda creada arriba).
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
-    panel._deshacer_ultimo()
-    restantes = obtener_repositorio(conn, "Vacacion").listar()
-    assert len(restantes) == 1
-    assert restantes[0]["FechaDesde"] == f"{anio_actual}-09-01"
-
-
-def test_deshacer_ultimo_movimiento_vacaciones_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
-    id_profesional = _preparar(conn)
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
-
-    pantalla = PantallaRegistroAusencias(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_vacaciones
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setDate(_fecha("2026-09-07"))
-    panel.campo_hasta.setDate(_fecha("2026-09-07"))
-    panel._crear()
-
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 1
 
 
 def test_panel_vacaciones_arranca_con_foco_en_profesional(qtbot, conn):
@@ -495,57 +438,6 @@ def test_cancelar_licencia_seleccionada_elimina(qtbot, conn):
     panel.tabla.selectRow(0)
     panel._cancelar()
     assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 0
-
-
-def test_deshacer_ultimo_movimiento_licencia_sin_registros_no_falla(qtbot, conn):
-    _preparar(conn)
-    pantalla = PantallaRegistroAusencias(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_licencias
-    panel._deshacer_ultimo()  # no debe intentar confirmar ni romper: no hay nada que deshacer
-
-
-def test_deshacer_ultimo_movimiento_licencia_anula_la_ultima_sin_importar_filtro(qtbot, conn, monkeypatch):
-    id_profesional = _preparar(conn)
-    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
-    conn.commit()
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
-
-    pantalla = PantallaRegistroAusencias(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_licencias
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setDate(_fecha("2026-09-07"))
-    panel.campo_hasta.setDate(_fecha("2026-09-07"))
-    panel._crear()
-    panel.campo_desde.setDate(_fecha("2026-09-14"))
-    panel.campo_hasta.setDate(_fecha("2026-09-14"))
-    panel._crear()
-    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 2
-
-    # El filtro queda en un profesional sin licencias cargadas, pero deshacer
-    # debe anular la última licencia del sistema igual (la segunda creada arriba).
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
-    panel._deshacer_ultimo()
-    restantes = obtener_repositorio(conn, "Licencia").listar()
-    assert len(restantes) == 1
-    assert restantes[0]["FechaDesde"] == "2026-09-07"
-
-
-def test_deshacer_ultimo_movimiento_licencia_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
-    id_profesional = _preparar(conn)
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
-
-    pantalla = PantallaRegistroAusencias(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_licencias
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setDate(_fecha("2026-09-07"))
-    panel.campo_hasta.setDate(_fecha("2026-09-07"))
-    panel._crear()
-
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
 
 
 def test_panel_licencias_recibe_foco_en_profesional_al_mostrar_la_solapa(qtbot, conn):
@@ -847,55 +739,6 @@ def test_cancelar_ausencia_seleccionada_elimina(qtbot, conn):
     panel.tabla.selectRow(0)
     panel._cancelar()
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 0
-
-
-def test_deshacer_ultimo_movimiento_ausencia_sin_registros_no_falla(qtbot, conn):
-    _preparar(conn)
-    pantalla = PantallaRegistroAusencias(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_ausencias
-    panel._deshacer_ultimo()  # no debe intentar confirmar ni romper: no hay nada que deshacer
-
-
-def test_deshacer_ultimo_movimiento_ausencia_anula_la_ultima_sin_importar_filtro(qtbot, conn, monkeypatch):
-    id_profesional = _preparar(conn)
-    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
-    conn.commit()
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
-
-    pantalla = PantallaRegistroAusencias(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_ausencias
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setDate(_fecha("2026-09-07"))
-    panel.campo_hasta.setDate(_fecha("2026-09-07"))
-    panel._crear()
-    panel.campo_desde.setDate(_fecha("2026-09-14"))
-    panel.campo_hasta.setDate(_fecha("2026-09-14"))
-    panel._crear()
-    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 2
-
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(otro_profesional))
-    panel._deshacer_ultimo()
-    restantes = obtener_repositorio(conn, "Ausencia").listar()
-    assert len(restantes) == 1
-    assert restantes[0]["FechaDesde"] == "2026-09-07"
-
-
-def test_deshacer_ultimo_movimiento_ausencia_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
-    id_profesional = _preparar(conn)
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
-
-    pantalla = PantallaRegistroAusencias(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_ausencias
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    panel.campo_desde.setDate(_fecha("2026-09-07"))
-    panel.campo_hasta.setDate(_fecha("2026-09-07"))
-    panel._crear()
-
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
 
 
 def test_panel_ausencias_recibe_foco_en_profesional_al_mostrar_la_solapa(qtbot, conn):

@@ -308,11 +308,6 @@ class _PanelVacaciones(QWidget):
         boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
-        boton_deshacer = QPushButton("Deshacer último movimiento")
-        boton_deshacer.setObjectName("botonSecundario")
-        boton_deshacer.setFixedWidth(_ANCHO_CAMPO)
-        boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        form.addWidget(boton_deshacer)
 
         form.addWidget(_linea_divisoria())
         self.etiqueta_cupo_utilizado = QLabel()
@@ -506,27 +501,6 @@ class _PanelVacaciones(QWidget):
         if self._cancelar_registro(registro, "Anular vacaciones"):
             self.combo_profesional.setFocus()
 
-    def _deshacer_ultimo(self) -> None:
-        """Anula la última vacación cargada en el sistema (la de mayor
-        IdVacacion), sin importar de qué profesional sea ni cuál esté
-        elegido en el filtro."""
-        todas = obtener_repositorio(self.conn, "Vacacion").listar()
-        if not todas:
-            QMessageBox.warning(self, "Deshacer último movimiento", "No hay vacaciones cargadas para deshacer.")
-            return
-        ultima = max(todas, key=lambda v: v["IdVacacion"])
-        respuesta = QMessageBox.question(
-            self, "Deshacer último movimiento",
-            "¿Deshacer la última vacación cargada en el sistema?\n"
-            f"{_texto_profesional(obtener_repositorio(self.conn, 'Profesional').obtener(ultima['IdProfesional']))}: "
-            f"{_fmt_fecha(ultima['FechaDesde'])} a {_fmt_fecha(ultima['FechaHasta'])}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
-        )
-        if respuesta != QMessageBox.StandardButton.Yes:
-            return
-        if self._cancelar_registro(ultima, "Deshacer último movimiento"):
-            self.combo_profesional.setFocus()
-
     def _modificar_seleccionada(self) -> None:
         """Mismo criterio que Ausencias: anula la vacación seleccionada
         (bloquea si ya hay una aislada de otro profesional asignada
@@ -628,11 +602,6 @@ class _PanelLicencias(QWidget):
         boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
-        boton_deshacer = QPushButton("Deshacer último movimiento")
-        boton_deshacer.setObjectName("botonSecundario")
-        boton_deshacer.setFixedWidth(_ANCHO_CAMPO)
-        boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        form.addWidget(boton_deshacer)
 
         form.addStretch()
         splitter_superior.addWidget(panel_form)
@@ -813,27 +782,6 @@ class _PanelLicencias(QWidget):
         if self._cancelar_registro(registro, "Anular licencia"):
             self.combo_profesional.setFocus()
 
-    def _deshacer_ultimo(self) -> None:
-        """Anula la última licencia cargada en el sistema (la de mayor
-        IdLicencia), sin importar de qué profesional sea ni cuál esté
-        elegido en el filtro."""
-        todas = obtener_repositorio(self.conn, "Licencia").listar()
-        if not todas:
-            QMessageBox.warning(self, "Deshacer último movimiento", "No hay licencias cargadas para deshacer.")
-            return
-        ultima = max(todas, key=lambda v: v["IdLicencia"])
-        respuesta = QMessageBox.question(
-            self, "Deshacer último movimiento",
-            "¿Deshacer la última licencia cargada en el sistema?\n"
-            f"{_texto_profesional(obtener_repositorio(self.conn, 'Profesional').obtener(ultima['IdProfesional']))}: "
-            f"{_fmt_fecha(ultima['FechaDesde'])} a {_fmt_fecha(ultima['FechaHasta'])}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
-        )
-        if respuesta != QMessageBox.StandardButton.Yes:
-            return
-        if self._cancelar_registro(ultima, "Deshacer último movimiento"):
-            self.combo_profesional.setFocus()
-
     def _modificar_seleccionada(self) -> None:
         registro = self._fila_seleccionada()
         if registro is None:
@@ -951,11 +899,6 @@ class _PanelAusencias(QWidget):
         boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
-        boton_deshacer = QPushButton("Deshacer último movimiento")
-        boton_deshacer.setObjectName("botonSecundario")
-        boton_deshacer.setFixedWidth(_ANCHO_CAMPO)
-        boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        form.addWidget(boton_deshacer)
         form.addStretch()
         splitter_superior.addWidget(panel_form)
 
@@ -1117,27 +1060,6 @@ class _PanelAusencias(QWidget):
         if registro is None:
             return
         if self._cancelar_registro(registro, "Anular ausencia"):
-            self.combo_profesional.setFocus()
-
-    def _deshacer_ultimo(self) -> None:
-        """Anula la última ausencia cargada en el sistema (la de mayor
-        IdAusencia), sin importar de qué profesional sea ni cuál esté
-        elegido en el filtro."""
-        todas = obtener_repositorio(self.conn, "Ausencia").listar()
-        if not todas:
-            QMessageBox.warning(self, "Deshacer último movimiento", "No hay ausencias cargadas para deshacer.")
-            return
-        ultima = max(todas, key=lambda v: v["IdAusencia"])
-        respuesta = QMessageBox.question(
-            self, "Deshacer último movimiento",
-            "¿Deshacer la última ausencia cargada en el sistema?\n"
-            f"{_texto_profesional(obtener_repositorio(self.conn, 'Profesional').obtener(ultima['IdProfesional']))}: "
-            f"{_fmt_fecha(ultima['FechaDesde'])} a {_fmt_fecha(ultima['FechaHasta'])}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
-        )
-        if respuesta != QMessageBox.StandardButton.Yes:
-            return
-        if self._cancelar_registro(ultima, "Deshacer último movimiento"):
             self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
