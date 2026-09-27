@@ -4626,6 +4626,124 @@ ultima_fila`, que confirma que el viewport de la tabla alcanza para
 mostrar la suma completa de sus filas con la barra de scroll horizontal
 ya presente).
 
+### Octava vuelta: "inmovilizar paneles" en la grilla — columnas y filas
+### de encabezado siempre visibles al escrolear
+
+Pedido de la clienta sobre la grilla embebida de Oferta de consultorios:
+"¿se puede dejar inmóvil la columna que dice día de la semana, unidad,
+consultorio, tipo de bloques y horarios, y que lo que se escrolee sea
+solo lo que está a la derecha?" — mismo concepto que "inmovilizar
+paneles" de Excel. Antes de implementar se consultaron dos decisiones
+(`AskUserQuestion`):
+
+- **Alcance**: "solo Oferta de consultorios" por ahora — es la única
+  pantalla donde esta grilla necesita scroll horizontal de forma
+  habitual (ver rondas anteriores); la clienta pidió el cambio a las
+  demás pantallas con esta grilla (Reservas, Novedades, Grilla semanal)
+  solo si queda conforme con lo que ve acá.
+- **Filas de encabezado al escrolear hacia abajo**: "fijar también el
+  encabezado arriba" — no solo las columnas de la izquierda, también
+  Día de la semana/Localidad/Edificio/Unidad/Consultorio quedan fijas
+  arriba; solo se escrolea el bloque de datos, en las dos direcciones.
+
+### Mecánica (`GrillaOperativaWidget.activar_filas_y_columnas_fijas`, opt-in)
+
+`QTableWidget` no tiene un "inmovilizar paneles" nativo, y menos con
+celdas armadas a mano vía `setCellWidget` (no hay un modelo compartido
+que dos vistas puedan mirar en simultáneo, como en el ejemplo oficial
+de Qt para una sola columna fija). Se arman tres tablas más chicas,
+superpuestas ENCIMA de `self.tabla` con `setGeometry` (no dentro de
+ningún layout — `self.tabla` sigue viviendo en el suyo, sin cambios):
+`_tabla_esquina` (la intersección fija de arriba a la izquierda: filas
+de encabezado × columnas Tipo de bloque/Horario), `_tabla_fila_fija`
+(el resto de las filas de encabezado, con las mismas columnas de datos
+que `self.tabla`) y `_tabla_columna_fija` (el resto de las columnas
+fijas, con las mismas filas de datos que `self.tabla`) — entre las
+tres cubren exactamente la porción que tiene que quedar fija, sin
+superponerse entre sí.
+
+Contenido: `_poner_texto_encabezado`/`_poner_texto_dato_fila` (los dos
+únicos puntos por los que pasa CUALQUIER celda de encabezado/Tipo de
+bloque/Horario, ver "Séptima vuelta" más arriba) duplican cada celda
+hacia la tabla fija que corresponda además de escribirla en `self.tabla`
+como siempre — un widget no puede tener dos padres, así que cada celda
+se construye dos veces (instancias separadas de `_EtiquetaGrilla`, no
+un problema: son widgets baratos y sin estado compartido). Ningún
+llamador de estos dos métodos (`_agregar_encabezado_agrupado`,
+`_agregar_encabezado_consultorio`, `_agregar_columna_tipo_bloque`, el
+loop de horas de `_construir_tabla`) tuvo que tocarse — la duplicación
+queda encapsulada ahí adentro, agnóstica de quién llama.
+
+**Primer intento fallido, documentado para no repetirlo**: la primera
+versión ocultaba las columnas/filas fijas en `self.tabla`
+(`setColumnHidden`/`setRowHidden`) para que su propio scroll arrancara
+directo en la primera fila/columna de DATOS, alineado 1 a 1 con las
+tablas fijas sin necesitar ningún descuento de offset al sincronizar
+los scrollbars. Se probó y resultó un error real, no solo cosmético:
+Qt reacomoda el contenido VISIBLE de una tabla para no dejar hueco
+donde antes había algo oculto — con las filas de encabezado ocultas,
+las filas de DATOS se corrían hacia arriba para ocupar ese lugar, y
+terminaban tapadas por `_tabla_fila_fija` (que se queda fija arriba)
+en vez de aparecer debajo de ella. Confirmado con una captura de
+prueba: la reserva "R1" cargada en la fila 9:00 desaparecía por
+completo de la pantalla.
+
+**Solución real**: `self.tabla` NO se toca — sigue con todas sus
+filas/columnas visibles, escroleando en las dos direcciones exactamente
+como antes de este pedido. Las tres tablas fijas, superpuestas encima,
+simplemente TAPAN (con el contenido correcto, duplicado) la porción
+que no tiene que scrollear; lo que hay debajo de ellas en `self.tabla`
+en ese momento (sea la fila 0 sin scrollear, o cualquier fila de datos
+después de scrollear) es irrelevante porque nunca se ve. Como ninguna
+fila/columna se oculta, reenviar el VALOR del scrollbar de `self.tabla`
+tal cual (sin ningún descuento) al de la tabla fija correspondiente ya
+alinea perfectamente el contenido — confirmado con la matemática y con
+una captura scrolleada al máximo en las dos direcciones (ver más
+abajo). `setVerticalScrollMode`/`setHorizontalScrollMode` en
+`ScrollPerPixel` (en las cuatro tablas) asegura que "el mismo valor" en
+verdad signifique "el mismo desplazamiento en píxeles" en las dos.
+
+Geometría (`_actualizar_geometria_tablas_fijas`): posiciona las tres
+tablas fijas relativas a `self.tabla.viewport().pos()` (después del
+borde/frame), midiendo el ancho/alto fijo sobre `_tabla_esquina` (no
+sobre `self.tabla` directo — un cambio defensivo, no necesario hoy que
+`self.tabla` no oculta nada, pero deja la cuenta blindada por si algún
+día `self.tabla` llegara a ocultar alguna fila/columna por otro
+motivo: Qt devuelve 0 de ancho/alto para una fila/columna oculta sin
+importar lo que se le haya puesto con `setColumnWidth`/`setRowHeight`
+— exactamente el bug que hizo fallar el primer intento, pero en la
+MEDICIÓN en vez de en el contenido). Se recalcula con un
+`eventFilter` en `self.tabla.viewport()` (dispara con cualquier
+`QEvent.Type.Resize`) y, además, explícitamente al final de
+`limitar_alto_grilla` — ese método achica `self.tabla` sin pasar por
+`_construir_tabla`, así que sin este llamado extra las tablas fijas
+podían quedar un instante con la geometría vieja (más alta) hasta que
+el evento de resize llegara a disparar el filtro.
+
+Verificación de punta a punta (scripts de geometría, no capturas para
+la clienta — el comportamiento scrolleado no es algo que una captura
+estática pueda mostrar bien): con más de un consultorio/día cargado, se
+escroleó `self.tabla` al máximo horizontal y al máximo vertical (este
+último forzando un tope con `limitar_alto_grilla`, ya que la grilla de
+Oferta no lo usa y por eso normalmente nunca necesita scroll vertical
+propio) y se confirmó en las dos capturas: las columnas Tipo de
+bloque/Horario y las filas Día de la semana/Unidad/Consultorio quedan
+fijas en su lugar, mostrando siempre el mismo contenido, mientras el
+resto de la grilla (a la derecha/abajo) muestra los datos que
+corresponden a la posición de scroll — sin ningún salto ni contenido
+incorrecto.
+
+Tests nuevos: `test_gui_grilla_operativa.py`
+(`test_activar_filas_y_columnas_fijas_es_opt_in`,
+`test_activar_filas_y_columnas_fijas_arma_las_tres_tablas_con_las_
+dimensiones_correctas`, `test_activar_filas_y_columnas_fijas_duplica_
+el_contenido`, `test_activar_filas_y_columnas_fijas_sincroniza_el_
+scroll`, `test_activar_filas_y_columnas_fijas_geometria_cubre_la_
+esquina_del_viewport`); `test_gui_oferta.py`
+(`test_grilla_deja_fijas_las_columnas_y_las_filas_de_encabezado`, que
+solo confirma que Oferta prende el mecanismo — el comportamiento del
+mecanismo en sí queda cubierto en los tests de arriba).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
