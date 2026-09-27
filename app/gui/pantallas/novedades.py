@@ -1220,10 +1220,6 @@ class _PanelCargosEspeciales(QWidget):
         boton_eliminar.setObjectName("botonSecundario")
         boton_eliminar.clicked.connect(self._eliminar)
         form.addWidget(boton_eliminar)
-        boton_deshacer = QPushButton("Deshacer último movimiento")
-        boton_deshacer.setObjectName("botonSecundario")
-        boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        form.addWidget(boton_deshacer)
         form.addStretch()
         splitter.addWidget(panel_form)
 
@@ -1242,7 +1238,7 @@ class _PanelCargosEspeciales(QWidget):
         self._foco = instalar_enter_avanza_foco(
             [
                 self.combo_profesional, self.combo_tipo, self.campo_concepto, self.spin_monto, self.campo_periodo,
-                boton, boton_modificar, boton_eliminar, boton_deshacer,
+                boton, boton_modificar, boton_eliminar,
             ],
             parent=self,
         )
@@ -1378,33 +1374,6 @@ class _PanelCargosEspeciales(QWidget):
         self.spin_monto.setValue(registro["Monto"])
         self.campo_periodo.setText(registro["PeriodoImputado"] or periodo_actual(self.conn))
 
-    def _deshacer_ultimo(self) -> None:
-        """Como no hay forma de anular un cargo especial (se elimina
-        directo, sin dejar estado): "Deshacer" borra el último cargo
-        especial cargado en el sistema (el de mayor IdCargo), sin importar
-        de qué profesional sea."""
-        todos = obtener_repositorio(self.conn, "CargoEspecial").listar()
-        if not todos:
-            QMessageBox.warning(self, "Deshacer último movimiento", "No hay cargos especiales cargados para deshacer.")
-            return
-        ultimo = max(todos, key=lambda c: c["IdCargo"])
-        if self._bloqueado_por_llave(ultimo, "Deshacer último movimiento"):
-            return
-        profesional = obtener_repositorio(self.conn, "Profesional").obtener(ultimo["IdProfesional"])
-        respuesta = QMessageBox.question(
-            self, "Deshacer último movimiento",
-            "¿Deshacer el último cargo especial cargado en el sistema?\n"
-            f"{_texto_profesional(profesional) if profesional else '?'}: "
-            f"{ultimo['Tipo']} - {ultimo['Concepto']} - {formatear_moneda(ultimo['Monto'])}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
-        )
-        if respuesta != QMessageBox.StandardButton.Yes:
-            return
-        obtener_repositorio(self.conn, "CargoEspecial").eliminar(ultimo["IdCargo"])
-        self.conn.commit()
-        self.actualizar()
-        self.combo_profesional.setFocus()
-        self.combo_profesional.setFocus()
 
 
 class _PanelEstadoCuentaCargos(QWidget):

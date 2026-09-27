@@ -1320,43 +1320,6 @@ def test_tabla_cargos_especiales_click_en_columna_ordena_y_alterna_sentido(qtbot
     assert conceptos_desc == ["Bbb", "Aaa"]
 
 
-def test_deshacer_ultimo_movimiento_cargo_especial_sin_registros_no_falla(qtbot, conn):
-    _preparar(conn)
-    panel = _PanelCargosEspeciales(conn)
-    qtbot.addWidget(panel)
-    panel._deshacer_ultimo()  # no debe intentar confirmar ni romper
-
-
-def test_deshacer_ultimo_movimiento_cargo_especial_borra_el_ultimo_cargado(qtbot, conn, monkeypatch):
-    _preparar(conn)
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
-    panel = _PanelCargosEspeciales(conn)
-    qtbot.addWidget(panel)
-    panel.combo_profesional.setCurrentIndex(1)
-    panel.campo_concepto.setText("ajuste manual")
-    panel.spin_monto.setValue(1500)
-    panel._crear()
-    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
-
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 0
-
-
-def test_deshacer_ultimo_movimiento_cargo_especial_cancelado_por_usuario_no_borra(qtbot, conn, monkeypatch):
-    _preparar(conn)
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
-    panel = _PanelCargosEspeciales(conn)
-    qtbot.addWidget(panel)
-    panel.combo_profesional.setCurrentIndex(1)
-    panel.campo_concepto.setText("ajuste manual")
-    panel.spin_monto.setValue(1500)
-    panel._crear()
-
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
-    panel._deshacer_ultimo()
-    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
-
-
 def test_combo_profesional_cargos_especiales_filtra_la_tabla(qtbot, conn):
     from app.negocio.pagos import crear_cargo_especial
 
@@ -1448,7 +1411,7 @@ def test_tabla_cargos_especiales_orden_por_defecto_fecha_categoria_codigo(qtbot,
     assert codigos == ["B1", "R2"]
 
 
-def test_cargo_ligado_a_llave_bloquea_modificar_eliminar_y_deshacer(qtbot, conn, monkeypatch):
+def test_cargo_ligado_a_llave_bloquea_modificar_y_eliminar(qtbot, conn):
     from app.negocio.llaves import asignar_llave, crear_llave, ingresar_copias
 
     _preparar(conn)
@@ -1467,10 +1430,6 @@ def test_cargo_ligado_a_llave_bloquea_modificar_eliminar_y_deshacer(qtbot, conn,
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1  # ...pero no se puede tocar
 
     panel._modificar_seleccionada()
-    assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
-
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
-    panel._deshacer_ultimo()
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
 
 
@@ -1537,13 +1496,13 @@ def test_spin_monto_cargos_especiales_se_pone_rojo_en_negativo(qtbot, conn):
 
 def test_botones_secundarios_de_cargos_especiales_son_celestes(qtbot, conn):
     """Mismo criterio que Vacaciones/Licencias/Ausencias: Modificar/
-    Eliminar/Deshacer usan "botonSecundario" (celeste, mismo alto que
-    el botón principal) en vez del gris por defecto del sistema."""
+    Eliminar usan "botonSecundario" (celeste, mismo alto que el botón
+    principal) en vez del gris por defecto del sistema."""
     from PySide6.QtWidgets import QPushButton
 
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
-    textos_secundarios = {"Modificar cargo especial", "Eliminar cargo especial", "Deshacer último movimiento"}
+    textos_secundarios = {"Modificar cargo especial", "Eliminar cargo especial"}
     encontrados = {
         b.text() for b in panel.findChildren(QPushButton)
         if b.objectName() == "botonSecundario" and b.text() in textos_secundarios
