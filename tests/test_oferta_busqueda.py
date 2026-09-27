@@ -244,6 +244,21 @@ def test_sillones_y_tamano_filtran_candidatos(conn):
     assert resultado.alternativas[0].opciones[0].tramos[0].id_consultorio == id_c_grande
 
 
+def test_placard_filtra_candidatos(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1, Placard=0)
+    id_c_con_placard = _crear_consultorio(conn, id_unidad, 2, Placard=1)
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11,
+        placard=True,
+    )
+    resultado = resolver_busqueda(conn, globales, busqueda)
+    assert resultado.alternativas[0].opciones[0].tramos[0].id_consultorio == id_c_con_placard
+
+
 def test_naranja_combina_unidades_distintas_mismo_edificio(conn):
     id_edificio = _crear_edificio(conn)
     id_unidad1 = _crear_unidad(conn, id_edificio, '7mo "L"')

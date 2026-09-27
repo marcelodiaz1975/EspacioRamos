@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QWidget
+from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QPushButton, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -770,3 +770,27 @@ def test_limitar_alto_grilla_con_un_tope_mas_chico_recorta_la_tabla_y_el_widget(
     assert widget.maximumHeight() == tope
     assert widget.tabla.maximumHeight() == alto_tabla_esperado
     assert widget.tabla.minimumHeight() == alto_tabla_esperado
+
+
+def test_agregar_widgets_debajo_de_leyenda_quedan_despues_y_antes_del_stretch(qtbot, conn):
+    """Pedido de la clienta al revisar Oferta de consultorios: los tres
+    botones de acción se mudan al panel de Filtros, debajo de
+    "Referencias de colores" — se insertan justo antes del
+    `addStretch()` final de `layout_filtros`, así ese stretch sigue
+    absorbiendo el resto del alto disponible después de los widgets
+    nuevos, en vez de quedar "atrapado" entre la leyenda y los botones."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.mostrar_leyenda_colores()
+    boton_1 = QPushButton("Uno")
+    boton_2 = QPushButton("Dos")
+
+    widget.agregar_widgets_debajo_de_leyenda(boton_1, boton_2)
+
+    layout = widget._panel_filtros.layout()
+    indice_leyenda = layout.indexOf(widget._leyenda_colores)
+    indice_1 = layout.indexOf(boton_1)
+    indice_2 = layout.indexOf(boton_2)
+    assert indice_leyenda < indice_1 < indice_2 < layout.count() - 1  # el último item sigue siendo el stretch
+    assert boton_1.parentWidget() is widget._panel_filtros

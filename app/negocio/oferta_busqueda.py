@@ -115,6 +115,7 @@ class Busqueda:
     apto_camilla: bool = False
     ventana: bool = False
     sillones: bool = False
+    placard: bool = False
     tamano: str | None = None
     valor_maximo_hora: float | None = None
     cantidad_horas_minimas: float | None = None
@@ -198,6 +199,8 @@ def _consultorios_candidatos(
         if busqueda.ventana and not c["Ventana"]:
             continue
         if busqueda.sillones and not c["Sillones"]:
+            continue
+        if busqueda.placard and not c["Placard"]:
             continue
         if busqueda.tamano and (c["TamanoClasificacion"] or "").strip().lower() != busqueda.tamano.strip().lower():
             continue

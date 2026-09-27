@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QCheckBox, QDialog, QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -93,23 +93,17 @@ def test_fecha_muestra_el_dia_de_la_semana_abreviado(qtbot, conn, profesional_y_
     assert pantalla.campo_fecha_desde.text().startswith("mié")
 
 
-def test_fechas_desde_hasta_apiladas_en_vez_de_una_fila(qtbot, conn, profesional_y_consultorio):
-    """"Desde"/"Hasta (solo Aislada)" pasaron de una sola fila (con dos
-    `addStretch()`, la que más forzaba el ancho de la columna del
-    formulario — 432px de sizeHint, más que ningún otro widget) a quedar
-    apiladas en el mismo `form` (QVBoxLayout), cada una con su etiqueta
-    inmediatamente arriba — mismo criterio que "Vigencia desde"/"Vigencia
-    hasta" en Reservas. Se recorre el layout en vez de buscar por texto
-    porque "Desde" se repite (también lo usa la fila de horario)."""
+def test_fechas_desde_hasta_en_la_misma_fila(qtbot, conn, profesional_y_consultorio):
+    """"Desde"/"Hasta (solo Aislada)" van en la misma fila (pedido
+    explícito de la clienta) — confirmado por posición vertical, ya que
+    los dos `QDateEdit` quedan a la misma altura dentro del mismo
+    `QHBoxLayout`."""
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
-    form = pantalla.combo_profesional.parentWidget().layout()
-    widgets = [form.itemAt(i).widget() for i in range(form.count()) if form.itemAt(i).widget() is not None]
-    indice_desde = widgets.index(pantalla.campo_fecha_desde)
-    indice_hasta = widgets.index(pantalla.campo_fecha_hasta)
-    assert widgets[indice_desde - 1].text() == "Desde"
-    assert widgets[indice_hasta - 1].text() == "Hasta (solo Aislada)"
-    assert indice_hasta == indice_desde + 2  # apiladas una justo después de la otra, sin nada en medio
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    assert pantalla.campo_fecha_desde.y() == pantalla.campo_fecha_hasta.y()
+    assert pantalla.campo_fecha_desde.x() < pantalla.campo_fecha_hasta.x()
 
 
 def test_horario_muestra_formato_hs(qtbot, conn, profesional_y_consultorio):
@@ -274,15 +268,21 @@ def test_foco_inicial_queda_en_profesional(qtbot, conn, profesional_y_consultori
     qtbot.waitUntil(lambda: pantalla.combo_profesional.hasFocus())
 
 
-def test_lista_franjas_es_scroleable_con_muchas_franjas(qtbot, conn, profesional_y_consultorio):
-    """El campo tiene una altura fija (no crece con el formulario) y
-    hereda el scroll propio de QListWidget — si se cargan muchas
-    franjas, quedan navegables con la barra en vez de estirar la
-    pantalla."""
+def test_lista_franjas_crece_hasta_el_pie_y_es_scroleable(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: prefiere que los cuadros/tablas
+    sean escroleables en vez de la pantalla entera — "Franjas agregadas
+    a esta búsqueda" pasa de un alto máximo fijo (90px) a crecer con
+    `stretch=1` hasta el pie de la columna, sin perder el scroll propio
+    de `QListWidget` para cuando hay más franjas de las que entran."""
     from PySide6.QtCore import Qt as _Qt
 
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
+    form = pantalla.combo_profesional.parentWidget().layout()
+    indice = form.indexOf(pantalla.lista_franjas)
+    assert form.stretch(indice) == 1
+    assert pantalla.lista_franjas.maximumHeight() > 90
+
     for i in range(20):
         pantalla._checks_dia["Lunes"].setChecked(True)
         pantalla.spin_desde.setValue(9)
@@ -290,7 +290,6 @@ def test_lista_franjas_es_scroleable_con_muchas_franjas(qtbot, conn, profesional
         pantalla._agregar_franja()
 
     assert pantalla.lista_franjas.count() == 20
-    assert pantalla.lista_franjas.maximumHeight() == 90
     assert pantalla.lista_franjas.verticalScrollBarPolicy() != _Qt.ScrollBarPolicy.ScrollBarAlwaysOff
 
 
@@ -528,17 +527,19 @@ def test_columna_del_formulario_mas_angosta_que_antes(qtbot, conn, profesional_y
     """Pedido explícito de la clienta: la primera columna (el formulario
     de búsqueda) tiene que quedar más angosta, y el ancho liberado se
     reparte entre el panel de Filtros y la grilla de la derecha — mismo
-    criterio que la columna del formulario en Reservas. Antes de este
-    cambio la columna medía 690px de sizeHint (dominada por la fila
+    criterio que la columna del formulario en Reservas. Antes de esta
+    ronda la columna medía 690px de sizeHint (dominada por la fila
     horizontal de "Generar PDF"/"Generar texto WhatsApp"/"Nueva
-    búsqueda", 660px de tres botones de 220px cada uno)."""
+    búsqueda", 660px de tres botones de 220px cada uno); esos tres
+    botones se mudaron al panel de Filtros de la grilla (ver más abajo),
+    así que ya no aportan nada al ancho de esta columna."""
     from PySide6.QtWidgets import QSplitter
 
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     splitter = pantalla.findChildren(QSplitter)[0]
     panel_form = splitter.widget(0)
-    assert panel_form.sizeHint().width() < 450  # bien por debajo de los 690px originales
+    assert panel_form.sizeHint().width() < 500  # bien por debajo de los 690px originales
     assert pantalla.grilla._panel_filtros.maximumWidth() > 260  # más ancho que el default de la grilla
 
 
@@ -575,3 +576,82 @@ def test_leyenda_cambia_de_referencias_segun_el_tipo_de_busqueda(qtbot, conn, pr
 
     pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData(TIPO_AISLADA))
     assert pantalla.grilla._leyenda_colores._layout.count() == len(REFERENCIAS_AISLADA) * 2
+
+
+def test_agregar_y_quitar_franja_en_la_misma_fila(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: "Agregar franja a la búsqueda" y
+    "Quitar franja seleccionada" van a la par, a la misma altura."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    assert pantalla.boton_agregar_franja.y() == pantalla.boton_quitar_franja.y()
+    assert pantalla.boton_agregar_franja.x() < pantalla.boton_quitar_franja.x()
+
+
+def test_etiqueta_franjas_agregadas_sin_texto_explicativo(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: el título de la lista de franjas
+    queda solo con "Franjas agregadas a esta búsqueda", sin la aclaración
+    entre paréntesis que tenía antes."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    etiquetas = [lbl.text() for lbl in pantalla.findChildren(QLabel)]
+    assert "Franjas agregadas a esta búsqueda" in etiquetas
+    assert not any("si no agregás ninguna" in texto for texto in etiquetas)
+
+
+def test_caracteristicas_pedidas_en_grilla_de_pares_con_placard(qtbot, conn, profesional_y_consultorio):
+    """"Con ventana"/"Apto camilla" en una fila, "Con sillones"/"Con
+    placard" (checkbox nuevo) en la siguiente, y "Tamaño"/"Valor máximo
+    por hora regular" cada uno junto a su selector — pedido explícito de
+    la clienta sobre el orden exacto de esta sección."""
+    from PySide6.QtWidgets import QGridLayout
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    assert isinstance(pantalla.casilla_placard, QCheckBox)
+    assert pantalla.casilla_placard.text() == "Con placard"
+
+    grid = pantalla._grid_caracteristicas
+    assert isinstance(grid, QGridLayout)
+    assert grid.indexOf(pantalla.casilla_ventana) == grid.indexOf(pantalla.casilla_camilla) - 1
+    assert grid.getItemPosition(grid.indexOf(pantalla.casilla_ventana))[:2] == (0, 0)
+    assert grid.getItemPosition(grid.indexOf(pantalla.casilla_camilla))[:2] == (0, 1)
+    assert grid.getItemPosition(grid.indexOf(pantalla.casilla_sillones))[:2] == (1, 0)
+    assert grid.getItemPosition(grid.indexOf(pantalla.casilla_placard))[:2] == (1, 1)
+    assert grid.getItemPosition(grid.indexOf(pantalla.casilla_tamano))[:2] == (2, 0)
+    assert grid.getItemPosition(grid.indexOf(pantalla.combo_tamano))[:2] == (2, 1)
+    assert grid.getItemPosition(grid.indexOf(pantalla.casilla_valor_maximo))[:2] == (3, 0)
+    assert grid.getItemPosition(grid.indexOf(pantalla.spin_valor_maximo))[:2] == (3, 1)
+
+
+def test_placard_se_incluye_en_la_busqueda_armada(qtbot, conn, profesional_y_consultorio):
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    pantalla.casilla_placard.setChecked(True)
+    busqueda = pantalla._armar_busqueda_actual()
+    assert busqueda.placard is True
+
+    pantalla._nueva_busqueda()
+    assert pantalla.casilla_placard.isChecked() is False
+
+
+def test_botones_de_accion_viven_en_el_panel_de_filtros_de_la_grilla(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: "Generar PDF"/"Generar texto
+    WhatsApp"/"Nueva búsqueda" se mudan al panel de Filtros de la grilla,
+    debajo de "Referencias de colores" — ya no viven al pie del
+    formulario de búsqueda."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    panel_filtros = pantalla.grilla._panel_filtros
+    assert pantalla.boton_pdf.parentWidget() is panel_filtros
+    assert pantalla.boton_texto.parentWidget() is panel_filtros
+    assert pantalla.boton_nueva.parentWidget() is panel_filtros
+
+    layout = panel_filtros.layout()
+    indice_leyenda = layout.indexOf(pantalla.grilla._leyenda_colores)
+    indice_pdf = layout.indexOf(pantalla.boton_pdf)
+    indice_texto = layout.indexOf(pantalla.boton_texto)
+    indice_nueva = layout.indexOf(pantalla.boton_nueva)
+    assert indice_leyenda < indice_pdf < indice_texto < indice_nueva

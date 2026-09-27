@@ -912,6 +912,21 @@ class GrillaOperativaWidget(QWidget):
         `_leyenda_colores` desde afuera."""
         return self._leyenda_colores._tamano_muestra
 
+    def agregar_widgets_debajo_de_leyenda(self, *widgets: QWidget) -> None:
+        """Agrega widgets al panel de Filtros, debajo de "Referencias de
+        colores" — pensado para Oferta de consultorios, que mueve ahí sus
+        tres botones de acción (Generar PDF/Generar texto WhatsApp/Nueva
+        búsqueda), antes al pie del formulario. Se insertan justo antes
+        del `addStretch()` final de `layout_filtros` (así ese stretch
+        sigue absorbiendo el resto del alto disponible, después de los
+        widgets nuevos) — opt-in, no afecta al resto de los usos de esta
+        grilla compartida."""
+        layout = self._panel_filtros.layout()
+        indice = layout.count() - 1  # justo antes del addStretch() final
+        for widget in widgets:
+            layout.insertWidget(indice, widget)
+            indice += 1
+
     def agrandar_muestras_leyenda(self, ancho: int, alto: int) -> None:
         """Agranda las muestras de color de "Referencias de colores" a
         `(ancho, alto)` y refresca la leyenda para que tome el tamaño

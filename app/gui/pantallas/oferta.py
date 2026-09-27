@@ -236,6 +236,7 @@ class _PanelOferta(QWidget):
         form.addWidget(QLabel("Tipo de búsqueda"))
         form.addWidget(self.combo_tipo)
 
+        fila_fechas = QHBoxLayout()
         self.campo_fecha_desde = QDateEdit()
         self.campo_fecha_desde.setCalendarPopup(True)
         self.campo_fecha_desde.setLocale(QLocale(QLocale.Language.Spanish))
@@ -244,15 +245,13 @@ class _PanelOferta(QWidget):
         self.campo_fecha_hasta.setCalendarPopup(True)
         self.campo_fecha_hasta.setLocale(QLocale(QLocale.Language.Spanish))
         self.campo_fecha_hasta.setDisplayFormat("ddd dd-MM-yyyy")
-        # Apiladas (label arriba, campo abajo), no en una sola fila con dos
-        # `addStretch()` — mismo criterio que "Vigencia desde"/"Vigencia
-        # hasta" de Reservas, esa fila era la que más forzaba el ancho de
-        # esta columna (432px de sizeHint, más que ningún otro widget del
-        # formulario).
-        form.addWidget(QLabel("Desde"))
-        form.addWidget(self.campo_fecha_desde)
-        form.addWidget(QLabel("Hasta (solo Aislada)"))
-        form.addWidget(self.campo_fecha_hasta)
+        fila_fechas.addWidget(QLabel("Desde"))
+        fila_fechas.addWidget(self.campo_fecha_desde)
+        fila_fechas.addStretch()
+        fila_fechas.addWidget(QLabel("Hasta (solo Aislada)"))
+        fila_fechas.addWidget(self.campo_fecha_hasta)
+        fila_fechas.addStretch()
+        form.addLayout(fila_fechas)
 
         form.addWidget(QLabel("Localidad"))
         self.lista_localidad = _lista_multiseleccion()
@@ -326,29 +325,31 @@ class _PanelOferta(QWidget):
         self.casilla_ventana = QCheckBox("Con ventana")
         self.casilla_camilla = QCheckBox("Apto camilla")
         self.casilla_sillones = QCheckBox("Con sillones")
-        for casilla in (self.casilla_ventana, self.casilla_camilla, self.casilla_sillones):
-            form.addWidget(casilla)
-
-        fila_tamano = QHBoxLayout()
+        self.casilla_placard = QCheckBox("Con placard")
         self.casilla_tamano = QCheckBox("Tamaño")
         self.combo_tamano = QComboBox()
         for etiqueta, valor in _TAMANOS:
             self.combo_tamano.addItem(etiqueta, valor)
         self.combo_tamano.setEnabled(False)
         self.casilla_tamano.toggled.connect(self.combo_tamano.setEnabled)
-        fila_tamano.addWidget(self.casilla_tamano)
-        fila_tamano.addWidget(self.combo_tamano)
-        form.addLayout(fila_tamano)
-
-        fila_valor_maximo = QHBoxLayout()
         self.casilla_valor_maximo = QCheckBox("Valor máximo por hora regular")
         self.spin_valor_maximo = QDoubleSpinBox()
         self.spin_valor_maximo.setRange(0, 10_000_000)
         self.spin_valor_maximo.setEnabled(False)
         self.casilla_valor_maximo.toggled.connect(self.spin_valor_maximo.setEnabled)
-        fila_valor_maximo.addWidget(self.casilla_valor_maximo)
-        fila_valor_maximo.addWidget(self.spin_valor_maximo)
-        form.addLayout(fila_valor_maximo)
+        # Grilla de 2 columnas, checkbox de a pares por fila (pedido
+        # explícito de la clienta), con "Tamaño"/"Valor máximo..." como
+        # las últimas dos filas, cada una junto a su propio selector.
+        self._grid_caracteristicas = grid_caracteristicas = QGridLayout()
+        grid_caracteristicas.addWidget(self.casilla_ventana, 0, 0)
+        grid_caracteristicas.addWidget(self.casilla_camilla, 0, 1)
+        grid_caracteristicas.addWidget(self.casilla_sillones, 1, 0)
+        grid_caracteristicas.addWidget(self.casilla_placard, 1, 1)
+        grid_caracteristicas.addWidget(self.casilla_tamano, 2, 0)
+        grid_caracteristicas.addWidget(self.combo_tamano, 2, 1)
+        grid_caracteristicas.addWidget(self.casilla_valor_maximo, 3, 0)
+        grid_caracteristicas.addWidget(self.spin_valor_maximo, 3, 1)
+        form.addLayout(grid_caracteristicas)
 
         self.combo_union_franja = QComboBox()
         for etiqueta, valor in _UNION_FRANJAS:
@@ -356,28 +357,41 @@ class _PanelOferta(QWidget):
         form.addWidget(QLabel("Combinación con la próxima franja"))
         form.addWidget(self.combo_union_franja)
 
+        self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
+        form.addWidget(self.casilla_detalle_reducido)
+
+        fila_franja = QHBoxLayout()
         self.boton_agregar_franja = QPushButton("Agregar franja a la búsqueda")
         self.boton_agregar_franja.clicked.connect(self._agregar_franja)
         self.boton_quitar_franja = QPushButton("Quitar franja seleccionada")
         self.boton_quitar_franja.clicked.connect(self._quitar_franja_seleccionada)
-        # Apilados, no en una sola fila — mismo criterio que el resto de
-        # los botones de este formulario (ver más abajo), para no forzar
-        # el ancho de la columna con dos botones lado a lado.
-        form.addWidget(self.boton_agregar_franja)
-        form.addWidget(self.boton_quitar_franja)
+        fila_franja.addWidget(self.boton_agregar_franja)
+        fila_franja.addWidget(self.boton_quitar_franja)
+        form.addLayout(fila_franja)
 
-        etiqueta_franjas = QLabel(
-            "Franjas agregadas a esta búsqueda (si no agregás ninguna, se usa lo cargado arriba como franja única)"
-        )
-        etiqueta_franjas.setWordWrap(True)
-        form.addWidget(etiqueta_franjas)
+        form.addWidget(QLabel("Franjas agregadas a esta búsqueda"))
         self.lista_franjas = QListWidget()
-        self.lista_franjas.setMaximumHeight(90)  # ya viene con scroll propio si hay muchas franjas
-        form.addWidget(self.lista_franjas)
+        # Sin alto máximo: crece hasta el pie de la pantalla (con
+        # `stretch=1` más abajo) — pedido explícito de la clienta, que
+        # prefiere que los cuadros/tablas sean escroleables en vez de la
+        # pantalla entera. Sigue teniendo su scroll propio de siempre
+        # (QListWidget nativo) para cuando hay más franjas de las que
+        # entran en el alto disponible.
+        form.addWidget(self.lista_franjas, stretch=1)
+        splitter.addWidget(panel_form)
 
-        self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
-        form.addWidget(self.casilla_detalle_reducido)
+        self.grilla = GrillaOperativaWidget(self.conn)
+        self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
+        self.grilla.agrupar_dias_en_pares()
+        self.grilla.mostrar_leyenda_colores(compacta=True)
+        self.grilla.fijar_titulo_filtros("Grilla semanal")
 
+        # Los tres botones de acción se mudan al panel de Filtros de la
+        # grilla, debajo de "Referencias de colores" — pedido explícito
+        # de la clienta, para no forzar el ancho/alto de la columna del
+        # formulario con ellos. Se siguen construyendo acá (mismos
+        # métodos `self._generar_pdf`/etc.) y quedan en la misma cadena
+        # de foco Enter/Tab de siempre, solo cambia dónde viven visualmente.
         self.boton_pdf = QPushButton("Generar PDF")
         self.boton_pdf.setObjectName("botonSecundario")
         self.boton_pdf.clicked.connect(self._generar_pdf)
@@ -389,15 +403,8 @@ class _PanelOferta(QWidget):
         self.boton_nueva.clicked.connect(self._nueva_busqueda)
         for boton in (self.boton_pdf, self.boton_texto, self.boton_nueva):
             boton.setFixedWidth(_ANCHO_BOTON_ACCION)
-            form.addWidget(boton)
-        form.addStretch()
-        splitter.addWidget(panel_form)
+        self.grilla.agregar_widgets_debajo_de_leyenda(self.boton_pdf, self.boton_texto, self.boton_nueva)
 
-        self.grilla = GrillaOperativaWidget(self.conn)
-        self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
-        self.grilla.agrupar_dias_en_pares()
-        self.grilla.mostrar_leyenda_colores(compacta=True)
-        self.grilla.fijar_titulo_filtros("Grilla semanal")
         splitter.addWidget(self.grilla)
         splitter.setStretchFactor(1, 1)
 
@@ -423,9 +430,11 @@ class _PanelOferta(QWidget):
                 *(self._checks_dia[dia] for dia in _DIAS_BUSQUEDA),
                 self.spin_desde, self.spin_hasta, self.casilla_horas_minimas, self.spin_horas_minimas,
                 self.combo_combinacion, self.casilla_ventana, self.casilla_camilla, self.casilla_sillones,
-                self.casilla_tamano, self.combo_tamano, self.casilla_valor_maximo, self.spin_valor_maximo,
-                self.combo_union_franja, self.boton_agregar_franja, self.boton_quitar_franja,
-                self.casilla_detalle_reducido, self.boton_pdf, self.boton_texto, self.boton_nueva,
+                self.casilla_placard, self.casilla_tamano, self.combo_tamano,
+                self.casilla_valor_maximo, self.spin_valor_maximo,
+                self.combo_union_franja, self.casilla_detalle_reducido,
+                self.boton_agregar_franja, self.boton_quitar_franja,
+                self.boton_pdf, self.boton_texto, self.boton_nueva,
             ],
             parent=self,
         )
@@ -557,6 +566,7 @@ class _PanelOferta(QWidget):
             apto_camilla=self.casilla_camilla.isChecked(),
             ventana=self.casilla_ventana.isChecked(),
             sillones=self.casilla_sillones.isChecked(),
+            placard=self.casilla_placard.isChecked(),
             tamano=self.combo_tamano.currentData() if self.casilla_tamano.isChecked() else None,
             valor_maximo_hora=self.spin_valor_maximo.value() if self.casilla_valor_maximo.isChecked() else None,
             cantidad_horas_minimas=self.spin_horas_minimas.value() if self.casilla_horas_minimas.isChecked() else None,
@@ -663,6 +673,7 @@ class _PanelOferta(QWidget):
         self.casilla_ventana.setChecked(False)
         self.casilla_camilla.setChecked(False)
         self.casilla_sillones.setChecked(False)
+        self.casilla_placard.setChecked(False)
         self.casilla_tamano.setChecked(False)
         self.combo_tamano.setCurrentIndex(0)
         self.casilla_valor_maximo.setChecked(False)
