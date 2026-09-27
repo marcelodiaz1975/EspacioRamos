@@ -4001,6 +4001,88 @@ widget.
   nada para deshacer" — este último ya no tiene sentido sin el
   concepto de "última acción" a probar).
 
+## Disponibilidad: Oferta de consultorios, columna angosta y grilla como en Reservas
+
+Pedido de la clienta al revisar las capturas de "Disponibilidad": de las
+tres solapas, solo "Oferta de consultorios" necesitaba ajustes ("las
+otras dos están bien"). Cuatro pedidos sobre esa solapa:
+
+- **Fondo del panel más claro (mismo tono que la solapa activa).** Mismo
+  bug ya documentado en "Panel izquierdo gris en vez de blanco" (ver más
+  arriba): `contenido` (el widget que se pasa a `scroll.setWidget(...)`)
+  nunca tenía `objectName="panelSolapa"` puesto en esta pantalla — a
+  diferencia de Reservas/Llaves, donde ya se había corregido. Se suma
+  `contenido.setObjectName("panelSolapa")`, mismo criterio exacto que
+  esas dos pantallas (alcanza con que lo tenga `contenido`, la cascada
+  llega sola a `panel_form`/la grilla, sin tocar ningún widget nested).
+- **Columna del formulario más angosta, ancho liberado a Filtros y a la
+  grilla.** Medido con un script de geometría (mismo criterio de todo
+  este apartado): antes de este cambio la columna medía 690px de
+  sizeHint, dominada por la fila horizontal de los tres botones de
+  acción ("Generar PDF"/"Generar texto WhatsApp"/"Nueva búsqueda", 220px
+  cada uno, 660px sumados) — ninguno de los otros widgets del formulario
+  se acercaba a esa medida. Se resolvió apilando verticalmente (mismo
+  criterio que Reservas: `form.addWidget(boton)` uno debajo del otro, en
+  vez de una fila con `QHBoxLayout`) las tres filas de botones/campos
+  que hasta ahora iban horizontales sin necesitarlo: los tres botones de
+  acción, "Agregar franja"/"Quitar franja" (189+172px lado a lado) y
+  "Desde"/"Hasta (solo Aislada)" (432px de sizeHint entre los dos
+  `QDateEdit`, sus etiquetas y los dos `addStretch()` — pasan a formato
+  "etiqueta arriba, campo abajo", mismo criterio que "Vigencia desde"/
+  "Vigencia hasta" en Reservas). De paso se envolvió con `setWordWrap`
+  la etiqueta larga "Franjas agregadas a esta búsqueda..." (623px sin
+  wrap) y se le sumó un salto de línea al checkbox "Cantidad de horas
+  dentro del rango (en vez del rango completo)" (411px sin wrap, mismo
+  mecanismo que el checkbox de reubicación de Reservas aisladas). La
+  columna quedó en 370px de sizeHint (46% menos que los 690px
+  originales) — el ancho liberado se lo lleva la grilla de al lado (de
+  806px a 1112px), repartido entre `agrandar_panel_filtros(290)` (mismo
+  valor que Reservas, antes 260px default) y el resto directo a
+  `panel_grilla` (`stretch=1`, crece solo).
+- **Filtros/días/referencias de la grilla como en Reservas.** La grilla
+  embebida ("Grilla semanal", la referencia visual mientras se arma la
+  búsqueda) llamaba `mostrar_leyenda_colores()` sin `compacta=True` y
+  nunca llamaba `agrupar_dias_en_pares()` — quedaba con el criterio
+  "grande" que usa Vista rápida en vez del compacto que ya usan las dos
+  solapas de Reservas. Se suman las dos llamadas (`agrupar_dias_en_
+  pares()`, `mostrar_leyenda_colores(compacta=True)`) junto con
+  `agrandar_panel_filtros(290)` de arriba — las tres, opt-in, no afectan
+  al resto de los usos de esta grilla compartida (Novedades, Grilla
+  semanal de "Grilla y mensajería"). No se tocó `fijar_titulo_filtros`
+  (sigue en "Grilla semanal", no en vacío) ni `renombrar_etiquetas_
+  filtro()`: a diferencia de Reservas, acá el título describe la grilla
+  entera como referencia visual, no un simple "Filtros" — la clienta no
+  pidió sacarlo. El modo (Regular/Aislada) ya venía resuelto por
+  `fijar_modo` según el "Tipo de búsqueda" elegido, y la leyenda ya
+  cambiaba de referencias sola al cambiar de modo (la señal de `combo_
+  modo` ya estaba conectada) — confirmado con un test nuevo, no hizo
+  falta ningún cambio ahí.
+- **Comentario sobre visualización**: apilar las tres filas horizontales
+  (para angostar la columna) las volvió más ALTAS — el sizeHint vertical
+  del formulario subió de 854px a 1031px. Contra una ventana de
+  referencia (1500×850, la misma que usan las capturas), eso deja
+  aproximadamente 270-310px de contenido por debajo del borde inferior
+  visible sin scrollear (confirmado con un script de geometría: el botón
+  "Nueva búsqueda", al final de la columna, termina en y=987 dentro del
+  contenido scrolleable, contra un viewport de 720px) — hay que
+  scrollear para llegar a "Detalle reducido", "Generar texto WhatsApp"/
+  "Generar PDF" y "Nueva búsqueda". El panel ya tiene su `QScrollArea`
+  propio de siempre (nada se corta ni queda inaccesible), pero conviene
+  que la clienta lo sepa antes de dar esta vuelta por cerrada: angostar
+  la columna trasladó parte de lo que antes se leía de un vistazo a
+  scroll vertical.
+
+Tests nuevos en `test_gui_oferta.py`: `test_contenido_dentro_del_scroll_
+tiene_fondo_claro` (mismo criterio que Reservas/Llaves — cuenta
+descendientes con `objectName() == "panelSolapa"`), `test_columna_del_
+formulario_mas_angosta_que_antes`, `test_filtros_dias_y_referencias_
+como_en_reservas`, `test_leyenda_cambia_de_referencias_segun_el_tipo_
+de_busqueda`. El viejo `test_fecha_queda_pegada_a_su_etiqueta_sin_hueco`
+(sobre la fila horizontal de fechas que ya no existe) se reescribe como
+`test_fechas_desde_hasta_apiladas_en_vez_de_una_fila`, recorriendo el
+layout en vez de buscar por texto (ambigüo: "Desde" se repite entre la
+fila de fecha y la de horario).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
