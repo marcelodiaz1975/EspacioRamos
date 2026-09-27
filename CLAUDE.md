@@ -4540,6 +4540,92 @@ en_la_grilla`, `test_formulario_no_escrolea_horizontal_solo_la_grilla`,
 con_domingo_configurado`, `test_grilla_nunca_se_recorta_con_mas_
 horarios_detalle_cede_espacio`.
 
+### Séptima vuelta: bug real detrás de las "letras cortadas" (ancho mal
+### asumido, no el tamaño de letra) y la grilla tapada por su propio scroll
+
+Dos pedidos más de la clienta sobre la misma pantalla:
+
+- **"Reducí un poco la fuente de las referencias de los colores para que
+  aparezcan los textos completos sin letras cortadas" (las dos solapas).**
+  Investigado con el mismo criterio de medición de siempre, el recorte
+  NO era un problema de tamaño de letra en sí — era un bug real en
+  `fijar_ancho_etiqueta_leyenda`: la llamada pasaba 220px como ancho de
+  referencia para calcular cuántas líneas necesita cada descripción al
+  wrapear, pero el ancho REAL renderizado de esa etiqueta (medido con
+  `QLabel.width()` ya mostrada en pantalla, el mismo en Regular y en
+  Aislada porque solo depende de `_ANCHO_PANEL_FILTROS_GRILLA`, no de la
+  letra) es 186px. Con 220 de más, `QFontMetrics.boundingRect` calculaba
+  menos líneas de wrap de las que el texto necesita a su ancho real —
+  "Reservado a futuro + aislada confirmada este mes." wrapea a 2 líneas
+  a 220px pero necesita 3 a los 186px reales, y esa tercera línea
+  quedaba cortada contra la fila de abajo. Corregido el ancho a 186 en
+  `fijar_ancho_etiqueta_leyenda(186)`, el recorte desaparece con
+  CUALQUIER tamaño de letra — confirmado armando un test nuevo que mide
+  contra el ancho REAL (`etiqueta.width()`, ya renderizada) en vez de
+  contra `leyenda._ancho_etiqueta` (la asunción, que es exactamente lo
+  que hacían los dos tests de la ronda anterior — por eso ninguno de los
+  dos había detectado este bug: comparaban contra su propio valor
+  equivocado, nunca contra la realidad).
+
+  De todos modos se bajó la letra como pidió la clienta (13→12 en
+  Regular, 15→11 en Aislada): con el ancho ya corregido no hace falta
+  para evitar el recorte, pero la mayoría de las descripciones largas
+  dejan de necesitar ese tercer renglón directamente, dando una leyenda
+  más compacta y prolija. Bajar la letra achica el alto natural de cada
+  descripción, así que `_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR`/`..._
+  AISLADA` (13/28) y `_AJUSTE_EXTRA_MUESTRA_CON_DOMINGO` (9) se
+  volvieron a medir desde cero con el ancho y la letra ya corregidos —
+  no alcanzaba con reusar los valores de la ronda anterior. Mismo
+  hallazgo YA documentado de rondas previas: el dataset real de
+  `shot_oferta.py` no coincide exactamente con el dataset mínimo de los
+  tests (`_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR` terminó en 9, no en el
+  13 que alcanzaba en el dataset de test, para no pasarse del alto
+  disponible con la captura real) — la tanda final de valores quedó
+  verificada contra las dos capturas reales antes de darla por cerrada.
+
+- **"La grilla está bien, solo dale más largo para que el scroll
+  horizontal no tape lo último que se tendría que ver de la grilla, en
+  este caso el horario de las 21hs con su línea inferior incluída."**
+  Bug real, no puntual de esta pantalla en su causa pero sí en su
+  efecto: `_construir_tabla` (`GrillaOperativaWidget`, compartida por
+  Reservas, Novedades, Grilla semanal y Oferta) calcula el alto mínimo
+  de `self.tabla` como la suma exacta de sus filas — correcto mientras
+  la tabla no necesite scroll horizontal, pero en Oferta (la única
+  pantalla donde esta grilla queda lo bastante angosta como para
+  necesitarlo de forma habitual, con los seis días de la semana como
+  columnas) la barra de scroll horizontal, al aparecer, le come al
+  VIEWPORT el alto de su propia altura — con el widget dimensionado
+  justo para la suma de filas, ese consumo tapaba la última fila
+  (21:00) junto con su línea inferior, quedando a mitad de camino entre
+  la última hora visible y la barra.
+
+  Método nuevo, opt-in, `GrillaOperativaWidget.reservar_alto_scroll_
+  horizontal()`: suma al alto mínimo de la tabla el valor de `QStyle.
+  PM_ScrollBarExtent` (el alto real que el estilo activo le da a una
+  barra de scroll horizontal) — sobra un poco de margen en blanco si la
+  barra no llega a aparecer en algún caso puntual, pero nunca vuelve a
+  faltar cuando sí aparece. Solo lo llama Oferta; no afecta al resto de
+  los usos de esta grilla compartida. Con la grilla mostrando "modo
+  regular" por default (el mismo `combo_modo` de siempre) y `fijar_modo(
+  "regular")` sin disparar `currentIndexChanged` porque el índice no
+  cambia, esta pantalla nunca vuelve a reconstruir la grilla de Regular
+  después de armar la UI — el mismo motivo, ya documentado en rondas
+  anteriores para otros métodos opt-in, por el que hacía falta que
+  `reservar_alto_scroll_horizontal()` reaplique de una el alto extra
+  (llamando a `_actualizar_grilla()`) si la tabla ya tiene filas armadas
+  al momento de llamarlo, en vez de esperar a una reconstrucción real
+  que en el modo por defecto nunca iba a llegar.
+
+Tests nuevos: `test_gui_grilla_operativa.py`
+(`test_reservar_alto_scroll_horizontal_suma_el_alto_de_la_barra`,
+`test_reservar_alto_scroll_horizontal_es_opt_in`); `test_gui_oferta.py`
+(`test_referencias_de_colores_sin_recorte_al_ancho_real_renderizado` —
+el test de regresión real de este bug, ver el detalle de arriba;
+`test_grilla_reserva_alto_para_que_el_scroll_horizontal_no_tape_la_
+ultima_fila`, que confirma que el viewport de la tabla alcanza para
+mostrar la suma completa de sus filas con la barra de scroll horizontal
+ya presente).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
