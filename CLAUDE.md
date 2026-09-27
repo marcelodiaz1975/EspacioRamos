@@ -4803,6 +4803,37 @@ mismo criterio que el test equivalente de Oferta (el comportamiento del
 mecanismo en sí ya está cubierto a fondo en `test_gui_grilla_
 operativa.py`, no hace falta repetirlo por pantalla).
 
+## Registro de ausencias: se saca "Deshacer último movimiento" de las
+## tres solapas con alta/edición (Vacaciones, Licencias, Ausencias)
+
+Pedido explícito de la clienta, mismo criterio ya aplicado antes en
+Llaves, Reservas y Cargos especiales/Centro de mensajería: el botón
+"Deshacer último movimiento" cubría cualquier alta/anulación de la
+solapa (anulaba la última Vacación/Licencia/Ausencia cargada en todo el
+sistema, sin importar el profesional del filtro), y se saca por
+completo — no estaba en la lista final de botones que dio la clienta.
+"Tipos de licencia" (la cuarta solapa, un catálogo `PantallaCRUD`
+anidado) nunca tuvo este botón, no fue parte del pedido.
+
+Se borra, en `_PanelVacaciones`/`_PanelLicencias`/`_PanelAusencias`
+(`app/gui/pantallas/novedades.py`) — cada una con su propia
+implementación, ninguna compartía estado con otro método salvo
+`_cancelar_registro` (que Anular ya usa, se queda intacto): el widget
+del botón, su conexión (`clicked.connect(self._deshacer_ultimo)`) y el
+método `_deshacer_ultimo` entero. Ninguna de las tres tenía este botón
+sumado a su cadena de foco Enter/Tab (`instalar_enter_avanza_foco`
+termina en el botón "Crear..." de cada una), así que no hizo falta
+tocar ningún `_foco`.
+
+Tests borrados en bloque en `test_gui_novedades.py` (mismo criterio:
+eran pruebas de la funcionalidad que se retira, no de otra cosa): los 9
+de "deshacer_ultimo_movimiento_{vacaciones,licencia,ausencia}_
+{sin_registros_no_falla,anula_la_ultima_sin_importar_filtro,
+cancelado_por_usuario_no_borra}". `test_botones_secundarios_de_las_
+tres_solapas_son_celestes` (confirma que Modificar/Anular quedan en
+`botonSecundario`) pierde su aserción sobre los tres "Deshacer..." y su
+docstring, que los mencionaba.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
