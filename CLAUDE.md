@@ -4442,6 +4442,104 @@ de muestra entre los dos tipos) y `test_leyenda_de_aislada_sin_texto_
 recortado` (mismo criterio que el test de Regular de la ronda anterior,
 aplicado a Aislada).
 
+### Sexta vuelta: sin scroll horizontal del formulario, domingo en el
+### filtro de días de la grilla, confirmaciones sobre franjas/Detalle/grilla
+
+Seis pedidos de la clienta sobre la captura de la ronda anterior, la
+mayoría de verificación/afinado más que de diseño nuevo:
+
+- **Se saca la etiqueta "Visualización:".** La clienta notó scroll
+  horizontal en el formulario y preguntó si era por el combo "Reservas
+  regulares"/"Reservas aisladas" (siempre deshabilitado acá, lo maneja
+  "Tipo de búsqueda") quedando cortado. Confirmado con un script de
+  geometría: la fila "Período: [combo] Visualización: [combo]" (dentro
+  de `GrillaOperativaWidget`, compartida por Reservas/Novedades/Grilla
+  semanal) fijaba el ancho MÍNIMO de toda la columna 4 en 391px — mucho
+  más que lo que la tabla en sí necesita (70px, ya que scrollea sola) —
+  y ese mínimo, sumado al de las otras tres columnas, superaba el ancho
+  disponible y forzaba scroll horizontal de TODA la pantalla.
+  `GrillaOperativaWidget.quitar_etiqueta_visualizacion()` (nueva, opt-in
+  — el resto de los usos de esta grilla compartida se quedan con la
+  etiqueta) oculta la etiqueta y le pone `setMaximumWidth(0)`, bajando
+  ese mínimo a 303px.
+- **Regla general nueva: "no quiero que sea escroleable en horizontal
+  los formularios en general, solo la grilla".** Con la etiqueta
+  sacada, medido de nuevo: el scroll horizontal de toda la pantalla
+  bajó a 0 (antes ~51-65px según el tipo) — la tabla (columna 4) pasa a
+  ser lo único que scrollea horizontal cuando hace falta (su propio
+  `horizontalScrollBar`, ya tenía `ScrollBarAsNeeded` de siempre), con
+  el resto del formulario siempre visible. Mismo criterio que la regla
+  general de Reservas de "los cuadros scrollean, no la pantalla" —
+  ahora extendida explícitamente al eje horizontal.
+- **Franjas/Detalle escrolean solo si hace falta.** Verificado (sin
+  ningún cambio de código): `lista_franjas` (`QListWidget`) y
+  `texto_detalle` (`QTextEdit`) nunca tuvieron un
+  `setVerticalScrollBarPolicy` explícito — ya scrollean con el
+  comportamiento nativo de Qt (`ScrollBarAsNeeded`), mostrando su barra
+  solo cuando el contenido no entra.
+- **Confirmación: si se suma el domingo a `_DIAS_BUSQUEDA` (el campo
+  "Días" del formulario, columna 1), queda Lunes/Martes/Miércoles/
+  Jueves arriba y Viernes/Sábado/Domingo abajo.** Confirmado
+  matemáticamente y con un test que monkeypatchea la lista a 7 días:
+  `math.ceil(len(dias)/2)` da 4 columnas para 7 días, y
+  `i // columnas, i % columnas` deja exactamente esa distribución (4+3)
+  sin necesitar ningún cambio de código — el mismo algoritmo que ya
+  arma la grilla de 6 días (3+3) hoy. `_DIAS_BUSQUEDA` sigue siendo una
+  constante fija de 6 días (Lunes a Sábado, no depende de ningún
+  parámetro de sistema pese a su comentario) — esto es una confirmación
+  a futuro, no algo alcanzable hoy desde la GUI.
+- **Si el domingo está configurado en el filtro "Día de la semana" de
+  la grilla (columna 3), pasa a 2 columnas con el domingo solo al
+  final.** A diferencia del caso de arriba, este filtro SÍ es
+  alcanzable hoy: sale de `app.negocio.grilla.dias_grilla(conn)`, que
+  lee `Configuracion.DiasGrilla` (editable desde "Configuración
+  general" — sección "Grilla y ocupación" → "Días de grilla") y puede
+  incluir domingo. `self._domingo_en_filtro_dia = "Domingo" in self.
+  grilla._checks_dia` se calcula una vez al construir la pantalla, y si
+  da `True` se llama `self.grilla.agrupar_dias_en_pares()` (mismo
+  método que ya usa Reservas) — con 7 días este mismo método dado dos
+  columnas fijas ya deja al séptimo (domingo, si el resto sigue en
+  orden de semana) solo en su propia fila, sin necesitar ningún caso
+  especial para "el último impar". Confirmado con un test que arma una
+  base con el domingo en `DiasGrilla` y revisa la posición exacta.
+  De paso, `_ajustar_tamano_leyenda` suma `_AJUSTE_EXTRA_MUESTRA_CON_
+  DOMINGO` (una constante más, sumada a la de Regular/Aislada) cuando
+  `_domingo_en_filtro_dia` es `True` — con los días a pares ocupando
+  menos alto que la lista de 7 líneas de antes, la leyenda necesita un
+  empujón extra para seguir llegando al pie de la columna; medido con
+  una base de prueba con el domingo configurado (no a ojo, aunque sin
+  captura de pantalla para la clienta — hoy ningún cliente real tiene
+  el domingo activado, así que esta parte queda verificada por
+  geometría y tests, no revisada visualmente).
+- **Si se agregan más horarios a la grilla, que se vea completa y el
+  espacio de más lo ceda "Detalle".** Confirmado (sin cambio de
+  código): `dar_stretch_a_detalle()`, ya sumado en una ronda anterior,
+  ya resuelve esto — deja la tabla con `stretch=0` (fija a su alto
+  natural, nunca se recorta) y "Detalle" con `stretch=1` (absorbe
+  cualquier diferencia, cediendo alto si la tabla necesita más).
+  Probado con un script de geometría extendiendo el horario de la
+  grilla a 0-24hs con fracciones de 30 minutos (27 filas, más del doble
+  de lo habitual): la tabla se sigue viendo completa
+  (`verticalScrollBar().maximum()` prácticamente 0) y "Detalle" se
+  achica de forma proporcional, sin que la pantalla necesite scroll
+  vertical.
+
+**Ajuste fino de constantes, downstream de sacar la etiqueta
+"Visualización:"**: al liberar esos 88px de ancho mínimo en la columna
+4, el reparto de alto entre columnas cambió (mismo hallazgo de "la
+primera columna no tiene un alto natural fijo" documentado en la ronda
+anterior) — `_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR`/`..._AISLADA` se
+reajustan (de 10/30 a 3/23) para seguir sin scroll vertical con el
+dataset real que usa `shot_oferta.py` (que difiere un poco del dataset
+mínimo de los tests, por eso hizo falta afinar de nuevo mirando la
+captura real y no solo el script de medición).
+
+Tests nuevos en `test_gui_oferta.py`: `test_sin_etiqueta_visualizacion_
+en_la_grilla`, `test_formulario_no_escrolea_horizontal_solo_la_grilla`,
+`test_dias_con_domingo_agregado_quedan_4_y_3`, `test_filtro_dia_a_pares_
+con_domingo_configurado`, `test_grilla_nunca_se_recorta_con_mas_
+horarios_detalle_cede_espacio`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
