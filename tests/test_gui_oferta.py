@@ -254,6 +254,36 @@ def test_dias_son_checkboxes_de_lunes_a_sabado_en_grilla_compacta(qtbot, conn, p
     assert grid.itemAtPosition(1, 2) is not None
 
 
+def test_dias_con_domingo_agregado_quedan_4_y_3(qtbot, conn, monkeypatch, profesional_y_consultorio):
+    """Confirmación pedida por la clienta: si el día domingo se sumara a
+    `_DIAS_BUSQUEDA` (hoy son 6 días fijos, Lunes a Sábado — ver el test
+    de arriba), la grilla de 2 filas quedaría con Lunes/Martes/Miércoles/
+    Jueves arriba y Viernes/Sábado/Domingo abajo — el mismo algoritmo
+    `math.ceil(len(dias)/2)` columnas que ya arma la grilla de 6 días,
+    sin necesitar ningún cambio de código. `_DIAS_BUSQUEDA` sigue siendo
+    hoy una constante fija de 6 días (no depende de ningún parámetro de
+    sistema pese al comentario), este test monkeypatchea la lista para
+    dejar la confirmación fijada como regresión."""
+    import app.gui.pantallas.oferta as oferta_mod
+    from PySide6.QtWidgets import QGridLayout
+
+    monkeypatch.setattr(
+        oferta_mod, "_DIAS_BUSQUEDA",
+        ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"],
+    )
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+
+    grid = pantalla._checks_dia["Lunes"].parentWidget().layout()
+    assert isinstance(grid, QGridLayout)
+    # 4 columnas (ceil(7/2)): fila 0 = Lunes..Jueves, fila 1 = Viernes/Sábado/Domingo.
+    fila_0 = [grid.itemAtPosition(0, c).widget().text() for c in range(4)]
+    fila_1 = [grid.itemAtPosition(1, c).widget().text() for c in range(3)]
+    assert fila_0 == ["Lunes", "Martes", "Miércoles", "Jueves"]
+    assert fila_1 == ["Viernes", "Sábado", "Domingo"]
+    assert grid.itemAtPosition(1, 3) is None  # nada más en esa fila
+
+
 def test_grilla_embebida_sin_titulo(qtbot, conn, profesional_y_consultorio):
     """Pedido explícito de la clienta: se saca el título "Grilla
     semanal" del panel de Filtros — mismo criterio que Reservas."""
@@ -526,6 +556,38 @@ def test_contenido_dentro_del_scroll_tiene_fondo_claro(qtbot, conn, profesional_
     assert len(descendientes_panel_solapa) == 1  # "contenido", el del scroll (self ya tiene el suyo aparte)
 
 
+def test_sin_etiqueta_visualizacion_en_la_grilla(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: el combo "Visualización" (Reservas
+    regulares/aisladas, siempre deshabilitado acá — lo maneja "Tipo de
+    búsqueda", ver `_al_cambiar_tipo`) se queda solo, sin la etiqueta al
+    lado — esa fila era la que fijaba el ancho mínimo de la cuarta
+    columna, más ancho que lo que la tabla en sí necesita (que ya
+    scrollea sola), forzando scroll horizontal de toda la pantalla."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.grilla._etiqueta_visualizacion.isVisible() is False
+
+
+def test_formulario_no_escrolea_horizontal_solo_la_grilla(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: "no quiero que sea escroleable en
+    horizontal los formularios en general, solo la grilla" — el
+    `QScrollArea` externo de la pantalla no debería necesitar scroll
+    horizontal (las primeras tres columnas más el ancho mínimo de la
+    cuarta tienen que entrar en el ancho disponible), dejando cualquier
+    desborde de días de la semana a cargo del scroll propio de la tabla
+    (`self.grilla.tabla`, que ya lo tenía de antes)."""
+    from PySide6.QtWidgets import QScrollArea
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1260, 850)  # ancho de referencia usado en las capturas (1500 - sidebar)
+    qtbot.waitExposed(pantalla)
+
+    scroll = pantalla.findChildren(QScrollArea)[0]
+    assert scroll.horizontalScrollBar().maximum() == 0
+
+
 def test_columna_del_formulario_mas_angosta_que_antes(qtbot, conn, profesional_y_consultorio):
     """Pedido explícito de la clienta, ronda "cuatro columnas": los
     botones "Agregar franja"/"Quitar franja" pasan a dos líneas de texto,
@@ -563,6 +625,32 @@ def test_filtros_dias_y_referencias_en_una_sola_linea(qtbot, conn, profesional_y
     # Referencias de colores en una sola columna (no compactas).
     assert grilla._leyenda_colores._columnas == 1
     assert not grilla._leyenda_colores.isHidden()
+
+
+def test_filtro_dia_a_pares_con_domingo_configurado(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: si el sistema tiene el domingo
+    sumado a "Días de grilla" (`Configuracion.DiasGrilla`, editable
+    desde Configuración general), el filtro de "Día de la semana" de la
+    grilla embebida (columna 3) pasa a 2 columnas — a diferencia del
+    caso normal (6 días, ver el test de arriba, que sigue en una sola
+    columna) — con el domingo solo en su propia fila al final, y la
+    leyenda de colores se agranda un poco más para seguir llegando al
+    pie de la columna con menos alto ocupado por el filtro de días."""
+    import json
+    from PySide6.QtWidgets import QGridLayout
+
+    dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    conn.execute("UPDATE Configuracion SET DiasGrilla = ? WHERE IdConfiguracion = 1", (json.dumps(dias, ensure_ascii=False),))
+    conn.commit()
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+
+    assert pantalla._domingo_en_filtro_dia is True
+    grid = pantalla.grilla._contenedor_dias.layout()
+    assert isinstance(grid, QGridLayout)
+    assert grid.itemAtPosition(3, 0).widget().text() == "Domingo"
+    assert grid.itemAtPosition(3, 1) is None  # solo en su columna, nada al lado
 
 
 def test_leyenda_cambia_de_referencias_segun_el_tipo_de_busqueda(qtbot, conn, profesional_y_consultorio):
@@ -716,6 +804,31 @@ def test_detalle_pegado_debajo_de_la_grilla_sin_relleno(qtbot, conn, profesional
     layout = pantalla.grilla._layout_grilla
     assert layout.stretch(layout.indexOf(pantalla.grilla.tabla)) == 0
     assert layout.stretch(layout.indexOf(pantalla.grilla.texto_detalle)) == 1
+
+
+def test_grilla_nunca_se_recorta_con_mas_horarios_detalle_cede_espacio(
+    qtbot, conn, profesional_y_consultorio,
+):
+    """Pedido explícito de la clienta: si se agregan más horarios a la
+    grilla (una franja horaria más amplia en "Configuración general"),
+    siempre tiene que verse completa — el espacio que necesite de más lo
+    cede el cuadro "Detalle" (gracias a `dar_stretch_a_detalle`, ver el
+    test de arriba: la tabla queda con `stretch=0`, fija a su alto
+    natural, y "Detalle" es el único que cede)."""
+    conn.execute("UPDATE Configuracion SET HoraInicioGrilla = 0, HoraFinGrilla = 24, FraccionGrilla = 0.5 WHERE IdConfiguracion = 1")
+    conn.commit()
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1260, 850)
+    qtbot.waitExposed(pantalla)
+
+    assert pantalla.grilla.tabla.rowCount() > 20  # grilla bien más larga que la de siempre (6 días × ~4hs)
+    # La tabla se ve completa (a lo sumo un resto ínfimo, artefacto de
+    # medición offscreen ya documentado en otras pantallas de este
+    # sistema — nunca una tabla realmente recortada).
+    assert pantalla.grilla.tabla.verticalScrollBar().maximum() <= 2
 
 
 def test_panel_filtros_de_la_grilla_ancho_fijo(qtbot, conn, profesional_y_consultorio):

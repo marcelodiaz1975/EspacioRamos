@@ -666,7 +666,8 @@ class GrillaOperativaWidget(QWidget):
         self.combo_periodo.currentIndexChanged.connect(self._periodo_cambiado)
         fila_controles.addWidget(self.combo_periodo)
 
-        fila_controles.addWidget(QLabel("Visualización:"))
+        self._etiqueta_visualizacion = QLabel("Visualización:")
+        fila_controles.addWidget(self._etiqueta_visualizacion)
         self.combo_modo = QComboBox()
         self.combo_modo.addItem("Reservas regulares", "regular")
         self.combo_modo.addItem("Reservas aisladas", "aislada")
@@ -890,6 +891,18 @@ class GrillaOperativaWidget(QWidget):
         sentido dejar que el usuario lo cambie a mano."""
         self.combo_modo.setCurrentIndex(self.combo_modo.findData(modo))
         self.combo_modo.setEnabled(False)
+
+    def quitar_etiqueta_visualizacion(self) -> None:
+        """Saca la etiqueta "Visualización:" de la fila de controles,
+        dejando solo el combo — pensado para Oferta de consultorios, que
+        ya deja ese combo deshabilitado (`fijar_modo`, siempre a cargo
+        de "Tipo de búsqueda") y necesitaba ganar el ancho que ocupaba la
+        etiqueta para no forzar scroll horizontal en columnas angostas.
+        Opt-in, no afecta al resto de los usos de esta grilla compartida
+        (Reservas, Novedades, Grilla semanal), donde el combo sigue
+        activo y la etiqueta sigue teniendo sentido."""
+        self._etiqueta_visualizacion.setVisible(False)
+        self._etiqueta_visualizacion.setMaximumWidth(0)
 
     def fijar_titulo_filtros(self, titulo: str) -> None:
         """Cambia el título del panel de Filtros — pensado para usos

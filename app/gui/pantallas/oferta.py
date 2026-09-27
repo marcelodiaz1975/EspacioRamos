@@ -111,10 +111,11 @@ _ANCHO_PANEL_FILTROS_GRILLA = 280  # baja desde 355: con las 4 columnas de la ro
 # y una letra más grandes todavía para llegar al mismo pie (ver
 # `_ajustar_tamano_leyenda`, que aplica el juego de valores que corresponda
 # cada vez que cambia "Tipo de búsqueda").
-_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR = 0
+_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR = 3
 _TAMANO_FUENTE_LEYENDA_REGULAR = 13
-_AJUSTE_ALTO_MUESTRA_LEYENDA_AISLADA = 20
+_AJUSTE_ALTO_MUESTRA_LEYENDA_AISLADA = 23
 _TAMANO_FUENTE_LEYENDA_AISLADA = 15
+_AJUSTE_EXTRA_MUESTRA_CON_DOMINGO = 9  # medido con una base con el domingo configurado en "Días de grilla"
 
 _DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
 
@@ -454,7 +455,19 @@ class _PanelOferta(QWidget):
         self.grilla.fijar_ancho_etiqueta_leyenda(220)
         # Filtros (días) y referencias en una sola línea cada uno — se
         # revierte `agrupar_dias_en_pares()`/`compacta=True` de la ronda
-        # anterior, pedido explícito de la clienta para esta vuelta.
+        # anterior, pedido explícito de la clienta para esta vuelta. Si
+        # el sistema tiene el domingo sumado a "Días de grilla"
+        # (`Configuracion.DiasGrilla`, editable desde Configuración
+        # general — normalmente son 6 días, Lunes a Sábado), el filtro
+        # de "Día de la semana" de esta columna pasa a 2 columnas
+        # (`agrupar_dias_en_pares`, mismo método que ya usa Reservas) en
+        # vez de una lista vertical de 7 líneas — con un total impar de
+        # días, ese mismo método deja al último (domingo, si el resto
+        # sigue en orden de semana) solo en su propia fila, "al final",
+        # pedido explícito de la clienta.
+        self._domingo_en_filtro_dia = "Domingo" in self.grilla._checks_dia
+        if self._domingo_en_filtro_dia:
+            self.grilla.agrupar_dias_en_pares()
         self.grilla.mostrar_leyenda_colores()
         # Sin título (antes "Grilla semanal") — pedido explícito de la
         # clienta, mismo criterio que Reservas (`fijar_titulo_filtros("")`).
@@ -465,6 +478,14 @@ class _PanelOferta(QWidget):
         # "Detalle" crece hasta el pie del formulario (columna 1), que es
         # la referencia de alto de todo el splitter.
         self.grilla.dar_stretch_a_detalle()
+        # Sin la etiqueta "Visualización:" (el combo queda solo,
+        # deshabilitado — acá siempre lo maneja "Tipo de búsqueda", ver
+        # `_al_cambiar_tipo`) — pedido explícito de la clienta: esa fila
+        # (Período + Visualización) era la que fijaba el ancho mínimo de
+        # esta columna, más ancha que lo que la tabla en sí necesita
+        # (que ya scrollea sola), forzando scroll horizontal de toda la
+        # pantalla en vez de solo de la grilla.
+        self.grilla.quitar_etiqueta_visualizacion()
 
         splitter.addWidget(self.grilla)
         splitter.setStretchFactor(2, 1)
@@ -632,6 +653,14 @@ class _PanelOferta(QWidget):
             (_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR, _TAMANO_FUENTE_LEYENDA_REGULAR) if tipo == TIPO_REGULAR
             else (_AJUSTE_ALTO_MUESTRA_LEYENDA_AISLADA, _TAMANO_FUENTE_LEYENDA_AISLADA)
         )
+        # Con el domingo sumado a "Días de grilla", el filtro de "Día de
+        # la semana" pasa a 2 columnas (ver más arriba) — ocupa bastante
+        # menos alto que la lista de 7 líneas de antes, así que la
+        # leyenda necesita un empujón extra para seguir llegando al pie
+        # de la columna (valor medido con un script de geometría contra
+        # una base con el domingo configurado, no a ojo).
+        if self._domingo_en_filtro_dia:
+            ajuste += _AJUSTE_EXTRA_MUESTRA_CON_DOMINGO
         self.grilla.fijar_tamano_fuente_leyenda(tamano_fuente)
         self.grilla.agrandar_muestras_leyenda(40, 24 + ajuste)
 
