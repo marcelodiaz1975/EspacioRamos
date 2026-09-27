@@ -4225,6 +4225,134 @@ grilla`, `test_detalle_pegado_debajo_de_la_grilla_sin_relleno`,
 `test_panel_filtros_de_la_grilla_mas_ancho`. El de "tiene título Grilla
 semanal" se reescribe como `test_grilla_embebida_sin_titulo`.
 
+### Cuarta vuelta: cuatro columnas (formulario / franjas+botones /
+### filtros+referencias / grilla+Detalle)
+
+Pedido explícito de la clienta, la reestructuración más grande de esta
+solapa hasta ahora — sigue siendo Regular nomás, Aislada continúa
+pendiente ("vamos con regular primero"):
+
+- **"Agregar franja a la búsqueda"/"Quitar franja seleccionada" a dos
+  líneas de texto.** `"Agregar franja\na la búsqueda"`/`"Quitar
+  franja\nseleccionada"` (mismo mecanismo de salto de línea manual que
+  `casilla_reubicacion` en Reservas aisladas) — más altos, y de paso más
+  angostos (cada línea es más corta que el texto de una sola línea de
+  antes), lo que termina de angostar la primera columna.
+- **Segunda columna, nueva: "Franjas agregadas a esta búsqueda".** Lo
+  que hasta la ronda anterior era el final de la primera columna
+  (título + `lista_franjas`) pasa a vivir en un `panel_franjas` propio,
+  agregado como segundo widget del `QSplitter` — junto con los tres
+  botones de acción (`Generar PDF`/`Generar texto WhatsApp`/`Nueva
+  búsqueda`), que la ronda anterior había mudado al panel de Filtros de
+  la grilla y ahora se reubican acá, al pie de esta columna. Mismo
+  mecanismo de siempre para "empujar algo al pie de una columna":
+  `lista_franjas` es lo único con `stretch=1` en `columna_franjas` (el
+  `QVBoxLayout` de este panel), así que absorbe todo el alto sobrante y
+  cualquier widget agregado después de ella (los tres botones) queda
+  pegado contra el borde inferior.
+- **Tercera columna: Filtros + Referencias de colores, en una sola
+  línea cada uno.** Se revierten los dos cambios "compactos" de la
+  ronda anterior: `agrupar_dias_en_pares()` deja de llamarse (los días
+  vuelven a una lista vertical, un check por línea) y `mostrar_leyenda_
+  colores(compacta=True)` pasa a `mostrar_leyenda_colores()` (una sola
+  columna de referencias, tamaño normal en vez del compactado a 2
+  columnas). Como en esta ronda la columna de Filtros pasa a tener un
+  ancho FIJO en vez de solo un tope (ver el bug de abajo), y la
+  clienta pidió que las referencias "terminen al pie de la tercera
+  columna", se agranda un poco la muestra de color (`agrandar_muestras_
+  leyenda`, +6px de alto) y la letra (14px, un punto arriba del default
+  de toda la app) — un residuo de ~3px entre el pie de esta columna y
+  el de la primera quedó irreductible (confirmado probando varios
+  valores de tamaño: agrandar la leyenda agranda por igual a la columna
+  del formulario, que no tiene un alto "natural" fijo — ver el hallazgo
+  de abajo — así que la brecha nunca se cierra del todo), aceptado como
+  el mismo tipo de resto imperceptible que otras rondas de esta
+  revisión.
+- **Cuarta columna: la grilla escroleable + "Detalle" al pie del
+  formulario.** Sin cambios de código nuevos acá — `dar_stretch_a_
+  detalle()` (ya sumado en la ronda anterior) ya hacía exactamente esto:
+  confirmado con un script de geometría que el borde inferior de
+  "Detalle" coincide EXACTO (0px de diferencia) con el borde inferior
+  de la primera columna, en cualquier tamaño probado.
+
+**Dos bugs reales, no pedidos, encontrados al armar esta vuelta:**
+
+- **"Referencias de colores" con texto recortado arriba y abajo, bug ya
+  presente en `mostrar_leyenda_colores()` sin `compacta`** (nunca se
+  había usado en producción sin `compacta=True` antes de esta ronda —
+  confirmado reproduciéndolo también fuera de Oferta, con cualquier
+  llamado a `mostrar_leyenda_colores()` a secas). Causa: `QLabel.
+  sizeHint()` con `wordWrap=True` devuelve el alto de una sola línea SIN
+  WRAPEAR (Qt no conoce el ancho final de la columna en ese momento), y
+  `QGridLayout` arma la fila con ESE alto — con una descripción que
+  necesita 2-3 líneas al ancho real de la columna, la fila queda más
+  baja de lo que hace falta y, como `QLabel` alinea verticalmente al
+  CENTRO por default (no arriba), el texto de más se recorta arriba Y
+  abajo por igual, en vez de solo abajo (por eso se veía la mitad de
+  cada descripción larga, con la primera y la última palabra cortadas).
+  Arreglo: `LeyendaColores.fijar_ancho_etiqueta(ancho)` (nueva) calcula
+  el alto real a mano con `QFontMetrics.boundingRect(...,
+  TextWordWrap)` para ESE ancho puntual y lo fija con `setMinimumHeight`
+  — no depende de que Qt vuelva a propagar el `sizeHint` después del
+  wrap (que en la plataforma offscreen no siempre pasa, mismo
+  `propagateSizeHints()` documentado en otras partes de esta grilla).
+  `GrillaOperativaWidget.fijar_ancho_etiqueta_leyenda(ancho)` la expone
+  — opt-in, sin afectar a Reservas (que sigue con `compacta=True`, texto
+  corto, nunca disparó este bug).
+- **El panel de Filtros de la grilla nunca llegaba a su ancho "máximo".**
+  `agrandar_panel_filtros` solo pone un TOPE (`setMaximumWidth`): sin
+  ningún `stretch` propio en el `QHBoxLayout` interno de la grilla
+  (Filtros | grilla), este panel se quedaba en su ancho NATURAL
+  (~190px, mucho menos que el tope) y toda la grilla (columna 4) se
+  llevaba el resto — nadie lo había notado en rondas anteriores porque
+  ahí el tope solo servía para no restringir de más un ancho que ya
+  salía generoso solo. Acá sí hacía falta que el panel ocupara ese
+  ancho de verdad, para que "Referencias de colores" tuviera sitio real.
+  Arreglo puntual de esta pantalla (no tocado en `grilla_operativa.py`,
+  que sigue sirviendo solo de tope para el resto de los usos):
+  `self.grilla._panel_filtros.setMinimumWidth(_ANCHO_PANEL_FILTROS_
+  GRILLA)`, dejándolo fijo (mínimo = máximo) en vez de solo topeado.
+  `_ANCHO_PANEL_FILTROS_GRILLA` baja de 355 (ronda anterior, un tope que
+  nunca se alcanzaba) a 250 (ahora sí un ancho real): con las cuatro
+  columnas de esta vuelta, forzarlo a 355 de verdad le sacaba demasiado
+  lugar a la grilla (columna 4) y disparaba scroll horizontal de toda la
+  pantalla en vez de solo de la tabla.
+
+**Hallazgo de geometría, documentado para no repetir el error:** la
+primera columna (el formulario) NO tiene un alto "natural" fijo — sus
+widgets (combos, checks, etc., con política de tamaño "Preferred") se
+reparten cualquier alto de sobra que el `QSplitter` le imponga, en vez
+de quedarse en su alto mínimo con hueco vacío al final. Esto significa
+que agrandar CUALQUIER otra columna (ej. la leyenda de "Referencias de
+colores") sube el alto de TODO el splitter, y la primera columna sube
+con él en la misma medida — confirmado con un script de geometría
+probando varios tamaños de muestra: el "pie" de la primera columna y el
+de la leyenda suben exactamente lo mismo, así que la brecha entre
+ambos nunca se cierra agrandando la leyenda. Para "hacer que algo
+llegue al pie de una columna" hay que usar `stretch=1` en un widget de
+ESA columna (como hace `dar_stretch_a_detalle`/`lista_franjas` en la
+columna de franjas), no agrandar el contenido de otra columna esperando
+que la brecha se achique.
+
+Tests nuevos: `test_gui_grilla_operativa.py` suma
+`test_fijar_ancho_etiqueta_leyenda_agranda_las_filas_que_wrappean`
+(confirma que el bug de arriba queda cubierto) y `test_fijar_ancho_
+etiqueta_leyenda_no_afecta_si_no_se_llama` (opt-in, Reservas no se ve
+afectada). `test_gui_oferta.py` suma `test_pantalla_tiene_cuatro_
+columnas`, `test_columna_de_franjas_tiene_titulo_lista_y_tres_botones_
+al_pie`, `test_referencias_de_colores_sin_texto_recortado` y
+`test_panel_filtros_de_la_grilla_ancho_fijo` (reemplaza a `test_panel_
+filtros_de_la_grilla_mas_ancho`, que comparaba contra el tope viejo de
+355). `test_botones_de_accion_viven_en_el_panel_de_filtros_de_la_grilla`
+se reescribe como `test_botones_de_accion_viven_al_pie_de_la_columna_de_
+franjas` (los botones ya no viven en Filtros). `test_filtros_dias_y_
+referencias_como_en_reservas` se reescribe como `test_filtros_dias_y_
+referencias_en_una_sola_linea` (justo lo contrario del criterio de la
+ronda anterior). `test_columna_del_formulario_mas_angosta_que_antes` y
+`test_lista_franjas_crece_hasta_el_pie_y_es_scroleable` se actualizan
+para el nuevo lugar de `lista_franjas` (su propia columna, no ya el pie
+del formulario).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
