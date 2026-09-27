@@ -49,3 +49,14 @@ def test_las_tres_solapas_son_los_paneles_esperados(qtbot, conn):
     assert isinstance(pantalla.panel_mensajes_predefinidos, _PanelMensajesPredefinidos)
     for panel in (pantalla.panel_grilla, pantalla.panel_mensajeria, pantalla.panel_mensajes_predefinidos):
         assert panel.objectName() == "panelSolapa"
+
+
+def test_grilla_semanal_deja_fijas_columnas_y_encabezado(qtbot, conn):
+    """Pedido explícito de la clienta, extendido desde Oferta de
+    consultorios a toda pantalla con esta grilla compartida: Tipo de
+    bloque/Horario y las filas de encabezado quedan siempre visibles al
+    escrolear — el comportamiento del mecanismo en sí queda cubierto en
+    `test_gui_grilla_operativa.py`."""
+    pantalla = PantallaGrillaYMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_grilla.grilla._filas_columnas_fijas is True

@@ -1568,3 +1568,16 @@ def test_solapa_estado_cuenta_cargos_combo_es_buscable_por_codigo_o_nombre(qtbot
     qtbot.addWidget(panel)
     completador = panel.combo_profesional.completer()
     assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
+
+
+def test_grillas_de_registro_de_ausencias_dejan_fijas_columnas_y_encabezado(qtbot, conn):
+    """Pedido explícito de la clienta, extendido desde Oferta de
+    consultorios a toda pantalla con esta grilla compartida: Tipo de
+    bloque/Horario y las filas de encabezado quedan siempre visibles al
+    escrolear, en las tres solapas (Vacaciones/Licencias/Ausencias) — el
+    comportamiento del mecanismo en sí queda cubierto en
+    `test_gui_grilla_operativa.py`."""
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_vacaciones, pantalla.panel_licencias, pantalla.panel_ausencias):
+        assert panel.grilla._filas_columnas_fijas is True

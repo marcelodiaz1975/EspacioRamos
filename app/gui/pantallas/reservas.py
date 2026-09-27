@@ -606,6 +606,11 @@ class _PanelReservasRegulares(QWidget):
         # falta mostrar más horarios sin agrandar el panel — ver
         # `limitar_alto_grilla`/`alto_natural_grilla`.
         self.grilla.limitar_alto_grilla(self.grilla.alto_natural_grilla())
+        # Pedido explícito de la clienta, extendido desde Oferta de
+        # consultorios a toda pantalla con esta grilla: Tipo de bloque/
+        # Horario y las filas de encabezado quedan siempre visibles al
+        # escrolear — solo se escrolea el bloque de datos.
+        self.grilla.activar_filas_y_columnas_fijas()
         layout_grupo_grilla.addWidget(self.grilla)
         # `limitar_alto_grilla` le pone un tope de alto a `self.grilla` —
         # sin este spacer, cuando el splitter le da a `grupo_grilla` más
@@ -1266,6 +1271,11 @@ class _PanelReservasAisladas(QWidget):
             ancho_muestra, alto_muestra = self.grilla.tamano_muestra_leyenda()
             alto_muestra += diferencia // _FILAS_LEYENDA_AISLADA
             self.grilla.agrandar_muestras_leyenda(ancho_muestra, alto_muestra)
+        # Pedido explícito de la clienta, extendido desde Oferta de
+        # consultorios a toda pantalla con esta grilla: Tipo de bloque/
+        # Horario y las filas de encabezado quedan siempre visibles al
+        # escrolear — solo se escrolea el bloque de datos.
+        self.grilla.activar_filas_y_columnas_fijas()
         layout_grupo_grilla.addWidget(self.grilla)
         layout_grupo_grilla.addWidget(etiqueta_detalle)
         layout_grupo_grilla.addWidget(texto_detalle)

@@ -445,6 +445,11 @@ class _PanelGrillaSemanal(QWidget):
         layout = QVBoxLayout(self)
         self.grilla = GrillaOperativaWidget(conn)
         self.grilla.combo_modo.currentIndexChanged.connect(self._actualizar_leyenda)
+        # Pedido explícito de la clienta, extendido desde Oferta de
+        # consultorios a toda pantalla con esta grilla: Tipo de bloque/
+        # Horario y las filas de encabezado quedan siempre visibles al
+        # escrolear — solo se escrolea el bloque de datos.
+        self.grilla.activar_filas_y_columnas_fijas()
         layout.addWidget(self.grilla)
         self._leyenda = LeyendaColores()
         layout.addWidget(self._leyenda)

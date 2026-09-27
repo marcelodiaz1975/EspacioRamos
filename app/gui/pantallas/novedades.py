@@ -326,6 +326,11 @@ class _PanelVacaciones(QWidget):
         grupo_grilla = QGroupBox("Vista previa: grilla operativa")
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         self.grilla = GrillaOperativaWidget(self.conn)
+        # Pedido explícito de la clienta, extendido desde Oferta de
+        # consultorios a toda pantalla con esta grilla: Tipo de bloque/
+        # Horario y las filas de encabezado quedan siempre visibles al
+        # escrolear — solo se escrolea el bloque de datos.
+        self.grilla.activar_filas_y_columnas_fijas()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -635,6 +640,11 @@ class _PanelLicencias(QWidget):
         grupo_grilla = QGroupBox("Vista previa: grilla operativa")
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         self.grilla = GrillaOperativaWidget(self.conn)
+        # Pedido explícito de la clienta, extendido desde Oferta de
+        # consultorios a toda pantalla con esta grilla: Tipo de bloque/
+        # Horario y las filas de encabezado quedan siempre visibles al
+        # escrolear — solo se escrolea el bloque de datos.
+        self.grilla.activar_filas_y_columnas_fijas()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -953,6 +963,11 @@ class _PanelAusencias(QWidget):
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.activar_resalte_ausencias(True)
+        # Pedido explícito de la clienta, extendido desde Oferta de
+        # consultorios a toda pantalla con esta grilla: Tipo de bloque/
+        # Horario y las filas de encabezado quedan siempre visibles al
+        # escrolear — solo se escrolea el bloque de datos.
+        self.grilla.activar_filas_y_columnas_fijas()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 

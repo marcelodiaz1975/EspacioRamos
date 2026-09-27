@@ -2378,3 +2378,16 @@ def test_grilla_preview_aisladas_filtro_exclusivo_no_muestra_otros_profesionales
 
     codigos = {c.codigo for c in panel.grilla._resultado.values() if c.codigo}
     assert codigos == {"R2"}
+
+
+def test_grillas_de_reservas_dejan_fijas_columnas_y_encabezado(qtbot, conn):
+    """Pedido explícito de la clienta, extendido desde Oferta de
+    consultorios a toda pantalla con esta grilla compartida: Tipo de
+    bloque/Horario y las filas de encabezado quedan siempre visibles al
+    escrolear, en las dos solapas — el comportamiento del mecanismo en
+    sí (contenido duplicado, sincronización de scroll, geometría) queda
+    cubierto en `test_gui_grilla_operativa.py`."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+        assert panel.grilla._filas_columnas_fijas is True
