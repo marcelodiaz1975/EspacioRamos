@@ -99,7 +99,16 @@ from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 
 _TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
 _ANCHO_BOTON_ACCION = 220  # Generar PDF / Generar texto WhatsApp / Nueva búsqueda, los tres iguales
-_ANCHO_PANEL_FILTROS_GRILLA = 355  # sube desde 290 con el ancho liberado al acortar "Hasta (solo Aislada)" a "Hasta"
+_ANCHO_PANEL_FILTROS_GRILLA = 250  # baja desde 355: con las 4 columnas de la ronda D, un ancho fijo mayor le sacaba lugar a la grilla (columna 4) y forzaba scroll horizontal de toda la pantalla
+# Medidos con un script de geometría: agrandan un poco la muestra de color y
+# la letra de "Referencias de colores" (antes compactada a 2 columnas, ver
+# más abajo) para que la leyenda llegue de verdad al pie de la columna de
+# Filtros — un residuo de 3px (irreductible, confirmado probando varios
+# valores: crece la leyenda Y la columna de al lado por igual, el gap no se
+# cierra) queda como el mismo tipo de resto imperceptible ya aceptado en
+# otras rondas de esta revisión.
+_AJUSTE_ALTO_MUESTRA_LEYENDA = 6
+_TAMANO_FUENTE_LEYENDA = 14  # 13px es el default de toda la app, ver `estilos.py`
 
 _DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
 
@@ -372,43 +381,37 @@ class _PanelOferta(QWidget):
         form.addWidget(self.casilla_detalle_reducido)
 
         fila_franja = QHBoxLayout()
-        self.boton_agregar_franja = QPushButton("Agregar franja a la búsqueda")
+        # Texto en dos líneas (pedido explícito de la clienta: "hacelos
+        # más altos, en dos líneas de texto cada uno") — sube el alto de
+        # los dos botones y, de paso, angosta la columna (cada línea es
+        # más corta que el texto de una sola línea de antes).
+        self.boton_agregar_franja = QPushButton("Agregar franja\na la búsqueda")
         self.boton_agregar_franja.clicked.connect(self._agregar_franja)
-        self.boton_quitar_franja = QPushButton("Quitar franja seleccionada")
+        self.boton_quitar_franja = QPushButton("Quitar franja\nseleccionada")
         self.boton_quitar_franja.clicked.connect(self._quitar_franja_seleccionada)
         fila_franja.addWidget(self.boton_agregar_franja)
         fila_franja.addWidget(self.boton_quitar_franja)
         form.addLayout(fila_franja)
-
-        form.addWidget(QLabel("Franjas agregadas a esta búsqueda"))
-        self.lista_franjas = QListWidget()
-        # Sin alto máximo: crece hasta el pie de la pantalla (con
-        # `stretch=1` más abajo) — pedido explícito de la clienta, que
-        # prefiere que los cuadros/tablas sean escroleables en vez de la
-        # pantalla entera. Sigue teniendo su scroll propio de siempre
-        # (QListWidget nativo) para cuando hay más franjas de las que
-        # entran en el alto disponible.
-        form.addWidget(self.lista_franjas, stretch=1)
         splitter.addWidget(panel_form)
 
-        self.grilla = GrillaOperativaWidget(self.conn)
-        self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
-        self.grilla.agrupar_dias_en_pares()
-        self.grilla.mostrar_leyenda_colores(compacta=True)
-        # Sin título (antes "Grilla semanal") — pedido explícito de la
-        # clienta, mismo criterio que Reservas (`fijar_titulo_filtros("")`).
-        self.grilla.fijar_titulo_filtros("")
-        # "Detalle" pegado justo debajo de la grilla, en vez de dejar que
-        # la tabla se estire con relleno vacío hasta el pie de la columna
-        # — mismo método opt-in que ya usa Reservas regulares.
-        self.grilla.dar_stretch_a_detalle()
+        # Segunda columna, nueva: "Franjas agregadas a esta búsqueda" (antes
+        # el final del formulario) + los tres botones de acción (antes en
+        # el panel de Filtros de la grilla, ver más abajo) reubicados al
+        # pie — pedido explícito de la clienta. `self.lista_franjas` se
+        # queda con `stretch=1` y sin alto máximo (crece hasta el pie de
+        # la columna, con su propio scroll para cuando hay más franjas de
+        # las que entran) — al ser lo único con stretch en esta columna,
+        # empuja a los tres botones agregados después de ella exactamente
+        # al borde inferior.
+        panel_franjas = QWidget()
+        panel_franjas.setMaximumWidth(_ANCHO_BOTON_ACCION + 16)
+        columna_franjas = QVBoxLayout(panel_franjas)
+        etiqueta_franjas = QLabel("Franjas agregadas a esta búsqueda")
+        etiqueta_franjas.setWordWrap(True)
+        columna_franjas.addWidget(etiqueta_franjas)
+        self.lista_franjas = QListWidget()
+        columna_franjas.addWidget(self.lista_franjas, stretch=1)
 
-        # Los tres botones de acción se mudan al panel de Filtros de la
-        # grilla, debajo de "Referencias de colores" — pedido explícito
-        # de la clienta, para no forzar el ancho/alto de la columna del
-        # formulario con ellos. Se siguen construyendo acá (mismos
-        # métodos `self._generar_pdf`/etc.) y quedan en la misma cadena
-        # de foco Enter/Tab de siempre, solo cambia dónde viven visualmente.
         self.boton_pdf = QPushButton("Generar PDF")
         self.boton_pdf.setObjectName("botonSecundario")
         self.boton_pdf.clicked.connect(self._generar_pdf)
@@ -420,10 +423,54 @@ class _PanelOferta(QWidget):
         self.boton_nueva.clicked.connect(self._nueva_busqueda)
         for boton in (self.boton_pdf, self.boton_texto, self.boton_nueva):
             boton.setFixedWidth(_ANCHO_BOTON_ACCION)
-        self.grilla.agregar_widgets_debajo_de_leyenda(self.boton_pdf, self.boton_texto, self.boton_nueva)
+            columna_franjas.addWidget(boton)
+        splitter.addWidget(panel_franjas)
+
+        self.grilla = GrillaOperativaWidget(self.conn)
+        self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
+        # `agrandar_panel_filtros` solo pone un TOPE (`setMaximumWidth`):
+        # sin ningún stretch propio dentro del `QHBoxLayout` interno de la
+        # grilla (`layout_principal`, filtros | grilla), este panel se
+        # queda con su ancho natural (bastante más angosto que el tope,
+        # ~190px) y toda la columna 4 (la grilla) se lleva el resto — acá
+        # sí interesa que la columna de Filtros ocupe ese ancho de
+        # verdad, para que "Referencias de colores" tenga sitio. Ancho
+        # mínimo = ancho máximo lo deja fijo en ese valor.
+        self.grilla._panel_filtros.setMinimumWidth(_ANCHO_PANEL_FILTROS_GRILLA)
+        # Ancho real de la columna de texto de "Referencias de colores"
+        # dentro de este panel de Filtros (contentsRect del QGroupBox de
+        # la leyenda, descontando la columna de la muestra de color y el
+        # espaciado de la grilla) — valor medido con un script de
+        # geometría a partir de `_ANCHO_PANEL_FILTROS_GRILLA`, ver
+        # `LeyendaColores.fijar_ancho_etiqueta` para el bug que resuelve
+        # (sin esto, algunas descripciones largas quedaban recortadas
+        # arriba y abajo en vez de mostrarse completas).
+        self.grilla.fijar_ancho_etiqueta_leyenda(180)
+        # Filtros (días) y referencias en una sola línea cada uno — se
+        # revierte `agrupar_dias_en_pares()`/`compacta=True` de la ronda
+        # anterior, pedido explícito de la clienta para esta vuelta.
+        self.grilla.mostrar_leyenda_colores()
+        # Sin título (antes "Grilla semanal") — pedido explícito de la
+        # clienta, mismo criterio que Reservas (`fijar_titulo_filtros("")`).
+        self.grilla.fijar_titulo_filtros("")
+        # "Detalle" pegado justo debajo de la grilla, en vez de dejar que
+        # la tabla se estire con relleno vacío hasta el pie de la columna
+        # — mismo método opt-in que ya usa Reservas regulares. Con esto,
+        # "Detalle" crece hasta el pie del formulario (columna 1), que es
+        # la referencia de alto de todo el splitter.
+        self.grilla.dar_stretch_a_detalle()
+        # El tamaño de la muestra de color (y de la letra) de "Referencias
+        # de colores" se agranda para que, sin el "compacta=True" de la
+        # ronda anterior, la leyenda llegue de verdad al pie de la columna
+        # de Filtros en vez de dejar un tramo de `addStretch()` en blanco
+        # debajo — valor medido con un script de geometría, no a ojo (ver
+        # CLAUDE.md).
+        ancho_muestra, alto_muestra = self.grilla.tamano_muestra_leyenda()
+        self.grilla.agrandar_muestras_leyenda(ancho_muestra, alto_muestra + _AJUSTE_ALTO_MUESTRA_LEYENDA)
+        self.grilla._leyenda_colores.setStyleSheet(f"QLabel {{ font-size: {_TAMANO_FUENTE_LEYENDA}px; }}")
 
         splitter.addWidget(self.grilla)
-        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 1)
 
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)

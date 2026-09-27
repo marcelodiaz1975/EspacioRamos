@@ -24,8 +24,8 @@ import sqlite3
 from datetime import date
 from typing import Callable
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen, QPolygon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -455,6 +455,7 @@ class LeyendaColores(QGroupBox):
         super().__init__("Referencias de colores", parent)
         self._columnas = columnas
         self._tamano_muestra = (40, 24)
+        self._ancho_etiqueta: int | None = None
         self._layout = QGridLayout(self)
         self.actualizar("regular")
 
@@ -482,6 +483,27 @@ class LeyendaColores(QGroupBox):
         `GrillaOperativaWidget.agrandar_muestras_leyenda`)."""
         self._tamano_muestra = (ancho, alto)
 
+    def fijar_ancho_etiqueta(self, ancho: int) -> None:
+        """Fija el ancho con el que se calcula el alto de cada etiqueta de
+        referencia (ver `actualizar`) — pensado para Oferta de
+        consultorios (a una sola columna, `columnas=1`, donde varias
+        descripciones no entran en una sola línea). Sin esto, cada fila
+        de la grilla se dimensiona con `QLabel.sizeHint()`, que devuelve
+        el alto de una sola línea SIN WRAPEAR (Qt no conoce todavía el
+        ancho final de la columna en ese momento) — con un texto más
+        largo que ese ancho, la fila queda más baja de lo que el texto
+        wrapeado necesita, y como `QLabel` alinea verticalmente al centro
+        por default, el texto de más queda recortado arriba y abajo en
+        vez de solo abajo (bug real, detectado al revisar Oferta de
+        consultorios). Se calcula el alto real a mano con `QFontMetrics.
+        boundingRect(..., TextWordWrap)` para ESTE ancho puntual, sin
+        depender de que Qt vuelva a propagar el `sizeHint` después del
+        wrap (que en la plataforma offscreen no siempre pasa, ver
+        `propagateSizeHints()` en otras partes de esta grilla). No vuelve
+        a llamar `actualizar` sola — quien la use tiene que refrescar la
+        leyenda después, mismo criterio que `fijar_tamano_muestra`."""
+        self._ancho_etiqueta = ancho
+
     def actualizar(self, modo: str) -> None:
         # `deleteLater` sola no alcanza: la destrucción real queda diferida
         # al próximo paso del loop de eventos, así que el widget viejo
@@ -503,6 +525,10 @@ class LeyendaColores(QGroupBox):
             self._layout.addWidget(muestra, fila, columna * 2)
             etiqueta = QLabel(texto)
             etiqueta.setWordWrap(True)
+            if self._ancho_etiqueta is not None:
+                metrica = QFontMetrics(etiqueta.font())
+                rect = metrica.boundingRect(QRect(0, 0, self._ancho_etiqueta, 0), Qt.TextFlag.TextWordWrap, texto)
+                etiqueta.setMinimumHeight(rect.height() + 4)
             self._layout.addWidget(etiqueta, fila, columna * 2 + 1)
 
 
@@ -926,6 +952,16 @@ class GrillaOperativaWidget(QWidget):
         for widget in widgets:
             layout.insertWidget(indice, widget)
             indice += 1
+
+    def fijar_ancho_etiqueta_leyenda(self, ancho: int) -> None:
+        """Fija el ancho de referencia para calcular el alto de las
+        etiquetas de "Referencias de colores" y refresca la leyenda con
+        ese valor — ver `LeyendaColores.fijar_ancho_etiqueta` para el
+        detalle del bug que resuelve. Pensado para Oferta de
+        consultorios, que usa la leyenda a una sola columna con
+        descripciones largas."""
+        self._leyenda_colores.fijar_ancho_etiqueta(ancho)
+        self._actualizar_leyenda_colores()
 
     def agrandar_muestras_leyenda(self, ancho: int, alto: int) -> None:
         """Agranda las muestras de color de "Referencias de colores" a

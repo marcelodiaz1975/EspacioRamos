@@ -271,18 +271,19 @@ def test_foco_inicial_queda_en_profesional(qtbot, conn, profesional_y_consultori
 
 
 def test_lista_franjas_crece_hasta_el_pie_y_es_scroleable(qtbot, conn, profesional_y_consultorio):
-    """Pedido explícito de la clienta: prefiere que los cuadros/tablas
-    sean escroleables en vez de la pantalla entera — "Franjas agregadas
-    a esta búsqueda" pasa de un alto máximo fijo (90px) a crecer con
-    `stretch=1` hasta el pie de la columna, sin perder el scroll propio
-    de `QListWidget` para cuando hay más franjas de las que entran."""
+    """Pedido explícito de la clienta (mantenido en la ronda que le dio a
+    "Franjas agregadas a esta búsqueda" su propia columna, la segunda):
+    prefiere que los cuadros/tablas sean escroleables en vez de la
+    pantalla entera — la lista crece con `stretch=1` hasta el pie de ESA
+    columna (ya no la del formulario), sin perder el scroll propio de
+    `QListWidget` para cuando hay más franjas de las que entran."""
     from PySide6.QtCore import Qt as _Qt
 
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
-    form = pantalla.combo_profesional.parentWidget().layout()
-    indice = form.indexOf(pantalla.lista_franjas)
-    assert form.stretch(indice) == 1
+    columna_franjas = pantalla.lista_franjas.parentWidget().layout()
+    indice = columna_franjas.indexOf(pantalla.lista_franjas)
+    assert columna_franjas.stretch(indice) == 1
     assert pantalla.lista_franjas.maximumHeight() > 90
 
     for i in range(20):
@@ -526,15 +527,15 @@ def test_contenido_dentro_del_scroll_tiene_fondo_claro(qtbot, conn, profesional_
 
 
 def test_columna_del_formulario_mas_angosta_que_antes(qtbot, conn, profesional_y_consultorio):
-    """Pedido explícito de la clienta: la primera columna (el formulario
-    de búsqueda) tiene que quedar más angosta, y el ancho liberado se
-    reparte entre el panel de Filtros y la grilla de la derecha — mismo
-    criterio que la columna del formulario en Reservas. Antes de esta
-    ronda la columna medía 690px de sizeHint (dominada por la fila
-    horizontal de "Generar PDF"/"Generar texto WhatsApp"/"Nueva
-    búsqueda", 660px de tres botones de 220px cada uno); esos tres
-    botones se mudaron al panel de Filtros de la grilla (ver más abajo),
-    así que ya no aportan nada al ancho de esta columna."""
+    """Pedido explícito de la clienta, ronda "cuatro columnas": los
+    botones "Agregar franja"/"Quitar franja" pasan a dos líneas de texto,
+    angostando la primera columna (el formulario de búsqueda) todavía
+    más — antes de esa ronda medía 690px de sizeHint (con los tres
+    botones "Generar PDF"/"Generar texto WhatsApp"/"Nueva búsqueda" en
+    una fila horizontal, y "Franjas agregadas" en la misma columna);
+    ahora esos tres botones y la lista de franjas viven en su propia
+    columna (la segunda, ver más abajo), y los dos botones que quedan acá
+    ya no fuerzan tanto ancho al ser de dos líneas."""
     from PySide6.QtWidgets import QSplitter
 
     pantalla = _PanelOferta(conn)
@@ -542,24 +543,25 @@ def test_columna_del_formulario_mas_angosta_que_antes(qtbot, conn, profesional_y
     splitter = pantalla.findChildren(QSplitter)[0]
     panel_form = splitter.widget(0)
     assert panel_form.sizeHint().width() < 500  # bien por debajo de los 690px originales
-    assert pantalla.grilla._panel_filtros.maximumWidth() > 260  # más ancho que el default de la grilla
+    assert pantalla.boton_agregar_franja.text() == "Agregar franja\na la búsqueda"
+    assert pantalla.boton_quitar_franja.text() == "Quitar franja\nseleccionada"
 
 
-def test_filtros_dias_y_referencias_como_en_reservas(qtbot, conn, profesional_y_consultorio):
-    """La grilla embebida (referencia visual "Grilla semanal") pasa a
-    manejar filtros/días/referencias con el mismo criterio compacto que
-    usa Reservas regulares/aisladas — antes se llamaba `mostrar_leyenda_
-    colores()` sin `compacta=True` y nunca se llamaba `agrupar_dias_en_
-    pares()`."""
+def test_filtros_dias_y_referencias_en_una_sola_linea(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta, ronda "cuatro columnas": los
+    filtros (días) y las referencias de colores de la grilla embebida
+    vuelven a mostrarse en una sola línea cada uno (no de a pares/
+    compactado a 2 columnas, como se había probado en la ronda
+    anterior) — la columna de Filtros pasa a ser la tercera columna de
+    esta pantalla, con la leyenda ajustada en tamaño para llegar al pie."""
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     grilla = pantalla.grilla
-    # Días de la semana de a pares (2 columnas), no en una lista vertical.
-    from PySide6.QtWidgets import QGridLayout
-    assert isinstance(grilla._contenedor_dias.layout(), QGridLayout)
-    # Referencias de colores compactas (2 columnas, muestra más chica).
-    assert grilla._leyenda_colores._columnas == 2
-    assert grilla._leyenda_colores._tamano_muestra == (28, 16)
+    # Días de la semana en una lista vertical, no de a pares.
+    from PySide6.QtWidgets import QVBoxLayout
+    assert isinstance(grilla._contenedor_dias.layout(), QVBoxLayout)
+    # Referencias de colores en una sola columna (no compactas).
+    assert grilla._leyenda_colores._columnas == 1
     assert not grilla._leyenda_colores.isHidden()
 
 
@@ -639,24 +641,29 @@ def test_placard_se_incluye_en_la_busqueda_armada(qtbot, conn, profesional_y_con
     assert pantalla.casilla_placard.isChecked() is False
 
 
-def test_botones_de_accion_viven_en_el_panel_de_filtros_de_la_grilla(qtbot, conn, profesional_y_consultorio):
-    """Pedido explícito de la clienta: "Generar PDF"/"Generar texto
-    WhatsApp"/"Nueva búsqueda" se mudan al panel de Filtros de la grilla,
-    debajo de "Referencias de colores" — ya no viven al pie del
-    formulario de búsqueda."""
+def test_botones_de_accion_viven_al_pie_de_la_columna_de_franjas(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta, ronda "cuatro columnas": "Generar
+    PDF"/"Generar texto WhatsApp"/"Nueva búsqueda" se reubican al pie de
+    la segunda columna (la de "Franjas agregadas a esta búsqueda") —
+    dejan de vivir en el panel de Filtros de la grilla, donde los había
+    puesto la ronda anterior."""
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
-    panel_filtros = pantalla.grilla._panel_filtros
-    assert pantalla.boton_pdf.parentWidget() is panel_filtros
-    assert pantalla.boton_texto.parentWidget() is panel_filtros
-    assert pantalla.boton_nueva.parentWidget() is panel_filtros
+    panel_franjas = pantalla.lista_franjas.parentWidget()
+    assert pantalla.boton_pdf.parentWidget() is panel_franjas
+    assert pantalla.boton_texto.parentWidget() is panel_franjas
+    assert pantalla.boton_nueva.parentWidget() is panel_franjas
 
-    layout = panel_filtros.layout()
-    indice_leyenda = layout.indexOf(pantalla.grilla._leyenda_colores)
+    layout = panel_franjas.layout()
+    indice_lista = layout.indexOf(pantalla.lista_franjas)
     indice_pdf = layout.indexOf(pantalla.boton_pdf)
     indice_texto = layout.indexOf(pantalla.boton_texto)
     indice_nueva = layout.indexOf(pantalla.boton_nueva)
-    assert indice_leyenda < indice_pdf < indice_texto < indice_nueva
+    assert indice_lista < indice_pdf < indice_texto < indice_nueva
+
+    # Ya no viven en el panel de Filtros de la grilla.
+    panel_filtros = pantalla.grilla._panel_filtros
+    assert pantalla.boton_pdf.parentWidget() is not panel_filtros
 
 
 def test_etiqueta_hasta_sin_aclaracion_de_aislada(qtbot, conn, profesional_y_consultorio):
@@ -711,9 +718,73 @@ def test_detalle_pegado_debajo_de_la_grilla_sin_relleno(qtbot, conn, profesional
     assert layout.stretch(layout.indexOf(pantalla.grilla.texto_detalle)) == 1
 
 
-def test_panel_filtros_de_la_grilla_mas_ancho(qtbot, conn, profesional_y_consultorio):
-    """Ancho liberado al acortar "Hasta (solo Aislada)" a "Hasta" —
-    pedido explícito de la clienta, "dáselo a la segunda columna"."""
+def test_panel_filtros_de_la_grilla_ancho_fijo(qtbot, conn, profesional_y_consultorio):
+    """Ronda "cuatro columnas": el panel de Filtros de la grilla (ahora
+    la tercera columna de la pantalla) pasa a tener un ancho FIJO
+    (mínimo = máximo) en vez de solo un tope — sin esto, sin ningún
+    stretch propio en el `QHBoxLayout` interno de la grilla, se quedaba
+    en su ancho natural (~190px, mucho menos que el tope) y no le
+    quedaba lugar de verdad a "Referencias de colores"."""
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.grilla._panel_filtros.maximumWidth() == 355
+    panel_filtros = pantalla.grilla._panel_filtros
+    assert panel_filtros.minimumWidth() == panel_filtros.maximumWidth()
+    assert panel_filtros.minimumWidth() > 200
+
+
+def test_pantalla_tiene_cuatro_columnas(qtbot, conn, profesional_y_consultorio):
+    """Ronda "cuatro columnas", pedido explícito de la clienta: 1)
+    formulario de búsqueda, 2) "Franjas agregadas a esta búsqueda" + los
+    tres botones de acción al pie, 3) Filtros de la grilla (Localidad/
+    Edificio/Unidad/Día/Profesional/Referencias), 4) la grilla
+    escroleable + "Detalle". Las columnas 3 y 4 siguen viviendo dentro de
+    un solo widget de splitter (`self.grilla`, que ya las divide
+    internamente en Filtros | grilla) — separarlas en dos panes de
+    `QSplitter` de verdad hubiera significado desarmar `GrillaOperativaWidget`
+    sin necesidad, cuando alcanza con que cada mitad interna quede bien
+    dimensionada."""
+    from PySide6.QtWidgets import QSplitter
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    splitter = pantalla.findChildren(QSplitter)[0]
+    assert splitter.count() == 3
+    assert splitter.widget(0) is pantalla.combo_profesional.parentWidget()
+    assert splitter.widget(1) is pantalla.lista_franjas.parentWidget()
+    assert splitter.widget(2) is pantalla.grilla
+
+
+def test_columna_de_franjas_tiene_titulo_lista_y_tres_botones_al_pie(qtbot, conn, profesional_y_consultorio):
+    """La segunda columna, nueva en esta ronda: título arriba, la lista
+    de franjas creciendo con `stretch=1` y los tres botones de acción
+    justo debajo — al ser lo único con stretch, la lista empuja los
+    botones exactamente al pie de la columna."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    panel_franjas = pantalla.lista_franjas.parentWidget()
+    etiqueta = next(
+        lbl for lbl in panel_franjas.findChildren(QLabel) if lbl.text() == "Franjas agregadas a esta búsqueda"
+    )
+    layout = panel_franjas.layout()
+    assert layout.indexOf(etiqueta) < layout.indexOf(pantalla.lista_franjas) < layout.indexOf(pantalla.boton_pdf)
+
+
+def test_referencias_de_colores_sin_texto_recortado(qtbot, conn, profesional_y_consultorio):
+    """Bug real detectado al armar esta pantalla a cuatro columnas: sin
+    `fijar_ancho_etiqueta_leyenda`, la columna de Filtros (angosta,
+    ~250px) forzaba varias líneas de wrap en las descripciones más
+    largas de "Referencias de colores", pero cada fila se dimensionaba
+    con el `sizeHint` de una sola línea SIN wrapear — el texto de más
+    quedaba recortado arriba y abajo (`QLabel` centra verticalmente por
+    default). Confirma que las etiquetas más largas ya piden más alto
+    del que ocuparía una sola línea."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    leyenda = pantalla.grilla._leyenda_colores
+    etiquetas = [
+        leyenda._layout.itemAtPosition(i, 1).widget()
+        for i in range(leyenda._layout.rowCount())
+        if leyenda._layout.itemAtPosition(i, 1) is not None
+    ]
+    una_linea = etiquetas[0].fontMetrics().height()
+    assert any(e.minimumHeight() > una_linea * 1.5 for e in etiquetas)

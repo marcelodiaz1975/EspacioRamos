@@ -584,6 +584,49 @@ def test_agrandar_muestras_leyenda_cambia_el_tamano_y_refresca(qtbot, conn):
     assert any(m.height() == 30 and m.width() == 28 for m in muestras)
 
 
+def test_fijar_ancho_etiqueta_leyenda_agranda_las_filas_que_wrappean(qtbot, conn):
+    """Bug real detectado al revisar Oferta de consultorios (a una sola
+    columna, con descripciones largas): sin esto, cada fila de la grilla
+    se dimensiona con `QLabel.sizeHint()`, que devuelve el alto de una
+    sola línea SIN WRAPEAR — con un texto más largo que el ancho final de
+    la columna, la fila queda más baja de lo que el texto wrapeado
+    necesita y, como `QLabel` centra verticalmente por default, el texto
+    de más queda recortado arriba y abajo en vez de mostrarse completo.
+    `fijar_ancho_etiqueta_leyenda` calcula el alto real a mano con
+    `QFontMetrics` para un ancho puntual, sin depender de que Qt vuelva a
+    propagar el `sizeHint` después del wrap."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.mostrar_leyenda_colores()  # una sola columna, texto sin achicar
+
+    # Con un ancho angosto, va a necesitar varias líneas de wrap para las
+    # descripciones más largas — sin el ancho fijado, `minimumHeight()`
+    # se queda en el alto de una sola línea.
+    widget.fijar_ancho_etiqueta_leyenda(100)
+
+    etiquetas = [
+        widget._leyenda_colores._layout.itemAtPosition(i, 1).widget()
+        for i in range(widget._leyenda_colores._layout.rowCount())
+        if widget._leyenda_colores._layout.itemAtPosition(i, 1) is not None
+    ]
+    # La descripción más larga necesita bastante más que una línea a 100px.
+    assert max(e.minimumHeight() for e in etiquetas) > 30
+
+
+def test_fijar_ancho_etiqueta_leyenda_no_afecta_si_no_se_llama(qtbot, conn):
+    """Opt-in: el resto de los usos de esta grilla (Reservas) no llaman a
+    `fijar_ancho_etiqueta_leyenda` y no tienen por qué verse afectados —
+    sin ancho fijado, las etiquetas se siguen construyendo sin forzar
+    ningún `minimumHeight` puntual."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.mostrar_leyenda_colores(compacta=True)
+
+    assert widget._leyenda_colores._ancho_etiqueta is None
+
+
 def test_agrandar_panel_filtros_cambia_el_ancho_maximo(qtbot, conn):
     _preparar(conn)
     widget = GrillaOperativaWidget(conn)
