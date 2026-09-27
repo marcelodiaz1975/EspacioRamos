@@ -3951,6 +3951,56 @@ Dos ajustes más de la clienta sobre "Totales por bloques y general":
   las columnas 0/1/2 (N° Bloque/Horas semanales/Horas mensuales) sin
   afectar a las tres en Stretch.
 
+## Cargos especiales y Centro de mensajería: se sacan sus "Deshacer..."
+
+Pedido explícito de la clienta al ver las capturas de "Llaves y otros
+conceptos" (solapa "Registro de cargos especiales") y de "Grilla y
+mensajería" (solapa "Centro de mensajería"): sacar el botón "Deshacer
+último movimiento"/"Deshacer última acción" de las dos — mismo criterio
+ya aplicado antes en Llaves y en Reservas ("cubría cualquier alta/
+edición/baja de esta pantalla, se sacó por completo a pedido explícito
+porque no estaba en la lista final de botones que dio la clienta —
+pérdida de funcionalidad real, no solo estética"). Acá también se borra
+todo el código que solo existía para alimentar ese botón, no solo el
+widget.
+
+- **Cargos especiales** (`_PanelCargosEspeciales`, `app/gui/pantallas/
+  novedades.py`): se borra el botón, su conexión
+  (`clicked.connect(self._deshacer_ultimo)`) y el método `_deshacer_
+  ultimo` entero, además de sacarlo de la cadena de foco Enter/Tab
+  (pasa de Buscar→Tipo→Concepto→Monto→Período→Crear→Modificar→
+  Eliminar→Deshacer a la misma cadena sin el último paso).
+  `_bloqueado_por_llave` (el guardarraíl que impide tocar un cargo
+  ligado a una llave) se queda intacto — sigue haciendo falta para
+  Modificar/Eliminar, que no se tocaron.
+- **Centro de mensajería** (`_PanelCentroMensajeria`, `app/gui/
+  pantallas/mensajeria.py`): a diferencia de Llaves/Cargos especiales,
+  acá "Deshacer última acción" no borraba un solo tipo de registro —
+  revertía CUALQUIERA de cuatro acciones distintas (marcar/desmarcar
+  "Enviada", generar el texto marrón de "mensaje previo" o el celeste
+  de "mensaje aislada"), guardadas en un diccionario `self._ultima_
+  accion` que se iba pisando en cada acción mutante. Sacar el botón por
+  sí solo hubiera dejado ese diccionario (y todo lo que lo alimentaba)
+  como código muerto, así que se borró todo junto: el atributo
+  `_ultima_accion`, los cuatro lugares donde se lo pisaba
+  (`_al_cambiar_enviada`/`_desmarcar_enviada`/`_marcar_como_enviada`/
+  `_generar_y_mostrar`/`_texto_para_boton`) y los tres métodos que solo
+  existían para leerlo (`_deshacer_ultima_accion`/`_deshacer_marcar_
+  enviada`/`_revertir_bandera_mensajeria`). De paso se sacó el respaldo
+  de PDF previo que hacía `_marcar_como_enviada` antes de generar el
+  nuevo (leer a memoria el archivo viejo con ese nombre, si existía,
+  para poder restaurarlo al deshacer) — sin la opción de deshacer, ese
+  respaldo no tenía ningún otro consumidor, así que quedaba leyendo un
+  archivo a memoria en cada marcado sin que nada lo usara después.
+  Tests borrados en bloque (mismo criterio: eran pruebas de la
+  funcionalidad que se retira, no de otra cosa): los ocho de la sección
+  "deshacer última acción" al final de `test_gui_mensajeria.py`
+  (sin acciones, marcar enviada con/sin PDF previo, restaurar saldo
+  actual, violeta restaura plazo extendido, desmarcar enviada, generar
+  texto marrón/aislada, y el de "generar texto sin mutación no deja
+  nada para deshacer" — este último ya no tiene sentido sin el
+  concepto de "última acción" a probar).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
