@@ -4353,6 +4353,95 @@ ronda anterior). `test_columna_del_formulario_mas_angosta_que_antes` y
 para el nuevo lugar de `lista_franjas` (su propia columna, no ya el pie
 del formulario).
 
+### Quinta vuelta: Aislada tratada igual que Regular, y un bug de fondo
+### en el tamaño de letra de la leyenda
+
+Pedido explícito de la clienta: "vamos tipo de búsqueda aisladas de
+manera similar a esta pantalla de regulares" — Oferta de consultorios no
+tiene solapas separadas por tipo (a diferencia de Reservas): "Regular"/
+"Aislada" es un solo combo (`combo_tipo`) sobre el mismo `_PanelOferta`,
+así que "tratar Aislada igual" significa que el ajuste de tamaño de
+"Referencias de colores" (columna 3) tiene que funcionar bien para las
+dos, cambiando en caliente cada vez que se cambia el combo — no hay una
+segunda pantalla que revisar aparte.
+
+Diagnóstico: Aislada tiene 6 referencias contra las 8 de Regular — con
+el mismo tamaño de muestra/letra que se había fijado para Regular (fijo,
+una sola vez, en `_armar_ui`), Aislada dejaba un hueco en blanco grande
+al pie de la columna de Filtros (menos filas, mismo alto total
+disponible). `_ajustar_tamano_leyenda(tipo)` (nueva, en `_PanelOferta`)
+resuelve esto aplicando un juego de valores de tamaño DISTINTO por tipo
+— `_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR`/`_TAMANO_FUENTE_LEYENDA_
+REGULAR` y sus pares `..._AISLADA` (más grandes, para repartir el mismo
+alto entre menos filas) — y se llama desde `_al_cambiar_tipo()`, justo
+después de `self.grilla.fijar_modo(...)`, así que se re-aplica cada vez
+que el combo "Tipo de búsqueda" cambia.
+
+**Bug de fondo, no pedido, encontrado al armar esto** (y que en
+retrospectiva ya afectaba un poco a la ronda anterior, sin llegar a
+notarse): el tamaño de letra de la leyenda se venía fijando con
+`self.grilla._leyenda_colores.setStyleSheet(f"QLabel {{ font-size:
+Npx; }}")` — un `setStyleSheet` de CSS cambia lo que Qt PINTA pero NO lo
+que devuelve `QLabel.font()`. Como `fijar_ancho_etiqueta_leyenda` mide
+el alto necesario con `QFontMetrics(etiqueta.font())`, ese cálculo
+seguía usando la letra VIEJA (la del tipo anterior, o el default de la
+app si era la primera vez) mientras Qt terminaba pintando con la letra
+NUEVA, más grande — el texto quedaba recortado arriba y abajo (`QLabel`
+centra verticalmente por default), el mismo síntoma que el bug de ancho
+resuelto en la ronda anterior, pero por una causa distinta. Se hizo
+visible recién en esta vuelta porque antes Regular usaba un tamaño de
+letra parecido al default (14px contra ~13px reales) — la diferencia
+era chica y no llegaba a notarse — mientras que Aislada, con menos
+filas, necesitaba un salto más grande (15px) que sí generó un recorte
+visible.
+
+Arreglo de fondo en `grilla_operativa.py` (no solo un parche de esta
+pantalla): `LeyendaColores.fijar_tamano_fuente(puntos)` (nueva, mismo
+criterio que `fijar_tamano_muestra`) guarda un tamaño de letra en píxeles
+que `actualizar()` aplica con `QLabel.setFont` (no CSS) ANTES de medir
+con `QFontMetrics` — así la letra que se mide es la misma que la que
+Qt termina pintando, sin necesitar ningún orden particular de llamadas
+para que coincidan. `GrillaOperativaWidget.fijar_tamano_fuente_leyenda`
+la expone, opt-in — Reservas (que sigue con `hacer_compacta()` y su
+`setStyleSheet` de toda la vida, sin haber tenido nunca este problema
+porque su texto es corto y nunca dispara wrap) no se ve afectada.
+`_PanelOferta._ajustar_tamano_leyenda` pasa a llamar `self.grilla.
+fijar_tamano_fuente_leyenda(...)` en vez del `setStyleSheet` crudo.
+
+**Efecto colateral real, no cosmético, de corregir la medición**: una
+vez que el alto se calcula con la letra REAL (más alto del que se
+pensaba, en los dos tipos), la pantalla completa necesitaba más alto
+total del que entraba en la ventana de referencia (1500×850) sin
+scrollear — confirmado con un script de geometría: la primera columna
+(el formulario) no tiene un alto "natural" fijo, así que crecer
+CUALQUIER otra columna sube el alto de todo el splitter parejo (mismo
+hallazgo documentado en la ronda anterior). Se resolvió en tres pasos:
+- `_ANCHO_PANEL_FILTROS_GRILLA` sube de 250 a 280 y el ancho de
+  referencia para el wrap (`fijar_ancho_etiqueta_leyenda`) de 180 a 220
+  — más ancho por línea, menos líneas de wrap, menos alto total pedido
+  por columna (a costa de un poco más de scroll horizontal en la
+  columna 4, de ~21px a ~51-65px según el tipo — aceptado, "la grilla
+  escroleable" ya lo contemplaba).
+- Con eso, Regular (a su tamaño de letra/muestra mínimo, sin ningún
+  agrandado artificial) ya entra sin scroll vertical, con un residuo de
+  9px entre el pie de la leyenda y el pie de la columna 1 — más grande
+  que el 3px de la ronda anterior, pero imperceptible igual, y
+  preferible a agrandar más y volver a necesitar scroll vertical.
+- Aislada sube su propio juego de valores (`_AJUSTE_ALTO_MUESTRA_
+  LEYENDA_AISLADA = 20`, `_TAMANO_FUENTE_LEYENDA_AISLADA = 15`, contra
+  0/13 de Regular) hasta emparejar el mismo residuo de 9px que Regular
+  — confirmado con el mismo script de geometría, iterando el valor
+  hasta que los dos números de "gap" coincidieran.
+
+Tests nuevos: `test_gui_grilla_operativa.py` suma `test_fijar_tamano_
+fuente_leyenda_usa_setfont_no_solo_estilo` (confirma que el tamaño de
+letra puesto ahí es el mismo que mide `QFontMetrics` después, en las dos
+direcciones — letra más grande y más chica). `test_gui_oferta.py` suma
+`test_leyenda_se_agranda_mas_en_aislada_que_en_regular` (compara el alto
+de muestra entre los dos tipos) y `test_leyenda_de_aislada_sin_texto_
+recortado` (mismo criterio que el test de Regular de la ronda anterior,
+aplicado a Aislada).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
