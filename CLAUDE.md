@@ -4083,6 +4083,101 @@ de_busqueda`. El viejo `test_fecha_queda_pegada_a_su_etiqueta_sin_hueco`
 layout en vez de buscar por texto (ambigüo: "Desde" se repite entre la
 fila de fecha y la de horario).
 
+### Segunda vuelta: reversiones, "Con placard" nuevo, botones al panel de Filtros
+
+Pedido explícito de la clienta sobre la captura de la primera vuelta,
+solo para "Oferta de consultorios" (Regular primero, "algo similar
+sería para aislada... pero vamos con regular primero, luego vamos a
+fondo con lo otro" — Aislada queda pendiente para una vuelta futura):
+
+- **Regla general nueva: "prefiero siempre que los cuadros y tablas...
+  sean escroleables y no la pantalla en sí".** Mismo tipo de regla
+  general que "Foco (Enter/Tab): orden general" o "Selectores y fecha"
+  más arriba — se aplica de acá en adelante, no dispara un barrido
+  completo del sistema. Para esta pantalla puntual: "Franjas agregadas
+  a esta búsqueda" (`lista_franjas`) pasa de un alto máximo fijo (90px)
+  a `stretch=1` sin tope — crece hasta el pie de la columna en vez de
+  quedar corta, y sigue teniendo su scroll propio de `QListWidget` para
+  cuando hay más franjas de las que entran. Efecto medido con un script
+  de geometría (ventana de referencia 1500×850, la misma de las
+  capturas): el scroll de la pantalla completa (el `QScrollArea` externo
+  de siempre) baja de ~270-310px de contenido oculto (medido en la
+  primera vuelta) a solo 37px — no queda en cero (el piso real de
+  `lista_franjas`, sumado a los márgenes de siempre, no da para más sin
+  tocar otra cosa), pero la reducción es sustancial.
+- **Se revierten dos apilados de la primera vuelta**: "Desde"/"Hasta
+  (solo Aislada)" (la fecha) y "Agregar franja a la búsqueda"/"Quitar
+  franja seleccionada" vuelven a su fila horizontal original, pedido
+  explícito ("que estén en la misma fila", "a la par en la misma
+  altura") — el ancho que esto le devuelve a la columna (`panel_form`
+  pasa de 370px a 450px de sizeHint) se compensa de sobra con el punto
+  siguiente.
+- **Los tres botones de acción se mudan al panel de Filtros de la
+  grilla**, debajo de "Referencias de colores" — pedido explícito
+  ("Los tres botones ponelos uno arriba del otro al lado, abajo de las
+  referencias de colores"), en el mismo orden de siempre (Generar PDF →
+  Generar texto WhatsApp → Nueva búsqueda). Esto es lo que realmente
+  angosta la columna del formulario (ya no cargan sus 660px de ancho
+  ahí) y libera además todo el alto que ocupaban al pie de esa columna.
+  Método nuevo en `GrillaOperativaWidget`, `agregar_widgets_debajo_de_
+  leyenda(*widgets)` (opt-in, no afecta al resto de los usos de esta
+  grilla compartida): inserta los widgets en `layout_filtros` justo
+  antes del `addStretch()` final, así ese stretch sigue absorbiendo el
+  resto del alto disponible después de ellos en vez de quedar
+  "atrapado" entre la leyenda y los botones nuevos. Los botones se
+  siguen construyendo en `_PanelOferta._armar_ui` (mismos métodos
+  `self._generar_pdf`/etc., sin cambios) y quedan en la misma cadena de
+  foco Enter/Tab de siempre — `instalar_enter_avanza_foco` instala el
+  filtro por widget, no le importa de qué widget sean hijos, así que
+  moverlos de padre no rompe el orden de Tab.
+- **"Características pedidas" pasa a una grilla de 2 columnas por
+  pares**, con un checkbox nuevo, "Con placard" — pedido explícito
+  sobre el orden exacto: fila 1 "Con ventana"/"Apto camilla", fila 2
+  "Con sillones"/"Con placard", fila 3 "Tamaño" + su combo, fila 4
+  "Valor máximo por hora regular" + su spin. `Consultorio.Placard` ya
+  existía en el schema (booleano, editable desde el catálogo de
+  Consultorios) pero nunca se había conectado como criterio de
+  búsqueda de Oferta — `Busqueda` (`app.negocio.oferta_busqueda`) suma
+  el campo `placard: bool = False` y `_consultorios_candidatos` suma el
+  filtro (`if busqueda.placard and not c["Placard"]: continue`), mismo
+  patrón exacto que `apto_camilla`/`ventana`/`sillones`. Ninguna otra
+  parte del sistema menciona estas características por su nombre (ni
+  el resumen de franja, ni los PDF/texto generados), así que no hizo
+  falta tocar nada más allá del filtro en sí.
+- **"Detalle reducido" sube de posición**: pasa a vivir justo después
+  de "Combinación con la próxima franja" y antes de "Agregar franja"/
+  "Quitar franja" (antes estaba al final, justo arriba de los tres
+  botones que ahora se mudaron) — interpretación propia ante la
+  ambigüedad (la clienta no lo mencionó explícitamente en esta vuelta):
+  como "Franjas agregadas a esta búsqueda" tiene que quedar como el
+  último elemento de la columna (el que "llega al pie de la pantalla"),
+  "Detalle reducido" no podía quedar después de esa lista.
+- **"Franjas agregadas a esta búsqueda" pierde la aclaración entre
+  paréntesis** ("si no agregás ninguna, se usa lo cargado arriba como
+  franja única") — pedido explícito: "asi el título nomás". El
+  comportamiento que describía esa aclaración no cambió, solo el texto.
+
+Tests: `tests/test_oferta_busqueda.py` suma `test_placard_filtra_
+candidatos` (mismo criterio que `test_sillones_y_tamano_filtran_
+candidatos`). `test_gui_grilla_operativa.py` suma
+`test_agregar_widgets_debajo_de_leyenda_quedan_despues_y_antes_del_
+stretch`. `test_gui_oferta.py`: el de "apiladas" de la primera vuelta
+se reemplaza por `test_fechas_desde_hasta_en_la_misma_fila` (compara
+posición vertical); el de `lista_franjas` con alto fijo se reemplaza
+por `test_lista_franjas_crece_hasta_el_pie_y_es_scroleable` (stretch=1,
+sin tope de alto); el de ancho de columna actualiza su umbral (de <450
+a <500, ahora por un motivo distinto: ya no son los tres botones los
+que se sacaron, sino la fila de fechas que volvió); se suman
+`test_agregar_y_quitar_franja_en_la_misma_fila`,
+`test_etiqueta_franjas_agregadas_sin_texto_explicativo`,
+`test_caracteristicas_pedidas_en_grilla_de_pares_con_placard` (compara
+posiciones de fila/columna vía `grid.getItemPosition`, comparando
+contra `pantalla._grid_caracteristicas` — nuevo atributo, necesario
+porque el grid es un layout anidado dentro de `form`, no el layout
+propio del widget padre de los checkboxes),
+`test_placard_se_incluye_en_la_busqueda_armada`,
+`test_botones_de_accion_viven_en_el_panel_de_filtros_de_la_grilla`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
