@@ -4178,6 +4178,53 @@ propio del widget padre de los checkboxes),
 `test_placard_se_incluye_en_la_busqueda_armada`,
 `test_botones_de_accion_viven_en_el_panel_de_filtros_de_la_grilla`.
 
+### Tercera vuelta: sin título en la grilla, Profesional/Localidad alineados, Detalle pegado, "Hasta" más corto
+
+Cuatro pedidos más de la clienta sobre "Oferta de consultorios" (siempre
+Regular; Aislada sigue pendiente para más adelante):
+
+- **Se saca el título "Grilla semanal"** del panel de Filtros de la
+  grilla — `self.grilla.fijar_titulo_filtros("")`, mismo criterio que
+  Reservas.
+- **"Profesional" alineado con "Localidad".** Con el título sacado,
+  "Localidad" (primer filtro del panel de Filtros, ya sin `renombrar_
+  etiquetas_filtro()` en esta pantalla — sigue diciéndose "Localidad",
+  no "Filtro de localidad") quedaba 6px más abajo que "Profesional"
+  (primer campo de la columna del formulario) — medido con un script de
+  geometría, no a ojo. A diferencia de Reservas (que parte de un margen
+  superior en 0 para `form`), acá `form` nunca tuvo márgenes propios
+  seteados — seguía con el default de Qt (9px) — así que alcanzó con
+  subir el margen superior de `form` de 9 a 15px (`form.
+  setContentsMargins(9, 15, 9, 9)`) para igualar las dos alturas exacto
+  (confirmado: las dos etiquetas quedan al mismo `y` global).
+- **"Detalle" pegado debajo de la grilla.** Mismo método opt-in que ya
+  usa Reservas regulares, `self.grilla.dar_stretch_a_detalle()`: le
+  saca el `stretch` a la tabla de la grilla (que se estiraba con
+  relleno vacío hasta el pie de la columna) y se lo pasa al cuadro
+  "Detalle", que ahora crece en su lugar — la tabla termina justo donde
+  termina su contenido real, con "Detalle" inmediatamente debajo (el
+  separador que queda es el spacing default de `layout_grilla`, 6px,
+  mismo residual que ya acepta Reservas regulares para este mismo
+  método, no se tocó).
+- **"Hasta (solo Aislada)" pasa a "Hasta"** — pedido explícito, el
+  comportamiento no cambia: sigue deshabilitado (gris) en modo Regular
+  vía `_al_cambiar_tipo`, la aclaración entre paréntesis solo describía
+  ese comportamiento en el texto, no lo cambiaba.
+- **Ancho liberado a la segunda columna.** Acortar esa etiqueta bajó el
+  sizeHint de `fila_fechas` (la fila que más pesaba en el ancho de la
+  columna desde que "Agregar franja"/"Quitar franja" volvió a su fila
+  horizontal) y con eso el de toda la columna, de 450px a 385px —
+  `_ANCHO_PANEL_FILTROS_GRILLA` sube de 290 a 355 (mismo criterio que
+  la primera vuelta: el ancho liberado en la columna del formulario se
+  lo lleva el panel de Filtros de la grilla) para no dejarlo como
+  espacio libre sin repartir.
+
+Tests nuevos en `test_gui_oferta.py`: `test_etiqueta_hasta_sin_
+aclaracion_de_aislada`, `test_profesional_alineado_con_localidad_de_la_
+grilla`, `test_detalle_pegado_debajo_de_la_grilla_sin_relleno`,
+`test_panel_filtros_de_la_grilla_mas_ancho`. El de "tiene título Grilla
+semanal" se reescribe como `test_grilla_embebida_sin_titulo`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
