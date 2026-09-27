@@ -887,6 +887,131 @@ def test_reservar_alto_scroll_horizontal_es_opt_in(qtbot, conn):
     assert widget._reservar_alto_scroll_horizontal is False
 
 
+def test_activar_filas_y_columnas_fijas_es_opt_in(qtbot, conn):
+    """No afecta al resto de los usos de esta grilla compartida (Reservas,
+    Novedades, Grilla semanal) — que no lo llaman."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget._filas_columnas_fijas is False
+    assert widget._tabla_esquina is None
+    assert widget._tabla_fila_fija is None
+    assert widget._tabla_columna_fija is None
+
+
+def test_activar_filas_y_columnas_fijas_arma_las_tres_tablas_con_las_dimensiones_correctas(qtbot, conn):
+    """Pedido explícito de la clienta: Tipo de bloque/Horario (columnas) y
+    Día de la semana/.../Consultorio (filas de encabezado) quedan siempre
+    visibles al escrolear. `_tabla_esquina` cubre la intersección fija
+    (filas de encabezado × columnas fijas), `_tabla_fila_fija` el resto
+    de las filas de encabezado (mismas columnas de datos que `self.tabla`)
+    y `_tabla_columna_fija` el resto de las columnas fijas (mismas filas
+    de datos que `self.tabla`) — las tres del mismo tamaño que la porción
+    de `self.tabla` que reemplazan."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+
+    widget.activar_filas_y_columnas_fijas()
+
+    filas_encabezado = widget._filas_encabezado_actual
+    assert filas_encabezado > 0
+    n_filas_datos = widget.tabla.rowCount() - filas_encabezado
+    n_columnas_datos = widget.tabla.columnCount() - 2
+
+    assert widget._tabla_esquina.rowCount() == filas_encabezado
+    assert widget._tabla_esquina.columnCount() == 2
+    assert widget._tabla_fila_fija.rowCount() == filas_encabezado
+    assert widget._tabla_fila_fija.columnCount() == n_columnas_datos
+    assert widget._tabla_columna_fija.rowCount() == n_filas_datos
+    assert widget._tabla_columna_fija.columnCount() == 2
+
+
+def test_activar_filas_y_columnas_fijas_duplica_el_contenido(qtbot, conn):
+    """El texto de cada celda fija (etiqueta de encabezado, Tipo de
+    bloque, Horario) tiene que coincidir entre `self.tabla` y la tabla
+    fija que la duplica — sin esto, las tablas fijas quedarían vacías o
+    con contenido viejo mientras `self.tabla` (tapada por ellas) muestra
+    lo real."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+
+    widget.activar_filas_y_columnas_fijas()
+
+    def _texto(tabla, fila, col) -> str:
+        return tabla.cellWidget(fila, col)._texto
+
+    filas_encabezado = widget._filas_encabezado_actual
+    # Etiqueta de la primera fila de encabezado ("Día de la semana"),
+    # fusionada en `self.tabla` en las columnas 0-1 — en `_tabla_esquina`
+    # arranca en su propia columna 0.
+    assert _texto(widget._tabla_esquina, 0, 0) == _texto(widget.tabla, 0, 0)
+    # Un valor agrupado de esa misma fila (columna de datos 0, la primera
+    # después de Tipo de bloque/Horario) — en `_tabla_fila_fija` arranca
+    # en su propia columna 0.
+    assert _texto(widget._tabla_fila_fija, 0, 0) == _texto(widget.tabla, 0, 2)
+    # "Tipo de bloque" de la primera fila de datos — en `_tabla_columna_
+    # fija` arranca en su propia fila 0.
+    assert _texto(widget._tabla_columna_fija, 0, 0) == _texto(widget.tabla, filas_encabezado, 0)
+    assert _texto(widget._tabla_columna_fija, 0, 1) == _texto(widget.tabla, filas_encabezado, 1)
+
+
+def test_activar_filas_y_columnas_fijas_sincroniza_el_scroll(qtbot, conn):
+    """El scroll de `self.tabla` (horizontal y vertical) se reenvía tal
+    cual, sin ningún descuento, a las tablas fijas correspondientes —
+    ninguna fila/columna de `self.tabla` se oculta (se probó ocultarlas
+    para no necesitar este reenvío directo y resultó un error real: Qt
+    reacomoda el contenido visible para no dejar hueco donde antes había
+    algo oculto, corriendo las filas/columnas de datos hacia la zona que
+    debía quedar tapada por la tabla fija), así que el mismo valor de
+    scroll siempre corresponde a la misma columna/fila visible en las dos
+    tablas."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.activar_filas_y_columnas_fijas()
+
+    hbar = widget.tabla.horizontalScrollBar()
+    if hbar.maximum() > 0:
+        hbar.setValue(hbar.maximum())
+        assert widget._tabla_fila_fija.horizontalScrollBar().value() == hbar.maximum()
+
+    vbar = widget.tabla.verticalScrollBar()
+    widget.limitar_alto_grilla(widget.alto_natural_grilla() // 2)
+    if vbar.maximum() > 0:
+        vbar.setValue(vbar.maximum())
+        assert widget._tabla_columna_fija.verticalScrollBar().value() == vbar.maximum()
+
+
+def test_activar_filas_y_columnas_fijas_geometria_cubre_la_esquina_del_viewport(qtbot, conn):
+    """Las tres tablas fijas quedan superpuestas en la esquina superior
+    izquierda del viewport de `self.tabla`: `_tabla_esquina` en el
+    origen, `_tabla_fila_fija` a su derecha (mismo alto) y `_tabla_
+    columna_fija` debajo (mismo ancho) — así tapan, con el contenido
+    correcto, la porción que tiene que quedar fija."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.show()
+    qtbot.waitExposed(widget)
+    widget.activar_filas_y_columnas_fijas()
+
+    origen = widget.tabla.viewport().pos()
+    esquina = widget._tabla_esquina.geometry()
+    fila_fija = widget._tabla_fila_fija.geometry()
+    columna_fija = widget._tabla_columna_fija.geometry()
+
+    assert esquina.topLeft() == origen
+    assert esquina.width() > 0 and esquina.height() > 0
+    assert fila_fija.top() == esquina.top()
+    assert fila_fija.left() == esquina.right() + 1
+    assert fila_fija.height() == esquina.height()
+    assert columna_fija.left() == esquina.left()
+    assert columna_fija.top() == esquina.bottom() + 1
+    assert columna_fija.width() == esquina.width()
+
+
 def test_agregar_widgets_debajo_de_leyenda_quedan_despues_y_antes_del_stretch(qtbot, conn):
     """Pedido de la clienta al revisar Oferta de consultorios: los tres
     botones de acción se mudan al panel de Filtros, debajo de

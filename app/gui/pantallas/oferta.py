@@ -518,6 +518,11 @@ class _PanelOferta(QWidget):
         # el alto de su propia altura al aparecer, tapando la última fila
         # (el horario más tardío) junto con su línea inferior.
         self.grilla.reservar_alto_scroll_horizontal()
+        # Pedido explícito de la clienta: las columnas Tipo de bloque/
+        # Horario y las filas de encabezado (Día de la semana/.../
+        # Consultorio) quedan siempre visibles al escrolear — solo se
+        # escrolea el bloque de datos.
+        self.grilla.activar_filas_y_columnas_fijas()
 
         splitter.addWidget(self.grilla)
         splitter.setStretchFactor(2, 1)

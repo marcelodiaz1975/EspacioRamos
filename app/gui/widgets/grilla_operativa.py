@@ -24,7 +24,7 @@ import sqlite3
 from datetime import date
 from typing import Callable
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen, QPolygon
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -573,6 +573,11 @@ class GrillaOperativaWidget(QWidget):
         self._filtro_exclusivo_profesional = False
         self._alto_maximo_grilla: int | None = None
         self._reservar_alto_scroll_horizontal = False
+        self._filas_columnas_fijas = False
+        self._filas_encabezado_actual = 0
+        self._tabla_esquina: QTableWidget | None = None
+        self._tabla_fila_fija: QTableWidget | None = None
+        self._tabla_columna_fija: QTableWidget | None = None
         self._armar_ui()
         self._cargar_localidades()
         self.actualizar()
@@ -927,6 +932,107 @@ class GrillaOperativaWidget(QWidget):
         if self.tabla.rowCount():
             self._actualizar_grilla()
 
+    def activar_filas_y_columnas_fijas(self) -> None:
+        """Deja siempre visibles las dos columnas de la izquierda (Tipo de
+        bloque/Horario) y las filas de encabezado de arriba (Día de la
+        semana/Localidad/Edificio/Unidad/Consultorio) al escrolear —
+        "inmovilizar paneles", al estilo Excel: solo se escrolea, en las
+        dos direcciones, el bloque de datos (abajo a la derecha). Pedido
+        explícito de la clienta sobre Oferta de consultorios, la única
+        pantalla donde esta grilla necesita scroll horizontal de forma
+        habitual. Opt-in — no afecta al resto de los usos de esta grilla
+        compartida (Reservas, Novedades, Grilla semanal).
+
+        Mecánica: se arman tres tablas más chicas, superpuestas ENCIMA de
+        `self.tabla` (`_tabla_esquina`, la intersección fija de arriba a
+        la izquierda; `_tabla_fila_fija`, el resto de las filas de
+        encabezado; `_tabla_columna_fija`, el resto de las columnas
+        fijas), posicionadas con `setGeometry` sobre la esquina superior
+        izquierda de su viewport. `_construir_tabla` las llena con el
+        MISMO contenido que `self.tabla` (`_poner_texto_encabezado`/
+        `_poner_texto_dato_fila` duplican cada celda hacia la tabla fija
+        que corresponda, ver esos métodos) — `self.tabla` en sí NO se
+        toca (sigue con todas sus filas/columnas visibles, escroleando
+        como siempre en las dos direcciones); las tres tablas de encima
+        simplemente tapan, con el contenido correcto, la porción que
+        tiene que quedar fija. Los scrollbars de `self.tabla` se
+        reenvían tal cual (mismo valor, sin ningún descuento) a los de
+        `_tabla_fila_fija`/`_tabla_columna_fija`: como NINGUNA columna/
+        fila de `self.tabla` se oculta, a un scroll horizontal `v`
+        cualquiera, lo que se ve arrancando en el borde de la zona fija
+        (columna de datos 0, en el sistema de coordenadas de `self.tabla`)
+        es exactamente lo mismo que muestra `_tabla_fila_fija` arrancando
+        en SU columna 0 al mismo valor `v` — se probó primero ocultando
+        las filas/columnas fijas de `self.tabla` (para que su scroll
+        arrancara ya en los datos) y resultó ser un error real: Qt
+        reacomoda el contenido VISIBLE para no dejar hueco donde antes
+        había una fila/columna oculta, así que las filas de datos
+        terminaban corridas hacia arriba, tapadas por `_tabla_fila_fija`
+        en vez de mostrarse debajo de ella."""
+        if self._filas_columnas_fijas:
+            return
+        self._filas_columnas_fijas = True
+        self._armar_tablas_fijas()
+        if self.tabla.rowCount():
+            self._actualizar_grilla()
+
+    def _armar_tablas_fijas(self) -> None:
+        for nombre in ("_tabla_esquina", "_tabla_fila_fija", "_tabla_columna_fija"):
+            tabla_fija = QTableWidget(self.tabla)
+            tabla_fija.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            tabla_fija.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            tabla_fija.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            tabla_fija.horizontalHeader().setVisible(False)
+            tabla_fija.verticalHeader().setVisible(False)
+            tabla_fija.setShowGrid(False)
+            tabla_fija.setFrameShape(QTableWidget.Shape.NoFrame)
+            tabla_fija.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            tabla_fija.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            setattr(self, nombre, tabla_fija)
+        # Scroll por píxel (no por ítem) en las cuatro tablas — para que
+        # reenviar el VALOR del scrollbar de `self.tabla` tal cual a la
+        # tabla fija correspondiente alcance, sin tener que traducir entre
+        # dos unidades de medida distintas.
+        for tabla in (self.tabla, self._tabla_fila_fija, self._tabla_columna_fija):
+            tabla.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+            tabla.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.tabla.horizontalScrollBar().valueChanged.connect(self._tabla_fila_fija.horizontalScrollBar().setValue)
+        self.tabla.verticalScrollBar().valueChanged.connect(self._tabla_columna_fija.verticalScrollBar().setValue)
+        self.tabla.viewport().installEventFilter(self)
+        self._actualizar_geometria_tablas_fijas()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if (
+            self._filas_columnas_fijas and watched is self.tabla.viewport()
+            and event.type() == QEvent.Type.Resize
+        ):
+            self._actualizar_geometria_tablas_fijas()
+        return super().eventFilter(watched, event)
+
+    def _actualizar_geometria_tablas_fijas(self) -> None:
+        if not self._filas_columnas_fijas:
+            return
+        viewport = self.tabla.viewport()
+        origen = viewport.pos()
+        # Mide sobre `_tabla_esquina` (mismas medidas que `self.tabla` para
+        # estas dos columnas/estas filas) en vez de sobre `self.tabla`
+        # directo — más allá de que hoy da lo mismo, mantiene esta cuenta
+        # independiente de si el día de mañana `self.tabla` llega a ocultar
+        # alguna fila/columna por otro motivo (Qt devuelve 0 de ancho/alto
+        # para una fila/columna oculta, sin importar lo que se le haya
+        # puesto con `setColumnWidth`/`setRowHeight`).
+        ancho_fijo = self._tabla_esquina.columnWidth(_COL_TIPO_BLOQUE) + self._tabla_esquina.columnWidth(_COL_HORARIO)
+        alto_fijo = sum(self._tabla_esquina.rowHeight(f) for f in range(self._filas_encabezado_actual))
+        self._tabla_esquina.setGeometry(origen.x(), origen.y(), ancho_fijo, alto_fijo)
+        self._tabla_fila_fija.setGeometry(
+            origen.x() + ancho_fijo, origen.y(), max(viewport.width() - ancho_fijo, 0), alto_fijo,
+        )
+        self._tabla_columna_fija.setGeometry(
+            origen.x(), origen.y() + alto_fijo, ancho_fijo, max(viewport.height() - alto_fijo, 0),
+        )
+        for tabla_fija in (self._tabla_esquina, self._tabla_fila_fija, self._tabla_columna_fija):
+            tabla_fija.raise_()
+
     def fijar_titulo_filtros(self, titulo: str) -> None:
         """Cambia el título del panel de Filtros — pensado para usos
         embebidos donde tiene más sentido otro nombre (ej. Oferta de
@@ -1149,6 +1255,12 @@ class GrillaOperativaWidget(QWidget):
             self.tabla.setMaximumHeight(alto_tabla)
             self.tabla.setMinimumHeight(min(self.tabla.minimumHeight(), alto_tabla))
         self.setMaximumHeight(alto)
+        # Con filas/columnas fijas activas, achicar `self.tabla` acá (sin
+        # pasar por `_construir_tabla`) puede cambiar el alto real de su
+        # viewport antes de que el evento de resize llegue a disparar el
+        # `eventFilter` — recalcular de una evita que las tablas fijas
+        # queden con la geometría vieja (más alta) por un instante.
+        self._actualizar_geometria_tablas_fijas()
 
     def activar_filtro_exclusivo_profesional(self, activar: bool = True) -> None:
         """Con un profesional elegido en el filtro, no alcanza con
@@ -1193,6 +1305,7 @@ class GrillaOperativaWidget(QWidget):
             self.tabla.setRowCount(0)
             self.tabla.setColumnCount(0)
             self.tabla.setMinimumHeight(0)
+            self._limpiar_tablas_fijas()
             self._resultado = {}
             return
 
@@ -1201,6 +1314,7 @@ class GrillaOperativaWidget(QWidget):
             self.tabla.setRowCount(0)
             self.tabla.setColumnCount(0)
             self.tabla.setMinimumHeight(0)
+            self._limpiar_tablas_fijas()
             self._resultado = {}
             return
 
@@ -1265,6 +1379,14 @@ class GrillaOperativaWidget(QWidget):
                 columnas.append({**base_col, "dia": dia})
         return columnas
 
+    def _limpiar_tablas_fijas(self) -> None:
+        if not self._filas_columnas_fijas:
+            return
+        for tabla_fija in (self._tabla_esquina, self._tabla_fila_fija, self._tabla_columna_fija):
+            tabla_fija.setRowCount(0)
+            tabla_fija.setColumnCount(0)
+        self._filas_encabezado_actual = 0
+
     def _construir_tabla(self, columnas: list[dict], horas: list[int]) -> None:
         n_localidades = len({c["localidad"] for c in columnas})
         n_edificios = len({c["id_edificio"] for c in columnas})
@@ -1274,6 +1396,12 @@ class GrillaOperativaWidget(QWidget):
         filas_encabezado = 3 + int(mostrar_localidad) + int(mostrar_edificio)  # Día [+Localidad][+Edificio] + Unidad + Consultorio
         n_filas = filas_encabezado + len(horas)
         n_columnas = _COL_DATOS_INICIO + len(columnas)
+        # `_poner_texto_dato_fila` la necesita para calcular en qué fila de
+        # `_tabla_columna_fija` cae cada fila de datos (ver "Filas y
+        # columnas fijas" más abajo) — se fija ANTES de armar ninguna
+        # celda, no solo al final, para que ya esté disponible desde la
+        # primera llamada.
+        self._filas_encabezado_actual = filas_encabezado
 
         # setRowCount(0)/setColumnCount(0) primero: QTableWidget.clear() no
         # garantiza liberar los cellWidget de la grilla anterior, y sin esto
@@ -1293,6 +1421,39 @@ class GrillaOperativaWidget(QWidget):
             self.tabla.setRowHeight(fila, 26)
         for fila in range(filas_encabezado, n_filas):
             self.tabla.setRowHeight(fila, 24)
+
+        if self._filas_columnas_fijas:
+            # Mismas dimensiones/anchos/altos que `self.tabla`, repartidos
+            # entre las tres tablas fijas: `_tabla_esquina` (encabezado ×
+            # columnas fijas), `_tabla_fila_fija` (encabezado × columnas de
+            # datos) y `_tabla_columna_fija` (filas de datos × columnas
+            # fijas) — el contenido en sí lo llenan `_poner_texto_
+            # encabezado`/`_poner_texto_dato_fila` más abajo, duplicando
+            # cada celda hacia la tabla fija que corresponda.
+            self._tabla_esquina.setRowCount(0)
+            self._tabla_esquina.setColumnCount(0)
+            self._tabla_esquina.setRowCount(filas_encabezado)
+            self._tabla_esquina.setColumnCount(_COL_DATOS_INICIO)
+            self._tabla_fila_fija.setRowCount(0)
+            self._tabla_fila_fija.setColumnCount(0)
+            self._tabla_fila_fija.setRowCount(filas_encabezado)
+            self._tabla_fila_fija.setColumnCount(len(columnas))
+            self._tabla_columna_fija.setRowCount(0)
+            self._tabla_columna_fija.setColumnCount(0)
+            self._tabla_columna_fija.setRowCount(len(horas))
+            self._tabla_columna_fija.setColumnCount(_COL_DATOS_INICIO)
+
+            self._tabla_esquina.setColumnWidth(_COL_TIPO_BLOQUE, 45)
+            self._tabla_esquina.setColumnWidth(_COL_HORARIO, 50)
+            self._tabla_columna_fija.setColumnWidth(_COL_TIPO_BLOQUE, 45)
+            self._tabla_columna_fija.setColumnWidth(_COL_HORARIO, 50)
+            for col in range(len(columnas)):
+                self._tabla_fila_fija.setColumnWidth(col, ancho_columna)
+            for fila in range(filas_encabezado):
+                self._tabla_esquina.setRowHeight(fila, 26)
+                self._tabla_fila_fija.setRowHeight(fila, 26)
+            for i in range(len(horas)):
+                self._tabla_columna_fija.setRowHeight(i, 24)
 
         limites_dia = self._limites_dia(columnas)
         es_primera_fila_encabezado = 0  # la fila "Día de la semana" siempre es la fila 0
@@ -1381,6 +1542,9 @@ class GrillaOperativaWidget(QWidget):
         else:
             self.tabla.setMinimumHeight(alto_natural)
 
+        if self._filas_columnas_fijas:
+            self._actualizar_geometria_tablas_fijas()
+
     def _limites_dia(self, columnas: list[dict]) -> set[int]:
         return {i for i in range(len(columnas)) if i == len(columnas) - 1 or columnas[i]["dia"] != columnas[i + 1]["dia"]}
 
@@ -1464,18 +1628,51 @@ class GrillaOperativaWidget(QWidget):
         # textos largos ("Día de la semana") — letra más chica ahí para
         # que entren en 2-3 líneas en vez de desbordar la celda.
         tamano = 7 if col == _COL_TIPO_BLOQUE else 8
+        self._colocar_etiqueta_encabezado(self.tabla, fila, col, texto, tamano, span, bordes)
+        if not self._filas_columnas_fijas:
+            return
+        # Con las filas/columnas fijas activas (Oferta), cada celda de
+        # encabezado se duplica hacia la tabla fija que corresponda —
+        # `_tabla_esquina` para la etiqueta de la columna 0 (fusionada con
+        # la 1, `span=2` cubre justo su ancho de 2 columnas), `_tabla_
+        # fila_fija` para los valores agrupados por día/localidad/edificio/
+        # unidad/consultorio (mismo `fila`, columna corrida para que
+        # arranque en 0 — esa tabla solo tiene las columnas de datos).
+        if col == _COL_TIPO_BLOQUE:
+            self._colocar_etiqueta_encabezado(self._tabla_esquina, fila, 0, texto, tamano, span, bordes)
+        else:
+            self._colocar_etiqueta_encabezado(
+                self._tabla_fila_fija, fila, col - _COL_DATOS_INICIO, texto, tamano, span, bordes,
+            )
+
+    def _colocar_etiqueta_encabezado(
+        self, tabla: QTableWidget, fila: int, col: int, texto: str, tamano: int, span: int, bordes: frozenset[str],
+    ) -> None:
         etiqueta = _EtiquetaGrilla(texto, tamano, fondo=COLOR_NIVEL_1, color_texto="#FFFFFF", bordes=bordes)
         if span > 1:
-            self.tabla.setSpan(fila, col, 1, span)
-        self.tabla.setCellWidget(fila, col, etiqueta)
+            tabla.setSpan(fila, col, 1, span)
+        tabla.setCellWidget(fila, col, etiqueta)
 
     def _poner_texto_dato_fila(
         self, fila: int, col: int, texto: str, span_filas: int = 1, bordes: frozenset[str] = frozenset(),
     ) -> None:
+        self._colocar_etiqueta_dato(self.tabla, fila, col, texto, span_filas, bordes)
+        if not self._filas_columnas_fijas:
+            return
+        # Tipo de bloque (col 0) y Horario (col 1) son siempre columnas
+        # fijas — la fila se corre para que `_tabla_columna_fija` (que solo
+        # tiene las filas de DATOS, sin las de encabezado) arranque en 0.
+        self._colocar_etiqueta_dato(
+            self._tabla_columna_fija, fila - self._filas_encabezado_actual, col, texto, span_filas, bordes,
+        )
+
+    def _colocar_etiqueta_dato(
+        self, tabla: QTableWidget, fila: int, col: int, texto: str, span_filas: int, bordes: frozenset[str],
+    ) -> None:
         etiqueta = _EtiquetaGrilla(texto, 7, bordes=bordes)
         if span_filas > 1:
-            self.tabla.setSpan(fila, col, span_filas, 1)
-        self.tabla.setCellWidget(fila, col, etiqueta)
+            tabla.setSpan(fila, col, span_filas, 1)
+        tabla.setCellWidget(fila, col, etiqueta)
 
     def _mostrar_detalle(self, clave: tuple[int, str, int]) -> None:
         celda = self._resultado.get(clave)

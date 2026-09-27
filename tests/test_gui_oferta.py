@@ -861,6 +861,30 @@ def test_grilla_reserva_alto_para_que_el_scroll_horizontal_no_tape_la_ultima_fil
     assert tabla.viewport().height() >= suma_filas
 
 
+def test_grilla_deja_fijas_las_columnas_y_las_filas_de_encabezado(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: Tipo de bloque/Horario y Día de la
+    semana/Unidad/Consultorio quedan siempre visibles al escrolear la
+    grilla — solo se escrolea el bloque de datos. Acá solo se confirma
+    que Oferta prende el mecanismo (`GrillaOperativaWidget.activar_filas_
+    y_columnas_fijas`); el comportamiento del mecanismo en sí (contenido
+    duplicado, sincronización de scroll, geometría) está cubierto en
+    `test_gui_grilla_operativa.py`."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    grilla = pantalla.grilla
+    assert grilla._filas_columnas_fijas is True
+    assert grilla._tabla_esquina.rowCount() > 0
+    assert grilla._tabla_fila_fija.columnCount() > 0
+    assert grilla._tabla_columna_fija.rowCount() > 0
+    # Las tres quedan efectivamente por encima de `self.tabla` en la
+    # esquina superior izquierda de su viewport, no en cualquier lado.
+    origen = grilla.tabla.viewport().pos()
+    assert grilla._tabla_esquina.geometry().topLeft() == origen
+
+
 def test_panel_filtros_de_la_grilla_ancho_fijo(qtbot, conn, profesional_y_consultorio):
     """Ronda "cuatro columnas": el panel de Filtros de la grilla (ahora
     la tercera columna de la pantalla) pasa a tener un ancho FIJO
