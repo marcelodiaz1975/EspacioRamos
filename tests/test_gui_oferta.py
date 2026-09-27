@@ -788,3 +788,54 @@ def test_referencias_de_colores_sin_texto_recortado(qtbot, conn, profesional_y_c
     ]
     una_linea = etiquetas[0].fontMetrics().height()
     assert any(e.minimumHeight() > una_linea * 1.5 for e in etiquetas)
+
+
+def test_leyenda_se_agranda_mas_en_aislada_que_en_regular(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: "Aislada de manera similar a esta
+    pantalla de Regulares" — Aislada tiene 6 referencias contra las 8 de
+    Regular, así que con menos filas para repartir el mismo alto total
+    necesita una muestra y una letra más grandes todavía para llegar al
+    mismo pie de columna. `_ajustar_tamano_leyenda` aplica un juego de
+    valores propio por tipo cada vez que cambia "Tipo de búsqueda"."""
+    from app.negocio.oferta_busqueda import TIPO_AISLADA, TIPO_REGULAR
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData(TIPO_REGULAR))
+    _, alto_regular = pantalla.grilla.tamano_muestra_leyenda()
+
+    pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData(TIPO_AISLADA))
+    _, alto_aislada = pantalla.grilla.tamano_muestra_leyenda()
+
+    assert alto_aislada > alto_regular
+
+
+def test_leyenda_de_aislada_sin_texto_recortado(qtbot, conn, profesional_y_consultorio):
+    """Mismo bug que `test_referencias_de_colores_sin_texto_recortado`,
+    pero para Aislada — su juego propio de tamaño de letra/muestra
+    (agrandado respecto de Regular, ver el test de arriba) también tiene
+    que quedar consistente con lo que `QFontMetrics` usa para calcular el
+    alto de cada etiqueta (`fijar_tamano_fuente_leyenda`, que usa
+    `QLabel.setFont` — no un `setStyleSheet` de CSS, que no lo hubiera
+    reflejado)."""
+    from app.negocio.oferta_busqueda import TIPO_AISLADA
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData(TIPO_AISLADA))
+
+    leyenda = pantalla.grilla._leyenda_colores
+    etiquetas = [
+        leyenda._layout.itemAtPosition(i, 1).widget()
+        for i in range(leyenda._layout.rowCount())
+        if leyenda._layout.itemAtPosition(i, 1) is not None
+    ]
+    from PySide6.QtCore import QRect as _QRect
+
+    ancho = leyenda._ancho_etiqueta
+    for etiqueta in etiquetas:
+        rect = etiqueta.fontMetrics().boundingRect(_QRect(0, 0, ancho, 0), Qt.TextFlag.TextWordWrap, etiqueta.text())
+        # El alto ya calculado no puede quedar por debajo de lo que la
+        # letra REAL (la que Qt termina pintando) necesita.
+        assert etiqueta.minimumHeight() >= rect.height()

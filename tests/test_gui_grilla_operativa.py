@@ -627,6 +627,42 @@ def test_fijar_ancho_etiqueta_leyenda_no_afecta_si_no_se_llama(qtbot, conn):
     assert widget._leyenda_colores._ancho_etiqueta is None
 
 
+def test_fijar_tamano_fuente_leyenda_usa_setfont_no_solo_estilo(qtbot, conn):
+    """Bug real detectado al armar Oferta de consultorios con dos tamaños
+    de letra distintos (Regular/Aislada): un `setStyleSheet` de CSS
+    cambia lo que Qt PINTA pero no lo que devuelve `QLabel.font()` — el
+    `QFontMetrics` de `fijar_ancho_etiqueta` seguía midiendo con la letra
+    VIEJA (más chica) mientras el texto se pintaba con la nueva (más
+    grande), y el texto terminaba recortado arriba y abajo.
+    `fijar_tamano_fuente_leyenda` usa `QLabel.setFont` en su lugar, así
+    que el tamaño puesto ahí es el mismo que después mide `QFontMetrics`."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.mostrar_leyenda_colores()
+    widget.fijar_ancho_etiqueta_leyenda(100)
+
+    widget.fijar_tamano_fuente_leyenda(20)
+
+    etiquetas = [
+        widget._leyenda_colores._layout.itemAtPosition(i, 1).widget()
+        for i in range(widget._leyenda_colores._layout.rowCount())
+        if widget._leyenda_colores._layout.itemAtPosition(i, 1) is not None
+    ]
+    assert all(e.font().pixelSize() == 20 for e in etiquetas)
+    # Con la letra más grande el alto mínimo calculado también crece
+    # (mismo ancho de 100px, mucho más texto por línea a medir).
+    alto_con_fuente_20 = max(e.minimumHeight() for e in etiquetas)
+    widget.fijar_tamano_fuente_leyenda(10)
+    etiquetas = [
+        widget._leyenda_colores._layout.itemAtPosition(i, 1).widget()
+        for i in range(widget._leyenda_colores._layout.rowCount())
+        if widget._leyenda_colores._layout.itemAtPosition(i, 1) is not None
+    ]
+    alto_con_fuente_10 = max(e.minimumHeight() for e in etiquetas)
+    assert alto_con_fuente_10 < alto_con_fuente_20
+
+
 def test_agrandar_panel_filtros_cambia_el_ancho_maximo(qtbot, conn):
     _preparar(conn)
     widget = GrillaOperativaWidget(conn)

@@ -456,6 +456,7 @@ class LeyendaColores(QGroupBox):
         self._columnas = columnas
         self._tamano_muestra = (40, 24)
         self._ancho_etiqueta: int | None = None
+        self._tamano_fuente: int | None = None
         self._layout = QGridLayout(self)
         self.actualizar("regular")
 
@@ -504,6 +505,24 @@ class LeyendaColores(QGroupBox):
         leyenda después, mismo criterio que `fijar_tamano_muestra`."""
         self._ancho_etiqueta = ancho
 
+    def fijar_tamano_fuente(self, puntos: int) -> None:
+        """Fija el tamaño (en píxeles) de la letra de cada descripción —
+        pensado para Oferta de consultorios, que agranda la letra un poco
+        más en modo Aislada (6 referencias) que en Regular (8) para
+        repartir el mismo alto total entre menos filas. A diferencia de
+        `hacer_compacta` (que achica la letra con un `setStyleSheet` de
+        toda la vida, sin que nada dependa después de medirla), acá el
+        tamaño se aplica con `QLabel.setFont` en `actualizar` — un
+        `setStyleSheet` con `font-size` cambia lo que se PINTA pero no lo
+        que devuelve `QLabel.font()`, así que el `QFontMetrics` de
+        `fijar_ancho_etiqueta` seguía midiendo con la letra vieja (más
+        chica) mientras Qt ya dibujaba con la nueva (más grande) —
+        recorte real, detectado al ajustar la leyenda de Aislada.
+        `setFont` cambia las dos cosas a la vez. No vuelve a llamar
+        `actualizar` sola, mismo criterio que el resto de estos
+        `fijar_*`."""
+        self._tamano_fuente = puntos
+
     def actualizar(self, modo: str) -> None:
         # `deleteLater` sola no alcanza: la destrucción real queda diferida
         # al próximo paso del loop de eventos, así que el widget viejo
@@ -525,6 +544,14 @@ class LeyendaColores(QGroupBox):
             self._layout.addWidget(muestra, fila, columna * 2)
             etiqueta = QLabel(texto)
             etiqueta.setWordWrap(True)
+            if self._tamano_fuente is not None:
+                # `setFont` (no un `setStyleSheet` de CSS) para que
+                # `QLabel.font()` — y por lo tanto el `QFontMetrics` de
+                # abajo — reflejen el tamaño real, ver `fijar_tamano_
+                # fuente`.
+                fuente = etiqueta.font()
+                fuente.setPixelSize(self._tamano_fuente)
+                etiqueta.setFont(fuente)
             if self._ancho_etiqueta is not None:
                 metrica = QFontMetrics(etiqueta.font())
                 rect = metrica.boundingRect(QRect(0, 0, self._ancho_etiqueta, 0), Qt.TextFlag.TextWordWrap, texto)
@@ -961,6 +988,17 @@ class GrillaOperativaWidget(QWidget):
         consultorios, que usa la leyenda a una sola columna con
         descripciones largas."""
         self._leyenda_colores.fijar_ancho_etiqueta(ancho)
+        self._actualizar_leyenda_colores()
+
+    def fijar_tamano_fuente_leyenda(self, puntos: int) -> None:
+        """Fija el tamaño de letra de "Referencias de colores" (en
+        píxeles, vía `QLabel.setFont` — no un `setStyleSheet` de CSS, ver
+        `LeyendaColores.fijar_tamano_fuente` para el motivo) y refresca
+        la leyenda con ese valor. Pensado para Oferta de consultorios,
+        que agranda la letra un poco más en modo Aislada que en Regular
+        para que la leyenda llegue al pie de la columna en los dos
+        casos."""
+        self._leyenda_colores.fijar_tamano_fuente(puntos)
         self._actualizar_leyenda_colores()
 
     def agrandar_muestras_leyenda(self, ancho: int, alto: int) -> None:

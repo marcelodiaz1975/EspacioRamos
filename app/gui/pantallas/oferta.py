@@ -99,16 +99,22 @@ from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 
 _TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
 _ANCHO_BOTON_ACCION = 220  # Generar PDF / Generar texto WhatsApp / Nueva búsqueda, los tres iguales
-_ANCHO_PANEL_FILTROS_GRILLA = 250  # baja desde 355: con las 4 columnas de la ronda D, un ancho fijo mayor le sacaba lugar a la grilla (columna 4) y forzaba scroll horizontal de toda la pantalla
+_ANCHO_PANEL_FILTROS_GRILLA = 280  # baja desde 355: con las 4 columnas de la ronda D, un ancho fijo mayor le sacaba lugar a la grilla (columna 4) y forzaba scroll horizontal de toda la pantalla
 # Medidos con un script de geometría: agrandan un poco la muestra de color y
 # la letra de "Referencias de colores" (antes compactada a 2 columnas, ver
 # más abajo) para que la leyenda llegue de verdad al pie de la columna de
 # Filtros — un residuo de 3px (irreductible, confirmado probando varios
 # valores: crece la leyenda Y la columna de al lado por igual, el gap no se
 # cierra) queda como el mismo tipo de resto imperceptible ya aceptado en
-# otras rondas de esta revisión.
-_AJUSTE_ALTO_MUESTRA_LEYENDA = 6
-_TAMANO_FUENTE_LEYENDA = 14  # 13px es el default de toda la app, ver `estilos.py`
+# otras rondas de esta revisión. Regular tiene 8 referencias, Aislada 6 —
+# con menos filas para repartir el mismo alto, Aislada necesita una muestra
+# y una letra más grandes todavía para llegar al mismo pie (ver
+# `_ajustar_tamano_leyenda`, que aplica el juego de valores que corresponda
+# cada vez que cambia "Tipo de búsqueda").
+_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR = 0
+_TAMANO_FUENTE_LEYENDA_REGULAR = 13
+_AJUSTE_ALTO_MUESTRA_LEYENDA_AISLADA = 20
+_TAMANO_FUENTE_LEYENDA_AISLADA = 15
 
 _DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
 
@@ -445,7 +451,7 @@ class _PanelOferta(QWidget):
         # `LeyendaColores.fijar_ancho_etiqueta` para el bug que resuelve
         # (sin esto, algunas descripciones largas quedaban recortadas
         # arriba y abajo en vez de mostrarse completas).
-        self.grilla.fijar_ancho_etiqueta_leyenda(180)
+        self.grilla.fijar_ancho_etiqueta_leyenda(220)
         # Filtros (días) y referencias en una sola línea cada uno — se
         # revierte `agrupar_dias_en_pares()`/`compacta=True` de la ronda
         # anterior, pedido explícito de la clienta para esta vuelta.
@@ -459,15 +465,6 @@ class _PanelOferta(QWidget):
         # "Detalle" crece hasta el pie del formulario (columna 1), que es
         # la referencia de alto de todo el splitter.
         self.grilla.dar_stretch_a_detalle()
-        # El tamaño de la muestra de color (y de la letra) de "Referencias
-        # de colores" se agranda para que, sin el "compacta=True" de la
-        # ronda anterior, la leyenda llegue de verdad al pie de la columna
-        # de Filtros en vez de dejar un tramo de `addStretch()` en blanco
-        # debajo — valor medido con un script de geometría, no a ojo (ver
-        # CLAUDE.md).
-        ancho_muestra, alto_muestra = self.grilla.tamano_muestra_leyenda()
-        self.grilla.agrandar_muestras_leyenda(ancho_muestra, alto_muestra + _AJUSTE_ALTO_MUESTRA_LEYENDA)
-        self.grilla._leyenda_colores.setStyleSheet(f"QLabel {{ font-size: {_TAMANO_FUENTE_LEYENDA}px; }}")
 
         splitter.addWidget(self.grilla)
         splitter.setStretchFactor(2, 1)
@@ -607,6 +604,36 @@ class _PanelOferta(QWidget):
             self.campo_fecha_hasta.setDate(QDate.fromString(hasta_iso, Qt.DateFormat.ISODate))
         self.campo_fecha_hasta.setEnabled(tipo == TIPO_AISLADA)
         self.grilla.fijar_modo("regular" if tipo == TIPO_REGULAR else "aislada")
+        self._ajustar_tamano_leyenda(tipo)
+
+    def _ajustar_tamano_leyenda(self, tipo: str) -> None:
+        """Agranda la muestra de color y la letra de "Referencias de
+        colores" para que la leyenda llegue de verdad al pie de la
+        columna de Filtros (columna 3), en vez de dejar un tramo de
+        `addStretch()` en blanco debajo — pedido explícito de la clienta,
+        "de manera similar" a como quedó Regular. Regular tiene 8
+        referencias, Aislada 6: con menos filas para repartir el mismo
+        alto total, Aislada necesita un ajuste más grande, así que se
+        aplica un juego de valores propio por tipo (medidos con un
+        script de geometría, no a ojo) cada vez que cambia "Tipo de
+        búsqueda" — la leyenda ya se refrescó con el set de referencias
+        que corresponde al llamar a `fijar_modo` más arriba, esto solo
+        le ajusta el tamaño.
+
+        `fijar_tamano_fuente_leyenda` (no un `setStyleSheet` de CSS) para
+        que el alto calculado por `fijar_ancho_etiqueta_leyenda`
+        (`QFontMetrics`) coincida con la letra que Qt termina pintando de
+        verdad — un CSS "font-size" cambia lo pintado pero no lo que
+        devuelve `QLabel.font()`, y el texto quedaba recortado arriba y
+        abajo al medir con una letra más chica que la real (bug real,
+        detectado al armar la leyenda de Aislada más grande que la de
+        Regular)."""
+        ajuste, tamano_fuente = (
+            (_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR, _TAMANO_FUENTE_LEYENDA_REGULAR) if tipo == TIPO_REGULAR
+            else (_AJUSTE_ALTO_MUESTRA_LEYENDA_AISLADA, _TAMANO_FUENTE_LEYENDA_AISLADA)
+        )
+        self.grilla.fijar_tamano_fuente_leyenda(tamano_fuente)
+        self.grilla.agrandar_muestras_leyenda(40, 24 + ajuste)
 
     def _dias_seleccionados(self) -> list[str]:
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
