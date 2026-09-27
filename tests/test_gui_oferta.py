@@ -831,6 +831,36 @@ def test_grilla_nunca_se_recorta_con_mas_horarios_detalle_cede_espacio(
     assert pantalla.grilla.tabla.verticalScrollBar().maximum() <= 2
 
 
+def test_grilla_reserva_alto_para_que_el_scroll_horizontal_no_tape_la_ultima_fila(
+    qtbot, conn, profesional_y_consultorio,
+):
+    """Pedido explícito de la clienta: "dale más largo para que el scrol
+    horizontal no tape lo último que se tendría que ver de la grilla, en
+    este caso el horario de las 21hs con su línea inferior incluída".
+    `reservar_alto_scroll_horizontal()` (opt-in, solo Oferta) suma al
+    alto mínimo de la tabla el espacio de la barra de scroll horizontal
+    — sin esto, el viewport de la tabla mide justo la suma de sus filas
+    y la barra, al aparecer, le come ese mismo alto al viewport, tapando
+    la última fila."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1260, 850)
+    qtbot.waitExposed(pantalla)
+    qtbot.wait(50)
+
+    assert pantalla.grilla._reservar_alto_scroll_horizontal is True
+    tabla = pantalla.grilla.tabla
+    # La grilla necesita scroll horizontal (columna angosta, seis días de
+    # la semana) — confirma que el escenario que motivó el pedido está
+    # realmente presente en este test, no solo la reserva de alto.
+    assert tabla.horizontalScrollBar().maximum() > 0
+    suma_filas = sum(tabla.rowHeight(i) for i in range(tabla.rowCount()))
+    # El borde inferior de la última fila tiene que caer DENTRO del
+    # viewport visible — nunca tapado por la barra de scroll horizontal.
+    assert tabla.viewport().height() >= suma_filas
+
+
 def test_panel_filtros_de_la_grilla_ancho_fijo(qtbot, conn, profesional_y_consultorio):
     """Ronda "cuatro columnas": el panel de Filtros de la grilla (ahora
     la tercera columna de la pantalla) pasa a tener un ancho FIJO
@@ -952,3 +982,42 @@ def test_leyenda_de_aislada_sin_texto_recortado(qtbot, conn, profesional_y_consu
         # El alto ya calculado no puede quedar por debajo de lo que la
         # letra REAL (la que Qt termina pintando) necesita.
         assert etiqueta.minimumHeight() >= rect.height()
+
+
+def test_referencias_de_colores_sin_recorte_al_ancho_real_renderizado(qtbot, conn, profesional_y_consultorio):
+    """Bug real detectado al revisar el pedido de la clienta de "letras
+    cortadas": los dos tests de arriba comparan `minimumHeight()` contra
+    un `boundingRect` calculado con `leyenda._ancho_etiqueta` (el ancho
+    que se le PASÓ a `fijar_ancho_etiqueta_leyenda`) — si ese valor está
+    mal (como pasaba con 220, cuando el ancho REAL renderizado de la
+    etiqueta era 186px), los dos tests siguen pasando igual, porque
+    comparan contra su propia asunción equivocada en vez de contra la
+    realidad. Este test mide el `QLabel.width()` YA RENDERIZADO (mostrando
+    la pantalla de verdad, no solo construyéndola) y confirma que el alto
+    ya calculado alcanza para el wrap real a ESE ancho — a 220px
+    "Reservado a futuro + aislada confirmada este mes." wrapeaba a 2
+    líneas, pero a los 186px reales necesita 3, y la tercera quedaba
+    cortada."""
+    from PySide6.QtCore import QRect as _QRect
+    from app.negocio.oferta_busqueda import TIPO_AISLADA, TIPO_REGULAR
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    for tipo in (TIPO_REGULAR, TIPO_AISLADA):
+        pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData(tipo))
+        pantalla._al_cambiar_tipo()
+        leyenda = pantalla.grilla._leyenda_colores
+        etiquetas = [
+            leyenda._layout.itemAtPosition(i, 1).widget()
+            for i in range(leyenda._layout.rowCount())
+            if leyenda._layout.itemAtPosition(i, 1) is not None
+        ]
+        for etiqueta in etiquetas:
+            ancho_real = etiqueta.width()
+            rect = etiqueta.fontMetrics().boundingRect(
+                _QRect(0, 0, ancho_real, 0), Qt.TextFlag.TextWordWrap, etiqueta.text(),
+            )
+            assert etiqueta.height() >= rect.height(), (tipo, etiqueta.text())

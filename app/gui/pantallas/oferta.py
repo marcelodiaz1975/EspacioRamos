@@ -111,11 +111,30 @@ _ANCHO_PANEL_FILTROS_GRILLA = 280  # baja desde 355: con las 4 columnas de la ro
 # y una letra más grandes todavía para llegar al mismo pie (ver
 # `_ajustar_tamano_leyenda`, que aplica el juego de valores que corresponda
 # cada vez que cambia "Tipo de búsqueda").
-_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR = 3
-_TAMANO_FUENTE_LEYENDA_REGULAR = 13
-_AJUSTE_ALTO_MUESTRA_LEYENDA_AISLADA = 23
-_TAMANO_FUENTE_LEYENDA_AISLADA = 15
-_AJUSTE_EXTRA_MUESTRA_CON_DOMINGO = 9  # medido con una base con el domingo configurado en "Días de grilla"
+#
+# La letra baja de 13/15 a 12/11 (pedido explícito de la clienta: texto
+# "cortado" en algunas referencias) — de paso destapó el bug real detrás de
+# ese recorte, no el tamaño de letra en sí: `fijar_ancho_etiqueta_leyenda`
+# asumía 220px de ancho real para la etiqueta, mientras el ancho REAL
+# renderizado (medido con un script de geometría, estable entre Regular y
+# Aislada porque solo depende de `_ANCHO_PANEL_FILTROS_GRILLA`, no de la
+# letra) es 186px — con 220 de más, `QFontMetrics.boundingRect` calculaba
+# menos líneas de wrap de las que el texto necesitaba de verdad a su ancho
+# real, dejando corta la última línea de las descripciones más largas
+# ("Reservado a futuro + aislada confirmada este mes.", que a 220px wrapea
+# a 2 líneas pero a 186px necesita 3). Con el ancho corregido a 186 el
+# recorte ya no aparece con NINGÚN tamaño de letra — bajar la letra además
+# (lo que pidió la clienta) evita que la mayoría de las descripciones largas
+# lleguen a necesitar ese tercer renglón, dejando la leyenda más compacta y
+# despejada. Los `_AJUSTE_ALTO_MUESTRA_LEYENDA_*` se volvieron a medir desde
+# cero con el ancho ya corregido y la letra ya más chica (no alcanza con
+# reusar los valores de la ronda anterior: con el ancho real bien calculado,
+# el alto que cada descripción necesita de verdad cambia).
+_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR = 9
+_TAMANO_FUENTE_LEYENDA_REGULAR = 12
+_AJUSTE_ALTO_MUESTRA_LEYENDA_AISLADA = 28
+_TAMANO_FUENTE_LEYENDA_AISLADA = 11
+_AJUSTE_EXTRA_MUESTRA_CON_DOMINGO = 9  # re-medido tras bajar la letra y corregir el ancho real de la etiqueta
 
 _DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
 
@@ -451,8 +470,15 @@ class _PanelOferta(QWidget):
         # geometría a partir de `_ANCHO_PANEL_FILTROS_GRILLA`, ver
         # `LeyendaColores.fijar_ancho_etiqueta` para el bug que resuelve
         # (sin esto, algunas descripciones largas quedaban recortadas
-        # arriba y abajo en vez de mostrarse completas).
-        self.grilla.fijar_ancho_etiqueta_leyenda(220)
+        # arriba y abajo en vez de mostrarse completas). Antes en 220 —
+        # corregido a 186, el ancho REAL medido con `QLabel.width()` ya
+        # renderizado (el mismo en Regular y en Aislada, no depende de la
+        # letra): con 220 de más, algunas descripciones necesitaban un
+        # renglón más de wrap del que se les calculaba, quedando cortas
+        # justo esa última línea (bug real detectado al revisar el pedido
+        # de "letras cortadas" de la clienta, ver el comentario de
+        # `_TAMANO_FUENTE_LEYENDA_REGULAR` más arriba).
+        self.grilla.fijar_ancho_etiqueta_leyenda(186)
         # Filtros (días) y referencias en una sola línea cada uno — se
         # revierte `agrupar_dias_en_pares()`/`compacta=True` de la ronda
         # anterior, pedido explícito de la clienta para esta vuelta. Si
@@ -486,6 +512,12 @@ class _PanelOferta(QWidget):
         # (que ya scrollea sola), forzando scroll horizontal de toda la
         # pantalla en vez de solo de la grilla.
         self.grilla.quitar_etiqueta_visualizacion()
+        # La grilla queda más angosta acá que en el resto de los usos de
+        # este widget, así que necesita scroll horizontal para mostrar los
+        # seis días — sin esto, la barra le come al viewport de la tabla
+        # el alto de su propia altura al aparecer, tapando la última fila
+        # (el horario más tardío) junto con su línea inferior.
+        self.grilla.reservar_alto_scroll_horizontal()
 
         splitter.addWidget(self.grilla)
         splitter.setStretchFactor(2, 1)

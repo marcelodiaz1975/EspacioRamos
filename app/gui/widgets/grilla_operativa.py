@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QStyle,
     QTableWidget,
     QTextEdit,
     QVBoxLayout,
@@ -571,6 +572,7 @@ class GrillaOperativaWidget(QWidget):
         self._resaltar_ausencias = False
         self._filtro_exclusivo_profesional = False
         self._alto_maximo_grilla: int | None = None
+        self._reservar_alto_scroll_horizontal = False
         self._armar_ui()
         self._cargar_localidades()
         self.actualizar()
@@ -903,6 +905,27 @@ class GrillaOperativaWidget(QWidget):
         activo y la etiqueta sigue teniendo sentido."""
         self._etiqueta_visualizacion.setVisible(False)
         self._etiqueta_visualizacion.setMaximumWidth(0)
+
+    def reservar_alto_scroll_horizontal(self) -> None:
+        """Suma al alto mínimo de la grilla el espacio que ocupa la barra
+        de scroll horizontal (`QStyle.PM_ScrollBarExtent`) — sin esto, esa
+        barra aparece "comiéndose" el alto del viewport de `self.tabla`
+        justo cuando hace falta (columnas más angostas que el contenido),
+        tapando la última fila con su línea inferior. Pensado para Oferta
+        de consultorios, la única pantalla donde esta grilla queda lo
+        bastante angosta como para necesitar scroll horizontal de forma
+        habitual. Opt-in — no afecta al resto de los usos de esta grilla
+        compartida (Reservas, Novedades, Grilla semanal), que no la
+        llaman. Si la grilla ya tiene filas armadas (el modo "regular" es
+        el default de `combo_modo` — `fijar_modo("regular")` no dispara
+        `currentIndexChanged` porque el índice no cambia, así que esta
+        pantalla nunca vuelve a reconstruir la grilla de Regular después
+        de armar la UI, a diferencia de Aislada, que sí cambia el combo),
+        lo aplica de una llamando a `_actualizar_grilla()` — mismo
+        criterio que `limitar_alto_grilla`."""
+        self._reservar_alto_scroll_horizontal = True
+        if self.tabla.rowCount():
+            self._actualizar_grilla()
 
     def fijar_titulo_filtros(self, titulo: str) -> None:
         """Cambia el título del panel de Filtros — pensado para usos
@@ -1342,6 +1365,16 @@ class GrillaOperativaWidget(QWidget):
         alto_filas_encabezado = sum(self.tabla.rowHeight(f) for f in range(filas_encabezado))
         alto_filas_datos = sum(self.tabla.rowHeight(f) for f in range(filas_encabezado, n_filas))
         alto_natural = alto_filas_encabezado + alto_filas_datos + 4
+        if self._reservar_alto_scroll_horizontal:
+            # Sin esto, el alto mínimo de la tabla alcanza justo para la
+            # suma de filas, sin dejarle lugar a la barra de scroll
+            # horizontal — que, al aparecer, le come al VIEWPORT el
+            # espacio de su propia altura, tapando la última fila (acá,
+            # el horario más tardío, con su línea inferior incluida).
+            # Reservar de más este alto (aunque la barra no llegue a
+            # aparecer en algún caso puntual) solo deja un margen en
+            # blanco chico debajo de la última fila, nunca un recorte.
+            alto_natural += self.tabla.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
         if self._alto_maximo_grilla is not None:
             self.tabla.setMinimumHeight(min(alto_natural, self._alto_maximo_grilla))
             self.tabla.setMaximumHeight(self._alto_maximo_grilla)

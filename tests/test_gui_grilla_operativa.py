@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QPushButton, QStyle, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -849,6 +849,42 @@ def test_limitar_alto_grilla_con_un_tope_mas_chico_recorta_la_tabla_y_el_widget(
     assert widget.maximumHeight() == tope
     assert widget.tabla.maximumHeight() == alto_tabla_esperado
     assert widget.tabla.minimumHeight() == alto_tabla_esperado
+
+
+def test_reservar_alto_scroll_horizontal_suma_el_alto_de_la_barra(qtbot, conn):
+    """Sin esto, el alto mínimo de la tabla alcanza justo para la suma de
+    sus filas, sin dejarle lugar a la barra de scroll horizontal — que,
+    al aparecer, le come al viewport el espacio de su propia altura,
+    tapando la última fila con su línea inferior (bug real detectado en
+    Oferta de consultorios: la última hora de la grilla, con la línea
+    inferior incluida, quedaba tapada por la barra). Como la grilla ya
+    tiene filas armadas al construirse (con `_preparar` ya cargado), el
+    método tiene que reaplicar de una el alto extra — no alcanza con
+    dejarlo para la próxima reconstrucción real, porque el modo
+    "regular" es el default de `combo_modo` y `fijar_modo("regular")` no
+    dispara ninguna reconstrucción (mismo criterio que
+    `limitar_alto_grilla`, que también reaplica de una si la grilla ya
+    tiene filas)."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget.tabla.rowCount() > 0
+    alto_antes = widget.tabla.minimumHeight()
+
+    widget.reservar_alto_scroll_horizontal()
+
+    extra = widget.tabla.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+    assert widget.tabla.minimumHeight() == alto_antes + extra
+
+
+def test_reservar_alto_scroll_horizontal_es_opt_in(qtbot, conn):
+    """No afecta al resto de los usos de esta grilla compartida (Reservas,
+    Novedades, Grilla semanal) — que no lo llaman, mismo criterio que el
+    resto de los métodos opt-in de este widget."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    assert widget._reservar_alto_scroll_horizontal is False
 
 
 def test_agregar_widgets_debajo_de_leyenda_quedan_despues_y_antes_del_stretch(qtbot, conn):
