@@ -4884,6 +4884,117 @@ operativa_diaria_y_van_contiguas` (`tests/test_gui_main.py`) solo
 verifica que las categorías sean esas dos y que vayan contiguas, no el
 orden interno de cada una — sigue pasando sin cambios.
 
+## Placas para timbres: se saca la tercera solapa (catálogo "Placas"),
+## botones debajo de los filtros
+
+Tres pedidos de la clienta sobre "Placas para timbres":
+
+- **Se elimina la tercera solapa** ("Placas", el catálogo genérico sobre
+  la tabla `Placa` sumado en el merge de esta pantalla porque compartía
+  nombre con la operativa) — "repite la función de la primer solapa":
+  "Búsqueda y asignación de placas" ya cubre dar de alta/reasignar/
+  liberar una posición del tablero, con validaciones y vista integrada
+  que el catálogo genérico no tenía. `catalogos.pantalla_placas` se
+  borra por completo de `catalogos.py` (queda sin ningún otro
+  consumidor, mismo criterio de "borrar código muerto entero" del resto
+  del proyecto) — `PantallaPlacasParaTimbres` pasa a tener solo las dos
+  solapas operativas (`panel_operativas.panel_buscar`/`panel_imprimir`).
+- **Los tres botones de acción bajan de una fila horizontal (debajo de
+  la tabla) a la columna de Filtros, uno debajo del otro** — pedido
+  explícito de la clienta, mismo criterio "botones debajo de los
+  filtros" que ya usan Nuevo/Editar/Eliminar en los catálogos genéricos.
+  Orden pedido explícitamente: "Asignar posición placa nueva"
+  (`botonPrimario`) → "Reasignar posición placa existente"
+  (`botonSecundario`) → "Liberar posición" (`botonSecundario`), los tres
+  con el mismo ancho fijo que ya usaba la columna de Filtros
+  (`_ANCHO_BOTON_BUSCAR`). Ningún cambio en la lógica de los tres
+  métodos (`_asignar_nueva`/`_reasignar`/`_liberar`) ni en
+  `_actualizar_botones_tabla` (Reasignar/Liberar siguen deshabilitados
+  sin selección) — puramente reubicación de widgets dentro del mismo
+  layout de columna.
+
+`gui_main.py`: la ayuda de "Placas para timbres" se actualiza para no
+mencionar más la tercera solapa.
+
+Tests: `tests/test_catalogos.py` saca `pantalla_placas` de la
+parametrización de fábricas y borra su test dedicado
+(`test_pantalla_placas_muestra_unidad_y_profesional`).
+`tests/test_gui_placas_para_timbres.py` pasa sus tests de "tres
+pestañas" a "dos pestañas" y borra el que confirmaba la tercera solapa
+como `PantallaCRUD` anidada.
+
+## Reservas: aviso si al profesional le falta la placa de la unidad
+
+Pedido explícito de la clienta, mismo mecanismo y mismo cartel que el
+aviso de llaves faltantes (ver "Reservas: aviso si al profesional le
+falta la llave..." más arriba): "cuando asigne una reserva, ya sea
+aislada o regular, que el sistema chequee si el profesional tiene placa
+en la unidad a la cual se le asigna... si no tiene placa no bloquea,
+emite un alerta... con opciones de continuar o cancelar. Este alerta
+funciona en conjunto con el alerta de las llaves, en el mismo cuadro
+avisa si le falta llave y placa, solo placa o solo llave. Si no le
+falta nada el alerta no se hace." Tampoco acá se consultó ninguna
+decisión abierta: el pedido ya describe el comportamiento de punta a
+punta y el modelo de `Placa` (una fila por posición del tablero de una
+Unidad, con `IdProfesional`) ya resuelve sin ambigüedad qué significa
+"tener placa" — cualquier posición asignada a ese profesional en esa
+Unidad alcanza, no hace falta ninguna posición puntual.
+
+`app.negocio.placas.placa_faltante_para_reserva(conn, *, id_profesional,
+id_consultorio)` (nueva) resuelve Consultorio → Unidad y devuelve
+`["la placa de la unidad {Departamento}"]` si el profesional no tiene
+ninguna fila de `Placa` en esa Unidad, o `[]` si ya tiene alguna (en
+cualquier posición) o si el consultorio/unidad no existen — mismo
+contrato exacto que `llaves_faltantes_para_reserva` (misma firma de
+parámetros por keyword, misma forma de lista de textos), a propósito,
+para que las dos listas se puedan concatenar sin ninguna adaptación.
+
+En `app/gui/pantallas/reservas.py`, `_confirmar_llaves_faltantes` se
+renombra `_confirmar_llave_o_placa_faltante` y arma un único cartel
+(`QMessageBox.question`, título "Falta llave o placa") con el mensaje
+"Al profesional le falta " + " y ".join(faltantes) + — la lista que
+recibe ya viene de concatenar las dos funciones
+(`llaves_faltantes_para_reserva(...) + placa_faltante_para_reserva(...)`)
+en los dos call sites (Regulares y Aisladas), así que el texto
+menciona automáticamente cualquier combinación (solo llave, solo placa,
+o ambas juntas) sin necesitar ninguna rama nueva — si la lista
+concatenada queda vacía, no se llama a la función y no aparece ningún
+cartel. Mismo lugar de la cadena que antes (una sola vez por click en
+"Crear...", antes del loop de días en Regulares; con la misma guarda
+`if not forzar` en Aisladas para no repreguntar en el reintento
+automático de `ConflictoBloqueanteError`).
+
+Tests nuevos: `tests/test_placas.py` (`placa_faltante_para_reserva` — 5
+tests: sin placa la reporta, con placa asignada no reporta nada,
+alcanza con cualquier posición del tablero, no cuenta la placa de otro
+profesional, consultorio inexistente no rompe — mismo criterio que los
+tests ya existentes de `llaves_faltantes_para_reserva`).
+`tests/test_gui_reservas.py` suma, en las dos solapas, un test de
+"avisa solo por placa si no hay llaves configuradas" y uno de "avisa
+con llave y placa juntas en un mismo cartel" (capturando el texto real
+del cartel vía monkeypatch de `QMessageBox.question`); los dos tests ya
+existentes de "con llave asignada no avisa" se actualizan para además
+asignarle una placa al profesional (si no, ahora avisarían igual, por
+la placa faltante).
+
+Regresión encontrada y corregida en un test PREEXISTENTE, sin relación
+directa con este pedido:
+`test_crear_reserva_regular_con_conflicto_en_un_dia_sigue_con_los_demas`
+mockea `QMessageBox.question` globalmente a "No" para simular que el
+operador cancela el cartel de conflicto de un día puntual (Martes),
+esperando que Lunes se cree igual. Como el profesional de este test
+nunca tenía una placa asignada, el aviso nuevo disparaba SU PROPIO
+cartel antes de llegar siquiera al loop de días — y el mismo mock
+global de "No" cancelaba ahí la carga completa (ni Lunes ni Martes),
+en vez de solo cancelar Martes como pretendía el test. Se corrigió
+asignándole una placa al profesional en el setup de ese test, con un
+comentario explicando por qué hace falta — verificado además que
+ningún otro test de este archivo con el mismo patrón de mock
+(`test_crear_reserva_regular_no_resuelve_pedido_si_operador_dice_que_no`,
+`test_crear_reserva_aislada_fecha_mes_anterior_pide_confirmacion`)
+tiene el mismo problema, por motivos propios de cada uno (ver el código
+para el detalle).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
