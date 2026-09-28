@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QMessageBox, QScrollArea
+from PySide6.QtWidgets import QDialog, QFormLayout, QLabel, QMessageBox, QScrollArea
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -246,9 +246,9 @@ def test_filtro_por_profesional_reduce_la_tabla(qtbot, conn):
 def test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar(qtbot, conn):
     pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.boton_asignar_nueva.text() == "Asignar posición placa nueva"
-    assert pantalla.boton_reasignar.text() == "Reasignar posición placa existente"
-    assert pantalla.boton_liberar.text() == "Liberar posición"
+    assert pantalla.boton_asignar_nueva.text() == "Asignar posición de placa\na profesional"
+    assert pantalla.boton_reasignar.text() == "Reasignar posición de placa\na otro profesional"
+    assert pantalla.boton_liberar.text() == "Liberar posición de placa"
     assert pantalla.boton_asignar_nueva.width() == pantalla.boton_reasignar.width()
     assert pantalla.boton_asignar_nueva.width() == pantalla.boton_liberar.width()
 
@@ -345,6 +345,79 @@ def test_dialogo_nueva_ofrece_solo_posiciones_libres(qtbot, conn):
 
     posiciones = [dialogo.combo_posicion.itemData(i) for i in range(dialogo.combo_posicion.count())]
     assert posiciones == [1, 3]
+
+
+def test_dialogo_nueva_localidad_y_edificio_unicos_quedan_preseleccionados_y_deshabilitados(qtbot, conn):
+    """Pedido explícito de la clienta: si solo hay una Localidad (o un
+    solo Edificio dentro de ella), ese combo se preselecciona solo y
+    queda deshabilitado — un combo deshabilitado ya queda afuera de la
+    cadena de foco de Qt, así que el foco pasa solo al siguiente
+    selector sin código extra."""
+    _, id_unidad = _crear_unidad(conn, localidad="Ramos Mejía")
+
+    dialogo = _DialogoPlaca(conn)
+    qtbot.addWidget(dialogo)
+
+    assert dialogo.combo_localidad.count() == 1
+    assert dialogo.combo_localidad.isEnabled() is False
+    assert dialogo.combo_edificio.count() == 1
+    assert dialogo.combo_edificio.isEnabled() is False
+    assert dialogo.combo_unidad.findData(id_unidad) == 0
+
+
+def test_dialogo_nueva_con_varias_localidades_el_combo_queda_habilitado(qtbot, conn):
+    _crear_unidad(conn, nombre_edificio="Torre A", localidad="Ramos Mejía")
+    _crear_unidad(conn, nombre_edificio="Torre B", localidad="Haedo")
+
+    dialogo = _DialogoPlaca(conn)
+    qtbot.addWidget(dialogo)
+
+    assert dialogo.combo_localidad.count() == 2
+    assert dialogo.combo_localidad.isEnabled() is True
+
+
+def test_dialogo_nueva_elegir_localidad_acota_edificio_y_unidad(qtbot, conn):
+    _, id_unidad_ramos = _crear_unidad(conn, nombre_edificio="Torre A", departamento="1A", localidad="Ramos Mejía")
+    _crear_unidad(conn, nombre_edificio="Torre B", departamento="1B", localidad="Haedo")
+
+    dialogo = _DialogoPlaca(conn)
+    qtbot.addWidget(dialogo)
+
+    indice_haedo = dialogo.combo_localidad.findText("Haedo")
+    dialogo.combo_localidad.setCurrentIndex(indice_haedo)
+
+    assert dialogo.combo_edificio.count() == 1
+    assert dialogo.combo_edificio.currentText() == "Torre B"
+    ids_unidad = [dialogo.combo_unidad.itemData(i) for i in range(dialogo.combo_unidad.count())]
+    assert ids_unidad == [dialogo.combo_unidad.itemData(0)]
+    assert id_unidad_ramos not in ids_unidad
+
+
+def test_dialogo_reasignar_muestra_localidad_edificio_y_unidad_por_separado(qtbot, conn):
+    """Pedido explícito de la clienta: ya no un solo campo combinado
+    "Edificio - Unidad" — Localidad/Edificio/Unidad quedan cada uno en
+    su propia fila (de solo lectura acá: reasignar no cambia de unidad,
+    solo de profesional)."""
+    _, id_unidad = _crear_unidad(conn, nombre_edificio="Ramos 1", departamento="1ro A", localidad="Ramos Mejía")
+    id_profesional = _crear_profesional(conn)
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+
+    dialogo = _DialogoPlaca(conn, placa_existente=placa)
+    qtbot.addWidget(dialogo)
+
+    layout = dialogo.layout()
+    etiquetas = {}
+    for fila in range(layout.rowCount()):
+        item_etiqueta = layout.itemAt(fila, QFormLayout.ItemRole.LabelRole)
+        item_campo = layout.itemAt(fila, QFormLayout.ItemRole.FieldRole)
+        if item_etiqueta is None or item_campo is None or not isinstance(item_campo.widget(), QLabel):
+            continue
+        etiquetas[item_etiqueta.widget().text()] = item_campo.widget().text()
+
+    assert etiquetas["Localidad"] == "Ramos Mejía"
+    assert etiquetas["Edificio"] == "Ramos 1"
+    assert etiquetas["Unidad"] == "1ro A"
 
 
 def test_dialogo_reasignar_precarga_datos_existentes(qtbot, conn):

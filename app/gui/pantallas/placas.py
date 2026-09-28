@@ -55,7 +55,13 @@ from PySide6.QtWidgets import (
 )
 from reportlab.lib.pagesizes import A4
 
-from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
+from app.gui.pantallas.reservas import (
+    _opciones_edificio,
+    _opciones_localidad,
+    _opciones_profesional,
+    _opciones_unidad,
+    _texto_profesional,
+)
 from app.gui.widgets.grilla_operativa import (
     _agregar_item_todos,
     _corregir_seleccion_todos,
@@ -251,15 +257,15 @@ class _PanelPlacasOperativas(QWidget):
         # debajo del otro, en este orden — mismo criterio que Nuevo/
         # Editar/Eliminar de los catálogos genéricos (botones debajo de
         # los filtros, en la misma columna).
-        self.boton_asignar_nueva = QPushButton("Asignar posición placa nueva")
+        self.boton_asignar_nueva = QPushButton("Asignar posición de placa\na profesional")
         self.boton_asignar_nueva.setObjectName("botonPrimario")
         self.boton_asignar_nueva.setFixedWidth(_ANCHO_BOTON_BUSCAR)
         self.boton_asignar_nueva.clicked.connect(self._asignar_nueva)
-        self.boton_reasignar = QPushButton("Reasignar posición placa existente")
+        self.boton_reasignar = QPushButton("Reasignar posición de placa\na otro profesional")
         self.boton_reasignar.setObjectName("botonSecundario")
         self.boton_reasignar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
         self.boton_reasignar.clicked.connect(self._reasignar)
-        self.boton_liberar = QPushButton("Liberar posición")
+        self.boton_liberar = QPushButton("Liberar posición de placa")
         self.boton_liberar.setObjectName("botonSecundario")
         self.boton_liberar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
         self.boton_liberar.clicked.connect(self._liberar)
@@ -675,22 +681,42 @@ class _DialogoPlaca(QDialog):
         layout = QFormLayout(self)
 
         if placa_existente is None:
+            # Pedido explícito de la clienta: Localidad/Edificio/Unidad se ven
+            # y se eligen por separado (no un combo compacto "Edificio -
+            # Unidad") — mismo criterio subido a regla general del sistema,
+            # ver "Selectores de ubicación" en CLAUDE.md. Cascada real
+            # (reusa `_opciones_localidad`/`_opciones_edificio`/
+            # `_opciones_unidad`, import cruzado de `reservas.py` — mismo
+            # criterio que el resto de las pantallas que arman esta misma
+            # cascada). Si un nivel tiene una sola opción, se preselecciona y
+            # se deshabilita — un combo deshabilitado queda afuera de la
+            # cadena de foco de Qt sola, así que el foco pasa solo al
+            # siguiente selector sin código extra.
+            self.combo_localidad = QComboBox()
+            self.combo_localidad.currentIndexChanged.connect(self._cargar_edificios_dialogo)
+            layout.addRow("Localidad", self.combo_localidad)
+
+            self.combo_edificio = QComboBox()
+            self.combo_edificio.currentIndexChanged.connect(self._cargar_unidades_dialogo)
+            layout.addRow("Edificio", self.combo_edificio)
+
             self.combo_unidad = QComboBox()
-            for fila in conn.execute(
-                "SELECT u.IdUnidad, u.Departamento, e.Nombre AS NombreEdificio FROM Unidad u "
-                "JOIN Edificio e ON e.IdEdificio = u.IdEdificio ORDER BY e.Nombre, u.Departamento"
-            ):
-                self.combo_unidad.addItem(f"{fila['NombreEdificio']} - {fila['Departamento']}", fila["IdUnidad"])
             self.combo_unidad.currentIndexChanged.connect(self._cargar_posiciones_libres)
             layout.addRow("Unidad", self.combo_unidad)
 
             self.combo_posicion = QComboBox()
             layout.addRow("Posición libre", self.combo_posicion)
-            self._cargar_posiciones_libres()
+            self._cargar_localidades_dialogo()
         else:
             unidad = obtener_repositorio(conn, "Unidad").obtener(placa_existente["IdUnidad"])
             edificio = obtener_repositorio(conn, "Edificio").obtener(unidad["IdEdificio"])
-            layout.addRow("Unidad", QLabel(f"{edificio['Nombre']} - {unidad['Departamento']}"))
+            localidad = (
+                obtener_repositorio(conn, "Localidad").obtener(edificio["IdLocalidad"])
+                if edificio["IdLocalidad"] else None
+            )
+            layout.addRow("Localidad", QLabel(localidad["Localidad"] if localidad else "(Sin localidad)"))
+            layout.addRow("Edificio", QLabel(edificio["Nombre"]))
+            layout.addRow("Unidad", QLabel(unidad["Departamento"]))
             layout.addRow("Posición", QLabel(str(placa_existente["PosicionTablero"])))
 
         self.combo_profesional = QComboBox()
@@ -717,6 +743,36 @@ class _DialogoPlaca(QDialog):
         botones.accepted.connect(self.accept)
         botones.rejected.connect(self.reject)
         layout.addRow(botones)
+
+    def _cargar_localidades_dialogo(self) -> None:
+        self.combo_localidad.blockSignals(True)
+        self.combo_localidad.clear()
+        opciones = _opciones_localidad(self.conn)
+        for id_localidad, etiqueta in opciones:
+            self.combo_localidad.addItem(etiqueta, id_localidad)
+        self.combo_localidad.blockSignals(False)
+        self.combo_localidad.setEnabled(len(opciones) > 1)
+        self._cargar_edificios_dialogo()
+
+    def _cargar_edificios_dialogo(self) -> None:
+        id_localidad = self.combo_localidad.currentData()
+        self.combo_edificio.blockSignals(True)
+        self.combo_edificio.clear()
+        opciones = _opciones_edificio(self.conn, id_localidad)
+        for id_edificio, etiqueta in opciones:
+            self.combo_edificio.addItem(etiqueta, id_edificio)
+        self.combo_edificio.blockSignals(False)
+        self.combo_edificio.setEnabled(len(opciones) > 1)
+        self._cargar_unidades_dialogo()
+
+    def _cargar_unidades_dialogo(self) -> None:
+        id_edificio = self.combo_edificio.currentData()
+        self.combo_unidad.blockSignals(True)
+        self.combo_unidad.clear()
+        for id_unidad, etiqueta in _opciones_unidad(self.conn, id_edificio):
+            self.combo_unidad.addItem(etiqueta, id_unidad)
+        self.combo_unidad.blockSignals(False)
+        self._cargar_posiciones_libres()
 
     def _cargar_posiciones_libres(self) -> None:
         id_unidad = self.combo_unidad.currentData()
