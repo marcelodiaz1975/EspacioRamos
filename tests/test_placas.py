@@ -8,6 +8,7 @@ from app.negocio.placas import (
     listar_placas,
     nombre_estandar,
     nombre_grabado,
+    placa_faltante_para_reserva,
     posiciones_libres,
     texto_para_imprimir,
 )
@@ -210,3 +211,57 @@ def test_listar_placas_ordena_por_edificio_unidad_y_posicion(conn):
     placas = listar_placas(conn)
 
     assert [p["PosicionTablero"] for p in placas] == [1, 2]
+
+
+# ------------------------------------------------- placa_faltante_para_reserva
+
+
+def _crear_consultorio(conn, id_unidad):
+    return obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+
+
+def test_placa_faltante_sin_placa_asignada_la_reporta(conn):
+    _, id_unidad = _crear_unidad(conn, departamento="1ro A")
+    id_consultorio = _crear_consultorio(conn, id_unidad)
+    id_profesional = _crear_profesional(conn)
+
+    faltantes = placa_faltante_para_reserva(conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
+
+    assert faltantes == ["la placa de la unidad 1ro A"]
+
+
+def test_placa_faltante_con_placa_asignada_no_reporta_nada(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_consultorio = _crear_consultorio(conn, id_unidad)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+
+    assert placa_faltante_para_reserva(conn, id_profesional=id_profesional, id_consultorio=id_consultorio) == []
+
+
+def test_placa_faltante_alcanza_con_cualquier_posicion_del_tablero(conn):
+    """No importa en qué posición del tablero tenga la placa, alcanza con
+    que tenga alguna en esa unidad."""
+    _, id_unidad = _crear_unidad(conn, limite_placas=5)
+    id_consultorio = _crear_consultorio(conn, id_unidad)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=3, id_profesional=id_profesional)
+
+    assert placa_faltante_para_reserva(conn, id_profesional=id_profesional, id_consultorio=id_consultorio) == []
+
+
+def test_placa_faltante_no_cuenta_la_placa_de_otro_profesional(conn):
+    _, id_unidad = _crear_unidad(conn, departamento="1ro A")
+    id_consultorio = _crear_consultorio(conn, id_unidad)
+    id_profesional = _crear_profesional(conn, apellido="Lo Veci")
+    id_otro = _crear_profesional(conn, apellido="Otro")
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_otro)
+
+    faltantes = placa_faltante_para_reserva(conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
+
+    assert faltantes == ["la placa de la unidad 1ro A"]
+
+
+def test_placa_faltante_consultorio_inexistente_no_rompe(conn):
+    id_profesional = _crear_profesional(conn)
+    assert placa_faltante_para_reserva(conn, id_profesional=id_profesional, id_consultorio=99999) == []

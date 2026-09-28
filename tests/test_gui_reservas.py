@@ -647,16 +647,19 @@ def test_crear_reserva_regular_no_crea_si_cancela_por_llave_faltante(qtbot, conn
 
 
 def test_crear_reserva_regular_con_llave_asignada_no_avisa(qtbot, conn, monkeypatch):
-    """Con la llave del edificio ya asignada al profesional, no hay nada
-    que avisar — si igual se llamara a `QMessageBox.question` para esto,
-    el monkeypatch de "No" haría fallar la creación."""
+    """Con la llave del edificio ya asignada al profesional Y una placa
+    ya asignada en la unidad, no hay nada que avisar — si igual se
+    llamara a `QMessageBox.question` para esto, el monkeypatch de "No"
+    haría fallar la creación."""
     _preparar(conn)
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     id_llave = crear_llave(conn, tipo="Edificio")
     agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio)
     ingresar_copias(conn, id_llave=id_llave, cantidad=1)
     asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional)
+    obtener_repositorio(conn, "Placa").crear(IdUnidad=id_unidad, PosicionTablero=1, IdProfesional=id_profesional, Activo=1)
     conn.commit()
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
 
@@ -668,6 +671,52 @@ def test_crear_reserva_regular_con_llave_asignada_no_avisa(qtbot, conn, monkeypa
     pantalla.panel_regulares._crear()
 
     assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+
+
+def test_crear_reserva_regular_avisa_solo_por_placa_si_no_hay_llaves_configuradas(qtbot, conn, monkeypatch):
+    """Sin ninguna Llave cargada en el sistema no hay nada que chequear
+    de acceso (ver `llaves_faltantes_para_reserva`), pero la placa sigue
+    faltando — el cartel combinado se dispara igual, solo por placa."""
+    _preparar(conn)
+    textos: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: (textos.append(a[2]), QMessageBox.StandardButton.Yes)[1]),
+    )
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_regulares.combo_profesional.setCurrentIndex(1)
+    pantalla.panel_regulares._crear()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+    assert len(textos) == 1
+    assert "placa de la unidad" in textos[0]
+    assert "llave" not in textos[0]
+
+
+def test_crear_reserva_regular_avisa_con_llave_y_placa_juntas_en_un_mismo_cartel(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: si faltan las dos cosas, un solo
+    cartel las menciona a ambas — no dos avisos seguidos."""
+    _preparar(conn)
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    id_llave = crear_llave(conn, tipo="Edificio")
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio)
+    conn.commit()
+    textos: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: (textos.append(a[2]), QMessageBox.StandardButton.Yes)[1]),
+    )
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_regulares.combo_profesional.setCurrentIndex(1)
+    pantalla.panel_regulares._crear()
+
+    assert len(textos) == 1
+    assert "llave del edificio" in textos[0]
+    assert "placa de la unidad" in textos[0]
 
 
 def test_crear_reserva_regular_con_varios_dias_tildados_crea_una_por_dia(qtbot, conn):
@@ -705,12 +754,18 @@ def test_crear_reserva_regular_con_conflicto_en_un_dia_sigue_con_los_demas(qtbot
     se cargan."""
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
     otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
     obtener_repositorio(conn, "ReservaRegular").crear(
         IdProfesional=otro_profesional, IdConsultorio=id_consultorio, DiaSemana="Martes",
         HoraInicio=9, HoraFin=10, VigenciaInicio="2020-01-01",
     )
+    # Con placa asignada, el único cartel "No" que dispara este test es el
+    # del conflicto bloqueante de Martes — si le faltara la placa, el
+    # monkeypatch global de "No" cancelaría la carga entera antes de
+    # llegar al conflicto (ver el aviso combinado llave/placa).
+    obtener_repositorio(conn, "Placa").crear(IdUnidad=id_unidad, PosicionTablero=1, IdProfesional=id_profesional, Activo=1)
     conn.commit()
 
     pantalla = PantallaReservas(conn)
@@ -1013,13 +1068,17 @@ def test_crear_reserva_aislada_no_crea_si_cancela_por_llave_faltante(qtbot, conn
 
 
 def test_crear_reserva_aislada_con_llave_asignada_no_avisa(qtbot, conn, monkeypatch):
+    """Con la llave del edificio ya asignada al profesional Y una placa
+    ya asignada en la unidad, no hay nada que avisar."""
     _preparar(conn)
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     id_llave = crear_llave(conn, tipo="Edificio")
     agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio)
     ingresar_copias(conn, id_llave=id_llave, cantidad=1)
     asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional)
+    obtener_repositorio(conn, "Placa").crear(IdUnidad=id_unidad, PosicionTablero=1, IdProfesional=id_profesional, Activo=1)
     conn.commit()
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
 
@@ -1031,6 +1090,47 @@ def test_crear_reserva_aislada_con_llave_asignada_no_avisa(qtbot, conn, monkeypa
     pantalla.panel_aisladas._crear()
 
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
+
+
+def test_crear_reserva_aislada_avisa_solo_por_placa_si_no_hay_llaves_configuradas(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    textos: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: (textos.append(a[2]), QMessageBox.StandardButton.Yes)[1]),
+    )
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas.combo_profesional.setCurrentIndex(1)
+    pantalla.panel_aisladas._crear()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
+    assert len(textos) == 1
+    assert "placa de la unidad" in textos[0]
+    assert "llave" not in textos[0]
+
+
+def test_crear_reserva_aislada_avisa_con_llave_y_placa_juntas_en_un_mismo_cartel(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    id_llave = crear_llave(conn, tipo="Edificio")
+    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio)
+    conn.commit()
+    textos: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: (textos.append(a[2]), QMessageBox.StandardButton.Yes)[1]),
+    )
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas.combo_profesional.setCurrentIndex(1)
+    pantalla.panel_aisladas._crear()
+
+    assert len(textos) == 1
+    assert "llave del edificio" in textos[0]
+    assert "placa de la unidad" in textos[0]
 
 
 def _monkeypatch_clipboard(monkeypatch):

@@ -53,6 +53,7 @@ from app.negocio.lista_espera import marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.llaves import llaves_faltantes_para_reserva
 from app.negocio.mensajes import mensaje_detalle_reserva_aislada
+from app.negocio.placas import placa_faltante_para_reserva
 from app.negocio.resumen_profesional import calcular_resumen_profesional
 from app.negocio.reservas import (
     ConflictoBloqueanteError,
@@ -194,21 +195,24 @@ def _fmt_horario(hora_inicio: float, hora_fin: float) -> str:
     return f"{_fmt_hora(hora_inicio)} a {_fmt_hora(hora_fin)}"
 
 
-def _confirmar_llaves_faltantes(parent: QWidget, faltantes: list[str]) -> bool:
+def _confirmar_llave_o_placa_faltante(parent: QWidget, faltantes: list[str]) -> bool:
     """Pedido explícito de la clienta: al cargar una reserva (regular o
-    aislada), si `llaves_faltantes_para_reserva` encuentra que el
-    profesional no tiene alguna llave de acceso necesaria, avisa con un
-    cartel Sí/No en vez de bloquear la carga — puede igual atender ahí
-    haciéndose abrir por otro profesional presente en ese momento, "pero
-    está bueno que el sistema avise para ver cómo se maneja el acceso".
-    Devuelve True si el operador elige seguir igual (Sí), False si
-    cancela (No) — mismo criterio (`QMessageBox.question`, Sí/No) que el
-    resto de los carteles de confirmación de esta pantalla (ej.
+    aislada), si al profesional le falta alguna llave de acceso
+    (`llaves_faltantes_para_reserva`) y/o una placa en la unidad
+    (`placa_faltante_para_reserva`), avisa con un cartel Sí/No en vez de
+    bloquear la carga — ninguna de las dos cosas impide atender ahí (una
+    llave la puede suplir otro profesional presente; una placa se puede
+    encargar después), "pero está bueno que el sistema avise". Los dos
+    chequeos se combinan en una sola lista y un solo cartel — si falta
+    solo una llave, solo una placa, o ambas, el texto las menciona todas
+    juntas; si no falta nada, no se llama a esta función. Devuelve True
+    si el operador elige seguir igual (Sí), False si cancela (No) —
+    mismo criterio (`QMessageBox.question`, Sí/No) que el resto de los
+    carteles de confirmación de esta pantalla (ej.
     `ConflictoBloqueanteError`)."""
     respuesta = QMessageBox.question(
-        parent, "Falta acceso al lugar",
+        parent, "Falta llave o placa",
         "Al profesional le falta " + " y ".join(faltantes) + ".\n\n"
-        "Puede atender igual si otro profesional presente le abre.\n"
         "¿Confirmás la reserva de todos modos?",
     )
     return respuesta == QMessageBox.StandardButton.Yes
@@ -915,10 +919,13 @@ class _PanelReservasRegulares(QWidget):
             return
         # Pedido explícito de la clienta: chequear una sola vez por carga
         # (no una vez por día elegido) si al profesional le falta alguna
-        # llave para entrar al lugar de la reserva — ver `_confirmar_
-        # llaves_faltantes`.
-        faltantes = llaves_faltantes_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
-        if faltantes and not _confirmar_llaves_faltantes(self, faltantes):
+        # llave para entrar al lugar de la reserva y/o una placa en la
+        # unidad — un solo cartel combinado, ver `_confirmar_llave_o_
+        # placa_faltante`.
+        faltantes = llaves_faltantes_para_reserva(
+            self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio,
+        ) + placa_faltante_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
+        if faltantes and not _confirmar_llave_o_placa_faltante(self, faltantes):
             return
         advertencias_totales: list[str] = []
         algun_dia_creado = False
@@ -1601,8 +1608,10 @@ class _PanelReservasAisladas(QWidget):
         # chequea una sola vez, no en cada reintento con `forzar=True`
         # (ya se confirmó, o no hacía falta, la primera vez).
         if not forzar:
-            faltantes = llaves_faltantes_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
-            if faltantes and not _confirmar_llaves_faltantes(self, faltantes):
+            faltantes = llaves_faltantes_para_reserva(
+                self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio,
+            ) + placa_faltante_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
+            if faltantes and not _confirmar_llave_o_placa_faltante(self, faltantes):
                 return
         datos = dict(
             id_profesional=id_profesional,

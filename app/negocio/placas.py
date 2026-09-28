@@ -162,6 +162,31 @@ def asignar_placa(
     )
 
 
+def placa_faltante_para_reserva(conn: sqlite3.Connection, *, id_profesional: int, id_consultorio: int) -> list[str]:
+    """Pedido explícito de la clienta, mismo criterio y mismo cartel que
+    `app.negocio.llaves.llaves_faltantes_para_reserva` (con el que se
+    combina en un único aviso desde `reservas.py`): al cargar una
+    reserva (regular o aislada), chequea si el profesional ya tiene
+    alguna placa asignada (en cualquier posición del tablero, no importa
+    cuál) en la Unidad del consultorio reservado. Devuelve una lista de
+    un solo texto ("la placa de la unidad {Departamento}") si le falta,
+    vacía si ya tiene alguna ahí o si el consultorio/unidad no existen —
+    puramente informativo, nunca bloquea la carga."""
+    consultorio = obtener_repositorio(conn, "Consultorio").obtener(id_consultorio)
+    if consultorio is None:
+        return []
+    unidad = obtener_repositorio(conn, "Unidad").obtener(consultorio["IdUnidad"])
+    if unidad is None:
+        return []
+    tiene_placa = any(
+        p["IdProfesional"] == id_profesional
+        for p in obtener_repositorio(conn, "Placa").listar(IdUnidad=unidad["IdUnidad"])
+    )
+    if tiene_placa:
+        return []
+    return [f"la placa de la unidad {unidad['Departamento']}"]
+
+
 def liberar_posicion(conn: sqlite3.Connection, id_placa: int) -> None:
     """Deja la posición vacía otra vez (no queda ningún registro) — para
     cuando la clienta saca la placa física sin armarle una nueva a otro
