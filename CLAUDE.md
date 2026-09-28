@@ -4834,6 +4834,56 @@ tres_solapas_son_celestes` (confirma que Modificar/Anular quedan en
 `botonSecundario`) pierde su aserción sobre los tres "Deshacer..." y su
 docstring, que los mencionaba.
 
+## Valores: se saca "Deshacer último movimiento" de la solapa "Aumentos"
+
+Pedido explícito de la clienta, mismo criterio ya aplicado en Llaves/
+Reservas/Registro de ausencias/Cargos especiales/Centro de mensajería:
+se borra el botón, su conexión (`clicked.connect(self._deshacer_ultimo)`)
+y el método `_deshacer_ultimo` de `_PanelAumentos` (`app/gui/pantallas/
+aumentos.py`), además de sacarlo de la cadena de foco Enter/Tab (pasa de
+terminar en Simular→Confirmar→Editar porcentaje diferencial→Deshacer a
+la misma cadena sin el último paso).
+
+Distinto de los casos anteriores: acá `app.negocio.aumentos.
+deshacer_ultimo_aumento` (la función que revierte valores de
+consultorio/esquema de descuentos/liquidaciones regeneradas) NO se
+borra — a diferencia de los helpers puramente de soporte de Llaves/
+Reservas (que solo existían para alimentar el botón), esta es una
+función de negocio completa, con su propia batería de tests dedicada
+(`tests/test_aumentos.py`) independiente de la GUI; se deja intacta por
+si hace falta usarla desde otro lado más adelante (soporte, un futuro
+botón en otra pantalla, etc.), aunque hoy quede sin ningún consumidor
+en la GUI. Solo se borran los dos tests GUI-side que ejercían el botón
+en `test_gui_aumentos.py` (`test_deshacer_ultimo_movimiento_revierte`/
+`test_deshacer_sin_movimientos_no_falla`) — los cuatro tests de negocio
+de `deshacer_ultimo_aumento` en `test_aumentos.py` no se tocan.
+
+## Reordenamiento del menú "Operativa diaria" (pedido explícito de la clienta)
+
+Sexto ajuste sobre el orden final del menú (después del renombre de
+categorías "Sistema"/"Operativa diaria"): la clienta pidió un orden
+puntual, distinto del que se había armado a criterio propio en esa
+ronda, para las doce secciones de "Operativa diaria":
+
+Grilla y mensajería, Reservas, Valores, Liquidaciones, Pagos, Registro
+de ausencias, Disponibilidad, Profesionales, Llaves y otros conceptos,
+Placas para timbres, Estadísticas, Balance del negocio.
+
+Mismo mecanismo que el renombre de categorías (`VentanaPrincipal` arma
+un separador de categoría cada vez que cambia respecto de la `Seccion`
+anterior en la lista, no agrupa por nombre repetido) — alcanzó con
+reordenar los doce bloques `Seccion` ya existentes dentro de
+`construir_secciones()` (`gui_main.py`), sin tocar contenido de ninguno
+(nombre, fábrica, ayuda). "Sistema" (5 secciones) no se tocó, sigue en
+el mismo orden de siempre. Comentario de `construir_secciones` corregido
+para reflejar que el orden de "Operativa diaria" es ahora un pedido
+explícito de la clienta, no criterio propio.
+
+Sin tests que actualizar: `test_categorias_son_solo_sistema_y_
+operativa_diaria_y_van_contiguas` (`tests/test_gui_main.py`) solo
+verifica que las categorías sean esas dos y que vayan contiguas, no el
+orden interno de cada una — sigue pasando sin cambios.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
