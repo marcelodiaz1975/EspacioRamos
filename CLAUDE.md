@@ -4995,6 +4995,94 @@ ningún otro test de este archivo con el mismo patrón de mock
 tiene el mismo problema, por motivos propios de cada uno (ver el código
 para el detalle).
 
+## Placas: Localidad/Edificio/Unidad por separado en los diálogos (regla
+## general nueva), botones más largos y respuesta sobre el nombre personalizado
+
+Segunda vuelta sobre "Placas para timbres", con cinco pedidos de la
+clienta sobre los dos diálogos de la primera solapa
+(`_DialogoPlaca`, `app/gui/pantallas/placas.py`):
+
+- **Diálogo "Asignar..." con Localidad/Edificio/Unidad por separado.**
+  Reemplaza el combo único "Unidad" (que mostraba "Edificio - Unidad"
+  combinado) por tres selectores en cascada real —
+  `_opciones_localidad`/`_opciones_edificio`/`_opciones_unidad`,
+  importados cruzados de `reservas.py` (mismo criterio de import
+  cruzado que ya usa este archivo para `_opciones_profesional`/
+  `_texto_profesional`, y que ya usan otras pantallas — Liquidaciones
+  simuladas, etc. — para esta misma cascada). Elegir una Localidad
+  acota las opciones de Edificio; elegir un Edificio acota las de
+  Unidad — mismo mecanismo de recarga en cadena (`blockSignals` +
+  recarga manual del siguiente nivel) que ya usan Liquidaciones
+  simuladas/Reservas para esta misma cascada.
+- **Si un nivel tiene una sola opción, se preselecciona y queda
+  deshabilitado — el foco pasa solo al siguiente selector.** Pedido
+  explícito de la clienta, aplicado a Localidad y a Edificio (no a
+  Unidad, que no lo pidió). No hizo falta ningún manejo de foco
+  explícito: un `QComboBox` deshabilitado (`setEnabled(False)`) ya
+  queda afuera de la cadena de foco nativa de Qt, así que Tab/Enter lo
+  saltea solo y cae directo en el siguiente selector habilitado.
+- **Diálogo "Reasignar..." también con los tres por separado.** Antes
+  mostraba un único `QLabel` "Edificio - Unidad"; ahora son tres
+  `QLabel` de solo lectura (Localidad/Edificio/Unidad no se pueden
+  cambiar al reasignar — la Unidad de una posición del tablero es fija,
+  lo único que cambia es el profesional), resolviendo la Localidad vía
+  `Edificio.IdLocalidad` con el mismo fallback "(Sin localidad)" que
+  usa el resto del sistema.
+- **Regla general nueva, para todo el sistema, no solo Placas**: "no me
+  gusta la versión compacta, prefiero ver claramente los cuatro puntos
+  por separado" — pedido explícito de la clienta sobre cualquier combo
+  que combine Localidad/Edificio/Unidad/Consultorio en un solo texto
+  ("Edificio - Unidad", etc.) de acá en adelante. Mismo criterio que
+  otras reglas generales de este documento (Foco, Selectores y fecha,
+  "cuadros scrolleables"): se aplica a las pantallas que se revisen de
+  acá en adelante, no dispara un barrido retroactivo de todo el sistema
+  ya armado con combos compactos. **Alcance confirmado con la clienta**
+  (consultada por `AskUserQuestion` antes de tocar código, porque el
+  pedido original mencionaba también "Consultorio" y el modelo de
+  `Placa` no tiene ese nivel — el tablero es por Unidad, a propósito, no
+  por consultorio, documentado desde el negocio de esta funcionalidad):
+  la regla es Localidad/Edificio/Unidad — Consultorio no aplica a este
+  diálogo puntual, la clienta confirmó el error ("me equivoqué con lo
+  de consultorio... las placas se le asignan a la unidad").
+- **Nombres de los tres botones, más largos, a dos líneas donde hace
+  falta**: "Asignar posición placa nueva" → "Asignar posición de
+  placa\na profesional"; "Reasignar posición placa existente" →
+  "Reasignar posición de placa\na otro profesional" (los dos con salto
+  de línea manual, mismo criterio que otros botones de dos líneas del
+  sistema — ej. "Agregar franja\na la búsqueda" de Oferta — medido con
+  el estilo real de la app antes de decidir el corte: las dos líneas
+  resultantes son más cortas que el texto de una sola línea que ya
+  entraba antes en el mismo ancho, así que `_ANCHO_BOTON_BUSCAR` no
+  necesitó cambiar); "Liberar posición" → "Liberar posición de placa"
+  (una sola línea, entra sin problema en el mismo ancho).
+
+**Respuesta a la pregunta de la clienta** ("¿El nombre personalizado se
+asigna con la primer solapa o con la segunda al imprimir y luego ese
+dato pasa a la BD?", sin cambio de código, es aclaración de
+comportamiento ya existente): son DOS mecanismos independientes, sin
+relación entre sí.
+- El "Nombre grabado personalizado" de los diálogos de la primera
+  solapa (Asignar/Reasignar) SÍ se guarda en la base
+  (`Placa.NombreGrabado`/`Placa.EsPersonalizada`, vía `asignar_placa`)
+  — es el nombre que queda grabado en la placa física del tablero, y
+  es lo que se ve después en la tabla ("Nombre grabado") y en
+  `nombre_grabado()`.
+- El "Personalizar texto de la placa" de la segunda solapa (Imprimir)
+  NO se guarda en ningún lado — solo se usa para ESA tanda puntual de
+  impresión (`generar_pdf_placas_seleccionadas`), independiente del
+  modelo de `Placa` por completo (ver el docstring de
+  `app.negocio.placas`: "La impresión puntual de placas nuevas es
+  independiente de este modelo"). Cerrar la solapa sin generar el PDF
+  pierde ese texto sin dejar rastro.
+
+Tests nuevos en `tests/test_gui_placas.py`:
+`test_dialogo_nueva_localidad_y_edificio_unicos_quedan_preseleccionados_y_deshabilitados`,
+`test_dialogo_nueva_con_varias_localidades_el_combo_queda_habilitado`,
+`test_dialogo_nueva_elegir_localidad_acota_edificio_y_unidad`,
+`test_dialogo_reasignar_muestra_localidad_edificio_y_unidad_por_separado`.
+`test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar` actualiza
+los tres textos esperados.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
