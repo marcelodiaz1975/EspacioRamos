@@ -245,6 +245,28 @@ class _PanelPlacasOperativas(QWidget):
         self._filtro_unidad = _FiltroColapsable(self.lista_unidad)
         columna_filtros.addWidget(self._filtro_unidad)
 
+        # Pedido explícito de la clienta al revisar esta pantalla: los
+        # tres botones de acción bajan de la columna de la tabla (donde
+        # vivían en una fila horizontal) a la columna de Filtros, uno
+        # debajo del otro, en este orden — mismo criterio que Nuevo/
+        # Editar/Eliminar de los catálogos genéricos (botones debajo de
+        # los filtros, en la misma columna).
+        self.boton_asignar_nueva = QPushButton("Asignar posición placa nueva")
+        self.boton_asignar_nueva.setObjectName("botonPrimario")
+        self.boton_asignar_nueva.setFixedWidth(_ANCHO_BOTON_BUSCAR)
+        self.boton_asignar_nueva.clicked.connect(self._asignar_nueva)
+        self.boton_reasignar = QPushButton("Reasignar posición placa existente")
+        self.boton_reasignar.setObjectName("botonSecundario")
+        self.boton_reasignar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
+        self.boton_reasignar.clicked.connect(self._reasignar)
+        self.boton_liberar = QPushButton("Liberar posición")
+        self.boton_liberar.setObjectName("botonSecundario")
+        self.boton_liberar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
+        self.boton_liberar.clicked.connect(self._liberar)
+        columna_filtros.addWidget(self.boton_asignar_nueva)
+        columna_filtros.addWidget(self.boton_reasignar)
+        columna_filtros.addWidget(self.boton_liberar)
+
         columna_filtros.addStretch()
         layout_principal.addWidget(panel_filtros)
 
@@ -263,25 +285,6 @@ class _PanelPlacasOperativas(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._orden = OrdenTabla(self.tabla, self._actualizar_tabla)
         columna_tabla.addWidget(self.tabla, stretch=1)
-
-        fila_botones = QHBoxLayout()
-        self.boton_asignar_nueva = QPushButton("Asignar posición placa nueva")
-        self.boton_asignar_nueva.setObjectName("botonPrimario")
-        self.boton_asignar_nueva.setFixedWidth(_ANCHO_BOTON_BUSCAR)
-        self.boton_asignar_nueva.clicked.connect(self._asignar_nueva)
-        self.boton_reasignar = QPushButton("Reasignar posición placa existente")
-        self.boton_reasignar.setObjectName("botonSecundario")
-        self.boton_reasignar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
-        self.boton_reasignar.clicked.connect(self._reasignar)
-        self.boton_liberar = QPushButton("Liberar posición")
-        self.boton_liberar.setObjectName("botonSecundario")
-        self.boton_liberar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
-        self.boton_liberar.clicked.connect(self._liberar)
-        fila_botones.addWidget(self.boton_asignar_nueva)
-        fila_botones.addWidget(self.boton_reasignar)
-        fila_botones.addWidget(self.boton_liberar)
-        fila_botones.addStretch()
-        columna_tabla.addLayout(fila_botones)
         layout_principal.addLayout(columna_tabla, stretch=1)
 
         self._actualizar_botones_tabla()

@@ -389,22 +389,6 @@ def _resolver_conflicto_gasto(parent, conn: sqlite3.Connection, valores: dict, r
     return valores
 
 
-def pantalla_placas(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
-    def opciones_profesional(c):
-        filas = c.execute("SELECT IdProfesional, Apellido, NombrePila FROM Profesional ORDER BY Apellido").fetchall()
-        return [(f["IdProfesional"], f"{f['Apellido']}, {f['NombrePila'] or ''}".strip(", ")) for f in filas]
-
-    campos = [
-        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad, requerido=True),
-        Campo("PosicionTablero", "Posición en el tablero", tipo="numero"),
-        Campo("IdProfesional", "Profesional", tipo="combo", opciones=opciones_profesional),
-        Campo("NombreGrabado", "Nombre grabado"),
-        Campo("EsPersonalizada", "Es personalizada", tipo="booleano"),
-        Campo("Activo", "Activo", tipo="booleano"),
-    ]
-    return PantallaCRUD(conn, "Placa", "Placas", campos, anidado=anidado)
-
-
 def pantalla_fechas_especiales(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Fecha", "Fecha", tipo="fecha"),

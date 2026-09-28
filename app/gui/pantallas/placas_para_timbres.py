@@ -1,21 +1,24 @@
 """Placas para timbres (reordenamiento de formularios, Excel de la
 clienta): agrupa la pantalla operativa "Placas" (antes formulario propio
-del menú) con el catálogo "Placas" (el tablero de posiciones/nombre
-grabado, distinto de la pantalla operativa aunque comparten nombre) —
-caso no contemplado en el Excel de la clienta, resuelto con ella: pasa a
-ser la tercera solapa de este formulario.
+del menú), con sus dos solapas ("Búsqueda y asignación de placas"/
+"Impresión de placas en papel", renombradas — ver `_PanelPlacasOperativas`
+en `placas.py`).
 
-Tres solapas: "Búsqueda y asignación de placas"/"Impresión de placas en
-papel" (las dos de la vieja pantalla operativa, renombradas — ver
-`_PanelPlacasOperativas` en `placas.py`) y "Placas" (el catálogo,
-anidado vía `catalogos.pantalla_placas`)."""
+Tenía una tercera solapa, el catálogo "Placas" (el tablero de posiciones/
+nombre grabado, `catalogos.pantalla_placas`) — caso no contemplado en el
+Excel de la clienta, sumado en su momento porque compartía nombre con
+esta pantalla operativa. Se sacó a pedido explícito de la clienta al
+revisar esta pantalla: esa solapa repetía la misma función que ya cubre
+"Búsqueda y asignación de placas" (dar de alta/reasignar/liberar una
+posición del tablero), solo que sin las validaciones ni la vista
+integrada con la tabla — `catalogos.pantalla_placas` se borró de
+`catalogos.py` al quedar sin ningún otro consumidor."""
 from __future__ import annotations
 
 import sqlite3
 
 from PySide6.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
 
-from app.gui.pantallas import catalogos
 from app.gui.pantallas.placas import _PanelPlacasOperativas
 
 
@@ -32,7 +35,5 @@ class PantallaPlacasParaTimbres(QWidget):
         self.panel_operativas = _PanelPlacasOperativas(conn)
         self.pestanas.addTab(self.panel_operativas.panel_buscar, "Búsqueda y asignación de placas")
         self.pestanas.addTab(self.panel_operativas.panel_imprimir, "Impresión de placas en papel")
-        self.panel_catalogo_placas = catalogos.pantalla_placas(conn, anidado=True)
-        self.pestanas.addTab(self.panel_catalogo_placas, "Placas")
         self.pestanas.tabBar().setDrawBase(False)
         layout.addWidget(self.pestanas, stretch=1)

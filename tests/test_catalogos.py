@@ -28,7 +28,6 @@ _FABRICAS = [
     catalogos.pantalla_detalles_complementarios_propuesta,
     catalogos.pantalla_profesiones,
     catalogos.pantalla_gastos_operativos,
-    catalogos.pantalla_placas,
     catalogos.pantalla_fechas_especiales,
 ]
 
@@ -171,25 +170,6 @@ def test_pantalla_consultorios_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre1") == 1
     assert nombres.count("CampoLibre2") == 1
     assert nombres.count("CampoLibre3") == 1
-
-
-def test_pantalla_placas_muestra_unidad_y_profesional(qtbot, conn):
-    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
-    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
-    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
-    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
-    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Gómez')")
-    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
-    conn.execute(
-        "INSERT INTO Placa (IdUnidad, IdProfesional, NombreGrabado) VALUES (?, ?, 'Dr. Gómez')",
-        (id_unidad, id_profesional),
-    )
-    conn.commit()
-
-    pantalla = catalogos.pantalla_placas(conn)
-    qtbot.addWidget(pantalla)
-    assert "1A" in pantalla.tabla_widget.item(0, 0).text()
-    assert "Gómez" in pantalla.tabla_widget.item(0, 2).text()
 
 
 def test_pantalla_gastos_operativos_muestra_alcance(qtbot, conn):

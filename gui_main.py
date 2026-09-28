@@ -156,9 +156,9 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
         Seccion(
             "Placas para timbres", lambda conn: PantallaPlacasParaTimbres(conn), categoria="Operativa diaria",
             ayuda="Solapa Búsqueda y asignación de placas: qué profesional tiene placa en qué posición "
-            "del tablero de cada unidad, filtrable por localidad/edificio/unidad/profesional. Solapa "
-            "Impresión de placas en papel: arma una selección puntual de profesionales y genera la hoja "
-            "para cortar e imprimir. Solapa Placas: catálogo del tablero de posiciones/nombre grabado.",
+            "del tablero de cada unidad, filtrable por localidad/edificio/unidad/profesional; desde ahí "
+            "se asigna, reasigna o libera una posición. Solapa Impresión de placas en papel: arma una "
+            "selección puntual de profesionales y genera la hoja para cortar e imprimir.",
         ),
         Seccion(
             "Estadísticas", lambda conn: PantallaEstadisticas(conn), categoria="Operativa diaria",
