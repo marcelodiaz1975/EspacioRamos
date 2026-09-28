@@ -12,10 +12,7 @@ redondea los valores nuevos calculados al múltiplo elegido (1/10/100/
 1000) — no afecta los valores fijados a mano (override en $, no en
 %). Confirmar reusa app.negocio.aumentos.confirmar_aumento, que además
 regenera (dejándolas "Regenerada no enviada") las liquidaciones ya
-emitidas del período afectado. "Deshacer último movimiento" reusa
-app.negocio.aumentos.deshacer_ultimo_aumento, que revierte la corrida más
-reciente completa (valores de consultorio, esquema de descuentos si lo
-había tocado, y liquidaciones regeneradas).
+emitidas del período afectado.
 
 "Esquema de descuentos" es el único lugar desde donde se puede tocar el
 esquema de descuentos (DC-10 §1.1: "solo modificable al ejecutar análisis
@@ -83,7 +80,6 @@ from app.gui.widgets.resumen_saldo import item_monto
 from app.negocio.aumentos import (
     actualizar_esquema_descuentos,
     confirmar_aumento,
-    deshacer_ultimo_aumento,
     detectar_parametros_esquema,
     generar_tramos_esquema,
     simular_aumento,
@@ -245,12 +241,6 @@ class _PanelAumentos(QWidget):
         self.boton_editar.toggled.connect(self._al_tildar_editar)
         form.addWidget(self.boton_editar)
 
-        self.boton_deshacer = QPushButton("Deshacer último movimiento")
-        self.boton_deshacer.setObjectName("botonSecundario")
-        self.boton_deshacer.setFixedWidth(_ANCHO_CAMPO)
-        self.boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        form.addWidget(self.boton_deshacer)
-
         form.addStretch()
         layout.addWidget(panel_form)
 
@@ -266,7 +256,7 @@ class _PanelAumentos(QWidget):
         self._foco = instalar_enter_avanza_foco([
             self.campo_periodo, self.combo_localidad, self.combo_edificio, self.combo_unidad,
             self.spin_porcentaje, self.check_redondear, *self._radios_multiplo.values(),
-            self.boton_simular, self.boton_confirmar, self.boton_editar, self.boton_deshacer,
+            self.boton_simular, self.boton_confirmar, self.boton_editar,
         ], parent=self)
 
     def actualizar(self) -> None:
@@ -491,26 +481,6 @@ class _PanelAumentos(QWidget):
                 f"{len(resumen.liquidaciones_regeneradas)} liquidación(es) del período {resumen.periodo}."
             )
         QMessageBox.information(self, "Aumento confirmado", mensaje)
-        self.actualizar()
-
-    def _deshacer_ultimo(self) -> None:
-        confirmacion = QMessageBox.question(
-            self, "Deshacer último movimiento",
-            "¿Deshacer el último aumento aplicado en el sistema?\nEsto revierte los valores de consultorio, el "
-            "esquema de descuentos (si lo había reemplazado) y las liquidaciones que hubiera regenerado.",
-        )
-        if confirmacion != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            resumen = deshacer_ultimo_aumento(self.conn)
-        except ValueError as error:
-            QMessageBox.warning(self, "Deshacer último movimiento", str(error))
-            return
-        self.conn.commit()
-        QMessageBox.information(
-            self, "Deshacer último movimiento",
-            f"Se revirtieron {resumen.consultorios_revertidos} consultorio(s) del período {resumen.periodo}.",
-        )
         self.actualizar()
 
 

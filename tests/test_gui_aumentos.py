@@ -223,28 +223,6 @@ def test_confirmar_actualiza_valores_de_consultorio(qtbot, conn):
     assert fila["ValorHoraRegularActual"] == pytest.approx(1100)
 
 
-def test_deshacer_ultimo_movimiento_revierte(qtbot, conn):
-    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
-    panel = _PanelAumentos(conn)
-    qtbot.addWidget(panel)
-    panel.spin_porcentaje.setValue(10)
-    panel._simular()
-    panel._confirmar()
-
-    panel._deshacer_ultimo()
-
-    fila = conn.execute(
-        "SELECT ValorHoraRegularActual FROM Consultorio WHERE IdConsultorio = ?", (id_consultorio,),
-    ).fetchone()
-    assert fila["ValorHoraRegularActual"] == pytest.approx(1000)
-
-
-def test_deshacer_sin_movimientos_no_falla(qtbot, conn):
-    panel = _PanelAumentos(conn)
-    qtbot.addWidget(panel)
-    panel._deshacer_ultimo()
-
-
 def test_esquema_arranca_con_valores_por_defecto(qtbot, conn):
     panel = _PanelEsquemaDescuentos(conn)
     qtbot.addWidget(panel)
