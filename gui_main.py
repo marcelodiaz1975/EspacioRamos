@@ -54,9 +54,10 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
     # separador cada vez que la categoría cambia respecto de la sección
     # anterior (no agrupa por nombre repetido en toda la lista), las
     # cinco de "Sistema" van todas juntas primero y las doce de
-    # "Operativa diaria" después; dentro de cada bloque se conservó el
-    # orden relativo que ya tenían entre sí (no hay un orden pedido por
-    # la clienta para esto, es criterio propio).
+    # "Operativa diaria" después. El orden dentro de "Sistema" es
+    # criterio propio (no hubo pedido puntual); el de "Operativa diaria"
+    # sí es un orden pedido explícito de la clienta, sobre el que ya
+    # había armado a criterio propio.
     secciones.extend([
         Seccion(
             "Panel de control", lambda conn: PanelControl(conn), categoria="Sistema",
@@ -105,12 +106,45 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             ayuda="Alta, edición y baja de reservas (regulares y aisladas) por profesional, consultorio y franja.",
         ),
         Seccion(
+            "Valores", lambda conn: PantallaValores(conn), categoria="Operativa diaria",
+            ayuda="Solapa Valores vigentes: valor hora regular/aislada de cada consultorio, filtrable, "
+            "con resumen de promedios. Solapas Aumentos/Esquema de descuentos: simula el impacto de un "
+            "aumento de valores antes de confirmarlo (y lo aplica a todos los valores correspondientes), "
+            "y define los tramos del esquema de descuentos por horas semanales.",
+        ),
+        Seccion(
             "Liquidaciones", lambda conn: ProcesoLiquidacion(conn), categoria="Operativa diaria",
             ayuda="Solapas Emisión de archivos/Estado de cuenta: genera la liquidación PDF de cada "
             "profesional para el período seleccionado, con descuentos por feriados/licencias/"
             "vacaciones ya aplicados, y el estado de cuenta con su historial de liquidaciones "
             "emitidas. Solapa Feriados y fechas especiales: catálogo de feriados y días no "
             "laborables, cargados a mano.",
+        ),
+        Seccion(
+            "Pagos", lambda conn: PantallaPagos(conn), categoria="Operativa diaria",
+            ayuda="Registro de pagos recibidos, planes de pago con refinanciación e interés por saldos "
+            "atrasados, y estado de cuenta del profesional.",
+        ),
+        Seccion(
+            "Registro de ausencias", lambda conn: PantallaRegistroAusencias(conn), categoria="Operativa diaria",
+            ayuda="Solapas Vacaciones/Licencias/Ausencias por motivos varios: plazos por inactividad de un "
+            "profesional cargados manualmente, con su vista previa de la grilla operativa. Solapa Tipos "
+            "de licencia: catálogo de tipos de licencia disponibles para cargarle a un profesional.",
+        ),
+        Seccion(
+            "Disponibilidad", lambda conn: PantallaDisponibilidad(conn), categoria="Operativa diaria",
+            ayuda="Solapa Oferta de consultorios: búsqueda de horarios libres que cumplen criterios "
+            "combinados (franjas, días, consultorio) para armar una oferta en PDF a un profesional "
+            "interesado. Solapa Lista de espera: profesionales interesados en un horario que hoy está "
+            "ocupado — el sistema avisa automáticamente cuando ese horario se libera. Solapa Archivos "
+            "para enviar: regenerar a demanda los documentos que ya se generan solos en el avance de "
+            "mes (Propuesta, Disponibilidad).",
+        ),
+        Seccion(
+            "Profesionales", lambda conn: PantallaProfesionales(conn), categoria="Operativa diaria",
+            ayuda="Solapa Listado de profesionales: alta, baja y edición de profesionales, con su "
+            "categoría, código y la documentación adjunta de cada uno. Solapa Profesiones y "
+            "tratamientos: catálogo de profesiones disponibles para asignarle a un profesional.",
         ),
         Seccion(
             "Llaves y otros conceptos", lambda conn: PantallaLlavesYOtrosConceptos(conn), categoria="Operativa diaria",
@@ -127,41 +161,8 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "para cortar e imprimir. Solapa Placas: catálogo del tablero de posiciones/nombre grabado.",
         ),
         Seccion(
-            "Disponibilidad", lambda conn: PantallaDisponibilidad(conn), categoria="Operativa diaria",
-            ayuda="Solapa Oferta de consultorios: búsqueda de horarios libres que cumplen criterios "
-            "combinados (franjas, días, consultorio) para armar una oferta en PDF a un profesional "
-            "interesado. Solapa Lista de espera: profesionales interesados en un horario que hoy está "
-            "ocupado — el sistema avisa automáticamente cuando ese horario se libera. Solapa Archivos "
-            "para enviar: regenerar a demanda los documentos que ya se generan solos en el avance de "
-            "mes (Propuesta, Disponibilidad).",
-        ),
-        Seccion(
-            "Registro de ausencias", lambda conn: PantallaRegistroAusencias(conn), categoria="Operativa diaria",
-            ayuda="Solapas Vacaciones/Licencias/Ausencias por motivos varios: plazos por inactividad de un "
-            "profesional cargados manualmente, con su vista previa de la grilla operativa. Solapa Tipos "
-            "de licencia: catálogo de tipos de licencia disponibles para cargarle a un profesional.",
-        ),
-        Seccion(
-            "Pagos", lambda conn: PantallaPagos(conn), categoria="Operativa diaria",
-            ayuda="Registro de pagos recibidos, planes de pago con refinanciación e interés por saldos "
-            "atrasados, y estado de cuenta del profesional.",
-        ),
-        Seccion(
             "Estadísticas", lambda conn: PantallaEstadisticas(conn), categoria="Operativa diaria",
             ayuda="Indicadores generales del espacio: ocupación, ingresos y otras métricas agregadas.",
-        ),
-        Seccion(
-            "Valores", lambda conn: PantallaValores(conn), categoria="Operativa diaria",
-            ayuda="Solapa Valores vigentes: valor hora regular/aislada de cada consultorio, filtrable, "
-            "con resumen de promedios. Solapas Aumentos/Esquema de descuentos: simula el impacto de un "
-            "aumento de valores antes de confirmarlo (y lo aplica a todos los valores correspondientes), "
-            "y define los tramos del esquema de descuentos por horas semanales.",
-        ),
-        Seccion(
-            "Profesionales", lambda conn: PantallaProfesionales(conn), categoria="Operativa diaria",
-            ayuda="Solapa Listado de profesionales: alta, baja y edición de profesionales, con su "
-            "categoría, código y la documentación adjunta de cada uno. Solapa Profesiones y "
-            "tratamientos: catálogo de profesiones disponibles para asignarle a un profesional.",
         ),
         Seccion(
             "Balance del negocio", lambda conn: PantallaBalanceDelNegocio(conn), categoria="Operativa diaria",
