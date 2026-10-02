@@ -40,7 +40,7 @@ from app.negocio.formato import formatear_moneda
 from app.negocio.valores_operativos import PromediosValorHora, calcular_promedios_valor_hora
 from app.pdf.estilos import clave_orden_unidad
 
-_COLUMNAS_VALORES = ["Localidad", "Edificio", "Unidad", "Consultorio", "Valor hora regular", "Valor hora aislada"]
+_COLUMNAS_VALORES = ["Localidad", "Edificio", "Unidad", "Consultorio", "Valor regular", "Valor aislada"]
 
 _COLOR_TOTAL = QColor("#B7C8DC")
 _COLOR_LOCALIDAD = QColor("#D2DEEB")
@@ -340,6 +340,7 @@ class _PanelFiltrosJerarquico(QGroupBox):
 
 
 _COLUMNAS_PROMEDIOS = ["Localidad", "Edificio", "Unidad", "Promedio hora regular", "Promedio hora aislada"]
+_PADDING_COLUMNA_PROMEDIOS = 20  # "un poquito" más ancho que el justo, pedido de la clienta, solo Localidad/Edificio
 
 _VALOR_PROMEDIO_POR_COLUMNA = [
     lambda g: g.localidad or "",
@@ -364,15 +365,39 @@ class _PanelPromedios(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Promedios de valor hora regular y aislada", parent)
-        self.setMinimumWidth(720)
-        self.setMaximumWidth(780)
         layout = QVBoxLayout(self)
         self.tabla = _armar_tabla(_COLUMNAS_PROMEDIOS, ordenable_nativo=False)
-        self.tabla.horizontalHeader().sectionClicked.connect(self._ordenar_por_columna)
+        # Localidad/Edificio (pedido explícito de la clienta: "agrandá un
+        # poquito" esas dos) pasan a Interactive para poder sumarles
+        # padding a mano — igual que "Día" en Liquidaciones simuladas,
+        # `resizeColumnToContents` + `setColumnWidth(... + padding)` no
+        # pega en una columna que sigue en ResizeToContents continuo, que
+        # la Qt vuelve a ajustar sola en cuanto cambia el contenido.
+        header = self.tabla.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.sectionClicked.connect(self._ordenar_por_columna)
         layout.addWidget(self.tabla)
         self._promedios = PromediosValorHora()
         self._columna_orden: int | None = None
         self._orden_ascendente = True
+
+    def showEvent(self, event) -> None:
+        # Esta tabla se puebla durante `__init__` de `_PanelValoresVigentes`
+        # (el `on_cambiar` que dispara `_PanelFiltrosJerarquico` al
+        # construirse), momento en el que el widget todavía es huérfano —
+        # no hereda todavía el `setStyleSheet` que `VentanaPrincipal` le
+        # pone a SÍ MISMA (no a la `QApplication`), que recién cascadea una
+        # vez que este panel cuelga de verdad del árbol de la ventana. Con
+        # la fuente sin estilar (más angosta que la bold/14px real de los
+        # encabezados), `_ajustar_ancho` calculaba un ancho de tabla más
+        # chico del que hace falta una vez que el estilo real se aplica —
+        # mismo motivo, documentado en Reservas, por el que un `sizeHint`
+        # calculado durante la construcción no siempre es el definitivo.
+        # Se recalcula una vez más al mostrarse de verdad, ya con el
+        # estilo puesto.
+        super().showEvent(event)
+        self._ajustar_ancho()
 
     def actualizar(self, promedios: PromediosValorHora) -> None:
         self._promedios = promedios
@@ -430,6 +455,35 @@ class _PanelPromedios(QGroupBox):
                     item.setBackground(color)
             for indice, item in enumerate(columnas):
                 self.tabla.setItem(fila, indice, item)
+        self._ajustar_ancho()
+
+    def _ajustar_ancho(self) -> None:
+        """Localidad/Edificio (Interactive) se agrandan a mano sobre su
+        ancho justo; Unidad/los dos Promedio (ResizeToContents) ya se
+        ajustan solos. Antes el GroupBox entero tenía un rango de ancho
+        fijo (720-780) que no guardaba relación con el contenido real,
+        dejando un espacio en blanco después de la última columna (pedido
+        de la clienta: sacarlo). Se fija el ancho de la TABLA (no del
+        GroupBox) a la suma real de sus columnas — el GroupBox se achica
+        solo a su alrededor, dejándole a su `QVBoxLayout` resolver el
+        margen/borde propios en vez de replicarlos a mano acá (un intento
+        con `setFixedWidth` en el GroupBox, calculando margen + borde a
+        mano, quedó corto por no contemplar el borde con esquinas
+        redondeadas de `QGroupBox` en `estilos.py`, y disparaba un
+        scroll horizontal). Se suma un colchón de 2px al resultado: la
+        suma de `columnWidth()` quedaba 1-2px corta contra el ancho real
+        que termina pidiendo el viewport de la tabla (residuo de
+        redondeo de Qt entre el ancho "lógico" por columna y el pixel
+        real renderizado, no algo que dependa del contenido) — sin este
+        colchón disparaba un scroll horizontal de 1px, imperceptible
+        pero real (ver `test_valores_vigentes_sin_scroll_horizontal_
+        con_estilo_real_aplicado`)."""
+        self.tabla.resizeColumnToContents(0)
+        self.tabla.resizeColumnToContents(1)
+        self.tabla.setColumnWidth(0, self.tabla.columnWidth(0) + _PADDING_COLUMNA_PROMEDIOS)
+        self.tabla.setColumnWidth(1, self.tabla.columnWidth(1) + _PADDING_COLUMNA_PROMEDIOS)
+        ancho = sum(self.tabla.columnWidth(i) for i in range(self.tabla.columnCount()))
+        self.tabla.setFixedWidth(ancho + 2 * self.tabla.frameWidth() + 2)
 
 
 class _PanelGrillaSemanal(QWidget):
@@ -475,6 +529,23 @@ class _PanelValoresVigentes(QWidget):
         # una vez (con todo tildado por defecto), y ese refresco necesita
         # que ya existan.
         self.tabla_valores = _armar_tabla(_COLUMNAS_VALORES)
+        # Pedido explícito de la clienta: que se vea completa sin
+        # escrolear para los costados. Localidad/Edificio/Unidad/
+        # Consultorio se quedan en el ResizeToContents de `_armar_tabla`
+        # (su contenido es corto, no necesitan más que eso); "Valor
+        # regular"/"Valor aislada" (acortados de "Valor hora regular"/
+        # "...aislada" — "hora" ya está en el título del GroupBox, de
+        # sobra en la columna, mismo criterio que otros títulos de
+        # columna acortados en el sistema) pasan a Stretch, para que se
+        # lleven todo el ancho que sobra del GroupBox en vez de dejarlo
+        # en blanco o forzar scroll horizontal (mismo criterio que
+        # "Totales por bloques" en Liquidaciones simuladas: columnas
+        # cortas con su ancho justo, las últimas en Stretch). Puntual de
+        # esta tabla — no toca el default de `_armar_tabla` ni la de
+        # `_PanelPromedios`.
+        header_valores = self.tabla_valores.horizontalHeader()
+        header_valores.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header_valores.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.promedios_valores = _PanelPromedios()
 
         self.filtros_valores = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_valores)
