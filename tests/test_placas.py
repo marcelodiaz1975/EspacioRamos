@@ -8,6 +8,7 @@ from app.negocio.placas import (
     listar_placas,
     nombre_estandar,
     nombre_grabado,
+    personalizacion_del_profesional,
     placa_faltante_para_reserva,
     posiciones_libres,
     texto_para_imprimir,
@@ -90,6 +91,68 @@ def test_texto_para_imprimir_con_dos_lineas(conn):
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     texto = texto_para_imprimir(profesional, linea1="Lic. Silvina Pugliese", linea2='Equipo "Sol terapias"')
     assert texto == 'Lic. Silvina Pugliese\nEquipo "Sol terapias"'
+
+
+def test_nombre_grabado_con_dos_lineas_guarda_el_salto_real(conn):
+    """El diálogo de Asignar/Reasignar guarda dos líneas separadas por un
+    salto real (mismo formato que texto_para_imprimir) — nombre_grabado
+    devuelve ese texto tal cual, sin transformar nada (la barra " / " es
+    puramente de la tabla de la GUI, ver test_gui_placas.py)."""
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    id_placa = asignar_placa(
+        conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional,
+        es_personalizada=True, nombre_grabado_personalizado="Lic. Agustina Viavattene\nEquipo Nutri Oeste",
+    )
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    assert nombre_grabado(placa, profesional) == "Lic. Agustina Viavattene\nEquipo Nutri Oeste"
+
+
+# --------------------------------------------------- personalizacion_del_profesional
+
+
+def test_personalizacion_sin_placa_devuelve_none(conn):
+    id_profesional = _crear_profesional(conn)
+    assert personalizacion_del_profesional(conn, id_profesional) is None
+
+
+def test_personalizacion_con_placa_no_personalizada_devuelve_none(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    assert personalizacion_del_profesional(conn, id_profesional) is None
+
+
+def test_personalizacion_con_placa_personalizada_devuelve_el_nombre_guardado(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(
+        conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional,
+        es_personalizada=True, nombre_grabado_personalizado="Equipo Nutri Oeste",
+    )
+    assert personalizacion_del_profesional(conn, id_profesional) == "Equipo Nutri Oeste"
+
+
+def test_personalizacion_con_dos_lineas_devuelve_el_salto_real(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(
+        conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional,
+        es_personalizada=True, nombre_grabado_personalizado="Lic. Agustina Viavattene\nEquipo Nutri Oeste",
+    )
+    assert personalizacion_del_profesional(conn, id_profesional) == "Lic. Agustina Viavattene\nEquipo Nutri Oeste"
+
+
+def test_personalizacion_no_cuenta_la_de_otro_profesional(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn, apellido="Uno")
+    id_otro = _crear_profesional(conn, apellido="Otro")
+    asignar_placa(
+        conn, id_unidad=id_unidad, posicion=1, id_profesional=id_otro,
+        es_personalizada=True, nombre_grabado_personalizado="Del otro",
+    )
+    assert personalizacion_del_profesional(conn, id_profesional) is None
 
 
 def test_asignar_placa_rechaza_posicion_fuera_de_rango(conn):

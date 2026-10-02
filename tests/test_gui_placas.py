@@ -63,16 +63,85 @@ def test_columnas_de_la_tabla_arrancan_con_localidad(qtbot, conn):
     ]
 
 
-def test_columnas_de_la_tabla_se_reparten_el_ancho_por_igual(qtbot, conn):
-    """Pedido de la clienta: en vez de ajustar cada columna a su
-    contenido, las 7 se reparten el ancho disponible por igual."""
+def test_nombre_grabado_es_la_unica_columna_que_se_estira(qtbot, conn):
+    """Pedido explícito de la clienta: reducir las seis columnas cortas
+    (Localidad/Edificio/Unidad/Posición/Profesional/Personalizada) y
+    dárselo a "Nombre grabado" — es la única en modo Stretch, las otras
+    seis se ajustan a su contenido."""
+    from PySide6.QtWidgets import QHeaderView
+
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    header = pantalla.tabla.horizontalHeader()
+    for columna in (0, 1, 2, 3, 4, 6):
+        assert header.sectionResizeMode(columna) == QHeaderView.ResizeMode.Interactive
+    assert header.sectionResizeMode(5) == QHeaderView.ResizeMode.Stretch
+
+
+def test_nombre_grabado_entra_al_menos_51_caracteres(qtbot, conn):
+    """51 = dos líneas completas de 24 caracteres (el límite calibrado
+    contra "Lic. Agustina Viavattene") más " / " en el medio."""
+    from PySide6.QtGui import QFontMetrics
+
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(
+        conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional,
+        es_personalizada=True, nombre_grabado_personalizado="Lic. Agustina Viavattene\nEquipo Nutri Oeste 24c",
+    )
     pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     pantalla.panel_buscar.resize(1400, 700)
     pantalla.panel_buscar.show()
     qtbot.waitExposed(pantalla.panel_buscar)
-    anchos = [pantalla.tabla.columnWidth(i) for i in range(pantalla.tabla.columnCount())]
-    assert max(anchos) - min(anchos) <= 2  # redondeo de Qt al repartir
+
+    referencia = "Lic. Agustina Viavattene / Lic. Agustina Viavattene"  # 51 caracteres
+    ancho_necesario = QFontMetrics(pantalla.tabla.font()).boundingRect(referencia).width()
+    assert pantalla.tabla.columnWidth(5) >= ancho_necesario
+
+
+def test_columnas_cortas_quedan_mas_angostas_que_nombre_grabado(qtbot, conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_buscar.resize(1400, 700)
+    pantalla.panel_buscar.show()
+    qtbot.waitExposed(pantalla.panel_buscar)
+
+    for columna in (0, 1, 2, 3, 4, 6):
+        assert pantalla.tabla.columnWidth(columna) < pantalla.tabla.columnWidth(5)
+
+
+def test_nombre_grabado_en_la_tabla_muestra_barra_en_vez_de_salto_de_linea(qtbot, conn):
+    """Pedido explícito de la clienta: "la barra solo es visual en el
+    campo para que sepa a simple vista que se hizo en dos líneas" — el
+    dato guardado sigue con el salto real (ver test_placas.py), esto es
+    puramente de esta columna de la tabla."""
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(
+        conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional,
+        es_personalizada=True, nombre_grabado_personalizado="Lic. Agustina Viavattene\nEquipo Nutri Oeste",
+    )
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+
+    assert pantalla.tabla.item(0, 5).text() == "Lic. Agustina Viavattene / Equipo Nutri Oeste"
+
+
+def test_nombre_grabado_de_una_linea_en_la_tabla_queda_de_corrido(qtbot, conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(
+        conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional,
+        es_personalizada=True, nombre_grabado_personalizado="Equipo Nutri Oeste",
+    )
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+
+    assert pantalla.tabla.item(0, 5).text() == "Equipo Nutri Oeste"
 
 
 def test_posicion_queda_centrada(qtbot, conn):
@@ -434,10 +503,60 @@ def test_dialogo_reasignar_precarga_datos_existentes(qtbot, conn):
 
     assert dialogo.combo_profesional.currentData() == id_profesional
     assert dialogo.casilla_personalizada.isChecked() is True
-    assert dialogo.campo_nombre_personalizado.text() == "Apodo"
+    assert dialogo.campo_linea1_personalizada.text() == "Apodo"
+    assert dialogo.campo_linea2_personalizada.text() == ""
     valores = dialogo.valores()
     assert valores["id_unidad"] == id_unidad
     assert valores["posicion"] == 1
+
+
+def test_dialogo_reasignar_precarga_las_dos_lineas_por_separado(qtbot, conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    id_placa = asignar_placa(
+        conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional,
+        es_personalizada=True, nombre_grabado_personalizado="Lic. Agustina Viavattene\nEquipo Nutri Oeste",
+    )
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+
+    dialogo = _DialogoPlaca(conn, placa_existente=placa)
+    qtbot.addWidget(dialogo)
+
+    assert dialogo.campo_linea1_personalizada.text() == "Lic. Agustina Viavattene"
+    assert dialogo.campo_linea2_personalizada.text() == "Equipo Nutri Oeste"
+
+
+def test_dialogo_lineas_personalizadas_limitan_a_24_caracteres(qtbot, conn):
+    """Pedido explícito de la clienta: el límite es el mismo que calibró
+    la placa física, "Lic. Agustina Viavattene" (24 caracteres, contando
+    puntos y espacios)."""
+    from app.gui.pantallas.placas import _MAX_CARACTERES_LINEA_PLACA
+
+    dialogo = _DialogoPlaca(conn)
+    qtbot.addWidget(dialogo)
+
+    assert _MAX_CARACTERES_LINEA_PLACA == 24
+    assert dialogo.campo_linea1_personalizada.maxLength() == 24
+    assert dialogo.campo_linea2_personalizada.maxLength() == 24
+
+
+def test_valores_arma_nombre_de_una_sola_linea(qtbot, conn):
+    dialogo = _DialogoPlaca(conn)
+    qtbot.addWidget(dialogo)
+    dialogo.casilla_personalizada.setChecked(True)
+    dialogo.campo_linea1_personalizada.setText("Equipo Nutri Oeste")
+
+    assert dialogo.valores()["nombre_grabado_personalizado"] == "Equipo Nutri Oeste"
+
+
+def test_valores_arma_nombre_de_dos_lineas_con_salto_real(qtbot, conn):
+    dialogo = _DialogoPlaca(conn)
+    qtbot.addWidget(dialogo)
+    dialogo.casilla_personalizada.setChecked(True)
+    dialogo.campo_linea1_personalizada.setText("Lic. Agustina Viavattene")
+    dialogo.campo_linea2_personalizada.setText("Equipo Nutri Oeste")
+
+    assert dialogo.valores()["nombre_grabado_personalizado"] == "Lic. Agustina Viavattene\nEquipo Nutri Oeste"
 
 
 def test_previa_usa_la_misma_fuente_fija_para_texto_corto_y_largo(qtbot):
@@ -581,28 +700,30 @@ def test_agregar_y_quitar_de_la_cola_de_impresion(qtbot, conn):
     assert pantalla._cola_impresion == []
 
 
-def test_personalizar_impresion_requiere_linea1(qtbot, conn):
-    id_profesional = _crear_profesional(conn)
+def test_panel_imprimir_no_tiene_controles_de_personalizar(qtbot, conn):
+    """Pedido explícito de la clienta: esta solapa ya no pide nada de
+    personalización — se maneja íntegramente en la primera solapa."""
     pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
-    indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
-    pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
-    pantalla.casilla_personalizar_impresion.setChecked(True)
-
-    pantalla._agregar_a_impresion()
-
-    assert pantalla.lista_impresion.count() == 0
+    assert not hasattr(pantalla, "casilla_personalizar_impresion")
+    assert not hasattr(pantalla, "campo_linea1_impresion")
+    assert not hasattr(pantalla, "campo_linea2_impresion")
 
 
-def test_personalizar_impresion_guarda_las_dos_lineas(qtbot, conn):
+def test_agregar_a_impresion_levanta_la_personalizacion_de_la_placa(qtbot, conn):
+    """"Agregar a impresión" ya no pide nada — levanta lo que ya se cargó
+    en la primera solapa para ese profesional (si tiene alguna placa
+    personalizada)."""
+    _, id_unidad = _crear_unidad(conn)
     id_profesional = _crear_profesional(conn, apellido="Pugliese", nombre_pila="Silvina")
+    asignar_placa(
+        conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional,
+        es_personalizada=True, nombre_grabado_personalizado='Lic. Silvina Pugliese\nEquipo "Sol terapias"',
+    )
     pantalla = _PanelPlacasOperativas(conn)
     qtbot.addWidget(pantalla)
     indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
     pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
-    pantalla.casilla_personalizar_impresion.setChecked(True)
-    pantalla.campo_linea1_impresion.setText("Lic. Silvina Pugliese")
-    pantalla.campo_linea2_impresion.setText('Equipo "Sol terapias"')
 
     pantalla._agregar_a_impresion()
 
@@ -611,9 +732,22 @@ def test_personalizar_impresion_guarda_las_dos_lineas(qtbot, conn):
     entrada = pantalla._cola_impresion[0]
     assert entrada["linea1"] == "Lic. Silvina Pugliese"
     assert entrada["linea2"] == 'Equipo "Sol terapias"'
-    # se limpian los campos y se destilda el check después de agregar
-    assert pantalla.casilla_personalizar_impresion.isChecked() is False
-    assert pantalla.campo_linea1_impresion.text() == ""
+
+
+def test_agregar_a_impresion_sin_placa_personalizada_usa_el_nombre_estandar(qtbot, conn):
+    id_profesional = _crear_profesional(conn, apellido="Difalco", nombre_pila="Sol")
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
+    pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
+
+    pantalla._agregar_a_impresion()
+
+    assert pantalla.lista_impresion.count() == 1
+    assert "(personalizada)" not in pantalla.lista_impresion.item(0).text()
+    entrada = pantalla._cola_impresion[0]
+    assert entrada["linea1"] is None
+    assert entrada["linea2"] is None
 
 
 def test_generar_pdf_sin_carpeta_base_no_falla(qtbot, conn):

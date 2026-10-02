@@ -73,6 +73,26 @@ def nombre_grabado(placa: sqlite3.Row, profesional: sqlite3.Row) -> str:
     return nombre_estandar(profesional)
 
 
+def personalizacion_del_profesional(conn: sqlite3.Connection, id_profesional: int) -> str | None:
+    """Pedido explícito de la clienta: el nombre personalizado se carga y
+    guarda solo desde el diálogo de Asignar/Reasignar (primera solapa) —
+    "Agregar a impresión" (segunda solapa) ya no pide nada, solo LEVANTA
+    esa info. Si el profesional tiene alguna placa personalizada (en
+    cualquier unidad, no hace falta que sea en la que se está imprimiendo
+    puntualmente), devuelve su `NombreGrabado` tal cual está guardado —
+    una sola línea, o dos separadas por "\\n" si se cargó una segunda
+    línea (mismo formato que ya arma `texto_para_imprimir` al unir
+    linea1/linea2). Si tiene más de una placa personalizada (un
+    profesional con más de una unidad, caso raro) se usa la primera que
+    aparezca — no hay forma de saber cuál "corresponde" a una impresión
+    puntual, que no está atada a ninguna unidad en particular. `None` si
+    no tiene ninguna placa personalizada."""
+    for placa in listar_placas(conn, id_profesional=id_profesional):
+        if placa["EsPersonalizada"] and placa["NombreGrabado"]:
+            return placa["NombreGrabado"]
+    return None
+
+
 def listar_placas(
     conn: sqlite3.Connection, *, ids_localidad: list[int | None] | None = None,
     ids_edificio: list[int] | None = None, ids_unidad: list[int] | None = None,

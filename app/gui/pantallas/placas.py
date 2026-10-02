@@ -78,6 +78,7 @@ from app.negocio.placas import (
     liberar_posicion,
     listar_placas,
     nombre_grabado,
+    personalizacion_del_profesional,
     posiciones_libres,
     texto_para_imprimir,
 )
@@ -167,6 +168,8 @@ def _envolver_lineas_previa(texto: str) -> list[str]:
 _ANCHO_BOTON_IMPRESION = 180  # Agregar a impresión / Quitar de la lista / Generar PDF, los tres iguales
 _ANCHO_MINIMO_PANEL_FILTROS = 300
 _ANCHO_BOTON_BUSCAR = 290  # Asignar posición placa nueva / Reasignar.../ Liberar posición, los tres iguales
+_MAX_CARACTERES_LINEA_PLACA = 24  # calibrado contra "Lic. Agustina Viavattene", ver app.pdf.placas_pdf
+_PADDING_COLUMNA_PLACAS = 20  # padding de las columnas cortas (Localidad/Edificio/Unidad/Posición/Profesional/Personalizada)
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -286,9 +289,17 @@ class _PanelPlacasOperativas(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones_tabla)
-        # Todas las columnas se reparten el ancho disponible por igual —
-        # pedido de la clienta, en vez de ajustarse al contenido.
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        # Pedido explícito de la clienta al revisar esta pantalla: ya no
+        # todas las columnas se reparten el ancho por igual — las seis
+        # cortas (Localidad/Edificio/Unidad/Posición/Profesional/
+        # Personalizada) se ajustan a su contenido, y "Nombre grabado" es
+        # la única en Stretch, así se queda con todo el ancho que las
+        # otras seis dejan libre (para que entren sus dos líneas más la
+        # barra separadora, ver `_ajustar_columnas`).
+        header = self.tabla.horizontalHeader()
+        for columna in (0, 1, 2, 3, 4, 6):
+            header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self._orden = OrdenTabla(self.tabla, self._actualizar_tabla)
         columna_tabla.addWidget(self.tabla, stretch=1)
         layout_principal.addLayout(columna_tabla, stretch=1)
@@ -431,11 +442,23 @@ class _PanelPlacasOperativas(QWidget):
             item_posicion.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tabla.setItem(fila_idx, 3, item_posicion)
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem(e["texto_profesional"]))
-            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(e["nombre"]))
+            # Pedido explícito de la clienta: un nombre grabado de dos
+            # líneas se guarda con un salto de línea real (mismo formato
+            # que arma `texto_para_imprimir`), pero en esta columna se
+            # muestra con " / " en vez del salto — "la barra solo es
+            # visual en el campo para que sepa a simple vista que se hizo
+            # en dos líneas".
+            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(e["nombre"].replace("\n", " / ")))
             item_personalizada = QTableWidgetItem("Sí" if placa["EsPersonalizada"] else "No")
             item_personalizada.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tabla.setItem(fila_idx, 6, item_personalizada)
+        self._ajustar_columnas()
         self._actualizar_botones_tabla()
+
+    def _ajustar_columnas(self) -> None:
+        self.tabla.resizeColumnsToContents()
+        for columna in (0, 1, 2, 3, 4, 6):
+            self.tabla.setColumnWidth(columna, self.tabla.columnWidth(columna) + _PADDING_COLUMNA_PLACAS)
 
     def _fila_seleccionada_placa(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -504,21 +527,12 @@ class _PanelPlacasOperativas(QWidget):
         habilitar_busqueda_profesional(self.combo_profesional_imprimir)
         columna_izquierda.addWidget(self.combo_profesional_imprimir)
 
-        fila_personalizada = QHBoxLayout()
-        self.casilla_personalizar_impresion = QCheckBox("Personalizar texto de la placa")
-        self.campo_linea1_impresion = QLineEdit()
-        self.campo_linea1_impresion.setPlaceholderText("Línea 1")
-        self.campo_linea1_impresion.setEnabled(False)
-        self.campo_linea2_impresion = QLineEdit()
-        self.campo_linea2_impresion.setPlaceholderText("Línea 2 (opcional)")
-        self.campo_linea2_impresion.setEnabled(False)
-        self.casilla_personalizar_impresion.toggled.connect(self.campo_linea1_impresion.setEnabled)
-        self.casilla_personalizar_impresion.toggled.connect(self.campo_linea2_impresion.setEnabled)
-        fila_personalizada.addWidget(self.casilla_personalizar_impresion)
-        fila_personalizada.addWidget(self.campo_linea1_impresion)
-        fila_personalizada.addWidget(self.campo_linea2_impresion)
-        columna_izquierda.addLayout(fila_personalizada)
-
+        # Pedido explícito de la clienta: esta solapa ya no pide nada de
+        # personalización — eso se maneja íntegramente desde la primera
+        # solapa (Asignar/Reasignar). "Agregar a impresión" levanta esa
+        # info sola (`_agregar_a_impresion`, vía
+        # `app.negocio.placas.personalizacion_del_profesional`) si el
+        # profesional elegido tiene alguna placa personalizada.
         fila_agregar = QHBoxLayout()
         self.boton_agregar_impresion = QPushButton("Agregar a impresión")
         self.boton_agregar_impresion.setObjectName("botonSecundario")
@@ -562,25 +576,25 @@ class _PanelPlacasOperativas(QWidget):
         id_profesional = self.combo_profesional_imprimir.currentData()
         if id_profesional is None:
             return
-        personalizar = self.casilla_personalizar_impresion.isChecked()
-        linea1 = self.campo_linea1_impresion.text().strip() or None
-        linea2 = self.campo_linea2_impresion.text().strip() or None
-        if personalizar and not linea1:
-            QMessageBox.warning(self, "Agregar a impresión", "Cargá al menos la línea 1 para una placa personalizada.")
-            return
-        if not personalizar:
+        # Pedido explícito de la clienta: acá ya no se pide personalizar
+        # nada — se levanta lo que ya se cargó en la primera solapa
+        # (Asignar/Reasignar), si el profesional tiene alguna placa
+        # personalizada asignada.
+        nombre_personalizado = personalizacion_del_profesional(self.conn, id_profesional)
+        if nombre_personalizado:
+            lineas = nombre_personalizado.split("\n")
+            linea1 = lineas[0]
+            linea2 = lineas[1] if len(lineas) > 1 else None
+        else:
             linea1 = None
             linea2 = None
 
         etiqueta_base = self.combo_profesional_imprimir.currentText()
-        etiqueta_lista = f"{etiqueta_base} (personalizada)" if personalizar else etiqueta_base
+        etiqueta_lista = f"{etiqueta_base} (personalizada)" if nombre_personalizado else etiqueta_base
         self._cola_impresion.append({
             "id_profesional": id_profesional, "linea1": linea1, "linea2": linea2, "etiqueta_lista": etiqueta_lista,
         })
         self.lista_impresion.addItem(etiqueta_lista)
-        self.casilla_personalizar_impresion.setChecked(False)
-        self.campo_linea1_impresion.clear()
-        self.campo_linea2_impresion.clear()
         self._actualizar_vista_previa()
 
     def _quitar_de_impresion(self) -> None:
@@ -729,15 +743,34 @@ class _DialogoPlaca(QDialog):
                 self.combo_profesional.setCurrentIndex(indice)
         layout.addRow("Profesional", self.combo_profesional)
 
+        # Pedido explícito de la clienta: el nombre personalizado admite
+        # DOS líneas acá (antes un solo campo) — "si pongo texto en las dos
+        # líneas las acomoda de acuerdo a lo que trabajamos por impresión",
+        # mismo criterio de línea 1/línea 2 que ya usaba "Agregar a
+        # impresión" (que ahora levanta esto de acá en vez de pedirlo de
+        # nuevo, ver `_agregar_a_impresion`). Cada línea limitada a
+        # `_MAX_CARACTERES_LINEA_PLACA` — el límite visual calibrado contra
+        # "Lic. Agustina Viavattene" (ver `app.pdf.placas_pdf`).
         self.casilla_personalizada = QCheckBox("Nombre grabado personalizado")
-        self.campo_nombre_personalizado = QLineEdit()
-        self.campo_nombre_personalizado.setEnabled(False)
-        self.casilla_personalizada.toggled.connect(self.campo_nombre_personalizado.setEnabled)
+        self.campo_linea1_personalizada = QLineEdit()
+        self.campo_linea1_personalizada.setPlaceholderText("Línea 1")
+        self.campo_linea1_personalizada.setMaxLength(_MAX_CARACTERES_LINEA_PLACA)
+        self.campo_linea1_personalizada.setEnabled(False)
+        self.campo_linea2_personalizada = QLineEdit()
+        self.campo_linea2_personalizada.setPlaceholderText("Línea 2 (opcional)")
+        self.campo_linea2_personalizada.setMaxLength(_MAX_CARACTERES_LINEA_PLACA)
+        self.campo_linea2_personalizada.setEnabled(False)
+        self.casilla_personalizada.toggled.connect(self.campo_linea1_personalizada.setEnabled)
+        self.casilla_personalizada.toggled.connect(self.campo_linea2_personalizada.setEnabled)
         if placa_existente is not None and placa_existente["EsPersonalizada"]:
             self.casilla_personalizada.setChecked(True)
-            self.campo_nombre_personalizado.setText(placa_existente["NombreGrabado"] or "")
+            lineas = (placa_existente["NombreGrabado"] or "").split("\n")
+            self.campo_linea1_personalizada.setText(lineas[0])
+            if len(lineas) > 1:
+                self.campo_linea2_personalizada.setText(lineas[1])
         layout.addRow(self.casilla_personalizada)
-        layout.addRow("Nombre grabado", self.campo_nombre_personalizado)
+        layout.addRow("Línea 1", self.campo_linea1_personalizada)
+        layout.addRow("Línea 2", self.campo_linea2_personalizada)
 
         botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         botones.accepted.connect(self.accept)
@@ -789,10 +822,13 @@ class _DialogoPlaca(QDialog):
         else:
             id_unidad = self.placa_existente["IdUnidad"]
             posicion = self.placa_existente["PosicionTablero"]
+        linea1 = self.campo_linea1_personalizada.text().strip()
+        linea2 = self.campo_linea2_personalizada.text().strip()
+        nombre_personalizado = "\n".join(linea for linea in (linea1, linea2) if linea) or None
         return {
             "id_unidad": id_unidad,
             "posicion": posicion,
             "id_profesional": self.combo_profesional.currentData(),
             "es_personalizada": self.casilla_personalizada.isChecked(),
-            "nombre_grabado_personalizado": self.campo_nombre_personalizado.text().strip() or None,
+            "nombre_grabado_personalizado": nombre_personalizado,
         }

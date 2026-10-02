@@ -80,6 +80,21 @@ def test_placa_personalizada_se_marca(conn, tmp_path):
     assert "Dr. Gómez (personalizada)" in texto
 
 
+def test_placa_personalizada_de_dos_lineas_muestra_las_dos(conn, tmp_path):
+    """El nombre grabado de dos líneas se guarda con un salto real (mismo
+    formato que texto_para_imprimir) — el PDF de referencia del tablero
+    tiene que mostrar las dos líneas de verdad, no el "\\n" crudo."""
+    _, id_unidad = _crear_unidad(conn)
+    obtener_repositorio(conn, "Placa").crear(
+        IdUnidad=id_unidad, PosicionTablero=1,
+        NombreGrabado="Lic. Agustina Viavattene\nEquipo Nutri Oeste", EsPersonalizada=1,
+    )
+    ruta = generar_pdf_placas(conn, str(tmp_path))
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Lic. Agustina Viavattene" in texto
+    assert "Equipo Nutri Oeste (personalizada)" in texto
+
+
 def test_unidad_sin_placas_no_aparece(conn, tmp_path):
     id_edificio, id_unidad_con = _crear_unidad(conn, departamento="1ro A")
     obtener_repositorio(conn, "Placa").crear(IdUnidad=id_unidad_con, PosicionTablero=1, NombreGrabado="Con placa")

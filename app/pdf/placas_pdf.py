@@ -92,9 +92,14 @@ def _tabla_placas(placas: list[sqlite3.Row], ancho: float) -> Table:
     for p in placas:
         posicion = str(p["PosicionTablero"]) if p["PosicionTablero"] is not None else "—"
         nombre = p["NombreGrabado"] or "(sin nombre cargado)"
+        # Un nombre grabado personalizado de dos líneas se guarda con un
+        # salto de línea real (mismo formato que texto_para_imprimir) —
+        # acá se convierte a <br/> para que Paragraph lo muestre en dos
+        # renglones de verdad, igual que en la placa física.
+        nombre_html = nombre.replace("\n", "<br/>")
         if p["EsPersonalizada"]:
-            nombre += " (personalizada)"
-        filas.append([Paragraph(posicion, estilo_texto(9)), Paragraph(nombre, estilo_texto(9))])
+            nombre_html += " (personalizada)"
+        filas.append([Paragraph(posicion, estilo_texto(9)), Paragraph(nombre_html, estilo_texto(9))])
 
     tabla = Table(filas, colWidths=[ancho * 0.2, ancho * 0.8])
     tabla.setStyle(TableStyle([
