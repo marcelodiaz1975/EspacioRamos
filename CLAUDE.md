@@ -5309,6 +5309,82 @@ Tests nuevos en `tests/test_gui_valores.py`:
 `test_promedios_sin_espacio_en_blanco_tras_la_ultima_columna`,
 `test_valores_vigentes_sin_scroll_horizontal_con_estilo_real_aplicado`.
 
+## Balance del negocio: Ingresos/Resultado en tabla, "Ver historial"/
+## "Ver período actual" en vez de "Actualizar"
+
+Pedido de la clienta de pulir las solapas "Ingresos"/"Resultado" de
+"Balance del negocio" (la solapa "Gastos" no se tocó):
+
+- **De etiquetas sueltas a tabla.** Las dos solapas mostraban su
+  resultado en un `QLabel` por dato (`fmt_dato`, con un título armado a
+  mano, "Ingresos período MM-AAAA"). Pasan a una tabla a la derecha del
+  panel de filtros (`_armar_tabla`, nueva, compartida por las dos —
+  Stretch en todas las columnas, mismo criterio "pocas columnas,
+  importancia pareja" que Placas/Importar planilla), con las columnas
+  pedidas explícitamente: "Período"/"Ingreso por horas regulares"/
+  "Ingreso por horas aisladas"/"Ingreso por feriados y días
+  especiales"/"Total ingresos" en Ingresos; "Período"/"Total ingresos"/
+  "Total gastos"/"Balance del período" en Resultado. Por defecto (al
+  entrar a la solapa, o al cambiar cualquier filtro) la tabla muestra
+  una ÚNICA fila, la del período elegido en el campo "Período" — mismo
+  comportamiento de siempre, solo que ahora en una fila de tabla en vez
+  de en etiquetas.
+  - **Bug encontrado al armar esto (mismo que "Valores vigentes" de la
+    ronda anterior, pero por una causa distinta)**: con las 5 columnas
+    de Ingresos en Stretch parejo, "Ingreso por feriados y días
+    especiales" (la más larga) quedaba con el título recortado a los
+    dos lados — no alcanzaba el ancho que le tocaba en partes iguales.
+    Se resuelve con el mismo recurso ya documentado en "Selectores y
+    fecha"/Estadísticas para títulos de columna largos: un `"\n"`
+    literal partiéndolo en dos líneas ("Ingreso por feriados\ny días
+    especiales") — `QHeaderView` agranda el alto de encabezado solo,
+    sin tocar el ancho de las demás columnas ni el texto pedido por la
+    clienta (sigue diciendo exactamente "Ingreso por feriados y días
+    especiales", solo partido visualmente).
+- **"Actualizar" se saca, reemplazado por dos botones.** La clienta
+  notó que "Actualizar" (`botonPrimario`) no cumplía ninguna función
+  real — los filtros ya estaban conectados para recalcular solos
+  (`editingFinished`/`currentIndexChanged` ya llamaban a `actualizar()`
+  antes de este pedido). En su lugar, dos botones nuevos en
+  `_PanelFiltrosMixin` (compartidos por las dos solapas, Gastos no los
+  tiene):
+  - **"Ver historial"** (`botonPrimario`): llena la tabla con una fila
+    por cada período que tiene algún dato cargado en el sistema, del
+    más nuevo al más viejo — reusa `app.negocio.estadisticas.
+    _periodos_para_filtro(conn, desde=None, hasta=None)` (import
+    cruzado de un símbolo privado, mismo criterio que
+    `_ids_consultorio_del_alcance`, ya importado antes en este módulo),
+    que ya devuelve esos períodos en ese orden sin necesitar invertir
+    nada. Respeta el alcance de ubicación elegido (Localidad/Edificio/
+    Unidad/Consultorio), igual que la fila única de `actualizar()`.
+  - **"Ver período actual"** (`botonSecundario`): solo toca el campo
+    Período (lo vuelve a `periodo_actual(conn)`) y llama a
+    `actualizar()` — a propósito NO toca los combos de ubicación, a
+    diferencia del viejo `_restablecer` (el handler de "Actualizar",
+    que si reiniciaba toda la cascada) — pedido explícito de la
+    clienta: "ahi setea de nuevo el período actual en el filtro de
+    período", nada más. `_restablecer` se borra entero, sin otro
+    consumidor.
+  - Cambiar cualquier filtro de ubicación mientras se está viendo el
+    historial (varias filas) vuelve a mostrar una sola fila — mismo
+    mecanismo de siempre (`currentIndexChanged` sigue llamando a
+    `actualizar()`, no a `_ver_historial()`), interpretación propia sin
+    pedido explícito sobre este caso puntual: cambiar un filtro de
+    ubicación es un pedido nuevo de "qué estoy mirando", no tiene
+    sentido que seguir mostrando el historial viejo sin ese filtro
+    aplicado.
+
+Tests nuevos/reescritos en `tests/test_gui_balance.py`: los que
+revisaban las etiquetas (`etiqueta_regulares`/etc.) pasan a revisar la
+tabla (una fila, columnas en el orden pedido);
+`test_botones_historial_y_periodo_actual_tienen_los_estilos_correctos`;
+`test_ingresos_ver_historial_muestra_todos_los_periodos_mas_nuevo_arriba`/
+`test_resultado_ver_historial_muestra_todos_los_periodos_mas_nuevo_arriba`
+(con una `ReservaRegular` del período anterior al actual, para tener
+más de un período con datos); `test_ingresos_ver_periodo_actual_
+vuelve_a_una_sola_fila`/`test_resultado_ver_periodo_actual_vuelve_a_
+una_sola_fila`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
