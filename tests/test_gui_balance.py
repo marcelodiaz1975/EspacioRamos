@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.balance import PantallaBalanceDelNegocio
-from app.negocio.dias import periodo_actual
+from app.negocio.dias import periodo_actual, periodo_anterior
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -55,15 +55,17 @@ def test_solapas_ingresos_y_resultado_usan_el_fondo_claro(qtbot, conn):
     assert pantalla.panel_resultado.objectName() == "panelSolapa"
 
 
-def test_ingresos_arranca_en_el_periodo_actual_y_muestra_las_tres_partes(qtbot, conn):
+def test_ingresos_arranca_en_el_periodo_actual_con_una_sola_fila(qtbot, conn):
     pantalla = PantallaBalanceDelNegocio(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_ingresos
     assert panel.campo_periodo.text() == periodo_actual(conn)
-    assert "Ingresos por horas regulares" in panel.etiqueta_regulares.text()
-    assert "Ingresos por horas aisladas" in panel.etiqueta_aisladas.text()
-    assert "Ingresos por feriados trabajados" in panel.etiqueta_feriados_trabajados.text()
-    assert "Total ingresos" in panel.etiqueta_total.text()
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 0).text() == periodo_actual(conn)
+    assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
+        "Período", "Ingreso por horas regulares", "Ingreso por horas aisladas",
+        "Ingreso por feriados\ny días especiales", "Total ingresos",
+    ]
 
 
 def test_ingresos_filtros_de_ubicacion_arrancan_en_todas_todos(qtbot, conn):
@@ -94,16 +96,21 @@ def test_ingresos_recalcula_al_cambiar_periodo(qtbot, conn):
     panel = pantalla.panel_ingresos
     panel.campo_periodo.setText("2026-08")
     panel.campo_periodo.editingFinished.emit()
-    assert "$ 10.000,00" in panel.etiqueta_regulares.text()
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 0).text() == "2026-08"
+    assert "$ 10.000,00" in panel.tabla.item(0, 1).text()
 
 
-def test_resultado_muestra_ingresos_gastos_y_resultado(qtbot, conn):
+def test_resultado_arranca_en_el_periodo_actual_con_una_sola_fila(qtbot, conn):
     pantalla = PantallaBalanceDelNegocio(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_resultado
-    assert "Ingresos totales" in panel.etiqueta_ingresos.text()
-    assert "Gastos totales" in panel.etiqueta_gastos.text()
-    assert "Resultado" in panel.etiqueta_resultado.text()
+    assert panel.campo_periodo.text() == periodo_actual(conn)
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 0).text() == periodo_actual(conn)
+    assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
+        "Período", "Total ingresos", "Total gastos", "Balance del período",
+    ]
 
 
 def test_resultado_excluye_gastos_generales_al_filtrar_por_consultorio(qtbot, conn):
@@ -121,8 +128,95 @@ def test_resultado_excluye_gastos_generales_al_filtrar_por_consultorio(qtbot, co
     pantalla = PantallaBalanceDelNegocio(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_resultado
-    assert "$ 3.000,00" in panel.etiqueta_gastos.text()
+    assert "-$ 3.000,00" in panel.tabla.item(0, 2).text()
 
     panel.combo_edificio.setCurrentIndex(panel.combo_edificio.findData(id_edificio))
     panel.combo_consultorio.setCurrentIndex(panel.combo_consultorio.findData(id_consultorio))
-    assert "$ 0,00" in panel.etiqueta_gastos.text()
+    assert "$ 0,00" in panel.tabla.item(0, 2).text()
+
+
+def test_botones_historial_y_periodo_actual_tienen_los_estilos_correctos(qtbot, conn):
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_ingresos, pantalla.panel_resultado):
+        assert panel.boton_historial.text() == "Ver historial"
+        assert panel.boton_historial.objectName() == "botonPrimario"
+        assert panel.boton_periodo_actual.text() == "Ver período actual"
+        assert panel.boton_periodo_actual.objectName() == "botonSecundario"
+        assert panel.boton_historial.width() == panel.boton_periodo_actual.width() == panel.campo_periodo.width()
+
+
+def test_ingresos_ver_historial_muestra_todos_los_periodos_mas_nuevo_arriba(qtbot, conn):
+    actual = periodo_actual(conn)
+    anterior = periodo_anterior(actual)
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000, ValorHoraAisladaActual=500,
+    )
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio=f"{anterior}-01", VigenciaFin=None,
+    )
+    conn.commit()
+
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ingresos
+    panel.boton_historial.click()
+    assert panel.tabla.rowCount() == 2
+    assert panel.tabla.item(0, 0).text() == actual
+    assert panel.tabla.item(1, 0).text() == anterior
+
+
+def test_ingresos_ver_periodo_actual_vuelve_a_una_sola_fila(qtbot, conn):
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ingresos
+    panel.campo_periodo.setText("2020-01")
+    panel.boton_historial.click()
+    assert panel.tabla.rowCount() >= 1
+
+    panel.boton_periodo_actual.click()
+    assert panel.campo_periodo.text() == periodo_actual(conn)
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 0).text() == periodo_actual(conn)
+
+
+def test_resultado_ver_historial_muestra_todos_los_periodos_mas_nuevo_arriba(qtbot, conn):
+    actual = periodo_actual(conn)
+    anterior = periodo_anterior(actual)
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000, ValorHoraAisladaActual=500,
+    )
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio=f"{anterior}-01", VigenciaFin=None,
+    )
+    conn.commit()
+
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_resultado
+    panel.boton_historial.click()
+    assert panel.tabla.rowCount() == 2
+    assert panel.tabla.item(0, 0).text() == actual
+    assert panel.tabla.item(1, 0).text() == anterior
+
+
+def test_resultado_ver_periodo_actual_vuelve_a_una_sola_fila(qtbot, conn):
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_resultado
+    panel.campo_periodo.setText("2020-01")
+    panel.boton_historial.click()
+    assert panel.tabla.rowCount() >= 1
+
+    panel.boton_periodo_actual.click()
+    assert panel.campo_periodo.text() == periodo_actual(conn)
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 0).text() == periodo_actual(conn)

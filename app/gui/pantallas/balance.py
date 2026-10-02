@@ -17,18 +17,31 @@ mismo criterio y mismo código que Estadísticas Varias, duplicado acá
 como el resto de las pantallas del sistema que arman su propia cadena
 de filtros) pero cada uno arma el suyo por separado (`_PanelIngresos`/
 `_PanelResultado`), sin una clase base compartida — mismo criterio de
-"cada pantalla arma la suya" que el resto del sistema."""
+"cada pantalla arma la suya" que el resto del sistema.
+
+Los dos muestran su resultado en una TABLA (no en etiquetas sueltas,
+como en la primera versión): una sola fila con el período elegido por
+defecto, o todos los períodos con datos (del más nuevo al más viejo,
+reusando `app.negocio.estadisticas._periodos_para_filtro`) al apretar
+"Ver historial". El viejo botón "Actualizar" (no hacía nada que los
+filtros ya conectados no dispararan solos) se reemplaza por ese botón
+("Ver historial", `botonPrimario`) y "Ver período actual"
+(`botonSecundario`, vuelve a mostrar solo el período en curso) — pedido
+explícito de la clienta. Gastos (el catálogo anidado) no se tocó."""
 from __future__ import annotations
 
 import sqlite3
 
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
-    QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -36,13 +49,19 @@ from PySide6.QtWidgets import (
 
 from app.gui.pantallas import catalogos
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.gui.widgets.resumen_saldo import fmt_dato
+from app.gui.widgets.resumen_saldo import item_monto
 from app.negocio.balance import resultado_periodo, total_ingresos_periodo
 from app.negocio.dias import periodo_actual
-from app.negocio.estadisticas import _ids_consultorio_del_alcance
+from app.negocio.estadisticas import _ids_consultorio_del_alcance, _periodos_para_filtro
 
 _ANCHO_CAMPO = 220
 _ANCHO_PANEL_FILTROS = 240
+
+_COLUMNAS_INGRESOS = [
+    "Período", "Ingreso por horas regulares", "Ingreso por horas aisladas",
+    "Ingreso por feriados\ny días especiales", "Total ingresos",
+]
+_COLUMNAS_RESULTADO = ["Período", "Total ingresos", "Total gastos", "Balance del período"]
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -51,21 +70,23 @@ def _titulo_campo(texto: str) -> QLabel:
     return etiqueta
 
 
-def _linea_divisoria() -> QFrame:
-    linea = QFrame()
-    linea.setFrameShape(QFrame.Shape.HLine)
-    return linea
-
-
-def _titulo_periodo(prefijo: str, periodo: str) -> str:
-    """Mismo criterio que "Subtotal gastos período" de Gastos
-    operativos: el período se guarda AAAA-MM pero se muestra invertido,
-    MM-AAAA, pedido de la clienta."""
-    partes = periodo.split("-")
-    if len(partes) == 2:
-        anio, mes = partes
-        return f"{prefijo} período {mes}-{anio}"
-    return f"{prefijo} período {periodo}"
+def _armar_tabla(columnas: list[str]) -> QTableWidget:
+    """Pocas columnas, todas de importancia pareja — Stretch en las
+    columnas (mismo criterio que Placas/Importar planilla) para que se
+    reparta todo el ancho disponible del panel en vez de dejar un
+    espacio en blanco al final (ver el bug ya documentado en "Valores
+    vigentes")."""
+    tabla = QTableWidget()
+    tabla.setColumnCount(len(columnas))
+    tabla.setHorizontalHeaderLabels(columnas)
+    tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+    tabla.verticalHeader().setVisible(False)
+    tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    header = tabla.horizontalHeader()
+    for columna in range(len(columnas)):
+        header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Stretch)
+    return tabla
 
 
 class _PanelFiltrosMixin:
@@ -111,11 +132,17 @@ class _PanelFiltrosMixin:
         self.combo_consultorio.currentIndexChanged.connect(self.actualizar)
         columna.addWidget(self.combo_consultorio)
 
-        self.boton_actualizar = QPushButton("Actualizar")
-        self.boton_actualizar.setObjectName("botonPrimario")
-        self.boton_actualizar.setFixedWidth(_ANCHO_CAMPO)
-        self.boton_actualizar.clicked.connect(self._restablecer)
-        columna.addWidget(self.boton_actualizar)
+        self.boton_historial = QPushButton("Ver historial")
+        self.boton_historial.setObjectName("botonPrimario")
+        self.boton_historial.setFixedWidth(_ANCHO_CAMPO)
+        self.boton_historial.clicked.connect(self._ver_historial)
+        columna.addWidget(self.boton_historial)
+
+        self.boton_periodo_actual = QPushButton("Ver período actual")
+        self.boton_periodo_actual.setObjectName("botonSecundario")
+        self.boton_periodo_actual.setFixedWidth(_ANCHO_CAMPO)
+        self.boton_periodo_actual.clicked.connect(self._ver_periodo_actual)
+        columna.addWidget(self.boton_periodo_actual)
 
         columna.addStretch()
 
@@ -123,7 +150,7 @@ class _PanelFiltrosMixin:
         self._foco = instalar_enter_avanza_foco(
             [
                 self.campo_periodo, self.combo_localidad, self.combo_edificio,
-                self.combo_unidad, self.combo_consultorio, self.boton_actualizar,
+                self.combo_unidad, self.combo_consultorio, self.boton_historial, self.boton_periodo_actual,
             ],
             parent=self,
         )
@@ -186,12 +213,13 @@ class _PanelFiltrosMixin:
         self.combo_consultorio.blockSignals(False)
         self.actualizar()
 
-    def _restablecer(self) -> None:
+    def _ver_periodo_actual(self) -> None:
+        """"Ver período actual" solo toca el campo Período — pedido
+        explícito de la clienta, a diferencia del viejo "Actualizar" que
+        también reiniciaba la cascada de ubicación (ese reinicio se saca
+        por completo, no tenía un pedido real detrás)."""
         self.campo_periodo.setText(periodo_actual(self.conn))
-        self.combo_localidad.blockSignals(True)
-        self.combo_localidad.setCurrentIndex(0)
-        self.combo_localidad.blockSignals(False)
-        self._cargar_combo_edificio()  # recarga en cascada unidad/consultorio y llama a actualizar() al final
+        self.actualizar()
 
 
 class _PanelIngresos(_PanelFiltrosMixin, QWidget):
@@ -208,41 +236,48 @@ class _PanelIngresos(_PanelFiltrosMixin, QWidget):
     def _armar_ui(self) -> None:
         layout_externo = QHBoxLayout(self)
 
-        # El panel de resumen se arma ANTES que el de filtros: construir
-        # los filtros dispara la cascada de combos, que termina llamando
-        # a `actualizar()` — las etiquetas de acá tienen que existir ya.
-        panel_resumen = QWidget()
-        resumen = QVBoxLayout(panel_resumen)
-        self.etiqueta_titulo = _titulo_campo("")
-        resumen.addWidget(self.etiqueta_titulo)
-        resumen.addWidget(_linea_divisoria())
-        self.etiqueta_regulares = QLabel()
-        self.etiqueta_aisladas = QLabel()
-        self.etiqueta_feriados_trabajados = QLabel()
-        self.etiqueta_total = QLabel()
-        for etiqueta in (
-            self.etiqueta_regulares, self.etiqueta_aisladas, self.etiqueta_feriados_trabajados, self.etiqueta_total,
-        ):
-            resumen.addWidget(etiqueta)
-        resumen.addStretch()
+        # La tabla se arma ANTES que el panel de filtros: construir los
+        # filtros dispara la cascada de combos, que termina llamando a
+        # `actualizar()` — la tabla tiene que existir ya.
+        self.tabla = _armar_tabla(_COLUMNAS_INGRESOS)
 
         layout_externo.addWidget(self._armar_panel_filtros())
-        layout_externo.addWidget(panel_resumen, stretch=1)
+        layout_externo.addWidget(self.tabla, stretch=1)
 
-    def actualizar(self) -> None:
-        periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
-        ids_consultorio = _ids_consultorio_del_alcance(
+    def _fila(self, periodo: str, ids_consultorio: list[int] | None) -> tuple:
+        regulares, aisladas, feriados_trabajados = total_ingresos_periodo(self.conn, periodo, ids_consultorio)
+        total = regulares + aisladas + feriados_trabajados
+        return periodo, regulares, aisladas, feriados_trabajados, total
+
+    def _llenar_filas(self, filas: list[tuple]) -> None:
+        self.tabla.setRowCount(len(filas))
+        for fila_idx, (periodo, regulares, aisladas, feriados_trabajados, total) in enumerate(filas):
+            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(periodo))
+            self.tabla.setItem(fila_idx, 1, item_monto(regulares))
+            self.tabla.setItem(fila_idx, 2, item_monto(aisladas))
+            self.tabla.setItem(fila_idx, 3, item_monto(feriados_trabajados))
+            self.tabla.setItem(fila_idx, 4, item_monto(total))
+
+    def _ids_consultorio(self) -> list[int] | None:
+        return _ids_consultorio_del_alcance(
             self.conn,
             id_localidad=self.combo_localidad.currentData(), id_edificio=self.combo_edificio.currentData(),
             id_unidad=self.combo_unidad.currentData(), id_consultorio=self.combo_consultorio.currentData(),
         )
-        regulares, aisladas, feriados_trabajados = total_ingresos_periodo(self.conn, periodo, ids_consultorio)
-        total = regulares + aisladas + feriados_trabajados
-        self.etiqueta_titulo.setText(_titulo_periodo("Ingresos", periodo))
-        self.etiqueta_regulares.setText(fmt_dato("Ingresos por horas regulares", regulares))
-        self.etiqueta_aisladas.setText(fmt_dato("Ingresos por horas aisladas", aisladas))
-        self.etiqueta_feriados_trabajados.setText(fmt_dato("Ingresos por feriados trabajados", feriados_trabajados))
-        self.etiqueta_total.setText(fmt_dato("Total ingresos", total))
+
+    def actualizar(self) -> None:
+        periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
+        self._llenar_filas([self._fila(periodo, self._ids_consultorio())])
+
+    def _ver_historial(self) -> None:
+        """Una fila por cada período con algún dato cargado en el
+        sistema, del más nuevo al más viejo (ya es el orden que devuelve
+        `_periodos_para_filtro` sin filtro de rango) — respeta el
+        alcance de ubicación elegido, igual que la fila única de
+        `actualizar()`."""
+        ids_consultorio = self._ids_consultorio()
+        periodos = _periodos_para_filtro(self.conn, desde=None, hasta=None)
+        self._llenar_filas([self._fila(periodo, ids_consultorio) for periodo in periodos])
 
 
 class _PanelResultado(_PanelFiltrosMixin, QWidget):
@@ -259,34 +294,39 @@ class _PanelResultado(_PanelFiltrosMixin, QWidget):
     def _armar_ui(self) -> None:
         layout_externo = QHBoxLayout(self)
 
-        # Mismo motivo que en _PanelIngresos: armar el resumen antes que
+        # Mismo motivo que en _PanelIngresos: armar la tabla antes que
         # los filtros, porque construir los filtros ya dispara `actualizar()`.
-        panel_resumen = QWidget()
-        resumen = QVBoxLayout(panel_resumen)
-        self.etiqueta_titulo = _titulo_campo("")
-        resumen.addWidget(self.etiqueta_titulo)
-        resumen.addWidget(_linea_divisoria())
-        self.etiqueta_ingresos = QLabel()
-        self.etiqueta_gastos = QLabel()
-        self.etiqueta_resultado = QLabel()
-        for etiqueta in (self.etiqueta_ingresos, self.etiqueta_gastos, self.etiqueta_resultado):
-            resumen.addWidget(etiqueta)
-        resumen.addStretch()
+        self.tabla = _armar_tabla(_COLUMNAS_RESULTADO)
 
         layout_externo.addWidget(self._armar_panel_filtros())
-        layout_externo.addWidget(panel_resumen, stretch=1)
+        layout_externo.addWidget(self.tabla, stretch=1)
 
-    def actualizar(self) -> None:
-        periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
+    def _fila(self, periodo: str) -> tuple:
         ingresos, gastos, resultado = resultado_periodo(
             self.conn, periodo,
             id_localidad=self.combo_localidad.currentData(), id_edificio=self.combo_edificio.currentData(),
             id_unidad=self.combo_unidad.currentData(), id_consultorio=self.combo_consultorio.currentData(),
         )
-        self.etiqueta_titulo.setText(_titulo_periodo("Resultado", periodo))
-        self.etiqueta_ingresos.setText(fmt_dato("Ingresos totales", ingresos))
-        self.etiqueta_gastos.setText(fmt_dato("Gastos totales", -gastos))
-        self.etiqueta_resultado.setText(fmt_dato("Resultado", resultado))
+        return periodo, ingresos, gastos, resultado
+
+    def _llenar_filas(self, filas: list[tuple]) -> None:
+        self.tabla.setRowCount(len(filas))
+        for fila_idx, (periodo, ingresos, gastos, resultado) in enumerate(filas):
+            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(periodo))
+            self.tabla.setItem(fila_idx, 1, item_monto(ingresos))
+            self.tabla.setItem(fila_idx, 2, item_monto(-gastos))
+            self.tabla.setItem(fila_idx, 3, item_monto(resultado))
+
+    def actualizar(self) -> None:
+        periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
+        self._llenar_filas([self._fila(periodo)])
+
+    def _ver_historial(self) -> None:
+        """Mismo criterio que `_PanelIngresos._ver_historial`: una fila
+        por cada período con algún dato, del más nuevo al más viejo,
+        respetando el alcance de ubicación elegido."""
+        periodos = _periodos_para_filtro(self.conn, desde=None, hasta=None)
+        self._llenar_filas([self._fila(periodo) for periodo in periodos])
 
 
 class PantallaBalanceDelNegocio(QWidget):
