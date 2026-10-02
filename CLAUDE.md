@@ -5083,6 +5083,105 @@ Tests nuevos en `tests/test_gui_placas.py`:
 `test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar` actualiza
 los tres textos esperados.
 
+## Placas: nombre personalizado de dos líneas, se arma en la primera
+## solapa y se levanta en la de impresión
+
+Tercera vuelta sobre "Placas para timbres", con seis pedidos de la
+clienta sobre el flujo de nombre personalizado:
+
+- **El nombre personalizado se carga y guarda SOLO en la primera solapa
+  (Asignar/Reasignar); la de Imprimir deja de pedirlo y solo lo
+  levanta.** Hasta esta vuelta eran dos mecanismos totalmente
+  independientes (ver la ronda anterior, "Respuesta a la pregunta de la
+  clienta") — ahora pasan a ser uno solo. Se sacan de la solapa Imprimir
+  el checkbox "Personalizar texto de la placa" y sus dos campos de línea
+  (`casilla_personalizar_impresion`/`campo_linea1_impresion`/
+  `campo_linea2_impresion`, con su validación de "cargá al menos la
+  línea 1") — `_agregar_a_impresion` ahora llama a
+  `app.negocio.placas.personalizacion_del_profesional(conn,
+  id_profesional)` (nueva), que busca si el profesional elegido tiene
+  alguna placa personalizada (en cualquier unidad — no hay forma de
+  saber cuál "corresponde" a una impresión puntual, que no está atada a
+  ninguna unidad en particular; con más de una, se usa la primera que
+  aparezca, caso raro) y arma `linea1`/`linea2` a partir de ahí, en vez
+  de pedirlos por teclado. Si no tiene ninguna, usa el nombre estándar
+  (comportamiento sin cambios).
+- **El diálogo de Asignar/Reasignar pasa a admitir DOS líneas**: el
+  campo único "Nombre grabado" se reemplaza por "Línea 1"/"Línea 2
+  (opcional)" (mismos placeholders que ya usaba la solapa de Imprimir
+  antes de sacárselos) — "si pongo texto en las dos líneas las acomoda
+  de acuerdo a lo que trabajamos por impresión". `Placa.NombreGrabado`
+  sigue siendo una sola columna de texto (sin migración de schema): se
+  guarda como `linea1` a secas si no hay segunda línea, o
+  `"{linea1}\n{linea2}"` si la hay — el mismo formato que ya arma
+  `texto_para_imprimir` al unir sus dos líneas, así que el valor
+  guardado se puede pasar directo a esa función sin ninguna conversión
+  extra (solo hace falta volver a separarlo con `.split("\n")` para
+  precargar los dos campos al reabrir el diálogo de Reasignar, o para
+  armar `linea1`/`linea2` en `_agregar_a_impresion`).
+- **Límite de 24 caracteres por línea**: `_MAX_CARACTERES_LINEA_PLACA =
+  24`, aplicado con `QLineEdit.setMaxLength(24)` en las dos líneas —
+  Qt impide escribir de más, no hace falta validar al guardar. Pedido
+  explícito de la clienta, mismo límite ya calibrado en
+  `app.pdf.placas_pdf` contra su sistema físico: "Lic. Agustina
+  Viavattene" (24 caracteres, contando puntos y espacios) es la
+  referencia exacta que dio.
+- **La columna "Nombre grabado" de la tabla muestra " / " en vez del
+  salto de línea real**: "la barra solo es visual en el campo para que
+  sepa a simple vista que se hizo en dos líneas" — el dato guardado
+  sigue con el salto real (`\n`), la transformación es puramente de
+  visualización en `_actualizar_tabla` (`e["nombre"].replace("\n", "
+  / ")`), no toca el valor real ni lo que usa `_agregar_a_impresion`/el
+  PDF. Ejemplo dado por la clienta: "Lic. Agustina Viavattene / Equipo
+  Nutri Oeste".
+- **Columnas de la tabla reacomodadas**: hasta esta vuelta las 7
+  columnas se repartían el ancho por igual (`Stretch` en todas, pedido
+  de una ronda anterior); ahora Localidad/Edificio/Unidad/Posición/
+  Profesional/Personalizada pasan a `Interactive` + ajuste a contenido
+  (`_ajustar_columnas`, mismo criterio `resizeColumnsToContents()` +
+  padding que `novedades._ajustar_columnas`, acá con
+  `_PADDING_COLUMNA_PLACAS = 20`) y "Nombre grabado" queda como la
+  ÚNICA columna en `Stretch` — se lleva todo el ancho que las otras seis
+  dejan libre. Pedido explícito de la clienta: "que entren 51
+  caracteres, dos líneas completas más el ' / ' que iría en el medio"
+  — verificado con un test que mide el ancho real necesario con
+  `QFontMetrics` contra la fuente real de la tabla (no un pixel fijo
+  hardcodeado, que sería frágil ante un cambio de fuente/DPI).
+- **El PDF de referencia del tablero completo (`generar_pdf_placas`,
+  automático en el avance de mes) también necesitaba un ajuste**: antes
+  de esta vuelta `NombreGrabado` nunca tenía más de una línea, así que
+  `_tabla_placas` nunca había necesitado manejar un salto de línea
+  interno — con el nombre guardado ahora pudiendo traer un `\n` real,
+  se corrigió para convertirlo a `<br/>` (la sintaxis que entiende
+  `Paragraph` de reportlab) antes de armar la celda, para que el
+  tablero de referencia muestre las dos líneas de verdad en vez del
+  carácter crudo.
+
+Tests nuevos: `tests/test_placas.py`
+(`test_nombre_grabado_con_dos_lineas_guarda_el_salto_real`,
+`personalizacion_del_profesional` — 5 tests: sin placa, con placa no
+personalizada, con placa personalizada de una/dos líneas, no cuenta la
+de otro profesional). `tests/test_gui_placas.py`
+(`test_dialogo_reasignar_precarga_las_dos_lineas_por_separado`,
+`test_dialogo_lineas_personalizadas_limitan_a_24_caracteres`,
+`test_valores_arma_nombre_de_una_sola_linea`/`test_valores_arma_nombre_
+de_dos_lineas_con_salto_real`, `test_nombre_grabado_es_la_unica_
+columna_que_se_estira`, `test_nombre_grabado_entra_al_menos_51_
+caracteres`, `test_columnas_cortas_quedan_mas_angostas_que_nombre_
+grabado`, `test_nombre_grabado_en_la_tabla_muestra_barra_en_vez_de_
+salto_de_linea`/`test_nombre_grabado_de_una_linea_en_la_tabla_queda_de_
+corrido`, `test_panel_imprimir_no_tiene_controles_de_personalizar`,
+`test_agregar_a_impresion_levanta_la_personalizacion_de_la_placa`/
+`test_agregar_a_impresion_sin_placa_personalizada_usa_el_nombre_
+estandar`). Los dos tests viejos de "Personalizar texto de la placa" en
+la solapa de Imprimir (`test_personalizar_impresion_requiere_linea1`/
+`test_personalizar_impresion_guarda_las_dos_lineas`) se sacan — eran
+pruebas de la funcionalidad que se retira de esa solapa, no de otra
+cosa. `test_columnas_de_la_tabla_se_reparten_el_ancho_por_igual` (de la
+ronda que había igualado las 7 columnas) se saca, reemplazada por las
+nuevas de arriba. `tests/test_pdf_placas.py` suma
+`test_placa_personalizada_de_dos_lineas_muestra_las_dos`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
