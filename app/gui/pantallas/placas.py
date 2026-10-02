@@ -168,6 +168,7 @@ def _envolver_lineas_previa(texto: str) -> list[str]:
 _ANCHO_BOTON_IMPRESION = 180  # Agregar a impresión / Quitar de la lista / Generar PDF, los tres iguales
 _ANCHO_MINIMO_PANEL_FILTROS = 300
 _ANCHO_BOTON_BUSCAR = 290  # Asignar posición placa nueva / Reasignar.../ Liberar posición, los tres iguales
+_ALTO_BOTON_BUSCAR = 46  # medido: alto natural de los dos botones de 2 líneas, "Liberar..." (1 línea) lo iguala
 _MAX_CARACTERES_LINEA_PLACA = 24  # calibrado contra "Lic. Agustina Viavattene", ver app.pdf.placas_pdf
 _PADDING_COLUMNA_PLACAS = 20  # padding de las columnas cortas (Localidad/Edificio/Unidad/Posición/Profesional/Personalizada)
 
@@ -263,14 +264,17 @@ class _PanelPlacasOperativas(QWidget):
         self.boton_asignar_nueva = QPushButton("Asignar posición de placa\na profesional")
         self.boton_asignar_nueva.setObjectName("botonPrimario")
         self.boton_asignar_nueva.setFixedWidth(_ANCHO_BOTON_BUSCAR)
+        self.boton_asignar_nueva.setFixedHeight(_ALTO_BOTON_BUSCAR)
         self.boton_asignar_nueva.clicked.connect(self._asignar_nueva)
         self.boton_reasignar = QPushButton("Reasignar posición de placa\na otro profesional")
         self.boton_reasignar.setObjectName("botonSecundario")
         self.boton_reasignar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
+        self.boton_reasignar.setFixedHeight(_ALTO_BOTON_BUSCAR)
         self.boton_reasignar.clicked.connect(self._reasignar)
         self.boton_liberar = QPushButton("Liberar posición de placa")
         self.boton_liberar.setObjectName("botonSecundario")
         self.boton_liberar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
+        self.boton_liberar.setFixedHeight(_ALTO_BOTON_BUSCAR)
         self.boton_liberar.clicked.connect(self._liberar)
         columna_filtros.addWidget(self.boton_asignar_nueva)
         columna_filtros.addWidget(self.boton_reasignar)

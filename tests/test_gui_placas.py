@@ -320,6 +320,8 @@ def test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar(qtbot, conn):
     assert pantalla.boton_liberar.text() == "Liberar posición de placa"
     assert pantalla.boton_asignar_nueva.width() == pantalla.boton_reasignar.width()
     assert pantalla.boton_asignar_nueva.width() == pantalla.boton_liberar.width()
+    assert pantalla.boton_asignar_nueva.height() == pantalla.boton_reasignar.height()
+    assert pantalla.boton_asignar_nueva.height() == pantalla.boton_liberar.height()
 
 
 def test_columnas_unidad_y_personalizada_quedan_centradas(qtbot, conn):
