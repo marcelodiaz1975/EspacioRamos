@@ -1,6 +1,7 @@
 """Centro de mensajería (DC-02, DC-03): lista de profesionales categoría R
 y A ordenada por color (marrón, verde, amarillo, naranja, rojo, violeta,
-celeste, azul, gris — DC-02 §2.1) y, dentro de cada color, por código.
+celeste, azul, bordó, gris — DC-02 §2.1 + bordó, pedido posterior de la
+clienta) y, dentro de cada color, por código.
 
 Cada fila tiene dos controles independientes (DC-02 §3): el check "Enviada"
 (solo habilitado para los colores que lo tienen asignado — DC-03 "Resumen
@@ -56,16 +57,17 @@ from app.negocio.mensajeria import (
     limpiar_plazos_vencidos_o_regularizados,
     marcar_mensaje_aislada_generado,
     marcar_mensaje_previo_generado,
+    marcar_recordatorio_mensajeria_generado,
 )
 from app.negocio.mensajes import (
     liquidacion_del_periodo,
     mensaje_detalle_reserva_aislada,
     mensaje_envio_liquidacion,
     mensaje_grupal,
+    mensaje_recordatorio_fin_de_mes,
     mensaje_situacion_1,
     mensaje_situacion_2,
     mensaje_situacion_3,
-    mensaje_situacion_4,
     mensaje_situacion_5,
 )
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
@@ -76,7 +78,7 @@ _COLUMNA_BOTON = 6
 
 _ORDEN_COLOR = {
     color: orden for orden, color in enumerate(
-        ("marron", "verde", "amarillo", "naranja", "rojo", "violeta", "celeste", "azul", "gris")
+        ("marron", "verde", "amarillo", "naranja", "rojo", "violeta", "celeste", "azul", "bordo", "gris")
     )
 }
 
@@ -92,17 +94,20 @@ _ESTADO_TEXTO = {
     "violeta": "Plazo extendido activo",
     "celeste": "Con aisladas para enviar mensaje",
     "azul": "Con aisladas y mensaje enviado",
+    "bordo": "Liquidación enviada, recordatorio de fin de mes",
     "gris": "Liquidación enviada",
 }
 _COLOR_FONDO = {
     "marron": "#8D6E63", "verde": "#4CAF50", "amarillo": "#F5D547",
     "naranja": "#E07B39", "rojo": "#C0392B", "violeta": "#8E44AD",
-    "celeste": "#5DADE2", "azul": "#2E5C8A", "gris": "#9E9E9E",
+    "celeste": "#5DADE2", "azul": "#2E5C8A", "bordo": "#6D1B2A", "gris": "#9E9E9E",
 }
 _COLOR_TEXTO_CLARO = {"amarillo", "celeste"}  # el resto usa letra blanca
 
 # DC-03 "Resumen de asignaciones": check de envío solo disponible para estos colores.
-_COLORES_CON_CHECK = {"amarillo", "verde", "naranja", "rojo", "violeta", "gris"}
+# Bordó se suma con el mismo criterio que gris (liquidación ya enviada, el
+# check sigue sirviendo para desmarcarla a mano si hiciera falta corregir).
+_COLORES_CON_CHECK = {"amarillo", "verde", "naranja", "rojo", "violeta", "bordo", "gris"}
 
 _FILTROS = [
     ("Todos", "todos"),
@@ -483,10 +488,11 @@ class _PanelCentroMensajeria(QWidget):
         if color in ("amarillo", "naranja"):
             return mensaje_situacion_1(self.conn, id_profesional, hoy)
         if color == "rojo":
-            liquidacion = liquidacion_del_periodo(self.conn, id_profesional, periodo)
-            if liquidacion is not None and liquidacion["EstadoEnvio"] == "Enviada":
-                return mensaje_situacion_4(self.conn, id_profesional)
             return mensaje_situacion_5(self.conn, id_profesional, periodo)
+        if color == "bordo":
+            texto = mensaje_recordatorio_fin_de_mes(self.conn, id_profesional, periodo)
+            marcar_recordatorio_mensajeria_generado(self.conn, id_profesional, periodo)
+            return texto
         if color in ("verde", "violeta", "gris"):
             return mensaje_envio_liquidacion(self.conn, id_profesional, periodo)
         return ""

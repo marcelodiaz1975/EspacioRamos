@@ -17,6 +17,25 @@ def test_base_nueva_ya_tiene_las_columnas_migradas(tmp_path):
     conn.close()
 
 
+def test_aplicar_migraciones_agrega_recordatorio_mensajeria_a_base_vieja(tmp_path):
+    """Simula una base creada antes del color bordó: EstadoMensajeriaPeriodo
+    sin esa columna — confirma que aplicar_migraciones la agrega sola."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE EstadoMensajeriaPeriodo (IdEstadoMensajeria INTEGER PRIMARY KEY, "
+        "IdProfesional INTEGER NOT NULL, Periodo TEXT NOT NULL, "
+        "MensajePrevioGenerado INTEGER NOT NULL DEFAULT 0, MensajeAisladaGenerado INTEGER NOT NULL DEFAULT 0)"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    columnas = {f["name"] for f in conn.execute("PRAGMA table_info(EstadoMensajeriaPeriodo)").fetchall()}
+    assert "RecordatorioMensajeriaGenerado" in columnas
+    conn.close()
+
+
 def test_aplicar_migraciones_agrega_tamano_de_escritorio_a_consultorio_viejo(tmp_path):
     """Simula una base creada antes de que existiera el tamaño del
     escritorio: Consultorio sin esas dos columnas — confirma que

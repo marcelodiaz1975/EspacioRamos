@@ -10,10 +10,10 @@ from app.negocio.mensajes import (
     mensaje_detalle_reserva_aislada,
     mensaje_envio_liquidacion,
     mensaje_grupal,
+    mensaje_recordatorio_fin_de_mes,
     mensaje_situacion_1,
     mensaje_situacion_2,
     mensaje_situacion_3,
-    mensaje_situacion_4,
     mensaje_situacion_5,
     nombre_para_mensaje,
     plan_activo,
@@ -99,11 +99,60 @@ def test_mensaje_situacion_3_incluye_saldo_y_cuando(conn, consultorio):
     assert "$1.234" in texto
 
 
-def test_mensaje_situacion_4_incluye_saldo_mes_en_curso(conn, consultorio):
-    id_prof = _crear_regular(conn, consultorio, Apodo="Male", SaldoCuentaActual=5000)
-    texto = mensaje_situacion_4(conn, id_prof)
-    assert "Male" in texto
-    assert "$5.000" in texto
+# ------------------------------------------------- recordatorio de fin de mes (bordó)
+
+def test_recordatorio_fin_de_mes_saldo_en_cero(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio, SaldoCuentaActual=0)
+    texto = mensaje_recordatorio_fin_de_mes(conn, id_prof, PERIODO)
+    assert "MENSAJE AUTOMATICO" in texto
+    assert "Saldo en cero, sin deuda." in texto
+    assert "A favor del profesional" not in texto
+    assert "Pendiente de cancelación" not in texto
+
+
+def test_recordatorio_fin_de_mes_saldo_a_favor_del_profesional(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio, SaldoCuentaActual=-4586)
+    texto = mensaje_recordatorio_fin_de_mes(conn, id_prof, PERIODO)
+    assert "A favor del profesional $4.586." in texto
+
+
+def test_recordatorio_fin_de_mes_saldo_pendiente_sin_fecha_de_sobres(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio, SaldoCuentaActual=4586)
+    texto = mensaje_recordatorio_fin_de_mes(conn, id_prof, PERIODO)
+    assert "Pendiente de cancelación $4.586." in texto
+    assert "sobres" not in texto
+
+
+def test_recordatorio_fin_de_mes_saldo_pendiente_con_fecha_de_sobres(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio, SaldoCuentaActual=4586)
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres="2026-08-25T00:00:00")
+    texto = mensaje_recordatorio_fin_de_mes(conn, id_prof, PERIODO)
+    assert "hasta el martes 25/8 inclusive" in texto
+
+
+def test_recordatorio_fin_de_mes_cierre_de_reservas_y_envio_de_liquidaciones(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio, SaldoCuentaActual=0)
+    texto = mensaje_recordatorio_fin_de_mes(conn, id_prof, PERIODO)
+    assert "CIERRE DE RESERVAS" in texto
+    assert "* lunes 31/8" in texto.lower()
+    assert "ENVIO DE LIQUIDACIONES" in texto
+    assert "* martes 1/9" in texto.lower()
+
+
+def test_recordatorio_fin_de_mes_sin_feriados_no_muestra_la_seccion(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio, SaldoCuentaActual=0)
+    texto = mensaje_recordatorio_fin_de_mes(conn, id_prof, PERIODO)
+    assert "FERIADOS" not in texto
+
+
+def test_recordatorio_fin_de_mes_con_feriados_los_lista_uno_por_uno(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio, SaldoCuentaActual=0)
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-09-07", Tipo="Feriado nacional")
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-09-21", Tipo="Día no laborable")
+    texto = mensaje_recordatorio_fin_de_mes(conn, id_prof, PERIODO)
+    assert "PROXIMOS FERIADOS" in texto
+    assert "* Lunes 7/9" in texto
+    assert "* Lunes 21/9" in texto
 
 
 def test_mensaje_situacion_5_incluye_saldo_anterior(conn, consultorio):

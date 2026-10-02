@@ -78,6 +78,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Configuracion", "ContrasenaMaestraSalt", "TEXT"),
     ("Consultorio", "LargoEscritorio", "REAL"),
     ("Consultorio", "AnchoEscritorio", "REAL"),
+    ("EstadoMensajeriaPeriodo", "RecordatorioMensajeriaGenerado", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja

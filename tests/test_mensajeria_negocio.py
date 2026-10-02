@@ -8,6 +8,7 @@ from app.negocio.mensajeria import (
     limpiar_plazos_vencidos_o_regularizados,
     marcar_mensaje_aislada_generado,
     marcar_mensaje_previo_generado,
+    marcar_recordatorio_mensajeria_generado,
 )
 from app.negocio.pagos import crear_plan_pago_historico
 from app.repositorio.registro import obtener_repositorio
@@ -45,6 +46,16 @@ def _crear_r(conn, saldo_anterior=0.0, saldo_actual=0.0):
 def _crear_a(conn):
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Aislada")
     return obtener_repositorio(conn, "Profesional").obtener(id_prof)
+
+
+def _dar_reserva_regular_activa(conn, id_profesional):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio="2026-01-01", VigenciaFin=None,
+    )
 
 
 def test_saldo_cero_es_verde(conn):
@@ -89,38 +100,57 @@ def test_liquidacion_enviada_es_gris(conn):
     assert color_profesional(conn, p, PERIODO) == "gris"
 
 
-def test_gris_reactiva_a_rojo_cerca_de_fin_de_mes_con_deuda(conn):
+def test_gris_pasa_a_bordo_cerca_de_fin_de_mes_con_reserva_regular_activa(conn):
+    p = _crear_r(conn, saldo_anterior=0)
+    _dar_reserva_regular_activa(conn, p["IdProfesional"])
+    emitir_liquidacion(conn, id_profesional=p["IdProfesional"], periodo=PERIODO)
+    marcar_estado_envio(conn, id_profesional=p["IdProfesional"], periodo=PERIODO, enviada=True)
+    _fijar_fecha(conn, "2026-08-28")  # a 3 días de fin de mes, default del parámetro = 5
+    assert color_profesional(conn, p, PERIODO) == "bordo"
+
+
+def test_bordo_no_depende_de_deuda_ni_de_plan(conn):
+    """Pedido explícito de la clienta al descartar la vieja reactivación a
+    rojo: bordó aplica a CUALQUIER profesional R con reserva regular
+    activa, aunque tenga deuda y un plan de pago vigente."""
     p = _crear_r(conn, saldo_anterior=0, saldo_actual=10000)
+    _dar_reserva_regular_activa(conn, p["IdProfesional"])
     crear_plan_pago_historico(
         conn, id_profesional=p["IdProfesional"], monto_refinanciado=10000,
         cantidad_cuotas=2, mes_ano_inicio=PERIODO,
     )
-    emitir_liquidacion(conn, id_profesional=p["IdProfesional"], periodo=PERIODO)
-    marcar_estado_envio(conn, id_profesional=p["IdProfesional"], periodo=PERIODO, enviada=True)
-    _fijar_fecha(conn, "2026-08-28")  # a 3 días de fin de mes, default de reactivación = 5
-    p = obtener_repositorio(conn, "Profesional").obtener(p["IdProfesional"])
-    assert color_profesional(conn, p, PERIODO) == "rojo"
-
-
-def test_gris_no_reactiva_lejos_de_fin_de_mes(conn):
-    p = _crear_r(conn, saldo_anterior=0, saldo_actual=10000)
-    crear_plan_pago_historico(
-        conn, id_profesional=p["IdProfesional"], monto_refinanciado=10000,
-        cantidad_cuotas=2, mes_ano_inicio=PERIODO,
-    )
-    emitir_liquidacion(conn, id_profesional=p["IdProfesional"], periodo=PERIODO)
-    marcar_estado_envio(conn, id_profesional=p["IdProfesional"], periodo=PERIODO, enviada=True)
-    _fijar_fecha(conn, "2026-08-10")  # lejos de fin de mes
-    p = obtener_repositorio(conn, "Profesional").obtener(p["IdProfesional"])
-    assert color_profesional(conn, p, PERIODO) == "gris"
-
-
-def test_gris_no_reactiva_sin_plan(conn):
-    p = _crear_r(conn, saldo_anterior=0, saldo_actual=10000)
     emitir_liquidacion(conn, id_profesional=p["IdProfesional"], periodo=PERIODO)
     marcar_estado_envio(conn, id_profesional=p["IdProfesional"], periodo=PERIODO, enviada=True)
     _fijar_fecha(conn, "2026-08-28")
     p = obtener_repositorio(conn, "Profesional").obtener(p["IdProfesional"])
+    assert color_profesional(conn, p, PERIODO) == "bordo"
+
+
+def test_gris_no_pasa_a_bordo_lejos_de_fin_de_mes(conn):
+    p = _crear_r(conn, saldo_anterior=0)
+    _dar_reserva_regular_activa(conn, p["IdProfesional"])
+    emitir_liquidacion(conn, id_profesional=p["IdProfesional"], periodo=PERIODO)
+    marcar_estado_envio(conn, id_profesional=p["IdProfesional"], periodo=PERIODO, enviada=True)
+    _fijar_fecha(conn, "2026-08-10")  # lejos de fin de mes
+    assert color_profesional(conn, p, PERIODO) == "gris"
+
+
+def test_gris_no_pasa_a_bordo_sin_reserva_regular_activa(conn):
+    p = _crear_r(conn, saldo_anterior=0)
+    emitir_liquidacion(conn, id_profesional=p["IdProfesional"], periodo=PERIODO)
+    marcar_estado_envio(conn, id_profesional=p["IdProfesional"], periodo=PERIODO, enviada=True)
+    _fijar_fecha(conn, "2026-08-28")
+    assert color_profesional(conn, p, PERIODO) == "gris"
+
+
+def test_bordo_vuelve_a_gris_tras_generar_el_recordatorio(conn):
+    p = _crear_r(conn, saldo_anterior=0)
+    _dar_reserva_regular_activa(conn, p["IdProfesional"])
+    emitir_liquidacion(conn, id_profesional=p["IdProfesional"], periodo=PERIODO)
+    marcar_estado_envio(conn, id_profesional=p["IdProfesional"], periodo=PERIODO, enviada=True)
+    _fijar_fecha(conn, "2026-08-28")
+    assert color_profesional(conn, p, PERIODO) == "bordo"
+    marcar_recordatorio_mensajeria_generado(conn, p["IdProfesional"], PERIODO)
     assert color_profesional(conn, p, PERIODO) == "gris"
 
 

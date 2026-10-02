@@ -8,10 +8,13 @@ usuario (Mensaje 1 y Mensaje 3 grupal).
 Las 5 situaciones (DC-02 §5) ya no se determinan por tolerancia/plan
 directamente acá — se arman por color del Centro de mensajería
 (`app.negocio.mensajeria.color_profesional`), que es quien resuelve la
-máquina de estados completa (violeta, gris con reactivación, etc.). Cada
-`mensaje_situacion_N` asume que el llamador (la pantalla) ya construyó el
-mensaje correcto para el color/acción según la tabla de asignación de
-DC-03 "Resumen de asignaciones" — no vuelven a validar el color acá.
+máquina de estados completa (violeta, gris con posible recordatorio
+bordó, etc.). Cada `mensaje_situacion_N` asume que el llamador (la
+pantalla) ya construyó el mensaje correcto para el color/acción según la
+tabla de asignación de DC-03 "Resumen de asignaciones" — no vuelven a
+validar el color acá. `mensaje_recordatorio_fin_de_mes` (bordó) es
+posterior a DC-02/DC-03, pedido directo de la clienta — no tiene
+numeración de "situación" del documento original.
 """
 from __future__ import annotations
 
@@ -178,19 +181,73 @@ def mensaje_situacion_3(conn: sqlite3.Connection, id_profesional: int, periodo: 
     )
 
 
-def mensaje_situacion_4(conn: sqlite3.Connection, id_profesional: int) -> str:
-    """Rojo con liquidación YA enviada, reactivado desde gris cerca de fin
-    de mes (DC-02 §5)."""
+def mensaje_recordatorio_fin_de_mes(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:
+    """Bordó, botón "Generar texto" (al generarlo vuelve a gris — el
+    llamador es responsable de avisarle a
+    `app.negocio.mensajeria.marcar_recordatorio_mensajeria_generado`).
+
+    Modelo acordado con la clienta: empieza igual que los demás mensajes
+    automáticos ("MENSAJE AUTOMATICO") y repite, casi textual, las
+    secciones de "Mensaje grupal" (cierre de reservas / envío de
+    liquidaciones / feriados del mes próximo) — pero agrega arriba de
+    todo el estado de cuenta actual del profesional (a su favor / pendiente
+    a favor del espacio / en cero), y si queda deudor, la fecha de la
+    última recogida de sobres (Configuracion.FechaHoraRecogidaSobres, el
+    mismo valor que ya precarga el campo de Pagos) como corte de lo ya
+    contemplado en ese saldo."""
     profesional = _profesional_r(conn, id_profesional)
-    saldo_mes_en_curso = _moneda(profesional["SaldoCuentaActual"] or 0.0)
-    return (
-        f"Hola {nombre_para_mensaje(profesional)}, cómo estás..? Te recuerdo que en unos días se va a estar "
-        f"cerrando el mes, a este momento el saldo a abonar del mes en curso incluyendo la cuota del plan de "
-        f"pago es de {saldo_mes_en_curso}, tendrías alguna cancelación para informar o para realizar antes de "
-        "que termine el mes?\n\n"
-        "Recordá que no se pueden trasladar importes atrasados al próximo período cuando hay un plan de pagos "
-        "vigente tal cual lo conversamos en su momento. Quedo atento a tu comentario, gracias."
-    )
+    saldo = profesional["SaldoCuentaActual"] or 0.0
+
+    anio, mes = (int(p) for p in periodo.split("-"))
+    ultimo_dia = ultimo_dia_mes(anio, mes)
+    mes_siguiente = sumar_meses(periodo, 1)
+    anio_sig, mes_sig = (int(p) for p in mes_siguiente.split("-"))
+    primer_dia_siguiente = date(anio_sig, mes_sig, 1)
+
+    lineas = [
+        "MENSAJE AUTOMATICO",
+        "",
+        "(Texto recordatorio de carácter informativo, no es necesario responder)",
+        "",
+        "ESTADO DE CUENTA ACTUAL 👇",
+        "",
+    ]
+    if saldo == 0:
+        lineas.append("* Saldo en cero, sin deuda.")
+    elif saldo < 0:
+        lineas.append(f"* A favor del profesional {_moneda(abs(saldo))}.")
+    else:
+        lineas.append(f"* Pendiente de cancelación {_moneda(saldo)}.")
+        cfg = conn.execute(
+            "SELECT FechaHoraRecogidaSobres FROM Configuracion WHERE IdConfiguracion = 1"
+        ).fetchone()
+        if cfg and cfg["FechaHoraRecogidaSobres"]:
+            dt = datetime.fromisoformat(cfg["FechaHoraRecogidaSobres"])
+            dia_semana = DIAS_SEMANA[dt.weekday()].lower()
+            lineas.append(
+                "* Para el saldo se contemplan los pagos realizados por sobres hasta el "
+                f"{dia_semana} {fecha_corta(dt.date().isoformat())} inclusive."
+            )
+
+    lineas += [
+        "",
+        "CIERRE DE RESERVAS 👇",
+        "",
+        f"* {DIAS_SEMANA[ultimo_dia.weekday()]} {fecha_corta(ultimo_dia.isoformat())}",
+        "",
+        "ENVIO DE LIQUIDACIONES 👇",
+        "",
+        f"* {DIAS_SEMANA[primer_dia_siguiente.weekday()]} {fecha_corta(primer_dia_siguiente.isoformat())}",
+    ]
+
+    feriados = feriados_relevantes_periodo(conn, anio_sig, mes_sig)
+    if feriados:
+        lineas += ["", "PROXIMOS FERIADOS 👇", ""]
+        for f in feriados:
+            d = date.fromisoformat(f["Fecha"])
+            lineas.append(f"* {DIAS_SEMANA[d.weekday()]} {fecha_corta(f['Fecha'])}")
+
+    return "\n".join(lineas)
 
 
 def mensaje_situacion_5(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:

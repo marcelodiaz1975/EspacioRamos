@@ -5,7 +5,8 @@ from PySide6.QtWidgets import QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.mensajeria import _PanelCentroMensajeria
-from app.negocio.dias import periodo_actual
+from app.negocio.dias import periodo_actual, ultimo_dia_mes
+from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.negocio.mensajeria import color_profesional, marcar_mensaje_previo_generado
 from app.negocio.pagos import crear_plan_pago_historico
 from app.repositorio.registro import obtener_repositorio
@@ -203,6 +204,36 @@ def test_generar_texto_aislada_pasa_a_azul(qtbot, conn):
 
     assert "DETALLE RESERVA" in pantalla.texto_mensaje.toPlainText()
     assert _color(conn, id_prof) == "azul"
+
+
+def test_generar_texto_bordo_pasa_a_gris(qtbot, conn):
+    id_prof = _crear_profesional(conn, saldo=0)
+    id_consultorio = _crear_consultorio(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio="2026-01-01", VigenciaFin=None,
+    )
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_prof, periodo=periodo, enviada=True)
+    anio, mes = (int(p) for p in periodo.split("-"))
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = ? WHERE IdConfiguracion = 1",
+        (ultimo_dia_mes(anio, mes).isoformat(),),
+    )
+    conn.commit()
+    assert _color(conn, id_prof) == "bordo"
+
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    fila = pantalla._profesionales.index(next(p for p in pantalla._profesionales if p["IdProfesional"] == id_prof))
+    pantalla.tabla.cellWidget(fila, 6).click()
+
+    assert "MENSAJE AUTOMATICO" in pantalla.texto_mensaje.toPlainText()
+    assert "ESTADO DE CUENTA ACTUAL" in pantalla.texto_mensaje.toPlainText()
+    assert _color(conn, id_prof) == "gris"
 
 
 def test_generar_texto_copia_al_portapapeles(qtbot, conn, monkeypatch):

@@ -381,19 +381,22 @@ CREATE TABLE IF NOT EXISTS LiquidacionEmitida (
 );
 
 -- EstadoMensajeriaPeriodo (DC-02 sec. 2) ------------------------------------------------------
--- Trackea, por profesional y período, las dos transiciones de color del
--- Centro de mensajería que no se pueden derivar de otra tabla: marrón (mensaje
+-- Trackea, por profesional y período, las transiciones de color del Centro
+-- de mensajería que no se pueden derivar de otra tabla: marrón (mensaje
 -- previo pendiente) -> amarillo (mensaje previo ya generado) para categoría R,
--- y celeste (mensaje aisladas pendiente) -> azul (ya generado) para categoría
--- A. Sin fila para (profesional, período) = arranque de mes (marrón/celeste
--- según corresponda). No se resetea con un paso explícito de avance de mes:
--- un período nuevo simplemente no tiene fila todavía.
+-- celeste (mensaje aisladas pendiente) -> azul (ya generado) para categoría
+-- A, y gris -> bordó (recordatorio de fin de mes) -> gris de nuevo una vez
+-- copiado el mensaje, también para categoría R. Sin fila para (profesional,
+-- período) = arranque de mes (marrón/celeste según corresponda, nunca
+-- bordó). No se resetea con un paso explícito de avance de mes: un período
+-- nuevo simplemente no tiene fila todavía.
 CREATE TABLE IF NOT EXISTS EstadoMensajeriaPeriodo (
     IdEstadoMensajeria INTEGER PRIMARY KEY AUTOINCREMENT,
     IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional),
     Periodo TEXT NOT NULL,
     MensajePrevioGenerado INTEGER NOT NULL DEFAULT 0,
     MensajeAisladaGenerado INTEGER NOT NULL DEFAULT 0,
+    RecordatorioMensajeriaGenerado INTEGER NOT NULL DEFAULT 0,
     UNIQUE (IdProfesional, Periodo)
 );
 
@@ -677,7 +680,12 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     SemanasVacacionesMaximasPorAnio INTEGER NOT NULL DEFAULT 2,
     DiasEnvioLiquidacionesRemanentes INTEGER NOT NULL DEFAULT 5,
     DiasAntesFinMesRecordatorioPlan INTEGER NOT NULL DEFAULT 5,
-    DiasAntesFinMesRecordatorioGeneral INTEGER NOT NULL DEFAULT 3,
+    -- Cantidad de días antes de fin de mes para activar el recordatorio
+    -- "bordó" del Centro de mensajería (ver EstadoMensajeriaPeriodo más
+    -- abajo) — reusa esta columna, que ya existía sin ningún lector hasta
+    -- ahora. DiasAntesFinMesRecordatorioPlan de arriba quedó sin uso al
+    -- descartarse la vieja reactivación gris->rojo que la leía.
+    DiasAntesFinMesRecordatorioGeneral INTEGER NOT NULL DEFAULT 5,
     RetencionHistorialListaEsperaAnios INTEGER NOT NULL DEFAULT 5,
     RangosEstadisticasOcupacion TEXT,
     ModulosExtendidos INTEGER NOT NULL DEFAULT 0,

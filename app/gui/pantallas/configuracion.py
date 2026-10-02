@@ -105,6 +105,10 @@ _CAMPOS_NUMERICOS = [
     ("PorcentajeDescuentoNoLaborable", "% descuento por día no laborable"),
     ("SemanasVacacionesMaximasPorAnio", "Semanas de vacaciones máximas por año"),
     ("DiasEnvioLiquidacionesRemanentes", "Días de margen para envío de liquidaciones"),
+    (
+        "DiasAntesFinMesRecordatorioGeneral",
+        "Cantidad de días antes de fin de mes para activar recordatorios en mensajería",
+    ),
     ("RetencionHistorialListaEsperaAnios", "Retención historial lista de espera (años)"),
     ("TamanoMaximoImagenMB", "Tamaño máximo de imagen (MB)"),
     ("CantidadDecimales", "Cantidad de decimales en los montos"),
@@ -158,6 +162,7 @@ _RANGOS_NUMERICOS: dict[str, tuple[float, float]] = {
     "PorcentajeDescuentoNoLaborable": (0, 100),
     "SemanasVacacionesMaximasPorAnio": (0, 52),
     "DiasEnvioLiquidacionesRemanentes": (0, 60),
+    "DiasAntesFinMesRecordatorioGeneral": (0, 31),
     "RetencionHistorialListaEsperaAnios": (0, 50),
     "TamanoMaximoImagenMB": (0.1, 500),
     "CantidadDecimales": (0, 4),
@@ -191,7 +196,7 @@ _GRUPOS: list[tuple[str, list[str]]] = [
         "PorcentajeAjusteSaldoAtrasado", "ToleranciaDeudaDescuento",
         "PorcentajeDescuentoFeriado", "PorcentajeDescuentoNoLaborable",
         "SemanasVacacionesMaximasPorAnio", "DiasEnvioLiquidacionesRemanentes",
-        "RetencionHistorialListaEsperaAnios",
+        "DiasAntesFinMesRecordatorioGeneral", "RetencionHistorialListaEsperaAnios",
     ]),
     ("Archivos y backup", [
         "FrecuenciaBackupDrive", "CarpetaBaseArchivos", "CarpetaBackup", "TamanoMaximoImagenMB",
