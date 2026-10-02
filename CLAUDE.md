@@ -5385,6 +5385,98 @@ más de un período con datos); `test_ingresos_ver_periodo_actual_
 vuelve_a_una_sola_fila`/`test_resultado_ver_periodo_actual_vuelve_a_
 una_sola_fila`.
 
+## Centro de mensajería: color Bordó (recordatorio de fin de mes), se descarta la reactivación a rojo
+
+Pedido de la clienta, ya con el sistema completamente reordenado: "quiero
+agregar una instancia más al centro de mensajería... al final de mes
+tendría a todos los profesionales en gris, salvo alguno con plan de pago
+impago" — repaso que destapó la vieja reactivación gris->rojo (DC-02
+§2.5: a X días de fin de mes, un gris con plan activo y saldo del mes en
+curso fuera de tolerancia volvía a subir a rojo). Sobre esa descripción,
+la clienta decidió: "El rojo lo dejamos para el punto 1 nada más, el
+punto 2 lo desestimamos" — rojo queda SOLO para el camino de siempre
+(deuda fuera de tolerancia + plan activo, liquidación todavía NO
+enviada); la reactivación se borra por completo (`_debe_reactivar_rojo`/
+`_dias_reactivacion_rojo` en `app.negocio.mensajeria`, y `mensaje_
+situacion_4` en `app.negocio.mensajes`) y se reemplaza por un color
+nuevo, bordó, con un alcance deliberadamente MÁS AMPLIO que el que tenía
+la reactivación: "aplica a TODOS los profesionales con reserva regular
+cuando se llega a esa instancia de mes" — sin mirar deuda ni plan de
+pago, a diferencia de lo que reemplaza.
+
+**Parámetro**: "Cantidad de días antes de fin de mes para activar
+recordatorios en mensajería" (ej. "si el mes tiene 31 días, el día 26
+por defecto 5 me va a cambiar el color de los profesionales grises").
+Investigado antes de sumar una columna nueva: `Configuracion.
+DiasAntesFinMesRecordatorioGeneral` ya existía en el schema (sembrada
+con default 3) desde antes de este pedido, sin ningún lector en todo el
+código — quedó así reusada para esto (default subido a 5) en vez de
+crear una columna nueva, y sumada por primera vez a la GUI (`app.gui.
+pantallas.configuracion`, solapa "Valores y liquidación", junto a "Días
+de margen para envío de liquidaciones"). `DiasAntesFinMesRecordatorioPlan`
+(el parámetro que leía la reactivación descartada) se deja tal cual en
+el schema — dato ya sembrado en bases existentes, sin ningún lector
+nuevo ni viejo a partir de este cambio, no se armó una migración para
+sacarlo (borrar una columna en SQLite exige reconstruir la tabla, sin
+ningún beneficio real acá).
+
+**Disparador** (`app.negocio.mensajeria._debe_recordar_fin_de_mes`): un
+profesional categoría R que ya está en gris (liquidación del período
+enviada) + tiene una `ReservaRegular` vigente hoy (`_reserva_regular_
+activa`, duplicado del homónimo privado de `app.negocio.panel_control`
+— mismo criterio de "no importar símbolos privados entre módulos sin
+relación real entre sí", aunque los dos sean de negocio) + faltan ≤ N
+días para fin de mes (el parámetro de arriba) + todavía no generó su
+recordatorio este período → bordó. Sin reserva regular activa, o ya
+generado el recordatorio este período, se queda en gris.
+
+**Transición bordó -> gris**: mismo mecanismo que marrón->amarillo/
+celeste->azul (`EstadoMensajeriaPeriodo`, columna nueva
+`RecordatorioMensajeriaGenerado`), pero a la inversa — de urgente a
+calmo en vez de al revés. Al generar el texto del recordatorio (botón
+"Generar texto", igual que cualquier otro color) se llama `marcar_
+recordatorio_mensajeria_generado`, y el profesional vuelve a gris por el
+resto del período aunque sigan dándose las mismas condiciones (sigue
+dentro de la ventana de días, sigue reservando regular) — "una vez que
+lo copio... me lo pasa a gris de nuevo y me lo baja", confirmado por la
+clienta.
+
+**Mensaje** (`app.negocio.mensajes.mensaje_recordatorio_fin_de_mes`):
+modelo final acordado con la clienta en dos vueltas (un primer borrador
+propio, que la clienta reescribió con la redacción exacta que quería).
+Empieza igual que el resto de los mensajes automáticos ("MENSAJE
+AUTOMATICO", el mismo preámbulo literal de `mensaje_situacion_1`/
+`mensaje_envio_liquidacion`) más una aclaración de que es informativo y
+no hace falta responder. Después, "ESTADO DE CUENTA ACTUAL" con el
+`SaldoCuentaActual` del profesional (no el anterior — es un recordatorio
+sobre el mes que se está cerrando): en cero ("Saldo en cero, sin
+deuda"), a favor del profesional (saldo negativo) o pendiente de
+cancelación (saldo positivo) — nunca ambigüo sobre a favor de quién
+queda la diferencia. Si queda deudor, suma una línea con la fecha de la
+última recogida de sobres (`Configuracion.FechaHoraRecogidaSobres`, el
+mismo valor que ya precarga el campo de Pagos al registrar un pago por
+sobre — no una fecha nueva, reusada tal cual) como corte de lo ya
+contemplado en ese saldo; si nunca se registró un pago por sobre, se
+omite la línea entera. Las tres secciones de abajo repiten, casi
+textual, las de "Mensaje grupal" (`mensaje_grupal`): "CIERRE DE
+RESERVAS" (último día del período, mismo cálculo que ya usa esa
+función), "ENVIO DE LIQUIDACIONES" (primer día del mes siguiente) y
+"PROXIMOS FERIADOS" (uno por uno, no agrupados en una sola línea como en
+"Mensaje grupal" — pedido explícito: "hacer esto con cada feriado o
+fecha especial que haya cargada" — se omite la sección entera si no hay
+ninguno).
+
+**GUI** (`app/gui/pantallas/mensajeria.py`): bordó se suma a `_ORDEN_
+COLOR` (justo antes de gris, mismo criterio de "urgencia decreciente"
+que el resto del orden), `_ESTADO_TEXTO`, `_COLOR_FONDO` (`#6D1B2A`,
+bordó real) y `_COLORES_CON_CHECK` (mismo criterio que gris: el check
+"Enviada" sigue disponible para desmarcarla a mano si hiciera falta
+corregir algo) y `COLORES_ENVIADOS` (el filtro "Enviados" también lo
+muestra — ya tiene la liquidación enviada, igual que gris/azul). El
+botón "Generar texto" de un bordó llama a `mensaje_recordatorio_fin_de_
+mes` y dispara la transición a gris en el mismo golpe de clic, mismo
+patrón que marrón/celeste.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
