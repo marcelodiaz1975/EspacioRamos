@@ -5182,6 +5182,44 @@ ronda que había igualado las 7 columnas) se saca, reemplazada por las
 nuevas de arriba. `tests/test_pdf_placas.py` suma
 `test_placa_personalizada_de_dos_lineas_muestra_las_dos`.
 
+## Placas: "Liberar posición de placa" a la misma altura que los otros dos
+
+Pedido puntual de la clienta al revisar la captura de la ronda anterior:
+en la columna de Filtros de "Búsqueda y asignación de placas", los tres
+botones (`boton_asignar_nueva`/`boton_reasignar`/`boton_liberar`) ya
+compartían el mismo ancho fijo (`_ANCHO_BOTON_BUSCAR`), pero no el
+alto — los dos primeros tienen texto de 2 líneas (desde una ronda
+anterior, "Asignar posición de placa\na profesional"/"Reasignar
+posición de placa\na otro profesional") mientras que "Liberar posición
+de placa" es una sola línea, así que Qt le daba a cada uno el alto
+natural de su propio `sizeHint()` — 46px a los de 2 líneas, 32px al de
+una sola (medido con un script contra el estilo real de la app, no a
+ojo). `_ALTO_BOTON_BUSCAR = 46` (nueva constante, en
+`app/gui/pantallas/placas.py`) se aplica con `setFixedHeight` a los
+tres — mismo criterio que ya usa `_ANCHO_BOTON_BUSCAR` para el ancho,
+extendido acá al alto porque esta es la primera pantalla de la revisión
+que mezcla botones de una y de dos líneas en un mismo grupo vertical
+(el resto de los botones de dos líneas del sistema, ej. Oferta/
+Reservas, no conviven con botones de una sola línea en la misma
+columna, así que nunca había hecho falta igualar el alto a mano antes).
+Test nuevo en `tests/test_gui_placas.py`: se suman dos aserciones al
+test ya existente de etiquetas/ancho
+(`test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar`)
+confirmando que los tres botones también comparten el mismo
+`.height()`.
+
+De paso, pedido de la clienta de cambiar el criterio de las capturas
+que se le envían para esta pantalla puntual: en vez de la pantalla
+`PantallaPlacasParaTimbres` sola (como el resto de las capturas de todo
+este documento), pidió ver las dos solapas con la PANTALLA COMPLETA del
+sistema, menú de navegación incluido — así que esta ronda sumó un
+script de captura nuevo que arma `VentanaPrincipal` de verdad (con
+`gui_main.construir_secciones()`), selecciona "Placas para timbres" en
+el menú lateral y hace `.grab()` sobre la ventana completa en vez de
+sobre el panel suelto. No es un cambio de convención general de
+capturas para el resto del sistema — es puntual de este pedido sobre
+esta pantalla.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
