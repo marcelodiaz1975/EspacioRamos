@@ -125,9 +125,9 @@ def test_recordatorio_fin_de_mes_saldo_pendiente_sin_fecha_de_sobres(conn, consu
 
 def test_recordatorio_fin_de_mes_saldo_pendiente_con_fecha_de_sobres(conn, consultorio):
     id_prof = _crear_regular(conn, consultorio, SaldoCuentaActual=4586)
-    obtener_repositorio(conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres="2026-08-25T00:00:00")
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres="2026-08-25T16:00:00")
     texto = mensaje_recordatorio_fin_de_mes(conn, id_prof, PERIODO)
-    assert "hasta el martes 25/8 inclusive" in texto
+    assert "hasta las 16hs del martes 25/8." in texto
 
 
 def test_recordatorio_fin_de_mes_cierre_de_reservas_y_envio_de_liquidaciones(conn, consultorio):

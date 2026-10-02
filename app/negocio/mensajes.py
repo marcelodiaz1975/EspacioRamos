@@ -191,10 +191,10 @@ def mensaje_recordatorio_fin_de_mes(conn: sqlite3.Connection, id_profesional: in
     secciones de "Mensaje grupal" (cierre de reservas / envío de
     liquidaciones / feriados del mes próximo) — pero agrega arriba de
     todo el estado de cuenta actual del profesional (a su favor / pendiente
-    a favor del espacio / en cero), y si queda deudor, la fecha de la
-    última recogida de sobres (Configuracion.FechaHoraRecogidaSobres, el
-    mismo valor que ya precarga el campo de Pagos) como corte de lo ya
-    contemplado en ese saldo."""
+    a favor del espacio / en cero), y si queda deudor, la fecha y hora de
+    la última recogida de sobres (Configuracion.FechaHoraRecogidaSobres,
+    el mismo valor que ya precarga el campo de Pagos) como corte de lo
+    ya contemplado en ese saldo."""
     profesional = _profesional_r(conn, id_profesional)
     saldo = profesional["SaldoCuentaActual"] or 0.0
 
@@ -224,9 +224,10 @@ def mensaje_recordatorio_fin_de_mes(conn: sqlite3.Connection, id_profesional: in
         if cfg and cfg["FechaHoraRecogidaSobres"]:
             dt = datetime.fromisoformat(cfg["FechaHoraRecogidaSobres"])
             dia_semana = DIAS_SEMANA[dt.weekday()].lower()
+            hora = hora_fmt(dt.hour + dt.minute / 60)
             lineas.append(
-                "* Para el saldo se contemplan los pagos realizados por sobres hasta el "
-                f"{dia_semana} {fecha_corta(dt.date().isoformat())} inclusive."
+                f"* Para el cálculo del saldo se contemplaron los sobres recogidos hasta las {hora} del "
+                f"{dia_semana} {fecha_corta(dt.date().isoformat())}."
             )
 
     lineas += [
