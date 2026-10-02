@@ -5220,6 +5220,95 @@ sobre el panel suelto. No es un cambio de convención general de
 capturas para el resto del sistema — es puntual de este pedido sobre
 esta pantalla.
 
+## Capturas: sin sufijo "(pantalla completa)", a pantalla completa para
+## varias pantallas más
+
+Dos pedidos de la clienta sobre el criterio de capturas:
+
+- **Nombre de archivo**: el sufijo "(pantalla completa)" que habían
+  sumado las dos capturas de Placas de la ronda anterior se saca —
+  vuelven al formato estándar de todo este documento, "{Sección} -
+  {Formulario} - {Solapa}.png", igual al nombre con el que ya se
+  descargan. El contenido (pantalla completa, con el menú a la
+  izquierda) no cambió, solo el nombre del archivo.
+- **Más pantallas a pantalla completa**: pedido explícito de "mandame de
+  nuevo todas las solapas con el menú de navegación a la izquierda"
+  para Valores, Registro de ausencias, Profesionales, Pagos y
+  Estadísticas — mismo mecanismo que Placas (armar `VentanaPrincipal`
+  de verdad vía `gui_main.construir_secciones()`, seleccionar la
+  `Seccion` por su nombre en el menú lateral, `.grab()` sobre la
+  ventana completa) aplicado a estas cinco. Sigue sin ser un cambio de
+  convención retroactivo para el resto de las capturas ya enviadas —
+  se aplica pantalla por pantalla, a medida que la clienta las pide de
+  nuevo.
+
+## Valores vigentes: columnas sin scroll horizontal, Localidad/Edificio
+## más anchas en Promedios
+
+Tres pedidos de la clienta sobre la solapa "Valores vigentes" (de
+"Valores"), revisada al mandarle la captura a pantalla completa:
+
+- **Las dos tablas, sin scroll horizontal.** "Valores vigentes por
+  horas regulares y aisladas" (`tabla_valores`, 6 columnas) quedaba con
+  barra de scroll horizontal en un panel más angosto que el de otras
+  pantallas — sus columnas usaban el `ResizeToContents` default de
+  `_armar_tabla` (compartido con `_PanelPromedios`, ver abajo), que
+  dimensiona cada columna a su contenido sin importar cuánto ancho haya
+  disponible en el `GroupBox` que la contiene. Localidad/Edificio/
+  Unidad/Consultorio se quedan en ese modo (contenido corto, no
+  necesitan más); "Valor hora regular"/"Valor hora aislada" — las dos
+  columnas que de ese modo quedaban más angostas que su propio título —
+  pasan a `Stretch`, mismo criterio que "Totales por bloques" de
+  Liquidaciones simuladas (columnas cortas a su ancho justo, las
+  últimas en Stretch). Para que las dos en Stretch tuvieran lugar de
+  sobra se acortó además su título ("Valor hora regular"/"...aislada" →
+  "Valor regular"/"Valor aislada" — "hora" ya está en el título del
+  `GroupBox` que las contiene, de sobra repetirlo en la columna, mismo
+  criterio de acortar títulos largos que ya se usó en otras pantallas).
+- **"Promedios de valor hora regular y aislada": Localidad/Edificio más
+  anchas, sin espacio en blanco al final.** Esta tabla (`_PanelPromedios`,
+  un `QGroupBox` con ancho fijo 720-780 sin relación con el contenido
+  real) dejaba un hueco en blanco después de la última columna —
+  `_ajustar_ancho` (nuevo) calcula el ancho de la TABLA (no ya del
+  `GroupBox`, que se achica solo alrededor) como la suma real de sus 5
+  columnas, sacando el rango fijo de siempre. Localidad/Edificio
+  (columnas 0/1) pasan de `ResizeToContents` a `Interactive` para poder
+  sumarles `_PADDING_COLUMNA_PROMEDIOS = 20` sobre su ancho justo (mismo
+  mecanismo que "Día" en Liquidaciones simuladas: `resizeColumnToContents`
+  + `setColumnWidth(... + padding)`, que solo pega en una columna que no
+  siga en `ResizeToContents` continuo). Un colchón de 2px sobre la suma
+  de columnas absorbe un residuo de redondeo de Qt entre el ancho
+  "lógico" seteado por columna y el pixel real que termina pidiendo el
+  viewport — sin él, quedaba un scroll horizontal de 1px.
+
+**Bug real encontrado al revisar esto contra la pantalla completa, no
+solo el panel suelto** (confirmado con captura — el panel aislado en un
+test daba bien, la pantalla completa no): `_PanelPromedios` arma y
+puebla su tabla durante `__init__` de `_PanelValoresVigentes` (el
+`on_cambiar` que dispara `_PanelFiltrosJerarquico` al construirse, ver
+el comentario ya existente sobre ese orden), momento en el que el
+widget todavía es huérfano — no cuelga todavía del árbol de
+`VentanaPrincipal`, que recién arma cada `Seccion` DESPUÉS de haberse
+aplicado a SÍ MISMA (no a la `QApplication`) el `setStyleSheet` de
+`hoja_estilos()`. Con la fuente default de Qt (sin el bold/14px real de
+los encabezados de `estilos.py`), `_ajustar_ancho` calculaba anchos más
+angostos que los que hacen falta una vez que el panel cuelga de verdad
+de la ventana y hereda el estilo real — mismo motivo, ya documentado en
+Reservas, por el que un `sizeHint` calculado durante la construcción no
+siempre es el definitivo. Se corrige con un `showEvent` en
+`_PanelPromedios` que vuelve a llamar `_ajustar_ancho()` al mostrarse de
+verdad. Test de regresión
+(`test_valores_vigentes_sin_scroll_horizontal_con_estilo_real_aplicado`)
+replica el bug real aplicando `hoja_estilos()` al panel DESPUÉS de
+construirlo (mismo mecanismo que ya usan varios tests de Reservas) en
+vez de a toda la `QApplication` — necesario para que la medición
+"antes de estilar" ocurra de verdad.
+
+Tests nuevos en `tests/test_gui_valores.py`:
+`test_promedios_localidad_y_edificio_mas_anchas_que_sin_padding`,
+`test_promedios_sin_espacio_en_blanco_tras_la_ultima_columna`,
+`test_valores_vigentes_sin_scroll_horizontal_con_estilo_real_aplicado`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
