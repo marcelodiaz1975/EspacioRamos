@@ -5614,6 +5614,80 @@ armado por el código) y `test_mensaje_detalle_reserva_aislada_sin_
 personalizar_sigue_igual_que_antes`. El conteo de `MENSAJES_EDITABLES`
 en `test_claves_de_mensajes_editables_son_unicas` sube de 7 a 8.
 
+### Tercera vuelta: se suma `oferta_busqueda_whatsapp` y auditoría de cierre
+
+Pedido explícito de la clienta: sumar el texto de WhatsApp de "Oferta
+de consultorios"/"Disponibilidad" (`generar_texto_oferta_busqueda`,
+`app/negocio/oferta_busqueda_whatsapp.py`) — el otro candidato que había
+quedado afuera de la primera vuelta, misma complejidad estructural que
+`mensaje_detalle_reserva_aislada` — y de paso auditar el resto del
+sistema por si quedaba algún otro texto generado que mereciera entrar a
+"Textos del sistema", "así tenemos todo cubierto en este aspecto".
+
+**Auditoría de cierre** (agente de exploración, sin escribir código):
+barrido de todo `app/` fuera de `app/pdf/` buscando cualquier función
+que arme y devuelva un texto de varias líneas pensado para ser leído/
+copiado/enviado por la clienta a un profesional o a un tercero. Resultado:
+ningún otro candidato real.
+- `mensaje_conflicto_aislada` (`app.negocio.conflictos_aisladas`):
+  cartel de error en un `QMessageBox.warning`, solo para la operadora,
+  nunca se envía a nadie — mismo descarte que cualquiera de los demás
+  carteles de advertencia/información sueltos por el sistema (no son
+  "texto de fábrica" con una redacción fija que tenga sentido poder
+  reescribir, son mensajes de validación puntual con datos en vivo).
+- `texto_para_imprimir` de Placas (`app.negocio.placas`): no es prosa
+  de fábrica — es el nombre estándar del profesional O un texto YA
+  libre que la clienta tipea por placa (`NombreGrabado`); no hay nada
+  fijo ahí que haga falta volver editable, el mecanismo de "texto
+  libre por registro" ya cumple ese rol.
+- PDFs (`app/pdf/`): quedan fuera de cualquier vuelta de esta
+  funcionalidad — son tablas/Paragraphs de ReportLab, un proyecto de
+  maquetación, no de redacción de texto corrido.
+- Revisadas puntualmente y descartadas por ser resúmenes de datos para
+  mostrar en una celda/tooltip, no mensajes: `app.gui.widgets.
+  resumen_saldo` (etiquetas de saldo con color), `_texto_condiciones`
+  de Lista de espera (resumen de filtros en una celda).
+
+Con esto, "Textos del sistema" queda en 9 slots de mensaje (los 7 del
+Centro de mensajería + `mensaje_detalle_reserva_aislada` +
+`oferta_busqueda_whatsapp`) más la ayuda F1 de cada pantalla — no
+queda pendiente ningún otro texto generado por el sistema con este
+perfil.
+
+**Mecánica de `oferta_busqueda_whatsapp`**: mismo criterio que
+`mensaje_detalle_reserva_aislada` — el texto tiene tres secciones
+armadas con loops (detalle de la búsqueda, listado de alternativas,
+comentario de edificios/avisos) que se entregan a la plantilla como
+tres variables de bloque ya resueltas (`{bloque_detalle_busqueda}`/
+`{bloque_alternativas}`/`{bloque_comentario}`), nunca editables línea
+por línea. Lo editable de verdad son los tres títulos en negrita de
+WhatsApp ("*Búsqueda requerida por el profesional*", "*Detalle de la
+búsqueda*", "*Listado de alternativas encontradas*"). El título propio
+de la sección de comentario, "*Comentario*", queda DENTRO de
+`{bloque_comentario}` (no como texto fijo aparte) — mismo truco que
+`{bloque_feriados}` del Mensaje grupal: así toda la sección, título
+incluido, desaparece junto cuando no hay ni edificios que aclarar ni
+avisos. Los marcadores estructurales de WhatsApp (viñetas "- ", la
+numeración "_Alternativa N_", la frase "Sin disponibilidad...") quedan
+del lado del código, dentro de `{bloque_alternativas}` — el sistema
+sigue decidiendo cuándo y cómo, nunca una plantilla mal escrita.
+
+`DEFAULT_OFERTA_BUSQUEDA_WHATSAPP` reproduce exacto el formato de
+siempre (confirmado: los 13 tests ya existentes de
+`generar_texto_oferta_busqueda`, que no personalizan nada, siguieron
+pasando sin tocarlos). `generar_texto_oferta_busqueda` pasa de armar
+`lineas` a mano y unirlas con `"\n".join` a juntar cada sección en su
+propia lista (`detalle_lineas`/`alternativas_lineas`/`comentario`),
+resolver la plantilla y sustituir — mismo patrón que el resto de los
+mensajes editables.
+
+Tests nuevos en `tests/test_plantillas_texto.py`:
+`test_oferta_busqueda_whatsapp_solo_los_titulos_son_editables`
+(personaliza los tres títulos, confirma que los tres bloques siguen
+armados por el código) y `test_oferta_busqueda_whatsapp_sin_
+personalizar_sigue_igual_que_antes`. El conteo de `MENSAJES_EDITABLES`
+sube de 8 a 9.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
