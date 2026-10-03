@@ -5,13 +5,15 @@ cada pantalla — ver `app.negocio.plantillas_texto` para el mecanismo
 (texto de fábrica + override opcional en `PlantillaTexto`, mismo patrón
 de sustitución que ya usa `MensajePredefinido`).
 
-Alcance acotado a pedido explícito de la clienta: los 7 mensajes de
+Alcance acotado a pedido explícito de la clienta: los 8 mensajes de
 `app.negocio.plantillas_texto.MENSAJES_EDITABLES` (`mensaje_detalle_
-reserva_aislada` queda afuera — arma listas con loops, misma complejidad
-que los textos de Oferta/Disponibilidad, una vuelta aparte) y la ayuda
-F1 de cada `Seccion` del menú (hallazgo #23 de la auditoría DC-01/DC-10:
-"la ayuda F1 funciona y es contextual, pero no es editable sin tocar
-código").
+reserva_aislada` se sumó en una segunda vuelta — su cuerpo, armado con
+loops de reservas/llaves/pagos/etc., llega como una sola variable ya
+resuelta, `{detalle_items}`; solo su encabezado es texto de plantilla de
+verdad) y la ayuda F1 de cada `Seccion` del menú (hallazgo #23 de la
+auditoría DC-01/DC-10: "la ayuda F1 funciona y es contextual, pero no es
+editable sin tocar código"). Los textos de WhatsApp de Oferta/
+Disponibilidad (loops de franjas) siguen fuera de esta funcionalidad.
 
 No usa `PantallaCRUD` (mismo criterio que Usuarios y permisos/Gestor de
 archivos): no hay alta/baja, los "slots" son un conjunto fijo que define

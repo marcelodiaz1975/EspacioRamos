@@ -27,6 +27,7 @@ from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, hora_fmt, mes_texto
 from app.negocio.liquidaciones import CATEGORIAS_CON_LIQUIDACION_MENSUAL
 from app.negocio.plantillas_texto import (  # noqa: F401 (sustituir_variables se reexporta)
+    DEFAULT_DETALLE_RESERVA_AISLADA,
     DEFAULT_ENVIO_LIQUIDACION,
     DEFAULT_GRUPAL,
     DEFAULT_RECORDATORIO_FIN_DE_MES,
@@ -477,7 +478,14 @@ def mensaje_detalle_reserva_aislada(
 
     "Regla del edificio" (si tiene llaves de más de un edificio, se agrega
     el edificio a cada línea aunque `incluir_edificio` esté en False) se
-    resuelve mirando las llaves ACTIVAS (sin devolver) del profesional."""
+    resuelve mirando las llaves ACTIVAS (sin devolver) del profesional.
+
+    Editable desde "Textos del sistema" (clave
+    `mensaje_detalle_reserva_aislada`) — ver `app.negocio.plantillas_
+    texto`: solo el encabezado (título + nombre) es texto de plantilla de
+    verdad, el resto del cuerpo (armado con loops de reservas/llaves/
+    pagos/etc.) se le entrega ya resuelto como la variable
+    `{detalle_items}`, nunca editable línea por línea."""
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None:
         raise ValueError(f"No existe el profesional #{id_profesional}")
@@ -486,7 +494,7 @@ def mensaje_detalle_reserva_aislada(
     incluir_edificio = _incluir_edificio_efectivo(conn, incluir_edificio, id_profesional)
 
     partes_nombre = [p for p in (profesional["Tratamiento"], profesional["NombrePila"], profesional["Apellido"]) if p]
-    lineas = [f"DETALLE RESERVA {mes_texto(mes).upper()}", " ".join(partes_nombre).upper(), ""]
+    lineas: list[str] = []
 
     filas = conn.execute(
         """
@@ -614,7 +622,14 @@ def mensaje_detalle_reserva_aislada(
             f"{dia_semana} {dt.day}/{dt.month} a las {hora}.",
         ]
 
-    return "\n".join(lineas)
+    plantilla = resolver_plantilla(
+        conn, "mensaje_detalle_reserva_aislada", DEFAULT_DETALLE_RESERVA_AISLADA,
+    )
+    return sustituir_variables(plantilla, {
+        "mes_mayus": mes_texto(mes).upper(),
+        "nombre_profesional": " ".join(partes_nombre).upper(),
+        "detalle_items": "\n".join(lineas),
+    })
 
 
 # -------------------------------------------------------- mensajes predefinidos (5.5)

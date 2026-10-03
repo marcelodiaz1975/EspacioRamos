@@ -2,7 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.mensajes import mensaje_envio_liquidacion, mensaje_grupal
+from app.negocio.mensajes import mensaje_detalle_reserva_aislada, mensaje_envio_liquidacion, mensaje_grupal
 from app.negocio.plantillas_texto import (
     MENSAJES_EDITABLES,
     guardar_texto_personalizado,
@@ -57,7 +57,7 @@ def test_guardar_dos_veces_actualiza_la_misma_fila(conn):
 
 def test_claves_de_mensajes_editables_son_unicas():
     claves = [m.clave for m in MENSAJES_EDITABLES]
-    assert len(claves) == len(set(claves)) == 7
+    assert len(claves) == len(set(claves)) == 8
 
 
 # --------------------------------------------- mensajes que usan la plantilla personalizada
@@ -83,3 +83,29 @@ def test_mensaje_grupal_bloque_feriados_sigue_armando_el_sistema(conn):
 def test_mensaje_grupal_sin_personalizar_sigue_igual_que_antes(conn):
     texto = mensaje_grupal(conn, "2026-08")
     assert "LIQUIDACIONES DE SEPTIEMBRE - AVISOS VARIOS" in texto
+
+
+def test_mensaje_detalle_reserva_aislada_solo_el_encabezado_es_editable(conn):
+    """{detalle_items} (loops de reservas/llaves/pagos/etc.) lo sigue
+    armando el código — acá solo se personaliza el encabezado, mismo
+    criterio que {bloque_feriados} en el Mensaje grupal."""
+    guardar_texto_personalizado(
+        conn, "mensaje_detalle_reserva_aislada", "{nombre_profesional} - {mes_mayus}\n\n{detalle_items}",
+    )
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="A", Apellido="Test", NombrePila="Juan",
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert texto.startswith("JUAN TEST - AGOSTO\n\n")
+    assert "SALDO A ABONAR" in texto
+
+
+def test_mensaje_detalle_reserva_aislada_sin_personalizar_sigue_igual_que_antes(conn):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="A", Apellido="Test", NombrePila="Juan",
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    lineas = texto.splitlines()
+    assert lineas[0] == "DETALLE RESERVA AGOSTO"
+    assert lineas[1] == "JUAN TEST"
+    assert lineas[2] == ""

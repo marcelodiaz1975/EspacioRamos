@@ -73,17 +73,22 @@ def resolver_plantilla(conn: sqlite3.Connection, clave: str, default: str) -> st
 
 
 # --------------------------------------------------------------------------
-# Registro de los 7 mensajes automáticos del Centro de mensajería (DC-02/
+# Registro de los 8 mensajes automáticos del Centro de mensajería (DC-02/
 # DC-03) que pasan a ser editables. Separados acá (y no mezclados con la
 # lógica de armado en `app.negocio.mensajes`) para que la pantalla de
 # edición pueda listar nombre/variables sin tener que importar ni ejecutar
 # ninguna función de armado de mensajes.
 #
-# `mensaje_detalle_reserva_aislada` queda FUERA de este alcance a
-# propósito (pedido explícito de la clienta de arrancar acotado): arma
-# listas de reservas/cargos/edificios con loops, misma complejidad
-# estructural que los textos de WhatsApp de Oferta/Disponibilidad — un
-# alcance más grande, para una vuelta aparte.
+# `mensaje_detalle_reserva_aislada` (sumado en una segunda vuelta, después
+# de quedar afuera de la primera por su complejidad) arma casi todo su
+# cuerpo con loops (llaves, reservas, saldo, pagos, ítems libres, reservas
+# posteriores, edificios mencionados, nota de sobres) — mismo criterio que
+# `{bloque_feriados}` del Mensaje grupal: todo ese cuerpo se entrega a la
+# plantilla como una única variable ya armada, `{detalle_items}`, nunca
+# como líneas editables por separado. Lo único que queda editable de
+# verdad es el encabezado (título + nombre del profesional) — el resto del
+# texto de WhatsApp de Oferta/Disponibilidad (loops de franjas) sigue
+# fuera de esta funcionalidad, es una pantalla totalmente distinta.
 
 DEFAULT_SITUACION_1 = (
     "MENSAJE AUTOMATICO\n\n"
@@ -160,6 +165,12 @@ DEFAULT_RECORDATORIO_FIN_DE_MES = (
     "* {fecha_envio_liquidaciones}{bloque_feriados}"
 )
 
+DEFAULT_DETALLE_RESERVA_AISLADA = (
+    "DETALLE RESERVA {mes_mayus}\n"
+    "{nombre_profesional}\n\n"
+    "{detalle_items}"
+)
+
 
 @dataclass
 class PlantillaMensaje:
@@ -199,5 +210,9 @@ MENSAJES_EDITABLES: list[PlantillaMensaje] = [
         "mensaje_recordatorio_fin_de_mes", "Recordatorio de fin de mes (color Bordó)",
         DEFAULT_RECORDATORIO_FIN_DE_MES, ("estado_cuenta", "fecha_cierre_reservas",
                                            "fecha_envio_liquidaciones", "bloque_feriados"),
+    ),
+    PlantillaMensaje(
+        "mensaje_detalle_reserva_aislada", "Detalle de reserva aislada del mes (encabezado)",
+        DEFAULT_DETALLE_RESERVA_AISLADA, ("mes_mayus", "nombre_profesional", "detalle_items"),
     ),
 ]
