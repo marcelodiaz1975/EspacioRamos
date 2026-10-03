@@ -1169,6 +1169,50 @@ def test_cancelar_reserva_aislada_copia_mensaje_de_detalle_al_portapapeles(qtbot
     assert "DETALLE RESERVA" in copiado[0]
 
 
+def test_crear_reserva_aislada_regenera_el_snapshot_de_su_periodo_si_ya_existe(qtbot, conn):
+    """DC-06 §3: cargar una aislada en un período que ya tiene su
+    `SnapshotMensual` (ya cerró) lo deja desactualizado — ver
+    `app.negocio.estadisticas.regenerar_snapshot_si_corresponde`."""
+    _preparar(conn)
+    periodo = periodo_actual(conn)
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "Consultorio").actualizar(id_consultorio, ValorHoraAisladaActual=1000)
+    from app.negocio.estadisticas import generar_snapshot
+    id_snapshot = generar_snapshot(conn, periodo)
+    assert obtener_repositorio(conn, "SnapshotMensual").obtener(id_snapshot)["MontoHorasAisladas"] == 0.0
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas.combo_profesional.setCurrentIndex(1)
+    pantalla.panel_aisladas._crear()
+
+    snapshots = obtener_repositorio(conn, "SnapshotMensual").listar(Periodo=periodo)
+    assert len(snapshots) == 1  # se actualizó la fila, no se creó una nueva
+    assert snapshots[0]["MontoHorasAisladas"] > 0
+
+
+def test_cancelar_reserva_aislada_tambien_regenera_el_snapshot(qtbot, conn):
+    _preparar(conn)
+    periodo = periodo_actual(conn)
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "Consultorio").actualizar(id_consultorio, ValorHoraAisladaActual=1000)
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas.combo_profesional.setCurrentIndex(1)
+    pantalla.panel_aisladas._crear()
+
+    from app.negocio.estadisticas import generar_snapshot
+    id_snapshot = generar_snapshot(conn, periodo)
+    assert obtener_repositorio(conn, "SnapshotMensual").obtener(id_snapshot)["MontoHorasAisladas"] > 0
+
+    pantalla.panel_aisladas.tabla.selectRow(0)
+    pantalla.panel_aisladas._cancelar()
+
+    snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(id_snapshot)
+    assert snapshot["MontoHorasAisladas"] == 0.0  # cancelada: ya no cuenta
+
+
 def test_crear_reserva_aislada_fecha_mes_anterior_pide_confirmacion(qtbot, conn, monkeypatch):
     _preparar(conn)
     conn.execute(

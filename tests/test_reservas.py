@@ -5,11 +5,13 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.dias import fecha_a_dia_semana
+from app.negocio.liquidaciones import emitir_liquidacion
 from app.negocio.reservas import (
     ConflictoBloqueanteError,
     cancelar_reserva_aislada,
     crear_reserva_aislada,
     crear_reserva_regular,
+    finalizar_reserva_regular,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -88,6 +90,109 @@ def test_crear_reserva_regular_respeta_fraccion_configurada(conn, consultorio, p
         hora_inicio=14.25, hora_fin=16, vigencia_inicio="2026-01-01",
     )
     assert id_reserva is not None
+
+
+# ----------------------------------------------- DC-06 §3: período cerrado
+
+def test_crear_reserva_regular_en_periodo_cerrado_bloquea(conn, consultorio, profesional_factory):
+    """DC-06 §3: a diferencia de una aislada (ajusta sola el saldo), una
+    regular con vigencia en un período que ya tiene una liquidación
+    POSTERIOR emitida tocaría la base de cálculo de esa liquidación ya
+    cerrada — se bloquea sin excepción, dirigiendo a Cargos especiales."""
+    id_prof = profesional_factory("Lo Veci")
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    with pytest.raises(ValueError, match="Cargo especial"):
+        crear_reserva_regular(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
+        )
+
+
+def test_crear_reserva_regular_en_periodo_cerrado_no_se_puede_forzar(conn, consultorio, profesional_factory):
+    """A diferencia de los conflictos de superposición, `forzar=True` no
+    pisa este bloqueo — no es una advertencia que se pueda confirmar."""
+    id_prof = profesional_factory("Lo Veci")
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    with pytest.raises(ValueError):
+        crear_reserva_regular(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01", forzar=True,
+        )
+
+
+def test_crear_reserva_regular_en_el_mismo_periodo_emitido_no_bloquea(conn, consultorio, profesional_factory):
+    """El criterio es `Periodo > periodo`, no `>=`: el período que
+    efectivamente tiene la liquidación más nueva todavía está "abierto"
+    (nada posterior lo usó como base), mismo criterio exacto de
+    `liquidaciones.emitir_liquidacion`."""
+    id_prof = profesional_factory("Lo Veci")
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-09-15",
+    )
+    assert id_reserva is not None
+
+
+def test_crear_reserva_regular_vigencia_fin_en_periodo_cerrado_bloquea(conn, consultorio, profesional_factory):
+    """El mismo chequeo se aplica a `vigencia_fin` cuando se la da de alta
+    de entrada con una fecha de cierre ya en un período cerrado (una
+    "excepción" puntual, no el alta abierta de siempre)."""
+    id_prof = profesional_factory("Lo Veci")
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    with pytest.raises(ValueError, match="Cargo especial"):
+        crear_reserva_regular(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01", vigencia_fin="2026-08-31",
+        )
+
+
+def test_crear_reserva_regular_consolida_el_bloqueo_del_e_en_su_r(conn, consultorio, profesional_factory):
+    """El período cerrado se evalúa sobre el profesional LIQUIDABLE: un E
+    consolidado en un R bloquea si el R tiene una liquidación posterior
+    emitida, aunque el E en sí nunca tenga liquidaciones propias."""
+    id_r = profesional_factory("Cabeza de equipo", categoria="R")
+    id_e = profesional_factory("Del equipo", categoria="E", cabeza_equipo=id_r)
+    emitir_liquidacion(conn, id_profesional=id_r, periodo="2026-09", fecha_emision="2026-09-01")
+    with pytest.raises(ValueError, match="Cargo especial"):
+        crear_reserva_regular(
+            conn, id_profesional=id_e, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
+        )
+
+
+def test_crear_reserva_regular_categoria_b_nunca_bloquea(conn, consultorio, profesional_factory):
+    """Un B no tiene profesional liquidable (`id_profesional_liquidable`
+    da `None`): no hay ninguna liquidación que una vigencia vieja pudiera
+    desalinear, así que nunca bloquea sin importar la fecha."""
+    id_b = profesional_factory("Sin liquidación", categoria="B")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_b, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2020-01-01",
+    )
+    assert id_reserva is not None
+
+
+def test_finalizar_reserva_regular_en_periodo_cerrado_bloquea(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    with pytest.raises(ValueError, match="Cargo especial"):
+        finalizar_reserva_regular(conn, id_reserva, "2026-08-31")
+
+
+def test_finalizar_reserva_regular_sin_periodo_cerrado_funciona(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    finalizar_reserva_regular(conn, id_reserva, "2026-09-30")
+    reserva = obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva)
+    assert reserva["VigenciaFin"] == "2026-09-30"
 
 
 def test_crear_reserva_aislada_fuera_de_fraccion_falla(conn, consultorio, profesional_factory):

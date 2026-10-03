@@ -4,7 +4,12 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.estadisticas import calcular_ocupacion, generar_snapshot, rango_horas_por_dia
+from app.negocio.estadisticas import (
+    calcular_ocupacion,
+    generar_snapshot,
+    rango_horas_por_dia,
+    regenerar_snapshot_si_corresponde,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -88,3 +93,57 @@ def test_generar_snapshot_persiste_valores_y_ocupacion(conn, dos_consultorios):
     valores = json.loads(snapshot["ValoresConsultorios"])
     assert valores[str(c1)] == pytest.approx(1000)
     assert valores[str(c2)] == pytest.approx(1200)
+
+
+# ----------------------------------------------- DC-06 §3: ajuste retroactivo
+
+def test_regenerar_snapshot_sin_snapshot_previo_no_hace_nada(conn, dos_consultorios):
+    """El período todavía no cerró (nunca se avanzó de mes sobre él) — no
+    hay nada desalineado, así que no se crea ningún snapshot de la nada."""
+    regenerar_snapshot_si_corresponde(conn, "2026-08")
+    assert obtener_repositorio(conn, "SnapshotMensual").listar(Periodo="2026-08") == []
+
+
+def test_regenerar_snapshot_recalcula_montos_con_una_aislada_tardia(conn, dos_consultorios):
+    """Una reserva aislada confirmada DESPUÉS de que el snapshot de su mes
+    ya se generó (el caso típico: se carga en un período ya cerrado) deja
+    el snapshot viejo con `MontoHorasAisladas` en 0 hasta que se llama a
+    esta función — mismo criterio exacto que `generar_snapshot`."""
+    _, _, c1, _ = dos_consultorios
+    obtener_repositorio(conn, "Consultorio").actualizar(c1, ValorHoraAisladaActual=1000)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Tardía")
+    id_snapshot = generar_snapshot(conn, "2026-08", porcentaje_aumento_aplicado=7.0)
+    snapshot_antes = obtener_repositorio(conn, "SnapshotMensual").obtener(id_snapshot)
+    assert snapshot_antes["MontoHorasAisladas"] == pytest.approx(0.0)
+
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-10",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada",
+    )
+    regenerar_snapshot_si_corresponde(conn, "2026-08")
+
+    snapshots = obtener_repositorio(conn, "SnapshotMensual").listar(Periodo="2026-08")
+    assert len(snapshots) == 1  # actualiza la fila existente, no crea una nueva
+    snapshot_despues = snapshots[0]
+    assert snapshot_despues["IdSnapshot"] == id_snapshot
+    assert snapshot_despues["MontoHorasAisladas"] == pytest.approx(2000.0)  # 2hs * 1000
+
+
+def test_regenerar_snapshot_conserva_fecha_generacion_y_aumento_aplicado(conn, dos_consultorios):
+    """Esos dos campos no son recalculables a partir del estado actual —
+    siguen reflejando el momento y el contexto del cierre original."""
+    id_snapshot = generar_snapshot(conn, "2026-08", porcentaje_aumento_aplicado=12.5)
+    snapshot_antes = obtener_repositorio(conn, "SnapshotMensual").obtener(id_snapshot)
+
+    regenerar_snapshot_si_corresponde(conn, "2026-08")
+
+    snapshot_despues = obtener_repositorio(conn, "SnapshotMensual").obtener(id_snapshot)
+    assert snapshot_despues["FechaGeneracion"] == snapshot_antes["FechaGeneracion"]
+    assert snapshot_despues["PorcentajeAumentoAplicado"] == pytest.approx(12.5)
+
+
+def test_regenerar_snapshot_de_otro_periodo_no_lo_toca(conn, dos_consultorios):
+    id_snapshot_julio = generar_snapshot(conn, "2026-07")
+    regenerar_snapshot_si_corresponde(conn, "2026-08")
+    assert obtener_repositorio(conn, "SnapshotMensual").obtener(id_snapshot_julio) is not None
+    assert obtener_repositorio(conn, "SnapshotMensual").listar(Periodo="2026-08") == []

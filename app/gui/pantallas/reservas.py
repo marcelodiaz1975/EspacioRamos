@@ -48,6 +48,7 @@ from app.gui.widgets.orden_tabla import OrdenTabla
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, ultimo_dia_mes
+from app.negocio.estadisticas import regenerar_snapshot_si_corresponde
 from app.negocio.formato import formatear_moneda
 from app.negocio.lista_espera import marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
@@ -60,6 +61,7 @@ from app.negocio.reservas import (
     cancelar_reserva_aislada,
     crear_reserva_aislada,
     crear_reserva_regular,
+    finalizar_reserva_regular,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -1001,14 +1003,24 @@ class _PanelReservasRegulares(QWidget):
             return None
         return self._reservas[filas[0].row()]
 
-    def _finalizar_registro(self, reserva: sqlite3.Row, fecha_fin: str) -> None:
-        obtener_repositorio(self.conn, "ReservaRegular").actualizar(
-            reserva["IdReservaRegular"], VigenciaFin=fecha_fin
-        )
+    def _finalizar_registro(self, reserva: sqlite3.Row, fecha_fin: str) -> bool:
+        """Devuelve False (con un cartel de aviso) si `fecha_fin` cae en un
+        período ya cerrado (DC-06 §3: `finalizar_reserva_regular` bloquea
+        sin excepción, dirigiendo a Cargos especiales) — bajo el uso
+        normal de los dos botones que llaman acá (a fin de mes actual, o
+        hoy) esto nunca debería dispararse, pero la validación vive en la
+        capa de negocio para no depender de que ningún botón futuro la
+        sortee."""
+        try:
+            finalizar_reserva_regular(self.conn, reserva["IdReservaRegular"], fecha_fin)
+        except ValueError as error:
+            QMessageBox.warning(self, "Finalizar reserva", str(error))
+            return False
         regenerar_si_corresponde(
             self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn),
         )
         self.conn.commit()
+        return True
 
     def _finalizar_vigencia(self) -> None:
         """"Finalizar reserva a fin de mes": el caso clásico (95% de las
@@ -1019,7 +1031,8 @@ class _PanelReservasRegulares(QWidget):
             return
         hoy = fecha_actual(self.conn)
         fin_de_mes = ultimo_dia_mes(hoy.year, hoy.month)
-        self._finalizar_registro(reserva, fin_de_mes.isoformat())
+        if not self._finalizar_registro(reserva, fin_de_mes.isoformat()):
+            return
         self.actualizar()
         self.combo_profesional.setFocus()
 
@@ -1036,7 +1049,8 @@ class _PanelReservasRegulares(QWidget):
         if reserva is None:
             QMessageBox.warning(self, "Modificar reserva", "Elegí una fila de la tabla para modificar.")
             return
-        self._finalizar_registro(reserva, fecha_actual(self.conn).isoformat())
+        if not self._finalizar_registro(reserva, fecha_actual(self.conn).isoformat()):
+            return
         self.actualizar()
 
         indice_profesional = self.combo_profesional.findData(reserva["IdProfesional"])
@@ -1637,6 +1651,7 @@ class _PanelReservasAisladas(QWidget):
             QMessageBox.warning(self, "Crear reserva aislada", str(error))
             return
         self.conn.commit()
+        regenerar_snapshot_si_corresponde(self.conn, fecha[:7])
         if datos["es_reubicacion"]:
             self._registrar_ausencia_por_reubicacion(id_profesional, fecha, _id)
         if advertencias:
@@ -1690,6 +1705,7 @@ class _PanelReservasAisladas(QWidget):
             QMessageBox.warning(self, titulo, str(error))
             return False
         self.conn.commit()
+        regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
         if requiere_aviso:
             QMessageBox.information(self, titulo, "Cancelada el mismo día: avisar al profesional.")
         self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])

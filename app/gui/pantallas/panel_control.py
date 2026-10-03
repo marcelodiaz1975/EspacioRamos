@@ -105,6 +105,7 @@ _TEXTO_EXPLICACION_AVANZAR = (
 
 _TITULOS_ALERTA = {
     "deuda_regulares": "Deuda mes en curso — profesionales regulares",
+    "deuda_regulares_mes_anterior": "Deuda mes anterior — profesionales regulares",
     "deuda_aisladas": "Deuda mes anterior — profesionales de reserva aislada",
     "liquidaciones_regeneradas_no_enviadas": "Liquidaciones regeneradas sin enviar",
     "planes_con_cuotas_vencidas": "Planes de pago con cuotas vencidas",
@@ -114,6 +115,9 @@ _TITULOS_ALERTA = {
 
 _ETIQUETA_FILA = {
     "deuda_regulares": lambda f: f"{f['Apellido']} — saldo actual {formatear_moneda(f['SaldoCuentaActual'])}",
+    "deuda_regulares_mes_anterior": lambda f: (
+        f"{f['Apellido']} — saldo anterior {formatear_moneda(f['SaldoCuentaAnterior'])}"
+    ),
     "deuda_aisladas": lambda f: f"{f['Apellido']} — saldo anterior {formatear_moneda(f['SaldoCuentaAnterior'])}",
     "liquidaciones_regeneradas_no_enviadas": lambda f: f"Liquidación #{f['IdLiquidacion']} — período {f['Periodo']}",
     "planes_con_cuotas_vencidas": lambda f: f"Plan #{f['IdPlan']}",

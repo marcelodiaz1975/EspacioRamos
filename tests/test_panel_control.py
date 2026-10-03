@@ -104,6 +104,35 @@ def test_alerta_deuda_aislada_no_tiene_tolerancia(conn):
     assert len(alertas.deuda_aisladas) == 1
 
 
+def test_alerta_deuda_regulares_mes_anterior_respeta_tolerancia(conn, consultorio):
+    """DC-06 §3: mismo criterio que `_deuda_aisladas`, pero para
+    profesionales R con `SaldoCuentaAnterior` fuera de tolerancia — hasta
+    ahora ese cálculo (`_deuda_regulares`) solo alimentaba el cuadrito
+    "Profesionales", sin tener su propia alerta en el panel."""
+    obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=1000)
+    _crear_profesional_con_reserva_regular(
+        conn, consultorio, Apellido="Bajo saldo anterior", SaldoCuentaAnterior=500,
+    )
+    _crear_profesional_con_reserva_regular(
+        conn, consultorio, Apellido="Alto saldo anterior", SaldoCuentaAnterior=5000,
+    )
+    alertas = calcular_alertas(conn)
+    assert len(alertas.deuda_regulares_mes_anterior) == 1
+    assert alertas.deuda_regulares_mes_anterior[0]["Apellido"] == "Alto saldo anterior"
+
+
+def test_alerta_deuda_regulares_mes_anterior_no_exige_reserva_activa(conn):
+    """A diferencia de `deuda_regulares` (mes en curso), esta alerta no
+    filtra por reserva regular activa — mismo criterio que
+    `_deuda_aisladas`, que tampoco lo exige: un profesional R puede dejar
+    de reservar y seguir debiendo el saldo arrastrado de meses previos."""
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Sin reservas", SaldoCuentaAnterior=5000,
+    )
+    alertas = calcular_alertas(conn)
+    assert len(alertas.deuda_regulares_mes_anterior) == 1
+
+
 def test_alerta_fechas_especiales_proximas_respeta_ventana(conn):
     _fijar_fecha(conn, "2026-08-01")
     obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-10", Tipo="Feriado nacional", Activo=1)

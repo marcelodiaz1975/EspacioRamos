@@ -3,8 +3,9 @@
 Encabezado (nombre del espacio, mes/año en curso, fecha de hoy) + botón
 "Avanzar de mes" (disponible en cualquier momento, no solo al principio o
 fin de mes — DC-06 §1: el operador puede necesitar adelantarlo unos días,
-por ejemplo por vacaciones propias) + 5 alertas. Este módulo calcula los
-datos; la pantalla en `app/gui` solo los muestra.
+por ejemplo por vacaciones propias) + 6 alertas (una nueva, `deuda_
+regulares_mes_anterior`, sumada en el repaso de DC-06 §3 — ver abajo).
+Este módulo calcula los datos; la pantalla en `app/gui` solo los muestra.
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ from app.repositorio.registro import obtener_repositorio
 @dataclass
 class Alertas:
     deuda_regulares: list[sqlite3.Row] = field(default_factory=list)
+    deuda_regulares_mes_anterior: list[sqlite3.Row] = field(default_factory=list)
     deuda_aisladas: list[sqlite3.Row] = field(default_factory=list)
     liquidaciones_regeneradas_no_enviadas: list[sqlite3.Row] = field(default_factory=list)
     planes_con_cuotas_vencidas: list[sqlite3.Row] = field(default_factory=list)
@@ -51,10 +53,13 @@ class Alertas:
 
 
 def _deuda_regulares(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Todos los profesionales R con saldo fuera de tolerancia — sigue
-    alimentando también el cuadrito "Profesionales" de más abajo
-    (`calcular_estadisticas_profesionales`), sin el filtro extra de
-    `_deuda_regulares_alerta`."""
+    """Todos los profesionales R con saldo (ANTERIOR, arrastrado de meses
+    previos) fuera de tolerancia — alimenta el cuadrito "Profesionales" de
+    más abajo (`calcular_estadisticas_profesionales`) y, desde el repaso
+    de pendientes abiertos de DC-06 §3, la alerta `deuda_regulares_mes_
+    anterior` del panel (mismo criterio exacto que ya usa `_deuda_aisladas`
+    para su propia alerta — sin el filtro extra de reserva activa que sí
+    tiene `_deuda_regulares_alerta`, que mira el saldo ACTUAL en cambio)."""
     cfg = conn.execute("SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
     return [
@@ -136,6 +141,7 @@ def calcular_alertas(conn: sqlite3.Connection) -> Alertas:
     periodo = periodo_actual(conn)
     return Alertas(
         deuda_regulares=_deuda_regulares_alerta(conn),
+        deuda_regulares_mes_anterior=_deuda_regulares(conn),
         deuda_aisladas=_deuda_aisladas(conn),
         liquidaciones_regeneradas_no_enviadas=obtener_repositorio(conn, "LiquidacionEmitida").listar(
             EstadoEnvio="Regenerada no enviada",

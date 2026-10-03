@@ -179,24 +179,20 @@ def calcular_ocupacion(
     return Ocupacion(general=general, por_edificio=por_edificio, por_unidad=por_unidad, por_consultorio=por_consultorio)
 
 
-def generar_snapshot(
-    conn: sqlite3.Connection, periodo: str, *, porcentaje_aumento_aplicado: float | None = None,
-) -> int:
-    """Persiste un SnapshotMensual con la ocupación y los valores vigentes
-    de `periodo` (sección 3.24: "backup de estado" para poder comparar
-    meses más adelante)."""
-    anio, mes = parsear_periodo(periodo)
+def _campos_snapshot(conn: sqlite3.Connection, anio: int, mes: int) -> dict:
+    """Los campos recalculables de un SnapshotMensual (todo salvo
+    `Periodo`/`FechaGeneracion`/`PorcentajeAumentoAplicado`, que no se
+    recalculan a partir del estado actual) — compartido por
+    `generar_snapshot` (alta, al avanzar de mes) y `regenerar_snapshot_
+    si_corresponde` (DC-06 §3: ajuste retroactivo de un snapshot ya
+    cerrado cuando llega una reserva aislada tardía), para no duplicar el
+    cálculo entre los dos."""
     ocupacion = calcular_ocupacion(conn, anio, mes)
-
     valores_consultorios = {
         str(c["IdConsultorio"]): c["ValorHoraRegularActual"]
         for c in conn.execute("SELECT IdConsultorio, ValorHoraRegularActual FROM Consultorio").fetchall()
     }
-
-    repo = obtener_repositorio(conn, "SnapshotMensual")
-    return repo.crear(
-        Periodo=periodo,
-        FechaGeneracion=fecha_actual(conn).isoformat(),
+    return dict(
         PorcentajeOcupacionGeneral=ocupacion.general,
         PorOcupEdificio=json.dumps({e.nombre: e.porcentaje for e in ocupacion.por_edificio.values()}),
         PorOcupUnidad=json.dumps({u.nombre: u.porcentaje for u in ocupacion.por_unidad.values()}),
@@ -204,11 +200,61 @@ def generar_snapshot(
             f"{c.edificio} - {c.unidad} - {c.numero}": c.porcentaje for c in ocupacion.por_consultorio.values()
         }),
         ValoresConsultorios=json.dumps(valores_consultorios),
-        PorcentajeAumentoAplicado=porcentaje_aumento_aplicado,
         HorasRegularesSemanales=horas_regulares_semanales_promedio(conn, anio, mes),
         MontoHorasRegulares=monto_neto_regular_periodo(conn, anio, mes),
         MontoHorasAisladas=monto_neto_aislada_periodo(conn, anio, mes),
     )
+
+
+def generar_snapshot(
+    conn: sqlite3.Connection, periodo: str, *, porcentaje_aumento_aplicado: float | None = None,
+) -> int:
+    """Persiste un SnapshotMensual con la ocupación y los valores vigentes
+    de `periodo` (sección 3.24: "backup de estado" para poder comparar
+    meses más adelante)."""
+    anio, mes = parsear_periodo(periodo)
+    repo = obtener_repositorio(conn, "SnapshotMensual")
+    return repo.crear(
+        Periodo=periodo,
+        FechaGeneracion=fecha_actual(conn).isoformat(),
+        PorcentajeAumentoAplicado=porcentaje_aumento_aplicado,
+        **_campos_snapshot(conn, anio, mes),
+    )
+
+
+def regenerar_snapshot_si_corresponde(conn: sqlite3.Connection, periodo: str) -> None:
+    """DC-06 §3: una reserva aislada confirmada o cancelada con fecha en un
+    período que YA tiene un `SnapshotMensual` (el mes ya cerró, `avance_
+    mes.avanzar_mes` ya corrió su snapshot en su momento) deja ese
+    snapshot desactualizado. A diferencia de una reserva regular
+    (bloqueada sin excepción si el período ya cerró, ver `app.negocio.
+    reservas._periodo_regular_cerrado`), una aislada SÍ puede cargarse o
+    cancelarse en un período cerrado — ajusta sola el saldo del
+    profesional, sin tocar ninguna liquidación ya emitida — así que acá
+    no hay nada que bloquear, solo un snapshot que recalcular para que
+    "Historial general" (Estadísticas) siga reflejando la realidad.
+
+    Recalcula con el mismo criterio exacto que `generar_snapshot`
+    (`_campos_snapshot`) y actualiza la fila YA existente en vez de crear
+    una nueva — conserva `FechaGeneracion` (sigue reflejando cuándo se
+    cerró el mes, no cuándo se corrigió después) y `PorcentajeAumento
+    Aplicado` (dato de contexto del momento del cierre, no recalculable a
+    partir del estado actual). No hace nada si ese período todavía no
+    tiene snapshot — no cerró, no hay nada desalineado.
+
+    Costo: el mismo que un `generar_snapshot` común (recorre los días del
+    mes una vez por cada una de las tres métricas, sobre el volumen de
+    datos de un solo espacio de consultorios) — nada que no se haga ya,
+    una vez por mes, en cada avance de mes; llamarlo de nuevo ante un
+    ítem tardío (un evento raro, no una operación de uso diario) no
+    agrega un costo distinto en orden de magnitud."""
+    repo = obtener_repositorio(conn, "SnapshotMensual")
+    existentes = repo.listar(Periodo=periodo)
+    if not existentes:
+        return
+    snapshot = max(existentes, key=lambda f: f["IdSnapshot"])
+    anio, mes = parsear_periodo(periodo)
+    repo.actualizar(snapshot["IdSnapshot"], **_campos_snapshot(conn, anio, mes))
 
 
 # --------------------------------------------------------------------------

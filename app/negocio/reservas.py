@@ -25,6 +25,7 @@ from app.negocio.ausencias import esta_ausente
 from app.negocio.dias import fecha_a_dia_semana
 from app.negocio.dias import fecha_actual as _fecha_actual_sistema
 from app.negocio.licencias import tiene_licencia
+from app.negocio.liquidaciones import id_profesional_liquidable
 from app.negocio.vacaciones import tiene_vacacion
 from app.repositorio.registro import obtener_repositorio
 
@@ -231,11 +232,52 @@ def verificar_conflicto_aisladas_futuras(
 
 # ------------------------------------------------------------------------ servicio
 
+def _periodo_regular_cerrado(conn: sqlite3.Connection, id_profesional: int, fecha_iso: str) -> bool:
+    """DC-06 §3: a diferencia de una reserva aislada (que una vez
+    confirmada en un período ya cerrado ajusta sola el saldo y lo
+    traslada al período en curso, sin tocar ninguna liquidación ya
+    emitida — ver `app.negocio.liquidaciones._aisladas_periodo`), una
+    reserva regular SÍ altera la base de cálculo de una liquidación: no
+    hay forma de aplicar el cambio sin reabrir un período que una
+    liquidación posterior ya pudo haber usado como base (DC-08 §6.2,
+    mismo guardarraíl exacto que `liquidaciones.emitir_liquidacion`).
+
+    "Cerrado" acá es ese mismo criterio: ya existe una `LiquidacionEmitida`
+    de un período POSTERIOR al de `fecha_iso` para el profesional
+    liquidable (el R mismo, o su cabeza de equipo si es categoría E). Sin
+    eso, el período sigue "abierto" aunque ya haya pasado — no hay ninguna
+    liquidación posterior que una reclasificación pudiera desalinear."""
+    id_r = id_profesional_liquidable(conn, id_profesional)
+    if id_r is None:
+        return False
+    periodo = fecha_iso[:7]
+    return conn.execute(
+        "SELECT 1 FROM LiquidacionEmitida WHERE IdProfesional = ? AND Periodo > ? LIMIT 1",
+        (id_r, periodo),
+    ).fetchone() is not None
+
+
+def _validar_vigencia_no_cerrada(conn: sqlite3.Connection, id_profesional: int, fecha_iso: str | None) -> None:
+    if fecha_iso and _periodo_regular_cerrado(conn, id_profesional, fecha_iso):
+        raise ValueError(
+            f"No se puede cargar ni modificar una reserva regular con vigencia en {fecha_iso[:7]}: ya hay "
+            "liquidaciones de un período posterior emitidas para este profesional. Para corregir algo de un "
+            "período ya cerrado, usá un Cargo especial en vez de tocar la reserva."
+        )
+
+
 def crear_reserva_regular(
     conn: sqlite3.Connection, *, id_profesional: int, id_consultorio: int, dia_semana: str,
     hora_inicio: float, hora_fin: float, vigencia_inicio: str, vigencia_fin: str | None = None,
     es_excepcion: bool = False, observacion: str | None = None, forzar: bool = False,
 ) -> tuple[int, list[str]]:
+    """`forzar` nunca pisa la validación de período cerrado (ver
+    `_validar_vigencia_no_cerrada`) — a diferencia de los conflictos de
+    superposición, esto no es una advertencia que el operador pueda
+    confirmar: es un bloqueo real, mismo criterio sin excepción que
+    `liquidaciones.emitir_liquidacion`."""
+    _validar_vigencia_no_cerrada(conn, id_profesional, vigencia_inicio)
+    _validar_vigencia_no_cerrada(conn, id_profesional, vigencia_fin)
     _validar_fraccion_grilla(conn, hora_inicio, hora_fin)
     conflictos = verificar_conflictos_regular(
         conn, id_consultorio=id_consultorio, dia_semana=dia_semana,
@@ -267,6 +309,19 @@ def crear_reserva_regular(
     if forzar:
         advertencias += [c.mensaje for c in bloqueantes]
     return id_reserva, advertencias
+
+
+def finalizar_reserva_regular(conn: sqlite3.Connection, id_reserva_regular: int, vigencia_fin: str) -> None:
+    """Pone `VigenciaFin` a una reserva regular existente ("Finalizar..."/
+    "Modificar..." en la GUI, que finaliza la vieja antes de dar de alta
+    la versión nueva) — con la misma validación de período cerrado que
+    `crear_reserva_regular`, para que no haya una vía alternativa (editar
+    en vez de crear) que la sortee."""
+    reserva = obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva_regular)
+    if reserva is None:
+        raise ValueError(f"No existe la reserva regular #{id_reserva_regular}")
+    _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], vigencia_fin)
+    obtener_repositorio(conn, "ReservaRegular").actualizar(id_reserva_regular, VigenciaFin=vigencia_fin)
 
 
 def crear_reserva_aislada(
