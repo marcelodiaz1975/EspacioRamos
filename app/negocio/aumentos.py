@@ -213,6 +213,20 @@ def actualizar_esquema_descuentos(conn: sqlite3.Connection, tramos: list[tuple[f
     return nuevos_ids
 
 
+def _ids_profesional_con_liquidacion_emitida(conn: sqlite3.Connection, periodo: str) -> set[int]:
+    return {f["IdProfesional"] for f in obtener_repositorio(conn, "LiquidacionEmitida").listar(Periodo=periodo)}
+
+
+def cantidad_liquidaciones_a_regenerar(conn: sqlite3.Connection, periodo: str) -> int:
+    """Cuántas liquidaciones ya emitidas de `periodo` se van a regenerar si
+    se confirma un aumento ahora mismo — mismo criterio exacto que el loop
+    de `confirmar_aumento` (un profesional con más de una emisión para el
+    período cuenta una sola vez). Expuesta aparte para que la pantalla
+    pueda avisar la cantidad ANTES de confirmar, no solo en el cartel de
+    éxito posterior (DC-10 §1.2, hallazgo de la auditoría DC-01/DC-10)."""
+    return len(_ids_profesional_con_liquidacion_emitida(conn, periodo))
+
+
 def confirmar_aumento(
     conn: sqlite3.Connection, *, porcentaje_general: float, valores_override: dict[int, dict] | None = None,
     porcentajes_override: dict[int, float] | None = None, redondear_a: float | None = None,
@@ -263,9 +277,7 @@ def confirmar_aumento(
         ]
         esquema_nuevos_ids = actualizar_esquema_descuentos(conn, nuevo_esquema_descuentos)
 
-    ids_profesional = {
-        f["IdProfesional"] for f in obtener_repositorio(conn, "LiquidacionEmitida").listar(Periodo=periodo)
-    }
+    ids_profesional = _ids_profesional_con_liquidacion_emitida(conn, periodo)
     liquidaciones_regeneradas = []
     for id_profesional in ids_profesional:
         emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo, fecha_emision=hoy)

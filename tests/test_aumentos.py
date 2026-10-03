@@ -3,6 +3,7 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.aumentos import (
+    cantidad_liquidaciones_a_regenerar,
     confirmar_aumento,
     deshacer_ultimo_aumento,
     detectar_parametros_esquema,
@@ -115,6 +116,32 @@ def test_confirmar_aumento_regenera_liquidaciones_ya_emitidas(conn, consultorio)
         key=lambda f: f["IdLiquidacion"],
     )
     assert ultima["MontoGenerado"] == pytest.approx(liq_original.monto_generado * 1.10)
+
+
+def test_cantidad_liquidaciones_a_regenerar_sin_emisiones_es_cero(conn, consultorio):
+    assert cantidad_liquidaciones_a_regenerar(conn, PERIODO) == 0
+
+
+def test_cantidad_liquidaciones_a_regenerar_cuenta_profesionales_distintos(conn, consultorio):
+    """DC-10 §1.2: tiene que poder consultarse ANTES de confirmar, con el
+    mismo criterio exacto que termina regenerando `confirmar_aumento` —
+    un profesional con más de una emisión para el período cuenta una
+    sola vez."""
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-15")  # reemisión
+    assert cantidad_liquidaciones_a_regenerar(conn, PERIODO) == 1
+
+
+def test_cantidad_liquidaciones_a_regenerar_coincide_con_lo_que_confirmar_aumento_regenera(conn, consultorio):
+    id_prof_1 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Uno")
+    id_prof_2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Dos")
+    emitir_liquidacion(conn, id_profesional=id_prof_1, periodo=PERIODO, fecha_emision="2026-08-01")
+    emitir_liquidacion(conn, id_profesional=id_prof_2, periodo=PERIODO, fecha_emision="2026-08-01")
+
+    cantidad_antes = cantidad_liquidaciones_a_regenerar(conn, PERIODO)
+    resumen = confirmar_aumento(conn, porcentaje_general=10, periodo=PERIODO)
+    assert cantidad_antes == len(resumen.liquidaciones_regeneradas) == 2
 
 
 def test_confirmar_aumento_liquidacion_enviada_pasa_a_regenerada_no_enviada(conn, consultorio):

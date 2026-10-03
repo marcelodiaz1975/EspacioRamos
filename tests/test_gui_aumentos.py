@@ -1,9 +1,12 @@
 import pytest
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.estilos import COLOR_AMARILLO
 from app.gui.pantallas.aumentos import (
+    _COL_AISLADA_NUEVO,
     _COL_CONSULTORIO,
     _COL_DIF_REGULAR,
     _COL_EDIFICIO,
@@ -12,6 +15,7 @@ from app.gui.pantallas.aumentos import (
     _COL_PORCENTAJE_GENERAL,
     _COL_REGULAR_ACTUAL,
     _COL_REGULAR_NUEVO,
+    _COL_RESTABLECER,
     _COL_UNIDAD,
     _GUION,
     _PanelAumentos,
@@ -186,6 +190,218 @@ def test_editar_celda_diferencial_actualiza_simulacion(qtbot, conn):
     panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("")
     assert id_consultorio not in panel._diferenciales
     assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.100,00"
+
+
+# ----------------------------------------- DC-10 §1.2: valores a mano, resaltado, Restablecer
+
+def test_boton_editar_valores_tiene_el_texto_pedido(qtbot, conn):
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    assert panel.boton_editar_valores.text() == "Editar valores manuales"
+
+
+def test_columnas_nuevo_no_editables_sin_tildar_editar_valores(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    from PySide6.QtCore import Qt
+    assert not bool(panel.tabla.item(0, _COL_REGULAR_NUEVO).flags() & Qt.ItemFlag.ItemIsEditable)
+    assert not bool(panel.tabla.item(0, _COL_AISLADA_NUEVO).flags() & Qt.ItemFlag.ItemIsEditable)
+
+
+def test_boton_editar_valores_habilita_columnas_nuevo(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.boton_editar_valores.setChecked(True)
+    from PySide6.QtCore import Qt
+    assert bool(panel.tabla.item(0, _COL_REGULAR_NUEVO).flags() & Qt.ItemFlag.ItemIsEditable)
+    assert bool(panel.tabla.item(0, _COL_AISLADA_NUEVO).flags() & Qt.ItemFlag.ItemIsEditable)
+
+
+def test_editar_celda_regular_nuevo_fija_el_valor_a_mano(qtbot, conn):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000, valor_aislada=1500)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.spin_porcentaje.setValue(10)
+    panel._simular()
+    panel.boton_editar_valores.setChecked(True)
+
+    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("$ 1.234,00")
+    assert panel._valores_manuales[id_consultorio]["regular"] == pytest.approx(1234.0)
+    assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.234,00"
+    # El redondeo/% general no le vuelven a pegar a un valor fijado a mano
+    # — Aislada sigue calculada con el % general (10% de 1500, con el
+    # redondeo "siempre para arriba" ya existente de _redondear_a_multiplo).
+    assert panel.tabla.item(0, _COL_AISLADA_NUEVO).text() == "$ 1.651,00"
+
+
+def test_editar_celda_vacia_quita_solo_ese_override(qtbot, conn):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000, valor_aislada=1500)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.boton_editar_valores.setChecked(True)
+    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("1234")
+    panel.tabla.item(0, _COL_AISLADA_NUEVO).setText("1900")
+    assert panel._valores_manuales[id_consultorio] == {"regular": 1234.0, "aislada": 1900.0}
+
+    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("")
+    assert panel._valores_manuales[id_consultorio] == {"aislada": 1900.0}
+
+
+def test_valor_manual_invalido_avisa_y_no_rompe(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.boton_editar_valores.setChecked(True)
+    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("no es un número")  # no debe lanzar
+
+
+def test_valor_manual_resalta_la_celda_calculo_con_porcentaje_no(qtbot, conn):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000, valor_aislada=1500)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.spin_porcentaje.setValue(10)
+    panel._simular()
+    assert panel.tabla.item(0, _COL_REGULAR_NUEVO).background().color().name() != QColor(COLOR_AMARILLO).name()
+
+    panel.boton_editar_valores.setChecked(True)
+    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("1234")
+    assert panel.tabla.item(0, _COL_REGULAR_NUEVO).background().color().name() == QColor(COLOR_AMARILLO).name()
+    # Aislada sigue calculada por %, sin resaltar
+    assert panel.tabla.item(0, _COL_AISLADA_NUEVO).background().color().name() != QColor(COLOR_AMARILLO).name()
+    assert id_consultorio in panel._valores_manuales
+
+
+def test_valor_manual_y_porcentaje_diferencial_son_mutuamente_excluyentes(qtbot, conn):
+    """Mismo criterio que % general/diferencial: nunca los dos juntos
+    para la misma fila — fijar un valor a mano limpia el diferencial y
+    viceversa."""
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.boton_editar.setChecked(True)
+    panel.boton_editar_valores.setChecked(True)
+
+    panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("30")
+    assert id_consultorio in panel._diferenciales
+    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("1234")
+    assert id_consultorio not in panel._diferenciales
+    assert panel._valores_manuales[id_consultorio]["regular"] == pytest.approx(1234.0)
+
+    panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("30")
+    assert id_consultorio not in panel._valores_manuales
+
+
+def test_boton_restablecer_deshabilitado_sin_override(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    boton = panel.tabla.cellWidget(0, _COL_RESTABLECER)
+    assert boton.isEnabled() is False
+
+
+def test_boton_restablecer_limpia_diferencial_y_valor_manual(qtbot, conn):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.spin_porcentaje.setValue(10)
+    panel.boton_editar_valores.setChecked(True)
+    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("1234")
+    assert id_consultorio in panel._valores_manuales
+
+    boton = panel.tabla.cellWidget(0, _COL_RESTABLECER)
+    assert boton.isEnabled() is True
+    boton.click()
+
+    assert id_consultorio not in panel._valores_manuales
+    assert id_consultorio not in panel._diferenciales
+    assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.100,00"  # vuelve al % general
+
+
+def test_rerenderizar_la_tabla_no_deja_botones_restablecer_huerfanos(qtbot, conn):
+    """Bug real encontrado al armar "Restablecer" (no pedido, destapado
+    midiendo geometría contra una captura): `setCellWidget` no borra solo
+    el widget que reemplaza, a diferencia de `setItem` — cada re-render
+    (un `_simular`/un tildar "Editar...") creaba un botón "Restablecer"
+    nuevo y dejaba el anterior huérfano, colgado del viewport sin
+    posición asignada por la tabla — Qt lo terminaba pintando superpuesto
+    contra las primeras columnas de la primera fila. Se resolvió
+    reusando un solo botón por consultorio (`self._botones_restablecer`)
+    en vez de crear uno nuevo en cada render."""
+    from PySide6.QtWidgets import QPushButton
+    _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.spin_porcentaje.setValue(10)
+    panel._simular()  # un render más
+    panel.boton_editar.setChecked(True)  # otro render (sin pasar por _simular)
+    panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("30")  # otro render más
+
+    botones = [b for b in panel.findChildren(QPushButton) if b.text() == "Restablecer"]
+    assert len(botones) == 1  # uno solo, el que vive en la tabla — nada huérfano colgando
+
+
+def test_confirmar_avisa_la_cantidad_de_liquidaciones_antes_de_confirmar(qtbot, conn, monkeypatch):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio="2020-01-01",
+    )
+    from app.negocio.dias import periodo_actual
+    from app.negocio.liquidaciones import emitir_liquidacion
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=periodo_actual(conn), fecha_emision="2026-08-01")
+
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.spin_porcentaje.setValue(10)
+    panel._simular()
+
+    textos_pregunta = []
+
+    def _question(*args, **kwargs):
+        textos_pregunta.append(args[2])
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_question))
+    panel._confirmar()
+
+    assert len(textos_pregunta) == 1
+    assert "1 liquidación" in textos_pregunta[0]
+
+
+def test_confirmar_sin_liquidaciones_emitidas_lo_dice_en_el_aviso(qtbot, conn, monkeypatch):
+    _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.spin_porcentaje.setValue(10)
+    panel._simular()
+
+    textos_pregunta = []
+
+    def _question(*args, **kwargs):
+        textos_pregunta.append(args[2])
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_question))
+    panel._confirmar()
+
+    assert "Todavía no hay ninguna liquidación emitida" in textos_pregunta[0]
+
+
+def test_confirmar_aplica_el_valor_manual(qtbot, conn):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel.boton_editar_valores.setChecked(True)
+    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("1234")
+    panel._confirmar()
+
+    fila = conn.execute(
+        "SELECT ValorHoraRegularActual FROM Consultorio WHERE IdConsultorio = ?", (id_consultorio,),
+    ).fetchone()
+    assert fila["ValorHoraRegularActual"] == pytest.approx(1234.0)
 
 
 def test_filtro_localidad_solo_oculta_filas_no_cambia_el_conjunto_confirmado(qtbot, conn):

@@ -14,6 +14,34 @@ redondea los valores nuevos calculados al múltiplo elegido (1/10/100/
 regenera (dejándolas "Regenerada no enviada") las liquidaciones ya
 emitidas del período afectado.
 
+DC-10 §1.2 (hallazgo #30 de la auditoría DC-01/DC-10): tres piezas que
+le faltaban a esta pantalla.
+- **"Editar valores manuales"** (botón hermano de "Editar porcentaje
+  diferencial"): habilita a editar directo, en $, las columnas "Regular
+  nuevo"/"Aislada nuevo" — es el nivel más específico de los tres
+  ("más detallado todavía" que el % diferencial), ya soportado desde
+  siempre por `simular_aumento`/`confirmar_aumento` (`valores_override`)
+  pero sin ningún control en la GUI hasta ahora. Fijar un valor a mano
+  en una de las dos columnas (Regular/Aislada se editan independiente)
+  limpia el % diferencial de esa fila y viceversa — mismo criterio "un
+  solo tipo de override por fila" que ya regía entre % general/
+  diferencial.
+- **Resaltado amarillo** (`COLOR_AMARILLO`, reusado de `estilos.py`) en
+  la celda "Regular nuevo"/"Aislada nuevo" cuando ESE valor puntual sale
+  de un override a mano — nunca cuando sale de aplicar el % general o el
+  diferencial, que siguen siendo "calculado por %" aunque sea un %
+  puntual de esa fila.
+- **Botón "Restablecer" por fila** (columna nueva, sin título, un botón
+  por fila vía `setCellWidget` — deshabilitado si esa fila no tiene
+  ningún override): limpia de una el % diferencial Y el valor manual de
+  esa fila, volviéndola a calcular por el % general.
+- **Aviso de liquidaciones a regenerar, ANTES de confirmar**: el cartel
+  de confirmación ahora dice cuántas liquidaciones ya emitidas de ese
+  período se van a regenerar (`app.negocio.aumentos.cantidad_
+  liquidaciones_a_regenerar`, mismo criterio exacto que el loop real de
+  `confirmar_aumento`) — antes esa cantidad solo aparecía en el cartel
+  de éxito, después de que ya se habían regenerado.
+
 "Esquema de descuentos" es el único lugar desde donde se puede tocar el
 esquema de descuentos (DC-10 §1.1: "solo modificable al ejecutar análisis
 de aumentos"; la pantalla de catálogo lo muestra en solo lectura), y la
@@ -55,6 +83,7 @@ from __future__ import annotations
 import sqlite3
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -74,11 +103,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.estilos import COLOR_AMARILLO
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.resumen_saldo import item_monto
 from app.negocio.aumentos import (
     actualizar_esquema_descuentos,
+    cantidad_liquidaciones_a_regenerar,
     confirmar_aumento,
     detectar_parametros_esquema,
     generar_tramos_esquema,
@@ -100,6 +131,7 @@ _COL_DIF_REGULAR = 8
 _COL_AISLADA_ACTUAL = 9
 _COL_AISLADA_NUEVO = 10
 _COL_DIF_AISLADA = 11
+_COL_RESTABLECER = 12
 
 _ANCHO_CAMPO = 300  # ancho compartido por todo lo que va en el panel izquierdo de "Aumentos"
 _MULTIPLOS_REDONDEO = (1, 10, 100, 1000)
@@ -134,6 +166,19 @@ def _fmt_horas(valor: float) -> str:
     return f"{round(valor):d}hs"
 
 
+def _parsear_monto(texto: str) -> float:
+    """Inverso de `app.negocio.formato.formatear_moneda` ("$ 1.234,56"):
+    saca el signo pesos y el separador de miles, pasa la coma decimal a
+    punto. También acepta un número "a secas" (sin separador de miles),
+    tipeado directo por el operador."""
+    texto = texto.strip().replace("$", "").replace(" ", "")
+    negativo = texto.startswith("-")
+    texto = texto.lstrip("-")
+    texto = texto.replace(".", "").replace(",", ".")
+    valor = float(texto)
+    return -valor if negativo else valor
+
+
 def _celda_no_editable(texto: str) -> QTableWidgetItem:
     item = QTableWidgetItem(texto)
     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -146,6 +191,25 @@ def _celda_monto_fija(valor: float) -> QTableWidgetItem:
     return item
 
 
+def _celda_monto_nuevo(valor: float, *, editable: bool, resaltada: bool) -> QTableWidgetItem:
+    """"Regular nuevo"/"Aislada nuevo": a diferencia de `_celda_monto_fija`
+    (el resto de las columnas de monto, siempre de solo lectura), estas
+    dos pueden quedar editables (fijar el valor final a mano, DC-10 §1.2)
+    y, cuando el valor que muestran viene de un override a mano (no de
+    aplicar el % general ni el diferencial), se resaltan en amarillo —
+    distinto de `item_monto`, que solo colorea en rojo un valor negativo;
+    acá la celda nunca es negativa (es un valor hora), así que no hay
+    conflicto entre los dos colores."""
+    item = item_monto(valor)
+    if editable:
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+    else:
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    if resaltada:
+        item.setBackground(QColor(COLOR_AMARILLO))
+    return item
+
+
 class _PanelAumentos(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -155,7 +219,10 @@ class _PanelAumentos(QWidget):
         self._orden_consultorios: list[int] = []
         self._filas: dict[int, object] = {}
         self._diferenciales: dict[int, float] = {}
+        self._valores_manuales: dict[int, dict[str, float]] = {}
+        self._botones_restablecer: dict[int, QPushButton] = {}
         self._editando_diferencial = False
+        self._editando_valores = False
         self._armar_ui()
         self.actualizar()
 
@@ -241,14 +308,22 @@ class _PanelAumentos(QWidget):
         self.boton_editar.toggled.connect(self._al_tildar_editar)
         form.addWidget(self.boton_editar)
 
+        self.boton_editar_valores = QPushButton("Editar valores manuales")
+        self.boton_editar_valores.setObjectName("botonSecundario")
+        self.boton_editar_valores.setFixedWidth(_ANCHO_CAMPO)
+        self.boton_editar_valores.setCheckable(True)
+        self.boton_editar_valores.toggled.connect(self._al_tildar_editar_valores)
+        form.addWidget(self.boton_editar_valores)
+
         form.addStretch()
         layout.addWidget(panel_form)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(12)
+        self.tabla.setColumnCount(13)
         self.tabla.setHorizontalHeaderLabels([
             "Localidad", "Edificio", "Unidad", "Consultorio", "% general", "% diferencial",
             "Regular actual", "Regular nuevo", "Dif. regular", "Aislada actual", "Aislada nuevo", "Dif. aislada",
+            "",
         ])
         self.tabla.itemChanged.connect(self._al_cambiar_celda)
         layout.addWidget(self.tabla, stretch=1)
@@ -256,14 +331,18 @@ class _PanelAumentos(QWidget):
         self._foco = instalar_enter_avanza_foco([
             self.campo_periodo, self.combo_localidad, self.combo_edificio, self.combo_unidad,
             self.spin_porcentaje, self.check_redondear, *self._radios_multiplo.values(),
-            self.boton_simular, self.boton_confirmar, self.boton_editar,
+            self.boton_simular, self.boton_confirmar, self.boton_editar, self.boton_editar_valores,
         ], parent=self)
 
     def actualizar(self) -> None:
         self.campo_periodo.setText(periodo_actual(self.conn))
         self._diferenciales.clear()
+        self._valores_manuales.clear()
+        self._botones_restablecer.clear()
         self._editando_diferencial = False
+        self._editando_valores = False
         self.boton_editar.setChecked(False)
+        self.boton_editar_valores.setChecked(False)
         self.spin_porcentaje.setValue(0)
         self.check_redondear.setChecked(True)
         self._radios_multiplo[1].setChecked(True)
@@ -383,11 +462,16 @@ class _PanelAumentos(QWidget):
         self._editando_diferencial = tildado
         self._renderizar_tabla()
 
+    def _al_tildar_editar_valores(self, tildado: bool) -> None:
+        self._editando_valores = tildado
+        self._renderizar_tabla()
+
     def _simular(self) -> None:
         periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
         filas = simular_aumento(
             self.conn, porcentaje_general=self.spin_porcentaje.value(),
-            porcentajes_override=self._diferenciales, redondear_a=self._redondear_a(), periodo=periodo,
+            porcentajes_override=self._diferenciales, valores_override=self._valores_manuales,
+            redondear_a=self._redondear_a(), periodo=periodo,
         )
         self._filas = {f.id_consultorio: f for f in filas}
         self._renderizar_tabla()
@@ -416,14 +500,50 @@ class _PanelAumentos(QWidget):
                     self._celda_porcentaje(diferencial, editable=self._editando_diferencial),
                 )
 
+                manual = self._valores_manuales.get(id_consultorio, {})
                 f = self._filas.get(id_consultorio)
                 if f is not None:
                     self.tabla.setItem(fila, _COL_REGULAR_ACTUAL, _celda_monto_fija(f.valor_regular_actual))
-                    self.tabla.setItem(fila, _COL_REGULAR_NUEVO, _celda_monto_fija(f.valor_regular_nuevo))
+                    self.tabla.setItem(
+                        fila, _COL_REGULAR_NUEVO,
+                        _celda_monto_nuevo(
+                            f.valor_regular_nuevo, editable=self._editando_valores, resaltada="regular" in manual,
+                        ),
+                    )
                     self.tabla.setItem(fila, _COL_DIF_REGULAR, _celda_monto_fija(f.diferencia_regular))
                     self.tabla.setItem(fila, _COL_AISLADA_ACTUAL, _celda_monto_fija(f.valor_aislada_actual))
-                    self.tabla.setItem(fila, _COL_AISLADA_NUEVO, _celda_monto_fija(f.valor_aislada_nuevo))
+                    self.tabla.setItem(
+                        fila, _COL_AISLADA_NUEVO,
+                        _celda_monto_nuevo(
+                            f.valor_aislada_nuevo, editable=self._editando_valores, resaltada="aislada" in manual,
+                        ),
+                    )
                     self.tabla.setItem(fila, _COL_DIF_AISLADA, _celda_monto_fija(f.diferencia_aislada))
+
+                # `setCellWidget` NO borra solo el widget que reemplaza —
+                # a diferencia de `setItem`, que sí limpia el item viejo —
+                # y `deleteLater()` tampoco alcanza (la deleción queda
+                # pendiente del event loop, que acá no llega a correr
+                # entre un render y el siguiente): un botón nuevo por
+                # render dejaba huérfanos colgados del viewport, sin
+                # posición asignada por la tabla, que Qt terminaba
+                # pintando en la esquina superior izquierda, superpuestos
+                # contra las primeras columnas en vez de desaparecer.
+                # Se resuelve reusando UN solo botón por consultorio
+                # (`self._botones_restablecer`, se limpia en
+                # `actualizar()` cuando cambia el conjunto de
+                # consultorios) en vez de crear uno nuevo en cada render.
+                boton_restablecer = self._botones_restablecer.get(id_consultorio)
+                if boton_restablecer is None:
+                    boton_restablecer = QPushButton("Restablecer")
+                    boton_restablecer.setObjectName("botonSecundario")
+                    boton_restablecer.clicked.connect(
+                        lambda _chk=False, id_c=id_consultorio: self._restablecer_fila(id_c)
+                    )
+                    self._botones_restablecer[id_consultorio] = boton_restablecer
+                tiene_override = id_consultorio in self._diferenciales or id_consultorio in self._valores_manuales
+                boton_restablecer.setEnabled(tiene_override)
+                self.tabla.setCellWidget(fila, _COL_RESTABLECER, boton_restablecer)
         finally:
             self.tabla.blockSignals(False)
         self.tabla.resizeColumnsToContents()
@@ -438,11 +558,25 @@ class _PanelAumentos(QWidget):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         return item
 
+    def _restablecer_fila(self, id_consultorio: int) -> None:
+        """Vuelve una fila puntual a calcularse por el % general, sea cual
+        sea el override que tuviera (diferencial, valor manual, o los dos
+        — DC-10 §1.2: botón "Restablecer" por fila individual)."""
+        self._diferenciales.pop(id_consultorio, None)
+        self._valores_manuales.pop(id_consultorio, None)
+        self._simular()
+
     def _al_cambiar_celda(self, item: QTableWidgetItem) -> None:
-        if item.column() != _COL_PORCENTAJE_DIFERENCIAL or not self._editando_diferencial:
-            return
-        item_localidad = self.tabla.item(item.row(), _COL_LOCALIDAD)
-        id_consultorio = item_localidad.data(_ID_CONSULTORIO)
+        if item.column() == _COL_PORCENTAJE_DIFERENCIAL and self._editando_diferencial:
+            self._al_cambiar_diferencial(item)
+        elif item.column() in (_COL_REGULAR_NUEVO, _COL_AISLADA_NUEVO) and self._editando_valores:
+            self._al_cambiar_valor_manual(item)
+
+    def _id_consultorio_de_fila(self, fila: int) -> int:
+        return self.tabla.item(fila, _COL_LOCALIDAD).data(_ID_CONSULTORIO)
+
+    def _al_cambiar_diferencial(self, item: QTableWidgetItem) -> None:
+        id_consultorio = self._id_consultorio_de_fila(item.row())
         texto = item.text().strip()
         if texto in ("", _GUION):
             self._diferenciales.pop(id_consultorio, None)
@@ -454,6 +588,30 @@ class _PanelAumentos(QWidget):
                 self._renderizar_tabla()
                 return
             self._diferenciales[id_consultorio] = valor
+            # Un % diferencial puntual y un valor fijado a mano son dos
+            # formas de override mutuamente excluyentes para la misma
+            # fila — mismo criterio que ya rige entre % general/
+            # diferencial ("nunca se muestran los dos juntos").
+            self._valores_manuales.pop(id_consultorio, None)
+        self._simular()
+
+    def _al_cambiar_valor_manual(self, item: QTableWidgetItem) -> None:
+        id_consultorio = self._id_consultorio_de_fila(item.row())
+        campo = "regular" if item.column() == _COL_REGULAR_NUEVO else "aislada"
+        texto = item.text().strip()
+        if texto in ("", _GUION):
+            self._valores_manuales.get(id_consultorio, {}).pop(campo, None)
+            if not self._valores_manuales.get(id_consultorio):
+                self._valores_manuales.pop(id_consultorio, None)
+        else:
+            try:
+                valor = _parsear_monto(texto)
+            except ValueError:
+                QMessageBox.warning(self, "Valor manual", "Valor inválido.")
+                self._renderizar_tabla()
+                return
+            self._valores_manuales.setdefault(id_consultorio, {})[campo] = valor
+            self._diferenciales.pop(id_consultorio, None)
         self._simular()
 
     def _confirmar(self) -> None:
@@ -461,17 +619,28 @@ class _PanelAumentos(QWidget):
             QMessageBox.warning(self, "Confirmar aumento", "Primero hay que simular el aumento.")
             return
         periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
+        # DC-10 §1.2 (hallazgo de la auditoría): la cantidad de liquidaciones
+        # que se van a regenerar se avisa ACÁ, antes de confirmar — antes
+        # solo aparecía en el cartel de éxito, después de que ya se habían
+        # regenerado.
+        cantidad_liq = cantidad_liquidaciones_a_regenerar(self.conn, periodo)
+        aviso_liquidaciones = (
+            f" Hay {cantidad_liq} liquidación(es) ya emitida(s) para ese período: se van a regenerar con los "
+            "valores nuevos." if cantidad_liq
+            else " Todavía no hay ninguna liquidación emitida para ese período."
+        )
         confirmacion = QMessageBox.question(
             self, "Confirmar aumento",
             f"¿Confirmás el aumento para el período {periodo}? Al aplicar los aumentos se modifican valores "
-            "en el sistema y, si hay liquidaciones ya emitidas para ese período, se marcan como no emitidas.",
+            f"en el sistema.{aviso_liquidaciones}",
         )
         if confirmacion != QMessageBox.StandardButton.Yes:
             return
 
         resumen = confirmar_aumento(
             self.conn, porcentaje_general=self.spin_porcentaje.value(),
-            porcentajes_override=dict(self._diferenciales), redondear_a=self._redondear_a(), periodo=periodo,
+            porcentajes_override=dict(self._diferenciales), valores_override=dict(self._valores_manuales),
+            redondear_a=self._redondear_a(), periodo=periodo,
         )
         self.conn.commit()
         mensaje = f"Se actualizaron {resumen.consultorios_actualizados} consultorio(s)."
