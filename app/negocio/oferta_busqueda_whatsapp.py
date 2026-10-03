@@ -11,7 +11,15 @@ No incluye la sección de fotos: son archivos aparte, se adjuntan sueltos
 en el chat — no hay forma de incrustarlas en el texto del mensaje. Por
 eso, a diferencia del PDF, acá SÍ se muestra el valor por hora al final
 de cada línea que identifica un consultorio puntual — no hay foto debajo
-de la cual mostrarlo."""
+de la cual mostrarlo.
+
+Editable desde "Textos del sistema" (clave `oferta_busqueda_whatsapp`)
+— ver `app.negocio.plantillas_texto`: los tres títulos en negrita son
+texto de plantilla de verdad; el contenido armado con loops (detalle de
+la búsqueda, listado de alternativas, comentario de edificios/avisos)
+llega ya resuelto como tres variables de bloque, nunca editable línea
+por línea — mismo criterio que `{detalle_items}` en `mensaje_detalle_
+reserva_aislada`."""
 from __future__ import annotations
 
 import sqlite3
@@ -28,6 +36,7 @@ from app.negocio.oferta_busqueda_texto import (
     mapa_consultorios_basico,
     resumen_busqueda,
 )
+from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_WHATSAPP, resolver_plantilla, sustituir_variables
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -59,34 +68,32 @@ def generar_texto_oferta_busqueda(
     mostrar_consultorio = not globales.detalle_reducido
     avisos = avisos_planos(listas_alternativas)
 
-    lineas = ["*Búsqueda requerida por el profesional*", ""]
+    detalle_lineas = [f"- {resumen_busqueda(b, globales.tipo_busqueda)}" for b in busquedas]
 
-    lineas.append("*Detalle de la búsqueda*")
-    for b in busquedas:
-        lineas.append(f"- {resumen_busqueda(b, globales.tipo_busqueda)}")
-    lineas.append("")
-
-    lineas.append("*Listado de alternativas encontradas*")
-    lineas.append("")
+    alternativas_lineas: list[str] = []
     planas = alternativas_planas(listas_alternativas)
     if not planas:
-        lineas.append("Sin disponibilidad para esta búsqueda con los filtros solicitados.")
+        alternativas_lineas.append("Sin disponibilidad para esta búsqueda con los filtros solicitados.")
     else:
         numerar = len(planas) > 1
         for indice, (etiqueta, opcion) in enumerate(planas):
             if indice > 0:
-                lineas.append("")
+                alternativas_lineas.append("")
             if numerar:
-                lineas.append(f"_Alternativa {indice + 1}_")
+                alternativas_lineas.append(f"_Alternativa {indice + 1}_")
             for linea in lineas_opcion(
                 etiqueta, opcion, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar,
                 mostrar_valor=True, decimales=decimales,
             ):
-                lineas.append(f"- {linea}")
+                alternativas_lineas.append(f"- {linea}")
 
     comentario = [f"- {t}" for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
     comentario += [f"- {aviso}" for aviso in avisos]
-    if comentario:
-        lineas += ["", "*Comentario*"] + comentario
+    bloque_comentario = ("\n\n*Comentario*\n" + "\n".join(comentario)) if comentario else ""
 
-    return "\n".join(lineas)
+    plantilla = resolver_plantilla(conn, "oferta_busqueda_whatsapp", DEFAULT_OFERTA_BUSQUEDA_WHATSAPP)
+    return sustituir_variables(plantilla, {
+        "bloque_detalle_busqueda": "\n".join(detalle_lineas),
+        "bloque_alternativas": "\n".join(alternativas_lineas),
+        "bloque_comentario": bloque_comentario,
+    })

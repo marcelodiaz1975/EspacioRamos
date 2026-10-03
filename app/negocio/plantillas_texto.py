@@ -2,7 +2,17 @@
 tocar código tanto los mensajes automáticos del Centro de mensajería como
 la ayuda contextual F1 de cada pantalla (este último, además, es el
 hallazgo #23 de la auditoría DC-01/DC-10: "la ayuda F1 funciona y es
-contextual, pero no es editable sin tocar código").
+contextual, pero no es editable sin tocar código") — más, en una segunda
+vuelta, el texto de WhatsApp de Oferta de consultorios/Disponibilidad
+(`generar_texto_oferta_busqueda`), auditado explícitamente a pedido de la
+clienta para confirmar que no quedaba ningún otro texto generado por el
+sistema con el mismo perfil (prosa que la clienta lee/copia/envía a un
+profesional o alguien externo). Revisados y descartados en esa auditoría,
+por no encajar en ese perfil: `mensaje_conflicto_aislada` (cartel de
+error, solo para la operadora, nunca se envía a nadie), `texto_para_
+imprimir` de Placas (no es prosa de fábrica, es texto libre que ya se
+tipea por placa), y los PDFs (tablas/Paragraphs de ReportLab, un proyecto
+de maquetación aparte, no de redacción).
 
 Mecanismo (reusa `sustituir_variables`, ya aprobado para `MensajePredefinido`,
 en vez de inventar uno nuevo): cada "slot" del sistema (un mensaje
@@ -73,11 +83,12 @@ def resolver_plantilla(conn: sqlite3.Connection, clave: str, default: str) -> st
 
 
 # --------------------------------------------------------------------------
-# Registro de los 8 mensajes automáticos del Centro de mensajería (DC-02/
-# DC-03) que pasan a ser editables. Separados acá (y no mezclados con la
-# lógica de armado en `app.negocio.mensajes`) para que la pantalla de
-# edición pueda listar nombre/variables sin tener que importar ni ejecutar
-# ninguna función de armado de mensajes.
+# Registro de los mensajes automáticos del Centro de mensajería (DC-02/
+# DC-03) y del texto de WhatsApp de Oferta/Disponibilidad que pasan a ser
+# editables. Separados acá (y no mezclados con la lógica de armado en
+# `app.negocio.mensajes`/`app.negocio.oferta_busqueda_whatsapp`) para que
+# la pantalla de edición pueda listar nombre/variables sin tener que
+# importar ni ejecutar ninguna función de armado de mensajes.
 #
 # `mensaje_detalle_reserva_aislada` (sumado en una segunda vuelta, después
 # de quedar afuera de la primera por su complejidad) arma casi todo su
@@ -86,9 +97,25 @@ def resolver_plantilla(conn: sqlite3.Connection, clave: str, default: str) -> st
 # `{bloque_feriados}` del Mensaje grupal: todo ese cuerpo se entrega a la
 # plantilla como una única variable ya armada, `{detalle_items}`, nunca
 # como líneas editables por separado. Lo único que queda editable de
-# verdad es el encabezado (título + nombre del profesional) — el resto del
-# texto de WhatsApp de Oferta/Disponibilidad (loops de franjas) sigue
-# fuera de esta funcionalidad, es una pantalla totalmente distinta.
+# verdad es el encabezado (título + nombre del profesional).
+#
+# `oferta_busqueda_whatsapp` (sumado en la misma segunda vuelta) sigue el
+# mismo criterio: sus tres secciones con contenido armado por loops
+# (detalle de la búsqueda, listado de alternativas, comentario de
+# edificios/avisos) se entregan como tres variables de bloque ya
+# resueltas — `{bloque_detalle_busqueda}`/`{bloque_alternativas}`/
+# `{bloque_comentario}` — nunca editables línea por línea; lo editable de
+# verdad son los tres títulos en negrita de WhatsApp ("*Búsqueda
+# requerida...*", "*Detalle de la búsqueda*", "*Listado de alternativas
+# encontradas*") más, dentro de `{bloque_comentario}`, su propio título
+# "*Comentario*" queda adentro del bloque (igual que en el Mensaje
+# grupal) para que la sección entera desaparezca junto con su título
+# cuando no hay nada que comentar. Los marcadores estructurales de
+# WhatsApp (viñetas "- ", la numeración "_Alternativa N_") y la frase de
+# "Sin disponibilidad..." quedan del lado del código, dentro de
+# `{bloque_alternativas}` — mismo criterio que el resto de las
+# condiciones de este mecanismo, el sistema decide cuándo y cómo, nunca
+# una plantilla mal escrita.
 
 DEFAULT_SITUACION_1 = (
     "MENSAJE AUTOMATICO\n\n"
@@ -171,6 +198,15 @@ DEFAULT_DETALLE_RESERVA_AISLADA = (
     "{detalle_items}"
 )
 
+DEFAULT_OFERTA_BUSQUEDA_WHATSAPP = (
+    "*Búsqueda requerida por el profesional*\n\n"
+    "*Detalle de la búsqueda*\n"
+    "{bloque_detalle_busqueda}\n\n"
+    "*Listado de alternativas encontradas*\n\n"
+    "{bloque_alternativas}"
+    "{bloque_comentario}"
+)
+
 
 @dataclass
 class PlantillaMensaje:
@@ -214,5 +250,9 @@ MENSAJES_EDITABLES: list[PlantillaMensaje] = [
     PlantillaMensaje(
         "mensaje_detalle_reserva_aislada", "Detalle de reserva aislada del mes (encabezado)",
         DEFAULT_DETALLE_RESERVA_AISLADA, ("mes_mayus", "nombre_profesional", "detalle_items"),
+    ),
+    PlantillaMensaje(
+        "oferta_busqueda_whatsapp", "Texto de WhatsApp de Oferta de consultorios/Disponibilidad",
+        DEFAULT_OFERTA_BUSQUEDA_WHATSAPP, ("bloque_detalle_busqueda", "bloque_alternativas", "bloque_comentario"),
     ),
 ]

@@ -3,6 +3,8 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.mensajes import mensaje_detalle_reserva_aislada, mensaje_envio_liquidacion, mensaje_grupal
+from app.negocio.oferta_busqueda import Busqueda, CriteriosGlobales
+from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
 from app.negocio.plantillas_texto import (
     MENSAJES_EDITABLES,
     guardar_texto_personalizado,
@@ -57,7 +59,7 @@ def test_guardar_dos_veces_actualiza_la_misma_fila(conn):
 
 def test_claves_de_mensajes_editables_son_unicas():
     claves = [m.clave for m in MENSAJES_EDITABLES]
-    assert len(claves) == len(set(claves)) == 8
+    assert len(claves) == len(set(claves)) == 9
 
 
 # --------------------------------------------- mensajes que usan la plantilla personalizada
@@ -109,3 +111,40 @@ def test_mensaje_detalle_reserva_aislada_sin_personalizar_sigue_igual_que_antes(
     assert lineas[0] == "DETALLE RESERVA AGOSTO"
     assert lineas[1] == "JUAN TEST"
     assert lineas[2] == ""
+
+
+def _busqueda_simple():
+    return Busqueda(fecha_desde="2026-08-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11)
+
+
+def test_oferta_busqueda_whatsapp_solo_los_titulos_son_editables(conn):
+    """Los tres bloques armados con loops (detalle de la búsqueda,
+    listado de alternativas, comentario de edificios/avisos) los sigue
+    armando el código — acá solo se personalizan los títulos en negrita,
+    mismo criterio que {detalle_items}/{bloque_feriados}."""
+    guardar_texto_personalizado(
+        conn, "oferta_busqueda_whatsapp",
+        "*Título propio*\n{bloque_detalle_busqueda}\n\n*Alternativas*\n\n{bloque_alternativas}{bloque_comentario}",
+    )
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
+
+    assert texto.startswith("*Título propio*\n- Lunes de 9 a 11hs\n\n*Alternativas*\n\n")
+    assert '- Lunes de 9 a 11hs consultorio 1 del 7mo "L"' in texto
+    assert "*Búsqueda requerida por el profesional*" not in texto
+
+
+def test_oferta_busqueda_whatsapp_sin_personalizar_sigue_igual_que_antes(conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
+
+    assert texto.startswith("*Búsqueda requerida por el profesional*\n\n*Detalle de la búsqueda*\n")
+    assert "*Listado de alternativas encontradas*" in texto

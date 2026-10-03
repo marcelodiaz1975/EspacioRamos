@@ -5,15 +5,19 @@ cada pantalla — ver `app.negocio.plantillas_texto` para el mecanismo
 (texto de fábrica + override opcional en `PlantillaTexto`, mismo patrón
 de sustitución que ya usa `MensajePredefinido`).
 
-Alcance acotado a pedido explícito de la clienta: los 8 mensajes de
-`app.negocio.plantillas_texto.MENSAJES_EDITABLES` (`mensaje_detalle_
-reserva_aislada` se sumó en una segunda vuelta — su cuerpo, armado con
-loops de reservas/llaves/pagos/etc., llega como una sola variable ya
-resuelta, `{detalle_items}`; solo su encabezado es texto de plantilla de
-verdad) y la ayuda F1 de cada `Seccion` del menú (hallazgo #23 de la
-auditoría DC-01/DC-10: "la ayuda F1 funciona y es contextual, pero no es
-editable sin tocar código"). Los textos de WhatsApp de Oferta/
-Disponibilidad (loops de franjas) siguen fuera de esta funcionalidad.
+Alcance: los 9 mensajes de `app.negocio.plantillas_texto.
+MENSAJES_EDITABLES` — los 7 del Centro de mensajería, `mensaje_detalle_
+reserva_aislada` (segunda vuelta) y `oferta_busqueda_whatsapp` (tercera
+vuelta, el texto de WhatsApp de Oferta de consultorios/Disponibilidad,
+sumado tras una auditoría explícita confirmando que no quedaba ningún
+otro texto generado por el sistema con este mismo perfil de "prosa que
+la clienta copia/envía") — más la ayuda F1 de cada `Seccion` del menú
+(hallazgo #23 de la auditoría DC-01/DC-10: "la ayuda F1 funciona y es
+contextual, pero no es editable sin tocar código"). Los tres mensajes
+con cuerpo armado por loops (`mensaje_detalle_reserva_aislada`,
+`oferta_busqueda_whatsapp`) solo dejan editable su encabezado/títulos —
+el cuerpo llega como una o más variables de bloque ya resueltas (ej.
+`{detalle_items}`, `{bloque_alternativas}`).
 
 No usa `PantallaCRUD` (mismo criterio que Usuarios y permisos/Gestor de
 archivos): no hay alta/baja, los "slots" son un conjunto fijo que define
