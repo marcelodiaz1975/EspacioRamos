@@ -1,8 +1,11 @@
 """Avance de mes (DC-06), subconjunto de las Etapas 4, 6 y 9.
 
 Cubre lo que le compete a liquidaciones, pagos, lista de espera y
-estadísticas: backup previo, snapshot del mes que se cierra, traspaso de
-saldo, cierre de cuotas del mes cerrado y limpieza de la lista de espera.
+estadísticas: backup previo, traspaso de saldo, cierre de cuotas del mes
+cerrado, limpieza de la lista de espera y, al final del proceso (DC-06
+§2 Paso 9 — corregido en el repaso de la auditoría DC-01/DC-10, antes se
+generaba como segundo paso, justo después del backup), el snapshot del
+mes que se cierra.
 El resto del proceso de 9 pasos del documento (oferta de análisis de
 valores, archivo de aisladas, reset del centro de mensajería) pertenece a
 otras etapas (centro de mensajería: Etapa 8; análisis de valores: Etapa
@@ -268,9 +271,6 @@ def avanzar_mes(
     resumen = ResumenAvanceMes(periodo_cerrado=periodo_cerrado)
     resumen.ruta_backup = _generar_backup_previo(conn)
     resumen.backup_generado = resumen.ruta_backup is not None
-    resumen.id_snapshot = generar_snapshot(
-        conn, periodo_cerrado, porcentaje_aumento_aplicado=porcentaje_aumento_aplicado,
-    )
     resumen.profesionales_con_traspaso = _traspasar_saldos(conn)
     resumen.plazos_extendidos_automaticos_aplicados = _aplicar_plazos_extendidos_automaticos(
         conn, sumar_meses(periodo_cerrado, 1),
@@ -287,4 +287,15 @@ def avanzar_mes(
     )
     if carpeta_base(conn) is not None:
         resumen.ofertas_eliminadas = vaciar_carpeta(carpeta_archivos_varios(conn, SUBCARPETA_OFERTA))
+
+    # Paso 9 (DC-06 §2, último paso del proceso — hallazgo de la auditoría
+    # DC-01/DC-10: se generaba como segundo paso, justo después del backup,
+    # en vez de al final). No cambia ningún valor calculado (ningún paso de
+    # arriba toca ReservaRegular/ReservaAislada/Consultorio.ValorHora*, que
+    # es todo lo que `generar_snapshot` lee), pero sí importa para que el
+    # snapshot quede como el cierre real del mes, después de que el resto
+    # del proceso ya corrió — no una "foto" tomada a mitad de camino.
+    resumen.id_snapshot = generar_snapshot(
+        conn, periodo_cerrado, porcentaje_aumento_aplicado=porcentaje_aumento_aplicado,
+    )
     return resumen

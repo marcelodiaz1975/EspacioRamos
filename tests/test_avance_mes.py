@@ -180,6 +180,38 @@ def test_avanzar_mes_genera_snapshot(conn):
     assert snapshot["Periodo"] == "2026-08"
 
 
+def test_avanzar_mes_genera_snapshot_al_final(conn, monkeypatch):
+    """DC-06 §2 Paso 9 (auditoría DC-01/DC-10, hallazgo #29): el snapshot
+    se genera como ÚLTIMO paso del proceso — antes de esta corrección se
+    generaba como segundo paso, justo después del backup."""
+    import app.negocio.avance_mes as avance_mes
+
+    orden: list[str] = []
+    original_snapshot = avance_mes.generar_snapshot
+    original_traspaso = avance_mes._traspasar_saldos
+    original_archivos = avance_mes._regenerar_archivos_varios
+
+    def _snapshot_envuelto(*args, **kwargs):
+        orden.append("snapshot")
+        return original_snapshot(*args, **kwargs)
+
+    def _traspaso_envuelto(*args, **kwargs):
+        orden.append("traspaso_saldos")
+        return original_traspaso(*args, **kwargs)
+
+    def _archivos_envuelto(*args, **kwargs):
+        orden.append("regenerar_archivos_varios")
+        return original_archivos(*args, **kwargs)
+
+    monkeypatch.setattr(avance_mes, "generar_snapshot", _snapshot_envuelto)
+    monkeypatch.setattr(avance_mes, "_traspasar_saldos", _traspaso_envuelto)
+    monkeypatch.setattr(avance_mes, "_regenerar_archivos_varios", _archivos_envuelto)
+
+    avanzar_mes(conn, periodo_cerrado="2026-08")
+
+    assert orden == ["traspaso_saldos", "regenerar_archivos_varios", "snapshot"]
+
+
 def test_avanzar_mes_pasa_porcentaje_aumento_al_snapshot(conn):
     resumen = avanzar_mes(conn, periodo_cerrado="2026-08", porcentaje_aumento_aplicado=12.5)
     snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(resumen.id_snapshot)
