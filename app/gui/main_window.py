@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.estilos import hoja_estilos, paleta
 from app.negocio.dias import periodo_actual
+from app.negocio.plantillas_texto import resolver_plantilla
 from app.negocio.seguridad import nivel_alcanza
 
 
@@ -120,12 +121,15 @@ class VentanaPrincipal(QMainWindow):
 
     def _mostrar_ayuda(self) -> None:
         """Ayuda contextual (Etapa 11): F1 muestra el texto de ayuda de
-        la pantalla actualmente visible, tomado de Seccion.ayuda."""
+        la pantalla actualmente visible, tomado de Seccion.ayuda — salvo
+        que se haya personalizado desde "Textos del sistema" (pedido de
+        la clienta, ver `app.negocio.plantillas_texto`)."""
         indice_pila = self._pila.currentIndex()
         if indice_pila < 0 or indice_pila >= len(self._secciones):
             return
         seccion = self._secciones[indice_pila]
-        texto = seccion.ayuda or "Esta pantalla todavía no tiene ayuda contextual cargada."
+        default = seccion.ayuda or "Esta pantalla todavía no tiene ayuda contextual cargada."
+        texto = resolver_plantilla(self.conn, f"ayuda:{seccion.nombre}", default)
         QMessageBox.information(self, f"Ayuda — {seccion.nombre}", texto)
 
     def _aplicar_tema(self) -> None:

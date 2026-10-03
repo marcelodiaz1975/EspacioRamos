@@ -44,6 +44,7 @@ TABLAS = [
     "GastoOperativo",
     "Imagen",
     "MensajePredefinido",
+    "PlantillaTexto",
     "Configuracion",
     "CondicionNorma",
     "DetalleComplementarioPropuesta",

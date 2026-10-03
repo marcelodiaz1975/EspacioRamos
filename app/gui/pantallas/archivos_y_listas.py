@@ -10,6 +10,10 @@ no tenían relación de navegación entre sí hasta esta reorganización:
   de la propuesta" (los tres, catálogos genéricos de `catalogos.py`,
   construidos acá con `anidado=True` — ver `crud_generico.py` — en vez de
   como pantallas de catálogo independientes).
+- "Textos del sistema" (`_PanelTextosDelSistema`, ver `textos_sistema.py`
+  — pedido de la clienta, posterior a esta reorganización): mensajes
+  automáticos del Centro de mensajería y ayuda contextual F1, editables
+  sin tocar código.
 
 Mismo patrón que Usuarios y permisos/Estadísticas: título Nivel 1 fijo +
 `QTabWidget` con las cuatro solapas, cada una responsable de su propio
@@ -35,6 +39,7 @@ from app.gui.pantallas.catalogos import (
     pantalla_listas_editables,
 )
 from app.gui.pantallas.imagenes import _PanelGestorArchivos
+from app.gui.pantallas.textos_sistema import _PanelTextosDelSistema
 
 
 class PantallaArchivosYListas(QWidget):
@@ -55,5 +60,7 @@ class PantallaArchivosYListas(QWidget):
         self.pestanas.addTab(self.panel_condiciones_normas, "Condiciones y normas")
         self.panel_detalles_complementarios = pantalla_detalles_complementarios_propuesta(conn, anidado=True)
         self.pestanas.addTab(self.panel_detalles_complementarios, "Detalles complementarios de la propuesta")
+        self.panel_textos_sistema = _PanelTextosDelSistema(conn, secciones)
+        self.pestanas.addTab(self.panel_textos_sistema, "Textos del sistema")
         self.pestanas.tabBar().setDrawBase(False)
         layout.addWidget(self.pestanas, stretch=1)

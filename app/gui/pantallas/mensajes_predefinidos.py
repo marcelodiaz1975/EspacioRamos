@@ -1,8 +1,8 @@
 """Mensajes predefinidos (FA8, sección 5.5): biblioteca editable de
-mensajes ad hoc (a diferencia de las 5 situaciones automáticas del Centro
-de mensajería, sección 5.3, que también viven en MensajePredefinido pero
-bajo la categoría fija "Situaciones centro de mensajería" — ver
-app.negocio.mensajes._DESCRIPCION_SITUACION). Formato estándar de
+mensajes ad hoc (a diferencia de los mensajes automáticos del Centro de
+mensajería, sección 5.3, que viven en su propia tabla `PlantillaTexto` —
+ver `app.negocio.plantillas_texto` y la solapa "Textos del sistema" de
+"Archivos y listas" — no en `MensajePredefinido`). Formato estándar de
 catálogo (solapa "Listado", Buscar a la izquierda) con todo lo propio de
 esta pantalla agrupado ARRIBA de Nuevo/Editar/Eliminar
 (`panel_extra_superior_izquierda`, pedido de la clienta al revisar esta

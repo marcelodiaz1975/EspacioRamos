@@ -26,6 +26,17 @@ from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, sumar_meses, ultim
 from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, hora_fmt, mes_texto
 from app.negocio.liquidaciones import CATEGORIAS_CON_LIQUIDACION_MENSUAL
+from app.negocio.plantillas_texto import (  # noqa: F401 (sustituir_variables se reexporta)
+    DEFAULT_ENVIO_LIQUIDACION,
+    DEFAULT_GRUPAL,
+    DEFAULT_RECORDATORIO_FIN_DE_MES,
+    DEFAULT_SITUACION_1,
+    DEFAULT_SITUACION_2,
+    DEFAULT_SITUACION_3,
+    DEFAULT_SITUACION_5,
+    resolver_plantilla,
+    sustituir_variables,
+)
 from app.repositorio.registro import obtener_repositorio
 
 NOMBRES_CONDICION = {
@@ -128,57 +139,44 @@ def _cuando_remanente(dias: int, dia_semana: str, fecha: str) -> str:
 
 def mensaje_situacion_1(conn: sqlite3.Connection, id_profesional: int, hoy: date) -> str:
     """Amarillo/Naranja con liquidación NO enviada, botón "Generar texto"
-    (DC-02 §5)."""
+    (DC-02 §5). Editable desde "Textos del sistema" (clave
+    `mensaje_situacion_1`) — ver `app.negocio.plantillas_texto`."""
     profesional = _profesional_r(conn, id_profesional)
     cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or ""
     dia_semana, fecha, _ = _fecha_y_dia_remanente(conn, hoy)
     saldo = _moneda(profesional["SaldoCuentaAnterior"] or 0.0)
-    return (
-        "MENSAJE AUTOMATICO\n\n"
-        f"Al día de la fecha se registra un saldo de {saldo} correspondiente al período anterior, por ende se "
-        f"retiene la liquidación para ser enviada el {dia_semana} {fecha} contemplando las nuevas cancelaciones "
-        "que se vayan a realizar desde ahora hasta ese momento con el fin de que en este plazo se regularice la "
-        "situación.\n\n"
-        "Se recuerda que los descuentos por cantidad de horas semanales reservadas se realizan únicamente cuando "
-        "el saldo está al día al momento de comenzar el nuevo mes, y por otro lado los saldos atrasados que "
-        "queden al momento de enviar la nueva liquidación se ajustarán para mantener los mismos actualizados.\n\n"
-        "Por cualquier consulta o duda acerca de lo expresado en este texto responder este mensaje para con "
-        "gusto conversar todas las inquietudes que pudieran existir.\n\n"
-        f"Saludos, {nombre_espacio}."
-    )
+    plantilla = resolver_plantilla(conn, "mensaje_situacion_1", DEFAULT_SITUACION_1)
+    return sustituir_variables(plantilla, {
+        "saldo": saldo, "dia_semana": dia_semana, "fecha": fecha, "nombre_espacio": nombre_espacio,
+    })
 
 
 def mensaje_situacion_2(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:
-    """Amarillo, al activar el check de envío (DC-02 §5)."""
+    """Amarillo, al activar el check de envío (DC-02 §5). Editable (clave
+    `mensaje_situacion_2`)."""
     profesional = _profesional_r(conn, id_profesional)
     anio, mes = periodo.split("-")
-    return (
-        f"Hola {nombre_para_mensaje(profesional)}, cómo estás..? Te envío la liquidación del mes de "
-        f"{mes_texto(int(mes))} en forma manual tal cual te había adelantado que iba a hacer luego del mensaje "
-        "que se disparó anteriormente en forma automática. Por cualquier cosa me escribís, saludos..!"
-    )
+    plantilla = resolver_plantilla(conn, "mensaje_situacion_2", DEFAULT_SITUACION_2)
+    return sustituir_variables(plantilla, {
+        "nombre": nombre_para_mensaje(profesional), "mes": mes_texto(int(mes)),
+    })
 
 
 def mensaje_situacion_3(conn: sqlite3.Connection, id_profesional: int, periodo: str, hoy: date) -> str:
     """Marrón, botón "Generar texto" (al generarlo pasa a amarillo — el
     llamador es responsable de avisarle a
-    `app.negocio.mensajeria.marcar_mensaje_previo_generado`)."""
+    `app.negocio.mensajeria.marcar_mensaje_previo_generado`). Editable
+    (clave `mensaje_situacion_3`)."""
     profesional = _profesional_r(conn, id_profesional)
     anio, mes = periodo.split("-")
     dia_semana, fecha, dias = _fecha_y_dia_remanente(conn, hoy)
     cuando = _cuando_remanente(dias, dia_semana, fecha)
     saldo = _moneda(profesional["SaldoCuentaAnterior"] or 0.0)
-    return (
-        f"Hola {nombre_para_mensaje(profesional)}, cómo estás? {cuando} se van a mandar los archivos con las "
-        f"liquidaciones de {mes_texto(int(mes))} a los profesionales que están al día con sus saldos, en tu "
-        "caso se va a llegar un mensaje automático en lugar del PDF, esto es porque quedó un saldo pendiente de "
-        f"{saldo} correspondiente al período anterior.\n\n"
-        "Obviamente la diferencia no es significativa, yo luego de ese mensaje te mando el archivo en forma "
-        "manual con los descuentos contemplados como siempre, solo te estoy anticipando esta secuencia para que "
-        "no te sorprenda ya que todo se hace de manera automática.\n\n"
-        "Luego del mensaje te escribo, saludos..!"
-    )
+    plantilla = resolver_plantilla(conn, "mensaje_situacion_3", DEFAULT_SITUACION_3)
+    return sustituir_variables(plantilla, {
+        "nombre": nombre_para_mensaje(profesional), "cuando": cuando, "mes": mes_texto(int(mes)), "saldo": saldo,
+    })
 
 
 def mensaje_recordatorio_fin_de_mes(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:
@@ -194,7 +192,12 @@ def mensaje_recordatorio_fin_de_mes(conn: sqlite3.Connection, id_profesional: in
     a favor del espacio / en cero), y si queda deudor, la fecha y hora de
     la última recogida de sobres (Configuracion.FechaHoraRecogidaSobres,
     el mismo valor que ya precarga el campo de Pagos) como corte de lo
-    ya contemplado en ese saldo."""
+    ya contemplado en ese saldo.
+
+    Editable (clave `mensaje_recordatorio_fin_de_mes`) — "ESTADO DE CUENTA
+    ACTUAL" y el bloque de feriados llegan a la plantilla ya armados como
+    variables (`{estado_cuenta}`/`{bloque_feriados}`), el sistema sigue
+    decidiendo cuándo y qué contienen (pedido explícito de la clienta)."""
     profesional = _profesional_r(conn, id_profesional)
     saldo = profesional["SaldoCuentaActual"] or 0.0
 
@@ -204,20 +207,12 @@ def mensaje_recordatorio_fin_de_mes(conn: sqlite3.Connection, id_profesional: in
     anio_sig, mes_sig = (int(p) for p in mes_siguiente.split("-"))
     primer_dia_siguiente = date(anio_sig, mes_sig, 1)
 
-    lineas = [
-        "MENSAJE AUTOMATICO",
-        "",
-        "(Texto recordatorio de carácter informativo, no es necesario responder)",
-        "",
-        "ESTADO DE CUENTA ACTUAL 👇",
-        "",
-    ]
     if saldo == 0:
-        lineas.append("* Saldo en cero, sin deuda.")
+        estado_cuenta = "* Saldo en cero, sin deuda."
     elif saldo < 0:
-        lineas.append(f"* A favor del profesional {_moneda(abs(saldo))}.")
+        estado_cuenta = f"* A favor del profesional {_moneda(abs(saldo))}."
     else:
-        lineas.append(f"* Pendiente de cancelación {_moneda(saldo)}.")
+        estado_cuenta = f"* Pendiente de cancelación {_moneda(saldo)}."
         cfg = conn.execute(
             "SELECT FechaHoraRecogidaSobres FROM Configuracion WHERE IdConfiguracion = 1"
         ).fetchone()
@@ -225,59 +220,53 @@ def mensaje_recordatorio_fin_de_mes(conn: sqlite3.Connection, id_profesional: in
             dt = datetime.fromisoformat(cfg["FechaHoraRecogidaSobres"])
             dia_semana = DIAS_SEMANA[dt.weekday()].lower()
             hora = hora_fmt(dt.hour + dt.minute / 60)
-            lineas.append(
-                f"* Para el cálculo del saldo se contemplaron los sobres recogidos hasta las {hora} del "
+            estado_cuenta += (
+                f"\n* Para el cálculo del saldo se contemplaron los sobres recogidos hasta las {hora} del "
                 f"{dia_semana} {fecha_corta(dt.date().isoformat())}."
             )
 
-    lineas += [
-        "",
-        "CIERRE DE RESERVAS 👇",
-        "",
-        f"* {DIAS_SEMANA[ultimo_dia.weekday()]} {fecha_corta(ultimo_dia.isoformat())}",
-        "",
-        "ENVIO DE LIQUIDACIONES 👇",
-        "",
-        f"* {DIAS_SEMANA[primer_dia_siguiente.weekday()]} {fecha_corta(primer_dia_siguiente.isoformat())}",
-    ]
-
+    bloque_feriados = ""
     feriados = feriados_relevantes_periodo(conn, anio_sig, mes_sig)
     if feriados:
-        lineas += ["", "PROXIMOS FERIADOS 👇", ""]
+        lineas_feriados = ["", "", "PROXIMOS FERIADOS 👇", ""]
         for f in feriados:
             d = date.fromisoformat(f["Fecha"])
-            lineas.append(f"* {DIAS_SEMANA[d.weekday()]} {fecha_corta(f['Fecha'])}")
+            lineas_feriados.append(f"* {DIAS_SEMANA[d.weekday()]} {fecha_corta(f['Fecha'])}")
+        bloque_feriados = "\n".join(lineas_feriados)
 
-    return "\n".join(lineas)
+    plantilla = resolver_plantilla(
+        conn, "mensaje_recordatorio_fin_de_mes", DEFAULT_RECORDATORIO_FIN_DE_MES,
+    )
+    return sustituir_variables(plantilla, {
+        "estado_cuenta": estado_cuenta,
+        "fecha_cierre_reservas": f"{DIAS_SEMANA[ultimo_dia.weekday()]} {fecha_corta(ultimo_dia.isoformat())}",
+        "fecha_envio_liquidaciones": (
+            f"{DIAS_SEMANA[primer_dia_siguiente.weekday()]} {fecha_corta(primer_dia_siguiente.isoformat())}"
+        ),
+        "bloque_feriados": bloque_feriados,
+    })
 
 
 def mensaje_situacion_5(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:
-    """Rojo con liquidación NO enviada (DC-02 §5)."""
+    """Rojo con liquidación NO enviada (DC-02 §5). Editable (clave
+    `mensaje_situacion_5`)."""
     profesional = _profesional_r(conn, id_profesional)
     anio, mes = periodo.split("-")
     saldo = _moneda(profesional["SaldoCuentaAnterior"] or 0.0)
-    return (
-        f"Hola {nombre_para_mensaje(profesional)}, cómo estás..? El mes de {mes_texto(int(mes))} ya se "
-        "encuentra cerrado en base a tu reserva actual, te va a llegar en breve un mensaje automático "
-        "informándote que hay saldos para regularizar en lugar del archivo de la liquidación del mes.\n\n"
-        "Como te informé hace unos días no se pueden trasladar saldos de un mes a otro cuando hay un plan de "
-        f"pagos acordado. El saldo a regularizar es de {saldo}. Quedo atento a tu comentario para estar al "
-        "tanto de como tenés pensado manejar la situación, aguardo tu respuesta, gracias."
-    )
+    plantilla = resolver_plantilla(conn, "mensaje_situacion_5", DEFAULT_SITUACION_5)
+    return sustituir_variables(plantilla, {
+        "nombre": nombre_para_mensaje(profesional), "mes": mes_texto(int(mes)), "saldo": saldo,
+    })
 
 
 def mensaje_envio_liquidacion(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str:
     """Mensaje 4 (DC-03): acompaña el PDF de liquidación. Asignado a
-    verde/violeta/gris (botón) y verde/naranja/rojo/violeta/gris (check)."""
+    verde/violeta/gris (botón) y verde/naranja/rojo/violeta/gris (check).
+    Editable (clave `mensaje_envio_liquidacion`)."""
     _profesional_r(conn, id_profesional)
     anio, mes = periodo.split("-")
-    return (
-        "MENSAJE AUTOMATICO\n"
-        "(no es necesario responder)\n\n"
-        f"* Se adjunta liquidación correspondiente al mes de {mes_texto(int(mes))}\n"
-        "* Abrir el archivo enseguida de recibirlo para que les quede en el teléfono\n"
-        "* Revisar el contenido, por cualquier duda comunicarse con el administrador"
-    )
+    plantilla = resolver_plantilla(conn, "mensaje_envio_liquidacion", DEFAULT_ENVIO_LIQUIDACION)
+    return sustituir_variables(plantilla, {"mes": mes_texto(int(mes))})
 
 
 # ------------------------------------------------------------------- mensaje grupal (Mensaje 3, DC-03)
@@ -300,7 +289,9 @@ def mensaje_grupal(conn: sqlite3.Connection, periodo_liquidacion: str) -> str:
     """Mensaje 3 (DC-03): "LIQUIDACIONES DE {MesSiguienteMAYUS} - AVISOS
     VARIOS", para el grupo de WhatsApp. `periodo_liquidacion` es el mes que
     se está por cerrar (cuya liquidación se arma y envía "el mes
-    siguiente" a él, según el flujo de avance de mes)."""
+    siguiente" a él, según el flujo de avance de mes). Editable (clave
+    `mensaje_grupal`) — el bloque de feriados llega como `{bloque_feriados}`
+    ya armado, no es editable por separado en esta primera vuelta."""
     cfg = conn.execute("SELECT MensajesPlural FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     plural = bool(cfg["MensajesPlural"]) if cfg is None or cfg["MensajesPlural"] is None else bool(cfg["MensajesPlural"])
     nos_o_me = "nos" if plural else "me"
@@ -312,32 +303,12 @@ def mensaje_grupal(conn: sqlite3.Connection, periodo_liquidacion: str) -> str:
     anio_sig, mes_sig = (int(p) for p in mes_siguiente.split("-"))
     primer_dia_siguiente = date(anio_sig, mes_sig, 1)
 
-    lineas = [
-        f"LIQUIDACIONES DE {mes_texto(mes_sig).upper()} - AVISOS VARIOS",
-        "",
-        "CIERRE DE RESERVA 👇",
-        "",
-        f"* El {DIAS_SEMANA[ultimo_dia.weekday()].lower()} {fecha_corta(ultimo_dia.isoformat())} cerramos las "
-        f"reservas de {mes_texto(mes_sig)}. Por informes de pago, avisos de vacaciones o por cualquier otra "
-        "cosa relacionada con las reservas escribir por privado hasta ese día inclusive.",
-        "",
-        "ENVIO DE LIQUIDACIONES 👇",
-        "",
-        f"* El {DIAS_SEMANA[primer_dia_siguiente.weekday()].lower()} {fecha_corta(primer_dia_siguiente.isoformat())} "
-        "se enviarán a través de un programa en forma automática las liquidaciones sin otro mensaje "
-        "complementario solo a los profesionales que estén sin saldos pendientes a la fecha.",
-        "* No hace falta responder el mensaje, si se pide abrir en ese momento el archivo para que les quede "
-        "en el teléfono.",
-        "* Dichas liquidaciones contarán con los habituales descuentos por cantidad de horas semanales "
-        "reservadas.",
-        f"* El profesional que tenga alguna duda por su saldo actual puede escribir{nos_o_me} por privado para "
-        f"consultar{nos_o_me} el estado de cuenta.",
-    ]
-
+    bloque_feriados = ""
     feriados = feriados_relevantes_periodo(conn, anio_sig, mes_sig)
     if feriados:
         esos_ese_dias = "esos días" if len(feriados) > 1 else "ese día"
-        lineas += [
+        bloque_feriados = "\n".join([
+            "",
             "",
             f"FERIADOS MES DE {mes_texto(mes_sig).upper()} 👇",
             "",
@@ -347,9 +318,21 @@ def mensaje_grupal(conn: sqlite3.Connection, periodo_liquidacion: str) -> str:
             "momento los horarios que pudiera llegar a necesitar para ser asignados, los cuales pueden ser "
             "distintos a los que habitualmente se tienen reservados.",
             f"* Las que se coordinen para ser utilizadas en {esos_ese_dias} como siempre se incluirán y "
-            f"detallarán en la próxima liquidación, en este caso la de {mes_texto(int(mes_siguiente_mas1.split('-')[1]))}.",
-        ]
-    return "\n".join(lineas)
+            f"detallarán en la próxima liquidación, en este caso la de "
+            f"{mes_texto(int(mes_siguiente_mas1.split('-')[1]))}.",
+        ])
+
+    plantilla = resolver_plantilla(conn, "mensaje_grupal", DEFAULT_GRUPAL)
+    return sustituir_variables(plantilla, {
+        "mes_mayus": mes_texto(mes_sig).upper(),
+        "dia_cierre": DIAS_SEMANA[ultimo_dia.weekday()].lower(),
+        "fecha_cierre": fecha_corta(ultimo_dia.isoformat()),
+        "mes": mes_texto(mes_sig),
+        "dia_envio": DIAS_SEMANA[primer_dia_siguiente.weekday()].lower(),
+        "fecha_envio": fecha_corta(primer_dia_siguiente.isoformat()),
+        "nos_o_me": nos_o_me,
+        "bloque_feriados": bloque_feriados,
+    })
 
 
 # --------------------------------------------------------- detalle aisladas (5.1)
@@ -635,12 +618,7 @@ def mensaje_detalle_reserva_aislada(
 
 
 # -------------------------------------------------------- mensajes predefinidos (5.5)
-
-def sustituir_variables(texto: str, variables: dict[str, str]) -> str:
-    """Reemplaza "{variable}" en el texto de un MensajePredefinido por su
-    valor. Los saltos de línea del texto guardado se respetan tal cual
-    (no hace falta hacer nada especial: son parte del `texto`)."""
-    resultado = texto
-    for clave, valor in variables.items():
-        resultado = resultado.replace(f"{{{clave}}}", str(valor))
-    return resultado
+# `sustituir_variables` se mudó a `app.negocio.plantillas_texto` (mismo
+# mecanismo, ahora compartido también por los mensajes automáticos
+# editables) — se reexporta arriba para no romper a quien ya la
+# importaba de acá.

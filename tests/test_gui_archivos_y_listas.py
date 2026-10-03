@@ -6,6 +6,7 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion
 from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
 from app.gui.pantallas.imagenes import _PanelGestorArchivos
+from app.gui.pantallas.textos_sistema import _PanelTextosDelSistema
 
 
 @pytest.fixture
@@ -34,7 +35,7 @@ def test_titulo_de_pantalla_es_jerarquia_1(qtbot, conn):
     assert titulo.text() == "ARCHIVOS Y LISTAS"
 
 
-def test_tiene_formato_solapa_con_las_cuatro_pestanas(qtbot, conn):
+def test_tiene_formato_solapa_con_las_cinco_pestanas(qtbot, conn):
     pantalla = PantallaArchivosYListas(conn)
     qtbot.addWidget(pantalla)
     solapas = pantalla.findChild(QTabWidget)
@@ -44,6 +45,7 @@ def test_tiene_formato_solapa_con_las_cuatro_pestanas(qtbot, conn):
         "Listas editables",
         "Condiciones y normas",
         "Detalles complementarios de la propuesta",
+        "Textos del sistema",
     ]
 
 
@@ -81,3 +83,12 @@ def test_secciones_se_reenvian_al_panel_de_gestor_de_archivos(qtbot, conn):
     pantalla = PantallaArchivosYListas(conn, secciones)
     qtbot.addWidget(pantalla)
     assert pantalla.panel_gestor_archivos._secciones == secciones
+
+
+def test_solapa_textos_del_sistema_es_un_panel_funcional(qtbot, conn):
+    secciones = [Seccion("Alguna pantalla", lambda c: None, categoria="Principal", ayuda="Texto de ayuda.")]
+    pantalla = PantallaArchivosYListas(conn, secciones)
+    qtbot.addWidget(pantalla)
+    assert isinstance(pantalla.panel_textos_sistema, _PanelTextosDelSistema)
+    assert pantalla.panel_textos_sistema.objectName() == "panelSolapa"
+    assert pantalla.panel_textos_sistema._secciones == secciones

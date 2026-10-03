@@ -633,6 +633,19 @@ CREATE TABLE IF NOT EXISTS MensajePredefinido (
     CampoLibre3 TEXT
 );
 
+-- 3.28 PlantillaTexto (pedido de la clienta: mensajes automáticos del Centro
+-- de mensajería y ayuda contextual F1 editables sin tocar código). Clave fija
+-- por "slot" del sistema (ej. "mensaje_situacion_1", "ayuda:Panel de
+-- control") — no hay alta/baja desde la GUI, solo edición y "Restablecer al
+-- original" (que borra la fila, no la deja en blanco: un texto vacío a
+-- propósito es distinto de "no personalizado"). Sin fila para una clave =
+-- usa el texto de fábrica (hardcodeado en app.negocio.plantillas_texto).
+CREATE TABLE IF NOT EXISTS PlantillaTexto (
+    IdPlantilla INTEGER PRIMARY KEY AUTOINCREMENT,
+    Clave TEXT NOT NULL UNIQUE,
+    TextoPersonalizado TEXT
+);
+
 -- 3.29 CondicionNorma (Etapa 7, sección 4.5: los 21 puntos editables de "Condiciones y
 -- normas" que aparecen en el PDF de Liquidación) --------------------------------------------
 CREATE TABLE IF NOT EXISTS CondicionNorma (
