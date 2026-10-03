@@ -5854,6 +5854,80 @@ snapshot`/`_traspasar_saldos`/`_regenerar_archivos_varios` para
 registrar el orden real de ejecución y confirma que el snapshot es el
 último de los tres.
 
+## DC-10 §1.2: valores a mano, resaltado, botón Restablecer y aviso de
+## liquidaciones antes de confirmar (solapa "Aumentos")
+
+Siguiente punto de la auditoría DC-01/DC-10 (hallazgo #30): "Al análisis
+de aumentos le falta: resaltado visual de valores editados a mano vs.
+calculados por %; botón 'Restablecer' por fila individual; y el aviso de
+cuántas liquidaciones se van a regenerar aparece DESPUÉS de confirmar,
+no antes." Los tres huecos eran reales — confirmado leyendo el código:
+`app.negocio.aumentos.simular_aumento`/`confirmar_aumento` ya tenían
+soporte completo para un override de valor final en $ por consultorio
+(`valores_override`, "más específico todavía" que el % diferencial, ver
+su propio docstring) desde que se armó esa pantalla, pero la GUI nunca
+había expuesto ningún control para cargarlo — solo el % diferencial.
+
+- **"Editar valores manuales"** (botón hermano de "Editar porcentaje
+  diferencial", mismo criterio checkable): habilita a mano, en $, las
+  columnas "Regular nuevo"/"Aislada nuevo" — hasta ahora siempre de solo
+  lectura. Mismo criterio "un solo tipo de override por fila" que ya
+  regía entre % general/diferencial ("nunca se muestran los dos
+  juntos"): fijar un valor a mano en una fila limpia el % diferencial de
+  esa fila y viceversa, en vez de dejar un estado ambiguo con los dos
+  override activos a la vez.
+- **Resaltado amarillo** (`COLOR_AMARILLO`, reusado de `estilos.py`, no
+  un color nuevo) en la celda puntual ("Regular nuevo" o "Aislada
+  nuevo") cuando ESE valor viene de un override a mano — nunca cuando
+  sale de aplicar el % general o el diferencial, que siguen siendo
+  "calculado por %" (un % puntual de esa fila sigue siendo un %, no una
+  cifra tipeada a mano) — lectura literal del hallazgo, confirmada
+  contra el ejemplo de la captura enviada.
+- **Botón "Restablecer" por fila**: columna nueva sin título, un botón
+  por fila (`setCellWidget`) deshabilitado si esa fila no tiene ningún
+  override — clickearlo limpia el % diferencial Y el valor manual de
+  esa fila de una sola vez, volviéndola a calcular por el % general.
+- **Aviso de liquidaciones ANTES de confirmar**: `app.negocio.aumentos.
+  cantidad_liquidaciones_a_regenerar(conn, periodo)` (nueva, extraída
+  del mismo query que ya usaba `confirmar_aumento` para armar
+  `ids_profesional`) se consulta antes de mostrar el cartel de
+  confirmación, y la cantidad entra directo en el texto del cartel
+  ("Hay N liquidación(es) ya emitida(s) para ese período: se van a
+  regenerar con los valores nuevos" / "Todavía no hay ninguna
+  liquidación emitida para ese período") — antes esa cantidad solo
+  aparecía en el cartel de éxito, después de que ya se habían
+  regenerado.
+
+**Bug real encontrado al armar "Restablecer", no pedido** (destapado
+comparando la geometría real contra lo esperado, no a ojo): `setCellWidget`
+no borra solo el widget que reemplaza —a diferencia de `setItem`, que sí
+limpia el item viejo— así que crear un botón "Restablecer" nuevo en
+CADA render (`_simular`, tildar/destildar "Editar...") dejaba el botón
+anterior huérfano, colgado del viewport sin ninguna posición asignada
+por la tabla: Qt lo terminaba pintando en la esquina superior izquierda
+del viewport, superpuesto contra "Localidad"/"Edificio" de la primera
+fila en vez de desaparecer — `deleteLater()` tampoco alcanzaba, la
+deleción queda pendiente del event loop, que entre un render y el
+siguiente acá no llega a correr. Se resolvió reusando un solo botón por
+consultorio (`self._botones_restablecer`, limpiado en `actualizar()`
+junto con `_diferenciales`/`_valores_manuales`) en vez de crear uno
+nuevo cada vez — solo se le actualiza el `setEnabled()` según corresponda.
+
+Tests nuevos en `tests/test_aumentos.py` (tres: `cantidad_liquidaciones_
+a_regenerar` sin emisiones es cero, cuenta profesionales distintos una
+sola vez aunque tengan reemisión, coincide exactamente con lo que
+`confirmar_aumento` termina regenerando) y en `tests/test_gui_aumentos.py`
+(catorce: botón/columnas editables solo con el toggle prendido, fijar un
+valor a mano actualiza la simulación sin que el % general/redondeo le
+vuelvan a pegar, vaciar la celda saca solo ESE override, valor inválido
+avisa sin romper, resaltado amarillo solo en la celda con override a
+mano — nunca en la calculada por %—, valor manual y % diferencial se
+excluyen mutuamente en una y otra dirección, "Restablecer" deshabilitado
+sin override / limpia los dos tipos de override al clickear, el cartel
+de confirmación menciona la cantidad real de liquidaciones — con y sin
+liquidaciones emitidas—, confirmar aplica el valor manual al consultorio,
+y el test de regresión del bug de los botones huérfanos).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
