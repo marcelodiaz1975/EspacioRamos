@@ -5477,6 +5477,108 @@ botón "Generar texto" de un bordó llama a `mensaje_recordatorio_fin_de_
 mes` y dispara la transición a gris en el mismo golpe de clic, mismo
 patrón que marrón/celeste.
 
+## Textos del sistema (mensajes automáticos y ayuda F1 editables)
+
+Pedido de la clienta ("los mensajes que se generan en el centro de
+mensajería y todo otro texto que se genere en el sistema quiero que sea
+editable"), consultado antes de implementar (`AskUserQuestion`, tres
+decisiones):
+
+- **Alcance**: los 7 mensajes automáticos del Centro de mensajería
+  (situación 1/2/3/5, envío de liquidación, mensaje grupal, recordatorio
+  de fin de mes/Bordó) + la ayuda contextual F1 de cada pantalla —
+  prosa simple, bajo riesgo. Quedan AFUERA de esta vuelta
+  `mensaje_detalle_reserva_aislada` (arma listas de reservas/cargos/
+  edificios con loops) y los textos de WhatsApp de Oferta/Disponibilidad
+  (`generar_texto_oferta_busqueda`, loops de franjas) — misma
+  complejidad estructural, candidatos a una vuelta aparte. Los PDFs
+  (tablas de ReportLab, no texto libre) quedan fuera de cualquier vuelta
+  de "texto editable" — es un proyecto de maquetación, no de redacción.
+- **Condicionales**: el sistema sigue decidiendo CUÁNDO aparece una
+  sección condicional (la línea de sobres solo si hay deuda, el bloque
+  de feriados solo si hay alguno cargado) — a la plantilla le llega ya
+  armada como una variable más (`{bloque_feriados}`, `{estado_cuenta}`),
+  nunca como lógica editable dentro del texto. Evita que una plantilla
+  mal escrita rompa quién recibe qué contenido, a costa de que la
+  redacción de esos bloques en sí no sea editable en esta primera
+  vuelta (ej. las 3 líneas de "FERIADOS MES DE..." del Mensaje grupal).
+- **Ubicación**: quinta solapa de "Archivos y listas" (no una pantalla
+  propia del menú, ni una solapa de Configuración general ni de Listas
+  editables, pensada para valores cortos de catálogo, no párrafos).
+
+### Mecanismo (`app/negocio/plantillas_texto.py`)
+
+Reusa `sustituir_variables` (mudada acá desde `app.negocio.mensajes`,
+reexportada ahí para no romper a quien ya la importaba de ese módulo) —
+mismo patrón ya aprobado para `MensajePredefinido`, en vez de inventar
+uno nuevo. Tabla nueva, `PlantillaTexto` (`Clave` única + `TextoPersonalizado`
+opcional): sin alta/baja desde la GUI, los "slots" son un conjunto FIJO
+que define el código. `resolver_plantilla(conn, clave, default)` — el
+texto personalizado si existe, si no el de fábrica (hardcodeado como
+`DEFAULT_*` en este módulo, extraído literal de las funciones viejas de
+`mensajes.py`). `guardar_texto_personalizado(conn, clave, texto)` con
+`texto` vacío/`None` BORRA la fila en vez de guardar una cadena vacía —
+"nunca se personalizó" y "se personalizó a propósito como texto vacío"
+son estados distintos.
+
+Cada `mensaje_situacion_N`/`mensaje_grupal`/`mensaje_envio_liquidacion`/
+`mensaje_recordatorio_fin_de_mes` (`app/negocio/mensajes.py`) pasa de
+armar el string a mano a: calcular las mismas variables de siempre en
+un `dict`, resolver la plantilla (personalizada o de fábrica) y
+sustituir — mismo resultado exacto que antes cuando no hay
+personalización (confirmado: los tests de redacción existentes
+siguieron pasando sin tocarlos). `MENSAJES_EDITABLES` (lista de
+`PlantillaMensaje`: clave, nombre legible, default, variables
+disponibles) es el registro que lee la pantalla para armar su lista —
+vive acá, no en `mensajes.py`, para que la GUI no tenga que importar ni
+ejecutar ninguna función de armado solo para mostrar nombres/variables.
+
+La ayuda F1 (`VentanaPrincipal._mostrar_ayuda`, `app/gui/main_window.py`)
+pasa a resolver `resolver_plantilla(conn, f"ayuda:{seccion.nombre}",
+seccion.ayuda or "...")` en vez de leer `seccion.ayuda` directo — la
+clave usa el nombre de la `Seccion` del menú (mismo criterio que
+`PermisoPantalla.NombrePantalla`, que ya identifica pantallas por su
+nombre de menú en vez de un ID propio).
+
+### GUI (`app/gui/pantallas/textos_sistema.py`, `_PanelTextosDelSistema`)
+
+No usa `PantallaCRUD` (mismo criterio que Usuarios y permisos/Gestor de
+archivos: no hay alta/baja, es edición de un conjunto fijo) — una lista
+a la izquierda (`QListWidget`, ancho fijo 360px) agrupada en dos
+secciones con separadores no seleccionables (mismo mecanismo
+`Qt.ItemFlag.NoItemFlags` que ya usan los separadores de categoría del
+menú lateral): "MENSAJES AUTOMÁTICOS" (los 7 de `MENSAJES_EDITABLES`) y
+"AYUDA CONTEXTUAL (F1)" (una por cada `Seccion` recibida — mismo dato
+`secciones` que ya le llegaba a "Archivos y listas" para el botón
+"Manual del usuario" de Gestor de archivos, reenviado también acá).
+Un ítem ya personalizado muestra "(personalizado)" al final de su
+nombre en la lista.
+
+A la derecha: nombre del texto elegido, una línea con las variables
+disponibles (o "Este texto no tiene variables" para la ayuda F1, que no
+tiene ninguna), el editor (`QPlainTextEdit`, precargado con el texto
+EFECTIVO — personalizado o de fábrica) y dos botones del mismo ancho
+(`botonPrimario`/`botonSecundario`): "Guardar" y "Restablecer al
+original" (deshabilitado si no hay override para ese texto todavía).
+"Restablecer" pide confirmación (se pierde la personalización) y borra
+la fila en vez de guardarla vacía.
+
+Guardarraíl liviano (no bloqueante): al guardar, si el texto tipeado
+tiene algún `{token}` que no es ninguna de las variables disponibles
+para ESE mensaje puntual, se avisa con un cartel Sí/No antes de guardar
+igual — para avisar de un typo en el nombre de una variable (quedaría
+visible tal cual en el mensaje real, sin reemplazar) sin impedir
+guardar si la clienta de verdad quiere ese texto literal.
+
+### Corrección de paso
+
+El docstring de `mensajes_predefinidos.py` mencionaba una categoría
+"Situaciones centro de mensajería" y una función `_DESCRIPCION_SITUACION`
+que nunca llegaron a existir en el código (quedó de una etapa de diseño
+anterior, nunca se corrigió) — se actualizó para apuntar a este
+mecanismo nuevo (`PlantillaTexto`), que es el que realmente cubre ese
+caso.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
