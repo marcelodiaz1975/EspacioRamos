@@ -5688,6 +5688,149 @@ armados por el código) y `test_oferta_busqueda_whatsapp_sin_
 personalizar_sigue_igual_que_antes`. El conteo de `MENSAJES_EDITABLES`
 sube de 8 a 9.
 
+## DC-06 §3: alerta de deuda regular anterior, snapshot retroactivo y
+## bloqueo de reservas regulares en períodos cerrados
+
+Repaso de un punto de la auditoría DC-01/DC-10 que había quedado
+señalado como "sigue sin implementar": el documento original DC-06 §3 no
+está en el repositorio, solo un resumen de una línea en el audit ("alerta
+permanente, pregunta '¿esta reserva es de mes anterior o nuevo?', ajuste
+retroactivo"). Antes de tocar código se le preguntó a la clienta si tenía
+el texto original para pasar o prefería que se propusiera un diseño a
+partir de ese resumen — eligió lo segundo.
+
+Investigando el código antes de proponer nada salió a la luz que buena
+parte de "DC-06 §3" YA estaba implementada, bajo otros nombres, de
+rondas anteriores de este mismo documento — la auditoría la había
+pasado por alto porque buscó solo dentro de `app/negocio/`:
+`app/gui/dialogos.py` (`confirmar_si_fecha_es_mes_anterior`/
+`confirmar_si_periodo_imputado_es_anterior`, con "DC-06 §3" ya en su
+propio docstring) es exactamente la "pregunta" del resumen — un cartel
+Sí/No para atajar errores de tipeo en la fecha, ya conectado en Reservas
+aisladas (campo Fecha) y en Pagos (período imputado). El "ajuste
+retroactivo" también estaba cubierto en gran parte:
+`liquidaciones._calcular_horas_regulares_agregadas`/`_calcular_feriados_
+pendientes` ya reclasifican solas, sin preguntar nada, una reserva
+regular o un feriado que llega justo después de que su mes ya se había
+emitido — las corren al período siguiente con el mismo descuento que les
+hubiera correspondido a tiempo.
+
+Con eso ya mapeado, se le propusieron tres piezas puntuales a la clienta
+(`AskUserQuestion`) para cubrir lo que realmente faltaba:
+
+- **Alerta permanente de deuda regular anterior**: hoy solo existe para
+  aisladas (`_deuda_aisladas`). Aprobado con la recomendación.
+- **Snapshot retroactivo**: que un `SnapshotMensual` ya cerrado se
+  recalcule solo cuando llega una aislada tardía a ese mes. Aprobado,
+  condicionado a que no fuera costoso — el cálculo resultó ser el mismo
+  que ya corre una vez por mes en cada avance de mes (unas pocas
+  consultas SQL por día del período), así que recalcularlo ante un
+  evento raro (una aislada cargada en un período cerrado) no agrega
+  ningún costo de otro orden de magnitud.
+- **La "pregunta" sobre reservas**: la clienta aclaró el punto más
+  importante de esta vuelta, más allá de la pregunta en sí — "si se
+  quiere cargar una reserva aislada a un período anterior cerrado...
+  modifica el saldo anterior y lo traslada al actual. Si pasa lo mismo
+  con una reserva regular, ahí es más complejo, porque aparte de los
+  saldos habría que tocar las liquidaciones... en el caso de querer
+  modificar reservas regulares en períodos cerrados bloqueaba con un
+  alerta, y cualquier ajuste se hacía a través del manejo de cargos
+  especiales". Esto fija una asimetría real entre los dos tipos de
+  reserva que no estaba cubierta: una aislada en un período cerrado se
+  puede cargar sin pedir nada más (ya se resuelve sola, ver abajo); una
+  regular en un período cerrado tiene que BLOQUEARSE sin excepción,
+  dirigiendo a Cargos especiales para cualquier corrección.
+
+### Alerta "Deuda mes anterior — profesionales regulares"
+
+`app.negocio.panel_control._deuda_regulares` (todos los R con
+`SaldoCuentaAnterior` fuera de tolerancia) ya existía, pero solo
+alimentaba el cuadrito "Profesionales" — nunca había tenido su propia
+tarjeta en "Alertas". Se sumó el campo `Alertas.deuda_regulares_mes_
+anterior`, wireado a esa misma función (sin filtro de reserva activa,
+mismo criterio que `_deuda_aisladas`, a diferencia de `_deuda_regulares_
+alerta` — la alerta de "Deuda mes en curso" ya existente, que sí exige
+reserva activa y mira `SaldoCuentaActual` en vez de `SaldoCuentaAnterior`
+— dos alertas distintas, sin relación entre sí más que el nombre de
+función parecido). `_TITULOS_ALERTA`/`_ETIQUETA_FILA`
+(`app/gui/pantallas/panel_control.py`) suman la entrada nueva con el
+mismo formato de etiqueta que ya usa "Deuda mes anterior — profesionales
+de reserva aislada".
+
+### Snapshot retroactivo ante una aislada tardía
+
+`app.negocio.estadisticas._campos_snapshot(conn, anio, mes)` (nueva)
+extrae los campos recalculables de un snapshot (ocupación, valores
+vigentes, horas regulares promedio, montos netos regular/aislada) a un
+helper compartido — `generar_snapshot` (alta, al avanzar de mes) y
+`regenerar_snapshot_si_corresponde(conn, periodo)` (nueva) lo llaman
+igual, sin duplicar el cálculo. Esta última busca si YA existe un
+`SnapshotMensual` para `periodo` (si no, no hace nada — el mes no cerró,
+no hay nada desalineado) y, si existe, lo actualiza IN PLACE con los
+valores recalculados — conservando `FechaGeneracion` (sigue siendo
+cuándo se cerró el mes, no cuándo se corrigió después) y
+`PorcentajeAumentoAplicado` (dato de contexto del cierre original, no
+recalculable desde el estado actual).
+
+Se llama desde `app/gui/pantallas/reservas.py`, en los tres puntos donde
+una `ReservaAislada` cambia de estado (`_crear`/`_cancelar_registro` de
+`_PanelReservasAisladas` — "Modificar reserva" reusa `_cancelar_
+registro` + el alta de siempre, así que queda cubierta de rebote), con
+el período de la `Fecha` de la reserva (no `periodo_actual`: es el
+período al que esa fecha puntual pertenece, sea el actual o uno
+cerrado). Una reserva regular NO dispara esto — queda bloqueada antes de
+llegar a tocar nada (ver abajo), así que nunca hay un snapshot cerrado
+que una regular pueda desalinear.
+
+### Bloqueo de reservas regulares en períodos cerrados
+
+"Período cerrado" se define con el mismo criterio EXACTO que ya usa el
+guardarraíl de `liquidaciones.emitir_liquidacion` (DC-08 §6.2: "nunca se
+puede generar una liquidación de un mes anterior ya cerrado") — ya
+existe una `LiquidacionEmitida` de un período POSTERIOR, para el
+profesional LIQUIDABLE (`liquidaciones.id_profesional_liquidable`: el R
+mismo, o su cabeza de equipo si es categoría E). Sin eso, el período
+sigue "abierto" aunque ya haya pasado en el calendario — no hay ninguna
+liquidación posterior que una reclasificación pudiera desalinear, así
+que no hace falta bloquear nada.
+
+`app.negocio.reservas._periodo_regular_cerrado`/`_validar_vigencia_no_
+cerrada` (nuevas) aplican este chequeo sobre `vigencia_inicio` Y
+`vigencia_fin` en `crear_reserva_regular` — a diferencia de los
+conflictos de superposición (avisos que `forzar=True` puede confirmar),
+este bloqueo NUNCA se puede forzar: no es una advertencia, es un
+guardarraíl real, mismo criterio sin excepción que `emitir_liquidacion`.
+El mensaje de error dirige explícitamente a usar un Cargo especial para
+corregir algo de un período ya cerrado, en vez de tocar la reserva.
+
+Como "Finalizar reserva a fin de mes"/"Modificar reserva" (las dos
+solapas de Reservas) ponían `VigenciaFin` escribiendo directo al
+repositorio (`ReservaRegular.actualizar`), sin pasar por ninguna función
+de negocio, esa vía quedaba sin el chequeo — se sumó `finalizar_reserva_
+regular(conn, id_reserva_regular, vigencia_fin)` (nueva, con el mismo
+guardarraíl) y `_finalizar_registro` (`app/gui/pantallas/reservas.py`)
+pasa a llamarla, devolviendo `False` (con un cartel de aviso en vez de
+romper) si el bloqueo se dispara. Bajo el uso normal de esos dos botones
+(que siempre finalizan a fin de mes actual o a hoy, nunca a una fecha
+pasada) esto nunca debería dispararse — la validación vive en la capa de
+negocio para que ningún botón futuro, ni un uso directo de la función
+fuera de la GUI, pueda sortearla.
+
+Tests nuevos: `tests/test_panel_control.py` (dos tests de la alerta
+nueva, respeta tolerancia y no exige reserva activa). `tests/test_
+reservas.py` (ocho tests: bloquea con `vigencia_inicio`/`vigencia_fin`
+en un período cerrado, `forzar=True` no lo sortea, el mismo período que
+la última liquidación NO bloquea — `Periodo >`, no `>=`—, un E consolida
+el chequeo en su R, un B nunca bloquea — no tiene profesional liquidable
+—, `finalizar_reserva_regular` bloquea/funciona según corresponda).
+`tests/test_estadisticas.py` (cuatro tests de `regenerar_snapshot_si_
+corresponde`: sin snapshot previo no hace nada, recalcula montos con una
+aislada tardía actualizando la fila existente sin duplicarla, conserva
+`FechaGeneracion`/`PorcentajeAumentoAplicado`, no toca el snapshot de
+otro período). `tests/test_gui_reservas.py` (dos tests confirmando que
+crear y cancelar una aislada disparan la regeneración del snapshot de su
+propio período).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
