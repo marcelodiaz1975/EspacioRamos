@@ -5579,6 +5579,41 @@ anterior, nunca se corrigió) — se actualizó para apuntar a este
 mecanismo nuevo (`PlantillaTexto`), que es el que realmente cubre ese
 caso.
 
+### Segunda vuelta: se suma `mensaje_detalle_reserva_aislada`
+
+Pedido explícito de la clienta: sumar el octavo mensaje que había
+quedado afuera de la primera vuelta por su complejidad estructural
+(arma casi todo su cuerpo con loops — llaves, reservas, saldo, pagos,
+ítems libres, reservas posteriores, edificios mencionados, nota de
+sobres). Mismo criterio ya usado para `{bloque_feriados}` del Mensaje
+grupal: en vez de dejar cada línea del cuerpo editable (lo que
+rompería en cuanto cambiara algo que el código necesita seguir
+calculando), todo ese cuerpo se le entrega a la plantilla como una
+ÚNICA variable ya armada, `{detalle_items}` — no editable línea por
+línea, solo reubicable dentro del texto. Lo que SÍ queda editable de
+verdad es el encabezado: título ("DETALLE RESERVA {mes_mayus}") y
+nombre del profesional (`{nombre_profesional}`).
+
+`DEFAULT_DETALLE_RESERVA_AISLADA` (`app/negocio/plantillas_texto.py`):
+`"DETALLE RESERVA {mes_mayus}\n{nombre_profesional}\n\n{detalle_items}"`
+— reproduce exacto el formato de siempre (confirmado: los tests de
+redacción existentes de `mensaje_detalle_reserva_aislada`, que no
+personalizan nada, siguieron pasando sin tocarlos). `mensajes.py` pasa
+de armar `lineas` con el encabezado adentro a arrancar esa lista vacía
+(solo el cuerpo) y resolver la plantilla al final, igual que el resto
+de los 7 mensajes ya editables.
+
+Los textos de WhatsApp de Oferta/Disponibilidad (loops de franjas,
+misma complejidad estructural) siguen sin ser parte de esta
+funcionalidad — no fueron parte de este pedido.
+
+Tests nuevos en `tests/test_plantillas_texto.py`:
+`test_mensaje_detalle_reserva_aislada_solo_el_encabezado_es_editable`
+(personaliza el encabezado, confirma que `{detalle_items}` sigue
+armado por el código) y `test_mensaje_detalle_reserva_aislada_sin_
+personalizar_sigue_igual_que_antes`. El conteo de `MENSAJES_EDITABLES`
+en `test_claves_de_mensajes_editables_son_unicas` sube de 7 a 8.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
