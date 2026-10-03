@@ -5831,6 +5831,29 @@ otro período). `tests/test_gui_reservas.py` (dos tests confirmando que
 crear y cancelar una aislada disparan la regeneración del snapshot de su
 propio período).
 
+## DC-06 §2 Paso 9: el snapshot se genera al final del avance de mes
+
+Siguiente punto de la auditoría DC-01/DC-10 (hallazgo #29, v2): `avance_
+mes.avanzar_mes` generaba el `SnapshotMensual` del período que se cierra
+como SEGUNDO paso del proceso (justo después del backup), en vez de
+como el último (DC-06 §2 Paso 9, el último del documento original).
+
+`generar_snapshot` pasa a llamarse al final de `avanzar_mes`, después de
+traspasar saldos, cerrar cuotas, limpiar la lista de espera, regenerar
+Archivos varios y limpiar liquidaciones antiguas — en vez de justo
+después del backup. Ningún valor calculado cambia con este reordenamiento
+(confirmado revisando los otros pasos: ninguno toca `ReservaRegular`/
+`ReservaAislada`/`Consultorio.ValorHora*`, que es todo lo que
+`generar_snapshot` lee), pero el snapshot queda representando de verdad
+el cierre del mes después de que el resto del proceso corrió, no una
+"foto" tomada a mitad de camino — consistente con el orden documentado.
+
+Test nuevo en `tests/test_avance_mes.py`
+(`test_avanzar_mes_genera_snapshot_al_final`): envuelve `generar_
+snapshot`/`_traspasar_saldos`/`_regenerar_archivos_varios` para
+registrar el orden real de ejecución y confirma que el snapshot es el
+último de los tres.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
