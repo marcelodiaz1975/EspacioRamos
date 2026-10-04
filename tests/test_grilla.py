@@ -12,7 +12,9 @@ from app.negocio.grilla import (
     calcular_ocupacion_fecha,
     dias_grilla,
 )
+from app.negocio.licencias import crear_licencia
 from app.negocio.reservas import crear_reserva_aislada, crear_reserva_regular
+from app.negocio.vacaciones import crear_vacacion
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -179,6 +181,43 @@ def test_ocupacion_fecha_libera_por_ausencia_puntual(conn, unidad_con_dos_consul
     assert (id_c1, 14) not in ocupado
 
     # otro lunes cualquiera, sin ausencia, sigue ocupado
+    ocupado_otro_lunes = calcular_ocupacion_fecha(conn, "2026-08-10")
+    assert ocupado_otro_lunes[(id_c1, 14)] is True
+
+
+def test_ocupacion_fecha_libera_por_vacacion_puntual(conn, unidad_con_dos_consultorios, profesional):
+    """DC-05 §1.1 (auditoría DC-01/DC-10, hallazgo #17): mismo criterio que
+    la ausencia — una vacación que cubre esa fecha también libera el
+    consultorio para ofrecerlo como horario regular alternativo."""
+    _, id_c1, _ = unidad_con_dos_consultorios
+    crear_reserva_regular(
+        conn, id_profesional=profesional, id_consultorio=id_c1, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    crear_vacacion(conn, id_profesional=profesional, fecha_desde="2026-08-01", fecha_hasta="2026-08-07")
+    ocupado = calcular_ocupacion_fecha(conn, "2026-08-03")  # lunes, dentro de la vacación
+    assert (id_c1, 14) not in ocupado
+
+    # otro lunes, fuera de la vacación, sigue ocupado
+    ocupado_otro_lunes = calcular_ocupacion_fecha(conn, "2026-08-10")
+    assert ocupado_otro_lunes[(id_c1, 14)] is True
+
+
+def test_ocupacion_fecha_libera_por_licencia_puntual(conn, unidad_con_dos_consultorios, profesional):
+    """Mismo criterio que vacaciones/ausencias (DC-05 §2.1, hallazgo #17)."""
+    _, id_c1, _ = unidad_con_dos_consultorios
+    crear_reserva_regular(
+        conn, id_profesional=profesional, id_consultorio=id_c1, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    id_tipo = obtener_repositorio(conn, "TipoLicencia").listar(Nombre="Licencia médica")[0]["IdTipoLicencia"]
+    crear_licencia(
+        conn, id_profesional=profesional, id_tipo_licencia=id_tipo,
+        fecha_desde="2026-08-01", fecha_hasta="2026-08-07",
+    )
+    ocupado = calcular_ocupacion_fecha(conn, "2026-08-03")  # lunes, dentro de la licencia
+    assert (id_c1, 14) not in ocupado
+
     ocupado_otro_lunes = calcular_ocupacion_fecha(conn, "2026-08-10")
     assert ocupado_otro_lunes[(id_c1, 14)] is True
 

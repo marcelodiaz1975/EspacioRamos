@@ -27,6 +27,8 @@ from app.negocio.ausencias import esta_ausente
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana
 from app.negocio.dias import primer_dia_mes as _primer_dia_mes
 from app.negocio.dias import ultimo_dia_mes as _ultimo_dia_mes
+from app.negocio.licencias import tiene_licencia
+from app.negocio.vacaciones import tiene_vacacion
 
 DIAS_GRILLA_DEFAULT = DIAS_SEMANA[:6]  # Lunes a Sábado
 
@@ -110,8 +112,12 @@ def calcular_ocupacion_fecha(conn: sqlite3.Connection, fecha: str) -> dict[tuple
     """Ocupación real de una fecha puntual (DC-03 Mensaje 2 Variante B), a
     diferencia de `calcular_ocupacion_regular` que promedia todo un mes por
     día de semana genérico. Acá SÍ importan las excepciones de ese día
-    concreto: una reserva regular no ocupa si el profesional está ausente
-    ese día (mismo criterio que `verificar_conflictos_aislada`).
+    concreto: una reserva regular no ocupa si el profesional está ausente,
+    de vacaciones o de licencia ese día (mismo criterio exacto que
+    `verificar_conflictos_aislada`, DC-05 §1.1/§2.1 — hallazgo de la
+    auditoría DC-01/DC-10, #17: hasta esta corrección solo se chequeaba
+    `esta_ausente`, dejando afuera a vacaciones/licencias acá, aunque sí
+    las liberaba `verificar_conflictos_aislada`).
 
     Las reservas aisladas NO cuentan acá como ocupación (a diferencia de
     una primera versión de esta función): quien busca disponibilidad para
@@ -127,7 +133,11 @@ def calcular_ocupacion_fecha(conn: sqlite3.Connection, fecha: str) -> dict[tuple
         vigencia_fin = r["VigenciaFin"] or "9999-12-31"
         if not (r["VigenciaInicio"] <= fecha <= vigencia_fin):
             continue
-        if esta_ausente(conn, r["IdProfesional"], fecha, r["IdConsultorio"]):
+        if (
+            esta_ausente(conn, r["IdProfesional"], fecha, r["IdConsultorio"])
+            or tiene_vacacion(conn, r["IdProfesional"], fecha)
+            or tiene_licencia(conn, r["IdProfesional"], fecha)
+        ):
             continue
         for h in range(int(r["HoraInicio"]), int(r["HoraFin"])):
             ocupado[(r["IdConsultorio"], h)] = True

@@ -435,7 +435,8 @@ def _coincidencia_bloque_fechas(
     """Igual que `_coincidencia_bloque`, pero contra fechas puntuales
     (DC-03 Mensaje 2 Variante B) en vez de días de la semana genéricos
     promediados en un mes — cada fecha usa su ocupación real ese día
-    concreto (`calcular_ocupacion_fecha`: respeta ausencias puntuales).
+    concreto (`calcular_ocupacion_fecha`: respeta ausencias, vacaciones y
+    licencias puntuales).
     Una reserva aislada que coincide con la alternativa NO la descarta,
     solo suma un aviso en el tercer elemento de la tupla (ver
     `_alertas_aisladas`)."""
