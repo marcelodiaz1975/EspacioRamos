@@ -784,7 +784,9 @@ def test_crear_reserva_regular_con_conflicto_en_un_dia_sigue_con_los_demas(qtbot
     assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 2  # el Lunes propio + el Martes de "Otro"
 
 
-def test_crear_reserva_regular_resuelve_pedido_unico_de_lista_de_espera(qtbot, conn):
+def test_crear_reserva_regular_resuelve_pedido_unico_de_lista_de_espera_automaticamente(qtbot, conn):
+    """DC-10 §2.2 paso 5 (pedido explícito de la clienta): con un solo
+    pedido Activo del profesional, se resuelve solo, sin preguntar nada."""
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     id_pedido = crear_pedido(
@@ -798,31 +800,13 @@ def test_crear_reserva_regular_resuelve_pedido_unico_de_lista_de_espera(qtbot, c
     pantalla.panel_regulares.combo_profesional.setCurrentIndex(
         pantalla.panel_regulares.combo_profesional.findData(id_profesional)
     )
-    pantalla.panel_regulares._crear()  # fixture responde "Yes" a cualquier QMessageBox.question
+    pantalla.panel_regulares._crear()
 
     pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
     assert pedido["Estado"] == "Resuelto"
 
 
-def test_crear_reserva_regular_no_resuelve_pedido_si_operador_dice_que_no(qtbot, conn, monkeypatch):
-    _preparar(conn)
-    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
-    id_pedido = crear_pedido(
-        conn, id_profesional=id_profesional,
-        bloques=[{"dias": ["Lunes"], "horario_desde": 9, "horario_hasta": 10}],
-    )
-    conn.commit()
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
-
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.panel_regulares._crear()
-
-    pedido = obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)
-    assert pedido["Estado"] == "Activo"
-
-
-def test_crear_reserva_regular_no_ofrece_resolver_con_mas_de_un_pedido_activo(qtbot, conn, monkeypatch):
+def test_crear_reserva_regular_no_resuelve_con_mas_de_un_pedido_activo(qtbot, conn):
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     for _ in range(2):
@@ -831,19 +815,13 @@ def test_crear_reserva_regular_no_ofrece_resolver_con_mas_de_un_pedido_activo(qt
             bloques=[{"dias": ["Lunes"], "horario_desde": 9, "horario_hasta": 10}],
         )
     conn.commit()
-    preguntas = []
-    monkeypatch.setattr(
-        QMessageBox, "question",
-        staticmethod(lambda *a, **k: preguntas.append(a) or QMessageBox.StandardButton.Yes),
-    )
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.panel_regulares._crear()
 
-    assert preguntas == []  # con más de un pedido activo no se pregunta, queda manual
     estados = {p["Estado"] for p in obtener_repositorio(conn, "ListaEspera").listar(IdProfesional=id_profesional)}
-    assert estados == {"Activo"}
+    assert estados == {"Activo"}  # con más de un pedido activo no se resuelve nada, queda manual
 
 
 def test_crear_reserva_regular_con_conflicto_pide_confirmacion_y_fuerza(qtbot, conn):

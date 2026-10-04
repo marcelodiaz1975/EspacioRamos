@@ -81,7 +81,13 @@ from app.negocio.licencias import cancelar_licencia, crear_licencia
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
 from app.negocio.pagos import TIPOS_CARGO, crear_cargo_especial
-from app.negocio.vacaciones import cancelar_vacacion, crear_vacacion, cupo_restante_actual
+from app.negocio.vacaciones import (
+    CATEGORIAS_CON_DERECHO_A_VACACIONES,
+    cancelar_vacacion,
+    crear_vacacion,
+    cupo_restante_actual,
+    simular_vacacion,
+)
 from app.repositorio.registro import obtener_repositorio
 
 _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
@@ -152,6 +158,41 @@ def _spin_anio(conn: sqlite3.Connection) -> QSpinBox:
     spin.setRange(2000, 2100)
     spin.setValue(fecha_actual(conn).year)
     return spin
+
+
+def _opciones_profesional_vacaciones(conn: sqlite3.Connection) -> list[tuple[int, str]]:
+    """Combo de la solapa Vacaciones (hallazgo #20 F19 de la auditoría,
+    pedido explícito de la clienta): "no se pueden cargar vacaciones a
+    quién no tiene reserva regular" — acorta la lista de antemano a
+    categoría R/B/E con una `ReservaRegular` VIGENTE HOY (mismo criterio
+    de "activa" que `app.negocio.panel_control._reserva_regular_activa`),
+    en vez de dejar que el cartel de error de `crear_vacacion` avise
+    recién al confirmar.
+
+    Este combo sirve doble propósito (elegir a quién crearle una vacación
+    Y filtrar el historial de la tabla de abajo) — para no perder la
+    posibilidad de filtrar el historial de alguien que YA tiene vacaciones
+    cargadas pero hoy no cumple más el criterio (ya no reserva, p.ej.), la
+    lista es la unión de los elegibles hoy con los que ya tienen al menos
+    una Vacacion registrada."""
+    hoy = fecha_actual(conn).isoformat()
+    placeholders = ", ".join("?" for _ in CATEGORIAS_CON_DERECHO_A_VACACIONES)
+    filas = conn.execute(
+        f"""
+        SELECT DISTINCT p.IdProfesional, p.IdCodigo, p.Tratamiento, p.Apellido, p.NombrePila
+        FROM Profesional p
+        WHERE (
+            p.CategoriaProfesional IN ({placeholders})
+            AND EXISTS (
+                SELECT 1 FROM ReservaRegular r WHERE r.IdProfesional = p.IdProfesional
+                AND r.VigenciaInicio <= ? AND (r.VigenciaFin IS NULL OR r.VigenciaFin >= ?)
+            )
+        ) OR EXISTS (SELECT 1 FROM Vacacion v WHERE v.IdProfesional = p.IdProfesional)
+        ORDER BY p.Apellido
+        """,
+        (*CATEGORIAS_CON_DERECHO_A_VACACIONES, hoy, hoy),
+    ).fetchall()
+    return [(f["IdProfesional"], _texto_profesional(f)) for f in filas]
 
 
 def _texto_valor_bonificado(valor: float | None, fecha_desde: str, periodo_en_curso: str) -> str:
@@ -273,7 +314,7 @@ class _PanelVacaciones(QWidget):
         self.combo_profesional = QComboBox()
         self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+        for id_, etiqueta in _opciones_profesional_vacaciones(self.conn):
             self.combo_profesional.addItem(etiqueta, id_)
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
@@ -287,11 +328,17 @@ class _PanelVacaciones(QWidget):
         form.addWidget(self.spin_anio)
 
         self.campo_desde = _campo_fecha(self.conn)
+        self.campo_desde.dateChanged.connect(self._actualizar_simulacion_periodo)
         form.addWidget(_titulo_campo("Desde"))
         form.addWidget(self.campo_desde)
         self.campo_hasta = _campo_fecha(self.conn)
+        self.campo_hasta.dateChanged.connect(self._actualizar_simulacion_periodo)
         form.addWidget(_titulo_campo("Hasta"))
         form.addWidget(self.campo_hasta)
+
+        self.etiqueta_simulacion_periodo = QLabel()
+        self.etiqueta_simulacion_periodo.setWordWrap(True)
+        form.addWidget(self.etiqueta_simulacion_periodo)
 
         self.boton_crear = QPushButton("Crear vacaciones")
         self.boton_crear.setObjectName("botonPrimario")
@@ -351,6 +398,7 @@ class _PanelVacaciones(QWidget):
         layout_externo.addWidget(scroll)
         self._actualizar_disponibilidad_crear()
         self._sincronizar_grilla()
+        self._actualizar_simulacion_periodo()
         self._foco = instalar_enter_avanza_foco(
             [self.combo_profesional, self.spin_anio, self.campo_desde, self.campo_hasta, self.boton_crear],
             parent=self,
@@ -358,11 +406,44 @@ class _PanelVacaciones(QWidget):
 
     def _profesional_cambio(self) -> None:
         self._sincronizar_grilla()
+        self._actualizar_simulacion_periodo()
         self.actualizar()
 
     def _anio_cambio(self) -> None:
         self._actualizar_disponibilidad_crear()
         self.actualizar()
+
+    def _actualizar_simulacion_periodo(self) -> None:
+        """Cálculo en vivo del período Desde/Hasta tal cual está tipeado
+        ahora (hallazgo #20 F19 de la auditoría, pedido explícito de la
+        clienta: "sumá el cálculo en vivo, me parece interesante y
+        útil") — reusa `simular_vacacion` (el mismo cálculo exacto que
+        hace `crear_vacacion` al guardar) sin llegar a crear nada, así
+        que se puede mostrar en cualquier momento mientras se eligen las
+        fechas, incluso con datos todavía inválidos (sin profesional, un
+        Hasta anterior al Desde, un período que cruza de año) — en esos
+        casos se muestra un guión en vez de romper."""
+        id_profesional = self.combo_profesional.currentData()
+        fecha_desde = self.campo_desde.date().toPython().isoformat()
+        fecha_hasta = self.campo_hasta.date().toPython().isoformat()
+        if id_profesional is None:
+            self.etiqueta_simulacion_periodo.setText("Impacto del período elegido en el cupo: —")
+            return
+        try:
+            sim = simular_vacacion(
+                self.conn, id_profesional=id_profesional, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
+            )
+        except (ValueError, ZeroDivisionError):
+            self.etiqueta_simulacion_periodo.setText("Impacto del período elegido en el cupo: —")
+            return
+        texto = (
+            f"Impacto del período elegido en el cupo: {sim.fraccion_consumida:.2f} semana(s) "
+            f"bonificada(s), {formatear_moneda(sim.valor_bonificado)} — "
+            f"cupo consumido {sim.cupo_consumido_pct:.1f}%, restante {sim.cupo_restante_pct:.1f}%"
+        )
+        if sim.advertencia:
+            texto += f"\n{sim.advertencia}"
+        self.etiqueta_simulacion_periodo.setText(texto)
 
     def _actualizar_disponibilidad_crear(self) -> None:
         """"Del año anterior solo consulta": el año elegido para imputar
@@ -472,6 +553,7 @@ class _PanelVacaciones(QWidget):
         regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
         self.conn.commit()
         self.actualizar()
+        self._actualizar_simulacion_periodo()
         self.combo_profesional.setFocus()
 
     def _fila_seleccionada(self) -> sqlite3.Row | None:
@@ -492,6 +574,7 @@ class _PanelVacaciones(QWidget):
         )
         self.conn.commit()
         self.actualizar()
+        self._actualizar_simulacion_periodo()
         return True
 
     def _cancelar(self) -> None:

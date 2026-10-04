@@ -102,19 +102,27 @@ def _campos_mensaje_predefinido(conn: sqlite3.Connection) -> list[Campo]:
         Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio_o_general),
         Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad_o_general),
         Campo("IdConsultorio", "Consultorio", tipo="combo", opciones=_opciones_consultorio_o_general),
-        Campo("Mensaje", "Mensaje", tipo="texto_largo"),
+        Campo("Mensaje", "Mensaje", tipo="texto_largo", variables=_VARIABLES_MENSAJE),
         Campo("Activo", "Activo", tipo="booleano"),
         *campos_libres(conn),
     ]
 
 
 def _variables_ubicacion(
-    conn: sqlite3.Connection, id_edificio: int | None, id_unidad: int | None, id_consultorio: int | None,
+    conn: sqlite3.Connection,
+    id_edificio: int | None,
+    id_unidad: int | None,
+    id_consultorio: int | None,
+    id_localidad: int | None = None,
 ) -> dict[str, str]:
-    """El más específico de los tres gana — usado tanto con el vínculo
-    propio del mensaje como, en la vista previa, con los valores que
-    hayan quedado tras aplicar las selecciones de contexto (que pisan al
-    vínculo del mensaje campo por campo, ver `_actualizar_vista_previa`)."""
+    """El más específico de los tres (edificio/unidad/consultorio) gana
+    — usado tanto con el vínculo propio del mensaje como, en la vista
+    previa, con los valores que hayan quedado tras aplicar las
+    selecciones de contexto (que pisan al vínculo del mensaje campo por
+    campo, ver `_actualizar_vista_previa`). `{localidad}` es
+    independiente de esos tres (campo propio del mensaje, sin cascada —
+    ver el docstring del módulo) y se resuelve aparte, con el mismo
+    criterio de "en blanco si no hay nada elegido" que los otros tres."""
     variables = {"edificio": "", "unidad": "", "consultorio": ""}
     if id_consultorio is not None:
         fila = conn.execute(
@@ -137,7 +145,29 @@ def _variables_ubicacion(
         fila = conn.execute("SELECT Nombre FROM Edificio WHERE IdEdificio = ?", (id_edificio,)).fetchone()
         if fila:
             variables = {"edificio": fila["Nombre"], "unidad": "", "consultorio": ""}
+    variables["localidad"] = ""
+    if id_localidad is not None:
+        fila_localidad = conn.execute("SELECT Localidad FROM Localidad WHERE IdLocalidad = ?", (id_localidad,)).fetchone()
+        if fila_localidad:
+            variables["localidad"] = fila_localidad["Localidad"] or ""
     return variables
+
+
+_VARIABLES_MENSAJE = {
+    "apodo": "Apodo del profesional elegido en \"Dirigido a\" (vista previa).",
+    "nombre": "Nombre de pila del profesional elegido en \"Dirigido a\".",
+    "apellido": "Apellido del profesional elegido en \"Dirigido a\".",
+    "tratamiento": "Tratamiento del profesional elegido en \"Dirigido a\" (ej. \"Lic.\", \"Dr.\").",
+    "edificio": "Nombre del edificio vinculado al mensaje (o elegido en los selectores de contexto).",
+    "unidad": "Departamento de la unidad vinculada al mensaje (o elegida en los selectores de contexto).",
+    "consultorio": "Número del consultorio vinculado al mensaje (o elegido en los selectores de contexto).",
+    "localidad": "Localidad vinculada al mensaje (o elegida en los selectores de contexto).",
+}
+"""Catálogo único de variables ofrecidas en el diálogo Nuevo/Editar
+(hallazgo #24 de la auditoría) — mismo dict que alimenta la fila de
+botones del campo "Mensaje" (ver `_campos_mensaje_predefinido`) y la
+leyenda de "Vista previa" más abajo, para no mantener la lista de
+variables en dos lugares."""
 
 
 class _PanelMensajesPredefinidos(QWidget):
@@ -220,10 +250,13 @@ class _PanelMensajesPredefinidos(QWidget):
         self.crud.actualizar = _actualizar_con_filtro
         self.crud.actualizar()
 
-        layout.addWidget(QLabel(
-            "Vista previa (sustituye {edificio}/{unidad}/{consultorio} por el vínculo elegido en el mensaje, "
-            "y {apodo} por el profesional elegido en \"Dirigido a\")"
-        ))
+        etiqueta_vista_previa = QLabel(
+            "Vista previa (sustituye {edificio}/{unidad}/{consultorio}/{localidad} por el vínculo elegido en "
+            "el mensaje o en los selectores de contexto, y {apodo}/{nombre}/{apellido}/{tratamiento} por el "
+            "profesional elegido en \"Dirigido a\")"
+        )
+        etiqueta_vista_previa.setWordWrap(True)
+        layout.addWidget(etiqueta_vista_previa)
         self.texto_vista_previa = QPlainTextEdit()
         self.texto_vista_previa.setReadOnly(True)
         self.texto_vista_previa.setFixedHeight(100)
@@ -268,16 +301,30 @@ class _PanelMensajesPredefinidos(QWidget):
         id_consultorio = self.combo_consultorio_contexto.currentData()
         if id_consultorio is None:
             id_consultorio = mensaje["IdConsultorio"]
-        variables = _variables_ubicacion(self.conn, id_edificio, id_unidad, id_consultorio)
-        variables["apodo"] = self._apodo_dirigido_a()
+        id_localidad = self.combo_localidad_contexto.currentData()
+        if id_localidad is None:
+            id_localidad = mensaje["IdLocalidad"]
+        variables = _variables_ubicacion(self.conn, id_edificio, id_unidad, id_consultorio, id_localidad)
+        variables.update(self._variables_profesional_dirigido_a())
         self.texto_vista_previa.setPlainText(sustituir_variables(mensaje["Mensaje"] or "", variables))
 
-    def _apodo_dirigido_a(self) -> str:
+    def _variables_profesional_dirigido_a(self) -> dict[str, str]:
+        """{apodo}/{nombre}/{apellido}/{tratamiento} del profesional
+        elegido en "Dirigido a" — en blanco los cuatro sin ninguno
+        elegido (mismo criterio que el resto de las variables de este
+        formulario)."""
         id_profesional = self.combo_dirigido_a.currentData()
         if id_profesional is None:
-            return ""
+            return {"apodo": "", "nombre": "", "apellido": "", "tratamiento": ""}
         profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
-        return (profesional["Apodo"] or "") if profesional else ""
+        if profesional is None:
+            return {"apodo": "", "nombre": "", "apellido": "", "tratamiento": ""}
+        return {
+            "apodo": profesional["Apodo"] or "",
+            "nombre": profesional["NombrePila"] or "",
+            "apellido": profesional["Apellido"] or "",
+            "tratamiento": profesional["Tratamiento"] or "",
+        }
 
     def _copiar_mensaje(self) -> None:
         QGuiApplication.clipboard().setText(self.texto_vista_previa.toPlainText())

@@ -37,6 +37,7 @@ para asignar aisladas, no depende de si hay o no descuento económico.
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 from datetime import date
 
 from app.negocio.conflictos_aisladas import aisladas_bloqueadas_por_anulacion, mensaje_conflicto_aislada
@@ -117,18 +118,23 @@ def _validar_periodo_no_cruza_anio(fecha_desde: str, fecha_hasta: str) -> None:
         )
 
 
-def crear_vacacion(
-    conn: sqlite3.Connection, *, id_profesional: int, fecha_desde: str, fecha_hasta: str,
-) -> tuple[int, list[str]]:
-    if not _profesional_tiene_derecho(conn, id_profesional):
-        raise ValueError(
-            "Las vacaciones solo aplican a profesionales categoría R, B o E "
-            "con reservas regulares activas"
-        )
-    if fecha_hasta < fecha_desde:
-        raise ValueError("FechaHasta debe ser posterior o igual a FechaDesde")
-    _validar_periodo_no_cruza_anio(fecha_desde, fecha_hasta)
+@dataclass
+class SimulacionVacacion:
+    """Resultado de calcular el impacto de un período de vacaciones sobre
+    el cupo anual, sin llegar a guardar nada — mismo cálculo exacto que
+    `crear_vacacion`, extraído para que el formulario pueda mostrarlo en
+    vivo mientras se elige Desde/Hasta (pedido de la clienta, hallazgo
+    #20 F19 de la auditoría: "sin cálculo en vivo al elegir fechas")."""
+    valor_bonificado: float
+    fraccion_consumida: float
+    cupo_consumido_pct: float
+    cupo_restante_pct: float
+    advertencia: str | None
 
+
+def simular_vacacion(
+    conn: sqlite3.Connection, *, id_profesional: int, fecha_desde: str, fecha_hasta: str,
+) -> SimulacionVacacion:
     fecha_hoy = fecha_actual(conn).isoformat()
     horas_semanales = horas_semanales_vigentes(conn, [id_profesional], fecha_hoy)
     descuento_pct = obtener_porcentaje_descuento(conn, horas_semanales)
@@ -144,13 +150,13 @@ def crear_vacacion(
     if cupo_restante_antes < 1e-9:  # residuo de punto flotante: tratarlo como cupo agotado
         cupo_restante_antes = 0.0
 
-    advertencias = []
+    advertencia = None
     if fraccion_bruta > cupo_restante_antes:
         proporcion_cubierta = (cupo_restante_antes / fraccion_bruta) if fraccion_bruta > 0 else 0.0
         valor_bonificado = valor_bonificado_bruto * proporcion_cubierta
         fraccion_consumida = cupo_restante_antes
         valor_excedente = valor_bonificado_bruto - valor_bonificado
-        advertencias.append(
+        advertencia = (
             "La vacación excede el cupo disponible: se bonifican "
             f"{fraccion_consumida:.2f} semana(s) (cupo agotado) y {formatear_moneda(valor_excedente)} "
             "del período se facturan normalmente en la liquidación"
@@ -176,13 +182,36 @@ def crear_vacacion(
     if profesional["CategoriaProfesional"] == "B":
         valor_bonificado = 0.0
 
+    return SimulacionVacacion(
+        valor_bonificado=valor_bonificado, fraccion_consumida=fraccion_consumida,
+        cupo_consumido_pct=cupo_consumido_pct, cupo_restante_pct=cupo_restante_pct, advertencia=advertencia,
+    )
+
+
+def crear_vacacion(
+    conn: sqlite3.Connection, *, id_profesional: int, fecha_desde: str, fecha_hasta: str,
+) -> tuple[int, list[str]]:
+    if not _profesional_tiene_derecho(conn, id_profesional):
+        raise ValueError(
+            "Las vacaciones solo aplican a profesionales categoría R, B o E "
+            "con reservas regulares activas"
+        )
+    if fecha_hasta < fecha_desde:
+        raise ValueError("FechaHasta debe ser posterior o igual a FechaDesde")
+    _validar_periodo_no_cruza_anio(fecha_desde, fecha_hasta)
+
+    sim = simular_vacacion(conn, id_profesional=id_profesional, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
+    fecha_hoy = fecha_actual(conn).isoformat()
+    valor_semanal = calcular_valor_semanal_regular(conn, id_profesional, fecha_hoy)
+
     repo = obtener_repositorio(conn, "Vacacion")
     id_vacacion = repo.crear(
         IdProfesional=id_profesional, FechaDesde=fecha_desde, FechaHasta=fecha_hasta,
-        ValorSemanalAlMomentoDelRegistro=valor_semanal, ValorBonificado=valor_bonificado,
-        FraccionSemanaConsumida=fraccion_consumida, CupoConsumidoPorcentaje=cupo_consumido_pct,
-        CupoRestantePorcentaje=cupo_restante_pct,
+        ValorSemanalAlMomentoDelRegistro=valor_semanal, ValorBonificado=sim.valor_bonificado,
+        FraccionSemanaConsumida=sim.fraccion_consumida, CupoConsumidoPorcentaje=sim.cupo_consumido_pct,
+        CupoRestantePorcentaje=sim.cupo_restante_pct,
     )
+    advertencias = [sim.advertencia] if sim.advertencia else []
     return id_vacacion, advertencias
 
 

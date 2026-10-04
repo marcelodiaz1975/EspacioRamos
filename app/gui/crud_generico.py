@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -133,6 +134,19 @@ class Campo:
     formato_esperado: str | None = None
     """Descripción corta del formato esperado, para el cartel de aviso
     cuando `validador` rechaza el valor (ej. "AAAA-MM-DD")."""
+    variables: dict[str, str] | None = None
+    """Solo para tipo="texto_largo": variables `{nombre}` disponibles
+    para sustituir en este campo, como `{"apodo": "Apodo del
+    profesional elegido en..."}` — nombre de variable (sin llaves) a su
+    descripción. Cuando está presente, el diálogo suma debajo del campo
+    una fila con un botón por variable (hallazgo #24 de la auditoría,
+    pedido explícito de la clienta: "cómo selecciono variables") que la
+    inserta en el cursor del campo al hacer clic, con la descripción
+    como tooltip del botón — ver `_DialogoRegistro._armar_fila_
+    variables`. Puramente informativo/de conveniencia: no valida que lo
+    tipeado a mano use solo variables de esta lista (`sustituir_
+    variables` deja cualquier `{token}` desconocido tal cual, sin
+    reemplazarlo ni romper)."""
 
 
 def campos_libres(conn: sqlite3.Connection) -> list[Campo]:
@@ -543,6 +557,8 @@ class _DialogoRegistro(QDialog):
             entrada = self._crear_entrada(campo, registro)
             self._entradas[campo.nombre] = entrada
             layout_formulario.addRow(campo.etiqueta, entrada)
+            if campo.variables:
+                layout_formulario.addRow("", self._armar_fila_variables(entrada, campo.variables))
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -602,6 +618,36 @@ class _DialogoRegistro(QDialog):
         if valor is not None:
             entrada.setText(str(valor))
         return entrada
+
+    _COLUMNAS_BOTONES_VARIABLES = 4
+
+    def _armar_fila_variables(self, entrada: QPlainTextEdit, variables: dict[str, str]) -> QWidget:
+        """Un botón por variable disponible (hallazgo #24 de la
+        auditoría): clickearlo inserta "{nombre}" en el cursor de
+        `entrada`, sin pisar nada de lo que ya estaba tipeado. La
+        descripción de cada variable queda como tooltip del botón, para
+        no alargar la fila con texto largo. En grilla de 4 columnas (no
+        una sola fila corrida) para que una lista más larga de variables
+        no termine recortada contra el borde del diálogo, angosto por
+        default — mismo criterio que la grilla de días de Llaves/
+        Oferta de consultorios."""
+        contenedor = QWidget()
+        layout_variables = QVBoxLayout(contenedor)
+        layout_variables.setContentsMargins(0, 0, 0, 0)
+        layout_variables.addWidget(QLabel("Variables disponibles (clic para insertar en el cursor):"))
+        grilla_botones = QGridLayout()
+        for i, (nombre_variable, descripcion) in enumerate(variables.items()):
+            boton = QPushButton(f"{{{nombre_variable}}}")
+            boton.setToolTip(descripcion)
+            boton.clicked.connect(lambda _checked=False, v=nombre_variable: self._insertar_variable(entrada, v))
+            grilla_botones.addWidget(boton, i // self._COLUMNAS_BOTONES_VARIABLES, i % self._COLUMNAS_BOTONES_VARIABLES)
+        layout_variables.addLayout(grilla_botones)
+        return contenedor
+
+    @staticmethod
+    def _insertar_variable(entrada: QPlainTextEdit, nombre_variable: str) -> None:
+        entrada.insertPlainText(f"{{{nombre_variable}}}")
+        entrada.setFocus()
 
     def _validar_y_aceptar(self) -> None:
         for campo in self.campos:

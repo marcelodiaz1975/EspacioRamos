@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QPushButton
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -284,3 +284,110 @@ def test_copiar_mensaje_usa_portapapeles(qtbot, conn, monkeypatch):
     )
     pantalla._copiar_mensaje()
     assert copiado == ["texto de prueba"]
+
+
+def test_campo_mensaje_suma_variables_al_diccionario_de_campo(qtbot, conn):
+    """Hallazgo #24 de la auditoría: el campo Mensaje tiene que ofrecer
+    la lista de variables disponibles, no solo el texto suelto de la
+    leyenda de Vista previa."""
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    campo_mensaje = next(c for c in pantalla.crud.campos if c.nombre == "Mensaje")
+    assert campo_mensaje.variables is not None
+    assert set(campo_mensaje.variables) == {
+        "apodo", "nombre", "apellido", "tratamiento", "edificio", "unidad", "consultorio", "localidad",
+    }
+
+
+def test_dialogo_suma_un_boton_por_variable_que_inserta_en_el_cursor(qtbot, conn):
+    """"Cómo selecciono variables": un botón por variable en el diálogo
+    Nuevo/Editar, debajo del campo Mensaje, que inserta "{variable}" en
+    el cursor del texto al hacer clic."""
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.crud.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    entrada = dialogo._entradas["Mensaje"]
+    entrada.setPlainText("Hola, ")
+    cursor = entrada.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    entrada.setTextCursor(cursor)
+
+    botones = dialogo.findChildren(QPushButton)
+    boton_apodo = next(b for b in botones if b.text() == "{apodo}")
+    assert "Apodo del profesional" in boton_apodo.toolTip()
+    boton_apodo.click()
+    assert entrada.toPlainText() == "Hola, {apodo}"
+
+    boton_localidad = next(b for b in botones if b.text() == "{localidad}")
+    boton_localidad.click()
+    assert entrada.toPlainText() == "Hola, {apodo}{localidad}"
+
+
+def test_campos_sin_variables_no_suman_ningun_boton_extra(qtbot, conn):
+    """Un campo "texto_largo" sin `variables` (el caso general de
+    cualquier otro catálogo) no se ve afectado por este mecanismo."""
+    from app.gui.crud_generico import Campo
+
+    campos = [Campo("Descripcion", "Descripción", tipo="texto_largo")]
+    dialogo = _DialogoRegistro(conn, campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    # Ningún botón extra de inserción de variables — solo quedan los de
+    # siempre (Aceptar/Cancelar, del QDialogButtonBox).
+    assert not any(b.text().startswith("{") for b in dialogo.findChildren(QPushButton))
+
+
+def test_localidad_del_mensaje_sustituye_en_la_vista_previa(qtbot, conn):
+    id_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Vicente López")
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Avisos", Descripcion="Aviso localidad", IdLocalidad=id_localidad,
+        Mensaje="Estamos en {localidad}.", Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    fila = next(
+        f for f in range(pantalla.crud.tabla_widget.rowCount())
+        if pantalla.crud.tabla_widget.item(f, 1).text() == "Aviso localidad"
+    )
+    pantalla.crud.tabla_widget.selectRow(fila)
+    assert pantalla.texto_vista_previa.toPlainText() == "Estamos en Vicente López."
+
+
+def test_contexto_localidad_pisa_al_vinculo_del_mensaje_general(qtbot, conn):
+    id_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Olivos")
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Avisos", Descripcion="Aviso general", Mensaje="Estamos en {localidad}.", Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    fila = next(
+        f for f in range(pantalla.crud.tabla_widget.rowCount())
+        if pantalla.crud.tabla_widget.item(f, 1).text() == "Aviso general"
+    )
+    pantalla.crud.tabla_widget.selectRow(fila)
+    assert pantalla.texto_vista_previa.toPlainText() == "Estamos en ."
+
+    indice = pantalla.combo_localidad_contexto.findData(id_localidad)
+    pantalla.combo_localidad_contexto.setCurrentIndex(indice)
+    assert pantalla.texto_vista_previa.toPlainText() == "Estamos en Olivos."
+
+
+def test_dirigido_a_sustituye_nombre_apellido_y_tratamiento(qtbot, conn):
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Pérez", NombrePila="Marta", Tratamiento="Lic.", Apodo="Marti",
+    )
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Avisos", Descripcion="Saludo", Mensaje="Hola {tratamiento} {nombre} {apellido} ({apodo}).", Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    fila = next(
+        f for f in range(pantalla.crud.tabla_widget.rowCount())
+        if pantalla.crud.tabla_widget.item(f, 1).text() == "Saludo"
+    )
+    pantalla.crud.tabla_widget.selectRow(fila)
+    assert pantalla.texto_vista_previa.toPlainText() == "Hola    ()."
+
+    indice = pantalla.combo_dirigido_a.findData(id_profesional)
+    pantalla.combo_dirigido_a.setCurrentIndex(indice)
+    assert pantalla.texto_vista_previa.toPlainText() == "Hola Lic. Marta Pérez (Marti)."

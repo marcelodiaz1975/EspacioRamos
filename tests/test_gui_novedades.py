@@ -277,7 +277,16 @@ def test_crear_vacacion_anio_ya_terminado_no_persiste(qtbot, conn):
 
 def test_tabla_vacaciones_muestra_todos_los_anios_y_filtra_por_profesional(qtbot, conn):
     id_profesional = _preparar(conn)
-    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Otro")
+    # Categoría R con una reserva regular vigente, para seguir apareciendo
+    # en el combo ya acotado (hallazgo #20 F19) aunque no tenga ninguna
+    # vacación cargada todavía.
+    otro_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    conn.execute(
+        "INSERT INTO ReservaRegular (IdProfesional, IdConsultorio, DiaSemana, HoraInicio, HoraFin, VigenciaInicio) "
+        "VALUES (?, ?, 'Martes', 9, 12, '2020-01-01')",
+        (otro_profesional, id_consultorio),
+    )
     conn.commit()
 
     pantalla = PantallaRegistroAusencias(conn)
@@ -308,6 +317,95 @@ def test_tabla_vacaciones_muestra_todos_los_anios_y_filtra_por_profesional(qtbot
     assert panel.tabla.item(0, 2).text() == _fmt_fecha_dia_abrev(f"{anio_actual}-09-01")
     assert panel.tabla.item(1, 1).text() == str(anio_actual + 1)
     assert panel.tabla.item(1, 2).text() == _fmt_fecha_dia_abrev(f"{anio_actual + 1}-01-05")
+
+
+def test_combo_vacaciones_solo_incluye_profesionales_con_reserva_regular_activa(qtbot, conn):
+    """Hallazgo #20 F19 de la auditoría, pedido explícito de la clienta:
+    "no se pueden cargar vacaciones a quién no tiene reserva regular" —
+    el combo de esta solapa se acorta de antemano, en vez de dejar que
+    el error recién aparezca al confirmar."""
+    id_profesional = _preparar(conn)
+    sin_reserva = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="SinReserva")
+    sin_derecho = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="SinDerecho")
+    conn.commit()
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+
+    assert panel.combo_profesional.findData(id_profesional) >= 0
+    assert panel.combo_profesional.findData(sin_reserva) == -1
+    assert panel.combo_profesional.findData(sin_derecho) == -1
+
+
+def test_combo_vacaciones_conserva_a_quien_ya_tiene_historial_aunque_hoy_no_califique(qtbot, conn):
+    """El combo sirve doble propósito (elegir a quién crearle una
+    vacación nueva Y filtrar el historial de abajo) — alguien que YA
+    tiene una vacación cargada no puede desaparecer de la lista solo
+    porque hoy dejó de tener una reserva regular activa, o se quedaría
+    sin forma de filtrar su propio historial."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    anio_actual = panel.spin_anio.value()
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
+    panel._crear()
+    conn.commit()
+
+    conn.execute("UPDATE ReservaRegular SET VigenciaFin = '2020-06-30' WHERE IdProfesional = ?", (id_profesional,))
+    conn.commit()
+
+    pantalla2 = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla2)
+    assert pantalla2.panel_vacaciones.combo_profesional.findData(id_profesional) >= 0
+
+
+def test_simulacion_en_vivo_del_periodo_se_actualiza_al_cambiar_las_fechas(qtbot, conn):
+    """Hallazgo #20 F19, segunda parte: cálculo en vivo al elegir
+    Desde/Hasta, sin necesidad de confirmar nada."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+
+    assert panel.etiqueta_simulacion_periodo.text() == "Impacto del período elegido en el cupo: —"
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    anio_actual = panel.spin_anio.value()
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
+
+    texto = panel.etiqueta_simulacion_periodo.text()
+    assert "semana(s) bonificada(s)" in texto
+    assert "cupo consumido" in texto
+    assert texto != "Impacto del período elegido en el cupo: —"
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(None))
+    assert panel.etiqueta_simulacion_periodo.text() == "Impacto del período elegido en el cupo: —"
+
+
+def test_simulacion_en_vivo_se_recalcula_despues_de_crear_una_vacacion(qtbot, conn):
+    """El cupo ya consumido cambia al confirmar — la vista previa del
+    mismo período tiene que reflejarlo, no quedarse con el valor de
+    antes de guardar."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    anio_actual = panel.spin_anio.value()
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
+    texto_antes = panel.etiqueta_simulacion_periodo.text()
+
+    panel._crear()
+
+    panel.campo_desde.setDate(QDate(anio_actual, 9, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual, 9, 7))
+    assert panel.etiqueta_simulacion_periodo.text() != texto_antes
 
 
 def test_tabla_vacaciones_muestra_cupo_utilizado_junto_al_restante(qtbot, conn):

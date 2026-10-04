@@ -940,7 +940,7 @@ class _PanelReservasRegulares(QWidget):
             return
         if advertencias_totales:
             QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias_totales))
-        self._ofrecer_resolver_lista_espera(id_profesional)
+        self._resolver_lista_espera_si_corresponde(id_profesional)
         regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
         self.conn.commit()
         self.actualizar()
@@ -977,25 +977,20 @@ class _PanelReservasRegulares(QWidget):
         self.conn.commit()
         return True, advertencias
 
-    def _ofrecer_resolver_lista_espera(self, id_profesional: int) -> None:
-        """DC-10 §2.2 paso 5: confirmar la reserva regular en F16 tiene que
-        poder cerrar el pedido de Lista de espera que la originó. Con un
-        solo pedido Activo del profesional alcanza con preguntar; con más
-        de uno queda a criterio manual (no hay forma de saber cuál de
-        todos se acaba de cubrir)."""
+    def _resolver_lista_espera_si_corresponde(self, id_profesional: int) -> None:
+        """DC-10 §2.2 paso 5: confirmar la reserva regular en F16 cierra
+        solo, sin preguntar, el pedido de Lista de espera que la originó —
+        pedido explícito de la clienta, reemplazando la confirmación Sí/No
+        que tenía antes. Con un solo pedido Activo del profesional alcanza
+        para resolverlo; con más de uno queda a criterio manual (no hay
+        forma de saber cuál de todos se acaba de cubrir)."""
         pedidos = obtener_repositorio(self.conn, "ListaEspera").listar(
             IdProfesional=id_profesional, Estado="Activo",
         )
         if len(pedidos) != 1:
             return
-        respuesta = QMessageBox.question(
-            self, "Lista de espera",
-            "Este profesional tiene un pedido activo en Lista de espera. "
-            "¿Lo marcás como resuelto?",
-        )
-        if respuesta == QMessageBox.StandardButton.Yes:
-            marcar_resuelto(self.conn, pedidos[0]["IdPedido"])
-            self.conn.commit()
+        marcar_resuelto(self.conn, pedidos[0]["IdPedido"])
+        self.conn.commit()
 
     def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
