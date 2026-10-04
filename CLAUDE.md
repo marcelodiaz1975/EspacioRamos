@@ -6046,6 +6046,47 @@ los encabezados y filas esperados en las dos solapas, cancelar el
 selector no genera nada, la cadena de foco de "Estadísticas varias"
 suma el botón nuevo al final).
 
+## DC-05 §1.1/§2.1: confirmado resuelto, más un hueco adyacente corregido en Lista de espera
+
+Hallazgo de la auditoría DC-01/DC-10 (#17, v2: 🔸 PARCIAL / posible
+decisión consciente — pedía confirmación antes de tocar nada porque el
+v2 había encontrado un comentario en `grilla.py` ("Vacaciones y
+ausencias NO afectan esta grilla") que parecía contradecir el hallazgo
+viejo ("Registrar vacaciones o licencias no libera el consultorio para
+aisladas de otro profesional"), sin estar seguro de si eran dos cosas
+distintas.
+
+**Confirmado: son dos cosas distintas, y el hallazgo original ya está
+resuelto.** `verificar_conflictos_aislada` (`app.negocio.reservas`, el
+gate real que corre al confirmar una reserva aislada) ya chequea
+`esta_ausente` + `tiene_vacacion` + `tiene_licencia` — las tres liberan
+el consultorio para asignárselo a otro profesional; los docstrings de
+`tiene_vacacion`/`tiene_licencia` (`app.negocio.vacaciones`/`licencias`)
+hasta citan "DC-05 §1.1"/"§2.1" explícitamente. El comentario de
+`grilla.py` es sobre `calcular_ocupacion_regular` — la grilla semanal de
+REFERENCIA visual (un patrón genérico por día de la semana, promediado
+para todo un mes, usada en Oferta/Disponibilidad/Reservas/Novedades/
+Grilla semanal) — que el documento pide explícitamente que ignore
+excepciones puntuales. No hizo falta tocar nada de esa parte.
+
+**Hueco real encontrado al investigar, corregido de paso** (consultado
+con la clienta antes de tocarlo, no es parte del hallazgo #17 en sí):
+`calcular_ocupacion_fecha` (`app.negocio.grilla` — ocupación de una
+fecha PUNTUAL, no un día de semana genérico; DC-03 Mensaje 2 Variante B,
+hallazgo #13, usada por Lista de espera para matchear pedidos contra
+disponibilidad real día por día) solo chequeaba `esta_ausente`, dejando
+afuera `tiene_vacacion`/`tiene_licencia` — mismo tipo de corrección que
+ya tenía `verificar_conflictos_aislada`, aplicada acá con el mismo
+criterio exacto: una reserva regular no ocupa esa fecha si el
+profesional está ausente, de vacaciones O de licencia ese día.
+
+Tests nuevos en `tests/test_grilla.py`: `test_ocupacion_fecha_libera_
+por_vacacion_puntual`/`test_ocupacion_fecha_libera_por_licencia_
+puntual` (mismo patrón que el ya existente `test_ocupacion_fecha_
+libera_por_ausencia_puntual` — confirman que la fecha dentro del período
+libera el consultorio y que OTRA fecha fuera de ese período sigue
+ocupada).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
