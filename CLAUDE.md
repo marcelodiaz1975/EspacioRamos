@@ -6087,6 +6087,65 @@ libera_por_ausencia_puntual` — confirman que la fecha dentro del período
 libera el consultorio y que OTRA fecha fuera de ese período sigue
 ocupada).
 
+## DC-07 §2.5: Tipo Bloque de la grilla ignora DiasVisualizacion/DiasLogica — decisión consciente, sin tocar código
+
+Hallazgo de la auditoría DC-01/DC-10 (#31, confirmado ❌ SIGUE en el v2):
+"la grilla PDF ignora `DiasVisualizacion`/`DiasLogica`: clasifica
+bloques rígidos solo por horario, sin distinguir por día". Investigado
+antes de tocar nada: el bug es más profundo de lo que sugiere el texto
+del hallazgo, y está duplicado en dos lugares, no solo en el PDF.
+
+**Diagnóstico**: tanto `app/pdf/grilla_pdf.py` (`_tipo_bloque_por_hora`)
+como `app/gui/widgets/grilla_operativa.py` (función homónima, misma
+firma e idéntica lógica) clasifican cada hora como Rígido/Flexible
+mirando únicamente si algún `BloqueRigido` activo cubre esa hora
+(`HoraInicio <= h < HoraFin`), sin mirar `DiasLogica` ni
+`DiasVisualizacion` en absoluto — la columna "Tipo Bloque" de la grilla
+(PDF y GUI por igual) es una única columna por hora, COMPARTIDA por
+todos los días que muestra la grilla, así que ni siquiera hay dónde
+guardar un valor distinto por día con la estructura actual de la tabla.
+El único arreglo de raíz sería convertir esa columna en una por cada
+grupo de día (misma reestructuración necesaria en los dos archivos,
+PDF y GUI) — alcance real mucho mayor que lo que sugiere el hallazgo
+original.
+
+Por qué nunca se notó con los datos de ejemplo: el bloque rígido default
+de 18-21hs se siembra con `DiasLogica` = Lunes a Viernes pero
+`DiasVisualizacion` = Lunes a Sábado (documentado a propósito desde que
+se armó esta funcionalidad, ver `app/db/seed.py:
+sembrar_bloques_rigidos` y el docstring de `bloques_rigidos.py` —
+"puede ser más amplio que DiasLogica, como el default de 18-21hs") — y
+`dias_grilla()` por defecto también es Lunes a Sábado, así que
+`DiasVisualizacion` termina coincidiendo con TODOS los días que la
+grilla muestra por defecto, ocultando el bug en cualquier captura o uso
+con la configuración de fábrica. Solo se manifiesta con una
+configuración real donde `DiasVisualizacion` no cubre todos los días
+visibles de la grilla (ej. un bloque que se visualiza rígido L-V pero
+no sábado).
+
+**Decisión de la clienta, consultada antes de tocar nada** (dos
+alcances posibles: arreglo completo en los dos archivos con columna por
+día, o solo el PDF per el alcance literal del hallazgo): "No quiero
+tocar nada de las grillas" — las dos opciones quedan descartadas, no se
+toca ni `grilla_pdf.py` ni `grilla_operativa.py`. Como alternativa, dejó
+abierta una simplificación de DATOS en vez de código (hacer que
+`DiasLogica` del bloque de 18-21hs también incluya el sábado, para que
+coincida con `DiasVisualizacion` y el desajuste deje de existir en la
+práctica) — "si simplifica la lógica"/"eso si es necesario". Evaluado:
+no hace falta — el desajuste entre `DiasLogica`/`DiasVisualizacion` del
+dato semilla es intencional desde que se armó esta funcionalidad
+(documentado en el propio docstring de `bloques_rigidos.py` como
+ejemplo explícito de que los dos campos pueden diferir), así que
+cambiarlo sería alterar sin necesidad un dato de ejemplo que hoy sirve
+justamente para ilustrar esa distinción — se deja tal cual, con el
+desajuste visual/lógico aceptado para el sábado 18-21hs (se ve rígido
+en la grilla pero sigue siendo flexible a los efectos de
+`verificar_bloques_rigidos`, sin el aviso que generaría si fuera rígido
+de verdad ese día).
+
+Mismo criterio que DC-07 §3.3 más arriba (decisión documentada, no un
+bug): este hallazgo queda cerrado sin cambio de código.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
