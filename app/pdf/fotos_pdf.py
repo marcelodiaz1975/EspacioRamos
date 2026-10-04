@@ -10,7 +10,12 @@ aspecto (fotos de celular, de cámara, recortadas a mano) — para que la
 grilla de 2 columnas quede pareja se recortan al centro a 4:3 (RELACION_FOTO)
 antes de insertarlas: de los costados si la foto es más ancha que 4:3, de
 arriba/abajo si es más alta. El formato definitivo recomendado para sacar
-fotos nuevas ya en el tamaño final es 1200x900px (4:3)."""
+fotos nuevas ya en el tamaño final es 1200x900px (4:3).
+
+`imagenes_de_consultorios` suma `DomicilioLocalidad` (LEFT JOIN Localidad
+vía `Edificio.IdLocalidad`, mismo alias que el resto del sistema) para
+que `pie_personalizado` pueda armar un pie con la localidad incluida
+(ej. Oferta de consultorios, DC-07 §6) sin tener que resolverla aparte."""
 from __future__ import annotations
 
 import io
@@ -56,11 +61,12 @@ def imagenes_de_consultorios(conn: sqlite3.Connection, ids_consultorio: list[int
     return conn.execute(
         f"""
         SELECT i.*, c.NumeroConsultorio, c.AptoCamilla, c.ValorHoraRegularActual, u.IdUnidad AS IdUnidadConsultorio,
-               u.Departamento, e.Nombre AS NombreEdificio
+               u.Departamento, e.Nombre AS NombreEdificio, loc.Localidad AS DomicilioLocalidad
         FROM Imagen i
         JOIN Consultorio c ON c.IdConsultorio = i.IdConsultorio
         JOIN Unidad u ON u.IdUnidad = c.IdUnidad
         JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
         WHERE i.IdConsultorio IN ({placeholders}) AND i.Activo = 1
         ORDER BY i.IdConsultorio, i.NumeroOrden
         """,

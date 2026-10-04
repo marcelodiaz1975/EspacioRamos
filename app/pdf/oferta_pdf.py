@@ -176,6 +176,38 @@ def _consultorios_ordenados(conn: sqlite3.Connection, consultorios: dict, anonim
     return sorted(consultorios.values(), key=clave)
 
 
+def _pie_foto_oferta(
+    imagen: sqlite3.Row, anonimizar: bool, decimales: int, *, mostrar_edificio: bool, mostrar_localidad: bool,
+) -> str:
+    """Pie único por foto (DC-07 §6, hallazgo de la auditoría DC-01/DC-10,
+    #32): consultorio + unidad [+ edificio] [+ localidad] + valor, en vez
+    del pie sin valor de siempre más una lista aparte con los valores —
+    mismo diseño que ya anticipaba el docstring de `tabla_fotos`, pedido
+    explícito de la clienta sobre el orden de los datos (confirmado con
+    PDF de ejemplo antes de implementarlo). Edificio/Localidad solo se
+    aclaran cuando hay más de uno entre los consultorios de este PDF
+    puntual (`mostrar_edificio`/`mostrar_localidad`, calculados una sola
+    vez por `_bloque_consultorios_intervinientes`) — pedido explícito de
+    la clienta: "aclarar solo localidad y edificio cuando haya más de
+    uno", repitiendo el mismo criterio que ya usa esa función para decidir
+    si imprime el encabezado "Edificio {Nombre}" (`multi`). Localidad usa
+    el mismo fallback "(Sin localidad)" que el resto del sistema cuando el
+    edificio no tiene una cargada. "✔ Apto camilla" solo para
+    profesionales NO activos (anonimizados), mismo criterio que Propuesta
+    (que siempre anonimiza); un profesional activo sigue el criterio de
+    Disponibilidad (nunca la muestra)."""
+    unidad = f"Unidad {imagen['IdUnidadConsultorio']}" if anonimizar else imagen["Departamento"]
+    partes = [f"Consultorio {imagen['NumeroConsultorio']}", unidad]
+    if mostrar_edificio:
+        partes.append(imagen["NombreEdificio"])
+    if mostrar_localidad:
+        partes.append(imagen["DomicilioLocalidad"] or "(Sin localidad)")
+    pie = f"{' - '.join(partes)}: {formatear_moneda(imagen['ValorHoraRegularActual'], decimales)}/hora"
+    if anonimizar and imagen["AptoCamilla"]:
+        pie += " ✔ Apto camilla"
+    return pie
+
+
 def _bloque_consultorios_intervinientes(
     conn: sqlite3.Connection, consultorios: dict, imagenes: list[sqlite3.Row], anonimizar: bool, ancho: float,
     decimales: int,
@@ -190,6 +222,11 @@ def _bloque_consultorios_intervinientes(
 
     ids_edificio_orden = list(dict.fromkeys(c["IdEdificio"] for c in consultorios_ordenados))
     multi = len(ids_edificio_orden) > 1
+    # Localidad en el pie de foto: mismo criterio que `multi` para
+    # Edificio, pero sobre las imágenes (no sobre `consultorios`, que no
+    # trae Localidad) — aclara solo cuando hay más de una entre TODAS las
+    # fotos del PDF, sin importar en qué grupo de edificio caiga cada una.
+    mostrar_localidad = len({img["DomicilioLocalidad"] for img in imagenes}) > 1
 
     story = []
     for id_edificio in ids_edificio_orden:
@@ -199,15 +236,11 @@ def _bloque_consultorios_intervinientes(
             story.append(Spacer(1, 6))
         imagenes_ed = [img for c in del_edificio for img in imagenes_por_consultorio.get(c["IdConsultorio"], [])]
         story.extend(tabla_fotos(
-            imagenes_ed, ancho, mostrar_apto_camilla=True, anonimizar_unidad=anonimizar, decimales=decimales,
+            imagenes_ed, ancho, decimales=decimales,
+            pie_personalizado=lambda img: _pie_foto_oferta(
+                img, anonimizar, decimales, mostrar_edificio=multi, mostrar_localidad=mostrar_localidad,
+            ),
         ))
-        for c in del_edificio:
-            unidad = f"Unidad {c['IdUnidad']}" if anonimizar else c["Departamento"]
-            story.append(Paragraph(
-                f"Consultorio {c['NumeroConsultorio']} - {unidad} - {c['NombreEdificio']}: "
-                f"{formatear_moneda(c['ValorHoraRegularActual'], decimales)}/hora",
-                estilo_texto(9),
-            ))
         story.append(Spacer(1, 6))
     story.append(Paragraph(
         "Los valores detallados corresponden a los vigentes a este mes en curso, y a los mismos luego se le "

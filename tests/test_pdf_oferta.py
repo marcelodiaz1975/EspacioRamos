@@ -91,6 +91,11 @@ def test_orden_consultorios_activo_por_piso_y_departamento(conn, tmp_path):
     id_unidad_pb = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='PB "B"')
     id_c_1ro = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_1ro, NumeroConsultorio=1, ValorHoraRegularActual=100)
     id_c_pb = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_pb, NumeroConsultorio=1, ValorHoraRegularActual=100)
+    # El orden se verifica en el pie de cada foto (DC-07 §6): hace falta
+    # una Imagen por consultorio, si no la sección queda en "Sin fotos
+    # cargadas." y nunca llega a mostrar el Departamento de ninguno.
+    obtener_repositorio(conn, "Imagen").crear(IdConsultorio=id_c_1ro, RutaArchivo="/no/existe1.jpg", NumeroOrden=1, Activo=1)
+    obtener_repositorio(conn, "Imagen").crear(IdConsultorio=id_c_pb, RutaArchivo="/no/existe2.jpg", NumeroOrden=1, Activo=1)
     # Cada pedido ocupa el consultorio del OTRO piso en su propio día, para
     # forzar que cada uno termine matcheando con una unidad distinta (si no,
     # el barrido siempre elige el primer consultorio libre y el otro nunca
@@ -148,6 +153,83 @@ def test_pedido_con_dos_bloques_muestra_ambos_y_como_se_combinan(conn, consultor
     assert "Bloque 1" in texto and "Bloque 2" in texto
     assert "Sábado" in texto
     assert "se necesitan todos los bloques" in texto
+
+
+def test_pie_de_foto_incluye_el_valor_sin_lista_aparte(conn, consultorio, tmp_path):
+    """DC-07 §6, hallazgo #32: el valor va en el mismo pie de foto (no hay
+    una lista aparte con los valores después de las fotos)."""
+    _, id_consultorio = consultorio
+    obtener_repositorio(conn, "Imagen").crear(IdConsultorio=id_consultorio, RutaArchivo="/no/existe.jpg", NumeroOrden=1, Activo=1)
+    id_pedido = _crear_pedido_para(conn, consultorio, "R")
+    ruta = generar_pdf_oferta(conn, str(tmp_path), id_pedido)
+    texto = fitz.open(ruta)[0].get_text()
+    assert "/hora" in texto
+    assert "Valor hora regular" not in texto
+
+
+def test_apto_camilla_solo_para_profesional_no_activo(conn, consultorio, tmp_path):
+    _, id_consultorio = consultorio
+    obtener_repositorio(conn, "Consultorio").actualizar(id_consultorio, AptoCamilla=1)
+    obtener_repositorio(conn, "Imagen").crear(IdConsultorio=id_consultorio, RutaArchivo="/no/existe.jpg", NumeroOrden=1, Activo=1)
+
+    id_pedido_no_activo = _crear_pedido_para(conn, consultorio, "C")
+    ruta_no_activo = generar_pdf_oferta(conn, str(tmp_path), id_pedido_no_activo)
+    assert "Apto camilla" in fitz.open(ruta_no_activo)[0].get_text()
+
+    id_pedido_activo = _crear_pedido_para(conn, consultorio, "R")
+    ruta_activo = generar_pdf_oferta(conn, str(tmp_path), id_pedido_activo)
+    assert "Apto camilla" not in fitz.open(ruta_activo)[0].get_text()
+
+
+def test_pie_de_foto_sin_edificio_ni_localidad_con_uno_solo(conn, consultorio, tmp_path):
+    """Pedido explícito de la clienta: Edificio/Localidad solo se aclaran
+    en el pie de cada foto cuando hay más de uno entre los consultorios
+    de ese PDF — con un solo edificio y una sola localidad (la fixture
+    `consultorio`, "Ramos 1" en "CABA"), no se mencionan."""
+    _, id_consultorio = consultorio
+    obtener_repositorio(conn, "Imagen").crear(IdConsultorio=id_consultorio, RutaArchivo="/no/existe.jpg", NumeroOrden=1, Activo=1)
+    id_pedido = _crear_pedido_para(conn, consultorio, "R")
+    ruta = generar_pdf_oferta(conn, str(tmp_path), id_pedido)
+    texto = fitz.open(ruta)[0].get_text()
+    seccion = texto.split("Consultorios que intervienen en las ofertas")[1]
+    assert "/hora" in seccion
+    assert "Ramos 1" not in seccion
+    assert "CABA" not in seccion
+
+
+def test_pie_de_foto_con_edificio_y_localidad_cuando_hay_mas_de_uno(conn, tmp_path):
+    """Con dos edificios (en dos localidades distintas) interviniendo en
+    la oferta, el pie de cada foto SÍ aclara edificio y localidad."""
+    id_loc1 = obtener_repositorio(conn, "Localidad").crear(Localidad="CABA")
+    id_loc2 = obtener_repositorio(conn, "Localidad").crear(Localidad="Vicente López")
+    id_ed1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Norte", IdLocalidad=id_loc1)
+    id_ed2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Sur", IdLocalidad=id_loc2)
+    id_un1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_ed1, Departamento="4to B")
+    id_un2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_ed2, Departamento="2do A")
+    id_c1 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_un1, NumeroConsultorio=3, ValorHoraRegularActual=1200)
+    id_c2 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_un2, NumeroConsultorio=5, ValorHoraRegularActual=1500)
+    obtener_repositorio(conn, "Imagen").crear(IdConsultorio=id_c1, RutaArchivo="/no/existe1.jpg", NumeroOrden=1, Activo=1)
+    obtener_repositorio(conn, "Imagen").crear(IdConsultorio=id_c2, RutaArchivo="/no/existe2.jpg", NumeroOrden=1, Activo=1)
+
+    id_prof_ocupante = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ocupante")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof_ocupante, IdConsultorio=id_c1, DiaSemana="Martes", HoraInicio=10, HoraFin=11,
+        VigenciaInicio="2020-01-01",
+    )
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof_ocupante, IdConsultorio=id_c2, DiaSemana="Lunes", HoraInicio=10, HoraFin=11,
+        VigenciaInicio="2020-01-01",
+    )
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    id_pedido1 = crear_pedido(conn, id_profesional=id_prof, bloques=[_bloque(["Lunes"], 10, 11)])
+    id_pedido2 = crear_pedido(conn, id_profesional=id_prof, bloques=[_bloque(["Martes"], 10, 11)])
+    ruta = generar_pdf_oferta_multiple(conn, str(tmp_path), [id_pedido1, id_pedido2])
+    texto = fitz.open(ruta)[0].get_text()
+    if len(fitz.open(ruta)) > 1:
+        texto = "\n".join(p.get_text() for p in fitz.open(ruta))
+    seccion = texto.split("Consultorios que intervienen en las ofertas")[1]
+    assert "Torre Norte" in seccion and "Torre Sur" in seccion
+    assert "CABA" in seccion and "Vicente López" in seccion
 
 
 def test_sin_combinar_rechaza_coincidencias_que_no_sean_verde(conn, tmp_path):
