@@ -5928,6 +5928,124 @@ de confirmación menciona la cantidad real de liquidaciones — con y sin
 liquidaciones emitidas—, confirmar aplica el valor manual al consultorio,
 y el test de regresión del bug de los botones huérfanos).
 
+## DC-06 §6: snapshot "de operación importante", retención y exportar a Excel
+
+Hallazgo de la auditoría DC-01/DC-10 (v1, nunca re-verificado hasta este
+pase): "no existe el tipo de snapshot 'de operación importante' (antes
+de aumentos o desactivación de edificio/unidad), ni función para
+eliminar snapshots antiguos con sus reglas de retención, ni exportación
+a Excel desde Estadísticas". Confirmado contra el código actual: ninguna
+de las tres piezas existía. Antes de implementar se consultaron tres
+decisiones (`AskUserQuestion`), porque el hallazgo daba por sentada una
+funcionalidad que no existe en el sistema (desactivar un edificio/
+unidad — `Edificio`/`Unidad` no tienen ningún campo `Activo`):
+
+- **Alcance del snapshot especial**: "solo antes de Aumentos" — se
+  descarta inventar un sistema de activo/inactivo para edificio/unidad
+  solo para cubrir la otra mitad del hallazgo original, que no tiene
+  ningún otro punto de apoyo en el resto del sistema.
+- **Retención**: 12 meses, solo para los snapshots de este tipo nuevo —
+  los mensuales de siempre (uno por período, que "Historial general"
+  necesita conservar para siempre) no se tocan.
+- **Exportar a Excel**: sí, un botón por solapa que exporta exactamente
+  lo que está filtrado/visible en ese momento en la tabla.
+
+### Snapshot "de operación importante" (`app.negocio.estadisticas`)
+
+`SnapshotMensual` suma dos columnas: `Tipo` (`'Mensual'` por default —
+las filas ya cargadas antes de este cambio quedan así solas, vía
+migración — o `'OperacionImportante'`) y `Observacion` (texto libre,
+solo para el tipo nuevo). `generar_snapshot` (el de siempre, uno por
+período al cerrar el mes) ahora pasa `Tipo="Mensual"` explícito.
+
+`generar_snapshot_operacion_importante(conn, periodo, *, observacion=None)`
+(nueva) arma un snapshot con el mismo contenido que el mensual
+(`_campos_snapshot`, compartido entre los tres) pero `Tipo=
+'OperacionImportante'` — a diferencia del mensual, PUEDE haber varios en
+el mismo período (cada operación importante genera el suyo, no hay
+restricción de "uno por período"). `app.negocio.aumentos.confirmar_aumento`
+la llama al principio, ANTES de tocar ningún valor de consultorio — así
+`ValoresConsultorios` del snapshot queda con el estado VIEJO, el punto
+de comparación real que pedía el hallazgo ("antes de la operación"), no
+el nuevo recién aplicado.
+
+`historial_general` y `regenerar_snapshot_si_corresponde` (DC-06 §3, ver
+más arriba) pasan a filtrar `Tipo='Mensual'` en su `SnapshotMensual.
+listar(...)` — sin este filtro, un snapshot de operación importante del
+mismo período podía colarse en `datos_por_mes` (que es un dict keyed por
+`Periodo`, pensado para una sola fila por mes) y pisar o duplicar al
+mensual real, según el orden de iteración. Son conceptos distintos: el
+de operación importante no representa "el cierre de ese período", así
+que nunca debe aparecer en "Historial general" ni ser el blanco de un
+ajuste retroactivo de DC-06 §3.
+
+No tiene pantalla propia para revisarlos a mano todavía — no fue parte
+de lo que se consultó ni de lo que pide el hallazgo (que solo pedía que
+el tipo existiera, la retención y la exportación); quedan en la base
+como registro histórico, visibles solo indirectamente a través de la
+retención.
+
+### Retención: 12 meses (`limpiar_snapshots_operacion_importante_antiguos`)
+
+Mismo criterio de retención en MESES que `app.negocio.archivos_
+generados.limpiar_liquidaciones_simuladas_antiguas` (comparar contra
+`sumar_meses`), pero sobre filas de la base en vez de archivos en disco:
+borra los `SnapshotMensual` con `Tipo='OperacionImportante'` cuyo
+`Periodo` quedó a más de 12 meses de `hoy`. Los mensuales de siempre no
+se tocan, sin importar su antigüedad — siguen conservándose para
+siempre, como ya documentaba la sección de Estadísticas más arriba.
+
+Se llama desde `avance_mes.avanzar_mes` (nuevo campo `snapshots_
+operacion_importante_eliminados` en `ResumenAvanceMes`), junto al resto
+de limpiezas periódicas del proceso — mismo lugar que `_limpiar_
+liquidaciones_simuladas_antiguas`, antes del snapshot del Paso 9.
+
+### Exportar a Excel (`app/gui/pantallas/estadisticas.py`)
+
+Un botón "Exportar a Excel" (`botonSecundario`, mismo ancho que
+"Actualizar tabla" — debajo de ese botón en las dos solapas, sumado
+también a la cadena de foco Enter/Tab de cada panel) abre un selector
+nativo "Guardar como" (`QFileDialog.getSaveFileName`, mismo criterio que
+"Descargar planilla importación") y genera ahí un libro Excel
+(`openpyxl`, ya dependencia del proyecto) con las mismas 11 columnas que
+la tabla en pantalla, mismos títulos (sin el `"\n"` que ahí sirve para
+achicar el ancho del encabezado — no hace falta en una planilla) y el
+MISMO formato de texto que ya se ve en cada celda (`_texto_pct`/
+`_texto_horas`/`_texto_variacion`/`_texto_monto`, reusados tal cual) —
+exporta exactamente las filas que están filtradas/ordenadas en ese
+momento (`self._filas`, ya calculado por `actualizar()`), no un volcado
+aparte de toda la base. `_exportar_filas_a_excel(filas, ruta)` es una
+función compartida por las dos solapas (`_PanelHistorialGeneral`/
+`_PanelEstadisticasVarias`), cada una con su propio nombre de archivo
+sugerido ("Estadisticas - Historial general.xlsx"/"Estadisticas -
+Estadisticas varias.xlsx").
+
+Bug real encontrado al armar los tests de esta pantalla, no puntual de
+Estadísticas: `QMessageBox.information`/`.critical` son modales de
+verdad (`exec()` bloquea el hilo esperando una respuesta) — un test que
+ejercite el camino de éxito o de error de "Exportar a Excel" se queda
+esperando para siempre si no se los neutraliza. `test_gui_importacion.py`
+ya tenía resuelto esto con una fixture `autouse` que los pisa por un
+no-op (`monkeypatch.setattr(QMessageBox, "information"/"critical",
+staticmethod(lambda *a, **k: None))`) — se sumó la misma fixture a
+`test_gui_estadisticas.py`, que hasta ahora nunca había tocado ningún
+`QMessageBox` modal y por eso no la necesitaba.
+
+Tests nuevos: `tests/test_estadisticas.py` (siete: el snapshot nuevo
+queda marcado `Tipo='OperacionImportante'` con su observación, el
+mensual sigue en `Tipo='Mensual'`, pueden convivir varios del tipo
+nuevo en el mismo período, `historial_general` los ignora por completo,
+`regenerar_snapshot_si_corresponde` no los toca si es lo único que hay
+en ese período, la retención borra solo los de más de 12 meses, nunca
+toca un mensual). `tests/test_aumentos.py` (uno: `confirmar_aumento`
+deja el snapshot con el estado VIEJO de `ValoresConsultorios`, no el
+nuevo). `tests/test_avance_mes.py` (uno: `avanzar_mes` limpia los
+vencidos sin tocar los mensuales). `tests/test_gui_estadisticas.py`
+(cinco: el botón es `botonSecundario`, exportar genera el archivo con
+los encabezados y filas esperados en las dos solapas, cancelar el
+selector no genera nada, la cadena de foco de "Estadísticas varias"
+suma el botón nuevo al final).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
