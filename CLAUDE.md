@@ -6146,6 +6146,124 @@ de verdad ese día).
 Mismo criterio que DC-07 §3.3 más arriba (decisión documentada, no un
 bug): este hallazgo queda cerrado sin cambio de código.
 
+## DC-07 §6: Oferta de consultorios — valor en el pie de cada foto,
+## Apto camilla solo para no activos, Edificio/Localidad solo si hay más de uno
+
+Hallazgo de la auditoría DC-01/DC-10 (#32, confirmado parcialmente ❌
+SIGUE en el v2 solo para el punto de "Apto camilla"; los otros dos
+puntos del v1 — "estructura de secciones distinta a la documentada" y
+"el valor no queda debajo de cada foto sino aparte" — habían quedado
+sin re-verificar). No se tiene el texto original de DC-07 §6 en el
+repositorio (mismo caso que DC-06 §3 en su momento) — consultada la
+clienta, eligió que se propusiera un diseño a partir del resumen del
+hallazgo en vez de pasar el documento.
+
+Investigando antes de proponer nada: el propio docstring de
+`tabla_fotos` (`app/pdf/fotos_pdf.py`) ya anticipaba la solución para
+"Oferta de consultorios por búsqueda" vía su parámetro
+`pie_personalizado` — un pie de foto totalmente a medida, documentado
+ahí desde que se armó esa función, nunca usado hasta ahora por ningún
+llamador. Comparado contra los PDF hermanos: Propuesta siempre
+anonimiza y muestra "✔ Apto camilla"; Disponibilidad nunca anonimiza y
+nunca la muestra; Oferta (el único de los tres que depende del
+profesional dueño del pedido puntual) no mostraba la aclaración en
+ningún caso — bug real, confirmado contra el criterio de los otros dos.
+
+Antes de implementar se le mostraron a la clienta, en varias rondas,
+ejemplos concretos (primero texto, después PDF reales generados con
+datos de prueba, antes/después) para cada decisión de diseño — mismo
+criterio de "mostrar antes de implementar" ya usado para otras
+funcionalidades de esta lista:
+
+- **Estructura de secciones**: no se tocó — sin un documento DC-07 §6
+  real contra el que comparar, no hay una fuente de verdad confiable
+  de cuál sería "la estructura correcta"; se dejó la actual (3
+  secciones: Criterios de búsqueda → Coincidencias → Consultorios que
+  intervienen en las ofertas) tal cual.
+- **"✔ Apto camilla"**: se corrige para que aparezca únicamente cuando
+  el pedido es de un profesional NO activo (anonimizado) — mismo
+  criterio que Propuesta (que siempre anonimiza y siempre la muestra);
+  un profesional activo sigue el criterio de Disponibilidad (nunca la
+  muestra).
+- **El valor "aparte"**: se elimina la lista de texto plano que iba
+  DESPUÉS de las fotos (una línea "Consultorio N - unidad - Edificio:
+  $valor/hora" por cada consultorio, repitiendo lo que ya mostraba el
+  pie de cada foto sin el valor) y se mergea todo en un único pie por
+  foto, vía `pie_personalizado` — mismo pie, con el valor adentro, sin
+  texto repetido aparte.
+
+Sobre el contenido final del pie, la clienta pidió además sumar
+Localidad (no estaba en el pedido original de "el valor no queda
+debajo de cada foto"): "Que se vea todo en la línea al pie de la foto
+y suprimí la línea posterior. Al pie de la foto: consultorio, unidad,
+edificio, localidad, valor y apto camilla si aplica." Y, en la vuelta
+final de revisión (ya con dos PDF de ejemplo mostrando Edificio y
+Localidad siempre presentes): "Si, conforme. Lo único, aclarar solo
+localidad y edificio cuando haya más de uno, repito por las dudas" —
+Edificio y Localidad dejan de mostrarse SIEMPRE y pasan a aclararse
+solo cuando hay ambigüedad real dentro de ese PDF puntual.
+
+### Implementación
+
+`_pie_foto_oferta(imagen, anonimizar, decimales, *, mostrar_edificio,
+mostrar_localidad)` (`app/pdf/oferta_pdf.py`, nueva) arma el pie único:
+Consultorio + Unidad siempre, Edificio y Localidad cada uno CONDICIONAL
+a su propio flag, valor siempre, y "✔ Apto camilla" solo si
+`anonimizar` (NO activo) y el consultorio lo tiene. Localidad usa el
+mismo fallback "(Sin localidad)" que el resto del sistema.
+
+`_bloque_consultorios_intervinientes` calcula los dos flags UNA sola
+vez para todo el PDF (no por grupo de edificio dentro del loop), antes
+de recorrer `ids_edificio_orden`:
+- `mostrar_edificio` reusa tal cual `multi` (`len(ids_edificio_orden) >
+  1`), que esa función ya calculaba desde antes de este pedido para
+  decidir si imprime el encabezado "Edificio {Nombre}" por grupo —
+  mismo criterio exacto, sin duplicar el cálculo: si solo hay un
+  edificio interviniendo, ni el encabezado ni el pie lo mencionan; con
+  más de uno, los dos lo hacen.
+- `mostrar_localidad` es nuevo: `len({img["DomicilioLocalidad"] for img
+  in imagenes}) > 1` — sobre las imágenes (no sobre `consultorios`, que
+  no trae Localidad), porque es lo único con esa columna disponible
+  (`imagenes_de_consultorios`, ver abajo). Un edificio sin localidad
+  cargada cuenta como un valor (`None`) distinto de cualquier localidad
+  real — si ese es el único caso distinto entre todas las fotos, sigue
+  siendo "más de uno" y se aclara igual (ambigüedad real: alguna foto
+  es de un edificio con localidad y otra no).
+
+`app/pdf/fotos_pdf.py::imagenes_de_consultorios` suma `DomicilioLocalidad`
+a su SELECT (`LEFT JOIN Localidad` vía `Edificio.IdLocalidad`, mismo
+alias que el resto del sistema) — cambio en la consulta compartida por
+los cuatro PDF que usan esta sección (Liquidación, Propuesta,
+Disponibilidad, Oferta), inocuo para los otros tres porque ninguno lee
+esa columna todavía.
+
+### Tests
+
+`tests/test_pdf_oferta.py` suma: `test_pie_de_foto_incluye_el_valor_sin_lista_aparte`
+(el valor queda en el mismo pie, "Valor hora regular" — el texto de la
+lista vieja — ya no aparece en ningún lado);
+`test_apto_camilla_solo_para_profesional_no_activo` (aparece para "C",
+no aparece para "R", mismo consultorio);
+`test_pie_de_foto_sin_edificio_ni_localidad_con_uno_solo` (con un solo
+edificio/localidad, el pie no los menciona);
+`test_pie_de_foto_con_edificio_y_localidad_cuando_hay_mas_de_uno` (con
+dos edificios en dos localidades distintas, el pie de cada foto
+menciona ambos). El pre-existente `test_orden_consultorios_activo_por_
+piso_y_departamento` (verifica el orden por piso vía el texto del pie)
+necesitó sumar una `Imagen` por consultorio de prueba — antes se apoyaba
+en la lista de texto aparte, que mostraba el Departamento de cada
+consultorio sin necesitar ninguna foto cargada; al eliminarse esa lista,
+el Departamento solo aparece a través del pie de una foto real.
+
+Las aserciones sobre "✔ Apto camilla" se escriben sin el signo "✔"
+(solo "Apto camilla", mismo criterio que los tests ya existentes de
+Disponibilidad/Liquidación/Oferta por búsqueda): el extractor de texto
+de PyMuPDF no siempre devuelve ese glifo tal cual con la fuente
+embebida en el PDF (confirmado probando — el mismo PDF que se ve
+correcto al abrirlo devuelve un carácter de control distinto al
+extraer texto), así que el signo en sí no es un criterio de test
+confiable en ningún PDF de este sistema.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
