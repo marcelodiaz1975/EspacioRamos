@@ -34,6 +34,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from app.negocio.dias import fecha_actual, periodo_actual
+from app.negocio.estadisticas import generar_snapshot_operacion_importante
 from app.negocio.liquidaciones import emitir_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
@@ -236,9 +237,20 @@ def confirmar_aumento(
     """Confirma el aumento (DC-10 §1.3/§1.4): actualiza valores de
     consultorios, opcionalmente el esquema de descuentos, y regenera las
     liquidaciones ya emitidas del período afectado (default: el mes en
-    curso) para que reflejen los valores nuevos."""
+    curso) para que reflejen los valores nuevos. De paso (DC-06 §6) deja
+    un `SnapshotMensual` tipo "operación importante" con el estado previo
+    a la corrida — ver `app.negocio.estadisticas.generar_snapshot_
+    operacion_importante`."""
     periodo = periodo or periodo_actual(conn)
     es_correccion = _es_correccion_del_mes(conn, periodo)
+
+    # DC-06 §6 (hallazgo de la auditoría DC-01/DC-10): snapshot "de
+    # operación importante", tomado ANTES de tocar ningún valor de
+    # consultorio, para poder comparar el estado previo contra lo que
+    # quede después del aumento.
+    generar_snapshot_operacion_importante(
+        conn, periodo, observacion=f"Antes de aplicar un aumento del {porcentaje_general}% ({periodo})",
+    )
 
     filas = simular_aumento(
         conn, porcentaje_general=porcentaje_general, valores_override=valores_override,

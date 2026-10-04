@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import pytest
 
@@ -7,6 +8,9 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.estadisticas import (
     calcular_ocupacion,
     generar_snapshot,
+    generar_snapshot_operacion_importante,
+    historial_general,
+    limpiar_snapshots_operacion_importante_antiguos,
     rango_horas_por_dia,
     regenerar_snapshot_si_corresponde,
 )
@@ -147,3 +151,73 @@ def test_regenerar_snapshot_de_otro_periodo_no_lo_toca(conn, dos_consultorios):
     regenerar_snapshot_si_corresponde(conn, "2026-08")
     assert obtener_repositorio(conn, "SnapshotMensual").obtener(id_snapshot_julio) is not None
     assert obtener_repositorio(conn, "SnapshotMensual").listar(Periodo="2026-08") == []
+
+
+# -------------------------------------------- DC-06 §6: snapshot de operación importante
+
+def test_generar_snapshot_operacion_importante_queda_marcado_con_ese_tipo(conn, dos_consultorios):
+    id_snapshot = generar_snapshot_operacion_importante(conn, "2026-08", observacion="Antes de un aumento")
+    snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(id_snapshot)
+    assert snapshot["Tipo"] == "OperacionImportante"
+    assert snapshot["Observacion"] == "Antes de un aumento"
+    assert snapshot["Periodo"] == "2026-08"
+
+
+def test_generar_snapshot_mensual_queda_marcado_con_tipo_mensual(conn, dos_consultorios):
+    id_snapshot = generar_snapshot(conn, "2026-08")
+    snapshot = obtener_repositorio(conn, "SnapshotMensual").obtener(id_snapshot)
+    assert snapshot["Tipo"] == "Mensual"
+    assert snapshot["Observacion"] is None
+
+
+def test_puede_haber_varios_snapshots_de_operacion_importante_en_el_mismo_periodo(conn, dos_consultorios):
+    """A diferencia del mensual (uno por período), este tipo se acumula —
+    cada operación importante genera el suyo."""
+    generar_snapshot_operacion_importante(conn, "2026-08", observacion="Primer aumento del mes")
+    generar_snapshot_operacion_importante(conn, "2026-08", observacion="Corrección del mismo mes")
+    filas = obtener_repositorio(conn, "SnapshotMensual").listar(Tipo="OperacionImportante")
+    assert len(filas) == 2
+
+
+def test_historial_general_ignora_los_snapshots_de_operacion_importante(conn, dos_consultorios):
+    """Si no filtrara por Tipo, un snapshot "de operación importante" del
+    mismo período pisaría (o duplicaría, según el orden de iteración) al
+    mensual en `datos_por_mes` — `historial_general` tiene que seguir
+    mostrando una sola fila por período, la del mensual."""
+    generar_snapshot(conn, "2026-08", porcentaje_aumento_aplicado=10.0)
+    generar_snapshot_operacion_importante(conn, "2026-08", observacion="Antes de un aumento")
+
+    filas = historial_general(conn, por_anio=False)
+    filas_agosto = [f for f in filas if f.periodo == "2026-08"]
+    assert len(filas_agosto) == 1
+
+
+def test_regenerar_snapshot_si_corresponde_no_toca_una_fila_de_operacion_importante(conn, dos_consultorios):
+    """Si en el mismo período solo existe un snapshot "de operación
+    importante" (sin ningún mensual todavía), DC-06 §3 no tiene nada que
+    actualizar — ese período, a los efectos del cierre de mes, sigue sin
+    cerrar."""
+    generar_snapshot_operacion_importante(conn, "2026-08", observacion="Antes de un aumento")
+    regenerar_snapshot_si_corresponde(conn, "2026-08")
+    filas = obtener_repositorio(conn, "SnapshotMensual").listar(Periodo="2026-08")
+    assert len(filas) == 1
+    assert filas[0]["Tipo"] == "OperacionImportante"  # sigue intacta, no se convirtió en mensual
+
+
+def test_limpiar_snapshots_operacion_importante_antiguos_borra_los_de_mas_de_12_meses(conn, dos_consultorios):
+    generar_snapshot_operacion_importante(conn, "2025-06")  # más de 12 meses antes de 2026-10
+    generar_snapshot_operacion_importante(conn, "2026-09")  # dentro de la retención
+    borrados = limpiar_snapshots_operacion_importante_antiguos(conn, date(2026, 10, 4))
+    assert borrados == 1
+    restantes = obtener_repositorio(conn, "SnapshotMensual").listar(Tipo="OperacionImportante")
+    assert [f["Periodo"] for f in restantes] == ["2026-09"]
+
+
+def test_limpiar_snapshots_operacion_importante_antiguos_no_toca_los_mensuales(conn, dos_consultorios):
+    """Los snapshots mensuales se conservan para siempre, sin importar su
+    antigüedad — esta limpieza es exclusiva de los de operación
+    importante."""
+    generar_snapshot(conn, "2020-01")
+    borrados = limpiar_snapshots_operacion_importante_antiguos(conn, date(2026, 10, 4))
+    assert borrados == 0
+    assert obtener_repositorio(conn, "SnapshotMensual").listar(Periodo="2020-01") != []

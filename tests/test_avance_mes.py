@@ -180,6 +180,23 @@ def test_avanzar_mes_genera_snapshot(conn):
     assert snapshot["Periodo"] == "2026-08"
 
 
+def test_avanzar_mes_limpia_snapshots_de_operacion_importante_antiguos(conn):
+    """DC-06 §6 (auditoría DC-01/DC-10, hallazgo #26): retención de 12
+    meses para los snapshots "de operación importante" — los mensuales
+    (generados por este mismo `avanzar_mes`, uno por período) no se
+    tocan, se conservan para siempre."""
+    from app.negocio.estadisticas import generar_snapshot_operacion_importante
+
+    generar_snapshot_operacion_importante(conn, "2025-01")  # más de 12 meses antes de la fecha ficticia del conn
+    generar_snapshot_operacion_importante(conn, "2026-07")  # dentro de la retención
+
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+    assert resumen.snapshots_operacion_importante_eliminados == 1
+
+    restantes = obtener_repositorio(conn, "SnapshotMensual").listar(Tipo="OperacionImportante")
+    assert [f["Periodo"] for f in restantes] == ["2026-07"]
+
+
 def test_avanzar_mes_genera_snapshot_al_final(conn, monkeypatch):
     """DC-06 §2 Paso 9 (auditoría DC-01/DC-10, hallazgo #29): el snapshot
     se genera como ÚLTIMO paso del proceso — antes de esta corrección se

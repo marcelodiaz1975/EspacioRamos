@@ -2,7 +2,7 @@
 general" y "Estadísticas varias" — ver CLAUDE.md y el docstring de
 app/gui/pantallas/estadisticas.py."""
 import pytest
-from PySide6.QtWidgets import QLabel, QTabWidget, QWidget
+from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -18,6 +18,16 @@ def conn(tmp_path):
     sembrar_valores_por_defecto(connection)
     yield connection
     connection.close()
+
+
+@pytest.fixture(autouse=True)
+def _sin_dialogos_modales(monkeypatch):
+    """Mismo criterio que `test_gui_importacion.py`: `QMessageBox.
+    information`/`.critical` son modales de verdad (`exec()` bloquea) —
+    sin esto, cualquier test que ejercite el camino de éxito/error de
+    "Exportar a Excel" (DC-06 §6) se queda esperando para siempre."""
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: None))
 
 
 def _crear_edificio_con_consultorio(conn):
@@ -297,7 +307,69 @@ def test_cadena_de_foco_de_estadisticas_varias(qtbot, conn):
     panel = pantalla.panel_varias
     from PySide6.QtWidgets import QPushButton
     boton_actualizar = next(b for b in panel.findChildren(QPushButton) if b.text() == "Actualizar tabla")
+    boton_exportar = next(b for b in panel.findChildren(QPushButton) if b.text() == "Exportar a Excel")
     assert panel._foco._orden == [
         panel.combo_desde, panel.combo_hasta, panel.combo_localidad, panel.combo_edificio,
-        panel.combo_unidad, panel.combo_consultorio, boton_actualizar,
+        panel.combo_unidad, panel.combo_consultorio, boton_actualizar, boton_exportar,
     ]
+
+
+# -------------------------------------------- DC-06 §6: exportar a Excel
+
+def _boton(panel, texto):
+    from PySide6.QtWidgets import QPushButton
+    return next(b for b in panel.findChildren(QPushButton) if b.text() == texto)
+
+
+def test_historial_general_boton_exportar_es_secundario(qtbot, conn):
+    pantalla = PantallaEstadisticas(conn)
+    qtbot.addWidget(pantalla)
+    boton = _boton(pantalla.panel_historial, "Exportar a Excel")
+    assert boton.objectName() == "botonSecundario"
+
+
+def test_historial_general_exportar_a_excel_genera_el_archivo(qtbot, conn, tmp_path, monkeypatch):
+    from openpyxl import load_workbook
+    from PySide6.QtWidgets import QFileDialog
+
+    generar_snapshot(conn, periodo_actual(conn))
+    pantalla = PantallaEstadisticas(conn)
+    qtbot.addWidget(pantalla)
+
+    destino = tmp_path / "historial.xlsx"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(destino), "")))
+    _boton(pantalla.panel_historial, "Exportar a Excel").click()
+
+    assert destino.exists()
+    hoja = load_workbook(destino).active
+    assert hoja.cell(row=1, column=1).value == "Período"
+    assert hoja.max_row - 1 == len(pantalla.panel_historial._filas)  # una fila de encabezado + una por período
+
+
+def test_historial_general_exportar_cancelado_no_genera_archivo(qtbot, conn, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    pantalla = PantallaEstadisticas(conn)
+    qtbot.addWidget(pantalla)
+    destino = tmp_path / "no_deberia_existir.xlsx"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: ("", "")))
+    _boton(pantalla.panel_historial, "Exportar a Excel").click()
+    assert not destino.exists()
+
+
+def test_estadisticas_varias_exportar_a_excel_genera_el_archivo(qtbot, conn, tmp_path, monkeypatch):
+    from openpyxl import load_workbook
+    from PySide6.QtWidgets import QFileDialog
+
+    _crear_edificio_con_consultorio(conn)
+    pantalla = PantallaEstadisticas(conn)
+    qtbot.addWidget(pantalla)
+
+    destino = tmp_path / "varias.xlsx"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(destino), "")))
+    _boton(pantalla.panel_varias, "Exportar a Excel").click()
+
+    assert destino.exists()
+    hoja = load_workbook(destino).active
+    assert [c.value for c in hoja[1]][:3] == ["Período", "Porcentaje Ocupación", "Horas regulares semanales"]
+    assert hoja.max_row - 1 == len(pantalla.panel_varias._filas)

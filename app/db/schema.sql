@@ -582,7 +582,9 @@ CREATE TABLE IF NOT EXISTS SnapshotMensual (
     PorcentajeAumentoAplicado REAL,
     HorasRegularesSemanales REAL,
     MontoHorasRegulares REAL,
-    MontoHorasAisladas REAL
+    MontoHorasAisladas REAL,
+    Tipo TEXT NOT NULL DEFAULT 'Mensual',
+    Observacion TEXT
 );
 
 -- 3.25 GastoOperativo -----------------------------------------------------------------------

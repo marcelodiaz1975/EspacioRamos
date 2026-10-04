@@ -70,6 +70,7 @@ from app.negocio.dias import (
     periodo_actual,
     periodo_anterior,
     primer_dia_mes,
+    sumar_meses,
     ultimo_dia_mes,
 )
 from app.negocio.grilla import calcular_ocupacion_regular
@@ -211,15 +212,76 @@ def generar_snapshot(
 ) -> int:
     """Persiste un SnapshotMensual con la ocupación y los valores vigentes
     de `periodo` (sección 3.24: "backup de estado" para poder comparar
-    meses más adelante)."""
+    meses más adelante). `Tipo='Mensual'` (uno por período, al cerrar el
+    mes) — ver `generar_snapshot_operacion_importante` para el otro tipo,
+    que no comparte esta restricción de "uno por período"."""
     anio, mes = parsear_periodo(periodo)
     repo = obtener_repositorio(conn, "SnapshotMensual")
     return repo.crear(
         Periodo=periodo,
         FechaGeneracion=fecha_actual(conn).isoformat(),
         PorcentajeAumentoAplicado=porcentaje_aumento_aplicado,
+        Tipo="Mensual",
         **_campos_snapshot(conn, anio, mes),
     )
+
+
+_RETENCION_SNAPSHOTS_OPERACION_IMPORTANTE_MESES = 12
+
+
+def generar_snapshot_operacion_importante(
+    conn: sqlite3.Connection, periodo: str, *, observacion: str | None = None,
+) -> int:
+    """DC-06 §6: snapshot adicional, fuera del ciclo mensual de avance de
+    mes, tomado justo ANTES de una operación importante que cambia
+    valores de consultorio — hoy, confirmar un aumento (`app.negocio.
+    aumentos.confirmar_aumento`, que lo llama antes de tocar ningún
+    valor) — para poder comparar el estado de ocupación/horas/montos (y,
+    vía `ValoresConsultorios`, los valores de hora vigentes en ese
+    momento) contra lo que haya después de la operación.
+
+    A diferencia de `generar_snapshot` (uno por período, al cerrar el
+    mes), acá puede haber varios dentro del mismo período — cada
+    operación importante genera el suyo — así que `Tipo=
+    'OperacionImportante'` los distingue de los mensuales de siempre y
+    `historial_general` los ignora por completo (sigue filtrando por
+    `Tipo='Mensual'`, uno por período). No tienen pantalla propia para
+    revisarlos a mano todavía — quedan en la base como registro histórico,
+    sujetos a la retención de `limpiar_snapshots_operacion_importante_
+    antiguos` (no fue parte de este pedido sumarles una pantalla, solo la
+    infraestructura que describe el hallazgo)."""
+    anio, mes = parsear_periodo(periodo)
+    repo = obtener_repositorio(conn, "SnapshotMensual")
+    return repo.crear(
+        Periodo=periodo,
+        FechaGeneracion=fecha_actual(conn).isoformat(),
+        Tipo="OperacionImportante",
+        Observacion=observacion,
+        **_campos_snapshot(conn, anio, mes),
+    )
+
+
+def limpiar_snapshots_operacion_importante_antiguos(conn: sqlite3.Connection, hoy: date) -> int:
+    """Retención de 12 meses para los snapshots `Tipo='OperacionImportante'`
+    (ver `generar_snapshot_operacion_importante`) — a diferencia de los
+    mensuales de siempre, que `historial_general` necesita conservar para
+    siempre (uno por período, nunca se borran), estos se acumulan uno por
+    cada operación importante sin ningún consumidor que necesite verlos
+    más allá de un año. Mismo criterio de retención en MESES que `app.
+    negocio.archivos_generados.limpiar_liquidaciones_simuladas_antiguas`,
+    pero sobre filas de la base en vez de archivos en disco. Se llama
+    desde `avance_mes.avanzar_mes`, junto con el resto de las limpiezas
+    periódicas."""
+    periodo_limite = sumar_meses(
+        f"{hoy.year:04d}-{hoy.month:02d}", -_RETENCION_SNAPSHOTS_OPERACION_IMPORTANTE_MESES,
+    )
+    repo = obtener_repositorio(conn, "SnapshotMensual")
+    borrados = 0
+    for snapshot in repo.listar(Tipo="OperacionImportante"):
+        if snapshot["Periodo"] < periodo_limite:
+            repo.eliminar(snapshot["IdSnapshot"])
+            borrados += 1
+    return borrados
 
 
 def regenerar_snapshot_si_corresponde(conn: sqlite3.Connection, periodo: str) -> None:
@@ -247,9 +309,14 @@ def regenerar_snapshot_si_corresponde(conn: sqlite3.Connection, periodo: str) ->
     datos de un solo espacio de consultorios) — nada que no se haga ya,
     una vez por mes, en cada avance de mes; llamarlo de nuevo ante un
     ítem tardío (un evento raro, no una operación de uso diario) no
-    agrega un costo distinto en orden de magnitud."""
+    agrega un costo distinto en orden de magnitud.
+
+    Filtra `Tipo='Mensual'` (DC-06 §6: ver `generar_snapshot_operacion_
+    importante`) para no confundir el snapshot mensual del cierre con
+    uno de "operación importante" que pueda caer en el mismo período —
+    son conceptos distintos, este solo toca el mensual."""
     repo = obtener_repositorio(conn, "SnapshotMensual")
-    existentes = repo.listar(Periodo=periodo)
+    existentes = repo.listar(Periodo=periodo, Tipo="Mensual")
     if not existentes:
         return
     snapshot = max(existentes, key=lambda f: f["IdSnapshot"])
@@ -526,8 +593,12 @@ def historial_general(conn: sqlite3.Connection, *, por_anio: bool) -> list[FilaE
     esta revisión no tienen Horas/Montos guardados (esas columnas no
     existían) — esas celdas quedan en blanco, no se recalculan
     retroactivamente (ver el docstring del módulo: la info "surge de los
-    snapshots", no se reconstruye por fuera de ellos)."""
-    snapshots = obtener_repositorio(conn, "SnapshotMensual").listar()
+    snapshots", no se reconstruye por fuera de ellos). Filtra `Tipo=
+    'Mensual'` (DC-06 §6): los snapshots "de operación importante"
+    (`generar_snapshot_operacion_importante`) pueden caer en el mismo
+    período que el mensual, sin ser el mismo concepto — se ignoran por
+    completo acá."""
+    snapshots = obtener_repositorio(conn, "SnapshotMensual").listar(Tipo="Mensual")
     datos_por_mes: dict[str, dict] = {
         s["Periodo"]: {
             "ocupacion_pct": s["PorcentajeOcupacionGeneral"],

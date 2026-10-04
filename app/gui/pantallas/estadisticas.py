@@ -11,13 +11,17 @@ from __future__ import annotations
 
 import sqlite3
 
+from openpyxl import Workbook
+from openpyxl.styles import Font
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -142,6 +146,37 @@ def _armar_tabla() -> QTableWidget:
     return tabla
 
 
+# Mismos títulos que `_COLUMNAS`, sin el "\n" (ahí es para que el
+# encabezado de la tabla ocupe menos ancho — en una planilla Excel no
+# hace falta ese recurso).
+_COLUMNAS_EXCEL = [c.replace("\n", " ") for c in _COLUMNAS]
+
+
+def _exportar_filas_a_excel(filas: list[FilaEstadistica], ruta: str) -> None:
+    """DC-06 §6 (hallazgo de la auditoría DC-01/DC-10): exporta exactamente
+    las filas que se le pasan (ya filtradas/ordenadas por el panel que
+    llama) con las mismas 11 columnas y el mismo formato de texto que la
+    tabla en pantalla — mismos helpers (`_texto_pct`/`_texto_horas`/etc.),
+    para que lo que se vea en la planilla coincida con lo que se vio en
+    el panel antes de exportar."""
+    libro = Workbook()
+    hoja = libro.active
+    hoja.title = "Estadísticas"
+    hoja.append(_COLUMNAS_EXCEL)
+    for celda in hoja[1]:
+        celda.font = Font(bold=True)
+    for f in filas:
+        hoja.append([
+            f.periodo, _texto_pct(f.ocupacion_pct), _texto_horas(f.horas_regulares_semanales),
+            _texto_variacion(f.variacion_horas), _texto_monto(f.monto_regular), _texto_monto(f.monto_aislada),
+            _texto_monto(f.monto_total), f.cant_localidades, f.cant_edificios, f.cant_unidades, f.cant_consultorios,
+        ])
+    for i, titulo in enumerate(_COLUMNAS_EXCEL, start=1):
+        ancho = max(14, len(titulo) + 2)
+        hoja.column_dimensions[hoja.cell(row=1, column=i).column_letter].width = ancho
+    libro.save(ruta)
+
+
 class PantallaEstadisticas(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -210,6 +245,12 @@ class _PanelHistorialGeneral(QWidget):
         boton_actualizar.clicked.connect(self._restablecer)
         columna.addWidget(boton_actualizar)
 
+        boton_exportar = QPushButton("Exportar a Excel")
+        boton_exportar.setObjectName("botonSecundario")
+        boton_exportar.setFixedWidth(_ANCHO_CAMPO)
+        boton_exportar.clicked.connect(self._exportar_a_excel)
+        columna.addWidget(boton_exportar)
+
         columna.addStretch()
         layout_externo.addWidget(panel_filtros)
 
@@ -218,8 +259,21 @@ class _PanelHistorialGeneral(QWidget):
 
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         self._foco = instalar_enter_avanza_foco(
-            [self.check_por_mes, self.check_por_anio, boton_actualizar], parent=self,
+            [self.check_por_mes, self.check_por_anio, boton_actualizar, boton_exportar], parent=self,
         )
+
+    def _exportar_a_excel(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar a Excel", "Estadisticas - Historial general.xlsx", "Excel (*.xlsx)",
+        )
+        if not ruta:
+            return
+        try:
+            _exportar_filas_a_excel(self._filas, ruta)
+        except OSError as exc:
+            QMessageBox.critical(self, "Exportar a Excel", f"No se pudo generar la planilla: {exc}")
+            return
+        QMessageBox.information(self, "Exportar a Excel", f"Planilla generada en: {ruta}")
 
     def _restablecer(self) -> None:
         self.check_por_mes.blockSignals(True)
@@ -308,6 +362,12 @@ class _PanelEstadisticasVarias(QWidget):
         boton_actualizar.clicked.connect(self._restablecer)
         columna.addWidget(boton_actualizar)
 
+        boton_exportar = QPushButton("Exportar a Excel")
+        boton_exportar.setObjectName("botonSecundario")
+        boton_exportar.setFixedWidth(_ANCHO_CAMPO)
+        boton_exportar.clicked.connect(self._exportar_a_excel)
+        columna.addWidget(boton_exportar)
+
         columna.addStretch()
         layout_externo.addWidget(panel_filtros)
 
@@ -319,10 +379,23 @@ class _PanelEstadisticasVarias(QWidget):
         self._foco = instalar_enter_avanza_foco(
             [
                 self.combo_desde, self.combo_hasta, self.combo_localidad, self.combo_edificio,
-                self.combo_unidad, self.combo_consultorio, boton_actualizar,
+                self.combo_unidad, self.combo_consultorio, boton_actualizar, boton_exportar,
             ],
             parent=self,
         )
+
+    def _exportar_a_excel(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar a Excel", "Estadisticas - Estadisticas varias.xlsx", "Excel (*.xlsx)",
+        )
+        if not ruta:
+            return
+        try:
+            _exportar_filas_a_excel(self._filas, ruta)
+        except OSError as exc:
+            QMessageBox.critical(self, "Exportar a Excel", f"No se pudo generar la planilla: {exc}")
+            return
+        QMessageBox.information(self, "Exportar a Excel", f"Planilla generada en: {ruta}")
 
     # ------------------------------------------------------- combos
 

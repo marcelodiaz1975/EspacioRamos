@@ -56,7 +56,7 @@ from app.negocio.archivos_generados import (
 )
 from app.negocio.backup import generar_backup
 from app.negocio.dias import fecha_actual, parsear_periodo, sumar_meses, ultimo_dia_mes
-from app.negocio.estadisticas import generar_snapshot
+from app.negocio.estadisticas import generar_snapshot, limpiar_snapshots_operacion_importante_antiguos
 from app.negocio.lista_espera import eliminar_pedido
 from app.repositorio.registro import obtener_repositorio
 
@@ -77,6 +77,7 @@ class ResumenAvanceMes:
     liquidaciones_antiguas_eliminadas: int = 0
     liquidaciones_simuladas_antiguas_eliminadas: int = 0
     ofertas_eliminadas: int = 0
+    snapshots_operacion_importante_eliminados: int = 0
 
 
 def _traspasar_saldos(conn: sqlite3.Connection) -> int:
@@ -283,6 +284,13 @@ def avanzar_mes(
     resumen.archivos_varios_regenerados = _regenerar_archivos_varios(conn)
     resumen.liquidaciones_antiguas_eliminadas = _limpiar_liquidaciones_antiguas_todos(conn, fecha_actual(conn))
     resumen.liquidaciones_simuladas_antiguas_eliminadas = _limpiar_liquidaciones_simuladas_antiguas(
+        conn, fecha_actual(conn),
+    )
+    # DC-06 §6 (hallazgo de la auditoría DC-01/DC-10): retención de 12
+    # meses para los snapshots "de operación importante" (ver
+    # `aumentos.confirmar_aumento`) — los mensuales de siempre no se
+    # tocan, se siguen conservando para siempre.
+    resumen.snapshots_operacion_importante_eliminados = limpiar_snapshots_operacion_importante_antiguos(
         conn, fecha_actual(conn),
     )
     if carpeta_base(conn) is not None:

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.db.init_db import init_database
@@ -66,6 +68,21 @@ def test_confirmar_aumento_congela_anterior_primera_vez(conn, consultorio):
     assert c["ValorHoraRegularActual"] == pytest.approx(1100)
     assert c["ValorHoraAisladaAnterior"] == pytest.approx(VALOR_AISLADA)
     assert c["ValorHoraAisladaActual"] == pytest.approx(550)
+
+
+def test_confirmar_aumento_deja_snapshot_de_operacion_importante_con_el_estado_previo(conn, consultorio):
+    """DC-06 §6: el snapshot se toma ANTES de tocar ningún valor de
+    consultorio, así que `ValoresConsultorios` tiene que reflejar el
+    valor VIEJO, no el nuevo recién aplicado."""
+    confirmar_aumento(conn, porcentaje_general=10, periodo=PERIODO)
+
+    snapshots = obtener_repositorio(conn, "SnapshotMensual").listar(Tipo="OperacionImportante")
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
+    assert snapshot["Periodo"] == PERIODO
+    assert "10" in snapshot["Observacion"]
+    valores = json.loads(snapshot["ValoresConsultorios"])
+    assert valores[str(consultorio)] == pytest.approx(VALOR_REGULAR)  # el viejo, no el 1100 nuevo
 
 
 def test_confirmar_aumento_correccion_no_vuelve_a_pisar_anterior(conn, consultorio):
