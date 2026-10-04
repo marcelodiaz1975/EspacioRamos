@@ -6264,6 +6264,27 @@ correcto al abrirlo devuelve un carácter de control distinto al
 extraer texto), así que el signo en sí no es un criterio de test
 confiable en ningún PDF de este sistema.
 
+## Liquidación: "Saldo de la liquidación anterior" siempre se muestra (hallazgo #33, decisión consciente)
+
+Hallazgo cosmético de la auditoría DC-01/DC-10 (#33, confirmado ❌ SIGUE
+en el v2: "'Saldo de la liquidación anterior' se agrega siempre, sin
+importar si es $0 — no se omite"). Se implementó la omisión en $0 (ver
+`_items_cuenta`, `app/pdf/liquidacion_pdf.py`) y se le mostraron a la
+clienta tres PDF de ejemplo (antes/después del caso en $0, más un
+tercero con saldo real para confirmar que no cambiaba) — mismo criterio
+de "mostrar antes de confirmar" que el resto de esta lista.
+
+**Revertido a pedido explícito de la clienta**: "Sin cambios, que esa
+línea se muestre siempre, es decir el saldo de la liquidación anterior,
+ya sea a favor del profesional, como pendiente a favor del espacio, o
+en cero, que se muestre siempre." El hallazgo de la auditoría queda
+cerrado SIN cambio de código — mismo criterio que DC-07 §2.5/§3.3 más
+arriba (decisión consciente documentada, no un bug): la línea de saldo
+anterior sigue apareciendo siempre en el PDF, en sus tres redacciones de
+siempre ("Saldo pendiente..."/"Saldo a favor..."/"Saldo de la
+liquidación anterior" a secas para el caso en $0), sin ninguna
+condición que la omita.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
