@@ -6285,6 +6285,216 @@ siempre ("Saldo pendiente..."/"Saldo a favor..."/"Saldo de la
 liquidación anterior" a secas para el caso en $0), sin ninguna
 condición que la omita.
 
+## Reservas: resolución de Lista de espera 100% automática (auditoría #12)
+
+Hallazgo de la auditoría DC-01/DC-10 (#12, DC-10 §2.2 paso 5): al
+confirmar una reserva regular que coincide con un pedido Activo de Lista
+de espera de ese profesional, el sistema preguntaba con un cartel Sí/No
+("¿Marcar como resuelto el pedido de Lista de espera de este
+profesional?") antes de marcarlo `Resuelto`. Pedido explícito de la
+clienta sobre este hallazgo: "Pasalo a automático" — se saca el cartel
+por completo, la resolución queda incondicional (siempre que haya
+exactamente un pedido Activo de ese profesional; con más de uno sigue
+quedando a criterio manual, no hay forma de saber cuál de todos se
+acaba de cubrir, eso no cambió).
+
+`app/gui/pantallas/reservas.py`: `_ofrecer_resolver_lista_espera`
+(preguntaba, y solo si confirmaban llamaba `marcar_resuelto`) se
+renombra `_resolver_lista_espera_si_corresponde` y llama `marcar_
+resuelto` directo, sin ningún `QMessageBox.question` de por medio. Mismo
+único call site de antes (al confirmar una reserva regular, después de
+`crear_reserva_regular`).
+
+Tests en `tests/test_gui_reservas.py`: el nombre del test que confirmaba
+la resolución automática con un solo pedido se actualiza
+(`test_crear_reserva_regular_resuelve_pedido_unico_de_lista_de_espera_
+automaticamente`); se borra el que probaba la opción de decir "No" al
+cartel (funcionalidad retirada); el de "no resuelve con más de un
+pedido activo" se simplifica, sacando el monkeypatch de `QMessageBox.
+question` que ya no hace falta.
+
+## Novedades: vacaciones/licencias nunca chocan con una aislada ya cargada (auditoría #16, decisión consciente)
+
+Hallazgo de la auditoría (#16): "al cargar una Vacación o Licencia, el
+sistema no avisa ni bloquea si ya hay una Reserva Aislada de OTRO
+profesional ocupando ese mismo consultorio/horario gracias al lugar que
+dejó vacante el profesional ausente". Investigado antes de proponer
+nada: `crear_vacacion`/`crear_licencia` en efecto no hacen ningún chequeo
+contra `ReservaAislada` — solo `cancelar_vacacion`/`cancelar_licencia` lo
+hacen (`aisladas_bloqueadas_por_anulacion`, para impedir anular una
+vacación si eso dejaría "huérfana" una aislada que ya ocupó ese lugar).
+
+Confirmado con la clienta que esto no es un hueco: una reserva aislada
+SOLO se puede cargar en un consultorio/horario ya liberado por una
+vacación/licencia/ausencia existente (`verificar_conflictos_aislada`
+exige que el lugar esté libre o vacante) — es decir, el orden real
+siempre es "primero se vacía el lugar, después se ocupa". Al CREAR una
+vacación/licencia nueva no puede existir todavía ninguna aislada que
+dependa de ella (no hay ninguna aislada previa que "choque" con un
+vaciado que recién está ocurriendo) — el caso que sí importa (anular una
+vacación que una aislada ya está usando) ya está cubierto por el
+chequeo que SÍ existe en `cancelar_vacacion`/`cancelar_licencia`.
+
+Hallazgo cerrado sin cambio de código — mismo criterio que otras
+decisiones ya documentadas en este archivo (DC-07 §2.5/§3.3, hallazgo
+#33): no es un bug, agregar el chequeo sería redundante.
+
+## Registro de ausencias (Vacaciones): combo acotado a reserva activa, cálculo en vivo del período (auditoría #20)
+
+Hallazgo de la auditoría (#20, DC-10 §1.1 F19): "el combo Profesional de
+la solapa Vacaciones no se acota a quienes realmente pueden tomar
+vacaciones, y no hay ningún cálculo en vivo mientras se eligen las
+fechas Desde/Hasta — solo se sabe el impacto real al confirmar". Pedido
+explícito de la clienta sobre los dos puntos: "acortá la lista de
+alguna manera a que solo se pueda buscar profesionales con reservas
+regulares activas. No se pueden cargar vacaciones a quién no tiene
+reserva regular. Y sumá el cálculo en vivo, me parece interesante y
+útil."
+
+### Combo acotado a reserva regular activa
+
+`_opciones_profesional_vacaciones(conn)` (nueva, `app/gui/pantallas/
+novedades.py`) reemplaza, SOLO en `_PanelVacaciones`, el `_opciones_
+profesional(self.conn, _CATEGORIAS_TODAS)` genérico que seguían usando
+Licencias/Ausencias/Cargos especiales (esas tres pantallas no fueron
+parte de este pedido, se quedan igual). Devuelve categoría R/B/E
+(`CATEGORIAS_CON_DERECHO_A_VACACIONES`, ya existente) CON una
+`ReservaRegular` vigente HOY (mismo criterio de "activa" que `app.
+negocio.panel_control._reserva_regular_activa`: `VigenciaInicio <= hoy
+AND (VigenciaFin IS NULL OR VigenciaFin >= hoy)`).
+
+Este combo cumple doble función en esta pantalla (elegir a quién
+crearle una vacación nueva, Y filtrar el historial de la tabla de
+abajo) — acotarlo solo a los elegibles de HOY hubiera dejado sin forma
+de filtrar el historial de alguien que ya tiene vacaciones cargadas
+pero hoy dejó de reservar regular. Por eso la lista es la UNIÓN de "
+elegible hoy" con "ya tiene al menos una `Vacacion` registrada" (un
+`OR EXISTS` contra la tabla `Vacacion`, no solo el filtro de reserva
+activa) — nadie con historial real desaparece de la lista, aunque ya
+no se le pueda cargar una vacación nueva.
+
+### Cálculo en vivo al elegir Desde/Hasta
+
+`simular_vacacion(conn, *, id_profesional, fecha_desde, fecha_hasta)`
+(nueva, `app/negocio/vacaciones.py`, devuelve el dataclass `Simulacion
+Vacacion`) extrae el cálculo que ya hacía `crear_vacacion` de punta a
+punta (valor bonificado, fracción de semana consumida, % de cupo
+consumido/restante, la advertencia de "excede el cupo disponible" si
+corresponde) SIN llegar a guardar nada — `crear_vacacion` pasa a
+delegar en esta función (mismo resultado exacto, confirmado con la
+suite completa de `tests/test_vacaciones.py` sin tocarla).
+
+`_PanelVacaciones` suma `self.etiqueta_simulacion_periodo` (un `QLabel`
+con `setWordWrap`, ubicado justo debajo de los campos Desde/Hasta, antes
+de los tres botones de acción) y `_actualizar_simulacion_periodo`, que
+llama a `simular_vacacion` con el profesional/fechas tal cual están
+tipeados en ESE momento — conectado a `combo_profesional.
+currentIndexChanged` (vía `_profesional_cambio`) y a `campo_desde.
+dateChanged`/`campo_hasta.dateChanged` directo, así que se recalcula
+sin necesitar ningún botón. Sin profesional elegido, o si `simular_
+vacacion` tira `ValueError` (ej. un período que cruza de año), muestra
+un guión en vez de romper. También se vuelve a llamar después de Crear/
+Anular (el cupo ya consumido cambia, así que la vista previa del mismo
+período tiene que reflejarlo).
+
+Tests nuevos en `tests/test_gui_novedades.py`: `test_combo_vacaciones_
+solo_incluye_profesionales_con_reserva_regular_activa` (categoría R sin
+reserva y categoría sin derecho quedan afuera), `test_combo_vacaciones_
+conserva_a_quien_ya_tiene_historial_aunque_hoy_no_califique` (alguien
+con una vacación ya cargada sigue en el combo aunque se le cierre la
+`ReservaRegular`), `test_simulacion_en_vivo_del_periodo_se_actualiza_al_
+cambiar_las_fechas` (guión sin profesional, texto real al elegir
+fechas), `test_simulacion_en_vivo_se_recalcula_despues_de_crear_una_
+vacacion` (el mismo período muestra un texto distinto después de
+confirmar). El test preexistente de "filtra por profesional" se ajustó:
+el "otro profesional" que antes era categoría A sin ninguna reserva (ya
+no entraría al combo acotado) pasa a ser categoría R con su propia
+`ReservaRegular` vigente, preservando la intención original del test
+(un profesional elegible sin ninguna vacación cargada muestra la tabla
+vacía).
+
+## Grilla y mensajería: se sacan los atajos rápidos desde celdas libres de la grilla semanal (auditoría #21, decisión consciente)
+
+Hallazgo de la auditoría (#21): la "Grilla semanal" (solapa de "Grilla y
+mensajería") no ofrece ningún atajo para cargar una vacación/licencia/
+aislada/reserva regular haciendo click directo sobre una celda libre —
+hay que ir a la pantalla correspondiente y elegir profesional/fecha/
+consultorio a mano. Consultada la clienta sobre si esto era lo que
+señalaba el hallazgo: confirmó que sí, y decidió explícitamente dejarlo
+como está — "dejalo así". Hallazgo cerrado sin cambio de código, mismo
+criterio que otras decisiones ya documentadas en este archivo.
+
+## Mensajes predefinidos: variables disponibles en el campo Mensaje (auditoría #24)
+
+Hallazgo de la auditoría (#24): el campo "Mensaje" del diálogo Nuevo/
+Editar no muestra en ningún lado qué variables se pueden usar — la
+única pista estaba en la leyenda de "Vista previa", DEBAJO de todo el
+`PantallaCRUD`, lejos de donde se escribe el mensaje. Consultada la
+clienta ("Mostrame o contame mejor esto, sería para hacer algo similar
+a la solapa de Textos del sistema..?"): confirmó que sí, y pidió además
+poder INSERTAR las variables con un clic ("como selecciono variables")
+y, de paso, sumar variables nuevas a futuro aunque hoy no se usen
+("por el día de mañana las necesito no está de más tampoco").
+
+### Mecanismo genérico en `crud_generico.py`
+
+`Campo` suma un parámetro nuevo, `variables: dict[str, str] | None =
+None` (nombre de variable sin llaves → descripción), solo con efecto en
+`tipo="texto_largo"`. Cuando está presente, `_DialogoRegistro` agrega
+una fila debajo del campo con una grilla de 4 columnas de botones
+(`_armar_fila_variables`, `_COLUMNAS_BOTONES_VARIABLES = 4` — mismo
+criterio de grilla fija que la de días de Llaves/Oferta de
+consultorios, para que una lista larga de variables no quede recortada
+contra el borde del diálogo), uno por variable: clickearlo inserta
+`{nombre}` en el cursor del `QPlainTextEdit` sin pisar lo ya tipeado
+(`QPlainTextEdit.insertPlainText`), con la descripción como tooltip del
+botón (sin alargar la fila con texto largo). El `QPlainTextEdit` real
+sigue siendo lo único que guarda `_DialogoRegistro._entradas[campo.
+nombre]` (no un widget contenedor) — así la cadena de foco Enter/Tab, la
+validación de campo obligatorio y `valores()` no necesitaron ningún
+cambio, siguen operando sobre el mismo widget de siempre.
+
+Queda disponible para cualquier catálogo con un campo `texto_largo`, no
+solo para Mensajes predefinidos — hoy es el único que lo usa.
+
+### Variables de Mensajes predefinidos: de 4 a 8
+
+`_VARIABLES_MENSAJE` (`app/gui/pantallas/mensajes_predefinidos.py`) es
+el diccionario único que alimenta tanto la fila de botones del campo
+Mensaje como la leyenda de "Vista previa" (una sola fuente, no dos
+listas a mantener). Además de las 4 que ya existían
+(`{apodo}`/`{edificio}`/`{unidad}`/`{consultorio}`), se suman cuatro
+más, elegidas por ser datos que esta pantalla ya tiene resueltos en su
+propio contexto (sin inventar ninguna fuente nueva):
+
+- `{localidad}`: cierra un hueco ya documentado en este archivo ("Localidad
+  no tiene ninguna variable propia todavía... queda ahí por paridad con
+  el cuadro de diálogo, listo para el día que haga falta un
+  {localidad}") — `_variables_ubicacion` suma un cuarto parámetro
+  `id_localidad` (independiente de edificio/unidad/consultorio, mismo
+  criterio de "sin cascada" que el resto de los campos de ubicación de
+  esta pantalla) y resuelve el nombre de la `Localidad` vinculada al
+  mensaje, en blanco si no hay ninguna — mismo criterio de "en blanco si
+  no hay nada elegido" que edificio/unidad/consultorio. El selector de
+  contexto Localidad (ya existía, sin usarlo para ninguna variable) pasa
+  a poder pisar también esta.
+- `{nombre}`/`{apellido}`/`{tratamiento}`: del profesional elegido en
+  "Dirigido a", mismo origen que `{apodo}` — `_apodo_dirigido_a` se
+  reemplaza por `_variables_profesional_dirigido_a` (devuelve las
+  cuatro juntas, en blanco las cuatro sin ningún profesional elegido),
+  para no repetir la misma consulta a `Profesional` cuatro veces.
+
+Tests nuevos en `tests/test_mensajes_predefinidos.py`:
+`test_campo_mensaje_suma_variables_al_diccionario_de_campo` (las 8
+quedan en `Campo.variables`), `test_dialogo_suma_un_boton_por_variable_
+que_inserta_en_el_cursor` (clic inserta en el cursor sin pisar lo
+tipeado, tooltip con la descripción), `test_campos_sin_variables_no_
+suman_ningun_boton_extra` (un campo `texto_largo` común, de cualquier
+otro catálogo, no se ve afectado), `test_localidad_del_mensaje_
+sustituye_en_la_vista_previa`, `test_contexto_localidad_pisa_al_
+vinculo_del_mensaje_general`, `test_dirigido_a_sustituye_nombre_
+apellido_y_tratamiento`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
