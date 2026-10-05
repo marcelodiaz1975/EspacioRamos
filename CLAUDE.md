@@ -6740,12 +6740,11 @@ actualización). `tests/test_reservas.py` (`#45`:
 `test_crear_reserva_aislada_que_cruza_medianoche_falla`/`test_crear_
 reserva_aislada_hora_fin_igual_a_hora_inicio_falla`).
 
-### #39, #44 ya resueltos (con ejemplos mostrados antes de implementar); #42 sigue en consulta
+### #39, #42, #44: los tres resueltos (con ejemplos mostrados antes de implementar)
 
 Los tres habían quedado pendientes de que la clienta viera ejemplos
-concretos antes de elegir. Dos ya se resolvieron sobre la respuesta que
-dio viendo esos ejemplos; el tercero sigue abierto porque la clienta
-pidió más aclaración.
+concretos antes de elegir. Los tres ya se resolvieron sobre la
+respuesta que dio viendo esos ejemplos.
 
 - **#39 — Nombre de archivo de Liquidación, sin sufijo de código**:
   decisión final de la clienta, distinta de lo que sugería el hallazgo
@@ -6802,11 +6801,75 @@ pidió más aclaración.
   tocarlo, porque ese caso ya daba 2 líneas antes y sigue dando 2 líneas
   ahora (el cambio solo afecta a bloques genuinamente continuos).
 
-- **#42 — Cargos especiales en 4 posiciones**: sigue sin implementarse
-  — la clienta pidió más aclaración sobre el alcance antes de decidir
-  ("¿implicaría un cambio en la lógica, en la base de datos y en el
-  formulario?"). Respondida esa pregunta (sí a los tres, ver el chat),
-  queda pendiente de que confirme si quiere seguir adelante.
+- **#42 — Cargos especiales en 4 posiciones**: implementado, sí tocando
+  lógica, base de datos y formulario (confirmado explícitamente en la
+  pregunta de la clienta antes de avanzar — "Avanza con el proceso de
+  las 4 posiciones en todo lo que necesites"). Antes solo existía la
+  distinción implícita "con llave" (`IdLlave`, un solo concepto
+  "Depósito de llave") / "sin llave" (todo lo demás, mostrado en el PDF
+  como un único grupo "ítem libre"). Pasa a cuatro Subtipos reales:
+  Depósito de llave / Ajuste / Bonificación / Ítem libre.
+
+  `CargoEspecial` suma la columna `Subtipo` (`schema.sql` + migración en
+  `app.db.migraciones`, mismo mecanismo `_COLUMNAS_NUEVAS` de siempre,
+  default `'Ítem libre'`). Una base ya en uso no puede reclasificar
+  retroactivamente Ajuste vs. Bonificación (son indistinguibles sin más
+  dato que el `Concepto` de texto libre) — quedan todos en "Ítem libre",
+  el default seguro. Lo que SÍ se puede reclasificar con certeza es
+  "Depósito de llave": `_clasificar_subtipo_deposito_llave` (migración
+  nueva, se llama al final de `aplicar_migraciones`) corre un `UPDATE`
+  que pasa a ese Subtipo cualquier fila ya existente con `IdLlave` no
+  nulo — sin este paso, una base vieja con depósitos de llave ya
+  cargados los mostraría mezclados entre los "ítem libre" del PDF en
+  vez de agrupados aparte, como siempre estuvieron.
+
+  "Depósito de llave" sigue siendo exclusivo de `app.negocio.llaves`
+  (`asignar_llave`/`devolver_llave`, los únicos dos puntos que crean un
+  `CargoEspecial` con `id_llave`) — nunca una elección del operador.
+  `crear_cargo_especial` (`app.negocio.pagos`) lo fuerza solo con que
+  venga `id_llave`, sin importar qué `subtipo` se le pase (o ninguno);
+  sin `id_llave`, exige uno de los otros tres, y si no se indica
+  ninguno cae a "Ítem libre" (mismo default que la columna, para no
+  romper a ningún llamador de antes de este pedido — ni `llaves.py`, que
+  nunca pasó `subtipo`, ni los tests existentes). `registrar_perdida`
+  (`app.negocio.llaves`) se revisó y confirmó que NO crea ningún
+  `CargoEspecial` (da de baja stock o cierra una Asignación sin
+  depósito involucrado) — no necesitó ningún cambio.
+
+  GUI (`_PanelCargosEspeciales`, "Llaves y otros conceptos" → "Registro
+  de cargos especiales"): combo nuevo "Subtipo", debajo de "Tipo",
+  con los tres editables (Ajuste/Bonificación/Ítem libre — "Depósito de
+  llave" nunca se ofrece ahí, es estructural) — sumado a la cadena de
+  foco Enter/Tab en ese mismo lugar. La tabla gana una columna "Subtipo"
+  (entre Tipo y Concepto, 7 columnas en total) y "Modificar cargo
+  especial" precarga el combo con el Subtipo de la fila (un cargo
+  "Depósito de llave" ya está bloqueado antes de llegar ahí por
+  `_bloqueado_por_llave`, así que el combo nunca necesita ofrecer esa
+  cuarta opción). `_PanelEstadoCuentaCargos` (misma pantalla, solapa
+  "Estado de cuenta") suma la misma columna "Subtipo" a su tabla de
+  solo lectura, mismo criterio de "mismos campos que Registro de cargos
+  especiales" que ya documentaba esa clase.
+
+  PDF (`liquidacion_pdf._items_cuenta`): los dos loops viejos
+  (`IdLlave is None`/`is not None`) pasan a cuatro, uno por cada
+  `Subtipo` en el orden fijo de `SUBTIPOS_CARGO` (Depósito de llave →
+  Ajuste → Bonificación → Ítem libre) — mismo criterio de separación
+  que ya usaba el Mensaje 1 de WhatsApp.
+
+  Tests nuevos: `tests/test_pagos.py` (default a "Ítem libre" sin
+  indicar subtipo, Ajuste/Bonificación se guardan tal cual, subtipo
+  inválido se rechaza, "Depósito de llave" se rechaza sin `id_llave`,
+  con `id_llave` se fuerza a "Depósito de llave" aunque se pase otro
+  valor); `tests/test_migraciones.py` (una base vieja de `CargoEspecial`
+  gana la columna con el default correcto, reclasificando solo la fila
+  ligada a una llave); `tests/test_gui_novedades.py` (el combo ofrece
+  los tres editables sin "Depósito de llave", crear con un subtipo
+  elegido persiste y se ve en la tabla, modificar precarga el subtipo
+  de la fila, más la actualización de índices de columna en los tests
+  ya existentes de esa tabla); `tests/test_pdf_liquidacion.py`
+  (los cuatro subtipos quedan en el orden fijo sin importar el orden de
+  carga, además del test ya existente de "llave antes que libre", que
+  sigue pasando sin tocarlo).
 
 ## Metodología de trabajo
 
