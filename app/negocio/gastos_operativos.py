@@ -6,26 +6,34 @@ import sqlite3
 from app.repositorio.registro import obtener_repositorio
 
 
-ALCANCES_GASTO = ("Espacio general", "Edificio", "Unidad")
+ALCANCES_GASTO = ("Espacio general", "Edificio", "Unidad", "Consultorio")
 
 
 def sanear_alcance(valores: dict) -> dict:
     """Un gasto solo puede estar asociado a UN nivel (Espacio general,
-    Edificio o Unidad, sección 3.25) — fuerza a None el/los campo(s) que
-    no corresponden al Alcance elegido, para que nunca quede un
-    IdEdificio o IdUnidad "colgado" de un gasto que en realidad es de
-    otro nivel (o general). Se llama tanto desde el diálogo de carga
-    manual (`catalogos._resolver_conflicto_gasto`) como, en un futuro
-    módulo extendido, desde la importación automática — cualquier vía de
-    carga tiene que pasar por acá antes de guardar."""
+    Edificio, Unidad o Consultorio — este último sumado a pedido de la
+    clienta, "improbable que lo use pero tenelo preparado por las
+    dudas") — fuerza a None el/los campo(s) que no corresponden al
+    Alcance elegido, para que nunca quede un IdEdificio/IdUnidad/
+    IdConsultorio "colgado" de un gasto que en realidad es de otro nivel
+    (o general). Se llama tanto desde el diálogo de carga manual
+    (`catalogos._resolver_conflicto_gasto`) como, en un futuro módulo
+    extendido, desde la importación automática — cualquier vía de carga
+    tiene que pasar por acá antes de guardar."""
     alcance = valores.get("Alcance")
     if alcance == "Edificio":
         valores["IdUnidad"] = None
+        valores["IdConsultorio"] = None
     elif alcance == "Unidad":
         valores["IdEdificio"] = None
+        valores["IdConsultorio"] = None
+    elif alcance == "Consultorio":
+        valores["IdEdificio"] = None
+        valores["IdUnidad"] = None
     else:
         valores["IdEdificio"] = None
         valores["IdUnidad"] = None
+        valores["IdConsultorio"] = None
     return valores
 
 

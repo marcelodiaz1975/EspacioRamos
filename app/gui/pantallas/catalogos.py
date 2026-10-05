@@ -249,6 +249,10 @@ def _opciones_unidad_o_ninguna_gasto(conn: sqlite3.Connection) -> list[tuple[int
     return [(None, "Sin relación a unidad específica")] + _opciones_unidad(conn)
 
 
+def _opciones_consultorio_o_ninguno_gasto(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    return [(None, "Sin relación a consultorio específico")] + _opciones_consultorio(conn)
+
+
 def _titulo_subtotal_periodo(periodo: str) -> str:
     """"Subtotal gastos período 09-2026": el período se guarda como
     AAAA-MM (`es_periodo_valido`) pero acá se muestra invertido, MM-AAAA
@@ -263,25 +267,30 @@ def _titulo_subtotal_periodo(periodo: str) -> str:
 
 
 def _al_abrir_dialogo_gasto(dialogo) -> None:
-    """El Alcance (Espacio general/Edificio/Unidad) define cuál de los
-    otros dos combos aplica: el que no corresponde queda deshabilitado y
-    se limpia, para que nunca convivan un Alcance "Espacio general" con
-    un Edificio cargado (o análogo) — mismo criterio de fondo que
-    `gastos_operativos.sanear_alcance`, que hace la misma limpieza del
-    lado de los datos por si el gasto se termina cargando por otra vía
-    (ej. una futura importación) que no pase por este diálogo."""
+    """El Alcance (Espacio general/Edificio/Unidad/Consultorio) define
+    cuál de los otros tres combos aplica: los que no corresponden quedan
+    deshabilitados y se limpian, para que nunca convivan un Alcance
+    "Espacio general" con un Edificio cargado (o análogo) — mismo
+    criterio de fondo que `gastos_operativos.sanear_alcance`, que hace la
+    misma limpieza del lado de los datos por si el gasto se termina
+    cargando por otra vía (ej. una futura importación) que no pase por
+    este diálogo."""
     combo_alcance = dialogo._entradas["Alcance"]
     combo_edificio = dialogo._entradas["IdEdificio"]
     combo_unidad = dialogo._entradas["IdUnidad"]
+    combo_consultorio = dialogo._entradas["IdConsultorio"]
 
     def _actualizar(*_args) -> None:
         alcance = combo_alcance.currentData()
         combo_edificio.setEnabled(alcance == "Edificio")
         combo_unidad.setEnabled(alcance == "Unidad")
+        combo_consultorio.setEnabled(alcance == "Consultorio")
         if alcance != "Edificio":
             combo_edificio.setCurrentIndex(0)
         if alcance != "Unidad":
             combo_unidad.setCurrentIndex(0)
+        if alcance != "Consultorio":
+            combo_consultorio.setCurrentIndex(0)
 
     combo_alcance.currentIndexChanged.connect(_actualizar)
     _actualizar()
@@ -305,6 +314,7 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection, *, anidado: bool = Fals
         Campo("Alcance", "Alcance", tipo="combo", opciones=opciones_alcance),
         Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio_o_ninguno_gasto),
         Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad_o_ninguna_gasto),
+        Campo("IdConsultorio", "Consultorio", tipo="combo", opciones=_opciones_consultorio_o_ninguno_gasto),
         Campo("Origen", "Origen", tipo="combo", opciones=opciones_origen),
         Campo("Observacion", "Observación", tipo="texto_largo"),
         *campos_libres(conn),

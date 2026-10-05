@@ -142,6 +142,70 @@ def test_aplicar_migraciones_agrega_subtipo_a_cargo_especial_viejo_y_reclasifica
     conn.close()
 
 
+def test_aplicar_migraciones_agrega_consultorio_y_amplia_alcance_de_gasto_operativo_viejo(tmp_path):
+    """Identificación de gasto por consultorio: una base vieja de
+    GastoOperativo (CHECK de Alcance fijo a los tres valores originales,
+    sin IdConsultorio) gana la columna nueva Y el CHECK ensanchado —
+    SQLite no permite ensanchar un CHECK con ALTER TABLE, así que esto
+    necesita el patrón de recrear la tabla (ver
+    `_ampliar_alcance_gasto_a_consultorio`), no un simple ADD COLUMN."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE GastoOperativo (IdGasto INTEGER PRIMARY KEY AUTOINCREMENT, Periodo TEXT NOT NULL, "
+        "Categoria TEXT, Concepto TEXT, Monto REAL NOT NULL, "
+        "Alcance TEXT CHECK (Alcance IN ('Espacio general','Edificio','Unidad')), "
+        "IdEdificio INTEGER, IdUnidad INTEGER, Origen TEXT, Observacion TEXT, "
+        "CampoLibre1 TEXT, CampoLibre2 TEXT, CampoLibre3 TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO GastoOperativo (Periodo, Categoria, Concepto, Monto, Alcance, IdEdificio) "
+        "VALUES ('2026-08', 'Limpieza', 'Limpieza edificio', 1000, 'Edificio', 3)"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    columnas = {f["name"] for f in conn.execute("PRAGMA table_info(GastoOperativo)").fetchall()}
+    assert "IdConsultorio" in columnas
+    fila = conn.execute("SELECT * FROM GastoOperativo WHERE Concepto = 'Limpieza edificio'").fetchone()
+    assert fila["Monto"] == 1000
+    assert fila["Alcance"] == "Edificio"
+    assert fila["IdEdificio"] == 3
+    assert fila["IdConsultorio"] is None
+    # el CHECK ya admite 'Consultorio' — antes de la migración esto fallaba
+    conn.execute(
+        "INSERT INTO GastoOperativo (Periodo, Concepto, Monto, Alcance, IdConsultorio) "
+        "VALUES ('2026-08', 'Pintura', 500, 'Consultorio', 9)"
+    )
+    conn.close()
+
+
+def test_aplicar_migraciones_es_idempotente_para_gasto_operativo(tmp_path):
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE GastoOperativo (IdGasto INTEGER PRIMARY KEY AUTOINCREMENT, Periodo TEXT NOT NULL, "
+        "Categoria TEXT, Concepto TEXT, Monto REAL NOT NULL, "
+        "Alcance TEXT CHECK (Alcance IN ('Espacio general','Edificio','Unidad')), "
+        "IdEdificio INTEGER, IdUnidad INTEGER, Origen TEXT, Observacion TEXT, "
+        "CampoLibre1 TEXT, CampoLibre2 TEXT, CampoLibre3 TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO GastoOperativo (Periodo, Concepto, Monto, Alcance) VALUES ('2026-08', 'Alquiler', 2000, "
+        "'Espacio general')"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+    aplicar_migraciones(conn)
+
+    filas = conn.execute("SELECT * FROM GastoOperativo").fetchall()
+    assert len(filas) == 1
+    assert filas[0]["Monto"] == 2000
+    conn.close()
+
+
 def test_aplicar_migraciones_es_idempotente(tmp_path):
     conn = init_database(tmp_path / "test.db")
     aplicar_migraciones(conn)  # segunda vez, no debería fallar ni duplicar la columna

@@ -348,15 +348,49 @@ def test_gasto_alcance_edificio_habilita_solo_edificio(qtbot, conn):
     combo_alcance = dialogo._entradas["Alcance"]
     combo_edificio = dialogo._entradas["IdEdificio"]
     combo_unidad = dialogo._entradas["IdUnidad"]
+    combo_consultorio = dialogo._entradas["IdConsultorio"]
 
     combo_alcance.setCurrentIndex(combo_alcance.findData("Edificio"))
     assert combo_edificio.isEnabled() is True
     assert combo_unidad.isEnabled() is False
     assert combo_unidad.currentData() is None
+    assert combo_consultorio.isEnabled() is False
+    assert combo_consultorio.currentData() is None
 
     combo_alcance.setCurrentIndex(combo_alcance.findData("Espacio general"))
     assert combo_edificio.isEnabled() is False
     assert combo_edificio.currentData() is None
+
+
+def test_gasto_alcance_consultorio_habilita_solo_consultorio(qtbot, conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Norte")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1")
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    catalogos._al_abrir_dialogo_gasto(dialogo)
+
+    combo_alcance = dialogo._entradas["Alcance"]
+    combo_edificio = dialogo._entradas["IdEdificio"]
+    combo_unidad = dialogo._entradas["IdUnidad"]
+    combo_consultorio = dialogo._entradas["IdConsultorio"]
+
+    combo_alcance.setCurrentIndex(combo_alcance.findData("Consultorio"))
+    assert combo_consultorio.isEnabled() is True
+    assert combo_edificio.isEnabled() is False
+    assert combo_edificio.currentData() is None
+    assert combo_unidad.isEnabled() is False
+    assert combo_unidad.currentData() is None
+
+    opciones = [combo_consultorio.itemText(i) for i in range(combo_consultorio.count())]
+    assert opciones[0] == "Sin relación a consultorio específico"
+    assert any("Consultorio 1" in o for o in opciones)
+
+    combo_alcance.setCurrentIndex(combo_alcance.findData("Unidad"))
+    assert combo_consultorio.isEnabled() is False
+    assert combo_consultorio.currentData() is None
 
 
 def test_gasto_periodo_filtro_arranca_en_el_periodo_actual(qtbot, conn):
@@ -429,6 +463,29 @@ def test_gasto_edificio_unidad_texto_de_sin_relacion(qtbot, conn):
     qtbot.addWidget(dialogo)
     assert dialogo._entradas["IdEdificio"].itemText(0) == "Sin relación a edificio específico"
     assert dialogo._entradas["IdUnidad"].itemText(0) == "Sin relación a unidad específica"
+    assert dialogo._entradas["IdConsultorio"].itemText(0) == "Sin relación a consultorio específico"
+
+
+def test_gasto_columna_consultorio_queda_despues_de_unidad(qtbot, conn):
+    """Pedido explícito de la clienta: una columna "Consultorio" en la
+    tabla, justo después de "Unidad"."""
+    pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    etiquetas = [c.etiqueta for c in pantalla.campos]
+    assert etiquetas.index("Consultorio") == etiquetas.index("Unidad") + 1
+
+
+def test_gasto_consultorio_se_guarda_y_se_lee(qtbot, conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Norte")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=2)
+    id_gasto = obtener_repositorio(conn, "GastoOperativo").crear(
+        Periodo="2026-08", Concepto="Pintura", Monto=800, Alcance="Consultorio", IdConsultorio=id_consultorio,
+    )
+    gasto = obtener_repositorio(conn, "GastoOperativo").obtener(id_gasto)
+    assert gasto["IdConsultorio"] == id_consultorio
+    assert gasto["IdEdificio"] is None
+    assert gasto["IdUnidad"] is None
 
 
 def test_gasto_cadena_de_foco_incluye_periodo_actual_y_da_la_vuelta(qtbot, conn):

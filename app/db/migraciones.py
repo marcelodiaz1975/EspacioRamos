@@ -238,6 +238,58 @@ def _clasificar_subtipo_deposito_llave(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ampliar_alcance_gasto_a_consultorio(conn: sqlite3.Connection) -> None:
+    """Identificación de gasto por consultorio (pedido de la clienta,
+    "improbable que lo use pero tenelo preparado por las dudas"): el
+    Alcance de `GastoOperativo` tenía un CHECK fijo a tres valores
+    ('Espacio general'/'Edificio'/'Unidad') desde que se creó la tabla
+    — SQLite no permite ensanchar un CHECK con `ALTER TABLE`, así que
+    sumar 'Consultorio' (más la columna `IdConsultorio`) no entra en
+    `_COLUMNAS_NUEVAS` como cualquier columna nueva: hace falta el
+    patrón estándar de SQLite para esto (tabla nueva con el CHECK ya
+    correcto, copiar los datos, reemplazar) en vez de un simple `ADD
+    COLUMN`. Idempotente: no hace nada si la tabla ya tiene `IdConsultorio`
+    (ya migrada)."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'GastoOperativo'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(GastoOperativo)").fetchall()}
+    if "IdConsultorio" in columnas_existentes:
+        return
+    conn.execute("ALTER TABLE GastoOperativo RENAME TO GastoOperativo_viejo")
+    conn.execute(
+        """
+        CREATE TABLE GastoOperativo (
+            IdGasto INTEGER PRIMARY KEY AUTOINCREMENT,
+            Periodo TEXT NOT NULL,
+            Categoria TEXT,
+            Concepto TEXT,
+            Monto REAL NOT NULL,
+            Alcance TEXT CHECK (Alcance IN ('Espacio general','Edificio','Unidad','Consultorio')),
+            IdEdificio INTEGER REFERENCES Edificio(IdEdificio),
+            IdUnidad INTEGER REFERENCES Unidad(IdUnidad),
+            IdConsultorio INTEGER REFERENCES Consultorio(IdConsultorio),
+            Origen TEXT CHECK (Origen IN ('Manual','Importado')),
+            Observacion TEXT,
+            CampoLibre1 TEXT,
+            CampoLibre2 TEXT,
+            CampoLibre3 TEXT
+        )
+        """
+    )
+    columnas_comunes = [c for c in (
+        "IdGasto", "Periodo", "Categoria", "Concepto", "Monto", "Alcance", "IdEdificio", "IdUnidad",
+        "Origen", "Observacion", "CampoLibre1", "CampoLibre2", "CampoLibre3",
+    ) if c in columnas_existentes]
+    columnas_sql = ", ".join(columnas_comunes)
+    conn.execute(
+        f"INSERT INTO GastoOperativo ({columnas_sql}) SELECT {columnas_sql} FROM GastoOperativo_viejo"
+    )
+    conn.execute("DROP TABLE GastoOperativo_viejo")
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -263,4 +315,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _normalizar_tamanos_consultorio(conn)
     _agregar_nivel_supervisor_general(conn)
     _clasificar_subtipo_deposito_llave(conn)
+    _ampliar_alcance_gasto_a_consultorio(conn)
     conn.commit()

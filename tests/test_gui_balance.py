@@ -113,11 +113,21 @@ def test_resultado_arranca_en_el_periodo_actual_con_una_sola_fila(qtbot, conn):
     ]
 
 
-def test_resultado_excluye_gastos_generales_al_filtrar_por_consultorio(qtbot, conn):
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
-    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1")
-    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
-        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000, ValorHoraAisladaActual=500,
+def test_resultado_prorratea_gastos_generales_al_filtrar_por_consultorio(qtbot, conn):
+    """Desde que Gastos reparte en cascada (ver `app.negocio.balance`),
+    filtrar por un consultorio puntual ya no excluye los gastos
+    "Espacio general" — le llega la porción prorateada que le
+    corresponde en la cascada. Acá hay dos edificios, así que cada uno
+    (y cada consultorio) se queda con la mitad."""
+    id_edificio_1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad_1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento="1")
+    id_consultorio_1 = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad_1, NumeroConsultorio=1, ValorHoraRegularActual=1000, ValorHoraAisladaActual=500,
+    )
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2")
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento="1")
+    obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad_2, NumeroConsultorio=1, ValorHoraRegularActual=1000, ValorHoraAisladaActual=500,
     )
     periodo = periodo_actual(conn)
     obtener_repositorio(conn, "GastoOperativo").crear(
@@ -130,9 +140,9 @@ def test_resultado_excluye_gastos_generales_al_filtrar_por_consultorio(qtbot, co
     panel = pantalla.panel_resultado
     assert "-$ 3.000,00" in panel.tabla.item(0, 2).text()
 
-    panel.combo_edificio.setCurrentIndex(panel.combo_edificio.findData(id_edificio))
-    panel.combo_consultorio.setCurrentIndex(panel.combo_consultorio.findData(id_consultorio))
-    assert "$ 0,00" in panel.tabla.item(0, 2).text()
+    panel.combo_edificio.setCurrentIndex(panel.combo_edificio.findData(id_edificio_1))
+    panel.combo_consultorio.setCurrentIndex(panel.combo_consultorio.findData(id_consultorio_1))
+    assert "-$ 1.500,00" in panel.tabla.item(0, 2).text()
 
 
 def test_botones_historial_y_periodo_actual_tienen_los_estilos_correctos(qtbot, conn):
