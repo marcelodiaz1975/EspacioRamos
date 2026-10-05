@@ -4,7 +4,7 @@ la garantía es la misma en todos los formularios porque es la misma clase."""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 
@@ -144,3 +144,51 @@ def test_shift_tab_retrocede_en_la_misma_cadena(qtbot):
     qtbot.waitUntil(lambda: campo_2.hasFocus())
     QTest.keyClick(campo_2, Qt.Key.Key_Backtab)
     qtbot.waitUntil(lambda: campo_1.hasFocus())
+
+
+def test_shift_enter_en_campo_multilinea_inserta_salto_de_linea_en_vez_de_avanzar(qtbot):
+    """Pedido explícito de la clienta: en un campo de texto largo
+    (`QPlainTextEdit`/`QTextEdit`), Shift+Enter inserta un salto de línea
+    en vez de avanzar al siguiente campo de la cadena."""
+    contenedor = QWidget()
+    layout = QVBoxLayout(contenedor)
+    campo_1 = QLineEdit()
+    texto = QPlainTextEdit()
+    campo_siguiente = QLineEdit()
+    for w in (campo_1, texto, campo_siguiente):
+        layout.addWidget(w)
+    foco = instalar_enter_avanza_foco([campo_1, texto, campo_siguiente])
+    contenedor._foco = foco
+    _mostrar(qtbot, contenedor)
+
+    texto.setPlainText("linea 1")
+    cursor = texto.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    texto.setTextCursor(cursor)
+    texto.setFocus()
+    qtbot.waitUntil(lambda: texto.hasFocus())
+    QTest.keyClick(texto, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+    assert texto.toPlainText() == "linea 1\n"
+    assert texto.hasFocus()
+
+
+def test_enter_solo_en_campo_multilinea_sigue_avanzando_el_foco(qtbot):
+    """Sin Shift, Enter en un campo de texto largo se comporta igual que
+    en cualquier otro campo de la cadena: avanza, sin agregar ningún
+    salto de línea."""
+    contenedor = QWidget()
+    layout = QVBoxLayout(contenedor)
+    texto = QPlainTextEdit()
+    campo_siguiente = QLineEdit()
+    for w in (texto, campo_siguiente):
+        layout.addWidget(w)
+    foco = instalar_enter_avanza_foco([texto, campo_siguiente])
+    contenedor._foco = foco
+    _mostrar(qtbot, contenedor)
+
+    texto.setPlainText("linea 1")
+    texto.setFocus()
+    qtbot.waitUntil(lambda: texto.hasFocus())
+    QTest.keyClick(texto, Qt.Key.Key_Return)
+    qtbot.waitUntil(lambda: campo_siguiente.hasFocus())
+    assert texto.toPlainText() == "linea 1"

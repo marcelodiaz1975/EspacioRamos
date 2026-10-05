@@ -21,11 +21,20 @@ mezcla de forma impredecible con cualquier otro widget enfocable de la
 pantalla que haya quedado afuera de la lista (ej. las tablas, que se
 navegan con mouse/flechas, no con Tab) — interceptar la tecla acá y
 mover el foco a mano con la misma lógica de `orden` es la única forma de
-garantizar que la cadena sea exactamente la misma para las tres teclas."""
+garantizar que la cadena sea exactamente la misma para las tres teclas.
+
+Excepción puntual: Shift+Enter en un campo multilínea (`QPlainTextEdit`/
+`QTextEdit`, ej. el campo "Mensaje" de los catálogos genéricos) NO avanza
+el foco — inserta un salto de línea, dejando que el widget lo procese
+nativamente. Pedido explícito de la clienta ("con Shift enter en los
+campos de texto largo de todos los formularios que genere un salto de
+línea"): Enter solo sigue avanzando el foco en esos campos, igual que en
+cualquier otro, así que cargar varios campos seguidos con Enter no
+cambia de comportamiento — solo Shift+Enter es distinto."""
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtWidgets import QComboBox, QWidget
+from PySide6.QtWidgets import QComboBox, QPlainTextEdit, QTextEdit, QWidget
 
 
 class _EnterAvanzaFoco(QObject):
@@ -38,6 +47,15 @@ class _EnterAvanzaFoco(QObject):
             return False
         tecla = event.key()
         if tecla in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if isinstance(watched, (QPlainTextEdit, QTextEdit)) and bool(
+                event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            ):
+                # Shift+Enter en un campo de texto largo inserta un salto de
+                # línea en vez de avanzar el foco — pedido explícito de la
+                # clienta, "en los campos de texto largo de todos los
+                # formularios". Devolver False deja que el propio widget
+                # procese la tecla con su comportamiento nativo.
+                return False
             self._mover(self._resolver_objetivo(watched), retroceder=False, seleccionar_todo=True)
             return True
         if tecla in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
