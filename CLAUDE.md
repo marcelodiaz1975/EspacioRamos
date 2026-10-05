@@ -6740,31 +6740,73 @@ actualización). `tests/test_reservas.py` (`#45`:
 `test_crear_reserva_aislada_que_cruza_medianoche_falla`/`test_crear_
 reserva_aislada_hora_fin_igual_a_hora_inicio_falla`).
 
-### Pendientes de decisión (#39, #42, #44)
+### #39, #44 ya resueltos (con ejemplos mostrados antes de implementar); #42 sigue en consulta
 
-No implementados — la clienta pidió ver ejemplos concretos antes de
-elegir. Quedan documentados acá para no perder el contexto, sin ninguna
-decisión tomada todavía:
+Los tres habían quedado pendientes de que la clienta viera ejemplos
+concretos antes de elegir. Dos ya se resolvieron sobre la respuesta que
+dio viendo esos ejemplos; el tercero sigue abierto porque la clienta
+pidió más aclaración.
 
-- **#39 — Nombres de archivo**: Liquidación le falta "mensual"
-  (`"{periodo} - Liquidación {Tratamiento} {Nombre} {Apellido}{-
-  Código}.pdf"`); Disponibilidad no lleva fecha a propósito — el nombre
-  es FIJO para que cada regeneración sobrescriba el archivo anterior en
-  vez de acumular uno por día (comentario explícito en `disponibilidad_
-  pdf.py`), así que agregarle una fecha real cambiaría ese
-  comportamiento, no sería solo cosmético.
-- **#42 — Cargos especiales en 4 posiciones**: hoy `CargoEspecial` no
-  tiene ningún campo que distinga "ajuste" de "bonificación" (solo
-  `Tipo` Débito/Crédito y `Concepto` de texto libre) — separarlos en 4
-  posiciones de verdad necesita sumar una columna nueva (`Subtipo`) y
-  migrar los cargos ya cargados, que quedarían sin poder reclasificarse
-  retroactivamente. Es el único de estos hallazgos que es una
-  funcionalidad nueva, no una corrección de texto.
-- **#44 — Checkboxes "Combinar..." destildados por defecto**: el propio
-  docstring de `_lineas_reservas_aisladas` (`mensajes.py`) documenta el
-  default actual (los dos destildados) como "el comportamiento pedido"
-  — tildarlos cambiaría el contenido real de los mensajes grupales que
-  se generan por defecto, no sería un cambio puramente visual.
+- **#39 — Nombre de archivo de Liquidación, sin sufijo de código**:
+  decisión final de la clienta, distinta de lo que sugería el hallazgo
+  original ("le falta 'mensual'") — el nombre ideal que dio fue
+  "2026-08 - Liquidación Lic. Marcela Lo Veci" (sin "mensual", sin el
+  "R1" del código). `nombre_archivo_liquidacion` (`liquidacion_pdf.py`)
+  saca el `sufijo_codigo` por completo — no hace falta para desambiguar:
+  cada profesional ya tiene su propia carpeta
+  (`Profesionales/{código}`), así que dos profesionales nunca comparten
+  directorio aunque coincidiera su nombre. Propuesta/Disponibilidad
+  quedan sin cambios, confirmado por la clienta ("ok así").
+
+  Tests actualizados en `tests/test_pdf_liquidacion.py`:
+  `test_nombre_archivo_sigue_el_formato_del_documento` (nuevo valor
+  esperado, sin sufijo); `test_nombre_archivo_sin_codigo_no_agrega_
+  sufijo` se renombra `test_nombre_archivo_nunca_agrega_sufijo_de_
+  codigo` y suma `IdCodigo` al profesional de prueba para confirmar que
+  el sufijo no aparece NI SIQUIERA cuando el profesional sí tiene
+  código cargado (antes el test probaba el caso "sin código", que ya no
+  es la distinción relevante).
+
+- **#44 — Una línea por bloque continuo de horas (default sin
+  combinar)**: la clienta confirmó el default destildado (ya era así)
+  y agregó una precisión real sobre el contenido de esa línea, más allá
+  de lo que mostraban mis ejemplos: no es "una línea por reserva aislada
+  individual" sino "una línea por bloque CONTINUO de horas" — dos
+  reservas del mismo consultorio sin ningún hueco entre medio (el
+  `HoraFin` de una coincide con el `HoraInicio` de la siguiente, ej. 10
+  a 12 y 12 a 14) tienen que verse como un único rango ("10 a 14hs"), no
+  como dos líneas separadas. Esto es distinto de "Combinar misma
+  unidad" (que fusiona TODAS las reservas de ese día/consultorio con
+  "y de", continuas o no) — ese checkbox no se tocó, sigue con su
+  comportamiento de siempre.
+
+  `_agrupar_bloques_continuos` (nueva, `app/negocio/mensajes.py`)
+  agrupa, por consultorio, las reservas de un día ordenadas por
+  `HoraInicio` y las funde en un mismo bloque mientras no haya hueco;
+  reemplaza al `[[f] for f in reservas_dia]` que usaba antes el camino
+  SIN combinar (una fila por reserva, sin mirar continuidad).
+  `_lineas_reservas_aisladas` arma el texto del horario de forma
+  distinta según el camino: con "Combinar misma unidad" sigue uniendo
+  con "y de" (sin cambios); sin combinar, arma un único rango de punta a
+  punta del bloque (`HoraInicio` del primero a `HoraFin` del último) en
+  vez de unir cada reserva por separado.
+
+  Tests nuevos en `tests/test_mensajes.py`:
+  `test_detalle_aislada_sin_combinar_une_bloque_continuo_en_una_sola_
+  linea` (10-12 + 12-14 se muestran como "10 a 14hs", sin "y de");
+  `test_detalle_aislada_sin_combinar_bloque_continuo_no_mezcla_
+  consultorios` (la misma hora exacta en dos consultorios distintos NO
+  se funde, cada consultorio agrupa sus propios bloques). El test
+  preexistente de "sin combinar, cada reserva en su propia línea" usa
+  horarios con hueco (10-12 y 14-16, no contiguos) — sigue pasando sin
+  tocarlo, porque ese caso ya daba 2 líneas antes y sigue dando 2 líneas
+  ahora (el cambio solo afecta a bloques genuinamente continuos).
+
+- **#42 — Cargos especiales en 4 posiciones**: sigue sin implementarse
+  — la clienta pidió más aclaración sobre el alcance antes de decidir
+  ("¿implicaría un cambio en la lógica, en la base de datos y en el
+  formulario?"). Respondida esa pregunta (sí a los tres, ver el chat),
+  queda pendiente de que confirme si quiere seguir adelante.
 
 ## Metodología de trabajo
 
