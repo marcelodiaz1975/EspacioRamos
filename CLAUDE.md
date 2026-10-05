@@ -6548,6 +6548,224 @@ en_vez_de_avanzar` (Shift+Enter inserta el salto y el foco se queda en
 el mismo campo) y `test_enter_solo_en_campo_multilinea_sigue_avanzando_
 el_foco` (Enter sin Shift sigue avanzando sin agregar ningún salto).
 
+## Lista de espera: botón "Confirmar reserva" (auditoría #22)
+
+Pedido explícito de la clienta sobre el hallazgo #22 de la auditoría
+("el detalle de cobertura está, pero no hay ningún atajo para iniciar
+una reserva regular precargada desde un pedido seleccionado"): un botón
+`botonPrimario`, "Confirmar reserva", a la izquierda de "Descartar
+pedido", habilitado solo con una fila que tenga alguna cobertura real
+(mismo criterio que ya decide `_mostrar_cobertura`). Al tocarlo, salta a
+Reservas > Reservas regulares con la cobertura ya precargada (profesional,
+consultorio, día(s), horario) — el operador la revisa y confirma con
+"Crear reserva regular" de siempre, no se crea sola. El cierre del
+pedido (pasar a "Resuelto") no necesitó ningún código nuevo:
+`_resolver_lista_espera_si_corresponde` (DC-10 §2.2 paso 5) ya lo hacía
+solo apenas se crea cualquier reserva regular del profesional.
+
+Antes de tocar código se le planteó a la clienta, y confirmó
+entendimiento, sobre tres puntos:
+
+- **Ver la cobertura antes de accionar el botón**: ya existe — el
+  cuadro "Cobertura de la coincidencia seleccionada" (`_mostrar_
+  cobertura`) ya muestra día/horario/consultorio al seleccionar la fila,
+  antes de tocar ningún botón.
+- **Con más de una opción de consultorio, ¿cuál toma?** El primer grupo
+  en orden de días de la semana (Lunes primero) — ver `grupos_cobertura`
+  más abajo. Si la cobertura necesita más de un grupo para cubrir todo
+  el pedido, un cartel previo lista TODAS las partes antes de saltar a
+  Reservas (ver el tercer punto).
+- **¿La opción (a) puede confundir al operador?** Sí, podía — se
+  detectó un problema real al diseñarla: el cierre automático del
+  pedido se dispara con la PRIMERA reserva regular creada del
+  profesional, no con "cubrir todo lo pedido". Con una cobertura de
+  varias partes, confirmar solo la primera ya marca el pedido
+  "Resuelto" aunque falte cargar el resto — si el operador tuviera que
+  volver a Lista de espera para la parte 2, el pedido ya no aparecería
+  ahí (solo lista pedidos Activos). Se resolvió con una COLA interna en
+  Reservas (ver `precargar_desde_pedido` más abajo): el operador nunca
+  necesita volver a Lista de espera — cada "Crear reserva regular"
+  exitoso precarga sola la parte siguiente, dentro de la misma pantalla,
+  y el pedido recién se marca Resuelto cuando no queda ninguna parte
+  pendiente.
+
+### `grupos_cobertura` (`app/negocio/lista_espera.py`)
+
+Agrupa los tramos de una `Coincidencia` por (consultorio, horario) —
+cada grupo es lo que SÍ se puede cargar en una sola `ReservaRegular`
+(`crear_reserva_regular` toma un solo horario por vez, ese es el límite
+real, no uno inventado para esta funcionalidad). Un pedido Verde con un
+solo bloque da un único grupo; pero Verde solo garantiza un ÚNICO
+consultorio en todo el pedido, no un único horario — un pedido con dos
+bloques de horario distinto (ej. "martes 9-12" + "jueves 14-17", mismo
+consultorio los dos) sigue necesitando dos grupos. Lo mismo, por el
+motivo contrario, si la cobertura combina más de un consultorio
+(Amarillo/Naranja/Rojo). Los grupos quedan ordenados por el día de la
+semana más temprano de cada uno.
+
+### `precargar_desde_pedido` (`_PanelReservasRegulares`, `app/gui/
+pantallas/reservas.py`)
+
+Carga el primer grupo en el formulario (reusa `_seleccionar_ubicacion`,
+ya existente para "Modificar reserva") y guarda el resto en
+`self._cola_precarga_pedido`. `_crear()` suma, al final, un chequeo
+nuevo: si queda algo en la cola, precarga la parte siguiente Y
+`return`s ahí mismo — sin llamar a `_resolver_lista_espera_si_
+corresponde` ni a `_resetear_formulario()` todavía. Recién cuando la
+cola queda vacía (el caso de siempre, o la última parte de una
+cobertura de varias) sigue el camino de siempre: resuelve el pedido
+Activo del profesional si corresponde, y resetea el formulario. En el
+uso manual de toda la vida la cola siempre está vacía, así que el
+comportamiento no cambia en nada.
+
+### `VentanaPrincipal.ir_a_seccion` (`app/gui/main_window.py`)
+
+Primera vez que una pantalla necesita saltar a otra en todo el sistema
+— no había ningún mecanismo para esto. Se sumó un método chico y
+reusable en vez de algo hecho a medida para este botón puntual: busca
+la `Seccion` por nombre, la selecciona en el menú lateral (como si el
+operador hubiera clickeado ahí) y devuelve su widget. `_PanelListaEspera.
+_confirmar_reserva` llega a la ventana con `self.window()` (hasta dónde
+cuelga el panel en tiempo real) en vez de recibirla por parámetro — esta
+pantalla también se instancia sola en los tests, sin ventana principal
+de verdad detrás, así que el método chequea `hasattr(ventana, "ir_a_
+seccion")` antes de usarlo y no hace nada si no está (en vez de romper).
+
+### GUI (`app/gui/pantallas/lista_espera.py`)
+
+`_texto_lugar` (nuevo, a nivel de módulo) factoriza el armado "{Edificio}
+- {Unidad} - Consultorio {N}" que `_mostrar_cobertura` ya tenía inline,
+para reusarlo también en el cartel de "Confirmar reserva". Con más de
+un grupo, el cartel (`QMessageBox.question`) enumera "Parte 1/N",
+"Parte 2/N"... con el detalle de cada uno, antes de preguntar si
+continuar — si el operador dice que no, no pasa nada (ni navega ni
+precarga).
+
+Tests nuevos: `tests/test_lista_espera.py` (`grupos_cobertura` — Verde
+de un solo grupo, Verde con horarios distintos en dos grupos, Amarillo
+combinando dos consultorios en dos grupos, orden por día de la semana,
+lista vacía sin tramos); `tests/test_main_window.py` (`ir_a_seccion`
+selecciona y devuelve el widget, nombre inexistente devuelve `None` sin
+romper); `tests/test_gui_reservas.py` (`precargar_desde_pedido` carga
+el primer grupo y deja el resto en cola, avanza de parte en parte y
+recién resuelve el pedido al final, con un solo grupo resuelve de una);
+`tests/test_gui_lista_espera.py` (botón deshabilitado sin selección o
+sin cobertura, habilitado con cobertura, un solo grupo navega sin
+preguntar nada, más de un grupo avisa con el detalle de las partes
+antes de navegar, cancelar el cartel no navega, el pedido se cierra
+solo al confirmar en Reservas, instanciada sola sin ventana principal
+no rompe).
+
+## Auditoría DC-01/DC-10: hallazgos cosméticos #34, #35, #37, #38, #40, #45
+
+Repaso de los hallazgos cosméticos que habían quedado "sin re-verificar"
+en la auditoría (#34 a #46) — la clienta los revisó uno por uno,
+eligiendo opción por ítem. Los que pedía "dejar así" (#36, #41, #43)
+quedan documentados como decisión consciente, sin cambio de código,
+mismo criterio que otras decisiones ya registradas en este archivo
+(DC-07 §2.5/§3.3). Los de #39 (nombres de archivo), #42 (cargos
+especiales en 4 posiciones) y #44 (checks "Combinar..." tildados por
+defecto) quedaron pendientes de la clienta, que pidió ver ejemplos
+antes de decidir — no implementados todavía.
+
+- **#34 — "Saldo a favor... del profesional" de más**: en
+  `liquidacion_pdf.py` (`_items_cuenta`), "Saldo a favor del profesional
+  de la liquidación anterior" pasa a "Saldo a favor de la liquidación
+  anterior" — mismo texto, sin la aclaración redundante, que ya usaba el
+  Mensaje de texto equivalente (`mensajes.py`, "Saldo a favor mes
+  anterior").
+- **#35 — "Descuento feriado pendiente" vs "Descuento por feriado..."**:
+  mismo prefijo que el feriado del mes en curso — pasa a "Descuento por
+  feriado (mes anterior) - {día} {fecha}" en vez de una redacción
+  distinta para el mismo concepto.
+- **#36 — Ajuste saldo atrasado sin sufijo de período**: sin cambios
+  (opción elegida por la clienta) — "Ajuste por saldo atrasado" se queda
+  como está; el período ya queda implícito por la liquidación que lo
+  contiene.
+- **#37 — Cuota sin "/Total"**: "Cuota {N} del plan de pagos" pasa a
+  "Cuota {N}/{Total} del plan de pagos". El total de cuotas
+  (`PlanPago.CantidadCuotas`) no llegaba a esta consulta — se suma a la
+  query de `CuotaPlan` en `liquidaciones.calcular_liquidacion` (join
+  contra `PlanPago`, ya existente para resolver `IdProfesional`).
+- **#38 — Edificio mencionado siempre, no solo si hay +1**: mismo
+  criterio que ya usan Placas y el pie de foto de Oferta de
+  consultorios, trasladado a `liquidacion_pdf.py`. `_lugar` suma un
+  parámetro `mostrar_edificio` (default `True`, no rompe ningún llamador
+  existente) que los cuatro `_texto_*` (horas agregadas, feriado
+  trabajado actual/anterior, aislada) reenvían. `generar_pdf_
+  liquidacion` lo calcula una sola vez por documento: la unión de los
+  edificios de las reservas regulares (`edificios_bloques`, ya se
+  calculaba ahí) con el edificio de cada ítem puntual de horas
+  agregadas/feriados trabajados/aisladas — no alcanza con mirar solo las
+  reservas regulares, una aislada en un edificio distinto del habitual
+  también cuenta para la cuenta de "cuántos edificios distintos
+  aparecen en este documento".
+- **#40 — Período de valores nunca usa "al"**: el conector pasa de "y" a
+  "al" en los dos PDFs que comparten `rango_actualizacion`
+  (`liquidacion_pdf.py` y `propuesta_pdf.py`) — es un RANGO continuo
+  (desde/hasta), no una lista de fechas sueltas, así que "al" describe
+  mejor la relación que "y".
+- **#41 — Localidad sin guiones**: sin cambios (opción elegida por la
+  clienta) — sigue en su propia línea bajo el logo, sin "- Localidad -".
+- **#42 — Cargos especiales en 2 posiciones**: pendiente, ver más abajo.
+- **#43 — Punto final faltante**: sin cambios (opción elegida por la
+  clienta) — "Corresponde a X, Y" se queda sin el punto final en
+  `mensajes.py`.
+- **#45 — Reserva aislada que cruza medianoche**: `crear_reserva_
+  aislada` (`app/negocio/reservas.py`) suma una validación al principio
+  (`hora_fin <= hora_inicio` → `ValueError`) — antes no se chequeaba en
+  absoluto, y el formulario (dos `QDoubleSpinBox` independientes) de
+  hecho dejaba cargar un horario cruzado (ej. 23 a 1), calculando un
+  monto negativo en silencio. No se implementó el "partido en dos
+  líneas" que pedía originalmente el documento (opción (a) elegida por
+  la clienta: bloquear es más simple y evita el dato inconsistente; el
+  caso de una reserva que de verdad cruza medianoche sigue sin estar
+  soportado, pero ya no se puede cargar mal por error de tipeo). La GUI
+  no necesitó ningún cambio: `_PanelReservasAisladas._crear` ya
+  atrapaba `ValueError` y lo mostraba en un cartel, mismo mecanismo que
+  cualquier otra validación de esta función.
+- **#46 — Viñetas del Mensaje 2 Variante A**: cerrado sin acción —
+  obsoleto, el mensaje se reescribió por completo en una ronda anterior
+  (prosa plana, sin viñetas) y no queda estructura contra la cual
+  comparar el hallazgo.
+
+Tests nuevos: `tests/test_pdf_liquidacion.py` (`#34`: ajustada la
+aserción existente de "a favor"; `#35`:
+`test_feriado_pendiente_usa_el_mismo_prefijo_que_el_del_mes_en_curso`;
+`#37`: `test_cuota_de_plan_muestra_numero_sobre_el_total`; `#38`:
+`test_hora_aislada_omite_el_edificio_con_un_solo_edificio_en_el_
+documento`/`test_hora_aislada_menciona_el_edificio_cuando_hay_mas_de_
+uno`; `#40`: ajustada la aserción existente de frecuencia de
+actualización). `tests/test_reservas.py` (`#45`:
+`test_crear_reserva_aislada_que_cruza_medianoche_falla`/`test_crear_
+reserva_aislada_hora_fin_igual_a_hora_inicio_falla`).
+
+### Pendientes de decisión (#39, #42, #44)
+
+No implementados — la clienta pidió ver ejemplos concretos antes de
+elegir. Quedan documentados acá para no perder el contexto, sin ninguna
+decisión tomada todavía:
+
+- **#39 — Nombres de archivo**: Liquidación le falta "mensual"
+  (`"{periodo} - Liquidación {Tratamiento} {Nombre} {Apellido}{-
+  Código}.pdf"`); Disponibilidad no lleva fecha a propósito — el nombre
+  es FIJO para que cada regeneración sobrescriba el archivo anterior en
+  vez de acumular uno por día (comentario explícito en `disponibilidad_
+  pdf.py`), así que agregarle una fecha real cambiaría ese
+  comportamiento, no sería solo cosmético.
+- **#42 — Cargos especiales en 4 posiciones**: hoy `CargoEspecial` no
+  tiene ningún campo que distinga "ajuste" de "bonificación" (solo
+  `Tipo` Débito/Crédito y `Concepto` de texto libre) — separarlos en 4
+  posiciones de verdad necesita sumar una columna nueva (`Subtipo`) y
+  migrar los cargos ya cargados, que quedarían sin poder reclasificarse
+  retroactivamente. Es el único de estos hallazgos que es una
+  funcionalidad nueva, no una corrección de texto.
+- **#44 — Checkboxes "Combinar..." destildados por defecto**: el propio
+  docstring de `_lineas_reservas_aisladas` (`mensajes.py`) documenta el
+  default actual (los dos destildados) como "el comportamiento pedido"
+  — tildarlos cambiaría el contenido real de los mensajes grupales que
+  se generan por defecto, no sería un cambio puramente visual.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
