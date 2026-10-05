@@ -2609,3 +2609,106 @@ def test_grillas_de_reservas_dejan_fijas_columnas_y_encabezado(qtbot, conn):
     qtbot.addWidget(pantalla)
     for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
         assert panel.grilla._filas_columnas_fijas is True
+
+
+# ------------------------------------------------------------ reserva extraordinaria
+
+def _preparar_categoria_a(conn):
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('A', 'Paz')")
+    conn.commit()
+
+
+def test_solapa_reserva_extraordinaria_existe_con_combo_solo_categoria_a(qtbot, conn):
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Lo Veci')")
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.pestanas.tabText(2) == "Reserva extraordinaria"
+    panel = pantalla.panel_extraordinaria
+    assert panel.objectName() == "panelSolapa"
+    # "Todos los profesionales" + solo el de categoría A (el R queda afuera).
+    assert panel.combo_profesional.count() == 2
+    assert panel.combo_profesional.itemText(1) == "Paz"
+
+
+def test_crear_reserva_extraordinaria_se_guarda_y_copia_mensaje_al_portapapeles(qtbot, conn, monkeypatch):
+    _preparar_categoria_a(conn)
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Uso del consultorio para un taller puntual")
+    panel.spin_monto.setValue(12000)
+    panel._crear()
+
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, 8).text() == "Uso del consultorio para un taller puntual"
+    assert "12.000" in panel.tabla.item(0, 9).text()
+    reserva = obtener_repositorio(conn, "ReservaAislada").listar()[0]
+    assert reserva["EsExtraordinaria"] == 1
+    assert len(copiado) == 1
+    assert "DETALLE RESERVA" in copiado[0]
+    assert "Uso del consultorio para un taller puntual" in copiado[0]
+
+
+def test_crear_reserva_extraordinaria_sin_item_no_crea_nada(qtbot, conn):
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.spin_monto.setValue(12000)
+    panel._crear()
+    assert obtener_repositorio(conn, "ReservaAislada").listar() == []
+
+
+def test_crear_reserva_extraordinaria_sin_monto_no_crea_nada(qtbot, conn):
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel._crear()
+    assert obtener_repositorio(conn, "ReservaAislada").listar() == []
+
+
+def test_cancelar_reserva_extraordinaria(qtbot, conn):
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel.spin_monto.setValue(5000)
+    panel._crear()
+    assert panel.tabla.rowCount() == 1
+
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+    assert obtener_repositorio(conn, "ReservaAislada").listar()[0]["Estado"] == "Cancelada"
+
+
+def test_reserva_extraordinaria_se_ve_en_la_tabla_de_reservas_aisladas_con_el_monto_manual(qtbot, conn):
+    """Una extraordinaria es una ReservaAislada más — la tabla de siempre
+    de "Reservas aisladas" también la lista, con la columna "Valor"
+    mostrando el monto manual (no un cálculo de hora×tarifa, que acá
+    daría un número distinto al que de verdad se cobra)."""
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel_extra = pantalla.panel_extraordinaria
+    panel_extra.combo_profesional.setCurrentIndex(1)
+    panel_extra.campo_item.setText("Taller puntual")
+    panel_extra.spin_monto.setValue(7500)
+    panel_extra._crear()
+
+    pantalla.panel_aisladas.actualizar()
+    assert pantalla.panel_aisladas.tabla.rowCount() == 1
+    assert "7.500" in pantalla.panel_aisladas.tabla.item(0, 10).text()

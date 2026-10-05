@@ -328,11 +328,40 @@ def crear_reserva_aislada(
     conn: sqlite3.Connection, *, id_profesional: int, id_consultorio: int, fecha: str,
     hora_inicio: float, hora_fin: float, aplica_recargo: bool | None = None,
     es_reubicacion: bool = False, observacion: str | None = None, forzar: bool = False,
+    es_extraordinaria: bool = False, item_extraordinario: str | None = None,
+    monto_extraordinario: float | None = None,
 ) -> tuple[int, list[str]]:
     """Las reservas aisladas no tienen ninguna restricción de bloques
     rígidos (DC-04 §2.2, confirmado por el usuario): esos bloques son una
     regla pensada para reservas regulares, no para compromisos de un solo
-    día."""
+    día.
+
+    "Reserva extraordinaria" (pedido de la clienta): una `ReservaAislada`
+    más, con el mismo modelo de conflictos/ocupación de grilla/cancelación
+    que cualquier otra — solo cambia CÓMO se cobra. En vez de hora×tarifa
+    del consultorio (`ValorHoraAisladaActual`), el monto es el que tipea
+    el operador a mano (`monto_extraordinario`), junto con una descripción
+    de texto libre de qué se está cobrando (`item_extraordinario`) — "el
+    ítem a cargar que sea de texto libre", confirmado explícitamente que
+    el monto también se tipea a mano (no se calcula con la tarifa). Solo
+    se puede asignar a un profesional categoría A (pedido explícito de la
+    clienta) — la misma categoría que ya usa Reservas aisladas para sus
+    propios compromisos de un día, no un tipo de profesional nuevo.
+    `AplicaRecargo` no tiene sentido acá (el monto ya es el final a
+    cobrar) — se ignora el parámetro `aplica_recargo` cuando es
+    extraordinaria. `mensaje_detalle_reserva_aislada`
+    (`app.negocio.mensajes`) ya lee CUALQUIER `ReservaAislada` del
+    profesional del período, así que una extraordinaria entra sola en el
+    "SALDO A ABONAR" del mes junto con el resto (saldo anterior, llaves,
+    ítems libres) — no hace falta ningún mensaje ni cálculo aparte."""
+    if es_extraordinaria:
+        profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+        if profesional is None or profesional["CategoriaProfesional"] != "A":
+            raise ValueError("Una reserva extraordinaria solo se puede asignar a un profesional categoría A.")
+        if not (item_extraordinario or "").strip():
+            raise ValueError("Una reserva extraordinaria necesita un ítem a cargar (texto libre).")
+        if monto_extraordinario is None:
+            raise ValueError("Una reserva extraordinaria necesita un monto a cobrar.")
     if hora_fin <= hora_inicio:
         # #45: sin esta validación, un horario tipeado al revés (ej.
         # "desde" 23, "hasta" 1) se guardaba tal cual — el formulario no
@@ -354,7 +383,9 @@ def crear_reserva_aislada(
     if bloqueantes and not forzar:
         raise ConflictoBloqueanteError(bloqueantes)
 
-    if aplica_recargo is None:
+    if es_extraordinaria:
+        aplica_recargo = False
+    elif aplica_recargo is None:
         fila_cfg = conn.execute(
             "SELECT RecargoAisladasActivoPorDefecto FROM Configuracion WHERE IdConfiguracion = 1"
         ).fetchone()
@@ -365,6 +396,9 @@ def crear_reserva_aislada(
         IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha=fecha,
         HoraInicio=hora_inicio, HoraFin=hora_fin, Estado="Confirmada",
         AplicaRecargo=int(aplica_recargo), EsReubicacion=int(es_reubicacion), Observacion=observacion,
+        EsExtraordinaria=int(es_extraordinaria),
+        ItemExtraordinario=item_extraordinario if es_extraordinaria else None,
+        MontoExtraordinario=monto_extraordinario if es_extraordinaria else None,
     )
     advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
     if forzar:

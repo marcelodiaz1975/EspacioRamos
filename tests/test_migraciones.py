@@ -55,6 +55,35 @@ def test_aplicar_migraciones_agrega_tamano_de_escritorio_a_consultorio_viejo(tmp
     conn.close()
 
 
+def test_aplicar_migraciones_agrega_columnas_de_reserva_extraordinaria_a_reserva_aislada_vieja(tmp_path):
+    """Reserva extraordinaria (categoría A): una base vieja de
+    ReservaAislada (sin EsExtraordinaria/ItemExtraordinario/
+    MontoExtraordinario) gana las tres columnas solas, sin perder las
+    filas ya cargadas."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE ReservaAislada (IdReservaAislada INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "IdProfesional INTEGER NOT NULL, IdConsultorio INTEGER NOT NULL, Fecha TEXT NOT NULL, "
+        "HoraInicio REAL NOT NULL, HoraFin REAL NOT NULL, Estado TEXT NOT NULL DEFAULT 'Confirmada', "
+        "AplicaRecargo INTEGER NOT NULL DEFAULT 0, EsReubicacion INTEGER NOT NULL DEFAULT 0, Observacion TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO ReservaAislada (IdProfesional, IdConsultorio, Fecha, HoraInicio, HoraFin) "
+        "VALUES (1, 1, '2026-08-10', 10, 12)"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    columnas = {f["name"] for f in conn.execute("PRAGMA table_info(ReservaAislada)").fetchall()}
+    assert {"EsExtraordinaria", "ItemExtraordinario", "MontoExtraordinario"} <= columnas
+    fila = conn.execute("SELECT * FROM ReservaAislada").fetchone()
+    assert fila["EsExtraordinaria"] == 0
+    assert fila["Fecha"] == "2026-08-10"
+    conn.close()
+
+
 def test_base_nueva_tiene_las_tablas_de_seguridad(tmp_path):
     conn = init_database(tmp_path / "test.db")
     tablas = {

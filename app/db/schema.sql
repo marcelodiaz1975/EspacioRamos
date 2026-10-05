@@ -280,7 +280,10 @@ CREATE TABLE IF NOT EXISTS ReservaAislada (
     Estado TEXT NOT NULL CHECK (Estado IN ('Confirmada','Cancelada')) DEFAULT 'Confirmada',
     AplicaRecargo INTEGER NOT NULL DEFAULT 0,
     EsReubicacion INTEGER NOT NULL DEFAULT 0,
-    Observacion TEXT
+    Observacion TEXT,
+    EsExtraordinaria INTEGER NOT NULL DEFAULT 0,
+    ItemExtraordinario TEXT,
+    MontoExtraordinario REAL
 );
 
 -- 3.11 BloqueRigido -------------------------------------------------------------------

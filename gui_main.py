@@ -103,7 +103,9 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
         ),
         Seccion(
             "Reservas", lambda conn: PantallaReservas(conn), categoria="Operativa diaria",
-            ayuda="Alta, edición y baja de reservas (regulares y aisladas) por profesional, consultorio y franja.",
+            ayuda="Alta, edición y baja de reservas (regulares y aisladas) por profesional, consultorio y "
+            "franja. Solapa Reserva extraordinaria: un cobro de ítem libre y monto manual para un "
+            "profesional categoría A, con el mismo mensaje de detalle que una aislada común.",
         ),
         Seccion(
             "Valores", lambda conn: PantallaValores(conn), categoria="Operativa diaria",

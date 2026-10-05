@@ -227,6 +227,72 @@ def test_crear_reserva_aislada_hora_fin_igual_a_hora_inicio_falla(conn, consulto
         )
 
 
+# ------------------------------------------------------------ reserva extraordinaria
+
+def test_crear_reserva_extraordinaria_se_guarda_con_monto_manual(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Paz", categoria="A")
+    id_reserva, advertencias = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, fecha="2026-08-10",
+        hora_inicio=14, hora_fin=16, es_extraordinaria=True,
+        item_extraordinario="Uso del consultorio para un taller puntual", monto_extraordinario=12000,
+    )
+    assert advertencias == []
+    reserva = obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)
+    assert reserva["EsExtraordinaria"] == 1
+    assert reserva["ItemExtraordinario"] == "Uso del consultorio para un taller puntual"
+    assert reserva["MontoExtraordinario"] == 12000
+    assert reserva["AplicaRecargo"] == 0
+
+
+def test_crear_reserva_extraordinaria_solo_para_categoria_a(conn, consultorio, profesional_factory):
+    id_prof_r = profesional_factory("Lo Veci", categoria="R")
+    with pytest.raises(ValueError, match="categoría A"):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof_r, id_consultorio=consultorio, fecha="2026-08-10",
+            hora_inicio=14, hora_fin=16, es_extraordinaria=True,
+            item_extraordinario="Taller puntual", monto_extraordinario=5000,
+        )
+
+
+def test_crear_reserva_extraordinaria_sin_item_falla(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Paz", categoria="A")
+    with pytest.raises(ValueError, match="ítem a cargar"):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, fecha="2026-08-10",
+            hora_inicio=14, hora_fin=16, es_extraordinaria=True,
+            item_extraordinario="   ", monto_extraordinario=5000,
+        )
+
+
+def test_crear_reserva_extraordinaria_sin_monto_falla(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Paz", categoria="A")
+    with pytest.raises(ValueError, match="monto a cobrar"):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, fecha="2026-08-10",
+            hora_inicio=14, hora_fin=16, es_extraordinaria=True,
+            item_extraordinario="Taller puntual", monto_extraordinario=None,
+        )
+
+
+def test_reserva_extraordinaria_ocupa_la_grilla_igual_que_una_aislada(conn, consultorio, profesional_factory):
+    """"Afecta la grilla visual en la ocupación como reserva aislada"
+    (pedido explícito de la clienta): al ser una ReservaAislada más,
+    genera el mismo conflicto bloqueante contra otro profesional que
+    cualquier aislada común."""
+    id_prof_a = profesional_factory("Paz", categoria="A")
+    id_prof_b = profesional_factory("Gomez", categoria="A")
+    crear_reserva_aislada(
+        conn, id_profesional=id_prof_a, id_consultorio=consultorio, fecha="2026-08-10",
+        hora_inicio=14, hora_fin=16, es_extraordinaria=True,
+        item_extraordinario="Taller puntual", monto_extraordinario=5000,
+    )
+    with pytest.raises(ConflictoBloqueanteError):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof_b, id_consultorio=consultorio, fecha="2026-08-10",
+            hora_inicio=15, hora_fin=17,
+        )
+
+
 def test_superposicion_entre_profesionales_distintos_bloquea(conn, consultorio, profesional_factory):
     id_prof_a = profesional_factory("Lo Veci")
     id_prof_b = profesional_factory("Gomez")

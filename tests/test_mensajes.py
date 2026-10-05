@@ -250,6 +250,52 @@ def test_detalle_aislada_de_reubicacion_no_genera_cargo(conn, profesional_aislad
     assert "SALDO A ABONAR: $1.000" in texto
 
 
+def test_detalle_aislada_extraordinaria_usa_el_monto_manual_y_el_item_de_texto_libre(
+    conn, profesional_aislada_con_edificios,
+):
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0, EsExtraordinaria=1,
+        ItemExtraordinario="Uso del consultorio para un taller puntual", MontoExtraordinario=12000,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    # saldo_anterior 1000 + extraordinaria 12000 = 13000 (no 2hs x 500 = 1000)
+    assert "SALDO A ABONAR: $13.000" in texto
+    assert "Uso del consultorio para un taller puntual $12.000" in texto
+
+
+def test_detalle_aislada_extraordinaria_y_normal_conviven_en_el_mismo_mes(conn, profesional_aislada_con_edificios):
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-12", HoraInicio=9, HoraFin=10,
+        Estado="Confirmada", AplicaRecargo=0, EsExtraordinaria=1,
+        ItemExtraordinario="Taller puntual", MontoExtraordinario=3000,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    # saldo_anterior 1000 + aislada normal (2hs x 500) 1000 + extraordinaria 3000 = 5000
+    assert "SALDO A ABONAR: $5.000" in texto
+    assert "Taller puntual $3.000" in texto
+
+
+def test_detalle_aislada_extraordinaria_posterior_va_en_su_propia_seccion(conn, profesional_aislada_con_edificios):
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-09-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0, EsExtraordinaria=1,
+        ItemExtraordinario="Taller de septiembre", MontoExtraordinario=4000,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "RESERVAS POSTERIORES" in texto
+    assert "Taller de septiembre $4.000" in texto
+    # no se suma al saldo de agosto, todavía no corresponde a este período
+    assert "SALDO A ABONAR: $1.000" in texto
+
+
 def test_detalle_aislada_omite_saldo_anterior_si_es_cero(conn, profesional_aislada_con_edificios):
     id_prof, c1, _, _, _ = profesional_aislada_con_edificios
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=0)

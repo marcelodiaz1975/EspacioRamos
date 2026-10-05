@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -379,13 +380,16 @@ class PantallaReservas(QWidget):
         self.pestanas = QTabWidget()
         self.panel_regulares = _PanelReservasRegulares(conn)
         self.panel_aisladas = _PanelReservasAisladas(conn)
+        self.panel_extraordinaria = _PanelReservaExtraordinaria(conn)
         self.pestanas.addTab(self.panel_regulares, "Reservas regulares")
         self.pestanas.addTab(self.panel_aisladas, "Reservas aisladas")
+        self.pestanas.addTab(self.panel_extraordinaria, "Reserva extraordinaria")
         layout.addWidget(self.pestanas, stretch=1)
 
     def actualizar(self) -> None:
         self.panel_regulares.actualizar()
         self.panel_aisladas.actualizar()
+        self.panel_extraordinaria.actualizar()
 
 
 class _PanelReservasRegulares(QWidget):
@@ -1546,9 +1550,16 @@ class _PanelReservasAisladas(QWidget):
 
     def _valor_reserva(self, reserva: sqlite3.Row, valor_hora_aislada: float, recargo_pct: float) -> str:
         """Vacío si la reserva cae en un período posterior al actual —
-        todavía no corresponde mostrarle un valor de facturación."""
+        todavía no corresponde mostrarle un valor de facturación. Una
+        reserva extraordinaria muestra el monto manual que se tipeó al
+        cargarla (`MontoExtraordinario`), no un cálculo de hora×tarifa —
+        esta tabla también lista las extraordinarias (son una
+        ReservaAislada más), así que su columna "Valor" tiene que
+        reflejar lo que de verdad se cobra."""
         if reserva["Fecha"][:7] > periodo_actual(self.conn):
             return ""
+        if reserva["EsExtraordinaria"]:
+            return formatear_moneda(reserva["MontoExtraordinario"] or 0.0)
         if reserva["EsReubicacion"]:
             return formatear_moneda(0.0)
         monto = (reserva["HoraFin"] - reserva["HoraInicio"]) * valor_hora_aislada
@@ -1779,3 +1790,341 @@ class _PanelReservasAisladas(QWidget):
         self.casilla_recargo.setChecked(bool(reserva["AplicaRecargo"]))
         self.casilla_reubicacion.setChecked(bool(reserva["EsReubicacion"]))
         self._sincronizar_grilla()
+
+
+class _PanelReservaExtraordinaria(QWidget):
+    """Reserva extraordinaria (pedido de la clienta): una `ReservaAislada`
+    más — mismo modelo de conflictos, ocupación de grilla y cancelación
+    que cualquier otra aislada (`crear_reserva_aislada`/
+    `cancelar_reserva_aislada`, sin duplicar nada de esa lógica) — pero
+    con un ítem a cargar de texto libre y un monto manual en vez de
+    hora×tarifa del consultorio, y solo para profesionales categoría A
+    (la misma categoría que ya usa Reservas aisladas para sus propios
+    compromisos de un día). Al confirmar, el mensaje de detalle
+    (`mensaje_detalle_reserva_aislada`, el mismo que ya usa Centro de
+    mensajería para categoría A) ya la incluye sola, con el saldo
+    anterior y los demás conceptos especiales (llaves, ítems libres) —
+    no hace falta ningún mensaje ni cálculo aparte, se copia al
+    portapapeles con el mismo mecanismo que cualquier alta de aislada.
+
+    A diferencia de Reservas regulares/aisladas (con rondas y rondas de
+    calibración pixel a pixel documentadas en CLAUDE.md), esta solapa es
+    un primer armado deliberadamente simple — sin grilla de referencia
+    embebida —, para no arriesgar esa geometría ya afinada de las otras
+    dos solapas."""
+
+    def __init__(self, conn: sqlite3.Connection, parent=None):
+        super().__init__(parent)
+        self.setObjectName("panelSolapa")
+        self.conn = conn
+        self._reservas: list[sqlite3.Row] = []
+        self._armar_ui()
+        self.actualizar()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._orden.reiniciar()
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
+    def _armar_ui(self) -> None:
+        layout_externo = QHBoxLayout(self)
+
+        panel_form = QWidget()
+        panel_form.setFixedWidth(_ANCHO_PANEL_FILTROS_GRILLA)
+        form = QVBoxLayout(panel_form)
+
+        self.combo_profesional = QComboBox()
+        self.combo_profesional.addItem("Todos los profesionales", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, ("A",)):
+            self.combo_profesional.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_profesional)
+        self.combo_profesional.currentIndexChanged.connect(self.actualizar)
+        form.addWidget(QLabel("Profesional (categoría A)"))
+        form.addWidget(self.combo_profesional)
+
+        self.combo_localidad = QComboBox()
+        opciones_localidad = _opciones_localidad(self.conn)
+        if len(opciones_localidad) > 1:
+            self.combo_localidad.addItem("Seleccionar…", _SIN_ELEGIR)
+        for valor, etiqueta in opciones_localidad:
+            self.combo_localidad.addItem(etiqueta, valor)
+        self.combo_localidad.setEnabled(len(opciones_localidad) > 1)
+        self.combo_localidad.currentIndexChanged.connect(self._cargar_edificios)
+        form.addWidget(QLabel("Localidad"))
+        form.addWidget(self.combo_localidad)
+
+        self.combo_edificio = QComboBox()
+        self.combo_edificio.currentIndexChanged.connect(self._cargar_unidades)
+        form.addWidget(QLabel("Edificio"))
+        form.addWidget(self.combo_edificio)
+
+        self.combo_unidad = QComboBox()
+        self.combo_unidad.currentIndexChanged.connect(self._cargar_consultorios)
+        form.addWidget(QLabel("Unidad"))
+        form.addWidget(self.combo_unidad)
+
+        self.combo_consultorio = QComboBox()
+        form.addWidget(QLabel("Consultorio"))
+        form.addWidget(self.combo_consultorio)
+
+        self.campo_fecha = QDateEdit()
+        self.campo_fecha.setDisplayFormat(_FORMATO_FECHA_DIA)
+        self.campo_fecha.setLocale(_LOCALE_ES)
+        self.campo_fecha.setCalendarPopup(True)
+        form.addWidget(QLabel("Fecha"))
+        form.addWidget(self.campo_fecha)
+
+        fila_horario = QHBoxLayout()
+        self.spin_desde = _SpinHorario()
+        self.spin_desde.setRange(0, 23)
+        self.spin_desde.setSingleStep(0.5)
+        self.spin_desde.setValue(9)
+        self.spin_hasta = _SpinHorario()
+        self.spin_hasta.setRange(0.5, 24)
+        self.spin_hasta.setSingleStep(0.5)
+        self.spin_hasta.setValue(10)
+        fila_horario.addWidget(QLabel("Desde"))
+        fila_horario.addWidget(self.spin_desde)
+        fila_horario.addWidget(QLabel("Hasta"))
+        fila_horario.addWidget(self.spin_hasta)
+        form.addLayout(fila_horario)
+
+        self.campo_item = QLineEdit()
+        self.campo_item.setPlaceholderText("Qué se está cobrando")
+        form.addWidget(QLabel("Ítem a cargar"))
+        form.addWidget(self.campo_item)
+
+        self.spin_monto = QDoubleSpinBox()
+        self.spin_monto.setRange(0, 99_999_999)
+        self.spin_monto.setDecimals(2)
+        self.spin_monto.setSingleStep(100)
+        form.addWidget(QLabel("Monto a cobrar"))
+        form.addWidget(self.spin_monto)
+
+        boton_crear = QPushButton("Crear reserva extraordinaria")
+        boton_crear.setObjectName("botonPrimario")
+        boton_crear.setFixedWidth(_ANCHO_PANEL_FILTROS_GRILLA)
+        boton_crear.clicked.connect(self._crear)
+        form.addWidget(boton_crear)
+
+        boton_cancelar = QPushButton("Cancelar reserva")
+        boton_cancelar.setObjectName("botonSecundario")
+        boton_cancelar.setFixedWidth(_ANCHO_PANEL_FILTROS_GRILLA)
+        boton_cancelar.clicked.connect(self._cancelar)
+        form.addWidget(boton_cancelar)
+
+        form.addStretch()
+        layout_externo.addWidget(panel_form)
+
+        columnas = [
+            "Profesional", "Localidad", "Edificio", "Unidad", "Consultorio",
+            "Día", "Fecha", "Horario", "Ítem", "Monto", "Estado",
+        ]
+        self.tabla = QTableWidget(0, len(columnas))
+        self.tabla.setHorizontalHeaderLabels(columnas)
+        self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla.verticalHeader().setVisible(False)
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
+        layout_externo.addWidget(self.tabla, stretch=1)
+
+        self._foco = instalar_enter_avanza_foco(
+            [
+                self.combo_profesional, self.combo_localidad, self.combo_edificio, self.combo_unidad,
+                self.combo_consultorio, self.campo_fecha, self.spin_desde, self.spin_hasta,
+                self.campo_item, self.spin_monto, boton_crear, boton_cancelar,
+            ],
+            parent=self,
+        )
+        # `_resetear_formulario` (no solo `_cargar_edificios`, que también
+        # llama) para que "Fecha" arranque en HOY en vez del default de
+        # `QDateEdit` sin fecha puesta (01-01-2000) — mismo motivo por el
+        # que Reservas aisladas fija ese campo recién en su primer
+        # `_resetear_formulario`, acá adelantado a la construcción porque
+        # esta solapa no tiene un `showEvent` que lo haga por otro lado.
+        self._resetear_formulario()
+
+    def _cargar_edificios(self) -> None:
+        localidad = self.combo_localidad.currentData()
+        self.combo_edificio.blockSignals(True)
+        self.combo_edificio.clear()
+        if localidad is _SIN_ELEGIR:
+            self.combo_edificio.blockSignals(False)
+            self.combo_edificio.setEnabled(False)
+            self._cargar_unidades()
+            return
+        opciones_edificio = _opciones_edificio(self.conn, localidad)
+        if len(opciones_edificio) > 1:
+            self.combo_edificio.addItem("Seleccionar…", None)
+        for id_, nombre in opciones_edificio:
+            self.combo_edificio.addItem(nombre, id_)
+        self.combo_edificio.blockSignals(False)
+        self.combo_edificio.setEnabled(len(opciones_edificio) > 1)
+        self._cargar_unidades()
+
+    def _cargar_unidades(self) -> None:
+        _recargar_unidades(self.conn, self.combo_edificio, self.combo_unidad)
+        self._cargar_consultorios()
+
+    def _cargar_consultorios(self) -> None:
+        _recargar_consultorios(self.conn, self.combo_unidad, self.combo_consultorio)
+
+    def _fila_seleccionada(self) -> sqlite3.Row | None:
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return None
+        return self._reservas[filas[0].row()]
+
+    def _copiar_mensaje_detalle(self, id_profesional: int, fecha: str) -> None:
+        """Mismo mecanismo que Reservas aisladas: confirmar o cancelar una
+        reserva extraordinaria carga sola el mensaje de detalle
+        actualizado al portapapeles."""
+        try:
+            texto = mensaje_detalle_reserva_aislada(self.conn, id_profesional=id_profesional, periodo=fecha[:7])
+        except ValueError:
+            return
+        QGuiApplication.clipboard().setText(texto)
+
+    def _crear(self, forzar: bool = False) -> None:
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            QMessageBox.warning(self, "Crear reserva extraordinaria", "Elegí un profesional.")
+            return
+        id_consultorio = self.combo_consultorio.currentData()
+        if id_consultorio is None:
+            QMessageBox.warning(
+                self, "Crear reserva extraordinaria", "Elegí localidad, edificio, unidad y consultorio.",
+            )
+            return
+        item = self.campo_item.text().strip()
+        if not item:
+            QMessageBox.warning(self, "Crear reserva extraordinaria", "Cargá el ítem que se está cobrando.")
+            return
+        monto = self.spin_monto.value()
+        if monto <= 0:
+            QMessageBox.warning(self, "Crear reserva extraordinaria", "Cargá el monto a cobrar.")
+            return
+        fecha = self.campo_fecha.date().toPython().isoformat()
+        if not forzar and not confirmar_si_fecha_es_mes_anterior(self, self.conn, fecha):
+            return
+        if not forzar:
+            faltantes = llaves_faltantes_para_reserva(
+                self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio,
+            ) + placa_faltante_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
+            if faltantes and not _confirmar_llave_o_placa_faltante(self, faltantes):
+                return
+        try:
+            _id, advertencias = crear_reserva_aislada(
+                self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio, fecha=fecha,
+                hora_inicio=self.spin_desde.value(), hora_fin=self.spin_hasta.value(),
+                es_extraordinaria=True, item_extraordinario=item, monto_extraordinario=monto, forzar=forzar,
+            )
+        except ConflictoBloqueanteError as error:
+            confirmacion = QMessageBox.question(
+                self, "Conflictos detectados", f"{error}\n\n¿Crear la reserva de todos modos?",
+            )
+            if confirmacion == QMessageBox.StandardButton.Yes:
+                self._crear(forzar=True)
+            return
+        except ValueError as error:
+            QMessageBox.warning(self, "Crear reserva extraordinaria", str(error))
+            return
+        self.conn.commit()
+        regenerar_snapshot_si_corresponde(self.conn, fecha[:7])
+        if advertencias:
+            QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias))
+        self._copiar_mensaje_detalle(id_profesional, fecha)
+        self.actualizar()
+        self._resetear_formulario()
+
+    def _cancelar(self) -> None:
+        reserva = self._fila_seleccionada()
+        if reserva is None:
+            return
+        try:
+            requiere_aviso = cancelar_reserva_aislada(self.conn, reserva["IdReservaAislada"])
+        except ValueError as error:
+            QMessageBox.warning(self, "Cancelar reserva", str(error))
+            return
+        self.conn.commit()
+        regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
+        if requiere_aviso:
+            QMessageBox.information(self, "Cancelar reserva", "Cancelada el mismo día: avisar al profesional.")
+        self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
+    def _resetear_formulario(self) -> None:
+        self.combo_profesional.setCurrentIndex(0)
+        if self.combo_localidad.count():
+            self.combo_localidad.setCurrentIndex(0)
+        self._cargar_edificios()
+        self.spin_desde.setValue(9)
+        self.spin_hasta.setValue(10)
+        hoy = fecha_actual(self.conn)
+        self.campo_fecha.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.campo_item.clear()
+        self.spin_monto.setValue(0)
+
+    def actualizar(self) -> None:
+        id_profesional_filtro = self.combo_profesional.currentData()
+        repo_profesional = obtener_repositorio(self.conn, "Profesional")
+        todas = [r for r in obtener_repositorio(self.conn, "ReservaAislada").listar() if r["EsExtraordinaria"]]
+        if id_profesional_filtro is not None:
+            filtradas = [r for r in todas if r["IdProfesional"] == id_profesional_filtro]
+        else:
+            filtradas = todas
+
+        filas: list[tuple[sqlite3.Row, sqlite3.Row | None, sqlite3.Row | None]] = []
+        for r in filtradas:
+            profesional = repo_profesional.obtener(r["IdProfesional"])
+            consultorio = self.conn.execute(
+                "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio, "
+                "loc.Localidad AS DomicilioLocalidad FROM Consultorio c "
+                "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+                "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad WHERE c.IdConsultorio = ?",
+                (r["IdConsultorio"],),
+            ).fetchone()
+            filas.append((r, profesional, consultorio))
+        filas.sort(key=lambda t: (t[0]["Fecha"], t[0]["HoraInicio"]), reverse=True)
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
+        self._reservas = [t[0] for t in filas]
+
+        self.tabla.setRowCount(len(filas))
+        for fila_idx, (r, profesional, consultorio) in enumerate(filas):
+            self.tabla.setItem(fila_idx, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
+            self.tabla.setItem(
+                fila_idx, 1,
+                QTableWidgetItem((consultorio["DomicilioLocalidad"] or "(Sin localidad)") if consultorio else "?"),
+            )
+            self.tabla.setItem(fila_idx, 2, QTableWidgetItem(consultorio["NombreEdificio"] if consultorio else "?"))
+            self.tabla.setItem(fila_idx, 3, QTableWidgetItem(consultorio["Departamento"] if consultorio else "?"))
+            self.tabla.setItem(
+                fila_idx, 4, item_numero(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
+            )
+            self.tabla.setItem(fila_idx, 5, QTableWidgetItem(fecha_a_dia_semana(date.fromisoformat(r["Fecha"]))))
+            self.tabla.setItem(fila_idx, 6, QTableWidgetItem(_fmt_fecha(r["Fecha"])))
+            self.tabla.setItem(fila_idx, 7, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
+            self.tabla.setItem(fila_idx, 8, QTableWidgetItem(r["ItemExtraordinario"] or ""))
+            self.tabla.setItem(fila_idx, 9, item_numero(formatear_moneda(r["MontoExtraordinario"] or 0.0)))
+            self.tabla.setItem(fila_idx, 10, QTableWidgetItem(r["Estado"]))
+        self.tabla.resizeColumnsToContents()
+
+    @staticmethod
+    def _clave_orden(columna: int):
+        claves = {
+            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            1: lambda t: (t[2]["DomicilioLocalidad"] or "") if t[2] else "",
+            2: lambda t: (t[2]["NombreEdificio"] or "") if t[2] else "",
+            3: lambda t: (t[2]["Departamento"] or "") if t[2] else "",
+            4: lambda t: (t[2]["NumeroConsultorio"] if t[2] else 0),
+            5: lambda t: date.fromisoformat(t[0]["Fecha"]).weekday(),
+            6: lambda t: t[0]["Fecha"],
+            7: lambda t: t[0]["HoraInicio"],
+            8: lambda t: t[0]["ItemExtraordinario"] or "",
+            9: lambda t: t[0]["MontoExtraordinario"] or 0.0,
+            10: lambda t: t[0]["Estado"],
+        }
+        return claves[columna]

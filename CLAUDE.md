@@ -7027,6 +7027,145 @@ sumando todo. `tests/test_gui_balance.py`
 reemplaza al viejo test de "excluye generales" con dos edificios para
 que la porción prorateada sea visible y no un simple 0/100%).
 
+## Reservas: solapa nueva "Reserva extraordinaria" (categoría A)
+
+Pedido de la clienta: una tercera solapa en "Reservas" para cargar un
+cobro puntual, con un ítem a texto libre y un monto que se tipea a mano,
+en vez de calcularse por hora×tarifa — "No es necesario armar PDF, si
+estaría bueno un texto tipo reserva aislada con el mismo formato... Se
+tiene en cuenta el saldo anterior y los conceptos especiales como
+llaves y otros cargos. Afecta la grilla visual en la ocupación como
+reserva aislada. Se asigna a un profesional cargado como categoría A."
+
+Antes de implementar se consultaron dos decisiones (`AskUserQuestion`):
+
+- **Modelo de datos**: extender `ReservaAislada` (con un flag + un monto
+  manual opcional) en vez de armar una tabla nueva separada — elegida la
+  opción recomendada: reusa gratis toda la lógica ya armada de
+  conflictos, ocupación de grilla, cancelación y mensaje de detalle de
+  aisladas, en vez de duplicarla.
+- **Cálculo del monto**: manual (el operador tipea el monto final junto
+  con el ítem de texto libre) en vez de seguir calculando por tarifa
+  horaria del consultorio — "es justamente lo 'extraordinario': un cargo
+  pactado aparte de la tarifa normal".
+
+Investigado antes de diseñar nada: categoría A YA es, en todo el
+sistema, la categoría de "reserva aislada" (`_CATEGORIAS_AISLADAS =
+("R", "A")` en `reservas.py`, Centro de mensajería filtra "Solo
+aisladas" para A) — no es un tipo de profesional nuevo, es la misma
+categoría que ya arma `ReservaAislada` y el mensaje de detalle mensual.
+Esto es lo que hace viable extender esa misma tabla en vez de inventar
+un modelo paralelo.
+
+### Modelo de datos (`ReservaAislada`)
+
+Suma tres columnas: `EsExtraordinaria` (booleano), `ItemExtraordinario`
+(texto libre, qué se está cobrando) y `MontoExtraordinario` (el monto
+manual). Migración simple vía `_COLUMNAS_NUEVAS` — a diferencia de la
+columna `Consultorio` de Gastos operativos (ver la sección de arriba),
+acá no hay ningún CHECK que ensanchar, así que alcanza con el mecanismo
+genérico de siempre.
+
+### Negocio (`app.negocio.reservas.crear_reserva_aislada`)
+
+Suma tres parámetros opcionales (`es_extraordinaria`/
+`item_extraordinario`/`monto_extraordinario`, default `False`/`None`/
+`None` — sin efecto para cualquier llamador existente). Con
+`es_extraordinaria=True`:
+- Valida que el profesional sea categoría A (`ValueError` si no) — único
+  guardarraíl nuevo de categoría en toda la función.
+- Valida que `item_extraordinario` tenga texto y `monto_extraordinario`
+  no sea `None`.
+- Ignora `aplica_recargo` (se fuerza a `False` — el monto ya es el final
+  a cobrar, el recargo de aisladas no tiene sentido encima de un cargo
+  ya manual).
+- El resto de la función (validación de fracción de grilla, `verificar_
+  conflictos_aislada`, `ConflictoBloqueanteError`/`forzar`) corre
+  EXACTAMENTE igual que para cualquier aislada — es lo que le da, gratis,
+  el pedido de "afecta la grilla visual... como reserva aislada": sigue
+  siendo una fila más de `ReservaAislada` con `Estado='Confirmada'`, así
+  que cualquier código que ya lee esa tabla para ocupación/conflictos
+  (grilla operativa, Oferta, Novedades, otras reservas) la trata igual
+  que cualquier otra, sin ningún cambio en esos módulos.
+
+### Mensaje de detalle (`app.negocio.mensajes.mensaje_detalle_reserva_aislada`)
+
+Mismo mensaje de siempre (DETALLE RESERVA {MES}, editable desde Textos
+del sistema) — no se armó ninguna función nueva. La consulta que trae
+las `ReservaAislada` del profesional/período ya traía CUALQUIER fila sin
+filtrar por `EsExtraordinaria`, así que una extraordinaria ya llegaba
+ahí sola; lo único que hacía falta era que no se formateara con la
+lógica de `_lineas_reservas_aisladas` (que asume un monto calculado por
+hora×tarifa y agrupa por bloques continuos/combinar, algo que no tiene
+sentido para un cobro puntual con su propia descripción).
+
+`_lineas_reservas_extraordinarias` (nueva, paralela a
+`_lineas_reservas_aisladas` pero mucho más simple): una línea por cada
+extraordinaria, SIN agrupar ni combinar nunca (cada una describe un
+cobro distinto, fundir dos en una sola línea les haría perder sentido)
+— `"+ {día} {fecha} - {ItemExtraordinario} {monto}"`. `del_mes`/
+`posteriores` (las dos listas que ya arma la función) se separan en
+"normales"/"extraordinarias" ANTES de pasarlas a cada formateador, pero
+siguen enteras (sin filtrar) para la "Regla del edificio" de más abajo
+— una extraordinaria también cuenta para decidir si hay que mencionar
+el edificio. El total de las extraordinarias se suma al de las
+reservas normales antes de calcular `SALDO A ABONAR` — así el saldo
+anterior, las llaves y los ítems libres se siguen computando exactamente
+igual, con la extraordinaria como un componente más, tal como pedía la
+clienta ("se tiene en cuenta el saldo anterior y los conceptos
+especiales").
+
+### GUI (`app/gui/pantallas/reservas.py`, `_PanelReservaExtraordinaria`)
+
+Tercera solapa de "Reservas" ("Reserva extraordinaria"), deliberadamente
+simple — sin grilla de referencia embebida, a diferencia de Reservas
+regulares/aisladas (con rondas y rondas de calibración pixel a pixel
+documentadas más arriba): un primer armado que no arriesga esa geometría
+ya afinada. Columna izquierda de ancho fijo: Profesional (combo buscable,
+SOLO categoría A, `_opciones_profesional(conn, ("A",))` — distinto del
+combo de Aisladas, que incluye R también), la cascada Localidad→
+Edificio→Unidad→Consultorio de siempre, Fecha (mismo formato "día de
+semana" que el resto del sistema), horario Desde/Hasta, "Ítem a cargar"
+(`QLineEdit` libre) y "Monto a cobrar" (`QDoubleSpinBox`), con "Crear
+reserva extraordinaria" (`botonPrimario`) y "Cancelar reserva"
+(`botonSecundario`) debajo. Tabla a la derecha: Profesional/Localidad/
+Edificio/Unidad/Consultorio/Día/Fecha/Horario/Ítem/Monto/Estado, con
+orden por click en el encabezado (`OrdenTabla`) y filtrable por el mismo
+combo de Profesional (patrón "Todos los profesionales" de siempre).
+
+`_crear`/`_cancelar` reusan exactamente el mismo flujo que ya tiene
+Reservas aisladas (confirmación de fecha de mes anterior, aviso de
+llave/placa faltante, `ConflictoBloqueanteError` con reintento
+`forzar=True`, `regenerar_snapshot_si_corresponde`) — mismos imports,
+sin duplicar ninguna lógica de negocio, solo la UI. Al confirmar (alta o
+cancelación), copia al portapapeles el mensaje de detalle actualizado
+del profesional — mismo mecanismo (`_copiar_mensaje_detalle`) que ya
+usa Aisladas, así que el pedido de "un texto tipo reserva aislada con el
+mismo formato" queda cubierto sin necesitar ningún botón "Copiar
+mensaje" aparte: ya se copia solo al cargarla.
+
+`_PanelReservasAisladas._valor_reserva` (la tabla de "Reservas
+aisladas" de siempre) se ajusta de paso: como una extraordinaria
+también es una fila de esa tabla (sin filtrar en ningún lado), su
+columna "Valor" mostraba un cálculo de hora×tarifa que no reflejaba lo
+que de verdad se cobra — ahora, si `EsExtraordinaria`, muestra
+`MontoExtraordinario` directo.
+
+Tests nuevos: `tests/test_reservas.py` (`crear_reserva_aislada` con
+`es_extraordinaria=True` — se guarda con el monto manual, rechaza
+categoría distinta de A, rechaza sin ítem, rechaza sin monto, genera el
+mismo conflicto bloqueante que cualquier aislada contra otro
+profesional); `tests/test_mensajes.py` (el detalle usa el monto manual
+y el ítem de texto libre, convive con una aislada normal en el mismo
+mes, una posterior va a su propia sección sin sumarse al saldo del
+período actual); `tests/test_migraciones.py` (una base vieja de
+`ReservaAislada` gana las tres columnas sin perder las filas ya
+cargadas); `tests/test_gui_reservas.py` (la solapa existe con el combo
+acotado a categoría A, crear guarda y copia el mensaje al portapapeles,
+sin ítem o sin monto no crea nada, cancelar funciona, y la fila también
+se ve en la tabla de "Reservas aisladas" con el monto manual en su
+columna "Valor").
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

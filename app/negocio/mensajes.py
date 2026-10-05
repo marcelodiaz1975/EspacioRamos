@@ -490,6 +490,25 @@ def _lineas_reservas_aisladas(
     return lineas, total
 
 
+def _lineas_reservas_extraordinarias(filas: list[sqlite3.Row]) -> tuple[list[str], float]:
+    """Reserva extraordinaria (categoría A, pedido de la clienta): el
+    monto es el que tipeó el operador a mano (`MontoExtraordinario`), no
+    uno calculado por hora×tarifa — y lo que se cobra es la descripción
+    de texto libre (`ItemExtraordinario`), no un horario/lugar armado
+    solo. A diferencia de `_lineas_reservas_aisladas`, nunca se agrupa ni
+    se combina entre sí (cada una describe un cobro distinto, fundir dos
+    ítems distintos en una sola línea les haría perder sentido) — una
+    línea por cada una, ordenadas por fecha."""
+    lineas: list[str] = []
+    total = 0.0
+    for f in sorted(filas, key=lambda f: (f["Fecha"], f["HoraInicio"])):
+        dia_semana = DIAS_SEMANA[date.fromisoformat(f["Fecha"]).weekday()]
+        monto = f["MontoExtraordinario"] or 0.0
+        lineas.append(f"+ {dia_semana} {fecha_corta(f['Fecha'])} - {f['ItemExtraordinario']} {_moneda(monto)}")
+        total += monto
+    return lineas, total
+
+
 def _lugar_llave(fila: sqlite3.Row, incluir_edificio: bool) -> str:
     """DC-03: línea de depósito/reintegro de llave — "unidad {Depto} [-
     Edificio {nombre}]" para llaves tipo Unidad; "edificio {nombre}" para
@@ -535,6 +554,7 @@ def mensaje_detalle_reserva_aislada(
     filas = conn.execute(
         """
         SELECT ra.IdReservaAislada, ra.Fecha, ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo, ra.EsReubicacion,
+               ra.EsExtraordinaria, ra.ItemExtraordinario, ra.MontoExtraordinario,
                c.IdConsultorio, c.NumeroConsultorio, c.ValorHoraAisladaActual, u.Departamento,
                e.IdEdificio, e.Nombre AS NombreEdificio, e.Domicilio, loc.Localidad AS DomicilioLocalidad
         FROM ReservaAislada ra
@@ -554,6 +574,16 @@ def mensaje_detalle_reserva_aislada(
     prefijo_mes = f"{anio:04d}-{mes:02d}-"
     del_mes = [f for f in filas if f["Fecha"].startswith(prefijo_mes)]
     posteriores = [f for f in filas if f["Fecha"] > f"{anio:04d}-{mes:02d}-31"]
+    # Las extraordinarias se cobran con el ítem de texto libre que tipeó
+    # el operador, no con el cálculo hora×tarifa de las demás — se
+    # separan ANTES de pasar por `_lineas_reservas_aisladas` (que asume
+    # ese cálculo) y se formatean aparte con `_lineas_reservas_
+    # extraordinarias`, pero siguen contando para "Regla del edificio"
+    # más abajo (quedan en `del_mes`/`posteriores`, sin sacarlas de ahí).
+    del_mes_normales = [f for f in del_mes if not f["EsExtraordinaria"]]
+    del_mes_extraordinarias = [f for f in del_mes if f["EsExtraordinaria"]]
+    posteriores_normales = [f for f in posteriores if not f["EsExtraordinaria"]]
+    posteriores_extraordinarias = [f for f in posteriores if f["EsExtraordinaria"]]
 
     def _monto(f: sqlite3.Row) -> float:
         if f["EsReubicacion"]:
@@ -594,11 +624,14 @@ def mensaje_detalle_reserva_aislada(
 
     # 2. reservas del mes con valor, cronológicas.
     lineas_reservas, total_reservas = _lineas_reservas_aisladas(
-        del_mes, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
+        del_mes_normales, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
         incluir_edificio=incluir_edificio, combinar_misma_unidad=combinar_misma_unidad,
         combinar_distintas_unidades=combinar_distintas_unidades, monto_fn=_monto,
     )
     lineas += lineas_reservas
+    lineas_extraordinarias, total_extraordinarias = _lineas_reservas_extraordinarias(del_mes_extraordinarias)
+    lineas += lineas_extraordinarias
+    total_reservas += total_extraordinarias
 
     # 3. saldo pendiente/a favor del mes anterior — se omite si es cero.
     saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
@@ -634,11 +667,12 @@ def mensaje_detalle_reserva_aislada(
 
     if posteriores:
         lineas_posteriores, _ = _lineas_reservas_aisladas(
-            posteriores, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
+            posteriores_normales, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
             incluir_edificio=incluir_edificio, combinar_misma_unidad=combinar_misma_unidad,
             combinar_distintas_unidades=combinar_distintas_unidades,
         )
-        lineas += ["", "RESERVAS POSTERIORES"] + lineas_posteriores
+        lineas_posteriores_extraordinarias, _ = _lineas_reservas_extraordinarias(posteriores_extraordinarias)
+        lineas += ["", "RESERVAS POSTERIORES"] + lineas_posteriores + lineas_posteriores_extraordinarias
 
     edificios_mencionados: dict[int, sqlite3.Row] = {f["IdEdificio"]: f for f in del_mes + posteriores}
     if incluir_edificio and len(edificios_mencionados) > 1:

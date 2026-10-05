@@ -85,6 +85,9 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("ListasEditables", "CampoLibre1", "TEXT"),
     ("ListasEditables", "CampoLibre2", "TEXT"),
     ("ListasEditables", "CampoLibre3", "TEXT"),
+    ("ReservaAislada", "EsExtraordinaria", "INTEGER NOT NULL DEFAULT 0"),
+    ("ReservaAislada", "ItemExtraordinario", "TEXT"),
+    ("ReservaAislada", "MontoExtraordinario", "REAL"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja
