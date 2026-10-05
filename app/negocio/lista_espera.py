@@ -60,7 +60,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
 
-from app.negocio.dias import fecha_actual, fecha_a_dia_semana
+from app.negocio.dias import DIAS_SEMANA, fecha_actual, fecha_a_dia_semana
 from app.negocio.formato import fecha_corta, hora_fmt
 from app.negocio.grilla import aisladas_confirmadas_fecha, calcular_ocupacion_fecha, calcular_ocupacion_regular
 from app.repositorio.registro import obtener_repositorio
@@ -90,6 +90,55 @@ class Coincidencia:
     # evalúe reubicarlas — NUNCA bloquean la alternativa (ver
     # `calcular_ocupacion_fecha`).
     alertas_aisladas: list[str] = field(default_factory=list)
+
+
+@dataclass
+class GrupoCobertura:
+    """Un conjunto de días que se pueden cargar en UNA sola ReservaRegular
+    (mismo consultorio, mismo horario para todos) — ver `grupos_
+    cobertura`, #22: el botón "Confirmar reserva" de Lista de espera
+    precarga Reservas con uno de estos grupos por vez."""
+    id_consultorio: int
+    hora_inicio: float
+    hora_fin: float
+    dias: list[str]
+
+
+def grupos_cobertura(coincidencia: Coincidencia) -> list[GrupoCobertura]:
+    """Agrupa los tramos de una coincidencia por (consultorio, horario) —
+    #22. Un pedido Verde con un solo bloque da un único grupo (un
+    consultorio cubre todo, mismo horario para todos los días): ahí
+    alcanza con UNA ReservaRegular. Pero "Verde" solo garantiza un único
+    `id_consultorio` en TODO el pedido — un pedido con varios bloques de
+    horario distinto (ej. "martes 9 a 12" + "jueves 14 a 17", mismo
+    consultorio los dos) sigue necesitando una ReservaRegular por
+    horario, porque ese es el modelo de datos (`crear_reserva_regular`
+    toma un solo `hora_inicio`/`hora_fin` por vez). Lo mismo si la
+    cobertura combina más de un consultorio (Amarillo/Naranja/Rojo): cada
+    (consultorio, horario) distinto termina siendo su propio grupo. Un
+    mismo día puede aparecer en más de un grupo si su horario pedido se
+    cubrió partido entre dos consultorios (combinación dentro del mismo
+    día).
+
+    Los grupos quedan ordenados por el día de la semana más temprano de
+    cada uno (Lunes primero) — orden estable para mostrarle al operador
+    "Parte 1/N, Parte 2/N..." siempre en el mismo sentido."""
+    indice_dia = {dia: i for i, dia in enumerate(DIAS_SEMANA)}
+    agrupado: dict[tuple[int, float, float], list[str]] = {}
+    for dia, tramos in coincidencia.tramos_por_dia.items():
+        for tramo in tramos:
+            clave = (tramo.id_consultorio, tramo.hora_inicio, tramo.hora_fin)
+            agrupado.setdefault(clave, []).append(dia)
+
+    grupos = [
+        GrupoCobertura(
+            id_consultorio=idc, hora_inicio=hora_inicio, hora_fin=hora_fin,
+            dias=sorted(dias, key=lambda d: indice_dia.get(d, len(DIAS_SEMANA))),
+        )
+        for (idc, hora_inicio, hora_fin), dias in agrupado.items()
+    ]
+    grupos.sort(key=lambda g: indice_dia.get(g.dias[0], len(DIAS_SEMANA)) if g.dias else len(DIAS_SEMANA))
+    return grupos
 
 
 def _validar_bloque(bloque: dict) -> None:

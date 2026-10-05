@@ -92,7 +92,13 @@ from app.gui.widgets.grilla_operativa import (
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import DIAS_SEMANA, periodo_actual
 from app.negocio.formato import hora_fmt
-from app.negocio.lista_espera import crear_pedido, editar_pedido, listar_pedidos_con_coincidencia, marcar_descartado
+from app.negocio.lista_espera import (
+    crear_pedido,
+    editar_pedido,
+    grupos_cobertura,
+    listar_pedidos_con_coincidencia,
+    marcar_descartado,
+)
 from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
 from app.repositorio.registro import obtener_repositorio
 
@@ -156,6 +162,20 @@ def _texto_condiciones(conn: sqlite3.Connection, condiciones: dict) -> str:
         palabra = "unidad" if len(ids_unidad) == 1 else "unidades"
         partes.append(f"Restringido a {len(ids_unidad)} {palabra}")
     return "; ".join(partes) if partes else "Sin condiciones"
+
+
+def _texto_lugar(conn: sqlite3.Connection, id_consultorio: int) -> str:
+    """"{Edificio} - {Unidad} - Consultorio {N}" — mismo armado que ya
+    usaba `_mostrar_cobertura` para cada tramo, factorizado para
+    reusarlo también en el cartel de "Confirmar reserva" (#22)."""
+    fila = conn.execute(
+        "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio FROM Consultorio c "
+        "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+        "WHERE c.IdConsultorio = ?", (id_consultorio,),
+    ).fetchone()
+    if fila is None:
+        return f"Consultorio #{id_consultorio}"
+    return f"{fila['NombreEdificio']} - {fila['Departamento']} - Consultorio {fila['NumeroConsultorio']}"
 
 
 def _item_con_tooltip(texto: str) -> QTableWidgetItem:
@@ -401,6 +421,14 @@ class _PanelListaEspera(QWidget):
         layout.addWidget(self.tabla)
 
         fila_botones = QHBoxLayout()
+        # #22: a la izquierda de "Descartar pedido" — la acción más
+        # "definitiva" de esta fila (manda a cargar la reserva de una),
+        # habilitada solo con una fila que tenga cobertura real (ver
+        # `_mostrar_cobertura`).
+        self.boton_confirmar_reserva = QPushButton("Confirmar reserva")
+        self.boton_confirmar_reserva.setObjectName("botonPrimario")
+        self.boton_confirmar_reserva.setEnabled(False)
+        self.boton_confirmar_reserva.clicked.connect(self._confirmar_reserva)
         self.boton_descartar = QPushButton("Descartar pedido")
         self.boton_descartar.setObjectName("botonSecundario")
         self.boton_descartar.clicked.connect(self._descartar)
@@ -408,6 +436,7 @@ class _PanelListaEspera(QWidget):
         self.boton_editar.setObjectName("botonSecundario")
         self.boton_editar.clicked.connect(self._editar_pedido)
         fila_botones.addStretch()
+        fila_botones.addWidget(self.boton_confirmar_reserva)
         fila_botones.addWidget(self.boton_descartar)
         fila_botones.addWidget(self.boton_editar)
         layout.addLayout(fila_botones)
@@ -575,12 +604,16 @@ class _PanelListaEspera(QWidget):
     def _mostrar_cobertura(self) -> None:
         """Al seleccionar un pedido con coincidencia, qué bloques/días y
         qué consultorio(s) puntuales la cubren — antes esto solo se podía
-        inferir indirectamente desde el color."""
+        inferir indirectamente desde el color. De paso habilita/deshabilita
+        "Confirmar reserva" (#22): solo tiene sentido con una fila
+        seleccionada que de verdad tenga alguna cobertura."""
         filas = self.tabla.selectionModel().selectedRows()
         if not filas:
             self.texto_cobertura.clear()
+            self.boton_confirmar_reserva.setEnabled(False)
             return
         coincidencia = self._coincidencias[filas[0].row()]
+        self.boton_confirmar_reserva.setEnabled(coincidencia is not None)
         if coincidencia is None:
             self.texto_cobertura.setPlainText("Sin cobertura: no hay forma de cubrir todo el horario pedido.")
             return
@@ -591,18 +624,61 @@ class _PanelListaEspera(QWidget):
             if not tramos:
                 continue
             for tramo in sorted(tramos, key=lambda t: t.hora_inicio):
-                fila_consultorio = self.conn.execute(
-                    "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio FROM Consultorio c "
-                    "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
-                    "WHERE c.IdConsultorio = ?", (tramo.id_consultorio,),
-                ).fetchone()
-                etiqueta = (
-                    f"{fila_consultorio['NombreEdificio']} - {fila_consultorio['Departamento']} - "
-                    f"Consultorio {fila_consultorio['NumeroConsultorio']}"
-                    if fila_consultorio else f"Consultorio #{tramo.id_consultorio}"
-                )
+                etiqueta = _texto_lugar(self.conn, tramo.id_consultorio)
                 partes.append(f"{dia}: {_horario_texto(tramo.hora_inicio, tramo.hora_fin)} — {etiqueta}")
         self.texto_cobertura.setPlainText("; ".join(partes))
+
+    def _confirmar_reserva(self) -> None:
+        """#22: salta a Reservas > Reservas regulares con el pedido
+        seleccionado ya precargado — el operador confirma ahí con "Crear
+        reserva regular" (no se crea sola). Cierra el pedido solo:
+        `_PanelReservasRegulares._crear` ya marca Resuelto el pedido
+        Activo del profesional apenas se confirma la última parte
+        necesaria (ver `precargar_desde_pedido`), sin que haga falta
+        ningún código acá para eso.
+
+        La ventana principal (`VentanaPrincipal.ir_a_seccion`) es quien
+        sabe cómo saltar de una pantalla a otra — acá solo se resuelve
+        con `self.window()` (hasta dónde cuelga este panel en tiempo
+        real) en vez de pasarla por parámetro, porque esta pantalla
+        también se instancia sola en los tests, sin ventana principal de
+        verdad detrás."""
+        pedido = self._fila_seleccionada_pedido()
+        filas = self.tabla.selectionModel().selectedRows()
+        if pedido is None or not filas:
+            return
+        coincidencia = self._coincidencias[filas[0].row()]
+        if coincidencia is None:
+            return
+        grupos = grupos_cobertura(coincidencia)
+        if not grupos:
+            return
+
+        if len(grupos) > 1:
+            detalle = "\n".join(
+                f"Parte {i}/{len(grupos)}: {', '.join(g.dias)} — {_texto_lugar(self.conn, g.id_consultorio)} — "
+                f"{_horario_texto(g.hora_inicio, g.hora_fin)}"
+                for i, g in enumerate(grupos, start=1)
+            )
+            respuesta = QMessageBox.question(
+                self, "Confirmar reserva",
+                f"Esta cobertura necesita {len(grupos)} reservas regulares distintas para cubrir todo el "
+                f"pedido:\n\n{detalle}\n\nSe van a precargar una por una en Reservas — confirmá cada una con "
+                '"Crear reserva regular" antes de pasar a la siguiente. ¿Continuar?',
+            )
+            if respuesta != QMessageBox.StandardButton.Yes:
+                return
+
+        ventana = self.window()
+        if not hasattr(ventana, "ir_a_seccion"):
+            return  # pantalla instanciada sola (ej. en tests), sin ventana principal real detrás
+        panel_reservas = ventana.ir_a_seccion("Reservas")
+        if panel_reservas is None:
+            return
+        panel_reservas.pestanas.setCurrentIndex(0)  # "Reservas regulares"
+        panel_reservas.panel_regulares.precargar_desde_pedido(
+            id_profesional=pedido["IdProfesional"], grupos=grupos,
+        )
 
     def _dias_seleccionados(self) -> list[str]:
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]

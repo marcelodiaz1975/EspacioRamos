@@ -4,7 +4,8 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.dias import parsear_periodo, primer_dia_mes, ultimo_dia_mes
-from app.negocio.liquidaciones import calcular_liquidacion, ids_consolidados
+from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion, ids_consolidados
+from app.negocio.pagos import crear_plan_pago_historico
 from app.pdf.liquidacion_pdf import (
     _consultorios_y_horas,
     _items_cuenta,
@@ -104,7 +105,39 @@ def test_items_cuenta_saldo_anterior_negativo_dice_a_favor(conn, profesional):
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=-500)
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
-    assert items[3][0] == "Saldo a favor del profesional de la liquidación anterior"
+    assert items[3][0] == "Saldo a favor de la liquidación anterior"  # #34: sin "del profesional" de más
+
+
+def test_feriado_pendiente_usa_el_mismo_prefijo_que_el_del_mes_en_curso(conn, profesional):
+    """#35: "Descuento por feriado (mes anterior) - ..." en vez de
+    "Descuento feriado pendiente - ...", mismo prefijo que el feriado del
+    mes en curso."""
+    emitir_liquidacion(conn, id_profesional=profesional, periodo="2026-07", fecha_emision="2026-07-01")
+    # 20/7/2026 es lunes (día en que el profesional reserva, fixture) y
+    # se agrega como feriado extraordinario DESPUÉS de emitida julio.
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-07-20", Descripcion="Feriado extraordinario", Tipo="Feriado nacional",
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert len(liquidacion.feriados_pendientes) == 1
+
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    concepto = next(c for c, _, _ in items if "20/7" in c)
+    assert concepto.startswith("Descuento por feriado (mes anterior) - ")
+    assert "pendiente" not in concepto
+
+
+def test_cuota_de_plan_muestra_numero_sobre_el_total(conn, profesional):
+    """#37: "Cuota 1/3 del plan de pagos" en vez de "Cuota 1..." a secas."""
+    crear_plan_pago_historico(
+        conn, id_profesional=profesional, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio=PERIODO,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert len(liquidacion.cuotas_plan) == 1
+
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    concepto = next(c for c, _, _ in items if c.startswith("Cuota "))
+    assert concepto == "Cuota 1/3 del plan de pagos"
 
 
 def test_items_cuenta_agrupa_deposito_llave_antes_del_item_libre(conn, profesional):
@@ -242,11 +275,12 @@ def test_titulo_de_fotos_menciona_consultorios_reservados(conn, profesional, tmp
 
 def test_titulo_valores_usa_la_frecuencia_de_actualizacion(conn, profesional, tmp_path):
     """Default sembrado: bimestral en meses pares — agosto vigente hasta
-    septiembre, no "08/2026 y 08/2026"."""
+    septiembre, no "08/2026 y 08/2026". #40: conector "al" (es un rango
+    continuo), no "y"."""
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
     texto = _texto_pdf(ruta)
-    assert "comprendido entre 08/2026 y 09/2026" in texto
+    assert "comprendido entre 08/2026 al 09/2026" in texto
 
 
 def test_consultorios_y_horas_ordenados_por_edificio_y_numero(conn, profesional, consultorio):
@@ -358,3 +392,43 @@ def test_fotos_de_liquidacion_no_muestran_apto_camilla(conn, profesional, consul
     texto = _texto_pdf(ruta)
     assert "Apto camilla" not in texto
     assert "Consultorio 1 - 7mo \"L\" - Ramos 1" in texto
+
+
+def test_hora_aislada_omite_el_edificio_con_un_solo_edificio_en_el_documento(conn, profesional, consultorio, tmp_path):
+    """#38: el edificio solo se aclara cuando el documento referencia más
+    de uno — con una sola aislada, en el MISMO edificio que la reserva
+    regular del profesional, no hace falta repetirlo."""
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert len(liquidacion.aisladas_mes_en_curso) == 1
+
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Hora aislada a trabajar" in texto
+    assert "consul 1 del" in texto
+    assert "- Ramos 1" not in texto
+
+
+def test_hora_aislada_menciona_el_edificio_cuando_hay_mas_de_uno(conn, profesional, consultorio, tmp_path):
+    """#38, caso contrario: una aislada en un edificio DISTINTO del de la
+    reserva regular habitual del profesional — ahí sí hace falta
+    aclararlo, porque el documento ya menciona dos edificios."""
+    id_edificio_b = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 0")
+    id_unidad_b = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_b, Departamento="PB")
+    consultorio_b = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad_b, NumeroConsultorio=9, ValorHoraAisladaActual=500,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio_b, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert len(liquidacion.aisladas_mes_en_curso) == 1
+
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Hora aislada a trabajar" in texto
+    assert "consul 9 del PB - Ramos 0" in texto

@@ -813,9 +813,11 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
     cargos_especiales = obtener_repositorio(conn, "CargoEspecial").listar(
         IdProfesional=id_profesional, PeriodoImputado=periodo
     )
+    # pp.CantidadCuotas sumada para #37 (PDF de liquidación: "Cuota N/Total
+    # del plan de pagos" en vez de "Cuota N" a secas).
     cuotas_plan = conn.execute(
         """
-        SELECT cp.* FROM CuotaPlan cp
+        SELECT cp.*, pp.CantidadCuotas FROM CuotaPlan cp
         JOIN PlanPago pp ON pp.IdPlan = cp.IdPlan
         WHERE pp.IdProfesional = ? AND cp.PeriodoImputado = ? AND cp.Pagado = 0
         """,

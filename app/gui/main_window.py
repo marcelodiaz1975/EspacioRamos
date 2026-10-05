@@ -119,6 +119,27 @@ class VentanaPrincipal(QMainWindow):
         self._atajo_ayuda = QShortcut(Qt.Key.Key_F1, self)
         self._atajo_ayuda.activated.connect(self._mostrar_ayuda)
 
+    def ir_a_seccion(self, nombre: str) -> QWidget | None:
+        """Salta a la Seccion de nombre `nombre` (la selecciona en el menú
+        lateral, como si el operador hubiera clickeado ahí) y devuelve su
+        widget — para que una pantalla pueda mandar a otra (#22: "Confirmar
+        reserva" de Lista de espera -> Reservas). Primera vez que hace
+        falta este tipo de salto en el sistema; se pensó como un método
+        chico y reusable en vez de algo hecho a medida para ese botón
+        puntual, para que cualquier pantalla futura con la misma necesidad
+        lo pueda reusar. None si no se encuentra `nombre` (mal escrito, o
+        esa Seccion no está visible para el nivel del usuario logueado —
+        ver Seguridad)."""
+        for fila in range(self._navegacion.count()):
+            item = self._navegacion.item(fila)
+            indice_pila = item.data(_INDICE_PILA)
+            if indice_pila is None:
+                continue
+            if self._secciones[indice_pila].nombre == nombre:
+                self._navegacion.setCurrentRow(fila)
+                return self._pila.widget(indice_pila)
+        return None
+
     def _mostrar_ayuda(self) -> None:
         """Ayuda contextual (Etapa 11): F1 muestra el texto de ayuda de
         la pantalla actualmente visible, tomado de Seccion.ayuda — salvo

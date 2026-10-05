@@ -198,3 +198,26 @@ def test_nivel_administrador_ve_todas_las_pantallas(qtbot, conn):
     nombres = [ventana._navegacion.item(i).text() for i in range(ventana._navegacion.count())]
     assert "Uno" in nombres
     assert "Dos" in nombres
+
+
+def test_ir_a_seccion_selecciona_la_fila_y_devuelve_el_widget(qtbot, conn):
+    """#22: mecanismo genérico para que una pantalla salte a otra (ej.
+    "Confirmar reserva" de Lista de espera -> Reservas)."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    ventana._navegacion.setCurrentRow(1)  # arranca en "Uno"
+
+    widget = ventana.ir_a_seccion("Dos")
+
+    assert isinstance(widget, QWidget)
+    assert ventana._pila.currentWidget() is widget
+    assert ventana._navegacion.currentItem().text() == "Dos"
+
+
+def test_ir_a_seccion_inexistente_devuelve_none_sin_romper(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    ventana._navegacion.setCurrentRow(1)
+
+    assert ventana.ir_a_seccion("No existe") is None
+    assert ventana._navegacion.currentItem().text() == "Uno"  # no se movió

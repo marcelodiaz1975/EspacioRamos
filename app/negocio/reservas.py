@@ -333,6 +333,18 @@ def crear_reserva_aislada(
     rígidos (DC-04 §2.2, confirmado por el usuario): esos bloques son una
     regla pensada para reservas regulares, no para compromisos de un solo
     día."""
+    if hora_fin <= hora_inicio:
+        # #45: sin esta validación, un horario tipeado al revés (ej.
+        # "desde" 23, "hasta" 1) se guardaba tal cual — el formulario no
+        # lo impedía (los dos spines son independientes) y el cálculo de
+        # monto quedaba silenciosamente negativo. Una reserva aislada que
+        # de verdad cruza medianoche no es un caso soportado hoy (no se
+        # parte en dos días): se bloquea con un mensaje claro en vez de
+        # guardar un dato inconsistente.
+        raise ValueError(
+            'El horario "hasta" tiene que ser posterior al horario "desde" — una reserva aislada '
+            "no puede cruzar medianoche (no se parte en dos días)."
+        )
     _validar_fraccion_grilla(conn, hora_inicio, hora_fin)
     conflictos = verificar_conflictos_aislada(
         conn, id_consultorio=id_consultorio, fecha=fecha,

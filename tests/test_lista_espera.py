@@ -11,10 +11,13 @@ from app.negocio.lista_espera import (
     NARANJA,
     ROJO,
     VERDE,
+    Coincidencia,
+    TramoCobertura,
     calcular_coincidencia,
     calcular_coincidencia_fechas,
     crear_pedido,
     editar_pedido,
+    grupos_cobertura,
     listar_pedidos_con_coincidencia,
     marcar_descartado,
     marcar_resuelto,
@@ -542,3 +545,70 @@ def test_coincidencia_fechas_no_confunde_fechas_distintas_del_mismo_dia_semana(c
         conn, bloques=[_bloque_fecha(["2026-08-03", "2026-08-10"], tipo_combinacion_dias="O")],
     )
     assert resultado_o.dias_cubiertos == ["2026-08-10"]
+
+
+# ---------------------------------------------------------------------------
+# grupos_cobertura (#22: "Confirmar reserva" de Lista de espera -> Reservas)
+# ---------------------------------------------------------------------------
+
+def test_grupos_cobertura_verde_un_solo_bloque_da_un_unico_grupo():
+    coincidencia = Coincidencia(
+        color=VERDE, dias_cubiertos=["Lunes", "Martes"],
+        tramos_por_dia={
+            "Lunes": [TramoCobertura(hora_inicio=9, hora_fin=12, id_consultorio=1)],
+            "Martes": [TramoCobertura(hora_inicio=9, hora_fin=12, id_consultorio=1)],
+        },
+    )
+    grupos = grupos_cobertura(coincidencia)
+    assert len(grupos) == 1
+    assert grupos[0].id_consultorio == 1
+    assert grupos[0].hora_inicio == 9 and grupos[0].hora_fin == 12
+    assert grupos[0].dias == ["Lunes", "Martes"]
+
+
+def test_grupos_cobertura_verde_con_bloques_de_horario_distinto_da_dos_grupos():
+    """Mismo consultorio (Verde) pero "Martes 9-12" y "Jueves 14-17" no se
+    pueden cargar en una sola ReservaRegular: el modelo de datos exige un
+    horario único por fila."""
+    coincidencia = Coincidencia(
+        color=VERDE, dias_cubiertos=["Martes", "Jueves"],
+        tramos_por_dia={
+            "Martes": [TramoCobertura(hora_inicio=9, hora_fin=12, id_consultorio=1)],
+            "Jueves": [TramoCobertura(hora_inicio=14, hora_fin=17, id_consultorio=1)],
+        },
+    )
+    grupos = grupos_cobertura(coincidencia)
+    assert len(grupos) == 2
+    assert grupos[0].dias == ["Martes"] and grupos[0].hora_inicio == 9
+    assert grupos[1].dias == ["Jueves"] and grupos[1].hora_inicio == 14
+
+
+def test_grupos_cobertura_amarillo_combina_dos_consultorios_en_dos_grupos():
+    coincidencia = Coincidencia(
+        color=AMARILLO, dias_cubiertos=["Lunes"],
+        tramos_por_dia={
+            "Lunes": [
+                TramoCobertura(hora_inicio=9, hora_fin=11, id_consultorio=1),
+                TramoCobertura(hora_inicio=11, hora_fin=13, id_consultorio=2),
+            ],
+        },
+    )
+    grupos = grupos_cobertura(coincidencia)
+    assert {(g.id_consultorio, g.hora_inicio, g.hora_fin) for g in grupos} == {(1, 9, 11), (2, 11, 13)}
+    assert all(g.dias == ["Lunes"] for g in grupos)
+
+
+def test_grupos_cobertura_ordenados_por_dia_de_la_semana_mas_temprano():
+    coincidencia = Coincidencia(
+        color=VERDE, dias_cubiertos=["Jueves", "Lunes"],
+        tramos_por_dia={
+            "Jueves": [TramoCobertura(hora_inicio=14, hora_fin=17, id_consultorio=2)],
+            "Lunes": [TramoCobertura(hora_inicio=9, hora_fin=12, id_consultorio=1)],
+        },
+    )
+    grupos = grupos_cobertura(coincidencia)
+    assert [g.dias[0] for g in grupos] == ["Lunes", "Jueves"]
+
+
+def test_grupos_cobertura_sin_tramos_da_lista_vacia():
+    assert grupos_cobertura(Coincidencia(color=VERDE, dias_cubiertos=[])) == []

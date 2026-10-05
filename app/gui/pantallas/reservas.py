@@ -50,7 +50,7 @@ from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, ultimo_dia_mes
 from app.negocio.estadisticas import regenerar_snapshot_si_corresponde
 from app.negocio.formato import formatear_moneda
-from app.negocio.lista_espera import marcar_resuelto
+from app.negocio.lista_espera import GrupoCobertura, marcar_resuelto
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.llaves import llaves_faltantes_para_reserva
 from app.negocio.mensajes import mensaje_detalle_reserva_aislada
@@ -394,6 +394,11 @@ class _PanelReservasRegulares(QWidget):
         self.setObjectName("panelSolapa")
         self.conn = conn
         self._reservas: list[sqlite3.Row] = []
+        # #22 ("Confirmar reserva" de Lista de espera): cola de partes
+        # pendientes de precargar cuando una cobertura necesita más de una
+        # ReservaRegular para cubrir todo el pedido — ver `precargar_
+        # desde_pedido`. Vacía en el uso manual de siempre.
+        self._cola_precarga_pedido: list[GrupoCobertura] = []
         self._armar_ui()
         self.actualizar()
 
@@ -906,6 +911,32 @@ class _PanelReservasRegulares(QWidget):
     def _dias_seleccionados(self) -> list[str]:
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
 
+    def precargar_desde_pedido(self, *, id_profesional: int, grupos: list[GrupoCobertura]) -> None:
+        """#22: Lista de espera llama esto desde "Confirmar reserva" —
+        carga la primera `GrupoCobertura` de `grupos` en el formulario y
+        deja el resto en cola. Cada "Crear reserva regular" exitoso avanza
+        solo a la parte siguiente (ver `_crear`), sin que el operador
+        tenga que volver a Lista de espera entre una parte y la otra."""
+        if not grupos:
+            return
+        self._cola_precarga_pedido = list(grupos[1:])
+        self._cargar_grupo_cobertura(id_profesional, grupos[0])
+
+    def _cargar_grupo_cobertura(self, id_profesional: int, grupo: GrupoCobertura) -> None:
+        indice_profesional = self.combo_profesional.findData(id_profesional)
+        if indice_profesional >= 0:
+            self.combo_profesional.setCurrentIndex(indice_profesional)
+        self._seleccionar_ubicacion(grupo.id_consultorio)
+        for dia, check in self._checks_dia.items():
+            check.setChecked(dia in grupo.dias)
+        self.spin_desde.setValue(grupo.hora_inicio)
+        self.spin_hasta.setValue(grupo.hora_fin)
+        hoy = fecha_actual(self.conn)
+        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.campo_vigencia_fin.setDate(_FECHA_SIN_DATO)
+        self._sincronizar_grilla()
+        self.combo_profesional.setFocus()
+
     def _crear(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
@@ -940,10 +971,18 @@ class _PanelReservasRegulares(QWidget):
             return
         if advertencias_totales:
             QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias_totales))
-        self._resolver_lista_espera_si_corresponde(id_profesional)
         regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
         self.conn.commit()
         self.actualizar()
+        if self._cola_precarga_pedido:
+            # #22: todavía falta cubrir otra parte del mismo pedido — se
+            # precarga sola, sin volver a Lista de espera. El pedido recién
+            # se marca Resuelto (más abajo) cuando no queda ninguna parte
+            # pendiente, para no cerrarlo a mitad de camino.
+            siguiente = self._cola_precarga_pedido.pop(0)
+            self._cargar_grupo_cobertura(id_profesional, siguiente)
+            return
+        self._resolver_lista_espera_si_corresponde(id_profesional)
         self._resetear_formulario()
         self._sincronizar_grilla()
 

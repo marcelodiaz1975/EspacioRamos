@@ -10,7 +10,7 @@ from app.gui.pantallas.reservas import (
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
-from app.negocio.lista_espera import crear_pedido
+from app.negocio.lista_espera import GrupoCobertura, crear_pedido
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.negocio.llaves import agregar_acceso_llave, asignar_llave, crear_llave, ingresar_copias
 from app.repositorio.registro import obtener_repositorio
@@ -745,6 +745,102 @@ def test_crear_reserva_regular_sin_ningun_dia_tildado_avisa_y_no_crea(qtbot, con
     panel._checks_dia["Lunes"].setChecked(False)
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 0
+
+
+def _crear_segundo_consultorio(conn, numero=2):
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, ?)", (id_unidad, numero))
+    conn.commit()
+    return conn.execute(
+        "SELECT IdConsultorio FROM Consultorio WHERE NumeroConsultorio = ?", (numero,)
+    ).fetchone()["IdConsultorio"]
+
+
+def test_precargar_desde_pedido_carga_el_primer_grupo_y_deja_el_resto_en_cola(qtbot, conn):
+    """#22: "Confirmar reserva" de Lista de espera precarga Reservas con
+    la primera `GrupoCobertura` y guarda el resto para cuando haga falta
+    más de una ReservaRegular para cubrir todo el pedido."""
+    _preparar(conn)
+    id_consultorio_1 = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_consultorio_2 = _crear_segundo_consultorio(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    grupos = [
+        GrupoCobertura(id_consultorio=id_consultorio_1, hora_inicio=9, hora_fin=12, dias=["Lunes"]),
+        GrupoCobertura(id_consultorio=id_consultorio_2, hora_inicio=14, hora_fin=17, dias=["Jueves"]),
+    ]
+    panel.precargar_desde_pedido(id_profesional=id_profesional, grupos=grupos)
+
+    assert panel.combo_profesional.currentData() == id_profesional
+    assert panel.combo_consultorio.currentData() == id_consultorio_1
+    assert panel.spin_desde.value() == 9 and panel.spin_hasta.value() == 12
+    assert panel._dias_seleccionados() == ["Lunes"]
+    assert len(panel._cola_precarga_pedido) == 1
+
+
+def test_precargar_desde_pedido_avanza_de_parte_en_parte_y_recien_resuelve_el_pedido_al_final(qtbot, conn):
+    """La cobertura necesita 2 ReservaRegular distintas (consultorios/
+    horarios distintos) para cubrir todo el pedido — el pedido tiene que
+    seguir Activo después de confirmar solo la primera parte, y pasar a
+    Resuelto recién al confirmar la última."""
+    _preparar(conn)
+    id_consultorio_1 = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_consultorio_2 = _crear_segundo_consultorio(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_pedido = crear_pedido(
+        conn, id_profesional=id_profesional,
+        bloques=[{"dias": ["Lunes", "Jueves"], "horario_desde": 9, "horario_hasta": 12}],
+    )
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    grupos = [
+        GrupoCobertura(id_consultorio=id_consultorio_1, hora_inicio=9, hora_fin=12, dias=["Lunes"]),
+        GrupoCobertura(id_consultorio=id_consultorio_2, hora_inicio=14, hora_fin=17, dias=["Jueves"]),
+    ]
+    panel.precargar_desde_pedido(id_profesional=id_profesional, grupos=grupos)
+
+    panel._crear()  # confirma la parte 1/2
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+    assert obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)["Estado"] == "Activo"
+    assert panel.combo_consultorio.currentData() == id_consultorio_2
+    assert panel._dias_seleccionados() == ["Jueves"]
+    assert panel.spin_desde.value() == 14 and panel.spin_hasta.value() == 17
+
+    panel._crear()  # confirma la parte 2/2
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 2
+    assert obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)["Estado"] == "Resuelto"
+
+
+def test_precargar_desde_pedido_con_un_solo_grupo_resuelve_de_una(qtbot, conn):
+    """El caso más común (Verde, un solo bloque): una sola ReservaRegular
+    alcanza, así que el pedido queda Resuelto apenas se confirma esa
+    única parte — sin ninguna cola pendiente."""
+    _preparar(conn)
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_pedido = crear_pedido(
+        conn, id_profesional=id_profesional, bloques=[{"dias": ["Lunes"], "horario_desde": 9, "horario_hasta": 12}],
+    )
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.precargar_desde_pedido(
+        id_profesional=id_profesional,
+        grupos=[GrupoCobertura(id_consultorio=id_consultorio, hora_inicio=9, hora_fin=12, dias=["Lunes"])],
+    )
+    panel._crear()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+    assert obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)["Estado"] == "Resuelto"
+    assert panel._cola_precarga_pedido == []
 
 
 def test_crear_reserva_regular_con_conflicto_en_un_dia_sigue_con_los_demas(qtbot, conn, monkeypatch):

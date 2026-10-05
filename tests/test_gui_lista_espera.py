@@ -4,9 +4,12 @@ from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.lista_espera import _PanelListaEspera
+from app.gui.pantallas.reservas import PantallaReservas
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.lista_espera import crear_pedido
+from app.repositorio.registro import obtener_repositorio
 
 
 @pytest.fixture
@@ -490,6 +493,158 @@ def test_cobertura_indica_sin_cobertura_cuando_no_hay_color(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.tabla.selectRow(0)
     assert "Sin cobertura" in pantalla.texto_cobertura.toPlainText()
+
+
+# ---------------------------------------------------------------------------
+# "Confirmar reserva" (#22)
+# ---------------------------------------------------------------------------
+
+def _ventana_con_lista_espera_y_reservas(conn):
+    """Mismo criterio que `_secciones()` de `test_main_window.py`, con los
+    dos nombres reales que usa `_confirmar_reserva` (`ir_a_seccion
+    ("Reservas")`) — no hace falta construir el formulario compuesto
+    "Disponibilidad" entero, alcanza con que `_PanelListaEspera` sea el
+    widget de alguna Seccion para que `self.window()` resuelva hasta la
+    `VentanaPrincipal` real."""
+    secciones = [
+        Seccion("Lista de espera", lambda c: _PanelListaEspera(c), categoria="Operativa diaria"),
+        Seccion("Reservas", lambda c: PantallaReservas(c), categoria="Operativa diaria"),
+    ]
+    ventana = VentanaPrincipal(conn, secciones)
+    return ventana, ventana._pila.widget(0), ventana._pila.widget(1)
+
+
+def test_boton_confirmar_reserva_deshabilitado_sin_seleccion(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+    pantalla = _PanelListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.boton_confirmar_reserva.isEnabled() is False
+
+
+def test_boton_confirmar_reserva_deshabilitado_si_la_fila_no_tiene_cobertura(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])  # sin consultorio cargado
+    pantalla = _PanelListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla.selectRow(0)
+    assert pantalla.boton_confirmar_reserva.isEnabled() is False
+
+
+def test_boton_confirmar_reserva_habilitado_con_cobertura(qtbot, conn):
+    _crear_edificio_con_consultorio(conn)
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+    pantalla = _PanelListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla.selectRow(0)
+    assert pantalla.boton_confirmar_reserva.isEnabled() is True
+
+
+def test_confirmar_reserva_de_un_solo_grupo_navega_y_precarga_sin_preguntar_nada(qtbot, conn, monkeypatch):
+    """Caso más común (Verde, un solo bloque): una sola ReservaRegular
+    alcanza, así que no hace falta ningún cartel de "Parte 1/N" antes de
+    saltar a Reservas."""
+    _crear_edificio_con_consultorio(conn)
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+
+    llamados = []
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: llamados.append(a) and None))
+
+    ventana, panel_lista_espera, pantalla_reservas = _ventana_con_lista_espera_y_reservas(conn)
+    qtbot.addWidget(ventana)
+    panel_lista_espera.tabla.selectRow(0)
+    panel_lista_espera._confirmar_reserva()
+
+    assert llamados == []  # sin preguntar nada
+    assert ventana._pila.currentWidget() is pantalla_reservas
+    panel_regulares = pantalla_reservas.panel_regulares
+    assert panel_regulares.combo_profesional.currentData() == id_profesional
+    assert panel_regulares.combo_consultorio.currentData() == id_consultorio
+    assert panel_regulares._dias_seleccionados() == ["Lunes"]
+    assert panel_regulares.spin_desde.value() == 9 and panel_regulares.spin_hasta.value() == 12
+
+
+def test_confirmar_reserva_con_mas_de_una_parte_avisa_antes_de_navegar(qtbot, conn, monkeypatch):
+    """Mismo consultorio (Verde) pero dos bloques de horario distinto: dos
+    partes necesarias — el cartel tiene que mencionar las dos antes de
+    saltar a Reservas."""
+    _crear_edificio_con_consultorio(conn)
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(
+        conn, id_profesional=id_profesional,
+        bloques=[_bloque_lunes(), {"dias": ["Jueves"], "horario_desde": 14, "horario_hasta": 17}],
+    )
+
+    textos = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: (textos.append(a[2]), QMessageBox.StandardButton.Yes)[1]),
+    )
+
+    ventana, panel_lista_espera, pantalla_reservas = _ventana_con_lista_espera_y_reservas(conn)
+    qtbot.addWidget(ventana)
+    panel_lista_espera.tabla.selectRow(0)
+    panel_lista_espera._confirmar_reserva()
+
+    assert len(textos) == 1
+    assert "2 reservas regulares distintas" in textos[0]
+    assert "Parte 1/2" in textos[0] and "Parte 2/2" in textos[0]
+    assert ventana._pila.currentWidget() is pantalla_reservas
+    panel_regulares = pantalla_reservas.panel_regulares
+    assert panel_regulares._dias_seleccionados() == ["Lunes"]  # la primera parte
+    assert len(panel_regulares._cola_precarga_pedido) == 1
+
+
+def test_confirmar_reserva_cancelando_el_cartel_no_navega(qtbot, conn, monkeypatch):
+    _crear_edificio_con_consultorio(conn)
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(
+        conn, id_profesional=id_profesional,
+        bloques=[_bloque_lunes(), {"dias": ["Jueves"], "horario_desde": 14, "horario_hasta": 17}],
+    )
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+
+    ventana, panel_lista_espera, _pantalla_reservas = _ventana_con_lista_espera_y_reservas(conn)
+    qtbot.addWidget(ventana)
+    panel_lista_espera.tabla.selectRow(0)
+    panel_lista_espera._confirmar_reserva()
+
+    assert ventana._pila.currentWidget() is panel_lista_espera  # no se movió de "Lista de espera"
+
+
+def test_confirmar_reserva_cierra_el_pedido_solo_al_confirmar_en_reservas(qtbot, conn):
+    """La resolución automática del pedido (DC-10 §2.2 paso 5) ya corre
+    sola dentro de Reservas — este botón no necesita ningún código propio
+    para eso."""
+    _crear_edificio_con_consultorio(conn)
+    id_profesional = _crear_profesional(conn)
+    id_pedido = crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+
+    ventana, panel_lista_espera, pantalla_reservas = _ventana_con_lista_espera_y_reservas(conn)
+    qtbot.addWidget(ventana)
+    panel_lista_espera.tabla.selectRow(0)
+    panel_lista_espera._confirmar_reserva()
+    pantalla_reservas.panel_regulares._crear()
+
+    assert obtener_repositorio(conn, "ListaEspera").obtener(id_pedido)["Estado"] == "Resuelto"
+
+
+def test_confirmar_reserva_sin_ventana_principal_no_rompe(qtbot, conn):
+    """Esta pantalla también se instancia sola (en tests, o si algún día
+    se muestra fuera de VentanaPrincipal) — `self.window()` no tiene
+    `ir_a_seccion` en ese caso, y `_confirmar_reserva` tiene que no hacer
+    nada en vez de romper."""
+    _crear_edificio_con_consultorio(conn)
+    id_profesional = _crear_profesional(conn)
+    crear_pedido(conn, id_profesional=id_profesional, bloques=[_bloque_lunes()])
+    pantalla = _PanelListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla.selectRow(0)
+    pantalla._confirmar_reserva()  # no debe lanzar ninguna excepción
 
 
 def test_tamano_minimo_es_combo_cerrado_deshabilitado_hasta_tildar_la_casilla(qtbot, conn):

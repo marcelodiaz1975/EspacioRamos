@@ -95,9 +95,14 @@ def _mapa_consultorios(conn: sqlite3.Connection) -> dict[int, sqlite3.Row]:
     return {f["IdConsultorio"]: f for f in filas}
 
 
-def _lugar(consultorios: dict, id_consultorio: int) -> str:
+def _lugar(consultorios: dict, id_consultorio: int, mostrar_edificio: bool = True) -> str:
+    """#38: el edificio solo se aclara cuando el PDF referencia más de
+    uno — mismo criterio que ya usan Placas y el pie de foto de Oferta
+    de consultorios (ver `_items_cuenta`, que calcula `mostrar_edificio`
+    una sola vez por documento)."""
     c = consultorios[id_consultorio]
-    return f"consul {c['NumeroConsultorio']} del {c['Departamento']} - {c['NombreEdificio']}"
+    base = f"consul {c['NumeroConsultorio']} del {c['Departamento']}"
+    return f"{base} - {c['NombreEdificio']}" if mostrar_edificio else base
 
 
 def _ids_consultorio_reservados(conn: sqlite3.Connection, ids: list[int]) -> list[int]:
@@ -199,41 +204,47 @@ def _tabla_bloques_horarios(bloques: list[sqlite3.Row], ancho: float) -> Table:
 
 # ---------------------------------------------------------------- ítems de la cuenta
 
-def _texto_horas_agregadas(consultorios: dict, h) -> str:
+def _texto_horas_agregadas(consultorios: dict, h, mostrar_edificio: bool = True) -> str:
     return (
         f"Horas regulares agregadas a partir del {h.dia_semana.lower()} {fecha_corta(h.vigencia_inicio)} "
-        f"de {hora_fmt(h.hora_inicio)[:-2]} a {hora_fmt(h.hora_fin)} {_lugar(consultorios, h.id_consultorio)}"
+        f"de {hora_fmt(h.hora_inicio)[:-2]} a {hora_fmt(h.hora_fin)} "
+        f"{_lugar(consultorios, h.id_consultorio, mostrar_edificio)}"
     )
 
 
-def _texto_feriado_trabajado_actual(consultorios: dict, item, tipo: str) -> str:
+def _texto_feriado_trabajado_actual(consultorios: dict, item, tipo: str, mostrar_edificio: bool = True) -> str:
     concepto = "feriado" if tipo == "Feriado nacional" else "día no laborable"
     return (
         f"Importe con descuento incluido por {concepto} del {fecha_corta(item.fecha)} "
-        f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} {_lugar(consultorios, item.id_consultorio)}"
+        f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} "
+        f"{_lugar(consultorios, item.id_consultorio, mostrar_edificio)}"
     )
 
 
-def _texto_feriado_trabajado_anterior(consultorios: dict, item, mes_ant_texto: str) -> str:
+def _texto_feriado_trabajado_anterior(consultorios: dict, item, mes_ant_texto: str, mostrar_edificio: bool = True) -> str:
     dia_semana = DIAS_SEMANA[date.fromisoformat(item.fecha).weekday()]
     return (
         f"Feriado trabajado en {mes_ant_texto}: {dia_semana.lower()} {fecha_corta(item.fecha)} "
-        f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} {_lugar(consultorios, item.id_consultorio)}"
+        f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} "
+        f"{_lugar(consultorios, item.id_consultorio, mostrar_edificio)}"
     )
 
 
-def _texto_aislada(consultorios: dict, item, verbo: str, mes_texto_opt: str | None) -> str:
+def _texto_aislada(
+    consultorios: dict, item, verbo: str, mes_texto_opt: str | None, mostrar_edificio: bool = True,
+) -> str:
     dia_semana = DIAS_SEMANA[date.fromisoformat(item.fecha).weekday()]
     prefijo = f"Hora aislada {verbo} en {mes_texto_opt}: " if mes_texto_opt else f"Hora aislada {verbo}: "
     return (
         f"{prefijo}{dia_semana.lower()} {fecha_corta(item.fecha)} "
-        f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} {_lugar(consultorios, item.id_consultorio)}"
+        f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} "
+        f"{_lugar(consultorios, item.id_consultorio, mostrar_edificio)}"
     )
 
 
 def _items_cuenta(
     liquidacion: Liquidacion, consultorios: dict, tipos_feriado_actual: dict[str, str],
-    mes_actual_texto: str, mes_anterior_texto: str,
+    mes_actual_texto: str, mes_anterior_texto: str, mostrar_edificio: bool = True,
 ) -> list[tuple[str, float, bool]]:
     """(concepto, importe, es_subtotal) — DC-01 §1.10, con la redacción del
     modelo real: sin prefijos de categoría genéricos para cargos
@@ -242,7 +253,12 @@ def _items_cuenta(
     antes que el ítem libre (ajustes y bonificación unificados, sin llave
     asociada) en vez de aparecer intercalados por orden de carga — mismo
     criterio de separación que ya usa el Mensaje 1 de WhatsApp
-    (`mensajes.py`). Los ítems de `descuento_licencias` deben traer ya
+    (`mensajes.py`). `mostrar_edificio` (#38) decide si las líneas de
+    horas agregadas/feriados trabajados/aisladas aclaran el edificio —
+    `generar_pdf_liquidacion` lo calcula una sola vez por documento
+    (True si el profesional tiene lugares en más de un edificio, mismo
+    criterio que ya usan Placas y el pie de foto de Oferta de
+    consultorios). Los ítems de `descuento_licencias` deben traer ya
     colgado `.nombre_tipo` (ver `generar_pdf_liquidacion`, que lo resuelve
     una sola vez)."""
     items: list[tuple[str, float, bool]] = []
@@ -274,7 +290,11 @@ def _items_cuenta(
     if liquidacion.saldo_anterior > 0:
         concepto_saldo = "Saldo pendiente de la liquidación anterior"
     elif liquidacion.saldo_anterior < 0:
-        concepto_saldo = "Saldo a favor del profesional de la liquidación anterior"
+        # #34: "del profesional" de más — redundante, es obviamente a
+        # favor del profesional si es SU liquidación (mismo texto, sin
+        # esa aclaración, que ya usa el Mensaje de texto equivalente,
+        # `mensajes.py` "Saldo a favor mes anterior").
+        concepto_saldo = "Saldo a favor de la liquidación anterior"
     else:
         concepto_saldo = "Saldo de la liquidación anterior"
     items.append((concepto_saldo, liquidacion.saldo_anterior, False))
@@ -292,7 +312,11 @@ def _items_cuenta(
         items.append((f"Descuento por día no laborable - {dia_semana} {fecha}", -f.monto, False))
     for f in liquidacion.feriados_pendientes:
         dia_semana, fecha = _dia_y_fecha(f.fecha)
-        items.append((f"Descuento feriado pendiente - {dia_semana} {fecha}", -f.monto, False))
+        # #35: mismo prefijo que el feriado del mes en curso ("Descuento
+        # por feriado..."), con la aclaración de que es de un período ya
+        # cerrado entre paréntesis, en vez de una redacción distinta
+        # ("Descuento feriado pendiente...") para el mismo concepto.
+        items.append((f"Descuento por feriado (mes anterior) - {dia_semana} {fecha}", -f.monto, False))
     for v in liquidacion.descuento_vacaciones:
         d1, f1 = _dia_y_fecha(v.fecha_desde)
         d2, f2 = _dia_y_fecha(v.fecha_hasta)
@@ -309,16 +333,25 @@ def _items_cuenta(
         ))
 
     for h in liquidacion.horas_regulares_agregadas:
-        items.append((_texto_horas_agregadas(consultorios, h), h.monto, False))
+        items.append((_texto_horas_agregadas(consultorios, h, mostrar_edificio), h.monto, False))
     for item in liquidacion.feriados_trabajados_mes_anterior:
-        items.append((_texto_feriado_trabajado_anterior(consultorios, item, mes_anterior_texto), item.monto, False))
+        items.append((
+            _texto_feriado_trabajado_anterior(consultorios, item, mes_anterior_texto, mostrar_edificio),
+            item.monto, False,
+        ))
     for item in liquidacion.feriados_trabajados_mes_en_curso:
         tipo = tipos_feriado_actual.get(item.fecha, "Feriado nacional")
-        items.append((_texto_feriado_trabajado_actual(consultorios, item, tipo), item.monto, False))
+        items.append((_texto_feriado_trabajado_actual(consultorios, item, tipo, mostrar_edificio), item.monto, False))
     for item in liquidacion.aisladas_mes_anterior:
-        items.append((_texto_aislada(consultorios, item, "trabajada", mes_anterior_texto), item.monto, False))
+        items.append((
+            _texto_aislada(consultorios, item, "trabajada", mes_anterior_texto, mostrar_edificio),
+            item.monto, False,
+        ))
     for item in liquidacion.aisladas_mes_en_curso:
-        items.append((_texto_aislada(consultorios, item, "a trabajar", mes_actual_texto), item.monto, False))
+        items.append((
+            _texto_aislada(consultorios, item, "a trabajar", mes_actual_texto, mostrar_edificio),
+            item.monto, False,
+        ))
     if liquidacion.ajuste_saldo_atrasado:
         items.append(("Ajuste por saldo atrasado", liquidacion.ajuste_saldo_atrasado, False))
     # Depósito/reintegro de llave (IdLlave) primero, item libre (ajustes y
@@ -333,7 +366,10 @@ def _items_cuenta(
             continue
         items.append((c["Concepto"], c["Monto"], False))
     for c in liquidacion.cuotas_plan:
-        items.append((f"Cuota {c['NumeroCuota']} del plan de pagos", c["Monto"], False))
+        # #37: "Cuota 3/12 del plan de pagos" en vez de "Cuota 3..." a
+        # secas — CantidadCuotas se suma a esta consulta en `liquidaciones.
+        # calcular_liquidacion`.
+        items.append((f"Cuota {c['NumeroCuota']}/{c['CantidadCuotas']} del plan de pagos", c["Monto"], False))
     items.append((f"Liquidación a abonar por el profesional en el mes de {mes_actual_texto}", liquidacion.total, True))
     return items
 
@@ -566,7 +602,26 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
     for b in bloques:
         edificios_bloques.setdefault(b["IdEdificio"], b)
 
-    items = _items_cuenta(liquidacion, consultorios, tipos_feriado_actual, mes_actual_texto, mes_anterior_texto)
+    # #38: el edificio solo se aclara en las líneas de horas agregadas/
+    # feriados trabajados/aisladas cuando este documento en conjunto
+    # referencia más de uno — mismo criterio que ya usan Placas y el pie
+    # de foto de Oferta de consultorios, trasladado acá. Se junta el
+    # edificio de las reservas regulares (`edificios_bloques`, ya
+    # calculado arriba) con el de cada ítem puntual, no solo el primero:
+    # una aislada en un edificio distinto del habitual también cuenta.
+    ids_edificio_lugares = set(edificios_bloques.keys())
+    for h in liquidacion.horas_regulares_agregadas:
+        ids_edificio_lugares.add(consultorios[h.id_consultorio]["IdEdificio"])
+    for item in (
+        *liquidacion.feriados_trabajados_mes_anterior, *liquidacion.feriados_trabajados_mes_en_curso,
+        *liquidacion.aisladas_mes_anterior, *liquidacion.aisladas_mes_en_curso,
+    ):
+        ids_edificio_lugares.add(consultorios[item.id_consultorio]["IdEdificio"])
+    mostrar_edificio = len(ids_edificio_lugares) > 1
+
+    items = _items_cuenta(
+        liquidacion, consultorios, tipos_feriado_actual, mes_actual_texto, mes_anterior_texto, mostrar_edificio,
+    )
     # El "valor con descuento" de cada consultorio es un valor final "en
     # vivo" (igual que feriados trabajados u horas agregadas): si se pierde
     # el descuento por saldo atrasado, va sin descuento — a diferencia del
@@ -646,9 +701,11 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
             ))
         story.append(Spacer(1, 10))
 
+        # #40: "al" en vez de "y" — es un RANGO continuo (desde/hasta de
+        # `rango_actualizacion`), no dos fechas sueltas.
         titulo_valores = (
             f"Valores de los consultorios para el período comprendido entre "
-            f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
+            f"{periodo_mm_aaaa(desde)} al {periodo_mm_aaaa(hasta)}"
         )
         story.append(Spacer(1, 6))
         story.append(encabezado(2, titulo_valores, ancho))

@@ -232,9 +232,11 @@ def _bloque_disponibilidad(
     story.extend(condiciones_forma_reserva(conn))
     story.append(Spacer(1, 10))
 
+    # #40: "al" en vez de "y" — es un RANGO continuo (desde/hasta de
+    # `rango_actualizacion`), no dos fechas sueltas.
     titulo_valores = (
         f"Valores vigentes por hora regular para el período comprendido entre "
-        f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
+        f"{periodo_mm_aaaa(desde)} al {periodo_mm_aaaa(hasta)}"
     )
     story.append(encabezado(nivel, titulo_valores, ancho))
     story.append(Spacer(1, 6))

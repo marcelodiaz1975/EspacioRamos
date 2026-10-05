@@ -204,6 +204,29 @@ def test_crear_reserva_aislada_fuera_de_fraccion_falla(conn, consultorio, profes
         )
 
 
+def test_crear_reserva_aislada_que_cruza_medianoche_falla(conn, consultorio, profesional_factory):
+    """#45: "Hasta" menor o igual que "Desde" se bloquea con un mensaje
+    claro — sin esta validación, se guardaba tal cual (los dos horarios
+    son spines independientes en el formulario) y el monto quedaba
+    calculado en negativo en silencio."""
+    id_prof = profesional_factory("Lo Veci")
+    with pytest.raises(ValueError, match="no puede cruzar medianoche"):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, fecha="2026-08-10",
+            hora_inicio=23, hora_fin=1,
+        )
+    assert obtener_repositorio(conn, "ReservaAislada").listar() == []
+
+
+def test_crear_reserva_aislada_hora_fin_igual_a_hora_inicio_falla(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    with pytest.raises(ValueError, match="no puede cruzar medianoche"):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, fecha="2026-08-10",
+            hora_inicio=14, hora_fin=14,
+        )
+
+
 def test_superposicion_entre_profesionales_distintos_bloquea(conn, consultorio, profesional_factory):
     id_prof_a = profesional_factory("Lo Veci")
     id_prof_b = profesional_factory("Gomez")
