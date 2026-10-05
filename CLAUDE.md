@@ -5424,11 +5424,19 @@ código — quedó así reusada para esto (default subido a 5) en vez de
 crear una columna nueva, y sumada por primera vez a la GUI (`app.gui.
 pantallas.configuracion`, solapa "Valores y liquidación", junto a "Días
 de margen para envío de liquidaciones"). `DiasAntesFinMesRecordatorioPlan`
-(el parámetro que leía la reactivación descartada) se deja tal cual en
-el schema — dato ya sembrado en bases existentes, sin ningún lector
-nuevo ni viejo a partir de este cambio, no se armó una migración para
-sacarlo (borrar una columna en SQLite exige reconstruir la tabla, sin
-ningún beneficio real acá).
+(el parámetro que leía la reactivación descartada) se dejó tal cual en
+el schema en su momento — sin ningún lector nuevo ni viejo, sin armar
+una migración para sacarlo.
+
+**Repaso posterior, pedido explícito de la clienta** ("no cumple
+función alguna ahora, quitalo"): se sacó de punta a punta —
+`schema.sql` (ya no se crea en una base nueva), `seed.py` (fuera del
+`INSERT` de valores por defecto) y `_COLUMNAS_ELIMINADAS` en
+`migraciones.py` (`ALTER TABLE ... DROP COLUMN` para una base ya
+creada que todavía la tenga) — mismo mecanismo ya usado para
+`Consultorio.PanelVidrioLuzNatural`/`Edificio.DomicilioLocalidad`/
+`Imagen.Localidad`. `DiasAntesFinMesRecordatorioGeneral` (la que sí
+lee el recordatorio Bordó) no se tocó.
 
 **Disparador** (`app.negocio.mensajeria._debe_recordar_fin_de_mes`): un
 profesional categoría R que ya está en gris (liquidación del período
