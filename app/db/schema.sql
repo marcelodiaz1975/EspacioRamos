@@ -355,6 +355,7 @@ CREATE TABLE IF NOT EXISTS CargoEspecial (
     IdCargo INTEGER PRIMARY KEY AUTOINCREMENT,
     IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional),
     Tipo TEXT NOT NULL CHECK (Tipo IN ('Débito','Crédito')),
+    Subtipo TEXT NOT NULL DEFAULT 'Ítem libre',
     Concepto TEXT NOT NULL,
     Monto REAL NOT NULL,
     Fecha TEXT,

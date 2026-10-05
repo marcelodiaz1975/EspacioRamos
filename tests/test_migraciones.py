@@ -112,6 +112,36 @@ def test_aplicar_migraciones_agrega_la_columna_a_una_base_vieja(tmp_path):
     conn.close()
 
 
+def test_aplicar_migraciones_agrega_subtipo_a_cargo_especial_viejo_y_reclasifica_llave(tmp_path):
+    """#42: una base vieja de CargoEspecial (sin Subtipo) gana la columna
+    nueva, con el default 'Ítem libre' en TODAS las filas — pero la fila
+    ligada a una llave (IdLlave no nulo) se reclasifica sola a 'Depósito
+    de llave', la única reclasificación retroactiva posible con certeza."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE CargoEspecial (IdCargo INTEGER PRIMARY KEY, IdProfesional INTEGER NOT NULL, "
+        "Tipo TEXT NOT NULL, Concepto TEXT NOT NULL, Monto REAL NOT NULL, Fecha TEXT, "
+        "PeriodoImputado TEXT, IdLlave INTEGER, IdUnidad INTEGER, Observacion TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO CargoEspecial (IdProfesional, Tipo, Concepto, Monto, IdLlave) "
+        "VALUES (1, 'Débito', 'Depósito llave 3', 5000, 7)"
+    )
+    conn.execute(
+        "INSERT INTO CargoEspecial (IdProfesional, Tipo, Concepto, Monto, IdLlave) "
+        "VALUES (1, 'Débito', 'Ajuste manual', 1000, NULL)"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    filas = {r["Concepto"]: r["Subtipo"] for r in conn.execute("SELECT Concepto, Subtipo FROM CargoEspecial")}
+    assert filas["Depósito llave 3"] == "Depósito de llave"
+    assert filas["Ajuste manual"] == "Ítem libre"
+    conn.close()
+
+
 def test_aplicar_migraciones_es_idempotente(tmp_path):
     conn = init_database(tmp_path / "test.db")
     aplicar_migraciones(conn)  # segunda vez, no debería fallar ni duplicar la columna

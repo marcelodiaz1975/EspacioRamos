@@ -1173,7 +1173,7 @@ def test_crear_cargo_especial_persiste(qtbot, conn):
     panel.spin_monto.setValue(1500)
     panel._crear()
     assert conn.execute("SELECT COUNT(*) c FROM CargoEspecial").fetchone()["c"] == 1
-    assert panel.tabla.item(0, 3).text() == "Ajuste manual"
+    assert panel.tabla.item(0, 4).text() == "Ajuste manual"
 
 
 def test_crear_cargo_especial_periodo_mes_anterior_se_rechaza(qtbot, conn):
@@ -1252,12 +1252,12 @@ def test_tabla_cargos_especiales_click_en_columna_ordena_y_alterna_sentido(qtbot
         panel._crear()
     assert panel.tabla.rowCount() == 2
 
-    panel.tabla.horizontalHeader().sectionClicked.emit(3)  # "Concepto" ascendente
-    conceptos_asc = [panel.tabla.item(f, 3).text() for f in range(panel.tabla.rowCount())]
+    panel.tabla.horizontalHeader().sectionClicked.emit(4)  # "Concepto" ascendente
+    conceptos_asc = [panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())]
     assert conceptos_asc == ["Aaa", "Bbb"]
 
-    panel.tabla.horizontalHeader().sectionClicked.emit(3)  # de nuevo -> descendente
-    conceptos_desc = [panel.tabla.item(f, 3).text() for f in range(panel.tabla.rowCount())]
+    panel.tabla.horizontalHeader().sectionClicked.emit(4)  # de nuevo -> descendente
+    conceptos_desc = [panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())]
     assert conceptos_desc == ["Bbb", "Aaa"]
 
 
@@ -1283,7 +1283,7 @@ def test_combo_profesional_cargos_especiales_filtra_la_tabla(qtbot, conn):
 
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional_1))
     assert panel.tabla.rowCount() == 1
-    assert panel.tabla.item(0, 3).text() == "Propio"
+    assert panel.tabla.item(0, 4).text() == "Propio"
 
 
 def test_tabla_cargos_especiales_incluye_columna_fecha_con_formato_dia(qtbot, conn):
@@ -1320,7 +1320,7 @@ def test_tabla_cargos_especiales_monto_con_signo_y_color(qtbot, conn):
 
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
-    valores = {panel.tabla.item(f, 3).text(): panel.tabla.item(f, 4) for f in range(panel.tabla.rowCount())}
+    valores = {panel.tabla.item(f, 4).text(): panel.tabla.item(f, 5) for f in range(panel.tabla.rowCount())}
     assert "$" in valores["A favor"].text()
     assert valores["A favor"].foreground().color().name() != COLOR_ROJO.lower()
     assert valores["En contra"].text().startswith("-")
@@ -1417,7 +1417,47 @@ def test_tabla_cargos_especiales_encabezado_periodo_imputado(qtbot, conn):
     _preparar(conn)
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
-    assert panel.tabla.horizontalHeaderItem(5).text() == "Período imputado"
+    assert panel.tabla.horizontalHeaderItem(6).text() == "Período imputado"
+
+
+def test_combo_subtipo_cargos_especiales_ofrece_los_tres_editables_sin_deposito_de_llave(qtbot, conn):
+    """#42: "Depósito de llave" es estructural (se deriva de `id_llave`
+    en `llaves.py`), nunca se ofrece como elección manual acá."""
+    _preparar(conn)
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    opciones = {panel.combo_subtipo.itemData(i) for i in range(panel.combo_subtipo.count())}
+    assert opciones == {"Ajuste", "Bonificación", "Ítem libre"}
+
+
+def test_crear_cargo_especial_con_subtipo_elegido_persiste_y_se_ve_en_la_tabla(qtbot, conn):
+    _preparar(conn)
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Bonificación"))
+    panel.campo_concepto.setText("bonificación por antigüedad")
+    panel.spin_monto.setValue(-500)
+    panel.combo_tipo.setCurrentIndex(panel.combo_tipo.findData("Crédito"))
+    panel._crear()
+    assert conn.execute("SELECT Subtipo FROM CargoEspecial").fetchone()["Subtipo"] == "Bonificación"
+    assert panel.tabla.item(0, 3).text() == "Bonificación"
+
+
+def test_modificar_cargo_especial_sin_llave_precarga_el_subtipo(qtbot, conn):
+    _preparar(conn)
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ajuste"))
+    panel.campo_concepto.setText("ajuste manual")
+    panel.spin_monto.setValue(1500)
+    panel._crear()
+
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))  # para confirmar que se repone
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+    assert panel.combo_subtipo.currentData() == "Ajuste"
 
 
 def test_spin_monto_cargos_especiales_se_pone_rojo_en_negativo(qtbot, conn):
@@ -1496,12 +1536,13 @@ def test_solapa_estado_cuenta_cargos_muestra_saldos_y_tabla_igual_a_registro(qtb
     )
 
     assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
-        "Fecha", "Tipo", "Concepto", "Monto", "Período imputado",
+        "Fecha", "Tipo", "Subtipo", "Concepto", "Monto", "Período imputado",
     ]
     assert panel.tabla.rowCount() == 1
     assert panel.tabla.item(0, 1).text() == "Débito"
-    assert panel.tabla.item(0, 2).text() == "Depósito llave"
-    assert panel.tabla.item(0, 3).text() == formatear_moneda(2000)
+    assert panel.tabla.item(0, 2).text() == "Ítem libre"  # default de la columna, el INSERT no lo especifica
+    assert panel.tabla.item(0, 3).text() == "Depósito llave"
+    assert panel.tabla.item(0, 4).text() == formatear_moneda(2000)
 
 
 def test_solapa_estado_cuenta_cargos_combo_es_buscable_por_codigo_o_nombre(qtbot, conn):

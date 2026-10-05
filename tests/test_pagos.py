@@ -273,6 +273,62 @@ def test_crear_cargo_especial_credito_acepta_monto_negativo(conn, profesional):
     assert cargo["Monto"] == -100
 
 
+def test_crear_cargo_especial_sin_subtipo_cae_a_item_libre(conn, profesional):
+    """#42: mismo default que la columna en la base — ningún llamador de
+    antes de este pedido necesitó actualizarse."""
+    id_cargo = crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=100,
+        periodo_imputado=periodo_actual(conn),
+    )
+    cargo = obtener_repositorio(conn, "CargoEspecial").obtener(id_cargo)
+    assert cargo["Subtipo"] == "Ítem libre"
+
+
+def test_crear_cargo_especial_acepta_ajuste_y_bonificacion(conn, profesional):
+    id_ajuste = crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=100,
+        periodo_imputado=periodo_actual(conn), subtipo="Ajuste",
+    )
+    id_bonificacion = crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Crédito", concepto="y", monto=-50,
+        periodo_imputado=periodo_actual(conn), subtipo="Bonificación",
+    )
+    repo = obtener_repositorio(conn, "CargoEspecial")
+    assert repo.obtener(id_ajuste)["Subtipo"] == "Ajuste"
+    assert repo.obtener(id_bonificacion)["Subtipo"] == "Bonificación"
+
+
+def test_crear_cargo_especial_rechaza_subtipo_invalido(conn, profesional):
+    with pytest.raises(ValueError):
+        crear_cargo_especial(
+            conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=100,
+            periodo_imputado=periodo_actual(conn), subtipo="Otro",
+        )
+
+
+def test_crear_cargo_especial_rechaza_deposito_de_llave_sin_id_llave(conn, profesional):
+    """"Depósito de llave" es estructural — solo se deriva de `id_llave`,
+    nunca una elección directa del operador."""
+    with pytest.raises(ValueError):
+        crear_cargo_especial(
+            conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=100,
+            periodo_imputado=periodo_actual(conn), subtipo="Depósito de llave",
+        )
+
+
+def test_crear_cargo_especial_con_id_llave_fuerza_deposito_de_llave_sin_importar_subtipo(conn, profesional):
+    """Si viene `id_llave`, el Subtipo es "Depósito de llave" siempre,
+    aunque se pase otro valor (o ninguno) — no es una elección del
+    operador, se deriva solo."""
+    id_llave = obtener_repositorio(conn, "Llave").crear(ValorDepositoActual=5000)
+    id_cargo = crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Débito", concepto="depósito", monto=100,
+        periodo_imputado=periodo_actual(conn), subtipo="Ajuste", id_llave=id_llave,
+    )
+    cargo = obtener_repositorio(conn, "CargoEspecial").obtener(id_cargo)
+    assert cargo["Subtipo"] == "Depósito de llave"
+
+
 def _fijar_periodo_actual(conn, periodo):
     conn.execute(
         "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = ? WHERE IdConfiguracion = 1",

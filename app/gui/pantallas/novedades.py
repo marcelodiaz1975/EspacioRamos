@@ -80,7 +80,12 @@ from app.negocio.formato import formatear_moneda
 from app.negocio.licencias import cancelar_licencia, crear_licencia
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
-from app.negocio.pagos import TIPOS_CARGO, crear_cargo_especial
+from app.negocio.pagos import SUBTIPOS_CARGO, TIPOS_CARGO, crear_cargo_especial
+
+# #42: los tres subtipos que elige el operador a mano — "Depósito de
+# llave" (el restante de SUBTIPOS_CARGO) se deriva solo, nunca se ofrece
+# en este combo (ver crear_cargo_especial).
+_SUBTIPOS_CARGO_EDITABLES = tuple(s for s in SUBTIPOS_CARGO if s != "Depósito de llave")
 from app.negocio.vacaciones import (
     CATEGORIAS_CON_DERECHO_A_VACACIONES,
     cancelar_vacacion,
@@ -1213,6 +1218,12 @@ class _PanelCargosEspeciales(QWidget):
         form.addWidget(QLabel("Tipo"))
         form.addWidget(self.combo_tipo)
 
+        self.combo_subtipo = QComboBox()
+        for s in _SUBTIPOS_CARGO_EDITABLES:
+            self.combo_subtipo.addItem(s, s)
+        form.addWidget(QLabel("Subtipo"))
+        form.addWidget(self.combo_subtipo)
+
         self.campo_concepto = QLineEdit()
         form.addWidget(QLabel("Concepto"))
         form.addWidget(self.campo_concepto)
@@ -1244,9 +1255,9 @@ class _PanelCargosEspeciales(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(6)
+        self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
-            ["Fecha", "Profesional", "Tipo", "Concepto", "Monto", "Período imputado"]
+            ["Fecha", "Profesional", "Tipo", "Subtipo", "Concepto", "Monto", "Período imputado"]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1257,8 +1268,8 @@ class _PanelCargosEspeciales(QWidget):
         layout.addWidget(splitter)
         self._foco = instalar_enter_avanza_foco(
             [
-                self.combo_profesional, self.combo_tipo, self.campo_concepto, self.spin_monto, self.campo_periodo,
-                boton, boton_modificar, boton_eliminar,
+                self.combo_profesional, self.combo_tipo, self.combo_subtipo, self.campo_concepto,
+                self.spin_monto, self.campo_periodo, boton, boton_modificar, boton_eliminar,
             ],
             parent=self,
         )
@@ -1300,9 +1311,10 @@ class _PanelCargosEspeciales(QWidget):
             self.tabla.setItem(i, 0, QTableWidgetItem(_fmt_fecha_dia(r["Fecha"]) if r["Fecha"] else ""))
             self.tabla.setItem(i, 1, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             self.tabla.setItem(i, 2, QTableWidgetItem(r["Tipo"]))
-            self.tabla.setItem(i, 3, QTableWidgetItem(r["Concepto"]))
-            self.tabla.setItem(i, 4, _item_monto(r["Monto"]))
-            self.tabla.setItem(i, 5, QTableWidgetItem(r["PeriodoImputado"] or ""))
+            self.tabla.setItem(i, 3, QTableWidgetItem(r["Subtipo"]))
+            self.tabla.setItem(i, 4, QTableWidgetItem(r["Concepto"]))
+            self.tabla.setItem(i, 5, _item_monto(r["Monto"]))
+            self.tabla.setItem(i, 6, QTableWidgetItem(r["PeriodoImputado"] or ""))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(1, max(self.tabla.columnWidth(1), _ANCHO_COL_PROFESIONAL))
 
@@ -1312,9 +1324,10 @@ class _PanelCargosEspeciales(QWidget):
             0: lambda t: t[0]["Fecha"] or "",
             1: lambda t: _texto_profesional(t[1]) if t[1] else "",
             2: lambda t: t[0]["Tipo"],
-            3: lambda t: t[0]["Concepto"],
-            4: lambda t: t[0]["Monto"],
-            5: lambda t: t[0]["PeriodoImputado"] or "",
+            3: lambda t: t[0]["Subtipo"],
+            4: lambda t: t[0]["Concepto"],
+            5: lambda t: t[0]["Monto"],
+            6: lambda t: t[0]["PeriodoImputado"] or "",
         }
         return claves[columna]
 
@@ -1331,6 +1344,7 @@ class _PanelCargosEspeciales(QWidget):
         try:
             crear_cargo_especial(
                 self.conn, id_profesional=id_profesional, tipo=self.combo_tipo.currentData(),
+                subtipo=self.combo_subtipo.currentData(),
                 concepto=concepto, monto=self.spin_monto.value(), periodo_imputado=periodo_imputado,
             )
         except ValueError as error:
@@ -1390,6 +1404,7 @@ class _PanelCargosEspeciales(QWidget):
         if indice_profesional >= 0:
             self.combo_profesional.setCurrentIndex(indice_profesional)
         self.combo_tipo.setCurrentIndex(self.combo_tipo.findData(registro["Tipo"]))
+        self.combo_subtipo.setCurrentIndex(self.combo_subtipo.findData(registro["Subtipo"]))
         self.campo_concepto.setText(registro["Concepto"])
         self.spin_monto.setValue(registro["Monto"])
         self.campo_periodo.setText(registro["PeriodoImputado"] or periodo_actual(self.conn))
@@ -1435,8 +1450,8 @@ class _PanelEstadoCuentaCargos(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
-        self.tabla.setColumnCount(5)
-        self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Concepto", "Monto", "Período imputado"])
+        self.tabla.setColumnCount(6)
+        self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Subtipo", "Concepto", "Monto", "Período imputado"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
@@ -1474,7 +1489,8 @@ class _PanelEstadoCuentaCargos(QWidget):
         for i, r in enumerate(registros):
             self.tabla.setItem(i, 0, QTableWidgetItem(_fmt_fecha_dia(r["Fecha"]) if r["Fecha"] else ""))
             self.tabla.setItem(i, 1, QTableWidgetItem(r["Tipo"]))
-            self.tabla.setItem(i, 2, QTableWidgetItem(r["Concepto"]))
-            self.tabla.setItem(i, 3, _item_monto(r["Monto"]))
-            self.tabla.setItem(i, 4, QTableWidgetItem(r["PeriodoImputado"] or ""))
+            self.tabla.setItem(i, 2, QTableWidgetItem(r["Subtipo"]))
+            self.tabla.setItem(i, 3, QTableWidgetItem(r["Concepto"]))
+            self.tabla.setItem(i, 4, _item_monto(r["Monto"]))
+            self.tabla.setItem(i, 5, QTableWidgetItem(r["PeriodoImputado"] or ""))
         self.tabla.resizeColumnsToContents()

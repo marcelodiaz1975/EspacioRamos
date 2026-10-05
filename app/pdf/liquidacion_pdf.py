@@ -41,6 +41,7 @@ from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, fecha_larga, hora_fmt, mes_texto, periodo_mm_aaaa
 from app.negocio.liquidaciones import Liquidacion, ids_consolidados
 from app.negocio.formato import decimales_configurados, formatear_moneda
+from app.negocio.pagos import SUBTIPOS_CARGO
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
     COLOR_ROJO,
@@ -255,11 +256,11 @@ def _items_cuenta(
     """(concepto, importe, es_subtotal) — DC-01 §1.10, con la redacción del
     modelo real: sin prefijos de categoría genéricos para cargos
     especiales (se muestra el Concepto tal cual se cargó). Dentro de
-    cargos especiales, depósito/reintegro de llave (IdLlave) se agrupa
-    antes que el ítem libre (ajustes y bonificación unificados, sin llave
-    asociada) en vez de aparecer intercalados por orden de carga — mismo
-    criterio de separación que ya usa el Mensaje 1 de WhatsApp
-    (`mensajes.py`). `mostrar_edificio` (#38) decide si las líneas de
+    cargos especiales, se agrupa por Subtipo (#42: Depósito de llave →
+    Ajuste → Bonificación → Ítem libre, el mismo orden de `SUBTIPOS_CARGO`)
+    en vez de aparecer intercalados por orden de carga — mismo criterio de
+    separación que ya usa el Mensaje 1 de WhatsApp (`mensajes.py`).
+    `mostrar_edificio` (#38) decide si las líneas de
     horas agregadas/feriados trabajados/aisladas aclaran el edificio —
     `generar_pdf_liquidacion` lo calcula una sola vez por documento
     (True si el profesional tiene lugares en más de un edificio, mismo
@@ -360,17 +361,13 @@ def _items_cuenta(
         ))
     if liquidacion.ajuste_saldo_atrasado:
         items.append(("Ajuste por saldo atrasado", liquidacion.ajuste_saldo_atrasado, False))
-    # Depósito/reintegro de llave (IdLlave) primero, item libre (ajustes y
-    # bonificación unificados, sin llave asociada) después — mismo criterio
+    # #42: por Subtipo, en el orden fijo de SUBTIPOS_CARGO — mismo criterio
     # de separación que ya usa el Mensaje 1 de WhatsApp (mensajes.py).
-    for c in liquidacion.cargos_especiales:
-        if c["IdLlave"] is None:
-            continue
-        items.append((c["Concepto"], c["Monto"], False))
-    for c in liquidacion.cargos_especiales:
-        if c["IdLlave"] is not None:
-            continue
-        items.append((c["Concepto"], c["Monto"], False))
+    for subtipo in SUBTIPOS_CARGO:
+        for c in liquidacion.cargos_especiales:
+            if c["Subtipo"] != subtipo:
+                continue
+            items.append((c["Concepto"], c["Monto"], False))
     for c in liquidacion.cuotas_plan:
         # #37: "Cuota 3/12 del plan de pagos" en vez de "Cuota 3..." a
         # secas — CantidadCuotas se suma a esta consulta en `liquidaciones.

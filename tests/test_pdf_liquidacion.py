@@ -166,6 +166,38 @@ def test_items_cuenta_agrupa_deposito_llave_antes_del_item_libre(conn, profesion
     assert idx_llave < idx_libre
 
 
+def test_items_cuenta_agrupa_los_cuatro_subtipos_en_orden(conn, profesional):
+    """#42: Depósito de llave → Ajuste → Bonificación → Ítem libre, sin
+    importar el orden en que se cargaron."""
+    from app.negocio.pagos import crear_cargo_especial
+
+    conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15'")
+    id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave portón", Tipo="Edificio")
+    # se cargan a propósito en orden inverso al que deberían quedar en el PDF
+    crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Débito", concepto="suelto sin subtipo", monto=50,
+        periodo_imputado=PERIODO,
+    )
+    crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Crédito", concepto="premio por antigüedad", monto=-80,
+        periodo_imputado=PERIODO, subtipo="Bonificación",
+    )
+    crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Débito", concepto="corrección de carga", monto=70,
+        periodo_imputado=PERIODO, subtipo="Ajuste",
+    )
+    crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Débito", concepto="Depósito llave portón", monto=1000,
+        periodo_imputado=PERIODO, id_llave=id_llave,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    conceptos = [c for c, _, _ in items]
+    orden_esperado = ["Depósito llave portón", "Corrección de carga", "Premio por antigüedad", "Suelto sin subtipo"]
+    indices = [conceptos.index(c) for c in orden_esperado]
+    assert indices == sorted(indices)
+
+
 def test_items_cuenta_desglosa_bruto_y_descuento_por_tramo_si_cambian_horas(conn, consultorio, profesional):
     # el profesional ya tiene 3hs los lunes (fixture); agrega una reserva
     # nueva desde el 15/8 que cambia el total de horas semanales a mitad de mes

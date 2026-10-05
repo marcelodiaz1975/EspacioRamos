@@ -23,6 +23,15 @@ from app.repositorio.registro import obtener_repositorio
 
 TIPOS_CARGO = ("Débito", "Crédito")
 
+# #42: antes solo existía la distinción implícita "con llave" (IdLlave) /
+# "sin llave" (todo lo demás, mostrado como un único "ítem libre" en el
+# PDF). Ajuste y Bonificación se separan como subtipos propios dentro de
+# ese "sin llave" — "Depósito de llave" sigue siendo exclusivo de
+# `app.negocio.llaves` (nunca se elige a mano desde el formulario de
+# Cargos especiales, se deriva solo de `id_llave`). Orden fijo: es el
+# mismo que agrupa `app.pdf.liquidacion_pdf._items_cuenta`.
+SUBTIPOS_CARGO = ("Depósito de llave", "Ajuste", "Bonificación", "Ítem libre")
+
 
 def _capitalizar(texto: str) -> str:
     texto = texto.strip()
@@ -238,8 +247,8 @@ def suspender_descuento_periodo(conn: sqlite3.Connection, *, id_profesional: int
 
 def crear_cargo_especial(
     conn: sqlite3.Connection, *, id_profesional: int, tipo: str, concepto: str, monto: float,
-    periodo_imputado: str, id_llave: int | None = None, id_unidad: int | None = None,
-    observacion: str | None = None,
+    periodo_imputado: str, subtipo: str | None = None, id_llave: int | None = None,
+    id_unidad: int | None = None, observacion: str | None = None,
 ) -> int:
     """A diferencia de Pagos (que sí puede corregir hasta un mes atrás), un
     cargo especial nunca se imputa a un período ya cerrado — ajustes,
@@ -248,7 +257,15 @@ def crear_cargo_especial(
     ya emitida (confirmado por la clienta). El monto lleva directo el
     signo que le corresponde al Tipo (Débito positivo, Crédito negativo)
     — Tipo queda como una validación cruzada de ese signo, no hace falta
-    derivarlo aparte en ningún lado que sume estos montos."""
+    derivarlo aparte en ningún lado que sume estos montos.
+
+    `subtipo` (#42) se deriva solo cuando viene `id_llave`: "Depósito de
+    llave" siempre, sin importar lo que se pase — es estructural (ver
+    `app.negocio.llaves`), no una elección del operador. Sin `id_llave`,
+    tiene que ser uno de los otros tres (Ajuste/Bonificación/Ítem libre);
+    sin indicar ninguno, cae a "Ítem libre" (mismo default que la columna
+    en la base, para no romper a ningún llamador de antes de este
+    pedido — el formulario de Cargos especiales sí lo pasa siempre)."""
     if tipo not in TIPOS_CARGO:
         raise ValueError(f"Tipo de cargo inválido: {tipo!r} (debe ser Débito o Crédito)")
     if not periodo_imputado:
@@ -259,10 +276,16 @@ def crear_cargo_especial(
         raise ValueError("Un cargo especial Débito debe cargarse con un monto positivo")
     if tipo == "Crédito" and monto >= 0:
         raise ValueError("Un cargo especial Crédito debe cargarse con un monto negativo")
+    if id_llave is not None:
+        subtipo = "Depósito de llave"
+    elif subtipo is None:
+        subtipo = "Ítem libre"
+    elif subtipo not in SUBTIPOS_CARGO or subtipo == "Depósito de llave":
+        raise ValueError(f"Subtipo de cargo inválido: {subtipo!r} (debe ser Ajuste, Bonificación o Ítem libre)")
 
     repo = obtener_repositorio(conn, "CargoEspecial")
     return repo.crear(
-        IdProfesional=id_profesional, Tipo=tipo, Concepto=_capitalizar(concepto), Monto=monto,
+        IdProfesional=id_profesional, Tipo=tipo, Subtipo=subtipo, Concepto=_capitalizar(concepto), Monto=monto,
         Fecha=fecha_actual(conn).isoformat(), PeriodoImputado=periodo_imputado,
         IdLlave=id_llave, IdUnidad=id_unidad, Observacion=observacion,
     )

@@ -81,6 +81,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("EstadoMensajeriaPeriodo", "RecordatorioMensajeriaGenerado", "INTEGER NOT NULL DEFAULT 0"),
     ("SnapshotMensual", "Tipo", "TEXT NOT NULL DEFAULT 'Mensual'"),
     ("SnapshotMensual", "Observacion", "TEXT"),
+    ("CargoEspecial", "Subtipo", "TEXT NOT NULL DEFAULT 'Ítem libre'"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja
@@ -209,6 +210,27 @@ def _agregar_nivel_supervisor_general(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _clasificar_subtipo_deposito_llave(conn: sqlite3.Connection) -> None:
+    """#42: una base ya en uso recibe la columna `Subtipo` (ver
+    `_COLUMNAS_NUEVAS`) con el default 'Ítem libre' en TODAS las filas
+    existentes de `CargoEspecial`, incluidas las ligadas a una llave
+    (`IdLlave` no nulo) — esas sí se pueden reclasificar con certeza
+    (a diferencia de Ajuste/Bonificación, indistinguibles
+    retroactivamente entre sí, que quedan en 'Ítem libre')."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'CargoEspecial'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(CargoEspecial)").fetchall()}
+    if "Subtipo" not in columnas_existentes:
+        return
+    conn.execute(
+        "UPDATE CargoEspecial SET Subtipo = 'Depósito de llave' "
+        "WHERE IdLlave IS NOT NULL AND Subtipo != 'Depósito de llave'"
+    )
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -233,4 +255,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
         conn.execute(f"DROP TABLE IF EXISTS {tabla}")
     _normalizar_tamanos_consultorio(conn)
     _agregar_nivel_supervisor_general(conn)
+    _clasificar_subtipo_deposito_llave(conn)
     conn.commit()
