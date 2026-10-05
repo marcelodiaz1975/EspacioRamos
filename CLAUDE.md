@@ -416,6 +416,16 @@ final de su lista. Si una edición además cambia el TipoLista de una fila
 existente, primero cierra el hueco que deja en la lista de la que sale
 (`_renumerar`) antes de ubicarla en la nueva.
 
+**Campos libres sumados después, como repaso aparte**: era el único de
+los 14 catálogos sobre `PantallaCRUD` que todavía no sumaba los tres
+(`*campos_libres(conn)`) — un hueco real, no una exclusión a propósito
+(la clienta no le vio sentido práctico al pedirlo, pero prefirió
+sumarlo igual para que la regla quede pareja en todos los catálogos).
+Mismo mecanismo de siempre: `CampoLibre1/2/3` en `schema.sql` +
+`_COLUMNAS_NUEVAS` (`migraciones.py`) para bases ya creadas. No tiene
+plantilla de importación Excel (no está en `COLUMNAS_PLANTILLA`), así
+que no hizo falta tocar nada de `app.importacion`.
+
 ## Condiciones y normas / Detalles complementarios (posición que se reacomoda sola)
 
 Mismo criterio que el Orden de Listas editables (pedido de la clienta al
