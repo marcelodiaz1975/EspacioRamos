@@ -6495,6 +6495,59 @@ sustituye_en_la_vista_previa`, `test_contexto_localidad_pisa_al_
 vinculo_del_mensaje_general`, `test_dirigido_a_sustituye_nombre_
 apellido_y_tratamiento`.
 
+## Foco: Shift+Enter inserta salto de línea en campos de texto largo (todos los formularios)
+
+Pedido de la clienta al revisar el mecanismo de "variables disponibles"
+de Mensajes predefinidos (#24): "¿se pueden hacer saltos de línea en
+los textos de los mensajes predefinidos? ¿Con shift enter como acá
+[en el chat]?" Investigado antes de responder: NO se podía — tanto
+Enter solo como Shift+Enter quedaban interceptados por el mecanismo
+compartido "Enter avanza foco" (`app/gui/widgets/foco.py`), que no
+distinguía Shift ni hacía ninguna excepción para campos multilínea
+(`_EnterAvanzaFoco.eventFilter` consumía el evento de Return/Enter
+siempre, devolviendo `True` sin importar los modificadores, así que el
+`QPlainTextEdit` nunca llegaba a ver la tecla). Confirmado armando un
+script que simula las dos teclas contra el diálogo real de Mensajes
+predefinidos: ninguna de las dos insertaba el salto.
+
+Pedido explícito de la clienta sobre la respuesta: "con Shift enter en
+los campos de texto largo de TODOS los formularios que genere un salto
+de línea, incorporalo" — no puntual de una pantalla.
+
+`_EnterAvanzaFoco.eventFilter` (`app/gui/widgets/foco.py`) suma una
+excepción: si la tecla es Return/Enter CON Shift Y el widget que la
+recibió es `QPlainTextEdit`/`QTextEdit`, devuelve `False` (no consume
+el evento) en vez de avanzar el foco — el propio widget procesa la
+tecla con su comportamiento nativo e inserta el salto de línea. Sin
+Shift, Enter en un campo multilínea se sigue comportando exactamente
+igual que en cualquier otro campo de la cadena (avanza al siguiente).
+
+Arreglado en el mecanismo COMPARTIDO (no en `crud_generico.py` ni en
+ninguna pantalla puntual): `instalar_enter_avanza_foco` lo usan
+decenas de formularios de todo el sistema, así que cualquier campo
+multilínea que alguno de ellos sume a su propia cadena queda cubierto
+automáticamente, sin tener que tocar cada pantalla una por una ni
+acordarse de repetir el arreglo en una pantalla nueva. Investigado cuáles
+de los `QPlainTextEdit`/`QTextEdit` del sistema estaban realmente
+afectados antes de tocar nada: la mayoría (Vista previa de Centro de
+mensajería, Detalle de Lista de espera, el editor de Textos del
+sistema, el Detalle de la grilla operativa) nunca pasaron por
+`instalar_enter_avanza_foco` — ya aceptaban Enter nativo desde
+siempre, sin este bug. Los únicos campos realmente afectados son los de
+`tipo="texto_largo"` armados por `crud_generico.Campo` (el campo
+"Mensaje" de Mensajes predefinidos y los tres `Campo texto_largo` de
+`catalogos.py`), que sí pasan por el diálogo genérico con su cadena de
+foco — quedan arreglados de rebote por este cambio central, sin tocar
+`crud_generico.py`.
+
+Tests nuevos en `tests/test_gui_widget_foco.py` (al nivel del
+mecanismo compartido, mismo criterio que el resto del archivo — la
+garantía es la misma en todos los formularios porque es la misma
+clase): `test_shift_enter_en_campo_multilinea_inserta_salto_de_linea_
+en_vez_de_avanzar` (Shift+Enter inserta el salto y el foco se queda en
+el mismo campo) y `test_enter_solo_en_campo_multilinea_sigue_avanzando_
+el_foco` (Enter sin Shift sigue avanzando sin agregar ningún salto).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
