@@ -394,16 +394,47 @@ def _lugar_reserva(fila: sqlite3.Row, incluir_consultorio: bool, incluir_unidad:
     return texto
 
 
+def _agrupar_bloques_continuos(reservas_dia: list[sqlite3.Row]) -> list[list[sqlite3.Row]]:
+    """#44: agrupa, por consultorio, las reservas de un mismo día cuyos
+    horarios son continuos (el HoraFin de una coincide con el HoraInicio
+    de la siguiente, sin huecos) — "una línea por bloque continuo de
+    horas", pedido explícito de la clienta para el default SIN combinar.
+    Dos reservas del mismo consultorio con un hueco entre medio (ej. 10 a
+    12 y 14 a 16) quedan en grupos separados, igual que antes de este
+    pedido."""
+    por_consultorio: dict[int, list[sqlite3.Row]] = {}
+    for f in reservas_dia:
+        por_consultorio.setdefault(f["IdConsultorio"], []).append(f)
+
+    grupos: list[list[sqlite3.Row]] = []
+    for filas_consultorio in por_consultorio.values():
+        ordenadas = sorted(filas_consultorio, key=lambda f: f["HoraInicio"])
+        bloque_actual: list[sqlite3.Row] = []
+        for f in ordenadas:
+            if bloque_actual and f["HoraInicio"] == bloque_actual[-1]["HoraFin"]:
+                bloque_actual.append(f)
+            else:
+                if bloque_actual:
+                    grupos.append(bloque_actual)
+                bloque_actual = [f]
+        if bloque_actual:
+            grupos.append(bloque_actual)
+    return grupos
+
+
 def _lineas_reservas_aisladas(
     filas: list[sqlite3.Row], *, incluir_consultorio: bool, incluir_unidad: bool, incluir_edificio: bool,
     combinar_misma_unidad: bool, combinar_distintas_unidades: bool,
     monto_fn: Callable[[sqlite3.Row], float] | None = None,
 ) -> tuple[list[str], float]:
-    """Sección 5.1: sin combinar (default), cada reserva aislada aparece en
-    su propia línea — es el comportamiento pedido para no perder el
-    detalle reserva por reserva. Con "Combinar misma unidad" se funden en
-    una sola línea las reservas del mismo día y consultorio, uniendo las
-    franjas horarias con "y de". "Combinar distintas unidades" además
+    """Sección 5.1: sin combinar (default), cada BLOQUE CONTINUO de horas
+    (mismo consultorio, sin huecos entre una reserva y la siguiente)
+    aparece en su propia línea, como un único rango — #44, pedido
+    explícito de la clienta. Dos reservas con un hueco entre medio siguen
+    en líneas separadas. Con "Combinar misma unidad" se funden en una
+    sola línea TODAS las reservas del mismo día y consultorio (continuas
+    o no), uniendo las franjas horarias con "y de" — sin cambios, este
+    pedido no tocó ese checkbox. "Combinar distintas unidades" además
     agrupa bajo una sola fecha (con el total del día) las reservas de
     consultorios distintos ese mismo día — implica combinar misma unidad
     (no tendría sentido agrupar entre consultorios sin haber fundido antes
@@ -426,13 +457,18 @@ def _lineas_reservas_aisladas(
                 grupos.setdefault(f["IdConsultorio"], []).append(f)
             grupos_ordenados = list(grupos.values())
         else:
-            grupos_ordenados = [[f] for f in reservas_dia]
+            grupos_ordenados = _agrupar_bloques_continuos(reservas_dia)
 
         entradas = []  # (horarios, lugar, monto | None)
         for grupo in grupos_ordenados:
-            horarios = " y de ".join(
-                f"{hora_fmt(f['HoraInicio'])[:-2]} a {hora_fmt(f['HoraFin'])}" for f in grupo
-            )
+            if combinar_misma_unidad:
+                horarios = " y de ".join(
+                    f"{hora_fmt(f['HoraInicio'])[:-2]} a {hora_fmt(f['HoraFin'])}" for f in grupo
+                )
+            else:
+                # Bloque continuo: un único rango de punta a punta, no
+                # un "y de" por cada reserva que lo compone.
+                horarios = f"{hora_fmt(grupo[0]['HoraInicio'])[:-2]} a {hora_fmt(grupo[-1]['HoraFin'])}"
             lugar = _lugar_reserva(grupo[0], incluir_consultorio, incluir_unidad, incluir_edificio)
             monto = sum(monto_fn(f) for f in grupo) if monto_fn else None
             entradas.append((horarios, lugar, monto))

@@ -65,12 +65,18 @@ from app.repositorio.registro import obtener_repositorio
 
 
 def nombre_archivo_liquidacion(periodo: str, profesional: sqlite3.Row) -> str:
+    """#39: sin sufijo de código — "{periodo} - Liquidación {Tratamiento}
+    {Nombre} {Apellido}.pdf", pedido explícito de la clienta ("sin el R1
+    del código"). No hace falta desambiguar contra otro archivo del
+    mismo profesional: cada uno vive en su propia carpeta
+    (`Profesionales/{código}`, ver `app.negocio.archivos_generados.
+    carpeta_profesional`), así que dos profesionales nunca comparten
+    directorio aunque tuvieran el mismo nombre."""
     tratamiento = profesional["Tratamiento"] or ""
     nombre = profesional["NombrePila"] or ""
     apellido = profesional["Apellido"]
     partes = " ".join(p for p in (tratamiento, nombre, apellido) if p)
-    sufijo_codigo = f" - {profesional['IdCodigo']}" if profesional["IdCodigo"] else ""
-    return f"{periodo} - Liquidación {partes}{sufijo_codigo}.pdf"
+    return f"{periodo} - Liquidación {partes}.pdf"
 
 
 def _nombre_completo(profesional: sqlite3.Row) -> str:

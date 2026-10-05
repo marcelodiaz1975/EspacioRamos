@@ -57,13 +57,15 @@ def profesional(conn, consultorio):
 
 
 def test_nombre_archivo_sigue_el_formato_del_documento(conn, profesional):
+    """#39: sin sufijo de código — "sin el R1 del código", pedido
+    explícito de la clienta."""
     prof = obtener_repositorio(conn, "Profesional").obtener(profesional)
-    assert nombre_archivo_liquidacion("2026-08", prof) == "2026-08 - Liquidación Lic. Marcela Lo Veci - R1.pdf"
+    assert nombre_archivo_liquidacion("2026-08", prof) == "2026-08 - Liquidación Lic. Marcela Lo Veci.pdf"
 
 
-def test_nombre_archivo_sin_codigo_no_agrega_sufijo(conn, consultorio):
+def test_nombre_archivo_nunca_agrega_sufijo_de_codigo(conn, consultorio):
     id_prof = obtener_repositorio(conn, "Profesional").crear(
-        CategoriaProfesional="R", Apellido="Sosa", NombrePila="Pablo", Tratamiento="Lic.",
+        CategoriaProfesional="R", Apellido="Sosa", NombrePila="Pablo", Tratamiento="Lic.", IdCodigo="R2",
     )
     prof = obtener_repositorio(conn, "Profesional").obtener(id_prof)
     assert nombre_archivo_liquidacion("2026-08", prof) == "2026-08 - Liquidación Lic. Pablo Sosa.pdf"
