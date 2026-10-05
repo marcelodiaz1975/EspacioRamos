@@ -698,12 +698,9 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     PorcentajeDescuentoNoLaborable REAL NOT NULL DEFAULT 100,
     SemanasVacacionesMaximasPorAnio INTEGER NOT NULL DEFAULT 2,
     DiasEnvioLiquidacionesRemanentes INTEGER NOT NULL DEFAULT 5,
-    DiasAntesFinMesRecordatorioPlan INTEGER NOT NULL DEFAULT 5,
     -- Cantidad de días antes de fin de mes para activar el recordatorio
     -- "bordó" del Centro de mensajería (ver EstadoMensajeriaPeriodo más
-    -- abajo) — reusa esta columna, que ya existía sin ningún lector hasta
-    -- ahora. DiasAntesFinMesRecordatorioPlan de arriba quedó sin uso al
-    -- descartarse la vieja reactivación gris->rojo que la leía.
+    -- abajo).
     DiasAntesFinMesRecordatorioGeneral INTEGER NOT NULL DEFAULT 5,
     RetencionHistorialListaEsperaAnios INTEGER NOT NULL DEFAULT 5,
     RangosEstadisticasOcupacion TEXT,

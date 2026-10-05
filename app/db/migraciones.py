@@ -95,6 +95,10 @@ _COLUMNAS_ELIMINADAS: list[tuple[str, str]] = [
     ("Consultorio", "PanelVidrioLuzNatural"),
     ("Edificio", "DomicilioLocalidad"),
     ("Imagen", "Localidad"),
+    # Quedó sin ningún lector al descartarse la vieja reactivación
+    # gris->rojo del Centro de mensajería que la leía (ver
+    # DiasAntesFinMesRecordatorioGeneral, la que sí se usa hoy).
+    ("Configuracion", "DiasAntesFinMesRecordatorioPlan"),
 ]
 
 # Tablas que existían en versiones anteriores y se dieron de baja del todo

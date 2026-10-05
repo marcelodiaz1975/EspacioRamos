@@ -187,6 +187,24 @@ def test_aplicar_migraciones_reemplaza_panel_de_vidrio_por_placard(tmp_path):
     conn.close()
 
 
+def test_aplicar_migraciones_saca_dias_antes_fin_mes_recordatorio_plan(tmp_path):
+    """Quedó sin ningún lector al descartarse la vieja reactivación
+    gris->rojo del Centro de mensajería — se saca de la base, sin tocar
+    DiasAntesFinMesRecordatorioGeneral, la columna que sí se usa hoy."""
+    conn = init_database(tmp_path / "test.db")
+    conn.execute(
+        "ALTER TABLE Configuracion ADD COLUMN DiasAntesFinMesRecordatorioPlan INTEGER NOT NULL DEFAULT 5"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    columnas = {f["name"] for f in conn.execute("PRAGMA table_info(Configuracion)").fetchall()}
+    assert "DiasAntesFinMesRecordatorioPlan" not in columnas
+    assert "DiasAntesFinMesRecordatorioGeneral" in columnas
+    conn.close()
+
+
 def test_aplicar_migraciones_normaliza_tamano_de_consultorio(tmp_path):
     """Consultorio.TamanoClasificacion pasó de texto libre a catálogo
     cerrado (Grande/Intermedio/Chico): una base vieja con mayúsculas
