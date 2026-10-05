@@ -480,7 +480,10 @@ CREATE TABLE IF NOT EXISTS ListasEditables (
     TipoLista TEXT NOT NULL,
     Valor TEXT NOT NULL,
     Activo INTEGER NOT NULL DEFAULT 1,
-    Orden INTEGER NOT NULL DEFAULT 0
+    Orden INTEGER NOT NULL DEFAULT 0,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
 );
 
 -- 3.21 ListaEspera --------------------------------------------------------------------------

@@ -82,6 +82,9 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("SnapshotMensual", "Tipo", "TEXT NOT NULL DEFAULT 'Mensual'"),
     ("SnapshotMensual", "Observacion", "TEXT"),
     ("CargoEspecial", "Subtipo", "TEXT NOT NULL DEFAULT 'Ítem libre'"),
+    ("ListasEditables", "CampoLibre1", "TEXT"),
+    ("ListasEditables", "CampoLibre2", "TEXT"),
+    ("ListasEditables", "CampoLibre3", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja

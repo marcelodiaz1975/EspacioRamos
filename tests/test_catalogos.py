@@ -268,6 +268,7 @@ def test_campos_libres_apagados_los_saca_de_todos_los_catalogos(qtbot, conn):
         catalogos.pantalla_consultorios, catalogos.pantalla_responsables, catalogos.pantalla_tipos_licencia,
         catalogos.pantalla_condiciones_normas, catalogos.pantalla_detalles_complementarios_propuesta,
         catalogos.pantalla_profesiones, catalogos.pantalla_gastos_operativos,
+        catalogos.pantalla_listas_editables,
     ]:
         pantalla = fabrica(conn)
         qtbot.addWidget(pantalla)
@@ -306,6 +307,15 @@ def test_pantalla_profesiones_tiene_tres_campos_libres(qtbot, conn):
 
 def test_pantalla_gastos_operativos_tiene_tres_campos_libres(qtbot, conn):
     pantalla = catalogos.pantalla_gastos_operativos(conn)
+    qtbot.addWidget(pantalla)
+    nombres = [c.nombre for c in pantalla.campos]
+    assert nombres.count("CampoLibre1") == 1
+    assert nombres.count("CampoLibre2") == 1
+    assert nombres.count("CampoLibre3") == 1
+
+
+def test_pantalla_listas_editables_tiene_tres_campos_libres(qtbot, conn):
+    pantalla = catalogos.pantalla_listas_editables(conn)
     qtbot.addWidget(pantalla)
     nombres = [c.nombre for c in pantalla.campos]
     assert nombres.count("CampoLibre1") == 1

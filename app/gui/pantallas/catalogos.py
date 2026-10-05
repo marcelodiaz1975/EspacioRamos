@@ -190,6 +190,7 @@ def pantalla_listas_editables(conn: sqlite3.Connection, *, anidado: bool = False
         Campo("Valor", "Valor", requerido=True),
         Campo("Orden", "Orden", tipo="numero"),
         Campo("Activo", "Activo", tipo="booleano"),
+        *campos_libres(conn),
     ]
     pantalla = PantallaCRUD(conn, "ListasEditables", "Listas editables", campos, anidado=anidado)
     pantalla.al_guardar = lambda valores, registro: reordenar_al_guardar(conn, valores, registro)
