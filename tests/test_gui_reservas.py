@@ -2695,6 +2695,66 @@ def test_cancelar_reserva_extraordinaria(qtbot, conn):
     assert obtener_repositorio(conn, "ReservaAislada").listar()[0]["Estado"] == "Cancelada"
 
 
+def test_modificar_reserva_extraordinaria_cancela_la_vieja_y_precarga_el_formulario(qtbot, conn):
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel.spin_monto.setValue(5000)
+    panel._crear()
+    id_profesional = panel._reservas[0]["IdProfesional"]
+    id_consultorio = panel._reservas[0]["IdConsultorio"]
+
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+
+    # La vieja queda cancelada (con su historial), no borrada.
+    reservas = obtener_repositorio(conn, "ReservaAislada").listar()
+    assert len(reservas) == 1
+    assert reservas[0]["Estado"] == "Cancelada"
+    # El formulario queda precargado con los datos de la que se canceló.
+    assert panel.combo_profesional.currentData() == id_profesional
+    assert panel.combo_consultorio.currentData() == id_consultorio
+    assert panel.campo_item.text() == "Taller puntual"
+    assert panel.spin_monto.value() == 5000
+
+    panel.spin_monto.setValue(6000)
+    panel._crear()
+    reservas = obtener_repositorio(conn, "ReservaAislada").listar()
+    assert len(reservas) == 2
+    confirmadas = [r for r in reservas if r["Estado"] == "Confirmada"]
+    assert len(confirmadas) == 1
+    assert confirmadas[0]["MontoExtraordinario"] == 6000
+
+
+def test_modificar_reserva_extraordinaria_sin_seleccion_avisa(qtbot, conn):
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel._modificar_seleccionada()
+    assert obtener_repositorio(conn, "ReservaAislada").listar() == []
+
+
+def test_modificar_reserva_extraordinaria_copia_mensaje_de_detalle_al_portapapeles(qtbot, conn, monkeypatch):
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel.spin_monto.setValue(5000)
+    panel._crear()
+
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+    assert len(copiado) == 1
+    assert "DETALLE RESERVA" in copiado[0]
+
+
 def test_reserva_extraordinaria_se_ve_en_la_tabla_de_reservas_aisladas_con_el_monto_manual(qtbot, conn):
     """Una extraordinaria es una ReservaAislada más — la tabla de siempre
     de "Reservas aisladas" también la lista, con la columna "Valor"

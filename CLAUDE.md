@@ -7166,6 +7166,39 @@ sin ítem o sin monto no crea nada, cancelar funciona, y la fila también
 se ve en la tabla de "Reservas aisladas" con el monto manual en su
 columna "Valor").
 
+### Segunda vuelta: botón "Modificar reserva" en la solapa nueva
+
+Pedido de la clienta, con tres puntos sobre la ronda anterior:
+
+- **Capturas de las tres solapas completas**: confirmado que el
+  mensaje de detalle de una extraordinaria ya se copiaba solo al
+  portapapeles al crearla (mismo mecanismo `_copiar_mensaje_detalle`
+  que Aisladas, documentado arriba) — se le mandó un ejemplo del texto
+  real para que lo viera: una línea con el ítem de texto libre,
+  conviviendo con una aislada común y el saldo anterior, todo sumado en
+  el mismo "SALDO A ABONAR" final.
+- **"Que cada vez que se cree, modifique o cancele... genere o
+  regenere ese texto"**: en "Reservas aisladas" ya pasaba así (Crear/
+  Modificar/Cancelar llaman los tres a `_copiar_mensaje_detalle`,
+  `test_modificar_reserva_aislada_al_confirmar_regenera_mensaje_al_
+  portapapeles` ya lo cubría desde antes de esta vuelta) — sin cambios
+  ahí. "Reserva extraordinaria" solo tenía Crear/Cancelar (ambos ya
+  copiaban), le faltaba un "Modificar" propio: se sumó `boton_
+  modificar`/`_modificar_seleccionada` (`_PanelReservaExtraordinaria`),
+  mismo patrón exacto que `_PanelReservasAisladas` — cancela la
+  seleccionada (que ya copia el mensaje sin ella, vía el `_cancelar_
+  registro` compartido que ahora usan `_cancelar`/`_modificar_
+  seleccionada` de este panel) y precarga el formulario con sus datos
+  (profesional, ubicación, fecha, horario, ítem, monto) para que el
+  operador ajuste y confirme con "Crear reserva extraordinaria" —ese
+  clic vuelve a copiar, ya con la versión corregida.
+
+Tests nuevos en `tests/test_gui_reservas.py`:
+`test_modificar_reserva_extraordinaria_cancela_la_vieja_y_precarga_el_
+formulario`, `test_modificar_reserva_extraordinaria_sin_seleccion_
+avisa`, `test_modificar_reserva_extraordinaria_copia_mensaje_de_
+detalle_al_portapapeles`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

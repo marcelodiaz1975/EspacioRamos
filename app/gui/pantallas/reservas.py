@@ -1908,6 +1908,12 @@ class _PanelReservaExtraordinaria(QWidget):
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
 
+        boton_modificar = QPushButton("Modificar reserva")
+        boton_modificar.setObjectName("botonSecundario")
+        boton_modificar.setFixedWidth(_ANCHO_PANEL_FILTROS_GRILLA)
+        boton_modificar.clicked.connect(self._modificar_seleccionada)
+        form.addWidget(boton_modificar)
+
         boton_cancelar = QPushButton("Cancelar reserva")
         boton_cancelar.setObjectName("botonSecundario")
         boton_cancelar.setFixedWidth(_ANCHO_PANEL_FILTROS_GRILLA)
@@ -1933,7 +1939,7 @@ class _PanelReservaExtraordinaria(QWidget):
             [
                 self.combo_profesional, self.combo_localidad, self.combo_edificio, self.combo_unidad,
                 self.combo_consultorio, self.campo_fecha, self.spin_desde, self.spin_hasta,
-                self.campo_item, self.spin_monto, boton_crear, boton_cancelar,
+                self.campo_item, self.spin_monto, boton_crear, boton_modificar, boton_cancelar,
             ],
             parent=self,
         )
@@ -2038,22 +2044,73 @@ class _PanelReservaExtraordinaria(QWidget):
         self.actualizar()
         self._resetear_formulario()
 
+    def _seleccionar_ubicacion(self, id_consultorio: int) -> None:
+        fila = self.conn.execute(
+            "SELECT e.IdLocalidad, u.IdEdificio, c.IdUnidad FROM Consultorio c "
+            "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+            "WHERE c.IdConsultorio = ?", (id_consultorio,),
+        ).fetchone()
+        if fila is None:
+            return
+        indice_localidad = self.combo_localidad.findData(fila["IdLocalidad"])
+        if indice_localidad >= 0:
+            self.combo_localidad.setCurrentIndex(indice_localidad)
+        indice_edificio = self.combo_edificio.findData(fila["IdEdificio"])
+        if indice_edificio >= 0:
+            self.combo_edificio.setCurrentIndex(indice_edificio)
+        indice_unidad = self.combo_unidad.findData(fila["IdUnidad"])
+        if indice_unidad >= 0:
+            self.combo_unidad.setCurrentIndex(indice_unidad)
+        indice_consultorio = self.combo_consultorio.findData(id_consultorio)
+        if indice_consultorio >= 0:
+            self.combo_consultorio.setCurrentIndex(indice_consultorio)
+
+    def _cancelar_registro(self, reserva: sqlite3.Row, titulo: str) -> bool:
+        try:
+            requiere_aviso = cancelar_reserva_aislada(self.conn, reserva["IdReservaAislada"])
+        except ValueError as error:
+            QMessageBox.warning(self, titulo, str(error))
+            return False
+        self.conn.commit()
+        regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
+        if requiere_aviso:
+            QMessageBox.information(self, titulo, "Cancelada el mismo día: avisar al profesional.")
+        self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
+        self.actualizar()
+        return True
+
     def _cancelar(self) -> None:
         reserva = self._fila_seleccionada()
         if reserva is None:
             return
-        try:
-            requiere_aviso = cancelar_reserva_aislada(self.conn, reserva["IdReservaAislada"])
-        except ValueError as error:
-            QMessageBox.warning(self, "Cancelar reserva", str(error))
+        if self._cancelar_registro(reserva, "Cancelar reserva"):
+            self.combo_profesional.setFocus()
+
+    def _modificar_seleccionada(self) -> None:
+        """Mismo criterio que Reservas aisladas: no se edita la fila
+        histórica in-place — se cancela la extraordinaria seleccionada
+        (queda su historial, no se borra, y ya copia al portapapeles el
+        mensaje de detalle actualizado sin ella) y se precarga el
+        formulario con sus datos para dar de alta la versión corregida.
+        El operador ajusta lo que haga falta y confirma con "Crear
+        reserva extraordinaria", como cualquier alta — que vuelve a
+        copiar el mensaje, ya con la versión corregida incluida."""
+        reserva = self._fila_seleccionada()
+        if reserva is None:
+            QMessageBox.warning(self, "Modificar reserva", "Elegí una fila de la tabla para modificar.")
             return
-        self.conn.commit()
-        regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
-        if requiere_aviso:
-            QMessageBox.information(self, "Cancelar reserva", "Cancelada el mismo día: avisar al profesional.")
-        self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
-        self.actualizar()
-        self.combo_profesional.setFocus()
+        if not self._cancelar_registro(reserva, "Modificar reserva"):
+            return
+
+        indice_profesional = self.combo_profesional.findData(reserva["IdProfesional"])
+        if indice_profesional >= 0:
+            self.combo_profesional.setCurrentIndex(indice_profesional)
+        self._seleccionar_ubicacion(reserva["IdConsultorio"])
+        self.campo_fecha.setDate(QDate.fromString(reserva["Fecha"], "yyyy-MM-dd"))
+        self.spin_desde.setValue(reserva["HoraInicio"])
+        self.spin_hasta.setValue(reserva["HoraFin"])
+        self.campo_item.setText(reserva["ItemExtraordinario"] or "")
+        self.spin_monto.setValue(reserva["MontoExtraordinario"] or 0.0)
 
     def _resetear_formulario(self) -> None:
         self.combo_profesional.setCurrentIndex(0)
