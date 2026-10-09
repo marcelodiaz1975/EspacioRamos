@@ -76,10 +76,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.estilos import COLOR_ROJO, COLOR_TEXTO_CLARO
 from app.gui.pantallas.importacion import _PanelImportacion
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.avance_mes import avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo
-from app.negocio.backup import backup_vencido, carpeta_backup, generar_backup, ultimo_backup
+from app.negocio.backup import (
+    _ruta_base_datos,
+    backup_vencido,
+    carpeta_backup,
+    generar_backup,
+    modo_sin_sincronizar_activo,
+    ultimo_backup,
+)
 from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual
 from app.negocio.formato import formatear_moneda, mes_texto, periodo_mm_aaaa
 from app.negocio.panel_control import (
@@ -241,6 +249,23 @@ class _PanelAvancePeriodo(QWidget):
     def _armar_ui(self) -> None:
         layout_solapa = QVBoxLayout(self)
 
+        # Aviso permanente mientras esta instalación esté en "modo local,
+        # sin sincronizar" (ver app.negocio.backup, sección "Backup y
+        # sincronización" de CLAUDE.md) — oculto en el caso normal,
+        # self.actualizar() lo muestra/oculta según corresponda. No es un
+        # cartel que se cierra y se olvida: tiene que seguir ahí mientras
+        # el modo esté activo.
+        self.etiqueta_modo_sin_sincronizar = QLabel(
+            "MODO LOCAL, SIN SINCRONIZAR — los backups están deshabilitados en esta instalación. "
+            "Restaurá la versión sincronizada desde Google Drive en cuanto puedas."
+        )
+        self.etiqueta_modo_sin_sincronizar.setWordWrap(True)
+        self.etiqueta_modo_sin_sincronizar.setStyleSheet(
+            f"background-color: {COLOR_ROJO}; color: {COLOR_TEXTO_CLARO}; font-weight: bold; padding: 8px;"
+        )
+        self.etiqueta_modo_sin_sincronizar.setVisible(False)
+        layout_solapa.addWidget(self.etiqueta_modo_sin_sincronizar)
+
         # Orden invertido a pedido de la clienta: "Generar backup ahora"
         # arriba, "Avanzar de mes" abajo — y este último vuelve a ser el
         # botonPrimario de la pantalla (el otro queda botonSecundario).
@@ -370,6 +395,11 @@ class _PanelAvancePeriodo(QWidget):
         return self.tarjeta_alertas
 
     def actualizar(self) -> None:
+        ruta_db = _ruta_base_datos(self.conn)
+        self.etiqueta_modo_sin_sincronizar.setVisible(
+            ruta_db is not None and modo_sin_sincronizar_activo(ruta_db)
+        )
+
         periodo = periodo_actual(self.conn)
         anio, mes = (int(p) for p in periodo.split("-"))
         self.etiqueta_periodo.setText(f"{mes_texto(mes).capitalize()} de {anio} ({periodo_mm_aaaa(periodo)})")

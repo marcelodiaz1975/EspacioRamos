@@ -1,11 +1,16 @@
 import pytest
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QInputDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.dialogos_seguridad import DialogoDesbloqueo, DialogoLogin, MonitorInactividad
+from app.gui.dialogos_seguridad import (
+    DialogoBaseDesactualizada,
+    DialogoDesbloqueo,
+    DialogoLogin,
+    MonitorInactividad,
+)
 from app.negocio.seguridad import (
     autenticar,
     crear_usuario,
@@ -243,3 +248,71 @@ def test_monitor_usa_los_minutos_configurados(qtbot, conn):
     monitor = MonitorInactividad(conn, None, usuario)
 
     assert monitor._timer.interval() == 5 * 60_000
+
+
+# ------------------------------------------------------- base desactualizada
+
+
+def test_base_desactualizada_restaurar_deja_la_decision_en_accion(qtbot, conn):
+    dialogo = DialogoBaseDesactualizada(conn, "Backup 2026-08-20 09h00")
+    qtbot.addWidget(dialogo)
+
+    dialogo._elegir_restaurar()
+
+    assert dialogo.accion == "restaurar"
+    assert dialogo.result() == QDialog.DialogCode.Accepted
+
+
+def test_base_desactualizada_sin_contrasena_maestra_no_habilita_la_via_de_escape(qtbot, conn):
+    dialogo = DialogoBaseDesactualizada(conn, "Backup 2026-08-20 09h00")
+    qtbot.addWidget(dialogo)
+
+    dialogo._elegir_sin_sincronizar()
+
+    assert dialogo.accion is None
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+
+
+def test_base_desactualizada_sin_sincronizar_con_contrasena_correcta_acepta(qtbot, conn, monkeypatch):
+    establecer_contrasena_maestra(conn, "maestra999")
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("maestra999", True)))
+    dialogo = DialogoBaseDesactualizada(conn, "Backup 2026-08-20 09h00")
+    qtbot.addWidget(dialogo)
+
+    dialogo._elegir_sin_sincronizar()
+
+    assert dialogo.accion == "sin_sincronizar"
+    assert dialogo.result() == QDialog.DialogCode.Accepted
+
+
+def test_base_desactualizada_sin_sincronizar_con_contrasena_incorrecta_no_acepta(qtbot, conn, monkeypatch):
+    establecer_contrasena_maestra(conn, "maestra999")
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("mala", True)))
+    dialogo = DialogoBaseDesactualizada(conn, "Backup 2026-08-20 09h00")
+    qtbot.addWidget(dialogo)
+
+    dialogo._elegir_sin_sincronizar()
+
+    assert dialogo.accion is None
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+
+
+def test_base_desactualizada_cancelar_el_pedido_de_contrasena_no_hace_nada(qtbot, conn, monkeypatch):
+    establecer_contrasena_maestra(conn, "maestra999")
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("", False)))
+    dialogo = DialogoBaseDesactualizada(conn, "Backup 2026-08-20 09h00")
+    qtbot.addWidget(dialogo)
+
+    dialogo._elegir_sin_sincronizar()
+
+    assert dialogo.accion is None
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+
+
+def test_base_desactualizada_salir_del_programa_rechaza(qtbot, conn):
+    dialogo = DialogoBaseDesactualizada(conn, "Backup 2026-08-20 09h00")
+    qtbot.addWidget(dialogo)
+
+    dialogo.reject()
+
+    assert dialogo.result() != QDialog.DialogCode.Accepted

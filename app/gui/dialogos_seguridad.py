@@ -12,9 +12,11 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QVBoxLayout,
 )
 
@@ -22,6 +24,7 @@ from app.negocio.seguridad import (
     autenticar,
     crear_usuario,
     establecer_contrasena_maestra,
+    hay_contrasena_maestra,
     hay_usuarios,
     verificar_contrasena_maestra,
 )
@@ -136,6 +139,85 @@ class DialogoLogin(QDialog):
             return
         establecer_contrasena_maestra(self.conn, self.campo_maestra.text())
         self.usuario = autenticar(self.conn, nombre, contrasena)
+        self.accept()
+
+
+class DialogoBaseDesactualizada(QDialog):
+    """Cartel bloqueante al arrancar (`gui_main.main`): se dispara cuando
+    `app.negocio.backup.hay_backup_mas_reciente_sin_sincronizar` detecta
+    que la base local de esta máquina quedó atrás de un backup generado
+    por otra instalación y ya sincronizado por Drive acá (ver CLAUDE.md,
+    sección "Backup y sincronización"). Pedido explícito de la clienta:
+    "casi que me obligue a levantar y a usar lo sincronizado" — por eso
+    no hay ningún botón de "seguir igual" a la vista; la única vía de
+    escape ("Continuar sin sincronizar") pide la contraseña maestra.
+
+    No actúa sobre la base directamente — deja la decisión en
+    `self.accion` ("restaurar"/"sin_sincronizar") para que `gui_main.
+    main()` la ejecute, con la conexión vieja ya cerrada antes de tocar
+    el archivo (reescribirlo con una conexión todavía abierta encima
+    puede fallar, sobre todo en Windows)."""
+
+    def __init__(self, conn: sqlite3.Connection, nombre_backup: str, parent=None):
+        super().__init__(parent)
+        self.conn = conn
+        self.accion: str | None = None
+        self.setWindowTitle("Base de datos desactualizada")
+        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.setModal(True)
+        self._armar_ui(nombre_backup)
+
+    def _armar_ui(self, nombre_backup: str) -> None:
+        layout = QVBoxLayout(self)
+
+        etiqueta = QLabel(
+            "Se encontró un backup más nuevo que esta base, sincronizado desde otra instalación "
+            f"({nombre_backup}).\n\n"
+            "Por seguridad, hay que restaurarlo antes de continuar — así se evita que la información "
+            "de esta máquina pise a la más actualizada."
+        )
+        etiqueta.setWordWrap(True)
+        layout.addWidget(etiqueta)
+
+        boton_restaurar = QPushButton("Restaurar y continuar")
+        boton_restaurar.setObjectName("botonPrimario")
+        boton_restaurar.clicked.connect(self._elegir_restaurar)
+        layout.addWidget(boton_restaurar)
+
+        boton_sin_sincronizar = QPushButton("Continuar sin sincronizar")
+        boton_sin_sincronizar.setObjectName("botonSecundario")
+        boton_sin_sincronizar.clicked.connect(self._elegir_sin_sincronizar)
+        layout.addWidget(boton_sin_sincronizar)
+
+        boton_salir = QPushButton("Salir del programa")
+        boton_salir.setObjectName("botonSecundario")
+        boton_salir.clicked.connect(self.reject)
+        layout.addWidget(boton_salir)
+
+        boton_restaurar.setFocus()
+
+    def _elegir_restaurar(self) -> None:
+        self.accion = "restaurar"
+        self.accept()
+
+    def _elegir_sin_sincronizar(self) -> None:
+        if not hay_contrasena_maestra(self.conn):
+            QMessageBox.warning(
+                self, "Continuar sin sincronizar",
+                "No hay una contraseña maestra configurada todavía en esta base — no se puede habilitar "
+                "esta vía de escape.",
+            )
+            return
+        contrasena, confirmado = QInputDialog.getText(
+            self, "Continuar sin sincronizar", "Contraseña maestra:", QLineEdit.EchoMode.Password,
+        )
+        if not confirmado:
+            return
+        if not verificar_contrasena_maestra(self.conn, contrasena):
+            QMessageBox.warning(self, "Continuar sin sincronizar", "Contraseña incorrecta.")
+            return
+        self.accion = "sin_sincronizar"
         self.accept()
 
 

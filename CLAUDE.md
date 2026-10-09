@@ -7309,6 +7309,149 @@ con el error), `test_importar_placa_posicion_fuera_del_tablero_
 reporta_error`, `test_importar_placa_posicion_dentro_del_tablero_
 se_guarda`.
 
+## Backup y sincronización: detección de base local desactualizada, "modo local sin sincronizar"
+
+Pedido de la clienta, surgido de una pregunta puntual sobre un escenario
+real: "estoy trabajando siempre en una notebook, voy backapeando la
+información cuando quiero y aparte se va sincronizando con Google Drive
+en forma automática. Por algún motivo necesito de urgencia usar el
+sistema en otra máquina... ¿Puedo pedir que baje la info más actualizada
+desde el último backup, o que se levante del Google Drive a mi
+elección?"
+
+Investigado antes de proponer nada: una parte de esto YA estaba
+cubierta. `app.negocio.backup.restaurar_backup` (sección 2: "restauración
+automática desde Google Drive") ya existía y `gui_main._ofrecer_
+restaurar_backup` ya la ofrecía al arrancar, pero SOLO cuando no hay
+ningún archivo de base en esa máquina todavía (instalación nunca usada
+ahí). El hueco real: si la máquina de emergencia YA tiene una base
+(vieja, de la última vez que se usó ahí hace tiempo), ese chequeo nunca
+dispara — el programa abre esa base vieja tal cual está, sin preguntar
+nada ni comparar contra lo que hay en Drive.
+
+Pedido explícito de la clienta sobre cómo cerrar ese hueco: "que detecte
+de alguna manera que la base de datos local no es la última que se
+sincronizó... casi que me obligue a levantar y a usar lo sincronizado.
+No quiero que por algún bug la info vieja pise a la nueva." Sobre la
+vía de escape de ese bloqueo (consultada por `AskUserQuestion`, con un
+agregado propio de la clienta sobre la respuesta): "sin ninguna vía de
+escape, pero podría ser con alguna vía de escape que solo me permita
+usar el programa localmente SIN QUE SINCRONICEN los cambios que a
+partir de ahí se hagan" — así quedó: existe una vía de escape, pero
+contiene el riesgo real en vez de solo destrabar el cartel.
+
+### Detección (`app.negocio.backup`)
+
+`Configuracion.UltimoBackupPropio` (TEXT, ISO) guarda el timestamp del
+backup que la base viva "dice ser": `generar_backup` lo escribe con su
+propio `momento` al terminar, y `restaurar_backup` lo pisa con el
+timestamp DEL BACKUP RESTAURADO (no "ahora") — la base restaurada se
+"convierte" en esa versión. Comparar fechas de ARCHIVO (mtime del `.db`)
+se descartó a propósito: Drive no siempre preserva esa fecha al
+sincronizar, y dos relojes de máquina distinta pueden tener un
+desfasaje — un valor que vive adentro de los datos mismos, y que viaja
+con cada restauración, es más confiable.
+
+`hay_backup_mas_reciente_sin_sincronizar(conn)` es el chequeo en sí: si
+en la carpeta de backup (la misma que ya sincroniza Drive) hay un
+backup con un timestamp MÁS NUEVO que `UltimoBackupPropio`, lo devuelve
+— es la señal de que otra instalación generó un backup más avanzado que
+esta copia local. `None` sin carpeta configurada, sin ningún backup
+todavía, o si esta base ya está al día (el caso normal de la máquina de
+uso diario: tu propio backup más reciente nunca puede quedar "más nuevo
+que vos misma", y un backup restaurado tampoco, porque hereda
+exactamente ese timestamp).
+
+Migración (`app.db.migraciones._inicializar_ultimo_backup_propio`): una
+base ya en uso recibe la columna en NULL por el `ALTER TABLE` genérico
+— se inicializa sola a "ahora" (no se deja en blanco) para que el día de
+la actualización no dispare una alarma falsa contra backups que ya
+estaban sincronizados de antes de que existiera este chequeo. Corre en
+cada `aplicar_migraciones` pero solo toca filas en NULL, así que es
+inocua después de la primera vez.
+
+### El cartel bloqueante (`DialogoBaseDesactualizada`, `app/gui/
+dialogos_seguridad.py`)
+
+Se dispara en `gui_main.main()`, justo después de abrir la base y antes
+del login — no tiene sentido dejar entrar a un mundo de datos que se
+sabe desactualizado. Tres caminos, sin ningún botón de "seguir igual"
+visible a simple vista (pedido explícito, "casi que me obligue"):
+
+- **"Restaurar y continuar"**: pide la carpeta de Drive y llama a
+  `restaurar_backup`. `gui_main.main()` (no el diálogo) es quien cierra
+  la conexión vieja ANTES de que `restaurar_backup` reescriba el
+  archivo — una conexión todavía abierta encima del mismo archivo puede
+  fallar al reescribirlo, sobre todo en Windows (no se puede reescribir
+  un archivo que otro proceso tiene abierto) — y abre una nueva después.
+- **"Continuar sin sincronizar"**: pide la contraseña maestra (sin
+  contraseña maestra configurada todavía, esta vía queda inhabilitada
+  por completo — no hay nada contra qué verificarla) y, si es correcta,
+  activa el "modo local, sin sincronizar" (ver abajo).
+- **"Salir del programa"**: cierra la aplicación sin tocar nada.
+
+El diálogo no actúa sobre la base directamente — devuelve la decisión
+en `self.accion` para que `gui_main.main()` la ejecute con el orden de
+conexión/archivo correcto.
+
+### "Modo local, sin sincronizar"
+
+Un archivo marcador al lado de la base (`{db}.sin_sincronizar`, mismo
+patrón que el lock de `app.negocio.instancia_unica.
+BloqueoInstanciaUnica` — un archivo chico junto al `.db` en vez de una
+columna DENTRO de la base, para que siga siendo visible aunque la base
+misma esté desactualizada o corrupta). Mientras esté presente:
+
+- `generar_backup` se niega a correr (`ValueError`) — ni el botón manual
+  "Generar backup ahora" de Panel de control ni el backup automático del
+  avance de mes pueden escribir en la carpeta sincronizada a Drive. Esto
+  es lo que de verdad contiene el riesgo: nada generado desde esta rama
+  diverge puede llegarle a Drive y pisar la cadena de backups legítima
+  que sigue avanzando en otro lado.
+  - "Avanzar de mes" en sí NO se bloquea — ya estaba diseñado para que
+    un backup fallido (sin carpeta configurada, error de disco, etc.)
+    no frene el resto del proceso (`_generar_backup_previo` atrapa el
+    error y sigue, dejando `backup_generado=False` en el resumen); con
+    el modo activo, el backup simplemente no se genera y el resumen lo
+    refleja igual, sin necesitar ningún cambio en `avance_mes.py`.
+- Panel de control muestra un aviso permanente en rojo, arriba de todo
+  (`_PanelAvancePeriodo.etiqueta_modo_sin_sincronizar`) — no un cartel
+  que se cierra y se olvida, tiene que seguir ahí mientras el modo esté
+  activo, recalculado en cada `actualizar()`.
+- Al volver a abrir el programa en esa misma máquina mientras el modo
+  sigue activo, NO se vuelve a mostrar el cartel bloqueante ni se pide
+  la contraseña de nuevo — ya quedó registrado que se entró así a
+  propósito. El aviso permanente de Panel de control sigue ahí como
+  recordatorio constante.
+- Se desactiva solo, automáticamente, en el momento en que se restaura
+  un backup de verdad en esa máquina (`restaurar_backup` lo borra al
+  final) — volver a la cadena de backups legítima es, justamente, lo
+  que levanta la cuarentena.
+
+**Lo que esto NO resuelve, documentado a propósito**: si en esa
+emergencia se cargó algo importante que no está en la rama "buena", el
+sistema no tiene forma de fusionar automáticamente esos dos mundos — la
+reconciliación (volver a cargar eso en la instalación principal, o lo
+que corresponda) queda en manos del operador. Esta función solo evita
+que lo viejo pise a lo nuevo sin que nadie se entere; no resuelve el
+merge.
+
+Tests nuevos: `tests/test_backup.py` (`UltimoBackupPropio` se actualiza
+al generar y al restaurar un backup — con el timestamp del backup
+restaurado, no "ahora"; `generar_backup` falla y no crea nada en modo
+sin sincronizar; `restaurar_backup` desactiva el modo; activar/
+desactivar/consultar el marcador; `hay_backup_mas_reciente_sin_
+sincronizar` en sus distintos casos — sin carpeta, sin backups, con el
+propio último backup, detecta uno de otra instalación, no alerta si es
+anterior o igual, sin ningún `UltimoBackupPropio` registrado todavía).
+`tests/test_migraciones.py` (inicialización en una base vieja sin la
+columna, no pisa un valor ya real, idempotencia, tabla `Configuracion`
+inexistente no rompe). `tests/test_gui_dialogos_seguridad.py`
+(`DialogoBaseDesactualizada` en sus tres caminos, más la contraseña
+incorrecta/cancelada y sin contraseña maestra configurada).
+`tests/test_gui_panel_control.py` (el aviso permanente oculto por
+defecto, visible con el modo activo).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

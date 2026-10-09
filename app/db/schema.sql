@@ -718,6 +718,13 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     RutaLogo TEXT,
     CarpetaBaseArchivos TEXT,
     CarpetaBackup TEXT,
+    -- Detección de base local desactualizada (sección "Backup y
+    -- sincronización" de CLAUDE.md): timestamp (ISO) del backup que
+    -- esta base dice ser — se actualiza al generar un backup propio o
+    -- al restaurar uno. Si en la carpeta de Drive sincronizada hay un
+    -- backup más nuevo que este valor, es que otra instalación avanzó
+    -- más que esta base local.
+    UltimoBackupPropio TEXT,
     ModoOscuro INTEGER NOT NULL DEFAULT 0,
     -- Tanda de sobres y recogida de sobres (DC-08 §5.2/§5.3, aclarado en
     -- conversación). FechaHoraRecogidaSobres es el valor por defecto que se

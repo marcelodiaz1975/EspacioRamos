@@ -7,7 +7,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.panel_control import PanelControl
-from app.negocio.backup import generar_backup
+from app.negocio.backup import activar_modo_sin_sincronizar, generar_backup
 from app.negocio.lista_espera import crear_pedido
 from app.repositorio.registro import obtener_repositorio
 
@@ -561,3 +561,19 @@ def test_cadena_de_foco_entre_los_dos_botones_da_la_vuelta(qtbot, conn):
     qtbot.waitUntil(lambda: panel_avance.boton_avanzar.hasFocus())
     panel_avance._foco._mover(panel_avance.boton_avanzar, retroceder=False, seleccionar_todo=False)
     qtbot.waitUntil(lambda: panel_avance.boton_backup.hasFocus())
+
+
+def test_banner_sin_sincronizar_oculto_por_defecto(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_avance.etiqueta_modo_sin_sincronizar.isHidden() is True
+
+
+def test_banner_sin_sincronizar_visible_cuando_el_modo_esta_activo(qtbot, conn):
+    db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
+    activar_modo_sin_sincronizar(db_path)
+
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+
+    assert pantalla.panel_avance.etiqueta_modo_sin_sincronizar.isHidden() is False

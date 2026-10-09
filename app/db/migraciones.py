@@ -16,6 +16,7 @@ tabla entera, sumarla en `_TABLAS_ELIMINADAS`."""
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 
 # (tabla, columna, definición SQL de la columna — tipo + constraints)
 _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
@@ -88,6 +89,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("ReservaAislada", "EsExtraordinaria", "INTEGER NOT NULL DEFAULT 0"),
     ("ReservaAislada", "ItemExtraordinario", "TEXT"),
     ("ReservaAislada", "MontoExtraordinario", "REAL"),
+    ("Configuracion", "UltimoBackupPropio", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja
@@ -293,6 +295,31 @@ def _ampliar_alcance_gasto_a_consultorio(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE GastoOperativo_viejo")
 
 
+def _inicializar_ultimo_backup_propio(conn: sqlite3.Connection) -> None:
+    """Detección de base local desactualizada
+    (`app.negocio.backup.hay_backup_mas_reciente_sin_sincronizar`): una
+    base ya en uso recibe la columna `UltimoBackupPropio` en NULL (ver
+    `_COLUMNAS_NUEVAS`) — se inicializa a "ahora" en vez de dejarla en
+    blanco, para que el día de la actualización no dispare una alarma
+    falsa contra backups viejos que ya estaban sincronizados de antes de
+    que existiera este chequeo. Una base nueva (recién creada, sin
+    ningún backup propio todavía) pasa por el mismo camino con el mismo
+    resultado correcto: "hasta donde se sabe, no hay ningún backup más
+    nuevo que yo misma"."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Configuracion'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(Configuracion)").fetchall()}
+    if "UltimoBackupPropio" not in columnas_existentes:
+        return
+    conn.execute(
+        "UPDATE Configuracion SET UltimoBackupPropio = ? WHERE UltimoBackupPropio IS NULL",
+        (datetime.now().isoformat(),),
+    )
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -319,4 +346,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _agregar_nivel_supervisor_general(conn)
     _clasificar_subtipo_deposito_llave(conn)
     _ampliar_alcance_gasto_a_consultorio(conn)
+    _inicializar_ultimo_backup_propio(conn)
     conn.commit()

@@ -2,6 +2,7 @@ import sqlite3
 
 from app.db.init_db import init_database
 from app.db.migraciones import aplicar_migraciones
+from app.db.seed import sembrar_valores_por_defecto
 
 
 def test_base_nueva_ya_tiene_las_columnas_migradas(tmp_path):
@@ -395,6 +396,72 @@ def test_aplicar_migraciones_ignora_nivel_acceso_que_no_existe_todavia(tmp_path)
     """Una base sin la tabla NivelAcceso (de antes de la solapa Seguridad)
     no debería romper — solo salteársela."""
     conn = sqlite3.connect(tmp_path / "sin_seguridad.db")
+    conn.row_factory = sqlite3.Row
+    aplicar_migraciones(conn)  # no debe lanzar excepción
+    conn.close()
+
+
+def test_base_nueva_tiene_ultimo_backup_propio_inicializado_en_el_siguiente_arranque(tmp_path):
+    """Detección de base desactualizada (ver app.negocio.backup): la
+    primera vez que corren las migraciones sobre una base recién creada,
+    Configuracion todavía no tiene ninguna fila (la siembra default
+    corre después, en app.db.seed) — no hay nada que inicializar
+    todavía. En el siguiente arranque (próxima vez que se llama a
+    aplicar_migraciones, ya con la fila sembrada) sí queda con un valor,
+    no en NULL — "hasta donde se sabe, no hay ningún backup más nuevo
+    que yo misma"."""
+    conn = init_database(tmp_path / "test.db")
+    sembrar_valores_por_defecto(conn)
+    aplicar_migraciones(conn)  # simula el siguiente arranque del programa
+
+    valor = conn.execute(
+        "SELECT UltimoBackupPropio FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()["UltimoBackupPropio"]
+    assert valor is not None
+    conn.close()
+
+
+def test_aplicar_migraciones_inicializa_ultimo_backup_propio_en_base_vieja(tmp_path):
+    """Una base de antes de este chequeo (sin la columna todavía) la
+    recibe en NULL por el ALTER TABLE genérico — se inicializa sola a
+    "ahora" en vez de quedar en blanco, para no disparar una alarma
+    falsa el día de la actualización contra backups que ya estaban
+    sincronizados de antes de que existiera este chequeo."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE Configuracion (IdConfiguracion INTEGER PRIMARY KEY)")
+    conn.execute("INSERT INTO Configuracion (IdConfiguracion) VALUES (1)")
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    valor = conn.execute(
+        "SELECT UltimoBackupPropio FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()["UltimoBackupPropio"]
+    assert valor is not None
+    conn.close()
+
+
+def test_aplicar_migraciones_no_pisa_un_ultimo_backup_propio_ya_registrado(tmp_path):
+    """Idempotencia: una vez que la columna tiene un valor real (un
+    backup genuino ya generado o restaurado), correr las migraciones de
+    nuevo no lo tiene que reemplazar por "ahora"."""
+    conn = init_database(tmp_path / "test.db")
+    sembrar_valores_por_defecto(conn)
+    conn.execute("UPDATE Configuracion SET UltimoBackupPropio = '2026-08-15T10:30:00' WHERE IdConfiguracion = 1")
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    valor = conn.execute(
+        "SELECT UltimoBackupPropio FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()["UltimoBackupPropio"]
+    assert valor == "2026-08-15T10:30:00"
+    conn.close()
+
+
+def test_aplicar_migraciones_sin_tabla_configuracion_no_rompe(tmp_path):
+    conn = sqlite3.connect(tmp_path / "sin_configuracion.db")
     conn.row_factory = sqlite3.Row
     aplicar_migraciones(conn)  # no debe lanzar excepción
     conn.close()

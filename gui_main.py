@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 from app.db.connection import DB_PATH_DEFAULT
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.dialogos_seguridad import DialogoLogin, MonitorInactividad
+from app.gui.dialogos_seguridad import DialogoBaseDesactualizada, DialogoLogin, MonitorInactividad
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
 from app.gui.pantallas.balance import PantallaBalanceDelNegocio
@@ -27,7 +27,12 @@ from app.gui.pantallas.profesionales import PantallaProfesionales
 from app.gui.pantallas.reservas import PantallaReservas
 from app.gui.pantallas.usuarios import PantallaUsuarios
 from app.gui.pantallas.valores import PantallaValores
-from app.negocio.backup import restaurar_backup
+from app.negocio.backup import (
+    activar_modo_sin_sincronizar,
+    hay_backup_mas_reciente_sin_sincronizar,
+    modo_sin_sincronizar_activo,
+    restaurar_backup,
+)
 from app.negocio.instancia_unica import BloqueoInstanciaUnica, InstanciaYaAbierta
 from app.negocio.seguridad import asegurar_permisos_pantalla
 
@@ -217,6 +222,40 @@ def main() -> None:
 
     conn = init_database(db_path)
     sembrar_valores_por_defecto(conn)
+
+    # Detección de base local desactualizada (ver CLAUDE.md, sección
+    # "Backup y sincronización"): salvo que esta máquina ya eligió
+    # trabajar en "modo local, sin sincronizar" (no se vuelve a preguntar
+    # cada vez que se abre el programa en ese estado — ver el docstring
+    # de DialogoBaseDesactualizada), si apareció un backup más nuevo
+    # sincronizado desde otra instalación, hay que restaurarlo o elegir
+    # explícitamente seguir sin sincronizar antes de llegar al login.
+    if not modo_sin_sincronizar_activo(db_path):
+        backup_mas_nuevo = hay_backup_mas_reciente_sin_sincronizar(conn)
+        if backup_mas_nuevo is not None:
+            dialogo_desactualizada = DialogoBaseDesactualizada(conn, backup_mas_nuevo.name)
+            if dialogo_desactualizada.exec() != DialogoBaseDesactualizada.DialogCode.Accepted:
+                bloqueo.liberar()
+                sys.exit(0)
+            if dialogo_desactualizada.accion == "sin_sincronizar":
+                activar_modo_sin_sincronizar(db_path)
+            else:  # "restaurar"
+                # Cerrar la conexión vieja ANTES de reescribir el archivo
+                # — `restaurar_backup` lo sobreescribe en el lugar, y una
+                # conexión todavía abierta encima puede fallar (sobre
+                # todo en Windows, donde no se puede reescribir un
+                # archivo que otro proceso tiene abierto).
+                conn.close()
+                carpeta = QFileDialog.getExistingDirectory(
+                    None, "Elegir la carpeta de backups de Google Drive",
+                )
+                if carpeta:
+                    try:
+                        restaurar_backup(Path(carpeta), db_path)
+                    except ValueError as error:
+                        QMessageBox.warning(None, "Restaurar backup", str(error))
+                conn = init_database(db_path)
+                sembrar_valores_por_defecto(conn)
 
     # Seguridad (ver CLAUDE.md): login obligatorio antes de mostrar la
     # ventana principal — con la base recién creada, sin ningún usuario
