@@ -7199,6 +7199,27 @@ formulario`, `test_modificar_reserva_extraordinaria_sin_seleccion_
 avisa`, `test_modificar_reserva_extraordinaria_copia_mensaje_de_
 detalle_al_portapapeles`.
 
+### Tercera vuelta: bordes de los tres botones cortados contra el panel
+
+Pedido explícito de la clienta sobre la captura de la ronda anterior:
+"Crear reserva extraordinaria"/"Modificar reserva"/"Cancelar reserva"
+se veían con el borde derecho cortado. Causa real, medida con un script
+de geometría: `panel_form` (el contenedor de toda la columna izquierda)
+tiene ancho fijo `_ANCHO_PANEL_FILTROS_GRILLA` (290), pero su
+`QVBoxLayout` se queda con el margen default de Qt (9px por lado) —
+el ancho de CONTENIDO real es 290 - 9 - 9 = 272 (confirmado contra
+`combo_profesional`, que ya se dimensionaba bien a ese ancho). Los tres
+botones, en cambio, se fijaban al ancho TOTAL del panel (290, el mismo
+que `panel_form`) en vez de al de contenido — su borde derecho quedaba
+9px más allá del borde del propio panel, cortado contra él.
+
+`_ANCHO_BOTON_EXTRAORDINARIA = _ANCHO_PANEL_FILTROS_GRILLA - 18`
+(constante nueva, puntual de esta pantalla) reemplaza a
+`_ANCHO_PANEL_FILTROS_GRILLA` en los tres `setFixedWidth` de los
+botones — confirmado con el mismo script que los tres terminan exacto
+en el mismo borde derecho que `combo_profesional` (x=281), bien
+adentro del ancho de `panel_form` (290).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

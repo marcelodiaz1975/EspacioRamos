@@ -1792,6 +1792,17 @@ class _PanelReservasAisladas(QWidget):
         self._sincronizar_grilla()
 
 
+# `panel_form` usa `_ANCHO_PANEL_FILTROS_GRILLA` como ancho TOTAL fijo,
+# pero su `QVBoxLayout` se queda con el margen default de Qt (9px por
+# lado) — el ancho de CONTENIDO real es 290 - 9 - 9 = 272 (confirmado
+# con `combo_profesional`, que ya se dimensiona bien a ese ancho). Los
+# tres botones de acción, en cambio, se fijaban al ancho TOTAL del panel
+# (290) en vez de al de contenido — su borde derecho terminaba 9px más
+# allá del borde del panel y quedaba cortado contra él. Ancho correcto
+# para estos tres botones, medido, no el de `panel_form`.
+_ANCHO_BOTON_EXTRAORDINARIA = _ANCHO_PANEL_FILTROS_GRILLA - 18
+
+
 class _PanelReservaExtraordinaria(QWidget):
     """Reserva extraordinaria (pedido de la clienta): una `ReservaAislada`
     más — mismo modelo de conflictos, ocupación de grilla y cancelación
@@ -1904,19 +1915,19 @@ class _PanelReservaExtraordinaria(QWidget):
 
         boton_crear = QPushButton("Crear reserva extraordinaria")
         boton_crear.setObjectName("botonPrimario")
-        boton_crear.setFixedWidth(_ANCHO_PANEL_FILTROS_GRILLA)
+        boton_crear.setFixedWidth(_ANCHO_BOTON_EXTRAORDINARIA)
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
 
         boton_modificar = QPushButton("Modificar reserva")
         boton_modificar.setObjectName("botonSecundario")
-        boton_modificar.setFixedWidth(_ANCHO_PANEL_FILTROS_GRILLA)
+        boton_modificar.setFixedWidth(_ANCHO_BOTON_EXTRAORDINARIA)
         boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(boton_modificar)
 
         boton_cancelar = QPushButton("Cancelar reserva")
         boton_cancelar.setObjectName("botonSecundario")
-        boton_cancelar.setFixedWidth(_ANCHO_PANEL_FILTROS_GRILLA)
+        boton_cancelar.setFixedWidth(_ANCHO_BOTON_EXTRAORDINARIA)
         boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(boton_cancelar)
 
