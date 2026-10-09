@@ -7220,6 +7220,95 @@ botones — confirmado con el mismo script que los tres terminan exacto
 en el mismo borde derecho que `combo_profesional` (x=281), bien
 adentro del ancho de `panel_form` (290).
 
+## Planilla de importación: revisión de cobertura (hueco real en Llaves, decisión consciente)
+
+Pedido de la clienta: revisar la planilla de importación completa
+("por las dudas"), con dudas puntuales sobre si la hoja "Llaves" cubre
+todo lo necesario, si falta algún campo nuevo en alguna hoja existente,
+o si habría que sumar alguna hoja más.
+
+Repaso sistemático de `app.importacion.definiciones.COLUMNAS_PLANTILLA`
+contra `schema.sql`, entidad por entidad: Localidad/Edificio/Unidad/
+Consultorio/Profesion/Profesional/ReservaRegular/FechasEspeciales/
+Responsable/PlanPago están completas (todo lo que corresponde cargar al
+importar ya tiene su columna — lo que falta en cada una son campos que
+el propio sistema calcula o gestiona en vivo, como `SaldoCuentaActual`
+o `MontoTotalAPagar`, nunca algo que debiera venir de la planilla).
+
+**Confirmada la duda sobre Llaves — hueco real, no una percepción
+equivocada.** La hoja "Llave" solo da de alta el TIPO de llave (`Tipo`
++ `ValorDepositoActual`) — pero el modelo de Llaves tiene tres tablas
+(sección 3.7 más arriba): `Llave` (el tipo), `LlaveAcceso` (a qué
+Edificio/Unidad abre) y `LlaveMovimiento` (stock existente y
+asignaciones ya vigentes a profesionales). Ninguna de las dos últimas
+se puede cargar por planilla — un tipo de llave importado queda sin
+ningún acceso configurado y sin ninguna copia en stock ni asignada,
+hasta que alguien entra a mano a la pantalla de Llaves a completarlo.
+Consecuencia práctica: el aviso "le falta la llave" de Reservas
+(`llaves_faltantes_para_reserva`) nunca dispara para una llave
+importada así, y si un profesional ya tenía una copia física antes de
+usar el sistema, se lo va a mostrar como "sin llave" hasta que se
+registre a mano el Ingreso + la Asignación correspondientes.
+
+Dos alternativas de diseño se le plantearon a la clienta
+(`AskUserQuestion`) antes de tocar nada: sumar columnas de acceso/stock
+directo a la misma hoja "Llave" (cubre el caso común, un tipo con un
+solo acceso), o una hoja nueva "LlaveMovimiento" referenciando el tipo
+por una columna de referencia inventada para la importación (más
+flexible, soporta accesos/asignaciones múltiples, pero más compleja de
+llenar). **Decisión: dejarlo como está** — no se implementa ninguna de
+las dos; el acceso y el stock/asignaciones de Llaves se siguen
+configurando a mano desde la pantalla después de importar.
+
+También se consultó sumar "Bloques rígidos" como hoja nueva (dato de
+configuración inicial parecido a Fechas especiales, que sí se importa,
+pero fuera del alcance original de la Etapa 1) — **decisión: no**, son
+pocos bloques por sistema, más simple cargarlos a mano.
+
+### Tres correcciones menores, sí implementadas
+
+Encontradas de paso en la misma revisión, de alcance chico y acotado
+— confirmadas con la clienta antes de tocarlas, implementadas sobre su
+"sí, corregí los tres":
+
+- **Hoja "Llave" sin `Observacion`**: la tabla `Llave` tiene esa
+  columna (una nota libre sobre el tipo, ej. "está un poco gastada"),
+  pero la planilla no la ofrecía. `COLUMNAS_PLANTILLA["Llave"]` suma
+  `"Observacion"` al final de la lista.
+- **Fila de Llave con `Tipo` vacío rompía TODA la importación**: `
+  importar_hoja` armaba `datos["Nombre"] = siguiente_nombre_llave(conn,
+  datos["Tipo"])`, y esa función hace `_LETRA_POR_TIPO[tipo]` — con
+  `Tipo` en blanco (`None`) o mal tipeado, un `KeyError` sin capturar
+  (el `try/except` de esa fila solo atrapaba `sqlite3.Error`/
+  `ValueError`) interrumpía el loop completo en vez de reportarse como
+  el error de esa única fila, como hace cualquier otra validación de
+  este módulo. Se agrega una validación explícita antes de llamar a esa
+  función (`tipo not in _LETRA_POR_TIPO`, importado cruzado de
+  `app.negocio.llaves` — mismo criterio de import cruzado que ya usa
+  este módulo) que levanta un `ValueError` con un mensaje claro,
+  atrapado por el mecanismo normal: la fila se reporta como error y el
+  resto de la hoja sigue importándose.
+- **Hoja "Placa" no valida que la Posición esté dentro del tablero**:
+  `asignar_placa` (la función de negocio que usa la pantalla al cargar
+  a mano) valida que la posición esté entre 1 y
+  `Unidad.CantLimitePlacas`, pero la importación hacía `repo.crear(
+  **datos)` directo, sin pasar por esa validación — una planilla con
+  una posición fuera de rango quedaba cargada igual, sin ningún aviso.
+  `_resolver_referencias` (caso "Placa") suma el mismo chequeo
+  (`1 <= PosicionTablero <= CantLimitePlacas`) antes de confirmar la
+  unidad resuelta — si falla, se agrega a `errores` (mismo mecanismo
+  que "no se encontró la unidad") y la fila se saltea sin romper el
+  resto de la hoja.
+
+Tests nuevos en `tests/test_importacion.py` (ninguna de las dos hojas
+tenía cobertura de tests hasta ahora, otra señal de que este costado no
+se había puesto a prueba): `test_importar_llave_guarda_observacion`,
+`test_importar_llave_sin_tipo_reporta_error_y_no_rompe_las_demas_filas`
+(confirma que el resto de la hoja sigue importándose después de la fila
+con el error), `test_importar_placa_posicion_fuera_del_tablero_
+reporta_error`, `test_importar_placa_posicion_dentro_del_tablero_
+se_guarda`.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

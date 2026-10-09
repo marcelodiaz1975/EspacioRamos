@@ -335,3 +335,80 @@ def test_importar_alias_banos_con_tilde(conn, tmp_path):
     assert not resultados["Unidad"].errores
     unidad = obtener_repositorio(conn, "Unidad").listar()[0]
     assert unidad["Banos"] == 2
+
+
+# --------------------------------------------------------------- Llave
+
+def test_importar_llave_guarda_observacion(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["Llave"].append(["Edificio", 500, "Llave del portón"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["Llave"].filas_importadas == 1
+    assert not resultados["Llave"].errores
+
+    llave = obtener_repositorio(conn, "Llave").listar()[0]
+    assert llave["Tipo"] == "Edificio"
+    assert llave["ValorDepositoActual"] == 500
+    assert llave["Observacion"] == "Llave del portón"
+    assert llave["Nombre"] == "Tipo llave E1"
+
+
+def test_importar_llave_sin_tipo_reporta_error_y_no_rompe_las_demas_filas(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["Llave"].append([None, 500, None])  # Tipo vacío -- antes rompía con KeyError
+    wb["Llave"].append(["Unidad", 300, None])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["Llave"].filas_importadas == 1
+    assert len(resultados["Llave"].errores) == 1
+    assert "Tipo de llave inválido" in resultados["Llave"].errores[0]
+
+    llave = obtener_repositorio(conn, "Llave").listar()[0]
+    assert llave["Tipo"] == "Unidad"
+
+
+# --------------------------------------------------------------- Placa
+
+def _preparar_unidad_con_tablero(wb, *, cant_limite_placas: int) -> None:
+    wb["Edificio"].append(["Ramos 1", "Av. Rivadavia 13876", None])
+    wb["Unidad"].append(
+        ["Ramos 1", '7mo "L"', "NO", "NO", 1, "NO", "NO", "NO", "NO", "NO", "NO", "NO", cant_limite_placas]
+    )
+
+
+def test_importar_placa_posicion_fuera_del_tablero_reporta_error(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    _preparar_unidad_con_tablero(wb, cant_limite_placas=3)
+    _agregar_profesional_r1(wb)
+    wb["Placa"].append(["Ramos 1", '7mo "L"', 10, "R1", None, "NO"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["Placa"].filas_importadas == 0
+    assert len(resultados["Placa"].errores) == 1
+    assert "fuera del rango 1-3" in resultados["Placa"].errores[0]
+    assert not obtener_repositorio(conn, "Placa").listar()
+
+
+def test_importar_placa_posicion_dentro_del_tablero_se_guarda(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    _preparar_unidad_con_tablero(wb, cant_limite_placas=3)
+    _agregar_profesional_r1(wb)
+    wb["Placa"].append(["Ramos 1", '7mo "L"', 2, "R1", None, "NO"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["Placa"].filas_importadas == 1
+    assert not resultados["Placa"].errores
+
+    placa = obtener_repositorio(conn, "Placa").listar()[0]
+    assert placa["PosicionTablero"] == 2
+    r1 = obtener_repositorio(conn, "Profesional").listar(IdCodigo="R1")[0]
+    assert placa["IdProfesional"] == r1["IdProfesional"]

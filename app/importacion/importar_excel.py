@@ -31,7 +31,7 @@ from app.importacion.definiciones import (
     ENTIDADES_IMPORTABLES,
 )
 from app.negocio.dias import periodo_actual
-from app.negocio.llaves import siguiente_nombre_llave
+from app.negocio.llaves import _LETRA_POR_TIPO, siguiente_nombre_llave
 from app.negocio.pagos import crear_plan_pago_historico, marcar_cuota_pagada
 from app.repositorio.registro import obtener_repositorio
 
@@ -206,6 +206,17 @@ def _resolver_referencias(conn: sqlite3.Connection, entidad: str, datos: dict) -
         id_unidad = _buscar_unidad(conn, nombre_ed, depto)
         if id_unidad is None:
             errores.append(f"No se encontró la unidad '{depto}' del edificio '{nombre_ed}'")
+        else:
+            posicion = datos.get("PosicionTablero")
+            fila_unidad = conn.execute(
+                "SELECT CantLimitePlacas FROM Unidad WHERE IdUnidad = ?", (id_unidad,),
+            ).fetchone()
+            limite = fila_unidad["CantLimitePlacas"] if fila_unidad else 0
+            if posicion is not None and not (1 <= posicion <= limite):
+                errores.append(
+                    f"La posición {posicion} está fuera del rango 1-{limite} "
+                    f"(capacidad del tablero) de la unidad '{depto}'"
+                )
         datos["IdUnidad"] = id_unidad
 
         codigo = datos.pop("Profesional", None)
@@ -288,7 +299,13 @@ def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImport
             if entidad == "PlanPago":
                 _crear_plan_pago_importado(conn, datos)
             elif entidad == "Llave":
-                datos["Nombre"] = siguiente_nombre_llave(conn, datos["Tipo"])
+                tipo = datos.get("Tipo")
+                if tipo not in _LETRA_POR_TIPO:
+                    raise ValueError(
+                        f"Tipo de llave inválido o vacío: {tipo!r} "
+                        f"(debe ser {', '.join(_LETRA_POR_TIPO)})"
+                    )
+                datos["Nombre"] = siguiente_nombre_llave(conn, tipo)
                 repo.crear(**datos)
             else:
                 repo.crear(**datos)
