@@ -9,6 +9,11 @@ Aplicación de escritorio para administrar el alquiler por horas de consultorios
 - **Empaquetado:** PyInstaller — se distribuye como carpeta con `.exe`, sin instalador
 - **Destino de instalación:** Windows (ver notas al final)
 
+> Para poner el sistema en funcionamiento por primera vez (armar el
+> `.exe`, instalarlo, configurar Google Drive para el backup, dar de
+> alta el primer Administrador), ver [`docs/MANUAL_INSTALACION.md`](docs/MANUAL_INSTALACION.md)
+> — esta sección de abajo es para quien sigue desarrollando el código.
+
 ## Estructura del repositorio
 
 ```
@@ -135,7 +140,17 @@ Puntos ya cubiertos en el código pensando en eso:
   la base de datos junto al `.exe` en vez de en la carpeta temporal de extracción de
   PyInstaller.
 
-Lo que **no** se pudo verificar en este entorno por tratarse de Linux: la compilación
-real del `.exe` con PyInstaller y el comportamiento de la interfaz gráfica corriendo
-en Windows de verdad. Antes de la entrega conviene un primer armado y prueba manual
-en una máquina Windows real.
+**Validado en este entorno Linux** (de cara al lanzamiento de la v1): se corrió
+`pyinstaller espacio_ramos.spec` completo (sin errores de imports ni de datos
+faltantes — confirma que `app/db/schema.sql` queda bien empaquetado) y se arrancó el
+binario resultante dos veces en modo offscreen — contra una ruta sin base de datos
+(llega limpio al cartel de "¿restaurar desde backup?") y contra una base ya
+inicializada (llega limpio al alta del primer Administrador) — sin ningún traceback
+en ninguno de los dos casos.
+
+Lo que **no** se pudo verificar en este entorno por tratarse de Linux: el binario en
+sí es un ELF de Linux, no el `.exe` real de Windows (PyInstaller no cruza
+plataformas), y tampoco el comportamiento visual de la interfaz gráfica corriendo en
+Windows de verdad (fuentes, SmartScreen, rutas con `C:\`, etc.). Antes de la entrega
+conviene un primer armado y prueba manual en una máquina Windows real — ver
+[`docs/MANUAL_INSTALACION.md`](docs/MANUAL_INSTALACION.md).
