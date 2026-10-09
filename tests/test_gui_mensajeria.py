@@ -575,6 +575,10 @@ def test_mensaje_aislada_siempre_incluye_consultorio_y_unidad(qtbot, conn):
         IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
         Estado="Confirmada", AplicaRecargo=0,
     )
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-05' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
 
     pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
@@ -596,6 +600,10 @@ def test_mensaje_aislada_por_defecto_no_combina(qtbot, conn):
         IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-05", HoraInicio=14, HoraFin=16,
         Estado="Confirmada", AplicaRecargo=0,
     )
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-05' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
 
     pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
@@ -616,6 +624,10 @@ def test_tildar_combinar_misma_unidad_actualiza_el_mensaje(qtbot, conn):
         IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-05", HoraInicio=14, HoraFin=16,
         Estado="Confirmada", AplicaRecargo=0,
     )
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-05' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
 
     pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)

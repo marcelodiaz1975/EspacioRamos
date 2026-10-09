@@ -2587,6 +2587,9 @@ def test_grilla_preview_aisladas_filtro_exclusivo_no_muestra_otros_profesionales
     repo = obtener_repositorio(conn, "ReservaAislada")
     repo.crear(IdProfesional=id_r2, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=10)
     repo.crear(IdProfesional=id_a1, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=14, HoraFin=15)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-17' WHERE IdConfiguracion = 1"
+    )
     conn.commit()
 
     pantalla = PantallaReservas(conn)

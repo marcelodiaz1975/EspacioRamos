@@ -52,7 +52,7 @@ def test_registrar_pago_sin_periodo_descuenta_saldo_actual(conn, profesional):
 
 def test_registrar_pago_imputado_a_mes_anterior_descuenta_saldo_anterior(conn, profesional):
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
-    # hoy (fecha real de sistema) cae en 2026-08 en este entorno de test
+    _fijar_periodo_actual(conn, "2026-08")  # "hoy" fijo, para que "2026-07" sea el mes inmediato anterior
     registrar_pago(conn, id_profesional=profesional, monto=-400, periodo_imputado="2026-07")
 
     actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
@@ -71,6 +71,7 @@ def test_registrar_pago_rechaza_mas_de_un_mes_atras(conn, profesional):
 def test_registrar_pago_cruza_tolerancia_al_regularizar_mes_anterior(conn, profesional):
     obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
+    _fijar_periodo_actual(conn, "2026-08")  # "hoy" fijo, para que "2026-07" sea el mes inmediato anterior
     # paga 950: saldo pasa de 1000 (por encima de 100) a 50 (dentro de tolerancia) -> cruza
     _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=-950, periodo_imputado="2026-07")
     assert cruza is True
@@ -79,6 +80,7 @@ def test_registrar_pago_cruza_tolerancia_al_regularizar_mes_anterior(conn, profe
 def test_registrar_pago_no_cruza_tolerancia_si_ya_estaba_dentro(conn, profesional):
     obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=50)
+    _fijar_periodo_actual(conn, "2026-08")  # "hoy" fijo, para que "2026-07" sea el mes inmediato anterior
     _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=-10, periodo_imputado="2026-07")
     assert cruza is False
 
@@ -86,6 +88,7 @@ def test_registrar_pago_no_cruza_tolerancia_si_ya_estaba_dentro(conn, profesiona
 def test_registrar_pago_no_cruza_tolerancia_si_sigue_endeudado(conn, profesional):
     obtener_repositorio(conn, "Configuracion").actualizar(1, ToleranciaDeudaDescuento=100)
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000)
+    _fijar_periodo_actual(conn, "2026-08")  # "hoy" fijo, para que "2026-07" sea el mes inmediato anterior
     _id, cruza = registrar_pago(conn, id_profesional=profesional, monto=-200, periodo_imputado="2026-07")
     assert cruza is False
 
@@ -149,6 +152,7 @@ def test_modificar_pago_mantiene_fecha_de_carga_original(conn, profesional):
 
 def test_modificar_pago_reimputa_a_otro_periodo(conn, profesional):
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaActual=1000, SaldoCuentaAnterior=500)
+    _fijar_periodo_actual(conn, "2026-08")  # "hoy" fijo, para que "2026-07" sea el mes inmediato anterior
     id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-100)  # contra el mes en curso
 
     modificar_pago(conn, id_pago, periodo_imputado="2026-07")  # se corrige: era del mes anterior

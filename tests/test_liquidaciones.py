@@ -21,6 +21,15 @@ PERIODO_ANTERIOR = "2026-07"
 def conn(tmp_path):
     connection = init_database(tmp_path / "test.db")
     sembrar_valores_por_defecto(connection)
+    # Este archivo entero asume que "hoy" cae dentro de PERIODO ("2026-08")
+    # — varios tests pasan por registrar_pago/crear_cargo_especial, que
+    # validan periodo_imputado contra la fecha REAL del sistema si no se
+    # fija la fecha ficticia (sin esto, los tests quedan "atados" al mes en
+    # que se escribieron y se rompen solos con el paso del calendario).
+    connection.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    connection.commit()
     yield connection
     connection.close()
 
