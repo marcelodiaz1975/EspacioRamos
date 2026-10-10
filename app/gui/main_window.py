@@ -29,6 +29,7 @@ from app.gui.estilos import hoja_estilos, paleta
 from app.negocio.dias import periodo_actual
 from app.negocio.plantillas_texto import resolver_plantilla
 from app.negocio.seguridad import nivel_alcanza
+from app.version import NOMBRE_Y_VERSION
 
 
 @dataclass
@@ -57,7 +58,7 @@ class VentanaPrincipal(QMainWindow):
         else:
             secciones_visibles = [s for s in secciones if nivel_alcanza(conn, id_nivel_usuario, s.nombre)]
         self._secciones = secciones_visibles
-        self.setWindowTitle("Sistema Espacio Ramos")
+        self.setWindowTitle(NOMBRE_Y_VERSION)
         self.resize(1200, 800)
         self._aplicar_tema()
 

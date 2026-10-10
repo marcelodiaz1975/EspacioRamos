@@ -1,4 +1,4 @@
-"""CRUD genérico para las tablas del Sistema Espacio Ramos.
+"""CRUD genérico para las tablas del sistema (SistemaDF).
 
 En vez de escribir 32 clases de repositorio casi idénticas (una por cada
 entidad de la sección 3 del documento), esta clase averigua las columnas de

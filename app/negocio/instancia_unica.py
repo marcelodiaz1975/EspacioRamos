@@ -36,7 +36,7 @@ class BloqueoInstanciaUnica:
         except OSError:
             archivo.close()
             raise InstanciaYaAbierta(
-                f"Ya hay otra sesión de Espacio Ramos abierta con esta base de datos ({self.ruta_lock.stem})."
+                f"Ya hay otra sesión del sistema abierta con esta base de datos ({self.ruta_lock.stem})."
             )
         self._archivo = archivo
 

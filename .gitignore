@@ -10,7 +10,7 @@ plantillas_excel/*.xlsx
 
 .pytest_cache/
 *.spec
-!espacio_ramos.spec
+!sistemadf.spec
 build/
 dist/
 

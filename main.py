@@ -9,8 +9,9 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.importacion.importar_excel import importar_planilla
 from app.importacion.plantillas import generar_plantillas
+from app.version import NOMBRE_PROGRAMA
 
-PLANTILLA_DEFAULT = Path(__file__).resolve().parent / "plantillas_excel" / "Plantilla_Importacion_EspacioRamos.xlsx"
+PLANTILLA_DEFAULT = Path(__file__).resolve().parent / "plantillas_excel" / "Plantilla_Importacion_SistemaDF.xlsx"
 
 
 def comando_init_db(args):
@@ -29,13 +30,13 @@ def comando_importar(args):
     sembrar_valores_por_defecto(conn)
     resultados = importar_planilla(conn, args.archivo)
     for r in resultados:
-        print(f"{r.entidad}: {r.filas_importadas} fila(s) importada(s)")
+        print(f"{r.entidad}: {r.filas_importadas} fila(s) importada(s), {r.filas_duplicadas} ya existían (no importadas)")
         for error in r.errores:
             print(f"  ! {error}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Administración de la base de datos - Sistema Espacio Ramos")
+    parser = argparse.ArgumentParser(description=f"Administración de la base de datos - {NOMBRE_PROGRAMA}")
     parser.add_argument("--db", type=Path, default=DB_PATH_DEFAULT, help="Ruta al archivo de base de datos SQLite")
     subparsers = parser.add_subparsers(dest="comando", required=True)
 

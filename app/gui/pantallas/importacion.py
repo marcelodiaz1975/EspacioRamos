@@ -125,8 +125,8 @@ class _PanelImportacion(QWidget):
         columna_derecha = QVBoxLayout()
         columna_derecha.addWidget(_titulo_campo("Resultado por hoja"))
         self.tabla_resultados = QTableWidget()
-        self.tabla_resultados.setColumnCount(3)
-        self.tabla_resultados.setHorizontalHeaderLabels(["Hoja", "Filas importadas", "Errores"])
+        self.tabla_resultados.setColumnCount(4)
+        self.tabla_resultados.setHorizontalHeaderLabels(["Hoja", "Filas importadas", "Duplicados (no importados)", "Errores"])
         self.tabla_resultados.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_resultados.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         columna_derecha.addWidget(self.tabla_resultados)
@@ -152,7 +152,7 @@ class _PanelImportacion(QWidget):
 
     def _descargar_plantilla(self) -> None:
         ruta, _ = QFileDialog.getSaveFileName(
-            self, "Descargar planilla de importación", "Plantilla_Importacion_EspacioRamos.xlsx", "Excel (*.xlsx)",
+            self, "Descargar planilla de importación", "Plantilla_Importacion_SistemaDF.xlsx", "Excel (*.xlsx)",
         )
         if not ruta:
             return
@@ -179,7 +179,8 @@ class _PanelImportacion(QWidget):
         for i, r in enumerate(resultados):
             self.tabla_resultados.setItem(i, 0, QTableWidgetItem(r.entidad))
             self.tabla_resultados.setItem(i, 1, item_numero(str(r.filas_importadas)))
-            self.tabla_resultados.setItem(i, 2, item_numero(str(len(r.errores))))
+            self.tabla_resultados.setItem(i, 2, item_numero(str(r.filas_duplicadas)))
+            self.tabla_resultados.setItem(i, 3, item_numero(str(len(r.errores))))
             for err in r.errores:
                 lineas_error.append(f"[{r.entidad}] {err}")
         self.texto_errores.setPlainText("\n".join(lineas_error))
@@ -188,10 +189,12 @@ class _PanelImportacion(QWidget):
         self.texto_integridad.setPlainText(self._texto_informe(informe))
 
         total_importadas = sum(r.filas_importadas for r in resultados)
+        total_duplicadas = sum(r.filas_duplicadas for r in resultados)
         total_errores = len(lineas_error)
         QMessageBox.information(
             self, "Importación terminada",
             f"Se importaron {total_importadas} filas en total, con {total_errores} error(es). "
+            f"{total_duplicadas} fila(s) ya existían idénticas en la base y no se volvieron a importar. "
             f"El informe de integridad encontró {informe.total} caso(s) para revisar.",
         )
 

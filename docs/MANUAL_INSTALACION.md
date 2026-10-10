@@ -1,4 +1,4 @@
-# Manual de instalación — Sistema Espacio Ramos (v1)
+# Manual de instalación — SistemaDF (v0.1)
 
 Esta guía cubre todo lo necesario para poner el sistema a funcionar por
 primera vez: desde armar el ejecutable hasta dejarlo configurado y listo
@@ -44,10 +44,10 @@ armarlo en Linux o Mac y después copiarlo a Windows.
 
    ```powershell
    pip install -r requirements-build.txt
-   pyinstaller espacio_ramos.spec
+   pyinstaller sistemadf.spec
    ```
 
-4. Esto genera la carpeta **`dist\EspacioRamos\`** — esa carpeta **es**
+4. Esto genera la carpeta **`dist\SistemaDF\`** — esa carpeta **es**
    la instalación completa (el `.exe` más todo lo que necesita para
    funcionar). Es la que se copia a la máquina real de uso en el paso
    siguiente.
@@ -80,9 +80,9 @@ inicial del sistema vas a necesitar la ruta de esta carpeta.
 
 ## 3. Instalar en la máquina real
 
-1. Copiar toda la carpeta `dist\EspacioRamos\` (del paso 1) a un lugar
-   fijo de esa máquina — por ejemplo `C:\EspacioRamos`.
-2. Adentro de esa carpeta está `EspacioRamos.exe` — se puede crear un
+1. Copiar toda la carpeta `dist\SistemaDF\` (del paso 1) a un lugar
+   fijo de esa máquina — por ejemplo `C:\SistemaDF`.
+2. Adentro de esa carpeta está `SistemaDF.exe` — se puede crear un
    acceso directo a él en el Escritorio o anclarlo a la barra de tareas,
    para no tener que navegar hasta la carpeta cada vez.
 3. No hace falta instalar Python, ni ninguna otra dependencia, en esta
@@ -98,7 +98,7 @@ inicial del sistema vas a necesitar la ruta de esta carpeta.
 
 ## 4. Primer arranque — alta del primer Administrador
 
-1. Doble click en `EspacioRamos.exe`.
+1. Doble click en `SistemaDF.exe`.
 2. Como todavía no hay ninguna base de datos en esta máquina, el
    sistema va a preguntar:
 
@@ -216,7 +216,7 @@ Si la idea es poder usar el sistema desde otra máquina en caso de
 emergencia (ver más abajo cómo se comporta esto):
 
 1. Repetir los pasos 1 a 3 en esa segunda máquina (mismo `.exe`
-   armado, o una copia de la misma carpeta `dist\EspacioRamos\`).
+   armado, o una copia de la misma carpeta `dist\SistemaDF\`).
 2. Instalar también ahí Google Drive de escritorio, con la **misma
    cuenta** y la **misma carpeta** sincronizada del paso 2.
 3. Al abrir el sistema por primera vez en esa máquina, cuando pregunte

@@ -1,16 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec para empaquetar el Sistema Espacio Ramos como
-ejecutable de escritorio (Etapa 10, sección 2: "Empaquetado: PyInstaller
-(.exe)"). Generar con:
+"""PyInstaller spec para empaquetar el sistema (SistemaDF, pedido
+explícito de la clienta de independizar el nombre del programa del
+nombre del negocio que lo use — ver app/version.py) como ejecutable de
+escritorio (Etapa 10, sección 2: "Empaquetado: PyInstaller (.exe)").
+Generar con:
 
-    pyinstaller espacio_ramos.spec
+    pyinstaller sistemadf.spec
 
-El resultado queda en dist/EspacioRamos/ (modo "onedir": una carpeta con
+El resultado queda en dist/SistemaDF/ (modo "onedir": una carpeta con
 el .exe y sus dependencias — más confiable con PySide6 que --onefile, que
 además tendría que descomprimirse en una carpeta temporal en cada
 arranque). Esa carpeta es la instalación completa: la base de datos y las
 carpetas de archivos/backup se crean al lado del ejecutable (ver
-app.db.connection._raiz_proyecto), así que copiar dist/EspacioRamos/ a
+app.db.connection._raiz_proyecto), así que copiar dist/SistemaDF/ a
 otra máquina alcanza para "instalar" — no hace falta un instalador aparte.
 
 Único dato que no se detecta solo por análisis estático de imports:
@@ -39,7 +41,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="EspacioRamos",
+    name="SistemaDF",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -52,5 +54,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    name="EspacioRamos",
+    name="SistemaDF",
 )

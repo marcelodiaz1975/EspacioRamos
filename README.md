@@ -1,6 +1,6 @@
-# Sistema Espacio Ramos
+# SistemaDF
 
-Aplicación de escritorio para administrar el alquiler por horas de consultorios a profesionales de salud (Espacio Ramos Consultorios). Reemplaza la gestión manual de reservas, liquidaciones, llaves, lista de espera y comunicación con los profesionales por un sistema único con base de datos local.
+Aplicación de escritorio para administrar el alquiler por horas de consultorios a profesionales de salud. El nombre del programa (`SistemaDF`) es independiente del nombre del espacio que lo use — se configura por separado desde Configuración general (`Configuracion.NombreEspacio`, ej. "Espacio Ramos Consultorios", el espacio para el que se desarrolló originalmente este repositorio). Reemplaza la gestión manual de reservas, liquidaciones, llaves, lista de espera y comunicación con los profesionales por un sistema único con base de datos local.
 
 - **Lenguaje:** Python 3.11+
 - **Base de datos:** SQLite (un único archivo, sin servidor)
@@ -31,13 +31,13 @@ referencia/      Scripts de referencia previos a la reescritura (no se ejecutan)
 tests/           ~795 tests (pytest + pytest-qt), uno por módulo de app/
 gui_main.py      Punto de entrada de la aplicación (interfaz gráfica)
 main.py          CLI de administración (init-db / generar-plantillas / importar)
-espacio_ramos.spec   Spec de PyInstaller para armar el .exe
+sistemadf.spec   Spec de PyInstaller para armar el .exe
 ```
 
 ## Requisitos
 
 - Python 3.11 o superior
-- En Windows, la app se instala como carpeta autocontenida (`dist/EspacioRamos/`)
+- En Windows, la app se instala como carpeta autocontenida (`dist/SistemaDF/`)
   generada con PyInstaller — la máquina de un operador **no necesita tener Python
   instalado**, solo copiar esa carpeta.
 - Para desarrollo sí hace falta Python + las dependencias de `requirements-dev.txt`.
@@ -97,13 +97,13 @@ commitear — el proyecto se mantiene con cero warnings.
 
 ```powershell
 pip install -r requirements-build.txt
-pyinstaller espacio_ramos.spec
+pyinstaller sistemadf.spec
 ```
 
-El resultado queda en `dist/EspacioRamos/` (modo "onedir": una carpeta con el `.exe`
+El resultado queda en `dist/SistemaDF/` (modo "onedir": una carpeta con el `.exe`
 y sus dependencias). Esa carpeta **es** la instalación completa — la base de datos y
 las carpetas de archivos/backup se crean al lado del ejecutable la primera vez que se
-abre, así que copiar `dist/EspacioRamos/` a otra máquina Windows alcanza para instalar,
+abre, así que copiar `dist/SistemaDF/` a otra máquina Windows alcanza para instalar,
 sin necesidad de un instalador aparte.
 
 ## Conceptos clave
@@ -141,7 +141,7 @@ Puntos ya cubiertos en el código pensando en eso:
   PyInstaller.
 
 **Validado en este entorno Linux** (de cara al lanzamiento de la v1): se corrió
-`pyinstaller espacio_ramos.spec` completo (sin errores de imports ni de datos
+`pyinstaller sistemadf.spec` completo (sin errores de imports ni de datos
 faltantes — confirma que `app/db/schema.sql` queda bien empaquetado) y se arrancó el
 binario resultante dos veces en modo offscreen — contra una ruta sin base de datos
 (llega limpio al cartel de "¿restaurar desde backup?") y contra una base ya

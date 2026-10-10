@@ -35,6 +35,7 @@ from app.negocio.backup import (
 )
 from app.negocio.instancia_unica import BloqueoInstanciaUnica, InstanciaYaAbierta
 from app.negocio.seguridad import asegurar_permisos_pantalla
+from app.version import NOMBRE_PROGRAMA
 
 
 def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
@@ -188,7 +189,7 @@ def _ofrecer_restaurar_backup(db_path: Path) -> None:
     (ver app.negocio.backup — el backup en sí ya asume esa carpeta, acá
     solo se recorre en sentido inverso)."""
     respuesta = QMessageBox.question(
-        None, "Sistema Espacio Ramos",
+        None, NOMBRE_PROGRAMA,
         "No se encontró una base de datos en esta máquina.\n\n"
         "¿Querés restaurar el último backup desde una carpeta de Google Drive ya sincronizada acá?",
     )
@@ -217,7 +218,7 @@ def main() -> None:
     try:
         bloqueo.adquirir()
     except InstanciaYaAbierta as error:
-        QMessageBox.critical(None, "Sistema Espacio Ramos", str(error))
+        QMessageBox.critical(None, NOMBRE_PROGRAMA, str(error))
         sys.exit(1)
 
     conn = init_database(db_path)
@@ -278,7 +279,7 @@ def main() -> None:
     )
 
     ventana = VentanaPrincipal(conn, secciones, id_nivel_usuario=usuario["IdNivelAcceso"])
-    ventana.show()
+    ventana.showMaximized()  # pedido explícito de la clienta: arrancar siempre maximizada
 
     # Bloqueo por inactividad: se instala sobre la QApplication entera
     # (cualquier click/tecla en cualquier pantalla la reinicia), así que

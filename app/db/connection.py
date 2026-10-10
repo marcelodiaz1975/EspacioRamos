@@ -1,4 +1,4 @@
-"""Conexión a la base de datos SQLite del Sistema Espacio Ramos."""
+"""Conexión a la base de datos SQLite del sistema (SistemaDF)."""
 import sqlite3
 import sys
 from pathlib import Path

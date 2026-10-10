@@ -28,6 +28,7 @@ from app.negocio.seguridad import (
     hay_usuarios,
     verificar_contrasena_maestra,
 )
+from app.version import NOMBRE_PROGRAMA
 
 _MINUTOS_INACTIVIDAD_DEFECTO = 15
 
@@ -51,7 +52,7 @@ class DialogoLogin(QDialog):
         self.conn = conn
         self.usuario: sqlite3.Row | None = None
         self._alta_inicial = not hay_usuarios(conn)
-        self.setWindowTitle("Sistema Espacio Ramos — Ingresar" if not self._alta_inicial else "Crear administrador")
+        self.setWindowTitle(f"{NOMBRE_PROGRAMA} — Ingresar" if not self._alta_inicial else "Crear administrador")
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self._armar_ui()
 
