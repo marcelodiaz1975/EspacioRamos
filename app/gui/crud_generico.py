@@ -45,8 +45,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.repositorio.registro import obtener_repositorio
 
 _ID_REGISTRO = Qt.ItemDataRole.UserRole
@@ -394,6 +395,7 @@ class PantallaCRUD(QWidget):
         self.tabla_widget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         if not self.solo_lectura:
             self.tabla_widget.doubleClicked.connect(self._editar)
+            instalar_eliminar_con_tecla(self.tabla_widget, self._eliminar)
         if ancho_botones is None:
             layout.addWidget(self.tabla_widget, stretch=1)
 
@@ -447,6 +449,12 @@ class PantallaCRUD(QWidget):
                 # ("lun 07-09-2026"): ese orden lexicográfico no coincide con
                 # el cronológico (empieza por el día de la semana).
                 return valor or ""
+            if campo.nombre == "IdCodigo":
+                # Orden natural (letra + número completo, ver CLAUDE.md
+                # "Orden natural de códigos de profesional") — alcanza
+                # con el nombre de columna, no hace falta un tipo nuevo
+                # de Campo para esto, solo lo usa Profesionales hoy.
+                return clave_orden_codigo(self._texto_celda(registro, campo))
             return self._texto_celda(registro, campo)
 
         return clave

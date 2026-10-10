@@ -62,9 +62,10 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
-from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.listas_editables import opciones_lista
 from app.negocio.llaves import (
@@ -225,6 +226,7 @@ class _PanelLlaves(QWidget):
         self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_observacion_tipo)
         self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_botones_movimiento)
         self._orden_tipos = OrdenTabla(self.tabla_tipos, self._actualizar_tipos)
+        instalar_eliminar_con_tecla(self.tabla_tipos, self._eliminar_tipo)
         columna_tipos.addWidget(self.tabla_tipos)
 
         self.campo_observacion_tipo = QLineEdit()
@@ -264,6 +266,7 @@ class _PanelLlaves(QWidget):
         self.tabla_accesos.setFixedHeight(_alto_para_filas(self.tabla_accesos, _FILAS_VISIBLES_ACCESOS))
         self.tabla_accesos.itemSelectionChanged.connect(self._actualizar_observacion_acceso)
         self._orden_accesos = OrdenTabla(self.tabla_accesos, self._actualizar_accesos)
+        instalar_eliminar_con_tecla(self.tabla_accesos, self._eliminar_acceso)
         columna_accesos.addWidget(self.tabla_accesos)
 
         self.campo_observacion_acceso = QLineEdit()
@@ -569,7 +572,7 @@ class _PanelLlaves(QWidget):
         claves = {
             0: lambda m: m["Fecha"] or "",
             1: lambda m: m["Tipo"] or "",
-            2: lambda m: m["_texto_profesional"],
+            2: lambda m: clave_orden_codigo(m["_texto_profesional"]),
             3: lambda m: m["_nombre_llave"],
             4: lambda m: m["Cantidad"],
             5: lambda m: m["MontoCobrado"] or 0,
@@ -605,7 +608,7 @@ class _PanelLlaves(QWidget):
         else:
             # Fecha de más nuevo a más viejo, luego Movimiento A-Z, luego Profesional A-Z (sort estable:
             # se ordena primero por la clave menos significativa).
-            enriquecidos.sort(key=lambda m: m["_texto_profesional"])
+            enriquecidos.sort(key=lambda m: clave_orden_codigo(m["_texto_profesional"]))
             enriquecidos.sort(key=lambda m: m["Tipo"] or "")
             enriquecidos.sort(key=lambda m: m["Fecha"] or "", reverse=True)
         self._movimientos_actuales = enriquecidos

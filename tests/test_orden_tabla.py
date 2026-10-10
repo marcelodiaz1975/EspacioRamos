@@ -3,7 +3,7 @@ import weakref
 
 from PySide6.QtWidgets import QTableWidget
 
-from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 
 
 def _tabla(columnas=3):
@@ -99,3 +99,35 @@ def test_no_sostiene_vivo_al_dueno_del_metodo_atado(qtbot):
     del panel
     gc.collect()
     assert referencia_debil() is None
+
+
+def test_clave_orden_codigo_ordena_por_numero_completo_no_por_digito():
+    """Pedido explícito de la clienta: "X1, X10, X11, X2..." (alfabético
+    puro) NO va; "X1, X2, X3... X10, X11... X234" (número completo) sí."""
+    codigos = ["X10", "X2", "X1", "X29", "X234", "X3", "X35", "X11", "X25", "X4"]
+    ordenados = sorted(codigos, key=clave_orden_codigo)
+    assert ordenados == ["X1", "X2", "X3", "X4", "X10", "X11", "X25", "X29", "X35", "X234"]
+
+
+def test_clave_orden_codigo_agrupa_primero_por_prefijo_alfabetico():
+    codigos = ["A10", "R2", "A2", "R10"]
+    ordenados = sorted(codigos, key=clave_orden_codigo)
+    assert ordenados == ["A2", "A10", "R2", "R10"]
+
+
+def test_clave_orden_codigo_funciona_con_texto_despues_del_codigo():
+    """Varias pantallas muestran "R1 - Lic. Juan Pérez" en la misma
+    celda (código + nombre) — el orden natural tiene que mirar solo el
+    código del principio, no romperse por el texto que sigue."""
+    textos = ["R10 - Lic. Ana Gómez", "R2 - Dr. Juan Pérez"]
+    ordenados = sorted(textos, key=clave_orden_codigo)
+    assert ordenados == ["R2 - Dr. Juan Pérez", "R10 - Lic. Ana Gómez"]
+
+
+def test_clave_orden_codigo_sin_numero_ordena_por_texto():
+    assert clave_orden_codigo("ABC") == ("ABC", -1, "ABC")
+
+
+def test_clave_orden_codigo_vacio_o_none_no_rompe():
+    assert clave_orden_codigo(None) == ("", -1, "")
+    assert clave_orden_codigo("") == ("", -1, "")

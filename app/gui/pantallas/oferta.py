@@ -67,6 +67,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.pantallas.reservas import _opciones_profesional
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
     GrillaOperativaWidget,
@@ -436,6 +437,7 @@ class _PanelOferta(QWidget):
         etiqueta_franjas.setWordWrap(True)
         columna_franjas.addWidget(etiqueta_franjas)
         self.lista_franjas = QListWidget()
+        instalar_eliminar_con_tecla(self.lista_franjas, self._quitar_franja_seleccionada)
         columna_franjas.addWidget(self.lista_franjas, stretch=1)
 
         self.boton_pdf = QPushButton("Generar PDF")

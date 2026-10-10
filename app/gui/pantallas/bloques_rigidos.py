@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.crud_generico import _normalizar_busqueda
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.negocio.dias import DIAS_SEMANA
@@ -256,6 +257,7 @@ class _PanelBloquesRigidos(QWidget):
             [self.campo_buscar, self.boton_nuevo, self.boton_editar, self.boton_eliminar], parent=self,
         )
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        instalar_eliminar_con_tecla(self.tabla, self._eliminar)
 
     def _aplicar_filtro_busqueda(self, *_args) -> None:
         """Mismo criterio que "Filtros que solo afectan la visualización"

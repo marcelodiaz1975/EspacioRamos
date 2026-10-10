@@ -51,6 +51,7 @@ def _normalizar_encabezado(texto: str) -> str:
 class ResultadoImportacion:
     entidad: str
     filas_importadas: int = 0
+    filas_duplicadas: int = 0
     errores: list[str] = field(default_factory=list)
 
 
@@ -236,6 +237,31 @@ def _resolver_referencias(conn: sqlite3.Connection, entidad: str, datos: dict) -
     return datos, errores
 
 
+def _ya_existe_identico(conn: sqlite3.Connection, tabla: str, datos: dict) -> bool:
+    """True si ya hay una fila en `tabla` con exactamente estos mismos
+    valores en todas las columnas de `datos` (después de resolver
+    referencias a IdX) — pedido explícito de la clienta: "que no importe
+    los registros que son iguales para evitar que se dupliquen". Compara
+    por igualdad exacta, NULL incluido; una fila "parecida" pero con
+    algún campo distinto (ej. un CampoLibre corregido) no cuenta como
+    duplicado y se importa igual. Se llama ANTES de cualquier columna
+    que la propia importación agregue sola (ej. `Nombre` de Llave,
+    autogenerado y por lo tanto siempre distinto) — comparar con esas ya
+    puestas nunca encontraría un duplicado real."""
+    if not datos:
+        return False
+    condiciones = []
+    valores = []
+    for columna, valor in datos.items():
+        if valor is None:
+            condiciones.append(f"{columna} IS NULL")
+        else:
+            condiciones.append(f"{columna} = ?")
+            valores.append(valor)
+    consulta = f"SELECT 1 FROM {tabla} WHERE " + " AND ".join(condiciones) + " LIMIT 1"
+    return conn.execute(consulta, valores).fetchone() is not None
+
+
 def _crear_plan_pago_importado(conn: sqlite3.Connection, datos: dict) -> None:
     """A diferencia del resto de las entidades importables, un PlanPago no
     es un simple INSERT: hay que pasar por `crear_plan_pago` (calcula
@@ -293,6 +319,10 @@ def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImport
         if errores_referencia:
             for err in errores_referencia:
                 resultado.errores.append(f"Fila {numero_fila}: {err}")
+            continue
+
+        if _ya_existe_identico(conn, entidad, datos):
+            resultado.filas_duplicadas += 1
             continue
 
         try:

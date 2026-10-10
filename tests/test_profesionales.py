@@ -40,6 +40,23 @@ def test_pantalla_profesionales_lista_existentes(qtbot, conn):
     assert pantalla.crud_profesionales.tabla_widget.item(0, 3).text() == "Gómez"
 
 
+def test_columna_codigo_ordena_natural_no_alfabetico(qtbot, conn):
+    """Pedido explícito de la clienta: click en "Código" tiene que
+    ordenar "R1, R2, R3... R10, R11" (número completo) en vez de
+    "R1, R10, R11, R2..." (alfabético dígito a dígito)."""
+    for codigo in ("R10", "R2", "R1"):
+        conn.execute(
+            "INSERT INTO Profesional (CategoriaProfesional, Apellido, IdCodigo) VALUES ('R', 'Lo Veci', ?)",
+            (codigo,),
+        )
+    conn.commit()
+    pantalla = _PanelProfesionales(conn)
+    qtbot.addWidget(pantalla)
+    tabla = pantalla.crud_profesionales.tabla_widget
+    tabla.horizontalHeader().sectionClicked.emit(0)
+    assert [tabla.item(fila, 0).text() for fila in range(3)] == ["R1", "R2", "R10"]
+
+
 def test_pantalla_profesionales_muestra_etiqueta_de_categoria(qtbot, conn):
     conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Gómez')")
     conn.commit()

@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QWidget
 
 from app.db.init_db import init_database
@@ -1007,6 +1007,27 @@ def test_finalizar_vigencia_actualiza_vigenciafin_a_fin_de_mes(qtbot, conn):
     assert fila["VigenciaFin"] == ultimo_dia_mes(2026, 8).isoformat() == "2026-08-31"
 
 
+def test_tecla_delete_en_regulares_finaliza_la_vigencia(qtbot, conn):
+    """Pedido explícito de la clienta, "todo el sistema": Delete sobre
+    la fila de la tabla hace lo mismo que "Finalizar reserva a fin de
+    mes" (no hay un botón literal "Eliminar" en esta solapa, es el
+    equivalente real)."""
+    from app.negocio.dias import ultimo_dia_mes
+
+    _preparar(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-10' WHERE IdConfiguracion = 1"
+    )
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_regulares.combo_profesional.setCurrentIndex(1)
+    pantalla.panel_regulares._crear()
+    pantalla.panel_regulares.tabla.selectRow(0)
+    qtbot.keyClick(pantalla.panel_regulares.tabla, Qt.Key.Key_Delete)
+    fila = conn.execute("SELECT VigenciaFin FROM ReservaRegular").fetchone()
+    assert fila["VigenciaFin"] == ultimo_dia_mes(2026, 8).isoformat()
+
+
 def test_panel_regulares_recibe_foco_en_profesional_al_mostrarse(qtbot, conn):
     _preparar(conn)
     pantalla = PantallaReservas(conn)
@@ -1573,6 +1594,20 @@ def test_cancelar_reserva_aislada_cambia_estado(qtbot, conn):
     pantalla.panel_aisladas._crear()
     pantalla.panel_aisladas.tabla.selectRow(0)
     pantalla.panel_aisladas._cancelar()
+    fila = conn.execute("SELECT Estado FROM ReservaAislada").fetchone()
+    assert fila["Estado"] == "Cancelada"
+
+
+def test_tecla_delete_en_aisladas_cancela_la_reserva(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas.combo_profesional.setCurrentIndex(1)
+    pantalla.panel_aisladas.spin_desde.setValue(13)
+    pantalla.panel_aisladas.spin_hasta.setValue(14)
+    pantalla.panel_aisladas._crear()
+    pantalla.panel_aisladas.tabla.selectRow(0)
+    qtbot.keyClick(pantalla.panel_aisladas.tabla, Qt.Key.Key_Delete)
     fila = conn.execute("SELECT Estado FROM ReservaAislada").fetchone()
     assert fila["Estado"] == "Cancelada"
 
@@ -2695,6 +2730,20 @@ def test_cancelar_reserva_extraordinaria(qtbot, conn):
 
     panel.tabla.selectRow(0)
     panel._cancelar()
+    assert obtener_repositorio(conn, "ReservaAislada").listar()[0]["Estado"] == "Cancelada"
+
+
+def test_tecla_delete_en_extraordinaria_cancela_la_reserva(qtbot, conn):
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel.spin_monto.setValue(5000)
+    panel._crear()
+    panel.tabla.selectRow(0)
+    qtbot.keyClick(panel.tabla, Qt.Key.Key_Delete)
     assert obtener_repositorio(conn, "ReservaAislada").listar()[0]["Estado"] == "Cancelada"
 
 

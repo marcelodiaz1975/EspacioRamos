@@ -80,6 +80,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.grilla_operativa import (
     _agregar_item_todos,
     _corregir_seleccion_todos,
@@ -418,6 +419,7 @@ class _PanelListaEspera(QWidget):
         self.tabla.horizontalHeader().setStretchLastSection(True)
         self.tabla.setItemDelegateForColumn(8, _DelegadoSinResaltarSeleccion(self.tabla))
         self.tabla.setMaximumHeight(260)  # más corta y escroleable, para que los botones y la cobertura entren solos
+        instalar_eliminar_con_tecla(self.tabla, self._descartar)
         layout.addWidget(self.tabla)
 
         fila_botones = QHBoxLayout()

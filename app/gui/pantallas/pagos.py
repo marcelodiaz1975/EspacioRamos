@@ -39,9 +39,10 @@ from PySide6.QtWidgets import (
 from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
-from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, partes_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import fecha_a_dia_semana, periodo_actual
@@ -279,6 +280,7 @@ class _PanelRegistrarPago(QWidget):
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._precargar_seleccion)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        instalar_eliminar_con_tecla(self.tabla, self._eliminar)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
@@ -401,7 +403,7 @@ class _PanelRegistrarPago(QWidget):
     def _clave_orden(columna: int):
         claves = {
             0: lambda t: t[0]["FechaHoraCarga"] or "",
-            1: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            1: lambda t: clave_orden_codigo(_texto_profesional(t[1])) if t[1] else ("", -1, ""),
             2: lambda t: t[0]["PeriodoImputado"] or "",
             3: lambda t: t[0]["Monto"],
             4: lambda t: t[0]["MedioPago"] or "",
@@ -717,6 +719,7 @@ class _PanelPlanesPago(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
@@ -792,7 +795,7 @@ class _PanelPlanesPago(QWidget):
     @staticmethod
     def _clave_orden(columna: int):
         claves = {
-            0: lambda t: _texto_profesional(t[0]) if t[0] else "",
+            0: lambda t: clave_orden_codigo(_texto_profesional(t[0])) if t[0] else ("", -1, ""),
             1: lambda t: t[1],
             2: lambda t: t[2],
             3: lambda t: t[3],

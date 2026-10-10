@@ -48,7 +48,22 @@ def test_importar_carga_datos_y_llena_tabla_resultados(qtbot, conn, tmp_path):
     assert panel.tabla_resultados.rowCount() == 1
     assert panel.tabla_resultados.item(0, 0).text() == "Edificio"
     assert panel.tabla_resultados.item(0, 1).text() == "1"
+    assert panel.tabla_resultados.item(0, 2).text() == "0"
     assert conn.execute("SELECT COUNT(*) c FROM Edificio").fetchone()["c"] == 1
+
+
+def test_importar_de_nuevo_la_misma_fila_la_muestra_como_duplicada(qtbot, conn, tmp_path):
+    panel = _PanelImportacion(conn)
+    qtbot.addWidget(panel)
+    ruta = _planilla_minima(tmp_path)
+    panel.campo_ruta.setText(ruta)
+    panel._importar()
+
+    panel._importar()  # misma planilla, una segunda vez
+
+    assert panel.tabla_resultados.item(0, 1).text() == "0"  # no se volvió a importar
+    assert panel.tabla_resultados.item(0, 2).text() == "1"  # quedó marcada como duplicada
+    assert conn.execute("SELECT COUNT(*) c FROM Edificio").fetchone()["c"] == 1  # sigue habiendo una sola
 
 
 def test_importar_sin_problemas_muestra_sin_observaciones(qtbot, conn, tmp_path):

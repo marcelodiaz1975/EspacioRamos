@@ -10,11 +10,34 @@ esta clase solo lleva el estado de qué columna/sentido eligió el usuario y
 avisa cuándo hay que volver a armar la tabla con ese criterio."""
 from __future__ import annotations
 
+import re
 import weakref
 from typing import Callable
 
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QTableWidget
+
+_PATRON_PREFIJO_NUMERO = re.compile(r"^(\D*)(\d+)")
+
+
+def clave_orden_codigo(texto: str | None) -> tuple:
+    """Orden natural para textos que arrancan con un código tipo
+    "R1"/"A25"/"E234" — con o sin algo más después (ej. "R1 - Lic. Juan
+    Pérez", el formato de la columna "Profesional" en varias pantallas):
+    agrupa primero por el prefijo alfabético y recién después por la
+    cadena de dígitos que sigue, interpretada como un único número
+    completo — así "R2" ordena antes que "R10" en vez de después (orden
+    alfabético puro, dígito a dígito, pondría "R10" antes que "R2").
+    Pedido explícito de la clienta: "primero por letra, y luego por la
+    cadena de números... interpretando como un único número a toda la
+    cadena independientemente de la cantidad de dígitos que contenga".
+    Sin ningún dígito al principio, se ordena por el texto completo."""
+    texto = (texto or "").strip()
+    coincidencia = _PATRON_PREFIJO_NUMERO.match(texto)
+    if not coincidencia:
+        return (texto, -1, texto)
+    prefijo, numero = coincidencia.groups()
+    return (prefijo, int(numero), texto)
 
 
 class OrdenTabla(QObject):

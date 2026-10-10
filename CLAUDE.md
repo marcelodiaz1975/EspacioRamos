@@ -7473,3 +7473,314 @@ Panel de control - Avance de período y backups.png". Sección es
 "Sistema"/"Operativa diaria" (las dos categorías del menú), Formulario
 el nombre del `Seccion` del menú, Solapa el texto de la pestaña
 mostrada (si la pantalla no tiene solapas, se omite esa tercera parte).
+
+## Primera tanda de correcciones post-v1 (lógica ante todo, lo visual queda
+## para otra ronda)
+
+Ya con el sistema instalado y en uso real por primera vez, la clienta
+empezó a anotar bugs/ajustes mientras seguía probando, con un pedido
+explícito sobre el orden de trabajo: "me voy a tratar de concentrar más
+en lo otro" (la lógica, no lo visual) y "no largues la nueva versión
+hasta que yo te diga, solo hace las correcciones" — los diez puntos de
+esta tanda se implementaron de punta a punta, pero sin dar por lanzada
+ninguna versión nueva todavía.
+
+### Ventana maximizada al iniciar
+
+`gui_main.main()`: `ventana.show()` pasa a `ventana.showMaximized()`.
+Pedido directo, sin alternativas que evaluar.
+
+### Indicador visual de foco (acotado a botones, con el porqué documentado)
+
+"Toco Tab, pasa de botón en botón, pero no veo dónde estoy parado."
+Investigado antes de tocar nada: `hoja_estilos()` nunca había tenido
+ninguna regla `:focus` — el estilo propio de `botonPrimario`/
+`botonSecundario` (fondo + borde negro) le ganaba al rectángulo de foco
+nativo que dibuja el estilo base de Qt, dejándolo invisible.
+
+Se probó `outline` (en vez de `border`) a propósito: no ocupa espacio
+de layout, así que un botón no "salta" un par de píxeles al ganar o
+perder el foco (lo que sí pasaría agrandando el borde en `:focus`).
+Color nuevo, `COLOR_FOCO = "#FFC107"` (ámbar) — ninguno de los colores
+ya existentes (azul de marca, naranja de selección de fila, rojo de
+alerta) servía sin generar confusión con otro significado ya asignado.
+
+**Verificado con capturas reales antes de darlo por bueno** (mismo
+criterio de todo este documento: medir, no asumir) — `outline` resultó
+NO ser parejo entre tipos de widget en este Qt: se pinta bien en
+`QPushButton` (confirmado con captura y con muestreo de píxeles), pero
+no se pintó en absoluto en `QComboBox`/`QDateEdit`/`QSpinBox`/
+`QCheckBox`/`QPlainTextEdit`/`QTextEdit`/`QTabBar::tab` (comprobado con
+el mismo método de muestreo, ninguno mostró el color). `QLineEdit` no
+necesitó nada: ya tenía su propio foco nativo visible (borde celeste)
+desde antes.
+
+Para esos otros tipos de widget SÍ hubiera funcionado `border`, pero a
+costa de agregarles un borde (reservado, transparente cuando no hay
+foco) que no tienen hoy — comprobado que eso les cambia el look en
+reposo (pierden el marco nativo 3D/sundido que ya traían). Es un cambio
+visual real, y la clienta pidió explícitamente concentrarse en lógica
+por ahora — se dejó la regla acotada a `QPushButton:focus` nada más,
+documentado en el propio comentario de `estilos.py` para que quede
+registrado por qué no se generalizó, con el camino (border reservado)
+ya investigado para cuando se retome en la ronda visual.
+
+Tests: `test_boton_tiene_anillo_de_foco_en_la_hoja_de_estilos` (texto
+del QSS) y `test_boton_primario_muestra_el_anillo_de_foco_al_recibir_
+foco_real` (captura + muestreo de píxeles contra `COLOR_FOCO`, no solo
+el texto — mismo motivo que el resto de esta sección: `outline` no se
+garantiza parejo).
+
+### Renombre del programa a "SistemaDF" (versión "v0.1")
+
+Pedido explícito: el PROGRAMA pasa a llamarse "SistemaDF", sin importar
+qué espacio lo use — distinto de `Configuracion.NombreEspacio` (el
+nombre del NEGOCIO, editable desde la app, sigue siendo "Espacio Ramos
+Consultorios" u otro que se cargue ahí). `app/version.py` (nuevo) es la
+fuente única: `NOMBRE_PROGRAMA = "SistemaDF"`, `VERSION = "v0.1"`,
+`NOMBRE_Y_VERSION` para el título de ventana.
+
+Alcance del renombre — todo lo que es branding del PROGRAMA, nada que
+sea branding del NEGOCIO:
+- Título de la ventana principal (`VentanaPrincipal`, ahora "SistemaDF
+  v0.1" — cumple de paso el pedido de mostrar la versión) y del diálogo
+  de login ("SistemaDF — Ingresar"/"Crear administrador").
+- Los dos `QMessageBox` de `gui_main.py` que usaban el nombre viejo como
+  título (instancia ya abierta, ofrecer restaurar backup).
+- El mensaje de `InstanciaYaAbierta` ("Ya hay otra sesión del sistema
+  abierta...", sin el nombre viejo hardcodeado).
+- El `ArgumentParser` de `main.py` (CLI).
+- El nombre sugerido de la planilla de importación descargable
+  (`Plantilla_Importacion_SistemaDF.xlsx`, en la GUI y como default del
+  comando `generar-plantillas`).
+- El spec de PyInstaller: `espacio_ramos.spec` se renombra
+  `sistemadf.spec` (`git mv`, conserva el historial), y el nombre del
+  `.exe`/la carpeta de salida pasan de `EspacioRamos`/`dist/EspacioRamos`
+  a `SistemaDF`/`dist/SistemaDF`.
+- Docstrings de `app/db/connection.py`/`app/repositorio/base.py` (solo
+  texto, sin efecto en runtime).
+- README.md y `docs/MANUAL_INSTALACION.md`: todas las rutas/comandos de
+  ejemplo actualizados al nombre nuevo.
+
+Lo que **no** se tocó, a propósito: `Configuracion.NombreEspacio` y su
+fallback `"Espacio Ramos Consultorios"`/`"Espacio Ramos"` en
+`oferta_busqueda_texto.py`/`pdf/estilos.py`/`pdf/placas_pdf.py`/
+`pdf/oferta_pdf.py`/`pdf/propuesta_pdf.py`/`pdf/disponibilidad_pdf.py`
+(el nombre del NEGOCIO, confirmado en cada uno que es eso y no
+branding del programa) y el nombre del repositorio de GitHub (fuera del
+alcance de este pedido, cambiarlo rompería la identidad de la sesión).
+
+**Validado de nuevo tras el renombre** (mismo criterio que la primera
+vez, ver sección de instalación): se volvió a correr `pyinstaller
+sistemadf.spec` completo en este entorno Linux — build sin errores,
+carpeta de salida y `.exe` ya con el nombre `SistemaDF`, arranque
+offscreen limpio contra una base sin inicializar — confirma que el
+renombre no rompió el empaquetado.
+
+### Importación: no duplicar registros ya existentes
+
+"Que no importe los registros que son iguales para evitar que se
+dupliquen." Investigado: `importar_hoja` nunca había comparado contra
+lo ya cargado — cada fila válida llamaba `repo.crear(**datos)` sin
+condición, así que reimportar la misma planilla (o una que se
+superpone) duplicaba todo sin avisar.
+
+`_ya_existe_identico(conn, tabla, datos)` (nueva,
+`app/importacion/importar_excel.py`): compara por igualdad EXACTA
+(NULL incluido) contra la tabla, sobre todas las columnas presentes en
+`datos` DESPUÉS de resolver referencias — "registros iguales", en el
+sentido literal que pidió la clienta, no una coincidencia por clave
+natural inventada. Una fila "parecida" pero con un solo campo distinto
+(ej. un CampoLibre corregido) no cuenta como duplicado, se importa
+igual. Se llama una sola vez, genérico para las ~12 entidades
+importables (mismo nombre de entidad = nombre de tabla en todas), justo
+antes del `try` que crea el registro — ANTES de cualquier columna que
+la propia importación agregue sola (importa para Llave: el chequeo
+corre sobre Tipo/ValorDepositoActual/Observacion, antes de que se le
+asigne `Nombre` — autogenerado, siempre distinto, comparar con eso
+nunca encontraría un duplicado real). Para PlanPago corre contra la
+tabla `PlanPago` antes de `_crear_plan_pago_importado`, evitando
+también duplicar sus `CuotaPlan`.
+
+`ResultadoImportacion` suma `filas_duplicadas: int` (no se mezcla con
+`errores` — un duplicado no es un error, es información). GUI
+(`_PanelImportacion`): la tabla "Resultado por hoja" suma una columna
+"Duplicados (no importados)", y el cartel final sincero sobre cuántas
+filas se saltearon por ya existir. CLI (`main.py`): la línea de resumen
+por hoja menciona el número de duplicados.
+
+Tests: `tests/test_importacion.py` (reimportar la misma planilla no
+duplica y lo reporta; una fila con un campo distinto SÍ se importa, no
+cuenta como duplicado; Llave duplicada no se vuelve a crear pese a que
+`Nombre` sería distinto en cada intento; PlanPago duplicado no genera
+un segundo juego de `CuotaPlan`). `tests/test_gui_importacion.py` (la
+columna nueva muestra el conteo correcto, antes y después de
+reimportar).
+
+### Tecla Delete = botón "Eliminar" (o su equivalente: Anular/Cancelar/
+### Liberar/Descartar/Quitar), en todo el sistema
+
+"Si presiono Delete en alguna fila de alguna tabla... que me ofrezca
+eliminar como si tocara el botón 'Eliminar' de cada solapa." Mecanismo
+nuevo y genérico, `app/gui/widgets/eliminar_tecla.py`
+(`instalar_eliminar_con_tecla(widget, accion)`): instala un filtro de
+eventos sobre la tabla (o lista) que, al recibir `Key_Delete`, llama
+DIRECTO al mismo método que ya usa el botón correspondiente — no
+duplica ninguna validación (selección vacía, confirmación, guardarraíl
+de integridad referencial): es, literalmente, la misma llamada que ya
+hacía el botón. Mismo criterio de referencia débil que `OrdenTabla`
+(`app/gui/widgets/orden_tabla.py`) para `accion` — evita el mismo ciclo
+panel → objeto → panel ya documentado ahí, con el mismo riesgo de
+segfault al destruir muchos paneles seguidos (tests).
+
+Sirve tanto para `QTableWidget` como para `QListWidget` (ej. la lista
+de documentos de Profesionales, la lista de franjas de Oferta) — el
+filtro de eventos no depende de ningún método propio de tabla.
+
+**Cobertura, pantalla por pantalla** (la acción real detrás de Delete
+varía: no todas las pantallas tienen un botón literal "Eliminar" — se
+usó el botón equivalente más cercano de cada una):
+
+- `crud_generico.PantallaCRUD` (un solo lugar, cubre de rebote TODOS
+  los catálogos genéricos — Localidades/Edificios/Unidades/
+  Consultorios/Responsables/Tipos de licencia/Condiciones y normas/
+  Profesiones/Gastos operativos/Fechas especiales/Listas editables/
+  Detalles complementarios/Mensajes predefinidos/Profesionales): Delete
+  → `self._eliminar` (ya validaba selección y pedía confirmación, sin
+  cambios ahí). En modo `solo_lectura` no se instala nada (no hay
+  `_eliminar` que llamar).
+- Reservas (`reservas.py`, las tres solapas): Regulares → `_finalizar_
+  vigencia` (no hay "Eliminar" literal, es el equivalente real);
+  Aisladas y Extraordinaria → `_cancelar`.
+- Registro de ausencias (`novedades.py`, las cuatro tablas con alta):
+  Vacaciones/Licencias/Ausencias → `_cancelar` (etiqueta de botón
+  "Anular..."); Cargos especiales → `_eliminar`.
+- Llaves (`llaves.py`): Tipos → `_eliminar_tipo`; Accesos → `_eliminar_
+  acceso`. Movimientos no tiene ninguna acción de "sacar una fila" (es
+  un historial), no se tocó.
+- Pagos (`pagos.py`): Registrar pagos → `_eliminar`; Planes de pago →
+  `_cancelar` ("Cancelar plan seleccionado"). Estado de cuenta es de
+  solo lectura, sin acción, no se tocó.
+- Placas para timbres (`placas.py`, solapa operativa): → `_liberar`
+  ("Liberar posición de placa").
+- Bloques rígidos (`bloques_rigidos.py`): → `_eliminar`.
+- Gestor de archivos del espacio (`imagenes.py`): → `_eliminar`.
+- Lista de espera (`lista_espera.py`): → `_descartar` ("Descartar
+  pedido").
+- Oferta de consultorios (`oferta.py`, lista "Franjas agregadas a esta
+  búsqueda"): → `_quitar_franja_seleccionada`.
+- Profesionales (`profesionales.py`, lista de documentación adjunta):
+  → `_eliminar_documento`.
+
+Pantallas revisadas y descartadas a propósito (sin ninguna acción de
+"sacar una fila" que mapear): Estadísticas (solo lectura), Centro de
+mensajería (solo marca "Enviada", no borra nada), Usuarios y permisos
+(solo desactivar vía Editar, sin baja), Configuración general (no es
+una tabla de registros). Los formularios compuestos que agrupan
+pantallas ya cubiertas (Disponibilidad, Llaves y otros conceptos,
+Grilla y mensajería, Base datos del espacio, Archivos y listas, Placas
+para timbres, Balance del negocio, Valores) no necesitaron ningún
+cambio propio — el cableado vive en el panel real que ya usan.
+
+Tests: `tests/test_eliminar_tecla.py` (el mecanismo en sí: dispara con
+Delete, no con otra tecla, no sostiene vivo al dueño del método atado
+— mismo criterio de test que `OrdenTabla` —, y una tecla sin acción
+viva no rompe nada). Un test de integración real (tecla de verdad vía
+`qtbot.keyClick`, no llamar al método a mano) por cada pantalla recién
+cableada: `test_crud_generico.py` (catálogo genérico, con y sin
+selección, y confirmando que en modo `solo_lectura` no hace nada),
+`test_gui_reservas.py` (las tres solapas), `test_gui_llaves.py`
+(Tipos), `test_gui_pagos.py` (Registrar pagos).
+
+### Botón "Restaurar backup" en Panel de control (elegir cuál, no
+### siempre el más reciente)
+
+Pedido explícito, siguiendo una sugerencia propia de una ronda
+anterior: hasta ahora `restaurar_backup` solo se disparaba en dos vías
+automáticas (instalación nueva, base desactualizada) y siempre tomaba
+el backup MÁS RECIENTE, sin dejar elegir. Se refactorizó
+`app/negocio/backup.py` sin romper ninguna de las dos vías existentes:
+
+- `restaurar_backup_desde(origen, db_path)` (nueva): el mecanismo real
+  de restauración sobre un backup YA ELEGIDO — extraído tal cual de lo
+  que antes era el cuerpo de `restaurar_backup` después de encontrar
+  `origen`, sin ningún cambio de comportamiento.
+- `restaurar_backup(carpeta_backups, db_path)` (la de siempre, sin
+  cambiar su firma ni su contrato): ahora es un wrapper de una línea
+  — busca el más reciente y delega en `restaurar_backup_desde`.
+- `listar_backups(carpeta)` (nueva): todas las subcarpetas "Backup
+  AAAA-MM-DD HHhMM", de la más nueva a la más vieja — para ofrecer una
+  lista real en vez de "siempre el último".
+
+GUI (`_PanelAvancePeriodo.boton_restaurar`, debajo de "Generar backup
+ahora", mismo ancho/criterio de fila con su propia explicación al
+lado): elige carpeta (sugiere la ya configurada), lista los backups de
+ahí (`listar_backups`), deja elegir uno (`QInputDialog.getItem`, el más
+reciente como default), confirma con el nombre elegido y una
+advertencia explícita de que el programa se va a cerrar.
+
+**Por qué se cierra el programa después de restaurar** (no es una
+limitación aceptada a medias, es la única forma segura con la
+arquitectura actual): `self.conn` es la MISMA conexión SQLite
+compartida por todos los paneles de la ventana ya construida — cerrarla
+acá para poder sobreescribir el archivo (mismo motivo documentado para
+las dos vías automáticas: una conexión abierta encima del archivo
+puede fallar al reescribirlo, sobre todo en Windows) deja a cualquier
+OTRO panel con una conexión muerta si se sigue usando el programa. No
+hay forma de "pasarle" una conexión nueva a todos los paneles ya
+armados, así que la única salida consistente es cerrar la aplicación
+entera (`QApplication.instance().quit()`) después de restaurar — el
+sistema operativo libera el lock de instancia única solo con que el
+proceso termine, sin necesitar tocar `BloqueoInstanciaUnica` desde acá.
+
+Tests: `tests/test_backup.py` (`listar_backups` — vacío sin carpeta/sin
+backups, orden del más nuevo al más viejo; `restaurar_backup_desde`
+elige puntualmente uno que NO es el más reciente, a diferencia de
+`restaurar_backup`). `tests/test_gui_panel_control.py` (botón
+secundario del mismo ancho que "Generar backup ahora"; cancelar en
+cualquier paso no rompe ni toca la conexión; caso de punta a punta con
+una conexión NUEVA después — ya que la vieja se cierra — confirmando
+que el archivo en disco volvió al estado del backup elegido y que
+`QApplication.quit` se llamó).
+
+### Orden natural de códigos de profesional en tablas (letra + número
+### completo, no dígito a dígito)
+
+"X1, X10, X11, X2... no va. X1, X2, X3, X4, X10, X11... X234 sí va.
+Primero por letra, después por la cadena de números completa." El
+orden alfabético puro que usaban las tablas comparaba texto, así que
+"R10" quedaba antes que "R2". Ya existía una versión correcta de esto,
+pero aislada en un solo lugar (`mensajeria._clave_codigo`, para la
+columna "Código" de Centro de mensajería) y con una limitación que
+nunca se había notado porque ahí nunca hacía falta: solo funcionaba
+con el código SOLO, se rompía si el texto traía algo más después (el
+caso real en el resto del sistema: "R12 - Lic. Juan Pérez", la columna
+"Profesional" con código + nombre juntos).
+
+`clave_orden_codigo(texto)` (nueva, `app/gui/widgets/orden_tabla.py` —
+mismo archivo que ya tenía `OrdenTabla`, concepto relacionado): separa
+el prefijo alfabético del principio y la cadena de dígitos que sigue
+(regex `^(\D*)(\d+)`, no "todo lo que sigue"), e ignora cualquier texto
+después — por eso funciona igual de bien con un código solo ("R12") que
+con código + nombre ("R12 - Lic. Juan Pérez"). Reemplaza a la versión
+vieja de `mensajeria.py` (que se saca, sin otro usuario) y se aplica en
+todos los lugares que ordenaban por código o por el texto combinado de
+"Profesional":
+
+- `crud_generico.py`: la columna `IdCodigo` del catálogo de
+  Profesionales (por nombre de campo, no hizo falta un tipo de `Campo`
+  nuevo — ningún otro catálogo tiene esta columna).
+- `reservas.py` (las tres tablas, columna "Profesional"),
+  `novedades.py` (las cuatro tablas, orden por click Y el orden por
+  defecto al construir), `pagos.py` (las dos tablas), `placas.py`
+  (columna "Profesional" armada aparte como texto), `llaves.py` (tabla
+  de Movimientos, orden por click y por defecto).
+- `liquidacion.py`: el orden por defecto de "Emisión de archivos" (no
+  tiene click-to-sort) pasa de `_numero_codigo` (solo el número,
+  ignorando la letra — podía mezclar categorías) a este.
+
+Tests: `tests/test_orden_tabla.py` (la función en sí: número completo
+no dígito a dígito, agrupa primero por letra, funciona con texto
+después del código, sin número cae a orden de texto, vacío/`None` no
+rompe). `tests/test_profesionales.py` (click en "Código" del catálogo
+real ordena natural, no alfabético).

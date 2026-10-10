@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QFrame, QLabel, QMessageBox, QWidget
 
 from app.db.init_db import init_database
@@ -212,6 +213,16 @@ def test_eliminar_tipo_sin_dependientes(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.tabla_tipos.selectRow(0)
     pantalla._eliminar_tipo()
+    assert pantalla.tabla_tipos.rowCount() == 0
+
+
+def test_tecla_delete_en_tabla_tipos_elimina_igual_que_el_boton(qtbot, conn):
+    crear_llave(conn)
+    conn.commit()
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+    qtbot.keyClick(pantalla.tabla_tipos, Qt.Key.Key_Delete)
     assert pantalla.tabla_tipos.rowCount() == 0
 
 

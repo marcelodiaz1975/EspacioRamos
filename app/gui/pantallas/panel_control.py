@@ -60,12 +60,16 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -85,7 +89,9 @@ from app.negocio.backup import (
     backup_vencido,
     carpeta_backup,
     generar_backup,
+    listar_backups,
     modo_sin_sincronizar_activo,
+    restaurar_backup_desde,
     ultimo_backup,
 )
 from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual
@@ -105,6 +111,11 @@ _ALTO_MINIMO_TARJETA = 140  # deja lugar de sobra al cuadrito con más líneas (
 _TEXTO_EXPLICACION_BACKUP = (
     "Generar backup ahora copia la base de datos y toda la carpeta de archivos generados a la carpeta de "
     "backup configurada, sin esperar a que se cumpla la frecuencia automática."
+)
+_TEXTO_EXPLICACION_RESTAURAR = (
+    "Restaurar backup reemplaza la base de datos actual por un backup elegido de una carpeta de Google "
+    "Drive — lo que se haya cargado después de ese backup se pierde. El programa se cierra al terminar; "
+    "hay que volver a abrirlo para seguir trabajando con los datos restaurados."
 )
 _TEXTO_EXPLICACION_AVANZAR = (
     "Avanzar de mes realiza el pase de un mes a otro en el sistema. Este proceso ubica virtualmente al "
@@ -281,6 +292,17 @@ class _PanelAvancePeriodo(QWidget):
         fila_backup.addWidget(self.boton_backup, alignment=Qt.AlignmentFlag.AlignTop)
         fila_backup.addWidget(self.etiqueta_explicacion_backup, stretch=1)
 
+        # Par del botón de arriba — pedido explícito de la clienta, mismo
+        # ancho/criterio de fila (botón + su propia explicación al lado).
+        self.boton_restaurar = QPushButton("Restaurar backup")
+        self.boton_restaurar.setObjectName("botonSecundario")
+        self.boton_restaurar.setFixedWidth(_ANCHO_BOTON)
+        self.boton_restaurar.clicked.connect(self._restaurar_backup)
+        self.etiqueta_explicacion_restaurar = _texto_explicacion(_TEXTO_EXPLICACION_RESTAURAR)
+        fila_restaurar = QHBoxLayout()
+        fila_restaurar.addWidget(self.boton_restaurar, alignment=Qt.AlignmentFlag.AlignTop)
+        fila_restaurar.addWidget(self.etiqueta_explicacion_restaurar, stretch=1)
+
         self.boton_avanzar = QPushButton("Avanzar de mes")
         self.boton_avanzar.setObjectName("botonPrimario")
         self.boton_avanzar.setFixedWidth(_ANCHO_BOTON)
@@ -291,6 +313,7 @@ class _PanelAvancePeriodo(QWidget):
         fila_avanzar.addWidget(self.etiqueta_explicacion_avanzar, stretch=1)
 
         layout_solapa.addLayout(fila_backup)
+        layout_solapa.addLayout(fila_restaurar)
         layout_solapa.addWidget(_linea_divisoria())
         layout_solapa.addLayout(fila_avanzar)
 
@@ -320,7 +343,9 @@ class _PanelAvancePeriodo(QWidget):
         # a diferencia de los seis cuadritos parejos de arriba.
         layout_solapa.addWidget(self._armar_tarjeta_alertas(), stretch=1)
 
-        self._foco = instalar_enter_avanza_foco([self.boton_backup, self.boton_avanzar], parent=self)
+        self._foco = instalar_enter_avanza_foco(
+            [self.boton_backup, self.boton_restaurar, self.boton_avanzar], parent=self,
+        )
 
         self._timer_reloj = QTimer(self)
         self._timer_reloj.timeout.connect(self._actualizar_reloj)
@@ -569,3 +594,63 @@ class _PanelAvancePeriodo(QWidget):
             return
         QMessageBox.information(self, "Generar backup", f"Backup generado en:\n{ruta}")
         self.actualizar()
+
+    def _restaurar_backup(self) -> None:
+        """Restauración manual, a pedido — a diferencia de las dos vías
+        automáticas de `gui_main.py` (instalación nueva / base
+        desactualizada), acá el operador elige CUÁL backup restaurar, no
+        siempre el más reciente (`listar_backups`, no `buscar_backup_
+        mas_reciente`). Como la restauración reemplaza el archivo de la
+        base en el lugar, hay que cerrar esta conexión (compartida por
+        toda la ventana) antes de tocarlo — y como no hay forma segura de
+        reabrir una conexión nueva y "pasarla" a todos los demás paneles
+        ya construidos, la única salida consistente es cerrar el programa
+        entero después: el sistema operativo libera el lock de instancia
+        única solo con que el proceso termine (ver `BloqueoInstanciaUnica`),
+        sin necesitar ningún código extra acá."""
+        carpeta_sugerida = str(carpeta_backup(self.conn) or "")
+        carpeta = QFileDialog.getExistingDirectory(
+            self, "Elegir la carpeta de backups de Google Drive", carpeta_sugerida,
+        )
+        if not carpeta:
+            return
+        backups = listar_backups(Path(carpeta))
+        if not backups:
+            QMessageBox.warning(self, "Restaurar backup", f"No se encontró ningún backup en {carpeta}.")
+            return
+        nombres = [b.name for b in backups]
+        nombre_elegido, confirmado = QInputDialog.getItem(
+            self, "Restaurar backup", "Elegí qué backup restaurar (el más reciente aparece primero):",
+            nombres, 0, False,
+        )
+        if not confirmado:
+            return
+        origen = backups[nombres.index(nombre_elegido)]
+        if not list(origen.glob("*.db")):
+            QMessageBox.warning(
+                self, "Restaurar backup", f"El backup en {origen} no tiene ningún archivo de base de datos.",
+            )
+            return
+        respuesta = QMessageBox.question(
+            self, "Restaurar backup",
+            f"Esto va a reemplazar la base de datos actual por el backup \"{origen.name}\" — lo que se "
+            "haya cargado después de ese momento se va a perder.\n\n"
+            "Después de restaurar, el programa se cierra — hay que volver a abrirlo para seguir trabajando "
+            "con los datos restaurados.\n\n¿Confirmás?",
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+        db_path = _ruta_base_datos(self.conn)
+        if db_path is None:
+            QMessageBox.warning(self, "Restaurar backup", "No se pudo determinar la ruta de la base de datos.")
+            return
+        self.conn.close()
+        try:
+            restaurar_backup_desde(origen, db_path)
+        except ValueError as error:
+            QMessageBox.warning(self, "Restaurar backup", str(error))
+            return
+        QMessageBox.information(
+            self, "Restaurar backup", f"Se restauró: {origen.name}.\n\nEl programa se va a cerrar ahora.",
+        )
+        QApplication.instance().quit()

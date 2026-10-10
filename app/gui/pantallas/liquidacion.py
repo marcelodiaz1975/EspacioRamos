@@ -52,7 +52,6 @@ from app.gui.pantallas.reservas import (
     _DIAS_RESERVA,
     _SpinHorario,
     _fmt_hora,
-    _numero_codigo,
     _opciones_edificio,
     _opciones_localidad,
     _opciones_profesional,
@@ -62,6 +61,7 @@ from app.gui.pantallas.reservas import (
 )
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
+from app.gui.widgets.orden_tabla import clave_orden_codigo
 from app.gui.widgets.resumen_saldo import item_monto
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_liquidaciones_simuladas, carpeta_profesional
@@ -271,7 +271,7 @@ class _PanelEmisionArchivos(QWidget):
                 "profesional": profesional, "monto_generado": monto_generado, "monto_error": monto_error,
                 "estado": estado, "horas_semanales": horas_semanales,
             })
-        filas.sort(key=lambda f: _numero_codigo(f["profesional"]["IdCodigo"]))
+        filas.sort(key=lambda f: clave_orden_codigo(f["profesional"]["IdCodigo"]))
         filas.sort(key=lambda f: f["estado"] == "Enviada")  # estable: no enviadas arriba
         self._filas = filas
 

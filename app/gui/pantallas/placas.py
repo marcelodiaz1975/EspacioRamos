@@ -62,6 +62,7 @@ from app.gui.pantallas.reservas import (
     _opciones_unidad,
     _texto_profesional,
 )
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.grilla_operativa import (
     _agregar_item_todos,
     _corregir_seleccion_todos,
@@ -70,7 +71,7 @@ from app.gui.widgets.grilla_operativa import (
     _lista_multiseleccion,
     _seleccionar_todos,
 )
-from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import SUBCARPETA_PLACAS, carpeta_archivos_varios
 from app.negocio.placas import (
@@ -305,6 +306,7 @@ class _PanelPlacasOperativas(QWidget):
             header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self._orden = OrdenTabla(self.tabla, self._actualizar_tabla)
+        instalar_eliminar_con_tecla(self.tabla, self._liberar)
         columna_tabla.addWidget(self.tabla, stretch=1)
         layout_principal.addLayout(columna_tabla, stretch=1)
 
@@ -396,7 +398,7 @@ class _PanelPlacasOperativas(QWidget):
             1: lambda e: e["edificio"],
             2: lambda e: e["unidad"],
             3: lambda e: e["placa"]["PosicionTablero"] or 0,
-            4: lambda e: e["texto_profesional"],
+            4: lambda e: clave_orden_codigo(e["texto_profesional"]),
             5: lambda e: e["nombre"],
             6: lambda e: e["placa"]["EsPersonalizada"],
         }

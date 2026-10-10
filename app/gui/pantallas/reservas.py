@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.dialogos import confirmar_si_fecha_es_mes_anterior
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
     GrillaOperativaWidget,
@@ -45,7 +46,7 @@ from app.gui.widgets.grilla_operativa import (
     pares_dia_unidad_con_reserva_vigente,
 )
 from app.gui.widgets.items_tabla import item_numero
-from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, ultimo_dia_mes
@@ -711,6 +712,7 @@ class _PanelReservasRegulares(QWidget):
         # alto que le toque, sea cual sea ese alto.
         self.tabla.setMinimumHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_REGULARES))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        instalar_eliminar_con_tecla(self.tabla, self._finalizar_vigencia)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla, stretch=1)
 
@@ -788,7 +790,7 @@ class _PanelReservasRegulares(QWidget):
     @staticmethod
     def _clave_orden(columna: int):
         claves = {
-            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            0: lambda t: clave_orden_codigo(_texto_profesional(t[1])) if t[1] else ("", -1, ""),
             1: lambda t: (t[2]["DomicilioLocalidad"] or "") if t[2] else "",
             2: lambda t: (t[2]["NombreEdificio"] or "") if t[2] else "",
             3: lambda t: (t[2]["Departamento"] or "") if t[2] else "",
@@ -1407,6 +1409,7 @@ class _PanelReservasAisladas(QWidget):
         # se quedaba invisible dentro de `scroll`.
         self.tabla.setMinimumHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla, stretch=1)
 
@@ -1637,7 +1640,7 @@ class _PanelReservasAisladas(QWidget):
     @staticmethod
     def _clave_orden(columna: int):
         claves = {
-            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            0: lambda t: clave_orden_codigo(_texto_profesional(t[1])) if t[1] else ("", -1, ""),
             1: lambda t: (t[2]["DomicilioLocalidad"] or "") if t[2] else "",
             2: lambda t: (t[2]["NombreEdificio"] or "") if t[2] else "",
             3: lambda t: (t[2]["Departamento"] or "") if t[2] else "",
@@ -1944,6 +1947,7 @@ class _PanelReservaExtraordinaria(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.verticalHeader().setVisible(False)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         layout_externo.addWidget(self.tabla, stretch=1)
 
         self._foco = instalar_enter_avanza_foco(
@@ -2183,7 +2187,7 @@ class _PanelReservaExtraordinaria(QWidget):
     @staticmethod
     def _clave_orden(columna: int):
         claves = {
-            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            0: lambda t: clave_orden_codigo(_texto_profesional(t[1])) if t[1] else ("", -1, ""),
             1: lambda t: (t[2]["DomicilioLocalidad"] or "") if t[2] else "",
             2: lambda t: (t[2]["NombreEdificio"] or "") if t[2] else "",
             3: lambda t: (t[2]["Departamento"] or "") if t[2] else "",

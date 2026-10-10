@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.widgets.orden_tabla import clave_orden_codigo
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.formato import formatear_moneda
@@ -143,25 +144,15 @@ def _nombre_con_tratamiento(profesional: sqlite3.Row) -> str:
     return " ".join(partes)
 
 
-def _clave_codigo(codigo: str | None) -> tuple[str, int, str]:
-    """Orden natural para IdCodigo tipo "R1".."R10" (sin ceros a la
-    izquierda): prefijo alfabético + número, no orden de texto puro."""
-    codigo = (codigo or "").strip()
-    i = 0
-    while i < len(codigo) and not codigo[i].isdigit():
-        i += 1
-    numero = codigo[i:]
-    return (codigo[:i], int(numero) if numero.isdigit() else 0, codigo)
-
-
 class _ItemCodigo(QTableWidgetItem):
     """Ordena la columna "Código" con el mismo criterio natural que ya
-    usa el orden por defecto (`_clave_codigo`) — comparar como texto
-    pondría "R10" antes que "R2"."""
+    usa el orden por defecto (`clave_orden_codigo`, compartida con el
+    resto del sistema — ver CLAUDE.md "Orden natural de códigos de
+    profesional") — comparar como texto pondría "R10" antes que "R2"."""
 
     def __lt__(self, other: object) -> bool:
         if isinstance(other, _ItemCodigo):
-            return _clave_codigo(self.text()) < _clave_codigo(other.text())
+            return clave_orden_codigo(self.text()) < clave_orden_codigo(other.text())
         return super().__lt__(other)
 
 
@@ -285,7 +276,7 @@ class _PanelCentroMensajeria(QWidget):
         # Dos pasadas (sort estable): primero código descendente, después
         # color ascendente — así, a igualdad de color, queda ordenado por
         # código descendente (confirmado por el usuario).
-        self._profesionales.sort(key=lambda p: _clave_codigo(p["IdCodigo"]), reverse=True)
+        self._profesionales.sort(key=lambda p: clave_orden_codigo(p["IdCodigo"]), reverse=True)
         self._profesionales.sort(key=lambda p: _ORDEN_COLOR.get(color_profesional(self.conn, p, periodo), 99))
 
         # Desactivada mientras se repuebla: si no, un clic previo en un

@@ -1,7 +1,16 @@
 from datetime import datetime
 
 import pytest
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QMessageBox, QTabWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QInputDialog,
+    QLabel,
+    QMessageBox,
+    QTabWidget,
+)
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -550,17 +559,88 @@ def test_foco_inicial_queda_en_generar_backup(qtbot, conn):
     qtbot.waitUntil(lambda: pantalla.panel_avance.boton_backup.hasFocus())
 
 
-def test_cadena_de_foco_entre_los_dos_botones_da_la_vuelta(qtbot, conn):
+def test_cadena_de_foco_entre_los_tres_botones_da_la_vuelta(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     panel_avance = pantalla.panel_avance
-    assert panel_avance._foco._orden == [panel_avance.boton_backup, panel_avance.boton_avanzar]
+    assert panel_avance._foco._orden == [
+        panel_avance.boton_backup, panel_avance.boton_restaurar, panel_avance.boton_avanzar,
+    ]
     pantalla.show()
     qtbot.waitExposed(pantalla)
     panel_avance.boton_avanzar.setFocus()
     qtbot.waitUntil(lambda: panel_avance.boton_avanzar.hasFocus())
     panel_avance._foco._mover(panel_avance.boton_avanzar, retroceder=False, seleccionar_todo=False)
     qtbot.waitUntil(lambda: panel_avance.boton_backup.hasFocus())
+
+
+def test_boton_restaurar_backup_es_secundario_y_mismo_ancho_que_generar(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    panel_avance = pantalla.panel_avance
+    assert panel_avance.boton_restaurar.objectName() == "botonSecundario"
+    assert panel_avance.boton_restaurar.width() == panel_avance.boton_backup.width()
+
+
+def test_restaurar_backup_sin_elegir_carpeta_no_hace_nada(qtbot, conn, monkeypatch):
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: ""))
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_avance._restaurar_backup()  # no debe romper ni tocar la conexión
+    conn.execute("SELECT 1")  # sigue abierta
+
+
+def test_restaurar_backup_carpeta_sin_backups_avisa_y_no_rompe(qtbot, conn, tmp_path, monkeypatch):
+    carpeta_vacia = tmp_path / "sin_backups"
+    carpeta_vacia.mkdir()
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: str(carpeta_vacia)))
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_avance._restaurar_backup()
+    conn.execute("SELECT 1")  # sigue abierta, no se tocó nada
+
+
+def test_restaurar_backup_cancelado_en_la_eleccion_no_hace_nada(qtbot, conn, tmp_path, monkeypatch):
+    obtener_repositorio(conn, "Configuracion").actualizar(1, CarpetaBackup=str(tmp_path))
+    conn.commit()
+    generar_backup(conn, momento=datetime(2026, 1, 1, 10, 0))
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: str(tmp_path)))
+    monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *a, **k: ("", False)))
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_avance._restaurar_backup()
+    conn.execute("SELECT 1")  # sigue abierta
+
+
+def test_restaurar_backup_confirmado_restaura_la_base_y_cierra_el_programa(qtbot, conn, tmp_path, monkeypatch):
+    """Caso real de punta a punta: genera un backup con un dato puntual,
+    cambia ese dato SIN volver a respaldar, restaura por el botón, y
+    confirma (con una conexión nueva, ya que la vieja se cierra) que el
+    archivo en disco volvió al estado del backup — y que el programa
+    pidió cerrarse, no que sigue funcionando con la conexión vieja."""
+    carpeta_backups = tmp_path / "Drive"
+    repo_cfg = obtener_repositorio(conn, "Configuracion")
+    repo_cfg.actualizar(1, CarpetaBackup=str(carpeta_backups), NombreEspacio="Antes del backup")
+    conn.commit()
+    ruta_backup = generar_backup(conn, momento=datetime(2026, 1, 1, 10, 0))
+    repo_cfg.actualizar(1, NombreEspacio="Cargado después, sin respaldar")
+    conn.commit()
+    db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
+
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: str(carpeta_backups)))
+    monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *a, **k: (ruta_backup.name, True)))
+    llamadas_quit = []
+    monkeypatch.setattr(QApplication, "quit", lambda *a, **k: llamadas_quit.append(1))
+
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_avance._restaurar_backup()
+
+    assert llamadas_quit == [1]
+    conn_nueva = init_database(db_path)
+    fila = conn_nueva.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    assert fila["NombreEspacio"] == "Antes del backup"
+    conn_nueva.close()
 
 
 def test_banner_sin_sincronizar_oculto_por_defecto(qtbot, conn):

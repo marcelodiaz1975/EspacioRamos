@@ -167,6 +167,44 @@ def test_pantalla_crud_eliminar_con_dependientes_no_rompe(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Edificio").fetchone()["c"] == 1
 
 
+def test_tecla_delete_en_la_tabla_elimina_igual_que_el_boton(qtbot, conn):
+    """Pedido explícito de la clienta, "todo el sistema": la tecla
+    Delete sobre una fila de cualquier catálogo genérico tiene que
+    disparar lo mismo que clickear "Eliminar" — acá se prueba con la
+    tecla real, no llamando a `_eliminar()` directo, para confirmar que
+    el cableado (`instalar_eliminar_con_tecla`) funciona de punta a
+    punta."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    conn.commit()
+
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_widget.selectRow(0)
+
+    qtbot.keyClick(pantalla.tabla_widget, Qt.Key.Key_Delete)
+
+    assert conn.execute("SELECT COUNT(*) c FROM Edificio").fetchone()["c"] == 0
+
+
+def test_tecla_delete_sin_seleccion_no_rompe(qtbot, conn):
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
+    qtbot.addWidget(pantalla)
+    qtbot.keyClick(pantalla.tabla_widget, Qt.Key.Key_Delete)  # sin filas, no debe lanzar nada
+
+
+def test_tecla_delete_en_pantalla_solo_lectura_no_rompe(qtbot, conn):
+    """Un catálogo `solo_lectura=True` no tiene `_eliminar` ni
+    `boton_eliminar` — la tecla Delete sobre su tabla no debe hacer
+    nada (ni romper, ver `if not self.solo_lectura` en crud_generico)."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    conn.commit()
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio(), solo_lectura=True)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_widget.selectRow(0)
+    qtbot.keyClick(pantalla.tabla_widget, Qt.Key.Key_Delete)
+    assert conn.execute("SELECT COUNT(*) c FROM Edificio").fetchone()["c"] == 1
+
+
 def test_pantalla_crud_editar_campo_numerico_not_null_vacio_no_rompe(qtbot, conn, monkeypatch):
     """CantLimitePlacas es NOT NULL DEFAULT 0 en la base — dejarlo vacío
     al editar mandaría NULL, que antes reventaba con un IntegrityError

@@ -892,6 +892,22 @@ def test_eliminar_pago_seleccionado_revierte_saldo(qtbot, conn, monkeypatch):
     assert saldo == 1000
 
 
+def test_tecla_delete_elimina_el_pago_igual_que_el_boton(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel.tabla.selectRow(0)
+    qtbot.keyClick(panel.tabla, Qt.Key.Key_Delete)
+
+    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
+
+
 def test_eliminar_pago_sin_seleccion_no_falla(qtbot, conn):
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)

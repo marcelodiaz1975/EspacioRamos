@@ -103,6 +103,7 @@ COLOR_AMARILLO = "#F5D547"
 COLOR_ROJO = "#C0392B"
 COLOR_AZUL_OSCURO = "#0B2942"  # grilla operativa — celdas del profesional filtrado
 COLOR_TEXTO_CLARO = "#FFFFFF"
+COLOR_FOCO = "#FFC107"  # ámbar — anillo de foco de teclado (Tab), ver "Indicador de foco" más abajo
 
 # ------------------------------------------------------------------- claro
 _CLARO = {
@@ -210,6 +211,28 @@ QHeaderView::section {{
     font-weight: bold; padding: 4px; border: none;
 }}
 QHeaderView:vertical {{ qproperty-defaultAlignment: AlignCenter; }}
+
+/* Indicador de foco en botones (pedido explícito de la clienta): "toco
+Tab, pasa de botón en botón, pero no veo dónde estoy parado" — el estilo
+propio de botonPrimario/botonSecundario (fondo + borde negro) le ganaba
+al rectángulo de foco nativo que dibuja el estilo base de Qt, así que
+quedaba invisible. `outline` (no `border`) porque no ocupa espacio de
+layout — a diferencia de agrandar el borde en :focus, que correría el
+contenido un par de píxeles cada vez que el botón gana o pierde el foco.
+
+Comprobado con capturas reales (`outline` no es parejo entre tipos de
+widget en Qt): funciona bien acá (QPushButton) y QLineEdit ya traía su
+propio foco nativo visible (borde celeste) sin necesitar nada de esto,
+pero `outline` NO llegó a pintarse en absoluto en QComboBox/QDateEdit/
+QSpinBox/QCheckBox/QPlainTextEdit/QTextEdit/QTabBar — para esos hubiera
+hecho falta `border` en vez de `outline`, que sí cambia el tamaño/look
+en reposo de cada uno (ocupan layout, y perderían el marco nativo que
+tienen hoy) — pedido aparte, visual, fuera del alcance de este arreglo
+puntual de botones. */
+QPushButton:focus {{
+    outline: 2px solid {COLOR_FOCO};
+    outline-offset: 1px;
+}}
 """
 
 

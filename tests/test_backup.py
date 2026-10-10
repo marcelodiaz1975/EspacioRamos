@@ -14,8 +14,10 @@ from app.negocio.backup import (
     desactivar_modo_sin_sincronizar,
     generar_backup,
     hay_backup_mas_reciente_sin_sincronizar,
+    listar_backups,
     modo_sin_sincronizar_activo,
     restaurar_backup,
+    restaurar_backup_desde,
     ultimo_backup,
 )
 from app.repositorio.registro import obtener_repositorio
@@ -147,6 +149,49 @@ def test_restaurar_backup_elige_el_mas_reciente_entre_varios(conn, tmp_path):
     nombres = {f["Nombre"] for f in restaurada.execute("SELECT Nombre FROM Edificio")}
     restaurada.close()
     assert nombres == {"Ramos 2"}  # el backup de agosto ya tenía las dos, el de julio solo la primera
+
+
+def test_listar_backups_sin_carpeta_devuelve_lista_vacia(tmp_path):
+    assert listar_backups(tmp_path / "no_existe") == []
+
+
+def test_listar_backups_carpeta_vacia_devuelve_lista_vacia(tmp_path):
+    carpeta = tmp_path / "backups"
+    carpeta.mkdir()
+    assert listar_backups(carpeta) == []
+
+
+def test_listar_backups_ordena_del_mas_reciente_al_mas_viejo(conn, tmp_path):
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    generar_backup(conn, momento=datetime(2026, 7, 1, 9, 0))
+    generar_backup(conn, momento=datetime(2026, 9, 1, 9, 0))
+    generar_backup(conn, momento=datetime(2026, 8, 1, 9, 0))
+
+    nombres = [b.name for b in listar_backups(tmp_path / "backups")]
+    assert nombres == ["Backup 2026-09-01 09h00", "Backup 2026-08-01 09h00", "Backup 2026-07-01 09h00"]
+
+
+def test_restaurar_backup_desde_elige_puntualmente_uno_que_no_es_el_mas_nuevo(conn, tmp_path):
+    """La diferencia real con `restaurar_backup` (siempre el más
+    reciente): el botón "Restaurar backup" de Panel de control deja
+    elegir CUALQUIER backup de la lista, no solo el último."""
+    _configurar_carpeta_backup(conn, tmp_path / "backups")
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos viejo")
+    generar_backup(conn, momento=datetime(2026, 7, 1, 9, 0))
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos nuevo")
+    generar_backup(conn, momento=datetime(2026, 8, 15, 10, 30))
+
+    backups = listar_backups(tmp_path / "backups")
+    mas_viejo = next(b for b in backups if b.name == "Backup 2026-07-01 09h00")
+
+    db_nueva = tmp_path / "maquina_nueva" / "espacio_ramos.db"
+    restaurar_backup_desde(mas_viejo, db_nueva)
+
+    restaurada = sqlite3.connect(db_nueva)
+    restaurada.row_factory = sqlite3.Row
+    nombres = {f["Nombre"] for f in restaurada.execute("SELECT Nombre FROM Edificio")}
+    restaurada.close()
+    assert nombres == {"Ramos viejo"}  # NO incluye "Ramos nuevo", que llegó después de este backup puntual
 
 
 def test_restaurar_backup_sin_carpeta_archivos_en_el_backup_no_falla(conn, tmp_path):

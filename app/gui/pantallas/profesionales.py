@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.pantallas import catalogos
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.negocio.archivos_generados import aplicar_cambio_codigo
 from app.negocio.dias import fecha_actual
 from app.negocio.documentacion_profesional import (
@@ -282,6 +283,7 @@ class _PanelProfesionales(QWidget):
         self.lista_documentos = QListWidget()
         self.lista_documentos.setFixedWidth(_ANCHO_CAMPO)
         self.lista_documentos.setMinimumHeight(150)
+        instalar_eliminar_con_tecla(self.lista_documentos, self._eliminar_documento)
         layout_doc.addWidget(self.lista_documentos, stretch=1)
 
         boton_agregar = QPushButton("Agregar archivo")

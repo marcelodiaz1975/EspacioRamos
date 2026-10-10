@@ -68,10 +68,11 @@ from app.gui.pantallas.reservas import (
     _opciones_profesional,
     _texto_profesional,
 )
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
 from app.gui.widgets.items_tabla import item_numero
-from app.gui.widgets.orden_tabla import OrdenTabla
+from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, partes_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
@@ -396,6 +397,7 @@ class _PanelVacaciones(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout.addWidget(panel_tabla, stretch=1)
 
@@ -500,7 +502,7 @@ class _PanelVacaciones(QWidget):
         filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
             (r, repo_profesional.obtener(r["IdProfesional"])) for r in filtradas
         ]
-        filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else "", t[0]["FechaDesde"]))
+        filas.sort(key=lambda t: (clave_orden_codigo(t[1]["IdCodigo"]) if t[1] else ("", -1, ""), t[0]["FechaDesde"]))
         if self._orden.columna is not None:
             filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._registros = [t[0] for t in filas]
@@ -525,7 +527,7 @@ class _PanelVacaciones(QWidget):
     @staticmethod
     def _clave_orden(columna: int):
         claves = {
-            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            0: lambda t: clave_orden_codigo(_texto_profesional(t[1])) if t[1] else ("", -1, ""),
             1: lambda t: t[0]["FechaDesde"][:4],
             2: lambda t: t[0]["FechaDesde"],
             3: lambda t: t[0]["FechaHasta"],
@@ -720,6 +722,7 @@ class _PanelLicencias(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout.addWidget(panel_tabla, stretch=1)
 
@@ -778,7 +781,7 @@ class _PanelLicencias(QWidget):
         filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
             (r, repo_profesional.obtener(r["IdProfesional"])) for r in filtradas
         ]
-        filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else ""))
+        filas.sort(key=lambda t: clave_orden_codigo(t[1]["IdCodigo"]) if t[1] else ("", -1, ""))
         filas.sort(key=lambda t: t[0]["FechaDesde"], reverse=True)
         if self._orden.columna is not None:
             clave = self._clave_orden(self._orden.columna, cache_tipo)
@@ -803,7 +806,7 @@ class _PanelLicencias(QWidget):
     @staticmethod
     def _clave_orden(columna: int, cache_tipo: dict):
         claves = {
-            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            0: lambda t: clave_orden_codigo(_texto_profesional(t[1])) if t[1] else ("", -1, ""),
             1: lambda t: (cache_tipo.get(t[0]["IdTipoLicencia"]) or {}).get("Nombre", ""),
             2: lambda t: t[0]["FechaDesde"],
             3: lambda t: t[0]["FechaHasta"],
@@ -1015,6 +1018,7 @@ class _PanelAusencias(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout.addWidget(panel_tabla, stretch=1)
 
@@ -1080,7 +1084,7 @@ class _PanelAusencias(QWidget):
         filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
             (r, repo_profesional.obtener(r["IdProfesional"])) for r in filtradas
         ]
-        filas.sort(key=lambda t: (t[1]["IdCodigo"] or "" if t[1] else "", t[0]["FechaDesde"]))
+        filas.sort(key=lambda t: (clave_orden_codigo(t[1]["IdCodigo"]) if t[1] else ("", -1, ""), t[0]["FechaDesde"]))
         if self._orden.columna is not None:
             filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._registros = [t[0] for t in filas]
@@ -1098,7 +1102,7 @@ class _PanelAusencias(QWidget):
 
     def _clave_orden(self, columna: int):
         claves = {
-            0: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            0: lambda t: clave_orden_codigo(_texto_profesional(t[1])) if t[1] else ("", -1, ""),
             1: lambda t: t[0]["FechaDesde"],
             2: lambda t: t[0]["FechaHasta"],
             3: lambda t: _fmt_horario_ausencia(t[0]),
@@ -1263,6 +1267,7 @@ class _PanelCargosEspeciales(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        instalar_eliminar_con_tecla(self.tabla, self._eliminar)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
@@ -1322,7 +1327,7 @@ class _PanelCargosEspeciales(QWidget):
     def _clave_orden(columna: int):
         claves = {
             0: lambda t: t[0]["Fecha"] or "",
-            1: lambda t: _texto_profesional(t[1]) if t[1] else "",
+            1: lambda t: clave_orden_codigo(_texto_profesional(t[1])) if t[1] else ("", -1, ""),
             2: lambda t: t[0]["Tipo"],
             3: lambda t: t[0]["Subtipo"],
             4: lambda t: t[0]["Concepto"],

@@ -110,6 +110,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.main_window import Seccion
+from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.items_tabla import item_numero
 from app.negocio.archivos_generados import SUBCARPETA_MANUAL, carpeta_archivos_varios
 from app.negocio.imagenes import (
@@ -422,6 +423,7 @@ class _PanelGestorArchivos(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._actualizar_previsualizacion)
+        instalar_eliminar_con_tecla(self.tabla, self._eliminar)
         layout_solapa.addWidget(self.tabla)
 
         panel_preview = QWidget()

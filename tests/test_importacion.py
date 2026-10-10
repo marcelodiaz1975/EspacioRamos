@@ -412,3 +412,81 @@ def test_importar_placa_posicion_dentro_del_tablero_se_guarda(conn, tmp_path):
     assert placa["PosicionTablero"] == 2
     r1 = obtener_repositorio(conn, "Profesional").listar(IdCodigo="R1")[0]
     assert placa["IdProfesional"] == r1["IdProfesional"]
+
+
+# ---------------------------------------- no duplicar registros idénticos
+
+def test_importar_la_misma_fila_dos_veces_no_duplica(conn, tmp_path):
+    """Pedido explícito de la clienta: volver a correr la misma planilla
+    (o una que se solapa) no tiene que crear un segundo registro
+    idéntico."""
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["Localidad"].append(["Ramos Mejía", "La Matanza", "Buenos Aires", "Argentina"])
+    wb["Edificio"].append(["Ramos 1", "Av. Rivadavia 13876", "Ramos Mejía"])
+    wb.save(ruta)
+
+    primera = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert primera["Edificio"].filas_importadas == 1
+    assert primera["Edificio"].filas_duplicadas == 0
+
+    segunda = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert segunda["Edificio"].filas_importadas == 0
+    assert segunda["Edificio"].filas_duplicadas == 1
+    assert not segunda["Edificio"].errores  # un duplicado no es un error
+
+    assert len(obtener_repositorio(conn, "Edificio").listar()) == 1
+
+
+def test_importar_fila_con_un_campo_distinto_no_es_duplicado(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["Localidad"].append(["Ramos Mejía", "La Matanza", "Buenos Aires", "Argentina"])
+    wb["Edificio"].append(["Ramos 1", "Av. Rivadavia 13876", "Ramos Mejía"])
+    wb.save(ruta)
+    importar_planilla(conn, ruta)
+
+    ruta2 = generar_plantillas(tmp_path / "plantilla2.xlsx")  # planilla nueva, sin la fila ya importada
+    wb2 = load_workbook(ruta2)
+    wb2["Edificio"].append(["Ramos 1", "Otro domicilio distinto", "Ramos Mejía"])  # mismo nombre, otro domicilio
+    wb2.save(ruta2)
+    resultado = {r.entidad: r for r in importar_planilla(conn, ruta2)}
+
+    assert resultado["Edificio"].filas_importadas == 1  # se importa igual, no es idéntico al anterior
+    assert resultado["Edificio"].filas_duplicadas == 0
+    assert len(obtener_repositorio(conn, "Edificio").listar()) == 2
+
+
+def test_importar_llave_duplicada_no_se_vuelve_a_crear(conn, tmp_path):
+    """El chequeo de duplicado compara Tipo/ValorDepositoActual/
+    Observacion -- los únicos datos que vienen de la planilla -- nunca
+    contra `Nombre`, que se autogenera después y siempre sería distinto
+    de fila a fila aunque el resto sea idéntico."""
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["Llave"].append(["Edificio", 500, "Llave del portón"])
+    wb.save(ruta)
+    importar_planilla(conn, ruta)
+
+    resultado = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultado["Llave"].filas_importadas == 0
+    assert resultado["Llave"].filas_duplicadas == 1
+    assert len(obtener_repositorio(conn, "Llave").listar()) == 1
+
+
+def test_importar_plan_pago_duplicado_no_se_vuelve_a_crear(conn, tmp_path):
+    """Un plan duplicado no debe ni recalcularse ni generar un segundo
+    juego de cuotas."""
+    _fijar_fecha(conn, "2026-08-15")
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    _agregar_profesional_r1(wb)
+    wb["PlanPago"].append(["R1", "05/2026", 12000, 0, 12, "Plan acordado antes del sistema"])
+    wb.save(ruta)
+    importar_planilla(conn, ruta)
+
+    resultado = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultado["PlanPago"].filas_importadas == 0
+    assert resultado["PlanPago"].filas_duplicadas == 1
+    assert len(obtener_repositorio(conn, "PlanPago").listar()) == 1
+    assert len(obtener_repositorio(conn, "CuotaPlan").listar()) == 12

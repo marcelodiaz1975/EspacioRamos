@@ -196,13 +196,28 @@ def backup_vencido(conn: sqlite3.Connection, hoy: date) -> bool:
     return (hoy - fecha_ultimo).days > dias_maximos
 
 
-def restaurar_backup(carpeta_backups: Path, db_path: Path) -> Path:
-    """Instalación en máquina nueva (sección 2: "restauración automática
-    desde Google Drive"): busca el backup más reciente dentro de
-    `carpeta_backups` (la carpeta de Drive que el operador ya tiene
-    sincronizada en la máquina nueva) y restaura ahí la base de datos y
-    la carpeta de archivos generados. Devuelve la carpeta de backup que
-    se usó.
+def listar_backups(carpeta: Path) -> list[Path]:
+    """Todas las subcarpetas "Backup AAAA-MM-DD HHhMM" de `carpeta`, de
+    la más reciente a la más vieja — a diferencia de
+    `buscar_backup_mas_reciente` (siempre una sola, la más nueva), esta
+    es para ofrecer una ELECCIÓN puntual (botón "Restaurar backup" de
+    Panel de control: no siempre se quiere volver justo al último)."""
+    carpeta = Path(carpeta)
+    if not carpeta.is_dir():
+        return []
+    return sorted(
+        (p for p in carpeta.iterdir() if p.is_dir() and p.name.startswith("Backup ")),
+        reverse=True,
+    )
+
+
+def restaurar_backup_desde(origen: Path, db_path: Path) -> None:
+    """El mecanismo real de restauración, sobre un backup YA ELEGIDO
+    (`origen`) — compartido por `restaurar_backup` (siempre el más
+    reciente, instalación nueva o base desactualizada) y por el botón
+    "Restaurar backup" de Panel de control (`app/gui/pantallas/
+    panel_control.py`, elige cuál de la lista, no necesariamente el más
+    reciente).
 
     Esta restauración hace que la base "se convierta" en esa versión: su
     propio `UltimoBackupPropio` pasa a ser el timestamp de `origen` (no
@@ -210,9 +225,7 @@ def restaurar_backup(carpeta_backups: Path, db_path: Path) -> Path:
     "modo local, sin sincronizar" si esta máquina lo tenía activo (ver
     docstring del módulo) — restaurar de verdad es, justamente, volver a
     la cadena de backups legítima."""
-    origen = buscar_backup_mas_reciente(Path(carpeta_backups))
-    if origen is None:
-        raise ValueError(f"No se encontró ningún backup en {carpeta_backups}.")
+    origen = Path(origen)
     archivos_db = list(origen.glob("*.db"))
     if not archivos_db:
         raise ValueError(f"El backup en {origen} no tiene ningún archivo de base de datos.")
@@ -244,6 +257,17 @@ def restaurar_backup(carpeta_backups: Path, db_path: Path) -> Path:
 
     desactivar_modo_sin_sincronizar(db_path)
 
+
+def restaurar_backup(carpeta_backups: Path, db_path: Path) -> Path:
+    """Instalación en máquina nueva (sección 2: "restauración automática
+    desde Google Drive") o base desactualizada: busca el backup más
+    reciente dentro de `carpeta_backups` (la carpeta de Drive que el
+    operador ya tiene sincronizada en esta máquina) y lo restaura con
+    `restaurar_backup_desde`. Devuelve la carpeta de backup que se usó."""
+    origen = buscar_backup_mas_reciente(Path(carpeta_backups))
+    if origen is None:
+        raise ValueError(f"No se encontró ningún backup en {carpeta_backups}.")
+    restaurar_backup_desde(origen, db_path)
     return origen
 
 

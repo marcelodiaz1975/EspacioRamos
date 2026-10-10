@@ -1,6 +1,7 @@
 from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 
-from app.gui.estilos import hoja_estilos, paleta
+from app.gui.estilos import COLOR_FOCO, hoja_estilos, paleta
 
 
 def test_hoja_estilos_claro_y_oscuro_son_distintas():
@@ -140,6 +141,46 @@ def test_solapas_tienen_apariencia_de_ficha_de_papel():
         assert superficie in bloque_seleccionada
         assert f"border-bottom-color: {superficie}" in bloque_seleccionada
         assert "margin-top: 2px" in bloque_inactiva
+
+
+def test_boton_tiene_anillo_de_foco_en_la_hoja_de_estilos():
+    """Pedido explícito de la clienta: "toco Tab, pasa de botón en
+    botón, pero no veo dónde estoy parado" — ver el comentario largo en
+    estilos.py sobre por qué `outline` (y no `border`) y por qué este
+    arreglo quedó acotado a QPushButton (es el único tipo de widget
+    donde se comprobó que `outline` se pinta de verdad en este Qt)."""
+    for modo_oscuro in (False, True):
+        bloque = hoja_estilos(modo_oscuro).split("QPushButton:focus {")[1].split("}")[0]
+        assert f"outline: 2px solid {COLOR_FOCO}" in bloque
+
+
+def test_boton_primario_muestra_el_anillo_de_foco_al_recibir_foco_real(qtbot):
+    """Confirma el renderizado real (captura + muestreo de píxeles), no
+    solo el texto de la hoja de estilos — `outline` no se pinta igual en
+    todos los tipos de widget de Qt, así que el texto del QSS por sí
+    solo no garantiza que se vea."""
+    ventana = QWidget()
+    ventana.setStyleSheet(hoja_estilos(False))
+    boton = QPushButton("Crear pedido")
+    boton.setObjectName("botonPrimario")
+    QVBoxLayout(ventana).addWidget(boton)
+    qtbot.addWidget(ventana)
+    ventana.show()
+    qtbot.waitExposed(ventana)
+    boton.setFocus()
+    qtbot.waitUntil(lambda: boton.hasFocus())
+
+    objetivo = tuple(int(COLOR_FOCO[i : i + 2], 16) for i in (1, 3, 5))
+    imagen = ventana.grab().toImage()
+    geometria = boton.geometry()
+    hay_anillo = any(
+        abs(imagen.pixelColor(x, y).red() - objetivo[0]) < 25
+        and abs(imagen.pixelColor(x, y).green() - objetivo[1]) < 25
+        and abs(imagen.pixelColor(x, y).blue() - objetivo[2]) < 25
+        for x in range(geometria.x(), geometria.x() + geometria.width())
+        for y in range(geometria.y(), geometria.y() + geometria.height())
+    )
+    assert hay_anillo
 
 
 def test_panel_dentro_de_una_solapa_hereda_el_mismo_fondo_claro():
