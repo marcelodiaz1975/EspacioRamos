@@ -3,12 +3,15 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from app.db.connection import DB_PATH_DEFAULT
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.dialogos_seguridad import DialogoBaseDesactualizada, DialogoLogin, MonitorInactividad
+from app.gui.estilos import FUENTE_APP
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
 from app.gui.pantallas.balance import PantallaBalanceDelNegocio
@@ -209,7 +212,17 @@ def _ofrecer_restaurar_backup(db_path: Path) -> None:
 def main() -> None:
     db_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DB_PATH_DEFAULT
 
+    # Pedido de la clienta ("puedo cambiar de máquina y monitor"): fijar
+    # la fuente de toda la app (ver app.gui.estilos.FUENTE_APP) hace que
+    # el ancho real del texto no dependa de la fuente default de cada
+    # instalación de Windows — y la política de redondeo de escala
+    # explícita evita que un factor fraccionario (125%, 150%) introduzca
+    # un desajuste de redondeo entre lo que se calculó a un tamaño lógico
+    # y lo que termina pintándose en píxeles físicos. Tiene que fijarse
+    # ANTES de crear la QApplication — después no tiene efecto.
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
+    app.setFont(QFont(FUENTE_APP))
 
     if not db_path.exists():
         _ofrecer_restaurar_backup(db_path)

@@ -1,7 +1,14 @@
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 
-from app.gui.estilos import COLOR_FOCO, hoja_estilos, paleta
+from app.gui.estilos import COLOR_FOCO, FUENTE_APP, hoja_estilos, paleta
+
+
+def test_fuente_app_fijada_a_segoe_ui():
+    """Pedido de la clienta ("puedo cambiar de máquina y monitor"): la
+    fuente queda fija en vez de depender de la default de cada
+    instalación — "Segoe UI" viene de fábrica en Windows 7 en adelante."""
+    assert FUENTE_APP == "Segoe UI"
 
 
 def test_hoja_estilos_claro_y_oscuro_son_distintas():

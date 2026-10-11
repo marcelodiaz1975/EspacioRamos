@@ -8015,3 +8015,97 @@ inválidos, incluyendo el caso del 29 de febrero). De paso se sumó
 `DiaProfesion` a `COLUMNAS_PLANTILLA["Profesion"]`
 (`app.importacion.definiciones`) para que la plantilla de importación
 Excel también lo contemple, mismo criterio que los campos libres.
+
+### Fuente fija de toda la app (independiza los tamaños de a qué máquina se mude la clienta)
+
+Pregunta de la clienta, surgida al notar diferencias entre lo que se
+había afinado pixel a pixel durante toda la revisión "uno por uno" (ver
+las decenas de rondas de calibración documentadas más arriba, sobre
+todo Reservas/Oferta) y lo que se ve en la versión instalada: "¿se
+puede regular los tamaños dentro del sistema?" — seguido de una
+precisión importante al confirmar que el problema real era de fuente/
+DPI, no de un tamaño puntual: "puedo cambiar de máquina y monitor, por
+ahí caigo en un Windows 11 al 100%, ¿cómo se puede manejar mejor este
+tema?"
+
+**Diagnóstico, antes de proponer nada**: `estilos.py` nunca fijó una
+`font-family` en ningún lado — toda la app corre con la fuente DEFAULT
+del sistema operativo donde se ejecuta. Cada ancho/alto fijo a mano que
+se calibró durante toda la revisión ("ancho justo para que entre el
+texto más largo sin cortarse") se midió en este entorno de desarrollo
+(Linux, sin interfaz gráfica real, plataforma `offscreen` de Qt), que
+usa una fuente genérica de Linux — DISTINTA a la que usa Windows por
+default ("Segoe UI" desde Windows Vista). Esa diferencia de métricas de
+fuente (ancho real de cada letra) es lo que corre los números, no el
+125%/100% de escala de Windows en sí: Qt6 (la versión que usa PySide6
+en este proyecto) escala automáticamente los tamaños en píxeles lógicos
+por el factor de DPI del sistema — un ancho fijo de 220px y el texto
+que tiene que entrar ahí escalan JUNTOS al mismo factor, así que pasar
+de 100% a 125%, o de una máquina a otra con otra escala, no debería por
+sí solo desalinear nada — lo que sí desalinea es que la fuente real
+nunca fue la misma que se usó para medir.
+
+**Dos cambios, los dos en `gui_main.main()`, antes de crear la
+`QApplication`** (tienen que fijarse ahí, después no tienen efecto):
+
+- `app.setFont(QFont(FUENTE_APP))` — `FUENTE_APP = "Segoe UI"`
+  (`app.gui.estilos`, nueva constante, al lado de los demás colores):
+  fija la fuente de toda la aplicación en vez de dejarla a la default
+  de cada instalación. "Segoe UI" viene instalada de fábrica en
+  Windows 7 en adelante — Windows 10 Y Windows 11 la tienen por igual,
+  así que cambiar de máquina/monitor entre esas dos versiones deja de
+  importar para este propósito: el ancho real del texto va a ser
+  siempre el mismo. Elegido por `app.setFont(...)` (fuente default de
+  la aplicación entera) en vez de threadearlo como `font-family` dentro
+  de `hoja_estilos()`: esa hoja de estilos solo se aplica con
+  `self.setStyleSheet(...)` sobre `VentanaPrincipal` (`app/gui/
+  main_window.py`), así que cualquier diálogo construido sin colgar de
+  ese árbol de widgets (bastante comunes en este sistema, ej. los
+  `_Dialogo*` de Nuevo/Editar) podía quedar afuera de ese alcance —
+  `app.setFont(...)` fija el default de TODA la aplicación, sin
+  depender de qué widget sea ancestro de qué otro, y además es lo que
+  usa por default cualquier `QFontMetrics()` construido sin argumentos
+  en el código (los cálculos manuales de ancho que ya existen en varias
+  pantallas).
+- `QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.
+  HighDpiScaleFactorRoundingPolicy.PassThrough)` — ya es el default de
+  Qt6 (no hacía falta para que funcione), se fija de forma explícita
+  para que quede documentada la intención en el propio código y no
+  dependa de que una futura actualización de Qt cambie ese default sin
+  que nadie se entere: con `PassThrough`, un factor de escala
+  fraccionario (125%, 150%) no introduce un redondeo de más entre el
+  tamaño lógico que ya se calibró y el tamaño físico en pantalla.
+
+**Sin "Segoe UI" instalada** (ej. corriendo este mismo código en Linux,
+como en este entorno de desarrollo): Qt sustituye sola la fuente más
+parecida que encuentre, sin romper — solo deja de ser pixel-perfect en
+ese caso puntual, que es exactamente la situación que ya existía antes
+de este cambio y que va a seguir existiendo únicamente ahí (nunca en
+una instalación real de Windows).
+
+**Lo que este cambio NO resuelve, aclarado a la clienta de entrada**:
+fijar la fuente hace que los tamaños queden ESTABLES de acá en
+adelante (la misma fuente, siempre, en cualquier máquina Windows) —
+pero no corrige retroactivamente ningún desajuste que ya exista entre
+lo calibrado contra la fuente de Linux y lo que realmente necesita
+"Segoe UI" (que es más ancha en promedio que la mayoría de las fuentes
+default de Linux). Una vuelta de validación visual sobre la instalación
+real (mismo criterio "uno por uno" de siempre: la clienta señala qué
+pantalla/campo quedó corto o desalineado, se corrige puntualmente) va
+a seguir haciendo falta — este cambio evita que ese trabajo haya que
+repetirlo cada vez que se cambia de máquina, no lo saltea. Se descartó,
+por ahora, un control de "escala de interfaz" general dentro de
+Configuración (multiplicar todos los anchos fijos por un factor
+elegible) — mucho más trabajo (revisar decenas de constantes en todas
+las pantallas) para resolver un problema que la fuente fija ya ataca de
+raíz.
+
+Tests: `tests/test_gui_estilos.py`
+(`test_fuente_app_fijada_a_segoe_ui`). Las dos líneas nuevas de
+`gui_main.main()` en sí no tienen test dedicado — ese punto de entrada
+nunca se probó de punta a punta en este proyecto (requiere boostrapear
+una base, el diálogo de login, etc.), mismo criterio que otras llamadas
+directas ya existentes ahí (`ventana.showMaximized()`); se verificó a
+mano que `QGuiApplication.setHighDpiScaleFactorRoundingPolicy` +
+`app.setFont(QFont("Segoe UI"))` no rompen la `QApplication` bajo la
+plataforma `offscreen`.
