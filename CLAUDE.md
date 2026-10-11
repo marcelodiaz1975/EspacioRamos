@@ -8109,3 +8109,111 @@ directas ya existentes ahí (`ventana.showMaximized()`); se verificó a
 mano que `QGuiApplication.setHighDpiScaleFactorRoundingPolicy` +
 `app.setFont(QFont("Segoe UI"))` no rompen la `QApplication` bajo la
 plataforma `offscreen`.
+
+## Tercera tanda de correcciones post-v1: Grilla y mensajería
+
+Lista de pedidos puntuales sobre las tres solapas de "Grilla y
+mensajería", ya con la clienta usando el sistema instalado — mismo
+criterio de la tanda anterior ("no largues la nueva versión hasta que
+yo te diga").
+
+### Grilla semanal
+
+- **Scroll horizontal + "Detalle" tapado por la grilla**: investigado a
+  fondo (medido con scripts de geometría, el mismo criterio de todo este
+  documento) — el mecanismo de scroll horizontal de `self.tabla`
+  (`ScrollBarAsNeeded`, correctamente dimensionado, sin que las tablas
+  fijas de `activar_filas_y_columnas_fijas()` lo tapen) y la posición de
+  "Detalle" respecto de la grilla (sin superposición, en ningún tamaño
+  de ventana probado) resultaron correctos en todos los escenarios
+  reproducidos. Lo que sí se confirmó, replicando `hoja_estilos()` sin
+  ninguna regla propia de `QScrollBar`, es que el scrollbar quedaba a
+  merced del estilo nativo de cada instalación — en la plataforma de
+  desarrollo (Linux/offscreen) el thumb se pinta en un degradé gris muy
+  pálido, casi indistinguible del fondo blanco, aunque funcionalmente
+  esté ahí (`isVisible()`, `maximum()` correctos). Se suma una regla de
+  `QScrollBar` propia a `estilos.py` (horizontal y vertical, parejo en
+  toda la app) con un thumb gris más oscuro y borde negro fino —mismo
+  criterio "borde negro fino" que el resto de los controles de esta
+  app— para que el scroll se note a simple vista sin depender de qué
+  tan buen contraste traiga el tema nativo de turno. De paso,
+  `_PanelGrillaSemanal` suma `reservar_alto_scroll_horizontal()` (mismo
+  mecanismo ya usado por Oferta de consultorios, la otra pantalla que
+  necesita scroll horizontal de forma habitual) como refuerzo — reserva
+  de más el alto que ocupa la barra, para que nunca tape la línea
+  inferior de la última hora si en algún momento aparece.
+- **Líneas de separación de unidad y de la fila "Día de la semana", en
+  un color intermedio nuevo**: hasta ahora la grilla solo distinguía dos
+  niveles de línea — la fina gris (`#999999`, 1px, la cuadrícula de
+  siempre) y la gruesa negra (`#000000`, 3px, exclusiva de los límites
+  de DÍA y del marco del bloque de encabezado). Se suma un tercer nivel,
+  `_COLOR_LINEA_UNIDAD = "#666666"` a `_GROSOR_MEDIO = 2`px, en el punto
+  intermedio pedido por la clienta: las separaciones de UNIDAD (ej. el
+  consultorio 7 de un piso contra el consultorio 1 de otro, dentro del
+  mismo día) y la línea horizontal que separa la fila "Día de la
+  semana" del resto de las filas de encabezado. `_dibujar_bordes_
+  gruesos` pasa a reconocer dos sufijos nuevos en el frozenset de
+  bordes, `"right_medio"`/`"bottom_medio"` (al lado de los cuatro de
+  siempre, sin sufijo = la línea gruesa negra), y `_limites_unidad`
+  (nueva, mismo criterio que `_limites_dia` pero comparando `id_unidad`)
+  se suma a `_agregar_encabezado_agrupado` (Localidad/Edificio/Unidad —
+  cualquier transición de grupo en esas filas que NO sea un límite de
+  día cae, por jerarquía, en un límite de unidad), `_agregar_
+  encabezado_consultorio` y el loop de datos por hora: en los tres,
+  `right_medio` se usa como alternativa a `right` (nunca los dos
+  juntos). La fila "Día de la semana" suma `bottom_medio` en todas sus
+  celdas (la etiqueta de la izquierda y cada grupo de día) al construir
+  esa fila en particular (`fila == primera_fila`).
+- **Filtros colapsables (Localidad/Edificio/Unidad), colapso automático
+  al elegir un único valor**: pedido explícito, extendido a "todos los
+  cuadros similares del sistema" — `_FiltroColapsable` (el widget
+  compartido detrás de estos tres filtros en CUALQUIER pantalla que
+  embeba `GrillaOperativaWidget`: Reservas, Oferta, Novedades, Grilla
+  semanal) suma `_colapsar_si_una_sola_seleccion`, conectada a la misma
+  señal `itemSelectionChanged` que ya actualiza el botón-resumen: si
+  queda exactamente UN valor tildado (el caso común, un clic simple sin
+  Ctrl), colapsa el menú solo. Si queda más de uno (selección múltiple
+  con Ctrl+clic en curso), se deja desplegado — colapsarlo en cada clic
+  hubiera roto la selección múltiple. Una sola corrección en el widget
+  compartido cubre las cuatro pantallas de una.
+
+### Centro de mensajería
+
+- **Orden de código, antes al revés**: `actualizar()` ordenaba, dentro
+  de cada color, por código DESCENDENTE (`reverse=True`, con un
+  comentario que decía "confirmado por el usuario" de una ronda
+  anterior) — la clienta pidió el criterio contrario ("los códigos
+  numéricos tienen que estar ordenados en orden ascendente... los
+  números están al revés nomás"). Se saca el `reverse=True`: ahora
+  ordena ascendente, dentro de cada color.
+- **Foco: Tab después de "Mensaje grupal" caía en "Vista previa"**: esta
+  solapa nunca había tenido una cadena de foco Enter/Tab propia ("no la
+  tenía y sigue sin tenerla", documentado desde que se armó) — Tab
+  dependía del orden nativo de Qt, que terminaba cayendo en
+  `self.texto_mensaje` (puramente visual, nunca se carga a mano) y,
+  sosteniendo Tab ahí, insertaba tabulaciones dentro del mensaje en vez
+  de seguir la cadena. Se suma una cadena explícita
+  (`instalar_enter_avanza_foco`) con los siete controles reales de la
+  columna izquierda (Filtro, Período, los dos checks "Combinar...",
+  Copiar mensaje, Actualizar, Mensaje grupal) — a propósito SIN incluir
+  `texto_mensaje`: al no tener el filtro instalado, Tab desde "Mensaje
+  grupal" (el último de la cadena) se salta ese cuadro por completo y
+  vuelve directo a "Filtro".
+
+### Mensajes predefinidos
+
+Investigados a fondo los dos puntos reportados (Tab no avanza desde
+"Buscar", y tampoco de "Nuevo" a "Editar"/"Eliminar") con el mismo
+criterio de "simular la tecla real, no solo revisar el código" de todo
+este documento: reproducido con `QTest.keyClick` tanto contra el panel
+aislado como contra el formulario compuesto completo
+(`PantallaGrillaYMensajeria`, cambiando de solapa primero, tal como lo
+haría la clienta), con y sin texto tipeado en Buscar — en los cuatro
+escenarios, la cadena ya instalada por `PantallaCRUD` en modo
+`anidado=True` (`[campo_buscar, boton_nuevo, boton_editar, boton_
+eliminar]`, con wrap-around de "Eliminar" de vuelta a "Buscar") avanzó
+correctamente en los cuatro pasos. No se encontró ningún defecto
+reproducible en el código actual — queda documentado por si vuelve a
+aparecer en la instalación real, con más detalle de cuándo pasa (recién
+abierto el formulario vs. después de cambiar de solapa, por ejemplo)
+para poder reproducirlo con precisión.

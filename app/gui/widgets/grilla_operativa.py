@@ -70,6 +70,14 @@ _FUENTE_HEX = {BLANCA: "#FFFFFF"}  # "negra" es el default de _CeldaGrilla, no h
 _ANCHO_CODIGO_CORTO = "A99"  # letra + 2 dígitos
 _ANCHO_CODIGO_LARGO = "A999"  # letra + 3 dígitos
 _GROSOR_GRUESO = 3  # línea estructural — mismo criterio visual que _GROSOR_GRUESO de grilla_pdf.py
+# Pedido de la clienta al revisar Grilla semanal: las separaciones de
+# UNIDAD (dentro de un mismo día) se distinguen con un color/grosor
+# intermedio entre la línea fina de grilla (#999999, 1px) y la línea
+# gruesa negra que separa DÍAS (#000000, 3px) — ni tan sutil como la
+# primera, ni tan marcada como la segunda. Mismo criterio para la línea
+# horizontal que separa la fila "Día de la semana" del resto.
+_COLOR_LINEA_UNIDAD = "#666666"
+_GROSOR_MEDIO = 2
 
 # Columnas fijas de cada fila de datos (igual que "Tipo Bloque"/"Horario" en el PDF).
 _COL_TIPO_BLOQUE = 0
@@ -141,16 +149,27 @@ def _dibujar_bordes_gruesos(painter: QPainter, rect, bordes: frozenset[str]) -> 
     painter.setPen(QPen(QColor("#999999"), 1))
     painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
-    pen = QPen(QColor("#000000"), _GROSOR_GRUESO)
-    painter.setPen(pen)
-    if "right" in bordes:
-        painter.drawLine(rect.topRight(), rect.bottomRight())
-    if "bottom" in bordes:
-        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
-    if "left" in bordes:
-        painter.drawLine(rect.topLeft(), rect.bottomLeft())
-    if "top" in bordes:
-        painter.drawLine(rect.topLeft(), rect.topRight())
+    # "right"/"bottom"/"left"/"top" (sin sufijo) = línea estructural
+    # gruesa y negra, de siempre (separa días/encierra el bloque de
+    # encabezado). Los "_medio" son el color/grosor intermedio nuevo
+    # (separaciones de unidad, y la fila "Día de la semana" del resto).
+    pen_fuerte = QPen(QColor("#000000"), _GROSOR_GRUESO)
+    pen_medio = QPen(QColor(_COLOR_LINEA_UNIDAD), _GROSOR_MEDIO)
+    for lado, pen in (
+        ("right", pen_fuerte), ("bottom", pen_fuerte), ("left", pen_fuerte), ("top", pen_fuerte),
+        ("right_medio", pen_medio), ("bottom_medio", pen_medio),
+    ):
+        if lado not in bordes:
+            continue
+        painter.setPen(pen)
+        if lado.startswith("right"):
+            painter.drawLine(rect.topRight(), rect.bottomRight())
+        elif lado.startswith("bottom"):
+            painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+        elif lado.startswith("left"):
+            painter.drawLine(rect.topLeft(), rect.bottomLeft())
+        elif lado.startswith("top"):
+            painter.drawLine(rect.topLeft(), rect.topRight())
 
 
 class _EtiquetaGrilla(QWidget):
@@ -276,10 +295,24 @@ class _FiltroColapsable(QWidget):
         layout.addWidget(lista)
         lista.setVisible(False)
         lista.itemSelectionChanged.connect(self.actualizar_resumen)
+        lista.itemSelectionChanged.connect(self._colapsar_si_una_sola_seleccion)
         self.actualizar_resumen()
 
     def _alternar(self) -> None:
         self._lista.setVisible(self._boton.isChecked())
+
+    def _colapsar_si_una_sola_seleccion(self) -> None:
+        """Pedido de la clienta al revisar Grilla semanal, aplicado a
+        todos los filtros colapsables del sistema (Localidad/Edificio/
+        Unidad en cualquier pantalla que embeba `GrillaOperativaWidget`):
+        elegir un único valor (el caso más común) contrae el menú solo,
+        sin tener que volver a tocar el botón-resumen — pero si queda
+        más de uno tildado (selección múltiple con Ctrl+clic en curso),
+        se deja desplegado para poder seguir sumando valores sin que se
+        cierre en cada clic."""
+        if len(self._lista.selectedItems()) == 1:
+            self._boton.setChecked(False)
+            self._lista.setVisible(False)
 
     def foco_widget(self) -> QWidget:
         """El widget que recibe el foco cuando este filtro forma parte de
@@ -1461,33 +1494,35 @@ class GrillaOperativaWidget(QWidget):
                 self._tabla_columna_fija.setRowHeight(i, 24)
 
         limites_dia = self._limites_dia(columnas)
+        limites_unidad = self._limites_unidad(columnas)
         es_primera_fila_encabezado = 0  # la fila "Día de la semana" siempre es la fila 0
         es_ultima_fila_encabezado = filas_encabezado - 1  # la fila "Consultorio"
 
         fila_actual = 0
         self._agregar_encabezado_agrupado(
-            fila_actual, columnas, lambda c: c["dia"], "Día de la semana", limites_dia,
+            fila_actual, columnas, lambda c: c["dia"], "Día de la semana", limites_dia, limites_unidad,
             es_primera_fila_encabezado, es_ultima_fila_encabezado, mayusculas=True,
         )
         fila_actual += 1
         if mostrar_localidad:
             self._agregar_encabezado_agrupado(
-                fila_actual, columnas, lambda c: (c["dia"], c["localidad"]), "Localidad", limites_dia,
+                fila_actual, columnas, lambda c: (c["dia"], c["localidad"]), "Localidad", limites_dia, limites_unidad,
                 es_primera_fila_encabezado, es_ultima_fila_encabezado,
             )
             fila_actual += 1
         if mostrar_edificio:
             self._agregar_encabezado_agrupado(
                 fila_actual, columnas, lambda c: (c["dia"], c["localidad"], c["nombre_edificio"]), "Edificio",
-                limites_dia, es_primera_fila_encabezado, es_ultima_fila_encabezado,
+                limites_dia, limites_unidad, es_primera_fila_encabezado, es_ultima_fila_encabezado,
             )
             fila_actual += 1
         self._agregar_encabezado_agrupado(
             fila_actual, columnas, lambda c: (c["dia"], c["localidad"], c["nombre_edificio"], c["id_unidad"]),
-            "Unidad", limites_dia, es_primera_fila_encabezado, es_ultima_fila_encabezado, texto=lambda c: c["departamento"],
+            "Unidad", limites_dia, limites_unidad, es_primera_fila_encabezado, es_ultima_fila_encabezado,
+            texto=lambda c: c["departamento"],
         )
         fila_actual += 1
-        self._agregar_encabezado_consultorio(fila_actual, columnas, limites_dia, es_ultima_fila_encabezado)
+        self._agregar_encabezado_consultorio(fila_actual, columnas, limites_dia, limites_unidad, es_ultima_fila_encabezado)
         fila_actual += 1
 
         tipo_por_hora = _tipo_bloque_por_hora(self.conn, horas)
@@ -1513,6 +1548,8 @@ class GrillaOperativaWidget(QWidget):
                 bordes_dato: set[str] = set()
                 if j in limites_dia:
                     bordes_dato.add("right")
+                elif j in limites_unidad:
+                    bordes_dato.add("right_medio")
                 if borde_inferior:
                     bordes_dato.add("bottom")
                 widget = _CeldaGrilla(celda, clave, self._mostrar_detalle, bordes=frozenset(bordes_dato))
@@ -1553,6 +1590,16 @@ class GrillaOperativaWidget(QWidget):
     def _limites_dia(self, columnas: list[dict]) -> set[int]:
         return {i for i in range(len(columnas)) if i == len(columnas) - 1 or columnas[i]["dia"] != columnas[i + 1]["dia"]}
 
+    def _limites_unidad(self, columnas: list[dict]) -> set[int]:
+        """Igual criterio que `_limites_dia`, pero por unidad — el color
+        intermedio nuevo (`_COLOR_LINEA_UNIDAD`) se dibuja en estos
+        límites cuando no coinciden también con un límite de día (que ya
+        se pinta con la línea negra gruesa de siempre)."""
+        return {
+            i for i in range(len(columnas))
+            if i == len(columnas) - 1 or columnas[i]["id_unidad"] != columnas[i + 1]["id_unidad"]
+        }
+
     def _agregar_columna_tipo_bloque(self, filas_encabezado: int, horas: list[int], tipo_por_hora: dict[int, str]) -> None:
         inicio = 0
         for i in range(1, len(horas) + 1):
@@ -1576,7 +1623,7 @@ class GrillaOperativaWidget(QWidget):
 
     def _agregar_encabezado_agrupado(
         self, fila: int, columnas: list[dict], clave_grupo, etiqueta_columna_0: str, limites_dia: set[int],
-        primera_fila: int, ultima_fila: int, texto=None, mayusculas: bool = False,
+        limites_unidad: set[int], primera_fila: int, ultima_fila: int, texto=None, mayusculas: bool = False,
     ) -> None:
         # Columna de etiqueta (Tipo Bloque/Horario fusionadas): además del
         # recuadro de "todo lo azul junto" (arriba en la primera fila,
@@ -1586,6 +1633,10 @@ class GrillaOperativaWidget(QWidget):
         bordes_etiqueta = {"left", "right"}
         if fila == primera_fila:
             bordes_etiqueta.add("top")
+            # Pedido de la clienta: la fila "Día de la semana" (siempre la
+            # primera) se separa del resto con el color intermedio nuevo
+            # — en toda la fila, no solo en esta etiqueta de la izquierda.
+            bordes_etiqueta.add("bottom_medio")
         if fila == ultima_fila:
             bordes_etiqueta.add("bottom")
         self._poner_texto_encabezado(fila, _COL_TIPO_BLOQUE, etiqueta_columna_0, span=2, bordes=frozenset(bordes_etiqueta))
@@ -1601,8 +1652,15 @@ class GrillaOperativaWidget(QWidget):
                 bordes: set[str] = set()
                 if (i - 1) in limites_dia:
                     bordes.add("right")
+                elif (i - 1) in limites_unidad:
+                    # Cualquier transición de grupo en ESTA fila que no sea
+                    # un cambio de día implica, por jerarquía, un cambio de
+                    # unidad (localidad/edificio/unidad son todos niveles
+                    # más específicos que día) — siempre cae acá.
+                    bordes.add("right_medio")
                 if fila == primera_fila:
                     bordes.add("top")
+                    bordes.add("bottom_medio")
                 if fila == ultima_fila:
                     bordes.add("bottom")
                 self._poner_texto_encabezado(
@@ -1612,7 +1670,7 @@ class GrillaOperativaWidget(QWidget):
                 actual = clave
 
     def _agregar_encabezado_consultorio(
-        self, fila: int, columnas: list[dict], limites_dia: set[int], ultima_fila: int,
+        self, fila: int, columnas: list[dict], limites_dia: set[int], limites_unidad: set[int], ultima_fila: int,
     ) -> None:
         bordes_etiqueta = {"left", "right", "bottom"} if fila == ultima_fila else {"left", "right"}
         self._poner_texto_encabezado(fila, _COL_TIPO_BLOQUE, "Consultorio", span=2, bordes=frozenset(bordes_etiqueta))
@@ -1620,6 +1678,8 @@ class GrillaOperativaWidget(QWidget):
             bordes: set[str] = set()
             if i in limites_dia:
                 bordes.add("right")
+            elif i in limites_unidad:
+                bordes.add("right_medio")
             if fila == ultima_fila:
                 bordes.add("bottom")
             self._poner_texto_encabezado(

@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import clave_orden_codigo
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import fecha_actual, periodo_actual
@@ -266,6 +267,21 @@ class _PanelCentroMensajeria(QWidget):
 
         self.campo_periodo.setText(periodo_actual(self.conn))
 
+        # Cadena de foco explícita, excluyendo a propósito "Vista previa"
+        # (self.texto_mensaje): es solo visual, nunca se carga a mano —
+        # sin esta cadena, Tab seguía el orden nativo de Qt y terminaba
+        # cayendo ahí después de "Mensaje grupal", insertando tabulaciones
+        # dentro del mensaje en vez de seguir la cadena. Al no estar en
+        # `orden`, nunca recibe el filtro de Enter/Tab y queda salteado de
+        # punta a punta — de "Mensaje grupal" se vuelve directo a "Filtro".
+        self._foco = instalar_enter_avanza_foco(
+            [
+                self.combo_filtro, self.campo_periodo, self.check_combinar_misma_unidad,
+                self.check_combinar_distintas_unidades, boton_copiar, boton_actualizar, boton_grupal,
+            ],
+            parent=self,
+        )
+
     # ------------------------------------------------------------------ listado
 
     def actualizar(self) -> None:
@@ -273,10 +289,12 @@ class _PanelCentroMensajeria(QWidget):
         limpiar_plazos_vencidos_o_regularizados(self.conn)
         filtro = self.combo_filtro.currentData()
         self._profesionales = self._listar_filtrados(periodo, filtro)
-        # Dos pasadas (sort estable): primero código descendente, después
+        # Dos pasadas (sort estable): primero código ascendente, después
         # color ascendente — así, a igualdad de color, queda ordenado por
-        # código descendente (confirmado por el usuario).
-        self._profesionales.sort(key=lambda p: clave_orden_codigo(p["IdCodigo"]), reverse=True)
+        # código ascendente (corregido a pedido de la clienta: se había
+        # probado descendente y quedaba al revés — los códigos numéricos
+        # tienen que quedar de menor a mayor, arriba los más chicos).
+        self._profesionales.sort(key=lambda p: clave_orden_codigo(p["IdCodigo"]))
         self._profesionales.sort(key=lambda p: _ORDEN_COLOR.get(color_profesional(self.conn, p, periodo), 99))
 
         # Desactivada mientras se repuebla: si no, un clic previo en un

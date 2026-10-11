@@ -68,6 +68,26 @@ def test_es_un_panel_solapa(qtbot, conn):
     assert pantalla.objectName() == "panelSolapa"
 
 
+def test_tab_desde_mensaje_grupal_saltea_la_vista_previa_y_vuelve_a_filtro(qtbot, conn):
+    """Pedido explícito de la clienta: "Vista previa" (texto_mensaje) es
+    solo visual — Tab después de "Mensaje grupal" (último botón real de
+    la cadena) tiene que volver directo a "Filtro", sin pasar por ahí (y
+    sin que, si cae ahí de todos modos, insertar más Tabs produzca
+    tabulaciones dentro del mensaje)."""
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    boton_grupal = pantalla._foco._orden[-1]
+    boton_grupal.setFocus()
+    qtbot.waitUntil(lambda: boton_grupal.hasFocus())
+    qtbot.keyClick(boton_grupal, Qt.Key.Key_Tab)
+
+    assert pantalla.combo_filtro.hasFocus()
+    assert not pantalla.texto_mensaje.hasFocus()
+
+
 def test_centro_mensajeria_lista_profesionales_categoria_r(qtbot, conn):
     _crear_profesional(conn, saldo=500)
     pantalla = _PanelCentroMensajeria(conn)
@@ -450,12 +470,13 @@ def test_orden_por_color_y_dentro_de_cada_color_por_codigo(qtbot, conn):
     _set_filtro(pantalla, "todos")
 
     nombres = [pantalla.tabla.item(i, 1).text() for i in range(pantalla.tabla.rowCount())]
-    # verde va antes que rojo (DC-02 §2.1); entre los dos rojos, R2 antes que R1 (código descendente).
-    assert nombres.index("Verde") < nombres.index("RojoDos")
-    assert nombres.index("RojoDos") < nombres.index("RojoUno")
+    # verde va antes que rojo (DC-02 §2.1); entre los dos rojos, R1 antes que R2 (código
+    # ascendente — corregido a pedido de la clienta, se había probado descendente).
+    assert nombres.index("Verde") < nombres.index("RojoUno")
+    assert nombres.index("RojoUno") < nombres.index("RojoDos")
 
 
-def test_orden_codigo_natural_descendente_r10_antes_de_r2(qtbot, conn):
+def test_orden_codigo_natural_ascendente_r2_antes_de_r10(qtbot, conn):
     _crear_profesional(conn, apellido="Diez", saldo=0, codigo="R10")
     _crear_profesional(conn, apellido="Dos", saldo=0, codigo="R2")
     pantalla = _PanelCentroMensajeria(conn)
@@ -463,7 +484,7 @@ def test_orden_codigo_natural_descendente_r10_antes_de_r2(qtbot, conn):
     _set_filtro(pantalla, "todos")
 
     nombres = [pantalla.tabla.item(i, 1).text() for i in range(pantalla.tabla.rowCount())]
-    assert nombres.index("Diez") < nombres.index("Dos")
+    assert nombres.index("Dos") < nombres.index("Diez")
 
 
 def test_columna_profesional_incluye_el_tratamiento(qtbot, conn):

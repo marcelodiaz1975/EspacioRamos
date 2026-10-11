@@ -504,6 +504,13 @@ class _PanelGrillaSemanal(QWidget):
         # Horario y las filas de encabezado quedan siempre visibles al
         # escrolear — solo se escrolea el bloque de datos.
         self.grilla.activar_filas_y_columnas_fijas()
+        # Mismo motivo que Oferta de consultorios (la otra pantalla que
+        # necesita scroll horizontal de forma habitual, con muchos
+        # edificios/unidades cargados): sin esto, la barra de scroll
+        # horizontal — al aparecer — le come al viewport el alto de su
+        # propia altura, pudiendo tapar la última fila de horario con su
+        # línea inferior.
+        self.grilla.reservar_alto_scroll_horizontal()
         layout.addWidget(self.grilla)
         self._leyenda = LeyendaColores()
         layout.addWidget(self._leyenda)

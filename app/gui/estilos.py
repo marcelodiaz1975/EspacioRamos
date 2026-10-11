@@ -248,6 +248,32 @@ QPushButton:focus {{
     outline: 2px solid {COLOR_FOCO};
     outline-offset: 1px;
 }}
+
+/* Scrollbars con contraste explícito, parejo en toda la app — pedido de
+la clienta al revisar Grilla semanal ("no aparece el scroll
+horizontal"): sin esta regla, el thumb queda pintado con el tema nativo
+de cada instalación, que en algunos casos (ciertos temas claros de
+Windows) lo deja en un gris muy parecido al fondo — ahí sigue
+funcionando (se puede arrastrar, aparece cuando hace falta), pero se
+percibe como "ausente" a simple vista. Mismo criterio de "borde negro
+fino" que el resto de la app en el thumb, para que se note sin
+depender de qué tan buen contraste traiga el estilo nativo de turno. */
+QScrollBar:horizontal {{
+    background: {t['fondo']}; height: 14px; border: 1px solid {t['borde']}; margin: 0px;
+}}
+QScrollBar::handle:horizontal {{
+    background: #8A8A8A; min-width: 24px; border: 1px solid #000000; border-radius: 3px;
+}}
+QScrollBar::handle:horizontal:hover {{ background: #6E6E6E; }}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0px; }}
+QScrollBar:vertical {{
+    background: {t['fondo']}; width: 14px; border: 1px solid {t['borde']}; margin: 0px;
+}}
+QScrollBar::handle:vertical {{
+    background: #8A8A8A; min-height: 24px; border: 1px solid #000000; border-radius: 3px;
+}}
+QScrollBar::handle:vertical:hover {{ background: #6E6E6E; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ width: 0px; }}
 """
 
 

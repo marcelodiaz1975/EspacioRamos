@@ -1034,3 +1034,123 @@ def test_agregar_widgets_debajo_de_leyenda_quedan_despues_y_antes_del_stretch(qt
     indice_2 = layout.indexOf(boton_2)
     assert indice_leyenda < indice_1 < indice_2 < layout.count() - 1  # el último item sigue siendo el stretch
     assert boton_1.parentWidget() is widget._panel_filtros
+
+
+# ------------------------------------------------- filtro colapsable: auto-cierre
+
+
+def _preparar_dos_localidades(conn):
+    """Dos localidades reales (más "Todas las localidades") para poder
+    probar selección múltiple en `lista_localidad`."""
+    _preparar(conn)
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 2", IdLocalidad=_id_localidad(conn, "Haedo")
+    )
+    obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento="PB")
+    conn.commit()
+
+
+def test_filtro_colapsable_se_contrae_al_elegir_un_unico_valor(qtbot, conn):
+    """Pedido de la clienta al revisar Grilla semanal: elegir un único
+    valor en Localidad/Edificio/Unidad carga el campo Y contrae el menú
+    colapsable solo, sin tener que volver a tocar el botón-resumen —
+    mismo mecanismo en todos los filtros colapsables del sistema."""
+    _preparar_dos_localidades(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    lista = widget.lista_localidad
+    widget._filtro_localidad._boton.setChecked(True)
+    lista.setVisible(True)
+
+    lista.clearSelection()
+    lista.item(1).setSelected(True)  # un único valor real (no "Todas")
+
+    assert lista.isHidden() is True
+    assert widget._filtro_localidad._boton.isChecked() is False
+    assert widget._filtro_localidad._boton.text() == lista.item(1).text()
+
+
+def test_filtro_colapsable_no_se_contrae_con_seleccion_multiple(qtbot, conn):
+    """Si queda más de un valor tildado (Ctrl+clic en curso), el menú se
+    deja desplegado — contraerlo en cada clic rompería la selección
+    múltiple."""
+    _preparar_dos_localidades(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    lista = widget.lista_localidad
+    lista.blockSignals(True)
+    lista.clearSelection()
+    lista.item(1).setSelected(True)
+    lista.blockSignals(False)
+    widget._filtro_localidad._boton.setChecked(True)
+    lista.setVisible(True)  # desplegada a mano, como si el usuario la hubiera vuelto a abrir
+
+    lista.item(2).setSelected(True)  # Ctrl+clic sumando un segundo valor
+
+    assert lista.isHidden() is False
+
+
+# --------------------------------------------- líneas de unidad/día (color nuevo)
+
+
+def _preparar_dos_unidades_mismo_dia(conn):
+    """Dos consultorios, cada uno en su propia Unidad, mismo Edificio —
+    para poder distinguir un límite de UNIDAD (sin cambio de día) de un
+    límite de DÍA."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Ramos 1", IdLocalidad=_id_localidad(conn, "Ramos Mejía")
+    )
+    id_unidad_1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="7mo")
+    id_consultorio_1 = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad_1, NumeroConsultorio=7, ValorHoraRegularActual=1000,
+    )
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="9no")
+    obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad_2, NumeroConsultorio=1, ValorHoraRegularActual=1000,
+    )
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Test", IdCodigo="R1")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio_1, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+
+def test_separacion_de_unidad_usa_el_color_intermedio_no_el_negro_de_dia(qtbot, conn):
+    """Pedido de la clienta: la línea que separa dos unidades DENTRO del
+    mismo día (ej. consultorio de un piso con el de otro) usa un color
+    intermedio nuevo, distinto de la línea negra gruesa que separa
+    días."""
+    from app.gui.widgets.grilla_operativa import _COL_DATOS_INICIO
+
+    _preparar_dos_unidades_mismo_dia(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.filtrar_por_dias(["Lunes"])  # dos columnas nomás: consultorio 7 y consultorio (unidad 9no)
+
+    # Con una sola localidad y un solo edificio, filas_encabezado = 3
+    # (Día de la semana, Unidad, Consultorio) — ver `_construir_tabla`.
+    fila_consultorio = 2
+    celda_consultorio_0 = widget.tabla.cellWidget(fila_consultorio, _COL_DATOS_INICIO)
+    assert "right_medio" in celda_consultorio_0._bordes
+    assert "right" not in celda_consultorio_0._bordes
+
+    fila_dato = fila_consultorio + 1  # primera hora de la grilla
+    celda_dato_0 = widget.tabla.cellWidget(fila_dato, _COL_DATOS_INICIO)
+    assert "right_medio" in celda_dato_0._bordes
+    assert "right" not in celda_dato_0._bordes
+
+
+def test_fila_dia_de_la_semana_separa_con_el_color_intermedio(qtbot, conn):
+    """Pedido de la clienta: la fila "Día de la semana" (la de más
+    arriba) se separa del resto de las filas de encabezado (Unidad/
+    Consultorio) con el mismo color intermedio nuevo."""
+    from app.gui.widgets.grilla_operativa import _COL_TIPO_BLOQUE
+
+    _preparar_dos_unidades_mismo_dia(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.filtrar_por_dias(["Lunes"])
+
+    etiqueta_dia = widget.tabla.cellWidget(0, _COL_TIPO_BLOQUE)
+    assert "bottom_medio" in etiqueta_dia._bordes
