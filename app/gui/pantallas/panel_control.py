@@ -55,7 +55,25 @@ pantallas). `PanelControl` queda como el contenedor de afuera: solo el
 título Nivel 1 (nombre del espacio) y el `QTabWidget` con las dos
 solapas — `actualizar()` sigue siendo el punto de entrada externo
 (ej. después de avanzar de mes desde otro lado), y delega en
-`self.panel_avance.actualizar()` para todo lo que no sea el título."""
+`self.panel_avance.actualizar()` para todo lo que no sea el título.
+
+Séptimo cuadrito, pedido explícito de la clienta ("un cuadrito similar
+a los que están... que me vaya indicando por orden de cercanía los
+cumpleaños de los profesionales activos... y los días del psicólogo,
+del fonoaudiólogo, etc."): "Cumpleaños y días de profesión"
+(`app.negocio.panel_control.cumpleanos_y_dias_profesion_proximos`),
+mismo criterio de ventana ("lo que queda de este mes + los próximos dos
+meses") que "Feriados y fechas especiales próximas". Los cumpleaños
+salen de `Profesional.FechaNacimiento` (excluyendo categoría X/C — ver
+el docstring de la función); los días de profesión de
+`Profesion.DiaProfesion`, un campo nuevo (MM-DD, SIN año — se repite
+todos los años) editable desde el catálogo "Profesiones y tratamientos",
+decisión tomada en vez de hardcodear un dict en Python para no tener que
+tocar código cada vez que se suma o cambia una fecha. La grilla pasa a
+7 cuadritos (sigue en 3 columnas; el séptimo queda solo en su propia
+fila, sin ningún cuadrito más al lado) — el armado ya era genérico sobre
+la cantidad de tarjetas, no hizo falta tocar `_COLUMNAS_GRILLA` ni el
+cálculo de filas."""
 from __future__ import annotations
 
 import sqlite3
@@ -101,6 +119,7 @@ from app.negocio.panel_control import (
     calcular_alertas,
     calcular_estadisticas_ocupacion,
     calcular_estadisticas_profesionales,
+    cumpleanos_y_dias_profesion_proximos,
     fechas_especiales_proximas_dos_meses,
 )
 
@@ -328,6 +347,7 @@ class _PanelAvancePeriodo(QWidget):
             self._armar_tarjeta_fechas_especiales(),
             self._armar_tarjeta_profesionales(),
             self._armar_tarjeta_ocupacion(),
+            self._armar_tarjeta_cumpleanos(),
         ]
         for indice, tarjeta in enumerate(tarjetas):
             grilla.addWidget(tarjeta, indice // _COLUMNAS_GRILLA, indice % _COLUMNAS_GRILLA)
@@ -407,6 +427,14 @@ class _PanelAvancePeriodo(QWidget):
         layout.addStretch()
         return tarjeta
 
+    def _armar_tarjeta_cumpleanos(self) -> QFrame:
+        tarjeta, layout = _tarjeta("Cumpleaños y días de profesión")
+        self.etiqueta_cumpleanos = QLabel()
+        self.etiqueta_cumpleanos.setWordWrap(True)
+        layout.addWidget(self.etiqueta_cumpleanos)
+        layout.addStretch()
+        return tarjeta
+
     def _armar_tarjeta_alertas(self) -> QFrame:
         self.tarjeta_alertas, layout = _tarjeta("Alertas")
         scroll = QScrollArea()
@@ -464,6 +492,15 @@ class _PanelAvancePeriodo(QWidget):
             f"Monto generado por esas horas aisladas: {formatear_moneda(ocup.monto_aisladas_mes)}\n"
             f"Saldo pendiente de cobro este mes: {formatear_moneda(ocup.saldo_pendiente_mes)}"
         )
+
+        eventos = cumpleanos_y_dias_profesion_proximos(self.conn)
+        if eventos:
+            texto_eventos = "\n".join(
+                f"•  {e.fecha_proxima.day:02d}-{e.fecha_proxima.month:02d} — {e.descripcion}" for e in eventos
+            )
+        else:
+            texto_eventos = "Sin cumpleaños ni días de profesión para lo que resta del período."
+        self.etiqueta_cumpleanos.setText(texto_eventos)
 
         alertas = calcular_alertas(self.conn)
         self._refrescar_alertas(alertas)

@@ -72,7 +72,7 @@ from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
 from app.gui.widgets.items_tabla import item_numero
-from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
+from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo, clave_orden_profesional
 from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, partes_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
@@ -185,7 +185,8 @@ def _opciones_profesional_vacaciones(conn: sqlite3.Connection) -> list[tuple[int
     placeholders = ", ".join("?" for _ in CATEGORIAS_CON_DERECHO_A_VACACIONES)
     filas = conn.execute(
         f"""
-        SELECT DISTINCT p.IdProfesional, p.IdCodigo, p.Tratamiento, p.Apellido, p.NombrePila
+        SELECT DISTINCT p.IdProfesional, p.IdCodigo, p.Tratamiento, p.Apellido, p.NombrePila,
+               p.CategoriaProfesional
         FROM Profesional p
         WHERE (
             p.CategoriaProfesional IN ({placeholders})
@@ -194,10 +195,10 @@ def _opciones_profesional_vacaciones(conn: sqlite3.Connection) -> list[tuple[int
                 AND r.VigenciaInicio <= ? AND (r.VigenciaFin IS NULL OR r.VigenciaFin >= ?)
             )
         ) OR EXISTS (SELECT 1 FROM Vacacion v WHERE v.IdProfesional = p.IdProfesional)
-        ORDER BY p.Apellido
         """,
         (*CATEGORIAS_CON_DERECHO_A_VACACIONES, hoy, hoy),
     ).fetchall()
+    filas = sorted(filas, key=lambda f: clave_orden_profesional(f["CategoriaProfesional"], f["IdCodigo"]))
     return [(f["IdProfesional"], _texto_profesional(f)) for f in filas]
 
 

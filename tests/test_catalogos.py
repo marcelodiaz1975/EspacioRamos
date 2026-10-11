@@ -305,6 +305,18 @@ def test_pantalla_profesiones_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre3") == 1
 
 
+def test_pantalla_profesiones_tiene_campo_dia_profesion_validado(qtbot, conn):
+    """Alimenta el cuadrito "Cumpleaños y días de profesión" de Panel de
+    control — ver app.negocio.panel_control."""
+    pantalla = catalogos.pantalla_profesiones(conn)
+    qtbot.addWidget(pantalla)
+    campo = next(c for c in pantalla.campos if c.nombre == "DiaProfesion")
+    assert campo.validador is not None
+    assert campo.validador("08-25") is True
+    assert campo.validador("25-08") is False  # mes y día invertidos
+    assert campo.validador("no es una fecha") is False
+
+
 def test_pantalla_gastos_operativos_tiene_tres_campos_libres(qtbot, conn):
     pantalla = catalogos.pantalla_gastos_operativos(conn)
     qtbot.addWidget(pantalla)

@@ -2,6 +2,7 @@ import pytest
 
 from app.negocio.validaciones import (
     es_cuit_valido,
+    es_dia_mes_valido,
     es_dni_valido,
     es_email_valido,
     es_fecha_valida,
@@ -56,3 +57,16 @@ def test_es_cuit_valido_acepta_11_digitos():
 @pytest.mark.parametrize("texto", ["20-12345678-9", "2012345678", "201234567890", "abc12345678", ""])
 def test_es_cuit_valido_rechaza_formatos_invalidos(texto):
     assert es_cuit_valido(texto) is False
+
+
+@pytest.mark.parametrize("texto", ["10-13", "01-01", "12-31", "02-29"])
+def test_es_dia_mes_valido_acepta_mes_dia_sin_anio(texto):
+    """"Día del Psicólogo" (13 de octubre, todos los años) — sin año; 29
+    de febrero se acepta porque se valida contra un año bisiesto de
+    referencia (2024), no contra el año real."""
+    assert es_dia_mes_valido(texto) is True
+
+
+@pytest.mark.parametrize("texto", ["13-10", "00-15", "02-30", "8-20", "2026-08-20", "no es una fecha", ""])
+def test_es_dia_mes_valido_rechaza_formatos_invalidos(texto):
+    assert es_dia_mes_valido(texto) is False

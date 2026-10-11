@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field, fields
-from datetime import timedelta
+from datetime import date, timedelta
 
 from app.negocio.backup import backup_vencido as _backup_vencido
 from app.negocio.dias import (
@@ -241,3 +241,81 @@ def fechas_especiales_proximas_dos_meses(conn: sqlite3.Connection) -> list[sqlit
     hasta = ultimo_dia_mes(anio_limite, mes_limite).isoformat()
     filas = obtener_repositorio(conn, "FechasEspeciales").listar(Activo=1)
     return sorted((f for f in filas if desde <= f["Fecha"] <= hasta), key=lambda f: f["Fecha"])
+
+
+@dataclass
+class EventoProximo:
+    dias_restantes: int
+    fecha_proxima: date  # la próxima ocurrencia futura, con el año que corresponda
+    descripcion: str
+
+
+def _proxima_ocurrencia(hoy: date, mes: int, dia: int) -> date | None:
+    """Próxima fecha (hoy inclusive) en que se repite este mes/día, sin
+    importar el año — para un 29 de febrero puede no caer el año que
+    viene (no es bisiesto), así que se prueba hasta 8 años para adelante
+    (siempre hay un bisiesto en ese rango) antes de rendirse."""
+    for delta_anio in range(0, 8):
+        try:
+            candidata = date(hoy.year + delta_anio, mes, dia)
+        except ValueError:
+            continue
+        if candidata >= hoy:
+            return candidata
+    return None
+
+
+def cumpleanos_y_dias_profesion_proximos(conn: sqlite3.Connection, meses_ventana: int = 2) -> list[EventoProximo]:
+    """Pedido de la clienta ("me podría armar un cuadrito... que me vaya
+    indicando por orden de cercanía los cumpleaños de los profesionales
+    activos... y los días del psicólogo, del fonoaudiólogo, etc."):
+
+    - Cumpleaños: de `Profesional.FechaNacimiento`, solo profesionales
+      "activos en el espacio" — se excluyen categoría X (Inactivo) y C
+      (Contacto/prospecto, todavía no es alguien que use el espacio).
+    - Días de profesión: de `Profesion.DiaProfesion` (MM-DD, sin año,
+      ver su columna en `schema.sql`) — una fecha fija que se repite
+      todos los años, a diferencia de FechasEspeciales (fechas puntuales
+      de un año concreto). Profesiones sin este dato cargado no aparecen.
+
+    Mismo criterio de ventana que `fechas_especiales_proximas_dos_meses`
+    (lo que queda del mes en curso más los próximos `meses_ventana`
+    meses) — ambos tipos de evento se mezclan en una sola lista, ordenada
+    por cercanía (más próximo primero)."""
+    hoy = fecha_actual(conn)
+    anio_limite, mes_limite = parsear_periodo(sumar_meses(f"{hoy.year:04d}-{hoy.month:02d}", meses_ventana))
+    limite = ultimo_dia_mes(anio_limite, mes_limite)
+
+    eventos: list[EventoProximo] = []
+
+    profesionales = conn.execute(
+        "SELECT Apellido, NombrePila, Tratamiento, FechaNacimiento FROM Profesional "
+        "WHERE FechaNacimiento IS NOT NULL AND FechaNacimiento != '' "
+        "AND CategoriaProfesional NOT IN ('X', 'C')"
+    ).fetchall()
+    for p in profesionales:
+        try:
+            nacimiento = date.fromisoformat(p["FechaNacimiento"])
+        except ValueError:
+            continue
+        proxima = _proxima_ocurrencia(hoy, nacimiento.month, nacimiento.day)
+        if proxima is None or proxima > limite:
+            continue
+        partes = [x for x in (p["Tratamiento"], p["NombrePila"], p["Apellido"]) if x]
+        nombre = " ".join(partes) if partes else p["Apellido"]
+        eventos.append(EventoProximo((proxima - hoy).days, proxima, f"Cumpleaños de {nombre}"))
+
+    profesiones = conn.execute(
+        "SELECT Nombre, DiaProfesion FROM Profesion WHERE DiaProfesion IS NOT NULL AND DiaProfesion != ''"
+    ).fetchall()
+    for prof in profesiones:
+        try:
+            mes, dia = (int(parte) for parte in prof["DiaProfesion"].split("-"))
+        except ValueError:
+            continue
+        proxima = _proxima_ocurrencia(hoy, mes, dia)
+        if proxima is None or proxima > limite:
+            continue
+        eventos.append(EventoProximo((proxima - hoy).days, proxima, f"Día de la profesión: {prof['Nombre']}"))
+
+    return sorted(eventos, key=lambda e: e.dias_restantes)

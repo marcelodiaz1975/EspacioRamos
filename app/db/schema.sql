@@ -104,6 +104,13 @@ CREATE TABLE IF NOT EXISTS Profesion (
     TieneMultiplesTratamientos INTEGER NOT NULL DEFAULT 0,
     OpcionesTratamientoMasculino TEXT,
     OpcionesTratamientoFemenino TEXT,
+    -- Fecha fija anual del "día de la profesión" (MM-DD, ej. "10-13" para
+    -- el 13 de octubre) — no cambia de un año a otro, a diferencia de
+    -- FechasEspeciales (que guarda fechas puntuales de un año concreto).
+    -- Alimenta el cuadrito "Cumpleaños y días de profesión" de Panel de
+    -- control (ver app.negocio.panel_control). Opcional: una profesión sin
+    -- este dato cargado simplemente no aparece en ese cuadrito.
+    DiaProfesion TEXT,
     CampoLibre1 TEXT,
     CampoLibre2 TEXT,
     CampoLibre3 TEXT

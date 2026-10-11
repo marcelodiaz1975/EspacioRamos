@@ -65,6 +65,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Profesion", "CampoLibre1", "TEXT"),
     ("Profesion", "CampoLibre2", "TEXT"),
     ("Profesion", "CampoLibre3", "TEXT"),
+    ("Profesion", "DiaProfesion", "TEXT"),
     ("GastoOperativo", "CampoLibre1", "TEXT"),
     ("GastoOperativo", "CampoLibre2", "TEXT"),
     ("GastoOperativo", "CampoLibre3", "TEXT"),

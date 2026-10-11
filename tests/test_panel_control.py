@@ -1,11 +1,15 @@
+from datetime import date
+
 import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.panel_control import (
+    _proxima_ocurrencia,
     calcular_alertas,
     calcular_estadisticas_ocupacion,
     calcular_estadisticas_profesionales,
+    cumpleanos_y_dias_profesion_proximos,
     fechas_especiales_proximas_dos_meses,
 )
 from app.repositorio.registro import obtener_repositorio
@@ -302,3 +306,91 @@ def test_fechas_especiales_proximas_dos_meses_ignora_inactivas(conn):
     _fijar_fecha(conn, "2026-08-15")
     obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-20", Tipo="Feriado nacional", Activo=0)
     assert fechas_especiales_proximas_dos_meses(conn) == []
+
+
+# -------------------------------------------------------------------------
+# cumpleanos_y_dias_profesion_proximos (pedido explícito de la clienta)
+# -------------------------------------------------------------------------
+
+
+def test_proxima_ocurrencia_dentro_del_mismo_anio(conn):
+    assert _proxima_ocurrencia(date(2026, 8, 15), 8, 20) == date(2026, 8, 20)
+
+
+def test_proxima_ocurrencia_hoy_cuenta_como_proxima(conn):
+    assert _proxima_ocurrencia(date(2026, 8, 20), 8, 20) == date(2026, 8, 20)
+
+
+def test_proxima_ocurrencia_ya_paso_este_anio_salta_al_que_viene(conn):
+    assert _proxima_ocurrencia(date(2026, 8, 15), 1, 10) == date(2027, 1, 10)
+
+
+def test_proxima_ocurrencia_29_de_febrero_salta_al_proximo_bisiesto(conn):
+    """2026 y 2027 no son bisiestos — el próximo 29 de febrero recién cae
+    en 2028."""
+    assert _proxima_ocurrencia(date(2026, 3, 1), 2, 29) == date(2028, 2, 29)
+
+
+def test_cumpleanos_proximo_de_profesional_activo_aparece(conn):
+    _fijar_fecha(conn, "2026-08-15")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Lo Veci", NombrePila="Virginia", FechaNacimiento="1990-08-20",
+    )
+    eventos = cumpleanos_y_dias_profesion_proximos(conn)
+    assert len(eventos) == 1
+    assert eventos[0].descripcion == "Cumpleaños de Virginia Lo Veci"
+    assert eventos[0].fecha_proxima == date(2026, 8, 20)
+    assert eventos[0].dias_restantes == 5
+
+
+def test_cumpleanos_de_categoria_x_o_c_no_aparece(conn):
+    """"Profesionales activos en el espacio": X (Inactivo) y C (Contacto/
+    prospecto) quedan afuera."""
+    _fijar_fecha(conn, "2026-08-15")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="X", Apellido="Inactivo", FechaNacimiento="1990-08-20",
+    )
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="C", Apellido="Prospecto", FechaNacimiento="1990-08-21",
+    )
+    assert cumpleanos_y_dias_profesion_proximos(conn) == []
+
+
+def test_cumpleanos_fuera_de_la_ventana_de_dos_meses_no_aparece(conn):
+    _fijar_fecha(conn, "2026-08-15")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Lejano", FechaNacimiento="1990-12-01",
+    )
+    assert cumpleanos_y_dias_profesion_proximos(conn) == []
+
+
+def test_dia_de_profesion_cargado_aparece(conn):
+    _fijar_fecha(conn, "2026-08-15")
+    obtener_repositorio(conn, "Profesion").crear(Nombre="Psicología", DiaProfesion="08-25")
+    eventos = cumpleanos_y_dias_profesion_proximos(conn)
+    assert len(eventos) == 1
+    assert eventos[0].descripcion == "Día de la profesión: Psicología"
+    assert eventos[0].fecha_proxima == date(2026, 8, 25)
+
+
+def test_profesion_sin_dia_cargado_no_aparece(conn):
+    _fijar_fecha(conn, "2026-08-15")
+    obtener_repositorio(conn, "Profesion").crear(Nombre="Psicología")
+    assert cumpleanos_y_dias_profesion_proximos(conn) == []
+
+
+def test_cumpleanos_y_dias_de_profesion_se_mezclan_ordenados_por_cercania(conn):
+    _fijar_fecha(conn, "2026-08-15")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Lejos", FechaNacimiento="1990-09-20",
+    )
+    obtener_repositorio(conn, "Profesion").crear(Nombre="Psicología", DiaProfesion="08-18")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Cerca", FechaNacimiento="1990-08-16",
+    )
+    eventos = cumpleanos_y_dias_profesion_proximos(conn)
+    assert [e.descripcion for e in eventos] == [
+        "Cumpleaños de Cerca",
+        "Día de la profesión: Psicología",
+        "Cumpleaños de Lejos",
+    ]

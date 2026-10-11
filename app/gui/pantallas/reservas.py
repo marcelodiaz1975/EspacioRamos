@@ -46,7 +46,7 @@ from app.gui.widgets.grilla_operativa import (
     pares_dia_unidad_con_reserva_vigente,
 )
 from app.gui.widgets.items_tabla import item_numero
-from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
+from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo, clave_orden_profesional
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, ultimo_dia_mes
@@ -274,18 +274,25 @@ def _opciones_profesional(
 ) -> list[tuple[int, str]]:
     """`categorias=None` trae todos los profesionales sin filtrar por
     categoría (por ejemplo, para pantallas donde puede aparecer cualquier
-    profesional sin importar su categoría)."""
+    profesional sin importar su categoría).
+
+    Orden: jerarquía de categorías B, R, A, E, X, C y, dentro de cada
+    una, código natural (`clave_orden_profesional`) — pedido explícito
+    de la clienta sobre TODOS los selectores de profesional del sistema,
+    reemplaza al orden alfabético por Apellido que tenía antes."""
     if categorias is None:
         filas = conn.execute(
-            "SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila FROM Profesional ORDER BY Apellido"
+            "SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila, CategoriaProfesional "
+            "FROM Profesional"
         ).fetchall()
     else:
         placeholders = ", ".join("?" for _ in categorias)
         filas = conn.execute(
-            f"SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila FROM Profesional "
-            f"WHERE CategoriaProfesional IN ({placeholders}) ORDER BY Apellido",
+            f"SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila, CategoriaProfesional "
+            f"FROM Profesional WHERE CategoriaProfesional IN ({placeholders})",
             categorias,
         ).fetchall()
+    filas = sorted(filas, key=lambda f: clave_orden_profesional(f["CategoriaProfesional"], f["IdCodigo"]))
     return [(f["IdProfesional"], _texto_profesional(f)) for f in filas]
 
 

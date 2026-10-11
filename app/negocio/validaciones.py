@@ -18,6 +18,7 @@ FORMATO_PERIODO = "AAAA-MM"
 FORMATO_EMAIL = "ejemplo@dominio.com"
 FORMATO_DNI = "solo números (6 a 9 dígitos)"
 FORMATO_CUIT = "11 dígitos (XX-XXXXXXXX-X, con o sin guiones)"
+FORMATO_DIA_MES = "MM-DD (ej. 10-13 para el 13 de octubre)"
 
 
 def es_fecha_valida(texto: str) -> bool:
@@ -41,6 +42,24 @@ def es_periodo_valido(texto: str) -> bool:
 
 def es_email_valido(texto: str) -> bool:
     return bool(_REGEX_EMAIL.fullmatch(texto))
+
+
+_REGEX_DIA_MES = re.compile(r"^\d{2}-\d{2}$")
+
+
+def es_dia_mes_valido(texto: str) -> bool:
+    """MM-DD, SIN año (ej. "Día del Psicólogo", 13 de octubre todos los
+    años — `Profesion.DiaProfesion`). Usa un año bisiesto de referencia
+    (2024) al validar, para no rechazar un 29 de febrero — el único día
+    del año que no existe en todos los años."""
+    if not _REGEX_DIA_MES.fullmatch(texto):
+        return False
+    mes, dia = (int(p) for p in texto.split("-"))
+    try:
+        date(2024, mes, dia)
+        return True
+    except ValueError:
+        return False
 
 
 def es_dni_valido(texto: str) -> bool:

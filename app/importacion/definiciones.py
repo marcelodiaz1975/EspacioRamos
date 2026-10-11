@@ -48,6 +48,7 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
         "Nombre", "NombreMasculino", "NombreFemenino", "NombreNeutro",
         "TratamientoDefaultMasculino", "TratamientoDefaultFemenino",
         "TieneMultiplesTratamientos", "OpcionesTratamientoMasculino", "OpcionesTratamientoFemenino",
+        "DiaProfesion",
         "CampoLibre1", "CampoLibre2", "CampoLibre3",
     ],
     "Profesional": [

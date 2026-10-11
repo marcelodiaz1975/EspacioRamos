@@ -422,6 +422,25 @@ def test_tarjeta_ocupacion_muestra_las_cinco_metricas(qtbot, conn):
     assert "Saldo pendiente de cobro este mes:" in texto
 
 
+def test_tarjeta_cumpleanos_sin_datos(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert "Sin cumpleaños ni días de profesión" in pantalla.panel_avance.etiqueta_cumpleanos.text()
+
+
+def test_tarjeta_cumpleanos_lista_profesionales_y_dias_de_profesion(qtbot, conn):
+    conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Lo Veci", NombrePila="Virginia", FechaNacimiento="1990-08-20",
+    )
+    obtener_repositorio(conn, "Profesion").crear(Nombre="Psicología", DiaProfesion="08-25")
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.panel_avance.etiqueta_cumpleanos.text()
+    assert "20-08 — Cumpleaños de Virginia Lo Veci" in texto
+    assert "25-08 — Día de la profesión: Psicología" in texto
+
+
 def test_tarjeta_alertas_sigue_mostrando_las_alertas_de_siempre(qtbot, conn):
     _crear_profesional_regular_con_deuda(conn, "Deudor", 99999)
     pantalla = PanelControl(conn)
@@ -446,7 +465,11 @@ def test_refrescar_alertas_dos_veces_no_deja_la_tarjeta_vieja_visible(qtbot, con
     assert tarjeta_vieja.isHidden()
 
 
-def test_hay_seis_tarjetas_parejas_en_la_grilla_y_alertas_aparte(qtbot, conn):
+def test_hay_siete_tarjetas_parejas_en_la_grilla_y_alertas_aparte(qtbot, conn):
+    """Séptima tarjeta sumada con "Cumpleaños y días de profesión" —
+    sigue en 3 columnas, la séptima queda sola en su propia fila (el
+    armado de la grilla ya era genérico sobre la cantidad de tarjetas,
+    no hizo falta ningún caso especial)."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1200, 800)
@@ -455,16 +478,16 @@ def test_hay_seis_tarjetas_parejas_en_la_grilla_y_alertas_aparte(qtbot, conn):
 
     grilla = pantalla.findChild(QGridLayout)
     assert grilla is not None
-    assert grilla.count() == 6
+    assert grilla.count() == 7
 
     # Tolerancia chica: QGridLayout reparte el resto de una división no
     # exacta (ancho/alto de ventana entre columnas/filas) en algún borde
     # — invisible a simple vista pero real en píxeles.
-    tarjetas = [grilla.itemAt(i).widget() for i in range(6)]
+    tarjetas = [grilla.itemAt(i).widget() for i in range(7)]
     anchos = [t.width() for t in tarjetas]
     altos = [t.height() for t in tarjetas]
-    assert max(anchos) - min(anchos) <= 8  # las seis del mismo ancho
-    assert max(altos) - min(altos) <= 8  # las seis del mismo alto
+    assert max(anchos) - min(anchos) <= 8  # las siete del mismo ancho
+    assert max(altos) - min(altos) <= 8  # las siete del mismo alto
 
 
 def test_tarjeta_alertas_no_esta_en_la_grilla(qtbot, conn):

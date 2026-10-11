@@ -23,8 +23,10 @@ from app.negocio.detalles_complementarios import reordenar_al_guardar as reorden
 from app.negocio.listas_editables import opciones_lista, reordenar_al_guardar
 from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
 from app.negocio.validaciones import (
+    FORMATO_DIA_MES,
     FORMATO_EMAIL,
     FORMATO_PERIODO,
+    es_dia_mes_valido,
     es_email_valido,
     es_periodo_valido,
 )
@@ -236,6 +238,11 @@ def pantalla_profesiones(conn: sqlite3.Connection, *, anidado: bool = False) -> 
         Campo("TieneMultiplesTratamientos", "Tiene múltiples tratamientos", tipo="booleano"),
         Campo("OpcionesTratamientoMasculino", "Opciones de tratamiento (masculino, separadas por coma)"),
         Campo("OpcionesTratamientoFemenino", "Opciones de tratamiento (femenino, separadas por coma)"),
+        # Fecha fija anual (sin año) del "día de la profesión" — ej.
+        # "10-13" para el 13 de octubre, todos los años. Alimenta el
+        # cuadrito "Cumpleaños y días de profesión" de Panel de control.
+        # Opcional: dejarlo vacío simplemente no suma nada a ese cuadrito.
+        Campo("DiaProfesion", "Día de la profesión", validador=es_dia_mes_valido, formato_esperado=FORMATO_DIA_MES),
         *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "Profesion", "Profesiones", campos, anidado=anidado)

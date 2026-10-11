@@ -19,6 +19,8 @@ from PySide6.QtWidgets import QTableWidget
 
 _PATRON_PREFIJO_NUMERO = re.compile(r"^(\D*)(\d+)")
 
+ORDEN_CATEGORIA_PROFESIONAL = {"B": 0, "R": 1, "A": 2, "E": 3, "X": 4, "C": 5}
+
 
 def clave_orden_codigo(texto: str | None) -> tuple:
     """Orden natural para textos que arrancan con un código tipo
@@ -38,6 +40,23 @@ def clave_orden_codigo(texto: str | None) -> tuple:
         return (texto, -1, texto)
     prefijo, numero = coincidencia.groups()
     return (prefijo, int(numero), texto)
+
+
+def clave_orden_profesional(categoria: str | None, codigo: str | None) -> tuple:
+    """Orden de los combos/selectores de profesional de todo el sistema
+    (pedido explícito de la clienta, "para todos los formularios"):
+    primero por la jerarquía de categorías B, R, A, E, X, C — sin
+    importar qué subconjunto de categorías ofrezca cada pantalla (ej.
+    Reservas aisladas sigue restringida a R/A, Vacaciones a R/B/E; esta
+    jerarquía solo decide el ORDEN dentro de lo que cada pantalla ya
+    elige mostrar, nunca agrega ni quita categorías) — y recién dentro
+    de cada categoría por el mismo orden natural de código que ya usan
+    las columnas "Profesional" de las tablas (`clave_orden_codigo`:
+    letra + número completo, no dígito a dígito). Una categoría fuera
+    de la lista (no debería pasar, pero por si acaso) se manda al
+    final, después de "C"."""
+    _, numero, texto = clave_orden_codigo(codigo)
+    return (ORDEN_CATEGORIA_PROFESIONAL.get(categoria, len(ORDEN_CATEGORIA_PROFESIONAL)), numero, texto)
 
 
 class OrdenTabla(QObject):

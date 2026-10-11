@@ -7784,3 +7784,190 @@ no dígito a dígito, agrupa primero por letra, funciona con texto
 después del código, sin número cae a orden de texto, vacío/`None` no
 rompe). `tests/test_profesionales.py` (click en "Código" del catálogo
 real ordena natural, no alfabético).
+
+## Segunda tanda de correcciones post-v1
+
+Siguiendo el mismo criterio de la primera tanda ("no largues la nueva
+versión hasta que yo te diga, solo hace las correcciones"): cinco
+puntos más, con los dos primeros ("buscar por código, no por nombre" +
+"desplegable en cascada con negrita") y el tercero (jerarquía de
+categorías) aplicados todos sobre el ÚNICO selector de profesional
+compartido de todo el sistema (`habilitar_busqueda_profesional`,
+`app/gui/widgets/selector_profesional.py`) — el cuarto punto de la
+clienta ("esto aplica a todos los campos de búsqueda de profesional")
+ya queda cumplido por construcción, es el mismo mecanismo que usan los
+18 selectores de profesional del sistema (Reservas ×3, Novedades ×5,
+Pagos ×3, Liquidaciones ×3, Llaves, Placas ×3, Lista de espera, Oferta,
+Mensajes predefinidos, la Grilla operativa compartida), sin que haya
+hecho falta tocar ninguno de ellos.
+
+### Selector de profesional: solo por código (prefijo), select-all al
+### enfocar, negrita en el desplegable
+
+Pedido explícito de la clienta, con un ejemplo puntual: "si empiezo a
+escribir Leandro no [tiene que encontrarlo], solo busca desde el
+comienzo de la cadena {código – tratamiento nombre apellido}" — y la
+pregunta de si esto se podía hacer. Se puede, y de la forma más simple:
+el filtro, que hasta ahora matcheaba por CUALQUIER PARTE del texto
+(`patron in texto`, buscaba por código O por nombre/apellido sueltos en
+cualquier posición), pasa a matchear solo por PREFIJO de la cadena
+canónica completa ("{código} - {tratamiento} {nombre} {apellido}",
+`_normalizar(texto).startswith(patron)` en vez de `in`). Como el código
+va siempre primero en esa cadena, esto habilita en los hechos "buscar
+por código" (sigue funcionando: "R11" encuentra a "R11 - Lic. Leandro
+Cervellini") y deshabilita "buscar por nombre" (escribir "Leandro" ya
+no encuentra nada, porque no es el principio de la cadena) — exactamente
+lo que pedía el ejemplo. Sigue sin distinguir mayúsculas ni acentos,
+aplicado ahora al prefijo en vez de a cualquier parte.
+
+Dos piezas más sobre el mismo widget, pedidas en el mismo mensaje:
+
+- **Select-all al enfocar** ("apenas se pinche se seleccione todo el
+  contenido, para poder borrarlo con Delete y escribir en limpio"):
+  `_SeleccionarTodoAlEnfocar`, un filtro de eventos sobre el
+  `QLineEdit` del combo que dispara `selectAll()` en `QEvent.FocusIn` —
+  diferido con `QTimer.singleShot(0, ...)` porque un `selectAll()`
+  inmediato durante el propio evento de foco queda pisado por el manejo
+  nativo del click de Qt, que reposiciona el cursor en el punto
+  clickeado justo después (confirmado al tanteo: sin el diferido, el
+  texto quedaba deseleccionado).
+- **Desplegable en cascada con negrita** ("si pongo R11, me muestra en
+  cascada R11, R110, R112, R118... poniendo en negrita los caracteres
+  que van coincidiendo"): el "en cascada" (varias coincidencias a la
+  vez, bajar con las flechas, confirmar con Enter) ya lo daba gratis el
+  `QCompleter` nativo en modo popup desde antes de este pedido — lo
+  único que faltaba era la negrita. Como el filtro ahora es por
+  PREFIJO, negritar "lo que va coincidiendo" se simplifica a negritar
+  los primeros `len(patrón)` caracteres de cada opción (no hace falta
+  ningún resaltado de substring en posición arbitraria, que sí hubiera
+  hecho falta con el filtro viejo). `_DelegadoNegritaPrefijo`
+  (`QStyledItemDelegate` puesto en `completador.popup()`) pinta el
+  fondo/selección nativo de la fila y arriba el texto con un
+  `QTextDocument` en HTML (`<b>{prefijo}</b>{resto}`), en vez de dejar
+  que Qt pinte el texto plano.
+
+  Pieza técnica encontrada al armar esto, no pedida pero necesaria:
+  `combo.completer()` (el completer que `QComboBox` arma solo al volverlo
+  editable) tiene su `popup()` en `None` hasta que se muestra por
+  primera vez de verdad — no se le puede poner un delegado antes de eso.
+  Se resolvió armando un `QCompleter()` nuevo aparte (que SÍ trae su
+  popup armado desde el constructor, confirmado a mano) y asignándolo al
+  combo con `combo.setCompleter(...)`, en vez de seguir reusando el que
+  ya traía `combo.completer()`.
+
+Tests reescritos de punta a punta en
+`tests/test_gui_widget_selector_profesional.py` (los viejos, que
+probaban "busca por cualquier parte"/"por nombre", dejaron de ser
+ciertos y se reemplazan por sus opuestos): filtra por prefijo de
+código, NO filtra por nombre en el medio de la cadena (ni en el
+completer ni en la confirmación al perder el foco), select-all real al
+enfocar (simulando el evento de foco, con `qtbot.wait` para el
+`singleShot`), el popup del completer tiene el delegado de negrita
+puesto.
+
+### Jerarquía de categorías B, R, A, E, X, C en los combos de profesional
+
+Pedido explícito, "para todos los formularios": el ORDEN en que
+aparecen las opciones de cualquier combo/selector de profesional tiene
+que respetar primero la jerarquía de categorías B, R, A, E, X, C y,
+dentro de cada categoría, el mismo orden natural de código que ya usan
+las columnas "Profesional" de las tablas (`clave_orden_codigo`, de la
+tanda anterior) — sin tocar qué categorías ofrece cada pantalla (cada
+una sigue restringida a su propio subconjunto, ej. Aisladas sigue en
+R/A, Vacaciones en R/B/E; la jerarquía solo decide el orden DENTRO de
+lo que cada pantalla ya elige mostrar).
+
+`clave_orden_profesional(categoria, codigo)` (nueva, `app/gui/widgets/
+orden_tabla.py`, al lado de `clave_orden_codigo`): combina un dict fijo
+`ORDEN_CATEGORIA_PROFESIONAL = {"B":0,"R":1,"A":2,"E":3,"X":4,"C":5}`
+con el orden natural de código ya existente. Reemplaza el `ORDER BY
+Apellido` que tenían las tres funciones que arman listas de
+profesionales para combos (`reservas._opciones_profesional` — la
+compartida, reusada por cross-import en la mayoría de las pantallas;
+`grilla_operativa._opciones_profesional_grilla` y `novedades.
+_opciones_profesional_vacaciones`, duplicadas por los mismos motivos de
+import circular/filtro propio ya documentados en el código) — las tres
+pasan a traer `CategoriaProfesional` en el SELECT y ordenar en Python
+con esta función en vez de alfabéticamente por apellido.
+
+Tests: ningún test nuevo dedicado (no hay una función de negocio
+aislada más allá de `clave_orden_profesional` en sí, cubierta
+indirectamente por los tests ya existentes de cada pantalla que
+siguieron pasando sin tocarlos — confirmado corriendo la suite
+completa de Reservas/Novedades/Grilla operativa/Oferta/Lista de
+espera/Pagos/Llaves/Placas/Liquidación/Mensajes predefinidos después
+del cambio, sin ninguna regresión).
+
+### Panel de control: séptimo cuadrito, "Cumpleaños y días de profesión"
+
+Pedido explícito de la clienta: "un cuadrito similar a los que
+están... que me vaya indicando por orden de cercanía los cumpleaños de
+los profesionales activos en el espacio... y los días del psicólogo,
+del fonoaudiólogo, etc." Dos fuentes de datos muy distintas en la misma
+lista, ordenadas juntas por cercanía:
+
+- **Cumpleaños**: de `Profesional.FechaNacimiento` (ya existía en el
+  schema). "Profesionales activos en el espacio" se interpretó como
+  "sin importar la categoría salvo las dos que no son un profesional
+  usando el espacio de verdad": se excluyen categoría X (Inactivo) y C
+  (Contacto/prospecto, todavía no se le dio de alta como alguien que
+  reserva) — quedan R, A, B, E.
+- **Días de profesión**: pedido sin resolver de antemano ("quedo atento
+  a alguna sugerencia de cómo armar esto de la manera más simple"). Se
+  sumó `Profesion.DiaProfesion` (TEXT, "MM-DD" SIN año — ej. "10-13"
+  para el 13 de octubre, se repite igual todos los años, a diferencia
+  de `FechasEspeciales` que guarda fechas puntuales de un año concreto)
+  como campo nuevo y OPCIONAL del catálogo "Profesiones y tratamientos"
+  (`catalogos.pantalla_profesiones`), en vez de hardcodear un diccionario
+  en Python — mismo criterio de "dato editable desde el sistema, no en
+  código" que el resto del proyecto (campos libres, Listas editables,
+  etc.): para sumar o corregir un día de profesión no hace falta tocar
+  nada de código, se carga desde la pantalla. Validado con un validador
+  nuevo, `es_dia_mes_valido`/`FORMATO_DIA_MES` (`app.negocio.
+  validaciones`, mismo mecanismo `Campo.validador`/`formato_esperado`
+  que ya usan Email/CUIT/DNI en los catálogos) — valida contra un año
+  bisiesto de referencia (2024) para no rechazar un 29 de febrero. Una
+  profesión sin este dato cargado simplemente no aparece en el
+  cuadrito. El texto se arma como "Día de la profesión: {Nombre}"
+  (reusa el nombre de la disciplina que ya tiene el catálogo, ej.
+  "Día de la profesión: Psicología") en vez de una frase con género
+  ("Día del/de la Psicólogo/a") para no tener que elegir una forma —
+  si la clienta prefiere la redacción coloquial ("Día del Psicólogo")
+  es un ajuste de texto aparte, posible sumando un campo de etiqueta
+  libre si hiciera falta más adelante.
+
+`app.negocio.panel_control.cumpleanos_y_dias_profesion_proximos(conn,
+meses_ventana=2)` (nueva): mismo criterio de ventana que `fechas_
+especiales_proximas_dos_meses` (lo que queda del mes en curso + los
+próximos dos meses) — `_proxima_ocurrencia(hoy, mes, dia)` calcula la
+próxima fecha futura (hoy inclusive) en que cae ese mes/día sin
+importar el año, probando hasta 8 años para adelante (cubre de sobra un
+29 de febrero, que como mucho tarda 4 años en volver a existir). Las
+dos listas (cumpleaños + días de profesión) se mezclan en una sola,
+ordenada por `dias_restantes` ascendente.
+
+GUI (`app/gui/pantallas/panel_control.py`): séptimo cuadrito,
+`_armar_tarjeta_cumpleanos`/`etiqueta_cumpleanos`, mismo patrón
+`_tarjeta`/`QLabel` con `setWordWrap` que el resto — el armado de la
+grilla (`_COLUMNAS_GRILLA = 3`, cálculo de filas por redondeo hacia
+arriba) ya era genérico sobre la cantidad de tarjetas, así que pasar de
+6 a 7 no necesitó ningún cambio ahí; el séptimo cuadrito queda solo en
+su propia fila, sin ningún otro al lado.
+
+Tests: `tests/test_panel_control.py` (`_proxima_ocurrencia` — dentro
+del mismo año, hoy cuenta como próxima, ya pasó este año salta al que
+viene, 29 de febrero salta al próximo bisiesto; `cumpleanos_y_dias_
+profesion_proximos` — cumpleaños de categoría activa aparece con los
+datos correctos, X/C quedan afuera, fuera de la ventana de dos meses no
+aparece, día de profesión cargado aparece/sin cargar no aparece,
+cumpleaños y días de profesión se mezclan ordenados por cercanía).
+`tests/test_gui_panel_control.py` (cuadrito sin datos muestra el
+mensaje default, con datos lista ambos tipos de evento; el test
+estructural de "seis tarjetas parejas" se renombra y actualiza a
+siete). `tests/test_catalogos.py` (el campo nuevo existe en
+"Profesiones y tratamientos" con su validador puesto). `tests/
+test_validaciones.py` (`es_dia_mes_valido`, formatos válidos/
+inválidos, incluyendo el caso del 29 de febrero). De paso se sumó
+`DiaProfesion` a `COLUMNAS_PLANTILLA["Profesion"]`
+(`app.importacion.definiciones`) para que la plantilla de importación
+Excel también lo contemple, mismo criterio que los campos libres.

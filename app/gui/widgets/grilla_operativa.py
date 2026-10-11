@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.estilos import COLOR_AMARILLO, COLOR_AZUL_OSCURO, COLOR_NIVEL_1
+from app.gui.widgets.orden_tabla import clave_orden_profesional
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_actual, primer_dia_mes, sumar_meses, ultimo_dia_mes
 from app.pdf.estilos import clave_orden_unidad
@@ -408,10 +409,14 @@ def _opciones_profesional_grilla(conn: sqlite3.Connection) -> list[tuple[int, st
     """Mismo formato canónico "{código} - {tratamiento} {nombre}
     {apellido}" que `reservas._texto_profesional` — duplicado acá (en
     vez de importado) porque `reservas.py` ya importa este módulo y
-    crearía un import circular."""
+    crearía un import circular. Mismo orden que `reservas.
+    _opciones_profesional` (jerarquía de categorías B/R/A/E/X/C, código
+    natural dentro de cada una), también duplicado acá por el mismo
+    motivo."""
     filas = conn.execute(
-        "SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila FROM Profesional ORDER BY Apellido"
+        "SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila, CategoriaProfesional FROM Profesional"
     ).fetchall()
+    filas = sorted(filas, key=lambda f: clave_orden_profesional(f["CategoriaProfesional"], f["IdCodigo"]))
     opciones = []
     for p in filas:
         partes = [x for x in (p["Tratamiento"], p["NombrePila"], p["Apellido"]) if x]
