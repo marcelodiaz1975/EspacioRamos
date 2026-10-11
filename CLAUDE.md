@@ -7865,6 +7865,41 @@ enfocar (simulando el evento de foco, con `qtbot.wait` para el
 `singleShot`), el popup del completer tiene el delegado de negrita
 puesto.
 
+**Corrección inmediata, mismo día**: la clienta aclaró que se había
+expresado mal — el pedido real era al revés de lo recién implementado:
+"quiero buscar por nombre también... quiero que busque DENTRO de la
+cadena también y no solo al principio". El filtro vuelve a matchear
+por CUALQUIER PARTE del texto (`patron in texto`, no `startswith`) —
+tanto en el `QSortFilterProxyModel` del completer como en el fallback
+de `_confirmar_texto` — recuperando el comportamiento original
+("Leandro" vuelve a encontrar a "R11 - Lic. Leandro Cervellini") sin
+perder nada de lo demás pedido en la misma tanda (select-all al
+enfocar, negrita en el desplegable).
+
+La negrita sí tuvo que cambiar de mecánica: con el filtro por
+substring (no por prefijo), "lo que va coincidiendo" puede estar en
+CUALQUIER posición de la cadena, no solo al principio — alcanzar con
+negritar los primeros N caracteres (como permitía el prefijo) ya no
+sirve. `_DelegadoNegritaPrefijo` se renombra `_DelegadoNegritaCoincidencia`
+y suma `_rango_resaltado(texto, patron)` (nueva, en el mismo módulo):
+busca la posición real del `patron` dentro del texto normalizado (sin
+acentos, sin mayúsculas) y devuelve `(inicio, fin)` para resaltar esa
+porción exacta del texto ORIGINAL — funciona porque `_normalizar`
+preserva la longitud carácter a carácter para el texto típico de este
+sistema (sacar tildes + `casefold()` no colapsa ni expande posiciones
+para texto en español ya compuesto en NFC, que es como llega cualquier
+nombre tipeado normalmente). Sin coincidencia, no se resalta nada.
+
+Tests actualizados otra vez en
+`tests/test_gui_widget_selector_profesional.py`: los que habían pasado
+a probar "NO busca por nombre" se revierten a probar que SÍ busca
+(mismos nombres de test que la primera versión, antes de esta tanda),
+más dos tests nuevos para `_rango_resaltado` (encuentra la posición
+real del substring, sin distinguir acentos, `None` sin coincidencia o
+sin patrón) — el de select-all y el del delegado puesto se mantienen
+sin cambios de fondo, solo el nombre de la clase que verifica el
+segundo.
+
 ### Jerarquía de categorías B, R, A, E, X, C en los combos de profesional
 
 Pedido explícito, "para todos los formularios": el ORDEN en que
@@ -7928,13 +7963,22 @@ lista, ordenadas juntas por cercanía:
   que ya usan Email/CUIT/DNI en los catálogos) — valida contra un año
   bisiesto de referencia (2024) para no rechazar un 29 de febrero. Una
   profesión sin este dato cargado simplemente no aparece en el
-  cuadrito. El texto se arma como "Día de la profesión: {Nombre}"
-  (reusa el nombre de la disciplina que ya tiene el catálogo, ej.
-  "Día de la profesión: Psicología") en vez de una frase con género
-  ("Día del/de la Psicólogo/a") para no tener que elegir una forma —
-  si la clienta prefiere la redacción coloquial ("Día del Psicólogo")
-  es un ajuste de texto aparte, posible sumando un campo de etiqueta
-  libre si hiciera falta más adelante.
+  cuadrito.
+
+**Redacción, corregida el mismo día a pedido de la clienta** ("prefiero
+algo más coloquial si se puede, sino complica dejalo así como lo
+planteaste"): la primera versión armaba el texto como "Día de la
+profesión: {Nombre}" (reusando el nombre de la disciplina, ej. "Día de
+la profesión: Psicología") para no tener que resolver el género del
+título ("Día del"/"Día de la"). Resultó no complicar: `Profesion.
+NombreMasculino` YA existe en el catálogo (sembrado para cada profesión,
+ej. "Psicólogo" para Psicología) — "del" contrae correctamente con
+cualquier nombre marcado como masculino sin importar con qué letra
+empiece, así que `f"Día del {NombreMasculino}"` es gramaticalmente
+válido sin tener que inventar ninguna regla de género ni sumar ningún
+campo nuevo. Sin `NombreMasculino` cargado para esa profesión puntual,
+cae al genérico "Día de la profesión: {Nombre}" de la primera versión,
+en vez de romper o mostrar "Día del None".
 
 `app.negocio.panel_control.cumpleanos_y_dias_profesion_proximos(conn,
 meses_ventana=2)` (nueva): mismo criterio de ventana que `fechas_

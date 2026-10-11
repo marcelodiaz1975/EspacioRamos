@@ -433,12 +433,14 @@ def test_tarjeta_cumpleanos_lista_profesionales_y_dias_de_profesion(qtbot, conn)
     obtener_repositorio(conn, "Profesional").crear(
         CategoriaProfesional="R", Apellido="Lo Veci", NombrePila="Virginia", FechaNacimiento="1990-08-20",
     )
-    obtener_repositorio(conn, "Profesion").crear(Nombre="Psicología", DiaProfesion="08-25")
+    obtener_repositorio(conn, "Profesion").crear(
+        Nombre="Psicología", NombreMasculino="Psicólogo", DiaProfesion="08-25",
+    )
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     texto = pantalla.panel_avance.etiqueta_cumpleanos.text()
     assert "20-08 — Cumpleaños de Virginia Lo Veci" in texto
-    assert "25-08 — Día de la profesión: Psicología" in texto
+    assert "25-08 — Día del Psicólogo" in texto
 
 
 def test_tarjeta_alertas_sigue_mostrando_las_alertas_de_siempre(qtbot, conn):

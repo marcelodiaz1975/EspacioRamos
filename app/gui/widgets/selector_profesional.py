@@ -13,23 +13,19 @@ categoría + código que usan los que arman esas opciones) y le agrega:
 - Al enfocar el campo (un click, o llegar con Tab), selecciona todo el
   texto — permite borrarlo con Delete y escribir de cero sin tener que
   seleccionar a mano (pedido explícito de la clienta).
-- Tipear filtra las opciones por PREFIJO de ese texto canónico completo
-  (no por cualquier parte): como el código va siempre primero, esto en
-  la práctica habilita buscar por código ("R11" encuentra a "R11 - Lic.
-  Leandro Cervellini") pero no por nombre/apellido sueltos ("Leandro" no
-  encuentra nada, porque no es el principio de la cadena) — pedido
-  explícito de la clienta, con un ejemplo puntual: "si empiezo a escribir
-  Leandro no [tiene que encontrarlo], solo busca desde el comienzo de la
-  cadena {código – tratamiento nombre apellido}". Sin distinguir
-  mayúsculas de minúsculas ni vocales acentuadas ("Diaz" encuentra
-  "Díaz", siempre que sea al principio de la cadena).
+- Tipear filtra las opciones por CUALQUIER PARTE de ese texto canónico
+  (código o nombre/apellido, en cualquier posición de la cadena) sin
+  distinguir mayúsculas de minúsculas ni vocales acentuadas ("Diaz"
+  encuentra "Díaz") — pedido explícito de la clienta: "R11" encuentra a
+  "R11 - Lic. Leandro Cervellini" por el código, y "Leandro" también lo
+  encuentra, por el nombre, estando en el medio de la cadena.
 - El desplegable del completer (ya mostraba varias coincidencias en
   cascada mientras se tipea, comportamiento nativo de `QCompleter` en
-  modo popup) resalta en negrita la porción tipeada al principio de cada
-  opción — como el filtro es por prefijo, alcanza con negritar los
-  primeros N caracteres de cada opción mostrada, sin necesitar ningún
-  resaltado de substring arbitrario. Bajar con las flechas y confirmar
-  con Enter ya lo da gratis el `QCompleter` nativo, sin código extra.
+  modo popup) resalta en negrita la porción de cada opción que matchea
+  lo tipeado — en la posición real donde aparece (código al principio,
+  nombre/apellido en el medio), no solo al principio. Bajar con las
+  flechas y confirmar con Enter ya lo da gratis el `QCompleter` nativo,
+  sin código extra.
 - Al perder el foco confirma la única opción que matchea lo tipeado —
   si no matchea ninguna, o matchea más de una, vuelve al texto de la
   selección vigente en vez de dejar un texto suelto que no se
@@ -63,8 +59,9 @@ def _normalizar(texto: str) -> str:
 
 
 class _ProxyBusquedaSinAcentos(QSortFilterProxyModel):
-    """Filtra filas por PREFIJO del texto, sin distinguir mayúsculas/
-    minúsculas ni acentos — ver el porqué en el docstring del módulo."""
+    """Filtra filas por substring (cualquier parte del texto), sin
+    distinguir mayúsculas/minúsculas ni acentos — ver el porqué en el
+    docstring del módulo."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -77,7 +74,7 @@ class _ProxyBusquedaSinAcentos(QSortFilterProxyModel):
     def filterAcceptsRow(self, fila: int, padre) -> bool:  # noqa: N802 (override de Qt)
         if not self.patron:
             return True
-        return _normalizar(self._texto_fila(fila, padre)).startswith(self.patron)
+        return self.patron in _normalizar(self._texto_fila(fila, padre))
 
     def _texto_fila(self, fila: int, padre) -> str:
         origen = self.sourceModel()
@@ -85,11 +82,25 @@ class _ProxyBusquedaSinAcentos(QSortFilterProxyModel):
         return origen.data(indice, Qt.ItemDataRole.DisplayRole) or ""
 
 
-class _DelegadoNegritaPrefijo(QStyledItemDelegate):
-    """Pinta en negrita los primeros `len(proxy.patron)` caracteres de
-    cada opción del desplegable — ver el docstring del módulo sobre por
-    qué alcanza con negritar un prefijo en vez de resaltar un substring
-    cualquiera."""
+def _rango_resaltado(texto: str, patron: str) -> tuple[int, int] | None:
+    """Posición (inicio, fin) de `patron` dentro de `texto`, buscando
+    sin distinguir mayúsculas ni acentos — `None` si no matchea. Como
+    `_normalizar` preserva la longitud carácter a carácter para el
+    texto típico de este sistema (saca tildes/casefold, sin colapsar ni
+    expandir posiciones), el rango encontrado en el texto normalizado
+    aplica tal cual sobre el texto ORIGINAL para resaltarlo."""
+    if not patron:
+        return None
+    inicio = _normalizar(texto).find(patron)
+    if inicio < 0:
+        return None
+    return inicio, inicio + len(patron)
+
+
+class _DelegadoNegritaCoincidencia(QStyledItemDelegate):
+    """Pinta en negrita la porción de cada opción del desplegable que
+    matchea lo tipeado, en su posición real (`_rango_resaltado`) — el
+    código al principio de la cadena, el nombre/apellido en el medio."""
 
     def __init__(self, proxy: _ProxyBusquedaSinAcentos, parent=None):
         super().__init__(parent)
@@ -103,11 +114,14 @@ class _DelegadoNegritaPrefijo(QStyledItemDelegate):
         estilo = opcion.widget.style() if opcion.widget else QApplication.style()
         estilo.drawControl(QStyle.ControlElement.CE_ItemViewItem, opcion, painter, opcion.widget)
 
-        n = len(self._proxy.patron)
+        rango = _rango_resaltado(texto, self._proxy.patron)
         documento = QTextDocument()
         documento.setDefaultFont(opcion.font)
-        if 0 < n <= len(texto):
-            documento.setHtml(f"<b>{html.escape(texto[:n])}</b>{html.escape(texto[n:])}")
+        if rango:
+            inicio, fin = rango
+            documento.setHtml(
+                f"{html.escape(texto[:inicio])}<b>{html.escape(texto[inicio:fin])}</b>{html.escape(texto[fin:])}"
+            )
         else:
             documento.setHtml(html.escape(texto))
 
@@ -151,7 +165,7 @@ def habilitar_busqueda_profesional(combo: QComboBox) -> None:
     completador = QCompleter(combo)
     completador.setModel(proxy)
     completador.setCompletionColumn(0)
-    completador.popup().setItemDelegate(_DelegadoNegritaPrefijo(proxy, completador.popup()))
+    completador.popup().setItemDelegate(_DelegadoNegritaCoincidencia(proxy, completador.popup()))
     combo.setCompleter(completador)
     combo.lineEdit().textEdited.connect(proxy.establecer_patron)
     combo.lineEdit().editingFinished.connect(lambda: _confirmar_texto(combo))
@@ -162,13 +176,13 @@ def _confirmar_texto(combo: QComboBox) -> None:
     texto = combo.currentText().strip()
     indice = combo.findText(texto, Qt.MatchFlag.MatchFixedString)
     if indice < 0 and texto:
-        # Coincidencia parcial (ej. tipeó solo "r1" o "r1" sin completar
-        # con la sugerencia del desplegable): se acepta solo si matchea
-        # una única opción por prefijo — con más de una (ej. "r1"
-        # matchea tanto "R1" como "R10") no hay forma de saber cuál
-        # quiso decir, así que no se adivina.
+        # Coincidencia parcial (ej. tipeó solo "r1" o "lo veci" sin
+        # completar con la sugerencia del desplegable): se acepta solo
+        # si matchea una única opción — con más de una (ej. "r1" matchea
+        # tanto "R1" como "R10") no hay forma de saber cuál quiso decir,
+        # así que no se adivina.
         patron = _normalizar(texto)
-        coincidencias = [i for i in range(combo.count()) if _normalizar(combo.itemText(i)).startswith(patron)]
+        coincidencias = [i for i in range(combo.count()) if patron in _normalizar(combo.itemText(i))]
         if len(coincidencias) == 1:
             indice = coincidencias[0]
     if indice >= 0:

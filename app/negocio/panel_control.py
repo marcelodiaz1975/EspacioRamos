@@ -277,6 +277,12 @@ def cumpleanos_y_dias_profesion_proximos(conn: sqlite3.Connection, meses_ventana
       ver su columna en `schema.sql`) — una fecha fija que se repite
       todos los años, a diferencia de FechasEspeciales (fechas puntuales
       de un año concreto). Profesiones sin este dato cargado no aparecen.
+      Texto coloquial ("Día del Psicólogo"), armado con `Profesion.
+      NombreMasculino` (ya existía en el catálogo, sin agregar ningún
+      campo nuevo para esto) — "del" es gramaticalmente correcto para
+      cualquier nombre marcado como masculino en el catálogo. Sin
+      `NombreMasculino` cargado, cae al genérico "Día de la profesión:
+      {Nombre}" en vez de romper.
 
     Mismo criterio de ventana que `fechas_especiales_proximas_dos_meses`
     (lo que queda del mes en curso más los próximos `meses_ventana`
@@ -306,7 +312,8 @@ def cumpleanos_y_dias_profesion_proximos(conn: sqlite3.Connection, meses_ventana
         eventos.append(EventoProximo((proxima - hoy).days, proxima, f"Cumpleaños de {nombre}"))
 
     profesiones = conn.execute(
-        "SELECT Nombre, DiaProfesion FROM Profesion WHERE DiaProfesion IS NOT NULL AND DiaProfesion != ''"
+        "SELECT Nombre, NombreMasculino, DiaProfesion FROM Profesion "
+        "WHERE DiaProfesion IS NOT NULL AND DiaProfesion != ''"
     ).fetchall()
     for prof in profesiones:
         try:
@@ -316,6 +323,11 @@ def cumpleanos_y_dias_profesion_proximos(conn: sqlite3.Connection, meses_ventana
         proxima = _proxima_ocurrencia(hoy, mes, dia)
         if proxima is None or proxima > limite:
             continue
-        eventos.append(EventoProximo((proxima - hoy).days, proxima, f"Día de la profesión: {prof['Nombre']}"))
+        descripcion = (
+            f"Día del {prof['NombreMasculino']}"
+            if prof["NombreMasculino"]
+            else f"Día de la profesión: {prof['Nombre']}"
+        )
+        eventos.append(EventoProximo((proxima - hoy).days, proxima, descripcion))
 
     return sorted(eventos, key=lambda e: e.dias_restantes)
