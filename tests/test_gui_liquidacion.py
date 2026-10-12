@@ -43,7 +43,7 @@ def _crear_profesional(conn, apellido="Gómez", id_codigo=None, saldo_anterior=0
 def test_periodo_por_defecto_es_el_actual(qtbot, conn):
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.panel_emision.campo_periodo.text() == periodo_actual(conn)
+    assert pantalla.panel_emision.campo_periodo.periodo() == periodo_actual(conn)
 
 
 def test_lista_solo_profesionales_categoria_r(qtbot, conn):
@@ -109,6 +109,35 @@ def test_calcula_monto_a_generar_sin_reservas(qtbot, conn):
         pantalla.panel_emision.tabla.horizontalHeaderItem(i).text()
         for i in range(pantalla.panel_emision.tabla.columnCount())
     ] == ["Incluir", "Profesional", "Horas semanales", "Saldo anterior", "Monto a generar", "Estado"]
+
+
+def test_monto_a_generar_incluye_el_saldo_anterior(qtbot, conn):
+    """Pedido explícito de la clienta: "Monto a generar" tiene que
+    coincidir con el importe en letras del PDF (`liquidacion.total` =
+    saldo anterior + lo generado este período), no con `monto_generado`
+    a secas (que excluye el saldo anterior)."""
+    _crear_profesional(conn, saldo_anterior=-1500)  # a favor del profesional
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    # sin reservas, monto_generado = 0 -> total = -1500 + 0 = -1500
+    assert pantalla.panel_emision.tabla.item(0, 4).text() == formatear_moneda(-1500)
+
+
+def test_boton_emitir_seleccionadas_deshabilitado_sin_tildar_ningun_check(qtbot, conn):
+    """Pedido explícito de la clienta: "Emitir liquidaciones
+    seleccionadas" queda deshabilitado mientras no haya ningún check
+    tildado en la tabla."""
+    _crear_profesional(conn)
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_emision
+    assert not panel.boton_emitir_seleccionadas.isEnabled()
+
+    panel.tabla.item(0, 0).setCheckState(Qt.CheckState.Checked)
+    assert panel.boton_emitir_seleccionadas.isEnabled()
+
+    panel.tabla.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
+    assert not panel.boton_emitir_seleccionadas.isEnabled()
 
 
 def test_columna_horas_semanales_suma_las_reservas_regulares_vigentes(qtbot, conn):
@@ -300,7 +329,7 @@ def test_foco_inicial_queda_en_periodo(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.show()
     qtbot.waitExposed(pantalla)
-    qtbot.waitUntil(lambda: pantalla.panel_emision.campo_periodo.hasFocus())
+    qtbot.waitUntil(lambda: pantalla.panel_emision.campo_periodo.spin_anio.hasFocus())
 
 
 def test_cadena_de_foco_de_emision_incluye_los_tres_botones_de_emitir(qtbot, conn):
@@ -315,7 +344,8 @@ def test_cadena_de_foco_de_emision_incluye_los_tres_botones_de_emitir(qtbot, con
     assert len(botones_emitir) == 3
     orden = panel._foco._orden
     assert orden == [
-        panel.campo_periodo, panel.combo_profesional_filtro, panel.combo_estado_filtro, panel.boton_calcular,
+        panel.campo_periodo.spin_anio, panel.campo_periodo.combo_mes,
+        panel.combo_profesional_filtro, panel.combo_estado_filtro, panel.boton_calcular,
         *botones_emitir,
     ]
 

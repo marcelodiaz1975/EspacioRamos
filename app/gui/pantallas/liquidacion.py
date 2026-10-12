@@ -63,6 +63,7 @@ from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import clave_orden_codigo
 from app.gui.widgets.resumen_saldo import item_monto
+from app.gui.widgets.selector_periodo import SelectorPeriodo
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_liquidaciones_simuladas, carpeta_profesional
 from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual, sumar_meses
@@ -166,8 +167,8 @@ class _PanelEmisionArchivos(QWidget):
         layout_filtros = QVBoxLayout(panel_filtros)
 
         layout_filtros.addWidget(QLabel("Período:"))
-        self.campo_periodo = QLineEdit()
-        self.campo_periodo.editingFinished.connect(self.actualizar)
+        self.campo_periodo = SelectorPeriodo(self.conn)
+        self.campo_periodo.cambiado.connect(self.actualizar)
         layout_filtros.addWidget(self.campo_periodo)
 
         layout_filtros.addWidget(QLabel("Profesional:"))
@@ -195,17 +196,18 @@ class _PanelEmisionArchivos(QWidget):
         boton_emitir_pendientes.setObjectName("botonSecundario")
         boton_emitir_pendientes.clicked.connect(self._emitir_pendientes)
         layout_filtros.addWidget(boton_emitir_pendientes)
-        boton_emitir_seleccionadas = QPushButton("Emitir liquidaciones seleccionadas")
-        boton_emitir_seleccionadas.setObjectName("botonSecundario")
-        boton_emitir_seleccionadas.clicked.connect(self._emitir_seleccionadas)
-        layout_filtros.addWidget(boton_emitir_seleccionadas)
+        self.boton_emitir_seleccionadas = QPushButton("Emitir liquidaciones seleccionadas")
+        self.boton_emitir_seleccionadas.setObjectName("botonSecundario")
+        self.boton_emitir_seleccionadas.setEnabled(False)
+        self.boton_emitir_seleccionadas.clicked.connect(self._emitir_seleccionadas)
+        layout_filtros.addWidget(self.boton_emitir_seleccionadas)
         boton_emitir_todas = QPushButton("Emitir todas las liquidaciones")
         boton_emitir_todas.setObjectName("botonSecundario")
         boton_emitir_todas.clicked.connect(self._emitir_todas)
         layout_filtros.addWidget(boton_emitir_todas)
 
         for boton in (
-            self.boton_calcular, boton_emitir_pendientes, boton_emitir_seleccionadas, boton_emitir_todas,
+            self.boton_calcular, boton_emitir_pendientes, self.boton_emitir_seleccionadas, boton_emitir_todas,
         ):
             boton.setFixedWidth(_ANCHO_BOTON_EMISION)
 
@@ -224,19 +226,34 @@ class _PanelEmisionArchivos(QWidget):
         # columna hasta el próximo refresco, que la vuelve a dejar así
         # (mismo criterio que Centro de mensajería).
         self.tabla.setSortingEnabled(True)
+        self.tabla.itemChanged.connect(self._actualizar_boton_seleccionadas)
         layout_externo.addWidget(self.tabla, stretch=1)
 
-        self.campo_periodo.setText(periodo_actual(self.conn))
         self._foco = instalar_enter_avanza_foco(
             [
-                self.campo_periodo, self.combo_profesional_filtro, self.combo_estado_filtro, self.boton_calcular,
-                boton_emitir_pendientes, boton_emitir_seleccionadas, boton_emitir_todas,
+                self.campo_periodo.spin_anio, self.campo_periodo.combo_mes, self.combo_profesional_filtro,
+                self.combo_estado_filtro, self.boton_calcular, boton_emitir_pendientes,
+                self.boton_emitir_seleccionadas, boton_emitir_todas,
             ],
             parent=self,
         )
 
+    def _actualizar_boton_seleccionadas(self, item: QTableWidgetItem | None = None) -> None:
+        """Pedido explícito de la clienta: "Emitir liquidaciones
+        seleccionadas" queda deshabilitado mientras no haya ningún check
+        tildado en la columna "Incluir" — conectado a `itemChanged` (no
+        solo a un click puntual) porque tildar/destildar un check dispara
+        justamente esa señal, no `itemSelectionChanged`."""
+        if item is not None and item.column() != 0:
+            return
+        hay_alguno_tildado = any(
+            self.tabla.item(fila, 0) is not None and self.tabla.item(fila, 0).checkState() == Qt.CheckState.Checked
+            for fila in range(self.tabla.rowCount())
+        )
+        self.boton_emitir_seleccionadas.setEnabled(hay_alguno_tildado)
+
     def _periodo(self) -> str:
-        return self.campo_periodo.text().strip() or periodo_actual(self.conn)
+        return self.campo_periodo.periodo()
 
     def actualizar(self) -> None:
         """Sin selección por defecto (el operador elige a quién emitir a
@@ -255,7 +272,16 @@ class _PanelEmisionArchivos(QWidget):
                 liquidacion = calcular_liquidacion(
                     self.conn, id_profesional=profesional["IdProfesional"], periodo=periodo
                 )
-                monto_generado, monto_error = liquidacion.monto_generado, None
+                # Pedido explícito de la clienta: "Monto a generar" tiene que
+                # coincidir con el importe en letras del PDF —
+                # `liquidacion.total` (saldo anterior + lo generado este
+                # período), no `monto_generado` a secas (que excluye el
+                # saldo anterior — ese valor más angosto SÍ sigue siendo lo
+                # que `emitir_liquidacion` persiste en `LiquidacionEmitida.
+                # MontoGenerado`, necesario para el mecanismo de delta entre
+                # reemisiones; acá es puramente una vista previa antes de
+                # emitir, no toca esa lógica).
+                monto_generado, monto_error = liquidacion.total, None
             except ValueError as error:
                 monto_generado, monto_error = None, str(error)
             ultima = self.conn.execute(
@@ -294,6 +320,7 @@ class _PanelEmisionArchivos(QWidget):
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(f["estado"]))
         self.tabla.setSortingEnabled(True)
         self.tabla.resizeColumnsToContents()
+        self._actualizar_boton_seleccionadas()
 
     @staticmethod
     def _item_incluir(id_profesional: int) -> QTableWidgetItem:

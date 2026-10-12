@@ -8742,3 +8742,118 @@ sendEvent` — un `.show()` directo sobre el `QCalendarWidget` de un
 `QDateTimeEdit`, pensado para mostrarse solo como popup nativo, no
 siempre entrega el evento esperado) y los de confirmación/regeneración/
 botones deshabilitados, mismo criterio que rondas anteriores.
+
+## Sexta tanda de correcciones post-v1: Valores vigentes, Liquidaciones,
+## Fechas especiales
+
+### Valores vigentes: filtro colapsable corría la tabla (#54/#55)
+
+`_PanelFiltrosJerarquico` solo tenía `setMaximumWidth(260)` en vez de
+`setFixedWidth(260)` — en estado colapsado (el default) el panel se
+achicaba a su ancho natural, más angosto que 260px, así que desplegar
+cualquiera de los 4 `_FiltroColapsable` (Localidad/Edificio/Unidad/
+Consultorio) con nombres largos lo empujaba de vuelta hacia 260px,
+corriendo "Valores vigentes por horas regulares y aisladas" (el único
+widget con `stretch=1` del `QHBoxLayout`) hacia la derecha — mismo bug
+ya documentado y corregido en su momento para Oferta de consultorios.
+Se corrige con `setFixedWidth`, igual que esa pantalla.
+
+De paso, ninguna de las dos tablas de esta solapa (`tabla_valores` de
+`_PanelValoresVigentes`, la de `_PanelPromedios`) tenía nunca excluida
+del tab-chain nativo — Tab podía entrar a ellas y, una vez dentro,
+navegar celda por celda en vez de saltar al siguiente control real de
+la pantalla. `setFocusPolicy(Qt.FocusPolicy.ClickFocus)` +
+`setTabKeyNavigation(True)` en las dos (mismo criterio ya usado en
+otras tablas de solo lectura del sistema): Tab ya no entra, un click
+sigue pudiendo seleccionar una fila.
+
+### Liquidaciones: "Monto a generar" no coincidía con el PDF (#58)
+
+`LiquidacionCalculada.monto_generado` ("lo que esta emisión aporta por
+sí sola, SIN saldo anterior" — el valor que de verdad se persiste en
+`LiquidacionEmitida.MontoGenerado`, crítico para el mecanismo de delta
+de `emitir_liquidacion` en una reemisión) y `.total` (`saldo_anterior +
+monto_generado`, lo que el PDF realmente pone en letras) son dos cosas
+distintas a propósito — la columna "Monto a generar" de la vista previa
+de "Emisión de archivos" mostraba la primera, pero la clienta esperaba
+ver el mismo número que el PDF. Se corrige SOLO en la columna de la
+vista previa (`_PanelEmisionArchivos.actualizar()` pasa a leer
+`liquidacion.total`) — lo que se persiste y el mecanismo de reemisión
+no se tocan.
+
+### Liquidaciones: "Emitir liquidaciones seleccionadas" sin selección (#60)
+
+El botón quedaba siempre habilitado, aunque ningún check de la tabla
+estuviera tildado — `boton_emitir_seleccionadas` pasa a `self.`,
+arranca deshabilitado, y una nueva `_actualizar_boton_seleccionadas`
+(conectada a `tabla.itemChanged`, llamada también al final de
+`actualizar()`) lo habilita solo si hay al menos un check tildado.
+Cuidado al armar esto: `itemChanged` dispara en medio del propio loop
+de `actualizar()` que puebla la tabla fila por fila (`setItem` en la
+fila N dispara el evento antes de que la fila N+1 tenga su item en la
+columna 0 todavía) — `any(...)` necesita filtrar `item is not None`
+antes de preguntar `.checkState()`, si no tira `AttributeError` sobre
+`None`.
+
+### Selector de período Año + Mes, reemplaza el texto libre "AAAA-MM" (#59)
+
+Pedido de la clienta: poder elegir el período con un desplegable de
+año y uno de mes, en vez de tipear "AAAA-MM" a mano. `SelectorPeriodo`
+(`app/gui/widgets/selector_periodo.py`, nuevo) es un `QWidget` chico y
+reusable — `QSpinBox` (año, 2000-2100) + `QComboBox` (mes, "Enero" a
+"Diciembre"), arranca en `periodo_actual(conn)` (respeta la fecha
+ficticia de QA), expone `periodo()`/`set_periodo(...)` con el mismo
+formato "AAAA-MM" que usa el resto del sistema, y una señal `cambiado`
+que se emite al tocar cualquiera de los dos — pensado para reemplazar,
+de a una, cualquier otro campo de período en texto libre del sistema;
+por ahora solo se integra en "Emisión de archivos" (Liquidaciones), el
+caso puntual que pidió la clienta primero.
+
+`campo_periodo` (`_PanelEmisionArchivos`) pasa de `QLineEdit` a
+`SelectorPeriodo`; `_periodo()` pasa de leer `.text()` a `.periodo()`;
+la cadena de foco suma `campo_periodo.spin_anio`/`.combo_mes` como dos
+entradas separadas en el lugar donde antes había una sola. "Período a
+simular" (Liquidaciones simuladas, otra solapa del mismo formulario)
+NO se tocó — sigue en texto libre, es un campo distinto, sin relación.
+
+Bug de conexión encontrado al armarlo: `QSpinBox.valueChanged`/
+`QComboBox.currentIndexChanged` pasan el valor nuevo como argumento al
+slot conectado — conectarlos directo a `self.cambiado.emit` (una señal
+de 0 argumentos) tira `TypeError: cambiado() only accepts 0 argument(s),
+1 given!` en cuanto se toca el spin/combo. Se resuelve con
+`_emitir_cambiado(self, *_args)` como intermediario.
+
+### Fechas especiales: aviso de regeneración antes de confirmar (#61)
+
+Mismo criterio ya usado en Aumentos: antes de guardar un alta/edición/
+baja que afecte una fecha del PERÍODO ACTUAL, si ya hay liquidaciones
+emitidas para ese período, se avisa con la cantidad exacta
+(`cantidad_liquidaciones_a_regenerar`, reusada de `app.negocio.
+aumentos`, no duplicada) y se puede cancelar. Al confirmar (alta/
+edición) o directamente al eliminar (sin segunda confirmación — el
+cartel genérico de "¿Confirmás eliminar?" ya cumplió ese rol), se
+regeneran solas las liquidaciones de los profesionales R de ese
+período (`regenerar_si_corresponde`, mismo mecanismo que Vacaciones/
+Licencias/Reservas regulares) — una edición chequea tanto la fecha
+VIEJA como la NUEVA (mover una fecha especial fuera del período actual
+también tiene que disparar la regeneración de ese período).
+
+Bug de referencia débil encontrado al conectar los hooks:
+`PantallaCRUD` guarda `al_crear`/`al_actualizar`/`al_eliminar` como
+`weakref` (a propósito, para no crear un ciclo de GC con métodos atados
+a la propia pantalla) — pasar lambdas sueltas, sin ninguna otra
+referencia fuerte, las deja elegibles para el recolector de basura casi
+de inmediato, volviendo los hooks no-ops en silencio. Se resuelve
+anclándolas como atributo del objeto devuelto
+(`pantalla._hooks_regeneracion = (al_crear, al_actualizar, al_eliminar)`)
+— mismo criterio que ya usa el resto del sistema para hooks de
+`PantallaCRUD` que no son métodos de la propia pantalla.
+
+Tests: `tests/test_gui_valores.py`/`tests/test_gui_pantalla_grilla_
+operativa.py` (ancho fijo del panel de filtros, tablas fuera del
+tab-chain); `tests/test_gui_liquidacion.py` (monto a generar = total,
+botón de seleccionadas deshabilitado sin tildar nada, más la
+actualización de los tests de foco/período por defecto al nuevo
+`SelectorPeriodo`); `tests/test_catalogos.py` (aviso de regeneración al
+crear/cancelar la confirmación/sin liquidaciones emitidas/al eliminar
+sin preguntar de nuevo).

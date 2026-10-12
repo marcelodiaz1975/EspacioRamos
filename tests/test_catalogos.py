@@ -5,6 +5,8 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.crud_generico import _DialogoRegistro
 from app.gui.pantallas import catalogos
+from app.negocio.dias import periodo_actual
+from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -653,3 +655,110 @@ def test_gasto_operativo_mismo_origen_no_pregunta(qtbot, conn, monkeypatch):
 
     assert preguntas == []
     assert len(obtener_repositorio(conn, "GastoOperativo").listar()) == 2
+
+
+def _crear_profesional_r(conn, apellido="Gómez"):
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', ?)", (apellido,))
+    conn.commit()
+    return conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = ?", (apellido,)).fetchone()[
+        "IdProfesional"
+    ]
+
+
+def test_crear_fecha_especial_del_mes_en_curso_avisa_y_regenera(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: crear un feriado/fecha especial
+    del período en curso dispara el mismo aviso de regeneración que ya
+    tiene Aumentos."""
+    id_profesional = _crear_profesional_r(conn)
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+
+    def _dialogo_aceptado(self, *a, **k):
+        # la Fecha arranca sola en "hoy" (QDate.currentDate()), que cae
+        # en el período en curso de una base recién creada sin fecha
+        # ficticia — alcanza con no tocarla.
+        self._entradas["Descripcion"].setText("Feriado de prueba")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_aceptado)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    pantalla._nuevo()
+
+    assert conn.execute("SELECT COUNT(*) c FROM FechasEspeciales").fetchone()["c"] == 1
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_crear_fecha_especial_cancelando_confirmacion_no_persiste(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional_r(conn)
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    conn.commit()
+
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+
+    def _dialogo_aceptado(self, *a, **k):
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_aceptado)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    pantalla._nuevo()
+
+    assert conn.execute("SELECT COUNT(*) c FROM FechasEspeciales").fetchone()["c"] == 0
+
+
+def test_crear_fecha_especial_sin_liquidaciones_emitidas_no_pregunta(qtbot, conn, monkeypatch):
+    """Sin ninguna liquidación emitida para el período en curso no hay
+    nada que regenerar — no corresponde preguntar nada."""
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+
+    preguntas = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: preguntas.append(a) or QMessageBox.StandardButton.Yes),
+    )
+
+    def _dialogo_aceptado(self, *a, **k):
+        self._entradas["Descripcion"].setText("Feriado de prueba")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_aceptado)
+    pantalla._nuevo()
+
+    assert preguntas == []
+    assert conn.execute("SELECT COUNT(*) c FROM FechasEspeciales").fetchone()["c"] == 1
+
+
+def test_eliminar_fecha_especial_del_mes_en_curso_regenera_sin_preguntar_de_nuevo(qtbot, conn, monkeypatch):
+    """Eliminar no pide una segunda confirmación aparte de la genérica de
+    "¿Confirmás eliminar?" — regenera directo."""
+    id_profesional = _crear_profesional_r(conn)
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha=periodo + "-15", Descripcion="Feriado de prueba", Tipo="Feriado nacional", Activo=1,
+    )
+    conn.commit()
+
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    pantalla.tabla_widget.selectRow(0)  # la tabla tiene un solo registro
+    pantalla._eliminar()
+
+    assert conn.execute("SELECT COUNT(*) c FROM FechasEspeciales").fetchone()["c"] == 0
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"

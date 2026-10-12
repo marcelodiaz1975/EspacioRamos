@@ -17,9 +17,11 @@ from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.dias import periodo_actual
 from app.negocio.formato import formatear_moneda
+from app.negocio.aumentos import cantidad_liquidaciones_a_regenerar
 from app.negocio.gastos_operativos import ALCANCES_GASTO, gasto_en_conflicto, sanear_alcance
 from app.negocio.condiciones_normas import reordenar_al_guardar as reordenar_condiciones_al_guardar
 from app.negocio.detalles_complementarios import reordenar_al_guardar as reordenar_detalles_al_guardar
+from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import opciones_lista, reordenar_al_guardar
 from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
 from app.pdf.estilos import clave_orden_unidad
@@ -415,6 +417,59 @@ def _resolver_conflicto_gasto(parent, conn: sqlite3.Connection, valores: dict, r
     return valores
 
 
+def _afecta_periodo_actual(conn: sqlite3.Connection, fecha: str | None) -> bool:
+    return bool(fecha) and fecha[:7] == periodo_actual(conn)
+
+
+def _regenerar_liquidaciones_del_periodo_actual(conn: sqlite3.Connection) -> None:
+    periodo = periodo_actual(conn)
+    ids_profesional = {f["IdProfesional"] for f in obtener_repositorio(conn, "LiquidacionEmitida").listar(Periodo=periodo)}
+    for id_profesional in ids_profesional:
+        regenerar_si_corresponde(conn, id_profesional=id_profesional, periodo=periodo)
+
+
+def _al_guardar_fecha_especial(valores: dict, registro, conn: sqlite3.Connection) -> dict | None:
+    """Pedido explícito de la clienta: crear/editar un feriado o fecha
+    especial del período en curso dispara el mismo aviso de
+    regeneración que ya tiene Aumentos ("Hay N liquidación(es) ya
+    emitida(s)... ¿Confirmás?") — antes de guardar, no solo después.
+    Mira tanto la fecha nueva como la que tenía antes de editar (si se
+    la corre fuera del período en curso, también hay que avisar)."""
+    fecha_nueva = valores.get("Fecha")
+    fecha_vieja = registro["Fecha"] if registro is not None else None
+    if not (_afecta_periodo_actual(conn, fecha_nueva) or _afecta_periodo_actual(conn, fecha_vieja)):
+        return valores
+    cantidad = cantidad_liquidaciones_a_regenerar(conn, periodo_actual(conn))
+    if cantidad == 0:
+        return valores
+    respuesta = QMessageBox.question(
+        None, "Fechas especiales",
+        f"Hay {cantidad} liquidación(es) ya emitida(s) para el período en curso ({periodo_actual(conn)}): "
+        "este cambio las va a regenerar y van a quedar marcadas como no enviadas. ¿Confirmás?",
+    )
+    return valores if respuesta == QMessageBox.StandardButton.Yes else None
+
+
+def _al_crear_fecha_especial(conn: sqlite3.Connection, _id_nuevo: int, valores: dict) -> None:
+    if _afecta_periodo_actual(conn, valores.get("Fecha")):
+        _regenerar_liquidaciones_del_periodo_actual(conn)
+
+
+def _al_actualizar_fecha_especial(conn: sqlite3.Connection, registro, valores: dict) -> None:
+    if _afecta_periodo_actual(conn, valores.get("Fecha")) or _afecta_periodo_actual(conn, registro["Fecha"]):
+        _regenerar_liquidaciones_del_periodo_actual(conn)
+
+
+def _al_eliminar_fecha_especial(conn: sqlite3.Connection, registro) -> None:
+    """A diferencia de crear/editar, acá no hay forma de preguntar ANTES
+    de eliminar (`al_eliminar` corre después del borrado — el cartel
+    genérico de "¿Confirmás eliminar?" de `PantallaCRUD` ya sirvió de
+    confirmación para la acción en sí): se regenera directo, sin pedir
+    una segunda confirmación."""
+    if _afecta_periodo_actual(conn, registro["Fecha"]):
+        _regenerar_liquidaciones_del_periodo_actual(conn)
+
+
 def pantalla_fechas_especiales(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Fecha", "Fecha", tipo="fecha"),
@@ -423,4 +478,18 @@ def pantalla_fechas_especiales(conn: sqlite3.Connection, *, anidado: bool = Fals
         Campo("Activo", "Activo", tipo="booleano"),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "FechasEspeciales", "Fechas especiales", campos, anidado=anidado)
+    al_crear = lambda id_nuevo, valores: _al_crear_fecha_especial(conn, id_nuevo, valores)  # noqa: E731
+    al_actualizar = lambda registro, valores: _al_actualizar_fecha_especial(conn, registro, valores)  # noqa: E731
+    al_eliminar = lambda registro: _al_eliminar_fecha_especial(conn, registro)  # noqa: E731
+    pantalla = PantallaCRUD(
+        conn, "FechasEspeciales", "Fechas especiales", campos, anidado=anidado,
+        al_guardar=lambda valores, registro: _al_guardar_fecha_especial(valores, registro, conn),
+        al_crear=al_crear, al_actualizar=al_actualizar, al_eliminar=al_eliminar,
+    )
+    # `al_crear`/`al_actualizar`/`al_eliminar` quedan como weakref dentro de
+    # `PantallaCRUD` (mismo motivo que Llaves: evitar un ciclo pantalla ->
+    # PantallaCRUD -> pantalla) — acá son lambdas sueltas, sin ninguna
+    # pantalla compuesta que las sostenga, así que hay que anclarlas a mano
+    # para que no las recolecte el GC apenas retorna esta función.
+    pantalla._hooks_regeneracion = (al_crear, al_actualizar, al_eliminar)
+    return pantalla
