@@ -75,6 +75,7 @@ from app.negocio.liquidacion_simulada import (
     calcular_liquidacion_simulada,
 )
 from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion
+from app.negocio.oferta_busqueda_texto import categoria_es_activa
 from app.negocio.valores import horas_semanales_vigentes
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
 from app.pdf.liquidacion_simulada_pdf import generar_pdf_liquidacion_simulada
@@ -509,14 +510,20 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         self.tabla.resizeColumnsToContents()
 
 
-def _ubicacion_bloque(conn: sqlite3.Connection, id_consultorio: int) -> tuple[str, str, str, str]:
+def _ubicacion_bloque(
+    conn: sqlite3.Connection, id_consultorio: int, *, anonimizar: bool = False,
+) -> tuple[str, str, str, str]:
     """Localidad/Edificio/Unidad/Consultorio de un bloque simulado, para
     la tabla "Bloques cargados" — mismo criterio "(Sin localidad)" que
     `_opciones_localidad` de `reservas.py` cuando el edificio no tiene
-    localidad cargada."""
+    localidad cargada. `anonimizar=True` (profesional categoría C, no
+    activo) muestra "Unidad {IdUnidad}" en vez del Departamento real —
+    mismo criterio exacto que `oferta_pdf`/`fotos_pdf` para esa
+    categoría, Localidad/Edificio/Consultorio no se tocan."""
     fila = conn.execute(
         """
-        SELECT loc.Localidad AS Localidad, e.Nombre AS Edificio, u.Departamento AS Unidad, c.NumeroConsultorio AS Consultorio
+        SELECT loc.Localidad AS Localidad, e.Nombre AS Edificio, u.IdUnidad AS IdUnidad,
+            u.Departamento AS Unidad, c.NumeroConsultorio AS Consultorio
         FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
         LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
         WHERE c.IdConsultorio = ?
@@ -525,8 +532,9 @@ def _ubicacion_bloque(conn: sqlite3.Connection, id_consultorio: int) -> tuple[st
     ).fetchone()
     if fila is None:
         return ("", "", "", "")
+    unidad = f"Unidad {fila['IdUnidad']}" if anonimizar else fila["Unidad"]
     return (
-        fila["Localidad"] or "(Sin localidad)", fila["Edificio"], fila["Unidad"],
+        fila["Localidad"] or "(Sin localidad)", fila["Edificio"], unidad,
         f"Consultorio {fila['Consultorio']}",
     )
 
@@ -579,7 +587,12 @@ class _PanelLiquidacionesSimuladas(QWidget):
 
         layout_izquierda.addWidget(QLabel("Profesional:"))
         self.combo_profesional = QComboBox()
-        for id_, etiqueta in _opciones_profesional(self.conn, ("R",)):
+        # Pedido explícito de la clienta: abierto a cualquier categoría
+        # (antes solo R) — también sirve para mostrarle a un profesional
+        # categoría C (todavía no activo) cuánto le saldría, igual que
+        # ya hacen Oferta de consultorios/Disponibilidad con ese mismo
+        # perfil de profesional.
+        for id_, etiqueta in _opciones_profesional(self.conn):
             self.combo_profesional.addItem(etiqueta, id_)
         habilitar_busqueda_profesional(self.combo_profesional)
         layout_izquierda.addWidget(self.combo_profesional)
@@ -698,6 +711,7 @@ class _PanelLiquidacionesSimuladas(QWidget):
         self.combo_localidad.currentIndexChanged.connect(self._al_cambiar_localidad)
         self.combo_edificio.currentIndexChanged.connect(self._al_cambiar_edificio)
         self.combo_unidad.currentIndexChanged.connect(self._al_cambiar_unidad)
+        self.combo_profesional.currentIndexChanged.connect(self._al_cambiar_profesional)
         self._cargar_localidades()
 
         self._foco = instalar_enter_avanza_foco([
@@ -731,6 +745,26 @@ class _PanelLiquidacionesSimuladas(QWidget):
     def _actualizar_boton_quitar_bloque(self) -> None:
         self.boton_quitar_bloque.setEnabled(bool(self.tabla_bloques.selectedItems()))
 
+    def _anonimizar_actual(self) -> bool:
+        """Categoría C (todavía no activo): la ubicación se anonimiza
+        igual que en Oferta de consultorios/Disponibilidad — el resto
+        (B/R/A/E/X) muestra los datos reales de siempre."""
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            return False
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        return profesional is not None and not categoria_es_activa(profesional)
+
+    def _al_cambiar_profesional(self) -> None:
+        """Pedido explícito de la clienta: cambiar de profesional limpia
+        los bloques ya cargados — fueron armados pensando en el
+        profesional anterior, y si alguno de los dos es categoría C la
+        numeración anonimizada de unidad ("Unidad N") cambiaría de
+        sentido de todos modos."""
+        self._bloques.clear()
+        self._refrescar_tabla_bloques()
+        self.tabla_subtotales.setRowCount(0)
+
     def _agregar_bloque(self) -> None:
         id_consultorio = self.combo_consultorio.currentData()
         if id_consultorio is None:
@@ -756,9 +790,12 @@ class _PanelLiquidacionesSimuladas(QWidget):
         self._refrescar_tabla_bloques()
 
     def _refrescar_tabla_bloques(self) -> None:
+        anonimizar = self._anonimizar_actual()
         self.tabla_bloques.setRowCount(len(self._bloques))
         for fila, bloque in enumerate(self._bloques):
-            localidad, edificio, unidad, consultorio = _ubicacion_bloque(self.conn, bloque.id_consultorio)
+            localidad, edificio, unidad, consultorio = _ubicacion_bloque(
+                self.conn, bloque.id_consultorio, anonimizar=anonimizar,
+            )
             self.tabla_bloques.setItem(fila, 0, item_numero(str(fila + 1)))
             self.tabla_bloques.setItem(fila, 1, QTableWidgetItem(bloque.dia_semana))
             self.tabla_bloques.setItem(fila, 2, item_numero(f"{_fmt_hora(bloque.hora_inicio)}hs"))

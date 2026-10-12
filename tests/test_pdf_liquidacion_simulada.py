@@ -66,6 +66,23 @@ def test_pdf_incluye_descuento_de_feriado_cuando_hay(conn, profesional, consulto
     assert "Descuento feriado nacional (2026-11-02)" in texto
 
 
+def test_profesional_categoria_c_anonimiza_la_unidad(conn, consultorio, tmp_path):
+    """Mismo criterio que `oferta_pdf`/`fotos_pdf`: categoría C (todavía
+    no activo) muestra "Unidad {IdUnidad}" en vez del Departamento
+    real — el resto de las categorías (R/A/B/E/X) muestran el dato
+    real, confirmado por `test_genera_pdf_con_los_bloques_y_el_total`
+    (categoría R)."""
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="C", Apellido="Suárez")
+    id_unidad = obtener_repositorio(conn, "Consultorio").obtener(consultorio)["IdUnidad"]
+    bloque = BloqueSimulado(dia_semana="Lunes", hora_inicio=9, hora_fin=11, id_consultorio=consultorio)
+    liquidacion = calcular_liquidacion_simulada(conn, id_profesional=id_prof, periodo="2026-11", bloques=[bloque])
+
+    ruta = generar_pdf_liquidacion_simulada(conn, liquidacion, str(tmp_path))
+    texto = "".join(pagina.get_text() for pagina in fitz.open(ruta))
+    assert f"consul 1 del Unidad {id_unidad} - Ramos 1" in texto
+    assert "7mo L" not in texto
+
+
 def test_profesional_inexistente_rechaza(conn, tmp_path):
     from app.negocio.liquidacion_simulada import LiquidacionSimulada
     liquidacion = LiquidacionSimulada(

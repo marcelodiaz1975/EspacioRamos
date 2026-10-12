@@ -8914,3 +8914,53 @@ nada, más dos nuevos para el aviso/regeneración de Esquema de
 descuentos. `tests/test_gui_estilos.py` suma `QRadioButton` a los dos
 tests existentes de borde de foco reservado (texto de la hoja + render
 real con muestreo de píxeles).
+
+## Octava tanda de correcciones post-v1: Liquidaciones simuladas abierta a
+## todas las categorías
+
+Pedido explícito de la clienta sobre "Liquidaciones simuladas" (cuarta
+solapa de "Liquidaciones"): el combo Profesional estaba acotado a
+categoría R (`_opciones_profesional(self.conn, ("R",))`), pero el caso
+de uso real de esta herramienta ("mostrarle a un profesional cuánto le
+saldría reservar ciertos bloques antes de darlos de alta de verdad") no
+tiene por qué limitarse a esa categoría — un B, A o E también puede
+querer ver el ejemplo antes de confirmar nada. Combo pasa a `_opciones_
+profesional(self.conn)` (todas las categorías, mismo criterio B/R/A/E/
+X/C que el resto del sistema).
+
+**Anonimización para categoría C** (todavía no activo): mismo criterio
+ya usado en `oferta_pdf`/`fotos_pdf`/`oferta_busqueda_pdf` — "Unidad
+{IdUnidad}" (el ID crudo, autoincremental) en vez del `Departamento`
+real ("7mo L"). `_ubicacion_bloque` (`app/gui/pantallas/liquidacion.py`,
+la tabla "Bloques cargados" de la GUI) y `_lugar_bloque`
+(`app/pdf/liquidacion_simulada_pdf.py`, el PDF) suman un parámetro
+`anonimizar: bool = False`, con el SELECT de las dos extendido para
+traer `Unidad.IdUnidad`. `generar_pdf_liquidacion_simulada` calcula
+`anonimizar = not categoria_es_activa(profesional)` (`app.negocio.
+oferta_busqueda_texto`, el helper ya existente en todo el sistema para
+esta misma distinción) una sola vez, justo después de validar que el
+profesional existe. En la GUI, `_PanelLiquidacionesSimuladas` suma
+`_anonimizar_actual()` (lee la categoría del profesional elegido en el
+combo) y lo pasa a `_ubicacion_bloque` desde `_refrescar_tabla_bloques()`.
+
+**Limpiar bloques al cambiar de profesional**: cargar bloques para un
+profesional y después cambiar el combo a otro dejaba la lista vieja
+colgada, mezclando bloques pensados para un profesional con la
+simulación de otro. `combo_profesional.currentIndexChanged` se conecta
+a `_al_cambiar_profesional` (nueva) — vacía `self._bloques`, refresca
+"Bloques cargados" (ahora vacía) y limpia también "Totales por bloques
+y general" (la simulación anterior ya no corresponde a lo que se ve
+cargado). La conexión se instala al FINAL de `_armar_ui`, después de
+construir `tabla_bloques`/`tabla_subtotales` — conectarla antes
+dispara `currentIndexChanged` durante el propio `addItem` de poblado
+inicial del combo, con esas tablas todavía sin existir.
+
+Tests nuevos: `tests/test_gui_liquidacion.py`
+(`test_liquidaciones_simuladas_lista_todas_las_categorias` — reemplaza
+al viejo "solo categoría R";
+`test_liquidaciones_simuladas_categoria_r_muestra_unidad_real`;
+`test_liquidaciones_simuladas_categoria_c_anonimiza_la_unidad`;
+`test_liquidaciones_simuladas_cambiar_profesional_limpia_bloques_y_
+resultado`). `tests/test_pdf_liquidacion_simulada.py`
+(`test_profesional_categoria_c_anonimiza_la_unidad` — mismo criterio,
+contra el PDF generado).

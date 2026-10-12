@@ -18,6 +18,7 @@ from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.formato import formatear_moneda, hora_fmt, periodo_mm_aaaa
 from app.negocio.liquidacion_simulada import LiquidacionSimulada
+from app.negocio.oferta_busqueda_texto import categoria_es_activa
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
     FUENTE,
@@ -49,10 +50,13 @@ def nombre_archivo_liquidacion_simulada(periodo: str, profesional: sqlite3.Row) 
     return f"{periodo} - Liquidación simulada {_nombre_completo(profesional)}.pdf"
 
 
-def _lugar_bloque(conn: sqlite3.Connection, id_consultorio: int) -> str:
+def _lugar_bloque(conn: sqlite3.Connection, id_consultorio: int, *, anonimizar: bool = False) -> str:
+    """`anonimizar=True` (profesional categoría C, no activo) muestra
+    "Unidad {IdUnidad}" en vez del Departamento real — mismo criterio
+    que `oferta_pdf`/`fotos_pdf` para esa categoría."""
     fila = conn.execute(
         """
-        SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio
+        SELECT c.NumeroConsultorio, u.IdUnidad, u.Departamento, e.Nombre AS NombreEdificio
         FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
         WHERE c.IdConsultorio = ?
         """,
@@ -60,7 +64,8 @@ def _lugar_bloque(conn: sqlite3.Connection, id_consultorio: int) -> str:
     ).fetchone()
     if fila is None:
         return ""
-    return f"consul {fila['NumeroConsultorio']} del {fila['Departamento']} - {fila['NombreEdificio']}"
+    unidad = f"Unidad {fila['IdUnidad']}" if anonimizar else fila["Departamento"]
+    return f"consul {fila['NumeroConsultorio']} del {unidad} - {fila['NombreEdificio']}"
 
 
 def generar_pdf_liquidacion_simulada(conn: sqlite3.Connection, liquidacion: LiquidacionSimulada, directorio: str) -> str:
@@ -68,6 +73,7 @@ def generar_pdf_liquidacion_simulada(conn: sqlite3.Connection, liquidacion: Liqu
     if profesional is None:
         raise ValueError(f"No existe el profesional #{liquidacion.id_profesional}")
     decimales = 2
+    anonimizar = not categoria_es_activa(profesional)
 
     n_filas = len(liquidacion.bloques) + len(liquidacion.descuentos_feriados)
     altura = (10 * cm + n_filas * _ALTO_FILA + 6 * cm) * 1.2
@@ -97,7 +103,7 @@ def generar_pdf_liquidacion_simulada(conn: sqlite3.Connection, liquidacion: Liqu
         for bloque in liquidacion.bloques:
             filas_bloques.append([
                 bloque.dia_semana, f"{hora_fmt(bloque.hora_inicio)} a {hora_fmt(bloque.hora_fin)}",
-                _lugar_bloque(conn, bloque.id_consultorio),
+                _lugar_bloque(conn, bloque.id_consultorio, anonimizar=anonimizar),
             ])
         tabla_bloques = Table(filas_bloques, colWidths=[ancho * 0.2, ancho * 0.3, ancho * 0.5])
         tabla_bloques.setStyle(TableStyle([

@@ -563,16 +563,21 @@ def test_liquidaciones_simuladas_periodo_por_defecto_es_el_mes_siguiente_al_actu
     assert pantalla.panel_liquidaciones_simuladas.campo_periodo.text() == sumar_meses(periodo_actual(conn), 1)
 
 
-def test_liquidaciones_simuladas_lista_solo_profesionales_categoria_r(qtbot, conn):
+def test_liquidaciones_simuladas_lista_todas_las_categorias(qtbot, conn):
+    """Pedido explícito de la clienta: abierto a cualquier categoría
+    (antes solo R) — sirve también para mostrarle a un profesional
+    categoría C (todavía no activo) cuánto le saldría."""
     _crear_profesional(conn, apellido="Gómez", id_codigo="R1")
     conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('A', 'Pérez')")
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('C', 'Suárez')")
     conn.commit()
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_liquidaciones_simuladas
     etiquetas = [panel.combo_profesional.itemText(i) for i in range(panel.combo_profesional.count())]
     assert any("Gómez" in e for e in etiquetas)
-    assert not any("Pérez" in e for e in etiquetas)
+    assert any("Pérez" in e for e in etiquetas)
+    assert any("Suárez" in e for e in etiquetas)
 
 
 def test_liquidaciones_simuladas_boton_quitar_bloque_arranca_deshabilitado(qtbot, conn):
@@ -707,6 +712,61 @@ def test_liquidaciones_simuladas_bloques_cargados_muestra_sin_localidad(qtbot, c
     panel._agregar_bloque()
 
     assert panel.tabla_bloques.item(0, 4).text() == "(Sin localidad)"
+
+
+def test_liquidaciones_simuladas_categoria_r_muestra_unidad_real(qtbot, conn):
+    id_consultorio = _crear_consultorio(conn)
+    id_prof = _crear_profesional(conn, apellido="Gómez")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_prof))
+    _elegir_consultorio(panel, id_consultorio)
+
+    panel._agregar_bloque()
+
+    assert panel.tabla_bloques.item(0, 6).text() == "7mo L"
+
+
+def test_liquidaciones_simuladas_categoria_c_anonimiza_la_unidad(qtbot, conn):
+    """Mismo criterio que Oferta de consultorios/Disponibilidad: un
+    profesional categoría C (todavía no activo) ve "Unidad N" en vez
+    del Departamento real, tanto en la tabla como en el PDF."""
+    id_consultorio = _crear_consultorio(conn)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="C", Apellido="Suárez")
+    id_unidad = obtener_repositorio(conn, "Consultorio").obtener(id_consultorio)["IdUnidad"]
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_prof))
+    _elegir_consultorio(panel, id_consultorio)
+
+    panel._agregar_bloque()
+
+    assert panel.tabla_bloques.item(0, 6).text() == f"Unidad {id_unidad}"
+
+
+def test_liquidaciones_simuladas_cambiar_profesional_limpia_bloques_y_resultado(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    id_consultorio = _crear_consultorio(conn)
+    id_prof_1 = _crear_profesional(conn, apellido="Gómez", id_codigo="R1")
+    id_prof_2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Pérez")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_prof_1))
+    _elegir_consultorio(panel, id_consultorio)
+    panel._agregar_bloque()
+    panel._generar()
+    assert panel.tabla_bloques.rowCount() == 1
+    assert panel.tabla_subtotales.rowCount() == 2
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_prof_2))
+
+    assert panel.tabla_bloques.rowCount() == 0
+    assert panel._bloques == []
+    assert panel.tabla_subtotales.rowCount() == 0
 
 
 def test_liquidaciones_simuladas_subtotal_por_bloque_con_varios_bloques(qtbot, conn, tmp_path):
