@@ -41,3 +41,26 @@ def confirmar_si_periodo_imputado_es_anterior(parent: QWidget, conn: sqlite3.Con
     if not periodo or periodo >= periodo_actual(conn):
         return True
     return _confirmar_periodo_anterior(parent, periodo, f"El período imputado ({periodo})")
+
+
+def confirmar_datos_antes_de_crear(parent: QWidget, titulo: str, lineas: list[str]) -> bool:
+    """Pedido explícito de la clienta ("antes de crear cualquier
+    reserva, mostrar una alerta previa con los datos a guardar, con
+    opción de confirmar o cancelar"): cartel de confirmación genérico,
+    con una vista previa de los datos que se están por guardar —
+    pensado para extenderse pantalla por pantalla a medida que se
+    revisan (confirmado con la clienta, "pantalla por pantalla, a
+    medida que las revisás", no un barrido de todo el sistema de una
+    sola vez), arrancando por las tres solapas de Reservas.
+
+    Esta función solo pregunta — nunca toca el formulario. Si el
+    operador cancela (devuelve `False`), el llamador tiene que dejar los
+    datos ya cargados tal cual estaban, sin limpiar nada, para que se
+    puedan corregir y reintentar — es responsabilidad de quien llama
+    (no de este diálogo) no resetear el formulario en ese caso, al
+    revés de lo que sí hace después de una creación exitosa."""
+    detalle = "\n".join(lineas)
+    respuesta = QMessageBox.question(
+        parent, titulo, f"Confirmá los datos antes de guardar:\n\n{detalle}",
+    )
+    return respuesta == QMessageBox.StandardButton.Yes

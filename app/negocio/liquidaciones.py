@@ -169,6 +169,11 @@ class ItemAislada:
     hora_inicio: float
     hora_fin: float
     monto: float
+    # Solo para una Reserva extraordinaria (#38, segunda vuelta: los R
+    # también pueden tenerlas) — el ítem de texto libre cargado a mano,
+    # para que el PDF pueda describir el cargo en vez de mostrar "Hora
+    # aislada trabajada" sobre algo que no se cobró por hora×tarifa.
+    item_extraordinario: str | None = None
 
 
 @dataclass
@@ -710,7 +715,8 @@ def _aisladas_periodo(
     filas = conn.execute(
         f"""
         SELECT ra.IdReservaAislada, ra.IdConsultorio, ra.Fecha, ra.HoraInicio, ra.HoraFin,
-               ra.AplicaRecargo, ra.EsReubicacion, c.ValorHoraAisladaActual
+               ra.AplicaRecargo, ra.EsReubicacion, ra.EsExtraordinaria, ra.MontoExtraordinario,
+               ra.ItemExtraordinario, c.ValorHoraAisladaActual
         FROM ReservaAislada ra
         JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
         WHERE ra.IdProfesional IN ({placeholders}) AND ra.Estado = 'Confirmada' AND ra.Fecha LIKE ?
@@ -720,7 +726,13 @@ def _aisladas_periodo(
 
     items = []
     for f in filas:
-        if f["EsReubicacion"]:
+        if f["EsExtraordinaria"]:
+            # Monto manual, ya cargado tal cual al confirmarla — ni
+            # hora×tarifa ni el recargo de aisladas corren acá (#38,
+            # segunda vuelta: mismo criterio que `crear_reserva_aislada`,
+            # que fuerza `AplicaRecargo=False` para estas).
+            monto = f["MontoExtraordinario"] or 0.0
+        elif f["EsReubicacion"]:
             # compensa una ausencia del mismo profesional en otro horario —
             # ocupa el consultorio pero no genera cargo (confirmado por el usuario).
             monto = 0.0
@@ -731,6 +743,7 @@ def _aisladas_periodo(
         items.append(ItemAislada(
             id_reserva_aislada=f["IdReservaAislada"], id_consultorio=f["IdConsultorio"], fecha=f["Fecha"],
             hora_inicio=f["HoraInicio"], hora_fin=f["HoraFin"], monto=monto,
+            item_extraordinario=f["ItemExtraordinario"] if f["EsExtraordinaria"] else None,
         ))
     return items
 

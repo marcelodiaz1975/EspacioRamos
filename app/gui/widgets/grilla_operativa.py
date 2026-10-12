@@ -1120,6 +1120,36 @@ class GrillaOperativaWidget(QWidget):
         self._etiqueta_unidad.setText("Filtro de unidad")
         self._etiqueta_dia.setText("Filtro de día de la semana")
 
+    def widgets_filtro_para_foco(self) -> list[QWidget]:
+        """Pedido de la clienta al revisar Reservas ("el Tab se salta el
+        filtro de Día de la semana entre Unidad y Profesional"): el panel
+        de Filtros de esta grilla nunca tuvo una cadena explícita de
+        `instalar_enter_avanza_foco` (a diferencia de la columna del
+        formulario de al lado, que sí la tiene) — dependía del orden
+        nativo de Tab de Qt, que `agrupar_dias_en_pares()` termina
+        rompiendo: reparenta los checks de día a un contenedor nuevo
+        DESPUÉS de construido el resto del panel, y Qt los reinserta al
+        final de la cadena nativa en vez de mantenerlos en su lugar
+        (confirmado: sin este método, Tab desde "Filtro de unidad" caía
+        directo en "Profesional", salteando los días).
+
+        Devuelve, en el mismo orden visual de arriba a abajo (y de
+        izquierda a derecha dentro de la grilla de días, que respeta el
+        mismo orden de inserción que `dias_grilla`), los widgets que
+        reciben foco de verdad: el botón-resumen de cada filtro
+        colapsable (`_FiltroColapsable.foco_widget()`, no la lista
+        interna — arranca oculta), cada check de día y el combo de
+        Profesional. Opt-in: quien no lo llame sigue con el orden nativo
+        de siempre (Oferta de consultorios ya arma su propia cadena
+        propia por otro lado, con el mismo criterio de `foco_widget()`)."""
+        return [
+            self._filtro_localidad.foco_widget(),
+            self._filtro_edificio.foco_widget(),
+            self._filtro_unidad.foco_widget(),
+            *(self._checks_dia[dia] for dia in self._checks_dia),
+            self.campo_profesional,
+        ]
+
     def mostrar_leyenda_colores(self, compacta: bool = False) -> None:
         """Revela la leyenda de referencias de colores en el panel de
         Filtros, debajo del combo de Profesional — pensado para los usos

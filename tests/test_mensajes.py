@@ -273,6 +273,23 @@ def test_detalle_aislada_extraordinaria_usa_el_monto_manual_y_el_item_de_texto_l
     assert "Uso del consultorio para un taller puntual $12.000" in texto
 
 
+def test_detalle_aislada_extraordinaria_incluye_horario_y_consultorio(conn, profesional_aislada_con_edificios):
+    """Pedido explícito de la clienta: el texto de una extraordinaria
+    tiene que incluir horario y consultorio/unidad, igual que el de
+    cualquier aislada común — antes solo mostraba día, fecha, ítem y
+    monto, sin decir CUÁNDO ni DÓNDE."""
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0, EsExtraordinaria=1,
+        ItemExtraordinario="Uso del consultorio para un taller puntual", MontoExtraordinario=12000,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "de 10 a 12hs" in texto
+    assert "consul 1" in texto
+    assert "Uso del consultorio para un taller puntual $12.000" in texto
+
+
 def test_detalle_aislada_extraordinaria_y_normal_conviven_en_el_mismo_mes(conn, profesional_aislada_con_edificios):
     id_prof, c1, _, _, _ = profesional_aislada_con_edificios
     obtener_repositorio(conn, "ReservaAislada").crear(

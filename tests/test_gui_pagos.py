@@ -1033,3 +1033,25 @@ def test_estado_cuenta_pagos_tiene_filtro_a_la_izquierda_y_datos_uno_por_linea(q
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     assert len(pantalla.panel_estado_cuenta.etiquetas_resumen) == 4
+
+
+def test_spin_monto_selecciona_todo_el_texto_al_recibir_foco(qtbot):
+    """Pedido de la clienta ("en todos los cuadros de texto similares
+    del sistema"): al enfocar el campo de monto, se selecciona todo el
+    contenido para poder escribir en limpio sin borrar a mano. Se
+    instancia `_SpinMonto` aparte (no dentro de `_PanelRegistrarPago`,
+    que vive en un `QScrollArea` cuya visibilidad real no depende solo
+    de `show()`) — el comportamiento es del widget en sí, no de la
+    pantalla que lo contiene."""
+    from app.gui.pantallas.pagos import _SpinMonto
+
+    spin = _SpinMonto()
+    spin.setValue(1234.5)
+    qtbot.addWidget(spin)
+    spin.show()
+    qtbot.waitExposed(spin)
+    spin.setFocus()
+    qtbot.waitUntil(lambda: spin.hasFocus())
+    qtbot.wait(10)  # deja correr el QTimer.singleShot(0, ...)
+    assert spin.lineEdit().selectedText() == spin.lineEdit().text()
+    assert spin.lineEdit().selectedText() != ""

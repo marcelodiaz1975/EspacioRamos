@@ -241,7 +241,11 @@ def _texto_aislada(
     consultorios: dict, item, verbo: str, mes_texto_opt: str | None, mostrar_edificio: bool = True,
 ) -> str:
     dia_semana = DIAS_SEMANA[date.fromisoformat(item.fecha).weekday()]
-    prefijo = f"Hora aislada {verbo} en {mes_texto_opt}: " if mes_texto_opt else f"Hora aislada {verbo}: "
+    # Una Reserva extraordinaria (#38, segunda vuelta) no es una hora
+    # cobrada por tarifa — se describe con su propio ítem de texto libre
+    # en vez de "Hora aislada trabajada/a trabajar", que sería engañoso.
+    concepto = getattr(item, "item_extraordinario", None) or f"Hora aislada {verbo}"
+    prefijo = f"{concepto} en {mes_texto_opt}: " if mes_texto_opt else f"{concepto}: "
     return (
         f"{prefijo}{dia_semana.lower()} {fecha_corta(item.fecha)} "
         f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} "

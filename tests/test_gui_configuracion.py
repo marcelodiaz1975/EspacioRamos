@@ -472,3 +472,21 @@ def test_dialogo_contrasena_maestra_rechaza_vacia_y_no_coincidente(qtbot, conn):
     dialogo._validar_y_aceptar()
     assert dialogo.result() == QDialog.DialogCode.Accepted
     assert verificar_contrasena_maestra(conn, "clave1") is True
+
+
+def test_spin_moneda_selecciona_todo_el_texto_al_recibir_foco(qtbot):
+    """Pedido de la clienta ("en todos los cuadros de texto similares
+    del sistema"): mismo mecanismo que `_SpinMonto` de Pagos."""
+    from app.gui.pantallas.configuracion import _SpinMoneda
+
+    spin = _SpinMoneda()
+    spin.setMaximum(1_000_000)
+    spin.setValue(999.5)
+    qtbot.addWidget(spin)
+    spin.show()
+    qtbot.waitExposed(spin)
+    spin.setFocus()
+    qtbot.waitUntil(lambda: spin.hasFocus())
+    qtbot.wait(10)
+    assert spin.lineEdit().selectedText() == spin.lineEdit().text()
+    assert spin.lineEdit().selectedText() != ""

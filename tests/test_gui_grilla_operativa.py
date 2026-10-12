@@ -1036,6 +1036,29 @@ def test_agregar_widgets_debajo_de_leyenda_quedan_despues_y_antes_del_stretch(qt
     assert boton_1.parentWidget() is widget._panel_filtros
 
 
+def test_widgets_filtro_para_foco_devuelve_el_orden_visual_completo(qtbot, conn):
+    """`widgets_filtro_para_foco` (opt-in, usada por Reservas) tiene que
+    devolver, en orden de arriba a abajo, los botones-resumen de los tres
+    filtros colapsables, cada check de día (en el mismo orden que
+    `_checks_dia`, que es el que usa `agrupar_dias_en_pares` para la
+    grilla de 2 columnas) y el combo de Profesional al final — ninguno de
+    los widgets reales (las listas internas de los colapsables, que
+    arrancan ocultas) debe colarse."""
+    _preparar(conn)
+    widget = GrillaOperativaWidget(conn)
+    qtbot.addWidget(widget)
+    widget.agrupar_dias_en_pares()
+
+    orden = widget.widgets_filtro_para_foco()
+
+    assert orden[0] is widget._filtro_localidad.foco_widget()
+    assert orden[1] is widget._filtro_edificio.foco_widget()
+    assert orden[2] is widget._filtro_unidad.foco_widget()
+    dias_esperados = list(widget._checks_dia.values())
+    assert orden[3 : 3 + len(dias_esperados)] == dias_esperados
+    assert orden[-1] is widget.campo_profesional
+
+
 # ------------------------------------------------- filtro colapsable: auto-cierre
 
 

@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from PySide6.QtCore import QDate, QLocale
+from PySide6.QtCore import QDate, QLocale, QTimer
 from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -237,7 +237,9 @@ class _SpinHora(QDoubleSpinBox):
 class _SpinMoneda(QDoubleSpinBox):
     """QDoubleSpinBox que se muestra como moneda ("$ 1.234,56") — mismo
     criterio que `_SpinMonto` de Pagos/Novedades/Llaves (duplicado acá,
-    no importado)."""
+    no importado). Select-all al enfocar (pedido de la clienta, "en
+    todos los cuadros de texto similares del sistema") — mismo mecanismo
+    que `_SpinMonto` de Pagos."""
 
     def textFromValue(self, value: float) -> str:  # noqa: N802
         return formatear_moneda(value)
@@ -251,6 +253,10 @@ class _SpinMoneda(QDoubleSpinBox):
 
     def validate(self, text: str, pos: int):  # noqa: N802
         return (QValidator.State.Acceptable, text, pos)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        QTimer.singleShot(0, self.selectAll)
 
 
 def _crear_spin_numerico(nombre: str) -> QWidget:

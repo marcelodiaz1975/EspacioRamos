@@ -630,3 +630,25 @@ def test_tabla_movimientos_escrolea_internamente_con_mas_filas_de_las_que_entran
 
     assert pantalla.tabla_movimientos.rowCount() == 20
     assert pantalla.tabla_movimientos.verticalScrollBar().maximum() > 0
+
+
+def test_campos_de_deposito_usan_spinmonto_con_formato_y_select_all(qtbot):
+    """Pedido de la clienta ("en todos los cuadros de texto similares
+    del sistema"): "Depósito actual"/"Monto cobrado"/"Monto a
+    reintegrar" pasan a mostrarse como moneda y seleccionar todo el
+    texto al enfocar — mismo `_SpinMonto` que ya usa Reservas/Pagos
+    (import cruzado, mismo criterio que `_opciones_profesional`)."""
+    from app.gui.pantallas.reservas import _SpinMonto
+
+    spin = _SpinMonto()
+    spin.setMaximum(10_000_000)
+    spin.setValue(1234.5)
+    qtbot.addWidget(spin)
+    assert "$" in spin.text()
+    spin.show()
+    qtbot.waitExposed(spin)
+    spin.setFocus()
+    qtbot.waitUntil(lambda: spin.hasFocus())
+    qtbot.wait(10)
+    assert spin.lineEdit().selectedText() == spin.lineEdit().text()
+    assert spin.lineEdit().selectedText() != ""

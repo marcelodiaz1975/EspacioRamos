@@ -490,21 +490,35 @@ def _lineas_reservas_aisladas(
     return lineas, total
 
 
-def _lineas_reservas_extraordinarias(filas: list[sqlite3.Row]) -> tuple[list[str], float]:
-    """Reserva extraordinaria (categoría A, pedido de la clienta): el
+def _lineas_reservas_extraordinarias(
+    filas: list[sqlite3.Row], *, incluir_consultorio: bool, incluir_unidad: bool, incluir_edificio: bool,
+) -> tuple[list[str], float]:
+    """Reserva extraordinaria (categorías A y R, pedido de la clienta): el
     monto es el que tipeó el operador a mano (`MontoExtraordinario`), no
-    uno calculado por hora×tarifa — y lo que se cobra es la descripción
-    de texto libre (`ItemExtraordinario`), no un horario/lugar armado
-    solo. A diferencia de `_lineas_reservas_aisladas`, nunca se agrupa ni
-    se combina entre sí (cada una describe un cobro distinto, fundir dos
+    uno calculado por hora×tarifa, y lo que se cobra es la descripción de
+    texto libre (`ItemExtraordinario`) — pero el horario y el consultorio/
+    unidad SÍ tienen que aparecer, igual que en cualquier aislada común
+    (pedido explícito de la clienta, "mismo formato"): sin esos dos datos
+    no queda claro CUÁNDO ni DÓNDE pasó el cargo. Mismos tres parámetros
+    y mismo helper (`_lugar_reserva`) que `_lineas_reservas_aisladas`,
+    para que el criterio de qué mostrar sea idéntico entre las dos.
+
+    A diferencia de `_lineas_reservas_aisladas`, nunca se agrupa ni se
+    combina entre sí (cada una describe un cobro distinto, fundir dos
     ítems distintos en una sola línea les haría perder sentido) — una
     línea por cada una, ordenadas por fecha."""
     lineas: list[str] = []
     total = 0.0
     for f in sorted(filas, key=lambda f: (f["Fecha"], f["HoraInicio"])):
         dia_semana = DIAS_SEMANA[date.fromisoformat(f["Fecha"]).weekday()]
+        horario = f"{hora_fmt(f['HoraInicio'])[:-2]} a {hora_fmt(f['HoraFin'])}"
+        lugar = _lugar_reserva(f, incluir_consultorio, incluir_unidad, incluir_edificio)
+        sufijo_lugar = f" {lugar}" if lugar else ""
         monto = f["MontoExtraordinario"] or 0.0
-        lineas.append(f"+ {dia_semana} {fecha_corta(f['Fecha'])} - {f['ItemExtraordinario']} {_moneda(monto)}")
+        lineas.append(
+            f"+ {dia_semana} {fecha_corta(f['Fecha'])} de {horario}{sufijo_lugar} "
+            f"- {f['ItemExtraordinario']} {_moneda(monto)}"
+        )
         total += monto
     return lineas, total
 
@@ -629,7 +643,10 @@ def mensaje_detalle_reserva_aislada(
         combinar_distintas_unidades=combinar_distintas_unidades, monto_fn=_monto,
     )
     lineas += lineas_reservas
-    lineas_extraordinarias, total_extraordinarias = _lineas_reservas_extraordinarias(del_mes_extraordinarias)
+    lineas_extraordinarias, total_extraordinarias = _lineas_reservas_extraordinarias(
+        del_mes_extraordinarias, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
+        incluir_edificio=incluir_edificio,
+    )
     lineas += lineas_extraordinarias
     total_reservas += total_extraordinarias
 
@@ -671,7 +688,10 @@ def mensaje_detalle_reserva_aislada(
             incluir_edificio=incluir_edificio, combinar_misma_unidad=combinar_misma_unidad,
             combinar_distintas_unidades=combinar_distintas_unidades,
         )
-        lineas_posteriores_extraordinarias, _ = _lineas_reservas_extraordinarias(posteriores_extraordinarias)
+        lineas_posteriores_extraordinarias, _ = _lineas_reservas_extraordinarias(
+            posteriores_extraordinarias, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
+            incluir_edificio=incluir_edificio,
+        )
         lineas += ["", "RESERVAS POSTERIORES"] + lineas_posteriores + lineas_posteriores_extraordinarias
 
     edificios_mencionados: dict[int, sqlite3.Row] = {f["IdEdificio"]: f for f in del_mes + posteriores}

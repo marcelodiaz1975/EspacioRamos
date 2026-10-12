@@ -45,7 +45,6 @@ from PySide6.QtWidgets import (
     QDateEdit,
     QDialog,
     QDialogButtonBox,
-    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -61,7 +60,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
+from app.gui.pantallas.reservas import _opciones_profesional, _SpinMonto, _texto_profesional
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
@@ -787,7 +786,7 @@ class _DialogoTipo(QDialog):
             ayuda.setStyleSheet("color: #666; font-size: 11px;")
             layout.addRow("", ayuda)
 
-        self.spin_deposito = QDoubleSpinBox()
+        self.spin_deposito = _SpinMonto()
         self.spin_deposito.setMaximum(10_000_000)
         self.spin_deposito.setValue(registro["ValorDepositoActual"] if registro else 0)
         layout.addRow("Depósito actual", self.spin_deposito)
@@ -947,7 +946,7 @@ class _DialogoAsignar(QDialog):
 
         self.casilla_deposito = QCheckBox("Cobrar depósito")
         layout.addRow(self.casilla_deposito)
-        self.spin_monto = QDoubleSpinBox()
+        self.spin_monto = _SpinMonto()
         self.spin_monto.setMaximum(10_000_000)
         self.spin_monto.setValue(tipo["ValorDepositoActual"] or 0)
         layout.addRow("Monto cobrado", self.spin_monto)
@@ -994,7 +993,7 @@ class _DialogoDevolucion(QDialog):
         self.casilla_reintegro = QCheckBox("Reintegrar depósito")
         self.casilla_reintegro.setChecked(bool(movimiento["DepositoCobrado"]))
         layout.addRow(self.casilla_reintegro)
-        self.spin_monto = QDoubleSpinBox()
+        self.spin_monto = _SpinMonto()
         self.spin_monto.setMaximum(10_000_000)
         self.spin_monto.setValue(movimiento["MontoCobrado"] or 0)
         layout.addRow("Monto a reintegrar", self.spin_monto)

@@ -362,6 +362,25 @@ def test_reserva_aislada_de_reubicacion_no_genera_cargo(conn, consultorio):
     assert liquidacion.total_aisladas_mes_en_curso == 0
 
 
+def test_reserva_extraordinaria_de_un_r_usa_el_monto_manual_no_hora_por_tarifa(conn, consultorio):
+    """#38, segunda vuelta: antes de abrir "Reservas extraordinarias" a
+    categoría R, `_aisladas_periodo` nunca había necesitado distinguir
+    `EsExtraordinaria` — calculaba TODO con hora×tarifa, lo que hubiera
+    facturado un número incorrecto (ignorando el monto manual cargado a
+    mano) apenas un R tuviera una."""
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+        EsExtraordinaria=1, ItemExtraordinario="Ajuste puntual", MontoExtraordinario=12345,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    # 12345, no 2 * VALOR_HORA_AISLADA (1000) — confirma que no se coló
+    # ningún cálculo por hora×tarifa.
+    assert liquidacion.total_aisladas_mes_en_curso == pytest.approx(12345)
+    assert liquidacion.aisladas_mes_en_curso[0].item_extraordinario == "Ajuste puntual"
+
+
 def test_descuento_vacaciones_no_se_duplica_al_cruzar_fin_de_mes(conn, consultorio):
     dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     id_prof = _crear_profesional(conn)

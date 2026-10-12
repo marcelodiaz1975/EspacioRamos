@@ -22,6 +22,7 @@ from app.negocio.condiciones_normas import reordenar_al_guardar as reordenar_con
 from app.negocio.detalles_complementarios import reordenar_al_guardar as reordenar_detalles_al_guardar
 from app.negocio.listas_editables import opciones_lista, reordenar_al_guardar
 from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
+from app.pdf.estilos import clave_orden_unidad
 from app.negocio.validaciones import (
     FORMATO_DIA_MES,
     FORMATO_EMAIL,
@@ -61,10 +62,16 @@ def _opciones_edificio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
 
 
 def _opciones_unidad(conn: sqlite3.Connection) -> list[tuple[int, str]]:
+    # Orden por edificio (alfabético, ya lo hace SQL) y, dentro de cada
+    # uno, por piso (PB, EP, después ascendente numérico —
+    # `clave_orden_unidad`, pedido explícito de la clienta sobre "todos
+    # los selectores similares del sistema", no expresable en el ORDER
+    # BY de SQL).
     filas = conn.execute(
         "SELECT u.IdUnidad, u.Departamento, e.Nombre AS Edificio FROM Unidad u "
-        "JOIN Edificio e ON e.IdEdificio = u.IdEdificio ORDER BY e.Nombre, u.Departamento"
+        "JOIN Edificio e ON e.IdEdificio = u.IdEdificio"
     ).fetchall()
+    filas = sorted(filas, key=lambda f: (f["Edificio"], clave_orden_unidad(f["Departamento"])))
     return [(f["IdUnidad"], f"{f['Edificio']} — {f['Departamento']}") for f in filas]
 
 
@@ -72,8 +79,9 @@ def _opciones_consultorio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
     filas = conn.execute(
         "SELECT c.IdConsultorio, c.NumeroConsultorio, u.Departamento, e.Nombre AS Edificio "
         "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad "
-        "JOIN Edificio e ON e.IdEdificio = u.IdEdificio ORDER BY e.Nombre, u.Departamento, c.NumeroConsultorio"
+        "JOIN Edificio e ON e.IdEdificio = u.IdEdificio"
     ).fetchall()
+    filas = sorted(filas, key=lambda f: (f["Edificio"], clave_orden_unidad(f["Departamento"]), f["NumeroConsultorio"]))
     return [
         (f["IdConsultorio"], f"{f['Edificio']} — {f['Departamento']} — Consultorio {f['NumeroConsultorio']}")
         for f in filas

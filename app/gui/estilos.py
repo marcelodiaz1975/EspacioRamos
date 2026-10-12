@@ -236,18 +236,27 @@ layout — a diferencia de agrandar el borde en :focus, que correría el
 contenido un par de píxeles cada vez que el botón gana o pierde el foco.
 
 Comprobado con capturas reales (`outline` no es parejo entre tipos de
-widget en Qt): funciona bien acá (QPushButton) y QLineEdit ya traía su
-propio foco nativo visible (borde celeste) sin necesitar nada de esto,
-pero `outline` NO llegó a pintarse en absoluto en QComboBox/QDateEdit/
-QSpinBox/QCheckBox/QPlainTextEdit/QTextEdit/QTabBar — para esos hubiera
-hecho falta `border` en vez de `outline`, que sí cambia el tamaño/look
-en reposo de cada uno (ocupan layout, y perderían el marco nativo que
-tienen hoy) — pedido aparte, visual, fuera del alcance de este arreglo
-puntual de botones. */
+widget en Qt): funciona bien acá (QPushButton) y QLineEdit/QDateEdit/
+QSpinBox/QDoubleSpinBox ya traían su propio foco nativo visible (borde
+celeste, por el QLineEdit interno que usan esos últimos tres) sin
+necesitar nada de esto, pero `outline` NO llegó a pintarse en absoluto
+en QComboBox/QCheckBox/QPlainTextEdit/QTextEdit/QTabBar.
+
+Pedido explícito de la clienta sobre Reservas ("no veo en los cheks ni
+en los botones"): para QComboBox/QCheckBox hace falta `border` en vez
+de `outline` — a diferencia de los botones, cambiar el tamaño en :focus
+hubiera corrido el contenido de alrededor cada vez que el control gana o
+pierde el foco, así que se reserva el mismo espacio siempre
+(`border: 2px solid transparent` en reposo, color real solo en :focus)
+en vez de agregarlo recién al enfocar. */
 QPushButton:focus {{
     outline: 2px solid {COLOR_FOCO};
     outline-offset: 1px;
 }}
+QComboBox {{ border: 2px solid transparent; border-radius: 2px; }}
+QComboBox:focus {{ border: 2px solid {COLOR_FOCO}; }}
+QCheckBox {{ border: 2px solid transparent; border-radius: 2px; padding: 1px; }}
+QCheckBox:focus {{ border: 2px solid {COLOR_FOCO}; }}
 
 /* Scrollbars con contraste explícito, parejo en toda la app — pedido de
 la clienta al revisar Grilla semanal ("no aparece el scroll

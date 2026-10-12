@@ -13,7 +13,7 @@ import re
 import sqlite3
 from datetime import date
 
-from PySide6.QtCore import QDate, QLocale
+from PySide6.QtCore import QDate, QLocale, QTimer
 from PySide6.QtGui import QGuiApplication, QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.dialogos import confirmar_si_fecha_es_mes_anterior
+from app.gui.dialogos import confirmar_datos_antes_de_crear, confirmar_si_fecha_es_mes_anterior
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
@@ -48,6 +48,7 @@ from app.gui.widgets.grilla_operativa import (
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo, clave_orden_profesional
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
+from app.pdf.estilos import clave_orden_unidad
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, ultimo_dia_mes
 from app.negocio.estadisticas import regenerar_snapshot_si_corresponde
@@ -242,6 +243,33 @@ class _SpinHorario(QDoubleSpinBox):
         return (QValidator.State.Acceptable, text, pos)
 
 
+class _SpinMonto(QDoubleSpinBox):
+    """QDoubleSpinBox que se muestra como moneda ("$ 1.234,56") — mismo
+    criterio que `_SpinMonto` de Pagos/`_SpinMoneda` de Configuración
+    general (duplicado acá, no importado). Pedido de la clienta sobre
+    "Monto a cobrar" de Reserva extraordinaria, extendido a "todos los
+    cuadros de texto similares del sistema": separador de miles (en vez
+    del decimal con coma que arrastra Qt por defecto) y select-all al
+    enfocar, para poder tipear en limpio sin borrar a mano."""
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802
+        return formatear_moneda(value)
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        texto = text.strip().replace("$", "").replace(".", "").replace(",", ".").strip()
+        try:
+            return float(texto) if texto else 0.0
+        except ValueError:
+            return 0.0
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        return (QValidator.State.Acceptable, text, pos)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        QTimer.singleShot(0, self.selectAll)
+
+
 _CATEGORIAS_REGULARES = ("R", "B", "E")
 _CATEGORIAS_AISLADAS = ("R", "A")
 _ORDEN_CATEGORIA_REGULAR = {"B": 0, "R": 1, "E": 2}
@@ -296,6 +324,25 @@ def _opciones_profesional(
     return [(f["IdProfesional"], _texto_profesional(f)) for f in filas]
 
 
+def _opciones_profesional_extraordinaria(conn: sqlite3.Connection) -> list[tuple[int, str, str]]:
+    """Profesionales elegibles para "Reservas extraordinarias": A y R
+    (pedido explícito de la clienta — "los R también pueden tener
+    reservas extraordinarias"), ordenados PRIMERO por categoría A
+    (código natural ascendente) y DESPUÉS por categoría R (código
+    natural ascendente) — NO la jerarquía global B/R/A/E/X/C que usa
+    `_opciones_profesional` (ahí R va antes que A). Devuelve también la
+    categoría de cada uno, para que el combo pueda decidir si corresponde
+    mostrar "Período a imputar" sin tener que volver a consultar la base
+    por cada cambio de selección."""
+    filas = conn.execute(
+        "SELECT IdProfesional, IdCodigo, Tratamiento, Apellido, NombrePila, CategoriaProfesional "
+        "FROM Profesional WHERE CategoriaProfesional IN ('A', 'R')"
+    ).fetchall()
+    orden = {"A": 0, "R": 1}
+    filas = sorted(filas, key=lambda f: (orden[f["CategoriaProfesional"]], clave_orden_codigo(f["IdCodigo"])))
+    return [(f["IdProfesional"], _texto_profesional(f), f["CategoriaProfesional"]) for f in filas]
+
+
 def _opciones_horario_regular(conn: sqlite3.Connection, id_profesional: int | None) -> list[tuple[int, str]]:
     """Horarios regulares vigentes del profesional — para que, al marcar
     "Es reubicación" en el alta de una reserva aislada, el operador pueda
@@ -340,11 +387,18 @@ def _opciones_edificio(conn: sqlite3.Connection, id_localidad: int | None) -> li
 
 
 def _opciones_unidad(conn: sqlite3.Connection, id_edificio: int | None) -> list[tuple[int, str]]:
+    """Orden por piso (PB, EP, después ascendente numérico —
+    `clave_orden_unidad`, no expresable en el ORDER BY de SQL), pedido
+    explícito de la clienta sobre este selector y "todos los similares
+    del sistema": el orden alfabético puro de `Departamento` ponía "EP"
+    antes de "PB" y rompía con pisos de dos dígitos (ej. "10mo" antes de
+    "9no")."""
     if id_edificio is None:
         return []
     filas = conn.execute(
-        "SELECT IdUnidad, Departamento FROM Unidad WHERE IdEdificio = ? ORDER BY Departamento", (id_edificio,)
+        "SELECT IdUnidad, Departamento FROM Unidad WHERE IdEdificio = ?", (id_edificio,)
     ).fetchall()
+    filas = sorted(filas, key=lambda f: clave_orden_unidad(f["Departamento"]))
     return [(f["IdUnidad"], f["Departamento"]) for f in filas]
 
 
@@ -391,7 +445,7 @@ class PantallaReservas(QWidget):
         self.panel_extraordinaria = _PanelReservaExtraordinaria(conn)
         self.pestanas.addTab(self.panel_regulares, "Reservas regulares")
         self.pestanas.addTab(self.panel_aisladas, "Reservas aisladas")
-        self.pestanas.addTab(self.panel_extraordinaria, "Reserva extraordinaria")
+        self.pestanas.addTab(self.panel_extraordinaria, "Reservas extraordinarias")
         layout.addWidget(self.pestanas, stretch=1)
 
     def actualizar(self) -> None:
@@ -579,8 +633,16 @@ class _PanelReservasRegulares(QWidget):
         linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
         form.addWidget(linea_separadora)
 
+        # wordWrap (pedido de la clienta, "Cantidad de horas regulares
+        # semanales se ve cortado"): sin esto, un QLabel de una sola
+        # línea más ancha que la columna no se recorta de forma visible
+        # en el layout, pero sí puede quedar tapado por el panel de al
+        # lado o cortado contra el borde de la ventana — con wrap pasa a
+        # ocupar una segunda línea en vez de desbordar.
         self.etiqueta_horas_semanales = QLabel()
+        self.etiqueta_horas_semanales.setWordWrap(True)
         self.etiqueta_descuento = QLabel()
+        self.etiqueta_descuento.setWordWrap(True)
         form.addWidget(self.etiqueta_horas_semanales)
         form.addWidget(self.etiqueta_descuento)
 
@@ -634,6 +696,24 @@ class _PanelReservasRegulares(QWidget):
         # Horario y las filas de encabezado quedan siempre visibles al
         # escrolear — solo se escrolea el bloque de datos.
         self.grilla.activar_filas_y_columnas_fijas()
+        # Pedido explícito de la clienta, extendido a todo el sistema: sin
+        # esto, cuando la grilla necesita scroll horizontal (muchos
+        # consultorios), la barra se come alto del viewport sin que el
+        # tope mínimo lo contemple — tapaba la última fila y podía
+        # disparar un scroll vertical de más, innecesario.
+        self.grilla.reservar_alto_scroll_horizontal()
+        # Cadena de foco propia del panel de Filtros de la grilla (pedido
+        # de la clienta: "el Tab se salta el filtro de Día de la semana
+        # entre Unidad y Profesional") — este panel nunca tuvo una cadena
+        # explícita, dependía del orden nativo de Tab de Qt, que `agrupar_
+        # dias_en_pares()` termina rompiendo. Cadena propia, separada de
+        # `self._foco` (el formulario de alta de la izquierda): son dos
+        # columnas con propósitos distintos (una carga la reserva, la
+        # otra solo filtra la grilla de referencia), sin que la una
+        # dependa del orden de Tab de la otra.
+        self._foco_filtros_grilla = instalar_enter_avanza_foco(
+            self.grilla.widgets_filtro_para_foco(), parent=self.grilla,
+        )
         layout_grupo_grilla.addWidget(self.grilla)
         # `limitar_alto_grilla` le pone un tope de alto a `self.grilla` —
         # sin este spacer, cuando el splitter le da a `grupo_grilla` más
@@ -973,6 +1053,23 @@ class _PanelReservasRegulares(QWidget):
         ) + placa_faltante_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
         if faltantes and not _confirmar_llave_o_placa_faltante(self, faltantes):
             return
+        # Pedido explícito de la clienta ("EN GENERAL"): antes de crear
+        # cualquier reserva, una vista previa de los datos con Confirmar/
+        # Cancelar — si cancela, no se toca nada del formulario (ver
+        # `confirmar_datos_antes_de_crear`).
+        vigencia_fin_texto = (
+            "sin fecha de fin" if self.campo_vigencia_fin.date() == _FECHA_SIN_DATO
+            else self.campo_vigencia_fin.date().toString("dd-MM-yyyy")
+        )
+        if not confirmar_datos_antes_de_crear(self, "Crear reserva regular", [
+            f"Profesional: {self.combo_profesional.currentText()}",
+            f"Ubicación: {self.combo_localidad.currentText()} - {self.combo_edificio.currentText()} - "
+            f"{self.combo_unidad.currentText()} - {self.combo_consultorio.currentText()}",
+            f"Días: {', '.join(dias)}",
+            f"Horario: {_fmt_hora(self.spin_desde.value())} a {_fmt_hora(self.spin_hasta.value())}",
+            f"Vigencia: desde {self.campo_vigencia_inicio.date().toString('dd-MM-yyyy')} hasta {vigencia_fin_texto}",
+        ]):
+            return
         advertencias_totales: list[str] = []
         algun_dia_creado = False
         for dia in dias:
@@ -1267,6 +1364,7 @@ class _PanelReservasAisladas(QWidget):
         form.addWidget(linea_separadora)
 
         self.etiqueta_horas_aisladas = QLabel()
+        self.etiqueta_horas_aisladas.setWordWrap(True)
         form.addWidget(self.etiqueta_horas_aisladas)
 
         form.addStretch()
@@ -1344,6 +1442,18 @@ class _PanelReservasAisladas(QWidget):
         # Horario y las filas de encabezado quedan siempre visibles al
         # escrolear — solo se escrolea el bloque de datos.
         self.grilla.activar_filas_y_columnas_fijas()
+        # Pedido explícito de la clienta, extendido a todo el sistema: sin
+        # esto, cuando la grilla necesita scroll horizontal (muchos
+        # consultorios), la barra se come alto del viewport sin que el
+        # tope mínimo lo contemple — tapaba la última fila y podía
+        # disparar un scroll vertical de más, innecesario.
+        self.grilla.reservar_alto_scroll_horizontal()
+        # Mismo criterio que Reservas regulares (ver esa solapa): cadena
+        # de foco propia para el panel de Filtros de la grilla, separada
+        # de `self._foco` (el formulario de alta).
+        self._foco_filtros_grilla = instalar_enter_avanza_foco(
+            self.grilla.widgets_filtro_para_foco(), parent=self.grilla,
+        )
         layout_grupo_grilla.addWidget(self.grilla)
         layout_grupo_grilla.addWidget(etiqueta_detalle)
         layout_grupo_grilla.addWidget(texto_detalle)
@@ -1682,6 +1792,20 @@ class _PanelReservasAisladas(QWidget):
             ) + placa_faltante_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
             if faltantes and not _confirmar_llave_o_placa_faltante(self, faltantes):
                 return
+            # Pedido explícito de la clienta ("EN GENERAL"): vista previa
+            # de los datos con Confirmar/Cancelar antes de crear — mismo
+            # criterio que Reservas regulares, sin repetir en el
+            # reintento automático con `forzar=True`.
+            if not confirmar_datos_antes_de_crear(self, "Crear reserva aislada", [
+                f"Profesional: {self.combo_profesional.currentText()}",
+                f"Ubicación: {self.combo_localidad.currentText()} - {self.combo_edificio.currentText()} - "
+                f"{self.combo_unidad.currentText()} - {self.combo_consultorio.currentText()}",
+                f"Fecha: {self.campo_fecha.date().toString('dd-MM-yyyy')}",
+                f"Horario: {_fmt_hora(self.spin_desde.value())} a {_fmt_hora(self.spin_hasta.value())}",
+                f"Aplica recargo: {'Sí' if self.casilla_recargo.isChecked() else 'No'}",
+                f"Es reubicación: {'Sí' if self.casilla_reubicacion.isChecked() else 'No'}",
+            ]):
+                return
         datos = dict(
             id_profesional=id_profesional,
             id_consultorio=id_consultorio,
@@ -1819,14 +1943,21 @@ class _PanelReservaExtraordinaria(QWidget):
     que cualquier otra aislada (`crear_reserva_aislada`/
     `cancelar_reserva_aislada`, sin duplicar nada de esa lógica) — pero
     con un ítem a cargar de texto libre y un monto manual en vez de
-    hora×tarifa del consultorio, y solo para profesionales categoría A
-    (la misma categoría que ya usa Reservas aisladas para sus propios
-    compromisos de un día). Al confirmar, el mensaje de detalle
+    hora×tarifa del consultorio. Al confirmar, el mensaje de detalle
     (`mensaje_detalle_reserva_aislada`, el mismo que ya usa Centro de
-    mensajería para categoría A) ya la incluye sola, con el saldo
-    anterior y los demás conceptos especiales (llaves, ítems libres) —
-    no hace falta ningún mensaje ni cálculo aparte, se copia al
-    portapapeles con el mismo mecanismo que cualquier alta de aislada.
+    mensajería) ya la incluye sola, con el saldo anterior y los demás
+    conceptos especiales (llaves, ítems libres) — no hace falta ningún
+    mensaje ni cálculo aparte, se copia al portapapeles con el mismo
+    mecanismo que cualquier alta de aislada.
+
+    Pedido explícito de la clienta en una segunda vuelta: categoría R
+    también puede tener reservas extraordinarias (no solo A) — "le
+    puedo hacer abrir por medio de otro profesional"/cobros puntuales
+    fuera de la tarifa normal también les pasan a los R. A diferencia de
+    A (sin liquidación mensual propia), una extraordinaria de un R SÍ
+    puede afectar una `LiquidacionEmitida` ya generada — de ahí el
+    selector "Período a imputar", que solo aparece para R (ver
+    `_al_cambiar_profesional`/`_resolver_liquidacion_si_corresponde`).
 
     A diferencia de Reservas regulares/aisladas (con rondas y rondas de
     calibración pixel a pixel documentadas en CLAUDE.md), esta solapa es
@@ -1857,12 +1988,28 @@ class _PanelReservaExtraordinaria(QWidget):
 
         self.combo_profesional = QComboBox()
         self.combo_profesional.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, ("A",)):
+        self._categoria_por_profesional: dict[int, str] = {}
+        for id_, etiqueta, categoria in _opciones_profesional_extraordinaria(self.conn):
             self.combo_profesional.addItem(etiqueta, id_)
+            self._categoria_por_profesional[id_] = categoria
         habilitar_busqueda_profesional(self.combo_profesional)
-        self.combo_profesional.currentIndexChanged.connect(self.actualizar)
-        form.addWidget(QLabel("Profesional (categoría A)"))
+        self.combo_profesional.currentIndexChanged.connect(self._al_cambiar_profesional)
+        form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
+
+        # "Período a imputar" (pedido de la clienta, segunda vuelta: los
+        # R también pueden tener reservas extraordinarias, y a diferencia
+        # de A, una de un R puede afectar una liquidación ya emitida) —
+        # solo tiene sentido para R, así que arranca oculto y
+        # `_al_cambiar_profesional` lo muestra/esconde según corresponda.
+        self.etiqueta_periodo_imputar = QLabel("Período a imputar")
+        self.combo_periodo_imputar = QComboBox()
+        self.combo_periodo_imputar.addItem("Período actual (el de la fecha cargada)", "actual")
+        self.combo_periodo_imputar.addItem("Período siguiente", "siguiente")
+        self.etiqueta_periodo_imputar.setVisible(False)
+        self.combo_periodo_imputar.setVisible(False)
+        form.addWidget(self.etiqueta_periodo_imputar)
+        form.addWidget(self.combo_periodo_imputar)
 
         self.combo_localidad = QComboBox()
         opciones_localidad = _opciones_localidad(self.conn)
@@ -1916,7 +2063,7 @@ class _PanelReservaExtraordinaria(QWidget):
         form.addWidget(QLabel("Ítem a cargar"))
         form.addWidget(self.campo_item)
 
-        self.spin_monto = QDoubleSpinBox()
+        self.spin_monto = _SpinMonto()
         self.spin_monto.setRange(0, 99_999_999)
         self.spin_monto.setDecimals(2)
         self.spin_monto.setSingleStep(100)
@@ -1959,8 +2106,8 @@ class _PanelReservaExtraordinaria(QWidget):
 
         self._foco = instalar_enter_avanza_foco(
             [
-                self.combo_profesional, self.combo_localidad, self.combo_edificio, self.combo_unidad,
-                self.combo_consultorio, self.campo_fecha, self.spin_desde, self.spin_hasta,
+                self.combo_profesional, self.combo_periodo_imputar, self.combo_localidad, self.combo_edificio,
+                self.combo_unidad, self.combo_consultorio, self.campo_fecha, self.spin_desde, self.spin_hasta,
                 self.campo_item, self.spin_monto, boton_crear, boton_modificar, boton_cancelar,
             ],
             parent=self,
@@ -1972,6 +2119,16 @@ class _PanelReservaExtraordinaria(QWidget):
         # `_resetear_formulario`, acá adelantado a la construcción porque
         # esta solapa no tiene un `showEvent` que lo haga por otro lado.
         self._resetear_formulario()
+
+    def _es_profesional_r(self) -> bool:
+        id_profesional = self.combo_profesional.currentData()
+        return id_profesional is not None and self._categoria_por_profesional.get(id_profesional) == "R"
+
+    def _al_cambiar_profesional(self) -> None:
+        es_r = self._es_profesional_r()
+        self.etiqueta_periodo_imputar.setVisible(es_r)
+        self.combo_periodo_imputar.setVisible(es_r)
+        self.actualizar()
 
     def _cargar_edificios(self) -> None:
         localidad = self.combo_localidad.currentData()
@@ -2019,6 +2176,10 @@ class _PanelReservaExtraordinaria(QWidget):
         if id_profesional is None:
             QMessageBox.warning(self, "Crear reserva extraordinaria", "Elegí un profesional.")
             return
+        # Capturado ACÁ, antes de que `_resetear_formulario()` (al final,
+        # si todo sale bien) vuelva a ocultar/reiniciar este combo.
+        es_r = self._es_profesional_r()
+        periodo_a_imputar = self.combo_periodo_imputar.currentData()
         id_consultorio = self.combo_consultorio.currentData()
         if id_consultorio is None:
             QMessageBox.warning(
@@ -2042,6 +2203,22 @@ class _PanelReservaExtraordinaria(QWidget):
             ) + placa_faltante_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
             if faltantes and not _confirmar_llave_o_placa_faltante(self, faltantes):
                 return
+            # Pedido explícito de la clienta ("EN GENERAL"): vista previa
+            # de los datos con Confirmar/Cancelar antes de crear — mismo
+            # criterio que Reservas regulares/aisladas.
+            lineas_confirmacion = [
+                f"Profesional: {self.combo_profesional.currentText()}",
+                f"Ubicación: {self.combo_localidad.currentText()} - {self.combo_edificio.currentText()} - "
+                f"{self.combo_unidad.currentText()} - {self.combo_consultorio.currentText()}",
+                f"Fecha: {self.campo_fecha.date().toString('dd-MM-yyyy')}",
+                f"Horario: {_fmt_hora(self.spin_desde.value())} a {_fmt_hora(self.spin_hasta.value())}",
+                f"Ítem a cargar: {item}",
+                f"Monto a cobrar: {formatear_moneda(monto)}",
+            ]
+            if es_r:
+                lineas_confirmacion.append(f"Período a imputar: {self.combo_periodo_imputar.currentText()}")
+            if not confirmar_datos_antes_de_crear(self, "Crear reserva extraordinaria", lineas_confirmacion):
+                return
         try:
             _id, advertencias = crear_reserva_aislada(
                 self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio, fecha=fecha,
@@ -2060,11 +2237,46 @@ class _PanelReservaExtraordinaria(QWidget):
             return
         self.conn.commit()
         regenerar_snapshot_si_corresponde(self.conn, fecha[:7])
+        if es_r:
+            self._resolver_liquidacion_si_corresponde(id_profesional, fecha[:7], periodo_a_imputar)
         if advertencias:
             QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias))
         self._copiar_mensaje_detalle(id_profesional, fecha)
         self.actualizar()
         self._resetear_formulario()
+
+    def _resolver_liquidacion_si_corresponde(
+        self, id_profesional: int, periodo_reserva: str, periodo_a_imputar: str,
+    ) -> None:
+        """Respuesta de la clienta sobre este punto puntual: "Si se
+        imputa al mismo período de la liquidación, la rehace y la marca
+        como no enviada. Si la imputa para el período siguiente, no toca
+        la liquidación del mes, se contempla ese punto para la
+        liquidación del mes siguiente."
+
+        "Período siguiente" no necesita ningún código acá: no se toca
+        nada ahora, y el mes que viene la recoge sola —
+        `calcular_liquidacion` ya arma su total sumando TANTO las
+        aisladas (incluidas las extraordinarias, son `ReservaAislada`
+        igual que cualquier otra) del mes en curso COMO las del mes
+        anterior, así que una extraordinaria fechada este mes entra de
+        todos modos en el cálculo del mes siguiente aunque este mes no
+        se la facture — no hace falta mover la `Fecha` ni guardar a
+        dónde se la "imputó".
+
+        "Período actual" reusa `regenerar_si_corresponde` (la misma
+        función que ya usan las reservas regulares para esto, DC-08
+        §3.7) — ella sola resuelve el profesional liquidable, reemite la
+        liquidación de `periodo_reserva` (si no se puede, ej. ya hay
+        períodos posteriores emitidos, no hace nada en vez de romper la
+        carga de la reserva) y, al reemitir, `emitir_liquidacion` ya deja
+        sola la marca "Regenerada no enviada" si la última emisión de ese
+        período ya estaba Enviada (DC-09 §2.1/2.2) — no hace falta
+        llamar a `marcar_estado_envio` aparte."""
+        if periodo_a_imputar != "actual":
+            return
+        regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_reserva)
+        self.conn.commit()
 
     def _seleccionar_ubicacion(self, id_consultorio: int) -> None:
         fila = self.conn.execute(
@@ -2133,6 +2345,18 @@ class _PanelReservaExtraordinaria(QWidget):
         self.spin_hasta.setValue(reserva["HoraFin"])
         self.campo_item.setText(reserva["ItemExtraordinario"] or "")
         self.spin_monto.setValue(reserva["MontoExtraordinario"] or 0.0)
+        # Pedido de la clienta ("no me permite editar... es mas la
+        # cancela"): sin este aviso, el único efecto visible de
+        # "Modificar reserva" era que la fila pasaba a "Cancelada" en la
+        # tabla — el formulario SÍ quedaba precargado con sus datos (ver
+        # arriba), pero nada avisaba que hacía falta volver a tocar
+        # "Crear reserva extraordinaria" para guardar la versión
+        # corregida, así que parecía que el botón solo cancelaba.
+        QMessageBox.information(
+            self, "Modificar reserva",
+            "La reserva seleccionada se canceló y sus datos quedaron cargados en el formulario — "
+            "revisalos y confirmá con \"Crear reserva extraordinaria\" para guardar la versión corregida.",
+        )
 
     def _resetear_formulario(self) -> None:
         self.combo_profesional.setCurrentIndex(0)
@@ -2166,7 +2390,11 @@ class _PanelReservaExtraordinaria(QWidget):
                 (r["IdConsultorio"],),
             ).fetchone()
             filas.append((r, profesional, consultorio))
-        filas.sort(key=lambda t: (t[0]["Fecha"], t[0]["HoraInicio"]), reverse=True)
+        # Orden por defecto ascendente (pedido explícito de la clienta:
+        # "las reservas tienen que aparecer por orden de fecha, lo mas
+        # próximo arriba") — antes quedaba descendente (la fecha más
+        # lejana en el tiempo primero).
+        filas.sort(key=lambda t: (t[0]["Fecha"], t[0]["HoraInicio"]))
         if self._orden.columna is not None:
             filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._reservas = [t[0] for t in filas]

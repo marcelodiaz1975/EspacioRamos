@@ -46,11 +46,22 @@ from app.repositorio.registro import obtener_repositorio
 def sustituir_variables(texto: str, variables: dict[str, str]) -> str:
     """Reemplaza "{variable}" en el texto de una plantilla (de
     `MensajePredefinido`, o de las de acá) por su valor. Los saltos de
-    línea del texto guardado se respetan tal cual."""
+    línea del texto guardado se respetan tal cual.
+
+    Último paso, pedido explícito de la clienta ("WhatsApp Web
+    interpreta mal un '-' al principio de línea, como si fuera una
+    llamada/viñeta/formato en vez del carácter literal"): cualquier
+    línea que termine empezando con "-" (sea del texto de fábrica, de
+    una variable sustituida, o de una plantilla personalizada por la
+    clienta) suma un espacio adelante — WhatsApp ya no lo confunde con
+    su propia sintaxis. Acá, al final de la única función que arma TODO
+    mensaje editable del sistema (automáticos y `MensajePredefinido`),
+    cubre a cualquiera sin tener que tocar cada función de armado una
+    por una."""
     resultado = texto
     for clave, valor in variables.items():
         resultado = resultado.replace(f"{{{clave}}}", str(valor))
-    return resultado
+    return "\n".join(f" {linea}" if linea.startswith("-") else linea for linea in resultado.split("\n"))
 
 
 def obtener_texto_personalizado(conn: sqlite3.Connection, clave: str) -> str | None:

@@ -1563,3 +1563,18 @@ def test_grillas_de_registro_de_ausencias_dejan_fijas_columnas_y_encabezado(qtbo
     qtbot.addWidget(pantalla)
     for panel in (pantalla.panel_vacaciones, pantalla.panel_licencias, pantalla.panel_ausencias):
         assert panel.grilla._filas_columnas_fijas is True
+
+
+def test_grillas_de_registro_de_ausencias_reservan_alto_para_el_scroll_horizontal(qtbot, conn):
+    """Pedido explícito de la clienta ("que solo aparezca la barra que
+    se necesite, sin que tape nada"), extendido a todo el sistema: sin
+    `reservar_alto_scroll_horizontal()`, la barra de scroll horizontal
+    — cuando la grilla la necesita, por muchos consultorios — se come
+    alto del viewport sin que el tope mínimo lo contemple. El
+    comportamiento del mecanismo en sí queda cubierto en
+    `test_gui_grilla_operativa.py` — acá solo se confirma que las tres
+    solapas lo prenden."""
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_vacaciones, pantalla.panel_licencias, pantalla.panel_ausencias):
+        assert panel.grilla._reservar_alto_scroll_horizontal is True

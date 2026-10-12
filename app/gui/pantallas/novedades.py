@@ -380,6 +380,12 @@ class _PanelVacaciones(QWidget):
         # Horario y las filas de encabezado quedan siempre visibles al
         # escrolear — solo se escrolea el bloque de datos.
         self.grilla.activar_filas_y_columnas_fijas()
+        # Pedido explícito de la clienta, extendido a todo el sistema:
+        # sin esto, cuando la grilla necesita scroll horizontal (muchos
+        # consultorios), la barra se come alto del viewport sin que el
+        # tope mínimo lo contemple — tapaba la última fila y podía
+        # disparar un scroll vertical de más, innecesario.
+        self.grilla.reservar_alto_scroll_horizontal()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -705,6 +711,12 @@ class _PanelLicencias(QWidget):
         # Horario y las filas de encabezado quedan siempre visibles al
         # escrolear — solo se escrolea el bloque de datos.
         self.grilla.activar_filas_y_columnas_fijas()
+        # Pedido explícito de la clienta, extendido a todo el sistema:
+        # sin esto, cuando la grilla necesita scroll horizontal (muchos
+        # consultorios), la barra se come alto del viewport sin que el
+        # tope mínimo lo contemple — tapaba la última fila y podía
+        # disparar un scroll vertical de más, innecesario.
+        self.grilla.reservar_alto_scroll_horizontal()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -1003,6 +1015,12 @@ class _PanelAusencias(QWidget):
         # Horario y las filas de encabezado quedan siempre visibles al
         # escrolear — solo se escrolea el bloque de datos.
         self.grilla.activar_filas_y_columnas_fijas()
+        # Pedido explícito de la clienta, extendido a todo el sistema:
+        # sin esto, cuando la grilla necesita scroll horizontal (muchos
+        # consultorios), la barra se come alto del viewport sin que el
+        # tope mínimo lo contemple — tapaba la última fila y podía
+        # disparar un scroll vertical de más, innecesario.
+        self.grilla.reservar_alto_scroll_horizontal()
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 

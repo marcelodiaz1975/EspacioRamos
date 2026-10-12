@@ -1,6 +1,8 @@
 import pytest
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtWidgets import QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QWidget
+from PySide6.QtWidgets import (
+    QApplication, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QWidget,
+)
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -648,9 +650,12 @@ def test_crear_reserva_regular_no_crea_si_cancela_por_llave_faltante(qtbot, conn
 
 def test_crear_reserva_regular_con_llave_asignada_no_avisa(qtbot, conn, monkeypatch):
     """Con la llave del edificio ya asignada al profesional Y una placa
-    ya asignada en la unidad, no hay nada que avisar — si igual se
-    llamara a `QMessageBox.question` para esto, el monkeypatch de "No"
-    haría fallar la creación."""
+    ya asignada en la unidad, no hay nada que avisar sobre eso puntual —
+    el cartel nuevo de "EN GENERAL" (confirmar datos antes de crear) sí
+    se dispara igual (es independiente de llaves/placas), así que el
+    stub tiene que contestar "Sí" ahí para que la reserva se cree, pero
+    registra los TÍTULOS vistos para confirmar que "Falta llave o placa"
+    nunca apareció."""
     _preparar(conn)
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
     id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
@@ -661,7 +666,11 @@ def test_crear_reserva_regular_con_llave_asignada_no_avisa(qtbot, conn, monkeypa
     asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional)
     obtener_repositorio(conn, "Placa").crear(IdUnidad=id_unidad, PosicionTablero=1, IdProfesional=id_profesional, Activo=1)
     conn.commit()
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    titulos: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: (titulos.append(a[1]), QMessageBox.StandardButton.Yes)[1]),
+    )
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
@@ -671,17 +680,22 @@ def test_crear_reserva_regular_con_llave_asignada_no_avisa(qtbot, conn, monkeypa
     pantalla.panel_regulares._crear()
 
     assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+    assert "Falta llave o placa" not in titulos
 
 
 def test_crear_reserva_regular_avisa_solo_por_placa_si_no_hay_llaves_configuradas(qtbot, conn, monkeypatch):
     """Sin ninguna Llave cargada en el sistema no hay nada que chequear
     de acceso (ver `llaves_faltantes_para_reserva`), pero la placa sigue
-    faltando — el cartel combinado se dispara igual, solo por placa."""
+    faltando — el cartel combinado se dispara igual, solo por placa.
+    `avisos` guarda (título, texto) de TODOS los `question()` — ahora
+    también pasa por acá el cartel nuevo de "EN GENERAL" ("Crear reserva
+    regular"), así que se filtra por título en vez de asumir una sola
+    llamada en total."""
     _preparar(conn)
-    textos: list[str] = []
+    avisos: list[tuple[str, str]] = []
     monkeypatch.setattr(
         QMessageBox, "question",
-        staticmethod(lambda *a, **k: (textos.append(a[2]), QMessageBox.StandardButton.Yes)[1]),
+        staticmethod(lambda *a, **k: (avisos.append((a[1], a[2])), QMessageBox.StandardButton.Yes)[1]),
     )
 
     pantalla = PantallaReservas(conn)
@@ -690,9 +704,10 @@ def test_crear_reserva_regular_avisa_solo_por_placa_si_no_hay_llaves_configurada
     pantalla.panel_regulares._crear()
 
     assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
-    assert len(textos) == 1
-    assert "placa de la unidad" in textos[0]
-    assert "llave" not in textos[0]
+    avisos_llave_placa = [texto for titulo, texto in avisos if titulo == "Falta llave o placa"]
+    assert len(avisos_llave_placa) == 1
+    assert "placa de la unidad" in avisos_llave_placa[0]
+    assert "llave" not in avisos_llave_placa[0]
 
 
 def test_crear_reserva_regular_avisa_con_llave_y_placa_juntas_en_un_mismo_cartel(qtbot, conn, monkeypatch):
@@ -703,10 +718,10 @@ def test_crear_reserva_regular_avisa_con_llave_y_placa_juntas_en_un_mismo_cartel
     id_llave = crear_llave(conn, tipo="Edificio")
     agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio)
     conn.commit()
-    textos: list[str] = []
+    avisos: list[tuple[str, str]] = []
     monkeypatch.setattr(
         QMessageBox, "question",
-        staticmethod(lambda *a, **k: (textos.append(a[2]), QMessageBox.StandardButton.Yes)[1]),
+        staticmethod(lambda *a, **k: (avisos.append((a[1], a[2])), QMessageBox.StandardButton.Yes)[1]),
     )
 
     pantalla = PantallaReservas(conn)
@@ -714,9 +729,10 @@ def test_crear_reserva_regular_avisa_con_llave_y_placa_juntas_en_un_mismo_cartel
     pantalla.panel_regulares.combo_profesional.setCurrentIndex(1)
     pantalla.panel_regulares._crear()
 
-    assert len(textos) == 1
-    assert "llave del edificio" in textos[0]
-    assert "placa de la unidad" in textos[0]
+    avisos_llave_placa = [texto for titulo, texto in avisos if titulo == "Falta llave o placa"]
+    assert len(avisos_llave_placa) == 1
+    assert "llave del edificio" in avisos_llave_placa[0]
+    assert "placa de la unidad" in avisos_llave_placa[0]
 
 
 def test_crear_reserva_regular_con_varios_dias_tildados_crea_una_por_dia(qtbot, conn):
@@ -735,6 +751,49 @@ def test_crear_reserva_regular_con_varios_dias_tildados_crea_una_por_dia(qtbot, 
     }
     assert dias == {"Lunes", "Martes", "Jueves"}
     assert panel.tabla.rowCount() == 3
+
+
+def test_crear_reserva_regular_muestra_vista_previa_y_cancelar_no_borra_el_formulario(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta ("EN GENERAL"): antes de crear
+    cualquier reserva, un cartel con los datos a guardar, Confirmar/
+    Cancelar — si cancela, el formulario sigue cargado tal cual para
+    poder editar y reintentar, no se borra nada."""
+    _preparar(conn)
+    textos: list[str] = []
+
+    def _responder(*args, **kwargs):
+        titulo, texto = args[1], args[2]
+        textos.append(texto)
+        # Confirma el llave/placa si apareciera (no es lo que se prueba
+        # acá) pero cancela puntualmente la vista previa nueva.
+        return QMessageBox.StandardButton.No if titulo == "Crear reserva regular" else QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_responder))
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(1)
+
+    panel._crear()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 0
+    assert any("Profesional:" in t and "Días: Lunes" in t for t in textos)
+    # El formulario sigue cargado, no se reseteó.
+    assert panel.combo_profesional.currentIndex() == 1
+    assert panel._checks_dia["Lunes"].isChecked()
+
+
+def test_crear_reserva_regular_confirma_vista_previa_y_crea(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(1)
+
+    panel._crear()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
 
 
 def test_crear_reserva_regular_sin_ningun_dia_tildado_avisa_y_no_crea(qtbot, conn):
@@ -870,7 +929,16 @@ def test_crear_reserva_regular_con_conflicto_en_un_dia_sigue_con_los_demas(qtbot
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     panel._checks_dia["Martes"].setChecked(True)  # Lunes ya viene tildado por defecto
 
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    # El cartel nuevo de "EN GENERAL" (confirmar datos antes de crear)
+    # se contesta "Sí" — es el único "No" que importa acá es el del
+    # conflicto bloqueante de Martes.
+    def _responder(*args, **kwargs):
+        titulo = args[1]
+        if titulo == "Conflictos detectados":
+            return QMessageBox.StandardButton.No
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_responder))
     panel._crear()  # Martes choca con "Otro" (conflicto bloqueante) y se cancela; Lunes es libre
 
     reservas_del_profesional = conn.execute(
@@ -1164,7 +1232,10 @@ def test_crear_reserva_aislada_no_crea_si_cancela_por_llave_faltante(qtbot, conn
 
 def test_crear_reserva_aislada_con_llave_asignada_no_avisa(qtbot, conn, monkeypatch):
     """Con la llave del edificio ya asignada al profesional Y una placa
-    ya asignada en la unidad, no hay nada que avisar."""
+    ya asignada en la unidad, no hay nada que avisar sobre eso puntual —
+    el cartel nuevo de "EN GENERAL" sí se dispara igual, contestado
+    "Sí"; se registran los títulos para confirmar que "Falta llave o
+    placa" nunca apareció."""
     _preparar(conn)
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
     id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
@@ -1175,7 +1246,11 @@ def test_crear_reserva_aislada_con_llave_asignada_no_avisa(qtbot, conn, monkeypa
     asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional)
     obtener_repositorio(conn, "Placa").crear(IdUnidad=id_unidad, PosicionTablero=1, IdProfesional=id_profesional, Activo=1)
     conn.commit()
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    titulos: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: (titulos.append(a[1]), QMessageBox.StandardButton.Yes)[1]),
+    )
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
@@ -1185,14 +1260,15 @@ def test_crear_reserva_aislada_con_llave_asignada_no_avisa(qtbot, conn, monkeypa
     pantalla.panel_aisladas._crear()
 
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
+    assert "Falta llave o placa" not in titulos
 
 
 def test_crear_reserva_aislada_avisa_solo_por_placa_si_no_hay_llaves_configuradas(qtbot, conn, monkeypatch):
     _preparar(conn)
-    textos: list[str] = []
+    avisos: list[tuple[str, str]] = []
     monkeypatch.setattr(
         QMessageBox, "question",
-        staticmethod(lambda *a, **k: (textos.append(a[2]), QMessageBox.StandardButton.Yes)[1]),
+        staticmethod(lambda *a, **k: (avisos.append((a[1], a[2])), QMessageBox.StandardButton.Yes)[1]),
     )
 
     pantalla = PantallaReservas(conn)
@@ -1201,9 +1277,10 @@ def test_crear_reserva_aislada_avisa_solo_por_placa_si_no_hay_llaves_configurada
     pantalla.panel_aisladas._crear()
 
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
-    assert len(textos) == 1
-    assert "placa de la unidad" in textos[0]
-    assert "llave" not in textos[0]
+    avisos_llave_placa = [texto for titulo, texto in avisos if titulo == "Falta llave o placa"]
+    assert len(avisos_llave_placa) == 1
+    assert "placa de la unidad" in avisos_llave_placa[0]
+    assert "llave" not in avisos_llave_placa[0]
 
 
 def test_crear_reserva_aislada_avisa_con_llave_y_placa_juntas_en_un_mismo_cartel(qtbot, conn, monkeypatch):
@@ -1212,10 +1289,10 @@ def test_crear_reserva_aislada_avisa_con_llave_y_placa_juntas_en_un_mismo_cartel
     id_llave = crear_llave(conn, tipo="Edificio")
     agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio)
     conn.commit()
-    textos: list[str] = []
+    avisos: list[tuple[str, str]] = []
     monkeypatch.setattr(
         QMessageBox, "question",
-        staticmethod(lambda *a, **k: (textos.append(a[2]), QMessageBox.StandardButton.Yes)[1]),
+        staticmethod(lambda *a, **k: (avisos.append((a[1], a[2])), QMessageBox.StandardButton.Yes)[1]),
     )
 
     pantalla = PantallaReservas(conn)
@@ -1223,9 +1300,10 @@ def test_crear_reserva_aislada_avisa_con_llave_y_placa_juntas_en_un_mismo_cartel
     pantalla.panel_aisladas.combo_profesional.setCurrentIndex(1)
     pantalla.panel_aisladas._crear()
 
-    assert len(textos) == 1
-    assert "llave del edificio" in textos[0]
-    assert "placa de la unidad" in textos[0]
+    avisos_llave_placa = [texto for titulo, texto in avisos if titulo == "Falta llave o placa"]
+    assert len(avisos_llave_placa) == 1
+    assert "llave del edificio" in avisos_llave_placa[0]
+    assert "placa de la unidad" in avisos_llave_placa[0]
 
 
 def _monkeypatch_clipboard(monkeypatch):
@@ -2583,6 +2661,30 @@ def test_tabla_aisladas_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
     assert fechas_desc == ["20-08-2026", "17-08-2026"]
 
 
+def test_crear_reserva_aislada_muestra_vista_previa_y_cancelar_no_borra_el_formulario(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta ("EN GENERAL"), mismo criterio que
+    Reservas regulares."""
+    _preparar(conn)
+    textos: list[str] = []
+
+    def _responder(*args, **kwargs):
+        titulo, texto = args[1], args[2]
+        textos.append(texto)
+        return QMessageBox.StandardButton.No if titulo == "Crear reserva aislada" else QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_responder))
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+
+    panel._crear()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 0
+    assert any("Profesional:" in t and "Fecha:" in t for t in textos)
+    assert panel.combo_profesional.currentIndex() == 1
+
+
 def test_crear_reserva_aislada_sin_elegir_consultorio_avisa_y_no_crea(qtbot, conn):
     """Con más de una localidad y ninguna elegida todavía, "Crear reserva
     aislada" no puede completar el alta sin explotar — avisa y no hace
@@ -2649,6 +2751,57 @@ def test_grillas_de_reservas_dejan_fijas_columnas_y_encabezado(qtbot, conn):
         assert panel.grilla._filas_columnas_fijas is True
 
 
+def test_grillas_de_reservas_reservan_alto_para_el_scroll_horizontal(qtbot, conn):
+    """Pedido explícito de la clienta ("que solo aparezca la barra que
+    se necesite, sin que tape nada"), extendido a todo el sistema: sin
+    `reservar_alto_scroll_horizontal()`, la barra de scroll horizontal
+    — cuando la grilla la necesita, por muchos consultorios — se come
+    alto del viewport sin que el tope mínimo lo contemple, tapando la
+    última fila y pudiendo disparar un scroll vertical de más,
+    innecesario. El comportamiento del mecanismo en sí (cuánto alto
+    suma, cómo se mide la barra) ya está cubierto en
+    `test_gui_grilla_operativa.py` — acá solo se confirma que las dos
+    solapas de Reservas lo prenden, mismo criterio que el test de
+    arriba para `activar_filas_y_columnas_fijas()`."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+        assert panel.grilla._reservar_alto_scroll_horizontal is True
+
+
+def test_tab_en_filtro_de_unidad_de_la_grilla_no_salta_el_filtro_de_dia(qtbot, conn):
+    """Bug reportado por la clienta: Tab desde "Filtro de unidad" caía
+    directo en "Profesional", salteando los checks de "Filtro de día de
+    la semana" — causado por `agrupar_dias_en_pares()`, que reparenta
+    los checks después de construido el resto del panel y los deja al
+    final de la cadena nativa de Qt. Se corrige con una cadena de foco
+    propia para este panel (`GrillaOperativaWidget.widgets_filtro_para_
+    foco`), separada del formulario de alta."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    for indice, panel in enumerate((pantalla.panel_regulares, pantalla.panel_aisladas)):
+        pantalla.pestanas.setCurrentIndex(indice)  # solo la solapa activa tiene widgets visibles
+        boton_filtro_unidad = panel.grilla._filtro_unidad.foco_widget()
+        boton_filtro_unidad.setFocus()
+        qtbot.waitUntil(lambda: boton_filtro_unidad.hasFocus())
+        qtbot.keyClick(boton_filtro_unidad, Qt.Key.Key_Tab)
+        siguiente = QApplication.focusWidget()
+        assert siguiente in panel.grilla._checks_dia.values()
+
+
+def test_etiquetas_horas_regulares_y_aisladas_tienen_wordwrap(qtbot, conn):
+    """Pedido de la clienta: "Cantidad de horas regulares semanales" se
+    veía cortado — con wordWrap pasa a una segunda línea en vez de
+    desbordar la columna."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.panel_regulares.etiqueta_horas_semanales.wordWrap() is True
+    assert pantalla.panel_regulares.etiqueta_descuento.wordWrap() is True
+    assert pantalla.panel_aisladas.etiqueta_horas_aisladas.wordWrap() is True
+
+
 # ------------------------------------------------------------ reserva extraordinaria
 
 def _preparar_categoria_a(conn):
@@ -2661,17 +2814,143 @@ def _preparar_categoria_a(conn):
     conn.commit()
 
 
-def test_solapa_reserva_extraordinaria_existe_con_combo_solo_categoria_a(qtbot, conn):
-    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Lo Veci')")
+def test_solapa_reserva_extraordinaria_existe_con_combo_a_y_r(qtbot, conn):
+    """Segunda vuelta: categoría R también puede tener reservas
+    extraordinarias, no solo A — el combo ofrece las dos categorías, con
+    las A primero (orden natural) y las R después (orden natural), no la
+    jerarquía global B/R/A/E/X/C que usan el resto de los selectores."""
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('R', 'R5', 'Lo Veci')"
+    )
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('A', 'A20', 'Paz')"
+    )
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('A', 'A3', 'Gómez')"
+    )
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('X', 'Inactivo')")
+    conn.commit()
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.pestanas.tabText(2) == "Reservas extraordinarias"
+    panel = pantalla.panel_extraordinaria
+    assert panel.objectName() == "panelSolapa"
+    # "Todos los profesionales" + A3, A20 (ascendente) + R5 — el X queda afuera.
+    assert panel.combo_profesional.count() == 4
+    assert panel.combo_profesional.itemText(1) == "A3 - Gómez"
+    assert panel.combo_profesional.itemText(2) == "A20 - Paz"
+    assert panel.combo_profesional.itemText(3) == "R5 - Lo Veci"
+
+
+def test_reserva_extraordinaria_etiqueta_profesional_sin_mencionar_categoria(qtbot, conn):
     _preparar_categoria_a(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    assert pantalla.pestanas.tabText(2) == "Reserva extraordinaria"
     panel = pantalla.panel_extraordinaria
-    assert panel.objectName() == "panelSolapa"
-    # "Todos los profesionales" + solo el de categoría A (el R queda afuera).
-    assert panel.combo_profesional.count() == 2
-    assert panel.combo_profesional.itemText(1) == "Paz"
+    etiquetas = [
+        w.text() for w in panel.findChildren(QLabel) if hasattr(w, "text")
+    ]
+    assert "Profesional" in etiquetas
+    assert "Profesional (categoría A)" not in etiquetas
+
+
+def test_periodo_a_imputar_solo_aparece_para_categoria_r(qtbot, conn):
+    _preparar_categoria_a(conn)
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('R', 'R1', 'Lo Veci')"
+    )
+    conn.commit()
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.pestanas.setCurrentIndex(2)  # "Reservas extraordinarias" — isVisible() exige la solapa activa
+    panel = pantalla.panel_extraordinaria
+
+    # Sin selección (arranca en "Todos los profesionales"): oculto.
+    assert panel.combo_periodo_imputar.isVisible() is False
+
+    # Categoría A: sigue oculto.
+    indice_a = panel.combo_profesional.findText("Paz")
+    panel.combo_profesional.setCurrentIndex(indice_a)
+    assert panel.combo_periodo_imputar.isVisible() is False
+
+    # Categoría R: visible.
+    indice_r = panel.combo_profesional.findText("R1 - Lo Veci")
+    panel.combo_profesional.setCurrentIndex(indice_r)
+    assert panel.combo_periodo_imputar.isVisible() is True
+    assert panel.etiqueta_periodo_imputar.isVisible() is True
+
+
+def test_crear_reserva_extraordinaria_de_un_r_con_periodo_actual_regenera_liquidacion(qtbot, conn):
+    """Respuesta de la clienta: "si se imputa al mismo período de la
+    liquidación, la rehace y la marca como no enviada"."""
+    from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
+    from app.negocio.dias import periodo_actual
+
+    _preparar_categoria_a(conn)
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido, SaldoCuentaActual) "
+        "VALUES ('R', 'R1', 'Lo Veci', 0)"
+    )
+    conn.commit()
+    id_r = conn.execute("SELECT IdProfesional FROM Profesional WHERE IdCodigo = 'R1'").fetchone()["IdProfesional"]
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_r, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_r, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    indice_r = panel.combo_profesional.findText("R1 - Lo Veci")
+    panel.combo_profesional.setCurrentIndex(indice_r)
+    indice_actual = panel.combo_periodo_imputar.findData("actual")
+    panel.combo_periodo_imputar.setCurrentIndex(indice_actual)
+    panel.campo_item.setText("Ajuste puntual")
+    panel.spin_monto.setValue(3000)
+    panel._crear()
+
+    from app.repositorio.registro import obtener_repositorio as repo
+    emisiones = repo(conn, "LiquidacionEmitida").listar(IdProfesional=id_r, Periodo=periodo)
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_crear_reserva_extraordinaria_de_un_r_con_periodo_siguiente_no_toca_liquidacion(qtbot, conn):
+    """Respuesta de la clienta: "si la imputa para el período siguiente,
+    no toca la liquidación del mes"."""
+    from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
+    from app.negocio.dias import periodo_actual
+    from app.repositorio.registro import obtener_repositorio as repo
+
+    _preparar_categoria_a(conn)
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido, SaldoCuentaActual) "
+        "VALUES ('R', 'R1', 'Lo Veci', 0)"
+    )
+    conn.commit()
+    id_r = conn.execute("SELECT IdProfesional FROM Profesional WHERE IdCodigo = 'R1'").fetchone()["IdProfesional"]
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_r, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_r, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    indice_r = panel.combo_profesional.findText("R1 - Lo Veci")
+    panel.combo_profesional.setCurrentIndex(indice_r)
+    indice_siguiente = panel.combo_periodo_imputar.findData("siguiente")
+    panel.combo_periodo_imputar.setCurrentIndex(indice_siguiente)
+    panel.campo_item.setText("Ajuste puntual")
+    panel.spin_monto.setValue(3000)
+    panel._crear()
+
+    emisiones = repo(conn, "LiquidacionEmitida").listar(IdProfesional=id_r, Periodo=periodo)
+    assert len(emisiones) == 1
+    assert emisiones[0]["EstadoEnvio"] == "Enviada"
 
 
 def test_crear_reserva_extraordinaria_se_guarda_y_copia_mensaje_al_portapapeles(qtbot, conn, monkeypatch):
@@ -2693,6 +2972,41 @@ def test_crear_reserva_extraordinaria_se_guarda_y_copia_mensaje_al_portapapeles(
     assert len(copiado) == 1
     assert "DETALLE RESERVA" in copiado[0]
     assert "Uso del consultorio para un taller puntual" in copiado[0]
+
+
+def test_crear_reserva_extraordinaria_muestra_vista_previa_y_cancelar_no_borra_el_formulario(
+    qtbot, conn, monkeypatch,
+):
+    """Pedido explícito de la clienta ("EN GENERAL"), mismo criterio que
+    las otras dos solapas — acá además confirma que el ítem/monto
+    cargados aparecen en la vista previa."""
+    _preparar_categoria_a(conn)
+    textos: list[str] = []
+
+    def _responder(*args, **kwargs):
+        titulo, texto = args[1], args[2]
+        textos.append(texto)
+        return (
+            QMessageBox.StandardButton.No if titulo == "Crear reserva extraordinaria"
+            else QMessageBox.StandardButton.Yes
+        )
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_responder))
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel.spin_monto.setValue(5000)
+
+    panel._crear()
+
+    assert obtener_repositorio(conn, "ReservaAislada").listar() == []
+    assert any("Taller puntual" in t and "5.000" in t for t in textos)
+    # El formulario sigue cargado, no se reseteó.
+    assert panel.combo_profesional.currentIndex() == 1
+    assert panel.campo_item.text() == "Taller puntual"
+    assert panel.spin_monto.value() == 5000
 
 
 def test_crear_reserva_extraordinaria_sin_item_no_crea_nada(qtbot, conn):
@@ -2781,6 +3095,35 @@ def test_modificar_reserva_extraordinaria_cancela_la_vieja_y_precarga_el_formula
     assert confirmadas[0]["MontoExtraordinario"] == 6000
 
 
+def test_modificar_reserva_extraordinaria_avisa_que_hay_que_confirmar_de_nuevo(qtbot, conn, monkeypatch):
+    """Pedido de la clienta: "no me permite editar... es mas la cancela"
+    — el único efecto visible era que la fila pasaba a "Cancelada" en la
+    tabla, sin ningún aviso de que el formulario quedó precargado para
+    volver a confirmar. Se agrega un cartel explícito."""
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel.spin_monto.setValue(5000)
+    panel._crear()
+
+    mensajes = []
+    monkeypatch.setattr(
+        QMessageBox, "information",
+        staticmethod(lambda *args, **kwargs: mensajes.append(args) or None),
+    )
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+
+    # Puede venir acompañado del aviso de "cancelada el mismo día" (la
+    # reserva de prueba queda con la fecha de hoy por default) — lo que
+    # importa es que el cartel nuevo esté entre los mostrados.
+    textos = [m[2] for m in mensajes]
+    assert any("quedaron cargados en el formulario" in t and "Crear reserva extraordinaria" in t for t in textos)
+
+
 def test_modificar_reserva_extraordinaria_sin_seleccion_avisa(qtbot, conn):
     _preparar_categoria_a(conn)
     pantalla = PantallaReservas(conn)
@@ -2824,3 +3167,60 @@ def test_reserva_extraordinaria_se_ve_en_la_tabla_de_reservas_aisladas_con_el_mo
     pantalla.panel_aisladas.actualizar()
     assert pantalla.panel_aisladas.tabla.rowCount() == 1
     assert "7.500" in pantalla.panel_aisladas.tabla.item(0, 10).text()
+
+
+def test_tabla_extraordinaria_ordena_por_fecha_ascendente_por_defecto(qtbot, conn):
+    """Pedido explícito de la clienta: "las reservas tienen que aparecer
+    por orden de fecha, lo mas próximo arriba" — antes quedaba al revés
+    (la fecha más lejana en el tiempo primero)."""
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    hoy = panel.campo_fecha.date()
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller lejano")
+    panel.spin_monto.setValue(1000)
+    panel.campo_fecha.setDate(hoy.addDays(20))
+    panel._crear()
+
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller cercano")
+    panel.spin_monto.setValue(2000)
+    panel.campo_fecha.setDate(hoy.addDays(5))
+    panel._crear()
+
+    assert panel.tabla.rowCount() == 2
+    assert panel.tabla.item(0, 8).text() == "Taller cercano"
+    assert panel.tabla.item(1, 8).text() == "Taller lejano"
+
+
+def test_spin_monto_de_reserva_extraordinaria_selecciona_todo_al_enfocar(qtbot):
+    """Pedido de la clienta sobre "Monto a cobrar" de Reserva
+    extraordinaria, extendido a "todos los cuadros de texto similares
+    del sistema": select-all al enfocar, mismo mecanismo que `_SpinMonto`
+    de Pagos/`_SpinMoneda` de Configuración general."""
+    from app.gui.pantallas.reservas import _SpinMonto
+
+    spin = _SpinMonto()
+    spin.setRange(0, 99_999_999)
+    spin.setValue(5000)
+    qtbot.addWidget(spin)
+    spin.show()
+    qtbot.waitExposed(spin)
+    spin.setFocus()
+    qtbot.waitUntil(lambda: spin.hasFocus())
+    qtbot.wait(10)
+    assert spin.lineEdit().selectedText() == spin.lineEdit().text()
+    assert spin.lineEdit().selectedText() != ""
+
+
+def test_spin_monto_de_reserva_extraordinaria_muestra_formato_moneda(qtbot):
+    from app.gui.pantallas.reservas import _SpinMonto
+
+    spin = _SpinMonto()
+    spin.setRange(0, 99_999_999)
+    spin.setValue(1234.5)
+    qtbot.addWidget(spin)
+    assert "$" in spin.text()
+    assert "1.234" in spin.text()

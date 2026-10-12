@@ -8217,3 +8217,382 @@ reproducible en el código actual — queda documentado por si vuelve a
 aparecer en la instalación real, con más detalle de cuándo pasa (recién
 abierto el formulario vs. después de cambiar de solapa, por ejemplo)
 para poder reproducirlo con precisión.
+
+## Cuarta tanda de correcciones post-v1: Reservas (las tres solapas) + reglas generales
+
+Lista grande de pedidos sobre "Reservas" (Reservas regulares/Reservas
+aisladas/Reserva extraordinaria), más dos pedidos "EN GENERAL" que
+arrancan como reglas nuevas. Mismo criterio de toda esta serie de
+tandas: se implementa, se investiga lo que hay que investigar (algunos
+puntos eran "fijate si entendés a qué me refiero", no pedidos de
+arreglo puntual), se corren pyflakes y la suite completa, y la nueva
+versión no se larga hasta que la clienta lo pida.
+
+### Orden de Unidad (PB/EP/piso ascendente) en los selectores del sistema
+
+Mismo bug en dos lugares: tanto `reservas.py::_opciones_unidad` (un solo
+edificio ya elegido) como `catalogos.py::_opciones_unidad`/
+`_opciones_consultorio` (sin edificio fijo, listan todas) ordenaban
+`Departamento` alfabéticamente por SQL — "EP" quedaba antes que "PB", y
+un piso de dos dígitos (ej. "10mo") se intercalaba mal contra uno de un
+dígito. La grilla embebida (`grilla_operativa.py`) ya resolvía esto
+correctamente con `clave_orden_unidad` (de `app.pdf.estilos`, ya
+existente) desde antes — las dos funciones de arriba pasan a ordenar en
+Python con esa misma clave en vez de depender del `ORDER BY` de SQL.
+En `catalogos.py`, que lista TODAS las unidades/consultorios del
+sistema sin acotar a un edificio, la clave pasa a ser compuesta
+(`(Edificio, clave_orden_unidad(Departamento))`) para no mezclar pisos
+de edificios distintos entre sí — error que se corrigió en el diseño,
+antes de escribirlo, no después de un test fallido.
+
+Quedó pendiente (mismo patrón, no corregido en esta tanda por acotar el
+alcance): `llaves.py`, `balance.py`, `imagenes.py`, `estadisticas.py`,
+`aumentos.py` tienen el mismo `ORDER BY Departamento` sin pasar por
+`clave_orden_unidad` — se arreglan la próxima vez que se revise alguna
+de esas pantallas.
+
+### Indicador de foco visible en checks y combos (estilos.py)
+
+La regla general de foco (`QPushButton:focus { outline: ...}`, ver más
+arriba en este documento) había quedado deliberadamente acotada a
+`QPushButton` porque `outline` no se pinta en otros tipos de widget en
+este Qt. Pedido explícito de la clienta sobre Reservas ("no veo en los
+cheks... por ejemplo"): se suma `border` reservado (2px transparente en
+reposo, color real en :focus, para no correr el contenido de
+alrededor) a `QComboBox` y `QCheckBox`. Comprobado con captura real +
+muestreo de píxeles (mismo criterio que el resto de este documento): el
+combo mostraba un botón nativo (click normal, sin estilo propio) antes
+de este cambio — agregar `border` no le cambió el look en reposo, solo
+sumó el anillo al enfocar.
+
+Investigado aparte: por qué solo mencionó "checks" y no "botones" (los
+botones YA tenían el anillo desde la ronda de "Indicador visual de
+foco" original) — comprobado con un script que los botones de Reservas
+(incluidos los compactos, con `setStyleSheet("padding: 3px 16px;")`)
+SÍ muestran el anillo correctamente; el override puntual de padding no
+pisa la regla `:focus` global. No se encontró ningún bug ahí — el pedido
+real era sobre checks/combos, cubierto arriba.
+
+Suite de regresión corrida contra los ~15 archivos de tests de GUI más
+sensibles a geometría (incluida toda la batería de Reservas/Oferta,
+calibrada pixel a pixel en rondas anteriores): sin cambios, el border
+reservado de 2px no corrió nada de lo ya afinado.
+
+### Reservas regulares: wordWrap en las etiquetas de resumen, Tab no se salta "Día de la semana"
+
+- **"Cantidad de horas regulares semanales" se veía cortado**:
+  `etiqueta_horas_semanales`/`etiqueta_descuento` (Regulares) y
+  `etiqueta_horas_aisladas` (Aisladas) suman `setWordWrap(True)` — sin
+  esto, un texto más largo que la columna no se recortaba de forma
+  visible en el layout pero podía quedar tapado por el panel de al lado
+  o cortado contra el borde de la ventana; con wrap pasa a una segunda
+  línea en vez de desbordar.
+- **Tab salteaba "Filtro de día de la semana" entre Unidad y Profesional**:
+  investigado a fondo, el bug es real y tiene una causa concreta. El
+  panel de Filtros de la grilla embebida (Localidad/Edificio/Unidad/Día
+  de la semana/Profesional) nunca tuvo una cadena explícita de
+  `instalar_enter_avanza_foco` — dependía del orden nativo de Tab de
+  Qt. `GrillaOperativaWidget.agrupar_dias_en_pares()` (pedido de una
+  ronda anterior, pasa los checks de día a una grilla de 2 columnas)
+  reparenta esos checks a un contenedor NUEVO después de construido el
+  resto del panel — Qt los reinserta al FINAL de la cadena nativa en vez
+  de mantenerlos en su lugar, así que Tab desde "Filtro de unidad" caía
+  directo en "Profesional". Se corrige con un método nuevo,
+  `GrillaOperativaWidget.widgets_filtro_para_foco()` (devuelve, en
+  orden visual, los botones-resumen de los tres filtros colapsables —
+  `_FiltroColapsable.foco_widget()`, no la lista interna que arranca
+  oculta —, cada check de día y el combo de Profesional), que Reservas
+  (las dos solapas con grilla embebida) usa para armar una cadena de
+  foco PROPIA de ese panel, separada de `self._foco` (el formulario de
+  alta, que vive en otra columna con otro propósito). Confirmado con
+  `QTest.keyClick` real, no solo revisando el código.
+
+### Referencias de colores: borde cortado — investigado, sin reproducir
+
+Pedido de "fijate si entendés a qué me refiero" sobre el borde de los
+cuadraditos de "Referencias de colores" (se veía con el borde exterior
+cortado, según la clienta). Investigado con captura real + pixel a
+pixel (`_CeldaGrilla.paintEvent`/`_dibujar_bordes_gruesos`, que dibuja
+un borde gris fino de 1px en las 4 caras de cada swatch, sin relación
+con `bordes` — siempre se dibuja): en este entorno, CUALQUIER swatch
+probado (simple y con triángulo divisor) muestra un rectángulo cerrado,
+sin corte en ningún lado. No se encontró ningún código que pudiera
+producir el defecto descripto — puede ser específico del renderizado
+real (Windows/DPI) o de la captura que la clienta estaba mirando; si
+persiste en la instalación real, hace falta una captura de pantalla
+puntual para poder reproducirlo acá.
+
+### Líneas de la grilla que varían según la consulta — explicación, no pedido de arreglo
+
+La clienta aclaró explícitamente que esto era una pregunta ("fijate y
+comentame si te das cuenta de qué estoy hablando"), no un pedido de
+arreglar un caso puntual (con datos propios que no se pueden ver desde
+acá). Respuesta: sí, se entiende a qué se refiere, y es el
+comportamiento ESPERADO, no un bug — `_dibujar_bordes_gruesos`
+(`grilla_operativa.py`) pinta tres grosores/colores distintos según
+qué tipo de límite cae en cada borde de celda:
+
+- **Fina gris (`#999999`, 1px)**: la cuadrícula de siempre, en las 4
+  caras de CUALQUIER celda — la línea "default" que separa cualquier
+  par de celdas vecinas sin ningún límite especial entre medio.
+- **Media (`_COLOR_LINEA_UNIDAD`, un gris más oscuro, 2px)**: separa dos
+  UNIDADES distintas dentro del mismo día (ej. el consultorio 3 del
+  "7mo" contra el consultorio 1 del "9no", si ambos aparecen uno al
+  lado del otro en la grilla) — sumada en la tanda anterior
+  ("Grilla semanal: scroll horizontal, colores de líneas..."). También
+  separa la fila "Día de la semana" del resto de las filas de
+  encabezado.
+- **Gruesa negra (3px)**: separa DÍAS distintos (el límite entre, por
+  ejemplo, martes y miércoles) y encierra el bloque de encabezado.
+
+El ejemplo puntual que dio la clienta (línea vertical entre los
+consultorios 3 y 4 del "7mo" los martes) sería, con ese criterio, una
+línea MEDIA si consultorio 3 y 4 pertenecen a UNIDADES distintas (ej.
+"7mo A" y "7mo B" cargadas como dos filas de `Unidad` separadas, aunque
+compartan el mismo texto "7mo" en el nombre visible) — es información
+real sobre la estructura de datos, no un error de dibujo. Lo que SÍ
+puede variar "según la consulta" (lo que la clienta notó) es que, al
+cambiar los filtros de Localidad/Edificio/Unidad de la grilla, cambia
+QUÉ columnas quedan una al lado de la otra — un consultorio que hoy
+tiene al lado uno de la MISMA unidad (línea fina) puede, con otro
+filtro aplicado, terminar al lado de uno de OTRA unidad (línea media) o
+de otro DÍA (línea gruesa), simplemente porque cambió su vecino
+inmediato en la grilla resultante. No hay ningún código que decida el
+grosor "al azar" ni que dependa de qué profesional está seleccionado —
+depende únicamente de qué dato cae al lado de cuál en cada consulta
+puntual.
+
+### Reservas aisladas: "Cancelar reserva" cortado — investigado, sin reproducir
+
+Capturado con datos mínimos en 1500×800 y 1366×768 (tamaños de ventana
+reales, con `hoja_estilos()` aplicada): en los dos casos "Cancelar
+reserva" se ve completo, dentro del panel, sin recorte. El mecanismo de
+alto de esta solapa (`scroll.setFixedHeight(contenido.
+minimumSizeHint().height())`, con la tabla de abajo llevándose el resto
+vía `stretch=1`) ya está diseñado para que el formulario de arriba
+nunca empuje a los botones fuera de la vista. No se pudo reproducir con
+los tamaños de ventana probados — puede depender del tamaño real de la
+ventana de la clienta o de datos cargados que alarguen el formulario de
+otra forma; si persiste, hace falta su tamaño de ventana real (o una
+captura) para reproducirlo con precisión.
+
+### Scrollbars: solo la que hace falta, nunca una de más tapando contenido
+
+Pedido explícito, "en todos los formularios del sistema": la grilla
+embebida tiene que verse entera cuando entra sin necesitar scroll
+vertical, y cuando sí necesita scroll horizontal (muchos consultorios),
+esa barra no tiene que "tapar" la última fila ni disparar un scroll
+vertical de más que no haría falta si la barra no estuviera ahí.
+
+Investigado antes de tocar nada: el mecanismo que resuelve exactamente
+este problema ya existía — `GrillaOperativaWidget.reservar_alto_scroll_
+horizontal()` (sumado en la revisión de Oferta de consultorios, séptima
+vuelta: "dale más largo para que el scroll horizontal no tape lo
+último que se tendría que ver de la grilla") suma al alto mínimo de la
+tabla el espacio real que el estilo activo le da a una barra de scroll
+horizontal (`QStyle.PM_ScrollBarExtent`) — sin esto, el viewport mide
+justo la suma de las filas, y la barra, al aparecer, le come ese mismo
+alto, tapando la última fila (y con ella, en los casos más ajustados,
+obligando a un scroll vertical que no haría falta si el espacio ya
+estuviera reservado de entrada).
+
+El mecanismo es opt-in (no afecta a ningún otro uso de esta grilla
+compartida) y, confirmado por búsqueda antes de este pedido, solo lo
+llamaban `_PanelGrillaSemanal` ("Grilla y mensajería") y `_PanelOferta`
+("Disponibilidad") — las dos solapas de Reservas y las tres de
+Registro de ausencias nunca lo habían sumado, pese a embeber la misma
+grilla y poder necesitar scroll horizontal con una base de muchos
+consultorios. Se suma la misma llamada, en el mismo lugar (justo
+después de `activar_filas_y_columnas_fijas()`), en los cinco paneles
+que todavía no la tenían: `_PanelReservasRegulares`/`_PanelReservasAisladas`
+(`reservas.py`) y `_PanelVacaciones`/`_PanelLicencias`/`_PanelAusencias`
+(`novedades.py`) — sin tocar nada del mecanismo en sí, que ya estaba
+cubierto a fondo por sus propios tests en `test_gui_grilla_operativa.py`.
+
+Tests nuevos: `test_grillas_de_reservas_reservan_alto_para_el_scroll_
+horizontal` (`test_gui_reservas.py`) y `test_grillas_de_registro_de_
+ausencias_reservan_alto_para_el_scroll_horizontal` (`test_gui_
+novedades.py`) — mismo criterio que el test ya existente de
+`activar_filas_y_columnas_fijas()` en cada archivo: confirman el flag
+`_reservar_alto_scroll_horizontal is True` en las solapas que
+corresponda, sin repetir la verificación del mecanismo en sí.
+
+### Reserva extraordinaria: renombre a plural, categoría R además de A, Modificar reserva arreglado, orden por fecha
+
+- **Solapa renombrada** "Reservas extraordinarias" (antes "Reserva
+  extraordinaria", singular).
+- **Categoría R además de A** (pedido explícito, segunda vuelta sobre
+  esta funcionalidad — ver más arriba la sección original "Reservas:
+  solapa nueva 'Reserva extraordinaria' (categoría A)"): "le puedo
+  hacer abrir por medio de otro profesional"/cobros puntuales fuera de
+  tarifa también les pasan a los R, y a diferencia de A (sin
+  liquidación mensual propia) SÍ pueden afectar una `LiquidacionEmitida`
+  ya generada. El guardarraíl de categoría que tenía
+  `crear_reserva_aislada` (`"Una reserva extraordinaria solo se puede
+  asignar a un profesional categoría A"`) pasa a aceptar A o R.
+  - Label del combo pasa de "Profesional (categoría A)" a "Profesional"
+    a secas.
+  - Orden del combo: A primero (código natural ascendente — A2, A3,
+    A21, A23...), R después (mismo criterio ascendente) — `_opciones_
+    profesional_extraordinaria` (nueva, `reservas.py`), DISTINTA de la
+    jerarquía global B/R/A/E/X/C que usa `_opciones_profesional` para
+    el resto del sistema (ahí R va antes que A) — acá el pedido
+    explícito de la clienta invierte ese orden para este combo
+    puntual.
+  - **"Período a imputar"** (combo nuevo, "Período actual (el de la
+    fecha cargada)"/"Período siguiente"): oculto por default, visible
+    SOLO cuando el profesional elegido es categoría R
+    (`_al_cambiar_profesional`/`_es_profesional_r`). Respuesta de la
+    clienta a la pregunta de qué hacer con una liquidación ya emitida:
+    "si se imputa al mismo período de la liquidación, la rehace y la
+    marca como no enviada. Si la imputa para el período siguiente, no
+    toca la liquidación del mes, se contempla ese punto para la
+    liquidación del mes siguiente." — "Período siguiente" no necesita
+    ningún código: `calcular_liquidacion` ya suma, para cualquier
+    período, tanto las aisladas del mes en curso como las del mes
+    ANTERIOR (`aisladas_mes_anterior`/`aisladas_mes_en_curso`), así que
+    una extraordinaria fechada este mes entra sola en el cálculo del
+    mes siguiente sin tener que mover ni marcar nada ahora. "Período
+    actual" reusa `regenerar_si_corresponde` (`app.negocio.
+    liquidaciones`, la misma función que ya usan las reservas
+    regulares, DC-08 §3.7) — resuelve el profesional liquidable,
+    reemite la liquidación de ese período (si no se puede, ej. ya hay
+    períodos posteriores emitidos, no rompe la carga de la reserva) y
+    `emitir_liquidacion` ya deja sola la marca "Regenerada no enviada"
+    si la última emisión de ese período ya estaba Enviada (DC-09
+    §2.1/2.2) — no hace falta llamar a `marcar_estado_envio` aparte.
+  - **Bug real encontrado al abrir esto a R, no pedido explícitamente
+    pero necesario para que los números cierren**: `_aisladas_periodo`
+    (`app.negocio.liquidaciones`, la función que arma el desglose de
+    aisladas de una liquidación) calculaba el monto de CUALQUIER
+    `ReservaAislada` con hora×tarifa, sin mirar `EsExtraordinaria` —
+    hubiera ignorado el monto manual cargado a mano apenas un R
+    tuviera una extraordinaria (bug latente desde que se armó la
+    funcionalidad para A, nunca alcanzable en producción porque A no
+    tiene liquidación mensual propia). Corregido: usa
+    `MontoExtraordinario` cuando `EsExtraordinaria` es verdadero, sin
+    aplicar el recargo de aisladas (mismo criterio que `crear_reserva_
+    aislada`, que ya fuerza `AplicaRecargo=False` para estas). `ItemAislada`
+    suma un campo `item_extraordinario` (opcional, default `None`) para
+    que el PDF pueda describir el cargo — `_texto_aislada` (`liquidacion_
+    pdf.py`) usa ese ítem en vez de "Hora aislada trabajada/a trabajar"
+    cuando corresponde.
+- **"Modificar reserva" arreglado** (bug reportado por la clienta: "no
+  me permite editar... es mas la cancela"): investigado, el mecanismo
+  en sí (cancelar la vieja + precargar el formulario con sus datos, el
+  mismo criterio que usan las otras dos solapas desde que se armó esta
+  funcionalidad) YA funcionaba correctamente — confirmado con un test
+  que verifica la precarga campo por campo. El problema era de
+  PERCEPCIÓN: el único efecto visible de clickear "Modificar reserva"
+  era que la fila pasaba a "Cancelada" en la tabla, sin ningún aviso de
+  que el formulario quedó precargado y hay que volver a tocar "Crear
+  reserva extraordinaria" para guardar la versión corregida — desde la
+  pantalla, parecía que el botón solo cancelaba. Se agrega un
+  `QMessageBox.information` explícito después de la precarga,
+  aclarando los dos pasos.
+- **Orden por fecha ascendente** (pedido explícito: "las reservas
+  tienen que aparecer por orden de fecha, lo mas próximo arriba"): el
+  orden por defecto de la tabla pasa de descendente (la fecha más
+  lejana primero) a ascendente.
+
+### Campos de monto: separador de miles + select-all al enfocar (todo el sistema)
+
+Pedido puntual sobre "Monto a cobrar" de Reserva extraordinaria,
+extendido explícitamente a "todos los cuadros de texto similares del
+sistema". El patrón `_SpinMonto`/`_SpinMoneda` (QDoubleSpinBox que se
+muestra como moneda vía `formatear_moneda`, "$ 1.234,56") ya existía,
+duplicado por pantalla (Pagos, Configuración general) — las dos
+clases existentes suman `focusInEvent` con `QTimer.singleShot(0,
+self.selectAll)` (mismo mecanismo ya usado por el selector de
+profesional: un `selectAll()` inmediato durante el propio evento de
+foco queda pisado por el reposicionamiento nativo del cursor que hace
+Qt justo después de un click).
+
+- `reservas.py` suma su propia `_SpinMonto` (mismo patrón, duplicado
+  acá) y la usa para "Monto a cobrar" de Reserva extraordinaria — antes
+  un `QDoubleSpinBox` liso, sin formato de moneda ni select-all.
+- `llaves.py` NO duplica una tercera vez — importa `_SpinMonto` de
+  `reservas.py` (mismo criterio de import cruzado que ya usa este
+  archivo para `_opciones_profesional`/`_texto_profesional`) y la usa
+  para "Depósito actual"/"Monto cobrado"/"Monto a reintegrar" (antes
+  tres `QDoubleSpinBox` lisos, sin formato de moneda).
+
+### Selectores de fecha: semana empieza en lunes (todo el sistema)
+
+`QLocale(QLocale.Language.Spanish)` ya tiene `firstDayOfWeek() ==
+Monday` por default (criterio ISO) — `gui_main.main()` suma `QLocale.
+setDefault(QLocale(QLocale.Language.Spanish))` (junto a `app.setFont(...)`,
+antes de mostrar cualquier pantalla) para que CUALQUIER `QDateEdit` del
+sistema (su calendario emergente incluido) herede este comportamiento
+sin tener que tocar cada instancia una por una — las pantallas que ya
+llamaban `.setLocale(_LOCALE_ES)` a mano (Registro de ausencias,
+Reservas) no cambian de comportamiento, es el mismo locale.
+
+### Reserva extraordinaria: texto generado con horario y consultorio/unidad
+
+`_lineas_reservas_extraordinarias` (`app.negocio.mensajes`) armaba la
+línea del mensaje de detalle con día, fecha, ítem y monto nomás — sin
+decir CUÁNDO (horario) ni DÓNDE (consultorio/unidad) pasó el cargo,
+distinto de cualquier aislada común. Pedido explícito de la clienta:
+"mismo formato". Suma los mismos tres parámetros y el mismo helper
+(`_lugar_reserva`) que `_lineas_reservas_aisladas`, para que el
+criterio de qué mostrar (incluir o no consultorio/unidad/edificio) sea
+idéntico entre las dos — la línea pasa de `"+ {día} {fecha} - {ítem}
+{monto}"` a `"+ {día} {fecha} de {horario} {lugar} - {ítem} {monto}"`.
+
+### Mensajes generados: espacio antes de una línea que empieza con "-" (todo el sistema)
+
+Pedido explícito, no un bug del sistema sino una corrección para cómo
+WhatsApp Web interpreta el texto: un "-" al principio de línea lo toma
+como una llamada/viñeta/formato propio en vez del carácter literal.
+`sustituir_variables` (`app.negocio.plantillas_texto` — la ÚNICA
+función que arma el texto final de TODO mensaje editable del sistema:
+los 9 slots de "Textos del sistema" y `MensajePredefinido`) suma, como
+último paso, después de reemplazar las `{variable}`: cualquier línea
+del resultado que empiece con "-" (el texto de fábrica, el de una
+variable sustituida, o el de una plantilla personalizada por la
+clienta) suma un espacio adelante. Un único cambio, en el choke-point
+compartido por todos los mensajes, cubre automáticamente cualquier
+mensaje actual y futuro construido sobre este mecanismo, sin tener que
+tocar cada función de armado (`mensaje_situacion_*`, `mensaje_grupal`,
+`oferta_busqueda_whatsapp`, etc.) una por una.
+
+### EN GENERAL: diálogo de confirmación antes de crear una reserva
+
+Pedido explícito: "cuando se crea una reserva... un alerta previo con
+los datos que se van a cargar para confirmar o cancelar, si uno cancela
+siguen los datos cargados". Segunda parte del pedido ("mismo
+comportamiento para todo, crear un edificio, agregar a profesional,
+etc., para todo el sistema") — consultada la clienta sobre el alcance,
+eligió la opción recomendada: "pantalla por pantalla, a medida que las
+revisás", no un barrido de todo el sistema de una sola vez.
+
+`confirmar_datos_antes_de_crear(parent, titulo, lineas)` (nueva,
+`app/gui/dialogos.py`, al lado de `confirmar_si_fecha_es_mes_anterior`/
+`confirmar_si_periodo_imputado_es_anterior` — mismo criterio de
+"diálogos de confirmación reusados entre varias pantallas"): arma un
+`QMessageBox.question` con la vista previa (una línea por dato) y
+devuelve `True`/`False` según la respuesta — no toca el formulario, esa
+responsabilidad queda del lado de quien llama (si cancela, el llamador
+simplemente no limpia nada, a diferencia del camino de éxito que sí
+resetea el formulario al final).
+
+Conectado en las tres solapas de Reservas, al final de la cadena de
+validaciones/avisos de cada `_crear()` (después de "fecha de mes
+anterior" y "llave/placa faltante", justo antes de la creación real) —
+mismo criterio que esos otros chequeos: una sola vez por submit, no
+repetido en el reintento automático con `forzar=True` después de un
+`ConflictoBloqueanteError`. Cada solapa arma su propia lista de líneas
+(Profesional, ubicación, días/fecha, horario, y los campos propios de
+cada una — vigencia para Regulares, recargo/reubicación para Aisladas,
+ítem/monto/período a imputar para Extraordinaria).
+
+Tests de regresión: varios tests ya existentes que monkeypatcheaban
+`QMessageBox.question` para simular SOLO el cartel de llave/placa (o
+SOLO el de conflicto bloqueante) con una respuesta única necesitaron
+distinguir por TÍTULO del cartel (`"Falta llave o placa"` vs.
+`"Crear reserva regular"`/etc.) en vez de asumir una sola llamada en
+total — el nuevo cartel se suma a la cadena, no la reemplaza. Tests
+nuevos por solapa confirman que cancelar no crea nada y deja el
+formulario intacto (profesional/ítem/monto siguen cargados), y que
+confirmar sigue creando como siempre.

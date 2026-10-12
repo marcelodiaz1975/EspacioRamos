@@ -3,7 +3,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QLocale, Qt
 from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -223,6 +223,15 @@ def main() -> None:
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     app.setFont(QFont(FUENTE_APP))
+    # Pedido de la clienta: todos los selectores de fecha del sistema
+    # arrancan la semana en lunes, no en domingo. `QLocale(Spanish)` ya
+    # tiene `firstDayOfWeek() == Monday` por default (criterio ISO) —
+    # fijarlo como locale POR DEFECTO de toda la aplicación alcanza para
+    # que CUALQUIER `QDateEdit` (su calendario emergente incluido), lo
+    # haya llamado o no con `.setLocale(_LOCALE_ES)` a mano en su propia
+    # pantalla, herede este comportamiento sin tener que tocar cada
+    # instancia una por una en todo el código.
+    QLocale.setDefault(QLocale(QLocale.Language.Spanish))
 
     if not db_path.exists():
         _ofrecer_restaurar_backup(db_path)

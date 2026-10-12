@@ -1,5 +1,5 @@
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QPushButton, QVBoxLayout, QWidget
 
 from app.gui.estilos import COLOR_FOCO, FUENTE_APP, hoja_estilos, paleta
 
@@ -188,6 +188,67 @@ def test_boton_primario_muestra_el_anillo_de_foco_al_recibir_foco_real(qtbot):
         for y in range(geometria.y(), geometria.y() + geometria.height())
     )
     assert hay_anillo
+
+
+def test_combobox_y_checkbox_tienen_borde_de_foco_reservado_en_la_hoja_de_estilos():
+    """Pedido explícito de la clienta sobre Reservas ("no veo en los
+    cheks... por ejemplo"): a diferencia de QPushButton, `outline` no se
+    pinta en QComboBox/QCheckBox en este Qt — acá hace falta `border`,
+    reservado siempre (transparente en reposo) para no correr el
+    contenido de alrededor al ganar/perder el foco."""
+    for modo_oscuro in (False, True):
+        hoja = hoja_estilos(modo_oscuro)
+        bloque_combo_reposo = hoja.split("QComboBox {")[1].split("}")[0]
+        assert "border: 2px solid transparent" in bloque_combo_reposo
+        bloque_combo_foco = hoja.split("QComboBox:focus {")[1].split("}")[0]
+        assert f"border: 2px solid {COLOR_FOCO}" in bloque_combo_foco
+        bloque_check_reposo = hoja.split("QCheckBox {")[1].split("}")[0]
+        assert "border: 2px solid transparent" in bloque_check_reposo
+        bloque_check_foco = hoja.split("QCheckBox:focus {")[1].split("}")[0]
+        assert f"border: 2px solid {COLOR_FOCO}" in bloque_check_foco
+
+
+def test_combobox_y_checkbox_muestran_el_borde_de_foco_al_recibir_foco_real(qtbot):
+    """Mismo criterio que el botón: confirma el renderizado real, no
+    solo el texto de la hoja de estilos."""
+    ventana = QWidget()
+    ventana.setStyleSheet(hoja_estilos(False))
+    layout = QVBoxLayout(ventana)
+    otro = QPushButton("Otro")
+    combo = QComboBox()
+    combo.addItems(["Uno", "Dos"])
+    check = QCheckBox("Un check")
+    for w in (otro, combo, check):
+        layout.addWidget(w)
+    qtbot.addWidget(ventana)
+    ventana.show()
+    qtbot.waitExposed(ventana)
+    otro.setFocus()
+    qtbot.waitUntil(lambda: otro.hasFocus())
+
+    objetivo = tuple(int(COLOR_FOCO[i : i + 2], 16) for i in (1, 3, 5))
+
+    def hay_anillo(widget):
+        imagen = ventana.grab().toImage()
+        geometria = widget.geometry()
+        return any(
+            abs(imagen.pixelColor(x, y).red() - objetivo[0]) < 25
+            and abs(imagen.pixelColor(x, y).green() - objetivo[1]) < 25
+            and abs(imagen.pixelColor(x, y).blue() - objetivo[2]) < 25
+            for x in range(geometria.x(), geometria.x() + geometria.width())
+            for y in range(geometria.y(), geometria.y() + geometria.height())
+        )
+
+    assert not hay_anillo(combo)
+    assert not hay_anillo(check)
+
+    combo.setFocus()
+    qtbot.waitUntil(lambda: combo.hasFocus())
+    assert hay_anillo(combo)
+
+    check.setFocus()
+    qtbot.waitUntil(lambda: check.hasFocus())
+    assert hay_anillo(check)
 
 
 def test_panel_dentro_de_una_solapa_hereda_el_mismo_fondo_claro():

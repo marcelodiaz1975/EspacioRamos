@@ -46,3 +46,29 @@ def test_archivos_y_listas_recibe_la_lista_completa_de_secciones(qtbot, conn):
 
     assert isinstance(pantalla, PantallaArchivosYListas)
     assert len(pantalla.panel_gestor_archivos._secciones) == len(secciones)
+
+
+def test_locale_espanol_tiene_la_semana_empezando_en_lunes(qtbot):
+    """Pedido de la clienta: "que todos los selectores de fecha del
+    sistema empiecen la semana en lunes, no en domingo". `gui_main.main()`
+    fija `QLocale.setDefault(QLocale(QLocale.Language.Spanish))` antes de
+    mostrar cualquier pantalla — no testeable invocando `main()` en sí
+    (abre una base real y un diálogo de login, mismo criterio ya
+    documentado para `showMaximized()`), así que esto confirma la pieza
+    real: ese locale tiene `firstDayOfWeek() == Monday`, y un QDateEdit
+    construido bajo ese locale por default arranca su calendario ahí."""
+    from PySide6.QtCore import QLocale, Qt
+    from PySide6.QtWidgets import QDateEdit
+
+    locale_espanol = QLocale(QLocale.Language.Spanish)
+    assert locale_espanol.firstDayOfWeek() == Qt.DayOfWeek.Monday
+
+    anterior = QLocale.system()
+    try:
+        QLocale.setDefault(locale_espanol)
+        campo = QDateEdit()
+        campo.setCalendarPopup(True)
+        qtbot.addWidget(campo)
+        assert campo.calendarWidget().firstDayOfWeek() == Qt.DayOfWeek.Monday
+    finally:
+        QLocale.setDefault(anterior)

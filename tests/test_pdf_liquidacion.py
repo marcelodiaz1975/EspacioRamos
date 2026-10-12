@@ -466,3 +466,22 @@ def test_hora_aislada_menciona_el_edificio_cuando_hay_mas_de_uno(conn, profesion
     texto = _texto_pdf(ruta)
     assert "Hora aislada a trabajar" in texto
     assert "consul 9 del PB - Ramos 0" in texto
+
+
+def test_reserva_extraordinaria_muestra_su_propio_item_en_vez_de_hora_aislada(conn, profesional, consultorio, tmp_path):
+    """#38, segunda vuelta: una reserva extraordinaria no es una hora
+    cobrada por tarifa — el PDF describe el cargo con su propio ítem de
+    texto libre en vez de "Hora aislada a trabajar", que sería engañoso
+    sobre algo que se cobró con un monto manual."""
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+        EsExtraordinaria=1, ItemExtraordinario="Uso puntual del consultorio", MontoExtraordinario=7777,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert len(liquidacion.aisladas_mes_en_curso) == 1
+
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+    assert "Uso puntual del consultorio" in texto
+    assert "Hora aislada" not in texto

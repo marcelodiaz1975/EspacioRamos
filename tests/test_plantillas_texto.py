@@ -27,6 +27,24 @@ def test_sustituir_variables_reemplaza_todas_las_ocurrencias():
     assert sustituir_variables("Hola {nombre}, {nombre}!", {"nombre": "Ana"}) == "Hola Ana, Ana!"
 
 
+def test_sustituir_variables_agrega_espacio_antes_de_lineas_que_empiezan_con_guion():
+    """#44: WhatsApp Web interpreta mal un "-" al principio de línea —
+    se le suma un espacio adelante. Único lugar, cubre tanto el texto de
+    fábrica como el que viene de una variable sustituida o de una
+    plantilla personalizada por la clienta."""
+    texto = "- primera\nsegunda línea sin guion\n-tercera, sin espacio después del guion\n{bloque}"
+    resultado = sustituir_variables(texto, {"bloque": "- del bloque sustituido"})
+    lineas = resultado.split("\n")
+    assert lineas[0] == " - primera"
+    assert lineas[1] == "segunda línea sin guion"  # sin "-" al principio, no se toca
+    assert lineas[2] == " -tercera, sin espacio después del guion"
+    assert lineas[3] == " - del bloque sustituido"  # también cubre lo que trae una variable
+
+
+def test_sustituir_variables_no_toca_un_guion_que_no_esta_al_principio_de_linea():
+    assert sustituir_variables("Saldo: -500", {}) == "Saldo: -500"
+
+
 def test_resolver_plantilla_sin_personalizar_devuelve_el_default(conn):
     assert resolver_plantilla(conn, "mensaje_situacion_1", "DEFAULT") == "DEFAULT"
 
@@ -133,8 +151,11 @@ def test_oferta_busqueda_whatsapp_solo_los_titulos_son_editables(conn):
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
     texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
 
-    assert texto.startswith("*Título propio*\n- Lunes de 9 a 11hs\n\n*Alternativas*\n\n")
-    assert '- Lunes de 9 a 11hs consultorio 1 del 7mo "L"' in texto
+    # El espacio adelante del "-" es a propósito (#44: WhatsApp Web
+    # interpreta mal un "-" al principio de línea) — lo agrega el último
+    # paso de `sustituir_variables`, no esta plantilla.
+    assert texto.startswith("*Título propio*\n - Lunes de 9 a 11hs\n\n*Alternativas*\n\n")
+    assert ' - Lunes de 9 a 11hs consultorio 1 del 7mo "L"' in texto
     assert "*Búsqueda requerida por el profesional*" not in texto
 
 

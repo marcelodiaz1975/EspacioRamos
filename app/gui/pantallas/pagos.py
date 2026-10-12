@@ -15,7 +15,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 
-from PySide6.QtCore import QDateTime, QLocale, Qt
+from PySide6.QtCore import QDateTime, QLocale, Qt, QTimer
 from PySide6.QtGui import QColor, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
@@ -111,7 +111,15 @@ class _SpinMonto(QDoubleSpinBox):
     con "-$ ..." y en rojo) en vez del formato con coma como separador de
     miles que arrastra Qt por defecto — internamente sigue siendo el
     mismo float con signo que espera `app.negocio.pagos.registrar_pago`
-    (negativo resta de la cuenta del profesional, positivo suma)."""
+    (negativo resta de la cuenta del profesional, positivo suma).
+
+    Select-all al enfocar (pedido de la clienta, "en todos los cuadros
+    de texto similares del sistema"): al pinchar el campo, selecciona
+    todo el contenido para poder escribir en limpio sin borrar a mano —
+    mismo mecanismo (`QTimer.singleShot(0, ...)`) que ya usa el selector
+    de profesional, necesario porque un `selectAll()` inmediato durante
+    el propio evento de foco queda pisado por el reposicionamiento
+    nativo del cursor que hace Qt justo después de un click."""
 
     def textFromValue(self, value: float) -> str:  # noqa: N802 (nombre impuesto por Qt)
         return formatear_moneda(value)
@@ -125,6 +133,10 @@ class _SpinMonto(QDoubleSpinBox):
 
     def validate(self, text: str, pos: int):  # noqa: N802
         return (QValidator.State.Acceptable, text, pos)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        QTimer.singleShot(0, self.selectAll)
 
 
 class PantallaPagos(QWidget):

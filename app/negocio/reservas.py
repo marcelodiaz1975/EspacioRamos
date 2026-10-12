@@ -343,21 +343,25 @@ def crear_reserva_aislada(
     el operador a mano (`monto_extraordinario`), junto con una descripción
     de texto libre de qué se está cobrando (`item_extraordinario`) — "el
     ítem a cargar que sea de texto libre", confirmado explícitamente que
-    el monto también se tipea a mano (no se calcula con la tarifa). Solo
-    se puede asignar a un profesional categoría A (pedido explícito de la
-    clienta) — la misma categoría que ya usa Reservas aisladas para sus
-    propios compromisos de un día, no un tipo de profesional nuevo.
-    `AplicaRecargo` no tiene sentido acá (el monto ya es el final a
-    cobrar) — se ignora el parámetro `aplica_recargo` cuando es
-    extraordinaria. `mensaje_detalle_reserva_aislada`
-    (`app.negocio.mensajes`) ya lee CUALQUIER `ReservaAislada` del
-    profesional del período, así que una extraordinaria entra sola en el
-    "SALDO A ABONAR" del mes junto con el resto (saldo anterior, llaves,
-    ítems libres) — no hace falta ningún mensaje ni cálculo aparte."""
+    el monto también se tipea a mano (no se calcula con la tarifa).
+
+    Se puede asignar a categoría A o R (pedido explícito de la clienta,
+    segunda vuelta: "los R también pueden tener reservas
+    extraordinarias... aparte de los saldos habría que tocar las
+    liquidaciones" — ver `app.gui.pantallas.reservas._PanelReserva
+    Extraordinaria._resolver_liquidacion_si_corresponde`, que reemite la
+    `LiquidacionEmitida` del R afectado cuando corresponde). `AplicaRecargo`
+    no tiene sentido acá (el monto ya es el final a cobrar) — se ignora el
+    parámetro `aplica_recargo` cuando es extraordinaria.
+    `mensaje_detalle_reserva_aislada` (`app.negocio.mensajes`) ya lee
+    CUALQUIER `ReservaAislada` del profesional del período, así que una
+    extraordinaria entra sola en el "SALDO A ABONAR" del mes junto con el
+    resto (saldo anterior, llaves, ítems libres) — no hace falta ningún
+    mensaje ni cálculo aparte."""
     if es_extraordinaria:
         profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
-        if profesional is None or profesional["CategoriaProfesional"] != "A":
-            raise ValueError("Una reserva extraordinaria solo se puede asignar a un profesional categoría A.")
+        if profesional is None or profesional["CategoriaProfesional"] not in ("A", "R"):
+            raise ValueError("Una reserva extraordinaria solo se puede asignar a un profesional categoría A o R.")
         if not (item_extraordinario or "").strip():
             raise ValueError("Una reserva extraordinaria necesita un ítem a cargar (texto libre).")
         if monto_extraordinario is None:
