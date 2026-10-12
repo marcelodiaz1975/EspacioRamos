@@ -248,7 +248,13 @@ de `outline` — a diferencia de los botones, cambiar el tamaño en :focus
 hubiera corrido el contenido de alrededor cada vez que el control gana o
 pierde el foco, así que se reserva el mismo espacio siempre
 (`border: 2px solid transparent` en reposo, color real solo en :focus)
-en vez de agregarlo recién al enfocar. */
+en vez de agregarlo recién al enfocar.
+
+Mismo hueco encontrado al revisar Aumentos (pedido explícito: "revisá
+si falta el foco visible en esta pantalla"): los `QRadioButton` de
+"Múltiplos de..." (los únicos de todo el sistema que pasan por
+`instalar_enter_avanza_foco`) tampoco tenían ninguna regla propia —
+mismo criterio `border` que QComboBox/QCheckBox. */
 QPushButton:focus {{
     outline: 2px solid {COLOR_FOCO};
     outline-offset: 1px;
@@ -257,6 +263,8 @@ QComboBox {{ border: 2px solid transparent; border-radius: 2px; }}
 QComboBox:focus {{ border: 2px solid {COLOR_FOCO}; }}
 QCheckBox {{ border: 2px solid transparent; border-radius: 2px; padding: 1px; }}
 QCheckBox:focus {{ border: 2px solid {COLOR_FOCO}; }}
+QRadioButton {{ border: 2px solid transparent; border-radius: 2px; padding: 1px; }}
+QRadioButton:focus {{ border: 2px solid {COLOR_FOCO}; }}
 
 /* Scrollbars con contraste explícito, parejo en toda la app — pedido de
 la clienta al revisar Grilla semanal ("no aparece el scroll

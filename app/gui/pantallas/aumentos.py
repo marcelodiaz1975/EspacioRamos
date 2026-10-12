@@ -88,6 +88,8 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFrame,
     QGridLayout,
@@ -116,6 +118,8 @@ from app.negocio.aumentos import (
     simular_aumento,
 )
 from app.negocio.dias import periodo_actual
+from app.negocio.formato import formatear_moneda
+from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.repositorio.registro import obtener_repositorio
 
 _ID_CONSULTORIO = Qt.ItemDataRole.UserRole
@@ -191,23 +195,52 @@ def _celda_monto_fija(valor: float) -> QTableWidgetItem:
     return item
 
 
-def _celda_monto_nuevo(valor: float, *, editable: bool, resaltada: bool) -> QTableWidgetItem:
+def _celda_monto_nuevo(valor: float, *, resaltada: bool) -> QTableWidgetItem:
     """"Regular nuevo"/"Aislada nuevo": a diferencia de `_celda_monto_fija`
     (el resto de las columnas de monto, siempre de solo lectura), estas
-    dos pueden quedar editables (fijar el valor final a mano, DC-10 §1.2)
-    y, cuando el valor que muestran viene de un override a mano (no de
-    aplicar el % general ni el diferencial), se resaltan en amarillo —
-    distinto de `item_monto`, que solo colorea en rojo un valor negativo;
-    acá la celda nunca es negativa (es un valor hora), así que no hay
-    conflicto entre los dos colores."""
+    dos se pueden fijar a mano (DC-10 §1.2) — pero no editando la celda
+    directo, sino clickeándola (`_al_click_celda` abre un diálogo propio
+    por fila, en vez de un checkbox global que habilitaba la edición in-
+    place de toda la columna a la vez). Cuando el valor que muestran
+    viene de ese override a mano (no de aplicar el % general ni el
+    diferencial) se resaltan en amarillo — distinto de `item_monto`, que
+    solo colorea en rojo un valor negativo; acá la celda nunca es
+    negativa (es un valor hora), así que no hay conflicto entre los dos
+    colores."""
     item = item_monto(valor)
-    if editable:
-        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
-    else:
-        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
     if resaltada:
         item.setBackground(QColor(COLOR_AMARILLO))
     return item
+
+
+class _DialogoValorFila(QDialog):
+    """Diálogo chico y genérico para editar el override de UNA fila de la
+    tabla de Aumentos (% diferencial, o valor manual regular/aislada) —
+    reemplaza al checkbox global "Editar porcentaje diferencial"/"Editar
+    valores manuales" + edición in-place de toda la columna (pedido
+    explícito de la clienta: "que se pueda clickear la celda puntual,
+    no habilitar edición de toda la columna"). Deja el campo vacío para
+    quitar el override de esa fila y volver a calcularla por el %
+    general — mismo criterio que antes al borrar el texto de la celda."""
+
+    def __init__(self, parent, titulo: str, etiqueta: str, valor_inicial: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(titulo)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(etiqueta))
+        self.campo = QLineEdit(valor_inicial)
+        self.campo.setPlaceholderText("Vacío = quitar el override y volver a calcular por %")
+        layout.addWidget(self.campo)
+        botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        botones.accepted.connect(self.accept)
+        botones.rejected.connect(self.reject)
+        layout.addWidget(botones)
+        self.campo.setFocus()
+        self.campo.selectAll()
+
+    def texto(self) -> str:
+        return self.campo.text().strip()
 
 
 class _PanelAumentos(QWidget):
@@ -221,8 +254,6 @@ class _PanelAumentos(QWidget):
         self._diferenciales: dict[int, float] = {}
         self._valores_manuales: dict[int, dict[str, float]] = {}
         self._botones_restablecer: dict[int, QPushButton] = {}
-        self._editando_diferencial = False
-        self._editando_valores = False
         self._armar_ui()
         self.actualizar()
 
@@ -301,19 +332,13 @@ class _PanelAumentos(QWidget):
         self.boton_confirmar.clicked.connect(self._confirmar)
         form.addWidget(self.boton_confirmar)
 
-        self.boton_editar = QPushButton("Editar porcentaje diferencial")
-        self.boton_editar.setObjectName("botonSecundario")
-        self.boton_editar.setFixedWidth(_ANCHO_CAMPO)
-        self.boton_editar.setCheckable(True)
-        self.boton_editar.toggled.connect(self._al_tildar_editar)
-        form.addWidget(self.boton_editar)
-
-        self.boton_editar_valores = QPushButton("Editar valores manuales")
-        self.boton_editar_valores.setObjectName("botonSecundario")
-        self.boton_editar_valores.setFixedWidth(_ANCHO_CAMPO)
-        self.boton_editar_valores.setCheckable(True)
-        self.boton_editar_valores.toggled.connect(self._al_tildar_editar_valores)
-        form.addWidget(self.boton_editar_valores)
+        self.etiqueta_ayuda_edicion = QLabel(
+            "Para fijar un % diferencial o un valor manual en una fila puntual, clickeá la celda "
+            "correspondiente ('% diferencial', 'Regular nuevo' o 'Aislada nuevo')."
+        )
+        self.etiqueta_ayuda_edicion.setWordWrap(True)
+        self.etiqueta_ayuda_edicion.setFixedWidth(_ANCHO_CAMPO)
+        form.addWidget(self.etiqueta_ayuda_edicion)
 
         form.addStretch()
         layout.addWidget(panel_form)
@@ -325,13 +350,13 @@ class _PanelAumentos(QWidget):
             "Regular actual", "Regular nuevo", "Dif. regular", "Aislada actual", "Aislada nuevo", "Dif. aislada",
             "",
         ])
-        self.tabla.itemChanged.connect(self._al_cambiar_celda)
+        self.tabla.cellClicked.connect(self._al_click_celda)
         layout.addWidget(self.tabla, stretch=1)
 
         self._foco = instalar_enter_avanza_foco([
             self.campo_periodo, self.combo_localidad, self.combo_edificio, self.combo_unidad,
             self.spin_porcentaje, self.check_redondear, *self._radios_multiplo.values(),
-            self.boton_simular, self.boton_confirmar, self.boton_editar, self.boton_editar_valores,
+            self.boton_simular, self.boton_confirmar,
         ], parent=self)
 
     def actualizar(self) -> None:
@@ -339,10 +364,6 @@ class _PanelAumentos(QWidget):
         self._diferenciales.clear()
         self._valores_manuales.clear()
         self._botones_restablecer.clear()
-        self._editando_diferencial = False
-        self._editando_valores = False
-        self.boton_editar.setChecked(False)
-        self.boton_editar_valores.setChecked(False)
         self.spin_porcentaje.setValue(0)
         self.check_redondear.setChecked(True)
         self._radios_multiplo[1].setChecked(True)
@@ -458,14 +479,6 @@ class _PanelAumentos(QWidget):
             )
             self.tabla.setRowHidden(fila, oculto)
 
-    def _al_tildar_editar(self, tildado: bool) -> None:
-        self._editando_diferencial = tildado
-        self._renderizar_tabla()
-
-    def _al_tildar_editar_valores(self, tildado: bool) -> None:
-        self._editando_valores = tildado
-        self._renderizar_tabla()
-
     def _simular(self) -> None:
         periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
         filas = simular_aumento(
@@ -496,8 +509,7 @@ class _PanelAumentos(QWidget):
                     self._celda_porcentaje(None if diferencial is not None else general_pct, editable=False),
                 )
                 self.tabla.setItem(
-                    fila, _COL_PORCENTAJE_DIFERENCIAL,
-                    self._celda_porcentaje(diferencial, editable=self._editando_diferencial),
+                    fila, _COL_PORCENTAJE_DIFERENCIAL, self._celda_porcentaje(diferencial, editable=False),
                 )
 
                 manual = self._valores_manuales.get(id_consultorio, {})
@@ -506,17 +518,13 @@ class _PanelAumentos(QWidget):
                     self.tabla.setItem(fila, _COL_REGULAR_ACTUAL, _celda_monto_fija(f.valor_regular_actual))
                     self.tabla.setItem(
                         fila, _COL_REGULAR_NUEVO,
-                        _celda_monto_nuevo(
-                            f.valor_regular_nuevo, editable=self._editando_valores, resaltada="regular" in manual,
-                        ),
+                        _celda_monto_nuevo(f.valor_regular_nuevo, resaltada="regular" in manual),
                     )
                     self.tabla.setItem(fila, _COL_DIF_REGULAR, _celda_monto_fija(f.diferencia_regular))
                     self.tabla.setItem(fila, _COL_AISLADA_ACTUAL, _celda_monto_fija(f.valor_aislada_actual))
                     self.tabla.setItem(
                         fila, _COL_AISLADA_NUEVO,
-                        _celda_monto_nuevo(
-                            f.valor_aislada_nuevo, editable=self._editando_valores, resaltada="aislada" in manual,
-                        ),
+                        _celda_monto_nuevo(f.valor_aislada_nuevo, resaltada="aislada" in manual),
                     )
                     self.tabla.setItem(fila, _COL_DIF_AISLADA, _celda_monto_fija(f.diferencia_aislada))
 
@@ -566,26 +574,39 @@ class _PanelAumentos(QWidget):
         self._valores_manuales.pop(id_consultorio, None)
         self._simular()
 
-    def _al_cambiar_celda(self, item: QTableWidgetItem) -> None:
-        if item.column() == _COL_PORCENTAJE_DIFERENCIAL and self._editando_diferencial:
-            self._al_cambiar_diferencial(item)
-        elif item.column() in (_COL_REGULAR_NUEVO, _COL_AISLADA_NUEVO) and self._editando_valores:
-            self._al_cambiar_valor_manual(item)
+    def _al_click_celda(self, fila: int, columna: int) -> None:
+        """Pedido explícito de la clienta: clickear la celda puntual
+        abre un diálogo para ESA fila, en vez de un checkbox global que
+        habilita la edición in-place de toda la columna a la vez."""
+        if columna == _COL_PORCENTAJE_DIFERENCIAL:
+            self._editar_diferencial(fila)
+        elif columna == _COL_REGULAR_NUEVO:
+            self._editar_valor_manual(fila, "regular")
+        elif columna == _COL_AISLADA_NUEVO:
+            self._editar_valor_manual(fila, "aislada")
 
     def _id_consultorio_de_fila(self, fila: int) -> int:
         return self.tabla.item(fila, _COL_LOCALIDAD).data(_ID_CONSULTORIO)
 
-    def _al_cambiar_diferencial(self, item: QTableWidgetItem) -> None:
-        id_consultorio = self._id_consultorio_de_fila(item.row())
-        texto = item.text().strip()
-        if texto in ("", _GUION):
+    def _editar_diferencial(self, fila: int) -> None:
+        id_consultorio = self._id_consultorio_de_fila(fila)
+        actual = self._diferenciales.get(id_consultorio)
+        info = self._consultorios_info[id_consultorio]
+        dialogo = _DialogoValorFila(
+            self, "Porcentaje diferencial",
+            f"% diferencial para el consultorio {info['numero']} ({info['edificio']} - {info['unidad']}):",
+            "" if actual is None else f"{actual:.2f}".replace(".", ","),
+        )
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
+            return
+        texto = dialogo.texto()
+        if texto == "":
             self._diferenciales.pop(id_consultorio, None)
         else:
             try:
                 valor = float(texto.replace(",", ".").replace("%", ""))
             except ValueError:
                 QMessageBox.warning(self, "Porcentaje diferencial", "Valor inválido.")
-                self._renderizar_tabla()
                 return
             self._diferenciales[id_consultorio] = valor
             # Un % diferencial puntual y un valor fijado a mano son dos
@@ -595,11 +616,24 @@ class _PanelAumentos(QWidget):
             self._valores_manuales.pop(id_consultorio, None)
         self._simular()
 
-    def _al_cambiar_valor_manual(self, item: QTableWidgetItem) -> None:
-        id_consultorio = self._id_consultorio_de_fila(item.row())
-        campo = "regular" if item.column() == _COL_REGULAR_NUEVO else "aislada"
-        texto = item.text().strip()
-        if texto in ("", _GUION):
+    def _editar_valor_manual(self, fila: int, campo: str) -> None:
+        id_consultorio = self._id_consultorio_de_fila(fila)
+        info = self._consultorios_info[id_consultorio]
+        manual = self._valores_manuales.get(id_consultorio, {})
+        f = self._filas.get(id_consultorio)
+        valor_actual = manual.get(campo)
+        if valor_actual is None and f is not None:
+            valor_actual = f.valor_regular_nuevo if campo == "regular" else f.valor_aislada_nuevo
+        etiqueta_campo = "Regular nuevo" if campo == "regular" else "Aislada nuevo"
+        dialogo = _DialogoValorFila(
+            self, f"Valor {etiqueta_campo.lower()}",
+            f"{etiqueta_campo} para el consultorio {info['numero']} ({info['edificio']} - {info['unidad']}):",
+            formatear_moneda(valor_actual) if valor_actual is not None else "",
+        )
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
+            return
+        texto = dialogo.texto()
+        if texto == "":
             self._valores_manuales.get(id_consultorio, {}).pop(campo, None)
             if not self._valores_manuales.get(id_consultorio):
                 self._valores_manuales.pop(id_consultorio, None)
@@ -608,7 +642,6 @@ class _PanelAumentos(QWidget):
                 valor = _parsear_monto(texto)
             except ValueError:
                 QMessageBox.warning(self, "Valor manual", "Valor inválido.")
-                self._renderizar_tabla()
                 return
             self._valores_manuales.setdefault(id_consultorio, {})[campo] = valor
             self._diferenciales.pop(id_consultorio, None)
@@ -794,17 +827,35 @@ class _PanelEsquemaDescuentos(QWidget):
 
     def _confirmar_cambios(self) -> None:
         horas, porcentaje, tope = self._valores_actuales()
+        periodo = periodo_actual(self.conn)
+        # Mismo criterio que Aumentos/Fechas especiales: el aviso de
+        # cuántas liquidaciones ya emitidas se van a regenerar aparece
+        # ANTES de confirmar, no solo en el cartel de éxito posterior.
+        cantidad_liq = cantidad_liquidaciones_a_regenerar(self.conn, periodo)
+        aviso_liquidaciones = (
+            f" Hay {cantidad_liq} liquidación(es) ya emitida(s) para el período en curso ({periodo}): se van a "
+            "regenerar con el esquema nuevo y van a quedar marcadas como no enviadas." if cantidad_liq
+            else " Todavía no hay ninguna liquidación emitida para el período en curso."
+        )
         confirmacion = QMessageBox.question(
             self, "Confirmar cambios",
             "¿Confirmás el nuevo esquema de descuentos? Al confirmar se modifican valores en el sistema: el "
-            "esquema vigente queda reemplazado (pasa a historial).",
+            f"esquema vigente queda reemplazado (pasa a historial).{aviso_liquidaciones}",
         )
         if confirmacion != QMessageBox.StandardButton.Yes:
             return
         tramos = generar_tramos_esquema(cantidad_horas=horas, porcentaje_descuento=porcentaje, porcentaje_tope=tope)
         actualizar_esquema_descuentos(self.conn, tramos)
+        ids_profesional = {
+            f["IdProfesional"] for f in obtener_repositorio(self.conn, "LiquidacionEmitida").listar(Periodo=periodo)
+        }
+        for id_profesional in ids_profesional:
+            regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo)
         self.conn.commit()
-        QMessageBox.information(self, "Esquema de descuentos", "Se actualizó el esquema de descuentos.")
+        mensaje = "Se actualizó el esquema de descuentos."
+        if ids_profesional:
+            mensaje += f" Se regeneraron {len(ids_profesional)} liquidación(es) del período {periodo}."
+        QMessageBox.information(self, "Esquema de descuentos", mensaje)
         self._valores_cargados = (horas, porcentaje, tope)
         self.boton_confirmar.setEnabled(False)
         self.etiqueta_aviso.setVisible(False)

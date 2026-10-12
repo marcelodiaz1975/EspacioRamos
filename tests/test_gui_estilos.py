@@ -1,5 +1,5 @@
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QCheckBox, QComboBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QPushButton, QRadioButton, QVBoxLayout, QWidget
 
 from app.gui.estilos import COLOR_FOCO, FUENTE_APP, hoja_estilos, paleta
 
@@ -206,6 +206,12 @@ def test_combobox_y_checkbox_tienen_borde_de_foco_reservado_en_la_hoja_de_estilo
         assert "border: 2px solid transparent" in bloque_check_reposo
         bloque_check_foco = hoja.split("QCheckBox:focus {")[1].split("}")[0]
         assert f"border: 2px solid {COLOR_FOCO}" in bloque_check_foco
+        # Mismo hueco encontrado al revisar Aumentos — el único QRadioButton
+        # de todo el sistema que pasa por la cadena de foco ("Múltiplos de...").
+        bloque_radio_reposo = hoja.split("QRadioButton {")[1].split("}")[0]
+        assert "border: 2px solid transparent" in bloque_radio_reposo
+        bloque_radio_foco = hoja.split("QRadioButton:focus {")[1].split("}")[0]
+        assert f"border: 2px solid {COLOR_FOCO}" in bloque_radio_foco
 
 
 def test_combobox_y_checkbox_muestran_el_borde_de_foco_al_recibir_foco_real(qtbot):
@@ -218,7 +224,8 @@ def test_combobox_y_checkbox_muestran_el_borde_de_foco_al_recibir_foco_real(qtbo
     combo = QComboBox()
     combo.addItems(["Uno", "Dos"])
     check = QCheckBox("Un check")
-    for w in (otro, combo, check):
+    radio = QRadioButton("Un radio")
+    for w in (otro, combo, check, radio):
         layout.addWidget(w)
     qtbot.addWidget(ventana)
     ventana.show()
@@ -241,6 +248,7 @@ def test_combobox_y_checkbox_muestran_el_borde_de_foco_al_recibir_foco_real(qtbo
 
     assert not hay_anillo(combo)
     assert not hay_anillo(check)
+    assert not hay_anillo(radio)
 
     combo.setFocus()
     qtbot.waitUntil(lambda: combo.hasFocus())
@@ -249,6 +257,10 @@ def test_combobox_y_checkbox_muestran_el_borde_de_foco_al_recibir_foco_real(qtbo
     check.setFocus()
     qtbot.waitUntil(lambda: check.hasFocus())
     assert hay_anillo(check)
+
+    radio.setFocus()
+    qtbot.waitUntil(lambda: radio.hasFocus())
+    assert hay_anillo(radio)
 
 
 def test_panel_dentro_de_una_solapa_hereda_el_mismo_fondo_claro():

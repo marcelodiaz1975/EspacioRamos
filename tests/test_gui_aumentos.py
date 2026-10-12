@@ -1,10 +1,11 @@
 import pytest
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import COLOR_AMARILLO
+from app.gui.pantallas import aumentos as aumentos_modulo
 from app.gui.pantallas.aumentos import (
     _COL_AISLADA_NUEVO,
     _COL_CONSULTORIO,
@@ -23,6 +24,29 @@ from app.gui.pantallas.aumentos import (
 )
 from app.negocio.aumentos import actualizar_esquema_descuentos, generar_tramos_esquema
 from app.repositorio.registro import obtener_repositorio
+
+
+class _DialogoValorFalso:
+    """Reemplaza a `_DialogoValorFila` en los tests: `exec()` devuelve el
+    resultado ya decidido sin abrir ningún diálogo real — mismo criterio
+    que `_DialogoFalso` de `test_gui_pagos.py`."""
+
+    def __init__(self, texto: str, *, aceptar: bool = True) -> None:
+        self._texto = texto
+        self._aceptar = aceptar
+
+    def exec(self) -> QDialog.DialogCode:
+        return QDialog.DialogCode.Accepted if self._aceptar else QDialog.DialogCode.Rejected
+
+    def texto(self) -> str:
+        return self._texto
+
+
+def _mockear_dialogo_valor(monkeypatch, texto: str, *, aceptar: bool = True) -> None:
+    monkeypatch.setattr(
+        aumentos_modulo, "_DialogoValorFila",
+        lambda *args, **kwargs: _DialogoValorFalso(texto, aceptar=aceptar),
+    )
 
 
 @pytest.fixture
@@ -112,12 +136,6 @@ def test_diferencial_pisa_al_general_y_muestra_rayita_cruzada(qtbot, conn):
     assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.500,00"
 
 
-def test_boton_editar_tiene_el_texto_pedido(qtbot, conn):
-    panel = _PanelAumentos(conn)
-    qtbot.addWidget(panel)
-    assert panel.boton_editar.text() == "Editar porcentaje diferencial"
-
-
 def test_redondear_valores_activado_por_defecto_en_multiplos_de_1(qtbot, conn):
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
@@ -156,7 +174,7 @@ def test_sin_redondear_conserva_los_centavos(qtbot, conn):
     assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.133,70"
 
 
-def test_columna_diferencial_no_editable_sin_tildar_editar(qtbot, conn):
+def test_columna_diferencial_nunca_editable_in_place(qtbot, conn):
     _crear_edificio_con_consultorio(conn)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
@@ -165,42 +183,48 @@ def test_columna_diferencial_no_editable_sin_tildar_editar(qtbot, conn):
     assert not bool(item.flags() & Qt.ItemFlag.ItemIsEditable)
 
 
-def test_boton_editar_habilita_columna_diferencial(qtbot, conn):
-    _crear_edificio_con_consultorio(conn)
-    panel = _PanelAumentos(conn)
-    qtbot.addWidget(panel)
-    panel.boton_editar.setChecked(True)
-    from PySide6.QtCore import Qt
-    item = panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL)
-    assert bool(item.flags() & Qt.ItemFlag.ItemIsEditable)
-
-
-def test_editar_celda_diferencial_actualiza_simulacion(qtbot, conn):
+def test_click_en_celda_diferencial_abre_el_dialogo_y_actualiza_simulacion(qtbot, conn, monkeypatch):
     id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
     panel.spin_porcentaje.setValue(10)
     panel._simular()
-    panel.boton_editar.setChecked(True)
 
-    panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("30")
+    _mockear_dialogo_valor(monkeypatch, "30")
+    panel._al_click_celda(0, _COL_PORCENTAJE_DIFERENCIAL)
     assert panel._diferenciales[id_consultorio] == 30
     assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.300,00"
 
-    panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("")
+    _mockear_dialogo_valor(monkeypatch, "")
+    panel._al_click_celda(0, _COL_PORCENTAJE_DIFERENCIAL)
     assert id_consultorio not in panel._diferenciales
     assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.100,00"
 
 
-# ----------------------------------------- DC-10 §1.2: valores a mano, resaltado, Restablecer
-
-def test_boton_editar_valores_tiene_el_texto_pedido(qtbot, conn):
+def test_cancelar_el_dialogo_de_diferencial_no_cambia_nada(qtbot, conn, monkeypatch):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
-    assert panel.boton_editar_valores.text() == "Editar valores manuales"
+    panel._simular()
+
+    _mockear_dialogo_valor(monkeypatch, "30", aceptar=False)
+    panel._al_click_celda(0, _COL_PORCENTAJE_DIFERENCIAL)
+    assert id_consultorio not in panel._diferenciales
 
 
-def test_columnas_nuevo_no_editables_sin_tildar_editar_valores(qtbot, conn):
+def test_click_en_otra_columna_no_abre_ningun_dialogo(qtbot, conn, monkeypatch):
+    _crear_edificio_con_consultorio(conn)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    llamado = []
+    monkeypatch.setattr(aumentos_modulo, "_DialogoValorFila", lambda *a, **k: llamado.append(1))
+    panel._al_click_celda(0, _COL_CONSULTORIO)
+    assert llamado == []
+
+
+# ----------------------------------------- DC-10 §1.2: valores a mano, resaltado, Restablecer
+
+def test_columnas_nuevo_nunca_editables_in_place(qtbot, conn):
     _crear_edificio_con_consultorio(conn)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
@@ -209,25 +233,15 @@ def test_columnas_nuevo_no_editables_sin_tildar_editar_valores(qtbot, conn):
     assert not bool(panel.tabla.item(0, _COL_AISLADA_NUEVO).flags() & Qt.ItemFlag.ItemIsEditable)
 
 
-def test_boton_editar_valores_habilita_columnas_nuevo(qtbot, conn):
-    _crear_edificio_con_consultorio(conn)
-    panel = _PanelAumentos(conn)
-    qtbot.addWidget(panel)
-    panel.boton_editar_valores.setChecked(True)
-    from PySide6.QtCore import Qt
-    assert bool(panel.tabla.item(0, _COL_REGULAR_NUEVO).flags() & Qt.ItemFlag.ItemIsEditable)
-    assert bool(panel.tabla.item(0, _COL_AISLADA_NUEVO).flags() & Qt.ItemFlag.ItemIsEditable)
-
-
-def test_editar_celda_regular_nuevo_fija_el_valor_a_mano(qtbot, conn):
+def test_click_en_regular_nuevo_fija_el_valor_a_mano(qtbot, conn, monkeypatch):
     id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000, valor_aislada=1500)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
     panel.spin_porcentaje.setValue(10)
     panel._simular()
-    panel.boton_editar_valores.setChecked(True)
 
-    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("$ 1.234,00")
+    _mockear_dialogo_valor(monkeypatch, "$ 1.234,00")
+    panel._al_click_celda(0, _COL_REGULAR_NUEVO)
     assert panel._valores_manuales[id_consultorio]["regular"] == pytest.approx(1234.0)
     assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.234,00"
     # El redondeo/% general no le vuelven a pegar a un valor fijado a mano
@@ -236,28 +250,43 @@ def test_editar_celda_regular_nuevo_fija_el_valor_a_mano(qtbot, conn):
     assert panel.tabla.item(0, _COL_AISLADA_NUEVO).text() == "$ 1.651,00"
 
 
-def test_editar_celda_vacia_quita_solo_ese_override(qtbot, conn):
+def test_click_en_celda_vacia_quita_solo_ese_override(qtbot, conn, monkeypatch):
     id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000, valor_aislada=1500)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
-    panel.boton_editar_valores.setChecked(True)
-    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("1234")
-    panel.tabla.item(0, _COL_AISLADA_NUEVO).setText("1900")
+    panel._simular()
+
+    _mockear_dialogo_valor(monkeypatch, "1234")
+    panel._al_click_celda(0, _COL_REGULAR_NUEVO)
+    _mockear_dialogo_valor(monkeypatch, "1900")
+    panel._al_click_celda(0, _COL_AISLADA_NUEVO)
     assert panel._valores_manuales[id_consultorio] == {"regular": 1234.0, "aislada": 1900.0}
 
-    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("")
+    _mockear_dialogo_valor(monkeypatch, "")
+    panel._al_click_celda(0, _COL_REGULAR_NUEVO)
     assert panel._valores_manuales[id_consultorio] == {"aislada": 1900.0}
 
 
-def test_valor_manual_invalido_avisa_y_no_rompe(qtbot, conn):
+def test_valor_manual_invalido_avisa_y_no_rompe(qtbot, conn, monkeypatch):
     _crear_edificio_con_consultorio(conn)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
-    panel.boton_editar_valores.setChecked(True)
-    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("no es un número")  # no debe lanzar
+    panel._simular()
+    _mockear_dialogo_valor(monkeypatch, "no es un número")
+    panel._al_click_celda(0, _COL_REGULAR_NUEVO)  # no debe lanzar
 
 
-def test_valor_manual_resalta_la_celda_calculo_con_porcentaje_no(qtbot, conn):
+def test_cancelar_el_dialogo_de_valor_manual_no_cambia_nada(qtbot, conn, monkeypatch):
+    id_consultorio = _crear_edificio_con_consultorio(conn)
+    panel = _PanelAumentos(conn)
+    qtbot.addWidget(panel)
+    panel._simular()
+    _mockear_dialogo_valor(monkeypatch, "1234", aceptar=False)
+    panel._al_click_celda(0, _COL_REGULAR_NUEVO)
+    assert id_consultorio not in panel._valores_manuales
+
+
+def test_valor_manual_resalta_la_celda_calculo_con_porcentaje_no(qtbot, conn, monkeypatch):
     id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000, valor_aislada=1500)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
@@ -265,31 +294,34 @@ def test_valor_manual_resalta_la_celda_calculo_con_porcentaje_no(qtbot, conn):
     panel._simular()
     assert panel.tabla.item(0, _COL_REGULAR_NUEVO).background().color().name() != QColor(COLOR_AMARILLO).name()
 
-    panel.boton_editar_valores.setChecked(True)
-    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("1234")
+    _mockear_dialogo_valor(monkeypatch, "1234")
+    panel._al_click_celda(0, _COL_REGULAR_NUEVO)
     assert panel.tabla.item(0, _COL_REGULAR_NUEVO).background().color().name() == QColor(COLOR_AMARILLO).name()
     # Aislada sigue calculada por %, sin resaltar
     assert panel.tabla.item(0, _COL_AISLADA_NUEVO).background().color().name() != QColor(COLOR_AMARILLO).name()
     assert id_consultorio in panel._valores_manuales
 
 
-def test_valor_manual_y_porcentaje_diferencial_son_mutuamente_excluyentes(qtbot, conn):
+def test_valor_manual_y_porcentaje_diferencial_son_mutuamente_excluyentes(qtbot, conn, monkeypatch):
     """Mismo criterio que % general/diferencial: nunca los dos juntos
     para la misma fila — fijar un valor a mano limpia el diferencial y
     viceversa."""
     id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
-    panel.boton_editar.setChecked(True)
-    panel.boton_editar_valores.setChecked(True)
+    panel._simular()
 
-    panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("30")
+    _mockear_dialogo_valor(monkeypatch, "30")
+    panel._al_click_celda(0, _COL_PORCENTAJE_DIFERENCIAL)
     assert id_consultorio in panel._diferenciales
-    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("1234")
+
+    _mockear_dialogo_valor(monkeypatch, "1234")
+    panel._al_click_celda(0, _COL_REGULAR_NUEVO)
     assert id_consultorio not in panel._diferenciales
     assert panel._valores_manuales[id_consultorio]["regular"] == pytest.approx(1234.0)
 
-    panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("30")
+    _mockear_dialogo_valor(monkeypatch, "30")
+    panel._al_click_celda(0, _COL_PORCENTAJE_DIFERENCIAL)
     assert id_consultorio not in panel._valores_manuales
 
 
@@ -301,13 +333,14 @@ def test_boton_restablecer_deshabilitado_sin_override(qtbot, conn):
     assert boton.isEnabled() is False
 
 
-def test_boton_restablecer_limpia_diferencial_y_valor_manual(qtbot, conn):
+def test_boton_restablecer_limpia_diferencial_y_valor_manual(qtbot, conn, monkeypatch):
     id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
     panel.spin_porcentaje.setValue(10)
-    panel.boton_editar_valores.setChecked(True)
-    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("1234")
+    panel._simular()
+    _mockear_dialogo_valor(monkeypatch, "1234")
+    panel._al_click_celda(0, _COL_REGULAR_NUEVO)
     assert id_consultorio in panel._valores_manuales
 
     boton = panel.tabla.cellWidget(0, _COL_RESTABLECER)
@@ -319,24 +352,25 @@ def test_boton_restablecer_limpia_diferencial_y_valor_manual(qtbot, conn):
     assert panel.tabla.item(0, _COL_REGULAR_NUEVO).text() == "$ 1.100,00"  # vuelve al % general
 
 
-def test_rerenderizar_la_tabla_no_deja_botones_restablecer_huerfanos(qtbot, conn):
+def test_rerenderizar_la_tabla_no_deja_botones_restablecer_huerfanos(qtbot, conn, monkeypatch):
     """Bug real encontrado al armar "Restablecer" (no pedido, destapado
     midiendo geometría contra una captura): `setCellWidget` no borra solo
     el widget que reemplaza, a diferencia de `setItem` — cada re-render
-    (un `_simular`/un tildar "Editar...") creaba un botón "Restablecer"
-    nuevo y dejaba el anterior huérfano, colgado del viewport sin
-    posición asignada por la tabla — Qt lo terminaba pintando superpuesto
-    contra las primeras columnas de la primera fila. Se resolvió
-    reusando un solo botón por consultorio (`self._botones_restablecer`)
-    en vez de crear uno nuevo en cada render."""
+    (un `_simular`/un click que confirma un override) creaba un botón
+    "Restablecer" nuevo y dejaba el anterior huérfano, colgado del
+    viewport sin posición asignada por la tabla — Qt lo terminaba
+    pintando superpuesto contra las primeras columnas de la primera
+    fila. Se resolvió reusando un solo botón por consultorio
+    (`self._botones_restablecer`) en vez de crear uno nuevo en cada
+    render."""
     from PySide6.QtWidgets import QPushButton
     _crear_edificio_con_consultorio(conn, valor_regular=1000)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
     panel.spin_porcentaje.setValue(10)
     panel._simular()  # un render más
-    panel.boton_editar.setChecked(True)  # otro render (sin pasar por _simular)
-    panel.tabla.item(0, _COL_PORCENTAJE_DIFERENCIAL).setText("30")  # otro render más
+    _mockear_dialogo_valor(monkeypatch, "30")
+    panel._al_click_celda(0, _COL_PORCENTAJE_DIFERENCIAL)  # otro render más
 
     botones = [b for b in panel.findChildren(QPushButton) if b.text() == "Restablecer"]
     assert len(botones) == 1  # uno solo, el que vive en la tabla — nada huérfano colgando
@@ -390,12 +424,13 @@ def test_confirmar_sin_liquidaciones_emitidas_lo_dice_en_el_aviso(qtbot, conn, m
     assert "Todavía no hay ninguna liquidación emitida" in textos_pregunta[0]
 
 
-def test_confirmar_aplica_el_valor_manual(qtbot, conn):
+def test_confirmar_aplica_el_valor_manual(qtbot, conn, monkeypatch):
     id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
     panel = _PanelAumentos(conn)
     qtbot.addWidget(panel)
-    panel.boton_editar_valores.setChecked(True)
-    panel.tabla.item(0, _COL_REGULAR_NUEVO).setText("1234")
+    panel._simular()
+    _mockear_dialogo_valor(monkeypatch, "1234")
+    panel._al_click_celda(0, _COL_REGULAR_NUEVO)
     panel._confirmar()
 
     fila = conn.execute(
@@ -512,3 +547,66 @@ def test_esquema_confirmar_cambios_reemplaza_el_vigente(qtbot, conn):
     assert panel.boton_confirmar.isEnabled() is False
     inactivos = obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=0)
     assert len(inactivos) == len(activos_antes)
+
+
+def test_esquema_confirmar_avisa_la_cantidad_de_liquidaciones_antes_de_confirmar(qtbot, conn, monkeypatch):
+    id_consultorio = _crear_edificio_con_consultorio(conn, valor_regular=1000)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio="2020-01-01",
+    )
+    from app.negocio.dias import periodo_actual
+    from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=periodo_actual(conn), fecha_emision="2026-08-01")
+    marcar_estado_envio(conn, id_profesional=id_prof, periodo=periodo_actual(conn), enviada=True)
+
+    panel = _PanelEsquemaDescuentos(conn)
+    qtbot.addWidget(panel)
+    panel.spin_horas.setValue(5)
+
+    textos_pregunta = []
+
+    def _question(*args, **kwargs):
+        textos_pregunta.append(args[2])
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_question))
+    panel._confirmar_cambios()
+
+    assert len(textos_pregunta) == 1
+    assert "1 liquidación" in textos_pregunta[0]
+    liquidaciones = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_prof, Periodo=periodo_actual(conn),
+    )
+    assert any(l["EstadoEnvio"] == "Regenerada no enviada" for l in liquidaciones)
+
+
+def test_esquema_confirmar_sin_liquidaciones_emitidas_lo_dice_en_el_aviso(qtbot, conn, monkeypatch):
+    panel = _PanelEsquemaDescuentos(conn)
+    qtbot.addWidget(panel)
+    panel.spin_horas.setValue(5)
+
+    textos_pregunta = []
+
+    def _question(*args, **kwargs):
+        textos_pregunta.append(args[2])
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_question))
+    panel._confirmar_cambios()
+
+    assert "Todavía no hay ninguna liquidación emitida" in textos_pregunta[0]
+
+
+def test_esquema_cancelar_confirmacion_no_cambia_nada(qtbot, conn, monkeypatch):
+    activos_antes = {a["IdEsquemaDescuento"] for a in obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1)}
+    panel = _PanelEsquemaDescuentos(conn)
+    qtbot.addWidget(panel)
+    panel.spin_horas.setValue(5)
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._confirmar_cambios()
+
+    activos_despues = {a["IdEsquemaDescuento"] for a in obtener_repositorio(conn, "EsquemaDescuentos").listar(Activo=1)}
+    assert activos_despues == activos_antes

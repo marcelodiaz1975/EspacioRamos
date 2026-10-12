@@ -8857,3 +8857,60 @@ actualización de los tests de foco/período por defecto al nuevo
 `SelectorPeriodo`); `tests/test_catalogos.py` (aviso de regeneración al
 crear/cancelar la confirmación/sin liquidaciones emitidas/al eliminar
 sin preguntar de nuevo).
+
+## Séptima tanda de correcciones post-v1: Esquema de descuentos y
+## Aumentos (edición por celda, en vez de checkbox global)
+
+### Esquema de descuentos: mismo aviso de regeneración que Aumentos
+
+`_PanelEsquemaDescuentos._confirmar_cambios` suma el mismo aviso que ya
+tenía "Aumentos" (reusa `cantidad_liquidaciones_a_regenerar`, sin
+duplicarla): antes de confirmar, si hay liquidaciones ya emitidas del
+período en curso, el cartel dice cuántas y que van a quedar marcadas
+como no enviadas. A diferencia de "Aumentos" (que regenera vía
+`confirmar_aumento`, atado a `AumentoAplicado`/snapshot de "operación
+importante"), acá se regenera directo con `regenerar_si_corresponde`
+por cada profesional con liquidación emitida en el período — un cambio
+de esquema de descuentos es más simple que un aumento, no necesita
+ninguno de los efectos colaterales que sí tiene `confirmar_aumento`
+(deshacer, snapshot).
+
+### Aumentos: edición por click en la celda puntual, no por checkbox global
+
+Pedido explícito de la clienta: en vez de dos botones checkable
+("Editar porcentaje diferencial"/"Editar valores manuales") que
+habilitaban la edición IN-PLACE de toda la columna a la vez, clickear
+la celda puntual ("% diferencial", "Regular nuevo" o "Aislada nuevo")
+abre un diálogo chico (`_DialogoValorFila`, genérico, reusado por los
+tres) para fijar/quitar el override de ESA fila nomás — las otras filas
+quedan intactas sin que haga falta "entrar/salir" de un modo de edición
+global primero.
+
+Se sacan los dos botones (`boton_editar`/`boton_editar_valores`) y los
+flags `_editando_diferencial`/`_editando_valores` — las tres celdas
+(`_COL_PORCENTAJE_DIFERENCIAL`/`_COL_REGULAR_NUEVO`/`_COL_AISLADA_
+NUEVO`) pasan a ser SIEMPRE no editables in-place (`_celda_porcentaje`/
+`_celda_monto_nuevo` sin el parámetro `editable`), y `tabla.itemChanged`
+se reemplaza por `tabla.cellClicked` → `_al_click_celda(fila, columna)`,
+que deriva a `_editar_diferencial`/`_editar_valor_manual` según la
+columna. Un `QLabel` nuevo (`etiqueta_ayuda_edicion`) explica el
+mecanismo donde antes estaban los botones. El resto de la lógica de
+negocio (override mutuamente excluyente entre % diferencial/valor
+manual, resaltado amarillo del valor manual, botón "Restablecer" por
+fila) no cambió — solo cambió CÓMO se dispara la edición.
+
+De paso, pedido explícito de revisar el foco visible en esta pantalla:
+los `QRadioButton` de "Múltiplos de..." (el único lugar de todo el
+sistema con `QRadioButton` en una cadena de foco) nunca habían tenido
+ninguna regla `:focus` en `estilos.py` — mismo hueco que en su momento
+tuvieron QComboBox/QCheckBox, mismo arreglo (`border` reservado,
+transparente en reposo, color real al enfocar).
+
+Tests: `tests/test_gui_aumentos.py` reescribe los ~13 tests que
+dependían de los botones/edición in-place (ahora mockeando
+`_DialogoValorFila` con un `_DialogoValorFalso`, mismo criterio que
+`_DialogoFalso` de Pagos) y suma los de cancelar el diálogo sin cambiar
+nada, más dos nuevos para el aviso/regeneración de Esquema de
+descuentos. `tests/test_gui_estilos.py` suma `QRadioButton` a los dos
+tests existentes de borde de foco reservado (texto de la hoja + render
+real con muestreo de píxeles).
