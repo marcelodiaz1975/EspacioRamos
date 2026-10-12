@@ -8596,3 +8596,149 @@ total — el nuevo cartel se suma a la cadena, no la reemplaza. Tests
 nuevos por solapa confirman que cancelar no crea nada y deja el
 formulario intacto (profesional/ítem/monto siguen cargados), y que
 confirmar sigue creando como siempre.
+
+## Quinta tanda de correcciones post-v1: Valores vigentes, Pagos, Registro de
+## ausencias
+
+Nueva ronda de feedback sobre el build instalado, con el mismo criterio de
+siempre ("dale para adelante con todo... cuando terminemos de revisar la
+primera tanda de solapas vamos con otra versión de prueba").
+
+### Valores vigentes: filtro colapsable no corre más la tabla de la derecha
+
+Hallazgo real (#54, ya venía pendiente de la tanda anterior): el panel
+"Filtros" de esta solapa (`_PanelFiltrosJerarquico`, cuatro `_FiltroColapsable`
+en cascada — Localidad/Edificio/Unidad/Consultorio) solo tenía un
+`setMaximumWidth(260)` — colapsado se achicaba por debajo de ese tope
+(ancho natural, más angosto que el botón-resumen más largo) y volvía a
+ensancharse hasta 260px al desplegar una lista con nombres largos. En el
+`QHBoxLayout` de `_PanelValoresVigentes` (Filtros | Promedios | tabla de
+Valores, esta última con `stretch=1`), ese ensanche se lo quitaba a la
+tabla — exactamente "correrse la tabla de la derecha". Mismo criterio ya
+usado para este mismo problema en el panel de Filtros de Oferta de
+consultorios: `setMaximumWidth` pasa a `setFixedWidth(260)`, siempre el
+mismo ancho, colapsado o desplegado.
+
+### Pagos: Registrar pagos (diálogo de modificar, botones deshabilitados,
+### confirmaciones), Planes de pago (diálogos por fila seleccionada)
+
+**Registrar pagos**: el selector de profesional y el foco visible en
+botones ya estaban cubiertos por los mecanismos compartidos de rondas
+anteriores — nada que tocar ahí. Lo nuevo:
+
+- **"Modificar pago"/"Eliminar pago" deshabilitados sin selección,
+  "Deshacer último movimiento" sin movimientos**: `boton_modificar`/
+  `boton_eliminar`/`boton_deshacer` pasan a atributos `self.` (antes
+  variables locales de `_armar_ui`) y suman `_actualizar_botones()`
+  (conectado a `tabla.itemSelectionChanged` y llamado al final de
+  `actualizar()`) — sin selección, los dos primeros quedan grises; sin
+  ningún registro, el tercero también. Como `_EnterAvanzaFoco._mover`
+  ya salteaba widgets deshabilitados desde que se armó ese mecanismo,
+  "desseleccionables con el tabulador" sale gratis con solo
+  `setEnabled(False)`, sin tocar `foco.py`.
+- **"Modificar pago" pasa a un cuadro de diálogo propio**
+  (`_DialogoModificarPago`): antes reusaba los campos del formulario de
+  alta de la izquierda (que además precargaba sola `_precargar_seleccion`
+  al elegir una fila) — ahora ese formulario queda exclusivo de
+  "Registrar pago" nuevo, sin precargarse con nada al seleccionar una
+  fila (`_actualizar_botones` reemplaza a `_precargar_seleccion`, que se
+  borra). El diálogo trae Período imputado/Monto/Medio de pago/Cuenta
+  receptora precargados del registro elegido (Profesional y fecha de
+  carga se muestran de solo lectura, nunca se tocan — `modificar_pago`
+  tampoco los cambia) y valida igual que antes de confirmar.
+- **"Eliminar pago" con alerta explícita sobre el impacto en la cuenta**:
+  confirmado que `eliminar_pago`/`modificar_pago` (`app.negocio.pagos`)
+  YA revertían correctamente según `PeriodoImputado` del pago
+  (`SaldoCuentaAnterior` si es anterior al mes en curso, `SaldoCuentaActual`
+  si no, vía `_campo_saldo`) — el pedido de la clienta ("ojo con eso, hay
+  que revertir de acuerdo al período en el cual se había imputado") ya
+  estaba bien resuelto en la capa de negocio, solo faltaba que el cartel
+  lo dijera: ahora menciona el profesional, el monto, el período imputado
+  y a qué saldo específico se devuelve.
+- **Confirmación antes de registrar un pago nuevo**
+  (`confirmar_datos_antes_de_crear`, mismo mecanismo de Reservas): se
+  suma también a "Guardar nuevo plan de pagos" de la otra solapa, por
+  consistencia dentro del mismo formulario que se estaba revisando.
+
+**Planes de pago**: "Refinanciar plan seleccionado"/"Cancelar plan
+seleccionado" dejan de habilitarse según si el profesional del COMBO
+tiene un plan activo (`plan_activo_de`) y pasan a habilitarse según la
+FILA elegida en la TABLA (`_fila_seleccionada_plan`/`_actualizar_botones_fila`,
+solo si `Estado == "Activo"`) — bug latente de rebote: antes, con la
+tecla Delete (atada a `_cancelar`) o con el combo apuntando a otro
+profesional distinto del resaltado en la tabla, se podía cancelar un
+plan que no era el que se veía seleccionado. "Refinanciar" abre
+`_DialogoRefinanciarPlan` (Monto a refinanciar/Cantidad de cuotas/%
+Interés, con el mismo monto sugerido de siempre — saldo atrasado + cuotas
+pendientes del plan a reemplazar, movido acá desde `_profesional_cambio`)
+en vez de leer los campos sueltos de la columna izquierda, que ahora son
+exclusivos de "Guardar nuevo plan de pagos". "Cancelar" suma un cartel de
+confirmación explícito (antes cancelaba directo, sin preguntar nada)
+explicando que las cuotas pendientes vuelven a sumarse como saldo
+atrasado.
+
+**Estado de cuenta**: investigado el pedido de "que no corra el ancho al
+pinchar en el cuadro" — el combo de profesional ya tiene `setFixedWidth`
+desde siempre, no se encontró ningún mecanismo real en el código que
+pudiera correrlo. Sin poder reproducirlo en este entorno, queda
+documentado por si vuelve a aparecer en la instalación real (si persiste,
+hace falta una captura puntual).
+
+Tests: `tests/test_gui_pagos.py` reescribe los tests que asumían el
+viejo comportamiento (selección precarga el formulario, refinanciar/
+cancelar por combo) y suma un helper `_DialogoFalso`/`_mockear_dialogo_
+modificar`/`_mockear_dialogo_refinanciar` (reemplaza, en los tests, a los
+`QDialog` reales — `exec()` devuelve el resultado ya decidido sin abrir
+ninguna ventana) para poder probar los flujos de diálogo sin bloquear.
+El fixture `_sin_dialogos_modales` de este archivo suma `QMessageBox.
+question` por default a "Yes" (antes solo lo mockeaban los tests
+puntuales que ya lo necesitaban) — con la confirmación nueva en el
+camino feliz de "Registrar pago"/"Guardar nuevo plan de pagos", cualquier
+test que llamara a esos métodos sin mockear `question` quedaba
+bloqueado esperando una respuesta real.
+
+### Registro de ausencias: Vacaciones, Licencias, Ausencias
+
+- **Vacaciones**: "Crear vacaciones" suma la misma confirmación
+  (`confirmar_datos_antes_de_crear`) que el resto del sistema.
+  Investigado el reparto de una vacación que cruza fin de mes (ejemplo de
+  la clienta: 20/10 al 5/11, 20-31/10 en octubre y 1-5/11 en noviembre) —
+  confirmado que `app.negocio.liquidaciones._calcular_descuento_vacaciones`/
+  `_prorratear_valor_bonificado` YA lo hacían bien desde antes (DC-05
+  §1.6): prorratea el `ValorBonificado` ya congelado según qué proporción
+  del BRUTO ponderado por día cae en cada período — con horas constantes
+  durante toda la vacación esto coincide exactamente con un prorrateo por
+  días corridos como el del ejemplo, y generaliza mejor si el profesional
+  cambia de consultorio o de cantidad de días reservados a mitad de la
+  vacación. No fue necesario ningún cambio de código para este punto —
+  quedó confirmado, no corregido.
+- **Vacaciones/Licencias, regenerar liquidación del período actual**: ya
+  estaba resuelto para Vacaciones (`_crear`/`_cancelar_registro` ya
+  llamaban `regenerar_si_corresponde`) pero faltaba en Licencias — hueco
+  real, corregido con el mismo mecanismo exacto.
+- **Licencias, "Hasta" llevaba al año 2000 al abrir el calendario**: bug
+  real, mismo patrón en Reservas regulares ("Vigencia hasta") — los dos
+  campos usan el sentinel `_FECHA_SIN_DATO` (`QDate(2000, 1, 1)`) para
+  "(sin fecha)", y el popup de calendario arrancaba siempre en esa
+  página mientras el campo no tuviera una fecha real cargada. Qt
+  sincroniza la página visible del calendario con `date()` al armar el
+  popup, antes de mostrarlo — `_FiltroCalendarioArrancaHoy`/
+  `_instalar_calendario_arranca_hoy` (nuevos, `reservas.py`, importado
+  cruzado en `novedades.py`) se instala como event filter sobre
+  `campo.calendarWidget()` y, en su evento Show, si el campo sigue en el
+  sentinel, llama `setCurrentPage(hoy.year, hoy.month)` — solo cambia qué
+  página se VE, nunca el valor real del campo ni el sentinel.
+- **Ausencias por motivos varios**: mismo patrón que Pagos/Vacaciones —
+  "Crear ausencia" suma confirmación, "Modificar ausencia seleccionada"/
+  "Anular ausencia seleccionada" quedan deshabilitados sin fila elegida
+  en la tabla (`boton_modificar`/`boton_cancelar` pasan a `self.`,
+  `_actualizar_botones` nueva).
+- **Tipos de licencia**: catálogo genérico anidado, sin selector de
+  profesional propio — nada que tocar ahí.
+
+Tests: `tests/test_gui_reservas.py`/`tests/test_gui_novedades.py` suman
+los del calendario (simulando el evento Show a mano con `QApplication.
+sendEvent` — un `.show()` directo sobre el `QCalendarWidget` de un
+`QDateTimeEdit`, pensado para mostrarse solo como popup nativo, no
+siempre entrega el evento esperado) y los de confirmación/regeneración/
+botones deshabilitados, mismo criterio que rondas anteriores.

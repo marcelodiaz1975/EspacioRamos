@@ -3269,3 +3269,54 @@ def test_spin_monto_de_reserva_extraordinaria_muestra_formato_moneda(qtbot):
     qtbot.addWidget(spin)
     assert "$" in spin.text()
     assert "1.234" in spin.text()
+
+
+def test_vigencia_fin_calendario_arranca_hoy_mientras_este_en_sin_fecha(qtbot, conn):
+    """Hallazgo real de la clienta (en Licencias, ver `test_gui_novedades.py`
+    — mismo mecanismo acá, en Reservas regulares): con "Vigencia hasta" en
+    el sentinel "(sin fecha)", el popup del calendario arrancaba en el año
+    2000 en vez del mes en curso. `_instalar_calendario_arranca_hoy`
+    re-paginea el calendario (sin tocar el valor real del campo) cada vez
+    que se muestra, mientras siga en el sentinel. Dispara el evento Show a
+    mano (`QApplication.sendEvent`) porque un `.show()` directo sobre el
+    `QCalendarWidget` de un `QDateTimeEdit` (pensado para mostrarse solo
+    como popup, no así) no siempre llega a entregar el evento nativo."""
+    from PySide6.QtGui import QShowEvent
+
+    from app.negocio.dias import fecha_actual
+
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    assert panel.campo_vigencia_fin.date() == _FECHA_SIN_DATO
+
+    calendario = panel.campo_vigencia_fin.calendarWidget()
+    calendario.setCurrentPage(2000, 1)  # simula que había quedado en la página del sentinel
+    QApplication.sendEvent(calendario, QShowEvent())
+
+    hoy = fecha_actual(conn)
+    assert calendario.yearShown() == hoy.year
+    assert calendario.monthShown() == hoy.month
+
+
+def test_vigencia_fin_calendario_no_se_repaginea_con_una_fecha_real(qtbot, conn):
+    """Con una fecha real cargada (no el sentinel), el filtro no toca la
+    página del calendario — solo actúa mientras el campo sigue en
+    "(sin fecha)"."""
+    from PySide6.QtGui import QShowEvent
+
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.campo_vigencia_fin.setDate(QDate(2030, 6, 15))
+
+    calendario = panel.campo_vigencia_fin.calendarWidget()
+    calendario.setCurrentPage(2015, 3)
+    QApplication.sendEvent(calendario, QShowEvent())
+
+    # el filtro no hace nada (no es el sentinel) — la página queda tal
+    # cual estaba antes de mostrar el calendario.
+    assert calendario.yearShown() == 2015
+    assert calendario.monthShown() == 3

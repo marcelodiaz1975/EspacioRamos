@@ -34,6 +34,12 @@ def conn(tmp_path):
 def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+    # Vacaciones/Ausencias pasan a preguntar con `confirmar_datos_antes_de_
+    # crear` (QMessageBox.question) en el camino feliz de "Crear..." —
+    # default a "Yes" para no bloquear ningún test existente que no se
+    # ocupe de esto puntualmente; los que sí quieren probar "cancelar" lo
+    # vuelven a mockear en su propio cuerpo, pisando este default.
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
 
 
 def _preparar(conn):
@@ -165,6 +171,21 @@ def test_crear_vacacion_persiste(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 1
 
 
+def test_crear_vacacion_cancelando_confirmacion_no_persiste(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: "Crear vacaciones" pasa a pedir
+    confirmación (mismo mecanismo que Reservas) antes de guardar."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Vacacion").fetchone()["c"] == 0
+
+
 def test_crear_vacacion_regenera_liquidacion_enviada(qtbot, conn):
     """DC-08 §4.6: registrar una vacación tiene que regenerar sola la
     liquidación del período en curso si ya estaba Enviada."""
@@ -201,6 +222,30 @@ def test_crear_licencia_sin_tipo_no_falla(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Licencia").fetchone()["c"] == 1
 
 
+def test_crear_licencia_regenera_liquidacion_enviada(qtbot, conn):
+    """Mismo criterio que Vacaciones (ver `test_crear_vacacion_regenera_
+    liquidacion_enviada`): un hueco real detectado al revisar esta
+    pantalla — `_crear` nunca llamaba a `regenerar_si_corresponde`."""
+    id_profesional = _preparar(conn)
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-03"))
+    panel._crear()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
 def test_crear_ausencia_persiste(qtbot, conn):
     id_profesional = _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)
@@ -214,6 +259,42 @@ def test_crear_ausencia_persiste(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 1
     assert panel.tabla.item(0, 3).text() == "Todo el día"
     assert panel.tabla.item(0, 4).text() == "Congreso"
+
+
+def test_crear_ausencia_cancelando_confirmacion_no_persiste(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-03"))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM Ausencia").fetchone()["c"] == 0
+
+
+def test_botones_ausencias_deshabilitados_sin_seleccion(qtbot, conn):
+    """Pedido explícito de la clienta: "Modificar ausencia seleccionada"/
+    "Anular ausencia seleccionada" quedan deshabilitados hasta que haya
+    una fila elegida en la tabla."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    assert not panel.boton_modificar.isEnabled()
+    assert not panel.boton_cancelar.isEnabled()
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-03"))
+    panel._crear()
+    assert not panel.boton_modificar.isEnabled()
+    assert not panel.boton_cancelar.isEnabled()
+
+    panel.tabla.selectRow(0)
+    assert panel.boton_modificar.isEnabled()
+    assert panel.boton_cancelar.isEnabled()
 
 
 def test_cancelar_vacacion_seleccionada_elimina(qtbot, conn):
@@ -1578,3 +1659,31 @@ def test_grillas_de_registro_de_ausencias_reservan_alto_para_el_scroll_horizonta
     qtbot.addWidget(pantalla)
     for panel in (pantalla.panel_vacaciones, pantalla.panel_licencias, pantalla.panel_ausencias):
         assert panel.grilla._reservar_alto_scroll_horizontal is True
+
+
+def test_licencias_hasta_calendario_arranca_hoy_mientras_este_en_sin_fecha(qtbot, conn):
+    """Hallazgo real de la clienta: "el selector de fecha hasta... me
+    lleva al año 2000 como está ahora" — con "Hasta" en el sentinel
+    "(sin fecha)", el popup del calendario arrancaba en esa página en
+    vez del mes en curso. `_instalar_calendario_arranca_hoy` (compartido
+    con Reservas regulares, ver `test_gui_reservas.py`) re-paginea el
+    calendario, sin tocar el valor real del campo, mientras siga en el
+    sentinel."""
+    from PySide6.QtGui import QShowEvent
+    from PySide6.QtWidgets import QApplication
+
+    from app.gui.pantallas.reservas import _FECHA_SIN_DATO
+    from app.negocio.dias import fecha_actual
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    assert panel.campo_hasta.date() == _FECHA_SIN_DATO
+
+    calendario = panel.campo_hasta.calendarWidget()
+    calendario.setCurrentPage(2000, 1)
+    QApplication.sendEvent(calendario, QShowEvent())
+
+    hoy = fecha_actual(conn)
+    assert calendario.yearShown() == hoy.year
+    assert calendario.monthShown() == hoy.month

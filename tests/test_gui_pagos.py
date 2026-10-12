@@ -1,11 +1,12 @@
 import pytest
 from PySide6.QtCore import QDateTime, Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import COLOR_ROJO
+from app.gui.pantallas import pagos as pagos_modulo
 from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
@@ -13,6 +14,37 @@ from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.negocio.pagos import registrar_pago
 from app.repositorio.registro import obtener_repositorio
+
+
+class _DialogoFalso:
+    """Reemplaza, en los tests, a los `QDialog` reales de esta pantalla
+    (`_DialogoModificarPago`/`_DialogoRefinanciarPlan`): no abre ninguna
+    ventana ni bloquea esperando al operador — `exec()` devuelve
+    directamente el resultado ya decidido por el test, y los atributos
+    que el panel lee de él después de `exec()` (los mismos que arma cada
+    diálogo real al confirmar) vienen precargados de antemano."""
+
+    def __init__(self, aceptar=True, **atributos):
+        self._aceptar = aceptar
+        for nombre, valor in atributos.items():
+            setattr(self, nombre, valor)
+
+    def exec(self):
+        return QDialog.DialogCode.Accepted if self._aceptar else QDialog.DialogCode.Rejected
+
+
+def _mockear_dialogo_modificar(monkeypatch, *, aceptar=True, **atributos):
+    monkeypatch.setattr(
+        pagos_modulo, "_DialogoModificarPago",
+        lambda conn, registro, profesional, parent=None: _DialogoFalso(aceptar, **atributos),
+    )
+
+
+def _mockear_dialogo_refinanciar(monkeypatch, *, aceptar=True, **atributos):
+    monkeypatch.setattr(
+        pagos_modulo, "_DialogoRefinanciarPlan",
+        lambda conn, plan, profesional, parent=None: _DialogoFalso(aceptar, **atributos),
+    )
 
 
 @pytest.fixture
@@ -27,6 +59,14 @@ def conn(tmp_path):
 def _sin_dialogos_modales(monkeypatch):
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+    # `confirmar_datos_antes_de_crear` (Registrar pago/Guardar plan de pagos)
+    # pasa a preguntar con `QMessageBox.question` en el camino feliz, antes
+    # sin mockear acá (solo lo necesitaban los pocos tests de "¿período
+    # anterior?"/"¿eliminar?", que lo mockean ellos mismos) — default a
+    # "Yes" para no bloquear ningún test existente que no se ocupe de esto
+    # en particular; los que sí quieren probar "cancelar" lo vuelven a
+    # mockear en su propio cuerpo, pisando este default.
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
 
 
 def _crear_profesional(conn, saldo=10000):
@@ -375,28 +415,35 @@ def test_iniciar_tanda_de_otro_dia_pregunta_mantener_o_nueva(qtbot, conn, monkey
 
 # ------------------------------------------------------- modificar / deshacer
 
-def test_seleccionar_fila_precarga_formulario(qtbot, conn):
+def test_seleccionar_fila_habilita_modificar_y_eliminar_sin_tocar_el_formulario(qtbot, conn):
+    """Pedido explícito de la clienta: "Modificar pago" pasa a un cuadro
+    de diálogo propio — seleccionar una fila ya no precarga el
+    formulario de alta (que ahora es exclusivo de "Registrar pago"
+    nuevo), solo habilita los botones "Modificar pago"/"Eliminar pago"."""
     id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
-    periodo = panel.campo_periodo.text()  # queda en el período actual por defecto
+    periodo = panel.campo_periodo.text()
     _seleccionar_profesional(panel, id_profesional)
     panel.combo_medio_pago.setCurrentText("Transferencia a cta Celeste")
     panel.combo_cuenta_receptora.setCurrentText("CA Banco Macro - Celeste")
     panel.spin_monto.setValue(-500)
-    panel._registrar()
+    panel._registrar()  # resetea el formulario al confirmar
+
+    assert not panel.boton_modificar.isEnabled()
+    assert not panel.boton_eliminar.isEnabled()
 
     panel.tabla.selectRow(0)
-
-    assert panel.combo_profesional.currentData() == id_profesional
-    assert panel.spin_monto.value() == -500
+    assert panel.boton_modificar.isEnabled()
+    assert panel.boton_eliminar.isEnabled()
+    # el formulario de alta sigue en su estado reseteado, sin tocar
+    assert panel.combo_profesional.currentData() is None
+    assert panel.spin_monto.value() == 0
     assert panel.campo_periodo.text() == periodo
-    assert panel.combo_medio_pago.currentText() == "Transferencia a cta Celeste"
-    assert panel.combo_cuenta_receptora.currentText() == "CA Banco Macro - Celeste"
 
 
-def test_modificar_pago_seleccionado_ajusta_saldo_y_marca_modificado(qtbot, conn):
+def test_modificar_pago_seleccionado_ajusta_saldo_y_marca_modificado(qtbot, conn, monkeypatch):
     id_profesional = _crear_profesional(conn, saldo=1000)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
@@ -406,7 +453,10 @@ def test_modificar_pago_seleccionado_ajusta_saldo_y_marca_modificado(qtbot, conn
     panel._registrar()  # saldo: 600
 
     panel.tabla.selectRow(0)
-    panel.spin_monto.setValue(-600)  # se corrige el monto cargado
+    _mockear_dialogo_modificar(
+        monkeypatch, periodo_imputado=periodo_actual(conn), monto=-600, medio_pago="Efectivo",
+        cuenta_receptora=None,
+    )
     panel._modificar()
 
     saldo = obtener_repositorio(conn, "Profesional").obtener(id_profesional)["SaldoCuentaActual"]
@@ -422,7 +472,25 @@ def test_modificar_pago_sin_seleccion_no_falla(qtbot, conn):
     pantalla.panel_pagos._modificar()  # nada seleccionado -> no debe romper
 
 
-def test_modificar_pago_a_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbot, conn):
+def test_modificar_pago_cancelando_el_dialogo_no_cambia_nada(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()
+
+    panel.tabla.selectRow(0)
+    _mockear_dialogo_modificar(monkeypatch, aceptar=False, monto=-999)
+    panel._modificar()
+
+    fila = conn.execute("SELECT Monto, RegistroModificado FROM HistorialPagos").fetchone()
+    assert fila["Monto"] == -400
+    assert fila["RegistroModificado"] == 0
+
+
+def test_modificar_pago_a_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbot, conn, monkeypatch):
     """Igual que al registrar un pago nuevo: si la modificación hace que el
     pago pase a afectar el saldo anterior (imputado al mes anterior), la
     liquidación del mes EN CURSO (no la de ese período) se regenera y
@@ -443,7 +511,9 @@ def test_modificar_pago_a_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtb
     panel._registrar()  # imputado al mes en curso, todavía no toca julio
 
     panel.tabla.selectRow(0)
-    panel.campo_periodo.setText("2026-07")  # se corrige: era del mes anterior
+    _mockear_dialogo_modificar(
+        monkeypatch, periodo_imputado="2026-07", monto=-1000, medio_pago="Efectivo", cuenta_receptora=None,
+    )  # se corrige: era del mes anterior
     panel._modificar()
 
     emisiones_agosto = obtener_repositorio(conn, "LiquidacionEmitida").listar(
@@ -539,8 +609,10 @@ def test_crear_plan_de_pagos_persiste_y_genera_cuotas(qtbot, conn):
 
 def test_botones_planes_pago_segun_si_hay_plan_activo(qtbot, conn):
     """"Guardar nuevo plan de pagos" se bloquea (no solo falla después del
-    clic) si el profesional elegido ya tiene un plan vigente; "Refinanciar"
-    y "Cancelar" recién se habilitan en ese caso."""
+    clic) si el profesional elegido ya tiene un plan vigente. "Refinanciar"/
+    "Cancelar" (pedido explícito de la clienta) ya NO dependen del
+    profesional del combo — recién se habilitan al elegir, en la TABLA,
+    la fila de un plan todavía Activo."""
     id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
@@ -554,6 +626,10 @@ def test_botones_planes_pago_segun_si_hay_plan_activo(qtbot, conn):
     panel._guardar()
 
     assert not panel.boton_guardar.isEnabled()
+    assert not panel.boton_refinanciar.isEnabled()  # todavía sin fila elegida en la tabla
+    assert not panel.boton_cancelar.isEnabled()
+
+    panel.tabla.selectRow(0)
     assert panel.boton_refinanciar.isEnabled()
     assert panel.boton_cancelar.isEnabled()
 
@@ -604,7 +680,7 @@ def test_guardar_con_plan_activo_no_crea_un_segundo(qtbot, conn):
     assert [p["Estado"] for p in planes] == ["Activo"]
 
 
-def test_refinanciar_plan_cancela_el_vigente_y_crea_uno_nuevo(qtbot, conn):
+def test_refinanciar_plan_cancela_el_vigente_y_crea_uno_nuevo(qtbot, conn, monkeypatch):
     id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
@@ -613,20 +689,23 @@ def test_refinanciar_plan_cancela_el_vigente_y_crea_uno_nuevo(qtbot, conn):
     panel.spin_monto.setValue(6000)
     panel._guardar()
 
-    panel.spin_monto.setValue(3000)
+    panel.tabla.selectRow(0)
+    _mockear_dialogo_refinanciar(monkeypatch, monto=3000, cantidad_cuotas=3, porcentaje_interes=0)
     panel._refinanciar()
 
     planes = conn.execute("SELECT Estado FROM PlanPago ORDER BY IdPlan").fetchall()
     assert [p["Estado"] for p in planes] == ["Cancelado", "Activo"]
 
 
-def test_refinanciar_sin_plan_activo_avisa_y_no_crea(qtbot, conn):
+def test_refinanciar_sin_seleccion_avisa_y_no_crea(qtbot, conn):
+    """Pedido explícito de la clienta: "Refinanciar plan seleccionado"
+    opera sobre la fila elegida en la TABLA, no sobre el profesional del
+    combo — sin ninguna fila seleccionada, avisa y no hace nada."""
     id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_planes
     _seleccionar_profesional(panel, id_profesional)
-    panel.spin_monto.setValue(3000)
     panel._refinanciar()
     assert conn.execute("SELECT COUNT(*) c FROM PlanPago").fetchone()["c"] == 0
 
@@ -641,7 +720,8 @@ def test_cancelar_plan_suma_pendientes_al_saldo_anterior(qtbot, conn):
     panel.spin_cuotas.setValue(3)
     panel._guardar()  # descuenta 6000 de SaldoCuentaAnterior -> queda en 0
 
-    panel._cancelar()
+    panel.tabla.selectRow(0)
+    panel._cancelar()  # QMessageBox.question mockeado a "Yes" por el fixture autouse
 
     estado = conn.execute("SELECT Estado FROM PlanPago").fetchone()["Estado"]
     assert estado == "Cancelado"
@@ -651,27 +731,50 @@ def test_cancelar_plan_suma_pendientes_al_saldo_anterior(qtbot, conn):
     assert saldo == pytest.approx(6000)  # las 3 cuotas pendientes vuelven a ser saldo atrasado
 
 
-def test_cancelar_sin_plan_activo_avisa_y_no_falla(qtbot, conn):
-    id_profesional = _crear_profesional(conn)
-    pantalla = PantallaPagos(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_planes
-    _seleccionar_profesional(panel, id_profesional)
-    panel._cancelar()  # no debe fallar aunque no haya plan activo
-
-
-def test_monto_a_refinanciar_se_sugiere_segun_saldo_atrasado_y_plan_activo(qtbot, conn):
+def test_cancelar_plan_responde_no_al_cartel_no_cambia_nada(qtbot, conn, monkeypatch):
     id_profesional = _crear_profesional(conn, saldo=0)
     obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=6000)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_planes
     _seleccionar_profesional(panel, id_profesional)
-    assert panel.spin_monto.value() == pytest.approx(6000)  # sin plan activo: el saldo atrasado tal cual
-
     panel.spin_cuotas.setValue(3)
-    panel._guardar()  # deja SaldoCuentaAnterior en 0, con 6000 en cuotas pendientes, y ya recalcula el sugerido
-    assert panel.spin_monto.value() == pytest.approx(6000)  # 0 de saldo + 6000 de cuotas del plan a reemplazar
+    panel._guardar()
+
+    panel.tabla.selectRow(0)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel._cancelar()
+
+    estado = conn.execute("SELECT Estado FROM PlanPago").fetchone()["Estado"]
+    assert estado == "Activo"
+
+
+def test_cancelar_sin_seleccion_avisa_y_no_falla(qtbot, conn):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    panel._cancelar()  # no debe fallar aunque no haya nada seleccionado en la tabla
+
+
+def test_dialogo_refinanciar_sugiere_saldo_atrasado_mas_cuotas_del_plan_a_reemplazar(qtbot, conn):
+    id_profesional = _crear_profesional(conn, saldo=0)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=6000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_cuotas.setValue(3)
+    panel._guardar()  # deja SaldoCuentaAnterior en 0, con 6000 en cuotas pendientes del plan nuevo
+
+    plan = obtener_repositorio(conn, "PlanPago").listar(IdProfesional=id_profesional)[0]
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    dialogo = pagos_modulo._DialogoRefinanciarPlan(conn, plan, profesional)
+    qtbot.addWidget(dialogo)
+    # 0 de saldo (ya consumido por "Guardar nuevo plan de pagos") + 6000
+    # de las cuotas pendientes del plan que este diálogo va a reemplazar.
+    assert dialogo.spin_monto.value() == pytest.approx(6000)
 
 
 def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):

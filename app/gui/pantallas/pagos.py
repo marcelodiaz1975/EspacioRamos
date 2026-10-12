@@ -20,6 +20,7 @@ from PySide6.QtGui import QColor, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDateTimeEdit,
+    QDialog,
     QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
@@ -36,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.dialogos import confirmar_si_periodo_imputado_es_anterior
+from app.gui.dialogos import confirmar_datos_antes_de_crear, confirmar_si_periodo_imputado_es_anterior
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
@@ -139,6 +140,103 @@ class _SpinMonto(QDoubleSpinBox):
         QTimer.singleShot(0, self.selectAll)
 
 
+class _DialogoModificarPago(QDialog):
+    """Pedido explícito de la clienta: "Modificar pago" pasa de reusar
+    los campos del formulario de alta (que sigue siendo solo para
+    "Registrar pago" nuevo) a un cuadro de diálogo propio, precargado
+    con los datos del registro elegido. Profesional y fecha de carga no
+    se tocan acá — `modificar_pago` nunca los cambia — los únicos
+    campos editables son los mismos cuatro que ya admitía esa función
+    (Período imputado/Monto/Medio de pago/Cuenta receptora)."""
+
+    def __init__(
+        self, conn: sqlite3.Connection, registro: sqlite3.Row, profesional: sqlite3.Row | None, parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Modificar pago")
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel(f"Profesional: {_texto_profesional(profesional) if profesional else '?'}"))
+        layout.addWidget(QLabel(f"Fecha de carga: {_fmt_fecha_hora_larga(registro['FechaHoraCarga'])}"))
+
+        layout.addWidget(QLabel("Período imputado"))
+        self.campo_periodo = QLineEdit(registro["PeriodoImputado"] or "")
+        self.campo_periodo.setPlaceholderText("aaaa-mm")
+        layout.addWidget(self.campo_periodo)
+
+        layout.addWidget(QLabel("Monto"))
+        self.spin_monto = _SpinMonto()
+        self.spin_monto.setRange(-100_000_000, 100_000_000)
+        self.spin_monto.setDecimals(2)
+        self.spin_monto.setValue(registro["Monto"])
+        layout.addWidget(self.spin_monto)
+
+        layout.addWidget(QLabel("Medio de pago"))
+        self.combo_medio_pago = QComboBox()
+        self.combo_medio_pago.setEditable(True)
+        for valor in valores_lista(conn, "MedioPago"):
+            self.combo_medio_pago.addItem(valor)
+        self.combo_medio_pago.setCurrentText(registro["MedioPago"] or "")
+        self.combo_medio_pago.currentTextChanged.connect(self._actualizar_cuenta_receptora)
+        layout.addWidget(self.combo_medio_pago)
+
+        layout.addWidget(QLabel("Cuenta receptora"))
+        self.combo_cuenta_receptora = QComboBox()
+        self.combo_cuenta_receptora.setEditable(True)
+        for valor in valores_lista(conn, "CuentaReceptora"):
+            self.combo_cuenta_receptora.addItem(valor)
+        self.combo_cuenta_receptora.setCurrentText(registro["CuentaReceptora"] or "")
+        layout.addWidget(self.combo_cuenta_receptora)
+        self._actualizar_cuenta_receptora()
+
+        fila_botones = QHBoxLayout()
+        boton_guardar = QPushButton("Guardar cambios")
+        boton_guardar.setObjectName("botonPrimario")
+        boton_guardar.clicked.connect(self._confirmar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.setObjectName("botonSecundario")
+        boton_cancelar.clicked.connect(self.reject)
+        fila_botones.addWidget(boton_guardar)
+        fila_botones.addWidget(boton_cancelar)
+        layout.addLayout(fila_botones)
+
+        self._foco = instalar_enter_avanza_foco(
+            [self.campo_periodo, self.spin_monto, self.combo_medio_pago, self.combo_cuenta_receptora,
+             boton_guardar, boton_cancelar],
+            parent=self,
+        )
+        self.campo_periodo.setFocus()
+
+    def _es_transferencia(self) -> bool:
+        return "transferencia" in self.combo_medio_pago.currentText().lower()
+
+    def _actualizar_cuenta_receptora(self, *_args) -> None:
+        self.combo_cuenta_receptora.setEnabled(self._es_transferencia())
+
+    def _confirmar(self) -> None:
+        periodo_imputado = self.campo_periodo.text().strip()
+        monto = self.spin_monto.value()
+        medio_pago = self.combo_medio_pago.currentText().strip()
+        if not periodo_imputado or monto == 0 or not medio_pago:
+            QMessageBox.warning(self, "Modificar pago", "Completá período, monto y medio de pago.")
+            return
+        if not es_periodo_valido(periodo_imputado):
+            QMessageBox.warning(
+                self, "Modificar pago", f"El período imputado no tiene el formato esperado ({FORMATO_PERIODO})."
+            )
+            return
+        if self._es_transferencia() and not self.combo_cuenta_receptora.currentText().strip():
+            QMessageBox.warning(self, "Modificar pago", "Elegí una cuenta receptora para la transferencia.")
+            return
+        self.periodo_imputado = periodo_imputado
+        self.monto = monto
+        self.medio_pago = medio_pago
+        self.cuenta_receptora = (
+            self.combo_cuenta_receptora.currentText().strip() if self._es_transferencia() else None
+        )
+        self.accept()
+
+
 class PantallaPagos(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -235,18 +333,18 @@ class _PanelRegistrarPago(QWidget):
         self.boton_registrar.setObjectName("botonPrimario")
         self.boton_registrar.clicked.connect(self._registrar)
         form.addWidget(self.boton_registrar)
-        boton_modificar = QPushButton("Modificar pago")
-        boton_modificar.setObjectName("botonSecundario")
-        boton_modificar.clicked.connect(self._modificar)
-        form.addWidget(boton_modificar)
-        boton_eliminar = QPushButton("Eliminar pago")
-        boton_eliminar.setObjectName("botonSecundario")
-        boton_eliminar.clicked.connect(self._eliminar)
-        form.addWidget(boton_eliminar)
-        boton_deshacer = QPushButton("Deshacer último movimiento")
-        boton_deshacer.setObjectName("botonSecundario")
-        boton_deshacer.clicked.connect(self._deshacer_ultimo)
-        form.addWidget(boton_deshacer)
+        self.boton_modificar = QPushButton("Modificar pago")
+        self.boton_modificar.setObjectName("botonSecundario")
+        self.boton_modificar.clicked.connect(self._modificar)
+        form.addWidget(self.boton_modificar)
+        self.boton_eliminar = QPushButton("Eliminar pago")
+        self.boton_eliminar.setObjectName("botonSecundario")
+        self.boton_eliminar.clicked.connect(self._eliminar)
+        form.addWidget(self.boton_eliminar)
+        self.boton_deshacer = QPushButton("Deshacer último movimiento")
+        self.boton_deshacer.setObjectName("botonSecundario")
+        self.boton_deshacer.clicked.connect(self._deshacer_ultimo)
+        form.addWidget(self.boton_deshacer)
 
         form.addWidget(_linea_divisoria())
         self.etiqueta_saldo_actual = QLabel()
@@ -290,7 +388,7 @@ class _PanelRegistrarPago(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla.itemSelectionChanged.connect(self._precargar_seleccion)
+        self.tabla.itemSelectionChanged.connect(self._actualizar_botones)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         instalar_eliminar_con_tecla(self.tabla, self._eliminar)
         splitter.addWidget(self.tabla)
@@ -300,10 +398,11 @@ class _PanelRegistrarPago(QWidget):
         self._actualizar_visibilidad_segun_medio_pago()
         self._actualizar_color_monto()
         self._actualizar_saldos()
+        self._actualizar_botones()
         self._foco = instalar_enter_avanza_foco([
             self.combo_profesional, self.campo_periodo, self.spin_monto, self.combo_medio_pago,
-            self.combo_cuenta_receptora, self.boton_registrar, boton_modificar, boton_eliminar,
-            boton_deshacer, boton_iniciar_tanda, boton_cerrar_tanda,
+            self.combo_cuenta_receptora, self.boton_registrar, self.boton_modificar, self.boton_eliminar,
+            self.boton_deshacer, boton_iniciar_tanda, boton_cerrar_tanda,
         ], parent=self)
 
     def _profesional_cambio(self) -> None:
@@ -410,6 +509,7 @@ class _PanelRegistrarPago(QWidget):
         self.tabla.setColumnWidth(1, max(self.tabla.columnWidth(1), _ANCHO_COL_PROFESIONAL))
         self._actualizar_tanda()
         self._actualizar_saldos()
+        self._actualizar_botones()
 
     @staticmethod
     def _clave_orden(columna: int):
@@ -452,6 +552,17 @@ class _PanelRegistrarPago(QWidget):
             return
         if not confirmar_si_periodo_imputado_es_anterior(self, self.conn, periodo_imputado):
             return
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        lineas = [
+            f"Profesional: {_texto_profesional(profesional) if profesional else '?'}",
+            f"Período imputado: {periodo_imputado}",
+            f"Monto: {formatear_moneda(monto)}",
+            f"Medio de pago: {medio_pago}",
+        ]
+        if es_transferencia:
+            lineas.append(f"Cuenta receptora: {self.combo_cuenta_receptora.currentText().strip()}")
+        if not confirmar_datos_antes_de_crear(self, "Registrar pago", lineas):
+            return
         es_sobre = self._es_sobre()
         recogida_sobres = (
             self.campo_recogida_sobres.dateTime().toString(Qt.DateFormat.ISODate) if es_sobre else None
@@ -487,50 +598,32 @@ class _PanelRegistrarPago(QWidget):
             return None
         return self._registros[filas[0].row()]
 
-    def _precargar_seleccion(self) -> None:
-        registro = self._fila_seleccionada()
-        if registro is None:
-            return
-        indice = self.combo_profesional.findData(registro["IdProfesional"])
-        if indice >= 0:
-            self.combo_profesional.setCurrentIndex(indice)
-        self.campo_periodo.setText(registro["PeriodoImputado"] or "")
-        self.spin_monto.setValue(registro["Monto"])
-        if registro["MedioPago"] and self.combo_medio_pago.findText(registro["MedioPago"]) >= 0:
-            self.combo_medio_pago.setCurrentText(registro["MedioPago"])
-        else:
-            self.combo_medio_pago.setCurrentText(registro["MedioPago"] or "")
-        self._actualizar_visibilidad_segun_medio_pago()
-        self.combo_cuenta_receptora.setCurrentText(registro["CuentaReceptora"] or "")
+    def _actualizar_botones(self) -> None:
+        """Pedido explícito de la clienta: "Modificar pago"/"Eliminar
+        pago" quedan deshabilitados (grises, e inalcanzables con el
+        Tab — `_EnterAvanzaFoco` ya salta cualquier widget deshabilitado)
+        hasta que haya una fila seleccionada en la tabla; "Deshacer
+        último movimiento" solo necesita que exista al menos un
+        movimiento, sin importar la selección."""
+        hay_seleccion = self._fila_seleccionada() is not None
+        self.boton_modificar.setEnabled(hay_seleccion)
+        self.boton_eliminar.setEnabled(hay_seleccion)
+        self.boton_deshacer.setEnabled(bool(self._registros))
 
     def _modificar(self) -> None:
         registro = self._fila_seleccionada()
         if registro is None:
             QMessageBox.warning(self, "Modificar pago", "Elegí una fila de la tabla para modificar.")
             return
-        periodo_imputado = self.campo_periodo.text().strip()
-        monto = self.spin_monto.value()
-        medio_pago = self.combo_medio_pago.currentText().strip()
-        if not periodo_imputado or monto == 0 or not medio_pago:
-            QMessageBox.warning(self, "Modificar pago", "Completá período, monto y medio de pago.")
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(registro["IdProfesional"])
+        dialogo = _DialogoModificarPago(self.conn, registro, profesional, parent=self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
-        if not es_periodo_valido(periodo_imputado):
-            QMessageBox.warning(self, "Modificar pago", f"El período imputado no tiene el formato esperado ({FORMATO_PERIODO}).")
-            return
-        es_transferencia = "transferencia" in medio_pago.lower()
-        if es_transferencia and not self.combo_cuenta_receptora.currentText().strip():
-            QMessageBox.warning(self, "Modificar pago", "Elegí una cuenta receptora para la transferencia.")
-            return
-        es_sobre = self._es_sobre()
-        recogida_sobres = (
-            self.campo_recogida_sobres.dateTime().toString(Qt.DateFormat.ISODate) if es_sobre else None
-        )
         periodo_viejo = registro["PeriodoImputado"]
         try:
             modificar_pago(
-                self.conn, registro["IdPago"], monto=monto, medio_pago=medio_pago,
-                cuenta_receptora=self.combo_cuenta_receptora.currentText().strip() if es_transferencia else None,
-                periodo_imputado=periodo_imputado, fecha_hora_recogida_sobres=recogida_sobres,
+                self.conn, registro["IdPago"], monto=dialogo.monto, medio_pago=dialogo.medio_pago,
+                cuenta_receptora=dialogo.cuenta_receptora, periodo_imputado=dialogo.periodo_imputado,
             )
         except ValueError as error:
             QMessageBox.warning(self, "Modificar pago", str(error))
@@ -539,7 +632,7 @@ class _PanelRegistrarPago(QWidget):
         # en la liquidación del mes en curso, que arrastra ese saldo — hay que
         # regenerarla y dejarla marcada como no enviada.
         self._regenerar_si_afecta_mes_anterior(registro["IdProfesional"], periodo_viejo)
-        self._regenerar_si_afecta_mes_anterior(registro["IdProfesional"], periodo_imputado)
+        self._regenerar_si_afecta_mes_anterior(registro["IdProfesional"], dialogo.periodo_imputado)
         self.conn.commit()
         self.actualizar()
         self._resetear_formulario()
@@ -557,10 +650,14 @@ class _PanelRegistrarPago(QWidget):
         if registro is None:
             QMessageBox.warning(self, "Eliminar pago", "Elegí una fila de la tabla para eliminar.")
             return
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(registro["IdProfesional"])
+        periodo = registro["PeriodoImputado"] or "(sin período)"
+        campo_saldo = "saldo del período anterior" if periodo < periodo_actual(self.conn) else "saldo actual"
         respuesta = QMessageBox.question(
             self, "Eliminar pago",
-            "Esto revierte por completo el efecto de este pago (le devuelve el saldo al profesional) y "
-            "borra el registro. ¿Confirmás?",
+            f"Esto afecta la cuenta de {_texto_profesional(profesional) if profesional else '?'}: revierte por "
+            f"completo este pago de {formatear_moneda(registro['Monto'])} imputado al período {periodo}, "
+            f"devolviéndolo al {campo_saldo} (de donde salió al cargarlo) y borra el registro. ¿Confirmás?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -638,6 +735,69 @@ class _PanelRegistrarPago(QWidget):
         )
         if respuesta == QMessageBox.StandardButton.No:
             suspender_descuento_periodo(self.conn, id_profesional=id_profesional, periodo=periodo_imputado)
+
+
+class _DialogoRefinanciarPlan(QDialog):
+    """Pedido explícito de la clienta: "Refinanciar plan seleccionado"
+    pasa a operar sobre la fila elegida en la tabla (no sobre lo que
+    tuviera cargado el combo de Profesional) y abre un cuadro de
+    diálogo propio con los datos del plan nuevo — mismo criterio que
+    "Modificar pago" en la otra solapa. El monto sugerido es el mismo
+    cálculo de siempre ("saldo atrasado con las cuotas del plan a
+    reemplazar sumadas"), movido acá desde `_profesional_cambio`."""
+
+    def __init__(
+        self, conn: sqlite3.Connection, plan: sqlite3.Row, profesional: sqlite3.Row | None, parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Refinanciar plan")
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Profesional: {_texto_profesional(profesional) if profesional else '?'}"))
+        layout.addWidget(QLabel(f"Plan activo desde {plan['MesAnoInicio']}"))
+
+        layout.addWidget(QLabel("Monto a refinanciar"))
+        self.spin_monto = QDoubleSpinBox()
+        self.spin_monto.setMaximum(100_000_000)
+        saldo_anterior = (profesional["SaldoCuentaAnterior"] or 0.0) if profesional else 0.0
+        sugerido = saldo_anterior + cuotas_pendientes_plan(conn, plan["IdPlan"])
+        self.spin_monto.setValue(max(sugerido, 0.0))
+        layout.addWidget(self.spin_monto)
+
+        layout.addWidget(QLabel("Cantidad de cuotas"))
+        self.spin_cuotas = QSpinBox()
+        self.spin_cuotas.setRange(1, 60)
+        self.spin_cuotas.setValue(3)
+        layout.addWidget(self.spin_cuotas)
+
+        layout.addWidget(QLabel("% Interés mensual"))
+        self.spin_interes = QDoubleSpinBox()
+        self.spin_interes.setRange(0, 100)
+        layout.addWidget(self.spin_interes)
+
+        fila_botones = QHBoxLayout()
+        boton_guardar = QPushButton("Refinanciar")
+        boton_guardar.setObjectName("botonPrimario")
+        boton_guardar.clicked.connect(self._confirmar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.setObjectName("botonSecundario")
+        boton_cancelar.clicked.connect(self.reject)
+        fila_botones.addWidget(boton_guardar)
+        fila_botones.addWidget(boton_cancelar)
+        layout.addLayout(fila_botones)
+
+        self._foco = instalar_enter_avanza_foco(
+            [self.spin_monto, self.spin_cuotas, self.spin_interes, boton_guardar, boton_cancelar], parent=self,
+        )
+        self.spin_monto.setFocus()
+
+    def _confirmar(self) -> None:
+        if self.spin_monto.value() <= 0:
+            QMessageBox.warning(self, "Refinanciar plan", "El monto debe ser mayor a cero.")
+            return
+        self.monto = self.spin_monto.value()
+        self.cantidad_cuotas = self.spin_cuotas.value()
+        self.porcentaje_interes = self.spin_interes.value()
+        self.accept()
 
 
 class _PanelPlanesPago(QWidget):
@@ -730,6 +890,7 @@ class _PanelPlanesPago(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla.itemSelectionChanged.connect(self._actualizar_botones_fila)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         splitter.addWidget(self.tabla)
@@ -742,30 +903,38 @@ class _PanelPlanesPago(QWidget):
             parent=self,
         )
 
-    def _plan_activo_seleccionado(self):
-        id_profesional = self.combo_profesional.currentData()
-        return plan_activo_de(self.conn, id_profesional) if id_profesional is not None else None
+    def _fila_seleccionada_plan(self) -> sqlite3.Row | None:
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return None
+        return self._planes[filas[0].row()][-1]
+
+    def _actualizar_botones_fila(self) -> None:
+        """Pedido explícito de la clienta: "Refinanciar plan seleccionado"/
+        "Cancelar plan seleccionado" se habilitan al elegir una fila en
+        la tabla (no al elegir un profesional en el combo de arriba) —
+        solo si el plan de esa fila sigue Activo, los ya Cancelados/
+        Finalizados no admiten ninguna de las dos acciones."""
+        plan = self._fila_seleccionada_plan()
+        activo = plan is not None and plan["Estado"] == "Activo"
+        self.boton_refinanciar.setEnabled(activo)
+        self.boton_cancelar.setEnabled(activo)
 
     def _profesional_cambio(self) -> None:
-        """El monto a refinanciar se sugiere solo (editable igual): sin
-        plan activo, el saldo atrasado tal cual; con uno activo, ese mismo
-        saldo ya incluyendo las cuotas que le quedaban pendientes al plan
-        que se está por reemplazar (lo que pide la conversación: "el
-        valor por defecto sería el saldo atrasado con las cuotas del plan
-        a eliminar sumadas")."""
+        """El monto a refinanciar de un plan NUEVO se sugiere con el
+        saldo atrasado del profesional elegido (editable igual) — la
+        sugerencia "con las cuotas del plan a reemplazar sumadas" quedó
+        a cargo de `_DialogoRefinanciarPlan`, que la calcula aparte para
+        el plan de la fila elegida."""
         id_profesional = self.combo_profesional.currentData()
-        plan_activo = self._plan_activo_seleccionado()
+        plan_activo = plan_activo_de(self.conn, id_profesional) if id_profesional is not None else None
         self.boton_guardar.setEnabled(id_profesional is not None and plan_activo is None)
-        self.boton_refinanciar.setEnabled(plan_activo is not None)
-        self.boton_cancelar.setEnabled(plan_activo is not None)
         if id_profesional is None:
             self.spin_monto.setValue(0)
             self.actualizar()
             return
         profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
         saldo_anterior = (profesional["SaldoCuentaAnterior"] or 0.0) if profesional else 0.0
-        if plan_activo is not None:
-            saldo_anterior += cuotas_pendientes_plan(self.conn, plan_activo["IdPlan"])
         self.spin_monto.setValue(max(saldo_anterior, 0.0))
         self.actualizar()
 
@@ -803,6 +972,7 @@ class _PanelPlanesPago(QWidget):
             self.tabla.setItem(i, 8, QTableWidgetItem(estado))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+        self._actualizar_botones_fila()
 
     @staticmethod
     def _clave_orden(columna: int):
@@ -830,6 +1000,15 @@ class _PanelPlanesPago(QWidget):
         if monto <= 0:
             QMessageBox.warning(self, "Guardar plan de pagos", "El monto debe ser mayor a cero.")
             return
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        lineas = [
+            f"Profesional: {_texto_profesional(profesional) if profesional else '?'}",
+            f"Monto a refinanciar: {formatear_moneda(monto)}",
+            f"Cantidad de cuotas: {self.spin_cuotas.value()}",
+            f"% Interés mensual: {self.spin_interes.value():.1f}%",
+        ]
+        if not confirmar_datos_antes_de_crear(self, "Guardar plan de pagos", lineas):
+            return
         try:
             crear_plan_pago(
                 self.conn, id_profesional=id_profesional, monto_refinanciado=monto,
@@ -845,47 +1024,65 @@ class _PanelPlanesPago(QWidget):
         self.combo_profesional.setFocus()
 
     def _refinanciar(self) -> None:
-        """Bloqueado desde `_profesional_cambio` si el profesional elegido
-        no tiene un plan activo para refinanciar."""
-        id_profesional = self.combo_profesional.currentData()
-        if id_profesional is None:
-            QMessageBox.warning(self, "Refinanciar plan", "Elegí un profesional.")
+        """Pedido explícito de la clienta: opera sobre el plan de la fila
+        elegida en la tabla (`_actualizar_botones_fila` ya lo exige
+        Activo para habilitar este botón) y abre
+        `_DialogoRefinanciarPlan` en vez de leer los campos sueltos de
+        la columna izquierda, que ahora son exclusivos de "Guardar
+        nuevo plan de pagos"."""
+        plan = self._fila_seleccionada_plan()
+        if plan is None or plan["Estado"] != "Activo":
+            QMessageBox.warning(self, "Refinanciar plan", "Elegí, en la tabla, un plan activo para refinanciar.")
             return
-        monto = self.spin_monto.value()
-        if monto <= 0:
-            QMessageBox.warning(self, "Refinanciar plan", "El monto debe ser mayor a cero.")
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(plan["IdProfesional"])
+        dialogo = _DialogoRefinanciarPlan(self.conn, plan, profesional, parent=self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
         try:
             refinanciar_plan(
-                self.conn, id_profesional=id_profesional, monto_a_refinanciar=monto,
-                cantidad_cuotas=self.spin_cuotas.value(), porcentaje_interes_mensual=self.spin_interes.value(),
+                self.conn, id_profesional=plan["IdProfesional"], monto_a_refinanciar=dialogo.monto,
+                cantidad_cuotas=dialogo.cantidad_cuotas, porcentaje_interes_mensual=dialogo.porcentaje_interes,
             )
         except ValueError as error:
             QMessageBox.warning(self, "Refinanciar plan", str(error))
             return
-        regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
+        regenerar_si_corresponde(self.conn, id_profesional=plan["IdProfesional"], periodo=periodo_actual(self.conn))
         self.conn.commit()
         self.actualizar()
         self._profesional_cambio()
-        self.combo_profesional.setFocus()
 
     def _cancelar(self) -> None:
-        plan_activo = self._plan_activo_seleccionado()
-        if plan_activo is None:
-            QMessageBox.warning(self, "Cancelar plan", "El profesional elegido no tiene un plan activo.")
+        """Pedido explícito de la clienta: opera sobre el plan de la fila
+        elegida en la tabla y abre un cartel de confirmación explicando
+        el impacto (las cuotas pendientes vuelven a ser saldo atrasado)
+        antes de cancelarlo — antes no pedía ninguna confirmación."""
+        plan = self._fila_seleccionada_plan()
+        if plan is None or plan["Estado"] != "Activo":
+            QMessageBox.warning(self, "Cancelar plan", "Elegí, en la tabla, un plan activo para cancelar.")
+            return
+        pendientes = cuotas_pendientes_plan(self.conn, plan["IdPlan"])
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(plan["IdProfesional"])
+        respuesta = QMessageBox.question(
+            self, "Cancelar plan",
+            f"Esto cancela el plan de {_texto_profesional(profesional) if profesional else '?'}: las cuotas que "
+            f"todavía quedaban sin abonar ({formatear_moneda(pendientes)}) vuelven a sumarse como saldo "
+            "atrasado. ¿Confirmás?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
             return
         try:
-            cancelar_plan(self.conn, plan_activo["IdPlan"])
+            cancelar_plan(self.conn, plan["IdPlan"])
         except ValueError as error:
             QMessageBox.warning(self, "Cancelar plan", str(error))
             return
         regenerar_si_corresponde(
-            self.conn, id_profesional=plan_activo["IdProfesional"], periodo=periodo_actual(self.conn)
+            self.conn, id_profesional=plan["IdProfesional"], periodo=periodo_actual(self.conn)
         )
         self.conn.commit()
         self.actualizar()
         self._profesional_cambio()
-        self.combo_profesional.setFocus()
 
 
 class _PanelEstadoCuentaPagos(QWidget):

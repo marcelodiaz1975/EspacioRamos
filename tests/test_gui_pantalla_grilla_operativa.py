@@ -101,6 +101,37 @@ def test_filtros_de_valores_arrancan_colapsados_con_resumen(qtbot, conn):
     assert filtros._filtro_consultorio._boton.text() == "Todos los consultorios"
 
 
+def test_filtros_de_valores_mantienen_ancho_fijo_al_desplegar(qtbot, conn):
+    """Pedido explícito de la clienta: desplegar cualquiera de los cuatro
+    `_FiltroColapsable` no tiene que correr la tabla de la derecha —
+    `_PanelFiltrosJerarquico` pasó de `setMaximumWidth` (se achicaba
+    colapsado y volvía a ensancharse al desplegar, quitándole ancho al
+    `grupo_valores` de al lado) a `setFixedWidth`, siempre en 260."""
+    _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"')
+    conn.commit()
+
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    filtros = panel.filtros_valores
+    assert filtros.width() == 260
+
+    filtros._filtro_localidad._boton.setChecked(True)
+    filtros._filtro_localidad._alternar()  # despliega la lista de Localidad
+    assert filtros.width() == 260
+
+
+def test_tablas_de_valores_no_entran_al_tab_chain_salvo_click(qtbot, conn):
+    """Pedido explícito de la clienta: Tab no tiene que entrar a ninguna
+    de las dos tablas de "Valores vigentes" salvo que se haga click
+    primero; una vez adentro, Tab recorre celdas en vez de salir."""
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    assert panel.tabla_valores.focusPolicy() == Qt.FocusPolicy.ClickFocus
+    assert panel.tabla_valores.tabKeyNavigation() is True
+    assert panel.promedios_valores.tabla.focusPolicy() == Qt.FocusPolicy.ClickFocus
+    assert panel.promedios_valores.tabla.tabKeyNavigation() is True
+
+
 def test_filtro_consultorio_ordena_por_piso_de_la_unidad(qtbot, conn):
     """Bug real: un ORDER BY NumeroConsultorio a secas mezclaba los
     consultorios de distintas unidades ignorando el piso de cada una."""

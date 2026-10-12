@@ -57,6 +57,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.dialogos import confirmar_datos_antes_de_crear
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas import catalogos
 from app.gui.pantallas.reservas import (
@@ -64,6 +65,7 @@ from app.gui.pantallas.reservas import (
     _SpinHorario,
     _fmt_fecha,
     _fmt_horario,
+    _instalar_calendario_arranca_hoy,
     _numero_codigo,
     _opciones_profesional,
     _texto_profesional,
@@ -148,11 +150,15 @@ def _campo_fecha(conn: sqlite3.Connection) -> QDateEdit:
 
 def _campo_fecha_opcional(conn: sqlite3.Connection) -> QDateEdit:
     """Como `_campo_fecha`, pero admite quedar en blanco ("(sin fecha)") —
-    mismo sentinel `_FECHA_SIN_DATO` que usa Reservas para Vigencia hasta."""
+    mismo sentinel `_FECHA_SIN_DATO` que usa Reservas para Vigencia hasta.
+    `_instalar_calendario_arranca_hoy` corrige el hallazgo real de la
+    clienta en Licencias ("Hasta" la llevaba al año 2000 al abrir el
+    calendario) — ver su docstring en `reservas.py`."""
     campo = _campo_fecha(conn)
     campo.setMinimumDate(_FECHA_SIN_DATO)
     campo.setSpecialValueText("(sin fecha)")
     campo.setDate(_FECHA_SIN_DATO)
+    _instalar_calendario_arranca_hoy(conn, campo)
     return campo
 
 
@@ -552,6 +558,18 @@ class _PanelVacaciones(QWidget):
                 self, "Crear vacaciones", "No se puede imputar una vacación a un año calendario que ya terminó.",
             )
             return
+        if id_profesional is None:
+            QMessageBox.warning(self, "Crear vacaciones", "Elegí un profesional.")
+            return
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        lineas = [
+            f"Profesional: {_texto_profesional(profesional) if profesional else '?'}",
+            f"Año calendario a imputar: {self.spin_anio.value()}",
+            f"Desde: {_fmt_fecha_dia_abrev(self.campo_desde.date().toPython().isoformat())}",
+            f"Hasta: {_fmt_fecha_dia_abrev(self.campo_hasta.date().toPython().isoformat())}",
+        ]
+        if not confirmar_datos_antes_de_crear(self, "Crear vacaciones", lineas):
+            return
         try:
             _id, advertencias = crear_vacacion(
                 self.conn, id_profesional=id_profesional,
@@ -860,6 +878,14 @@ class _PanelLicencias(QWidget):
         self.conn.commit()
         if advertencias:
             QMessageBox.information(self, "Licencia creada", "\n".join(advertencias))
+        # Mismo criterio que Vacaciones: si la licencia recién cargada afecta
+        # al período en curso (su valor bonificado se prorratea contra ese
+        # mes), la liquidación ya emitida de ese período tiene que
+        # regenerarse y quedar marcada como no enviada.
+        regenerar_si_corresponde(
+            self.conn, id_profesional=self.combo_profesional.currentData(), periodo=periodo_actual(self.conn)
+        )
+        self.conn.commit()
         self.actualizar()
         self.combo_profesional.setFocus()
 
@@ -875,6 +901,10 @@ class _PanelLicencias(QWidget):
         except ValueError as error:
             QMessageBox.warning(self, titulo, str(error))
             return False
+        self.conn.commit()
+        regenerar_si_corresponde(
+            self.conn, id_profesional=registro["IdProfesional"], periodo=periodo_actual(self.conn),
+        )
         self.conn.commit()
         self.actualizar()
         return True
@@ -993,16 +1023,16 @@ class _PanelAusencias(QWidget):
         boton.setFixedWidth(_ANCHO_CAMPO)
         boton.clicked.connect(self._crear)
         form.addWidget(boton)
-        boton_modificar = QPushButton("Modificar ausencia seleccionada")
-        boton_modificar.setObjectName("botonSecundario")
-        boton_modificar.setFixedWidth(_ANCHO_CAMPO)
-        boton_modificar.clicked.connect(self._modificar_seleccionada)
-        form.addWidget(boton_modificar)
-        boton_cancelar = QPushButton("Anular ausencia seleccionada")
-        boton_cancelar.setObjectName("botonSecundario")
-        boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
-        boton_cancelar.clicked.connect(self._cancelar)
-        form.addWidget(boton_cancelar)
+        self.boton_modificar = QPushButton("Modificar ausencia seleccionada")
+        self.boton_modificar.setObjectName("botonSecundario")
+        self.boton_modificar.setFixedWidth(_ANCHO_CAMPO)
+        self.boton_modificar.clicked.connect(self._modificar_seleccionada)
+        form.addWidget(self.boton_modificar)
+        self.boton_cancelar = QPushButton("Anular ausencia seleccionada")
+        self.boton_cancelar.setObjectName("botonSecundario")
+        self.boton_cancelar.setFixedWidth(_ANCHO_CAMPO)
+        self.boton_cancelar.clicked.connect(self._cancelar)
+        form.addWidget(self.boton_cancelar)
         form.addStretch()
         splitter_superior.addWidget(panel_form)
 
@@ -1036,6 +1066,7 @@ class _PanelAusencias(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla.itemSelectionChanged.connect(self._actualizar_botones)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         layout_tabla.addWidget(self.tabla, stretch=1)
@@ -1044,10 +1075,21 @@ class _PanelAusencias(QWidget):
         scroll.setWidget(contenido)
         layout_externo.addWidget(scroll)
         self._sincronizar_grilla()
+        self._actualizar_botones()
         self._foco = instalar_enter_avanza_foco(
             [self.combo_profesional, self.combo_motivo, self.campo_desde, self.campo_hasta, boton],
             parent=self,
         )
+
+    def _actualizar_botones(self) -> None:
+        """Pedido explícito de la clienta: "Modificar ausencia
+        seleccionada"/"Anular ausencia seleccionada" quedan
+        deshabilitados (y fuera de la cadena de Tab, que ya saltea
+        cualquier widget deshabilitado) hasta que haya una fila elegida
+        en la tabla."""
+        hay_seleccion = self._fila_seleccionada() is not None
+        self.boton_modificar.setEnabled(hay_seleccion)
+        self.boton_cancelar.setEnabled(hay_seleccion)
 
     def _profesional_cambio(self) -> None:
         self._sincronizar_grilla()
@@ -1118,6 +1160,7 @@ class _PanelAusencias(QWidget):
             self.tabla.setItem(i, 5, QTableWidgetItem(self._origen(r)))
         _ajustar_columnas(self.tabla)
         self.grilla.actualizar()
+        self._actualizar_botones()
 
     def _clave_orden(self, columna: int):
         claves = {
@@ -1131,13 +1174,28 @@ class _PanelAusencias(QWidget):
         return claves[columna]
 
     def _crear(self) -> None:
+        id_profesional = self.combo_profesional.currentData()
+        if id_profesional is None:
+            QMessageBox.warning(self, "Crear ausencia", "Elegí un profesional.")
+            return
         hora_inicio = hora_fin = None
         if self.grupo_horario.isEnabled() and self.grupo_horario.isChecked():
             hora_inicio = self.spin_hora_desde.value()
             hora_fin = self.spin_hora_hasta.value()
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        lineas = [
+            f"Profesional: {_texto_profesional(profesional) if profesional else '?'}",
+            f"Desde: {_fmt_fecha_dia_abrev(self.campo_desde.date().toPython().isoformat())}",
+            f"Hasta: {_fmt_fecha_dia_abrev(self.campo_hasta.date().toPython().isoformat())}",
+            f"Motivo: {self.combo_motivo.currentText().strip() or '(sin motivo)'}",
+        ]
+        if hora_inicio is not None:
+            lineas.append(f"Horario puntual: {_fmt_horario(hora_inicio, hora_fin)}")
+        if not confirmar_datos_antes_de_crear(self, "Crear ausencia", lineas):
+            return
         try:
             crear_ausencia(
-                self.conn, id_profesional=self.combo_profesional.currentData(),
+                self.conn, id_profesional=id_profesional,
                 fecha_desde=self.campo_desde.date().toPython().isoformat(),
                 fecha_hasta=self.campo_hasta.date().toPython().isoformat(),
                 motivo=self.combo_motivo.currentText().strip() or None,

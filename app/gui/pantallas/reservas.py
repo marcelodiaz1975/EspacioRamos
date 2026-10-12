@@ -13,7 +13,7 @@ import re
 import sqlite3
 from datetime import date
 
-from PySide6.QtCore import QDate, QLocale, QTimer
+from PySide6.QtCore import QDate, QEvent, QLocale, QObject, QTimer
 from PySide6.QtGui import QGuiApplication, QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -74,6 +74,42 @@ _ANCHO_PANEL_FILTROS_GRILLA = 290
 _ANCHO_COL_PROFESIONAL = 180
 _FORMATO_FECHA = "dd-MM-yyyy"
 _FECHA_SIN_DATO = QDate(2000, 1, 1)  # sentinel de QDateEdit.setSpecialValueText: "sin fecha"
+
+
+class _FiltroCalendarioArrancaHoy(QObject):
+    """Hallazgo real de la clienta en Licencias ("el selector de fecha
+    hasta... me lleva al año 2000"), mismo patrón en Reservas regulares
+    (Vigencia hasta): mientras el campo sigue en el sentinel
+    `_FECHA_SIN_DATO`, el popup del calendario arranca en esa página
+    (año 2000) en vez del mes en curso — hay que retroceder casi tres
+    décadas para llegar a una fecha real. Qt sincroniza la página
+    visible del calendario con `date()` al armar el popup, ANTES de
+    mostrarlo — instalado sobre el propio `calendarWidget()` y
+    disparando en su evento Show (después de esa sincronización),
+    `setCurrentPage` solo cambia qué página se VE, sin tocar el valor
+    real del campo ni perder el sentinel."""
+
+    def __init__(self, conn: sqlite3.Connection, campo: QDateEdit, parent=None):
+        super().__init__(parent)
+        self._conn = conn
+        self._campo = campo
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (override de Qt)
+        if event.type() == QEvent.Type.Show and self._campo.date() == _FECHA_SIN_DATO:
+            hoy = fecha_actual(self._conn)
+            watched.setCurrentPage(hoy.year, hoy.month)
+        return False
+
+
+def _instalar_calendario_arranca_hoy(conn: sqlite3.Connection, campo: QDateEdit) -> None:
+    """Ver `_FiltroCalendarioArrancaHoy` — para cualquier `QDateEdit` con
+    `setCalendarPopup(True)` y el sentinel `_FECHA_SIN_DATO` como
+    "sin fecha" (Reservas regulares acá mismo, Licencias en
+    `novedades.py`, importado cruzado)."""
+    filtro = _FiltroCalendarioArrancaHoy(conn, campo, parent=campo)
+    campo.calendarWidget().installEventFilter(filtro)
+
+
 # Pedido de la clienta: el campo "Fecha" de Reservas aisladas pasa al
 # mismo formato "día de la semana abreviado" que Registro de ausencias/
 # Fechas especiales (ej. "lun 07-09-2026") — mismo criterio, duplicado
@@ -666,6 +702,7 @@ class _PanelReservasRegulares(QWidget):
         self.campo_vigencia_fin.setMinimumDate(_FECHA_SIN_DATO)
         self.campo_vigencia_fin.setSpecialValueText("(sin fecha)")
         self.campo_vigencia_fin.setDate(_FECHA_SIN_DATO)
+        _instalar_calendario_arranca_hoy(self.conn, self.campo_vigencia_fin)
         form.addWidget(QLabel("Vigencia hasta (opcional)"))
         form.addWidget(self.campo_vigencia_fin)
 

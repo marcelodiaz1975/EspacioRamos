@@ -202,7 +202,22 @@ class _PanelFiltrosJerarquico(QGroupBox):
         super().__init__("Filtros", parent)
         self.conn = conn
         self._on_cambiar = on_cambiar
-        self.setMaximumWidth(260)
+        # Pedido explícito de la clienta: desplegar cualquiera de los
+        # cuatro `_FiltroColapsable` (Localidad/Edificio/Unidad/
+        # Consultorio) no tiene que correr la tabla de la derecha. Con
+        # solo un tope (`setMaximumWidth`, como estaba antes), este
+        # panel se achicaba por debajo de 260px mientras los filtros
+        # estaban colapsados (ancho natural, más angosto) y volvía a
+        # ensancharse hasta el tope al desplegar uno con nombres más
+        # largos que el botón-resumen — en el `QHBoxLayout` de
+        # `_PanelValoresVigentes`, ese ensanche se lo quita a
+        # `grupo_valores` (el único con stretch=1), corriendo la tabla.
+        # `setFixedWidth` fija el ancho SIEMPRE en 260, colapsado o
+        # desplegado — mismo criterio ya usado para este mismo problema
+        # en el panel de Filtros de Oferta de consultorios ("con solo
+        # un máximo, el panel se achicaba... con setFixedWidth ahora sí
+        # ocupa ese ancho completo").
+        self.setFixedWidth(260)
         layout = QVBoxLayout(self)
 
         layout.addWidget(QLabel("Localidad"))
@@ -370,6 +385,17 @@ class _PanelPromedios(QGroupBox):
         super().__init__("Promedios de valor hora regular y aislada", parent)
         layout = QVBoxLayout(self)
         self.tabla = _armar_tabla(_COLUMNAS_PROMEDIOS, ordenable_nativo=False)
+        # Pedido explícito de la clienta ("Valores vigentes"): Tab no
+        # tiene que entrar a esta tabla salvo que se haga click primero
+        # — `ClickFocus` la saca del tab-chain nativo (que la ponía con
+        # `StrongFocus` por default) sin afectar el resto de las tablas
+        # del sistema, que siguen con su focus policy de siempre.
+        # `setTabKeyNavigation(True)` (ya es el default de `QTableView`,
+        # se deja explícito para que la intención quede documentada) es
+        # la otra mitad del pedido: una vez adentro (por click), Tab
+        # recorre celda a celda en vez de salir hacia el próximo widget.
+        self.tabla.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.tabla.setTabKeyNavigation(True)
         # Localidad/Edificio (pedido explícito de la clienta: "agrandá un
         # poquito" esas dos) pasan a Interactive para poder sumarles
         # padding a mano — igual que "Día" en Liquidaciones simuladas,
@@ -539,6 +565,10 @@ class _PanelValoresVigentes(QWidget):
         # una vez (con todo tildado por defecto), y ese refresco necesita
         # que ya existan.
         self.tabla_valores = _armar_tabla(_COLUMNAS_VALORES)
+        # Mismo pedido y mismo mecanismo que `_PanelPromedios.tabla` (ver
+        # su comentario): Tab no entra a esta tabla salvo click directo.
+        self.tabla_valores.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.tabla_valores.setTabKeyNavigation(True)
         # Pedido explícito de la clienta: que se vea completa sin
         # escrolear para los costados. Localidad/Edificio/Unidad/
         # Consultorio se quedan en el ResizeToContents de `_armar_tabla`
