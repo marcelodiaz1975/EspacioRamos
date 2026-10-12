@@ -259,11 +259,27 @@ def test_crear_reserva_extraordinaria_tambien_admite_categoria_r(conn, consultor
     assert reserva["MontoExtraordinario"] == 5000
 
 
-def test_crear_reserva_extraordinaria_rechaza_categoria_distinta_de_a_o_r(conn, consultorio, profesional_factory):
-    id_prof_e = profesional_factory("Paz", categoria="E")
-    with pytest.raises(ValueError, match="categoría A o R"):
+def test_crear_reserva_extraordinaria_admite_categoria_b_y_e(conn, consultorio, profesional_factory):
+    """Pedido de la clienta, ampliado de A/R a las cuatro categorías
+    imputables: B participa solo para marcar ocupación (nunca afecta
+    liquidación), E puede imputar igual que R."""
+    for fecha, categoria in (("2026-08-10", "B"), ("2026-08-11", "E")):
+        id_prof = profesional_factory(f"Paz{categoria}", categoria=categoria)
+        _id, advertencias = crear_reserva_aislada(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, fecha=fecha,
+            hora_inicio=14, hora_fin=16, es_extraordinaria=True,
+            item_extraordinario="Taller puntual", monto_extraordinario=5000,
+        )
+        assert advertencias == []
+        reserva = obtener_repositorio(conn, "ReservaAislada").obtener(_id)
+        assert reserva["EsExtraordinaria"] == 1
+
+
+def test_crear_reserva_extraordinaria_rechaza_categoria_distinta_de_a_b_r_e(conn, consultorio, profesional_factory):
+    id_prof_x = profesional_factory("Paz", categoria="X")
+    with pytest.raises(ValueError, match="categoría A, B, R o E"):
         crear_reserva_aislada(
-            conn, id_profesional=id_prof_e, id_consultorio=consultorio, fecha="2026-08-10",
+            conn, id_profesional=id_prof_x, id_consultorio=consultorio, fecha="2026-08-10",
             hora_inicio=14, hora_fin=16, es_extraordinaria=True,
             item_extraordinario="Taller puntual", monto_extraordinario=5000,
         )

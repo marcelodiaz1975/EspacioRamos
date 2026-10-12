@@ -360,8 +360,15 @@ def crear_reserva_aislada(
     mensaje ni cálculo aparte."""
     if es_extraordinaria:
         profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
-        if profesional is None or profesional["CategoriaProfesional"] not in ("A", "R"):
-            raise ValueError("Una reserva extraordinaria solo se puede asignar a un profesional categoría A o R.")
+        # Pedido de la clienta, ampliado de A/R a las cuatro categorías
+        # imputables: B participa solo para marcar ocupación (nunca
+        # afecta ninguna liquidación, "horas bonificadas"); E puede
+        # imputar igual que R, afectando la de su cabeza de equipo
+        # (`id_profesional_liquidable` ya resuelve esa consolidación).
+        if profesional is None or profesional["CategoriaProfesional"] not in ("A", "B", "R", "E"):
+            raise ValueError(
+                "Una reserva extraordinaria solo se puede asignar a un profesional categoría A, B, R o E."
+            )
         if not (item_extraordinario or "").strip():
             raise ValueError("Una reserva extraordinaria necesita un ítem a cargar (texto libre).")
         if monto_extraordinario is None:

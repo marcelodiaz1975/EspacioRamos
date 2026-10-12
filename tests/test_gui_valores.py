@@ -7,6 +7,7 @@ from app.gui.estilos import hoja_estilos
 from app.gui.pantallas.aumentos import _PanelAumentos, _PanelEsquemaDescuentos
 from app.gui.pantallas.grilla_operativa import _PanelValoresVigentes
 from app.gui.pantallas.valores import PantallaValores
+from app.negocio.formato import formatear_moneda
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -85,6 +86,36 @@ def test_promedios_sin_espacio_en_blanco_tras_la_ultima_columna(qtbot, conn):
     promedios = panel.promedios_valores
     ancho_columnas = sum(promedios.tabla.columnWidth(i) for i in range(promedios.tabla.columnCount()))
     assert promedios.tabla.width() == ancho_columnas + 2 * promedios.tabla.frameWidth() + 2
+
+
+def test_valores_vigentes_muestra_columna_con_recargo(qtbot, conn):
+    """Pedido explícito de la clienta: "si activo un porcentaje de
+    recargo en horas aisladas, no me lo cambia en el formulario de
+    valores" — se suma una columna nueva al lado de "Valor aislada" en
+    vez de pisarla (el recargo es opcional por reserva, `AplicaRecargo`,
+    no algo que siempre corresponda al valor de referencia)."""
+    _cargar_consultorios(conn)
+    conn.execute("UPDATE Configuracion SET RecargoPorcentajeAisladas = 10 WHERE IdConfiguracion = 1")
+    conn.commit()
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    tabla = panel.tabla_valores
+    assert tabla.horizontalHeaderItem(6).text() == "Valor aislada\ncon recargo"
+    # Consultorios de `_cargar_consultorios`: $700 y $850 de valor base —
+    # con 10% de recargo, $770 y $935.
+    valores_base = {tabla.item(f, 5).text() for f in range(tabla.rowCount())}
+    valores_recargo = {tabla.item(f, 6).text() for f in range(tabla.rowCount())}
+    assert valores_base == {formatear_moneda(700), formatear_moneda(850)}
+    assert valores_recargo == {formatear_moneda(770), formatear_moneda(935)}
+
+
+def test_valores_vigentes_sin_recargo_configurado_columna_nueva_igual_a_la_base(qtbot, conn):
+    _cargar_consultorios(conn)
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    tabla = panel.tabla_valores
+    for fila in range(tabla.rowCount()):
+        assert tabla.item(fila, 6).text() == tabla.item(fila, 5).text()
 
 
 def test_valores_vigentes_sin_scroll_horizontal_con_estilo_real_aplicado(qtbot, conn):

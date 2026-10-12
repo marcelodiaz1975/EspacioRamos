@@ -1814,19 +1814,24 @@ def test_combo_profesional_regulares_solo_categorias_r_b_e(qtbot, conn):
     assert ids == {id_gomez, id_bono, id_equipo}
 
 
-def test_combo_profesional_aisladas_solo_categorias_r_a(qtbot, conn):
+def test_combo_profesional_aisladas_admite_a_b_r_e(qtbot, conn):
+    """Pedido de la clienta: Aisladas se abre a las cuatro categorías
+    imputables (A/B/R/E) — B para marcar ocupación, E porque puede
+    imputar igual que R. X/C quedan afuera, sin relación con reservas."""
     _preparar(conn)
     id_gomez = conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = 'Gómez'").fetchone()["IdProfesional"]
-    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bono")
-    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="E", Apellido="Equipo")
+    id_bono = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bono")
+    id_equipo = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="E", Apellido="Equipo")
     id_ajeno = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Ajeno")
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="X", Apellido="Inactivo")
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="C", Apellido="Contacto")
     conn.commit()
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     combo = pantalla.panel_aisladas.combo_profesional
     ids = {combo.itemData(i) for i in range(combo.count()) if combo.itemData(i) is not None}
-    assert ids == {id_gomez, id_ajeno}
+    assert ids == {id_gomez, id_bono, id_equipo, id_ajeno}
 
 
 def test_combo_profesional_muestra_tratamiento_nombre_apellido(qtbot, conn):
@@ -2591,11 +2596,12 @@ def test_tabla_aisladas_con_profesional_acota_a_sus_reservas(qtbot, conn):
     assert panel.tabla.item(0, 6).text() == "18-08-2026"
 
 
-def test_tabla_aisladas_orden_por_defecto_categoria_numero_fecha_hora(qtbot, conn):
-    """Orden por defecto: categoría en el orden fijo R, A (no alfabético
-    inverso); dentro de la misma categoría, por número de profesional
-    (numérico: "R2" antes que "R10", no alfabético); luego fecha y hora
-    de inicio de la reserva."""
+def test_tabla_aisladas_todos_los_profesionales_excluye_extraordinarias_y_ordena_por_fecha_hora_codigo(qtbot, conn):
+    """Pedido explícito de la clienta: con "Todos los profesionales"
+    elegido, la tabla de abajo muestra solo aisladas comunes (las
+    extraordinarias quedan afuera, tienen su propia solapa) y ordena
+    primero por fecha, luego por hora de inicio, y recién después por
+    código de profesional — sin agrupar por categoría."""
     _preparar(conn)
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
     repo_prof = obtener_repositorio(conn, "Profesional")
@@ -2603,15 +2609,25 @@ def test_tabla_aisladas_orden_por_defecto_categoria_numero_fecha_hora(qtbot, con
     id_r10 = repo_prof.crear(CategoriaProfesional="R", Apellido="Regular Diez", IdCodigo="R10")
     id_r2 = repo_prof.crear(CategoriaProfesional="R", Apellido="Regular Dos", IdCodigo="R2")
     repo = obtener_repositorio(conn, "ReservaAislada")
-    for id_prof in (id_a1, id_r10, id_r2):
-        repo.crear(IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=10)
+    # Mismo día y hora para R10/A1 — desempata por código (número natural,
+    # ignorando la letra: A1 < R10); R2 un día después, siempre al final.
+    repo.crear(IdProfesional=id_a1, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=10)
+    repo.crear(IdProfesional=id_r10, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=14, HoraFin=15)
+    repo.crear(IdProfesional=id_r2, IdConsultorio=id_consultorio, Fecha="2026-08-18", HoraInicio=9, HoraFin=10)
+    # Una extraordinaria del mismo profesional/fecha más temprana que
+    # todas — si se coló acá, aparecería primera.
+    repo.crear(
+        IdProfesional=id_a1, IdConsultorio=id_consultorio, Fecha="2026-08-10", HoraInicio=9, HoraFin=10,
+        EsExtraordinaria=1, ItemExtraordinario="Taller", MontoExtraordinario=1000,
+    )
     conn.commit()
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    assert panel.tabla.rowCount() == 3
     codigos = [panel.tabla.item(f, 0).text().split(" - ")[0] for f in range(panel.tabla.rowCount())]
-    assert codigos == ["R2", "R10", "A1"]
+    assert codigos == ["A1", "R10", "R2"]
 
 
 def test_combo_profesional_arranca_en_blanco_en_ambas_solapas(qtbot, conn):
@@ -2814,11 +2830,12 @@ def _preparar_categoria_a(conn):
     conn.commit()
 
 
-def test_solapa_reserva_extraordinaria_existe_con_combo_a_y_r(qtbot, conn):
-    """Segunda vuelta: categoría R también puede tener reservas
-    extraordinarias, no solo A — el combo ofrece las dos categorías, con
-    las A primero (orden natural) y las R después (orden natural), no la
-    jerarquía global B/R/A/E/X/C que usan el resto de los selectores."""
+def test_solapa_reserva_extraordinaria_existe_con_combo_a_b_r_e(qtbot, conn):
+    """Ampliado a las cuatro categorías imputables (A/B/R/E) — pedido de
+    la clienta: B participa solo para marcar ocupación, E puede imputar
+    igual que R. Orden: jerarquía global B/R/A/E/X/C (mismo criterio
+    `_opciones_profesional_con_categoria`, ya no la excepción "A antes
+    que R" que regía cuando el combo solo admitía esas dos)."""
     conn.execute(
         "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('R', 'R5', 'Lo Veci')"
     )
@@ -2828,6 +2845,12 @@ def test_solapa_reserva_extraordinaria_existe_con_combo_a_y_r(qtbot, conn):
     conn.execute(
         "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('A', 'A3', 'Gómez')"
     )
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('B', 'B1', 'Bono')"
+    )
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('E', 'E1', 'Equipo')"
+    )
     conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('X', 'Inactivo')")
     conn.commit()
     pantalla = PantallaReservas(conn)
@@ -2835,11 +2858,13 @@ def test_solapa_reserva_extraordinaria_existe_con_combo_a_y_r(qtbot, conn):
     assert pantalla.pestanas.tabText(2) == "Reservas extraordinarias"
     panel = pantalla.panel_extraordinaria
     assert panel.objectName() == "panelSolapa"
-    # "Todos los profesionales" + A3, A20 (ascendente) + R5 — el X queda afuera.
-    assert panel.combo_profesional.count() == 4
-    assert panel.combo_profesional.itemText(1) == "A3 - Gómez"
-    assert panel.combo_profesional.itemText(2) == "A20 - Paz"
-    assert panel.combo_profesional.itemText(3) == "R5 - Lo Veci"
+    # "Todos los profesionales" + B1, R5, A3, A20, E1 (jerarquía B/R/A/E) — el X queda afuera.
+    assert panel.combo_profesional.count() == 6
+    assert panel.combo_profesional.itemText(1) == "B1 - Bono"
+    assert panel.combo_profesional.itemText(2) == "R5 - Lo Veci"
+    assert panel.combo_profesional.itemText(3) == "A3 - Gómez"
+    assert panel.combo_profesional.itemText(4) == "A20 - Paz"
+    assert panel.combo_profesional.itemText(5) == "E1 - Equipo"
 
 
 def test_reserva_extraordinaria_etiqueta_profesional_sin_mencionar_categoria(qtbot, conn):
@@ -2854,32 +2879,45 @@ def test_reserva_extraordinaria_etiqueta_profesional_sin_mencionar_categoria(qtb
     assert "Profesional (categoría A)" not in etiquetas
 
 
-def test_periodo_a_imputar_solo_aparece_para_categoria_r(qtbot, conn):
+def test_periodo_a_imputar_editable_solo_para_r_y_e(qtbot, conn):
+    """"Período a imputar" queda siempre VISIBLE (pedido de la clienta:
+    "para los profesionales categoría A y B el período es el actual y
+    no se puede editar, para los R y E por defecto es el período
+    próximo pero se puede editar") — lo que cambia es si está
+    habilitado y cuál es el default."""
     _preparar_categoria_a(conn)
     conn.execute(
         "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('R', 'R1', 'Lo Veci')"
     )
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('E', 'E1', 'Equipo')"
+    )
     conn.commit()
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
-    pantalla.pestanas.setCurrentIndex(2)  # "Reservas extraordinarias" — isVisible() exige la solapa activa
     panel = pantalla.panel_extraordinaria
 
-    # Sin selección (arranca en "Todos los profesionales"): oculto.
-    assert panel.combo_periodo_imputar.isVisible() is False
+    # Sin selección (arranca en "Todos los profesionales"): deshabilitado, "actual".
+    assert panel.combo_periodo_imputar.isEnabled() is False
+    assert panel.combo_periodo_imputar.currentData() == "actual"
 
-    # Categoría A: sigue oculto.
+    # Categoría A: deshabilitado, "actual".
     indice_a = panel.combo_profesional.findText("Paz")
     panel.combo_profesional.setCurrentIndex(indice_a)
-    assert panel.combo_periodo_imputar.isVisible() is False
+    assert panel.combo_periodo_imputar.isEnabled() is False
+    assert panel.combo_periodo_imputar.currentData() == "actual"
 
-    # Categoría R: visible.
+    # Categoría R: habilitado, default "siguiente".
     indice_r = panel.combo_profesional.findText("R1 - Lo Veci")
     panel.combo_profesional.setCurrentIndex(indice_r)
-    assert panel.combo_periodo_imputar.isVisible() is True
-    assert panel.etiqueta_periodo_imputar.isVisible() is True
+    assert panel.combo_periodo_imputar.isEnabled() is True
+    assert panel.combo_periodo_imputar.currentData() == "siguiente"
+
+    # Categoría E: habilitado, default "siguiente" — igual que R.
+    indice_e = panel.combo_profesional.findText("E1 - Equipo")
+    panel.combo_profesional.setCurrentIndex(indice_e)
+    assert panel.combo_periodo_imputar.isEnabled() is True
+    assert panel.combo_periodo_imputar.currentData() == "siguiente"
 
 
 def test_crear_reserva_extraordinaria_de_un_r_con_periodo_actual_regenera_liquidacion(qtbot, conn):
@@ -3151,22 +3189,29 @@ def test_modificar_reserva_extraordinaria_copia_mensaje_de_detalle_al_portapapel
 
 
 def test_reserva_extraordinaria_se_ve_en_la_tabla_de_reservas_aisladas_con_el_monto_manual(qtbot, conn):
-    """Una extraordinaria es una ReservaAislada más — la tabla de siempre
-    de "Reservas aisladas" también la lista, con la columna "Valor"
-    mostrando el monto manual (no un cálculo de hora×tarifa, que acá
-    daría un número distinto al que de verdad se cobra)."""
+    """Una extraordinaria es una ReservaAislada más — la tabla de
+    "Reservas aisladas" la lista cuando se filtra por SU profesional
+    puntual (columna "Valor" con el monto manual, no un cálculo de
+    hora×tarifa que daría un número distinto al que de verdad se
+    cobra). Con "Todos los profesionales" elegido queda afuera — pedido
+    explícito de la clienta, ver `test_tabla_aisladas_todos_los_
+    profesionales_excluye_extraordinarias_y_ordena_por_fecha_hora_
+    codigo`."""
     _preparar_categoria_a(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel_extra = pantalla.panel_extraordinaria
     panel_extra.combo_profesional.setCurrentIndex(1)
+    id_profesional = panel_extra.combo_profesional.currentData()
     panel_extra.campo_item.setText("Taller puntual")
     panel_extra.spin_monto.setValue(7500)
     panel_extra._crear()
 
-    pantalla.panel_aisladas.actualizar()
-    assert pantalla.panel_aisladas.tabla.rowCount() == 1
-    assert "7.500" in pantalla.panel_aisladas.tabla.item(0, 10).text()
+    panel_aisladas = pantalla.panel_aisladas
+    indice = panel_aisladas.combo_profesional.findData(id_profesional)
+    panel_aisladas.combo_profesional.setCurrentIndex(indice)
+    assert panel_aisladas.tabla.rowCount() == 1
+    assert "7.500" in panel_aisladas.tabla.item(0, 10).text()
 
 
 def test_tabla_extraordinaria_ordena_por_fecha_ascendente_por_defecto(qtbot, conn):

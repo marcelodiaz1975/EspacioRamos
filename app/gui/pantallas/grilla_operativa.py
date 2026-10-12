@@ -40,7 +40,10 @@ from app.negocio.formato import formatear_moneda
 from app.negocio.valores_operativos import PromediosValorHora, calcular_promedios_valor_hora
 from app.pdf.estilos import clave_orden_unidad
 
-_COLUMNAS_VALORES = ["Localidad", "Edificio", "Unidad", "Consultorio", "Valor regular", "Valor aislada"]
+_COLUMNAS_VALORES = [
+    "Localidad", "Edificio", "Unidad", "Consultorio", "Valor regular", "Valor aislada",
+    "Valor aislada\ncon recargo",
+]
 
 _COLOR_TOTAL = QColor("#B7C8DC")
 _COLOR_LOCALIDAD = QColor("#D2DEEB")
@@ -549,10 +552,17 @@ class _PanelValoresVigentes(QWidget):
         # "Totales por bloques" en Liquidaciones simuladas: columnas
         # cortas con su ancho justo, las últimas en Stretch). Puntual de
         # esta tabla — no toca el default de `_armar_tabla` ni la de
-        # `_PanelPromedios`.
+        # `_PanelPromedios`. "Valor aislada con recargo" (sumada después,
+        # pedido de la clienta: "si activo un porcentaje de recargo en
+        # horas aisladas... en el cuadro tendría que ver el valor con el
+        # recargo" — el valor base de al lado nunca cambiaba) se agrega
+        # APARTE en vez de pisarlo, porque el recargo es opcional por
+        # reserva (`AplicaRecargo`), no algo que siempre corresponda
+        # aplicar al valor de referencia del consultorio.
         header_valores = self.tabla_valores.horizontalHeader()
         header_valores.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         header_valores.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        header_valores.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.promedios_valores = _PanelPromedios()
 
         self.filtros_valores = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_valores)
@@ -571,6 +581,10 @@ class _PanelValoresVigentes(QWidget):
             self.tabla_valores.setSortingEnabled(True)
             self.promedios_valores.actualizar(PromediosValorHora())
             return
+        cfg = self.conn.execute(
+            "SELECT RecargoPorcentajeAisladas FROM Configuracion WHERE IdConfiguracion = 1"
+        ).fetchone()
+        recargo_pct = (cfg["RecargoPorcentajeAisladas"] if cfg else 0.0) or 0.0
         placeholders = ", ".join("?" for _ in ids_consultorio)
         filas = self.conn.execute(
             f"""
@@ -590,12 +604,16 @@ class _PanelValoresVigentes(QWidget):
         for fila, f in enumerate(filas):
             valor_regular = f["ValorHoraRegularActual"] or 0
             valor_aislada = f["ValorHoraAisladaActual"] or 0
+            valor_aislada_recargo = valor_aislada * (1 + recargo_pct / 100)
             self.tabla_valores.setItem(fila, 0, QTableWidgetItem(f["DomicilioLocalidad"] or "(Sin localidad)"))
             self.tabla_valores.setItem(fila, 1, QTableWidgetItem(f["NombreEdificio"]))
             self.tabla_valores.setItem(fila, 2, QTableWidgetItem(f["Departamento"]))
             self.tabla_valores.setItem(fila, 3, _ItemNumerico(str(f["NumeroConsultorio"]), f["NumeroConsultorio"]))
             self.tabla_valores.setItem(fila, 4, _ItemNumerico(formatear_moneda(valor_regular), valor_regular))
             self.tabla_valores.setItem(fila, 5, _ItemNumerico(formatear_moneda(valor_aislada), valor_aislada))
+            self.tabla_valores.setItem(
+                fila, 6, _ItemNumerico(formatear_moneda(valor_aislada_recargo), valor_aislada_recargo),
+            )
         self.tabla_valores.setSortingEnabled(True)
 
         self.promedios_valores.actualizar(calcular_promedios_valor_hora(self.conn, ids_consultorio))
