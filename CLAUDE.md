@@ -8964,3 +8964,282 @@ al viejo "solo categoría R";
 resultado`). `tests/test_pdf_liquidacion_simulada.py`
 (`test_profesional_categoria_c_anonimiza_la_unidad` — mismo criterio,
 contra el PDF generado).
+
+## Novena tanda de correcciones post-v1: Disponibilidad, Profesionales,
+## Llaves, Placas, Estadísticas, Balance del negocio
+
+Nueva ronda de feedback sobre el build instalado, pedida solapa por
+solapa sobre seis formularios — mismo criterio de siempre ("no largues
+la nueva versión hasta que yo te diga, solo hace las correcciones").
+
+### Dos reglas generales nuevas, aplicadas en el mecanismo compartido
+
+- **Tab TAMBIÉN selecciona el contenido prefijado del campo al llegar**
+  (`app/gui/widgets/foco.py`): revierte la decisión anterior ("Tab no
+  selecciona, solo Enter") — pedido explícito de la clienta sobre Llaves,
+  extendido a "todos los formularios del sistema": "cuando tabulo hacia
+  un cuadro de texto en el que hay una opción prefijada... que quede
+  seleccionado al hacer foco ahí así uno tiene la opción de empezar a
+  escribir borrando el contenido prefijado". `_EnterAvanzaFoco._mover`
+  pasa `seleccionar_todo=True` también en la rama de Tab/Backtab (antes
+  `False`) — un solo cambio en el mecanismo compartido por decenas de
+  formularios, sin tocar ninguna pantalla puntual.
+- **Importes negativos en rojo, "compete a todos los importes del
+  sistema"**: hasta ahora `item_monto` (moneda + alineado a la derecha +
+  rojo si negativo) solo vivía en las solapas "Estado de cuenta" de
+  Pagos/Liquidaciones/Cargos especiales. `Campo` (`crud_generico.py`)
+  suma `es_monto: bool = False` — con `tipo="numero"` y `es_monto=True`,
+  la tabla de CUALQUIER catálogo genérico pinta esa columna con
+  `item_monto` en vez del número crudo sin formato. Aplicado en esta
+  ronda a Consultorios (los 4 `ValorHora*`), Gastos operativos
+  (`Monto`) y Profesionales (`SaldoCuentaActual`/`SaldoCuentaAnterior`)
+  — los campos numéricos que NO son un importe (Cantidad de baños, %
+  Bonificación, Orden) se quedan sin este flag, sin cambiar su
+  comportamiento.
+
+### Disponibilidad: Oferta de consultorios / Lista de espera / Archivos para enviar
+
+Las tres solapas ya tenían el selector de profesional compartido
+(`habilitar_busqueda_profesional`) y la cadena de foco Enter/Tab general
+desde rondas anteriores — "visualización de focos" (Archivos para
+enviar) se revisó y se confirmó que ya cumplía la regla general, sin
+necesitar ningún cambio propio.
+
+- **Oferta: "Día de la semana" del filtro de la grilla embebida,
+  siempre de a pares.** Hasta ahora `agrupar_dias_en_pares()` (la lista
+  de 2 columnas, mismo criterio que Reservas) solo se aplicaba cuando el
+  sistema tenía domingo sumado a `Configuracion.DiasGrilla` — pedido
+  explícito de la clienta de aplicarlo siempre, sin esa condición.
+  `_AJUSTE_EXTRA_MUESTRA_CON_DOMINGO` se renombra `_AJUSTE_EXTRA_
+  MUESTRA_PARES` (mismo valor, 9px) y pasa a sumarse siempre al ajuste
+  de alto de "Referencias de colores" (antes solo con domingo
+  configurado) — con los días siempre a 2 columnas, la leyenda necesita
+  el mismo empujón extra para seguir llegando al pie de la columna, sin
+  importar si hay 6 o 7 días.
+- **Lista de espera: cadena de foco Enter/Tab propia.** Esta solapa
+  nunca había tenido una cadena explícita (dependía del orden nativo de
+  Qt) — se suma una, de arriba a abajo por columnas (Profesional →
+  Localidad/Edificio/Unidad → Días → Tipo/horario → Agregar/Quitar
+  bloque → Características pedidas → Detalle → Crear/Confirmar
+  reserva/Descartar/Editar), con `showEvent` enfocando el combo de
+  Profesional al entrar a la pantalla.
+
+### Profesionales (Listado de profesionales / Profesiones y tratamientos)
+
+- **Diálogo Nuevo/Editar: ancho dinámico en vez de 480px fijo**
+  (`crud_generico.py`, cambio genérico, no puntual de Profesionales):
+  480 recortaba etiquetas/campos largos de este formulario (ej. "Día
+  del mes para plazo extendido automático..."). `_DialogoRegistro.
+  __init__` calcula el ancho contra el `sizeHint()` real del formulario
+  ya armado, con un piso de 480 (no se achica para diálogos chicos) y
+  un techo de 900 (un campo larguísimo sigue envolviendo en dos líneas
+  en vez de estirar el diálogo sin límite).
+- **Combo "Tratamiento" no desplegaba nada para la mayoría de las
+  profesiones**: bug real — `opciones_tratamiento` solo devuelve algo
+  para Fonoaudiología/Psicopedagogía (sección 8.1 del negocio); el resto
+  de las profesiones dejaba el combo vacío. `_actualizar_tratamiento`
+  suma, siempre, cualquier `Tratamiento` ya usado por algún profesional
+  del sistema (`_opciones_tratamiento_usados`, nueva — mismo criterio
+  "catálogo abierto, sugiere lo ya usado" que `Responsable.Rol`/
+  `CondicionFiscal`) a las que ya sugiere `opciones_tratamiento` para la
+  profesión/sexo elegidos — el combo nunca vuelve a quedar sin ninguna
+  opción una vez que hay al menos un profesional cargado con tratamiento.
+- **Categoría se adelanta al principio del diálogo, arriba de Código.**
+  `PantallaCRUD` suma un parámetro nuevo, `campos_primero_dialogo:
+  list[str] | None` — reordena esos campos al principio SOLO en el
+  cuadro Nuevo/Editar, sin tocar el orden de columnas de la tabla/
+  listado (que sigue siendo "Código - Tratamiento - Nombre -
+  Apellido...", el formato canónico de los selectores de profesional).
+  `pantalla_profesionales` lo pasa como `["CategoriaProfesional"]`.
+- **"Fecha de nacimiento" pasa a `tipo="fecha"` con formato
+  "dd-MM-yyyy"** (sin día de semana — pedido explícito: "el día de la
+  semana de un nacimiento no aporta nada", a diferencia de una fecha
+  operativa como Vigencia). `Campo` suma `formato_fecha: str | None`
+  (solo para `tipo="fecha"`, patrón de visualización alternativo al
+  default del sistema `_FORMATO_FECHA_DIA`) — `_fmt_fecha_dia` y el
+  `QDateEdit.setDisplayFormat` del diálogo lo usan cuando está presente.
+
+  Como "Fecha de nacimiento" es opcional (no toda persona cargada tiene
+  que tener este dato), `crud_generico.py` suma un sentinel propio para
+  "(sin fecha)" en `tipo="fecha"` NO obligatorio: `_FECHA_SIN_DATO =
+  QDate(1900, 1, 1)` — DISTINTO del `QDate(2000, 1, 1)` que ya usan
+  Reservas/Novedades para sus propias fechas operativas (duplicado acá,
+  sin relación entre los tres módulos), porque 2000 hubiera recortado en
+  silencio cualquier nacimiento real anterior a ese año
+  (`QDateEdit.setDate` por debajo del mínimo configurado clampea sin
+  avisar). `setMinimumDate(_FECHA_SIN_DATO)` + `setSpecialValueText(
+  "(sin fecha)")` solo se aplican cuando `campo.requerido` es `False`;
+  un campo de fecha obligatorio sigue arrancando en `QDate.currentDate()`
+  como siempre, sin este sentinel.
+
+  **Bug real, encontrado al revisar la cobertura de este sentinel
+  genérico, no pedido por la clienta**: "Fechas especiales" (su campo
+  `Fecha`, obligatorio — `NOT NULL` en el schema) usaba `Campo(tipo=
+  "fecha")` SIN `requerido=True` — con el sentinel nuevo, "Nuevo" sin
+  tocar el campo guardaba `None` y el `repositorio.crear(...)` reventaba
+  con `sqlite3.IntegrityError`, que a su vez quedaba atrapado por un
+  `QMessageBox.warning` real (no mockeado en varios tests) — en
+  producción, un cartel modal; en la suite de tests, un hang
+  indefinido, detectado con `faulthandler`+`SIGALRM` forzando un dump
+  del stack en pleno bloqueo. Corregido sumando `requerido=True` al
+  `Campo("Fecha", ...)` de Fechas especiales — el único otro uso de
+  `tipo="fecha"` en catálogos genéricos (`Profesional.FechaNacimiento`,
+  legítimamente nullable en el schema) se queda sin tocar.
+- **Profesiones y tratamientos: botones secundarios deshabilitados sin
+  selección.** Cubierto de rebote por el cambio genérico de
+  `PantallaCRUD` (ver más abajo) — no hizo falta ningún código puntual
+  de este catálogo. Foco revisado y confirmado sin problemas.
+
+### Botones Editar/Eliminar deshabilitados sin selección — regla general
+
+Pedido explícito de la clienta, "ESTO PARA TODO EL SISTEMA": los botones
+secundarios de edición de un catálogo arrancan deshabilitados y solo se
+habilitan con una fila elegida en la tabla. `PantallaCRUD` (`crud_
+generico.py`) suma `_actualizar_botones_seleccion()` (conectada a
+`tabla_widget.itemSelectionChanged`, llamada también al final de
+`actualizar()`) — un solo cambio en la clase genérica cubre de una a los
+~14 catálogos que pasan por acá (Localidades, Edificios, Unidades,
+Consultorios, Responsables, Tipos de licencia, Listas editables,
+Condiciones y normas, Detalles complementarios, Profesiones, Gastos
+operativos, Fechas especiales, Mensajes predefinidos, Profesionales).
+Mismo criterio ya usado puntualmente en rondas anteriores para Pagos/
+Registrar pagos y Planes de pago, ahora generalizado a la clase base.
+Pantallas armadas a mano que NO pasan por `PantallaCRUD` (Llaves, Placas,
+Bloques rígidos) necesitan el mismo cableado por separado — ver sus
+secciones correspondientes más abajo.
+
+### Llaves (Movimientos y tenencias / Registro de cargos especiales / Estado de cuenta)
+
+**Movimientos y tenencias:**
+
+- Botones Editar/Eliminar de las tres secciones (Tipos/Accesos/
+  Movimientos) deshabilitados sin selección en su tabla correspondiente
+  — `_actualizar_botones_tipo`/`_actualizar_botones_acceso`/`_
+  actualizar_botones_movimiento` (esta última ya existía parcialmente,
+  se extiende para cubrir también "Ingresar copia"/"Asignar copia", que
+  dependen de tener un Tipo elegido).
+- **Columna "Observación" nueva en la tabla de Movimientos** (8va
+  columna) — el dato (`LlaveMovimiento.Observacion`) ya existía y se
+  podía cargar desde el campo de observación de abajo, pero nunca se
+  veía en la tabla. `_clave_orden_movimientos` suma la entrada
+  correspondiente para que también sea ordenable por click.
+- **Nomenclatura automática de Tipo="Edificio": "Tipo llave E{N} -
+  {NombreEdificio}"** (antes solo "Tipo llave E{N}", sin distinguir a
+  qué edificio corresponde cuando hay más de uno). `siguiente_nombre_
+  llave`/`crear_llave` (`app.negocio.llaves`) suman un parámetro
+  `id_edificio: int | None = None` (sin efecto para cualquier llamador
+  existente, Tipo="Unidad"/"No especificada" no lo usan) que agrega el
+  sufijo solo cuando `tipo == "Edificio"` y se pasó un edificio.
+  `_DialogoTipo` suma un combo "Edificio" (solo habilitado para
+  Tipo="Edificio" en un alta nueva, nunca en una edición — el edificio
+  de una llave ya creada no se puede cambiar después) con su propia
+  validación antes de aceptar.
+- **Orden de Unidad en "Agregar acceso de llave"**: el combo de Unidad
+  de `_DialogoAcceso` ordenaba alfabético por `Departamento` — pasa a
+  `clave_orden_unidad` (de `app.pdf.estilos`, ya usada en toda la
+  grilla/reservas), mismo criterio PB/EP/piso ascendente que el resto
+  del sistema.
+
+**Registro de cargos especiales:**
+
+- **"Subtipo" se adelanta arriba de "Tipo", con reglas que lo
+  condicionan**: Bonificación → Tipo fijo en Débito (combo
+  deshabilitado); Ajuste → Tipo editable, default Crédito; Ítem libre →
+  Tipo editable, default Débito. `_actualizar_tipo_segun_subtipo` (nueva)
+  conecta el cambio de Subtipo a esta lógica. "Modificar cargo
+  especial" precarga Subtipo antes que Tipo, y si el Subtipo no es
+  Bonificación, pisa el default con el Tipo REAL ya guardado en la fila
+  (no el que acabaría de sugerir el Subtipo).
+- **Un cargo especial solo se puede imputar al mes en curso o al
+  siguiente** (`crear_cargo_especial`, `app.negocio.pagos`) — antes solo
+  rechazaba imputar a un mes YA PASADO; ahora también rechaza imputar
+  más de un mes para adelante, con el mensaje indicando ambos períodos
+  válidos.
+- **Imputado al mes en curso, regenera y marca no enviada la
+  liquidación de ese profesional** (mismo mecanismo `regenerar_si_
+  corresponde` ya usado en Vacaciones/Licencias/Reservas regulares) —
+  al mes SIGUIENTE no hace falta ningún llamado extra: `calcular_
+  liquidacion` ya suma los cargos especiales de ese período al calcular,
+  así que un cargo agendado para el mes que viene entra solo cuando
+  llegue ese momento.
+
+**Estado de cuenta:**
+
+- Panel de filtros pasa de `setMaximumWidth(260)` a `setFixedWidth(260)`
+  — con solo el máximo, clickear el combo de profesional (que despliega
+  una lista más ancha momentáneamente) corría el ancho real del panel y
+  la tabla de al lado se reacomodaba; con el ancho fijo, el panel nunca
+  cambia de tamaño.
+- `self.tabla.horizontalHeader().setStretchLastSection(True)` — la
+  última columna se estira para ocupar el ancho sobrante del panel en
+  vez de dejar un área en blanco a la derecha.
+
+### Placas para timbres (Búsqueda y asignación / Impresión en papel)
+
+**Regla general nueva, "ESTO PARA TODO EL SISTEMA"**: los botones
+secundarios de una tabla se habilitan/deshabilitan según la fila
+seleccionada, y cualquier edición pasa por un cuadro de diálogo en vez
+de por campos sueltos al costado — mismo criterio ya generalizado en
+`PantallaCRUD` (ver arriba) y ya usado en varias rondas anteriores para
+Pagos/Cargos especiales/Planes de pago. En Placas esto ya estaba
+cumplido de antes ("Reasignar"/"Liberar" ya se habilitaban solo con
+selección, y ya usan sus propios diálogos) — confirmado sin necesitar
+ningún cambio de código en esta pantalla puntual.
+
+- **Tabla ya ordenada por Localidad/Edificio/Unidad/Posición** —
+  confirmado por revisión de código, sin cambios: el orden por defecto
+  ya sigue esa jerarquía exacta desde que se armó la pantalla.
+- **Bloquear "Asignar posición de placa nueva" sin posiciones libres**:
+  el mensaje de aviso (`QMessageBox.warning`, ya existía para el caso de
+  tablero lleno) se actualiza para sugerir explícitamente la
+  alternativa — reasignar la posición de otro profesional en vez de
+  dejar la operación simplemente rechazada sin salida.
+- **"Placa a imprimir": selector colapsable nuevo en la solapa de
+  Impresión**, debajo del combo de Profesional — lista todas las
+  posiciones de placa ya asignadas a ese profesional (puede tener una
+  placa estándar en una unidad y una personalizada en otra) y deja
+  elegir CUÁL imprimir, en vez de asumir "la personalización de
+  cualquier placa suya" como hacía antes `personalizacion_del_
+  profesional` (ese helper se deja de usar en este punto de entrada).
+  `_lista_seleccion_simple()` (helper nuevo, `QListWidget` de selección
+  única) + `_cargar_placas_profesional_imprimir`/`_placa_seleccionada_
+  imprimir`/`_actualizar_boton_agregar_impresion` resuelven la carga/
+  selección/habilitación del botón "Agregar a impresión" según haya 0,
+  1 o varias placas para ese profesional.
+- **Selector de profesional + cadena de foco en las dos solapas**
+  (Buscar y Asignar / Imprimir): cada una suma su propio
+  `instalar_enter_avanza_foco` y una subclase mínima de `QWidget`
+  (`_PanelImprimirPlacas`, mismo patrón que la ya existente
+  `_PanelBuscarPlacas`) con `showEvent` propio para enfocar el combo de
+  Profesional de esa solapa al mostrarse.
+- **El PDF generado por "Agregar a impresión" va a una carpeta propia,
+  "Placas para imprimir"**, distinta de la carpeta del tablero de
+  referencia completo (`generar_pdf_placas`, el PDF automático del
+  avance de mes, que sigue en su carpeta de siempre). `app.negocio.
+  archivos_generados` suma `SUBCARPETA_PLACAS_PARA_IMPRIMIR` como
+  constante separada de `SUBCARPETA_PLACAS`, con el docstring
+  explicando la distinción.
+
+### Estadísticas / Balance del negocio
+
+Las dos pantallas se revisaron contra la regla general de foco — ya
+cumplían el orden de siempre (botones "Ver historial"/"Ver período
+actual"/"Exportar a Excel" y los catálogos anidados correspondientes),
+sin encontrar ningún hueco. Sin cambios de código en ninguna de las dos.
+
+Tests: `tests/test_gui_widget_foco.py` (Tab selecciona contenido
+prefijado, reemplaza al test que probaba lo contrario);
+`tests/test_catalogos.py` (es_monto en las tablas de Consultorios/
+Gastos operativos, botones deshabilitados sin selección, Fecha
+requerido=True en Fechas especiales); `tests/test_profesionales.py`
+(ancho dinámico del diálogo, combo Tratamiento con valores usados,
+Categoría primero, formato de fecha de nacimiento, es_monto en los dos
+saldos); `tests/test_gui_oferta.py` (días siempre a pares, sin la
+condición de domingo); `tests/test_llaves.py`/`tests/test_gui_llaves.py`
+(nomenclatura Edificio, orden de unidad, columna Observación, botones
+deshabilitados); `tests/test_pagos.py` (límite de imputación a mes
+siguiente); `tests/test_gui_novedades.py` (reglas Subtipo→Tipo,
+regeneración al imputar al mes en curso); `tests/test_gui_placas.py`
+(selector "Placa a imprimir" con 0/1/varias opciones, aviso de tablero
+lleno con la sugerencia, carpeta "Placas para imprimir", foco en las
+dos solapas). Suite completa: 2384 passed, sin regresiones.

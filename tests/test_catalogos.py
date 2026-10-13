@@ -507,6 +507,10 @@ def test_gasto_cadena_de_foco_incluye_periodo_actual_y_da_la_vuelta(qtbot, conn)
 
     from app.negocio.dias import periodo_actual
 
+    obtener_repositorio(conn, "GastoOperativo").crear(
+        Periodo=periodo_actual(conn), Concepto="Pintura", Monto=800, Alcance="Espacio general",
+    )
+    conn.commit()
     pantalla = catalogos.pantalla_gastos_operativos(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
@@ -518,6 +522,7 @@ def test_gasto_cadena_de_foco_incluye_periodo_actual_y_da_la_vuelta(qtbot, conn)
         pantalla.campo_buscar, campo_periodo_filtro, pantalla.boton_nuevo, pantalla.boton_editar, pantalla.boton_eliminar,
     ]
 
+    pantalla.tabla_widget.selectRow(0)  # Editar/Eliminar solo reciben foco con una fila seleccionada
     pantalla.boton_eliminar.setFocus()
     qtbot.waitUntil(lambda: pantalla.boton_eliminar.hasFocus())
     pantalla._foco._mover(pantalla.boton_eliminar, retroceder=False, seleccionar_todo=False)

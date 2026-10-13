@@ -152,10 +152,10 @@ def pantalla_consultorios(conn: sqlite3.Connection, *, anidado: bool = False) ->
         Campo("Sillones", "Sillones", tipo="booleano"),
         Campo("AptoCamilla", "Apto camilla", tipo="booleano"),
         Campo("Balcon", "Balcón", tipo="booleano"),
-        Campo("ValorHoraRegularActual", "Valor hora regular actual", tipo="numero"),
-        Campo("ValorHoraRegularAnterior", "Valor hora regular anterior", tipo="numero"),
-        Campo("ValorHoraAisladaActual", "Valor hora aislada actual", tipo="numero"),
-        Campo("ValorHoraAisladaAnterior", "Valor hora aislada anterior", tipo="numero"),
+        Campo("ValorHoraRegularActual", "Valor hora regular actual", tipo="numero", es_monto=True),
+        Campo("ValorHoraRegularAnterior", "Valor hora regular anterior", tipo="numero", es_monto=True),
+        Campo("ValorHoraAisladaActual", "Valor hora aislada actual", tipo="numero", es_monto=True),
+        Campo("ValorHoraAisladaAnterior", "Valor hora aislada anterior", tipo="numero", es_monto=True),
         *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "Consultorio", "Consultorios", campos, anidado=anidado)
@@ -327,7 +327,7 @@ def pantalla_gastos_operativos(conn: sqlite3.Connection, *, anidado: bool = Fals
         ),
         Campo("Categoria", "Categoría", tipo="combo", opciones=opciones_lista("CategoriaGasto"), combo_editable=True),
         Campo("Concepto", "Concepto"),
-        Campo("Monto", "Monto", tipo="numero", requerido=True),
+        Campo("Monto", "Monto", tipo="numero", requerido=True, es_monto=True),
         Campo("Alcance", "Alcance", tipo="combo", opciones=opciones_alcance),
         Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio_o_ninguno_gasto),
         Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad_o_ninguna_gasto),
@@ -472,7 +472,11 @@ def _al_eliminar_fecha_especial(conn: sqlite3.Connection, registro) -> None:
 
 def pantalla_fechas_especiales(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
-        Campo("Fecha", "Fecha", tipo="fecha"),
+        # requerido=True: la columna es NOT NULL en el schema — sin esto,
+        # "Nuevo" sin tocar el campo deja la fecha en el sentinel "(sin
+        # fecha)" (ver `_FECHA_SIN_DATO`) y el guardado revienta con un
+        # IntegrityError (bug real, encontrado al revisar esta pantalla).
+        Campo("Fecha", "Fecha", tipo="fecha", requerido=True),
         Campo("Descripcion", "Descripción"),
         Campo("Tipo", "Tipo", tipo="combo", opciones=opciones_lista("TipoFechaEspecial")),
         Campo("Activo", "Activo", tipo="booleano"),

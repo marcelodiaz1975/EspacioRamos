@@ -81,6 +81,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
     _agregar_item_todos,
     _corregir_seleccion_todos,
@@ -453,6 +454,28 @@ class _PanelListaEspera(QWidget):
         self._actualizar_combo_tipo_bloques()
         self._cargar_profesionales()
         self._cargar_localidades()
+
+        # Regla general de foco (ver "Foco (Enter/Tab): orden general" en
+        # CLAUDE.md): arranca en el control más arriba de todo y baja — las
+        # tres columnas del formulario de arriba se recorren de izquierda a
+        # derecha, una entera antes de pasar a la siguiente (mismo criterio
+        # ya usado en Llaves para columnas con contenido a la misma altura).
+        self._foco = instalar_enter_avanza_foco([
+            self.combo_profesional,
+            self._filtro_localidad.foco_widget(), self._filtro_edificio.foco_widget(),
+            self._filtro_unidad.foco_widget(),
+            *self._checks_dia.values(),
+            self.combo_tipo, self.spin_desde, self.spin_hasta,
+            self.casilla_cantidad_horas, self.spin_cantidad_horas, self.boton_agregar_bloque,
+            self.combo_tipo_bloques, self.combo_sin_combinar, self.boton_quitar_bloque,
+            self.casilla_tamano, self.combo_tamano, self.casilla_ventana, self.casilla_camilla,
+            self.casilla_placard, self.casilla_aire, self.campo_detalle, self.boton_crear,
+            self.boton_confirmar_reserva, self.boton_descartar, self.boton_editar,
+        ], parent=self)
+
+    def showEvent(self, event) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        super().showEvent(event)
+        self.combo_profesional.setFocus()
 
     def _cargar_profesionales(self) -> None:
         self.combo_profesional.clear()

@@ -67,6 +67,7 @@ from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.listas_editables import opciones_lista
+from app.pdf.estilos import clave_orden_unidad
 from app.negocio.llaves import (
     agregar_acceso_llave,
     asignar_llave,
@@ -242,6 +243,12 @@ class _PanelLlaves(QWidget):
         self.boton_eliminar_tipo = QPushButton("Eliminar tipo de llave")
         self.boton_eliminar_tipo.setObjectName("botonSecundario")
         self.boton_eliminar_tipo.clicked.connect(self._eliminar_tipo)
+        # Editar/Eliminar arrancan deshabilitados y solo se habilitan con un
+        # Tipo seleccionado en la tabla — pedido explícito de la clienta,
+        # "ESTO PARA TODO EL SISTEMA".
+        self.boton_editar_tipo.setEnabled(False)
+        self.boton_eliminar_tipo.setEnabled(False)
+        self.tabla_tipos.itemSelectionChanged.connect(self._actualizar_botones_tipo)
         grid.addWidget(
             self._grupo_botones(
                 _alto_hasta_primera_fila(titulo_tipos, self.tabla_tipos),
@@ -264,6 +271,7 @@ class _PanelLlaves(QWidget):
         self.tabla_accesos.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla_accesos.setFixedHeight(_alto_para_filas(self.tabla_accesos, _FILAS_VISIBLES_ACCESOS))
         self.tabla_accesos.itemSelectionChanged.connect(self._actualizar_observacion_acceso)
+        self.tabla_accesos.itemSelectionChanged.connect(self._actualizar_botones_acceso)
         self._orden_accesos = OrdenTabla(self.tabla_accesos, self._actualizar_accesos)
         instalar_eliminar_con_tecla(self.tabla_accesos, self._eliminar_acceso)
         columna_accesos.addWidget(self.tabla_accesos)
@@ -294,9 +302,12 @@ class _PanelLlaves(QWidget):
         titulo_movimientos = self._titulo_seccion("Movimientos de llaves")
         columna_movimientos.addWidget(titulo_movimientos)
         self.tabla_movimientos = QTableWidget()
-        self.tabla_movimientos.setColumnCount(7)
+        self.tabla_movimientos.setColumnCount(8)
         self.tabla_movimientos.setHorizontalHeaderLabels(
-            ["Fecha", "Movimiento", "Profesional", "Tipo de llave", "Cantidad", "Depósito cobrado", "Depósito reintegrado"]
+            [
+                "Fecha", "Movimiento", "Profesional", "Tipo de llave", "Cantidad",
+                "Depósito cobrado", "Depósito reintegrado", "Observación",
+            ]
         )
         self.tabla_movimientos.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_movimientos.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -392,6 +403,13 @@ class _PanelLlaves(QWidget):
         else:
             self._actualizar_accesos()
             self._actualizar_observacion_tipo()
+            self._actualizar_botones_tipo()
+            self._actualizar_botones_movimiento()
+
+    def _actualizar_botones_tipo(self) -> None:
+        hay_seleccion = self._tipo_seleccionado() is not None
+        self.boton_editar_tipo.setEnabled(hay_seleccion)
+        self.boton_eliminar_tipo.setEnabled(hay_seleccion)
 
     def _actualizar_observacion_tipo(self) -> None:
         tipo = self._tipo_seleccionado()
@@ -415,7 +433,7 @@ class _PanelLlaves(QWidget):
         valores = dialogo.valores()
         id_nuevo = crear_llave(
             self.conn, tipo=valores["tipo"], valor_deposito_actual=valores["valor_deposito_actual"],
-            observacion=valores["observacion"],
+            observacion=valores["observacion"], id_edificio=valores["id_edificio"],
         )
         if not valores["activo"]:
             obtener_repositorio(self.conn, "Llave").actualizar(id_nuevo, Activo=0)
@@ -494,11 +512,11 @@ class _PanelLlaves(QWidget):
     def _actualizar_accesos(self) -> None:
         tipo = self._tipo_seleccionado()
         self.boton_agregar_acceso.setEnabled(tipo is not None)
-        self.boton_eliminar_acceso.setEnabled(False)
         self._accesos_actuales = []
         self.tabla_accesos.setRowCount(0)
         if tipo is None:
             self._actualizar_observacion_acceso()
+            self._actualizar_botones_acceso()
             return
         accesos = self._accesos(tipo["IdLlave"])
         if self._orden_accesos.columna is not None:
@@ -514,8 +532,15 @@ class _PanelLlaves(QWidget):
             self.tabla_accesos.setItem(fila_idx, 2, QTableWidgetItem(a["Departamento"] or "Todas"))
             self.tabla_accesos.setItem(fila_idx, 3, QTableWidgetItem(a["Nombre"] or ""))
         _ajustar_columnas(self.tabla_accesos, factor=2)
-        self.boton_eliminar_acceso.setEnabled(bool(self._accesos_actuales))
         self._actualizar_observacion_acceso()
+        self._actualizar_botones_acceso()
+
+    def _actualizar_botones_acceso(self) -> None:
+        # "Eliminar acceso de llave" solo se habilita con un acceso
+        # seleccionado en la tabla (pedido explícito de la clienta, "ESTO
+        # PARA TODO EL SISTEMA") — antes se habilitaba con solo que
+        # hubiera algún acceso cargado, sin importar la selección.
+        self.boton_eliminar_acceso.setEnabled(self._acceso_seleccionado() is not None)
 
     def _actualizar_observacion_acceso(self) -> None:
         acceso = self._acceso_seleccionado()
@@ -576,6 +601,7 @@ class _PanelLlaves(QWidget):
             4: lambda m: m["Cantidad"],
             5: lambda m: m["MontoCobrado"] or 0,
             6: lambda m: m["MontoReintegrado"] or 0,
+            7: lambda m: m["Observacion"] or "",
         }
         return claves[columna]
 
@@ -626,6 +652,7 @@ class _PanelLlaves(QWidget):
             else:
                 reintegrado = _moneda(m["MontoReintegrado"]) if m["Tipo"] == "Devolución" and m["DepositoReintegrado"] else ""
                 self.tabla_movimientos.setItem(fila_idx, 6, item_numero(reintegrado))
+            self.tabla_movimientos.setItem(fila_idx, 7, QTableWidgetItem(m["Observacion"] or ""))
         self.tabla_movimientos.resizeColumnsToContents()
         if self.tabla_movimientos.columnWidth(2) < 180:
             self.tabla_movimientos.setColumnWidth(2, 180)
@@ -658,9 +685,15 @@ class _PanelLlaves(QWidget):
         )
 
     def _actualizar_botones_movimiento(self) -> None:
+        tipo = self._tipo_seleccionado()
+        # "Ingresar copia al stock"/"Asignar copia a profesional" operan
+        # sobre el Tipo de llave seleccionado — sin selección, no hay nada
+        # sobre qué actuar (pedido explícito de la clienta, "ESTO PARA TODO
+        # EL SISTEMA").
+        self.boton_ingresar.setEnabled(tipo is not None)
+        self.boton_asignar.setEnabled(tipo is not None)
         es_asignacion_abierta = self._asignacion_abierta_seleccionada()
         self.boton_devolver.setEnabled(es_asignacion_abierta)
-        tipo = self._tipo_seleccionado()
         # "Registrar pérdida…" cubre dos casos: cerrar la asignación abierta
         # seleccionada, o (sin ninguna seleccionada) dar de baja stock
         # disponible del Tipo seleccionado que se perdió antes de asignarse.
@@ -769,17 +802,29 @@ class _DialogoTipo(QDialog):
         self.combo_tipo = QComboBox()
         for valor, etiqueta in opciones_lista("TipoLlave")(conn):
             self.combo_tipo.addItem(etiqueta, valor)
+        # Edificio al que corresponde esta llave, SOLO para Tipo="Edificio"
+        # — pedido explícito de la clienta: el nombre pasa a sumar el
+        # edificio elegido ("Tipo llave E1 - Ramos 1"). Queda deshabilitado
+        # para los demás Tipos y siempre al editar (el Tipo ya está
+        # bloqueado, elegir el edificio es solo para el alta).
+        self.combo_edificio = QComboBox()
+        self.combo_edificio.addItem("(elegí un edificio)", None)
+        for f in conn.execute("SELECT IdEdificio, Nombre FROM Edificio ORDER BY Nombre"):
+            self.combo_edificio.addItem(f["Nombre"], f["IdEdificio"])
         self.etiqueta_nombre = QLabel()
         if registro is None:
             self.combo_tipo.currentIndexChanged.connect(self._actualizar_previsualizacion)
+            self.combo_edificio.currentIndexChanged.connect(self._actualizar_previsualizacion)
         else:
             indice = self.combo_tipo.findData(registro["Tipo"])
             if indice >= 0:
                 self.combo_tipo.setCurrentIndex(indice)
             self.combo_tipo.setEnabled(False)
+            self.combo_edificio.setEnabled(False)
             self.etiqueta_nombre.setText(registro["Nombre"])
             self.etiqueta_nombre.setStyleSheet("font-weight: bold;")
         layout.addRow("Tipo", self.combo_tipo)
+        layout.addRow("Edificio", self.combo_edificio)
         layout.addRow("Nombre del tipo de llave", self.etiqueta_nombre)
         if registro is not None:
             ayuda = QLabel("No se puede cambiar: si cambia, el nombre dejaría de tener sentido.")
@@ -805,7 +850,10 @@ class _DialogoTipo(QDialog):
 
         boton_ok = botones.button(QDialogButtonBox.StandardButton.Ok)
         boton_cancelar = botones.button(QDialogButtonBox.StandardButton.Cancel)
-        orden = [self.combo_tipo, self.spin_deposito, self.campo_observacion, self.casilla_activo, boton_ok, boton_cancelar]
+        orden = [
+            self.combo_tipo, self.combo_edificio, self.spin_deposito, self.campo_observacion,
+            self.casilla_activo, boton_ok, boton_cancelar,
+        ]
         self._foco = instalar_enter_avanza_foco(orden, parent=self)
         if registro is None:
             self._actualizar_previsualizacion()
@@ -816,11 +864,27 @@ class _DialogoTipo(QDialog):
 
     def _actualizar_previsualizacion(self) -> None:
         tipo = self.combo_tipo.currentData()
-        self.etiqueta_nombre.setText(f"Se va a llamar: {siguiente_nombre_llave(self.conn, tipo)}")
+        es_edificio = tipo == "Edificio"
+        self.combo_edificio.setEnabled(es_edificio and self.registro is None)
+        id_edificio = self.combo_edificio.currentData() if es_edificio else None
+        self.etiqueta_nombre.setText(
+            f"Se va a llamar: {siguiente_nombre_llave(self.conn, tipo, id_edificio=id_edificio)}"
+        )
+
+    def accept(self) -> None:  # noqa: N802
+        if (
+            self.registro is None and self.combo_tipo.currentData() == "Edificio"
+            and self.combo_edificio.currentData() is None
+        ):
+            QMessageBox.warning(self, "Nuevo Tipo de llave", "Elegí el edificio para este Tipo de llave.")
+            return
+        super().accept()
 
     def valores(self) -> dict:
+        tipo = self.combo_tipo.currentData()
         return {
-            "tipo": self.combo_tipo.currentData(),
+            "tipo": tipo,
+            "id_edificio": self.combo_edificio.currentData() if tipo == "Edificio" else None,
             "valor_deposito_actual": self.spin_deposito.value(),
             "observacion": self.campo_observacion.text().strip() or None,
             "activo": self.casilla_activo.isChecked(),
@@ -869,9 +933,12 @@ class _DialogoAcceso(QDialog):
         id_edificio = self.combo_edificio.currentData()
         if id_edificio is None:
             return
-        for f in self.conn.execute(
-            "SELECT IdUnidad, Departamento FROM Unidad WHERE IdEdificio = ? ORDER BY Departamento", (id_edificio,)
-        ):
+        filas = self.conn.execute(
+            "SELECT IdUnidad, Departamento FROM Unidad WHERE IdEdificio = ?", (id_edificio,)
+        ).fetchall()
+        # Orden PB/EP/piso ascendente (ver CLAUDE.md "Orden de Unidad"), no
+        # alfabético — mismo criterio ya usado en reservas.py/catalogos.py.
+        for f in sorted(filas, key=lambda f: clave_orden_unidad(f["Departamento"])):
             self.combo_unidad.addItem(f["Departamento"], f["IdUnidad"])
 
     def valores(self) -> dict:

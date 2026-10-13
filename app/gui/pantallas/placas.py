@@ -63,6 +63,7 @@ from app.gui.pantallas.reservas import (
     _texto_profesional,
 )
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
     _agregar_item_todos,
     _corregir_seleccion_todos,
@@ -73,13 +74,12 @@ from app.gui.widgets.grilla_operativa import (
 )
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
-from app.negocio.archivos_generados import SUBCARPETA_PLACAS, carpeta_archivos_varios
+from app.negocio.archivos_generados import SUBCARPETA_PLACAS_PARA_IMPRIMIR, carpeta_archivos_varios
 from app.negocio.placas import (
     asignar_placa,
     liberar_posicion,
     listar_placas,
     nombre_grabado,
-    personalizacion_del_profesional,
     posiciones_libres,
     texto_para_imprimir,
 )
@@ -180,6 +180,17 @@ def _titulo_campo(texto: str) -> QLabel:
     return etiqueta
 
 
+def _lista_seleccion_simple() -> QListWidget:
+    """Mismo criterio de altura que `_lista_multiseleccion` (compartida
+    por Localidad/Edificio/Unidad de "Buscar y asignar"), pero de
+    selección ÚNICA — acá se elige UNA placa puntual para imprimir, no
+    un conjunto."""
+    lista = QListWidget()
+    lista.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+    lista.setMaximumHeight(90)
+    return lista
+
+
 class _PanelBuscarPlacas(QWidget):
     """Widget propio (en vez de un `QWidget()` liso) solo para poder
     engancharle un `showEvent`: `_PanelPlacasOperativas` ya no es, ella
@@ -196,6 +207,21 @@ class _PanelBuscarPlacas(QWidget):
         self._contenedor._orden.reiniciar()
         self._contenedor.combo_profesional_filtro.setCurrentIndex(0)
         self._contenedor._cargar_localidades()
+        self._contenedor.combo_profesional_filtro.setFocus()
+
+
+class _PanelImprimirPlacas(QWidget):
+    """Mismo motivo que `_PanelBuscarPlacas`: necesita un `showEvent`
+    propio (foco inicial en Profesional) y un `QWidget()` liso no admite
+    pisarle el método de instancia."""
+
+    def __init__(self, contenedor: "_PanelPlacasOperativas") -> None:
+        super().__init__()
+        self._contenedor = contenedor
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._contenedor.combo_profesional_imprimir.setFocus()
 
 
 class _PanelPlacasOperativas(QWidget):
@@ -311,6 +337,11 @@ class _PanelPlacasOperativas(QWidget):
         layout_principal.addLayout(columna_tabla, stretch=1)
 
         self._actualizar_botones_tabla()
+        self._foco_buscar = instalar_enter_avanza_foco([
+            self.combo_profesional_filtro, self._filtro_localidad.foco_widget(),
+            self._filtro_edificio.foco_widget(), self._filtro_unidad.foco_widget(),
+            self.boton_asignar_nueva, self.boton_reasignar, self.boton_liberar,
+        ], parent=panel)
         return panel
 
     def _cargar_localidades(self) -> None:
@@ -483,7 +514,16 @@ class _PanelPlacasOperativas(QWidget):
             return
         valores = dialogo.valores()
         if valores["id_unidad"] is None or valores["posicion"] is None:
-            QMessageBox.warning(self, "Asignar placa nueva", "Elegí una unidad con alguna posición libre.")
+            # Pedido explícito de la clienta: si la unidad elegida no tiene
+            # ninguna posición libre en el tablero, el aviso sugiere la
+            # alternativa real — reasignar una posición ya ocupada por otro
+            # profesional — en vez de solo decir "no hay lugar".
+            QMessageBox.warning(
+                self, "Asignar placa nueva",
+                "Esta unidad no tiene ninguna posición libre en el tablero.\n\n"
+                "Para asignarle una placa a este profesional, primero hay que reasignar "
+                "la posición de otro profesional (botón \"Reasignar posición de placa\").",
+            )
             return
         try:
             asignar_placa(self.conn, **valores)
@@ -521,7 +561,7 @@ class _PanelPlacasOperativas(QWidget):
     # ------------------------------------------------------------ imprimir
 
     def _armar_panel_imprimir(self) -> QWidget:
-        panel = QWidget()
+        panel = _PanelImprimirPlacas(self)
         panel.setObjectName("panelSolapa")
         layout_principal = QHBoxLayout(panel)
 
@@ -531,14 +571,21 @@ class _PanelPlacasOperativas(QWidget):
         for id_profesional, etiqueta in _opciones_profesional(self.conn):
             self.combo_profesional_imprimir.addItem(etiqueta, id_profesional)
         habilitar_busqueda_profesional(self.combo_profesional_imprimir)
+        self.combo_profesional_imprimir.currentIndexChanged.connect(self._cargar_placas_profesional_imprimir)
         columna_izquierda.addWidget(self.combo_profesional_imprimir)
 
-        # Pedido explícito de la clienta: esta solapa ya no pide nada de
-        # personalización — eso se maneja íntegramente desde la primera
-        # solapa (Asignar/Reasignar). "Agregar a impresión" levanta esa
-        # info sola (`_agregar_a_impresion`, vía
-        # `app.negocio.placas.personalizacion_del_profesional`) si el
-        # profesional elegido tiene alguna placa personalizada.
+        # Pedido explícito de la clienta: un profesional puede tener más de
+        # una placa asignada (ej. una estándar en una unidad y una
+        # personalizada en otra) — este selector colapsable (mismo widget
+        # que Localidad/Edificio/Unidad de "Buscar y asignar") deja elegir
+        # CUÁL de ellas imprimir, en vez de levantar "la primera
+        # personalizada que aparezca" a ciegas.
+        columna_izquierda.addWidget(_titulo_campo("Placa a imprimir"))
+        self.lista_placa_imprimir = _lista_seleccion_simple()
+        self.lista_placa_imprimir.itemSelectionChanged.connect(self._actualizar_boton_agregar_impresion)
+        self._filtro_placa_imprimir = _FiltroColapsable(self.lista_placa_imprimir)
+        columna_izquierda.addWidget(self._filtro_placa_imprimir)
+
         fila_agregar = QHBoxLayout()
         self.boton_agregar_impresion = QPushButton("Agregar a impresión")
         self.boton_agregar_impresion.setObjectName("botonSecundario")
@@ -575,25 +622,64 @@ class _PanelPlacasOperativas(QWidget):
         columna_derecha.addWidget(self.area_previa, stretch=1)
         layout_principal.addLayout(columna_derecha, stretch=1)
         self._actualizar_vista_previa()
+        self._cargar_placas_profesional_imprimir()
+        self._foco_imprimir = instalar_enter_avanza_foco([
+            self.combo_profesional_imprimir, self._filtro_placa_imprimir.foco_widget(),
+            self.boton_agregar_impresion, self.boton_quitar_impresion, self.boton_generar_pdf,
+        ], parent=panel)
 
         return panel
+
+    def _cargar_placas_profesional_imprimir(self) -> None:
+        id_profesional = self.combo_profesional_imprimir.currentData()
+        self.lista_placa_imprimir.blockSignals(True)
+        self.lista_placa_imprimir.clear()
+        if id_profesional is not None:
+            for placa in listar_placas(self.conn, id_profesional=id_profesional):
+                etiqueta = f"{placa['NombreEdificio']} - {placa['Departamento']} (Posición {placa['PosicionTablero']})"
+                if placa["EsPersonalizada"]:
+                    etiqueta += " - Personalizada"
+                item = QListWidgetItem(etiqueta)
+                item.setData(Qt.ItemDataRole.UserRole, placa["IdPlaca"])
+                self.lista_placa_imprimir.addItem(item)
+        if self.lista_placa_imprimir.count() == 1:
+            self.lista_placa_imprimir.setCurrentRow(0)  # único resultado: se preselecciona sola
+        self.lista_placa_imprimir.blockSignals(False)
+        self._filtro_placa_imprimir.actualizar_resumen()
+        self._actualizar_boton_agregar_impresion()
+
+    def _placa_seleccionada_imprimir(self) -> sqlite3.Row | None:
+        items = self.lista_placa_imprimir.selectedItems()
+        if not items:
+            return None
+        return obtener_repositorio(self.conn, "Placa").obtener(items[0].data(Qt.ItemDataRole.UserRole))
+
+    def _actualizar_boton_agregar_impresion(self) -> None:
+        # Sin ninguna placa asignada, "Agregar a impresión" sigue andando
+        # (imprime la ficha estándar, mismo criterio de siempre) — con más
+        # de una y ninguna elegida, se bloquea: hay que elegir cuál.
+        sin_placas = self.lista_placa_imprimir.count() == 0
+        hay_seleccion = bool(self.lista_placa_imprimir.selectedItems())
+        self.boton_agregar_impresion.setEnabled(sin_placas or hay_seleccion)
 
     def _agregar_a_impresion(self) -> None:
         id_profesional = self.combo_profesional_imprimir.currentData()
         if id_profesional is None:
             return
-        # Pedido explícito de la clienta: acá ya no se pide personalizar
-        # nada — se levanta lo que ya se cargó en la primera solapa
-        # (Asignar/Reasignar), si el profesional tiene alguna placa
-        # personalizada asignada.
-        nombre_personalizado = personalizacion_del_profesional(self.conn, id_profesional)
-        if nombre_personalizado:
-            lineas = nombre_personalizado.split("\n")
+        # Pedido explícito de la clienta: un profesional puede tener más de
+        # una placa asignada (ej. una estándar en una unidad y una
+        # personalizada en otra) — se imprime la que esté elegida en
+        # "Placa a imprimir", no "la primera personalizada que aparezca".
+        placa = self._placa_seleccionada_imprimir()
+        if placa is not None and placa["EsPersonalizada"] and placa["NombreGrabado"]:
+            lineas = placa["NombreGrabado"].split("\n")
             linea1 = lineas[0]
             linea2 = lineas[1] if len(lineas) > 1 else None
+            nombre_personalizado = placa["NombreGrabado"]
         else:
             linea1 = None
             linea2 = None
+            nombre_personalizado = None
 
         etiqueta_base = self.combo_profesional_imprimir.currentText()
         etiqueta_lista = f"{etiqueta_base} (personalizada)" if nombre_personalizado else etiqueta_base
@@ -677,7 +763,7 @@ class _PanelPlacasOperativas(QWidget):
             QMessageBox.information(self, "Generar PDF", "Todavía no agregaste ninguna placa a la lista.")
             return
         try:
-            directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_PLACAS))
+            directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_PLACAS_PARA_IMPRIMIR))
             entradas = [
                 {"id_profesional": e["id_profesional"], "linea1": e["linea1"], "linea2": e["linea2"]}
                 for e in self._cola_impresion

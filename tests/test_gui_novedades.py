@@ -12,7 +12,7 @@ from app.gui.pantallas.novedades import (
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.ausencias import crear_ausencia
-from app.negocio.dias import periodo_actual
+from app.negocio.dias import periodo_actual, sumar_meses
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.negocio.reservas import crear_reserva_aislada
 from app.repositorio.registro import obtener_repositorio
@@ -1250,6 +1250,7 @@ def test_crear_cargo_especial_persiste(qtbot, conn):
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))  # default Tipo=Débito
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
     panel._crear()
@@ -1268,6 +1269,7 @@ def test_crear_cargo_especial_periodo_mes_anterior_se_rechaza(qtbot, conn):
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))  # default Tipo=Débito
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
     panel.campo_periodo.setText("2026-07")
@@ -1306,6 +1308,7 @@ def test_tabla_cargos_especiales_usa_formato_canonico_de_profesional(qtbot, conn
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))  # default Tipo=Débito
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
     panel._crear()
@@ -1327,6 +1330,7 @@ def test_tabla_cargos_especiales_click_en_columna_ordena_y_alterna_sentido(qtbot
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))  # default Tipo=Débito
     for concepto, monto in (("bbb", 100), ("aaa", 200)):
         panel.campo_concepto.setText(concepto)
         panel.spin_monto.setValue(monto)
@@ -1375,6 +1379,7 @@ def test_tabla_cargos_especiales_incluye_columna_fecha_con_formato_dia(qtbot, co
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))  # default Tipo=Débito
     panel.campo_concepto.setText("ajuste manual")
     panel.spin_monto.setValue(1500)
     panel._crear()
@@ -1511,6 +1516,88 @@ def test_combo_subtipo_cargos_especiales_ofrece_los_tres_editables_sin_deposito_
     assert opciones == {"Ajuste", "Bonificación", "Ítem libre"}
 
 
+def test_subtipo_bonificacion_fuerza_tipo_debito_y_lo_bloquea(qtbot, conn):
+    """Pedido explícito de la clienta: "Si se selecciona 'Bonificación' el
+    tipo se pone en débito y no se puede modificar"."""
+    _preparar(conn)
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Bonificación"))
+    assert panel.combo_tipo.currentData() == "Débito"
+    assert not panel.combo_tipo.isEnabled()
+
+
+def test_subtipo_ajuste_deja_tipo_editable_por_defecto_credito(qtbot, conn):
+    _preparar(conn)
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ajuste"))
+    assert panel.combo_tipo.currentData() == "Crédito"
+    assert panel.combo_tipo.isEnabled()
+
+
+def test_subtipo_item_libre_deja_tipo_editable_por_defecto_debito(qtbot, conn):
+    _preparar(conn)
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))
+    assert panel.combo_tipo.currentData() == "Débito"
+    assert panel.combo_tipo.isEnabled()
+
+
+def test_subtipo_arriba_de_tipo_en_la_cadena_de_foco(qtbot, conn):
+    """Pedido explícito de la clienta: "Subtipo que esté arriba de tipo"."""
+    _preparar(conn)
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    orden = panel._foco._orden
+    assert orden.index(panel.combo_subtipo) < orden.index(panel.combo_tipo)
+
+
+def test_crear_cargo_especial_mes_en_curso_regenera_liquidacion_no_enviada(qtbot, conn):
+    from app.negocio.liquidaciones import emitir_liquidacion
+
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_liquidacion, _ = emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo_actual(conn))
+    obtener_repositorio(conn, "LiquidacionEmitida").actualizar(id_liquidacion, EstadoEnvio="Enviada")
+    conn.commit()
+
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))
+    panel.campo_concepto.setText("cargo del mes")
+    panel.spin_monto.setValue(100)
+    panel._crear()
+
+    liquidaciones = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_profesional, Periodo=periodo_actual(conn),
+    )
+    ultima = max(liquidaciones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_crear_cargo_especial_mes_proximo_no_intenta_regenerar_nada(qtbot, conn, monkeypatch):
+    import app.gui.pantallas.novedades as mod_novedades
+
+    _preparar(conn)
+    llamado = []
+    monkeypatch.setattr(mod_novedades, "regenerar_si_corresponde", lambda *a, **k: llamado.append((a, k)))
+
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))
+    panel.campo_concepto.setText("cargo del mes que viene")
+    panel.spin_monto.setValue(100)
+    panel.campo_periodo.setText(sumar_meses(periodo_actual(conn), 1))
+    panel._crear()
+
+    assert llamado == []
+
+
 def test_crear_cargo_especial_con_subtipo_elegido_persiste_y_se_ve_en_la_tabla(qtbot, conn):
     _preparar(conn)
     panel = _PanelCargosEspeciales(conn)
@@ -1530,9 +1617,9 @@ def test_modificar_cargo_especial_sin_llave_precarga_el_subtipo(qtbot, conn):
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
-    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ajuste"))
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ajuste"))  # default Tipo=Crédito
     panel.campo_concepto.setText("ajuste manual")
-    panel.spin_monto.setValue(1500)
+    panel.spin_monto.setValue(-1500)
     panel._crear()
 
     panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))  # para confirmar que se repone
@@ -1590,6 +1677,18 @@ def test_estado_cuenta_cargos_tiene_filtro_a_la_izquierda_y_datos_uno_por_linea(
     panel = _PanelEstadoCuentaCargos(conn)
     qtbot.addWidget(panel)
     assert len(panel.etiquetas_resumen) == 4
+
+
+def test_estado_cuenta_cargos_panel_de_filtros_ancho_fijo_y_tabla_sin_blanco(qtbot, conn):
+    """Pedido explícito de la clienta: el panel de filtros entero (no
+    solo el combo) a un ancho fijo más ancho, para que la tabla no se
+    corra al elegir profesional, y la tabla sin área en blanco a la
+    derecha del último encabezado."""
+    panel = _PanelEstadoCuentaCargos(conn)
+    qtbot.addWidget(panel)
+    panel_filtros = panel.combo_profesional.parentWidget()
+    assert panel_filtros.minimumWidth() == panel_filtros.maximumWidth() == 340
+    assert panel.tabla.horizontalHeader().stretchLastSection()
 
 
 def test_solapa_estado_cuenta_cargos_muestra_saldos_y_tabla_igual_a_registro(qtbot, conn):

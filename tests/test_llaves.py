@@ -58,6 +58,31 @@ def test_crear_llave_asigna_nombre_automatico(conn):
     assert llave["Activo"] == 1
 
 
+def test_siguiente_nombre_llave_tipo_edificio_suma_el_edificio(conn, edificios):
+    id_ramos1, id_ramos2 = edificios
+    assert siguiente_nombre_llave(conn, "Edificio", id_edificio=id_ramos1) == "Tipo llave E1 - Ramos 1"
+    crear_llave(conn, tipo="Edificio", id_edificio=id_ramos1)
+    assert siguiente_nombre_llave(conn, "Edificio", id_edificio=id_ramos2) == "Tipo llave E2 - Ramos 2"
+
+
+def test_siguiente_nombre_llave_tipo_edificio_sin_edificio_elegido_no_suma_nada(conn):
+    assert siguiente_nombre_llave(conn, "Edificio") == "Tipo llave E1"
+    assert siguiente_nombre_llave(conn, "Edificio", id_edificio=None) == "Tipo llave E1"
+
+
+def test_siguiente_nombre_llave_tipo_unidad_ignora_id_edificio(conn, edificios):
+    """La nomenclatura de Unidad queda sin cambios, pedido explícito de la
+    clienta — aunque se pase un id_edificio, no se usa para ese Tipo."""
+    assert siguiente_nombre_llave(conn, "Unidad", id_edificio=edificios[0]) == "Tipo llave U1"
+
+
+def test_crear_llave_tipo_edificio_con_id_edificio_guarda_el_nombre_completo(conn, edificios):
+    id_ramos1, _ = edificios
+    id_llave = crear_llave(conn, tipo="Edificio", id_edificio=id_ramos1)
+    llave = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    assert llave["Nombre"] == "Tipo llave E1 - Ramos 1"
+
+
 def test_resumen_stock_vacio(conn):
     id_llave = crear_llave(conn)
     resumen = resumen_stock(conn, id_llave)

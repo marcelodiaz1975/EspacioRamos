@@ -106,6 +106,11 @@ _ANCHO_CAMPO = 265  # ancho compartido por todo lo que va en la columna izquierd
                     # (8px 16px, más ancho que el botón sin estilo de antes)
 _ANCHO_COMBO_PROFESIONAL = _ANCHO_CAMPO
 _ANCHO_COL_PROFESIONAL = 180
+# Pedido explícito de la clienta sobre "Estado de cuenta" (solapa de
+# Cargos especiales): el panel de filtros entero, no solo el combo, para
+# que la tabla no se corra al elegir profesional — mismo criterio y
+# mismo valor que `_ANCHO_PANEL_FILTROS_ESTADO_CUENTA` de Liquidaciones.
+_ANCHO_PANEL_FILTROS_ESTADO_CUENTA_CARGOS = 340
 _PADDING_COLUMNA = 30  # pedido de la clienta: las columnas se veían apretadas, sobraba ancho de sobra
 _LOCALE_ES = QLocale(QLocale.Language.Spanish)
 _FORMATO_FECHA_DIA = "ddd dd-MM-yyyy"  # ej. "lun 07-09-2026" — pedido de la clienta al revisar esta
@@ -1293,17 +1298,22 @@ class _PanelCargosEspeciales(QWidget):
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
-        self.combo_tipo = QComboBox()
-        for t in TIPOS_CARGO:
-            self.combo_tipo.addItem(t, t)
-        form.addWidget(QLabel("Tipo"))
-        form.addWidget(self.combo_tipo)
-
+        # Subtipo arriba de Tipo (pedido explícito de la clienta) — el
+        # Subtipo elegido define el Tipo por defecto y, para Bonificación,
+        # lo bloquea (ver `_actualizar_tipo_segun_subtipo`).
         self.combo_subtipo = QComboBox()
         for s in _SUBTIPOS_CARGO_EDITABLES:
             self.combo_subtipo.addItem(s, s)
         form.addWidget(QLabel("Subtipo"))
         form.addWidget(self.combo_subtipo)
+
+        self.combo_tipo = QComboBox()
+        for t in TIPOS_CARGO:
+            self.combo_tipo.addItem(t, t)
+        form.addWidget(QLabel("Tipo"))
+        form.addWidget(self.combo_tipo)
+        self.combo_subtipo.currentIndexChanged.connect(self._actualizar_tipo_segun_subtipo)
+        self._actualizar_tipo_segun_subtipo()
 
         self.campo_concepto = QLineEdit()
         form.addWidget(QLabel("Concepto"))
@@ -1350,11 +1360,28 @@ class _PanelCargosEspeciales(QWidget):
         layout.addWidget(splitter)
         self._foco = instalar_enter_avanza_foco(
             [
-                self.combo_profesional, self.combo_tipo, self.combo_subtipo, self.campo_concepto,
+                self.combo_profesional, self.combo_subtipo, self.combo_tipo, self.campo_concepto,
                 self.spin_monto, self.campo_periodo, boton, boton_modificar, boton_eliminar,
             ],
             parent=self,
         )
+
+    def _actualizar_tipo_segun_subtipo(self) -> None:
+        """Pedido explícito de la clienta: "Si se selecciona 'Bonificación'
+        el tipo se pone en débito y no se puede modificar; si es ajuste se
+        puede editar tipo pero que sea por defecto crédito; si es ítem
+        libre se puede editar pero que sea por defecto débito." — se
+        reaplica cada vez que cambia el Subtipo (no solo al construir la
+        pantalla), así que elegir un Subtipo siempre vuelve el Tipo a su
+        default para ESE subtipo."""
+        subtipo = self.combo_subtipo.currentData()
+        if subtipo == "Bonificación":
+            self.combo_tipo.setCurrentIndex(self.combo_tipo.findData("Débito"))
+            self.combo_tipo.setEnabled(False)
+            return
+        self.combo_tipo.setEnabled(True)
+        default = "Crédito" if subtipo == "Ajuste" else "Débito"  # Ítem libre -> Débito
+        self.combo_tipo.setCurrentIndex(self.combo_tipo.findData(default))
 
     def _actualizar_color_monto(self) -> None:
         """Mismo criterio que la tabla: negativo en rojo, positivo en
@@ -1433,6 +1460,14 @@ class _PanelCargosEspeciales(QWidget):
             QMessageBox.warning(self, "Crear cargo especial", str(error))
             return
         self.conn.commit()
+        # Pedido explícito de la clienta: imputado al mes en curso, la
+        # liquidación de ESE período (si ya estaba emitida) se regenera y
+        # queda marcada como no enviada; imputado al mes que viene, no hay
+        # nada que regenerar todavía — `calcular_liquidacion` lo toma solo
+        # cuando le llegue el turno a ese período.
+        if periodo_imputado == periodo_actual(self.conn):
+            regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_imputado)
+            self.conn.commit()
         self.actualizar()
         self.combo_profesional.setFocus()
 
@@ -1465,6 +1500,11 @@ class _PanelCargosEspeciales(QWidget):
             return
         obtener_repositorio(self.conn, "CargoEspecial").eliminar(registro["IdCargo"])
         self.conn.commit()
+        if registro["PeriodoImputado"] == periodo_actual(self.conn):
+            regenerar_si_corresponde(
+                self.conn, id_profesional=registro["IdProfesional"], periodo=registro["PeriodoImputado"],
+            )
+            self.conn.commit()
         self.actualizar()
         self.combo_profesional.setFocus()
 
@@ -1480,13 +1520,25 @@ class _PanelCargosEspeciales(QWidget):
             return
         obtener_repositorio(self.conn, "CargoEspecial").eliminar(registro["IdCargo"])
         self.conn.commit()
+        if registro["PeriodoImputado"] == periodo_actual(self.conn):
+            regenerar_si_corresponde(
+                self.conn, id_profesional=registro["IdProfesional"], periodo=registro["PeriodoImputado"],
+            )
+            self.conn.commit()
         self.actualizar()
 
         indice_profesional = self.combo_profesional.findData(registro["IdProfesional"])
         if indice_profesional >= 0:
             self.combo_profesional.setCurrentIndex(indice_profesional)
-        self.combo_tipo.setCurrentIndex(self.combo_tipo.findData(registro["Tipo"]))
+        # Subtipo primero: `_actualizar_tipo_segun_subtipo` se dispara solo
+        # y pisa Tipo con el default de ese subtipo — para Ajuste/Ítem
+        # libre se vuelve a pisar después con el Tipo real ya guardado
+        # (puede no coincidir con el default); para Bonificación el
+        # default SIEMPRE es Débito y queda bloqueado, así que no hay nada
+        # que restaurar.
         self.combo_subtipo.setCurrentIndex(self.combo_subtipo.findData(registro["Subtipo"]))
+        if registro["Subtipo"] != "Bonificación":
+            self.combo_tipo.setCurrentIndex(self.combo_tipo.findData(registro["Tipo"]))
         self.campo_concepto.setText(registro["Concepto"])
         self.spin_monto.setValue(registro["Monto"])
         self.campo_periodo.setText(registro["PeriodoImputado"] or periodo_actual(self.conn))
@@ -1510,7 +1562,15 @@ class _PanelEstadoCuentaCargos(QWidget):
         layout = QHBoxLayout(self)
         splitter = QSplitter()
 
+        # Pedido explícito de la clienta: el panel ENTERO (no solo el
+        # combo) a un ancho fijo más generoso — con solo un máximo (o
+        # nada), el panel se achica al ancho natural de su contenido y la
+        # tabla termina ocupando distinto lugar según qué tan ancho sea el
+        # combo desplegado en ese momento, dando la sensación de que "se
+        # corre" al elegir profesional. Mismo criterio y mismo valor que
+        # `_ANCHO_PANEL_FILTROS_ESTADO_CUENTA` de Liquidaciones.
         panel_form = QWidget()
+        panel_form.setFixedWidth(_ANCHO_PANEL_FILTROS_ESTADO_CUENTA_CARGOS)
         form = QVBoxLayout(panel_form)
         form.addWidget(_titulo_campo("Profesional"))
         self.combo_profesional = QComboBox()
@@ -1535,6 +1595,11 @@ class _PanelEstadoCuentaCargos(QWidget):
         self.tabla.setColumnCount(6)
         self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Subtipo", "Concepto", "Monto", "Período imputado"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Pedido explícito de la clienta: sin esto, `resizeColumnsToContents`
+        # deja la tabla con un área en blanco a la derecha del último
+        # encabezado — la última columna se estira para ocupar el resto
+        # del ancho disponible del viewport.
+        self.tabla.horizontalHeader().setStretchLastSection(True)
         splitter.addWidget(self.tabla)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)

@@ -253,11 +253,21 @@ def crear_cargo_especial(
     """A diferencia de Pagos (que sí puede corregir hasta un mes atrás), un
     cargo especial nunca se imputa a un período ya cerrado — ajustes,
     bonificaciones y depósitos/reintegros de llave se cargan siempre al mes
-    en curso o a uno posterior, para no tener que reabrir una liquidación
-    ya emitida (confirmado por la clienta). El monto lleva directo el
-    signo que le corresponde al Tipo (Débito positivo, Crédito negativo)
-    — Tipo queda como una validación cruzada de ese signo, no hace falta
-    derivarlo aparte en ningún lado que sume estos montos.
+    en curso o al que viene, nunca más adelante (pedido explícito de la
+    clienta: "solo se puede agendar para el mes en curso o el que viene"),
+    para no tener que reabrir una liquidación ya emitida. El monto lleva
+    directo el signo que le corresponde al Tipo (Débito positivo, Crédito
+    negativo) — Tipo queda como una validación cruzada de ese signo, no
+    hace falta derivarlo aparte en ningún lado que sume estos montos.
+
+    Esta función NO regenera ninguna liquidación — eso queda del lado de
+    la GUI (`_PanelCargosEspeciales._crear`, mismo criterio que Vacaciones/
+    Licencias/Reservas regulares): si el cargo se imputa al mes en curso,
+    la liquidación de ESE período ya emitida tiene que regenerarse y
+    quedar marcada como no enviada; si se imputa al mes que viene, no hay
+    nada para regenerar todavía — `calcular_liquidacion` ya lo toma solo
+    cuando le llegue el turno a ese período (filtra `CargoEspecial` por
+    `PeriodoImputado` exacto).
 
     `subtipo` (#42) se deriva solo cuando viene `id_llave`: "Depósito de
     llave" siempre, sin importar lo que se pase — es estructural (ver
@@ -270,8 +280,12 @@ def crear_cargo_especial(
         raise ValueError(f"Tipo de cargo inválido: {tipo!r} (debe ser Débito o Crédito)")
     if not periodo_imputado:
         raise ValueError("El período imputado es obligatorio")
-    if periodo_imputado < periodo_actual(conn):
-        raise ValueError("No se puede imputar un cargo especial a un período anterior al mes en curso")
+    periodo_siguiente = sumar_meses(periodo_actual(conn), 1)
+    if periodo_imputado not in (periodo_actual(conn), periodo_siguiente):
+        raise ValueError(
+            "Un cargo especial solo se puede imputar al mes en curso o al que viene "
+            f"({periodo_actual(conn)} o {periodo_siguiente})"
+        )
     if tipo == "Débito" and monto <= 0:
         raise ValueError("Un cargo especial Débito debe cargarse con un monto positivo")
     if tipo == "Crédito" and monto >= 0:

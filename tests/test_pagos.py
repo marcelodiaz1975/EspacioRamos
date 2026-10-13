@@ -2,7 +2,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.dias import periodo_actual
+from app.negocio.dias import periodo_actual, sumar_meses
 from app.negocio.pagos import (
     abrir_tanda_sobres,
     cancelar_plan,
@@ -247,6 +247,25 @@ def test_crear_cargo_especial_rechaza_periodo_anterior(conn, profesional):
         crear_cargo_especial(
             conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=100,
             periodo_imputado="2000-01",
+        )
+
+
+def test_crear_cargo_especial_acepta_el_mes_que_viene(conn, profesional):
+    """Pedido explícito de la clienta: "solo se puede agendar para el mes
+    en curso o el que viene"."""
+    id_cargo = crear_cargo_especial(
+        conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=100,
+        periodo_imputado=sumar_meses(periodo_actual(conn), 1),
+    )
+    cargo = obtener_repositorio(conn, "CargoEspecial").obtener(id_cargo)
+    assert cargo["PeriodoImputado"] == sumar_meses(periodo_actual(conn), 1)
+
+
+def test_crear_cargo_especial_rechaza_mas_de_un_mes_adelante(conn, profesional):
+    with pytest.raises(ValueError):
+        crear_cargo_especial(
+            conn, id_profesional=profesional, tipo="Débito", concepto="x", monto=100,
+            periodo_imputado=sumar_meses(periodo_actual(conn), 2),
         )
 
 

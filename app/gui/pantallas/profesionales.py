@@ -35,7 +35,9 @@ from PySide6.QtWidgets import (
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.pantallas import catalogos
+from app.gui.pantallas.reservas import _opciones_profesional as _opciones_profesional_canonico
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import aplicar_cambio_codigo
 from app.negocio.dias import fecha_actual
 from app.negocio.documentacion_profesional import (
@@ -143,14 +145,19 @@ def _opciones_sexo(conn: sqlite3.Connection) -> list[tuple[str, str]]:
     return _SEXOS
 
 
+def _opciones_tratamiento_usados(conn: sqlite3.Connection) -> list[str]:
+    """Cualquier `Tratamiento` ya cargado en algún profesional del
+    sistema, sin duplicados — ver `_actualizar_tratamiento`."""
+    filas = conn.execute(
+        "SELECT DISTINCT Tratamiento FROM Profesional WHERE Tratamiento IS NOT NULL AND Tratamiento != '' "
+        "ORDER BY Tratamiento"
+    ).fetchall()
+    return [f["Tratamiento"] for f in filas]
+
+
 def _opciones_profesion(conn: sqlite3.Connection) -> list[tuple[int, str]]:
     filas = conn.execute("SELECT IdProfesion, Nombre FROM Profesion ORDER BY Nombre").fetchall()
     return [(f["IdProfesion"], f["Nombre"]) for f in filas]
-
-
-def _opciones_profesional(conn: sqlite3.Connection) -> list[tuple[int, str]]:
-    filas = conn.execute("SELECT IdProfesional, Apellido, NombrePila FROM Profesional ORDER BY Apellido").fetchall()
-    return [(f["IdProfesional"], f"{f['Apellido']}, {f['NombrePila'] or ''}".strip(", ")) for f in filas]
 
 
 def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
@@ -173,10 +180,12 @@ def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
             "CondicionFiscal", "Condición fiscal", tipo="combo",
             opciones=opciones_lista("CondicionFiscal"), combo_editable=True,
         ),
-        Campo(
-            "FechaNacimiento", "Fecha de nacimiento (AAAA-MM-DD)",
-            validador=es_fecha_valida, formato_esperado=FORMATO_FECHA,
-        ),
+        # "DD-MM-YYYY" (sin día de semana, a diferencia de `tipo="fecha"`
+        # por default — ver `Campo.formato_fecha`): pedido explícito de
+        # la clienta, el día de la semana de un nacimiento no aporta
+        # nada (a diferencia de una fecha operativa como Vigencia o
+        # Fecha de ausencia).
+        Campo("FechaNacimiento", "Fecha de nacimiento", tipo="fecha", formato_fecha="dd-MM-yyyy"),
         Campo("Domicilio", "Domicilio"),
         Campo("DomicilioLocalidad", "Localidad"),
         Campo("TelefonoParticular", "Teléfono particular"),
@@ -189,9 +198,12 @@ def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
             "FechaContacto", "Fecha de contacto (AAAA-MM-DD)",
             validador=es_fecha_valida, formato_esperado=FORMATO_FECHA,
         ),
-        Campo("ProfesionalCabezaEquipo", "Cabeza de equipo", tipo="combo", opciones=_opciones_profesional),
-        Campo("SaldoCuentaActual", "Saldo cuenta actual", tipo="numero"),
-        Campo("SaldoCuentaAnterior", "Saldo cuenta anterior", tipo="numero"),
+        Campo(
+            "ProfesionalCabezaEquipo", "Cabeza de equipo", tipo="combo",
+            opciones=_opciones_profesional_canonico,
+        ),
+        Campo("SaldoCuentaActual", "Saldo cuenta actual", tipo="numero", es_monto=True),
+        Campo("SaldoCuentaAnterior", "Saldo cuenta anterior", tipo="numero", es_monto=True),
         Campo("PlazoPagoExtendido", "Plazo de pago extendido"),
         Campo("MotivoPlazoExtra", "Motivo del plazo extra"),
         Campo(
@@ -221,6 +233,12 @@ def _al_abrir_dialogo(dialogo) -> None:
     combo_sexo = dialogo._entradas["Sexo"]
     combo_tratamiento = dialogo._entradas["Tratamiento"]
 
+    # Mismo selector buscable (código o nombre, con jerarquía de
+    # categorías) que el resto del sistema — ya viene poblado en el
+    # formato canónico por `_opciones_profesional_canonico`, solo hace
+    # falta sumarle el comportamiento de búsqueda.
+    habilitar_busqueda_profesional(dialogo._entradas["ProfesionalCabezaEquipo"])
+
     ultimo_codigo_sugerido = [None]
 
     def _actualizar_codigo() -> None:
@@ -238,9 +256,20 @@ def _al_abrir_dialogo(dialogo) -> None:
     def _actualizar_tratamiento() -> None:
         id_profesion = combo_profesion.currentData()
         sexo = combo_sexo.currentData()
-        opciones = opciones_tratamiento(conn, id_profesion, sexo)
+        opciones_profesion = opciones_tratamiento(conn, id_profesion, sexo)
         sugerido = tratamiento_sugerido(conn, id_profesion, sexo)
         actual = combo_tratamiento.currentText().strip()
+
+        # `opciones_tratamiento` solo devuelve algo para Fonoaudiología/
+        # Psicopedagogía (sección 8.1) — para el resto de las profesiones
+        # el desplegable quedaba vacío ("no despliega la lista de
+        # tratamientos", bug reportado por la clienta): se suma, siempre,
+        # cualquier Tratamiento que ya se haya usado en algún profesional
+        # del sistema (mismo criterio "catálogo abierto, sugiere lo ya
+        # usado" que `Responsable.Rol`/`CondicionFiscal`), así que el
+        # desplegable nunca queda sin nada para elegir una vez que hay al
+        # menos un profesional cargado con tratamiento.
+        opciones = list(dict.fromkeys([*opciones_profesion, *_opciones_tratamiento_usados(conn)]))
 
         combo_tratamiento.blockSignals(True)
         combo_tratamiento.clear()
@@ -309,6 +338,11 @@ class _PanelProfesionales(QWidget):
             panel_extra_izquierda=panel_doc,
             etiqueta_buscar="Buscar profesional",
             anidado=True,
+            # Solo en el diálogo Nuevo/Editar — pedido explícito de la
+            # clienta: Categoría al principio, arriba de Código. La
+            # tabla/listado sigue mostrando las columnas en el orden de
+            # siempre ("Código - Tratamiento - Nombre - Apellido...").
+            campos_primero_dialogo=["CategoriaProfesional"],
         )
         self.crud_profesionales.tabla_widget.itemSelectionChanged.connect(self._actualizar_documentacion)
         layout.addWidget(self.crud_profesionales, stretch=1)

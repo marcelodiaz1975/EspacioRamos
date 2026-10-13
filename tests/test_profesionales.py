@@ -113,6 +113,30 @@ def test_nuevo_profesional_sugiere_codigo_de_la_categoria_por_defecto(qtbot, con
     assert dialogo._entradas["IdCodigo"].text() == "R1"
 
 
+def test_tratamiento_ofrece_los_ya_usados_aunque_la_profesion_no_tenga_desplegable(qtbot, conn):
+    """Bug reportado por la clienta ("no despliega el menú de los
+    tratamientos"): `opciones_tratamiento` solo devuelve algo para
+    Fonoaudiología/Psicopedagogía — para el resto de las profesiones el
+    desplegable quedaba vacío. Ahora siempre suma, además, cualquier
+    Tratamiento ya usado en algún profesional del sistema."""
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido, Tratamiento) VALUES ('R', 'Pérez', 'Dr.')")
+    conn.commit()
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    combo = dialogo._entradas["Tratamiento"]
+    opciones = [combo.itemText(i) for i in range(combo.count())]
+    assert "Dr." in opciones
+
+
+def test_cabeza_de_equipo_tiene_busqueda_habilitada_y_formato_canonico(qtbot, conn):
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido, IdCodigo) VALUES ('R', 'Gómez', 'R1')")
+    conn.commit()
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    combo = dialogo._entradas["ProfesionalCabezaEquipo"]
+    assert combo.isEditable() is True
+    assert combo.completer() is not None
+    assert combo.itemText(0) == "R1 - Gómez"
+
+
 def test_sugerencia_de_codigo_se_actualiza_al_cambiar_categoria(qtbot, conn):
     dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
     combo_categoria = dialogo._entradas["CategoriaProfesional"]
@@ -458,3 +482,55 @@ def test_pantalla_profesionales_columnas_en_orden_codigo_tratamiento_nombre_apel
     qtbot.addWidget(pantalla)
     etiquetas = [c.etiqueta for c in pantalla.crud_profesionales.campos[:4]]
     assert etiquetas == ["Código", "Tratamiento", "Nombre", "Apellido"]
+
+
+def test_categoria_queda_primero_en_el_dialogo_pero_la_tabla_no_cambia(qtbot, conn):
+    """Pedido explícito de la clienta: Categoría al principio, arriba de
+    Código, SOLO en el cuadro de diálogo — el listado sigue mostrando
+    las columnas en el orden canónico de siempre."""
+    pantalla = _PanelProfesionales(conn)
+    qtbot.addWidget(pantalla)
+    crud = pantalla.crud_profesionales
+    assert crud.campos[0].nombre == "IdCodigo"  # tabla: sin cambios
+    campos_dialogo = crud._campos_dialogo()
+    assert campos_dialogo[0].nombre == "CategoriaProfesional"
+    assert [c.nombre for c in campos_dialogo[1:]] == [c.nombre for c in crud.campos if c.nombre != "CategoriaProfesional"]
+
+
+def test_dialogo_se_ensancha_para_que_entren_etiquetas_largas(qtbot, conn):
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    assert dialogo.width() > 480  # el campo de "Día del mes para plazo extendido..." no entraba en el ancho fijo viejo
+
+
+def test_fecha_nacimiento_sin_cargar_no_guarda_hoy_por_defecto(qtbot, conn):
+    """Bug real: un `QDateEdit` siempre tiene algún valor concreto — sin
+    el sentinel "(sin fecha)", un alta nueva sin tocar el campo hubiera
+    guardado la fecha de hoy como si fuera el nacimiento real."""
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    assert dialogo._entradas["FechaNacimiento"].text() == "(sin fecha)"
+    dialogo._entradas["Apellido"].setText("Gómez")
+    assert dialogo.valores()["FechaNacimiento"] is None
+
+
+def test_fecha_nacimiento_formato_sin_dia_de_semana(qtbot, conn):
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    from PySide6.QtCore import QDate
+    dialogo._entradas["FechaNacimiento"].setDate(QDate(1990, 5, 20))
+    assert dialogo._entradas["FechaNacimiento"].text() == "20-05-1990"
+    dialogo._entradas["Apellido"].setText("Gómez")
+    assert dialogo.valores()["FechaNacimiento"] == "1990-05-20"
+
+
+def test_fecha_nacimiento_ya_cargada_se_precarga_y_se_puede_guardar_igual(qtbot, conn):
+    id_prof = conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido, FechaNacimiento) VALUES ('R', 'Gómez', '1990-05-20')"
+    ).lastrowid
+    conn.commit()
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    assert dialogo._entradas["FechaNacimiento"].text() == "20-05-1990"
+    assert dialogo.valores()["FechaNacimiento"] == "1990-05-20"

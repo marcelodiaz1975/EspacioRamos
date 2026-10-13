@@ -124,6 +124,29 @@ def test_tab_sigue_la_misma_cadena_que_enter(qtbot):
     qtbot.waitUntil(lambda: campo_1.hasFocus())  # último -> primero, igual que Enter
 
 
+def test_tab_selecciona_el_contenido_prefijado_del_campo_al_llegar(qtbot):
+    """Pedido explícito de la clienta en una segunda vuelta sobre Llaves:
+    "cuando tabulo hacia un cuadro de texto en el que hay una opción
+    prefijada... que quede seleccionado al hacer foco ahí" — reversa la
+    decisión anterior de que Tab no seleccionara nada (solo Enter lo
+    hacía)."""
+    contenedor = QWidget()
+    layout = QVBoxLayout(contenedor)
+    campo_1 = QLineEdit()
+    campo_2 = QLineEdit("Valor prefijado")
+    for w in (campo_1, campo_2):
+        layout.addWidget(w)
+    foco = instalar_enter_avanza_foco([campo_1, campo_2])
+    contenedor._foco = foco
+    _mostrar(qtbot, contenedor)
+
+    campo_1.setFocus()
+    qtbot.waitUntil(lambda: campo_1.hasFocus())
+    QTest.keyClick(campo_1, Qt.Key.Key_Tab)
+    qtbot.waitUntil(lambda: campo_2.hasFocus())
+    assert campo_2.selectedText() == "Valor prefijado"
+
+
 def test_shift_tab_retrocede_en_la_misma_cadena(qtbot):
     contenedor = QWidget()
     layout = QVBoxLayout(contenedor)

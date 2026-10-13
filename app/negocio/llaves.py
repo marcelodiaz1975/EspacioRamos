@@ -49,14 +49,26 @@ from app.repositorio.registro import obtener_repositorio
 _LETRA_POR_TIPO = {"Edificio": "E", "Unidad": "U", "No especificada": "N"}
 
 
-def siguiente_nombre_llave(conn: sqlite3.Connection, tipo: str) -> str:
+def siguiente_nombre_llave(conn: sqlite3.Connection, tipo: str, *, id_edificio: int | None = None) -> str:
     """Arma el nombre correlativo por letra ("Tipo llave E1", "Tipo llave
     U3", ...) que le va a corresponder al próximo Tipo de llave que se cree
     con ese Tipo. Expuesto aparte de crear_llave para que la pantalla
-    pueda mostrarlo como previsualización antes de confirmar el alta."""
+    pueda mostrarlo como previsualización antes de confirmar el alta.
+
+    Para Tipo="Edificio", pedido explícito de la clienta: el nombre suma
+    el Edificio elegido ("Tipo llave E1 - Ramos 1"), para no tener que
+    abrir la pantalla de Accesos para saber a qué edificio corresponde
+    cada Tipo. La nomenclatura de Unidad queda sin cambios (una llave de
+    ese tipo puede abrir más de una unidad, no hay un único nombre sin
+    ambigüedad que sumarle — ver `_lugar_llave_texto`)."""
     letra = _LETRA_POR_TIPO[tipo]
     cantidad = len(obtener_repositorio(conn, "Llave").listar(Tipo=tipo))
-    return f"Tipo llave {letra}{cantidad + 1}"
+    nombre = f"Tipo llave {letra}{cantidad + 1}"
+    if tipo == "Edificio" and id_edificio is not None:
+        edificio = obtener_repositorio(conn, "Edificio").obtener(id_edificio)
+        if edificio is not None:
+            nombre += f" - {edificio['Nombre']}"
+    return nombre
 
 
 def _lugar_llave_texto(conn: sqlite3.Connection, llave: sqlite3.Row) -> str:
@@ -87,9 +99,9 @@ def _lugar_llave_texto(conn: sqlite3.Connection, llave: sqlite3.Row) -> str:
 
 def crear_llave(
     conn: sqlite3.Connection, *, tipo: str = "No especificada", valor_deposito_actual: float = 0.0,
-    observacion: str | None = None,
+    observacion: str | None = None, id_edificio: int | None = None,
 ) -> int:
-    nombre = siguiente_nombre_llave(conn, tipo)
+    nombre = siguiente_nombre_llave(conn, tipo, id_edificio=id_edificio)
     repo = obtener_repositorio(conn, "Llave")
     return repo.crear(
         Nombre=nombre, Tipo=tipo, ValorDepositoActual=valor_deposito_actual, Observacion=observacion, Activo=1,

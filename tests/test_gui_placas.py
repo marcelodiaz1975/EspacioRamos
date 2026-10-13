@@ -368,6 +368,37 @@ def test_asignar_placa_nueva_crea_registro(qtbot, conn, monkeypatch):
     assert obtener_repositorio(conn, "Placa").listar(IdUnidad=id_unidad)[0]["IdProfesional"] == id_profesional
 
 
+def test_asignar_placa_nueva_sin_posiciones_libres_avisa_la_alternativa(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: si la unidad elegida no tiene
+    ninguna posición libre, el aviso sugiere reasignar la posición de
+    otro profesional como alternativa, en vez de solo decir "no hay
+    lugar"."""
+    _, id_unidad = _crear_unidad(conn, limite_placas=1)
+    ocupante = _crear_profesional(conn, apellido="Ocupante")
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=ocupante)
+    id_profesional = _crear_profesional(conn, apellido="Nuevo")
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+
+    def _aceptar(self, *a, **k):
+        indice_unidad = self.combo_unidad.findData(id_unidad)
+        self.combo_unidad.setCurrentIndex(indice_unidad)
+        indice_profesional = self.combo_profesional.findData(id_profesional)
+        self.combo_profesional.setCurrentIndex(indice_profesional)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoPlaca, "exec", _aceptar)
+    mensajes = []
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        staticmethod(lambda *a, **k: mensajes.append(a[2]) if len(a) > 2 else None),
+    )
+    pantalla._asignar_nueva()
+
+    assert pantalla.tabla.rowCount() == 1  # solo el ocupante original, no se creó nada nuevo
+    assert mensajes and "reasignar" in mensajes[0].lower()
+
+
 def test_reasignar_pisa_el_mismo_registro(qtbot, conn, monkeypatch):
     _, id_unidad = _crear_unidad(conn)
     id_viejo = _crear_profesional(conn, apellido="Viejo")
@@ -752,6 +783,62 @@ def test_agregar_a_impresion_sin_placa_personalizada_usa_el_nombre_estandar(qtbo
     assert entrada["linea2"] is None
 
 
+def test_lista_placa_imprimir_un_solo_resultado_se_preselecciona(qtbot, conn):
+    """Pedido explícito de la clienta: poder elegir cuál de las placas
+    asignadas imprimir — con una sola, se preselecciona sola."""
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn, apellido="Pugliese", nombre_pila="Silvina")
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
+    pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
+
+    assert pantalla.lista_placa_imprimir.count() == 1
+    assert len(pantalla.lista_placa_imprimir.selectedItems()) == 1
+    assert pantalla.boton_agregar_impresion.isEnabled()
+
+
+def test_lista_placa_imprimir_con_dos_placas_no_preselecciona_y_bloquea_el_boton(qtbot, conn):
+    """Un profesional con placa estándar en una unidad y personalizada en
+    otra — no se puede adivinar cuál imprimir, hay que elegir."""
+    _, id_unidad_1 = _crear_unidad(conn, departamento="1ro A")
+    _, id_unidad_2 = _crear_unidad(conn, departamento="2do B")
+    id_profesional = _crear_profesional(conn, apellido="Pugliese", nombre_pila="Silvina")
+    asignar_placa(conn, id_unidad=id_unidad_1, posicion=1, id_profesional=id_profesional)
+    asignar_placa(
+        conn, id_unidad=id_unidad_2, posicion=1, id_profesional=id_profesional,
+        es_personalizada=True, nombre_grabado_personalizado="Lic. Silvina Pugliese",
+    )
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
+    pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
+
+    assert pantalla.lista_placa_imprimir.count() == 2
+    assert not pantalla.lista_placa_imprimir.selectedItems()
+    assert not pantalla.boton_agregar_impresion.isEnabled()
+
+    pantalla.lista_placa_imprimir.setCurrentRow(1)  # elige la personalizada
+    assert pantalla.boton_agregar_impresion.isEnabled()
+    pantalla._agregar_a_impresion()
+    entrada = pantalla._cola_impresion[0]
+    assert entrada["linea1"] == "Lic. Silvina Pugliese"
+
+
+def test_lista_placa_imprimir_sin_ninguna_placa_asignada_deja_el_boton_habilitado(qtbot, conn):
+    """Sin placa asignada todavía, "Agregar a impresión" sigue andando —
+    imprime la ficha estándar, mismo criterio de siempre."""
+    id_profesional = _crear_profesional(conn, apellido="Difalco", nombre_pila="Sol")
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
+    pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
+
+    assert pantalla.lista_placa_imprimir.count() == 0
+    assert pantalla.boton_agregar_impresion.isEnabled()
+
+
 def test_generar_pdf_sin_carpeta_base_no_falla(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     pantalla = _PanelPlacasOperativas(conn)
@@ -775,7 +862,7 @@ def test_generar_pdf_genera_archivo_y_vacia_la_cola(qtbot, conn, tmp_path):
 
     pantalla._generar_pdf_impresion()
 
-    generados = list((tmp_path / "Archivos varios" / "Placas").iterdir())
+    generados = list((tmp_path / "Archivos varios" / "Placas para imprimir").iterdir())
     assert len(generados) == 1
     assert generados[0].name.startswith("Placas para imprimir")
     assert pantalla.lista_impresion.count() == 0

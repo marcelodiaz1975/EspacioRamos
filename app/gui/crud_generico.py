@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
+from app.gui.widgets.resumen_saldo import item_monto
 from app.repositorio.registro import obtener_repositorio
 
 _ID_REGISTRO = Qt.ItemDataRole.UserRole
@@ -58,6 +59,20 @@ _LOCALE_ES = QLocale(QLocale.Language.Spanish)
 # tipo="fecha" en vez de duplicarlo pantalla por pantalla (pedido de la
 # clienta al revisar Fechas especiales).
 _FORMATO_FECHA_DIA = "ddd dd-MM-yyyy"
+# Sentinel de QDateEdit.setSpecialValueText para "sin fecha" en un
+# `Campo(tipo="fecha")` NO obligatorio (ej. Profesionales: Fecha de
+# nacimiento) — mismo criterio que `reservas._FECHA_SIN_DATO`/
+# `novedades._FECHA_SIN_DATO` (duplicado acá, este módulo no tiene
+# relación con esos: sin esto, un `QDateEdit` siempre tiene algún valor
+# concreto y un alta nueva sin tocar el campo guardaría "hoy" como si
+# fuera un dato real), pero con un valor DISTINTO: año 1900 en vez de
+# 2000. `setMinimumDate(_FECHA_SIN_DATO)` deja ese valor como el piso
+# del campo — el 2000 que usan Reservas/Novedades (fechas operativas,
+# nunca anteriores a la puesta en marcha del sistema) hubiera recortado
+# en silencio cualquier fecha de nacimiento real anterior a ese año
+# (bug real, encontrado al testear: `QDateEdit.setDate` con un valor
+# por debajo del mínimo lo clampea al mínimo sin avisar).
+_FECHA_SIN_DATO = QDate(1900, 1, 1)
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -81,15 +96,17 @@ def _normalizar_busqueda(texto: str) -> str:
     return _sin_acentos(texto).casefold()
 
 
-def _fmt_fecha_dia(fecha_iso: str | None) -> str:
+def _fmt_fecha_dia(fecha_iso: str | None, formato: str = _FORMATO_FECHA_DIA) -> str:
     """"lun 07-09-2026" a partir del AAAA-MM-DD guardado — ver
-    `_FORMATO_FECHA_DIA`. Si el valor no es una fecha válida (no debería
-    pasar, viene siempre de un QDateEdit) se muestra tal cual en vez de
-    romper."""
+    `_FORMATO_FECHA_DIA`. `formato` deja usar otro patrón distinto del
+    default (ej. Profesionales: "dd-MM-yyyy" sin día de semana para
+    Fecha de nacimiento/contacto, ver `Campo.formato_fecha`). Si el
+    valor no es una fecha válida (no debería pasar, viene siempre de un
+    QDateEdit) se muestra tal cual en vez de romper."""
     if not fecha_iso:
         return ""
     fecha_qt = QDate.fromString(fecha_iso, "yyyy-MM-dd")
-    return _LOCALE_ES.toString(fecha_qt, _FORMATO_FECHA_DIA) if fecha_qt.isValid() else fecha_iso
+    return _LOCALE_ES.toString(fecha_qt, formato) if fecha_qt.isValid() else fecha_iso
 
 
 def _referencia_debil(funcion):
@@ -135,6 +152,20 @@ class Campo:
     formato_esperado: str | None = None
     """Descripción corta del formato esperado, para el cartel de aviso
     cuando `validador` rechaza el valor (ej. "AAAA-MM-DD")."""
+    formato_fecha: str | None = None
+    """Solo para tipo="fecha": patrón de visualización a usar en vez del
+    default del sistema (`_FORMATO_FECHA_DIA`, "lun 07-09-2026") — ej.
+    Profesionales usa "dd-MM-yyyy" sin día de semana para Fecha de
+    nacimiento/contacto, donde el día de la semana no aporta nada."""
+    es_monto: bool = False
+    """Solo para tipo="numero": se muestra en la tabla como moneda
+    (`formatear_moneda`, con separador de miles), alineado a la derecha,
+    y en rojo si es negativo (mismo criterio `item_monto` que ya usan
+    las solapas "Estado de cuenta" de Pagos/Liquidaciones/Cargos
+    especiales — pedido explícito de la clienta: "compete a todos los
+    importes del sistema") — en vez del número crudo sin formato que
+    usan los campos numéricos que NO son un importe (ej. "Cantidad de
+    baños", "% Bonificación", "Orden")."""
     variables: dict[str, str] | None = None
     """Solo para tipo="texto_largo": variables `{nombre}` disponibles
     para sustituir en este campo, como `{"apodo": "Apodo del
@@ -184,6 +215,7 @@ class PantallaCRUD(QWidget):
         etiqueta_buscar: str = "Buscar",
         nuevo_secundario: bool = False,
         anidado: bool = False,
+        campos_primero_dialogo: list[str] | None = None,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -227,6 +259,13 @@ class PantallaCRUD(QWidget):
         # resolver (p. ej. Gastos operativos: no puede convivir un origen
         # Manual y uno Importado para el mismo concepto y período).
         self.al_guardar = al_guardar
+        # campos_primero_dialogo: nombres de `Campo` que, SOLO en el
+        # cuadro de diálogo Nuevo/Editar, se adelantan al principio del
+        # formulario en ese orden (ej. Profesionales: Categoría antes de
+        # Código) — la tabla/listado sigue mostrando las columnas en el
+        # orden original de `campos`, que no se toca (pedido puntual
+        # sobre el diálogo, no sobre el listado).
+        self._campos_primero_dialogo = campos_primero_dialogo
         # compacto: layout viejo (título + fila de botones arriba de la
         # tabla, sin solapa/filtro) — para cuando una pantalla compuesta
         # (ej. Mensajes predefinidos) inserta este CRUD como un componente
@@ -372,6 +411,12 @@ class PantallaCRUD(QWidget):
             self.boton_eliminar = QPushButton("Eliminar")
             self.boton_eliminar.setObjectName("botonSecundario")
             self.boton_eliminar.clicked.connect(self._eliminar)
+            # Editar/Eliminar arrancan deshabilitados y solo se habilitan con
+            # una fila seleccionada en la tabla (pedido explícito de la
+            # clienta, "ESTO PARA TODO EL SISTEMA") — mismo criterio ya usado
+            # en Pagos/Registrar pagos y Planes de pago.
+            self.boton_editar.setEnabled(False)
+            self.boton_eliminar.setEnabled(False)
             if ancho_botones is not None:
                 self.boton_nuevo.setFixedWidth(ancho_botones)
                 self.boton_editar.setFixedWidth(ancho_botones)
@@ -395,6 +440,7 @@ class PantallaCRUD(QWidget):
         self.tabla_widget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         if not self.solo_lectura:
             self.tabla_widget.doubleClicked.connect(self._editar)
+            self.tabla_widget.itemSelectionChanged.connect(self._actualizar_botones_seleccion)
             instalar_eliminar_con_tecla(self.tabla_widget, self._eliminar)
         if ancho_botones is None:
             layout.addWidget(self.tabla_widget, stretch=1)
@@ -428,12 +474,27 @@ class PantallaCRUD(QWidget):
         self.tabla_widget.setRowCount(len(registros))
         for fila_idx, registro in enumerate(registros):
             for col_idx, campo in enumerate(self.campos):
-                item = QTableWidgetItem(self._texto_celda(registro, campo))
+                if campo.tipo == "numero" and campo.es_monto:
+                    # Pedido explícito de la clienta ("compete a todos los
+                    # importes del sistema"): mismo helper ya usado en
+                    # Estado de cuenta de Pagos/Liquidaciones/Cargos
+                    # especiales — moneda, a la derecha, rojo si negativo.
+                    item = item_monto(registro[campo.nombre])
+                else:
+                    item = QTableWidgetItem(self._texto_celda(registro, campo))
                 if col_idx == 0:
                     item.setData(_ID_REGISTRO, registro[self.repositorio.clave_primaria])
                 self.tabla_widget.setItem(fila_idx, col_idx, item)
         self.tabla_widget.resizeColumnsToContents()
         self._aplicar_filtro_busqueda()
+        self._actualizar_botones_seleccion()
+
+    def _actualizar_botones_seleccion(self) -> None:
+        if self.solo_lectura:
+            return
+        hay_seleccion = self.fila_seleccionada_id() is not None
+        self.boton_editar.setEnabled(hay_seleccion)
+        self.boton_eliminar.setEnabled(hay_seleccion)
 
     def _clave_orden(self, columna: int):
         campo = self.campos[columna]
@@ -464,7 +525,7 @@ class PantallaCRUD(QWidget):
         if campo.tipo == "booleano":
             return "Sí" if valor else "No"
         if campo.tipo == "fecha":
-            return _fmt_fecha_dia(valor)
+            return _fmt_fecha_dia(valor, campo.formato_fecha or _FORMATO_FECHA_DIA)
         if campo.tipo == "combo" and campo.opciones:
             opciones = dict(campo.opciones(self.conn))
             return opciones.get(valor, "" if valor is None else str(valor))
@@ -478,8 +539,16 @@ class PantallaCRUD(QWidget):
             return None
         return self.tabla_widget.item(filas[0].row(), 0).data(_ID_REGISTRO)
 
+    def _campos_dialogo(self) -> list[Campo]:
+        if not self._campos_primero_dialogo:
+            return self.campos
+        por_nombre = {c.nombre: c for c in self.campos}
+        primeros = [por_nombre[nombre] for nombre in self._campos_primero_dialogo]
+        resto = [c for c in self.campos if c.nombre not in self._campos_primero_dialogo]
+        return primeros + resto
+
     def _nuevo(self) -> None:
-        dialogo = _DialogoRegistro(self.conn, self.campos, "Nuevo registro")
+        dialogo = _DialogoRegistro(self.conn, self._campos_dialogo(), "Nuevo registro")
         if self.al_abrir_dialogo:
             self.al_abrir_dialogo(dialogo)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
@@ -506,7 +575,7 @@ class PantallaCRUD(QWidget):
             QMessageBox.information(self, "Editar", "Seleccioná un registro para editar.")
             return
         registro = self.repositorio.obtener(id_valor)
-        dialogo = _DialogoRegistro(self.conn, self.campos, "Editar registro", registro=registro)
+        dialogo = _DialogoRegistro(self.conn, self._campos_dialogo(), "Editar registro", registro=registro)
         if self.al_abrir_dialogo:
             self.al_abrir_dialogo(dialogo)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
@@ -578,7 +647,15 @@ class _DialogoRegistro(QDialog):
         botones.rejected.connect(self.reject)
         layout_general.addWidget(botones)
 
-        self.resize(480, min(60 + 40 * len(campos), 640))
+        # Ancho dinámico: 480 era un mínimo fijo que recortaba etiquetas/
+        # campos largos (ej. "Día del mes para plazo extendido
+        # automático..." en Profesionales) — se calcula contra el ancho
+        # real que pide el formulario (`sizeHint`, ya con etiquetas y
+        # campos armados) en vez de un número fijo, con un techo para no
+        # terminar con un diálogo absurdamente ancho por un solo campo
+        # larguísimo (ahí ya pasa a envolver en dos líneas, como antes).
+        ancho = max(480, min(formulario.sizeHint().width() + 32, 900))
+        self.resize(ancho, min(60 + 40 * len(campos), 640))
 
         boton_ok = botones.button(QDialogButtonBox.StandardButton.Ok)
         boton_cancelar = botones.button(QDialogButtonBox.StandardButton.Cancel)
@@ -616,11 +693,24 @@ class _DialogoRegistro(QDialog):
             return entrada
         if campo.tipo == "fecha":
             entrada = QDateEdit()
-            entrada.setDisplayFormat(_FORMATO_FECHA_DIA)
+            entrada.setDisplayFormat(campo.formato_fecha or _FORMATO_FECHA_DIA)
             entrada.setLocale(_LOCALE_ES)
             entrada.setCalendarPopup(True)
+            if not campo.requerido:
+                # Sin esto, un campo opcional sin valor cargado quedaría
+                # mostrando y guardando "hoy" como si fuera un dato real
+                # (ver `_FECHA_SIN_DATO`) — solo para los obligatorios
+                # (ej. Fechas especiales) tiene sentido forzar una fecha
+                # concreta por default.
+                entrada.setMinimumDate(_FECHA_SIN_DATO)
+                entrada.setSpecialValueText("(sin fecha)")
             fecha_qt = QDate.fromString(valor, "yyyy-MM-dd") if valor else QDate()
-            entrada.setDate(fecha_qt if fecha_qt.isValid() else QDate.currentDate())
+            if fecha_qt.isValid():
+                entrada.setDate(fecha_qt)
+            elif campo.requerido:
+                entrada.setDate(QDate.currentDate())
+            else:
+                entrada.setDate(_FECHA_SIN_DATO)
             return entrada
         entrada = QLineEdit()
         if valor is not None:
@@ -711,7 +801,10 @@ class _DialogoRegistro(QDialog):
                 texto = entrada.text().strip()
                 resultado[campo.nombre] = float(texto) if texto else None
             elif campo.tipo == "fecha":
-                resultado[campo.nombre] = entrada.date().toString("yyyy-MM-dd")
+                if not campo.requerido and entrada.date() == _FECHA_SIN_DATO:
+                    resultado[campo.nombre] = None
+                else:
+                    resultado[campo.nombre] = entrada.date().toString("yyyy-MM-dd")
             else:
                 texto = entrada.text().strip()
                 if texto and campo.normalizar:

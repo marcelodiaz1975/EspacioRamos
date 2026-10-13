@@ -42,6 +42,12 @@ SUBCARPETA_PROPUESTA = "Propuesta"
 SUBCARPETA_DISPONIBILIDAD = "Disponibilidad"
 SUBCARPETA_OFERTA = "Oferta"
 SUBCARPETA_PLACAS = "Placas"
+# Distinta de SUBCARPETA_PLACAS (el tablero completo de referencia, que
+# regenera solo `avance_mes` con `generar_pdf_placas`) — esta es para el
+# PDF puntual de "Agregar a impresión" / "Generar PDF" de la solapa
+# "Impresión de placas en papel" (pedido explícito de la clienta sobre
+# ESE botón nomás, no sobre el tablero de referencia).
+SUBCARPETA_PLACAS_PARA_IMPRIMIR = "Placas para imprimir"
 SUBCARPETA_MANUAL = "Manual"
 SUBCARPETA_LIQUIDACIONES_SIMULADAS = "Liquidaciones simuladas"
 

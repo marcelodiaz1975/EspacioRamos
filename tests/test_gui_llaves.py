@@ -161,6 +161,135 @@ def test_nuevo_tipo_arma_nombre_automatico(qtbot, conn, monkeypatch):
     assert pantalla.tabla_tipos.item(0, 1).text() == "Edificio"
 
 
+def test_dialogo_tipo_suma_combo_edificio_habilitado_solo_para_edificio_nuevo(qtbot, conn):
+    _crear_edificio_con_unidad(conn, nombre="Ramos 1")
+    conn.commit()
+    dialogo = _DialogoTipo(conn, None)
+    qtbot.addWidget(dialogo)
+    assert not dialogo.combo_edificio.isEnabled()
+    indice = dialogo.combo_tipo.findData("Edificio")
+    dialogo.combo_tipo.setCurrentIndex(indice)
+    assert dialogo.combo_edificio.isEnabled()
+    indice_unidad = dialogo.combo_tipo.findData("Unidad")
+    dialogo.combo_tipo.setCurrentIndex(indice_unidad)
+    assert not dialogo.combo_edificio.isEnabled()
+
+
+def test_dialogo_tipo_edificio_sin_elegir_edificio_bloquea_el_alta(qtbot, conn):
+    _crear_edificio_con_unidad(conn, nombre="Ramos 1")
+    conn.commit()
+    dialogo = _DialogoTipo(conn, None)
+    qtbot.addWidget(dialogo)
+    indice = dialogo.combo_tipo.findData("Edificio")
+    dialogo.combo_tipo.setCurrentIndex(indice)
+    dialogo.accept()
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+
+
+def test_dialogo_tipo_edificio_con_edificio_elegido_permite_el_alta(qtbot, conn):
+    id_edificio, _ = _crear_edificio_con_unidad(conn, nombre="Ramos 1")
+    dialogo = _DialogoTipo(conn, None)
+    qtbot.addWidget(dialogo)
+    indice = dialogo.combo_tipo.findData("Edificio")
+    dialogo.combo_tipo.setCurrentIndex(indice)
+    indice_edificio = dialogo.combo_edificio.findData(id_edificio)
+    dialogo.combo_edificio.setCurrentIndex(indice_edificio)
+    dialogo.accept()
+    assert dialogo.result() == QDialog.DialogCode.Accepted
+    assert dialogo.valores()["id_edificio"] == id_edificio
+
+
+def test_nuevo_tipo_edificio_con_edificio_elegido_suma_el_nombre(qtbot, conn, monkeypatch):
+    id_edificio, _ = _crear_edificio_con_unidad(conn, nombre="Ramos 1")
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+
+    def _crear_edificio(self, *a, **k):
+        self.combo_tipo.setCurrentIndex(self.combo_tipo.findData("Edificio"))
+        self.combo_edificio.setCurrentIndex(self.combo_edificio.findData(id_edificio))
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoTipo, "exec", _crear_edificio)
+    pantalla._nuevo_tipo()
+
+    assert pantalla.tabla_tipos.item(0, 0).text() == "Tipo llave E1 - Ramos 1"
+
+
+def test_editar_tipo_no_permite_cambiar_el_edificio(qtbot, conn):
+    _crear_edificio_con_unidad(conn, nombre="Ramos 1")
+    id_llave = crear_llave(conn, tipo="Edificio")
+    conn.commit()
+    tipo = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    dialogo = _DialogoTipo(conn, None, registro=tipo)
+    qtbot.addWidget(dialogo)
+    assert not dialogo.combo_edificio.isEnabled()
+
+
+def test_dialogo_acceso_unidades_en_orden_pb_ep_piso(qtbot, conn):
+    id_edificio = conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Ramos 1')").lastrowid
+    for departamento in ['2do "A"', 'PB "A"', 'EP "A"', '10mo "A"', '1ro "A"']:
+        conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, ?)", (id_edificio, departamento))
+    conn.commit()
+    dialogo = _DialogoAcceso(conn, None)
+    qtbot.addWidget(dialogo)
+    indice = dialogo.combo_edificio.findData(id_edificio)
+    dialogo.combo_edificio.setCurrentIndex(indice)
+    textos = [dialogo.combo_unidad.itemText(i) for i in range(1, dialogo.combo_unidad.count())]
+    assert textos == ['PB "A"', 'EP "A"', '1ro "A"', '2do "A"', '10mo "A"']
+
+
+def test_panel_llaves_botones_editar_eliminar_tipo_deshabilitados_sin_seleccion(qtbot, conn):
+    crear_llave(conn)
+    conn.commit()
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    assert not pantalla.boton_editar_tipo.isEnabled()
+    assert not pantalla.boton_eliminar_tipo.isEnabled()
+    pantalla.tabla_tipos.selectRow(0)
+    assert pantalla.boton_editar_tipo.isEnabled()
+    assert pantalla.boton_eliminar_tipo.isEnabled()
+    pantalla.tabla_tipos.clearSelection()
+    assert not pantalla.boton_editar_tipo.isEnabled()
+    assert not pantalla.boton_eliminar_tipo.isEnabled()
+
+
+def test_panel_llaves_boton_eliminar_acceso_deshabilitado_sin_seleccion(qtbot, conn, monkeypatch):
+    crear_llave(conn)
+    _crear_edificio_con_unidad(conn)
+    conn.commit()
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+    monkeypatch.setattr(_DialogoAcceso, "exec", lambda self: QDialog.DialogCode.Accepted)
+    pantalla._agregar_acceso()
+
+    assert not pantalla.boton_eliminar_acceso.isEnabled()
+    pantalla.tabla_accesos.selectRow(0)
+    assert pantalla.boton_eliminar_acceso.isEnabled()
+
+
+def test_panel_llaves_botones_ingresar_y_asignar_deshabilitados_sin_tipo_seleccionado(qtbot, conn):
+    crear_llave(conn)
+    conn.commit()
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    assert not pantalla.boton_ingresar.isEnabled()
+    assert not pantalla.boton_asignar.isEnabled()
+    pantalla.tabla_tipos.selectRow(0)
+    assert pantalla.boton_ingresar.isEnabled()
+    assert pantalla.boton_asignar.isEnabled()
+
+
+def test_tabla_movimientos_suma_columna_observacion(qtbot, conn):
+    id_llave = crear_llave(conn)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1, fecha="2026-01-10", observacion="Nota del ingreso")
+    conn.commit()
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla_movimientos.horizontalHeaderItem(7).text() == "Observación"
+    assert pantalla.tabla_movimientos.item(0, 7).text() == "Nota del ingreso"
+
+
 def test_tipos_ordenados_alfabeticamente_por_defecto(qtbot, conn):
     crear_llave(conn, tipo="Unidad")
     crear_llave(conn, tipo="Edificio")

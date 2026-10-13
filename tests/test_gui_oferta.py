@@ -609,33 +609,29 @@ def test_columna_del_formulario_mas_angosta_que_antes(qtbot, conn, profesional_y
     assert pantalla.boton_quitar_franja.text() == "Quitar franja\nseleccionada"
 
 
-def test_filtros_dias_y_referencias_en_una_sola_linea(qtbot, conn, profesional_y_consultorio):
-    """Pedido explícito de la clienta, ronda "cuatro columnas": los
-    filtros (días) y las referencias de colores de la grilla embebida
-    vuelven a mostrarse en una sola línea cada uno (no de a pares/
-    compactado a 2 columnas, como se había probado en la ronda
-    anterior) — la columna de Filtros pasa a ser la tercera columna de
-    esta pantalla, con la leyenda ajustada en tamaño para llegar al pie."""
+def test_filtro_dia_de_la_grilla_siempre_de_a_pares(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta (revisión de "Disponibilidad"): el
+    filtro "Día de la semana" de la grilla embebida (columna 3) va
+    siempre de a pares — ya no una sola línea por día — con la leyenda
+    de referencias ajustada en tamaño para seguir llegando al pie de la
+    columna con menos alto ocupado por el filtro de días."""
+    from PySide6.QtWidgets import QGridLayout
+
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     grilla = pantalla.grilla
-    # Días de la semana en una lista vertical, no de a pares.
-    from PySide6.QtWidgets import QVBoxLayout
-    assert isinstance(grilla._contenedor_dias.layout(), QVBoxLayout)
-    # Referencias de colores en una sola columna (no compactas).
-    assert grilla._leyenda_colores._columnas == 1
+    grid = grilla._contenedor_dias.layout()
+    assert isinstance(grid, QGridLayout)
+    assert grid.itemAtPosition(0, 1) is not None  # dos columnas, no una lista vertical
     assert not grilla._leyenda_colores.isHidden()
 
 
 def test_filtro_dia_a_pares_con_domingo_configurado(qtbot, conn, profesional_y_consultorio):
-    """Pedido explícito de la clienta: si el sistema tiene el domingo
-    sumado a "Días de grilla" (`Configuracion.DiasGrilla`, editable
-    desde Configuración general), el filtro de "Día de la semana" de la
-    grilla embebida (columna 3) pasa a 2 columnas — a diferencia del
-    caso normal (6 días, ver el test de arriba, que sigue en una sola
-    columna) — con el domingo solo en su propia fila al final, y la
-    leyenda de colores se agranda un poco más para seguir llegando al
-    pie de la columna con menos alto ocupado por el filtro de días."""
+    """Con el domingo sumado a "Días de grilla" (`Configuracion.
+    DiasGrilla`, editable desde Configuración general), el filtro de
+    "Día de la semana" de la grilla embebida sigue de a pares — con el
+    domingo solo en su propia fila al final, sin necesitar ningún caso
+    especial (mismo algoritmo que ya arma la grilla de 6 días)."""
     import json
     from PySide6.QtWidgets import QGridLayout
 

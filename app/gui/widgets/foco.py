@@ -12,10 +12,16 @@ pago; pensado para reutilizarse en los demás formularios de carga.
 Tab/Shift+Tab siguen exactamente la misma cadena que Enter, con el mismo
 salto de último a primero (y de primero a último en reversa) — pedido
 explícito de la clienta en la revisión de Llaves: no puede haber una
-cadena para Enter y otra distinta para Tab. A diferencia de Enter, Tab no
-selecciona el contenido del campo al llegar (solo mueve el foco, sin
-tocar nada). Se implementa interceptando Tab/Backtab acá mismo en vez de
-recablear el focus chain nativo de Qt (`QWidget.setTabOrder`): ese chain
+cadena para Enter y otra distinta para Tab. Tab TAMBIÉN selecciona el
+contenido del campo al llegar, igual que Enter — pedido explícito de la
+clienta en una segunda vuelta sobre Llaves ("cuando tabulo hacia un
+cuadro de texto en el que hay una opción prefijada, ya sea un valor o
+texto, que quede seleccionado al hacer foco ahí así uno tiene la opción
+de empezar a escribir borrando el contenido prefijado... en todos los
+[formularios] del sistema"), que revierte la decisión anterior de no
+seleccionar con Tab. Se implementa interceptando Tab/Backtab acá mismo en
+vez de recablear el focus chain nativo de Qt (`QWidget.setTabOrder`): ese
+chain
 es uno solo por aplicación, así que empalmar ahí el orden de `orden` se
 mezcla de forma impredecible con cualquier otro widget enfocable de la
 pantalla que haya quedado afuera de la lista (ej. las tablas, que se
@@ -60,7 +66,7 @@ class _EnterAvanzaFoco(QObject):
             return True
         if tecla in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
             retroceder = tecla == Qt.Key.Key_Backtab or bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-            self._mover(self._resolver_objetivo(watched), retroceder=retroceder, seleccionar_todo=False)
+            self._mover(self._resolver_objetivo(watched), retroceder=retroceder, seleccionar_todo=True)
             return True
         return False
 
