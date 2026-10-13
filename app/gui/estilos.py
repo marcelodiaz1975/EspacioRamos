@@ -105,20 +105,13 @@ COLOR_AZUL_OSCURO = "#0B2942"  # grilla operativa — celdas del profesional fil
 COLOR_TEXTO_CLARO = "#FFFFFF"
 COLOR_FOCO = "#FFC107"  # ámbar — anillo de foco de teclado (Tab), ver "Indicador de foco" más abajo
 
-# Fuente fija de toda la app (pedido de la clienta: evitar que los anchos
-# fijos a mano — calculados históricamente en un entorno de desarrollo
-# Linux, con otra fuente default — queden descalzados contra la fuente
-# real de Windows, que puede variar de una máquina a otra según el
-# entorno gráfico). "Segoe UI" viene instalada de fábrica en Windows 7 en
-# adelante (Windows 10 y 11 incluidos) — fijarla hace que el ancho real
-# del texto sea el MISMO sin importar a qué máquina/monitor se mude la
-# clienta, en vez de depender de la fuente default de cada instalación.
-# Sin "Segoe UI" disponible (ej. corriendo este mismo código en Linux,
-# como en este entorno de desarrollo), Qt sustituye automáticamente la
-# fuente más parecida que encuentre — no rompe, solo deja de ser
-# pixel-perfect ahí, que es exactamente la situación que ya existía antes
-# de este cambio y seguirá existiendo solo en ese caso.
-FUENTE_APP = "Segoe UI"
+# Se probó fijar la fuente de toda la app a "Segoe UI" (para que el
+# ancho real del texto no dependiera de la fuente default de cada
+# instalación de Windows) pero se revirtió a pedido explícito de la
+# clienta: esa fuente resolvía un tamaño de punto más grande que el
+# default que ya traía su Windows, y contra los anchos/altos fijos
+# calibrados pixel a pixel en todo el sistema eso apelmazaba el
+# contenido — ver `gui_main.main()`, que ya no fija ninguna fuente.
 
 # ------------------------------------------------------------------- claro
 _CLARO = {

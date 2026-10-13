@@ -9243,3 +9243,39 @@ regeneración al imputar al mes en curso); `tests/test_gui_placas.py`
 (selector "Placa a imprimir" con 0/1/varias opciones, aviso de tablero
 lleno con la sugerencia, carpeta "Placas para imprimir", foco en las
 dos solapas). Suite completa: 2384 passed, sin regresiones.
+
+## Se revierte la fuente fija de toda la app ("Segoe UI")
+
+Ya instalado y probado en una máquina real, la clienta reportó que las
+fuentes quedaron "muy grandes, peor que antes" — tanto que se apelmazaba
+el contenido y quedaban cosas fuera de la pantalla, en todo el sistema a
+la vez. Diagnóstico confirmado antes de tocar nada: el cambio
+responsable es `app.setFont(QFont(FUENTE_APP))` (`gui_main.main()`,
+`FUENTE_APP = "Segoe UI"` en `estilos.py`, sumado en la "Segunda tanda")
+— `QFont("Segoe UI")` sin un tamaño de punto explícito deja que Qt
+resuelva el tamaño "default" de esa fuente, y ese tamaño resultó más
+grande que el default que ya traía Windows en esa máquina. Contra los
+anchos/altos fijos calibrados pixel a pixel en todo el sistema (toda la
+revisión "uno por uno" documentada en este archivo), una fuente más
+grande sobre esas medidas fijas es justo lo que produce el apelmazado
+descripto.
+
+Pedido explícito de la clienta: revertir SOLO esta parte y dejar el
+tema visual de fuentes para una ronda aparte, después de pulir la
+lógica — "ir probando la lógica, y cuando la lógica se pula y quede
+bien volver a realizar los ajustes visuales pantalla por pantalla".
+
+Revertido de punta a punta, aislado, sin tocar nada más: se saca la
+línea `app.setFont(QFont(FUENTE_APP))` de `gui_main.main()` (la
+aplicación vuelve a usar la fuente nativa de cada instalación, como
+estaba antes de esa tanda) y la constante `FUENTE_APP`, ya sin ningún
+consumidor, de `estilos.py` — con un comentario en su lugar explicando
+por qué se probó y se descartó, para no repetir el mismo camino sin
+revisar este historial. La política de escala de DPI
+(`setHighDpiScaleFactorRoundingPolicy(PassThrough)`, sumada en el mismo
+cambio original) NO se tocó — es inocua (ya es el default de Qt6) y no
+tiene relación con el tamaño de fuente en sí.
+
+Tests: se borra `test_fuente_app_fijada_a_segoe_ui`
+(`tests/test_gui_estilos.py`), que solo verificaba la constante ya
+retirada — ninguna otra prueba dependía de `FUENTE_APP`/del `setFont`.
