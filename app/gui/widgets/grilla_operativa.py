@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.estilos import COLOR_AMARILLO, COLOR_AZUL_OSCURO, COLOR_NIVEL_1
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.orden_tabla import clave_orden_profesional
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_actual, primer_dia_mes, sumar_meses, ultimo_dia_mes
@@ -137,17 +138,29 @@ class _CeldaGrilla(QWidget):
 
 
 def _dibujar_bordes_gruesos(painter: QPainter, rect, bordes: frozenset[str]) -> None:
-    # Línea fina propia en las 4 caras — reemplaza a la cuadrícula nativa
-    # de la tabla (desactivada): con "showGrid" activo, Qt le resta 1px a
-    # la altura de columnas angostas como Tipo Bloque/Horario para dejarle
-    # lugar a su propia línea, y esas celdas quedan 1px más bajas que las
-    # de datos — la línea gruesa de esa fila no se dibuja donde debería.
-    # Sin esto, drawRect hereda el brush que haya quedado seteado (el
-    # color del triángulo de centro, si esta celda tiene uno) y repinta
-    # toda la celda encima del texto ya dibujado.
+    # Línea fina propia — reemplaza a la cuadrícula nativa de la tabla
+    # (desactivada): con "showGrid" activo, Qt le resta 1px a la altura de
+    # columnas angostas como Tipo Bloque/Horario para dejarle lugar a su
+    # propia línea, y esas celdas quedan 1px más bajas que las de datos —
+    # la línea gruesa de esa fila no se dibuja donde debería.
+    #
+    # Solo abajo y a la derecha (no las 4 caras): pedido general de la
+    # clienta ("líneas internas de la grilla... se ven como unas dobles
+    # líneas... como que están más encimados unos cuadritos"). Causa real:
+    # cada celda pintaba su propio marco completo — el límite ENTRE dos
+    # celdas vecinas quedaba pintado DOS VECES, una por cada lado (el
+    # borde derecho de la celda de la izquierda Y el borde izquierdo de la
+    # celda de la derecha), en dos columnas de píxeles distintas y
+    # contiguas en vez de una sola línea compartida de 1px. Pintando solo
+    # abajo/derecha, cada límite interno lo traza una única celda (la de
+    # arriba/la de la izquierda) — el borde exterior superior/izquierdo de
+    # la grilla sigue cerrado porque ahí ya cae la línea gruesa estructural
+    # (día/encabezado), nunca la fina.
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.setPen(QPen(QColor("#999999"), 1))
-    painter.drawRect(rect.adjusted(0, 0, -1, -1))
+    esquina = rect.bottomRight()
+    painter.drawLine(rect.bottomLeft(), esquina)
+    painter.drawLine(rect.topRight(), esquina)
 
     # "right"/"bottom"/"left"/"top" (sin sufijo) = línea estructural
     # gruesa y negra, de siempre (separa días/encierra el bloque de
@@ -747,6 +760,11 @@ class GrillaOperativaWidget(QWidget):
         self.tabla.setShowGrid(False)
         self.tabla.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # Pedido general de la clienta ("los focos no pasan nunca de los
+        # filtros a las tablas"): esta grilla es de referencia visual, no
+        # un control de carga — Tab nunca debería poder aterrizar en ella
+        # desde los filtros de al lado (solo un click la selecciona).
+        excluir_tabla_del_tab(self.tabla)
         layout_grilla.addWidget(self.tabla, stretch=1)
 
         self._etiqueta_detalle = QLabel("Detalle:")

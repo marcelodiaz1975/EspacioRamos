@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.crud_generico import _normalizar_busqueda
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.negocio.dias import DIAS_SEMANA
@@ -245,6 +246,7 @@ class _PanelBloquesRigidos(QWidget):
         layout_solapa.addWidget(panel_izquierda)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(4)
         self.tabla.setHorizontalHeaderLabels(["Horario", "Días (restricción)", "Días (grilla)", "Activo"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

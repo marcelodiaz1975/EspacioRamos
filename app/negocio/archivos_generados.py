@@ -31,12 +31,19 @@ que haya que conservar ni mudar si cambia el código.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import sqlite3
 from datetime import date
 from pathlib import Path
 
 from app.negocio.dias import sumar_meses
+
+# Windows (donde se empaqueta con PyInstaller) no admite \/:*?"<>| en un
+# nombre de archivo/carpeta — mismo criterio que `app.negocio.imagenes.
+# _nombre_archivo_valido`, duplicado acá (capa de negocio distinta, sin
+# importar entre sí).
+_CARACTERES_INVALIDOS_CARPETA = re.compile(r'[\\/:*?"<>|]')
 
 SUBCARPETA_PROPUESTA = "Propuesta"
 SUBCARPETA_DISPONIBILIDAD = "Disponibilidad"
@@ -77,11 +84,40 @@ def carpeta_archivos_varios(conn: sqlite3.Connection, subcarpeta: str) -> Path:
     return carpeta
 
 
+def nombre_carpeta_profesional(
+    codigo: str | None, tratamiento: str | None, nombre_pila: str | None, apellido: str | None,
+) -> str:
+    """"{código} - {tratamiento} {nombre} {apellido}" — mismo formato
+    canónico que ya muestran los selectores de profesional de todo el
+    sistema (ej. "R1 - Lic. Virginia Lo Veci"), saneado para nombre de
+    carpeta. Pedido explícito de la clienta: antes la carpeta se nombraba
+    solo con el código ("R1"), sin forma de identificar de quién es sin
+    abrir el sistema."""
+    partes = [p for p in (tratamiento, nombre_pila, apellido) if p]
+    nombre = " ".join(partes) if partes else (apellido or "")
+    if codigo and nombre:
+        texto = f"{codigo} - {nombre}"
+    else:
+        texto = codigo or nombre or "Profesional"
+    return _CARACTERES_INVALIDOS_CARPETA.sub("_", texto).strip()
+
+
 def carpeta_profesional(conn: sqlite3.Connection, codigo: str) -> Path:
-    """"Profesionales/{codigo}" bajo la carpeta base. La crea si hace falta."""
+    """"Profesionales/{código} - {tratamiento nombre apellido}" bajo la
+    carpeta base. La crea si hace falta. El nombre completo es puramente
+    descriptivo (para que el operador identifique la carpeta a simple
+    vista en el explorador de archivos) — toda la lógica de negocio
+    sigue resolviendo siempre por código, nunca por este nombre."""
     if not codigo:
         raise ValueError("El profesional no tiene código cargado: no se puede determinar su carpeta.")
-    carpeta = _requerir_carpeta_base(conn) / "Profesionales" / codigo
+    fila = conn.execute(
+        "SELECT Tratamiento, NombrePila, Apellido FROM Profesional WHERE IdCodigo = ?", (codigo,)
+    ).fetchone()
+    nombre_carpeta = nombre_carpeta_profesional(
+        codigo, fila["Tratamiento"] if fila else None, fila["NombrePila"] if fila else None,
+        fila["Apellido"] if fila else None,
+    )
+    carpeta = _requerir_carpeta_base(conn) / "Profesionales" / nombre_carpeta
     carpeta.mkdir(parents=True, exist_ok=True)
     return carpeta
 
@@ -189,45 +225,62 @@ def limpiar_liquidaciones_simuladas_antiguas(carpeta: Path, hoy: date) -> int:
 def aplicar_cambio_codigo(conn: sqlite3.Connection, registro_anterior: sqlite3.Row, valores_nuevos: dict, hoy: date) -> None:
     """Hook llamado por la pantalla de Profesionales después de guardar una
     edición: si cambió la categoría y/o el código, registra el cambio en
-    HistorialCodigo y, si cambió el código, renombra en disco la carpeta
-    Profesionales/{código} conservando los archivos y aplica en el mismo
-    proceso la limpieza de liquidaciones con más de un año."""
+    HistorialCodigo. Si cambió el código, el tratamiento, el nombre o el
+    apellido (cualquiera de los cuatro que componen el nombre de la
+    carpeta, ver `nombre_carpeta_profesional`), renombra en disco la
+    carpeta Profesionales/{...} conservando los archivos y aplica en el
+    mismo proceso la limpieza de liquidaciones con más de un año.
+
+    `valores_nuevos` llega con el valor YA actualizado en la base (este
+    hook corre después de `repositorio.actualizar`, que ya hizo commit)
+    — por eso el nombre de carpeta ANTERIOR se calcula a partir de
+    `registro_anterior` (la fila de antes de guardar) en vez de volver a
+    consultar la base por el código viejo, que ya no existe ahí."""
     categoria_anterior = registro_anterior["CategoriaProfesional"]
     codigo_anterior = registro_anterior["IdCodigo"]
     categoria_nueva = valores_nuevos.get("CategoriaProfesional", categoria_anterior)
     codigo_nuevo = valores_nuevos.get("IdCodigo", codigo_anterior)
-    if categoria_nueva == categoria_anterior and codigo_nuevo == codigo_anterior:
-        return
 
-    conn.execute(
-        "INSERT INTO HistorialCodigo "
-        "(IdProfesional, CategoriaAnterior, CodigoAnterior, CategoriaNueva, CodigoNuevo, FechaCambio) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (
-            registro_anterior["IdProfesional"], categoria_anterior, codigo_anterior,
-            categoria_nueva, codigo_nuevo, hoy.isoformat(),
-        ),
+    if categoria_nueva != categoria_anterior or codigo_nuevo != codigo_anterior:
+        conn.execute(
+            "INSERT INTO HistorialCodigo "
+            "(IdProfesional, CategoriaAnterior, CodigoAnterior, CategoriaNueva, CodigoNuevo, FechaCambio) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                registro_anterior["IdProfesional"], categoria_anterior, codigo_anterior,
+                categoria_nueva, codigo_nuevo, hoy.isoformat(),
+            ),
+        )
+        conn.commit()
+
+    nombre_carpeta_anterior = nombre_carpeta_profesional(
+        codigo_anterior, registro_anterior["Tratamiento"], registro_anterior["NombrePila"], registro_anterior["Apellido"],
     )
-    conn.commit()
+    nombre_carpeta_nuevo = nombre_carpeta_profesional(
+        codigo_nuevo,
+        valores_nuevos.get("Tratamiento", registro_anterior["Tratamiento"]),
+        valores_nuevos.get("NombrePila", registro_anterior["NombrePila"]),
+        valores_nuevos.get("Apellido", registro_anterior["Apellido"]),
+    )
+    if nombre_carpeta_nuevo != nombre_carpeta_anterior and carpeta_base(conn) is not None:
+        renombrar_carpeta_profesional(conn, nombre_carpeta_anterior, nombre_carpeta_nuevo)
+        if codigo_nuevo:
+            limpiar_liquidaciones_antiguas(carpeta_profesional(conn, codigo_nuevo), hoy)
 
-    if codigo_nuevo != codigo_anterior:
-        if carpeta_base(conn) is not None:
-            renombrar_carpeta_profesional(conn, codigo_anterior, codigo_nuevo)
-            if codigo_nuevo:
-                limpiar_liquidaciones_antiguas(carpeta_profesional(conn, codigo_nuevo), hoy)
 
-
-def renombrar_carpeta_profesional(conn: sqlite3.Connection, codigo_anterior: str | None, codigo_nuevo: str | None) -> None:
-    """Al cambiar el código de un profesional, la carpeta con sus archivos
-    se renombra (no se crea una nueva vacía): se conservan todas las
-    liquidaciones ya generadas bajo el código anterior."""
-    if not codigo_nuevo or codigo_anterior == codigo_nuevo:
+def renombrar_carpeta_profesional(conn: sqlite3.Connection, nombre_carpeta_anterior: str | None, nombre_carpeta_nuevo: str | None) -> None:
+    """Al cambiar el código, tratamiento, nombre o apellido de un
+    profesional, la carpeta con sus archivos se renombra (no se crea una
+    nueva vacía): se conservan todas las liquidaciones ya generadas bajo
+    el nombre anterior. Los parámetros son el nombre de carpeta COMPLETO
+    (`nombre_carpeta_profesional`), no solo el código."""
+    if not nombre_carpeta_nuevo or nombre_carpeta_anterior == nombre_carpeta_nuevo:
         return
     base = carpeta_base(conn)
     if base is None:
         return
-    carpeta_anterior = base / "Profesionales" / codigo_anterior if codigo_anterior else None
-    carpeta_nueva = base / "Profesionales" / codigo_nuevo
+    carpeta_anterior = base / "Profesionales" / nombre_carpeta_anterior if nombre_carpeta_anterior else None
+    carpeta_nueva = base / "Profesionales" / nombre_carpeta_nuevo
     if carpeta_anterior and carpeta_anterior.exists():
         carpeta_nueva.parent.mkdir(parents=True, exist_ok=True)
         if carpeta_nueva.exists():

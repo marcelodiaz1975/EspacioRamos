@@ -48,11 +48,13 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.pantallas import catalogos
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.resumen_saldo import item_monto
 from app.negocio.balance import resultado_periodo, total_ingresos_periodo
 from app.negocio.dias import periodo_actual
 from app.negocio.estadisticas import _ids_consultorio_del_alcance, _periodos_para_filtro
+from app.pdf.estilos import clave_orden_unidad
 
 _ANCHO_CAMPO = 220
 _ANCHO_PANEL_FILTROS = 240
@@ -77,6 +79,7 @@ def _armar_tabla(columnas: list[str]) -> QTableWidget:
     espacio en blanco al final (ver el bug ya documentado en "Valores
     vigentes")."""
     tabla = QTableWidget()
+    excluir_tabla_del_tab(tabla)
     tabla.setColumnCount(len(columnas))
     tabla.setHorizontalHeaderLabels(columnas)
     tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -191,8 +194,12 @@ class _PanelFiltrosMixin:
         if id_edificio is not None:
             sql += " WHERE IdEdificio = ?"
             parametros.append(id_edificio)
-        sql += " ORDER BY Departamento"
-        for f in self.conn.execute(sql, parametros).fetchall():
+        filas = self.conn.execute(sql, parametros).fetchall()
+        # Orden por piso (PB, EP, después ascendente numérico) + letra a
+        # igual piso — pedido general de la clienta, no expresable en el
+        # ORDER BY de SQL (ver `clave_orden_unidad`/`reservas._opciones_unidad`).
+        filas = sorted(filas, key=lambda f: clave_orden_unidad(f["Departamento"]))
+        for f in filas:
             self.combo_unidad.addItem(f["Departamento"], f["IdUnidad"])
         self.combo_unidad.blockSignals(False)
         self._cargar_combo_consultorio()

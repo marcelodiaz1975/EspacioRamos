@@ -9279,3 +9279,348 @@ tiene relación con el tamaño de fuente en sí.
 Tests: se borra `test_fuente_app_fijada_a_segoe_ui`
 (`tests/test_gui_estilos.py`), que solo verificaba la constante ya
 retirada — ninguna otra prueba dependía de `FUENTE_APP`/del `setFont`.
+
+## SistemaDF v0.11.2026.10: documento "Correcciones para próxima versión"
+
+La clienta mandó un documento nuevo (Word) con ~220 puntos para la
+próxima versión, organizado en dos partes: una sección "GENERAL PARA
+TODO EL SISTEMA" (14 reglas numeradas 1.1 a 1.14, más tres pedidos
+sueltos — nombre de la versión, carpeta de profesional, planilla de
+Llaves) y, debajo, cada pantalla del sistema con sus propios puntos,
+muchos de los cuales referencian una regla general por número ("Aplicar
+corrección #1.4"). Mismo criterio de trabajo que toda la revisión
+anterior: primero las reglas GENERALES (son la base que el resto
+referencia), después pantalla por pantalla en el orden del documento,
+con tandas intermedias de pyflakes + suite + commit. Esta sección cubre
+la primera tanda — los puntos GENERALES que se pueden resolver de una
+sola vez, centralizados — antes de arrancar el recorrido pantalla por
+pantalla (que queda documentado en sus propias secciones, a medida que
+se hace).
+
+### 1.1 — Panel de control al abrir, pantalla maximizada
+
+`VentanaPrincipal.__init__` elegía como pestaña inicial la PRIMERA
+`Seccion` de la lista (posición 0) — hoy coincide con "Panel de
+control" porque esa `Seccion` ya es la primera de "Sistema", pero el
+punto 19/20 de este mismo documento (ver "Menú lateral" más abajo) va a
+sacarla de esa categoría y ponerla primera en "{Nombre del espacio}" —
+con eso, "la primera de la lista" dejaría de ser Panel de control.
+Se resuelve buscándola por NOMBRE en vez de por posición: `VentanaPrincipal`
+guarda `fila_panel_control` mientras arma el menú y, si la encuentra, la
+usa como fila inicial en lugar de `primer_item_seleccionable` — robusto
+a cualquier reordenamiento futuro del menú. Sin esa `Seccion` en la
+lista (algún nivel de usuario sin acceso a ella), cae al primer ítem de
+siempre. La ventana maximizada ya estaba resuelta de una tanda anterior
+(`ventana.showMaximized()`), no se tocó.
+
+### 1.2 — Selector de profesional: ya resuelto
+
+Select-all al enfocar (click y Tab), sin distinguir mayúsculas/acentos,
+substring en cualquier parte de la cadena — las tres cosas ya estaban
+resueltas en `app/gui/widgets/selector_profesional.py` de rondas
+anteriores (ver ese archivo y las tandas "Selector de profesional..."
+más arriba en este documento). No hizo falta ningún cambio: se verificó
+leyendo el código, no se repite la implementación acá. Queda pendiente,
+sí, confirmar pantalla por pantalla que el selector usado en cada
+formulario con búsqueda de profesional sea efectivamente este
+(`habilitar_busqueda_profesional`) y no un combo suelto — eso se revisa
+en el recorrido pantalla por pantalla, no es un punto GENERAL en sí.
+
+### 1.3 — Orden de unidades (piso + letra): extendido a los 5 lugares que faltaban
+
+`clave_orden_unidad` (`app.pdf.estilos`) ya existía y ya se usaba en la
+mayoría del sistema — CLAUDE.md ya tenía anotado qué pantallas quedaban
+pendientes de una revisión anterior ("Llaves, Balance, Imágenes,
+Estadísticas, Aumentos"). Se completaron los cinco, cada uno
+reemplazando su `ORDER BY Departamento` (alfabético puro, "EP" quedaba
+antes de "PB") por un `sorted(..., key=lambda f: clave_orden_unidad(...))`
+en Python después de traer las filas:
+
+- `llaves.py`: el combo de Unidad del diálogo "Agregar acceso" ya estaba
+  resuelto; lo que faltaba era `_accesos`/`_clave_orden_accesos` (la
+  tabla de Accesos de la pantalla) — la columna 2 ("Unidad") del orden
+  por click en el encabezado pasa a `clave_orden_unidad`, y el orden por
+  defecto (sin click) se resuelve en Python en vez del `ORDER BY ...,
+  u.Departamento` que tenía la consulta.
+- `balance.py`/`imagenes.py`/`estadisticas.py`: mismo patrón en
+  `_cargar_combo_unidad` (cascada Localidad→Edificio→Unidad→Consultorio
+  de los filtros) — se trae `SELECT IdUnidad, Departamento FROM Unidad
+  ...` sin el `ORDER BY Departamento` y se ordena en Python antes de
+  poblar el combo.
+- `aumentos.py`: dos lugares — el combo de Unidad del filtro visual
+  (mismo patrón que los tres de arriba) y `_cargar_consultorios_info`
+  (la lista ordenada de consultorios que alimenta la tabla de Aumentos/
+  Esquema de descuentos), que ordenaba por SQL `loc.Localidad, e.Nombre,
+  u.Departamento, c.NumeroConsultorio` — pasa a ordenar por SQL solo
+  Localidad/Edificio/NumeroConsultorio (sin Departamento) y reordenar en
+  Python con clave compuesta `(Localidad, Edificio, clave_orden_unidad(
+  Departamento))`, confiando en que `sorted` es estable para no perder
+  el orden por NumeroConsultorio dentro de una misma unidad.
+
+### 1.4 y 1.5 — Dos cadenas de foco independientes + reset al reingresar: infraestructura
+
+Dos pedidos relacionados, con una pieza de infraestructura compartida y
+una pieza que se termina de aplicar pantalla por pantalla (no es
+mecánicamente centralizable al 100%):
+
+**1.5 (tablas nunca reciben el foco por Tab) — resuelto de una sola vez
+para todo el sistema.** `excluir_tabla_del_tab(tabla)` (nueva, `app.gui.
+widgets.foco`) factoriza el patrón puntual que ya existía para "Valores
+vigentes" (`ClickFocus` + `setTabKeyNavigation(True)` — Tab no puede
+aterrizar en la tabla desde ningún filtro/botón, solo un click la
+selecciona; una vez que SÍ tiene el foco por click, Tab sigue
+recorriendo celdas en vez de "escaparse" hacia otro widget, que ya es el
+default de `QTableView`). Se aplicó con un script de un solo uso a las
+32 tablas del sistema (`QTableWidget()` en 16 archivos de pantallas +
+`crud_generico.py`, que cubre de rebote los ~14 catálogos genéricos) y,
+a mano, a la grilla operativa compartida (`app.gui.widgets.
+grilla_operativa.GrillaOperativaWidget.tabla` — el widget reutilizado
+por Reservas/Oferta/Novedades/Grilla semanal/Valores vigentes, antes sin
+excluir salvo en los dos usos puntuales que ya lo hacían a mano). Con
+esto, "los focos no pasan nunca de los filtros a las tablas" queda
+garantizado en todo el sistema de una sola vez — lo que falta pantalla
+por pantalla es la otra mitad del pedido (que la cadena de controles/
+filtros de CADA pantalla esté completa y cerrada, sin huecos que la
+dejen "escaparse" por el orden nativo de Qt hacia algún widget sin la
+cadena instalada), que se revisa caso por caso en el recorrido.
+
+**1.4 (reset de filtros al salir de la solapa, foco siempre en el
+primer control) — infraestructura de F3 lista, aplicación pantalla por
+pantalla.** Ver el punto 1.6 de abajo: el mecanismo es el mismo que F3
+("reiniciar la solapa... como recién se entrara en ella") — cada panel
+que lo necesite expone un método `reiniciar()` que resetea sus propios
+filtros a su valor por defecto y refoca el primer control, y ESE MISMO
+método es lo que hay que llamar tanto desde `showEvent` (para que ya
+esté así "al volver a ingresar", sin que el usuario note nada) como
+desde F3 (para poder forzarlo a mano). La pieza central (cómo encontrar
+"la solapa activa en este momento", bajando por cualquier cadena de
+`QTabWidget` anidados, y el atajo F3 que la invoca) ya está lista — ver
+`VentanaPrincipal._panel_mas_interno`/`_reiniciar_solapa_activa` en el
+punto 1.6. Sumarle el método `reiniciar()` a cada panel en particular
+(qué cuenta como "sus filtros", qué es "el primer control") se hace
+pantalla por pantalla, a medida que se recorre el documento — no hay
+una forma genérica de saber eso sin mirar cada pantalla.
+
+### 1.6 — Línea F1/F2/F3 + calculadora flotante
+
+`VentanaPrincipal` suma, en la barra de estado, una etiqueta "F1 –
+Ayuda / F2 – Calculadora / F3 – Reiniciar solapa" — con `statusBar().
+addWidget(...)` (no `addPermanentWidget`, usado ya para el badge de
+período) queda del lado IZQUIERDO de esa misma línea, tal como pide el
+documento ("en esa misma línea pero al borde de la izquierda").
+
+`Calculadora` (nueva, `app/gui/widgets/calculadora.py`): una ventana de
+verdad (`Qt.WindowType.Window`, no un diálogo modal — no tiene que
+bloquear el resto del sistema mientras está abierta), con las cuatro
+operaciones básicas (dígitos + `+ - * /` + `.` + `C` + borrar último
+carácter + `=`). `_calcular` usa `eval` sobre la expresión acumulada,
+pero sin ningún riesgo de ejecutar código arbitrario: los únicos
+caracteres que pueden llegar a esa cadena son los de los propios
+botones (dígitos, operadores, paréntesis — no hay ningún campo de texto
+libre), validados explícitamente antes de evaluar. `WA_DeleteOnClose`
+hace que cerrarla con la cruz la destruya de verdad (el default de
+`QWidget.close()` es solo ESCONDERLA, no destruirla) — necesario para
+que `VentanaPrincipal` se entere (señal `destroyed`) y pueda volver a
+abrir una nueva la próxima vez que se presione F2, en vez de quedar
+"colgada" de una instancia ya cerrada. F2 abre una sola instancia por
+ventana (si ya está abierta, la trae al frente con `raise_()`/
+`activateWindow()` en vez de abrir una segunda).
+
+F3 (`_reiniciar_solapa_activa`) resuelve primero "cuál es la solapa
+activa en este momento" con `_panel_mas_interno`: baja por la cadena de
+`self._pila.currentWidget()` mientras sea un `QTabWidget`, hasta llegar
+al panel de verdad que se está viendo (una pantalla compuesta como
+"Archivos y listas" es un `QTabWidget` cuyo contenido de cada pestaña
+puede a su vez ser OTRO formulario con sus propias solapas — hay que
+bajar las veces que haga falta, no solo un nivel). Si ese panel tiene un
+método `reiniciar` (duck-typing, no una interfaz formal — la mayoría de
+los paneles todavía no lo tienen, se va sumando pantalla por pantalla
+según 1.4), lo llama; si no lo tiene, no hace nada en vez de romper.
+
+### 1.7 — Recuadro negro fino en filtros/cuadros de texto
+
+`QComboBox` ya tenía un borde reservado de 2px para el anillo de foco
+(ver la sección "Indicador visual de foco" más arriba), pero
+TRANSPARENTE en reposo — por eso varios combos usados como filtro se
+veían "sin delimitar" hasta que se los enfocaba. Pasa de `transparent`
+a `#000000` en reposo (mismo ancho de 2px, así el foco no corre nada al
+ganar/perder color). `QLineEdit` no tenía ninguna regla propia en
+`estilos.py` — dependía por completo del estilo nativo de cada
+instalación, que en algunos casos lo deja prácticamente invisible; se
+suma `QLineEdit { border: 1px solid #000000; border-radius: 2px;
+padding: 1px 2px; }`, mismo criterio "borde negro fino" que el resto de
+la app (botones, solapas, tabla).
+
+### 1.8 — Líneas internas de la grilla: ya no se ven dobles
+
+Causa real del efecto "como que están más encimados unos cuadritos, como
+si no compartieran la misma línea" (`_dibujar_bordes_gruesos`, `app.gui.
+widgets.grilla_operativa`): cada celda pintaba su propio marco fino
+COMPLETO (las 4 caras, vía `drawRect`) — el límite ENTRE dos celdas
+vecinas quedaba pintado DOS VECES, una por cada lado (el borde derecho
+de la celda de la izquierda Y el borde izquierdo de la celda de la
+derecha), en dos columnas de píxeles distintas y contiguas en vez de una
+sola línea compartida de 1px. Se corrige pintando solo abajo y a la
+derecha (`drawLine` ×2 en vez de `drawRect`): cada límite interno queda
+trazado por una única celda (la de arriba/la de la izquierda), sin
+duplicarse. El borde exterior superior/izquierdo de la grilla sigue
+cerrado igual que antes porque ahí ya cae la línea gruesa estructural
+(día/encabezado), nunca la fina — no hace falta ningún caso especial
+para el borde de afuera.
+
+### 1.9 a 1.12 — Reglas cruzadas, se aplican pantalla por pantalla
+
+Cuatro puntos que no son centralizables en un solo lugar (dependen del
+flujo concreto de cada pantalla), así que quedan como criterio a aplicar
+durante el recorrido, no como un cambio de una sola vez acá:
+
+- **1.9** (regenerar liquidación + marcar no enviada tras cualquier
+  recálculo del período actual; copiar WhatsApp si es categoría A): en
+  gran parte YA es el comportamiento del sistema desde varias tandas
+  anteriores (`regenerar_si_corresponde`, usado por Vacaciones/
+  Licencias/Reservas regulares/Cargos especiales/Aumentos/Fechas
+  especiales) — lo que queda es verificar que no falte en ningún lugar
+  nuevo a medida que se revisa cada pantalla.
+- **1.10** (alertas con el contenido completo, no solo el número de
+  referencia + fecha con día de semana abreviado) y **1.11** (alerta
+  final de éxito/cancelación): se revisan mensaje por mensaje, pantalla
+  por pantalla — no hay un único lugar que arme "todos los carteles del
+  sistema".
+- **1.12** (solo se puede imputar al período actual o posterior, nunca
+  a uno anterior): ya existe como criterio en varios flujos (Reservas,
+  Cargos especiales, movimientos de Llaves) — se revisa que esté en
+  todos los lugares con un campo de período a imputar.
+
+### 1.13 — Sábado en negro en todos los selectores de fecha
+
+`aplicar_color_sabado_negro` (nuevo, `app/gui/widgets/fecha.py`): toma
+un `QDateEdit` ya con `setCalendarPopup(True)` y le pinta de negro el
+`weekdayTextFormat` del sábado en su `calendarWidget()` (por default, Qt
+lo pinta en un tono distinto al resto de la semana, igual que el
+domingo — la clienta pidió corregir solo el sábado). Se aplicó en los
+seis puntos de construcción de `QDateEdit` del sistema: tres fábricas
+compartidas (`novedades._campo_fecha`, `llaves._fecha_edit`,
+`configuracion._crear_campo_fecha`) que ya cubren varios usos cada una,
+más los campos armados a mano en `oferta.py` (2), `reservas.py` (5, vía
+un script de un solo uso sobre cada `setCalendarPopup(True)`) y
+`crud_generico.py` (el `tipo="fecha"` de los catálogos genéricos).
+
+### 1.14 — Nueva versión: "SistemaDF v0.11.2026.10"
+
+`app/version.py`: `VERSION` pasa de `"v0.1"` a `"v0.11.2026.10"` — sin
+ningún otro cambio, `NOMBRE_Y_VERSION` ya se arma solo a partir de esa
+constante.
+
+### Carpeta de profesional: nombre completo, se renombra sola ante cualquier cambio relevante
+
+Pedido explícito de la clienta: la carpeta de un profesional
+(`Profesionales/{...}`, liquidaciones + documentación) pasa de llamarse
+solo con el código ("R1") a "{código} - {tratamiento} {nombre}
+{apellido}" (ej. "R1 - Lic. Virginia Lo Veci"), el mismo formato
+canónico que ya muestran los selectores de profesional de todo el
+sistema — para poder identificar de quién es la carpeta sin tener que
+abrir el sistema.
+
+`nombre_carpeta_profesional(codigo, tratamiento, nombre_pila, apellido)`
+(nuevo, `app.negocio.archivos_generados`) arma y sanea ese texto
+(`_CARACTERES_INVALIDOS_CARPETA`, mismo criterio que `app.negocio.
+imagenes._nombre_archivo_valido` — Windows no admite `\/:*?"<>|` en un
+nombre de archivo/carpeta, duplicado acá porque son capas de negocio sin
+relación entre sí) — sin tratamiento/nombre/apellido cargados, cae al
+código solo, igual que antes de este cambio (compatibilidad con
+cualquier Profesional de prueba sin esos campos). `carpeta_profesional`
+pasa a resolver internamente el nombre completo consultando la tabla
+`Profesional` por `IdCodigo` — los llamadores (`mensajeria.py`,
+`liquidacion.py`, `avance_mes.py`) no cambiaron, siguen pasando solo el
+código.
+
+`aplicar_cambio_codigo` (el hook que ya corría al editar un profesional
+desde la pantalla, antes solo para código/categoría) ahora dispara el
+renombrado de carpeta ante un cambio en CUALQUIERA de los cuatro campos
+que componen el nombre (código, tratamiento, nombre, apellido) — no solo
+el código como antes. El nombre ANTERIOR se calcula a partir de
+`registro_anterior` (la fila de antes de guardar, que el hook ya recibía)
+en vez de volver a consultar la base por el código viejo, que para
+cuando corre este hook ya no existe ahí (`repositorio.actualizar` ya
+hizo commit antes de llamarlo). `renombrar_carpeta_profesional` pasa a
+recibir el nombre de carpeta COMPLETO en sus dos parámetros (antes,
+códigos sueltos) — mismo mecanismo de mover+limpiar de siempre, solo
+cambia qué representan esos dos strings.
+
+Tests nuevos en `tests/test_archivos_generados.py`
+(`nombre_carpeta_profesional` con distintas combinaciones, `carpeta_
+profesional` con y sin registro real) y ajustados en `tests/test_
+profesionales.py`/`tests/test_gui_liquidacion.py` (las rutas de disco
+esperadas pasan de "R3"/"R1" a "R3 - Ramos"/"R1 - Gómez", reflejando el
+nombre real del profesional de cada test — incluido un caso donde el
+diálogo de edición real termina completando "Tratamiento" con un valor
+default del combo aunque el mock no lo haya tocado, destapando que
+cualquier edición por ese diálogo ya rellenaba ese campo desde antes de
+este cambio, simplemente sin que importara hasta ahora).
+
+### Planilla de importación de Llaves: tipos, accesos y tenencias en una sola hoja
+
+Pedido explícito de la clienta — contradice una decisión anterior de
+"dejarlo como está" (ver la sección "Planilla de importación: revisión
+de cobertura" más arriba), tomada antes de este pedido nuevo y explícito
+de volver a resolverlo. La hoja "Llave" suma cuatro columnas opcionales
+al final de las tres que ya tenía (`Tipo`, `ValorDepositoActual`,
+`Observacion`): `Edificio`, `Unidad`, `Profesional`, `DepositoAbonado` —
+al final de la lista, no en el medio, para no correr la posición de las
+columnas que ya tenía alguien con una planilla vieja descargada (se
+resuelve por nombre de encabezado, pero mantener el orden estable evita
+sorpresas).
+
+Alcance deliberadamente acotado al caso común — "una fila = un tipo de
+llave, con como mucho UN acceso y UNA tenencia inicial" — en vez de
+construir un mecanismo de referencias cruzadas entre hojas (`LlaveAcceso`/
+`LlaveMovimiento` como hojas aparte, referenciando filas de "Llave" por
+algún identificador inventado): la fila ya resuelve directamente el caso
+real que describió la clienta ("qué llaves tiene cada profesional, y si
+abonó depósito"). Si una llave necesitara más de un acceso o más de un
+tenedor, se completa a mano desde la pantalla de Llaves después de
+importar — igual que antes de este cambio.
+
+Mecánica (`app/importacion/importar_excel.py`, rama `elif entidad ==
+"Llave":`): `_resolver_referencias` resuelve Edificio (opcional) →
+`IdEdificio`, Unidad (opcional, solo si hay Edificio) → `IdUnidad`, y
+Profesional (opcional, por `IdCodigo`) → `IdProfesional` — las tres
+quedan en `datos` aunque sean `None`, a diferencia del resto de las
+entidades de esta función (que SIEMPRE son obligatorias). `importar_hoja`
+saca esas tres referencias más `DepositoAbonado` de `datos` ANTES del
+chequeo de duplicado (`_ya_existe_identico` reventaría contra la tabla
+`Llave`, que no tiene esas columnas, si quedaran) y antes de crear la
+`Llave` en sí:
+
+- Si hay Edificio, `agregar_acceso_llave(conn, id_llave=..., id_edificio=...,
+  id_unidad=...)` — misma función que ya usa la pantalla, con sus mismas
+  validaciones (una llave Tipo Edificio no admite más de un edificio
+  distinto, Tipo Unidad exige una unidad puntual).
+- Si hay Profesional, `ingresar_copias` (una copia nueva al stock) +
+  un `LlaveMovimiento` Tipo="Asignación" armado directo por repositorio
+  (no vía `asignar_llave`, la función que usa la pantalla para una
+  asignación NUEVA): a propósito NUNCA genera un `CargoEspecial`, sea
+  que `DepositoAbonado` venga en "Sí" o en "No" — es una tenencia
+  HISTÓRICA, de antes de empezar a usar el sistema; si ya lo pagó, fue
+  por fuera del sistema (se registra `DepositoCobrado=1`/`MontoCobrado`
+  para que quede history, sin cobrar nada de nuevo); si no lo pagó,
+  tampoco corresponde cobrárselo recién ahora solo por estar
+  importando el dato histórico — mismo criterio que ya usa `PlanPago`
+  importado (las cuotas pasadas se marcan solas como pagadas, sin
+  volver a generar nada).
+
+Chequeo de duplicados (`_ya_existe_identico`) se saltea por completo
+para "Llave" cuando la fila trae Edificio o Profesional: comparar solo
+por las columnas reales de la tabla Llave (Tipo/ValorDepositoActual/
+Observacion) hubiera hecho pasar como "duplicadas" a dos llaves del
+mismo tipo/valor pero con acceso a edificios o profesionales DISTINTOS
+— exactamente las dos columnas que quedarían afuera de esa comparación
+son las que hacen que sean filas legítimamente distintas. Sin Edificio
+ni Profesional (el caso simple, "solo cargo el tipo"), el chequeo sigue
+funcionando exactamente igual que antes de este cambio.
+
+Tests nuevos en `tests/test_importacion.py`: acceso creado con Edificio
+válido, error con edificio inexistente, tenencia con depósito abonado
+(sin `CargoEspecial` generado) y sin abonar, error con profesional
+inexistente, dos llaves del mismo tipo/valor a edificios distintos NO
+se consideran duplicadas entre sí.

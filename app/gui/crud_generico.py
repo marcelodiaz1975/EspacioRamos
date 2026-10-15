@@ -46,6 +46,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.fecha import aplicar_color_sabado_negro
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.resumen_saldo import item_monto
@@ -433,6 +435,7 @@ class PantallaCRUD(QWidget):
                 layout.addLayout(fila_botones)
 
         self.tabla_widget = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_widget)
         self.tabla_widget.setColumnCount(len(self.campos))
         self.tabla_widget.setHorizontalHeaderLabels([c.etiqueta for c in self.campos])
         self.tabla_widget.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -696,6 +699,7 @@ class _DialogoRegistro(QDialog):
             entrada.setDisplayFormat(campo.formato_fecha or _FORMATO_FECHA_DIA)
             entrada.setLocale(_LOCALE_ES)
             entrada.setCalendarPopup(True)
+            aplicar_color_sabado_negro(entrada)
             if not campo.requerido:
                 # Sin esto, un campo opcional sin valor cargado quedaría
                 # mostrando y guardando "hoy" como si fuera un dato real

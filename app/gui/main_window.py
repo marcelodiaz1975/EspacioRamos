@@ -21,11 +21,13 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QStackedWidget,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from app.gui.estilos import hoja_estilos, paleta
+from app.gui.widgets.calculadora import Calculadora
 from app.negocio.dias import periodo_actual
 from app.negocio.plantillas_texto import resolver_plantilla
 from app.negocio.seguridad import nivel_alcanza
@@ -69,6 +71,7 @@ class VentanaPrincipal(QMainWindow):
 
         categoria_actual = None
         primer_item_seleccionable = None
+        fila_panel_control = None
         for seccion in secciones_visibles:
             if seccion.categoria != categoria_actual:
                 separador = QListWidgetItem(f"— {seccion.categoria.upper()} —")
@@ -85,6 +88,18 @@ class VentanaPrincipal(QMainWindow):
             self._navegacion.addItem(item)
             if primer_item_seleccionable is None:
                 primer_item_seleccionable = self._navegacion.count() - 1
+            if seccion.nombre == "Panel de control":
+                fila_panel_control = self._navegacion.count() - 1
+
+        # Pedido general de la clienta: al abrir el programa, siempre
+        # arranca en "Panel de control" — por NOMBRE, no por posición, para
+        # que un reordenamiento futuro del menú (ver `gui_main.
+        # construir_secciones`) no corra accidentalmente cuál es la
+        # pantalla inicial. Sin esa Seccion en la lista (algún nivel de
+        # usuario sin acceso a ella), cae al primer ítem seleccionable de
+        # siempre.
+        if fila_panel_control is not None:
+            primer_item_seleccionable = fila_panel_control
 
         self._barra_fecha_ficticia = QLabel()
         self._barra_fecha_ficticia.setObjectName("barraFechaFicticia")
@@ -95,6 +110,19 @@ class VentanaPrincipal(QMainWindow):
         self._badge_periodo.setObjectName("badgePeriodo")
         self.statusBar().addPermanentWidget(self._badge_periodo)
         self._actualizar_badge_periodo()
+
+        # Pedido general de la clienta: "en la línea donde se ve el
+        # período... al borde de la izquierda" — `addWidget` (a diferencia
+        # de `addPermanentWidget`, usado arriba para el período) ubica en
+        # el área IZQUIERDA de la barra de estado, de siempre en Qt.
+        self._etiqueta_funciones = QLabel("F1 – Ayuda / F2 – Calculadora / F3 – Reiniciar solapa")
+        self.statusBar().addWidget(self._etiqueta_funciones)
+
+        self._calculadora: Calculadora | None = None
+        self._atajo_calculadora = QShortcut(Qt.Key.Key_F2, self)
+        self._atajo_calculadora.activated.connect(self._abrir_calculadora)
+        self._atajo_reiniciar = QShortcut(Qt.Key.Key_F3, self)
+        self._atajo_reiniciar.activated.connect(self._reiniciar_solapa_activa)
 
         self._navegacion.currentRowChanged.connect(self._cambiar_seccion)
         if primer_item_seleccionable is not None:
@@ -119,6 +147,51 @@ class VentanaPrincipal(QMainWindow):
 
         self._atajo_ayuda = QShortcut(Qt.Key.Key_F1, self)
         self._atajo_ayuda.activated.connect(self._mostrar_ayuda)
+
+    def _abrir_calculadora(self) -> None:
+        """F2: una sola instancia por ventana — F2 repetido mientras ya
+        está abierta la vuelve a traer al frente en vez de abrir una
+        segunda, y `_calculadora` queda en `None` otra vez cuando se la
+        cierra con la cruz (señal `destroyed`) para que la próxima F2
+        abra una nueva."""
+        if self._calculadora is None:
+            self._calculadora = Calculadora(self)
+            self._calculadora.destroyed.connect(self._al_cerrar_calculadora)
+            self._calculadora.show()
+        else:
+            self._calculadora.raise_()
+            self._calculadora.activateWindow()
+
+    def _al_cerrar_calculadora(self) -> None:
+        self._calculadora = None
+
+    def _panel_mas_interno(self) -> QWidget | None:
+        """Baja por la cadena de `QTabWidget` anidados hasta el panel de
+        verdad que se está viendo en este momento — una pantalla compuesta
+        (ej. "Archivos y listas") es un `QTabWidget` cuyo contenido de cada
+        pestaña puede a su vez ser OTRO formulario con sus propias
+        solapas. `visto` evita un loop infinito si alguna vez un
+        `QTabWidget` quedara anidado dentro de sí mismo (no debería pasar,
+        es una guarda defensiva nomás)."""
+        widget = self._pila.currentWidget()
+        visto: set[int] = set()
+        while isinstance(widget, QTabWidget) and id(widget) not in visto:
+            visto.add(id(widget))
+            siguiente = widget.currentWidget()
+            if siguiente is None:
+                break
+            widget = siguiente
+        return widget
+
+    def _reiniciar_solapa_activa(self) -> None:
+        """F3: "reinicia la solapa, la resetea, como recién se entrara en
+        ella" — mismo método (`reiniciar`) que cada panel ya implementa
+        para el reseteo automático al cambiar de pestaña (ver #1.4); los
+        paneles que todavía no lo tienen simplemente no hacen nada con F3,
+        en vez de romper."""
+        panel = self._panel_mas_interno()
+        if panel is not None and hasattr(panel, "reiniciar"):
+            panel.reiniciar()
 
     def ir_a_seccion(self, nombre: str) -> QWidget | None:
         """Salta a la Seccion de nombre `nombre` (la selecciona en el menú

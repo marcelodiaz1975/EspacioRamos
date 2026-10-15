@@ -41,6 +41,7 @@ from app.gui.dialogos import confirmar_datos_antes_de_crear, confirmar_si_period
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
@@ -380,6 +381,7 @@ class _PanelRegistrarPago(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(10)
         self.tabla.setHorizontalHeaderLabels([
             "Fecha de carga", "Profesional", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
@@ -882,6 +884,7 @@ class _PanelPlanesPago(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(9)
         self.tabla.setHorizontalHeaderLabels(
             ["Profesional", "Inicio", "Monto refinanciado", "Cuotas del plan", "Interés mensual",
@@ -1124,6 +1127,7 @@ class _PanelEstadoCuentaPagos(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(9)
         self.tabla.setHorizontalHeaderLabels([
             "Fecha de carga", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",

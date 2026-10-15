@@ -381,7 +381,10 @@ def test_emitir_seleccionadas_persiste_liquidacion_y_genera_pdf(qtbot, conn, tmp
     assert fila is not None
     assert fila["Periodo"] == periodo_actual(conn)
     assert fila["NombreArchivo"] is not None
-    assert (tmp_path / "Profesionales" / "R1" / fila["NombreArchivo"]).exists()
+    # Carpeta "{código} - {apellido}" (sin Tratamiento/NombrePila cargados
+    # para este profesional de prueba, default "Gómez") — ver
+    # `app.negocio.archivos_generados.nombre_carpeta_profesional`.
+    assert (tmp_path / "Profesionales" / "R1 - Gómez" / fila["NombreArchivo"]).exists()
 
 
 def test_emitir_sin_seleccionados_no_emite(qtbot, conn, tmp_path):

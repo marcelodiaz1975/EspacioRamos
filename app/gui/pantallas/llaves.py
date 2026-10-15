@@ -62,6 +62,8 @@ from PySide6.QtWidgets import (
 
 from app.gui.pantallas.reservas import _opciones_profesional, _SpinMonto, _texto_profesional
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.fecha import aplicar_color_sabado_negro
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
@@ -133,6 +135,7 @@ def _fecha_edit(valor_iso: str | None = None) -> QDateEdit:
     campo.setCalendarPopup(True)
     campo.setDisplayFormat("dd-MM-yyyy")
     campo.setLocale(QLocale(QLocale.Language.Spanish))
+    aplicar_color_sabado_negro(campo)
     campo.setDate(QDate.fromString(valor_iso, Qt.DateFormat.ISODate) if valor_iso else QDate.currentDate())
     return campo
 
@@ -208,6 +211,7 @@ class _PanelLlaves(QWidget):
         titulo_tipos = self._titulo_seccion("Tipos de llaves")
         columna_tipos.addWidget(titulo_tipos)
         self.tabla_tipos = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_tipos)
         self.tabla_tipos.setColumnCount(6)
         self.tabla_tipos.setHorizontalHeaderLabels(
             ["Nombre del tipo de llave", "Tipo", "Depósito actual", "Asignadas", "Disponibles", "Total"]
@@ -264,6 +268,7 @@ class _PanelLlaves(QWidget):
         titulo_accesos = self._titulo_seccion("Accesos habilitados con la llave")
         columna_accesos.addWidget(titulo_accesos)
         self.tabla_accesos = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_accesos)
         self.tabla_accesos.setColumnCount(4)
         self.tabla_accesos.setHorizontalHeaderLabels(["Localidad", "Edificio", "Unidad", "Nombre"])
         self.tabla_accesos.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -302,6 +307,7 @@ class _PanelLlaves(QWidget):
         titulo_movimientos = self._titulo_seccion("Movimientos de llaves")
         columna_movimientos.addWidget(titulo_movimientos)
         self.tabla_movimientos = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_movimientos)
         self.tabla_movimientos.setColumnCount(8)
         self.tabla_movimientos.setHorizontalHeaderLabels(
             [
@@ -481,17 +487,25 @@ class _PanelLlaves(QWidget):
     # ----------------------------------------------------------- accesos
 
     def _accesos(self, id_llave: int) -> list[sqlite3.Row]:
-        return self.conn.execute(
+        filas = self.conn.execute(
             """
             SELECT la.*, e.Nombre AS NombreEdificio, loc.Localidad AS Localidad, u.Departamento
             FROM LlaveAcceso la
             JOIN Edificio e ON e.IdEdificio = la.IdEdificio
             LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
             LEFT JOIN Unidad u ON u.IdUnidad = la.IdUnidad
-            WHERE la.IdLlave = ? ORDER BY loc.Localidad, e.Nombre, u.Departamento
+            WHERE la.IdLlave = ? ORDER BY loc.Localidad, e.Nombre
             """,
             (id_llave,),
         ).fetchall()
+        # El orden por Unidad (piso + letra) no es expresable en el ORDER
+        # BY de SQL — se aplica en Python, mismo criterio que el resto del
+        # sistema (`clave_orden_unidad`), sin perder el agrupamiento por
+        # Localidad/Edificio que ya trae ordenado la consulta.
+        return sorted(
+            filas,
+            key=lambda a: (a["Localidad"] or "", a["NombreEdificio"] or "", clave_orden_unidad(a["Departamento"] or "")),
+        )
 
     def _acceso_seleccionado(self) -> sqlite3.Row | None:
         filas = self.tabla_accesos.selectionModel().selectedRows()
@@ -504,7 +518,9 @@ class _PanelLlaves(QWidget):
         claves = {
             0: lambda a: a["Localidad"] or "",
             1: lambda a: a["NombreEdificio"] or "",
-            2: lambda a: a["Departamento"] or "",
+            # Orden por piso (PB, EP, después ascendente numérico) + letra a
+            # igual piso — pedido general de la clienta (`clave_orden_unidad`).
+            2: lambda a: clave_orden_unidad(a["Departamento"] or ""),
             3: lambda a: a["Nombre"] or "",
         }
         return claves[columna]

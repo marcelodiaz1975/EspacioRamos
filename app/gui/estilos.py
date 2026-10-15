@@ -252,12 +252,24 @@ QPushButton:focus {{
     outline: 2px solid {COLOR_FOCO};
     outline-offset: 1px;
 }}
-QComboBox {{ border: 2px solid transparent; border-radius: 2px; }}
+QComboBox {{ border: 2px solid #000000; border-radius: 2px; }}
 QComboBox:focus {{ border: 2px solid {COLOR_FOCO}; }}
 QCheckBox {{ border: 2px solid transparent; border-radius: 2px; padding: 1px; }}
 QCheckBox:focus {{ border: 2px solid {COLOR_FOCO}; }}
 QRadioButton {{ border: 2px solid transparent; border-radius: 2px; padding: 1px; }}
 QRadioButton:focus {{ border: 2px solid {COLOR_FOCO}; }}
+
+/* Pedido general de la clienta ("recuadro alrededor del filtro
+seleccionable"): a varios cuadros de texto/filtro les faltaba la línea
+negra finita que los delimita visualmente — `QComboBox` ya tenía un
+borde (ver arriba), pero transparente en reposo (solo se veía al
+enfocar); `QLineEdit` dependía por completo del estilo nativo de cada
+plataforma, que en algunos casos lo deja prácticamente invisible. Mismo
+criterio "borde negro fino" que el resto de la app (botones, solapas,
+tabla). `QComboBox` sube de `transparent` a `#000000` en reposo (mismo
+ancho de 2px que ya tenía, así el foco no corre nada al ganar/perder
+color). */
+QLineEdit {{ border: 1px solid #000000; border-radius: 2px; padding: 1px 2px; }}
 
 /* Scrollbars con contraste explícito, parejo en toda la app — pedido de
 la clienta al revisar Grilla semanal ("no aparece el scroll

@@ -68,6 +68,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.pantallas.reservas import _opciones_profesional
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.fecha import aplicar_color_sabado_negro
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
     GrillaOperativaWidget,
@@ -285,10 +286,12 @@ class _PanelOferta(QWidget):
         self.campo_fecha_desde.setCalendarPopup(True)
         self.campo_fecha_desde.setLocale(QLocale(QLocale.Language.Spanish))
         self.campo_fecha_desde.setDisplayFormat("ddd dd-MM-yyyy")
+        aplicar_color_sabado_negro(self.campo_fecha_desde)
         self.campo_fecha_hasta = QDateEdit()
         self.campo_fecha_hasta.setCalendarPopup(True)
         self.campo_fecha_hasta.setLocale(QLocale(QLocale.Language.Spanish))
         self.campo_fecha_hasta.setDisplayFormat("ddd dd-MM-yyyy")
+        aplicar_color_sabado_negro(self.campo_fecha_hasta)
         fila_fechas.addWidget(QLabel("Desde"))
         fila_fechas.addWidget(self.campo_fecha_desde)
         fila_fechas.addStretch()

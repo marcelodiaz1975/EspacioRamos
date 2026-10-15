@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.estilos import COLOR_ROJO
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
@@ -42,6 +43,7 @@ from app.negocio.estadisticas import (
     historial_general,
 )
 from app.negocio.formato import formatear_moneda
+from app.pdf.estilos import clave_orden_unidad
 
 _ANCHO_PANEL_FILTROS = 240
 _ANCHO_CAMPO = 220
@@ -140,6 +142,7 @@ def _opciones_periodo(conn: sqlite3.Connection) -> list[str]:
 
 def _armar_tabla() -> QTableWidget:
     tabla = QTableWidget()
+    excluir_tabla_del_tab(tabla)
     tabla.setColumnCount(len(_COLUMNAS))
     tabla.setHorizontalHeaderLabels(_COLUMNAS)
     tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -434,8 +437,11 @@ class _PanelEstadisticasVarias(QWidget):
         if id_edificio is not None:
             sql += " WHERE IdEdificio = ?"
             parametros.append(id_edificio)
-        sql += " ORDER BY Departamento"
-        for f in self.conn.execute(sql, parametros).fetchall():
+        filas = self.conn.execute(sql, parametros).fetchall()
+        # Orden por piso (PB, EP, después ascendente numérico) + letra a
+        # igual piso — pedido general de la clienta (ver `clave_orden_unidad`).
+        filas = sorted(filas, key=lambda f: clave_orden_unidad(f["Departamento"]))
+        for f in filas:
             self.combo_unidad.addItem(f["Departamento"], f["IdUnidad"])
         self.combo_unidad.blockSignals(False)
         self._cargar_combo_consultorio()

@@ -111,6 +111,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.main_window import Seccion
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.items_tabla import item_numero
 from app.negocio.archivos_generados import SUBCARPETA_MANUAL, carpeta_archivos_varios
 from app.negocio.imagenes import (
@@ -131,6 +132,7 @@ from app.negocio.imagenes import (
     marcar_principal,
     reordenar,
 )
+from app.pdf.estilos import clave_orden_unidad
 from app.pdf.manual_pdf import generar_pdf_manual
 
 _ANCHO_CAMPO = 240
@@ -417,6 +419,7 @@ class _PanelGestorArchivos(QWidget):
         layout_solapa.addWidget(panel_izquierda)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self._configurar_columnas(es_todos=True)  # "Todos los archivos" es la primera opción del combo Alcance
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -503,8 +506,11 @@ class _PanelGestorArchivos(QWidget):
         if id_edificio is not None:
             sql += " WHERE IdEdificio = ?"
             parametros.append(id_edificio)
-        sql += " ORDER BY Departamento"
-        for f in self.conn.execute(sql, parametros).fetchall():
+        filas = self.conn.execute(sql, parametros).fetchall()
+        # Orden por piso (PB, EP, después ascendente numérico) + letra a
+        # igual piso — pedido general de la clienta (ver `clave_orden_unidad`).
+        filas = sorted(filas, key=lambda f: clave_orden_unidad(f["Departamento"]))
+        for f in filas:
             self.combo_unidad.addItem(f["Departamento"], f["IdUnidad"])
         self.combo_unidad.blockSignals(False)
         self._cargar_combo_consultorio()

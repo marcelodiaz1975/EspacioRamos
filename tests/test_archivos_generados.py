@@ -15,6 +15,7 @@ from app.negocio.archivos_generados import (
     destino_sin_colision,
     limpiar_liquidaciones_antiguas,
     limpiar_liquidaciones_simuladas_antiguas,
+    nombre_carpeta_profesional,
     renombrar_carpeta_profesional,
     vaciar_carpeta,
 )
@@ -60,6 +61,31 @@ def test_carpeta_profesional_sin_codigo_falla(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     with pytest.raises(ValueError):
         carpeta_profesional(conn, "")
+
+
+def test_carpeta_profesional_incluye_el_nombre_cuando_existe_el_registro(conn, tmp_path):
+    """Pedido explícito de la clienta: la carpeta pasa de nombrarse solo
+    con el código a "{código} - {tratamiento} {nombre} {apellido}", igual
+    al formato que ya muestran los selectores de profesional."""
+    _configurar_carpeta_base(conn, tmp_path)
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", IdCodigo="R1", Tratamiento="Lic.", NombrePila="Virginia", Apellido="Lo Veci",
+    )
+    carpeta = carpeta_profesional(conn, "R1")
+    assert carpeta == tmp_path / "Profesionales" / "R1 - Lic. Virginia Lo Veci"
+    assert carpeta.is_dir()
+
+
+def test_nombre_carpeta_profesional_sin_ningun_dato_de_nombre():
+    assert nombre_carpeta_profesional("R1", None, None, None) == "R1"
+
+
+def test_nombre_carpeta_profesional_solo_apellido():
+    assert nombre_carpeta_profesional("R1", None, None, "Ramos") == "R1 - Ramos"
+
+
+def test_nombre_carpeta_profesional_sanea_caracteres_invalidos():
+    assert nombre_carpeta_profesional("R1", None, None, 'Pérez / López "Jr"') == "R1 - Pérez _ López _Jr_"
 
 
 def test_vaciar_carpeta_borra_solo_archivos_sueltos(tmp_path):
@@ -147,10 +173,14 @@ def test_aplicar_cambio_codigo_registra_historial_y_renombra_carpeta(conn, tmp_p
     assert historial["CategoriaNueva"] == "X"
     assert historial["CodigoNuevo"] == "X34"
 
-    carpeta_nueva = tmp_path / "Profesionales" / "X34"
+    # Apellido ("Ramos") no cambió en este caso — solo categoría/código —
+    # así que la carpeta nueva conserva ese mismo nombre, con el código
+    # nuevo (pedido general: "Profesionales/{código} - {tratamiento
+    # nombre apellido}", ver `nombre_carpeta_profesional`).
+    carpeta_nueva = tmp_path / "Profesionales" / "X34 - Ramos"
     assert (carpeta_nueva / "2026-08 - Liquidación Ramos.pdf").exists()
     assert not (carpeta_nueva / "2025-01 - Liquidación Ramos.pdf").exists()
-    assert not (tmp_path / "Profesionales" / "R3").exists()
+    assert not (tmp_path / "Profesionales" / "R3 - Ramos").exists()
 
 
 def test_aplicar_cambio_codigo_sin_cambios_no_hace_nada(conn, tmp_path):

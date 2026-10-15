@@ -187,12 +187,14 @@ def test_combobox_y_checkbox_tienen_borde_de_foco_reservado_en_la_hoja_de_estilo
     """Pedido explícito de la clienta sobre Reservas ("no veo en los
     cheks... por ejemplo"): a diferencia de QPushButton, `outline` no se
     pinta en QComboBox/QCheckBox en este Qt — acá hace falta `border`,
-    reservado siempre (transparente en reposo) para no correr el
-    contenido de alrededor al ganar/perder el foco."""
+    reservado siempre para no correr el contenido de alrededor al ganar/
+    perder el foco. `QComboBox` en reposo pasa a negro (regla general
+    posterior, "recuadro alrededor del filtro seleccionable" — antes
+    transparente, solo se veía al enfocar), mismo ancho de 2px."""
     for modo_oscuro in (False, True):
         hoja = hoja_estilos(modo_oscuro)
         bloque_combo_reposo = hoja.split("QComboBox {")[1].split("}")[0]
-        assert "border: 2px solid transparent" in bloque_combo_reposo
+        assert "border: 2px solid #000000" in bloque_combo_reposo
         bloque_combo_foco = hoja.split("QComboBox:focus {")[1].split("}")[0]
         assert f"border: 2px solid {COLOR_FOCO}" in bloque_combo_foco
         bloque_check_reposo = hoja.split("QCheckBox {")[1].split("}")[0]

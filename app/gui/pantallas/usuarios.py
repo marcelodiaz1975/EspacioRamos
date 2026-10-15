@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.negocio.seguridad import cambiar_contrasena, crear_usuario, hay_otro_usuario_activo_de_nivel
@@ -184,6 +185,7 @@ class _DialogoHistorialContrasenas(QDialog):
         layout = QVBoxLayout(self)
 
         tabla = QTableWidget()
+        excluir_tabla_del_tab(tabla)
         tabla.setColumnCount(3)
         tabla.setHorizontalHeaderLabels(["Fecha y hora", "Motivo", "Realizado por"])
         tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -254,6 +256,7 @@ class _PanelUsuarios(QWidget):
         layout_solapa.addWidget(columna_widget)
 
         self.tabla_usuarios = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_usuarios)
         self.tabla_usuarios.setColumnCount(4)
         self.tabla_usuarios.setHorizontalHeaderLabels(["Usuario", "Nivel de acceso", "Activo", "Último ingreso"])
         self.tabla_usuarios.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -394,6 +397,7 @@ class _PanelPermisosPantalla(QWidget):
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(2)
         self.tabla.setHorizontalHeaderLabels(["Pantalla", "Nivel mínimo requerido"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

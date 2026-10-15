@@ -63,6 +63,7 @@ from app.gui.pantallas.reservas import (
     _texto_profesional,
 )
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
     _agregar_item_todos,
@@ -312,6 +313,7 @@ class _PanelPlacasOperativas(QWidget):
 
         columna_tabla = QVBoxLayout()
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
             ["Localidad", "Edificio", "Unidad", "Posición", "Profesional", "Nombre grabado", "Personalizada"]

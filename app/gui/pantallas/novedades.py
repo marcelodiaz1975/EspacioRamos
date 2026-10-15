@@ -71,6 +71,8 @@ from app.gui.pantallas.reservas import (
     _texto_profesional,
 )
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.fecha import aplicar_color_sabado_negro
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
 from app.gui.widgets.items_tabla import item_numero
@@ -147,6 +149,7 @@ def _campo_fecha(conn: sqlite3.Connection) -> QDateEdit:
     campo.setDisplayFormat(_FORMATO_FECHA_DIA)
     campo.setLocale(_LOCALE_ES)
     campo.setCalendarPopup(True)
+    aplicar_color_sabado_negro(campo)
     campo.setFixedWidth(_ANCHO_CAMPO)
     hoy = fecha_actual(conn)
     campo.setDate(QDate(hoy.year, hoy.month, hoy.day))
@@ -407,6 +410,7 @@ class _PanelVacaciones(QWidget):
         panel_tabla = QGroupBox("Vacaciones tomadas")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
             ["Profesional", "Año calendario", "Desde", "Hasta", "Valor bonificado", "Cupo utilizado %", "Cupo restante %"]
@@ -750,6 +754,7 @@ class _PanelLicencias(QWidget):
         panel_tabla = QGroupBox("Licencias tomadas")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(6)
         self.tabla.setHorizontalHeaderLabels(
             ["Profesional", "Tipo", "Desde", "Hasta", "Bonificación", "Valor bonificado"]
@@ -1066,6 +1071,7 @@ class _PanelAusencias(QWidget):
         panel_tabla = QGroupBox("Ausencias registradas")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(6)
         self.tabla.setHorizontalHeaderLabels(["Profesional", "Desde", "Hasta", "Horario", "Motivo", "Origen"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -1346,6 +1352,7 @@ class _PanelCargosEspeciales(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
             ["Fecha", "Profesional", "Tipo", "Subtipo", "Concepto", "Monto", "Período imputado"]
@@ -1592,6 +1599,7 @@ class _PanelEstadoCuentaCargos(QWidget):
         splitter.addWidget(panel_form)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(6)
         self.tabla.setHorizontalHeaderLabels(["Fecha", "Tipo", "Subtipo", "Concepto", "Monto", "Período imputado"])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

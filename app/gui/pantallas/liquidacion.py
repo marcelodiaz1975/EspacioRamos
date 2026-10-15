@@ -59,6 +59,7 @@ from app.gui.pantallas.reservas import (
     _recargar_unidades,
     _texto_profesional,
 )
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import clave_orden_codigo
@@ -216,6 +217,7 @@ class _PanelEmisionArchivos(QWidget):
         layout_externo.addWidget(panel_filtros)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(6)
         self.tabla.setHorizontalHeaderLabels(
             ["Incluir", "Profesional", "Horas semanales", "Saldo anterior", "Monto a generar", "Estado"]
@@ -461,6 +463,7 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         layout_externo.addWidget(panel_filtros)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels([
             "Período", "Fecha emisión", "Monto generado", "Reemisión", "Estado de envío", "Archivo",
@@ -673,6 +676,7 @@ class _PanelLiquidacionesSimuladas(QWidget):
 
         layout_derecha.addWidget(QLabel("Bloques cargados:"))
         self.tabla_bloques = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_bloques)
         self.tabla_bloques.setColumnCount(8)
         self.tabla_bloques.setHorizontalHeaderLabels(
             ["N° Bloque", "Día", "Horario desde", "Horario hasta", "Localidad", "Edificio", "Unidad", "Consultorio"]
@@ -691,6 +695,7 @@ class _PanelLiquidacionesSimuladas(QWidget):
 
         layout_derecha.addWidget(QLabel("Totales por bloques y general:"))
         self.tabla_subtotales = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_subtotales)
         self.tabla_subtotales.setColumnCount(7)
         self.tabla_subtotales.setHorizontalHeaderLabels([
             "N° Bloque", "Horas semanales", "Horas mensuales", "Importe Bruto",

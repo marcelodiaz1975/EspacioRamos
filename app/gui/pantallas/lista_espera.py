@@ -81,6 +81,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
     _agregar_item_todos,
@@ -329,6 +330,7 @@ class _PanelListaEspera(QWidget):
         col_cuando = QVBoxLayout()
         col_cuando.addWidget(_titulo_campo("Bloques del pedido"))
         self.tabla_bloques = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_bloques)
         self.tabla_bloques.setColumnCount(4)
         self.tabla_bloques.setHorizontalHeaderLabels(["Días", "Horario", "Comb. días", "Horas mínimas"])
         self.tabla_bloques.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -408,6 +410,7 @@ class _PanelListaEspera(QWidget):
         layout.addWidget(panel_nuevo_pedido)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(10)
         self.tabla.setHorizontalHeaderLabels([
             "Fecha pedido", "Profesional", "Días", "Horario", "Combinación días", "Combinación bloques",

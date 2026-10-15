@@ -251,8 +251,10 @@ def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_p
     id_prof = obtener_repositorio(conn, "Profesional").crear(
         CategoriaProfesional="R", Apellido="Ramos", IdCodigo="R3",
     )
-    (tmp_path / "Profesionales" / "R3").mkdir(parents=True)
-    (tmp_path / "Profesionales" / "R3" / "2026-08 - Liquidación Ramos.pdf").write_text("x")
+    # Carpeta "{código} - {apellido}" (sin Tratamiento/NombrePila cargados
+    # en este profesional de prueba) — ver `nombre_carpeta_profesional`.
+    (tmp_path / "Profesionales" / "R3 - Ramos").mkdir(parents=True)
+    (tmp_path / "Profesionales" / "R3 - Ramos" / "2026-08 - Liquidación Ramos.pdf").write_text("x")
     conn.commit()
 
     pantalla = _PanelProfesionales(conn)
@@ -276,15 +278,23 @@ def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_p
     assert historial["CodigoAnterior"] == "R3"
     assert historial["CodigoNuevo"] == "X34"
 
-    assert (tmp_path / "Profesionales" / "X34" / "2026-08 - Liquidación Ramos.pdf").exists()
-    assert not (tmp_path / "Profesionales" / "R3").exists()
+    # El diálogo de edición resuelve "Tratamiento" con el combo completo
+    # (`_entradas["Tratamiento"]`, no tocado por este mock) — al guardar
+    # vuelve a escribir su valor actual ("Coach", el que ya resolvía el
+    # combo para este profesional sin tratamiento cargado antes), así que
+    # la carpeta nueva lo incorpora aunque el mock no haya tocado ese
+    # campo. La carpeta vieja ("R3 - Ramos") seguía sin Tratamiento porque
+    # se armó a mano en el setup de este test, antes de pasar por ningún
+    # diálogo real.
+    assert (tmp_path / "Profesionales" / "X34 - Coach Ramos" / "2026-08 - Liquidación Ramos.pdf").exists()
+    assert not (tmp_path / "Profesionales" / "R3 - Ramos").exists()
 
 
 def test_seleccionar_profesional_muestra_su_documentacion(qtbot, conn, tmp_path):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ramos", IdCodigo="R3")
-    (tmp_path / "Profesionales" / "R3" / "Documentación").mkdir(parents=True)
-    (tmp_path / "Profesionales" / "R3" / "Documentación" / "dni.pdf").write_text("x")
+    (tmp_path / "Profesionales" / "R3 - Ramos" / "Documentación").mkdir(parents=True)
+    (tmp_path / "Profesionales" / "R3 - Ramos" / "Documentación" / "dni.pdf").write_text("x")
     conn.commit()
 
     pantalla = _PanelProfesionales(conn)
@@ -326,7 +336,7 @@ def test_agregar_documento_lo_copia_y_lo_lista(qtbot, conn, tmp_path, monkeypatc
     # primera de la lista, "DNI completo" — mockeada por defecto), no
     # con el nombre original.
     assert pantalla.lista_documentos.item(0).text() == "DNI completo.pdf"
-    assert (tmp_path / "base" / "Profesionales" / "R3" / "Documentación" / "DNI completo.pdf").exists()
+    assert (tmp_path / "base" / "Profesionales" / "R3 - Ramos" / "Documentación" / "DNI completo.pdf").exists()
 
 
 def test_eliminar_documento(qtbot, conn, tmp_path, monkeypatch):
@@ -346,7 +356,7 @@ def test_eliminar_documento(qtbot, conn, tmp_path, monkeypatch):
     pantalla._eliminar_documento()
 
     assert pantalla.lista_documentos.count() == 0
-    assert not (tmp_path / "base" / "Profesionales" / "R3" / "Documentación" / "DNI completo.pdf").exists()
+    assert not (tmp_path / "base" / "Profesionales" / "R3 - Ramos" / "Documentación" / "DNI completo.pdf").exists()
 
 
 def test_agregar_documento_elige_categoria_del_dialogo(qtbot, conn, tmp_path, monkeypatch):

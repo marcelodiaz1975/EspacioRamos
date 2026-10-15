@@ -40,7 +40,7 @@ cambia de comportamiento — solo Shift+Enter es distinto."""
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtWidgets import QComboBox, QPlainTextEdit, QTextEdit, QWidget
+from PySide6.QtWidgets import QComboBox, QPlainTextEdit, QTableWidget, QTextEdit, QWidget
 
 
 class _EnterAvanzaFoco(QObject):
@@ -123,3 +123,19 @@ def instalar_enter_avanza_foco(orden: list[QWidget], parent: QObject | None = No
         if isinstance(widget, QComboBox) and widget.isEditable() and widget.lineEdit() is not None:
             widget.lineEdit().installEventFilter(filtro)
     return filtro
+
+
+def excluir_tabla_del_tab(tabla: QTableWidget) -> None:
+    """Pedido general de la clienta ("los focos no pasan nunca de los
+    filtros a las tablas ni de las tablas a los filtros... armar dos
+    cadenas de foco independientes"): saca una tabla del tab-chain nativo
+    de Qt (`ClickFocus` — ya no se puede llegar a ella con Tab desde
+    ningún filtro/control, solo con un click) sin tocarle la navegación
+    interna por teclado una vez que SÍ tiene el foco por click
+    (`setTabKeyNavigation(True)`, ya es el default de `QTableView` — Tab
+    sigue moviéndose celda a celda dentro de la tabla, nunca se "escapa"
+    hacia afuera). Mismo patrón puntual que ya usaba `GrillaOperativaWidget`
+    para sus tablas, generalizado acá para aplicarlo a cualquier tabla del
+    sistema sin repetir las dos líneas en cada pantalla."""
+    tabla.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+    tabla.setTabKeyNavigation(True)

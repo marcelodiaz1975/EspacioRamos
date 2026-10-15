@@ -63,7 +63,19 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
         "Profesional", "Edificio", "Unidad", "Consultorio", "DiaSemana",
         "HoraInicio", "HoraFin", "VigenciaInicio", "VigenciaFin", "EsExcepcion", "Observacion",
     ],
-    "Llave": ["Tipo", "ValorDepositoActual", "Observacion"],
+    # Edificio/Unidad arman de una el acceso (LlaveAcceso) de esta llave si
+    # se cargan; Profesional/DepositoAbonado arman de una una tenencia
+    # inicial (ingresa una copia al stock y la asigna a ese profesional,
+    # marcando si ya abonó el depósito oportunamente o no) — pedido
+    # explícito de la clienta para no tener que cargar todo esto a mano
+    # desde la pantalla de Llaves. Las cuatro son opcionales: una fila
+    # puede cargar solo el tipo de llave, sin acceso ni tenencia todavía.
+    # Al final de la lista (no en el medio de las tres columnas
+    # originales) para no correr la posición de "ValorDepositoActual"/
+    # "Observacion" contra una planilla ya descargada antes de este
+    # agregado — se resuelve por nombre de encabezado, pero mantener el
+    # orden estable evita sorpresas en capturas/documentación ya hechas.
+    "Llave": ["Tipo", "ValorDepositoActual", "Observacion", "Edificio", "Unidad", "Profesional", "DepositoAbonado"],
     "Placa": ["Edificio", "Unidad", "PosicionTablero", "Profesional", "NombreGrabado", "EsPersonalizada"],
     "FechasEspeciales": ["Fecha", "Descripcion", "Tipo", "CampoLibre1", "CampoLibre2", "CampoLibre3"],
     "Responsable": [
@@ -84,7 +96,7 @@ CAMPOS_BOOLEANOS = {
     "Recepcionista", "BalconComun", "EntradaProfesionalExclusiva", "WiFi",
     "Ventana", "Placard", "AireAcondicionado", "VentiladorTecho",
     "Sillones", "AptoCamilla", "Balcon", "EsContactoPrincipal", "AptoPDF",
-    "TieneMultiplesTratamientos", "EsExcepcion", "EsPersonalizada",
+    "TieneMultiplesTratamientos", "EsExcepcion", "EsPersonalizada", "DepositoAbonado",
 }
 
 # Columnas de fecha: en la planilla se cargan como DD/MM/AAAA (DC-11 caso 7),
@@ -107,4 +119,5 @@ COLUMNAS_REFERENCIA = {
     "ReservaRegular": {"Profesional", "Edificio", "Unidad", "Consultorio"},
     "Placa": {"Edificio", "Unidad", "Profesional"},
     "PlanPago": {"Profesional"},
+    "Llave": {"Edificio", "Unidad", "Profesional"},
 }

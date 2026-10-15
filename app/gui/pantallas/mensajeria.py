@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import clave_orden_codigo
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
@@ -251,6 +252,7 @@ class _PanelCentroMensajeria(QWidget):
         layout_solapa.addWidget(panel_izquierda)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
             ["Código", "Profesional", "Estado", "Saldo anterior", "Saldo actual", "Enviada", ""]

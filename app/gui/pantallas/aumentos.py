@@ -106,6 +106,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.estilos import COLOR_AMARILLO
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.resumen_saldo import item_monto
@@ -120,6 +121,7 @@ from app.negocio.aumentos import (
 from app.negocio.dias import periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import regenerar_si_corresponde
+from app.pdf.estilos import clave_orden_unidad
 from app.repositorio.registro import obtener_repositorio
 
 _ID_CONSULTORIO = Qt.ItemDataRole.UserRole
@@ -344,6 +346,7 @@ class _PanelAumentos(QWidget):
         layout.addWidget(panel_form)
 
         self.tabla = QTableWidget()
+        excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(13)
         self.tabla.setHorizontalHeaderLabels([
             "Localidad", "Edificio", "Unidad", "Consultorio", "% general", "% diferencial",
@@ -395,8 +398,12 @@ class _PanelAumentos(QWidget):
             "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad "
             "JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
             "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad "
-            "ORDER BY loc.Localidad, e.Nombre, u.Departamento, c.NumeroConsultorio"
+            "ORDER BY loc.Localidad, e.Nombre, c.NumeroConsultorio"
         ).fetchall()
+        # El orden de Unidad (piso + letra, `clave_orden_unidad`) no es
+        # expresable en el ORDER BY de SQL — se reordena en Python, pedido
+        # general de la clienta sobre cualquier listado con unidades.
+        filas = sorted(filas, key=lambda f: (f["NombreLocalidad"] or "", f["NombreEdificio"], clave_orden_unidad(f["Departamento"])))
         self._consultorios_info = {}
         self._orden_consultorios = []
         for f in filas:
@@ -453,8 +460,9 @@ class _PanelAumentos(QWidget):
         if id_edificio is not _TODAS:
             sql += " WHERE IdEdificio = ?"
             parametros.append(id_edificio)
-        sql += " ORDER BY Departamento"
-        for f in self.conn.execute(sql, parametros).fetchall():
+        filas = self.conn.execute(sql, parametros).fetchall()
+        filas = sorted(filas, key=lambda f: clave_orden_unidad(f["Departamento"]))
+        for f in filas:
             self.combo_unidad.addItem(f["Departamento"], f["IdUnidad"])
         self.combo_unidad.setCurrentIndex(0)
         self.combo_unidad.blockSignals(False)
@@ -752,6 +760,7 @@ class _PanelEsquemaDescuentos(QWidget):
         layout.addWidget(panel_form)
 
         self.tabla_preview = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_preview)
         self.tabla_preview.setColumnCount(3)
         self.tabla_preview.setHorizontalHeaderLabels(["Horas desde", "Horas hasta", "% Descuento"])
         self.tabla_preview.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

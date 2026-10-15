@@ -221,3 +221,81 @@ def test_ir_a_seccion_inexistente_devuelve_none_sin_romper(qtbot, conn):
 
     assert ventana.ir_a_seccion("No existe") is None
     assert ventana._navegacion.currentItem().text() == "Uno"  # no se movió
+
+
+def test_al_abrir_arranca_en_panel_de_control_por_nombre_no_por_posicion(qtbot, conn):
+    """#1.1 (GENERAL, "Correcciones para próxima versión"): tiene que
+    arrancar en "Panel de control" aunque esa Seccion NO sea la primera
+    de la lista (lo que pasaría, por ejemplo, tras el reordenamiento de
+    menú que pide mover Panel de control de categoría)."""
+    secciones = [
+        Seccion("Otra pantalla", lambda c: QWidget(), categoria="X"),
+        Seccion("Panel de control", lambda c: QWidget(), categoria="Y"),
+        Seccion("Y otra más", lambda c: QWidget(), categoria="Y"),
+    ]
+    ventana = VentanaPrincipal(conn, secciones)
+    qtbot.addWidget(ventana)
+    assert ventana._navegacion.currentItem().text() == "Panel de control"
+
+
+def test_etiqueta_de_funciones_f1_f2_f3(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    assert ventana._etiqueta_funciones.text() == "F1 – Ayuda / F2 – Calculadora / F3 – Reiniciar solapa"
+
+
+def test_f2_abre_una_sola_calculadora_y_f2_de_nuevo_no_abre_otra(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    assert ventana._calculadora is None
+
+    ventana._abrir_calculadora()
+    primera = ventana._calculadora
+    assert primera is not None
+
+    ventana._abrir_calculadora()
+    assert ventana._calculadora is primera  # no abrió una segunda
+
+    primera.close()
+    qtbot.wait(50)  # WA_DeleteOnClose agenda un deleteLater, no es sincrónico
+    assert ventana._calculadora is None  # se liberó al cerrarla con la cruz
+
+
+def test_panel_mas_interno_baja_por_tabwidgets_anidados(qtbot, conn):
+    from PySide6.QtWidgets import QTabWidget
+
+    hoja_interna = QWidget()
+    tab_interno = QTabWidget()
+    tab_interno.addTab(hoja_interna, "Interna")
+
+    tab_externo = QTabWidget()
+    tab_externo.addTab(tab_interno, "Externa")
+
+    secciones = [Seccion("Compuesta", lambda c: tab_externo, categoria="X")]
+    ventana = VentanaPrincipal(conn, secciones)
+    qtbot.addWidget(ventana)
+
+    assert ventana._panel_mas_interno() is hoja_interna
+
+
+def test_f3_llama_reiniciar_del_panel_activo_si_lo_tiene(qtbot, conn):
+    llamadas = []
+
+    class _PanelConReset(QWidget):
+        def reiniciar(self):
+            llamadas.append(True)
+
+    panel = _PanelConReset()
+    secciones = [Seccion("Con reset", lambda c: panel, categoria="X")]
+    ventana = VentanaPrincipal(conn, secciones)
+    qtbot.addWidget(ventana)
+
+    ventana._reiniciar_solapa_activa()
+
+    assert llamadas == [True]
+
+
+def test_f3_sin_metodo_reiniciar_no_rompe(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())  # QWidget liso, sin reiniciar()
+    qtbot.addWidget(ventana)
+    ventana._reiniciar_solapa_activa()  # no debe lanzar

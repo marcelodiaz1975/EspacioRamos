@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.importacion.importar_excel import importar_planilla
@@ -125,6 +126,7 @@ class _PanelImportacion(QWidget):
         columna_derecha = QVBoxLayout()
         columna_derecha.addWidget(_titulo_campo("Resultado por hoja"))
         self.tabla_resultados = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_resultados)
         self.tabla_resultados.setColumnCount(4)
         self.tabla_resultados.setHorizontalHeaderLabels(["Hoja", "Filas importadas", "Duplicados (no importados)", "Errores"])
         self.tabla_resultados.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

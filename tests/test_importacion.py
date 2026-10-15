@@ -474,6 +474,109 @@ def test_importar_llave_duplicada_no_se_vuelve_a_crear(conn, tmp_path):
     assert len(obtener_repositorio(conn, "Llave").listar()) == 1
 
 
+def test_importar_llave_con_edificio_crea_el_acceso(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["Edificio"].append(["Ramos 1"])
+    wb["Llave"].append(["Edificio", 500, "Llave del portón", "Ramos 1"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["Llave"].filas_importadas == 1
+    assert not resultados["Llave"].errores
+
+    llave = obtener_repositorio(conn, "Llave").listar()[0]
+    id_edificio = obtener_repositorio(conn, "Edificio").listar()[0]["IdEdificio"]
+    accesos = obtener_repositorio(conn, "LlaveAcceso").listar(IdLlave=llave["IdLlave"])
+    assert len(accesos) == 1
+    assert accesos[0]["IdEdificio"] == id_edificio
+    assert accesos[0]["IdUnidad"] is None
+
+
+def test_importar_llave_con_edificio_inexistente_reporta_error(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["Llave"].append(["Edificio", 500, None, "No existe este edificio"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["Llave"].filas_importadas == 0
+    assert "No se encontró el edificio" in resultados["Llave"].errores[0]
+    assert obtener_repositorio(conn, "Llave").listar() == []
+
+
+def test_importar_llave_con_profesional_y_deposito_abonado_no_genera_cargo(conn, tmp_path):
+    """Tenencia histórica: si ya pagó el depósito, fue por fuera del
+    sistema -- la importación lo deja registrado en el movimiento, pero
+    nunca genera un CargoEspecial nuevo (no hay nada pendiente de cobrar)."""
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    _agregar_profesional_r1(wb)
+    wb["Llave"].append(["No especificada", 500, None, None, None, "R1", "SI"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["Llave"].filas_importadas == 1
+    assert not resultados["Llave"].errores
+
+    llave = obtener_repositorio(conn, "Llave").listar()[0]
+    movimientos = obtener_repositorio(conn, "LlaveMovimiento").listar(IdLlave=llave["IdLlave"])
+    ingreso = next(m for m in movimientos if m["Tipo"] == "Ingreso")
+    asignacion = next(m for m in movimientos if m["Tipo"] == "Asignación")
+    assert ingreso["Cantidad"] == 1
+    assert asignacion["DepositoCobrado"] == 1
+    assert asignacion["MontoCobrado"] == 500
+    assert obtener_repositorio(conn, "CargoEspecial").listar() == []
+
+
+def test_importar_llave_con_profesional_sin_deposito_abonado(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    _agregar_profesional_r1(wb)
+    wb["Llave"].append(["No especificada", 500, None, None, None, "R1", "NO"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["Llave"].filas_importadas == 1
+
+    llave = obtener_repositorio(conn, "Llave").listar()[0]
+    asignacion = next(
+        m for m in obtener_repositorio(conn, "LlaveMovimiento").listar(IdLlave=llave["IdLlave"])
+        if m["Tipo"] == "Asignación"
+    )
+    assert asignacion["DepositoCobrado"] == 0
+    assert asignacion["MontoCobrado"] is None
+
+
+def test_importar_llave_con_profesional_inexistente_reporta_error(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["Llave"].append(["No especificada", 500, None, None, None, "R99", "NO"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["Llave"].filas_importadas == 0
+    assert "No se encontró el profesional con código" in resultados["Llave"].errores[0]
+
+
+def test_importar_llaves_con_edificios_distintos_no_se_consideran_duplicadas(conn, tmp_path):
+    """Mismo Tipo/ValorDepositoActual/Observacion, pero a edificios
+    distintos: son dos llaves legítimamente distintas, nunca una
+    repetida de la otra (ver docstring de `_ya_existe_identico`)."""
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["Edificio"].append(["Ramos 1"])
+    wb["Edificio"].append(["Ramos 2"])
+    wb["Llave"].append(["Edificio", 500, "Llave del portón", "Ramos 1"])
+    wb["Llave"].append(["Edificio", 500, "Llave del portón", "Ramos 2"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["Llave"].filas_importadas == 2
+    assert resultados["Llave"].filas_duplicadas == 0
+    assert len(obtener_repositorio(conn, "Llave").listar()) == 2
+
+
 def test_importar_plan_pago_duplicado_no_se_vuelve_a_crear(conn, tmp_path):
     """Un plan duplicado no debe ni recalcularse ni generar un segundo
     juego de cuotas."""
