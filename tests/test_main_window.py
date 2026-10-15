@@ -238,6 +238,66 @@ def test_al_abrir_arranca_en_panel_de_control_por_nombre_no_por_posicion(qtbot, 
     assert ventana._navegacion.currentItem().text() == "Panel de control"
 
 
+def test_categorias_arrancan_colapsadas_salvo_panel_de_control(qtbot, conn):
+    """Punto 20: las dos categorías arrancan COLAPSADAS, "Panel de
+    control" queda siempre visible sin importar el estado de la suya."""
+    secciones = [
+        Seccion("Panel de control", lambda c: QWidget(), categoria="Y"),
+        Seccion("Y otra más", lambda c: QWidget(), categoria="Y"),
+    ]
+    ventana = VentanaPrincipal(conn, secciones)
+    qtbot.addWidget(ventana)
+
+    item_panel = next(
+        ventana._navegacion.item(i) for i in range(ventana._navegacion.count()) if ventana._navegacion.item(i).text() == "Panel de control"
+    )
+    item_otra = next(
+        ventana._navegacion.item(i) for i in range(ventana._navegacion.count()) if ventana._navegacion.item(i).text() == "Y otra más"
+    )
+    assert item_panel.isHidden() is False
+    assert item_otra.isHidden() is True
+
+
+def test_click_en_separador_despliega_y_vuelve_a_colapsar(qtbot, conn):
+    """Punto 20: clickear el separador de una categoría la despliega; un
+    segundo click la vuelve a colapsar."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    separador = ventana._navegacion.item(0)
+    item_uno = ventana._navegacion.item(1)
+    assert item_uno.isHidden() is True
+
+    ventana._al_click_item_navegacion(separador)
+    assert item_uno.isHidden() is False
+    assert ventana._navegacion.item(0).text().startswith("▾")
+
+    ventana._al_click_item_navegacion(separador)
+    assert item_uno.isHidden() is True
+    assert ventana._navegacion.item(0).text().startswith("▸")
+
+
+def test_click_en_item_normal_no_toca_el_colapso(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    item_uno = ventana._navegacion.item(1)
+
+    ventana._al_click_item_navegacion(item_uno)  # no es un separador
+
+    assert item_uno.isHidden() is True  # sigue colapsado, no rompió nada
+
+
+def test_ir_a_seccion_expande_la_categoria_si_estaba_colapsada(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    item_dos = next(ventana._navegacion.item(i) for i in range(ventana._navegacion.count()) if ventana._navegacion.item(i).text() == "Dos")
+    assert item_dos.isHidden() is True
+
+    widget = ventana.ir_a_seccion("Dos")
+
+    assert widget is not None
+    assert item_dos.isHidden() is False
+
+
 def test_etiqueta_de_funciones_f1_f2_f3(qtbot, conn):
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)

@@ -9624,3 +9624,77 @@ válido, error con edificio inexistente, tenencia con depósito abonado
 (sin `CargoEspecial` generado) y sin abonar, error con profesional
 inexistente, dos llaves del mismo tipo/valor a edificios distintos NO
 se consideran duplicadas entre sí.
+
+### Menú lateral (puntos 19, 20 y 74): categorías renombradas, Panel de control reubicado, acordeón colapsable
+
+Tres pedidos sobre `gui_main.construir_secciones`/`app.gui.main_window.
+VentanaPrincipal`, resueltos juntos porque los tres tocan la misma
+estructura (las dos categorías del menú y el orden de sus Secciones).
+
+**Punto 19 — renombre de las dos categorías.** "Sistema" pasa a llamarse
+"Parámetros del sistema" (string fijo). "Operativa diaria" deja de ser
+un nombre fijo y pasa a mostrar el nombre del espacio configurado, en
+MAYÚSCULA — mismo criterio Nivel 1 que el resto del sistema.
+`construir_secciones` suma un parámetro `conn: sqlite3.Connection | None
+= None` (antes solo recibía `usuario`): con `conn`, lee `Configuracion.
+NombreEspacio` y arma `categoria_espacio = nombre_espacio.upper()`
+(fallback "Espacio Ramos Consultorios" si está vacío, el mismo fallback
+que ya usan `app.negocio.oferta_busqueda_texto`/`app.pdf.estilos`/etc.);
+sin `conn` (la mayoría de los tests de pantallas sueltas, que no tienen
+que ver con el menú en sí), cae directo a ese fallback sin tocar la
+base. `gui_main.main()` pasa a llamar `construir_secciones(usuario,
+conn)`. Dentro de la lista, cada `categoria="Sistema"`/`categoria=
+"Operativa diaria"` literal se reemplazó por las variables
+`categoria_sistema`/`categoria_espacio` correspondientes — ningún otro
+cambio en qué Seccion cae en cuál categoría.
+
+**Punto 74 — "Panel de control" pasa a ser la primera Seccion de la
+categoría del espacio**, arriba de "Grilla y mensajería" (antes era la
+primera de "Sistema"). Se sacó esa `Seccion` de su posición vieja y se
+reinsertó al principio del bloque `categoria_espacio` — `VentanaPrincipal.
+_abrir_calculadora`/arranque-por-nombre (punto 1.1, ver más arriba) ya
+buscaba "Panel de control" por NOMBRE y no por posición, así que este
+movimiento no necesitó ningún cambio ahí.
+
+**Punto 20 — las dos categorías arrancan COLAPSADAS, acordeón por
+clic, "Panel de control" siempre visible.** Hasta ahora el separador de
+categoría (`"— {categoria.upper()} —"`) se armaba con `Qt.ItemFlag.
+NoItemFlags` — ni seleccionable ni clickeable, puramente decorativo.
+Pasa a `Qt.ItemFlag.ItemIsEnabled` (clickeable, pero nunca "seleccionado"
+como la fila actual) y suma una flecha (▸ colapsado / ▾ expandido) al
+texto. `VentanaPrincipal` suma tres diccionarios nuevos armados al
+construir el menú: `_categorias_expandidas` (estado por categoría,
+arranca en `False` para las dos), `_separadores_por_categoria` (para
+poder reescribirle el texto/flecha al toggle) y `_items_por_categoria`
+(la lista de ítems de pantalla de cada categoría que SÍ hay que ocultar/
+mostrar — "Panel de control" queda deliberadamente afuera de esa lista
+de su categoría, así nunca se oculta sin importar el estado del
+acordeón). `_aplicar_colapso(categoria)` sincroniza texto del separador
++ `setHidden()` de cada ítem de esa categoría contra el estado guardado;
+se llama una vez por categoría al terminar de armar el menú (deja todo
+colapsado salvo Panel de control) y de nuevo cada vez que se clickea un
+separador (`_al_click_item_navegacion`, conectada a `itemClicked` —
+ítems normales, sin la marca de separador en `Qt.ItemDataRole.UserRole +
+1`, no hacen nada al clickearlos ahí, la selección de pantalla la sigue
+manejando `currentRowChanged` de siempre).
+
+Un ítem oculto (`setHidden(True)`) sigue pudiendo recibir el foco de
+selección por código (`QListWidget.setCurrentRow`/`currentItem()`)
+aunque no se vea en pantalla — confirmado antes de tocar nada, así que
+ningún mecanismo existente que ya hacía eso (arranque en "Panel de
+control", `ir_a_seccion`, los tests que setean la fila a mano) se vio
+afectado por el colapso. `ir_a_seccion` (#22, Lista de espera → Reservas)
+suma un paso extra: si la Seccion destino está en una categoría todavía
+colapsada, la expande antes de seleccionarla — saltar a una pantalla
+"escondida" detrás de un acordeón sin desplegarlo dejaría la selección
+sin ningún indicio visual en el menú.
+
+Tests nuevos en `tests/test_gui_main.py` (reemplazando el viejo test de
+categorías fijas): nombres/contigüidad de las dos categorías nuevas,
+`categoria_espacio` refleja `Configuracion.NombreEspacio` cuando se pasa
+`conn`, "Panel de control" es la primera Seccion de la categoría del
+espacio y no de "Parámetros del sistema". Tests nuevos en
+`tests/test_main_window.py`: las dos categorías arrancan colapsadas
+salvo "Panel de control", clic en el separador despliega/vuelve a
+colapsar (con la flecha cambiando), clic en un ítem normal no toca nada
+del colapso, `ir_a_seccion` expande la categoría si estaba colapsada.

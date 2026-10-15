@@ -43,6 +43,7 @@ class Seccion:
 
 
 _INDICE_PILA = Qt.ItemDataRole.UserRole
+_CATEGORIA_SEPARADOR = Qt.ItemDataRole.UserRole + 1
 
 
 class VentanaPrincipal(QMainWindow):
@@ -69,14 +70,29 @@ class VentanaPrincipal(QMainWindow):
         self._navegacion.setFixedWidth(240)
         self._pila = QStackedWidget()
 
+        # Punto 20 (SistemaDF v0.11.2026.10): las dos categorías del menú
+        # arrancan COLAPSADAS — clickear el separador de una categoría la
+        # despliega/colapsa, acordeón. "Panel de control" queda SIEMPRE
+        # visible sin importar el estado de su categoría (se excluye de
+        # `_items_por_categoria`, la lista que `_aplicar_colapso` oculta/
+        # muestra) — es la pantalla de entrada de siempre, no tiene
+        # sentido que quede escondida detrás de un clic.
+        self._categorias_expandidas: dict[str, bool] = {}
+        self._separadores_por_categoria: dict[str, QListWidgetItem] = {}
+        self._items_por_categoria: dict[str, list[QListWidgetItem]] = {}
+
         categoria_actual = None
         primer_item_seleccionable = None
         fila_panel_control = None
         for seccion in secciones_visibles:
             if seccion.categoria != categoria_actual:
-                separador = QListWidgetItem(f"— {seccion.categoria.upper()} —")
-                separador.setFlags(Qt.ItemFlag.NoItemFlags)
+                separador = QListWidgetItem()
+                separador.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                separador.setData(_CATEGORIA_SEPARADOR, seccion.categoria)
                 self._navegacion.addItem(separador)
+                self._separadores_por_categoria[seccion.categoria] = separador
+                self._categorias_expandidas.setdefault(seccion.categoria, False)
+                self._items_por_categoria.setdefault(seccion.categoria, [])
                 categoria_actual = seccion.categoria
 
             indice_pila = self._pila.count()
@@ -86,10 +102,17 @@ class VentanaPrincipal(QMainWindow):
             item = QListWidgetItem(seccion.nombre)
             item.setData(_INDICE_PILA, indice_pila)
             self._navegacion.addItem(item)
+            if seccion.nombre != "Panel de control":
+                self._items_por_categoria[seccion.categoria].append(item)
             if primer_item_seleccionable is None:
                 primer_item_seleccionable = self._navegacion.count() - 1
             if seccion.nombre == "Panel de control":
                 fila_panel_control = self._navegacion.count() - 1
+
+        for categoria in self._categorias_expandidas:
+            self._aplicar_colapso(categoria)
+
+        self._navegacion.itemClicked.connect(self._al_click_item_navegacion)
 
         # Pedido general de la clienta: al abrir el programa, siempre
         # arranca en "Panel de control" — por NOMBRE, no por posición, para
@@ -147,6 +170,26 @@ class VentanaPrincipal(QMainWindow):
 
         self._atajo_ayuda = QShortcut(Qt.Key.Key_F1, self)
         self._atajo_ayuda.activated.connect(self._mostrar_ayuda)
+
+    def _texto_separador(self, categoria: str, expandida: bool) -> str:
+        flecha = "▾" if expandida else "▸"
+        return f"{flecha} — {categoria.upper()} —"
+
+    def _aplicar_colapso(self, categoria: str) -> None:
+        expandida = self._categorias_expandidas[categoria]
+        self._separadores_por_categoria[categoria].setText(self._texto_separador(categoria, expandida))
+        for item in self._items_por_categoria[categoria]:
+            item.setHidden(not expandida)
+
+    def _al_click_item_navegacion(self, item: QListWidgetItem) -> None:
+        """Punto 20: clickear el separador de una categoría la despliega/
+        colapsa — un ítem de pantalla normal (sin esta marca) no hace
+        nada acá, la selección ya la maneja `currentRowChanged`."""
+        categoria = item.data(_CATEGORIA_SEPARADOR)
+        if categoria is None:
+            return
+        self._categorias_expandidas[categoria] = not self._categorias_expandidas[categoria]
+        self._aplicar_colapso(categoria)
 
     def _abrir_calculadora(self) -> None:
         """F2: una sola instancia por ventana — F2 repetido mientras ya
@@ -210,6 +253,10 @@ class VentanaPrincipal(QMainWindow):
             if indice_pila is None:
                 continue
             if self._secciones[indice_pila].nombre == nombre:
+                categoria = self._secciones[indice_pila].categoria
+                if not self._categorias_expandidas.get(categoria, True):
+                    self._categorias_expandidas[categoria] = True
+                    self._aplicar_colapso(categoria)
                 self._navegacion.setCurrentRow(fila)
                 return self._pila.widget(indice_pila)
         return None

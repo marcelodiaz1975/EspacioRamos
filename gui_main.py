@@ -40,7 +40,7 @@ from app.negocio.seguridad import asegurar_permisos_pantalla
 from app.version import NOMBRE_PROGRAMA
 
 
-def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
+def construir_secciones(usuario: sqlite3.Row | None = None, conn: sqlite3.Connection | None = None) -> list[Seccion]:
     # Se arma como lista mutable (en vez de un literal) porque la sección
     # "Archivos y listas" necesita la lista completa para poder armar el
     # manual de usuario (junta la ayuda de todas las demás, vía el botón
@@ -56,25 +56,33 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
     # loguearse) deja esa pantalla sin ese dato, ver `PantallaUsuarios`.
     secciones: list[Seccion] = []
 
-    # Categorías finales del reordenamiento de formularios (Excel de la
-    # clienta): "Principal"/"Catálogos"/"Configuración" pasan a solo dos,
-    # "Sistema"/"Operativa diaria" — como `VentanaPrincipal` arma un
-    # separador cada vez que la categoría cambia respecto de la sección
-    # anterior (no agrupa por nombre repetido en toda la lista), las
-    # cinco de "Sistema" van todas juntas primero y las doce de
-    # "Operativa diaria" después. El orden dentro de "Sistema" es
-    # criterio propio (no hubo pedido puntual); el de "Operativa diaria"
-    # sí es un orden pedido explícito de la clienta, sobre el que ya
-    # había armado a criterio propio.
+    # Categorías finales (puntos 19/20 de "Correcciones para próxima
+    # versión", SistemaDF v0.11.2026.10): "Sistema" pasa a llamarse
+    # "Parámetros del sistema", y "Operativa diaria" pasa a mostrar el
+    # nombre del espacio ya configurado (en mayúsculas, mismo criterio
+    # que el resto del sistema) en vez de un nombre de categoría fijo —
+    # "Panel de control" se saca de "Parámetros del sistema" y pasa a
+    # ser el primero de esta segunda categoría, arriba de "Grilla y
+    # mensajería" (ya no es "la portada" conceptual del sistema, es un
+    # formulario más entre los de uso diario). Como `VentanaPrincipal`
+    # arma un separador cada vez que la categoría cambia respecto de la
+    # sección anterior (no agrupa por nombre repetido en toda la lista),
+    # las cuatro de "Parámetros del sistema" van todas juntas primero y
+    # las trece de la categoría del espacio después. El orden dentro de
+    # "Parámetros del sistema" es criterio propio (no hubo pedido
+    # puntual); el del resto sí es un orden pedido explícito de la
+    # clienta, sobre el que ya había armado a criterio propio.
+    categoria_sistema = "Parámetros del sistema"
+    if conn is not None:
+        fila_cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+        nombre_espacio = (fila_cfg["NombreEspacio"] if fila_cfg else None) or "Espacio Ramos Consultorios"
+    else:
+        nombre_espacio = "Espacio Ramos Consultorios"
+    categoria_espacio = nombre_espacio.upper()
+
     secciones.extend([
         Seccion(
-            "Panel de control", lambda conn: PanelControl(conn), categoria="Sistema",
-            ayuda="Solapa Avance de período y backups: resumen del estado actual del espacio (ocupación, "
-            "próximos vencimientos y alertas), generación de backup manual y avance de mes. Solapa "
-            "Importación datos desde Excel: importación masiva inicial de datos desde una planilla Excel.",
-        ),
-        Seccion(
-            "Archivos y listas", lambda conn: PantallaArchivosYListas(conn, secciones), categoria="Sistema",
+            "Archivos y listas", lambda conn: PantallaArchivosYListas(conn, secciones), categoria=categoria_sistema,
             ayuda="Solapa Gestor de archivos del espacio: fotos y documentos de edificios, unidades y "
             "consultorios usados en Propuesta/Disponibilidad/Liquidación/Oferta, más el botón "
             "\"Manual del usuario\" para regenerarlo contra el estado actual del sistema. Solapas "
@@ -82,12 +90,12 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "listas y textos de referencia usados por otras pantallas y por el PDF de Propuesta.",
         ),
         Seccion(
-            "Base datos del espacio", lambda conn: PantallaBaseDatosEspacio(conn), categoria="Sistema",
+            "Base datos del espacio", lambda conn: PantallaBaseDatosEspacio(conn), categoria=categoria_sistema,
             ayuda="Localidades, Edificios, Unidades, Consultorios y Responsables — la estructura "
             "física y de contacto del espacio, en el orden de la cadena de referencias entre ellos.",
         ),
         Seccion(
-            "Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria="Sistema",
+            "Configuración general", lambda conn: ConfiguracionGeneral(conn), categoria=categoria_sistema,
             ayuda="Datos generales del espacio (nombre, logo), carpeta base de archivos, carpeta de "
             "backup, modo de fecha ficticia para pruebas y las franjas horarias bloqueadas de forma "
             "fija (solapa Bloques rígidos).",
@@ -95,13 +103,19 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
         Seccion(
             "Usuarios y permisos",
             lambda conn: PantallaUsuarios(conn, usuario["IdUsuario"] if usuario else None),
-            categoria="Sistema",
+            categoria=categoria_sistema,
             ayuda="Alta y baja de usuarios del sistema, nivel de acceso de cada uno, reseteo de "
             "contraseña, historial de cambios de contraseña, y qué nivel mínimo requiere cada "
             "pantalla del menú.",
         ),
         Seccion(
-            "Grilla y mensajería", lambda conn: PantallaGrillaYMensajeria(conn), categoria="Operativa diaria",
+            "Panel de control", lambda conn: PanelControl(conn), categoria=categoria_espacio,
+            ayuda="Solapa Avance de período y backups: resumen del estado actual del espacio (ocupación, "
+            "próximos vencimientos y alertas), generación de backup manual y avance de mes. Solapa "
+            "Importación datos desde Excel: importación masiva inicial de datos desde una planilla Excel.",
+        ),
+        Seccion(
+            "Grilla y mensajería", lambda conn: PantallaGrillaYMensajeria(conn), categoria=categoria_espacio,
             ayuda="Solapa Grilla semanal: grilla filtrable por localidad/edificio/unidad/día/profesional, "
             "con período propio y dos modos de visualización (reservas regulares o aisladas), más "
             "referencias de colores. Solapa Centro de mensajería: arma los mensajes de WhatsApp "
@@ -110,20 +124,20 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "propias, editables.",
         ),
         Seccion(
-            "Reservas", lambda conn: PantallaReservas(conn), categoria="Operativa diaria",
+            "Reservas", lambda conn: PantallaReservas(conn), categoria=categoria_espacio,
             ayuda="Alta, edición y baja de reservas (regulares y aisladas) por profesional, consultorio y "
             "franja. Solapa Reserva extraordinaria: un cobro de ítem libre y monto manual para un "
             "profesional categoría A, con el mismo mensaje de detalle que una aislada común.",
         ),
         Seccion(
-            "Valores", lambda conn: PantallaValores(conn), categoria="Operativa diaria",
+            "Valores", lambda conn: PantallaValores(conn), categoria=categoria_espacio,
             ayuda="Solapa Valores vigentes: valor hora regular/aislada de cada consultorio, filtrable, "
             "con resumen de promedios. Solapas Aumentos/Esquema de descuentos: simula el impacto de un "
             "aumento de valores antes de confirmarlo (y lo aplica a todos los valores correspondientes), "
             "y define los tramos del esquema de descuentos por horas semanales.",
         ),
         Seccion(
-            "Liquidaciones", lambda conn: ProcesoLiquidacion(conn), categoria="Operativa diaria",
+            "Liquidaciones", lambda conn: ProcesoLiquidacion(conn), categoria=categoria_espacio,
             ayuda="Solapas Emisión de archivos/Estado de cuenta: genera la liquidación PDF de cada "
             "profesional para el período seleccionado, con descuentos por feriados/licencias/"
             "vacaciones ya aplicados, y el estado de cuenta con su historial de liquidaciones "
@@ -131,18 +145,18 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "laborables, cargados a mano.",
         ),
         Seccion(
-            "Pagos", lambda conn: PantallaPagos(conn), categoria="Operativa diaria",
+            "Pagos", lambda conn: PantallaPagos(conn), categoria=categoria_espacio,
             ayuda="Registro de pagos recibidos, planes de pago con refinanciación e interés por saldos "
             "atrasados, y estado de cuenta del profesional.",
         ),
         Seccion(
-            "Registro de ausencias", lambda conn: PantallaRegistroAusencias(conn), categoria="Operativa diaria",
+            "Registro de ausencias", lambda conn: PantallaRegistroAusencias(conn), categoria=categoria_espacio,
             ayuda="Solapas Vacaciones/Licencias/Ausencias por motivos varios: plazos por inactividad de un "
             "profesional cargados manualmente, con su vista previa de la grilla operativa. Solapa Tipos "
             "de licencia: catálogo de tipos de licencia disponibles para cargarle a un profesional.",
         ),
         Seccion(
-            "Disponibilidad", lambda conn: PantallaDisponibilidad(conn), categoria="Operativa diaria",
+            "Disponibilidad", lambda conn: PantallaDisponibilidad(conn), categoria=categoria_espacio,
             ayuda="Solapa Oferta de consultorios: búsqueda de horarios libres que cumplen criterios "
             "combinados (franjas, días, consultorio) para armar una oferta en PDF a un profesional "
             "interesado. Solapa Lista de espera: profesionales interesados en un horario que hoy está "
@@ -151,31 +165,31 @@ def construir_secciones(usuario: sqlite3.Row | None = None) -> list[Seccion]:
             "mes (Propuesta, Disponibilidad).",
         ),
         Seccion(
-            "Profesionales", lambda conn: PantallaProfesionales(conn), categoria="Operativa diaria",
+            "Profesionales", lambda conn: PantallaProfesionales(conn), categoria=categoria_espacio,
             ayuda="Solapa Listado de profesionales: alta, baja y edición de profesionales, con su "
             "categoría, código y la documentación adjunta de cada uno. Solapa Profesiones y "
             "tratamientos: catálogo de profesiones disponibles para asignarle a un profesional.",
         ),
         Seccion(
-            "Llaves y otros conceptos", lambda conn: PantallaLlavesYOtrosConceptos(conn), categoria="Operativa diaria",
+            "Llaves y otros conceptos", lambda conn: PantallaLlavesYOtrosConceptos(conn), categoria=categoria_espacio,
             ayuda="Solapa Movimientos y tenencias de llaves: entrega y devolución de llaves con depósito, "
             "y definición de a qué edificio/unidad da acceso cada llave. Solapas Registro de cargos "
             "especiales/Estado de cuenta: cargos extraordinarios (ajustes puntuales) que se suman a la "
             "liquidación de un profesional, y su historial.",
         ),
         Seccion(
-            "Placas para timbres", lambda conn: PantallaPlacasParaTimbres(conn), categoria="Operativa diaria",
+            "Placas para timbres", lambda conn: PantallaPlacasParaTimbres(conn), categoria=categoria_espacio,
             ayuda="Solapa Búsqueda y asignación de placas: qué profesional tiene placa en qué posición "
             "del tablero de cada unidad, filtrable por localidad/edificio/unidad/profesional; desde ahí "
             "se asigna, reasigna o libera una posición. Solapa Impresión de placas en papel: arma una "
             "selección puntual de profesionales y genera la hoja para cortar e imprimir.",
         ),
         Seccion(
-            "Estadísticas", lambda conn: PantallaEstadisticas(conn), categoria="Operativa diaria",
+            "Estadísticas", lambda conn: PantallaEstadisticas(conn), categoria=categoria_espacio,
             ayuda="Indicadores generales del espacio: ocupación, ingresos y otras métricas agregadas.",
         ),
         Seccion(
-            "Balance del negocio", lambda conn: PantallaBalanceDelNegocio(conn), categoria="Operativa diaria",
+            "Balance del negocio", lambda conn: PantallaBalanceDelNegocio(conn), categoria=categoria_espacio,
             ayuda="Solapa Gastos: gastos operativos del espacio, usados en los cálculos de estadísticas. "
             "Solapa Ingresos: ingresos por horas regulares/aisladas/feriados trabajados de un período. "
             "Solapa Resultado: ingresos menos gastos del período, para el mismo alcance de ubicación.",
@@ -297,7 +311,7 @@ def main() -> None:
         sys.exit(0)
     usuario = dialogo_login.usuario
 
-    secciones = construir_secciones(usuario)
+    secciones = construir_secciones(usuario, conn)
     # "Configuración general" y "Usuarios y permisos" nacen directo en
     # Administrador (pedido explícito de la clienta) — no visibles para
     # cualquiera hasta que alguien las suba a mano, a diferencia del
