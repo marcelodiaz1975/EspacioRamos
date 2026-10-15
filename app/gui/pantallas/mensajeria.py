@@ -192,6 +192,18 @@ class _PanelCentroMensajeria(QWidget):
         de foco en Filtro, que es cuando realmente surte efecto (mismo
         motivo que Reservas/Liquidación)."""
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto 1.4: al volver a entrar (o F3) se resetean los
+        filtros propios de esta solapa a su valor por defecto — distinto
+        del refresco de punto 90 (al marcar "Enviada"), que a propósito
+        CONSERVA el filtro/período/checks elegidos."""
+        self.combo_filtro.setCurrentIndex([clave for _, clave in _FILTROS].index(_FILTRO_DEFAULT))
+        self.campo_periodo.setText(periodo_actual(self.conn))
+        self.check_combinar_misma_unidad.setChecked(False)
+        self.check_combinar_distintas_unidades.setChecked(False)
+        self.actualizar()
         self.combo_filtro.setFocus()
 
     def _armar_ui(self) -> None:
@@ -201,7 +213,7 @@ class _PanelCentroMensajeria(QWidget):
         columna = QVBoxLayout(panel_izquierda)
         columna.setContentsMargins(0, 0, 0, 0)
 
-        columna.addWidget(_titulo_campo("Filtro"))
+        columna.addWidget(_titulo_campo("Filtro de visualización"))
         self.combo_filtro = QComboBox()
         for etiqueta, clave in _FILTROS:
             self.combo_filtro.addItem(etiqueta, clave)
@@ -419,6 +431,12 @@ class _PanelCentroMensajeria(QWidget):
         except ValueError as error:
             QMessageBox.warning(self, "Centro de mensajería", str(error))
         self.actualizar()
+        # Punto 90 (SistemaDF v0.11.2026.10): "quiero visualizar siempre
+        # la parte de arriba de la tabla" — el refresco ya conserva el
+        # filtro/período/checks (actualizar() los lee tal cual están),
+        # pero el reordenamiento por color puede mover la fila recién
+        # marcada lejos de donde estaba el scroll.
+        self.tabla.scrollToTop()
 
     def _desmarcar_enviada(self, profesional: sqlite3.Row, periodo: str) -> None:
         marcar_estado_envio(

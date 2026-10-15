@@ -223,6 +223,9 @@ class _PanelUsuarios(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
         self._orden_usuarios.reiniciar()
         self.actualizar()
         self.boton_nuevo.setFocus()
@@ -310,6 +313,7 @@ class _PanelUsuarios(QWidget):
         dialogo = _DialogoUsuarioNuevo(self.conn, niveles, parent=self)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             self.actualizar()
+            QMessageBox.information(self, "Nuevo usuario", "Usuario creado con éxito.")
 
     def _editar(self) -> None:
         id_usuario = self._fila_seleccionada_usuario()
@@ -355,6 +359,7 @@ class _PanelUsuarios(QWidget):
             return
         self.conn.commit()
         self.actualizar()
+        QMessageBox.information(self, "Editar usuario", "Usuario editado con éxito.")
 
     def _resetear_contrasena(self) -> None:
         id_usuario = self._fila_seleccionada_usuario()
@@ -392,6 +397,9 @@ class _PanelPermisosPantalla(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
         self.actualizar()
 
     def _armar_ui(self) -> None:

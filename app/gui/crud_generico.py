@@ -315,7 +315,21 @@ class PantallaCRUD(QWidget):
         """`setFocus()` durante la construcción no alcanza a "pegar":
         el widget todavía no está mostrado en ese momento."""
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto 1.4 (SistemaDF v0.11.2026.10, "resetear la solapa
+        cuando se sale de ella" + F3 "Reiniciar solapa"): además de
+        reiniciar el orden de la tabla (`_orden.reiniciar()`, ya
+        existía), limpia el campo "Buscar" — el único filtro propio de
+        un catálogo genérico — para que re-entrar a la solapa (o F3)
+        muestre la tabla completa, sin arrastrar lo que se haya tipeado
+        la última vez. Mismo método para los dos disparadores: el
+        `showEvent` de arriba (re-entrada real) y `VentanaPrincipal.
+        _reiniciar_solapa_activa` (F3, por nombre de método, duck-typed)."""
         self._orden.reiniciar()
+        if self.campo_buscar is not None:
+            self.campo_buscar.clear()
         self.actualizar()
         if self.instalar_foco:
             (self.campo_buscar or self.boton_nuevo).setFocus()
@@ -571,6 +585,7 @@ class PantallaCRUD(QWidget):
             self.actualizar()
             if self.instalar_foco:
                 self.boton_nuevo.setFocus()
+            QMessageBox.information(self, "Nuevo registro", "Registro creado con éxito.")
 
     def _editar(self) -> None:
         id_valor = self.fila_seleccionada_id()
@@ -598,6 +613,7 @@ class PantallaCRUD(QWidget):
             self.actualizar()
             if self.instalar_foco:
                 self.boton_nuevo.setFocus()
+            QMessageBox.information(self, "Editar registro", "Registro editado con éxito.")
 
     def _eliminar(self) -> None:
         id_valor = self.fila_seleccionada_id()
@@ -606,6 +622,7 @@ class PantallaCRUD(QWidget):
             return
         confirmacion = QMessageBox.question(self, "Eliminar", "¿Confirmás eliminar el registro seleccionado?")
         if confirmacion != QMessageBox.StandardButton.Yes:
+            QMessageBox.information(self, "Eliminar", "Eliminación cancelada.")
             return
         registro = self.repositorio.obtener(id_valor)
         try:
@@ -619,6 +636,7 @@ class PantallaCRUD(QWidget):
         self.actualizar()
         if self.instalar_foco:
             self.boton_nuevo.setFocus()
+        QMessageBox.information(self, "Eliminar", "Registro eliminado con éxito.")
 
 
 class _DialogoRegistro(QDialog):

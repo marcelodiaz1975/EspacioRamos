@@ -64,6 +64,7 @@ from PySide6.QtWidgets import QComboBox, QLabel, QPlainTextEdit, QPushButton, QV
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.pantallas.catalogos import _opciones_consultorio, _opciones_edificio, _opciones_localidad, _opciones_unidad
 from app.gui.pantallas.reservas import _opciones_profesional
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.listas_editables import opciones_lista
 from app.negocio.mensajes import sustituir_variables
@@ -226,16 +227,22 @@ class _PanelMensajesPredefinidos(QWidget):
         self.combo_consultorio_contexto.currentIndexChanged.connect(self._actualizar_vista_previa)
         layout_superior.addWidget(self.combo_consultorio_contexto)
 
-        boton_copiar = QPushButton("Copiar mensaje")
-        boton_copiar.setObjectName("botonPrimario")
-        boton_copiar.clicked.connect(self._copiar_mensaje)
-        layout_superior.addWidget(boton_copiar)
+        self.boton_copiar = QPushButton("Copiar mensaje")
+        self.boton_copiar.setObjectName("botonPrimario")
+        self.boton_copiar.clicked.connect(self._copiar_mensaje)
+        layout_superior.addWidget(self.boton_copiar)
 
         self.crud = PantallaCRUD(
             self.conn, "MensajePredefinido", "Mensajes predefinidos", _campos_mensaje_predefinido(self.conn),
             panel_extra_superior_izquierda=panel_superior,
             nuevo_secundario=True,
             anidado=True,
+            # Punto 95 (SistemaDF v0.11.2026.10): la cadena de foco de
+            # esta pantalla no es solo Buscar/Nuevo/Editar/Eliminar (el
+            # default de `PantallaCRUD`) — tiene que incluir también los
+            # selectores de contexto de arriba, así que se arma una
+            # propia más abajo (mismo criterio que Gastos operativos).
+            instalar_foco=False,
         )
         self.crud.tabla_widget.itemSelectionChanged.connect(self._actualizar_vista_previa)
         layout.addWidget(self.crud, stretch=1)
@@ -261,6 +268,33 @@ class _PanelMensajesPredefinidos(QWidget):
         self.texto_vista_previa.setReadOnly(True)
         self.texto_vista_previa.setFixedHeight(100)
         layout.addWidget(self.texto_vista_previa)
+
+        # Punto 95 (SistemaDF v0.11.2026.10): la cadena de foco de esta
+        # pantalla no es solo Buscar/Nuevo/Editar/Eliminar (el default
+        # de `PantallaCRUD`, desactivado arriba con `instalar_foco=
+        # False`) — tiene que incluir también los selectores de contexto
+        # de arriba, así que se arma una propia (mismo criterio que
+        # Gastos operativos).
+        self._foco = instalar_enter_avanza_foco(
+            [
+                self.crud.campo_buscar, self.combo_filtro, self.combo_dirigido_a,
+                self.combo_localidad_contexto, self.combo_edificio_contexto, self.combo_unidad_contexto,
+                self.combo_consultorio_contexto, self.boton_copiar,
+                self.crud.boton_nuevo, self.crud.boton_editar, self.crud.boton_eliminar,
+            ],
+            parent=self,
+        )
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto 1.4: al volver a entrar (o F3), se resetea la tabla
+        (`self.crud.reiniciar()`, limpia Buscar) y el foco vuelve al
+        primero de la cadena completa de esta pantalla."""
+        self.crud.reiniciar()
+        self.crud.campo_buscar.setFocus()
 
     def _refrescar_categorias(self) -> None:
         categoria_actual = self.combo_filtro.currentData()

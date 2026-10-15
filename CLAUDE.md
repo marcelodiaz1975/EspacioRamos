@@ -9698,3 +9698,197 @@ espacio y no de "Parámetros del sistema". Tests nuevos en
 salvo "Panel de control", clic en el separador despliega/vuelve a
 colapsar (con la flecha cambiando), clic en un ítem normal no toca nada
 del colapso, `ir_a_seccion` expande la categoría si estaba colapsada.
+
+### Archivos y listas / Base de datos del espacio / Configuración general / Usuarios y permisos / Panel de control
+
+Segunda tanda del documento, cubriendo el resto de "ARCHIVOS Y LISTAS",
+"BASE DE DATOS DEL ESPACIO" completa (sin puntos propios, solo 1.4/1.11
+— ya cubierta por el cambio central de `PantallaCRUD`), "CONFIGURACIÓN
+GENERAL", "USUARIOS Y PERMISOS" y el reordenamiento de "PANEL DE
+CONTROL" (puntos 76-80).
+
+**1.4/1.11 centralizados en `PantallaCRUD` (`crud_generico.py`)**: de
+una sola vez, para los ~14 catálogos genéricos (Localidades, Edificios,
+Unidades, Consultorios, Responsables, Listas editables, Condiciones y
+normas, Detalles complementarios, etc.) — `showEvent` pasa a llamar un
+método nuevo, `reiniciar()` (mismo contrato que el resto del sistema
+para F3): limpia el campo "Buscar" además de reiniciar el orden de la
+tabla, y vuelve a enfocar el primer control. `_nuevo`/`_editar`/
+`_eliminar` suman un `QMessageBox.information` de éxito al terminar, y
+`_eliminar` suma uno de "Eliminación cancelada" cuando se declina la
+confirmación — mismo criterio en los tres. Como Listas editables/
+Condiciones y normas/Detalles complementarios/los 5 catálogos de Base
+de datos del espacio no tienen ningún parámetro propio de foco (usan
+`PantallaCRUD` tal cual, sin pisar nada), este único cambio ya cumple
+"Aplicar correcciones 1.4, 1.11" para los tres primeros y para los
+cinco de Base de datos del espacio sin necesitar ningún código
+puntual.
+
+**Gestor de archivos del espacio** (puntos 23 a 27, `imagenes.py`):
+- Punto 23: `QTableView` (clase base de `QTableWidget`) suma un borde
+  negro fino en `estilos.py` — se confundía contra el fondo, mismo
+  criterio ya aplicado a filtros/cuadros de texto (1.7).
+- Puntos 25/27: `_ajustar_columnas` suma un parámetro `columnas_
+  minimas` — las columnas "Orden"/"Principal"/"Activo" (vista por
+  alcance) o "Consultorio"/"Principal"/"Activo" (vista "Todos los
+  archivos") se quedan en el ancho justo de `resizeColumnsToContents`
+  en vez del padding generoso de las demás, para que el ancho que esas
+  tres dejan de usar se lo lleve la Vista previa (la única con
+  `stretch=1` del layout de la solapa).
+- Punto 26: cadena de foco explícita (`instalar_enter_avanza_foco`),
+  Alcance → Tipo de archivo → Localidad → Edificio → Unidad →
+  Consultorio → los siete botones → Manual del usuario, con wrap-around
+  de vuelta a Alcance (gratis).
+- 1.4/1.11: `reiniciar()`/`showEvent` (reinicia Alcance/Tipo de archivo
+  a su valor por defecto, limpia la selección, enfoca Alcance) y
+  alertas de éxito/cancelación en `_agregar`/`_eliminar`.
+
+**Textos del sistema** (punto 41, `textos_sistema.py`): los subtítulos
+"MENSAJES AUTOMÁTICOS"/"AYUDA CONTEXTUAL (F1)" pasan a negrita y color
+negro explícito (antes dependían del estilo nativo de un ítem
+deshabilitado, sin ninguna regla QSS propia para esta lista en
+particular — a diferencia del menú lateral, que sí la tiene por
+`objectName="navegacion"`); "Textos editables" pasa de `subtituloCampo`
+a `subtituloSeccion`, mismo tamaño/negrita que `etiqueta_nombre` (el
+título que aparece arriba del cuadro de la derecha al seleccionar un
+texto). `reiniciar()`/`showEvent` descartan cualquier edición sin
+guardar y vuelven al estado "sin selección"; `_guardar`/`_restablecer`
+suman alertas de éxito y de cancelación (al declinar el cartel de
+variable desconocida / de confirmación de restablecer).
+
+**Configuración general** (`configuracion.py`): `ConfiguracionGeneral`
+(el contenedor con las 7 solapas) suma `showEvent`/`reiniciar()` — a
+diferencia de los catálogos, acá "resetear filtros" se traduce en
+recargar los valores reales de `Configuracion` (vía `actualizar()`, ya
+existía) y descartar cualquier campo tocado sin guardar, sin importar
+en qué solapa haya quedado el usuario — el botón "Guardar" sigue siendo
+compartido por las 7, así que el reset vive en el contenedor de afuera,
+no en cada `_PanelCampos` individual.
+
+**Bloques rígidos** (`bloques_rigidos.py`, solapa de Configuración
+general): mismo patrón que los catálogos genéricos pero a mano (no usa
+`PantallaCRUD`) — `showEvent` pasa a `reiniciar()` (limpia "Buscar" +
+reinicia orden + reenfoca) y `_nuevo`/`_editar`/`_eliminar` suman las
+mismas alertas de éxito/cancelación.
+
+**Usuarios y permisos** (`usuarios.py`): `_PanelUsuarios`/`_PanelPermisosPantalla`
+suman `reiniciar()` (antes la lógica vivía solo en `showEvent`, sin
+método propio para que F3 la dispare) y `_nuevo`/`_editar` suman
+alertas de éxito ("Resetear contraseña" ya la tenía).
+
+**Panel de control, "Avance de período y backups"** (puntos 76-80,
+`panel_control.py`): "Fecha y hora actual" se funde dentro de "Período
+actual" (período en la primera línea, fecha/hora real debajo, mismo
+cuadrito) — la grilla vuelve a 6 cuadritos (de los 7 que tenía desde que
+se sumó "Cumpleaños y días de profesión"), en el orden pedido
+explícito: Período actual, Último backup, Ocupación y horas /
+Profesionales, Feriados y fechas especiales, Cumpleaños y días de
+profesión. Cada uno de los seis pasa a ser escroleable EN VERTICAL de
+forma individual (`_agregar_contenido_escrolable`, nueva: envuelve el
+`QLabel` — o el contenedor con las dos etiquetas del cuadrito de
+Período — en un `QScrollArea` propio sin marco, en vez de agregarlo
+directo al layout del cuadrito) para cuando el contenido no entre en el
+alto parejo de la grilla (`_ALTO_MINIMO_TARJETA`); la tarjeta de
+Alertas, debajo de los seis, ya tenía su propio scroll desde antes.
+"Cumpleaños y días de profesión" pasa a mostrar el día de la semana
+abreviado ("ddd dd-mm", ej. "mar 15-10"), mismo criterio que el resto
+del sistema (1.10).
+
+Tests actualizados en `tests/test_gui_panel_control.py`: el conteo de
+la grilla pasa de 7 a 6; los tres tests que ubicaban el cuadrito de
+"Período actual" vía `etiqueta_periodo.parentWidget()` (ya no es
+directo, ahora hay un `QScrollArea` de por medio) pasan a un helper
+nuevo, `_tarjeta_de(widget)`, que sube por `parentWidget()` hasta
+encontrar el `QFrame#cuadritoInfo`; se suman dos tests (cada cuadrito
+principal tiene su propio `QScrollArea`, "Período actual"/reloj caen en
+el mismo cuadrito) y se actualiza el test de cumpleaños para el formato
+con día de la semana.
+
+Tests nuevos/actualizados en `tests/test_gui_imagenes.py`,
+`tests/test_gui_textos_sistema.py`, `tests/test_gui_configuracion.py`,
+`tests/test_gui_bloques_rigidos.py` y `tests/test_gui_usuarios.py` —
+mismo criterio en los cinco: alertas de éxito/cancelación capturadas
+monkeypatcheando `QMessageBox.information`/`question`, `reiniciar()`
+llamado directo para confirmar que descarta el estado transitorio
+correspondiente a cada pantalla.
+
+### Grilla y mensajería (puntos 83-96)
+
+**Grilla semanal** (`_PanelGrillaSemanal`, `grilla_operativa.py`):
+- Punto 87: cadena de foco explícita sobre el panel de Filtros de la
+  grilla embebida (`GrillaOperativaWidget.widgets_filtro_para_foco()`,
+  ya existía para este mismo propósito en Reservas) — Localidad →
+  Edificio → Unidad → checks de día → Profesional, wrap-around gratis.
+  `reiniciar()`/`showEvent` enfocan el primero de la cadena.
+- Punto 86: la solapa entera pasa a estar envuelta en un `QScrollArea`
+  propio (antes agregaba todo directo a `self`) — si la grilla se
+  configura con más horarios de los que entran en la pantalla
+  maximizada, se puede escrolear en vertical sin perder de vista
+  "Detalle" ni la leyenda de colores, mismo criterio "los cuadros
+  escrolean, no la pantalla" del resto del sistema.
+- Puntos 1.2/1.5/1.7/1.8/1.11 ya resueltos (selector de profesional,
+  tabla excluida del Tab, bordes de filtro/grilla, líneas sin doble
+  efecto — ver 1.7/1.8 más arriba); el punto 85 ("no se ve la línea de
+  las 21hs") queda cubierto por el mismo `QScrollArea` nuevo.
+
+**Centro de mensajería** (`_PanelCentroMensajeria`, `mensajeria.py`):
+ya tenía una cadena de foco explícita de una ronda anterior
+(Filtro→Período→los dos checks→Copiar mensaje→Actualizar→Mensaje
+grupal→vuelve a Filtro) que YA coincidía exacto con el punto 92 — no
+hizo falta tocarla. Lo que faltaba:
+- Punto 91: la etiqueta "Filtro" pasa a "Filtro de visualización".
+- Punto 90: `_al_cambiar_enviada` ya conservaba filtro/período/checks al
+  refrescar (`actualizar()` los lee tal cual están, sin tocarlos) — lo
+  que faltaba era volver el scroll de la tabla al principio
+  (`self.tabla.scrollToTop()`) después de marcar/desmarcar "Enviada",
+  para que el reordenamiento por color no deje la vista a mitad de la
+  tabla.
+- 1.4: `reiniciar()`/`showEvent` nuevos — resetean Filtro/Período/los
+  dos checks a su default (distinto del refresco de punto 90, que a
+  propósito CONSERVA esos valores).
+
+**Mensajes predefinidos** (`_PanelMensajesPredefinidos`,
+`mensajes_predefinidos.py`): punto 95, cadena de foco completa —
+Buscar → Categoría → Dirigido a → Localidad → Edificio → Unidad →
+Consultorio → Copiar mensaje → Nuevo → Editar → Eliminar. El
+`PantallaCRUD` interno pasa a `instalar_foco=False` (mismo criterio que
+Gastos operativos: "apagalo cuando la pantalla arma su propia cadena
+que combina los botones del CRUD con los suyos") y la pantalla arma su
+propia cadena con `instalar_enter_avanza_foco`, combinando
+`self.crud.campo_buscar`/`boton_nuevo`/`boton_editar`/`boton_eliminar`
+con los seis selectores de contexto y "Copiar mensaje". `reiniciar()`/
+`showEvent` nuevos llaman a `self.crud.reiniciar()` (ya limpia Buscar y
+refresca, ver la sección de `crud_generico.py` más arriba) y enfocan el
+primero de la cadena completa.
+
+### Bug real encontrado en esta tanda: `QMessageBox.question`/`information` reales cuelgan la suite sin mockear — default global en `conftest.py`
+
+Al correr la suite completa después de sumar las alertas de éxito/
+cancelación de la tanda anterior (1.11, en `PantallaCRUD` y varios
+paneles armados a mano), se detectó un hang real: `QT_QPA_PLATFORM=
+offscreen` no vuelve "no-op" a `QMessageBox.exec()` — sigue siendo un
+diálogo MODAL de verdad (abre su propio loop de eventos y espera a que
+lo cierren), así que cualquier test que disparara una acción de crear/
+editar/eliminar sin mockear `information`/`warning`/`question` se
+quedaba esperando para siempre un clic que nunca iba a llegar.
+Reproducido puntualmente contra `test_catalogos.py::test_pantalla_
+edificios_campo_libre_se_guarda_y_se_ve_en_la_tabla` (sin ningún mock de
+estos tres métodos) con `pytest -v` + `timeout`, confirmando el hang
+exacto.
+
+Mismo motivo que ya tenían decenas de archivos de test, cada uno con su
+propia fixture `autouse` local mockeando estos tres métodos — en vez de
+seguir sumando una fixture local más por archivo nuevo (y arriesgarse a
+olvidar alguno, como pasó acá), se sube un default a `tests/conftest.py`:
+`_sin_dialogos_modales_por_defecto` (autouse, toda la suite)
+mockea `information`/`warning` a no-op y `question` a "Sí" — cualquier
+archivo que ya tenga su propia fixture local haciendo lo mismo sigue
+funcionando igual (pytest instancia las fixtures `autouse` de un
+conftest ancestro antes que las del módulo de test, así que la local
+termina pisando/reafirmando el mismo valor), y los tests puntuales que
+necesitan otra respuesta de `question` o capturar el texto de un
+`information` siguen pudiendo pisarlo con su propio `monkeypatch.
+setattr` dentro del test. Un default seguro así, aplicado una sola vez,
+cubre también cualquier `QMessageBox` que se sume de acá en adelante en
+el resto de este documento sin tener que acordarse de mockearlo archivo
+por archivo.

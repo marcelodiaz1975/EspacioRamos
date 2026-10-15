@@ -490,3 +490,29 @@ def test_spin_moneda_selecciona_todo_el_texto_al_recibir_foco(qtbot):
     qtbot.wait(10)
     assert spin.lineEdit().selectedText() == spin.lineEdit().text()
     assert spin.lineEdit().selectedText() != ""
+
+
+def test_reiniciar_descarta_cambios_sin_guardar(qtbot, conn):
+    """Punto 1.4 (SistemaDF v0.11.2026.10): al volver a entrar a la
+    pantalla (o F3) se descarta cualquier campo tocado sin guardar,
+    volviendo a leer los valores reales de `Configuracion`."""
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["NombreEspacio"].setText("Un cambio sin guardar")
+
+    pantalla.reiniciar()
+
+    fila = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    assert pantalla._entradas["NombreEspacio"].text() == (fila["NombreEspacio"] or "")
+    assert pantalla._entradas["NombreEspacio"].text() != "Un cambio sin guardar"
+
+
+def test_mostrar_la_pantalla_dispara_reiniciar(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["NombreEspacio"].setText("Un cambio sin guardar")
+
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    assert pantalla._entradas["NombreEspacio"].text() != "Un cambio sin guardar"

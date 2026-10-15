@@ -62,6 +62,65 @@ def test_sin_seleccion_el_editor_queda_deshabilitado(qtbot, conn):
     assert not pantalla.boton_restablecer.isEnabled()
 
 
+def test_separadores_en_negrita_y_color_negro(qtbot, conn):
+    """Punto 41: mismo tamaño que el resto de la lista, pero negra y en
+    negrita, para distinguirse de los textos editables."""
+    pantalla = _PanelTextosDelSistema(conn, _SECCIONES)
+    qtbot.addWidget(pantalla)
+    separador = pantalla.lista.item(0)
+    assert separador.font().bold() is True
+    assert separador.foreground().color().name() == "#000000"
+
+
+def test_titulo_textos_editables_mismo_estilo_que_etiqueta_nombre(qtbot, conn):
+    pantalla = _PanelTextosDelSistema(conn, _SECCIONES)
+    qtbot.addWidget(pantalla)
+    assert pantalla.titulo_lista.objectName() == pantalla.etiqueta_nombre.objectName() == "subtituloSeccion"
+
+
+def test_reiniciar_descarta_seleccion_y_edicion_sin_guardar(qtbot, conn):
+    """Punto 1.4: al volver a entrar (o F3) se pierde cualquier edición
+    sin guardar y vuelve al estado inicial, sin selección."""
+    pantalla = _PanelTextosDelSistema(conn, _SECCIONES)
+    qtbot.addWidget(pantalla)
+    _seleccionar_por_nombre(pantalla, "Mensaje que acompaña el PDF de liquidación")
+    pantalla.editor.setPlainText("Un cambio que no se guardó.")
+
+    pantalla.reiniciar()
+
+    assert pantalla.lista.currentItem() is None
+    assert pantalla.editor.toPlainText() == ""
+    assert not pantalla.editor.isEnabled()
+
+
+def test_guardar_exitoso_muestra_alerta_de_exito(qtbot, conn, monkeypatch):
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda self, titulo, texto: mensajes.append(texto)))
+    pantalla = _PanelTextosDelSistema(conn, _SECCIONES)
+    qtbot.addWidget(pantalla)
+    _seleccionar_por_nombre(pantalla, "Mensaje que acompaña el PDF de liquidación")
+    pantalla.editor.setPlainText("Texto nuevo con {mes}.")
+
+    pantalla.boton_guardar.click()
+
+    assert any("éxito" in m for m in mensajes)
+
+
+def test_restablecer_cancelado_muestra_alerta_de_cancelado(qtbot, conn, monkeypatch):
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda self, titulo, texto: mensajes.append(texto)))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    guardar_texto_personalizado(conn, "mensaje_envio_liquidacion", "Personalizado")
+    pantalla = _PanelTextosDelSistema(conn, _SECCIONES)
+    qtbot.addWidget(pantalla)
+    _seleccionar_por_nombre(pantalla, "Mensaje que acompaña el PDF de liquidación")
+
+    pantalla.boton_restablecer.click()
+
+    assert any("cancelado" in m for m in mensajes)
+    assert pantalla.editor.toPlainText() == "Personalizado"  # no se tocó
+
+
 def _seleccionar_por_nombre(pantalla, nombre):
     for i in range(pantalla.lista.count()):
         item = pantalla.lista.item(i)

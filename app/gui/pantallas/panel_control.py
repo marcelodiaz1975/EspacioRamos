@@ -73,7 +73,21 @@ tocar código cada vez que se suma o cambia una fecha. La grilla pasa a
 7 cuadritos (sigue en 3 columnas; el séptimo queda solo en su propia
 fila, sin ningún cuadrito más al lado) — el armado ya era genérico sobre
 la cantidad de tarjetas, no hizo falta tocar `_COLUMNAS_GRILLA` ni el
-cálculo de filas."""
+cálculo de filas.
+
+SistemaDF v0.11.2026.10, puntos 76-80 ("Avance de período y backups"):
+"Fecha y hora actual" se funde dentro de "Período actual" (dos líneas
+en el mismo cuadrito — período arriba, fecha/hora real debajo), así que
+la grilla vuelve a 6 cuadritos, en el orden pedido explícito: Período
+actual, Último backup, Ocupación y horas / Profesionales, Feriados y
+fechas especiales, Cumpleaños y días de profesión. Cada cuadrito pasa a
+ser escroleable EN VERTICAL de forma individual (`_agregar_contenido_
+escrolable`, un `QScrollArea` propio por cuadrito en vez de agregar el
+`QLabel` directo al layout) para cuando su contenido no entre en el
+alto parejo de la grilla — la tarjeta de Alertas, debajo de los seis, ya
+tenía su propio scroll desde antes. Cumpleaños y días de profesión pasa
+a mostrar la fecha con el día de la semana abreviado ("ddd dd-mm", ej.
+"mar 15-10"), mismo criterio que el resto del sistema."""
 from __future__ import annotations
 
 import sqlite3
@@ -191,6 +205,20 @@ def _texto_fecha_hora(momento: datetime, *, con_segundos: bool = False) -> str:
     if con_segundos:
         hora += f":{momento.second:02d}"
     return f"{dia} {momento.day:02d}-{momento.month:02d}-{momento.year} {hora}hs"
+
+
+def _agregar_contenido_escrolable(layout: QVBoxLayout, contenido: QWidget) -> None:
+    """Punto 78 (SistemaDF v0.11.2026.10): cada cuadrito tiene que ser
+    escroleable EN VERTICAL de forma individual si su contenido no
+    entra en el alto parejo de la grilla (`_ALTO_MINIMO_TARJETA`), sin
+    afectar el alto de los demás — un `QScrollArea` propio por cuadrito,
+    envolviendo el `QLabel` (o el contenedor de varios) en vez de
+    agregarlo directo al layout del cuadrito."""
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setWidget(contenido)
+    layout.addWidget(scroll, stretch=1)
 
 
 def _tarjeta(titulo: str) -> tuple[QFrame, QVBoxLayout]:
@@ -338,15 +366,20 @@ class _PanelAvancePeriodo(QWidget):
 
         # Seis cuadritos principales, todos del mismo ancho y alto (grilla
         # pareja 3x2 — sin la de Alertas, que va aparte ocupando todo el
-        # ancho de la pantalla, ver abajo).
+        # ancho de la pantalla, ver abajo). Punto 76/77 (SistemaDF
+        # v0.11.2026.10): "Fecha y hora actual" se unifica dentro de
+        # "Período actual" (dos líneas en el mismo cuadrito, ver
+        # `_armar_tarjeta_periodo`) — de 7 cuadritos se pasa a 6, en el
+        # orden pedido explícito: Período actual, Último backup,
+        # Ocupación y horas / Profesionales, Feriados y fechas
+        # especiales, Cumpleaños y días de profesión.
         grilla = QGridLayout()
         tarjetas = [
-            self._armar_tarjeta_reloj(),
             self._armar_tarjeta_periodo(),
             self._armar_tarjeta_backup(),
-            self._armar_tarjeta_fechas_especiales(),
-            self._armar_tarjeta_profesionales(),
             self._armar_tarjeta_ocupacion(),
+            self._armar_tarjeta_profesionales(),
+            self._armar_tarjeta_fechas_especiales(),
             self._armar_tarjeta_cumpleanos(),
         ]
         for indice, tarjeta in enumerate(tarjetas):
@@ -374,13 +407,6 @@ class _PanelAvancePeriodo(QWidget):
 
     # ------------------------------------------------------------ tarjetas
 
-    def _armar_tarjeta_reloj(self) -> QFrame:
-        tarjeta, layout = _tarjeta("Fecha y hora actual")
-        self.etiqueta_reloj = QLabel()
-        layout.addWidget(self.etiqueta_reloj)
-        layout.addStretch()
-        return tarjeta
-
     def _actualizar_reloj(self) -> None:
         """Hora real del sistema, no la fecha ficticia de QA — un reloj en
         vivo tiene que mostrar la hora real para orientar al operador,
@@ -389,50 +415,55 @@ class _PanelAvancePeriodo(QWidget):
         self.etiqueta_reloj.setText(_texto_fecha_hora(datetime.now(), con_segundos=True))
 
     def _armar_tarjeta_periodo(self) -> QFrame:
+        """Punto 76: unifica lo que antes eran dos cuadritos separados
+        ("Fecha y hora actual" + "Período actual") en uno solo — período
+        en la primera línea, fecha/hora real debajo, dentro del mismo
+        cuadrito "Período actual"."""
         tarjeta, layout = _tarjeta("Período actual")
+        contenido = QWidget()
+        layout_contenido = QVBoxLayout(contenido)
+        layout_contenido.setContentsMargins(0, 0, 0, 0)
         self.etiqueta_periodo = QLabel()
-        layout.addWidget(self.etiqueta_periodo)
-        layout.addStretch()
+        layout_contenido.addWidget(self.etiqueta_periodo)
+        self.etiqueta_reloj = QLabel()
+        layout_contenido.addWidget(self.etiqueta_reloj)
+        layout_contenido.addStretch()
+        _agregar_contenido_escrolable(layout, contenido)
         return tarjeta
 
     def _armar_tarjeta_backup(self) -> QFrame:
         tarjeta, layout = _tarjeta("Último backup")
         self.etiqueta_backup = QLabel()
         self.etiqueta_backup.setWordWrap(True)
-        layout.addWidget(self.etiqueta_backup)
-        layout.addStretch()
+        _agregar_contenido_escrolable(layout, self.etiqueta_backup)
         return tarjeta
 
     def _armar_tarjeta_fechas_especiales(self) -> QFrame:
         tarjeta, layout = _tarjeta("Feriados y fechas especiales próximas")
         self.etiqueta_fechas_especiales = QLabel()
         self.etiqueta_fechas_especiales.setWordWrap(True)
-        layout.addWidget(self.etiqueta_fechas_especiales)
-        layout.addStretch()
+        _agregar_contenido_escrolable(layout, self.etiqueta_fechas_especiales)
         return tarjeta
 
     def _armar_tarjeta_profesionales(self) -> QFrame:
         tarjeta, layout = _tarjeta("Profesionales")
         self.etiqueta_profesionales = QLabel()
         self.etiqueta_profesionales.setWordWrap(True)
-        layout.addWidget(self.etiqueta_profesionales)
-        layout.addStretch()
+        _agregar_contenido_escrolable(layout, self.etiqueta_profesionales)
         return tarjeta
 
     def _armar_tarjeta_ocupacion(self) -> QFrame:
         tarjeta, layout = _tarjeta("Ocupación y horas")
         self.etiqueta_ocupacion = QLabel()
         self.etiqueta_ocupacion.setWordWrap(True)
-        layout.addWidget(self.etiqueta_ocupacion)
-        layout.addStretch()
+        _agregar_contenido_escrolable(layout, self.etiqueta_ocupacion)
         return tarjeta
 
     def _armar_tarjeta_cumpleanos(self) -> QFrame:
         tarjeta, layout = _tarjeta("Cumpleaños y días de profesión")
         self.etiqueta_cumpleanos = QLabel()
         self.etiqueta_cumpleanos.setWordWrap(True)
-        layout.addWidget(self.etiqueta_cumpleanos)
-        layout.addStretch()
+        _agregar_contenido_escrolable(layout, self.etiqueta_cumpleanos)
         return tarjeta
 
     def _armar_tarjeta_alertas(self) -> QFrame:
@@ -495,8 +526,12 @@ class _PanelAvancePeriodo(QWidget):
 
         eventos = cumpleanos_y_dias_profesion_proximos(self.conn)
         if eventos:
+            # Punto 80: "ddd dd-mm" con el día de la semana abreviado,
+            # mismo criterio que el resto del sistema (ver 1.10).
             texto_eventos = "\n".join(
-                f"•  {e.fecha_proxima.day:02d}-{e.fecha_proxima.month:02d} — {e.descripcion}" for e in eventos
+                f"•  {fecha_a_dia_semana(e.fecha_proxima)[:3].lower()} "
+                f"{e.fecha_proxima.day:02d}-{e.fecha_proxima.month:02d} — {e.descripcion}"
+                for e in eventos
             )
         else:
             texto_eventos = "Sin cumpleaños ni días de profesión para lo que resta del período."

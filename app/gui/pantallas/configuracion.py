@@ -523,6 +523,20 @@ class ConfiguracionGeneral(QWidget):
             return  # esta solapa (Bloques rígidos) arma su propia cadena de foco
         self._foco = instalar_enter_avanza_foco(panel.orden + [self.boton_guardar], parent=self)
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto 1.4 (SistemaDF v0.11.2026.10): al volver a entrar a
+        "Configuración general" (o F3) se descarta cualquier cambio sin
+        guardar — `actualizar()` vuelve a leer los valores reales de
+        `Configuracion`, sin tocar de qué solapa haya quedado activa."""
+        self.actualizar()
+        panel_actual = self._paneles[self.pestanas.currentIndex()]
+        if panel_actual is not None and panel_actual.orden:
+            panel_actual.orden[0].setFocus()
+
     def actualizar(self) -> None:
         registro = self.repositorio.obtener(1)
         if registro is None:

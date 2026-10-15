@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QMessageBox,
+    QScrollArea,
     QTabWidget,
 )
 
@@ -18,6 +19,18 @@ from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.panel_control import PanelControl
 from app.negocio.backup import activar_modo_sin_sincronizar, generar_backup
 from app.negocio.lista_espera import crear_pedido
+
+
+def _tarjeta_de(widget):
+    """Sube por `parentWidget()` hasta el `QFrame#cuadritoInfo` (punto 78,
+    SistemaDF v0.11.2026.10: cada cuadrito envuelve su contenido en un
+    `QScrollArea` propio, así que la etiqueta de contenido ya no es hija
+    directa del cuadrito — hay que atravesar el viewport del scroll)."""
+    actual = widget
+    while actual is not None and actual.objectName() != "cuadritoInfo":
+        actual = actual.parentWidget()
+    assert actual is not None, "no se encontró ningún ancestro cuadritoInfo"
+    return actual
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -439,8 +452,34 @@ def test_tarjeta_cumpleanos_lista_profesionales_y_dias_de_profesion(qtbot, conn)
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     texto = pantalla.panel_avance.etiqueta_cumpleanos.text()
-    assert "20-08 — Cumpleaños de Virginia Lo Veci" in texto
-    assert "25-08 — Día del Psicólogo" in texto
+    # Punto 80: día de la semana abreviado ("ddd dd-mm") — jue 20-08-2026,
+    # mar 25-08-2026.
+    assert "jue 20-08 — Cumpleaños de Virginia Lo Veci" in texto
+    assert "mar 25-08 — Día del Psicólogo" in texto
+
+
+def test_cada_cuadrito_principal_tiene_su_propio_scroll_area(qtbot, conn):
+    """Punto 78: cada uno de los seis cuadritos (período, backup,
+    ocupación, profesionales, fechas especiales, cumpleaños) tiene que
+    poder escrolear en vertical de forma individual — un `QScrollArea`
+    propio dentro de cada uno, sin afectar el alto parejo de la grilla."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    for etiqueta in (
+        pantalla.panel_avance.etiqueta_periodo, pantalla.panel_avance.etiqueta_backup,
+        pantalla.panel_avance.etiqueta_ocupacion, pantalla.panel_avance.etiqueta_profesionales,
+        pantalla.panel_avance.etiqueta_fechas_especiales, pantalla.panel_avance.etiqueta_cumpleanos,
+    ):
+        tarjeta = _tarjeta_de(etiqueta)
+        assert tarjeta.findChild(QScrollArea) is not None
+
+
+def test_tarjeta_periodo_muestra_periodo_y_reloj_en_el_mismo_cuadrito(qtbot, conn):
+    """Punto 76: "Fecha y hora actual" se funde dentro de "Período
+    actual" — las dos etiquetas quedan en el mismo cuadrito."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    assert _tarjeta_de(pantalla.panel_avance.etiqueta_periodo) is _tarjeta_de(pantalla.panel_avance.etiqueta_reloj)
 
 
 def test_tarjeta_alertas_sigue_mostrando_las_alertas_de_siempre(qtbot, conn):
@@ -467,11 +506,10 @@ def test_refrescar_alertas_dos_veces_no_deja_la_tarjeta_vieja_visible(qtbot, con
     assert tarjeta_vieja.isHidden()
 
 
-def test_hay_siete_tarjetas_parejas_en_la_grilla_y_alertas_aparte(qtbot, conn):
-    """Séptima tarjeta sumada con "Cumpleaños y días de profesión" —
-    sigue en 3 columnas, la séptima queda sola en su propia fila (el
-    armado de la grilla ya era genérico sobre la cantidad de tarjetas,
-    no hizo falta ningún caso especial)."""
+def test_hay_seis_tarjetas_parejas_en_la_grilla_y_alertas_aparte(qtbot, conn):
+    """Punto 76 (SistemaDF v0.11.2026.10): "Fecha y hora actual" se funde
+    dentro de "Período actual" — de 7 cuadritos (3+3+1 suelto) vuelve a
+    6 (3+3 parejo, sin ninguno sobrando en una fila propia)."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1200, 800)
@@ -480,16 +518,16 @@ def test_hay_siete_tarjetas_parejas_en_la_grilla_y_alertas_aparte(qtbot, conn):
 
     grilla = pantalla.findChild(QGridLayout)
     assert grilla is not None
-    assert grilla.count() == 7
+    assert grilla.count() == 6
 
     # Tolerancia chica: QGridLayout reparte el resto de una división no
     # exacta (ancho/alto de ventana entre columnas/filas) en algún borde
     # — invisible a simple vista pero real en píxeles.
-    tarjetas = [grilla.itemAt(i).widget() for i in range(7)]
+    tarjetas = [grilla.itemAt(i).widget() for i in range(6)]
     anchos = [t.width() for t in tarjetas]
     altos = [t.height() for t in tarjetas]
-    assert max(anchos) - min(anchos) <= 8  # las siete del mismo ancho
-    assert max(altos) - min(altos) <= 8  # las siete del mismo alto
+    assert max(anchos) - min(anchos) <= 8  # las seis del mismo ancho
+    assert max(altos) - min(altos) <= 8  # las seis del mismo alto
 
 
 def test_tarjeta_alertas_no_esta_en_la_grilla(qtbot, conn):
@@ -515,7 +553,8 @@ def test_tarjeta_alertas_ocupa_mucho_mas_ancho_que_una_tarjeta_de_la_grilla(qtbo
 def test_titulos_de_las_tarjetas_van_en_negrita_e_italica_con_dos_puntos(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    encabezado = pantalla.panel_avance.etiqueta_periodo.parentWidget().findChildren(QLabel)[0]
+    tarjeta = _tarjeta_de(pantalla.panel_avance.etiqueta_periodo)
+    encabezado = tarjeta.findChildren(QLabel)[0]
     assert encabezado.text() == "Período actual:"
     assert "italic" in encabezado.styleSheet()
     assert "bold" in encabezado.styleSheet()
@@ -529,7 +568,7 @@ def test_el_borde_del_cuadrito_no_se_cuela_al_titulo_ni_al_contenido(qtbot, conn
     acotado por objectName, no por clase."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    tarjeta = pantalla.panel_avance.etiqueta_periodo.parentWidget()
+    tarjeta = _tarjeta_de(pantalla.panel_avance.etiqueta_periodo)
     assert tarjeta.objectName() == "cuadritoInfo"
     assert "QFrame#cuadritoInfo" in tarjeta.styleSheet()
     encabezado = tarjeta.findChildren(QLabel)[0]
@@ -572,7 +611,8 @@ def test_titulo_de_fechas_especiales_es_corto(qtbot, conn):
     que las otras dos — se acortó, pedido explícito de la clienta."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    encabezado = pantalla.panel_avance.etiqueta_fechas_especiales.parentWidget().findChildren(QLabel)[0]
+    tarjeta = _tarjeta_de(pantalla.panel_avance.etiqueta_fechas_especiales)
+    encabezado = tarjeta.findChildren(QLabel)[0]
     assert encabezado.text() == "Feriados y fechas especiales próximas:"
 
 

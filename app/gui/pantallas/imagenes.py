@@ -111,7 +111,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.main_window import Seccion
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
-from app.gui.widgets.foco import excluir_tabla_del_tab
+from app.gui.widgets.foco import excluir_tabla_del_tab, instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.negocio.archivos_generados import SUBCARPETA_MANUAL, carpeta_archivos_varios
 from app.negocio.imagenes import (
@@ -172,15 +172,27 @@ def _linea_divisoria() -> QFrame:
     return linea
 
 
-def _ajustar_columnas(tabla: QTableWidget, indice_descripcion: int) -> None:
+def _ajustar_columnas(
+    tabla: QTableWidget, indice_descripcion: int, columnas_minimas: frozenset[int] = frozenset(),
+) -> None:
     """Mismo criterio que `novedades._ajustar_columnas`: más aire que el
     ancho justo de `resizeColumnsToContents`, con Descripción todavía
     más generosa — pedido puntual de la clienta al revisar esta pantalla.
     El ancho final de la tabla queda fijo a la suma de sus columnas (sin
     stretch) para que no quede un espacio en blanco antes del panel de
-    vista previa, que es el que se estira y ocupa el resto del ancho."""
+    vista previa, que es el que se estira y ocupa el resto del ancho.
+
+    `columnas_minimas` (puntos 25/27, SistemaDF v0.11.2026.10): las
+    columnas "Orden"/"Principal"/"Activo" (vista por alcance) o
+    "Consultorio"/"Principal"/"Activo" (vista "Todos los archivos") se
+    quedan en el ancho justo de `resizeColumnsToContents` — sin el
+    padding de las demás — para que el ancho que esas tres dejan de
+    usar se lo lleve la Vista previa, que es la única con `stretch=1` en
+    el layout de la solapa."""
     tabla.resizeColumnsToContents()
     for columna in range(tabla.columnCount()):
+        if columna in columnas_minimas:
+            continue
         tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
     tabla.setColumnWidth(indice_descripcion, max(tabla.columnWidth(indice_descripcion), _ANCHO_MINIMO_DESCRIPCION))
     ancho_total = tabla.verticalHeader().width() + tabla.horizontalHeader().length() + 2 * tabla.frameWidth() + 4
@@ -445,6 +457,31 @@ class _PanelGestorArchivos(QWidget):
         scroll.setWidget(contenido)
         layout_externo.addWidget(scroll)
 
+        # Punto 26 (SistemaDF v0.11.2026.10): cadena de foco explícita,
+        # de arriba a abajo, con wrap-around de "Manual del usuario" de
+        # vuelta a "Alcance" (gratis, ver `instalar_enter_avanza_foco`).
+        self._foco = instalar_enter_avanza_foco(
+            [
+                self.combo_alcance, self.combo_tipo, self.combo_localidad, self.combo_edificio,
+                self.combo_unidad, self.combo_consultorio, self.boton_agregar, self.boton_principal,
+                self.boton_subir, self.boton_bajar, self.boton_activo, self.boton_descargar,
+                self.boton_eliminar, self.boton_manual,
+            ],
+            parent=self,
+        )
+
+    def showEvent(self, evento) -> None:
+        """Punto 1.4: al volver a mostrarse la solapa (incluido F3, ver
+        `reiniciar`), arranca "como recién se hubiera ingresado"."""
+        super().showEvent(evento)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        self.combo_alcance.setCurrentIndex(0)
+        self.combo_tipo.setCurrentIndex(0)
+        self.tabla.clearSelection()
+        self.combo_alcance.setFocus()
+
     def _al_cambiar_alcance(self, *_args) -> None:
         alcance = self.combo_alcance.currentText()
         es_todos = alcance == _TODOS
@@ -572,7 +609,7 @@ class _PanelGestorArchivos(QWidget):
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(img["Tipo"] or ""))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem("Sí" if img["NumeroOrden"] == 1 else "No"))
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem("Sí" if img["Activo"] else "No"))
-        _ajustar_columnas(self.tabla, indice_descripcion=1)
+        _ajustar_columnas(self.tabla, indice_descripcion=1, columnas_minimas=frozenset({0, 3, 4}))
 
     def _llenar_tabla_todos(self) -> None:
         self.tabla.setRowCount(len(self._imagenes))
@@ -588,7 +625,7 @@ class _PanelGestorArchivos(QWidget):
             self.tabla.setItem(fila_idx, 6, QTableWidgetItem(img["Tipo"] or ""))
             self.tabla.setItem(fila_idx, 7, QTableWidgetItem("Sí" if img["NumeroOrden"] == 1 else "No"))
             self.tabla.setItem(fila_idx, 8, QTableWidgetItem("Sí" if img["Activo"] else "No"))
-        _ajustar_columnas(self.tabla, indice_descripcion=5)
+        _ajustar_columnas(self.tabla, indice_descripcion=5, columnas_minimas=frozenset({4, 7, 8}))
 
     def _actualizar_previsualizacion(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -673,6 +710,7 @@ class _PanelGestorArchivos(QWidget):
             return
         self.conn.commit()
         self.actualizar()
+        QMessageBox.information(self, "Gestor de archivos", "Archivo agregado con éxito.")
 
     def _marcar_principal(self) -> None:
         img = self._imagen_seleccionada()
@@ -736,10 +774,12 @@ class _PanelGestorArchivos(QWidget):
             return
         confirmacion = QMessageBox.question(self, "Eliminar archivo", "¿Confirmás eliminar el archivo seleccionado?")
         if confirmacion != QMessageBox.StandardButton.Yes:
+            QMessageBox.information(self, "Gestor de archivos", "Eliminación cancelada.")
             return
         eliminar_imagen(self.conn, img["IdImagen"])
         self.conn.commit()
         self.actualizar()
+        QMessageBox.information(self, "Gestor de archivos", "Archivo eliminado con éxito.")
 
     def _regenerar_manual(self) -> None:
         """A diferencia del resto de los botones de este panel, no

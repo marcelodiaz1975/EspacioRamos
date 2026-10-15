@@ -391,3 +391,27 @@ def test_dirigido_a_sustituye_nombre_apellido_y_tratamiento(qtbot, conn):
     indice = pantalla.combo_dirigido_a.findData(id_profesional)
     pantalla.combo_dirigido_a.setCurrentIndex(indice)
     assert pantalla.texto_vista_previa.toPlainText() == "Hola Lic. Marta Pérez (Marti)."
+
+
+def test_cadena_de_foco_completa_buscar_a_eliminar(qtbot, conn):
+    """Punto 95 (SistemaDF v0.11.2026.10): Buscar → Categoría → Dirigido
+    a → Localidad → Edificio → Unidad → Consultorio → Copiar mensaje →
+    Nuevo → Editar → Eliminar."""
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla._foco._orden == [
+        pantalla.crud.campo_buscar, pantalla.combo_filtro, pantalla.combo_dirigido_a,
+        pantalla.combo_localidad_contexto, pantalla.combo_edificio_contexto, pantalla.combo_unidad_contexto,
+        pantalla.combo_consultorio_contexto, pantalla.boton_copiar,
+        pantalla.crud.boton_nuevo, pantalla.crud.boton_editar, pantalla.crud.boton_eliminar,
+    ]
+
+
+def test_reiniciar_limpia_buscar_y_enfoca_el_primero(qtbot, conn):
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud.campo_buscar.setText("algo")
+
+    pantalla.reiniciar()
+
+    assert pantalla.crud.campo_buscar.text() == ""

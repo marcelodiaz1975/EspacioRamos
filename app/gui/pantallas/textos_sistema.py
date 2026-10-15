@@ -37,6 +37,7 @@ import re
 import sqlite3
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -63,15 +64,18 @@ _CLAVE = Qt.ItemDataRole.UserRole
 
 
 def _item_separador(texto: str) -> QListWidgetItem:
+    """Punto 41 (SistemaDF v0.11.2026.10): mismo tamaño de fuente que el
+    resto de los ítems, pero negra y en negrita — distinguible de los
+    textos editables sin necesitar un `objectName`/QSS aparte (esta
+    lista, a diferencia de la del menú lateral, no se llama
+    "navegacion")."""
     item = QListWidgetItem(f"— {texto} —")
     item.setFlags(Qt.ItemFlag.NoItemFlags)
+    fuente = item.font()
+    fuente.setBold(True)
+    item.setFont(fuente)
+    item.setForeground(QColor("#000000"))
     return item
-
-
-def _titulo_campo(texto: str) -> QLabel:
-    etiqueta = QLabel(texto)
-    etiqueta.setObjectName("subtituloCampo")
-    return etiqueta
 
 
 class _PanelTextosDelSistema(QWidget):
@@ -92,7 +96,11 @@ class _PanelTextosDelSistema(QWidget):
         panel_izquierda.setObjectName("panelSolapa")
         columna = QVBoxLayout(panel_izquierda)
         columna.setContentsMargins(0, 0, 0, 0)
-        columna.addWidget(_titulo_campo("Textos editables"))
+        # Punto 41: mismo tamaño y negrita que `etiqueta_nombre`
+        # (subtituloSeccion) de más abajo, no el subtituloCampo normal.
+        self.titulo_lista = QLabel("Textos editables")
+        self.titulo_lista.setObjectName("subtituloSeccion")
+        columna.addWidget(self.titulo_lista)
         self.lista = QListWidget()
         self.lista.setFixedWidth(_ANCHO_LISTA)
         self.lista.currentItemChanged.connect(self._al_cambiar_seleccion)
@@ -128,6 +136,17 @@ class _PanelTextosDelSistema(QWidget):
 
         self._llenar_lista()
         self._mostrar_sin_seleccion()
+
+    def showEvent(self, evento) -> None:
+        super().showEvent(evento)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto 1.4: al volver a entrar (o F3) se descarta cualquier
+        edición sin guardar y vuelve al estado "sin selección"."""
+        self.lista.setCurrentItem(None)
+        self._mostrar_sin_seleccion()
+        self.lista.setFocus()
 
     # ------------------------------------------------------------------ lista
 
@@ -206,10 +225,12 @@ class _PanelTextosDelSistema(QWidget):
                 "va a aparecer tal cual, sin reemplazar. ¿Guardás igual?",
             )
             if respuesta != QMessageBox.StandardButton.Yes:
+                QMessageBox.information(self, "Textos del sistema", "Guardado cancelado.")
                 return
         guardar_texto_personalizado(self.conn, self._clave_actual, texto)
         self.boton_restablecer.setEnabled(obtener_texto_personalizado(self.conn, self._clave_actual) is not None)
         self._refrescar_item_actual()
+        QMessageBox.information(self, "Textos del sistema", "Texto guardado con éxito.")
 
     def _restablecer(self) -> None:
         if self._clave_actual is None:
@@ -219,8 +240,10 @@ class _PanelTextosDelSistema(QWidget):
             "¿Restablecer este texto a la redacción original? Se pierde la personalización actual.",
         )
         if respuesta != QMessageBox.StandardButton.Yes:
+            QMessageBox.information(self, "Textos del sistema", "Restablecimiento cancelado.")
             return
         guardar_texto_personalizado(self.conn, self._clave_actual, None)
         self.editor.setPlainText(self._default_actual)
         self.boton_restablecer.setEnabled(False)
         self._refrescar_item_actual()
+        QMessageBox.information(self, "Textos del sistema", "Texto restablecido con éxito.")

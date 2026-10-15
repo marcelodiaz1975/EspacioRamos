@@ -84,6 +84,25 @@ def test_nuevo_usuario_crea_uno(qtbot, conn, monkeypatch):
     assert pantalla.panel_usuarios.tabla_usuarios.rowCount() == 1
 
 
+def test_nuevo_usuario_muestra_alerta_de_exito(qtbot, conn, monkeypatch):
+    def _fake_exec(self):
+        self.campo_nombre.setText("beto")
+        self.campo_contrasena.setText("clave123")
+        self.campo_confirmar.setText("clave123")
+        self._validar_y_aceptar()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoUsuarioNuevo, "exec", _fake_exec)
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda self, titulo, texto: mensajes.append(texto)))
+
+    pantalla = PantallaUsuarios(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_usuarios._nuevo()
+
+    assert any("éxito" in m for m in mensajes)
+
+
 def test_editar_usuario_cambia_nivel_y_activo(qtbot, conn, monkeypatch):
     id_usuario = crear_usuario(conn, "ana", "clave123", _id_nivel(conn, "Operador"))
 
@@ -274,3 +293,14 @@ def test_cambiar_combo_de_permiso_actualiza_la_base_de_inmediato(qtbot, conn):
 
     fila_bd = conn.execute("SELECT IdNivelAcceso FROM PermisoPantalla WHERE NombrePantalla = 'Reservas'").fetchone()
     assert fila_bd["IdNivelAcceso"] == _id_nivel(conn, "Administrador")
+
+
+def test_reiniciar_de_usuarios_y_permisos_tiene_metodo_duck_typed(qtbot, conn):
+    """Punto 1.4/F3: los dos paneles implementan `reiniciar()` (duck-
+    typed, mismo contrato que `VentanaPrincipal._reiniciar_solapa_activa`)."""
+    pantalla = PantallaUsuarios(conn)
+    qtbot.addWidget(pantalla)
+    assert hasattr(pantalla.panel_usuarios, "reiniciar")
+    assert hasattr(pantalla.panel_permisos, "reiniciar")
+    pantalla.panel_usuarios.reiniciar()  # no rompe
+    pantalla.panel_permisos.reiniciar()  # no rompe

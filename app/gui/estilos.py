@@ -213,7 +213,12 @@ QLabel#barraFechaFicticia {{
     font-weight: bold; font-size: 12px; padding: 6px 12px;
 }}
 
-QTableView {{ gridline-color: {t['borde']}; }}
+/* Punto 23 (SistemaDF v0.11.2026.10): a la tabla de Gestor de archivos
+le faltaba el mismo recuadro negro fino que ya tienen los filtros
+(QLineEdit/QComboBox, ver más abajo) — se confundía contra el fondo.
+`QTableView` es la clase base de `QTableWidget`, así que cubre de una a
+cualquier tabla del sistema. */
+QTableView {{ gridline-color: {t['borde']}; border: 1px solid #000000; }}
 QHeaderView::section {{
     background-color: {COLOR_NIVEL_1_OSCURO}; color: {COLOR_TEXTO_CLARO};
     font-weight: bold; padding: 4px; border: none;

@@ -172,3 +172,40 @@ def test_columnas_de_la_tabla_tienen_mas_ancho_que_el_ajuste_justo(qtbot, conn):
     anchos_justos = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
 
     assert all(con > justo for con, justo in zip(anchos_con_padding, anchos_justos))
+
+
+def test_reiniciar_limpia_buscar_y_enfoca(qtbot, conn):
+    """Punto 1.4: al volver a entrar (o F3) se limpia "Buscar"."""
+    pantalla = _PanelBloquesRigidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.campo_buscar.setText("18:00")
+
+    pantalla.reiniciar()
+
+    assert pantalla.campo_buscar.text() == ""
+
+
+def test_nuevo_bloque_muestra_alerta_de_exito(qtbot, conn, monkeypatch):
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda self, titulo, texto: mensajes.append(texto)))
+    monkeypatch.setattr(_DialogoBloque, "exec", lambda self: QDialog.DialogCode.Accepted)
+
+    pantalla = _PanelBloquesRigidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._nuevo()
+
+    assert any("éxito" in m for m in mensajes)
+
+
+def test_eliminar_cancelado_muestra_alerta_de_cancelado(qtbot, conn, monkeypatch):
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda self, titulo, texto: mensajes.append(texto)))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+
+    pantalla = _PanelBloquesRigidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla.selectRow(0)
+    pantalla._eliminar()
+
+    assert any("cancelad" in m for m in mensajes)
+    assert len(obtener_repositorio(conn, "BloqueRigido").listar()) == 2

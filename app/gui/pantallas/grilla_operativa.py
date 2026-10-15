@@ -31,10 +31,11 @@ import sqlite3
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
+    QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, LeyendaColores, _FiltroColapsable
 from app.negocio.formato import formatear_moneda
 from app.negocio.valores_operativos import PromediosValorHora, calcular_promedios_valor_hora
@@ -525,7 +526,23 @@ class _PanelGrillaSemanal(QWidget):
         super().__init__(parent)
         self.setObjectName("panelSolapa")
         self.conn = conn
-        layout = QVBoxLayout(self)
+
+        # Punto 86 (SistemaDF v0.11.2026.10): si la grilla se configura
+        # con más horarios (más filas de las que entran en la pantalla
+        # maximizada), tiene que poder escrolearse EN VERTICAL sin que
+        # ningún elemento (Detalle, la leyenda) quede inaccesible —
+        # mismo criterio "los cuadros escrolean, no la pantalla" que el
+        # resto del sistema. Antes esta solapa agregaba todo directo a
+        # `self`, sin ningún `QScrollArea` de por medio.
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        contenido = QWidget()
+        contenido.setObjectName("panelSolapa")
+        layout = QVBoxLayout(contenido)
+
         self.grilla = GrillaOperativaWidget(conn)
         self.grilla.combo_modo.currentIndexChanged.connect(self._actualizar_leyenda)
         # Pedido explícito de la clienta, extendido desde Oferta de
@@ -543,6 +560,26 @@ class _PanelGrillaSemanal(QWidget):
         layout.addWidget(self.grilla)
         self._leyenda = LeyendaColores()
         layout.addWidget(self._leyenda)
+
+        scroll.setWidget(contenido)
+        layout_externo.addWidget(scroll)
+
+        # Punto 87 (SistemaDF v0.11.2026.10): cadena de foco explícita
+        # sobre el panel de Filtros de la grilla embebida — Localidad →
+        # Edificio → Unidad → checks de día → Profesional, con
+        # wrap-around de vuelta a Localidad (gratis).
+        self._foco = instalar_enter_avanza_foco(self.grilla.widgets_filtro_para_foco(), parent=self)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto 1.4: al volver a entrar (o F3), el foco vuelve al
+        primer filtro de la cadena ("Localidad")."""
+        widgets = self.grilla.widgets_filtro_para_foco()
+        if widgets:
+            widgets[0].setFocus()
 
     def _actualizar_leyenda(self) -> None:
         self._leyenda.actualizar(self.grilla.combo_modo.currentData() or "regular")

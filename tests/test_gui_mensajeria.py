@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -658,3 +658,46 @@ def test_tildar_combinar_misma_unidad_actualiza_el_mensaje(qtbot, conn):
 
     assert "y de 14 a 16hs" in pantalla.texto_mensaje.toPlainText()
 
+
+
+def test_etiqueta_filtro_dice_filtro_de_visualizacion(qtbot, conn):
+    """Punto 91 (SistemaDF v0.11.2026.10)."""
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    etiquetas = [w.text() for w in pantalla.findChildren(QLabel)]
+    assert "Filtro de visualización" in etiquetas
+    assert "Filtro" not in etiquetas
+
+
+def test_reiniciar_vuelve_el_filtro_y_periodo_a_su_default(qtbot, conn):
+    """Punto 1.4: al volver a entrar (o F3) se resetean los filtros
+    propios de esta solapa."""
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "aisladas")
+    pantalla.campo_periodo.setText("2020-01")
+    pantalla.check_combinar_misma_unidad.setChecked(True)
+
+    pantalla.reiniciar()
+
+    assert pantalla.combo_filtro.currentData() == "pendientes"
+    assert pantalla.campo_periodo.text() != "2020-01"
+    assert pantalla.check_combinar_misma_unidad.isChecked() is False
+
+
+def test_marcar_enviada_vuelve_el_scroll_al_principio(qtbot, conn):
+    """Punto 90: el refresco al marcar "Enviada" tiene que dejar la
+    parte de arriba de la tabla a la vista."""
+    for codigo in ("R1", "R2"):
+        obtener_repositorio(conn, "Profesional").crear(
+            CategoriaProfesional="R", IdCodigo=codigo, Apellido=f"Prof{codigo}",
+        )
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla.verticalScrollBar().setValue(pantalla.tabla.verticalScrollBar().maximum())
+
+    item = pantalla.tabla.item(0, 5)
+    if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+        item.setCheckState(Qt.CheckState.Checked)
+
+    assert pantalla.tabla.verticalScrollBar().value() == 0

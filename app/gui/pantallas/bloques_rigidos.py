@@ -210,7 +210,14 @@ class _PanelBloquesRigidos(QWidget):
         """`setFocus()` durante la construcción no alcanza a "pegar": el
         QTabWidget contenedor todavía no está mostrado en ese momento."""
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto 1.4: al volver a entrar (o F3) se limpia "Buscar" y se
+        reinicia el orden de la tabla, mismo criterio que cualquier
+        catálogo genérico (`PantallaCRUD.reiniciar`)."""
         self._orden.reiniciar()
+        self.campo_buscar.clear()
         self.actualizar()
         self.campo_buscar.setFocus()
 
@@ -317,6 +324,7 @@ class _PanelBloquesRigidos(QWidget):
             self.repositorio.crear(**dialogo.valores())
             self.actualizar()
             self.boton_nuevo.setFocus()
+            QMessageBox.information(self, "Nuevo", "Bloque rígido creado con éxito.")
 
     def _editar(self) -> None:
         id_valor = self._fila_seleccionada_id()
@@ -329,6 +337,7 @@ class _PanelBloquesRigidos(QWidget):
             self.repositorio.actualizar(id_valor, **dialogo.valores())
             self.actualizar()
             self.boton_nuevo.setFocus()
+            QMessageBox.information(self, "Editar", "Bloque rígido editado con éxito.")
 
     def _eliminar(self) -> None:
         id_valor = self._fila_seleccionada_id()
@@ -337,7 +346,9 @@ class _PanelBloquesRigidos(QWidget):
             return
         confirmacion = QMessageBox.question(self, "Eliminar", "¿Confirmás eliminar el bloque rígido seleccionado?")
         if confirmacion != QMessageBox.StandardButton.Yes:
+            QMessageBox.information(self, "Eliminar", "Eliminación cancelada.")
             return
         self.repositorio.eliminar(id_valor)
         self.actualizar()
         self.boton_nuevo.setFocus()
+        QMessageBox.information(self, "Eliminar", "Bloque rígido eliminado con éxito.")

@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QLabel, QMessageBox, QScrollArea, QTabWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -60,3 +60,39 @@ def test_grilla_semanal_deja_fijas_columnas_y_encabezado(qtbot, conn):
     pantalla = PantallaGrillaYMensajeria(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.panel_grilla.grilla._filas_columnas_fijas is True
+
+
+def test_grilla_semanal_tiene_cadena_de_foco_sobre_los_filtros(qtbot, conn):
+    """Punto 87 (SistemaDF v0.11.2026.10): Localidad → Edificio → Unidad
+    → checks de día → Profesional, con wrap-around de vuelta a
+    Localidad."""
+    pantalla = PantallaGrillaYMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_grilla
+    assert panel._foco._orden == panel.grilla.widgets_filtro_para_foco()
+
+
+def test_grilla_semanal_reiniciar_enfoca_el_primer_filtro(qtbot, conn):
+    pantalla = PantallaGrillaYMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    panel = pantalla.panel_grilla
+
+    primer_filtro = panel.grilla.widgets_filtro_para_foco()[0]
+    primer_filtro.clearFocus()
+    panel.reiniciar()
+
+    qtbot.waitUntil(lambda: primer_filtro.hasFocus())
+
+
+def test_grilla_semanal_queda_envuelta_en_un_scroll_area(qtbot, conn):
+    """Punto 86: si la grilla necesita más alto del que entra en
+    pantalla, tiene que poder escrolearse en vertical — toda la solapa
+    pasa a estar dentro de un `QScrollArea` propio."""
+    pantalla = PantallaGrillaYMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_grilla
+    assert panel.findChild(QScrollArea) is not None
+    assert panel.objectName() == "panelSolapa"
+    assert len(panel.findChildren(QWidget, "panelSolapa")) == 1  # "contenido", dentro del scroll
