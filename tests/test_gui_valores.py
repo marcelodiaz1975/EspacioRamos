@@ -118,6 +118,24 @@ def test_valores_vigentes_sin_recargo_configurado_columna_nueva_igual_a_la_base(
         assert tabla.item(fila, 6).text() == tabla.item(fila, 5).text()
 
 
+def test_valores_vigentes_reiniciar_recarga_filtros_y_enfoca_el_primero(qtbot, conn):
+    """Punto #1.4: esta solapa no tiene QTabWidget/título propio (pasa
+    desnuda a `addTab(...)`), así que necesita su propio `showEvent` ->
+    `reiniciar()` para que el foco no quede en la barra de solapas."""
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    panel.filtros_valores.lista_localidad.blockSignals(True)
+    for i in range(panel.filtros_valores.lista_localidad.count()):
+        panel.filtros_valores.lista_localidad.item(i).setSelected(False)
+    panel.filtros_valores.lista_localidad.blockSignals(False)
+
+    panel.show()
+    qtbot.waitExposed(panel)
+
+    assert panel.filtros_valores.lista_localidad.selectedItems()
+    qtbot.waitUntil(lambda: panel.filtros_valores._filtro_localidad.foco_widget().hasFocus())
+
+
 def test_valores_vigentes_sin_scroll_horizontal_con_estilo_real_aplicado(qtbot, conn):
     # Reproduce el bug real reportado por la clienta: `_PanelValoresVigentes`
     # arma sus tablas durante `__init__`, ANTES de colgar de verdad de

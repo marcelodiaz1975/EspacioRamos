@@ -10105,3 +10105,76 @@ mockeado a Sí/No, columna "Período imputado", botones deshabilitados
 sin selección, foco). `tests/test_gui_grilla_operativa.py`
 (`test_muestras_de_la_leyenda_quedan_recuadradas_en_negro` reescrito
 contra el `QFrame` nuevo en vez de `WA_StyledBackground`).
+
+## Valores (las tres solapas): batch completo (#10.x del documento)
+
+Undécima tanda de `v0.11.2026.10`, cerrando la décima sección del
+documento ("VALORES"). A diferencia de la mayoría de las secciones
+anteriores, acá dos de las tres solapas ya estaban completamente
+cubiertas por tandas previas — se investigó cada punto contra el
+código real antes de tocar nada, para no duplicar trabajo ya hecho:
+
+- **Aumentos** (1.3/1.5/1.7/1.9/1.11 + "checks de múltiplos en
+  columna"): confirmado, sin ningún cambio de código necesario. 1.3
+  (orden PB/EP/piso de Unidad) ya se resolvió explícitamente para
+  `aumentos.py` en la tanda GENERAL ("Orden natural de códigos..."
+  más arriba, que también cubrió el combo de Unidad del filtro visual
+  y `_cargar_consultorios_info`); 1.5 (`excluir_tabla_del_tab`) ya
+  estaba llamado sobre la tabla de esta solapa; 1.7 (foco visible) ya
+  sumó `QRadioButton` a la regla de borde reservado en la séptima
+  tanda ("edición por celda, en vez de checkbox global"); 1.9
+  (regenerar + marcar no enviada tras cualquier recálculo del período
+  actual) ya se logra de punta a punta dentro de `confirmar_aumento`
+  (`app.negocio.aumentos`), que llama `emitir_liquidacion` directo por
+  cada profesional con liquidación emitida del período — mismo
+  resultado que `regenerar_si_corresponde`, por un camino ya existente
+  desde antes de este documento; 1.11 (alerta con el número real antes
+  de confirmar, más alerta de éxito) ya estaba resuelto por
+  `cantidad_liquidaciones_a_regenerar` (DC-10 §1.2, tanda anterior) y
+  el cartel final de "Aumento confirmado". "Checks de múltiplos en
+  columna": la grilla de checkboxes de "Múltiplos de..." ya se armaba
+  en 2 columnas fijas (`indice // 2, indice % 2`) desde que se armó esa
+  sección — confirmado leyendo el código, no es un pedido nuevo.
+- **Esquema de descuentos** (1.9 si corresponde): confirmado, sin
+  ningún cambio de código necesario — `_PanelEsquemaDescuentos.
+  _confirmar_cambios` ya llama `regenerar_si_corresponde` por cada
+  profesional con liquidación emitida en el período, sumado en la
+  séptima tanda ("mismo aviso de regeneración que Aumentos").
+- **Valores vigentes** (1.4/1.5 + reubicar tablas/anchos + foco sin
+  título de pestaña): 1.5 ya estaba resuelto (`setFocusPolicy(
+  ClickFocus)` + `setTabKeyNavigation(True)` puestos a mano sobre
+  `tabla_valores`/la tabla de `_PanelPromedios`, funcionalmente
+  idéntico a `excluir_tabla_del_tab`). "Reubicar tablas + anchos" ya
+  quedó resuelto en la ronda "Valores vigentes: columnas sin scroll
+  horizontal, Localidad/Edificio más anchas en Promedios" (ver más
+  arriba en este documento) — sin ningún pedido nuevo que apunte a otra
+  cosa, se tomó como ya cumplido.
+
+  **1.4/"foco sin título de pestaña" era un hueco real**: esta solapa
+  pasa DESNUDA a `addTab(...)` de "Valores" (sin `QTabWidget`/título
+  propio — mismo criterio `panelSolapa` que el resto de las solapas
+  "bare" de este sistema), así que necesitaba su propio `showEvent`
+  para que el foco no se quedara en la barra de solapas al entrar —
+  ninguno de los paneles de esta pantalla (`_PanelValoresVigentes`) lo
+  tenía. Se suma `_PanelFiltrosJerarquico.reiniciar()` (recarga la
+  cascada completa de Localidad/Edificio/Unidad/Consultorio volviendo
+  los cuatro niveles a "Todas/os" y enfoca el primer filtro,
+  `self._filtro_localidad.foco_widget()` — el botón-resumen del
+  `_FiltroColapsable`, no la lista interna que arranca oculta) y
+  `_PanelValoresVigentes.showEvent()`/`reiniciar()` (delega en el
+  `reiniciar()` del panel de Filtros) — mismo patrón `showEvent` →
+  `reiniciar()` ya usado en todo el sistema para el punto 1.4, y mismo
+  método que F3 (`VentanaPrincipal._reiniciar_solapa_activa`) puede
+  disparar por duck-typing sin necesitar ningún cambio ahí.
+
+Tests nuevos: `tests/test_gui_valores.py`
+(`test_valores_vigentes_reiniciar_recarga_filtros_y_enfoca_el_primero`
+— deselecciona Localidad a mano, muestra el panel, y confirma que
+`reiniciar()` volvió a seleccionar todo y que el foco llegó al primer
+filtro; usa `qtbot.waitUntil` para el `hasFocus()`, no un assert
+inmediato — bajo la plataforma `offscreen`, el foco puesto dentro de
+`showEvent` no siempre se refleja en `hasFocus()` sin un tick más del
+event loop, mismo criterio ya usado en varios tests de
+`test_gui_reservas.py`). Suite combinada (`test_gui_valores.py` +
+`test_gui_pantalla_grilla_operativa.py` + `test_gui_aumentos.py` +
+`test_gui_grilla_y_mensajeria.py`): 72 passed, sin regresiones.

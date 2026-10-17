@@ -357,6 +357,12 @@ class _PanelFiltrosJerarquico(QGroupBox):
     def ids_consultorio_seleccionados(self) -> list[int]:
         return _ids_reales(self.lista_consultorio)
 
+    def reiniciar(self) -> None:
+        """Punto #1.4: recarga la cascada completa (vuelve los cuatro
+        niveles a "Todas/os") y enfoca el primero."""
+        self._cargar_localidades()
+        self._filtro_localidad.foco_widget().setFocus()
+
 
 _COLUMNAS_PROMEDIOS = ["Localidad", "Edificio", "Unidad", "Promedio hora regular", "Promedio hora aislada"]
 _PADDING_COLUMNA_PROMEDIOS = 20  # "un poquito" más ancho que el justo, pedido de la clienta, solo Localidad/Edificio
@@ -639,6 +645,16 @@ class _PanelValoresVigentes(QWidget):
         layout_grupo_valores = QVBoxLayout(grupo_valores)
         layout_grupo_valores.addWidget(self.tabla_valores)
         layout.addWidget(grupo_valores, stretch=1)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto #1.4: esta solapa no tiene título propio (pasa desnuda a
+        `addTab(...)` de "Valores") — sin este `showEvent`, el foco
+        quedaba en la barra de solapas hasta que se tocaba algo a mano."""
+        self.filtros_valores.reiniciar()
 
     def _refrescar_valores(self, panel: _PanelFiltrosJerarquico) -> None:
         ids_consultorio = panel.ids_consultorio_seleccionados()
