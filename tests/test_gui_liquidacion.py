@@ -563,7 +563,7 @@ def test_liquidaciones_simuladas_periodo_por_defecto_es_el_mes_siguiente_al_actu
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
     from app.negocio.dias import sumar_meses
-    assert pantalla.panel_liquidaciones_simuladas.campo_periodo.text() == sumar_meses(periodo_actual(conn), 1)
+    assert pantalla.panel_liquidaciones_simuladas.campo_periodo.periodo() == sumar_meses(periodo_actual(conn), 1)
 
 
 def test_liquidaciones_simuladas_lista_todas_las_categorias(qtbot, conn):
@@ -767,6 +767,35 @@ def test_liquidaciones_simuladas_cambiar_profesional_limpia_bloques_y_resultado(
 
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_prof_2))
 
+    assert panel.tabla_bloques.rowCount() == 0
+    assert panel._bloques == []
+    assert panel.tabla_subtotales.rowCount() == 0
+
+
+def test_liquidaciones_simuladas_reiniciar_vuelve_al_estado_inicial(qtbot, conn, tmp_path):
+    """Punto #1.4: `reiniciar()` (disparado también desde `showEvent` y
+    desde F3) vuelve el período al mes siguiente del actual y limpia los
+    bloques cargados y el resultado de la última simulación — el combo
+    Profesional no tiene una opción en blanco (siempre hace falta uno
+    elegido para poder generar), así que `reiniciar()` no lo toca."""
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    id_consultorio = _crear_consultorio(conn)
+    id_prof = _crear_profesional(conn, apellido="Gómez", id_codigo="R1")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_prof))
+    _elegir_consultorio(panel, id_consultorio)
+    panel._agregar_bloque()
+    panel._generar()
+    panel.campo_periodo.set_periodo("2020-01")
+
+    panel.reiniciar()
+
+    from app.negocio.dias import sumar_meses
+    assert panel.combo_profesional.currentData() == id_prof
+    assert panel.campo_periodo.periodo() == sumar_meses(periodo_actual(conn), 1)
     assert panel.tabla_bloques.rowCount() == 0
     assert panel._bloques == []
     assert panel.tabla_subtotales.rowCount() == 0

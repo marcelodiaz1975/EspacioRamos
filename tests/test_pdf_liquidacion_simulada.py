@@ -53,6 +53,29 @@ def test_genera_pdf_con_los_bloques_y_el_total(conn, profesional, consultorio, t
     assert formatear_moneda(liquidacion.neto) in texto
 
 
+def test_disclaimer_de_documento_de_ejemplo_se_ve_en_rojo(conn, profesional, consultorio, tmp_path):
+    """Pedido explícito de la clienta ("PDF rojo"): el párrafo que avisa
+    que es un documento de ejemplo, no una liquidación real, se destaca
+    en rojo (`COLOR_ROJO`, no solo en itálica) — mismo criterio que
+    importes negativos en el resto del sistema."""
+    from app.pdf.estilos import COLOR_ROJO
+
+    bloque = BloqueSimulado(dia_semana="Lunes", hora_inicio=9, hora_fin=11, id_consultorio=consultorio)
+    liquidacion = calcular_liquidacion_simulada(conn, id_profesional=profesional, periodo="2026-11", bloques=[bloque])
+    ruta = generar_pdf_liquidacion_simulada(conn, liquidacion, str(tmp_path))
+
+    color_esperado = int(COLOR_ROJO.hexval()[2:], 16)
+    encontrado = False
+    for pagina in fitz.open(ruta):
+        for bloque_texto in pagina.get_text("dict")["blocks"]:
+            for linea in bloque_texto.get("lines", []):
+                for span in linea["spans"]:
+                    if "Documento de ejemplo" in span["text"]:
+                        assert span["color"] == color_esperado
+                        encontrado = True
+    assert encontrado, "no se encontró el párrafo del disclaimer en el PDF"
+
+
 def test_pdf_incluye_descuento_de_feriado_cuando_hay(conn, profesional, consultorio, tmp_path):
     obtener_repositorio(conn, "FechasEspeciales").crear(
         Fecha="2026-11-02", Descripcion="Feriado de prueba", Tipo="Feriado nacional",

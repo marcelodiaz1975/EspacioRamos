@@ -589,6 +589,21 @@ class _PanelLiquidacionesSimuladas(QWidget):
         el foco recién "pega" cuando la solapa ya se está mostrando de
         verdad, no durante la construcción."""
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto #1.4: vuelve la solapa al estado "recién entrada" —
+        cascada de ubicación a "Todas/os", Período al mes siguiente del
+        actual (el default de siempre), bloques cargados y resultado de
+        la última simulación vaciados, foco en Profesional. El combo
+        Profesional no tiene una opción en blanco (siempre hace falta
+        elegir uno para poder generar), así que no se toca — queda en
+        el que ya estuviera seleccionado."""
+        self.campo_periodo.set_periodo(sumar_meses(periodo_actual(self.conn), 1))
+        self.combo_localidad.setCurrentIndex(0)
+        self._bloques.clear()
+        self._refrescar_tabla_bloques()
+        self.tabla_subtotales.setRowCount(0)
         self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
@@ -612,10 +627,10 @@ class _PanelLiquidacionesSimuladas(QWidget):
         layout_izquierda.addWidget(self.combo_profesional)
 
         layout_izquierda.addWidget(QLabel("Período a simular:"))
-        self.campo_periodo = QLineEdit()
+        self.campo_periodo = SelectorPeriodo(self.conn)
         # Por defecto el mes siguiente al actual (pedido explícito de la
         # clienta) — se puede cambiar a mano para simular cualquier otro.
-        self.campo_periodo.setText(sumar_meses(periodo_actual(self.conn), 1))
+        self.campo_periodo.set_periodo(sumar_meses(periodo_actual(self.conn), 1))
         layout_izquierda.addWidget(self.campo_periodo)
 
         linea_1 = QFrame()
@@ -731,7 +746,8 @@ class _PanelLiquidacionesSimuladas(QWidget):
         self._cargar_localidades()
 
         self._foco = instalar_enter_avanza_foco([
-            self.combo_profesional, self.campo_periodo, self.combo_localidad, self.combo_edificio,
+            self.combo_profesional, self.campo_periodo.spin_anio, self.campo_periodo.combo_mes,
+            self.combo_localidad, self.combo_edificio,
             self.combo_unidad, self.combo_consultorio, self.combo_dia, self.spin_desde, self.spin_hasta,
             self.boton_agregar_bloque, self.boton_quitar_bloque, self.boton_generar,
         ])
@@ -835,10 +851,7 @@ class _PanelLiquidacionesSimuladas(QWidget):
         if id_profesional is None:
             QMessageBox.warning(self, "Falta elegir profesional", "Elegí un profesional antes de generar.")
             return
-        periodo = self.campo_periodo.text().strip()
-        if not periodo:
-            QMessageBox.warning(self, "Falta el período", "Ingresá el período a simular (AAAA-MM).")
-            return
+        periodo = self.campo_periodo.periodo()
         if not self._bloques:
             QMessageBox.warning(self, "Sin bloques", "Agregá al menos un bloque antes de generar.")
             return

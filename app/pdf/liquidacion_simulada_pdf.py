@@ -21,6 +21,7 @@ from app.negocio.liquidacion_simulada import LiquidacionSimulada
 from app.negocio.oferta_busqueda_texto import categoria_es_activa
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
+    COLOR_ROJO,
     FUENTE,
     FUENTE_NEGRITA,
     construir_sin_saltos,
@@ -92,7 +93,7 @@ def generar_pdf_liquidacion_simulada(conn: sqlite3.Connection, liquidacion: Liqu
                 "Documento de ejemplo: simula cuánto generarían los bloques cargados en este período, "
                 "sin tener en cuenta si el consultorio está ocupado o reservado por otro profesional a esa "
                 "hora. No representa una liquidación real ni una reserva confirmada.",
-                estilo_texto(9, italica=True),
+                estilo_texto(9, italica=True, textColor=COLOR_ROJO),
             )
         )
         story.append(Spacer(1, 12))

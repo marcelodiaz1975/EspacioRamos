@@ -10178,3 +10178,68 @@ event loop, mismo criterio ya usado en varios tests de
 `test_gui_reservas.py`). Suite combinada (`test_gui_valores.py` +
 `test_gui_pantalla_grilla_operativa.py` + `test_gui_aumentos.py` +
 `test_gui_grilla_y_mensajeria.py`): 72 passed, sin regresiones.
+
+## Liquidaciones (las cuatro solapas): batch completo (#11.x del documento)
+
+Duodécima tanda de `v0.11.2026.10`, cerrando la undécima sección del
+documento ("LIQUIDACIONES"). Mismo criterio de investigar primero: tres
+de las cuatro solapas ya estaban prácticamente resueltas de tandas
+anteriores (Selector de período, "Emitir seleccionadas" deshabilitado,
+monto a generar = total, aviso de regeneración de Fechas especiales,
+todas confirmadas leyendo el código actual), así que esta tanda se
+concentró en los huecos reales que quedaban:
+
+- **Emisión de archivos** (1.2/1.5/1.7/1.11): confirmado todo resuelto
+  — combo de profesional con `habilitar_busqueda_profesional`,
+  `excluir_tabla_del_tab` en la tabla, y `_emitir` ya pedía confirmación
+  y mostraba un cartel de éxito con la cantidad emitida (de la tanda del
+  Selector de período). Sin cambios de código.
+- **Estado de cuenta**: 1.2/1.7 confirmados (combo con búsqueda,
+  `excluir_tabla_del_tab`). 1.4 (reset de filtros al reingresar) NO se
+  aplicó a propósito — `actualizar()` ya documenta una decisión
+  consciente, anterior a este documento, de CONSERVAR el profesional
+  elegido al salir y volver a entrar a esta solapa ("se busca de nuevo
+  por su id después de repoblar el combo, en vez de resetear a
+  'ninguno'") — aplicar 1.4 acá hubiera revertido esa decisión sin que
+  nadie lo pidiera de nuevo.
+- **Feriados y fechas especiales**: es el catálogo genérico
+  `FechasEspeciales` anidado (`PantallaCRUD`) — 1.4/1.11 ya cubiertos de
+  rebote por el cambio central en `crud_generico.py` de una tanda
+  anterior, sin necesitar nada puntual acá.
+- **Liquidaciones simuladas** — tres huecos reales:
+  - **1.4**: esta solapa nunca tuvo `reiniciar()` — `showEvent` solo
+    enfocaba Profesional. Se suma `reiniciar()` (Período al mes
+    siguiente del actual — el default de siempre —, Localidad a
+    "Todas", bloques cargados y resultado de la última simulación
+    vaciados, foco en Profesional) y `showEvent` pasa a llamarla. El
+    combo Profesional NO tiene una opción en blanco (siempre hace falta
+    elegir uno para poder generar, a diferencia del resto de los
+    combos de profesional del sistema) — `reiniciar()` no lo toca, se
+    queda en el que ya estuviera elegido.
+  - **"+ período + selector"**: "Período a simular" pasa de `QLineEdit`
+    en texto libre a `SelectorPeriodo` (el widget de año+mes ya sumado
+    para "Emisión de archivos" en una tanda anterior, que en su momento
+    había quedado deliberadamente afuera de esta solapa) — mismo
+    criterio que el resto del sistema, con el mismo default de siempre
+    (mes siguiente al actual) fijado vía `set_periodo`. La validación
+    de "Falta el período" se saca de `_generar`: `SelectorPeriodo`
+    siempre tiene un valor válido, nunca puede quedar vacío.
+  - **"PDF rojo" + "texto aclaratorio"**: el párrafo que avisa que es un
+    documento de ejemplo (ya en itálica desde que se armó esta
+    funcionalidad) pasa además a `COLOR_ROJO` — mismo criterio que
+    "importes negativos en rojo" del resto del sistema, para que la
+    aclaración de "esto no es una liquidación real" se destaque a
+    simple vista.
+
+Tests nuevos: `tests/test_gui_liquidacion.py`
+(`test_liquidaciones_simuladas_reiniciar_vuelve_al_estado_inicial`,
+ajuste de `test_liquidaciones_simuladas_periodo_por_defecto_es_el_mes_
+siguiente_al_actual` al nuevo `.periodo()` en vez de `.text()`).
+`tests/test_pdf_liquidacion_simulada.py`
+(`test_disclaimer_de_documento_de_ejemplo_se_ve_en_rojo` — extrae los
+spans de texto del PDF con PyMuPDF y compara el color del span que
+contiene "Documento de ejemplo" contra el entero RGB de `COLOR_ROJO`).
+Suite combinada (`test_gui_liquidacion.py` +
+`test_pdf_liquidacion_simulada.py` + `test_catalogos.py` +
+`test_pdf_liquidacion.py` + `test_gui_main.py`): 165 passed, sin
+regresiones.
