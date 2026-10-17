@@ -91,6 +91,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("ReservaAislada", "ItemExtraordinario", "TEXT"),
     ("ReservaAislada", "MontoExtraordinario", "REAL"),
     ("Configuracion", "UltimoBackupPropio", "TEXT"),
+    ("ReservaAislada", "PeriodoImputado", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja

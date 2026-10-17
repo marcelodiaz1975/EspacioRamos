@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDateEdit,
+    QDialog,
     QDoubleSpinBox,
     QFrame,
     QGridLayout,
@@ -52,7 +53,7 @@ from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo, clave_or
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.pdf.estilos import clave_orden_unidad
 from app.negocio.ausencias import crear_ausencia
-from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, ultimo_dia_mes
+from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, sumar_meses
 from app.negocio.estadisticas import regenerar_snapshot_si_corresponde
 from app.negocio.formato import formatear_moneda
 from app.negocio.lista_espera import GrupoCobertura, marcar_resuelto
@@ -66,7 +67,9 @@ from app.negocio.reservas import (
     cancelar_reserva_aislada,
     crear_reserva_aislada,
     crear_reserva_regular,
-    finalizar_reserva_regular,
+    eliminar_reserva_regular,
+    modificar_reserva_aislada,
+    modificar_reserva_regular,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -76,6 +79,18 @@ _ANCHO_PANEL_FILTROS_GRILLA = 290
 _ANCHO_COL_PROFESIONAL = 180
 _FORMATO_FECHA = "dd-MM-yyyy"
 _FECHA_SIN_DATO = QDate(2000, 1, 1)  # sentinel de QDateEdit.setSpecialValueText: "sin fecha"
+# Punto #9.1.8 (SistemaDF v0.11.2026.10): "Dale un poco más de ancho a
+# las columnas de la tabla, hay lugar" — mismo criterio y mismo valor
+# que `novedades._ajustar_columnas`/`llaves._ajustar_columnas`
+# (duplicado acá, pantallas sin relación entre sí).
+_PADDING_COLUMNA = 30
+
+
+def _ajustar_columnas(tabla: QTableWidget) -> None:
+    tabla.resizeColumnsToContents()
+    for columna in range(tabla.columnCount()):
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
+    tabla.setColumnWidth(0, max(tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
 
 
 class _FiltroCalendarioArrancaHoy(QObject):
@@ -138,22 +153,21 @@ _ESPACIADO_FORM = 4
 # 22px sin perder el color/borde que ya les da el objectName.
 _ESTILO_BOTON_COMPACTO = "padding: 3px 16px;"
 # Pedido explícito de la clienta, puntual de los tres botones de acción
-# de Reservas AISLADAS (Crear/Modificar/Cancelar): en vez de quedar
-# compactos como el resto de la columna (`_ESTILO_BOTON_COMPACTO`, 22px),
-# crecen lo necesario para que "Horas aisladas mensuales" (el título que
-# sigue después del separador, al final de esta columna) quede alineado
-# con el borde inferior del cuadro "Detalle" de la grilla de al lado —
-# valor medido (`padding: 11px 16px` ≈ 38px de alto por botón, sube el
-# título ~48px en total entre los tres), no un número a ojo.
+# de Reservas AISLADAS (Crear/Modificar/Cancelar): en una ronda anterior
+# crecían a propósito (`padding: 11px 16px`, después bajado a `5px` al
+# sumar "Período a imputar") para alinear "Horas aisladas mensuales" con
+# el borde inferior del cuadro "Detalle" — ver el historial completo en
+# versiones anteriores de este comentario.
 #
-# Pedido explícito de la clienta al sumar "Período a imputar" (ver
-# `_PanelReservasAisladas._armar_ui`): bajado a la mitad del padding
-# vertical ("achicar el alto de los tres botones a la mitad para que
-# entre todo bien sin apelmazarse") para compensar el campo nuevo —
-# el ancho de columna/los 48px de alineación de arriba quedan por
-# revisar en la próxima ronda visual, una vez que la clienta vea el
-# resultado real.
-_ESTILO_BOTON_AISLADAS_ALTO = "padding: 5px 16px;"
+# Punto #9.1.3 (SistemaDF v0.11.2026.10): "Achicá el alto de los tres
+# botones un poco más, al mínimo, para que se vean los tres... hoy por
+# hoy veo dos nada más" — pasan al mismo mínimo que el resto de la
+# columna (`_ESTILO_BOTON_COMPACTO`, 22px), sin ninguna distinción
+# propia. El criterio de alineación cambia de objetivo en esta misma
+# ronda: ya no persigue "Horas aisladas mensuales" (ver `_ALTO_DETALLE_
+# AISLADAS` más abajo) — "a la altura donde termina el tercer botón,
+# hasta ahí tiene que llegar el cuadro de detalle".
+_ESTILO_BOTON_AISLADAS_ALTO = _ESTILO_BOTON_COMPACTO
 # Pedido de la clienta: la tabla de abajo (Horarios reservados/Reservas
 # aisladas) tiene que verse, título y un par de filas, sin scrollear el
 # panel entero — ver el rearmado de `_armar_ui` en las dos clases de
@@ -170,12 +184,28 @@ _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 4
 # Alto máximo del cuadro "Detalle" en Reservas aisladas, ya sacado de la
 # grilla y ocupando todo el ancho de "Filtros + grid" (90px por defecto
 # en el resto de los usos) — ver `GrillaOperativaWidget.extraer_detalle`.
-# Sube de 54 a 64 (medido, no a ojo) en la ronda que junta el gap grilla-
-# Detalle: sacar el espaciado default de Qt ahí corrió a "Detalle" 6-10px
-# hacia arriba, rompiendo la alineación de su borde inferior contra el
-# pie de "Cant. horas aisladas mensuales" (pedido de una ronda anterior,
-# "que se vea todo parejo") — el cuadro un poco más alto la recupera.
-_ALTO_DETALLE_AISLADAS = 64
+# Historial de rondas anteriores (criterio viejo, "que 'Detalle' quede
+# parejo con el pie de 'Cant. horas aisladas mensuales'"): 54 -> 64.
+#
+# Punto #9.1.6 (SistemaDF v0.11.2026.10): "A la altura donde termina el
+# tercer botón, hasta ahí tiene que llegar el cuadro de detalle, debajo
+# de todo eso se ubicaría la tabla" — nuevo criterio de alineación, que
+# reemplaza al de "Cant. horas aisladas mensuales" de rondas anteriores.
+# Medido (no a ojo), con una salvedad real: medido SIN `hoja_estilos()`
+# aplicada, 64 -> 25 da una coincidencia exacta con el pie de "Cancelar
+# reserva"; medido CON `hoja_estilos()` aplicada (lo que la clienta ve
+# de verdad, mismo motivo documentado en `test_detalle_de_aisladas_
+# alineado_con_el_pie_del_tercer_boton`) queda un resto de ~30-35px —
+# incluso llevando este valor a 1 (el piso real, "Detalle" prácticamente
+# sin alto) el resto no se cierra del todo, así que el desajuste no es
+# algo que esta sola constante pueda terminar de resolver: la fuente
+# real cambia la proporción entre la columna del formulario y la de la
+# grilla+Detalle de un modo que no es lineal con este valor. Se deja en
+# 25 (un cuadro todavía útil, no colapsado a 1px) — sin una captura real
+# de la clienta para seguir calibrando, queda documentado como mejor
+# esfuerzo, mismo criterio que otros casos "investigado, sin reproducir
+# del todo" de este archivo.
+_ALTO_DETALLE_AISLADAS = 25
 # Hasta la ronda anterior, `layout_externo` (form+grilla scrolleable,
 # `stretch=1`, seguido de la tabla de abajo, sin stretch) le daba TODO el
 # alto sobrante de la ventana a `scroll` — cualquier alto que `panel_
@@ -525,6 +555,110 @@ def _recargar_consultorios(conn: sqlite3.Connection, combo_unidad: QComboBox, co
     combo_consultorio.blockSignals(False)
 
 
+class _DialogoModificarReservaRegular(QDialog):
+    """Punto #9.1.4 (SistemaDF v0.11.2026.10): "Modificar reserva" pasa de
+    finalizar la fila vieja y precargar el formulario de alta (que
+    parecía solo "cancelarla", sin dejar en claro que había quedado algo
+    pendiente de confirmar) a este diálogo propio — edita Horario/
+    Vigencia de la fila EXISTENTE, dejándola corriendo con la
+    modificación aplicada. "Si quiero la termino desde el cuadro de
+    diálogo" — alcanza con poner una Vigencia hasta real en vez de
+    dejarla en "(sin fecha)", no hace falta ningún control aparte para
+    eso. Profesional/Consultorio/Día no se pueden tocar acá (cambiarlos
+    es, en los hechos, dar de alta una reserva distinta) — se muestran
+    de solo lectura, arriba de los campos editables."""
+
+    def __init__(self, conn: sqlite3.Connection, reserva: sqlite3.Row, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Modificar reserva")
+        layout = QVBoxLayout(self)
+
+        profesional = obtener_repositorio(conn, "Profesional").obtener(reserva["IdProfesional"])
+        consultorio = conn.execute(
+            "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio, "
+            "loc.Localidad AS DomicilioLocalidad "
+            "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+            "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad "
+            "WHERE c.IdConsultorio = ?",
+            (reserva["IdConsultorio"],),
+        ).fetchone()
+        layout.addWidget(QLabel(f"Profesional: {_texto_profesional(profesional) if profesional else '?'}"))
+        if consultorio is not None:
+            layout.addWidget(QLabel(
+                f"Ubicación: {consultorio['DomicilioLocalidad'] or '(Sin localidad)'} - "
+                f"{consultorio['NombreEdificio']} - {consultorio['Departamento']} - "
+                f"Consultorio {consultorio['NumeroConsultorio']}"
+            ))
+        layout.addWidget(QLabel(f"Día: {reserva['DiaSemana']}"))
+
+        fila_horario = QHBoxLayout()
+        self.spin_desde = _SpinHorario()
+        self.spin_desde.setRange(0, 23)
+        self.spin_desde.setValue(reserva["HoraInicio"])
+        self.spin_hasta = _SpinHorario()
+        self.spin_hasta.setRange(1, 24)
+        self.spin_hasta.setValue(reserva["HoraFin"])
+        fila_horario.addWidget(QLabel("Desde"))
+        fila_horario.addWidget(self.spin_desde)
+        fila_horario.addWidget(QLabel("Hasta"))
+        fila_horario.addWidget(self.spin_hasta)
+        layout.addLayout(fila_horario)
+
+        layout.addWidget(QLabel("Vigencia desde"))
+        self.campo_vigencia_inicio = QDateEdit()
+        self.campo_vigencia_inicio.setDisplayFormat(_FORMATO_FECHA_DIA)
+        self.campo_vigencia_inicio.setLocale(_LOCALE_ES)
+        self.campo_vigencia_inicio.setCalendarPopup(True)
+        aplicar_color_sabado_negro(self.campo_vigencia_inicio)
+        self.campo_vigencia_inicio.setDate(QDate.fromString(reserva["VigenciaInicio"], "yyyy-MM-dd"))
+        layout.addWidget(self.campo_vigencia_inicio)
+
+        layout.addWidget(QLabel("Vigencia hasta (opcional — poné una fecha para terminar la reserva)"))
+        self.campo_vigencia_fin = QDateEdit()
+        self.campo_vigencia_fin.setDisplayFormat(_FORMATO_FECHA_DIA)
+        self.campo_vigencia_fin.setLocale(_LOCALE_ES)
+        self.campo_vigencia_fin.setCalendarPopup(True)
+        aplicar_color_sabado_negro(self.campo_vigencia_fin)
+        self.campo_vigencia_fin.setMinimumDate(_FECHA_SIN_DATO)
+        self.campo_vigencia_fin.setSpecialValueText("(sin fecha)")
+        self.campo_vigencia_fin.setDate(
+            QDate.fromString(reserva["VigenciaFin"], "yyyy-MM-dd") if reserva["VigenciaFin"] else _FECHA_SIN_DATO
+        )
+        _instalar_calendario_arranca_hoy(conn, self.campo_vigencia_fin)
+        layout.addWidget(self.campo_vigencia_fin)
+
+        fila_botones = QHBoxLayout()
+        boton_guardar = QPushButton("Guardar cambios")
+        boton_guardar.setObjectName("botonPrimario")
+        boton_guardar.clicked.connect(self._confirmar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.setObjectName("botonSecundario")
+        boton_cancelar.clicked.connect(self.reject)
+        fila_botones.addWidget(boton_guardar)
+        fila_botones.addWidget(boton_cancelar)
+        layout.addLayout(fila_botones)
+
+        self._foco = instalar_enter_avanza_foco(
+            [self.spin_desde, self.spin_hasta, self.campo_vigencia_inicio, self.campo_vigencia_fin,
+             boton_guardar, boton_cancelar],
+            parent=self,
+        )
+        self.spin_desde.setFocus()
+
+    def _confirmar(self) -> None:
+        if self.spin_hasta.value() <= self.spin_desde.value():
+            QMessageBox.warning(self, "Modificar reserva", "\"Hasta\" tiene que ser posterior a \"Desde\".")
+            return
+        self.hora_inicio = self.spin_desde.value()
+        self.hora_fin = self.spin_hasta.value()
+        self.vigencia_inicio = self.campo_vigencia_inicio.date().toPython().isoformat()
+        self.vigencia_fin = (
+            None if self.campo_vigencia_fin.date() == _FECHA_SIN_DATO
+            else self.campo_vigencia_fin.date().toPython().isoformat()
+        )
+        self.accept()
+
+
 class PantallaReservas(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -568,15 +702,15 @@ class _PanelReservasRegulares(QWidget):
         el QTabWidget contenedor todavía no está mostrado y se termina
         quedando el foco en su tab bar. Al mostrarse la pestaña (al
         abrir la pantalla o volver a esta solapa) se repite el pedido
-        de foco en Profesional, que es cuando realmente surte efecto.
-        De paso, vuelve a fijar el alto de `_scroll_superior` (ver
-        `_armar_ui`): el `minimumSizeHint()` calculado ANTES de este
-        primer show puede quedar unos pixels desincronizado del real."""
+        de foco en Profesional, que es cuando realmente surte efecto —
+        vía `reiniciar()` (punto #1.4), que de paso es lo mismo que
+        dispara F3 ("Reiniciar solapa"). De paso, vuelve a fijar el
+        alto de `_scroll_superior` (ver `_armar_ui`): el
+        `minimumSizeHint()` calculado ANTES de este primer show puede
+        quedar unos pixels desincronizado del real."""
         super().showEvent(event)
         self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
-        self._orden.reiniciar()
-        self.actualizar()
-        self.combo_profesional.setFocus()
+        self.reiniciar()
 
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
@@ -715,16 +849,23 @@ class _PanelReservasRegulares(QWidget):
         boton_crear.setStyleSheet(_ESTILO_BOTON_COMPACTO)
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
-        boton_modificar = QPushButton("Modificar seleccionada")
-        boton_modificar.setObjectName("botonSecundario")
-        boton_modificar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
-        boton_modificar.clicked.connect(self._modificar_seleccionada)
-        form.addWidget(boton_modificar)
-        boton_finalizar = QPushButton("Finalizar reserva a fin de mes")
-        boton_finalizar.setObjectName("botonSecundario")
-        boton_finalizar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
-        boton_finalizar.clicked.connect(self._finalizar_vigencia)
-        form.addWidget(boton_finalizar)
+        # Punto #9.1.3 (SistemaDF v0.11.2026.10): deshabilitados sin
+        # ninguna fila seleccionada en la tabla — ver `_actualizar_
+        # botones`, conectada a `itemSelectionChanged` y llamada también
+        # al final de `actualizar()`.
+        self.boton_modificar = QPushButton("Modificar reserva")
+        self.boton_modificar.setObjectName("botonSecundario")
+        self.boton_modificar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
+        self.boton_modificar.clicked.connect(self._modificar_seleccionada)
+        form.addWidget(self.boton_modificar)
+        # Punto #9.1.6: "Finalizar reserva a fin de mes" pasa a "Eliminar
+        # reserva" — ya no finaliza la vigencia, borra la fila por
+        # completo (alerta mediante) y la saca de la tabla.
+        self.boton_eliminar = QPushButton("Eliminar reserva")
+        self.boton_eliminar.setObjectName("botonSecundario")
+        self.boton_eliminar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
+        self.boton_eliminar.clicked.connect(self._eliminar_seleccionada)
+        form.addWidget(self.boton_eliminar)
 
         linea_separadora = QFrame()
         linea_separadora.setFrameShape(QFrame.Shape.HLine)
@@ -898,7 +1039,8 @@ class _PanelReservasRegulares(QWidget):
         # alto que le toque, sea cual sea ese alto.
         self.tabla.setMinimumHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_REGULARES))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
-        instalar_eliminar_con_tecla(self.tabla, self._finalizar_vigencia)
+        instalar_eliminar_con_tecla(self.tabla, self._eliminar_seleccionada)
+        self.tabla.itemSelectionChanged.connect(self._actualizar_botones)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla, stretch=1)
 
@@ -909,9 +1051,11 @@ class _PanelReservasRegulares(QWidget):
                 self.combo_consultorio, *(self._checks_dia[dia] for dia in _DIAS_RESERVA),
                 self.spin_desde, self.spin_hasta,
                 self.campo_vigencia_inicio, self.campo_vigencia_fin, boton_crear,
+                self.boton_modificar, self.boton_eliminar,
             ],
             parent=self,
         )
+        self._actualizar_botones()
 
     def actualizar(self) -> None:
         """Sin profesional elegido, muestra todas las reservas regulares
@@ -969,9 +1113,9 @@ class _PanelReservasRegulares(QWidget):
             self.tabla.setItem(fila_idx, 6, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
             self.tabla.setItem(fila_idx, 7, QTableWidgetItem(_fmt_fecha(r["VigenciaInicio"])))
             self.tabla.setItem(fila_idx, 8, QTableWidgetItem(_fmt_fecha(r["VigenciaFin"])))
-        self.tabla.resizeColumnsToContents()
-        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+        _ajustar_columnas(self.tabla)
         self._sincronizar_grilla()
+        self._actualizar_botones()
 
     @staticmethod
     def _clave_orden(columna: int):
@@ -1083,11 +1227,12 @@ class _PanelReservasRegulares(QWidget):
         self.etiqueta_descuento.setText(f"% Descuento: {resumen.porcentaje_descuento:.1f}%")
 
     def _resetear_formulario(self) -> None:
-        """Después de aplicar un cambio, deja el formulario listo y en
-        blanco para cargar otro registro — aunque sea de otro
-        profesional (el combo vuelve al placeholder en blanco, no queda
-        pegado al que se acababa de cargar)."""
-        self.combo_profesional.setCurrentIndex(0)
+        """Después de crear una reserva, deja el resto del formulario
+        listo para cargar otra — PERO sin tocar "Profesional" (punto
+        #9.1.9, pedido explícito de la clienta: "queda cargado el
+        nombre del profesional en el selector, solo cambia si se
+        abandona el foco de la solapa") — ese reset vive aparte, en
+        `reiniciar()`, que es lo que corre al reingresar a la solapa."""
         if self.combo_localidad.count():
             self.combo_localidad.setCurrentIndex(0)
         self._cargar_edificios()
@@ -1099,6 +1244,17 @@ class _PanelReservasRegulares(QWidget):
         self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self.campo_vigencia_fin.setDate(_FECHA_SIN_DATO)
         self.combo_profesional.setFocus()
+
+    def reiniciar(self) -> None:
+        """Punto #1.4: reset completo de filtros al reingresar a la
+        solapa (incluido "Profesional", a diferencia de `_resetear_
+        formulario`) + foco en el primer control — ver el comentario de
+        esa función para por qué están separadas. Se llama desde
+        `showEvent` y desde F3 ("Reiniciar solapa")."""
+        self._orden.reiniciar()
+        self.combo_profesional.setCurrentIndex(0)
+        self._resetear_formulario()
+        self.actualizar()
 
     def _dias_seleccionados(self) -> list[str]:
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
@@ -1180,6 +1336,9 @@ class _PanelReservasRegulares(QWidget):
             return
         if advertencias_totales:
             QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias_totales))
+        else:
+            # Punto #9.1.9: alerta final de éxito.
+            QMessageBox.information(self, "Reserva creada", "Reserva cargada con éxito.")
         regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
         self.conn.commit()
         self.actualizar()
@@ -1246,79 +1405,192 @@ class _PanelReservasRegulares(QWidget):
             return None
         return self._reservas[filas[0].row()]
 
-    def _finalizar_registro(self, reserva: sqlite3.Row, fecha_fin: str) -> bool:
-        """Devuelve False (con un cartel de aviso) si `fecha_fin` cae en un
-        período ya cerrado (DC-06 §3: `finalizar_reserva_regular` bloquea
-        sin excepción, dirigiendo a Cargos especiales) — bajo el uso
-        normal de los dos botones que llaman acá (a fin de mes actual, o
-        hoy) esto nunca debería dispararse, pero la validación vive en la
-        capa de negocio para no depender de que ningún botón futuro la
-        sortee."""
-        try:
-            finalizar_reserva_regular(self.conn, reserva["IdReservaRegular"], fecha_fin)
-        except ValueError as error:
-            QMessageBox.warning(self, "Finalizar reserva", str(error))
-            return False
-        regenerar_si_corresponde(
-            self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn),
-        )
-        self.conn.commit()
-        return True
-
-    def _finalizar_vigencia(self) -> None:
-        """"Finalizar reserva a fin de mes": el caso clásico (95% de las
-        bajas se cierran a fin de mes), no el día exacto en que se
-        gestiona la baja."""
-        reserva = self._fila_seleccionada()
-        if reserva is None:
-            return
-        hoy = fecha_actual(self.conn)
-        fin_de_mes = ultimo_dia_mes(hoy.year, hoy.month)
-        if not self._finalizar_registro(reserva, fin_de_mes.isoformat()):
-            return
-        self.actualizar()
-        self.combo_profesional.setFocus()
+    def _actualizar_botones(self) -> None:
+        """Punto #9.1.3 (SistemaDF v0.11.2026.10): "Modificar reserva"/
+        "Eliminar reserva" quedan deshabilitados (grises, salteados por
+        el Tab) sin ninguna fila en foco en la tabla."""
+        hay_seleccion = self._fila_seleccionada() is not None
+        self.boton_modificar.setEnabled(hay_seleccion)
+        self.boton_eliminar.setEnabled(hay_seleccion)
 
     def _modificar_seleccionada(self) -> None:
-        """No se edita la fila histórica in-place (podría desalinear una
-        liquidación ya emitida que la haya usado): finaliza su vigencia
-        hoy (no a fin de mes — acá la versión nueva arranca hoy mismo, y
-        dejarla superpuesta con la vieja hasta fin de mes rompería la
-        validación de solapamiento) y precarga el formulario con sus
-        datos para dar de alta la versión nueva. El operador ajusta lo
-        que haga falta y confirma con "Crear reserva regular", como
-        cualquier alta."""
+        """Punto #9.1.4: "Modificar reserva" abre un cuadro de diálogo
+        propio (`_DialogoModificarReservaRegular`) que edita la fila
+        EXISTENTE — sin finalizarla ni precargar el formulario de alta
+        — "si quiero modifico algo puntual y la reserva sigue corriendo
+        con esa modificación". Desde el mismo diálogo se la puede
+        "terminar" poniendo una Vigencia hasta real."""
         reserva = self._fila_seleccionada()
         if reserva is None:
             QMessageBox.warning(self, "Modificar reserva", "Elegí una fila de la tabla para modificar.")
             return
-        if not self._finalizar_registro(reserva, fecha_actual(self.conn).isoformat()):
+        dialogo = _DialogoModificarReservaRegular(self.conn, reserva, parent=self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
+        try:
+            advertencias = modificar_reserva_regular(
+                self.conn, reserva["IdReservaRegular"], hora_inicio=dialogo.hora_inicio,
+                hora_fin=dialogo.hora_fin, vigencia_inicio=dialogo.vigencia_inicio,
+                vigencia_fin=dialogo.vigencia_fin,
+            )
+        except ConflictoBloqueanteError as error:
+            confirmacion = QMessageBox.question(
+                self, "Conflictos detectados", f"{error}\n\n¿Modificar la reserva de todos modos?",
+            )
+            if confirmacion != QMessageBox.StandardButton.Yes:
+                return
+            advertencias = modificar_reserva_regular(
+                self.conn, reserva["IdReservaRegular"], hora_inicio=dialogo.hora_inicio,
+                hora_fin=dialogo.hora_fin, vigencia_inicio=dialogo.vigencia_inicio,
+                vigencia_fin=dialogo.vigencia_fin, forzar=True,
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Modificar reserva", str(error))
+            return
+        regenerar_si_corresponde(
+            self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn),
+        )
+        self.conn.commit()
+        if advertencias:
+            QMessageBox.information(
+                self, "Reserva modificada", "Reserva modificada con avisos:\n" + "\n".join(advertencias),
+            )
+        else:
+            QMessageBox.information(self, "Modificar reserva", "Reserva modificada con éxito.")
         self.actualizar()
 
-        indice_profesional = self.combo_profesional.findData(reserva["IdProfesional"])
-        if indice_profesional >= 0:
-            self.combo_profesional.setCurrentIndex(indice_profesional)
-        self._seleccionar_ubicacion(reserva["IdConsultorio"])
-        for dia, check in self._checks_dia.items():
-            check.setChecked(dia == reserva["DiaSemana"])
-        self.spin_desde.setValue(reserva["HoraInicio"])
-        self.spin_hasta.setValue(reserva["HoraFin"])
-        hoy = fecha_actual(self.conn)
-        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
-        self.campo_vigencia_fin.setDate(_FECHA_SIN_DATO)
-        self._sincronizar_grilla()
-        # Mismo aviso que en Reservas aisladas/extraordinarias (pedido de
-        # la clienta, "no me permite editar... es mas la cancela"): el
-        # único efecto visible era que la fila pasaba a "Finalizada" en
-        # la tabla — el formulario SÍ quedaba precargado con "Vigencia
-        # desde" en hoy, pero nada avisaba que hacía falta volver a
-        # tocar "Crear reserva regular" para guardar la versión nueva.
-        QMessageBox.information(
-            self, "Modificar reserva",
-            "La reserva seleccionada se finalizó hoy y sus datos quedaron cargados en el formulario — "
-            "revisalos y confirmá con \"Crear reserva regular\" para guardar la versión nueva.",
+    def _eliminar_seleccionada(self) -> None:
+        """Punto #9.1.6: "Finalizar reserva a fin de mes" pasa a
+        "Eliminar reserva" — con una fila seleccionada, borra esa
+        reserva (alerta mediante) y la saca de la tabla directamente, en
+        vez de solo ponerle fecha de fin."""
+        reserva = self._fila_seleccionada()
+        if reserva is None:
+            return
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(reserva["IdProfesional"])
+        nombre_profesional = _texto_profesional(profesional) if profesional else "?"
+        confirmacion = QMessageBox.question(
+            self, "Eliminar reserva",
+            f"¿Eliminar la reserva regular de {nombre_profesional} los {reserva['DiaSemana']} de "
+            f"{_fmt_horario(reserva['HoraInicio'], reserva['HoraFin'])}?",
         )
+        if confirmacion != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            eliminar_reserva_regular(self.conn, reserva["IdReservaRegular"])
+        except ValueError as error:
+            QMessageBox.warning(self, "Eliminar reserva", str(error))
+            return
+        # Punto #9.1.9: cualquiera de los tres botones (Crear/Modificar/
+        # Eliminar) que toque el período en curso regenera y marca no
+        # enviada la liquidación del profesional afectado.
+        regenerar_si_corresponde(
+            self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn),
+        )
+        self.conn.commit()
+        QMessageBox.information(self, "Eliminar reserva", "Reserva eliminada con éxito.")
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
+
+class _DialogoModificarReservaAislada(QDialog):
+    """Homólogo de `_DialogoModificarReservaRegular` para Reservas
+    aisladas/extraordinarias (pedido explícito de la clienta, "que los
+    botones 'Modificar reserva'/'Cancelar reserva' se comporten de la
+    misma manera que los homólogos de Regulares, #9.1.4 y #9.1.6"):
+    edita la fila EXISTENTE (horario, y recargo o ítem/monto según el
+    tipo) en vez de cancelarla y precargar el formulario de alta.
+    Profesional/Ubicación/Fecha quedan de solo lectura — cambiarlos es,
+    en los hechos, dar de alta una reserva distinta."""
+
+    def __init__(self, conn: sqlite3.Connection, reserva: sqlite3.Row, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Modificar reserva")
+        self._es_extraordinaria = bool(reserva["EsExtraordinaria"])
+        layout = QVBoxLayout(self)
+
+        profesional = obtener_repositorio(conn, "Profesional").obtener(reserva["IdProfesional"])
+        consultorio = conn.execute(
+            "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio, "
+            "loc.Localidad AS DomicilioLocalidad "
+            "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+            "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad "
+            "WHERE c.IdConsultorio = ?",
+            (reserva["IdConsultorio"],),
+        ).fetchone()
+        layout.addWidget(QLabel(f"Profesional: {_texto_profesional(profesional) if profesional else '?'}"))
+        if consultorio is not None:
+            layout.addWidget(QLabel(
+                f"Ubicación: {consultorio['DomicilioLocalidad'] or '(Sin localidad)'} - "
+                f"{consultorio['NombreEdificio']} - {consultorio['Departamento']} - "
+                f"Consultorio {consultorio['NumeroConsultorio']}"
+            ))
+        layout.addWidget(QLabel(f"Fecha: {_fmt_fecha(reserva['Fecha'])}"))
+
+        fila_horario = QHBoxLayout()
+        self.spin_desde = _SpinHorario()
+        self.spin_desde.setRange(0, 23)
+        self.spin_desde.setSingleStep(0.5)
+        self.spin_desde.setValue(reserva["HoraInicio"])
+        self.spin_hasta = _SpinHorario()
+        self.spin_hasta.setRange(0.5, 24)
+        self.spin_hasta.setSingleStep(0.5)
+        self.spin_hasta.setValue(reserva["HoraFin"])
+        fila_horario.addWidget(QLabel("Desde"))
+        fila_horario.addWidget(self.spin_desde)
+        fila_horario.addWidget(QLabel("Hasta"))
+        fila_horario.addWidget(self.spin_hasta)
+        layout.addLayout(fila_horario)
+
+        widgets_foco = [self.spin_desde, self.spin_hasta]
+
+        self.casilla_recargo: QCheckBox | None = None
+        self.campo_item: QLineEdit | None = None
+        self.campo_monto: _SpinMonto | None = None
+        if self._es_extraordinaria:
+            layout.addWidget(QLabel("Ítem a cargar"))
+            self.campo_item = QLineEdit(reserva["ItemExtraordinario"] or "")
+            layout.addWidget(self.campo_item)
+            layout.addWidget(QLabel("Monto a cobrar"))
+            self.campo_monto = _SpinMonto()
+            self.campo_monto.setRange(0, 10_000_000)
+            self.campo_monto.setValue(reserva["MontoExtraordinario"] or 0.0)
+            layout.addWidget(self.campo_monto)
+            widgets_foco += [self.campo_item, self.campo_monto]
+        else:
+            self.casilla_recargo = QCheckBox("Aplica recargo")
+            self.casilla_recargo.setChecked(bool(reserva["AplicaRecargo"]))
+            layout.addWidget(self.casilla_recargo)
+            widgets_foco.append(self.casilla_recargo)
+
+        fila_botones = QHBoxLayout()
+        boton_guardar = QPushButton("Guardar cambios")
+        boton_guardar.setObjectName("botonPrimario")
+        boton_guardar.clicked.connect(self._confirmar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.setObjectName("botonSecundario")
+        boton_cancelar.clicked.connect(self.reject)
+        fila_botones.addWidget(boton_guardar)
+        fila_botones.addWidget(boton_cancelar)
+        layout.addLayout(fila_botones)
+
+        widgets_foco += [boton_guardar, boton_cancelar]
+        self._foco = instalar_enter_avanza_foco(widgets_foco, parent=self)
+        self.spin_desde.setFocus()
+
+    def _confirmar(self) -> None:
+        if self.spin_hasta.value() <= self.spin_desde.value():
+            QMessageBox.warning(self, "Modificar reserva", "\"Hasta\" tiene que ser posterior a \"Desde\".")
+            return
+        if self._es_extraordinaria and not self.campo_item.text().strip():
+            QMessageBox.warning(self, "Modificar reserva", "Cargá un ítem a cobrar.")
+            return
+        self.hora_inicio = self.spin_desde.value()
+        self.hora_fin = self.spin_hasta.value()
+        self.aplica_recargo = self.casilla_recargo.isChecked() if self.casilla_recargo else None
+        self.item_extraordinario = self.campo_item.text().strip() if self.campo_item else None
+        self.monto_extraordinario = self.campo_monto.value() if self.campo_monto else None
+        self.accept()
 
 
 class _PanelReservasAisladas(QWidget):
@@ -1447,18 +1719,20 @@ class _PanelReservasAisladas(QWidget):
         fila_horario.addWidget(self.spin_hasta)
         form.addLayout(fila_horario)
 
+        # Punto "la etiqueta del check... cambiala a 'Es reubicación' y
+        # ponelos en la misma línea uno al lado del otro" (SistemaDF
+        # v0.11.2026.10, Reservas aisladas): la aclaración larga que
+        # tenía el check de reubicación se saca del todo (ya no hace
+        # falta el salto de línea a mano de la ronda anterior, que
+        # existía justamente para compensar ese texto largo) y los dos
+        # checks pasan a una sola fila.
+        fila_checks = QHBoxLayout()
         self.casilla_recargo = QCheckBox("Aplica recargo")
-        form.addWidget(self.casilla_recargo)
-
-        # Salto de línea a mano (QCheckBox no ajusta el texto solo, a
-        # diferencia de un QLabel): pedido de la clienta, la columna del
-        # formulario quedaba mucho más ancha que la del panel de Filtros
-        # de al lado por culpa de este texto largo en una sola línea.
-        self.casilla_reubicacion = QCheckBox(
-            "Es reubicación (compensa una ausencia\ndel profesional, no genera cargo)"
-        )
+        fila_checks.addWidget(self.casilla_recargo)
+        self.casilla_reubicacion = QCheckBox("Es reubicación")
         self.casilla_reubicacion.stateChanged.connect(self._alternar_reubicacion)
-        form.addWidget(self.casilla_reubicacion)
+        fila_checks.addWidget(self.casilla_reubicacion)
+        form.addLayout(fila_checks)
 
         self.contenedor_reubicacion = QWidget()
         layout_reubicacion = QVBoxLayout(self.contenedor_reubicacion)
@@ -1480,16 +1754,19 @@ class _PanelReservasAisladas(QWidget):
         boton_crear.setStyleSheet(_ESTILO_BOTON_AISLADAS_ALTO)
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
-        boton_modificar = QPushButton("Modificar reserva")
-        boton_modificar.setObjectName("botonSecundario")
-        boton_modificar.setStyleSheet(_ESTILO_BOTON_AISLADAS_ALTO)
-        boton_modificar.clicked.connect(self._modificar_seleccionada)
-        form.addWidget(boton_modificar)
-        boton_cancelar = QPushButton("Cancelar reserva")
-        boton_cancelar.setObjectName("botonSecundario")
-        boton_cancelar.setStyleSheet(_ESTILO_BOTON_AISLADAS_ALTO)
-        boton_cancelar.clicked.connect(self._cancelar)
-        form.addWidget(boton_cancelar)
+        # Mismo criterio que Reservas regulares (regla general "EN
+        # GENERAL": edición de tabla vía selección + diálogo): deshabilitados
+        # sin ninguna fila en foco en la tabla.
+        self.boton_modificar = QPushButton("Modificar reserva")
+        self.boton_modificar.setObjectName("botonSecundario")
+        self.boton_modificar.setStyleSheet(_ESTILO_BOTON_AISLADAS_ALTO)
+        self.boton_modificar.clicked.connect(self._modificar_seleccionada)
+        form.addWidget(self.boton_modificar)
+        self.boton_cancelar = QPushButton("Cancelar reserva")
+        self.boton_cancelar.setObjectName("botonSecundario")
+        self.boton_cancelar.setStyleSheet(_ESTILO_BOTON_AISLADAS_ALTO)
+        self.boton_cancelar.clicked.connect(self._cancelar)
+        form.addWidget(self.boton_cancelar)
 
         linea_separadora = QFrame()
         linea_separadora.setFrameShape(QFrame.Shape.HLine)
@@ -1523,6 +1800,10 @@ class _PanelReservasAisladas(QWidget):
         self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
         self.grilla.agrupar_dias_en_pares()
         self.grilla.mostrar_leyenda_colores(compacta=True)
+        # Punto propio de esta ronda: "achicar la fuente de las
+        # referencias para que no salgan apelmazadas" — un poco más
+        # chica que el default de `hacer_compacta()` (10px).
+        self.grilla.fijar_tamano_fuente_leyenda(9)
         # Sin título "Filtros" (pedido de la clienta) — cada filtro pasa a
         # nombrarse solo con "Filtro de ...", ver `renombrar_etiquetas_
         # filtro`.
@@ -1644,11 +1925,11 @@ class _PanelReservasAisladas(QWidget):
         layout_tabla.setContentsMargins(9, 0, 9, 9)
         self.tabla = QTableWidget()
         excluir_tabla_del_tab(self.tabla)
-        self.tabla.setColumnCount(11)
+        self.tabla.setColumnCount(12)
         self.tabla.setHorizontalHeaderLabels(
             [
                 "Profesional", "Localidad", "Edificio", "Unidad", "Consultorio", "Día", "Fecha", "Horario",
-                "Reubicación", "Estado", "Valor",
+                "Reubicación", "Estado", "Valor", "Período imputado",
             ]
         )
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -1660,6 +1941,7 @@ class _PanelReservasAisladas(QWidget):
         # se quedaba invisible dentro de `scroll`.
         self.tabla.setMinimumHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        self.tabla.itemSelectionChanged.connect(self._actualizar_botones)
         instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla, stretch=1)
@@ -1667,13 +1949,21 @@ class _PanelReservasAisladas(QWidget):
         self._cargar_edificios()
         self._foco = instalar_enter_avanza_foco(
             [
-                self.combo_profesional, self.combo_localidad, self.combo_edificio, self.combo_unidad,
+                # Pedido explícito de la clienta: "si elijo un profesional
+                # categoría R el foco desde el selector del profesional
+                # pasa al 'Período a imputar', no lo saltea" — faltaba de
+                # la cadena por completo; al estar deshabilitado para A/B
+                # (`_al_cambiar_profesional`), `instalar_enter_avanza_foco`
+                # ya lo saltea sola sin necesitar ninguna condición acá.
+                self.combo_profesional, self.combo_periodo_imputar,
+                self.combo_localidad, self.combo_edificio, self.combo_unidad,
                 self.combo_consultorio, self.campo_fecha, self.spin_desde, self.spin_hasta,
                 self.casilla_recargo, self.casilla_reubicacion, self.combo_horario_no_usado,
-                self.campo_fecha_ausencia, boton_crear,
+                self.campo_fecha_ausencia, boton_crear, self.boton_modificar, self.boton_cancelar,
             ],
             parent=self,
         )
+        self._actualizar_botones()
 
     def _cargar_edificios(self) -> None:
         """Mismo criterio que en Reservas regulares: Localidad/Edificio
@@ -1706,6 +1996,8 @@ class _PanelReservasAisladas(QWidget):
         self._sincronizar_grilla()
 
     def _seleccionar_ubicacion(self, id_consultorio: int) -> None:
+        """Helper interno (y de tests): puebla los cuatro combos de
+        ubicación en cascada a partir de un `IdConsultorio`."""
         fila = self.conn.execute(
             "SELECT e.IdLocalidad, u.IdEdificio, c.IdUnidad FROM Consultorio c "
             "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
@@ -1896,8 +2188,8 @@ class _PanelReservasAisladas(QWidget):
             self.tabla.setItem(fila_idx, 9, QTableWidgetItem(r["Estado"]))
             valor_hora = consultorio["ValorHoraAisladaActual"] if consultorio else 0.0
             self.tabla.setItem(fila_idx, 10, item_numero(self._valor_reserva(r, valor_hora, recargo_pct)))
-        self.tabla.resizeColumnsToContents()
-        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+            self.tabla.setItem(fila_idx, 11, QTableWidgetItem(r["PeriodoImputado"] or ""))
+        _ajustar_columnas(self.tabla)
         self._sincronizar_grilla()
         self.grilla.actualizar()
 
@@ -1915,6 +2207,7 @@ class _PanelReservasAisladas(QWidget):
             8: lambda t: bool(t[0]["EsReubicacion"]),
             9: lambda t: t[0]["Estado"],
             10: lambda t: t[0]["HoraFin"] - t[0]["HoraInicio"],
+            11: lambda t: t[0]["PeriodoImputado"] or "",
         }
         return claves[columna]
 
@@ -1966,6 +2259,14 @@ class _PanelReservasAisladas(QWidget):
             aplica_recargo=self.casilla_recargo.isChecked(),
             es_reubicacion=self.casilla_reubicacion.isChecked(),
             forzar=forzar,
+            # "En la tabla agregar el campo 'Período imputado'" — se
+            # guarda ya resuelto a "AAAA-MM" (no "actual"/"siguiente" tal
+            # cual viene del combo), mismo criterio que `_resolver_
+            # periodo_imputar` resuelve el efecto real sobre la
+            # liquidación.
+            periodo_imputado=(
+                fecha[:7] if periodo_a_imputar == "actual" else sumar_meses(fecha[:7], 1)
+            ),
         )
         try:
             _id, advertencias = crear_reserva_aislada(self.conn, **datos)
@@ -2043,50 +2344,78 @@ class _PanelReservasAisladas(QWidget):
         self.actualizar()
         return True
 
+    def _actualizar_botones(self) -> None:
+        """Mismo criterio que Reservas regulares: "Modificar reserva"/
+        "Cancelar reserva" quedan deshabilitados sin ninguna fila en
+        foco en la tabla."""
+        hay_seleccion = self._fila_seleccionada() is not None
+        self.boton_modificar.setEnabled(hay_seleccion)
+        self.boton_cancelar.setEnabled(hay_seleccion)
+
     def _cancelar(self) -> None:
+        """Punto #9.1.6 (homólogo de "Eliminar reserva" en Regulares):
+        pide confirmación explícita antes de cancelar, con los datos
+        completos de la reserva (profesional/día/horario) en vez de
+        cancelar directo sin preguntar nada."""
         reserva = self._fila_seleccionada()
         if reserva is None:
+            return
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(reserva["IdProfesional"])
+        nombre_profesional = _texto_profesional(profesional) if profesional else "?"
+        dia_semana = fecha_a_dia_semana(date.fromisoformat(reserva["Fecha"]))
+        confirmacion = QMessageBox.question(
+            self, "Cancelar reserva",
+            f"¿Cancelar la reserva aislada de {nombre_profesional} el {dia_semana} "
+            f"{_fmt_fecha(reserva['Fecha'])} de {_fmt_horario(reserva['HoraInicio'], reserva['HoraFin'])}?",
+        )
+        if confirmacion != QMessageBox.StandardButton.Yes:
             return
         if self._cancelar_registro(reserva, "Cancelar reserva"):
             self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
-        """Mismo criterio que en Reservas regulares: no se edita la fila
-        histórica in-place (podría desalinear una liquidación ya
-        emitida que la haya usado) — se cancela la reserva aislada
-        seleccionada (queda su historial, no se borra) y se precarga el
-        formulario con sus datos para dar de alta la versión corregida.
-        El operador ajusta lo que haga falta (ej. una hora más de las
-        que le habían encargado en un principio) y confirma con "Crear
-        reserva aislada", como cualquier alta."""
+        """Punto #9.1.4 (homólogo de Reservas regulares): abre
+        `_DialogoModificarReservaAislada`, que edita la fila EXISTENTE
+        (horario, y recargo o ítem/monto si es extraordinaria) sin
+        cancelarla ni precargar el formulario de alta."""
         reserva = self._fila_seleccionada()
         if reserva is None:
             QMessageBox.warning(self, "Modificar reserva", "Elegí una fila de la tabla para modificar.")
             return
-        if not self._cancelar_registro(reserva, "Modificar reserva"):
+        dialogo = _DialogoModificarReservaAislada(self.conn, reserva, parent=self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
-
-        indice_profesional = self.combo_profesional.findData(reserva["IdProfesional"])
-        if indice_profesional >= 0:
-            self.combo_profesional.setCurrentIndex(indice_profesional)
-        self._seleccionar_ubicacion(reserva["IdConsultorio"])
-        self.campo_fecha.setDate(QDate.fromString(reserva["Fecha"], "yyyy-MM-dd"))
-        self.spin_desde.setValue(reserva["HoraInicio"])
-        self.spin_hasta.setValue(reserva["HoraFin"])
-        self.casilla_recargo.setChecked(bool(reserva["AplicaRecargo"]))
-        self.casilla_reubicacion.setChecked(bool(reserva["EsReubicacion"]))
-        self._sincronizar_grilla()
-        # Mismo aviso que en Reservas extraordinarias (pedido de la
-        # clienta, "no me permite editar... es mas la cancela"): el único
-        # efecto visible era que la fila pasaba a "Cancelada" — el
-        # formulario SÍ quedaba precargado, pero nada avisaba que hacía
-        # falta volver a tocar "Crear reserva aislada" para guardar la
-        # versión corregida.
-        QMessageBox.information(
-            self, "Modificar reserva",
-            "La reserva seleccionada se canceló y sus datos quedaron cargados en el formulario — "
-            "revisalos y confirmá con \"Crear reserva aislada\" para guardar la versión corregida.",
-        )
+        try:
+            advertencias = modificar_reserva_aislada(
+                self.conn, reserva["IdReservaAislada"], hora_inicio=dialogo.hora_inicio,
+                hora_fin=dialogo.hora_fin, aplica_recargo=dialogo.aplica_recargo,
+                item_extraordinario=dialogo.item_extraordinario, monto_extraordinario=dialogo.monto_extraordinario,
+            )
+        except ConflictoBloqueanteError as error:
+            confirmacion = QMessageBox.question(
+                self, "Conflictos detectados", f"{error}\n\n¿Modificar la reserva de todos modos?",
+            )
+            if confirmacion != QMessageBox.StandardButton.Yes:
+                return
+            advertencias = modificar_reserva_aislada(
+                self.conn, reserva["IdReservaAislada"], hora_inicio=dialogo.hora_inicio,
+                hora_fin=dialogo.hora_fin, aplica_recargo=dialogo.aplica_recargo,
+                item_extraordinario=dialogo.item_extraordinario, monto_extraordinario=dialogo.monto_extraordinario,
+                forzar=True,
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Modificar reserva", str(error))
+            return
+        self.conn.commit()
+        regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
+        self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
+        if advertencias:
+            QMessageBox.information(
+                self, "Reserva modificada", "Reserva modificada con avisos:\n" + "\n".join(advertencias),
+            )
+        else:
+            QMessageBox.information(self, "Modificar reserva", "Reserva modificada con éxito.")
+        self.actualizar()
 
 
 # `panel_form` usa `_ANCHO_PANEL_FILTROS_GRILLA` como ancho TOTAL fijo,
@@ -2239,31 +2568,33 @@ class _PanelReservaExtraordinaria(QWidget):
         boton_crear.clicked.connect(self._crear)
         form.addWidget(boton_crear)
 
-        boton_modificar = QPushButton("Modificar reserva")
-        boton_modificar.setObjectName("botonSecundario")
-        boton_modificar.setFixedWidth(_ANCHO_BOTON_EXTRAORDINARIA)
-        boton_modificar.clicked.connect(self._modificar_seleccionada)
-        form.addWidget(boton_modificar)
+        self.boton_modificar = QPushButton("Modificar reserva")
+        self.boton_modificar.setObjectName("botonSecundario")
+        self.boton_modificar.setFixedWidth(_ANCHO_BOTON_EXTRAORDINARIA)
+        self.boton_modificar.clicked.connect(self._modificar_seleccionada)
+        form.addWidget(self.boton_modificar)
 
-        boton_cancelar = QPushButton("Cancelar reserva")
-        boton_cancelar.setObjectName("botonSecundario")
-        boton_cancelar.setFixedWidth(_ANCHO_BOTON_EXTRAORDINARIA)
-        boton_cancelar.clicked.connect(self._cancelar)
-        form.addWidget(boton_cancelar)
+        self.boton_cancelar = QPushButton("Cancelar reserva")
+        self.boton_cancelar.setObjectName("botonSecundario")
+        self.boton_cancelar.setFixedWidth(_ANCHO_BOTON_EXTRAORDINARIA)
+        self.boton_cancelar.clicked.connect(self._cancelar)
+        form.addWidget(self.boton_cancelar)
 
         form.addStretch()
         layout_externo.addWidget(panel_form)
 
         columnas = [
             "Profesional", "Localidad", "Edificio", "Unidad", "Consultorio",
-            "Día", "Fecha", "Horario", "Ítem", "Monto", "Estado",
+            "Día", "Fecha", "Horario", "Ítem", "Monto", "Estado", "Período imputado",
         ]
         self.tabla = QTableWidget(0, len(columnas))
         self.tabla.setHorizontalHeaderLabels(columnas)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.verticalHeader().setVisible(False)
+        excluir_tabla_del_tab(self.tabla)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
+        self.tabla.itemSelectionChanged.connect(self._actualizar_botones)
         instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         layout_externo.addWidget(self.tabla, stretch=1)
 
@@ -2271,10 +2602,11 @@ class _PanelReservaExtraordinaria(QWidget):
             [
                 self.combo_profesional, self.combo_periodo_imputar, self.combo_localidad, self.combo_edificio,
                 self.combo_unidad, self.combo_consultorio, self.campo_fecha, self.spin_desde, self.spin_hasta,
-                self.campo_item, self.spin_monto, boton_crear, boton_modificar, boton_cancelar,
+                self.campo_item, self.spin_monto, boton_crear, self.boton_modificar, self.boton_cancelar,
             ],
             parent=self,
         )
+        self._actualizar_botones()
         # `_resetear_formulario` (no solo `_cargar_edificios`, que también
         # llama) para que "Fecha" arranque en HOY en vez del default de
         # `QDateEdit` sin fecha puesta (01-01-2000) — mismo motivo por el
@@ -2383,6 +2715,12 @@ class _PanelReservaExtraordinaria(QWidget):
                 self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio, fecha=fecha,
                 hora_inicio=self.spin_desde.value(), hora_fin=self.spin_hasta.value(),
                 es_extraordinaria=True, item_extraordinario=item, monto_extraordinario=monto, forzar=forzar,
+                # Mismo criterio que Reservas aisladas: se guarda ya
+                # resuelto a "AAAA-MM" (no "actual"/"siguiente" tal cual
+                # viene del combo), para la columna "Período imputado".
+                periodo_imputado=(
+                    fecha[:7] if periodo_a_imputar == "actual" else sumar_meses(fecha[:7], 1)
+                ),
             )
         except ConflictoBloqueanteError as error:
             confirmacion = QMessageBox.question(
@@ -2403,27 +2741,6 @@ class _PanelReservaExtraordinaria(QWidget):
         self.actualizar()
         self._resetear_formulario()
 
-    def _seleccionar_ubicacion(self, id_consultorio: int) -> None:
-        fila = self.conn.execute(
-            "SELECT e.IdLocalidad, u.IdEdificio, c.IdUnidad FROM Consultorio c "
-            "JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
-            "WHERE c.IdConsultorio = ?", (id_consultorio,),
-        ).fetchone()
-        if fila is None:
-            return
-        indice_localidad = self.combo_localidad.findData(fila["IdLocalidad"])
-        if indice_localidad >= 0:
-            self.combo_localidad.setCurrentIndex(indice_localidad)
-        indice_edificio = self.combo_edificio.findData(fila["IdEdificio"])
-        if indice_edificio >= 0:
-            self.combo_edificio.setCurrentIndex(indice_edificio)
-        indice_unidad = self.combo_unidad.findData(fila["IdUnidad"])
-        if indice_unidad >= 0:
-            self.combo_unidad.setCurrentIndex(indice_unidad)
-        indice_consultorio = self.combo_consultorio.findData(id_consultorio)
-        if indice_consultorio >= 0:
-            self.combo_consultorio.setCurrentIndex(indice_consultorio)
-
     def _cancelar_registro(self, reserva: sqlite3.Row, titulo: str) -> bool:
         try:
             requiere_aviso = cancelar_reserva_aislada(self.conn, reserva["IdReservaAislada"])
@@ -2438,50 +2755,79 @@ class _PanelReservaExtraordinaria(QWidget):
         self.actualizar()
         return True
 
+    def _actualizar_botones(self) -> None:
+        """Mismo criterio que Reservas regulares/aisladas: "Modificar
+        reserva"/"Cancelar reserva" quedan deshabilitados sin ninguna
+        fila en foco en la tabla."""
+        hay_seleccion = self._fila_seleccionada() is not None
+        self.boton_modificar.setEnabled(hay_seleccion)
+        self.boton_cancelar.setEnabled(hay_seleccion)
+
     def _cancelar(self) -> None:
+        """Punto #9.1.6 (homólogo de Reservas aisladas): pide
+        confirmación explícita antes de cancelar, con los datos
+        completos de la reserva (profesional/día/horario/ítem) en vez
+        de cancelar directo sin preguntar nada."""
         reserva = self._fila_seleccionada()
         if reserva is None:
+            return
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(reserva["IdProfesional"])
+        nombre_profesional = _texto_profesional(profesional) if profesional else "?"
+        dia_semana = fecha_a_dia_semana(date.fromisoformat(reserva["Fecha"]))
+        confirmacion = QMessageBox.question(
+            self, "Cancelar reserva",
+            f"¿Cancelar la reserva extraordinaria de {nombre_profesional} el {dia_semana} "
+            f"{_fmt_fecha(reserva['Fecha'])} de {_fmt_horario(reserva['HoraInicio'], reserva['HoraFin'])} "
+            f"({reserva['ItemExtraordinario']})?",
+        )
+        if confirmacion != QMessageBox.StandardButton.Yes:
             return
         if self._cancelar_registro(reserva, "Cancelar reserva"):
             self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
-        """Mismo criterio que Reservas aisladas: no se edita la fila
-        histórica in-place — se cancela la extraordinaria seleccionada
-        (queda su historial, no se borra, y ya copia al portapapeles el
-        mensaje de detalle actualizado sin ella) y se precarga el
-        formulario con sus datos para dar de alta la versión corregida.
-        El operador ajusta lo que haga falta y confirma con "Crear
-        reserva extraordinaria", como cualquier alta — que vuelve a
-        copiar el mensaje, ya con la versión corregida incluida."""
+        """Punto #9.1.4 (homólogo de Reservas regulares/aisladas):
+        reusa `_DialogoModificarReservaAislada`/`modificar_reserva_
+        aislada` (ya armados genéricos sobre `EsExtraordinaria`, ver
+        Reservas aisladas) — edita la fila EXISTENTE (horario, ítem y
+        monto) sin cancelarla ni precargar el formulario de alta."""
         reserva = self._fila_seleccionada()
         if reserva is None:
             QMessageBox.warning(self, "Modificar reserva", "Elegí una fila de la tabla para modificar.")
             return
-        if not self._cancelar_registro(reserva, "Modificar reserva"):
+        dialogo = _DialogoModificarReservaAislada(self.conn, reserva, parent=self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
-
-        indice_profesional = self.combo_profesional.findData(reserva["IdProfesional"])
-        if indice_profesional >= 0:
-            self.combo_profesional.setCurrentIndex(indice_profesional)
-        self._seleccionar_ubicacion(reserva["IdConsultorio"])
-        self.campo_fecha.setDate(QDate.fromString(reserva["Fecha"], "yyyy-MM-dd"))
-        self.spin_desde.setValue(reserva["HoraInicio"])
-        self.spin_hasta.setValue(reserva["HoraFin"])
-        self.campo_item.setText(reserva["ItemExtraordinario"] or "")
-        self.spin_monto.setValue(reserva["MontoExtraordinario"] or 0.0)
-        # Pedido de la clienta ("no me permite editar... es mas la
-        # cancela"): sin este aviso, el único efecto visible de
-        # "Modificar reserva" era que la fila pasaba a "Cancelada" en la
-        # tabla — el formulario SÍ quedaba precargado con sus datos (ver
-        # arriba), pero nada avisaba que hacía falta volver a tocar
-        # "Crear reserva extraordinaria" para guardar la versión
-        # corregida, así que parecía que el botón solo cancelaba.
-        QMessageBox.information(
-            self, "Modificar reserva",
-            "La reserva seleccionada se canceló y sus datos quedaron cargados en el formulario — "
-            "revisalos y confirmá con \"Crear reserva extraordinaria\" para guardar la versión corregida.",
-        )
+        try:
+            advertencias = modificar_reserva_aislada(
+                self.conn, reserva["IdReservaAislada"], hora_inicio=dialogo.hora_inicio,
+                hora_fin=dialogo.hora_fin, item_extraordinario=dialogo.item_extraordinario,
+                monto_extraordinario=dialogo.monto_extraordinario,
+            )
+        except ConflictoBloqueanteError as error:
+            confirmacion = QMessageBox.question(
+                self, "Conflictos detectados", f"{error}\n\n¿Modificar la reserva de todos modos?",
+            )
+            if confirmacion != QMessageBox.StandardButton.Yes:
+                return
+            advertencias = modificar_reserva_aislada(
+                self.conn, reserva["IdReservaAislada"], hora_inicio=dialogo.hora_inicio,
+                hora_fin=dialogo.hora_fin, item_extraordinario=dialogo.item_extraordinario,
+                monto_extraordinario=dialogo.monto_extraordinario, forzar=True,
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Modificar reserva", str(error))
+            return
+        self.conn.commit()
+        regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
+        self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
+        if advertencias:
+            QMessageBox.information(
+                self, "Reserva modificada", "Reserva modificada con avisos:\n" + "\n".join(advertencias),
+            )
+        else:
+            QMessageBox.information(self, "Modificar reserva", "Reserva modificada con éxito.")
+        self.actualizar()
 
     def _resetear_formulario(self) -> None:
         self.combo_profesional.setCurrentIndex(0)
@@ -2542,7 +2888,9 @@ class _PanelReservaExtraordinaria(QWidget):
             self.tabla.setItem(fila_idx, 8, QTableWidgetItem(r["ItemExtraordinario"] or ""))
             self.tabla.setItem(fila_idx, 9, item_numero(formatear_moneda(r["MontoExtraordinario"] or 0.0)))
             self.tabla.setItem(fila_idx, 10, QTableWidgetItem(r["Estado"]))
+            self.tabla.setItem(fila_idx, 11, QTableWidgetItem(r["PeriodoImputado"] or ""))
         self.tabla.resizeColumnsToContents()
+        self._actualizar_botones()
 
     @staticmethod
     def _clave_orden(columna: int):
@@ -2558,5 +2906,6 @@ class _PanelReservaExtraordinaria(QWidget):
             8: lambda t: t[0]["ItemExtraordinario"] or "",
             9: lambda t: t[0]["MontoExtraordinario"] or 0.0,
             10: lambda t: t[0]["Estado"],
+            11: lambda t: t[0]["PeriodoImputado"] or "",
         }
         return claves[columna]

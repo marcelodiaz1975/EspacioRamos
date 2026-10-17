@@ -290,7 +290,8 @@ CREATE TABLE IF NOT EXISTS ReservaAislada (
     Observacion TEXT,
     EsExtraordinaria INTEGER NOT NULL DEFAULT 0,
     ItemExtraordinario TEXT,
-    MontoExtraordinario REAL
+    MontoExtraordinario REAL,
+    PeriodoImputado TEXT
 );
 
 -- 3.11 BloqueRigido -------------------------------------------------------------------

@@ -59,6 +59,20 @@ def _vigencias_solapan(inicio_a, fin_a, inicio_b, fin_b) -> bool:
     return inicio_a <= fin_b and inicio_b <= fin_a
 
 
+def _texto_profesional_conflicto(conn: sqlite3.Connection, id_profesional: int) -> str:
+    """Punto #9.1.5 (SistemaDF v0.11.2026.10): los mensajes de conflicto
+    identificaban al profesional solo por su número interno — pedido
+    explícito de la clienta, pasan a mostrar "Tratamiento Nombre
+    Apellido" (sin el número ni el código, que no agregan nada acá).
+    Sin ninguno de los tres datos cargados, cae al número de siempre
+    (nunca deja el mensaje sin ninguna forma de identificarlo)."""
+    fila = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    if fila is None:
+        return f"#{id_profesional}"
+    partes = [p for p in (fila["Tratamiento"], fila["NombrePila"], fila["Apellido"]) if p]
+    return " ".join(partes) if partes else f"#{id_profesional}"
+
+
 def _relacion_equipo(conn: sqlite3.Connection, id_profesional_a: int, id_profesional_b: int) -> bool:
     """True si a y b son la misma persona, o un par E / su propio R (superposición
     permitida con aviso en vez de bloqueo, según sección 3.9)."""
@@ -137,7 +151,8 @@ def verificar_conflictos_regular(
             bloqueante=bloqueante,
             mensaje=(
                 f"Se superpone con la reserva regular #{fila['IdReservaRegular']} del "
-                f"profesional #{fila['IdProfesional']} ({dia_semana} {fila['HoraInicio']}–{fila['HoraFin']}hs)"
+                f"profesional {_texto_profesional_conflicto(conn, fila['IdProfesional'])} "
+                f"({dia_semana} {fila['HoraInicio']}–{fila['HoraFin']}hs)"
             ),
             reserva_existente=fila,
         ))
@@ -165,7 +180,8 @@ def verificar_conflictos_aislada(
             bloqueante=bloqueante,
             mensaje=(
                 f"Se superpone con la reserva aislada #{fila['IdReservaAislada']} del "
-                f"profesional #{fila['IdProfesional']} ({fecha} {fila['HoraInicio']}–{fila['HoraFin']}hs)"
+                f"profesional {_texto_profesional_conflicto(conn, fila['IdProfesional'])} "
+                f"({fecha} {fila['HoraInicio']}–{fila['HoraFin']}hs)"
             ),
             reserva_existente=fila,
         ))
@@ -190,7 +206,8 @@ def verificar_conflictos_aislada(
             bloqueante=bloqueante,
             mensaje=(
                 f"Se superpone con la reserva regular #{fila['IdReservaRegular']} del "
-                f"profesional #{fila['IdProfesional']} ({dia_semana} {fila['HoraInicio']}–{fila['HoraFin']}hs)"
+                f"profesional {_texto_profesional_conflicto(conn, fila['IdProfesional'])} "
+                f"({dia_semana} {fila['HoraInicio']}–{fila['HoraFin']}hs)"
             ),
             reserva_existente=fila,
         ))
@@ -222,8 +239,8 @@ def verificar_conflicto_aisladas_futuras(
             bloqueante=False,
             mensaje=(
                 f"Ya hay una reserva aislada confirmada #{fila['IdReservaAislada']} del profesional "
-                f"#{fila['IdProfesional']} en ese consultorio el {fila['Fecha']} de "
-                f"{fila['HoraInicio']}–{fila['HoraFin']}hs"
+                f"{_texto_profesional_conflicto(conn, fila['IdProfesional'])} en ese consultorio el "
+                f"{fila['Fecha']} de {fila['HoraInicio']}–{fila['HoraFin']}hs"
             ),
             reserva_existente=fila,
         ))
@@ -312,11 +329,13 @@ def crear_reserva_regular(
 
 
 def finalizar_reserva_regular(conn: sqlite3.Connection, id_reserva_regular: int, vigencia_fin: str) -> None:
-    """Pone `VigenciaFin` a una reserva regular existente ("Finalizar..."/
-    "Modificar..." en la GUI, que finaliza la vieja antes de dar de alta
-    la versión nueva) — con la misma validación de período cerrado que
-    `crear_reserva_regular`, para que no haya una vía alternativa (editar
-    en vez de crear) que la sortee."""
+    """Pone `VigenciaFin` a una reserva regular existente ("Finalizar
+    reserva a fin de mes" en Reservas regulares, el único botón que
+    sigue usando este mecanismo — "Modificar reserva" pasó a
+    `modificar_reserva_regular`, ver más abajo) — con la misma
+    validación de período cerrado que `crear_reserva_regular`, para que
+    no haya una vía alternativa (editar en vez de crear) que la
+    sortee."""
     reserva = obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva_regular)
     if reserva is None:
         raise ValueError(f"No existe la reserva regular #{id_reserva_regular}")
@@ -324,12 +343,75 @@ def finalizar_reserva_regular(conn: sqlite3.Connection, id_reserva_regular: int,
     obtener_repositorio(conn, "ReservaRegular").actualizar(id_reserva_regular, VigenciaFin=vigencia_fin)
 
 
+def modificar_reserva_regular(
+    conn: sqlite3.Connection, id_reserva_regular: int, *, hora_inicio: float, hora_fin: float,
+    vigencia_inicio: str, vigencia_fin: str | None, forzar: bool = False,
+) -> list[str]:
+    """Punto #9.1.4 (SistemaDF v0.11.2026.10): "Modificar reserva" pasa de
+    finalizar la fila vieja y precargar el formulario para dar de alta
+    una nueva (lo que seguía haciendo creer que el botón solo cancelaba)
+    a editar la fila EXISTENTE — "si quiero modifico algo puntual y la
+    reserva sigue corriendo con esa modificación". Sigue pudiendo
+    "terminarla" desde el mismo diálogo: alcanza con poner una Vigencia
+    hasta real en vez de dejarla en blanco, no hace falta un camino
+    aparte para eso.
+
+    Mismos guardarraíles que `crear_reserva_regular`: ninguna vigencia
+    (la vieja de la fila NI la nueva que se está aplicando) puede caer en
+    un período ya cerrado, y la superposición contra otra reserva del
+    mismo consultorio/día se vuelve a chequear (excluyendo a la propia
+    fila vía `excluir_id`) porque el horario/vigencia nuevos pueden
+    generar un conflicto que la versión vieja no tenía."""
+    repo = obtener_repositorio(conn, "ReservaRegular")
+    reserva = repo.obtener(id_reserva_regular)
+    if reserva is None:
+        raise ValueError(f"No existe la reserva regular #{id_reserva_regular}")
+    _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], reserva["VigenciaInicio"])
+    _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], vigencia_inicio)
+    _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], vigencia_fin)
+    _validar_fraccion_grilla(conn, hora_inicio, hora_fin)
+    conflictos = verificar_conflictos_regular(
+        conn, id_consultorio=reserva["IdConsultorio"], dia_semana=reserva["DiaSemana"],
+        hora_inicio=hora_inicio, hora_fin=hora_fin, vigencia_inicio=vigencia_inicio,
+        vigencia_fin=vigencia_fin, id_profesional=reserva["IdProfesional"], excluir_id=id_reserva_regular,
+    )
+    bloqueantes = [c for c in conflictos if c.bloqueante]
+    if bloqueantes and not forzar:
+        raise ConflictoBloqueanteError(bloqueantes)
+    repo.actualizar(
+        id_reserva_regular, HoraInicio=hora_inicio, HoraFin=hora_fin,
+        VigenciaInicio=vigencia_inicio, VigenciaFin=vigencia_fin,
+    )
+    advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
+    if forzar:
+        advertencias += [c.mensaje for c in bloqueantes]
+    return advertencias
+
+
+def eliminar_reserva_regular(conn: sqlite3.Connection, id_reserva_regular: int) -> None:
+    """Botón "Eliminar reserva" (antes "Finalizar reserva a fin de mes",
+    renombrado a pedido explícito de la clienta) — a diferencia de
+    `finalizar_reserva_regular` (pone `VigenciaFin`, conserva la fila
+    histórica), esto BORRA la fila por completo. Mismo guardarraíl de
+    período cerrado que el resto de este módulo, aplicado sobre
+    `VigenciaInicio` de la fila (no hay otro punto de referencia real:
+    borrar una reserva cuya vigencia ya fue usada por una liquidación
+    posterior desalinearía esa liquidación sin dejar ningún rastro al
+    que una futura revisión pudiera recurrir)."""
+    repo = obtener_repositorio(conn, "ReservaRegular")
+    reserva = repo.obtener(id_reserva_regular)
+    if reserva is None:
+        raise ValueError(f"No existe la reserva regular #{id_reserva_regular}")
+    _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], reserva["VigenciaInicio"])
+    repo.eliminar(id_reserva_regular)
+
+
 def crear_reserva_aislada(
     conn: sqlite3.Connection, *, id_profesional: int, id_consultorio: int, fecha: str,
     hora_inicio: float, hora_fin: float, aplica_recargo: bool | None = None,
     es_reubicacion: bool = False, observacion: str | None = None, forzar: bool = False,
     es_extraordinaria: bool = False, item_extraordinario: str | None = None,
-    monto_extraordinario: float | None = None,
+    monto_extraordinario: float | None = None, periodo_imputado: str | None = None,
 ) -> tuple[int, list[str]]:
     """Las reservas aisladas no tienen ninguna restricción de bloques
     rígidos (DC-04 §2.2, confirmado por el usuario): esos bloques son una
@@ -410,6 +492,13 @@ def crear_reserva_aislada(
         EsExtraordinaria=int(es_extraordinaria),
         ItemExtraordinario=item_extraordinario if es_extraordinaria else None,
         MontoExtraordinario=monto_extraordinario if es_extraordinaria else None,
+        # Punto "En la tabla agregar el campo 'Período imputado'"
+        # (SistemaDF v0.11.2026.10, Reservas aisladas/extraordinarias):
+        # guardado tal cual lo resolvió la GUI (`_resolver_periodo_
+        # imputar`/el combo "Período a imputar") — "actual" o "siguiente"
+        # ya resuelto a un "AAAA-MM" concreto, para poder mostrarlo en la
+        # tabla sin tener que recalcularlo cada vez.
+        PeriodoImputado=periodo_imputado,
     )
     advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
     if forzar:
@@ -434,3 +523,57 @@ def cancelar_reserva_aislada(
 
     repo.actualizar(id_reserva_aislada, Estado="Cancelada")
     return requiere_aviso
+
+
+def modificar_reserva_aislada(
+    conn: sqlite3.Connection, id_reserva_aislada: int, *, hora_inicio: float, hora_fin: float,
+    aplica_recargo: bool | None = None, item_extraordinario: str | None = None,
+    monto_extraordinario: float | None = None, forzar: bool = False,
+) -> list[str]:
+    """Homólogo de `modificar_reserva_regular` para aisladas/
+    extraordinarias (#9.1.4 de Reservas regulares, pedido explícito de
+    que las otras dos solapas se comporten "de la misma manera"):
+    "Modificar reserva" edita la fila EXISTENTE (horario, y recargo o
+    ítem/monto según el tipo) en vez de cancelarla y precargar el
+    formulario para darla de alta de nuevo — profesional, ubicación y
+    fecha quedan fijos, se ajusta el resto desde un cuadro de diálogo.
+
+    Sin guardarraíl de "período cerrado" (a diferencia de la versión de
+    Regulares): una `ReservaAislada` nunca bloquea por eso, DC-06 §3 ya
+    la resuelve sola con el reparto de saldo entre períodos — este
+    método no cambia esa parte, solo el horario/monto de la fila."""
+    repo = obtener_repositorio(conn, "ReservaAislada")
+    reserva = repo.obtener(id_reserva_aislada)
+    if reserva is None:
+        raise ValueError(f"No existe la reserva aislada #{id_reserva_aislada}")
+    if hora_fin <= hora_inicio:
+        raise ValueError(
+            'El horario "hasta" tiene que ser posterior al horario "desde" — una reserva aislada '
+            "no puede cruzar medianoche (no se parte en dos días)."
+        )
+    _validar_fraccion_grilla(conn, hora_inicio, hora_fin)
+    conflictos = verificar_conflictos_aislada(
+        conn, id_consultorio=reserva["IdConsultorio"], fecha=reserva["Fecha"],
+        hora_inicio=hora_inicio, hora_fin=hora_fin, id_profesional=reserva["IdProfesional"],
+        excluir_id=id_reserva_aislada,
+    )
+    bloqueantes = [c for c in conflictos if c.bloqueante]
+    if bloqueantes and not forzar:
+        raise ConflictoBloqueanteError(bloqueantes)
+
+    campos: dict = dict(HoraInicio=hora_inicio, HoraFin=hora_fin)
+    if reserva["EsExtraordinaria"]:
+        if not (item_extraordinario or "").strip():
+            raise ValueError("Una reserva extraordinaria necesita un ítem a cargar (texto libre).")
+        if monto_extraordinario is None:
+            raise ValueError("Una reserva extraordinaria necesita un monto a cobrar.")
+        campos["ItemExtraordinario"] = item_extraordinario
+        campos["MontoExtraordinario"] = monto_extraordinario
+    else:
+        campos["AplicaRecargo"] = int(bool(aplica_recargo))
+    repo.actualizar(id_reserva_aislada, **campos)
+
+    advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
+    if forzar:
+        advertencias += [c.mensaje for c in bloqueantes]
+    return advertencias

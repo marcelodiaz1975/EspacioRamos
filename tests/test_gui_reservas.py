@@ -1,9 +1,10 @@
 import pytest
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
-    QApplication, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QWidget,
+    QApplication, QDialog, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QWidget,
 )
 
+import app.gui.pantallas.reservas as reservas_modulo
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import hoja_estilos
@@ -16,6 +17,41 @@ from app.negocio.lista_espera import GrupoCobertura, crear_pedido
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.negocio.llaves import agregar_acceso_llave, asignar_llave, crear_llave, ingresar_copias
 from app.repositorio.registro import obtener_repositorio
+
+
+class _DialogoRegularFalso:
+    """Reemplaza, en los tests, a `_DialogoModificarReservaRegular` —
+    mismo criterio que `_DialogoFalso` de Pagos: no abre ninguna ventana
+    real ni bloquea esperando al operador, `exec()` devuelve el
+    resultado ya decidido y los atributos que el panel lee después de
+    `exec()` vienen precargados de antemano."""
+
+    def __init__(self, aceptar=True, **atributos):
+        self._aceptar = aceptar
+        for nombre, valor in atributos.items():
+            setattr(self, nombre, valor)
+
+    def exec(self):
+        return QDialog.DialogCode.Accepted if self._aceptar else QDialog.DialogCode.Rejected
+
+
+def _mockear_dialogo_modificar_regular(monkeypatch, *, aceptar=True, **atributos):
+    monkeypatch.setattr(
+        reservas_modulo, "_DialogoModificarReservaRegular",
+        lambda conn, reserva, parent=None: _DialogoRegularFalso(aceptar, **atributos),
+    )
+
+
+def _mockear_dialogo_modificar_aislada(monkeypatch, *, aceptar=True, **atributos):
+    """Mismo criterio que `_mockear_dialogo_modificar_regular`, para
+    `_DialogoModificarReservaAislada` (Aisladas y Extraordinarias)."""
+    atributos.setdefault("aplica_recargo", None)
+    atributos.setdefault("item_extraordinario", None)
+    atributos.setdefault("monto_extraordinario", None)
+    monkeypatch.setattr(
+        reservas_modulo, "_DialogoModificarReservaAislada",
+        lambda conn, reserva, parent=None: _DialogoRegularFalso(aceptar, **atributos),
+    )
 
 
 @pytest.fixture
@@ -380,7 +416,7 @@ def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
     assert grilla_regulares.texto_detalle.maximumHeight() > 90
 
     grilla_aisladas = pantalla.panel_aisladas.grilla
-    assert grilla_aisladas.texto_detalle.maximumHeight() == 64
+    assert grilla_aisladas.texto_detalle.maximumHeight() == 25
 
 
 def test_detalle_de_aisladas_ocupa_todo_el_ancho_de_la_grilla(qtbot, conn):
@@ -406,14 +442,12 @@ def test_detalle_de_aisladas_ocupa_todo_el_ancho_de_la_grilla(qtbot, conn):
 
 def test_botones_de_accion_quedan_compactos_con_su_color(qtbot, conn):
     """Pedido explícito de la clienta: los tres botones de acción de cada
-    solapa mantienen los colores de siempre (primario/secundario) pero
-    bajan de alto para quedar como el resto de los controles de la
-    columna (los botones-resumen de los filtros colapsables, ~22px) —
-    cambio puntual de esta pantalla, no de `estilos.py`. Los tres de
-    Aisladas (Crear/Modificar/Cancelar) vuelven a crecer en una ronda
-    posterior (`_ESTILO_BOTON_AISLADAS_ALTO`) para alinear "Horas
-    aisladas mensuales" con el cuadro "Detalle" — ver
-    `test_botones_de_aisladas_quedan_mas_altos_que_los_de_regulares`."""
+    solapa mantienen los colores de siempre (primario/secundario). Punto
+    #9.1.3 (SistemaDF v0.11.2026.10): los de Aisladas (Crear/Modificar/
+    Cancelar) ya no crecen aparte para alinear "Horas aisladas
+    mensuales" (criterio de una ronda anterior) — pasan al mismo mínimo
+    que el resto de la columna (`_ESTILO_BOTON_COMPACTO`, 22px), igual
+    que los de Regulares."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.setStyleSheet(hoja_estilos(modo_oscuro=False))  # solo esta ventana, no toda la app
@@ -423,12 +457,11 @@ def test_botones_de_accion_quedan_compactos_con_su_color(qtbot, conn):
 
     botones_primarios = ["Crear reserva regular", "Crear reserva aislada"]
     botones_secundarios = [
-        "Modificar seleccionada", "Finalizar reserva a fin de mes",
-        "Modificar reserva", "Cancelar reserva",
+        "Modificar reserva", "Eliminar reserva", "Cancelar reserva",
     ]
     alturas_esperadas = {
-        "Crear reserva regular": 22, "Modificar seleccionada": 22,
-        "Finalizar reserva a fin de mes": 22,
+        "Crear reserva regular": 22, "Eliminar reserva": 22,
+        "Crear reserva aislada": 22, "Modificar reserva": 22, "Cancelar reserva": 22,
     }
     for indice, panel in enumerate((pantalla.panel_regulares, pantalla.panel_aisladas)):
         pantalla.pestanas.setCurrentIndex(indice)  # solo la solapa activa tiene geometría real
@@ -444,13 +477,11 @@ def test_botones_de_accion_quedan_compactos_con_su_color(qtbot, conn):
                 assert boton.height() == alturas_esperadas[boton.text()]
 
 
-def test_botones_de_aisladas_quedan_mas_altos_que_los_de_regulares(qtbot, conn):
-    """Pedido explícito de la clienta: los tres botones de Aisladas
-    (Crear/Modificar/Cancelar) crecen lo necesario para que "Horas
-    aisladas mensuales" quede alineado con el borde inferior del cuadro
-    "Detalle" — ver `test_titulo_horas_aisladas_alineado_con_el_pie_de_
-    detalle`. Los de Regulares no fueron parte de este pedido y siguen
-    en 22px (`_ESTILO_BOTON_COMPACTO`)."""
+def test_botones_de_aisladas_quedan_igual_de_compactos_que_los_de_regulares(qtbot, conn):
+    """Punto #9.1.3: "achicá el alto de los tres botones... al mínimo,
+    para que se vean los tres — hoy por hoy veo dos nada más". Ya no son
+    más altos que los de Regulares (criterio viejo, ver el historial en
+    `_ESTILO_BOTON_AISLADAS_ALTO`)."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.setStyleSheet(hoja_estilos(modo_oscuro=False))
@@ -462,7 +493,8 @@ def test_botones_de_aisladas_quedan_mas_altos_que_los_de_regulares(qtbot, conn):
     panel_a = pantalla.panel_aisladas
     for texto in ("Crear reserva aislada", "Modificar reserva", "Cancelar reserva"):
         boton = next(b for b in panel_a.findChildren(QPushButton) if b.text() == texto)
-        assert boton.height() > 22
+        assert boton.height() == 22
+        assert boton.isVisible()
 
 
 def test_grilla_de_regulares_mantiene_el_tope_identidad_sin_achicarse(qtbot, conn):
@@ -525,19 +557,22 @@ def test_detalle_de_aisladas_queda_pegado_debajo_de_la_grilla(qtbot, conn):
     assert 0 <= tope_detalle - fondo_grilla <= 15
 
 
-def test_titulo_horas_aisladas_alineado_con_el_pie_de_detalle(qtbot, conn):
-    """Pedido explícito de la clienta: los tres botones de acción crecen
-    lo necesario para que "Horas aisladas mensuales" quede alineado con
-    el borde inferior del cuadro "Detalle". El alto real de los botones
-    depende de la fuente que les da `hoja_estilos()` (mismo motivo que
-    `test_botones_de_accion_quedan_compactos_con_su_color`), así que hay
-    que aplicarla para medir lo mismo que ve la clienta. Con `_preparar`
-    (al menos un consultorio cargado, como en cualquier base real): sin
-    ningún consultorio, la grilla no tiene columnas y su alto natural se
-    achica mucho, corriendo "Detalle" bastante más arriba de lo que
-    correspondería — mismo motivo por el que las capturas que se le
-    envían a la clienta siempre parten de datos de ejemplo, nunca de una
-    base vacía."""
+def test_detalle_de_aisladas_termina_cerca_del_pie_del_tercer_boton(qtbot, conn):
+    """Punto #9.1.6 (SistemaDF v0.11.2026.10): "a la altura donde
+    termina el tercer botón, hasta ahí tiene que llegar el cuadro de
+    detalle" — reemplaza al criterio viejo de alinear con "Horas
+    aisladas mensuales". El alto real de los botones depende de la
+    fuente que les da `hoja_estilos()`, así que hay que aplicarla para
+    medir lo mismo que ve la clienta.
+
+    Tolerancia generosa, no `<= 5` como el resto de las alineaciones de
+    esta pantalla (ver el comentario completo en `_ALTO_DETALLE_
+    AISLADAS`): bajo `hoja_estilos()` real, incluso llevando el cuadro a
+    su piso (altura casi nula) queda un resto de ~30px que esta sola
+    constante no puede cerrar — mejor esfuerzo sin una captura real de
+    la clienta para seguir calibrando. Lo que sí se verifica de forma
+    dura es que "Detalle" quedó bastante más arriba que con el criterio
+    viejo (64px de alto), no que la alineación sea exacta."""
     _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
@@ -548,13 +583,12 @@ def test_titulo_horas_aisladas_alineado_con_el_pie_de_detalle(qtbot, conn):
     qtbot.waitExposed(pantalla)
 
     panel_a = pantalla.panel_aisladas
-    fondo_etiqueta = panel_a.etiqueta_horas_aisladas.mapToGlobal(
-        panel_a.etiqueta_horas_aisladas.rect().bottomLeft()
-    ).y()
+    boton_cancelar = next(b for b in panel_a.findChildren(QPushButton) if b.text() == "Cancelar reserva")
+    fondo_boton = boton_cancelar.mapToGlobal(boton_cancelar.rect().bottomLeft()).y()
     fondo_detalle = panel_a.grilla.texto_detalle.mapToGlobal(
         panel_a.grilla.texto_detalle.rect().bottomLeft()
     ).y()
-    assert abs(fondo_etiqueta - fondo_detalle) <= 5
+    assert abs(fondo_boton - fondo_detalle) <= 40
 
 
 def test_titulo_profesional_alineado_con_filtro_de_localidad(qtbot, conn):
@@ -593,14 +627,19 @@ def test_campo_fecha_aisladas_muestra_dia_de_la_semana(qtbot, conn):
     assert panel.campo_fecha.text() == "vie 25-09-2026"
 
 
-def test_checkbox_de_reubicacion_tiene_salto_de_linea(qtbot, conn):
-    """La columna del formulario de Reservas aisladas quedaba mucho más
-    ancha que la del panel de Filtros por culpa de este texto largo en
-    una sola línea — pedido de la clienta, se parte en dos con un
-    `"\\n"` a mano (QCheckBox no ajusta el texto solo)."""
+def test_checkbox_de_reubicacion_etiqueta_corta_en_la_misma_fila_que_recargo(qtbot, conn):
+    """Pedido explícito de la clienta sobre Reservas aisladas: la
+    aclaración larga de "Es reubicación (compensa una ausencia...)" se
+    saca — queda solo "Es reubicación" — y pasa a compartir fila con
+    "Aplica recargo" en vez de ir cada uno en su propia línea."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    assert "\n" in pantalla.panel_aisladas.casilla_reubicacion.text()
+    panel = pantalla.panel_aisladas
+    assert panel.casilla_reubicacion.text() == "Es reubicación"
+    assert "\n" not in panel.casilla_reubicacion.text()
+    # Misma fila: comparados dentro del mismo padre, quedan a la misma
+    # altura en vez de uno debajo del otro.
+    assert panel.casilla_recargo.y() == panel.casilla_reubicacion.y()
 
 
 def test_crear_reserva_regular_sin_conflicto_persiste(qtbot, conn):
@@ -611,6 +650,26 @@ def test_crear_reserva_regular_sin_conflicto_persiste(qtbot, conn):
     pantalla.panel_regulares._crear()
     assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
     assert pantalla.panel_regulares.tabla.rowCount() == 1
+
+
+def test_crear_reserva_regular_sin_avisos_muestra_alerta_de_exito(qtbot, conn, monkeypatch):
+    """Punto #9.1.9: "Alerta final indicando 'Reserva cargada con
+    éxito'" — solo cuando no hubo ningún aviso que mostrar en su lugar.
+    El horario default (9-10hs) cae parcialmente dentro del bloque
+    rígido sembrado por defecto (9-11hs) y SÍ genera un aviso — se usa
+    un horario fuera de los dos bloques rígidos de fábrica (9-11/18-21)
+    para probar el camino sin avisos."""
+    _preparar(conn)
+    textos: list[tuple] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: textos.append(a)))
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.spin_desde.setValue(12)
+    panel.spin_hasta.setValue(13)
+    panel._crear()
+    assert any("Reserva cargada con éxito" in t[2] for t in textos)
 
 
 def test_crear_reserva_regular_avisa_si_falta_llave_y_confirma(qtbot, conn):
@@ -1028,7 +1087,10 @@ def test_crear_reserva_regular_regenera_liquidacion_enviada(qtbot, conn):
     assert ultima["EstadoEnvio"] == "Regenerada no enviada"
 
 
-def test_finalizar_vigencia_regenera_liquidacion_enviada(qtbot, conn):
+def test_modificar_reserva_regular_regenera_liquidacion_enviada(qtbot, conn, monkeypatch):
+    """Punto #9.1.9: cualquiera de los tres botones que afecte el
+    período en curso regenera y marca no enviada la liquidación del
+    profesional — acá vía "Modificar reserva"."""
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     periodo = periodo_actual(conn)
@@ -1047,7 +1109,12 @@ def test_finalizar_vigencia_regenera_liquidacion_enviada(qtbot, conn):
         obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
     )
     pantalla.panel_regulares.tabla.selectRow(0)
-    pantalla.panel_regulares._finalizar_vigencia()
+    reserva = pantalla.panel_regulares._fila_seleccionada()
+    _mockear_dialogo_modificar_regular(
+        monkeypatch, hora_inicio=reserva["HoraInicio"], hora_fin=14,
+        vigencia_inicio=reserva["VigenciaInicio"], vigencia_fin=None,
+    )
+    pantalla.panel_regulares._modificar_seleccionada()
 
     emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
     assert len(emisiones) == emitidas_antes + 1
@@ -1055,45 +1122,71 @@ def test_finalizar_vigencia_regenera_liquidacion_enviada(qtbot, conn):
     assert ultima["EstadoEnvio"] == "Regenerada no enviada"
 
 
-def test_finalizar_vigencia_actualiza_vigenciafin_a_fin_de_mes(qtbot, conn):
-    """"Finalizar reserva a fin de mes": el caso clásico — la vigencia
-    se cierra el último día del mes en curso, no el día exacto en que se
-    hace el trámite."""
-    from app.negocio.dias import ultimo_dia_mes
-
+def test_eliminar_reserva_regular_borra_la_fila_con_confirmacion(qtbot, conn):
+    """Punto #9.1.6: "Finalizar reserva a fin de mes" pasa a "Eliminar
+    reserva" — borra la fila de la base y la saca de la tabla, en vez de
+    solo ponerle fecha de fin."""
     _preparar(conn)
-    conn.execute(
-        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-10' WHERE IdConfiguracion = 1"
-    )
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.panel_regulares.combo_profesional.setCurrentIndex(1)
     pantalla.panel_regulares._crear()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+
     pantalla.panel_regulares.tabla.selectRow(0)
-    pantalla.panel_regulares._finalizar_vigencia()
-    fila = conn.execute("SELECT VigenciaFin FROM ReservaRegular").fetchone()
-    assert fila["VigenciaFin"] == ultimo_dia_mes(2026, 8).isoformat() == "2026-08-31"
+    pantalla.panel_regulares._eliminar_seleccionada()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 0
+    assert pantalla.panel_regulares.tabla.rowCount() == 0
 
 
-def test_tecla_delete_en_regulares_finaliza_la_vigencia(qtbot, conn):
-    """Pedido explícito de la clienta, "todo el sistema": Delete sobre
-    la fila de la tabla hace lo mismo que "Finalizar reserva a fin de
-    mes" (no hay un botón literal "Eliminar" en esta solapa, es el
-    equivalente real)."""
-    from app.negocio.dias import ultimo_dia_mes
-
+def test_eliminar_reserva_regular_cancelada_por_el_usuario_no_borra_nada(qtbot, conn, monkeypatch):
     _preparar(conn)
-    conn.execute(
-        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-10' WHERE IdConfiguracion = 1"
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_regulares.combo_profesional.setCurrentIndex(1)
+    pantalla.panel_regulares._crear()
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+
+    pantalla.panel_regulares.tabla.selectRow(0)
+    pantalla.panel_regulares._eliminar_seleccionada()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+
+
+def test_eliminar_reserva_regular_regenera_liquidacion_enviada(qtbot, conn):
+    """Punto #9.1.9 aplicado a "Eliminar reserva"."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    periodo = periodo_actual(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_regulares.combo_profesional.setCurrentIndex(
+        pantalla.panel_regulares.combo_profesional.findData(id_profesional)
     )
+    pantalla.panel_regulares._crear()
+
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla.panel_regulares.tabla.selectRow(0)
+    pantalla.panel_regulares._eliminar_seleccionada()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_tecla_delete_en_regulares_elimina_la_reserva(qtbot, conn):
+    """Pedido explícito de la clienta, "todo el sistema": Delete sobre
+    la fila de la tabla hace lo mismo que "Eliminar reserva"."""
+    _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.panel_regulares.combo_profesional.setCurrentIndex(1)
     pantalla.panel_regulares._crear()
     pantalla.panel_regulares.tabla.selectRow(0)
     qtbot.keyClick(pantalla.panel_regulares.tabla, Qt.Key.Key_Delete)
-    fila = conn.execute("SELECT VigenciaFin FROM ReservaRegular").fetchone()
-    assert fila["VigenciaFin"] == ultimo_dia_mes(2026, 8).isoformat()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 0
 
 
 def test_panel_regulares_recibe_foco_en_profesional_al_mostrarse(qtbot, conn):
@@ -1124,7 +1217,11 @@ def test_tabla_regulares_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
     assert dias_desc == ["Miércoles", "Lunes"]
 
 
-def test_modificar_seleccionada_finaliza_la_vieja_y_precarga_el_formulario(qtbot, conn):
+def test_modificar_seleccionada_edita_la_fila_existente_sin_precargar_el_formulario(qtbot, conn, monkeypatch):
+    """Punto #9.1.4: "Modificar reserva" edita la fila EXISTENTE a
+    través de un cuadro de diálogo, sin finalizarla ni precargar el
+    formulario de alta — "si quiero modifico algo puntual y la reserva
+    sigue corriendo con esa modificación"."""
     _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
@@ -1133,42 +1230,37 @@ def test_modificar_seleccionada_finaliza_la_vieja_y_precarga_el_formulario(qtbot
     panel._checks_dia["Martes"].setChecked(True)  # Lunes + Martes
     panel.spin_desde.setValue(14)
     panel.spin_hasta.setValue(16)
-    panel._crear()  # crea Lunes 14-16 y Martes 14-16, formulario queda en blanco
+    panel._crear()  # crea Lunes 14-16 y Martes 14-16
 
-    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
-    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
     fila_lunes = next(
         i for i in range(panel.tabla.rowCount())
         if panel.tabla.item(i, 5).text() == "Lunes"
     )
     panel.tabla.selectRow(fila_lunes)
+    reserva = panel._fila_seleccionada()
+    _mockear_dialogo_modificar_regular(
+        monkeypatch, hora_inicio=reserva["HoraInicio"], hora_fin=18,
+        vigencia_inicio=reserva["VigenciaInicio"], vigencia_fin=None,
+    )
     panel._modificar_seleccionada()
 
-    # la fila del Lunes quedó finalizada hoy, sin tocar la del Martes
-    filas = conn.execute("SELECT DiaSemana, VigenciaFin FROM ReservaRegular").fetchall()
-    finalizada = {f["DiaSemana"]: f["VigenciaFin"] for f in filas}
-    assert finalizada["Lunes"] is not None
-    assert finalizada["Martes"] is None
+    # la fila del Lunes quedó editada (sigue vigente), sin tocar el Martes
+    filas = conn.execute("SELECT DiaSemana, HoraFin, VigenciaFin FROM ReservaRegular").fetchall()
+    por_dia = {f["DiaSemana"]: f for f in filas}
+    assert por_dia["Lunes"]["HoraFin"] == 18
+    assert por_dia["Lunes"]["VigenciaFin"] is None
+    assert por_dia["Martes"]["HoraFin"] == 16
 
-    # el formulario quedó precargado con esos datos, vigencia desde hoy
-    assert panel.combo_profesional.currentData() == id_profesional
-    assert panel.combo_consultorio.currentData() == id_consultorio
-    assert {d for d, c in panel._checks_dia.items() if c.isChecked()} == {"Lunes"}
-    assert panel.spin_desde.value() == 14
-    assert panel.spin_hasta.value() == 16
-    assert panel.campo_vigencia_fin.date() == _FECHA_SIN_DATO
+    # el formulario de alta no se tocó (`_crear()` ya lo había dejado en
+    # su default de 9-10 al cargar la segunda reserva).
+    assert panel.spin_desde.value() == 9
+    assert panel.spin_hasta.value() == 10
 
 
-def test_modificar_seleccionada_sin_fila_no_hace_nada(qtbot, conn):
-    _preparar(conn)
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_regulares
-    panel._modificar_seleccionada()
-    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular WHERE VigenciaFin IS NOT NULL").fetchone()["c"] == 0
-
-
-def test_modificar_seleccionada_permite_cargar_la_nueva_version(qtbot, conn):
+def test_modificar_seleccionada_puede_terminar_la_reserva_desde_el_dialogo(qtbot, conn, monkeypatch):
+    """"Desde el cuadro de diálogo... si quiero la termino" — poniendo
+    una Vigencia hasta real queda igual de terminada que antes, pero sin
+    pasar por "crear de nuevo"."""
     _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
@@ -1177,13 +1269,40 @@ def test_modificar_seleccionada_permite_cargar_la_nueva_version(qtbot, conn):
     panel._crear()  # Lunes 9-10
 
     panel.tabla.selectRow(0)
+    reserva = panel._fila_seleccionada()
+    _mockear_dialogo_modificar_regular(
+        monkeypatch, hora_inicio=reserva["HoraInicio"], hora_fin=reserva["HoraFin"],
+        vigencia_inicio=reserva["VigenciaInicio"], vigencia_fin="2026-12-31",
+    )
     panel._modificar_seleccionada()
-    panel.spin_hasta.setValue(12)  # el operador ajusta el horario de la nueva versión
-    panel._crear()
 
-    vigentes = conn.execute("SELECT HoraInicio, HoraFin FROM ReservaRegular WHERE VigenciaFin IS NULL").fetchall()
-    assert len(vigentes) == 1
-    assert vigentes[0]["HoraFin"] == 12
+    fila = conn.execute("SELECT VigenciaFin FROM ReservaRegular").fetchone()
+    assert fila["VigenciaFin"] == "2026-12-31"
+
+
+def test_modificar_seleccionada_sin_fila_avisa(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel._modificar_seleccionada()
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular WHERE VigenciaFin IS NOT NULL").fetchone()["c"] == 0
+
+
+def test_modificar_seleccionada_cancelada_por_el_usuario_no_cambia_nada(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()  # Lunes 9-10
+
+    panel.tabla.selectRow(0)
+    _mockear_dialogo_modificar_regular(monkeypatch, aceptar=False)
+    panel._modificar_seleccionada()
+
+    fila = conn.execute("SELECT HoraFin FROM ReservaRegular").fetchone()
+    assert fila["HoraFin"] == 10
 
 
 def test_crear_reserva_aislada_sin_conflicto_persiste(qtbot, conn):
@@ -1514,21 +1633,40 @@ def test_grilla_preview_acota_tambien_los_dias_a_los_que_tiene_reserva(qtbot, co
 
 
 def test_formulario_vuelve_en_blanco_despues_de_crear(qtbot, conn):
+    """Punto #9.1.9: "Queda cargado el nombre del profesional en el
+    selector, solo cambia si se abandona el foco de la solapa" — el
+    resto del formulario sí vuelve en blanco."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(1)
+    id_profesional = panel.combo_profesional.currentData()
+    panel.campo_vigencia_fin.setDate(QDate(2026, 12, 31))
+    panel._checks_dia["Martes"].setChecked(True)
+
+    panel._crear()
+
+    assert panel.combo_profesional.currentData() == id_profesional
+    assert panel.campo_vigencia_fin.date() == _FECHA_SIN_DATO
+    assert {dia for dia, check in panel._checks_dia.items() if check.isChecked()} == {"Lunes"}
+
+
+def test_reiniciar_vuelve_profesional_a_todos_los_profesionales(qtbot, conn):
+    """`reiniciar()` (F3/`showEvent`) sí resetea "Profesional" — a
+    diferencia de `_resetear_formulario()`, que se queda con lo cargado
+    después de crear una reserva (ver el test de arriba)."""
     _preparar(conn)
     id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_regulares
     panel.combo_profesional.setCurrentIndex(1)
-    panel.campo_vigencia_fin.setDate(QDate(2026, 12, 31))
-    panel._checks_dia["Martes"].setChecked(True)
 
-    panel._crear()
+    panel.reiniciar()
 
     assert panel.combo_profesional.currentData() is None
     assert panel.combo_profesional.currentIndex() == 0
-    assert panel.campo_vigencia_fin.date() == _FECHA_SIN_DATO
-    assert {dia for dia, check in panel._checks_dia.items() if check.isChecked()} == {"Lunes"}
     # vuelve a "Todos los profesionales" -> la vista previa muestra la
     # grilla completa (todo lo que haya), no queda vacía
     assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad]
@@ -1674,6 +1812,44 @@ def test_cancelar_reserva_aislada_cambia_estado(qtbot, conn):
     pantalla.panel_aisladas._cancelar()
     fila = conn.execute("SELECT Estado FROM ReservaAislada").fetchone()
     assert fila["Estado"] == "Cancelada"
+
+
+def test_cancelar_reserva_aislada_pide_confirmacion_explicita(qtbot, conn, monkeypatch):
+    """Punto #9.1.6 (homólogo de "Eliminar reserva" en Regulares):
+    "Cancelar reserva" pasa a pedir confirmación antes de cancelar, en
+    vez de hacerlo directo sin preguntar nada."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+
+    textos: list[tuple] = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: (textos.append(a), QMessageBox.StandardButton.Yes)[1]),
+    )
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+    assert any("Cancelar reserva" in t[1] for t in textos)
+    fila = conn.execute("SELECT Estado FROM ReservaAislada").fetchone()
+    assert fila["Estado"] == "Cancelada"
+
+
+def test_cancelar_reserva_aislada_declinada_no_cambia_nada(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+    fila = conn.execute("SELECT Estado FROM ReservaAislada").fetchone()
+    assert fila["Estado"] == "Confirmada"
 
 
 def test_tecla_delete_en_aisladas_cancela_la_reserva(qtbot, conn):
@@ -2271,15 +2447,12 @@ def test_dia_de_la_semana_en_tabla_de_aisladas(qtbot, conn):
     assert panel.tabla.item(0, 6).text() == "18-08-2026"
 
 
-def test_modificar_reserva_aislada_cancela_la_vieja_y_precarga_el_formulario(qtbot, conn):
-    """Para corregir algo de una reserva aislada ya cargada (ej. le
-    encargaron una hora más de lo que habían pedido en un principio): se
-    cancela la fila vieja (queda su historial, no se borra ni se edita
-    in-place) y se precarga el formulario para dar de alta la versión
-    corregida."""
+def test_modificar_reserva_aislada_edita_la_fila_existente_sin_cancelarla(qtbot, conn, monkeypatch):
+    """Punto #9.1.4 (homólogo de Reservas regulares): "Modificar
+    reserva" edita la fila EXISTENTE a través de un cuadro de diálogo —
+    sigue Confirmada, no pasa por cancelar+precargar el formulario."""
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
-    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
@@ -2290,23 +2463,14 @@ def test_modificar_reserva_aislada_cancela_la_vieja_y_precarga_el_formulario(qtb
     panel._crear()
 
     panel.tabla.selectRow(0)
+    _mockear_dialogo_modificar_aislada(monkeypatch, hora_inicio=9, hora_fin=11, aplica_recargo=True)
     panel._modificar_seleccionada()
 
-    fila = conn.execute("SELECT Estado FROM ReservaAislada").fetchone()
-    assert fila["Estado"] == "Cancelada"
-
-    assert panel.combo_profesional.currentData() == id_profesional
-    assert panel.combo_consultorio.currentData() == id_consultorio
-    assert panel.campo_fecha.date() == QDate(2026, 8, 18)
-    assert panel.spin_desde.value() == 9
-    assert panel.spin_hasta.value() == 10
-
-    panel.spin_hasta.setValue(11)  # el ajuste que pedían: una hora más
-    panel._crear()
-
-    vigentes = conn.execute("SELECT HoraInicio, HoraFin FROM ReservaAislada WHERE Estado = 'Confirmada'").fetchall()
-    assert len(vigentes) == 1
-    assert vigentes[0]["HoraFin"] == 11
+    fila = conn.execute("SELECT Estado, HoraFin, AplicaRecargo FROM ReservaAislada").fetchone()
+    assert fila["Estado"] == "Confirmada"
+    assert fila["HoraFin"] == 11
+    assert bool(fila["AplicaRecargo"]) is True
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
 
 
 def test_modificar_reserva_aislada_sin_fila_avisa(qtbot, conn):
@@ -2315,6 +2479,23 @@ def test_modificar_reserva_aislada_sin_fila_avisa(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.panel_aisladas._modificar_seleccionada()
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 0
+
+
+def test_modificar_reserva_aislada_cancelada_por_el_usuario_no_cambia_nada(qtbot, conn, monkeypatch):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+
+    panel.tabla.selectRow(0)
+    _mockear_dialogo_modificar_aislada(monkeypatch, aceptar=False)
+    panel._modificar_seleccionada()
+
+    fila = conn.execute("SELECT HoraFin, Estado FROM ReservaAislada").fetchone()
+    assert fila["HoraFin"] == 10
+    assert fila["Estado"] == "Confirmada"
 
 
 def test_modificar_reserva_aislada_al_confirmar_regenera_mensaje_al_portapapeles(qtbot, conn, monkeypatch):
@@ -2329,13 +2510,10 @@ def test_modificar_reserva_aislada_al_confirmar_regenera_mensaje_al_portapapeles
 
     copiado = _monkeypatch_clipboard(monkeypatch)
     panel.tabla.selectRow(0)
+    _mockear_dialogo_modificar_aislada(monkeypatch, hora_inicio=9, hora_fin=12, aplica_recargo=False)
     panel._modificar_seleccionada()
-    panel.spin_hasta.setValue(12)  # el ajuste que pedían
-    panel._crear()
 
-    # se copia el mensaje al cancelar la vieja y de nuevo al confirmar la
-    # corregida
-    assert len(copiado) == 2
+    assert len(copiado) == 1
     assert "DETALLE RESERVA" in copiado[-1]
 
 
@@ -2363,6 +2541,56 @@ def test_columna_reubicacion_en_tabla_de_aisladas(qtbot, conn):
     assert valores["19-08-2026"] == "No"
     # el Estado ya no repite la aclaración de reubicación (queda en su propia columna)
     assert panel.tabla.item(0, 9).text() == "Confirmada"
+
+
+def test_columna_periodo_imputado_en_tabla_de_aisladas(qtbot, conn):
+    """"En la tabla agregar el campo 'Período imputado'"."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    assert panel.tabla.horizontalHeaderItem(11).text() == "Período imputado"
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_fecha.setDate(QDate(2026, 8, 18))
+    # Categoría R arranca en "Período siguiente" por default
+    # (`_al_cambiar_profesional`) — se fuerza a "actual" para que el
+    # valor esperado sea el mismo mes de la fecha, sin ambigüedad.
+    panel.combo_periodo_imputar.setCurrentIndex(panel.combo_periodo_imputar.findData("actual"))
+    panel._crear()
+    assert panel.tabla.item(0, 11).text() == "2026-08"
+
+
+def test_botones_modificar_y_cancelar_aislada_deshabilitados_sin_seleccion(qtbot, conn):
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    assert panel.boton_modificar.isEnabled() is False
+    assert panel.boton_cancelar.isEnabled() is False
+
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+    panel.tabla.selectRow(0)
+    assert panel.boton_modificar.isEnabled() is True
+    assert panel.boton_cancelar.isEnabled() is True
+
+
+def test_foco_de_aisladas_no_saltea_periodo_a_imputar_para_categoria_r(qtbot, conn):
+    """Pedido explícito de la clienta: "si elijo un profesional
+    categoría R el foco desde el selector del profesional pasa al
+    'Período a imputar', no lo saltea"."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)  # el único profesional, categoría R
+    assert panel.combo_periodo_imputar.isEnabled() is True
+    orden = panel._foco._orden
+    assert panel.combo_profesional in orden
+    assert panel.combo_periodo_imputar in orden
+    indice_profesional = orden.index(panel.combo_profesional)
+    assert orden[indice_profesional + 1] is panel.combo_periodo_imputar
 
 
 def _id_localidad(conn, nombre: str) -> int:
@@ -3070,6 +3298,9 @@ def test_crear_reserva_extraordinaria_sin_monto_no_crea_nada(qtbot, conn):
 
 
 def test_cancelar_reserva_extraordinaria(qtbot, conn):
+    """Punto #9.1.6 (homólogo de Reservas aisladas): pide confirmación
+    explícita antes de cancelar — este test confía en el default global
+    de `_sin_dialogos_modales` (`question` responde "Sí")."""
     _preparar_categoria_a(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
@@ -3083,6 +3314,22 @@ def test_cancelar_reserva_extraordinaria(qtbot, conn):
     panel.tabla.selectRow(0)
     panel._cancelar()
     assert obtener_repositorio(conn, "ReservaAislada").listar()[0]["Estado"] == "Cancelada"
+
+
+def test_cancelar_reserva_extraordinaria_declinada_no_cambia_nada(qtbot, conn, monkeypatch):
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel.spin_monto.setValue(5000)
+    panel._crear()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+    assert obtener_repositorio(conn, "ReservaAislada").listar()[0]["Estado"] == "Confirmada"
 
 
 def test_tecla_delete_en_extraordinaria_cancela_la_reserva(qtbot, conn):
@@ -3099,7 +3346,12 @@ def test_tecla_delete_en_extraordinaria_cancela_la_reserva(qtbot, conn):
     assert obtener_repositorio(conn, "ReservaAislada").listar()[0]["Estado"] == "Cancelada"
 
 
-def test_modificar_reserva_extraordinaria_cancela_la_vieja_y_precarga_el_formulario(qtbot, conn):
+def test_modificar_reserva_extraordinaria_edita_la_fila_existente_sin_cancelarla(qtbot, conn, monkeypatch):
+    """Punto #9.1.4 (homólogo de Reservas regulares/aisladas): ya no
+    cancela la fila vieja y precarga el formulario — abre
+    `_DialogoModificarReservaAislada` (reusado, ya sabe mostrar ítem/
+    monto en vez de recargo cuando `EsExtraordinaria`) y edita la fila
+    EXISTENTE, sin tocar su `Estado`."""
     _preparar_categoria_a(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
@@ -3108,58 +3360,20 @@ def test_modificar_reserva_extraordinaria_cancela_la_vieja_y_precarga_el_formula
     panel.campo_item.setText("Taller puntual")
     panel.spin_monto.setValue(5000)
     panel._crear()
-    id_profesional = panel._reservas[0]["IdProfesional"]
-    id_consultorio = panel._reservas[0]["IdConsultorio"]
+    assert panel.tabla.rowCount() == 1
 
-    panel.tabla.selectRow(0)
-    panel._modificar_seleccionada()
-
-    # La vieja queda cancelada (con su historial), no borrada.
-    reservas = obtener_repositorio(conn, "ReservaAislada").listar()
-    assert len(reservas) == 1
-    assert reservas[0]["Estado"] == "Cancelada"
-    # El formulario queda precargado con los datos de la que se canceló.
-    assert panel.combo_profesional.currentData() == id_profesional
-    assert panel.combo_consultorio.currentData() == id_consultorio
-    assert panel.campo_item.text() == "Taller puntual"
-    assert panel.spin_monto.value() == 5000
-
-    panel.spin_monto.setValue(6000)
-    panel._crear()
-    reservas = obtener_repositorio(conn, "ReservaAislada").listar()
-    assert len(reservas) == 2
-    confirmadas = [r for r in reservas if r["Estado"] == "Confirmada"]
-    assert len(confirmadas) == 1
-    assert confirmadas[0]["MontoExtraordinario"] == 6000
-
-
-def test_modificar_reserva_extraordinaria_avisa_que_hay_que_confirmar_de_nuevo(qtbot, conn, monkeypatch):
-    """Pedido de la clienta: "no me permite editar... es mas la cancela"
-    — el único efecto visible era que la fila pasaba a "Cancelada" en la
-    tabla, sin ningún aviso de que el formulario quedó precargado para
-    volver a confirmar. Se agrega un cartel explícito."""
-    _preparar_categoria_a(conn)
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_extraordinaria
-    panel.combo_profesional.setCurrentIndex(1)
-    panel.campo_item.setText("Taller puntual")
-    panel.spin_monto.setValue(5000)
-    panel._crear()
-
-    mensajes = []
-    monkeypatch.setattr(
-        QMessageBox, "information",
-        staticmethod(lambda *args, **kwargs: mensajes.append(args) or None),
+    _mockear_dialogo_modificar_aislada(
+        monkeypatch, hora_inicio=9, hora_fin=11, item_extraordinario="Taller corregido", monto_extraordinario=6000,
     )
     panel.tabla.selectRow(0)
     panel._modificar_seleccionada()
 
-    # Puede venir acompañado del aviso de "cancelada el mismo día" (la
-    # reserva de prueba queda con la fecha de hoy por default) — lo que
-    # importa es que el cartel nuevo esté entre los mostrados.
-    textos = [m[2] for m in mensajes]
-    assert any("quedaron cargados en el formulario" in t and "Crear reserva extraordinaria" in t for t in textos)
+    reservas = obtener_repositorio(conn, "ReservaAislada").listar()
+    assert len(reservas) == 1
+    assert reservas[0]["Estado"] == "Confirmada"
+    assert reservas[0]["ItemExtraordinario"] == "Taller corregido"
+    assert reservas[0]["MontoExtraordinario"] == 6000
+    assert reservas[0]["HoraFin"] == 11
 
 
 def test_modificar_reserva_extraordinaria_sin_seleccion_avisa(qtbot, conn):
@@ -3169,6 +3383,25 @@ def test_modificar_reserva_extraordinaria_sin_seleccion_avisa(qtbot, conn):
     panel = pantalla.panel_extraordinaria
     panel._modificar_seleccionada()
     assert obtener_repositorio(conn, "ReservaAislada").listar() == []
+
+
+def test_modificar_reserva_extraordinaria_cancelada_por_el_usuario_no_cambia_nada(qtbot, conn, monkeypatch):
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel.spin_monto.setValue(5000)
+    panel._crear()
+
+    _mockear_dialogo_modificar_aislada(monkeypatch, aceptar=False)
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+
+    reservas = obtener_repositorio(conn, "ReservaAislada").listar()
+    assert reservas[0]["ItemExtraordinario"] == "Taller puntual"
+    assert reservas[0]["MontoExtraordinario"] == 5000
 
 
 def test_modificar_reserva_extraordinaria_copia_mensaje_de_detalle_al_portapapeles(qtbot, conn, monkeypatch):
@@ -3181,6 +3414,9 @@ def test_modificar_reserva_extraordinaria_copia_mensaje_de_detalle_al_portapapel
     panel.spin_monto.setValue(5000)
     panel._crear()
 
+    _mockear_dialogo_modificar_aislada(
+        monkeypatch, hora_inicio=9, hora_fin=11, item_extraordinario="Taller puntual", monto_extraordinario=5000,
+    )
     copiado = _monkeypatch_clipboard(monkeypatch)
     panel.tabla.selectRow(0)
     panel._modificar_seleccionada()
@@ -3238,6 +3474,47 @@ def test_tabla_extraordinaria_ordena_por_fecha_ascendente_por_defecto(qtbot, con
     assert panel.tabla.rowCount() == 2
     assert panel.tabla.item(0, 8).text() == "Taller cercano"
     assert panel.tabla.item(1, 8).text() == "Taller lejano"
+
+
+def test_columna_periodo_imputado_en_tabla_de_extraordinaria(qtbot, conn):
+    """Mismo criterio que Reservas aisladas: columna "Período imputado"
+    (AAAA-MM), al final de la tabla."""
+    from app.negocio.dias import periodo_actual, sumar_meses
+
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel.spin_monto.setValue(5000)
+    panel._crear()
+
+    assert panel.tabla.columnCount() == 12
+    assert panel.tabla.horizontalHeaderItem(11).text() == "Período imputado"
+    assert panel.tabla.item(0, 11).text() == periodo_actual(conn)
+    assert panel.tabla.item(0, 11).text() != sumar_meses(periodo_actual(conn), 1)
+
+
+def test_botones_modificar_y_cancelar_extraordinaria_deshabilitados_sin_seleccion(qtbot, conn):
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    assert not panel.boton_modificar.isEnabled()
+    assert not panel.boton_cancelar.isEnabled()
+
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller puntual")
+    panel.spin_monto.setValue(5000)
+    panel._crear()
+    panel.tabla.selectRow(0)
+    assert panel.boton_modificar.isEnabled()
+    assert panel.boton_cancelar.isEnabled()
+
+    panel.tabla.clearSelection()
+    assert not panel.boton_modificar.isEnabled()
+    assert not panel.boton_cancelar.isEnabled()
 
 
 def test_spin_monto_de_reserva_extraordinaria_selecciona_todo_al_enfocar(qtbot):

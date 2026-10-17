@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -593,7 +594,29 @@ class LeyendaColores(QGroupBox):
             fila, columna = divmod(i, self._columnas)
             muestra = _CeldaGrilla(celda, (0, "Lunes", 0), lambda *_: None)
             muestra.setFixedSize(*self._tamano_muestra)
-            self._layout.addWidget(muestra, fila, columna * 2)
+            # Punto #9.1.2 (SistemaDF v0.11.2026.10): "que los cuadritos de
+            # las referencias de colores sean recuadrados con una línea
+            # finita negra... para que se vean delimitados" — a diferencia
+            # de una celda real de la grilla (que solo pinta abajo/derecha,
+            # ver `_dibujar_bordes_gruesos`), acá conviene un marco CERRADO
+            # en las 4 caras. Se probó primero con `WA_StyledBackground`
+            # directo sobre `_CeldaGrilla` (el QSS de `estilos.py` le
+            # dibujaría el borde encima, acotado por objectName) — se
+            # descartó: combinar ese atributo con el `paintEvent` propio de
+            # `_CeldaGrilla` (que no llama a `super().paintEvent()`)
+            # terminó en un segfault real, reproducido corriendo la suite
+            # completa (confirmado con/sin el cambio, no es un falso
+            # positivo). Un `QFrame` envolvente SÍ soporta un borde de QSS
+            # de forma nativa (mismo mecanismo que cualquier otro borde de
+            # este sistema, ej. `QFrame#tarjetaAlerta`), sin tocar el
+            # paintEvent compartido por el resto de los usos de esta celda
+            # en la grilla real.
+            marco_muestra = QFrame()
+            marco_muestra.setObjectName("muestraLeyenda")
+            layout_marco = QHBoxLayout(marco_muestra)
+            layout_marco.setContentsMargins(0, 0, 0, 0)
+            layout_marco.addWidget(muestra)
+            self._layout.addWidget(marco_muestra, fila, columna * 2)
             etiqueta = QLabel(texto)
             etiqueta.setWordWrap(True)
             if self._tamano_fuente is not None:

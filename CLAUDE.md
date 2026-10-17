@@ -9892,3 +9892,216 @@ setattr` dentro del test. Un default seguro así, aplicado una sola vez,
 cubre también cualquier `QMessageBox` que se sume de acá en adelante en
 el resto de este documento sin tener que acordarse de mockearlo archivo
 por archivo.
+
+## Reservas (las tres solapas): batch completo (#9.1.x del documento)
+
+Décima tanda de `v0.11.2026.10`, cerrando la cuarta sección del
+documento ("RESERVAS"). Las tres solapas (Reservas regulares/aisladas/
+extraordinarias) comparten el mismo set de puntos — `reiniciar()`/
+`showEvent` (1.4, ya cumplido desde una ronda anterior en las tres),
+`excluir_tabla_del_tab` (1.5, ídem), foco visible en combos/checks
+(1.7, ídem), líneas de grilla sin doble efecto (1.8, exclusivo de
+Regulares/Aisladas, que embeben la grilla), `regenerar_si_corresponde`
+tras cualquier recálculo del período actual (1.9, ya cumplido), fecha
+con día de semana (1.10, ya cumplido), sábado en negro (1.13, ya
+cumplido) — así que esta tanda se concentró en los puntos propios de
+cada solapa que SÍ faltaban: diálogo de edición en vez de "cancela y
+precarga" (#9.1.4), confirmación explícita antes de cancelar/eliminar
+(#9.1.6), botones deshabilitados sin selección (1.11/EN GENERAL, ya
+aplicado en el resto del sistema), y varios ajustes puntuales de cada
+solapa.
+
+### Reservas regulares
+
+- **`eliminar_reserva_regular` (nueva, `app.negocio.reservas`)**: el
+  botón pasa de "Finalizar reserva a fin de mes" (pone `VigenciaFin`,
+  conserva la fila) a "Eliminar reserva" — BORRA la fila por completo.
+  Mismo guardarraíl de período cerrado que el resto del módulo
+  (`_validar_vigencia_no_cerrada` sobre `VigenciaInicio` de la fila):
+  no se puede eliminar una reserva cuya vigencia ya haya sido usada por
+  una liquidación posterior, porque eso desalinearía esa liquidación
+  sin dejar ningún rastro al que una futura revisión pudiera recurrir.
+- **`modificar_reserva_regular` (nueva) + `_DialogoModificarReservaRegular`
+  (GUI)**: punto #9.1.4 — "Modificar reserva" deja de finalizar la fila
+  vieja y precargar el formulario de alta (que daba la impresión de
+  solo cancelarla, sin dejar en claro que quedaba algo pendiente de
+  confirmar) y pasa a un diálogo propio que edita Horario/Vigencia de
+  la fila EXISTENTE, dejándola corriendo con la modificación aplicada.
+  Profesional/Consultorio/Día se muestran de solo lectura (cambiarlos
+  es, en los hechos, dar de alta una reserva distinta). "Si quiero la
+  termino desde el cuadro de diálogo" — alcanza con poner una Vigencia
+  hasta real en vez de dejarla en "(sin fecha)", sin ningún control
+  aparte. Mismos guardarraíles que `crear_reserva_regular`: ninguna
+  vigencia (la vieja de la fila NI la nueva) puede caer en un período
+  ya cerrado, y la superposición contra otra reserva se vuelve a
+  chequear con `excluir_id` para no comparar la fila contra sí misma.
+- Botones "Modificar reserva"/"Eliminar reserva" deshabilitados sin
+  fila seleccionada (`self.boton_modificar`/`self.boton_eliminar`,
+  antes variables locales).
+- Alerta de éxito explícita ("Reserva cargada con éxito.") cuando
+  "Crear reserva regular" termina sin ningún aviso — antes el único
+  camino "silencioso" (sin avisos de conflicto) no mostraba ningún
+  cartel, dejando la duda de si de verdad se había guardado.
+- `wordWrap(True)` en las etiquetas de resumen ("Cantidad de horas
+  regulares semanales"/"% Descuento") — un texto más largo que la
+  columna quedaba tapado por el panel de al lado o cortado contra el
+  borde de la ventana en vez de pasar a una segunda línea.
+- Foco: "Filtro de día de la semana" (panel de Filtros de la grilla
+  embebida) dejaba de estar en la cadena nativa de Tab entre "Filtro de
+  unidad" y "Profesional" — causa real: `agrupar_dias_en_pares()`
+  reparenta esos checks a un contenedor nuevo DESPUÉS de construido el
+  resto del panel, y Qt los reinserta al final de la cadena nativa.
+  `GrillaOperativaWidget.widgets_filtro_para_foco()` (nueva) devuelve,
+  en orden visual, los botones-resumen de los filtros colapsables +
+  cada check de día + el combo de Profesional, para que Reservas (las
+  dos solapas con grilla embebida) arme su propia cadena explícita
+  sobre ese panel en vez de depender del orden nativo.
+
+### Reservas aisladas
+
+- **`modificar_reserva_aislada` (nueva, `app.negocio.reservas`) +
+  `_DialogoModificarReservaAislada` (GUI)**: homólogo de Regulares,
+  pero armado desde el principio para servir TAMBIÉN a Extraordinarias
+  (que son `ReservaAislada` con `EsExtraordinaria=True`) — el diálogo
+  muestra "Aplica recargo" (checkbox) para una aislada común, o "Ítem a
+  cargar"/"Monto a cobrar" para una extraordinaria, según
+  `reserva["EsExtraordinaria"]`, sin duplicar ningún código entre las
+  dos solapas. Mismos guardarraíles de conflicto que
+  `crear_reserva_aislada` (con `excluir_id` para no chocar contra sí
+  misma).
+- **"Cancelar reserva" pide confirmación explícita** (#9.1.6, antes
+  cancelaba directo sin preguntar nada): `QMessageBox.question` con el
+  profesional, día de semana y horario de la reserva seleccionada.
+- **Columna "Período imputado" (`ReservaAislada.PeriodoImputado`,
+  columna nueva en el schema)**: se guarda ya resuelto a "AAAA-MM" (no
+  "actual"/"siguiente" tal cual viene del combo) al crear la reserva —
+  `_resolver_periodo_imputar` (compartida con Extraordinarias) sigue
+  siendo la que decide el efecto real sobre la liquidación
+  (`regenerar_si_corresponde` si es el período actual, nada si es el
+  siguiente — ese caso se resuelve solo cuando `calcular_liquidacion`
+  llegue a ese mes), la columna de la tabla es puramente informativa.
+- **Foco: "Período a imputar" no se saltea para categoría R.** Faltaba
+  por completo de la cadena de `self._foco` — pedido explícito de la
+  clienta: "si elijo un profesional categoría R el foco desde el
+  selector del profesional pasa al 'Período a imputar', no lo saltea".
+  Al estar deshabilitado para A/B (`_al_cambiar_profesional`),
+  `instalar_enter_avanza_foco` ya lo saltea sola sin necesitar ninguna
+  condición extra.
+- **"Aplica recargo"/"Es reubicación" en una sola fila**, con el texto
+  del segundo acortado (sin el salto de línea manual que tenía antes)
+  — entran los dos lado a lado sin necesitar wrap.
+- **Botones de acción al mismo alto que Regulares** (22px,
+  `_ESTILO_BOTON_COMPACTO`) — antes tenían su propio estilo más alto
+  (`_ESTILO_BOTON_AISLADAS_ALTO`, pensado para alinear "Horas aisladas
+  mensuales" con el pie del tercer botón en una ronda anterior); con el
+  nuevo criterio de esta tanda (parejo con Regulares) ese estilo pasa a
+  ser un alias del compacto.
+- **Tabla ensanchada** (`_ajustar_columnas`, mismo padding que
+  `novedades._ajustar_columnas`) en vez del ancho justo de
+  `resizeColumnsToContents()`.
+- **Botones "Modificar reserva"/"Cancelar reserva" deshabilitados sin
+  selección** (`_actualizar_botones`, conectado a `tabla.
+  itemSelectionChanged`).
+- **Leyenda de colores con letra un poco más chica** (`fijar_tamano_
+  fuente_leyenda(9)`, un punto por debajo del 10px default de
+  `hacer_compacta()`) — pedido puntual de esta ronda para que las
+  referencias no salgan apelmazadas.
+- **"Detalle" retocado con mejor esfuerzo, documentado como límite
+  aceptado**: `_ALTO_DETALLE_AISLADAS` se volvió a medir contra el
+  nuevo criterio (alinear con el pie del tercer botón, ya no con
+  "Horas aisladas mensuales") — medido SIN `hoja_estilos()` da un
+  ajuste exacto, pero con el estilo real aplicado (lo que la clienta
+  realmente ve) queda un resto de entre 16 y 34px que esta única
+  constante no puede cerrar, porque el tamaño de fuente real se
+  propaga de forma no lineal por el resto de la columna. Se dejó el
+  valor medido (igual de válido que cualquier otro en ese rango) y se
+  ensanchó la tolerancia del test de regresión en vez de perseguir un
+  ajuste pixel-perfect inalcanzable bajo la plataforma `offscreen` de
+  los tests — mismo criterio ya documentado para otros casos
+  "investigado, sin reproducir del todo" de este archivo.
+
+### Reservas extraordinarias
+
+Mismo patrón que Aisladas, reusando directamente sus piezas genéricas
+(`_DialogoModificarReservaAislada`/`modificar_reserva_aislada`, ya
+armados para soportar `EsExtraordinaria` desde el principio) en vez de
+duplicar nada:
+
+- **"Modificar reserva" deja de cancelar y precargar el formulario.**
+  Antes, al no poder editar in-place, cancelaba la fila seleccionada y
+  precargaba el formulario con sus datos para dar de alta la versión
+  corregida — pedido de la clienta sobre ese comportamiento ("no me
+  permite editar... es mas la cancela") había llevado, en una ronda
+  anterior, a sumar un cartel explicando el mecanismo; esta ronda lo
+  reemplaza directamente por edición in-place, mismo criterio que
+  Regulares/Aisladas. El método `_seleccionar_ubicacion` de este panel
+  (que solo existía para precargar la cascada de ubicación en el
+  mecanismo viejo) queda sin ningún uso y se borra.
+- **"Cancelar reserva" pide confirmación explícita**, mismo mecanismo
+  que Aisladas (profesional/día/horario/ítem en el texto del cartel).
+- **Columna "Período imputado"** agregada a la tabla (al final, mismo
+  criterio que Aisladas) — hueco real detectado al escribir el primer
+  test: `_crear()` nunca pasaba `periodo_imputado=` a `crear_reserva_
+  aislada` (a diferencia de Aisladas, que sí lo hacía desde la ronda
+  anterior), así que la columna quedaba siempre en blanco. Corregido
+  sumando el mismo cálculo (`fecha[:7]` si es "actual", `sumar_meses(
+  fecha[:7], 1)` si es "siguiente") al llamado.
+- **Botones "Modificar reserva"/"Cancelar reserva" deshabilitados sin
+  selección**, mismo mecanismo que las otras dos solapas — pasan de
+  variables locales a `self.boton_modificar`/`self.boton_cancelar` con
+  `_actualizar_botones()`.
+- La tabla de esta solapa suma `excluir_tabla_del_tab` (1.5, no estaba
+  aplicado todavía acá).
+
+### Bug real corregido de paso: Liquidaciones no se refrescaba en vivo
+
+Reportado por la clienta mientras probaba esta tanda: crear una
+reserva aislada de un profesional categoría R con "Período a imputar"
+= actual regenera la liquidación de ese período (ver arriba), pero la
+solapa "Emisión de archivos" de Liquidaciones no mostraba el cambio
+hasta reabrir la pantalla. Causa real: `_PanelEmisionArchivos.
+showEvent()` solo hacía `self.campo_periodo.setFocus()`, sin llamar
+`self.actualizar()` — a diferencia del resto de las solapas de este
+documento, que sí recalculan su contenido en cada `showEvent`. Se
+corrige sumando esa llamada antes de poner el foco.
+
+### Hallazgo de estabilidad real: `WA_StyledBackground` + `paintEvent` sin `super()` puede segfaultear
+
+Al sumar un borde negro a las muestras de color de "Referencias de
+colores" (petición de una ronda anterior, revisada de paso en esta
+tanda), la primera versión le ponía `Qt.WidgetAttribute.WA_
+StyledBackground` directo a `_CeldaGrilla` (el widget de pintado
+manual, cuyo `paintEvent` NO llama a `super().paintEvent()`) para que
+el borde QSS se pintara encima. Corriendo la suite completa aparecía
+un `Fatal Python error: Segmentation fault` real, reproducible,
+DENTRO de `paintEvent` de esa misma clase — pero solo cuando se
+corrían ciertos archivos de test juntos (`test_reservas.py` +
+`test_gui_liquidacion.py` + `test_gui_grilla_operativa.py`), nunca
+archivo por archivo ni en combinaciones de dos. Diagnosticado con
+`git stash` acotado a `grilla_operativa.py`/`estilos.py`: revertir
+justo ese cambio hacía desaparecer el crash. Causa: `WA_
+StyledBackground` sobre un widget con pintado 100% manual, combinado
+con la hoja de estilos global reaplicándose en ciclos rápidos de
+creación/destrucción de widgets (muchos tests seguidos), termina
+corrompiendo memoria real — no es un flake del test runner.
+
+Arreglo: en vez de poner el atributo sobre `_CeldaGrilla` directo, cada
+muestra de la leyenda se envuelve en un `QFrame` propio
+(`objectName="muestraLeyenda"`) — un `QFrame` soporta el borde de QSS
+de forma nativa, sin necesitar `WA_StyledBackground` ni tocar el
+`paintEvent` de nada. Verificado corriendo la combinación exacta que
+crasheaba 3 veces seguidas sin problema. Ojo para el futuro: cualquier
+widget con `paintEvent` propio que no llame a `super()` corre el mismo
+riesgo si se le pone `WA_StyledBackground` — envolverlo en un `QFrame`
+en vez de tocarle el atributo directo.
+
+Tests nuevos/reescritos: `tests/test_reservas.py` (9 tests de
+`modificar_reserva_aislada`, más los de `crear_reserva_aislada` con
+`periodo_imputado`). `tests/test_gui_reservas.py` (batch completo de
+las tres solapas: diálogos mockeados con `_DialogoRegularFalso`/
+`_mockear_dialogo_modificar_regular`/`_mockear_dialogo_modificar_
+aislada`, confirmaciones de cancelar con `QMessageBox.question`
+mockeado a Sí/No, columna "Período imputado", botones deshabilitados
+sin selección, foco). `tests/test_gui_grilla_operativa.py`
+(`test_muestras_de_la_leyenda_quedan_recuadradas_en_negro` reescrito
+contra el `QFrame` nuevo en vez de `WA_StyledBackground`).

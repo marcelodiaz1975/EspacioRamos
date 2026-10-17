@@ -11,7 +11,10 @@ from app.negocio.reservas import (
     cancelar_reserva_aislada,
     crear_reserva_aislada,
     crear_reserva_regular,
+    eliminar_reserva_regular,
     finalizar_reserva_regular,
+    modificar_reserva_aislada,
+    modificar_reserva_regular,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -195,6 +198,112 @@ def test_finalizar_reserva_regular_sin_periodo_cerrado_funciona(conn, consultori
     assert reserva["VigenciaFin"] == "2026-09-30"
 
 
+def test_eliminar_reserva_regular_en_periodo_cerrado_bloquea(conn, consultorio, profesional_factory):
+    """Punto #9.1.6 (SistemaDF v0.11.2026.10): "Finalizar reserva a fin de
+    mes" pasa a "Eliminar reserva" — borra la fila por completo, pero con
+    el mismo guardarraíl de período cerrado que `finalizar_reserva_regular`,
+    acá aplicado sobre `VigenciaInicio` de la fila (la única referencia
+    real que queda una vez borrada)."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    with pytest.raises(ValueError, match="Cargo especial"):
+        eliminar_reserva_regular(conn, id_reserva)
+    assert obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva) is not None
+
+
+def test_eliminar_reserva_regular_sin_periodo_cerrado_borra_la_fila(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    eliminar_reserva_regular(conn, id_reserva)
+    assert obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva) is None
+
+
+def test_eliminar_reserva_regular_inexistente_falla(conn):
+    with pytest.raises(ValueError, match="No existe"):
+        eliminar_reserva_regular(conn, 99999)
+
+
+def test_modificar_reserva_regular_edita_la_fila_sin_finalizarla(conn, consultorio, profesional_factory):
+    """Punto #9.1.4 (SistemaDF v0.11.2026.10): "Modificar reserva" edita la
+    fila existente en vez de finalizarla y precargar el formulario para
+    dar de alta una nueva — "la reserva sigue corriendo con esa
+    modificación" (sin VigenciaFin)."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    advertencias = modificar_reserva_regular(
+        conn, id_reserva, hora_inicio=15, hora_fin=17, vigencia_inicio="2026-01-01", vigencia_fin=None,
+    )
+    assert advertencias == []
+    reserva = obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva)
+    assert reserva["HoraInicio"] == 15
+    assert reserva["HoraFin"] == 17
+    assert reserva["VigenciaFin"] is None
+
+
+def test_modificar_reserva_regular_puede_terminarla_poniendo_vigencia_fin(conn, consultorio, profesional_factory):
+    """"Si quiero la termino desde el cuadro de diálogo" — alcanza con
+    pasar una Vigencia hasta real, sin necesitar ningún camino aparte."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    modificar_reserva_regular(
+        conn, id_reserva, hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01", vigencia_fin="2026-09-30",
+    )
+    reserva = obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva)
+    assert reserva["VigenciaFin"] == "2026-09-30"
+
+
+def test_modificar_reserva_regular_en_periodo_cerrado_bloquea(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    with pytest.raises(ValueError, match="Cargo especial"):
+        modificar_reserva_regular(
+            conn, id_reserva, hora_inicio=15, hora_fin=17, vigencia_inicio="2026-08-01", vigencia_fin=None,
+        )
+
+
+def test_modificar_reserva_regular_contra_otro_profesional_bloquea(conn, consultorio, profesional_factory):
+    """El horario nuevo puede generar un conflicto que la versión vieja
+    no tenía — se vuelve a chequear, excluyendo a la propia fila."""
+    id_prof_a = profesional_factory("Lo Veci")
+    id_prof_b = profesional_factory("Gomez")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof_a, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    crear_reserva_regular(
+        conn, id_profesional=id_prof_b, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=18, hora_fin=20, vigencia_inicio="2026-01-01",
+    )
+    with pytest.raises(ConflictoBloqueanteError):
+        modificar_reserva_regular(
+            conn, id_reserva, hora_inicio=19, hora_fin=21, vigencia_inicio="2026-01-01", vigencia_fin=None,
+        )
+
+
+def test_modificar_reserva_regular_inexistente_falla(conn):
+    with pytest.raises(ValueError, match="No existe"):
+        modificar_reserva_regular(
+            conn, 99999, hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01", vigencia_fin=None,
+        )
+
+
 def test_crear_reserva_aislada_fuera_de_fraccion_falla(conn, consultorio, profesional_factory):
     id_prof = profesional_factory("Lo Veci")
     with pytest.raises(ValueError):
@@ -321,6 +430,27 @@ def test_reserva_extraordinaria_ocupa_la_grilla_igual_que_una_aislada(conn, cons
         crear_reserva_aislada(
             conn, id_profesional=id_prof_b, id_consultorio=consultorio, fecha="2026-08-10",
             hora_inicio=15, hora_fin=17,
+        )
+
+
+def test_mensaje_de_conflicto_identifica_al_profesional_por_tratamiento_nombre_y_apellido(
+    conn, consultorio, profesional_factory,
+):
+    """Punto #9.1.5 (SistemaDF v0.11.2026.10): el mensaje de conflicto
+    identificaba al profesional solo por su número interno — pedido
+    explícito de la clienta, pasa a mostrar "Tratamiento Nombre
+    Apellido"."""
+    profesionales = obtener_repositorio(conn, "Profesional")
+    id_prof_a = profesionales.crear(CategoriaProfesional="R", Tratamiento="Lic.", NombrePila="Virginia", Apellido="Lo Veci")
+    id_prof_b = profesional_factory("Gomez")
+    crear_reserva_regular(
+        conn, id_profesional=id_prof_a, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    with pytest.raises(ConflictoBloqueanteError, match="Lic. Virginia Lo Veci"):
+        crear_reserva_regular(
+            conn, id_profesional=id_prof_b, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=15, hora_fin=17, vigencia_inicio="2026-01-01",
         )
 
 
@@ -473,6 +603,110 @@ def test_cancelar_reserva_aislada_mismo_dia_en_bloque_rigido_no_bloquea(conn, co
     requiere_aviso = cancelar_reserva_aislada(conn, id_reserva, fecha_actual="2026-08-20")
     assert requiere_aviso is True
     assert obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)["Estado"] == "Cancelada"
+
+
+def test_crear_reserva_aislada_guarda_el_periodo_imputado(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=11, hora_fin=12, periodo_imputado="2026-09",
+    )
+    assert obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)["PeriodoImputado"] == "2026-09"
+
+
+def test_crear_reserva_aislada_sin_periodo_imputado_queda_en_blanco(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=11, hora_fin=12,
+    )
+    assert obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)["PeriodoImputado"] is None
+
+
+def test_modificar_reserva_aislada_edita_horario_y_recargo_sin_cancelarla(conn, consultorio, profesional_factory):
+    """#9.1.4 (homólogo de Reservas regulares): edita la fila existente,
+    sigue Confirmada."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=11, hora_fin=12, aplica_recargo=False,
+    )
+    advertencias = modificar_reserva_aislada(conn, id_reserva, hora_inicio=14, hora_fin=16, aplica_recargo=True)
+    assert advertencias == []
+    fila = obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)
+    assert fila["HoraInicio"] == 14
+    assert fila["HoraFin"] == 16
+    assert bool(fila["AplicaRecargo"]) is True
+    assert fila["Estado"] == "Confirmada"
+
+
+def test_modificar_reserva_aislada_hora_fin_menor_a_inicio_falla(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=11, hora_fin=12,
+    )
+    with pytest.raises(ValueError):
+        modificar_reserva_aislada(conn, id_reserva, hora_inicio=14, hora_fin=12)
+
+
+def test_modificar_reserva_aislada_contra_otro_profesional_bloquea(conn, consultorio, profesional_factory):
+    id_a = profesional_factory("Lo Veci")
+    id_b = profesional_factory("Gómez", categoria="A")
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_a, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=11, hora_fin=12,
+    )
+    crear_reserva_aislada(
+        conn, id_profesional=id_b, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=15, hora_fin=17,
+    )
+    with pytest.raises(ConflictoBloqueanteError):
+        modificar_reserva_aislada(conn, id_reserva, hora_inicio=16, hora_fin=18)
+
+
+def test_modificar_reserva_aislada_no_choca_contra_si_misma(conn, consultorio, profesional_factory):
+    """`excluir_id` evita que la propia fila se reporte como conflicto
+    contra sí misma al mantener el mismo horario."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=11, hora_fin=12,
+    )
+    advertencias = modificar_reserva_aislada(conn, id_reserva, hora_inicio=11, hora_fin=12, aplica_recargo=False)
+    assert advertencias == []
+
+
+def test_modificar_reserva_aislada_extraordinaria_edita_item_y_monto(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci", categoria="A")
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=11, hora_fin=12,
+        es_extraordinaria=True, item_extraordinario="Taller", monto_extraordinario=1000,
+    )
+    modificar_reserva_aislada(
+        conn, id_reserva, hora_inicio=11, hora_fin=12,
+        item_extraordinario="Taller corregido", monto_extraordinario=1500,
+    )
+    fila = obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)
+    assert fila["ItemExtraordinario"] == "Taller corregido"
+    assert fila["MontoExtraordinario"] == 1500
+
+
+def test_modificar_reserva_aislada_extraordinaria_sin_item_falla(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci", categoria="A")
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=11, hora_fin=12,
+        es_extraordinaria=True, item_extraordinario="Taller", monto_extraordinario=1000,
+    )
+    with pytest.raises(ValueError):
+        modificar_reserva_aislada(conn, id_reserva, hora_inicio=11, hora_fin=12, item_extraordinario="")
+
+
+def test_modificar_reserva_aislada_inexistente_falla(conn):
+    with pytest.raises(ValueError):
+        modificar_reserva_aislada(conn, 99999, hora_inicio=9, hora_fin=10)
 
 
 def test_crear_reserva_aislada_en_bloque_rigido_no_advierte(conn, consultorio, profesional_factory):

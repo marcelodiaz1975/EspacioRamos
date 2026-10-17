@@ -225,6 +225,22 @@ QHeaderView::section {{
 }}
 QHeaderView:vertical {{ qproperty-defaultAlignment: AlignCenter; }}
 
+/* Punto #9.1.2 (SistemaDF v0.11.2026.10, Reservas regulares): "que los
+cuadritos de las referencias de colores sean recuadrados con una línea
+finita negra... para que se vean delimitados" — una celda real de la
+grilla (`_CeldaGrilla`) solo pinta su borde abajo/derecha (ver
+`_dibujar_bordes_gruesos` en grilla_operativa.py), así que la muestra de
+color de la leyenda necesita un marco CERRADO propio en las 4 caras.
+Acotado por objectName (mismo criterio que QFrame#tarjetaAlerta) — cada
+muestra va envuelta en un `QFrame` propio con este objectName
+(`LeyendaColores.actualizar`), que es el que de verdad recibe el borde
+de QSS: un `WA_StyledBackground` directo sobre `_CeldaGrilla` (que pinta
+su propio contenido a mano, sin llamar a `super().paintEvent()`)
+funcionaba visualmente pero reventaba en un segfault real al correr la
+suite completa — un QFrame envolvente evita tocar el paintEvent
+compartido por el resto de los usos de esa celda en la grilla real. */
+QWidget#muestraLeyenda {{ border: 1px solid #000000; }}
+
 /* Indicador de foco en botones (pedido explícito de la clienta): "toco
 Tab, pasa de botón en botón, pero no veo dónde estoy parado" — el estilo
 propio de botonPrimario/botonSecundario (fondo + borde negro) le ganaba

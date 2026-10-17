@@ -157,8 +157,19 @@ class _PanelEmisionArchivos(QWidget):
         """Mismo motivo que en Reservas: `setFocus()` durante la
         construcción no alcanza a "pegar" porque el QTabWidget
         contenedor todavía no está mostrado — se repite el pedido de
-        foco en Período al mostrarse la solapa."""
+        foco en Período al mostrarse la solapa.
+
+        Bug real reportado por la clienta: cargar una reserva aislada a
+        un profesional R en el período actual regenera la liquidación
+        en la base (`_resolver_periodo_imputar`/`regenerar_si_
+        corresponde`, ya corrían bien) pero esta tabla nunca se volvía a
+        consultar al simplemente cambiar de solapa — `showEvent` solo
+        enfocaba el campo, sin llamar `actualizar()`. Por eso el monto
+        actualizado recién se veía al cerrar y reabrir el sistema (que
+        sí arranca con una consulta nueva), nunca al volver a entrar a
+        esta solapa en caliente."""
         super().showEvent(event)
+        self.actualizar()
         self.campo_periodo.setFocus()
 
     def _armar_ui(self) -> None:
