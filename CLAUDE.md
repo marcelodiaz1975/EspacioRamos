@@ -10609,3 +10609,49 @@ combinada `test_gui_placas.py`+`test_gui_placas_para_timbres.py`+
 segfault intermitente ya documentado reapareció en dos corridas
 seguidas y no se reprodujo en una tercera — confirmado no relacionado
 con esta tanda).
+
+## Cierre de `v0.11.2026.10`
+
+Con "Placas para timbres"/"Estadísticas"/"Balance del negocio" cerradas,
+las once secciones del documento (GENERAL, MENU LATERAL, ARCHIVOS Y
+LISTAS, BASE DE DATOS DEL ESPACIO, CONFIGURACION GENERAL, USUARIOS Y
+PERMISOS, PANEL DE CONTROL, GRILLA Y MENSAJERIA, RESERVAS, VALORES,
+LIQUIDACIONES, PAGOS, REGISTRO DE AUSENCIAS, DISPONIBILIDAD,
+PROFESIONALES, LLAVES Y OTROS CONCEPTOS, PLACAS PARA LOS TIMBRES,
+ESTADISTICAS, BALANCE DEL NEGOCIO) quedan recorridas de punta a punta.
+`pyflakes app/ tests/` sin ningún warning; suite completa confirmada en
+verde varias veces a lo largo de todo este trabajo (último conteo:
+2492 passed) — el único ruido fue el segfault intermitente de
+`grilla_operativa.py::paintEvent` ya documentado en este archivo
+(hallazgo de estabilidad `WA_StyledBackground`/`paintEvent` manual bajo
+la plataforma Qt `offscreen`, reproducido y descartado varias veces
+contra código sin cambios, nunca contra un cambio puntual de esta
+tanda — no es un bug de producción, es una fragilidad propia del
+entorno de test offscreen bajo construcción/destrucción masiva de
+widgets Qt).
+
+Puntos del documento que quedaron **sin implementar, documentados como
+pendientes de aclaración** por ser genuinamente ambiguos sin el texto
+original a la vista (mismo criterio en los tres: no se inventa el
+alcance exacto de un pedido vago, se pregunta antes de programar algo
+que puede no ser lo que la clienta tenía en mente):
+
+- **Pagos — "autocierre de tanda"**: sin ningún rastro de un mecanismo
+  de cierre automático en el código (solo manual, "Iniciar tanda"/
+  "Cerrar tanda"), sin saber qué condición debería dispararlo.
+- **Oferta de consultorios — "reducir proporcional"**: sin ninguna base
+  en el código ni en rondas anteriores de qué debería reducirse ni en
+  qué proporción.
+- **Profesionales (Listado) — "botones mitad alto, etiquetas, cuadro
+  documentación 5 items, Vista previa"**: cuatro puntos sin ningún
+  rastro en CLAUDE.md ni en el código actual, incluida una posible
+  vista previa de documentos sin saber qué formato debería mostrar.
+- **Llaves — "check Bonificar depósito"**: sin saber qué debería eximir
+  exactamente (¿a qué profesional? ¿bajo qué condición?).
+- **Llaves — nueva solapa "Stock de llaves por profesional"**: una
+  pantalla/reporte nuevo completo, sin ninguna especificación de
+  columnas o agrupamiento más allá del nombre.
+
+Los cinco quedan anotados en el checklist de trabajo para retomarlos en
+cuanto la clienta aclare el alcance — no se perdieron de vista, se
+decidió no adivinarlos.
