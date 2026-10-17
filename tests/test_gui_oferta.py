@@ -173,6 +173,26 @@ def test_elegir_un_edificio_puntual_acota_las_unidades_de_la_busqueda(qtbot, con
     ]
 
 
+def test_unidades_quedan_en_orden_pb_ep_piso_no_alfabetico(qtbot, conn, profesional_y_consultorio):
+    """Punto #1.3: mismo criterio que el resto del sistema
+    (`clave_orden_unidad`) — "EP" tiene que listarse antes que "10"
+    (piso -1 contra piso 10), aunque alfabéticamente "10" quede
+    primero."""
+    id_prof, id_edificio = profesional_y_consultorio
+    id_unidad_10 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="10")
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_10, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    id_unidad_ep = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="EP")
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_ep, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    conn.commit()
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._cargar_localidades()
+
+    textos = [pantalla.lista_unidad.item(i).text() for i in range(pantalla.lista_unidad.count())]
+    assert textos.index("Ramos 1 - EP") < textos.index("Ramos 1 - 10")
+
+
 def test_tamano_arranca_deshabilitado_y_se_habilita_con_el_check(qtbot, conn, profesional_y_consultorio):
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)

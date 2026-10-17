@@ -97,6 +97,7 @@ from app.negocio.oferta_busqueda import (
 )
 from app.negocio.oferta_busqueda_texto import previsualizar_documento, resumen_busqueda
 from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
+from app.pdf.estilos import clave_orden_unidad
 from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 
 _TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
@@ -635,8 +636,12 @@ class _PanelOferta(QWidget):
             placeholders = ", ".join("?" for _ in ids_edificio)
             sql += f" WHERE u.IdEdificio IN ({placeholders})"
             parametros = ids_edificio
+        # Punto #1.3: orden PB/EP/piso (no alfabético puro) dentro de cada
+        # edificio — mismo criterio y mismo helper que el resto del
+        # sistema (`clave_orden_unidad`, de `app.pdf.estilos`).
         filas = sorted(
-            self.conn.execute(sql, parametros).fetchall(), key=lambda f: (f["NombreEdificio"], f["Departamento"]),
+            self.conn.execute(sql, parametros).fetchall(),
+            key=lambda f: (f["NombreEdificio"], clave_orden_unidad(f["Departamento"])),
         )
         for fila in filas:
             item = QListWidgetItem(f"{fila['NombreEdificio']} - {fila['Departamento']}")

@@ -814,6 +814,77 @@ def test_descartar_saca_el_pedido_de_la_lista(qtbot, conn):
     assert estado == "Descartado"
 
 
+def test_descartar_pide_confirmacion_y_no_descarta_si_se_cancela(qtbot, conn, monkeypatch):
+    """Punto #1.11: antes no se preguntaba nada — el pedido no se vuelve
+    a ver después (la tabla solo lista Activos)."""
+    _crear_profesional(conn)
+    pantalla = _PanelListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    pantalla._agregar_bloque()
+    pantalla._crear_pedido()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+    pantalla.tabla.selectRow(0)
+    pantalla._descartar()
+
+    assert pantalla.tabla.rowCount() == 1
+    estado = conn.execute("SELECT Estado FROM ListaEspera").fetchone()["Estado"]
+    assert estado == "Activo"
+
+
+def test_reiniciar_vuelve_el_formulario_de_nuevo_pedido_al_default(qtbot, conn):
+    """Punto #1.4: a diferencia de Oferta de consultorios (que conserva
+    la última búsqueda a pedido explícito de la clienta), esta pantalla
+    no tiene ninguna decisión en contra — `reiniciar()` (llamado desde
+    `showEvent`) vuelve el formulario a su estado en blanco."""
+    id_profesional = _crear_profesional(conn)
+    pantalla = _PanelListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    pantalla.combo_profesional.setCurrentIndex(pantalla.combo_profesional.findData(id_profesional))
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    pantalla._agregar_bloque()
+    pantalla.spin_desde.setValue(14)
+    pantalla.spin_hasta.setValue(18)
+    pantalla.casilla_cantidad_horas.setChecked(True)
+    pantalla.casilla_ventana.setChecked(True)
+    pantalla.casilla_tamano.setChecked(True)
+    pantalla.campo_detalle.setPlainText("algo tipeado")
+
+    pantalla.reiniciar()
+
+    assert pantalla.combo_profesional.currentIndex() == 0
+    assert pantalla._bloques_pendientes == []
+    assert pantalla.spin_desde.value() == 9
+    assert pantalla.spin_hasta.value() == 12
+    assert pantalla.casilla_cantidad_horas.isChecked() is False
+    assert pantalla.casilla_ventana.isChecked() is False
+    assert pantalla.casilla_tamano.isChecked() is False
+    assert pantalla.campo_detalle.toPlainText() == ""
+    assert pantalla.boton_crear.text() == "Crear pedido"
+    qtbot.waitUntil(lambda: pantalla.combo_profesional.hasFocus())
+
+
+def test_unidades_quedan_en_orden_pb_ep_piso_no_alfabetico(qtbot, conn):
+    """Punto #1.3: mismo criterio que el resto del sistema
+    (`clave_orden_unidad`)."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Ramos 1')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '10')", (id_edificio,))
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, 'EP')", (id_edificio,))
+    conn.commit()
+
+    pantalla = _PanelListaEspera(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._cargar_localidades()
+
+    textos = [pantalla.lista_unidad.item(i).text() for i in range(pantalla.lista_unidad.count())]
+    assert textos.index("Ramos 1 - EP") < textos.index("Ramos 1 - 10")
+
+
 def test_editar_pedido_sin_seleccion_avisa_y_no_rompe(qtbot, conn):
     pantalla = _PanelListaEspera(conn)
     qtbot.addWidget(pantalla)

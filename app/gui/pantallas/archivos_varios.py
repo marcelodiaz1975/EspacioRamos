@@ -103,6 +103,13 @@ class _PanelArchivosVarios(QWidget):
         el QTabWidget contenedor todavía no está mostrado en ese
         momento (mismo motivo que Reservas/Liquidación/Oferta)."""
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto #1.4: vuelve la solapa al estado "recién entrada" — sin
+        ningún documento elegido y la Vista previa en blanco."""
+        self._tipo_seleccionado = None
+        self._mostrar_preview(None, sin_archivo=_SIN_SELECCION)
         self.boton_propuesta.setFocus()
 
     def _armar_ui(self) -> None:

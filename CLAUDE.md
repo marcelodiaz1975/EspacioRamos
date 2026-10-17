@@ -10365,3 +10365,93 @@ que la columna queda por encima de ese ancho justo, no solo igual).
 Suite combinada `test_gui_novedades.py`+`test_catalogos.py`+
 `test_crud_generico.py`: 190 passed. Suite completa: 2479 passed, sin
 regresiones.
+
+## Disponibilidad (las tres solapas): batch completo (#14.x del documento)
+
+Decimocuarta tanda de `v0.11.2026.10`, cerrando la sección
+"DISPONIBILIDAD". 1.2 (selector de profesional)/1.5 (`excluir_tabla_
+del_tab`)/1.7 (foco visible)/1.8 (líneas de grilla)/1.10 (fecha con día
+de semana + sábado en negro, 1.13) ya estaban resueltos desde tandas
+anteriores en las tres solapas (confirmado leyendo el código). Lo que
+faltaba era 1.3 (orden de unidad) en dos de las tres, 1.4 en las tres
+(con un hallazgo real sobre Oferta: no aplica, decisión previa ya
+documentada) y los puntos propios de cada una.
+
+### Oferta de consultorios
+
+- **1.3 — orden de Unidad**: `_cargar_unidades` ordenaba por
+  `(NombreEdificio, Departamento)` alfabético puro — mismo hueco ya
+  corregido en otras pantallas en rondas anteriores (`clave_orden_
+  unidad`, de `app.pdf.estilos`), nunca cerrado acá. Corregido con el
+  mismo helper y mismo criterio PB/EP/piso ascendente.
+- **1.4 — confirmado que NO aplica, decisión previa documentada**: la
+  propia función `_nueva_busqueda` ya tenía, desde una ronda anterior,
+  el comentario "Único punto que limpia el formulario a propósito —
+  entrar y salir de la pantalla NO lo resetea (confirmado por la
+  clienta: la última búsqueda queda cargada tal cual se la dejó)" —
+  mismo criterio ya aplicado en Liquidaciones (Estado de cuenta):
+  cuando hay una decisión previa de la clienta que contradice la regla
+  general nueva, se respeta la decisión previa, documentada acá de
+  nuevo para que quede claro que no es un olvido sino algo
+  deliberadamente sin tocar.
+- **1.11**: ya cubierto — "Generar PDF" avisa la ruta generada,
+  "Generar texto WhatsApp" abre un diálogo con el resultado. "Agregar
+  franja"/"Quitar franja" no suman ningún cartel (operaciones de lista
+  en memoria, con feedback visual inmediato) — mismo criterio que el
+  resto del sistema para acciones chicas de UI sin consecuencia
+  persistente.
+- **"Reducir proporcional"**: no implementado — ambigüedad sin el texto
+  original del punto a la vista, queda pendiente de una aclaración
+  puntual antes de implementarse (mismo criterio que "autocierre de
+  tanda" de Pagos).
+
+### Lista de espera
+
+- **1.3 — orden de Unidad**: mismo hueco exacto que Oferta, en
+  `_cargar_unidades` — corregido con el mismo helper.
+- **1.4 — hueco real, `reiniciar()` nuevo**: a diferencia de Oferta,
+  esta pantalla no tiene ninguna decisión previa documentada que
+  contradiga la regla general — `showEvent` solo enfocaba Profesional,
+  sin resetear nada del formulario "Nuevo pedido" (Profesional,
+  cascada Localidad/Edificio/Unidad, días, tipo O/Y, horario, cantidad
+  de horas, bloques pendientes, combinación de bloques/consultorios,
+  características, comentarios, y el modo "editando" si había uno en
+  curso). `reiniciar()` nuevo (llamado desde `showEvent`, descubrible
+  por F3) vuelve todo a su default de recién construida.
+- **Confirmar eliminar pedido**: `_descartar` borraba el pedido sin
+  preguntar nada — el pedido no se vuelve a ver después (la tabla solo
+  lista Activos), así que se suma un `QMessageBox.question` con el
+  nombre del profesional antes de marcarlo Descartado, más un
+  `QMessageBox.information` de éxito al terminar.
+- **"Renombrar botones" / "Editar pedido"**: investigado, ya resuelto
+  de una ronda anterior (#22) — "Editar pedido" ya existe como tercer
+  botón, con su propio flujo de precarga del formulario
+  (`_cargar_pedido_en_formulario`) — ningún cambio de código hizo
+  falta. Mismo criterio documentado otras veces en este archivo: el
+  checklist de trabajo es un resumen propio armado sin el texto
+  original, así que a veces señala algo que investigar y resulta ya
+  estar cubierto.
+
+### Archivos para enviar
+
+- **1.4 — hueco real, `reiniciar()` nuevo**: el único estado de esta
+  pantalla es `_tipo_seleccionado` (qué documento se eligió ver) — sin
+  resetear, volver a la solapa seguía mostrando la vista previa del
+  último documento elegido. `reiniciar()` nuevo lo vuelve a `None` y la
+  Vista previa al texto de ayuda default.
+
+Tests nuevos: `tests/test_gui_oferta.py`
+(`test_unidades_quedan_en_orden_pb_ep_piso_no_alfabetico`);
+`tests/test_gui_lista_espera.py`
+(`test_descartar_pide_confirmacion_y_no_descarta_si_se_cancela`,
+`test_reiniciar_vuelve_el_formulario_de_nuevo_pedido_al_default`,
+`test_unidades_quedan_en_orden_pb_ep_piso_no_alfabetico`);
+`tests/test_gui_archivos_varios.py` (`test_reiniciar_vuelve_a_sin_
+seleccion`). Suite combinada `test_gui_oferta.py`+`test_gui_lista_
+espera.py`+`test_gui_archivos_varios.py`+`test_gui_disponibilidad.py`:
+145 passed. Suite completa: 2484 passed, sin regresiones (un
+segfault intermitente de `grilla_operativa.py::paintEvent` apareció en
+una corrida y no se reprodujo en la siguiente — mismo hallazgo de
+estabilidad ya documentado más arriba en este archivo, WA_
+StyledBackground + paintEvent manual bajo la plataforma `offscreen`,
+no relacionado con los cambios de esta tanda).

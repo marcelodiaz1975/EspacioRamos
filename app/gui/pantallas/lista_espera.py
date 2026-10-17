@@ -103,6 +103,7 @@ from app.negocio.lista_espera import (
     marcar_descartado,
 )
 from app.negocio.oferta_busqueda import TAMANOS_CONSULTORIO
+from app.pdf.estilos import clave_orden_unidad
 from app.repositorio.registro import obtener_repositorio
 
 _COLOR_CELDA = {"verde": "#4CAF50", "amarillo": "#F5D547", "naranja": "#E07B39", "rojo": "#C0392B"}
@@ -478,6 +479,36 @@ class _PanelListaEspera(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802 (nombre impuesto por Qt)
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto #1.4: a diferencia de Oferta de consultorios (donde la
+        clienta pidió explícitamente conservar la última búsqueda al
+        salir y volver a entrar), esta pantalla no tiene ninguna
+        decisión documentada en contra — el formulario de "Nuevo pedido"
+        vuelve a su estado en blanco y el foco arranca en Profesional."""
+        self.combo_profesional.setCurrentIndex(0)
+        self._cargar_localidades()  # vuelve la cascada a "Todas/Todos" en los tres niveles
+        for check in self._checks_dia.values():
+            check.setChecked(False)
+        self.combo_tipo.setCurrentIndex(0)
+        self.spin_desde.setValue(9)
+        self.spin_hasta.setValue(12)
+        self.casilla_cantidad_horas.setChecked(False)
+        self.spin_cantidad_horas.setValue(1)
+        self._bloques_pendientes = []
+        self._refrescar_tabla_bloques()
+        self.combo_tipo_bloques.setCurrentIndex(0)
+        self.combo_sin_combinar.setCurrentIndex(0)
+        self.casilla_tamano.setChecked(False)
+        self.combo_tamano.setCurrentIndex(0)
+        self.casilla_ventana.setChecked(False)
+        self.casilla_camilla.setChecked(False)
+        self.casilla_placard.setChecked(False)
+        self.casilla_aire.setChecked(False)
+        self.campo_detalle.setPlainText("")
+        self._id_pedido_en_edicion = None
+        self.boton_crear.setText("Crear pedido")
         self.combo_profesional.setFocus()
 
     def _cargar_profesionales(self) -> None:
@@ -550,8 +581,11 @@ class _PanelListaEspera(QWidget):
             placeholders = ", ".join("?" for _ in ids_edificio)
             sql += f" WHERE u.IdEdificio IN ({placeholders})"
             parametros = ids_edificio
+        # Punto #1.3: orden PB/EP/piso, mismo criterio que el resto del
+        # sistema (`clave_orden_unidad`), no alfabético puro.
         filas = sorted(
-            self.conn.execute(sql, parametros).fetchall(), key=lambda f: (f["NombreEdificio"], f["Departamento"]),
+            self.conn.execute(sql, parametros).fetchall(),
+            key=lambda f: (f["NombreEdificio"], clave_orden_unidad(f["Departamento"])),
         )
         for fila in filas:
             item = QListWidgetItem(f"{fila['NombreEdificio']} - {fila['Departamento']}")
@@ -917,9 +951,20 @@ class _PanelListaEspera(QWidget):
         self.boton_crear.setText("Guardar cambios")
 
     def _descartar(self) -> None:
+        """Punto #1.11: confirmación explícita antes de descartar — el
+        pedido no se vuelve a ver (la tabla solo lista Activos), así que
+        la clienta pidió avisar antes de perderlo por un click de más."""
         pedido = self._fila_seleccionada_pedido()
         if pedido is None:
+            return
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(pedido["IdProfesional"])
+        nombre = _texto_profesional(profesional) if profesional else "?"
+        respuesta = QMessageBox.question(
+            self, "Descartar pedido", f"¿Descartar el pedido de lista de espera de {nombre}?",
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
             return
         marcar_descartado(self.conn, pedido["IdPedido"])
         self.conn.commit()
         self.actualizar()
+        QMessageBox.information(self, "Descartar pedido", "Pedido descartado.")

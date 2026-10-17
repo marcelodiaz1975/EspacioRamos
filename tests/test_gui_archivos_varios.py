@@ -160,6 +160,23 @@ def test_preview_muestra_texto_de_ayuda_antes_de_elegir_nada(qtbot, conn):
     assert pantalla.etiqueta_preview.pixmap().isNull()
 
 
+def test_reiniciar_vuelve_a_sin_seleccion(qtbot, conn, tmp_path):
+    """Punto #1.4: al volver a entrar a la solapa (`showEvent` llama a
+    `reiniciar()`), se pierde el documento elegido y la Vista previa
+    vuelve al texto de ayuda — mismo criterio que el resto del sistema."""
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    pantalla = _PanelArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._seleccionar("propuesta")
+    assert pantalla._tipo_seleccionado == "propuesta"
+
+    pantalla.reiniciar()
+
+    assert pantalla._tipo_seleccionado is None
+    assert pantalla.etiqueta_preview.text() == _SIN_SELECCION
+
+
 def test_regenerar_sin_archivos_generados_no_rompe_la_vista_previa(qtbot, conn, monkeypatch, tmp_path):
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.commit()
