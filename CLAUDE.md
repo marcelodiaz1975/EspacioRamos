@@ -10285,3 +10285,83 @@ Tests nuevos: `tests/test_gui_pagos.py`
 (`test_registrar_pagos_reiniciar_vuelve_filtro_y_formulario_al_
 default`, `test_planes_de_pago_reiniciar_vuelve_combo_y_spins_al_
 default`). Suite: 62 passed.
+
+## Registro de ausencias (las cuatro solapas): batch completo (#13.x del documento)
+
+Decimotercera tanda de `v0.11.2026.10`, cerrando la sección "REGISTRO DE
+AUSENCIAS". 1.2/1.5/1.7/1.8/1.9/1.10/1.11/1.12/1.13 ya estaban resueltos
+desde tandas anteriores en las tres solapas con alta (confirmado leyendo
+el código, sin ningún cambio): selector de profesional buscable
+(`habilitar_busqueda_profesional`), `excluir_tabla_del_tab` en las tres
+tablas, foco visible en combos/checks (regla general de `estilos.py`),
+`activar_filas_y_columnas_fijas()`/`reservar_alto_scroll_horizontal()`
+en la grilla embebida de las tres, `regenerar_si_corresponde` ya
+llamado al crear/cancelar en Vacaciones y Licencias (tanda anterior,
+"Vacaciones/Licencias: regenerar..."), `confirmar_datos_antes_de_crear`
+ya conectado en Vacaciones/Ausencias, botones secundarios ya
+deshabilitados sin selección en Ausencias, día de semana abreviado ya
+en `_campo_fecha`, sábado en negro ya aplicado vía
+`aplicar_color_sabado_negro` en esa misma fábrica. Lo que faltaba era
+puntualmente **1.4** (reset de filtros al volver a la solapa) en las
+tres, y un hallazgo de ancho de columna en el catálogo anidado "Tipos
+de licencia".
+
+### 1.4 — `reiniciar()` en Vacaciones/Licencias/Ausencias
+
+Mismo hueco exacto ya corregido en Liquidaciones/Pagos: el `showEvent`
+de las tres solo reiniciaba el orden de la tabla y refocaba
+Profesional, sin devolver ningún campo a su valor de recién construida
+— `combo_profesional` quedaba en el profesional que se hubiera elegido
+la última vez, `spin_anio`/`campo_desde`/`campo_hasta` en lo que se
+hubiera tipeado, etc. Las tres suman `reiniciar()` (llamado desde
+`showEvent`, descubrible por F3 vía duck-typing, sin ningún cambio en
+`main_window.py`):
+
+- **Vacaciones**: Profesional a "Todos los profesionales", Año
+  calendario al actual (`fecha_actual(conn).year`), Desde/Hasta a hoy.
+- **Licencias**: Profesional a "Todos los profesionales", Tipo de
+  licencia al primero (con su % de bonificación recargado vía
+  `_precargar_porcentaje`, ya que `combo_tipo.setCurrentIndex(0)`
+  puede no disparar `currentIndexChanged` si ya estaba en esa
+  posición), Desde a hoy, Hasta al sentinel "(sin fecha)"
+  (`_FECHA_SIN_DATO`, importado de `reservas.py`).
+- **Ausencias**: Profesional a "Todos los profesionales", Motivo al
+  primero, Desde/Hasta a hoy, "Horario puntual" destildado con su
+  horario default (9 a 10).
+
+### Tipos de licencia — columna "Nombre" muy pegada al contenido
+
+Hallazgo real, no puntual de este catálogo: `PantallaCRUD.actualizar()`
+(`crud_generico.py`) solo llamaba `resizeColumnsToContents()`, sin
+ningún padding extra — a diferencia de `novedades._ajustar_columnas`/
+`llaves._ajustar_columnas` (+30px sobre el ancho justo), que sí lo
+tienen desde hace tiempo. Con un texto largo en "Nombre" (ej. una
+licencia con nombre descriptivo largo), la columna quedaba exactamente
+al ancho del texto, sin ningún margen de respiro — se notaba más en
+este catálogo anidado (dentro de "Registro de ausencias") que en el
+resto, pero el hueco real es compartido por los ~14 catálogos genéricos
+que pasan por `PantallaCRUD`.
+
+Corregido de una sola vez en el lugar común: `crud_generico.py` suma
+`_PADDING_COLUMNA = 30` y, después de `resizeColumnsToContents()`, le
+suma ese padding a cada columna (`setColumnWidth(col, columnWidth(col)
++ _PADDING_COLUMNA)`) — mismo criterio y mismo valor que las otras dos
+pantallas armadas a mano, ahora centralizado para que cualquier
+catálogo genérico (presente o futuro) quede parejo sin tener que
+acordarse de aplicarlo pantalla por pantalla.
+
+Tests nuevos: `tests/test_gui_novedades.py`
+(`test_vacaciones_reiniciar_vuelve_filtros_al_default`,
+`test_licencias_reiniciar_vuelve_filtros_al_default`,
+`test_ausencias_reiniciar_vuelve_filtros_al_default` — las tres
+muestran la pantalla de verdad, `pantalla.pestanas.setCurrentWidget(
+panel)` para Licencias/Ausencias antes de llamar `reiniciar()`
+directo, ya que `setFocus()` sobre un widget oculto no deja
+`hasFocus()` en verdadero bajo la plataforma `offscreen`);
+`tests/test_catalogos.py`
+(`test_tabla_de_catalogo_generico_suma_padding_sobre_el_ancho_justo` —
+mide el ancho real del texto más largo con `QFontMetrics` y confirma
+que la columna queda por encima de ese ancho justo, no solo igual).
+Suite combinada `test_gui_novedades.py`+`test_catalogos.py`+
+`test_crud_generico.py`: 190 passed. Suite completa: 2479 passed, sin
+regresiones.

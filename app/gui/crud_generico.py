@@ -55,6 +55,7 @@ from app.repositorio.registro import obtener_repositorio
 
 _ID_REGISTRO = Qt.ItemDataRole.UserRole
 _ANCHO_CAMPO = 240  # ancho compartido por el panel izquierdo (buscar + botones), mismo criterio que otras pantallas
+_PADDING_COLUMNA = 30  # mismo criterio y mismo valor que novedades._ajustar_columnas/llaves._ajustar_columnas
 _LOCALE_ES = QLocale(QLocale.Language.Spanish)
 # "lun 07-09-2026" — mismo formato que los campos Desde/Hasta de Registro de
 # ausencias (app/gui/pantallas/novedades.py), generalizado acá para
@@ -502,7 +503,15 @@ class PantallaCRUD(QWidget):
                 if col_idx == 0:
                     item.setData(_ID_REGISTRO, registro[self.repositorio.clave_primaria])
                 self.tabla_widget.setItem(fila_idx, col_idx, item)
+        # Hallazgo puntual en "Tipos de licencia" (columna "Nombre" muy
+        # pegada al contenido): aplicado acá de una a los ~14 catálogos
+        # genéricos, mismo criterio y mismo valor que
+        # novedades._ajustar_columnas/llaves._ajustar_columnas — sobra
+        # ancho en el panel, no tiene sentido dejar las columnas al
+        # ancho justo de resizeColumnsToContents().
         self.tabla_widget.resizeColumnsToContents()
+        for col in range(self.tabla_widget.columnCount()):
+            self.tabla_widget.setColumnWidth(col, self.tabla_widget.columnWidth(col) + _PADDING_COLUMNA)
         self._aplicar_filtro_busqueda()
         self._actualizar_botones_seleccion()
 

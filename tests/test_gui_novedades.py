@@ -444,6 +444,97 @@ def test_combo_vacaciones_conserva_a_quien_ya_tiene_historial_aunque_hoy_no_cali
     assert pantalla2.panel_vacaciones.combo_profesional.findData(id_profesional) >= 0
 
 
+def test_vacaciones_reiniciar_vuelve_filtros_al_default(qtbot, conn):
+    """Punto #1.4: cambiar Profesional/Año/Desde/Hasta y llamar
+    `reiniciar()` (lo que ya hace `showEvent` al volver a esta solapa)
+    tiene que devolver los cuatro a su valor de recién construida."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    panel = pantalla.panel_vacaciones
+    anio_actual = panel.spin_anio.value()
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.spin_anio.setValue(anio_actual + 3)
+    panel.campo_desde.setDate(QDate(anio_actual + 3, 2, 1))
+    panel.campo_hasta.setDate(QDate(anio_actual + 3, 2, 15))
+
+    panel.reiniciar()
+
+    assert panel.combo_profesional.currentIndex() == 0
+    assert panel.spin_anio.value() == anio_actual
+    hoy = QDate.currentDate()
+    assert panel.campo_desde.date() == hoy
+    assert panel.campo_hasta.date() == hoy
+    qtbot.waitUntil(lambda: panel.combo_profesional.hasFocus())
+
+
+def test_licencias_reiniciar_vuelve_filtros_al_default(qtbot, conn):
+    """Mismo punto #1.4, sobre Licencias — además de Profesional/Desde/
+    Hasta, vuelve Tipo de licencia al primero (con su % precargado) y
+    Hasta al sentinel "(sin fecha)"."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    panel = pantalla.panel_licencias
+    pantalla.pestanas.setCurrentWidget(panel)
+    porcentaje_default = panel.spin_porcentaje.value()
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    if panel.combo_tipo.count() > 1:
+        panel.combo_tipo.setCurrentIndex(1)
+    panel.spin_porcentaje.setValue(porcentaje_default + 5)
+    hoy = QDate.currentDate()
+    panel.campo_desde.setDate(hoy.addDays(10))
+    panel.campo_hasta.setDate(hoy.addDays(20))
+
+    panel.reiniciar()
+
+    assert panel.combo_profesional.currentIndex() == 0
+    assert panel.combo_tipo.currentIndex() == 0
+    assert panel.spin_porcentaje.value() == porcentaje_default
+    assert panel.campo_desde.date() == hoy
+    assert panel.campo_hasta.text() == "(sin fecha)"
+    qtbot.waitUntil(lambda: panel.combo_profesional.hasFocus())
+
+
+def test_ausencias_reiniciar_vuelve_filtros_al_default(qtbot, conn):
+    """Mismo punto #1.4, sobre Ausencias por motivos varios — Profesional/
+    Motivo/Desde/Hasta vuelven al default y "Horario puntual" se destilda
+    con su horario de siempre (9 a 10)."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    panel = pantalla.panel_ausencias
+    pantalla.pestanas.setCurrentWidget(panel)
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.combo_motivo.setCurrentText("Algo tipeado a mano")
+    hoy = QDate.currentDate()
+    panel.campo_desde.setDate(hoy.addDays(5))
+    panel.campo_hasta.setDate(hoy.addDays(6))
+    panel.grupo_horario.setChecked(True)
+    panel.spin_hora_desde.setValue(14)
+    panel.spin_hora_hasta.setValue(15)
+
+    panel.reiniciar()
+
+    assert panel.combo_profesional.currentIndex() == 0
+    assert panel.combo_motivo.currentIndex() == 0
+    assert panel.campo_desde.date() == hoy
+    assert panel.campo_hasta.date() == hoy
+    assert panel.grupo_horario.isChecked() is False
+    assert panel.spin_hora_desde.value() == 9
+    assert panel.spin_hora_hasta.value() == 10
+    qtbot.waitUntil(lambda: panel.combo_profesional.hasFocus())
+
+
 def test_simulacion_en_vivo_del_periodo_se_actualiza_al_cambiar_las_fechas(qtbot, conn):
     """Hallazgo #20 F19, segunda parte: cálculo en vivo al elegir
     Desde/Hasta, sin necesidad de confirmar nada."""

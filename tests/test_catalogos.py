@@ -562,6 +562,22 @@ def test_pantalla_tipos_licencia_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre3") == 1
 
 
+def test_tabla_de_catalogo_generico_suma_padding_sobre_el_ancho_justo(qtbot, conn):
+    """Hallazgo puntual sobre "Nombre" de Tipos de licencia (quedaba muy
+    pegada al contenido, sin el padding que ya tienen las tablas de
+    Novedades/Llaves) — corregido de una para los ~14 catálogos
+    genéricos (`PantallaCRUD.actualizar`), no solo este."""
+    obtener_repositorio(conn, "TipoLicencia").crear(
+        Nombre="Licencia por estudio prolongado y capacitación profesional",
+    )
+    conn.commit()
+    pantalla = catalogos.pantalla_tipos_licencia(conn)
+    qtbot.addWidget(pantalla)
+    tabla = pantalla.tabla_widget
+    ancho_sin_padding = tabla.fontMetrics().boundingRect("Licencia por estudio prolongado y capacitación profesional").width()
+    assert tabla.columnWidth(0) >= ancho_sin_padding + 20
+
+
 def test_responsables_rol_es_combo_editable(qtbot, conn):
     """Rol es un catálogo abierto (sección 8.2): sugiere los valores
     sembrados pero admite texto libre, a diferencia de Tipo de fecha

@@ -315,7 +315,19 @@ class _PanelVacaciones(QWidget):
         abrir la pantalla o volver a esta solapa) se repite el pedido
         de foco en Profesional, que es cuando realmente surte efecto."""
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto #1.4: vuelve la solapa al estado "recién entrada" —
+        Profesional a "Todos los profesionales", Año calendario al
+        actual, Desde/Hasta a hoy, orden de la tabla reiniciado y foco
+        en Profesional."""
         self._orden.reiniciar()
+        self.combo_profesional.setCurrentIndex(0)
+        self.spin_anio.setValue(fecha_actual(self.conn).year)
+        hoy = fecha_actual(self.conn)
+        self.campo_desde.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.campo_hasta.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self.actualizar()
         self.combo_profesional.setFocus()
 
@@ -661,7 +673,21 @@ class _PanelLicencias(QWidget):
         abrir la pantalla o volver a esta solapa) se repite el pedido
         de foco en Profesional, que es cuando realmente surte efecto."""
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto #1.4: vuelve la solapa al estado "recién entrada" —
+        Profesional a "Todos los profesionales", Tipo de licencia al
+        primero (con su % de bonificación precargado), Desde a hoy,
+        Hasta a "(sin fecha)", orden de la tabla reiniciado y foco en
+        Profesional."""
         self._orden.reiniciar()
+        self.combo_profesional.setCurrentIndex(0)
+        self.combo_tipo.setCurrentIndex(0)
+        self._precargar_porcentaje()
+        hoy = fecha_actual(self.conn)
+        self.campo_desde.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.campo_hasta.setDate(_FECHA_SIN_DATO)
         self.actualizar()
         self.combo_profesional.setFocus()
 
@@ -967,7 +993,23 @@ class _PanelAusencias(QWidget):
         abrir la pantalla o volver a esta solapa) se repite el pedido
         de foco en Profesional, que es cuando realmente surte efecto."""
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto #1.4: vuelve la solapa al estado "recién entrada" —
+        Profesional a "Todos los profesionales", Motivo al primero,
+        Desde/Hasta a hoy, Horario puntual destildado con su horario
+        default (9 a 10), orden de la tabla reiniciado y foco en
+        Profesional."""
         self._orden.reiniciar()
+        self.combo_profesional.setCurrentIndex(0)
+        self.combo_motivo.setCurrentIndex(0)
+        hoy = fecha_actual(self.conn)
+        self.campo_desde.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.campo_hasta.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.grupo_horario.setChecked(False)
+        self.spin_hora_desde.setValue(9)
+        self.spin_hora_hasta.setValue(10)
         self.actualizar()
         self.combo_profesional.setFocus()
 
