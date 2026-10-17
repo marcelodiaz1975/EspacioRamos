@@ -82,6 +82,44 @@ def _seleccionar_profesional(panel, id_profesional):
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
 
 
+def test_registrar_pagos_reiniciar_vuelve_filtro_y_formulario_al_default(qtbot, conn):
+    """Punto #1.4: `reiniciar()` (disparado también desde `showEvent` y
+    desde F3) vuelve "Profesional" (el mismo combo que filtra la tabla)
+    a "Todos los profesionales", Período al actual y Monto a cero."""
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.campo_periodo.setText("2020-01")
+    panel.spin_monto.setValue(500)
+
+    panel.reiniciar()
+
+    assert panel.combo_profesional.currentData() is None
+    assert panel.campo_periodo.text() == periodo_actual(conn)
+    assert panel.spin_monto.value() == 0
+
+
+def test_planes_de_pago_reiniciar_vuelve_combo_y_spins_al_default(qtbot, conn):
+    """Punto #1.4: mismo criterio que "Registrar pagos" — vuelve
+    "Profesional" a "Seleccionar profesional…" y cuotas/interés a su
+    default."""
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_cuotas.setValue(12)
+    panel.spin_interes.setValue(5)
+
+    panel.reiniciar()
+
+    assert panel.combo_profesional.currentData() is None
+    assert panel.spin_cuotas.value() == 3
+    assert panel.spin_interes.value() == 0
+
+
 def test_registrar_pago_sin_monto_no_persiste(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)

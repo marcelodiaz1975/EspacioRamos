@@ -278,9 +278,17 @@ class _PanelRegistrarPago(QWidget):
         abrir la pantalla o volver a esta solapa) se repite el pedido
         de foco en Profesional, que es cuando realmente surte efecto."""
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto #1.4: vuelve la solapa al estado "recién entrada" —
+        el mismo `_resetear_formulario()` que ya corre después de
+        Registrar/Modificar/Eliminar/Deshacer (resetea el filtro de
+        Profesional —el mismo combo que la tabla lee para acotarse—,
+        Período y Monto) más el orden de la tabla y un refresco."""
         self._orden.reiniciar()
+        self._resetear_formulario()
         self.actualizar()
-        self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -821,7 +829,16 @@ class _PanelPlanesPago(QWidget):
         """Mismo motivo que en la solapa "Registrar pagos": `setFocus()`
         durante la construcción no alcanza a "pegar"."""
         super().showEvent(event)
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Punto #1.4: vuelve la solapa al estado "recién entrada" —
+        Profesional a "Seleccionar profesional…", cuotas/interés a su
+        default, orden de la tabla reiniciado y foco en Profesional."""
         self._orden.reiniciar()
+        self.combo_profesional.setCurrentIndex(0)
+        self.spin_cuotas.setValue(3)
+        self.spin_interes.setValue(0)
         self._profesional_cambio()
         self.combo_profesional.setFocus()
 
