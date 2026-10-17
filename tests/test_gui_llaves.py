@@ -17,6 +17,7 @@ from app.gui.pantallas.llaves import (
     _PADDING_COLUMNA,
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
+from app.negocio.dias import periodo_actual, sumar_meses
 from app.negocio.llaves import crear_llave, ingresar_copias
 from app.repositorio.registro import obtener_repositorio
 
@@ -463,6 +464,91 @@ def test_asignar_crea_movimiento_y_cargo_especial(qtbot, conn, monkeypatch):
     cargo = conn.execute("SELECT * FROM CargoEspecial WHERE IdProfesional = ?", (id_profesional,)).fetchone()
     assert cargo is not None
     assert cargo["IdLlave"] == id_llave
+    assert cargo["PeriodoImputado"] == periodo_actual(conn)  # combo "Período a imputar" arranca en "Período actual"
+
+
+def test_dialogo_asignar_periodo_siguiente_imputa_al_mes_que_viene(qtbot, conn, monkeypatch):
+    """Punto propio de esta vuelta: `asignar_llave` ya soportaba
+    `periodo_imputado`, sin ningún control en la GUI para elegir "el
+    siguiente" — mismo combo que ya usa Reservas para esta decisión."""
+    id_llave = _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
+    conn.commit()
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+
+    def _asignar_periodo_siguiente(self, *a, **k):
+        indice = self.combo_profesional.findData(id_profesional)
+        self.combo_profesional.setCurrentIndex(indice)
+        self.casilla_deposito.setChecked(True)
+        self.combo_periodo.setCurrentIndex(self.combo_periodo.findData("siguiente"))
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAsignar, "exec", _asignar_periodo_siguiente)
+    pantalla._asignar()
+
+    cargo = conn.execute("SELECT * FROM CargoEspecial WHERE IdLlave = ?", (id_llave,)).fetchone()
+    assert cargo["PeriodoImputado"] == sumar_meses(periodo_actual(conn), 1)
+
+
+def test_asignar_con_deposito_al_mes_actual_regenera_liquidacion_no_enviada(qtbot, conn, monkeypatch):
+    """Punto #1.9: mismo criterio que Cargos especiales — un depósito
+    cobrado, imputado al período en curso, regenera y marca no enviada
+    la liquidación de ese profesional si ya estaba emitida."""
+    from app.negocio.liquidaciones import emitir_liquidacion
+
+    _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
+    conn.commit()
+    id_liquidacion, _ = emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo_actual(conn))
+    obtener_repositorio(conn, "LiquidacionEmitida").actualizar(id_liquidacion, EstadoEnvio="Enviada")
+    conn.commit()
+
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+
+    def _asignar_con_deposito(self, *a, **k):
+        indice = self.combo_profesional.findData(id_profesional)
+        self.combo_profesional.setCurrentIndex(indice)
+        self.casilla_deposito.setChecked(True)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAsignar, "exec", _asignar_con_deposito)
+    pantalla._asignar()
+
+    liquidaciones = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_profesional, Periodo=periodo_actual(conn),
+    )
+    ultima = max(liquidaciones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_dialogo_asignar_fecha_muestra_dia_de_la_semana(qtbot, conn):
+    """Punto #1.10: mismo formato "ddd dd-MM-yyyy" que el resto del
+    sistema — antes "dd-MM-yyyy" nomás, sin el día."""
+    id_llave = _crear_tipo_con_copia(conn)
+    tipo = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    dialogo = _DialogoAsignar(conn, tipo, 1)
+    qtbot.addWidget(dialogo)
+    assert dialogo.campo_fecha.displayFormat() == "ddd dd-MM-yyyy"
+
+
+def test_asignar_con_exito_muestra_alerta(qtbot, conn, monkeypatch):
+    """Punto #1.11: alerta de éxito al confirmar — antes no se avisaba
+    nada, mismo criterio que el resto del sistema."""
+    _crear_tipo_con_copia(conn)
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+
+    monkeypatch.setattr(_DialogoAsignar, "exec", lambda self, *a, **k: QDialog.DialogCode.Accepted)
+    llamadas = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: llamadas.append(a)))
+    pantalla._asignar()
+
+    assert llamadas
 
 
 def test_registrar_devolucion_deshabilitado_sin_asignacion_abierta(qtbot, conn):
@@ -548,6 +634,53 @@ def test_flujo_completo_asignar_y_devolver(qtbot, conn, monkeypatch):
     assert pantalla.tabla_tipos.item(0, 3).text() == "0"
     assert pantalla.tabla_tipos.item(0, 4).text() == "1"
     assert pantalla.tabla_movimientos.rowCount() == 3  # Ingreso + Asignación + Devolución
+
+
+def test_dialogo_devolucion_periodo_siguiente_imputa_al_mes_que_viene(qtbot, conn, monkeypatch):
+    _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
+    conn.commit()
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+
+    def _asignar_con_deposito(self, *a, **k):
+        indice = self.combo_profesional.findData(id_profesional)
+        self.combo_profesional.setCurrentIndex(indice)
+        self.casilla_deposito.setChecked(True)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoAsignar, "exec", _asignar_con_deposito)
+    pantalla._asignar()
+    pantalla.tabla_movimientos.selectRow(0)
+
+    def _devolver_periodo_siguiente(self, *a, **k):
+        self.combo_periodo.setCurrentIndex(self.combo_periodo.findData("siguiente"))
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoDevolucion, "exec", _devolver_periodo_siguiente)
+    pantalla._registrar_devolucion()
+
+    reintegro = conn.execute(
+        "SELECT * FROM CargoEspecial WHERE IdProfesional = ? AND Monto < 0", (id_profesional,),
+    ).fetchone()
+    assert reintegro["PeriodoImputado"] == sumar_meses(periodo_actual(conn), 1)
+
+
+def test_dialogo_devolucion_fecha_muestra_dia_de_la_semana(qtbot, conn):
+    """Punto #1.10, mismo criterio que `_DialogoAsignar`."""
+    _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
+    conn.commit()
+    from app.negocio.llaves import asignar_llave
+
+    id_llave = conn.execute("SELECT IdLlave FROM Llave").fetchone()["IdLlave"]
+    id_movimiento = asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional)
+    conn.commit()
+    movimiento = obtener_repositorio(conn, "LlaveMovimiento").obtener(id_movimiento)
+    dialogo = _DialogoDevolucion(conn, {**movimiento, "_nombre_llave": "x", "_texto_profesional": "y"})
+    qtbot.addWidget(dialogo)
+    assert dialogo.campo_fecha.displayFormat() == "ddd dd-MM-yyyy"
 
 
 def test_flujo_perdida_no_reintegra(qtbot, conn, monkeypatch):

@@ -10455,3 +10455,92 @@ una corrida y no se reprodujo en la siguiente — mismo hallazgo de
 estabilidad ya documentado más arriba en este archivo, WA_
 StyledBackground + paintEvent manual bajo la plataforma `offscreen`,
 no relacionado con los cambios de esta tanda).
+
+## Profesionales: sin cambios de código (batch #15.x del documento)
+
+Decimoquinta tanda de `v0.11.2026.10`: "Listado de profesionales"
+(`_PanelProfesionales`) ya cumple 1.4 de rebote — no tiene `showEvent`
+propio, pero `self.crud_profesionales` (la `PantallaCRUD` anidada que
+arma el catálogo) ya recibe su propio evento de visibilidad al mostrarse
+y ya tiene `reiniciar()` desde el fix central de `crud_generico.py` —
+confirmado leyendo el código, nada que agregar. "Profesiones y
+tratamientos" (el otro tab de este formulario, también un catálogo
+anidado) igual, cerrado desde las tandas #83/#84.
+
+**"Listado: botones mitad alto, etiquetas, cuadro documentación 5
+items, Vista previa"**: no implementado — ninguno de estos cuatro
+puntos tiene ningún rastro en CLAUDE.md de tandas anteriores ni
+ninguna base concreta en el código actual (botones "Agregar archivo"/
+"Eliminar archivo" al alto default, sin ningún pedido de "mitad alto"
+documentado; `lista_documentos` sin ningún criterio de "N items
+visibles"; ninguna vista previa de documentos en esta pantalla, a
+diferencia de Gestor de archivos). Sin el texto original del punto a
+la vista, y sin saber qué formato de archivo debería previsualizar una
+"Vista previa" acá, no hay una base segura para inventar el detalle —
+mismo criterio que "autocierre de tanda" (Pagos) y "reducir
+proporcional" (Oferta). Queda pendiente de una aclaración puntual.
+
+## Llaves y otros conceptos: Movimientos y tenencias (batch #16.x del documento)
+
+Decimosexta tanda de `v0.11.2026.10`. 1.2 (selector de profesional,
+`_DialogoAsignar`)/1.3 (orden de unidad, ya resuelto en una tanda
+anterior en los tres lugares — `_accesos`, el combo de "Agregar
+acceso" y la tabla de Accesos)/1.5 (`excluir_tabla_del_tab` en las tres
+tablas)/1.7 (foco visible en combos/checks, regla general)/1.12
+(período solo actual o siguiente, por construcción del combo nuevo —
+ver abajo) confirmados ya resueltos, sin cambios. Lo que faltaba:
+
+- **Período a imputar en los diálogos de Asignar/Devolución**:
+  `asignar_llave`/`devolver_llave` (`app.negocio.llaves`) ya soportaban
+  `periodo_imputado` desde que se armó el Subtipo "Depósito de llave" —
+  nunca había ningún control en la GUI para elegir "el siguiente", el
+  depósito/reintegro siempre caía en el período actual por el default
+  del parámetro. Se suma el mismo combo "Período actual"/"Período
+  siguiente" que ya usan Reservas aisladas/extraordinarias para esta
+  misma decisión, a `_DialogoAsignar` y `_DialogoDevolucion` (que ahora
+  recibe `conn` como parámetro nuevo, para poder resolver el período
+  real en `valores()`).
+- **1.9 — regenerar liquidación del período actual**: mismo criterio
+  que Cargos especiales — `_asignar`/`_registrar_devolucion` llaman
+  `regenerar_si_corresponde` cuando el depósito/reintegro cobrado cae
+  en el período en curso (nunca cuando cae en el siguiente, ni cuando
+  no se cobra/reintegra nada).
+- **1.10 — fecha con día de la semana**: `_fecha_edit` (compartida por
+  los diálogos de Asignar/Devolución/Ingreso/Pérdida) usaba
+  "dd-MM-yyyy" sin el día — hueco real, pasa a "ddd dd-MM-yyyy" como el
+  resto del sistema (el sábado en negro ya estaba, vía `aplicar_color_
+  sabado_negro`, aplicado desde antes de esta tanda).
+- **1.11 — alerta de éxito**: "Asignar"/"Registrar devolución"/
+  "Registrar pérdida" nunca avisaban nada al terminar con éxito — se
+  suma un `QMessageBox.information` a cada uno, mismo criterio que el
+  resto del sistema.
+- **"Check Bonificar depósito"**: no implementado — sin ningún rastro
+  en el código ni en CLAUDE.md de qué debería hacer exactamente (¿exime
+  de pagar el depósito a un profesional puntual? ¿a qué categoría?),
+  queda pendiente de aclaración antes de implementarse.
+- **"Nueva solapa 'Stock de llaves por profesional'"**: no
+  implementado — es una pantalla/reporte nuevo completo, sin ninguna
+  especificación de qué columnas o agrupamiento debería mostrar más
+  allá del nombre. Mismo criterio que el resto de los puntos
+  genuinamente ambiguos de este documento: no se inventa el alcance,
+  queda pendiente de una definición puntual con la clienta antes de
+  programarlo.
+- **Estado de cuenta (Cargos especiales)**: confirmado sin ningún punto
+  propio pendiente (ya cubierto por #93/#94) — 1.4 deliberadamente NO
+  aplicado, mismo criterio ya documentado para "Estado de cuenta" de
+  Liquidaciones: este panel conserva a propósito el profesional
+  elegido entre una consulta y la siguiente, nunca tuvo `showEvent`
+  propio y no se le agrega uno ahora.
+
+Tests nuevos: `tests/test_gui_llaves.py`
+(`test_dialogo_asignar_periodo_siguiente_imputa_al_mes_que_viene`,
+`test_asignar_con_deposito_al_mes_actual_regenera_liquidacion_no_
+enviada`, `test_dialogo_asignar_fecha_muestra_dia_de_la_semana`,
+`test_asignar_con_exito_muestra_alerta`, `test_dialogo_devolucion_
+periodo_siguiente_imputa_al_mes_que_viene`, `test_dialogo_devolucion_
+fecha_muestra_dia_de_la_semana`), más la aserción nueva de `PeriodoImputado`
+sumada a `test_asignar_crea_movimiento_y_cargo_especial`. Suite
+combinada `test_gui_llaves.py`+`test_llaves.py`: 99 passed. Suite
+completa: 2490 passed, sin regresiones (mismo segfault intermitente ya
+documentado, no relacionado con esta tanda — confirmado con una
+segunda corrida limpia).

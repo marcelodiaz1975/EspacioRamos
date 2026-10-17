@@ -68,6 +68,8 @@ from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
+from app.negocio.dias import periodo_actual, sumar_meses
+from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import opciones_lista
 from app.pdf.estilos import clave_orden_unidad
 from app.negocio.llaves import (
@@ -131,9 +133,12 @@ def _moneda(monto: float) -> str:
 
 
 def _fecha_edit(valor_iso: str | None = None) -> QDateEdit:
+    # Punto #1.10: día de la semana abreviado, mismo formato y criterio
+    # que el resto del sistema (Registro de ausencias/Reservas/
+    # Configuración general) — antes "dd-MM-yyyy" nomás, sin el día.
     campo = QDateEdit()
     campo.setCalendarPopup(True)
-    campo.setDisplayFormat("dd-MM-yyyy")
+    campo.setDisplayFormat("ddd dd-MM-yyyy")
     campo.setLocale(QLocale(QLocale.Language.Spanish))
     aplicar_color_sabado_negro(campo)
     campo.setDate(QDate.fromString(valor_iso, Qt.DateFormat.ISODate) if valor_iso else QDate.currentDate())
@@ -742,32 +747,50 @@ class _PanelLlaves(QWidget):
         dialogo = _DialogoAsignar(self.conn, tipo, disponibles, self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
+        valores = dialogo.valores()
         try:
-            asignar_llave(self.conn, id_llave=tipo["IdLlave"], **dialogo.valores())
+            asignar_llave(self.conn, id_llave=tipo["IdLlave"], **valores)
         except ValueError as error:
             QMessageBox.warning(self, "Asignar", str(error))
             return
         self.conn.commit()
+        # Punto #1.9: mismo criterio que Cargos especiales — un depósito
+        # cobrado, imputado al período en curso, regenera y marca no
+        # enviada la liquidación de ese profesional si ya estaba emitida.
+        if valores["cobrar_deposito"] and valores["monto_cobrado"] and valores["periodo_imputado"] == periodo_actual(self.conn):
+            regenerar_si_corresponde(self.conn, id_profesional=valores["id_profesional"], periodo=valores["periodo_imputado"])
+            self.conn.commit()
         self._actualizar_tipos()
         self._actualizar_movimientos()
         self.boton_nuevo_tipo.setFocus()
+        QMessageBox.information(self, "Asignar", "Llave asignada con éxito.")
 
     def _registrar_devolucion(self) -> None:
         movimiento = self._movimiento_seleccionado()
         if movimiento is None:
             return
-        dialogo = _DialogoDevolucion(movimiento, self)
+        dialogo = _DialogoDevolucion(self.conn, movimiento, self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
+        valores = dialogo.valores()
         try:
-            devolver_llave(self.conn, movimiento["IdMovimiento"], **dialogo.valores())
+            devolver_llave(self.conn, movimiento["IdMovimiento"], **valores)
         except ValueError as error:
             QMessageBox.warning(self, "Registrar devolución", str(error))
             return
         self.conn.commit()
+        if (
+            valores["reintegrar_deposito"] and valores["monto_reintegrado"]
+            and valores["periodo_imputado"] == periodo_actual(self.conn)
+        ):
+            regenerar_si_corresponde(
+                self.conn, id_profesional=movimiento["IdProfesional"], periodo=valores["periodo_imputado"],
+            )
+            self.conn.commit()
         self._actualizar_tipos()
         self._actualizar_movimientos()
         self.boton_nuevo_tipo.setFocus()
+        QMessageBox.information(self, "Registrar devolución", "Devolución registrada con éxito.")
 
     def _registrar_perdida(self) -> None:
         if self._asignacion_abierta_seleccionada():
@@ -805,6 +828,7 @@ class _PanelLlaves(QWidget):
         self._actualizar_tipos()
         self._actualizar_movimientos()
         self.boton_nuevo_tipo.setFocus()
+        QMessageBox.information(self, "Registrar pérdida", "Pérdida registrada con éxito.")
 
 
 class _DialogoTipo(QDialog):
@@ -1013,6 +1037,7 @@ class _DialogoIngreso(QDialog):
 class _DialogoAsignar(QDialog):
     def __init__(self, conn: sqlite3.Connection, tipo: sqlite3.Row, disponibles: int, parent=None):
         super().__init__(parent)
+        self.conn = conn
         self.setWindowTitle("Asignar")
         layout = QFormLayout(self)
         copia_o_copias = "copia disponible" if disponibles == 1 else "copias disponibles"
@@ -1034,6 +1059,16 @@ class _DialogoAsignar(QDialog):
         self.spin_monto.setValue(tipo["ValorDepositoActual"] or 0)
         layout.addRow("Monto cobrado", self.spin_monto)
 
+        # Punto propio de esta vuelta: `asignar_llave` ya soportaba
+        # `periodo_imputado` (default el período actual, sin ningún
+        # control para elegir "el siguiente") — mismo combo exacto que
+        # ya usa Reservas aisladas/extraordinarias para esta misma
+        # decisión, solo tiene efecto si se tilda "Cobrar depósito".
+        self.combo_periodo = QComboBox()
+        self.combo_periodo.addItem("Período actual", "actual")
+        self.combo_periodo.addItem("Período siguiente", "siguiente")
+        layout.addRow("Período a imputar", self.combo_periodo)
+
         self.campo_observacion = QLineEdit()
         layout.addRow("Observación", self.campo_observacion)
 
@@ -1046,7 +1081,7 @@ class _DialogoAsignar(QDialog):
         boton_cancelar = botones.button(QDialogButtonBox.StandardButton.Cancel)
         self._foco = instalar_enter_avanza_foco([
             self.combo_profesional, self.campo_fecha, self.casilla_deposito, self.spin_monto,
-            self.campo_observacion, boton_ok, boton_cancelar,
+            self.combo_periodo, self.campo_observacion, boton_ok, boton_cancelar,
         ], parent=self)
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -1054,18 +1089,23 @@ class _DialogoAsignar(QDialog):
         self.combo_profesional.setFocus()
 
     def valores(self) -> dict:
+        periodo = periodo_actual(self.conn)
+        if self.combo_periodo.currentData() == "siguiente":
+            periodo = sumar_meses(periodo, 1)
         return {
             "id_profesional": self.combo_profesional.currentData(),
             "fecha": self.campo_fecha.date().toString(Qt.DateFormat.ISODate),
             "cobrar_deposito": self.casilla_deposito.isChecked(),
             "monto_cobrado": self.spin_monto.value() or None,
+            "periodo_imputado": periodo,
             "observacion": self.campo_observacion.text().strip() or None,
         }
 
 
 class _DialogoDevolucion(QDialog):
-    def __init__(self, movimiento: sqlite3.Row, parent=None):
+    def __init__(self, conn: sqlite3.Connection, movimiento: sqlite3.Row, parent=None):
         super().__init__(parent)
+        self.conn = conn
         self.setWindowTitle("Registrar devolución")
         layout = QFormLayout(self)
         layout.addRow(QLabel(f"{movimiento['_nombre_llave']}  —  {movimiento['_texto_profesional']}"))
@@ -1081,6 +1121,13 @@ class _DialogoDevolucion(QDialog):
         self.spin_monto.setValue(movimiento["MontoCobrado"] or 0)
         layout.addRow("Monto a reintegrar", self.spin_monto)
 
+        # Mismo combo que `_DialogoAsignar` — `devolver_llave` ya
+        # soportaba `periodo_imputado` sin ningún control en la GUI.
+        self.combo_periodo = QComboBox()
+        self.combo_periodo.addItem("Período actual", "actual")
+        self.combo_periodo.addItem("Período siguiente", "siguiente")
+        layout.addRow("Período a imputar", self.combo_periodo)
+
         self.campo_observacion = QLineEdit()
         layout.addRow("Observación", self.campo_observacion)
 
@@ -1092,7 +1139,10 @@ class _DialogoDevolucion(QDialog):
         boton_ok = botones.button(QDialogButtonBox.StandardButton.Ok)
         boton_cancelar = botones.button(QDialogButtonBox.StandardButton.Cancel)
         self._foco = instalar_enter_avanza_foco(
-            [self.campo_fecha, self.casilla_reintegro, self.spin_monto, self.campo_observacion, boton_ok, boton_cancelar],
+            [
+                self.campo_fecha, self.casilla_reintegro, self.spin_monto,
+                self.combo_periodo, self.campo_observacion, boton_ok, boton_cancelar,
+            ],
             parent=self,
         )
 
@@ -1101,10 +1151,14 @@ class _DialogoDevolucion(QDialog):
         self.campo_fecha.setFocus()
 
     def valores(self) -> dict:
+        periodo = periodo_actual(self.conn)
+        if self.combo_periodo.currentData() == "siguiente":
+            periodo = sumar_meses(periodo, 1)
         return {
             "fecha": self.campo_fecha.date().toString(Qt.DateFormat.ISODate),
             "reintegrar_deposito": self.casilla_reintegro.isChecked(),
             "monto_reintegrado": self.spin_monto.value() or None,
+            "periodo_imputado": periodo,
             "observacion": self.campo_observacion.text().strip() or None,
         }
 
