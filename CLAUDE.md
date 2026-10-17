@@ -10544,3 +10544,68 @@ combinada `test_gui_llaves.py`+`test_llaves.py`: 99 passed. Suite
 completa: 2490 passed, sin regresiones (mismo segfault intermitente ya
 documentado, no relacionado con esta tanda — confirmado con una
 segunda corrida limpia).
+
+## Placas para timbres / Estadísticas / Balance del negocio (batch #17.x del documento)
+
+Decimoséptima tanda de `v0.11.2026.10`, cerrando "PLACAS PARA LOS
+TIMBRES", "ESTADISTICAS" y "BALANCE DEL NEGOCIO".
+
+### Placas para timbres
+
+1.2 (selector de profesional)/1.3 (orden de unidad, ya resuelto en los
+diálogos vía `reservas._opciones_unidad`)/1.5 (`excluir_tabla_del_tab`)
+confirmados ya resueltos, sin cambios. 1.4 ya estaba completo en
+"Búsqueda y asignación" (`_PanelBuscarPlacas.showEvent` ya reinicia
+Profesional/cascada/orden desde una tanda anterior); en "Impresión" se
+confirmó, investigando, que es un caso de preservación deliberada —
+mismo criterio que Oferta/Estado de cuenta: la cola de impresión
+(`self._cola_impresion`) está pensada explícitamente para sobrevivir
+al cambiar de solapa ("Buscar y asignar" ↔ "Imprimir" comparten este
+estado, según el propio docstring de la clase), así que resetear el
+combo de profesional o la selección de placa en cada `showEvent`
+rompería ese diseño sin que nadie lo pidiera — se deja como está, solo
+con el foco inicial que ya tenía.
+
+**1.11 — alertas de éxito**: "Asignar placa nueva"/"Reasignar"/
+"Liberar posición" nunca avisaban nada al terminar con éxito (la
+confirmación de "Liberar posición" ya existía, era solo la falta de
+cierre lo que faltaba) — se suma un `QMessageBox.information` a cada
+una. "Generar PDF" (solapa Imprimir) ya avisaba la ruta generada desde
+que se armó esa funcionalidad; "Agregar a impresión"/"Quitar de la
+lista" no suman nada, mismo criterio que el resto del sistema para
+operaciones de lista en memoria sin persistencia (Oferta, Lista de
+espera).
+
+### Estadísticas
+
+1.3 (orden de unidad)/1.7 (foco) confirmados ya resueltos desde la
+tanda de "Orden natural de códigos..." y #102 — sin cambios de código.
+
+### Balance del negocio (Ingresos/Resultado)
+
+1.5 (`excluir_tabla_del_tab`)/1.7 (foco, #103) confirmados ya
+resueltos. **"Selector año/mes en línea"**: `campo_periodo` pasa de
+`QLineEdit` libre ("AAAA-MM") a `SelectorPeriodo` (el mismo widget
+Año+Mes ya introducido en Liquidaciones > "Emisión de archivos") en
+`_PanelFiltrosMixin._armar_panel_filtros` — un solo cambio en el mixin
+compartido alcanza para las dos solapas (Ingresos y Resultado), sin
+duplicar nada. `_ver_periodo_actual` pasa de `setText(periodo_actual(...))`
+a `set_periodo(...)`; las dos `actualizar()` (una por panel) pasan de
+`self.campo_periodo.text().strip() or periodo_actual(self.conn)` a
+`self.campo_periodo.periodo()` directo — `SelectorPeriodo` siempre
+devuelve un período válido, ya no hace falta el fallback. La cadena de
+foco pasa a incluir `campo_periodo.spin_anio`/`.combo_mes` por
+separado, mismo criterio que Liquidaciones.
+
+Tests nuevos: `tests/test_gui_placas.py`
+(`test_asignar_reasignar_y_liberar_muestran_alerta_de_exito`);
+`tests/test_gui_balance.py`
+(`test_periodo_es_selector_anio_y_mes_en_linea_en_las_dos_solapas`),
+más el ajuste de los 5 tests ya existentes que usaban `campo_periodo.
+text()`/`.setText()` (pasan a `.periodo()`/`.set_periodo()`). Suite
+combinada `test_gui_placas.py`+`test_gui_placas_para_timbres.py`+
+`test_gui_balance.py`+`test_estadisticas.py`+`test_gui_estadisticas.py`:
+110 passed. Suite completa: 2492 passed, sin regresiones (mismo
+segfault intermitente ya documentado reapareció en dos corridas
+seguidas y no se reprodujo en una tercera — confirmado no relacionado
+con esta tanda).

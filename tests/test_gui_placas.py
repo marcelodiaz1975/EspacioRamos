@@ -432,6 +432,46 @@ def test_liberar_posicion_borra_el_registro(qtbot, conn):
     pantalla._liberar()
 
     assert pantalla.tabla.rowCount() == 0
+
+
+def test_asignar_reasignar_y_liberar_muestran_alerta_de_exito(qtbot, conn, monkeypatch):
+    """Punto #1.11: ninguna de las tres acciones avisaba nada al
+    terminar con éxito."""
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    id_otro = _crear_profesional(conn, apellido="Otro")
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: mensajes.append(a)))
+
+    def _aceptar_nueva(self, *a, **k):
+        indice = self.combo_profesional.findData(id_profesional)
+        self.combo_profesional.setCurrentIndex(indice)
+        indice_unidad = self.combo_unidad.findData(id_unidad)
+        self.combo_unidad.setCurrentIndex(indice_unidad)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoPlaca, "exec", _aceptar_nueva)
+    pantalla._asignar_nueva()
+    assert mensajes
+    mensajes.clear()
+
+    pantalla.tabla.selectRow(0)
+
+    def _aceptar_reasignar(self, *a, **k):
+        indice = self.combo_profesional.findData(id_otro)
+        self.combo_profesional.setCurrentIndex(indice)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoPlaca, "exec", _aceptar_reasignar)
+    pantalla._reasignar()
+    assert mensajes
+    mensajes.clear()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    pantalla._liberar()
+    assert mensajes
     assert obtener_repositorio(conn, "Placa").listar(IdUnidad=id_unidad) == []
 
 

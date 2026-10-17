@@ -533,6 +533,7 @@ class _PanelPlacasOperativas(QWidget):
             QMessageBox.warning(self, "Asignar placa nueva", str(error))
             return
         self._actualizar_tabla()
+        QMessageBox.information(self, "Asignar placa nueva", "Placa asignada con éxito.")
 
     def _reasignar(self) -> None:
         placa = self._fila_seleccionada_placa()
@@ -547,6 +548,7 @@ class _PanelPlacasOperativas(QWidget):
             QMessageBox.warning(self, "Reasignar", str(error))
             return
         self._actualizar_tabla()
+        QMessageBox.information(self, "Reasignar", "Placa reasignada con éxito.")
 
     def _liberar(self) -> None:
         placa = self._fila_seleccionada_placa()
@@ -559,6 +561,7 @@ class _PanelPlacasOperativas(QWidget):
             return
         liberar_posicion(self.conn, placa["IdPlaca"])
         self._actualizar_tabla()
+        QMessageBox.information(self, "Liberar posición", "Posición liberada con éxito.")
 
     # ------------------------------------------------------------ imprimir
 

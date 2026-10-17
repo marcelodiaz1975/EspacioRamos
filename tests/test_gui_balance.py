@@ -59,13 +59,26 @@ def test_ingresos_arranca_en_el_periodo_actual_con_una_sola_fila(qtbot, conn):
     pantalla = PantallaBalanceDelNegocio(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_ingresos
-    assert panel.campo_periodo.text() == periodo_actual(conn)
+    assert panel.campo_periodo.periodo() == periodo_actual(conn)
     assert panel.tabla.rowCount() == 1
     assert panel.tabla.item(0, 0).text() == periodo_actual(conn)
     assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
         "Período", "Ingreso por horas regulares", "Ingreso por horas aisladas",
         "Ingreso por feriados\ny días especiales", "Total ingresos",
     ]
+
+
+def test_periodo_es_selector_anio_y_mes_en_linea_en_las_dos_solapas(qtbot, conn):
+    """Punto propio de esta vuelta: selector Año+Mes en línea (mismo
+    widget que Liquidaciones), no texto libre "AAAA-MM"."""
+    from app.gui.widgets.selector_periodo import SelectorPeriodo
+
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    for panel in (pantalla.panel_ingresos, pantalla.panel_resultado):
+        assert isinstance(panel.campo_periodo, SelectorPeriodo)
+        assert panel._foco._orden[0] is panel.campo_periodo.spin_anio
+        assert panel._foco._orden[1] is panel.campo_periodo.combo_mes
 
 
 def test_ingresos_filtros_de_ubicacion_arrancan_en_todas_todos(qtbot, conn):
@@ -94,8 +107,7 @@ def test_ingresos_recalcula_al_cambiar_periodo(qtbot, conn):
     pantalla = PantallaBalanceDelNegocio(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_ingresos
-    panel.campo_periodo.setText("2026-08")
-    panel.campo_periodo.editingFinished.emit()
+    panel.campo_periodo.set_periodo("2026-08")
     assert panel.tabla.rowCount() == 1
     assert panel.tabla.item(0, 0).text() == "2026-08"
     assert "$ 10.000,00" in panel.tabla.item(0, 1).text()
@@ -105,7 +117,7 @@ def test_resultado_arranca_en_el_periodo_actual_con_una_sola_fila(qtbot, conn):
     pantalla = PantallaBalanceDelNegocio(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_resultado
-    assert panel.campo_periodo.text() == periodo_actual(conn)
+    assert panel.campo_periodo.periodo() == periodo_actual(conn)
     assert panel.tabla.rowCount() == 1
     assert panel.tabla.item(0, 0).text() == periodo_actual(conn)
     assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
@@ -184,12 +196,12 @@ def test_ingresos_ver_periodo_actual_vuelve_a_una_sola_fila(qtbot, conn):
     pantalla = PantallaBalanceDelNegocio(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_ingresos
-    panel.campo_periodo.setText("2020-01")
+    panel.campo_periodo.set_periodo("2020-01")
     panel.boton_historial.click()
     assert panel.tabla.rowCount() >= 1
 
     panel.boton_periodo_actual.click()
-    assert panel.campo_periodo.text() == periodo_actual(conn)
+    assert panel.campo_periodo.periodo() == periodo_actual(conn)
     assert panel.tabla.rowCount() == 1
     assert panel.tabla.item(0, 0).text() == periodo_actual(conn)
 
@@ -222,11 +234,11 @@ def test_resultado_ver_periodo_actual_vuelve_a_una_sola_fila(qtbot, conn):
     pantalla = PantallaBalanceDelNegocio(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_resultado
-    panel.campo_periodo.setText("2020-01")
+    panel.campo_periodo.set_periodo("2020-01")
     panel.boton_historial.click()
     assert panel.tabla.rowCount() >= 1
 
     panel.boton_periodo_actual.click()
-    assert panel.campo_periodo.text() == periodo_actual(conn)
+    assert panel.campo_periodo.periodo() == periodo_actual(conn)
     assert panel.tabla.rowCount() == 1
     assert panel.tabla.item(0, 0).text() == periodo_actual(conn)

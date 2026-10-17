@@ -38,7 +38,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -51,6 +50,7 @@ from app.gui.pantallas import catalogos
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.resumen_saldo import item_monto
+from app.gui.widgets.selector_periodo import SelectorPeriodo
 from app.negocio.balance import resultado_periodo, total_ingresos_periodo
 from app.negocio.dias import periodo_actual
 from app.negocio.estadisticas import _ids_consultorio_del_alcance, _periodos_para_filtro
@@ -105,10 +105,12 @@ class _PanelFiltrosMixin:
         columna = QVBoxLayout(panel_filtros)
 
         columna.addWidget(_titulo_campo("Período"))
-        self.campo_periodo = QLineEdit()
+        # Punto propio de esta vuelta: selector Año+Mes en línea en vez
+        # de texto libre "AAAA-MM" — mismo widget ya introducido en
+        # Liquidaciones ("Emisión de archivos").
+        self.campo_periodo = SelectorPeriodo(self.conn)
         self.campo_periodo.setFixedWidth(_ANCHO_CAMPO)
-        self.campo_periodo.setText(periodo_actual(self.conn))
-        self.campo_periodo.editingFinished.connect(self.actualizar)
+        self.campo_periodo.cambiado.connect(self.actualizar)
         columna.addWidget(self.campo_periodo)
 
         columna.addWidget(_titulo_campo("Localidad"))
@@ -152,7 +154,8 @@ class _PanelFiltrosMixin:
         self._cargar_combo_localidad()
         self._foco = instalar_enter_avanza_foco(
             [
-                self.campo_periodo, self.combo_localidad, self.combo_edificio,
+                self.campo_periodo.spin_anio, self.campo_periodo.combo_mes,
+                self.combo_localidad, self.combo_edificio,
                 self.combo_unidad, self.combo_consultorio, self.boton_historial, self.boton_periodo_actual,
             ],
             parent=self,
@@ -225,7 +228,7 @@ class _PanelFiltrosMixin:
         explícito de la clienta, a diferencia del viejo "Actualizar" que
         también reiniciaba la cascada de ubicación (ese reinicio se saca
         por completo, no tenía un pedido real detrás)."""
-        self.campo_periodo.setText(periodo_actual(self.conn))
+        self.campo_periodo.set_periodo(periodo_actual(self.conn))
         self.actualizar()
 
 
@@ -273,7 +276,7 @@ class _PanelIngresos(_PanelFiltrosMixin, QWidget):
         )
 
     def actualizar(self) -> None:
-        periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
+        periodo = self.campo_periodo.periodo()
         self._llenar_filas([self._fila(periodo, self._ids_consultorio())])
 
     def _ver_historial(self) -> None:
@@ -325,7 +328,7 @@ class _PanelResultado(_PanelFiltrosMixin, QWidget):
             self.tabla.setItem(fila_idx, 3, item_monto(resultado))
 
     def actualizar(self) -> None:
-        periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
+        periodo = self.campo_periodo.periodo()
         self._llenar_filas([self._fila(periodo)])
 
     def _ver_historial(self) -> None:
