@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -35,6 +38,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.pantallas import catalogos
+from app.gui.pantallas.imagenes import _pixmap_primera_pagina_pdf
 from app.gui.pantallas.reservas import _opciones_profesional as _opciones_profesional_canonico
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
@@ -62,6 +66,20 @@ from app.negocio.validaciones import (
 from app.repositorio.registro import obtener_repositorio
 
 _ANCHO_CAMPO = 240  # mismo ancho que el panel izquierdo de PantallaCRUD (ver crud_generico._ANCHO_CAMPO)
+# Pedido explícito de la clienta sobre esta pantalla puntual (no una regla
+# general de estilos.py): los cinco botones de la columna (los tres del CRUD
+# genérico — Nuevo/Editar/Eliminar — más los dos propios de este panel —
+# Agregar/Eliminar archivo) bajan a la mitad de su alto default, para hacer
+# lugar al cuadro de Vista previa nuevo. Medido con un script de geometría:
+# el alto default de un botón (padding "8px 16px" de estilos.py) es 32px;
+# "padding: 0px 16px" da exactamente 16px, la mitad exacta.
+_ESTILO_BOTON_COMPACTO = "padding: 0px 16px;"
+# Alto fijo de `lista_documentos` para mostrar ~5 líneas sin scroll (medido
+# con un script de geometría: alto de fila + marco del widget, mismo
+# criterio que `_alto_para_filas` de Reservas/Llaves, acá para un
+# `QListWidget` en vez de una tabla) — sigue siendo scrolleable (default de
+# Qt) para cuando hay más archivos de los que entran.
+_ALTO_LISTA_DOCUMENTOS = 76
 
 _CATEGORIAS = [
     ("R", "R - Regular"),
@@ -305,26 +323,55 @@ class _PanelProfesionales(QWidget):
         layout_doc = QVBoxLayout(panel_doc)
         layout_doc.setContentsMargins(0, 0, 0, 0)
         layout_doc.addWidget(_linea_divisoria())
-        titulo_doc = QLabel("Documentación del profesional seleccionado")
+        # "Documentación del profesional" (antes "...seleccionado") — pedido
+        # explícito de la clienta, así entra en una sola línea sin wrapear.
+        titulo_doc = QLabel("Documentación del profesional")
         titulo_doc.setObjectName("subtituloSeccion")
-        titulo_doc.setWordWrap(True)
         layout_doc.addWidget(titulo_doc)
         self.lista_documentos = QListWidget()
         self.lista_documentos.setFixedWidth(_ANCHO_CAMPO)
-        self.lista_documentos.setMinimumHeight(150)
+        # Alto fijo (no `stretch=1`) para ~5 líneas — el alto que esto le
+        # saca al stretch de siempre se lo lleva el cuadro de Vista previa
+        # nuevo, más abajo. Sigue scrolleando sola (default de Qt) si hay
+        # más archivos de los que entran.
+        self.lista_documentos.setFixedHeight(_ALTO_LISTA_DOCUMENTOS)
+        self.lista_documentos.itemSelectionChanged.connect(self._actualizar_vista_previa)
         instalar_eliminar_con_tecla(self.lista_documentos, self._eliminar_documento)
-        layout_doc.addWidget(self.lista_documentos, stretch=1)
+        layout_doc.addWidget(self.lista_documentos)
 
         boton_agregar = QPushButton("Agregar archivo")
         boton_agregar.setObjectName("botonPrimario")
         boton_agregar.setFixedWidth(_ANCHO_CAMPO)
+        boton_agregar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
         boton_agregar.clicked.connect(self._agregar_documento)
         layout_doc.addWidget(boton_agregar)
         boton_eliminar = QPushButton("Eliminar archivo")
         boton_eliminar.setObjectName("botonSecundario")
         boton_eliminar.setFixedWidth(_ANCHO_CAMPO)
+        boton_eliminar.setStyleSheet(_ESTILO_BOTON_COMPACTO)
         boton_eliminar.clicked.connect(self._eliminar_documento)
         layout_doc.addWidget(boton_eliminar)
+
+        # Vista previa del archivo seleccionado en `lista_documentos` —
+        # pedido explícito de la clienta, mismo mecanismo (imagen con
+        # QPixmap directo, PDF con la primera página vía PyMuPDF) que ya
+        # usan Gestor de archivos/Archivos para enviar — acá solo hace
+        # falta cubrir PDF/JPG/PNG, las únicas extensiones que admite esta
+        # documentación (ver `app.negocio.documentacion_profesional.
+        # EXTENSIONES_VALIDAS`). Con `stretch=1`, este cuadro es el único
+        # elemento que absorbe el alto de sobra del panel izquierdo
+        # (mismo mecanismo que ya usaba `lista_documentos` antes de este
+        # cambio) — llega hasta el pie del panel, a la par de la tabla de
+        # la derecha.
+        layout_doc.addWidget(_titulo_campo("Vista previa"))
+        self.area_vista_previa = QScrollArea()
+        self.area_vista_previa.setWidgetResizable(True)
+        self.area_vista_previa.setStyleSheet("QScrollArea { border: 1px solid #000000; }")
+        self.etiqueta_vista_previa = QLabel("Seleccioná un archivo para verlo acá.")
+        self.etiqueta_vista_previa.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        self.etiqueta_vista_previa.setWordWrap(True)
+        self.area_vista_previa.setWidget(self.etiqueta_vista_previa)
+        layout_doc.addWidget(self.area_vista_previa, stretch=1)
 
         # panel_doc va debajo de Nuevo/Editar/Eliminar en el panel izquierdo
         # de PantallaCRUD (formato solapa, mismo criterio que todo catálogo
@@ -344,6 +391,14 @@ class _PanelProfesionales(QWidget):
             # siempre ("Código - Tratamiento - Nombre - Apellido...").
             campos_primero_dialogo=["CategoriaProfesional"],
         )
+        # Mismo achicado que los dos botones propios de arriba, acá sobre
+        # los tres botones genéricos del CRUD (Nuevo/Editar/Eliminar).
+        for boton in (
+            self.crud_profesionales.boton_nuevo,
+            self.crud_profesionales.boton_editar,
+            self.crud_profesionales.boton_eliminar,
+        ):
+            boton.setStyleSheet(_ESTILO_BOTON_COMPACTO)
         self.crud_profesionales.tabla_widget.itemSelectionChanged.connect(self._actualizar_documentacion)
         layout.addWidget(self.crud_profesionales, stretch=1)
 
@@ -367,13 +422,50 @@ class _PanelProfesionales(QWidget):
     def _actualizar_documentacion(self) -> None:
         self.lista_documentos.clear()
         codigo = self._codigo_seleccionado()
-        if not codigo:
+        if codigo:
+            try:
+                for ruta in listar_documentos(self.conn, codigo):
+                    item = QListWidgetItem(ruta.name)
+                    item.setData(Qt.ItemDataRole.UserRole, str(ruta))
+                    self.lista_documentos.addItem(item)
+            except ValueError:
+                pass  # sin carpeta base configurada todavía: lista vacía
+        self._actualizar_vista_previa()
+
+    def _actualizar_vista_previa(self) -> None:
+        item = self.lista_documentos.currentItem()
+        if item is None:
+            self._mostrar_vista_previa_texto("Seleccioná un archivo para verlo acá.")
             return
-        try:
-            for ruta in listar_documentos(self.conn, codigo):
-                self.lista_documentos.addItem(QListWidgetItem(ruta.name))
-        except ValueError:
-            pass  # sin carpeta base configurada todavía: lista vacía
+        ruta = item.data(Qt.ItemDataRole.UserRole)
+        ruta_minuscula = (ruta or "").lower()
+        if ruta_minuscula.endswith((".jpg", ".jpeg", ".png")):
+            pixmap = QPixmap(ruta)
+            if not pixmap.isNull():
+                self._mostrar_vista_previa_pixmap(pixmap)
+                return
+        elif ruta_minuscula.endswith(".pdf"):
+            pixmap = _pixmap_primera_pagina_pdf(ruta)
+            if pixmap is not None:
+                self._mostrar_vista_previa_pixmap(pixmap)
+                return
+        self._mostrar_vista_previa_texto("No hay vista disponible.")
+
+    def _mostrar_vista_previa_texto(self, texto: str) -> None:
+        self.etiqueta_vista_previa.setMinimumSize(0, 0)
+        self.etiqueta_vista_previa.setPixmap(QPixmap())
+        self.etiqueta_vista_previa.setText(texto)
+
+    def _mostrar_vista_previa_pixmap(self, pixmap: QPixmap) -> None:
+        ancho_disponible = self.area_vista_previa.viewport().width() - 4
+        if ancho_disponible > 0 and pixmap.width() > ancho_disponible:
+            pixmap = pixmap.scaledToWidth(ancho_disponible, Qt.TransformationMode.SmoothTransformation)
+        self.etiqueta_vista_previa.setText("")
+        self.etiqueta_vista_previa.setPixmap(pixmap)
+        # Mismo motivo que Archivos para enviar: sin esto, el QScrollArea
+        # (widgetResizable=True) achica la etiqueta al alto del viewport y
+        # la imagen queda recortada en vez de poder bajarla con la barra.
+        self.etiqueta_vista_previa.setMinimumSize(pixmap.size())
 
     def _agregar_documento(self) -> None:
         codigo = self._codigo_seleccionado()

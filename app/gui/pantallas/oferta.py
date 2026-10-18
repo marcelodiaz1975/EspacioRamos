@@ -133,11 +133,30 @@ _ANCHO_PANEL_FILTROS_GRILLA = 280  # baja desde 355: con las 4 columnas de la ro
 # cero con el ancho ya corregido y la letra ya más chica (no alcanza con
 # reusar los valores de la ronda anterior: con el ancho real bien calculado,
 # el alto que cada descripción necesita de verdad cambia).
-_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR = 9
+_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR = 33
 _TAMANO_FUENTE_LEYENDA_REGULAR = 12
-_AJUSTE_ALTO_MUESTRA_LEYENDA_AISLADA = 28
+_AJUSTE_ALTO_MUESTRA_LEYENDA_AISLADA = 54
 _TAMANO_FUENTE_LEYENDA_AISLADA = 11
 _AJUSTE_EXTRA_MUESTRA_PARES = 9  # pedido de la clienta: los días siempre de a pares, ver _ajustar_tamano_leyenda
+# Ancho de la muestra de color en modo `compacta=True` (`LeyendaColores.
+# hacer_compacta`, 2 columnas de referencias) — pedido explícito de la
+# clienta sobre esta vuelta ("los cuadraditos, y la fuente también
+# reducila, de manera que estén dos por línea"), reemplaza a la versión
+# grande (40px) de rondas anteriores. Los `_AJUSTE_ALTO_MUESTRA_LEYENDA_*`
+# de arriba se volvieron a medir desde cero para este modo compacto, con
+# un script de geometría (`self.grilla._panel_filtros.sizeHint()` después
+# de `updateGeometry()` — bajo la plataforma offscreen, `sizeHint()` no
+# refleja un cambio de tamaño de la leyenda sin ese llamado de más) hasta
+# que el panel de Filtros llega aproximadamente a la misma altura que el
+# formulario de la columna 1, ya recortado (ver _armar_ui).
+_ANCHO_MUESTRA_LEYENDA_COMPACTA = 28
+# Alto fijo de "Franjas agregadas a esta búsqueda" (columna 2) para ~3
+# líneas — pedido explícito de la clienta ("sacale altura al cuadro
+# donde se van cargando las franjas horarias"), mismo criterio de
+# medición que `_ALTO_LISTA_DOCUMENTOS` en Profesionales (alto de fila +
+# marco, medido con un script de geometría). Sigue scrolleando sola
+# (default de Qt) si hay más franjas de las que entran.
+_ALTO_LISTA_FRANJAS = 48
 
 _DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
 
@@ -365,18 +384,19 @@ class _PanelOferta(QWidget):
         fila_horas_minimas.addWidget(self.spin_horas_minimas)
         form.addLayout(fila_horas_minimas)
 
+        # "Combinación de consultorios" pierde su etiqueta propia y pasa
+        # a vivir debajo del título de "Requisitos de búsqueda" (antes
+        # "Características pedidas") — pedido explícito de la clienta,
+        # para ganar la altura que ocupaba esa etiqueta suelta.
+        form.addWidget(QLabel("Requisitos de búsqueda"))
         self.combo_combinacion = QComboBox()
         for etiqueta, valor in _COMBINACIONES:
             self.combo_combinacion.addItem(etiqueta, valor)
         self.combo_combinacion.setCurrentIndex(2)
-        form.addWidget(QLabel("Combinación de consultorios"))
         form.addWidget(self.combo_combinacion)
 
-        form.addWidget(QLabel("Características pedidas"))
         self.casilla_ventana = QCheckBox("Con ventana")
         self.casilla_camilla = QCheckBox("Apto camilla")
-        self.casilla_sillones = QCheckBox("Con sillones")
-        self.casilla_placard = QCheckBox("Con placard")
         self.casilla_tamano = QCheckBox("Tamaño")
         self.combo_tamano = QComboBox()
         for etiqueta, valor in _TAMANOS:
@@ -388,18 +408,17 @@ class _PanelOferta(QWidget):
         self.spin_valor_maximo.setRange(0, 10_000_000)
         self.spin_valor_maximo.setEnabled(False)
         self.casilla_valor_maximo.toggled.connect(self.spin_valor_maximo.setEnabled)
-        # Grilla de 2 columnas, checkbox de a pares por fila (pedido
-        # explícito de la clienta), con "Tamaño"/"Valor máximo..." como
-        # las últimas dos filas, cada una junto a su propio selector.
+        # Grilla de 2 columnas, checkbox de a pares por fila. "Con
+        # sillones"/"Con placard" se sacan (pedido explícito de la
+        # clienta, para ganar altura) — quedan Ventana/Camilla arriba y
+        # Tamaño/Valor máximo abajo, cada uno junto a su propio selector.
         self._grid_caracteristicas = grid_caracteristicas = QGridLayout()
         grid_caracteristicas.addWidget(self.casilla_ventana, 0, 0)
         grid_caracteristicas.addWidget(self.casilla_camilla, 0, 1)
-        grid_caracteristicas.addWidget(self.casilla_sillones, 1, 0)
-        grid_caracteristicas.addWidget(self.casilla_placard, 1, 1)
-        grid_caracteristicas.addWidget(self.casilla_tamano, 2, 0)
-        grid_caracteristicas.addWidget(self.combo_tamano, 2, 1)
-        grid_caracteristicas.addWidget(self.casilla_valor_maximo, 3, 0)
-        grid_caracteristicas.addWidget(self.spin_valor_maximo, 3, 1)
+        grid_caracteristicas.addWidget(self.casilla_tamano, 1, 0)
+        grid_caracteristicas.addWidget(self.combo_tamano, 1, 1)
+        grid_caracteristicas.addWidget(self.casilla_valor_maximo, 2, 0)
+        grid_caracteristicas.addWidget(self.spin_valor_maximo, 2, 1)
         form.addLayout(grid_caracteristicas)
 
         self.combo_union_franja = QComboBox()
@@ -410,30 +429,28 @@ class _PanelOferta(QWidget):
 
         self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
         form.addWidget(self.casilla_detalle_reducido)
-
-        fila_franja = QHBoxLayout()
-        # Texto en dos líneas (pedido explícito de la clienta: "hacelos
-        # más altos, en dos líneas de texto cada uno") — sube el alto de
-        # los dos botones y, de paso, angosta la columna (cada línea es
-        # más corta que el texto de una sola línea de antes).
-        self.boton_agregar_franja = QPushButton("Agregar franja\na la búsqueda")
-        self.boton_agregar_franja.clicked.connect(self._agregar_franja)
-        self.boton_quitar_franja = QPushButton("Quitar franja\nseleccionada")
-        self.boton_quitar_franja.clicked.connect(self._quitar_franja_seleccionada)
-        fila_franja.addWidget(self.boton_agregar_franja)
-        fila_franja.addWidget(self.boton_quitar_franja)
-        form.addLayout(fila_franja)
+        # "Agregar franja a la búsqueda"/"Quitar franja seleccionada" se
+        # sacan de esta columna (pedido explícito de la clienta, para
+        # ganar altura) — los métodos `_agregar_franja`/`_quitar_franja_
+        # seleccionada` quedan intactos (la tecla Delete sobre `lista_
+        # franjas`, columna 2, sigue pudiendo quitar una franja ya
+        # agregada), pero sin ningún botón que arme más de una franja
+        # por búsqueda desde esta pantalla.
         splitter.addWidget(panel_form)
 
-        # Segunda columna, nueva: "Franjas agregadas a esta búsqueda" (antes
-        # el final del formulario) + los tres botones de acción (antes en
-        # el panel de Filtros de la grilla, ver más abajo) reubicados al
-        # pie — pedido explícito de la clienta. `self.lista_franjas` se
-        # queda con `stretch=1` y sin alto máximo (crece hasta el pie de
-        # la columna, con su propio scroll para cuando hay más franjas de
-        # las que entran) — al ser lo único con stretch en esta columna,
-        # empuja a los tres botones agregados después de ella exactamente
-        # al borde inferior.
+        # Segunda columna: "Franjas agregadas a esta búsqueda" + los tres
+        # botones de acción, reubicados al pie. `self.lista_franjas` pasa
+        # de `stretch=1` sin tope (crecía hasta el pie de la columna,
+        # dejando mucho espacio en blanco) a un alto FIJO (~3 líneas,
+        # pedido explícito de la clienta: "sacale altura al cuadro") —
+        # sigue teniendo su propio scroll para cuando hay más franjas de
+        # las que entran. Con `columna_franjas.addStretch()` al final en
+        # vez del `stretch=1` de la lista, el contenido (etiqueta + lista
+        # + 3 botones) queda pegado arriba en vez de centrarse en el alto
+        # que le dé el splitter — mismo mecanismo ya documentado para
+        # Reservas (un tope de alto sin un `addStretch()` final en el
+        # layout que lo contiene centra el contenido en vez de pegarlo
+        # arriba).
         panel_franjas = QWidget()
         panel_franjas.setMaximumWidth(_ANCHO_BOTON_ACCION + 16)
         columna_franjas = QVBoxLayout(panel_franjas)
@@ -441,8 +458,9 @@ class _PanelOferta(QWidget):
         etiqueta_franjas.setWordWrap(True)
         columna_franjas.addWidget(etiqueta_franjas)
         self.lista_franjas = QListWidget()
+        self.lista_franjas.setFixedHeight(_ALTO_LISTA_FRANJAS)
         instalar_eliminar_con_tecla(self.lista_franjas, self._quitar_franja_seleccionada)
-        columna_franjas.addWidget(self.lista_franjas, stretch=1)
+        columna_franjas.addWidget(self.lista_franjas)
 
         self.boton_pdf = QPushButton("Generar PDF")
         self.boton_pdf.setObjectName("botonSecundario")
@@ -456,6 +474,7 @@ class _PanelOferta(QWidget):
         for boton in (self.boton_pdf, self.boton_texto, self.boton_nueva):
             boton.setFixedWidth(_ANCHO_BOTON_ACCION)
             columna_franjas.addWidget(boton)
+        columna_franjas.addStretch()
         splitter.addWidget(panel_franjas)
 
         self.grilla = GrillaOperativaWidget(self.conn)
@@ -495,16 +514,25 @@ class _PanelOferta(QWidget):
         # propia fila, "al final", sin necesitar ningún caso especial.
         self._domingo_en_filtro_dia = "Domingo" in self.grilla._checks_dia
         self.grilla.agrupar_dias_en_pares()
-        self.grilla.mostrar_leyenda_colores()
+        # "Referencias de colores" compacta (2 columnas, cuadraditos y
+        # letra más chicos — mismo criterio `hacer_compacta()` que ya usa
+        # Reservas) en vez de la versión grande de una sola columna —
+        # pedido explícito de la clienta, para que la columna de Filtros
+        # (3) llegue a la misma altura que el resto del formulario sin
+        # necesitar tanto alto.
+        self.grilla.mostrar_leyenda_colores(compacta=True)
         # Sin título (antes "Grilla semanal") — pedido explícito de la
         # clienta, mismo criterio que Reservas (`fijar_titulo_filtros("")`).
         self.grilla.fijar_titulo_filtros("")
-        # "Detalle" pegado justo debajo de la grilla, en vez de dejar que
-        # la tabla se estire con relleno vacío hasta el pie de la columna
-        # — mismo método opt-in que ya usa Reservas regulares. Con esto,
-        # "Detalle" crece hasta el pie del formulario (columna 1), que es
-        # la referencia de alto de todo el splitter.
-        self.grilla.dar_stretch_a_detalle()
+        # La grilla (tabla de horarios) vuelve al comportamiento DEFAULT
+        # de `GrillaOperativaWidget` (stretch=1, "Detalle" con su alto
+        # máximo fijo de siempre) — antes esta pantalla llamaba
+        # `dar_stretch_a_detalle()` para que "Detalle" absorbiera el
+        # alto de sobra; pedido explícito de la clienta sobre esta
+        # vuelta ("la grilla comé altura del cuadro de detalle"): ahora
+        # es la GRILLA la que crece con cualquier alto de sobra, y
+        # "Detalle" se queda en su tamaño chico de siempre. Sin ningún
+        # llamado a `dar_stretch_a_detalle`/`achicar_detalle` acá.
         # Sin la etiqueta "Visualización:" (el combo queda solo,
         # deshabilitado — acá siempre lo maneja "Tipo de búsqueda", ver
         # `_al_cambiar_tipo`) — pedido explícito de la clienta: esa fila
@@ -549,11 +577,10 @@ class _PanelOferta(QWidget):
                 self._filtro_unidad.foco_widget(),
                 *(self._checks_dia[dia] for dia in _DIAS_BUSQUEDA),
                 self.spin_desde, self.spin_hasta, self.casilla_horas_minimas, self.spin_horas_minimas,
-                self.combo_combinacion, self.casilla_ventana, self.casilla_camilla, self.casilla_sillones,
-                self.casilla_placard, self.casilla_tamano, self.combo_tamano,
+                self.combo_combinacion, self.casilla_ventana, self.casilla_camilla,
+                self.casilla_tamano, self.combo_tamano,
                 self.casilla_valor_maximo, self.spin_valor_maximo,
                 self.combo_union_franja, self.casilla_detalle_reducido,
-                self.boton_agregar_franja, self.boton_quitar_franja,
                 self.boton_pdf, self.boton_texto, self.boton_nueva,
             ],
             parent=self,
@@ -702,7 +729,13 @@ class _PanelOferta(QWidget):
         # con un script de geometría, no a ojo).
         ajuste += _AJUSTE_EXTRA_MUESTRA_PARES
         self.grilla.fijar_tamano_fuente_leyenda(tamano_fuente)
-        self.grilla.agrandar_muestras_leyenda(40, 24 + ajuste)
+        # `_ANCHO_MUESTRA_LEYENDA_COMPACTA` (28px) es el ancho de la
+        # muestra en modo `compacta=True` (`LeyendaColores.hacer_
+        # compacta`, 2 columnas de referencias) — a diferencia de la
+        # versión grande (40px) de rondas anteriores, acá interesa el
+        # tamaño compacto para que "Referencias de colores" quepa en
+        # menos alto, no más ancho.
+        self.grilla.agrandar_muestras_leyenda(_ANCHO_MUESTRA_LEYENDA_COMPACTA, 16 + ajuste)
 
     def _dias_seleccionados(self) -> list[str]:
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
@@ -725,8 +758,10 @@ class _PanelOferta(QWidget):
             combinacion=self.combo_combinacion.currentData(),
             apto_camilla=self.casilla_camilla.isChecked(),
             ventana=self.casilla_ventana.isChecked(),
-            sillones=self.casilla_sillones.isChecked(),
-            placard=self.casilla_placard.isChecked(),
+            # "Con sillones"/"Con placard" se sacaron de este formulario
+            # (ver _armar_ui) — quedan en False, nunca filtran nada acá.
+            sillones=False,
+            placard=False,
             tamano=self.combo_tamano.currentData() if self.casilla_tamano.isChecked() else None,
             valor_maximo_hora=self.spin_valor_maximo.value() if self.casilla_valor_maximo.isChecked() else None,
             cantidad_horas_minimas=self.spin_horas_minimas.value() if self.casilla_horas_minimas.isChecked() else None,
@@ -832,8 +867,6 @@ class _PanelOferta(QWidget):
         self.combo_combinacion.setCurrentIndex(2)
         self.casilla_ventana.setChecked(False)
         self.casilla_camilla.setChecked(False)
-        self.casilla_sillones.setChecked(False)
-        self.casilla_placard.setChecked(False)
         self.casilla_tamano.setChecked(False)
         self.combo_tamano.setCurrentIndex(0)
         self.casilla_valor_maximo.setChecked(False)

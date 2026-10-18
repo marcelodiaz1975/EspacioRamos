@@ -10655,3 +10655,171 @@ que puede no ser lo que la clienta tenía en mente):
 Los cinco quedan anotados en el checklist de trabajo para retomarlos en
 cuanto la clienta aclare el alcance — no se perdieron de vista, se
 decidió no adivinarlos.
+
+## Resolución de tres de los cinco puntos pendientes de arriba
+
+De los cinco puntos que habían quedado abiertos, la clienta resolvió
+tres en esta vuelta — los otros dos (Llaves: "check Bonificar depósito"
+y la nueva solapa "Stock de llaves por profesional") siguen sin
+definir, ver la sección de arriba.
+
+### Pagos — "autocierre de tanda": dejado tal cual
+
+Pedido explícito de la clienta: "Dejalo como está, no toque nada." Sin
+ningún cambio de código — la pantalla sigue con el cierre manual de
+siempre ("Iniciar tanda"/"Cerrar tanda").
+
+### Oferta de consultorios: las cuatro columnas comprimidas hasta "Alcanza con esta franja sola (O)"
+
+Pedido explícito de la clienta: todo el contenido de las cuatro
+columnas de "Oferta de consultorios" tiene que entrar en el mismo alto
+visible que ya alcanzaba hasta el check "Alcanza con esta franja sola
+(O)" (el último control de la primera columna antes de esta vuelta) —
+"de derecha a izquierda":
+
+- **Columna 4 (la grilla)**: "la grilla come altura del cuadro de
+  detalle" — se revierte `dar_stretch_a_detalle()` (sumado en una ronda
+  anterior para que "Detalle" absorbiera el alto de sobra). Vuelve el
+  comportamiento DEFAULT de `GrillaOperativaWidget` (la tabla con
+  `stretch=1`, "Detalle" con su alto máximo fijo de siempre, sin
+  stretch) — ahora es la tabla la que crece con cualquier alto de
+  sobra, "Detalle" se queda en su tamaño chico.
+- **Columna 3 (Filtros/Referencias de colores)**: "Referencias de
+  colores" pasa de la versión grande (una sola columna, cuadraditos de
+  40px) a `mostrar_leyenda_colores(compacta=True)` (2 columnas,
+  cuadraditos de 28px) — mismo criterio `hacer_compacta()` que ya usa
+  Reservas. Los `_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR`/`_AISLADA` (antes
+  tuneados para la versión grande) se volvieron a medir desde cero con
+  un script de geometría para este modo compacto — bajo la plataforma
+  offscreen, `self.grilla._panel_filtros.sizeHint()` no refleja un
+  cambio de tamaño de la leyenda sin llamar antes a `updateGeometry()`
+  en el panel (hallazgo nuevo, no documentado hasta ahora para este
+  mecanismo) — se tuneó hasta que el panel de Filtros llega
+  aproximadamente a la misma altura que el formulario ya recortado de
+  la columna 1 (614px medidos contra 612px de objetivo, un residuo de
+  2px aceptado, mismo tipo de resto imperceptible que otras rondas de
+  esta revisión).
+- **Columna 2 ("Franjas agregadas a esta búsqueda")**: `lista_franjas`
+  pasa de `stretch=1` sin tope (crecía hasta el pie de la columna,
+  dejando mucho espacio en blanco) a un alto FIJO de ~3 líneas
+  (`_ALTO_LISTA_FRANJAS`, mismo criterio de medición — alto de fila +
+  marco — que `_ALTO_LISTA_DOCUMENTOS` en Profesionales, ver más abajo)
+  — sigue scrolleando sola si hay más franjas de las que entran.
+  `columna_franjas` suma un `addStretch()` al final (en vez del
+  `stretch=1` que tenía la lista) para que el contenido (etiqueta +
+  lista + 3 botones) quede pegado arriba en vez de centrarse en el alto
+  que le dé el splitter — mismo mecanismo ya documentado para Reservas
+  ("un tope de alto sin un `addStretch()` final en el layout que lo
+  contiene centra el contenido en vez de pegarlo arriba").
+- **Columna 1 (el formulario), la más creativa**: "Combinación de
+  consultorios" pierde su etiqueta propia y el combo pasa a vivir
+  directo debajo del título "Requisitos de búsqueda" (antes
+  "Características pedidas", renombrado a pedido explícito de la
+  clienta en el mismo movimiento). Los checks "Con sillones"/"Con
+  placard" se sacan por completo de `_grid_caracteristicas` (quedan
+  Ventana/Camilla en la primera fila, Tamaño/Valor máximo en las dos
+  que siguen) — `_armar_busqueda_actual` manda `sillones=False,
+  placard=False` siempre, el campo sigue existiendo en `Busqueda` para
+  cualquier otro llamador (ej. importación), solo deja de poder
+  activarse desde esta pantalla. "Agregar franja a la búsqueda"/"Quitar
+  franja seleccionada" se sacan de esta columna por completo.
+
+  **Consecuencia real de sacar esos dos botones, señalada a la
+  clienta**: `_agregar_franja`/`_quitar_franja_seleccionada` (los
+  métodos) quedan intactos — la tecla Delete sobre `lista_franjas` sigue
+  pudiendo quitar una franja ya agregada (`instalar_eliminar_con_tecla`,
+  sin tocar) — pero esta pantalla deja de tener ningún botón que arme
+  MÁS DE UNA franja por búsqueda (el caso de "lunes y miércoles de
+  mañana" + "viernes de tarde" documentado en el docstring del módulo).
+  Con una sola franja cargada en el formulario, "Generar" sigue
+  funcionando exactamente igual que siempre (la usa directo, sin pasar
+  por `self._franjas`) — la pérdida real es puntualmente la de combinar
+  más de una franja distinta en el mismo documento desde esta pantalla.
+
+Tests actualizados en `tests/test_gui_oferta.py`: se borra
+`test_agregar_y_quitar_franja_en_la_misma_fila` (los botones que
+probaba ya no existen); `test_lista_franjas_crece_hasta_el_pie_y_es_
+scroleable` se reemplaza por `test_lista_franjas_alto_fijo_y_escrolea_
+con_mas_de_las_que_entran` (alto fijo en vez de `stretch=1`, sigue
+escrolleando con 20 franjas cargadas directo vía `_agregar_franja`);
+`test_caracteristicas_pedidas_en_grilla_de_pares_con_placard` se
+reemplaza por `test_caracteristicas_pedidas_en_grilla_de_pares_sin_
+sillones_ni_placard` (confirma que los dos checks no existen más, y la
+posición de fila/columna de los que quedan); `test_placard_se_incluye_
+en_la_busqueda_armada` se reemplaza por `test_busqueda_armada_nunca_
+filtra_por_sillones_ni_placard` (sillones/placard siempre en `False`);
+`test_detalle_pegado_debajo_de_la_grilla_sin_relleno` se reemplaza por
+`test_la_grilla_come_la_altura_del_cuadro_detalle` (stretch invertido:
+tabla=1, Detalle=0); `test_grilla_nunca_se_recorta_con_mas_horarios_
+detalle_cede_espacio` se renombra `test_grilla_nunca_se_recorta_con_
+mas_horarios` (la tabla se protege a sí misma con su propio `stretch=1`,
+ya no depende de que "Detalle" ceda); se actualiza el docstring de
+`test_columna_de_franjas_tiene_titulo_lista_y_tres_botones_al_pie`
+(ya no menciona el `stretch=1` de la lista); se suma
+`test_combinacion_de_consultorios_bajo_el_titulo_requisitos_de_busqueda`.
+
+### Profesionales (Listado): botones a la mitad de alto, Vista previa de archivos
+
+Pedido explícito de la clienta sobre "Listado de profesionales"
+(`_PanelProfesionales`, `app/gui/pantallas/profesionales.py`):
+
+- **Los cinco botones de la columna** (Nuevo/Editar/Eliminar del CRUD +
+  Agregar archivo/Eliminar archivo) **bajan a la mitad del alto
+  default** — `_ESTILO_BOTON_COMPACTO = "padding: 0px 16px;"` (constante
+  LOCAL de este archivo, sin relación con la de mismo nombre en
+  `reservas.py` — cada pantalla define la suya con el valor que le haga
+  falta, mismo criterio ya documentado para "botones compactos" de
+  Reservas), medido con un script de geometría contra el alto default
+  real de `botonPrimario` (32px con `hoja_estilos()` aplicada): 0px de
+  padding vertical da exactamente 16px, la mitad buscada.
+- **"Documentación del profesional seleccionado" pasa a "Documentación
+  del profesional"** — pedido explícito, así entra en una sola línea
+  sin wrapear.
+- **El cuadro de `lista_documentos` baja de alto**: pasa de `stretch=1`
+  sin tope (crecía hasta el pie del panel) a un alto FIJO para ~5
+  líneas (`_ALTO_LISTA_DOCUMENTOS = 76`, medido con un script de
+  geometría — alto de fila de `QListWidget` + marco × 2 + 4px, mismo
+  criterio que otras listas/tablas de ancho fijo del sistema) — sigue
+  scrolleando sola (default de Qt) si hay más archivos de los que
+  entran.
+- **Cuadro nuevo "Vista previa"**, debajo de "Documentación del
+  profesional" (los dos botones de Agregar/Eliminar archivo quedan
+  entre la lista y la vista previa, sin cambiar de posición) — con
+  `stretch=1`, es el único elemento del panel izquierdo que absorbe el
+  alto de sobra (mismo mecanismo que antes usaba `lista_documentos`),
+  así que llega hasta el pie del panel, a la par de la tabla de la
+  derecha (`panel_extra_izquierda` de `PantallaCRUD` ya se agrega con
+  `stretch=1` en el `form` del panel izquierdo — ver "Catálogos
+  (PantallaCRUD genérica)" más arriba). Reusa el mismo mecanismo de
+  Gestor de archivos/Archivos para enviar (imagen con `QPixmap` directo,
+  PDF con la primera página vía `_pixmap_primera_pagina_pdf`, sin vista
+  para cualquier otra extensión — acá solo hace falta cubrir PDF/JPG/
+  PNG, las únicas que admite esta documentación) dentro de un
+  `QScrollArea` propio (con `setMinimumSize(pixmap.size())` sobre la
+  etiqueta, mismo motivo ya documentado en Archivos para enviar: sin
+  esto el `QScrollArea` recorta la imagen al alto del viewport en vez de
+  habilitar el scroll). Se actualiza sola al seleccionar un archivo de
+  la lista (`itemSelectionChanged`), al elegir otro profesional (la
+  lista se repuebla y la vista previa se resetea con ella) y al agregar/
+  eliminar un documento.
+
+  `_actualizar_documentacion` suma `item.setData(Qt.ItemDataRole.
+  UserRole, str(ruta))` a cada fila de `lista_documentos` para poder
+  resolver la ruta completa al armar la vista previa — `listar_
+  documentos` ya devolvía objetos `Path` completos, solo que antes se
+  usaba únicamente `.name` para el texto visible.
+
+Tests nuevos en `tests/test_profesionales.py`: `test_pantalla_
+profesionales_botones_quedan_a_la_mitad_del_alto_default` (compara
+contra un botón de referencia con `hoja_estilos()` aplicada);
+`test_pantalla_profesionales_titulo_documentacion_sin_seleccionado`;
+`test_vista_previa_arranca_con_el_texto_de_ayuda_y_sin_seleccion_
+vuelve_a_el` (incluye el caso de una extensión no soportada, ".txt",
+que cae al mensaje de "sin vista"); `test_vista_previa_de_imagen_
+muestra_el_pixmap`; `test_cambiar_de_profesional_actualiza_la_vista_
+previa` (confirma que no queda la imagen del profesional anterior
+pegada en pantalla al elegir uno sin documentos). El test ya existente
+de `lista_documentos` se renombra `test_pantalla_profesionales_lista_
+documentos_alto_fijo_y_vista_previa_se_estira` y se reescribe para el
+nuevo comportamiento (alto fijo en la lista, `area_vista_previa` con
+el alto de sobra).

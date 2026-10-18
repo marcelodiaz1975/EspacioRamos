@@ -1,9 +1,11 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QPushButton, QTabWidget
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QDialog, QFileDialog, QLabel, QMessageBox, QPushButton, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.crud_generico import _DialogoRegistro
+from app.gui.estilos import hoja_estilos
 from app.gui.pantallas.profesionales import (
     _al_abrir_dialogo,
     _campos_profesional,
@@ -453,15 +455,110 @@ def test_pantalla_profesionales_documentacion_va_bajo_los_botones_del_crud(qtbot
     assert crud.panel_extra_izquierda.isAncestorOf(pantalla.lista_documentos)
 
 
-def test_pantalla_profesionales_lista_documentos_se_estira_con_la_ventana(qtbot, conn):
+def test_pantalla_profesionales_lista_documentos_alto_fijo_y_vista_previa_se_estira(qtbot, conn):
     pantalla = _PanelProfesionales(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1300, 700)
     pantalla.show()
     qtbot.wait(50)
-    # con una ventana alta, la lista tiene que crecer más allá de su mínimo
-    # (150px) para llegar al pie del panel, a la par de la tabla de la derecha
-    assert pantalla.lista_documentos.height() > 150
+    # `lista_documentos` queda a un alto fijo (~5 líneas), sin crecer con la
+    # ventana — el alto de sobra se lo lleva "Vista previa" (cuadro nuevo),
+    # que tiene que llegar al pie del panel, a la par de la tabla de la
+    # derecha.
+    assert pantalla.lista_documentos.height() == pantalla.lista_documentos.minimumHeight() == pantalla.lista_documentos.maximumHeight()
+    assert pantalla.area_vista_previa.height() > 150
+
+
+def test_pantalla_profesionales_botones_quedan_a_la_mitad_del_alto_default(qtbot, conn):
+    """Pedido explícito de la clienta: los cinco botones de la columna
+    (los tres del CRUD + "Agregar archivo"/"Eliminar archivo") bajan a
+    la mitad del alto default de botonPrimario/botonSecundario, para
+    ganar espacio vertical en el panel izquierdo."""
+    referencia = QPushButton("Agregar archivo")
+    referencia.setObjectName("botonPrimario")
+    referencia.setStyleSheet(hoja_estilos(modo_oscuro=False))
+    qtbot.addWidget(referencia)
+    alto_default = referencia.sizeHint().height()
+
+    pantalla = _PanelProfesionales(conn)
+    pantalla.setStyleSheet(hoja_estilos(modo_oscuro=False))
+    qtbot.addWidget(pantalla)
+    botones = pantalla.findChildren(QPushButton)
+    nombres = {"Agregar archivo", "Eliminar archivo", "Nuevo", "Editar", "Eliminar"}
+    botones_relevantes = [b for b in botones if b.text() in nombres]
+    assert len(botones_relevantes) == 5
+    for boton in botones_relevantes:
+        assert boton.sizeHint().height() == alto_default // 2
+
+
+def test_pantalla_profesionales_titulo_documentacion_sin_seleccionado(qtbot, conn):
+    pantalla = _PanelProfesionales(conn)
+    qtbot.addWidget(pantalla)
+    etiquetas = [e.text() for e in pantalla.findChildren(QLabel)]
+    assert "Documentación del profesional" in etiquetas
+    assert "Documentación del profesional seleccionado" not in etiquetas
+
+
+def test_vista_previa_arranca_con_el_texto_de_ayuda_y_sin_seleccion_vuelve_a_el(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ramos", IdCodigo="R3")
+    (tmp_path / "Profesionales" / "R3 - Ramos" / "Documentación").mkdir(parents=True)
+    (tmp_path / "Profesionales" / "R3 - Ramos" / "Documentación" / "notas.txt").write_text("x")
+    conn.commit()
+
+    pantalla = _PanelProfesionales(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.etiqueta_vista_previa.text() == "Seleccioná un archivo para verlo acá."
+
+    pantalla.crud_profesionales.tabla_widget.selectRow(0)
+    pantalla.lista_documentos.setCurrentRow(0)
+    # ".txt" no está entre las extensiones que esta vista previa sabe
+    # renderizar (solo PDF/JPG/PNG) — cae al mensaje de "sin vista".
+    assert pantalla.etiqueta_vista_previa.text() == "No hay vista disponible."
+
+    pantalla.lista_documentos.setCurrentItem(None)
+    assert pantalla.etiqueta_vista_previa.text() == "Seleccioná un archivo para verlo acá."
+
+
+def test_vista_previa_de_imagen_muestra_el_pixmap(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ramos", IdCodigo="R3")
+    carpeta = tmp_path / "Profesionales" / "R3 - Ramos" / "Documentación"
+    carpeta.mkdir(parents=True)
+    ruta_imagen = carpeta / "foto.png"
+    QPixmap(20, 20).save(str(ruta_imagen))
+    conn.commit()
+
+    pantalla = _PanelProfesionales(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud_profesionales.tabla_widget.selectRow(0)
+    pantalla.lista_documentos.setCurrentRow(0)
+
+    assert pantalla.etiqueta_vista_previa.text() == ""
+    assert not pantalla.etiqueta_vista_previa.pixmap().isNull()
+
+
+def test_cambiar_de_profesional_actualiza_la_vista_previa(qtbot, conn, tmp_path):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ramos", IdCodigo="R3")
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci", IdCodigo="R4")
+    carpeta = tmp_path / "Profesionales" / "R3 - Ramos" / "Documentación"
+    carpeta.mkdir(parents=True)
+    QPixmap(20, 20).save(str(carpeta / "foto.png"))
+    conn.commit()
+
+    pantalla = _PanelProfesionales(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud_profesionales.tabla_widget.selectRow(0)
+    pantalla.lista_documentos.setCurrentRow(0)
+    assert not pantalla.etiqueta_vista_previa.pixmap().isNull()
+
+    # Lo Veci (R4) no tiene ningún documento cargado — al seleccionarla,
+    # la vista previa vuelve al mensaje default, sin dejar la imagen del
+    # profesional anterior pegada en pantalla.
+    pantalla.crud_profesionales.tabla_widget.selectRow(1)
+    assert pantalla.lista_documentos.count() == 0
+    assert pantalla.etiqueta_vista_previa.text() == "Seleccioná un archivo para verlo acá."
 
 
 def test_pantalla_profesionales_buscar_dice_buscar_profesional(qtbot, conn):
