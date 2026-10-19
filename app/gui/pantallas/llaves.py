@@ -143,9 +143,16 @@ def _ajustar_columnas(tabla: QTableWidget, factor: int = 1) -> None:
 
 
 def _fecha_larga(iso: str) -> str:
+    # Día de la semana ABREVIADO (3 letras) — mismo criterio "ddd dd-MM-
+    # yyyy" que ya usa el resto del sistema (Registro de ausencias,
+    # Reservas, Configuración general) para cualquier fecha que se
+    # muestre en una tabla; acá además angosta la columna "Fecha" de
+    # Movimientos (pedido de la clienta de achicar columnas en esa
+    # tabla) sin perder el dato del día — antes mostraba el nombre
+    # completo ("Lunes"), inconsistente con esa convención.
     d = date.fromisoformat(iso)
     dia = _DIAS_SEMANA[d.weekday()]
-    return f"{dia[0].upper()}{dia[1:]} {d.strftime('%d-%m-%Y')}"
+    return f"{dia[:3]} {d.strftime('%d-%m-%Y')}"
 
 
 def _moneda(monto: float) -> str:
@@ -367,7 +374,16 @@ class _PanelLlaves(QWidget):
         self.tabla_stock.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_stock.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla_stock.setFixedHeight(_alto_para_filas(self.tabla_stock, _FILAS_VISIBLES_ACCESOS))
-        self.tabla_stock.horizontalHeader().setStretchLastSection(True)
+        # Sin `setStretchLastSection`: pedido de la clienta de achicar
+        # "Depósito" ("Abonado"/"Bonificado", el texto más largo de la
+        # columna) — con el stretch puesto, esta columna se quedaba con
+        # TODO el ancho que "Profesional"/"Tipo de llave" dejaban libre
+        # en `panel_stock` (confirmado con un script de geometría: hasta
+        # 233px para un texto que con el mismo padding que las otras dos
+        # columnas — `_ajustar_columnas`, ver `_actualizar_stock` — entra
+        # de sobra en ~103px). Sin el stretch, queda al ancho justo como
+        # las otras dos, y lo que sobra del panel se queda en blanco a
+        # la derecha en vez de hincharla.
         columna_stock.addWidget(self.tabla_stock, stretch=1)
         # `AlignTop` acá es lo que de verdad alinea el comienzo Y el fin
         # de las dos tablas: sin él, `panel_accesos_izq` (más alto, por
@@ -409,8 +425,13 @@ class _PanelLlaves(QWidget):
         self.tabla_movimientos.setColumnCount(8)
         self.tabla_movimientos.setHorizontalHeaderLabels(
             [
+                # "Dep. cobrado"/"Dep. reintegrado" (antes "Depósito
+                # cobrado"/"Depósito reintegrado"): pedido de la clienta
+                # de achicar columnas en esta tabla — mismo significado,
+                # abreviado, para que el título deje de ser lo que fija
+                # el ancho mínimo de estas dos columnas.
                 "Fecha", "Movimiento", "Profesional", "Tipo de llave", "Cantidad",
-                "Depósito cobrado", "Depósito reintegrado", "Observación",
+                "Dep. cobrado", "Dep. reintegrado", "Observación",
             ]
         )
         self.tabla_movimientos.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

@@ -11080,3 +11080,76 @@ anterior se reemplaza por
 `test_lista_franjas_estirada_hasta_el_pie_y_escrolea_con_mas_de_las_que_
 entran` (stretch=1, sin tope de alto, sigue escrolleando con 20 franjas
 cargadas).
+
+## Llaves/Oferta: segunda ronda — qué muestra el cuadro de Accesos, columnas de Stock/Movimientos achicadas, cierre de Oferta
+
+Cuarto conjunto de pedidos sobre la captura del prototipo de Stock:
+
+- **"¿El cuadro de abajo de Accesos qué tendría que mostrar?"** Mismo
+  mecanismo exacto que los de Tipos/Movimientos (ya confirmados por la
+  clienta como funcionales): muestra y permite editar la `Observacion`
+  de la fila ACTUALMENTE SELECCIONADA en "Accesos habilitados con la
+  llave" (`campo_observacion_acceso`/`_actualizar_observacion_acceso`/
+  `_guardar_observacion_acceso`, sin cambios de código — ya estaba así
+  desde antes de esta vuelta, confirmado leyendo el código y
+  reproduciéndolo con un script en vivo). Punto importante para
+  entender por qué puede parecer "que no muestra nada": como "Accesos"
+  depende de qué Tipo de llave esté seleccionado en la tabla de arriba
+  (`_actualizar_accesos` solo puebla `tabla_accesos` cuando hay un
+  `_tipo_seleccionado()`), el cuadro de observación de Accesos se queda
+  deshabilitado y vacío hasta que se elige PRIMERO una fila en "Tipos
+  de llaves" Y DESPUÉS una fila en "Accesos" — sin ese primer paso, no
+  hay ninguna fila de Acceso que seleccionar, así que el cuadro
+  correctamente no muestra nada (no es un bug, es la cascada Tipo →
+  Acceso que esta pantalla siempre tuvo).
+- **"Achicá la columna de Depósito en la tabla Stock para que se vea
+  horizontalmente de una sin escrolear."** `self.tabla_stock.
+  horizontalHeader().setStretchLastSection(True)` se saca — medido con
+  un script de geometría: esa llamada le daba a "Depósito"
+  ("Abonado"/"Bonificado", el texto más corto de las tres columnas)
+  TODO el ancho que "Profesional"/"Tipo de llave" dejaban libre dentro
+  de `panel_stock` (hasta 233px en el escenario de prueba, contra
+  ~103px que necesita de sobra con el mismo padding que las otras dos
+  columnas — `_ajustar_columnas`, sin cambios). Sin el stretch, la
+  columna queda al ancho justo como el resto de la tabla, y lo que
+  sobra del panel se queda en blanco a la derecha en vez de hincharla.
+- **"En movimientos de llaves también achicá columnas... si se
+  puede."** Dos ajustes reversibles, sin pérdida de información:
+  - Los encabezados "Depósito cobrado"/"Depósito reintegrado" pasan a
+    "Dep. cobrado"/"Dep. reintegrado" — esas dos columnas se
+    dimensionaban por el ANCHO DEL TÍTULO (más largo que el contenido
+    real, "$5.000"/vacío), así que abreviarlo angosta la columna sin
+    tocar nada del dato.
+  - La columna "Fecha" pasaba el nombre completo del día de la semana
+    ("Lunes 19-10-2026", vía `_fecha_larga`) — inconsistente con el
+    resto del sistema, que abrevia a 3 letras (`"ddd dd-MM-yyyy"`, ej.
+    "lun 19-10-2026", ya usado en Registro de ausencias/Reservas/
+    Configuración general). `_fecha_larga` pasa a `dia[:3]` en vez del
+    nombre completo — mismo dato (el día de la semana sigue mostrándose),
+    columna más angosta.
+  - **Límite real, documentado**: estos dos cambios ahorran espacio
+    real (medido: ~75px sobre un total de ~1188px en el escenario de
+    prueba) pero no alcanzan, por sí solos, para eliminar el scroll
+    horizontal cuando "Tipo de llave" trae un nombre de llave largo
+    (el nombre incluye el del edificio, sección 3.7/"nomenclatura
+    automática") o cuando "Profesional" necesita su ancho mínimo ya
+    establecido (`>= 180px`, cubierto por un test existente). Achicar
+    esas dos columnas de verdad implicaría truncar contenido real
+    (nombre del profesional o de la llave) — no pedido explícitamente
+    esta vuelta, así que se deja como la limitación aceptada de este
+    "si se puede": el ahorro logrado es neto y sin pérdida de
+    información, pero no garantiza cero scroll con nombres largos.
+- **"Conforme con oferta de consultorios, cerralo."** Confirmado por la
+  clienta — la solapa "Franjas agregadas a esta búsqueda" con
+  `stretch=1` (de la ronda anterior) queda cerrada, sin más cambios
+  pendientes sobre Oferta de consultorios en esta vuelta.
+
+Tests nuevos en `tests/test_gui_llaves.py`:
+`test_columna_deposito_de_stock_no_se_estira_mas_alla_de_su_contenido`
+(confirma `stretchLastSection() is False` y que la columna no supera el
+doble de su ancho justo con padding) y
+`test_fecha_de_movimientos_usa_el_dia_de_la_semana_abreviado` (el texto
+de la celda arranca con una abreviatura de 3 letras, nunca con el
+nombre completo del día). `test_columnas_de_deposito_cobrado_y_
+reintegrado_tienen_el_mismo_ancho` se actualiza para medir contra "Dep.
+reintegrado" (el título nuevo) en vez de "Depósito reintegrado".

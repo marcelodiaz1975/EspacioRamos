@@ -105,7 +105,9 @@ def test_columnas_de_accesos_tienen_el_ancho_justo_con_padding(qtbot, conn, monk
 
 def test_columnas_de_deposito_cobrado_y_reintegrado_tienen_el_mismo_ancho(qtbot, conn):
     """Pedido de la clienta: mismo ancho para las dos, el necesario para
-    ver completo el título más largo ("Depósito reintegrado")."""
+    ver completo el título más largo ("Dep. reintegrado" — abreviado
+    desde "Depósito reintegrado" en la ronda que achicó columnas de
+    esta tabla para que entre sin escrolear horizontalmente)."""
     _crear_tipo_con_copia(conn)
     conn.commit()
     pantalla = _PanelLlaves(conn)
@@ -115,7 +117,7 @@ def test_columnas_de_deposito_cobrado_y_reintegrado_tienen_el_mismo_ancho(qtbot,
     ancho_reintegrado = pantalla.tabla_movimientos.columnWidth(6)
     assert ancho_cobrado == ancho_reintegrado
     header = pantalla.tabla_movimientos.horizontalHeader()
-    ancho_minimo_titulo = header.fontMetrics().horizontalAdvance("Depósito reintegrado")
+    ancho_minimo_titulo = header.fontMetrics().horizontalAdvance("Dep. reintegrado")
     assert ancho_cobrado >= ancho_minimo_titulo
 
 
@@ -1121,3 +1123,61 @@ def test_tabla_accesos_se_achica_al_ancho_de_sus_columnas(qtbot, conn):
     ) + 2 * pantalla.tabla_accesos.frameWidth()
     assert pantalla.tabla_accesos.width() == ancho_esperado
     assert pantalla.tabla_accesos.maximumWidth() == ancho_esperado
+
+
+# ---------------------- ronda de ajustes sobre la captura del prototipo de Stock (2)
+
+def test_columna_deposito_de_stock_no_se_estira_mas_alla_de_su_contenido(qtbot, conn):
+    """Pedido explícito de la clienta: "Achicá la columna de Depósito en
+    la tabla Stock para que se vea horizontalmente de una sin
+    escrolear" — `setStretchLastSection` le daba a esta columna TODO el
+    ancho que "Profesional"/"Tipo de llave" dejaban libre en
+    `panel_stock` (medido con un script de geometría: hasta 233px para
+    "Abonado"/"Bonificado", que con el mismo padding que las otras dos
+    columnas entra de sobra en ~103px) — se sacó, así que la columna
+    queda al ancho justo (`_ajustar_columnas`, igual que el resto de la
+    tabla) en vez de hincharse con lo que sobra."""
+    id_llave = _crear_tipo_con_copia(conn, tipo="Edificio", valor_deposito_actual=5000)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Cervellini", NombrePila="Leandro",
+        Tratamiento="Lic.", IdCodigo="R12",
+    )
+    conn.commit()
+    asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional, cobrar_deposito=True, monto_cobrado=5000)
+    conn.commit()
+
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1200, 800)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    assert pantalla.tabla_stock.horizontalHeader().stretchLastSection() is False
+    ancho_justo = pantalla.tabla_stock.fontMetrics().horizontalAdvance("Bonificado") + _PADDING_COLUMNA
+    # Tope generoso: nunca más del doble del ancho justo con padding —
+    # antes del arreglo llegaba a superarlo largamente (233px contra
+    # ~103px justos, en el mismo escenario de prueba).
+    assert pantalla.tabla_stock.columnWidth(2) <= ancho_justo * 2
+
+
+def test_fecha_de_movimientos_usa_el_dia_de_la_semana_abreviado(qtbot, conn):
+    """Pedido explícito de la clienta: achicar columnas de "Movimientos
+    de llaves" para que entre sin escrolear horizontalmente — la
+    columna "Fecha" mostraba el nombre completo del día ("Lunes..."),
+    inconsistente con el resto del sistema (`ddd dd-MM-yyyy`, abreviado
+    a 3 letras). Se angosta sin perder el dato del día."""
+    id_llave = _crear_tipo_con_copia(conn)
+    conn.commit()
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Dos", IdCodigo="R2")
+    conn.commit()
+    asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional)
+    conn.commit()
+
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_tipos.selectRow(0)
+
+    texto_fecha = pantalla.tabla_movimientos.item(0, 0).text()
+    assert texto_fecha[:3] in ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
+    assert "Lunes" not in texto_fecha and "Martes" not in texto_fecha
+    assert len(texto_fecha.split(" ", 1)[0]) == 3
