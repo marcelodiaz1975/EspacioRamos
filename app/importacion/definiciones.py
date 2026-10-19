@@ -63,19 +63,36 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
         "Profesional", "Edificio", "Unidad", "Consultorio", "DiaSemana",
         "HoraInicio", "HoraFin", "VigenciaInicio", "VigenciaFin", "EsExcepcion", "Observacion",
     ],
-    # Edificio/Unidad arman de una el acceso (LlaveAcceso) de esta llave si
-    # se cargan; Profesional/DepositoAbonado arman de una una tenencia
-    # inicial (ingresa una copia al stock y la asigna a ese profesional,
-    # marcando si ya abonó el depósito oportunamente o no) — pedido
-    # explícito de la clienta para no tener que cargar todo esto a mano
-    # desde la pantalla de Llaves. Las cuatro son opcionales: una fila
-    # puede cargar solo el tipo de llave, sin acceso ni tenencia todavía.
-    # Al final de la lista (no en el medio de las tres columnas
-    # originales) para no correr la posición de "ValorDepositoActual"/
-    # "Observacion" contra una planilla ya descargada antes de este
-    # agregado — se resuelve por nombre de encabezado, pero mantener el
-    # orden estable evita sorpresas en capturas/documentación ya hechas.
-    "Llave": ["Tipo", "ValorDepositoActual", "Observacion", "Edificio", "Unidad", "Profesional", "DepositoAbonado"],
+    # Llaves: tres hojas separadas (pedido explícito de la clienta, segunda
+    # vuelta sobre esto — reemplaza el diseño de una sola hoja "Llave" con
+    # columnas opcionales de acceso/tenencia, que mezclaba en una misma
+    # fila tres conceptos de tablas distintas), una por cada tabla real del
+    # modelo (Llave/LlaveAcceso/LlaveMovimiento), en el orden en que hay
+    # que cargarlas: primero los TIPOS de llave que maneja, después a qué
+    # ACCEDE cada uno, por último qué profesional tiene cuál en su poder.
+    #
+    # El Nombre de un Tipo de llave lo arma el sistema solo (correlativo,
+    # "Tipo llave E1"...) — no hay forma de saberlo de antemano al escribir
+    # la planilla, así que "Codigo" (hoja Llave) es un identificador
+    # PURAMENTE DE PLANILLA, inventado por la clienta (cualquier texto
+    # corto, ej. "LL-01"), que "CodigoLlave" (hojas LlaveAcceso/
+    # LlaveMovimiento) repite para decir a qué Tipo de llave de la primera
+    # hoja se refiere cada fila — nunca se guarda en la base, solo sirve
+    # para que `importar_excel.py` una las tres hojas entre sí durante la
+    # importación (ver `_resolver_referencias`/`mapa_codigo_llave`).
+    #
+    # La hoja "Llave" ingresa sola 1000 copias de stock a cada Tipo que
+    # crea (ver `importar_excel._STOCK_INICIAL_IMPORTACION`) para que la
+    # hoja "LlaveMovimiento" nunca falle por falta de stock disponible al
+    # asignar — pedido explícito: "la clienta ajusta el stock real a mano
+    # después, con Ingreso/Pérdida desde la pantalla de Llaves".
+    # Sin los tres CampoLibre de siempre: a diferencia de los catálogos
+    # genéricos (`PantallaCRUD`), Llave no pasa por ahí (armada a mano,
+    # "Llaves (formato solapa a mano, no PantallaCRUD)") y la tabla nunca
+    # llegó a sumarlos -- no hay columna a la que mapearlos.
+    "Llave": ["Codigo", "Tipo", "ValorDepositoActual", "Observacion"],
+    "LlaveAcceso": ["CodigoLlave", "Edificio", "Unidad", "Nombre", "Observacion"],
+    "LlaveMovimiento": ["CodigoLlave", "Profesional", "DepositoAbonado"],
     "Placa": ["Edificio", "Unidad", "PosicionTablero", "Profesional", "NombreGrabado", "EsPersonalizada"],
     "FechasEspeciales": ["Fecha", "Descripcion", "Tipo", "CampoLibre1", "CampoLibre2", "CampoLibre3"],
     "Responsable": [
@@ -119,5 +136,10 @@ COLUMNAS_REFERENCIA = {
     "ReservaRegular": {"Profesional", "Edificio", "Unidad", "Consultorio"},
     "Placa": {"Edificio", "Unidad", "Profesional"},
     "PlanPago": {"Profesional"},
-    "Llave": {"Edificio", "Unidad", "Profesional"},
+    # "Llave" (tipos) ya no tiene ninguna referencia que resolver -- "Codigo"
+    # es planilla-only, se extrae directo en importar_excel.importar_hoja,
+    # no acá (no hace falta buscarlo contra la base, es un identificador
+    # que la clienta inventa, no uno que ya exista en ningún lado).
+    "LlaveAcceso": {"CodigoLlave", "Edificio", "Unidad"},
+    "LlaveMovimiento": {"CodigoLlave", "Profesional"},
 }

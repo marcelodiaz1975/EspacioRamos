@@ -134,10 +134,19 @@ def _buscar_consultorio(conn: sqlite3.Connection, nombre_edificio, departamento,
     return fila["IdConsultorio"] if fila else None
 
 
-def _resolver_referencias(conn: sqlite3.Connection, entidad: str, datos: dict) -> tuple[dict, list[str]]:
+def _resolver_referencias(
+    conn: sqlite3.Connection, entidad: str, datos: dict, *, mapa_codigo_llave: dict[str, int] | None = None,
+) -> tuple[dict, list[str]]:
     """Reemplaza las columnas de referencia (nombres legibles) por su IdX.
     Devuelve los datos resueltos y una lista de errores (referencias no
-    encontradas)."""
+    encontradas).
+
+    `mapa_codigo_llave` (solo para "LlaveAcceso"/"LlaveMovimiento"): el
+    diccionario {Código de planilla -> IdLlave} que arma `importar_planilla`
+    mientras procesa la hoja "Llave", ANTES de llegar a estas dos — ninguna
+    de las dos resuelve su "CodigoLlave" contra ninguna columna de la base
+    (ese Código no se guarda en ningún lado), lo resuelve contra este mapa
+    en memoria."""
     errores: list[str] = []
     referencias = COLUMNAS_REFERENCIA.get(entidad, set())
     if not referencias:
@@ -234,61 +243,85 @@ def _resolver_referencias(conn: sqlite3.Connection, entidad: str, datos: dict) -
             errores.append(f"No se encontró el profesional con código '{codigo}'")
         datos["IdProfesional"] = id_profesional
 
-    elif entidad == "Llave":
-        # Las tres referencias son opcionales acá (a diferencia del resto
-        # de las entidades de arriba): una fila puede cargar solo el tipo
-        # de llave, sin acceso ni tenencia todavía.
+    elif entidad == "LlaveAcceso":
+        codigo_llave = datos.pop("CodigoLlave", None)
+        id_llave = _buscar_codigo_llave(codigo_llave, mapa_codigo_llave, errores)
+        datos["IdLlave"] = id_llave
+
+        # Edificio es obligatorio (LlaveAcceso.IdEdificio es NOT NULL -- un
+        # acceso siempre abre al menos un edificio); Unidad es opcional,
+        # solo para una llave de Tipo "Unidad" que apunta a una puntual.
         nombre_ed = datos.pop("Edificio", None)
-        depto = datos.pop("Unidad", None)
-        id_edificio = None
-        if nombre_ed is not None:
-            id_edificio = _buscar_id(conn, "Edificio", "Nombre", nombre_ed)
-            if id_edificio is None:
-                errores.append(f"No se encontró el edificio '{nombre_ed}'")
+        id_edificio = _buscar_id(conn, "Edificio", "Nombre", nombre_ed)
+        if id_edificio is None:
+            errores.append(f"No se encontró el edificio '{nombre_ed}'")
         datos["IdEdificio"] = id_edificio
 
+        depto = datos.pop("Unidad", None)
         id_unidad = None
         if depto is not None:
             if id_edificio is None:
-                errores.append("Para indicar una unidad primero hay que indicar el edificio de esa llave")
+                errores.append("Para indicar una unidad primero hay que indicar el edificio de ese acceso")
             else:
                 id_unidad = _buscar_unidad(conn, nombre_ed, depto)
                 if id_unidad is None:
                     errores.append(f"No se encontró la unidad '{depto}' del edificio '{nombre_ed}'")
         datos["IdUnidad"] = id_unidad
 
-        codigo = datos.pop("Profesional", None)
-        id_profesional = None
-        if codigo is not None:
-            id_profesional = _buscar_id(conn, "Profesional", "IdCodigo", codigo)
-            if id_profesional is None:
-                errores.append(f"No se encontró el profesional con código '{codigo}'")
+    elif entidad == "LlaveMovimiento":
+        codigo_llave = datos.pop("CodigoLlave", None)
+        id_llave = _buscar_codigo_llave(codigo_llave, mapa_codigo_llave, errores)
+        datos["IdLlave"] = id_llave
+
+        codigo_prof = datos.pop("Profesional", None)
+        id_profesional = _buscar_id(conn, "Profesional", "IdCodigo", codigo_prof)
+        if id_profesional is None:
+            errores.append(f"No se encontró el profesional con código '{codigo_prof}'")
         datos["IdProfesional"] = id_profesional
 
     return datos, errores
 
 
-def _ya_existe_identico(conn: sqlite3.Connection, tabla: str, datos: dict) -> bool:
-    """True si ya hay una fila en `tabla` con exactamente estos mismos
-    valores en todas las columnas de `datos` (después de resolver
-    referencias a IdX) — pedido explícito de la clienta: "que no importe
-    los registros que son iguales para evitar que se dupliquen". Compara
-    por igualdad exacta, NULL incluido; una fila "parecida" pero con
-    algún campo distinto (ej. un CampoLibre corregido) no cuenta como
-    duplicado y se importa igual. Se llama ANTES de cualquier columna
-    que la propia importación agregue sola (ej. `Nombre` de Llave,
-    autogenerado y por lo tanto siempre distinto) — comparar con esas ya
-    puestas nunca encontraría un duplicado real.
+def _buscar_codigo_llave(
+    codigo: str | None, mapa_codigo_llave: dict[str, int] | None, errores: list[str],
+) -> int | None:
+    """Resuelve el "CodigoLlave" de una fila de LlaveAcceso/LlaveMovimiento
+    contra el mapa {Código -> IdLlave} armado al procesar la hoja "Llave"
+    -- ese Código es puramente de planilla, nunca se guarda en la base, así
+    que no hay ninguna columna contra la que buscarlo con `_buscar_id`."""
+    if not codigo:
+        errores.append('Falta el "CodigoLlave" -- a qué Tipo de llave (hoja "Llave") se refiere esta fila')
+        return None
+    id_llave = (mapa_codigo_llave or {}).get(codigo)
+    if id_llave is None:
+        errores.append(
+            f"No se encontró ningún Tipo de llave con el código '{codigo}' "
+            '(tiene que estar cargado antes, en la hoja "Llave")'
+        )
+    return id_llave
 
-    Para "Llave", `importar_hoja` ya sacó de `datos` (antes de llamar
-    acá) los campos que no son columnas de la tabla Llave (IdEdificio/
-    IdUnidad/IdProfesional/DepositoAbonado) y salteó este chequeo por
-    completo si la fila trae edificio o profesional — dos llaves con el
-    mismo Tipo/ValorDepositoActual pero acceso a edificios o
-    profesionales distintos son filas legítimamente distintas, nunca una
-    repetida."""
+
+def _buscar_identico(conn: sqlite3.Connection, tabla: str, datos: dict) -> int | None:
+    """Devuelve el Id (primera columna, convención de siempre en este
+    módulo -- ver `_buscar_id`) de la fila ya existente en `tabla` con
+    exactamente estos mismos valores en todas las columnas de `datos`
+    (NULL incluido), o `None` si no hay ninguna — pedido explícito de la
+    clienta: "que no importe los registros que son iguales para evitar
+    que se dupliquen". Una fila "parecida" pero con algún campo distinto
+    (ej. un CampoLibre corregido) no cuenta como duplicado y se importa
+    igual. Se llama ANTES de cualquier columna que la propia importación
+    agregue sola (ej. `Nombre` de Llave, autogenerado y por lo tanto
+    siempre distinto) — comparar con esas ya puestas nunca encontraría un
+    duplicado real.
+
+    Devolver el Id (no solo un bool) sirve para "Llave": si la fila de la
+    hoja "Llave" resulta duplicada de un Tipo ya cargado, igual hace falta
+    saber SU Id para poder enlazar el "Codigo" de esta fila al Tipo ya
+    existente (si la planilla entera se reimporta sin querer, las hojas
+    "LlaveAcceso"/"LlaveMovimiento" tienen que poder seguir resolviendo
+    ese mismo Código, no solo la primera vez)."""
     if not datos:
-        return False
+        return None
     condiciones = []
     valores = []
     for columna, valor in datos.items():
@@ -297,8 +330,9 @@ def _ya_existe_identico(conn: sqlite3.Connection, tabla: str, datos: dict) -> bo
         else:
             condiciones.append(f"{columna} = ?")
             valores.append(valor)
-    consulta = f"SELECT 1 FROM {tabla} WHERE " + " AND ".join(condiciones) + " LIMIT 1"
-    return conn.execute(consulta, valores).fetchone() is not None
+    consulta = f"SELECT * FROM {tabla} WHERE " + " AND ".join(condiciones) + " LIMIT 1"
+    fila = conn.execute(consulta, valores).fetchone()
+    return fila[0] if fila else None
 
 
 def _crear_plan_pago_importado(conn: sqlite3.Connection, datos: dict) -> None:
@@ -327,7 +361,24 @@ def _crear_plan_pago_importado(conn: sqlite3.Connection, datos: dict) -> None:
             marcar_cuota_pagada(conn, cuota["IdCuota"])
 
 
-def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImportacion:
+# Copias de stock que la hoja "Llave" ingresa sola a cada Tipo que crea,
+# para que la hoja "LlaveMovimiento" (asignaciones a profesionales) nunca
+# falle por falta de stock disponible, sin importar cuántas tenencias
+# traiga la planilla — pedido explícito de la clienta: después de
+# importar, ajusta el stock real a mano (Ingreso/Pérdida, desde la
+# pantalla de Llaves) para que vuelva a reflejar la cantidad real que
+# tiene en circulación.
+_STOCK_INICIAL_IMPORTACION = 1000
+
+
+def importar_hoja(
+    conn: sqlite3.Connection, entidad: str, ws, *, mapa_codigo_llave: dict[str, int] | None = None,
+) -> ResultadoImportacion:
+    """`mapa_codigo_llave`: el diccionario {Código de planilla -> IdLlave}
+    compartido entre las tres hojas de Llaves (ver `_resolver_referencias`)
+    -- `importar_planilla` arma uno solo y lo pasa a las tres llamadas, en
+    orden, para que la hoja "Llave" lo vaya completando y "LlaveAcceso"/
+    "LlaveMovimiento" lo lean después."""
     resultado = ResultadoImportacion(entidad=entidad)
     filas = list(ws.iter_rows(values_only=True))
     if not filas:
@@ -354,36 +405,51 @@ def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImport
             resultado.errores.append(f"Fila {numero_fila}: {error_conversion}")
             continue
 
-        datos, errores_referencia = _resolver_referencias(conn, entidad, datos)
+        datos, errores_referencia = _resolver_referencias(conn, entidad, datos, mapa_codigo_llave=mapa_codigo_llave)
         if errores_referencia:
             for err in errores_referencia:
                 resultado.errores.append(f"Fila {numero_fila}: {err}")
             continue
 
-        # Edificio/Unidad/Profesional/DepositoAbonado no son columnas de
-        # la tabla Llave (son insumos para el acceso/tenencia que se arma
-        # más abajo) — se sacan de `datos` ACÁ, antes del chequeo de
-        # duplicados, por dos motivos: `_ya_existe_identico` reventaría
-        # contra la tabla Llave si quedaran ("no such column"), y una fila
-        # CON edificio o profesional nunca debe tratarse como duplicada
-        # solo por compartir Tipo/ValorDepositoActual/Observacion con otra
-        # — dos llaves de ese mismo tipo/valor pero a edificios o
-        # profesionales distintos son filas legítimamente distintas, no
-        # una repetida.
-        id_edificio_llave = id_unidad_llave = id_profesional_llave = None
-        deposito_abonado_llave = False
+        # "Codigo" (hoja "Llave") no es columna de la tabla Llave -- es un
+        # identificador puramente de planilla, se saca de `datos` ACÁ,
+        # antes del chequeo de duplicados, para que `_buscar_identico` no
+        # reviente contra la tabla ("no such column"). Único dentro de
+        # esta misma hoja: dos Tipos de llave con el mismo Código dejarían
+        # a "LlaveAcceso"/"LlaveMovimiento" sin forma de saber a cuál de
+        # los dos se referían.
+        codigo_llave_nuevo = None
         if entidad == "Llave":
-            id_edificio_llave = datos.pop("IdEdificio", None)
-            id_unidad_llave = datos.pop("IdUnidad", None)
-            id_profesional_llave = datos.pop("IdProfesional", None)
-            deposito_abonado_llave = bool(datos.pop("DepositoAbonado", 0))
+            codigo_llave_nuevo = datos.pop("Codigo", None)
+            if not codigo_llave_nuevo:
+                resultado.errores.append(
+                    f'Fila {numero_fila}: falta el "Codigo" de este Tipo de llave -- hace falta para '
+                    'poder referenciarlo después en las hojas "LlaveAcceso"/"LlaveMovimiento"'
+                )
+                continue
+            if mapa_codigo_llave is not None and codigo_llave_nuevo in mapa_codigo_llave:
+                resultado.errores.append(
+                    f"Fila {numero_fila}: el código '{codigo_llave_nuevo}' ya se usó antes "
+                    "en esta misma hoja -- tiene que ser único"
+                )
+                continue
 
-        es_llave_con_acceso_o_tenencia = entidad == "Llave" and (
-            id_edificio_llave is not None or id_profesional_llave is not None
-        )
-        if not es_llave_con_acceso_o_tenencia and _ya_existe_identico(conn, entidad, datos):
-            resultado.filas_duplicadas += 1
-            continue
+        # "DepositoAbonado" (hoja "LlaveMovimiento") tampoco es columna de
+        # LlaveMovimiento -- la columna real es DepositoCobrado, que se
+        # arma más abajo recién al crear el movimiento.
+        deposito_abonado = bool(datos.pop("DepositoAbonado", 0)) if entidad == "LlaveMovimiento" else False
+
+        # "LlaveAcceso"/"LlaveMovimiento" nunca se tratan como duplicadas
+        # de una fila ya existente (mismo criterio que tenía la hoja única
+        # "Llave" para sus accesos/tenencias antes de este rediseño): un
+        # acceso o una tenencia nueva siempre se agrega, no se compara.
+        if entidad not in ("LlaveAcceso", "LlaveMovimiento"):
+            id_identico = _buscar_identico(conn, entidad, datos)
+            if id_identico is not None:
+                resultado.filas_duplicadas += 1
+                if entidad == "Llave" and mapa_codigo_llave is not None:
+                    mapa_codigo_llave[codigo_llave_nuevo] = id_identico
+                continue
 
         try:
             if entidad == "PlanPago":
@@ -395,32 +461,37 @@ def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImport
                         f"Tipo de llave inválido o vacío: {tipo!r} "
                         f"(debe ser {', '.join(_LETRA_POR_TIPO)})"
                     )
-                id_edificio = id_edificio_llave
-                id_unidad = id_unidad_llave
-                id_profesional = id_profesional_llave
-                deposito_abonado = deposito_abonado_llave
-                datos["Nombre"] = siguiente_nombre_llave(
-                    conn, tipo, id_edificio=id_edificio if tipo == "Edificio" else None,
-                )
+                datos["Nombre"] = siguiente_nombre_llave(conn, tipo)
                 id_llave = repo.crear(**datos)
-                if id_edificio is not None:
-                    agregar_acceso_llave(conn, id_llave=id_llave, id_edificio=id_edificio, id_unidad=id_unidad)
-                if id_profesional is not None:
-                    ingresar_copias(conn, id_llave=id_llave, observacion="Copia cargada por importación")
-                    # Tenencia histórica, de antes de empezar a usar el
-                    # sistema: a diferencia de `asignar_llave` (la función
-                    # que usa la pantalla para una asignación NUEVA), acá
-                    # nunca se genera un CargoEspecial — si ya abonó el
-                    # depósito, fue en su momento, por fuera del sistema;
-                    # si no lo abonó, no hay por qué cobrárselo recién
-                    # ahora solo por estar importando el dato.
-                    obtener_repositorio(conn, "LlaveMovimiento").crear(
-                        IdLlave=id_llave, Tipo="Asignación", Fecha=fecha_actual(conn).isoformat(),
-                        IdProfesional=id_profesional, Cantidad=1,
-                        DepositoCobrado=int(deposito_abonado),
-                        MontoCobrado=datos.get("ValorDepositoActual") if deposito_abonado else None,
-                        Observacion="Tenencia cargada por importación",
-                    )
+                ingresar_copias(
+                    conn, id_llave=id_llave, cantidad=_STOCK_INICIAL_IMPORTACION,
+                    observacion="Stock inicial de importación (ajustar con Ingreso/Pérdida)",
+                )
+                if mapa_codigo_llave is not None:
+                    mapa_codigo_llave[codigo_llave_nuevo] = id_llave
+            elif entidad == "LlaveAcceso":
+                agregar_acceso_llave(
+                    conn, id_llave=datos.pop("IdLlave"), id_edificio=datos.pop("IdEdificio"),
+                    id_unidad=datos.pop("IdUnidad"), nombre=datos.get("Nombre"),
+                    observacion=datos.get("Observacion"),
+                )
+            elif entidad == "LlaveMovimiento":
+                id_llave = datos["IdLlave"]
+                llave = obtener_repositorio(conn, "Llave").obtener(id_llave)
+                # Tenencia histórica, de antes de empezar a usar el
+                # sistema: a diferencia de `asignar_llave` (la función que
+                # usa la pantalla para una asignación NUEVA), acá nunca se
+                # genera un CargoEspecial — si ya abonó el depósito, fue
+                # en su momento, por fuera del sistema; si no lo abonó, no
+                # hay por qué cobrárselo recién ahora solo por estar
+                # importando el dato.
+                obtener_repositorio(conn, "LlaveMovimiento").crear(
+                    IdLlave=id_llave, Tipo="Asignación", Fecha=fecha_actual(conn).isoformat(),
+                    IdProfesional=datos["IdProfesional"], Cantidad=1,
+                    DepositoCobrado=int(deposito_abonado),
+                    MontoCobrado=llave["ValorDepositoActual"] if deposito_abonado else None,
+                    Observacion="Tenencia cargada por importación",
+                )
             else:
                 repo.crear(**datos)
             resultado.filas_importadas += 1
@@ -433,8 +504,14 @@ def importar_hoja(conn: sqlite3.Connection, entidad: str, ws) -> ResultadoImport
 def importar_planilla(conn: sqlite3.Connection, ruta_excel: Path | str) -> list[ResultadoImportacion]:
     wb = load_workbook(ruta_excel, data_only=True)
     resultados = []
+    # Compartido entre las tres hojas de Llaves (ver `importar_hoja`) --
+    # vive acá, no dentro de `importar_hoja`, porque tiene que persistir
+    # ENTRE una llamada y la siguiente: la hoja "Llave" lo completa, las
+    # hojas "LlaveAcceso"/"LlaveMovimiento" (que se procesan después, por
+    # el orden de ENTIDADES_IMPORTABLES) lo leen.
+    mapa_codigo_llave: dict[str, int] = {}
     for entidad in ENTIDADES_IMPORTABLES:
         if entidad not in wb.sheetnames:
             continue
-        resultados.append(importar_hoja(conn, entidad, wb[entidad]))
+        resultados.append(importar_hoja(conn, entidad, wb[entidad], mapa_codigo_llave=mapa_codigo_llave))
     return resultados

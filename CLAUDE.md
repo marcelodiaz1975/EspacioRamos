@@ -11153,3 +11153,136 @@ de la celda arranca con una abreviatura de 3 letras, nunca con el
 nombre completo del día). `test_columnas_de_deposito_cobrado_y_
 reintegrado_tienen_el_mismo_ancho` se actualiza para medir contra "Dep.
 reintegrado" (el título nuevo) en vez de "Depósito reintegrado".
+
+## Planilla de importación de Llaves: rediseño en tres hojas (Llave / LlaveAcceso / LlaveMovimiento)
+
+Pedido de la clienta, surgido al preguntar si la planilla de importación
+"toma el tipo de llave, el nombre, el acceso y el stock" a partir de
+cargar, por profesional, todas las llaves ya distribuidas. Investigado
+antes de responder: SÍ tomaba todo eso, pero con un hueco real que la
+clienta no había contemplado — la hoja única "Llave" de aquel momento
+(ver "Planilla de importación de Llaves: tipos, accesos y tenencias en
+una sola hoja", más arriba) creaba un Tipo de llave NUEVO por cada fila,
+sin ningún mecanismo de fusión: si varios profesionales tenían copia de
+la MISMA llave física (mismo Tipo + Edificio), cada fila terminaba en un
+"Tipo de llave" propio con 1 copia/1 asignada/0 disponibles, en vez de un
+único Tipo con varias copias — funcionaba igual para la alerta de "le
+falta la llave" en Reservas, pero dejaba el catálogo "Tipos de llaves"
+fragmentado en entradas que a simple vista parecen duplicadas.
+
+Consultada la clienta con tres alternativas (`AskUserQuestion`), eligió
+una cuarta, más clara, que ella misma propuso: tres hojas separadas, una
+por cada tabla real del modelo (`Llave`/`LlaveAcceso`/`LlaveMovimiento`)
+— "Tipos de llave" (con stock inicial de 1000 para que la importación
+nunca falle por falta de stock, ajustado a mano después), "Accesos de
+llave" y "Llaves distribuidas por profesional" (una fila por cada copia
+ya repartida, con si abonó el depósito o fue bonificado). Confirmado con
+ella que entendí bien antes de tocar código (preguntó "avisame si me
+expliqué").
+
+### El problema que su propio diseño no resolvía: cómo enlazar las tres hojas
+
+El `Nombre` de un Tipo de llave lo arma el sistema solo (`siguiente_
+nombre_llave`, "Tipo llave E1"...) — no hay forma de saberlo de antemano
+al escribir la planilla, así que las hojas "Accesos" y "Llaves
+distribuidas" necesitaban alguna forma de decir "esta fila es sobre ESE
+Tipo de la hoja 1" sin depender de ese nombre. Consultado aparte
+(`AskUserQuestion`, tres opciones), eligió la recomendada: un "Código"
+propio, inventado por ella (cualquier texto corto, ej. "LL-01"), que la
+hoja "Llave" suma como columna nueva y las hojas "LlaveAcceso"/
+"LlaveMovimiento" repiten (columna "CodigoLlave") para decir a qué Tipo
+se refiere cada una de sus filas — nunca se guarda en la base, es
+puramente de planilla, solo sirve para que la importación una las tres
+hojas entre sí durante esa corrida.
+
+### Modelo nuevo (`app/importacion/definiciones.py`)
+
+`COLUMNAS_PLANTILLA` reemplaza la vieja entrada única `"Llave"` por tres,
+consecutivas (el orden del dict es el orden real de importación, vía
+`ENTIDADES_IMPORTABLES = list(COLUMNAS_PLANTILLA.keys())` — "Llave"
+tiene que procesarse antes que las otras dos, que la referencian):
+
+- **"Llave"**: `Codigo, Tipo, ValorDepositoActual, Observacion` — sin los
+  tres `CampoLibre` de siempre: a diferencia de los catálogos genéricos
+  (`PantallaCRUD`), la tabla `Llave` nunca los sumó (esta pantalla está
+  "armada a mano, no `PantallaCRUD`" — ver esa sección más arriba), no
+  hay columna a la que mapearlos.
+- **"LlaveAcceso"**: `CodigoLlave, Edificio, Unidad, Nombre, Observacion`
+  — Edificio es obligatorio (`LlaveAcceso.IdEdificio` es `NOT NULL`),
+  Unidad opcional (solo para una llave de Tipo "Unidad" que apunta a una
+  puntual).
+- **"LlaveMovimiento"**: `CodigoLlave, Profesional, DepositoAbonado` —
+  una fila por cada copia ya repartida; `Profesional` por Código, mismo
+  criterio que el resto de la planilla.
+
+### Mecánica (`app/importacion/importar_excel.py`)
+
+`importar_planilla` arma `mapa_codigo_llave: dict[str, int] = {}` una
+sola vez, ANTES del loop sobre `ENTIDADES_IMPORTABLES`, y lo pasa a cada
+llamada de `importar_hoja` (parámetro nuevo, `mapa_codigo_llave`) — tiene
+que vivir ahí, no dentro de `importar_hoja`, porque necesita persistir
+ENTRE una llamada y la siguiente: la hoja "Llave" lo completa, las otras
+dos lo leen después. `_resolver_referencias` suma un parámetro homónimo
+y un helper nuevo, `_buscar_codigo_llave(codigo, mapa_codigo_llave,
+errores)`, compartido por las ramas `"LlaveAcceso"`/`"LlaveMovimiento"` —
+resuelve "CodigoLlave" contra el mapa en memoria, nunca contra ninguna
+columna de la base (ese Código no se guarda en ningún lado).
+
+`_ya_existe_identico` se renombra `_buscar_identico` y pasa a devolver el
+**Id** de la fila igual ya cargada (no solo un bool) — necesario para
+"Llave": si la fila de la hoja 1 resulta duplicada de un Tipo ya
+existente (ej. toda la planilla se reimporta sin querer), igual hace
+falta ese Id para que `mapa_codigo_llave[codigo]` apunte al Tipo YA
+existente, y así "LlaveAcceso"/"LlaveMovimiento" de esa misma corrida
+sigan pudiendo resolver su "CodigoLlave" en vez de reportar "no
+encontrado" — un reimport completo de la planilla entera queda prolijo
+(Llave se marca duplicada, LlaveAcceso/LlaveMovimiento se procesan
+igual, apuntando al Tipo correcto) en vez de romper en cascada.
+
+"LlaveAcceso"/"LlaveMovimiento" nunca se tratan como duplicadas de una
+fila ya existente — mismo criterio (sin cambios de fondo) que ya regía
+para los accesos/tenencias de la vieja hoja única: un acceso o una
+tenencia nueva siempre se agrega, no se compara.
+
+`importar_hoja`, rama `"Llave"`: valida que "Codigo" venga completo
+(error de fila si falta) y que sea único DENTRO de esta misma hoja
+(error si se repite); si pasa, crea la `Llave` (mismo armado de
+`Nombre`/validación de `Tipo` de siempre, ahora SIN pasarle `id_edificio`
+a `siguiente_nombre_llave` — el edificio todavía no se sabe en este
+punto, se carga recién en "LlaveAcceso") e ingresa sola
+`_STOCK_INICIAL_IMPORTACION = 1000` copias de stock
+(`ingresar_copias(..., observacion="Stock inicial de importación
+(ajustar con Ingreso/Pérdida)")`) — la clienta ajusta el número real a
+mano después, desde la pantalla de Llaves.
+
+Rama `"LlaveAcceso"`: llama a `agregar_acceso_llave` directo (reusa sus
+mismas validaciones de siempre — una llave Tipo Edificio no admite más
+de un edificio, Tipo Unidad exige una unidad puntual). Rama
+`"LlaveMovimiento"`: mismo armado de siempre para la tenencia histórica
+("Asignación" sin `CargoEspecial`, el depósito cobrado/monto sale de
+`DepositoAbonado` + `Llave.ValorDepositoActual` del Tipo resuelto) — ya
+no necesita `ingresar_copias` propio (consume del stock inicial que la
+hoja "Llave" ya precargó).
+
+### Instrucciones (`app/importacion/plantillas.py`)
+
+La hoja "Instrucciones" de la planilla descargable suma un bloque nuevo
+explicando las tres hojas, el orden de carga, qué es "Codigo"/
+"CodigoLlave" y por qué, y el ajuste manual de stock pendiente después
+de importar — mismo criterio que el resto de esa hoja (texto plano,
+una línea por `ws.append`).
+
+### Tests
+
+`tests/test_importacion.py`: se borran los 7 tests de la vieja hoja
+única (duplicada con edificio/profesional mezclados, accesos y
+tenencias armados desde la misma fila) y se arma una batería nueva —
+por hoja (`Llave`: guarda Código, ingresa stock inicial, sin Código
+reporta error sin romper el resto, sin Tipo ídem, Código duplicado en
+la misma hoja reporta error, duplicado real no se vuelve a crear;
+`LlaveAcceso`: crea el acceso, Código inexistente reporta error,
+Edificio inexistente reporta error; `LlaveMovimiento`: con/sin depósito
+abonado, profesional inexistente, Código inexistente) más dos de punta a
+punta: las tres hojas juntas enlazan por Código al mismo `IdLlave`, y
+reimportar toda la planilla deja "Llave" duplicada pero "LlaveAcceso"
+sigue resolviendo el Código contra el Tipo ya existente.
