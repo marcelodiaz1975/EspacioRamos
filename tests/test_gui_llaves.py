@@ -18,7 +18,7 @@ from app.gui.pantallas.llaves import (
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual, sumar_meses
-from app.negocio.llaves import crear_llave, ingresar_copias
+from app.negocio.llaves import asignar_llave, crear_llave, devolver_llave, ingresar_copias
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -79,9 +79,13 @@ def test_columnas_de_tipos_son_mas_anchas_que_antes(qtbot, conn):
         assert pantalla.tabla_tipos.columnWidth(columna) > ancho_anterior
 
 
-def test_columnas_de_accesos_tienen_el_doble_del_ancho_con_padding(qtbot, conn, monkeypatch):
-    """Pedido explícito de la clienta: el doble de ancho para todas las
-    columnas de Accesos, sobre el ancho justo + el padding de siempre."""
+def test_columnas_de_accesos_tienen_el_ancho_justo_con_padding(qtbot, conn, monkeypatch):
+    """El doble de ancho que pedía la clienta en una ronda anterior
+    ("Accesos pide directamente el DOBLE de ancho") queda superado por
+    el punto 5 del documento de correcciones ("la tabla del medio la
+    podés acortar hasta el borde donde termina la columna 'Nombre'") —
+    vuelve al padding simple, para dejarle más ancho libre a "Stock de
+    llaves por profesional" de al lado."""
     crear_llave(conn)
     _crear_edificio_con_unidad(conn)
     conn.commit()
@@ -96,7 +100,7 @@ def test_columnas_de_accesos_tienen_el_doble_del_ancho_con_padding(qtbot, conn, 
     tabla.resizeColumnsToContents()
     anchos_justos = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
 
-    assert anchos_actuales == [(justo + _PADDING_COLUMNA) * 2 for justo in anchos_justos]
+    assert anchos_actuales == [justo + _PADDING_COLUMNA for justo in anchos_justos]
 
 
 def test_columnas_de_deposito_cobrado_y_reintegrado_tienen_el_mismo_ancho(qtbot, conn):
@@ -453,7 +457,7 @@ def test_asignar_crea_movimiento_y_cargo_especial(qtbot, conn, monkeypatch):
     def _asignar_con_deposito(self, *a, **k):
         indice = self.combo_profesional.findData(id_profesional)
         self.combo_profesional.setCurrentIndex(indice)
-        self.casilla_deposito.setChecked(True)
+        self.combo_deposito.setCurrentIndex(self.combo_deposito.findData("abonado"))
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(_DialogoAsignar, "exec", _asignar_con_deposito)
@@ -481,7 +485,7 @@ def test_dialogo_asignar_periodo_siguiente_imputa_al_mes_que_viene(qtbot, conn, 
     def _asignar_periodo_siguiente(self, *a, **k):
         indice = self.combo_profesional.findData(id_profesional)
         self.combo_profesional.setCurrentIndex(indice)
-        self.casilla_deposito.setChecked(True)
+        self.combo_deposito.setCurrentIndex(self.combo_deposito.findData("abonado"))
         self.combo_periodo.setCurrentIndex(self.combo_periodo.findData("siguiente"))
         return QDialog.DialogCode.Accepted
 
@@ -512,7 +516,7 @@ def test_asignar_con_deposito_al_mes_actual_regenera_liquidacion_no_enviada(qtbo
     def _asignar_con_deposito(self, *a, **k):
         indice = self.combo_profesional.findData(id_profesional)
         self.combo_profesional.setCurrentIndex(indice)
-        self.casilla_deposito.setChecked(True)
+        self.combo_deposito.setCurrentIndex(self.combo_deposito.findData("abonado"))
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(_DialogoAsignar, "exec", _asignar_con_deposito)
@@ -617,7 +621,7 @@ def test_flujo_completo_asignar_y_devolver(qtbot, conn, monkeypatch):
     def _asignar_con_deposito(self, *a, **k):
         indice = self.combo_profesional.findData(id_profesional)
         self.combo_profesional.setCurrentIndex(indice)
-        self.casilla_deposito.setChecked(True)
+        self.combo_deposito.setCurrentIndex(self.combo_deposito.findData("abonado"))
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(_DialogoAsignar, "exec", _asignar_con_deposito)
@@ -647,7 +651,7 @@ def test_dialogo_devolucion_periodo_siguiente_imputa_al_mes_que_viene(qtbot, con
     def _asignar_con_deposito(self, *a, **k):
         indice = self.combo_profesional.findData(id_profesional)
         self.combo_profesional.setCurrentIndex(indice)
-        self.casilla_deposito.setChecked(True)
+        self.combo_deposito.setCurrentIndex(self.combo_deposito.findData("abonado"))
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(_DialogoAsignar, "exec", _asignar_con_deposito)
@@ -694,7 +698,7 @@ def test_flujo_perdida_no_reintegra(qtbot, conn, monkeypatch):
     def _asignar_con_deposito(self, *a, **k):
         indice = self.combo_profesional.findData(id_profesional)
         self.combo_profesional.setCurrentIndex(indice)
-        self.casilla_deposito.setChecked(True)
+        self.combo_deposito.setCurrentIndex(self.combo_deposito.findData("abonado"))
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(_DialogoAsignar, "exec", _asignar_con_deposito)
@@ -761,7 +765,7 @@ def test_orden_de_foco_sigue_el_orden_visual_de_los_botones(qtbot, conn):
     assert pantalla._foco._orden == [
         pantalla.campo_observacion_tipo, pantalla.boton_nuevo_tipo, pantalla.boton_editar_tipo,
         pantalla.boton_eliminar_tipo, pantalla.campo_observacion_acceso, pantalla.boton_agregar_acceso,
-        pantalla.boton_eliminar_acceso, pantalla.campo_observacion_movimiento,
+        pantalla.boton_eliminar_acceso, pantalla.combo_filtro_stock, pantalla.campo_observacion_movimiento,
         pantalla.boton_ingresar, pantalla.boton_perdida, pantalla.boton_devolver, pantalla.boton_asignar,
     ]
 
@@ -819,7 +823,9 @@ def test_cada_grupo_de_botones_arranca_a_la_altura_del_primer_registro(qtbot, co
     tabla": el primer botón de cada grupo tiene que empezar (en Y) a la
     misma altura que el comienzo de la primera fila de datos de su
     tabla correspondiente (después del encabezado), no a la altura del
-    título."""
+    título — salvo Accesos (punto 5), donde la clienta pidió
+    explícitamente alinear contra el INICIO de la tabla (su borde de
+    arriba, sin saltear el encabezado), no contra el primer registro."""
     pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1300, 900)
@@ -833,8 +839,11 @@ def test_cada_grupo_de_botones_arranca_a_la_altura_del_primer_registro(qtbot, co
         header = tabla.horizontalHeader()
         return header.mapToGlobal(header.rect().bottomLeft()).y()
 
+    def _y_inicio_tabla(tabla):
+        return tabla.mapToGlobal(tabla.rect().topLeft()).y()
+
     assert abs(_y_global(pantalla.boton_nuevo_tipo) - _y_primera_fila(pantalla.tabla_tipos)) <= 2
-    assert abs(_y_global(pantalla.boton_agregar_acceso) - _y_primera_fila(pantalla.tabla_accesos)) <= 2
+    assert abs(_y_global(pantalla.boton_agregar_acceso) - _y_inicio_tabla(pantalla.tabla_accesos)) <= 2
     assert abs(_y_global(pantalla.boton_ingresar) - _y_primera_fila(pantalla.tabla_movimientos)) <= 2
 
 
@@ -914,3 +923,140 @@ def test_campos_de_deposito_usan_spinmonto_con_formato_y_select_all(qtbot):
     qtbot.wait(10)
     assert spin.lineEdit().selectedText() == spin.lineEdit().text()
     assert spin.lineEdit().selectedText() != ""
+
+
+# ------------------------------------------------- punto 4: bonificado/abonado
+
+def test_dialogo_asignar_arranca_en_bonificado_con_monto_deshabilitado(qtbot, conn):
+    """Punto 4: selector explícito "Depósito bonificado"/"Depósito
+    abonado" en vez del checkbox "Cobrar depósito" de antes — arranca en
+    "Bonificado", mismo default que tenía el checkbox sin tildar."""
+    id_llave = _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
+    tipo = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    dialogo = _DialogoAsignar(conn, tipo, 1)
+    qtbot.addWidget(dialogo)
+    assert dialogo.combo_deposito.currentData() == "bonificado"
+    assert not dialogo.spin_monto.isEnabled()
+    valores = dialogo.valores()
+    assert valores["cobrar_deposito"] is False
+    assert valores["monto_cobrado"] is None
+
+
+def test_dialogo_asignar_elegir_abonado_habilita_el_monto(qtbot, conn):
+    id_llave = _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
+    tipo = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    dialogo = _DialogoAsignar(conn, tipo, 1)
+    qtbot.addWidget(dialogo)
+    dialogo.combo_deposito.setCurrentIndex(dialogo.combo_deposito.findData("abonado"))
+    assert dialogo.spin_monto.isEnabled()
+    valores = dialogo.valores()
+    assert valores["cobrar_deposito"] is True
+    assert valores["monto_cobrado"] == 3000
+
+
+def test_dialogo_devolucion_muestra_abonado_y_pretilda_reintegrar(qtbot, conn):
+    id_llave = _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
+    conn.commit()
+    id_asignacion = asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional, cobrar_deposito=True)
+    conn.commit()
+    movimiento = dict(obtener_repositorio(conn, "LlaveMovimiento").obtener(id_asignacion))
+    movimiento.update(_nombre_llave="Tipo de prueba", _texto_profesional="Gómez")
+    dialogo = _DialogoDevolucion(conn, movimiento)
+    qtbot.addWidget(dialogo)
+    etiquetas = [w.text() for w in dialogo.findChildren(QLabel)]
+    assert any("Depósito original: Abonado" in t for t in etiquetas)
+    assert dialogo.casilla_reintegro.isChecked()
+
+
+def test_dialogo_devolucion_bonificado_no_pretilda_reintegrar(qtbot, conn):
+    id_llave = _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Pérez")
+    conn.commit()
+    id_asignacion = asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional, cobrar_deposito=False)
+    conn.commit()
+    movimiento = dict(obtener_repositorio(conn, "LlaveMovimiento").obtener(id_asignacion))
+    movimiento.update(_nombre_llave="Tipo de prueba", _texto_profesional="Pérez")
+    dialogo = _DialogoDevolucion(conn, movimiento)
+    qtbot.addWidget(dialogo)
+    etiquetas = [w.text() for w in dialogo.findChildren(QLabel)]
+    assert any("Depósito original: Bonificado" in t for t in etiquetas)
+    assert not dialogo.casilla_reintegro.isChecked()
+
+
+# -------------------------------------- punto 5: Stock de llaves por profesional
+
+def test_stock_lista_solo_asignaciones_abiertas_ordenadas_por_categoria_y_codigo(qtbot, conn):
+    """Punto 5: "Stock de llaves por profesional" muestra una fila por
+    Asignación abierta, ordenada por categoría B,R,E,A,X (DISTINTO de la
+    jerarquía B,R,A,E,X,C del resto del sistema) y, dentro de cada una,
+    por código natural."""
+    id_llave_r = _crear_tipo_con_copia(conn, valor_deposito_actual=1000)
+    id_llave_b = _crear_tipo_con_copia(conn, valor_deposito_actual=500)
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Dos", IdCodigo="R2")
+    id_b = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Uno", IdCodigo="B1")
+    conn.commit()
+    asignar_llave(conn, id_llave=id_llave_r, id_profesional=id_r, cobrar_deposito=True)
+    asignar_llave(conn, id_llave=id_llave_b, id_profesional=id_b, cobrar_deposito=False)
+    conn.commit()
+
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+
+    assert pantalla.tabla_stock.rowCount() == 2
+    assert pantalla.tabla_stock.item(0, 0).text().startswith("B1")
+    assert pantalla.tabla_stock.item(0, 2).text() == "Bonificado"
+    assert pantalla.tabla_stock.item(1, 0).text().startswith("R2")
+    assert pantalla.tabla_stock.item(1, 2).text() == "Abonado"
+
+
+def test_stock_no_lista_asignaciones_ya_devueltas(qtbot, conn):
+    id_llave = _crear_tipo_con_copia(conn, valor_deposito_actual=1000)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Dos")
+    conn.commit()
+    id_asignacion = asignar_llave(conn, id_llave=id_llave, id_profesional=id_profesional, cobrar_deposito=False)
+    conn.commit()
+
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla_stock.rowCount() == 1
+
+    devolver_llave(conn, id_asignacion)
+    conn.commit()
+    pantalla._actualizar_movimientos()
+    assert pantalla.tabla_stock.rowCount() == 0
+
+
+def test_stock_se_filtra_por_el_buscador_de_profesional(qtbot, conn):
+    id_llave_r = _crear_tipo_con_copia(conn, valor_deposito_actual=1000)
+    id_llave_b = _crear_tipo_con_copia(conn, valor_deposito_actual=500)
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Dos")
+    id_b = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Uno")
+    conn.commit()
+    asignar_llave(conn, id_llave=id_llave_r, id_profesional=id_r, cobrar_deposito=False)
+    asignar_llave(conn, id_llave=id_llave_b, id_profesional=id_b, cobrar_deposito=False)
+    conn.commit()
+
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla_stock.rowCount() == 2
+
+    indice = pantalla.combo_filtro_stock.findData(id_r)
+    pantalla.combo_filtro_stock.setCurrentIndex(indice)
+    assert pantalla.tabla_stock.rowCount() == 1
+    assert "Dos" in pantalla.tabla_stock.item(0, 0).text()
+
+
+def test_tabla_accesos_se_achica_al_ancho_de_sus_columnas(qtbot, conn):
+    """Punto 5: "la tabla del medio la podés acortar hasta el borde
+    donde termina la columna 'Nombre'" — `tabla_accesos` pasa a tener un
+    ancho FIJO (en vez de estirarse con el resto de la columna de la
+    grilla), dejándole el ancho libre a "Stock de llaves por
+    profesional" de al lado."""
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    ancho_esperado = sum(
+        pantalla.tabla_accesos.columnWidth(c) for c in range(4)
+    ) + 2 * pantalla.tabla_accesos.frameWidth()
+    assert pantalla.tabla_accesos.width() == ancho_esperado
+    assert pantalla.tabla_accesos.maximumWidth() == ancho_esperado

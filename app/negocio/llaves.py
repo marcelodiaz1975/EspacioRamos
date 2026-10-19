@@ -49,6 +49,17 @@ from app.repositorio.registro import obtener_repositorio
 _LETRA_POR_TIPO = {"Edificio": "E", "Unidad": "U", "No especificada": "N"}
 
 
+def texto_estado_deposito(deposito_cobrado: bool) -> str:
+    """"Abonado" (se le cobró el depósito, hay que reintegrarlo al
+    devolver la llave) o "Bonificado" (se lo eximió, nada que reintegrar)
+    — mismo criterio exacto que ya usa `DepositoCobrado` en
+    `LlaveMovimiento` para decidir si la devolución pre-tilda "Reintegrar
+    depósito", acá expuesto como texto para mostrarlo en pantalla (p. ej.
+    la columna "Depósito" de "Stock de llaves por profesional") y en la
+    planilla de importación."""
+    return "Abonado" if deposito_cobrado else "Bonificado"
+
+
 def siguiente_nombre_llave(conn: sqlite3.Connection, tipo: str, *, id_edificio: int | None = None) -> str:
     """Arma el nombre correlativo por letra ("Tipo llave E1", "Tipo llave
     U3", ...) que le va a corresponder al próximo Tipo de llave que se cree

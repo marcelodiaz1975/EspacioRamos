@@ -102,6 +102,15 @@ from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 
 _TAMANOS = [("Cualquier tamaño", None)] + [(t, t) for t in TAMANOS_CONSULTORIO]
 _ANCHO_BOTON_ACCION = 220  # Generar PDF / Generar texto WhatsApp / Nueva búsqueda, los tres iguales
+# "Agregar franja a la búsqueda"/"Quitar franja seleccionada" (columna 1):
+# padding vertical reducido, mismo criterio puntual que `_ESTILO_BOTON_
+# COMPACTO` de Reservas — un override de estilo solo para estos dos
+# botones, sin tocar `estilos.py`. Objetivo: que terminen a la altura
+# donde hoy (antes de esta ronda de compresión) termina "Alcanza con esta
+# franja sola (O)" — el resto de la columna 1 se achica (combo reubicado,
+# checks de sillones/placard sacados) para dejarle a estos dos botones el
+# mismo lugar que ya tenían, sin que la columna crezca más allá de eso.
+_ESTILO_BOTON_COMPACTO_FRANJA = "padding: 3px 16px;"
 _ANCHO_PANEL_FILTROS_GRILLA = 280  # baja desde 355: con las 4 columnas de la ronda D, un ancho fijo mayor le sacaba lugar a la grilla (columna 4) y forzaba scroll horizontal de toda la pantalla
 # Medidos con un script de geometría: agrandan un poco la muestra de color y
 # la letra de "Referencias de colores" (antes compactada a 2 columnas, ver
@@ -429,13 +438,26 @@ class _PanelOferta(QWidget):
 
         self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
         form.addWidget(self.casilla_detalle_reducido)
-        # "Agregar franja a la búsqueda"/"Quitar franja seleccionada" se
-        # sacan de esta columna (pedido explícito de la clienta, para
-        # ganar altura) — los métodos `_agregar_franja`/`_quitar_franja_
-        # seleccionada` quedan intactos (la tecla Delete sobre `lista_
-        # franjas`, columna 2, sigue pudiendo quitar una franja ya
-        # agregada), pero sin ningún botón que arme más de una franja
-        # por búsqueda desde esta pantalla.
+
+        # "Agregar franja a la búsqueda"/"Quitar franja seleccionada" SE
+        # CONSERVAN (corregido: una vuelta anterior los había sacado por
+        # error, interpretando mal el pedido de la clienta — lo que pedía
+        # era reducir la ALTURA de estos dos botones, no eliminarlos, para
+        # que terminen a la altura de "Alcanza con esta franja sola (O)").
+        # `_ESTILO_BOTON_COMPACTO_FRANJA` baja su padding vertical (mismo
+        # criterio "override puntual de esta pantalla" que `_ESTILO_
+        # BOTON_COMPACTO` de Reservas) para ganar la altura que antes se
+        # intentó ganar sacándolos del todo.
+        fila_franja = QHBoxLayout()
+        self.boton_agregar_franja = QPushButton("Agregar franja\na la búsqueda")
+        self.boton_agregar_franja.setStyleSheet(_ESTILO_BOTON_COMPACTO_FRANJA)
+        self.boton_agregar_franja.clicked.connect(self._agregar_franja)
+        self.boton_quitar_franja = QPushButton("Quitar franja\nseleccionada")
+        self.boton_quitar_franja.setStyleSheet(_ESTILO_BOTON_COMPACTO_FRANJA)
+        self.boton_quitar_franja.clicked.connect(self._quitar_franja_seleccionada)
+        fila_franja.addWidget(self.boton_agregar_franja)
+        fila_franja.addWidget(self.boton_quitar_franja)
+        form.addLayout(fila_franja)
         splitter.addWidget(panel_form)
 
         # Segunda columna: "Franjas agregadas a esta búsqueda" + los tres
@@ -581,6 +603,7 @@ class _PanelOferta(QWidget):
                 self.casilla_tamano, self.combo_tamano,
                 self.casilla_valor_maximo, self.spin_valor_maximo,
                 self.combo_union_franja, self.casilla_detalle_reducido,
+                self.boton_agregar_franja, self.boton_quitar_franja,
                 self.boton_pdf, self.boton_texto, self.boton_nueva,
             ],
             parent=self,

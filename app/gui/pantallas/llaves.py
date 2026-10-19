@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -81,6 +82,7 @@ from app.negocio.llaves import (
     registrar_perdida,
     resumen_stock,
     siguiente_nombre_llave,
+    texto_estado_deposito,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -90,6 +92,14 @@ _ANCHO_BOTON = 280  # "Devolución copia del profesional", el texto más largo d
 _FILAS_VISIBLES_TIPOS = 6
 _FILAS_VISIBLES_ACCESOS = 3
 _PADDING_COLUMNA = 30  # mismo criterio que `novedades._ajustar_columnas`: más aire que el ancho justo
+# Orden de "Stock de llaves por profesional" (punto 5 del documento de
+# correcciones) — pedido explícito de la clienta, DISTINTO de la
+# jerarquía B,R,A,E,X,C que usa `clave_orden_profesional`/`_opciones_
+# profesional` para el resto de los selectores del sistema (ahí R va
+# antes que A, acá E va antes que A). Categoría C (sin reserva ni llave
+# esperable, pero el modelo no lo impide) cae al final, sin entrada
+# explícita.
+_ORDEN_CATEGORIA_STOCK = {"B": 0, "R": 1, "E": 2, "A": 3, "X": 4}
 
 
 def _alto_para_filas(tabla: QTableWidget, filas: int) -> int:
@@ -109,6 +119,16 @@ def _alto_hasta_primera_fila(titulo: QLabel, tabla: QTableWidget) -> int:
     botón de cada grupo tiene que quedar alineado con el primer
     registro de su tabla, no con el título."""
     return titulo.sizeHint().height() + tabla.horizontalHeader().sizeHint().height() + tabla.frameWidth()
+
+
+def _alto_hasta_la_tabla(titulo: QLabel) -> int:
+    """Alto desde el techo de la sección hasta el borde de ARRIBA de la
+    tabla (sin saltear el encabezado) — distinto de `_alto_hasta_
+    primera_fila` de arriba. Pedido puntual de la clienta sobre los
+    botones de Accesos (punto 5): "que quede a la par del inicio de esa
+    tabla", no contra el primer registro como el resto de los grupos de
+    esta pantalla."""
+    return titulo.sizeHint().height()
 
 
 def _ajustar_columnas(tabla: QTableWidget, factor: int = 1) -> None:
@@ -267,8 +287,19 @@ class _PanelLlaves(QWidget):
         )
 
         # ------------------------------------------------------- fila 1: Accesos
+        # + "Stock de llaves por profesional" (punto 5 del documento de
+        # correcciones, prototipo dentro de esta misma solapa en vez de
+        # una solapa nueva): `panel_accesos` pasa de una columna sola a
+        # un `QHBoxLayout` con dos mitades — Accesos (achicada hasta el
+        # ancho justo de su columna "Nombre", ver `_actualizar_accesos`)
+        # a la izquierda, la tabla nueva a la derecha, con `stretch=1`
+        # para quedarse con el ancho que Accesos deja libre.
         panel_accesos = QWidget()
-        columna_accesos = QVBoxLayout(panel_accesos)
+        fila_accesos = QHBoxLayout(panel_accesos)
+        fila_accesos.setContentsMargins(0, 0, 0, 0)
+
+        panel_accesos_izq = QWidget()
+        columna_accesos = QVBoxLayout(panel_accesos_izq)
         columna_accesos.setContentsMargins(0, 0, 0, 0)
         titulo_accesos = self._titulo_seccion("Accesos habilitados con la llave")
         columna_accesos.addWidget(titulo_accesos)
@@ -289,6 +320,24 @@ class _PanelLlaves(QWidget):
         self.campo_observacion_acceso = QLineEdit()
         self.campo_observacion_acceso.editingFinished.connect(self._guardar_observacion_acceso)
         columna_accesos.addWidget(self.campo_observacion_acceso)
+        fila_accesos.addWidget(panel_accesos_izq)
+
+        panel_stock = QWidget()
+        columna_stock = QVBoxLayout(panel_stock)
+        columna_stock.setContentsMargins(0, 0, 0, 0)
+        columna_stock.addWidget(self._titulo_seccion("Stock de llaves por profesional"))
+        self.tabla_stock = QTableWidget()
+        excluir_tabla_del_tab(self.tabla_stock)
+        self.tabla_stock.setColumnCount(3)
+        self.tabla_stock.setHorizontalHeaderLabels(["Profesional", "Tipo de llave", "Depósito"])
+        self.tabla_stock.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla_stock.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla_stock.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla_stock.setFixedHeight(_alto_para_filas(self.tabla_stock, _FILAS_VISIBLES_ACCESOS))
+        self.tabla_stock.horizontalHeader().setStretchLastSection(True)
+        columna_stock.addWidget(self.tabla_stock, stretch=1)
+        fila_accesos.addWidget(panel_stock, stretch=1)
+
         grid.addWidget(panel_accesos, 1, 1)
 
         self.boton_agregar_acceso = QPushButton("Agregar acceso de llave")
@@ -297,13 +346,26 @@ class _PanelLlaves(QWidget):
         self.boton_eliminar_acceso = QPushButton("Eliminar acceso de llave")
         self.boton_eliminar_acceso.setObjectName("botonSecundario")
         self.boton_eliminar_acceso.clicked.connect(self._eliminar_acceso)
-        grid.addWidget(
-            self._grupo_botones(
-                _alto_hasta_primera_fila(titulo_accesos, self.tabla_accesos),
-                self.boton_agregar_acceso, self.boton_eliminar_acceso,
-            ),
-            1, 0, Qt.AlignmentFlag.AlignTop,
+        grupo_accesos = self._grupo_botones(
+            _alto_hasta_la_tabla(titulo_accesos),
+            self.boton_agregar_acceso, self.boton_eliminar_acceso,
         )
+        # Buscador de profesional (punto 5): debajo de "Eliminar acceso de
+        # llave", mismo criterio de selector que el punto 1.2 del
+        # documento (`habilitar_busqueda_profesional`) — filtra la tabla
+        # "Stock de llaves por profesional" de al lado, sin tocar Accesos.
+        etiqueta_filtro_stock = QLabel("Buscar profesional\n(filtra Stock de llaves)")
+        etiqueta_filtro_stock.setWordWrap(True)
+        self.combo_filtro_stock = QComboBox()
+        self.combo_filtro_stock.setFixedWidth(_ANCHO_BOTON)
+        self.combo_filtro_stock.addItem("Todos los profesionales", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+            self.combo_filtro_stock.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_filtro_stock)
+        self.combo_filtro_stock.currentIndexChanged.connect(self._actualizar_stock)
+        grupo_accesos.layout().addWidget(etiqueta_filtro_stock)
+        grupo_accesos.layout().addWidget(self.combo_filtro_stock)
+        grid.addWidget(grupo_accesos, 1, 0, Qt.AlignmentFlag.AlignTop)
 
         # ------------------------------------------------------- fila 2: Movimientos
         panel_movimientos = QWidget()
@@ -359,6 +421,7 @@ class _PanelLlaves(QWidget):
         self._foco = instalar_enter_avanza_foco([
             self.campo_observacion_tipo, self.boton_nuevo_tipo, self.boton_editar_tipo, self.boton_eliminar_tipo,
             self.campo_observacion_acceso, self.boton_agregar_acceso, self.boton_eliminar_acceso,
+            self.combo_filtro_stock,
             self.campo_observacion_movimiento,
             self.boton_ingresar, self.boton_perdida, self.boton_devolver, self.boton_asignar,
         ], parent=self)
@@ -535,24 +598,31 @@ class _PanelLlaves(QWidget):
         self.boton_agregar_acceso.setEnabled(tipo is not None)
         self._accesos_actuales = []
         self.tabla_accesos.setRowCount(0)
-        if tipo is None:
-            self._actualizar_observacion_acceso()
-            self._actualizar_botones_acceso()
-            return
-        accesos = self._accesos(tipo["IdLlave"])
-        if self._orden_accesos.columna is not None:
-            accesos = sorted(
-                accesos, key=self._clave_orden_accesos(self._orden_accesos.columna),
-                reverse=not self._orden_accesos.ascendente,
-            )
-        self._accesos_actuales = accesos
-        self.tabla_accesos.setRowCount(len(accesos))
-        for fila_idx, a in enumerate(accesos):
-            self.tabla_accesos.setItem(fila_idx, 0, QTableWidgetItem(a["Localidad"] or ""))
-            self.tabla_accesos.setItem(fila_idx, 1, QTableWidgetItem(a["NombreEdificio"]))
-            self.tabla_accesos.setItem(fila_idx, 2, QTableWidgetItem(a["Departamento"] or "Todas"))
-            self.tabla_accesos.setItem(fila_idx, 3, QTableWidgetItem(a["Nombre"] or ""))
-        _ajustar_columnas(self.tabla_accesos, factor=2)
+        if tipo is not None:
+            accesos = self._accesos(tipo["IdLlave"])
+            if self._orden_accesos.columna is not None:
+                accesos = sorted(
+                    accesos, key=self._clave_orden_accesos(self._orden_accesos.columna),
+                    reverse=not self._orden_accesos.ascendente,
+                )
+            self._accesos_actuales = accesos
+            self.tabla_accesos.setRowCount(len(accesos))
+            for fila_idx, a in enumerate(accesos):
+                self.tabla_accesos.setItem(fila_idx, 0, QTableWidgetItem(a["Localidad"] or ""))
+                self.tabla_accesos.setItem(fila_idx, 1, QTableWidgetItem(a["NombreEdificio"]))
+                self.tabla_accesos.setItem(fila_idx, 2, QTableWidgetItem(a["Departamento"] or "Todas"))
+                self.tabla_accesos.setItem(fila_idx, 3, QTableWidgetItem(a["Nombre"] or ""))
+        # `_ajustar_columnas` y el ancho fijo corren SIEMPRE (con o sin
+        # Tipo seleccionado, con o sin filas) — punto 5: "la tabla del
+        # medio la podés acortar hasta el borde donde termina la columna
+        # 'Nombre'", para dejarle ese ancho libre a "Stock de llaves por
+        # profesional" de al lado. `factor` vuelve a 1 (el doble ancho de
+        # una ronda anterior, "Accesos pide directamente el DOBLE de
+        # ancho", queda superado por este pedido nuevo y más específico:
+        # "acortar", no agrandar).
+        _ajustar_columnas(self.tabla_accesos, factor=1)
+        ancho = sum(self.tabla_accesos.columnWidth(c) for c in range(4)) + 2 * self.tabla_accesos.frameWidth()
+        self.tabla_accesos.setFixedWidth(ancho)
         self._actualizar_observacion_acceso()
         self._actualizar_botones_acceso()
 
@@ -645,6 +715,7 @@ class _PanelLlaves(QWidget):
             enriquecidos.append({
                 **dict(m), "_texto_profesional": _texto_profesional(profesional) if profesional else "",
                 "_nombre_llave": llave["Nombre"] if llave else "",
+                "_categoria_profesional": profesional["CategoriaProfesional"] if profesional else "",
             })
         if self._orden_movimientos.columna is not None:
             enriquecidos.sort(
@@ -682,6 +753,38 @@ class _PanelLlaves(QWidget):
         self.tabla_movimientos.setColumnWidth(6, ancho_deposito)
         self._actualizar_observacion_movimiento()
         self._actualizar_botones_movimiento()
+        self._actualizar_stock()
+
+    # --------------------------------------------- stock por profesional
+
+    @staticmethod
+    def _clave_orden_stock(m: dict) -> tuple:
+        return (
+            _ORDEN_CATEGORIA_STOCK.get(m["_categoria_profesional"], len(_ORDEN_CATEGORIA_STOCK)),
+            clave_orden_codigo(m["_texto_profesional"]),
+        )
+
+    def _actualizar_stock(self) -> None:
+        """"Stock de llaves por profesional" (punto 5): una fila por cada
+        Asignación todavía ABIERTA (sin Devolución/Pérdida que la
+        cierre) — reusa `self._movimientos_actuales`, ya enriquecido por
+        `_actualizar_movimientos`, sin repetir la consulta. Filtrable por
+        `combo_filtro_stock`; orden fijo (categoría B,R,E,A,X, después
+        código natural), no por click de encabezado."""
+        id_filtro = self.combo_filtro_stock.currentData()
+        cerradas = self._asignaciones_cerradas()
+        filas = [
+            m for m in self._movimientos_actuales
+            if m["Tipo"] == "Asignación" and m["IdMovimiento"] not in cerradas
+            and (id_filtro is None or m["IdProfesional"] == id_filtro)
+        ]
+        filas.sort(key=self._clave_orden_stock)
+        self.tabla_stock.setRowCount(len(filas))
+        for fila_idx, m in enumerate(filas):
+            self.tabla_stock.setItem(fila_idx, 0, QTableWidgetItem(m["_texto_profesional"]))
+            self.tabla_stock.setItem(fila_idx, 1, QTableWidgetItem(m["_nombre_llave"]))
+            self.tabla_stock.setItem(fila_idx, 2, QTableWidgetItem(texto_estado_deposito(bool(m["DepositoCobrado"]))))
+        _ajustar_columnas(self.tabla_stock)
 
     def _actualizar_observacion_movimiento(self) -> None:
         movimiento = self._movimiento_seleccionado()
@@ -1052,12 +1155,21 @@ class _DialogoAsignar(QDialog):
         self.campo_fecha = _fecha_edit()
         layout.addRow("Fecha", self.campo_fecha)
 
-        self.casilla_deposito = QCheckBox("Cobrar depósito")
-        layout.addRow(self.casilla_deposito)
+        # Selector explícito (en vez de un checkbox "Cobrar depósito",
+        # fácil de dejar sin tocar por descuido) — pedido de la clienta:
+        # "que me memorice también qué depósito les cobro y qué les
+        # bonifico" (punto 4 del documento de correcciones). Arranca en
+        # "Bonificado" (mismo default que tenía el checkbox sin tildar).
+        self.combo_deposito = QComboBox()
+        self.combo_deposito.addItem("Depósito bonificado (no se cobra nada)", "bonificado")
+        self.combo_deposito.addItem("Depósito abonado (se cobra el monto)", "abonado")
+        layout.addRow("Depósito", self.combo_deposito)
         self.spin_monto = _SpinMonto()
         self.spin_monto.setMaximum(10_000_000)
         self.spin_monto.setValue(tipo["ValorDepositoActual"] or 0)
+        self.spin_monto.setEnabled(False)
         layout.addRow("Monto cobrado", self.spin_monto)
+        self.combo_deposito.currentIndexChanged.connect(self._al_cambiar_deposito)
 
         # Punto propio de esta vuelta: `asignar_llave` ya soportaba
         # `periodo_imputado` (default el período actual, sin ningún
@@ -1080,7 +1192,7 @@ class _DialogoAsignar(QDialog):
         boton_ok = botones.button(QDialogButtonBox.StandardButton.Ok)
         boton_cancelar = botones.button(QDialogButtonBox.StandardButton.Cancel)
         self._foco = instalar_enter_avanza_foco([
-            self.combo_profesional, self.campo_fecha, self.casilla_deposito, self.spin_monto,
+            self.combo_profesional, self.campo_fecha, self.combo_deposito, self.spin_monto,
             self.combo_periodo, self.campo_observacion, boton_ok, boton_cancelar,
         ], parent=self)
 
@@ -1088,15 +1200,19 @@ class _DialogoAsignar(QDialog):
         super().showEvent(event)
         self.combo_profesional.setFocus()
 
+    def _al_cambiar_deposito(self) -> None:
+        self.spin_monto.setEnabled(self.combo_deposito.currentData() == "abonado")
+
     def valores(self) -> dict:
         periodo = periodo_actual(self.conn)
         if self.combo_periodo.currentData() == "siguiente":
             periodo = sumar_meses(periodo, 1)
+        cobrar_deposito = self.combo_deposito.currentData() == "abonado"
         return {
             "id_profesional": self.combo_profesional.currentData(),
             "fecha": self.campo_fecha.date().toString(Qt.DateFormat.ISODate),
-            "cobrar_deposito": self.casilla_deposito.isChecked(),
-            "monto_cobrado": self.spin_monto.value() or None,
+            "cobrar_deposito": cobrar_deposito,
+            "monto_cobrado": (self.spin_monto.value() or None) if cobrar_deposito else None,
             "periodo_imputado": periodo,
             "observacion": self.campo_observacion.text().strip() or None,
         }
@@ -1113,8 +1229,21 @@ class _DialogoDevolucion(QDialog):
         self.campo_fecha = _fecha_edit()
         layout.addRow("Fecha", self.campo_fecha)
 
+        # Estado del depósito al asignar esta llave, explícito — pedido
+        # de la clienta (punto 4): que a la hora de la devolución quede
+        # claro si corresponde reintegrar algo o si ya alcanza con la
+        # devolución de la llave en sí (bonificado en su momento, nada
+        # que devolver). `casilla_reintegro` ya se pre-tildaba según este
+        # mismo dato; esta etiqueta solo lo hace visible.
+        deposito_cobrado = bool(movimiento["DepositoCobrado"])
+        texto_estado = (
+            f"Depósito original: Abonado ({_moneda(movimiento['MontoCobrado'] or 0)})" if deposito_cobrado
+            else "Depósito original: Bonificado (no se cobró nada — no corresponde reintegrar)"
+        )
+        layout.addRow(QLabel(texto_estado))
+
         self.casilla_reintegro = QCheckBox("Reintegrar depósito")
-        self.casilla_reintegro.setChecked(bool(movimiento["DepositoCobrado"]))
+        self.casilla_reintegro.setChecked(deposito_cobrado)
         layout.addRow(self.casilla_reintegro)
         self.spin_monto = _SpinMonto()
         self.spin_monto.setMaximum(10_000_000)

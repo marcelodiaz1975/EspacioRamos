@@ -10659,9 +10659,13 @@ decidió no adivinarlos.
 ## Resolución de tres de los cinco puntos pendientes de arriba
 
 De los cinco puntos que habían quedado abiertos, la clienta resolvió
-tres en esta vuelta — los otros dos (Llaves: "check Bonificar depósito"
-y la nueva solapa "Stock de llaves por profesional") siguen sin
-definir, ver la sección de arriba.
+tres en esta vuelta (Pagos sin cambios, Oferta y Profesionales — esta
+última, corregida en una vuelta posterior tras una interpretación
+equivocada de la primera, ver abajo). Los dos de Llaves ("check
+Bonificar depósito" y la nueva solapa "Stock de llaves por
+profesional") se resolvieron después, en la sección "Llaves: bonificado/
+abonado..." más abajo — NO como una solapa nueva, sino como un
+prototipo dentro de "Movimientos y tenencias de llaves".
 
 ### Pagos — "autocierre de tanda": dejado tal cual
 
@@ -10674,8 +10678,8 @@ siempre ("Iniciar tanda"/"Cerrar tanda").
 Pedido explícito de la clienta: todo el contenido de las cuatro
 columnas de "Oferta de consultorios" tiene que entrar en el mismo alto
 visible que ya alcanzaba hasta el check "Alcanza con esta franja sola
-(O)" (el último control de la primera columna antes de esta vuelta) —
-"de derecha a izquierda":
+(O)" (el último control visible de la primera columna antes de esta
+vuelta) — "de derecha a izquierda":
 
 - **Columna 4 (la grilla)**: "la grilla come altura del cuadro de
   detalle" — se revierte `dar_stretch_a_detalle()` (sumado en una ronda
@@ -10688,17 +10692,11 @@ visible que ya alcanzaba hasta el check "Alcanza con esta franja sola
   colores" pasa de la versión grande (una sola columna, cuadraditos de
   40px) a `mostrar_leyenda_colores(compacta=True)` (2 columnas,
   cuadraditos de 28px) — mismo criterio `hacer_compacta()` que ya usa
-  Reservas. Los `_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR`/`_AISLADA` (antes
-  tuneados para la versión grande) se volvieron a medir desde cero con
-  un script de geometría para este modo compacto — bajo la plataforma
-  offscreen, `self.grilla._panel_filtros.sizeHint()` no refleja un
-  cambio de tamaño de la leyenda sin llamar antes a `updateGeometry()`
-  en el panel (hallazgo nuevo, no documentado hasta ahora para este
-  mecanismo) — se tuneó hasta que el panel de Filtros llega
-  aproximadamente a la misma altura que el formulario ya recortado de
-  la columna 1 (614px medidos contra 612px de objetivo, un residuo de
-  2px aceptado, mismo tipo de resto imperceptible que otras rondas de
-  esta revisión).
+  Reservas. Los `_AJUSTE_ALTO_MUESTRA_LEYENDA_REGULAR`/`_AISLADA` se
+  tunearon con un script de geometría contra el modo compacto, bajo la
+  plataforma offscreen (`self.grilla._panel_filtros.sizeHint()` no
+  refleja un cambio de tamaño de la leyenda sin `updateGeometry()`
+  antes, hallazgo ya documentado para este mecanismo).
 - **Columna 2 ("Franjas agregadas a esta búsqueda")**: `lista_franjas`
   pasa de `stretch=1` sin tope (crecía hasta el pie de la columna,
   dejando mucho espacio en blanco) a un alto FIJO de ~3 líneas
@@ -10711,37 +10709,53 @@ visible que ya alcanzaba hasta el check "Alcanza con esta franja sola
   que le dé el splitter — mismo mecanismo ya documentado para Reservas
   ("un tope de alto sin un `addStretch()` final en el layout que lo
   contiene centra el contenido en vez de pegarlo arriba").
-- **Columna 1 (el formulario), la más creativa**: "Combinación de
-  consultorios" pierde su etiqueta propia y el combo pasa a vivir
-  directo debajo del título "Requisitos de búsqueda" (antes
-  "Características pedidas", renombrado a pedido explícito de la
-  clienta en el mismo movimiento). Los checks "Con sillones"/"Con
-  placard" se sacan por completo de `_grid_caracteristicas` (quedan
-  Ventana/Camilla en la primera fila, Tamaño/Valor máximo en las dos
-  que siguen) — `_armar_busqueda_actual` manda `sillones=False,
-  placard=False` siempre, el campo sigue existiendo en `Busqueda` para
-  cualquier otro llamador (ej. importación), solo deja de poder
-  activarse desde esta pantalla. "Agregar franja a la búsqueda"/"Quitar
-  franja seleccionada" se sacan de esta columna por completo.
+- **Columna 1 (el formulario)**: "Combinación de consultorios" pierde
+  su etiqueta propia y el combo pasa a vivir directo debajo del título
+  "Requisitos de búsqueda" (antes "Características pedidas", renombrado
+  a pedido explícito de la clienta en el mismo movimiento). Los checks
+  "Con sillones"/"Con placard" se sacan por completo de `_grid_
+  caracteristicas` (quedan Ventana/Camilla en la primera fila, Tamaño/
+  Valor máximo en las dos que siguen) — `_armar_busqueda_actual` manda
+  `sillones=False, placard=False` siempre, el campo sigue existiendo en
+  `Busqueda` para cualquier otro llamador (ej. importación), solo deja
+  de poder activarse desde esta pantalla.
 
-  **Consecuencia real de sacar esos dos botones, señalada a la
-  clienta**: `_agregar_franja`/`_quitar_franja_seleccionada` (los
-  métodos) quedan intactos — la tecla Delete sobre `lista_franjas` sigue
-  pudiendo quitar una franja ya agregada (`instalar_eliminar_con_tecla`,
-  sin tocar) — pero esta pantalla deja de tener ningún botón que arme
-  MÁS DE UNA franja por búsqueda (el caso de "lunes y miércoles de
-  mañana" + "viernes de tarde" documentado en el docstring del módulo).
-  Con una sola franja cargada en el formulario, "Generar" sigue
-  funcionando exactamente igual que siempre (la usa directo, sin pasar
-  por `self._franjas`) — la pérdida real es puntualmente la de combinar
-  más de una franja distinta en el mismo documento desde esta pantalla.
+**Corrección sobre una primera interpretación equivocada**: una primera
+vuelta de esta misma tanda había sacado por completo "Agregar franja a
+la búsqueda"/"Quitar franja seleccionada" de esta columna, leyendo mal
+el pedido ("elimina los checks... y los botones que digan 'Agregar
+franja' y 'Quitar franja' nada más, esto para que puedas reducir la
+altura de los mismos") como "elimina también esos dos botones" — la
+clienta corrigió de inmediato: **los dos botones se conservan**, lo que
+pedía reducir era su ALTURA (no eliminarlos), para que terminen a la
+altura donde hoy se ve "Alcanza con esta franja sola (O)". Se
+restauraron `boton_agregar_franja`/`boton_quitar_franja` (misma `fila_
+franja` horizontal, mismo texto a dos líneas de siempre) con un
+override de estilo puntual, `_ESTILO_BOTON_COMPACTO_FRANJA = "padding:
+3px 16px;"` (mismo criterio que `_ESTILO_BOTON_COMPACTO` de Reservas:
+un override local, sin tocar `estilos.py`), y se sumaron de vuelta a
+`self._foco`.
 
-Tests actualizados en `tests/test_gui_oferta.py`: se borra
-`test_agregar_y_quitar_franja_en_la_misma_fila` (los botones que
-probaba ya no existen); `test_lista_franjas_crece_hasta_el_pie_y_es_
-scroleable` se reemplaza por `test_lista_franjas_alto_fijo_y_escrolea_
-con_mas_de_las_que_entran` (alto fijo en vez de `stretch=1`, sigue
-escrolleando con 20 franjas cargadas directo vía `_agregar_franja`);
+Captura enviada a la clienta (ventana completa 1500×850, mismo criterio
+`VentanaPrincipal`/`ir_a_seccion` de siempre) para confirmar la
+interpretación antes de seguir afinando el ajuste pixel a pixel —
+pedido explícito: "mandame una captura de pantalla con lo que
+interpretaste y vamos confirmando antes de tocar código". Con la
+combinación de los cuatro puntos de arriba, las cuatro columnas ya
+entran sin necesitar scroll en esa ventana de referencia (los dos
+botones terminan dentro del alto visible) — pendiente de confirmación
+visual de la clienta antes de dar el ajuste fino por cerrado.
+
+Tests en `tests/test_gui_oferta.py`:
+`test_agregar_y_quitar_franja_siguen_en_la_misma_fila_y_compactos`
+(reemplaza al viejo "en la misma fila", ahora también confirma el
+`_ESTILO_BOTON_COMPACTO_FRANJA`); `test_columna_del_formulario_mas_
+angosta_que_antes` vuelve a confirmar que los dos botones EXISTEN (la
+versión intermedia, ya corregida, llegó a afirmar lo contrario);
+`test_lista_franjas_crece_hasta_el_pie_y_es_scroleable` se reemplaza
+por `test_lista_franjas_alto_fijo_y_escrolea_con_mas_de_las_que_
+entran` (alto fijo en vez de `stretch=1`, sigue escrolleando con 20
+franjas cargadas directo vía `_agregar_franja`);
 `test_caracteristicas_pedidas_en_grilla_de_pares_con_placard` se
 reemplaza por `test_caracteristicas_pedidas_en_grilla_de_pares_sin_
 sillones_ni_placard` (confirma que los dos checks no existen más, y la
@@ -10823,3 +10837,129 @@ de `lista_documentos` se renombra `test_pantalla_profesionales_lista_
 documentos_alto_fijo_y_vista_previa_se_estira` y se reescribe para el
 nuevo comportamiento (alto fijo en la lista, `area_vista_previa` con
 el alto de sobra).
+
+## Llaves: bonificado/abonado (punto 4) y "Stock de llaves por profesional" dentro de la solapa existente (punto 5)
+
+Cierra los dos puntos de Llaves que habían quedado pendientes de
+definición en la lista de cinco ("check Bonificar depósito" y la
+eventual nueva solapa "Stock de llaves por profesional") — la clienta
+los resolvió explícitamente: punto 4 con una aclaración de para qué
+sirve, punto 5 con un pedido puntual de prototipo DENTRO de la solapa
+"Movimientos y tenencias de llaves" ("No hagas la solapa por ahora"),
+con una lista de cambios concretos y pedido de captura antes de darlo
+por cerrado.
+
+### Punto 4 — "Depósito bonificado" vs "Depósito abonado"
+
+Aclaración de la clienta sobre para qué sirve esta distinción: "que me
+memorice también qué depósito les cobro y qué les bonifico... para que
+a la hora de la devolución de la llave sepa yo si le tengo que
+reintegrar el depósito o ya con el reintegro de la llave alcanza". El
+dato de fondo YA existía (`LlaveMovimiento.DepositoCobrado`, que
+`_DialogoDevolucion` ya usaba para pre-tildar "Reintegrar depósito") —
+lo que faltaba era hacerlo EXPLÍCITO en los dos diálogos, en vez de
+quedar escondido detrás de un checkbox genérico "Cobrar depósito".
+
+`texto_estado_deposito(deposito_cobrado: bool) -> str` (nuevo,
+`app.negocio.llaves`): "Abonado"/"Bonificado", único punto de verdad
+para este texto — lo usan tanto la GUI (la columna "Depósito" de
+"Stock de llaves por profesional", ver punto 5) como, en su momento,
+la planilla de importación (que ya tenía su propia columna
+`DepositoAbonado`, ver más abajo).
+
+`_DialogoAsignar` (`app/gui/pantallas/llaves.py`): el checkbox "Cobrar
+depósito" se reemplaza por un selector explícito, `combo_deposito`
+("Depósito bonificado (no se cobra nada)"/"Depósito abonado (se cobra
+el monto)"), arrancando en "Bonificado" (mismo default que tenía el
+checkbox sin tildar) — "Monto cobrado" (`spin_monto`) pasa a
+deshabilitado por default y solo se habilita al elegir "Abonado"
+(`_al_cambiar_deposito`, conectado DESPUÉS de construir `spin_monto`
+para no dispararse contra un atributo que todavía no existe en el
+primer `addItem`). `valores()` sigue devolviendo exactamente el mismo
+contrato de siempre (`cobrar_deposito`/`monto_cobrado`) para
+`asignar_llave`, sin tocar la capa de negocio.
+
+`_DialogoDevolucion`: suma una línea de texto, ANTES del checkbox
+"Reintegrar depósito", mostrando el estado original tal cual quedó
+registrado al asignar — "Depósito original: Abonado ($3.000)" o
+"Depósito original: Bonificado (no se cobró nada — no corresponde
+reintegrar)" — el checkbox sigue pre-tildándose solo según ese mismo
+dato, esta etiqueta solo lo hace visible en vez de que la clienta tenga
+que recordarlo o abrir el historial de movimientos para confirmarlo.
+
+### Punto 5 — "Stock de llaves por profesional", dentro de "Movimientos y tenencias de llaves"
+
+Pedido explícito y detallado de la clienta, implementado tal cual lo
+describió, con el prototipo ya armado antes de pedir confirmación
+("Si me entendiste prearmalo y mostrame una captura de pantalla"):
+
+- **"Accesos habilitados con la llave" se achica hasta el ancho justo
+  de sus columnas** (incluida "Nombre"). `panel_accesos` pasa de una
+  columna sola a un `QHBoxLayout` con dos mitades — `panel_accesos_izq`
+  (título + `tabla_accesos` + observación, SIN stretch) a la izquierda,
+  `panel_stock` (la tabla nueva, CON `stretch=1`) a la derecha, para
+  que se quede con el ancho que Accesos deja libre. `_actualizar_
+  accesos` pasa a correr `_ajustar_columnas`/fijar el ancho de
+  `tabla_accesos` SIEMPRE (antes solo con un Tipo seleccionado) y el
+  ancho queda FIJO (`setFixedWidth`, suma de las 4 columnas + el marco)
+  en vez de estirarse con el resto de la fila. De paso, el "doble de
+  ancho" que esta misma tabla pedía en una ronda anterior
+  ("Accesos pide directamente el DOBLE de ancho", `factor=2`) queda
+  SUPERADO por este pedido nuevo y más específico ("acortar", no
+  agrandar) — `factor` vuelve a 1.
+- **Tabla nueva, "Stock de llaves por profesional"** (`self.tabla_
+  stock`, 3 columnas: Profesional/Tipo de llave/Depósito): una fila por
+  cada `LlaveMovimiento` Tipo="Asignación" todavía ABIERTA (sin
+  Devolución/Pérdida que la cierre) — reusa `self._movimientos_
+  actuales` (ya enriquecido por `_actualizar_movimientos`, que ahora
+  también guarda `_categoria_profesional`) sin repetir la consulta;
+  `_actualizar_stock()` se llama al final de `_actualizar_movimientos`,
+  así que se refresca sola ante cualquier alta/baja de movimiento. La
+  columna "Depósito" usa `texto_estado_deposito` (punto 4). Alto fijo a
+  3 filas (`_FILAS_VISIBLES_ACCESOS`, mismo criterio que Accesos, para
+  que las dos tablas de la fila quedaran parejas), con
+  `setStretchLastSection(True)` (mismo criterio que "Estado de cuenta"
+  de Cargos especiales) para que "Depósito" se lleve el ancho sobrante.
+- **Orden fijo, NO por click de encabezado**: pedido explícito —
+  categoría B,R,E,A,X (constante nueva, `_ORDEN_CATEGORIA_STOCK`,
+  DISTINTA de la jerarquía global B,R,A,E,X,C que usa `clave_orden_
+  profesional`/`_opciones_profesional` para el resto de los selectores
+  del sistema — acá E va antes que A) y, dentro de cada categoría,
+  código natural (`clave_orden_codigo`, reusado tal cual).
+- **Los dos botones de Accesos suben, alineados contra el INICIO de la
+  tabla** (su borde de arriba, sin saltear el encabezado) — DISTINTO
+  del criterio `_alto_hasta_primera_fila` que usan Tipos/Movimientos
+  (alineados contra la primera fila de DATOS, saltando el encabezado).
+  Se suma `_alto_hasta_la_tabla(titulo)` (nueva, devuelve solo el alto
+  del título) para este caso puntual.
+- **Buscador de profesional, debajo de "Eliminar acceso de llave"**:
+  `combo_filtro_stock`, mismo widget/criterio que "punto 1.2" del
+  documento general (`habilitar_busqueda_profesional`), con "Todos los
+  profesionales" como primera opción — filtra `tabla_stock` sin tocar
+  `tabla_accesos`. Se agrega al mismo `QWidget` que devuelve `_grupo_
+  botones` para Accesos (`grupo_accesos.layout().addWidget(...)`, en
+  vez de pasarlo como un botón más — `_grupo_botones` solo fija ancho y
+  apila, sirve igual para un combo) y se suma a la cadena de foco
+  general de la pantalla, entre "Eliminar acceso de llave" y el campo
+  de observación de Movimientos.
+
+Captura enviada a la clienta (ventana completa, `VentanaPrincipal` +
+`ir_a_seccion("Llaves y otros conceptos")`, con tres profesionales de
+categorías B/R/E con tenencias abiertas de ejemplo) para confirmar el
+prototipo antes de darlo por cerrado — pendiente de su revisión.
+
+### Punto 6 — planilla de importación de ejemplo
+
+La hoja "Llave" de la planilla de importación YA tenía, de una ronda
+anterior ("Planilla de importación de Llaves: tipos, accesos y
+tenencias en una sola hoja"), una columna `DepositoAbonado` (SI/NO)
+que ya alimenta `LlaveMovimiento.DepositoCobrado` al importar una
+tenencia histórica — sin generar ningún `CargoEspecial` (es un dato de
+antes de empezar a usar el sistema, no un cobro nuevo) — así que no
+hizo falta ningún cambio de código para este punto, solo generar y
+enviar un archivo de ejemplo: `app.importacion.plantillas.
+generar_plantillas` más 4 filas de muestra agregadas a mano a la hoja
+"Llave" (una llave de Edificio con una tenencia abonada y otra
+bonificada, una de Unidad sin tenencia todavía, una "No especificada"
+abonada) — verificado que importa sin errores contra una base de
+prueba antes de enviarlo.

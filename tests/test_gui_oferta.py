@@ -634,9 +634,9 @@ def test_columna_del_formulario_mas_angosta_que_antes(qtbot, conn, profesional_y
     690px de sizeHint que medía en su versión original (con los tres
     botones "Generar PDF"/"Generar texto WhatsApp"/"Nueva búsqueda" en
     una fila horizontal ahí mismo) — esos tres botones viven ahora en su
-    propia columna (la segunda), y "Agregar franja"/"Quitar franja" se
-    sacaron de esta columna por completo (pedido explícito de la
-    clienta, para ganar altura)."""
+    propia columna (la segunda). "Agregar franja"/"Quitar franja" SIGUEN
+    en esta columna (se conservan, solo se achicaron de alto — ver
+    `test_agregar_y_quitar_franja_en_la_misma_fila`)."""
     from PySide6.QtWidgets import QSplitter
 
     pantalla = _PanelOferta(conn)
@@ -644,8 +644,8 @@ def test_columna_del_formulario_mas_angosta_que_antes(qtbot, conn, profesional_y
     splitter = pantalla.findChildren(QSplitter)[0]
     panel_form = splitter.widget(0)
     assert panel_form.sizeHint().width() < 500  # bien por debajo de los 690px originales
-    assert not hasattr(pantalla, "boton_agregar_franja")
-    assert not hasattr(pantalla, "boton_quitar_franja")
+    assert hasattr(pantalla, "boton_agregar_franja")
+    assert hasattr(pantalla, "boton_quitar_franja")
 
 
 def test_filtro_dia_de_la_grilla_siempre_de_a_pares(qtbot, conn, profesional_y_consultorio):
@@ -703,6 +703,27 @@ def test_leyenda_cambia_de_referencias_segun_el_tipo_de_busqueda(qtbot, conn, pr
 
     pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData(TIPO_AISLADA))
     assert pantalla.grilla._leyenda_colores._layout.count() == len(REFERENCIAS_AISLADA) * 2
+
+
+def test_agregar_y_quitar_franja_siguen_en_la_misma_fila_y_compactos(qtbot, conn, profesional_y_consultorio):
+    """"Agregar franja a la búsqueda"/"Quitar franja seleccionada" se
+    conservan en la columna 1 (se habían sacado por error en una vuelta
+    anterior, corregido): siguen a la par, a la misma altura, y bajan de
+    alto (`_ESTILO_BOTON_COMPACTO_FRANJA`) para poder terminar a la
+    altura que ocupaba "Alcanza con esta franja sola (O)" antes de esta
+    ronda de compresión."""
+    from app.gui.estilos import hoja_estilos
+    from app.gui.pantallas.oferta import _ESTILO_BOTON_COMPACTO_FRANJA
+
+    pantalla = _PanelOferta(conn)
+    pantalla.setStyleSheet(hoja_estilos(modo_oscuro=False))
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    assert pantalla.boton_agregar_franja.y() == pantalla.boton_quitar_franja.y()
+    assert pantalla.boton_agregar_franja.x() < pantalla.boton_quitar_franja.x()
+    assert pantalla.boton_agregar_franja.styleSheet() == _ESTILO_BOTON_COMPACTO_FRANJA
+    assert pantalla.boton_quitar_franja.styleSheet() == _ESTILO_BOTON_COMPACTO_FRANJA
 
 
 def test_etiqueta_franjas_agregadas_sin_texto_explicativo(qtbot, conn, profesional_y_consultorio):
