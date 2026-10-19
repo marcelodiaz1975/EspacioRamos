@@ -298,10 +298,31 @@ class _PanelLlaves(QWidget):
         fila_accesos = QHBoxLayout(panel_accesos)
         fila_accesos.setContentsMargins(0, 0, 0, 0)
 
+        # Buscador de profesional (punto 5) y el alto que determina, se
+        # construyen ANTES de los dos títulos de esta fila: el combo,
+        # editable (`habilitar_busqueda_profesional`), necesita más alto
+        # que un `QLabel` solo (20px contra 14px, medido) — fijar ese
+        # mismo alto EXPLÍCITO en los dos títulos (`setFixedHeight`, no
+        # dejarlo al `sizeHint()` de la fila que lo envuelve) es lo que
+        # de verdad alinea el comienzo de las dos tablas: un `QHBoxLayout`
+        # agregado con `addLayout` reserva, bajo la plataforma offscreen,
+        # un alto mayor al real para la fila que combina label+combo
+        # (`sizeHint()` inestable, mismo tipo de hallazgo ya documentado
+        # para la leyenda de colores de Reservas/Oferta) — con alto FIJO
+        # en los dos títulos, ninguno de los dos depende de ese cálculo.
+        self.combo_filtro_stock = QComboBox()
+        self.combo_filtro_stock.addItem("Todos los profesionales", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+            self.combo_filtro_stock.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_filtro_stock)
+        self.combo_filtro_stock.currentIndexChanged.connect(self._actualizar_stock)
+        _alto_fila_titulo_stock = self.combo_filtro_stock.sizeHint().height()
+
         panel_accesos_izq = QWidget()
         columna_accesos = QVBoxLayout(panel_accesos_izq)
         columna_accesos.setContentsMargins(0, 0, 0, 0)
         titulo_accesos = self._titulo_seccion("Accesos habilitados con la llave")
+        titulo_accesos.setFixedHeight(_alto_fila_titulo_stock)
         columna_accesos.addWidget(titulo_accesos)
         self.tabla_accesos = QTableWidget()
         excluir_tabla_del_tab(self.tabla_accesos)
@@ -325,7 +346,19 @@ class _PanelLlaves(QWidget):
         panel_stock = QWidget()
         columna_stock = QVBoxLayout(panel_stock)
         columna_stock.setContentsMargins(0, 0, 0, 0)
-        columna_stock.addWidget(self._titulo_seccion("Stock de llaves por profesional"))
+        # El título y el combo van en un `QWidget` propio (no un `QHBoxLayout`
+        # agregado directo con `addLayout`) con alto FIJO — mismo motivo
+        # que `titulo_accesos.setFixedHeight(...)` más arriba: pedido
+        # explícito de la clienta ("ponelo a la par de la etiqueta...
+        # apenas termina la misma sin ninguna otra etiqueta adicional").
+        fila_titulo_stock = QWidget()
+        fila_titulo_stock.setFixedHeight(_alto_fila_titulo_stock)
+        layout_titulo_stock = QHBoxLayout(fila_titulo_stock)
+        layout_titulo_stock.setContentsMargins(0, 0, 0, 0)
+        titulo_stock = self._titulo_seccion("Stock de llaves por profesional")
+        layout_titulo_stock.addWidget(titulo_stock)
+        layout_titulo_stock.addWidget(self.combo_filtro_stock, stretch=1)
+        columna_stock.addWidget(fila_titulo_stock)
         self.tabla_stock = QTableWidget()
         excluir_tabla_del_tab(self.tabla_stock)
         self.tabla_stock.setColumnCount(3)
@@ -336,7 +369,20 @@ class _PanelLlaves(QWidget):
         self.tabla_stock.setFixedHeight(_alto_para_filas(self.tabla_stock, _FILAS_VISIBLES_ACCESOS))
         self.tabla_stock.horizontalHeader().setStretchLastSection(True)
         columna_stock.addWidget(self.tabla_stock, stretch=1)
-        fila_accesos.addWidget(panel_stock, stretch=1)
+        # `AlignTop` acá es lo que de verdad alinea el comienzo Y el fin
+        # de las dos tablas: sin él, `panel_accesos_izq` (más alto, por
+        # el campo de observación debajo de su tabla) fuerza a
+        # `panel_stock` a estirarse hasta esa misma altura — y, como
+        # ningún hijo de `panel_stock` puede crecer de verdad (el título
+        # y la tabla tienen alto fijo), Qt reparte ese sobrante como
+        # relleno repartido ANTES/ENTRE/DESPUÉS de los dos (medido: título
+        # y tabla terminaban bajando parejo, mismo desplazamiento en los
+        # dos). Con `AlignTop`, `panel_stock` se queda en su alto natural
+        # y el sobrante entero cae DEBAJO suyo, invisible, sin correr
+        # nada — confirmado con script de geometría: título y tabla
+        # terminan exactos en el mismo píxel que los de "Accesos
+        # habilitados con la llave".
+        fila_accesos.addWidget(panel_stock, stretch=1, alignment=Qt.AlignmentFlag.AlignTop)
 
         grid.addWidget(panel_accesos, 1, 1)
 
@@ -350,21 +396,6 @@ class _PanelLlaves(QWidget):
             _alto_hasta_la_tabla(titulo_accesos),
             self.boton_agregar_acceso, self.boton_eliminar_acceso,
         )
-        # Buscador de profesional (punto 5): debajo de "Eliminar acceso de
-        # llave", mismo criterio de selector que el punto 1.2 del
-        # documento (`habilitar_busqueda_profesional`) — filtra la tabla
-        # "Stock de llaves por profesional" de al lado, sin tocar Accesos.
-        etiqueta_filtro_stock = QLabel("Buscar profesional\n(filtra Stock de llaves)")
-        etiqueta_filtro_stock.setWordWrap(True)
-        self.combo_filtro_stock = QComboBox()
-        self.combo_filtro_stock.setFixedWidth(_ANCHO_BOTON)
-        self.combo_filtro_stock.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
-            self.combo_filtro_stock.addItem(etiqueta, id_)
-        habilitar_busqueda_profesional(self.combo_filtro_stock)
-        self.combo_filtro_stock.currentIndexChanged.connect(self._actualizar_stock)
-        grupo_accesos.layout().addWidget(etiqueta_filtro_stock)
-        grupo_accesos.layout().addWidget(self.combo_filtro_stock)
         grid.addWidget(grupo_accesos, 1, 0, Qt.AlignmentFlag.AlignTop)
 
         # ------------------------------------------------------- fila 2: Movimientos

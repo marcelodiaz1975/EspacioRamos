@@ -340,21 +340,24 @@ def test_foco_inicial_queda_en_profesional(qtbot, conn, profesional_y_consultori
     qtbot.waitUntil(lambda: pantalla.combo_profesional.hasFocus())
 
 
-def test_lista_franjas_alto_fijo_y_escrolea_con_mas_de_las_que_entran(qtbot, conn, profesional_y_consultorio):
-    """Pedido explícito de la clienta ("sacale altura al cuadro donde se
-    van cargando las franjas horarias"): `lista_franjas` pasa de
-    `stretch=1` sin tope (crecía hasta el pie de la columna) a un alto
-    FIJO (~3 líneas) — sigue teniendo su propio scroll (default de Qt)
-    para cuando hay más franjas de las que entran."""
+def test_lista_franjas_estirada_hasta_el_pie_y_escrolea_con_mas_de_las_que_entran(
+    qtbot, conn, profesional_y_consultorio
+):
+    """Pedido explícito de la clienta sobre la ronda anterior ("el cuadro
+    de las franjas quedó extremadamente chico"): `lista_franjas` vuelve a
+    `stretch=1` sin tope — absorbe sola el alto de sobra que le imponga
+    el splitter, empujando los tres botones de abajo hasta el pie de la
+    columna — y sigue teniendo su propio scroll (default de Qt) para
+    cuando hay más franjas de las que entran."""
     from PySide6.QtCore import Qt as _Qt
 
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     columna_franjas = pantalla.lista_franjas.parentWidget().layout()
     indice = columna_franjas.indexOf(pantalla.lista_franjas)
-    assert columna_franjas.stretch(indice) == 0
-    assert pantalla.lista_franjas.height() == pantalla.lista_franjas.minimumHeight() == pantalla.lista_franjas.maximumHeight()
-    assert pantalla.lista_franjas.maximumHeight() < 90
+    assert columna_franjas.stretch(indice) == 1
+    assert not pantalla.lista_franjas.hasHeightForWidth()
+    assert pantalla.lista_franjas.maximumHeight() >= 16777214  # sin tope de alto
 
     for i in range(20):
         pantalla._checks_dia["Lunes"].setChecked(True)
@@ -967,9 +970,10 @@ def test_pantalla_tiene_cuatro_columnas(qtbot, conn, profesional_y_consultorio):
 
 
 def test_columna_de_franjas_tiene_titulo_lista_y_tres_botones_al_pie(qtbot, conn, profesional_y_consultorio):
-    """La segunda columna: título arriba, la lista de franjas (alto fijo,
-    ver `test_lista_franjas_alto_fijo_y_escrolea_con_mas_de_las_que_
-    entran`) y los tres botones de acción justo debajo, en ese orden."""
+    """La segunda columna: título arriba, la lista de franjas (estirada
+    hasta el pie, ver `test_lista_franjas_estirada_hasta_el_pie_y_
+    escrolea_con_mas_de_las_que_entran`) y los tres botones de acción
+    justo debajo, en ese orden."""
     pantalla = _PanelOferta(conn)
     qtbot.addWidget(pantalla)
     panel_franjas = pantalla.lista_franjas.parentWidget()

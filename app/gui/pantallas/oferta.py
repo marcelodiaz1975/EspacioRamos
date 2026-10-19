@@ -159,13 +159,6 @@ _AJUSTE_EXTRA_MUESTRA_PARES = 9  # pedido de la clienta: los días siempre de a 
 # que el panel de Filtros llega aproximadamente a la misma altura que el
 # formulario de la columna 1, ya recortado (ver _armar_ui).
 _ANCHO_MUESTRA_LEYENDA_COMPACTA = 28
-# Alto fijo de "Franjas agregadas a esta búsqueda" (columna 2) para ~3
-# líneas — pedido explícito de la clienta ("sacale altura al cuadro
-# donde se van cargando las franjas horarias"), mismo criterio de
-# medición que `_ALTO_LISTA_DOCUMENTOS` en Profesionales (alto de fila +
-# marco, medido con un script de geometría). Sigue scrolleando sola
-# (default de Qt) si hay más franjas de las que entran.
-_ALTO_LISTA_FRANJAS = 48
 
 _DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
 
@@ -461,18 +454,20 @@ class _PanelOferta(QWidget):
         splitter.addWidget(panel_form)
 
         # Segunda columna: "Franjas agregadas a esta búsqueda" + los tres
-        # botones de acción, reubicados al pie. `self.lista_franjas` pasa
-        # de `stretch=1` sin tope (crecía hasta el pie de la columna,
-        # dejando mucho espacio en blanco) a un alto FIJO (~3 líneas,
-        # pedido explícito de la clienta: "sacale altura al cuadro") —
-        # sigue teniendo su propio scroll para cuando hay más franjas de
-        # las que entran. Con `columna_franjas.addStretch()` al final en
-        # vez del `stretch=1` de la lista, el contenido (etiqueta + lista
-        # + 3 botones) queda pegado arriba en vez de centrarse en el alto
-        # que le dé el splitter — mismo mecanismo ya documentado para
-        # Reservas (un tope de alto sin un `addStretch()` final en el
-        # layout que lo contiene centra el contenido en vez de pegarlo
-        # arriba).
+        # botones de acción, reubicados al pie. Pedido explícito de la
+        # clienta sobre esta vuelta: el cuadro quedó "extremadamente
+        # chico" con el alto fijo de la ronda anterior (~3 líneas) — se
+        # revierte a `stretch=1` SIN tope (vuelve a crecer hasta el pie
+        # de la columna, con su propio scroll para cuando hay más
+        # franjas de las que entran) y se saca el `addStretch()` final
+        # que antes empujaba el contenido hacia arriba. Con la lista
+        # como único elemento flexible de esta columna, absorbe sola
+        # cualquier alto de sobra que le imponga el `QSplitter` (que
+        # ahora iguala las cuatro columnas a la más alta, la del
+        # formulario, con los botones de franja ya restaurados al pie) —
+        # los tres botones de abajo quedan empujados hasta el borde
+        # inferior de la columna, terminando "Nueva búsqueda" a la misma
+        # altura que "Agregar franja"/"Quitar franja" de la columna 1.
         panel_franjas = QWidget()
         panel_franjas.setMaximumWidth(_ANCHO_BOTON_ACCION + 16)
         columna_franjas = QVBoxLayout(panel_franjas)
@@ -480,9 +475,8 @@ class _PanelOferta(QWidget):
         etiqueta_franjas.setWordWrap(True)
         columna_franjas.addWidget(etiqueta_franjas)
         self.lista_franjas = QListWidget()
-        self.lista_franjas.setFixedHeight(_ALTO_LISTA_FRANJAS)
         instalar_eliminar_con_tecla(self.lista_franjas, self._quitar_franja_seleccionada)
-        columna_franjas.addWidget(self.lista_franjas)
+        columna_franjas.addWidget(self.lista_franjas, stretch=1)
 
         self.boton_pdf = QPushButton("Generar PDF")
         self.boton_pdf.setObjectName("botonSecundario")
@@ -496,7 +490,6 @@ class _PanelOferta(QWidget):
         for boton in (self.boton_pdf, self.boton_texto, self.boton_nueva):
             boton.setFixedWidth(_ANCHO_BOTON_ACCION)
             columna_franjas.addWidget(boton)
-        columna_franjas.addStretch()
         splitter.addWidget(panel_franjas)
 
         self.grilla = GrillaOperativaWidget(self.conn)

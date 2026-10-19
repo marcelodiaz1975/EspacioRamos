@@ -1047,6 +1047,67 @@ def test_stock_se_filtra_por_el_buscador_de_profesional(qtbot, conn):
     assert "Dos" in pantalla.tabla_stock.item(0, 0).text()
 
 
+def test_combo_filtro_stock_vive_a_la_par_del_titulo_sin_etiqueta_propia(qtbot, conn):
+    """Pedido explícito de la clienta sobre esta vuelta: "Reubicá el
+    selector de profesional, ponelo a la par de la etiqueta 'Stock de
+    llaves por profesional' apenas termina la misma sin ninguna otra
+    etiqueta adicional" — antes vivía debajo de "Eliminar acceso de
+    llave", con una etiqueta propia ("Buscar profesional..."). Ahora
+    comparte la misma fila que el título de "Stock de llaves por
+    profesional", sin ninguna otra etiqueta."""
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+
+    titulo_stock = next(
+        lbl for lbl in pantalla.findChildren(QLabel) if lbl.text() == "Stock de llaves por profesional"
+    )
+    fila_titulo = titulo_stock.parentWidget()
+    layout = fila_titulo.layout()
+    assert layout.indexOf(titulo_stock) < layout.indexOf(pantalla.combo_filtro_stock)
+    # Nada más en esa fila aparte del título y el combo.
+    assert layout.count() == 2
+    # La columna de botones de Accesos ya no tiene ninguna etiqueta
+    # "Buscar profesional..." ni al combo colgando de ella.
+    assert pantalla.boton_eliminar_acceso.parentWidget().layout().indexOf(pantalla.combo_filtro_stock) == -1
+    assert not any(
+        lbl.text().startswith("Buscar profesional") for lbl in pantalla.findChildren(QLabel)
+    )
+
+
+def test_tablas_de_accesos_y_stock_empiezan_y_terminan_a_la_misma_altura(qtbot, conn):
+    """Pedido explícito de la clienta: "La tabla ponela bien a la par de
+    la que está a la izquierda, que tengan el mismo alto... que empiecen
+    y terminen en el mismo lugar de la pantalla." Medido con geometría
+    real (no `sizeHint()`, nada confiable bajo la plataforma offscreen
+    para este caso — ver el comentario en `llaves.py` sobre `AlignTop`):
+    sin ese `AlignTop`, el campo de observación debajo de "Accesos..."
+    hacía que "Stock..." se estirara con relleno repartido antes/después
+    de su título y de su tabla, corriendo las dos un poco hacia abajo."""
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 850)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    def top(w):
+        return w.mapTo(pantalla, w.rect().topLeft()).y()
+
+    def bottom(w):
+        return w.mapTo(pantalla, w.rect().bottomLeft()).y()
+
+    assert top(pantalla.tabla_stock) == top(pantalla.tabla_accesos)
+    assert bottom(pantalla.tabla_stock) == bottom(pantalla.tabla_accesos)
+
+    titulo_accesos = next(
+        lbl for lbl in pantalla.findChildren(QLabel) if lbl.text() == "Accesos habilitados con la llave"
+    )
+    titulo_stock = next(
+        lbl for lbl in pantalla.findChildren(QLabel) if lbl.text() == "Stock de llaves por profesional"
+    )
+    assert top(titulo_stock) == top(titulo_accesos)
+    assert bottom(titulo_stock) == bottom(titulo_accesos)
+
+
 def test_tabla_accesos_se_achica_al_ancho_de_sus_columnas(qtbot, conn):
     """Punto 5: "la tabla del medio la podés acortar hasta el borde
     donde termina la columna 'Nombre'" — `tabla_accesos` pasa a tener un

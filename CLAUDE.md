@@ -10963,3 +10963,120 @@ generar_plantillas` más 4 filas de muestra agregadas a mano a la hoja
 bonificada, una de Unidad sin tenencia todavía, una "No especificada"
 abonada) — verificado que importa sin errores contra una base de
 prueba antes de enviarlo.
+
+## Llaves/Oferta: ronda de ajustes sobre la captura del prototipo de Stock
+
+Tres pedidos puntuales de la clienta al revisar la captura del
+prototipo "Stock de llaves por profesional" (punto 5) y la de Oferta de
+la vuelta anterior:
+
+### Llaves: investigación de los campos de observación (consultado, sin tocar nada)
+
+Pregunta de la clienta: "¿Muestran algo los campos de texto que están
+abajo de la tabla 'Accesos...' y de la tabla 'Movimientos...'? Si no
+tienen función alguna los eliminaría para ganar espacio." Investigado
+contra el código (`campo_observacion_acceso`/`campo_observacion_
+movimiento`, `_actualizar_observacion_*`/`_guardar_observacion_*`): SÍ
+tienen función real — muestran y permiten editar la `Observacion` de la
+fila actualmente SELECCIONADA en su tabla correspondiente (`LlaveAcceso.
+Observacion`/`LlaveMovimiento.Observacion`), guardando al perder el
+foco (`editingFinished`). Quedan deshabilitados y vacíos cuando no hay
+ninguna fila elegida — lo que probablemente los hace parecer "sin
+función" a primera vista, si no se los ve justo después de clickear una
+fila. No se tocó nada: la clienta condicionó la eliminación a que NO
+tuvieran función ("si no tienen función alguna los eliminaría"), y
+estos sí la tienen — queda pendiente de que confirme si, sabiendo esto,
+los quiere eliminar igual (perdería la posibilidad de anotar una
+observación por acceso/movimiento) o prefiere conservarlos.
+
+### Llaves: buscador de Stock a la par del título, tablas alineadas de punta a punta
+
+Dos pedidos sobre la misma zona: "Reubicá el selector de profesional,
+ponelo a la par de la etiqueta 'Stock de llaves por profesional' apenas
+termina la misma sin ninguna otra etiqueta adicional. La tabla ponela
+bien a la par de la que está a la izquierda, que tengan el mismo alto
+que empiecen y terminen en el mismo lugar de la pantalla."
+
+- **Combo a la par del título**: `combo_filtro_stock` (antes debajo de
+  "Eliminar acceso de llave", con su propia etiqueta "Buscar
+  profesional\n(filtra Stock de llaves)") se saca de la columna de
+  botones por completo — ni el combo ni esa etiqueta quedan ahí. El
+  título "Stock de llaves por profesional" pasa a vivir en un `QWidget`
+  propio con un `QHBoxLayout` (título + combo, sin ninguna etiqueta de
+  más), reemplazando al `QLabel` suelto que tenía antes.
+- **Bug real de geometría detrás del desalineado** (confirmado con un
+  script, medición pixel a pixel, mismo criterio de todo este
+  documento): las dos tablas NO arrancaban ni terminaban en el mismo
+  lugar, aun con el mismo alto fijo (`_FILAS_VISIBLES_ACCESOS` en las
+  dos). Causa en dos capas:
+  1. Un `QHBoxLayout` con un `QLabel` (14px de alto natural) y un
+     `QComboBox` editable (20px, por el borde reservado para el foco +
+     el padding de `estilos.py`) agregado con `addLayout` a un
+     `QVBoxLayout` reporta, bajo la plataforma `offscreen`, un
+     `sizeHint()` de esa fila completamente fuera de rango (144px
+     medidos contra un alto real de 20px) — mismo tipo de inestabilidad
+     de `sizeHint()` ya documentado para la leyenda de colores de
+     Reservas/Oferta. Se corrige envolviendo el título+combo en un
+     `QWidget` con `setFixedHeight` explícito (el mismo alto, medido en
+     vivo con `combo.sizeHint().height()`, que también se le aplica a
+     `titulo_accesos` del otro lado) — ninguno de los dos títulos
+     depende más de un `sizeHint()` de layout anidado.
+  2. Con los dos títulos ya al mismo alto fijo, seguía quedando un
+     desalineado de pie a pie: `panel_accesos_izq` (con el campo
+     `campo_observacion_acceso` DEBAJO de su tabla) es más alto que
+     `panel_stock` (que no tiene ningún campo equivalente) — dentro del
+     `QHBoxLayout` que los contiene (`fila_accesos`), por default Qt
+     estira `panel_stock` hasta igualar esa altura mayor, y como ningún
+     hijo de `panel_stock` puede crecer de verdad (título y tabla con
+     alto fijo), ese sobrante se reparte como relleno ANTES, ENTRE y
+     DESPUÉS de los dos — título y tabla terminaban corridos hacia
+     abajo en la misma medida, en vez de quedar arriba del todo.
+     Corregido agregando `panel_stock` a `fila_accesos` con
+     `alignment=Qt.AlignmentFlag.AlignTop` (en vez de dejarlo en el
+     alineamiento default, que estira/rellena) — el sobrante cae entero
+     DEBAJO de `panel_stock`, invisible, sin correr nada adentro.
+     Confirmado con el mismo script: título y tabla de Stock terminan
+     en el píxel EXACTO que los de "Accesos habilitados con la llave",
+     en las dos puntas.
+
+Tests nuevos en `tests/test_gui_llaves.py`:
+`test_combo_filtro_stock_vive_a_la_par_del_titulo_sin_etiqueta_propia`
+(el combo está en la misma fila que el título, sin ninguna etiqueta
+extra, y ya no cuelga de la columna de botones de Accesos);
+`test_tablas_de_accesos_y_stock_empiezan_y_terminan_a_la_misma_altura`
+(compara `mapTo`/`rect()` de las dos tablas y de los dos títulos,
+mostrando la pantalla de verdad — no alcanza con `sizeHint()` para este
+caso, ver el bug de arriba).
+
+### Oferta de consultorios: columna de franjas estirada hasta el pie
+
+Pedido explícito de la clienta sobre la captura de la vuelta anterior
+(la que restauró "Agregar franja"/"Quitar franja" en la columna 1,
+compactados): "el cuadro de la segunda columna, el de las franjas,
+quedó extremadamente chico. Estiralo para que el botón 'Nueva búsqueda'
+termine a la misma altura que los botones de agregar y quitar franja."
+
+Con `lista_franjas` fijada a un alto chico (`_ALTO_LISTA_FRANJAS = 48`,
+de la vuelta anterior, pensada para un pedido de "achicar" que esta
+vuelta revierte) y un `columna_franjas.addStretch()` al final, el hueco
+sobrante quedaba TODO abajo de "Nueva búsqueda" en vez de repartirse —
+exactamente lo opuesto de lo que se busca ahora. Se revierte al
+criterio de antes de esa ronda: `lista_franjas` vuelve a `stretch=1` sin
+tope de alto (sigue teniendo su propio scroll si hay más franjas de las
+que entran) y se saca el `addStretch()` final — con la lista como único
+elemento flexible de la columna, absorbe sola el alto de sobra que le
+imponga el `QSplitter` (que iguala las cuatro columnas a la más alta —
+la del formulario, con los botones de franja ya restaurados en su pie),
+empujando los tres botones de acción hasta el borde inferior de la
+columna. Constante `_ALTO_LISTA_FRANJAS` se elimina (sin otro uso).
+
+Confirmado con un script de geometría: `boton_nueva.bottom()` (columna
+2) y `boton_quitar_franja.bottom()` (columna 1) coinciden en el mismo
+píxel exacto (diferencia de 0px, contra la ventana de referencia
+1500×850).
+
+Tests en `tests/test_gui_oferta.py`: el test de "alto fijo" de la ronda
+anterior se reemplaza por
+`test_lista_franjas_estirada_hasta_el_pie_y_escrolea_con_mas_de_las_que_
+entran` (stretch=1, sin tope de alto, sigue escrolleando con 20 franjas
+cargadas).
