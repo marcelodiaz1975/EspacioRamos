@@ -26,6 +26,7 @@ from app.gui.pantallas.pagos import PantallaPagos
 from app.gui.pantallas.panel_control import PanelControl
 from app.gui.pantallas.placas_para_timbres import PantallaPlacasParaTimbres
 from app.gui.pantallas.profesionales import PantallaProfesionales
+from app.gui.pantallas.reinicio_prueba import PantallaReinicioPrueba
 from app.gui.pantallas.reservas import PantallaReservas
 from app.gui.pantallas.usuarios import PantallaUsuarios
 from app.gui.pantallas.valores import PantallaValores
@@ -115,6 +116,16 @@ def construir_secciones(usuario: sqlite3.Row | None = None, conn: sqlite3.Connec
             ayuda="Alta y baja de usuarios del sistema, nivel de acceso de cada uno, reseteo de "
             "contraseña, historial de cambios de contraseña, y qué nivel mínimo requiere cada "
             "pantalla del menú.",
+        ),
+        Seccion(
+            "Reinicio de prueba", lambda conn: PantallaReinicioPrueba(conn), categoria=categoria_sistema,
+            ayuda="Solapa Saldos iniciales: ajuste manual del saldo anterior de cada profesional R/A, "
+            "para arrancar con el valor real antes de usar el sistema en forma definitiva. Solapa "
+            "Depurar historial de prueba: borra, hasta el período elegido, pagos, liquidaciones, "
+            "cargos especiales, feriados trabajados, planes de pago, reservas aisladas/"
+            "extraordinarias, snapshots y estado de mensajería — sin tocar estructura física, "
+            "profesionales, reservas regulares ni archivos subidos. Pide la contraseña maestra, es "
+            "irreversible.",
         ),
         Seccion(
             "Panel de control", lambda conn: PanelControl(conn), categoria=categoria_espacio,
@@ -320,13 +331,16 @@ def main() -> None:
     usuario = dialogo_login.usuario
 
     secciones = construir_secciones(usuario, conn)
-    # "Configuración general" y "Usuarios y permisos" nacen directo en
-    # Administrador (pedido explícito de la clienta) — no visibles para
-    # cualquiera hasta que alguien las suba a mano, a diferencia del
-    # resto de las pantallas nuevas del sistema.
+    # "Configuración general", "Usuarios y permisos" y "Reinicio de
+    # prueba" nacen directo en Administrador (pedido explícito de la
+    # clienta para las dos primeras; la tercera es igual de sensible —
+    # ajusta saldos y borra historial financiero — así que se la suma
+    # al mismo guardarraíl) — no visibles para cualquiera hasta que
+    # alguien las suba a mano, a diferencia del resto de las pantallas
+    # nuevas del sistema.
     asegurar_permisos_pantalla(
         conn, [s.nombre for s in secciones],
-        nombres_nivel_alto=frozenset({"Configuración general", "Usuarios y permisos"}),
+        nombres_nivel_alto=frozenset({"Configuración general", "Usuarios y permisos", "Reinicio de prueba"}),
     )
 
     ventana = VentanaPrincipal(conn, secciones, id_nivel_usuario=usuario["IdNivelAcceso"])

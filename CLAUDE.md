@@ -11317,3 +11317,113 @@ de un menú de navegación.
 
 Tests actualizados en `tests/test_gui_main.py`: los tres que
 comparaban contra "ESPACIO RAMOS CONSULTORIOS" pasan a "SISTEMA DF".
+
+## Reinicio de prueba: ajuste manual de saldos anteriores + depuración de historial
+
+Pedido explícito de la clienta: quiere probar el sistema a fondo durante
+un mes (octubre) antes de arrancar a usarlo de verdad en noviembre —
+"con la base de datos cargada lo pruebo y reviento por todos lados sin
+importar los saldos y cargos que voy generando". Al avanzar a
+noviembre, `avance_mes.avanzar_mes` (`_traspasar_saldos`) ya pasa
+`SaldoCuentaActual` a `SaldoCuentaAnterior` y resetea el actual a 0 —
+pero el anterior queda con todo lo que se generó probando, no con el
+valor real de arranque. Pidió, textualmente: poder "ajustar manualmente
+los SALDOS ANTERIORES de los profesionales, no los actuales" uno por
+uno, y de paso "borre los historiales... de movimientos varios del mes
+anterior" — sin tocar los archivos subidos ni la base ya cargada
+(estructura física, profesionales, reservas regulares — estas últimas
+las revisa ella a mano, "controlar que todas las reservas estén
+correctas", no un borrado automático).
+
+Antes de tocar código se consultaron dos decisiones (`AskUserQuestion`,
+sobre una propuesta de diseño propia — pantalla nueva en "Parámetros
+del sistema", distinta de "Base de datos del espacio" porque esa es
+pura estructura física sin relación con dinero):
+
+- **Alcance de "historiales de movimientos varios" a depurar**: elegido
+  "Pagos y liquidaciones" + "Reservas aisladas y extraordinarias" +
+  "Snapshots y estado de mensajería" — descartado explícitamente
+  "Movimientos de llaves y placas" (stock/asignaciones reales, riesgoso
+  si durante el mes de prueba ya hubo movimientos de verdad que haya
+  que conservar).
+- **Seguridad de la depuración**: pide la contraseña maestra antes de
+  ejecutar (mismo mecanismo ya usado para "Continuar sin sincronizar"
+  en `DialogoBaseDesactualizada`) — es irreversible.
+
+### Negocio (`app/negocio/reinicio_prueba.py`, nuevo)
+
+`CATEGORIAS_CON_SALDO = ("R", "A")` — las dos únicas categorías con
+saldo de cuenta propio (B/E/X/C no facturan directo; E consolida en su
+cabeza de equipo R). `profesionales_con_saldo`/`ajustar_saldo_anterior`
+(esta última pisa `SaldoCuentaAnterior` directo, SIN pasar por `pagos.
+registrar_pago` — acá el valor nuevo ES el punto de partida, no un
+movimiento más a sumar encima de lo que quedó de la prueba).
+
+"Período de corte": cualquier fila con período (imputado o, a falta de
+eso, el mes de su `Fecha`) MENOR O IGUAL al elegido se borra —
+`contar_registros_a_depurar` (cuenta sin borrar, mismo criterio que
+`aumentos.cantidad_liquidaciones_a_regenerar`: el número real antes de
+confirmar, no una advertencia genérica) y `depurar_historial_hasta_
+periodo` (ejecuta, una sola transacción con rollback si algo revienta)
+tocan: `HistorialPagos`/`LiquidacionEmitida`/`CargoEspecial`/
+`FeriadoTrabajado`/`PlanPago`+`CuotaPlan` (bucket "Pagos y
+liquidaciones"), `ReservaAislada` (bucket "Reservas aisladas y
+extraordinarias" — las dos conviven en la misma tabla, ver `app.
+negocio.reservas`) y `SnapshotMensual`/`EstadoMensajeriaPeriodo`
+(bucket "Snapshots y estado de mensajería"). Deliberadamente AFUERA:
+`LlaveMovimiento`/`Placa` (descartados en la consulta) y `AumentoAplicado`/
+`EsquemaDescuentos` (no son "historial de movimientos", son
+configuración de valores vigentes).
+
+Dos referencias que apuntan HACIA estas tablas (con `PRAGMA
+foreign_keys = ON`, borrar sin tocarlas primero revienta con
+`IntegrityError`) se limpian a NULL antes de borrar, sin tocar la fila
+que las tiene: `Ausencia.IdReservaAislada` (el vínculo "esta ausencia
+surgió de esta reubicación") y `PlanPago.IdPlanAnterior` (la cadena de
+refinanciaciones, en cualquier plan que sobreviva y apunte a uno que se
+va a borrar).
+
+### GUI (`app/gui/pantallas/reinicio_prueba.py`, nuevo — `PantallaReinicioPrueba`)
+
+Nueva `Seccion` en "Parámetros del sistema" (`gui_main.py`, después de
+"Usuarios y permisos"), sumada al mismo guardarraíl de nivel alto que
+esa pantalla y "Configuración general" (`nombres_nivel_alto`,
+`asegurar_permisos_pantalla`) — nace directo en Administrador, mismo
+criterio: ajusta saldos y borra historial financiero, no menos sensible
+que esas dos.
+
+Dos solapas, mismo patrón `panelSolapa`/`showEvent`→`reiniciar()` que
+el resto del sistema:
+
+- **"Saldos iniciales"**: tabla Profesional/Categoría/Saldo actual
+  (solo lectura, referencia)/Saldo anterior (editable), ordenada por
+  `clave_orden_profesional` — "Ajustar saldo anterior" (edición por
+  selección + diálogo, `botonPrimario`, deshabilitado sin selección) y
+  "Poner todos en $0" (`botonSecundario`, con confirmación) para el
+  caso común de arrancar de cero.
+- **"Depurar historial de prueba"**: `SelectorPeriodo` (arranca en el
+  MES ANTERIOR al actual — el que recién se cerró de prueba, distinto
+  del default de ese widget, que es el mes en curso), una tabla que
+  muestra en vivo cuánto hay para borrar de cada concepto (`contar_
+  registros_a_depurar`, recalculada al cambiar el período) y "Depurar
+  historial de prueba" (`botonPrimario`, deshabilitado sin nada para
+  borrar) — al confirmar, pide la contraseña maestra (`QInputDialog.
+  getText` + `verificar_contrasena_maestra`, mismo patrón que
+  `DialogoBaseDesactualizada._elegir_sin_sincronizar`); sin ninguna
+  contraseña maestra configurada todavía, avisa que hay que configurar
+  una primero en vez de dejar pasar la acción sin ninguna verificación.
+
+Tests nuevos: `tests/test_reinicio_prueba.py` (negocio — filtrado por
+categoría, no toca el saldo actual, cada bucket se cuenta y se borra
+por su período correspondiente incluyendo el fallback a `Fecha` cuando
+no hay período imputado, las dos referencias que apuntan hacia las
+tablas borradas no rompen por FK, no toca Llaves/Placas/Reservas
+regulares, `contar_registros_a_depurar` coincide exacto con lo que se
+termina borrando); `tests/test_gui_reinicio_prueba.py` (orden natural
+de la tabla de saldos, ajustar/poner todos en $0, botón deshabilitado
+sin selección, el selector de período arranca en el mes anterior,
+botón de depurar habilitado/deshabilitado según haya algo para borrar,
+sin contraseña maestra configurada avisa y no borra, contraseña
+incorrecta no borra, correcta borra y refresca, cancelar el pedido de
+contraseña o el cartel de confirmación no borra nada, las dos tablas
+quedan excluidas del tab-chain).
