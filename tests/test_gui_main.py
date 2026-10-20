@@ -23,16 +23,18 @@ def test_todas_las_secciones_tienen_ayuda_cargada():
 def test_categorias_son_parametros_del_sistema_y_el_nombre_del_espacio_y_van_contiguas():
     """SistemaDF v0.11.2026.10, puntos 19/20: "Sistema" pasa a llamarse
     "Parámetros del sistema" y "Operativa diaria" pasa a mostrar el
-    nombre del espacio configurado (en mayúsculas) — sin `conn`, cae al
-    nombre default "Espacio Ramos Consultorios", mismo fallback que el
-    resto del sistema. `VentanaPrincipal` arma un separador cada vez que
-    la categoría cambia respecto de la sección anterior (no agrupa por
-    nombre repetido en toda la lista) — así que las de una misma
-    categoría tienen que quedar todas juntas, sin intercalarse con la
-    otra."""
+    nombre del espacio configurado (en mayúsculas) — sin `conn`, o con
+    `NombreEspacio` todavía sin configurar, cae al nombre default
+    "Sistema DF" (pedido explícito de la clienta: una base recién
+    instalada no tiene por qué mostrar el nombre de un negocio de
+    ejemplo que no es el suyo). `VentanaPrincipal` arma un separador
+    cada vez que la categoría cambia respecto de la sección anterior
+    (no agrupa por nombre repetido en toda la lista) — así que las de
+    una misma categoría tienen que quedar todas juntas, sin
+    intercalarse con la otra."""
     secciones = construir_secciones()
     categorias = [s.categoria for s in secciones]
-    assert set(categorias) == {"Parámetros del sistema", "ESPACIO RAMOS CONSULTORIOS"}
+    assert set(categorias) == {"Parámetros del sistema", "SISTEMA DF"}
     cambios = sum(1 for a, b in zip(categorias, categorias[1:]) if a != b)
     assert cambios == 1  # un solo cambio de categoría en toda la lista
 
@@ -45,7 +47,7 @@ def test_categoria_del_espacio_usa_el_nombre_configurado(conn):
     secciones = construir_secciones(conn=conn)
     categorias = {s.categoria for s in secciones}
     assert "CONSULTORIOS DEL SUR" in categorias
-    assert "ESPACIO RAMOS CONSULTORIOS" not in categorias
+    assert "SISTEMA DF" not in categorias
 
 
 def test_panel_de_control_es_la_primera_seccion_de_la_categoria_del_espacio():
@@ -53,7 +55,7 @@ def test_panel_de_control_es_la_primera_seccion_de_la_categoria_del_espacio():
     del espacio (no de "Parámetros del sistema"), arriba de "Grilla y
     mensajería"."""
     secciones = construir_secciones()
-    nombres_del_espacio = [s.nombre for s in secciones if s.categoria == "ESPACIO RAMOS CONSULTORIOS"]
+    nombres_del_espacio = [s.nombre for s in secciones if s.categoria == "SISTEMA DF"]
     assert nombres_del_espacio[0] == "Panel de control"
     assert nombres_del_espacio[1] == "Grilla y mensajería"
     assert "Panel de control" not in [s.nombre for s in secciones if s.categoria == "Parámetros del sistema"]

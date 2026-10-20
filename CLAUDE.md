@@ -11286,3 +11286,34 @@ abonado, profesional inexistente, Código inexistente) más dos de punta a
 punta: las tres hojas juntas enlazan por Código al mismo `IdLlave`, y
 reimportar toda la planilla deja "Llave" duplicada pero "LlaveAcceso"
 sigue resolviendo el Código contra el Tipo ya existente.
+
+## Menú lateral: "Sistema DF" como nombre de espacio default (en vez de "Espacio Ramos Consultorios")
+
+Pedido explícito de la clienta: una base recién instalada, antes de
+cargar "Nombre del espacio" en Configuración general, mostraba
+"ESPACIO RAMOS CONSULTORIOS" como categoría del menú lateral (el
+fallback de `Configuracion.NombreEspacio` vacío) — un nombre de negocio
+de EJEMPLO que no tiene por qué ser el de quien instala el sistema.
+Pasa a "Sistema DF" (el nombre del PROGRAMA, sin relación con ningún
+negocio en particular — mismo criterio ya usado para `app.version.
+NOMBRE_PROGRAMA`, aunque acá es un literal propio, con espacio, "Sistema
+DF", en vez de reusar esa constante, que es "SistemaDF" sin espacio y
+está pensada para branding del programa en sí — título de ventana, CLI,
+nombre del ejecutable — no para esto).
+
+Las dos ramas de `gui_main.construir_secciones` (con `conn`, cuando
+`NombreEspacio` está vacío/NULL, y sin `conn`, los tests de pantallas
+sueltas) cambian su literal de "Espacio Ramos Consultorios" a "Sistema
+DF" — apenas se carga un nombre real en "Nombre del espacio", la
+categoría pasa a mostrar ESE nombre en mayúsculas, como siempre.
+
+Puntual de este fallback nomás: el resto de los fallbacks de
+`NombreEspacio` del sistema (PDFs de Propuesta/Disponibilidad/Oferta/
+Placas, `oferta_busqueda_texto`, etc., que siguen cayendo a "Espacio
+Ramos Consultorios"/"Espacio Ramos" según el caso, documentado en la
+sección de Panel de control más arriba) no se tocaron — son textos de
+documentos reales del negocio, un caso distinto del nombre de categoría
+de un menú de navegación.
+
+Tests actualizados en `tests/test_gui_main.py`: los tres que
+comparaban contra "ESPACIO RAMOS CONSULTORIOS" pasan a "SISTEMA DF".

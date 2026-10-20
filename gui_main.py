@@ -72,12 +72,20 @@ def construir_secciones(usuario: sqlite3.Row | None = None, conn: sqlite3.Connec
     # "Parámetros del sistema" es criterio propio (no hubo pedido
     # puntual); el del resto sí es un orden pedido explícito de la
     # clienta, sobre el que ya había armado a criterio propio.
+    # Fallback de "nombre del espacio" PROPIO de este menú (distinto del
+    # fallback "Espacio Ramos Consultorios" que usan los PDFs/textos del
+    # negocio, sección "Localidad (catálogo propio...)" y "Panel de
+    # control..." más arriba): pedido explícito de la clienta — una base
+    # recién instalada, sin "Nombre del espacio" configurado todavía,
+    # tiene que mostrar "SISTEMA DF" en el menú lateral (el nombre del
+    # PROGRAMA, no el de un negocio de ejemplo que no es el suyo) hasta
+    # que se cargue el nombre real desde "Configuración general".
     categoria_sistema = "Parámetros del sistema"
     if conn is not None:
         fila_cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-        nombre_espacio = (fila_cfg["NombreEspacio"] if fila_cfg else None) or "Espacio Ramos Consultorios"
+        nombre_espacio = (fila_cfg["NombreEspacio"] if fila_cfg else None) or "Sistema DF"
     else:
-        nombre_espacio = "Espacio Ramos Consultorios"
+        nombre_espacio = "Sistema DF"
     categoria_espacio = nombre_espacio.upper()
 
     secciones.extend([
