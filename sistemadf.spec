@@ -15,9 +15,14 @@ carpetas de archivos/backup se crean al lado del ejecutable (ver
 app.db.connection._raiz_proyecto), así que copiar dist/SistemaDF/ a
 otra máquina alcanza para "instalar" — no hace falta un instalador aparte.
 
-Único dato que no se detecta solo por análisis estático de imports:
+Dos datos que no se detectan solo por análisis estático de imports:
 app/db/schema.sql, que app.db.init_db lee desde disco en vez de traerlo
-embebido en el código."""
+embebido en el código, y app/gui/recursos/icono.png, que la pantalla de
+carga (app.gui.widgets.pantalla_carga) y el ícono de la QApplication
+leen igual, por ruta, en vez de embebido. `icon=` en el EXE es aparte:
+es lo que Windows usa para el ícono del .exe/acceso directo en sí
+(necesita .ico, no .png — `app/gui/recursos/icono.ico` se generó junto
+con el .png, mismo diseño, multi-resolución)."""
 from pathlib import Path
 
 RAIZ = Path(SPECPATH)
@@ -26,7 +31,11 @@ a = Analysis(
     [str(RAIZ / "gui_main.py")],
     pathex=[str(RAIZ)],
     binaries=[],
-    datas=[(str(RAIZ / "app" / "db" / "schema.sql"), "app/db")],
+    datas=[
+        (str(RAIZ / "app" / "db" / "schema.sql"), "app/db"),
+        (str(RAIZ / "app" / "gui" / "recursos" / "icono.png"), "app/gui/recursos"),
+        (str(RAIZ / "app" / "gui" / "recursos" / "icono.ico"), "app/gui/recursos"),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -47,6 +56,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    icon=str(RAIZ / "app" / "gui" / "recursos" / "icono.ico"),
 )
 coll = COLLECT(
     exe,

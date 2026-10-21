@@ -11427,3 +11427,99 @@ sin contraseña maestra configurada avisa y no borra, contraseña
 incorrecta no borra, correcta borra y refresca, cancelar el pedido de
 contraseña o el cartel de confirmación no borra nada, las dos tablas
 quedan excluidas del tab-chain).
+
+## Pantalla de carga al iniciar sesión
+
+Pedido de la clienta: "Cuando esté cargando la base de datos luego de
+poner el usuario y contraseña que se ponga una pantalla con el ícono
+que me asignaste como miniatura del programa grande en el centro de la
+pantalla o algo parecido, y abajo la leyenda 'SistemaDF {versión}'".
+
+Investigado antes de implementar: el proyecto nunca tuvo, en ningún
+lado, ningún ícono asignado — ni `QApplication.setWindowIcon`, ni
+ningún `.ico`/`.png` referenciado desde `sistemadf.spec` ni desde
+ningún módulo de la GUI (confirmado con una búsqueda completa del
+repositorio). La frase de la clienta asumía que ya había uno; como no
+lo había, se le consultó (`AskUserQuestion`) si prefería pasar un
+archivo propio o que se generara uno simple ahora — eligió la opción
+recomendada: generar uno.
+
+### Ícono nuevo (`app/gui/recursos/`)
+
+`icono.png` (512×512, con transparencia) e `icono.ico` (multi-
+resolución, 16 a 256px, para el `.exe` empaquetado en Windows): un
+cuadrado redondeado con degradé entre `COLOR_NIVEL_1`/`COLOR_NIVEL_1_
+OSCURO` (el azul de marca que ya usa el resto del sistema, sin inventar
+un color nuevo) y el monograma "DF" en blanco — generado una sola vez
+con Pillow (ya dependencia del proyecto) y commiteado como archivo
+estático, no código que se ejecute en cada arranque. `app/gui/recursos/
+__init__.py` expone `RUTA_ICONO`/`RUTA_ICONO_ICO` como único punto de
+referencia — reemplazar esos dos archivos (mismo nombre, mismo lugar)
+alcanza para cambiar el ícono en los tres puntos donde se usa sin tocar
+ningún código.
+
+Se usa en tres lugares:
+- `gui_main.main()`: `QApplication.setWindowIcon(QIcon(...))`, apenas
+  se crea la `QApplication` — cualquier ventana/diálogo del sistema que
+  no pise el suyo propio lo hereda (mismo criterio que ya se usaba para
+  `app.setFont(...)` en su momento, antes de revertirse esa parte).
+- La pantalla de carga nueva (ver abajo).
+- `sistemadf.spec`: `icon=` del `EXE(...)` (`icono.ico`, Windows/macOS
+  necesitan `.ico`/`.icns`, no `.png` — en Linux PyInstaller lo ignora
+  con un warning, esperado, confirmado en la verificación de abajo) +
+  los dos archivos sumados a `datas` (mismo mecanismo que ya usaba
+  `schema.sql`) para que la versión empaquetada los encuentre en
+  runtime por la misma ruta relativa (`Path(__file__).parent`) que usa
+  el código fuente — confirmado corriendo el build completo
+  (`pyinstaller sistemadf.spec`) y encontrando los dos archivos bajo
+  `dist/SistemaDF/_internal/app/gui/recursos/`.
+
+### Pantalla de carga (`app/gui/widgets/pantalla_carga.py`)
+
+`crear_pantalla_carga() -> QSplashScreen`: arma un `QPixmap` de 420×340
+a mano (no un archivo estático, porque la leyenda tiene que mostrar la
+versión ACTUAL, que cambia con cada release) — fondo blanco, el ícono
+escalado a 200px centrado arriba, y debajo "SistemaDF {versión}"
+(`app.version.NOMBRE_Y_VERSION`, la misma fuente única que ya usa el
+título de ventana y el login — nunca un string propio hardcodeado) en
+negrita, `COLOR_NIVEL_1_OSCURO`. Se envuelve en un `QSplashScreen`
+estándar de Qt en vez de un diálogo propio — no hace falta ningún
+mecanismo de cierre manual, `QSplashScreen.finish(ventana)` ya lo
+resuelve solo.
+
+**Dónde se engancha, y por qué ahí**: investigado antes de tocar nada
+—`VentanaPrincipal.__init__` arma las ~18 pantallas del sistema TODAS
+DE UNA, dentro del loop que recorre `secciones` (`seccion.fabrica(conn)`
+corre para cada una en la construcción, no al hacer clic — el docstring
+de `Seccion`/`VentanaPrincipal` dice "una sola vez", que significa
+"una vez en la vida de la sesión", no "perezoso"). Ese armado es lo que
+puede tardar un momento perceptible — no la apertura de la conexión
+SQLite en sí, que ya está resuelta mucho antes, en el login. Por eso
+`gui_main.main()` muestra la pantalla de carga JUSTO DESPUÉS de un
+login exitoso (`dialogo_login.exec() == Accepted`) y la cierra recién
+cuando `VentanaPrincipal` ya está armada y maximizada — cubre
+exactamente el tramo que puede demorar, ni antes (el login no tiene
+ninguna carga pesada propia) ni después.
+
+`app.processEvents()` justo después de `pantalla_carga.show()` es
+necesario: sin eventos procesados, la pantalla de carga quedaría en
+cola sin pintarse hasta que arrancara `app.exec()` — mucho más tarde,
+con la ventana principal ya completamente armada encima, dejando la
+pantalla de carga sin ningún efecto visible.
+
+### Verificación
+
+`tests/test_gui_pantalla_carga.py`: `crear_pantalla_carga()` devuelve
+un `QSplashScreen` del tamaño esperado, con contenido real pintado
+tanto en la zona del ícono como en la zona de la leyenda (barrido de
+píxeles no-blancos, sin asumir una fila exacta de texto — depende de
+la métrica real de la fuente, mismo criterio de "no asumir sizeHint
+exacto" ya documentado en varias pantallas de este archivo) y que la
+leyenda se arma a partir de `NOMBRE_Y_VERSION` (inspección del código
+fuente, no hay forma de leer texto de un `QPixmap` sin OCR). `gui_main.
+main()` en sí no tiene test de punta a punta (mismo criterio que el
+resto de ese punto de entrada, nunca probado así en este proyecto) —
+se verificó a mano corriendo el `.spec` empaquetado completo bajo
+`QT_QPA_PLATFORM=offscreen` contra una base nueva: arranca limpio hasta
+quedar esperando el diálogo de login (el único punto donde puede
+seguir sin interacción humana), sin ningún traceback.

@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QLocale, Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from app.db.connection import DB_PATH_DEFAULT
@@ -12,6 +12,8 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.dialogos_seguridad import DialogoBaseDesactualizada, DialogoLogin, MonitorInactividad
 from app.gui.main_window import Seccion, VentanaPrincipal
+from app.gui.recursos import RUTA_ICONO
+from app.gui.widgets.pantalla_carga import crear_pantalla_carga
 from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
 from app.gui.pantallas.balance import PantallaBalanceDelNegocio
 from app.gui.pantallas.base_datos_espacio import PantallaBaseDatosEspacio
@@ -263,6 +265,11 @@ def main() -> None:
     # para retomar en una ronda aparte, después de pulir la lógica.
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
+    # Ícono del programa (ver app/gui/recursos y app/gui/widgets/pantalla_
+    # carga.py) — aplicado a nivel de QApplication para que cualquier
+    # ventana/diálogo del sistema (que no pise el suyo propio) lo herede,
+    # mismo criterio que `app.setFont(...)` en su momento.
+    app.setWindowIcon(QIcon(str(RUTA_ICONO)))
     # Pedido de la clienta: todos los selectores de fecha del sistema
     # arrancan la semana en lunes, no en domingo. `QLocale(Spanish)` ya
     # tiene `firstDayOfWeek() == Monday` por default (criterio ISO) —
@@ -330,6 +337,19 @@ def main() -> None:
         sys.exit(0)
     usuario = dialogo_login.usuario
 
+    # Pantalla de carga (pedido explícito de la clienta): se muestra
+    # apenas se confirma el login y se cierra recién cuando la ventana
+    # principal ya está lista — cubre el tramo que de verdad puede
+    # tardar un momento perceptible, que es `VentanaPrincipal.__init__`
+    # armando sus ~18 pantallas de una sola vez (no la apertura de la
+    # base, ya resuelta antes del login). `app.processEvents()` fuerza a
+    # pintarla ANTES de arrancar ese armado pesado — sin esto quedaría
+    # en cola sin dibujarse hasta que empiece `app.exec()`, mucho más
+    # tarde, ya con la ventana principal encima.
+    pantalla_carga = crear_pantalla_carga()
+    pantalla_carga.show()
+    app.processEvents()
+
     secciones = construir_secciones(usuario, conn)
     # "Configuración general", "Usuarios y permisos" y "Reinicio de
     # prueba" nacen directo en Administrador (pedido explícito de la
@@ -345,6 +365,7 @@ def main() -> None:
 
     ventana = VentanaPrincipal(conn, secciones, id_nivel_usuario=usuario["IdNivelAcceso"])
     ventana.showMaximized()  # pedido explícito de la clienta: arrancar siempre maximizada
+    pantalla_carga.finish(ventana)
 
     # Bloqueo por inactividad: se instala sobre la QApplication entera
     # (cualquier click/tecla en cualquier pantalla la reinicia), así que
