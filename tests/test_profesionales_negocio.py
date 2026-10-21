@@ -2,7 +2,13 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.profesionales import normalizar_cuit, opciones_tratamiento, sugerir_codigo, tratamiento_sugerido
+from app.negocio.profesionales import (
+    normalizar_cuit,
+    opciones_tratamiento,
+    sugerir_codigo,
+    sugerir_codigos_multiples,
+    tratamiento_sugerido,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -38,6 +44,30 @@ def test_sugerir_codigo_no_mezcla_categorias(conn):
 def test_sugerir_codigo_ignora_codigos_con_formato_distinto(conn):
     obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Raro", IdCodigo="R-viejo")
     assert sugerir_codigo(conn, "R") == "R1"
+
+
+# ------------------------------------------------------- sugerir_codigos_multiples
+
+def test_sugerir_codigos_multiples_sin_nadie_cargado(conn):
+    assert sugerir_codigos_multiples(conn, "X", 3) == ["X1", "X2", "X3"]
+
+
+def test_sugerir_codigos_multiples_no_repite_el_mismo_numero(conn):
+    """El motivo real de que exista esta función aparte de `sugerir_
+    codigo`: llamar a esa una vez por cada uno de varios profesionales
+    a reclasificar (ninguno guardado todavía) devolvería SIEMPRE el
+    mismo número — acá, cada sugerido ya cuenta como "usado" para el
+    siguiente, dentro de la misma pasada."""
+    assert sugerir_codigos_multiples(conn, "X", 2) == ["X1", "X2"]
+
+
+def test_sugerir_codigos_multiples_respeta_los_huecos_ya_usados(conn):
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="X", Apellido="Uno", IdCodigo="X1")
+    assert sugerir_codigos_multiples(conn, "X", 2) == ["X2", "X3"]
+
+
+def test_sugerir_codigos_multiples_cantidad_cero_devuelve_lista_vacia(conn):
+    assert sugerir_codigos_multiples(conn, "X", 0) == []
 
 
 # ----------------------------------------------------------- tratamiento_sugerido

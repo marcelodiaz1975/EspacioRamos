@@ -72,8 +72,12 @@ from app.negocio.pagos import (
 )
 from app.repositorio.registro import obtener_repositorio
 
-_CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
 _CATEGORIA_R = ("R",)
+# Ronda de validaciones de categoría: "C" (contacto/prospecto, "nunca
+# llegaron a pasar por el espacio") no puede tener NINGÚN movimiento —
+# se excluye del combo que elige a quién registrarle un pago nuevo
+# (antes `_CATEGORIAS_TODAS`, sin este descarte, se borra sin otro uso).
+_CATEGORIAS_CON_PAGOS = ("R", "A", "B", "E", "X")
 _ANCHO_COMBO_PROFESIONAL = 220
 _ANCHO_COL_PROFESIONAL = 180
 
@@ -300,7 +304,7 @@ class _PanelRegistrarPago(QWidget):
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_CON_PAGOS):
             self.combo_profesional.addItem(etiqueta, id_)
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)

@@ -7,21 +7,48 @@ import sqlite3
 from app.repositorio.registro import obtener_repositorio
 
 
-def sugerir_codigo(conn: sqlite3.Connection, categoria: str) -> str:
-    """Prefijo letra (la categoría) + número más bajo todavía no usado en
-    esa categoría (sección 3.4: "prefijo letra + número más bajo
-    disponible en la categoría, editable antes de confirmar") — es solo
-    un punto de partida, el operador lo puede pisar antes de guardar."""
+def _numeros_usados(conn: sqlite3.Connection, categoria: str) -> set[int]:
     usados = set()
     for fila in obtener_repositorio(conn, "Profesional").listar(CategoriaProfesional=categoria):
         codigo = (fila["IdCodigo"] or "").strip()
         resto = codigo[len(categoria):] if codigo.startswith(categoria) else ""
         if resto.isdigit():
             usados.add(int(resto))
+    return usados
+
+
+def sugerir_codigo(conn: sqlite3.Connection, categoria: str) -> str:
+    """Prefijo letra (la categoría) + número más bajo todavía no usado en
+    esa categoría (sección 3.4: "prefijo letra + número más bajo
+    disponible en la categoría"). Pedido explícito de la clienta (ronda
+    de validaciones de categoría): el código deja de ser "un punto de
+    partida editable" — ahora es lo que determina el código real del
+    profesional, de forma automática y de solo lectura, cada vez que se
+    fija o cambia su Categoría (ver `app.gui.pantallas.profesionales.
+    _al_abrir_dialogo`)."""
+    return sugerir_codigos_multiples(conn, categoria, 1)[0]
+
+
+def sugerir_codigos_multiples(conn: sqlite3.Connection, categoria: str, cantidad: int) -> list[str]:
+    """Varios códigos sugeridos de la misma categoría EN UNA SOLA
+    PASADA, sin tocar la base — pensado para el alerta que lista, de una,
+    el código X que le tocaría a cada profesional E que hay que
+    desvincular antes de poder cambiarle la categoría a su cabeza de
+    equipo (ver `app.gui.pantallas.profesionales._al_guardar_profesional`):
+    llamar a `sugerir_codigo` una vez por cada uno devolvería el MISMO
+    número para todos (ninguno está guardado todavía como para que el
+    siguiente cálculo lo vea como "usado"). Devuelve los `cantidad`
+    números más bajos libres, en orden, simulando que cada uno ya se
+    ocupó antes de buscar el siguiente."""
+    usados = _numeros_usados(conn, categoria)
+    sugeridos = []
     numero = 1
-    while numero in usados:
+    while len(sugeridos) < cantidad:
+        if numero not in usados:
+            sugeridos.append(f"{categoria}{numero}")
+            usados.add(numero)
         numero += 1
-    return f"{categoria}{numero}"
+    return sugeridos
 
 
 def tratamiento_sugerido(conn: sqlite3.Connection, id_profesion: int | None, sexo: str | None) -> str | None:

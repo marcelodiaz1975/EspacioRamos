@@ -176,6 +176,68 @@ def test_crear_reserva_regular_categoria_b_nunca_bloquea(conn, consultorio, prof
     assert id_reserva is not None
 
 
+# -------------------------------------------- validación de categoría (regular)
+
+def test_crear_reserva_regular_rechaza_categoria_a(conn, consultorio, profesional_factory):
+    """Defensa en profundidad (los combos de la GUI ya ni siquiera
+    ofrecen A/X/C para Reservas regulares): el guardarraíl de categoría
+    vive también en `crear_reserva_regular`, con el código R sugerido en
+    el mensaje."""
+    id_prof = profesional_factory("Paz", categoria="A")
+    with pytest.raises(ValueError, match="código sugerido: R1"):
+        crear_reserva_regular(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+        )
+
+
+def test_crear_reserva_regular_rechaza_categoria_x(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Paz", categoria="X")
+    with pytest.raises(ValueError, match="no admite horarios regulares"):
+        crear_reserva_regular(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+        )
+
+
+def test_crear_reserva_regular_rechaza_categoria_c(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Paz", categoria="C")
+    with pytest.raises(ValueError, match="no admite horarios regulares"):
+        crear_reserva_regular(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+        )
+
+
+def test_crear_reserva_regular_rechaza_e_sin_cabeza_de_equipo(conn, consultorio, profesional_factory):
+    id_e = profesional_factory("Huérfano", categoria="E")
+    with pytest.raises(ValueError, match="Cabeza de equipo"):
+        crear_reserva_regular(
+            conn, id_profesional=id_e, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+        )
+
+
+def test_crear_reserva_regular_rechaza_e_con_cabeza_que_no_es_r(conn, consultorio, profesional_factory):
+    id_b = profesional_factory("Cabeza inválida", categoria="B")
+    id_e = profesional_factory("Huérfano", categoria="E", cabeza_equipo=id_b)
+    with pytest.raises(ValueError, match="Cabeza de equipo"):
+        crear_reserva_regular(
+            conn, id_profesional=id_e, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+        )
+
+
+def test_crear_reserva_regular_acepta_e_con_cabeza_r_valida(conn, consultorio, profesional_factory):
+    id_r = profesional_factory("Cabeza de equipo", categoria="R")
+    id_e = profesional_factory("Del equipo", categoria="E", cabeza_equipo=id_r)
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_e, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    assert id_reserva is not None
+
+
 def test_finalizar_reserva_regular_en_periodo_cerrado_bloquea(conn, consultorio, profesional_factory):
     id_prof = profesional_factory("Lo Veci")
     id_reserva, _ = crear_reserva_regular(
@@ -566,6 +628,63 @@ def test_reserva_aislada_sin_conflicto_toma_recargo_por_defecto(conn, consultori
     reserva = obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)
     assert reserva["AplicaRecargo"] == 0  # RecargoAisladasActivoPorDefecto = 0 por defecto
     assert advertencias == []
+
+
+# -------------------------------------------- validación de categoría (aislada)
+
+def test_crear_reserva_aislada_rechaza_categoria_x(conn, consultorio, profesional_factory):
+    """Defensa en profundidad (el combo de Reservas aisladas ya no
+    ofrece X/C): el guardarraíl de categoría vive también en
+    `crear_reserva_aislada`, solo para la aislada COMÚN — la
+    extraordinaria ya tiene su propia validación aparte."""
+    id_prof = profesional_factory("Paz", categoria="X")
+    with pytest.raises(ValueError, match="código sugerido: A1"):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof, id_consultorio=consultorio,
+            fecha="2026-08-10", hora_inicio=11, hora_fin=12,
+        )
+
+
+def test_crear_reserva_aislada_rechaza_categoria_c(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Paz", categoria="C")
+    with pytest.raises(ValueError, match="no admite horarios aislados"):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof, id_consultorio=consultorio,
+            fecha="2026-08-10", hora_inicio=11, hora_fin=12,
+        )
+
+
+def test_crear_reserva_aislada_rechaza_e_sin_cabeza_de_equipo(conn, consultorio, profesional_factory):
+    id_e = profesional_factory("Huérfano", categoria="E")
+    with pytest.raises(ValueError, match="Cabeza de equipo"):
+        crear_reserva_aislada(
+            conn, id_profesional=id_e, id_consultorio=consultorio,
+            fecha="2026-08-10", hora_inicio=11, hora_fin=12,
+        )
+
+
+def test_crear_reserva_aislada_acepta_e_con_cabeza_r_valida(conn, consultorio, profesional_factory):
+    id_r = profesional_factory("Cabeza de equipo", categoria="R")
+    id_e = profesional_factory("Del equipo", categoria="E", cabeza_equipo=id_r)
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_e, id_consultorio=consultorio,
+        fecha="2026-08-10", hora_inicio=11, hora_fin=12,
+    )
+    assert id_reserva is not None
+
+
+def test_crear_reserva_extraordinaria_no_pasa_por_la_validacion_de_la_comun(conn, consultorio, profesional_factory):
+    """Una extraordinaria de categoría X (fuera de A/B/R/E) sigue
+    rechazada, pero por SU PROPIA validación — no por la de la aislada
+    común (`_validar_categoria_reserva`), que se saltea por completo
+    cuando `es_extraordinaria=True`."""
+    id_prof = profesional_factory("Paz", categoria="X")
+    with pytest.raises(ValueError, match="categoría A, B, R o E"):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, fecha="2026-08-10",
+            hora_inicio=14, hora_fin=16, es_extraordinaria=True,
+            item_extraordinario="Taller puntual", monto_extraordinario=5000,
+        )
 
 
 # ---------------------------------------------------------------- cancelación

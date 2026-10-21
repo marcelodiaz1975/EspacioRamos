@@ -52,7 +52,13 @@ from app.negocio.documentacion_profesional import (
 )
 from app.negocio.imagenes import CATEGORIA_OTRAS_IMAGENES, CATEGORIA_OTROS_DOCUMENTOS
 from app.negocio.listas_editables import opciones_lista
-from app.negocio.profesionales import normalizar_cuit, opciones_tratamiento, sugerir_codigo, tratamiento_sugerido
+from app.negocio.profesionales import (
+    normalizar_cuit,
+    opciones_tratamiento,
+    sugerir_codigo,
+    sugerir_codigos_multiples,
+    tratamiento_sugerido,
+)
 from app.negocio.validaciones import (
     FORMATO_CUIT,
     FORMATO_DNI,
@@ -239,11 +245,21 @@ def _al_abrir_dialogo(dialogo) -> None:
     al crear un registro nuevo como al editar uno existente — en edición,
     además de sugerir, repuebla el desplegable de Tratamiento con las
     opciones de la profesión/sexo actuales (para Fonoaudiología y
-    Psicopedagogía) sin perder el valor ya cargado. Cada campo se
-    recalcula mientras el operador no haya tocado ese campo a mano (se
-    compara contra la última sugerencia, no contra "vacío", para no pisar
-    un valor que sí escribieron o que ya traía el registro); ambos quedan
-    editables antes de confirmar."""
+    Psicopedagogía) sin perder el valor ya cargado.
+
+    El código (`campo_codigo`) pasa a ser de SOLO LECTURA (ronda de
+    validaciones de categoría, pedido explícito de la clienta: "cualquier
+    cambio pase a ser el código mas bajo disponible, que ese campo pase a
+    hacer solo lectura") — el operador ya no lo tipea a mano, lo decide
+    únicamente la Categoría elegida. `categoria_original`/`codigo_original`
+    (el valor con el que se abrió el diálogo: vacío para un alta nueva, el
+    código real para una edición) son el ancla: mientras la Categoría se
+    quede en la que ya tenía, se conserva el código real tal cual estaba
+    (no se lo pisa con una sugerencia); en cuanto cambia a cualquier otra,
+    se sugiere el más bajo libre de esa categoría nueva — y si se vuelve a
+    la categoría original, se restaura el código real de antes. El
+    tratamiento sigue siendo editable, con el mismo criterio de "no pisar
+    un valor que sí escribieron" de siempre."""
     conn = dialogo.conn
     combo_categoria = dialogo._entradas["CategoriaProfesional"]
     campo_codigo = dialogo._entradas["IdCodigo"]
@@ -251,23 +267,24 @@ def _al_abrir_dialogo(dialogo) -> None:
     combo_sexo = dialogo._entradas["Sexo"]
     combo_tratamiento = dialogo._entradas["Tratamiento"]
 
+    campo_codigo.setReadOnly(True)
+    categoria_original = combo_categoria.currentData()
+    codigo_original = campo_codigo.text().strip()
+
     # Mismo selector buscable (código o nombre, con jerarquía de
     # categorías) que el resto del sistema — ya viene poblado en el
     # formato canónico por `_opciones_profesional_canonico`, solo hace
     # falta sumarle el comportamiento de búsqueda.
     habilitar_busqueda_profesional(dialogo._entradas["ProfesionalCabezaEquipo"])
 
-    ultimo_codigo_sugerido = [None]
-
     def _actualizar_codigo() -> None:
         categoria = combo_categoria.currentData()
         if categoria is None:
             return
-        sugerido = sugerir_codigo(conn, categoria)
-        actual = campo_codigo.text().strip()
-        if actual in ("", ultimo_codigo_sugerido[0]):
-            campo_codigo.setText(sugerido)
-            ultimo_codigo_sugerido[0] = sugerido
+        if codigo_original and categoria == categoria_original:
+            campo_codigo.setText(codigo_original)
+        else:
+            campo_codigo.setText(sugerir_codigo(conn, categoria))
 
     ultimo_tratamiento_sugerido = [None]
 
@@ -307,6 +324,64 @@ def _al_abrir_dialogo(dialogo) -> None:
     combo_sexo.currentIndexChanged.connect(_actualizar_tratamiento)
     _actualizar_codigo()
     _actualizar_tratamiento()
+
+
+def _al_guardar_profesional(valores: dict, registro: sqlite3.Row | None, conn: sqlite3.Connection) -> dict | None:
+    """Dos guardarraíles de categoría (ronda de validaciones de
+    categorías, consultada y confirmada con la clienta), corridos ANTES
+    de guardar — nunca después, para no dejar nunca un estado inválido
+    aunque sea por un instante:
+
+    - Un profesional categoría E necesita un Cabeza de equipo cargado, Y
+      que ese cabeza sea categoría R — sin esto, el E queda "huérfano":
+      nunca se liquida (`liquidaciones.id_profesional_liquidable` da
+      `None` sin un R válido del otro lado) y nadie se entera, porque
+      hasta ahora nada lo impedía al guardar.
+    - Cambiarle la categoría a un R que todavía tiene profesionales E
+      vinculados (`ProfesionalCabezaEquipo` apuntando a él) se bloquea —
+      "antes se debe desvincular a los miembros del equipo", el resto
+      ("liberar sus horarios") es consecuencia natural de pasarlos a X,
+      no una condición aparte que haga falta chequear acá. El alerta
+      lista cada E con el código X que le tocaría si se lo pasa a esa
+      categoría — `sugerir_codigos_multiples` en una sola pasada, para no
+      sugerirle el mismo número a dos E distintos en el mismo alerta
+      (cada `sugerir_codigo` por separado devolvería el más bajo libre
+      SIN saber de los demás, ya que ninguno está guardado todavía)."""
+    categoria_nueva = valores.get("CategoriaProfesional")
+
+    if categoria_nueva == "E":
+        id_cabeza = valores.get("ProfesionalCabezaEquipo")
+        cabeza = obtener_repositorio(conn, "Profesional").obtener(id_cabeza) if id_cabeza else None
+        if cabeza is None or cabeza["CategoriaProfesional"] != "R":
+            QMessageBox.warning(
+                None, "Categoría",
+                "Un profesional categoría E necesita un Cabeza de equipo cargado, y tiene que "
+                "ser un profesional categoría R.",
+            )
+            return None
+
+    if registro is not None and registro["CategoriaProfesional"] == "R" and categoria_nueva != "R":
+        equipo = conn.execute(
+            "SELECT * FROM Profesional WHERE ProfesionalCabezaEquipo = ? AND CategoriaProfesional = 'E'",
+            (registro["IdProfesional"],),
+        ).fetchall()
+        if equipo:
+            codigos_x = sugerir_codigos_multiples(conn, "X", len(equipo))
+            detalle = "\n".join(
+                f"- {e['IdCodigo'] or '(sin código)'} {e['Apellido'] or ''} -> pasaría a {codigo_x}"
+                for e, codigo_x in zip(equipo, codigos_x)
+            )
+            QMessageBox.warning(
+                None, "Categoría",
+                "No se puede cambiar la categoría de este profesional porque todavía tiene "
+                "profesionales categoría E vinculados como cabeza de equipo:\n"
+                f"{detalle}\n\n"
+                "Primero hay que desvincularlos (pasarlos a categoría X, o asignarles otro "
+                "Cabeza de equipo) antes de poder cambiar este profesional.",
+            )
+            return None
+
+    return valores
 
 
 class _PanelProfesionales(QWidget):
@@ -378,8 +453,14 @@ class _PanelProfesionales(QWidget):
         # a partir de ahora) — sus botones referencian self.crud_profesionales
         # por método atado (_agregar_documento/_eliminar_documento), así que
         # alcanza con que exista para cuando se hagan clic, no ya en este punto.
+        conn = self.conn
         self.crud_profesionales = PantallaCRUD(
             self.conn, "Profesional", "Profesionales", _campos_profesional(self.conn),
+            # `al_guardar` (a diferencia de al_actualizar/al_crear) no se
+            # envuelve en referencia débil — se cierra sobre `conn`, la
+            # variable local, no sobre `self`, para no armar un ciclo
+            # entre el panel y su propio PantallaCRUD.
+            al_guardar=lambda valores, registro: _al_guardar_profesional(valores, registro, conn),
             al_actualizar=self._al_actualizar_profesional,
             al_abrir_dialogo=_al_abrir_dialogo,
             panel_extra_izquierda=panel_doc,

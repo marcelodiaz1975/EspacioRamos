@@ -8,6 +8,7 @@ from app.gui.crud_generico import _DialogoRegistro
 from app.gui.estilos import hoja_estilos
 from app.gui.pantallas.profesionales import (
     _al_abrir_dialogo,
+    _al_guardar_profesional,
     _campos_profesional,
     _DialogoCategoriaDocumento,
     _PanelProfesionales,
@@ -146,15 +147,125 @@ def test_sugerencia_de_codigo_se_actualiza_al_cambiar_categoria(qtbot, conn):
     assert dialogo._entradas["IdCodigo"].text() == "X1"
 
 
-def test_sugerencia_de_codigo_no_pisa_una_edicion_manual(qtbot, conn):
+def test_campo_codigo_es_de_solo_lectura(qtbot, conn):
+    """Ronda de validaciones de categoría, pedido explícito de la
+    clienta: el código deja de ser editable a mano — lo decide
+    únicamente la Categoría elegida (ver `_al_abrir_dialogo`)."""
     dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
-    campo_codigo = dialogo._entradas["IdCodigo"]
-    campo_codigo.setText("R99")
+    assert dialogo._entradas["IdCodigo"].isReadOnly() is True
 
+
+def test_editar_profesional_sin_cambiar_categoria_conserva_el_codigo_real(qtbot, conn):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Gómez", IdCodigo="R7",
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    _al_abrir_dialogo(dialogo)
+    assert dialogo._entradas["IdCodigo"].text() == "R7"
+
+
+def test_editar_profesional_cambiando_categoria_reasigna_el_codigo_mas_bajo_disponible(qtbot, conn):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Gómez", IdCodigo="R7",
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    _al_abrir_dialogo(dialogo)
     combo_categoria = dialogo._entradas["CategoriaProfesional"]
-    combo_categoria.setCurrentIndex(combo_categoria.findData("X"))
 
-    assert campo_codigo.text() == "R99"
+    combo_categoria.setCurrentIndex(combo_categoria.findData("X"))
+    assert dialogo._entradas["IdCodigo"].text() == "X1"
+
+    # Volver a la categoría original restaura el código real de antes,
+    # en vez de dejar la última sugerencia pisada.
+    combo_categoria.setCurrentIndex(combo_categoria.findData("R"))
+    assert dialogo._entradas["IdCodigo"].text() == "R7"
+
+
+# ---------------------------------------------- validaciones de categoría (al_guardar)
+
+def test_al_guardar_rechaza_categoria_e_sin_cabeza_de_equipo(conn):
+    valores = {"CategoriaProfesional": "E", "ProfesionalCabezaEquipo": None}
+    assert _al_guardar_profesional(valores, None, conn) is None
+
+
+def test_al_guardar_rechaza_categoria_e_con_cabeza_que_no_es_r(conn):
+    id_b = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Sin liquidación")
+    valores = {"CategoriaProfesional": "E", "ProfesionalCabezaEquipo": id_b}
+    assert _al_guardar_profesional(valores, None, conn) is None
+
+
+def test_al_guardar_acepta_categoria_e_con_cabeza_r_valida(conn):
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Cabeza")
+    valores = {"CategoriaProfesional": "E", "ProfesionalCabezaEquipo": id_r}
+    assert _al_guardar_profesional(valores, None, conn) == valores
+
+
+def test_al_guardar_no_bloquea_categorias_distintas_de_e_ni_cambios_de_r_sin_equipo(conn):
+    """Crear o editar cualquier profesional que no sea E, o un R sin
+    ningún E vinculado, nunca pasa por ninguno de los dos guardarraíles
+    — `al_guardar` devuelve `valores` tal cual."""
+    valores = {"CategoriaProfesional": "A"}
+    assert _al_guardar_profesional(valores, None, conn) == valores
+
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Solo")
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_r)
+    valores_x = {"CategoriaProfesional": "X"}
+    assert _al_guardar_profesional(valores_x, registro, conn) == valores_x
+
+
+def test_al_guardar_bloquea_cambiar_categoria_de_r_con_equipo_e_vinculado(conn):
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Cabeza")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="E", Apellido="Del equipo", ProfesionalCabezaEquipo=id_r,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_r)
+    valores = {"CategoriaProfesional": "X"}
+    assert _al_guardar_profesional(valores, registro, conn) is None
+
+    # El bloqueo es real: la categoría del R no se tocó.
+    assert obtener_repositorio(conn, "Profesional").obtener(id_r)["CategoriaProfesional"] == "R"
+
+
+def test_al_guardar_permite_guardar_el_mismo_r_sin_cambiar_su_categoria(conn):
+    """Guardar cualquier otro campo de un R con equipo, SIN tocar su
+    Categoría, no dispara el bloqueo — `valores["CategoriaProfesional"]`
+    sigue siendo "R", igual que `registro`."""
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Cabeza")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="E", Apellido="Del equipo", ProfesionalCabezaEquipo=id_r,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_r)
+    valores = {"CategoriaProfesional": "R", "Apellido": "Cabeza de equipo"}
+    assert _al_guardar_profesional(valores, registro, conn) == valores
+
+
+def test_al_guardar_sugiere_un_codigo_x_distinto_para_cada_e_del_equipo(conn, monkeypatch):
+    """`sugerir_codigos_multiples` en una sola pasada: con dos E
+    vinculados, el alerta tiene que sugerirles códigos X DISTINTOS
+    (X1 y X2), no el mismo número repetido dos veces."""
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Cabeza")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="E", Apellido="Uno", IdCodigo="E1", ProfesionalCabezaEquipo=id_r,
+    )
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="E", Apellido="Dos", IdCodigo="E2", ProfesionalCabezaEquipo=id_r,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_r)
+
+    mensajes = []
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        staticmethod(lambda *a, **k: mensajes.append(a[-1]) or QMessageBox.StandardButton.Ok),
+    )
+
+    assert _al_guardar_profesional({"CategoriaProfesional": "X"}, registro, conn) is None
+    assert len(mensajes) == 1
+    assert "X1" in mensajes[0]
+    assert "X2" in mensajes[0]
 
 
 def test_nuevo_profesional_pre_completa_tratamiento(qtbot, conn):
@@ -265,8 +376,11 @@ def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_p
     pantalla.crud_profesionales.tabla_widget.selectRow(fila)
 
     def _dialogo_cambia_codigo(self, *a, **k):
+        # El código ya no se tipea a mano (pasó a solo lectura, ver
+        # `_al_abrir_dialogo`) — cambiar la Categoría ya dispara sola la
+        # reasignación al código más bajo disponible de la nueva
+        # categoría ("X1", sin ningún otro X cargado en esta base).
         self._entradas["CategoriaProfesional"].setCurrentIndex(self._entradas["CategoriaProfesional"].findData("X"))
-        self._entradas["IdCodigo"].setText("X34")
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_cambia_codigo)
@@ -274,11 +388,11 @@ def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_p
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
     assert profesional["CategoriaProfesional"] == "X"
-    assert profesional["IdCodigo"] == "X34"
+    assert profesional["IdCodigo"] == "X1"
 
     historial = conn.execute("SELECT * FROM HistorialCodigo WHERE IdProfesional = ?", (id_prof,)).fetchone()
     assert historial["CodigoAnterior"] == "R3"
-    assert historial["CodigoNuevo"] == "X34"
+    assert historial["CodigoNuevo"] == "X1"
 
     # El diálogo de edición resuelve "Tratamiento" con el combo completo
     # (`_entradas["Tratamiento"]`, no tocado por este mock) — al guardar
@@ -288,7 +402,7 @@ def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_p
     # campo. La carpeta vieja ("R3 - Ramos") seguía sin Tratamiento porque
     # se armó a mano en el setup de este test, antes de pasar por ningún
     # diálogo real.
-    assert (tmp_path / "Profesionales" / "X34 - Coach Ramos" / "2026-08 - Liquidación Ramos.pdf").exists()
+    assert (tmp_path / "Profesionales" / "X1 - Coach Ramos" / "2026-08 - Liquidación Ramos.pdf").exists()
     assert not (tmp_path / "Profesionales" / "R3 - Ramos").exists()
 
 

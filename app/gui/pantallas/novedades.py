@@ -101,6 +101,13 @@ from app.negocio.vacaciones import (
 from app.repositorio.registro import obtener_repositorio
 
 _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
+# Ronda de validaciones de categoría: "C" (contacto/prospecto, "nunca
+# llegaron a pasar por el espacio") no puede tener ningún movimiento —
+# se excluye del combo de Cargos especiales (crear uno nuevo), que
+# hasta ahora usaba `_CATEGORIAS_TODAS` sin ese descarte. Licencias/
+# Ausencias (más arriba en este mismo archivo) no fueron parte de este
+# pedido, se quedan con `_CATEGORIAS_TODAS`.
+_CATEGORIAS_CON_CARGOS = ("R", "A", "B", "E", "X")
 _ORDEN_CATEGORIA_CARGOS = {"B": 0, "R": 1, "A": 2, "E": 3}
 _ANCHO_CAMPO = 265  # ancho compartido por todo lo que va en la columna izquierda de las tres solapas
                     # (combos, fechas y botones), para que las tres queden del mismo ancho — el valor
@@ -1339,7 +1346,7 @@ class _PanelCargosEspeciales(QWidget):
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_CON_CARGOS):
             self.combo_profesional.addItem(etiqueta, id_)
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self.actualizar)

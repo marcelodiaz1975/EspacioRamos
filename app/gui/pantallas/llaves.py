@@ -87,6 +87,13 @@ from app.negocio.llaves import (
 from app.repositorio.registro import obtener_repositorio
 
 _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
+# Ronda de validaciones de categoría: "C" no puede tener ningún
+# movimiento — se excluye del combo que asigna una llave nueva a un
+# profesional (distinto de `_CATEGORIAS_TODAS`, que sigue usando el
+# filtro de "Stock de llaves por profesional" sin este descarte: es
+# solo un filtro de VISUALIZACIÓN sobre tenencias ya existentes, no una
+# acción que pueda crear una nueva).
+_CATEGORIAS_CON_LLAVES = ("R", "A", "B", "E", "X")
 _DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 _ANCHO_BOTON = 280  # "Devolución copia del profesional", el texto más largo de la columna
 _FILAS_VISIBLES_TIPOS = 6
@@ -1199,7 +1206,7 @@ class _DialogoAsignar(QDialog):
         layout.addRow(QLabel(f"{tipo['Nombre']}  —  {disponibles} {copia_o_copias}"))
 
         self.combo_profesional = QComboBox()
-        for id_, etiqueta in _opciones_profesional(conn, _CATEGORIAS_TODAS):
+        for id_, etiqueta in _opciones_profesional(conn, _CATEGORIAS_CON_LLAVES):
             self.combo_profesional.addItem(etiqueta, id_)
         habilitar_busqueda_profesional(self.combo_profesional)
         layout.addRow("Profesional", self.combo_profesional)

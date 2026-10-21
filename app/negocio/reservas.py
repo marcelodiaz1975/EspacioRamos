@@ -26,10 +26,53 @@ from app.negocio.dias import fecha_a_dia_semana
 from app.negocio.dias import fecha_actual as _fecha_actual_sistema
 from app.negocio.licencias import tiene_licencia
 from app.negocio.liquidaciones import id_profesional_liquidable
+from app.negocio.profesionales import sugerir_codigo
 from app.negocio.vacaciones import tiene_vacacion
 from app.repositorio.registro import obtener_repositorio
 
 FIN_INDEFINIDO = "9999-12-31"
+
+
+def _validar_categoria_reserva(
+    conn: sqlite3.Connection, id_profesional: int, *,
+    categorias_permitidas: tuple[str, ...], categoria_sugerida: str, descripcion_tipo: str,
+) -> None:
+    """Guardarraíl de categoría (ronda de validaciones de categorías de
+    Profesional, confirmada con la clienta) — defensa en profundidad:
+    los combos de profesional de las tres solapas de Reservas ya NO
+    ofrecen las categorías que no corresponden (A/X/C para regulares,
+    X/C para aisladas), así que en el uso normal de la GUI esto nunca
+    debería saltar — pero la validación en sí vive acá, no solo en el
+    combo, para que cualquier otro camino (importación, un uso directo
+    de `crear_reserva_regular`/`crear_reserva_aislada`, un bug de
+    combo) quede igual de cubierto.
+
+    Un E se valida distinto del resto: en vez de mirar
+    `categorias_permitidas`, exige que tenga un Cabeza de equipo
+    cargado y que ese cabeza sea categoría R — mismo criterio exacto
+    que `app.gui.pantallas.profesionales._al_guardar_profesional` (el
+    guardarraíl que impide guardar un E sin cabeza válido), para que un
+    E nunca quede "huérfano" (sin liquidación, sin que nadie se
+    entere) ni siquiera por una vía que no pase por ese diálogo."""
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    if profesional is None:
+        raise ValueError(f"No existe el profesional #{id_profesional}")
+    categoria = profesional["CategoriaProfesional"]
+    if categoria == "E":
+        id_cabeza = profesional["ProfesionalCabezaEquipo"]
+        cabeza = obtener_repositorio(conn, "Profesional").obtener(id_cabeza) if id_cabeza else None
+        if cabeza is None or cabeza["CategoriaProfesional"] != "R":
+            raise ValueError(
+                "Este profesional categoría E no tiene un Cabeza de equipo categoría R válido "
+                f"cargado — no se le pueden asignar horarios {descripcion_tipo} hasta corregirlo."
+            )
+        return
+    if categoria not in categorias_permitidas:
+        sugerido = sugerir_codigo(conn, categoria_sugerida)
+        raise ValueError(
+            f"La categoría de este profesional no admite horarios {descripcion_tipo}. Para "
+            f"habilitarlo, cambiale la categoría a {categoria_sugerida} — código sugerido: {sugerido}."
+        )
 
 
 @dataclass
@@ -292,7 +335,14 @@ def crear_reserva_regular(
     `_validar_vigencia_no_cerrada`) — a diferencia de los conflictos de
     superposición, esto no es una advertencia que el operador pueda
     confirmar: es un bloqueo real, mismo criterio sin excepción que
-    `liquidaciones.emitir_liquidacion`."""
+    `liquidaciones.emitir_liquidacion`. Lo mismo para la categoría del
+    profesional (`_validar_categoria_reserva`, ver su docstring): nunca
+    se puede forzar, solo R/B (o E con cabeza de equipo R) reservan
+    horas regulares."""
+    _validar_categoria_reserva(
+        conn, id_profesional, categorias_permitidas=("R", "B"), categoria_sugerida="R",
+        descripcion_tipo="regulares",
+    )
     _validar_vigencia_no_cerrada(conn, id_profesional, vigencia_inicio)
     _validar_vigencia_no_cerrada(conn, id_profesional, vigencia_fin)
     _validar_fraccion_grilla(conn, hora_inicio, hora_fin)
@@ -455,6 +505,17 @@ def crear_reserva_aislada(
             raise ValueError("Una reserva extraordinaria necesita un ítem a cargar (texto libre).")
         if monto_extraordinario is None:
             raise ValueError("Una reserva extraordinaria necesita un monto a cobrar.")
+    else:
+        # Mismo guardarraíl que `crear_reserva_regular` (ver
+        # `_validar_categoria_reserva`), solo para la aislada "común" —
+        # la extraordinaria ya tiene su propia validación de categoría
+        # arriba (A/B/R/E, sin sugerencia de código porque no es un
+        # gate de "categoría equivocada" sino una lista cerrada propia
+        # de esa funcionalidad).
+        _validar_categoria_reserva(
+            conn, id_profesional, categorias_permitidas=("A", "B", "R"), categoria_sugerida="A",
+            descripcion_tipo="aislados",
+        )
     if hora_fin <= hora_inicio:
         # #45: sin esta validación, un horario tipeado al revés (ej.
         # "desde" 23, "hasta" 1) se guardaba tal cual — el formulario no
