@@ -3293,3 +3293,88 @@ documentos_alto_fijo_y_vista_previa_se_estira` y se reescribe para el
 nuevo comportamiento (alto fijo en la lista, `area_vista_previa` con
 el alto de sobra).
 
+## Selector de profesional: el filtro en vivo y el select-all por Tab nunca funcionaron de punta a punta
+
+Segunda prueba del flujo de trabajo por temas separados: sesión nueva,
+solo con `docs/historial/general.md` como contexto (donde vivían las
+rondas anteriores de este mismo widget). La clienta reportó tres cosas
+que ya se habían dado por resueltas en rondas anteriores ("Selector de
+profesional: solo por código... select-all al enfocar", más arriba en
+este archivo, y "1.2 — Selector de profesional: ya resuelto"):
+mayúsculas/minúsculas, buscar en cualquier parte de la cadena (no solo
+el principio) y select-all al llegar con Tab — con un ejemplo puntual
+de cada una ("x1" no encuentra nada pero "X1" sí; "lo ve" no encuentra
+"R1 - Lic. Virginia Lo Veci"; el combo Profesional de Reservas
+regulares, con "Todos los profesionales" de default, no selecciona
+nada al llegar por Tab).
+
+Investigado ANTES de tocar código, con scripts que simulan tipeo/Tab
+reales (no solo leer el código ni confiar en que los tests ya pasaban):
+los tres reportes eran ciertos, con dos causas distintas — ninguna de
+las dos estaba cubierta por los tests existentes, que probaban piezas
+aisladas en vez del comportamiento real de punta a punta.
+
+### Causa 1 (ítems 1 y 2): `QCompleter` tiene su propio filtro, aparte del nuestro
+
+`_ProxyBusquedaSinAcentos` (el `QSortFilterProxyModel` que ya filtraba
+bien, sin distinguir mayúsculas/acentos, por cualquier posición de la
+cadena) sigue correcto — el problema es que `QCompleter` arma, ADEMÁS,
+su PROPIO motor de filtrado interno sobre el modelo que se le pasa
+(`completionPrefix`/`filterMode`/`caseSensitivity`), que nunca se había
+tocado y se queda en el default de Qt: `MatchStartsWith` + `CaseSensitive`.
+Ese filtro propio se aplica ENCIMA del nuestro, no en su lugar —
+cualquier fila que `proxy` ya dejaba pasar podía desaparecer igual antes
+de llegar al desplegable. Confirmado con un script que simula
+`textEdited` real y lee `completador.completionModel()` (lo que de
+verdad se ve en pantalla, a diferencia de llamar `proxy.
+establecer_patron(...)` directo como hacían los tests viejos): "x1"
+mostraba `[]` aunque hubiera un "X1 - ..." cargado, y "lo ve" también
+`[]` aunque "R1 - Lic. Virginia Lo Veci" estuviera en la lista.
+
+Ajustarle solo `filterMode`/`caseSensitivity` al completer no alcanza
+por sí solo (confirmado aparte): sigue sin ignorar acentos, que es
+justo lo que `proxy` ya resuelve — mezclar los dos filtros a medias
+hubiera dejado un comportamiento inconsistente según el caso. Se
+neutraliza por completo el filtro propio del completer reseteando su
+`completionPrefix` a vacío cada vez que se actualiza el patrón de
+`proxy` (`_al_tipear`, nueva, reemplaza la conexión directa de
+`textEdited` a `proxy.establecer_patron`) — con prefijo vacío, el
+filtro de Qt acepta cualquier fila trivialmente, dejando a `proxy` como
+única fuente de verdad del filtrado, que es la intención original del
+módulo desde que se armó.
+
+### Causa 2 (ítem 3): `QComboBox` no tiene `.selectAll()` propio
+
+Bug distinto, y más general — vive en `app/gui/widgets/foco.py`
+(`_EnterAvanzaFoco._mover`), el mecanismo COMPARTIDO por Tab/Enter en
+TODOS los formularios del sistema, no en `selector_profesional.py`.
+`_mover` seleccionaba el contenido del widget destino con `if
+seleccionar_todo and hasattr(candidato, "selectAll"): candidato.
+selectAll()` — pero `candidato`, para un combo, es el `QComboBox`
+completo, y `QComboBox` NO tiene `.selectAll()` propio (solo lo tiene
+su `.lineEdit()` interno) — así que esa condición daba `False` para
+CUALQUIER combo editable llegado por Tab, en cualquier pantalla del
+sistema, no solo el selector de profesional. Confirmado con un script
+que tabula de un campo a un combo real: el foco llegaba bien, pero
+`lineEdit().selectedText()` quedaba vacío. El click directo del mouse
+sí seleccionaba (ese es `_SeleccionarTodoAlEnfocar`, un mecanismo
+aparte dentro de `selector_profesional.py`, sin relación con `foco.py`)
+— por eso no se había notado en ninguna revisión anterior, todas las
+pruebas manuales de "select-all" documentadas hasta ahora se hicieron
+clickeando, no tabulando.
+
+Arreglo: `_EnterAvanzaFoco._mover` suma un helper `_seleccionar_todo`
+que, para un `QComboBox` editable, selecciona sobre `.lineEdit()` en
+vez de sobre el combo — beneficia a cualquier combo editable del
+sistema llegado por Tab, no solo a los selectores de profesional.
+
+Tests nuevos: `tests/test_gui_widget_selector_profesional.py`
+(`test_desplegable_real_no_distingue_mayusculas_de_minusculas`,
+`test_desplegable_real_filtra_por_substring_en_el_medio` — las dos
+simulan tipeo real y leen `completador.completionModel()`, el punto
+exacto donde se coló el bug, no `proxy` en aislado como los tests
+viejos); `tests/test_gui_widget_foco.py`
+(`test_tab_selecciona_todo_el_texto_de_un_combo_editable_al_llegar`,
+con un `QComboBox` editable real en la cadena, no solo `QLineEdit` como
+el test ya existente de esta misma regla).
+

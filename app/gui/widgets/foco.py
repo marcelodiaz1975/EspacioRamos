@@ -93,9 +93,24 @@ class _EnterAvanzaFoco(QObject):
         for candidato in candidatos:
             if candidato.isVisible() and candidato.isEnabled():
                 candidato.setFocus()
-                if seleccionar_todo and hasattr(candidato, "selectAll"):
-                    candidato.selectAll()
+                if seleccionar_todo:
+                    self._seleccionar_todo(candidato)
                 return
+
+    @staticmethod
+    def _seleccionar_todo(widget: QWidget) -> None:
+        # Un QComboBox editable no tiene `.selectAll()` propio (solo lo
+        # tiene su `.lineEdit()` interno) — `hasattr(widget, "selectAll")`
+        # daba `False` para cualquier combo y la selección nunca se
+        # aplicaba al llegar por Tab/Enter (confirmado simulando el Tab
+        # real: foco sí llegaba al combo, pero `lineEdit().selectedText()`
+        # quedaba vacío). El click directo del mouse sí seleccionaba, por
+        # un mecanismo aparte (`_SeleccionarTodoAlEnfocar` en
+        # `selector_profesional.py`) — por eso no se había notado antes.
+        if isinstance(widget, QComboBox) and widget.isEditable() and widget.lineEdit() is not None:
+            widget.lineEdit().selectAll()
+        elif hasattr(widget, "selectAll"):
+            widget.selectAll()
 
 
 def instalar_enter_avanza_foco(orden: list[QWidget], parent: QObject | None = None) -> QObject:

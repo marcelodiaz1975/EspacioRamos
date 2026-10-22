@@ -41,6 +41,43 @@ def test_completer_filtra_por_nombre_en_el_medio_de_la_cadena(qtbot):
     assert [proxy.data(proxy.index(f, 0)) for f in range(proxy.rowCount())] == ["R1 - Lic. Virginia Lo Veci"]
 
 
+def _filas_visibles_en_el_desplegable(combo: QComboBox) -> list[str]:
+    """A diferencia de llamar `proxy.establecer_patron(...)` directo (lo
+    que ya prueban los tests de arriba), esto simula tipeo real y lee lo
+    que de verdad termina mostrando `QCompleter` — el punto donde se
+    coló el bug: `QCompleter` tiene su PROPIO filtro interno (case-
+    sensitive, solo prefijo por default) que se aplica ENCIMA de
+    `proxy`, así que un patrón que `proxy` ya dejaba pasar podía
+    desaparecer igual antes de llegar a pantalla."""
+    cm = combo.completer().completionModel()
+    return [cm.data(cm.index(f, 0)) for f in range(cm.rowCount())]
+
+
+def test_desplegable_real_no_distingue_mayusculas_de_minusculas(qtbot):
+    """Bug real: `QCompleter` filtra con `CaseSensitive` por default, por
+    encima de nuestro `proxy` (que sí es case-insensitive) — escribir en
+    minúscula un código que existe en mayúscula no mostraba nada."""
+    combo = _combo_de_prueba()
+    combo.addItem("X1 - Carlos Pérez", 99)
+    qtbot.addWidget(combo)
+
+    combo.lineEdit().textEdited.emit("x1")
+    assert _filas_visibles_en_el_desplegable(combo) == ["X1 - Carlos Pérez"]
+
+
+def test_desplegable_real_filtra_por_substring_en_el_medio(qtbot):
+    """Bug real: `QCompleter` filtra con `MatchStartsWith` por default,
+    por encima de nuestro `proxy` (que busca en cualquier posición) — un
+    patrón que está en el medio de la cadena (no al principio) no
+    mostraba nada en el desplegable real, aunque el `proxy` en aislado sí
+    lo dejara pasar."""
+    combo = _combo_de_prueba()
+    qtbot.addWidget(combo)
+
+    combo.lineEdit().textEdited.emit("lo ve")
+    assert _filas_visibles_en_el_desplegable(combo) == ["R1 - Lic. Virginia Lo Veci"]
+
+
 def test_completer_filtra_sin_distinguir_acentos(qtbot):
     """"diaz" (sin tilde) tiene que encontrar "Díaz"."""
     combo = _combo_de_prueba()

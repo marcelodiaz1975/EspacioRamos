@@ -31,10 +31,25 @@ categoría + código que usan los que arman esas opciones) y le agrega:
   selección vigente en vez de dejar un texto suelto que no se
   corresponde con ningún profesional.
 
-El filtrado nativo de `QCompleter` (`setFilterMode`/`setCaseSensitivity`)
-solo resuelve mayúsculas/minúsculas, no tildes — por eso el completer usa
-acá un `QSortFilterProxyModel` con `filterAcceptsRow` reimplementado a
-mano en vez de esos dos métodos."""
+`QCompleter` tiene su PROPIO filtro interno además del `proxy` de acá
+(`completionPrefix`/`filterMode`/`caseSensitivity`, por default
+`MatchStartsWith` + `CaseSensitive`) — aplica encima del nuestro, no en
+lugar de. Confirmado con un script que simula tipeo real: con el
+completer tal cual lo arma `QComboBox.setCompleter(...)` (que conecta
+`textEdited` a `completer.setCompletionPrefix` solo, sin tocar
+`filterMode`/`caseSensitivity`), escribir "x1" no mostraba nada en el
+desplegable aunque hubiera un "X1 - ..." (case-sensitive) ni "lo ve"
+encontraba "R1 - Lic. Virginia Lo Veci" (prefijo nomás, no busca en
+cualquier posición) — el filtro propio de Qt descartaba esas filas
+ANTES de que importara lo que ya había filtrado `proxy`. Ajustarle
+`filterMode`/`caseSensitivity` al completer no alcanza por sí solo
+(sigue sin ignorar acentos, que es justo lo que `proxy` ya resuelve) —
+se neutraliza por completo reseteando `completionPrefix` a vacío cada
+vez que se actualiza el patrón del `proxy` (`_al_tipear`, abajo): con
+prefijo vacío, el filtro propio de `QCompleter` acepta cualquier fila
+trivialmente, dejando a `proxy` como única fuente de verdad del
+filtrado — mismo patrón `QSortFilterProxyModel` con `filterAcceptsRow`
+reimplementado a mano de siempre, ahora sí efectivo de punta a punta."""
 from __future__ import annotations
 
 import html
@@ -167,7 +182,17 @@ def habilitar_busqueda_profesional(combo: QComboBox) -> None:
     completador.setCompletionColumn(0)
     completador.popup().setItemDelegate(_DelegadoNegritaCoincidencia(proxy, completador.popup()))
     combo.setCompleter(completador)
-    combo.lineEdit().textEdited.connect(proxy.establecer_patron)
+
+    def _al_tipear(texto: str) -> None:
+        proxy.establecer_patron(texto)
+        # Neutraliza el filtro propio de QCompleter (ver docstring del
+        # módulo) — `combo.setCompleter(...)` ya conectó `textEdited` a
+        # `completador.setCompletionPrefix` por su cuenta; esta conexión
+        # nuestra corre DESPUÉS (se agrega más tarde) y pisa ese valor
+        # con uno vacío, dejando a `proxy` como único filtro real.
+        completador.setCompletionPrefix("")
+
+    combo.lineEdit().textEdited.connect(_al_tipear)
     combo.lineEdit().editingFinished.connect(lambda: _confirmar_texto(combo))
     _SeleccionarTodoAlEnfocar(combo.lineEdit())
 

@@ -4,7 +4,7 @@ la garantía es la misma en todos los formularios porque es la misma clase."""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 
@@ -145,6 +145,34 @@ def test_tab_selecciona_el_contenido_prefijado_del_campo_al_llegar(qtbot):
     QTest.keyClick(campo_1, Qt.Key.Key_Tab)
     qtbot.waitUntil(lambda: campo_2.hasFocus())
     assert campo_2.selectedText() == "Valor prefijado"
+
+
+def test_tab_selecciona_todo_el_texto_de_un_combo_editable_al_llegar(qtbot):
+    """Mismo pedido que el test anterior, pero sobre un `QComboBox`
+    editable — bug real encontrado al revisar el selector de profesional
+    (Reservas regulares > Profesional, default "Todos los
+    profesionales"): `QComboBox` no tiene `.selectAll()` propio (solo lo
+    tiene su `.lineEdit()` interno), así que `hasattr(candidato,
+    "selectAll")` daba `False` para CUALQUIER combo editable del sistema
+    llegado por Tab — la selección nunca se aplicaba, aunque el foco sí
+    llegara bien."""
+    contenedor = QWidget()
+    layout = QVBoxLayout(contenedor)
+    campo_1 = QLineEdit()
+    combo = QComboBox()
+    combo.setEditable(True)
+    combo.addItem("Todos los profesionales")
+    for w in (campo_1, combo):
+        layout.addWidget(w)
+    foco = instalar_enter_avanza_foco([campo_1, combo])
+    contenedor._foco = foco
+    _mostrar(qtbot, contenedor)
+
+    campo_1.setFocus()
+    qtbot.waitUntil(lambda: campo_1.hasFocus())
+    QTest.keyClick(campo_1, Qt.Key.Key_Tab)
+    qtbot.waitUntil(lambda: combo.lineEdit().hasFocus())
+    assert combo.lineEdit().selectedText() == "Todos los profesionales"
 
 
 def test_shift_tab_retrocede_en_la_misma_cadena(qtbot):
