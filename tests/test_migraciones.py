@@ -110,6 +110,25 @@ def test_aplicar_migraciones_agrega_columnas_de_seguridad_a_configuracion_vieja(
     conn.close()
 
 
+def test_aplicar_migraciones_agrega_decimales_total_liquidacion_con_default_2(tmp_path):
+    """Base vieja sin la columna: la recibe con el mismo default (2, "sin
+    redondear") que ya traía CantidadDecimales, sin tocar el comportamiento
+    de ninguna liquidación ya en uso."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE Configuracion (IdConfiguracion INTEGER PRIMARY KEY CHECK (IdConfiguracion = 1))")
+    conn.execute("INSERT INTO Configuracion (IdConfiguracion) VALUES (1)")
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    valor = conn.execute(
+        "SELECT DecimalesTotalLiquidacion FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()["DecimalesTotalLiquidacion"]
+    assert valor == 2
+    conn.close()
+
+
 def test_aplicar_migraciones_ignora_tabla_que_no_existe_todavia(tmp_path):
     """Una base vieja de verdad puede no tener ni siquiera alguna de las
     tablas que ganaron columnas nuevas más adelante — no debería romper,

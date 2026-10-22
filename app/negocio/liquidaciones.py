@@ -97,6 +97,7 @@ from app.negocio.dias import (
     ultimo_dia_mes,
 )
 from app.negocio.feriados import feriados_relevantes_periodo
+from app.negocio.formato import decimales_total_liquidacion
 from app.negocio.valores import horas_semanales_vigentes, obtener_porcentaje_descuento, valor_regular_por_rango_dias
 from app.repositorio.registro import obtener_repositorio
 
@@ -201,6 +202,13 @@ class Liquidacion:
     ajuste_saldo_atrasado: float = 0.0
     cargos_especiales: list[sqlite3.Row] = field(default_factory=list)
     cuotas_plan: list[sqlite3.Row] = field(default_factory=list)
+    # Redondeo del total a un peso entero (Configuracion.
+    # DecimalesTotalLiquidacion = 0, ver `app.negocio.formato.
+    # decimales_total_liquidacion`): calculado DESPUÉS de armar el resto de
+    # la liquidación, con los centavos exactos (a favor o en contra) que
+    # hacen falta para que `total` termine en un número entero — un ítem
+    # más de la cuenta real, no un redondeo de pantalla.
+    ajuste_redondeo: float = 0.0
 
     @property
     def total_descuento_feriados(self) -> float:
@@ -273,6 +281,7 @@ class Liquidacion:
             + self.ajuste_saldo_atrasado
             + self.total_cargos_especiales
             + self.total_cuotas_plan
+            + self.ajuste_redondeo
         )
 
     @property
@@ -837,7 +846,7 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
         (id_profesional, periodo),
     ).fetchall()
 
-    return Liquidacion(
+    liquidacion = Liquidacion(
         id_profesional=id_profesional, periodo=periodo, bruto=bruto,
         horas_semanales=tramos[0].horas_semanales if tramos else 0.0,
         descuento_horas_pct=tramos[0].descuento_pct if tramos else 0.0,
@@ -853,6 +862,14 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
         ajuste_saldo_atrasado=ajuste_saldo_atrasado,
         cargos_especiales=cargos_especiales, cuotas_plan=cuotas_plan,
     )
+    # Redondeo del total a un peso entero (ver docstring de `Liquidacion.
+    # ajuste_redondeo`): se calcula al final, con `ajuste_redondeo` todavía
+    # en 0 (así `.total` da el valor exacto, con centavos) — la diferencia
+    # contra el entero más cercano queda como un ítem más de la cuenta.
+    if decimales_total_liquidacion(conn) == 0:
+        total_exacto = liquidacion.total
+        liquidacion.ajuste_redondeo = round(total_exacto) - total_exacto
+    return liquidacion
 
 
 def emitir_liquidacion(

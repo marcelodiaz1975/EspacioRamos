@@ -723,6 +723,14 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     FechaFicticia TEXT,
     MensajesPlural INTEGER NOT NULL DEFAULT 1,
     CantidadDecimales INTEGER NOT NULL DEFAULT 2,
+    -- Distinto de CantidadDecimales (que solo controla cuántos decimales se
+    -- VEN en los PDFs/textos de todo el sistema, sin tocar ningún número
+    -- real): en 0, el TOTAL de la liquidación se fuerza a un peso entero de
+    -- verdad (ver app.negocio.liquidaciones.Liquidacion.ajuste_redondeo),
+    -- con una línea "Redondeo" que reconcilia los centavos exactos que
+    -- hicieron falta — los demás ítems de la cuenta siguen con centavos.
+    -- En cualquier otro valor (2 por defecto) no se toca nada.
+    DecimalesTotalLiquidacion INTEGER NOT NULL DEFAULT 2,
     RutaLogo TEXT,
     CarpetaBaseArchivos TEXT,
     CarpetaBackup TEXT,

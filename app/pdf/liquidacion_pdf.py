@@ -40,7 +40,7 @@ from app.negocio.dias import DIAS_SEMANA, fecha_actual, parsear_periodo, primer_
 from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, fecha_larga, hora_fmt, mes_texto, periodo_mm_aaaa
 from app.negocio.liquidaciones import Liquidacion, ids_consolidados
-from app.negocio.formato import decimales_configurados, formatear_moneda
+from app.negocio.formato import decimales_configurados, decimales_total_liquidacion, formatear_moneda
 from app.negocio.pagos import SUBTIPOS_CARGO
 from app.pdf.estilos import (
     COLOR_NIVEL_1,
@@ -377,6 +377,11 @@ def _items_cuenta(
         # secas — CantidadCuotas se suma a esta consulta en `liquidaciones.
         # calcular_liquidacion`.
         items.append((f"Cuota {c['NumeroCuota']}/{c['CantidadCuotas']} del plan de pagos", c["Monto"], False))
+    if liquidacion.ajuste_redondeo:
+        # Configuracion.DecimalesTotalLiquidacion = 0 (ver Liquidacion.
+        # ajuste_redondeo): los centavos exactos, a favor o en contra, que
+        # hicieron falta para que el total termine en un peso entero.
+        items.append(("Redondeo", liquidacion.ajuste_redondeo, False))
     items.append((f"Liquidación a abonar por el profesional en el mes de {mes_actual_texto}", liquidacion.total, True))
     return items
 
@@ -586,6 +591,12 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
     profesional = obtener_repositorio(conn, "Profesional").obtener(liquidacion.id_profesional)
     cfg = conn.execute("SELECT * FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     decimales = decimales_configurados(conn)
+    if decimales_total_liquidacion(conn) == 0:
+        # Con el redondeo del total activo, los ítems de la cuenta siguen
+        # mostrándose con centavos (pedido explícito de la clienta) aunque
+        # CantidadDecimales esté en 0 para el resto del sistema — solo el
+        # total, ya forzado a entero por `ajuste_redondeo`, se ve afectado.
+        decimales = 2
 
     ids = ids_consolidados(conn, liquidacion.id_profesional)
     anio, mes = parsear_periodo(liquidacion.periodo)

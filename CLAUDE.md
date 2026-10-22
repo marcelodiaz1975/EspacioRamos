@@ -11704,3 +11704,119 @@ acepta E válido, confirma que la extraordinaria no pasa por esta
 validación). Suite completa corrida en 9 lotes en paralelo después de
 este cambio (2576 tests, incluyendo cada pantalla que toca un combo de
 profesional de cualquier categoría): sin ninguna falla.
+
+## Liquidaciones: redondeo del total a un peso entero (parámetro nuevo)
+
+Pedido de la clienta, dado como ejemplo de "cambios de lógica, no de
+tablas" al preguntar sobre el proceso de instalar una versión nueva
+conservando la base: "agregar un parámetro en configuración para
+indicar cómo redondear el importe total de la liquidación para que
+luego de hacer toda la cuenta con centavos el último número quede
+entero si yo lo llegara a setear así." Antes de implementar se
+consultaron tres decisiones (`AskUserQuestion`):
+
+- **Sobre qué monto**: confirmó "el importe en letras" — el `total`
+  (saldo anterior + lo generado), no solo lo generado este mes.
+- **Criterio**: al más cercano (redondeo estándar).
+- **Impacto contable**: "ajuste contable real" — no es solo de
+  presentación, tiene que modificar de verdad la cuenta.
+
+Sobre el impacto contable, la clienta agregó una precisión clave que
+termina de definir el diseño: "Si el parámetro nuevo está configurado
+en 0 decimales, todos los valores de la cuenta deben mostrarse con
+centavos y solo el resultado final, el del importe en letras, se debe
+redondear. El importe del redondeo de ese valor se debe detallar como
+último concepto justo antes del valor en letras, arriba del total
+liquidado, con los centavos que hagan falta a favor o en contra para
+que la suma luego de exacta. El detalle de decir únicamente
+'Redondeo'."
+
+### Parámetro nuevo, distinto del ya existente `CantidadDecimales`
+
+Investigado antes de tocar nada: YA existe `Configuracion.
+CantidadDecimales` (`app.negocio.formato.decimales_configurados`), pero
+es un parámetro GLOBAL de puro DISPLAY — controla cuántos decimales se
+VEN en Valores/Propuesta/Oferta/Disponibilidad/Oferta búsqueda (texto y
+PDF), sin ningún efecto sobre ningún número real de la base. Reusarlo
+para disparar un ajuste contable real en Liquidaciones hubiera sido un
+riesgo real y silencioso: alguien que pusiera `CantidadDecimales=0`
+solo para que otro PDF se vea más limpio empezaría, sin saberlo, a
+generar ajustes de saldo en Liquidaciones. Se optó por un parámetro
+NUEVO y totalmente independiente, `Configuracion.
+DecimalesTotalLiquidacion` (INTEGER, default 2 — "sin redondear", mismo
+comportamiento de siempre), para que activar uno nunca afecte al otro.
+
+`decimales_total_liquidacion(conn)` (nueva, `app.negocio.formato`, al
+lado de `decimales_configurados`): lee ese campo, default 2 si está en
+NULL. GUI: mismo patrón que `CantidadDecimales` (`QSpinBox`, rango 0-4)
+pero en la solapa "Valores y liquidación" de Configuración general (no
+en "General", donde vive `CantidadDecimales`) — es un parámetro de
+cálculo de liquidación, no de display general.
+
+### `Liquidacion.ajuste_redondeo` (negocio)
+
+`app.negocio.liquidaciones.Liquidacion` suma un campo nuevo,
+`ajuste_redondeo: float = 0.0`, sumado dentro de la propiedad
+`monto_generado` (mismo lugar que `ajuste_saldo_atrasado`) — así viaja
+solo, sin ningún código nuevo, hasta `LiquidacionEmitida.MontoGenerado`
+y el delta que `emitir_liquidacion` acredita a `SaldoCuentaActual`: es
+un ítem más de la cuenta real, no un redondeo de pantalla.
+
+`calcular_liquidacion` lo calcula al FINAL, después de armar el resto
+de la liquidación (con `ajuste_redondeo` todavía en 0, así que
+`liquidacion.total` da el valor exacto, con centavos): si
+`decimales_total_liquidacion(conn) == 0`, `ajuste_redondeo = round(
+total_exacto) - total_exacto` — los centavos exactos, a favor o en
+contra, que hacen falta para que el total termine en un entero. En
+cualquier otro valor del parámetro, `ajuste_redondeo` se queda en 0 y
+nada cambia respecto de antes de este pedido.
+
+### PDF (`app/pdf/liquidacion_pdf.py`)
+
+`_items_cuenta` suma la línea "Redondeo" (con el valor de `ajuste_
+redondeo`, positivo o negativo) justo antes del ítem final "Liquidación
+a abonar..." — solo si `ajuste_redondeo` es distinto de 0 (no aparece
+si el total ya caía justo en un peso entero, o si el parámetro está
+apagado). `en_letras_pesos`/`_entero_y_centavos` ya manejaban bien un
+monto exactamente entero (sin "con NN/100" de más) desde antes de este
+pedido, así que no hizo falta tocar nada ahí — el PDF ya muestra el
+total redondeado en letras, limpio.
+
+`generar_pdf_liquidacion` fuerza `decimales = 2` cuando `decimales_
+total_liquidacion(conn) == 0`, SIN importar lo que diga `CantidadDecimales`
+— cumple al pie de la letra "todos los valores de la cuenta deben
+mostrarse con centavos" cuando el redondeo está activo, sin que el otro
+parámetro (pensado para otros documentos) pueda truncar de más los
+ítems de esta liquidación puntual.
+
+### Tests
+
+`tests/test_formato.py` (`decimales_total_liquidacion` default 2,
+independiente de `CantidadDecimales`). `tests/test_liquidaciones.py`
+(sin el parámetro activo el total no se toca aunque el saldo anterior
+tenga centavos; con el parámetro en 0 el total queda entero y `ajuste_
+redondeo` es el valor exacto esperado; si el total ya caía en un
+entero el ajuste da 0, no de más; el ajuste viaja de verdad hasta
+`SaldoCuentaActual` vía `emitir_liquidacion`, no es solo de
+presentación). `tests/test_pdf_liquidacion.py` (la línea "Redondeo"
+aparece justo antes del total y no aparece sin ajuste; el PDF real
+muestra la línea con los centavos exactos; los ítems siguen con
+centavos aunque `CantidadDecimales` también esté en 0). `tests/
+test_migraciones.py` (una base vieja gana la columna con el default 2,
+sin afectar liquidaciones ya en uso). `tests/test_gui_configuracion.py`
+(el campo es un `QSpinBox` en "Valores y liquidación", no en "General";
+guardar lo persiste).
+
+### Instalar una versión nueva conservando la base (pregunta de la clienta)
+
+Sin relación con el cambio de arriba, pero preguntado en el mismo
+mensaje: confirmado que copiar `data/espacio_ramos.db` (el único
+archivo de la base, al lado del ejecutable — `app.db.connection.
+_raiz_proyecto`) a la carpeta de la versión nueva alcanza, sin importar
+si esa versión suma columnas/tablas — `init_database` corre `aplicar_
+migraciones` en cada arranque, de forma idempotente, así que una base
+vieja se pone al día sola la primera vez que la abre la versión nueva.
+Las carpetas de archivos/backup (`CarpetaBaseArchivos`/`CarpetaBackup`)
+solo hay que copiarlas si están configuradas DENTRO de la carpeta de
+instalación vieja — si apuntan a una ruta fija del disco, la versión
+nueva las sigue encontrando sola.

@@ -53,6 +53,21 @@ def decimales_configurados(conn: sqlite3.Connection) -> int:
     return int(fila["CantidadDecimales"]) if fila and fila["CantidadDecimales"] is not None else 2
 
 
+def decimales_total_liquidacion(conn: sqlite3.Connection) -> int:
+    """`Configuracion.DecimalesTotalLiquidacion` (default 2) — DISTINTO de
+    `decimales_configurados`/`CantidadDecimales`, que solo controla cuántos
+    decimales se VEN en los PDFs/textos de todo el sistema sin tocar ningún
+    número real. Este, en cambio, decide si el TOTAL de la liquidación se
+    fuerza a un peso entero de verdad (`app.negocio.liquidaciones.
+    Liquidacion.ajuste_redondeo`, un ítem más que se suma a
+    `monto_generado` — no un redondeo de pantalla): en 0, sí; en cualquier
+    otro valor (2 por defecto) no se toca nada."""
+    fila = conn.execute(
+        "SELECT DecimalesTotalLiquidacion FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    return int(fila["DecimalesTotalLiquidacion"]) if fila and fila["DecimalesTotalLiquidacion"] is not None else 2
+
+
 def formatear_moneda(monto: float, decimales: int = 2) -> str:
     texto = f"{abs(monto):,.{decimales}f}"
     texto = texto.replace(",", "_").replace(".", ",").replace("_", ".")

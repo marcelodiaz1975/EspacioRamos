@@ -740,3 +740,72 @@ def test_reemision_no_pisa_pagos_ya_registrados_contra_el_mes_en_curso(conn, con
     saldo_final = obtener_repositorio(conn, "Profesional").obtener(id_prof)["SaldoCuentaActual"]
     # el pago de 500 sigue descontado; el cargo de 300 se suma encima, sin repetir lo ya emitido
     assert saldo_final == pytest.approx(liq_1.monto_generado - 500 + 300)
+
+
+# ---------------------------------------------------------- ajuste_redondeo (Configuracion.DecimalesTotalLiquidacion)
+
+def test_sin_el_parametro_activo_el_total_no_se_toca(conn, consultorio):
+    """Default (2 decimales, "sin redondear") — mismo comportamiento de
+    siempre, con un saldo anterior fraccionario que deja el total con
+    centavos (acá, además, dispara de rebote el ajuste por saldo
+    atrasado ya existente — sin relación con este cambio — porque
+    ToleranciaDeudaDescuento default es 0: con esto alcanza para
+    confirmar que, sin el parámetro nuevo, el total NO se fuerza a
+    ningún entero)."""
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=0.37)
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+
+    assert liquidacion.ajuste_redondeo == 0
+    assert abs(liquidacion.total - round(liquidacion.total)) > 1e-6
+
+
+def test_con_el_parametro_en_cero_el_total_queda_entero(conn, consultorio):
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=0.37)
+
+    # Referencia: el total "exacto" (con centavos) que daría esta misma
+    # liquidación sin el parámetro activo — más confiable que recalcular
+    # a mano los componentes (ajuste_saldo_atrasado también entra en juego).
+    sin_redondeo = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    total_exacto = sin_redondeo.total
+    assert abs(total_exacto - round(total_exacto)) > 1e-6  # de partida, con centavos
+
+    obtener_repositorio(conn, "Configuracion").actualizar(1, DecimalesTotalLiquidacion=0)
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+
+    assert liquidacion.ajuste_redondeo == pytest.approx(round(total_exacto) - total_exacto)
+    assert liquidacion.total == pytest.approx(round(total_exacto), abs=1e-9)
+    # de verdad entero, no solo "cerca" de uno por los centavos de sobra
+    assert abs(liquidacion.total - round(liquidacion.total)) < 1e-9
+
+
+def test_el_ajuste_de_redondeo_no_hace_falta_si_el_total_ya_es_entero(conn, consultorio):
+    """subtotal_reserva (múltiplo de VALOR_HORA_REGULAR, sin saldo
+    anterior) ya cae en un peso entero — el ajuste tiene que dar 0, no
+    agregar ni restar nada de más."""
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Configuracion").actualizar(1, DecimalesTotalLiquidacion=0)
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+
+    assert liquidacion.ajuste_redondeo == 0
+
+
+def test_ajuste_redondeo_se_acredita_de_verdad_en_saldocuentaactual(conn, consultorio):
+    """Es un ajuste contable real (confirmado por la clienta), no solo de
+    presentación: tiene que viajar a través de monto_generado hasta
+    MontoGenerado/SaldoCuentaActual, igual que ajuste_saldo_atrasado."""
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=0.37, SaldoCuentaActual=0)
+    obtener_repositorio(conn, "Configuracion").actualizar(1, DecimalesTotalLiquidacion=0)
+
+    _, liquidacion = emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+
+    assert liquidacion.ajuste_redondeo != 0
+    # SaldoCuentaActual arrancó en 0, así que queda igual a lo generado —
+    # el ajuste de redondeo viaja hasta ahí (no es solo de presentación).
+    saldo = obtener_repositorio(conn, "Profesional").obtener(id_prof)["SaldoCuentaActual"]
+    assert saldo == pytest.approx(liquidacion.monto_generado)
+    assert abs(liquidacion.total - round(liquidacion.total)) < 1e-9

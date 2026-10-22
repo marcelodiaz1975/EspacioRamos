@@ -113,6 +113,7 @@ _CAMPOS_NUMERICOS = [
     ("RetencionHistorialListaEsperaAnios", "Retención historial lista de espera (años)"),
     ("TamanoMaximoImagenMB", "Tamaño máximo de imagen (MB)"),
     ("CantidadDecimales", "Cantidad de decimales en los montos"),
+    ("DecimalesTotalLiquidacion", "Decimales del total de liquidación (0 = redondear a entero)"),
     ("MinutosInactividadBloqueo", "Minutos de inactividad para bloqueo automático"),
 ]
 _CAMPOS_BOOLEANOS = [
@@ -167,6 +168,7 @@ _RANGOS_NUMERICOS: dict[str, tuple[float, float]] = {
     "RetencionHistorialListaEsperaAnios": (0, 50),
     "TamanoMaximoImagenMB": (0.1, 500),
     "CantidadDecimales": (0, 4),
+    "DecimalesTotalLiquidacion": (0, 4),
     "MinutosInactividadBloqueo": (1, 240),
 }
 _CAMPOS_HORA = {"HoraInicioGrilla", "HoraFinGrilla"}
@@ -198,6 +200,7 @@ _GRUPOS: list[tuple[str, list[str]]] = [
         "PorcentajeDescuentoFeriado", "PorcentajeDescuentoNoLaborable",
         "SemanasVacacionesMaximasPorAnio", "DiasEnvioLiquidacionesRemanentes",
         "DiasAntesFinMesRecordatorioGeneral", "RetencionHistorialListaEsperaAnios",
+        "DecimalesTotalLiquidacion",
     ]),
     ("Archivos y backup", [
         "FrecuenciaBackupDrive", "CarpetaBaseArchivos", "CarpetaBackup", "TamanoMaximoImagenMB",

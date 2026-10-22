@@ -221,6 +221,25 @@ def test_items_cuenta_desglosa_bruto_y_descuento_por_tramo_si_cambian_horas(conn
     assert items[4][1] == pytest.approx(sum(t.subtotal for t in liquidacion.tramos))
 
 
+def test_items_cuenta_incluye_linea_redondeo_justo_antes_del_total(conn, profesional):
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    liquidacion.ajuste_redondeo = 0.13  # simula el ajuste ya calculado por calcular_liquidacion
+
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+
+    assert items[-2] == ("Redondeo", pytest.approx(0.13), False)
+    assert items[-1][0].startswith("Liquidación a abonar")
+
+
+def test_items_cuenta_sin_ajuste_de_redondeo_no_agrega_la_linea(conn, profesional):
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert liquidacion.ajuste_redondeo == 0  # DecimalesTotalLiquidacion default (2), feature apagada
+
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+
+    assert all(concepto != "Redondeo" for concepto, _, _ in items)
+
+
 def test_monto_en_letras_casos_basicos():
     assert monto_en_letras(0) == "Pesos cero con 00/100"
     assert monto_en_letras(21) == "Pesos veintiuno con 00/100"
@@ -291,6 +310,54 @@ def test_decimales_configurados_en_0_no_muestra_centavos(conn, profesional, tmp_
     texto = _texto_pdf(ruta)
     assert formatear_moneda(liquidacion.total, decimales=0) in texto
     assert formatear_moneda(liquidacion.total, decimales=2) not in texto
+
+
+def test_decimales_total_liquidacion_en_0_redondea_el_total_y_agrega_la_linea(conn, profesional, tmp_path):
+    """Configuracion.DecimalesTotalLiquidacion (distinto de CantidadDecimales,
+    que se deja en su default de 2 adrede): fuerza el total a un peso
+    entero y agrega la línea "Redondeo" con los centavos exactos que
+    hicieron falta — los demás ítems siguen mostrándose con centavos."""
+    from app.negocio.formato import formatear_moneda
+
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=0.37)
+    obtener_repositorio(conn, "Configuracion").actualizar(1, DecimalesTotalLiquidacion=0)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert liquidacion.ajuste_redondeo != 0
+
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+
+    assert "Redondeo" in texto
+    assert formatear_moneda(liquidacion.ajuste_redondeo, decimales=2) in texto
+    assert abs(liquidacion.total - round(liquidacion.total)) < 1e-9
+
+
+def test_decimales_total_liquidacion_en_0_no_trunca_los_items_aunque_cantidaddecimales_tambien_este_en_0(
+    conn, profesional, tmp_path,
+):
+    """Pedido explícito de la clienta: con el redondeo del total activo,
+    los ítems de la cuenta siguen con centavos sin importar lo que diga
+    CantidadDecimales (el parámetro global, sin relación con este)."""
+    import re
+
+    from app.negocio.formato import formatear_moneda
+
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=0.37)
+    obtener_repositorio(conn, "Configuracion").actualizar(1, DecimalesTotalLiquidacion=0, CantidadDecimales=0)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    assert liquidacion.ajuste_redondeo != 0
+
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta)
+
+    monto_con_centavos = formatear_moneda(liquidacion.ajuste_redondeo, decimales=2)
+    monto_truncado = formatear_moneda(liquidacion.ajuste_redondeo, decimales=0)
+    assert monto_con_centavos in texto
+    # "$ 0" por sí solo nunca aparece (no seguido de la coma que arranca
+    # los centavos) — monto_truncado sin esto sería un falso negativo, ya
+    # que es literalmente el prefijo de monto_con_centavos ("$ 0" dentro
+    # de "$ 0,38").
+    assert re.search(re.escape(monto_truncado) + r"(?!,)", texto) is None
 
 
 def test_fotos_sin_cargar_muestra_mensaje(conn, profesional, tmp_path):

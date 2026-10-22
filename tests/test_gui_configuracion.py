@@ -163,6 +163,26 @@ def test_cantidad_decimales_es_un_spinbox_entero(qtbot, conn):
     assert isinstance(pantalla._entradas["CantidadDecimales"], QSpinBox)
 
 
+def test_decimales_total_liquidacion_es_un_spinbox_en_valores_y_liquidacion(qtbot, conn):
+    """Distinto de CantidadDecimales (en la solapa "General"): el
+    redondeo del total de la liquidación vive en "Valores y liquidación",
+    junto al resto de los parámetros que afectan ese cálculo."""
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    assert isinstance(pantalla._entradas["DecimalesTotalLiquidacion"], QSpinBox)
+    assert "DecimalesTotalLiquidacion" in dict(_GRUPOS)["Valores y liquidación"]
+    assert "DecimalesTotalLiquidacion" not in dict(_GRUPOS)["General"]
+
+
+def test_guardar_persiste_decimales_total_liquidacion(qtbot, conn):
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["DecimalesTotalLiquidacion"].setValue(0)
+    pantalla._guardar()
+    fila = conn.execute("SELECT DecimalesTotalLiquidacion FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    assert fila["DecimalesTotalLiquidacion"] == 0
+
+
 def test_fecha_ficticia_es_un_selector_de_calendario(qtbot, conn):
     pantalla = ConfiguracionGeneral(conn)
     qtbot.addWidget(pantalla)
