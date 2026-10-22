@@ -3,10 +3,14 @@ liquidacion_simulada` para el detalle completo de qué contempla y qué
 no) — mucho más corto que el PDF de liquidación real
 (`app.pdf.liquidacion_pdf`): solo los bloques que se cargaron para la
 simulación, el bruto, el descuento por volumen de horas, los descuentos
-por feriados/fechas especiales (si los hay) y el total neto. Sin
-bloques de horarios reales, sin valores de consultorios, sin
-disponibilidad, sin condiciones y normas — es un documento de ejemplo,
-no el PDF que se le manda de verdad a un profesional."""
+por feriados/fechas especiales (si los hay), el total neto y, al final,
+una foto de cada consultorio involucrado con su valor hora regular
+("Fotos de los consultorios ofrecidos", pedido explícito de la
+clienta — mismo helper compartido `app.pdf.fotos_pdf.tabla_fotos` que
+ya usan Propuesta/Disponibilidad con `mostrar_valor=True`, sin "Apto
+camilla"). Sin bloques de horarios reales, sin disponibilidad, sin
+condiciones y normas — es un documento de ejemplo, no el PDF que se le
+manda de verdad a un profesional."""
 from __future__ import annotations
 
 import os
@@ -29,6 +33,7 @@ from app.pdf.estilos import (
     encabezado_espacio,
     estilo_texto,
 )
+from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.repositorio.registro import obtener_repositorio
 
 _ALTO_FILA = 0.65 * cm
@@ -76,8 +81,11 @@ def generar_pdf_liquidacion_simulada(conn: sqlite3.Connection, liquidacion: Liqu
     decimales = 2
     anonimizar = not categoria_es_activa(profesional)
 
+    ids_consultorio = sorted({b.id_consultorio for b in liquidacion.bloques})
+    imagenes = imagenes_de_consultorios(conn, ids_consultorio)
+
     n_filas = len(liquidacion.bloques) + len(liquidacion.descuentos_feriados)
-    altura = (10 * cm + n_filas * _ALTO_FILA + 6 * cm) * 1.2
+    altura = (10 * cm + n_filas * _ALTO_FILA + 6 * cm + (len(imagenes) // 2 + 1) * 7 * cm) * 1.2
 
     def _construir_story(ancho: float) -> list:
         story = list(encabezado_espacio(conn, ancho))
@@ -121,18 +129,18 @@ def generar_pdf_liquidacion_simulada(conn: sqlite3.Connection, liquidacion: Liqu
 
         story.append(Paragraph("Liquidación simulada", estilo_texto(11, negrita=True)))
         story.append(Spacer(1, 4))
-        filas_montos = [
-            ["Concepto", "Monto"],
-            ["Bruto (horas semanales: " + f"{liquidacion.horas_semanales:g})", formatear_moneda(liquidacion.bruto, decimales)],
-            [
-                f"Descuento por volumen de horas ({liquidacion.descuento_horas_pct:g}%)",
-                formatear_moneda(-liquidacion.bruto * liquidacion.descuento_horas_pct / 100, decimales),
-            ],
+        descuento_horas = -liquidacion.bruto * liquidacion.descuento_horas_pct / 100
+        items_montos = [
+            ("Bruto (horas semanales: " + f"{liquidacion.horas_semanales:g})", liquidacion.bruto),
+            (f"Descuento por volumen de horas ({liquidacion.descuento_horas_pct:g}%)", descuento_horas),
         ]
         for item in liquidacion.descuentos_feriados:
-            filas_montos.append([f"Descuento {item.tipo.lower()} ({item.fecha})", formatear_moneda(-item.monto, decimales)])
-        filas_montos.append(["Total simulado", formatear_moneda(liquidacion.neto, decimales)])
+            items_montos.append((f"Descuento {item.tipo.lower()} ({item.fecha})", -item.monto))
+        items_montos.append(("Total simulado", liquidacion.neto))
 
+        filas_montos = [["Concepto", "Monto"]] + [
+            [concepto, formatear_moneda(importe, decimales)] for concepto, importe in items_montos
+        ]
         tabla_montos = Table(filas_montos, colWidths=[ancho * 0.7, ancho * 0.3])
         estilo_tabla_montos = [
             ("BACKGROUND", (0, 0), (-1, 0), COLOR_NIVEL_1),
@@ -146,8 +154,20 @@ def generar_pdf_liquidacion_simulada(conn: sqlite3.Connection, liquidacion: Liqu
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LINEABOVE", (0, -1), (-1, -1), 1, colors.black),
         ]
+        # Importes negativos en rojo, positivos en color normal — mismo
+        # criterio que el resto del sistema (ver `_tabla_plana` en
+        # `liquidacion_pdf.py`), fila por fila (+1 por la fila de
+        # encabezado, que no tiene importe).
+        for i, (_, importe) in enumerate(items_montos, start=1):
+            if importe < 0:
+                estilo_tabla_montos.append(("TEXTCOLOR", (1, i), (1, i), COLOR_ROJO))
         tabla_montos.setStyle(TableStyle(estilo_tabla_montos))
         story.append(tabla_montos)
+        story.append(Spacer(1, 14))
+
+        story.append(Paragraph("Fotos de los consultorios ofrecidos", estilo_texto(11, negrita=True)))
+        story.append(Spacer(1, 4))
+        story.extend(tabla_fotos(imagenes, ancho, mostrar_apto_camilla=False, mostrar_valor=True, decimales=decimales))
         return story
 
     ruta = os.path.join(directorio, nombre_archivo_liquidacion_simulada(liquidacion.periodo, profesional))

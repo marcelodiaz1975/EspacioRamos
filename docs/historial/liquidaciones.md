@@ -696,3 +696,82 @@ solo hay que copiarlas si están configuradas DENTRO de la carpeta de
 instalación vieja — si apuntan a una ruta fija del disco, la versión
 nueva las sigue encontrando sola.
 
+## Liquidaciones simuladas: sección "Fotos de los consultorios ofrecidos"
+
+Primera prueba del flujo de trabajo nuevo (sesiones separadas por tema,
+ver `CLAUDE.md` — "Historial archivado"): se le pidió a la IA cargar
+solo `docs/historial/liquidaciones.md` como contexto antes de tocar
+nada, en vez del proyecto entero.
+
+Pedido de la clienta: debajo de la tabla "Liquidación simulada" (en el
+PDF de esa cuarta solapa), una sección nueva "Fotos de los consultorios
+ofrecidos" con una foto de cada consultorio involucrado en los bloques
+cargados, junto a su nombre y su valor.
+
+### Implementación (`app/pdf/liquidacion_simulada_pdf.py`)
+
+Reusa tal cual el helper ya compartido por Propuesta/Disponibilidad
+(`app.pdf.fotos_pdf.imagenes_de_consultorios`/`tabla_fotos`, con
+`mostrar_valor=True`) en vez de armar un pie de foto propio — el pie
+default de ese modo ("Consultorio {N} — Valor hora regular {$}") ya es
+exactamente "nombre y valor", sin necesitar `pie_personalizado`.
+`mostrar_apto_camilla=False` (como Disponibilidad): acá no es una
+oferta real, no aporta nada.
+
+`ids_consultorio = sorted({b.id_consultorio for b in liquidacion.
+bloques})` (los consultorios de los bloques simulados, sin duplicar si
+dos bloques comparten consultorio) alimenta `imagenes_de_consultorios`;
+la estimación de `altura` (para que `construir_sin_saltos` no tenga que
+reintentar con una página más alta) suma `(len(imagenes) // 2 + 1) * 7
+* cm`, mismo criterio que ya usa `oferta_pdf.py` para su propia sección
+de fotos. Sin ninguna `Imagen` cargada para esos consultorios, cae al
+mismo aviso "Sin fotos cargadas." que el resto del sistema — no hace
+falta ningún caso especial.
+
+### Segunda vuelta: Tratamiento en el título, descuento en rojo
+
+Dos pedidos de la clienta al revisar la primera captura:
+
+- **"Con el nombre del profesional que salga el tratamiento también
+  ('{Tratamiento} {Nombre} {Apellido}'), en la liquidación que yo
+  simulé no salió el tratamiento de un profesional categoría X por
+  ejemplo, pero sí lo vi en la captura que me mandaste."** Investigado
+  antes de tocar nada: `_nombre_completo` (el título del PDF y el
+  nombre de archivo) ya arma el nombre igual para cualquier categoría
+  (`profesional["Tratamiento"] or ""`, sin ninguna rama que lo
+  condicione a la categoría ni a `categoria_es_activa`/`anonimizar` —
+  confirmado también contra `liquidacion_pdf.py`/`oferta_busqueda_
+  texto.py`, que arman el nombre con el mismo criterio exacto en todo
+  el sistema) y `Profesional.obtener(...)` hace `SELECT *`, así que el
+  campo llega completo sin importar la categoría. Confirmado armando un
+  profesional categoría X con `Tratamiento="Fgo."` de prueba: aparece
+  correcto en el título y en el nombre de archivo. La conclusión, que
+  se le devolvió a la clienta: el código ya es category-agnostic — si
+  en su prueba no apareció, el profesional puntual que usó no tiene el
+  campo Tratamiento cargado en el catálogo de Profesionales, no es un
+  bug de esta pantalla. Se sumó un test de regresión igual, para que
+  quede blindado ante un cambio futuro que sí rompiera esto.
+- **"El importe que resta, en este caso los descuentos por volumen de
+  horas, que se vea en fuente roja como todos los importes negativos
+  del sistema."** Hueco real, confirmado contra el código: la tabla
+  "Liquidación simulada" nunca había tenido ninguna regla de color por
+  signo (a diferencia de `_tabla_plana` en `liquidacion_pdf.py`, que sí
+  pinta de `COLOR_ROJO` cualquier importe negativo fila por fila). Se
+  corrige con el mismo criterio: `filas_montos` pasa a construirse a
+  partir de una lista intermedia `items_montos` (concepto, importe
+  numérico sin formatear todavía), y después de armar la tabla se
+  recorre esa lista sumando `("TEXTCOLOR", (1, i), (1, i), COLOR_ROJO)`
+  por cada fila con importe negativo — cubre tanto el descuento por
+  volumen de horas como cualquier descuento por feriado, y el total
+  simulado si alguna vez diera negativo (no cambia nada del resto del
+  estilo de esa fila, que sigue en negrita).
+
+Tests nuevos en `tests/test_pdf_liquidacion_simulada.py`:
+`test_sin_fotos_cargadas_muestra_el_aviso`, `test_con_foto_cargada_
+muestra_el_pie_con_nombre_y_valor`, `test_tratamiento_se_muestra_sin_
+importar_la_categoria` (categoría X con Tratamiento cargado, confirma
+que aparece en el título y en el nombre de archivo), `test_descuento_
+por_volumen_de_horas_se_ve_en_rojo` (con un bloque de 6hs semanales —
+el esquema de descuentos por defecto da 0% hasta 2hs, hacía falta más
+para tener un importe negativo real que pintar).
+
