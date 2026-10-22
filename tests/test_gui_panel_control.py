@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -299,7 +300,7 @@ def test_tiene_dos_solapas_avance_de_periodo_e_importacion(qtbot, conn):
     solapas = pantalla.findChild(QTabWidget)
     assert solapas is not None
     assert solapas.count() == 2
-    assert solapas.tabText(0) == "Avance de período y backups"
+    assert solapas.tabText(0) == "Avance de período, backup, y vista rápida"
     assert solapas.tabText(1) == "Importación datos desde Excel"
     assert pantalla.panel_avance.objectName() == "panelSolapa"
     assert pantalla.panel_importacion.objectName() == "panelSolapa"
@@ -424,15 +425,49 @@ def test_tarjeta_profesionales_muestra_los_tres_conteos(qtbot, conn):
     assert "Con reservas regulares activas: 0" in texto
 
 
-def test_tarjeta_ocupacion_muestra_las_cinco_metricas(qtbot, conn):
+def test_tarjeta_ocupacion_muestra_los_tres_conceptos_generales(qtbot, conn):
+    """El monto de aisladas y el saldo pendiente se mudaron a
+    "Estadísticas principales mes en curso" (sin duplicarse acá)."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     texto = pantalla.panel_avance.etiqueta_ocupacion.text()
     assert "Ocupación regular general:" in texto
-    assert "Horas regulares reservadas por semana:" in texto
-    assert "Horas aisladas reservadas este mes:" in texto
-    assert "Monto generado por esas horas aisladas:" in texto
-    assert "Saldo pendiente de cobro este mes:" in texto
+    assert "Cantidad horas regulares semanales mes en curso:" in texto
+    assert "Cantidad horas aisladas mensuales:" in texto
+    assert "Monto generado" not in texto
+    assert "Saldo pendiente" not in texto
+
+
+def test_tarjeta_ocupacion_repite_los_tres_conceptos_por_unidad(qtbot, conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.panel_avance.etiqueta_ocupacion.text()
+    assert "Ramos 1 - 1A:" in texto
+    assert texto.count("Ocupación regular general:") == 2  # general + la de esa unidad
+
+
+def test_tarjeta_estadisticas_principales_muestra_los_siete_conceptos(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.panel_avance.etiqueta_estadisticas_principales.text()
+    for etiqueta in (
+        "Monto por reservas regulares:", "Monto por reservas aisladas:", "Total ingresos:",
+        "Total liquidado:", "Saldo pendiente de cobro (de lo liquidado):",
+        "Gastos operativos:", "Balance de negocio:",
+    ):
+        assert etiqueta in texto
+
+
+def test_tarjeta_profesionales_muestra_los_cuatro_conceptos_nuevos(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.panel_avance.etiqueta_profesionales.text()
+    assert "Con reservas aisladas activas:" in texto
+    assert "Horarios incorporados para el mes próximo:" in texto
+    assert "Horarios liberados para el mes próximo:" in texto
+    assert "Diferencia:" in texto
 
 
 def test_tarjeta_cumpleanos_sin_datos(qtbot, conn):
@@ -555,7 +590,7 @@ def test_titulos_de_las_tarjetas_van_en_negrita_e_italica_con_dos_puntos(qtbot, 
     qtbot.addWidget(pantalla)
     tarjeta = _tarjeta_de(pantalla.panel_avance.etiqueta_periodo)
     encabezado = tarjeta.findChildren(QLabel)[0]
-    assert encabezado.text() == "Período actual:"
+    assert encabezado.text() == "Período actual y último backup:"
     assert "italic" in encabezado.styleSheet()
     assert "bold" in encabezado.styleSheet()
 
@@ -720,5 +755,61 @@ def test_banner_sin_sincronizar_visible_cuando_el_modo_esta_activo(qtbot, conn):
 
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-
     assert pantalla.panel_avance.etiqueta_modo_sin_sincronizar.isHidden() is False
+
+
+def test_scroll_de_cada_cuadrito_principal_tiene_fondo_transparente(qtbot, conn):
+    """Punto 81: sin esto, el viewport del `QScrollArea` pintaba con el
+    color default de Qt — un recuadro de color distinto al resto del
+    cuadrito ("un cuadrito adentro del cuadrito")."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    for etiqueta in (
+        pantalla.panel_avance.etiqueta_periodo, pantalla.panel_avance.etiqueta_estadisticas_principales,
+        pantalla.panel_avance.etiqueta_ocupacion, pantalla.panel_avance.etiqueta_profesionales,
+        pantalla.panel_avance.etiqueta_fechas_especiales, pantalla.panel_avance.etiqueta_cumpleanos,
+    ):
+        tarjeta = _tarjeta_de(etiqueta)
+        scroll = tarjeta.findChild(QScrollArea)
+        assert "transparent" in scroll.styleSheet()
+        assert "transparent" in scroll.viewport().styleSheet()
+
+
+def test_scroll_de_alertas_tambien_tiene_fondo_transparente(qtbot, conn):
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    scroll = pantalla.panel_avance.tarjeta_alertas.findChild(QScrollArea)
+    assert "transparent" in scroll.styleSheet()
+
+
+def test_contenido_de_un_solo_label_se_alinea_arriba_no_al_centro(qtbot, conn):
+    """Sin `setAlignment(AlignTop)`, `setWidgetResizable(True)` estira el
+    `QLabel` al alto del viewport y la alineación vertical default
+    (`AlignVCenter`) lo deja centrado en vez de arriba."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    for etiqueta in (
+        pantalla.panel_avance.etiqueta_estadisticas_principales, pantalla.panel_avance.etiqueta_ocupacion,
+        pantalla.panel_avance.etiqueta_profesionales, pantalla.panel_avance.etiqueta_fechas_especiales,
+        pantalla.panel_avance.etiqueta_cumpleanos,
+    ):
+        assert etiqueta.alignment() & Qt.AlignmentFlag.AlignTop
+
+
+def test_alto_minimo_de_tarjeta_bajo_a_dos_tercios(qtbot, conn):
+    from app.gui.pantallas.panel_control import _ALTO_MINIMO_TARJETA
+    assert _ALTO_MINIMO_TARJETA == 93  # round(140 * 2 / 3)
+
+
+def test_tarjeta_alertas_ocupa_mucho_mas_alto_que_una_tarjeta_de_la_grilla(qtbot, conn):
+    """El espacio que se le recortó a los seis cuadritos de la grilla
+    (pedido explícito de la clienta) lo absorbe Alertas — ya tenía
+    `stretch=1` en `layout_solapa`, a diferencia de la grilla."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1200, 900)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    grilla = pantalla.findChild(QGridLayout)
+    alto_una_tarjeta = grilla.itemAt(0).widget().height()
+    assert pantalla.panel_avance.tarjeta_alertas.height() > alto_una_tarjeta * 1.5

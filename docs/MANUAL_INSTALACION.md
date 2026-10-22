@@ -201,7 +201,7 @@ Excel"**:
 Una vez cargados los datos básicos (al menos un Edificio/Unidad/
 Consultorio):
 
-1. Ir a **Panel de control** → solapa **"Avance de período y backups"**.
+1. Ir a **Panel de control** → solapa **"Avance de período, backup, y vista rápida"**.
 2. Click en **"Generar backup ahora"**.
 3. Confirmar que aparezca una carpeta nueva (con el formato
    `Backup AAAA-MM-DD HHhMM`) dentro de la carpeta de Google Drive del

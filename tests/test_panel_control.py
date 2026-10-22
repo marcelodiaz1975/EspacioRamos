@@ -4,10 +4,13 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.negocio.balance import resultado_periodo
 from app.negocio.panel_control import (
     _proxima_ocurrencia,
     calcular_alertas,
     calcular_estadisticas_ocupacion,
+    calcular_estadisticas_ocupacion_por_unidad,
+    calcular_estadisticas_principales,
     calcular_estadisticas_profesionales,
     cumpleanos_y_dias_profesion_proximos,
     fechas_especiales_proximas_dos_meses,
@@ -233,13 +236,66 @@ def test_estadisticas_profesionales_cuenta_reservas_regulares_activas(conn):
     assert calcular_estadisticas_profesionales(conn).con_reservas_regulares_activas == 1
 
 
+def test_estadisticas_profesionales_cuenta_aisladas_activas_desde_hoy(conn):
+    """"Activas" = confirmadas desde hoy en adelante (inclusive) — una
+    aislada ya pasada no cuenta, una futura o de hoy sí."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    _fijar_fecha(conn, "2026-08-15")
+    con_futura = _profesional(conn, CategoriaProfesional="A")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=con_futura, IdConsultorio=id_consultorio, Fecha="2026-08-20", HoraInicio=9, HoraFin=11,
+    )
+    con_pasada = _profesional(conn, CategoriaProfesional="A")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=con_pasada, IdConsultorio=id_consultorio, Fecha="2026-08-10", HoraInicio=9, HoraFin=11,
+    )
+    assert calcular_estadisticas_profesionales(conn).con_reservas_aisladas_activas == 1
+
+
+def test_estadisticas_profesionales_horarios_incorporados_proximo_periodo(conn):
+    """Una `ReservaRegular` que arranca (`VigenciaInicio`) dentro del mes
+    PRÓXIMO es un horario "incorporado" — todavía no pesa en la ocupación
+    de este mes, pero sí en la del que viene."""
+    _fijar_fecha(conn, "2026-08-15")
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    id_prof = _profesional(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=11, VigenciaInicio="2026-09-01",
+    )
+    est = calcular_estadisticas_profesionales(conn)
+    assert est.horarios_incorporados_proximo_periodo == pytest.approx(2.0)
+    assert est.horarios_liberados_proximo_periodo == pytest.approx(0.0)
+    assert est.diferencia_horarios_proximo_periodo == pytest.approx(2.0)
+
+
+def test_estadisticas_profesionales_horarios_liberados_proximo_periodo(conn):
+    """Una `ReservaRegular` que termina (`VigenciaFin`) dentro del mes EN
+    CURSO libera ese horario a partir del mes próximo."""
+    _fijar_fecha(conn, "2026-08-15")
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    id_prof = _profesional(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=12, VigenciaInicio="2020-01-01", VigenciaFin="2026-08-31",
+    )
+    est = calcular_estadisticas_profesionales(conn)
+    assert est.horarios_incorporados_proximo_periodo == pytest.approx(0.0)
+    assert est.horarios_liberados_proximo_periodo == pytest.approx(3.0)
+    assert est.diferencia_horarios_proximo_periodo == pytest.approx(-3.0)
+
+
 def test_estadisticas_ocupacion_sin_datos(conn):
     est = calcular_estadisticas_ocupacion(conn)
     assert est.ocupacion_regular_pct == 0.0
     assert est.horas_regulares_semanales == 0.0
     assert est.horas_aisladas_mes == 0.0
-    assert est.monto_aisladas_mes == 0.0
-    assert est.saldo_pendiente_mes == 0.0
 
 
 def test_estadisticas_ocupacion_horas_aisladas_solo_cuenta_confirmadas(conn):
@@ -259,12 +315,56 @@ def test_estadisticas_ocupacion_horas_aisladas_solo_cuenta_confirmadas(conn):
     )
     est = calcular_estadisticas_ocupacion(conn)
     assert est.horas_aisladas_mes == pytest.approx(2.0)
-    assert est.monto_aisladas_mes == pytest.approx(2000.0)
 
 
-def test_estadisticas_ocupacion_saldo_pendiente_es_facturado_menos_cobrado(conn):
+def test_estadisticas_ocupacion_por_unidad_desglosa_horas_regulares_y_aisladas(conn):
+    """Repite los tres conceptos generales por cada Unidad del sistema
+    (pedido explícito de la clienta) — una reserva cargada en una Unidad
+    no debe aparecer en las estadísticas de la otra."""
+    _fijar_fecha(conn, "2026-08-15")
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad_1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
+    id_consultorio_1 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_1, NumeroConsultorio=1)
+    id_consultorio_2 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=2)
+    id_prof = _profesional(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio_1, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=11, VigenciaInicio="2020-01-01",
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio_2, Fecha="2026-08-10", HoraInicio=9, HoraFin=11,
+    )
+    por_unidad = {u.nombre: u for u in calcular_estadisticas_ocupacion_por_unidad(conn)}
+    assert por_unidad["Ramos 1 - 1A"].horas_regulares_semanales == pytest.approx(2.0)
+    assert por_unidad["Ramos 1 - 1A"].horas_aisladas_mes == pytest.approx(0.0)
+    assert por_unidad["Ramos 1 - PB"].horas_regulares_semanales == pytest.approx(0.0)
+    assert por_unidad["Ramos 1 - PB"].horas_aisladas_mes == pytest.approx(2.0)
+
+
+def test_estadisticas_ocupacion_por_unidad_ordena_pb_antes_que_pisos(conn):
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
+    nombres = [u.nombre for u in calcular_estadisticas_ocupacion_por_unidad(conn)]
+    assert nombres == ["Ramos 1 - PB", "Ramos 1 - 1A"]
+
+
+def test_estadisticas_principales_monto_aisladas_y_saldo_pendiente(conn):
+    """El monto generado por aisladas (antes vivía en `EstadisticasOcupacion.
+    monto_aisladas_mes`) y el saldo pendiente (antes `saldo_pendiente_mes`)
+    se mudaron acá, al cuadrito "Estadísticas principales mes en curso" —
+    pedido explícito de la clienta, sin duplicarse en "Ocupación y horas"."""
     _fijar_fecha(conn, "2026-08-15")
     id_prof = _profesional(conn)
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=1000,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-10", HoraInicio=9, HoraFin=11,
+    )
     obtener_repositorio(conn, "LiquidacionEmitida").crear(
         IdProfesional=id_prof, Periodo="2026-08", MontoGenerado=10000,
     )
@@ -275,7 +375,25 @@ def test_estadisticas_ocupacion_saldo_pendiente_es_facturado_menos_cobrado(conn)
     obtener_repositorio(conn, "HistorialPagos").crear(
         IdProfesional=id_prof, Monto=1000, PeriodoImputado="2026-07",
     )
-    assert calcular_estadisticas_ocupacion(conn).saldo_pendiente_mes == pytest.approx(6000.0)
+    principales = calcular_estadisticas_principales(conn)
+    assert principales.monto_aisladas == pytest.approx(2000.0)
+    assert principales.total_liquidado == pytest.approx(10000.0)
+    assert principales.saldo_pendiente == pytest.approx(6000.0)
+
+
+def test_estadisticas_principales_total_ingresos_y_balance_reusan_balance_del_negocio(conn):
+    """"Total ingresos"/"Gastos operativos"/"Balance de negocio" son los
+    mismos tres valores que ya calcula `app.negocio.balance.resultado_
+    periodo` para todo el espacio, sin ningún alcance de ubicación."""
+    _fijar_fecha(conn, "2026-08-15")
+    obtener_repositorio(conn, "GastoOperativo").crear(
+        Periodo="2026-08", Monto=500, Alcance="Espacio general", Concepto="Limpieza",
+    )
+    principales = calcular_estadisticas_principales(conn)
+    ingresos, gastos, balance = resultado_periodo(conn, "2026-08")
+    assert principales.total_ingresos == pytest.approx(ingresos)
+    assert principales.gastos_operativos == pytest.approx(gastos)
+    assert principales.balance_negocio == pytest.approx(balance)
 
 
 def test_fechas_especiales_proximas_dos_meses_excluye_las_que_ya_pasaron_este_mes(conn):

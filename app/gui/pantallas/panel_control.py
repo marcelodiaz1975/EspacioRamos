@@ -87,7 +87,36 @@ escrolable`, un `QScrollArea` propio por cuadrito en vez de agregar el
 alto parejo de la grilla — la tarjeta de Alertas, debajo de los seis, ya
 tenía su propio scroll desde antes. Cumpleaños y días de profesión pasa
 a mostrar la fecha con el día de la semana abreviado ("ddd dd-mm", ej.
-"mar 15-10"), mismo criterio que el resto del sistema."""
+"mar 15-10"), mismo criterio que el resto del sistema.
+
+Punto 81 (misma versión, segunda vuelta sobre esta solapa — ahora
+"Avance de período, backup, y vista rápida"): "Último backup" se funde
+DENTRO de "Período actual" (pasa a llamarse "Período actual y último
+backup", con la info de período/reloj arriba y la de backup debajo, sin
+cambios en ninguna de las dos) y el cuadrito que libera pasa a
+"Estadísticas principales mes en curso" (montos del mes, reusando
+`app.negocio.balance.resultado_periodo` — mismo criterio "neto" que
+Estadísticas/Balance del negocio). "Ocupación y horas" (ahora "...mes en
+curso") pierde el monto de aisladas y el saldo pendiente (ya están en el
+cuadrito nuevo, sin duplicarse) y suma, debajo de los tres conceptos
+generales, el mismo desglose por cada Unidad del sistema
+(`calcular_estadisticas_ocupacion_por_unidad`). "Profesionales" suma
+cuatro conceptos: con reservas aisladas activas, y tres sobre cambios de
+`ReservaRegular` que todavía no entraron en vigencia (horarios
+incorporados/liberados para el mes próximo, según caiga `VigenciaInicio`/
+`VigenciaFin` dentro del mes próximo/en curso, más la diferencia entre
+los dos). Los seis cuadritos (y Alertas) pasan a tener fondo transparente
+en su `QScrollArea` (tanto el área como el viewport interno, que Qt arma
+con su propio color default — "un cuadrito adentro del cuadrito", pedido
+explícito de la clienta) y el contenido de un solo `QLabel` pasa a
+alinearse arriba (`AlignTop`, en vez del centrado vertical default de
+`QLabel` cuando `setWidgetResizable` lo estira al alto del viewport) —
+ver `_agregar_contenido_escrolable`. `_ALTO_MINIMO_TARJETA` baja a 2/3
+del valor anterior (pedido explícito, "lo que se libera dáselo al
+cuadro de alertas") — no hace falta ningún cambio aparte para que
+Alertas absorba ese espacio: ya tenía `stretch=1` en `layout_solapa`,
+a diferencia de la grilla (sin stretch propio), así que cualquier
+espacio vertical sobrante en la solapa ya iba entero a Alertas."""
 from __future__ import annotations
 
 import sqlite3
@@ -132,6 +161,8 @@ from app.negocio.panel_control import (
     Alertas,
     calcular_alertas,
     calcular_estadisticas_ocupacion,
+    calcular_estadisticas_ocupacion_por_unidad,
+    calcular_estadisticas_principales,
     calcular_estadisticas_profesionales,
     cumpleanos_y_dias_profesion_proximos,
     fechas_especiales_proximas_dos_meses,
@@ -139,7 +170,12 @@ from app.negocio.panel_control import (
 
 _ANCHO_BOTON = 220
 _COLUMNAS_GRILLA = 3
-_ALTO_MINIMO_TARJETA = 140  # deja lugar de sobra al cuadrito con más líneas ("Ocupación y horas")
+# SistemaDF v0.11.2026.10 ("Avance de período, backup, y vista rápida"):
+# un tercio menos que el alto original (140px) — pedido explícito de la
+# clienta, el espacio que se libera lo absorbe solo el cuadro de Alertas
+# (stretch=1 en `layout_solapa`, a diferencia de la grilla, que no
+# compite por ese espacio extra — ver `_armar_ui`).
+_ALTO_MINIMO_TARJETA = round(140 * 2 / 3)
 
 _TEXTO_EXPLICACION_BACKUP = (
     "Generar backup ahora copia la base de datos y toda la carpeta de archivos generados a la carpeta de "
@@ -213,10 +249,35 @@ def _agregar_contenido_escrolable(layout: QVBoxLayout, contenido: QWidget) -> No
     entra en el alto parejo de la grilla (`_ALTO_MINIMO_TARJETA`), sin
     afectar el alto de los demás — un `QScrollArea` propio por cuadrito,
     envolviendo el `QLabel` (o el contenedor de varios) en vez de
-    agregarlo directo al layout del cuadrito."""
+    agregarlo directo al layout del cuadrito.
+
+    Punto 81 (misma versión): dos retoques pedidos por la clienta sobre
+    esa misma pieza, para que el contenido se vea igual que el resto del
+    cuadrito, no como "una caja adentro de otra":
+    - Fondo transparente, tanto del `QScrollArea` como de su viewport
+      interno (el widget que Qt arma solo al llamar `setWidget`, no
+      accesible por objectName — hay que tocarlo directo vía `.viewport()`):
+      sin esto, el viewport pinta con el color de fondo DEFAULT de Qt
+      (en modo claro, `paleta()` no toca `QPalette.ColorRole.Base`/
+      `Window`, así que cae al gris de sistema; en modo oscuro, el
+      `Base` que sí fija `paleta()` no es necesariamente el mismo tono
+      que el `superficie` de `QWidget#panelSolapa`/`QFrame#cuadritoInfo`)
+      — quedaba un recuadro de color distinto adentro del cuadrito.
+    - Alineación arriba (`AlignLeft | AlignTop`) en el `QLabel` de
+      contenido: con `setWidgetResizable(True)`, Qt estira ese `QLabel`
+      al alto completo del viewport, y la alineación VERTICAL default de
+      `QLabel` es centrada (`AlignVCenter`) — un cuadrito con poco texto
+      lo mostraba centrado en vez de arriba. No aplica al contenedor de
+      "Período actual y último backup" (un `QWidget` con su propio
+      `QVBoxLayout` + `addStretch()` al final, que ya empuja todo arriba
+      por su cuenta)."""
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setStyleSheet("background: transparent;")
+    scroll.viewport().setStyleSheet("background: transparent;")
+    if isinstance(contenido, QLabel):
+        contenido.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
     scroll.setWidget(contenido)
     layout.addWidget(scroll, stretch=1)
 
@@ -274,7 +335,7 @@ class PanelControl(QWidget):
 
         solapas = QTabWidget()
         self.panel_avance = _PanelAvancePeriodo(self.conn)
-        solapas.addTab(self.panel_avance, "Avance de período y backups")
+        solapas.addTab(self.panel_avance, "Avance de período, backup, y vista rápida")
         self.panel_importacion = _PanelImportacion(self.conn)
         solapas.addTab(self.panel_importacion, "Importación datos desde Excel")
         solapas.tabBar().setDrawBase(False)
@@ -366,17 +427,18 @@ class _PanelAvancePeriodo(QWidget):
 
         # Seis cuadritos principales, todos del mismo ancho y alto (grilla
         # pareja 3x2 — sin la de Alertas, que va aparte ocupando todo el
-        # ancho de la pantalla, ver abajo). Punto 76/77 (SistemaDF
-        # v0.11.2026.10): "Fecha y hora actual" se unifica dentro de
-        # "Período actual" (dos líneas en el mismo cuadrito, ver
-        # `_armar_tarjeta_periodo`) — de 7 cuadritos se pasa a 6, en el
-        # orden pedido explícito: Período actual, Último backup,
-        # Ocupación y horas / Profesionales, Feriados y fechas
-        # especiales, Cumpleaños y días de profesión.
+        # ancho de la pantalla, ver abajo). Punto 81 (SistemaDF
+        # v0.11.2026.10): "Último backup" se funde dentro de "Período
+        # actual" (un cuadrito "Período actual y último backup", ver
+        # `_armar_tarjeta_periodo_y_backup`) y el cuadrito que libera pasa
+        # a "Estadísticas principales mes en curso" — sigue en 6 cuadritos,
+        # en el orden pedido explícito: Período actual y último backup,
+        # Estadísticas principales, Ocupación y horas / Profesionales,
+        # Feriados y fechas especiales, Cumpleaños y días de profesión.
         grilla = QGridLayout()
         tarjetas = [
-            self._armar_tarjeta_periodo(),
-            self._armar_tarjeta_backup(),
+            self._armar_tarjeta_periodo_y_backup(),
+            self._armar_tarjeta_estadisticas_principales(),
             self._armar_tarjeta_ocupacion(),
             self._armar_tarjeta_profesionales(),
             self._armar_tarjeta_fechas_especiales(),
@@ -414,12 +476,16 @@ class _PanelAvancePeriodo(QWidget):
         simulada."""
         self.etiqueta_reloj.setText(_texto_fecha_hora(datetime.now(), con_segundos=True))
 
-    def _armar_tarjeta_periodo(self) -> QFrame:
-        """Punto 76: unifica lo que antes eran dos cuadritos separados
-        ("Fecha y hora actual" + "Período actual") en uno solo — período
-        en la primera línea, fecha/hora real debajo, dentro del mismo
-        cuadrito "Período actual"."""
-        tarjeta, layout = _tarjeta("Período actual")
+    def _armar_tarjeta_periodo_y_backup(self) -> QFrame:
+        """Punto 76 (vuelta anterior): unifica "Fecha y hora actual" dentro
+        de "Período actual" (período arriba, fecha/hora real debajo).
+        Punto 81 (esta vuelta, pedido explícito de la clienta): el
+        cuadrito "Último backup" entero se funde ACÁ TAMBIÉN, debajo de lo
+        anterior, para que quede todo junto en un solo cuadrito "Período
+        actual y último backup" — se mantiene intacta la información del
+        cuadrito de período (arriba) y se agrega debajo, sin cambios, la
+        del cuadrito de backup (antes aparte)."""
+        tarjeta, layout = _tarjeta("Período actual y último backup")
         contenido = QWidget()
         layout_contenido = QVBoxLayout(contenido)
         layout_contenido.setContentsMargins(0, 0, 0, 0)
@@ -427,15 +493,23 @@ class _PanelAvancePeriodo(QWidget):
         layout_contenido.addWidget(self.etiqueta_periodo)
         self.etiqueta_reloj = QLabel()
         layout_contenido.addWidget(self.etiqueta_reloj)
+        self.etiqueta_backup = QLabel()
+        self.etiqueta_backup.setWordWrap(True)
+        layout_contenido.addWidget(self.etiqueta_backup)
         layout_contenido.addStretch()
         _agregar_contenido_escrolable(layout, contenido)
         return tarjeta
 
-    def _armar_tarjeta_backup(self) -> QFrame:
-        tarjeta, layout = _tarjeta("Último backup")
-        self.etiqueta_backup = QLabel()
-        self.etiqueta_backup.setWordWrap(True)
-        _agregar_contenido_escrolable(layout, self.etiqueta_backup)
+    def _armar_tarjeta_estadisticas_principales(self) -> QFrame:
+        """Cuadrito nuevo (punto 81, SistemaDF v0.11.2026.10), en el lugar
+        que liberó "Último backup" al fundirse con "Período actual" —
+        montos del mes en curso, todo el espacio, mismo criterio "neto"
+        que ya usan Estadísticas/Balance del negocio (ver `app.negocio.
+        panel_control.calcular_estadisticas_principales`)."""
+        tarjeta, layout = _tarjeta("Estadísticas principales mes en curso")
+        self.etiqueta_estadisticas_principales = QLabel()
+        self.etiqueta_estadisticas_principales.setWordWrap(True)
+        _agregar_contenido_escrolable(layout, self.etiqueta_estadisticas_principales)
         return tarjeta
 
     def _armar_tarjeta_fechas_especiales(self) -> QFrame:
@@ -453,7 +527,13 @@ class _PanelAvancePeriodo(QWidget):
         return tarjeta
 
     def _armar_tarjeta_ocupacion(self) -> QFrame:
-        tarjeta, layout = _tarjeta("Ocupación y horas")
+        """Punto 81: el monto generado por aisladas y el saldo pendiente
+        se sacan de este cuadrito (ahora viven en "Estadísticas
+        principales mes en curso", sin duplicarse) — quedan los tres
+        conceptos de ocupación/horas generales, y debajo, repetidos para
+        cada Unidad del sistema (`calcular_estadisticas_ocupacion_por_
+        unidad`), pedido explícito de la clienta."""
+        tarjeta, layout = _tarjeta("Ocupación y horas mes en curso")
         self.etiqueta_ocupacion = QLabel()
         self.etiqueta_ocupacion.setWordWrap(True)
         _agregar_contenido_escrolable(layout, self.etiqueta_ocupacion)
@@ -467,14 +547,23 @@ class _PanelAvancePeriodo(QWidget):
         return tarjeta
 
     def _armar_tarjeta_alertas(self) -> QFrame:
+        """Mismo criterio de fondo transparente que el resto de los
+        cuadritos (`_agregar_contenido_escrolable`) — acá no se reusa esa
+        función porque Alertas no muestra un solo QLabel sino una lista de
+        tarjetas propias (`contenedor_alertas`/`layout_alertas`), pero el
+        bug de fondo (el viewport del QScrollArea con un color distinto
+        al resto del cuadrito) es el mismo. La alineación arriba ya la
+        daba gratis `layout_alertas.addStretch()` al final, sin tocar."""
         self.tarjeta_alertas, layout = _tarjeta("Alertas")
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
         self.contenedor_alertas = QWidget()
         self.layout_alertas = QVBoxLayout(self.contenedor_alertas)
         self.layout_alertas.addStretch()
         scroll.setWidget(self.contenedor_alertas)
+        scroll.viewport().setStyleSheet("background: transparent;")
         layout.addWidget(scroll)
         return self.tarjeta_alertas
 
@@ -512,17 +601,38 @@ class _PanelAvancePeriodo(QWidget):
         self.etiqueta_profesionales.setText(
             f"Con plan de pago vigente: {prof.con_plan_pago_vigente}\n"
             f"Con saldo fuera de tolerancia: {prof.con_saldo_fuera_de_tolerancia}\n"
-            f"Con reservas regulares activas: {prof.con_reservas_regulares_activas}"
+            f"Con reservas regulares activas: {prof.con_reservas_regulares_activas}\n"
+            f"Con reservas aisladas activas: {prof.con_reservas_aisladas_activas}\n"
+            f"Horarios incorporados para el mes próximo: {prof.horarios_incorporados_proximo_periodo:.1f}hs\n"
+            f"Horarios liberados para el mes próximo: {prof.horarios_liberados_proximo_periodo:.1f}hs\n"
+            f"Diferencia: {prof.diferencia_horarios_proximo_periodo:+.1f}hs"
+        )
+
+        principales = calcular_estadisticas_principales(self.conn)
+        self.etiqueta_estadisticas_principales.setText(
+            f"Monto por reservas regulares: {formatear_moneda(principales.monto_regulares)}\n"
+            f"Monto por reservas aisladas: {formatear_moneda(principales.monto_aisladas)}\n"
+            f"Total ingresos: {formatear_moneda(principales.total_ingresos)}\n"
+            f"Total liquidado: {formatear_moneda(principales.total_liquidado)}\n"
+            f"Saldo pendiente de cobro (de lo liquidado): {formatear_moneda(principales.saldo_pendiente)}\n"
+            f"Gastos operativos: {formatear_moneda(principales.gastos_operativos)}\n"
+            f"Balance de negocio: {formatear_moneda(principales.balance_negocio)}"
         )
 
         ocup = calcular_estadisticas_ocupacion(self.conn)
-        self.etiqueta_ocupacion.setText(
-            f"Ocupación regular general: {ocup.ocupacion_regular_pct:.1f}%\n"
-            f"Horas regulares reservadas por semana: {ocup.horas_regulares_semanales:.1f}hs\n"
-            f"Horas aisladas reservadas este mes: {ocup.horas_aisladas_mes:.1f}hs\n"
-            f"Monto generado por esas horas aisladas: {formatear_moneda(ocup.monto_aisladas_mes)}\n"
-            f"Saldo pendiente de cobro este mes: {formatear_moneda(ocup.saldo_pendiente_mes)}"
-        )
+        lineas_ocupacion = [
+            f"Ocupación regular general: {ocup.ocupacion_regular_pct:.1f}%",
+            f"Cantidad horas regulares semanales mes en curso: {ocup.horas_regulares_semanales:.1f}hs",
+            f"Cantidad horas aisladas mensuales: {ocup.horas_aisladas_mes:.1f}hs",
+        ]
+        for unidad in calcular_estadisticas_ocupacion_por_unidad(self.conn):
+            lineas_ocupacion.append(f"\n{unidad.nombre}:")
+            lineas_ocupacion.append(f"Ocupación regular general: {unidad.ocupacion_pct:.1f}%")
+            lineas_ocupacion.append(
+                f"Cantidad horas regulares semanales mes en curso: {unidad.horas_regulares_semanales:.1f}hs"
+            )
+            lineas_ocupacion.append(f"Cantidad horas aisladas mensuales: {unidad.horas_aisladas_mes:.1f}hs")
+        self.etiqueta_ocupacion.setText("\n".join(lineas_ocupacion))
 
         eventos = cumpleanos_y_dias_profesion_proximos(self.conn)
         if eventos:

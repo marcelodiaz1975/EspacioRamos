@@ -289,6 +289,111 @@ en_vez_de_avanzar` (Shift+Enter inserta el salto y el foco se queda en
 el mismo campo) y `test_enter_solo_en_campo_multilinea_sigue_avanzando_
 el_foco` (Enter sin Shift sigue avanzando sin agregar ningún salto).
 
+## Panel de control, solapa "Avance de período, backup, y vista rápida" (ronda en curso)
+
+Nuevo hilo de trabajo (tercera prueba del flujo por temas separados):
+sesión nueva, con `docs/historial/sistema.md` como contexto (donde vive
+el resto del historial de esta pantalla). Pedido de varios puntos juntos
+sobre la grilla de cuadritos:
+
+- **Título de la solapa**: "Avance de período y backups" pasa a "Avance
+  de período, backup, y vista rápida" — pedido explícito, sin ningún
+  otro cambio de fondo asociado.
+- **Fusión de cuadritos**: "Último backup" se funde DENTRO de "Período
+  actual" (ahora "Período actual y último backup") — la info del
+  primero queda arriba, la del segundo debajo, sin tocar ninguna de las
+  dos (`_armar_tarjeta_periodo_y_backup`, antes dos funciones separadas).
+  El cuadrito que libera pasa a ser "Estadísticas principales mes en
+  curso" (`calcular_estadisticas_principales`, `app.negocio.
+  panel_control`): monto por reservas regulares/aisladas (`monto_neto_
+  regular_periodo`/`monto_neto_aislada_periodo`, mismo criterio "neto"
+  que Estadísticas), total ingresos/gastos operativos/balance de negocio
+  (reusa `app.negocio.balance.resultado_periodo` tal cual, sin alcance de
+  ubicación), total liquidado y saldo pendiente de cobro (`LiquidacionEmitida.
+  MontoGenerado` del período, ya existía adentro de `_saldo_pendiente_
+  periodo` — se extrajo a `_total_liquidado_periodo` para no duplicar la
+  consulta).
+- **"Ocupación y horas mes en curso"** (antes "Ocupación y horas"):
+  pierde el monto de aisladas y el saldo pendiente (ya están en el
+  cuadrito nuevo, sin duplicarse) y suma, debajo de los tres conceptos
+  generales (ocupación %, horas regulares semanales, horas aisladas
+  mensuales), el mismo desglose repetido por cada Unidad del sistema
+  (`calcular_estadisticas_ocupacion_por_unidad`, nueva) — reusa
+  `calcular_ocupacion(conn, anio, mes).por_unidad` para el % (ya lo
+  calculaba agregado) y repite `_horas_regulares_semanales_en_fecha`/
+  `_horas_aisladas_periodo` (esta última sumó un parámetro opcional
+  `ids_consultorio`, que antes no tenía) acotados a los consultorios de
+  cada Unidad. Orden: Edificio alfabético y, dentro de cada uno, la
+  Unidad con el mismo criterio PB/EP/piso ascendente que el resto del
+  sistema (`app.pdf.estilos.clave_orden_unidad`, importado cruzado de
+  capa — mismo patrón que ya usa `app.negocio.valores_operativos`).
+- **"Profesionales"** suma cuatro conceptos, todos en `calcular_
+  estadisticas_profesionales`: "con reservas aisladas activas" (confirmadas
+  desde HOY en adelante, inclusive — no cuenta una ya pasada) y tres
+  sobre cambios de `ReservaRegular` que todavía no entraron en vigencia:
+  "horarios incorporados para el mes próximo" (suma de horas semanales
+  de reservas cuya `VigenciaInicio` cae dentro del mes PRÓXIMO),
+  "horarios liberados para el mes próximo" (mismo criterio sobre
+  `VigenciaFin` cayendo dentro del mes EN CURSO — dejan de estar
+  vigentes a partir del 1° del próximo) y "Diferencia" (incorporados
+  menos liberados, puede ser negativa). Estos tres últimos son una
+  interpretación propia de "cambios de horas regulares para el próximo
+  período" sobre el modelo de vigencias ya existente — no hay, todavía,
+  confirmación explícita de la clienta sobre si es exactamente lo que
+  tenía en mente.
+- **Fondo "cuadrito adentro del cuadrito"**: el `QScrollArea` de cada
+  tarjeta (y su viewport interno, que Qt arma solo al llamar `setWidget`
+  y no es accesible por objectName) pintaba con el color default de Qt
+  en vez del `superficie` del resto del cuadrito — en modo claro porque
+  `paleta()` no toca `Base`/`Window` ahí (vuelve temprano), en modo
+  oscuro porque el `Base` que sí fija no es necesariamente el mismo tono
+  que `panelSolapa`/`cuadritoInfo`. Se resuelve seteando `background:
+  transparent` directo en la instancia del `scroll` y de `scroll.
+  viewport()` (`_agregar_contenido_escrolable`, y a mano en `_armar_
+  tarjeta_alertas`, que no pasa por esa función) — sin tocar `estilos.py`
+  global, es local a este módulo igual que el resto del estilo de
+  `_tarjeta`.
+- **Alineación arriba**: con `setWidgetResizable(True)`, Qt estira el
+  `QLabel` de contenido al alto completo del viewport, y la alineación
+  vertical default de `QLabel` es centrada — un cuadrito con poco texto
+  quedaba centrado en vez de arriba. Se corrige con `setAlignment(AlignLeft
+  | AlignTop)` sobre ese `QLabel`, adentro de `_agregar_contenido_
+  escrolable` (no aplica al cuadrito de período/backup, que es un
+  `QWidget` con su propio `QVBoxLayout` + `addStretch()`, ya alineado
+  arriba por su cuenta).
+- **Alto de los cuadritos, 2/3 del anterior**: `_ALTO_MINIMO_TARJETA`
+  baja de 140 a 93px (`round(140 * 2 / 3)`). El espacio que se libera lo
+  absorbe Alertas SOLO — no hizo falta ningún cambio de layout aparte:
+  Alertas ya tenía `stretch=1` en `layout_solapa` desde que se separó de
+  la grilla (tercera vuelta de una ronda anterior), mientras que la
+  grilla en sí se agrega sin stretch propio, así que cualquier espacio
+  vertical sobrante en la solapa ya iba entero a Alertas por cómo reparte
+  `QVBoxLayout` el espacio entre sus hijos.
+
+Pregunta aparte, sin cambio de código: cómo cargar "Día del psicólogo"
+el 13 de octubre de cada año — se carga desde el catálogo "Profesiones y
+tratamientos", campo "Día de profesión" (formato MM-DD, sin año, se
+repite todos los años), en la fila de "Psicología"; el texto "Día del
+Psicólogo" sale del campo "Nombre masculino" de esa misma fila. Ya
+alimenta el cuadrito "Cumpleaños y días de profesión" sin tocar nada
+más (`cumpleanos_y_dias_profesion_proximos`, sin cambios).
+
+Tests nuevos/reescritos: `tests/test_panel_control.py` (`calcular_
+estadisticas_profesionales` con los tres casos de aisladas activas/
+incorporados/liberados; `calcular_estadisticas_principales` contra
+`resultado_periodo` directo, para no duplicar la fórmula en el test;
+`calcular_estadisticas_ocupacion_por_unidad` con dos Unidades, cada una
+con su propia reserva, más el orden PB antes que piso numérico; los
+viejos `monto_aisladas_mes`/`saldo_pendiente_mes` de `EstadisticasOcupacion`
+se sacaron, ya no existen ahí). `tests/test_gui_panel_control.py` (título
+de solapa nuevo; título del cuadrito fusionado; los tres conceptos
+generales de ocupación sin el monto/saldo viejo, más el desglose por
+Unidad; los siete conceptos del cuadrito nuevo; los cuatro conceptos
+nuevos de Profesionales; fondo transparente del scroll en los seis
+cuadritos y en Alertas; alineación `AlignTop` del contenido; `_ALTO_
+MINIMO_TARJETA` en el valor nuevo; Alertas más alto que un cuadrito de
+la grilla en una proporción mínima esperada).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
@@ -306,7 +411,7 @@ antes de dar la pantalla por cerrada.
 Las capturas que se le envían a la clienta se nombran
 "{Sección} - {Formulario} - {Solapa}.png" (pedido explícito de la
 clienta, para no tener que renombrarlas ella a mano) — ej. "Sistema -
-Panel de control - Avance de período y backups.png". Sección es
+Panel de control - Avance de período, backup, y vista rápida.png". Sección es
 "Sistema"/"Operativa diaria" (las dos categorías del menú), Formulario
 el nombre del `Seccion` del menú, Solapa el texto de la pestaña
 mostrada (si la pantalla no tiene solapas, se omite esa tercera parte).

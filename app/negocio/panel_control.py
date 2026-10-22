@@ -14,6 +14,7 @@ from dataclasses import dataclass, field, fields
 from datetime import date, timedelta
 
 from app.negocio.backup import backup_vencido as _backup_vencido
+from app.negocio.balance import resultado_periodo
 from app.negocio.dias import (
     fecha_actual,
     parsear_periodo,
@@ -26,7 +27,9 @@ from app.negocio.estadisticas import (
     _horas_regulares_semanales_en_fecha,
     calcular_ocupacion,
     monto_neto_aislada_periodo,
+    monto_neto_regular_periodo,
 )
+from app.pdf.estilos import clave_orden_unidad
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -165,10 +168,37 @@ class EstadisticasProfesionales:
     con_plan_pago_vigente: int
     con_saldo_fuera_de_tolerancia: int
     con_reservas_regulares_activas: int
+    con_reservas_aisladas_activas: int
+    horarios_incorporados_proximo_periodo: float
+    horarios_liberados_proximo_periodo: float
+
+    @property
+    def diferencia_horarios_proximo_periodo(self) -> float:
+        return self.horarios_incorporados_proximo_periodo - self.horarios_liberados_proximo_periodo
+
+
+def _horas_regulares_por_columna_vigencia(conn: sqlite3.Connection, columna: str, desde: str, hasta: str) -> float:
+    """Suma de horas SEMANALES (`HoraFin - HoraInicio`, una vez por fila,
+    no multiplicadas por semanas del mes) de `ReservaRegular` cuya
+    `columna` (`VigenciaInicio`/`VigenciaFin`) cae dentro de [`desde`,
+    `hasta`] — usada para "horarios incorporados/liberados para el mes
+    próximo" (ver `calcular_estadisticas_profesionales`): una reserva que
+    ARRANCA (`VigenciaInicio`) dentro del mes próximo es un horario que
+    se suma a partir de ese mes; una que TERMINA (`VigenciaFin`) dentro
+    del mes en curso es un horario que se libera a partir del próximo."""
+    filas = conn.execute(
+        f"SELECT HoraInicio, HoraFin FROM ReservaRegular WHERE {columna} BETWEEN ? AND ?",  # noqa: S608 (columna fija, no input de usuario)
+        (desde, hasta),
+    ).fetchall()
+    return sum(f["HoraFin"] - f["HoraInicio"] for f in filas)
 
 
 def calcular_estadisticas_profesionales(conn: sqlite3.Connection) -> EstadisticasProfesionales:
     hoy = fecha_actual(conn).isoformat()
+    periodo = periodo_actual(conn)
+    anio, mes = parsear_periodo(periodo)
+    anio_prox, mes_prox = parsear_periodo(sumar_meses(periodo, 1))
+
     con_plan = conn.execute(
         "SELECT COUNT(DISTINCT IdProfesional) AS n FROM PlanPago WHERE Estado = 'Activo'"
     ).fetchone()["n"]
@@ -177,10 +207,25 @@ def calcular_estadisticas_profesionales(conn: sqlite3.Connection) -> Estadistica
         "WHERE VigenciaInicio <= ? AND (VigenciaFin IS NULL OR VigenciaFin >= ?)",
         (hoy, hoy),
     ).fetchone()["n"]
+    con_aisladas_activas = conn.execute(
+        "SELECT COUNT(DISTINCT IdProfesional) AS n FROM ReservaAislada WHERE Estado = 'Confirmada' AND Fecha >= ?",
+        (hoy,),
+    ).fetchone()["n"]
+
+    incorporados = _horas_regulares_por_columna_vigencia(
+        conn, "VigenciaInicio", primer_dia_mes(anio_prox, mes_prox).isoformat(), ultimo_dia_mes(anio_prox, mes_prox).isoformat(),
+    )
+    liberados = _horas_regulares_por_columna_vigencia(
+        conn, "VigenciaFin", primer_dia_mes(anio, mes).isoformat(), ultimo_dia_mes(anio, mes).isoformat(),
+    )
+
     return EstadisticasProfesionales(
         con_plan_pago_vigente=con_plan,
         con_saldo_fuera_de_tolerancia=len(_deuda_regulares(conn)) + len(_deuda_aisladas(conn)),
         con_reservas_regulares_activas=con_reservas_activas,
+        con_reservas_aisladas_activas=con_aisladas_activas,
+        horarios_incorporados_proximo_periodo=incorporados,
+        horarios_liberados_proximo_periodo=liberados,
     )
 
 
@@ -189,16 +234,26 @@ class EstadisticasOcupacion:
     ocupacion_regular_pct: float
     horas_regulares_semanales: float
     horas_aisladas_mes: float
-    monto_aisladas_mes: float
-    saldo_pendiente_mes: float
 
 
-def _horas_aisladas_periodo(conn: sqlite3.Connection, anio: int, mes: int) -> float:
-    filas = conn.execute(
-        "SELECT HoraInicio, HoraFin FROM ReservaAislada WHERE Estado = 'Confirmada' AND Fecha BETWEEN ? AND ?",
-        (primer_dia_mes(anio, mes).isoformat(), ultimo_dia_mes(anio, mes).isoformat()),
-    ).fetchall()
+def _horas_aisladas_periodo(
+    conn: sqlite3.Connection, anio: int, mes: int, ids_consultorio: list[int] | None = None,
+) -> float:
+    if ids_consultorio is not None and not ids_consultorio:
+        return 0.0
+    sql = "SELECT HoraInicio, HoraFin FROM ReservaAislada WHERE Estado = 'Confirmada' AND Fecha BETWEEN ? AND ?"
+    parametros: list = [primer_dia_mes(anio, mes).isoformat(), ultimo_dia_mes(anio, mes).isoformat()]
+    if ids_consultorio is not None:
+        sql += f" AND IdConsultorio IN ({', '.join('?' for _ in ids_consultorio)})"
+        parametros.extend(ids_consultorio)
+    filas = conn.execute(sql, parametros).fetchall()
     return sum(f["HoraFin"] - f["HoraInicio"] for f in filas)
+
+
+def _total_liquidado_periodo(conn: sqlite3.Connection, periodo: str) -> float:
+    return conn.execute(
+        "SELECT COALESCE(SUM(MontoGenerado), 0) AS total FROM LiquidacionEmitida WHERE Periodo = ?", (periodo,),
+    ).fetchone()["total"]
 
 
 def _saldo_pendiente_periodo(conn: sqlite3.Connection, periodo: str) -> float:
@@ -207,13 +262,10 @@ def _saldo_pendiente_periodo(conn: sqlite3.Connection, periodo: str) -> float:
     ese mismo período (`HistorialPagos.Monto`) — confirmado con la
     clienta en la revisión "uno por uno" de Panel de control, es el
     cálculo que tenía en mente."""
-    facturado = conn.execute(
-        "SELECT COALESCE(SUM(MontoGenerado), 0) AS total FROM LiquidacionEmitida WHERE Periodo = ?", (periodo,),
-    ).fetchone()["total"]
     cobrado = conn.execute(
         "SELECT COALESCE(SUM(Monto), 0) AS total FROM HistorialPagos WHERE PeriodoImputado = ?", (periodo,),
     ).fetchone()["total"]
-    return facturado - cobrado
+    return _total_liquidado_periodo(conn, periodo) - cobrado
 
 
 def calcular_estadisticas_ocupacion(conn: sqlite3.Connection) -> EstadisticasOcupacion:
@@ -224,8 +276,78 @@ def calcular_estadisticas_ocupacion(conn: sqlite3.Connection) -> EstadisticasOcu
         ocupacion_regular_pct=calcular_ocupacion(conn, anio, mes).general,
         horas_regulares_semanales=_horas_regulares_semanales_en_fecha(conn, hoy.isoformat()),
         horas_aisladas_mes=_horas_aisladas_periodo(conn, anio, mes),
-        monto_aisladas_mes=monto_neto_aislada_periodo(conn, anio, mes),
-        saldo_pendiente_mes=_saldo_pendiente_periodo(conn, periodo),
+    )
+
+
+@dataclass
+class EstadisticaOcupacionUnidad:
+    nombre: str
+    ocupacion_pct: float
+    horas_regulares_semanales: float
+    horas_aisladas_mes: float
+
+
+def calcular_estadisticas_ocupacion_por_unidad(conn: sqlite3.Connection) -> list[EstadisticaOcupacionUnidad]:
+    """Repite los tres conceptos de "Ocupación y horas mes en curso"
+    (ocupación %, horas regulares semanales, horas aisladas del mes) por
+    cada Unidad del sistema — pedido explícito de la clienta, desglosando
+    lo que el cuadrito general ya muestra agregado. Orden: Edificio
+    (alfabético) y, dentro de cada uno, la Unidad en el mismo orden
+    natural (PB/EP/piso ascendente) que el resto de las pantallas que
+    listan unidades (`clave_orden_unidad`)."""
+    periodo = periodo_actual(conn)
+    anio, mes = parsear_periodo(periodo)
+    hoy = fecha_actual(conn).isoformat()
+    ocupacion = calcular_ocupacion(conn, anio, mes)
+
+    unidades = conn.execute(
+        "SELECT u.IdUnidad, u.Departamento, e.Nombre AS NombreEdificio "
+        "FROM Unidad u JOIN Edificio e ON e.IdEdificio = u.IdEdificio"
+    ).fetchall()
+    ids_por_unidad: dict[int, list[int]] = {}
+    for fila in conn.execute("SELECT IdUnidad, IdConsultorio FROM Consultorio"):
+        ids_por_unidad.setdefault(fila["IdUnidad"], []).append(fila["IdConsultorio"])
+
+    resultado = []
+    for u in sorted(unidades, key=lambda u: (u["NombreEdificio"], clave_orden_unidad(u["Departamento"]))):
+        agregado = ocupacion.por_unidad.get(u["IdUnidad"])
+        ids_consultorio = ids_por_unidad.get(u["IdUnidad"], [])
+        resultado.append(EstadisticaOcupacionUnidad(
+            nombre=f"{u['NombreEdificio']} - {u['Departamento']}",
+            ocupacion_pct=agregado.porcentaje if agregado else 0.0,
+            horas_regulares_semanales=_horas_regulares_semanales_en_fecha(conn, hoy, ids_consultorio),
+            horas_aisladas_mes=_horas_aisladas_periodo(conn, anio, mes, ids_consultorio),
+        ))
+    return resultado
+
+
+@dataclass
+class EstadisticasPrincipales:
+    monto_regulares: float
+    monto_aisladas: float
+    total_ingresos: float
+    total_liquidado: float
+    saldo_pendiente: float
+    gastos_operativos: float
+    balance_negocio: float
+
+
+def calcular_estadisticas_principales(conn: sqlite3.Connection) -> EstadisticasPrincipales:
+    """Montos del mes en curso, todo el espacio (sin ningún alcance de
+    ubicación) — mismas fórmulas "monto real facturado" (neto de
+    descuentos/recargos) que ya usan Estadísticas y Balance del negocio,
+    reusadas tal cual en vez de reimplementarlas acá."""
+    periodo = periodo_actual(conn)
+    anio, mes = parsear_periodo(periodo)
+    ingresos, gastos, balance = resultado_periodo(conn, periodo)
+    return EstadisticasPrincipales(
+        monto_regulares=monto_neto_regular_periodo(conn, anio, mes),
+        monto_aisladas=monto_neto_aislada_periodo(conn, anio, mes),
+        total_ingresos=ingresos,
+        total_liquidado=_total_liquidado_periodo(conn, periodo),
+        saldo_pendiente=_saldo_pendiente_periodo(conn, periodo),
+        gastos_operativos=gastos,
+        balance_negocio=balance,
     )
 
 

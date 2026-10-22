@@ -131,9 +131,10 @@ def construir_secciones(usuario: sqlite3.Row | None = None, conn: sqlite3.Connec
         ),
         Seccion(
             "Panel de control", lambda conn: PanelControl(conn), categoria=categoria_espacio,
-            ayuda="Solapa Avance de período y backups: resumen del estado actual del espacio (ocupación, "
-            "próximos vencimientos y alertas), generación de backup manual y avance de mes. Solapa "
-            "Importación datos desde Excel: importación masiva inicial de datos desde una planilla Excel.",
+            ayuda="Solapa Avance de período, backup, y vista rápida: resumen del estado actual del espacio "
+            "(ocupación, estadísticas principales, próximos vencimientos y alertas), generación de backup "
+            "manual y avance de mes. Solapa Importación datos desde Excel: importación masiva inicial de "
+            "datos desde una planilla Excel.",
         ),
         Seccion(
             "Grilla y mensajería", lambda conn: PantallaGrillaYMensajeria(conn), categoria=categoria_espacio,
