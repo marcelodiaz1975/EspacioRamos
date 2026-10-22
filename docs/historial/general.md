@@ -3378,3 +3378,96 @@ viejos); `tests/test_gui_widget_foco.py`
 con un `QComboBox` editable real en la cadena, no solo `QLineEdit` como
 el test ya existente de esta misma regla).
 
+### Segunda vuelta: la primera corrección no alcanzaba con tipeo real, y el select-all no arrancaba sola la pantalla
+
+La clienta probó el arreglo de arriba en la pantalla real y volvió con
+tres conclusiones: mayúsculas/minúsculas seguía sin funcionar, buscar en
+el medio de la cadena seguía sin funcionar, y el select-all funcionaba
+al tabular y volver pero NO al entrar recién a la solapa/pantalla. Para
+el select-all dio dos alternativas (mover el foco a la solapa en el
+`QTabWidget` al clickearla, o chequear el caso en el primer foco del
+campo) y pidió la segunda, dejando la implementación a criterio propio
+por ser la de menor complejidad.
+
+**Por qué la corrección anterior daba falso positivo.** El script de
+diagnóstico de la primera vuelta simulaba el tipeo emitiendo la señal a
+mano (`lineEdit().textEdited.emit(texto)`) y fijando `completionPrefix`
+en el mismo slot — con eso, reseteaba el prefijo a vacío y el filtro
+propio de `QCompleter` quedaba neutralizado, confirmado por ese mismo
+script. Pero `QLineEdit` y `QCompleter` tienen, además, una conexión
+interna de Qt a nivel C++ que TAMBIÉN fija `completionPrefix` al texto
+tipeado — y lo hace en un punto del procesamiento de la tecla real que
+el slot de Python conectado a `textEdited` no puede garantizar que
+corra después. Repetir el diagnóstico con tipeo REAL (`QTest.
+keyClicks`, que sintetiza eventos de teclado de verdad en vez de
+emitir la señal a mano) lo confirmó: `completionPrefix()` terminaba
+siendo el texto tipeado tal cual, no vacío, pese al reseteo — exactamente
+lo que la clienta reportó. Cualquier arreglo que dependa del ORDEN en
+que Qt dispara señales contra código Python es frágil por definición;
+los dos tests nuevos de la primera vuelta (`test_desplegable_real_...`)
+pasaban igual porque también usaban señal emitida a mano, no tipeo
+real — dieron el mismo falso positivo que el script original. Lección
+para cualquier test de este tipo de ahora en más: verificar con
+`QTest.keyClicks`/`QTest.keyClick` (teclado real), nunca con la señal
+emitida a mano, cuando lo que se prueba es la interacción entre un
+widget nativo de Qt y su propia maquinaria interna.
+
+**Arreglo robusto (sin pelear con el orden de señales).** En vez de
+neutralizar el filtro propio de `QCompleter`, se lo hace filtrar
+exactamente como hace falta, con sus propios puntos de extensión:
+
+1. `_ProxyBusquedaSinAcentos` deja de filtrar filas — ahora solo expone
+   un rol de dato nuevo, `_ROL_TEXTO_NORMALIZADO`, con el texto de cada
+   fila ya sin acentos y en minúsculas.
+2. El `QCompleter` (`_CompleterSinAcentos`, subclase nueva) usa ese rol
+   como `completionRole`, con `setFilterMode(MatchContains)` +
+   `setCaseSensitivity(CaseInsensitive)` — así su propio motor nativo ya
+   filtra sin distinguir mayúsculas ni por posición, sin ningún filtro
+   nuestro corriendo en paralelo ni ninguna carrera de señales.
+3. Falta normalizar lo que el USUARIO tipeó (si no, escribir "díaz" con
+   tilde no matchearía el rol normalizado "diaz"): `_CompleterSinAcentos`
+   overridea `splitPath(path)` (método virtual público de `QCompleter`,
+   el punto donde Qt arma la cadena que de verdad usa para comparar)
+   para devolver `[_normalizar(path)]`.
+4. Como el rol de matcheo es ahora el texto normalizado, Qt insertaría
+   ESE texto (minúsculas, sin acentos) al elegir una opción del
+   desplegable — se corrige overrideando también `pathFromIndex(index)`
+   para devolver el texto original (`DisplayRole`), no el normalizado.
+
+Verificado con tipeo real (`QTest.keyClicks`): "x1"/"X1" encuentran
+"X1 - Carlos Pérez"; "lo ve" encuentra "R1 - Lic. Virginia Lo Veci";
+"diaz" encuentra "R4 - Dr. Roberto Díaz"; elegir esa opción del
+desplegable inserta el texto original con tilde, no el normalizado.
+
+**Select-all al entrar a la pantalla (no solo al tabular/clickear).**
+Instrumentando el evento real (no asumiendo), se confirmó que
+`combo.setFocus()` llamado desde un `showEvent` (el patrón que usa casi
+toda pantalla del sistema para arrancar la cadena de foco) entrega el
+evento `FocusIn` al `QComboBox` de AFUERA, nunca a su `lineEdit()`
+interno — a diferencia de un click directo del mouse en el campo de
+texto, que sí se lo entrega al `lineEdit()`. `_SeleccionarTodoAlEnfocar`
+escuchaba solo en el `lineEdit()`, así que el caso de "recién entro a la
+pantalla" nunca disparaba el select-all. Arreglo elegido (la opción que
+pidió la clienta, sin tocar el `showEvent` de ninguna pantalla en
+particular): `_SeleccionarTodoAlEnfocar` ahora instala el mismo filtro
+de eventos también en el `QComboBox` (no solo en su `lineEdit()`),
+así que cualquiera de los dos widgets que reciba el `FocusIn` dispara el
+mismo `selectAll()` sobre el `lineEdit()` — cubre de una sola vez el
+click directo, la llegada por Tab (ver Causa 2 más arriba, sin cambios)
+y ahora también el `showEvent`, en los ~18 selectores de profesional
+del sistema sin tocar ninguna pantalla individual.
+
+Tests: se reescribieron `test_desplegable_real_no_distingue_mayusculas_
+de_minusculas` y `test_desplegable_real_filtra_por_substring_en_el_medio`
+para tipear con `QTest.keyClicks` en vez de emitir la señal a mano
+(corrigiendo el mismo problema de fondo que motivó esta segunda vuelta),
+igual que `test_completer_filtra_por_codigo`/`..._por_nombre_en_el_medio_
+de_la_cadena`/`..._sin_distinguir_acentos` (antes miraban `proxy`
+aislado, que ya no filtra — ahora miran `completador.completionModel()`,
+con tipeo real, igual que el resto). Nuevos:
+`test_al_elegir_una_opcion_del_desplegable_inserta_el_texto_original`
+(verifica `pathFromIndex` directo) y
+`test_setfocus_directo_en_el_combo_selecciona_todo_el_contenido`
+(simula el patrón `showEvent` llamando `combo.setFocus()` sin pasar por
+el `lineEdit()`, el caso que faltaba cubrir).
+
