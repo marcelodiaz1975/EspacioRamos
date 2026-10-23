@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QFrame,
-    QGridLayout,
     QInputDialog,
     QLabel,
     QMessageBox,
@@ -409,11 +408,11 @@ def test_tarjeta_fechas_especiales_lista_lo_que_falta_del_mes_y_los_dos_siguient
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     texto = pantalla.panel_avance.etiqueta_fechas_especiales.text()
-    assert "2026-08-01" not in texto
-    assert "2026-08-20" in texto
+    assert "01-08-2026" not in texto
+    assert "jue 20-08-2026" in texto  # punto 82: formato "ddd dd-mm-yyyy"
     assert "Feriado puente" in texto
-    assert "2026-10-05" in texto
-    assert "2026-11-01" not in texto
+    assert "lun 05-10-2026" in texto
+    assert "01-11-2026" not in texto
 
 
 def test_tarjeta_profesionales_muestra_los_tres_conteos(qtbot, conn):
@@ -541,47 +540,56 @@ def test_refrescar_alertas_dos_veces_no_deja_la_tarjeta_vieja_visible(qtbot, con
     assert tarjeta_vieja.isHidden()
 
 
-def test_hay_seis_tarjetas_parejas_en_la_grilla_y_alertas_aparte(qtbot, conn):
+def _seis_tarjetas(panel) -> list:
+    return [
+        _tarjeta_de(panel.etiqueta_periodo),
+        _tarjeta_de(panel.etiqueta_estadisticas_principales),
+        _tarjeta_de(panel.etiqueta_ocupacion),
+        _tarjeta_de(panel.etiqueta_profesionales),
+        _tarjeta_de(panel.etiqueta_fechas_especiales),
+        _tarjeta_de(panel.etiqueta_cumpleanos),
+    ]
+
+
+def test_hay_seis_tarjetas_parejas_en_dos_filas_y_alertas_aparte(qtbot, conn):
     """Punto 76 (SistemaDF v0.11.2026.10): "Fecha y hora actual" se funde
     dentro de "Período actual" — de 7 cuadritos (3+3+1 suelto) vuelve a
-    6 (3+3 parejo, sin ninguno sobrando en una fila propia)."""
+    6 (3+3 parejo, sin ninguno sobrando en una fila propia). Punto 82:
+    las dos filas de tres ya NO viven en un único `QGridLayout` — cada
+    una es su propio `QHBoxLayout`, hermano del de Alertas en
+    `layout_solapa` (ver el comentario grande en `_armar_ui`)."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1200, 800)
     pantalla.show()
     qtbot.waitExposed(pantalla)
 
-    grilla = pantalla.findChild(QGridLayout)
-    assert grilla is not None
-    assert grilla.count() == 6
+    tarjetas = _seis_tarjetas(pantalla.panel_avance)
+    assert all(t is not None for t in tarjetas)
 
-    # Tolerancia chica: QGridLayout reparte el resto de una división no
-    # exacta (ancho/alto de ventana entre columnas/filas) en algún borde
-    # — invisible a simple vista pero real en píxeles.
-    tarjetas = [grilla.itemAt(i).widget() for i in range(6)]
+    # Tolerancia chica: el reparto de una división no exacta (ancho/alto
+    # de ventana entre columnas/filas) cae en algún borde — invisible a
+    # simple vista pero real en píxeles.
     anchos = [t.width() for t in tarjetas]
     altos = [t.height() for t in tarjetas]
     assert max(anchos) - min(anchos) <= 8  # las seis del mismo ancho
     assert max(altos) - min(altos) <= 8  # las seis del mismo alto
 
 
-def test_tarjeta_alertas_no_esta_en_la_grilla(qtbot, conn):
+def test_tarjeta_alertas_no_es_ninguna_de_las_seis_tarjetas(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    grilla = pantalla.findChild(QGridLayout)
-    assert all(
-        grilla.itemAt(i).widget() is not pantalla.panel_avance.tarjeta_alertas for i in range(grilla.count())
-    )
+    tarjetas = _seis_tarjetas(pantalla.panel_avance)
+    assert pantalla.panel_avance.tarjeta_alertas not in tarjetas
 
 
-def test_tarjeta_alertas_ocupa_mucho_mas_ancho_que_una_tarjeta_de_la_grilla(qtbot, conn):
+def test_tarjeta_alertas_ocupa_mucho_mas_ancho_que_una_tarjeta_de_las_filas(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1200, 800)
     pantalla.show()
     qtbot.waitExposed(pantalla)
-    grilla = pantalla.findChild(QGridLayout)
-    ancho_una_tarjeta = grilla.itemAt(0).widget().width()
+    ancho_una_tarjeta = _seis_tarjetas(pantalla.panel_avance)[0].width()
     assert pantalla.panel_avance.tarjeta_alertas.width() > ancho_una_tarjeta * 2
 
 
@@ -832,12 +840,23 @@ def test_alto_minimo_de_tarjeta_bajo_a_dos_tercios(qtbot, conn):
     assert _ALTO_MINIMO_TARJETA == 93  # round(140 * 2 / 3)
 
 
-def test_tarjeta_alertas_ocupa_mucho_mas_alto_que_una_tarjeta_de_la_grilla(qtbot, conn):
+def test_fila1_fila2_y_alertas_quedan_del_mismo_alto(qtbot, conn):
+    """Punto 82 (SistemaDF v0.11.2026.10), pedido explícito de la
+    clienta: todo el alto que queda debajo de "Avanzar de mes" se reparte
+    en tres franjas IGUALES — primera fila de tres cuadritos, segunda
+    fila, y Alertas — no que Alertas se quede con lo que sobra después de
+    que las filas tomen lo que piden. Antes la grilla y Alertas competían
+    con stretch 0 vs 1 (Alertas terminaba mucho más chica o mucho más
+    grande según la ventana, nunca igual); ahora las tres son hermanas de
+    `layout_solapa` con el mismo `stretch=1`."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1200, 900)
     pantalla.show()
     qtbot.waitExposed(pantalla)
-    grilla = pantalla.findChild(QGridLayout)
-    alto_una_tarjeta = grilla.itemAt(0).widget().height()
-    assert pantalla.panel_avance.tarjeta_alertas.height() > alto_una_tarjeta * 1.5
+    alto_fila1 = _tarjeta_de(pantalla.panel_avance.etiqueta_periodo).height()
+    alto_fila2 = _tarjeta_de(pantalla.panel_avance.etiqueta_profesionales).height()
+    alto_alertas = pantalla.panel_avance.tarjeta_alertas.height()
+    # Tolerancia chica: redondeo de QBoxLayout al repartir píxeles entre
+    # tres ítems, invisible a simple vista.
+    assert max(alto_fila1, alto_fila2, alto_alertas) - min(alto_fila1, alto_fila2, alto_alertas) <= 8

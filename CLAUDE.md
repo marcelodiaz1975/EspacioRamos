@@ -418,6 +418,55 @@ que el arreglo de color de la segunda vuelta (`setAutoFillBackground`
 en vez de `setStyleSheet`) se mantiene intacto, confirmado explícitamente
 por la clienta como la parte que sí había que aplicar y dejar.
 
+### Cuarta vuelta: las tres franjas (fila 1, fila 2, Alertas) reparten el alto por igual
+
+La clienta volvió a marcar que Alertas se veía "bajo" (corto) — pero
+reformuló el pedido en términos más precisos, sin ambigüedad: todo el
+alto que queda DEBAJO del botón "Avanzar de mes" tiene que repartirse en
+TRES franjas iguales (la primera fila de tres cuadritos, la segunda fila
+de tres, y Alertas), las tres del mismo tamaño visual — no que Alertas
+absorba "lo que sobra" después de que la grilla tome lo que necesita (el
+criterio con el que se había armado hasta acá, desde la primera
+versión). Antes de tocar código se armó un script con la pantalla real
+(no se adivinó a partir de leer el layout) para confirmar la causa: las
+dos filas de cuadritos vivían en un único `QGridLayout`, agregado a
+`layout_solapa` SIN ningún `stretch` propio (0 implícito), mientras
+Alertas se agregaba con `stretch=1` — en un `QBoxLayout`, un ítem sin
+stretch explícito NO crece más allá de lo que pide su contenido (aunque
+sus hijos tengan política `Expanding`), así que la grilla quedaba
+achicada a su tamaño "natural" (determinado en la práctica por el
+tamaño por default de cada `QScrollArea`, ~192px, no por el piso de
+`_ALTO_MINIMO_TARJETA`) y Alertas se llevaba TODO el resto — midiendo en
+una ventana real de 950px de alto, la grilla terminaba en 138px por fila
+y Alertas en 412px: ni iguales, ni en la proporción 2:1 que hubiera
+tenido sentido para "dos filas + una franja".
+
+Arreglo: las dos filas de tres cuadritos dejan de vivir en un único
+`QGridLayout` — pasan a ser dos `QHBoxLayout` independientes
+(`fila_tarjetas_1`/`fila_tarjetas_2`, cada cuadrito agregado con
+`stretch=1` para mantener el mismo ancho parejo que ya daba
+`setColumnStretch`), y las tres franjas (`fila_tarjetas_1`,
+`fila_tarjetas_2`, la tarjeta de Alertas) se agregan a `layout_solapa`
+como HERMANAS, con el mismo `stretch=1` cada una. Con el mismo stretch Y
+el mismo piso (`_ALTO_MINIMO_TARJETA` en las tres, Alertas incluida, vía
+`_tarjeta()`), `QBoxLayout` reparte cualquier espacio de sobra en partes
+iguales entre las tres — confirmado armando la pantalla real y midiendo
+alto en píxeles en dos tamaños de ventana distintos (950px y 800px de
+alto): las tres franjas quedaron exactas o a 1px de diferencia en los
+dos casos, no una aproximación. Ya no existe ningún `QGridLayout` en
+esta solapa — `_COLUMNAS_GRILLA` se mantiene (ahora corta la lista de
+seis tarjetas en dos mitades de tres para repartir entre las dos filas).
+
+De paso, formato de fecha del cuadrito "Feriados y fechas especiales
+próximas": pasa de mostrar `FechasEspeciales.Fecha` tal cual (AAAA-MM-DD)
+a "ddd dd-mm-aaaa" (día de la semana abreviado, mismo criterio que el
+resto del sistema) — `_texto_fecha`, nueva, mismo patrón que `_texto_
+fecha_hora` pero sin la hora (acá el dato es una fecha sola). Puntual de
+este cuadrito — la lista de alertas "Fechas especiales en los próximos
+15 días" (`_ETIQUETA_FILA["fechas_especiales_proximas"]`, otro lugar
+que también arma texto con `f['Fecha']`) no se tocó, no fue parte de
+este pedido.
+
 Pregunta aparte, sin cambio de código: cómo cargar "Día del psicólogo"
 el 13 de octubre de cada año — se carga desde el catálogo "Profesiones y
 tratamientos", campo "Día de profesión" (formato MM-DD, sin año, se
@@ -425,6 +474,20 @@ repite todos los años), en la fila de "Psicología"; el texto "Día del
 Psicólogo" sale del campo "Nombre masculino" de esa misma fila. Ya
 alimenta el cuadrito "Cumpleaños y días de profesión" sin tocar nada
 más (`cumpleanos_y_dias_profesion_proximos`, sin cambios).
+
+Segunda pregunta aparte, también sin cambio de código: qué es
+`Configuracion.RangosEstadisticasOcupacion` ("Configuración general" →
+solapa "Grilla y ocupación" → "Rangos de estadísticas de ocupación
+(JSON)") — confirmado que sí, es exactamente eso: un JSON por día de la
+semana (`{"Lunes": [9, 21], ...}`, default L-V 9-21hs / Sáb 9-15hs /
+domingo no cuenta — `app.negocio.estadisticas.RANGO_DEFAULT`) que define
+el rango horario "hábil" que se tiene en cuenta al calcular los % de
+ocupación (general y desglosado por edificio/unidad/consultorio) —
+`rango_horas_por_dia`/`calcular_ocupacion` en `app/negocio/estadisticas.py`
+lo usan tal cual. Puntual: NO es lo mismo que "Hora inicio/fin de
+grilla" (otro campo de esa misma solapa) — ese es el rango que se
+MUESTRA en la grilla semanal visual, un concepto distinto que puede no
+coincidir con el rango que efectivamente cuenta para las estadísticas.
 
 Tests nuevos/reescritos: `tests/test_panel_control.py` (`calcular_
 estadisticas_profesionales` con los tres casos de aisladas activas/
@@ -447,7 +510,15 @@ el revert); que ningún `QScrollArea`/viewport de Alertas tenga un
 `styleSheet` propio, y que el título de cada alerta
 (`QLabel#encabezadoAlerta`) no tenga ningún estilo local que pueda
 competir con `estilos.py` — regresión del bug real que encontró la
-clienta).
+clienta). Cuarta vuelta: los tres tests que usaban `pantalla.
+findChild(QGridLayout)` (ya no existe ningún `QGridLayout` en esta
+solapa) se reescriben ubicando cada cuadrito por su `QLabel` de
+contenido (`_tarjeta_de`, ya usado en otros tests del archivo) en vez de
+por posición dentro de la grilla vieja; nuevo `test_fila1_fila2_y_
+alertas_quedan_del_mismo_alto` (reemplaza al que afirmaba que Alertas
+quedaba "mucho más alto" — ya no es cierto, ahora es igual a propósito)
+y el test de fecha de "Feriados y fechas especiales próximas" pasa a
+verificar "ddd dd-mm-yyyy" en vez del AAAA-MM-DD crudo de antes.
 
 ## Metodología de trabajo
 

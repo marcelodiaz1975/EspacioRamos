@@ -120,7 +120,7 @@ espacio vertical sobrante en la solapa ya iba entero a Alertas."""
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -128,7 +128,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -247,6 +246,16 @@ def _texto_fecha_hora(momento: datetime, *, con_segundos: bool = False) -> str:
     if con_segundos:
         hora += f":{momento.second:02d}"
     return f"{dia} {momento.day:02d}-{momento.month:02d}-{momento.year} {hora}hs"
+
+
+def _texto_fecha(fecha_iso: str) -> str:
+    """"vie 25-08-2026" — mismo criterio que `_texto_fecha_hora`, sin la
+    hora (el dato es una fecha sola, AAAA-MM-DD, como la de `FechasEspeciales.
+    Fecha`). Pedido explícito de la clienta para el cuadrito "Feriados y
+    fechas especiales próximas" ("ddd dd-mm-yyyy")."""
+    fecha = date.fromisoformat(fecha_iso)
+    dia = fecha_a_dia_semana(fecha)[:3].lower()
+    return f"{dia} {fecha.day:02d}-{fecha.month:02d}-{fecha.year}"
 
 
 def _agregar_contenido_escrolable(layout: QVBoxLayout, contenido: QWidget) -> None:
@@ -439,17 +448,37 @@ class _PanelAvancePeriodo(QWidget):
         layout_solapa.addWidget(_linea_divisoria())
         layout_solapa.addLayout(fila_avanzar)
 
-        # Seis cuadritos principales, todos del mismo ancho y alto (grilla
-        # pareja 3x2 — sin la de Alertas, que va aparte ocupando todo el
-        # ancho de la pantalla, ver abajo). Punto 81 (SistemaDF
-        # v0.11.2026.10): "Último backup" se funde dentro de "Período
-        # actual" (un cuadrito "Período actual y último backup", ver
-        # `_armar_tarjeta_periodo_y_backup`) y el cuadrito que libera pasa
-        # a "Estadísticas principales mes en curso" — sigue en 6 cuadritos,
-        # en el orden pedido explícito: Período actual y último backup,
-        # Estadísticas principales, Ocupación y horas / Profesionales,
-        # Feriados y fechas especiales, Cumpleaños y días de profesión.
-        grilla = QGridLayout()
+        # Seis cuadritos principales, todos del mismo ancho (dos filas de
+        # tres) — sin la de Alertas, que va aparte ocupando todo el ancho
+        # de la pantalla, ver abajo. Punto 81 (SistemaDF v0.11.2026.10):
+        # "Último backup" se funde dentro de "Período actual" (un
+        # cuadrito "Período actual y último backup", ver `_armar_tarjeta_
+        # periodo_y_backup`) y el cuadrito que libera pasa a "Estadísticas
+        # principales mes en curso" — sigue en 6 cuadritos, en el orden
+        # pedido explícito: Período actual y último backup, Estadísticas
+        # principales, Ocupación y horas / Profesionales, Feriados y
+        # fechas especiales, Cumpleaños y días de profesión.
+        #
+        # Punto 82 (misma versión, segunda vuelta sobre esta solapa):
+        # pedido explícito de la clienta — repartir TODO el alto que
+        # queda debajo de "Avanzar de mes" en tres franjas iguales
+        # (primera fila de tres cuadritos, segunda fila de tres, Alertas),
+        # no que Alertas absorba "lo que sobra" después de que la grilla
+        # tome lo que necesita. Antes las dos filas vivían en un único
+        # `QGridLayout` agregado a `layout_solapa` SIN stretch propio,
+        # compitiendo con Alertas (`stretch=1`) — un ítem sin stretch
+        # explícito en un `QBoxLayout` no crece más allá de lo que pida
+        # su contenido aunque tenga política `Expanding`, así que las dos
+        # filas quedaban achicadas a su tamaño "natural" y Alertas se
+        # llevaba todo el resto, en vez de quedar las tres parejas. Ahora
+        # son tres ítems HERMANOS de `layout_solapa` (`fila_tarjetas_1`/
+        # `fila_tarjetas_2`/la tarjeta de Alertas), cada uno con
+        # `stretch=1` explícito — con el mismo stretch Y el mismo
+        # `_ALTO_MINIMO_TARJETA` de piso en los tres, `QBoxLayout` reparte
+        # cualquier espacio de sobra en partes iguales entre los tres,
+        # así terminan siempre del mismo alto (verificado armando la
+        # pantalla real y midiendo alto en píxeles, no solo leyendo el
+        # código — ver docs/historial para el detalle de la ronda).
         tarjetas = [
             self._armar_tarjeta_periodo_y_backup(),
             self._armar_tarjeta_estadisticas_principales(),
@@ -458,18 +487,20 @@ class _PanelAvancePeriodo(QWidget):
             self._armar_tarjeta_fechas_especiales(),
             self._armar_tarjeta_cumpleanos(),
         ]
-        for indice, tarjeta in enumerate(tarjetas):
-            grilla.addWidget(tarjeta, indice // _COLUMNAS_GRILLA, indice % _COLUMNAS_GRILLA)
-        for columna_grilla in range(_COLUMNAS_GRILLA):
-            grilla.setColumnStretch(columna_grilla, 1)
-        filas_grilla = -(-len(tarjetas) // _COLUMNAS_GRILLA)  # redondeo hacia arriba sin importar math
-        for fila_grilla in range(filas_grilla):
-            grilla.setRowStretch(fila_grilla, 1)
-        layout_solapa.addLayout(grilla)
+        fila_tarjetas_1 = QHBoxLayout()
+        fila_tarjetas_2 = QHBoxLayout()
+        for tarjeta in tarjetas[:_COLUMNAS_GRILLA]:
+            fila_tarjetas_1.addWidget(tarjeta, stretch=1)
+        for tarjeta in tarjetas[_COLUMNAS_GRILLA:]:
+            fila_tarjetas_2.addWidget(tarjeta, stretch=1)
+        layout_solapa.addLayout(fila_tarjetas_1, stretch=1)
+        layout_solapa.addLayout(fila_tarjetas_2, stretch=1)
 
         # Alertas ocupa todo el ancho de la pantalla, con scroll propio
         # (puede ser una lista larga) — pedido explícito de la clienta,
-        # a diferencia de los seis cuadritos parejos de arriba.
+        # a diferencia de los seis cuadritos parejos de arriba. Mismo
+        # stretch que las dos filas de arriba (ver el comentario grande):
+        # las tres franjas quedan del mismo alto.
         layout_solapa.addWidget(self._armar_tarjeta_alertas(), stretch=1)
 
         self._foco = instalar_enter_avanza_foco(
@@ -618,7 +649,9 @@ class _PanelAvancePeriodo(QWidget):
 
         fechas = fechas_especiales_proximas_dos_meses(self.conn)
         if fechas:
-            texto_fechas = "\n".join(f"•  {f['Fecha']} — {f['Descripcion'] or f['Tipo'] or 'Sin descripción'}" for f in fechas)
+            texto_fechas = "\n".join(
+                f"•  {_texto_fecha(f['Fecha'])} — {f['Descripcion'] or f['Tipo'] or 'Sin descripción'}" for f in fechas
+            )
         else:
             texto_fechas = "Sin fechas especiales cargadas para lo que resta del período."
         self.etiqueta_fechas_especiales.setText(texto_fechas)
