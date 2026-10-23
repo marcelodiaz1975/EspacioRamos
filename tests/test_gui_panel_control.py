@@ -760,8 +760,12 @@ def test_banner_sin_sincronizar_visible_cuando_el_modo_esta_activo(qtbot, conn):
 
 def test_scroll_de_cada_cuadrito_principal_tiene_fondo_transparente(qtbot, conn):
     """Punto 81: sin esto, el viewport del `QScrollArea` pintaba con el
-    color default de Qt — un recuadro de color distinto al resto del
-    cuadrito ("un cuadrito adentro del cuadrito")."""
+    color de la paleta (`autoFillBackground` + `Base`) — un recuadro de
+    color distinto al resto del cuadrito ("un cuadrito adentro del
+    cuadrito"). `autoFillBackground(False)`, no un `setStyleSheet(...)`:
+    ver `test_el_fondo_transparente_de_alertas_no_le_pisa_el_color_a_los_
+    titulos` para el motivo (un stylesheet ahí rompía el color de los
+    títulos de alerta, que están mucho más anidados)."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     for etiqueta in (
@@ -771,15 +775,37 @@ def test_scroll_de_cada_cuadrito_principal_tiene_fondo_transparente(qtbot, conn)
     ):
         tarjeta = _tarjeta_de(etiqueta)
         scroll = tarjeta.findChild(QScrollArea)
-        assert "transparent" in scroll.styleSheet()
-        assert "transparent" in scroll.viewport().styleSheet()
+        assert scroll.viewport().autoFillBackground() is False
 
 
 def test_scroll_de_alertas_tambien_tiene_fondo_transparente(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     scroll = pantalla.panel_avance.tarjeta_alertas.findChild(QScrollArea)
-    assert "transparent" in scroll.styleSheet()
+    assert scroll.viewport().autoFillBackground() is False
+
+
+def test_el_fondo_transparente_de_alertas_no_le_pisa_el_color_a_los_titulos(qtbot, conn):
+    """Bug real, detectado por la clienta probando la pantalla: un
+    `setStyleSheet("background: transparent;")` puesto en el `QScrollArea`
+    de Alertas (un ancestro de cada `QFrame#tarjetaAlerta`/`QLabel#
+    encabezadoAlerta`) le cambiaba el motor de pintado a TODOS los
+    descendientes y terminaba pisándole el fondo naranja/letra blanca al
+    título de cada alerta, pese a que esa regla tiene su propio selector
+    por objectName en `estilos.py`. No debe quedar ningún `styleSheet`
+    puesto en el `QScrollArea` ni en su viewport — el arreglo tiene que
+    ser por `autoFillBackground`, que no pasa por ese motor."""
+    _crear_profesional_regular_con_deuda(conn, "Deudor", 99999)
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    scroll = pantalla.panel_avance.tarjeta_alertas.findChild(QScrollArea)
+    assert scroll.styleSheet() == ""
+    assert scroll.viewport().styleSheet() == ""
+    encabezado = next(
+        lbl for lbl in pantalla.panel_avance.contenedor_alertas.findChildren(QLabel)
+        if lbl.objectName() == "encabezadoAlerta"
+    )
+    assert "border" not in encabezado.styleSheet()  # sin estilo local que pueda competir con estilos.py
 
 
 def test_contenido_de_un_solo_label_se_alinea_arriba_no_al_centro(qtbot, conn):
@@ -797,14 +823,16 @@ def test_contenido_de_un_solo_label_se_alinea_arriba_no_al_centro(qtbot, conn):
 
 
 def test_alto_minimo_de_tarjeta_bajo_a_dos_tercios(qtbot, conn):
+    """Revertido tras el feedback de la clienta: el primer intento sumaba
+    `setFixedHeight` + un piso explícito para Alertas, pero probó la
+    captura y confirmó que el mínimo solo (como se pidió desde el
+    principio) ya daba el resultado que quería — se volvió a esa versión
+    más simple, sin tocar nada del mecanismo de alto."""
     from app.gui.pantallas.panel_control import _ALTO_MINIMO_TARJETA
     assert _ALTO_MINIMO_TARJETA == 93  # round(140 * 2 / 3)
 
 
 def test_tarjeta_alertas_ocupa_mucho_mas_alto_que_una_tarjeta_de_la_grilla(qtbot, conn):
-    """El espacio que se le recortó a los seis cuadritos de la grilla
-    (pedido explícito de la clienta) lo absorbe Alertas — ya tenía
-    `stretch=1` en `layout_solapa`, a diferencia de la grilla."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1200, 900)

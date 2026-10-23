@@ -174,7 +174,13 @@ _COLUMNAS_GRILLA = 3
 # un tercio menos que el alto original (140px) — pedido explícito de la
 # clienta, el espacio que se libera lo absorbe solo el cuadro de Alertas
 # (stretch=1 en `layout_solapa`, a diferencia de la grilla, que no
-# compite por ese espacio extra — ver `_armar_ui`).
+# compite por ese espacio extra — ver `_armar_ui`). Se probó además
+# fijarles un alto FIJO (`setFixedHeight`) a los seis cuadritos y
+# subirle el piso a Alertas a mano con el excedente — la clienta
+# confirmó, tras revisar una captura, que este valor nomás (el mínimo,
+# como estaba pedido desde el principio) ya daba el resultado que
+# quería; se revirtió esa parte para no complicar el mecanismo sin
+# necesidad.
 _ALTO_MINIMO_TARJETA = round(140 * 2 / 3)
 
 _TEXTO_EXPLICACION_BACKUP = (
@@ -254,15 +260,24 @@ def _agregar_contenido_escrolable(layout: QVBoxLayout, contenido: QWidget) -> No
     Punto 81 (misma versión): dos retoques pedidos por la clienta sobre
     esa misma pieza, para que el contenido se vea igual que el resto del
     cuadrito, no como "una caja adentro de otra":
-    - Fondo transparente, tanto del `QScrollArea` como de su viewport
-      interno (el widget que Qt arma solo al llamar `setWidget`, no
-      accesible por objectName — hay que tocarlo directo vía `.viewport()`):
-      sin esto, el viewport pinta con el color de fondo DEFAULT de Qt
-      (en modo claro, `paleta()` no toca `QPalette.ColorRole.Base`/
-      `Window`, así que cae al gris de sistema; en modo oscuro, el
-      `Base` que sí fija `paleta()` no es necesariamente el mismo tono
-      que el `superficie` de `QWidget#panelSolapa`/`QFrame#cuadritoInfo`)
-      — quedaba un recuadro de color distinto adentro del cuadrito.
+    - Fondo transparente del viewport interno del `QScrollArea` (el
+      widget que Qt arma solo al llamar `setWidget`, no accesible por
+      objectName — hay que tocarlo directo vía `.viewport()`): sin esto,
+      el viewport pinta su fondo con el color de la paleta (`QPalette.
+      ColorRole.Base`, que `QAbstractScrollArea` le fija por default con
+      `autoFillBackground` activado) — en modo claro, `paleta()` no toca
+      ese rol, así que cae al gris de sistema; en modo oscuro, el `Base`
+      que sí fija `paleta()` no es necesariamente el mismo tono que el
+      `superficie` de `QWidget#panelSolapa`/`QFrame#cuadritoInfo` — quedaba
+      un recuadro de color distinto adentro del cuadrito. Se resuelve con
+      `setAutoFillBackground(False)` (no con un stylesheet: un
+      `setStyleSheet("background: transparent;")` en el cuadrito de
+      Alertas, con sus propias tarjetas de alerta anidadas adentro,
+      terminaba pisando el fondo naranja/letra blanca de los títulos de
+      cada alerta — un stylesheet puesto en un ancestro le cambia el
+      motor de pintado a TODOS los descendientes, aunque tengan su propio
+      selector por objectName; `autoFillBackground` no toca ningún
+      stylesheet, así que no corre ese riesgo).
     - Alineación arriba (`AlignLeft | AlignTop`) en el `QLabel` de
       contenido: con `setWidgetResizable(True)`, Qt estira ese `QLabel`
       al alto completo del viewport, y la alineación VERTICAL default de
@@ -274,8 +289,7 @@ def _agregar_contenido_escrolable(layout: QVBoxLayout, contenido: QWidget) -> No
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.Shape.NoFrame)
-    scroll.setStyleSheet("background: transparent;")
-    scroll.viewport().setStyleSheet("background: transparent;")
+    scroll.viewport().setAutoFillBackground(False)
     if isinstance(contenido, QLabel):
         contenido.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
     scroll.setWidget(contenido)
@@ -553,17 +567,29 @@ class _PanelAvancePeriodo(QWidget):
         tarjetas propias (`contenedor_alertas`/`layout_alertas`), pero el
         bug de fondo (el viewport del QScrollArea con un color distinto
         al resto del cuadrito) es el mismo. La alineación arriba ya la
-        daba gratis `layout_alertas.addStretch()` al final, sin tocar."""
+        daba gratis `layout_alertas.addStretch()` al final, sin tocar.
+
+        Importante: el fondo se arregla con `setAutoFillBackground(False)`,
+        NO con un `setStyleSheet(...)` como se probó primero — un
+        stylesheet puesto en el `QScrollArea`/viewport (un ancestro de
+        cada `QFrame#tarjetaAlerta`/`QLabel#encabezadoAlerta`) le cambiaba
+        el motor de pintado a TODOS los descendientes y terminaba
+        pisándole el fondo naranja y la letra blanca al título de cada
+        alerta, pese a que esas reglas tienen su propio selector por
+        objectName en `estilos.py` — la clienta lo detectó probando la
+        pantalla real. `autoFillBackground` no pasa por el motor de
+        stylesheets, así que no corre ese riesgo. Esta parte del arreglo
+        se mantiene (la clienta la confirmó explícitamente); lo único que
+        se revirtió fue el alto fijo de los seis cuadritos de la grilla."""
         self.tarjeta_alertas, layout = _tarjeta("Alertas")
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("background: transparent;")
+        scroll.viewport().setAutoFillBackground(False)
         self.contenedor_alertas = QWidget()
         self.layout_alertas = QVBoxLayout(self.contenedor_alertas)
         self.layout_alertas.addStretch()
         scroll.setWidget(self.contenedor_alertas)
-        scroll.viewport().setStyleSheet("background: transparent;")
         layout.addWidget(scroll)
         return self.tarjeta_alertas
 

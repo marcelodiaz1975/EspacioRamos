@@ -370,6 +370,54 @@ sobre la grilla de cuadritos:
   vertical sobrante en la solapa ya iba entero a Alertas por cómo reparte
   `QVBoxLayout` el espacio entre sus hijos.
 
+### Segunda vuelta: dos cosas que no andaban como se esperaba al probar en la pantalla real
+
+La clienta probó esta primera versión y encontró dos problemas reales
+(no de gusto, de comportamiento):
+
+- **Los seis cuadritos no se veían más chicos** ("los veo igual o más
+  grandes"). Hipótesis en el momento: `setMinimumHeight` es un PISO, no
+  un TECHO — con `QSizePolicy.Expanding` en los dos ejes, los cuadritos
+  podrían seguir creciendo hasta ocupar el espacio disponible sin
+  importar el mínimo. Se probó un arreglo (`_tarjeta(..., alto_fijo=
+  ...)`, `setFixedHeight` en vez de `setMinimumHeight`, con el piso de
+  Alertas subido a mano con el excedente real) — ver tercera vuelta más
+  abajo para el desenlace real de este punto.
+- **El cambio de fondo le pisó el color a los títulos de las alertas**
+  ("antes eran de fondo naranja y letras blancas... dejá como antes esa
+  parte"). Causa: el arreglo de la primera vuelta usaba `setStyleSheet
+  ("background: transparent;")` en el `QScrollArea`/viewport de cada
+  cuadrito — para los seis cuadritos simples (un solo `QLabel` sin hijos
+  con estilo propio) no se notaba, pero el de Alertas tiene adentro
+  `QFrame#tarjetaAlerta` → `QLabel#encabezadoAlerta` (fondo naranja,
+  letra blanca, con su PROPIO selector por objectName en `estilos.py`)
+  — un stylesheet puesto en un ancestro le cambia el motor de pintado a
+  TODOS los descendientes, y terminaba pisándole el color a esos
+  `QLabel`, aunque tengan su propio selector. Arreglo: `setAutoFillBackground
+  (False)` en el viewport en vez de cualquier `setStyleSheet` — no pasa
+  por el motor de stylesheets, así que no puede competir con ningún
+  selector de ningún descendiente. Se cambió en los SIETE lugares (los
+  seis cuadritos, vía `_agregar_contenido_escrolable`, y Alertas,
+  aparte, que no pasa por esa función). Confirmado por la clienta en la
+  tercera vuelta: este arreglo queda tal cual, sin tocar.
+
+### Tercera vuelta: la clienta avisó que había probado una versión sin comitear — el alto vuelve al mínimo simple
+
+Después de ver una captura nueva (con `alto_fijo`/`setFixedHeight`), la
+clienta aclaró que se había confundido probando algo sin comitear, y
+adjuntó la captura que sí le había gustado: el alto de los seis
+cuadritos con el mecanismo ORIGINAL (`setMinimumHeight(_ALTO_MINIMO_
+TARJETA)`, sin `setFixedHeight` ni ningún piso calculado a mano para
+Alertas) ya daba el resultado que pedía desde el principio. Se revirtió
+esa parte completa — `_tarjeta` vuelve a tener un solo parámetro
+(`titulo`), los seis `_armar_tarjeta_*` vuelven a llamarla sin
+`alto_fijo`, `_armar_tarjeta_alertas` vuelve a no recibir ningún
+parámetro de alto, y `_ALTO_MINIMO_TARJETA_ANTERIOR`/el cálculo de
+`excedente_liberado` en `_armar_ui` se sacaron por completo — mientras
+que el arreglo de color de la segunda vuelta (`setAutoFillBackground`
+en vez de `setStyleSheet`) se mantiene intacto, confirmado explícitamente
+por la clienta como la parte que sí había que aplicar y dejar.
+
 Pregunta aparte, sin cambio de código: cómo cargar "Día del psicólogo"
 el 13 de octubre de cada año — se carga desde el catálogo "Profesiones y
 tratamientos", campo "Día de profesión" (formato MM-DD, sin año, se
@@ -389,10 +437,17 @@ se sacaron, ya no existen ahí). `tests/test_gui_panel_control.py` (título
 de solapa nuevo; título del cuadrito fusionado; los tres conceptos
 generales de ocupación sin el monto/saldo viejo, más el desglose por
 Unidad; los siete conceptos del cuadrito nuevo; los cuatro conceptos
-nuevos de Profesionales; fondo transparente del scroll en los seis
-cuadritos y en Alertas; alineación `AlignTop` del contenido; `_ALTO_
-MINIMO_TARJETA` en el valor nuevo; Alertas más alto que un cuadrito de
-la grilla en una proporción mínima esperada).
+nuevos de Profesionales; fondo transparente (`autoFillBackground`, no
+`styleSheet`) del scroll en los seis cuadritos y en Alertas; alineación
+`AlignTop` del contenido; `_ALTO_MINIMO_TARJETA` en el valor nuevo
+(2/3 del anterior, con `setMinimumHeight` nomás — el intento de
+`setFixedHeight`/piso calculado a mano para Alertas se probó y se
+revirtió, ver tercera vuelta; los tests de esa variante se sacaron con
+el revert); que ningún `QScrollArea`/viewport de Alertas tenga un
+`styleSheet` propio, y que el título de cada alerta
+(`QLabel#encabezadoAlerta`) no tenga ningún estilo local que pueda
+competir con `estilos.py` — regresión del bug real que encontró la
+clienta).
 
 ## Metodología de trabajo
 
