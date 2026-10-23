@@ -961,3 +961,233 @@ se verificó a mano corriendo el `.spec` empaquetado completo bajo
 quedar esperando el diálogo de login (el único punto donde puede
 seguir sin interacción humana), sin ningún traceback.
 
+## Panel de control, solapa "Avance de período, backup, y vista rápida": rediseño de la grilla de cuadritos
+
+Nuevo hilo de trabajo (tercera prueba del flujo por temas separados):
+sesión nueva, con `docs/historial/sistema.md` como contexto (donde vive
+el resto del historial de esta pantalla). Pedido de varios puntos juntos
+sobre la grilla de cuadritos:
+
+- **Título de la solapa**: "Avance de período y backups" pasa a "Avance
+  de período, backup, y vista rápida" — pedido explícito, sin ningún
+  otro cambio de fondo asociado.
+- **Fusión de cuadritos**: "Último backup" se funde DENTRO de "Período
+  actual" (ahora "Período actual y último backup") — la info del
+  primero queda arriba, la del segundo debajo, sin tocar ninguna de las
+  dos (`_armar_tarjeta_periodo_y_backup`, antes dos funciones separadas).
+  El cuadrito que libera pasa a ser "Estadísticas principales mes en
+  curso" (`calcular_estadisticas_principales`, `app.negocio.
+  panel_control`): monto por reservas regulares/aisladas (`monto_neto_
+  regular_periodo`/`monto_neto_aislada_periodo`, mismo criterio "neto"
+  que Estadísticas), total ingresos/gastos operativos/balance de negocio
+  (reusa `app.negocio.balance.resultado_periodo` tal cual, sin alcance de
+  ubicación), total liquidado y saldo pendiente de cobro (`LiquidacionEmitida.
+  MontoGenerado` del período, ya existía adentro de `_saldo_pendiente_
+  periodo` — se extrajo a `_total_liquidado_periodo` para no duplicar la
+  consulta).
+- **"Ocupación y horas mes en curso"** (antes "Ocupación y horas"):
+  pierde el monto de aisladas y el saldo pendiente (ya están en el
+  cuadrito nuevo, sin duplicarse) y suma, debajo de los tres conceptos
+  generales (ocupación %, horas regulares semanales, horas aisladas
+  mensuales), el mismo desglose repetido por cada Unidad del sistema
+  (`calcular_estadisticas_ocupacion_por_unidad`, nueva) — reusa
+  `calcular_ocupacion(conn, anio, mes).por_unidad` para el % (ya lo
+  calculaba agregado) y repite `_horas_regulares_semanales_en_fecha`/
+  `_horas_aisladas_periodo` (esta última sumó un parámetro opcional
+  `ids_consultorio`, que antes no tenía) acotados a los consultorios de
+  cada Unidad. Orden: Edificio alfabético y, dentro de cada uno, la
+  Unidad con el mismo criterio PB/EP/piso ascendente que el resto del
+  sistema (`app.pdf.estilos.clave_orden_unidad`, importado cruzado de
+  capa — mismo patrón que ya usa `app.negocio.valores_operativos`).
+- **"Profesionales"** suma cuatro conceptos, todos en `calcular_
+  estadisticas_profesionales`: "con reservas aisladas activas" (confirmadas
+  desde HOY en adelante, inclusive — no cuenta una ya pasada) y tres
+  sobre cambios de `ReservaRegular` que todavía no entraron en vigencia:
+  "horarios incorporados para el mes próximo" (suma de horas semanales
+  de reservas cuya `VigenciaInicio` cae dentro del mes PRÓXIMO),
+  "horarios liberados para el mes próximo" (mismo criterio sobre
+  `VigenciaFin` cayendo dentro del mes EN CURSO — dejan de estar
+  vigentes a partir del 1° del próximo) y "Diferencia" (incorporados
+  menos liberados, puede ser negativa). Estos tres últimos son una
+  interpretación propia de "cambios de horas regulares para el próximo
+  período" sobre el modelo de vigencias ya existente — no hay, todavía,
+  confirmación explícita de la clienta sobre si es exactamente lo que
+  tenía en mente.
+- **Fondo "cuadrito adentro del cuadrito"**: el `QScrollArea` de cada
+  tarjeta (y su viewport interno, que Qt arma solo al llamar `setWidget`
+  y no es accesible por objectName) pintaba con el color default de Qt
+  en vez del `superficie` del resto del cuadrito — en modo claro porque
+  `paleta()` no toca `Base`/`Window` ahí (vuelve temprano), en modo
+  oscuro porque el `Base` que sí fija no es necesariamente el mismo tono
+  que `panelSolapa`/`cuadritoInfo`. Se resuelve seteando `background:
+  transparent` directo en la instancia del `scroll` y de `scroll.
+  viewport()` (`_agregar_contenido_escrolable`, y a mano en `_armar_
+  tarjeta_alertas`, que no pasa por esa función) — sin tocar `estilos.py`
+  global, es local a este módulo igual que el resto del estilo de
+  `_tarjeta`.
+- **Alineación arriba**: con `setWidgetResizable(True)`, Qt estira el
+  `QLabel` de contenido al alto completo del viewport, y la alineación
+  vertical default de `QLabel` es centrada — un cuadrito con poco texto
+  quedaba centrado en vez de arriba. Se corrige con `setAlignment(AlignLeft
+  | AlignTop)` sobre ese `QLabel`, adentro de `_agregar_contenido_
+  escrolable` (no aplica al cuadrito de período/backup, que es un
+  `QWidget` con su propio `QVBoxLayout` + `addStretch()`, ya alineado
+  arriba por su cuenta).
+- **Alto de los cuadritos, 2/3 del anterior**: `_ALTO_MINIMO_TARJETA`
+  baja de 140 a 93px (`round(140 * 2 / 3)`). El espacio que se libera lo
+  absorbe Alertas SOLO — no hizo falta ningún cambio de layout aparte:
+  Alertas ya tenía `stretch=1` en `layout_solapa` desde que se separó de
+  la grilla (tercera vuelta de una ronda anterior), mientras que la
+  grilla en sí se agrega sin stretch propio, así que cualquier espacio
+  vertical sobrante en la solapa ya iba entero a Alertas por cómo reparte
+  `QVBoxLayout` el espacio entre sus hijos.
+
+### Segunda vuelta: dos cosas que no andaban como se esperaba al probar en la pantalla real
+
+La clienta probó esta primera versión y encontró dos problemas reales
+(no de gusto, de comportamiento):
+
+- **Los seis cuadritos no se veían más chicos** ("los veo igual o más
+  grandes"). Hipótesis en el momento: `setMinimumHeight` es un PISO, no
+  un TECHO — con `QSizePolicy.Expanding` en los dos ejes, los cuadritos
+  podrían seguir creciendo hasta ocupar el espacio disponible sin
+  importar el mínimo. Se probó un arreglo (`_tarjeta(..., alto_fijo=
+  ...)`, `setFixedHeight` en vez de `setMinimumHeight`, con el piso de
+  Alertas subido a mano con el excedente real) — ver tercera vuelta más
+  abajo para el desenlace real de este punto.
+- **El cambio de fondo le pisó el color a los títulos de las alertas**
+  ("antes eran de fondo naranja y letras blancas... dejá como antes esa
+  parte"). Causa: el arreglo de la primera vuelta usaba `setStyleSheet
+  ("background: transparent;")` en el `QScrollArea`/viewport de cada
+  cuadrito — para los seis cuadritos simples (un solo `QLabel` sin hijos
+  con estilo propio) no se notaba, pero el de Alertas tiene adentro
+  `QFrame#tarjetaAlerta` → `QLabel#encabezadoAlerta` (fondo naranja,
+  letra blanca, con su PROPIO selector por objectName en `estilos.py`)
+  — un stylesheet puesto en un ancestro le cambia el motor de pintado a
+  TODOS los descendientes, y terminaba pisándole el color a esos
+  `QLabel`, aunque tengan su propio selector. Arreglo: `setAutoFillBackground
+  (False)` en el viewport en vez de cualquier `setStyleSheet` — no pasa
+  por el motor de stylesheets, así que no puede competir con ningún
+  selector de ningún descendiente. Se cambió en los SIETE lugares (los
+  seis cuadritos, vía `_agregar_contenido_escrolable`, y Alertas,
+  aparte, que no pasa por esa función). Confirmado por la clienta en la
+  tercera vuelta: este arreglo queda tal cual, sin tocar.
+
+### Tercera vuelta: la clienta avisó que había probado una versión sin comitear — el alto vuelve al mínimo simple
+
+Después de ver una captura nueva (con `alto_fijo`/`setFixedHeight`), la
+clienta aclaró que se había confundido probando algo sin comitear, y
+adjuntó la captura que sí le había gustado: el alto de los seis
+cuadritos con el mecanismo ORIGINAL (`setMinimumHeight(_ALTO_MINIMO_
+TARJETA)`, sin `setFixedHeight` ni ningún piso calculado a mano para
+Alertas) ya daba el resultado que pedía desde el principio. Se revirtió
+esa parte completa — `_tarjeta` vuelve a tener un solo parámetro
+(`titulo`), los seis `_armar_tarjeta_*` vuelven a llamarla sin
+`alto_fijo`, `_armar_tarjeta_alertas` vuelve a no recibir ningún
+parámetro de alto, y `_ALTO_MINIMO_TARJETA_ANTERIOR`/el cálculo de
+`excedente_liberado` en `_armar_ui` se sacaron por completo — mientras
+que el arreglo de color de la segunda vuelta (`setAutoFillBackground`
+en vez de `setStyleSheet`) se mantiene intacto, confirmado explícitamente
+por la clienta como la parte que sí había que aplicar y dejar.
+
+### Cuarta vuelta: las tres franjas (fila 1, fila 2, Alertas) reparten el alto por igual
+
+La clienta volvió a marcar que Alertas se veía "bajo" (corto) — pero
+reformuló el pedido en términos más precisos, sin ambigüedad: todo el
+alto que queda DEBAJO del botón "Avanzar de mes" tiene que repartirse en
+TRES franjas iguales (la primera fila de tres cuadritos, la segunda fila
+de tres, y Alertas), las tres del mismo tamaño visual — no que Alertas
+absorba "lo que sobra" después de que la grilla tome lo que necesita (el
+criterio con el que se había armado hasta acá, desde la primera
+versión). Antes de tocar código se armó un script con la pantalla real
+(no se adivinó a partir de leer el layout) para confirmar la causa: las
+dos filas de cuadritos vivían en un único `QGridLayout`, agregado a
+`layout_solapa` SIN ningún `stretch` propio (0 implícito), mientras
+Alertas se agregaba con `stretch=1` — en un `QBoxLayout`, un ítem sin
+stretch explícito NO crece más allá de lo que pide su contenido (aunque
+sus hijos tengan política `Expanding`), así que la grilla quedaba
+achicada a su tamaño "natural" (determinado en la práctica por el
+tamaño por default de cada `QScrollArea`, ~192px, no por el piso de
+`_ALTO_MINIMO_TARJETA`) y Alertas se llevaba TODO el resto — midiendo en
+una ventana real de 950px de alto, la grilla terminaba en 138px por fila
+y Alertas en 412px: ni iguales, ni en la proporción 2:1 que hubiera
+tenido sentido para "dos filas + una franja".
+
+Arreglo: las dos filas de tres cuadritos dejan de vivir en un único
+`QGridLayout` — pasan a ser dos `QHBoxLayout` independientes
+(`fila_tarjetas_1`/`fila_tarjetas_2`, cada cuadrito agregado con
+`stretch=1` para mantener el mismo ancho parejo que ya daba
+`setColumnStretch`), y las tres franjas (`fila_tarjetas_1`,
+`fila_tarjetas_2`, la tarjeta de Alertas) se agregan a `layout_solapa`
+como HERMANAS, con el mismo `stretch=1` cada una. Con el mismo stretch Y
+el mismo piso (`_ALTO_MINIMO_TARJETA` en las tres, Alertas incluida, vía
+`_tarjeta()`), `QBoxLayout` reparte cualquier espacio de sobra en partes
+iguales entre las tres — confirmado armando la pantalla real y midiendo
+alto en píxeles en dos tamaños de ventana distintos (950px y 800px de
+alto): las tres franjas quedaron exactas o a 1px de diferencia en los
+dos casos, no una aproximación. Ya no existe ningún `QGridLayout` en
+esta solapa — `_COLUMNAS_GRILLA` se mantiene (ahora corta la lista de
+seis tarjetas en dos mitades de tres para repartir entre las dos filas).
+
+De paso, formato de fecha del cuadrito "Feriados y fechas especiales
+próximas": pasa de mostrar `FechasEspeciales.Fecha` tal cual (AAAA-MM-DD)
+a "ddd dd-mm-aaaa" (día de la semana abreviado, mismo criterio que el
+resto del sistema) — `_texto_fecha`, nueva, mismo patrón que `_texto_
+fecha_hora` pero sin la hora (acá el dato es una fecha sola). Puntual de
+este cuadrito — la lista de alertas "Fechas especiales en los próximos
+15 días" (`_ETIQUETA_FILA["fechas_especiales_proximas"]`, otro lugar
+que también arma texto con `f['Fecha']`) no se tocó, no fue parte de
+este pedido.
+
+Pregunta aparte, sin cambio de código: cómo cargar "Día del psicólogo"
+el 13 de octubre de cada año — se carga desde el catálogo "Profesiones y
+tratamientos", campo "Día de profesión" (formato MM-DD, sin año, se
+repite todos los años), en la fila de "Psicología"; el texto "Día del
+Psicólogo" sale del campo "Nombre masculino" de esa misma fila. Ya
+alimenta el cuadrito "Cumpleaños y días de profesión" sin tocar nada
+más (`cumpleanos_y_dias_profesion_proximos`, sin cambios).
+
+Segunda pregunta aparte, también sin cambio de código: qué es
+`Configuracion.RangosEstadisticasOcupacion` ("Configuración general" →
+solapa "Grilla y ocupación" → "Rangos de estadísticas de ocupación
+(JSON)") — confirmado que sí, es exactamente eso: un JSON por día de la
+semana (`{"Lunes": [9, 21], ...}`, default L-V 9-21hs / Sáb 9-15hs /
+domingo no cuenta — `app.negocio.estadisticas.RANGO_DEFAULT`) que define
+el rango horario "hábil" que se tiene en cuenta al calcular los % de
+ocupación (general y desglosado por edificio/unidad/consultorio) —
+`rango_horas_por_dia`/`calcular_ocupacion` en `app/negocio/estadisticas.py`
+lo usan tal cual. Puntual: NO es lo mismo que "Hora inicio/fin de
+grilla" (otro campo de esa misma solapa) — ese es el rango que se
+MUESTRA en la grilla semanal visual, un concepto distinto que puede no
+coincidir con el rango que efectivamente cuenta para las estadísticas.
+
+Tests nuevos/reescritos: `tests/test_panel_control.py` (`calcular_
+estadisticas_profesionales` con los tres casos de aisladas activas/
+incorporados/liberados; `calcular_estadisticas_principales` contra
+`resultado_periodo` directo, para no duplicar la fórmula en el test;
+`calcular_estadisticas_ocupacion_por_unidad` con dos Unidades, cada una
+con su propia reserva, más el orden PB antes que piso numérico; los
+viejos `monto_aisladas_mes`/`saldo_pendiente_mes` de `EstadisticasOcupacion`
+se sacaron, ya no existen ahí). `tests/test_gui_panel_control.py` (título
+de solapa nuevo; título del cuadrito fusionado; los tres conceptos
+generales de ocupación sin el monto/saldo viejo, más el desglose por
+Unidad; los siete conceptos del cuadrito nuevo; los cuatro conceptos
+nuevos de Profesionales; fondo transparente (`autoFillBackground`, no
+`styleSheet`) del scroll en los seis cuadritos y en Alertas; alineación
+`AlignTop` del contenido; `_ALTO_MINIMO_TARJETA` en el valor nuevo
+(2/3 del anterior, con `setMinimumHeight` nomás — el intento de
+`setFixedHeight`/piso calculado a mano para Alertas se probó y se
+revirtió, ver tercera vuelta; los tests de esa variante se sacaron con
+el revert); que ningún `QScrollArea`/viewport de Alertas tenga un
+`styleSheet` propio, y que el título de cada alerta
+(`QLabel#encabezadoAlerta`) no tenga ningún estilo local que pueda
+competir con `estilos.py` — regresión del bug real que encontró la
+clienta). Cuarta vuelta: los tres tests que usaban `pantalla.
+findChild(QGridLayout)` (ya no existe ningún `QGridLayout` en esta
+solapa) se reescriben ubicando cada cuadrito por su `QLabel` de
+contenido (`_tarjeta_de`, ya usado en otros tests del archivo) en vez de
+por posición dentro de la grilla vieja; nuevo `test_fila1_fila2_y_
+alertas_quedan_del_mismo_alto` (reemplaza al que afirmaba que Alertas
+quedaba "mucho más alto" — ya no es cierto, ahora es igual a propósito)
+y el test de fecha de "Feriados y fechas especiales próximas" pasa a
+verificar "ddd dd-mm-yyyy" en vez del AAAA-MM-DD crudo de antes.
