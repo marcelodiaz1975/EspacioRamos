@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 from PySide6.QtCore import Qt
@@ -216,6 +216,41 @@ def test_avanzar_mes_no_pregunta_por_aumento_si_ya_se_confirmo_uno(qtbot, conn, 
     assert "evaluar un aumento" not in preguntas[0]
     snapshots = obtener_repositorio(conn, "SnapshotMensual").listar()
     assert snapshots[0]["PorcentajeAumentoAplicado"] == 5.0
+
+
+def test_avanzar_mes_bloqueado_si_ya_esta_un_periodo_por_delante_de_la_fecha_real(qtbot, conn, monkeypatch):
+    """Confirmado por la clienta: "si estoy realmente en octubre, que me
+    permita avanzar a noviembre y no más de eso" — un segundo click sobre
+    "Avanzar de mes" sin que la fecha real haya alcanzado ese período
+    tiene que avisar y NO ejecutar nada (sin backup, cuotas, snapshot,
+    etc.). Usa la fecha REAL del sistema operativo (no el modo QA de
+    fecha ficticia, que esta regla ignora a propósito)."""
+    from app.negocio import avance_mes as avance_mes_modulo
+    from app.negocio import dias as dias_modulo
+
+    class _FechaFija(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 10, 25)
+
+    monkeypatch.setattr(dias_modulo, "date", _FechaFija)
+    monkeypatch.setattr(avance_mes_modulo, "date", _FechaFija)
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    _saltear_aumento_y_confirmar(monkeypatch)
+    pantalla.panel_avance._avanzar_mes()  # avance válido: cierra 2026-10, queda parado en 2026-11
+    snapshots_tras_el_avance = len(obtener_repositorio(conn, "SnapshotMensual").listar())
+
+    avisos = []
+    monkeypatch.setattr(
+        QMessageBox, "information",
+        staticmethod(lambda self, titulo, texto, *a, **k: avisos.append(texto)),
+    )
+    pantalla.panel_avance._avanzar_mes()  # 2do intento, sin que la fecha real haya llegado a noviembre
+
+    assert len(avisos) == 1
+    assert "no se puede avanzar" in avisos[0].lower()
+    assert len(obtener_repositorio(conn, "SnapshotMensual").listar()) == snapshots_tras_el_avance
 
 
 def _crear_pedido_vencido(conn) -> int:

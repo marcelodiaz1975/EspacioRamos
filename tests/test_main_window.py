@@ -58,6 +58,35 @@ def test_barra_fecha_ficticia_activada_sin_fecha_no_se_muestra(qtbot, conn):
     assert ventana._barra_fecha_ficticia.isHidden() is True
 
 
+def test_barra_fecha_ficticia_avisa_de_avance_adelantado_sin_modo_qa(qtbot, conn, monkeypatch):
+    """Pedido de la clienta ("no lo necesitaría, pero tampoco me molesta,
+    agregalo por si acaso"): si "Avanzar de mes" dejó al sistema parado
+    un período por delante de la fecha real, la misma barra avisa — sin
+    que el modo fecha ficticia (QA) esté activo."""
+    from datetime import date
+
+    from app.negocio import avance_mes as avance_mes_modulo
+    from app.negocio import dias as dias_modulo
+
+    class _FechaFija(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 10, 25)
+
+    monkeypatch.setattr(dias_modulo, "date", _FechaFija)
+    monkeypatch.setattr(avance_mes_modulo, "date", _FechaFija)
+    from app.negocio.avance_mes import avanzar_mes
+    avanzar_mes(conn, periodo_cerrado="2026-10")
+    conn.commit()
+
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+
+    assert ventana._barra_fecha_ficticia.isHidden() is False
+    assert "AVANCE DE MES ADELANTADO" in ventana._barra_fecha_ficticia.text()
+    assert "11/2026" in ventana._barra_fecha_ficticia.text()
+
+
 def test_sin_secciones_no_falla(qtbot, conn):
     ventana = VentanaPrincipal(conn, [])
     qtbot.addWidget(ventana)

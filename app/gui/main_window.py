@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import date
 from typing import Callable
 
 from PySide6.QtCore import Qt
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.estilos import hoja_estilos, paleta
 from app.gui.widgets.calculadora import Calculadora
+from app.negocio.avance_mes import puede_avanzarse_mes
 from app.negocio.dias import periodo_actual
 from app.negocio.plantillas_texto import resolver_plantilla
 from app.negocio.seguridad import nivel_alcanza
@@ -294,16 +296,30 @@ class VentanaPrincipal(QMainWindow):
         visible mientras está activo, para no confundir datos de prueba
         con reales — se revisa en cada cambio de pantalla, ya que
         Configuración general puede activarlo/desactivarlo en cualquier
-        momento durante la sesión."""
+        momento durante la sesión.
+
+        Fuera de ese modo, la misma barra (no se necesitan las dos a la
+        vez: mientras la fecha ficticia está activa no corre el recorte
+        de `fecha_actual` contra el período operativo) avisa si "Avanzar
+        de mes" dejó al sistema parado un período por delante de la fecha
+        real — pedido de la clienta ("no lo necesitaría, pero tampoco me
+        molesta, agregalo por si acaso")."""
         cfg = self.conn.execute(
             "SELECT ModoFechaFicticia, FechaFicticia FROM Configuracion WHERE IdConfiguracion = 1"
         ).fetchone()
-        activo = bool(cfg and cfg["ModoFechaFicticia"] and cfg["FechaFicticia"])
-        if activo:
+        if cfg and cfg["ModoFechaFicticia"] and cfg["FechaFicticia"]:
             self._barra_fecha_ficticia.setText(
                 f"⚠ MODO FECHA FICTICIA ACTIVO — Hoy simulado: {cfg['FechaFicticia']} ⚠"
             )
-        self._barra_fecha_ficticia.setVisible(activo)
+            self._barra_fecha_ficticia.show()
+        elif not puede_avanzarse_mes(self.conn):
+            self._barra_fecha_ficticia.setText(
+                f"⚠ AVANCE DE MES ADELANTADO — Período operativo: {self._periodo_legible()} "
+                f"(fecha real de hoy: {date.today():%d-%m-%Y}) ⚠"
+            )
+            self._barra_fecha_ficticia.show()
+        else:
+            self._barra_fecha_ficticia.hide()
 
     def _actualizar_badge_periodo(self) -> None:
         """Miscelánea (ago-2026): el período en el que está posicionado el

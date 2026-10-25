@@ -721,6 +721,12 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     FrecuenciaBackupDrive TEXT,
     ModoFechaFicticia INTEGER NOT NULL DEFAULT 0,
     FechaFicticia TEXT,
+    -- 'AAAA-MM' en el que "Avanzar de mes" dejó parado al operador la
+    -- última vez (ver app.negocio.dias.fecha_actual) — independiente del
+    -- modo fecha ficticia (QA) de arriba, rige siempre, incluso en uso
+    -- real. Se inicializa al período real de hoy (`sembrar_configuracion`/
+    -- migración `_inicializar_periodo_operativo_actual`).
+    PeriodoOperativoActual TEXT,
     MensajesPlural INTEGER NOT NULL DEFAULT 1,
     CantidadDecimales INTEGER NOT NULL DEFAULT 2,
     -- Distinto de CantidadDecimales (que solo controla cuántos decimales se

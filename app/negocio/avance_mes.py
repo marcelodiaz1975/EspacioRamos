@@ -55,7 +55,9 @@ from app.negocio.archivos_generados import (
     vaciar_carpeta,
 )
 from app.negocio.backup import generar_backup
-from app.negocio.dias import fecha_actual, parsear_periodo, sumar_meses, ultimo_dia_mes
+from app.negocio.dias import (
+    fecha_actual, parsear_periodo, periodo_operativo_actual, primer_dia_mes, sumar_meses, ultimo_dia_mes,
+)
 from app.negocio.estadisticas import generar_snapshot, limpiar_snapshots_operacion_importante_antiguos
 from app.negocio.lista_espera import eliminar_pedido
 from app.repositorio.registro import obtener_repositorio
@@ -252,6 +254,19 @@ def porcentaje_aumento_del_periodo(conn: sqlite3.Connection, periodo: str) -> fl
     return max(aplicados, key=lambda a: a["IdAumento"])["PorcentajeGeneral"]
 
 
+def puede_avanzarse_mes(conn: sqlite3.Connection) -> bool:
+    """Tope de un período de anticipo (confirmado por la clienta: "si
+    estoy realmente en octubre, que me permita avanzar a noviembre y no
+    más de eso"): si "Avanzar de mes" ya dejó al operador parado en un
+    período que la fecha real todavía no alcanzó, no se puede volver a
+    avanzar hasta que la realidad llegue a ese período — expuesto aparte,
+    mismo criterio que `pedidos_activos_vencidos`, para que la pantalla
+    de avance de mes pueda avisar y cortar el flujo ANTES de ofrecer el
+    resto de los pasos (evaluar aumento, confirmar el pase, etc.)."""
+    anio, mes = parsear_periodo(periodo_operativo_actual(conn))
+    return primer_dia_mes(anio, mes) <= date.today()
+
+
 def avanzar_mes(
     conn: sqlite3.Connection, *, periodo_cerrado: str, eliminar_activos_vencidos_lista_espera: bool = False,
     porcentaje_aumento_aplicado: float | None = None,
@@ -269,13 +284,12 @@ def avanzar_mes(
     pase el valor a mano."""
     if porcentaje_aumento_aplicado is None:
         porcentaje_aumento_aplicado = porcentaje_aumento_del_periodo(conn, periodo_cerrado)
+    periodo_nuevo = sumar_meses(periodo_cerrado, 1)
     resumen = ResumenAvanceMes(periodo_cerrado=periodo_cerrado)
     resumen.ruta_backup = _generar_backup_previo(conn)
     resumen.backup_generado = resumen.ruta_backup is not None
     resumen.profesionales_con_traspaso = _traspasar_saldos(conn)
-    resumen.plazos_extendidos_automaticos_aplicados = _aplicar_plazos_extendidos_automaticos(
-        conn, sumar_meses(periodo_cerrado, 1),
-    )
+    resumen.plazos_extendidos_automaticos_aplicados = _aplicar_plazos_extendidos_automaticos(conn, periodo_nuevo)
     resumen.cuotas_cerradas, resumen.planes_finalizados = _cerrar_cuotas(conn, periodo_cerrado)
     resumen.pedidos_lista_espera_eliminados, resumen.pedidos_activos_vencidos_eliminados = _limpiar_lista_espera(
         conn, eliminar_activos_vencidos=eliminar_activos_vencidos_lista_espera,
@@ -305,5 +319,13 @@ def avanzar_mes(
     # del proceso ya corrió — no una "foto" tomada a mitad de camino.
     resumen.id_snapshot = generar_snapshot(
         conn, periodo_cerrado, porcentaje_aumento_aplicado=porcentaje_aumento_aplicado,
+    )
+
+    # Último paso, después de todo lo anterior (que todavía calcula sobre
+    # `fecha_actual`/`periodo_actual` del período que se está cerrando):
+    # recién acá se mueve el ancla, para que el "hoy" que vieron los pasos
+    # de arriba no cambie a mitad de la propia operación de avance.
+    conn.execute(
+        "UPDATE Configuracion SET PeriodoOperativoActual = ? WHERE IdConfiguracion = 1", (periodo_nuevo,),
     )
     return resumen

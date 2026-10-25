@@ -143,7 +143,9 @@ from PySide6.QtWidgets import (
 from app.gui.estilos import COLOR_ROJO, COLOR_TEXTO_CLARO
 from app.gui.pantallas.importacion import _PanelImportacion
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.negocio.avance_mes import avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo
+from app.negocio.avance_mes import (
+    avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo, puede_avanzarse_mes,
+)
 from app.negocio.backup import (
     _ruta_base_datos,
     backup_vencido,
@@ -770,6 +772,14 @@ class _PanelAvancePeriodo(QWidget):
 
     def _avanzar_mes(self) -> None:
         periodo = periodo_actual(self.conn)
+
+        if not puede_avanzarse_mes(self.conn):
+            QMessageBox.information(
+                self, "Avanzar de mes",
+                f"Ya estás parado en el período {periodo}, un mes por delante de la fecha real de hoy. "
+                "No se puede avanzar más de un período hasta que la fecha real alcance ese mes.",
+            )
+            return
 
         if porcentaje_aumento_del_periodo(self.conn, periodo) is None:
             respuesta_aumento = QMessageBox.question(

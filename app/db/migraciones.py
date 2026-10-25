@@ -93,6 +93,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Configuracion", "UltimoBackupPropio", "TEXT"),
     ("ReservaAislada", "PeriodoImputado", "TEXT"),
     ("Configuracion", "DecimalesTotalLiquidacion", "INTEGER NOT NULL DEFAULT 2"),
+    ("Configuracion", "PeriodoOperativoActual", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja
@@ -323,6 +324,30 @@ def _inicializar_ultimo_backup_propio(conn: sqlite3.Connection) -> None:
     )
 
 
+def _inicializar_periodo_operativo_actual(conn: sqlite3.Connection) -> None:
+    """Avance de mes (confirmado por la clienta): una base ya en uso
+    recibe la columna `PeriodoOperativoActual` en NULL (ver
+    `_COLUMNAS_NUEVAS`) — se inicializa al período real de hoy, "sin
+    avance pendiente", el mismo estado en que ya estaba funcionando de
+    hecho (sin esta columna, el sistema siempre mostraba el período real).
+    Una base nueva pasa por el mismo camino si todavía no llegó a
+    `sembrar_configuracion` (que ya la inicializa explícita al crear la
+    fila) por algún motivo."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Configuracion'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(Configuracion)").fetchall()}
+    if "PeriodoOperativoActual" not in columnas_existentes:
+        return
+    hoy = datetime.now()
+    conn.execute(
+        "UPDATE Configuracion SET PeriodoOperativoActual = ? WHERE PeriodoOperativoActual IS NULL",
+        (f"{hoy.year:04d}-{hoy.month:02d}",),
+    )
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -350,4 +375,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _clasificar_subtipo_deposito_llave(conn)
     _ampliar_alcance_gasto_a_consultorio(conn)
     _inicializar_ultimo_backup_propio(conn)
+    _inicializar_periodo_operativo_actual(conn)
     conn.commit()

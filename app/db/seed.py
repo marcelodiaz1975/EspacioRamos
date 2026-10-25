@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 
 DIAS_LUNES_A_SABADO = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"]
 DIAS_LUNES_A_VIERNES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
@@ -283,6 +284,7 @@ def sembrar_bloques_rigidos(conn: sqlite3.Connection) -> None:
 def sembrar_configuracion(conn: sqlite3.Connection) -> None:
     if not _tabla_vacia(conn, "Configuracion"):
         return
+    hoy = datetime.now()
     conn.execute(
         "INSERT INTO Configuracion (IdConfiguracion, HoraInicioGrilla, HoraFinGrilla, DiasGrilla, "
         "FraccionGrilla, UmbralGiroGrilla, RecargoPorcentajeAisladas, RecargoAisladasActivoPorDefecto, "
@@ -290,9 +292,12 @@ def sembrar_configuracion(conn: sqlite3.Connection) -> None:
         "PorcentajeAjusteSaldoAtrasado, SemanasVacacionesMaximasPorAnio, DiasEnvioLiquidacionesRemanentes, "
         "DiasAntesFinMesRecordatorioGeneral, "
         "RetencionHistorialListaEsperaAnios, ModulosExtendidos, TamanoMaximoImagenMB, "
-        "ModoFechaFicticia, MensajesPlural) "
-        "VALUES (1, 8, 22, ?, 30, 8, 0, 0, ?, ?, 3, 2, 5, 5, 5, 0, 5, 0, 1)",
-        (json.dumps(DIAS_LUNES_A_SABADO, ensure_ascii=False), "Bimestral", json.dumps([2, 4, 6, 8, 10, 12])),
+        "ModoFechaFicticia, PeriodoOperativoActual, MensajesPlural) "
+        "VALUES (1, 8, 22, ?, 30, 8, 0, 0, ?, ?, 3, 2, 5, 5, 5, 0, 5, 0, ?, 1)",
+        (
+            json.dumps(DIAS_LUNES_A_SABADO, ensure_ascii=False), "Bimestral", json.dumps([2, 4, 6, 8, 10, 12]),
+            f"{hoy.year:04d}-{hoy.month:02d}",
+        ),
     )
     conn.commit()
 

@@ -1,10 +1,16 @@
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.avance_mes import avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo
+from app.negocio import avance_mes as avance_mes_modulo
+from app.negocio import dias as dias_modulo
+from app.negocio.avance_mes import (
+    avanzar_mes, pedidos_activos_vencidos, porcentaje_aumento_del_periodo, puede_avanzarse_mes,
+)
+from app.negocio.dias import periodo_actual, periodo_operativo_actual
 from app.negocio.lista_espera import crear_pedido, marcar_descartado, marcar_resuelto
 from app.negocio.pagos import crear_plan_pago
 from app.repositorio.registro import obtener_repositorio
@@ -331,3 +337,50 @@ def test_avanzar_mes_genera_backup_previo(conn, tmp_path):
     assert resumen.backup_generado is True
     assert resumen.ruta_backup is not None
     assert list(Path(resumen.ruta_backup).glob("*.db"))
+
+
+def _congelar_hoy_real(monkeypatch, anio, mes, dia):
+    """Pisa `date.today()` en los dos módulos que lo usan para esta regla
+    (`dias.fecha_actual`/`periodo_actual` y el tope de
+    `avance_mes.puede_avanzarse_mes`) — necesario para simular la fecha
+    REAL del sistema operativo, algo distinto del modo fecha ficticia
+    (QA), que esta regla ignora a propósito."""
+    class _FechaFija(date):
+        @classmethod
+        def today(cls):
+            return date(anio, mes, dia)
+
+    monkeypatch.setattr(dias_modulo, "date", _FechaFija)
+    monkeypatch.setattr(avance_mes_modulo, "date", _FechaFija)
+
+
+def test_avanzar_mes_mueve_el_periodo_operativo_al_mes_siguiente(conn):
+    avanzar_mes(conn, periodo_cerrado="2026-08")
+    assert periodo_operativo_actual(conn) == "2026-09"
+
+
+def test_puede_avanzarse_mes_sin_ningun_avance_pendiente(conn, monkeypatch):
+    _congelar_hoy_real(monkeypatch, 2026, 10, 25)
+    assert puede_avanzarse_mes(conn) is True
+
+
+def test_no_se_puede_avanzar_mas_de_un_periodo_por_delante_de_la_fecha_real(conn, monkeypatch):
+    """Confirmado por la clienta: "si estoy realmente en octubre, que me
+    permita avanzar a noviembre y no más de eso" — un segundo avance sin
+    que la fecha real haya alcanzado noviembre tiene que quedar
+    bloqueado."""
+    _congelar_hoy_real(monkeypatch, 2026, 10, 25)
+
+    avanzar_mes(conn, periodo_cerrado=periodo_actual(conn))
+
+    assert periodo_operativo_actual(conn) == "2026-11"
+    assert puede_avanzarse_mes(conn) is False
+
+
+def test_vuelve_a_poder_avanzarse_cuando_la_fecha_real_alcanza_el_periodo_operativo(conn, monkeypatch):
+    _congelar_hoy_real(monkeypatch, 2026, 10, 25)
+    avanzar_mes(conn, periodo_cerrado=periodo_actual(conn))  # queda parado en 2026-11
+
+    _congelar_hoy_real(monkeypatch, 2026, 11, 1)  # la realidad alcanzó a noviembre: "se rompe lo virtual"
+
+    assert puede_avanzarse_mes(conn) is True
