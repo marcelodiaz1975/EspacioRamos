@@ -29,9 +29,10 @@ def edificio_con_consultorio(conn):
     return id_edificio, id_unidad, id_consultorio
 
 
-def _busqueda_simple(dias=("Lunes",)):
+def _busqueda_simple(dias=("Lunes",), hora_desde=9, hora_hasta=11):
     return Busqueda(
-        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=list(dias), hora_desde=9, hora_hasta=11,
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=list(dias),
+        hora_desde=hora_desde, hora_hasta=hora_hasta,
     )
 
 
@@ -311,7 +312,11 @@ def test_comentario_ausente_sin_contenido(conn, edificio_con_consultorio, tmp_pa
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
-    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
+    # Horario fuera de los BloqueRigido default (9-11 y 18-21) para que no
+    # dispare, de rebote, la nota de bloques rígidos (ver test propio).
+    ruta = generar_pdf_oferta_busqueda(
+        conn, str(tmp_path), id_prof, globales, [_busqueda_simple(hora_desde=12, hora_hasta=14)],
+    )
     texto = fitz.open(ruta)[0].get_text()
     assert "Comentario" not in texto
 
@@ -358,7 +363,11 @@ def test_comentario_excluye_edificio_sin_resultados(conn, tmp_path):
     globales = CriteriosGlobales(
         tipo_busqueda="Regular", ids_edificio=[id_edificio1, id_edificio2], localidad="Ramos Mejía",
     )
-    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
+    # Horario fuera de los BloqueRigido default (9-11 y 18-21) para que no
+    # dispare, de rebote, la nota de bloques rígidos (ver test propio).
+    ruta = generar_pdf_oferta_busqueda(
+        conn, str(tmp_path), id_prof, globales, [_busqueda_simple(hora_desde=12, hora_hasta=14)],
+    )
     texto = fitz.open(ruta)[0].get_text()
     assert "Comentario" not in texto
     assert "Ramos 2" not in texto
@@ -377,3 +386,33 @@ def test_comentario_incluye_aviso_de_hora_aislada_con_un_solo_edificio(conn, edi
     assert "Comentario" in texto
     assert "hora aislada asignada" in texto
     assert f"{ANIO}-{MES:02d}-03" in texto
+
+
+def test_comentario_aclara_bloque_rigido_involucrado(conn, edificio_con_consultorio, tmp_path):
+    """Pedido explícito de la clienta: cuando la oferta incluye horas de
+    un BloqueRigido activo, el documento aclara cuáles son esas horas y
+    que hay que tomarlas juntas, sin fraccionar — mismo criterio que la
+    aclaración de "Redondeo" en las liquidaciones. `_busqueda_simple`
+    (9-11hs Lunes) cae justo dentro del BloqueRigido default sembrado
+    por `sembrar_valores_por_defecto` (9-11hs, Lunes a Sábado)."""
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Comentario" in texto
+    assert "bloque rígido" in texto
+    assert "9 a 11hs" in texto
+    assert "Lunes" in texto
+    assert "sin fraccionarlo" in texto
+
+
+def test_comentario_sin_bloque_rigido_involucrado_no_lo_menciona(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    ruta = generar_pdf_oferta_busqueda(
+        conn, str(tmp_path), id_prof, globales, [_busqueda_simple(hora_desde=12, hora_hasta=14)],
+    )
+    texto = fitz.open(ruta)[0].get_text()
+    assert "bloque rígido" not in texto

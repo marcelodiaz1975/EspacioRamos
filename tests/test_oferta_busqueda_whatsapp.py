@@ -32,6 +32,11 @@ def _busqueda_simple(dias=("Lunes",)):
 
 
 def test_estructura_basica_con_una_sola_alternativa(conn, edificio_con_consultorio, tmp_path):
+    # Sin esto, 9-11hs Lunes cae dentro del BloqueRigido default (ver
+    # test propio de la nota de bloques rígidos) y dispara el comentario
+    # que esta prueba busca ver AUSENTE por los otros dos motivos
+    # (edificio único, sin avisos).
+    conn.execute("UPDATE BloqueRigido SET Activo = 0")
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
@@ -43,7 +48,7 @@ def test_estructura_basica_con_una_sola_alternativa(conn, edificio_con_consultor
     assert "*Listado de alternativas encontradas*" in texto
     assert "_Alternativa" not in texto  # una sola alternativa: no se numera
     assert '- Lunes de 9 a 11hs consultorio 1 del 7mo "L" - Hora regular $ 1.000' in texto
-    assert "*Comentario*" not in texto  # un solo edificio, sin avisos
+    assert "*Comentario*" not in texto  # un solo edificio, sin avisos ni bloques rígidos
 
 
 def test_muestra_valor_al_final_cuando_se_identifica_el_consultorio(conn, edificio_con_consultorio, tmp_path):
@@ -114,6 +119,20 @@ def test_comentario_enumera_edificios_cuando_hay_mas_de_uno(conn, tmp_path):
     assert "*Comentario*" in texto
     assert "- Ramos 1 corresponde a Av. Rivadavia 13876, Ramos Mejía." in texto
     assert "- Ramos 2 corresponde a Alvear 856, Ramos Mejía." in texto
+
+
+def test_comentario_aclara_bloque_rigido_involucrado(conn, edificio_con_consultorio, tmp_path):
+    """`_busqueda_simple` (9-11hs Lunes) cae justo dentro del BloqueRigido
+    default sembrado por `sembrar_valores_por_defecto` (9-11hs, Lunes a
+    Sábado) — mismo criterio que el PDF (`test_pdf_oferta_busqueda.py`)."""
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
+
+    assert "*Comentario*" in texto
+    assert "bloque rígido" in texto
+    assert "sin fraccionarlo" in texto
 
 
 def test_aislada_incluye_rango_de_fechas(conn, tmp_path):

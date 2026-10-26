@@ -49,6 +49,7 @@ from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales
 from app.negocio.oferta_busqueda_texto import (
     alternativas_planas,
     avisos_planos,
+    bloques_rigidos_comentario,
     categoria_es_activa,
     edificios_comentario,
     filtrar_excluidas,
@@ -91,12 +92,16 @@ def _texto_alternativas(
     return story
 
 
-def _texto_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[int], mostrar_edificio: bool, avisos: list[str]) -> list:
+def _texto_comentario(
+    conn: sqlite3.Connection, ids_edificio_resultado: set[int], mostrar_edificio: bool,
+    notas_bloques_rigidos: list[str], avisos: list[str],
+) -> list:
     """Sin título de nivel 2 propio — va pegado abajo de las alternativas,
     con el mismo estilo de etiqueta en negrita que "Alternativa N"."""
     style = estilo_texto(9)
     style_aviso = estilo_texto(8, italica=True)
     lineas = [Paragraph(f"* {t}", style) for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
+    lineas += [Paragraph(f"* {nota}", style) for nota in notas_bloques_rigidos]
     lineas += [Paragraph(f"* {aviso}", style_aviso) for aviso in avisos]
     if not lineas:
         return []
@@ -196,6 +201,7 @@ def generar_pdf_oferta_busqueda(
     mostrar_edificio = len(ids_edificio_resultado) > 1
     mostrar_consultorio = not globales.detalle_reducido
     avisos = avisos_planos(listas_alternativas)
+    notas_bloques_rigidos = bloques_rigidos_comentario(conn, listas_alternativas)
 
     altura = (
         6 * cm + 3 * cm + len(busquedas) * 1 * cm + len(ids_consultorio) * 2 * 1.2 * cm
@@ -216,7 +222,7 @@ def generar_pdf_oferta_busqueda(
         story.append(Spacer(1, 6))
         story.extend(_texto_alternativas(listas_alternativas, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar))
 
-        comentario = _texto_comentario(conn, ids_edificio_resultado, mostrar_edificio, avisos)
+        comentario = _texto_comentario(conn, ids_edificio_resultado, mostrar_edificio, notas_bloques_rigidos, avisos)
         if comentario:
             story.append(Spacer(1, 8))
             story.extend(comentario)

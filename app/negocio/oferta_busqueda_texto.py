@@ -19,6 +19,7 @@ son los que se usaron para ENCONTRAR las alternativas, no hacen falta
 para elegir entre ellas — el profesional ya sabe lo que pidió."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from app.negocio.formato import decimales_configurados, fecha_larga, formatear_valor, hora_fmt
@@ -196,6 +197,43 @@ def edificios_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[i
         list(ids_edificio_resultado),
     ).fetchall()
     return [_texto_edificio_comentario(f) for f in filas]
+
+
+def bloques_rigidos_comentario(conn: sqlite3.Connection, listas_alternativas: list[list[Alternativa]]) -> list[str]:
+    """Pedido de la clienta: igual que la aclaración de "Redondeo" en las
+    liquidaciones, cuando una alternativa ofrecida incluye horas que caen
+    dentro de un `BloqueRigido` activo, el documento tiene que aclarar
+    cuáles son esas horas y que hay que tomarlas juntas, sin fraccionar
+    — mismo bloqueo que ya aplica Reservas al crear una reserva real
+    (`reservas.verificar_bloques_rigidos`), acá solo informativo (todavía
+    no se está reservando nada, es una oferta). Una línea por cada
+    (bloque, día) realmente involucrado en alguna alternativa, sin
+    duplicados aunque varias opciones/tramos lo repitan."""
+    bloques = conn.execute("SELECT * FROM BloqueRigido WHERE Activo = 1").fetchall()
+    if not bloques:
+        return []
+    notas: list[str] = []
+    vistos: set[tuple[float, float, str]] = set()
+    for alternativas in listas_alternativas:
+        for alt in alternativas:
+            for opcion in alt.opciones:
+                for t in opcion.tramos:
+                    for b in bloques:
+                        dias = json.loads(b["DiasLogica"] or "[]")
+                        if alt.dia_semana not in dias:
+                            continue
+                        b_ini, b_fin = b["HoraInicio"], b["HoraFin"]
+                        if not (t.hora_inicio < b_fin and b_ini < t.hora_fin):
+                            continue
+                        clave = (b_ini, b_fin, alt.dia_semana)
+                        if clave in vistos:
+                            continue
+                        vistos.add(clave)
+                        notas.append(
+                            f"El tramo de {hora_fmt(b_ini)[:-2]} a {hora_fmt(b_fin)} de los {alt.dia_semana} "
+                            "es un bloque rígido: hay que tomarlo completo, sin fraccionarlo."
+                        )
+    return notas
 
 
 def previsualizar_documento(

@@ -29,6 +29,7 @@ from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales
 from app.negocio.oferta_busqueda_texto import (
     alternativas_planas,
     avisos_planos,
+    bloques_rigidos_comentario,
     categoria_es_activa,
     edificios_comentario,
     filtrar_excluidas,
@@ -88,6 +89,7 @@ def generar_texto_oferta_busqueda(
                 alternativas_lineas.append(f"- {linea}")
 
     comentario = [f"- {t}" for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
+    comentario += [f"- {t}" for t in bloques_rigidos_comentario(conn, listas_alternativas)]
     comentario += [f"- {aviso}" for aviso in avisos]
     bloque_comentario = ("\n\n*Comentario*\n" + "\n".join(comentario)) if comentario else ""
 

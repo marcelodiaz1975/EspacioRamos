@@ -353,14 +353,25 @@ def _opciones_en_horas(
 def _opciones_con_duracion(
     candidatos_por_edificio: dict[int, dict[int, sqlite3.Row]], busqueda: Busqueda, ocupado_lookup,
 ) -> list[Opcion] | None:
+    """`cantidad_horas_minimas` es el mínimo que alcanza para cubrir el
+    pedido, no el máximo a ofrecer (pedido explícito de la clienta): se
+    busca el bloque más grande posible dentro de [hora_desde, hora_hasta)
+    que tenga al menos esa duración — probando primero el rango pedido
+    completo y achicándolo recién si no cierra, nunca agrandándolo más
+    allá de lo que se buscó. A igual longitud, se prefiere el inicio más
+    temprano (mismo criterio que antes). El profesional ve el bloque real
+    completo y elige dentro de él qué hora tomar."""
     hd, hh = int(busqueda.hora_desde), int(busqueda.hora_hasta)
     dur = int(busqueda.cantidad_horas_minimas) if busqueda.cantidad_horas_minimas else hh - hd
     if dur <= 0 or dur > hh - hd:
         return None
-    for inicio in range(hd, hh - dur + 1):
-        opciones = _opciones_en_horas(candidatos_por_edificio, list(range(inicio, inicio + dur)), ocupado_lookup, busqueda.combinacion)
-        if opciones is not None:
-            return opciones
+    for longitud in range(hh - hd, dur - 1, -1):
+        for inicio in range(hd, hh - longitud + 1):
+            opciones = _opciones_en_horas(
+                candidatos_por_edificio, list(range(inicio, inicio + longitud)), ocupado_lookup, busqueda.combinacion,
+            )
+            if opciones is not None:
+                return opciones
     return None
 
 

@@ -216,6 +216,49 @@ def test_cantidad_horas_minimas_encuentra_subrango(conn):
     assert (tramo.hora_inicio, tramo.hora_fin) == (11, 13)
 
 
+def test_cantidad_horas_minimas_ofrece_el_bloque_mas_grande_no_solo_el_minimo(conn):
+    """Pedido explícito de la clienta: "solo con una hora alcanza para
+    cubrir el pedido" no significa ofrecer apenas esa hora — tiene que
+    ofrecer el bloque real más grande que haya, siempre dentro del rango
+    buscado (nunca afuera). Libre de 9 a 12 (ocupado recién a partir de
+    las 12) dentro de una búsqueda de 9 a 13 con 1 hora mínima: se
+    ofrece el bloque entero 9-12, no solo 9-10."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    _ocupar_regular(conn, id_consultorio, "Lunes", 12, 13)
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=13,
+        cantidad_horas_minimas=1,
+    )
+    resultado = resolver_busqueda(conn, globales, busqueda)
+    assert len(resultado.alternativas) == 1
+    tramo = resultado.alternativas[0].opciones[0].tramos[0]
+    assert (tramo.hora_inicio, tramo.hora_fin) == (9, 12)
+
+
+def test_cantidad_horas_minimas_nunca_ofrece_horas_fuera_del_rango_buscado(conn):
+    """El bloque real libre es más grande que lo buscado (libre de 8 a
+    13), pero la búsqueda pidió desde las 9: no tiene que ofrecer la
+    hora de las 8, aunque esté libre — se respeta siempre el rango
+    pedido como techo."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    _crear_consultorio(conn, id_unidad, 1)
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=13,
+        cantidad_horas_minimas=1,
+    )
+    resultado = resolver_busqueda(conn, globales, busqueda)
+    assert len(resultado.alternativas) == 1
+    tramo = resultado.alternativas[0].opciones[0].tramos[0]
+    assert (tramo.hora_inicio, tramo.hora_fin) == (9, 13)
+
+
 def test_valor_maximo_hora_descarta_consultorios_caros(conn):
     id_edificio = _crear_edificio(conn)
     id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
