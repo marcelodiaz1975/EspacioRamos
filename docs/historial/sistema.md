@@ -1285,3 +1285,39 @@ aviso y sin ejecutar nada en el intento de un segundo avance),
 `monkeypatch` sobre `date` en `app.negocio.dias`/`app.negocio.avance_mes`
 para simular la fecha REAL del sistema operativo — distinto de
 `ModoFechaFicticia`, que esta regla ignora a propósito.
+
+## Reinicio de prueba: búsqueda de profesional, categoría X en saldos iniciales
+
+Pedido de la clienta, hilo separado del de Avance de mes:
+
+- **"Buscar profesional"** arriba de "Ajustar saldo anterior"
+  (`_PanelSaldosIniciales`): filtro de texto libre, mismo criterio que
+  "Filtros que solo afectan la visualización" (sustring por cualquier
+  columna visible, sin distinguir mayúsculas ni acentos, reusa
+  `_normalizar_busqueda` de `crud_generico.py` — mismo patrón ya usado
+  en `bloques_rigidos.py`). Se limpia y recupera el foco en
+  `reiniciar()`, como cualquier "Buscar" del sistema.
+- **Categoría X sumada a la tabla de saldos** (`app.negocio.
+  reinicio_prueba.CATEGORIAS_CON_SALDO`, ahora `("R", "A", "X")`):
+  confirmado por la clienta — un X puede venir de haber sido R/A antes
+  de liberar sus horarios, y conservar un saldo arrastrado de esa
+  época. El orden ya salía solo correcto (R, luego A, luego X, cada uno
+  por código) con el `clave_orden_profesional` que la tabla ya usaba —
+  no hizo falta tocar la lógica de orden, solo sumar la categoría al
+  filtro de la consulta.
+
+Consulta aislada de la clienta sobre una validación más amplia (B/E/C
+nunca deberían poder recibir cargos/pagos/depósitos de llave, E se
+redirige al cabeza de equipo): investigado contra el código real,
+confirmado un hueco real en Cargos especiales/Pagos/Llaves (hoy
+excluyen C de esos combos, pero SÍ dejan crear un cargo/pago/depósito
+contra un B o un E sin ningún aviso ni redirección) — queda **afuera**
+de esta ronda, es tema de otro hilo (toca tres pantallas y sus negocios,
+no tiene nada que ver con Reinicio de prueba).
+
+Tests nuevos: `tests/test_gui_widget_foco.py` (`instalar_seleccionar_
+todo_al_enfocar`, con `setFocus()` directo y con click), `tests/
+test_reinicio_prueba.py` (`profesionales_con_saldo` trae R/A/X),
+`tests/test_gui_reinicio_prueba.py` (orden R→A→X, el diálogo selecciona
+el importe al abrir, el buscador filtra y se limpia en `reiniciar()`).
+
