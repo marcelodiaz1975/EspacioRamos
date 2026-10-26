@@ -124,6 +124,7 @@ class ItemFeriado:
     fecha: str
     tipo: str
     monto: float
+    descripcion: str | None = None
 
 
 @dataclass
@@ -506,8 +507,15 @@ def _calcular_descuentos_feriados(
         )
         if monto <= 0:
             continue
-        item = ItemFeriado(fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto)
+        item = ItemFeriado(
+            fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto, descripcion=feriado["Descripcion"],
+        )
         (nacionales if feriado["Tipo"] == "Feriado nacional" else no_laborables).append(item)
+    # Pedido de la clienta: en el PDF, de más próximo (arriba) a más
+    # alejado en el tiempo (abajo) — sin importar el orden de carga en la
+    # tabla de Fechas especiales.
+    nacionales.sort(key=lambda i: i.fecha, reverse=True)
+    no_laborables.sort(key=lambda i: i.fecha, reverse=True)
     return nacionales, no_laborables
 
 
@@ -531,7 +539,10 @@ def _calcular_feriados_pendientes(
             conn, ids, feriado["Fecha"], ids_excluir, pierde_descuento, porcentajes[feriado["Tipo"]],
         )
         if monto > 0:
-            pendientes.append(ItemFeriado(fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto))
+            pendientes.append(ItemFeriado(
+                fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto, descripcion=feriado["Descripcion"],
+            ))
+    pendientes.sort(key=lambda i: i.fecha, reverse=True)  # mismo criterio que _calcular_descuentos_feriados
     return pendientes
 
 

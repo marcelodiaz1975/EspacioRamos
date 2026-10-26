@@ -80,6 +80,7 @@ class ResumenAvanceMes:
     liquidaciones_simuladas_antiguas_eliminadas: int = 0
     ofertas_eliminadas: int = 0
     snapshots_operacion_importante_eliminados: int = 0
+    fechas_especiales_antiguas_eliminadas: int = 0
 
 
 def _traspasar_saldos(conn: sqlite3.Connection) -> int:
@@ -244,6 +245,32 @@ def _limpiar_liquidaciones_simuladas_antiguas(conn: sqlite3.Connection, hoy) -> 
     return limpiar_liquidaciones_simuladas_antiguas(carpeta_liquidaciones_simuladas(conn), hoy)
 
 
+def _limpiar_fechas_especiales_antiguas(conn: sqlite3.Connection, periodo_cerrado: str) -> int:
+    """Pedido de la clienta: un feriado/fecha especial del período que se
+    cierra (o de cualquiera anterior, por si quedó alguno de una ronda
+    previa) ya no tiene ningún efecto sobre liquidaciones nuevas, así que
+    se puede borrar solo al avanzar de mes. Dos motivos, no uno:
+    - Su propio período nunca se vuelve a calcular (DC-08 §6.2: no se
+      puede reemitir un mes anterior una vez que hay liquidaciones de
+      meses posteriores — y, si se llegó a este paso del avance de mes,
+      es porque ese período ya está cerrado).
+    - El único lugar donde un feriado del período cerrado podía seguir
+      pesando era como "feriado pendiente" del período siguiente
+      (`liquidaciones._calcular_feriados_pendientes`) — pero esa función
+      filtra contra la fecha de emisión YA FIJADA del período cerrado
+      (`feriado['Fecha'] <= fecha_emision_ant`), un valor que no cambia
+      nunca más. Si el feriado ya existía antes de esa emisión (el caso
+      normal), ya quedó excluido de "pendientes" para siempre, sin
+      importar cuándo se corra esta limpieza."""
+    anio, mes = parsear_periodo(periodo_cerrado)
+    limite = ultimo_dia_mes(anio, mes).isoformat()
+    repo = obtener_repositorio(conn, "FechasEspeciales")
+    antiguas = [f for f in repo.listar() if f["Fecha"] <= limite]
+    for f in antiguas:
+        repo.eliminar(f["IdFecha"])
+    return len(antiguas)
+
+
 def porcentaje_aumento_del_periodo(conn: sqlite3.Connection, periodo: str) -> float | None:
     """Último % de aumento confirmado (`aumentos.confirmar_aumento`) para
     `periodo` — una corrección posterior en el mismo mes reemplaza, no se
@@ -300,6 +327,7 @@ def avanzar_mes(
     resumen.liquidaciones_simuladas_antiguas_eliminadas = _limpiar_liquidaciones_simuladas_antiguas(
         conn, fecha_actual(conn),
     )
+    resumen.fechas_especiales_antiguas_eliminadas = _limpiar_fechas_especiales_antiguas(conn, periodo_cerrado)
     # DC-06 §6 (hallazgo de la auditoría DC-01/DC-10): retención de 12
     # meses para los snapshots "de operación importante" (ver
     # `aumentos.confirmar_aumento`) — los mensuales de siempre no se

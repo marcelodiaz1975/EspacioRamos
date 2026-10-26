@@ -284,6 +284,7 @@ def test_avanzar_mes_sin_carpeta_base_no_regenera_archivos(conn):
     assert resumen.archivos_varios_regenerados is False
     assert resumen.liquidaciones_antiguas_eliminadas == 0
     assert resumen.liquidaciones_simuladas_antiguas_eliminadas == 0
+    assert resumen.fechas_especiales_antiguas_eliminadas == 0
 
 
 def test_avanzar_mes_regenera_archivos_varios_y_limpia_liquidaciones_antiguas(conn, tmp_path):
@@ -305,6 +306,23 @@ def test_avanzar_mes_regenera_archivos_varios_y_limpia_liquidaciones_antiguas(co
     assert any((tmp_path / "Archivos varios" / "Propuesta").iterdir())
     assert any((tmp_path / "Archivos varios" / "Disponibilidad").iterdir())
     assert any((tmp_path / "Archivos varios" / "Placas").iterdir())
+
+
+def test_avanzar_mes_elimina_fechas_especiales_del_periodo_cerrado_y_anteriores(conn):
+    """Pedido de la clienta: un feriado del período que se cierra (o de
+    cualquiera anterior) ya no puede afectar ninguna liquidación nueva
+    (ver docstring de `_limpiar_fechas_especiales_antiguas`), así que se
+    borra solo al avanzar de mes — no hace falta conservarlo a mano."""
+    repo = obtener_repositorio(conn, "FechasEspeciales")
+    repo.crear(Fecha="2026-01-10", Descripcion="Vieja", Tipo="Feriado nacional", Activo=1)
+    repo.crear(Fecha="2026-08-12", Descripcion="Del mes que cierra", Tipo="Feriado nacional", Activo=1)
+    id_futura = repo.crear(Fecha="2026-09-20", Descripcion="Del mes nuevo", Tipo="Feriado nacional", Activo=1)
+
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+
+    assert resumen.fechas_especiales_antiguas_eliminadas == 2
+    restantes = repo.listar()
+    assert [f["IdFecha"] for f in restantes] == [id_futura]
 
 
 def test_avanzar_mes_limpia_liquidaciones_simuladas_con_mas_de_3_meses(conn, tmp_path):

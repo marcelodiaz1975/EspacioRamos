@@ -830,10 +830,16 @@ class _PanelAvancePeriodo(QWidget):
             f"profesional(es)."
             if resumen.plazos_extendidos_automaticos_aplicados else ""
         )
+        mensaje_fechas_especiales = (
+            f" Se eliminaron {resumen.fechas_especiales_antiguas_eliminadas} feriado(s)/fecha(s) especial(es) "
+            f"que ya no tienen efecto en liquidaciones nuevas."
+            if resumen.fechas_especiales_antiguas_eliminadas else ""
+        )
         QMessageBox.information(
             self, "Avance de mes completado",
             f"{mensaje_backup}Se traspasó el saldo de {resumen.profesionales_con_traspaso} profesional(es), se cerraron "
-            f"{resumen.cuotas_cerradas} cuota(s) y se generó el snapshot #{resumen.id_snapshot}.{mensaje_plazos}",
+            f"{resumen.cuotas_cerradas} cuota(s) y se generó el snapshot #{resumen.id_snapshot}."
+            f"{mensaje_plazos}{mensaje_fechas_especiales}",
         )
         self.actualizar()
 

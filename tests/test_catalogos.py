@@ -783,3 +783,55 @@ def test_eliminar_fecha_especial_del_mes_en_curso_regenera_sin_preguntar_de_nuev
     assert len(emisiones) == 2
     ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
     assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_eliminar_fecha_especial_muestra_cartel_de_proceso_completado(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: siempre que eliminar/crear/editar
+    un feriado regenere liquidaciones, tiene que quedar un cartel final
+    que lo diga explícitamente — para Eliminar, al no poder avisar ANTES
+    (ver `_al_eliminar_fecha_especial`), este es la única confirmación
+    visible de que el proceso terminó."""
+    id_profesional = _crear_profesional_r(conn)
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha=periodo + "-15", Descripcion="Feriado de prueba", Tipo="Feriado nacional", Activo=1,
+    )
+    conn.commit()
+
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    avisos = []
+    monkeypatch.setattr(
+        QMessageBox, "information", staticmethod(lambda *a, **k: avisos.append(a) or None),
+    )
+    pantalla.tabla_widget.selectRow(0)
+    pantalla._eliminar()
+
+    mensajes_regeneracion = [a for a in avisos if "se regeneraron" in a[-1].lower()]
+    assert len(mensajes_regeneracion) == 1
+    assert f"1 liquidación(es) ya emitida(s) del período {periodo}" in mensajes_regeneracion[0][-1]
+    assert "no enviadas" in mensajes_regeneracion[0][-1]
+
+
+def test_fecha_especial_sin_regeneracion_no_muestra_cartel_de_regeneracion(qtbot, conn, monkeypatch):
+    """Sin ninguna liquidación emitida para el período en curso no hay
+    nada que avisar de más."""
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+
+    def _dialogo_aceptado(self, *a, **k):
+        self._entradas["Descripcion"].setText("Feriado de prueba")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_aceptado)
+    avisos = []
+    monkeypatch.setattr(
+        QMessageBox, "information", staticmethod(lambda *a, **k: avisos.append(a) or None),
+    )
+    pantalla._nuevo()
+
+    assert not any("se regeneraron" in a[-1].lower() for a in avisos)

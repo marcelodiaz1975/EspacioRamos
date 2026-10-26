@@ -426,6 +426,20 @@ def _regenerar_liquidaciones_del_periodo_actual(conn: sqlite3.Connection) -> Non
     ids_profesional = {f["IdProfesional"] for f in obtener_repositorio(conn, "LiquidacionEmitida").listar(Periodo=periodo)}
     for id_profesional in ids_profesional:
         regenerar_si_corresponde(conn, id_profesional=id_profesional, periodo=periodo)
+    # Pedido explícito de la clienta: que SIEMPRE quede claro que esto
+    # regeneró archivos y los marcó como no enviados, con un "proceso
+    # completado" al terminar — mismo criterio que ya usan Aumentos y
+    # Esquema de descuentos (cartel de éxito con la cantidad real
+    # regenerada, después de que ya se hizo). Antes de esto no había
+    # ningún cartel para el caso de Eliminar (no se puede avisar ANTES,
+    # ver `_al_eliminar_fecha_especial`), así que esta es la única
+    # confirmación visible de que el proceso terminó.
+    if ids_profesional:
+        QMessageBox.information(
+            None, "Fechas especiales",
+            f"Se regeneraron {len(ids_profesional)} liquidación(es) ya emitida(s) del período {periodo}: "
+            "quedaron marcadas como no enviadas.",
+        )
 
 
 def _al_guardar_fecha_especial(valores: dict, registro, conn: sqlite3.Connection) -> dict | None:

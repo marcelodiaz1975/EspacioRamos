@@ -125,6 +125,14 @@ def _dia_y_fecha(fecha_iso: str) -> tuple[str, str]:
     return dia_semana, fecha_corta(fecha_iso)
 
 
+def _sufijo_descripcion(descripcion: str | None) -> str:
+    """Pedido de la clienta: la descripción cargada en Fechas especiales
+    (ej. "Visita Papal") se agrega al final del ítem de descuento por
+    feriado/día no laborable, para distinguir de cuál feriado se trata —
+    vacío si no se cargó ninguna."""
+    return f" - {descripcion}" if descripcion else ""
+
+
 # ------------------------------------------------------------------- bloques horarios
 
 def _bloques_horarios(conn: sqlite3.Connection, ids: list[int]) -> list[sqlite3.Row]:
@@ -317,17 +325,25 @@ def _items_cuenta(
 
     for f in liquidacion.descuentos_feriados:
         dia_semana, fecha = _dia_y_fecha(f.fecha)
-        items.append((f"Descuento por feriado - {dia_semana} {fecha}", -f.monto, False))
+        items.append((
+            f"Descuento por feriado - {dia_semana} {fecha}{_sufijo_descripcion(f.descripcion)}", -f.monto, False,
+        ))
     for f in liquidacion.descuentos_no_laborables:
         dia_semana, fecha = _dia_y_fecha(f.fecha)
-        items.append((f"Descuento por día no laborable - {dia_semana} {fecha}", -f.monto, False))
+        items.append((
+            f"Descuento por día no laborable - {dia_semana} {fecha}{_sufijo_descripcion(f.descripcion)}",
+            -f.monto, False,
+        ))
     for f in liquidacion.feriados_pendientes:
         dia_semana, fecha = _dia_y_fecha(f.fecha)
         # #35: mismo prefijo que el feriado del mes en curso ("Descuento
         # por feriado..."), con la aclaración de que es de un período ya
         # cerrado entre paréntesis, en vez de una redacción distinta
         # ("Descuento feriado pendiente...") para el mismo concepto.
-        items.append((f"Descuento por feriado (mes anterior) - {dia_semana} {fecha}", -f.monto, False))
+        items.append((
+            f"Descuento por feriado (mes anterior) - {dia_semana} {fecha}{_sufijo_descripcion(f.descripcion)}",
+            -f.monto, False,
+        ))
     for v in liquidacion.descuento_vacaciones:
         d1, f1 = _dia_y_fecha(v.fecha_desde)
         d2, f2 = _dia_y_fecha(v.fecha_hasta)
