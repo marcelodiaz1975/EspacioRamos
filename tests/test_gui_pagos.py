@@ -320,6 +320,39 @@ def test_registrar_pago_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbot
     assert emisiones_agosto[0]["EstadoEnvio"] == "No enviada"
 
 
+def test_registrar_pago_mes_anterior_regenera_tambien_el_pdf(qtbot, conn, monkeypatch, tmp_path):
+    """Bug real reportado por la clienta: la grilla de mensajería ya
+    mostraba bien el estado ("no enviada"), pero el PDF en disco de la
+    liquidación del mes en curso quedaba con los números de ANTES del
+    pago — nunca se regeneraba de verdad."""
+    id_profesional = _crear_profesional(conn, saldo=10000)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, IdCodigo="R1")
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15', "
+        "CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1",
+        (str(tmp_path),),
+    )
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo="2026-08")
+    conn.commit()
+
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-1000)
+    panel.campo_periodo.setText("2026-07")
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+
+    panel._registrar()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_profesional, Periodo="2026-08",
+    )
+    emision = max(emisiones, key=lambda f: f["IdLiquidacion"])  # la regenerada, no la original
+    assert emision["NombreArchivo"] is not None
+    assert (tmp_path / "Profesionales" / "R1 - Gómez" / emision["NombreArchivo"]).exists()
+
+
 def test_registrar_pago_mes_en_curso_no_regenera_liquidacion_de_mes_anterior(qtbot, conn, monkeypatch):
     id_profesional = _crear_profesional(conn, saldo=10000)
     conn.execute(

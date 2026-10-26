@@ -719,6 +719,46 @@ def test_regenerar_si_corresponde_marca_no_enviada_la_liquidacion_del_r(conn, co
     regenerar_si_corresponde(conn, id_profesional=id_b, periodo=PERIODO)  # no hace nada, no rompe
 
 
+def test_regenerar_si_corresponde_tambien_regenera_el_pdf(conn, consultorio, tmp_path):
+    """Bug real reportado por la clienta sobre un pago imputado al mes
+    anterior: `regenerar_si_corresponde` dejaba la liquidación marcada
+    "no enviada" en la base (lo que ya hacía que el Centro de mensajería
+    mostrara bien el estado), pero el PDF en disco quedaba con los
+    números de ANTES del cambio — nunca se regeneraba de verdad."""
+    from app.negocio.liquidaciones import regenerar_si_corresponde
+
+    id_r = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_r, IdCodigo="R1")
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+
+    id_liq, _ = emitir_liquidacion(conn, id_profesional=id_r, periodo=PERIODO, fecha_emision="2026-08-01")
+    obtener_repositorio(conn, "LiquidacionEmitida").actualizar(id_liq, EstadoEnvio="Enviada", NombreArchivo="viejo.pdf")
+
+    regenerar_si_corresponde(conn, id_profesional=id_r, periodo=PERIODO)
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_r, Periodo=PERIODO)
+    nueva = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert nueva["EstadoEnvio"] == "Regenerada no enviada"
+    assert nueva["NombreArchivo"] is not None
+    assert nueva["NombreArchivo"] != "viejo.pdf"
+    assert (tmp_path / "Profesionales" / "R1 - Lo Veci" / nueva["NombreArchivo"]).exists()
+
+
+def test_regenerar_si_corresponde_sin_carpeta_base_no_genera_pdf_ni_rompe(conn, consultorio):
+    """Sin carpeta base configurada todavía, sigue dejando la liquidación
+    marcada en la base (lo que ya alcanza para el Centro de mensajería),
+    sin intentar generar ningún PDF ni romper por eso."""
+    from app.negocio.liquidaciones import regenerar_si_corresponde
+
+    id_r = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_r, IdCodigo="R1")
+
+    regenerar_si_corresponde(conn, id_profesional=id_r, periodo=PERIODO)
+
+    emision = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_r, Periodo=PERIODO)[0]
+    assert emision["NombreArchivo"] is None
+
+
 def test_reemision_no_pisa_pagos_ya_registrados_contra_el_mes_en_curso(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=0, SaldoCuentaActual=0)

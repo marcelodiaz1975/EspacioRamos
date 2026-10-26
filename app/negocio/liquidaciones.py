@@ -85,10 +85,12 @@ mes, en el avance de mes).
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
+from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import (
     fecha_a_dia_semana,
     parsear_periodo,
@@ -330,17 +332,40 @@ def regenerar_si_corresponde(conn: sqlite3.Connection, *, id_profesional: int, p
     """DC-08 §3.7/§4.6/§5.4: cargar/modificar/dar de baja una reserva
     regular, registrar vacaciones, o registrar un pago imputado al mes
     anterior tienen que regenerar sola la liquidación del R afectado y
-    dejarla marcada como no enviada (`emitir_liquidacion` ya se encarga de
-    eso solo). Si no hay un R al que regenerarle nada, o el período no se
-    puede reemitir (ya hay períodos posteriores emitidos), no hay nada que
-    hacer — no es motivo para interrumpir la operación principal."""
+    dejarla marcada como no enviada. Si no hay un R al que regenerarle
+    nada, o el período no se puede reemitir (ya hay períodos posteriores
+    emitidos), no hay nada que hacer — no es motivo para interrumpir la
+    operación principal.
+
+    `emitir_liquidacion` sola solo deja el registro en `LiquidacionEmitida`
+    (lo que ya alcanza para que el Centro de mensajería muestre el estado
+    correcto) — pero el PDF real en disco quedaba desactualizado, con los
+    números de ANTES del cambio que disparó esta regeneración (bug real,
+    no solo cosmético: confirmado por la clienta sobre un pago imputado al
+    mes anterior). Acá también se genera el PDF nuevo y se actualiza
+    `NombreArchivo`/`FechaHoraGeneracion`, mismo criterio exacto que
+    `PantallaLiquidacion._emitir` — sin pedir confirmación, igual que el
+    resto de esta función, y sin interrumpir nada si todavía no hay
+    carpeta base configurada o el profesional no tiene código asignado."""
     id_r = id_profesional_liquidable(conn, id_profesional)
     if id_r is None:
         return
     try:
-        emitir_liquidacion(conn, id_profesional=id_r, periodo=periodo)
+        id_liquidacion, liquidacion = emitir_liquidacion(conn, id_profesional=id_r, periodo=periodo)
     except ValueError:
-        pass
+        return
+    if carpeta_base(conn) is None:
+        return
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_r)
+    if profesional is None or not profesional["IdCodigo"]:
+        return
+    from app.pdf.liquidacion_pdf import generar_pdf_liquidacion  # import tardío: evita el ciclo con este módulo
+
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(carpeta_profesional(conn, profesional["IdCodigo"])))
+    obtener_repositorio(conn, "LiquidacionEmitida").actualizar(
+        id_liquidacion, NombreArchivo=os.path.basename(ruta),
+        FechaHoraGeneracion=datetime.now().isoformat(timespec="seconds"),
+    )
 
 
 # ------------------------------------------------------------------- reservas regulares
