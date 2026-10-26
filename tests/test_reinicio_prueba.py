@@ -31,16 +31,19 @@ def _crear_profesional(conn, categoria="R", apellido="Lo Veci") -> int:
 
 # --- profesionales_con_saldo / ajustar_saldo_anterior -----------------------------------
 
-def test_profesionales_con_saldo_solo_trae_r_y_a(conn):
+def test_profesionales_con_saldo_trae_r_a_y_x(conn):
+    """Confirmado por la clienta: un X puede venir de haber sido R/A antes
+    de liberar sus horarios, y conservar un saldo arrastrado de esa
+    época — B/E/C nunca facturan directo, no van acá."""
     id_r = _crear_profesional(conn, "R", "Lo Veci")
     id_a = _crear_profesional(conn, "A", "Pérez")
+    id_x = _crear_profesional(conn, "X", "Inactivo")
     _crear_profesional(conn, "B", "Bonificado")
     _crear_profesional(conn, "E", "Equipo")
-    _crear_profesional(conn, "X", "Inactivo")
     _crear_profesional(conn, "C", "Contacto")
 
     ids = {f["IdProfesional"] for f in profesionales_con_saldo(conn)}
-    assert ids == {id_r, id_a}
+    assert ids == {id_r, id_a, id_x}
 
 
 def test_ajustar_saldo_anterior_no_toca_el_actual(conn):

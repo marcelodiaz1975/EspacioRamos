@@ -39,7 +39,8 @@ cualquier otro, así que cargar varios campos seguidos con Enter no
 cambia de comportamiento — solo Shift+Enter es distinto."""
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Qt
+import shiboken6
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtWidgets import QComboBox, QPlainTextEdit, QTableWidget, QTextEdit, QWidget
 
 
@@ -138,6 +139,54 @@ def instalar_enter_avanza_foco(orden: list[QWidget], parent: QObject | None = No
         if isinstance(widget, QComboBox) and widget.isEditable() and widget.lineEdit() is not None:
             widget.lineEdit().installEventFilter(filtro)
     return filtro
+
+
+class _SeleccionarTodoAlEnfocar(QObject):
+    """Al enfocar `widget` (por cualquier vía: click, Tab, o el foco
+    automático que Qt le da al primer control enfocable de un diálogo
+    recién abierto), selecciona todo su contenido — pedido explícito de
+    la clienta sobre `_DialogoAjustarSaldo` (Reinicio de prueba),
+    generalizado acá porque el pedido es "para todos los campos que
+    requieran texto, en todo el sistema": "que el importe esté
+    seleccionado para empezar a escribir encima y borrarlo a la vez".
+
+    Cubre un caso que `instalar_enter_avanza_foco` NO cubre: ESE solo
+    selecciona al llegar por Tab/Enter dentro de una cadena ya armada,
+    nunca en el primer foco automático de un diálogo (no es un evento de
+    tecla, así que su filtro nunca se dispara ahí) — confirmado el mismo
+    hueco, con el mismo mecanismo de reloj en 0ms, en
+    `_SeleccionarTodoAlEnfocar` de `selector_profesional.py` (que
+    resuelve el caso puntual del combo buscable de profesional; esta es
+    la versión general para cualquier otro campo, sin duplicar las dos
+    cada vez que se necesite en una pantalla nueva).
+
+    `QTimer.singleShot(0, ...)` en vez de seleccionar directo en el
+    propio evento de foco: un `selectAll()` inmediato queda pisado por el
+    manejo nativo del click de Qt, que reposiciona el cursor en el punto
+    clickeado justo después."""
+
+    def __init__(self, widget: QWidget, parent: QObject | None = None):
+        super().__init__(parent or widget)
+        self._widget = widget
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (override de Qt)
+        if event.type() == QEvent.Type.FocusIn:
+            QTimer.singleShot(0, self._seleccionar_si_sigue_vivo)
+        return False
+
+    def _seleccionar_si_sigue_vivo(self) -> None:
+        if shiboken6.isValid(self._widget):
+            self._widget.selectAll()
+
+
+def instalar_seleccionar_todo_al_enfocar(widget: QWidget, parent: QObject | None = None) -> QObject:
+    """Instala el mecanismo de arriba sobre `widget` (cualquiera con
+    `.selectAll()`: `QLineEdit`, `QDoubleSpinBox`/`QSpinBox`, `QDateEdit`,
+    etc.). Quien lo llame tiene que guardar la referencia devuelta, mismo
+    motivo que `instalar_enter_avanza_foco` — sin un padre Qt vivo, el
+    garbage collector de Python puede recolectarlo en cualquier momento."""
+    return _SeleccionarTodoAlEnfocar(widget, parent)
 
 
 def excluir_tabla_del_tab(tabla: QTableWidget) -> None:

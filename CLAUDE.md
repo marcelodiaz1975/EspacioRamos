@@ -289,6 +289,72 @@ en_vez_de_avanzar` (Shift+Enter inserta el salto y el foco se queda en
 el mismo campo) y `test_enter_solo_en_campo_multilinea_sigue_avanzando_
 el_foco` (Enter sin Shift sigue avanzando sin agregar ningún salto).
 
+## Foco: seleccionar todo el contenido al enfocar un campo prefijado (disponible para todo el sistema)
+
+Pedido de la clienta al revisar `_DialogoAjustarSaldo` (Reinicio de
+prueba): "que el importe esté seleccionado para empezar a escribir
+encima y borrarlo a la vez, esto para todos los campos que requieran
+texto a introducir por los usuarios... en todo el sistema". La regla de
+Tab/Enter de más arriba (`instalar_enter_avanza_foco`) ya selecciona
+todo al LLEGAR por Tab/Enter dentro de una cadena armada, pero no cubre
+el foco automático que Qt le da al primer control enfocable de un
+diálogo recién abierto (no es un evento de tecla, nunca dispara ese
+filtro) — el caso real de `_DialogoAjustarSaldo`, que tiene un solo
+campo editable.
+
+`instalar_seleccionar_todo_al_enfocar(widget, parent=None)`
+(`app/gui/widgets/foco.py`) es el mecanismo general: escucha
+`FocusIn` en `widget` (por click, por Tab/Enter, o por `setFocus()`
+llamado desde código) y selecciona todo su contenido con
+`QTimer.singleShot(0, ...)` (un `selectAll()` inmediato queda pisado
+por el reposicionamiento de cursor que hace Qt después de un click).
+Sirve para cualquier widget con `.selectAll()` — `QLineEdit`,
+`QDoubleSpinBox`/`QSpinBox`, `QDateEdit`, etc. Generalización del
+mecanismo puntual que ya tenía `selector_profesional.py`
+(`_SeleccionarTodoAlEnfocar`, sigue ahí sin tocar — cubre un caso propio
+con dos widgets a escuchar) para que cualquier pantalla nueva lo use sin
+duplicar la clase.
+
+Aplicado por ahora solo en `_DialogoAjustarSaldo.spin_saldo` (Reinicio
+de prueba) — queda disponible para sumarlo al resto de los formularios
+del sistema caso por caso, mismo criterio que el resto de los cambios
+de alcance general (no un barrido completo de una sola vez).
+
+## Reinicio de prueba: búsqueda de profesional, categoría X en saldos iniciales
+
+Pedido de la clienta, hilo separado del de Avance de mes:
+
+- **"Buscar profesional"** arriba de "Ajustar saldo anterior"
+  (`_PanelSaldosIniciales`): filtro de texto libre, mismo criterio que
+  "Filtros que solo afectan la visualización" (sustring por cualquier
+  columna visible, sin distinguir mayúsculas ni acentos, reusa
+  `_normalizar_busqueda` de `crud_generico.py` — mismo patrón ya usado
+  en `bloques_rigidos.py`). Se limpia y recupera el foco en
+  `reiniciar()`, como cualquier "Buscar" del sistema.
+- **Categoría X sumada a la tabla de saldos** (`app.negocio.
+  reinicio_prueba.CATEGORIAS_CON_SALDO`, ahora `("R", "A", "X")`):
+  confirmado por la clienta — un X puede venir de haber sido R/A antes
+  de liberar sus horarios, y conservar un saldo arrastrado de esa
+  época. El orden ya salía solo correcto (R, luego A, luego X, cada uno
+  por código) con el `clave_orden_profesional` que la tabla ya usaba —
+  no hizo falta tocar la lógica de orden, solo sumar la categoría al
+  filtro de la consulta.
+
+Consulta aislada de la clienta sobre una validación más amplia (B/E/C
+nunca deberían poder recibir cargos/pagos/depósitos de llave, E se
+redirige al cabeza de equipo): investigado contra el código real,
+confirmado un hueco real en Cargos especiales/Pagos/Llaves (hoy
+excluyen C de esos combos, pero SÍ dejan crear un cargo/pago/depósito
+contra un B o un E sin ningún aviso ni redirección) — queda **afuera**
+de esta ronda, es tema de otro hilo (toca tres pantallas y sus negocios,
+no tiene nada que ver con Reinicio de prueba).
+
+Tests nuevos: `tests/test_gui_widget_foco.py` (`instalar_seleccionar_
+todo_al_enfocar`, con `setFocus()` directo y con click), `tests/
+test_reinicio_prueba.py` (`profesionales_con_saldo` trae R/A/X),
+`tests/test_gui_reinicio_prueba.py` (orden R→A→X, el diálogo selecciona
+el importe al abrir, el buscador filtra y se limpia en `reiniciar()`).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

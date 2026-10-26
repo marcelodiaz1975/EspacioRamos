@@ -6,10 +6,12 @@ catálogo de registros). Ver `app.negocio.reinicio_prueba` para el
 contrato completo de qué toca y qué no.
 
 Dos solapas:
-- "Saldos iniciales": tabla de profesionales R/A con su
-  `SaldoCuentaAnterior` editable por selección + diálogo (regla general
-  "EN GENERAL" de todo el sistema), más "Poner todos en $0" para el caso
-  común de arrancar de cero.
+- "Saldos iniciales": tabla de profesionales R/A/X (ver `app.negocio.
+  reinicio_prueba.CATEGORIAS_CON_SALDO`) con su `SaldoCuentaAnterior`
+  editable por selección + diálogo (regla general "EN GENERAL" de todo
+  el sistema), más "Poner todos en $0" para el caso común de arrancar
+  de cero. "Buscar profesional" arriba de los botones filtra la tabla,
+  mismo criterio que "Filtros que solo afectan la visualización".
 - "Depurar historial de prueba": elegís un período de corte
   (`SelectorPeriodo`, default el mes anterior al actual — el que
   recién se cerró de prueba), se muestra cuánto hay para borrar de cada
@@ -42,8 +44,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.crud_generico import _normalizar_busqueda
 from app.gui.pantallas.reservas import _texto_profesional
-from app.gui.widgets.foco import excluir_tabla_del_tab, instalar_enter_avanza_foco
+from app.gui.widgets.foco import (
+    excluir_tabla_del_tab,
+    instalar_enter_avanza_foco,
+    instalar_seleccionar_todo_al_enfocar,
+)
 from app.gui.widgets.orden_tabla import clave_orden_profesional
 from app.gui.widgets.resumen_saldo import item_monto
 from app.gui.widgets.selector_periodo import SelectorPeriodo
@@ -90,11 +97,20 @@ class _DialogoAjustarSaldo(QDialog):
         self.spin_saldo.setDecimals(2)
         self.spin_saldo.setValue(saldo_actual)
         layout.addRow("Saldo anterior", self.spin_saldo)
+        # Pedido explícito de la clienta: el importe prefijado queda
+        # seleccionado al enfocar, para empezar a escribir encima y
+        # borrarlo a la vez — acá cubre el foco automático que Qt le da
+        # a `spin_saldo` al abrirse el diálogo (único campo editable).
+        self._foco_saldo = instalar_seleccionar_todo_al_enfocar(self.spin_saldo, parent=self)
 
         botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         botones.accepted.connect(self.accept)
         botones.rejected.connect(self.reject)
         layout.addRow(botones)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.spin_saldo.setFocus()
 
     def saldo(self) -> float:
         return self.spin_saldo.value()
@@ -113,14 +129,23 @@ class _PanelSaldosIniciales(QWidget):
         self.reiniciar()
 
     def reiniciar(self) -> None:
+        self.campo_buscar.clear()
         self.actualizar()
-        self.boton_ajustar.setFocus()
+        self.campo_buscar.setFocus()
 
     def _armar_ui(self) -> None:
         layout_solapa = QHBoxLayout(self)
 
         columna_widget = QWidget()
         columna = QVBoxLayout(columna_widget)
+        etiqueta_buscar = QLabel("Buscar profesional")
+        etiqueta_buscar.setObjectName("subtituloCampo")
+        columna.addWidget(etiqueta_buscar)
+        self.campo_buscar = QLineEdit()
+        self.campo_buscar.setFixedWidth(_ANCHO_BOTON)
+        self.campo_buscar.textChanged.connect(self._aplicar_filtro_busqueda)
+        columna.addWidget(self.campo_buscar)
+
         self.boton_ajustar = QPushButton("Ajustar saldo anterior")
         self.boton_ajustar.setObjectName("botonPrimario")
         self.boton_ajustar.setFixedWidth(_ANCHO_BOTON)
@@ -146,7 +171,25 @@ class _PanelSaldosIniciales(QWidget):
         self.tabla.doubleClicked.connect(self._ajustar_seleccionado)
         layout_solapa.addWidget(self.tabla, stretch=1)
 
-        self._foco = instalar_enter_avanza_foco([self.boton_ajustar, self.boton_todos_cero], parent=self)
+        self._foco = instalar_enter_avanza_foco(
+            [self.campo_buscar, self.boton_ajustar, self.boton_todos_cero], parent=self,
+        )
+
+    def _aplicar_filtro_busqueda(self, *_args) -> None:
+        """Mismo criterio que "Filtros que solo afectan la visualización":
+        solo oculta filas, sin distinguir mayúsculas ni acentos, por
+        cualquier columna visible (código, nombre, categoría)."""
+        buscado = _normalizar_busqueda(self.campo_buscar.text().strip())
+        for fila in range(self.tabla.rowCount()):
+            if not buscado:
+                self.tabla.setRowHidden(fila, False)
+                continue
+            texto_fila = " ".join(
+                self.tabla.item(fila, col).text()
+                for col in range(self.tabla.columnCount())
+                if self.tabla.item(fila, col) is not None
+            )
+            self.tabla.setRowHidden(fila, buscado not in _normalizar_busqueda(texto_fila))
 
     def actualizar(self) -> None:
         filas = sorted(
@@ -162,6 +205,7 @@ class _PanelSaldosIniciales(QWidget):
             self.tabla.setItem(fila_idx, 2, item_monto(f["SaldoCuentaActual"]))
             self.tabla.setItem(fila_idx, 3, item_monto(f["SaldoCuentaAnterior"]))
         self.tabla.resizeColumnsToContents()
+        self._aplicar_filtro_busqueda()
         self._actualizar_boton()
 
     def _fila_seleccionada(self):
@@ -190,7 +234,7 @@ class _PanelSaldosIniciales(QWidget):
     def _poner_todos_en_cero(self) -> None:
         respuesta = QMessageBox.question(
             self, "Poner todos en $0",
-            "¿Confirmás poner el saldo anterior de TODOS los profesionales R y A en $0?",
+            "¿Confirmás poner el saldo anterior de TODOS los profesionales R, A y X en $0?",
         )
         if respuesta != QMessageBox.StandardButton.Yes:
             return

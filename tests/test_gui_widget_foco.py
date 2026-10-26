@@ -4,9 +4,18 @@ la garantía es la misma en todos los formularios porque es la misma clase."""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDoubleSpinBox,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
-from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.foco import instalar_enter_avanza_foco, instalar_seleccionar_todo_al_enfocar
 
 
 def _enter(widget: QWidget) -> None:
@@ -243,3 +252,38 @@ def test_enter_solo_en_campo_multilinea_sigue_avanzando_el_foco(qtbot):
     QTest.keyClick(texto, Qt.Key.Key_Return)
     qtbot.waitUntil(lambda: campo_siguiente.hasFocus())
     assert texto.toPlainText() == "linea 1"
+
+
+def test_instalar_seleccionar_todo_al_enfocar_con_setfocus_directo(qtbot):
+    """Caso que `instalar_enter_avanza_foco` NO cubre: el foco automático
+    que Qt le da al primer control enfocable de un diálogo recién
+    abierto (`setFocus()` llamado desde código, no un click ni un Tab/
+    Enter) — confirmado con `QDoubleSpinBox`, el caso real de
+    `_DialogoAjustarSaldo` en Reinicio de prueba."""
+    campo = QDoubleSpinBox()
+    campo.setValue(9999)
+    foco = instalar_seleccionar_todo_al_enfocar(campo)
+    campo._foco = foco  # mantiene viva la referencia, como en las pantallas reales
+    _mostrar(qtbot, campo)
+    campo.lineEdit().deselect()
+    campo.lineEdit().setCursorPosition(0)
+
+    campo.setFocus()
+    qtbot.wait(10)  # el select-all corre en un QTimer.singleShot(0, ...)
+
+    assert campo.lineEdit().selectedText() == campo.lineEdit().text()
+
+
+def test_instalar_seleccionar_todo_al_enfocar_con_click(qtbot):
+    """También cubre el click directo del mouse, no solo `setFocus()`."""
+    campo = QLineEdit("texto prefijado")
+    foco = instalar_seleccionar_todo_al_enfocar(campo)
+    campo._foco = foco
+    _mostrar(qtbot, campo)
+    campo.deselect()
+    campo.setCursorPosition(0)
+
+    QTest.mouseClick(campo, Qt.MouseButton.LeftButton)
+    qtbot.wait(10)
+
+    assert campo.selectedText() == campo.text()

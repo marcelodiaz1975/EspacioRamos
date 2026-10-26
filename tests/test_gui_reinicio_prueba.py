@@ -31,17 +31,21 @@ def _crear_profesional(conn, categoria="R", apellido="Lo Veci", id_codigo=None):
 
 # --- _PanelSaldosIniciales ---------------------------------------------------------------
 
-def test_panel_saldos_lista_solo_r_y_a_en_orden_natural(qtbot, conn):
+def test_panel_saldos_lista_r_a_y_x_en_orden_natural(qtbot, conn):
+    """Confirmado por la clienta: R, luego A, luego X, cada uno por
+    código — `clave_orden_profesional` ya da este orden solo, con la
+    jerarquía de categorías de todo el sistema (B, R, A, E, X, C)."""
     _crear_profesional(conn, "R", "Lo Veci", "R14")
     _crear_profesional(conn, "R", "Pérez", "R2")
     _crear_profesional(conn, "A", "Gómez", "A1")
+    _crear_profesional(conn, "X", "Inactivo", "X1")
     _crear_profesional(conn, "B", "Bonificado", "B1")
 
     panel = _PanelSaldosIniciales(conn)
     qtbot.addWidget(panel)
 
     codigos = [panel.tabla.item(fila, 0).text().split(" - ")[0] for fila in range(panel.tabla.rowCount())]
-    assert codigos == ["R2", "R14", "A1"]
+    assert codigos == ["R2", "R14", "A1", "X1"]
 
 
 def test_ajustar_saldo_seleccionado_actualiza_la_tabla(qtbot, conn, monkeypatch):
@@ -105,6 +109,58 @@ def test_ajustar_saldo_no_toca_el_actual(qtbot, conn):
     dialogo.accept()
 
     assert dialogo.saldo() == pytest.approx(50.0)
+
+
+def test_dialogo_ajustar_saldo_selecciona_el_importe_al_abrir(qtbot):
+    """Pedido explícito de la clienta: el importe prefijado queda
+    seleccionado al abrir el diálogo, para empezar a escribir encima y
+    borrarlo a la vez."""
+    dialogo = _DialogoAjustarSaldo("R1 - Lo Veci", 9999.0)
+    qtbot.addWidget(dialogo)
+    dialogo.show()
+    qtbot.waitExposed(dialogo)
+    qtbot.wait(10)  # el select-all corre en un QTimer.singleShot(0, ...)
+
+    linea = dialogo.spin_saldo.lineEdit()
+    assert linea.selectedText() == linea.text()
+
+
+def test_buscar_profesional_filtra_la_tabla(qtbot, conn):
+    """Mismo criterio que "Filtros que solo afectan la visualización":
+    oculta filas sin distinguir mayúsculas ni acentos, por cualquier
+    columna visible."""
+    _crear_profesional(conn, "R", "Díaz", "R1")
+    _crear_profesional(conn, "A", "Gómez", "A1")
+
+    panel = _PanelSaldosIniciales(conn)
+    qtbot.addWidget(panel)
+
+    panel.campo_buscar.setText("diaz")
+    assert panel.tabla.isRowHidden(0) is False
+    assert panel.tabla.isRowHidden(1) is True
+
+    panel.campo_buscar.clear()
+    assert panel.tabla.isRowHidden(0) is False
+    assert panel.tabla.isRowHidden(1) is False
+
+
+def test_reiniciar_limpia_el_buscador(qtbot, conn):
+    _crear_profesional(conn, "R", "Lo Veci", "R1")
+    panel = _PanelSaldosIniciales(conn)
+    qtbot.addWidget(panel)
+    panel.campo_buscar.setText("algo")
+
+    panel.reiniciar()
+
+    assert panel.campo_buscar.text() == ""
+
+
+def test_foco_inicial_queda_en_el_buscador(qtbot, conn):
+    panel = _PanelSaldosIniciales(conn)
+    qtbot.addWidget(panel)
+    panel.show()
+    qtbot.waitExposed(panel)
+    qtbot.waitUntil(lambda: panel.campo_buscar.hasFocus())
 
 
 # --- _PanelDepurarHistorial ---------------------------------------------------------------

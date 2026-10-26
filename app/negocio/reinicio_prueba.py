@@ -3,13 +3,14 @@
 durante un mes (ej. octubre), antes de arrancar a usarlo de verdad (ej.
 noviembre), necesita poder:
 
-- Ajustar a mano el `SaldoCuentaAnterior` de cada profesional R/A (los
-  dos únicos que llevan saldo de cuenta propio — B/E/X/C no facturan
-  directo, E consolida en su cabeza de equipo R) a su valor real, sin
-  que importe lo que haya quedado acumulado probando. NUNCA toca
-  `SaldoCuentaActual` — `avance_mes.avanzar_mes` (`_traspasar_saldos`)
-  ya lo resetea a 0 al cerrar el mes de prueba, antes de que esta
-  pantalla entre en juego.
+- Ajustar a mano el `SaldoCuentaAnterior` de cada profesional R/A/X (los
+  que pueden llevar saldo de cuenta propio — confirmado por la clienta:
+  X también, porque puede venir de haber sido R/A antes y conservar un
+  saldo arrastrado; B/E/C no facturan directo, E consolida en su cabeza
+  de equipo R) a su valor real, sin que importe lo que haya quedado
+  acumulado probando. NUNCA toca `SaldoCuentaActual` — `avance_mes.
+  avanzar_mes` (`_traspasar_saldos`) ya lo resetea a 0 al cerrar el mes
+  de prueba, antes de que esta pantalla entre en juego.
 - Borrar los historiales de movimientos generados durante la prueba,
   hasta un período de corte elegido, SIN tocar la estructura física
   (Localidad/Edificio/Unidad/Consultorio/Profesional), las reservas
@@ -42,13 +43,16 @@ from dataclasses import dataclass
 
 from app.repositorio.registro import obtener_repositorio
 
-# Categorías que llevan saldo de cuenta propio — las únicas que esta
-# pantalla ofrece para ajustar `SaldoCuentaAnterior` a mano.
-CATEGORIAS_CON_SALDO = ("R", "A")
+# Categorías que pueden llevar saldo de cuenta propio — las que esta
+# pantalla ofrece para ajustar `SaldoCuentaAnterior` a mano. X se suma a
+# R/A (confirmado por la clienta): un X puede venir de haber sido R/A
+# antes de liberar sus horarios, y conservar un saldo arrastrado de esa
+# época — B/E/C nunca facturan directo, no van acá.
+CATEGORIAS_CON_SALDO = ("R", "A", "X")
 
 
 def profesionales_con_saldo(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Profesionales R/A con su saldo actual (solo lectura, referencia —
+    """Profesionales R/A/X con su saldo actual (solo lectura, referencia —
     recién reseteado a 0 por `avance_mes.avanzar_mes`) y anterior
     (editable desde esta pantalla)."""
     placeholders = ", ".join("?" for _ in CATEGORIAS_CON_SALDO)
