@@ -289,3 +289,99 @@ estas dos en el medio de la lista no rompe ninguna planilla ya
 descargada antes de este cambio (sigue funcionando por el texto del
 encabezado que traiga esa planilla puntual).
 
+
+## Feriados y fechas especiales: limpieza automática, descripción y orden en el PDF, cartel de regeneración
+
+Hilo nuevo, a partir de probar el arreglo de arriba (Pagos/PDF): la
+clienta confirmó que, con ese cambio, eliminar/agregar un feriado del
+mes en curso ya regenera de verdad TODAS las liquidaciones ya emitidas
+de ese período (antes de ese cambio, `regenerar_si_corresponde` solo
+tocaba el estado en la base, nunca el PDF — el mismo bug, visto desde
+el lado de Fechas especiales en vez de Pagos). Cuatro pedidos nuevos
+sobre esta misma pantalla:
+
+### 1. Avance de mes: limpiar los feriados que ya no tienen efecto
+
+"Cuando hizo el avance de mes de octubre a noviembre, me conservó en
+la lista el feriado que tenía del 12-10, eso me lo tendría que haber
+limpiado de la tabla ya que no tiene más efecto en las nuevas
+liquidaciones." Confirmado por código antes de tocar nada: un feriado
+del período que se cierra deja de poder afectar cualquier liquidación
+nueva por DOS motivos, no uno — (a) DC-08 §6.2 ya bloquea reemitir un
+período una vez que hay liquidaciones de períodos posteriores, así que
+su propio cálculo nunca se vuelve a correr; (b) el único lugar donde
+seguía pesando como "feriado pendiente" del período siguiente
+(`liquidaciones._calcular_feriados_pendientes`) filtra contra la fecha
+de emisión YA FIJADA del período que se cierra
+(`feriado['Fecha'] <= fecha_emision_ant`, un valor que no cambia más),
+así que si el feriado ya existía antes de esa emisión (el caso normal)
+ya estaba excluido de "pendientes" para siempre, sin importar cuándo se
+borre.
+
+`avance_mes._limpiar_fechas_especiales_antiguas(conn, periodo_cerrado)`
+(nueva, mismo patrón que `_limpiar_liquidaciones_antiguas_todos`/
+`_limpiar_lista_espera`) borra toda fila de `FechasEspeciales` con
+`Fecha` dentro del período que se cierra O anterior (por si quedó
+alguna de una ronda vieja sin limpiar) — se llama en `avanzar_mes`
+junto al resto de las limpiezas de fin de mes, nuevo campo
+`ResumenAvanceMes.fechas_especiales_antiguas_eliminadas` sumado al
+cartel final de "Avance de mes completado" (`panel_control.py`), mismo
+criterio que los otros contadores de esa pantalla.
+
+### 2. Descripción cargada, agregada al ítem del PDF
+
+"En los items de feriados que aparecen en las liquidaciones agregame
+la descripción que tiene cargada... en lugar de 'Descuento por feriado
+- lunes 9/11' que diga 'Descuento por feriado - lunes 9/11 - Visita
+Papal'." `ItemFeriado` (`app.negocio.liquidaciones`) suma un campo
+`descripcion: str | None`, poblado con `feriado["Descripcion"]` en los
+tres lugares donde se construye (`_calcular_descuentos_feriados` para
+nacionales/no laborables, `_calcular_feriados_pendientes`).
+`liquidacion_pdf._sufijo_descripcion` (" - {descripcion}", o "" si no
+hay ninguna cargada) se agrega al final de los tres textos que ya
+armaba `_items_cuenta` ("Descuento por feriado...", "...día no
+laborable...", "...feriado (mes anterior)...") — sin tocar la
+redacción existente cuando no hay descripción.
+
+### 3. Orden en el PDF: más próximo arriba, más alejado abajo
+
+"Que aparezcan en el PDF ordenados de más próximo arriba a más
+alejados en el tiempo abajo, más allá de la posición en el que fueron
+cargados en la tabla." Las tres listas (`descuentos_feriados`,
+`descuentos_no_laborables`, `feriados_pendientes`) se ordenan por
+`fecha` descendente al armarlas en `liquidaciones.py` (no en el PDF:
+es la única parte del sistema que las consume, así que ordenar en el
+origen alcanza) — el feriado más reciente del período queda arriba,
+el más viejo abajo, sin importar el orden de carga en Fechas
+especiales.
+
+### 4. Cartel final de "proceso completado" al regenerar
+
+"Asegurate que siempre salga un alerta que... va a regenerar todos los
+archivos y marcarlos como no enviados, siempre con el ok final de
+proceso completado cuando termine." Para crear/editar ya existía el
+aviso ANTES de guardar (`_al_guardar_fecha_especial`, "Hay N
+liquidación(es)... ¿Confirmás?"); lo que faltaba era un cartel
+explícito DESPUÉS, sobre todo para Eliminar (no se puede avisar antes
+de borrar — el genérico "¿Confirmás eliminar?" de `PantallaCRUD` ya
+sirve de confirmación de la acción en sí). `_regenerar_liquidaciones_
+del_periodo_actual` (`catalogos.py`) ahora, si de verdad regeneró algo,
+muestra `QMessageBox.information` con la cantidad real y el período —
+mismo criterio exacto que ya usan Aumentos/Esquema de descuentos para
+su "cartel de éxito" (cuenta real, después de regenerar). Queda un
+cartel de más en la secuencia (el genérico "Registro eliminado con
+éxito" de `PantallaCRUD` sigue saliendo después) — aceptado como costo
+menor frente a que SIEMPRE quede explícito que se regeneró algo. Este
+patrón de "cartel final explícito cuando se regenera" queda disponible
+para sumarse a otras pantallas con el mismo mecanismo (Aumentos y
+Esquema de descuentos ya lo tenían de antes) caso por caso, no es un
+barrido de una sola vez.
+
+Tests nuevos: `tests/test_avance_mes.py` (limpia el período cerrado y
+anteriores, conserva fechas futuras, cuenta 0 sin nada que limpiar),
+`tests/test_pdf_liquidacion.py` (la descripción se agrega al ítem, sin
+descripción no agrega guion de más, orden descendente por fecha tanto
+en `Liquidacion.descuentos_feriados` como en los ítems del PDF),
+`tests/test_catalogos.py` (el cartel de regeneración aparece con la
+cantidad y el período correctos al eliminar, no aparece si no hay nada
+que regenerar).
