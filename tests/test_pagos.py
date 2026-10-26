@@ -17,6 +17,7 @@ from app.negocio.pagos import (
     plan_activo_de,
     refinanciar_plan,
     registrar_pago,
+    resolver_profesional_para_cargo,
     subtotal_tanda_sobres,
     tanda_sobres_abierta,
     tanda_sobres_es_de_otro_dia,
@@ -528,3 +529,99 @@ def test_tanda_sobres_es_de_otro_dia(conn):
 
     obtener_repositorio(conn, "Configuracion").actualizar(1, TandaSobresApertura="2026-08-15T09:00:00")
     assert tanda_sobres_es_de_otro_dia(conn) is False
+
+
+# --- resolver_profesional_para_cargo / categorías B, E, C (confirmado por la clienta) ---
+
+def _crear_profesional(conn, **kwargs):
+    kwargs.setdefault("Apellido", "Lo Veci")
+    return obtener_repositorio(conn, "Profesional").crear(**kwargs)
+
+
+def test_resolver_profesional_para_cargo_r_a_x_a_si_mismos(conn):
+    for categoria in ("R", "A", "X"):
+        id_prof = _crear_profesional(conn, CategoriaProfesional=categoria)
+        assert resolver_profesional_para_cargo(conn, id_prof) == id_prof
+
+
+def test_resolver_profesional_para_cargo_e_redirige_al_cabeza_de_equipo(conn):
+    id_r = _crear_profesional(conn, CategoriaProfesional="R")
+    id_e = _crear_profesional(conn, CategoriaProfesional="E", ProfesionalCabezaEquipo=id_r)
+    assert resolver_profesional_para_cargo(conn, id_e) == id_r
+
+
+def test_resolver_profesional_para_cargo_e_sin_cabeza_rechaza(conn):
+    id_e = _crear_profesional(conn, CategoriaProfesional="E")
+    with pytest.raises(ValueError):
+        resolver_profesional_para_cargo(conn, id_e)
+
+
+def test_resolver_profesional_para_cargo_e_con_cabeza_que_no_es_r_rechaza(conn):
+    id_a = _crear_profesional(conn, CategoriaProfesional="A")
+    id_e = _crear_profesional(conn, CategoriaProfesional="E", ProfesionalCabezaEquipo=id_a)
+    with pytest.raises(ValueError):
+        resolver_profesional_para_cargo(conn, id_e)
+
+
+def test_resolver_profesional_para_cargo_b_rechaza(conn):
+    id_b = _crear_profesional(conn, CategoriaProfesional="B")
+    with pytest.raises(ValueError):
+        resolver_profesional_para_cargo(conn, id_b)
+
+
+def test_resolver_profesional_para_cargo_c_rechaza(conn):
+    id_c = _crear_profesional(conn, CategoriaProfesional="C")
+    with pytest.raises(ValueError):
+        resolver_profesional_para_cargo(conn, id_c)
+
+
+def test_resolver_profesional_para_cargo_inexistente_rechaza(conn):
+    with pytest.raises(ValueError):
+        resolver_profesional_para_cargo(conn, 9999)
+
+
+def test_registrar_pago_a_un_e_se_imputa_al_cabeza_de_equipo(conn):
+    id_r = _crear_profesional(conn, CategoriaProfesional="R", SaldoCuentaActual=0)
+    id_e = _crear_profesional(conn, CategoriaProfesional="E", ProfesionalCabezaEquipo=id_r)
+
+    registrar_pago(conn, id_profesional=id_e, monto=500)
+
+    repo = obtener_repositorio(conn, "Profesional")
+    assert repo.obtener(id_r)["SaldoCuentaActual"] == pytest.approx(500)
+    assert repo.obtener(id_e)["SaldoCuentaActual"] == pytest.approx(0)
+    assert obtener_repositorio(conn, "HistorialPagos").listar()[0]["IdProfesional"] == id_r
+
+
+def test_registrar_pago_a_un_b_rechaza(conn):
+    id_b = _crear_profesional(conn, CategoriaProfesional="B")
+    with pytest.raises(ValueError):
+        registrar_pago(conn, id_profesional=id_b, monto=500)
+
+
+def test_crear_cargo_especial_a_un_e_se_imputa_al_cabeza_de_equipo(conn):
+    id_r = _crear_profesional(conn, CategoriaProfesional="R")
+    id_e = _crear_profesional(conn, CategoriaProfesional="E", ProfesionalCabezaEquipo=id_r)
+
+    id_cargo = crear_cargo_especial(
+        conn, id_profesional=id_e, tipo="Débito", concepto="x", monto=100, periodo_imputado=periodo_actual(conn),
+    )
+
+    assert obtener_repositorio(conn, "CargoEspecial").obtener(id_cargo)["IdProfesional"] == id_r
+
+
+def test_crear_cargo_especial_a_un_b_rechaza(conn):
+    id_b = _crear_profesional(conn, CategoriaProfesional="B")
+    with pytest.raises(ValueError):
+        crear_cargo_especial(
+            conn, id_profesional=id_b, tipo="Débito", concepto="x", monto=100,
+            periodo_imputado=periodo_actual(conn),
+        )
+
+
+def test_crear_cargo_especial_a_un_c_rechaza(conn):
+    id_c = _crear_profesional(conn, CategoriaProfesional="C")
+    with pytest.raises(ValueError):
+        crear_cargo_especial(
+            conn, id_profesional=id_c, tipo="Débito", concepto="x", monto=100,
+            periodo_imputado=periodo_actual(conn),
+        )

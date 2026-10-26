@@ -1328,6 +1328,26 @@ def test_panel_ausencias_grilla_resalta_verde_donde_hay_ausencia(qtbot, conn):
     assert (celda.color_aro, celda.color_centro, celda.color_fuente) == (VERDE, VERDE, NEGRA)
 
 
+def test_combo_cargos_especiales_no_ofrece_categoria_b(qtbot, conn):
+    """Confirmado por la clienta: "no reciben ningún cargo ni tienen que
+    abonar nada, todo lo que se les carge queda bonificado" —
+    `crear_cargo_especial` ya lo bloquea a nivel de negocio, sacarlo del
+    combo evita que el operador llegue a chocar con ese error."""
+    _preparar(conn)
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bonificado")
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+
+    categorias = {
+        obtener_repositorio(conn, "Profesional").obtener(panel.combo_profesional.itemData(i))[
+            "CategoriaProfesional"
+        ]
+        for i in range(panel.combo_profesional.count())
+        if panel.combo_profesional.itemData(i) is not None
+    }
+    assert "B" not in categorias
+
+
 def test_crear_cargo_especial_sin_concepto_no_persiste(qtbot, conn):
     _preparar(conn)
     panel = _PanelCargosEspeciales(conn)
@@ -1515,11 +1535,17 @@ def test_tabla_cargos_especiales_orden_por_defecto_fecha_categoria_codigo(qtbot,
     conn.execute(
         "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-17' WHERE IdConfiguracion = 1"
     )
-    for id_prof in (id_b1, id_r2):
-        crear_cargo_especial(
-            conn, id_profesional=id_prof, tipo="Débito", concepto="x", monto=100,
-            periodo_imputado=periodo_actual(conn),
-        )
+    crear_cargo_especial(
+        conn, id_profesional=id_r2, tipo="Débito", concepto="x", monto=100, periodo_imputado=periodo_actual(conn),
+    )
+    # El cargo del B se inserta directo por el repositorio, no vía
+    # `crear_cargo_especial` (ahora bloquea B — "todo queda bonificado"):
+    # simula un registro histórico de antes de esa validación, que la
+    # tabla sigue teniendo que poder ordenar igual.
+    obtener_repositorio(conn, "CargoEspecial").crear(
+        IdProfesional=id_b1, Tipo="Débito", Subtipo="Ítem libre", Concepto="x", Monto=100,
+        Fecha="2026-08-17", PeriodoImputado=periodo_actual(conn),
+    )
     conn.commit()
 
     panel = _PanelCargosEspeciales(conn)

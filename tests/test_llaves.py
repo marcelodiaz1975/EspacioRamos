@@ -506,3 +506,52 @@ def test_llaves_faltantes_llave_de_unidad_puntual_no_cuenta_como_acceso_de_edifi
 
 def test_llaves_faltantes_consultorio_inexistente_no_rompe(conn, profesional):
     assert llaves_faltantes_para_reserva(conn, id_profesional=profesional, id_consultorio=999999) == []
+
+
+# --- Categorías B, E, C (confirmado por la clienta) ---
+
+def test_asignar_llave_a_un_c_rechaza(conn):
+    id_c = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="C", Apellido="Contacto")
+    id_llave = crear_llave(conn, tipo="Unidad")
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+    with pytest.raises(ValueError):
+        asignar_llave(conn, id_llave=id_llave, id_profesional=id_c)
+
+
+def test_asignar_llave_con_deposito_a_un_b_rechaza(conn):
+    """Confirmado por la clienta: "no reciben ningún cargo ni tienen que
+    abonar nada, todo lo que se les carge queda bonificado" — a nivel de
+    negocio (`crear_cargo_especial` → `resolver_profesional_para_cargo`)
+    queda bloqueado si de todos modos se intenta cobrar."""
+    id_b = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bonificado")
+    id_llave = crear_llave(conn, tipo="Edificio", valor_deposito_actual=5000)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+    with pytest.raises(ValueError):
+        asignar_llave(conn, id_llave=id_llave, id_profesional=id_b, cobrar_deposito=True)
+
+
+def test_asignar_llave_sin_deposito_a_un_b_funciona(conn):
+    """"Sí pueden registrarse movimientos de llaves a nivel stock" — solo
+    se bloquea si se intenta cobrar un depósito."""
+    id_b = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bonificado")
+    id_llave = crear_llave(conn, tipo="Unidad")
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+    id_asignacion = asignar_llave(conn, id_llave=id_llave, id_profesional=id_b)
+    assert obtener_repositorio(conn, "LlaveMovimiento").obtener(id_asignacion)["IdProfesional"] == id_b
+
+
+def test_asignar_llave_con_deposito_a_un_e_imputa_el_cargo_al_cabeza_de_equipo(conn):
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Cabeza")
+    id_e = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="E", Apellido="Equipo", ProfesionalCabezaEquipo=id_r,
+    )
+    id_llave = crear_llave(conn, tipo="Edificio", valor_deposito_actual=5000)
+    ingresar_copias(conn, id_llave=id_llave, cantidad=1)
+    id_asignacion = asignar_llave(conn, id_llave=id_llave, id_profesional=id_e, cobrar_deposito=True)
+
+    # El movimiento de stock sigue a nombre del E (quien físicamente
+    # tiene la llave) — solo el cargo monetario se redirige.
+    assert obtener_repositorio(conn, "LlaveMovimiento").obtener(id_asignacion)["IdProfesional"] == id_e
+    cargos = obtener_repositorio(conn, "CargoEspecial").listar(IdProfesional=id_r)
+    assert len(cargos) == 1
+    assert cargos[0]["Monto"] == pytest.approx(5000)

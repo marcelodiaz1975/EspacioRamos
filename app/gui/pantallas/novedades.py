@@ -107,7 +107,13 @@ _CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
 # hasta ahora usaba `_CATEGORIAS_TODAS` sin ese descarte. Licencias/
 # Ausencias (más arriba en este mismo archivo) no fueron parte de este
 # pedido, se quedan con `_CATEGORIAS_TODAS`.
-_CATEGORIAS_CON_CARGOS = ("R", "A", "B", "E", "X")
+#
+# "B" se sacó en una ronda posterior (confirmado por la clienta: "no
+# reciben ningún cargo ni tienen que abonar nada, todo lo que se les
+# carge queda bonificado") — `crear_cargo_especial` ya lo bloquea a
+# nivel de negocio (`resolver_profesional_para_cargo`), así que sacarlo
+# también del combo evita que el operador llegue a chocar con ese error.
+_CATEGORIAS_CON_CARGOS = ("R", "A", "E", "X")
 _ORDEN_CATEGORIA_CARGOS = {"B": 0, "R": 1, "A": 2, "E": 3}
 _ANCHO_CAMPO = 265  # ancho compartido por todo lo que va en la columna izquierda de las tres solapas
                     # (combos, fechas y botones), para que las tres queden del mismo ancho — el valor

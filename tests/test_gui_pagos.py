@@ -82,6 +82,26 @@ def _seleccionar_profesional(panel, id_profesional):
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
 
 
+def test_combo_registrar_pago_no_ofrece_categoria_b(qtbot, conn):
+    """Confirmado por la clienta: "no reciben ningún cargo ni tienen que
+    abonar nada, todo lo que se les carge queda bonificado" —
+    `registrar_pago` ya lo bloquea a nivel de negocio, sacarlo del combo
+    evita que el operador llegue a chocar con ese error."""
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bonificado")
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+
+    categorias = {
+        obtener_repositorio(conn, "Profesional").obtener(panel.combo_profesional.itemData(i))[
+            "CategoriaProfesional"
+        ]
+        for i in range(panel.combo_profesional.count())
+        if panel.combo_profesional.itemData(i) is not None
+    }
+    assert "B" not in categorias
+
+
 def test_registrar_pagos_reiniciar_vuelve_filtro_y_formulario_al_default(qtbot, conn):
     """Punto #1.4: `reiniciar()` (disparado también desde `showEvent` y
     desde F3) vuelve "Profesional" (el mismo combo que filtra la tabla)

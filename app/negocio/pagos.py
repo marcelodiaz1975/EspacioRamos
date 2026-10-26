@@ -38,6 +38,52 @@ def _capitalizar(texto: str) -> str:
     return texto[:1].upper() + texto[1:] if texto else texto
 
 
+def resolver_profesional_para_cargo(conn: sqlite3.Connection, id_profesional: int) -> int:
+    """Devuelve el id de profesional al que REALMENTE corresponde
+    imputar un cargo/pago — compartida por `registrar_pago` y
+    `crear_cargo_especial` (y, de rebote, por los depósitos/reintegros
+    de llave de `app.negocio.llaves`, que llaman a `crear_cargo_
+    especial` internamente, así que no necesitan su propio chequeo).
+
+    Confirmado por la clienta sobre las seis categorías de Profesional:
+    - **R/A/X**: a sí mismo — son las únicas con cuenta propia.
+    - **E**: a su cabeza de equipo (tiene que ser un R válido). Nada lee
+      nunca el saldo propio de un E: `liquidaciones.
+      CATEGORIAS_CON_LIQUIDACION_MENSUAL` es solo `("R",)`, y
+      `calcular_liquidacion` filtra `CargoEspecial` por el IdProfesional
+      exacto del R que se está liquidando, no por los ids consolidados
+      del equipo — un cargo o pago dejado en el E quedaría huérfano
+      para siempre, sin que nadie se entere ni lo cobre.
+    - **B**: nunca — "todo lo que se les carga queda bonificado", no
+      tiene cuenta propia.
+    - **C**: nunca — "no se puede hacer ningún otro movimiento con
+      ellos". Ya excluido de los combos de creación de las tres
+      pantallas (Cargos especiales, Pagos, Llaves); esto es la defensa
+      en profundidad a nivel de negocio, mismo criterio que
+      `reservas._validar_categoria_reserva`."""
+    repo = obtener_repositorio(conn, "Profesional")
+    profesional = repo.obtener(id_profesional)
+    if profesional is None:
+        raise ValueError(f"No existe el profesional #{id_profesional}")
+    categoria = profesional["CategoriaProfesional"]
+    if categoria == "C":
+        raise ValueError("Un profesional categoría C no puede recibir ningún cargo ni pago.")
+    if categoria == "B":
+        raise ValueError(
+            "Un profesional categoría B no puede recibir ningún cargo ni pago: todo queda bonificado."
+        )
+    if categoria == "E":
+        id_cabeza = profesional["ProfesionalCabezaEquipo"]
+        cabeza = repo.obtener(id_cabeza) if id_cabeza else None
+        if cabeza is None or cabeza["CategoriaProfesional"] != "R":
+            raise ValueError(
+                "Este profesional categoría E no tiene un cabeza de equipo válido (categoría R) — "
+                "corregilo desde Profesionales antes de imputarle algo."
+            )
+        return id_cabeza
+    return id_profesional
+
+
 def registrar_pago(
     conn: sqlite3.Connection, *, id_profesional: int, monto: float, fecha: str | None = None,
     medio_pago: str | None = None, cuenta_receptora: str | None = None,
@@ -62,9 +108,8 @@ def registrar_pago(
     ToleranciaDeudaDescuento a estar dentro — el caso en que corresponde
     preguntarle al operador si restablece el descuento por horas semanales
     para la liquidación remanente de ese período puntual (DC-06 §5.2)."""
+    id_profesional = resolver_profesional_para_cargo(conn, id_profesional)
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
-    if profesional is None:
-        raise ValueError(f"No existe el profesional #{id_profesional}")
     if periodo_imputado and periodo_imputado < sumar_meses(periodo_actual(conn), -1):
         raise ValueError("Un pago no se puede imputar a más de un mes anterior al mes en curso")
 
@@ -275,7 +320,13 @@ def crear_cargo_especial(
     tiene que ser uno de los otros tres (Ajuste/Bonificación/Ítem libre);
     sin indicar ninguno, cae a "Ítem libre" (mismo default que la columna
     en la base, para no romper a ningún llamador de antes de este
-    pedido — el formulario de Cargos especiales sí lo pasa siempre)."""
+    pedido — el formulario de Cargos especiales sí lo pasa siempre).
+
+    `id_profesional` pasa primero por `resolver_profesional_para_cargo`:
+    un E se redirige solo a su cabeza de equipo (cubre también los
+    depósitos/reintegros de llave, que llaman a esta función), B/C
+    nunca pueden recibir un cargo."""
+    id_profesional = resolver_profesional_para_cargo(conn, id_profesional)
     if tipo not in TIPOS_CARGO:
         raise ValueError(f"Tipo de cargo inválido: {tipo!r} (debe ser Débito o Crédito)")
     if not periodo_imputado:

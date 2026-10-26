@@ -1229,6 +1229,7 @@ class _DialogoAsignar(QDialog):
         self.spin_monto.setEnabled(False)
         layout.addRow("Monto cobrado", self.spin_monto)
         self.combo_deposito.currentIndexChanged.connect(self._al_cambiar_deposito)
+        self.combo_profesional.currentIndexChanged.connect(self._al_cambiar_profesional)
 
         # Punto propio de esta vuelta: `asignar_llave` ya soportaba
         # `periodo_imputado` (default el período actual, sin ningún
@@ -1254,6 +1255,7 @@ class _DialogoAsignar(QDialog):
             self.combo_profesional, self.campo_fecha, self.combo_deposito, self.spin_monto,
             self.combo_periodo, self.campo_observacion, boton_ok, boton_cancelar,
         ], parent=self)
+        self._al_cambiar_profesional()
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -1261,6 +1263,20 @@ class _DialogoAsignar(QDialog):
 
     def _al_cambiar_deposito(self) -> None:
         self.spin_monto.setEnabled(self.combo_deposito.currentData() == "abonado")
+
+    def _al_cambiar_profesional(self) -> None:
+        """Confirmado por la clienta: un profesional B nunca paga
+        depósito — "todo lo que se les carge queda bonificado". En vez
+        de dejar que el operador elija "Abonado" y chocar después con el
+        error de `crear_cargo_especial` (`resolver_profesional_para_
+        cargo`), el combo "Depósito" se fuerza a "Bonificado" y se
+        deshabilita mientras el profesional elegido sea un B."""
+        id_profesional = self.combo_profesional.currentData()
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional) if id_profesional else None
+        es_b = profesional is not None and profesional["CategoriaProfesional"] == "B"
+        if es_b:
+            self.combo_deposito.setCurrentIndex(0)  # "bonificado"
+        self.combo_deposito.setEnabled(not es_b)
 
     def valores(self) -> dict:
         periodo = periodo_actual(self.conn)

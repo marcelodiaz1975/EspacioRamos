@@ -132,6 +132,27 @@ def test_combo_profesional_asignar_es_buscable_por_codigo_o_nombre(qtbot, conn):
     assert isinstance(completador.model(), _ProxyBusquedaSinAcentos)
 
 
+def test_dialogo_asignar_fuerza_bonificado_para_categoria_b(qtbot, conn):
+    """Confirmado por la clienta: un B nunca paga depósito — "todo lo que
+    se les carge queda bonificado". En vez de dejar elegir "Abonado" y
+    chocar después con el error de `crear_cargo_especial`, el combo
+    "Depósito" se fuerza y se deshabilita mientras el profesional
+    elegido sea un B."""
+    id_b = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Bonificado")
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
+    id_llave = _crear_tipo_con_copia(conn)
+    tipo = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    dialogo = _DialogoAsignar(conn, tipo, 1)
+    qtbot.addWidget(dialogo)
+
+    dialogo.combo_profesional.setCurrentIndex(dialogo.combo_profesional.findData(id_b))
+    assert dialogo.combo_deposito.currentData() == "bonificado"
+    assert not dialogo.combo_deposito.isEnabled()
+
+    dialogo.combo_profesional.setCurrentIndex(dialogo.combo_profesional.findData(id_r))
+    assert dialogo.combo_deposito.isEnabled()
+
+
 def _crear_edificio_con_unidad(conn, nombre="Ramos 1", departamento="1ro A"):
     id_edificio = conn.execute("INSERT INTO Edificio (Nombre) VALUES (?)", (nombre,)).lastrowid
     id_unidad = conn.execute(

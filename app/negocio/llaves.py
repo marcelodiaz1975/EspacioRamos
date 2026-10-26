@@ -197,6 +197,18 @@ def asignar_llave(
         raise ValueError(f"No existe la llave #{id_llave}")
     if resumen_stock(conn, id_llave)["disponibles"] <= 0:
         raise ValueError(f"No hay copias disponibles de {llave['Nombre']} para asignar")
+    # Confirmado por la clienta: "no se puede hacer ningún otro movimiento
+    # con ellos" — ya excluidos del combo de "Asignar" (defensa en
+    # profundidad a nivel de negocio, mismo criterio que `reservas.
+    # _validar_categoria_reserva`). El depósito (B/E) lo resuelve solo
+    # `crear_cargo_especial` más abajo, vía `resolver_profesional_para_
+    # cargo`, así que acá solo hace falta bloquear C — lo único que no
+    # puede ni siquiera recibir la llave a nivel de stock. Si `id_
+    # profesional` no corresponde a ningún registro, no es asunto de
+    # este chequeo (comportamiento de siempre, sin tocar).
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    if profesional is not None and profesional["CategoriaProfesional"] == "C":
+        raise ValueError("Un profesional categoría C no puede recibir ninguna llave.")
 
     if cobrar_deposito and monto_cobrado is None:
         monto_cobrado = llave["ValorDepositoActual"]

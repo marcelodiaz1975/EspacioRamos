@@ -65,6 +65,7 @@ from app.negocio.pagos import (
     plan_activo_de,
     refinanciar_plan,
     registrar_pago,
+    resolver_profesional_para_cargo,
     subtotal_tanda_sobres,
     suspender_descuento_periodo,
     tanda_sobres_abierta,
@@ -77,7 +78,13 @@ _CATEGORIA_R = ("R",)
 # llegaron a pasar por el espacio") no puede tener NINGÚN movimiento —
 # se excluye del combo que elige a quién registrarle un pago nuevo
 # (antes `_CATEGORIAS_TODAS`, sin este descarte, se borra sin otro uso).
-_CATEGORIAS_CON_PAGOS = ("R", "A", "B", "E", "X")
+#
+# "B" se sacó en una ronda posterior (confirmado por la clienta: "no
+# reciben ningún cargo ni tienen que abonar nada, todo lo que se les
+# carge queda bonificado") — `registrar_pago` ya lo bloquea a nivel de
+# negocio (`resolver_profesional_para_cargo`), así que sacarlo también
+# del combo evita que el operador llegue a chocar con ese error.
+_CATEGORIAS_CON_PAGOS = ("R", "A", "E", "X")
 _ANCHO_COMBO_PROFESIONAL = 220
 _ANCHO_COL_PROFESIONAL = 180
 
@@ -593,7 +600,14 @@ class _PanelRegistrarPago(QWidget):
             QMessageBox.warning(self, "Registrar pago", str(error))
             return
         if cruza_tolerancia:
-            self._preguntar_restablecer_descuento(id_profesional, periodo_imputado)
+            # `registrar_pago` ya redirigió internamente el saldo de un
+            # E a su cabeza de equipo (`resolver_profesional_para_cargo`)
+            # — hay que suspender el descuento sobre ESE mismo
+            # profesional (el único cuyo `DescuentoSuspendidoPeriodo` lee
+            # `calcular_liquidacion`), no sobre el E original.
+            self._preguntar_restablecer_descuento(
+                resolver_profesional_para_cargo(self.conn, id_profesional), periodo_imputado,
+            )
         if periodo_imputado < periodo_actual(self.conn):
             # El pago corrige el saldo anterior, pero no se reabre la liquidación
             # ya emitida de ese período — lo que hay que regenerar y marcar como
