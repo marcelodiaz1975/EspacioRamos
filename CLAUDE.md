@@ -361,6 +361,18 @@ pila era la primera Seccion real (`test_gui_configuracion.py`,
 `test_gui_lista_espera.py`, `test_gui_panel_control.py` — todos +1 en
 el índice que leían, ya no +0).
 
+Corrección de la clienta tras ver esto andando: "Panel de control"
+tenía de antes una excepción que lo dejaba siempre visible en el menú
+sin importar el estado (colapsado/expandido) de su categoría — venía
+de la regla vieja que esta sección reemplaza (el sistema arrancaba
+abriéndolo solo, así que no tenía sentido que quedara escondido detrás
+de un clic de categoría). Ya no hace falta: se sacó esa excepción
+(`_items_por_categoria` ya no excluye a "Panel de control") y ahora se
+colapsa/expande con el resto de los ítems de su categoría, como
+cualquier otro. Test `test_categorias_arrancan_colapsadas_salvo_panel_
+de_control` renombrado a `test_categorias_arrancan_colapsadas_
+incluyendo_panel_de_control` y invertido para reflejar esto.
+
 ### Menú lateral: separadores de categoría sin guiones, en negrita
 
 `_texto_separador` armaba "flecha — CATEGORÍA —" con guiones
@@ -384,6 +396,11 @@ intercepta esas teclas y llama a los mismos `_al_tocar`/
 teclados numéricos la usan como separador decimal). `pantalla`
 (de solo lectura) pasa a `FocusPolicy.NoFocus` para que nunca se quede
 con el foco por accidente; la ventana entera lo recibe en su lugar.
+
+Corrección de la clienta: la tecla Suprimir/Delete también borra todo
+(mismo destino que Escape/"C"), no solo el último carácter — se suma
+`Qt.Key.Key_Delete` a esa misma rama de `keyPressEvent` en vez de a la
+de Backspace.
 
 ### F3 ("Reiniciar solapa"): auditoría completa + 9 correcciones
 

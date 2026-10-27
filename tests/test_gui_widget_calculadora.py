@@ -98,6 +98,19 @@ def test_teclado_escape_y_c_limpian_la_expresion(qtbot):
     assert calc.pantalla.text() == ""
 
 
+def test_teclado_delete_limpia_la_expresion(qtbot):
+    """Corrección de la clienta: la tecla Suprimir/Delete también borra
+    todo, mismo comportamiento que Escape/"C" (no solo el último
+    carácter, eso lo sigue haciendo Backspace)."""
+    calc = Calculadora()
+    qtbot.addWidget(calc)
+    calc.show()
+    qtbot.waitExposed(calc)
+    QTest.keyClicks(calc, "123")
+    QTest.keyClick(calc, Qt.Key.Key_Delete)
+    assert calc.pantalla.text() == ""
+
+
 def test_ventana_se_puede_cerrar_con_la_cruz(qtbot):
     """Pedido explícito: "que se pueda cerrar con la cruz típica de
     todas las apps" — una ventana de verdad (`Qt.WindowType.Window`), no

@@ -78,7 +78,7 @@ class Calculadora(QWidget):
             self._al_tocar("=")
         elif tecla == Qt.Key.Key_Backspace:
             self._borrar_ultimo()
-        elif tecla in (Qt.Key.Key_Escape, Qt.Key.Key_C):
+        elif tecla in (Qt.Key.Key_Escape, Qt.Key.Key_C, Qt.Key.Key_Delete):
             self._al_tocar("C")
         elif tecla == Qt.Key.Key_Comma:
             self._al_tocar(".")

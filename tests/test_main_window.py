@@ -290,9 +290,12 @@ def test_al_hacer_click_en_una_solapa_reemplaza_la_pantalla_inicial(qtbot, conn)
     assert ventana._navegacion.currentItem().text() == "Panel de control"
 
 
-def test_categorias_arrancan_colapsadas_salvo_panel_de_control(qtbot, conn):
-    """Punto 20: las dos categorías arrancan COLAPSADAS, "Panel de
-    control" queda siempre visible sin importar el estado de la suya."""
+def test_categorias_arrancan_colapsadas_incluyendo_panel_de_control(qtbot, conn):
+    """Punto 20, corrección de la clienta: las dos categorías arrancan
+    COLAPSADAS, "Panel de control" incluido — la excepción que lo dejaba
+    siempre visible era porque el sistema arrancaba abriéndolo solo; ya
+    no hace falta (ver `_pantalla_inicial`), así que se colapsa/expande
+    con el resto de los ítems de su categoría, como cualquier otro."""
     secciones = [
         Seccion("Panel de control", lambda c: QWidget(), categoria="Y"),
         Seccion("Y otra más", lambda c: QWidget(), categoria="Y"),
@@ -306,7 +309,7 @@ def test_categorias_arrancan_colapsadas_salvo_panel_de_control(qtbot, conn):
     item_otra = next(
         ventana._navegacion.item(i) for i in range(ventana._navegacion.count()) if ventana._navegacion.item(i).text() == "Y otra más"
     )
-    assert item_panel.isHidden() is False
+    assert item_panel.isHidden() is True
     assert item_otra.isHidden() is True
 
 

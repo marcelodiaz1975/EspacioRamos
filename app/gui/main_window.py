@@ -95,11 +95,12 @@ class VentanaPrincipal(QMainWindow):
 
         # Punto 20 (SistemaDF v0.11.2026.10): las dos categorías del menú
         # arrancan COLAPSADAS — clickear el separador de una categoría la
-        # despliega/colapsa, acordeón. "Panel de control" queda SIEMPRE
-        # visible sin importar el estado de su categoría (se excluye de
-        # `_items_por_categoria`, la lista que `_aplicar_colapso` oculta/
-        # muestra) — es la pantalla de entrada de siempre, no tiene
-        # sentido que quede escondida detrás de un clic.
+        # despliega/colapsa, acordeón. "Panel de control" tenía antes una
+        # excepción (quedaba siempre visible sin importar el estado de su
+        # categoría) porque el sistema arrancaba abriéndola sola; corrección
+        # de la clienta tras sacar esa regla (ver `_pantalla_inicial`): ya
+        # no hace falta — "Panel de control" se colapsa/expande con el
+        # resto de los ítems de su categoría, como cualquier otro.
         self._categorias_expandidas: dict[str, bool] = {}
         self._separadores_por_categoria: dict[str, QListWidgetItem] = {}
         self._items_por_categoria: dict[str, list[QListWidgetItem]] = {}
@@ -137,8 +138,7 @@ class VentanaPrincipal(QMainWindow):
             item = QListWidgetItem(seccion.nombre)
             item.setData(_INDICE_PILA, indice_pila)
             self._navegacion.addItem(item)
-            if seccion.nombre != "Panel de control":
-                self._items_por_categoria[seccion.categoria].append(item)
+            self._items_por_categoria[seccion.categoria].append(item)
 
         for categoria in self._categorias_expandidas:
             self._aplicar_colapso(categoria)
