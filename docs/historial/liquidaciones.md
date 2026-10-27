@@ -775,3 +775,55 @@ por_volumen_de_horas_se_ve_en_rojo` (con un bloque de 6hs semanales —
 el esquema de descuentos por defecto da 0% hasta 2hs, hacía falta más
 para tener un importe negativo real que pintar).
 
+## Reemitir el período en curso se bloqueaba por una preview futura
+
+Bug real reportado por la clienta: parada en noviembre (período
+operativo actual), cargó reservas aisladas a una profesional R con
+"Período a imputar" = actual para noviembre, y otras agendadas para
+diciembre (mes siguiente, dentro del tope de 1 mes de anticipo). Al
+apretar "Emitir todas las liquidaciones" (período noviembre), esa
+profesional quedó afuera con el error "no se puede reemitir la
+liquidación de un período anterior a la última que se hizo — resolvé
+la diferencia con ajustes".
+
+La clienta identificó la causa ella misma: cargar/editar una reserva
+aislada de un mes FUTURO con "Período a imputar" = actual dispara
+`regenerar_si_corresponde` (`app/negocio/liquidaciones.py`) para ESE mes
+futuro (`_resolver_periodo_imputar`, `reservas.py`, con `periodo_reserva
+= fecha[:7]` de la reserva) — crea una `LiquidacionEmitida` de diciembre
+que es pura previsualización (mantiene el PDF/el estado del Centro de
+mensajería al día si llegara a consultarse), sin que ningún avance de
+mes la haya "cerrado" todavía. El guard de `emitir_liquidacion` ("no se
+puede reemitir un período si ya hay liquidaciones de períodos
+posteriores", DC-08 §6.2) comparaba contra CUALQUIER fila con `Periodo
+> periodo`, sin distinguir una preview de un período realmente cerrado
+— exactamente el caso que la clienta señaló: "sería un problema rehacer
+octubre parado en noviembre, pero rehacer noviembre estando parado en
+noviembre no tendría que tener ningún problema".
+
+Reproducido con un script antes de tocar nada: se repite el escenario
+exacto (operativo en noviembre, liquidación de noviembre emitida,
+`regenerar_si_corresponde` para diciembre simulando la reserva aislada
+futura, reintento de reemisión de noviembre) y el error aparece tal
+cual lo describió la clienta.
+
+Arreglado acotando la consulta del guard a `Periodo <= periodo_
+operativo_actual(conn)` (`app/negocio/dias.py`, ya existía, sin usar
+en este módulo): un período posterior solo bloquea si el período
+operativo YA lo alcanzó — ahí sí pudo haber usado como base de cálculo
+el período que se querría reabrir (el riesgo real que describe el
+docstring de la función, "feriados/horas pendientes" duplicados). Una
+preview de un mes que todavía no llegó no corre ese riesgo. Confirmado
+con el mismo script que el caso que SÍ debe seguir bloqueado (un
+período posterior realmente alcanzado) sigue bloqueando igual que
+antes.
+
+Test nuevo en `tests/test_liquidaciones.py`
+(`test_emitir_liquidacion_no_rechaza_reemitir_si_el_periodo_posterior_
+es_solo_una_preview_futura`) junto al test ya existente del caso que sí
+bloquea (`test_emitir_liquidacion_rechaza_reemitir_periodo_anterior_a_
+uno_ya_emitido`, al que se le sumó fijar `PeriodoOperativoActual`
+explícitamente — antes dependía sin querer de que la fecha real del
+sistema al correr el test ya hubiera pasado el período "posterior" del
+escenario, algo que este mismo fix podía romper).
+
