@@ -260,21 +260,40 @@ def test_finalizar_reserva_regular_sin_periodo_cerrado_funciona(conn, consultori
     assert reserva["VigenciaFin"] == "2026-09-30"
 
 
-def test_eliminar_reserva_regular_en_periodo_cerrado_bloquea(conn, consultorio, profesional_factory):
-    """Punto #9.1.6 (SistemaDF v0.11.2026.10): "Finalizar reserva a fin de
-    mes" pasa a "Eliminar reserva" — borra la fila por completo, pero con
-    el mismo guardarraíl de período cerrado que `finalizar_reserva_regular`,
-    acá aplicado sobre `VigenciaInicio` de la fila (la única referencia
-    real que queda una vez borrada)."""
+def test_eliminar_reserva_regular_ya_finalizada_en_periodo_cerrado_sigue_bloqueada(
+    conn, consultorio, profesional_factory,
+):
+    """Una reserva puramente histórica (ya finalizada ANTES del borde del
+    último período cerrado) sigue sin poder borrarse: no hay ningún
+    motivo de negocio real detrás (no hay nada "activo" para reemplazar),
+    así que acá sigue el guardarraíl estricto de siempre."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01", vigencia_fin="2026-08-15",
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    with pytest.raises(ValueError, match="Cargo especial"):
+        eliminar_reserva_regular(conn, id_reserva)
+    assert obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva) is not None
+
+
+def test_eliminar_reserva_regular_activa_en_periodo_cerrado_se_permite(conn, consultorio, profesional_factory):
+    """Pedido explícito de la clienta (caso real: reemplazar una reserva
+    vieja por otra con más horas en otro consultorio desde el mes en
+    curso): si la reserva sigue ACTIVA (sin Vigencia hasta, o con una
+    posterior al borde del último período cerrado), se permite borrarla
+    igual aunque su Vigencia desde caiga en un período ya cerrado —
+    aceptando a sabiendas que se pierde el rastro de que existió durante
+    ese período."""
     id_prof = profesional_factory("Lo Veci")
     id_reserva, _ = crear_reserva_regular(
         conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
         hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
     )
     emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
-    with pytest.raises(ValueError, match="Cargo especial"):
-        eliminar_reserva_regular(conn, id_reserva)
-    assert obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva) is not None
+    eliminar_reserva_regular(conn, id_reserva)
+    assert obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva) is None
 
 
 def test_eliminar_reserva_regular_sin_periodo_cerrado_borra_la_fila(conn, consultorio, profesional_factory):
@@ -337,6 +356,71 @@ def test_modificar_reserva_regular_en_periodo_cerrado_bloquea(conn, consultorio,
     with pytest.raises(ValueError, match="Cargo especial"):
         modificar_reserva_regular(
             conn, id_reserva, hora_inicio=15, hora_fin=17, vigencia_inicio="2026-08-01", vigencia_fin=None,
+        )
+
+
+def test_modificar_reserva_regular_finaliza_en_el_borde_del_periodo_cerrado_se_permite(
+    conn, consultorio, profesional_factory,
+):
+    """Pedido explícito de la clienta (caso real: profesional con una
+    reserva vieja que necesita reemplazarse por otra con más horas en
+    otro consultorio desde el mes en curso): "finalizarla" — mismo
+    Horario y Vigencia desde, solo se le pone una Vigencia hasta —
+    tiene que permitirse aunque la Vigencia desde de la fila sea de un
+    período ya cerrado, siempre que la Vigencia hasta nueva no se meta
+    DENTRO de ese período (acá, justo en su borde: el último día de
+    agosto, el último período cerrado por la liquidación de
+    septiembre)."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    modificar_reserva_regular(
+        conn, id_reserva, hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01", vigencia_fin="2026-08-31",
+    )
+    reserva = obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva)
+    assert reserva["VigenciaFin"] == "2026-08-31"
+
+
+def test_modificar_reserva_regular_finaliza_dentro_del_periodo_cerrado_sigue_bloqueada(
+    conn, consultorio, profesional_factory,
+):
+    """A diferencia del caso anterior, una Vigencia hasta que cae a
+    MITAD de un período ya cerrado sí cambiaría lo que esa liquidación
+    ya tuvo en cuenta (le quitaría presencia que ya estaba contada) —
+    sigue bloqueado."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    with pytest.raises(ValueError, match="período ya cerrado"):
+        modificar_reserva_regular(
+            conn, id_reserva, hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01", vigencia_fin="2026-08-15",
+        )
+    reserva = obtener_repositorio(conn, "ReservaRegular").obtener(id_reserva)
+    assert reserva["VigenciaFin"] is None
+
+
+def test_modificar_reserva_regular_cambia_horario_y_finaliza_en_periodo_cerrado_sigue_bloqueada(
+    conn, consultorio, profesional_factory,
+):
+    """La excepción es SOLO para "finalizar" sin tocar nada más — si
+    además se cambia el horario, vuelve a aplicar el guardarraíl
+    estricto de siempre (la Vigencia desde de la fila sigue cayendo en
+    un período cerrado)."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_regular(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
+    with pytest.raises(ValueError, match="Cargo especial"):
+        modificar_reserva_regular(
+            conn, id_reserva, hora_inicio=15, hora_fin=17, vigencia_inicio="2026-08-01", vigencia_fin="2026-08-31",
         )
 
 

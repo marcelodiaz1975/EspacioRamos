@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.negocio.ausencias import esta_ausente
-from app.negocio.dias import fecha_a_dia_semana
+from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_anterior, ultimo_dia_mes
 from app.negocio.dias import fecha_actual as _fecha_actual_sistema
 from app.negocio.licencias import tiene_licencia
 from app.negocio.liquidaciones import id_profesional_liquidable
@@ -326,6 +326,44 @@ def _validar_vigencia_no_cerrada(conn: sqlite3.Connection, id_profesional: int, 
         )
 
 
+def _ultimo_dia_cerrado(conn: sqlite3.Connection, id_profesional: int) -> str | None:
+    """Pedido de la clienta: el guardarraíl de período cerrado
+    (`_validar_vigencia_no_cerrada`) bloqueaba también "finalizar" una
+    reserva vieja (ponerle una Vigencia hasta) para poder cargar una
+    nueva con otro horario/consultorio desde el mes en curso — aunque
+    ESE cambio puntual no reabre nada: la reserva sigue habiendo estado
+    activa, sin ningún cambio, durante todo lo que un período cerrado
+    ya tuvo en cuenta.
+
+    Devuelve el último día real del último período YA cerrado para este
+    profesional (None si no hay ninguno todavía) — el borde seguro: una
+    Vigencia hasta nueva que caiga en esa fecha o después no cambia nada
+    de lo que un período cerrado ya calculó, así que no hace falta
+    bloquearla. Un día ANTERIOR a ese borde sí la acortaría dentro de un
+    período cerrado — eso sigue bloqueado."""
+    id_r = id_profesional_liquidable(conn, id_profesional)
+    if id_r is None:
+        return None
+    fila = conn.execute(
+        "SELECT MAX(Periodo) AS periodo_max FROM LiquidacionEmitida WHERE IdProfesional = ?", (id_r,),
+    ).fetchone()
+    periodo_max = fila["periodo_max"] if fila else None
+    if periodo_max is None:
+        return None
+    anio, mes = parsear_periodo(periodo_anterior(periodo_max))
+    return ultimo_dia_mes(anio, mes).isoformat()
+
+
+def _validar_finalizacion_no_retroactiva(conn: sqlite3.Connection, id_profesional: int, vigencia_fin: str) -> None:
+    ultimo_cerrado = _ultimo_dia_cerrado(conn, id_profesional)
+    if ultimo_cerrado is not None and vigencia_fin < ultimo_cerrado:
+        raise ValueError(
+            f"No se puede finalizar esta reserva regular el {vigencia_fin}: ese día todavía cae dentro de un "
+            "período ya cerrado (hay liquidaciones de un período posterior emitidas para este profesional). "
+            f"La fecha más temprana permitida es el {ultimo_cerrado}."
+        )
+
+
 def crear_reserva_regular(
     conn: sqlite3.Connection, *, id_profesional: int, id_consultorio: int, dia_semana: str,
     hora_inicio: float, hora_fin: float, vigencia_inicio: str, vigencia_fin: str | None = None,
@@ -411,14 +449,35 @@ def modificar_reserva_regular(
     un período ya cerrado, y la superposición contra otra reserva del
     mismo consultorio/día se vuelve a chequear (excluyendo a la propia
     fila vía `excluir_id`) porque el horario/vigencia nuevos pueden
-    generar un conflicto que la versión vieja no tenía."""
+    generar un conflicto que la versión vieja no tenía.
+
+    EXCEPCIÓN puntual (pedido de la clienta): si el único cambio real es
+    "finalizarla" (Horario y Vigencia desde quedan exactamente igual,
+    Vigencia hasta se acorta o se fija por primera vez) y la Vigencia
+    hasta nueva no se mete DENTRO de un período ya cerrado (ver
+    `_ultimo_dia_cerrado`/`_validar_finalizacion_no_retroactiva`), se
+    permite aunque la Vigencia desde de la fila sea de un período
+    cerrado — ese cambio puntual no reabre nada: la reserva sigue
+    habiendo estado activa, sin ningún cambio, durante todo lo que ese
+    período cerrado ya tuvo en cuenta. Cualquier otro cambio (horario,
+    Vigencia desde, o estirar la Vigencia hasta en vez de acortarla)
+    sigue con el guardarraíl estricto de siempre."""
     repo = obtener_repositorio(conn, "ReservaRegular")
     reserva = repo.obtener(id_reserva_regular)
     if reserva is None:
         raise ValueError(f"No existe la reserva regular #{id_reserva_regular}")
-    _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], reserva["VigenciaInicio"])
-    _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], vigencia_inicio)
-    _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], vigencia_fin)
+    solo_finaliza = (
+        hora_inicio == reserva["HoraInicio"] and hora_fin == reserva["HoraFin"]
+        and vigencia_inicio == reserva["VigenciaInicio"]
+        and vigencia_fin is not None
+        and (reserva["VigenciaFin"] is None or vigencia_fin < reserva["VigenciaFin"])
+    )
+    if solo_finaliza:
+        _validar_finalizacion_no_retroactiva(conn, reserva["IdProfesional"], vigencia_fin)
+    else:
+        _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], reserva["VigenciaInicio"])
+        _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], vigencia_inicio)
+        _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], vigencia_fin)
     _validar_fraccion_grilla(conn, hora_inicio, hora_fin)
     conflictos = verificar_conflictos_regular(
         conn, id_consultorio=reserva["IdConsultorio"], dia_semana=reserva["DiaSemana"],
@@ -447,12 +506,27 @@ def eliminar_reserva_regular(conn: sqlite3.Connection, id_reserva_regular: int) 
     `VigenciaInicio` de la fila (no hay otro punto de referencia real:
     borrar una reserva cuya vigencia ya fue usada por una liquidación
     posterior desalinearía esa liquidación sin dejar ningún rastro al
-    que una futura revisión pudiera recurrir)."""
+    que una futura revisión pudiera recurrir).
+
+    EXCEPCIÓN puntual (pedido explícito de la clienta, aceptando el
+    costo a sabiendas): si la reserva sigue ACTIVA al día de hoy —
+    `VigenciaFin` en blanco o posterior al borde del último período
+    cerrado (`_ultimo_dia_cerrado`), el caso real de "tengo una reserva
+    vieja corriendo y quiero reemplazarla ya por otra distinta" — se
+    permite borrarla igual, aunque eso pierda el rastro de que existió
+    durante el período cerrado. Si ya estaba finalizada ANTES de ese
+    borde (una fila puramente histórica, ya cerrada en el pasado), sigue
+    bloqueado: borrar esa no tiene el mismo motivo de negocio detrás."""
     repo = obtener_repositorio(conn, "ReservaRegular")
     reserva = repo.obtener(id_reserva_regular)
     if reserva is None:
         raise ValueError(f"No existe la reserva regular #{id_reserva_regular}")
-    _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], reserva["VigenciaInicio"])
+    ultimo_cerrado = _ultimo_dia_cerrado(conn, reserva["IdProfesional"])
+    reserva_activa_al_cierre = ultimo_cerrado is None or (
+        reserva["VigenciaFin"] is None or reserva["VigenciaFin"] >= ultimo_cerrado
+    )
+    if not reserva_activa_al_cierre:
+        _validar_vigencia_no_cerrada(conn, reserva["IdProfesional"], reserva["VigenciaInicio"])
     repo.eliminar(id_reserva_regular)
 
 
