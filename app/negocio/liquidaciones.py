@@ -95,6 +95,7 @@ from app.negocio.dias import (
     fecha_a_dia_semana,
     parsear_periodo,
     periodo_anterior as calcular_periodo_anterior,
+    periodo_operativo_actual,
     primer_dia_mes,
     ultimo_dia_mes,
 )
@@ -924,14 +925,28 @@ def emitir_liquidacion(
     "No enviada" (primera vez o todavía pendiente).
 
     No se puede reemitir un período si ya hay liquidaciones de períodos
-    posteriores (DC-08 §6.2: "nunca se puede generar una liquidación de un
-    mes anterior ya cerrado"): reabrirlo pisaría con valores de hoy un
-    período que un mes posterior ya pudo haber usado como base para sus
-    propios "feriados/horas pendientes", duplicando ese descuento."""
+    posteriores YA ALCANZADOS por el período operativo (DC-08 §6.2:
+    "nunca se puede generar una liquidación de un mes anterior ya
+    cerrado"): reabrirlo pisaría con valores de hoy un período que un mes
+    posterior ya pudo haber usado como base para sus propios "feriados/
+    horas pendientes", duplicando ese descuento.
+
+    Bug real reportado por la clienta: cargar/editar una reserva aislada
+    de un mes futuro (ej. diciembre, parado en noviembre) con "Período a
+    imputar" = actual dispara `regenerar_si_corresponde` para ESE mes
+    futuro (`_resolver_periodo_imputar`, `reservas.py`) — crea una
+    `LiquidacionEmitida` de diciembre que es pura previsualización,
+    ningún avance de mes la "cerró" todavía. Esa fila bloqueaba reemitir
+    noviembre (el período EN CURSO) con el mensaje de "ya hay períodos
+    posteriores", pensado para un mes posterior realmente cerrado, no
+    para una preview de un mes que ni siquiera llegó. Se acota la
+    consulta a `Periodo <= periodo_operativo_actual`: solo cuenta un
+    período posterior si el período operativo ya lo alcanzó (ahí sí pudo
+    haber usado el período que se quiere reabrir como base de cálculo)."""
     repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
     if conn.execute(
-        "SELECT 1 FROM LiquidacionEmitida WHERE IdProfesional = ? AND Periodo > ? LIMIT 1",
-        (id_profesional, periodo),
+        "SELECT 1 FROM LiquidacionEmitida WHERE IdProfesional = ? AND Periodo > ? AND Periodo <= ? LIMIT 1",
+        (id_profesional, periodo, periodo_operativo_actual(conn)),
     ).fetchone():
         raise ValueError(
             f"No se puede reemitir la liquidación de {periodo}: ya hay liquidaciones de períodos "

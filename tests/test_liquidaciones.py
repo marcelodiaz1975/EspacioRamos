@@ -511,12 +511,42 @@ def test_descuento_licencias_respeta_tope_de_duracion_maxima_sin_duplicar(conn, 
 
 
 def test_emitir_liquidacion_rechaza_reemitir_periodo_anterior_a_uno_ya_emitido(conn, consultorio):
+    """El período posterior (septiembre) tiene que estar REALMENTE
+    alcanzado por el período operativo para que bloquee — fijado acá
+    explícitamente en vez de depender de la fecha real del sistema al
+    correr el test (ver `test_emitir_liquidacion_no_rechaza_reemitir_si_
+    el_periodo_posterior_es_solo_una_preview_futura`, el caso que este
+    mismo fijo corrigió)."""
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    conn.execute("UPDATE Configuracion SET PeriodoOperativoActual = '2026-09' WHERE IdConfiguracion = 1")
+    conn.commit()
     emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-08", fecha_emision="2026-08-01")
     emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
 
     with pytest.raises(ValueError):
         emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-08", fecha_emision="2026-09-15")
+
+
+def test_emitir_liquidacion_no_rechaza_reemitir_si_el_periodo_posterior_es_solo_una_preview_futura(
+    conn, consultorio,
+):
+    """Bug real reportado por la clienta: parada en agosto (período
+    operativo actual), cargó una reserva aislada de septiembre (mes
+    futuro) con "Período a imputar" = actual — eso dispara
+    `regenerar_si_corresponde` para septiembre (`_resolver_periodo_
+    imputar`, `reservas.py`), que crea una `LiquidacionEmitida` de
+    septiembre puramente de previsualización, sin que ningún avance de
+    mes la haya "cerrado" todavía. Eso bloqueaba reemitir agosto (el
+    período EN CURSO) con el mensaje de "ya hay períodos posteriores" —
+    pensado para un mes posterior realmente cerrado, no para una preview
+    de un mes que ni siquiera llegó."""
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    conn.execute("UPDATE Configuracion SET PeriodoOperativoActual = '2026-08' WHERE IdConfiguracion = 1")
+    conn.commit()
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-08", fecha_emision="2026-08-01")
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")  # preview futura, sin cerrar
+
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-08", fecha_emision="2026-08-20")  # no explota
 
 
 def test_marcar_estado_envio_falla_sin_liquidacion_emitida(conn):
