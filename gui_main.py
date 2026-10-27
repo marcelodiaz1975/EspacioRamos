@@ -3,7 +3,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QLocale, Qt
+from PySide6.QtCore import QLibraryInfo, QLocale, Qt, QTranslator
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -220,6 +220,24 @@ def construir_secciones(usuario: sqlite3.Row | None = None, conn: sqlite3.Connec
     return secciones
 
 
+def instalar_traduccion_es(app: QApplication) -> QTranslator:
+    """Pedido de la clienta: los botones de los cuadros de diálogo del
+    sistema (`QMessageBox.question`, etc.) tienen que decir "Sí"/"No",
+    no "Yes"/"No" como vienen por default. Esos textos no son nuestros
+    — son los botones ESTÁNDAR de Qt (`QMessageBox.StandardButton.Yes`/
+    `.No`, también Aceptar/Cancelar/Guardar en otros diálogos), que Qt
+    muestra en inglés salvo que se cargue su propia traducción oficial
+    al español (`qt_es.qm`, instalada junto con PySide6) — no hace
+    falta tocar ninguno de los `QMessageBox` del sistema uno por uno.
+
+    `traductor` queda con `app` como padre (se destruye con ella) —
+    devolverlo además es solo para poder comprobarlo desde un test."""
+    traductor = QTranslator(app)
+    traductor.load("qt_es", QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath))
+    app.installTranslator(traductor)
+    return traductor
+
+
 def _ofrecer_restaurar_backup(db_path: Path) -> None:
     """Instalación en máquina nueva (sección 2): si no hay base de datos
     todavía, ofrece restaurar el último backup desde una carpeta de
@@ -266,6 +284,7 @@ def main() -> None:
     # para retomar en una ronda aparte, después de pulir la lógica.
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
+    instalar_traduccion_es(app)
     # Ícono del programa (ver app/gui/recursos y app/gui/widgets/pantalla_
     # carga.py) — aplicado a nivel de QApplication para que cualquier
     # ventana/diálogo del sistema (que no pise el suyo propio) lo herede,

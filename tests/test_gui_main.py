@@ -3,7 +3,7 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
-from gui_main import construir_secciones
+from gui_main import construir_secciones, instalar_traduccion_es
 
 
 @pytest.fixture
@@ -99,3 +99,23 @@ def test_locale_espanol_tiene_la_semana_empezando_en_lunes(qtbot):
         assert campo.calendarWidget().firstDayOfWeek() == Qt.DayOfWeek.Monday
     finally:
         QLocale.setDefault(anterior)
+
+
+def test_instalar_traduccion_es_pone_si_no_en_los_botones_de_mensajebox(qtbot):
+    """Mismo criterio que el test de "semana empieza en lunes" más
+    arriba: no es testeable invocando `main()` en sí (abre una base
+    real y un diálogo de login), así que esto confirma la pieza real —
+    los botones ESTÁNDAR de un `QMessageBox` (Sí/No, también Aceptar/
+    Cancelar) quedan en español después de instalar la traducción, en
+    vez de en inglés como viene por default Qt."""
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    app = QApplication.instance()
+    traductor = instalar_traduccion_es(app)
+    try:
+        caja = QMessageBox()
+        caja.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        textos = {boton.text().replace("&", "") for boton in caja.buttons()}
+        assert textos == {"Sí", "No"}
+    finally:
+        app.removeTranslator(traductor)
