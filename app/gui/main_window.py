@@ -219,18 +219,18 @@ class VentanaPrincipal(QMainWindow):
         self._aplicar_colapso(categoria)
 
     def _abrir_calculadora(self) -> None:
-        """F2: una sola instancia por ventana — F2 repetido mientras ya
-        está abierta la vuelve a traer al frente en vez de abrir una
-        segunda, y `_calculadora` queda en `None` otra vez cuando se la
-        cierra con la cruz (señal `destroyed`) para que la próxima F2
-        abra una nueva."""
+        """F2 alterna la calculadora: la pone en pantalla la primera vez,
+        la saca si se vuelve a apretar mientras ya está abierta (pedido
+        de la clienta) — una sola instancia por ventana, y `_calculadora`
+        queda en `None` otra vez al cerrarse (señal `destroyed`, se
+        dispara tanto por este toggle como por la cruz o Escape) para
+        que la próxima F2 abra una nueva."""
         if self._calculadora is None:
             self._calculadora = Calculadora(self)
             self._calculadora.destroyed.connect(self._al_cerrar_calculadora)
             self._calculadora.show()
         else:
-            self._calculadora.raise_()
-            self._calculadora.activateWindow()
+            self._calculadora.close()
 
     def _al_cerrar_calculadora(self) -> None:
         self._calculadora = None

@@ -3640,3 +3640,174 @@ Test nuevo: `tests/test_gui_main.py`
 archivo: no es testeable invocando `main()` en sí (abre una base real
 y un diálogo de login), así que confirma la pieza real armando un
 `QMessageBox` con botones Sí/No después de instalar la traducción.
+
+## Pantalla inicial, menú lateral y calculadora: batch de pedidos + correcciones
+
+Cuatro pedidos de la clienta sobre la pantalla inicial y el menú
+lateral (`app/gui/main_window.py`) y la calculadora flotante
+(`app/gui/widgets/calculadora.py`), seguidos de tres rondas de
+correcciones sobre lo mismo.
+
+### Pantalla inicial: logo centrado hasta el primer click
+
+Reemplaza una regla anterior ya documentada ("al abrir el programa,
+siempre arranca en Panel de control" — por nombre, no por posición).
+Pedido nuevo, confirmado explícitamente antes de tocar código (pisaba
+esa regla anterior): al abrir el sistema no se selecciona ninguna fila
+del menú — ni Panel de control — y se ve el ícono del programa
+centrado (`app/gui/recursos/icono.png`, el mismo monograma "DF" de
+siempre) hasta el primer click en cualquier solapa.
+
+`_pantalla_inicial()` (función de módulo, `main_window.py`) arma ese
+widget y se agrega como página 0 de `self._pila` (`QStackedWidget`),
+antes que ninguna Seccion real — queda mostrada por default porque es
+la primera que se agrega, sin necesidad de un `setCurrentIndex`
+explícito. Se sacó toda la lógica de auto-selección (`primer_item_
+seleccionable`/`fila_panel_control`): `self._navegacion` arranca sin
+ninguna fila seleccionada (`currentRow() == -1`), así que el primer
+click del operador es el que dispara `_cambiar_seccion` por primera
+vez.
+
+Como la pila ya no tiene un índice por Seccion 1 a 1 (la página 0 es la
+pantalla inicial, sin Seccion propia), `ir_a_seccion`/`_mostrar_ayuda`
+(F1) dejaron de poder asumir `self._secciones[indice_pila]` — se
+agregó `self._seccion_por_indice_pila: dict[int, Seccion]`, poblado en
+el mismo loop que arma la pila, y las dos funciones lo usan en vez de
+indexar la lista. `self._secciones` (el atributo en sí, ya sin ningún
+lector) se eliminó.
+
+Tests actualizados en `tests/test_main_window.py` (arranque sin
+selección, click reemplaza la pantalla inicial, ícono presente) y en
+cualquier test de otras pantallas que asumiera que el índice 0 de la
+pila era la primera Seccion real (`test_gui_configuracion.py`,
+`test_gui_lista_espera.py`, `test_gui_panel_control.py` — todos +1 en
+el índice que leían, ya no +0).
+
+**Corrección 1**: "Panel de control" tenía de antes una excepción que
+lo dejaba siempre visible en el menú sin importar el estado
+(colapsado/expandido) de su categoría — venía de la regla vieja que
+esta sección reemplaza (el sistema arrancaba abriéndolo solo, así que
+no tenía sentido que quedara escondido detrás de un clic de
+categoría). Ya no hace falta: se sacó esa excepción
+(`_items_por_categoria` ya no excluye a "Panel de control") y ahora se
+colapsa/expande con el resto de los ítems de su categoría, como
+cualquier otro. Test `test_categorias_arrancan_colapsadas_salvo_panel_
+de_control` renombrado a `test_categorias_arrancan_colapsadas_
+incluyendo_panel_de_control` e invertido para reflejar esto.
+
+### Menú lateral: separadores de categoría sin guiones, en negrita
+
+`_texto_separador` armaba "flecha — CATEGORÍA —" con guiones
+decorativos a los costados — pedido de la clienta: sacarlos, que quede
+"flecha CATEGORÍA". De paso, la negrita que la hoja de estilos le
+quería dar al separador (`QListWidget#navegacion::item:disabled`)
+nunca llegaba a pintarse: el ítem separador solo tiene sacada
+`ItemIsSelectable` (`setFlags(Qt.ItemFlag.ItemIsEnabled)`), sigue
+ENABLED, así que ese selector de QSS nunca matchea — se fija la
+negrita directo sobre el ítem (`QFont` + `setBold(True)`) en vez de
+seguir dependiendo de esa regla muerta.
+
+### Calculadora: manejo completo por teclado
+
+Pedido de la clienta: números y signos matemáticos (+-*/), punto/coma
+decimal, Enter (=), Backspace (borrar último) y Escape/tecla C
+(limpiar) desde el teclado, no solo clickeando los botones.
+`Calculadora.keyPressEvent` intercepta esas teclas y llama a los
+mismos `_al_tocar`/`_borrar_ultimo` de siempre — la coma se trata como
+el punto (algunos teclados numéricos la usan como separador decimal).
+`pantalla` (de solo lectura) pasa a `FocusPolicy.NoFocus` para que
+nunca se quede con el foco por accidente; la ventana entera lo recibe
+en su lugar.
+
+**Corrección 2**: la tecla Suprimir/Delete también borra todo (mismo
+destino que tenía Escape/"C" en ese momento), no solo el último
+carácter — se suma `Qt.Key.Key_Delete` a esa misma rama de
+`keyPressEvent` en vez de a la de Backspace. Test nuevo
+`test_teclado_delete_limpia_la_expresion`.
+
+**Corrección 3**: Escape pasa a CERRAR la ventana de la calculadora
+(mismo destino que la cruz) en vez de limpiar la expresión — mismo
+criterio que cualquier ventana flotante del sistema operativo. "C" y
+Delete siguen limpiando la expresión, sin cambios; Escape sale de esa
+rama y pasa a llamar `self.close()` en una rama propia. Test
+`test_teclado_escape_y_c_limpian_la_expresion` separado en
+`test_teclado_c_limpia_la_expresion` (sin Escape) y
+`test_teclado_escape_cierra_la_calculadora` (nuevo).
+
+**Corrección 4**: F2 pasa a ALTERNAR la calculadora — la pone en
+pantalla la primera vez, la saca si se vuelve a apretar mientras ya
+está abierta, en vez de solo traerla al frente
+(`VentanaPrincipal._abrir_calculadora`, `raise_()`/`activateWindow()`
+reemplazados por `self._calculadora.close()` en la rama "ya está
+abierta"). Sigue siendo una sola instancia por ventana — la próxima F2
+después de cerrarla abre una nueva, vía la misma señal `destroyed` de
+siempre. Test `test_f2_abre_una_sola_calculadora_y_f2_de_nuevo_no_abre_
+otra` renombrado a `test_f2_abre_una_sola_calculadora_y_f2_de_nuevo_la_
+cierra` y extendido para cubrir el ciclo completo (abre → F2 cierra →
+F2 abre una nueva → cruz cierra).
+
+## F3 ("Reiniciar solapa"): auditoría completa y 9 correcciones
+
+Pedido de la clienta: "Chequeá que F3 reinicie cada solapa a como
+estaría cuando se abre el sistema, que deje todos los filtros como
+están en ese momento y el foco puesto en el inicio de cada cadena."
+Auditados los 24 métodos `reiniciar()` existentes en los 17 archivos
+con ese método, comparando cada uno contra el estado real de apertura
+de su propia pantalla. 21 de 24 ya estaban bien. Encontrados y
+corregidos:
+
+- **`_PanelGrillaSemanal`** (`grilla_operativa.py`): `reiniciar()` solo
+  devolvía el foco, nunca tocaba Localidad/Edificio/Unidad/Día/
+  Profesional. `GrillaOperativaWidget.reiniciar_filtros()` (nueva)
+  reusa la cascada que ya arma `_cargar_localidades()` para la carga
+  inicial (todos seleccionados en los tres colapsables) + tilda los
+  siete días + "Sin selección" en Profesional. No toca Período ni
+  Visualización (viven afuera del cuadro "Filtros").
+- **`_PanelMensajesPredefinidos`** (`mensajes_predefinidos.py`):
+  `reiniciar()` reseteaba la tabla (`self.crud.reiniciar()`) pero no el
+  filtro "Categoría" (`combo_filtro`, agregado como `panel_extra_
+  superior_izquierda`) — se le suma `combo_filtro.setCurrentIndex(0)`.
+- **`_PanelReservasAisladas`/`_PanelReservaExtraordinaria`**
+  (`reservas.py`): no tenían `reiniciar()` en absoluto — F3 no hacía
+  nada en esas dos solapas de "Reservas" (solo Regulares respondía).
+  Se les agregó, mismo criterio que Regulares (`_orden.reiniciar()` +
+  `_resetear_formulario()` + `actualizar()` + foco en Profesional) —
+  en estas dos, a diferencia de Regulares, `_resetear_formulario` ya
+  incluye "Profesional" (el punto #9.1.9 que lo excluye es específico
+  de Regulares), así que alcanza con llamarla directo.
+- **`_PanelEmisionArchivos`** (`liquidacion.py`): no tenía
+  `reiniciar()` — se le agregó, resetea Período (al actual),
+  Profesional y Estado de la liquidación a sus valores iniciales.
+- **`_PanelCargosEspeciales`** (`novedades.py`): no tenía
+  `reiniciar()` — se le agregó, mismo criterio que Reservas regulares
+  (acá "Profesional" también filtra la tabla Y es parte del
+  formulario de alta, así que si se resetea): Profesional, Subtipo,
+  Tipo (recalculado), Concepto, Monto y Período imputado vuelven a su
+  valor inicial.
+- **`_PanelEstadoCuentaLiquidaciones`/`_PanelEstadoCuentaCargos`/
+  `_PanelEstadoCuentaPagos`** (`liquidacion.py`/`novedades.py`/
+  `pagos.py`): ninguna de las tres tenía `reiniciar()`. Las tres
+  conservan el profesional elegido a propósito aunque se salga y se
+  vuelva a entrar (`actualizar()` lo busca de nuevo por id después de
+  repoblar el combo, documentado en el propio código) — F3 ahí NO
+  resetea ese filtro (haría lo contrario de lo que la clienta ya pidió
+  para esta pantalla en su momento), solo devuelve el foco.
+
+Regla general que salió de esta auditoría, aplicada en los cinco casos
+que antes no tenían `reiniciar()` en absoluto: **F3 y `showEvent` son
+cosas DISTINTAS, aunque antes en algunas pantallas (Reservas
+regulares, Cargos especiales, Grilla semanal) estuvieran mezclados.**
+Volver a entrar a una solapa (`showEvent`) no tiene por qué perder un
+filtro que el operador ya había elegido (ej. qué profesional estaba
+mirando); F3 sí es un pedido explícito de "empezar de cero". Se
+desacoplaron los casos donde antes `showEvent` llamaba directo a
+`reiniciar()` (Grilla semanal, Reservas aisladas/extraordinaria): el
+`showEvent` de esas pantallas quedó con su comportamiento ORIGINAL
+(sin resetear filtros), y `reiniciar()` pasó a ser un método aparte,
+con el reset completo, que solo F3 dispara.
+
+Tests nuevos: `tests/test_gui_grilla_y_mensajeria.py` (reset de
+filtros de Grilla semanal, reset de Categoría en Mensajes
+predefinidos), `tests/test_gui_reservas.py`, `tests/test_gui_
+liquidacion.py`, `tests/test_gui_novedades.py`, `tests/test_gui_
+pagos.py` (uno por cada método `reiniciar()` nuevo).

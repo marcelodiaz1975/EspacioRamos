@@ -369,7 +369,10 @@ def test_etiqueta_de_funciones_f1_f2_f3(qtbot, conn):
     assert ventana._etiqueta_funciones.text() == "F1 – Ayuda / F2 – Calculadora / F3 – Reiniciar solapa"
 
 
-def test_f2_abre_una_sola_calculadora_y_f2_de_nuevo_no_abre_otra(qtbot, conn):
+def test_f2_abre_una_sola_calculadora_y_f2_de_nuevo_la_cierra(qtbot, conn):
+    """Pedido de la clienta: F2 alterna la calculadora — la pone en
+    pantalla la primera vez, la saca si se vuelve a apretar mientras ya
+    está abierta (no abre una segunda)."""
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
     assert ventana._calculadora is None
@@ -379,10 +382,16 @@ def test_f2_abre_una_sola_calculadora_y_f2_de_nuevo_no_abre_otra(qtbot, conn):
     assert primera is not None
 
     ventana._abrir_calculadora()
-    assert ventana._calculadora is primera  # no abrió una segunda
-
-    primera.close()
     qtbot.wait(50)  # WA_DeleteOnClose agenda un deleteLater, no es sincrónico
+    assert ventana._calculadora is None  # F2 de nuevo la cerró
+
+    ventana._abrir_calculadora()
+    segunda = ventana._calculadora
+    assert segunda is not None
+    assert segunda is not primera  # la próxima F2 abre una nueva
+
+    segunda.close()
+    qtbot.wait(50)
     assert ventana._calculadora is None  # se liberó al cerrarla con la cruz
 
 

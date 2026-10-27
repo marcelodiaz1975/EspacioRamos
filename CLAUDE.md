@@ -320,231 +320,30 @@ de prueba) — queda disponible para sumarlo al resto de los formularios
 del sistema caso por caso, mismo criterio que el resto de los cambios
 de alcance general (no un barrido completo de una sola vez).
 
-## Pantalla inicial, menú lateral, calculadora, F3 y Panel de control — batch de pedidos
+## F3 ("Reiniciar solapa"): reinicia desde cero, distinto de `showEvent`
 
-Siete pedidos de la clienta sobre la pantalla inicial y el menú lateral
-(`app/gui/main_window.py`), la calculadora flotante, el mecanismo F3 y
-tres puntos puntuales de Panel de control.
+Regla general confirmada en una auditoría completa de los ~24 métodos
+`reiniciar()` del sistema (detalle pantalla por pantalla en
+`docs/historial/general.md`): F3 y `showEvent` son disparadores
+DISTINTOS. Volver a entrar a una solapa (`showEvent`) no tiene por qué
+perder un filtro que el operador ya eligió (ej. qué profesional estaba
+mirando); F3 sí es un pedido explícito de "empezar de cero" — todos los
+filtros a su valor inicial y el foco al principio de la cadena. Toda
+pantalla nueva con estado propio (filtros, selección) tiene que
+mantener esta separación al armar su propio `reiniciar()`, no
+mezclarlo con `showEvent`.
 
-### Pantalla inicial: logo centrado hasta el primer click
+## Indicador "Procesando..." para operaciones largas
 
-Reemplaza una regla anterior ya documentada ("al abrir el programa,
-siempre arranca en Panel de control" — por nombre, no por posición).
-Pedido nuevo, confirmado explícitamente antes de tocar código (pisaba
-esa regla anterior): al abrir el sistema no se selecciona ninguna fila
-del menú — ni Panel de control — y se ve el ícono del programa
-centrado (`app/gui/recursos/icono.png`, el mismo monograma "DF" de
-siempre) hasta el primer click en cualquier solapa.
-
-`_pantalla_inicial()` (función de módulo, `main_window.py`) arma ese
-widget y se agrega como página 0 de `self._pila` (`QStackedWidget`),
-antes que ninguna Seccion real — queda mostrada por default porque es
-la primera que se agrega, sin necesidad de un `setCurrentIndex`
-explícito. Se sacó toda la lógica de auto-selección (`primer_item_
-seleccionable`/`fila_panel_control`): `self._navegacion` arranca sin
-ninguna fila seleccionada (`currentRow() == -1`), así que el primer
-click del operador es el que dispara `_cambiar_seccion` por primera
-vez.
-
-Como la pila ya no tiene un índice por Seccion 1 a 1 (la página 0 es la
-pantalla inicial, sin Seccion propia), `ir_a_seccion`/`_mostrar_ayuda`
-(F1) dejaron de poder asumir `self._secciones[indice_pila]` — se
-agregó `self._seccion_por_indice_pila: dict[int, Seccion]`, poblado en
-el mismo loop que arma la pila, y las dos funciones lo usan en vez de
-indexar la lista. `self._secciones` (el atributo en sí, ya sin ningún
-lector) se eliminó.
-
-Tests actualizados en `tests/test_main_window.py` (arranque sin
-selección, click reemplaza la pantalla inicial, ícono presente) y en
-cualquier test de otras pantallas que asumiera que el índice 0 de la
-pila era la primera Seccion real (`test_gui_configuracion.py`,
-`test_gui_lista_espera.py`, `test_gui_panel_control.py` — todos +1 en
-el índice que leían, ya no +0).
-
-Corrección de la clienta tras ver esto andando: "Panel de control"
-tenía de antes una excepción que lo dejaba siempre visible en el menú
-sin importar el estado (colapsado/expandido) de su categoría — venía
-de la regla vieja que esta sección reemplaza (el sistema arrancaba
-abriéndolo solo, así que no tenía sentido que quedara escondido detrás
-de un clic de categoría). Ya no hace falta: se sacó esa excepción
-(`_items_por_categoria` ya no excluye a "Panel de control") y ahora se
-colapsa/expande con el resto de los ítems de su categoría, como
-cualquier otro. Test `test_categorias_arrancan_colapsadas_salvo_panel_
-de_control` renombrado a `test_categorias_arrancan_colapsadas_
-incluyendo_panel_de_control` y invertido para reflejar esto.
-
-### Menú lateral: separadores de categoría sin guiones, en negrita
-
-`_texto_separador` armaba "flecha — CATEGORÍA —" con guiones
-decorativos a los costados — pedido de la clienta: sacarlos, que quede
-"flecha CATEGORÍA". De paso, la negrita que la hoja de estilos le
-quería dar al separador (`QListWidget#navegacion::item:disabled`)
-nunca llegaba a pintarse: el ítem separador solo tiene sacada
-`ItemIsSelectable` (`setFlags(Qt.ItemFlag.ItemIsEnabled)`), sigue
-ENABLED, así que ese selector de QSS nunca matchea — se fija la
-negrita directo sobre el ítem (`QFont` + `setBold(True)`) en vez de
-seguir dependiendo de esa regla muerta.
-
-### Calculadora: manejo completo por teclado
-
-Pedido de la clienta: números y signos matemáticos (+-*/), punto/coma
-decimal, Enter (=), Backspace (borrar último) y Escape/tecla C
-(limpiar) desde el teclado, no solo clickeando los botones.
-`Calculadora.keyPressEvent` (`app/gui/widgets/calculadora.py`)
-intercepta esas teclas y llama a los mismos `_al_tocar`/
-`_borrar_ultimo` de siempre — la coma se trata como el punto (algunos
-teclados numéricos la usan como separador decimal). `pantalla`
-(de solo lectura) pasa a `FocusPolicy.NoFocus` para que nunca se quede
-con el foco por accidente; la ventana entera lo recibe en su lugar.
-
-Corrección de la clienta: la tecla Suprimir/Delete también borra todo
-(mismo destino que Escape/"C"), no solo el último carácter — se suma
-`Qt.Key.Key_Delete` a esa misma rama de `keyPressEvent` en vez de a la
-de Backspace.
-
-### F3 ("Reiniciar solapa"): auditoría completa + 9 correcciones
-
-Pedido de la clienta: "Chequeá que F3 reinicie cada solapa a como
-estaría cuando se abre el sistema, que deje todos los filtros como
-están en ese momento y el foco puesto en el inicio de cada cadena."
-Auditados los 24 métodos `reiniciar()` existentes en los 17 archivos
-con ese método, comparando cada uno contra el estado real de apertura
-de su propia pantalla. 21 de 24 ya estaban bien. Encontrados y
-corregidos:
-
-- **`_PanelGrillaSemanal`** (`grilla_operativa.py`): `reiniciar()` solo
-  devolvía el foco, nunca tocaba Localidad/Edificio/Unidad/Día/
-  Profesional. `GrillaOperativaWidget.reiniciar_filtros()` (nueva)
-  reusa la cascada que ya arma `_cargar_localidades()` para la carga
-  inicial (todos seleccionados en los tres colapsables) + tilda los
-  siete días + "Sin selección" en Profesional. No toca Período ni
-  Visualización (viven afuera del cuadro "Filtros").
-- **`_PanelMensajesPredefinidos`** (`mensajes_predefinidos.py`):
-  `reiniciar()` reseteaba la tabla (`self.crud.reiniciar()`) pero no el
-  filtro "Categoría" (`combo_filtro`, agregado como `panel_extra_
-  superior_izquierda`) — se le suma `combo_filtro.setCurrentIndex(0)`.
-- **`_PanelReservasAisladas`/`_PanelReservaExtraordinaria`**
-  (`reservas.py`): no tenían `reiniciar()` en absoluto — F3 no hacía
-  nada en esas dos solapas de "Reservas" (solo Regulares respondía).
-  Se les agregó, mismo criterio que Regulares (`_orden.reiniciar()` +
-  `_resetear_formulario()` + `actualizar()` + foco en Profesional) —
-  en estas dos, a diferencia de Regulares, `_resetear_formulario` ya
-  incluye "Profesional" (el punto #9.1.9 que lo excluye es específico
-  de Regulares), así que alcanza con llamarla directo.
-- **`_PanelEmisionArchivos`** (`liquidacion.py`): no tenía
-  `reiniciar()` — se le agregó, resetea Período (al actual),
-  Profesional y Estado de la liquidación a sus valores iniciales.
-- **`_PanelCargosEspeciales`** (`novedades.py`): no tenía
-  `reiniciar()` — se le agregó, mismo criterio que Reservas regulares
-  (acá "Profesional" también filtra la tabla Y es parte del
-  formulario de alta, así que si se resetea): Profesional, Subtipo,
-  Tipo (recalculado), Concepto, Monto y Período imputado vuelven a su
-  valor inicial.
-- **`_PanelEstadoCuentaLiquidaciones`/`_PanelEstadoCuentaCargos`/
-  `_PanelEstadoCuentaPagos`** (`liquidacion.py`/`novedades.py`/
-  `pagos.py`): ninguna de las tres tenía `reiniciar()`. Las tres
-  conservan el profesional elegido a propósito aunque se salga y se
-  vuelva a entrar (`actualizar()` lo busca de nuevo por id después de
-  repoblar el combo, documentado en el propio código) — F3 ahí NO
-  resetea ese filtro (haría lo contrario de lo que la clienta ya pidió
-  para esta pantalla en su momento), solo devuelve el foco.
-
-Regla general que salió de esta auditoría, aplicada en los cinco casos
-que antes no tenían `reiniciar()` en absoluto: **F3 y `showEvent` son
-cosas DISTINTAS, aunque antes en algunas pantallas (Reservas
-regulares, Cargos especiales, Grilla semanal) estuvieran mezclados.**
-Volver a entrar a una solapa (`showEvent`) no tiene por qué perder un
-filtro que el operador ya había elegido (ej. qué profesional estaba
-mirando); F3 sí es un pedido explícito de "empezar de cero". Se
-desacoplaron los casos donde antes `showEvent` llamaba directo a
-`reiniciar()` (Grilla semanal, Reservas aisladas/extraordinaria): el
-`showEvent` de esas pantallas quedó con su comportamiento ORIGINAL
-(sin resetear filtros), y `reiniciar()` pasó a ser un método aparte,
-con el reset completo, que solo F3 dispara.
-
-Tests nuevos: `tests/test_gui_grilla_y_mensajeria.py` (reset de
-filtros de Grilla semanal, reset de Categoría en Mensajes
-predefinidos), `tests/test_gui_reservas.py`, `tests/test_gui_
-liquidacion.py`, `tests/test_gui_novedades.py`, `tests/test_gui_
-pagos.py` (uno por cada método `reiniciar()` nuevo).
-
-### Panel de control: Total liquidado/saldo pendiente duplicaban reemisiones de prueba
-
-Bug real reportado por la clienta: "estuve haciendo un par de pruebas
-con las emisiones de liquidaciones y evidentemente va acumulando
-valores". `_total_liquidado_periodo` (`app/negocio/panel_control.py`)
-sumaba `MontoGenerado` de TODAS las filas de `LiquidacionEmitida` del
-período — pero `emitir_liquidacion` crea una fila NUEVA en cada
-reemisión, cada una con el monto TOTAL de esa emisión (no un delta: el
-delta solo se usa para `SaldoCuentaActual`, ver su propio docstring),
-así que sumar todas las filas cuenta de más cada reemisión de prueba
-que haya hecho el operador para el mismo profesional/período.
-Reproducido con un script: 3 emisiones de $100.000 para el mismo
-profesional daban $300.000 en vez de $100.000.
-
-Arreglado sumando solo la ÚLTIMA emisión de cada profesional
-(subconsulta `MAX(IdLiquidacion) ... GROUP BY IdProfesional`). Afecta
-tanto a "Total liquidado" como a "Saldo pendiente de cobro" (que se
-calcula a partir de él). Test nuevo: `tests/test_panel_control.py`
-(`test_estadisticas_principales_total_liquidado_no_duplica_
-reemisiones`).
-
-### Panel de control: Estado del backup "VENCIDO" en rojo, negrita y mayúscula
-
-Pedido de la clienta, cuadrito "Período actual y último backup". Se
-separó la línea "Estado: ..." de `etiqueta_backup` (que sigue
-mostrando solo Último backup/Frecuencia, sin estilo especial) a una
-etiqueta propia, `etiqueta_estado_backup`: si `backup_vencido()` es
-`True`, el texto pasa a "ESTADO: VENCIDO" con `color: {COLOR_ROJO};
-font-weight: bold;`; si está al día, "Estado: al día" sin estilo.
-Tests nuevos en `tests/test_gui_panel_control.py`.
-
-### Panel de control: cuadros de Feriados/Cumpleaños basados en fecha real, no en la del período
-
-Caso real de la clienta: hizo "Avanzar de mes" con todavía unos días
-de octubre por delante (fecha real 27/10, parado virtualmente en
-noviembre) y el cuadrito de cumpleaños dejó de mostrarle uno que caía
-el 29/10. Causa: `fechas_especiales_proximas_dos_meses`/`cumpleanos_y_
-dias_profesion_proximos` usaban `fecha_actual(conn)`, que recorta
-`date.today()` al rango del período operativo — una vez avanzado el
-mes, esa función ya devolvía el 01/11 (el primer día del período
-nuevo), "perdiendo" todo lo que quedaba entre la fecha real y esa.
-
-`fecha_real(conn)` (nueva, `app/negocio/dias.py`): igual que `fecha_
-actual` pero SIN el recorte al período operativo — respeta el modo
-fecha ficticia de QA (es la fecha "real" simulada mientras se prueba),
-pero fuera de ese modo devuelve `date.today()` sin tocar. Los dos
-cuadritos de recordatorios pasan a usarla; el resto de los usos de
-`fecha_actual` en este módulo (ocupación, backup vencido, alertas,
-cálculos atados al período) no se tocó — siguen necesitando el
-recorte real para que el negocio calcule sobre el período correcto.
-Tests nuevos en `tests/test_panel_control.py` reproduciendo el caso
-exacto (fecha real 27/10, período operativo adelantado a noviembre,
-el evento del 29/10 sigue apareciendo).
-
-### Indicador "Procesando..." para operaciones largas (mecanismo nuevo, aplicado en Liquidaciones)
-
-Pedido de la clienta, de paso ("para el comportamiento general del
-sistema"): que un proceso largo (ejemplo que dio: emitir todas las
-liquidaciones) muestre algo chico y centrado — relojito de arena +
-"Procesando..." — para que no parezca que el sistema se colgó.
-
-`Procesando` (`app/gui/widgets/procesando.py`, nuevo): se usa como
-`with Procesando(self, "texto..."):` alrededor del loop largo, y el
-propio loop llama a `procesando.tick()` en cada vuelta — Qt es de un
-solo hilo, así que sin este empujón manual (`QApplication.
-processEvents()` adentro de `tick()`) el cartel ni el resto de la
-ventana se repintarían hasta que el loop termine. Se evaluó mover el
-trabajo a otro hilo y se descartó: la conexión sqlite no está pensada
-para compartirse entre hilos, mucho más riesgo que beneficio para este
-caso (loops de unos pocos segundos, no minutos).
-
-Aplicado en `_PanelEmisionArchivos._emitir` (`liquidacion.py`, el
-`for profesional in seleccionados` que genera un PDF por cada uno) —
-mecanismo compartido disponible para sumar a cualquier otro loop largo
-del sistema caso por caso (ej. avance de mes, importación de Excel),
-no un barrido completo de una sola vez. Tests nuevos en `tests/
-test_gui_widget_procesando.py`.
+Mecanismo compartido (`Procesando`, `app/gui/widgets/procesando.py` —
+origen y caso real en `docs/historial/sistema.md`) para cualquier loop
+sincrónico largo (ej. emitir todas las liquidaciones): `with
+Procesando(self, "texto..."):` alrededor del loop, llamando a
+`procesando.tick()` en cada vuelta — fuerza `QApplication.
+processEvents()`, necesario porque Qt es de un solo hilo y si no el
+cartel ni el resto de la ventana se repintarían hasta que el loop
+termine. Se suma caso por caso a cualquier otro loop largo del sistema
+que lo necesite (no es una instalación global).
 
 ## Metodología de trabajo
 

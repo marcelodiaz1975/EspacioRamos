@@ -1321,3 +1321,87 @@ test_reinicio_prueba.py` (`profesionales_con_saldo` trae R/A/X),
 `tests/test_gui_reinicio_prueba.py` (orden R→A→X, el diálogo selecciona
 el importe al abrir, el buscador filtra y se limpia en `reiniciar()`).
 
+## Panel de control: fix de doble conteo, estado de backup, recordatorios por fecha real e indicador "Procesando..."
+
+Tres pedidos puntuales de la clienta sobre la solapa "Avance de
+período, backup, y vista rápida", más un mecanismo nuevo de alcance
+general que surgió de paso en el mismo hilo.
+
+### Total liquidado/saldo pendiente duplicaban reemisiones de prueba
+
+Bug real reportado por la clienta: "estuve haciendo un par de pruebas
+con las emisiones de liquidaciones y evidentemente va acumulando
+valores". `_total_liquidado_periodo` (`app/negocio/panel_control.py`)
+sumaba `MontoGenerado` de TODAS las filas de `LiquidacionEmitida` del
+período — pero `emitir_liquidacion` crea una fila NUEVA en cada
+reemisión, cada una con el monto TOTAL de esa emisión (no un delta: el
+delta solo se usa para `SaldoCuentaActual`, ver su propio docstring),
+así que sumar todas las filas cuenta de más cada reemisión de prueba
+que haya hecho el operador para el mismo profesional/período.
+Reproducido con un script: 3 emisiones de $100.000 para el mismo
+profesional daban $300.000 en vez de $100.000.
+
+Arreglado sumando solo la ÚLTIMA emisión de cada profesional
+(subconsulta `MAX(IdLiquidacion) ... GROUP BY IdProfesional`). Afecta
+tanto a "Total liquidado" como a "Saldo pendiente de cobro" (que se
+calcula a partir de él). Test nuevo: `tests/test_panel_control.py`
+(`test_estadisticas_principales_total_liquidado_no_duplica_
+reemisiones`).
+
+### Estado del backup "VENCIDO" en rojo, negrita y mayúscula
+
+Pedido de la clienta, cuadrito "Período actual y último backup". Se
+separó la línea "Estado: ..." de `etiqueta_backup` (que sigue
+mostrando solo Último backup/Frecuencia, sin estilo especial) a una
+etiqueta propia, `etiqueta_estado_backup`: si `backup_vencido()` es
+`True`, el texto pasa a "ESTADO: VENCIDO" con `color: {COLOR_ROJO};
+font-weight: bold;`; si está al día, "Estado: al día" sin estilo.
+Tests nuevos en `tests/test_gui_panel_control.py`.
+
+### Cuadros de Feriados/Cumpleaños basados en fecha real, no en la del período
+
+Caso real de la clienta: hizo "Avanzar de mes" con todavía unos días
+de octubre por delante (fecha real 27/10, parado virtualmente en
+noviembre) y el cuadrito de cumpleaños dejó de mostrarle uno que caía
+el 29/10. Causa: `fechas_especiales_proximas_dos_meses`/`cumpleanos_y_
+dias_profesion_proximos` usaban `fecha_actual(conn)`, que recorta
+`date.today()` al rango del período operativo — una vez avanzado el
+mes, esa función ya devolvía el 01/11 (el primer día del período
+nuevo), "perdiendo" todo lo que quedaba entre la fecha real y esa.
+
+`fecha_real(conn)` (nueva, `app/negocio/dias.py`): igual que `fecha_
+actual` pero SIN el recorte al período operativo — respeta el modo
+fecha ficticia de QA (es la fecha "real" simulada mientras se prueba),
+pero fuera de ese modo devuelve `date.today()` sin tocar. Los dos
+cuadritos de recordatorios pasan a usarla; el resto de los usos de
+`fecha_actual` en este módulo (ocupación, backup vencido, alertas,
+cálculos atados al período) no se tocó — siguen necesitando el
+recorte real para que el negocio calcule sobre el período correcto.
+Tests nuevos en `tests/test_panel_control.py` reproduciendo el caso
+exacto (fecha real 27/10, período operativo adelantado a noviembre,
+el evento del 29/10 sigue apareciendo).
+
+### Indicador "Procesando..." para operaciones largas (mecanismo nuevo, aplicado en Liquidaciones)
+
+Pedido de la clienta, de paso ("para el comportamiento general del
+sistema"): que un proceso largo (ejemplo que dio: emitir todas las
+liquidaciones) muestre algo chico y centrado — relojito de arena +
+"Procesando..." — para que no parezca que el sistema se colgó.
+
+`Procesando` (`app/gui/widgets/procesando.py`, nuevo): se usa como
+`with Procesando(self, "texto..."):` alrededor del loop largo, y el
+propio loop llama a `procesando.tick()` en cada vuelta — Qt es de un
+solo hilo, así que sin este empujón manual (`QApplication.
+processEvents()` adentro de `tick()`) el cartel ni el resto de la
+ventana se repintarían hasta que el loop termine. Se evaluó mover el
+trabajo a otro hilo y se descartó: la conexión sqlite no está pensada
+para compartirse entre hilos, mucho más riesgo que beneficio para este
+caso (loops de unos pocos segundos, no minutos).
+
+Aplicado en `_PanelEmisionArchivos._emitir` (`liquidacion.py`, el
+`for profesional in seleccionados` que genera un PDF por cada uno) —
+mecanismo compartido disponible para sumar a cualquier otro loop largo
+del sistema caso por caso (ej. avance de mes, importación de Excel),
+no un barrido completo de una sola vez. Tests nuevos en `tests/
+test_gui_widget_procesando.py`.
+

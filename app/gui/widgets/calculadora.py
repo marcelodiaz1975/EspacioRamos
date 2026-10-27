@@ -72,13 +72,17 @@ class Calculadora(QWidget):
         """Números y signos matemáticos del teclado, no solo del mouse —
         mismos botones de siempre, solo que disparados por tecla en vez
         de click. La coma (teclado numérico en configuraciones que la
-        usan como separador decimal) se trata igual que el punto."""
+        usan como separador decimal) se trata igual que el punto. Escape
+        cierra la ventana (pedido de la clienta) en vez de limpiar la
+        expresión — "C"/Delete siguen limpiando, como siempre."""
         tecla = event.key()
-        if tecla in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Equal):
+        if tecla == Qt.Key.Key_Escape:
+            self.close()
+        elif tecla in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Equal):
             self._al_tocar("=")
         elif tecla == Qt.Key.Key_Backspace:
             self._borrar_ultimo()
-        elif tecla in (Qt.Key.Key_Escape, Qt.Key.Key_C, Qt.Key.Key_Delete):
+        elif tecla in (Qt.Key.Key_C, Qt.Key.Key_Delete):
             self._al_tocar("C")
         elif tecla == Qt.Key.Key_Comma:
             self._al_tocar(".")

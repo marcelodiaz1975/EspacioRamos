@@ -84,18 +84,26 @@ def test_teclado_backspace_borra_el_ultimo_caracter(qtbot):
     assert calc.pantalla.text() == "12"
 
 
-def test_teclado_escape_y_c_limpian_la_expresion(qtbot):
+def test_teclado_c_limpia_la_expresion(qtbot):
     calc = Calculadora()
     qtbot.addWidget(calc)
     calc.show()
     qtbot.waitExposed(calc)
-    QTest.keyClicks(calc, "12")
-    QTest.keyClick(calc, Qt.Key.Key_Escape)
-    assert calc.pantalla.text() == ""
-
     QTest.keyClicks(calc, "34")
     QTest.keyClick(calc, Qt.Key.Key_C)
     assert calc.pantalla.text() == ""
+
+
+def test_teclado_escape_cierra_la_calculadora(qtbot):
+    """Última corrección de la clienta: Escape ya no limpia la
+    expresión — cierra la ventana (igual que la cruz), mismo criterio
+    que cualquier ventana flotante del sistema operativo."""
+    calc = Calculadora()
+    qtbot.addWidget(calc)
+    calc.show()
+    qtbot.waitExposed(calc)
+    with qtbot.waitSignal(calc.destroyed, timeout=1000):
+        QTest.keyClick(calc, Qt.Key.Key_Escape)
 
 
 def test_teclado_delete_limpia_la_expresion(qtbot):
