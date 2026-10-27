@@ -1610,10 +1610,27 @@ class _PanelReservasAisladas(QWidget):
         """Mismo motivo que en Reservas regulares: `setFocus()` durante la
         construcción no alcanza a "pegar" porque el QTabWidget contenedor
         todavía no está mostrado. De paso, vuelve a fijar el alto de
-        `_scroll_superior` (ver esa misma solapa)."""
+        `_scroll_superior` (ver esa misma solapa).
+
+        A diferencia de Reservas regulares, este `showEvent` NO llama a
+        `reiniciar()` — simplemente volver a esta solapa no tiene que
+        perder el filtro de Profesional que el operador ya había
+        elegido (comportamiento de siempre, sin tocar); `reiniciar()`
+        es exclusivamente para F3 ("Reiniciar solapa"), que sí es un
+        pedido explícito de empezar de cero."""
         super().showEvent(event)
         self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
         self._orden.reiniciar()
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
+    def reiniciar(self) -> None:
+        """F3 ("Reiniciar solapa"): mismo criterio que `_PanelReservas
+        Regulares.reiniciar` — a diferencia de esa solapa, acá
+        `_resetear_formulario` ya incluye "Profesional" (punto #9.1.9
+        no aplica acá), así que alcanza con llamarla directo."""
+        self._orden.reiniciar()
+        self._resetear_formulario()
         self.actualizar()
         self.combo_profesional.setFocus()
 
@@ -2471,8 +2488,19 @@ class _PanelReservaExtraordinaria(QWidget):
         self.actualizar()
 
     def showEvent(self, event) -> None:  # noqa: N802
+        """No llama a `reiniciar()` — mismo motivo que en Reservas
+        aisladas: volver a esta solapa no tiene que perder el filtro de
+        Profesional elegido."""
         super().showEvent(event)
         self._orden.reiniciar()
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
+    def reiniciar(self) -> None:
+        """F3 ("Reiniciar solapa"): mismo criterio que las otras dos
+        solapas de Reservas."""
+        self._orden.reiniciar()
+        self._resetear_formulario()
         self.actualizar()
         self.combo_profesional.setFocus()
 

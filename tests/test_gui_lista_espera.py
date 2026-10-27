@@ -511,7 +511,10 @@ def _ventana_con_lista_espera_y_reservas(conn):
         Seccion("Reservas", lambda c: PantallaReservas(c), categoria="Operativa diaria"),
     ]
     ventana = VentanaPrincipal(conn, secciones)
-    return ventana, ventana._pila.widget(0), ventana._pila.widget(1)
+    # Índice 0 de la pila es `_pantalla_inicial` (el ícono centrado que se
+    # ve hasta el primer click en una solapa) — las secciones reales
+    # arrancan en 1.
+    return ventana, ventana._pila.widget(1), ventana._pila.widget(2)
 
 
 def test_boton_confirmar_reserva_deshabilitado_sin_seleccion(qtbot, conn):
@@ -610,6 +613,7 @@ def test_confirmar_reserva_cancelando_el_cartel_no_navega(qtbot, conn, monkeypat
 
     ventana, panel_lista_espera, _pantalla_reservas = _ventana_con_lista_espera_y_reservas(conn)
     qtbot.addWidget(ventana)
+    ventana.ir_a_seccion("Lista de espera")  # nada queda seleccionado al abrir
     panel_lista_espera.tabla.selectRow(0)
     panel_lista_espera._confirmar_reserva()
 

@@ -6,7 +6,8 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.grilla_operativa import _PanelGrillaSemanal
 from app.gui.pantallas.grilla_y_mensajeria import PantallaGrillaYMensajeria
 from app.gui.pantallas.mensajeria import _PanelCentroMensajeria
-from app.gui.pantallas.mensajes_predefinidos import _PanelMensajesPredefinidos
+from app.gui.pantallas.mensajes_predefinidos import _TODAS, _PanelMensajesPredefinidos
+from app.repositorio.registro import obtener_repositorio
 
 
 @pytest.fixture
@@ -86,6 +87,24 @@ def test_grilla_semanal_reiniciar_enfoca_el_primer_filtro(qtbot, conn):
     qtbot.waitUntil(lambda: primer_filtro.hasFocus())
 
 
+def test_grilla_semanal_reiniciar_vuelve_los_filtros_al_estado_inicial(qtbot, conn):
+    """F3 ("Reiniciar solapa"): antes solo devolvía el foco al primer
+    filtro, sin resetear ninguno de los valores elegidos."""
+    pantalla = PantallaGrillaYMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_grilla
+    grilla = panel.grilla
+
+    for check in grilla._checks_dia.values():
+        check.setChecked(False)
+    grilla.campo_profesional.setCurrentIndex(0)  # queda en "Sin selección" de por sí
+
+    panel.reiniciar()
+
+    assert all(check.isChecked() for check in grilla._checks_dia.values())
+    assert grilla.campo_profesional.currentIndex() == 0
+
+
 def test_grilla_semanal_queda_envuelta_en_un_scroll_area(qtbot, conn):
     """Punto 86: si la grilla necesita más alto del que entra en
     pantalla, tiene que poder escrolearse en vertical — toda la solapa
@@ -96,3 +115,23 @@ def test_grilla_semanal_queda_envuelta_en_un_scroll_area(qtbot, conn):
     assert panel.findChild(QScrollArea) is not None
     assert panel.objectName() == "panelSolapa"
     assert len(panel.findChildren(QWidget, "panelSolapa")) == 1  # "contenido", dentro del scroll
+
+
+def test_mensajes_predefinidos_reiniciar_vuelve_el_filtro_de_categoria_a_todas(qtbot, conn):
+    """F3 ("Reiniciar solapa"): antes solo limpiaba Buscar
+    (`self.crud.reiniciar()`), sin tocar el filtro de Categoría."""
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Nombre="Prueba", Mensaje="Texto", Categoria="Recordatorio",
+    )
+    pantalla = PantallaGrillaYMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_mensajes_predefinidos
+
+    indice = panel.combo_filtro.findData("Recordatorio")
+    assert indice >= 0
+    panel.combo_filtro.setCurrentIndex(indice)
+
+    panel.reiniciar()
+
+    assert panel.combo_filtro.currentIndex() == 0
+    assert panel.combo_filtro.currentData() == _TODAS

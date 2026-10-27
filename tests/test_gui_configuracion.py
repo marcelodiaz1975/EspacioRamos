@@ -125,7 +125,7 @@ def test_guardar_modo_oscuro_aplica_el_tema_sin_reiniciar(qtbot, conn):
     qtbot.addWidget(ventana)
     assert ventana.styleSheet() == hoja_estilos(False)
 
-    pantalla = ventana._pila.widget(0)
+    pantalla = ventana._pila.widget(1)  # 0 es `_pantalla_inicial`
     pantalla._entradas["ModoOscuro"].setChecked(True)
     pantalla._guardar()
 

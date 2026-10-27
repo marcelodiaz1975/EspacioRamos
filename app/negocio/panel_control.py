@@ -17,6 +17,7 @@ from app.negocio.backup import backup_vencido as _backup_vencido
 from app.negocio.balance import resultado_periodo
 from app.negocio.dias import (
     fecha_actual,
+    fecha_real,
     parsear_periodo,
     periodo_actual,
     primer_dia_mes,
@@ -251,8 +252,23 @@ def _horas_aisladas_periodo(
 
 
 def _total_liquidado_periodo(conn: sqlite3.Connection, periodo: str) -> float:
+    """Suma `MontoGenerado` de la ÚLTIMA emisión de cada profesional para
+    este período, nunca de todas sus filas — `emitir_liquidacion` crea
+    una fila NUEVA en cada reemisión (cada una con el monto TOTAL de esa
+    emisión, no un delta: el delta solo se usa para `SaldoCuentaActual`,
+    ver su docstring), así que sumar todas las filas cuenta de más cada
+    reemisión de prueba que haya hecho el operador para el mismo
+    profesional/período — reproducido con un script: 3 emisiones de
+    $100.000 para el mismo profesional daban $300.000 en vez de
+    $100.000."""
     return conn.execute(
-        "SELECT COALESCE(SUM(MontoGenerado), 0) AS total FROM LiquidacionEmitida WHERE Periodo = ?", (periodo,),
+        """
+        SELECT COALESCE(SUM(MontoGenerado), 0) AS total FROM LiquidacionEmitida
+        WHERE Periodo = ? AND IdLiquidacion IN (
+            SELECT MAX(IdLiquidacion) FROM LiquidacionEmitida WHERE Periodo = ? GROUP BY IdProfesional
+        )
+        """,
+        (periodo, periodo),
     ).fetchone()["total"]
 
 
@@ -356,8 +372,14 @@ def fechas_especiales_proximas_dos_meses(conn: sqlite3.Connection) -> list[sqlit
     mes en curso no se muestra) hasta el último día del segundo mes
     siguiente — "lo que queda de este mes más los dos próximos meses",
     pedido explícito de la clienta. Ventana calendario, distinta de
-    `_fechas_especiales_proximas` (15 días corridos, para la alerta)."""
-    hoy = fecha_actual(conn)
+    `_fechas_especiales_proximas` (15 días corridos, para la alerta).
+
+    `fecha_real`, no `fecha_actual`: caso real de la clienta, un
+    "Avanzar de mes" hecho unos días antes de fin de mes recortaba
+    `fecha_actual` al primer día del período nuevo y "perdía" fechas
+    entre la fecha real de hoy y esa — un recordatorio tiene que mirar
+    el calendario real, no en qué período quedó posicionado el sistema."""
+    hoy = fecha_real(conn)
     desde = hoy.isoformat()
     anio_limite, mes_limite = parsear_periodo(sumar_meses(f"{hoy.year:04d}-{hoy.month:02d}", 2))
     hasta = ultimo_dia_mes(anio_limite, mes_limite).isoformat()
@@ -409,8 +431,9 @@ def cumpleanos_y_dias_profesion_proximos(conn: sqlite3.Connection, meses_ventana
     Mismo criterio de ventana que `fechas_especiales_proximas_dos_meses`
     (lo que queda del mes en curso más los próximos `meses_ventana`
     meses) — ambos tipos de evento se mezclan en una sola lista, ordenada
-    por cercanía (más próximo primero)."""
-    hoy = fecha_actual(conn)
+    por cercanía (más próximo primero). Mismo motivo que ahí para usar
+    `fecha_real` en vez de `fecha_actual`."""
+    hoy = fecha_real(conn)
     anio_limite, mes_limite = parsear_periodo(sumar_meses(f"{hoy.year:04d}-{hoy.month:02d}", meses_ventana))
     limite = ultimo_dia_mes(anio_limite, mes_limite)
 

@@ -60,6 +60,29 @@ def periodo_actual(conn: sqlite3.Connection) -> str:
     return f"{fecha.year:04d}-{fecha.month:02d}"
 
 
+def fecha_real(conn: sqlite3.Connection) -> date:
+    """Hoy de VERDAD, sin el recorte al período operativo que hace
+    `fecha_actual` (sigue respetando el modo fecha ficticia de QA, que
+    es la fecha "real" simulada mientras se prueba el sistema).
+
+    Caso real de la clienta: hizo "Avanzar de mes" con todavía unos días
+    de octubre por delante (parado virtualmente en noviembre), y el
+    cuadrito de cumpleaños dejó de mostrarle uno que caía el 29/10 (hoy
+    real) porque `fecha_actual` ya devolvía el 01/11 (recortada al
+    período operativo nuevo) — para un recordatorio ("desde el día en
+    curso en adelante") lo que importa es la fecha real del calendario,
+    no en qué período quedó posicionado el sistema para la liquidación.
+    `periodo_operativo_actual`/`fecha_actual` siguen siendo lo correcto
+    para cualquier cálculo de NEGOCIO atado al período (liquidaciones,
+    ocupación, etc.) — esta función es solo para esos recordatorios."""
+    cfg = conn.execute(
+        "SELECT ModoFechaFicticia, FechaFicticia FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    if cfg and cfg["ModoFechaFicticia"] and cfg["FechaFicticia"]:
+        return date.fromisoformat(cfg["FechaFicticia"])
+    return date.today()
+
+
 def primer_dia_mes(anio: int, mes: int) -> date:
     return date(anio, mes, 1)
 

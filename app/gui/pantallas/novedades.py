@@ -1344,6 +1344,24 @@ class _PanelCargosEspeciales(QWidget):
         self.actualizar()
         self.combo_profesional.setFocus()
 
+    def reiniciar(self) -> None:
+        """F3 ("Reiniciar solapa"): a diferencia de `showEvent` (que no
+        toca el formulario — simplemente volver a esta solapa no tiene
+        que perder lo que el operador ya había tipeado), F3 es un
+        pedido explícito de empezar de cero: vuelve el formulario
+        completo (incluido "Profesional", que acá además filtra la
+        tabla) al estado inicial, mismo criterio que Reservas
+        regulares."""
+        self._orden.reiniciar()
+        self.combo_profesional.setCurrentIndex(0)
+        self.combo_subtipo.setCurrentIndex(0)
+        self._actualizar_tipo_segun_subtipo()
+        self.campo_concepto.clear()
+        self.spin_monto.setValue(0)
+        self.campo_periodo.setText(periodo_actual(self.conn))
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
     def _armar_ui(self) -> None:
         layout = QHBoxLayout(self)
         splitter = QSplitter()
@@ -1620,6 +1638,13 @@ class _PanelEstadoCuentaCargos(QWidget):
         self.conn = conn
         self._armar_ui()
         self.actualizar()
+
+    def reiniciar(self) -> None:
+        """F3 ("Reiniciar solapa"): no hay ningún filtro que resetear
+        acá — "Profesional" se conserva a propósito al refrescar (ver
+        `actualizar()`, mismo criterio que el Estado de cuenta de
+        Liquidaciones/Pagos) — alcanza con devolver el foco."""
+        self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
         layout = QHBoxLayout(self)

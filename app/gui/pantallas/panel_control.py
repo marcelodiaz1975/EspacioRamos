@@ -543,6 +543,14 @@ class _PanelAvancePeriodo(QWidget):
         self.etiqueta_backup = QLabel()
         self.etiqueta_backup.setWordWrap(True)
         layout_contenido.addWidget(self.etiqueta_backup)
+        # Separada de `etiqueta_backup` (pedido explícito de la clienta):
+        # cuando el backup está vencido, SOLO esta línea pasa a mayúscula/
+        # roja/negrita — las otras dos (Último backup/Frecuencia) siguen
+        # con el estilo normal, así que no puede ser parte del mismo texto
+        # plano de `etiqueta_backup`.
+        self.etiqueta_estado_backup = QLabel()
+        self.etiqueta_estado_backup.setWordWrap(True)
+        layout_contenido.addWidget(self.etiqueta_estado_backup)
         layout_contenido.addStretch()
         _agregar_contenido_escrolable(layout, contenido)
         return tarjeta
@@ -645,9 +653,17 @@ class _PanelAvancePeriodo(QWidget):
             else "Todavía no se generó ningún backup.",
             f"Frecuencia configurada: {frecuencia}" if frecuencia else "Frecuencia configurada: sin definir",
         ]
-        if carpeta_backup(self.conn) is not None:
-            lineas_backup.append("Estado: vencido" if backup_vencido(self.conn, fecha_actual(self.conn)) else "Estado: al día")
         self.etiqueta_backup.setText("\n".join(lineas_backup))
+
+        if carpeta_backup(self.conn) is None:
+            self.etiqueta_estado_backup.setText("")
+            self.etiqueta_estado_backup.setStyleSheet("")
+        elif backup_vencido(self.conn, fecha_actual(self.conn)):
+            self.etiqueta_estado_backup.setText("ESTADO: VENCIDO")
+            self.etiqueta_estado_backup.setStyleSheet(f"color: {COLOR_ROJO}; font-weight: bold;")
+        else:
+            self.etiqueta_estado_backup.setText("Estado: al día")
+            self.etiqueta_estado_backup.setStyleSheet("")
 
         fechas = fechas_especiales_proximas_dos_meses(self.conn)
         if fechas:

@@ -8,7 +8,10 @@ suelta, igual que la calculadora de cualquier sistema operativo."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QGridLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
+
+_TECLAS_VALIDAS = set("0123456789.+-*/")
 
 _BOTONES = [
     ["7", "8", "9", "/"],
@@ -32,9 +35,16 @@ class Calculadora(QWidget):
 
         self._expresion = ""
 
+        # Pedido de la clienta: números y signos matemáticos del teclado,
+        # no solo del mouse — la ventana entera (no "pantalla", de solo
+        # lectura y sin motivo para quedarse con el foco) es la que recibe
+        # las teclas, ver `keyPressEvent`.
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
         layout = QVBoxLayout(self)
         self.pantalla = QLineEdit()
         self.pantalla.setReadOnly(True)
+        self.pantalla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.pantalla.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.pantalla.setFixedHeight(40)
         layout.addWidget(self.pantalla)
@@ -58,6 +68,25 @@ class Calculadora(QWidget):
         boton_borrar.clicked.connect(self._borrar_ultimo)
         grilla.addWidget(boton_borrar, len(_BOTONES), 1)
 
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (override de Qt)
+        """Números y signos matemáticos del teclado, no solo del mouse —
+        mismos botones de siempre, solo que disparados por tecla en vez
+        de click. La coma (teclado numérico en configuraciones que la
+        usan como separador decimal) se trata igual que el punto."""
+        tecla = event.key()
+        if tecla in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Equal):
+            self._al_tocar("=")
+        elif tecla == Qt.Key.Key_Backspace:
+            self._borrar_ultimo()
+        elif tecla in (Qt.Key.Key_Escape, Qt.Key.Key_C):
+            self._al_tocar("C")
+        elif tecla == Qt.Key.Key_Comma:
+            self._al_tocar(".")
+        elif event.text() in _TECLAS_VALIDAS:
+            self._al_tocar(event.text())
+        else:
+            super().keyPressEvent(event)
+
     def _al_tocar(self, tecla: str) -> None:
         if tecla == "C":
             self._expresion = ""
@@ -75,8 +104,8 @@ class Calculadora(QWidget):
     def _calcular(self) -> None:
         # Solo dígitos/./+-*/ y paréntesis — nunca texto arbitrario, así
         # `eval` acá no abre ninguna puerta a código ejecutable externo
-        # (no hay forma de que el usuario tipee algo que no sea uno de
-        # estos caracteres, los únicos botones que existen).
+        # (los botones solo agregan uno de estos caracteres, y
+        # `keyPressEvent` filtra el teclado contra el mismo conjunto).
         if not self._expresion or any(c not in "0123456789.+-*/() " for c in self._expresion):
             self.pantalla.setText("Error")
             self._expresion = ""

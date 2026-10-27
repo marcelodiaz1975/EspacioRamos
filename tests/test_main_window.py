@@ -107,6 +107,7 @@ def test_f1_muestra_ayuda_de_la_seccion_actual(qtbot, conn, monkeypatch):
     )
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
+    ventana._navegacion.setCurrentRow(1)  # "Uno" — nada queda seleccionado al abrir
 
     ventana._mostrar_ayuda()
 
@@ -252,11 +253,11 @@ def test_ir_a_seccion_inexistente_devuelve_none_sin_romper(qtbot, conn):
     assert ventana._navegacion.currentItem().text() == "Uno"  # no se movió
 
 
-def test_al_abrir_arranca_en_panel_de_control_por_nombre_no_por_posicion(qtbot, conn):
-    """#1.1 (GENERAL, "Correcciones para próxima versión"): tiene que
-    arrancar en "Panel de control" aunque esa Seccion NO sea la primera
-    de la lista (lo que pasaría, por ejemplo, tras el reordenamiento de
-    menú que pide mover Panel de control de categoría)."""
+def test_al_abrir_no_hay_ninguna_fila_seleccionada_ni_panel_de_control(qtbot, conn):
+    """Pedido de la clienta (reemplaza la regla anterior, "siempre arranca
+    en Panel de control"): al abrir, ninguna fila del menú queda
+    seleccionada todavía — ni "Panel de control" — y se ve la pantalla
+    inicial (ícono centrado) hasta el primer click."""
     secciones = [
         Seccion("Otra pantalla", lambda c: QWidget(), categoria="X"),
         Seccion("Panel de control", lambda c: QWidget(), categoria="Y"),
@@ -264,6 +265,28 @@ def test_al_abrir_arranca_en_panel_de_control_por_nombre_no_por_posicion(qtbot, 
     ]
     ventana = VentanaPrincipal(conn, secciones)
     qtbot.addWidget(ventana)
+    assert ventana._navegacion.currentRow() == -1
+    assert ventana._navegacion.currentItem() is None
+    assert ventana._pila.currentWidget() is ventana._pantalla_inicial
+
+
+def test_pantalla_inicial_muestra_el_icono_del_programa(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    etiquetas = ventana._pantalla_inicial.findChildren(QLabel)
+    assert len(etiquetas) == 1
+    assert not etiquetas[0].pixmap().isNull()
+
+
+def test_al_hacer_click_en_una_solapa_reemplaza_la_pantalla_inicial(qtbot, conn):
+    secciones = [Seccion("Panel de control", lambda c: QWidget(), categoria="Y")]
+    ventana = VentanaPrincipal(conn, secciones)
+    qtbot.addWidget(ventana)
+    assert ventana._pila.currentWidget() is ventana._pantalla_inicial
+
+    ventana._navegacion.setCurrentRow(1)  # 0 es el separador de categoría
+
+    assert ventana._pila.currentWidget() is not ventana._pantalla_inicial
     assert ventana._navegacion.currentItem().text() == "Panel de control"
 
 
@@ -285,6 +308,16 @@ def test_categorias_arrancan_colapsadas_salvo_panel_de_control(qtbot, conn):
     )
     assert item_panel.isHidden() is False
     assert item_otra.isHidden() is True
+
+
+def test_separador_de_categoria_sin_guiones_y_en_negrita(qtbot, conn):
+    """Pedido de la clienta: sin los guiones decorativos alrededor del
+    nombre de categoría, y la fuente en negrita."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    separador = ventana._navegacion.item(0)
+    assert separador.text() == "▸ PRINCIPAL"
+    assert separador.font().bold() is True
 
 
 def test_click_en_separador_despliega_y_vuelve_a_colapsar(qtbot, conn):
@@ -363,6 +396,7 @@ def test_panel_mas_interno_baja_por_tabwidgets_anidados(qtbot, conn):
     secciones = [Seccion("Compuesta", lambda c: tab_externo, categoria="X")]
     ventana = VentanaPrincipal(conn, secciones)
     qtbot.addWidget(ventana)
+    ventana._navegacion.setCurrentRow(1)  # "Compuesta" — nada queda seleccionado al abrir
 
     assert ventana._panel_mas_interno() is hoja_interna
 
@@ -378,6 +412,7 @@ def test_f3_llama_reiniciar_del_panel_activo_si_lo_tiene(qtbot, conn):
     secciones = [Seccion("Con reset", lambda c: panel, categoria="X")]
     ventana = VentanaPrincipal(conn, secciones)
     qtbot.addWidget(ventana)
+    ventana._navegacion.setCurrentRow(1)  # "Con reset" — nada queda seleccionado al abrir
 
     ventana._reiniciar_solapa_activa()
 

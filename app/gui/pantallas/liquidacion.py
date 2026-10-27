@@ -63,6 +63,7 @@ from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import clave_orden_codigo
+from app.gui.widgets.procesando import Procesando
 from app.gui.widgets.resumen_saldo import item_monto
 from app.gui.widgets.selector_periodo import SelectorPeriodo
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
@@ -169,6 +170,18 @@ class _PanelEmisionArchivos(QWidget):
         sí arranca con una consulta nueva), nunca al volver a entrar a
         esta solapa en caliente."""
         super().showEvent(event)
+        self.actualizar()
+        self.campo_periodo.setFocus()
+
+    def reiniciar(self) -> None:
+        """F3 ("Reiniciar solapa"): a diferencia de `showEvent` (que solo
+        refresca y enfoca, sin tocar los filtros — simplemente volver a
+        esta solapa no tiene que perder lo que el operador ya había
+        elegido), F3 es un pedido explícito de empezar de cero: Período/
+        Profesional/Estado vuelven a su valor inicial."""
+        self.campo_periodo.set_periodo(periodo_actual(self.conn))
+        self.combo_profesional_filtro.setCurrentIndex(0)
+        self.combo_estado_filtro.setCurrentIndex(0)
         self.actualizar()
         self.campo_periodo.setFocus()
 
@@ -368,21 +381,26 @@ class _PanelEmisionArchivos(QWidget):
 
         errores = []
         emitidas = 0
-        for profesional in seleccionados:
-            try:
-                id_liquidacion, liquidacion = emitir_liquidacion(
-                    self.conn, id_profesional=profesional["IdProfesional"], periodo=periodo,
-                    fecha_emision=fecha_actual(self.conn).isoformat(),
-                )
-                directorio = str(carpeta_profesional(self.conn, profesional["IdCodigo"]))
-                ruta = generar_pdf_liquidacion(self.conn, liquidacion, directorio)
-                obtener_repositorio(self.conn, "LiquidacionEmitida").actualizar(
-                    id_liquidacion, NombreArchivo=os.path.basename(ruta),
-                    FechaHoraGeneracion=datetime.now().isoformat(timespec="seconds"),
-                )
-                emitidas += 1
-            except ValueError as error:
-                errores.append(f"{profesional['Apellido']}: {error}")
+        # Pedido de la clienta: un cartel "Procesando..." mientras dura
+        # este loop (puede ser varios profesionales, cada uno generando
+        # su propio PDF) para que no parezca que el sistema se colgó.
+        with Procesando(self, "Procesando liquidaciones...") as procesando:
+            for profesional in seleccionados:
+                try:
+                    id_liquidacion, liquidacion = emitir_liquidacion(
+                        self.conn, id_profesional=profesional["IdProfesional"], periodo=periodo,
+                        fecha_emision=fecha_actual(self.conn).isoformat(),
+                    )
+                    directorio = str(carpeta_profesional(self.conn, profesional["IdCodigo"]))
+                    ruta = generar_pdf_liquidacion(self.conn, liquidacion, directorio)
+                    obtener_repositorio(self.conn, "LiquidacionEmitida").actualizar(
+                        id_liquidacion, NombreArchivo=os.path.basename(ruta),
+                        FechaHoraGeneracion=datetime.now().isoformat(timespec="seconds"),
+                    )
+                    emitidas += 1
+                except ValueError as error:
+                    errores.append(f"{profesional['Apellido']}: {error}")
+                procesando.tick()
         self.conn.commit()
 
         mensaje = f"Se emitieron {emitidas} liquidación(es)."
@@ -446,6 +464,13 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         solapa (recién ahí "pega" el foco) lo manda a Profesional, el
         único control con el que se interactúa en este panel."""
         super().showEvent(event)
+        self.combo_profesional.setFocus()
+
+    def reiniciar(self) -> None:
+        """F3 ("Reiniciar solapa"): no hay ningún filtro que resetear
+        acá — "Profesional" se conserva a propósito incluso al volver a
+        entrar (ver el comentario de `actualizar()`) — alcanza con
+        devolver el foco, igual que `showEvent`."""
         self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:

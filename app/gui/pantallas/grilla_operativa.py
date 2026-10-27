@@ -577,12 +577,24 @@ class _PanelGrillaSemanal(QWidget):
         self._foco = instalar_enter_avanza_foco(self.grilla.widgets_filtro_para_foco(), parent=self)
 
     def showEvent(self, event) -> None:  # noqa: N802
+        """Punto 1.4: al volver a entrar, el foco vuelve al primer
+        filtro de la cadena ("Localidad") — sin tocar los filtros en sí
+        (simplemente volver a esta solapa no tiene por qué perder lo
+        que el operador ya había elegido). El reset completo de
+        filtros queda reservado a `reiniciar()`, que es lo que F3
+        dispara — un pedido explícito de empezar de cero, distinto de
+        solo volver a mirar la pantalla."""
         super().showEvent(event)
-        self.reiniciar()
+        widgets = self.grilla.widgets_filtro_para_foco()
+        if widgets:
+            widgets[0].setFocus()
 
     def reiniciar(self) -> None:
-        """Punto 1.4: al volver a entrar (o F3), el foco vuelve al
-        primer filtro de la cadena ("Localidad")."""
+        """F3 ("Reiniciar solapa"): los filtros vuelven al estado
+        inicial (`GrillaOperativaWidget.reiniciar_filtros`) y el foco
+        al primero de la cadena — antes este método solo devolvía el
+        foco, sin tocar los filtros."""
+        self.grilla.reiniciar_filtros()
         widgets = self.grilla.widgets_filtro_para_foco()
         if widgets:
             widgets[0].setFocus()

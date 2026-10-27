@@ -889,6 +889,19 @@ class GrillaOperativaWidget(QWidget):
     def _dias_seleccionados(self) -> list[str]:
         return [dia for dia, check in self._checks_dia.items() if check.isChecked()]
 
+    def reiniciar_filtros(self) -> None:
+        """Vuelve Localidad/Edificio/Unidad/Día/Profesional al estado
+        "recién abierta la pantalla" — todos seleccionados en cascada
+        (`_cargar_localidades` ya arma esa cascada completa para la
+        carga inicial, así que alcanza con reusarla), los días todos
+        tildados, "Sin selección" en Profesional. No toca Período ni
+        Visualización (viven afuera del cuadro "Filtros", no son parte
+        de este reset)."""
+        self._cargar_localidades()
+        for check in self._checks_dia.values():
+            check.setChecked(True)
+        self.campo_profesional.setCurrentIndex(0)
+
     def _id_profesional_filtro(self) -> int | None:
         return self.campo_profesional.currentData()
 

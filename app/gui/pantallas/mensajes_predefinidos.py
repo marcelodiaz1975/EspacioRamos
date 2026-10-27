@@ -290,9 +290,11 @@ class _PanelMensajesPredefinidos(QWidget):
         self.reiniciar()
 
     def reiniciar(self) -> None:
-        """Punto 1.4: al volver a entrar (o F3), se resetea la tabla
-        (`self.crud.reiniciar()`, limpia Buscar) y el foco vuelve al
+        """Punto 1.4: al volver a entrar (o F3), se resetea el filtro de
+        Categoría (`combo_filtro`, antes no se tocaba) y la tabla
+        (`self.crud.reiniciar()`, limpia Buscar), y el foco vuelve al
         primero de la cadena completa de esta pantalla."""
+        self.combo_filtro.setCurrentIndex(0)
         self.crud.reiniciar()
         self.crud.campo_buscar.setFocus()
 

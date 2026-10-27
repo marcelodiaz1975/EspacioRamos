@@ -1903,3 +1903,34 @@ def test_licencias_hasta_calendario_arranca_hoy_mientras_este_en_sin_fecha(qtbot
     hoy = fecha_actual(conn)
     assert calendario.yearShown() == hoy.year
     assert calendario.monthShown() == hoy.month
+
+
+def test_cargos_especiales_reiniciar_vuelve_el_formulario_al_estado_inicial(qtbot, conn):
+    """F3 ("Reiniciar solapa"): antes esta pestaña no tenía reiniciar()."""
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+
+    if panel.combo_profesional.count() > 1:
+        panel.combo_profesional.setCurrentIndex(1)
+    if panel.combo_subtipo.count() > 1:
+        panel.combo_subtipo.setCurrentIndex(1)
+    panel.campo_concepto.setText("Algo tipeado")
+    panel.spin_monto.setValue(1234)
+    panel.campo_periodo.setText("2020-01")
+
+    panel.reiniciar()
+
+    assert panel.combo_profesional.currentIndex() == 0
+    assert panel.combo_subtipo.currentIndex() == 0
+    assert panel.campo_concepto.text() == ""
+    assert panel.spin_monto.value() == 0
+    assert panel.campo_periodo.text() == periodo_actual(conn)
+
+
+def test_estado_cuenta_cargos_reiniciar_no_rompe(qtbot, conn):
+    """F3 acá no tiene ningún filtro que resetear (Profesional se
+    conserva a propósito) — solo confirma que el método existe y no
+    rompe."""
+    panel = _PanelEstadoCuentaCargos(conn)
+    qtbot.addWidget(panel)
+    panel.reiniciar()

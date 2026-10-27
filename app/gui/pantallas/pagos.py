@@ -1135,6 +1135,14 @@ class _PanelEstadoCuentaPagos(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def reiniciar(self) -> None:
+        """F3 ("Reiniciar solapa"): no hay ningún filtro que resetear
+        acá — "Profesional" se conserva a propósito al refrescar (ver
+        `actualizar()`, mismo criterio que el Estado de cuenta de
+        Liquidaciones/Cargos especiales) — alcanza con devolver el
+        foco."""
+        self.combo_profesional.setFocus()
+
     def _armar_ui(self) -> None:
         layout = QHBoxLayout(self)
         splitter = QSplitter()

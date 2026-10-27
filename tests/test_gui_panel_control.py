@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.estilos import COLOR_ROJO
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.panel_control import PanelControl
 from app.negocio.backup import activar_modo_sin_sincronizar, generar_backup
@@ -317,9 +318,9 @@ def test_ventana_principal_navega_entre_secciones(qtbot, conn):
     ]
     ventana = VentanaPrincipal(conn, secciones)
     qtbot.addWidget(ventana)
-    assert ventana._pila.count() == 2
+    assert ventana._pila.count() == 3  # pantalla inicial + las dos secciones
     ventana._navegacion.setCurrentRow(2)  # fila 0 = separador, 1 = primera, 2 = segunda
-    assert ventana._pila.currentIndex() == 1
+    assert ventana._pila.currentIndex() == 2
 
 
 # --------------------------------------------------------- formato solapa
@@ -414,7 +415,38 @@ def test_tarjeta_backup_con_uno_ya_generado(qtbot, conn, tmp_path):
     texto = pantalla.panel_avance.etiqueta_backup.text()
     assert "Último backup: mar 25-08-2026 14:45hs" in texto
     assert "Frecuencia configurada: Semanal" in texto
-    assert "Estado:" in texto
+    assert "estado" in pantalla.panel_avance.etiqueta_estado_backup.text().lower()
+
+
+def test_tarjeta_backup_vencido_queda_en_mayuscula_rojo_y_negrita(qtbot, conn, tmp_path):
+    """Pedido explícito de la clienta: cuando el backup está vencido, la
+    línea entera pasa a "ESTADO: VENCIDO", en rojo y negrita — separada
+    de `etiqueta_backup` (que sigue mostrando Último backup/Frecuencia
+    sin ningún estilo especial)."""
+    obtener_repositorio(conn, "Configuracion").actualizar(
+        1, CarpetaBackup=str(tmp_path / "backups"), FrecuenciaBackupDrive="Diario",
+        ModoFechaFicticia=1, FechaFicticia="2026-08-30",
+    )
+    generar_backup(conn, momento=datetime(2026, 8, 25, 14, 45))
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    etiqueta = pantalla.panel_avance.etiqueta_estado_backup
+    assert etiqueta.text() == "ESTADO: VENCIDO"
+    assert COLOR_ROJO in etiqueta.styleSheet()
+    assert "bold" in etiqueta.styleSheet()
+    assert "Estado" not in pantalla.panel_avance.etiqueta_backup.text()
+
+
+def test_tarjeta_backup_al_dia_sin_estilo_especial(qtbot, conn, tmp_path):
+    obtener_repositorio(conn, "Configuracion").actualizar(
+        1, CarpetaBackup=str(tmp_path / "backups"), FrecuenciaBackupDrive="Mensual",
+    )
+    generar_backup(conn, momento=datetime.now())
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    etiqueta = pantalla.panel_avance.etiqueta_estado_backup
+    assert etiqueta.text() == "Estado: al día"
+    assert etiqueta.styleSheet() == ""
 
 
 def test_generar_backup_actualiza_la_tarjeta(qtbot, conn, tmp_path):

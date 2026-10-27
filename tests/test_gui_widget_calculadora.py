@@ -1,3 +1,6 @@
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+
 from app.gui.widgets.calculadora import Calculadora
 
 
@@ -47,6 +50,52 @@ def test_igual_sin_expresion_cargada_no_rompe(qtbot):
     qtbot.addWidget(calc)
     calc._al_tocar("=")
     assert calc.pantalla.text() == "Error"
+
+
+def test_teclado_suma_basica(qtbot):
+    """Pedido de la clienta: números y signos matemáticos del teclado, no
+    solo del mouse."""
+    calc = Calculadora()
+    qtbot.addWidget(calc)
+    calc.show()
+    qtbot.waitExposed(calc)
+    QTest.keyClicks(calc, "2+3")
+    QTest.keyClick(calc, Qt.Key.Key_Return)
+    assert calc.pantalla.text() == "5"
+
+
+def test_teclado_coma_se_trata_como_punto_decimal(qtbot):
+    calc = Calculadora()
+    qtbot.addWidget(calc)
+    calc.show()
+    qtbot.waitExposed(calc)
+    QTest.keyClicks(calc, "1,5+0,5")
+    QTest.keyClick(calc, Qt.Key.Key_Equal)
+    assert calc.pantalla.text() == "2.0"
+
+
+def test_teclado_backspace_borra_el_ultimo_caracter(qtbot):
+    calc = Calculadora()
+    qtbot.addWidget(calc)
+    calc.show()
+    qtbot.waitExposed(calc)
+    QTest.keyClicks(calc, "123")
+    QTest.keyClick(calc, Qt.Key.Key_Backspace)
+    assert calc.pantalla.text() == "12"
+
+
+def test_teclado_escape_y_c_limpian_la_expresion(qtbot):
+    calc = Calculadora()
+    qtbot.addWidget(calc)
+    calc.show()
+    qtbot.waitExposed(calc)
+    QTest.keyClicks(calc, "12")
+    QTest.keyClick(calc, Qt.Key.Key_Escape)
+    assert calc.pantalla.text() == ""
+
+    QTest.keyClicks(calc, "34")
+    QTest.keyClick(calc, Qt.Key.Key_C)
+    assert calc.pantalla.text() == ""
 
 
 def test_ventana_se_puede_cerrar_con_la_cruz(qtbot):

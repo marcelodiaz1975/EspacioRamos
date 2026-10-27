@@ -381,6 +381,25 @@ def test_estadisticas_principales_monto_aisladas_y_saldo_pendiente(conn):
     assert principales.saldo_pendiente == pytest.approx(6000.0)
 
 
+def test_estadisticas_principales_total_liquidado_no_duplica_reemisiones(conn):
+    """Caso real de la clienta: "estuve haciendo un par de pruebas con las
+    emisiones de liquidaciones" dejó varias filas de `LiquidacionEmitida`
+    para el mismo profesional/período (cada reemisión crea una fila
+    nueva, con el monto TOTAL de esa emisión — ver `emitir_liquidacion`),
+    y "Total liquidado" las sumaba todas en vez de quedarse solo con la
+    última de cada profesional."""
+    _fijar_fecha(conn, "2026-08-15")
+    id_prof1 = _profesional(conn)
+    id_prof2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
+    repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
+    repo_liq.crear(IdProfesional=id_prof1, Periodo="2026-08", MontoGenerado=100000, EsReemision=0)
+    repo_liq.crear(IdProfesional=id_prof1, Periodo="2026-08", MontoGenerado=150000, EsReemision=1)
+    repo_liq.crear(IdProfesional=id_prof1, Periodo="2026-08", MontoGenerado=120000, EsReemision=1)
+    repo_liq.crear(IdProfesional=id_prof2, Periodo="2026-08", MontoGenerado=50000, EsReemision=0)
+    principales = calcular_estadisticas_principales(conn)
+    assert principales.total_liquidado == pytest.approx(170000.0)  # última de prof1 (120000) + prof2 (50000)
+
+
 def test_estadisticas_principales_total_ingresos_y_balance_reusan_balance_del_negocio(conn):
     """"Total ingresos"/"Gastos operativos"/"Balance de negocio" son los
     mismos tres valores que ya calcula `app.negocio.balance.resultado_
@@ -424,6 +443,21 @@ def test_fechas_especiales_proximas_dos_meses_ignora_inactivas(conn):
     _fijar_fecha(conn, "2026-08-15")
     obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-20", Tipo="Feriado nacional", Activo=0)
     assert fechas_especiales_proximas_dos_meses(conn) == []
+
+
+def test_fechas_especiales_proximas_dos_meses_usa_fecha_real_no_la_del_periodo_operativo(conn):
+    """Caso real de la clienta: "Avanzar de mes" hecho con días de
+    octubre todavía por delante la deja parada virtualmente en
+    noviembre (`PeriodoOperativoActual`) aunque la fecha real de hoy
+    (`FechaFicticia` en este test, simulando el reloj real) siga en
+    octubre — una fecha especial del 29/10 no tiene que desaparecer
+    del cuadrito solo porque el sistema ya está posicionado en el mes
+    siguiente para la liquidación."""
+    _fijar_fecha(conn, "2026-10-27")
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-10-29", Tipo="Feriado nacional", Activo=1)
+    conn.execute("UPDATE Configuracion SET PeriodoOperativoActual = '2026-11' WHERE IdConfiguracion = 1")
+    fechas = fechas_especiales_proximas_dos_meses(conn)
+    assert [f["Fecha"] for f in fechas] == ["2026-10-29"]
 
 
 # -------------------------------------------------------------------------
@@ -472,6 +506,21 @@ def test_cumpleanos_de_categoria_x_o_c_no_aparece(conn):
         CategoriaProfesional="C", Apellido="Prospecto", FechaNacimiento="1990-08-21",
     )
     assert cumpleanos_y_dias_profesion_proximos(conn) == []
+
+
+def test_cumpleanos_usa_fecha_real_no_la_del_periodo_operativo(conn):
+    """Mismo caso real que en `fechas_especiales_proximas_dos_meses`: un
+    "Avanzar de mes" hecho antes de que la fecha real llegara a fin de
+    mes no tiene que hacer desaparecer un cumpleaños que todavía no
+    pasó en el calendario real."""
+    _fijar_fecha(conn, "2026-10-27")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Test", NombrePila="Ana", FechaNacimiento="1990-10-29",
+    )
+    conn.execute("UPDATE Configuracion SET PeriodoOperativoActual = '2026-11' WHERE IdConfiguracion = 1")
+    eventos = cumpleanos_y_dias_profesion_proximos(conn)
+    assert len(eventos) == 1
+    assert eventos[0].fecha_proxima == date(2026, 10, 29)
 
 
 def test_cumpleanos_fuera_de_la_ventana_de_dos_meses_no_aparece(conn):

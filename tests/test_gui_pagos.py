@@ -1249,3 +1249,12 @@ def test_spin_monto_selecciona_todo_el_texto_al_recibir_foco(qtbot):
     qtbot.wait(10)  # deja correr el QTimer.singleShot(0, ...)
     assert spin.lineEdit().selectedText() == spin.lineEdit().text()
     assert spin.lineEdit().selectedText() != ""
+
+
+def test_estado_cuenta_pagos_reiniciar_no_rompe(qtbot, conn):
+    """F3 ("Reiniciar solapa") acá no tiene ningún filtro que resetear
+    (Profesional se conserva a propósito) — antes esta pestaña no tenía
+    reiniciar() en absoluto; confirma que ahora existe y no rompe."""
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_estado_cuenta.reiniciar()

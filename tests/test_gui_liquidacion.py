@@ -888,3 +888,29 @@ def test_liquidaciones_simuladas_botones_tienen_el_mismo_ancho_fijo(qtbot, conn)
     panel = pantalla.panel_liquidaciones_simuladas
     anchos = {panel.boton_agregar_bloque.width(), panel.boton_quitar_bloque.width(), panel.boton_generar.width()}
     assert len(anchos) == 1
+
+
+def test_reiniciar_emision_archivos_vuelve_filtros_al_estado_inicial(qtbot, conn):
+    """F3 ("Reiniciar solapa"): antes esta solapa no tenía reiniciar()."""
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_emision
+
+    panel.campo_periodo.set_periodo("2020-01")
+    panel.combo_profesional_filtro.setCurrentIndex(1 if panel.combo_profesional_filtro.count() > 1 else 0)
+    panel.combo_estado_filtro.setCurrentIndex(1 if panel.combo_estado_filtro.count() > 1 else 0)
+
+    panel.reiniciar()
+
+    assert panel.campo_periodo.periodo() == periodo_actual(conn)
+    assert panel.combo_profesional_filtro.currentIndex() == 0
+    assert panel.combo_estado_filtro.currentIndex() == 0
+
+
+def test_reiniciar_estado_cuenta_liquidaciones_no_rompe(qtbot, conn):
+    """F3 acá no tiene ningún filtro que resetear (Profesional se
+    conserva a propósito) — solo confirma que el método existe y no
+    rompe."""
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_estado_cuenta.reiniciar()
