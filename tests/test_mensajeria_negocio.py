@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from app.db.init_db import init_database
@@ -7,7 +9,7 @@ from app.negocio.mensajeria import (
     color_profesional,
     limpiar_plazos_vencidos_o_regularizados,
     marcar_mensaje_aislada_generado,
-    marcar_mensaje_previo_generado,
+    marcar_recordatorio_deuda_x_generado,
     marcar_recordatorio_mensajeria_generado,
 )
 from app.negocio.pagos import crear_plan_pago_historico
@@ -68,14 +70,11 @@ def test_saldo_negativo_es_verde(conn):
     assert color_profesional(conn, p, PERIODO) == "verde"
 
 
-def test_saldo_dentro_de_tolerancia_sin_mensaje_previo_es_marron(conn):
+def test_saldo_dentro_de_tolerancia_es_amarillo(conn):
+    """Corrección de la clienta: "marrón" (R dentro de tolerancia) se
+    unificó con amarillo, sin ningún sub-estado — ver docstring del
+    módulo. El viejo flag MensajePrevioGenerado ya no tiene efecto."""
     p = _crear_r(conn, saldo_anterior=1)
-    assert color_profesional(conn, p, PERIODO) == "marron"
-
-
-def test_saldo_dentro_de_tolerancia_con_mensaje_previo_es_amarillo(conn):
-    p = _crear_r(conn, saldo_anterior=1)
-    marcar_mensaje_previo_generado(conn, p["IdProfesional"], PERIODO)
     assert color_profesional(conn, p, PERIODO) == "amarillo"
 
 
@@ -215,7 +214,50 @@ def test_categoria_a_con_mensaje_generado_es_azul(conn):
     assert color_profesional(conn, p, PERIODO) == "azul"
 
 
-def test_categoria_no_r_ni_a_no_tiene_color(conn):
-    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="X", Apellido="Inactivo")
+def test_categoria_desconocida_no_tiene_color(conn):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="C", Apellido="Inactivo")
     p = obtener_repositorio(conn, "Profesional").obtener(id_prof)
     assert color_profesional(conn, p, PERIODO) is None
+
+
+def _crear_x(conn, saldo_anterior=0.0):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="X", Apellido="DejoElEspacio", SaldoCuentaAnterior=saldo_anterior,
+    )
+    return obtener_repositorio(conn, "Profesional").obtener(id_prof)
+
+
+def test_categoria_x_sin_deuda_no_tiene_color(conn):
+    p = _crear_x(conn, saldo_anterior=0)
+    assert color_profesional(conn, p, PERIODO) is None
+
+
+def test_categoria_x_con_deuda_chica_es_marron(conn):
+    """Pedido de la clienta: la tolerancia no aplica a X — cualquier
+    deuda, por chica que sea, cuenta (acá menor que ToleranciaDeuda
+    Descuento=100, que SÍ aplicaría a un R)."""
+    p = _crear_x(conn, saldo_anterior=1)
+    assert color_profesional(conn, p, PERIODO) == "marron"
+
+
+def test_categoria_x_con_deuda_pasa_a_gris_al_generar_el_recordatorio(conn):
+    p = _crear_x(conn, saldo_anterior=5000)
+    assert color_profesional(conn, p, PERIODO) == "marron"
+    marcar_recordatorio_deuda_x_generado(conn, p["IdProfesional"], date.fromisoformat("2026-08-15"))
+    p = obtener_repositorio(conn, "Profesional").obtener(p["IdProfesional"])
+    assert color_profesional(conn, p, PERIODO) == "gris"
+
+
+def test_categoria_x_vuelve_a_marron_pasados_los_dias_del_parametro(conn):
+    conn.execute(
+        "UPDATE Configuracion SET DiasRecordatorioProfesionalXDejoEspacio = 30 WHERE IdConfiguracion = 1"
+    )
+    p = _crear_x(conn, saldo_anterior=5000)
+    marcar_recordatorio_deuda_x_generado(conn, p["IdProfesional"], date.fromisoformat("2026-08-01"))
+    p = obtener_repositorio(conn, "Profesional").obtener(p["IdProfesional"])
+
+    _fijar_fecha(conn, "2026-08-20")  # 19 días después, todavía no
+    assert color_profesional(conn, p, PERIODO) == "gris"
+
+    _fijar_fecha(conn, "2026-08-31")  # 30 días después, justo en el límite
+    assert color_profesional(conn, p, PERIODO) == "marron"

@@ -1,13 +1,16 @@
-"""Centro de mensajería (DC-02, DC-03): lista de profesionales categoría R
-y A ordenada por color (marrón, verde, amarillo, naranja, rojo, violeta,
-celeste, azul, bordó, gris — DC-02 §2.1 + bordó, pedido posterior de la
-clienta) y, dentro de cada color, por código.
+"""Centro de mensajería (DC-02, DC-03): lista de profesionales categoría
+R, A y X con deuda, ordenada por color (verde, amarillo, naranja, rojo,
+violeta, celeste, azul, bordó, marrón, gris — DC-02 §2.1 + bordó +
+marrón/X, estos dos últimos pedidos posteriores de la clienta) y, dentro
+de cada color, por código — salvo gris, donde los X quedan al final de
+ese grupo, después de los grises de R/A (ver `actualizar`).
 
 Cada fila tiene dos controles independientes (DC-02 §3): el check "Enviada"
 (solo habilitado para los colores que lo tienen asignado — DC-03 "Resumen
-de asignaciones") y el botón "Generar texto" (siempre disponible, carga al
-portapapeles el mensaje que corresponde al color actual). No están
-encadenados: el check cambia el estado, el botón solo genera texto.
+de asignaciones", nunca para categoría X: no tiene liquidación que marcar)
+y el botón "Generar texto" (siempre disponible, carga al portapapeles el
+mensaje que corresponde al color actual). No están encadenados: el check
+cambia el estado, el botón solo genera texto.
 
 Sección 5.1: para categoría A, los 5 controles (todos marcados por
 default salvo los "combinar") que arman el detalle de reserva aislada —
@@ -15,7 +18,13 @@ Incluir consultorio / Incluir unidad / Incluir edificio / Combinar misma
 unidad / Combinar distintas unidades.
 
 Filtros exactos de DC-02 §4: Todos / Pendientes de envío / Enviados /
-Solo regulares / Solo aisladas.
+Solo regulares / Solo aisladas — "Todos" es el valor por defecto al
+entrar (pedido de la clienta, reemplaza "Pendientes de envío"). Debajo
+del filtro de visualización y antes de Período, un selector de
+profesional (buscable por código o nombre, "Todos los profesionales" por
+defecto) acota la tabla a uno puntual — mismo criterio que "Filtros que
+solo afectan la visualización" de CLAUDE.md, no cambia la categoría de
+nadie ni lo que hace un botón.
 
 Reordenamiento de formularios (Excel de la clienta): dejó de ser una
 pantalla propia del menú y pasó a ser la solapa "Centro de mensajería"
@@ -46,9 +55,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.pantallas.reservas import _opciones_profesional
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import clave_orden_codigo
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.formato import formatear_moneda
@@ -59,7 +70,7 @@ from app.negocio.mensajeria import (
     color_profesional,
     limpiar_plazos_vencidos_o_regularizados,
     marcar_mensaje_aislada_generado,
-    marcar_mensaje_previo_generado,
+    marcar_recordatorio_deuda_x_generado,
     marcar_recordatorio_mensajeria_generado,
 )
 from app.negocio.mensajes import (
@@ -67,10 +78,9 @@ from app.negocio.mensajes import (
     mensaje_detalle_reserva_aislada,
     mensaje_envio_liquidacion,
     mensaje_grupal,
+    mensaje_recordatorio_deuda_profesional_x,
     mensaje_recordatorio_fin_de_mes,
     mensaje_situacion_1,
-    mensaje_situacion_2,
-    mensaje_situacion_3,
     mensaje_situacion_5,
 )
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
@@ -81,7 +91,11 @@ _COLUMNA_BOTON = 6
 
 _ORDEN_COLOR = {
     color: orden for orden, color in enumerate(
-        ("marron", "verde", "amarillo", "naranja", "rojo", "violeta", "celeste", "azul", "bordo", "gris")
+        # Marrón (categoría X con deuda) pedido explícito de la clienta:
+        # último color antes de los grises, ya no primero (ver docstring
+        # del módulo — el viejo marrón de R, "deuda dentro de
+        # tolerancia", se unificó con amarillo).
+        ("verde", "amarillo", "naranja", "rojo", "violeta", "celeste", "azul", "bordo", "marron", "gris")
     )
 }
 
@@ -89,7 +103,6 @@ _ORDEN_COLOR = {
 # fila ya identifica visualmente cuál es cuál, esto es la descripción en
 # palabras para quien lo lea sin distinguir colores.
 _ESTADO_TEXTO = {
-    "marron": "Deuda en rango de tolerancia",
     "verde": "Situación regular",
     "amarillo": "Deuda en rango de tolerancia",
     "naranja": "Deuda fuera del rango de tolerancia",
@@ -100,6 +113,19 @@ _ESTADO_TEXTO = {
     "bordo": "Liquidación enviada, recordatorio de fin de mes",
     "gris": "Liquidación enviada",
 }
+# Categoría X con deuda: mismos colores marrón/gris que R/A pero otro
+# significado (sin liquidación de por medio) — se consulta por categoría
+# ANTES que `_ESTADO_TEXTO` en vez de sumarse ahí (ver `_texto_estado`).
+_ESTADO_TEXTO_X = {
+    "marron": "Dejó el espacio, con deuda pendiente",
+    "gris": "Recordatorio de deuda ya enviado, en espera",
+}
+
+
+def _texto_estado(categoria: str, color: str | None) -> str:
+    if categoria == "X":
+        return _ESTADO_TEXTO_X.get(color, "")
+    return _ESTADO_TEXTO.get(color, "")
 _COLOR_FONDO = {
     "marron": "#8D6E63", "verde": "#4CAF50", "amarillo": "#F5D547",
     "naranja": "#E07B39", "rojo": "#C0392B", "violeta": "#8E44AD",
@@ -119,7 +145,7 @@ _FILTROS = [
     ("Solo regulares", "regulares"),
     ("Solo aisladas", "aisladas"),
 ]
-_FILTRO_DEFAULT = "pendientes"
+_FILTRO_DEFAULT = "todos"
 _ANCHO_CAMPO = 280  # combo Filtro, campo Período y los botones del panel izquierdo
 
 
@@ -200,6 +226,7 @@ class _PanelCentroMensajeria(QWidget):
         del refresco de punto 90 (al marcar "Enviada"), que a propósito
         CONSERVA el filtro/período/checks elegidos."""
         self.combo_filtro.setCurrentIndex([clave for _, clave in _FILTROS].index(_FILTRO_DEFAULT))
+        self.combo_profesional_filtro.setCurrentIndex(0)
         self.campo_periodo.setText(periodo_actual(self.conn))
         self.check_combinar_misma_unidad.setChecked(False)
         self.check_combinar_distintas_unidades.setChecked(False)
@@ -221,6 +248,16 @@ class _PanelCentroMensajeria(QWidget):
         self.combo_filtro.currentIndexChanged.connect(self.actualizar)
         self.combo_filtro.setFixedWidth(_ANCHO_CAMPO)
         columna.addWidget(self.combo_filtro)
+
+        columna.addWidget(_titulo_campo("Profesional"))
+        self.combo_profesional_filtro = QComboBox()
+        self.combo_profesional_filtro.addItem("Todos los profesionales", None)
+        for id_profesional, etiqueta in _opciones_profesional(self.conn, ("R", "A", "X")):
+            self.combo_profesional_filtro.addItem(etiqueta, id_profesional)
+        habilitar_busqueda_profesional(self.combo_profesional_filtro)
+        self.combo_profesional_filtro.currentIndexChanged.connect(self.actualizar)
+        self.combo_profesional_filtro.setFixedWidth(_ANCHO_CAMPO)
+        columna.addWidget(self.combo_profesional_filtro)
 
         columna.addWidget(_titulo_campo("Período"))
         self.campo_periodo = QLineEdit()
@@ -290,8 +327,9 @@ class _PanelCentroMensajeria(QWidget):
         # punta a punta — de "Mensaje grupal" se vuelve directo a "Filtro".
         self._foco = instalar_enter_avanza_foco(
             [
-                self.combo_filtro, self.campo_periodo, self.check_combinar_misma_unidad,
-                self.check_combinar_distintas_unidades, boton_copiar, boton_actualizar, boton_grupal,
+                self.combo_filtro, self.combo_profesional_filtro, self.campo_periodo,
+                self.check_combinar_misma_unidad, self.check_combinar_distintas_unidades,
+                boton_copiar, boton_actualizar, boton_grupal,
             ],
             parent=self,
         )
@@ -302,14 +340,25 @@ class _PanelCentroMensajeria(QWidget):
         periodo = self._periodo()
         limpiar_plazos_vencidos_o_regularizados(self.conn)
         filtro = self.combo_filtro.currentData()
-        self._profesionales = self._listar_filtrados(periodo, filtro)
-        # Dos pasadas (sort estable): primero código ascendente, después
-        # color ascendente — así, a igualdad de color, queda ordenado por
-        # código ascendente (corregido a pedido de la clienta: se había
-        # probado descendente y quedaba al revés — los códigos numéricos
-        # tienen que quedar de menor a mayor, arriba los más chicos).
+        id_profesional_filtro = self.combo_profesional_filtro.currentData()
+        self._profesionales = self._listar_filtrados(periodo, filtro, id_profesional_filtro)
+        # Un solo cálculo de color por profesional (consulta la base) en
+        # vez de recalcularlo en cada sort y de nuevo en el loop de abajo.
+        colores = {p["IdProfesional"]: color_profesional(self.conn, p, periodo) for p in self._profesionales}
+
+        # Tres pasadas (sort estable): código ascendente, después color
+        # (corregido a pedido de la clienta: los códigos numéricos tienen
+        # que quedar de menor a mayor, arriba los más chicos dentro de
+        # cada color) y por último "es gris de categoría X" — como gris
+        # ya es el último color (ver `_ORDEN_COLOR`), esto empuja a esos
+        # grises en particular al final de ESE grupo sin tocar el resto
+        # del orden (pedido de la clienta: "primero los grises de
+        # siempre, al final los grises X, ordenados por código").
         self._profesionales.sort(key=lambda p: clave_orden_codigo(p["IdCodigo"]))
-        self._profesionales.sort(key=lambda p: _ORDEN_COLOR.get(color_profesional(self.conn, p, periodo), 99))
+        self._profesionales.sort(key=lambda p: _ORDEN_COLOR.get(colores[p["IdProfesional"]], 99))
+        self._profesionales.sort(
+            key=lambda p: p["CategoriaProfesional"] == "X" and colores[p["IdProfesional"]] == "gris"
+        )
 
         # Desactivada mientras se repuebla: si no, un clic previo en un
         # título reordenaría filas fila por fila a medida que se van
@@ -321,12 +370,13 @@ class _PanelCentroMensajeria(QWidget):
         try:
             self.tabla.setRowCount(len(self._profesionales))
             for fila_idx, profesional in enumerate(self._profesionales):
-                color = color_profesional(self.conn, profesional, periodo)
+                color = colores[profesional["IdProfesional"]]
                 saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
                 saldo_actual = saldo_anterior + (profesional["SaldoCuentaActual"] or 0.0)
                 self.tabla.setItem(fila_idx, 0, _ItemCodigo(profesional["IdCodigo"] or ""))
                 self.tabla.setItem(fila_idx, 1, QTableWidgetItem(_nombre_con_tratamiento(profesional)))
-                self.tabla.setItem(fila_idx, 2, QTableWidgetItem(_ESTADO_TEXTO.get(color, "")))
+                estado = _texto_estado(profesional["CategoriaProfesional"], color)
+                self.tabla.setItem(fila_idx, 2, QTableWidgetItem(estado))
                 self.tabla.setItem(fila_idx, 3, _ItemMoneda(formatear_moneda(saldo_anterior), saldo_anterior))
                 self.tabla.setItem(fila_idx, 4, _ItemMoneda(formatear_moneda(saldo_actual), saldo_actual))
                 self.tabla.setItem(fila_idx, _COLUMNA_ENVIADA, self._item_enviada(profesional, color, periodo))
@@ -359,21 +409,31 @@ class _PanelCentroMensajeria(QWidget):
         self.tabla.setSortingEnabled(True)
         self.tabla.resizeColumnsToContents()
 
-    def _listar_filtrados(self, periodo: str, filtro: str) -> list[sqlite3.Row]:
-        """Base = profesionales de categoría R o A (las únicas con
-        contenido propio en este centro de mensajería), acotada según el
-        filtro elegido (DC-02 §4). Los A sin ninguna reserva aislada del
-        mes en curso en adelante se depuran de la lista (DC-02 §2.2:
-        "los profesionales que ya no tienen reservas aisladas activas ni
-        pendientes se depuran")."""
+    def _listar_filtrados(
+        self, periodo: str, filtro: str, id_profesional_filtro: int | None,
+    ) -> list[sqlite3.Row]:
+        """Base = profesionales de categoría R, A o X con deuda (las
+        únicas con contenido propio en este centro de mensajería),
+        acotada según el filtro elegido (DC-02 §4). Los A sin ninguna
+        reserva aislada del mes en curso en adelante se depuran de la
+        lista (DC-02 §2.2: "los profesionales que ya no tienen reservas
+        aisladas activas ni pendientes se depuran"); los X sin deuda
+        (SaldoCuentaAnterior <= 0) ni siquiera participan — no hay nada
+        para hacerles acá."""
         candidatos = [
             p for p in obtener_repositorio(self.conn, "Profesional").listar()
-            if p["CategoriaProfesional"] in ("R", "A")
+            if p["CategoriaProfesional"] in ("R", "A", "X")
         ]
         candidatos = [
             p for p in candidatos
             if p["CategoriaProfesional"] != "A" or self._tiene_aisladas_vigentes(p["IdProfesional"], periodo)
         ]
+        candidatos = [
+            p for p in candidatos
+            if p["CategoriaProfesional"] != "X" or (p["SaldoCuentaAnterior"] or 0.0) > 0
+        ]
+        if id_profesional_filtro is not None:
+            candidatos = [p for p in candidatos if p["IdProfesional"] == id_profesional_filtro]
         if filtro == "regulares":
             return [p for p in candidatos if p["CategoriaProfesional"] == "R"]
         if filtro == "aisladas":
@@ -401,7 +461,10 @@ class _PanelCentroMensajeria(QWidget):
         item = QTableWidgetItem()
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         item.setData(Qt.ItemDataRole.UserRole, profesional["IdProfesional"])
-        if color not in _COLORES_CON_CHECK:
+        # Categoría X nunca tiene liquidación que marcar como enviada,
+        # sin importar el color (marrón o gris) — a diferencia de R/A, el
+        # check acá no tiene ningún sentido.
+        if profesional["CategoriaProfesional"] == "X" or color not in _COLORES_CON_CHECK:
             item.setFlags(Qt.ItemFlag.ItemIsSelectable)
             item.setToolTip("El check de envío no está disponible para este color.")
             return item
@@ -469,10 +532,7 @@ class _PanelCentroMensajeria(QWidget):
                 id_profesional, PlazoPagoExtendido=None, MotivoPlazoExtra=None,
             )
 
-        texto = (
-            mensaje_situacion_2(self.conn, id_profesional, periodo) if color == "amarillo"
-            else mensaje_envio_liquidacion(self.conn, id_profesional, periodo)
-        )
+        texto = mensaje_envio_liquidacion(self.conn, id_profesional, periodo)
         self.texto_mensaje.setPlainText(texto)
         QGuiApplication.clipboard().setText(texto)
 
@@ -490,9 +550,9 @@ class _PanelCentroMensajeria(QWidget):
         self.actualizar()
 
     def _texto_para_boton(self, profesional: sqlite3.Row, color: str | None, periodo: str) -> str:
-        """DC-03 "Resumen de asignaciones", botón "Generar texto". Marrón
-        y celeste disparan una transición de estado (a amarillo y azul
-        respectivamente).
+        """DC-03 "Resumen de asignaciones", botón "Generar texto". Celeste
+        dispara una transición de estado (a azul); marrón/gris de
+        categoría X también, en los dos sentidos (ver más abajo).
 
         Consultorio y unidad van siempre (los checks "Incluir..." son de
         las pantallas de oferta/búsqueda, no de este mensaje); el
@@ -500,7 +560,9 @@ class _PanelCentroMensajeria(QWidget):
         (`mensaje_detalle_reserva_aislada` ya la aplica sola con el
         default `incluir_edificio=True`, no hace falta pasarlo)."""
         id_profesional = profesional["IdProfesional"]
-        if profesional["CategoriaProfesional"] == "A":
+        categoria = profesional["CategoriaProfesional"]
+
+        if categoria == "A":
             texto = mensaje_detalle_reserva_aislada(
                 self.conn, id_profesional=id_profesional, periodo=periodo,
                 combinar_misma_unidad=self.check_combinar_misma_unidad.isChecked(),
@@ -509,12 +571,19 @@ class _PanelCentroMensajeria(QWidget):
             marcar_mensaje_aislada_generado(self.conn, id_profesional, periodo)
             return texto
 
-        hoy = fecha_actual(self.conn)
-        if color == "marron":
-            texto = mensaje_situacion_3(self.conn, id_profesional, periodo, hoy)
-            marcar_mensaje_previo_generado(self.conn, id_profesional, periodo)
+        if categoria == "X":
+            # Tanto desde marrón (primera vez, o vuelta a aparecer tras
+            # los días del parámetro) como desde gris (reenvío manual):
+            # siempre reescribe el mismo mensaje y reinicia la cuenta de
+            # días — pedido de la clienta solo cubre el caso marrón, pero
+            # volver a enviar desde gris con el mismo criterio es
+            # consistente y no tiene ningún caso de uso distinto.
+            texto = mensaje_recordatorio_deuda_profesional_x(self.conn, id_profesional)
+            marcar_recordatorio_deuda_x_generado(self.conn, id_profesional, fecha_actual(self.conn))
             return texto
-        if color in ("amarillo", "naranja"):
+
+        hoy = fecha_actual(self.conn)
+        if color == "naranja":
             return mensaje_situacion_1(self.conn, id_profesional, hoy)
         if color == "rojo":
             return mensaje_situacion_5(self.conn, id_profesional, periodo)
@@ -522,7 +591,7 @@ class _PanelCentroMensajeria(QWidget):
             texto = mensaje_recordatorio_fin_de_mes(self.conn, id_profesional, periodo)
             marcar_recordatorio_mensajeria_generado(self.conn, id_profesional, periodo)
             return texto
-        if color in ("verde", "violeta", "gris"):
+        if color in ("verde", "amarillo", "violeta", "gris"):
             return mensaje_envio_liquidacion(self.conn, id_profesional, periodo)
         return ""
 

@@ -10,6 +10,7 @@ from app.negocio.mensajes import (
     mensaje_detalle_reserva_aislada,
     mensaje_envio_liquidacion,
     mensaje_grupal,
+    mensaje_recordatorio_deuda_profesional_x,
     mensaje_recordatorio_fin_de_mes,
     mensaje_situacion_1,
     mensaje_situacion_2,
@@ -105,6 +106,26 @@ def test_mensaje_situacion_3_incluye_saldo_y_cuando(conn, consultorio):
     texto = mensaje_situacion_3(conn, id_prof, PERIODO, HOY)
     assert "Male" in texto
     assert "$1.234" in texto
+
+
+# ------------------------------- recordatorio de deuda a profesionales categoría X
+
+def test_mensaje_recordatorio_deuda_profesional_x_incluye_saldo_y_nombre_del_espacio(conn):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="X", Apellido="DejoElEspacio", SaldoCuentaAnterior=5000,
+    )
+    conn.execute("UPDATE Configuracion SET NombreEspacio = 'Espacio Ramos' WHERE IdConfiguracion = 1")
+    conn.commit()
+    texto = mensaje_recordatorio_deuda_profesional_x(conn, id_prof)
+    assert "$5.000" in texto
+    assert "MENSAJE AUTOMATICO" in texto
+    assert "Espacio Ramos" in texto
+
+
+def test_mensaje_recordatorio_deuda_profesional_x_rechaza_categoria_no_x(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio, SaldoCuentaAnterior=5000)
+    with pytest.raises(ValueError):
+        mensaje_recordatorio_deuda_profesional_x(conn, id_prof)
 
 
 # ------------------------------------------------- recordatorio de fin de mes (bordó)

@@ -5,9 +5,9 @@ from PySide6.QtWidgets import QLabel, QMessageBox
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.pantallas.mensajeria import _PanelCentroMensajeria
-from app.negocio.dias import periodo_actual, ultimo_dia_mes
+from app.negocio.dias import fecha_actual, periodo_actual, ultimo_dia_mes
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
-from app.negocio.mensajeria import color_profesional, marcar_mensaje_previo_generado
+from app.negocio.mensajeria import color_profesional, marcar_recordatorio_deuda_x_generado
 from app.negocio.pagos import crear_plan_pago_historico
 from app.repositorio.registro import obtener_repositorio
 
@@ -172,16 +172,21 @@ def test_centro_mensajeria_usa_periodo_actual_por_defecto(qtbot, conn):
 
 # ------------------------------------------------------------------ botón "Generar texto"
 
-def test_generar_texto_marron_pasa_a_amarillo(qtbot, conn):
-    id_prof = _crear_profesional(conn, saldo=1)  # dentro de tolerancia -> marrón
+def test_generar_texto_amarillo_usa_el_mismo_mensaje_que_verde(qtbot, conn):
+    """Corrección de la clienta: R dentro de tolerancia es amarillo desde
+    el principio (sin marrón intermedio) y, por ahora, se trata igual
+    que verde — mismo mensaje al generar texto, sin ninguna transición
+    de color."""
+    id_prof = _crear_profesional(conn, saldo=1)  # dentro de tolerancia -> amarillo
     pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
+    assert _color(conn, id_prof) == "amarillo"
 
     fila = pantalla._profesionales.index(next(p for p in pantalla._profesionales if p["IdProfesional"] == id_prof))
     pantalla.tabla.cellWidget(fila, 6).click()
 
-    assert "se van a mandar los archivos" in pantalla.texto_mensaje.toPlainText()
+    assert "Se adjunta liquidación" in pantalla.texto_mensaje.toPlainText()
     assert _color(conn, id_prof) == "amarillo"
 
 
@@ -273,8 +278,10 @@ def test_generar_texto_copia_al_portapapeles(qtbot, conn, monkeypatch):
 
 # --------------------------------------------------------------------- check "Enviada"
 
-def test_check_enviada_deshabilitado_para_marron(qtbot, conn):
-    _crear_profesional(conn, saldo=1)  # dentro de tolerancia -> marrón
+def test_check_enviada_deshabilitado_para_marron_categoria_x(qtbot, conn):
+    """Marrón es ahora exclusivo de categoría X con deuda, y esta nunca
+    tiene liquidación que marcar como enviada."""
+    _crear_profesional(conn, categoria="X", saldo=5000)
     pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "todos")
@@ -327,9 +334,11 @@ def test_marcar_enviada_emite_liquidacion_genera_pdf_y_baja_a_gris(qtbot, conn):
     assert pantalla.tabla.item(0, 5).checkState() == Qt.CheckState.Checked
 
 
-def test_marcar_enviada_amarillo_usa_situacion_2(qtbot, conn):
-    id_prof = _crear_profesional(conn, saldo=1, codigo="R1")  # marrón -> lo subimos a mano a amarillo
-    marcar_mensaje_previo_generado(conn, id_prof, periodo_actual(conn))
+def test_marcar_enviada_amarillo_usa_el_mismo_mensaje_que_verde(qtbot, conn):
+    """Corrección de la clienta: ya no hay un mensaje propio (la vieja
+    Situación 2) para amarillo al marcar "Enviada" — usa el mismo
+    mensaje que acompaña el PDF de liquidación, igual que verde."""
+    id_prof = _crear_profesional(conn, saldo=1, codigo="R1")  # dentro de tolerancia -> amarillo
 
     pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
@@ -337,7 +346,7 @@ def test_marcar_enviada_amarillo_usa_situacion_2(qtbot, conn):
     assert _color(conn, id_prof) == "amarillo"
 
     pantalla.tabla.item(0, 5).setCheckState(Qt.CheckState.Checked)
-    assert "en forma manual" in pantalla.texto_mensaje.toPlainText()
+    assert "Se adjunta liquidación" in pantalla.texto_mensaje.toPlainText()
 
 
 def test_marcar_enviada_violeta_borra_plazo_extendido(qtbot, conn):
@@ -390,7 +399,9 @@ def test_marcar_enviada_sin_carpeta_base_avisa_y_no_rompe(qtbot, conn):
 
 # ------------------------------------------------------------------------ filtros
 
-def test_filtro_pendientes_es_el_default(qtbot, conn):
+def test_filtro_todos_es_el_default(qtbot, conn):
+    """Corrección de la clienta: "Todos" pasa a ser el filtro por
+    defecto al entrar (reemplaza a "Pendientes de envío")."""
     _crear_profesional(conn, apellido="Gris", saldo=0, codigo="R1")
     obtener_repositorio(conn, "LiquidacionEmitida").crear(
         IdProfesional=1, Periodo=periodo_actual(conn), EstadoEnvio="Enviada",
@@ -399,9 +410,8 @@ def test_filtro_pendientes_es_el_default(qtbot, conn):
     pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
 
-    assert pantalla.combo_filtro.currentData() == "pendientes"
-    assert pantalla.tabla.rowCount() == 1
-    assert "Verde" in pantalla.tabla.item(0, 1).text()
+    assert pantalla.combo_filtro.currentData() == "todos"
+    assert pantalla.tabla.rowCount() == 2
 
 
 def test_filtro_enviados(qtbot, conn):
@@ -447,6 +457,31 @@ def test_filtro_solo_aisladas(qtbot, conn):
     _set_filtro(pantalla, "aisladas")
     assert pantalla.tabla.rowCount() == 1
     assert "Aislada" in pantalla.tabla.item(0, 1).text()
+
+
+# ------------------------------------------------------------- selector de profesional
+
+def test_selector_profesional_todos_por_defecto(qtbot, conn):
+    _crear_profesional(conn, apellido="Uno", saldo=0, codigo="R1")
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.combo_profesional_filtro.currentText() == "Todos los profesionales"
+    assert pantalla.combo_profesional_filtro.currentData() is None
+
+
+def test_selector_profesional_acota_la_tabla_a_uno_puntual(qtbot, conn):
+    id_uno = _crear_profesional(conn, apellido="Uno", saldo=0, codigo="R1")
+    _crear_profesional(conn, apellido="Dos", saldo=0, codigo="R2")
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    assert pantalla.tabla.rowCount() == 2
+
+    indice = pantalla.combo_profesional_filtro.findData(id_uno)
+    pantalla.combo_profesional_filtro.setCurrentIndex(indice)
+
+    assert pantalla.tabla.rowCount() == 1
+    assert "Uno" in pantalla.tabla.item(0, 1).text()
 
 
 # ---------------------------------------------------------------------------- orden
@@ -672,15 +707,20 @@ def test_etiqueta_filtro_dice_filtro_de_visualizacion(qtbot, conn):
 def test_reiniciar_vuelve_el_filtro_y_periodo_a_su_default(qtbot, conn):
     """Punto 1.4: al volver a entrar (o F3) se resetean los filtros
     propios de esta solapa."""
+    id_prof = _crear_profesional(conn, saldo=0, codigo="R1")
     pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     _set_filtro(pantalla, "aisladas")
+    pantalla.combo_profesional_filtro.setCurrentIndex(
+        pantalla.combo_profesional_filtro.findData(id_prof)
+    )
     pantalla.campo_periodo.setText("2020-01")
     pantalla.check_combinar_misma_unidad.setChecked(True)
 
     pantalla.reiniciar()
 
-    assert pantalla.combo_filtro.currentData() == "pendientes"
+    assert pantalla.combo_filtro.currentData() == "todos"
+    assert pantalla.combo_profesional_filtro.currentIndex() == 0
     assert pantalla.campo_periodo.text() != "2020-01"
     assert pantalla.check_combinar_misma_unidad.isChecked() is False
 
@@ -701,3 +741,58 @@ def test_marcar_enviada_vuelve_el_scroll_al_principio(qtbot, conn):
         item.setCheckState(Qt.CheckState.Checked)
 
     assert pantalla.tabla.verticalScrollBar().value() == 0
+
+
+# --------------------------------------------- categoría X con deuda (marrón/gris)
+
+def test_categoria_x_sin_deuda_no_aparece(qtbot, conn):
+    _crear_profesional(conn, categoria="X", apellido="SinDeuda", saldo=0)
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    assert pantalla.tabla.rowCount() == 0
+
+
+def test_categoria_x_con_deuda_aparece_marron(qtbot, conn):
+    _crear_profesional(conn, categoria="X", apellido="ConDeuda", saldo=5000, codigo="X1")
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    assert pantalla.tabla.rowCount() == 1
+    assert "dejó el espacio" in pantalla.tabla.item(0, 2).text().lower()
+
+
+def test_generar_texto_marron_x_copia_mensaje_y_pasa_a_gris(qtbot, conn):
+    id_prof = _crear_profesional(conn, categoria="X", apellido="ConDeuda", saldo=5000, codigo="X1")
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    assert _color(conn, id_prof) == "marron"
+
+    pantalla.tabla.cellWidget(0, 6).click()
+
+    assert "MENSAJE AUTOMATICO" in pantalla.texto_mensaje.toPlainText()
+    assert "pendiente de cancelación" in pantalla.texto_mensaje.toPlainText()
+    assert _color(conn, id_prof) == "gris"
+
+
+def test_categoria_x_gris_queda_al_final_del_grupo_gris(qtbot, conn):
+    """Pedido de la clienta: primero los grises de siempre (R/A), al
+    final los grises de categoría X, ordenados por código."""
+    id_x = _crear_profesional(conn, categoria="X", apellido="ConDeuda", saldo=5000, codigo="X1")
+    marcar_recordatorio_deuda_x_generado(conn, id_x, fecha_actual(conn))
+
+    id_r = _crear_profesional(conn, categoria="R", apellido="Gris", saldo=0, codigo="R9")
+    obtener_repositorio(conn, "LiquidacionEmitida").crear(
+        IdProfesional=id_r, Periodo=periodo_actual(conn), EstadoEnvio="Enviada",
+    )
+
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    assert _color(conn, id_r) == "gris"
+    assert _color(conn, id_x) == "gris"
+    assert pantalla.tabla.rowCount() == 2
+    assert "Gris" in pantalla.tabla.item(0, 1).text()  # gris de R primero
+    assert "ConDeuda" in pantalla.tabla.item(1, 1).text()  # gris de X al final

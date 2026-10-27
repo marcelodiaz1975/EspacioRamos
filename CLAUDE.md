@@ -345,6 +345,99 @@ cartel ni el resto de la ventana se repintarían hasta que el loop
 termine. Se suma caso por caso a cualquier otro loop largo del sistema
 que lo necesite (no es una instalación global).
 
+## Centro de mensajería — batch de pedidos (hilo abierto, primera tanda)
+
+Siete pedidos de la clienta sobre esta solapa (`app/gui/pantallas/
+mensajeria.py`, negocio en `app/negocio/mensajeria.py`/`mensajes.py`),
+con la aclaración explícita de que sigue habiendo más tareas pendientes
+sobre la misma pantalla en próximas rondas.
+
+### Filtro de visualización arranca en "Todos"
+
+`_FILTRO_DEFAULT` pasa de `"pendientes"` a `"todos"` — reemplaza al
+default anterior, mismo criterio simple que otros cambios de default.
+
+### Selector de profesional (filtro visual, antes de Período)
+
+Combo nuevo entre "Filtro de visualización" y "Período": "Todos los
+profesionales" por defecto, buscable por código o nombre
+(`habilitar_busqueda_profesional`, mismo mecanismo que el resto del
+sistema), poblado con `_opciones_profesional(conn, ("R", "A", "X"))`
+(reusa el helper de `reservas.py`, cross-import ya establecido —
+`placas.py` hace lo mismo). Mismo criterio que "Filtros que solo afectan
+la visualización": acota `self._profesionales` en `_listar_filtrados`,
+nunca cambia lo que hace un botón. Sumado a la cadena de foco Enter/Tab
+justo después del filtro de visualización, y al reset de `reiniciar()`.
+
+### Marrón de R (deuda dentro de tolerancia) se unifica con amarillo
+
+Pedido original: ese marrón pase a verde, "mismo mensaje, todo igual".
+Al revisar el impacto (dejaba sin uso el color amarillo, el flag
+`MensajePrevioGenerado` y las plantillas de Situación 2/3), la clienta
+ajustó la decisión: **amarillo se mantiene como color propio** (pura
+diferenciación visual, sin cambiar el tratamiento) en vez de fundirse
+también en verde — "en la práctica, al menos por ahora, va a ser lo
+mismo que el verde" (mismo mensaje a generar: `mensaje_envio_liquidacion`, ya sea por
+botón o por check "Enviada"). `color_profesional` ya no consulta
+`MensajePrevioGenerado` para decidir marrón/amarillo — cualquier
+`SaldoCuentaAnterior` dentro de la tolerancia es amarillo directo, sin
+sub-estado.
+
+El flag `MensajePrevioGenerado` (schema), la función `marcar_mensaje_
+previo_generado`, y los mensajes `mensaje_situacion_2`/`mensaje_
+situacion_3` (negocio) se dejaron DEFINIDOS pero sin ningún llamador
+desde la pantalla — la clienta avisó que "luego seguramente tocamos los
+mensajes predefinidos" sobre este punto, así que no se borra nada
+todavía (decisión explícita, no descuido: evita tener que re-crear estas
+piezas si la retoma pronto).
+
+### Marrón pasa a categoría X con deuda (nuevo, reemplaza el uso anterior)
+
+Marrón, liberado por el punto anterior, se reutiliza para profesionales
+categoría X (dejaron el espacio) con `SaldoCuentaAnterior > 0` — **sin
+aplicar la tolerancia** (confirmado explícitamente: cualquier deuda
+cuenta, por chica que sea, ya que no van a volver a reservar). Un X sin
+deuda sigue sin participar del Centro de mensajería (`color_profesional`
+devuelve `None`).
+
+Posición en la grilla (`_ORDEN_COLOR`): marrón pasa de ser el PRIMER
+color a ser el ÚLTIMO antes de gris — pedido explícito ("que sea el
+último color antes de los grises"). Dentro del grupo gris en particular,
+los grises de categoría X quedan DESPUÉS de los grises de siempre (R/A):
+un tercer `.sort()` (además de código y color, mismo truco de sorts
+estables encadenados) con la clave "es gris de categoría X" empuja esas
+filas al final de la tabla entera — como gris ya es el último color, eso
+coincide exactamente con "al final de ESE grupo" sin tocar el resto del
+orden.
+
+Mensaje nuevo (texto exacto pedido por la clienta, variables `{saldo}`/
+`{nombre_espacio}`): `mensaje_recordatorio_deuda_profesional_x`
+(`app/negocio/mensajes.py`, plantilla editable en "Textos del sistema",
+clave `mensaje_recordatorio_deuda_profesional_x`). Usa `_moneda` del
+mismo módulo (formato DC-03: "$1.234", sin espacio ni decimales) — SIN
+agregar un "$" literal en la plantilla antes de `{saldo}`, mismo
+criterio que todos los demás mensajes de este módulo (la plantilla que
+pasó la clienta tenía "$ {saldo}" a mano, pero duplicaría el signo).
+
+Botón "Generar texto" sobre un X (marrón o gris): copia el mensaje al
+portapapeles y llama a `marcar_recordatorio_deuda_x_generado` (guarda
+`Profesional.FechaUltimoRecordatorioDeudaX`, directo en `Profesional` y
+no en `EstadoMensajeriaPeriodo` — un X ya no tiene período operativo
+propio). Pasados `DiasRecordatorioProfesionalXDejoEspacio` días desde
+esa fecha (parámetro nuevo en Configuración general / Valores y
+liquidación, por defecto 30), `color_profesional` vuelve a marrón solo —
+sin ningún refresco manual de por medio, se recalcula en cada
+`actualizar()`. El check "Enviada" (columna propia) queda deshabilitado
+para categoría X sin importar el color (marrón o gris): no hay
+liquidación que marcar, a diferencia de R/A.
+
+Tests nuevos: `tests/test_mensajeria_negocio.py` (color por deuda,
+transición marrón->gris->marrón con `_fijar_fecha`), `tests/test_
+mensajes.py` (mensaje nuevo, rechaza categoría distinta de X), `tests/
+test_gui_mensajeria.py` (aparece/no aparece según deuda, botón, check
+deshabilitado, orden dentro de gris, selector de profesional), `tests/
+test_plantillas_texto.py` (conteo de claves +1).
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio

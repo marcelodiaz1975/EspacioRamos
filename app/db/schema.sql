@@ -153,6 +153,12 @@ CREATE TABLE IF NOT EXISTS Profesional (
     DiaPlazoExtendidoAutomatico INTEGER CHECK (
         DiaPlazoExtendidoAutomatico IS NULL OR DiaPlazoExtendidoAutomatico BETWEEN 1 AND 31
     ),
+    -- Centro de mensajería, categoría X con deuda (marrón/gris, ver
+    -- app.negocio.mensajeria): fecha (ISO) del último "Generar texto" del
+    -- recordatorio de deuda — NULL todavía no se le generó ninguno.
+    -- Cuando pasan DiasRecordatorioProfesionalXDejoEspacio días desde
+    -- esta fecha, vuelve a marrón.
+    FechaUltimoRecordatorioDeudaX TEXT,
     CampoLibre1 TEXT,
     CampoLibre2 TEXT,
     CampoLibre3 TEXT
@@ -714,6 +720,10 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     -- "bordó" del Centro de mensajería (ver EstadoMensajeriaPeriodo más
     -- abajo).
     DiasAntesFinMesRecordatorioGeneral INTEGER NOT NULL DEFAULT 5,
+    -- Centro de mensajería, categoría X con deuda: días desde el último
+    -- recordatorio generado (Profesional.FechaUltimoRecordatorioDeudaX)
+    -- para que el profesional vuelva a aparecer marrón.
+    DiasRecordatorioProfesionalXDejoEspacio INTEGER NOT NULL DEFAULT 30,
     RetencionHistorialListaEsperaAnios INTEGER NOT NULL DEFAULT 5,
     RangosEstadisticasOcupacion TEXT,
     ModulosExtendidos INTEGER NOT NULL DEFAULT 0,

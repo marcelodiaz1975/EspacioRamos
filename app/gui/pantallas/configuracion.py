@@ -110,6 +110,10 @@ _CAMPOS_NUMERICOS = [
         "DiasAntesFinMesRecordatorioGeneral",
         "Cantidad de días antes de fin de mes para activar recordatorios en mensajería",
     ),
+    (
+        "DiasRecordatorioProfesionalXDejoEspacio",
+        "Días para recordatorio de pago a profesionales que dejaron el espacio",
+    ),
     ("RetencionHistorialListaEsperaAnios", "Retención historial lista de espera (años)"),
     ("TamanoMaximoImagenMB", "Tamaño máximo de imagen (MB)"),
     ("CantidadDecimales", "Cantidad de decimales en los montos"),
@@ -165,6 +169,7 @@ _RANGOS_NUMERICOS: dict[str, tuple[float, float]] = {
     "SemanasVacacionesMaximasPorAnio": (0, 52),
     "DiasEnvioLiquidacionesRemanentes": (0, 60),
     "DiasAntesFinMesRecordatorioGeneral": (0, 31),
+    "DiasRecordatorioProfesionalXDejoEspacio": (0, 3650),
     "RetencionHistorialListaEsperaAnios": (0, 50),
     "TamanoMaximoImagenMB": (0.1, 500),
     "CantidadDecimales": (0, 4),
@@ -200,7 +205,7 @@ _GRUPOS: list[tuple[str, list[str]]] = [
         "PorcentajeDescuentoFeriado", "PorcentajeDescuentoNoLaborable",
         "SemanasVacacionesMaximasPorAnio", "DiasEnvioLiquidacionesRemanentes",
         "DiasAntesFinMesRecordatorioGeneral", "RetencionHistorialListaEsperaAnios",
-        "DecimalesTotalLiquidacion",
+        "DecimalesTotalLiquidacion", "DiasRecordatorioProfesionalXDejoEspacio",
     ]),
     ("Archivos y backup", [
         "FrecuenciaBackupDrive", "CarpetaBaseArchivos", "CarpetaBackup", "TamanoMaximoImagenMB",

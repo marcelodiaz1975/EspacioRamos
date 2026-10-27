@@ -1,16 +1,40 @@
-"""Centro de mensajería (DC-02): máquina de 10 colores por profesional.
+"""Centro de mensajería (DC-02): máquina de colores por profesional.
 
-Solo categorías R y A participan. Para R el color se deriva de
-SaldoCuentaAnterior, plan de pagos, plazo de pago extendido y estado de
-envío de la liquidación del período; para A, de si ya se generó el
-mensaje de detalle de aisladas. Las transiciones que no se pueden derivar
-de otra tabla (marrón->amarillo, celeste->azul, gris->bordó->gris) se
-trackean en EstadoMensajeriaPeriodo, sección por (profesional, período) —
-sin fila todavía = arranque de mes, nunca bordó (DC-02 §2.2 / DC-06 §4.2).
+Categorías R, A y X (esta última, con deuda, pedido posterior de la
+clienta) participan. Para R el color se deriva de SaldoCuentaAnterior,
+plan de pagos, plazo de pago extendido y estado de envío de la
+liquidación del período; para A, de si ya se generó el mensaje de
+detalle de aisladas; para X, de si tiene deuda y de cuánto hace que se le
+generó el último recordatorio. Las transiciones que no se pueden derivar
+de otra tabla (celeste->azul, gris->bordó->gris, marrón->gris->marrón de
+X) se trackean en EstadoMensajeriaPeriodo (por profesional y período,
+R/A) o directo en Profesional (X, que ya no tiene período operativo
+propio) — sin fila/fecha todavía = arranque, nunca bordó (DC-02 §2.2 /
+DC-06 §4.2).
 
 Precedencia de colores para R (violeta primero, después gris con posible
 recordatorio de fin de mes, después el resto):
-    violeta > gris (± bordó) > verde/marrón|amarillo/naranja/rojo
+    violeta > gris (± bordó) > verde/amarillo/naranja/rojo
+
+Marrón (pedido posterior de la clienta, reemplaza el uso original del
+color para "R con deuda dentro de tolerancia" — ver `amarillo` más
+abajo): exclusivo de categoría X con SaldoCuentaAnterior > 0 (sin
+tolerancia — cualquier deuda cuenta, ya dejó de reservar). Al generar su
+mensaje (botón "Generar texto") pasa a gris, y vuelve solo a marrón
+cuando pasan `DiasRecordatorioProfesionalXDejoEspacio` días desde esa
+generación (`Profesional.FechaUltimoRecordatorioDeudaX`) — a diferencia
+de bordó->gris (que se queda en gris el resto del período sin volver
+atrás), ACÁ el ciclo se repite solo mientras siga con deuda.
+
+Amarillo (R con deuda dentro de tolerancia): hasta una ronda anterior
+tenía un sub-estado propio (marrón/amarillo según si ya se había
+generado un "mensaje previo") que ahora quedó sin uso — pedido explícito
+de la clienta: "en la práctica, al menos por ahora, va a ser lo mismo
+que el verde" (mismo mensaje a generar). El flag que distinguía ese
+sub-estado (`EstadoMensajeriaPeriodo.MensajePrevioGenerado`) y los
+mensajes que lo acompañaban (Situación 2/3 de DC-02) quedaron en el
+código sin ningún llamador desde este módulo — la clienta puede pedir
+retomarlos más adelante al revisar los mensajes predefinidos.
 
 Bordó (pedido de la clienta, posterior a DC-02/DC-03): reemplaza a la
 vieja reactivación gris->rojo cerca de fin de mes (que solo miraba plan de
@@ -21,8 +45,7 @@ reserva regular activa, sin importar deuda ni plan: a partir de
 reserva regular activa pasa a bordó; al generar su mensaje (botón
 "Generar texto") vuelve a gris por el resto del período, aunque sigan
 dándose las mismas condiciones — se trackea con
-`RecordatorioMensajeriaGenerado`, mismo mecanismo que marrón->amarillo
-pero a la inversa (de urgente a calmo en vez de al revés)."""
+`RecordatorioMensajeriaGenerado`."""
 from __future__ import annotations
 
 import sqlite3
@@ -32,8 +55,9 @@ from app.negocio.dias import fecha_actual, parsear_periodo, ultimo_dia_mes
 from app.negocio.mensajes import liquidacion_del_periodo, plan_activo
 from app.repositorio.registro import obtener_repositorio
 
-COLORES_R = ("marron", "verde", "amarillo", "naranja", "rojo", "violeta", "bordo", "gris")
+COLORES_R = ("verde", "amarillo", "naranja", "rojo", "violeta", "bordo", "gris")
 COLORES_A = ("celeste", "azul")
+COLORES_X = ("marron", "gris")
 COLORES_PENDIENTES_ENVIO = ("marron", "verde", "amarillo", "naranja", "rojo", "violeta", "celeste")
 COLORES_ENVIADOS = ("azul", "bordo", "gris")
 
@@ -83,6 +107,30 @@ def marcar_recordatorio_mensajeria_generado(conn: sqlite3.Connection, id_profesi
     )
 
 
+def marcar_recordatorio_deuda_x_generado(conn: sqlite3.Connection, id_profesional: int, hoy: date) -> None:
+    """Marrón -> gris (categoría X con deuda, pedido posterior de la
+    clienta: "las tareas de X"): se llama al generar el texto del
+    recordatorio de deuda. A diferencia de marrón->amarillo (sube de
+    urgencia), esta baja — y a diferencia de bordó->gris (se queda en
+    gris el resto del período, sin importar nada más), ACÁ vuelve sola a
+    marrón cuando pasan `DiasRecordatorioProfesionalXDejoEspacio` días
+    desde esta fecha (ver `_debe_recordar_deuda_x`). Se guarda directo en
+    `Profesional` (no en `EstadoMensajeriaPeriodo`, que es por período):
+    un profesional X ya no tiene período operativo propio, la cuenta de
+    días corre sobre el calendario real, no sobre meses de liquidación."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        id_profesional, FechaUltimoRecordatorioDeudaX=hoy.isoformat(),
+    )
+
+
+def _debe_recordar_deuda_x(profesional: sqlite3.Row, dias_param: int, hoy: date) -> bool:
+    ultima = profesional["FechaUltimoRecordatorioDeudaX"]
+    if not ultima:
+        return True
+    dias_transcurridos = (hoy - date.fromisoformat(ultima)).days
+    return dias_transcurridos >= dias_param
+
+
 def _tolerancia(conn: sqlite3.Connection) -> float:
     cfg = conn.execute("SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     return cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
@@ -97,6 +145,16 @@ def _dias_recordatorio_mensajeria(conn: sqlite3.Connection) -> int:
         "SELECT DiasAntesFinMesRecordatorioGeneral FROM Configuracion WHERE IdConfiguracion = 1"
     ).fetchone()
     return cfg["DiasAntesFinMesRecordatorioGeneral"] if cfg else 5
+
+
+def _dias_recordatorio_deuda_x(conn: sqlite3.Connection) -> int:
+    """Días desde el último recordatorio generado para que un profesional
+    categoría X con deuda vuelva a aparecer marrón — expuesto en
+    Configuración general / Valores y liquidación, por defecto 30."""
+    cfg = conn.execute(
+        "SELECT DiasRecordatorioProfesionalXDejoEspacio FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    return cfg["DiasRecordatorioProfesionalXDejoEspacio"] if cfg else 30
 
 
 def _reserva_regular_activa(conn: sqlite3.Connection, id_profesional: int, hoy: date) -> bool:
@@ -146,10 +204,11 @@ def limpiar_plazos_vencidos_o_regularizados(conn: sqlite3.Connection) -> None:
 
 
 def color_profesional(conn: sqlite3.Connection, profesional: sqlite3.Row, periodo: str) -> str | None:
-    """Uno de los 10 colores (DC-02 §2.1 + bordó), o None si la categoría no
-    participa del Centro de mensajería (ni R ni A). Asume que
-    `limpiar_plazos_vencidos_o_regularizados` ya corrió en este refresco —
-    no vuelve a limpiar acá para no mezclar lectura con escritura."""
+    """Uno de los colores del Centro de mensajería (DC-02 §2.1 + bordó +
+    marrón/gris de X), o None si la categoría no participa (ni R, A ni X
+    con deuda). Asume que `limpiar_plazos_vencidos_o_regularizados` ya
+    corrió en este refresco — no vuelve a limpiar acá para no mezclar
+    lectura con escritura."""
     categoria = profesional["CategoriaProfesional"]
     id_profesional = profesional["IdProfesional"]
 
@@ -157,6 +216,14 @@ def color_profesional(conn: sqlite3.Connection, profesional: sqlite3.Row, period
         estado = _estado_periodo(conn, id_profesional, periodo)
         generado = bool(estado["MensajeAisladaGenerado"]) if estado else False
         return "azul" if generado else "celeste"
+
+    if categoria == "X":
+        saldo = profesional["SaldoCuentaAnterior"] or 0.0
+        if saldo <= 0:
+            return None
+        hoy = fecha_actual(conn)
+        dias_param = _dias_recordatorio_deuda_x(conn)
+        return "marron" if _debe_recordar_deuda_x(profesional, dias_param, hoy) else "gris"
 
     if categoria != "R":
         return None
@@ -177,10 +244,13 @@ def color_profesional(conn: sqlite3.Connection, profesional: sqlite3.Row, period
     if saldo_anterior <= 0:
         return "verde"
 
+    # Pedido de la clienta: "amarillo" ya no distingue si el mensaje
+    # previo se generó o no (ese flag, MensajePrevioGenerado, quedó sin
+    # ningún lector) — cualquier deuda dentro de la tolerancia es
+    # amarillo directo, con el mismo tratamiento que verde (mismo mensaje
+    # a generar, "Textos del sistema" pendiente de revisar más adelante).
     if saldo_anterior <= tolerancia:
-        estado = _estado_periodo(conn, id_profesional, periodo)
-        generado = bool(estado["MensajePrevioGenerado"]) if estado else False
-        return "amarillo" if generado else "marron"
+        return "amarillo"
 
     return "rojo" if plan_activo(conn, id_profesional) is not None else "naranja"
 

@@ -30,6 +30,7 @@ from app.negocio.plantillas_texto import (  # noqa: F401 (sustituir_variables se
     DEFAULT_DETALLE_RESERVA_AISLADA,
     DEFAULT_ENVIO_LIQUIDACION,
     DEFAULT_GRUPAL,
+    DEFAULT_RECORDATORIO_DEUDA_PROFESIONAL_X,
     DEFAULT_RECORDATORIO_FIN_DE_MES,
     DEFAULT_SITUACION_1,
     DEFAULT_SITUACION_2,
@@ -268,6 +269,24 @@ def mensaje_envio_liquidacion(conn: sqlite3.Connection, id_profesional: int, per
     anio, mes = periodo.split("-")
     plantilla = resolver_plantilla(conn, "mensaje_envio_liquidacion", DEFAULT_ENVIO_LIQUIDACION)
     return sustituir_variables(plantilla, {"mes": mes_texto(int(mes))})
+
+
+def mensaje_recordatorio_deuda_profesional_x(conn: sqlite3.Connection, id_profesional: int) -> str:
+    """Marrón (categoría X con deuda), botón "Generar texto" — pedido
+    posterior de la clienta, no cubierto por DC-02/DC-03 (esas categorías
+    no participaban del Centro de mensajería en su momento). Sin período:
+    a diferencia de R/A, un profesional X ya no tiene liquidación mensual
+    en curso. Editable (clave `mensaje_recordatorio_deuda_profesional_x`)."""
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    if profesional is None or profesional["CategoriaProfesional"] != "X":
+        raise ValueError("Este mensaje solo aplica a profesionales categoría X.")
+    saldo = _moneda(profesional["SaldoCuentaAnterior"] or 0.0)
+    cfg = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    nombre_espacio = (cfg["NombreEspacio"] if cfg else None) or ""
+    plantilla = resolver_plantilla(
+        conn, "mensaje_recordatorio_deuda_profesional_x", DEFAULT_RECORDATORIO_DEUDA_PROFESIONAL_X,
+    )
+    return sustituir_variables(plantilla, {"saldo": saldo, "nombre_espacio": nombre_espacio})
 
 
 # ------------------------------------------------------------------- mensaje grupal (Mensaje 3, DC-03)

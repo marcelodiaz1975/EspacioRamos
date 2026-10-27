@@ -77,7 +77,7 @@ def test_guardar_dos_veces_actualiza_la_misma_fila(conn):
 
 def test_claves_de_mensajes_editables_son_unicas():
     claves = [m.clave for m in MENSAJES_EDITABLES]
-    assert len(claves) == len(set(claves)) == 10
+    assert len(claves) == len(set(claves)) == 11
 
 
 # --------------------------------------------- mensajes que usan la plantilla personalizada

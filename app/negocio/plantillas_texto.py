@@ -192,6 +192,14 @@ DEFAULT_GRUPAL = (
     "consultar{nos_o_me} el estado de cuenta.{bloque_feriados}"
 )
 
+DEFAULT_RECORDATORIO_DEUDA_PROFESIONAL_X = (
+    "*MENSAJE AUTOMATICO*\n\n"
+    "* Al día de la fecha se registra un saldo de {saldo} pendiente de cancelación.\n"
+    "* Agradecemos responder este mensaje para comunicarse con el administrador y coordinar para regularizar "
+    "la situación\n\n"
+    "_{nombre_espacio}_"
+)
+
 DEFAULT_RECORDATORIO_FIN_DE_MES = (
     "MENSAJE AUTOMATICO\n\n"
     "(Texto recordatorio de carácter informativo, no es necesario responder)\n\n"
@@ -263,6 +271,11 @@ MENSAJES_EDITABLES: list[PlantillaMensaje] = [
         "mensaje_recordatorio_fin_de_mes", "Recordatorio de fin de mes (color Bordó)",
         DEFAULT_RECORDATORIO_FIN_DE_MES, ("estado_cuenta", "fecha_cierre_reservas",
                                            "fecha_envio_liquidaciones", "bloque_feriados"),
+    ),
+    PlantillaMensaje(
+        "mensaje_recordatorio_deuda_profesional_x",
+        "Recordatorio de deuda a profesionales que dejaron el espacio (categoría X, color Marrón)",
+        DEFAULT_RECORDATORIO_DEUDA_PROFESIONAL_X, ("saldo", "nombre_espacio"),
     ),
     PlantillaMensaje(
         "mensaje_detalle_reserva_aislada", "Detalle de reserva aislada del mes (encabezado)",
