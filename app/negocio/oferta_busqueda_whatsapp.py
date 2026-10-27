@@ -29,15 +29,20 @@ from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales
 from app.negocio.oferta_busqueda_texto import (
     alternativas_planas,
     avisos_planos,
-    bloques_rigidos_comentario,
     categoria_es_activa,
     edificios_comentario,
     filtrar_excluidas,
+    hay_bloque_rigido_involucrado,
     lineas_opcion,
     mapa_consultorios_basico,
     resumen_busqueda,
 )
-from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_WHATSAPP, resolver_plantilla, sustituir_variables
+from app.negocio.plantillas_texto import (
+    DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS,
+    DEFAULT_OFERTA_BUSQUEDA_WHATSAPP,
+    resolver_plantilla,
+    sustituir_variables,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -89,7 +94,11 @@ def generar_texto_oferta_busqueda(
                 alternativas_lineas.append(f"- {linea}")
 
     comentario = [f"- {t}" for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
-    comentario += [f"- {t}" for t in bloques_rigidos_comentario(conn, listas_alternativas)]
+    if hay_bloque_rigido_involucrado(conn, listas_alternativas):
+        nota = resolver_plantilla(
+            conn, "oferta_busqueda_nota_bloques_rigidos", DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS,
+        )
+        comentario.append(f"- {nota}")
     comentario += [f"- {aviso}" for aviso in avisos]
     bloque_comentario = ("\n\n*Comentario*\n" + "\n".join(comentario)) if comentario else ""
 

@@ -4,6 +4,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.oferta_busqueda import Busqueda, CriteriosGlobales
 from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
+from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS, guardar_texto_personalizado
 from app.repositorio.registro import obtener_repositorio
 
 ANIO, MES = 2026, 8
@@ -124,15 +125,26 @@ def test_comentario_enumera_edificios_cuando_hay_mas_de_uno(conn, tmp_path):
 def test_comentario_aclara_bloque_rigido_involucrado(conn, edificio_con_consultorio, tmp_path):
     """`_busqueda_simple` (9-11hs Lunes) cae justo dentro del BloqueRigido
     default sembrado por `sembrar_valores_por_defecto` (9-11hs, Lunes a
-    Sábado) — mismo criterio que el PDF (`test_pdf_oferta_busqueda.py`)."""
+    Sábado) — mismo criterio que el PDF (`test_pdf_oferta_busqueda.py`):
+    nota fija y editable (`DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_
+    RIGIDOS`), un único texto para todos los casos."""
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
     texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
 
     assert "*Comentario*" in texto
-    assert "bloque rígido" in texto
-    assert "sin fraccionarlo" in texto
+    assert DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS in texto
+
+
+def test_comentario_de_bloques_rigidos_es_personalizable(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    guardar_texto_personalizado(conn, "oferta_busqueda_nota_bloques_rigidos", "Nota personalizada de bloques.")
+    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
+    assert "- Nota personalizada de bloques." in texto
+    assert DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS not in texto
 
 
 def test_aislada_incluye_rango_de_fechas(conn, tmp_path):

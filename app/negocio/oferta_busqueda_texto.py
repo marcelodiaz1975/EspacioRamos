@@ -199,21 +199,22 @@ def edificios_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[i
     return [_texto_edificio_comentario(f) for f in filas]
 
 
-def bloques_rigidos_comentario(conn: sqlite3.Connection, listas_alternativas: list[list[Alternativa]]) -> list[str]:
-    """Pedido de la clienta: igual que la aclaración de "Redondeo" en las
-    liquidaciones, cuando una alternativa ofrecida incluye horas que caen
-    dentro de un `BloqueRigido` activo, el documento tiene que aclarar
-    cuáles son esas horas y que hay que tomarlas juntas, sin fraccionar
-    — mismo bloqueo que ya aplica Reservas al crear una reserva real
-    (`reservas.verificar_bloques_rigidos`), acá solo informativo (todavía
-    no se está reservando nada, es una oferta). Una línea por cada
-    (bloque, día) realmente involucrado en alguna alternativa, sin
-    duplicados aunque varias opciones/tramos lo repitan."""
+def hay_bloque_rigido_involucrado(conn: sqlite3.Connection, listas_alternativas: list[list[Alternativa]]) -> bool:
+    """Pedido de la clienta: cuando alguna alternativa ofrecida incluye
+    horas que caen dentro de un `BloqueRigido` activo, el documento
+    tiene que aclararlo — mismo bloqueo que ya aplica Reservas al crear
+    una reserva real (`reservas.verificar_bloques_rigidos`), acá solo
+    informativo (todavía no se está reservando nada, es una oferta).
+
+    A diferencia de la primera versión (una línea distinta por cada
+    bloque/día involucrado, armada acá), la clienta pidió un ÚNICO
+    texto fijo y editable para todos los casos (ver `app.negocio.
+    plantillas_texto.DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS`) —
+    esta función solo decide SI corresponde mostrarlo, nunca arma el
+    texto en sí."""
     bloques = conn.execute("SELECT * FROM BloqueRigido WHERE Activo = 1").fetchall()
     if not bloques:
-        return []
-    notas: list[str] = []
-    vistos: set[tuple[float, float, str]] = set()
+        return False
     for alternativas in listas_alternativas:
         for alt in alternativas:
             for opcion in alt.opciones:
@@ -223,17 +224,9 @@ def bloques_rigidos_comentario(conn: sqlite3.Connection, listas_alternativas: li
                         if alt.dia_semana not in dias:
                             continue
                         b_ini, b_fin = b["HoraInicio"], b["HoraFin"]
-                        if not (t.hora_inicio < b_fin and b_ini < t.hora_fin):
-                            continue
-                        clave = (b_ini, b_fin, alt.dia_semana)
-                        if clave in vistos:
-                            continue
-                        vistos.add(clave)
-                        notas.append(
-                            f"El tramo de {hora_fmt(b_ini)[:-2]} a {hora_fmt(b_fin)} de los {alt.dia_semana} "
-                            "es un bloque rígido: hay que tomarlo completo, sin fraccionarlo."
-                        )
-    return notas
+                        if t.hora_inicio < b_fin and b_ini < t.hora_fin:
+                            return True
+    return False
 
 
 def previsualizar_documento(

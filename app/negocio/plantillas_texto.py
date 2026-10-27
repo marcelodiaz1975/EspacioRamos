@@ -218,6 +218,12 @@ DEFAULT_OFERTA_BUSQUEDA_WHATSAPP = (
     "{bloque_comentario}"
 )
 
+DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS = (
+    "Las horas que van de 9 a 11hs de lunes a sábados y las que van de 18 a 21hs de lunes a viernes son "
+    "bloques rígidos que no se fraccionan para ser reservados en forma regular. Dicha limitación no aplica "
+    "para las reservas aisladas."
+)
+
 
 @dataclass
 class PlantillaMensaje:
@@ -265,5 +271,10 @@ MENSAJES_EDITABLES: list[PlantillaMensaje] = [
     PlantillaMensaje(
         "oferta_busqueda_whatsapp", "Texto de WhatsApp de Oferta de consultorios/Disponibilidad",
         DEFAULT_OFERTA_BUSQUEDA_WHATSAPP, ("bloque_detalle_busqueda", "bloque_alternativas", "bloque_comentario"),
+    ),
+    PlantillaMensaje(
+        "oferta_busqueda_nota_bloques_rigidos",
+        "Oferta de consultorios/Disponibilidad: aclaración de bloques rígidos (PDF y WhatsApp)",
+        DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS, (),
     ),
 ]

@@ -4,6 +4,7 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.oferta_busqueda import Busqueda, CriteriosGlobales
+from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS, guardar_texto_personalizado
 from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 from app.repositorio.registro import obtener_repositorio
 
@@ -390,21 +391,33 @@ def test_comentario_incluye_aviso_de_hora_aislada_con_un_solo_edificio(conn, edi
 
 def test_comentario_aclara_bloque_rigido_involucrado(conn, edificio_con_consultorio, tmp_path):
     """Pedido explícito de la clienta: cuando la oferta incluye horas de
-    un BloqueRigido activo, el documento aclara cuáles son esas horas y
-    que hay que tomarlas juntas, sin fraccionar — mismo criterio que la
-    aclaración de "Redondeo" en las liquidaciones. `_busqueda_simple`
-    (9-11hs Lunes) cae justo dentro del BloqueRigido default sembrado
-    por `sembrar_valores_por_defecto` (9-11hs, Lunes a Sábado)."""
+    un BloqueRigido activo, el documento muestra la nota fija y
+    editable de `app.negocio.plantillas_texto.DEFAULT_OFERTA_BUSQUEDA_
+    NOTA_BLOQUES_RIGIDOS` (un único texto para todos los casos, en vez
+    de detallar día por día — pedido explícito de la clienta).
+    `_busqueda_simple` (9-11hs Lunes) cae justo dentro del BloqueRigido
+    default sembrado por `sembrar_valores_por_defecto` (9-11hs, Lunes a
+    Sábado)."""
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
     ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
     texto = fitz.open(ruta)[0].get_text()
     assert "Comentario" in texto
-    assert "bloque rígido" in texto
-    assert "9 a 11hs" in texto
-    assert "Lunes" in texto
-    assert "sin fraccionarlo" in texto
+    # El párrafo puede partirse en varias líneas al ajustar el ancho —
+    # se normaliza antes de comparar la nota completa.
+    assert DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS in texto.replace("\n", " ")
+
+
+def test_comentario_de_bloques_rigidos_es_personalizable(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    guardar_texto_personalizado(conn, "oferta_busqueda_nota_bloques_rigidos", "Nota personalizada de bloques.")
+    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Nota personalizada de bloques." in texto
+    assert DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS not in texto
 
 
 def test_comentario_sin_bloque_rigido_involucrado_no_lo_menciona(conn, edificio_con_consultorio, tmp_path):
