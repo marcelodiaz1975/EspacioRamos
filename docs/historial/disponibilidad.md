@@ -1359,3 +1359,34 @@ Tests nuevos: `tests/test_pdf_oferta_busqueda.py`/`tests/
 test_oferta_busqueda_whatsapp.py`
 (`test_comentario_aclara_bloque_rigido_involucrado`,
 `test_comentario_sin_bloque_rigido_involucrado_no_lo_menciona`).
+
+## Oferta de consultorios: nota de bloques rígidos pasa a texto único editable
+
+Seguimiento del hilo anterior (ver `docs/historial/disponibilidad.md`,
+"Oferta de consultorios: bloque máximo..."): la aclaración de bloques
+rígidos armaba una línea distinta por cada (bloque, día) involucrado en
+la oferta. Pedido de la clienta: "no me gusta que se detalle lo mismo
+día por día" — un ÚNICO texto fijo para todos los casos, y que sea
+editable desde "Textos del sistema" (mismo mecanismo que el resto de
+los mensajes automáticos, `app.negocio.plantillas_texto`).
+
+`hay_bloque_rigido_involucrado(conn, listas_alternativas)`
+(`oferta_busqueda_texto.py`, reemplaza a `bloques_rigidos_comentario`):
+ahora solo devuelve `bool` — SI corresponde mostrar la nota, nunca
+arma texto. El texto en sí es la plantilla nueva
+`oferta_busqueda_nota_bloques_rigidos` (`DEFAULT_OFERTA_BUSQUEDA_
+NOTA_BLOQUES_RIGIDOS`, sin variables — "Este texto no tiene variables
+— es fijo, igual para cualquier pantalla", mismo criterio que la ayuda
+F1), con el texto que pasó la clienta de ejemplo inicial. Se resuelve
+con `resolver_plantilla` tanto en el PDF (`_texto_comentario`) como en
+el WhatsApp (mismo bloque `comentario`) — aparece en el mismo lugar de
+siempre (la sección "Comentario"), sigue condicionado a que la oferta
+realmente toque un bloque rígido activo (no se muestra siempre).
+
+Tests actualizados: `tests/test_pdf_oferta_busqueda.py`/`tests/
+test_oferta_busqueda_whatsapp.py` (`test_comentario_aclara_bloque_
+rigido_involucrado` ahora compara contra el texto de fábrica completo
+en vez de los fragmentos día/hora de la versión vieja;
+`test_comentario_de_bloques_rigidos_es_personalizable`, nuevo, confirma
+que un texto guardado vía `guardar_texto_personalizado` reemplaza al
+de fábrica en ambos documentos).

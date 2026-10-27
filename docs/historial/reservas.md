@@ -1822,3 +1822,69 @@ sin selección, foco). `tests/test_gui_grilla_operativa.py`
 (`test_muestras_de_la_leyenda_quedan_recuadradas_en_negro` reescrito
 contra el `QFrame` nuevo en vez de `WA_StyledBackground`).
 
+## Reservas regulares: finalizar/eliminar una reserva cuya Vigencia desde es de un período ya cerrado
+
+Caso real de la clienta: profesional R5 con una reserva regular vigente
+desde octubre (9-12hs, consultorio 3), parada virtualmente en noviembre
+(ya hay una liquidación de noviembre emitida, así que octubre quedó
+"cerrado" — DC-08 §6.2). Pide una hora más (9-13hs) desde noviembre, en
+OTRO consultorio (el 2) — hace falta reemplazar la reserva vieja por
+una nueva, pero ni "Modificar reserva" ni "Eliminar reserva" lo
+permitían: el guardarraíl de período cerrado (`_validar_vigencia_no_
+cerrada`, sobre la `VigenciaInicio` de la fila) bloqueaba cualquier
+edición, aunque el cambio real no tocara nada de octubre — "Modificar
+reserva" ni siquiera permite cambiar de consultorio (solo Horario/
+Vigencia), así que el camino real es finalizar la vieja desde noviembre
+y crear la nueva (eso sí ya funcionaba sin bloqueo, noviembre está
+abierto).
+
+Dos ajustes puntuales, confirmados con la clienta antes de tocar código
+(el guardarraíl protege plata real, no es un detalle cosmético):
+
+### "Modificar reserva": finalizar sin reabrir el período cerrado
+
+`_ultimo_dia_cerrado(conn, id_profesional)` (nueva): el último día real
+del último período YA cerrado para este profesional (`None` si no hay
+ninguno) — el borde seguro, porque una reserva que ya estuvo activa sin
+cambios durante todo ese período no le cambia nada a lo que esa
+liquidación ya calculó.
+
+`modificar_reserva_regular` detecta el caso "solo finalizar" (Horario Y
+Vigencia desde quedan EXACTAMENTE igual que la fila, Vigencia hasta se
+fija por primera vez o se acorta — nunca se estira) y, solo en ese
+caso, usa `_validar_finalizacion_no_retroactiva` en vez del guardarraíl
+estricto: permite cualquier Vigencia hasta que caiga en el borde de
+arriba o después (ej. 31/10, el último día del período cerrado), sigue
+bloqueando una que se meta A MITAD de un período cerrado (ej. 15/10 —
+eso sí le quitaría presencia que esa liquidación ya tuvo en cuenta).
+Cualquier otro cambio (horario, Vigencia desde) sigue con el
+guardarraíl de siempre, sin excepción.
+
+### "Eliminar reserva": permitido si la reserva sigue activa
+
+Pedido explícito de la clienta, aceptando el costo a sabiendas: a
+diferencia de "finalizar" (conserva la fila), "Eliminar reserva" borra
+la fila entera — perdería el rastro de que existió durante el período
+cerrado. Consultada la clienta puntualmente sobre esta diferencia,
+confirmó que igual prefiere que borre la fila de verdad en este caso.
+
+`eliminar_reserva_regular` ahora permite el borrado si la reserva sigue
+ACTIVA al borde del último período cerrado (`VigenciaFin` en blanco, o
+posterior a ese borde — el caso real: "tengo una reserva vieja
+corriendo y la quiero reemplazar ya"). Si la reserva YA estaba
+finalizada ANTES de ese borde (una fila puramente histórica, sin
+ningún motivo de negocio real para tocarla ahora), sigue bloqueado
+igual que antes.
+
+Tests nuevos: `tests/test_reservas.py`
+(`test_modificar_reserva_regular_finaliza_en_el_borde_del_periodo_
+cerrado_se_permite`, `test_modificar_reserva_regular_finaliza_dentro_
+del_periodo_cerrado_sigue_bloqueada`, `test_modificar_reserva_regular_
+cambia_horario_y_finaliza_en_periodo_cerrado_sigue_bloqueada`,
+`test_eliminar_reserva_regular_activa_en_periodo_cerrado_se_permite`).
+El test preexistente `test_eliminar_reserva_regular_en_periodo_
+cerrado_bloquea` pasó a llamarse `..._ya_finalizada_..._sigue_
+bloqueada`, agregándole un `vigencia_fin` histórico a la reserva de
+prueba — su escenario original (reserva sin Vigencia hasta) ahora cae
+del lado permitido a propósito.
+
