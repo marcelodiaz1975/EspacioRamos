@@ -71,7 +71,7 @@ from app.gui.pantallas.reservas import (
     _texto_profesional,
 )
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
-from app.gui.widgets.fecha import aplicar_color_sabado_negro
+from app.gui.widgets.fecha import aplicar_color_sabado_negro, instalar_flechas_cambian_fecha_completa
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_unidad_con_reserva_vigente
@@ -163,6 +163,7 @@ def _campo_fecha(conn: sqlite3.Connection) -> QDateEdit:
     campo.setLocale(_LOCALE_ES)
     campo.setCalendarPopup(True)
     aplicar_color_sabado_negro(campo)
+    instalar_flechas_cambian_fecha_completa(campo)
     campo.setFixedWidth(_ANCHO_CAMPO)
     hoy = fecha_actual(conn)
     campo.setDate(QDate(hoy.year, hoy.month, hoy.day))

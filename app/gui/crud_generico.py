@@ -46,7 +46,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
-from app.gui.widgets.fecha import aplicar_color_sabado_negro
+from app.gui.widgets.fecha import aplicar_color_sabado_negro, instalar_flechas_cambian_fecha_completa
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
@@ -727,6 +727,7 @@ class _DialogoRegistro(QDialog):
             entrada.setLocale(_LOCALE_ES)
             entrada.setCalendarPopup(True)
             aplicar_color_sabado_negro(entrada)
+            instalar_flechas_cambian_fecha_completa(entrada)
             if not campo.requerido:
                 # Sin esto, un campo opcional sin valor cargado quedaría
                 # mostrando y guardando "hoy" como si fuera un dato real

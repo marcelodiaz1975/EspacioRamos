@@ -58,7 +58,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.pantallas.bloques_rigidos import _PanelBloquesRigidos
-from app.gui.widgets.fecha import aplicar_color_sabado_negro
+from app.gui.widgets.fecha import aplicar_color_sabado_negro, instalar_flechas_cambian_fecha_completa
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.formato import formatear_moneda
 from app.negocio.seguridad import cambiar_contrasena_maestra, hay_contrasena_maestra
@@ -396,6 +396,7 @@ def _crear_campo_fecha() -> QDateEdit:
     entrada.setDisplayFormat(_FORMATO_FECHA_DIA)
     entrada.setLocale(QLocale(QLocale.Language.Spanish))
     aplicar_color_sabado_negro(entrada)
+    instalar_flechas_cambian_fecha_completa(entrada)
     return entrada
 
 

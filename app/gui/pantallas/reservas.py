@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.dialogos import confirmar_datos_antes_de_crear, confirmar_si_fecha_es_mes_anterior
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
-from app.gui.widgets.fecha import aplicar_color_sabado_negro
+from app.gui.widgets.fecha import aplicar_color_sabado_negro, instalar_flechas_cambian_fecha_completa
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import (
@@ -610,6 +610,7 @@ class _DialogoModificarReservaRegular(QDialog):
         self.campo_vigencia_inicio.setLocale(_LOCALE_ES)
         self.campo_vigencia_inicio.setCalendarPopup(True)
         aplicar_color_sabado_negro(self.campo_vigencia_inicio)
+        instalar_flechas_cambian_fecha_completa(self.campo_vigencia_inicio)
         self.campo_vigencia_inicio.setDate(QDate.fromString(reserva["VigenciaInicio"], "yyyy-MM-dd"))
         layout.addWidget(self.campo_vigencia_inicio)
 
@@ -619,6 +620,7 @@ class _DialogoModificarReservaRegular(QDialog):
         self.campo_vigencia_fin.setLocale(_LOCALE_ES)
         self.campo_vigencia_fin.setCalendarPopup(True)
         aplicar_color_sabado_negro(self.campo_vigencia_fin)
+        instalar_flechas_cambian_fecha_completa(self.campo_vigencia_fin)
         self.campo_vigencia_fin.setMinimumDate(_FECHA_SIN_DATO)
         self.campo_vigencia_fin.setSpecialValueText("(sin fecha)")
         self.campo_vigencia_fin.setDate(
@@ -829,6 +831,7 @@ class _PanelReservasRegulares(QWidget):
         self.campo_vigencia_inicio.setLocale(_LOCALE_ES)
         self.campo_vigencia_inicio.setCalendarPopup(True)
         aplicar_color_sabado_negro(self.campo_vigencia_inicio)
+        instalar_flechas_cambian_fecha_completa(self.campo_vigencia_inicio)
         form.addWidget(QLabel("Vigencia desde"))
         form.addWidget(self.campo_vigencia_inicio)
 
@@ -837,6 +840,7 @@ class _PanelReservasRegulares(QWidget):
         self.campo_vigencia_fin.setLocale(_LOCALE_ES)
         self.campo_vigencia_fin.setCalendarPopup(True)
         aplicar_color_sabado_negro(self.campo_vigencia_fin)
+        instalar_flechas_cambian_fecha_completa(self.campo_vigencia_fin)
         self.campo_vigencia_fin.setMinimumDate(_FECHA_SIN_DATO)
         self.campo_vigencia_fin.setSpecialValueText("(sin fecha)")
         self.campo_vigencia_fin.setDate(_FECHA_SIN_DATO)
@@ -1701,6 +1705,7 @@ class _PanelReservasAisladas(QWidget):
         self.campo_fecha.setLocale(_LOCALE_ES)
         self.campo_fecha.setCalendarPopup(True)
         aplicar_color_sabado_negro(self.campo_fecha)
+        instalar_flechas_cambian_fecha_completa(self.campo_fecha)
         form.addWidget(QLabel("Fecha"))
         form.addWidget(self.campo_fecha)
 
@@ -1745,6 +1750,7 @@ class _PanelReservasAisladas(QWidget):
         self.campo_fecha_ausencia.setDisplayFormat(_FORMATO_FECHA)
         self.campo_fecha_ausencia.setCalendarPopup(True)
         aplicar_color_sabado_negro(self.campo_fecha_ausencia)
+        instalar_flechas_cambian_fecha_completa(self.campo_fecha_ausencia)
         layout_reubicacion.addWidget(self.campo_fecha_ausencia)
         self.contenedor_reubicacion.setVisible(False)
         form.addWidget(self.contenedor_reubicacion)
@@ -2532,6 +2538,7 @@ class _PanelReservaExtraordinaria(QWidget):
         self.campo_fecha.setLocale(_LOCALE_ES)
         self.campo_fecha.setCalendarPopup(True)
         aplicar_color_sabado_negro(self.campo_fecha)
+        instalar_flechas_cambian_fecha_completa(self.campo_fecha)
         form.addWidget(QLabel("Fecha"))
         form.addWidget(self.campo_fecha)
 

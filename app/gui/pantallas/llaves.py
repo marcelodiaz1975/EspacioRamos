@@ -63,7 +63,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.pantallas.reservas import _opciones_profesional, _SpinMonto, _texto_profesional
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
-from app.gui.widgets.fecha import aplicar_color_sabado_negro
+from app.gui.widgets.fecha import aplicar_color_sabado_negro, instalar_flechas_cambian_fecha_completa
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
@@ -175,6 +175,7 @@ def _fecha_edit(valor_iso: str | None = None) -> QDateEdit:
     campo.setDisplayFormat("ddd dd-MM-yyyy")
     campo.setLocale(QLocale(QLocale.Language.Spanish))
     aplicar_color_sabado_negro(campo)
+    instalar_flechas_cambian_fecha_completa(campo)
     campo.setDate(QDate.fromString(valor_iso, Qt.DateFormat.ISODate) if valor_iso else QDate.currentDate())
     return campo
 

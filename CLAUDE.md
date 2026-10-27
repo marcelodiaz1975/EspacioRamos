@@ -320,6 +320,53 @@ de prueba) — queda disponible para sumarlo al resto de los formularios
 del sistema caso por caso, mismo criterio que el resto de los cambios
 de alcance general (no un barrido completo de una sola vez).
 
+## Selectores de fecha: Flecha arriba/abajo mueve la fecha completa (todo el sistema)
+
+Pedido de la clienta, alcance general: "que con el cursor para arriba o
+para abajo me permita subir y bajar de fecha en fecha de a un día a la
+vez pero no solamente dentro de la semana, sino avanzar más allá de la
+misma." Investigado antes de tocar código, con un script de prueba
+armado contra un `QDateEdit` real: por default Qt mueve el VALOR DE LA
+SECCIÓN donde está el cursor (día, mes, año, o -si el formato tiene
+"ddd"- día de la semana), no la fecha completa. Confirmados dos bugs
+reales por eso:
+- Con el cursor sobre "dd" (día de mes, el caso de cualquier campo sin
+  el día de semana): al llegar al último día del mes, Flecha arriba se
+  queda clavado ahí, nunca pasa al mes siguiente.
+- Con el cursor sobre "ddd" (día de semana — la sección que arranca
+  enfocada en los campos con ese formato, ej. Registro de ausencias,
+  Fechas especiales): al llegar al último día de la semana, Flecha
+  arriba salta HACIA ATRÁS al mismo día de la semana anterior y se
+  queda trabado repitiendo esa misma fecha — el síntoma exacto que
+  reportó la clienta ("solo navega dentro de la misma semana").
+
+`instalar_flechas_cambian_fecha_completa(campo)` (`app/gui/widgets/
+fecha.py`, nueva, mismo módulo que `aplicar_color_sabado_negro`):
+intercepta Flecha arriba/abajo con un event filter sobre el propio
+campo y avanza/retrocede la FECHA completa (`QDate.addDays`) en vez de
+dejar que Qt mueva la sección, sin importar dónde esté el cursor.
+Aplicado en los 9 puntos donde se construye un `QDateEdit` en el
+sistema (`oferta.py` ×2, `novedades.py` ×1 — cubre también el campo
+opcional, que se arma sobre el mismo factory —, `reservas.py` ×7,
+`llaves.py` ×1, `configuracion.py` ×1, `crud_generico.py` ×1) — mismo
+criterio "mecanismo compartido, instalado explícitamente en cada
+construcción" que `aplicar_color_sabado_negro` y `instalar_
+seleccionar_todo_al_enfocar`, no una única instalación global.
+
+Sobre la validación que pidió la clienta de paso ("que no me permita
+seleccionar una fecha muy para atrás... del período anterior"): no
+hizo falta tocar nada ahí — ese tipo de guardarraíl (ej. período
+cerrado en Reservas regulares, ver más arriba) ya se valida al
+GUARDAR, no campo por campo mientras se edita, así que sigue aplicando
+exactamente igual sin importar si la fecha se tipeó, se eligió del
+calendario, o se llegó con estas flechas nuevas.
+
+Tests nuevos: `tests/test_gui_widget_fecha.py` (mecanismo compartido,
+mismo criterio que `tests/test_gui_widget_foco.py` — la garantía es la
+misma en todos los formularios porque es el mismo event filter): cruce
+de fin de mes, cruce de fin de año, y el caso real con formato "ddd"
+que antes se trababa retrocediendo.
+
 ## Metodología de trabajo
 
 Revisión "uno por uno", pantalla por pantalla, con la clienta. Un cambio
