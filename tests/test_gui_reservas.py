@@ -251,7 +251,12 @@ def test_aisladas_filtros_y_leyenda_separados_en_columnas_propias(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
 
-    assert panel.grilla._panel_filtros.width() == panel.combo_profesional.parentWidget().width()
+    # Columnas 2 y 3 achicadas a dos tercios del ancho de la columna 1 —
+    # pedido explícito de la clienta, ronda siguiente sobre la pantalla ya
+    # en uso ("Reduci en un tercio el ancho de la columna"): ya no van al
+    # mismo ancho que la columna 1, el ancho que pierden lo gana la
+    # columna 4 (la grilla).
+    assert panel.grilla._panel_filtros.width() == reservas_modulo._ANCHO_COLUMNA_ANGOSTA_AISLADAS
     assert panel.grilla._panel_filtros.layout().indexOf(panel.grilla._leyenda_colores) == -1
     assert isinstance(panel.grilla._contenedor_dias.layout(), QVBoxLayout)
     assert not isinstance(panel.grilla._contenedor_dias.layout(), QGridLayout)
@@ -420,9 +425,11 @@ def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
 def test_detalle_de_aisladas_en_su_propia_columna(qtbot, conn):
     """Rediseño a 4 columnas de Reservas aisladas: "Detalle" ya no vive
     adentro de la grilla (columna 4) ni ocupa su ancho — pasa a su propia
-    columna 3, junto a "Referencias de colores", con el mismo ancho fijo
-    que las columnas 1 y 2. En Reservas regulares no cambió nada: sigue
-    dentro de la columna de la grilla, más angosto que ella."""
+    columna 3, junto a "Referencias de colores". Desde que esa columna se
+    achicó a dos tercios del ancho de las columnas 1/2 (pedido explícito
+    de la clienta, ronda siguiente sobre la pantalla ya en uso), ya no
+    comparte su ancho con ellas. En Reservas regulares no cambió nada:
+    sigue dentro de la columna de la grilla, más angosto que ella."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1500, 800)
@@ -433,7 +440,7 @@ def test_detalle_de_aisladas_en_su_propia_columna(qtbot, conn):
     panel_a = pantalla.panel_aisladas
     assert panel_a.grilla._layout_grilla.indexOf(panel_a.grilla.texto_detalle) == -1
     assert panel_a.grilla.texto_detalle.parentWidget() is not panel_a.grilla
-    assert panel_a.grilla.texto_detalle.width() == panel_a.combo_profesional.parentWidget().width()
+    assert panel_a.grilla.texto_detalle.width() == reservas_modulo._ANCHO_COLUMNA_ANGOSTA_AISLADAS
 
     panel_r = pantalla.panel_regulares
     assert panel_r.grilla._layout_grilla.indexOf(panel_r.grilla.texto_detalle) != -1
@@ -512,18 +519,14 @@ def test_grilla_de_regulares_mantiene_el_tope_identidad_sin_achicarse(qtbot, con
 
 
 def test_detalle_de_aisladas_llega_al_pie_de_su_columna(qtbot, conn):
-    """Desde que "Referencias de colores" pasó al triple de alto (ronda
-    sobre la pantalla ya en uso, ver `test_aisladas_filtros_y_leyenda_
-    separados_en_columnas_propias`), la columna 3 (leyenda + Detalle)
-    puede terminar más alta que la columna 1 (formulario + botones) —
-    ya no tiene sentido medir "Detalle" contra el pie del tercer botón
-    (criterio viejo, de cuando la columna 1 era siempre la más alta).
-    Lo que sigue valiendo (`fila_columnas` iguala el alto de las cuatro
-    columnas) es que "Detalle", al tener `stretch=1` sin nada después,
-    llega siempre hasta el pie de SU PROPIA columna — a diferencia del
-    tercer botón, que puede quedar con hueco en blanco debajo (absorbido
-    por el `addStretch()` del formulario) si la columna 3 termina
-    marcando el alto de la fila."""
+    """Desde la ronda siguiente sobre la pantalla ya en uso, la columna 3
+    (leyenda + Detalle) tiene un tope de alto explícito, igual al de la
+    columna 1 (`panel_col_detalle.setMaximumHeight(self._alto_referencia_
+    aisladas)` — ver `_armar_ui`), así que ya no puede terminar más alta
+    que ella. Lo que este test verifica sigue valiendo igual: "Detalle",
+    al tener `stretch=1` sin nada después, llega siempre hasta el pie de
+    SU PROPIA columna (ahora ese pie coincide con el de la columna 1, no
+    por casualidad sino por el tope explícito)."""
     _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
@@ -565,6 +568,70 @@ def test_titulo_profesional_alineado_con_filtro_de_localidad(qtbot, conn):
             panel.grilla._etiqueta_localidad.rect().topLeft()
         ).y()
         assert top_profesional == top_filtro
+
+
+def test_aisladas_columnas_2_3_4_terminan_a_la_altura_de_cancelar_reserva(qtbot, conn):
+    """Pedido explícito de la clienta, ronda siguiente sobre la pantalla
+    ya en uso: "que el cuadro de detalle"/"el contenedor de la grilla
+    termine[n] a la misma altura que el botón 'Cancelar reserva'" —
+    columna 1 (formulario + botones) pasa a ser la referencia de alto
+    (`_alto_referencia_aisladas`, ver `_armar_ui`) para las columnas 2, 3
+    y 4, que ahora llevan un tope de alto explícito en vez de poder
+    quedar más altas o más bajas que ella."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
+    qtbot.waitExposed(pantalla)
+
+    panel = pantalla.panel_aisladas
+
+    def pie(widget):
+        return widget.mapToGlobal(widget.rect().bottomLeft()).y()
+
+    pie_cancelar = pie(panel.boton_cancelar)
+    assert abs(pie(panel._panel_filtros_aisladas) - pie_cancelar) <= 5
+    assert abs(pie(panel._panel_col_detalle_aisladas) - pie_cancelar) <= 5
+    assert abs(pie(panel.grilla) - pie_cancelar) <= 5
+
+
+def test_aisladas_profesional_y_filtro_localidad_suben_16px(qtbot, conn):
+    """Pedido explícito de la clienta, ronda siguiente sobre la pantalla
+    ya en uso: "Profesional" (columna 1) y "Filtro de localidad" (columna
+    2) suben 16px para arrancar en el mismo píxel que "Referencias de
+    colores" (columna 3, que no se movió esta ronda) — confirmado contra
+    una captura real, ver CLAUDE.md. No se compara acá contra el título
+    nativo de "Referencias de colores" (un `QGroupBox` sin marco): medir
+    su posición exacta depende del cálculo de `QStyle` para el título, que
+    ya dio una discrepancia real entre el render offscreen de los tests y
+    la pantalla real de la clienta en una ronda anterior (ver
+    `docs/historial/reservas.md`) — las dos etiquetas (Profesional/Filtro
+    de localidad) siguen a la misma altura entre sí, y la diferencia de
+    16px contra el margen de la columna 3 queda fijada por constante
+    (`_ALTO_TITULO_COLUMNA_AISLADAS - _ALTO_ETIQUETA_COLUMNAS_1_2_
+    AISLADAS`), no por una medición de pixels frágil."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 800)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
+    qtbot.waitExposed(pantalla)
+
+    panel = pantalla.panel_aisladas
+    etiqueta_profesional = next(
+        hijo for hijo in panel.combo_profesional.parentWidget().findChildren(QLabel)
+        if hijo.text() == "Profesional"
+    )
+    top_profesional = etiqueta_profesional.mapToGlobal(etiqueta_profesional.rect().topLeft()).y()
+    top_filtro = panel.grilla._etiqueta_localidad.mapToGlobal(
+        panel.grilla._etiqueta_localidad.rect().topLeft()
+    ).y()
+    assert top_profesional == top_filtro
+    assert (
+        reservas_modulo._ALTO_TITULO_COLUMNA_AISLADAS
+        - reservas_modulo._ALTO_ETIQUETA_COLUMNAS_1_2_AISLADAS
+    ) == 16
 
 
 def test_campo_fecha_aisladas_muestra_dia_de_la_semana(qtbot, conn):

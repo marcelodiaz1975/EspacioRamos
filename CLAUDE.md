@@ -504,6 +504,82 @@ tres botones de acción son operaciones de un solo registro, no un loop
 largo (ver "Indicador 'Procesando...'" más arriba, que es justamente
 para eso).
 
+Ronda siguiente, pedido explícito de la clienta con instrucciones
+puntuales por columna (sobre la pantalla ya en uso):
+
+- **Columna 1**: "Profesional" sube 16px, al mismo píxel donde arranca
+  "Referencias de colores" (columna 3, que esta ronda NO cambia de
+  posición) — todo lo que está debajo de esa etiqueta sube con ella (es
+  un solo margen superior del formulario, `form.setContentsMargins(9,
+  _ALTO_ETIQUETA_COLUMNAS_1_2_AISLADAS, 9, 0)`, antes en
+  `_ALTO_TITULO_COLUMNA_AISLADAS` = 18, ahora en una constante propia,
+  `_ALTO_ETIQUETA_COLUMNAS_1_2_AISLADAS` = 2 — 16px menos). Columna 1 deja
+  de ser "una columna más": pasa a ser la REFERENCIA de alto para las
+  columnas 2, 3 y 4 (`self._alto_referencia_aisladas = panel_form.
+  sizeHint().height()`, guardado en `_armar_ui` y vuelto a calcular en
+  `showEvent` por el mismo motivo que `_scroll_superior`/`_contenido_
+  superior` — el `sizeHint()` puede quedar desincronizado hasta el primer
+  show real).
+- **Columna 2**: "Filtro de localidad" sube los mismos 16px que
+  "Profesional" (mismo valor de margen, `_ALTO_ETIQUETA_COLUMNAS_1_2_
+  AISLADAS`, para no perder la alineación entre las dos). Además se
+  achica a dos tercios del ancho de las columnas 1/3 (`_ANCHO_COLUMNA_
+  ANGOSTA_AISLADAS = _ANCHO_COLUMNA_AISLADAS * 2 // 3` = 173, pedido
+  explícito: "Reduci en un tercio el ancho de la columna"). Alto topeado
+  al de la columna 1 (`panel_filtros_aisladas.setMaximumHeight(self.
+  _alto_referencia_aisladas)`).
+- **Columna 3**: mismo achique de ancho que la columna 2 (misma
+  constante), SIN mover su posición vertical (sigue con
+  `_ALTO_TITULO_COLUMNA_AISLADAS` = 18, sin cambios — es la referencia
+  contra la que subieron las columnas 1 y 2, no al revés). Con el ancho
+  más angosto, dos de las ocho referencias ("Reservado, pero libera un
+  hueco por ausencia/vacación/licencia."/"Igual, con aislada confirmada
+  en ese hueco.") pasan de una línea a dos (`QLabel.setWordWrap(True)`,
+  ya estaba puesto desde el rediseño original) — confirmado con captura
+  real que no queda apelmazado ni cortado, así que no hizo falta tocar
+  `fijar_tamano_fuente(12)` (la clienta había dado permiso explícito para
+  achicarla "si lo necesitás", pero no hizo falta). Alto topeado al de la
+  columna 1, igual que la columna 2 (`panel_col_detalle.setMaximumHeight
+  (self._alto_referencia_aisladas)`) — "Detalle" (`stretch=1`, sin tope
+  propio) sigue absorbiendo el sobrante entre el pie de la leyenda y el
+  tope de la columna, mismo mecanismo que antes.
+- **Columna 4** (la grilla): el ancho que liberan las columnas 2 y 3 lo
+  gana automáticamente (ya tenía `stretch=1` en `fila_columnas`, sin
+  código extra). Alto topeado al de la columna 1 con `self.grilla.
+  limitar_alto_grilla(self._alto_referencia_aisladas)` (método
+  preexistente, ya usado en Reservas regulares con su propio alto natural
+  — acá se reinstala con la columna 1 como referencia en vez del alto
+  natural de la propia grilla) — si las 14 horas no entran en ese tope,
+  la grilla scrollea sola adentro en vez de desbordar la fila.
+- La tabla de abajo queda pegada al pie de la columna 1 (que ahora
+  termina antes, al haber subido 16px) — consecuencia automática de que
+  las 4 columnas ya terminan a la misma altura, sin tocar el código de la
+  tabla.
+
+Pixel final del botón "Cancelar reserva" (y, por el tope de alto común,
+también el pie de las columnas 2/3/4), medido con un script de geometría
+offscreen a 1500x900: **535** (arrancaba en 83 el tope de las 4 columnas,
+"Profesional"/"Filtro de localidad" en 85). Reportado a la clienta como
+referencia, mismo criterio que las rondas anteriores de esta pantalla.
+
+**Pendiente de investigar, declarado NO ser un bug tras revisión**: la
+clienta pidió "si yo cambio el período en la grilla debería cambiar el
+comportamiento de la grilla y mostrarme lo del período seleccionado,
+tendría que ser el actual o posteriores, no anteriores, esto surgiría de
+una validación". Investigado antes de tocar nada: `combo_periodo`
+(`GrillaOperativaWidget._armar_ui`) ya se arma únicamente con el período
+actual + 12 meses hacia adelante (`periodo_actual(self.conn)` +
+`sumar_meses`, nunca un mes anterior) — no hay manera de seleccionar un
+período pasado desde este combo, en ninguna pantalla que use esta grilla
+compartida. Y cambiar el período SÍ cambia lo que muestra la grilla:
+confirmado con un script que arma una aislada confirmada para el mes
+siguiente y compara `calcular_grilla_operativa` con `periodo` = mes
+actual (celda verde, "Horario disponible") contra `periodo` = mes
+siguiente (celda amarilla, con el detalle de la aislada) — el motor ya
+usa `periodo` para acotar `mes_actual_inicio`/`mes_actual_fin` en
+`app/negocio/grilla_operativa.py`. Sin cambios de código: ambas partes
+del pedido ya estaban cubiertas antes de esta ronda.
+
 Pendiente: la clienta todavía no probó esta versión en vivo — puede
 haber correcciones en la próxima ronda.
 
