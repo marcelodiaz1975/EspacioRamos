@@ -13,3 +13,12 @@ def item_numero(texto: str) -> QTableWidgetItem:
     item = QTableWidgetItem(texto)
     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     return item
+
+
+def item_centrado(texto: str) -> QTableWidgetItem:
+    """Excepción puntual a la regla de arriba (texto normalmente a la
+    izquierda) para columnas que la clienta pidió centradas caso por
+    caso — ver convención "Contenido de celda" en CLAUDE.md."""
+    item = QTableWidgetItem(texto)
+    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    return item

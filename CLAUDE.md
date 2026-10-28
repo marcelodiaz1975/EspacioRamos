@@ -616,6 +616,77 @@ disponible, de sobra) y que ninguna de las columnas "al mínimo" quedó
 recortada. Tests nuevos en `tests/test_gui_reservas.py`
 (`test_tabla_aisladas_columnas_angostadas_sin_scroll_horizontal`).
 
+Ronda siguiente, pedido explícito de la clienta sobre la pantalla ya en
+uso ("Muy conforme hasta ahora, ajustaría el ancho de la tabla en
+algunas columnas ya para terminar esta solapa definitivamente"):
+
+- **Horario**: sufijo "hs" al final ("9:00 a 10:00hs"), alineado a la
+  derecha — agregado directo en el `setItem` de esta tabla, sin tocar
+  `_fmt_horario` (compartida con Regulares/Extraordinaria, que no
+  pidieron este cambio).
+- **Fecha**: pasa de `_fmt_fecha` (compartida) a `_fmt_fecha_dia_abrev`
+  (nueva, puntual de esta tabla) — mismo formato "ddd dd-MM-yyyy" que ya
+  usa el campo "Fecha" del formulario de esta misma pantalla (`_FORMATO_
+  FECHA_DIA`/`_LOCALE_ES`, ya existían). Alineada a la derecha. Ancho:
+  pasa del grupo "recorte porcentual" (20%) al grupo "que entre justo"
+  (ancho NATURAL de `resizeColumnsToContents()`, que ya mide el
+  contenido real — "mar 15-10-2026" — cargado antes de llamar a
+  `_ajustar_columnas_aisladas`).
+- **Consul/Reubicación/Período imputado**: contenido centrado
+  (`item_centrado`, nuevo en `app/gui/widgets/items_tabla.py`, hermano
+  de `item_numero` — mismo criterio "excepción puntual" que ya
+  documenta la convención general de "Contenido de celda" más arriba).
+- **Profesional se lleva el ancho sobrante**: pedido explícito ("dáselo
+  a la columna 'Profesional'... sin espacios en blanco al final y sin
+  que se vea la barra de desplazamiento horizontal... contemplá que vas
+  a ver sí o sí la barra de desplazamiento vertical") —
+  `_distribuir_ancho_sobrante_aisladas` (nueva, llamada al final de
+  `_ajustar_columnas_aisladas`) calcula `tabla.width()` menos el
+  encabezado vertical, el borde de `QTableView` (2px, `estilos.py`) y
+  el ancho de la barra de desplazamiento vertical — este último
+  SIEMPRE, la esté mostrando Qt en este momento o no (`QStyle.PM_
+  ScrollBarExtent`, no `verticalScrollBar().isVisible()`): sin este
+  descuento incondicional, el día que la tabla realmente necesite esa
+  barra (el caso normal, con muchas reservas cargadas) le robaría ancho
+  al viewport y de rebote aparecería la barra horizontal, que es
+  justo lo que se quiere evitar. Lo que sobra de esa cuenta, menos la
+  suma de las otras 11 columnas, se lo lleva "Profesional" (con el piso
+  de siempre, `_ANCHO_COL_PROFESIONAL`).
+
+  `tabla.width()` recién refleja el ancho real una vez que Qt terminó
+  de resolver el layout de toda la ventana — en el momento en que
+  `showEvent` llama a `actualizar()` (que dispara `_ajustar_columnas_
+  aisladas`) ese ancho puede seguir desincronizado (mismo problema de
+  fondo que `_alto_referencia_aisladas`, confirmado con un script de
+  geometría: sin este reintento "Profesional" se quedaba en el piso de
+  180px en vez de repartirse el sobrante real). `showEvent` programa un
+  `QTimer.singleShot(0, ...)` para volver a correr `_distribuir_ancho_
+  sobrante_aisladas` apenas el loop de eventos procese el layout
+  pendiente.
+
+  Bug real encontrado corriendo la suite completa (no al revisar la
+  pantalla sola): si la ventana se cierra antes de que ese timer
+  dispare, `self.tabla` ya no existe del lado de C++ cuando el callback
+  corre — "libshiboken: Internal C++ object... already deleted",
+  reventaba en medio de OTRO test sin relación, el que le tocara
+  procesar el loop de eventos en ese momento. Mismo guard que ya usan
+  `foco._EnterAvanzaFoco`/`selector_profesional._SeleccionarTodoAl
+  Enfocar` para este mismo problema: `shiboken6.isValid(self.tabla)`
+  antes de tocarla (`_distribuir_ancho_sobrante_si_sigue_vivo`, nuevo
+  método del panel).
+
+Pixel final del borde derecho de la tabla, medido con un script de
+geometría offscreen a 1500x900 (mismo criterio que el pixel del botón
+"Cancelar reserva" de la ronda anterior): **1475**. Reportado a la
+clienta como referencia.
+
+Tests nuevos en `tests/test_gui_reservas.py`:
+`test_tabla_aisladas_formato_fecha_horario_y_columnas_centradas`,
+`test_tabla_aisladas_profesional_se_lleva_el_ancho_sobrante`. Varios
+tests preexistentes que comparaban el texto de la columna "Fecha" de
+esta tabla contra el formato viejo ("18-08-2026") se actualizaron al
+nuevo ("mar 18-08-2026").
+
 Pendiente: la clienta todavía no probó esta versión en vivo — puede
 haber correcciones en la próxima ronda.
 

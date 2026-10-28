@@ -2,8 +2,8 @@ import pytest
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QVBoxLayout,
-    QWidget,
+    QApplication, QDialog, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QStyle,
+    QVBoxLayout, QWidget,
 )
 
 import app.gui.pantallas.reservas as reservas_modulo
@@ -435,6 +435,101 @@ def test_tabla_aisladas_columnas_angostadas_sin_scroll_horizontal(qtbot, conn):
         texto = tabla.horizontalHeaderItem(columna).text()
         ancho_minimo_titulo = QFontMetrics(tabla.font()).horizontalAdvance(texto)
         assert tabla.columnWidth(columna) >= ancho_minimo_titulo
+
+
+def test_tabla_aisladas_formato_fecha_horario_y_columnas_centradas(qtbot, conn):
+    """Pedido explícito de la clienta, cierre de esta solapa:
+    - "Horario": sufijo "hs" al final ("9:00 a 10:00hs"), alineado a la
+      derecha.
+    - "Fecha": formato "ddd dd-mm-yyyy" (ej. "mar 15-10-2026", mismo
+      criterio que Registro de ausencias — `_fmt_fecha_dia_abrev`),
+      alineado a la derecha, con ancho ajustado para que entre justo.
+    - "Consul"/"Reubicación"/"Período imputado": contenido centrado."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Pérez")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-10-15",
+        HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0, EsReubicacion=1,
+        PeriodoImputado="2026-10",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
+    qtbot.waitExposed(pantalla)
+
+    tabla = pantalla.panel_aisladas.tabla
+    alineacion_derecha = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+    alineacion_centro = Qt.AlignmentFlag.AlignCenter
+
+    item_fecha = tabla.item(0, reservas_modulo._COL_AISLADAS_FECHA)
+    assert item_fecha.text() == "jue 15-10-2026"
+    assert Qt.AlignmentFlag(item_fecha.textAlignment()) == alineacion_derecha
+
+    item_horario = tabla.item(0, reservas_modulo._COL_AISLADAS_HORARIO)
+    assert item_horario.text() == "9:00 a 10:00hs"
+    assert Qt.AlignmentFlag(item_horario.textAlignment()) == alineacion_derecha
+
+    assert Qt.AlignmentFlag(
+        tabla.item(0, reservas_modulo._COL_AISLADAS_CONSULTORIO).textAlignment()
+    ) == alineacion_centro
+    assert Qt.AlignmentFlag(
+        tabla.item(0, reservas_modulo._COL_AISLADAS_REUBICACION).textAlignment()
+    ) == alineacion_centro
+    assert Qt.AlignmentFlag(
+        tabla.item(0, reservas_modulo._COL_AISLADAS_PERIODO_IMPUTADO).textAlignment()
+    ) == alineacion_centro
+
+
+def test_tabla_aisladas_profesional_se_lleva_el_ancho_sobrante(qtbot, conn):
+    """Pedido explícito de la clienta, cierre de esta solapa: "ese ancho
+    dáselo a la columna 'Profesional'... sin espacios en blanco al final
+    y sin necesidad de que se vea la barra de desplazamiento horizontal"
+    — `_distribuir_ancho_sobrante_aisladas` le da a "Profesional" lo que
+    sobra del ancho total de la tabla, contemplando que la barra de
+    desplazamiento vertical se reserva siempre (se vea o no en este
+    momento)."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Pérez")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-10-15",
+        HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
+    qtbot.waitExposed(pantalla)
+    # El reparto final corre en un `QTimer.singleShot(0, ...)` disparado
+    # desde `showEvent` (el ancho real de `tabla` recién está resuelto
+    # después de que Qt termina de acomodar el layout de toda la
+    # ventana) — hace falta una vuelta más del loop de eventos.
+    qtbot.wait(50)
+
+    tabla = pantalla.panel_aisladas.tabla
+    assert tabla.horizontalScrollBar().maximum() == 0
+    ancho_vertical_header = tabla.verticalHeader().width()
+    ancho_scrollbar_vertical = tabla.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+    suma_columnas = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
+    ancho_total_esperado = suma_columnas + ancho_vertical_header + ancho_scrollbar_vertical + reservas_modulo._ANCHO_BORDE_TABLA
+    assert abs(tabla.width() - ancho_total_esperado) <= 2
+    assert tabla.columnWidth(reservas_modulo._COL_AISLADAS_PROFESIONAL) > reservas_modulo._ANCHO_COL_PROFESIONAL
 
 
 def test_cuadro_detalle_escrolea_con_mas_texto_del_que_entra(qtbot, conn):
@@ -2289,9 +2384,9 @@ def test_tabla_aisladas_ordenada_por_fecha_y_hora(qtbot, conn):
         for f in range(panel.tabla.rowCount())
     ]
     assert filas == [
-        ("Martes", "18-08-2026", "9:00 a 10:00"),
-        ("Martes", "18-08-2026", "14:00 a 15:00"),
-        ("Jueves", "20-08-2026", "9:00 a 10:00"),
+        ("Martes", "mar 18-08-2026", "9:00 a 10:00hs"),
+        ("Martes", "mar 18-08-2026", "14:00 a 15:00hs"),
+        ("Jueves", "jue 20-08-2026", "9:00 a 10:00hs"),
     ]
 
 
@@ -2316,8 +2411,8 @@ def test_tabla_aisladas_columna_valor(qtbot, conn):
     from app.negocio.formato import formatear_moneda
 
     valores = {panel.tabla.item(f, 6).text(): panel.tabla.item(f, 10).text() for f in range(panel.tabla.rowCount())}
-    assert valores["17-08-2026"] == formatear_moneda(2000)
-    assert valores["17-09-2026"] == ""
+    assert valores["lun 17-08-2026"] == formatear_moneda(2000)
+    assert valores["jue 17-09-2026"] == ""
 
 
 
@@ -2407,7 +2502,8 @@ def test_tablas_de_abajo_muestran_tratamiento_nombre_apellido_y_columna_ancha(qt
     tabla_a = pantalla.panel_aisladas.tabla
     assert tabla_a.item(0, 0).text() == "Lic. Virginia Gómez"
     assert tabla_a.columnWidth(0) >= 180
-    assert tabla_a.item(0, 7).text() == "9:00 a 10:00"
+    # "hs" al final — pedido puntual de esta tabla, cierre de esta solapa.
+    assert tabla_a.item(0, 7).text() == "9:00 a 10:00hs"
 
 
 def test_reubicacion_ofrece_horario_regular_y_registra_ausencia(qtbot, conn):
@@ -2496,7 +2592,9 @@ def test_dia_de_la_semana_en_tabla_de_aisladas(qtbot, conn):
     panel = pantalla.panel_aisladas
     assert panel.tabla.horizontalHeaderItem(5).text() == "Día"
     assert panel.tabla.item(0, 5).text() == "Martes"
-    assert panel.tabla.item(0, 6).text() == "18-08-2026"
+    # "ddd dd-MM-yyyy" (ej. "mar 18-08-2026") — pedido puntual de esta
+    # tabla, cierre de esta solapa (ver `_fmt_fecha_dia_abrev`).
+    assert panel.tabla.item(0, 6).text() == "mar 18-08-2026"
 
 
 def test_modificar_reserva_aislada_edita_la_fila_existente_sin_cancelarla(qtbot, conn, monkeypatch):
@@ -2589,8 +2687,8 @@ def test_columna_reubicacion_en_tabla_de_aisladas(qtbot, conn):
     assert panel.tabla.horizontalHeaderItem(8).text() == "Reubicación"
     assert panel.tabla.horizontalHeaderItem(9).text() == "Estado"
     valores = {panel.tabla.item(f, 6).text(): panel.tabla.item(f, 8).text() for f in range(panel.tabla.rowCount())}
-    assert valores["18-08-2026"] == "Sí"
-    assert valores["19-08-2026"] == "No"
+    assert valores["mar 18-08-2026"] == "Sí"
+    assert valores["mié 19-08-2026"] == "No"
     # el Estado ya no repite la aclaración de reubicación (queda en su propia columna)
     assert panel.tabla.item(0, 9).text() == "Confirmada"
 
@@ -2873,7 +2971,7 @@ def test_tabla_aisladas_con_profesional_acota_a_sus_reservas(qtbot, conn):
     panel = pantalla.panel_aisladas
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional_1))
     assert panel.tabla.rowCount() == 1
-    assert panel.tabla.item(0, 6).text() == "18-08-2026"
+    assert panel.tabla.item(0, 6).text() == "mar 18-08-2026"
 
 
 def test_tabla_aisladas_todos_los_profesionales_excluye_extraordinarias_y_ordena_por_fecha_hora_codigo(qtbot, conn):
@@ -2950,11 +3048,11 @@ def test_tabla_aisladas_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
 
     panel.tabla.horizontalHeader().sectionClicked.emit(6)  # "Fecha" ascendente
     fechas_asc = [panel.tabla.item(f, 6).text() for f in range(panel.tabla.rowCount())]
-    assert fechas_asc == ["17-08-2026", "20-08-2026"]
+    assert fechas_asc == ["lun 17-08-2026", "jue 20-08-2026"]
 
     panel.tabla.horizontalHeader().sectionClicked.emit(6)  # de nuevo -> descendente
     fechas_desc = [panel.tabla.item(f, 6).text() for f in range(panel.tabla.rowCount())]
-    assert fechas_desc == ["20-08-2026", "17-08-2026"]
+    assert fechas_desc == ["jue 20-08-2026", "lun 17-08-2026"]
 
 
 def test_crear_reserva_aislada_muestra_vista_previa_y_cancelar_no_borra_el_formulario(qtbot, conn, monkeypatch):

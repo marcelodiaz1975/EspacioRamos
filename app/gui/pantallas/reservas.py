@@ -13,6 +13,7 @@ import re
 import sqlite3
 from datetime import date
 
+import shiboken6
 from PySide6.QtCore import QDate, QEvent, QLocale, QObject, QTimer
 from PySide6.QtGui import QFontMetrics, QGuiApplication, QValidator
 from PySide6.QtWidgets import (
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
+    QStyle,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -49,7 +51,7 @@ from app.gui.widgets.grilla_operativa import (
     pares_dia_unidad_con_reserva,
     pares_dia_unidad_con_reserva_vigente,
 )
-from app.gui.widgets.items_tabla import item_numero
+from app.gui.widgets.items_tabla import item_centrado, item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo, clave_orden_profesional
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.pdf.estilos import clave_orden_unidad
@@ -98,10 +100,12 @@ def _ajustar_columnas(tabla: QTableWidget) -> None:
 # `_PanelReservasAisladas._armar_ui`, `setHorizontalHeaderLabels`) — se
 # usan en `_ajustar_columnas_aisladas` para los recortes puntuales
 # pedidos por la clienta, ronda de cierre de esta solapa.
+_COL_AISLADAS_PROFESIONAL = 0
 _COL_AISLADAS_UNIDAD = 3
 _COL_AISLADAS_CONSULTORIO = 4
 _COL_AISLADAS_DIA = 5
 _COL_AISLADAS_FECHA = 6
+_COL_AISLADAS_HORARIO = 7
 _COL_AISLADAS_REUBICACION = 8
 _COL_AISLADAS_ESTADO = 9
 _COL_AISLADAS_PERIODO_IMPUTADO = 11
@@ -112,6 +116,11 @@ _COL_AISLADAS_PERIODO_IMPUTADO = 11
 # item` en `estilos.py` que lo fije a un valor propio, así que es el
 # default nativo del estilo, unos pocos píxels por lado).
 _PADDING_AJUSTE_MINIMO_AISLADAS = 10
+# `QTableView { border: 1px solid #000000; }` en `estilos.py` — 1px a
+# cada lado del widget entero, antes de llegar al encabezado vertical o
+# al viewport. Usado en `_distribuir_ancho_sobrante_aisladas` para no
+# contarlo de más ni de menos al repartir el ancho sobrante.
+_ANCHO_BORDE_TABLA = 2
 
 
 def _ajustar_columnas_aisladas(tabla: QTableWidget) -> None:
@@ -122,31 +131,26 @@ def _ajustar_columnas_aisladas(tabla: QTableWidget) -> None:
     `_PADDING_COLUMNA` que el resto del sistema) y despues recorta las
     columnas puntuales que pidió, cada una con su propio criterio:
 
-    - Unidad/Día/Fecha: un porcentaje fijo de recorte sobre el ancho ya
+    - Unidad/Día: un porcentaje fijo de recorte sobre el ancho ya
       calculado arriba (con relleno incluido, el mismo que ve la clienta
       en pantalla).
-    - Consultorio: se renombra "Consul" en `setHorizontalHeaderLabels`
-      (no acá) y se le aplica el mismo criterio "que entre justo" que
-      Reubicación/Período imputado (ver abajo), NO el 60% pedido
-      literalmente — ese porcentaje, aplicado sobre el ancho CON relleno
-      (88px con "Consul" ya puesto), daba 35px y recortaba la propia
-      etiqueta "Consul" a la mitad ("onsu" en pantalla, confirmado con
-      una captura) — resultado contrario al pedido ("que se vea todo"/
-      la etiqueta recién renombrada para que se lea). Con el ancho
-      natural sin relleno (58px) la columna queda igual achicada en
-      más de la mitad frente al "Consultorio" de antes y sin recortar
-      nada — la clienta puede pedir un valor distinto si lo prefiere.
-    - Reubicación/Período imputado: "que la etiqueta del título entre
-      justo"/"que el ancho coincida con el título" — se usa el ancho
-      NATURAL que ya calculó `resizeColumnsToContents()` ANTES de sumarle
-      `_PADDING_COLUMNA` (guardado en `anchos_sin_relleno`), sin agregar
-      nada de relleno extra: ese método ya mide el título en negrita tal
-      cual lo pinta `QHeaderView::section` (padding/negrita de
-      `estilos.py` incluidos), así que no hace falta recalcularlo a mano
-      con `QFontMetrics` (que mediría la fuente SIN negrita si se usa
-      `header.font()` directo — la negrita es CSS, no está reflejada ahí,
-      mismo problema ya documentado en `LeyendaColores.fijar_tamano_
-      fuente`).
+    - Consultorio/Fecha/Reubicación/Período imputado: "que entre justo"
+      — ancho NATURAL que ya calculó `resizeColumnsToContents()` ANTES de
+      sumarle `_PADDING_COLUMNA` (guardado en `anchos_sin_relleno`), sin
+      relleno extra. Ese método ya mide tanto el título (en negrita, tal
+      cual lo pinta `QHeaderView::section`) como el contenido real de
+      cada celda (acá ya cargado con el formato final — "mar 15-10-2026"
+      para Fecha, ver `_fmt_fecha_dia_abrev` — antes de llamar a esta
+      función), así que no hace falta recalcular nada a mano con
+      `QFontMetrics` (que además mediría la fuente del título SIN
+      negrita si se usa `header.font()` directo — la negrita es CSS, no
+      está reflejada ahí, mismo problema ya documentado en
+      `LeyendaColores.fijar_tamano_fuente`). Consultorio en particular:
+      el 60% de recorte pedido originalmente, aplicado sobre el ancho
+      CON relleno (88px con "Consul" ya puesto), daba 35px y recortaba
+      la propia etiqueta "Consul" a la mitad ("onsu" en pantalla,
+      confirmado con una captura) — se descartó ese porcentaje a favor
+      de este mismo criterio "que entre justo".
     - Estado: "que la palabra 'Confirmada' entre justo" — se pide por una
       palabra puntual, no por lo que haya cargado en la tabla en este
       momento (podría estar filtrada a un profesional con solo
@@ -154,7 +158,12 @@ def _ajustar_columnas_aisladas(tabla: QTableWidget) -> None:
       `QFontMetrics` (la celda no tiene negrita ni ningún otro QSS propio
       — a diferencia del título, acá `tabla.font()` sí reflaja la fuente
       real) y se toma el máximo contra el ancho natural, para no quedar
-      más angosto que lo que la tabla ya necesita hoy."""
+      más angosto que lo que la tabla ya necesita hoy.
+
+    Al final, `_distribuir_ancho_sobrante_aisladas` le da a "Profesional"
+    lo que sobre del ancho total de la tabla una vez puestas todas las
+    demás columnas, para que no quede espacio en blanco al final ni
+    escrolee en horizontal — ver esa función para el detalle."""
     tabla.resizeColumnsToContents()
     anchos_sin_relleno = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
     for columna in range(tabla.columnCount()):
@@ -164,15 +173,50 @@ def _ajustar_columnas_aisladas(tabla: QTableWidget) -> None:
     for columna, factor in (
         (_COL_AISLADAS_UNIDAD, 0.8),
         (_COL_AISLADAS_DIA, 0.85),
-        (_COL_AISLADAS_FECHA, 0.8),
     ):
         tabla.setColumnWidth(columna, round(tabla.columnWidth(columna) * factor))
 
-    for columna in (_COL_AISLADAS_CONSULTORIO, _COL_AISLADAS_REUBICACION, _COL_AISLADAS_PERIODO_IMPUTADO):
+    for columna in (
+        _COL_AISLADAS_CONSULTORIO, _COL_AISLADAS_FECHA, _COL_AISLADAS_REUBICACION, _COL_AISLADAS_PERIODO_IMPUTADO,
+    ):
         tabla.setColumnWidth(columna, anchos_sin_relleno[columna])
 
     ancho_minimo_estado = QFontMetrics(tabla.font()).horizontalAdvance("Confirmada") + _PADDING_AJUSTE_MINIMO_AISLADAS
     tabla.setColumnWidth(_COL_AISLADAS_ESTADO, max(anchos_sin_relleno[_COL_AISLADAS_ESTADO], ancho_minimo_estado))
+
+    _distribuir_ancho_sobrante_aisladas(tabla)
+
+
+def _distribuir_ancho_sobrante_aisladas(tabla: QTableWidget) -> None:
+    """Pedido explícito de la clienta, cierre de esta solapa: "si vos
+    notás que queda algo de blanco visible al final de la tabla, ese
+    ancho dáselo a la columna 'Profesional'... sin espacios en blanco al
+    final y sin necesidad de que se vea la barra de desplazamiento
+    horizontal". Se llama al final de `_ajustar_columnas_aisladas`, con
+    las otras 11 columnas ya en su ancho definitivo — "Profesional" se
+    lleva lo que sobre (o lo que falte, moderado por el piso de
+    `_ANCHO_COL_PROFESIONAL`) para que la suma de las 12 columnas
+    coincida exactamente con el ancho disponible.
+
+    "Contemplá que vas a ver sí o sí la barra de desplazamiento
+    vertical": el cálculo le resta el ancho de esa barra SIEMPRE (`QStyle
+    .PM_ScrollBarExtent`, el que usa Qt para reservarle lugar), esté
+    mostrándose en este momento o no — esta tabla crece con las reservas
+    cargadas y en la práctica casi siempre va a necesitarla; sin este
+    descuento, el día que aparezca de verdad le robaría ancho al
+    viewport y de rebote aparecería también la barra horizontal, que es
+    justo lo que se quiere evitar. `tabla.width()` recién refleja el
+    ancho real una vez que la ventana está mostrada de verdad — esta
+    función se llama en cada `actualizar()` (incluido el que dispara
+    `showEvent`), mismo criterio que el resto de los valores geométricos
+    de esta pantalla que dependen del primer show real."""
+    ancho_vertical_header = tabla.verticalHeader().width()
+    ancho_scrollbar_vertical = tabla.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+    ancho_disponible = tabla.width() - ancho_vertical_header - ancho_scrollbar_vertical - _ANCHO_BORDE_TABLA
+    suma_resto = sum(
+        tabla.columnWidth(c) for c in range(tabla.columnCount()) if c != _COL_AISLADAS_PROFESIONAL
+    )
+    tabla.setColumnWidth(_COL_AISLADAS_PROFESIONAL, max(ancho_disponible - suma_resto, _ANCHO_COL_PROFESIONAL))
 
 
 class _FiltroCalendarioArrancaHoy(QObject):
@@ -336,6 +380,18 @@ def _fmt_fecha(fecha_iso: str | None) -> str:
     if not fecha_iso:
         return ""
     return QDate.fromString(fecha_iso, "yyyy-MM-dd").toString(_FORMATO_FECHA)
+
+
+def _fmt_fecha_dia_abrev(fecha_iso: str | None) -> str:
+    """"mar 15-10-2026": mismo formato (`_FORMATO_FECHA_DIA`/`_LOCALE_ES`,
+    ya usados por el campo "Fecha" del formulario de Reservas aisladas)
+    pedido explícito de la clienta, cierre de esta solapa, para la
+    columna "Fecha" de la TABLA de abajo de esa misma pantalla — no
+    reemplaza a `_fmt_fecha` (sigue usándose en Regulares/Extraordinaria,
+    que no pidieron este cambio)."""
+    if not fecha_iso:
+        return ""
+    return _LOCALE_ES.toString(QDate.fromString(fecha_iso, "yyyy-MM-dd"), _FORMATO_FECHA_DIA)
 
 
 def _fmt_hora(valor: float) -> str:
@@ -1716,6 +1772,31 @@ class _PanelReservasAisladas(QWidget):
         self._orden.reiniciar()
         self.actualizar()
         self.combo_profesional.setFocus()
+        # `_distribuir_ancho_sobrante_aisladas` (dentro de `actualizar()`
+        # -> `_ajustar_columnas_aisladas`) usa `self.tabla.width()`, que
+        # recién refleja el ancho final de verdad una vez que Qt terminó
+        # de resolver el layout de TODA la ventana — en este punto de
+        # `showEvent` puede seguir desincronizado (mismo motivo que
+        # `_alto_referencia_aisladas` más arriba, pero acá no alcanza con
+        # volver a medir ya mismo: el ancho todavía no está resuelto ni
+        # leyendo de nuevo). `QTimer.singleShot(0, ...)` lo vuelve a
+        # correr apenas el loop de eventos procese el layout pendiente —
+        # confirmado con un script de geometría: sin este reintento la
+        # columna "Profesional" se quedaba en el piso de `_ANCHO_COL_
+        # PROFESIONAL` en vez de repartirse el sobrante real.
+        QTimer.singleShot(0, self._distribuir_ancho_sobrante_si_sigue_vivo)
+
+    def _distribuir_ancho_sobrante_si_sigue_vivo(self) -> None:
+        """Ver el `QTimer.singleShot` en `showEvent`: si la pantalla se
+        cerró (o este panel se destruyó) antes de que el loop de eventos
+        llegue a disparar el timer, `self.tabla` ya no existe del lado de
+        C++ aunque el wrapper de Python siga vivo — tocar cualquiera de
+        sus métodos revienta con "libshiboken: Internal C++ object...
+        already deleted" (bug real, reproducido corriendo la suite
+        completa). Mismo guard que `selector_profesional._Seleccionar
+        TodoAlEnfocar`/`foco._EnterAvanzaFoco` para este mismo problema."""
+        if shiboken6.isValid(self.tabla):
+            _distribuir_ancho_sobrante_aisladas(self.tabla)
 
     def reiniciar(self) -> None:
         """F3 ("Reiniciar solapa"): mismo criterio que `_PanelReservas
@@ -2360,16 +2441,21 @@ class _PanelReservasAisladas(QWidget):
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(consultorio["NombreEdificio"] if consultorio else "?"))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(consultorio["Departamento"] if consultorio else "?"))
             self.tabla.setItem(
-                fila_idx, 4, item_numero(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
+                fila_idx, 4, item_centrado(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
             )
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(fecha_a_dia_semana(date.fromisoformat(r["Fecha"]))))
-            self.tabla.setItem(fila_idx, 6, QTableWidgetItem(_fmt_fecha(r["Fecha"])))
-            self.tabla.setItem(fila_idx, 7, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
-            self.tabla.setItem(fila_idx, 8, QTableWidgetItem("Sí" if r["EsReubicacion"] else "No"))
+            # "ddd dd-MM-yyyy" (ej. "mar 15-10-2026", `_fmt_fecha_dia_
+            # abrev`) en vez del `_fmt_fecha` compartido con Regulares/
+            # Extraordinaria — pedido puntual de esta tabla, cierre de
+            # esta solapa.
+            self.tabla.setItem(fila_idx, 6, item_numero(_fmt_fecha_dia_abrev(r["Fecha"])))
+            # "hs" al final (ej. "9:00 a 10:00hs") — mismo pedido puntual.
+            self.tabla.setItem(fila_idx, 7, item_numero(_fmt_horario(r["HoraInicio"], r["HoraFin"]) + "hs"))
+            self.tabla.setItem(fila_idx, 8, item_centrado("Sí" if r["EsReubicacion"] else "No"))
             self.tabla.setItem(fila_idx, 9, QTableWidgetItem(r["Estado"]))
             valor_hora = consultorio["ValorHoraAisladaActual"] if consultorio else 0.0
             self.tabla.setItem(fila_idx, 10, item_numero(self._valor_reserva(r, valor_hora, recargo_pct)))
-            self.tabla.setItem(fila_idx, 11, QTableWidgetItem(r["PeriodoImputado"] or ""))
+            self.tabla.setItem(fila_idx, 11, item_centrado(r["PeriodoImputado"] or ""))
         _ajustar_columnas_aisladas(self.tabla)
         self._sincronizar_grilla()
         self.grilla.actualizar()
