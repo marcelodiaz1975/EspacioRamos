@@ -388,13 +388,21 @@ Pedido explícito de la clienta: la pantalla pasó de 2 "columnas"
    uno (NO se llama `agrupar_dias_en_pares()`, a diferencia de
    Regulares) para que la columna gane alto y llegue simétrica con la 1
    sin hueco en blanco al final.
-3. "Referencias de colores" (una por fila, cuadros y letra chicos —
-   `_columnas = 1`, `fijar_tamano_muestra(24, 14)`, `fijar_tamano_
-   fuente(9)`) sacada del panel de Filtros con `extraer_leyenda_
-   colores()` (nuevo), + el cuadro "Detalle" (ya se sacaba con
-   `extraer_detalle`) debajo, sin tope de alto (antes 25px) — se estira
-   hasta el pie de la columna en vez de quedar chico con un hueco
-   debajo.
+3. "Referencias de colores" (una por fila, sacada del panel de Filtros
+   con `extraer_leyenda_colores()`, nuevo) + el cuadro "Detalle" (ya se
+   sacaba con `extraer_detalle`) debajo, sin tope de alto (antes 25px)
+   — se estira hasta el pie de la columna en vez de quedar chico con un
+   hueco debajo. Ronda siguiente, sobre la pantalla ya en uso: sin el
+   marco de `QGroupBox` que las envolvía (`LeyendaColores.quitar_
+   marco()`, nuevo — el título "Referencias de colores" se queda, sin
+   el borde), muestras al triple de alto (14 → 42, `fijar_tamano_
+   muestra(24, 42)`), letra más grande (9 → 12, `fijar_tamano_fuente`),
+   alineadas a la izquierda con el texto pegado a la muestra
+   (`alinear_contenido_izquierda()`, nuevo, espaciado horizontal 6px →
+   4px). Lo que gana de alto la leyenda se lo saca directo al cuadro
+   "Detalle" sin código extra: ninguno de los dos tiene `addStretch()`
+   propio después de la leyenda y "Detalle" sí tiene `stretch=1`, así
+   que el margen que cede siempre es el de "Detalle".
 4. La grilla sola (ya sin Filtros ni leyenda, que se sacaron arriba):
    `self.grilla` después de las extracciones queda reducida a esto
    (su propio `layout_principal` ya solo tiene `panel_grilla`). Celdas
@@ -418,17 +426,83 @@ el corrimiento (bug real, detectado por
 `test_titulo_profesional_alineado_con_filtro_de_localidad`, que
 reventaba 81 contra 60 — la diferencia exacta de ese margen de más).
 
+Ronda siguiente, sobre la pantalla ya en uso (pedido explícito de la
+clienta con una foto real: "Referencias de colores" quedaba pegada
+arriba, "Filtro de localidad" un poco más abajo y "Profesional" más
+abajo todavía — un efecto escalera que además angostaba la tabla de
+abajo): las tres columnas pasan al MISMO margen de arriba, explícito y
+chico (`_ALTO_TITULO_COLUMNA_AISLADAS`, no `_ALTO_TITULO_FILTROS` de
+Regulares) en vez de depender del margen nativo de cada `QGroupBox` —
+ese margen nativo resultó no ser idéntico entre los tres (columna 2,
+CON borde, reservaba 6px más que columna 1 o que columna 3, YA sin
+borde desde el punto anterior), aunque el test de alineación (que mide
+offscreen) no lo detectaba — diferencia real de medición entre el
+entorno de test y una pantalla real, confirmada con captura de la
+clienta. Columna 2 (`panel_filtros_aisladas`) suma el mismo tratamiento
+"sin marco" que la columna 3 (`setStyleSheet("QGroupBox { border: none;
+}")` + margen de arriba explícito, dejando los otros tres lados como
+estaban) — pierde el borde de "Filtros" (ya sin título visible desde
+antes) como efecto necesario para igualar el margen real, no solo el
+nominal.
+
+Arrancó en 9 (lo mínimo que la columna 3 necesitaba para no recortar el
+título "Referencias de colores") — confirmado con un script de
+geometría antes de aplicarlo (test a ciegas de `left`/`subcontrol-
+origin` en el QSS del título dieron corrimientos horizontales raros —
+la única combinación que no recortó nada fue heredar el margen nativo
+que Qt ya calculaba para ESE título antes de sacarle el marco, no
+inventar un valor a mano). Con 9 quedó "apelmazado" (la primera
+referencia de color pegada al título) — pedido explícito de la
+clienta, ronda siguiente sobre la pantalla ya en uso: subido a 18.
+`LeyendaColores.quitar_marco()` suma un parámetro opcional
+`margen_superior` para esto — sin pasarlo, sigue heredando el mínimo
+nativo (comportamiento de siempre para cualquier otro uso futuro); acá
+se le pasa `_ALTO_TITULO_COLUMNA_AISLADAS` explícito, igual que las
+columnas 1 y 2, para que seguir las tres alineadas entre sí.
+
 Todo el rediseño se armó y confirmó primero con un mockup aparte (script
 descartable fuera de `app/`, reutilizando los widgets/estilos reales)
 que se le mandó a la clienta como captura — recién con su "sí, así" se
 tocó código de verdad, mismo criterio que el resto de "Metodología de
 trabajo" mencionado más abajo.
 
-`GrillaOperativaWidget` suma tres métodos opt-in para este rediseño
-(no afectan a Oferta de consultorios/Novedades/Grilla semanal/Reservas
+`GrillaOperativaWidget` suma métodos opt-in para este rediseño (no
+afectan a Oferta de consultorios/Novedades/Grilla semanal/Reservas
 regulares, que no los llaman): `extraer_panel_filtros()`,
 `extraer_leyenda_colores()`, `fijar_alto_filas(alto_encabezado,
-alto_dato)`.
+alto_dato)` y, en `LeyendaColores`, `quitar_marco()`,
+`fijar_columnas(n)` (reemplaza pisar `._columnas` a mano desde afuera)
+y `alinear_contenido_izquierda(espaciado_horizontal)`.
+
+Bug encontrado y arreglado en esta misma ronda (pantalla ya en uso):
+"el formulario aparece con la barra de scroll vertical por unos pocos
+pixeles" — `scroll.setFixedHeight(contenido.minimumSizeHint().height())`
+(mismo mecanismo que Regulares) quedaba unos pixeles por debajo de lo
+que el contenido necesitaba de verdad (confirmado con un script de
+geometría: `minimumSizeHint()` daba 471, el alto real necesario —
+`sizeHint()` — daba 512). Causa: la columna 2 tiene `QSizePolicy.
+Expanding` (para estirarse hasta el pie de la columna 1), y un widget
+`Expanding` puede encogerse bastante más que su alto real — el
+`minimumSizeHint()` del contenedor entero hereda esa elasticidad y dejó
+de ser un piso confiable. _PanelReservasAisladas_ (`_armar_ui` y
+`showEvent`) pasa a medir con `sizeHint()` en vez de `minimumSizeHint()`
+— Regulares no se tocó, sigue con `minimumSizeHint()` como siempre (no
+tiene ningún `Expanding` en su columna).
+
+Chequeo pedido por la clienta ("que salga una alerta de éxito como en
+todo el sistema"): faltaba el cartel de éxito simple (sin advertencias)
+al crear y al cancelar una reserva aislada — `_crear`/`_cancelar_
+registro` solo avisaban cuando había advertencias o cuando la cancelación
+era el mismo día, pero se quedaban mudos en el resto de los casos
+(a diferencia de Regulares, que sí tiene el "Reserva cargada con
+éxito."/"Reserva eliminada con éxito." de siempre, punto #9.1.9).
+Mismo gap encontrado y corregido en Reserva extraordinaria (mismos dos
+métodos, copiados de Aisladas). "Modificar reserva" ya tenía el cartel
+en las tres pantallas, no hacía falta tocarlo. Revisado también si
+hacía falta el indicador "Procesando..." (reloj de arena) acá: no — los
+tres botones de acción son operaciones de un solo registro, no un loop
+largo (ver "Indicador 'Procesando...'" más arriba, que es justamente
+para eso).
 
 Pendiente: la clienta todavía no probó esta versión en vivo — puede
 haber correcciones en la próxima ronda.

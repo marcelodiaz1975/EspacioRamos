@@ -158,7 +158,14 @@ def test_tabla_de_abajo_se_expande_con_el_sobrante_de_la_ventana(qtbot, conn):
     tabla."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
+    # Aisladas mide contra `sizeHint()`, no `minimumSizeHint()` como
+    # Regulares — ver `_PanelReservasAisladas.showEvent` para el motivo
+    # (la columna 2, con `QSizePolicy.Expanding`, hace que el mínimo
+    # quede por debajo de lo que el contenido necesita de verdad).
+    for panel, alto_esperado in (
+        (pantalla.panel_regulares, lambda w: w.minimumSizeHint().height()),
+        (pantalla.panel_aisladas, lambda w: w.sizeHint().height()),
+    ):
         layout = panel.layout()
         scroll = panel.findChild(QScrollArea)
         panel_tabla = panel.tabla.parentWidget()
@@ -168,7 +175,7 @@ def test_tabla_de_abajo_se_expande_con_el_sobrante_de_la_ventana(qtbot, conn):
         assert layout.stretch(indice_scroll) == 0
         assert layout.stretch(indice_tabla) == 1
         assert scroll.minimumHeight() == scroll.maximumHeight() == scroll.height()
-        assert scroll.height() == scroll.widget().minimumSizeHint().height()
+        assert scroll.height() == alto_esperado(scroll.widget())
         # Nada después de `panel_tabla`: ni espaciador ni ningún otro ítem.
         assert layout.itemAt(indice_tabla + 1) is None
 
@@ -236,9 +243,10 @@ def test_aisladas_filtros_y_leyenda_separados_en_columnas_propias(qtbot, conn):
     (solo los filtros de la grilla, mismo ancho fijo que la 1, días de la
     semana de a uno -- no agrupados en pares, para que la columna llegue
     simétrica sin hueco en blanco) / columna 3 (Referencias de colores,
-    una por fila, chica, + Detalle estirado hasta abajo) / columna 4 (la
-    grilla sola, celdas más bajas para que entren las 14 horas sin
-    scroll)."""
+    una por fila, sin marco, al triple de alto y con letra más grande
+    -- ronda siguiente sobre la pantalla ya en uso -- + Detalle estirado
+    hasta abajo) / columna 4 (la grilla sola, celdas más bajas para que
+    entren las 14 horas sin scroll)."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
@@ -248,8 +256,14 @@ def test_aisladas_filtros_y_leyenda_separados_en_columnas_propias(qtbot, conn):
     assert isinstance(panel.grilla._contenedor_dias.layout(), QVBoxLayout)
     assert not isinstance(panel.grilla._contenedor_dias.layout(), QGridLayout)
 
-    assert panel.grilla._leyenda_colores._columnas == 1
-    assert panel.grilla._leyenda_colores._tamano_muestra == (24, 14)
+    leyenda = panel.grilla._leyenda_colores
+    assert leyenda._columnas == 1
+    # Al triple del alto original (14 -> 42) — pedido explícito de la
+    # clienta sobre la pantalla ya en uso.
+    assert leyenda._tamano_muestra == (24, 42)
+    assert leyenda._tamano_fuente == 12
+    assert leyenda._alinear_izquierda is True
+    assert "border: none" in leyenda.styleSheet()
     assert panel.grilla.texto_detalle.maximumHeight() == 16_777_215
 
 
@@ -497,22 +511,19 @@ def test_grilla_de_regulares_mantiene_el_tope_identidad_sin_achicarse(qtbot, con
     assert panel_r.grilla.maximumHeight() == panel_r.grilla.alto_natural_grilla()
 
 
-def test_detalle_de_aisladas_termina_cerca_del_pie_del_tercer_boton(qtbot, conn):
-    """Punto #9.1.6 (SistemaDF v0.11.2026.10): "a la altura donde
-    termina el tercer botón, hasta ahí tiene que llegar el cuadro de
-    detalle" — reemplaza al criterio viejo de alinear con "Horas
-    aisladas mensuales". El alto real de los botones depende de la
-    fuente que les da `hoja_estilos()`, así que hay que aplicarla para
-    medir lo mismo que ve la clienta.
-
-    Tolerancia generosa, no `<= 5` como el resto de las alineaciones de
-    esta pantalla (ver el comentario completo en `_ALTO_DETALLE_
-    AISLADAS`): bajo `hoja_estilos()` real, incluso llevando el cuadro a
-    su piso (altura casi nula) queda un resto de ~30px que esta sola
-    constante no puede cerrar — mejor esfuerzo sin una captura real de
-    la clienta para seguir calibrando. Lo que sí se verifica de forma
-    dura es que "Detalle" quedó bastante más arriba que con el criterio
-    viejo (64px de alto), no que la alineación sea exacta."""
+def test_detalle_de_aisladas_llega_al_pie_de_su_columna(qtbot, conn):
+    """Desde que "Referencias de colores" pasó al triple de alto (ronda
+    sobre la pantalla ya en uso, ver `test_aisladas_filtros_y_leyenda_
+    separados_en_columnas_propias`), la columna 3 (leyenda + Detalle)
+    puede terminar más alta que la columna 1 (formulario + botones) —
+    ya no tiene sentido medir "Detalle" contra el pie del tercer botón
+    (criterio viejo, de cuando la columna 1 era siempre la más alta).
+    Lo que sigue valiendo (`fila_columnas` iguala el alto de las cuatro
+    columnas) es que "Detalle", al tener `stretch=1` sin nada después,
+    llega siempre hasta el pie de SU PROPIA columna — a diferencia del
+    tercer botón, que puede quedar con hueco en blanco debajo (absorbido
+    por el `addStretch()` del formulario) si la columna 3 termina
+    marcando el alto de la fila."""
     _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
@@ -523,12 +534,12 @@ def test_detalle_de_aisladas_termina_cerca_del_pie_del_tercer_boton(qtbot, conn)
     qtbot.waitExposed(pantalla)
 
     panel_a = pantalla.panel_aisladas
-    boton_cancelar = next(b for b in panel_a.findChildren(QPushButton) if b.text() == "Cancelar reserva")
-    fondo_boton = boton_cancelar.mapToGlobal(boton_cancelar.rect().bottomLeft()).y()
+    panel_col_detalle = panel_a.grilla._leyenda_colores.parentWidget()
+    fondo_columna = panel_col_detalle.mapToGlobal(panel_col_detalle.rect().bottomLeft()).y()
     fondo_detalle = panel_a.grilla.texto_detalle.mapToGlobal(
         panel_a.grilla.texto_detalle.rect().bottomLeft()
     ).y()
-    assert abs(fondo_boton - fondo_detalle) <= 40
+    assert abs(fondo_columna - fondo_detalle) <= 5
 
 
 def test_titulo_profesional_alineado_con_filtro_de_localidad(qtbot, conn):

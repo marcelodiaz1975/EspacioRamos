@@ -510,8 +510,61 @@ class LeyendaColores(QGroupBox):
         self._tamano_muestra = (40, 24)
         self._ancho_etiqueta: int | None = None
         self._tamano_fuente: int | None = None
+        self._alinear_izquierda = False
         self._layout = QGridLayout(self)
         self.actualizar("regular")
+
+    def fijar_columnas(self, columnas: int) -> None:
+        """Cambia la cantidad de columnas de referencias (2 por defecto,
+        o lo que haya dejado `hacer_compacta`) — pensado para Reservas
+        aisladas, que en su rediseño a 4 columnas la pasa a 1 sola (una
+        referencia por fila) en vez de pisar `self._columnas` desde
+        afuera. No vuelve a llamar `actualizar` sola, mismo criterio que
+        el resto de estos `fijar_*`."""
+        self._columnas = columnas
+
+    def quitar_marco(self, margen_superior: int | None = None) -> None:
+        """Saca el marco nativo de `QGroupBox` (borde + área reservada
+        del título) — pedido explícito de la clienta al revisar Reservas
+        aisladas ("sacale el recuadro que recubre las referencias de
+        colores"): el título "Referencias de colores" se queda (sigue
+        funcionando como encabezado suelto de la columna), solo se saca
+        la caja que lo envuelve. `QGroupBox` no tiene esta regla en
+        `estilos.py` (solo `#panelFiltrosGrilla::title`, ver ese
+        archivo) — se pisa acá, por instancia, para no afectar al resto
+        de los usos de esta leyenda (Vista rápida, Oferta de
+        consultorios), que se quedan con la caja de siempre. Sin margen
+        propio del layout tampoco: la caja le sumaba un padding interno
+        que ya no hace falta compensar sin el marco."""
+        self.setStyleSheet("QGroupBox { border: none; }")
+        # Sin tocar el margen de ARRIBA (lo sigue calculando Qt para
+        # dejarle lugar al título, que se queda — sacarlo de acá daba un
+        # bug real: la primera referencia quedaba dibujada encima del
+        # título, tapándole el arranque del texto). Los otros tres lados
+        # sí se achican: ya no hace falta compensar el padding que traía
+        # el marco que se sacó. `margen_superior` (opcional) pisa ese
+        # mínimo nativo con un valor más grande — pedido explícito de la
+        # clienta sobre Reservas aisladas ("queda apelmazada con la
+        # primera referencia... bajá un poco la posición de las
+        # referencias con respecto a la etiqueta"): el mínimo nativo
+        # alcanza para no recortar el título, pero queda demasiado
+        # pegado a la primera fila. Nunca hay que pasarle algo MENOR al
+        # mínimo nativo (sí recortaría el título) — queda a cargo de
+        # quien lo use.
+        margen_titulo = margen_superior if margen_superior is not None else self._layout.contentsMargins().top()
+        self._layout.setContentsMargins(0, margen_titulo, 0, 0)
+
+    def alinear_contenido_izquierda(self, espaciado_horizontal: int = 4) -> None:
+        """Pedido explícito de la clienta ("las referencias pueden estar
+        alineadas a la izquierda y el texto puede arrancar pegado a la
+        referencia"): cada muestra y su etiqueta quedan ancladas arriba a
+        la izquierda de su celda (en vez de ocupar/centrarse en todo el
+        espacio de sobra que le puede tocar a esa columna) y el espacio
+        entre la muestra y el texto se achica del default de Qt (6px) a
+        `espaciado_horizontal`. No vuelve a llamar `actualizar` sola,
+        mismo criterio que el resto de estos `fijar_*`/`alinear_*`."""
+        self._alinear_izquierda = True
+        self._layout.setHorizontalSpacing(espaciado_horizontal)
 
     def hacer_compacta(self) -> None:
         """Pedido de la clienta al revisar Reservas: dos columnas de
@@ -616,7 +669,11 @@ class LeyendaColores(QGroupBox):
             layout_marco = QHBoxLayout(marco_muestra)
             layout_marco.setContentsMargins(0, 0, 0, 0)
             layout_marco.addWidget(muestra)
-            self._layout.addWidget(marco_muestra, fila, columna * 2)
+            alineacion = (
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                if self._alinear_izquierda else Qt.AlignmentFlag(0)
+            )
+            self._layout.addWidget(marco_muestra, fila, columna * 2, alineacion)
             etiqueta = QLabel(texto)
             etiqueta.setWordWrap(True)
             if self._tamano_fuente is not None:
@@ -631,7 +688,7 @@ class LeyendaColores(QGroupBox):
                 metrica = QFontMetrics(etiqueta.font())
                 rect = metrica.boundingRect(QRect(0, 0, self._ancho_etiqueta, 0), Qt.TextFlag.TextWordWrap, texto)
                 etiqueta.setMinimumHeight(rect.height() + 4)
-            self._layout.addWidget(etiqueta, fila, columna * 2 + 1)
+            self._layout.addWidget(etiqueta, fila, columna * 2 + 1, alineacion)
 
 
 class GrillaOperativaWidget(QWidget):

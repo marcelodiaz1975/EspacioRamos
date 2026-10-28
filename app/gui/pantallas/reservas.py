@@ -208,6 +208,19 @@ _ANCHO_COLUMNA_AISLADAS = 260
 # filas`.
 _ALTO_FILA_ENCABEZADO_AISLADAS = 18
 _ALTO_FILA_DATO_AISLADAS = 16
+# Margen de arriba de las columnas 1, 2 y 3 — mismo motivo que
+# `_ALTO_TITULO_FILTROS`, pero bajado de 21: pedido explícito de la
+# clienta, sobre la pantalla ya en uso ("todo arranque bien arriba,
+# pegado a la línea que define la solapa... libera espacio para la
+# tabla"). Arrancó en 9 (lo mínimo que la columna 3 necesitaba para no
+# recortar el título "Referencias de colores") pero quedó "apelmazado"
+# con la primera referencia de abajo — pedido explícito de la clienta,
+# ronda siguiente ("bajá un poco la posición de las referencias con
+# respecto a la etiqueta"): subido a 18 para darle aire al título sin
+# volver al 21 original. Las tres columnas se mueven juntas (sigue
+# siendo el mismo valor para las tres) para no reabrir la diferencia de
+# alineación que la ronda anterior corrigió.
+_ALTO_TITULO_COLUMNA_AISLADAS = 18
 
 
 def _alto_para_filas(tabla: QTableWidget, filas: int) -> int:
@@ -1586,7 +1599,17 @@ class _PanelReservasAisladas(QWidget):
         es exclusivamente para F3 ("Reiniciar solapa"), que sí es un
         pedido explícito de empezar de cero."""
         super().showEvent(event)
-        self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
+        # `sizeHint()`, no `minimumSizeHint()` (a diferencia de Reservas
+        # regulares, ver esa solapa): acá la columna 2 (Filtros) tiene
+        # `QSizePolicy.Expanding` para estirarse hasta el pie de la
+        # columna 1 (ver `_armar_ui`) — un widget `Expanding` puede
+        # encogerse bastante más que su alto real, así que `minimum
+        # SizeHint()` quedaba unos pixels por debajo de lo que el
+        # contenido necesita de verdad, y el `QScrollArea` terminaba
+        # mostrando una barra de scroll vertical de pocos pixels, sin
+        # hacer falta — bug real, reproducido con un script de geometría
+        # (`vscroll.maximum()` daba 41, no 0).
+        self._scroll_superior.setFixedHeight(self._contenido_superior.sizeHint().height())
         self._orden.reiniciar()
         self.actualizar()
         self.combo_profesional.setFocus()
@@ -1626,11 +1649,13 @@ class _PanelReservasAisladas(QWidget):
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
-        # Margen de arriba en `_ALTO_TITULO_FILTROS` (no en 0): mismo
-        # motivo que en Reservas regulares — "Profesional" arranca a la
-        # misma altura que "Filtro de localidad", pedido explícito de la
-        # clienta.
-        form.setContentsMargins(9, _ALTO_TITULO_FILTROS, 9, 0)
+        # Margen de arriba en `_ALTO_TITULO_COLUMNA_AISLADAS` (no en 0,
+        # y no en `_ALTO_TITULO_FILTROS` como Regulares): "Profesional"
+        # arranca a la misma altura que "Filtro de localidad" (columna
+        # 2, ver más abajo) — pedido explícito de la clienta, bajado de
+        # 21 a 9 sobre la pantalla ya en uso para que las tres columnas
+        # arranquen pegadas a la línea de la solapa.
+        form.setContentsMargins(9, _ALTO_TITULO_COLUMNA_AISLADAS, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
@@ -1790,6 +1815,22 @@ class _PanelReservasAisladas(QWidget):
 
         panel_filtros_aisladas = self.grilla.extraer_panel_filtros()
         panel_filtros_aisladas.setFixedWidth(_ANCHO_COLUMNA_AISLADAS)
+        # Sin marco (pedido de la clienta sobre la pantalla ya en uso,
+        # mismo motivo que `LeyendaColores.quitar_marco`): el título ya
+        # viene vacío (`fijar_titulo_filtros("")`), pero el borde de
+        # `QGroupBox` igual reserva arriba el alto nativo de un título
+        # (aunque esté vacío) MÁS el propio grosor del marco — entre
+        # los dos corrían "Filtro de localidad" más abajo que "Profesional"
+        # (columna 1) y que "Referencias de colores" (columna 3, sin
+        # marco desde la ronda anterior). Se saca el marco y se fuerza el
+        # mismo margen de arriba que las otras dos columnas
+        # (`_ALTO_TITULO_COLUMNA_AISLADAS`), dejando los otros tres lados
+        # como ya estaban.
+        panel_filtros_aisladas.setStyleSheet("QGroupBox { border: none; }")
+        margenes_filtros = panel_filtros_aisladas.layout().contentsMargins()
+        panel_filtros_aisladas.layout().setContentsMargins(
+            margenes_filtros.left(), _ALTO_TITULO_COLUMNA_AISLADAS, margenes_filtros.right(), margenes_filtros.bottom(),
+        )
         # "Referencias de colores" se separa del panel de Filtros: pasa a
         # su propia columna 3, arriba del cuadro "Detalle" — pedido
         # explícito de la clienta ("arrancás con las referencias de
@@ -1797,11 +1838,28 @@ class _PanelReservasAisladas(QWidget):
         leyenda_colores = self.grilla.extraer_leyenda_colores()
         # Una referencia por fila (no a dos columnas, que es lo que arma
         # `mostrar_leyenda_colores(compacta=True)` para el panel angosto
-        # de Filtros embebido de siempre) — fuente y cuadros chicos para
-        # ganar lugar, mismo pedido explícito de la clienta.
-        leyenda_colores._columnas = 1
-        leyenda_colores.fijar_tamano_muestra(24, 14)
-        leyenda_colores.fijar_tamano_fuente(9)
+        # de Filtros embebido de siempre). Ronda siguiente, sobre la
+        # pantalla ya en uso: sin el recuadro que las envolvía ("sacale
+        # el recuadro que recubre las referencias de colores"), muestras
+        # al triple de alto (14 -> 42) y letra un poco más grande (9 ->
+        # 12), alineadas a la izquierda con el texto pegado a la muestra
+        # (espaciado horizontal por defecto de Qt, 6px, bajado a 4px) —
+        # todo pedido explícito de la clienta. Lo que este sector gana de
+        # alto se lo saca al cuadro "Detalle" de abajo solo, sin que haga
+        # falta nada más: no tiene stretch propio (ver más abajo, `layout_
+        # col_detalle.addWidget(leyenda_colores)` sin stretch) y
+        # "Detalle" sí (`stretch=1`), así que el que cede el lugar de
+        # sobra es siempre "Detalle".
+        leyenda_colores.fijar_columnas(1)
+        leyenda_colores.fijar_tamano_muestra(24, 42)
+        leyenda_colores.fijar_tamano_fuente(12)
+        # Mismo margen de arriba que las columnas 1 y 2
+        # (`_ALTO_TITULO_COLUMNA_AISLADAS`), no el mínimo nativo que
+        # `quitar_marco()` usa por defecto (quedaba apelmazado con la
+        # primera referencia, ver el comentario completo de esa
+        # constante) — mantiene las tres columnas alineadas entre sí.
+        leyenda_colores.quitar_marco(_ALTO_TITULO_COLUMNA_AISLADAS)
+        leyenda_colores.alinear_contenido_izquierda(4)
         leyenda_colores.actualizar(self.grilla.combo_modo.currentData() or "aislada")
         # La columna de Filtros se estira hasta la misma altura que la
         # columna 1 (ver `fila_columnas` más abajo, que iguala el alto de
@@ -1826,10 +1884,10 @@ class _PanelReservasAisladas(QWidget):
         panel_col_detalle = QWidget()
         panel_col_detalle.setFixedWidth(_ANCHO_COLUMNA_AISLADAS)
         layout_col_detalle = QVBoxLayout(panel_col_detalle)
-        # Sin margen propio, mismo motivo que la columna 2: "Referencias de
-        # colores" es un `QGroupBox` (como "Filtros") y ya trae su propio
-        # margen nativo para alinearse con "Profesional" — sumarle
-        # `_ALTO_TITULO_FILTROS` encima lo corría de más.
+        # Sin margen propio: "Referencias de colores" (`leyenda_colores`,
+        # ver más arriba) ya trae su propio margen de arriba
+        # (`_ALTO_TITULO_COLUMNA_AISLADAS`, aplicado en `LeyendaColores.
+        # quitar_marco`) — sumarle otro encima la corría de más.
         layout_col_detalle.setContentsMargins(0, 0, 0, 0)
         layout_col_detalle.addWidget(leyenda_colores)
         etiqueta_detalle, texto_detalle = self.grilla.extraer_detalle()
@@ -1872,15 +1930,18 @@ class _PanelReservasAisladas(QWidget):
         scroll.setWidget(contenido)
         # Mismo mecanismo que Reservas regulares (ver esa solapa para el
         # detalle completo): `scroll` pasa de `stretch=1` a un alto FIJO
-        # igual a lo que su contenido realmente necesita
-        # (`contenido.minimumSizeHint()`, sin dejarle nada de más), así
-        # el sobrante de la ventana se lo lleva la tabla de abajo en vez
-        # de quedar invisible dentro del scroll — "Reservas aisladas"
-        # sigue quedando FUERA de este `QScrollArea` para que su título y
-        # un par de filas siempre se vean sin scrollear todo el panel.
-        scroll.setFixedHeight(contenido.minimumSizeHint().height())
+        # igual a lo que su contenido realmente necesita, así el sobrante
+        # de la ventana se lo lleva la tabla de abajo en vez de quedar
+        # invisible dentro del scroll — "Reservas aisladas" sigue
+        # quedando FUERA de este `QScrollArea` para que su título y un
+        # par de filas siempre se vean sin scrollear todo el panel.
+        # `sizeHint()`, no `minimumSizeHint()` como en Regulares — ver
+        # `showEvent` para el motivo completo (la columna 2, con
+        # `QSizePolicy.Expanding`, hace que el mínimo quede por debajo de
+        # lo que el contenido necesita de verdad).
+        scroll.setFixedHeight(contenido.sizeHint().height())
         # Guardados aparte para volver a fijar el alto en `showEvent` (ver
-        # esa solapa en Regulares) — el `minimumSizeHint()` de acá puede
+        # esa solapa en Regulares) — el `sizeHint()` de acá puede
         # quedar unos pixels desincronizado hasta el primer show real.
         self._scroll_superior = scroll
         self._contenido_superior = contenido
@@ -2249,6 +2310,11 @@ class _PanelReservasAisladas(QWidget):
             self._registrar_ausencia_por_reubicacion(id_profesional, fecha, _id)
         if advertencias:
             QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias))
+        else:
+            # Mismo criterio "EN GENERAL" que Reservas regulares (punto
+            # #9.1.9) y el resto del sistema: alerta de éxito aunque no
+            # haya nada puntual que avisar — faltaba acá.
+            QMessageBox.information(self, "Reserva creada", "Reserva creada con éxito.")
         self._copiar_mensaje_detalle(datos["id_profesional"], fecha)
         self.actualizar()
         self._resetear_formulario()
@@ -2710,6 +2776,12 @@ class _PanelReservaExtraordinaria(QWidget):
         _resolver_periodo_imputar(self.conn, id_profesional, fecha[:7], periodo_a_imputar)
         if advertencias:
             QMessageBox.information(self, "Reserva creada", "Reserva creada con avisos:\n" + "\n".join(advertencias))
+        else:
+            # Mismo criterio "EN GENERAL" que el resto del sistema:
+            # alerta de éxito aunque no haya nada puntual que avisar —
+            # faltaba acá (ver Reservas aisladas, mismo gap detectado y
+            # corregido ahí).
+            QMessageBox.information(self, "Reserva creada", "Reserva creada con éxito.")
         self._copiar_mensaje_detalle(id_profesional, fecha)
         self.actualizar()
         self._resetear_formulario()
@@ -2724,6 +2796,8 @@ class _PanelReservaExtraordinaria(QWidget):
         regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
         if requiere_aviso:
             QMessageBox.information(self, titulo, "Cancelada el mismo día: avisar al profesional.")
+        else:
+            QMessageBox.information(self, titulo, "Reserva cancelada con éxito.")
         self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
         self.actualizar()
         return True
