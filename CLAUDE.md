@@ -580,6 +580,42 @@ usa `periodo` para acotar `mes_actual_inicio`/`mes_actual_fin` en
 `app/negocio/grilla_operativa.py`. Sin cambios de código: ambas partes
 del pedido ya estaban cubiertas antes de esta ronda.
 
+Ronda de cierre, pedido explícito de la clienta sobre la tabla de abajo
+("Muy conforme hasta ahora, ajustaría el ancho de la tabla en algunas
+columnas ya para terminar esta solapa definitivamente"): ancho por
+columna puntual, no el `_ajustar_columnas` genérico que comparten
+Regulares/Extraordinaria (`_ajustar_columnas_aisladas`, nueva función,
+mismo arranque — `resizeColumnsToContents()` + `_PADDING_COLUMNA` — con
+recortes después):
+
+- Unidad/Día/Fecha: 20%/15%/20% de recorte sobre el ancho ya calculado
+  (con relleno incluido).
+- "Consultorio" pasa a llamarse "Consul" SOLO en esta tabla
+  (`setHorizontalHeaderLabels`, no afecta a Regulares/Extraordinaria, que
+  siguen con "Consultorio"). El recorte del 60% pedido sobre esa columna
+  se probó primero literal y RECORTABA LA PROPIA ETIQUETA "Consul" a la
+  mitad ("onsu" en pantalla, confirmado con una captura real) — se
+  descartó ese porcentaje y se dejó al ancho natural que necesita el
+  título "Consul" (58px contra 88px que hubiera tenido con el 60%
+  literal), mismo criterio que Reubicación/Período imputado.
+- Reubicación/Período imputado: "que la etiqueta del título entre
+  justo"/"que el ancho coincida con el título" — ancho NATURAL que ya
+  calcula `resizeColumnsToContents()` antes de sumarle `_PADDING_
+  COLUMNA` (ese método ya mide el título en negrita tal cual lo pinta
+  `QHeaderView::section`, no hace falta recalcularlo a mano).
+- Estado: "que la palabra 'Confirmada' entre justo" — medida a mano con
+  `QFontMetrics` sobre esa palabra puntual (no sobre lo que haya cargado
+  en la tabla en ese momento, que podría no incluir ninguna fila
+  "Confirmada" si está filtrada a un profesional con solo
+  cancelaciones), tomando el máximo contra el ancho natural para no
+  quedar más angosto que lo que la tabla ya necesita hoy.
+
+Verificado con una captura real (1500px de ancho) que la tabla entera
+entra sin scroll horizontal (1214px de columnas contra 1452px de ancho
+disponible, de sobra) y que ninguna de las columnas "al mínimo" quedó
+recortada. Tests nuevos en `tests/test_gui_reservas.py`
+(`test_tabla_aisladas_columnas_angostadas_sin_scroll_horizontal`).
+
 Pendiente: la clienta todavía no probó esta versión en vivo — puede
 haber correcciones en la próxima ronda.
 

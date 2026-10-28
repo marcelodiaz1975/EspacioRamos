@@ -1,5 +1,6 @@
 import pytest
 from PySide6.QtCore import QDate, Qt
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QApplication, QDialog, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QVBoxLayout,
     QWidget,
@@ -384,6 +385,56 @@ def test_tabla_reservas_aisladas_escrolea_con_mas_filas_de_las_que_entran(qtbot,
 
     assert pantalla.panel_aisladas.tabla.rowCount() == cantidad_filas
     assert pantalla.panel_aisladas.tabla.verticalScrollBar().maximum() > 0
+
+
+def test_tabla_aisladas_columnas_angostadas_sin_scroll_horizontal(qtbot, conn):
+    """Pedido explícito de la clienta, cierre de esta solapa: "El objetivo
+    es que se vea todo sin escrolear en horizontal" — ajuste puntual de
+    ancho por columna sobre la tabla de abajo (`_ajustar_columnas_
+    aisladas`, no el `_ajustar_columnas` genérico que usan Regulares/
+    Extraordinaria). "Consultorio" pasa a llamarse "Consul" solo en esta
+    tabla, y la columna queda al ancho natural que necesita ese título
+    (sin el 60% pedido literalmente: un primer intento con ese
+    porcentaje recortaba la propia etiqueta "Consul" a la mitad,
+    confirmado con una captura — ver `_ajustar_columnas_aisladas`)."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Pérez")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-11-09",
+        HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
+    qtbot.waitExposed(pantalla)
+
+    tabla = pantalla.panel_aisladas.tabla
+    assert tabla.horizontalHeaderItem(reservas_modulo._COL_AISLADAS_CONSULTORIO).text() == "Consul"
+    assert tabla.horizontalScrollBar().maximum() == 0
+
+    fm = QFontMetrics(tabla.font())
+    ancho_minimo_confirmada = fm.horizontalAdvance("Confirmada")
+    assert tabla.columnWidth(reservas_modulo._COL_AISLADAS_ESTADO) >= ancho_minimo_confirmada
+
+    # Ninguna columna "al mínimo" quedó más angosta que su propio título
+    # (serían clipeados, mismo bug ya corregido para "Consul")
+    for columna in (
+        reservas_modulo._COL_AISLADAS_CONSULTORIO,
+        reservas_modulo._COL_AISLADAS_REUBICACION,
+        reservas_modulo._COL_AISLADAS_PERIODO_IMPUTADO,
+    ):
+        texto = tabla.horizontalHeaderItem(columna).text()
+        ancho_minimo_titulo = QFontMetrics(tabla.font()).horizontalAdvance(texto)
+        assert tabla.columnWidth(columna) >= ancho_minimo_titulo
 
 
 def test_cuadro_detalle_escrolea_con_mas_texto_del_que_entra(qtbot, conn):

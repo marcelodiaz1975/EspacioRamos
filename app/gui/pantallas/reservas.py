@@ -14,7 +14,7 @@ import sqlite3
 from datetime import date
 
 from PySide6.QtCore import QDate, QEvent, QLocale, QObject, QTimer
-from PySide6.QtGui import QGuiApplication, QValidator
+from PySide6.QtGui import QFontMetrics, QGuiApplication, QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -92,6 +92,87 @@ def _ajustar_columnas(tabla: QTableWidget) -> None:
     for columna in range(tabla.columnCount()):
         tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
     tabla.setColumnWidth(0, max(tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+
+
+# Índices de columna de la tabla de abajo de Reservas aisladas (ver
+# `_PanelReservasAisladas._armar_ui`, `setHorizontalHeaderLabels`) — se
+# usan en `_ajustar_columnas_aisladas` para los recortes puntuales
+# pedidos por la clienta, ronda de cierre de esta solapa.
+_COL_AISLADAS_UNIDAD = 3
+_COL_AISLADAS_CONSULTORIO = 4
+_COL_AISLADAS_DIA = 5
+_COL_AISLADAS_FECHA = 6
+_COL_AISLADAS_REUBICACION = 8
+_COL_AISLADAS_ESTADO = 9
+_COL_AISLADAS_PERIODO_IMPUTADO = 11
+# Margen chico para las columnas que se ajustan "al mínimo que entre
+# justo" (Estado) cuando ese mínimo se calcula a mano con `QFontMetrics`
+# en vez de `resizeColumnsToContents()` — compensa el margen interno que
+# Qt le suma a cada celda por su cuenta (no hay ningún `QTableWidget::
+# item` en `estilos.py` que lo fije a un valor propio, así que es el
+# default nativo del estilo, unos pocos píxels por lado).
+_PADDING_AJUSTE_MINIMO_AISLADAS = 10
+
+
+def _ajustar_columnas_aisladas(tabla: QTableWidget) -> None:
+    """Variante de `_ajustar_columnas` solo para la tabla de abajo de
+    Reservas aisladas — pedido explícito de la clienta, cierre de esta
+    solapa: "el objetivo es que se vea todo sin escrolear en horizontal".
+    Arranca igual (`resizeColumnsToContents()` + el mismo relleno de
+    `_PADDING_COLUMNA` que el resto del sistema) y despues recorta las
+    columnas puntuales que pidió, cada una con su propio criterio:
+
+    - Unidad/Día/Fecha: un porcentaje fijo de recorte sobre el ancho ya
+      calculado arriba (con relleno incluido, el mismo que ve la clienta
+      en pantalla).
+    - Consultorio: se renombra "Consul" en `setHorizontalHeaderLabels`
+      (no acá) y se le aplica el mismo criterio "que entre justo" que
+      Reubicación/Período imputado (ver abajo), NO el 60% pedido
+      literalmente — ese porcentaje, aplicado sobre el ancho CON relleno
+      (88px con "Consul" ya puesto), daba 35px y recortaba la propia
+      etiqueta "Consul" a la mitad ("onsu" en pantalla, confirmado con
+      una captura) — resultado contrario al pedido ("que se vea todo"/
+      la etiqueta recién renombrada para que se lea). Con el ancho
+      natural sin relleno (58px) la columna queda igual achicada en
+      más de la mitad frente al "Consultorio" de antes y sin recortar
+      nada — la clienta puede pedir un valor distinto si lo prefiere.
+    - Reubicación/Período imputado: "que la etiqueta del título entre
+      justo"/"que el ancho coincida con el título" — se usa el ancho
+      NATURAL que ya calculó `resizeColumnsToContents()` ANTES de sumarle
+      `_PADDING_COLUMNA` (guardado en `anchos_sin_relleno`), sin agregar
+      nada de relleno extra: ese método ya mide el título en negrita tal
+      cual lo pinta `QHeaderView::section` (padding/negrita de
+      `estilos.py` incluidos), así que no hace falta recalcularlo a mano
+      con `QFontMetrics` (que mediría la fuente SIN negrita si se usa
+      `header.font()` directo — la negrita es CSS, no está reflejada ahí,
+      mismo problema ya documentado en `LeyendaColores.fijar_tamano_
+      fuente`).
+    - Estado: "que la palabra 'Confirmada' entre justo" — se pide por una
+      palabra puntual, no por lo que haya cargado en la tabla en este
+      momento (podría estar filtrada a un profesional con solo
+      cancelaciones, o vacía). Se mide esa palabra a mano con
+      `QFontMetrics` (la celda no tiene negrita ni ningún otro QSS propio
+      — a diferencia del título, acá `tabla.font()` sí reflaja la fuente
+      real) y se toma el máximo contra el ancho natural, para no quedar
+      más angosto que lo que la tabla ya necesita hoy."""
+    tabla.resizeColumnsToContents()
+    anchos_sin_relleno = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
+    for columna in range(tabla.columnCount()):
+        tabla.setColumnWidth(columna, anchos_sin_relleno[columna] + _PADDING_COLUMNA)
+    tabla.setColumnWidth(0, max(tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+
+    for columna, factor in (
+        (_COL_AISLADAS_UNIDAD, 0.8),
+        (_COL_AISLADAS_DIA, 0.85),
+        (_COL_AISLADAS_FECHA, 0.8),
+    ):
+        tabla.setColumnWidth(columna, round(tabla.columnWidth(columna) * factor))
+
+    for columna in (_COL_AISLADAS_CONSULTORIO, _COL_AISLADAS_REUBICACION, _COL_AISLADAS_PERIODO_IMPUTADO):
+        tabla.setColumnWidth(columna, anchos_sin_relleno[columna])
+
+    ancho_minimo_estado = QFontMetrics(tabla.font()).horizontalAdvance("Confirmada") + _PADDING_AJUSTE_MINIMO_AISLADAS
+    tabla.setColumnWidth(_COL_AISLADAS_ESTADO, max(anchos_sin_relleno[_COL_AISLADAS_ESTADO], ancho_minimo_estado))
 
 
 class _FiltroCalendarioArrancaHoy(QObject):
@@ -2039,7 +2120,12 @@ class _PanelReservasAisladas(QWidget):
         self.tabla.setColumnCount(12)
         self.tabla.setHorizontalHeaderLabels(
             [
-                "Profesional", "Localidad", "Edificio", "Unidad", "Consultorio", "Día", "Fecha", "Horario",
+                # "Consultorio" pasa a "Consul" SOLO en esta tabla (pedido
+                # explícito de la clienta, cierre de esta solapa) — ver
+                # `_ajustar_columnas_aisladas` para el recorte de ancho
+                # que además se le aplica a esta columna y a las otras
+                # puntuales.
+                "Profesional", "Localidad", "Edificio", "Unidad", "Consul", "Día", "Fecha", "Horario",
                 "Reubicación", "Estado", "Valor", "Período imputado",
             ]
         )
@@ -2284,7 +2370,7 @@ class _PanelReservasAisladas(QWidget):
             valor_hora = consultorio["ValorHoraAisladaActual"] if consultorio else 0.0
             self.tabla.setItem(fila_idx, 10, item_numero(self._valor_reserva(r, valor_hora, recargo_pct)))
             self.tabla.setItem(fila_idx, 11, QTableWidgetItem(r["PeriodoImputado"] or ""))
-        _ajustar_columnas(self.tabla)
+        _ajustar_columnas_aisladas(self.tabla)
         self._sincronizar_grilla()
         self.grilla.actualizar()
 
