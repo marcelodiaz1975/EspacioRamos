@@ -9,6 +9,7 @@ from app.negocio.liquidaciones import emitir_liquidacion
 from app.negocio.reservas import (
     ConflictoBloqueanteError,
     cancelar_reserva_aislada,
+    eliminar_reserva_aislada,
     crear_reserva_aislada,
     crear_reserva_regular,
     eliminar_reserva_regular,
@@ -806,6 +807,40 @@ def test_cancelar_reserva_aislada_mismo_dia_en_bloque_rigido_no_bloquea(conn, co
     requiere_aviso = cancelar_reserva_aislada(conn, id_reserva, fecha_actual="2026-08-20")
     assert requiere_aviso is True
     assert obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)["Estado"] == "Cancelada"
+
+
+# ------------------------------------------------------------ eliminación (Reservas aisladas)
+
+def test_eliminar_reserva_aislada_otro_dia_no_requiere_aviso_y_borra_la_fila(conn, consultorio, profesional_factory):
+    """`eliminar_reserva_aislada` (botón "Eliminar reserva" de Reservas
+    aisladas, antes "Cancelar reserva") borra la fila por completo en
+    vez de marcarla `Estado="Cancelada"` — pedido explícito de la
+    clienta. `cancelar_reserva_aislada` sigue existiendo tal cual, sin
+    tocar (todavía la usa Reserva extraordinaria)."""
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=11, hora_fin=12,
+    )
+    requiere_aviso = eliminar_reserva_aislada(conn, id_reserva, fecha_actual="2026-08-10")
+    assert requiere_aviso is False
+    assert obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva) is None
+
+
+def test_eliminar_reserva_aislada_mismo_dia_requiere_aviso(conn, consultorio, profesional_factory):
+    id_prof = profesional_factory("Lo Veci")
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio,
+        fecha="2026-08-20", hora_inicio=11, hora_fin=12,
+    )
+    requiere_aviso = eliminar_reserva_aislada(conn, id_reserva, fecha_actual="2026-08-20")
+    assert requiere_aviso is True
+    assert obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva) is None
+
+
+def test_eliminar_reserva_aislada_inexistente_lanza_error(conn):
+    with pytest.raises(ValueError):
+        eliminar_reserva_aislada(conn, 99999)
 
 
 def test_crear_reserva_aislada_guarda_el_periodo_imputado(conn, consultorio, profesional_factory):

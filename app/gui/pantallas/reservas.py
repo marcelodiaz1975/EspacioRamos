@@ -68,6 +68,7 @@ from app.negocio.resumen_profesional import calcular_resumen_profesional
 from app.negocio.reservas import (
     ConflictoBloqueanteError,
     cancelar_reserva_aislada,
+    eliminar_reserva_aislada,
     crear_reserva_aislada,
     crear_reserva_regular,
     eliminar_reserva_regular,
@@ -99,22 +100,38 @@ def _ajustar_columnas(tabla: QTableWidget) -> None:
 # Índices de columna de la tabla de abajo de Reservas aisladas (ver
 # `_PanelReservasAisladas._armar_ui`, `setHorizontalHeaderLabels`) — se
 # usan en `_ajustar_columnas_aisladas` para los recortes puntuales
-# pedidos por la clienta, ronda de cierre de esta solapa.
+# pedidos por la clienta, ronda de cierre de esta solapa. "Estado" ya
+# no existe como columna (eliminada, ver `_armar_ui`) — los índices que
+# quedan corren uno menos desde "Valor" en adelante.
 _COL_AISLADAS_PROFESIONAL = 0
+_COL_AISLADAS_LOCALIDAD = 1
+_COL_AISLADAS_EDIFICIO = 2
 _COL_AISLADAS_UNIDAD = 3
 _COL_AISLADAS_CONSULTORIO = 4
 _COL_AISLADAS_DIA = 5
 _COL_AISLADAS_FECHA = 6
 _COL_AISLADAS_HORARIO = 7
 _COL_AISLADAS_REUBICACION = 8
-_COL_AISLADAS_ESTADO = 9
-_COL_AISLADAS_PERIODO_IMPUTADO = 11
-# Margen chico para las columnas que se ajustan "al mínimo que entre
-# justo" (Estado) cuando ese mínimo se calcula a mano con `QFontMetrics`
-# en vez de `resizeColumnsToContents()` — compensa el margen interno que
-# Qt le suma a cada celda por su cuenta (no hay ningún `QTableWidget::
-# item` en `estilos.py` que lo fije a un valor propio, así que es el
-# default nativo del estilo, unos pocos píxels por lado).
+_COL_AISLADAS_PERIODO_IMPUTADO = 10
+# Ancho fijo del encabezado vertical (número de fila) de esta tabla —
+# ver el comentario junto a `setFixedWidth` en `_armar_ui` para el bug
+# real que esto corrige. Mide lo mismo que Qt calcula nativamente para
+# 4 dígitos (medido con un script de geometría offscreen: 21px para 1
+# dígito, 29px para 2, 38px para 3, 46px para 4 — la progresión no es
+# lineal porque `QHeaderView::section` en `estilos.py` ya le suma su
+# propio padding fijo de 4px por lado más la negrita, encima del ancho
+# de los caracteres).
+_ANCHO_HEADER_VERTICAL_AISLADAS = 46
+# Margen chico para calcular cuánto medía la columna "Estado" (ya
+# eliminada, ver `_armar_ui`) cuando se ajustaba "al mínimo que entre
+# justo" con `QFontMetrics` en vez de `resizeColumnsToContents()` —
+# compensa el margen interno que Qt le suma a cada celda por su cuenta
+# (no hay ningún `QTableWidget::item` en `estilos.py` que lo fije a un
+# valor propio, así que es el default nativo del estilo, unos pocos
+# píxels por lado). Sigue usándose en `_ajustar_columnas_aisladas` para
+# calcular cuánto ancho se LIBERÓ al sacar esa columna (ese ancho, no
+# la columna en sí, es lo que ahora se reparte entre Profesional/
+# Localidad/Edificio/Fecha).
 _PADDING_AJUSTE_MINIMO_AISLADAS = 10
 # `QTableView { border: 1px solid #000000; }` en `estilos.py` — 1px a
 # cada lado del widget entero, antes de llegar al encabezado vertical o
@@ -151,14 +168,13 @@ def _ajustar_columnas_aisladas(tabla: QTableWidget) -> None:
       la propia etiqueta "Consul" a la mitad ("onsu" en pantalla,
       confirmado con una captura) — se descartó ese porcentaje a favor
       de este mismo criterio "que entre justo".
-    - Estado: "que la palabra 'Confirmada' entre justo" — se pide por una
-      palabra puntual, no por lo que haya cargado en la tabla en este
-      momento (podría estar filtrada a un profesional con solo
-      cancelaciones, o vacía). Se mide esa palabra a mano con
-      `QFontMetrics` (la celda no tiene negrita ni ningún otro QSS propio
-      — a diferencia del título, acá `tabla.font()` sí reflaja la fuente
-      real) y se toma el máximo contra el ancho natural, para no quedar
-      más angosto que lo que la tabla ya necesita hoy.
+    - "Estado" ya no es una columna real (eliminada — ver `_armar_ui`),
+      pero el ancho que hubiera ocupado ("que la palabra 'Confirmada'
+      entre justo", mismo cálculo de siempre con `QFontMetrics`, la
+      celda no tenía negrita a diferencia del título) sigue
+      calculándose, solo para repartirlo en partes iguales entre
+      Profesional/Localidad/Edificio/Fecha (pedido explícito de la
+      clienta) en vez de perderse sin más.
 
     Al final, `_distribuir_ancho_sobrante_aisladas` le da a "Profesional"
     lo que sobre del ancho total de la tabla una vez puestas todas las
@@ -181,8 +197,18 @@ def _ajustar_columnas_aisladas(tabla: QTableWidget) -> None:
     ):
         tabla.setColumnWidth(columna, anchos_sin_relleno[columna])
 
-    ancho_minimo_estado = QFontMetrics(tabla.font()).horizontalAdvance("Confirmada") + _PADDING_AJUSTE_MINIMO_AISLADAS
-    tabla.setColumnWidth(_COL_AISLADAS_ESTADO, max(anchos_sin_relleno[_COL_AISLADAS_ESTADO], ancho_minimo_estado))
+    # Ancho que la columna "Estado" (ya eliminada) hubiera ocupado —
+    # repartido en partes iguales entre Profesional/Localidad/Edificio/
+    # Fecha, pedido explícito de la clienta ("repartí ese ancho en
+    # partes iguales"). Se suma DESPUÉS de los ajustes puntuales de
+    # arriba (Fecha ya está en su ancho "entre justo", por ejemplo), no
+    # los reemplaza.
+    ancho_estado_liberado = QFontMetrics(tabla.font()).horizontalAdvance("Confirmada") + _PADDING_AJUSTE_MINIMO_AISLADAS
+    reparto = ancho_estado_liberado // 4
+    for columna in (
+        _COL_AISLADAS_PROFESIONAL, _COL_AISLADAS_LOCALIDAD, _COL_AISLADAS_EDIFICIO, _COL_AISLADAS_FECHA,
+    ):
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + reparto)
 
     _distribuir_ancho_sobrante_aisladas(tabla)
 
@@ -193,9 +219,9 @@ def _distribuir_ancho_sobrante_aisladas(tabla: QTableWidget) -> None:
     ancho dáselo a la columna 'Profesional'... sin espacios en blanco al
     final y sin necesidad de que se vea la barra de desplazamiento
     horizontal". Se llama al final de `_ajustar_columnas_aisladas`, con
-    las otras 11 columnas ya en su ancho definitivo — "Profesional" se
+    las otras 10 columnas ya en su ancho definitivo — "Profesional" se
     lleva lo que sobre (o lo que falte, moderado por el piso de
-    `_ANCHO_COL_PROFESIONAL`) para que la suma de las 12 columnas
+    `_ANCHO_COL_PROFESIONAL`) para que la suma de las 11 columnas
     coincida exactamente con el ancho disponible.
 
     "Contemplá que vas a ver sí o sí la barra de desplazamiento
@@ -1966,15 +1992,22 @@ class _PanelReservasAisladas(QWidget):
         self.boton_modificar.setStyleSheet(_ESTILO_BOTON_AISLADAS_ALTO)
         self.boton_modificar.clicked.connect(self._modificar_seleccionada)
         form.addWidget(self.boton_modificar)
-        self.boton_cancelar = QPushButton("Cancelar reserva")
+        # "Eliminar reserva" (antes "Cancelar reserva", renombrado a
+        # pedido explícito de la clienta): borra la reserva de la tabla/
+        # base directamente en vez de marcarla cancelada — ver
+        # `eliminar_reserva_aislada` (negocio) y `_eliminar`/`_eliminar_
+        # registro` más abajo. Puntual de esta solapa — Reserva
+        # extraordinaria sigue cancelando (`cancelar_reserva_aislada`),
+        # no se tocó.
+        self.boton_cancelar = QPushButton("Eliminar reserva")
         self.boton_cancelar.setObjectName("botonSecundario")
         self.boton_cancelar.setStyleSheet(_ESTILO_BOTON_AISLADAS_ALTO)
-        self.boton_cancelar.clicked.connect(self._cancelar)
+        self.boton_cancelar.clicked.connect(self._eliminar)
         form.addWidget(self.boton_cancelar)
 
         # Sin `addStretch()` acá (a diferencia de antes): pedido explícito
         # de la clienta, tercera ronda — la tabla de abajo tiene que
-        # arrancar justo debajo de "Cancelar reserva", así que esta
+        # arrancar justo debajo de "Eliminar reserva", así que esta
         # columna no se estira con nada de sobra; es la referencia de
         # alto para las otras tres (ver más abajo, `alto_referencia`).
         panel_form.setFixedWidth(_ANCHO_COLUMNA_AISLADAS)
@@ -2198,18 +2231,48 @@ class _PanelReservasAisladas(QWidget):
         layout_tabla.setContentsMargins(9, 0, 9, 9)
         self.tabla = QTableWidget()
         excluir_tabla_del_tab(self.tabla)
-        self.tabla.setColumnCount(12)
+        self.tabla.setColumnCount(11)
         self.tabla.setHorizontalHeaderLabels(
             [
                 # "Consultorio" pasa a "Consul" SOLO en esta tabla (pedido
                 # explícito de la clienta, cierre de esta solapa) — ver
                 # `_ajustar_columnas_aisladas` para el recorte de ancho
                 # que además se le aplica a esta columna y a las otras
-                # puntuales.
+                # puntuales. "Estado" eliminada (pedido explícito,
+                # ronda posterior): con "Eliminar reserva" borrando la
+                # fila directamente en vez de marcarla cancelada, toda
+                # fila de esta tabla es, por definición, una reserva
+                # confirmada — ver `_eliminar`.
                 "Profesional", "Localidad", "Edificio", "Unidad", "Consul", "Día", "Fecha", "Horario",
-                "Reubicación", "Estado", "Valor", "Período imputado",
+                "Reubicación", "Valor", "Período imputado",
             ]
         )
+        # Pedido explícito de la clienta: ancho fijo para que entren 4
+        # caracteres numéricos SIEMPRE, sin importar cuántas filas haya
+        # cargadas en este momento — ver `_distribuir_ancho_sobrante_
+        # aisladas`, que resta este ancho del total disponible para
+        # repartir el resto entre las demás columnas (con "Profesional"
+        # llevándose lo que sobre). Antes quedaba al ancho NATIVO de Qt
+        # (variable según la cantidad de dígitos necesarios para el
+        # número de fila más alto mostrado en este momento — 21px con 1
+        # dígito, 38px con 3), lo cual causaba un bug real reportado por
+        # la clienta: al volver a "Todos los profesionales" después de
+        # filtrar a uno solo, aparecía la barra de desplazamiento
+        # horizontal. Causa real (confirmada con un script de geometría
+        # offscreen): `_distribuir_ancho_sobrante_aisladas` lee `tabla.
+        # verticalHeader().width()` para calcular cuánto darle a
+        # "Profesional", pero en el momento exacto en que corre (dentro
+        # del mismo `actualizar()` que acaba de cambiar la cantidad de
+        # filas) Qt todavía no había vuelto a calcular el ancho nativo
+        # del encabezado para la nueva cantidad de dígitos — leía el
+        # valor VIEJO (más angosto, de la consulta filtrada anterior),
+        # así que "Profesional" quedaba de más ancho del que en
+        # realidad correspondía; recién DESPUÉS Qt actualizaba el
+        # encabezado al ancho correcto (más ancho), y para entonces la
+        # suma total ya desbordaba el viewport por esa misma diferencia.
+        # Con el ancho fijo, el encabezado nunca cambia de valor —
+        # ningún momento en el que pueda quedar desactualizado.
+        self.tabla.verticalHeader().setFixedWidth(_ANCHO_HEADER_VERTICAL_AISLADAS)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -2220,7 +2283,7 @@ class _PanelReservasAisladas(QWidget):
         self.tabla.setMinimumHeight(_alto_para_filas(self.tabla, _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS))
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones)
-        instalar_eliminar_con_tecla(self.tabla, self._cancelar)
+        instalar_eliminar_con_tecla(self.tabla, self._eliminar)
         layout_tabla.addWidget(self.tabla, stretch=1)
         layout_externo.addWidget(panel_tabla, stretch=1)
 
@@ -2439,7 +2502,14 @@ class _PanelReservasAisladas(QWidget):
                 QTableWidgetItem((consultorio["DomicilioLocalidad"] or "(Sin localidad)") if consultorio else "?"),
             )
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(consultorio["NombreEdificio"] if consultorio else "?"))
-            self.tabla.setItem(fila_idx, 3, QTableWidgetItem(consultorio["Departamento"] if consultorio else "?"))
+            # Centrado (pedido explícito de la clienta) — a diferencia de
+            # Localidad/Edificio (texto largo, se alinea a la izquierda
+            # como el resto del sistema), Unidad es un código corto
+            # (ej. "7mo \"L\""), mismo criterio que Consul/Reubicación/
+            # Período imputado más abajo.
+            self.tabla.setItem(
+                fila_idx, 3, item_centrado(consultorio["Departamento"] if consultorio else "?"),
+            )
             self.tabla.setItem(
                 fila_idx, 4, item_centrado(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
             )
@@ -2452,10 +2522,16 @@ class _PanelReservasAisladas(QWidget):
             # "hs" al final (ej. "9:00 a 10:00hs") — mismo pedido puntual.
             self.tabla.setItem(fila_idx, 7, item_numero(_fmt_horario(r["HoraInicio"], r["HoraFin"]) + "hs"))
             self.tabla.setItem(fila_idx, 8, item_centrado("Sí" if r["EsReubicacion"] else "No"))
-            self.tabla.setItem(fila_idx, 9, QTableWidgetItem(r["Estado"]))
+            # Columna "Estado" eliminada (pedido explícito de la clienta,
+            # consecuencia directa de "Cancelar reserva" pasar a
+            # "Eliminar reserva" — ver `_eliminar`/`eliminar_reserva_
+            # aislada`): con el botón borrando la fila directamente en
+            # vez de marcarla cancelada, toda reserva que figure en esta
+            # tabla es, por definición, una reserva confirmada — ya no
+            # hay ningún otro valor posible que mostrar ahí.
             valor_hora = consultorio["ValorHoraAisladaActual"] if consultorio else 0.0
-            self.tabla.setItem(fila_idx, 10, item_numero(self._valor_reserva(r, valor_hora, recargo_pct)))
-            self.tabla.setItem(fila_idx, 11, item_centrado(r["PeriodoImputado"] or ""))
+            self.tabla.setItem(fila_idx, 9, item_numero(self._valor_reserva(r, valor_hora, recargo_pct)))
+            self.tabla.setItem(fila_idx, 10, item_centrado(r["PeriodoImputado"] or ""))
         _ajustar_columnas_aisladas(self.tabla)
         self._sincronizar_grilla()
         self.grilla.actualizar()
@@ -2472,9 +2548,8 @@ class _PanelReservasAisladas(QWidget):
             6: lambda t: t[0]["Fecha"],
             7: lambda t: t[0]["HoraInicio"],
             8: lambda t: bool(t[0]["EsReubicacion"]),
-            9: lambda t: t[0]["Estado"],
-            10: lambda t: t[0]["HoraFin"] - t[0]["HoraInicio"],
-            11: lambda t: t[0]["PeriodoImputado"] or "",
+            9: lambda t: t[0]["HoraFin"] - t[0]["HoraInicio"],
+            10: lambda t: t[0]["PeriodoImputado"] or "",
         }
         return claves[columna]
 
@@ -2620,33 +2695,37 @@ class _PanelReservasAisladas(QWidget):
             return None
         return self._reservas[filas[0].row()]
 
-    def _cancelar_registro(self, reserva: sqlite3.Row, titulo: str) -> bool:
+    def _eliminar_registro(self, reserva: sqlite3.Row, titulo: str) -> bool:
         try:
-            requiere_aviso = cancelar_reserva_aislada(self.conn, reserva["IdReservaAislada"])
+            requiere_aviso = eliminar_reserva_aislada(self.conn, reserva["IdReservaAislada"])
         except ValueError as error:
             QMessageBox.warning(self, titulo, str(error))
             return False
         self.conn.commit()
         regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
         if requiere_aviso:
-            QMessageBox.information(self, titulo, "Cancelada el mismo día: avisar al profesional.")
+            QMessageBox.information(self, titulo, "Eliminada el mismo día: avisar al profesional.")
         self._copiar_mensaje_detalle(reserva["IdProfesional"])
         self.actualizar()
         return True
 
     def _actualizar_botones(self) -> None:
         """Mismo criterio que Reservas regulares: "Modificar reserva"/
-        "Cancelar reserva" quedan deshabilitados sin ninguna fila en
+        "Eliminar reserva" quedan deshabilitados sin ninguna fila en
         foco en la tabla."""
         hay_seleccion = self._fila_seleccionada() is not None
         self.boton_modificar.setEnabled(hay_seleccion)
         self.boton_cancelar.setEnabled(hay_seleccion)
 
-    def _cancelar(self) -> None:
+    def _eliminar(self) -> None:
         """Punto #9.1.6 (homólogo de "Eliminar reserva" en Regulares):
-        pide confirmación explícita antes de cancelar, con los datos
+        pide confirmación explícita antes de eliminar, con los datos
         completos de la reserva (profesional/día/horario) en vez de
-        cancelar directo sin preguntar nada."""
+        borrar directo sin preguntar nada. Antes "Cancelar reserva"
+        (`cancelar_reserva_aislada`, marcaba `Estado="Cancelada"` sin
+        sacar la fila) — pedido explícito de la clienta, borra la
+        reserva de la tabla/base directamente (`eliminar_reserva_
+        aislada`)."""
         reserva = self._fila_seleccionada()
         if reserva is None:
             return
@@ -2654,13 +2733,13 @@ class _PanelReservasAisladas(QWidget):
         nombre_profesional = _texto_profesional(profesional) if profesional else "?"
         dia_semana = fecha_a_dia_semana(date.fromisoformat(reserva["Fecha"]))
         confirmacion = QMessageBox.question(
-            self, "Cancelar reserva",
-            f"¿Cancelar la reserva aislada de {nombre_profesional} el {dia_semana} "
+            self, "Eliminar reserva",
+            f"¿Eliminar la reserva aislada de {nombre_profesional} el {dia_semana} "
             f"{_fmt_fecha(reserva['Fecha'])} de {_fmt_horario(reserva['HoraInicio'], reserva['HoraFin'])}?",
         )
         if confirmacion != QMessageBox.StandardButton.Yes:
             return
-        if self._cancelar_registro(reserva, "Cancelar reserva"):
+        if self._eliminar_registro(reserva, "Eliminar reserva"):
             self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:

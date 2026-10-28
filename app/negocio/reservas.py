@@ -660,6 +660,37 @@ def cancelar_reserva_aislada(
     return requiere_aviso
 
 
+def eliminar_reserva_aislada(
+    conn: sqlite3.Connection, id_reserva_aislada: int, fecha_actual: str | None = None,
+) -> bool:
+    """Botón "Eliminar reserva" de la solapa Reservas aisladas (antes
+    "Cancelar reserva", renombrado y cambiado a pedido explícito de la
+    clienta): a diferencia de `cancelar_reserva_aislada` (que sigue
+    existiendo tal cual, todavía usada por Reserva extraordinaria —
+    pedido puntual de esta solapa, no un cambio general), esto BORRA la
+    fila por completo en vez de marcarla `Estado="Cancelada"` —
+    consecuencia directa de que, en Reservas aisladas, la columna
+    "Estado" deja de tener sentido una vez que toda fila que figure en
+    la tabla es, por definición, una reserva confirmada (ya no hay
+    manera de distinguir "cancelada" de "confirmada" en esa tabla, ni
+    falta hace). Pierde el historial de canceladas por profesional que
+    antes se podía revisar ahí (aceptado explícitamente por la clienta,
+    parte del mismo pedido). Devuelve True si la eliminación requiere
+    aviso (mismo día), igual que la versión anterior — nunca bloquea, ni
+    siquiera dentro de un bloque rígido (DC-04 §4.3, confirmado por el
+    usuario)."""
+    repo = obtener_repositorio(conn, "ReservaAislada")
+    reserva = repo.obtener(id_reserva_aislada)
+    if reserva is None:
+        raise ValueError(f"No existe la reserva aislada #{id_reserva_aislada}")
+
+    fecha_actual = fecha_actual or _fecha_actual_sistema(conn).isoformat()
+    requiere_aviso = fecha_actual == reserva["Fecha"]
+
+    repo.eliminar(id_reserva_aislada)
+    return requiere_aviso
+
+
 def modificar_reserva_aislada(
     conn: sqlite3.Connection, id_reserva_aislada: int, *, hora_inicio: float, hora_fin: float,
     aplica_recargo: bool | None = None, item_extraordinario: str | None = None,

@@ -601,7 +601,7 @@ def mensaje_detalle_reserva_aislada(
         """
         SELECT ra.IdReservaAislada, ra.Fecha, ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo, ra.EsReubicacion,
                ra.EsExtraordinaria, ra.ItemExtraordinario, ra.MontoExtraordinario,
-               c.IdConsultorio, c.NumeroConsultorio, c.ValorHoraAisladaActual, u.Departamento,
+               c.IdConsultorio, c.NumeroConsultorio, c.ValorHoraAisladaActual, u.IdUnidad, u.Departamento,
                e.IdEdificio, e.Nombre AS NombreEdificio, e.Domicilio, loc.Localidad AS DomicilioLocalidad
         FROM ReservaAislada ra
         JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
@@ -759,6 +759,28 @@ def mensaje_detalle_reserva_aislada(
             f"* Nota: Se imputaron los pagos de los sobres recogidos en las unidades hasta el "
             f"{dia_semana} {dt.day}/{dt.month} a las {hora}.",
         ]
+
+    # "PLACAS PARA LOS TIMBRES": pedido explícito de la clienta, para que
+    # el profesional sepa en qué posición del tablero de timbres está su
+    # placa en cada unidad involucrada en ESTE mensaje (del mes +
+    # posteriores) — una línea "* {Edificio} - {Unidad}: Posición {N}"
+    # por cada unidad donde YA tiene una placa asignada (mismo criterio
+    # que `placas.placa_faltante_para_reserva`: cualquier posición de esa
+    # unidad asignada a este profesional alcanza). Si no tiene placa en
+    # alguna de esas unidades, esa unidad se omite sin avisar nada —el
+    # aviso de placa faltante ya existe aparte, al cargar la reserva—; si
+    # no tiene en NINGUNA, se omite la sección entera.
+    unidades_mencionadas: dict[int, sqlite3.Row] = {f["IdUnidad"]: f for f in del_mes + posteriores}
+    lineas_placas: list[str] = []
+    for u in unidades_mencionadas.values():
+        placa = next(
+            (p for p in obtener_repositorio(conn, "Placa").listar(IdUnidad=u["IdUnidad"]) if p["IdProfesional"] == id_profesional),
+            None,
+        )
+        if placa is not None:
+            lineas_placas.append(f"* {u['NombreEdificio']} - {u['Departamento']}: Posición {placa['PosicionTablero']}")
+    if lineas_placas:
+        lineas += ["", "PLACAS PARA LOS TIMBRES"] + lineas_placas
 
     plantilla = resolver_plantilla(
         conn, "mensaje_detalle_reserva_aislada", DEFAULT_DETALLE_RESERVA_AISLADA,

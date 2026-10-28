@@ -21,6 +21,7 @@ from app.negocio.mensajes import (
     sustituir_variables,
 )
 from app.negocio.pagos import crear_cargo_especial, crear_plan_pago_historico, registrar_pago
+from app.negocio.placas import asignar_placa
 from app.repositorio.registro import obtener_repositorio
 
 PERIODO = "2026-08"
@@ -488,6 +489,68 @@ def test_detalle_aislada_un_edificio_en_dos_meses_distintos_no_repite_la_mencion
     assert texto.count("Edificio") == 1
     assert "Edificio Ramos 1: Av. Rivadavia 1234, CABA" in texto
     assert "RESERVAS POSTERIORES" in texto
+
+
+def test_detalle_aislada_sin_placas_no_agrega_la_seccion(conn, profesional_aislada_con_edificios):
+    """Pedido explícito de la clienta: si el profesional no tiene placa
+    asignada en NINGUNA unidad involucrada en el mensaje, la sección
+    "PLACAS PARA LOS TIMBRES" no aparece."""
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "PLACAS" not in texto
+
+
+def test_detalle_aislada_con_placa_en_una_sola_unidad_solo_esa_linea(conn, profesional_aislada_con_edificios):
+    """Con reservas en dos unidades distintas pero placa asignada en
+    solo una de ellas, la sección solo menciona esa — la otra se omite
+    sin avisar nada (el aviso de placa faltante ya existe aparte, al
+    cargar la reserva)."""
+    id_prof, c1, c2, id_ed1, id_ed2 = profesional_aislada_con_edificios
+    id_un1 = obtener_repositorio(conn, "Consultorio").obtener(c1)["IdUnidad"]
+    obtener_repositorio(conn, "Unidad").actualizar(id_un1, CantLimitePlacas=200)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c2, Fecha="2026-08-06", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    asignar_placa(conn, id_unidad=id_un1, posicion=75, id_profesional=id_prof)
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    seccion = texto.split("PLACAS PARA LOS TIMBRES")[1]
+    assert 'Ramos 1 - 7mo "L": Posición 75' in seccion
+    assert "San Justo" not in seccion
+
+
+def test_detalle_aislada_con_placas_en_ambas_unidades_las_dos_lineas(conn, profesional_aislada_con_edificios):
+    """Con placa asignada en las dos unidades involucradas, la sección
+    lista las dos — mismo escenario que el ejemplo real dado por la
+    clienta (Edificio Imperio, dos unidades, dos posiciones)."""
+    id_prof, c1, c2, id_ed1, id_ed2 = profesional_aislada_con_edificios
+    id_un1 = obtener_repositorio(conn, "Consultorio").obtener(c1)["IdUnidad"]
+    id_un2 = obtener_repositorio(conn, "Consultorio").obtener(c2)["IdUnidad"]
+    obtener_repositorio(conn, "Unidad").actualizar(id_un1, CantLimitePlacas=200)
+    obtener_repositorio(conn, "Unidad").actualizar(id_un2, CantLimitePlacas=200)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c2, Fecha="2026-09-03", HoraInicio=9, HoraFin=10,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    asignar_placa(conn, id_unidad=id_un1, posicion=75, id_profesional=id_prof)
+    asignar_placa(conn, id_unidad=id_un2, posicion=145, id_profesional=id_prof)
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "PLACAS PARA LOS TIMBRES" in texto
+    assert texto.index("RESERVAS POSTERIORES") < texto.index("PLACAS PARA LOS TIMBRES")
+    assert 'Ramos 1 - 7mo "L": Posición 75' in texto
+    assert 'San Justo 1 - 3ro "B": Posición 145' in texto
 
 
 def test_detalle_aislada_deposito_de_llave_del_mes(conn, profesional_aislada_con_edificios):

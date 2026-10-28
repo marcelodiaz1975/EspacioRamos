@@ -367,6 +367,93 @@ Panel de control - Avance de período, backup, y vista rápida.png". Sección es
 el nombre del `Seccion` del menú, Solapa el texto de la pestaña
 mostrada (si la pantalla no tiene solapas, se omite esa tercera parte).
 
+## Hilo abierto: Reservas aisladas — tabla (ancho fijo, Eliminar, sin Estado) y mensaje con placas
+
+Pedido de la clienta, cuatro puntos sobre la tabla de abajo de "Reservas
+aisladas" y uno sobre el mensaje "DETALLE RESERVA {MES}" (DC-03):
+
+1. **Bug real reportado y su causa**: "cuando abro el sistema no aparece
+   la barra de desplazamiento horizontal... filtro por un profesional,
+   vuelvo a poner todos, ahí aparece la barra". Reproducido con un
+   script de geometría offscreen (120 reservas de distintos
+   profesionales, filtrar a 1 y volver a "Todos"): el encabezado
+   vertical (número de fila) de `self.tabla` no tiene ancho fijo —Qt lo
+   recalcula solo según la cantidad de dígitos que necesite mostrar
+   (21px con 1 dígito, 29px con 2, 38px con 3, 46px con 4, medido con
+   `QFontMetrics` sobre el estilo real de la app)— y
+   `_distribuir_ancho_sobrante_aisladas` (que reparte el ancho sobrante
+   a la columna "Profesional" leyendo `tabla.verticalHeader().width()`
+   en cada `actualizar()`) corría ANTES de que Qt terminara de
+   recalcular ese ancho para la cantidad de filas nueva: leía el valor
+   VIEJO (más angosto), le daba a "Profesional" más ancho del que
+   correspondía, y cuando Qt actualizaba el encabezado al valor
+   correcto (más ancho) ya no quedaba margen — la suma total desbordaba
+   el viewport por esa misma diferencia y aparecía la barra.
+
+   Arreglado dándole un ancho FIJO al encabezado vertical
+   (`_ANCHO_HEADER_VERTICAL_AISLADAS = 46`, alcanza para 4 caracteres
+   numéricos — pedido explícito de la clienta) con `verticalHeader()
+   .setFixedWidth(...)`, una sola vez en `_armar_ui`: al no cambiar
+   nunca más de valor, el bug de lectura desactualizada queda eliminado
+   de raíz (no hace falta ningún ajuste de timing). El ancho que esto le
+   "saca" a Profesional lo absorbe automáticamente el mecanismo que ya
+   existía (`_distribuir_ancho_sobrante_aisladas`), sin tocarlo.
+
+2. **Columna "Estado" eliminada**: consecuencia directa del punto 3
+   (ver abajo) — con "Eliminar reserva" borrando la fila de la base en
+   vez de marcarla cancelada, toda fila que figure en esta tabla es,
+   por definición, una reserva confirmada, así que la columna deja de
+   aportar nada. El ancho que ocupaba (medido igual que siempre, "que
+   entre justo la palabra 'Confirmada'") se reparte en partes iguales
+   entre Profesional/Localidad/Edificio/Fecha (pedido explícito), DESPUÉS
+   de los ajustes puntuales de cada una (ver `_ajustar_columnas_
+   aisladas`) — no los reemplaza, se suma encima.
+
+3. **"Cancelar reserva" pasa a "Eliminar reserva"**: borra la fila de
+   la tabla/base directamente (`eliminar_reserva_aislada`, nueva en
+   `app.negocio.reservas`) en vez de marcarla `Estado="Cancelada"`
+   (`cancelar_reserva_aislada`, que sigue existiendo TAL CUAL — todavía
+   la usa "Reserva extraordinaria", que no se tocó, pedido puntual de
+   esta solapa). Mismo aviso de "mismo día" que antes (`requiere_
+   aviso`); pierde el historial de canceladas por profesional que antes
+   se podía revisar en esta tabla (filtrando por un profesional
+   puntual) — aceptado explícitamente por la clienta, consecuencia
+   directa de su propio pedido, no un efecto colateral oculto.
+
+4. **Columna "Unidad" centrada** (antes alineada a la izquierda, como
+   Localidad/Edificio — texto largo; Unidad es un código corto, mismo
+   criterio que Consul/Reubicación/Período imputado).
+
+5. **Mensaje "DETALLE RESERVA {MES}": sección "PLACAS PARA LOS
+   TIMBRES"**: al final del mensaje (después de "RESERVAS POSTERIORES"
+   y de la nota de sobres, si la hay), una línea "* {Edificio} -
+   {Unidad}: Posición {N}" por cada unidad involucrada en el mensaje
+   (del mes + posteriores) donde el profesional YA tiene una placa
+   asignada (mismo criterio que `placas.placa_faltante_para_reserva`:
+   cualquier posición de esa unidad alcanza). Si no tiene placa en
+   alguna de esas unidades, esa unidad se omite sin avisar nada — el
+   aviso de placa faltante ya existe aparte, al cargar la reserva; si
+   no tiene en NINGUNA, se omite la sección entera. Al pasar por
+   `mensaje_detalle_reserva_aislada`, llega gratis tanto al mensaje que
+   se copia al confirmar una reserva aislada como al que genera Centro
+   de mensajería a mano (misma función, sin duplicar nada).
+
+Tests nuevos: `tests/test_reservas.py`
+(`test_eliminar_reserva_aislada_otro_dia_no_requiere_aviso_y_borra_la_
+fila`, `test_eliminar_reserva_aislada_mismo_dia_requiere_aviso`,
+`test_eliminar_reserva_aislada_inexistente_lanza_error`),
+`tests/test_gui_reservas.py` (renombrados/actualizados los que
+probaban "Cancelar reserva" sobre Aisladas —
+`test_eliminar_reserva_aislada_borra_la_fila`, `test_eliminar_reserva_
+aislada_pide_confirmacion_explicita`, `test_eliminar_reserva_aislada_
+declinada_no_cambia_nada`, `test_tecla_delete_en_aisladas_elimina_la_
+reserva` — más un test nuevo end-to-end de la sección de placas,
+`test_crear_reserva_aislada_con_placa_asignada_copia_placas_para_los_
+timbres`), `tests/test_mensajes.py` (`test_detalle_aislada_sin_placas_
+no_agrega_la_seccion`, `test_detalle_aislada_con_placa_en_una_sola_
+unidad_solo_esa_linea`, `test_detalle_aislada_con_placas_en_ambas_
+unidades_las_dos_lineas`).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
