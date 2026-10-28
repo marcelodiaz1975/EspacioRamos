@@ -1888,3 +1888,325 @@ bloqueada`, agregándole un `vigencia_fin` histórico a la reserva de
 prueba — su escenario original (reserva sin Vigencia hasta) ahora cae
 del lado permitido a propósito.
 
+## Reservas aisladas: rediseño a 4 columnas
+
+Pedido explícito de la clienta: la pantalla pasó de 2 "columnas"
+(formulario + grilla con sus filtros embebidos, repartidas con un
+`QSplitter`) a 4, todas armadas con `QHBoxLayout` (`fila_columnas` en
+`_PanelReservasAisladas._armar_ui`):
+
+1. Formulario de carga (`panel_form`), sin cambios de contenido hasta
+   los checks "Aplica recargo"/"Es reubicación" — los tres botones
+   (Crear/Modificar/Cancelar) siguen después, al final de la columna
+   (ya estaban ahí). Se sacó el texto "Cant. horas aisladas mensuales"
+   (`etiqueta_horas_aisladas`, con el método `_actualizar_resumen_
+   profesional` que lo alimentaba) — pedido explícito, sin reemplazo.
+2. Solo los filtros de la grilla (Localidad/Edificio/Unidad/Día de la
+   semana/Profesional) — sacados de `self.grilla` con
+   `GrillaOperativaWidget.extraer_panel_filtros()` (nuevo, mismo
+   criterio que `extraer_detalle`: remueve el widget del layout interno
+   y lo devuelve para reubicar, sin re-crearlo). Días de la semana de a
+   uno (NO se llama `agrupar_dias_en_pares()`, a diferencia de
+   Regulares) para que la columna gane alto y llegue simétrica con la 1
+   sin hueco en blanco al final.
+3. "Referencias de colores" (una por fila, sacada del panel de Filtros
+   con `extraer_leyenda_colores()`, nuevo) + el cuadro "Detalle" (ya se
+   sacaba con `extraer_detalle`) debajo, sin tope de alto (antes 25px)
+   — se estira hasta el pie de la columna en vez de quedar chico con un
+   hueco debajo. Ronda siguiente, sobre la pantalla ya en uso: sin el
+   marco de `QGroupBox` que las envolvía (`LeyendaColores.quitar_
+   marco()`, nuevo — el título "Referencias de colores" se queda, sin
+   el borde), muestras al triple de alto (14 → 42, `fijar_tamano_
+   muestra(24, 42)`), letra más grande (9 → 12, `fijar_tamano_fuente`),
+   alineadas a la izquierda con el texto pegado a la muestra
+   (`alinear_contenido_izquierda()`, nuevo, espaciado horizontal 6px →
+   4px). Lo que gana de alto la leyenda se lo saca directo al cuadro
+   "Detalle" sin código extra: ninguno de los dos tiene `addStretch()`
+   propio después de la leyenda y "Detalle" sí tiene `stretch=1`, así
+   que el margen que cede siempre es el de "Detalle".
+4. La grilla sola (ya sin Filtros ni leyenda, que se sacaron arriba):
+   `self.grilla` después de las extracciones queda reducida a esto
+   (su propio `layout_principal` ya solo tiene `panel_grilla`). Celdas
+   más bajas que el default (`fijar_alto_filas`, nuevo en
+   `GrillaOperativaWidget` — 18px/16px en vez de 26px/24px) para que las
+   14 horas (8 a 22hs) entren sin scroll vertical.
+
+Las tres primeras columnas van al mismo ancho fijo
+(`_ANCHO_COLUMNA_AISLADAS = 260`, subido de un primer intento en 230 al
+ver el mockup real con `hoja_estilos()` — a 230 algunos textos cortos
+("Aplica recargo", "Es reubicación", "Sin selección") quedaban
+recortados). Debajo de las 4 columnas, la tabla de Reservas aisladas de
+siempre, con más alto disponible gracias al espacio que se liberó
+arriba.
+
+`self.grilla._panel_filtros`/`_leyenda_colores` (QGroupBox) ya traían
+su propio margen nativo para alinearse con "Profesional" — las columnas
+2 y 3 van SIN margen superior propio (`layout_col_filtros`/`layout_col_
+detalle` en 0,0,0,0): sumarle `_ALTO_TITULO_FILTROS` encima duplicaba
+el corrimiento (bug real, detectado por
+`test_titulo_profesional_alineado_con_filtro_de_localidad`, que
+reventaba 81 contra 60 — la diferencia exacta de ese margen de más).
+
+Ronda siguiente, sobre la pantalla ya en uso (pedido explícito de la
+clienta con una foto real: "Referencias de colores" quedaba pegada
+arriba, "Filtro de localidad" un poco más abajo y "Profesional" más
+abajo todavía — un efecto escalera que además angostaba la tabla de
+abajo): las tres columnas pasan al MISMO margen de arriba, explícito y
+chico (`_ALTO_TITULO_COLUMNA_AISLADAS`, no `_ALTO_TITULO_FILTROS` de
+Regulares) en vez de depender del margen nativo de cada `QGroupBox` —
+ese margen nativo resultó no ser idéntico entre los tres (columna 2,
+CON borde, reservaba 6px más que columna 1 o que columna 3, YA sin
+borde desde el punto anterior), aunque el test de alineación (que mide
+offscreen) no lo detectaba — diferencia real de medición entre el
+entorno de test y una pantalla real, confirmada con captura de la
+clienta. Columna 2 (`panel_filtros_aisladas`) suma el mismo tratamiento
+"sin marco" que la columna 3 (`setStyleSheet("QGroupBox { border: none;
+}")` + margen de arriba explícito, dejando los otros tres lados como
+estaban) — pierde el borde de "Filtros" (ya sin título visible desde
+antes) como efecto necesario para igualar el margen real, no solo el
+nominal.
+
+Arrancó en 9 (lo mínimo que la columna 3 necesitaba para no recortar el
+título "Referencias de colores") — confirmado con un script de
+geometría antes de aplicarlo (test a ciegas de `left`/`subcontrol-
+origin` en el QSS del título dieron corrimientos horizontales raros —
+la única combinación que no recortó nada fue heredar el margen nativo
+que Qt ya calculaba para ESE título antes de sacarle el marco, no
+inventar un valor a mano). Con 9 quedó "apelmazado" (la primera
+referencia de color pegada al título) — pedido explícito de la
+clienta, ronda siguiente sobre la pantalla ya en uso: subido a 18.
+`LeyendaColores.quitar_marco()` suma un parámetro opcional
+`margen_superior` para esto — sin pasarlo, sigue heredando el mínimo
+nativo (comportamiento de siempre para cualquier otro uso futuro); acá
+se le pasa `_ALTO_TITULO_COLUMNA_AISLADAS` explícito, igual que las
+columnas 1 y 2, para que seguir las tres alineadas entre sí.
+
+Todo el rediseño se armó y confirmó primero con un mockup aparte (script
+descartable fuera de `app/`, reutilizando los widgets/estilos reales)
+que se le mandó a la clienta como captura — recién con su "sí, así" se
+tocó código de verdad, mismo criterio que el resto de "Metodología de
+trabajo" (CLAUDE.md).
+
+`GrillaOperativaWidget` suma métodos opt-in para este rediseño (no
+afectan a Oferta de consultorios/Novedades/Grilla semanal/Reservas
+regulares, que no los llaman): `extraer_panel_filtros()`,
+`extraer_leyenda_colores()`, `fijar_alto_filas(alto_encabezado,
+alto_dato)` y, en `LeyendaColores`, `quitar_marco()`,
+`fijar_columnas(n)` (reemplaza pisar `._columnas` a mano desde afuera)
+y `alinear_contenido_izquierda(espaciado_horizontal)`.
+
+Bug encontrado y arreglado en esta misma ronda (pantalla ya en uso):
+"el formulario aparece con la barra de scroll vertical por unos pocos
+pixeles" — `scroll.setFixedHeight(contenido.minimumSizeHint().height())`
+(mismo mecanismo que Regulares) quedaba unos pixeles por debajo de lo
+que el contenido necesitaba de verdad (confirmado con un script de
+geometría: `minimumSizeHint()` daba 471, el alto real necesario —
+`sizeHint()` — daba 512). Causa: la columna 2 tiene `QSizePolicy.
+Expanding` (para estirarse hasta el pie de la columna 1), y un widget
+`Expanding` puede encogerse bastante más que su alto real — el
+`minimumSizeHint()` del contenedor entero hereda esa elasticidad y dejó
+de ser un piso confiable. _PanelReservasAisladas_ (`_armar_ui` y
+`showEvent`) pasa a medir con `sizeHint()` en vez de `minimumSizeHint()`
+— Regulares no se tocó, sigue con `minimumSizeHint()` como siempre (no
+tiene ningún `Expanding` en su columna).
+
+Chequeo pedido por la clienta ("que salga una alerta de éxito como en
+todo el sistema"): faltaba el cartel de éxito simple (sin advertencias)
+al crear y al cancelar una reserva aislada — `_crear`/`_cancelar_
+registro` solo avisaban cuando había advertencias o cuando la cancelación
+era el mismo día, pero se quedaban mudos en el resto de los casos
+(a diferencia de Regulares, que sí tiene el "Reserva cargada con
+éxito."/"Reserva eliminada con éxito." de siempre, punto #9.1.9).
+Mismo gap encontrado y corregido en Reserva extraordinaria (mismos dos
+métodos, copiados de Aisladas). "Modificar reserva" ya tenía el cartel
+en las tres pantallas, no hacía falta tocarlo. Revisado también si
+hacía falta el indicador "Procesando..." (reloj de arena) acá: no — los
+tres botones de acción son operaciones de un solo registro, no un loop
+largo (ver "Indicador 'Procesando...'", CLAUDE.md).
+
+Ronda siguiente, pedido explícito de la clienta con instrucciones
+puntuales por columna (sobre la pantalla ya en uso):
+
+- **Columna 1**: "Profesional" sube 16px, al mismo píxel donde arranca
+  "Referencias de colores" (columna 3, que esta ronda NO cambia de
+  posición) — todo lo que está debajo de esa etiqueta sube con ella (es
+  un solo margen superior del formulario, `form.setContentsMargins(9,
+  _ALTO_ETIQUETA_COLUMNAS_1_2_AISLADAS, 9, 0)`, antes en
+  `_ALTO_TITULO_COLUMNA_AISLADAS` = 18, ahora en una constante propia,
+  `_ALTO_ETIQUETA_COLUMNAS_1_2_AISLADAS` = 2 — 16px menos). Columna 1 deja
+  de ser "una columna más": pasa a ser la REFERENCIA de alto para las
+  columnas 2, 3 y 4 (`self._alto_referencia_aisladas = panel_form.
+  sizeHint().height()`, guardado en `_armar_ui` y vuelto a calcular en
+  `showEvent` por el mismo motivo que `_scroll_superior`/`_contenido_
+  superior` — el `sizeHint()` puede quedar desincronizado hasta el primer
+  show real).
+- **Columna 2**: "Filtro de localidad" sube los mismos 16px que
+  "Profesional" (mismo valor de margen, `_ALTO_ETIQUETA_COLUMNAS_1_2_
+  AISLADAS`, para no perder la alineación entre las dos). Además se
+  achica a dos tercios del ancho de las columnas 1/3 (`_ANCHO_COLUMNA_
+  ANGOSTA_AISLADAS = _ANCHO_COLUMNA_AISLADAS * 2 // 3` = 173, pedido
+  explícito: "Reduci en un tercio el ancho de la columna"). Alto topeado
+  al de la columna 1 (`panel_filtros_aisladas.setMaximumHeight(self.
+  _alto_referencia_aisladas)`).
+- **Columna 3**: mismo achique de ancho que la columna 2 (misma
+  constante), SIN mover su posición vertical (sigue con
+  `_ALTO_TITULO_COLUMNA_AISLADAS` = 18, sin cambios — es la referencia
+  contra la que subieron las columnas 1 y 2, no al revés). Con el ancho
+  más angosto, dos de las ocho referencias ("Reservado, pero libera un
+  hueco por ausencia/vacación/licencia."/"Igual, con aislada confirmada
+  en ese hueco.") pasan de una línea a dos (`QLabel.setWordWrap(True)`,
+  ya estaba puesto desde el rediseño original) — confirmado con captura
+  real que no queda apelmazado ni cortado, así que no hizo falta tocar
+  `fijar_tamano_fuente(12)` (la clienta había dado permiso explícito para
+  achicarla "si lo necesitás", pero no hizo falta). Alto topeado al de la
+  columna 1, igual que la columna 2 (`panel_col_detalle.setMaximumHeight
+  (self._alto_referencia_aisladas)`) — "Detalle" (`stretch=1`, sin tope
+  propio) sigue absorbiendo el sobrante entre el pie de la leyenda y el
+  tope de la columna, mismo mecanismo que antes.
+- **Columna 4** (la grilla): el ancho que liberan las columnas 2 y 3 lo
+  gana automáticamente (ya tenía `stretch=1` en `fila_columnas`, sin
+  código extra). Alto topeado al de la columna 1 con `self.grilla.
+  limitar_alto_grilla(self._alto_referencia_aisladas)` (método
+  preexistente, ya usado en Reservas regulares con su propio alto natural
+  — acá se reinstala con la columna 1 como referencia en vez del alto
+  natural de la propia grilla) — si las 14 horas no entran en ese tope,
+  la grilla scrollea sola adentro en vez de desbordar la fila.
+- La tabla de abajo queda pegada al pie de la columna 1 (que ahora
+  termina antes, al haber subido 16px) — consecuencia automática de que
+  las 4 columnas ya terminan a la misma altura, sin tocar el código de la
+  tabla.
+
+Pixel final del botón "Cancelar reserva" (y, por el tope de alto común,
+también el pie de las columnas 2/3/4), medido con un script de geometría
+offscreen a 1500x900: **535** (arrancaba en 83 el tope de las 4 columnas,
+"Profesional"/"Filtro de localidad" en 85). Reportado a la clienta como
+referencia, mismo criterio que las rondas anteriores de esta pantalla.
+
+**Pendiente de investigar, declarado NO ser un bug tras revisión**: la
+clienta pidió "si yo cambio el período en la grilla debería cambiar el
+comportamiento de la grilla y mostrarme lo del período seleccionado,
+tendría que ser el actual o posteriores, no anteriores, esto surgiría de
+una validación". Investigado antes de tocar nada: `combo_periodo`
+(`GrillaOperativaWidget._armar_ui`) ya se arma únicamente con el período
+actual + 12 meses hacia adelante (`periodo_actual(self.conn)` +
+`sumar_meses`, nunca un mes anterior) — no hay manera de seleccionar un
+período pasado desde este combo, en ninguna pantalla que use esta grilla
+compartida. Y cambiar el período SÍ cambia lo que muestra la grilla:
+confirmado con un script que arma una aislada confirmada para el mes
+siguiente y compara `calcular_grilla_operativa` con `periodo` = mes
+actual (celda verde, "Horario disponible") contra `periodo` = mes
+siguiente (celda amarilla, con el detalle de la aislada) — el motor ya
+usa `periodo` para acotar `mes_actual_inicio`/`mes_actual_fin` en
+`app/negocio/grilla_operativa.py`. Sin cambios de código: ambas partes
+del pedido ya estaban cubiertas antes de esta ronda.
+
+Ronda de cierre, pedido explícito de la clienta sobre la tabla de abajo
+("Muy conforme hasta ahora, ajustaría el ancho de la tabla en algunas
+columnas ya para terminar esta solapa definitivamente"): ancho por
+columna puntual, no el `_ajustar_columnas` genérico que comparten
+Regulares/Extraordinaria (`_ajustar_columnas_aisladas`, nueva función,
+mismo arranque — `resizeColumnsToContents()` + `_PADDING_COLUMNA` — con
+recortes después):
+
+- Unidad/Día/Fecha: 20%/15%/20% de recorte sobre el ancho ya calculado
+  (con relleno incluido).
+- "Consultorio" pasa a llamarse "Consul" SOLO en esta tabla
+  (`setHorizontalHeaderLabels`, no afecta a Regulares/Extraordinaria, que
+  siguen con "Consultorio"). El recorte del 60% pedido sobre esa columna
+  se probó primero literal y RECORTABA LA PROPIA ETIQUETA "Consul" a la
+  mitad ("onsu" en pantalla, confirmado con una captura real) — se
+  descartó ese porcentaje y se dejó al ancho natural que necesita el
+  título "Consul" (58px contra 88px que hubiera tenido con el 60%
+  literal), mismo criterio que Reubicación/Período imputado.
+- Reubicación/Período imputado: "que la etiqueta del título entre
+  justo"/"que el ancho coincida con el título" — ancho NATURAL que ya
+  calcula `resizeColumnsToContents()` antes de sumarle `_PADDING_
+  COLUMNA` (ese método ya mide el título en negrita tal cual lo pinta
+  `QHeaderView::section`, no hace falta recalcularlo a mano).
+- Estado: "que la palabra 'Confirmada' entre justo" — medida a mano con
+  `QFontMetrics` sobre esa palabra puntual (no sobre lo que haya cargado
+  en la tabla en ese momento, que podría no incluir ninguna fila
+  "Confirmada" si está filtrada a un profesional con solo
+  cancelaciones), tomando el máximo contra el ancho natural para no
+  quedar más angosto que lo que la tabla ya necesita hoy.
+
+Verificado con una captura real (1500px de ancho) que la tabla entera
+entra sin scroll horizontal (1214px de columnas contra 1452px de ancho
+disponible, de sobra) y que ninguna de las columnas "al mínimo" quedó
+recortada. Tests nuevos en `tests/test_gui_reservas.py`
+(`test_tabla_aisladas_columnas_angostadas_sin_scroll_horizontal`).
+
+Ronda siguiente, pedido explícito de la clienta sobre la pantalla ya en
+uso ("Muy conforme hasta ahora, ajustaría el ancho de la tabla en
+algunas columnas ya para terminar esta solapa definitivamente"):
+
+- **Horario**: sufijo "hs" al final ("9:00 a 10:00hs"), alineado a la
+  derecha — agregado directo en el `setItem` de esta tabla, sin tocar
+  `_fmt_horario` (compartida con Regulares/Extraordinaria, que no
+  pidieron este cambio).
+- **Fecha**: pasa de `_fmt_fecha` (compartida) a `_fmt_fecha_dia_abrev`
+  (nueva, puntual de esta tabla) — mismo formato "ddd dd-MM-yyyy" que ya
+  usa el campo "Fecha" del formulario de esta misma pantalla (`_FORMATO_
+  FECHA_DIA`/`_LOCALE_ES`, ya existían). Alineada a la derecha. Ancho:
+  pasa del grupo "recorte porcentual" (20%) al grupo "que entre justo"
+  (ancho NATURAL de `resizeColumnsToContents()`, que ya mide el
+  contenido real — "mar 15-10-2026" — cargado antes de llamar a
+  `_ajustar_columnas_aisladas`).
+- **Consul/Reubicación/Período imputado**: contenido centrado
+  (`item_centrado`, nuevo en `app/gui/widgets/items_tabla.py`, hermano
+  de `item_numero` — mismo criterio "excepción puntual" que documenta la
+  convención general de "Contenido de celda" en CLAUDE.md).
+- **Profesional se lleva el ancho sobrante**: pedido explícito ("dáselo
+  a la columna 'Profesional'... sin espacios en blanco al final y sin
+  que se vea la barra de desplazamiento horizontal... contemplá que vas
+  a ver sí o sí la barra de desplazamiento vertical") —
+  `_distribuir_ancho_sobrante_aisladas` (nueva, llamada al final de
+  `_ajustar_columnas_aisladas`) calcula `tabla.width()` menos el
+  encabezado vertical, el borde de `QTableView` (2px, `estilos.py`) y
+  el ancho de la barra de desplazamiento vertical — este último
+  SIEMPRE, la esté mostrando Qt en este momento o no (`QStyle.PM_
+  ScrollBarExtent`, no `verticalScrollBar().isVisible()`): sin este
+  descuento incondicional, el día que la tabla realmente necesite esa
+  barra (el caso normal, con muchas reservas cargadas) le robaría ancho
+  al viewport y de rebote aparecería la barra horizontal, que es
+  justo lo que se quiere evitar. Lo que sobra de esa cuenta, menos la
+  suma de las otras 11 columnas, se lo lleva "Profesional" (con el piso
+  de siempre, `_ANCHO_COL_PROFESIONAL`).
+
+  `tabla.width()` recién refleja el ancho real una vez que Qt terminó
+  de resolver el layout de toda la ventana — en el momento en que
+  `showEvent` llama a `actualizar()` (que dispara `_ajustar_columnas_
+  aisladas`) ese ancho puede seguir desincronizado (mismo problema de
+  fondo que `_alto_referencia_aisladas`, confirmado con un script de
+  geometría: sin este reintento "Profesional" se quedaba en el piso de
+  180px en vez de repartirse el sobrante real). `showEvent` programa un
+  `QTimer.singleShot(0, ...)` para volver a correr `_distribuir_ancho_
+  sobrante_aisladas` apenas el loop de eventos procese el layout
+  pendiente.
+
+  Bug real encontrado corriendo la suite completa (no al revisar la
+  pantalla sola): si la ventana se cierra antes de que ese timer
+  dispare, `self.tabla` ya no existe del lado de C++ cuando el callback
+  corre — "libshiboken: Internal C++ object... already deleted",
+  reventaba en medio de OTRO test sin relación, el que le tocara
+  procesar el loop de eventos en ese momento. Mismo guard que ya usan
+  `foco._EnterAvanzaFoco`/`selector_profesional._SeleccionarTodoAl
+  Enfocar` para este mismo problema: `shiboken6.isValid(self.tabla)`
+  antes de tocarla (`_distribuir_ancho_sobrante_si_sigue_vivo`, nuevo
+  método del panel).
+
+Pixel final del borde derecho de la tabla, medido con un script de
+geometría offscreen a 1500x900 (mismo criterio que el pixel del botón
+"Cancelar reserva" de la ronda anterior): **1475**. Reportado a la
+clienta como referencia.
+
+Tests nuevos en `tests/test_gui_reservas.py`:
+`test_tabla_aisladas_formato_fecha_horario_y_columnas_centradas`,
+`test_tabla_aisladas_profesional_se_lleva_el_ancho_sobrante`. Varios
+tests preexistentes que comparaban el texto de la columna "Fecha" de
+esta tabla contra el formato viejo ("18-08-2026") se actualizaron al
+nuevo ("mar 18-08-2026").
+
+Hilo cerrado: la clienta confirmó conformidad con todas las tareas de
+esta etapa.
+
