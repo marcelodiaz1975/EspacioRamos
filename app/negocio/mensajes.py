@@ -564,9 +564,24 @@ def mensaje_detalle_reserva_aislada(
     línea — es el comportamiento pedido, reserva por reserva. Ver
     `_lineas_reservas_aisladas` para el detalle de qué hace cada combinar.
 
-    "Regla del edificio" (si tiene llaves de más de un edificio, se agrega
-    el edificio a cada línea aunque `incluir_edificio` esté en False) se
-    resuelve mirando las llaves ACTIVAS (sin devolver) del profesional.
+    Mención del edificio — regla propia de ESTE mensaje, pedido explícito
+    de la clienta ("que tengan siempre la dirección a mano"), acotado a
+    este caso puntual (no es la "regla del edificio" general de
+    `_incluir_edificio_efectivo`, que sigue existiendo para los demás
+    mensajes que puedan necesitarla): mira únicamente cuántos edificios
+    DISTINTOS aparecen en ESTE mensaje (`edificios_mencionados`, armado
+    con las reservas del mes + posteriores), sin importar cuántos haya
+    en todo el sistema ni las llaves del profesional.
+    - Siempre (si `incluir_edificio` no vino en False y hay al menos un
+      edificio involucrado) se agrega arriba de todo el detalle una línea
+      "Edificio {nombre}: {Domicilio}, {Localidad}" por cada edificio
+      distinto — reemplaza a una versión anterior de esta misma sección
+      que vivía al pie del mensaje y solo se mostraba con más de uno.
+    - La mención en línea de cada reserva ("- Edificio {nombre}", vía
+      `_lugar_reserva`/`incluir_edificio` en `_lineas_reservas_aisladas`/
+      `_lineas_reservas_extraordinarias`) solo se agrega si hay MÁS DE UN
+      edificio en el mensaje — con uno solo ya quedó aclarado arriba sin
+      ambigüedad posible, repetirlo en cada línea es redundante.
 
     Editable desde "Textos del sistema" (clave
     `mensaje_detalle_reserva_aislada`) — ver `app.negocio.plantillas_
@@ -578,8 +593,6 @@ def mensaje_detalle_reserva_aislada(
     if profesional is None:
         raise ValueError(f"No existe el profesional #{id_profesional}")
     anio, mes = (int(p) for p in periodo.split("-"))
-
-    incluir_edificio = _incluir_edificio_efectivo(conn, incluir_edificio, id_profesional)
 
     partes_nombre = [p for p in (profesional["Tratamiento"], profesional["NombrePila"], profesional["Apellido"]) if p]
     lineas: list[str] = []
@@ -611,12 +624,27 @@ def mensaje_detalle_reserva_aislada(
     # el operador, no con el cálculo hora×tarifa de las demás — se
     # separan ANTES de pasar por `_lineas_reservas_aisladas` (que asume
     # ese cálculo) y se formatean aparte con `_lineas_reservas_
-    # extraordinarias`, pero siguen contando para "Regla del edificio"
+    # extraordinarias`, pero siguen contando para la mención de edificio
     # más abajo (quedan en `del_mes`/`posteriores`, sin sacarlas de ahí).
     del_mes_normales = [f for f in del_mes if not f["EsExtraordinaria"]]
     del_mes_extraordinarias = [f for f in del_mes if f["EsExtraordinaria"]]
     posteriores_normales = [f for f in posteriores if not f["EsExtraordinaria"]]
     posteriores_extraordinarias = [f for f in posteriores if f["EsExtraordinaria"]]
+
+    # 0. dirección de cada edificio involucrado (del mes y posteriores),
+    # arriba de todo el detalle — pedido explícito de la clienta: "que
+    # tengan siempre la dirección a mano", una línea por edificio
+    # mostrado en el texto (ya no solo cuando hay más de uno, como la
+    # versión anterior de esta misma sección — que vivía al pie del
+    # mensaje). Ver docstring: regla propia de este mensaje, acotada a
+    # cuántos edificios distintos aparecen EN ÉL, no a la "regla del
+    # edificio" general del sistema.
+    edificios_mencionados: dict[int, sqlite3.Row] = {f["IdEdificio"]: f for f in del_mes + posteriores}
+    incluir_edificio_inline = incluir_edificio and len(edificios_mencionados) > 1
+    if incluir_edificio and edificios_mencionados:
+        for e in edificios_mencionados.values():
+            lineas.append(f"Edificio {e['NombreEdificio']}: {e['Domicilio']}, {e['DomicilioLocalidad']}")
+        lineas.append("")
 
     def _monto(f: sqlite3.Row) -> float:
         if f["EsReubicacion"]:
@@ -643,9 +671,16 @@ def mensaje_detalle_reserva_aislada(
         (id_profesional, prefijo_mes + "%"),
     ).fetchall()
 
+    # La línea de depósito/reintegro de llave sigue con la "regla del
+    # edificio" general (`_incluir_edificio_efectivo`, llaves activas del
+    # profesional) — el pedido de la clienta fue puntual sobre el texto
+    # de LA RESERVA, no sobre esta línea, que además puede aparecer sin
+    # ninguna reserva en el mensaje (edificios_mencionados vacío no debe
+    # apagarla).
+    incluir_edificio_llave = _incluir_edificio_efectivo(conn, incluir_edificio, id_profesional)
     total_llaves = 0.0
     for ll in llaves:
-        lugar_llave = _lugar_llave(ll, incluir_edificio)
+        lugar_llave = _lugar_llave(ll, incluir_edificio_llave)
         if ll["Tipo"] == "Asignación" and ll["DepositoCobrado"]:
             monto = ll["MontoCobrado"] or 0.0
             lineas.append(f"+ Depósito por llave {lugar_llave} {_moneda(monto)}")
@@ -658,13 +693,13 @@ def mensaje_detalle_reserva_aislada(
     # 2. reservas del mes con valor, cronológicas.
     lineas_reservas, total_reservas = _lineas_reservas_aisladas(
         del_mes_normales, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
-        incluir_edificio=incluir_edificio, combinar_misma_unidad=combinar_misma_unidad,
+        incluir_edificio=incluir_edificio_inline, combinar_misma_unidad=combinar_misma_unidad,
         combinar_distintas_unidades=combinar_distintas_unidades, monto_fn=_monto,
     )
     lineas += lineas_reservas
     lineas_extraordinarias, total_extraordinarias = _lineas_reservas_extraordinarias(
         del_mes_extraordinarias, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
-        incluir_edificio=incluir_edificio,
+        incluir_edificio=incluir_edificio_inline,
     )
     lineas += lineas_extraordinarias
     total_reservas += total_extraordinarias
@@ -704,20 +739,14 @@ def mensaje_detalle_reserva_aislada(
     if posteriores:
         lineas_posteriores, _ = _lineas_reservas_aisladas(
             posteriores_normales, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
-            incluir_edificio=incluir_edificio, combinar_misma_unidad=combinar_misma_unidad,
+            incluir_edificio=incluir_edificio_inline, combinar_misma_unidad=combinar_misma_unidad,
             combinar_distintas_unidades=combinar_distintas_unidades,
         )
         lineas_posteriores_extraordinarias, _ = _lineas_reservas_extraordinarias(
             posteriores_extraordinarias, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
-            incluir_edificio=incluir_edificio,
+            incluir_edificio=incluir_edificio_inline,
         )
         lineas += ["", "RESERVAS POSTERIORES"] + lineas_posteriores + lineas_posteriores_extraordinarias
-
-    edificios_mencionados: dict[int, sqlite3.Row] = {f["IdEdificio"]: f for f in del_mes + posteriores}
-    if incluir_edificio and len(edificios_mencionados) > 1:
-        lineas.append("")
-        for e in edificios_mencionados.values():
-            lineas.append(f"* Edificio {e['NombreEdificio']}: Corresponde a {e['Domicilio']}, {e['DomicilioLocalidad']}")
 
     pagos_sobre = [p for p in pagos if p["MedioPago"] == "Sobre en buzón" and p["FechaHoraRecogidaSobres"]]
     if pagos_sobre:

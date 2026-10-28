@@ -15,6 +15,7 @@ from app.gui.pantallas.reservas import (
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
+from app.negocio.formato import mes_texto
 from app.negocio.lista_espera import GrupoCobertura, crear_pedido
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.negocio.llaves import agregar_acceso_llave, asignar_llave, crear_llave, ingresar_copias
@@ -1607,6 +1608,49 @@ def test_crear_reserva_aislada_copia_mensaje_de_detalle_al_portapapeles(qtbot, c
     pantalla.panel_aisladas._crear()
     assert len(copiado) == 1
     assert "DETALLE RESERVA" in copiado[0]
+
+
+def test_crear_reserva_aislada_de_un_mes_posterior_no_pierde_el_detalle_del_mes_en_curso(qtbot, conn, monkeypatch):
+    """Bug real reportado por la clienta: parada en el período actual,
+    con una hora aislada del profesional ya confirmada ese mes, agendarle
+    otra para el mes siguiente copiaba al portapapeles un mensaje que
+    mostraba SOLO la reserva nueva (del mes siguiente) — el detalle del
+    mes en curso desaparecía por completo, a diferencia de generar el
+    mismo mensaje a mano desde el Centro de mensajería, que sí mostraba
+    las dos (la del mes en curso arriba, la del mes siguiente bajo
+    "RESERVAS POSTERIORES", sin importe).
+
+    Causa: `_copiar_mensaje_detalle` llamaba a `mensaje_detalle_reserva_
+    aislada` con `periodo=fecha[:7]` (el mes DE LA RESERVA que se acaba
+    de cargar) en vez de `periodo_actual(self.conn)` (el mes de HOY,
+    mismo criterio que ya usaba el Centro de mensajería) — esa función
+    solo arma "del mes" (el período consultado) y "posteriores"
+    (estrictamente posterior), así que la reserva del mes en curso no
+    encajaba en ninguna de las dos listas si se consultaba con el
+    período de la reserva nueva, más adelante en el tiempo."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+
+    # Una reserva confirmada hoy, dentro del período actual.
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel._crear()
+
+    # Otra para el mes siguiente, mismo profesional — esta es la que
+    # reproducía el bug.
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_fecha.setDate(panel.campo_fecha.date().addMonths(1))
+    panel._crear()
+
+    assert len(copiado) == 1
+    texto = copiado[0]
+    mes_actual = int(periodo_actual(conn).split("-")[1])
+    assert texto.startswith(f"DETALLE RESERVA {mes_texto(mes_actual).upper()}")
+    assert "RESERVAS POSTERIORES" in texto
+    assert texto.index("RESERVAS POSTERIORES") > texto.index("SALDO A ABONAR")
 
 
 def test_cancelar_reserva_aislada_copia_mensaje_de_detalle_al_portapapeles(qtbot, conn, monkeypatch):

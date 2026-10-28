@@ -2558,9 +2558,12 @@ class _PanelReservasAisladas(QWidget):
         else:
             # Mismo criterio "EN GENERAL" que Reservas regulares (punto
             # #9.1.9) y el resto del sistema: alerta de éxito aunque no
-            # haya nada puntual que avisar — faltaba acá.
-            QMessageBox.information(self, "Reserva creada", "Reserva creada con éxito.")
-        self._copiar_mensaje_detalle(datos["id_profesional"], fecha)
+            # haya nada puntual que avisar. Texto "Reserva asignada con
+            # éxito." (no "creada") — pedido explícito de la clienta al
+            # revisar el flujo de carga de horas aisladas, que ella
+            # misma llama "proceso de asignación de horas aisladas".
+            QMessageBox.information(self, "Reserva creada", "Reserva asignada con éxito.")
+        self._copiar_mensaje_detalle(datos["id_profesional"])
         self.actualizar()
         self._resetear_formulario()
         self._sincronizar_grilla()
@@ -2585,13 +2588,28 @@ class _PanelReservasAisladas(QWidget):
         )
         self.conn.commit()
 
-    def _copiar_mensaje_detalle(self, id_profesional: int, fecha: str) -> None:
+    def _copiar_mensaje_detalle(self, id_profesional: int) -> None:
         """DC-02/DC-03/DC-04: confirmar, cancelar o modificar una reserva
         aislada carga sola el mensaje de detalle al portapapeles — sin
         reemplazar la posibilidad de volver a generarlo a mano desde el
-        Centro de mensajería."""
+        Centro de mensajería.
+
+        `periodo=periodo_actual(self.conn)` (el período de HOY, no el de
+        la reserva que se está cargando) — mismo criterio que usa el
+        Centro de mensajería (`_texto_para_boton`, `mensajeria.py`): si el
+        profesional ya tiene reservas confirmadas este mes y la que se
+        está cargando ahora es para un mes posterior, pasarle el período
+        de la reserva nueva (bug real, encontrado por la clienta) dejaba
+        completamente afuera el detalle del mes en curso — `mensaje_
+        detalle_reserva_aislada` solo mira "del mes" (el período
+        consultado) y "posteriores" (estrictamente después), así que una
+        reserva de hoy quedaba sin encajar en ninguna de las dos listas
+        si se consultaba con el período de la reserva nueva (más
+        adelante)."""
         try:
-            texto = mensaje_detalle_reserva_aislada(self.conn, id_profesional=id_profesional, periodo=fecha[:7])
+            texto = mensaje_detalle_reserva_aislada(
+                self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn),
+            )
         except ValueError:
             return
         QGuiApplication.clipboard().setText(texto)
@@ -2612,7 +2630,7 @@ class _PanelReservasAisladas(QWidget):
         regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
         if requiere_aviso:
             QMessageBox.information(self, titulo, "Cancelada el mismo día: avisar al profesional.")
-        self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
+        self._copiar_mensaje_detalle(reserva["IdProfesional"])
         self.actualizar()
         return True
 
@@ -2680,7 +2698,7 @@ class _PanelReservasAisladas(QWidget):
             return
         self.conn.commit()
         regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
-        self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
+        self._copiar_mensaje_detalle(reserva["IdProfesional"])
         if advertencias:
             QMessageBox.information(
                 self, "Reserva modificada", "Reserva modificada con avisos:\n" + "\n".join(advertencias),
@@ -2938,12 +2956,16 @@ class _PanelReservaExtraordinaria(QWidget):
             return None
         return self._reservas[filas[0].row()]
 
-    def _copiar_mensaje_detalle(self, id_profesional: int, fecha: str) -> None:
-        """Mismo mecanismo que Reservas aisladas: confirmar o cancelar una
+    def _copiar_mensaje_detalle(self, id_profesional: int) -> None:
+        """Mismo mecanismo que Reservas aisladas (ver esa solapa para el
+        detalle completo del bug de período que corrige `periodo_actual`
+        en vez del período de la reserva): confirmar o cancelar una
         reserva extraordinaria carga sola el mensaje de detalle
         actualizado al portapapeles."""
         try:
-            texto = mensaje_detalle_reserva_aislada(self.conn, id_profesional=id_profesional, periodo=fecha[:7])
+            texto = mensaje_detalle_reserva_aislada(
+                self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn),
+            )
         except ValueError:
             return
         QGuiApplication.clipboard().setText(texto)
@@ -3027,7 +3049,7 @@ class _PanelReservaExtraordinaria(QWidget):
             # faltaba acá (ver Reservas aisladas, mismo gap detectado y
             # corregido ahí).
             QMessageBox.information(self, "Reserva creada", "Reserva creada con éxito.")
-        self._copiar_mensaje_detalle(id_profesional, fecha)
+        self._copiar_mensaje_detalle(id_profesional)
         self.actualizar()
         self._resetear_formulario()
 
@@ -3043,7 +3065,7 @@ class _PanelReservaExtraordinaria(QWidget):
             QMessageBox.information(self, titulo, "Cancelada el mismo día: avisar al profesional.")
         else:
             QMessageBox.information(self, titulo, "Reserva cancelada con éxito.")
-        self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
+        self._copiar_mensaje_detalle(reserva["IdProfesional"])
         self.actualizar()
         return True
 
@@ -3112,7 +3134,7 @@ class _PanelReservaExtraordinaria(QWidget):
             return
         self.conn.commit()
         regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
-        self._copiar_mensaje_detalle(reserva["IdProfesional"], reserva["Fecha"])
+        self._copiar_mensaje_detalle(reserva["IdProfesional"])
         if advertencias:
             QMessageBox.information(
                 self, "Reserva modificada", "Reserva modificada con avisos:\n" + "\n".join(advertencias),

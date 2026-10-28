@@ -369,9 +369,12 @@ def test_detalle_aislada_separa_reservas_posteriores_sin_dos_puntos(conn, profes
     assert texto.index("RESERVAS POSTERIORES") > texto.index("SALDO A ABONAR")
 
 
-def test_detalle_aislada_un_solo_edificio_en_el_espacio_nunca_lo_menciona(conn):
-    """Regla del edificio, primer nivel: con un solo edificio en todo el
-    espacio se omite siempre, aunque el control esté tildado."""
+def test_detalle_aislada_un_solo_edificio_en_el_mensaje_no_repite_la_mencion(conn):
+    """Regla propia de este mensaje (no la "regla del edificio" general
+    del sistema, ligada a llaves): con un solo edificio INVOLUCRADO EN
+    EL MENSAJE se agrega la dirección una vez arriba de todo, pero se
+    omite la repetición en la línea de la reserva — sería redundante, no
+    hay ambigüedad posible con un solo edificio."""
     id_caba = obtener_repositorio(conn, "Localidad").crear(Localidad="CABA")
     id_ed = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", Domicilio="Rivadavia 1", IdLocalidad=id_caba)
     id_un = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_ed, Departamento='7mo "L"')
@@ -382,39 +385,17 @@ def test_detalle_aislada_un_solo_edificio_en_el_espacio_nunca_lo_menciona(conn):
         Estado="Confirmada", AplicaRecargo=0,
     )
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08", incluir_edificio=True)
-    assert "Edificio" not in texto
+    assert texto.count("Edificio") == 1
+    assert "Edificio Ramos 1: Rivadavia 1, CABA" in texto
 
 
-def test_detalle_aislada_omite_edificio_si_las_llaves_son_de_uno_solo(conn, profesional_aislada_con_edificios):
-    id_prof, c1, c2, id_ed1, _ = profesional_aislada_con_edificios
-    id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave", Tipo="Unidad", ValorDepositoActual=5000)
-    obtener_repositorio(conn, "LlaveAcceso").crear(IdLlave=id_llave, IdEdificio=id_ed1)
-    obtener_repositorio(conn, "LlaveMovimiento").crear(
-        IdLlave=id_llave, Tipo="Asignación", IdProfesional=id_prof, Fecha="2026-07-02",
-    )
-    obtener_repositorio(conn, "ReservaAislada").crear(
-        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
-        Estado="Confirmada", AplicaRecargo=0,
-    )
-    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
-    assert "Edificio" not in texto
-
-
-def test_detalle_aislada_sin_llaves_pero_con_mas_de_un_edificio_lo_menciona(conn, profesional_aislada_con_edificios):
-    """Un profesional sin ninguna llave todavía (recién empieza, alguien
-    más le abre la puerta la primera vez) igual necesita saber en qué
-    edificio es si el espacio tiene más de uno — confirmado por el
-    usuario, corrige el supuesto anterior de omitirlo en este caso."""
-    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
-    obtener_repositorio(conn, "ReservaAislada").crear(
-        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
-        Estado="Confirmada", AplicaRecargo=0,
-    )
-    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
-    assert "Edificio Ramos 1" in texto
-
-
-def test_detalle_aislada_agrega_edificio_si_tiene_llaves_de_mas_de_uno(conn, profesional_aislada_con_edificios):
+def test_detalle_aislada_un_edificio_en_el_mensaje_aunque_el_sistema_tenga_mas(conn, profesional_aislada_con_edificios):
+    """La decisión mira solo los edificios de ESTE mensaje, no los del
+    sistema ni las llaves del profesional (ya no aplica la vieja "regla
+    del edificio" general para este mensaje puntual): con una sola
+    reserva, en un solo edificio, el mensaje lo menciona una vez arriba
+    aunque el sistema tenga más de un edificio y el profesional tenga
+    llaves de varios."""
     id_prof, c1, c2, id_ed1, id_ed2 = profesional_aislada_con_edificios
     id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave", Tipo="Unidad", ValorDepositoActual=5000)
     obtener_repositorio(conn, "LlaveAcceso").crear(IdLlave=id_llave, IdEdificio=id_ed1)
@@ -426,14 +407,87 @@ def test_detalle_aislada_agrega_edificio_si_tiene_llaves_de_mas_de_uno(conn, pro
         IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
         Estado="Confirmada", AplicaRecargo=0,
     )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert texto.count("Edificio") == 1
+    assert "Edificio Ramos 1: Av. Rivadavia 1234, CABA" in texto
+
+
+def test_detalle_aislada_sin_llaves_con_un_edificio_en_el_mensaje_lo_menciona(conn, profesional_aislada_con_edificios):
+    """Un profesional sin ninguna llave todavía (recién empieza, alguien
+    más le abre la puerta la primera vez) igual necesita saber la
+    dirección del edificio de su reserva — ya no depende de si tiene
+    llaves o no, solo de que el edificio aparezca en el mensaje."""
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "Edificio Ramos 1" in texto
+
+
+def test_detalle_aislada_con_mas_de_un_edificio_en_el_mensaje_los_menciona_arriba_y_en_cada_linea(
+    conn, profesional_aislada_con_edificios,
+):
+    """Con más de un edificio involucrado en el mensaje (del mes +
+    posteriores) se agrega la dirección de cada uno arriba de todo Y se
+    repite el edificio en la línea de cada reserva — para que el
+    profesional no confunda a qué edificio corresponde cada unidad
+    (pedido explícito de la clienta). Ya no depende de las llaves del
+    profesional, a diferencia de la vieja "regla del edificio" general."""
+    id_prof, c1, c2, id_ed1, id_ed2 = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
     obtener_repositorio(conn, "ReservaAislada").crear(
         IdProfesional=id_prof, IdConsultorio=c2, Fecha="2026-08-06", HoraInicio=10, HoraFin=12,
         Estado="Confirmada", AplicaRecargo=0,
     )
-    texto = mensaje_detalle_reserva_aislada(
-        conn, id_profesional=id_prof, periodo="2026-08", incluir_edificio=False,
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "Edificio Ramos 1: Av. Rivadavia 1234, CABA" in texto
+    assert "Edificio San Justo 1: Belgrano 500, San Justo" in texto
+    assert "- Edificio Ramos 1" in texto
+    assert "- Edificio San Justo 1" in texto
+
+
+def test_detalle_aislada_incluir_edificio_false_suprime_todo(conn, profesional_aislada_con_edificios):
+    """`incluir_edificio=False` sigue funcionando como apagado total —
+    ni la línea de arriba ni la mención en cada reserva, aunque el
+    mensaje tenga más de un edificio."""
+    id_prof, c1, c2, id_ed1, id_ed2 = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
     )
-    assert "Edificio Ramos 1" in texto and "Edificio San Justo 1" in texto
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c2, Fecha="2026-08-06", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08", incluir_edificio=False)
+    assert "Edificio" not in texto
+
+
+def test_detalle_aislada_un_edificio_en_dos_meses_distintos_no_repite_la_mencion(
+    conn, profesional_aislada_con_edificios,
+):
+    """Escenario real reportado por la clienta: una reserva del mes en
+    curso y otra para el mes siguiente, ambas en el mismo único edificio
+    involucrado — la línea de arriba aparece una sola vez (no una por
+    reserva) y ninguna de las dos líneas de detalle repite el edificio."""
+    id_prof, c1, _, id_ed1, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-09-03", HoraInicio=9, HoraFin=10,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert texto.count("Edificio") == 1
+    assert "Edificio Ramos 1: Av. Rivadavia 1234, CABA" in texto
+    assert "RESERVAS POSTERIORES" in texto
 
 
 def test_detalle_aislada_deposito_de_llave_del_mes(conn, profesional_aislada_con_edificios):
