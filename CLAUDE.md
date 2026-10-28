@@ -426,19 +426,51 @@ aisladas" y uno sobre el mensaje "DETALLE RESERVA {MES}" (DC-03):
 
 5. **Mensaje "DETALLE RESERVA {MES}": sección "PLACAS PARA LOS
    TIMBRES"**: al final del mensaje (después de "RESERVAS POSTERIORES"
-   y de la nota de sobres, si la hay), una línea "* {Edificio} -
-   {Unidad}: Posición {N}" por cada unidad involucrada en el mensaje
-   (del mes + posteriores) donde el profesional YA tiene una placa
-   asignada (mismo criterio que `placas.placa_faltante_para_reserva`:
-   cualquier posición de esa unidad alcanza). Si no tiene placa en
-   alguna de esas unidades, esa unidad se omite sin avisar nada — el
-   aviso de placa faltante ya existe aparte, al cargar la reserva; si
-   no tiene en NINGUNA, se omite la sección entera. Al pasar por
-   `mensaje_detalle_reserva_aislada`, llega gratis tanto al mensaje que
-   se copia al confirmar una reserva aislada como al que genera Centro
-   de mensajería a mano (misma función, sin duplicar nada).
+   y de la nota de sobres, si la hay), una línea "+ {Edificio} -
+   {Unidad}: Posición {N}" (signo "+", mismo criterio que el resto de
+   las líneas de detalle del mensaje — ver punto 7) por cada unidad
+   involucrada en el mensaje (del mes + posteriores) donde el
+   profesional YA tiene una placa asignada (mismo criterio que
+   `placas.placa_faltante_para_reserva`: cualquier posición de esa
+   unidad alcanza). Si no tiene placa en alguna de esas unidades, esa
+   unidad se omite sin avisar nada — el aviso de placa faltante ya
+   existe aparte, al cargar la reserva; si no tiene en NINGUNA, se omite
+   la sección entera. Al pasar por `mensaje_detalle_reserva_aislada`,
+   llega gratis tanto al mensaje que se copia al confirmar una reserva
+   aislada como al que genera Centro de mensajería a mano (misma
+   función, sin duplicar nada).
 
-Tests nuevos: `tests/test_reservas.py`
+6. **Filtro de período (arriba de la grilla) se cortaba al desplegar**:
+   pedido explícito de la clienta, reportado sobre Reservas aisladas
+   pero el combo es COMPARTIDO (`GrillaOperativaWidget.combo_periodo`,
+   `app/gui/widgets/grilla_operativa.py` — usado también por Oferta de
+   consultorios, Novedades y Grilla semanal). Ancho natural muy ajustado
+   (~72px para "2026-10" + flecha, con solo ~22px de margen real sobre
+   el texto) — en la pantalla real de la clienta, con los 13 períodos
+   sin entrar todos en la altura visible, el desplegable saca un
+   scrollbar vertical que le come ese margen y corta el texto. Ancho
+   mínimo subido a 100px (`setMinimumWidth`) para que sobre lugar de
+   verdad, scrollbar incluido.
+
+7. **Formato WhatsApp (negrita/itálica) en el mensaje**: pedido
+   explícito de la clienta, con un mensaje modelo exacto. `*texto*` en
+   negrita, `_texto_` en itálica (convención ya usada en otros mensajes
+   del sistema, ej. `DEFAULT_OFERTA_BUSQUEDA_WHATSAPP`) — ahora también
+   en `mensaje_detalle_reserva_aislada`:
+   - `*DETALLE RESERVA {MES}*` y `_{NOMBRE PROFESIONAL}_`: en la
+     plantilla editable (`plantillas_texto.DEFAULT_DETALLE_RESERVA_
+     AISLADA`, clave "Textos del sistema" `mensaje_detalle_reserva_
+     aislada`) — sigue siendo el único texto de plantilla de verdad.
+   - `*SALDO A ABONAR: {monto}*`, `_RESERVAS POSTERIORES_` y
+     `_PLACAS PARA LOS TIMBRES_`: hardcodeado en el código (como el
+     resto del cuerpo del mensaje, armado algorítmicamente, no es texto
+     de plantilla).
+   - El resto del mensaje (línea de edificio, detalle de cada reserva,
+     saldo pendiente, placas) sigue sin ningún marcador — solo esos
+     cinco elementos puntuales, tal cual el mensaje modelo que dio la
+     clienta.
+
+Tests nuevos/actualizados: `tests/test_reservas.py`
 (`test_eliminar_reserva_aislada_otro_dia_no_requiere_aviso_y_borra_la_
 fila`, `test_eliminar_reserva_aislada_mismo_dia_requiere_aviso`,
 `test_eliminar_reserva_aislada_inexistente_lanza_error`),
@@ -452,7 +484,9 @@ reserva` — más un test nuevo end-to-end de la sección de placas,
 timbres`), `tests/test_mensajes.py` (`test_detalle_aislada_sin_placas_
 no_agrega_la_seccion`, `test_detalle_aislada_con_placa_en_una_sola_
 unidad_solo_esa_linea`, `test_detalle_aislada_con_placas_en_ambas_
-unidades_las_dos_lineas`).
+unidades_las_dos_lineas`, más los ajustados por el formato WhatsApp
+nuevo del encabezado/"RESERVAS POSTERIORES"), `tests/test_plantillas_
+texto.py` (ídem, template por defecto).
 
 ## Historial archivado
 

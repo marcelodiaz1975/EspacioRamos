@@ -806,6 +806,15 @@ class GrillaOperativaWidget(QWidget):
             periodo = sumar_meses(periodo_base, i)
             self.combo_periodo.addItem(periodo, periodo)
         self.combo_periodo.currentIndexChanged.connect(self._periodo_cambiado)
+        # Pedido explícito de la clienta (reportado en Reservas aisladas,
+        # pero el combo es compartido — Reservas/Oferta/Novedades/Grilla
+        # semanal): el ancho NATURAL ("2026-10" + flecha, ~72px) le deja
+        # muy poco margen de sobra al texto (~50px de ancho real) — con
+        # los 13 períodos no entrando todos en la altura visible de la
+        # pantalla real de la clienta, el desplegable saca un scrollbar
+        # vertical que le come ese margen y corta el texto. Ancho mínimo
+        # más generoso para que sobre lugar de verdad, scrollbar incluido.
+        self.combo_periodo.setMinimumWidth(100)
         fila_controles.addWidget(self.combo_periodo)
 
         self._etiqueta_visualizacion = QLabel("Visualización:")

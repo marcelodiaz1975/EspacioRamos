@@ -734,7 +734,7 @@ def mensaje_detalle_reserva_aislada(
         total_item_libre += c["Monto"]
 
     saldo_a_abonar = saldo_anterior + total_reservas + total_llaves + total_item_libre - total_pagos
-    lineas += ["", f"SALDO A ABONAR: {_moneda(saldo_a_abonar)}"]
+    lineas += ["", f"*SALDO A ABONAR: {_moneda(saldo_a_abonar)}*"]
 
     if posteriores:
         lineas_posteriores, _ = _lineas_reservas_aisladas(
@@ -746,7 +746,7 @@ def mensaje_detalle_reserva_aislada(
             posteriores_extraordinarias, incluir_consultorio=incluir_consultorio, incluir_unidad=incluir_unidad,
             incluir_edificio=incluir_edificio_inline,
         )
-        lineas += ["", "RESERVAS POSTERIORES"] + lineas_posteriores + lineas_posteriores_extraordinarias
+        lineas += ["", "_RESERVAS POSTERIORES_"] + lineas_posteriores + lineas_posteriores_extraordinarias
 
     pagos_sobre = [p for p in pagos if p["MedioPago"] == "Sobre en buzón" and p["FechaHoraRecogidaSobres"]]
     if pagos_sobre:
@@ -763,13 +763,21 @@ def mensaje_detalle_reserva_aislada(
     # "PLACAS PARA LOS TIMBRES": pedido explícito de la clienta, para que
     # el profesional sepa en qué posición del tablero de timbres está su
     # placa en cada unidad involucrada en ESTE mensaje (del mes +
-    # posteriores) — una línea "* {Edificio} - {Unidad}: Posición {N}"
+    # posteriores) — una línea "+ {Edificio} - {Unidad}: Posición {N}"
+    # (mismo signo "+" que el resto de las líneas de detalle del
+    # mensaje, pedido explícito — no el "*" usado en un primer intento)
     # por cada unidad donde YA tiene una placa asignada (mismo criterio
     # que `placas.placa_faltante_para_reserva`: cualquier posición de esa
     # unidad asignada a este profesional alcanza). Si no tiene placa en
     # alguna de esas unidades, esa unidad se omite sin avisar nada —el
     # aviso de placa faltante ya existe aparte, al cargar la reserva—; si
-    # no tiene en NINGUNA, se omite la sección entera.
+    # no tiene en NINGUNA, se omite la sección entera. Título de la
+    # sección en itálica ("_PLACAS PARA LOS TIMBRES_", formato WhatsApp,
+    # mismo criterio que "_RESERVAS POSTERIORES_" más abajo) — pedido
+    # explícito de la clienta, junto con "*DETALLE RESERVA {MES}*" y
+    # "_{nombre_profesional}_" en la plantilla (`plantillas_texto.
+    # DEFAULT_DETALLE_RESERVA_AISLADA`) y "*SALDO A ABONAR: ...*" en
+    # negrita más arriba.
     unidades_mencionadas: dict[int, sqlite3.Row] = {f["IdUnidad"]: f for f in del_mes + posteriores}
     lineas_placas: list[str] = []
     for u in unidades_mencionadas.values():
@@ -778,9 +786,9 @@ def mensaje_detalle_reserva_aislada(
             None,
         )
         if placa is not None:
-            lineas_placas.append(f"* {u['NombreEdificio']} - {u['Departamento']}: Posición {placa['PosicionTablero']}")
+            lineas_placas.append(f"+ {u['NombreEdificio']} - {u['Departamento']}: Posición {placa['PosicionTablero']}")
     if lineas_placas:
-        lineas += ["", "PLACAS PARA LOS TIMBRES"] + lineas_placas
+        lineas += ["", "_PLACAS PARA LOS TIMBRES_"] + lineas_placas
 
     plantilla = resolver_plantilla(
         conn, "mensaje_detalle_reserva_aislada", DEFAULT_DETALLE_RESERVA_AISLADA,

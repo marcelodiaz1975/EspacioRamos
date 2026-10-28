@@ -126,8 +126,8 @@ def test_mensaje_detalle_reserva_aislada_sin_personalizar_sigue_igual_que_antes(
     )
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
     lineas = texto.splitlines()
-    assert lineas[0] == "DETALLE RESERVA AGOSTO"
-    assert lineas[1] == "JUAN TEST"
+    assert lineas[0] == "*DETALLE RESERVA AGOSTO*"
+    assert lineas[1] == "_JUAN TEST_"
     assert lineas[2] == ""
 
 

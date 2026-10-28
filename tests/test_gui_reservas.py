@@ -1645,7 +1645,7 @@ def test_crear_reserva_aislada_de_un_mes_posterior_no_pierde_el_detalle_del_mes_
     assert len(copiado) == 1
     texto = copiado[0]
     mes_actual = int(periodo_actual(conn).split("-")[1])
-    assert texto.startswith(f"DETALLE RESERVA {mes_texto(mes_actual).upper()}")
+    assert texto.startswith(f"*DETALLE RESERVA {mes_texto(mes_actual).upper()}*")
     assert "RESERVAS POSTERIORES" in texto
     assert texto.index("RESERVAS POSTERIORES") > texto.index("SALDO A ABONAR")
 

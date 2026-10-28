@@ -249,8 +249,8 @@ def test_detalle_aislada_encabezado_en_mayusculas(conn, profesional_aislada_con_
     id_prof, _, _, _, _ = profesional_aislada_con_edificios
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
     lineas = texto.splitlines()
-    assert lineas[0] == "DETALLE RESERVA AGOSTO"
-    assert lineas[1] == "LIC. LUCIA AISLADA"
+    assert lineas[0] == "*DETALLE RESERVA AGOSTO*"
+    assert lineas[1] == "_LIC. LUCIA AISLADA_"
     assert lineas[2] == ""
 
 
@@ -366,7 +366,7 @@ def test_detalle_aislada_separa_reservas_posteriores_sin_dos_puntos(conn, profes
     )
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
     lineas = texto.splitlines()
-    assert "RESERVAS POSTERIORES" in lineas
+    assert "_RESERVAS POSTERIORES_" in lineas
     assert texto.index("RESERVAS POSTERIORES") > texto.index("SALDO A ABONAR")
 
 

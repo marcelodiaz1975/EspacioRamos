@@ -212,8 +212,8 @@ DEFAULT_RECORDATORIO_FIN_DE_MES = (
 )
 
 DEFAULT_DETALLE_RESERVA_AISLADA = (
-    "DETALLE RESERVA {mes_mayus}\n"
-    "{nombre_profesional}\n\n"
+    "*DETALLE RESERVA {mes_mayus}*\n"
+    "_{nombre_profesional}_\n\n"
     "{detalle_items}"
 )
 
