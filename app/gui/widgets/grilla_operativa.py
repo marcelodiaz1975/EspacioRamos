@@ -646,6 +646,10 @@ class GrillaOperativaWidget(QWidget):
         self._resaltar_ausencias = False
         self._filtro_exclusivo_profesional = False
         self._alto_maximo_grilla: int | None = None
+        # Alto (px) de fila de encabezado/dato de la grilla — ver
+        # `fijar_alto_filas` para el único uso de hoy (Reservas aisladas).
+        self._alto_fila_encabezado = 26
+        self._alto_fila_dato = 24
         self._reservar_alto_scroll_horizontal = False
         self._filas_columnas_fijas = False
         self._filas_encabezado_actual = 0
@@ -1141,6 +1145,45 @@ class GrillaOperativaWidget(QWidget):
         columnas."""
         self._panel_filtros.setMaximumWidth(ancho)
 
+    def fijar_alto_filas(self, alto_encabezado: int, alto_dato: int) -> None:
+        """Achica (o agranda) el alto de fila de encabezado/dato de la
+        grilla (26px/24px por defecto) — pensado para Reservas aisladas,
+        que en su rediseño de 4 columnas le dedica una columna propia solo
+        a la grilla (ver `_PanelReservasAisladas`) y necesita que entren
+        las 14 horas (8 a 22hs, configuración de hoy) sin scroll vertical.
+        Hay que llamarlo ANTES de la primera construcción real de la
+        grilla (mismo criterio que `limitar_alto_grilla`) para que
+        aplique desde la primera vez. Opt-in: el resto de los usos de
+        esta grilla compartida (Oferta, Novedades, Grilla semanal,
+        Reservas regulares) no lo llaman y se quedan con el alto de
+        siempre."""
+        self._alto_fila_encabezado = alto_encabezado
+        self._alto_fila_dato = alto_dato
+
+    def extraer_panel_filtros(self) -> QGroupBox:
+        """Saca el panel de Filtros (Localidad/Edificio/Unidad/Día/
+        Profesional, con "Referencias de colores" adentro si no se sacó
+        aparte con `extraer_leyenda_colores`) de este widget para que el
+        llamador lo reubique en otro lado — pensado para Reservas
+        aisladas, que en su rediseño de 4 columnas arma una columna
+        propia solo con estos filtros (mismo criterio que
+        `extraer_detalle`: devuelve el mismo objeto, no una copia). El
+        resto de los usos de esta grilla compartida (Oferta, Novedades,
+        Grilla semanal, Reservas regulares) no lo llaman y el panel sigue
+        embebido al lado de la grilla, como siempre."""
+        self.layout().removeWidget(self._panel_filtros)
+        return self._panel_filtros
+
+    def extraer_leyenda_colores(self) -> "LeyendaColores":
+        """Saca "Referencias de colores" del panel de Filtros (hay que
+        llamarlo DESPUÉS de `mostrar_leyenda_colores`) para que el
+        llamador la reubique en otro lado — pensado para Reservas
+        aisladas, que en su rediseño de 4 columnas la separa en su propia
+        columna, por encima de "Detalle" (mismo criterio que
+        `extraer_detalle`: devuelve el mismo objeto, no una copia)."""
+        self._panel_filtros.layout().removeWidget(self._leyenda_colores)
+        return self._leyenda_colores
+
     def agrupar_dias_en_pares(self) -> None:
         """El filtro "Día de la semana" pasa de una lista vertical (un
         check por línea) a una grilla de 2 columnas fijas — mismo
@@ -1540,9 +1583,9 @@ class GrillaOperativaWidget(QWidget):
         for col in range(_COL_DATOS_INICIO, n_columnas):
             self.tabla.setColumnWidth(col, ancho_columna)
         for fila in range(filas_encabezado):
-            self.tabla.setRowHeight(fila, 26)
+            self.tabla.setRowHeight(fila, self._alto_fila_encabezado)
         for fila in range(filas_encabezado, n_filas):
-            self.tabla.setRowHeight(fila, 24)
+            self.tabla.setRowHeight(fila, self._alto_fila_dato)
 
         if self._filas_columnas_fijas:
             # Mismas dimensiones/anchos/altos que `self.tabla`, repartidos
@@ -1572,10 +1615,10 @@ class GrillaOperativaWidget(QWidget):
             for col in range(len(columnas)):
                 self._tabla_fila_fija.setColumnWidth(col, ancho_columna)
             for fila in range(filas_encabezado):
-                self._tabla_esquina.setRowHeight(fila, 26)
-                self._tabla_fila_fija.setRowHeight(fila, 26)
+                self._tabla_esquina.setRowHeight(fila, self._alto_fila_encabezado)
+                self._tabla_fila_fija.setRowHeight(fila, self._alto_fila_encabezado)
             for i in range(len(horas)):
-                self._tabla_columna_fija.setRowHeight(i, 24)
+                self._tabla_columna_fija.setRowHeight(i, self._alto_fila_dato)
 
         limites_dia = self._limites_dia(columnas)
         limites_unidad = self._limites_unidad(columnas)

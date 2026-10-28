@@ -367,6 +367,72 @@ Panel de control - Avance de período, backup, y vista rápida.png". Sección es
 el nombre del `Seccion` del menú, Solapa el texto de la pestaña
 mostrada (si la pantalla no tiene solapas, se omite esa tercera parte).
 
+## Reservas aisladas — rediseño a 4 columnas (hilo abierto)
+
+Pedido explícito de la clienta: la pantalla pasó de 2 "columnas"
+(formulario + grilla con sus filtros embebidos, repartidas con un
+`QSplitter`) a 4, todas armadas con `QHBoxLayout` (`fila_columnas` en
+`_PanelReservasAisladas._armar_ui`):
+
+1. Formulario de carga (`panel_form`), sin cambios de contenido hasta
+   los checks "Aplica recargo"/"Es reubicación" — los tres botones
+   (Crear/Modificar/Cancelar) siguen después, al final de la columna
+   (ya estaban ahí). Se sacó el texto "Cant. horas aisladas mensuales"
+   (`etiqueta_horas_aisladas`, con el método `_actualizar_resumen_
+   profesional` que lo alimentaba) — pedido explícito, sin reemplazo.
+2. Solo los filtros de la grilla (Localidad/Edificio/Unidad/Día de la
+   semana/Profesional) — sacados de `self.grilla` con
+   `GrillaOperativaWidget.extraer_panel_filtros()` (nuevo, mismo
+   criterio que `extraer_detalle`: remueve el widget del layout interno
+   y lo devuelve para reubicar, sin re-crearlo). Días de la semana de a
+   uno (NO se llama `agrupar_dias_en_pares()`, a diferencia de
+   Regulares) para que la columna gane alto y llegue simétrica con la 1
+   sin hueco en blanco al final.
+3. "Referencias de colores" (una por fila, cuadros y letra chicos —
+   `_columnas = 1`, `fijar_tamano_muestra(24, 14)`, `fijar_tamano_
+   fuente(9)`) sacada del panel de Filtros con `extraer_leyenda_
+   colores()` (nuevo), + el cuadro "Detalle" (ya se sacaba con
+   `extraer_detalle`) debajo, sin tope de alto (antes 25px) — se estira
+   hasta el pie de la columna en vez de quedar chico con un hueco
+   debajo.
+4. La grilla sola (ya sin Filtros ni leyenda, que se sacaron arriba):
+   `self.grilla` después de las extracciones queda reducida a esto
+   (su propio `layout_principal` ya solo tiene `panel_grilla`). Celdas
+   más bajas que el default (`fijar_alto_filas`, nuevo en
+   `GrillaOperativaWidget` — 18px/16px en vez de 26px/24px) para que las
+   14 horas (8 a 22hs) entren sin scroll vertical.
+
+Las tres primeras columnas van al mismo ancho fijo
+(`_ANCHO_COLUMNA_AISLADAS = 260`, subido de un primer intento en 230 al
+ver el mockup real con `hoja_estilos()` — a 230 algunos textos cortos
+("Aplica recargo", "Es reubicación", "Sin selección") quedaban
+recortados). Debajo de las 4 columnas, la tabla de Reservas aisladas de
+siempre, con más alto disponible gracias al espacio que se liberó
+arriba.
+
+`self.grilla._panel_filtros`/`_leyenda_colores` (QGroupBox) ya traían
+su propio margen nativo para alinearse con "Profesional" — las columnas
+2 y 3 van SIN margen superior propio (`layout_col_filtros`/`layout_col_
+detalle` en 0,0,0,0): sumarle `_ALTO_TITULO_FILTROS` encima duplicaba
+el corrimiento (bug real, detectado por
+`test_titulo_profesional_alineado_con_filtro_de_localidad`, que
+reventaba 81 contra 60 — la diferencia exacta de ese margen de más).
+
+Todo el rediseño se armó y confirmó primero con un mockup aparte (script
+descartable fuera de `app/`, reutilizando los widgets/estilos reales)
+que se le mandó a la clienta como captura — recién con su "sí, así" se
+tocó código de verdad, mismo criterio que el resto de "Metodología de
+trabajo" mencionado más abajo.
+
+`GrillaOperativaWidget` suma tres métodos opt-in para este rediseño
+(no afectan a Oferta de consultorios/Novedades/Grilla semanal/Reservas
+regulares, que no los llaman): `extraer_panel_filtros()`,
+`extraer_leyenda_colores()`, `fijar_alto_filas(alto_encabezado,
+alto_dato)`.
+
+Pendiente: la clienta todavía no probó esta versión en vivo — puede
+haber correcciones en la próxima ronda.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

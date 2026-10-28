@@ -1,7 +1,8 @@
 import pytest
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QWidget,
+    QApplication, QDialog, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QScrollArea, QVBoxLayout,
+    QWidget,
 )
 
 import app.gui.pantallas.reservas as reservas_modulo
@@ -9,7 +10,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import hoja_estilos
 from app.gui.pantallas.reservas import (
-    _AJUSTE_ALTO_GRILLA_AISLADAS, _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
+    _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import periodo_actual
@@ -202,73 +203,55 @@ def test_layout_externo_sin_espaciado_en_las_dos_solapas(qtbot, conn):
     assert pantalla.panel_aisladas.layout().spacing() == 0
 
 
-def test_grilla_y_detalle_de_aisladas_separacion_minima(qtbot, conn):
-    """Pedido explícito de la clienta: "el título detalle... subilo un
-    poco para que haya una separación mínima con la grilla" —
-    `layout_grupo_grilla.setSpacing(0)` saca el espaciado default de Qt
-    (6px) entre el borde inferior de la grilla y "Detalle:", dejando solo
-    el borde propio de `self.grilla` como separación."""
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.resize(1500, 800)
-    pantalla.show()
-    pantalla.pestanas.setCurrentIndex(1)
-    qtbot.waitExposed(pantalla)
-
-    panel_a = pantalla.panel_aisladas
-    etiqueta_detalle = next(
-        hijo for hijo in panel_a.findChildren(QLabel) if hijo.text() == "Detalle:"
-    )
-    grilla_bottom = panel_a.grilla.mapToGlobal(panel_a.grilla.rect().bottomLeft()).y()
-    etiqueta_top = etiqueta_detalle.mapToGlobal(etiqueta_detalle.rect().topLeft()).y()
-    assert 0 <= etiqueta_top - grilla_bottom <= 2
-
-
-def test_aisladas_grilla_ajustada_sin_scrollbar(qtbot, conn):
-    """Pedido explícito de la clienta ("ajustá un pelín la grilla para
-    que se vea el borde de abajo y que no aparezca el escrolleable"): el
-    tope "identidad" (`alto_natural_grilla()`) quedaba unos pixels por
-    debajo de lo que la tabla de la grilla realmente necesita para
-    mostrarse completa sin scroll interno — confirmado con un script de
-    geometría contra la pantalla completa (mismo criterio que
-    `shot_reservas.py`) que antes de este ajuste
-    `verticalScrollBar().maximum()` daba 1, y que sumar
-    `_AJUSTE_ALTO_GRILLA_AISLADAS` lo deja en 0. Se compara contra
-    `panel_a._alto_grilla_aplicado` (el valor efectivamente usado al
-    construir la pantalla) en vez de volver a llamar `alto_natural_
-    grilla()` acá: ese `sizeHint()` deja de ser estable una vez agrandada
-    la leyenda de colores (un paso posterior de la misma construcción),
-    así que recalcularlo en el test no da el mismo valor."""
-    _preparar(conn)
-
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    panel_a = pantalla.panel_aisladas
-
-    assert panel_a.grilla.maximumHeight() == panel_a._alto_grilla_aplicado
-    assert _AJUSTE_ALTO_GRILLA_AISLADAS > 0
-
-
 def test_panel_de_filtros_de_la_grilla_queda_compacto(qtbot, conn):
-    """Pedido de la clienta al revisar Reservas: la columna del formulario
-    (Profesional/Localidad/.../botones) se angosta un poco y ese ancho se
-    lo lleva el panel de Filtros de la grilla (Localidad/Edificio/Unidad/
-    Día de la semana/Profesional/Referencias de colores), que además
-    muestra sus días de a pares y la leyenda de colores a 2 columnas con
-    muestra más chica que el tamaño normal (40, 24). El alto de la
-    muestra en sí varía por solapa (Regulares la agranda un poco más,
-    "hay lugar" — ver `test_leyenda_de_regulares_se_agranda_un_poco`;
-    Aisladas la agranda según cuánto le sobre a la grilla, puede quedar
-    en el tamaño compacto de base si no hay diferencia que repartir)."""
+    """Pedido de la clienta al revisar Reservas: en Reservas regulares, la
+    columna del formulario (Profesional/Localidad/.../botones) se angosta
+    un poco y ese ancho se lo lleva el panel de Filtros de la grilla
+    (Localidad/Edificio/Unidad/Día de la semana/Profesional/Referencias de
+    colores), que además muestra sus días de a pares y la leyenda de
+    colores a 2 columnas con muestra más chica que el tamaño normal
+    (40, 24) -- "hay lugar", ver `test_leyenda_de_regulares_se_agranda_un_
+    poco`.
+
+    Reservas aisladas tiene su propio criterio desde el rediseño a 4
+    columnas (ver `test_aisladas_filtros_y_leyenda_separados_en_columnas_
+    propias`): el panel de Filtros ya no comparte ancho con la grilla
+    (columna propia, ancho fijo) y la leyenda se separa a su propia
+    columna con una referencia por fila."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
-    for panel in (pantalla.panel_regulares, pantalla.panel_aisladas):
-        assert panel.combo_profesional.minimumWidth() == 190
-        assert panel.grilla._panel_filtros.maximumWidth() == 290
-        assert panel.grilla._leyenda_colores._columnas == 2
-        assert panel.grilla._leyenda_colores._tamano_muestra[0] == 28
-        grid = panel.grilla._contenedor_dias.layout()
-        assert isinstance(grid, QGridLayout)
+    panel = pantalla.panel_regulares
+    assert panel.combo_profesional.minimumWidth() == 190
+    assert panel.grilla._panel_filtros.maximumWidth() == 290
+    assert panel.grilla._leyenda_colores._columnas == 2
+    assert panel.grilla._leyenda_colores._tamano_muestra[0] == 28
+    grid = panel.grilla._contenedor_dias.layout()
+    assert isinstance(grid, QGridLayout)
+
+
+def test_aisladas_filtros_y_leyenda_separados_en_columnas_propias(qtbot, conn):
+    """Rediseño a 4 columnas de Reservas aisladas (pedido explícito de la
+    clienta, confirmado con una captura mockup antes de tocar código):
+    columna 1 (formulario, con los tres botones al final) / columna 2
+    (solo los filtros de la grilla, mismo ancho fijo que la 1, días de la
+    semana de a uno -- no agrupados en pares, para que la columna llegue
+    simétrica sin hueco en blanco) / columna 3 (Referencias de colores,
+    una por fila, chica, + Detalle estirado hasta abajo) / columna 4 (la
+    grilla sola, celdas más bajas para que entren las 14 horas sin
+    scroll)."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+
+    assert panel.grilla._panel_filtros.width() == panel.combo_profesional.parentWidget().width()
+    assert panel.grilla._panel_filtros.layout().indexOf(panel.grilla._leyenda_colores) == -1
+    assert isinstance(panel.grilla._contenedor_dias.layout(), QVBoxLayout)
+    assert not isinstance(panel.grilla._contenedor_dias.layout(), QGridLayout)
+
+    assert panel.grilla._leyenda_colores._columnas == 1
+    assert panel.grilla._leyenda_colores._tamano_muestra == (24, 14)
+    assert panel.grilla.texto_detalle.maximumHeight() == 16_777_215
+
 
 
 def test_leyenda_de_regulares_se_agranda_un_poco(qtbot, conn):
@@ -406,34 +389,37 @@ def test_cuadro_detalle_escrolea_con_mas_texto_del_que_entra(qtbot, conn):
 def test_cuadro_detalle_queda_parejo_con_la_columna_del_formulario(qtbot, conn):
     """Pedido explícito de la clienta ("que quede parejo"): en Reservas
     regulares (columna del formulario más alta, por los campos "Días" y
-    "Vigencia") el cuadro "Detalle" pasa a estirarse en vez de la grilla;
-    en Reservas aisladas (columna de la grilla más alta) es al revés, se
-    achica "Detalle" para no ser la que fuerza el scroll."""
+    "Vigencia") el cuadro "Detalle" pasa a estirarse en vez de la grilla.
+
+    En Reservas aisladas, desde el rediseño a 4 columnas, "Detalle" vive
+    en su propia columna (la 3, junto a "Referencias de colores") y
+    siempre se estira sin tope de alto hasta el pie de la columna 1 (ver
+    `test_aisladas_filtros_y_leyenda_separados_en_columnas_propias`), sin
+    importar si la grilla de al lado queda más alta o más baja."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     grilla_regulares = pantalla.panel_regulares.grilla
     assert grilla_regulares._layout_grilla.stretch(grilla_regulares._layout_grilla.indexOf(grilla_regulares.tabla)) == 0
     assert grilla_regulares.texto_detalle.maximumHeight() > 90
 
-    grilla_aisladas = pantalla.panel_aisladas.grilla
-    assert grilla_aisladas.texto_detalle.maximumHeight() == 25
 
-
-def test_detalle_de_aisladas_ocupa_todo_el_ancho_de_la_grilla(qtbot, conn):
-    """Pedido explícito de la clienta: en Reservas aisladas, "Detalle"
-    pasa a ocupar todo el ancho de la grilla (Filtros + grid juntos, la
-    segunda y tercer columna de la pantalla), no la columna angosta de
-    la grilla nomás — "en regulares no porque no entra", así que ahí se
-    queda como estaba (dentro de la columna de la grilla)."""
+def test_detalle_de_aisladas_en_su_propia_columna(qtbot, conn):
+    """Rediseño a 4 columnas de Reservas aisladas: "Detalle" ya no vive
+    adentro de la grilla (columna 4) ni ocupa su ancho — pasa a su propia
+    columna 3, junto a "Referencias de colores", con el mismo ancho fijo
+    que las columnas 1 y 2. En Reservas regulares no cambió nada: sigue
+    dentro de la columna de la grilla, más angosto que ella."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1500, 800)
     pantalla.show()
+    pantalla.pestanas.setCurrentIndex(1)
     qtbot.waitExposed(pantalla)
 
     panel_a = pantalla.panel_aisladas
     assert panel_a.grilla._layout_grilla.indexOf(panel_a.grilla.texto_detalle) == -1
-    assert panel_a.grilla.texto_detalle.width() == panel_a.grilla.width()
+    assert panel_a.grilla.texto_detalle.parentWidget() is not panel_a.grilla
+    assert panel_a.grilla.texto_detalle.width() == panel_a.combo_profesional.parentWidget().width()
 
     panel_r = pantalla.panel_regulares
     assert panel_r.grilla._layout_grilla.indexOf(panel_r.grilla.texto_detalle) != -1
@@ -509,52 +495,6 @@ def test_grilla_de_regulares_mantiene_el_tope_identidad_sin_achicarse(qtbot, con
     panel_r = pantalla.panel_regulares
 
     assert panel_r.grilla.maximumHeight() == panel_r.grilla.alto_natural_grilla()
-
-
-def test_grilla_de_aisladas_termina_alineada_con_las_referencias_de_colores(qtbot, conn):
-    """Pedido explícito de la clienta: en Reservas aisladas, la grilla
-    (Período/Visualización + la tabla) termina alineada con la última
-    referencia de colores del panel de Filtros de al lado ("Profesional
-    filtrado"), en vez de imponer su propio alto natural (más alto) al
-    resto de la columna."""
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.resize(1500, 800)
-    pantalla.show()
-    pantalla.pestanas.setCurrentIndex(1)
-    qtbot.waitExposed(pantalla)
-
-    panel_a = pantalla.panel_aisladas
-    fondo_tabla = panel_a.grilla.tabla.mapToGlobal(panel_a.grilla.tabla.rect().bottomLeft()).y()
-    fondo_leyenda = panel_a.grilla._leyenda_colores.mapToGlobal(
-        panel_a.grilla._leyenda_colores.rect().bottomLeft()
-    ).y()
-    assert abs(fondo_tabla - fondo_leyenda) <= 5
-
-
-def test_detalle_de_aisladas_queda_pegado_debajo_de_la_grilla(qtbot, conn):
-    """Pedido explícito de la clienta ("subí el cuadro de detalle para
-    pegarlo con lo de arriba"): con la grilla ya achicada, "Detalle"
-    arranca justo debajo (solo el espaciado normal del layout, no un
-    hueco de más como cuando la grilla quedaba forzada a un alto mayor
-    por el splitter)."""
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.resize(1500, 800)
-    pantalla.show()
-    pantalla.pestanas.setCurrentIndex(1)
-    qtbot.waitExposed(pantalla)
-
-    panel_a = pantalla.panel_aisladas
-    etiqueta_detalle, _ = None, None
-    for hijo in panel_a.findChildren(QLabel):
-        if hijo.text() == "Detalle:":
-            etiqueta_detalle = hijo
-            break
-    assert etiqueta_detalle is not None
-    fondo_grilla = panel_a.grilla.mapToGlobal(panel_a.grilla.rect().bottomLeft()).y()
-    tope_detalle = etiqueta_detalle.mapToGlobal(etiqueta_detalle.rect().topLeft()).y()
-    assert 0 <= tope_detalle - fondo_grilla <= 15
 
 
 def test_detalle_de_aisladas_termina_cerca_del_pie_del_tercer_boton(qtbot, conn):
@@ -1698,20 +1638,21 @@ def test_datos_complementarios_del_profesional(qtbot, conn):
     assert panel.etiqueta_horas_semanales.text() == "Cant. horas regulares semanales: 3"
 
 
-def test_regulares_sin_horas_aisladas_mensuales_y_aisladas_solo_horas_aisladas(qtbot, conn):
-    """Pedido explícito de la clienta, en tres vueltas: primero se sacó
+def test_regulares_con_horas_semanales_y_descuento_aisladas_sin_ninguno(qtbot, conn):
+    """Pedido explícito de la clienta, en varias vueltas: primero se sacó
     "Horas aisladas mensuales" de Reservas regulares (solo importan
     "Horas regulares semanales" y "% Descuento" ahí); después se sacó
-    "Horas regulares semanales" de Reservas aisladas, y en la vuelta
-    siguiente también "% Descuento" — Aisladas termina con un solo
-    título informativo ("Horas aisladas mensuales"), Regulares con dos
+    "Horas regulares semanales" y "% Descuento" de Reservas aisladas; en
+    el rediseño a 4 columnas se terminó sacando también "Horas aisladas
+    mensuales" de Aisladas — esa solapa queda sin ningún título
+    informativo de este tipo, Regulares se queda con los dos de siempre
     ("Horas regulares semanales" y "% Descuento")."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     assert not hasattr(pantalla.panel_regulares, "etiqueta_horas_aisladas")
     assert hasattr(pantalla.panel_regulares, "etiqueta_horas_semanales")
     assert hasattr(pantalla.panel_regulares, "etiqueta_descuento")
-    assert hasattr(pantalla.panel_aisladas, "etiqueta_horas_aisladas")
+    assert not hasattr(pantalla.panel_aisladas, "etiqueta_horas_aisladas")
     assert not hasattr(pantalla.panel_aisladas, "etiqueta_horas_semanales")
     assert not hasattr(pantalla.panel_aisladas, "etiqueta_descuento")
 
@@ -2249,24 +2190,6 @@ def test_tabla_aisladas_columna_valor(qtbot, conn):
     assert valores["17-08-2026"] == formatear_moneda(2000)
     assert valores["17-09-2026"] == ""
 
-
-def test_datos_complementarios_aisladas_incluye_horas_aisladas_mensuales(qtbot, conn):
-    _preparar(conn)
-    conn.execute(
-        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-10' WHERE IdConfiguracion = 1"
-    )
-    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
-    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
-    obtener_repositorio(conn, "ReservaAislada").crear(
-        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-08-17", HoraInicio=9, HoraFin=11,
-    )
-    conn.commit()
-
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_aisladas
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    assert panel.etiqueta_horas_aisladas.text() == "Cant. horas aisladas mensuales: 2"
 
 
 def test_spin_horario_se_muestra_como_reloj(qtbot, conn):
@@ -3043,7 +2966,6 @@ def test_etiquetas_horas_regulares_y_aisladas_tienen_wordwrap(qtbot, conn):
     qtbot.addWidget(pantalla)
     assert pantalla.panel_regulares.etiqueta_horas_semanales.wordWrap() is True
     assert pantalla.panel_regulares.etiqueta_descuento.wordWrap() is True
-    assert pantalla.panel_aisladas.etiqueta_horas_aisladas.wordWrap() is True
 
 
 # ------------------------------------------------------------ reserva extraordinaria

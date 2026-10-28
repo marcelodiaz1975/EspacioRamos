@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QTableWidget,
@@ -163,10 +164,7 @@ _ESTILO_BOTON_COMPACTO = "padding: 3px 16px;"
 # botones un poco más, al mínimo, para que se vean los tres... hoy por
 # hoy veo dos nada más" — pasan al mismo mínimo que el resto de la
 # columna (`_ESTILO_BOTON_COMPACTO`, 22px), sin ninguna distinción
-# propia. El criterio de alineación cambia de objetivo en esta misma
-# ronda: ya no persigue "Horas aisladas mensuales" (ver `_ALTO_DETALLE_
-# AISLADAS` más abajo) — "a la altura donde termina el tercer botón,
-# hasta ahí tiene que llegar el cuadro de detalle".
+# propia.
 _ESTILO_BOTON_AISLADAS_ALTO = _ESTILO_BOTON_COMPACTO
 # Pedido de la clienta: la tabla de abajo (Horarios reservados/Reservas
 # aisladas) tiene que verse, título y un par de filas, sin scrollear el
@@ -181,31 +179,6 @@ _ESTILO_BOTON_AISLADAS_ALTO = _ESTILO_BOTON_COMPACTO
 # antes (pedido explícito de la clienta al revisar la captura).
 _FILAS_VISIBLES_TABLA_INFERIOR_REGULARES = 3
 _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 4
-# Alto máximo del cuadro "Detalle" en Reservas aisladas, ya sacado de la
-# grilla y ocupando todo el ancho de "Filtros + grid" (90px por defecto
-# en el resto de los usos) — ver `GrillaOperativaWidget.extraer_detalle`.
-# Historial de rondas anteriores (criterio viejo, "que 'Detalle' quede
-# parejo con el pie de 'Cant. horas aisladas mensuales'"): 54 -> 64.
-#
-# Punto #9.1.6 (SistemaDF v0.11.2026.10): "A la altura donde termina el
-# tercer botón, hasta ahí tiene que llegar el cuadro de detalle, debajo
-# de todo eso se ubicaría la tabla" — nuevo criterio de alineación, que
-# reemplaza al de "Cant. horas aisladas mensuales" de rondas anteriores.
-# Medido (no a ojo), con una salvedad real: medido SIN `hoja_estilos()`
-# aplicada, 64 -> 25 da una coincidencia exacta con el pie de "Cancelar
-# reserva"; medido CON `hoja_estilos()` aplicada (lo que la clienta ve
-# de verdad, mismo motivo documentado en `test_detalle_de_aisladas_
-# alineado_con_el_pie_del_tercer_boton`) queda un resto de ~30-35px —
-# incluso llevando este valor a 1 (el piso real, "Detalle" prácticamente
-# sin alto) el resto no se cierra del todo, así que el desajuste no es
-# algo que esta sola constante pueda terminar de resolver: la fuente
-# real cambia la proporción entre la columna del formulario y la de la
-# grilla+Detalle de un modo que no es lineal con este valor. Se deja en
-# 25 (un cuadro todavía útil, no colapsado a 1px) — sin una captura real
-# de la clienta para seguir calibrando, queda documentado como mejor
-# esfuerzo, mismo criterio que otros casos "investigado, sin reproducir
-# del todo" de este archivo.
-_ALTO_DETALLE_AISLADAS = 25
 # Hasta la ronda anterior, `layout_externo` (form+grilla scrolleable,
 # `stretch=1`, seguido de la tabla de abajo, sin stretch) le daba TODO el
 # alto sobrante de la ventana a `scroll` — cualquier alto que `panel_
@@ -222,25 +195,19 @@ _ALTO_DETALLE_AISLADAS = 25
 # verdad, no hueco muerto), `_ALTO_TITULO_PANEL_TABLA`/`_ALTO_TITULO_
 # PANEL_TABLA_REGULARES` — los espaciadores fijos de las dos rondas
 # anteriores — dejaron de usarse y se sacaron.
-# Cantidad de filas de "Referencias de colores" en Reservas aisladas (6
-# referencias / 2 columnas, ver `LeyendaColores.hacer_compacta`) — usado
-# para repartir en partes iguales, entre los "cuadraditos" de esa
-# leyenda, el alto de sobra que gana el panel de Filtros al alinearse
-# contra una grilla que ahora se muestra completa (pedido explícito de
-# la clienta, ver `_PanelReservasAisladas._armar_ui`).
-_FILAS_LEYENDA_AISLADA = 3
-# Ajuste fino sobre el tope "identidad" de la grilla de Aisladas (pedido
-# explícito de la clienta, ronda posterior: "ajustá un pelín la grilla
-# para que se vea el borde de abajo y que no aparezca el escrolleable").
-# Medido con un script de geometría: `alto_natural_grilla()` (el
-# `sizeHint()` de la columna) quedaba 2px por debajo de lo que la tabla
-# realmente necesita (`sum(rowHeight) + 2 × frameWidth`, con el
-# encabezado horizontal oculto) — un desfasaje entre el `sizeHint` y el
-# alto real de renderizado, no algo que dependa de los datos cargados,
-# así que alcanza con sumarle un puñado de pixels fijo al tope antes de
-# aplicarlo. Confirmado que sube a `tabla.verticalScrollBar().maximum()
-# == 0` (antes daba 1) sin recortar el borde inferior de la grilla.
-_AJUSTE_ALTO_GRILLA_AISLADAS = 2
+# Rediseño a 4 columnas de Reservas aisladas (pedido explícito de la
+# clienta, confirmado con una captura mockup antes de tocar código):
+# formulario / filtros de la grilla / referencias de colores+Detalle /
+# grilla, las primeras tres del mismo ancho fijo para que queden
+# simétricas entre sí.
+_ANCHO_COLUMNA_AISLADAS = 260
+# Alto (px) de fila de encabezado/dato de la grilla en esa columna 4,
+# más chico que el default de `GrillaOperativaWidget` (26px/24px) para
+# que las 14 horas (8 a 22hs, configuración de hoy) entren sin necesitar
+# scroll vertical — pedido explícito de la clienta, ver `fijar_alto_
+# filas`.
+_ALTO_FILA_ENCABEZADO_AISLADAS = 18
+_ALTO_FILA_DATO_AISLADAS = 16
 
 
 def _alto_para_filas(tabla: QTableWidget, filas: int) -> int:
@@ -1651,7 +1618,11 @@ class _PanelReservasAisladas(QWidget):
         # scrollear, espacio que acá se usa para mostrar más filas en la
         # tabla de abajo sin perder de vista "Detalle"/"% Descuento".
         layout.setContentsMargins(0, 0, 0, 0)
-        splitter_superior = QSplitter()
+        # Rediseño a 4 columnas (pedido de la clienta, ver constantes
+        # `_ANCHO_COLUMNA_AISLADAS`/`_ALTO_FILA_*_AISLADAS` más arriba en
+        # el archivo): reemplaza el `QSplitter` de 2 paneles (formulario +
+        # grilla con filtros embebidos) de antes.
+        fila_columnas = QHBoxLayout()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
@@ -1791,89 +1762,88 @@ class _PanelReservasAisladas(QWidget):
         self.boton_cancelar.clicked.connect(self._cancelar)
         form.addWidget(self.boton_cancelar)
 
-        linea_separadora = QFrame()
-        linea_separadora.setFrameShape(QFrame.Shape.HLine)
-        linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
-        form.addWidget(linea_separadora)
-
-        self.etiqueta_horas_aisladas = QLabel()
-        self.etiqueta_horas_aisladas.setWordWrap(True)
-        form.addWidget(self.etiqueta_horas_aisladas)
-
         form.addStretch()
-        splitter_superior.addWidget(panel_form)
+        panel_form.setFixedWidth(_ANCHO_COLUMNA_AISLADAS)
+        fila_columnas.addWidget(panel_form)
 
-        # Sin título (pedido de la clienta) — antes decía "Vista previa:
-        # grilla operativa".
-        grupo_grilla = QGroupBox()
-        layout_grupo_grilla = QVBoxLayout(grupo_grilla)
-        layout_grupo_grilla.setContentsMargins(0, 0, 0, 0)
-        # Sin espaciado default de Qt (6px) entre la grilla y "Detalle:"
-        # (pedido explícito de la clienta: "el título detalle... subilo
-        # un poco para que haya una separación mínima con la grilla") —
-        # el hueco que queda ahora (borde de `self.grilla` nomás) es el
-        # mínimo posible, no hace falta compensar nada más abajo porque
-        # acá no hay ningún mecanismo de "scroll que se lleva lo
-        # sobrante" de por medio, a diferencia de `layout_externo` más
-        # abajo.
-        layout_grupo_grilla.setSpacing(0)
+        # --- Columna 2: solo los filtros de la grilla (Localidad/
+        # Edificio/Unidad/Día de la semana/Profesional), mismo ancho que
+        # la columna 1, estirados hasta su misma altura. Rediseño de 4
+        # columnas pedido por la clienta sobre el formulario anterior (2
+        # columnas: formulario + grilla con sus filtros embebidos) —
+        # "vamos a agregar una cuarta columna a ver cómo queda".
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.fijar_modo("aislada")
         self.grilla.activar_filtro_exclusivo_profesional(True)
-        self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
-        self.grilla.agrupar_dias_en_pares()
-        self.grilla.mostrar_leyenda_colores(compacta=True)
-        # Punto propio de esta ronda: "achicar la fuente de las
-        # referencias para que no salgan apelmazadas" — un poco más
-        # chica que el default de `hacer_compacta()` (10px).
-        self.grilla.fijar_tamano_fuente_leyenda(9)
+        self.grilla.mostrar_leyenda_colores(compacta=False)
         # Sin título "Filtros" (pedido de la clienta) — cada filtro pasa a
         # nombrarse solo con "Filtro de ...", ver `renombrar_etiquetas_
         # filtro`.
         self.grilla.fijar_titulo_filtros("")
         self.grilla.renombrar_etiquetas_filtro()
-        # "Detalle" pasa a ocupar todo el ancho de esta grilla (Filtros +
-        # grid juntos), debajo de todo, en vez de la columna angosta de
-        # la grilla nomás — pedido explícito de la clienta ("en regulares
-        # no porque no entra", así que esto es puntual de Aisladas). Sale
-        # de `self.grilla` con `extraer_detalle` ANTES de medir el alto
-        # natural de la columna (ver justo abajo): si se sacara después,
-        # ese alto natural todavía arrastraría el de "Detalle", que de
-        # todos modos se saca a continuación.
+        # Celdas más bajas que el default (26px/24px) para que las 14
+        # horas (8 a 22hs, configuración de hoy) entren en la columna 4
+        # sin necesitar scroll vertical — pedido explícito de la clienta
+        # en este rediseño. Hay que fijarlo ANTES de la primera
+        # construcción real de la grilla (ver `fijar_alto_filas`).
+        self.grilla.fijar_alto_filas(_ALTO_FILA_ENCABEZADO_AISLADAS, _ALTO_FILA_DATO_AISLADAS)
+
+        panel_filtros_aisladas = self.grilla.extraer_panel_filtros()
+        panel_filtros_aisladas.setFixedWidth(_ANCHO_COLUMNA_AISLADAS)
+        # "Referencias de colores" se separa del panel de Filtros: pasa a
+        # su propia columna 3, arriba del cuadro "Detalle" — pedido
+        # explícito de la clienta ("arrancás con las referencias de
+        # colores... de a una por fila").
+        leyenda_colores = self.grilla.extraer_leyenda_colores()
+        # Una referencia por fila (no a dos columnas, que es lo que arma
+        # `mostrar_leyenda_colores(compacta=True)` para el panel angosto
+        # de Filtros embebido de siempre) — fuente y cuadros chicos para
+        # ganar lugar, mismo pedido explícito de la clienta.
+        leyenda_colores._columnas = 1
+        leyenda_colores.fijar_tamano_muestra(24, 14)
+        leyenda_colores.fijar_tamano_fuente(9)
+        leyenda_colores.actualizar(self.grilla.combo_modo.currentData() or "aislada")
+        # La columna de Filtros se estira hasta la misma altura que la
+        # columna 1 (ver `fila_columnas` más abajo, que iguala el alto de
+        # las cuatro columnas) — pedido explícito de la clienta ("si es
+        # necesario... poné los días de la semana de a uno", ya el
+        # default de esta grilla, para que llegue simétrico sin hueco en
+        # blanco al final).
+        # Sin margen propio: el panel ya trae su propio margen nativo de
+        # `QGroupBox` (el mismo que, sin título, alineaba "Filtro de
+        # localidad" con "Profesional" cuando vivía embebido directo en
+        # `self.grilla`) — sumarle acá otro encima de `_ALTO_TITULO_
+        # FILTROS` lo corría de más.
+        panel_filtros_aisladas.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        layout_col_filtros = QVBoxLayout()
+        layout_col_filtros.setContentsMargins(0, 0, 0, 0)
+        layout_col_filtros.addWidget(panel_filtros_aisladas, stretch=1)
+        fila_columnas.addLayout(layout_col_filtros)
+
+        # --- Columna 3: referencias de colores arriba, "Detalle" abajo
+        # (estirado hasta el final, sin tope de alto), mismo ancho que
+        # las columnas 1 y 2.
+        panel_col_detalle = QWidget()
+        panel_col_detalle.setFixedWidth(_ANCHO_COLUMNA_AISLADAS)
+        layout_col_detalle = QVBoxLayout(panel_col_detalle)
+        # Sin margen propio, mismo motivo que la columna 2: "Referencias de
+        # colores" es un `QGroupBox` (como "Filtros") y ya trae su propio
+        # margen nativo para alinearse con "Profesional" — sumarle
+        # `_ALTO_TITULO_FILTROS` encima lo corría de más.
+        layout_col_detalle.setContentsMargins(0, 0, 0, 0)
+        layout_col_detalle.addWidget(leyenda_colores)
         etiqueta_detalle, texto_detalle = self.grilla.extraer_detalle()
-        # La grilla se muestra COMPLETA, sin recortar (pedido explícito
-        # de la clienta: "se ve cortada... dale mas alta de manera que se
-        # visualice completa") — el tope que se le pone es IGUAL a su
-        # propio alto natural (mismo criterio "identidad" que Reservas
-        # regulares, ver `_PanelReservasRegulares`), así que no recorta
-        # nada hoy; de paso queda scrolleable, por si el día de mañana
-        # hace falta mostrar más horarios sin agrandar el panel.
-        alto_grilla = self.grilla.alto_natural_grilla() + _AJUSTE_ALTO_GRILLA_AISLADAS
-        # Guardado aparte (no solo pasado a `limitar_alto_grilla`): el
-        # `sizeHint()` detrás de `alto_natural_grilla()` deja de ser
-        # estable una vez aplicado el tope y agrandada la leyenda más
-        # abajo — volver a llamarlo después de construir la pantalla (ej.
-        # desde un test) puede devolver otro valor. Este atributo es el
-        # que realmente se usó.
-        self._alto_grilla_aplicado = alto_grilla
-        self.grilla.limitar_alto_grilla(alto_grilla)
-        # El panel de Filtros de al lado (con "Referencias de colores")
-        # queda más bajo que la grilla ahora que esta se ve completa —
-        # pedido explícito de la clienta: ese sobrante no se deja como
-        # hueco en blanco al final (lo que haría solo el `addStretch()`
-        # de `layout_filtros`), se reparte entre los "cuadraditos" de la
-        # leyenda para que crezcan y el panel termine exactamente a la
-        # misma altura que el borde inferior de la grilla.
-        alto_filtros = self.grilla.alto_natural_filtros()
-        diferencia = alto_grilla - alto_filtros
-        # Si la grilla no queda más alta que Filtros (ej. una base con
-        # pocos consultorios cargados), no hay nada que repartir — se
-        # deja el tamaño compacto de siempre en vez de achicar las
-        # muestras con una diferencia negativa.
-        if diferencia > 0:
-            ancho_muestra, alto_muestra = self.grilla.tamano_muestra_leyenda()
-            alto_muestra += diferencia // _FILAS_LEYENDA_AISLADA
-            self.grilla.agrandar_muestras_leyenda(ancho_muestra, alto_muestra)
+        layout_col_detalle.addWidget(etiqueta_detalle)
+        # Sin tope de alto (90px por defecto): el cuadro de Detalle se
+        # estira hasta el final de la columna en vez de quedar chico con
+        # un hueco en blanco debajo — pedido explícito de la clienta
+        # ("estiralo hasta abajo donde terminan las otras columnas").
+        texto_detalle.setMaximumHeight(16_777_215)
+        layout_col_detalle.addWidget(texto_detalle, stretch=1)
+        fila_columnas.addWidget(panel_col_detalle)
+
+        # --- Columna 4: la grilla en sí (ya sin el panel de Filtros ni
+        # la leyenda, sacados arriba), con el resto del ancho disponible.
         # Pedido explícito de la clienta, extendido desde Oferta de
         # consultorios a toda pantalla con esta grilla: Tipo de bloque/
         # Horario y las filas de encabezado quedan siempre visibles al
@@ -1891,25 +1861,9 @@ class _PanelReservasAisladas(QWidget):
         self._foco_filtros_grilla = instalar_enter_avanza_foco(
             self.grilla.widgets_filtro_para_foco(), parent=self.grilla,
         )
-        layout_grupo_grilla.addWidget(self.grilla)
-        layout_grupo_grilla.addWidget(etiqueta_detalle)
-        layout_grupo_grilla.addWidget(texto_detalle)
-        texto_detalle.setMaximumHeight(_ALTO_DETALLE_AISLADAS)
-        # Sin esto, el sobrante de alto que el splitter le da a
-        # `grupo_grilla` (para igualar el alto de `panel_form`, más alto
-        # que el contenido real de acá) lo repartía Qt en `etiqueta_
-        # detalle` — el único item de este layout sin un tope propio,
-        # ya que `self.grilla` y `texto_detalle` sí lo tienen — inflando
-        # el label "Detalle:" a un alto absurdo y empujando el cuadro de
-        # texto hacia abajo, en vez de pegarlo justo debajo de la grilla
-        # como pidió la clienta. Mismo mecanismo/mismo arreglo que el
-        # `addStretch()` de `GrillaOperativaWidget._armar_ui`.
-        layout_grupo_grilla.addStretch()
-        splitter_superior.addWidget(grupo_grilla)
+        fila_columnas.addWidget(self.grilla, stretch=1)
 
-        splitter_superior.setStretchFactor(0, 0)
-        splitter_superior.setStretchFactor(1, 1)
-        layout.addWidget(splitter_superior)
+        layout.addLayout(fila_columnas)
 
         hoy = fecha_actual(self.conn)
         self.campo_fecha.setDate(QDate(hoy.year, hoy.month, hoy.day))
@@ -2064,24 +2018,8 @@ class _PanelReservasAisladas(QWidget):
             self.grilla.filtrar_por_dias(dias)
             self.grilla.filtrar_por_pares_unidad_dia(pares)
             self.grilla.filtrar_por_profesional(id_profesional)
-        self._actualizar_resumen_profesional(id_profesional)
         if self.casilla_reubicacion.isChecked():
             self._cargar_horarios_no_usados()
-
-    def _actualizar_resumen_profesional(self, id_profesional: int | None) -> None:
-        # Sin "Horas regulares semanales" ni "% Descuento" (pedido
-        # explícito de la clienta, en dos vueltas): en Reservas aisladas
-        # solo importa "Horas aisladas mensuales" — ver
-        # `_PanelReservasRegulares._actualizar_resumen_profesional` para
-        # la versión de la pantalla hermana (horas regulares + %
-        # descuento, sin horas aisladas).
-        resumen = calcular_resumen_profesional(self.conn, id_profesional)
-        if resumen is None:
-            self.etiqueta_horas_aisladas.setText("Cant. horas aisladas mensuales: —")
-            return
-        self.etiqueta_horas_aisladas.setText(
-            f"Cant. horas aisladas mensuales: {_fmt_horas(resumen.horas_aisladas_mensuales)}"
-        )
 
     def _alternar_reubicacion(self) -> None:
         marcado = self.casilla_reubicacion.isChecked()
