@@ -63,11 +63,9 @@ from app.negocio.validaciones import (
     FORMATO_CUIT,
     FORMATO_DNI,
     FORMATO_EMAIL,
-    FORMATO_FECHA,
     es_cuit_valido,
     es_dni_valido,
     es_email_valido,
-    es_fecha_valida,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -179,9 +177,24 @@ def _opciones_tratamiento_usados(conn: sqlite3.Connection) -> list[str]:
     return [f["Tratamiento"] for f in filas]
 
 
-def _opciones_profesion(conn: sqlite3.Connection) -> list[tuple[int, str]]:
+def _opciones_profesion(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    """Con "(Sin profesión)" al principio (antes no tenía ninguna opción en
+    blanco): necesario para que IdProfesion pueda pedirse como obligatorio
+    para la categoría C (ver `requerido_si` en `_campos_profesional`) — sin
+    esto, el combo siempre quedaba con ALGUNA profesión real preseleccionada
+    (la primera en orden alfabético) y nunca se podía detectar "no elegida"."""
     filas = conn.execute("SELECT IdProfesion, Nombre FROM Profesion ORDER BY Nombre").fetchall()
-    return [(f["IdProfesion"], f["Nombre"]) for f in filas]
+    return [(None, "(Sin profesión)"), *[(f["IdProfesion"], f["Nombre"]) for f in filas]]
+
+
+def _opciones_cabeza_equipo(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
+    """Mismo motivo que `_opciones_profesion`: "(Sin cabeza de equipo)" al
+    principio para que el combo pueda arrancar/volver a "nada elegido" en
+    vez de quedar siempre con algún profesional real preseleccionado (el
+    primero en la jerarquía de categorías de `_opciones_profesional_
+    canonico`) — root cause de que apareciera "puesto por defecto" un
+    cabeza de equipo al dar de alta cualquier categoría, inclusive C."""
+    return [(None, "(Sin cabeza de equipo)"), *_opciones_profesional_canonico(conn)]
 
 
 def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
@@ -192,8 +205,14 @@ def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
         # la clienta para esta pantalla, no una regla general de Campo).
         Campo("IdCodigo", "Código"),
         Campo("Tratamiento", "Tratamiento", tipo="combo", opciones=lambda conn: [], combo_editable=True),
-        Campo("NombrePila", "Nombre"),
-        Campo("Apellido", "Apellido", requerido=True),
+        # Pedido explícito de la clienta sobre la categoría "C - Contacto /
+        # prospecto": el Apellido deja de ser obligatorio para esta
+        # categoría (alcanza con un contacto que solo dio el nombre) pero
+        # en cambio el Nombre, la Profesión y la Fecha de contacto SÍ
+        # pasan a serlo — mismo criterio `requerido_si` en los cuatro
+        # campos (ver `Campo.requerido_si`, `crud_generico.py`).
+        Campo("NombrePila", "Nombre", requerido_si=lambda v: v("CategoriaProfesional") == "C"),
+        Campo("Apellido", "Apellido", requerido_si=lambda v: v("CategoriaProfesional") != "C"),
         Campo("CategoriaProfesional", "Categoría", tipo="combo", opciones=_opciones_categoria, requerido=True),
         Campo("NombreCompleto", "Nombre completo"),
         Campo("Apodo", "Apodo"),
@@ -215,16 +234,30 @@ def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
         Campo("TelefonoParticular", "Teléfono particular"),
         Campo("Celular", "Celular"),
         Campo("Email", "Email", validador=es_email_valido, formato_esperado=FORMATO_EMAIL),
-        Campo("IdProfesion", "Profesión", tipo="combo", opciones=_opciones_profesion),
+        Campo(
+            "IdProfesion", "Profesión", tipo="combo", opciones=_opciones_profesion,
+            requerido_si=lambda v: v("CategoriaProfesional") == "C",
+        ),
         Campo("MatriculaNacional", "Matrícula nacional"),
         Campo("MatriculaProvincial", "Matrícula provincial"),
+        # "dd-MM-yyyy" (pedido explícito de la clienta) en vez del texto
+        # libre validado contra AAAA-MM-DD de antes — mismo `QDateEdit` que
+        # Fecha de nacimiento, sin día de semana. El AAAA-MM-DD sigue
+        # siendo lo que se guarda en la base (`tipo="fecha"` lo resuelve
+        # solo, ver convención de estilos en CLAUDE.md).
         Campo(
-            "FechaContacto", "Fecha de contacto (AAAA-MM-DD)",
-            validador=es_fecha_valida, formato_esperado=FORMATO_FECHA,
+            "FechaContacto", "Fecha de contacto", tipo="fecha", formato_fecha="dd-MM-yyyy",
+            requerido_si=lambda v: v("CategoriaProfesional") == "C",
         ),
+        # Pedido explícito de la clienta: deshabilitado salvo que la
+        # categoría sea "E" (ver `_al_abrir_dialogo`/`_actualizar_cabeza_
+        # equipo`) — antes quedaba siempre con algún profesional real
+        # preseleccionado (sin opción en blanco), lo que daba la impresión
+        # de "venir puesto por defecto" al dar de alta cualquier categoría.
         Campo(
             "ProfesionalCabezaEquipo", "Cabeza de equipo", tipo="combo",
-            opciones=_opciones_profesional_canonico,
+            opciones=_opciones_cabeza_equipo,
+            requerido_si=lambda v: v("CategoriaProfesional") == "E",
         ),
         Campo("SaldoCuentaActual", "Saldo cuenta actual", tipo="numero", es_monto=True),
         Campo("SaldoCuentaAnterior", "Saldo cuenta anterior", tipo="numero", es_monto=True),
@@ -266,6 +299,7 @@ def _al_abrir_dialogo(dialogo) -> None:
     combo_profesion = dialogo._entradas["IdProfesion"]
     combo_sexo = dialogo._entradas["Sexo"]
     combo_tratamiento = dialogo._entradas["Tratamiento"]
+    combo_cabeza_equipo = dialogo._entradas["ProfesionalCabezaEquipo"]
 
     campo_codigo.setReadOnly(True)
     categoria_original = combo_categoria.currentData()
@@ -275,7 +309,19 @@ def _al_abrir_dialogo(dialogo) -> None:
     # categorías) que el resto del sistema — ya viene poblado en el
     # formato canónico por `_opciones_profesional_canonico`, solo hace
     # falta sumarle el comportamiento de búsqueda.
-    habilitar_busqueda_profesional(dialogo._entradas["ProfesionalCabezaEquipo"])
+    habilitar_busqueda_profesional(combo_cabeza_equipo)
+
+    def _actualizar_cabeza_equipo(resetear: bool) -> None:
+        # Pedido explícito de la clienta: el campo solo es seleccionable
+        # para la categoría "E" — para cualquier otra queda deshabilitado
+        # y, si el cambio de categoría es real (no la carga inicial del
+        # diálogo, `resetear=False` ahí para no pisar un valor ya cargado
+        # al editar un E existente), se limpia a "(Sin cabeza de equipo)"
+        # en vez de dejar pegado un valor que ya no aplica.
+        es_equipo = combo_categoria.currentData() == "E"
+        combo_cabeza_equipo.setEnabled(es_equipo)
+        if not es_equipo and resetear:
+            combo_cabeza_equipo.setCurrentIndex(combo_cabeza_equipo.findData(None))
 
     def _actualizar_codigo() -> None:
         categoria = combo_categoria.currentData()
@@ -320,9 +366,12 @@ def _al_abrir_dialogo(dialogo) -> None:
             combo_tratamiento.setEditText(actual)
 
     combo_categoria.currentIndexChanged.connect(_actualizar_codigo)
+    combo_categoria.currentIndexChanged.connect(lambda: _actualizar_cabeza_equipo(resetear=True))
+    combo_categoria.currentIndexChanged.connect(dialogo.actualizar_etiquetas_requeridas)
     combo_profesion.currentIndexChanged.connect(_actualizar_tratamiento)
     combo_sexo.currentIndexChanged.connect(_actualizar_tratamiento)
     _actualizar_codigo()
+    _actualizar_cabeza_equipo(resetear=False)
     _actualizar_tratamiento()
 
 

@@ -136,6 +136,18 @@ class Campo:
     tipo: str = "texto"  # "texto" | "texto_largo" | "numero" | "booleano" | "combo" | "fecha"
     opciones: Callable[[sqlite3.Connection], list[tuple]] | None = None
     requerido: bool = False
+    requerido_si: Callable[[Callable[[str], object]], bool] | None = None
+    """Obligatoriedad dinámica, para cuando depende de otro campo del mismo
+    diálogo (ej. Profesionales: Apellido deja de ser obligatorio para la
+    categoría "C", donde en cambio pasan a serlo Nombre/Profesión/Fecha de
+    contacto) — cuando está presente PISA a `requerido` (que para estos
+    campos queda en False, el valor "sin condición" no se usa). Recibe
+    `obtener_valor(nombre_campo)`, que da el valor ACTUAL de cualquier otro
+    campo del mismo diálogo tal como lo daría `valores()` sin cerrarlo
+    (ver `_DialogoRegistro._valor_actual`) — se evalúa tanto al validar
+    (`_validar_y_aceptar`) como al redibujar el asterisco de la etiqueta
+    (`actualizar_etiquetas_requeridas`, a conectar a mano contra lo que
+    dispare el cambio, ej. el combo de Categoría)."""
     combo_editable: bool = False
     """Solo para tipo="combo": si el combo acepta texto libre además de las
     opciones sugeridas — para catálogos abiertos (p. ej. CondicionFiscal)
@@ -655,15 +667,25 @@ class _DialogoRegistro(QDialog):
         self.campos = campos
         self.setWindowTitle(titulo)
         self._entradas: dict[str, QWidget] = {}
+        self._etiquetas: dict[str, QLabel] = {}
+        self._campo_por_nombre = {c.nombre: c for c in campos}
 
         layout_general = QVBoxLayout(self)
 
         formulario = QWidget()
         layout_formulario = QFormLayout(formulario)
+        # Las entradas se arman todas antes de las etiquetas (abajo) para
+        # que `requerido_si` pueda mirar el valor inicial de CUALQUIER otro
+        # campo del mismo diálogo (ej. Categoría, más abajo en la lista que
+        # algún campo cuya obligatoriedad depende de ella) al calcular el
+        # asterisco inicial, sin importar el orden en que aparezcan.
         for campo in campos:
-            entrada = self._crear_entrada(campo, registro)
-            self._entradas[campo.nombre] = entrada
-            layout_formulario.addRow(campo.etiqueta, entrada)
+            self._entradas[campo.nombre] = self._crear_entrada(campo, registro)
+        for campo in campos:
+            entrada = self._entradas[campo.nombre]
+            etiqueta = QLabel(self._texto_etiqueta(campo))
+            self._etiquetas[campo.nombre] = etiqueta
+            layout_formulario.addRow(etiqueta, entrada)
             if campo.variables:
                 layout_formulario.addRow("", self._armar_fila_variables(entrada, campo.variables))
 
@@ -779,6 +801,24 @@ class _DialogoRegistro(QDialog):
         entrada.insertPlainText(f"{{{nombre_variable}}}")
         entrada.setFocus()
 
+    def _es_requerido(self, campo: Campo) -> bool:
+        if campo.requerido_si is not None:
+            return campo.requerido_si(self._valor_actual)
+        return campo.requerido
+
+    def _texto_etiqueta(self, campo: Campo) -> str:
+        """Asterisco en la etiqueta de todo campo obligatorio (estático o
+        dinámico vía `requerido_si`), pedido explícito de la clienta."""
+        return f"{campo.etiqueta} *" if self._es_requerido(campo) else campo.etiqueta
+
+    def actualizar_etiquetas_requeridas(self) -> None:
+        """A conectar a mano contra lo que dispare un cambio que pueda
+        afectar algún `requerido_si` (ej. el combo de Categoría en
+        Profesionales) — redibuja el asterisco de TODAS las etiquetas,
+        no solo la del campo que depende de la que cambió."""
+        for campo in self.campos:
+            self._etiquetas[campo.nombre].setText(self._texto_etiqueta(campo))
+
     def _validar_y_aceptar(self) -> None:
         for campo in self.campos:
             entrada = self._entradas[campo.nombre]
@@ -802,11 +842,13 @@ class _DialogoRegistro(QDialog):
                         )
                         entrada.setFocus()
                         return
-            if not campo.requerido:
+            if not self._es_requerido(campo):
                 continue
             vacio = (
                 (campo.tipo in ("texto", "numero") and not entrada.text().strip())
                 or (campo.tipo == "texto_largo" and not entrada.toPlainText().strip())
+                or (campo.tipo == "fecha" and entrada.date() == _FECHA_SIN_DATO)
+                or (campo.tipo == "combo" and not campo.combo_editable and entrada.currentData() is None)
             )
             if vacio:
                 QMessageBox.warning(self, "Datos incompletos", f"El campo «{campo.etiqueta}» es obligatorio.")
@@ -814,32 +856,34 @@ class _DialogoRegistro(QDialog):
                 return
         self.accept()
 
+    def _valor_actual(self, nombre_campo: str):
+        """El valor actual de un campo tal como lo daría `valores()`, sin
+        cerrar el diálogo — usado tanto por `valores()` (ver abajo) como
+        por `requerido_si` para mirar el valor de OTRO campo del mismo
+        diálogo."""
+        campo = self._campo_por_nombre[nombre_campo]
+        entrada = self._entradas[nombre_campo]
+        if campo.tipo == "booleano":
+            return 1 if entrada.isChecked() else 0
+        if campo.tipo == "combo":
+            if campo.combo_editable:
+                texto = entrada.currentText().strip()
+                return texto or None
+            return entrada.currentData()
+        if campo.tipo == "texto_largo":
+            texto = entrada.toPlainText().strip()
+            return texto or None
+        if campo.tipo == "numero":
+            texto = entrada.text().strip()
+            return float(texto) if texto else None
+        if campo.tipo == "fecha":
+            if not campo.requerido and entrada.date() == _FECHA_SIN_DATO:
+                return None
+            return entrada.date().toString("yyyy-MM-dd")
+        texto = entrada.text().strip()
+        if texto and campo.normalizar:
+            texto = campo.normalizar(texto)
+        return texto or None
+
     def valores(self) -> dict:
-        resultado = {}
-        for campo in self.campos:
-            entrada = self._entradas[campo.nombre]
-            if campo.tipo == "booleano":
-                resultado[campo.nombre] = 1 if entrada.isChecked() else 0
-            elif campo.tipo == "combo":
-                if campo.combo_editable:
-                    texto = entrada.currentText().strip()
-                    resultado[campo.nombre] = texto or None
-                else:
-                    resultado[campo.nombre] = entrada.currentData()
-            elif campo.tipo == "texto_largo":
-                texto = entrada.toPlainText().strip()
-                resultado[campo.nombre] = texto or None
-            elif campo.tipo == "numero":
-                texto = entrada.text().strip()
-                resultado[campo.nombre] = float(texto) if texto else None
-            elif campo.tipo == "fecha":
-                if not campo.requerido and entrada.date() == _FECHA_SIN_DATO:
-                    resultado[campo.nombre] = None
-                else:
-                    resultado[campo.nombre] = entrada.date().toString("yyyy-MM-dd")
-            else:
-                texto = entrada.text().strip()
-                if texto and campo.normalizar:
-                    texto = campo.normalizar(texto)
-                resultado[campo.nombre] = texto or None
-        return resultado
+        return {campo.nombre: self._valor_actual(campo.nombre) for campo in self.campos}

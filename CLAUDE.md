@@ -367,6 +367,87 @@ Panel de control - Avance de período, backup, y vista rápida.png". Sección es
 el nombre del `Seccion` del menú, Solapa el texto de la pestaña
 mostrada (si la pantalla no tiene solapas, se omite esa tercera parte).
 
+## Hilo abierto: Ingreso de profesionales
+
+Pedido explícito de la clienta al intentar ingresar un profesional
+categoría "C - Contacto / prospecto" para una consulta: el formulario le
+exigía Apellido, pero en esa categoría "alcanza con el nombre, la
+profesión, y la fecha de contacto". Cuatro pedidos sobre el mismo
+formulario (diálogo Nuevo/Editar de Profesionales):
+
+1. **Apellido deja de ser obligatorio para la categoría "C"** — a cambio,
+   para esa categoría pasan a ser obligatorios Nombre (`NombrePila`),
+   Profesión (`IdProfesion`) y Fecha de contacto (`FechaContacto`). Para
+   cualquier otra categoría, Apellido sigue siendo obligatorio como
+   siempre.
+2. **Fecha de contacto en formato "dd-mm-aaaa"** — pasó de texto libre
+   validado contra AAAA-MM-DD a `tipo="fecha"` (mismo `QDateEdit` que
+   Fecha de nacimiento, sin día de semana). Transparente para la base: el
+   AAAA-MM-DD sigue siendo lo que se guarda.
+3. **Asterisco en las etiquetas de los campos obligatorios** — pedido
+   general ("en todo el sistema" por extensión del criterio de alcance
+   general de este documento), implementado en el mecanismo COMPARTIDO
+   (`crud_generico.py`), no en Profesionales puntualmente: cualquier
+   catálogo con un `Campo(requerido=True)` ya muestra el asterisco sin
+   tocar nada más.
+4. **"Cabeza de equipo" deshabilitado salvo categoría "E"** — antes
+   quedaba siempre con algún profesional real preseleccionado (sin
+   opción en blanco en su combo), dando la impresión de "venir puesto
+   por defecto" al dar de alta cualquier categoría, inclusive C. Ahora:
+   deshabilitado para toda categoría que no sea "E", habilitado (y
+   editable) solo para "E", y se resetea a "(Sin cabeza de equipo)" al
+   salir de "E" (sin pisar el valor real al simplemente abrir el diálogo
+   de edición de un E ya existente).
+
+### Mecanismo nuevo en `crud_generico.py` (alcance general, no puntual de Profesionales)
+
+`Campo.requerido_si` (opcional, pisa a `requerido` cuando está presente):
+una función que recibe `obtener_valor(nombre_campo)` — el valor ACTUAL de
+cualquier otro campo del mismo diálogo, mismo criterio de extracción que
+`valores()` — y devuelve si este campo es obligatorio AHORA. Se evalúa
+tanto en la validación (`_validar_y_aceptar`) como en el asterisco de la
+etiqueta (`_DialogoRegistro.actualizar_etiquetas_requeridas()`, método
+público a conectar a mano contra lo que dispare el cambio — en
+Profesionales, el combo de Categoría). Necesario porque antes no existía
+ninguna forma declarativa de que la obligatoriedad de un campo dependiera
+de otro sin hackear la validación pantalla por pantalla.
+
+Al sumar esto se encontró y corrigió un gap latente en
+`_validar_y_aceptar`: el chequeo de "vacío" solo cubría
+`tipo in ("texto", "numero", "texto_largo")`, nunca `"combo"` ni
+`"fecha"` — invisible hasta ahora porque ningún combo obligatorio tenía
+opción en blanco y los campos fecha obligatorios siempre arrancaban en
+la fecha de hoy. Se extendió a los cuatro tipos (`"fecha"` contra el
+sentinel `_FECHA_SIN_DATO`, `"combo"` no editable contra
+`currentData() is None`).
+
+### Efecto colateral necesario: combos de Profesionales sin opción en blanco
+
+Para que "Profesión obligatoria para C" y "Cabeza de equipo obligatorio
+para E" tengan algún efecto real, sus combos (`_opciones_profesion`,
+`_opciones_cabeza_equipo`) pasaron a tener una opción "(Sin profesión)"/
+"(Sin cabeza de equipo)" al principio — antes, sin ninguna opción en
+blanco, el combo SIEMPRE quedaba con algún valor real preseleccionado
+(el primero en orden alfabético/jerárquico), así que "obligatorio" nunca
+podría haber bloqueado nada. Esto además corrigió, de rebote, un bug
+latente análogo al de Cabeza de equipo pero en Profesión: un profesional
+sin Profesión cargada (`IdProfesion IS NULL`) abría el diálogo de
+edición con alguna profesión real preseleccionada sin reflejar el dato
+real — y de ahí podía colar un Tratamiento sugerido fantasma (ej.
+"Coach", sugerido por la profesión "Coaching" al ser la primera en
+orden alfabético) que el profesional nunca eligió. Se corrigió el test
+`test_cambiar_codigo_registra_historial_y_renombra_carpeta` que
+encodeaba ese comportamiento viejo como esperado.
+
+Tests nuevos en `tests/test_profesionales.py`: los cuatro casos de
+obligatoriedad dinámica para C (acepta con los tres campos cargados,
+bloquea si falta cualquiera de los tres), que las demás categorías
+sigan exigiendo Apellido, que los asteriscos cambien en vivo al cambiar
+la Categoría, formato/guardado de Fecha de contacto, y los tres casos de
+Cabeza de equipo (deshabilitado por defecto, se habilita solo con E y se
+resetea al salir, y que editar un E existente lo abra habilitado con el
+valor real sin resetearlo).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

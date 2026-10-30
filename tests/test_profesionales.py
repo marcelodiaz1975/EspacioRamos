@@ -137,7 +137,147 @@ def test_cabeza_de_equipo_tiene_busqueda_habilitada_y_formato_canonico(qtbot, co
     combo = dialogo._entradas["ProfesionalCabezaEquipo"]
     assert combo.isEditable() is True
     assert combo.completer() is not None
-    assert combo.itemText(0) == "R1 - Gómez"
+    # Índice 0 es "(Sin cabeza de equipo)" (ver _opciones_cabeza_equipo) —
+    # el combo ya no arranca con algún profesional real preseleccionado.
+    assert combo.itemText(0) == "(Sin cabeza de equipo)"
+    assert combo.itemText(1) == "R1 - Gómez"
+
+
+# ---------------------------------------------- categoría C: requeridos distintos (pedido de la clienta)
+
+def test_categoria_c_no_exige_apellido_pero_si_nombre_profesion_y_fecha_contacto(qtbot, conn):
+    from PySide6.QtCore import QDate
+
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    id_psicologia = obtener_repositorio(conn, "Profesion").listar(Nombre="Psicología")[0]["IdProfesion"]
+    combo_categoria = dialogo._entradas["CategoriaProfesional"]
+    combo_categoria.setCurrentIndex(combo_categoria.findData("C"))
+    dialogo._entradas["NombrePila"].setText("Juan")
+    dialogo._entradas["IdProfesion"].setCurrentIndex(dialogo._entradas["IdProfesion"].findData(id_psicologia))
+    dialogo._entradas["FechaContacto"].setDate(QDate(2026, 10, 30))
+
+    dialogo._validar_y_aceptar()
+    assert dialogo.result() == QDialog.DialogCode.Accepted
+    valores = dialogo.valores()
+    assert valores["Apellido"] is None
+    assert valores["NombrePila"] == "Juan"
+    assert valores["FechaContacto"] == "2026-10-30"
+
+
+def test_categoria_c_bloquea_si_falta_nombre(qtbot, conn):
+    from PySide6.QtCore import QDate
+
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    id_psicologia = obtener_repositorio(conn, "Profesion").listar(Nombre="Psicología")[0]["IdProfesion"]
+    combo_categoria = dialogo._entradas["CategoriaProfesional"]
+    combo_categoria.setCurrentIndex(combo_categoria.findData("C"))
+    dialogo._entradas["IdProfesion"].setCurrentIndex(dialogo._entradas["IdProfesion"].findData(id_psicologia))
+    dialogo._entradas["FechaContacto"].setDate(QDate(2026, 10, 30))
+
+    dialogo._validar_y_aceptar()
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+
+
+def test_categoria_c_bloquea_si_falta_profesion(qtbot, conn):
+    from PySide6.QtCore import QDate
+
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    combo_categoria = dialogo._entradas["CategoriaProfesional"]
+    combo_categoria.setCurrentIndex(combo_categoria.findData("C"))
+    dialogo._entradas["NombrePila"].setText("Juan")
+    dialogo._entradas["FechaContacto"].setDate(QDate(2026, 10, 30))
+
+    dialogo._validar_y_aceptar()
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+
+
+def test_categoria_c_bloquea_si_falta_fecha_contacto(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    id_psicologia = obtener_repositorio(conn, "Profesion").listar(Nombre="Psicología")[0]["IdProfesion"]
+    combo_categoria = dialogo._entradas["CategoriaProfesional"]
+    combo_categoria.setCurrentIndex(combo_categoria.findData("C"))
+    dialogo._entradas["NombrePila"].setText("Juan")
+    dialogo._entradas["IdProfesion"].setCurrentIndex(dialogo._entradas["IdProfesion"].findData(id_psicologia))
+
+    dialogo._validar_y_aceptar()
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+
+
+def test_categoria_distinta_de_c_sigue_exigiendo_apellido(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)  # categoría por defecto: R
+
+    dialogo._validar_y_aceptar()
+    assert dialogo.result() != QDialog.DialogCode.Accepted
+
+    dialogo._entradas["Apellido"].setText("Gómez")
+    dialogo._validar_y_aceptar()
+    assert dialogo.result() == QDialog.DialogCode.Accepted
+
+
+def test_asteriscos_de_requeridos_cambian_con_la_categoria(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)  # categoría por defecto: R
+    assert dialogo._etiquetas["Apellido"].text() == "Apellido *"
+    assert dialogo._etiquetas["NombrePila"].text() == "Nombre"
+    assert dialogo._etiquetas["IdProfesion"].text() == "Profesión"
+    assert dialogo._etiquetas["FechaContacto"].text() == "Fecha de contacto"
+    assert dialogo._etiquetas["ProfesionalCabezaEquipo"].text() == "Cabeza de equipo"
+
+    combo_categoria = dialogo._entradas["CategoriaProfesional"]
+    combo_categoria.setCurrentIndex(combo_categoria.findData("C"))
+    assert dialogo._etiquetas["Apellido"].text() == "Apellido"
+    assert dialogo._etiquetas["NombrePila"].text() == "Nombre *"
+    assert dialogo._etiquetas["IdProfesion"].text() == "Profesión *"
+    assert dialogo._etiquetas["FechaContacto"].text() == "Fecha de contacto *"
+
+    combo_categoria.setCurrentIndex(combo_categoria.findData("E"))
+    assert dialogo._etiquetas["ProfesionalCabezaEquipo"].text() == "Cabeza de equipo *"
+
+
+def test_fecha_contacto_es_date_edit_formato_sin_dia_de_semana(qtbot, conn):
+    from PySide6.QtCore import QDate
+
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    dialogo._entradas["FechaContacto"].setDate(QDate(2026, 10, 30))
+    assert dialogo._entradas["FechaContacto"].text() == "30-10-2026"
+    dialogo._entradas["Apellido"].setText("Gómez")
+    assert dialogo.valores()["FechaContacto"] == "2026-10-30"
+
+
+# ---------------------------------------------- cabeza de equipo: solo seleccionable para categoría E
+
+def test_cabeza_de_equipo_deshabilitado_por_defecto(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)  # categoría por defecto: R
+    combo = dialogo._entradas["ProfesionalCabezaEquipo"]
+    assert combo.isEnabled() is False
+    assert combo.currentData() is None
+
+
+def test_cabeza_de_equipo_se_habilita_solo_con_categoria_e_y_se_resetea_al_salir(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    combo_categoria = dialogo._entradas["CategoriaProfesional"]
+    combo = dialogo._entradas["ProfesionalCabezaEquipo"]
+
+    combo_categoria.setCurrentIndex(combo_categoria.findData("E"))
+    assert combo.isEnabled() is True
+
+    combo_categoria.setCurrentIndex(combo_categoria.findData("C"))
+    assert combo.isEnabled() is False
+    assert combo.currentData() is None
+
+
+def test_editar_profesional_e_existente_abre_con_cabeza_de_equipo_habilitada_y_cargada(qtbot, conn):
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Cabeza")
+    id_e = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="E", Apellido="Del equipo", ProfesionalCabezaEquipo=id_r,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_e)
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    _al_abrir_dialogo(dialogo)
+
+    combo = dialogo._entradas["ProfesionalCabezaEquipo"]
+    assert combo.isEnabled() is True
+    assert combo.currentData() == id_r
 
 
 def test_sugerencia_de_codigo_se_actualiza_al_cambiar_categoria(qtbot, conn):
@@ -394,15 +534,14 @@ def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_p
     assert historial["CodigoAnterior"] == "R3"
     assert historial["CodigoNuevo"] == "X1"
 
-    # El diálogo de edición resuelve "Tratamiento" con el combo completo
-    # (`_entradas["Tratamiento"]`, no tocado por este mock) — al guardar
-    # vuelve a escribir su valor actual ("Coach", el que ya resolvía el
-    # combo para este profesional sin tratamiento cargado antes), así que
-    # la carpeta nueva lo incorpora aunque el mock no haya tocado ese
-    # campo. La carpeta vieja ("R3 - Ramos") seguía sin Tratamiento porque
-    # se armó a mano en el setup de este test, antes de pasar por ningún
-    # diálogo real.
-    assert (tmp_path / "Profesionales" / "X1 - Coach Ramos" / "2026-08 - Liquidación Ramos.pdf").exists()
+    # Este profesional no tiene Profesión cargada — el combo "Profesión"
+    # arranca en "(Sin profesión)" (ver `_opciones_profesion`, antes sin
+    # opción en blanco: antes de ese fix quedaba con la primera profesión
+    # real preseleccionada, "Coaching", y de ahí colaba un Tratamiento
+    # "Coach" fantasma que el profesional nunca eligió), así que
+    # "Tratamiento" no tiene nada para sugerir y la carpeta nueva queda
+    # sin ese prefijo.
+    assert (tmp_path / "Profesionales" / "X1 - Ramos" / "2026-08 - Liquidación Ramos.pdf").exists()
     assert not (tmp_path / "Profesionales" / "R3 - Ramos").exists()
 
 
