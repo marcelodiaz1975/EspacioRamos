@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QMessageBox, QVBoxLayou
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.negocio.archivos_generados import nombre_carpeta_consultorio, renombrar_carpeta_imagenes_consultorio
 from app.negocio.dias import periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.aumentos import cantidad_liquidaciones_a_regenerar
@@ -133,6 +134,29 @@ def pantalla_unidades(conn: sqlite3.Connection, *, anidado: bool = False) -> Pan
     return PantallaCRUD(conn, "Unidad", "Unidades", campos, anidado=anidado)
 
 
+def _nombre_carpeta_consultorio_de_registro(conn: sqlite3.Connection, registro) -> str | None:
+    fila_unidad = conn.execute(
+        "SELECT u.Departamento, e.Nombre AS Edificio FROM Unidad u "
+        "JOIN Edificio e ON e.IdEdificio = u.IdEdificio WHERE u.IdUnidad = ?",
+        (registro["IdUnidad"],),
+    ).fetchone()
+    if fila_unidad is None:
+        return None
+    return nombre_carpeta_consultorio(fila_unidad["Edificio"], fila_unidad["Departamento"], registro["NumeroConsultorio"])
+
+
+def _al_actualizar_consultorio(conn: sqlite3.Connection, registro_anterior, valores_nuevos: dict) -> None:
+    """Al cambiar la Unidad o el Número de un consultorio, la carpeta de
+    sus imágenes se renombra sola para seguir el nombre descriptivo
+    (pedido explícito de la clienta, ver `nombre_carpeta_consultorio`) —
+    `registro_anterior` da el nombre ANTES de guardar; el nombre después
+    se recalcula solo, ya con los datos nuevos ya escritos en la base
+    (`renombrar_carpeta_imagenes_consultorio`)."""
+    nombre_anterior = _nombre_carpeta_consultorio_de_registro(conn, registro_anterior)
+    if nombre_anterior is not None:
+        renombrar_carpeta_imagenes_consultorio(conn, registro_anterior["IdConsultorio"], nombre_anterior)
+
+
 def pantalla_consultorios(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad, requerido=True),
@@ -158,7 +182,15 @@ def pantalla_consultorios(conn: sqlite3.Connection, *, anidado: bool = False) ->
         Campo("ValorHoraAisladaAnterior", "Valor hora aislada anterior", tipo="numero", es_monto=True),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "Consultorio", "Consultorios", campos, anidado=anidado)
+    al_actualizar = lambda registro, valores: _al_actualizar_consultorio(conn, registro, valores)  # noqa: E731
+    pantalla = PantallaCRUD(
+        conn, "Consultorio", "Consultorios", campos, anidado=anidado, al_actualizar=al_actualizar,
+    )
+    # al_actualizar queda como weakref dentro de PantallaCRUD (mismo motivo
+    # que Fechas especiales, más abajo): hay que anclar la lambda a mano
+    # para que no la recolecte el GC apenas retorna esta función.
+    pantalla._hook_renombrar_carpeta = al_actualizar
+    return pantalla
 
 
 def pantalla_responsables(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:

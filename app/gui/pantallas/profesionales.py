@@ -247,7 +247,7 @@ def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
         # solo, ver convención de estilos en CLAUDE.md).
         Campo(
             "FechaContacto", "Fecha de contacto", tipo="fecha", formato_fecha="dd-MM-yyyy",
-            requerido_si=lambda v: v("CategoriaProfesional") == "C",
+            default_hoy=True, requerido_si=lambda v: v("CategoriaProfesional") == "C",
         ),
         # Pedido explícito de la clienta: deshabilitado salvo que la
         # categoría sea "E" (ver `_al_abrir_dialogo`/`_actualizar_cabeza_

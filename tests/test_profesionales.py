@@ -192,12 +192,19 @@ def test_categoria_c_bloquea_si_falta_profesion(qtbot, conn):
 
 
 def test_categoria_c_bloquea_si_falta_fecha_contacto(qtbot, conn):
+    """Fecha de contacto arranca en la fecha de hoy (`default_hoy`,
+    pedido aparte de la clienta) — para ejercitar el caso "vacío" hay
+    que vaciarla a mano al sentinel "(sin fecha)", el mismo que puede
+    dejar un operador que de verdad no quiera cargar ninguna."""
+    from app.gui.crud_generico import _FECHA_SIN_DATO
+
     dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
     id_psicologia = obtener_repositorio(conn, "Profesion").listar(Nombre="Psicología")[0]["IdProfesion"]
     combo_categoria = dialogo._entradas["CategoriaProfesional"]
     combo_categoria.setCurrentIndex(combo_categoria.findData("C"))
     dialogo._entradas["NombrePila"].setText("Juan")
     dialogo._entradas["IdProfesion"].setCurrentIndex(dialogo._entradas["IdProfesion"].findData(id_psicologia))
+    dialogo._entradas["FechaContacto"].setDate(_FECHA_SIN_DATO)
 
     dialogo._validar_y_aceptar()
     assert dialogo.result() != QDialog.DialogCode.Accepted
@@ -241,6 +248,34 @@ def test_fecha_contacto_es_date_edit_formato_sin_dia_de_semana(qtbot, conn):
     assert dialogo._entradas["FechaContacto"].text() == "30-10-2026"
     dialogo._entradas["Apellido"].setText("Gómez")
     assert dialogo.valores()["FechaContacto"] == "2026-10-30"
+
+
+def test_fecha_contacto_arranca_en_la_fecha_de_hoy_en_un_alta_nueva(qtbot, conn):
+    """Pedido explícito de la clienta: a diferencia de otros campos
+    fecha opcionales (ej. Fecha de nacimiento, que arranca en "(sin
+    fecha)"), Fecha de contacto arranca pre-cargada con la fecha de
+    hoy — sigue siendo editable/vaciable como cualquier campo opcional,
+    solo cambia el valor inicial (`Campo.default_hoy`)."""
+    from PySide6.QtCore import QDate
+
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    assert dialogo._entradas["FechaContacto"].date() == QDate.currentDate()
+    dialogo._entradas["Apellido"].setText("Gómez")
+    assert dialogo.valores()["FechaContacto"] == QDate.currentDate().toString("yyyy-MM-dd")
+
+
+def test_fecha_contacto_ya_cargada_se_precarga_y_no_la_pisa_la_de_hoy(qtbot, conn):
+    id_prof = conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido, FechaContacto) VALUES ('R', 'Gómez', '2020-01-15')"
+    ).lastrowid
+    conn.commit()
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    from PySide6.QtCore import QDate
+
+    assert dialogo._entradas["FechaContacto"].date() == QDate(2020, 1, 15)
+    assert dialogo.valores()["FechaContacto"] == "2020-01-15"
 
 
 # ---------------------------------------------- cabeza de equipo: solo seleccionable para categoría E

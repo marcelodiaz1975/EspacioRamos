@@ -174,6 +174,41 @@ def test_pantalla_consultorios_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre3") == 1
 
 
+def test_editar_consultorio_cambia_numero_renombra_carpeta_de_imagenes(qtbot, conn, tmp_path, monkeypatch):
+    """Pedido explícito de la clienta: la carpeta de imágenes del
+    consultorio usa un nombre descriptivo ("Consultorio - {Edificio} -
+    {Unidad} - {Número}") en vez del ID interno — al cambiar el Número
+    desde esta pantalla, la carpeta se renombra sola, sin perder los
+    archivos ya cargados (ver `_al_actualizar_consultorio`)."""
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
+    conn.commit()
+
+    carpeta_vieja = tmp_path / "Imagenes" / "Consultorio - Torre Norte - 1A - 1"
+    carpeta_vieja.mkdir(parents=True)
+    (carpeta_vieja / "foto.jpg").write_text("x")
+
+    pantalla = catalogos.pantalla_consultorios(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_widget.selectRow(0)
+
+    def _cambia_numero(self, *a, **k):
+        self._entradas["NumeroConsultorio"].setText("2")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _cambia_numero)
+    pantalla._editar()
+
+    assert conn.execute("SELECT NumeroConsultorio FROM Consultorio").fetchone()["NumeroConsultorio"] == 2
+    carpeta_nueva = tmp_path / "Imagenes" / "Consultorio - Torre Norte - 1A - 2"
+    assert (carpeta_nueva / "foto.jpg").exists()
+    assert not carpeta_vieja.exists()
+
+
 def test_pantalla_gastos_operativos_muestra_alcance(qtbot, conn):
     conn.execute(
         "INSERT INTO GastoOperativo (Periodo, Concepto, Monto, Alcance) VALUES ('2026-08', 'Limpieza', 5000, 'Espacio general')"

@@ -172,6 +172,15 @@ class Campo:
     default del sistema (`_FORMATO_FECHA_DIA`, "lun 07-09-2026") — ej.
     Profesionales usa "dd-MM-yyyy" sin día de semana para Fecha de
     nacimiento/contacto, donde el día de la semana no aporta nada."""
+    default_hoy: bool = False
+    """Solo para tipo="fecha" NO `requerido` (estático): en vez de
+    arrancar en "(sin fecha)" (`_FECHA_SIN_DATO`) en un alta nueva sin
+    valor cargado, arranca en la fecha de hoy — pedido puntual de
+    Profesionales para Fecha de contacto (no todas las categorías la
+    exigen, pero cuando se da de alta un contacto es casi siempre
+    "hoy"). Sigue siendo editable/vaciable como cualquier campo fecha
+    opcional (el sentinel "(sin fecha)" se instala igual, ver
+    `_crear_entrada`) — solo cambia el valor con el que arranca."""
     es_monto: bool = False
     """Solo para tipo="numero": se muestra en la tabla como moneda
     (`formatear_moneda`, con separador de miles), alineado a la derecha,
@@ -761,7 +770,7 @@ class _DialogoRegistro(QDialog):
             fecha_qt = QDate.fromString(valor, "yyyy-MM-dd") if valor else QDate()
             if fecha_qt.isValid():
                 entrada.setDate(fecha_qt)
-            elif campo.requerido:
+            elif campo.requerido or campo.default_hoy:
                 entrada.setDate(QDate.currentDate())
             else:
                 entrada.setDate(_FECHA_SIN_DATO)

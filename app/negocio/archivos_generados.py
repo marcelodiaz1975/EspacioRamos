@@ -11,7 +11,8 @@ CarpetaBaseArchivos), en subcarpetas fijas:
     {base}/Profesionales/{IdCodigo}/
     {base}/Profesionales/{IdCodigo}/Documentación/
     {base}/Imagenes/Espacio/
-    {base}/Imagenes/{Alcance}_{Id}/  (Localidad, Edificio, Unidad, Consultorio)
+    {base}/Imagenes/{Alcance}_{Id}/  (Localidad, Edificio, Unidad)
+    {base}/Imagenes/Consultorio - {Edificio} - {Unidad} - {Número}/
     {base}/Liquidaciones simuladas/
 
 Los tres primeros son documentos únicos del espacio en general: cada
@@ -20,9 +21,17 @@ Profesionales/{IdCodigo} en cambio acumula las liquidaciones mensuales (y,
 en su subcarpeta Documentación, cualquier archivo del profesional) de ese
 profesional en particular — todo bajo el mismo código, así que se muda
 entero cuando el código cambia (ver `renombrar_carpeta_profesional`).
-Imagenes/{Alcance}_{Id} usa el ID interno (no un nombre editable) para no
-depender de que el operador no le cambie el nombre al edificio/unidad más
-adelante. Liquidaciones simuladas (pedido de la clienta, ver `app.negocio.
+Imagenes/{Alcance}_{Id} (Localidad/Edificio/Unidad) usa el ID interno (no
+un nombre editable) para no depender de que el operador no le cambie el
+nombre al edificio/unidad más adelante — Consultorio es la EXCEPCIÓN
+(pedido explícito de la clienta, ronda "Ingreso de profesionales"): usa
+el nombre descriptivo armado en `nombre_carpeta_consultorio`, migrando
+sola la carpeta vieja basada en ID la primera vez que se accede a ese
+consultorio (`carpeta_imagenes`) y renombrándose de nuevo si cambia el
+Número del consultorio (`renombrar_carpeta_imagenes_consultorio`, hook
+de `pantalla_consultorios`) — pero no si cambia el nombre del Edificio o
+la Unidad desde SUS propias pantallas (ver el docstring de esa función).
+Liquidaciones simuladas (pedido de la clienta, ver `app.negocio.
 liquidacion_simulada`) es una carpeta ÚNICA compartida por todos los
 profesionales (a diferencia de Profesionales/{IdCodigo}) porque su
 retención es corta (3 meses, ver `limpiar_liquidaciones_simuladas_
@@ -129,13 +138,96 @@ def carpeta_documentacion_profesional(conn: sqlite3.Connection, codigo: str) -> 
     return carpeta
 
 
+def nombre_carpeta_consultorio(edificio: str | None, unidad: str | None, numero_consultorio) -> str:
+    """"Consultorio - {Edificio} - {Unidad} - {Consultorio}" — pedido
+    explícito de la clienta sobre esta carpeta puntual (no las de
+    Localidad/Edificio/Unidad, que siguen por ID, ver `carpeta_
+    imagenes`): antes se nombraba solo "Consultorio_{id}", sin forma de
+    identificar de cuál se trata sin abrir el sistema — mismo criterio
+    ya usado en `nombre_carpeta_profesional`."""
+    texto = f"Consultorio - {edificio or '?'} - {unidad or '?'} - {numero_consultorio}"
+    return _CARACTERES_INVALIDOS_CARPETA.sub("_", texto).strip()
+
+
+def _datos_consultorio_para_carpeta(conn: sqlite3.Connection, id_consultorio: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS Edificio "
+        "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad "
+        "JOIN Edificio e ON e.IdEdificio = u.IdEdificio WHERE c.IdConsultorio = ?",
+        (id_consultorio,),
+    ).fetchone()
+
+
+def _mover_contenido_carpeta(origen: Path, destino: Path) -> None:
+    """Mueve TODO el contenido de `origen` a `destino` (creándola si hace
+    falta) y borra `origen` — a diferencia de un simple `rename`, sirve
+    tanto si `destino` todavía no existe como si ya existe (ej. ya se
+    había migrado antes a mano, o dos consultorios distintos terminan
+    apuntando al mismo nombre por datos repetidos)."""
+    if not origen.exists():
+        return
+    if not destino.exists():
+        origen.rename(destino)
+        return
+    for archivo in origen.iterdir():
+        shutil.move(str(archivo), str(destino / archivo.name))
+    origen.rmdir()
+
+
+def renombrar_carpeta_imagenes_consultorio(conn: sqlite3.Connection, id_consultorio: int, nombre_anterior: str) -> None:
+    """Al cambiar el Número de un consultorio (`pantalla_consultorios`,
+    `al_actualizar`), la carpeta de sus imágenes se renombra para seguir
+    el nombre descriptivo actual — se conservan los archivos ya
+    cargados, no se crea una carpeta nueva vacía. `nombre_anterior` es
+    el nombre de carpeta COMPLETO (`nombre_carpeta_consultorio`) con los
+    datos de ANTES de guardar.
+
+    No cubre un cambio de nombre de Edificio/Unidad hecho desde SUS
+    propias pantallas (`pantalla_edificios`/`pantalla_unidades`): esas
+    pantallas no saben qué consultorios dependen de ellas, así que la
+    carpeta de un consultorio cuyo edificio o unidad se renombra DESPUÉS
+    queda con el nombre viejo hasta que ese consultorio se vuelva a
+    guardar (editarlo sin cambiar nada alcanza para que esta misma
+    función lo reconcilie) — limitación conocida, no resuelta en esta
+    ronda."""
+    base = carpeta_base(conn)
+    if base is None:
+        return
+    fila = _datos_consultorio_para_carpeta(conn, id_consultorio)
+    if fila is None:
+        return
+    nombre_nuevo = nombre_carpeta_consultorio(fila["Edificio"], fila["Departamento"], fila["NumeroConsultorio"])
+    if nombre_nuevo == nombre_anterior:
+        return
+    _mover_contenido_carpeta(base / "Imagenes" / nombre_anterior, base / "Imagenes" / nombre_nuevo)
+
+
 def carpeta_imagenes(conn: sqlite3.Connection, alcance: str, id_valor: int | None = None) -> Path:
     """"Imagenes/{Alcance}" (alcance "Espacio", sin id: imágenes generales
     del sistema) o "Imagenes/{Alcance}_{Id}" (alcance "Localidad",
-    "Edificio", "Unidad" o "Consultorio", con el ID interno de su tabla)
-    bajo la carpeta base. La crea si hace falta."""
-    nombre = alcance if id_valor is None else f"{alcance}_{id_valor}"
-    carpeta = _requerir_carpeta_base(conn) / "Imagenes" / nombre
+    "Edificio" o "Unidad", con el ID interno de su tabla) bajo la
+    carpeta base. La crea si hace falta.
+
+    Para alcance "Consultorio" usa en cambio el nombre descriptivo de
+    `nombre_carpeta_consultorio` (pedido explícito de la clienta) — y,
+    si todavía existe la carpeta vieja "Consultorio_{id}" (de antes de
+    este cambio) sin la nueva, la migra sola la primera vez que se
+    accede a las imágenes de ese consultorio, sin que haga falta
+    renombrar nada a mano."""
+    if alcance == "Consultorio" and id_valor is not None:
+        base = _requerir_carpeta_base(conn)
+        carpeta_vieja = base / "Imagenes" / f"Consultorio_{id_valor}"
+        fila = _datos_consultorio_para_carpeta(conn, id_valor)
+        nombre = (
+            nombre_carpeta_consultorio(fila["Edificio"], fila["Departamento"], fila["NumeroConsultorio"])
+            if fila is not None else f"Consultorio_{id_valor}"
+        )
+        carpeta = base / "Imagenes" / nombre
+        if carpeta_vieja != carpeta:
+            _mover_contenido_carpeta(carpeta_vieja, carpeta)
+    else:
+        nombre = alcance if id_valor is None else f"{alcance}_{id_valor}"
+        carpeta = _requerir_carpeta_base(conn) / "Imagenes" / nombre
     carpeta.mkdir(parents=True, exist_ok=True)
     return carpeta
 

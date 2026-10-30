@@ -350,6 +350,59 @@ def _inicializar_periodo_operativo_actual(conn: sqlite3.Connection) -> None:
     )
 
 
+def _permitir_profesional_sin_apellido(conn: sqlite3.Connection) -> None:
+    """Ronda "Ingreso de profesionales": la categoría "C" no exige
+    Apellido (alcanza con Nombre/Profesión/Fecha de contacto) — pero la
+    columna seguía con NOT NULL en el esquema de toda base ya en uso
+    (de cuando se creó la tabla, antes de que existiera ninguna
+    categoría sin apellido), así que apenas se sacó la validación del
+    lado de la UI empezó a tirar un error de SQLite al guardar ("NOT
+    NULL constraint failed: Profesional.Apellido").
+
+    SQLite no permite "ALTER TABLE ... ALTER COLUMN ... DROP NOT NULL"
+    directo — mismo patrón que `_ampliar_alcance_gasto_a_consultorio`
+    (tabla nueva con la columna ya sin la restricción, copiar los datos,
+    reemplazar), pero con una vuelta extra: a diferencia de
+    GastoOperativo, Profesional tiene muchas OTRAS tablas con una FK
+    apuntándole (`REFERENCES Profesional(...)`) y `ALTER TABLE ...
+    RENAME TO` reescribe esas referencias para que sigan apuntando a
+    donde quedó la tabla renombrada (acá, "Profesional_viejo") — si lo
+    dejáramos así, al borrar "Profesional_viejo" al final esas otras
+    tablas quedarían con una FK apuntando a una tabla que ya no existe.
+    Comprobado a mano (SQLite 3.45) que esa reescritura NO se suprime
+    con un solo `PRAGMA` — hacen falta los DOS a la vez, antes del
+    RENAME y sostenidos hasta después del DROP: `legacy_alter_table =
+    ON` (el que en teoría debería alcanzar solo, según la documentación
+    de SQLite, pero en la práctica no lo hizo) Y `foreign_keys = OFF`
+    (que de paso evita que el INSERT...SELECT de la copia falle por el
+    autorreferenciado `ProfesionalCabezaEquipo` sin importar en qué
+    orden vengan las filas)."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Profesional'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    fila_definicion = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'Profesional'"
+    ).fetchone()
+    definicion = fila_definicion["sql"] if fila_definicion else ""
+    if "Apellido TEXT NOT NULL" not in definicion:
+        return  # ya migrada
+    columnas = [f["name"] for f in conn.execute("PRAGMA table_info(Profesional)").fetchall()]
+    columnas_sql = ", ".join(columnas)
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("PRAGMA legacy_alter_table = ON")
+    try:
+        conn.execute("ALTER TABLE Profesional RENAME TO Profesional_viejo")
+        conn.execute(definicion.replace("Apellido TEXT NOT NULL", "Apellido TEXT", 1))
+        conn.execute(f"INSERT INTO Profesional ({columnas_sql}) SELECT {columnas_sql} FROM Profesional_viejo")
+        conn.execute("DROP TABLE Profesional_viejo")
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA legacy_alter_table = OFF")
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -378,4 +431,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _ampliar_alcance_gasto_a_consultorio(conn)
     _inicializar_ultimo_backup_propio(conn)
     _inicializar_periodo_operativo_actual(conn)
+    _permitir_profesional_sin_apellido(conn)
     conn.commit()

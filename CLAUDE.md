@@ -448,6 +448,76 @@ Cabeza de equipo (deshabilitado por defecto, se habilita solo con E y se
 resetea al salir, y que editar un E existente lo abra habilitado con el
 valor real sin resetearlo).
 
+### Segunda ronda: bug real al guardar un "C" + Fecha de contacto por defecto
+
+Al usar lo de arriba en la práctica, la clienta reportó un error real:
+"Me tira un error que no se puede guardar NULL, sin apellido". Causa:
+sacar la validación del lado de la UI (arriba) no alcanzaba — la
+columna `Profesional.Apellido` seguía con `NOT NULL` en el esquema de
+base de datos (de cuando se creó la tabla, antes de que existiera
+ninguna categoría sin apellido), así que SQLite rechazaba el guardado
+igual. Arreglado en los dos lados: `schema.sql` (bases nuevas) y
+`app.db.migraciones._permitir_profesional_sin_apellido` (bases ya en
+uso — recrea la tabla sin el `NOT NULL`, ver el docstring de esa
+función para el detalle de por qué hacen falta DOS pragmas de SQLite a
+la vez, `legacy_alter_table` Y `foreign_keys`, para que las ~17 FK de
+otras tablas que apuntan a `Profesional` no queden rotas).
+
+Pedido aparte, mismo hilo: "En el campo "Fecha de contacto" de ingreso
+de profesionales por defecto la fecha del día" — a diferencia de otros
+campos fecha opcionales (ej. Fecha de nacimiento, que arranca en
+"(sin fecha)"), este arranca pre-cargado con hoy. Mecanismo nuevo y
+general, `Campo.default_hoy` (`crud_generico.py`): sigue siendo
+editable/vaciable como cualquier campo opcional, solo cambia el valor
+con el que arranca un alta nueva sin tocar el campo.
+
+## Hilo abierto: Nueva versión + carpetas de imágenes de consultorios
+
+Dos pedidos sueltos de la clienta, sin relación con Profesionales:
+
+1. **Nueva versión**: "a partir de ahora 'SistemaDF v.2026.11'" —
+   `app/version.py::VERSION` (única fuente del título de ventana y
+   demás, ver ese módulo) pasa de `"v0.11.2026.10"` a `"v.2026.11"`.
+2. **Nombres de carpeta de imágenes de Consultorio**: pedido explícito,
+   "Consultorio - {Edificio} - {Unidad} - {Consultorio}" en vez del
+   nombre viejo basado solo en el ID interno ("Consultorio_7") —
+   preguntó además si el sistema podía renombrar las carpetas ya
+   existentes o si lo tenía que hacer a mano.
+
+   Implementado en `app/negocio/archivos_generados.py`
+   (`nombre_carpeta_consultorio`, `carpeta_imagenes`): a diferencia de
+   Localidad/Edificio/Unidad (que siguen por ID — ver el docstring del
+   módulo, "no depender de que el operador no le cambie el nombre al
+   edificio/unidad más adelante", la razón original de usar IDs en
+   primer lugar), Consultorio es la única excepción, a pedido de la
+   clienta.
+
+   Respuesta a su pregunta: SÍ, el sistema migra solo las carpetas
+   existentes — `carpeta_imagenes` detecta la carpeta vieja
+   "Consultorio_{id}" la primera vez que se accede a las imágenes de
+   ese consultorio (subir una foto nueva, o simplemente abrir el
+   Gestor de archivos en esa pestaña) y la renombra al nombre
+   descriptivo, SIN perder los archivos ya cargados — no hizo falta
+   ningún paso manual ni una migración aparte que corra una sola vez.
+
+   Además, cambiar el Número de un consultorio desde su propia pantalla
+   (`pantalla_consultorios`, `al_actualizar` → `_al_actualizar_
+   consultorio`/`renombrar_carpeta_imagenes_consultorio`) renombra la
+   carpeta sola para seguir el nombre actual, mismo criterio que
+   `aplicar_cambio_codigo` en Profesionales.
+
+   **Limitación conocida, no resuelta en esta ronda** (documentada en
+   el propio código, `renombrar_carpeta_imagenes_consultorio`):
+   renombrar un Edificio o una Unidad desde SUS PROPIAS pantallas
+   (`pantalla_edificios`/`pantalla_unidades`) no actualiza en cascada
+   las carpetas de los consultorios que dependen de ellos — esas
+   pantallas no saben qué consultorios hay debajo. La carpeta de un
+   consultorio afectado queda con el nombre viejo hasta que ESE
+   consultorio se vuelva a guardar (editarlo sin cambiar nada alcanza
+   para que se reconcilie solo). Si la clienta quiere que el renombre
+   de Edificio/Unidad se propague solo a los consultorios de abajo, es
+   un pedido aparte para una próxima ronda.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

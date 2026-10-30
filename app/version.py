@@ -8,5 +8,5 @@ programa pasa a llamarse "SistemaDF" independientemente de qué espacio
 lo esté usando, para no atar el nombre del software al de un cliente en
 particular."""
 NOMBRE_PROGRAMA = "SistemaDF"
-VERSION = "v0.11.2026.10"
+VERSION = "v.2026.11"
 NOMBRE_Y_VERSION = f"{NOMBRE_PROGRAMA} {VERSION}"

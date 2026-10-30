@@ -15,7 +15,9 @@ from app.negocio.archivos_generados import (
     destino_sin_colision,
     limpiar_liquidaciones_antiguas,
     limpiar_liquidaciones_simuladas_antiguas,
+    nombre_carpeta_consultorio,
     nombre_carpeta_profesional,
+    renombrar_carpeta_imagenes_consultorio,
     renombrar_carpeta_profesional,
     vaciar_carpeta,
 )
@@ -206,6 +208,91 @@ def test_carpeta_imagenes_crea_subcarpeta_por_id(conn, tmp_path):
     carpeta = carpeta_imagenes(conn, "Consultorio", 7)
     assert carpeta == tmp_path / "Imagenes" / "Consultorio_7"
     assert carpeta.is_dir()
+
+
+def _crear_consultorio(conn, edificio="Torre Norte", unidad="1A", numero=1) -> int:
+    id_edificio = conn.execute("INSERT INTO Edificio (Nombre) VALUES (?)", (edificio,)).lastrowid
+    id_unidad = conn.execute(
+        "INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, ?)", (id_edificio, unidad),
+    ).lastrowid
+    id_consultorio = conn.execute(
+        "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, ?)", (id_unidad, numero),
+    ).lastrowid
+    conn.commit()
+    return id_consultorio
+
+
+def test_nombre_carpeta_consultorio_formato():
+    assert nombre_carpeta_consultorio("Torre Norte", "1A", 3) == "Consultorio - Torre Norte - 1A - 3"
+
+
+def test_carpeta_imagenes_de_consultorio_real_usa_nombre_descriptivo(conn, tmp_path):
+    """Pedido explícito de la clienta: la carpeta de imágenes de un
+    consultorio se identifica por Edificio/Unidad/Número en vez de solo
+    el ID interno (a diferencia de Localidad/Edificio/Unidad, que
+    siguen por ID — ver docstring del módulo)."""
+    _configurar_carpeta_base(conn, tmp_path)
+    id_consultorio = _crear_consultorio(conn)
+    carpeta = carpeta_imagenes(conn, "Consultorio", id_consultorio)
+    assert carpeta == tmp_path / "Imagenes" / "Consultorio - Torre Norte - 1A - 1"
+    assert carpeta.is_dir()
+
+
+def test_carpeta_imagenes_migra_sola_la_carpeta_vieja_basada_en_id(conn, tmp_path):
+    """Responde la consulta de la clienta ("¿el sistema puede renombrar
+    lo existente o lo tengo que hacer manualmente?"): sí, solo —
+    cualquier acceso a las imágenes de un consultorio que todavía tenga
+    la carpeta vieja "Consultorio_{id}" (de antes de este cambio) la
+    migra sola al nombre descriptivo, sin perder los archivos ya
+    cargados."""
+    _configurar_carpeta_base(conn, tmp_path)
+    id_consultorio = _crear_consultorio(conn)
+    carpeta_vieja = tmp_path / "Imagenes" / f"Consultorio_{id_consultorio}"
+    carpeta_vieja.mkdir(parents=True)
+    (carpeta_vieja / "foto.jpg").write_text("x")
+
+    carpeta = carpeta_imagenes(conn, "Consultorio", id_consultorio)
+
+    assert carpeta == tmp_path / "Imagenes" / "Consultorio - Torre Norte - 1A - 1"
+    assert (carpeta / "foto.jpg").exists()
+    assert not carpeta_vieja.exists()
+
+
+def test_carpeta_imagenes_consultorio_sin_registro_sigue_usando_el_id(conn, tmp_path):
+    """Un consultorio que ya no existe en la base (eliminado) no tiene
+    Edificio/Unidad de dónde sacar un nombre descriptivo — cae al
+    esquema viejo por ID en vez de romper."""
+    _configurar_carpeta_base(conn, tmp_path)
+    carpeta = carpeta_imagenes(conn, "Consultorio", 999)
+    assert carpeta == tmp_path / "Imagenes" / "Consultorio_999"
+
+
+def test_renombrar_carpeta_imagenes_consultorio_conserva_archivos(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path)
+    id_consultorio = _crear_consultorio(conn, numero=1)
+    carpeta_vieja = tmp_path / "Imagenes" / "Consultorio - Torre Norte - 1A - 1"
+    carpeta_vieja.mkdir(parents=True)
+    (carpeta_vieja / "foto.jpg").write_text("x")
+
+    conn.execute("UPDATE Consultorio SET NumeroConsultorio = 2 WHERE IdConsultorio = ?", (id_consultorio,))
+    conn.commit()
+    renombrar_carpeta_imagenes_consultorio(conn, id_consultorio, "Consultorio - Torre Norte - 1A - 1")
+
+    carpeta_nueva = tmp_path / "Imagenes" / "Consultorio - Torre Norte - 1A - 2"
+    assert (carpeta_nueva / "foto.jpg").exists()
+    assert not carpeta_vieja.exists()
+
+
+def test_renombrar_carpeta_imagenes_consultorio_sin_cambios_no_hace_nada(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path)
+    id_consultorio = _crear_consultorio(conn, numero=1)
+    carpeta = tmp_path / "Imagenes" / "Consultorio - Torre Norte - 1A - 1"
+    carpeta.mkdir(parents=True)
+    (carpeta / "foto.jpg").write_text("x")
+
+    renombrar_carpeta_imagenes_consultorio(conn, id_consultorio, "Consultorio - Torre Norte - 1A - 1")
+
+    assert (carpeta / "foto.jpg").exists()
 
 
 def test_destino_sin_colision_devuelve_nombre_original_si_no_existe(tmp_path):

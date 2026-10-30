@@ -1,5 +1,7 @@
 import sqlite3
 
+import pytest
+
 from app.db.init_db import init_database
 from app.db.migraciones import aplicar_migraciones
 from app.db.seed import sembrar_valores_por_defecto
@@ -476,6 +478,82 @@ def test_aplicar_migraciones_no_pisa_un_ultimo_backup_propio_ya_registrado(tmp_p
         "SELECT UltimoBackupPropio FROM Configuracion WHERE IdConfiguracion = 1"
     ).fetchone()["UltimoBackupPropio"]
     assert valor == "2026-08-15T10:30:00"
+    conn.close()
+
+
+def test_aplicar_migraciones_quita_not_null_de_apellido_y_preserva_datos_y_fks(tmp_path):
+    """Ronda "Ingreso de profesionales": una base vieja con `Apellido TEXT
+    NOT NULL` (como quedó desde que se creó la tabla) pierde esa
+    restricción sola — sin esto, la categoría "C" (que no exige
+    Apellido del lado de la UI) tiraba un error de SQLite al guardar.
+    Confirma además que los datos existentes, el autorreferenciado
+    ProfesionalCabezaEquipo y una FK de OTRA tabla (HistorialCodigo)
+    sobreviven intactos al recrear la tabla (ver
+    `_permitir_profesional_sin_apellido`)."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        "CREATE TABLE Profesional (IdProfesional INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "CategoriaProfesional TEXT NOT NULL CHECK (CategoriaProfesional IN ('R','A','B','E','X','C')), "
+        "IdCodigo TEXT, Apellido TEXT NOT NULL, NombrePila TEXT, "
+        "ProfesionalCabezaEquipo INTEGER REFERENCES Profesional(IdProfesional), "
+        "SaldoCuentaActual REAL NOT NULL DEFAULT 0, SaldoCuentaAnterior REAL NOT NULL DEFAULT 0)"
+    )
+    conn.execute(
+        "CREATE TABLE HistorialCodigo (IdHistorialCodigo INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "IdProfesional INTEGER NOT NULL REFERENCES Profesional(IdProfesional), "
+        "CodigoAnterior TEXT, CodigoNuevo TEXT)"
+    )
+    id_r = conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido) VALUES ('R', 'R1', 'Cabeza')"
+    ).lastrowid
+    id_e = conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido, ProfesionalCabezaEquipo) "
+        "VALUES ('E', 'E1', 'Del equipo', ?)", (id_r,),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO HistorialCodigo (IdProfesional, CodigoAnterior, CodigoNuevo) VALUES (?, 'R7', 'R1')", (id_r,),
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    # Ya no hace falta Apellido para guardar (el caso real: categoría "C").
+    id_c = conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, NombrePila) VALUES ('C', 'Juan')"
+    ).lastrowid
+    conn.commit()
+    assert conn.execute(
+        "SELECT Apellido FROM Profesional WHERE IdProfesional = ?", (id_c,)
+    ).fetchone()["Apellido"] is None
+
+    # Los datos y las dos FK (la autorreferenciada y la de HistorialCodigo) siguen intactos.
+    cabeza = conn.execute("SELECT * FROM Profesional WHERE IdProfesional = ?", (id_r,)).fetchone()
+    equipo = conn.execute("SELECT * FROM Profesional WHERE IdProfesional = ?", (id_e,)).fetchone()
+    assert cabeza["Apellido"] == "Cabeza"
+    assert equipo["ProfesionalCabezaEquipo"] == id_r
+    historial = conn.execute("SELECT * FROM HistorialCodigo WHERE IdProfesional = ?", (id_r,)).fetchone()
+    assert historial["CodigoNuevo"] == "R1"
+
+    # La FK de HistorialCodigo sigue realmente activa contra la tabla nueva
+    # (no apunta a una "Profesional_viejo" ya borrada) — intentar referenciar
+    # un IdProfesional inexistente tiene que seguir rechazándose.
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO HistorialCodigo (IdProfesional, CodigoNuevo) VALUES (9999, 'X1')")
+    conn.rollback()
+    conn.close()
+
+
+def test_aplicar_migraciones_es_idempotente_para_apellido_de_profesional(tmp_path):
+    conn = init_database(tmp_path / "test.db")
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, NombrePila) VALUES ('C', 'Juan')")
+    conn.commit()
+
+    aplicar_migraciones(conn)  # segunda vez, no debería fallar ni perder la fila
+
+    filas = conn.execute("SELECT * FROM Profesional").fetchall()
+    assert len(filas) == 1
     conn.close()
 
 

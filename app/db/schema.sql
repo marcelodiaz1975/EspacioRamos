@@ -121,7 +121,14 @@ CREATE TABLE IF NOT EXISTS Profesional (
     IdProfesional INTEGER PRIMARY KEY AUTOINCREMENT,
     CategoriaProfesional TEXT NOT NULL CHECK (CategoriaProfesional IN ('R','A','B','E','X','C')),
     IdCodigo TEXT,
-    Apellido TEXT NOT NULL,
+    -- Sin NOT NULL (ronda "Ingreso de profesionales"): la categoría "C"
+    -- no lo exige (alcanza con Nombre/Profesión/Fecha de contacto, ver
+    -- `app.gui.pantallas.profesionales._campos_profesional`) — la UI ya
+    -- no lo pedía, pero quedaba este NOT NULL de cuando se creó la tabla
+    -- (antes de que existiera ninguna categoría sin apellido) y tiraba
+    -- un error de SQLite al guardar. Una base ya en uso lo pierde con
+    -- `app.db.migraciones._permitir_profesional_sin_apellido`.
+    Apellido TEXT,
     NombreCompleto TEXT,
     NombrePila TEXT,
     Apodo TEXT,
