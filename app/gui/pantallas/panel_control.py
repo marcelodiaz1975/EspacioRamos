@@ -121,6 +121,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date, datetime
+from html import escape
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -156,7 +157,7 @@ from app.negocio.backup import (
     restaurar_backup_desde,
     ultimo_backup,
 )
-from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual
+from app.negocio.dias import fecha_a_dia_semana, fecha_actual, fecha_real, periodo_actual
 from app.negocio.formato import formatear_moneda, mes_texto, periodo_mm_aaaa
 from app.negocio.panel_control import (
     Alertas,
@@ -258,6 +259,18 @@ def _texto_fecha(fecha_iso: str) -> str:
     fecha = date.fromisoformat(fecha_iso)
     dia = fecha_a_dia_semana(fecha)[:3].lower()
     return f"{dia} {fecha.day:02d}-{fecha.month:02d}-{fecha.year}"
+
+
+def _resaltar_si_es_hoy(linea_html: str, es_hoy: bool) -> str:
+    """Pedido explícito de la clienta: el cumpleaños/día de profesión/
+    feriado que cae justo HOY (fecha real, no la del período — ver
+    `fecha_real`) se resalta en rojo y negrita en los cuadritos de Panel
+    de control. `linea_html` ya viene con cualquier texto dinámico
+    (Descripción, nombre del profesional) escapado (`html.escape`) por
+    el llamador — acá solo se decide si hace falta envolverla."""
+    if not es_hoy:
+        return linea_html
+    return f'<span style="color: {COLOR_ROJO}; font-weight: bold;">{linea_html}</span>'
 
 
 def _agregar_contenido_escrolable(layout: QVBoxLayout, contenido: QWidget) -> None:
@@ -571,6 +584,10 @@ class _PanelAvancePeriodo(QWidget):
         tarjeta, layout = _tarjeta("Feriados y fechas especiales próximas")
         self.etiqueta_fechas_especiales = QLabel()
         self.etiqueta_fechas_especiales.setWordWrap(True)
+        # Texto enriquecido: pedido explícito de la clienta, el feriado/
+        # fecha especial que cae justo hoy (fecha real, no la del período)
+        # se resalta en rojo y negrita — ver `actualizar()`.
+        self.etiqueta_fechas_especiales.setTextFormat(Qt.TextFormat.RichText)
         _agregar_contenido_escrolable(layout, self.etiqueta_fechas_especiales)
         return tarjeta
 
@@ -598,6 +615,9 @@ class _PanelAvancePeriodo(QWidget):
         tarjeta, layout = _tarjeta("Cumpleaños y días de profesión")
         self.etiqueta_cumpleanos = QLabel()
         self.etiqueta_cumpleanos.setWordWrap(True)
+        # Mismo motivo que etiqueta_fechas_especiales: el cumpleaños/día
+        # de profesión que cae justo hoy se resalta en rojo y negrita.
+        self.etiqueta_cumpleanos.setTextFormat(Qt.TextFormat.RichText)
         _agregar_contenido_escrolable(layout, self.etiqueta_cumpleanos)
         return tarjeta
 
@@ -665,10 +685,15 @@ class _PanelAvancePeriodo(QWidget):
             self.etiqueta_estado_backup.setText("Estado: al día")
             self.etiqueta_estado_backup.setStyleSheet("")
 
+        hoy_real = fecha_real(self.conn)
         fechas = fechas_especiales_proximas_dos_meses(self.conn)
         if fechas:
-            texto_fechas = "\n".join(
-                f"•  {_texto_fecha(f['Fecha'])} — {f['Descripcion'] or f['Tipo'] or 'Sin descripción'}" for f in fechas
+            texto_fechas = "<br>".join(
+                _resaltar_si_es_hoy(
+                    f"•  {_texto_fecha(f['Fecha'])} — {escape(f['Descripcion'] or f['Tipo'] or 'Sin descripción')}",
+                    date.fromisoformat(f["Fecha"]) == hoy_real,
+                )
+                for f in fechas
             )
         else:
             texto_fechas = "Sin fechas especiales cargadas para lo que resta del período."
@@ -715,9 +740,12 @@ class _PanelAvancePeriodo(QWidget):
         if eventos:
             # Punto 80: "ddd dd-mm" con el día de la semana abreviado,
             # mismo criterio que el resto del sistema (ver 1.10).
-            texto_eventos = "\n".join(
-                f"•  {fecha_a_dia_semana(e.fecha_proxima)[:3].lower()} "
-                f"{e.fecha_proxima.day:02d}-{e.fecha_proxima.month:02d} — {e.descripcion}"
+            texto_eventos = "<br>".join(
+                _resaltar_si_es_hoy(
+                    f"•  {fecha_a_dia_semana(e.fecha_proxima)[:3].lower()} "
+                    f"{e.fecha_proxima.day:02d}-{e.fecha_proxima.month:02d} — {escape(e.descripcion)}",
+                    e.fecha_proxima == hoy_real,
+                )
                 for e in eventos
             )
         else:

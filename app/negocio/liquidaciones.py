@@ -945,7 +945,22 @@ def emitir_liquidacion(
     para una preview de un mes que ni siquiera llegó. Se acota la
     consulta a `Periodo <= periodo_operativo_actual`: solo cuenta un
     período posterior si el período operativo ya lo alcanzó (ahí sí pudo
-    haber usado el período que se quiere reabrir como base de cálculo)."""
+    haber usado el período que se quiere reabrir como base de cálculo).
+
+    Segunda vuelta del mismo bug, reportada por la clienta como "saldo
+    actual" inflado en algunos profesionales: esa misma
+    `LiquidacionEmitida` de diciembre — pura previsualización, sin
+    cerrar — SÍ acreditaba su monto a `SaldoCuentaActual`, que en ese
+    momento todavía representa SOLO noviembre (el período en curso
+    real). El profesional terminaba con los dos meses sumados en el
+    mismo campo hasta el próximo avance de mes. Por eso la acreditación
+    de más abajo también se acota a `periodo <= periodo_operativo_
+    actual`: una preview de un mes que todavía no llegó deja su
+    `LiquidacionEmitida`/PDF al día (para que el profesional pueda verla
+    si la pide) pero no toca el saldo real todavía — ese crédito llega
+    solo, con el delta de siempre, cuando el avance de mes alcance ese
+    período y alguien la vuelva a emitir (ya con `SaldoCuentaActual`
+    recién puesto en 0 para ese mes)."""
     repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
     if conn.execute(
         "SELECT 1 FROM LiquidacionEmitida WHERE IdProfesional = ? AND Periodo > ? AND Periodo <= ? LIMIT 1",
@@ -972,10 +987,11 @@ def emitir_liquidacion(
         MontoGenerado=liquidacion.monto_generado,
     )
 
-    delta = liquidacion.monto_generado - monto_generado_anterior
-    repo_prof = obtener_repositorio(conn, "Profesional")
-    profesional = repo_prof.obtener(id_profesional)
-    repo_prof.actualizar(id_profesional, SaldoCuentaActual=(profesional["SaldoCuentaActual"] or 0.0) + delta)
+    if periodo <= periodo_operativo_actual(conn):
+        delta = liquidacion.monto_generado - monto_generado_anterior
+        repo_prof = obtener_repositorio(conn, "Profesional")
+        profesional = repo_prof.obtener(id_profesional)
+        repo_prof.actualizar(id_profesional, SaldoCuentaActual=(profesional["SaldoCuentaActual"] or 0.0) + delta)
 
     return id_liquidacion, liquidacion
 

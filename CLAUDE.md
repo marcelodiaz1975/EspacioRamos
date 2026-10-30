@@ -320,18 +320,53 @@ de prueba) — queda disponible para sumarlo al resto de los formularios
 del sistema caso por caso, mismo criterio que el resto de los cambios
 de alcance general (no un barrido completo de una sola vez).
 
-## F3 ("Reiniciar solapa"): reinicia desde cero, distinto de `showEvent`
+## F5 ("Refrescar"): reinicia desde cero, distinto de `showEvent`
 
 Regla general confirmada en una auditoría completa de los ~24 métodos
 `reiniciar()` del sistema (detalle pantalla por pantalla en
-`docs/historial/general.md`): F3 y `showEvent` son disparadores
+`docs/historial/general.md`): este atajo y `showEvent` son disparadores
 DISTINTOS. Volver a entrar a una solapa (`showEvent`) no tiene por qué
 perder un filtro que el operador ya eligió (ej. qué profesional estaba
-mirando); F3 sí es un pedido explícito de "empezar de cero" — todos los
-filtros a su valor inicial y el foco al principio de la cadena. Toda
-pantalla nueva con estado propio (filtros, selección) tiene que
-mantener esta separación al armar su propio `reiniciar()`, no
+mirando); el atajo sí es un pedido explícito de "empezar de cero" —
+todos los filtros a su valor inicial y el foco al principio de la
+cadena. Toda pantalla nueva con estado propio (filtros, selección) tiene
+que mantener esta separación al armar su propio `reiniciar()`, no
 mezclarlo con `showEvent`.
+
+Pedido de la clienta (hilo "saldo actual"/atajos de teclado): la tecla
+se corrió de F3 a F5 — "más asociado al refrescar que usan los
+navegadores" — para dejar F3 libre como salto directo a una solapa (ver
+abajo). El método (`VentanaPrincipal._reiniciar_solapa_activa`, que a su
+vez llama a `reiniciar()` del panel más interno vía `_panel_mas_interno`)
+no cambió, solo la tecla del `QShortcut`.
+
+## F1-F12: leyenda completa de atajos, salto directo a una solapa
+
+Pedido explícito de la clienta: además de F1 (Ayuda, `_mostrar_ayuda`),
+F2 (Calculadora, `_abrir_calculadora`) y F5 (Refrescar, ver arriba), el
+resto de las F quedan como atajo directo a una solapa puntual del
+sistema — no la pantalla, la SOLAPA, en pantallas compuestas con varias:
+
+- F3: Regulares (solapa "Reservas regulares" de la Seccion "Reservas")
+- F4: Aisladas (solapa "Reservas aisladas" de "Reservas")
+- F6: Grilla (solapa "Grilla semanal" de "Grilla y mensajería")
+- F7: Mensajería (solapa "Centro de mensajería" de "Grilla y mensajería")
+- F8: Predefinidos (solapa "Mensajes predefinidos" de "Grilla y mensajería")
+- F9: Oferta (solapa "Oferta de consultorios" de "Disponibilidad")
+- F10: Profesionales (solapa "Listado de profesionales" de "Profesionales")
+- F11: Llaves (solapa "Movimientos y tenencias de llaves" de "Llaves y otros conceptos")
+- F12: Placas (solapa "Búsqueda y asignación de placas" de "Placas para timbres")
+
+Implementado con `VentanaPrincipal.ir_a_solapa(nombre_seccion,
+texto_solapa)` (`app/gui/main_window.py`), que reusa `ir_a_seccion` (#22,
+ya existía para el salto de botón "Confirmar reserva" de Lista de
+espera) y después busca con `findChild(QTabWidget)` la solapa de ese
+texto dentro de la Seccion — todas las pantallas compuestas de este
+sistema arman su `QTabWidget` en el atributo `pestanas`, así que el
+método es genérico y no hace falta tocarlo si se agrega una Seccion
+nueva con el mismo patrón. `self._etiqueta_funciones` (barra de estado,
+costado izquierdo) muestra la leyenda completa de las 12 teclas en el
+orden pedido por la clienta.
 
 ## Indicador "Procesando..." para operaciones largas
 
@@ -366,6 +401,46 @@ Panel de control - Avance de período, backup, y vista rápida.png". Sección es
 "Sistema"/"Operativa diaria" (las dos categorías del menú), Formulario
 el nombre del `Seccion` del menú, Solapa el texto de la pestaña
 mostrada (si la pantalla no tiene solapas, se omite esa tercera parte).
+
+## Hilo abierto: saldo actual inflado por una reserva aislada a futuro, resaltado de hoy en Panel de control
+
+Pedido de la clienta en Reinicio de prueba: notó una profesional con
+"saldo actual" muy superior al del mes, sospechando que una reserva
+aislada agendada para un mes futuro (diciembre, estando parada en
+noviembre) se lo estaba sumando encima.
+
+**Confirmado y corregido.** Causa: `emitir_liquidacion`
+(`app/negocio/liquidaciones.py`) acreditaba el delta de CUALQUIER
+emisión a `Profesional.SaldoCuentaActual` sin importar el período —
+incluida la emisión-preview de un período FUTURO que dispara sola
+`regenerar_si_corresponde` al cargar/editar una reserva aislada con
+"Período a imputar" posterior al operativo actual. `SaldoCuentaActual`
+representa solo el período operativo actual (se resetea a 0 en cada
+avance de mes, ver `avance_mes.py`), así que una preview a futuro no le
+tiene que sumar nada todavía — ese crédito llega solo, más adelante,
+cuando el avance de mes alcance ese período y alguien la reemita contra
+un `SaldoCuentaActual` recién puesto en 0. Mismo patrón que el guard ya
+existente para "no rechazar reemitir el período actual por haber una
+preview posterior" (`periodo <= periodo_operativo_actual(conn)`), ahora
+aplicado también al crédito de saldo. Test de regresión:
+`test_emitir_liquidacion_de_un_periodo_futuro_sin_cerrar_no_infla_el_saldo_actual`
+(`tests/test_liquidaciones.py`) — confirmado que SIN el fix falla con el
+síntoma exacto reportado (saldo duplicando dos períodos).
+
+**Importante para la clienta:** el fix evita que el bug vuelva a pasar
+de acá en adelante, pero NO corrige retroactivamente el valor ya
+inflado de la profesional que detectó — ese quedó escrito por el código
+viejo. Hay que ajustarlo a mano una vez desde "Ajustar saldo" en
+Reinicio de prueba (`_DialogoAjustarSaldo`).
+
+De paso, en Panel de control: cumpleaños, días de profesión y feriados/
+fechas especiales que caen justo HOY (`fecha_real`, no la fecha de
+período) se resaltan en rojo y negrita en sus respectivos cuadritos
+(`_resaltar_si_es_hoy`, `panel_control.py`) — mismo criterio que el
+"VENCIDO" de Estado de backup (#147). Sin concepto de "aniversario"
+separado en el código (cero resultados buscando "aniversario" en todo
+el repo): se interpretó como un sinónimo coloquial de "día de
+profesión", a confirmar con la clienta si se refería a otra cosa.
 
 ## Historial archivado
 

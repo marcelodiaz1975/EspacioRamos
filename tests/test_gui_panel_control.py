@@ -482,6 +482,46 @@ def test_tarjeta_fechas_especiales_lista_lo_que_falta_del_mes_y_los_dos_siguient
     assert "01-11-2026" not in texto
 
 
+def test_tarjeta_fechas_especiales_resalta_la_que_cae_hoy(qtbot, conn):
+    """Pedido explícito de la clienta: el feriado/fecha especial que
+    coincide con el día de HOY real (no la fecha de período) se
+    resalta en rojo y negrita — las demás quedan sin resaltar."""
+    conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-20' WHERE IdConfiguracion = 1")
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-20", Descripcion="Feriado puente", Activo=1)
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-25", Descripcion="Otro feriado", Activo=1)
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    etiqueta = pantalla.panel_avance.etiqueta_fechas_especiales
+    assert etiqueta.textFormat() == Qt.TextFormat.RichText
+    texto = etiqueta.text()
+    assert f'<span style="color: {COLOR_ROJO}; font-weight: bold;">•  jue 20-08-2026 — Feriado puente</span>' in texto
+    assert "•  mar 25-08-2026 — Otro feriado" in texto
+    assert "color:" not in texto.split("Otro feriado")[0].split("mar 25-08-2026")[0][-40:]
+
+
+def test_tarjeta_cumpleanos_resalta_el_que_cae_hoy(qtbot, conn):
+    """Mismo pedido que fechas especiales, para cumpleaños/días de
+    profesión: solo el que cae justo hoy (fecha real) se resalta."""
+    conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-20' WHERE IdConfiguracion = 1")
+    obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Lo Veci", NombrePila="Virginia", FechaNacimiento="1990-08-20",
+    )
+    obtener_repositorio(conn, "Profesion").crear(
+        Nombre="Psicología", NombreMasculino="Psicólogo", DiaProfesion="08-25",
+    )
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    etiqueta = pantalla.panel_avance.etiqueta_cumpleanos
+    assert etiqueta.textFormat() == Qt.TextFormat.RichText
+    texto = etiqueta.text()
+    assert (
+        f'<span style="color: {COLOR_ROJO}; font-weight: bold;">•  jue 20-08 — Cumpleaños de Virginia Lo Veci</span>'
+        in texto
+    )
+    assert "•  mar 25-08 — Día del Psicólogo" in texto
+    assert "color:" not in texto.split("Día del Psicólogo")[0].split("mar 25-08")[0][-40:]
+
+
 def test_tarjeta_profesionales_muestra_los_tres_conteos(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)

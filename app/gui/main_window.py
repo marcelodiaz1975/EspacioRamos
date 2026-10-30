@@ -159,14 +159,55 @@ class VentanaPrincipal(QMainWindow):
         # período... al borde de la izquierda" — `addWidget` (a diferencia
         # de `addPermanentWidget`, usado arriba para el período) ubica en
         # el área IZQUIERDA de la barra de estado, de siempre en Qt.
-        self._etiqueta_funciones = QLabel("F1 – Ayuda / F2 – Calculadora / F3 – Reiniciar solapa")
+        #
+        # Pedido explícito de la clienta (hilo "saldo actual"/atajos de
+        # teclado): atajos F1-F12 completos como salto directo a una
+        # solapa puntual del sistema (ver `ir_a_solapa`), con F5
+        # ("Refrescar") en el medio ocupando el lugar del viejo F3
+        # ("Reiniciar solapa" — el nombre de tecla cambió, el método
+        # `_reiniciar_solapa_activa` sigue siendo el mismo). El orden es
+        # el que pidió la clienta, no alfabético ni por categoría de menú.
+        self._etiqueta_funciones = QLabel(
+            "F1 – Ayuda / F2 – Calculadora / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
+            "F6 – Grilla / F7 – Mensajería / F8 – Predefinidos / F9 – Oferta / F10 – Profesionales / "
+            "F11 – Llaves / F12 – Placas"
+        )
         self.statusBar().addWidget(self._etiqueta_funciones)
 
         self._calculadora: Calculadora | None = None
         self._atajo_calculadora = QShortcut(Qt.Key.Key_F2, self)
         self._atajo_calculadora.activated.connect(self._abrir_calculadora)
-        self._atajo_reiniciar = QShortcut(Qt.Key.Key_F3, self)
+
+        self._atajo_regulares = QShortcut(Qt.Key.Key_F3, self)
+        self._atajo_regulares.activated.connect(lambda: self.ir_a_solapa("Reservas", "Reservas regulares"))
+        self._atajo_aisladas = QShortcut(Qt.Key.Key_F4, self)
+        self._atajo_aisladas.activated.connect(lambda: self.ir_a_solapa("Reservas", "Reservas aisladas"))
+        self._atajo_reiniciar = QShortcut(Qt.Key.Key_F5, self)
         self._atajo_reiniciar.activated.connect(self._reiniciar_solapa_activa)
+        self._atajo_grilla = QShortcut(Qt.Key.Key_F6, self)
+        self._atajo_grilla.activated.connect(lambda: self.ir_a_solapa("Grilla y mensajería", "Grilla semanal"))
+        self._atajo_mensajeria = QShortcut(Qt.Key.Key_F7, self)
+        self._atajo_mensajeria.activated.connect(
+            lambda: self.ir_a_solapa("Grilla y mensajería", "Centro de mensajería")
+        )
+        self._atajo_predefinidos = QShortcut(Qt.Key.Key_F8, self)
+        self._atajo_predefinidos.activated.connect(
+            lambda: self.ir_a_solapa("Grilla y mensajería", "Mensajes predefinidos")
+        )
+        self._atajo_oferta = QShortcut(Qt.Key.Key_F9, self)
+        self._atajo_oferta.activated.connect(lambda: self.ir_a_solapa("Disponibilidad", "Oferta de consultorios"))
+        self._atajo_profesionales = QShortcut(Qt.Key.Key_F10, self)
+        self._atajo_profesionales.activated.connect(
+            lambda: self.ir_a_solapa("Profesionales", "Listado de profesionales")
+        )
+        self._atajo_llaves = QShortcut(Qt.Key.Key_F11, self)
+        self._atajo_llaves.activated.connect(
+            lambda: self.ir_a_solapa("Llaves y otros conceptos", "Movimientos y tenencias de llaves")
+        )
+        self._atajo_placas = QShortcut(Qt.Key.Key_F12, self)
+        self._atajo_placas.activated.connect(
+            lambda: self.ir_a_solapa("Placas para timbres", "Búsqueda y asignación de placas")
+        )
 
         self._navegacion.currentRowChanged.connect(self._cambiar_seccion)
         # Pedido de la clienta: al abrir, ninguna fila queda seleccionada
@@ -288,6 +329,30 @@ class VentanaPrincipal(QMainWindow):
                 return self._pila.widget(indice_pila)
         return None
 
+    def ir_a_solapa(self, nombre_seccion: str, texto_solapa: str) -> QWidget | None:
+        """Atajo de teclado F3-F12 (ver `_etiqueta_funciones`): salta a la
+        Seccion `nombre_seccion` (vía `ir_a_seccion`) y, si es una pantalla
+        compuesta con solapas propias (atributo `pestanas`, el `QTabWidget`
+        que arma cada pantalla así — Reservas, Grilla y mensajería,
+        Disponibilidad, Profesionales, Llaves y otros conceptos, Placas
+        para timbres), se para además en la solapa de texto `texto_solapa`
+        dentro de ella. Si la Seccion no tiene solapas propias (o no se
+        encuentra `texto_solapa` entre ellas), se queda solo con el salto
+        de `ir_a_seccion`, sin romper. `findChild` alcanza aunque el
+        `QTabWidget` esté dentro de un layout intermedio, no directamente
+        como hijo."""
+        widget = self.ir_a_seccion(nombre_seccion)
+        if widget is None:
+            return None
+        pestanas = widget.findChild(QTabWidget)
+        if pestanas is None:
+            return widget
+        for indice in range(pestanas.count()):
+            if pestanas.tabText(indice) == texto_solapa:
+                pestanas.setCurrentIndex(indice)
+                return pestanas.widget(indice)
+        return widget
+
     def _mostrar_ayuda(self) -> None:
         """Ayuda contextual (Etapa 11): F1 muestra el texto de ayuda de
         la pantalla actualmente visible, tomado de Seccion.ayuda — salvo
@@ -350,8 +415,14 @@ class VentanaPrincipal(QMainWindow):
         """Miscelánea (ago-2026): el período en el que está posicionado el
         sistema tiene que estar siempre a la vista en cualquier pantalla —
         se revisa en cada cambio de sección, igual que la barra de fecha
-        ficticia, para que un avance de mes se refleje sin reiniciar."""
-        self._badge_periodo.setText(f"Período {self._periodo_legible()}")
+        ficticia, para que un avance de mes se refleje sin reiniciar.
+
+        Pedido de la clienta en el hilo de "saldo actual"/atajos de
+        teclado: mismo azul que los encabezados de columna de las tablas
+        (`COLOR_NIVEL_1_OSCURO`, ver `estilos.py#badgePeriodo`), negrita y
+        mayúscula — `.upper()` en el texto porque QSS no soporta
+        text-transform, mismo criterio que `tituloPantalla`."""
+        self._badge_periodo.setText(f"Período {self._periodo_legible()}".upper())
 
     def _periodo_legible(self) -> str:
         anio, mes = periodo_actual(self.conn).split("-")

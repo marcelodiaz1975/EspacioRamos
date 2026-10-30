@@ -162,6 +162,9 @@ QLabel#tituloPantalla {{
 QLabel#subtitulo {{ font-size: 11px; color: {'#AAAAAA' if modo_oscuro else '#555555'}; }}
 QLabel#subtituloSeccion {{ font-size: 15px; font-weight: bold; color: {t['texto']}; padding: 4px 0px; }}
 QLabel#subtituloCampo {{ }}
+QLabel#badgePeriodo {{
+    color: {COLOR_NIVEL_1_OSCURO}; font-weight: bold;
+}}
 QTabWidget::pane {{
     background-color: {t['superficie']};
     border: 1px solid #000000;

@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QMessageBox, QWidget
 
 from app.db.init_db import init_database
@@ -159,10 +160,14 @@ def test_tema_se_actualiza_al_cambiar_de_pantalla(qtbot, conn):
 # --------------------------------------------------------- badge de período
 
 def test_badge_periodo_muestra_el_periodo_actual(qtbot, conn):
+    """Pedido de la clienta (hilo "saldo actual"/atajos de teclado): el
+    badge va en mayúscula — el color azul y la negrita son QSS
+    (`estilos.py#badgePeriodo`), no se pueden chequear desde el texto."""
     obtener_repositorio(conn, "Configuracion").actualizar(1, ModoFechaFicticia=1, FechaFicticia="2026-08-10")
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
-    assert ventana._badge_periodo.text() == "Período 08/2026"
+    assert ventana._badge_periodo.text() == "PERÍODO 08/2026"
+    assert ventana._badge_periodo.objectName() == "badgePeriodo"
 
 
 def test_badge_periodo_se_actualiza_al_cambiar_de_pantalla(qtbot, conn):
@@ -170,7 +175,7 @@ def test_badge_periodo_se_actualiza_al_cambiar_de_pantalla(qtbot, conn):
     qtbot.addWidget(ventana)
     obtener_repositorio(conn, "Configuracion").actualizar(1, ModoFechaFicticia=1, FechaFicticia="2026-03-15")
     ventana._navegacion.setCurrentRow(2)
-    assert ventana._badge_periodo.text() == "Período 03/2026"
+    assert ventana._badge_periodo.text() == "PERÍODO 03/2026"
 
 
 def test_f1_sin_secciones_no_falla(qtbot, conn, monkeypatch):
@@ -363,10 +368,17 @@ def test_ir_a_seccion_expande_la_categoria_si_estaba_colapsada(qtbot, conn):
     assert item_dos.isHidden() is False
 
 
-def test_etiqueta_de_funciones_f1_f2_f3(qtbot, conn):
+def test_etiqueta_de_funciones_f1_a_f12(qtbot, conn):
+    """Pedido explícito de la clienta (hilo "saldo actual"/atajos de
+    teclado): leyenda completa F1-F12, F5 pasa a ser "Refrescar" (antes
+    F3 "Reiniciar solapa") y el resto son saltos directos a una solapa."""
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
-    assert ventana._etiqueta_funciones.text() == "F1 – Ayuda / F2 – Calculadora / F3 – Reiniciar solapa"
+    assert ventana._etiqueta_funciones.text() == (
+        "F1 – Ayuda / F2 – Calculadora / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
+        "F6 – Grilla / F7 – Mensajería / F8 – Predefinidos / F9 – Oferta / F10 – Profesionales / "
+        "F11 – Llaves / F12 – Placas"
+    )
 
 
 def test_f2_abre_una_sola_calculadora_y_f2_de_nuevo_la_cierra(qtbot, conn):
@@ -413,7 +425,9 @@ def test_panel_mas_interno_baja_por_tabwidgets_anidados(qtbot, conn):
     assert ventana._panel_mas_interno() is hoja_interna
 
 
-def test_f3_llama_reiniciar_del_panel_activo_si_lo_tiene(qtbot, conn):
+def test_f5_llama_reiniciar_del_panel_activo_si_lo_tiene(qtbot, conn):
+    """F5 ("Refrescar") es el nuevo nombre de tecla del viejo F3
+    ("Reiniciar solapa") — el método sigue siendo el mismo."""
     llamadas = []
 
     class _PanelConReset(QWidget):
@@ -431,7 +445,54 @@ def test_f3_llama_reiniciar_del_panel_activo_si_lo_tiene(qtbot, conn):
     assert llamadas == [True]
 
 
-def test_f3_sin_metodo_reiniciar_no_rompe(qtbot, conn):
+def test_f5_sin_metodo_reiniciar_no_rompe(qtbot, conn):
     ventana = VentanaPrincipal(conn, _secciones())  # QWidget liso, sin reiniciar()
     qtbot.addWidget(ventana)
     ventana._reiniciar_solapa_activa()  # no debe lanzar
+
+
+def test_atajo_reiniciar_quedo_en_f5_no_en_f3(qtbot, conn):
+    """La tecla F3 queda libre para el nuevo atajo "Regulares" — el de
+    "Refrescar" (antes en F3) se corrió a F5."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    assert ventana._atajo_reiniciar.key() == Qt.Key.Key_F5
+
+
+def test_ir_a_solapa_selecciona_la_seccion_y_la_solapa_por_texto(qtbot, conn):
+    """F3-F12 (salvo F5): además de saltar a la Seccion (`ir_a_seccion`),
+    se tienen que parar en la solapa puntual pedida por la clienta."""
+    from PySide6.QtWidgets import QTabWidget
+
+    panel_uno = QWidget()
+    panel_dos = QWidget()
+    compuesta = QWidget()
+    pestanas = QTabWidget(compuesta)
+    pestanas.addTab(panel_uno, "Solapa uno")
+    pestanas.addTab(panel_dos, "Solapa dos")
+
+    secciones = [Seccion("Compuesta", lambda c: compuesta, categoria="X")]
+    ventana = VentanaPrincipal(conn, secciones)
+    qtbot.addWidget(ventana)
+
+    widget = ventana.ir_a_solapa("Compuesta", "Solapa dos")
+
+    assert widget is panel_dos
+    assert ventana._navegacion.currentItem().text() == "Compuesta"
+    assert pestanas.currentWidget() is panel_dos
+
+
+def test_ir_a_solapa_sin_solapas_propias_no_rompe(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())  # "Dos" es un QWidget liso
+    qtbot.addWidget(ventana)
+
+    widget = ventana.ir_a_solapa("Dos", "Lo que sea")
+
+    assert isinstance(widget, QWidget)
+    assert ventana._navegacion.currentItem().text() == "Dos"
+
+
+def test_ir_a_solapa_seccion_inexistente_devuelve_none(qtbot, conn):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    assert ventana.ir_a_solapa("No existe", "Lo que sea") is None

@@ -549,6 +549,36 @@ def test_emitir_liquidacion_no_rechaza_reemitir_si_el_periodo_posterior_es_solo_
     emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-08", fecha_emision="2026-08-20")  # no explota
 
 
+def test_emitir_liquidacion_de_un_periodo_futuro_sin_cerrar_no_infla_el_saldo_actual(conn, consultorio):
+    """Segunda vuelta del mismo bug real: la clienta reportó "saldo
+    actual" muy superior al del mes en algunos profesionales con una
+    reserva aislada agendada para un mes futuro (diciembre, parada en
+    noviembre). La emisión preview de ese mes futuro (disparada sola por
+    `regenerar_si_corresponde` al cargar/editar esa reserva) tiene que
+    dejar su `LiquidacionEmitida`/monto al día para quien quiera verla,
+    pero SIN acreditar nada a `SaldoCuentaActual` todavía — ese campo
+    representa solo el período operativo real (agosto en este test), no
+    la suma de agosto + la preview de septiembre."""
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    conn.execute("UPDATE Configuracion SET PeriodoOperativoActual = '2026-08' WHERE IdConfiguracion = 1")
+    conn.commit()
+
+    _, liq_agosto = emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-08", fecha_emision="2026-08-01")
+    saldo_tras_agosto = obtener_repositorio(conn, "Profesional").obtener(id_prof)["SaldoCuentaActual"]
+    assert saldo_tras_agosto == pytest.approx(liq_agosto.monto_generado)
+
+    id_liq_sep, liq_septiembre = emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
+    assert liq_septiembre.monto_generado > 0  # la preview tiene un monto real, no cero
+
+    registro_sep = obtener_repositorio(conn, "LiquidacionEmitida").obtener(id_liq_sep)
+    assert registro_sep["MontoGenerado"] == pytest.approx(liq_septiembre.monto_generado)
+
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    # El saldo actual sigue siendo SOLO el de agosto — la preview de
+    # septiembre no se le suma encima.
+    assert profesional["SaldoCuentaActual"] == pytest.approx(saldo_tras_agosto)
+
+
 def test_marcar_estado_envio_falla_sin_liquidacion_emitida(conn):
     id_prof = _crear_profesional(conn)
     with pytest.raises(ValueError):
