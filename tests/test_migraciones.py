@@ -557,6 +557,71 @@ def test_aplicar_migraciones_es_idempotente_para_apellido_de_profesional(tmp_pat
     conn.close()
 
 
+def test_aplicar_migraciones_no_rompe_con_datos_reales_y_transaccion_abierta(tmp_path):
+    """Bug real reportado por la clienta al arrancar la última versión:
+    "sqlite3.IntegrityError: FOREIGN KEY constraint failed" en
+    `_permitir_profesional_sin_apellido`. Causa: `PRAGMA foreign_keys`
+    es un no-op si se cambia en medio de una transacción, y a esta
+    altura de `aplicar_migraciones` casi siempre HAY una transacción
+    implícita abierta por algún `UPDATE`/`INSERT` anterior sin su
+    propio `commit()` (ej. `_clasificar_subtipo_deposito_llave`) — en
+    una base de prueba vacía nunca se notaba (sin filas, ninguna
+    referencia rota llega a violar nada), pero con datos reales
+    (HistorialCodigo, CargoEspecial, el autorreferenciado
+    ProfesionalCabezaEquipo) sí. Este test reproduce el escenario real:
+    base sembrada (`sembrar_valores_por_defecto`, que deja varias
+    transacciones implícitas sin commitear antes de llegar a la
+    migración) con el esquema viejo (`Apellido NOT NULL`) y datos
+    reales entrelazados entre varias tablas."""
+    from app.repositorio.registro import obtener_repositorio
+
+    conn = init_database(tmp_path / "test.db")
+    sembrar_valores_por_defecto(conn)
+
+    # Simula una base ya en uso, de antes de este cambio (Apellido NOT
+    # NULL) — mismo patrón de recrear la tabla que usa la migración real.
+    definicion = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'Profesional'").fetchone()["sql"]
+    columnas = [f["name"] for f in conn.execute("PRAGMA table_info(Profesional)").fetchall()]
+    columnas_sql = ", ".join(columnas)
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("PRAGMA legacy_alter_table = ON")
+    conn.execute("ALTER TABLE Profesional RENAME TO Profesional_viejo")
+    conn.execute(definicion.replace("Apellido TEXT", "Apellido TEXT NOT NULL", 1))
+    conn.execute(f"INSERT INTO Profesional ({columnas_sql}) SELECT {columnas_sql} FROM Profesional_viejo")
+    conn.execute("DROP TABLE Profesional_viejo")
+    conn.commit()
+    conn.execute("PRAGMA legacy_alter_table = OFF")
+    conn.execute("PRAGMA foreign_keys = ON")
+
+    repo = obtener_repositorio(conn, "Profesional")
+    id_r = repo.crear(CategoriaProfesional="R", Apellido="Cabeza", IdCodigo="R1")
+    id_e = repo.crear(CategoriaProfesional="E", Apellido="Equipo", ProfesionalCabezaEquipo=id_r, IdCodigo="E1")
+    conn.execute(
+        "INSERT INTO HistorialCodigo (IdProfesional, CodigoAnterior, CodigoNuevo, FechaCambio) "
+        "VALUES (?, 'R0', 'R1', '2026-01-01')", (id_r,),
+    )
+    conn.execute(
+        "INSERT INTO CargoEspecial (IdProfesional, Tipo, Concepto, Monto, Subtipo) "
+        "VALUES (?, 'Débito', 'test', 100, 'Ítem libre')", (id_r,),
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)  # tal cual arranca la app real — no debería lanzar IntegrityError
+
+    assert "NOT NULL" not in conn.execute(
+        "SELECT sql FROM sqlite_master WHERE name = 'Profesional'"
+    ).fetchone()["sql"].split("Apellido")[1].split(",")[0]
+    assert conn.execute(
+        "SELECT ProfesionalCabezaEquipo FROM Profesional WHERE IdProfesional = ?", (id_e,)
+    ).fetchone()["ProfesionalCabezaEquipo"] == id_r
+    assert conn.execute("SELECT COUNT(*) AS c FROM HistorialCodigo").fetchone()["c"] == 1
+    assert conn.execute("SELECT COUNT(*) AS c FROM CargoEspecial").fetchone()["c"] == 1
+    id_c = repo.crear(CategoriaProfesional="C", NombrePila="Juan")
+    assert repo.obtener(id_c)["Apellido"] is None
+    conn.close()
+
+
 def test_aplicar_migraciones_sin_tabla_configuracion_no_rompe(tmp_path):
     conn = sqlite3.connect(tmp_path / "sin_configuracion.db")
     conn.row_factory = sqlite3.Row

@@ -198,6 +198,10 @@ def calcular_liquidacion_simulada(
         )
         for i, monto_bloque in enumerate(montos_por_bloque_este_feriado):
             descuentos_feriados_por_bloque[i] += monto_bloque
+    # Mismo criterio que `liquidaciones._calcular_descuentos_feriados`:
+    # orden cronológico ascendente en el PDF, sin importar el orden de
+    # carga en la tabla de Fechas especiales.
+    descuentos_feriados.sort(key=lambda i: i.fecha)
 
     subtotales_bloques = [
         SubtotalBloque(

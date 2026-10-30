@@ -152,10 +152,12 @@ def test_descuento_feriado_sin_descripcion_no_agrega_guion_de_mas(conn, profesio
     assert concepto == "Descuento por feriado - Lunes 10/8"
 
 
-def test_descuentos_feriados_quedan_ordenados_de_mas_reciente_a_mas_antiguo(conn, profesional):
-    """Pedido de la clienta: en el PDF, de más próximo arriba a más
-    alejado en el tiempo abajo — sin importar el orden en que se
-    cargaron en la tabla de Fechas especiales."""
+def test_descuentos_feriados_quedan_ordenados_cronologicamente(conn, profesional):
+    """Pedido explícito de la clienta ("los veo mezclados", con un
+    ejemplo concreto: el feriado del 9 tiene que ir arriba del 23) —
+    orden cronológico ascendente (el más viejo arriba), sin importar el
+    orden en que se cargaron en la tabla de Fechas especiales. Reemplaza
+    el criterio anterior (más reciente arriba)."""
     repo = obtener_repositorio(conn, "FechasEspeciales")
     # Se cargan deliberadamente fuera de orden cronológico.
     repo.crear(Fecha="2026-08-17", Descripcion="Del medio", Tipo="Feriado nacional", Activo=1)
@@ -163,14 +165,33 @@ def test_descuentos_feriados_quedan_ordenados_de_mas_reciente_a_mas_antiguo(conn
     repo.crear(Fecha="2026-08-31", Descripcion="El más nuevo", Tipo="Feriado nacional", Activo=1)
 
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    assert [f.fecha for f in liquidacion.descuentos_feriados] == ["2026-08-31", "2026-08-17", "2026-08-03"]
+    assert [f.fecha for f in liquidacion.descuentos_feriados] == ["2026-08-03", "2026-08-17", "2026-08-31"]
 
     items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     conceptos_feriados = [c for c, _, _ in items if c.startswith("Descuento por feriado - ")]
     assert conceptos_feriados == [
-        "Descuento por feriado - Lunes 31/8 - El más nuevo",
-        "Descuento por feriado - Lunes 17/8 - Del medio",
         "Descuento por feriado - Lunes 3/8 - El más viejo",
+        "Descuento por feriado - Lunes 17/8 - Del medio",
+        "Descuento por feriado - Lunes 31/8 - El más nuevo",
+    ]
+
+
+def test_descuentos_feriados_y_no_laborables_se_intercalan_por_fecha(conn, profesional):
+    """Caso real reportado por la clienta: un feriado nacional y un día
+    no laborable en el mismo mes tienen que salir en UN SOLO listado
+    cronológico (no dos bloques separados por tipo) — el no laborable
+    (más temprano en el mes) arriba del feriado nacional (más tarde),
+    a pesar de que antes cada tipo se armaba en un bloque separado."""
+    repo = obtener_repositorio(conn, "FechasEspeciales")
+    repo.crear(Fecha="2026-08-17", Descripcion="Feriado tarde", Tipo="Feriado nacional", Activo=1)
+    repo.crear(Fecha="2026-08-03", Descripcion="No laborable temprano", Tipo="Día no laborable", Activo=1)
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    conceptos = [c for c, _, _ in items if "3/8" in c or "17/8" in c]
+    assert conceptos == [
+        "Descuento por día no laborable - Lunes 3/8 - No laborable temprano",
+        "Descuento por feriado - Lunes 17/8 - Feriado tarde",
     ]
 
 

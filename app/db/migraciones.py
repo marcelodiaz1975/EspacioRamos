@@ -376,7 +376,19 @@ def _permitir_profesional_sin_apellido(conn: sqlite3.Connection) -> None:
     de SQLite, pero en la práctica no lo hizo) Y `foreign_keys = OFF`
     (que de paso evita que el INSERT...SELECT de la copia falle por el
     autorreferenciado `ProfesionalCabezaEquipo` sin importar en qué
-    orden vengan las filas)."""
+    orden vengan las filas).
+
+    Bug real (reportado por la clienta, "FOREIGN KEY constraint failed"
+    al arrancar): `PRAGMA foreign_keys` es un no-op si se cambia en medio
+    de una transacción — y a esta altura de `aplicar_migraciones` casi
+    siempre HAY una transacción implícita abierta (alguna de las
+    funciones de arriba hace un `UPDATE`/`INSERT` sin un `commit()`
+    propio inmediatamente después, ej. `_clasificar_subtipo_deposito_
+    llave`). Sin el `conn.commit()` de acá abajo, el `foreign_keys =
+    OFF` quedaba ignorado en silencio, la reescritura de FK de las
+    otras tablas pasaba igual, y el DROP final fallaba de verdad apenas
+    había algún dato real (en una base vacía de pruebas nunca se nota:
+    sin filas, ninguna referencia rota llega a violar nada)."""
     existe_tabla = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Profesional'"
     ).fetchone()
@@ -390,6 +402,7 @@ def _permitir_profesional_sin_apellido(conn: sqlite3.Connection) -> None:
         return  # ya migrada
     columnas = [f["name"] for f in conn.execute("PRAGMA table_info(Profesional)").fetchall()]
     columnas_sql = ", ".join(columnas)
+    conn.commit()  # cierra cualquier transacción implícita abierta — ver arriba
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.execute("PRAGMA legacy_alter_table = ON")
     try:

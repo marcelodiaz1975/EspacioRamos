@@ -323,16 +323,19 @@ def _items_cuenta(
             liquidacion.reversion_descuento, False,
         ))
 
-    for f in liquidacion.descuentos_feriados:
+    # Pedido explícito de la clienta ("los veo mezclados", ejemplo
+    # concreto: feriado del 9 arriba del 23): un solo listado cronológico
+    # para feriados nacionales y días no laborables juntos, en vez de dos
+    # bloques separados por tipo (que antes podían salir intercalados mal
+    # entre sí aunque cada uno estuviera ordenado por su cuenta) — las dos
+    # listas ya vienen ordenadas ascendente (`_calcular_descuentos_
+    # feriados`), `sorted` por fecha sobre la unión preserva ese orden
+    # entre tipos distintos de la misma fecha.
+    for f in sorted([*liquidacion.descuentos_feriados, *liquidacion.descuentos_no_laborables], key=lambda i: i.fecha):
         dia_semana, fecha = _dia_y_fecha(f.fecha)
+        etiqueta = "feriado" if f.tipo == "Feriado nacional" else "día no laborable"
         items.append((
-            f"Descuento por feriado - {dia_semana} {fecha}{_sufijo_descripcion(f.descripcion)}", -f.monto, False,
-        ))
-    for f in liquidacion.descuentos_no_laborables:
-        dia_semana, fecha = _dia_y_fecha(f.fecha)
-        items.append((
-            f"Descuento por día no laborable - {dia_semana} {fecha}{_sufijo_descripcion(f.descripcion)}",
-            -f.monto, False,
+            f"Descuento por {etiqueta} - {dia_semana} {fecha}{_sufijo_descripcion(f.descripcion)}", -f.monto, False,
         ))
     for f in liquidacion.feriados_pendientes:
         dia_semana, fecha = _dia_y_fecha(f.fecha)

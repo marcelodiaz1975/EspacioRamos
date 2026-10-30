@@ -512,11 +512,14 @@ def _calcular_descuentos_feriados(
             fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto, descripcion=feriado["Descripcion"],
         )
         (nacionales if feriado["Tipo"] == "Feriado nacional" else no_laborables).append(item)
-    # Pedido de la clienta: en el PDF, de más próximo (arriba) a más
-    # alejado en el tiempo (abajo) — sin importar el orden de carga en la
-    # tabla de Fechas especiales.
-    nacionales.sort(key=lambda i: i.fecha, reverse=True)
-    no_laborables.sort(key=lambda i: i.fecha, reverse=True)
+    # Pedido explícito de la clienta ("los veo mezclados", con un ejemplo
+    # concreto: el feriado del 9 tiene que ir arriba del 23) — orden
+    # cronológico ascendente, sin importar el orden de carga en la tabla
+    # de Fechas especiales. Reemplaza el criterio anterior ("de más
+    # próximo a hoy arriba a más alejado abajo", que en la práctica daba
+    # el más RECIENTE primero — ver docs/historial/liquidaciones.md).
+    nacionales.sort(key=lambda i: i.fecha)
+    no_laborables.sort(key=lambda i: i.fecha)
     return nacionales, no_laborables
 
 
@@ -543,7 +546,7 @@ def _calcular_feriados_pendientes(
             pendientes.append(ItemFeriado(
                 fecha=feriado["Fecha"], tipo=feriado["Tipo"], monto=monto, descripcion=feriado["Descripcion"],
             ))
-    pendientes.sort(key=lambda i: i.fecha, reverse=True)  # mismo criterio que _calcular_descuentos_feriados
+    pendientes.sort(key=lambda i: i.fecha)  # mismo criterio que _calcular_descuentos_feriados
     return pendientes
 
 

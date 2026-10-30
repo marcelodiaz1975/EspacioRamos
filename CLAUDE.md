@@ -471,6 +471,79 @@ general, `Campo.default_hoy` (`crud_generico.py`): sigue siendo
 editable/vaciable como cualquier campo opcional, solo cambia el valor
 con el que arranca un alta nueva sin tocar el campo.
 
+### Tercera ronda: el fix de Apellido rompía el arranque en la versión empaquetada
+
+La clienta reportó, al querer arrancar la última versión, un
+`sqlite3.IntegrityError: FOREIGN KEY constraint failed` en
+`_permitir_profesional_sin_apellido` — la migración de la segunda ronda
+(arriba) fallaba en su base REAL, aunque los tests de la primera pasada
+la habían dado por buena.
+
+Causa encontrada al reproducir con datos reales (no una base vacía de
+test): `PRAGMA foreign_keys` es un no-op si se cambia en medio de una
+transacción — y a la altura de `aplicar_migraciones` en la que corre
+esta función, casi siempre HAY una transacción implícita abierta por
+algún `UPDATE`/`INSERT` de una función anterior sin su propio
+`commit()` (ej. `_clasificar_subtipo_deposito_llave`). El `foreign_keys
+= OFF` quedaba entonces ignorado en silencio, la reescritura de FK de
+las ~17 tablas que apuntan a `Profesional` pasaba igual durante el
+`RENAME`, y el `DROP TABLE Profesional_viejo` final fallaba de verdad
+en cuanto había algún dato real que violara esa referencia rota — en
+una base de prueba vacía (sin filas, sin violación posible) nunca se
+notaba. Arreglado con un `conn.commit()` explícito al principio de la
+función, antes de tocar los pragmas, para garantizar que no hay ninguna
+transacción pendiente de por medio.
+
+Test de regresión nuevo en `tests/test_migraciones.py`
+(`test_aplicar_migraciones_no_rompe_con_datos_reales_y_transaccion_
+abierta`) que reproduce el escenario real (base sembrada +
+Profesionales entrelazados con HistorialCodigo/CargoEspecial/
+autorreferenciado) — confirmado a mano que ESTE test sí fallaba sin el
+`commit()` (y los tests viejos de la segunda ronda, con esquemas
+mínimos sin datos reales, no lo habían detectado).
+
+## Hilo abierto: Liquidaciones — feriados y días no laborables en orden cronológico
+
+Pedido explícito de la clienta: en el PDF de liquidación mensual, los
+descuentos por feriado y por día no laborable aparecían "mezclados" —
+ejemplo dado: el feriado del 9 tiene que ir arriba del 23, no al revés.
+
+Causa: `_calcular_descuentos_feriados`
+(`app/negocio/liquidaciones.py`) devuelve DOS listas separadas
+(feriados nacionales / días no laborables), cada una ordenada por su
+cuenta — pero antes con `reverse=True` ("de más próximo a hoy arriba a
+más alejado abajo", pedido de una ronda anterior documentado en
+`docs/historial/liquidaciones.md`, que en la práctica daba el más
+RECIENTE primero). El PDF (`liquidacion_pdf.py::_items_cuenta`) además
+las imprimía en dos bloques separados, uno por tipo — así que aunque
+cada lista estuviera bien ordenada por su cuenta, el resultado cruzado
+(feriados nacionales primero, días no laborables después) no seguía
+una sola secuencia cronológica.
+
+Arreglado en los dos lados: el criterio de orden pasa a ser
+ascendente (el más viejo arriba) en `_calcular_descuentos_feriados` Y
+en `_calcular_feriados_pendientes` ("mismo criterio", mismo comentario
+de siempre) — pisando el pedido anterior de "más próximo a hoy
+arriba" a pedido explícito de esta ronda, con un ejemplo concreto que
+lo deja sin ambigüedad. Y en el PDF, las dos listas (feriados +
+no laborables) se combinan con `sorted(...)` en un ÚNICO loop en vez
+de dos loops separados por tipo, así quedan intercaladas por fecha
+real sin importar el tipo de cada una.
+
+De paso, mismo criterio aplicado en `liquidacion_simulada.py`
+(`descuentos_feriados`, que no tenía NINGÚN orden — dependía del orden
+de carga en la tabla de Fechas especiales) para no dejar la misma clase
+de bug sin tocar en "Liquidaciones simuladas", aunque la clienta no la
+mencionó puntualmente.
+
+Tests actualizados/nuevos en `tests/test_pdf_liquidacion.py`: el test
+viejo de orden (`test_descuentos_feriados_quedan_ordenados_de_mas_
+reciente_a_mas_antiguo`) pasa a `..._cronologicamente` con la
+aserción invertida, y un test nuevo
+(`test_descuentos_feriados_y_no_laborables_se_intercalan_por_fecha`)
+cubre el caso real de un feriado nacional y un día no laborable en el
+mismo mes saliendo en un solo listado intercalado.
+
 ## Hilo abierto: Nueva versión + carpetas de imágenes de consultorios
 
 Dos pedidos sueltos de la clienta, sin relación con Profesionales:
