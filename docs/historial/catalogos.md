@@ -381,7 +381,58 @@ Tests nuevos: `tests/test_avance_mes.py` (limpia el período cerrado y
 anteriores, conserva fechas futuras, cuenta 0 sin nada que limpiar),
 `tests/test_pdf_liquidacion.py` (la descripción se agrega al ítem, sin
 descripción no agrega guion de más, orden descendente por fecha tanto
-en `Liquidacion.descuentos_feriados` como en los ítems del PDF),
-`tests/test_catalogos.py` (el cartel de regeneración aparece con la
-cantidad y el período correctos al eliminar, no aparece si no hay nada
-que regenerar).
+en `Liquidacion.descuentos_feriados` como en los ítems del PDF —
+NOTA: este orden se invirtió a ascendente más adelante, ver
+`docs/historial/liquidaciones.md`, "Feriados y días no laborables en
+orden cronológico"), `tests/test_catalogos.py` (el cartel de
+regeneración aparece con la cantidad y el período correctos al
+eliminar, no aparece si no hay nada que regenerar).
+
+## Carpetas de imágenes de Consultorio: nombre descriptivo en vez de solo el ID
+
+Pedido explícito de la clienta: "los nombres de la carpeta de los
+consultorios que sean 'Consultorio - {Edificio} - {Unidad} -
+{Consultorio}'" en vez del nombre viejo basado solo en el ID interno
+("Consultorio_7") — preguntó además si el sistema podía renombrar las
+carpetas ya existentes o si lo tenía que hacer a mano.
+
+Implementado en `app/negocio/archivos_generados.py`
+(`nombre_carpeta_consultorio`, `carpeta_imagenes`): a diferencia de
+Localidad/Edificio/Unidad (que siguen por ID — ver el docstring del
+módulo, "no depender de que el operador no le cambie el nombre al
+edificio/unidad más adelante", la razón original de usar IDs en primer
+lugar), Consultorio es la única excepción, a pedido explícito de la
+clienta.
+
+Respuesta a su pregunta: SÍ, el sistema migra solo las carpetas
+existentes — `carpeta_imagenes` detecta la carpeta vieja
+"Consultorio_{id}" la primera vez que se accede a las imágenes de ese
+consultorio (subir una foto nueva, o simplemente abrir el Gestor de
+archivos en esa pestaña) y la renombra al nombre descriptivo, SIN
+perder los archivos ya cargados — no hizo falta ningún paso manual ni
+una migración aparte que corra una sola vez.
+
+Además, cambiar el Número de un consultorio desde su propia pantalla
+(`pantalla_consultorios`, `al_actualizar` → `_al_actualizar_
+consultorio`/`renombrar_carpeta_imagenes_consultorio`) renombra la
+carpeta sola para seguir el nombre actual, mismo criterio que
+`aplicar_cambio_codigo` en Profesionales.
+
+**Limitación conocida, no resuelta en esta ronda** (documentada en el
+propio código, `renombrar_carpeta_imagenes_consultorio`): renombrar un
+Edificio o una Unidad desde SUS PROPIAS pantallas
+(`pantalla_edificios`/`pantalla_unidades`) no actualiza en cascada las
+carpetas de los consultorios que dependen de ellos — esas pantallas no
+saben qué consultorios hay debajo. La carpeta de un consultorio
+afectado queda con el nombre viejo hasta que ESE consultorio se vuelva
+a guardar (editarlo sin cambiar nada alcanza para que se reconcilie
+solo). Si la clienta quiere que el renombre de Edificio/Unidad se
+propague solo a los consultorios de abajo, es un pedido aparte para
+una próxima ronda.
+
+Tests nuevos en `tests/test_archivos_generados.py` (formato del
+nombre, carpeta real usa el nombre descriptivo, migración sola de la
+carpeta vieja por ID, consultorio inexistente cae al esquema viejo,
+`renombrar_carpeta_imagenes_consultorio` conserva archivos y es
+idempotente sin cambios) y `tests/test_catalogos.py` (editar el Número
+desde la pantalla renombra la carpeta sin perder archivos).

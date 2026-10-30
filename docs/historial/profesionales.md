@@ -207,3 +207,138 @@ validación). Suite completa corrida en 9 lotes en paralelo después de
 este cambio (2576 tests, incluyendo cada pantalla que toca un combo de
 profesional de cualquier categoría): sin ninguna falla.
 
+## Ingreso de profesionales: categoría "C" sin Apellido obligatorio, Fecha de contacto, asteriscos, Cabeza de equipo
+
+Pedido explícito de la clienta al intentar ingresar un profesional
+categoría "C - Contacto / prospecto" para una consulta: el formulario le
+exigía Apellido, pero en esa categoría "alcanza con el nombre, la
+profesión, y la fecha de contacto". Cuatro pedidos sobre el mismo
+formulario (diálogo Nuevo/Editar de Profesionales):
+
+1. **Apellido deja de ser obligatorio para la categoría "C"** — a cambio,
+   para esa categoría pasan a ser obligatorios Nombre (`NombrePila`),
+   Profesión (`IdProfesion`) y Fecha de contacto (`FechaContacto`). Para
+   cualquier otra categoría, Apellido sigue siendo obligatorio como
+   siempre.
+2. **Fecha de contacto en formato "dd-mm-aaaa"** — pasó de texto libre
+   validado contra AAAA-MM-DD a `tipo="fecha"` (mismo `QDateEdit` que
+   Fecha de nacimiento, sin día de semana). Transparente para la base: el
+   AAAA-MM-DD sigue siendo lo que se guarda.
+3. **Asterisco en las etiquetas de los campos obligatorios** — pedido
+   general ("en todo el sistema" por extensión del criterio de alcance
+   general de CLAUDE.md), implementado en el mecanismo COMPARTIDO
+   (`crud_generico.py`), no en Profesionales puntualmente: cualquier
+   catálogo con un `Campo(requerido=True)` ya muestra el asterisco sin
+   tocar nada más.
+4. **"Cabeza de equipo" deshabilitado salvo categoría "E"** — antes
+   quedaba siempre con algún profesional real preseleccionado (sin
+   opción en blanco en su combo), dando la impresión de "venir puesto
+   por defecto" al dar de alta cualquier categoría, inclusive C. Ahora:
+   deshabilitado para toda categoría que no sea "E", habilitado (y
+   editable) solo para "E", y se resetea a "(Sin cabeza de equipo)" al
+   salir de "E" (sin pisar el valor real al simplemente abrir el diálogo
+   de edición de un E ya existente).
+
+### Mecanismo nuevo en `crud_generico.py` (alcance general, no puntual de Profesionales)
+
+`Campo.requerido_si` (opcional, pisa a `requerido` cuando está presente):
+una función que recibe `obtener_valor(nombre_campo)` — el valor ACTUAL de
+cualquier otro campo del mismo diálogo, mismo criterio de extracción que
+`valores()` — y devuelve si este campo es obligatorio AHORA. Se evalúa
+tanto en la validación (`_validar_y_aceptar`) como en el asterisco de la
+etiqueta (`_DialogoRegistro.actualizar_etiquetas_requeridas()`, método
+público a conectar a mano contra lo que dispare el cambio — en
+Profesionales, el combo de Categoría). Necesario porque antes no existía
+ninguna forma declarativa de que la obligatoriedad de un campo dependiera
+de otro sin hackear la validación pantalla por pantalla.
+
+Al sumar esto se encontró y corrigió un gap latente en
+`_validar_y_aceptar`: el chequeo de "vacío" solo cubría
+`tipo in ("texto", "numero", "texto_largo")`, nunca `"combo"` ni
+`"fecha"` — invisible hasta ahora porque ningún combo obligatorio tenía
+opción en blanco y los campos fecha obligatorios siempre arrancaban en
+la fecha de hoy. Se extendió a los cuatro tipos (`"fecha"` contra el
+sentinel `_FECHA_SIN_DATO`, `"combo"` no editable contra
+`currentData() is None`).
+
+### Efecto colateral necesario: combos de Profesionales sin opción en blanco
+
+Para que "Profesión obligatoria para C" y "Cabeza de equipo obligatorio
+para E" tengan algún efecto real, sus combos (`_opciones_profesion`,
+`_opciones_cabeza_equipo`) pasaron a tener una opción "(Sin profesión)"/
+"(Sin cabeza de equipo)" al principio — antes, sin ninguna opción en
+blanco, el combo SIEMPRE quedaba con algún valor real preseleccionado
+(el primero en orden alfabético/jerárquico), así que "obligatorio" nunca
+podría haber bloqueado nada. Esto además corrigió, de rebote, un bug
+latente análogo al de Cabeza de equipo pero en Profesión: un profesional
+sin Profesión cargada (`IdProfesion IS NULL`) abría el diálogo de
+edición con alguna profesión real preseleccionada sin reflejar el dato
+real — y de ahí podía colar un Tratamiento sugerido fantasma (ej.
+"Coach", sugerido por la profesión "Coaching" al ser la primera en
+orden alfabético) que el profesional nunca eligió. Se corrigió el test
+`test_cambiar_codigo_registra_historial_y_renombra_carpeta` que
+encodeaba ese comportamiento viejo como esperado.
+
+Tests nuevos en `tests/test_profesionales.py`: los cuatro casos de
+obligatoriedad dinámica para C (acepta con los tres campos cargados,
+bloquea si falta cualquiera de los tres), que las demás categorías
+sigan exigiendo Apellido, que los asteriscos cambien en vivo al cambiar
+la Categoría, formato/guardado de Fecha de contacto, y los tres casos de
+Cabeza de equipo (deshabilitado por defecto, se habilita solo con E y se
+resetea al salir, y que editar un E existente lo abra habilitado con el
+valor real sin resetearlo).
+
+### Segunda ronda: bug real al guardar un "C" + Fecha de contacto por defecto
+
+Al usar lo de arriba en la práctica, la clienta reportó un error real:
+"Me tira un error que no se puede guardar NULL, sin apellido". Causa:
+sacar la validación del lado de la UI (arriba) no alcanzaba — la
+columna `Profesional.Apellido` seguía con `NOT NULL` en el esquema de
+base de datos (de cuando se creó la tabla, antes de que existiera
+ninguna categoría sin apellido), así que SQLite rechazaba el guardado
+igual. Arreglado en los dos lados: `schema.sql` (bases nuevas) y
+`app.db.migraciones._permitir_profesional_sin_apellido` (bases ya en
+uso — recrea la tabla sin el `NOT NULL`, ver el docstring de esa
+función para el detalle de por qué hacen falta DOS pragmas de SQLite a
+la vez, `legacy_alter_table` Y `foreign_keys`, para que las ~17 FK de
+otras tablas que apuntan a `Profesional` no queden rotas).
+
+Pedido aparte, mismo hilo: "En el campo 'Fecha de contacto' de ingreso
+de profesionales por defecto la fecha del día" — a diferencia de otros
+campos fecha opcionales (ej. Fecha de nacimiento, que arranca en
+"(sin fecha)"), este arranca pre-cargado con hoy. Mecanismo nuevo y
+general, `Campo.default_hoy` (`crud_generico.py`): sigue siendo
+editable/vaciable como cualquier campo opcional, solo cambia el valor
+con el que arranca un alta nueva sin tocar el campo.
+
+### Tercera ronda: el fix de Apellido rompía el arranque en la versión empaquetada
+
+La clienta reportó, al querer arrancar la última versión, un
+`sqlite3.IntegrityError: FOREIGN KEY constraint failed` en
+`_permitir_profesional_sin_apellido` — la migración de la segunda ronda
+(arriba) fallaba en su base REAL, aunque los tests de la primera pasada
+la habían dado por buena.
+
+Causa encontrada al reproducir con datos reales (no una base vacía de
+test): `PRAGMA foreign_keys` es un no-op si se cambia en medio de una
+transacción — y a la altura de `aplicar_migraciones` en la que corre
+esta función, casi siempre HAY una transacción implícita abierta por
+algún `UPDATE`/`INSERT` de una función anterior sin su propio
+`commit()` (ej. `_clasificar_subtipo_deposito_llave`). El `foreign_keys
+= OFF` quedaba entonces ignorado en silencio, la reescritura de FK de
+las ~17 tablas que apuntan a `Profesional` pasaba igual durante el
+`RENAME`, y el `DROP TABLE Profesional_viejo` final fallaba de verdad
+en cuanto había algún dato real que violara esa referencia rota — en
+una base de prueba vacía (sin filas, sin violación posible) nunca se
+notaba. Arreglado con un `conn.commit()` explícito al principio de la
+función, antes de tocar los pragmas, para garantizar que no hay ninguna
+transacción pendiente de por medio.
+
+Test de regresión nuevo en `tests/test_migraciones.py`
+(`test_aplicar_migraciones_no_rompe_con_datos_reales_y_transaccion_
+abierta`) que reproduce el escenario real (base sembrada +
+Profesionales entrelazados con HistorialCodigo/CargoEspecial/
+autorreferenciado) — confirmado a mano que ESTE test sí fallaba sin el
+`commit()` (y los tests viejos de la segunda ronda, con esquemas
+mínimos sin datos reales, no lo habían detectado).
+

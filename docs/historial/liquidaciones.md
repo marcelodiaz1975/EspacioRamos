@@ -827,3 +827,44 @@ explícitamente — antes dependía sin querer de que la fecha real del
 sistema al correr el test ya hubiera pasado el período "posterior" del
 escenario, algo que este mismo fix podía romper).
 
+## Feriados y días no laborables en orden cronológico (PDF)
+
+Pedido explícito de la clienta: en el PDF de liquidación mensual, los
+descuentos por feriado y por día no laborable aparecían "mezclados" —
+ejemplo dado: el feriado del 9 tiene que ir arriba del 23, no al revés.
+
+Causa: `_calcular_descuentos_feriados` (`app/negocio/liquidaciones.py`)
+devuelve DOS listas separadas (feriados nacionales / días no
+laborables), cada una ordenada por su cuenta — pero antes con
+`reverse=True` ("de más próximo a hoy arriba a más alejado abajo",
+pedido de una ronda anterior de este mismo archivo, que en la práctica
+daba el más RECIENTE primero). El PDF (`liquidacion_pdf.py::_items_
+cuenta`) además las imprimía en dos bloques separados, uno por tipo —
+así que aunque cada lista estuviera bien ordenada por su cuenta, el
+resultado cruzado (feriados nacionales primero, días no laborables
+después) no seguía una sola secuencia cronológica.
+
+Arreglado en los dos lados: el criterio de orden pasa a ser ascendente
+(el más viejo arriba) en `_calcular_descuentos_feriados` Y en
+`_calcular_feriados_pendientes` ("mismo criterio", mismo comentario de
+siempre) — pisando el pedido anterior de "más próximo a hoy arriba" a
+pedido explícito de esta ronda, con un ejemplo concreto que lo deja sin
+ambigüedad. Y en el PDF, las dos listas (feriados + no laborables) se
+combinan con `sorted(...)` en un ÚNICO loop en vez de dos loops
+separados por tipo, así quedan intercaladas por fecha real sin
+importar el tipo de cada una.
+
+De paso, mismo criterio aplicado en `liquidacion_simulada.py`
+(`descuentos_feriados`, que no tenía NINGÚN orden — dependía del orden
+de carga en la tabla de Fechas especiales) para no dejar la misma clase
+de bug sin tocar en "Liquidaciones simuladas", aunque la clienta no la
+mencionó puntualmente.
+
+Tests actualizados/nuevos en `tests/test_pdf_liquidacion.py`: el test
+viejo de orden (`test_descuentos_feriados_quedan_ordenados_de_mas_
+reciente_a_mas_antiguo`) pasa a `..._cronologicamente` con la aserción
+invertida, y un test nuevo
+(`test_descuentos_feriados_y_no_laborables_se_intercalan_por_fecha`)
+cubre el caso real de un feriado nacional y un día no laborable en el
+mismo mes saliendo en un solo listado intercalado.
+

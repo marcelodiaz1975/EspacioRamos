@@ -3811,3 +3811,12 @@ filtros de Grilla semanal, reset de Categoría en Mensajes
 predefinidos), `tests/test_gui_reservas.py`, `tests/test_gui_
 liquidacion.py`, `tests/test_gui_novedades.py`, `tests/test_gui_
 pagos.py` (uno por cada método `reiniciar()` nuevo).
+
+## Nueva versión: "SistemaDF v.2026.11"
+
+Pedido explícito de la clienta: "a partir de ahora 'SistemaDF
+v.2026.11'". `app/version.py::VERSION` (única fuente del título de
+ventana y demás, ver ese módulo) pasa de `"v0.11.2026.10"` a
+`"v.2026.11"` — sin ningún otro cambio, `NOMBRE_Y_VERSION` ya se arma
+solo a partir de esa constante (mismo patrón que el cambio de versión
+anterior, punto 1.14 más arriba en este mismo archivo).
