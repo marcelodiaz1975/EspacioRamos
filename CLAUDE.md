@@ -354,8 +354,12 @@ sistema — no la pantalla, la SOLAPA, en pantallas compuestas con varias:
 - F8: Predefinidos (solapa "Mensajes predefinidos" de "Grilla y mensajería")
 - F9: Oferta (solapa "Oferta de consultorios" de "Disponibilidad")
 - F10: Profesionales (solapa "Listado de profesionales" de "Profesionales")
-- F11: Llaves (solapa "Movimientos y tenencias de llaves" de "Llaves y otros conceptos")
-- F12: Placas (solapa "Búsqueda y asignación de placas" de "Placas para timbres")
+- F11: Pagos (solapa "Registrar pagos" de la Seccion "Pagos")
+- F12: Panel de control (Seccion "Panel de control" — sin solapa puntual,
+  "Panel de control" no es el texto de ninguna de sus dos solapas reales
+  ("Avance de período..."/"Importación datos desde Excel"), así que
+  `ir_a_solapa` no encuentra coincidencia y se queda solo con el salto a
+  la Seccion, que es lo que pidió la clienta)
 
 Implementado con `VentanaPrincipal.ir_a_solapa(nombre_seccion,
 texto_solapa)` (`app/gui/main_window.py`), que reusa `ir_a_seccion` (#22,
@@ -404,6 +408,11 @@ mostrada (si la pantalla no tiene solapas, se omite esa tercera parte).
 
 ## Hilo abierto: saldo actual inflado por una reserva aislada a futuro, resaltado de hoy en Panel de control
 
+(Nota: F11/F12 de la leyenda de atajos pasaron de Llaves/Placas a Pagos/
+Panel de control a pedido de la clienta en una segunda vuelta de este
+mismo hilo — ver la sección "F1-F12" más arriba, ya actualizada con el
+mapeo final.)
+
 Pedido de la clienta en Reinicio de prueba: notó una profesional con
 "saldo actual" muy superior al del mes, sospechando que una reserva
 aislada agendada para un mes futuro (diciembre, estando parada en
@@ -437,10 +446,25 @@ De paso, en Panel de control: cumpleaños, días de profesión y feriados/
 fechas especiales que caen justo HOY (`fecha_real`, no la fecha de
 período) se resaltan en rojo y negrita en sus respectivos cuadritos
 (`_resaltar_si_es_hoy`, `panel_control.py`) — mismo criterio que el
-"VENCIDO" de Estado de backup (#147). Sin concepto de "aniversario"
-separado en el código (cero resultados buscando "aniversario" en todo
-el repo): se interpretó como un sinónimo coloquial de "día de
-profesión", a confirmar con la clienta si se refería a otra cosa.
+"VENCIDO" de Estado de backup (#147). "Aniversarios" confirmado por la
+clienta: es el sinónimo coloquial que usa para "día de profesión", no
+hay ningún concepto separado que agregar.
+
+**Combo "Profesión" de Nuevo/Editar profesional — investigado, no es un
+bug de código.** La clienta reportó ver "Día del psicólogo" como
+alternativa en el desplegable "Profesión" al dar de alta un
+profesional. Revisado `_opciones_profesion` (`app/gui/pantallas/
+profesionales.py`): solo lee `Profesion.Nombre` — probado en una base
+limpia con `DiaProfesion` cargado y el combo sale sin ninguna entrada de
+ese tipo, solo nombres de profesión reales. La explicación más probable
+es una fila de verdad en el catálogo "Profesiones y tratamientos" cuyo
+campo "Nombre" es literalmente "Día del Psicólogo" — alguien (quizás la
+propia clienta, al querer armar el recordatorio de Panel de control)
+creó una profesión nueva con ese texto como nombre en vez de cargar el
+campo "Día de la profesión" sobre la profesión real "Psicología". A
+confirmar con la clienta revisando esa solapa; si es así, hay que borrar
+esa fila fantasma y cargar "10-13" en el campo "Día de la profesión" de
+la fila real "Psicología".
 
 ## Historial archivado
 

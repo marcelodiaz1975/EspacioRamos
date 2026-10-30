@@ -170,7 +170,7 @@ class VentanaPrincipal(QMainWindow):
         self._etiqueta_funciones = QLabel(
             "F1 – Ayuda / F2 – Calculadora / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
             "F6 – Grilla / F7 – Mensajería / F8 – Predefinidos / F9 – Oferta / F10 – Profesionales / "
-            "F11 – Llaves / F12 – Placas"
+            "F11 – Pagos / F12 – Panel de control"
         )
         self.statusBar().addWidget(self._etiqueta_funciones)
 
@@ -200,14 +200,10 @@ class VentanaPrincipal(QMainWindow):
         self._atajo_profesionales.activated.connect(
             lambda: self.ir_a_solapa("Profesionales", "Listado de profesionales")
         )
-        self._atajo_llaves = QShortcut(Qt.Key.Key_F11, self)
-        self._atajo_llaves.activated.connect(
-            lambda: self.ir_a_solapa("Llaves y otros conceptos", "Movimientos y tenencias de llaves")
-        )
-        self._atajo_placas = QShortcut(Qt.Key.Key_F12, self)
-        self._atajo_placas.activated.connect(
-            lambda: self.ir_a_solapa("Placas para timbres", "Búsqueda y asignación de placas")
-        )
+        self._atajo_pagos = QShortcut(Qt.Key.Key_F11, self)
+        self._atajo_pagos.activated.connect(lambda: self.ir_a_solapa("Pagos", "Registrar pagos"))
+        self._atajo_panel_control = QShortcut(Qt.Key.Key_F12, self)
+        self._atajo_panel_control.activated.connect(lambda: self.ir_a_solapa("Panel de control", "Panel de control"))
 
         self._navegacion.currentRowChanged.connect(self._cambiar_seccion)
         # Pedido de la clienta: al abrir, ninguna fila queda seleccionada

@@ -377,7 +377,7 @@ def test_etiqueta_de_funciones_f1_a_f12(qtbot, conn):
     assert ventana._etiqueta_funciones.text() == (
         "F1 – Ayuda / F2 – Calculadora / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
         "F6 – Grilla / F7 – Mensajería / F8 – Predefinidos / F9 – Oferta / F10 – Profesionales / "
-        "F11 – Llaves / F12 – Placas"
+        "F11 – Pagos / F12 – Panel de control"
     )
 
 
