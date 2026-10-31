@@ -178,7 +178,15 @@ class _PanelSaldosIniciales(QWidget):
     def _aplicar_filtro_busqueda(self, *_args) -> None:
         """Mismo criterio que "Filtros que solo afectan la visualización":
         solo oculta filas, sin distinguir mayúsculas ni acentos, por
-        cualquier columna visible (código, nombre, categoría)."""
+        cualquier columna visible (código, nombre, categoría).
+
+        Pedido explícito de la clienta: si el filtro deja un solo
+        resultado visible, seleccionarlo solo — para operar directo
+        sobre ese profesional ("Ajustar saldo") sin tener que pinchar
+        la fila a mano. Solo aplica mientras hay texto buscado: con el
+        campo vacío (todas las filas visibles) no se selecciona nada
+        sola, aunque por coincidencia quede un solo profesional en la
+        lista entera."""
         buscado = _normalizar_busqueda(self.campo_buscar.text().strip())
         for fila in range(self.tabla.rowCount()):
             if not buscado:
@@ -190,6 +198,10 @@ class _PanelSaldosIniciales(QWidget):
                 if self.tabla.item(fila, col) is not None
             )
             self.tabla.setRowHidden(fila, buscado not in _normalizar_busqueda(texto_fila))
+        if buscado:
+            visibles = [fila for fila in range(self.tabla.rowCount()) if not self.tabla.isRowHidden(fila)]
+            if len(visibles) == 1:
+                self.tabla.selectRow(visibles[0])
 
     def actualizar(self) -> None:
         filas = sorted(

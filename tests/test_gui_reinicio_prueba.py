@@ -144,6 +144,37 @@ def test_buscar_profesional_filtra_la_tabla(qtbot, conn):
     assert panel.tabla.isRowHidden(1) is False
 
 
+def test_buscar_con_un_solo_resultado_lo_selecciona_solo(qtbot, conn):
+    """Pedido explícito de la clienta: si el filtro deja un solo
+    resultado visible, seleccionarlo solo para poder operar directo
+    sobre él ("Ajustar saldo") sin tener que pinchar la fila a mano."""
+    _crear_profesional(conn, "R", "Díaz", "R1")
+    _crear_profesional(conn, "A", "Gómez", "A1")
+
+    panel = _PanelSaldosIniciales(conn)
+    qtbot.addWidget(panel)
+    assert panel.tabla.selectionModel().selectedRows() == []
+
+    panel.campo_buscar.setText("diaz")
+
+    filas = panel.tabla.selectionModel().selectedRows()
+    assert len(filas) == 1
+    assert filas[0].row() == 0
+    assert panel.boton_ajustar.isEnabled() is True
+
+
+def test_buscar_con_mas_de_un_resultado_no_selecciona_nada(qtbot, conn):
+    _crear_profesional(conn, "R", "Díaz", "R1")
+    _crear_profesional(conn, "R", "Díaz Otro", "R2")
+
+    panel = _PanelSaldosIniciales(conn)
+    qtbot.addWidget(panel)
+
+    panel.campo_buscar.setText("diaz")
+
+    assert panel.tabla.selectionModel().selectedRows() == []
+
+
 def test_reiniciar_limpia_el_buscador(qtbot, conn):
     _crear_profesional(conn, "R", "Lo Veci", "R1")
     panel = _PanelSaldosIniciales(conn)

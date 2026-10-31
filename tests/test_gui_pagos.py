@@ -769,6 +769,24 @@ def test_guardar_con_plan_activo_no_crea_un_segundo(qtbot, conn):
     assert [p["Estado"] for p in planes] == ["Activo"]
 
 
+def test_guardar_plan_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: alerta final de proceso exitoso
+    en Pagos/Planes de pago — mismo patrón ya establecido en otras
+    pantallas."""
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(6000)
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: mensajes.append(a)))
+
+    panel._guardar()
+
+    assert mensajes == [(panel, "Guardar plan de pagos", "Plan de pagos creado con éxito.")]
+
+
 def test_refinanciar_plan_cancela_el_vigente_y_crea_uno_nuevo(qtbot, conn, monkeypatch):
     id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
@@ -784,6 +802,24 @@ def test_refinanciar_plan_cancela_el_vigente_y_crea_uno_nuevo(qtbot, conn, monke
 
     planes = conn.execute("SELECT Estado FROM PlanPago ORDER BY IdPlan").fetchall()
     assert [p["Estado"] for p in planes] == ["Cancelado", "Activo"]
+
+
+def test_refinanciar_plan_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(6000)
+    panel._guardar()
+    panel.tabla.selectRow(0)
+    _mockear_dialogo_refinanciar(monkeypatch, monto=3000, cantidad_cuotas=3, porcentaje_interes=0)
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: mensajes.append(a)))
+
+    panel._refinanciar()
+
+    assert mensajes == [(panel, "Refinanciar plan", "Plan refinanciado con éxito.")]
 
 
 def test_refinanciar_sin_seleccion_avisa_y_no_crea(qtbot, conn):
@@ -818,6 +854,24 @@ def test_cancelar_plan_suma_pendientes_al_saldo_anterior(qtbot, conn):
         "SELECT SaldoCuentaAnterior FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
     ).fetchone()["SaldoCuentaAnterior"]
     assert saldo == pytest.approx(6000)  # las 3 cuotas pendientes vuelven a ser saldo atrasado
+
+
+def test_cancelar_plan_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn, saldo=0)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=6000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_cuotas.setValue(3)
+    panel._guardar()
+    panel.tabla.selectRow(0)
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: mensajes.append(a)))
+
+    panel._cancelar()  # QMessageBox.question mockeado a "Yes" por el fixture autouse
+
+    assert mensajes == [(panel, "Cancelar plan", "Plan cancelado con éxito.")]
 
 
 def test_cancelar_plan_responde_no_al_cartel_no_cambia_nada(qtbot, conn, monkeypatch):

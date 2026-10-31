@@ -1078,6 +1078,7 @@ class _PanelPlanesPago(QWidget):
         self.actualizar()
         self._profesional_cambio()
         self.combo_profesional.setFocus()
+        QMessageBox.information(self, "Guardar plan de pagos", "Plan de pagos creado con éxito.")
 
     def _refinanciar(self) -> None:
         """Pedido explícito de la clienta: opera sobre el plan de la fila
@@ -1106,6 +1107,7 @@ class _PanelPlanesPago(QWidget):
         self.conn.commit()
         self.actualizar()
         self._profesional_cambio()
+        QMessageBox.information(self, "Refinanciar plan", "Plan refinanciado con éxito.")
 
     def _cancelar(self) -> None:
         """Pedido explícito de la clienta: opera sobre el plan de la fila
@@ -1139,6 +1141,7 @@ class _PanelPlanesPago(QWidget):
         self.conn.commit()
         self.actualizar()
         self._profesional_cambio()
+        QMessageBox.information(self, "Cancelar plan", "Plan cancelado con éxito.")
 
 
 class _PanelEstadoCuentaPagos(QWidget):

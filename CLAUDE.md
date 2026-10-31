@@ -568,6 +568,45 @@ Pedido de la clienta sobre la solapa "Registrar pagos":
    (`crud_generico.py`, `reservas.py`: "{Entidad} {verbo} con éxito."),
    que a esta pantalla todavía no le había llegado.
 
+## Hilo abierto: Pagos/Planes de pago — alerta final; Reinicio de prueba — selección automática de resultado único
+
+Pedido de la clienta: *"En pagos/Planes de pago — Alerta final de proceso
+exitoso — En reinicio de prueba — Si empiezo a filtrar y queda un
+resultado solo en la lista, que quede seleccionado en la tabla para ya
+empezar a editarlo directamente sin tener que pinchar en el registro"*.
+
+1. **Pagos/Planes de pago — alerta final de proceso exitoso.** A
+   diferencia de Registrar pagos (ver hilo anterior, ya con su alerta),
+   `_PanelPlanesPago` (`app/gui/pantallas/pagos.py`) no tenía ninguna en
+   sus tres acciones. Se agrega al final de cada una, mismo patrón
+   "{Entidad} {verbo} con éxito.": `_guardar` → "Plan de pagos creado
+   con éxito.", `_refinanciar` → "Plan refinanciado con éxito.",
+   `_cancelar` → "Plan cancelado con éxito." No se tocó el cartel de
+   confirmación de `_cancelar` (`QMessageBox.question`, mismo riesgo de
+   traducción al inglés ya resuelto en Registrar pagos vía
+   `preguntar_si_no`) — no fue parte de este pedido puntual. Tests:
+   `test_guardar_plan_muestra_alerta_final_de_exito`,
+   `test_refinanciar_plan_muestra_alerta_final_de_exito`,
+   `test_cancelar_plan_muestra_alerta_final_de_exito`
+   (`tests/test_gui_pagos.py`).
+
+2. **Reinicio de prueba — selección automática con un solo resultado.**
+   `_PanelSaldosIniciales._aplicar_filtro_busqueda`
+   (`app/gui/pantallas/reinicio_prueba.py`) ya ocultaba filas por
+   substring (mismo criterio que "Filtros que solo afectan la
+   visualización"); ahora, si queda exactamente una fila visible,
+   la selecciona sola (`self.tabla.selectRow(...)`) para poder ir
+   directo a "Ajustar saldo" sin pinchar la fila a mano. Solo dispara
+   mientras hay texto buscado ("si EMPIEZO a filtrar", pedido textual) —
+   con el campo vacío (todas las filas visibles) no selecciona nada,
+   aunque por coincidencia haya un solo profesional cargado en la base
+   entera. La otra solapa de esta pantalla (Depurar historial) usa
+   `QTableWidget.SelectionMode.NoSelection` en su tabla, así que el
+   pedido no le aplica. Tests:
+   `test_buscar_con_un_solo_resultado_lo_selecciona_solo`,
+   `test_buscar_con_mas_de_un_resultado_no_selecciona_nada`
+   (`tests/test_gui_reinicio_prueba.py`).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
