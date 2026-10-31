@@ -1756,6 +1756,44 @@ def test_crear_reserva_aislada_fecha_mes_anterior_pide_confirmacion(qtbot, conn,
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
 
 
+def test_crear_reserva_aislada_de_mes_pasado_con_periodo_siguiente_regenera_liquidacion_del_periodo_operativo(
+    qtbot, conn,
+):
+    """Bug real reportado por la clienta: carga una reserva aislada de un
+    mes YA PASADO (ej. 14 de octubre, parada en noviembre) para corregir
+    una omisión — con "Período a imputar" en "Período siguiente"
+    (default de categoría R), que en ESTE caso resuelve a noviembre, el
+    período OPERATIVO ACTUAL, no a un mes futuro todavía sin calcular.
+    `_resolver_periodo_imputar` tiene que regenerar YA la liquidación de
+    noviembre (ya emitida y enviada de antes) en vez de asumir que "el
+    mes que viene la recoge sola" — eso solo es cierto si noviembre
+    todavía no se calculó, que no es este caso."""
+    _preparar(conn)
+    conn.execute("UPDATE Configuracion SET PeriodoOperativoActual = '2026-11' WHERE IdConfiguracion = 1")
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "Consultorio").actualizar(id_consultorio, ValorHoraAisladaActual=1000)
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo="2026-11")
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo="2026-11", enviada=True)
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_fecha.setDate(QDate(2026, 10, 14))
+    assert panel.combo_periodo_imputar.currentData() == "siguiente"  # default de categoría R, sin tocarlo
+
+    panel._crear()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo="2026-11")
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+    assert ultima["MontoGenerado"] > 0
+
+
 def _textos_leyenda_visibles(leyenda) -> list[str]:
     """`takeAt()` + `hide()` + `deleteLater()` (ver `LeyendaColores.
     actualizar`) saca los QLabel viejos de pantalla al toque, pero siguen

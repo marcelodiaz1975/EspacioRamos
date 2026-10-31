@@ -606,22 +606,36 @@ def _resolver_periodo_imputar(
 ) -> None:
     """Respuesta de la clienta: "si se imputa al mismo período de la
     liquidación, la rehace y la marca como no enviada. Si la imputa para
-    el período siguiente, no toca la liquidación del mes, se contempla
-    ese punto para la liquidación del mes siguiente." Compartida por
-    Reservas aisladas y Reservas extraordinarias — mismo mecanismo,
-    ninguna de las dos pantallas necesita más que esto.
+    el período siguiente, [lo mismo, pero] para la liquidación del mes
+    siguiente." Compartida por Reservas aisladas y Reservas
+    extraordinarias — mismo mecanismo, ninguna de las dos pantallas
+    necesita más que esto.
 
-    "Período siguiente" no necesita código: no se toca nada ahora, y el
-    mes que viene la recoge sola — `calcular_liquidacion` ya suma tanto
-    las aisladas del mes en curso como las del mes anterior. "Período
-    actual" reusa `regenerar_si_corresponde` (DC-08 §3.7): resuelve el
-    profesional liquidable (el R mismo, o su cabeza de equipo si es E;
-    `None` para A/B, en cuyo caso no hace nada) y reemite la liquidación
-    de `periodo_reserva` si corresponde — `emitir_liquidacion` ya deja
-    sola la marca "Regenerada no enviada" si hacía falta."""
-    if periodo_a_imputar != "actual":
-        return
-    regenerar_si_corresponde(conn, id_profesional=id_profesional, periodo=periodo_reserva)
+    Bug real reportado por la clienta: cargar una reserva aislada de un
+    mes YA PASADO (ej. 14 de octubre, parada en noviembre) para corregir
+    una omisión, imputada al "período siguiente" (que en ese caso resulta
+    ser noviembre, el período EN CURSO — no necesariamente un mes futuro
+    como asume el nombre) no regeneraba nada: la versión vieja de esta
+    función solo llamaba a `regenerar_si_corresponde` para "actual" y
+    directamente no hacía nada para "siguiente", asumiendo que ese
+    período siempre estaba sin alcanzar todavía ("el mes que viene la
+    recoge sola" al calcularla por primera vez). Esa asunción es cierta
+    para el caso normal (reserva del mes en curso imputada al próximo,
+    todavía no calculado) pero falsa en este caso: el "período siguiente"
+    de una reserva de un mes YA pasado puede ser el período operativo
+    actual, cuya liquidación bien puede ya estar emitida de antes y
+    necesitar regenerarse YA, no "sola en el próximo cálculo".
+
+    Se resuelve llamando a `regenerar_si_corresponde` siempre, contra el
+    período real que corresponda ("actual" -> `periodo_reserva`,
+    "siguiente" -> el mes siguiente a `periodo_reserva`) — sin
+    distinguir casos, porque `emitir_liquidacion` ya sabe tratar sin
+    romper nada un período genuinamente futuro (deja la `LiquidacionEmitida`/
+    PDF al día como preview, sin acreditar todavía a `SaldoCuentaActual`,
+    ver su docstring) y uno ya alcanzado (lo reemite de verdad y lo marca
+    "Regenerada no enviada" si hacía falta)."""
+    periodo_real = periodo_reserva if periodo_a_imputar == "actual" else sumar_meses(periodo_reserva, 1)
+    regenerar_si_corresponde(conn, id_profesional=id_profesional, periodo=periodo_real)
     conn.commit()
 
 

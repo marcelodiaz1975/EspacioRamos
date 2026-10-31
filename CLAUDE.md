@@ -484,6 +484,55 @@ invierte las dos mitades de cada `Profesion.DiaProfesion` cargado y sube
 el flag a 1 para no volver a invertirlas (y deshacer el fix) en el
 próximo arranque.
 
+## Hilo abierto: reserva aislada de un mes pasado, imputada al siguiente, no regeneraba la liquidación en curso
+
+Pedido de la clienta: carga una reserva aislada de un mes YA PASADO (ej.
+14 de octubre, parada en noviembre) para corregir una omisión, con
+"Período a imputar" en "Período siguiente" — que en SU caso resuelve a
+noviembre, el período OPERATIVO ACTUAL (no un mes futuro todavía sin
+calcular, el caso normal para el que se pensó esa opción). Reportó dos
+síntomas del mismo problema: (1) al crear la reserva, no se regeneraba
+sola la liquidación de noviembre; (2) yendo a Liquidaciones e intentando
+reemitirla a mano, tampoco pasaba nada ni se veía ningún aviso.
+
+**Confirmado y corregido el síntoma (1).** Causa: `_resolver_periodo_
+imputar` (`app/gui/pantallas/reservas.py`, compartida por Reservas
+aisladas y extraordinarias) solo llamaba a `regenerar_si_corresponde`
+para "Período actual" — para "Período siguiente" no hacía nada en
+absoluto, bajo el supuesto (cierto en el caso normal: reserva del mes en
+curso imputada al próximo, todavía sin calcular) de que "el mes que
+viene la recoge sola" al calcularlo por primera vez. Ese supuesto es
+falso cuando la reserva es de un mes YA pasado: el "período siguiente"
+puede ser el período operativo actual, cuya liquidación bien puede
+estar ya emitida y necesitar regenerarse YA. Se resuelve calculando
+siempre el período real (`periodo_reserva` para "actual",
+`sumar_meses(periodo_reserva, 1)` para "siguiente") y llamando a
+`regenerar_si_corresponde` sin distinguir casos — `emitir_liquidacion`
+ya sabe tratar sin romper nada tanto un período genuinamente futuro
+(preview, sin acreditar a `SaldoCuentaActual` todavía) como uno ya
+alcanzado (lo reemite de verdad). Test de regresión: `test_crear_
+reserva_aislada_de_mes_pasado_con_periodo_siguiente_regenera_
+liquidacion_del_periodo_operativo` (`tests/test_gui_reservas.py`) —
+confirmado que SIN el fix falla (solo 1 emisión en vez de 2).
+
+**Investigado el síntoma (2): el cálculo en sí (`calcular_liquidacion`)
+ya sumaba bien esa reserva.** `_aisladas_periodo` arma el bloque
+"aisladas del mes anterior" por FECHA real de la reserva (no por
+`PeriodoImputado`, que es puramente informativo para la columna de la
+tabla) — una reserva aislada fechada en octubre SIEMPRE cae en el
+bloque "mes anterior" de noviembre al calcular noviembre, sin importar
+qué se elija en "Período a imputar". Probado directo contra el motor
+(`emitir_liquidacion`, sin pasar por la GUI): emitir una vez, cargar la
+aislada del mes anterior, volver a emitir el mismo período — el monto
+sube reflejando la aislada, correctamente. No encontré ningún bug
+separado acá: lo más probable es que el síntoma (2) haya sido el MISMO
+problema visto desde el lado manual (sin el fix de (1), quizás algún
+otro paso intermedio tampoco se disparaba) o un detalle puntual de qué
+estaba tildado/seleccionado en la pantalla en ese momento. A confirmar
+con la clienta si, ya con el fix de (1) andando, todavía le pasa al
+reemitir manualmente — con el botón exacto que usa y el período
+elegido en la pantalla.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
