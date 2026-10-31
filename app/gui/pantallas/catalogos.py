@@ -281,10 +281,17 @@ def pantalla_profesiones(conn: sqlite3.Connection, *, anidado: bool = False) -> 
         Campo("OpcionesTratamientoMasculino", "Opciones de tratamiento (masculino, separadas por coma)"),
         Campo("OpcionesTratamientoFemenino", "Opciones de tratamiento (femenino, separadas por coma)"),
         # Fecha fija anual (sin año) del "día de la profesión" — ej.
-        # "10-13" para el 13 de octubre, todos los años. Alimenta el
+        # "13-10" para el 13 de octubre, todos los años. Alimenta el
         # cuadrito "Cumpleaños y días de profesión" de Panel de control.
         # Opcional: dejarlo vacío simplemente no suma nada a ese cuadrito.
-        Campo("DiaProfesion", "Día de la profesión", validador=es_dia_mes_valido, formato_esperado=FORMATO_DIA_MES),
+        # Formato DD-MM (pedido explícito de la clienta, antes era al
+        # revés) agregado directamente al texto de la etiqueta — no solo
+        # al mensaje de error de formato_esperado — para que el operador
+        # sepa cómo escribirlo sin tener que fallar la validación primero.
+        Campo(
+            "DiaProfesion", "Día de la profesión (dd-mm)",
+            validador=es_dia_mes_valido, formato_esperado=FORMATO_DIA_MES,
+        ),
         *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "Profesion", "Profesiones", campos, anidado=anidado)

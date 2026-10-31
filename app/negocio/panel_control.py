@@ -417,7 +417,7 @@ def cumpleanos_y_dias_profesion_proximos(conn: sqlite3.Connection, meses_ventana
     - Cumpleaños: de `Profesional.FechaNacimiento`, solo profesionales
       "activos en el espacio" — se excluyen categoría X (Inactivo) y C
       (Contacto/prospecto, todavía no es alguien que use el espacio).
-    - Días de profesión: de `Profesion.DiaProfesion` (MM-DD, sin año,
+    - Días de profesión: de `Profesion.DiaProfesion` (DD-MM, sin año,
       ver su columna en `schema.sql`) — una fecha fija que se repite
       todos los años, a diferencia de FechasEspeciales (fechas puntuales
       de un año concreto). Profesiones sin este dato cargado no aparecen.
@@ -462,7 +462,7 @@ def cumpleanos_y_dias_profesion_proximos(conn: sqlite3.Connection, meses_ventana
     ).fetchall()
     for prof in profesiones:
         try:
-            mes, dia = (int(parte) for parte in prof["DiaProfesion"].split("-"))
+            dia, mes = (int(parte) for parte in prof["DiaProfesion"].split("-"))
         except ValueError:
             continue
         proxima = _proxima_ocurrencia(hoy, mes, dia)

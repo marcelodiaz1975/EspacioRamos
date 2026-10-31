@@ -622,6 +622,72 @@ def test_aplicar_migraciones_no_rompe_con_datos_reales_y_transaccion_abierta(tmp
     conn.close()
 
 
+def test_base_nueva_no_invierte_dia_profesion(tmp_path):
+    """Pedido de la clienta: `Profesion.DiaProfesion` pasa de MM-DD a
+    DD-MM — una base nueva ya nace con `FormatoDiaProfesionInvertido=1`
+    (ver schema.sql), nunca tuvo el formato viejo, así que no hay nada
+    para invertir."""
+    conn = init_database(tmp_path / "test.db")
+    sembrar_valores_por_defecto(conn)
+    assert (
+        conn.execute(
+            "SELECT FormatoDiaProfesionInvertido FROM Configuracion WHERE IdConfiguracion = 1"
+        ).fetchone()["FormatoDiaProfesionInvertido"]
+        == 1
+    )
+    conn.close()
+
+
+def test_aplicar_migraciones_invierte_dia_profesion_de_mm_dd_a_dd_mm_en_base_vieja(tmp_path):
+    """Simula una base ya en uso con `Profesion.DiaProfesion` cargado en
+    el formato VIEJO (MM-DD, ej. "10-13" para el 13 de octubre) —
+    confirma que aplicar_migraciones lo invierte a DD-MM una sola vez,
+    preservando el None de una profesión sin el dato cargado."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE Configuracion (IdConfiguracion INTEGER PRIMARY KEY CHECK (IdConfiguracion = 1))")
+    conn.execute("INSERT INTO Configuracion (IdConfiguracion) VALUES (1)")
+    conn.execute("CREATE TABLE Profesion (IdProfesion INTEGER PRIMARY KEY, Nombre TEXT NOT NULL, DiaProfesion TEXT)")
+    conn.executemany(
+        "INSERT INTO Profesion (Nombre, DiaProfesion) VALUES (?, ?)",
+        [("Psicología", "10-13"), ("Nutrición", "06-20"), ("Coaching", None)],
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    valores = {f["Nombre"]: f["DiaProfesion"] for f in conn.execute("SELECT Nombre, DiaProfesion FROM Profesion")}
+    assert valores == {"Psicología": "13-10", "Nutrición": "20-06", "Coaching": None}
+    assert (
+        conn.execute(
+            "SELECT FormatoDiaProfesionInvertido FROM Configuracion WHERE IdConfiguracion = 1"
+        ).fetchone()["FormatoDiaProfesionInvertido"]
+        == 1
+    )
+    conn.close()
+
+
+def test_aplicar_migraciones_es_idempotente_para_dia_profesion(tmp_path):
+    """Correr aplicar_migraciones dos veces no debe volver a invertir (y
+    así deshacer la corrección) un valor ya migrado."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE Configuracion (IdConfiguracion INTEGER PRIMARY KEY CHECK (IdConfiguracion = 1))")
+    conn.execute("INSERT INTO Configuracion (IdConfiguracion) VALUES (1)")
+    conn.execute("CREATE TABLE Profesion (IdProfesion INTEGER PRIMARY KEY, Nombre TEXT NOT NULL, DiaProfesion TEXT)")
+    conn.execute("INSERT INTO Profesion (Nombre, DiaProfesion) VALUES ('Psicología', '10-13')")
+    conn.commit()
+
+    aplicar_migraciones(conn)
+    aplicar_migraciones(conn)
+
+    assert (
+        conn.execute("SELECT DiaProfesion FROM Profesion WHERE Nombre = 'Psicología'").fetchone()["DiaProfesion"]
+        == "13-10"
+    )
+    conn.close()
+
+
 def test_aplicar_migraciones_sin_tabla_configuracion_no_rompe(tmp_path):
     conn = sqlite3.connect(tmp_path / "sin_configuracion.db")
     conn.row_factory = sqlite3.Row

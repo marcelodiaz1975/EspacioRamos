@@ -66,7 +66,7 @@ mismo criterio de ventana ("lo que queda de este mes + los próximos dos
 meses") que "Feriados y fechas especiales próximas". Los cumpleaños
 salen de `Profesional.FechaNacimiento` (excluyendo categoría X/C — ver
 el docstring de la función); los días de profesión de
-`Profesion.DiaProfesion`, un campo nuevo (MM-DD, SIN año — se repite
+`Profesion.DiaProfesion`, un campo nuevo (DD-MM, SIN año — se repite
 todos los años) editable desde el catálogo "Profesiones y tratamientos",
 decisión tomada en vez de hardcodear un dict en Python para no tener que
 tocar código cada vez que se suma o cambia una fecha. La grilla pasa a

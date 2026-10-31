@@ -18,7 +18,7 @@ FORMATO_PERIODO = "AAAA-MM"
 FORMATO_EMAIL = "ejemplo@dominio.com"
 FORMATO_DNI = "solo números (6 a 9 dígitos)"
 FORMATO_CUIT = "11 dígitos (XX-XXXXXXXX-X, con o sin guiones)"
-FORMATO_DIA_MES = "MM-DD (ej. 10-13 para el 13 de octubre)"
+FORMATO_DIA_MES = "DD-MM (ej. 13-10 para el 13 de octubre)"
 
 
 def es_fecha_valida(texto: str) -> bool:
@@ -48,13 +48,16 @@ _REGEX_DIA_MES = re.compile(r"^\d{2}-\d{2}$")
 
 
 def es_dia_mes_valido(texto: str) -> bool:
-    """MM-DD, SIN año (ej. "Día del Psicólogo", 13 de octubre todos los
-    años — `Profesion.DiaProfesion`). Usa un año bisiesto de referencia
-    (2024) al validar, para no rechazar un 29 de febrero — el único día
-    del año que no existe en todos los años."""
+    """DD-MM, SIN año (ej. "Día del Psicólogo", 13 de octubre todos los
+    años — `Profesion.DiaProfesion`). Pedido explícito de la clienta:
+    antes era MM-DD, "al revés" de como se lee habitualmente una fecha
+    en el resto del sistema (`dd-mm-aaaa`) — se invirtió para que quede
+    coherente. Usa un año bisiesto de referencia (2024) al validar, para
+    no rechazar un 29 de febrero — el único día del año que no existe en
+    todos los años."""
     if not _REGEX_DIA_MES.fullmatch(texto):
         return False
-    mes, dia = (int(p) for p in texto.split("-"))
+    dia, mes = (int(p) for p in texto.split("-"))
     try:
         date(2024, mes, dia)
         return True

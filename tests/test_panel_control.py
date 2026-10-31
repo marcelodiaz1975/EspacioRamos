@@ -537,7 +537,7 @@ def test_dia_de_profesion_cargado_aparece_con_texto_coloquial(conn):
     armar "Día del {NombreMasculino}" en vez del genérico."""
     _fijar_fecha(conn, "2026-08-15")
     obtener_repositorio(conn, "Profesion").crear(
-        Nombre="Psicología", NombreMasculino="Psicólogo", DiaProfesion="08-25",
+        Nombre="Psicología", NombreMasculino="Psicólogo", DiaProfesion="25-08",
     )
     eventos = cumpleanos_y_dias_profesion_proximos(conn)
     assert len(eventos) == 1
@@ -547,7 +547,7 @@ def test_dia_de_profesion_cargado_aparece_con_texto_coloquial(conn):
 
 def test_dia_de_profesion_sin_nombre_masculino_usa_el_generico(conn):
     _fijar_fecha(conn, "2026-08-15")
-    obtener_repositorio(conn, "Profesion").crear(Nombre="Psicología", DiaProfesion="08-25")
+    obtener_repositorio(conn, "Profesion").crear(Nombre="Psicología", DiaProfesion="25-08")
     eventos = cumpleanos_y_dias_profesion_proximos(conn)
     assert len(eventos) == 1
     assert eventos[0].descripcion == "Día de la profesión: Psicología"
@@ -565,7 +565,7 @@ def test_cumpleanos_y_dias_de_profesion_se_mezclan_ordenados_por_cercania(conn):
         CategoriaProfesional="R", Apellido="Lejos", FechaNacimiento="1990-09-20",
     )
     obtener_repositorio(conn, "Profesion").crear(
-        Nombre="Psicología", NombreMasculino="Psicólogo", DiaProfesion="08-18",
+        Nombre="Psicología", NombreMasculino="Psicólogo", DiaProfesion="18-08",
     )
     obtener_repositorio(conn, "Profesional").crear(
         CategoriaProfesional="R", Apellido="Cerca", FechaNacimiento="1990-08-16",

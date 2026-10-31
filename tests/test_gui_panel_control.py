@@ -507,7 +507,7 @@ def test_tarjeta_cumpleanos_resalta_el_que_cae_hoy(qtbot, conn):
         CategoriaProfesional="R", Apellido="Lo Veci", NombrePila="Virginia", FechaNacimiento="1990-08-20",
     )
     obtener_repositorio(conn, "Profesion").crear(
-        Nombre="Psicología", NombreMasculino="Psicólogo", DiaProfesion="08-25",
+        Nombre="Psicología", NombreMasculino="Psicólogo", DiaProfesion="25-08",
     )
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
@@ -588,7 +588,7 @@ def test_tarjeta_cumpleanos_lista_profesionales_y_dias_de_profesion(qtbot, conn)
         CategoriaProfesional="R", Apellido="Lo Veci", NombrePila="Virginia", FechaNacimiento="1990-08-20",
     )
     obtener_repositorio(conn, "Profesion").crear(
-        Nombre="Psicología", NombreMasculino="Psicólogo", DiaProfesion="08-25",
+        Nombre="Psicología", NombreMasculino="Psicólogo", DiaProfesion="25-08",
     )
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)

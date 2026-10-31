@@ -96,6 +96,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Configuracion", "PeriodoOperativoActual", "TEXT"),
     ("Configuracion", "DiasRecordatorioProfesionalXDejoEspacio", "INTEGER NOT NULL DEFAULT 30"),
     ("Profesional", "FechaUltimoRecordatorioDeudaX", "TEXT"),
+    ("Configuracion", "FormatoDiaProfesionInvertido", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja
@@ -416,6 +417,55 @@ def _permitir_profesional_sin_apellido(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _invertir_formato_dia_profesion_a_dd_mm(conn: sqlite3.Connection) -> None:
+    """Pedido explícito de la clienta: `Profesion.DiaProfesion` pasa de
+    MM-DD a DD-MM — coherente con cómo se lee una fecha en el resto del
+    sistema (`dd-mm-aaaa`), "al revés" hasta ahora (ver `FORMATO_DIA_MES`/
+    `es_dia_mes_valido` en `app/negocio/validaciones.py` y el parseo en
+    `app.negocio.panel_control.cumpleanos_y_dias_profesion_proximos`,
+    ambos ya actualizados al nuevo orden).
+
+    Una base ya en uso puede tener valores reales cargados en el formato
+    VIEJO (ej. "10-13" para el 13 de octubre) — hay que invertirles las
+    dos mitades una sola vez para que sigan representando la misma
+    fecha. `Configuracion.FormatoDiaProfesionInvertido` (ver
+    `_COLUMNAS_NUEVAS`/`schema.sql`) es el marcador de "ya se invirtió":
+    una base NUEVA nace con este flag en 1 (nunca tuvo el formato viejo)
+    y esta función no le toca nada; una base ya en uso lo recibe en 0 y
+    esta función invierte sus filas de `Profesion` y lo sube a 1, para
+    no volver a invertirlas (y así deshacer el fix) en el próximo
+    arranque."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Configuracion'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(Configuracion)").fetchall()}
+    if "FormatoDiaProfesionInvertido" not in columnas_existentes:
+        return
+    fila = conn.execute(
+        "SELECT FormatoDiaProfesionInvertido FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    if fila is None or fila["FormatoDiaProfesionInvertido"]:
+        return  # ya invertida (o base nueva, que ya nace en 1)
+    existe_profesion = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Profesion'"
+    ).fetchone()
+    if not existe_profesion:
+        conn.execute("UPDATE Configuracion SET FormatoDiaProfesionInvertido = 1 WHERE IdConfiguracion = 1")
+        return
+    for prof in conn.execute(
+        "SELECT IdProfesion, DiaProfesion FROM Profesion WHERE DiaProfesion IS NOT NULL AND DiaProfesion != ''"
+    ).fetchall():
+        partes = prof["DiaProfesion"].split("-")
+        if len(partes) == 2:
+            conn.execute(
+                "UPDATE Profesion SET DiaProfesion = ? WHERE IdProfesion = ?",
+                (f"{partes[1]}-{partes[0]}", prof["IdProfesion"]),
+            )
+    conn.execute("UPDATE Configuracion SET FormatoDiaProfesionInvertido = 1 WHERE IdConfiguracion = 1")
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -445,4 +495,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _inicializar_ultimo_backup_propio(conn)
     _inicializar_periodo_operativo_actual(conn)
     _permitir_profesional_sin_apellido(conn)
+    _invertir_formato_dia_profesion_a_dd_mm(conn)
     conn.commit()

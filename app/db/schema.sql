@@ -764,6 +764,12 @@ CREATE TABLE IF NOT EXISTS Configuracion (
     -- backup más nuevo que este valor, es que otra instalación avanzó
     -- más que esta base local.
     UltimoBackupPropio TEXT,
+    -- Marcador de migración (ver `app.db.migraciones._invertir_formato_
+    -- dia_profesion_a_dd_mm`): una base NUEVA nace en 1 (nunca tuvo el
+    -- formato viejo MM-DD de Profesion.DiaProfesion, nada que invertir);
+    -- una base ya en uso lo recibe en 0 vía ALTER TABLE y la migración
+    -- invierte sus filas una sola vez antes de subirlo a 1.
+    FormatoDiaProfesionInvertido INTEGER NOT NULL DEFAULT 1,
     ModoOscuro INTEGER NOT NULL DEFAULT 0,
     -- Tanda de sobres y recogida de sobres (DC-08 §5.2/§5.3, aclarado en
     -- conversación). FechaHoraRecogidaSobres es el valor por defecto que se

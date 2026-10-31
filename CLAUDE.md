@@ -461,10 +461,28 @@ es una fila de verdad en el catálogo "Profesiones y tratamientos" cuyo
 campo "Nombre" es literalmente "Día del Psicólogo" — alguien (quizás la
 propia clienta, al querer armar el recordatorio de Panel de control)
 creó una profesión nueva con ese texto como nombre en vez de cargar el
-campo "Día de la profesión" sobre la profesión real "Psicología". A
-confirmar con la clienta revisando esa solapa; si es así, hay que borrar
-esa fila fantasma y cargar "10-13" en el campo "Día de la profesión" de
-la fila real "Psicología".
+campo "Día de la profesión" sobre la profesión real "Psicología".
+**Confirmado por la clienta**: exactamente eso — ya corregido a mano
+borrando la fila fantasma y cargando el día en la fila real.
+
+**Formato de "Día de la profesión": DD-MM en vez de MM-DD.** Pedido de
+la clienta al cerrar el punto anterior: el campo quedaba "al revés" de
+cómo se lee una fecha en el resto del sistema. Cambiado en los tres
+lugares que conocían el orden viejo: `FORMATO_DIA_MES`/
+`es_dia_mes_valido` (`app/negocio/validaciones.py`), el parseo en
+`cumpleanos_y_dias_profesion_proximos` (`app/negocio/panel_control.py`)
+y — el pedido explícito de "agregalo a la etiqueta para que el operador
+sepa cómo ponerlo" — la etiqueta del Campo en `catalogos.py` pasa de
+"Día de la profesión" a "Día de la profesión (dd-mm)" (antes el formato
+solo se veía en el mensaje de error de `formato_esperado`, nunca de
+entrada). Una base YA EN USO puede tener valores reales cargados en el
+formato viejo — `Configuracion.FormatoDiaProfesionInvertido` (columna
+nueva, default 1 en `schema.sql` para que una base NUEVA nazca "ya
+migrada") es el marcador de una sola vez: en 0 dispara
+`_invertir_formato_dia_profesion_a_dd_mm` (`app/db/migraciones.py`), que
+invierte las dos mitades de cada `Profesion.DiaProfesion` cargado y sube
+el flag a 1 para no volver a invertirlas (y deshacer el fix) en el
+próximo arranque.
 
 ## Historial archivado
 
