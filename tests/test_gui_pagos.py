@@ -111,13 +111,13 @@ def test_registrar_pagos_reiniciar_vuelve_filtro_y_formulario_al_default(qtbot, 
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
-    panel.campo_periodo.setText("2020-01")
+    panel.combo_periodo.setCurrentIndex(1)  # "Período anterior"
     panel.spin_monto.setValue(500)
 
     panel.reiniciar()
 
     assert panel.combo_profesional.currentData() is None
-    assert panel.campo_periodo.text() == periodo_actual(conn)
+    assert panel.combo_periodo.currentData() == periodo_actual(conn)
     assert panel.spin_monto.value() == 0
 
 
@@ -145,17 +145,6 @@ def test_registrar_pago_sin_monto_no_persiste(qtbot, conn):
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     _seleccionar_profesional(pantalla.panel_pagos, id_profesional)
-    pantalla.panel_pagos._registrar()
-    assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
-
-
-def test_registrar_pago_periodo_invalido_no_persiste(qtbot, conn):
-    id_profesional = _crear_profesional(conn)
-    pantalla = PantallaPagos(conn)
-    qtbot.addWidget(pantalla)
-    _seleccionar_profesional(pantalla.panel_pagos, id_profesional)
-    pantalla.panel_pagos.spin_monto.setValue(-1000)
-    pantalla.panel_pagos.campo_periodo.setText("no es un período")
     pantalla.panel_pagos._registrar()
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
 
@@ -270,7 +259,7 @@ def test_registrar_pago_periodo_imputado_mes_anterior_pide_confirmacion(qtbot, c
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(-1000)
-    panel.campo_periodo.setText("2026-07")
+    panel.combo_periodo.setCurrentIndex(1)  # "Período anterior"
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
     panel._registrar()
@@ -279,7 +268,7 @@ def test_registrar_pago_periodo_imputado_mes_anterior_pide_confirmacion(qtbot, c
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(-1000)
-    panel.campo_periodo.setText("2026-07")
+    panel.combo_periodo.setCurrentIndex(1)  # "Período anterior"
     panel._registrar()
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 1
 
@@ -302,7 +291,7 @@ def test_registrar_pago_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbot
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(-1000)
-    panel.campo_periodo.setText("2026-07")
+    panel.combo_periodo.setCurrentIndex(1)  # "Período anterior"
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
 
     panel._registrar()
@@ -340,7 +329,7 @@ def test_registrar_pago_mes_anterior_regenera_tambien_el_pdf(qtbot, conn, monkey
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(-1000)
-    panel.campo_periodo.setText("2026-07")
+    panel.combo_periodo.setCurrentIndex(1)  # "Período anterior"
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
 
     panel._registrar()
@@ -387,15 +376,6 @@ def _preparar_pago_que_cruza_tolerancia(conn):
     return id_profesional
 
 
-def _responder_segun_titulo(respuesta_restablecer):
-    def _responder(_parent, titulo, *a, **k):
-        if titulo == "Restablecer descuentos":
-            return respuesta_restablecer
-        return QMessageBox.StandardButton.Yes  # confirma que la fecha del mes anterior es correcta
-
-    return staticmethod(_responder)
-
-
 def test_registrar_pago_que_cruza_tolerancia_pregunta_restablecer_descuento(qtbot, conn, monkeypatch):
     id_profesional = _preparar_pago_que_cruza_tolerancia(conn)
     pantalla = PantallaPagos(conn)
@@ -403,9 +383,9 @@ def test_registrar_pago_que_cruza_tolerancia_pregunta_restablecer_descuento(qtbo
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(-950)  # 1000 -> 50: cruza la tolerancia de 100
-    panel.campo_periodo.setText("2026-07")
+    panel.combo_periodo.setCurrentIndex(1)  # "Período anterior"
 
-    monkeypatch.setattr(QMessageBox, "question", _responder_segun_titulo(QMessageBox.StandardButton.No))
+    monkeypatch.setattr(pagos_modulo, "preguntar_si_no", lambda *a, **k: False)
     panel._registrar()
 
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 1
@@ -420,13 +400,31 @@ def test_registrar_pago_que_cruza_tolerancia_restablece_si_responde_si(qtbot, co
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(-950)
-    panel.campo_periodo.setText("2026-07")
+    panel.combo_periodo.setCurrentIndex(1)  # "Período anterior"
 
-    monkeypatch.setattr(QMessageBox, "question", _responder_segun_titulo(QMessageBox.StandardButton.Yes))
+    monkeypatch.setattr(pagos_modulo, "preguntar_si_no", lambda *a, **k: True)
     panel._registrar()
 
     actualizado = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     assert actualizado["DescuentoSuspendidoPeriodo"] is None
+
+
+def test_preguntar_restablecer_descuento_default_queda_en_si(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: el default de esta alerta pasa a
+    "Sí" (antes "No", perder el descuento)."""
+    id_profesional = _preparar_pago_que_cruza_tolerancia(conn)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    capturado = {}
+
+    def _capturar(*_a, default_si=True, **_k):
+        capturado["default_si"] = default_si
+        return default_si
+
+    monkeypatch.setattr(pagos_modulo, "preguntar_si_no", _capturar)
+    panel._preguntar_restablecer_descuento(id_profesional, "2026-07")
+    assert capturado["default_si"] is True
 
 
 def test_cuenta_receptora_se_deshabilita_salvo_transferencia(qtbot, conn):
@@ -515,7 +513,7 @@ def test_seleccionar_fila_habilita_modificar_y_eliminar_sin_tocar_el_formulario(
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
-    periodo = panel.campo_periodo.text()
+    periodo = panel.combo_periodo.currentData()
     _seleccionar_profesional(panel, id_profesional)
     panel.combo_medio_pago.setCurrentText("Transferencia a cta Celeste")
     panel.combo_cuenta_receptora.setCurrentText("CA Banco Macro - Celeste")
@@ -531,7 +529,7 @@ def test_seleccionar_fila_habilita_modificar_y_eliminar_sin_tocar_el_formulario(
     # el formulario de alta sigue en su estado reseteado, sin tocar
     assert panel.combo_profesional.currentData() is None
     assert panel.spin_monto.value() == 0
-    assert panel.campo_periodo.text() == periodo
+    assert panel.combo_periodo.currentData() == periodo
 
 
 def test_modificar_pago_seleccionado_ajusta_saldo_y_marca_modificado(qtbot, conn, monkeypatch):
@@ -1125,7 +1123,7 @@ def test_eliminar_pago_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbot,
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(-1000)
-    panel.campo_periodo.setText("2026-07")
+    panel.combo_periodo.setCurrentIndex(1)  # "Período anterior"
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
     panel._registrar()
 
@@ -1158,7 +1156,7 @@ def test_deshacer_ultimo_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtbo
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(-1000)
-    panel.campo_periodo.setText("2026-07")
+    panel.combo_periodo.setCurrentIndex(1)  # "Período anterior"
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
     panel._registrar()
 

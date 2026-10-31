@@ -533,6 +533,41 @@ con la clienta si, ya con el fix de (1) andando, todavía le pasa al
 reemitir manualmente — con el botón exacto que usa y el período
 elegido en la pantalla.
 
+## Hilo abierto: Pagos/Registrar pagos — "Período imputado" como alternador, alerta de restablecer descuento
+
+Pedido de la clienta sobre la solapa "Registrar pagos":
+
+1. **"Período imputado" deja de ser texto libre** — pasa a un
+   `QComboBox` (`_PanelRegistrarPago.combo_periodo`, antes
+   `campo_periodo`/`QLineEdit`) con exactamente dos opciones ("Período
+   actual (MM/AAAA)" / "Período anterior (MM/AAAA)", recalculadas cada
+   vez contra `periodo_actual(conn)` — `_armar_combo_periodo`), que se
+   alternan con la flechita arriba/abajo (comportamiento nativo de
+   `QComboBox` con el foco puesto, sin código extra) — arranca siempre
+   en "Período actual". Reusa el mismo patrón ya probado en "Período a
+   imputar" de Reservas aisladas/extraordinarias (`combo_periodo_
+   imputar`, `reservas.py`). `es_periodo_valido`/`FORMATO_PERIODO` ya no
+   hacen falta para este campo (el combo no puede tener un valor
+   inválido) — sigue en uso en `_DialogoModificarPago`, que no se tocó
+   (texto libre sin cambios, no pedido por la clienta).
+2. **Alerta "Restablecer descuentos" (cruza de tolerancia) — default a
+   "Sí"** (antes "No", perder el descuento — pedido explícito de
+   invertirlo) **y botones "Sí"/"No" fijos, no en inglés.** La clienta
+   reportó seguir viendo "Yes" en este cartel puntual pese a que #140 ya
+   instaló la traducción oficial de Qt (`qt_es.qm`) para todo el
+   sistema — esa traducción depende de que el `.qm` esté disponible y
+   cargue bien en el entorno real, nada lo garantiza siempre (confirmado
+   que en ESTE entorno de desarrollo sí carga y traduce bien, pero no es
+   algo para confiarle a un build empaquetado sin verificarlo). Se
+   resuelve con `preguntar_si_no(parent, titulo, texto, default_si=True)`
+   (`app/gui/dialogos.py`, nueva, reusable si aparece el mismo problema
+   en otro cartel): arma los botones a mano con texto "Sí"/"No" fijo,
+   nunca depende de ninguna traducción externa.
+3. **Alerta final "Pago registrado con éxito."** al terminar
+   `_registrar()` — mismo patrón ya establecido en otras pantallas
+   (`crud_generico.py`, `reservas.py`: "{Entidad} {verbo} con éxito."),
+   que a esta pantalla todavía no le había llegado.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

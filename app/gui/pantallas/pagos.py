@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.dialogos import confirmar_datos_antes_de_crear, confirmar_si_periodo_imputado_es_anterior
+from app.gui.dialogos import confirmar_datos_antes_de_crear, confirmar_si_periodo_imputado_es_anterior, preguntar_si_no
 from app.gui.estilos import COLOR_ROJO
 from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
@@ -47,8 +47,8 @@ from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, partes_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
-from app.negocio.dias import fecha_a_dia_semana, periodo_actual
-from app.negocio.formato import formatear_moneda
+from app.negocio.dias import fecha_a_dia_semana, periodo_actual, periodo_anterior
+from app.negocio.formato import formatear_moneda, periodo_mm_aaaa
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
 from app.negocio.validaciones import FORMATO_PERIODO, es_periodo_valido
@@ -318,11 +318,15 @@ class _PanelRegistrarPago(QWidget):
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
-        self.campo_periodo = QLineEdit()
-        self.campo_periodo.setPlaceholderText("aaaa-mm")
-        self.campo_periodo.setText(periodo_actual(self.conn))
+        # Pedido explícito de la clienta: en vez de texto libre, alternar
+        # con la flechita (↑/↓, comportamiento nativo de `QComboBox` al
+        # tener el foco) entre período actual y anterior nomás — siempre
+        # arranca en "actual". `_armar_combo_periodo` resuelve el texto
+        # con el mes/año de cada uno para que quede claro cuál es cuál.
+        self.combo_periodo = QComboBox()
+        self._armar_combo_periodo()
         form.addWidget(QLabel("Período imputado"))
-        form.addWidget(self.campo_periodo)
+        form.addWidget(self.combo_periodo)
 
         self.spin_monto = _SpinMonto()
         self.spin_monto.setRange(-100_000_000, 100_000_000)
@@ -421,7 +425,7 @@ class _PanelRegistrarPago(QWidget):
         self._actualizar_saldos()
         self._actualizar_botones()
         self._foco = instalar_enter_avanza_foco([
-            self.combo_profesional, self.campo_periodo, self.spin_monto, self.combo_medio_pago,
+            self.combo_profesional, self.combo_periodo, self.spin_monto, self.combo_medio_pago,
             self.combo_cuenta_receptora, self.boton_registrar, self.boton_modificar, self.boton_eliminar,
             self.boton_deshacer, boton_iniciar_tanda, boton_cerrar_tanda,
         ], parent=self)
@@ -548,9 +552,22 @@ class _PanelRegistrarPago(QWidget):
         }
         return claves[columna]
 
+    def _armar_combo_periodo(self) -> None:
+        """Dos opciones fijas nomás (pedido explícito de la clienta,
+        nada de texto libre): período actual y anterior, siempre
+        recalculados contra el período operativo de ahora mismo (puede
+        haber cambiado si hubo un avance de mes de por medio) — "Período
+        actual" queda seleccionado por defecto."""
+        self.combo_periodo.clear()
+        actual = periodo_actual(self.conn)
+        anterior = periodo_anterior(actual)
+        self.combo_periodo.addItem(f"Período actual ({periodo_mm_aaaa(actual)})", actual)
+        self.combo_periodo.addItem(f"Período anterior ({periodo_mm_aaaa(anterior)})", anterior)
+        self.combo_periodo.setCurrentIndex(0)
+
     def _resetear_formulario(self) -> None:
         self.combo_profesional.setCurrentIndex(0)
-        self.campo_periodo.setText(periodo_actual(self.conn))
+        self._armar_combo_periodo()
         self.spin_monto.setValue(0)
         if self.combo_medio_pago.findText("Sobre en buzón") >= 0:
             self.combo_medio_pago.setCurrentText("Sobre en buzón")
@@ -558,14 +575,11 @@ class _PanelRegistrarPago(QWidget):
 
     def _registrar(self) -> None:
         id_profesional = self.combo_profesional.currentData()
-        periodo_imputado = self.campo_periodo.text().strip()
+        periodo_imputado = self.combo_periodo.currentData()
         monto = self.spin_monto.value()
         medio_pago = self.combo_medio_pago.currentText().strip()
-        if id_profesional is None or not periodo_imputado or monto == 0 or not medio_pago:
+        if id_profesional is None or monto == 0 or not medio_pago:
             QMessageBox.warning(self, "Registrar pago", "Completá profesional, período, monto y medio de pago.")
-            return
-        if not es_periodo_valido(periodo_imputado):
-            QMessageBox.warning(self, "Registrar pago", f"El período imputado no tiene el formato esperado ({FORMATO_PERIODO}).")
             return
         es_transferencia = "transferencia" in medio_pago.lower()
         if es_transferencia and not self.combo_cuenta_receptora.currentText().strip():
@@ -619,6 +633,7 @@ class _PanelRegistrarPago(QWidget):
         self.conn.commit()
         self.actualizar()
         self._resetear_formulario()
+        QMessageBox.information(self, "Registrar pago", "Pago registrado con éxito.")
 
     def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -748,20 +763,23 @@ class _PanelRegistrarPago(QWidget):
 
     def _preguntar_restablecer_descuento(self, id_profesional: int, periodo_imputado: str) -> None:
         """DC-06 §5.2: el saldo del mes anterior volvió a estar dentro de
-        tolerancia con este pago. Por defecto (recomendado) el descuento
-        por horas semanales queda perdido igual para esa liquidación
-        puntual — los descuentos están pensados para profesionales que
-        terminan al día, no para los que se pusieron al día a mitad de
-        camino."""
-        respuesta = QMessageBox.question(
+        tolerancia con este pago — se pregunta si hay que restablecerle
+        el descuento por cantidad de horas semanales reservadas para esa
+        liquidación puntual. Pedido explícito de la clienta: el default
+        queda en "Sí" (antes era "No", perder el descuento) — y los
+        botones usan `preguntar_si_no` (texto "Sí"/"No" fijo) en vez de
+        `QMessageBox.question` con los `StandardButton` de Qt, que
+        seguía mostrándolos en inglés ("Yes") pese a la traducción
+        oficial ya instalada (#140) — ver el docstring de
+        `preguntar_si_no` (`app/gui/dialogos.py`)."""
+        restablecer = preguntar_si_no(
             self, "Restablecer descuentos",
             f"El saldo del período {periodo_imputado} volvió a estar dentro de la tolerancia con este pago.\n\n"
             "¿Querés restablecerle el descuento por cantidad de horas semanales reservadas "
             "para esa liquidación?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            default_si=True,
         )
-        if respuesta == QMessageBox.StandardButton.No:
+        if not restablecer:
             suspender_descuento_periodo(self.conn, id_profesional=id_profesional, periodo=periodo_imputado)
 
 
