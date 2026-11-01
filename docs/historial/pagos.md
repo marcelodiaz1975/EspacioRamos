@@ -97,3 +97,55 @@ liquidaciones.md`) seguía intacto por código y por los tests
 existentes. No era un bug: la clienta tenía el parámetro en 2 decimales
 en vez de 0 en esta base de prueba — al ponerlo en 0 funcionó. Cerrado
 sin cambios de código.
+
+## Registrar pagos: "Período imputado" como alternador, alerta de restablecer descuento
+
+Pedido de la clienta sobre la solapa "Registrar pagos":
+
+1. **"Período imputado" deja de ser texto libre** — pasa a un
+   `QComboBox` (`_PanelRegistrarPago.combo_periodo`, antes
+   `campo_periodo`/`QLineEdit`) con exactamente dos opciones ("Período
+   actual (MM/AAAA)" / "Período anterior (MM/AAAA)", recalculadas cada
+   vez contra `periodo_actual(conn)` — `_armar_combo_periodo`), que se
+   alternan con la flechita arriba/abajo (comportamiento nativo de
+   `QComboBox` con el foco puesto, sin código extra) — arranca siempre
+   en "Período actual". Reusa el mismo patrón ya probado en "Período a
+   imputar" de Reservas aisladas/extraordinarias (`combo_periodo_
+   imputar`, `reservas.py`). `es_periodo_valido`/`FORMATO_PERIODO` ya no
+   hacen falta para este campo (el combo no puede tener un valor
+   inválido) — sigue en uso en `_DialogoModificarPago`, que no se tocó
+   (texto libre sin cambios, no pedido por la clienta).
+2. **Alerta "Restablecer descuentos" (cruza de tolerancia) — default a
+   "Sí"** (antes "No", perder el descuento — pedido explícito de
+   invertirlo) **y botones "Sí"/"No" fijos, no en inglés.** La clienta
+   reportó seguir viendo "Yes" en este cartel puntual pese a que la
+   traducción oficial de Qt (`qt_es.qm`) ya estaba instalada para todo
+   el sistema (ver "Cuadros de diálogo del sistema" en
+   `docs/historial/general.md`) — esa traducción depende de que el
+   `.qm` esté disponible y cargue bien en el entorno real, nada lo
+   garantiza siempre. Se resuelve con `preguntar_si_no(parent, titulo,
+   texto, default_si=True)` (`app/gui/dialogos.py`, nueva, reusable si
+   aparece el mismo problema en otro cartel): arma los botones a mano
+   con texto "Sí"/"No" fijo, nunca depende de ninguna traducción
+   externa.
+3. **Alerta final "Pago registrado con éxito."** al terminar
+   `_registrar()` — mismo patrón ya establecido en otras pantallas
+   (`crud_generico.py`, `reservas.py`: "{Entidad} {verbo} con éxito."),
+   que a esta pantalla todavía no le había llegado.
+
+## Planes de pago: alerta final de proceso exitoso
+
+Pedido de la clienta: *"En pagos/Planes de pago — Alerta final de
+proceso exitoso"*. A diferencia de Registrar pagos (ver más arriba, ya
+con su alerta), `_PanelPlanesPago` (`app/gui/pantallas/pagos.py`) no
+tenía ninguna en sus tres acciones. Se agregó al final de cada una,
+mismo patrón "{Entidad} {verbo} con éxito.": `_guardar` → "Plan de
+pagos creado con éxito.", `_refinanciar` → "Plan refinanciado con
+éxito.", `_cancelar` → "Plan cancelado con éxito." No se tocó el
+cartel de confirmación de `_cancelar` (`QMessageBox.question`, mismo
+riesgo de traducción al inglés ya resuelto en Registrar pagos vía
+`preguntar_si_no`) — no fue parte de este pedido puntual. Tests:
+`test_guardar_plan_muestra_alerta_final_de_exito`,
+`test_refinanciar_plan_muestra_alerta_final_de_exito`,
+`test_cancelar_plan_muestra_alerta_final_de_exito`
+(`tests/test_gui_pagos.py`).

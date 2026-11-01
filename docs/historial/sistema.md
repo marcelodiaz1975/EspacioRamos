@@ -1405,3 +1405,93 @@ del sistema caso por caso (ej. avance de mes, importación de Excel),
 no un barrido completo de una sola vez. Tests nuevos en `tests/
 test_gui_widget_procesando.py`.
 
+## Saldo actual inflado por una reserva aislada a futuro; Panel de control: resaltado de hoy, combo de Profesión y formato de Día de la profesión
+
+Pedido de la clienta en Reinicio de prueba: notó una profesional con
+"saldo actual" muy superior al del mes, sospechando que una reserva
+aislada agendada para un mes futuro (diciembre, estando parada en
+noviembre) se lo estaba sumando encima.
+
+**Confirmado y corregido.** Causa: `emitir_liquidacion`
+(`app/negocio/liquidaciones.py`) acreditaba el delta de CUALQUIER
+emisión a `Profesional.SaldoCuentaActual` sin importar el período —
+incluida la emisión-preview de un período FUTURO que dispara sola
+`regenerar_si_corresponde` al cargar/editar una reserva aislada con
+"Período a imputar" posterior al operativo actual. `SaldoCuentaActual`
+representa solo el período operativo actual (se resetea a 0 en cada
+avance de mes, ver `avance_mes.py`), así que una preview a futuro no le
+tiene que sumar nada todavía — ese crédito llega solo, más adelante,
+cuando el avance de mes alcance ese período y alguien la reemita contra
+un `SaldoCuentaActual` recién puesto en 0. Mismo patrón que el guard ya
+existente para "no rechazar reemitir el período actual por haber una
+preview posterior" (`periodo <= periodo_operativo_actual(conn)`), ahora
+aplicado también al crédito de saldo. Test de regresión:
+`test_emitir_liquidacion_de_un_periodo_futuro_sin_cerrar_no_infla_el_saldo_actual`
+(`tests/test_liquidaciones.py`) — confirmado que SIN el fix falla con el
+síntoma exacto reportado (saldo duplicando dos períodos).
+
+**Importante para la clienta:** el fix evita que el bug vuelva a pasar
+de acá en adelante, pero NO corrige retroactivamente el valor ya
+inflado de la profesional que detectó — ese quedó escrito por el código
+viejo. Se ajustó a mano una vez desde "Ajustar saldo" en Reinicio de
+prueba (`_DialogoAjustarSaldo`).
+
+De paso, en Panel de control: cumpleaños, días de profesión y feriados/
+fechas especiales que caen justo HOY (`fecha_real`, no la fecha de
+período) se resaltan en rojo y negrita en sus respectivos cuadritos
+(`_resaltar_si_es_hoy`, `panel_control.py`) — mismo criterio que el
+"VENCIDO" de Estado de backup. "Aniversarios" confirmado por la
+clienta: es el sinónimo coloquial que usa para "día de profesión", no
+hay ningún concepto separado que agregar.
+
+**Combo "Profesión" de Nuevo/Editar profesional — investigado, no era
+un bug de código.** La clienta reportó ver "Día del psicólogo" como
+alternativa en el desplegable "Profesión" al dar de alta un
+profesional. Revisado `_opciones_profesion` (`app/gui/pantallas/
+profesionales.py`): solo lee `Profesion.Nombre` — probado en una base
+limpia con `DiaProfesion` cargado y el combo sale sin ninguna entrada de
+ese tipo, solo nombres de profesión reales. **Confirmado por la
+clienta**: era una fila de verdad en el catálogo "Profesiones y
+tratamientos" cuyo campo "Nombre" era literalmente "Día del
+Psicólogo" — se había creado una profesión nueva con ese texto como
+nombre en vez de cargar el campo "Día de la profesión" sobre la
+profesión real "Psicología". Corregido a mano borrando la fila
+fantasma y cargando el día en la fila real.
+
+**Formato de "Día de la profesión": DD-MM en vez de MM-DD.** Pedido de
+la clienta al cerrar el punto anterior: el campo quedaba "al revés" de
+cómo se lee una fecha en el resto del sistema. Cambiado en los tres
+lugares que conocían el orden viejo: `FORMATO_DIA_MES`/
+`es_dia_mes_valido` (`app/negocio/validaciones.py`), el parseo en
+`cumpleanos_y_dias_profesion_proximos` (`app/negocio/panel_control.py`)
+y la etiqueta del Campo en `catalogos.py`, que pasa de "Día de la
+profesión" a "Día de la profesión (dd-mm)" (antes el formato solo se
+veía en el mensaje de error de `formato_esperado`, nunca de entrada).
+`Configuracion.FormatoDiaProfesionInvertido` (columna nueva, default 1
+en `schema.sql` para que una base NUEVA nazca "ya migrada") es el
+marcador de una sola vez: en 0 dispara `_invertir_formato_dia_profesion_
+a_dd_mm` (`app/db/migraciones.py`), que invierte las dos mitades de
+cada `Profesion.DiaProfesion` cargado y sube el flag a 1 para no volver
+a invertirlas en el próximo arranque.
+
+## Reinicio de prueba: selección automática del resultado único al filtrar
+
+Pedido de la clienta: *"Si empiezo a filtrar y queda un resultado solo
+en la lista, que quede seleccionado en la tabla para ya empezar a
+editarlo directamente sin tener que pinchar en el registro"*.
+
+`_PanelSaldosIniciales._aplicar_filtro_busqueda`
+(`app/gui/pantallas/reinicio_prueba.py`) ya ocultaba filas por
+substring (mismo criterio que "Filtros que solo afectan la
+visualización"); ahora, si queda exactamente una fila visible, la
+selecciona sola (`self.tabla.selectRow(...)`) para poder ir directo a
+"Ajustar saldo" sin pinchar la fila a mano. Solo dispara mientras hay
+texto buscado ("si EMPIEZO a filtrar", pedido textual) — con el campo
+vacío (todas las filas visibles) no selecciona nada, aunque por
+coincidencia haya un solo profesional cargado en la base entera. La
+otra solapa de esta pantalla (Depurar historial) usa `QTableWidget.
+SelectionMode.NoSelection` en su tabla, así que el pedido no le
+aplica. Tests nuevos: `test_buscar_con_un_solo_resultado_lo_selecciona_
+solo`, `test_buscar_con_mas_de_un_resultado_no_selecciona_nada`
+(`tests/test_gui_reinicio_prueba.py`).
+
