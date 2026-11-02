@@ -229,6 +229,7 @@ class PantallaCRUD(QWidget):
         al_actualizar: Callable[[sqlite3.Row, dict], None] | None = None,
         al_crear: Callable[[int, dict], None] | None = None,
         al_eliminar: Callable[[sqlite3.Row], None] | None = None,
+        antes_de_eliminar: Callable[[sqlite3.Row], str | None] | None = None,
         al_abrir_dialogo: Callable[[QDialog], None] | None = None,
         al_guardar: Callable[[dict, sqlite3.Row | None], dict | None] | None = None,
         solo_lectura: bool = False,
@@ -255,6 +256,15 @@ class PantallaCRUD(QWidget):
         self._al_actualizar = _referencia_debil(al_actualizar)
         self._al_crear = _referencia_debil(al_crear)
         self._al_eliminar = _referencia_debil(al_eliminar)
+        # antes_de_eliminar: a diferencia de al_eliminar (corre DESPUÉS del
+        # borrado, solo para reaccionar — ver `_al_eliminar_fecha_especial`
+        # en catalogos.py), este corre ANTES de pedir la confirmación
+        # genérica y puede BLOQUEAR la eliminación devolviendo un mensaje
+        # (None = sin objeción, seguir normal) — para catálogos donde
+        # borrar el registro puede dejar algo inconsistente que el
+        # sistema no puede resolver solo (ej. Fechas especiales: anular
+        # un feriado con reservas aisladas ya confirmadas ese día).
+        self._antes_de_eliminar = _referencia_debil(antes_de_eliminar)
         # solo_lectura: sin botones Nuevo/Editar/Eliminar ni doble clic para
         # editar — para catálogos que se modifican solo desde un proceso de
         # negocio específico (p. ej. Esquema de descuentos, que DC-10 §1.1
@@ -650,11 +660,17 @@ class PantallaCRUD(QWidget):
         if id_valor is None:
             QMessageBox.information(self, "Eliminar", "Seleccioná un registro para eliminar.")
             return
+        registro = self.repositorio.obtener(id_valor)
+        antes_de_eliminar = self._antes_de_eliminar()
+        if antes_de_eliminar:
+            motivo = antes_de_eliminar(registro)
+            if motivo:
+                QMessageBox.warning(self, "Eliminar", motivo)
+                return
         confirmacion = QMessageBox.question(self, "Eliminar", "¿Confirmás eliminar el registro seleccionado?")
         if confirmacion != QMessageBox.StandardButton.Yes:
             QMessageBox.information(self, "Eliminar", "Eliminación cancelada.")
             return
-        registro = self.repositorio.obtener(id_valor)
         try:
             self.repositorio.eliminar(id_valor)
         except sqlite3.IntegrityError:

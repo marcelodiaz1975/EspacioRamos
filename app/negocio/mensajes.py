@@ -713,12 +713,25 @@ def mensaje_detalle_reserva_aislada(
 
     # 4. pagos registrados en el mes en curso: una sola línea con los ajustes ya incluidos
     # (confirmado por el usuario — sin detalle pago por pago).
+    #
+    # Pedido explícito de la clienta — bug real, encontrado con un pago
+    # cargado estando parada en noviembre pero imputado a octubre (mes
+    # anterior): filtra por `PeriodoImputado`, NO por `Fecha` (fecha de
+    # CARGA del pago en el sistema) — un pago cargado este mes pero
+    # imputado a otro período no es "de este mes" para este mensaje.
     pagos = conn.execute(
-        "SELECT * FROM HistorialPagos WHERE IdProfesional = ? AND Fecha LIKE ? ORDER BY Fecha",
-        (id_profesional, prefijo_mes + "%"),
+        "SELECT * FROM HistorialPagos WHERE IdProfesional = ? AND PeriodoImputado = ? ORDER BY Fecha",
+        (id_profesional, periodo),
     ).fetchall()
     total_pagos = sum(p["Monto"] for p in pagos)
     if pagos:
+        # `Monto` ya viene con signo (negativo = pago recibido, resta de
+        # la cuenta — ver `registrar_pago`): sumarlo directo, igual que
+        # `total_llaves`/`total_reservas`/`total_item_libre` más abajo.
+        # Restarlo (como hacía antes) lo contaba dos veces a favor del
+        # profesional en vez de una — bug real, de la mano del anterior:
+        # un pago del mes en curso terminaba SUMANDO al saldo a abonar
+        # en vez de descontarlo.
         lineas.append(f"- Pagos registrados en mes en curso {_moneda(abs(total_pagos))}")
 
     # 5. ítem libre opcional: CargoEspecial sin llave asociada (ajustes y bonificación
@@ -733,7 +746,7 @@ def mensaje_detalle_reserva_aislada(
         lineas.append(f"{signo} {c['Concepto']} {_moneda(abs(c['Monto']))}")
         total_item_libre += c["Monto"]
 
-    saldo_a_abonar = saldo_anterior + total_reservas + total_llaves + total_item_libre - total_pagos
+    saldo_a_abonar = saldo_anterior + total_reservas + total_llaves + total_item_libre + total_pagos
     lineas += ["", f"*SALDO A ABONAR: {_moneda(saldo_a_abonar)}*"]
 
     if posteriores:

@@ -704,6 +704,35 @@ def test_reserva_aislada_choca_con_regular_vigente(conn, consultorio, profesiona
         )
 
 
+def test_reserva_aislada_en_feriado_no_choca_con_regular(conn, consultorio, profesional_factory):
+    """Pedido explícito de la clienta: si el día es feriado (o día no
+    laborable), el consultorio se considera libre de la reserva regular
+    para TODO el día — ni siquiera avisa, sin importar si la aislada es
+    para el MISMO profesional de la regular o para otro distinto
+    (`verificar_conflictos_aislada`). Mismo escenario que `test_reserva_
+    aislada_choca_con_regular_vigente` (profesionales sin relación de
+    equipo, conflicto bloqueante en un día normal), pero acá la fecha
+    es un feriado activo."""
+    id_prof_a = profesional_factory("Lo Veci")
+    id_prof_b = profesional_factory("Gomez")
+    proxima_fecha = date(2026, 8, 10)
+    dia_semana = fecha_a_dia_semana(proxima_fecha)
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha=proxima_fecha.isoformat(), Tipo="Feriado nacional", Activo=1,
+    )
+
+    crear_reserva_regular(
+        conn, id_profesional=id_prof_a, id_consultorio=consultorio, dia_semana=dia_semana,
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
+    )
+    id_reserva, advertencias = crear_reserva_aislada(
+        conn, id_profesional=id_prof_b, id_consultorio=consultorio,
+        fecha=proxima_fecha.isoformat(), hora_inicio=15, hora_fin=16,
+    )
+    assert id_reserva is not None
+    assert advertencias == []
+
+
 def test_reserva_aislada_sin_conflicto_toma_recargo_por_defecto(conn, consultorio, profesional_factory):
     id_prof = profesional_factory("Lo Veci")
     id_reserva, advertencias = crear_reserva_aislada(

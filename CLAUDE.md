@@ -571,6 +571,83 @@ otra cosa), uno porque se resolvió directo sin necesidad de más vueltas:
    actual` (`tests/test_gui_reservas.py`) — confirmado que SIN el fix
    falla (queda 1 emisión en vez de 2).
 
+## Hilo abierto: Reservas aisladas en día feriado; anular un feriado con aisladas asignadas; bug de pagos en "Detalle reserva"
+
+Pedido de la clienta, tres puntos:
+
+1. **Resuelto — reserva aislada en un día feriado no choca con la
+   reserva regular.** Pedido explícito: "si el día es feriado en
+   principio todos los horarios se consideran libres" — no debería
+   haber problema en asignar una aislada ese día, sea al mismo
+   profesional de la regular o a otro distinto. `verificar_conflictos_
+   aislada` (`app/negocio/reservas.py`) solo liberaba el consultorio de
+   la reserva regular si el profesional tenía una Ausencia/Vacación/
+   Licencia activa ese día — un feriado no estaba contemplado como otra
+   razón válida. Se suma `es_feriado_relevante(conn, fecha)` (nueva,
+   `app/negocio/feriados.py` — mismo criterio de "tipo relevante" que
+   `feriados_relevantes_periodo`, pero para una fecha puntual, sin el
+   filtro de domingo que es específico del descuento en la
+   liquidación) como otra condición que libera el consultorio, igual
+   que las tres anteriores. La otra validación (aislada contra otra
+   aislada ya confirmada ese mismo día/horario/consultorio, más arriba
+   en la misma función) NO cambia — sigue corriendo siempre, sea
+   feriado o no, tal cual lo pidió la clienta ("lo que empiezo a
+   anotar como reservas aisladas es lo que hay que controlar"). Test
+   nuevo: `test_reserva_aislada_en_feriado_no_choca_con_regular`
+   (`tests/test_reservas.py`).
+
+2. **Resuelto — anular un feriado con aisladas confirmadas ese día
+   queda bloqueado.** Caso hipotético planteado por la clienta ("en el
+   improbable caso de que yo quiera anular un feriado... el sistema me
+   tiene que avisar que antes tengo que cancelar todas las reservas
+   aisladas de ese día"): como consecuencia del punto 1, eliminar el
+   feriado sin revisar esas aisladas podría dejarlas pisando una
+   reserva regular sin que nadie lo haya evaluado — no hay forma
+   automática segura de resolverlo, así que el sistema bloquea y
+   obliga a revisar caso por caso. `PantallaCRUD` (`app/gui/crud_
+   generico.py`) suma un hook nuevo, `antes_de_eliminar` (a diferencia
+   de `al_eliminar`, que ya existía pero corre DESPUÉS del borrado,
+   este corre ANTES de pedir la confirmación genérica "¿Confirmás
+   eliminar?" y puede bloquear devolviendo un mensaje). `pantalla_
+   fechas_especiales` (`app/gui/pantallas/catalogos.py`) lo usa para
+   chequear si hay alguna `ReservaAislada` con `Estado='Confirmada'`
+   en la fecha del feriado que se intenta eliminar — de haber alguna,
+   bloquea con `QMessageBox.warning` y ni siquiera llega a preguntar
+   la confirmación genérica. Tests nuevos: `test_eliminar_fecha_
+   especial_feriado_con_aisladas_confirmadas_bloquea`/`..._con_
+   aisladas_canceladas_no_bloquea` (`tests/test_catalogos.py`).
+
+3. **Resuelto — bug real de doble error en "Detalle reserva" (Mensaje 1
+   de WhatsApp, categoría A).** La clienta imputó un pago de $40.000 al
+   mes ANTERIOR (octubre) estando parada en noviembre, y el mensaje de
+   noviembre lo mostraba de todas formas en "Pagos registrados en mes
+   en curso" — Y ADEMÁS lo sumaba al saldo a abonar en vez de
+   descontarlo. Dos bugs independientes en `mensaje_detalle_reserva_
+   aislada` (`app/negocio/mensajes.py`):
+   - La consulta de pagos filtraba por `Fecha` (fecha de CARGA del
+     pago en el sistema) en vez de por `PeriodoImputado` (a qué
+     período se imputó) — un pago cargado este mes pero imputado a
+     otro no es "de este mes" para este mensaje. Cambiado a `WHERE
+     IdProfesional = ? AND PeriodoImputado = ?`.
+   - La fórmula de `saldo_a_abonar` hacía `- total_pagos`, pero
+     `Monto` en `HistorialPagos` YA viene con signo (negativo = pago
+     recibido, resta de la cuenta — ver `registrar_pago`): restar un
+     valor ya negativo lo SUMABA en vez de descontarlo (doble
+     negación). Cambiado a `+ total_pagos`, mismo criterio que
+     `total_llaves`/`total_reservas`/`total_item_libre`, que ya se
+     suman directo sin negación aparte.
+   - Un test ya existente (`test_detalle_aislada_calcula_saldo_a_
+     abonar`) tenía `monto=500` (positivo, semánticamente un CARGO, no
+     un pago) para simular "un pago de 500" — los dos bugs se
+     compensaban sin querer y el test pasaba por las razones
+     equivocadas; corregido a `monto=-500` junto con el fix real (el
+     resultado esperado no cambia). Test nuevo: `test_detalle_aislada_
+     ignora_pago_imputado_a_otro_periodo` (`tests/test_mensajes.py`) —
+     reproduce el caso real de la clienta (pago cargado en agosto,
+     imputado a julio) y confirma que no aparece en el mensaje de
+     agosto. Confirmado por reversión que ambos tests fallan sin el
+     fix, con el síntoma exacto reportado.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

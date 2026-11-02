@@ -17,6 +17,7 @@ from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.negocio.archivos_generados import nombre_carpeta_consultorio, renombrar_carpeta_imagenes_consultorio
 from app.negocio.dias import periodo_actual
+from app.negocio.feriados import TIPOS_QUE_DESCUENTAN_100
 from app.negocio.formato import formatear_moneda
 from app.negocio.aumentos import cantidad_liquidaciones_a_regenerar
 from app.negocio.gastos_operativos import ALCANCES_GASTO, gasto_en_conflicto, sanear_alcance
@@ -523,6 +524,30 @@ def _al_eliminar_fecha_especial(conn: sqlite3.Connection, registro) -> None:
         _regenerar_liquidaciones_del_periodo_actual(conn)
 
 
+def _antes_de_eliminar_fecha_especial(conn: sqlite3.Connection, registro) -> str | None:
+    """Pedido explícito de la clienta ("anular un feriado" — caso
+    hipotético e improbable, pero delicado): a diferencia de `al_
+    eliminar` (corre DESPUÉS del borrado, solo para reaccionar), esto
+    usa el hook `antes_de_eliminar` de `PantallaCRUD` para BLOQUEAR la
+    eliminación cuando haga falta — sin forma automática segura de
+    resolverlo, el sistema obliga a revisar caso por caso: hay que
+    cancelar a mano, una por una, las reservas aisladas confirmadas ese
+    día (probablemente cargadas asumiendo que el día estaba libre por
+    ser feriado — ver `verificar_conflictos_aislada`, que deja de
+    chequear la reserva regular en un día feriado) antes de poder
+    anular el feriado en sí."""
+    if registro["Tipo"] not in TIPOS_QUE_DESCUENTAN_100:
+        return None
+    aisladas = obtener_repositorio(conn, "ReservaAislada").listar(Fecha=registro["Fecha"], Estado="Confirmada")
+    if not aisladas:
+        return None
+    return (
+        f"No se puede eliminar: hay {len(aisladas)} reserva(s) aislada(s) confirmada(s) el "
+        f"{registro['Fecha']}, probablemente cargada(s) asumiendo que ese día era feriado. "
+        "Cancelá esas reservas una por una antes de anular el feriado."
+    )
+
+
 def pantalla_fechas_especiales(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         # requerido=True: la columna es NOT NULL en el schema — sin esto,
@@ -538,15 +563,18 @@ def pantalla_fechas_especiales(conn: sqlite3.Connection, *, anidado: bool = Fals
     al_crear = lambda id_nuevo, valores: _al_crear_fecha_especial(conn, id_nuevo, valores)  # noqa: E731
     al_actualizar = lambda registro, valores: _al_actualizar_fecha_especial(conn, registro, valores)  # noqa: E731
     al_eliminar = lambda registro: _al_eliminar_fecha_especial(conn, registro)  # noqa: E731
+    antes_de_eliminar = lambda registro: _antes_de_eliminar_fecha_especial(conn, registro)  # noqa: E731
     pantalla = PantallaCRUD(
         conn, "FechasEspeciales", "Fechas especiales", campos, anidado=anidado,
         al_guardar=lambda valores, registro: _al_guardar_fecha_especial(valores, registro, conn),
         al_crear=al_crear, al_actualizar=al_actualizar, al_eliminar=al_eliminar,
+        antes_de_eliminar=antes_de_eliminar,
     )
-    # `al_crear`/`al_actualizar`/`al_eliminar` quedan como weakref dentro de
-    # `PantallaCRUD` (mismo motivo que Llaves: evitar un ciclo pantalla ->
-    # PantallaCRUD -> pantalla) — acá son lambdas sueltas, sin ninguna
-    # pantalla compuesta que las sostenga, así que hay que anclarlas a mano
-    # para que no las recolecte el GC apenas retorna esta función.
-    pantalla._hooks_regeneracion = (al_crear, al_actualizar, al_eliminar)
+    # `al_crear`/`al_actualizar`/`al_eliminar`/`antes_de_eliminar` quedan
+    # como weakref dentro de `PantallaCRUD` (mismo motivo que Llaves:
+    # evitar un ciclo pantalla -> PantallaCRUD -> pantalla) — acá son
+    # lambdas sueltas, sin ninguna pantalla compuesta que las sostenga,
+    # así que hay que anclarlas a mano para que no las recolecte el GC
+    # apenas retorna esta función.
+    pantalla._hooks_regeneracion = (al_crear, al_actualizar, al_eliminar, antes_de_eliminar)
     return pantalla

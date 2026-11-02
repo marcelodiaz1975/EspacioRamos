@@ -24,6 +24,7 @@ from datetime import date
 from app.negocio.ausencias import esta_ausente
 from app.negocio.dias import fecha_a_dia_semana, parsear_periodo, periodo_anterior, ultimo_dia_mes
 from app.negocio.dias import fecha_actual as _fecha_actual_sistema
+from app.negocio.feriados import es_feriado_relevante
 from app.negocio.licencias import tiene_licencia
 from app.negocio.liquidaciones import id_profesional_liquidable
 from app.negocio.profesionales import sugerir_codigo
@@ -229,6 +230,16 @@ def verificar_conflictos_aislada(
             reserva_existente=fila,
         ))
 
+    # Pedido explícito de la clienta: si la fecha es feriado/día no
+    # laborable, el consultorio se considera libre de la reserva regular
+    # para TODO el día, sin importar si el profesional regular decide
+    # igual usar su horario ese día o si lo usa otro distinto — mismo
+    # criterio que ya existía para ausencia/vacación/licencia, ahora
+    # sumando el feriado como otra razón por la que "el profesional
+    # regular no va a estar". La única validación que sigue corriendo
+    # en un feriado es la de más arriba (aislada contra otra aislada ya
+    # confirmada ese mismo día/horario/consultorio) — esa no cambia.
+    es_feriado = es_feriado_relevante(conn, fecha)
     filas = conn.execute(
         "SELECT * FROM ReservaRegular WHERE IdConsultorio = ? AND DiaSemana = ?",
         (id_consultorio, dia_semana),
@@ -239,7 +250,8 @@ def verificar_conflictos_aislada(
         if not _vigencias_solapan(fecha, fecha, fila["VigenciaInicio"], fila["VigenciaFin"]):
             continue
         if (
-            esta_ausente(conn, fila["IdProfesional"], fecha, id_consultorio)
+            es_feriado
+            or esta_ausente(conn, fila["IdProfesional"], fecha, id_consultorio)
             or tiene_vacacion(conn, fila["IdProfesional"], fecha)
             or tiene_licencia(conn, fila["IdProfesional"], fecha)
         ):

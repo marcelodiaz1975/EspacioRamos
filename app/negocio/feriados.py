@@ -15,6 +15,15 @@ from app.repositorio.registro import obtener_repositorio
 TIPOS_QUE_DESCUENTAN_100 = ("Feriado nacional", "Día no laborable")
 
 
+def es_feriado_relevante(conn: sqlite3.Connection, fecha: str) -> bool:
+    """¿La fecha es un feriado nacional o día no laborable activo? Mismo
+    criterio de "tipo relevante" que `feriados_relevantes_periodo`, pero
+    para una fecha puntual — sin el filtro de domingo (específico del
+    descuento en la liquidación, no aplica acá)."""
+    filas = obtener_repositorio(conn, "FechasEspeciales").listar(Fecha=fecha, Activo=1)
+    return any(f["Tipo"] in TIPOS_QUE_DESCUENTAN_100 for f in filas)
+
+
 def feriados_relevantes_periodo(conn: sqlite3.Connection, anio: int, mes: int) -> list[sqlite3.Row]:
     """Feriados que se descuentan al 100% en la liquidación (sección 5.4):
     nacionales y no laborables, de lunes a sábado (domingos se omiten)."""

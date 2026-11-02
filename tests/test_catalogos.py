@@ -821,6 +821,77 @@ def test_eliminar_fecha_especial_del_mes_en_curso_regenera_sin_preguntar_de_nuev
     assert ultima["EstadoEnvio"] == "Regenerada no enviada"
 
 
+def test_eliminar_fecha_especial_feriado_con_aisladas_confirmadas_bloquea(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta ("anular un feriado" — caso
+    hipotético e improbable, pero delicado): si hay reservas aisladas
+    confirmadas ese día (probablemente cargadas asumiendo que el día
+    estaba libre por ser feriado — ver `verificar_conflictos_aislada`,
+    que deja de chequear la reserva regular en un día feriado), el
+    sistema bloquea la eliminación y obliga a cancelarlas una por una
+    antes de poder anular el feriado — ni siquiera llega a preguntar
+    el "¿Confirmás eliminar?" genérico."""
+    fecha = "2026-08-10"
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=500,
+    )
+    id_profesional = _crear_profesional_r(conn)
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha=fecha, Descripcion="Feriado de prueba", Tipo="Feriado nacional", Activo=1,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha=fecha,
+        HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    conn.commit()
+
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+    preguntas = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: preguntas.append(a) or QMessageBox.StandardButton.Yes),
+    )
+    avisos = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: avisos.append(a) or None))
+    pantalla.tabla_widget.selectRow(0)
+    pantalla._eliminar()
+
+    assert conn.execute("SELECT COUNT(*) c FROM FechasEspeciales").fetchone()["c"] == 1  # no se eliminó
+    assert preguntas == []  # ni siquiera llegó a preguntar "¿Confirmás eliminar?"
+    assert len(avisos) == 1
+    assert "reserva(s) aislada(s)" in avisos[0][-1]
+
+
+def test_eliminar_fecha_especial_feriado_con_aisladas_canceladas_no_bloquea(qtbot, conn, monkeypatch):
+    """Contraparte del test anterior: una aislada CANCELADA ese mismo día
+    no tiene que bloquear nada — solo cuentan las confirmadas."""
+    fecha = "2026-08-10"
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=500,
+    )
+    id_profesional = _crear_profesional_r(conn)
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha=fecha, Descripcion="Feriado de prueba", Tipo="Feriado nacional", Activo=1,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha=fecha,
+        HoraInicio=10, HoraFin=11, Estado="Cancelada", AplicaRecargo=0,
+    )
+    conn.commit()
+
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    pantalla.tabla_widget.selectRow(0)
+    pantalla._eliminar()
+
+    assert conn.execute("SELECT COUNT(*) c FROM FechasEspeciales").fetchone()["c"] == 0
+
+
 def test_eliminar_fecha_especial_muestra_cartel_de_proceso_completado(qtbot, conn, monkeypatch):
     """Pedido explícito de la clienta: siempre que eliminar/crear/editar
     un feriado regenere liquidaciones, tiene que quedar un cartel final

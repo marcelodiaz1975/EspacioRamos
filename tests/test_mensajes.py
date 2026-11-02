@@ -260,13 +260,41 @@ def test_detalle_aislada_calcula_saldo_a_abonar(conn, profesional_aislada_con_ed
         IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
         Estado="Confirmada", AplicaRecargo=0,
     )
-    registrar_pago(conn, id_profesional=id_prof, monto=500, fecha="2026-08-15", periodo_imputado="2026-08")
+    # monto negativo: un pago recibido resta de la cuenta (ver
+    # `registrar_pago`) — antes este test usaba +500 (semánticamente un
+    # cargo, no un pago) y el bug de signo en la fórmula lo compensaba
+    # sin querer; corregido junto con el fix real.
+    registrar_pago(conn, id_profesional=id_prof, monto=-500, fecha="2026-08-15", periodo_imputado="2026-08")
 
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
     # saldo_anterior 1000 + reserva (2hs x 500) 1000 - pago 500 = 1500
     assert "SALDO A ABONAR: $1.500" in texto
     assert "+ Saldo pendiente mes anterior $1.000" in texto
     assert "- Pagos registrados en mes en curso $500" in texto
+
+
+def test_detalle_aislada_ignora_pago_imputado_a_otro_periodo(conn, profesional_aislada_con_edificios):
+    """Bug real reportado por la clienta: un pago CARGADO en noviembre
+    (parada en ese mes) pero IMPUTADO a octubre (mes anterior) no tiene
+    que aparecer en "Pagos registrados en mes en curso" de noviembre —
+    antes se filtraba por la fecha de carga del pago, no por a qué
+    período se imputó, así que aparecía igual y además restaba al
+    revés (ver `test_detalle_aislada_calcula_saldo_a_abonar`, mismo
+    fix de signo)."""
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0,
+    )
+    registrar_pago(conn, id_profesional=id_prof, monto=-500, fecha="2026-08-15", periodo_imputado="2026-07")
+
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "Pagos registrados en mes en curso" not in texto
+    # El pago imputado a julio ya descontó esos $500 de SaldoCuentaAnterior
+    # directo en la base (1000 -> 500, ver `registrar_pago`) — no aparece
+    # ADEMÁS como línea de "Pagos registrados en mes en curso" de agosto.
+    assert "+ Saldo pendiente mes anterior $500" in texto
+    assert "SALDO A ABONAR: $1.500" in texto
 
 
 def test_detalle_aislada_de_reubicacion_no_genera_cargo(conn, profesional_aislada_con_edificios):
