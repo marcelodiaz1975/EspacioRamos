@@ -262,6 +262,27 @@ def test_reingresar_a_la_pantalla_resetea_filtros(qtbot, conn):
     assert pantalla.tabla.rowCount() == 2
 
 
+def test_panel_buscar_reiniciar_resetea_filtros(qtbot, conn):
+    """F5: `_PanelBuscarPlacas` no tenía ningún `reiniciar()` propio —
+    mismo reset completo que ya hace `showEvent` en esta solapa."""
+    _, id_unidad = _crear_unidad(conn)
+    id_1 = _crear_profesional(conn, apellido="Uno")
+    id_2 = _crear_profesional(conn, apellido="Dos")
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_1)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=2, id_profesional=id_2)
+
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    indice = pantalla.combo_profesional_filtro.findData(id_1)
+    pantalla.combo_profesional_filtro.setCurrentIndex(indice)
+    assert pantalla.tabla.rowCount() == 1
+
+    pantalla.panel_buscar.reiniciar()
+
+    assert pantalla.combo_profesional_filtro.currentIndex() == 0
+    assert pantalla.tabla.rowCount() == 2
+
+
 def test_tabla_arranca_con_todas_las_placas(qtbot, conn):
     _, id_unidad = _crear_unidad(conn)
     id_profesional = _crear_profesional(conn)
@@ -769,6 +790,23 @@ def test_agregar_y_quitar_de_la_cola_de_impresion(qtbot, conn):
 
     pantalla.lista_impresion.setCurrentRow(0)
     pantalla._quitar_de_impresion()
+    assert pantalla.lista_impresion.count() == 0
+    assert pantalla._cola_impresion == []
+
+
+def test_panel_imprimir_reiniciar_vacia_cola_y_vuelve_profesional_al_inicio(qtbot, conn):
+    """F5: `_PanelImprimirPlacas` no tenía ningún `reiniciar()` propio."""
+    id_profesional = _crear_profesional(conn)
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    indice = pantalla.combo_profesional_imprimir.findData(id_profesional)
+    pantalla.combo_profesional_imprimir.setCurrentIndex(indice)
+    pantalla._agregar_a_impresion()
+    assert pantalla.lista_impresion.count() == 1
+
+    pantalla.panel_imprimir.reiniciar()
+
+    assert pantalla.combo_profesional_imprimir.currentIndex() == 0
     assert pantalla.lista_impresion.count() == 0
     assert pantalla._cola_impresion == []
 

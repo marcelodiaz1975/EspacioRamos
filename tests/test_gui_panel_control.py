@@ -85,6 +85,38 @@ def test_panel_control_muestra_su_propio_nombre_en_mayuscula(qtbot, conn):
     assert pantalla.titulo.text() == "PANEL DE CONTROL"
 
 
+def test_panel_avance_periodo_reiniciar_no_rompe_y_refresca(qtbot, conn):
+    """F5: `_PanelAvancePeriodo` no tenía ningún método `reiniciar()` —
+    la solapa no respondía nada a F5. Esta solapa no tiene filtros
+    propios (los cuadritos son puro estado calculado), así que alcanza
+    con confirmar que no rompe y que vuelve a calcular los cuadritos."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_avance.reiniciar()  # no debe lanzar ninguna excepción
+
+
+def test_panel_importacion_reiniciar_limpia_archivo_y_resultados(qtbot, conn):
+    """F5: `_PanelImportacion` no tenía ningún `reiniciar()` — volvía a
+    mostrar el archivo/resultados de la última importación aunque se
+    saliera y volviera a entrar a la solapa."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_importacion
+    panel.campo_ruta.setText("/tmp/alguna_planilla.xlsx")
+    panel.boton_importar.setEnabled(True)
+    panel.tabla_resultados.setRowCount(2)
+    panel.texto_errores.setPlainText("un error cualquiera")
+    panel.texto_integridad.setPlainText("un informe cualquiera")
+
+    panel.reiniciar()
+
+    assert panel.campo_ruta.text() == ""
+    assert panel.boton_importar.isEnabled() is False
+    assert panel.tabla_resultados.rowCount() == 0
+    assert panel.texto_errores.toPlainText() == ""
+    assert panel.texto_integridad.toPlainText() == ""
+
+
 def test_panel_control_boton_avanzar_habilitado_a_mitad_de_mes(qtbot, conn):
     # DC-06 §1: el avance de mes tiene que estar disponible en cualquier
     # momento, no solo al principio o fin de mes.

@@ -206,6 +206,25 @@ def test_ingresos_ver_periodo_actual_vuelve_a_una_sola_fila(qtbot, conn):
     assert panel.tabla.item(0, 0).text() == periodo_actual(conn)
 
 
+def test_ingresos_reiniciar_vuelve_periodo_y_localidad_al_inicial(qtbot, conn):
+    """F5: `_PanelIngresos` no tenía ningún `reiniciar()` propio — a
+    diferencia de "Ver período actual", esto también vuelve la cascada
+    de ubicación a "Todas/Todos"."""
+    id_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Ramos 1")
+    conn.commit()
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ingresos
+    panel.campo_periodo.set_periodo("2020-01")
+    panel.combo_localidad.setCurrentIndex(panel.combo_localidad.findData(id_localidad))
+    assert panel.combo_localidad.currentData() == id_localidad
+
+    panel.reiniciar()
+
+    assert panel.campo_periodo.periodo() == periodo_actual(conn)
+    assert panel.combo_localidad.currentText() == "Todas"
+
+
 def test_resultado_ver_historial_muestra_todos_los_periodos_mas_nuevo_arriba(qtbot, conn):
     actual = periodo_actual(conn)
     anterior = periodo_anterior(actual)
@@ -242,3 +261,20 @@ def test_resultado_ver_periodo_actual_vuelve_a_una_sola_fila(qtbot, conn):
     assert panel.campo_periodo.periodo() == periodo_actual(conn)
     assert panel.tabla.rowCount() == 1
     assert panel.tabla.item(0, 0).text() == periodo_actual(conn)
+
+
+def test_resultado_reiniciar_vuelve_periodo_y_localidad_al_inicial(qtbot, conn):
+    """F5: `_PanelResultado` no tenía ningún `reiniciar()` propio."""
+    id_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Ramos 1")
+    conn.commit()
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_resultado
+    panel.campo_periodo.set_periodo("2020-01")
+    panel.combo_localidad.setCurrentIndex(panel.combo_localidad.findData(id_localidad))
+    assert panel.combo_localidad.currentData() == id_localidad
+
+    panel.reiniciar()
+
+    assert panel.campo_periodo.periodo() == periodo_actual(conn)
+    assert panel.combo_localidad.currentText() == "Todas"

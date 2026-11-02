@@ -351,18 +351,27 @@ class PantallaCRUD(QWidget):
 
     def reiniciar(self) -> None:
         """Punto 1.4 (SistemaDF v0.11.2026.10, "resetear la solapa
-        cuando se sale de ella" + F3 "Reiniciar solapa"): además de
+        cuando se sale de ella" + F3/F5 "Reiniciar solapa"): además de
         reiniciar el orden de la tabla (`_orden.reiniciar()`, ya
         existía), limpia el campo "Buscar" — el único filtro propio de
-        un catálogo genérico — para que re-entrar a la solapa (o F3)
+        un catálogo genérico — para que re-entrar a la solapa (o F5)
         muestre la tabla completa, sin arrastrar lo que se haya tipeado
         la última vez. Mismo método para los dos disparadores: el
         `showEvent` de arriba (re-entrada real) y `VentanaPrincipal.
-        _reiniciar_solapa_activa` (F3, por nombre de método, duck-typed)."""
+        _reiniciar_solapa_activa` (F5, por nombre de método, duck-typed).
+
+        `tabla_widget.clearSelection()` (barrido F5 de #145): `actualizar()`
+        reconstruye la tabla por índice de fila, nunca por identidad de
+        registro, así que una fila seleccionada antes de F5 queda
+        igual de seleccionada después, aunque ahora muestre otro
+        registro — no es el estado de apertura real (sin nada
+        seleccionado). El propio `clearSelection()` dispara
+        `itemSelectionChanged`, que ya deshabilita Editar/Eliminar."""
         self._orden.reiniciar()
         if self.campo_buscar is not None:
             self.campo_buscar.clear()
         self.actualizar()
+        self.tabla_widget.clearSelection()
         if self.instalar_foco:
             (self.campo_buscar or self.boton_nuevo).setFocus()
 

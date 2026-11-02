@@ -219,6 +219,13 @@ class _PanelHistorialGeneral(QWidget):
         super().showEvent(event)
         self.check_por_mes.setFocus()
 
+    def reiniciar(self) -> None:
+        """F5: `_restablecer()` (botón "Actualizar tabla") ya vuelve
+        "Agrupar por" a "Por mes" y el orden de la tabla al original —
+        mismo efecto que un alta nueva de esta solapa."""
+        self._restablecer()
+        self.check_por_mes.setFocus()
+
     def _armar_ui(self) -> None:
         layout_externo = QHBoxLayout(self)
 
@@ -306,6 +313,13 @@ class _PanelEstadisticasVarias(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        self.combo_desde.setFocus()
+
+    def reiniciar(self) -> None:
+        """F5: `_restablecer()` (botón "Actualizar tabla") ya vuelve el
+        orden de la tabla y los cinco filtros (Desde/Hasta/Localidad,
+        en cascada hasta Consultorio) a "Todo el historial"/"Todas"."""
+        self._restablecer()
         self.combo_desde.setFocus()
 
     def _armar_ui(self) -> None:

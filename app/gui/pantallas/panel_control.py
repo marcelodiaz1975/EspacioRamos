@@ -403,6 +403,14 @@ class _PanelAvancePeriodo(QWidget):
         super().showEvent(event)
         self.boton_backup.setFocus()
 
+    def reiniciar(self) -> None:
+        """F5: esta solapa no tiene ningún filtro propio que el operador
+        pueda haber cambiado (los seis cuadritos y las alertas son puro
+        estado calculado, siempre al día) — alcanza con refrescar esos
+        datos y devolver el foco al primer botón, igual que `showEvent`."""
+        self.actualizar()
+        self.boton_backup.setFocus()
+
     def _armar_ui(self) -> None:
         layout_solapa = QVBoxLayout(self)
 

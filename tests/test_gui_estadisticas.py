@@ -182,6 +182,20 @@ def test_cadena_de_foco_de_historial_general(qtbot, conn):
     assert panel._foco._orden[1] is panel.check_por_anio
 
 
+def test_historial_general_reiniciar_vuelve_a_por_mes(qtbot, conn):
+    """F5: `_PanelHistorialGeneral` no tenía ningún `reiniciar()` propio."""
+    pantalla = PantallaEstadisticas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_historial
+    panel.check_por_anio.click()
+    assert panel.check_por_anio.isChecked()
+
+    panel.reiniciar()
+
+    assert panel.check_por_mes.isChecked()
+    assert not panel.check_por_anio.isChecked()
+
+
 # ----------------------------------------------------- Estadísticas varias
 
 
@@ -262,6 +276,23 @@ def test_estadisticas_varias_boton_actualizar_restablece_todos_los_filtros(qtbot
     from PySide6.QtWidgets import QPushButton
     boton_actualizar = next(b for b in panel.findChildren(QPushButton) if b.text() == "Actualizar tabla")
     boton_actualizar.click()
+
+    assert panel.combo_edificio.currentData() is None
+    assert panel.combo_localidad.currentData() is None
+    assert panel.combo_desde.currentData() is None
+    assert panel.combo_hasta.currentData() is None
+
+
+def test_estadisticas_varias_reiniciar_vuelve_filtros_a_todos(qtbot, conn):
+    """F5: `_PanelEstadisticasVarias` no tenía ningún `reiniciar()` propio."""
+    id_edificio, _ = _crear_edificio_con_consultorio(conn)
+    pantalla = PantallaEstadisticas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_varias
+    panel.combo_edificio.setCurrentIndex(panel.combo_edificio.findData(id_edificio))
+    panel.combo_desde.setCurrentIndex(panel.combo_desde.findData("2026-01"))
+
+    panel.reiniciar()
 
     assert panel.combo_edificio.currentData() is None
     assert panel.combo_localidad.currentData() is None

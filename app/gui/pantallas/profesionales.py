@@ -441,6 +441,17 @@ class _PanelProfesionales(QWidget):
         self.conn = conn
         self._armar_ui()
 
+    def reiniciar(self) -> None:
+        """F5: esta solapa no tenía ningún método propio (ni siquiera
+        `showEvent`) — `crud_profesionales.reiniciar()` ya limpia
+        "Buscar profesional", el orden de la tabla y (desde el barrido
+        F5 de #145, en la base `PantallaCRUD`) la selección, lo que de
+        rebote vacía la documentación (`itemSelectionChanged`); se llama
+        `_actualizar_documentacion()` explícito para no depender de que
+        esa señal dispare."""
+        self.crud_profesionales.reiniciar()
+        self._actualizar_documentacion()
+
     def _armar_ui(self) -> None:
         layout = QVBoxLayout(self)
 

@@ -868,6 +868,13 @@ class _PanelOferta(QWidget):
             _DialogoTexto(texto, self).exec()
         self._generar_y_mostrar(hacer)
 
+    def reiniciar(self) -> None:
+        """F5: a diferencia de entrar/salir de la solapa (que a propósito
+        NO toca nada, ver `_nueva_busqueda`), el atajo de "empezar de
+        cero" sí tiene que limpiar el formulario — mismo reset completo
+        que ya hace el botón "Nueva búsqueda"."""
+        self._nueva_busqueda()
+
     def _nueva_busqueda(self) -> None:
         """Único punto que limpia el formulario a propósito — entrar y
         salir de la pantalla NO lo resetea (confirmado por la clienta:

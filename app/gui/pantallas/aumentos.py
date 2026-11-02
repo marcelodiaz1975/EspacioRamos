@@ -263,6 +263,14 @@ class _PanelAumentos(QWidget):
         super().showEvent(event)
         self.campo_periodo.setFocus()
 
+    def reiniciar(self) -> None:
+        """F5: `actualizar()` ya vuelve período/Localidad-Edificio-Unidad/
+        porcentaje/redondeo/múltiplo y las ediciones por celda (`_diferenciales`/
+        `_valores_manuales`) a su valor inicial, así que alcanza con
+        llamarla y devolver el foco al principio de la cadena."""
+        self.actualizar()
+        self.campo_periodo.setFocus()
+
     def _armar_ui(self) -> None:
         layout = QHBoxLayout(self)
 
@@ -705,6 +713,14 @@ class _PanelEsquemaDescuentos(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        self.spin_horas.setFocus()
+
+    def reiniciar(self) -> None:
+        """F5: `actualizar()` ya vuelve los tres parámetros al esquema
+        vigente real (no a un valor fijo — es lo correcto para esta
+        solapa) y deshabilita "Confirmar cambios" hasta que se toque
+        algo de nuevo."""
+        self.actualizar()
         self.spin_horas.setFocus()
 
     def _armar_ui(self) -> None:

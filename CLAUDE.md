@@ -652,26 +652,91 @@ Pedido de la clienta, tres puntos:
 
 Pedido de la clienta, ocho puntos en un solo mensaje:
 
-1. **Pendiente de la clienta — F5 ("Refrescar") "no funciona en ningún
-   lado".** Investigado con un repro directo (`QTest.keyClick` sobre un
+1. **Resuelto — F5 ("Refrescar") "no funciona en ningún lado".**
+   Investigado con un repro directo (`QTest.keyClick` sobre un
    `VentanaPrincipal` real con un panel sintético): el mecanismo del
    atajo en sí (`VentanaPrincipal._reiniciar_solapa_activa`/
-   `_panel_mas_interno`, `app/gui/main_window.py`) sigue andando bien —
-   encuentra el panel más interno de la solapa activa y le llama
-   `reiniciar()` sin problema. Ya existe una auditoría completa previa
-   de los ~24 métodos `reiniciar()` del sistema (ver "F5 ('Refrescar')"
-   más arriba y `docs/historial/general.md`), así que no parece un
-   atajo roto a nivel global. La nueva especificación que dio la
-   clienta en este pedido es más estricta que lo que esa auditoría
-   confirmó en su momento: "los filtros y los distintos elementos
+   `_panel_mas_interno`, `app/gui/main_window.py`) andaba bien — el
+   problema real era otro: la clienta pidió explícitamente el barrido
+   completo de las ~24 pantallas ("los filtros y los distintos elementos
    tienen valores iniciales, al presionar esa tecla quiero que devuelva
-   la solapa a esos estados iniciales a TODOS los elementos" — no solo
-   el primer filtro/el foco, sino cada campo de cada solapa. Verificar
-   eso de verdad (no solo que el foco vuelva al principio) en las ~24
-   pantallas es un relevamiento exhaustivo — tal cual la clienta pidió
-   que se avise en ese caso en vez de adivinar. Falta que indique si
-   quiere ese barrido completo ahora, o algunas pantallas puntuales
-   donde lo haya visto fallar, para arrancar por ahí.
+   la solapa a esos estados iniciales a TODOS los elementos", más
+   estricto que la auditoría previa de "F5 ('Refrescar')" más arriba,
+   que solo confirmó el foco).
+
+   Cruzando las 18 Secciones de nivel superior contra cada `addTab()`
+   de cada pantalla compuesta, **13 solapas no tenían NINGÚN método
+   `reiniciar()`** — F5 no hacía absolutamente nada en ellas (el
+   duck-typing de `_panel_mas_interno` no rompe, simplemente no llama a
+   nada). Esto explica el "no funciona en ningún lado": no era un bug
+   puntual, era un barrido que nunca se había hecho sobre estas 13.
+   Para cada una se reusó, con un `reiniciar()` nuevo, el reset que YA
+   existía para otro disparador (un botón "Actualizar tabla"/"Nueva
+   búsqueda", o `showEvent` en los dos casos donde ese método ya hacía
+   un reset completo — ver más abajo) en vez de duplicar lógica:
+
+   - `_PanelAvancePeriodo`/`_PanelImportacion` (`panel_control.py`):
+     `actualizar()`/limpiar campo+resultados.
+   - `_PanelAumentos`/`_PanelEsquemaDescuentos` (`aumentos.py`): cada
+     uno con su propio `actualizar()`.
+   - `_PanelHistorialGeneral`/`_PanelEstadisticasVarias`
+     (`estadisticas.py`): cada uno con su propio `_restablecer()`
+     (botón "Actualizar tabla").
+   - `_PanelIngresos`/`_PanelResultado` (`balance.py`): nuevo
+     `_restablecer_filtros()` compartido en `_PanelFiltrosMixin` (a
+     diferencia de "Ver período actual", que a propósito NO toca la
+     cascada de ubicación, F5 sí vuelve período Y ubicación a
+     "Todas/Todos").
+   - `_PanelLlaves` (`llaves.py`): mismo reset completo que ya hacía
+     `showEvent` en esta pantalla (anti-patrón ya existente, no tocado
+     — solo se le sumó `reiniciar()` con la misma lógica), más el
+     filtro de profesional de "Movimientos de llaves" (#117, no
+     existía cuando se escribió ese `showEvent`).
+   - `_PanelBuscarPlacas`/`_PanelImprimirPlacas` (`placas.py`): mismo
+     caso que Llaves para Buscar (se extrajo `_reiniciar_filtros()` del
+     `showEvent` existente para compartirla); Imprimir no tenía ningún
+     reset, se armó nuevo (profesional + cola de impresión + vista
+     previa, todo a blanco).
+   - `_PanelOferta` (`oferta.py`): reusa `_nueva_busqueda()` tal cual
+     (a diferencia de entrar/salir de la solapa, que a propósito NO
+     resetea nada en esta pantalla — confirmado en su momento con la
+     clienta).
+   - `_PanelProfesionales` (`profesionales.py`): no tenía NI SIQUIERA
+     `showEvent` — reusa `crud_profesionales.reiniciar()` (ver bug de
+     abajo) + `_actualizar_documentacion()` explícito.
+
+   **Bug real encontrado de rebote, en el mecanismo COMPARTIDO de
+   catálogos genéricos:** al escribir el test de `_PanelProfesionales`
+   (seleccionar una fila, F5, verificar que la documentación de la
+   derecha quedara vacía) se descubrió que `PantallaCRUD.reiniciar()`
+   (`app/gui/crud_generico.py`) NUNCA deseleccionaba la fila — limpia
+   "Buscar" y reconstruye la tabla (`actualizar()`), pero `actualizar()`
+   reescribe los `QTableWidgetItem` por ÍNDICE de fila, no por
+   identidad de registro, así que la selección vieja (por índice)
+   seguía marcada después de F5, aunque esa fila pasara a mostrar otro
+   registro. Esto afecta a TODOS los catálogos genéricos del sistema
+   (Edificios, Unidades, Consultorios, Profesiones, etc.), no solo
+   Profesionales — arreglado una sola vez en la base
+   (`tabla_widget.clearSelection()`, que de rebote dispara
+   `itemSelectionChanged` y deshabilita Editar/Eliminar, el estado
+   correcto de apertura).
+
+   Suite completa corrida sin regresiones nuevas tras el cambio en la
+   base compartida (476 tests de las pantallas afectadas + la suite
+   completa). Tests nuevos: uno por cada una de las 13 solapas
+   (`test_gui_panel_control.py`, `test_gui_aumentos.py`,
+   `test_gui_estadisticas.py` ×2, `test_gui_balance.py` ×2,
+   `test_gui_llaves.py`, `test_gui_placas.py` ×2, `test_gui_oferta.py`,
+   `test_profesionales.py` — este último confirmado que falla sin el
+   fix de `clearSelection()`).
+
+   **Fuera de alcance de este barrido** (deliberado, no un gap
+   pendiente): las ~11 solapas que ya tenían `reiniciar()` desde la
+   auditoría previa no se revisaron campo por campo de nuevo — esa
+   auditoría ya había confirmado que cubrían el caso general (foco +
+   filtros propios), y la excepción conocida de `_PanelEstadoCuenta*`
+   (no resetea el profesional elegido, decisión explícita de la
+   clienta) sigue vigente sin cambios.
 
 2. **Resuelto — Centro de mensajería, "Saldo actual" mal calculado para
    categoría A.** La columna usaba la misma fórmula genérica para R y A

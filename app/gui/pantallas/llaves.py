@@ -197,6 +197,25 @@ class _PanelLlaves(QWidget):
         self.actualizar()
         self.boton_nuevo_tipo.setFocus()
 
+    def reiniciar(self) -> None:
+        """F5: mismo reset completo que ya hacía `showEvent` en esta
+        pantalla — se agrega acá el filtro de profesional de
+        "Movimientos de llaves" (`combo_filtro_movimientos`, #117), que
+        `showEvent` no tocaba porque no existía todavía cuando se
+        escribió ese reset."""
+        self._orden_tipos.reiniciar()
+        self._orden_accesos.reiniciar()
+        self._orden_movimientos.reiniciar()
+        # `setCurrentIndex(0)` no dispara `currentIndexChanged` si el
+        # combo ya estaba en el índice 0 — se llama `_actualizar_stock()`
+        # a mano en vez de confiar en esa señal (`actualizar()`, abajo,
+        # tampoco la llama: solo refresca Tipos y Movimientos).
+        self.combo_filtro_stock.setCurrentIndex(0)
+        self.combo_filtro_movimientos.setCurrentIndex(0)
+        self._actualizar_stock()
+        self.actualizar()
+        self.boton_nuevo_tipo.setFocus()
+
     @staticmethod
     def _titulo_seccion(texto: str) -> QLabel:
         """`subtituloCampo` (Nivel 3: mismo tamaño que el texto normal) en

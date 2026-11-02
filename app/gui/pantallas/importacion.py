@@ -75,6 +75,17 @@ class _PanelImportacion(QWidget):
         super().showEvent(event)
         self.boton_descargar_plantilla.setFocus()
 
+    def reiniciar(self) -> None:
+        """F5: vuelve esta solapa al estado "recién abierta" — sin
+        archivo elegido (ni habilitar "Importar"), sin ningún resultado
+        de una importación anterior en los tres cuadros de la derecha."""
+        self.campo_ruta.clear()
+        self.boton_importar.setEnabled(False)
+        self.tabla_resultados.setRowCount(0)
+        self.texto_errores.clear()
+        self.texto_integridad.clear()
+        self.boton_descargar_plantilla.setFocus()
+
     def _armar_ui(self) -> None:
         layout_solapa = QHBoxLayout(self)
 

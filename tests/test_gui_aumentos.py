@@ -23,6 +23,7 @@ from app.gui.pantallas.aumentos import (
     _PanelEsquemaDescuentos,
 )
 from app.negocio.aumentos import actualizar_esquema_descuentos, generar_tramos_esquema
+from app.negocio.dias import periodo_actual
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -80,6 +81,41 @@ def _crear_edificio_con_consultorio(
         IdUnidad=id_unidad, NumeroConsultorio=1,
         ValorHoraRegularActual=valor_regular, ValorHoraAisladaActual=valor_aislada,
     )
+
+
+def test_aumentos_reiniciar_vuelve_filtros_y_porcentaje_al_estado_inicial(qtbot, conn):
+    """F5: `_PanelAumentos` no tenía ningún `reiniciar()` propio."""
+    pantalla = _PanelAumentos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.campo_periodo.setText("2020-01")
+    pantalla.spin_porcentaje.setValue(15)
+    pantalla.check_redondear.setChecked(False)
+    pantalla.combo_localidad.setCurrentIndex(0)
+
+    pantalla.reiniciar()
+
+    assert pantalla.campo_periodo.text() == periodo_actual(conn)
+    assert pantalla.spin_porcentaje.value() == 0
+    assert pantalla.check_redondear.isChecked() is True
+
+
+def test_esquema_descuentos_reiniciar_vuelve_al_esquema_vigente(qtbot, conn):
+    """F5: `_PanelEsquemaDescuentos` no tenía ningún `reiniciar()`
+    propio — después de tocar los spines sin confirmar, F5 tiene que
+    volver a lo que de verdad está vigente, no a un valor fijo."""
+    pantalla = _PanelEsquemaDescuentos(conn)
+    qtbot.addWidget(pantalla)
+    valores_vigentes = (
+        pantalla.spin_horas.value(), pantalla.spin_porcentaje_descuento.value(), pantalla.spin_porcentaje_tope.value(),
+    )
+    pantalla.spin_horas.setValue(pantalla.spin_horas.value() + 1)
+
+    pantalla.reiniciar()
+
+    assert (
+        pantalla.spin_horas.value(), pantalla.spin_porcentaje_descuento.value(), pantalla.spin_porcentaje_tope.value(),
+    ) == valores_vigentes
+    assert pantalla.boton_confirmar.isEnabled() is False
 
 
 def test_tabla_arranca_poblada_con_todos_los_consultorios(qtbot, conn):

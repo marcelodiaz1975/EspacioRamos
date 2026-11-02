@@ -1100,6 +1100,29 @@ def test_movimientos_se_filtra_por_el_buscador_de_profesional(qtbot, conn):
     assert pantalla.tabla_stock.rowCount() == 2  # combo_filtro_stock, sin tocar, sigue mostrando los dos
 
 
+def test_reiniciar_vuelve_los_filtros_de_profesional_a_todos(qtbot, conn):
+    """F5: `_PanelLlaves` no tenía ningún `reiniciar()` propio."""
+    id_llave_r = _crear_tipo_con_copia(conn, valor_deposito_actual=1000)
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Dos")
+    conn.commit()
+    asignar_llave(conn, id_llave=id_llave_r, id_profesional=id_r, cobrar_deposito=False)
+    conn.commit()
+
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_filtro_stock.setCurrentIndex(pantalla.combo_filtro_stock.findData(id_r))
+    pantalla.combo_filtro_movimientos.setCurrentIndex(pantalla.combo_filtro_movimientos.findData(id_r))
+    assert pantalla.tabla_stock.rowCount() == 1
+    assert pantalla.tabla_movimientos.rowCount() == 1
+
+    pantalla.reiniciar()
+
+    assert pantalla.combo_filtro_stock.currentIndex() == 0
+    assert pantalla.combo_filtro_movimientos.currentIndex() == 0
+    assert pantalla.tabla_stock.rowCount() == 1
+    assert pantalla.tabla_movimientos.rowCount() == 2
+
+
 def test_combo_filtro_stock_vive_a_la_par_del_titulo_sin_etiqueta_propia(qtbot, conn):
     """Pedido explícito de la clienta sobre esta vuelta: "Reubicá el
     selector de profesional, ponelo a la par de la etiqueta 'Stock de

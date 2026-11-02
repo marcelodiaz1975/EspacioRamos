@@ -274,6 +274,26 @@ def test_nueva_busqueda_resetea_el_formulario_y_enfoca_profesional(qtbot, conn, 
     qtbot.waitUntil(lambda: pantalla.combo_profesional.hasFocus())
 
 
+def test_reiniciar_resetea_el_formulario_igual_que_nueva_busqueda(qtbot, conn, profesional_y_consultorio):
+    """F5: `_PanelOferta` no tenía ningún `reiniciar()` propio — a
+    diferencia de entrar/salir de la solapa (que a propósito NO toca
+    nada), reusa el mismo reset completo de "Nueva búsqueda"."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    pantalla.casilla_ventana.setChecked(True)
+    pantalla._agregar_franja()
+
+    pantalla.reiniciar()
+
+    assert pantalla._dias_seleccionados() == []
+    assert not pantalla.casilla_ventana.isChecked()
+    assert pantalla._franjas == []
+    assert pantalla.lista_franjas.count() == 0
+
+
 def test_dias_son_checkboxes_de_lunes_a_sabado_en_grilla_compacta(qtbot, conn, profesional_y_consultorio):
     """De acuerdo a los parámetros del sistema (reservas de lunes a
     sábado, sin domingo — mismo criterio que Reservas y Lista de

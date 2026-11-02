@@ -205,6 +205,14 @@ class _PanelBuscarPlacas(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        self._reiniciar_filtros()
+
+    def reiniciar(self) -> None:
+        """F5: mismo reset completo que ya hace `showEvent` en esta
+        solapa."""
+        self._reiniciar_filtros()
+
+    def _reiniciar_filtros(self) -> None:
         self._contenedor._orden.reiniciar()
         self._contenedor.combo_profesional_filtro.setCurrentIndex(0)
         self._contenedor._cargar_localidades()
@@ -223,6 +231,19 @@ class _PanelImprimirPlacas(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
         self._contenedor.combo_profesional_imprimir.setFocus()
+
+    def reiniciar(self) -> None:
+        """F5: a diferencia de `showEvent` (que solo devuelve el foco),
+        esto vuelve la solapa al estado de apertura de verdad — sin
+        ningún profesional elegido, la lista de "Placas a imprimir"
+        vacía y la vista previa en blanco."""
+        c = self._contenedor
+        c.combo_profesional_imprimir.setCurrentIndex(0)
+        c._cargar_placas_profesional_imprimir()
+        c._cola_impresion.clear()
+        c.lista_impresion.clear()
+        c._actualizar_vista_previa()
+        c.combo_profesional_imprimir.setFocus()
 
 
 class _PanelPlacasOperativas(QWidget):

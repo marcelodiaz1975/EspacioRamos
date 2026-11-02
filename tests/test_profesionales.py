@@ -45,6 +45,35 @@ def test_pantalla_profesionales_lista_existentes(qtbot, conn):
     assert pantalla.crud_profesionales.tabla_widget.item(0, 3).text() == "Gómez"
 
 
+def test_reiniciar_limpia_buscar_y_deselecciona_fila(qtbot, conn):
+    """F5: `_PanelProfesionales` no tenía ningún método propio (ni
+    siquiera `showEvent`) — `crud_profesionales.reiniciar()` ya limpia
+    "Buscar profesional" y deselecciona la fila, lo que de rebote vacía
+    la documentación de la derecha."""
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Gómez')")
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Ruiz')")
+    conn.commit()
+    pantalla = _PanelProfesionales(conn)
+    qtbot.addWidget(pantalla)
+    crud = pantalla.crud_profesionales
+    tabla = crud.tabla_widget
+
+    def _filas_visibles():
+        return sum(not tabla.isRowHidden(f) for f in range(tabla.rowCount()))
+
+    crud.campo_buscar.setText("Gómez")
+    assert _filas_visibles() == 1
+    fila_visible = next(f for f in range(tabla.rowCount()) if not tabla.isRowHidden(f))
+    tabla.selectRow(fila_visible)
+
+    pantalla.reiniciar()
+
+    assert crud.campo_buscar.text() == ""
+    assert _filas_visibles() == 2
+    assert not tabla.selectedItems()
+    assert pantalla.lista_documentos.count() == 0
+
+
 def test_columna_codigo_ordena_natural_no_alfabetico(qtbot, conn):
     """Pedido explícito de la clienta: click en "Código" tiene que
     ordenar "R1, R2, R3... R10, R11" (número completo) en vez de

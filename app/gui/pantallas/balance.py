@@ -231,6 +231,18 @@ class _PanelFiltrosMixin:
         self.campo_periodo.set_periodo(periodo_actual(self.conn))
         self.actualizar()
 
+    def _restablecer_filtros(self) -> None:
+        """F5 (`reiniciar()` de cada subclase): a diferencia de "Ver
+        período actual", acá sí vuelve TODO al estado de apertura —
+        Período al actual y la cascada de ubicación a "Todas/Todos".
+        Se reconstruye `combo_localidad` desde cero (`_cargar_combo_
+        localidad`, que ya encadena hasta `actualizar()`) en vez de
+        `setCurrentIndex(0)`: si ya estaba en el índice 0, ese set no
+        dispara `currentIndexChanged` y la cascada de abajo (Edificio/
+        Unidad/Consultorio) quedaría con una selección vieja."""
+        self.campo_periodo.set_periodo(periodo_actual(self.conn))
+        self._cargar_combo_localidad()
+
 
 class _PanelIngresos(_PanelFiltrosMixin, QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
@@ -241,6 +253,10 @@ class _PanelIngresos(_PanelFiltrosMixin, QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        self.campo_periodo.setFocus()
+
+    def reiniciar(self) -> None:
+        self._restablecer_filtros()
         self.campo_periodo.setFocus()
 
     def _armar_ui(self) -> None:
@@ -299,6 +315,10 @@ class _PanelResultado(_PanelFiltrosMixin, QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        self.campo_periodo.setFocus()
+
+    def reiniciar(self) -> None:
+        self._restablecer_filtros()
         self.campo_periodo.setFocus()
 
     def _armar_ui(self) -> None:
