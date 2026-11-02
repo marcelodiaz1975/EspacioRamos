@@ -371,8 +371,14 @@ class _PanelRegistrarPago(QWidget):
         form.addWidget(self.boton_deshacer)
 
         form.addWidget(_linea_divisoria())
+        # Pedido explícito de la clienta: "Saldo período anterior" (cómo
+        # cerró el profesional el período anterior, antes sin mostrarse
+        # en esta solapa) arriba de "Saldo período actual" (antes "Saldo
+        # actual" a secas, renombrada para distinguirla de la anterior).
+        self.etiqueta_saldo_anterior = QLabel()
         self.etiqueta_saldo_actual = QLabel()
         self.etiqueta_nuevo_saldo = QLabel()
+        form.addWidget(self.etiqueta_saldo_anterior)
         form.addWidget(self.etiqueta_saldo_actual)
         form.addWidget(self.etiqueta_nuevo_saldo)
 
@@ -462,13 +468,16 @@ class _PanelRegistrarPago(QWidget):
     def _actualizar_saldos(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
-            self.etiqueta_saldo_actual.setText("Saldo actual: —")
+            self.etiqueta_saldo_anterior.setText("Saldo período anterior: —")
+            self.etiqueta_saldo_actual.setText("Saldo período actual: —")
             self.etiqueta_nuevo_saldo.setText("Nuevo saldo: —")
             return
         profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        saldo_anterior = (profesional["SaldoCuentaAnterior"] or 0.0) if profesional else 0.0
         saldo_actual = (profesional["SaldoCuentaActual"] or 0.0) if profesional else 0.0
         nuevo_saldo = saldo_actual + self.spin_monto.value()
-        self.etiqueta_saldo_actual.setText(self._fmt_saldo_label("Saldo actual", saldo_actual))
+        self.etiqueta_saldo_anterior.setText(self._fmt_saldo_label("Saldo período anterior", saldo_anterior))
+        self.etiqueta_saldo_actual.setText(self._fmt_saldo_label("Saldo período actual", saldo_actual))
         self.etiqueta_nuevo_saldo.setText(self._fmt_saldo_label("Nuevo saldo", nuevo_saldo))
 
     def _precargar_recogida_sobres(self) -> None:

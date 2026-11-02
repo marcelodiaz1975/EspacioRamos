@@ -500,6 +500,77 @@ primero, antes del feriado trabajado del 2/8).
 feriados trabajados ni aisladas en bloques propios (es más simple,
 sin esas dos categorías), así que no hizo falta tocarlo.
 
+## Hilo abierto: batch de 6 pedidos (Horas aisladas, Liquidaciones, Llaves, Pagos)
+
+Pedido de la clienta, seis puntos en un solo mensaje. Tres quedaron
+desestimados/pendientes de que ella los verifique mejor antes de
+seguir — dos porque, al investigar, el comportamiento pedido YA
+estaba implementado (así que probablemente el síntoma real que vio es
+otra cosa), uno porque se resolvió directo sin necesidad de más vueltas:
+
+1. **Desestimado por la clienta** ("si ya tiene scroll ese cuadro de
+   detalle desestimá mi pedido"): el cuadro "Detalle" de Reservas
+   aisladas (`GrillaOperativaWidget.texto_detalle`, un `QTextEdit`) ya
+   muestra su propia barra de scroll vertical en cuanto el texto no
+   entra en el alto disponible — confirmado con un script de geometría
+   offscreen (`verticalScrollBar().maximum() > 0` con el mismo alto
+   acotado que usa esa pantalla). No se tocó código.
+2. **Pendiente, a verificar por la clienta**: el concepto de "Depósito
+   de llave" en la liquidación (`_lugar_llave_texto`, `app/negocio/
+   llaves.py`) YA incluye la unidad cuando el Tipo de llave abre una
+   sola unidad sin ambigüedad (ej. "Depósito llave unidad del 7mo "L"
+   del edificio Ramos 1" — confirmado en `tests/test_llaves.py`). Si
+   el caso real que motivó el pedido es otro (ej. una llave tipo
+   Edificio, o sin acceso configurado todavía), falta que la clienta lo
+   puntualice antes de tocar nada.
+3. **Resuelto**: buscador de profesionales en Tenencias de llaves,
+   arriba de "Ingresar copia al stock" — combo buscable ("Todos los
+   profesionales" + código/nombre, mismo criterio que
+   `combo_filtro_stock` de esta misma pantalla), filtrando la tabla de
+   "Movimientos de llaves" (la última de la pantalla) SIN afectar a
+   `combo_filtro_stock` ni a su tabla derivada (`self._movimientos_
+   actuales` se mantiene completo, el filtro nuevo solo recorta lo que
+   se vuelca a `self.tabla_movimientos`). `_PanelLlaves._grupo_botones`
+   suma un parámetro opcional `combo_extra`: descuenta su alto (+ el
+   espaciado que agrega como ítem nuevo del layout) del espaciador que
+   alinea el primer botón con el primer registro de la tabla, así
+   "Ingresar copia al stock" sigue exactamente a la misma altura que
+   antes — confirmado con el test de geometría ya existente de esta
+   pantalla (`test_cada_grupo_de_botones_arranca_a_la_altura_del_
+   primer_registro`). Test nuevo: `test_movimientos_se_filtra_por_el_
+   buscador_de_profesional` (`tests/test_gui_llaves.py`).
+4. **Resuelto**: "Horas aisladas a trabajar/trabajada" en plural en vez
+   de "Hora aislada" fijo cuando el bloque dura más de una hora
+   (`_texto_aislada`, `app/pdf/liquidacion_pdf.py` — compara `item.
+   hora_fin - item.hora_inicio`). Tests nuevos: `test_horas_aisladas_
+   en_plural_cuando_el_bloque_dura_mas_de_una_hora`/`..._en_singular_
+   cuando_el_bloque_dura_una_hora` (`tests/test_pdf_liquidacion.py`) —
+   de paso, dos tests ya existentes que usaban un bloque de 2hs
+   (`test_hora_aislada_omite_el_edificio_...`/`..._menciona_el_
+   edificio_...`) se actualizaron a la redacción en plural que les
+   corresponde ahora.
+5. **Resuelto**: en Pagos/Registrar pagos, debajo de "Deshacer último
+   movimiento", se agregó "Saldo período anterior:" (`SaldoCuenta
+   Anterior` del profesional — cómo cerró el período anterior, antes
+   sin mostrarse en esta solapa) arriba de "Saldo período actual:"
+   (antes "Saldo actual" a secas, renombrada para distinguirlas). Test
+   nuevo: `test_registrar_pago_muestra_etiqueta_de_saldo_periodo_
+   anterior` (`tests/test_gui_pagos.py`).
+6. **Resuelto**: eliminar una hora aislada del MES ANTERIOR que afecta
+   el "saldo anterior" de la liquidación ACTUAL (`_aisladas_periodo` la
+   toma por fecha real, no por Período imputado — mismo mecanismo que
+   el hilo "reserva aislada de un mes pasado" más arriba) no rehacía
+   esa liquidación ni la dejaba como no enviada —
+   `eliminar_reserva_aislada` (negocio) nunca llamaba a `regenerar_si_
+   corresponde`, a diferencia de crear/modificar una aislada. Se agregó
+   el llamado en `_PanelReservasAisladas._eliminar_registro`
+   (`app/gui/pantallas/reservas.py`), con `periodo=periodo_actual(self.
+   conn)` — mismo criterio que el resto de los disparadores de
+   `regenerar_si_corresponde` en pantallas de este sistema. Test nuevo:
+   `test_eliminar_reserva_aislada_de_mes_anterior_regenera_liquidacion_
+   actual` (`tests/test_gui_reservas.py`) — confirmado que SIN el fix
+   falla (queda 1 emisión en vez de 2).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

@@ -252,7 +252,11 @@ def _texto_aislada(
     # Una Reserva extraordinaria (#38, segunda vuelta) no es una hora
     # cobrada por tarifa — se describe con su propio ítem de texto libre
     # en vez de "Hora aislada trabajada/a trabajar", que sería engañoso.
-    concepto = getattr(item, "item_extraordinario", None) or f"Hora aislada {verbo}"
+    # Pedido explícito de la clienta: "Horas aisladas" en plural cuando
+    # el bloque dura más de una hora (ej. "de 9 a 11hs"), en vez de
+    # "Hora aislada" fijo sin importar la duración real del bloque.
+    palabra = "Horas aisladas" if (item.hora_fin - item.hora_inicio) > 1 else "Hora aislada"
+    concepto = getattr(item, "item_extraordinario", None) or f"{palabra} {verbo}"
     prefijo = f"{concepto} en {mes_texto_opt}: " if mes_texto_opt else f"{concepto}: "
     return (
         f"{prefijo}{dia_semana.lower()} {fecha_corta(item.fecha)} "

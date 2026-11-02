@@ -1794,6 +1794,40 @@ def test_crear_reserva_aislada_de_mes_pasado_con_periodo_siguiente_regenera_liqu
     assert ultima["MontoGenerado"] > 0
 
 
+def test_eliminar_reserva_aislada_de_mes_anterior_regenera_liquidacion_actual(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: eliminar una hora aislada del mes
+    anterior (que entra al "saldo anterior" de la liquidación ACTUAL —
+    `_aisladas_periodo` la toma por fecha real, no por Período imputado)
+    tiene que rehacer esa liquidación y dejarla marcada como no enviada,
+    mismo mecanismo que ya dispara crear una (ver el hilo "reserva
+    aislada de un mes pasado" en CLAUDE.md)."""
+    _preparar(conn)
+    conn.execute("UPDATE Configuracion SET PeriodoOperativoActual = '2026-11' WHERE IdConfiguracion = 1")
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "Consultorio").actualizar(id_consultorio, ValorHoraAisladaActual=1000)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha="2026-10-14",
+        HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
+    )
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo="2026-11")
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo="2026-11", enviada=True)
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel.tabla.selectRow(0)
+    panel._eliminar()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo="2026-11")
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
 def _textos_leyenda_visibles(leyenda) -> list[str]:
     """`takeAt()` + `hide()` + `deleteLater()` (ver `LeyendaColores.
     actualizar`) saca los QLabel viejos de pantalla al toque, pero siguen

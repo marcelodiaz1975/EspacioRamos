@@ -2717,6 +2717,16 @@ class _PanelReservasAisladas(QWidget):
             return False
         self.conn.commit()
         regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
+        # Pedido explícito de la clienta: si la aislada eliminada era del
+        # mes anterior, afectaba el "saldo anterior" de la liquidación
+        # ACTUAL (`_aisladas_periodo` la toma por fecha real, no por
+        # Período imputado — ver el hilo "reserva aislada de un mes
+        # pasado" en CLAUDE.md) — hay que rehacerla y dejarla marcada
+        # como no enviada, mismo mecanismo que ya usa el resto del
+        # sistema (`regenerar_si_corresponde`, sin efecto si no hay nada
+        # que reemitir para este profesional/período).
+        regenerar_si_corresponde(self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn))
+        self.conn.commit()
         if requiere_aviso:
             QMessageBox.information(self, titulo, "Eliminada el mismo día: avisar al profesional.")
         self._copiar_mensaje_detalle(reserva["IdProfesional"])

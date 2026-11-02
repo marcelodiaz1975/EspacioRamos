@@ -219,7 +219,7 @@ def test_feriados_y_aisladas_se_intercalan_por_fecha_sin_importar_el_tipo(conn, 
     assert conceptos == [
         "Importe con descuento incluido por feriado del 2/8 de 9 a 11hs consul 1 del 7mo \"L\" - Ramos 1",
         "Descuento por feriado - Lunes 17/8",
-        "Hora aislada a trabajar en agosto: viernes 28/8 de 9 a 11hs consul 1 del 7mo \"L\" - Ramos 1",
+        "Horas aisladas a trabajar en agosto: viernes 28/8 de 9 a 11hs consul 1 del 7mo \"L\" - Ramos 1",
     ]
 
 
@@ -589,6 +589,32 @@ def test_fotos_de_liquidacion_no_muestran_apto_camilla(conn, profesional, consul
     assert "Consultorio 1 - 7mo \"L\" - Ramos 1" in texto
 
 
+def test_horas_aisladas_en_plural_cuando_el_bloque_dura_mas_de_una_hora(conn, profesional, consultorio):
+    """Pedido explícito de la clienta: "Horas aisladas a trabajar en
+    noviembre" en vez de "Hora aislada a trabajar en noviembre" cuando
+    son más de una — en la práctica, el bloque de la aislada dura más
+    de una hora (ej. "de 9 a 11hs")."""
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    concepto = next(c for c, _, _ in items if "5/8" in c)
+    assert concepto.startswith("Horas aisladas a trabajar en agosto: ")
+
+
+def test_horas_aisladas_en_singular_cuando_el_bloque_dura_una_hora(conn, profesional, consultorio):
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    concepto = next(c for c, _, _ in items if "5/8" in c)
+    assert concepto.startswith("Hora aislada a trabajar en agosto: ")
+
+
 def test_hora_aislada_omite_el_edificio_con_un_solo_edificio_en_el_documento(conn, profesional, consultorio, tmp_path):
     """#38: el edificio solo se aclara cuando el documento referencia más
     de uno — con una sola aislada, en el MISMO edificio que la reserva
@@ -602,7 +628,7 @@ def test_hora_aislada_omite_el_edificio_con_un_solo_edificio_en_el_documento(con
 
     ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
     texto = _texto_pdf(ruta)
-    assert "Hora aislada a trabajar" in texto
+    assert "Horas aisladas a trabajar" in texto  # bloque de 2hs: plural
     assert "consul 1 del" in texto
     assert "- Ramos 1" not in texto
 
@@ -625,7 +651,7 @@ def test_hora_aislada_menciona_el_edificio_cuando_hay_mas_de_uno(conn, profesion
 
     ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
     texto = _texto_pdf(ruta)
-    assert "Hora aislada a trabajar" in texto
+    assert "Horas aisladas a trabajar" in texto  # bloque de 2hs: plural
     assert "consul 9 del PB - Ramos 0" in texto
 
 

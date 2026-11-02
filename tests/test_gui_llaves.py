@@ -789,6 +789,7 @@ def test_orden_de_foco_sigue_el_orden_visual_de_los_botones(qtbot, conn):
         pantalla.campo_observacion_tipo, pantalla.boton_nuevo_tipo, pantalla.boton_editar_tipo,
         pantalla.boton_eliminar_tipo, pantalla.campo_observacion_acceso, pantalla.boton_agregar_acceso,
         pantalla.boton_eliminar_acceso, pantalla.combo_filtro_stock, pantalla.campo_observacion_movimiento,
+        pantalla.combo_filtro_movimientos,
         pantalla.boton_ingresar, pantalla.boton_perdida, pantalla.boton_devolver, pantalla.boton_asignar,
     ]
 
@@ -1068,6 +1069,35 @@ def test_stock_se_filtra_por_el_buscador_de_profesional(qtbot, conn):
     pantalla.combo_filtro_stock.setCurrentIndex(indice)
     assert pantalla.tabla_stock.rowCount() == 1
     assert "Dos" in pantalla.tabla_stock.item(0, 0).text()
+
+
+def test_movimientos_se_filtra_por_el_buscador_de_profesional(qtbot, conn):
+    """Pedido explícito de la clienta: un buscador de profesionales
+    arriba de "Ingresar copia al stock" que filtre la tabla de
+    Movimientos de llaves (la última de esta pantalla) — mismo criterio
+    que `combo_filtro_stock`, pero sin afectar a ese otro combo ni a su
+    tabla derivada (`self._movimientos_actuales` se queda completo)."""
+    id_llave_r = _crear_tipo_con_copia(conn, valor_deposito_actual=1000)
+    id_llave_b = _crear_tipo_con_copia(conn, valor_deposito_actual=500)
+    id_r = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Dos")
+    id_b = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="B", Apellido="Uno")
+    conn.commit()
+    asignar_llave(conn, id_llave=id_llave_r, id_profesional=id_r, cobrar_deposito=False)
+    asignar_llave(conn, id_llave=id_llave_b, id_profesional=id_b, cobrar_deposito=False)
+    conn.commit()
+
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+    # 4 movimientos en total: un "Ingreso" (sin profesional) y una
+    # "Asignación" por cada una de las dos llaves creadas.
+    assert pantalla.tabla_movimientos.rowCount() == 4
+    assert pantalla.tabla_stock.rowCount() == 2  # sin filtrar, intacto
+
+    indice = pantalla.combo_filtro_movimientos.findData(id_r)
+    pantalla.combo_filtro_movimientos.setCurrentIndex(indice)
+    assert pantalla.tabla_movimientos.rowCount() == 1
+    assert "Dos" in pantalla.tabla_movimientos.item(0, 2).text()
+    assert pantalla.tabla_stock.rowCount() == 2  # combo_filtro_stock, sin tocar, sigue mostrando los dos
 
 
 def test_combo_filtro_stock_vive_a_la_par_del_titulo_sin_etiqueta_propia(qtbot, conn):

@@ -212,20 +212,42 @@ class _PanelLlaves(QWidget):
         return etiqueta
 
     @staticmethod
-    def _grupo_botones(alto_hasta_primera_fila: int, *botones: QPushButton) -> QWidget:
+    def _grupo_botones(
+        alto_hasta_primera_fila: int, *botones: QPushButton, combo_extra: QComboBox | None = None,
+    ) -> QWidget:
         """Envuelve un grupo de botones en su propio widget, con ancho fijo
         y sin estirarse — para poder alinearlo por `QGridLayout.addWidget`
         (`Qt.AlignmentFlag.AlignTop`) contra el primer registro de su
         tabla correspondiente (`alto_hasta_primera_fila`, ver
         `_alto_hasta_primera_fila`: salta el título y el encabezado de la
         tabla), en vez de apilar los diez botones de las tres secciones
-        seguidos en una sola columna."""
+        seguidos en una sola columna.
+
+        `combo_extra` (pedido explícito de la clienta sobre "Movimientos
+        de llaves": un buscador de profesionales arriba del primer
+        botón del grupo): se descuenta su alto del espaciador para que
+        el primer botón ("Ingresar copia al stock") siga quedando
+        exactamente a la misma altura que el primer registro de la
+        tabla — el combo ocupa el hueco que el espaciador deja libre
+        arriba suyo, en vez de empujar los botones más abajo."""
         widget = QWidget()
         columna = QVBoxLayout(widget)
         columna.setContentsMargins(0, 0, 0, 0)
+        alto_espaciador = alto_hasta_primera_fila
+        if combo_extra is not None:
+            # + `spacing()`: el combo agrega un ítem más al layout, y por
+            # lo tanto un hueco de espaciado más entre ítems (el que
+            # separa al combo del espaciador) — sin descontarlo también,
+            # el primer botón terminaba unos pocos píxeles más abajo que
+            # el primer registro de la tabla (confirmado con un script de
+            # geometría).
+            alto_espaciador -= combo_extra.sizeHint().height() + columna.spacing()
         espaciador = QWidget()
-        espaciador.setFixedHeight(alto_hasta_primera_fila)
+        espaciador.setFixedHeight(max(alto_espaciador, 0))
         columna.addWidget(espaciador)
+        if combo_extra is not None:
+            combo_extra.setFixedWidth(_ANCHO_BOTON)
+            columna.addWidget(combo_extra)
         for boton in botones:
             boton.setFixedWidth(_ANCHO_BOTON)
             columna.addWidget(boton)
@@ -455,6 +477,19 @@ class _PanelLlaves(QWidget):
         columna_movimientos.addWidget(self.campo_observacion_movimiento)
         grid.addWidget(panel_movimientos, 2, 1)
 
+        # Pedido explícito de la clienta: buscador de profesionales arriba
+        # de "Ingresar copia al stock", para filtrar la tabla de
+        # Movimientos de llaves (la última de esta pantalla) — mismo
+        # patrón que `combo_filtro_stock` (combo buscable, "Todos los
+        # profesionales" por defecto), pero acá filtra el listado
+        # completo de movimientos, no el de Stock por profesional.
+        self.combo_filtro_movimientos = QComboBox()
+        self.combo_filtro_movimientos.addItem("Todos los profesionales", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+            self.combo_filtro_movimientos.addItem(etiqueta, id_)
+        habilitar_busqueda_profesional(self.combo_filtro_movimientos)
+        self.combo_filtro_movimientos.currentIndexChanged.connect(self._actualizar_movimientos)
+
         self.boton_ingresar = QPushButton("Ingresar copia al stock")
         self.boton_ingresar.setObjectName("botonSecundario")
         self.boton_ingresar.clicked.connect(self._ingresar_copia)
@@ -471,6 +506,7 @@ class _PanelLlaves(QWidget):
             self._grupo_botones(
                 _alto_hasta_primera_fila(titulo_movimientos, self.tabla_movimientos),
                 self.boton_ingresar, self.boton_perdida, self.boton_devolver, self.boton_asignar,
+                combo_extra=self.combo_filtro_movimientos,
             ),
             2, 0, Qt.AlignmentFlag.AlignTop,
         )
@@ -483,6 +519,7 @@ class _PanelLlaves(QWidget):
             self.campo_observacion_acceso, self.boton_agregar_acceso, self.boton_eliminar_acceso,
             self.combo_filtro_stock,
             self.campo_observacion_movimiento,
+            self.combo_filtro_movimientos,
             self.boton_ingresar, self.boton_perdida, self.boton_devolver, self.boton_asignar,
         ], parent=self)
 
@@ -790,8 +827,17 @@ class _PanelLlaves(QWidget):
             enriquecidos.sort(key=lambda m: m["Fecha"] or "", reverse=True)
         self._movimientos_actuales = enriquecidos
 
-        self.tabla_movimientos.setRowCount(len(enriquecidos))
-        for fila_idx, m in enumerate(enriquecidos):
+        # Filtrable por `combo_filtro_movimientos` — a diferencia de
+        # `combo_filtro_stock` (que filtra su propia tabla derivada),
+        # este filtro es solo sobre lo que se MUESTRA acá: `self.
+        # _movimientos_actuales` se queda completo (lo sigue usando
+        # `_actualizar_stock` sin verse afectado por este combo).
+        id_filtro_movimientos = self.combo_filtro_movimientos.currentData()
+        filas_movimientos = [
+            m for m in enriquecidos if id_filtro_movimientos is None or m["IdProfesional"] == id_filtro_movimientos
+        ]
+        self.tabla_movimientos.setRowCount(len(filas_movimientos))
+        for fila_idx, m in enumerate(filas_movimientos):
             self.tabla_movimientos.setItem(fila_idx, 0, QTableWidgetItem(_fecha_larga(m["Fecha"])))
             self.tabla_movimientos.setItem(fila_idx, 1, QTableWidgetItem(m["Tipo"]))
             self.tabla_movimientos.setItem(fila_idx, 2, QTableWidgetItem(m["_texto_profesional"]))

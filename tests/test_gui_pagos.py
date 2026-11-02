@@ -1097,6 +1097,30 @@ def test_fecha_de_carga_usa_dia_de_la_semana_abreviado(qtbot, conn):
     assert dia_completo.lower() not in texto
 
 
+def test_registrar_pago_muestra_etiqueta_de_saldo_periodo_anterior(qtbot, conn):
+    """Pedido explícito de la clienta: en Registrar pagos, debajo de
+    "Deshacer último movimiento", agregar "Saldo período anterior:" (cómo
+    cerró el profesional el período anterior) y renombrar "Saldo actual"
+    a "Saldo período actual:" para distinguirlas."""
+    id_profesional = _crear_profesional(conn, saldo=1234.5)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=-678.9)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+
+    assert panel.etiqueta_saldo_anterior.text() == (
+        f'Saldo período anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>'
+    )
+    assert panel.etiqueta_saldo_actual.text() == (
+        f'Saldo período actual: <span style="color:black;">{formatear_moneda(1234.5)}</span>'
+    )
+
+    panel.combo_profesional.setCurrentIndex(0)
+    assert panel.etiqueta_saldo_anterior.text() == "Saldo período anterior: —"
+    assert panel.etiqueta_saldo_actual.text() == "Saldo período actual: —"
+
+
 def test_saldo_anterior_y_nuevo_saldo_se_colorean_en_negativo(qtbot, conn):
     """Confirmado por la clienta: Saldo anterior y Nuevo saldo respetan el
     mismo color rojo-si-negativo que Monto, igual que en todo el sistema
