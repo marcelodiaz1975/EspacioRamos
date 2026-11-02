@@ -195,6 +195,34 @@ def test_descuentos_feriados_y_no_laborables_se_intercalan_por_fecha(conn, profe
     ]
 
 
+def test_feriados_y_aisladas_se_intercalan_por_fecha_sin_importar_el_tipo(conn, profesional, consultorio):
+    """Pedido explícito de la clienta: "no importa si es aislada o
+    feriado, todo lo que tenga fecha que se ordene por fecha en el
+    archivo" — un feriado trabajado, un descuento por feriado y una hora
+    aislada, cargados deliberadamente fuera de orden y de tipos
+    distintos, tienen que salir en UN SOLO listado cronológico."""
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio, Fecha="2026-08-28",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    obtener_repositorio(conn, "FeriadoTrabajado").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio, Fecha="2026-08-02",
+        HoraInicio=9, HoraFin=11, AplicaRecargo=0, FechaCarga="2026-08-01",
+    )
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-08-17", Descripcion=None, Tipo="Feriado nacional", Activo=1,
+    )
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    conceptos = [c for c, _, _ in items if "2/8" in c or "17/8" in c or "28/8" in c]
+    assert conceptos == [
+        "Importe con descuento incluido por feriado del 2/8 de 9 a 11hs consul 1 del 7mo \"L\" - Ramos 1",
+        "Descuento por feriado - Lunes 17/8",
+        "Hora aislada a trabajar en agosto: viernes 28/8 de 9 a 11hs consul 1 del 7mo \"L\" - Ramos 1",
+    ]
+
+
 def test_cuota_de_plan_muestra_numero_sobre_el_total(conn, profesional):
     """#37: "Cuota 1/3 del plan de pagos" en vez de "Cuota 1..." a secas."""
     crear_plan_pago_historico(

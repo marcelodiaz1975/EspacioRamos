@@ -323,19 +323,25 @@ def _items_cuenta(
             liquidacion.reversion_descuento, False,
         ))
 
-    # Pedido explícito de la clienta ("los veo mezclados", ejemplo
-    # concreto: feriado del 9 arriba del 23): un solo listado cronológico
-    # para feriados nacionales y días no laborables juntos, en vez de dos
-    # bloques separados por tipo (que antes podían salir intercalados mal
-    # entre sí aunque cada uno estuviera ordenado por su cuenta) — las dos
-    # listas ya vienen ordenadas ascendente (`_calcular_descuentos_
-    # feriados`), `sorted` por fecha sobre la unión preserva ese orden
-    # entre tipos distintos de la misma fecha.
-    for f in sorted([*liquidacion.descuentos_feriados, *liquidacion.descuentos_no_laborables], key=lambda i: i.fecha):
+    # Pedido explícito de la clienta ("no importa si es aislada o
+    # feriado, todo lo que tenga fecha que se ordene por fecha en el
+    # archivo"): un solo listado cronológico para TODO lo que tiene un
+    # día puntual del período, sin importar el tipo — descuentos por
+    # feriado/día no laborable (actual + pendientes del mes anterior),
+    # feriados trabajados (actual + mes anterior) y horas aisladas
+    # (actual + mes anterior) — en vez de bloques separados por tipo que
+    # antes podían salir desordenados entre sí (ej. una aislada del 2/11
+    # tiene que ir arriba de un feriado del 10/2 del período siguiente).
+    # Alcance acordado explícitamente con la clienta: vacaciones/
+    # licencias (un RANGO de fechas, no un día puntual) y horas
+    # regulares agregadas (vigencia desde una fecha) quedan en sus
+    # bloques de siempre, más abajo — no entran en este único listado.
+    eventos_con_fecha: list[tuple[str, str, float]] = []
+    for f in [*liquidacion.descuentos_feriados, *liquidacion.descuentos_no_laborables]:
         dia_semana, fecha = _dia_y_fecha(f.fecha)
         etiqueta = "feriado" if f.tipo == "Feriado nacional" else "día no laborable"
-        items.append((
-            f"Descuento por {etiqueta} - {dia_semana} {fecha}{_sufijo_descripcion(f.descripcion)}", -f.monto, False,
+        eventos_con_fecha.append((
+            f.fecha, f"Descuento por {etiqueta} - {dia_semana} {fecha}{_sufijo_descripcion(f.descripcion)}", -f.monto,
         ))
     for f in liquidacion.feriados_pendientes:
         dia_semana, fecha = _dia_y_fecha(f.fecha)
@@ -343,10 +349,38 @@ def _items_cuenta(
         # por feriado..."), con la aclaración de que es de un período ya
         # cerrado entre paréntesis, en vez de una redacción distinta
         # ("Descuento feriado pendiente...") para el mismo concepto.
-        items.append((
+        eventos_con_fecha.append((
+            f.fecha,
             f"Descuento por feriado (mes anterior) - {dia_semana} {fecha}{_sufijo_descripcion(f.descripcion)}",
-            -f.monto, False,
+            -f.monto,
         ))
+    for item in liquidacion.feriados_trabajados_mes_anterior:
+        eventos_con_fecha.append((
+            item.fecha, _texto_feriado_trabajado_anterior(consultorios, item, mes_anterior_texto, mostrar_edificio),
+            item.monto,
+        ))
+    for item in liquidacion.feriados_trabajados_mes_en_curso:
+        tipo = tipos_feriado_actual.get(item.fecha, "Feriado nacional")
+        eventos_con_fecha.append((
+            item.fecha, _texto_feriado_trabajado_actual(consultorios, item, tipo, mostrar_edificio), item.monto,
+        ))
+    for item in liquidacion.aisladas_mes_anterior:
+        eventos_con_fecha.append((
+            item.fecha, _texto_aislada(consultorios, item, "trabajada", mes_anterior_texto, mostrar_edificio),
+            item.monto,
+        ))
+    for item in liquidacion.aisladas_mes_en_curso:
+        eventos_con_fecha.append((
+            item.fecha, _texto_aislada(consultorios, item, "a trabajar", mes_actual_texto, mostrar_edificio),
+            item.monto,
+        ))
+    # `sorted` es estable: entre eventos de la misma fecha exacta
+    # conserva el orden de carga arriba (feriado/no laborable primero,
+    # después feriado trabajado, después aislada), igual que ya hacía el
+    # `sorted` anterior entre feriados nacionales y no laborables.
+    for _fecha, texto, monto in sorted(eventos_con_fecha, key=lambda e: e[0]):
+        items.append((texto, monto, False))
+
     for v in liquidacion.descuento_vacaciones:
         d1, f1 = _dia_y_fecha(v.fecha_desde)
         d2, f2 = _dia_y_fecha(v.fecha_hasta)
@@ -364,24 +398,6 @@ def _items_cuenta(
 
     for h in liquidacion.horas_regulares_agregadas:
         items.append((_texto_horas_agregadas(consultorios, h, mostrar_edificio), h.monto, False))
-    for item in liquidacion.feriados_trabajados_mes_anterior:
-        items.append((
-            _texto_feriado_trabajado_anterior(consultorios, item, mes_anterior_texto, mostrar_edificio),
-            item.monto, False,
-        ))
-    for item in liquidacion.feriados_trabajados_mes_en_curso:
-        tipo = tipos_feriado_actual.get(item.fecha, "Feriado nacional")
-        items.append((_texto_feriado_trabajado_actual(consultorios, item, tipo, mostrar_edificio), item.monto, False))
-    for item in liquidacion.aisladas_mes_anterior:
-        items.append((
-            _texto_aislada(consultorios, item, "trabajada", mes_anterior_texto, mostrar_edificio),
-            item.monto, False,
-        ))
-    for item in liquidacion.aisladas_mes_en_curso:
-        items.append((
-            _texto_aislada(consultorios, item, "a trabajar", mes_actual_texto, mostrar_edificio),
-            item.monto, False,
-        ))
     if liquidacion.ajuste_saldo_atrasado:
         items.append(("Ajuste por saldo atrasado", liquidacion.ajuste_saldo_atrasado, False))
     # #42: por Subtipo, en el orden fijo de SUBTIPOS_CARGO — mismo criterio

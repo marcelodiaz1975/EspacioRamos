@@ -455,6 +455,51 @@ con la clienta si, ya con el fix de (1) andando, todavía le pasa al
 reemitir manualmente — con el botón exacto que usa y el período
 elegido en la pantalla.
 
+## Hilo abierto: Liquidaciones — un solo listado cronológico para feriados, feriados trabajados y horas aisladas
+
+Pedido explícito de la clienta: *"las horas aisladas, los feriados y lo
+que tenga fecha que esté ordenado de menor a mayor por fecha ... no
+importa si es aislada o feriado, todo lo que tenga fecha que se ordene
+por fecha en el archivo"*.
+
+Alcance acordado explícitamente con la clienta (sobre tres opciones
+presentadas): se fusionan en un ÚNICO listado cronológico ascendente
+los descuentos por feriado/día no laborable (actual + pendientes del
+mes anterior, que ya estaban fusionados entre sí desde una ronda
+anterior — ver "Feriados y días no laborables en orden cronológico
+(PDF)" en `docs/historial/liquidaciones.md`), los feriados trabajados
+(actual + mes anterior) y las horas aisladas (actual + mes anterior).
+Vacaciones/licencias (un RANGO de fechas, no un día puntual) y horas
+regulares agregadas (vigencia desde una fecha) quedan FUERA de este
+listado, en sus bloques de siempre — alcance explícitamente acotado,
+no "todo lo que tenga alguna fecha en el documento".
+
+`_items_cuenta` (`app/pdf/liquidacion_pdf.py`) arma ahora una lista
+intermedia `eventos_con_fecha` (fecha, texto, monto) con los seis
+orígenes de arriba y la ordena una sola vez con `sorted(..., key=lambda
+e: e[0])` antes de volcarla a `items` — en vez de los bloques separados
+de antes (feriados+no laborables ya fusionados por un lado, feriados
+trabajados y aisladas cada uno en su propio loop más abajo, después de
+vacaciones/licencias/horas agregadas). Como consecuencia, feriados
+trabajados y aisladas se mueven MÁS ARRIBA en el documento (antes de
+vacaciones/licencias/horas agregadas) — es la posición natural del
+único bloque fusionado, no algo pedido aparte. `sorted` es estable, así
+que dos eventos de la misma fecha exacta mantienen el orden de carga de
+siempre (feriado/no laborable primero, feriado trabajado después,
+aislada al final).
+
+Test nuevo: `test_feriados_y_aisladas_se_intercalan_por_fecha_sin_
+importar_el_tipo` (`tests/test_pdf_liquidacion.py`) — un feriado
+trabajado del 2/8, un descuento por feriado del 17/8 y una aislada del
+28/8, cargados fuera de orden y de tipos distintos, confirmando que
+salen en ese mismo orden cronológico en `_items_cuenta`. Confirmado por
+reversión que el test falla sin el fix (el feriado del 17/8 salía
+primero, antes del feriado trabajado del 2/8).
+
+`liquidacion_simulada_pdf.py` no tiene este problema — no separa
+feriados trabajados ni aisladas en bloques propios (es más simple,
+sin esas dos categorías), así que no hizo falta tocarlo.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
