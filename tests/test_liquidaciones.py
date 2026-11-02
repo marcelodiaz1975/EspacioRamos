@@ -620,9 +620,13 @@ def test_reserva_agregada_sin_emision_previa_se_cobra_completa(conn, consultorio
     assert id_reserva is not None
 
 
-def test_reserva_agregada_luego_de_emitida_se_traslada_al_mes_siguiente(conn, consultorio):
+def test_reserva_agregada_luego_de_emitida_y_enviada_se_traslada_al_mes_siguiente(conn, consultorio):
+    """Si la liquidación de ese mes ya quedó "Enviada" al profesional, una
+    reserva agregada después se difiere al mes siguiente — no se reabre
+    una liquidación que el profesional ya recibió."""
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+    marcar_estado_envio(conn, id_profesional=id_prof, periodo=PERIODO, enviada=True)
 
     id_reserva_nueva = _crear_reserva(conn, id_prof, consultorio, "Martes", horas=2, vigencia_inicio="2026-08-15")
 
@@ -636,6 +640,35 @@ def test_reserva_agregada_luego_de_emitida_se_traslada_al_mes_siguiente(conn, co
     item = liq_septiembre.horas_regulares_agregadas[0]
     assert item.id_reserva_regular == id_reserva_nueva
     assert liq_septiembre.total_horas_regulares_agregadas > 0
+
+
+def test_reserva_agregada_luego_de_emitida_pero_no_enviada_se_cobra_ese_mismo_mes(conn, consultorio):
+    """Bug real reportado por la clienta: emitió la liquidación una vez
+    (sin enviarla) y después, ese mismo mes, cambió a un profesional de
+    consultorio a mitad de mes (finalizar + crear de nuevo, típico de un
+    cambio de consultorio) — la reserva nueva quedaba en $0 ese mes y la
+    plata aparecía recién al mes siguiente, aunque nadie hubiera visto
+    todavía la liquidación de este mes. Si la última emisión del período
+    sigue "No enviada"/"Regenerada no enviada", el cambio se refleja
+    completo ese mismo mes."""
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-01")
+
+    id_reserva_nueva = _crear_reserva(conn, id_prof, consultorio, "Martes", horas=2, vigencia_inicio="2026-08-15")
+
+    liq_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    lunes_en_agosto = _cantidad_dia(2026, 8, "Lunes")
+    martes_desde_15_agosto = sum(
+        1 for d in range(15, 32) if fecha_a_dia_semana(date(2026, 8, d)) == "Martes"
+    )
+    assert liq_agosto.bruto == pytest.approx(
+        lunes_en_agosto * 2 * VALOR_HORA_REGULAR + martes_desde_15_agosto * 2 * VALOR_HORA_REGULAR
+    )
+    assert liq_agosto.horas_regulares_agregadas == []
+
+    liq_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
+    assert liq_septiembre.horas_regulares_agregadas == []
+    assert id_reserva_nueva is not None
 
 
 def test_feriado_trabajado_mes_en_curso_avisado_antes_de_emitir(conn, consultorio):

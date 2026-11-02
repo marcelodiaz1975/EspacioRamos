@@ -399,14 +399,38 @@ def _descuento_pct_en_fecha(
     return obtener_porcentaje_descuento(conn, horas)
 
 
+def _fecha_emision_enviada_periodo(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> str | None:
+    """Igual que `_fecha_emision_periodo`, pero solo cuenta como "corte"
+    la fecha de la ÚLTIMA emisión de ese período si esa emisión ya quedó
+    `EstadoEnvio = 'Enviada'` — si todavía está "No enviada"/"Regenerada
+    no enviada", nadie la vio todavía: no hay riesgo en reflejar un
+    cambio del mismo mes de una vez (`_ids_reservas_tardias` no tiene
+    nada que diferir al mes siguiente). Bug real reportado por la
+    clienta (ver "Hilo abierto: batch de 8 pedidos", bug liquidación con
+    dos tramos en el mes, CLAUDE.md): emitió noviembre una vez, sin
+    enviarla, después cambió a un profesional de consultorio/horario a
+    mitad de mes — `regenerar_si_corresponde` (pensado justo para
+    reflejar ese cambio al instante) quedaba pisado igual por el
+    diferimiento de "tardía", aunque la liquidación de noviembre nunca
+    hubiera llegado al profesional."""
+    filas = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    if not filas:
+        return None
+    ultima = max(filas, key=lambda f: f["IdLiquidacion"])
+    if ultima["EstadoEnvio"] != "Enviada":
+        return None
+    return ultima["FechaEmision"]
+
+
 def _ids_reservas_tardias(
     conn: sqlite3.Connection, ids: list[int], anio: int, mes: int, fecha_corte: str | None,
 ) -> frozenset[int]:
     """Reservas que empezaron dentro de (anio, mes) después de `fecha_corte`
-    (la emisión de la liquidación de ese mismo mes): sus ocurrencias de ese
-    mes quedan afuera del bruto y pasan como "horas regulares agregadas"
-    al mes siguiente. Vacío si el mes no fue emitido: no hay nada que
-    trasladar."""
+    (la emisión YA ENVIADA de la liquidación de ese mismo mes, ver
+    `_fecha_emision_enviada_periodo`): sus ocurrencias de ese mes quedan
+    afuera del bruto y pasan como "horas regulares agregadas" al mes
+    siguiente. Vacío si el mes no fue emitido, o si se emitió pero
+    todavía no se envió: no hay nada que trasladar."""
     if fecha_corte is None:
         return frozenset()
     placeholders = ", ".join("?" for _ in ids)
@@ -556,12 +580,15 @@ def _calcular_horas_regulares_agregadas(
     conn: sqlite3.Connection, ids: list[int], id_profesional: int, periodo: str, pierde_descuento: bool,
 ) -> list[ItemHorasAgregadas]:
     """Reservas agregadas a mitad del mes anterior después de que su
-    liquidación ya había sido emitida: se cobran ahora, con el mismo
-    descuento por horas semanales que tendrían si se hubieran cobrado a
-    tiempo, por las ocurrencias entre su VigenciaInicio y el fin de ese
-    mes, sin contar los feriados de ese mes."""
+    liquidación YA ENVIADA (`_fecha_emision_enviada_periodo` — si todavía
+    estaba "No enviada", `calcular_liquidacion` del mes anterior ya las
+    cobró de una, ver `_ids_reservas_tardias`, y contarlas de nuevo acá
+    sería duplicarlas) se cobran ahora, con el mismo descuento por horas
+    semanales que tendrían si se hubieran cobrado a tiempo, por las
+    ocurrencias entre su VigenciaInicio y el fin de ese mes, sin contar
+    los feriados de ese mes."""
     periodo_anterior = calcular_periodo_anterior(periodo)
-    fecha_corte = _fecha_emision_periodo(conn, id_profesional, periodo_anterior)
+    fecha_corte = _fecha_emision_enviada_periodo(conn, id_profesional, periodo_anterior)
     if fecha_corte is None:
         return []
 
@@ -843,7 +870,7 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
     # descuento por horas no lo reactiva.
     ajuste_saldo_atrasado = saldo_anterior * ajuste_pct / 100 if saldo_sigue_atrasado else 0.0
 
-    fecha_emision_este_periodo = _fecha_emision_periodo(conn, id_profesional, periodo)
+    fecha_emision_este_periodo = _fecha_emision_enviada_periodo(conn, id_profesional, periodo)
     ids_tardias = _ids_reservas_tardias(conn, ids, anio, mes, fecha_emision_este_periodo)
 
     tramos = _bruto_y_tramos(conn, ids, primer_dia_periodo, ultimo_dia_periodo, ids_tardias)

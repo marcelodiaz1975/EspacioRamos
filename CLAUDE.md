@@ -945,33 +945,56 @@ Pedido de la clienta, ocho puntos en un solo mensaje:
    sin tocar. Test nuevo: `test_vigencia_inicio_arranca_en_el_primer_
    dia_del_mes` (`tests/test_gui_reservas.py`).
 
-8. **Pendiente de la clienta — bug real en liquidaciones con un
-   profesional que cambia de consultorio/horario a mitad de mes.**
-   Reproducido con un script directo contra `calcular_liquidacion`: si
-   el mes YA fue emitido una vez (con `fecha_emision` real) y DESPUÉS,
-   ese mismo mes, se finaliza una reserva regular y se crea una nueva
-   (otro consultorio/horario, típico de "Modificar" cuando cambia el
-   consultorio, que esta pantalla no soporta — hay que finalizar +
-   crear de nuevo), el tramo nuevo queda en bruto $0 y descuento $0 — la
-   plata aparece recién en la liquidación del MES SIGUIENTE, como "horas
-   regulares agregadas". Causa: `_ids_reservas_tardias`
-   (`app/negocio/liquidaciones.py`) trata cualquier reserva con
+8. **Resuelto — bug real en liquidaciones con un profesional que cambia
+   de consultorio/horario a mitad de mes.** Reproducido con un script
+   directo contra `calcular_liquidacion`: si el mes YA fue emitido una
+   vez (con `fecha_emision` real) y DESPUÉS, ese mismo mes, se finaliza
+   una reserva regular y se crea una nueva (otro consultorio/horario,
+   típico de "Modificar" cuando cambia el consultorio, que esta
+   pantalla no soporta — hay que finalizar + crear de nuevo), el tramo
+   nuevo quedaba en bruto $0 y descuento $0 — la plata aparecía recién
+   en la liquidación del MES SIGUIENTE, como "horas regulares
+   agregadas". Causa: `_ids_reservas_tardias`
+   (`app/negocio/liquidaciones.py`) trataba cualquier reserva con
    `VigenciaInicio` posterior a la última emisión del período como
-   "tardía" y la excluye del bruto de ese mes sin excepción — diseño
+   "tardía" y la excluía del bruto de ese mes sin excepción — diseño
    explícito para no reabrir una liquidación YA EMITIDA (ver "Hilo
    abierto: reserva aislada de un mes pasado" y `docs/historial/
    general.md`, "ajuste retroactivo"). El choque: `regenerar_si_
    corresponde` (llamado automáticamente al crear/finalizar una reserva
    regular) SÍ está pensado para reflejar el cambio al instante ese
-   mismo mes — pero la deferral de "tardía" lo pisa igual, sin importar
-   que la liquidación de ese mes nunca se haya ENVIADO al profesional.
-   Propuesta de fix presentada a la clienta (no aplicada todavía,
-   pendiente de que confirme con el caso real si la liquidación de
-   noviembre ya estaba emitida Y enviada antes del cambio de
-   consultorio): que `_ids_reservas_tardias` solo difiera al mes
-   siguiente si la última emisión de ese período ya quedó "Enviada" —
-   si todavía está "No enviada"/"Regenerada no enviada", reflejar el
-   cambio completo ese mismo mes es seguro (nadie la vio todavía).
+   mismo mes — pero la deferral de "tardía" lo pisaba igual, sin
+   importar que la liquidación de ese mes nunca se hubiera ENVIADO al
+   profesional. Confirmado por la clienta sobre el caso real: la
+   liquidación de noviembre estaba emitida pero todavía NO enviada.
+
+   Fix: nueva `_fecha_emision_enviada_periodo` (reemplaza a
+   `_fecha_emision_periodo` como fuente de `fecha_corte` para
+   `_ids_reservas_tardias`) — solo cuenta como "corte" la fecha de la
+   ÚLTIMA emisión del período si esa emisión ya quedó
+   `EstadoEnvio = 'Enviada'`; si sigue "No enviada"/"Regenerada no
+   enviada", devuelve `None` (equivalente a "el mes no fue emitido
+   todavía": nada que diferir) y el cambio se refleja completo ese
+   mismo mes. `_calcular_horas_regulares_agregadas` (la mitad "mes
+   siguiente" del mismo mecanismo, que decide qué reservas agregadas al
+   mes anterior cobrar ahora) tenía el mismo problema de fondo y se
+   cambió igual — de no hacerlo, una reserva que con el fix ya se cobra
+   completa en su propio mes (porque no estaba enviada) se habría
+   contado DE NUEVO al mes siguiente como "agregada", duplicando el
+   monto (confirmado por un test que lo reproducía antes de este
+   segundo cambio). `_calcular_feriados_pendientes` (mismo patrón, pero
+   para feriados de último momento agregados a un mes ya cerrado, sin
+   el mismo disparador automático de `regenerar_si_corresponde`) queda
+   sin tocar — no es el caso reportado.
+
+   Tests actualizados/nuevos en `tests/test_liquidaciones.py`:
+   `test_reserva_agregada_luego_de_emitida_se_traslada_al_mes_siguiente`
+   pasa a `..._luego_de_emitida_Y_ENVIADA_se_traslada_al_mes_siguiente`
+   (agrega el `marcar_estado_envio` que le faltaba, sigue probando el
+   diferimiento cuando SÍ se envió) + nuevo
+   `test_reserva_agregada_luego_de_emitida_pero_no_enviada_se_cobra_
+   ese_mismo_mes` (reproduce el caso real de la clienta, confirmado que
+   sin el fix de `_ids_reservas_tardias` falla).
 
 ## Historial archivado
 
