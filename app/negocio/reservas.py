@@ -103,6 +103,24 @@ def _vigencias_solapan(inicio_a, fin_a, inicio_b, fin_b) -> bool:
     return inicio_a <= fin_b and inicio_b <= fin_a
 
 
+def _texto_consultorio_conflicto(conn: sqlite3.Connection, id_consultorio: int) -> str:
+    """Pedido explícito de la clienta ("con nombres, días, horarios y
+    consultorios exactos"): el mensaje de un conflicto de superposición
+    no mencionaba el consultorio en absoluto (se daba por obvio porque es
+    el mismo que se está intentando reservar) — se agrega explícito,
+    mismo formato "Consultorio N (Unidad - Edificio)" ya usado en los
+    combos de ubicación de este mismo formulario."""
+    fila = conn.execute(
+        "SELECT c.NumeroConsultorio, u.Departamento, e.Nombre AS NombreEdificio "
+        "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad "
+        "JOIN Edificio e ON e.IdEdificio = u.IdEdificio WHERE c.IdConsultorio = ?",
+        (id_consultorio,),
+    ).fetchone()
+    if fila is None:
+        return f"consultorio #{id_consultorio}"
+    return f"Consultorio {fila['NumeroConsultorio']} ({fila['Departamento']} - {fila['NombreEdificio']})"
+
+
 def _texto_profesional_conflicto(conn: sqlite3.Connection, id_profesional: int) -> str:
     """Punto #9.1.5 (SistemaDF v0.11.2026.10): los mensajes de conflicto
     identificaban al profesional solo por su número interno — pedido
@@ -179,6 +197,7 @@ def verificar_conflictos_regular(
     vigencia_fin: str | None, id_profesional: int, excluir_id: int | None = None,
 ) -> list[Conflicto]:
     conflictos = []
+    texto_consultorio = _texto_consultorio_conflicto(conn, id_consultorio)
     filas = conn.execute(
         "SELECT * FROM ReservaRegular WHERE IdConsultorio = ? AND DiaSemana = ?",
         (id_consultorio, dia_semana),
@@ -196,7 +215,7 @@ def verificar_conflictos_regular(
             mensaje=(
                 f"Se superpone con la reserva regular #{fila['IdReservaRegular']} del "
                 f"profesional {_texto_profesional_conflicto(conn, fila['IdProfesional'])} "
-                f"({dia_semana} {fila['HoraInicio']}–{fila['HoraFin']}hs)"
+                f"({dia_semana} {fila['HoraInicio']}–{fila['HoraFin']}hs, {texto_consultorio})"
             ),
             reserva_existente=fila,
         ))
@@ -209,6 +228,7 @@ def verificar_conflictos_aislada(
 ) -> list[Conflicto]:
     conflictos = []
     dia_semana = fecha_a_dia_semana(date.fromisoformat(fecha))
+    texto_consultorio = _texto_consultorio_conflicto(conn, id_consultorio)
 
     filas = conn.execute(
         "SELECT * FROM ReservaAislada WHERE IdConsultorio = ? AND Fecha = ? AND Estado = 'Confirmada'",
@@ -225,7 +245,7 @@ def verificar_conflictos_aislada(
             mensaje=(
                 f"Se superpone con la reserva aislada #{fila['IdReservaAislada']} del "
                 f"profesional {_texto_profesional_conflicto(conn, fila['IdProfesional'])} "
-                f"({fecha} {fila['HoraInicio']}–{fila['HoraFin']}hs)"
+                f"({fecha} {fila['HoraInicio']}–{fila['HoraFin']}hs, {texto_consultorio})"
             ),
             reserva_existente=fila,
         ))
@@ -262,7 +282,7 @@ def verificar_conflictos_aislada(
             mensaje=(
                 f"Se superpone con la reserva regular #{fila['IdReservaRegular']} del "
                 f"profesional {_texto_profesional_conflicto(conn, fila['IdProfesional'])} "
-                f"({dia_semana} {fila['HoraInicio']}–{fila['HoraFin']}hs)"
+                f"({dia_semana} {fila['HoraInicio']}–{fila['HoraFin']}hs, {texto_consultorio})"
             ),
             reserva_existente=fila,
         ))
@@ -379,16 +399,17 @@ def _validar_finalizacion_no_retroactiva(conn: sqlite3.Connection, id_profesiona
 def crear_reserva_regular(
     conn: sqlite3.Connection, *, id_profesional: int, id_consultorio: int, dia_semana: str,
     hora_inicio: float, hora_fin: float, vigencia_inicio: str, vigencia_fin: str | None = None,
-    es_excepcion: bool = False, observacion: str | None = None, forzar: bool = False,
+    es_excepcion: bool = False, observacion: str | None = None,
 ) -> tuple[int, list[str]]:
-    """`forzar` nunca pisa la validación de período cerrado (ver
-    `_validar_vigencia_no_cerrada`) — a diferencia de los conflictos de
-    superposición, esto no es una advertencia que el operador pueda
-    confirmar: es un bloqueo real, mismo criterio sin excepción que
-    `liquidaciones.emitir_liquidacion`. Lo mismo para la categoría del
-    profesional (`_validar_categoria_reserva`, ver su docstring): nunca
-    se puede forzar, solo R/B (o E con cabeza de equipo R) reservan
-    horas regulares."""
+    """Pedido explícito de la clienta ("lo más sagrado de este sistema"):
+    una superposición de horarios bloqueante (`Conflicto.bloqueante`,
+    `ConflictoBloqueanteError`) ya NO se puede forzar desde ningún lado
+    — se sacó el parámetro `forzar` que antes permitía crear la reserva
+    igual después de que el operador confirmara un cartel de "¿Crear de
+    todos modos?" en la GUI. Mismo criterio sin excepción que la
+    validación de período cerrado (`_validar_vigencia_no_cerrada`) y la
+    categoría del profesional (`_validar_categoria_reserva`): ninguna de
+    las tres se puede sortear."""
     _validar_categoria_reserva(
         conn, id_profesional, categorias_permitidas=("R", "B"), categoria_sugerida="R",
         descripcion_tipo="regulares",
@@ -409,7 +430,7 @@ def crear_reserva_regular(
     )
     problemas_rigidos = verificar_bloques_rigidos(conn, dia_semana, hora_inicio, hora_fin)
     bloqueantes = [c for c in conflictos if c.bloqueante]
-    if bloqueantes and not forzar:
+    if bloqueantes:
         raise ConflictoBloqueanteError(bloqueantes)
 
     repo = obtener_repositorio(conn, "ReservaRegular")
@@ -423,8 +444,6 @@ def crear_reserva_regular(
         + [c.mensaje for c in conflictos_aisladas]
         + problemas_rigidos
     )
-    if forzar:
-        advertencias += [c.mensaje for c in bloqueantes]
     return id_reserva, advertencias
 
 
@@ -445,7 +464,7 @@ def finalizar_reserva_regular(conn: sqlite3.Connection, id_reserva_regular: int,
 
 def modificar_reserva_regular(
     conn: sqlite3.Connection, id_reserva_regular: int, *, hora_inicio: float, hora_fin: float,
-    vigencia_inicio: str, vigencia_fin: str | None, forzar: bool = False,
+    vigencia_inicio: str, vigencia_fin: str | None,
 ) -> list[str]:
     """Punto #9.1.4 (SistemaDF v0.11.2026.10): "Modificar reserva" pasa de
     finalizar la fila vieja y precargar el formulario para dar de alta
@@ -497,15 +516,13 @@ def modificar_reserva_regular(
         vigencia_fin=vigencia_fin, id_profesional=reserva["IdProfesional"], excluir_id=id_reserva_regular,
     )
     bloqueantes = [c for c in conflictos if c.bloqueante]
-    if bloqueantes and not forzar:
+    if bloqueantes:
         raise ConflictoBloqueanteError(bloqueantes)
     repo.actualizar(
         id_reserva_regular, HoraInicio=hora_inicio, HoraFin=hora_fin,
         VigenciaInicio=vigencia_inicio, VigenciaFin=vigencia_fin,
     )
     advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
-    if forzar:
-        advertencias += [c.mensaje for c in bloqueantes]
     return advertencias
 
 
@@ -545,7 +562,7 @@ def eliminar_reserva_regular(conn: sqlite3.Connection, id_reserva_regular: int) 
 def crear_reserva_aislada(
     conn: sqlite3.Connection, *, id_profesional: int, id_consultorio: int, fecha: str,
     hora_inicio: float, hora_fin: float, aplica_recargo: bool | None = None,
-    es_reubicacion: bool = False, observacion: str | None = None, forzar: bool = False,
+    es_reubicacion: bool = False, observacion: str | None = None,
     es_extraordinaria: bool = False, item_extraordinario: str | None = None,
     monto_extraordinario: float | None = None, periodo_imputado: str | None = None,
 ) -> tuple[int, list[str]]:
@@ -620,7 +637,7 @@ def crear_reserva_aislada(
         hora_inicio=hora_inicio, hora_fin=hora_fin, id_profesional=id_profesional,
     )
     bloqueantes = [c for c in conflictos if c.bloqueante]
-    if bloqueantes and not forzar:
+    if bloqueantes:
         raise ConflictoBloqueanteError(bloqueantes)
 
     if es_extraordinaria:
@@ -648,8 +665,6 @@ def crear_reserva_aislada(
         PeriodoImputado=periodo_imputado,
     )
     advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
-    if forzar:
-        advertencias += [c.mensaje for c in bloqueantes]
     return id_reserva, advertencias
 
 
@@ -706,7 +721,7 @@ def eliminar_reserva_aislada(
 def modificar_reserva_aislada(
     conn: sqlite3.Connection, id_reserva_aislada: int, *, hora_inicio: float, hora_fin: float,
     aplica_recargo: bool | None = None, item_extraordinario: str | None = None,
-    monto_extraordinario: float | None = None, forzar: bool = False,
+    monto_extraordinario: float | None = None,
 ) -> list[str]:
     """Homólogo de `modificar_reserva_regular` para aisladas/
     extraordinarias (#9.1.4 de Reservas regulares, pedido explícito de
@@ -736,7 +751,7 @@ def modificar_reserva_aislada(
         excluir_id=id_reserva_aislada,
     )
     bloqueantes = [c for c in conflictos if c.bloqueante]
-    if bloqueantes and not forzar:
+    if bloqueantes:
         raise ConflictoBloqueanteError(bloqueantes)
 
     campos: dict = dict(HoraInicio=hora_inicio, HoraFin=hora_fin)
@@ -752,6 +767,4 @@ def modificar_reserva_aislada(
     repo.actualizar(id_reserva_aislada, **campos)
 
     advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
-    if forzar:
-        advertencias += [c.mensaje for c in bloqueantes]
     return advertencias

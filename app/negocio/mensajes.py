@@ -554,6 +554,84 @@ def _lugar_llave(fila: sqlite3.Row, incluir_edificio: bool) -> str:
     return texto
 
 
+def saldo_actual_aislada(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> float:
+    """"Saldo actual" (Centro de mensajería) de un profesional categoría A
+    para un período dado. A diferencia de un R (que acredita lo liquidado
+    a `Profesional.SaldoCuentaActual` al emitir la liquidación — ver
+    `emitir_liquidacion`), un A nunca acredita nada ahí: no hay
+    liquidación propia para categoría A. Este número se calcula en vivo,
+    mismo criterio EXACTO que el "SALDO A ABONAR" de
+    `mensaje_detalle_reserva_aislada` (reutiliza sus mismos helpers de
+    reservas para no duplicar esa cuenta): reservas aisladas del período +
+    llaves + ítems libres (`CargoEspecial`), más el saldo pendiente del mes
+    anterior, menos los pagos imputados a este período."""
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    if profesional is None:
+        return 0.0
+    anio, mes = (int(p) for p in periodo.split("-"))
+    prefijo_mes = f"{anio:04d}-{mes:02d}-"
+
+    cfg = conn.execute("SELECT RecargoPorcentajeAisladas FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    recargo_pct = cfg["RecargoPorcentajeAisladas"] if cfg else 0.0
+
+    filas = conn.execute(
+        """
+        SELECT ra.Fecha, ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo, ra.EsReubicacion,
+               ra.EsExtraordinaria, ra.ItemExtraordinario, ra.MontoExtraordinario,
+               c.IdConsultorio, c.ValorHoraAisladaActual
+        FROM ReservaAislada ra JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
+        WHERE ra.IdProfesional = ? AND ra.Estado = 'Confirmada' AND ra.Fecha LIKE ?
+        """,
+        (id_profesional, prefijo_mes + "%"),
+    ).fetchall()
+
+    def _monto(f: sqlite3.Row) -> float:
+        if f["EsReubicacion"]:
+            return 0.0
+        monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
+        return monto * (1 + recargo_pct / 100) if f["AplicaRecargo"] else monto
+
+    _, total_reservas = _lineas_reservas_aisladas(
+        [f for f in filas if not f["EsExtraordinaria"]],
+        incluir_consultorio=False, incluir_unidad=False, incluir_edificio=False,
+        combinar_misma_unidad=False, combinar_distintas_unidades=False, monto_fn=_monto,
+    )
+    _, total_extraordinarias = _lineas_reservas_extraordinarias(
+        [f for f in filas if f["EsExtraordinaria"]],
+        incluir_consultorio=False, incluir_unidad=False, incluir_edificio=False,
+    )
+    total_reservas += total_extraordinarias
+
+    llaves = conn.execute(
+        "SELECT Tipo, DepositoCobrado, MontoCobrado, DepositoReintegrado, MontoReintegrado "
+        "FROM LlaveMovimiento WHERE IdProfesional = ? AND Tipo IN ('Asignación', 'Devolución') AND Fecha LIKE ?",
+        (id_profesional, prefijo_mes + "%"),
+    ).fetchall()
+    total_llaves = 0.0
+    for ll in llaves:
+        if ll["Tipo"] == "Asignación" and ll["DepositoCobrado"]:
+            total_llaves += ll["MontoCobrado"] or 0.0
+        if ll["Tipo"] == "Devolución" and ll["DepositoReintegrado"]:
+            total_llaves -= ll["MontoReintegrado"] or 0.0
+
+    total_item_libre = sum(
+        c["Monto"] for c in obtener_repositorio(conn, "CargoEspecial").listar(
+            IdProfesional=id_profesional, PeriodoImputado=periodo,
+        )
+        if c["IdLlave"] is None
+    )
+
+    total_pagos = sum(
+        p["Monto"] for p in conn.execute(
+            "SELECT Monto FROM HistorialPagos WHERE IdProfesional = ? AND PeriodoImputado = ?",
+            (id_profesional, periodo),
+        ).fetchall()
+    )
+
+    saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
+    return saldo_anterior + total_reservas + total_llaves + total_item_libre + total_pagos
+
+
 def mensaje_detalle_reserva_aislada(
     conn: sqlite3.Connection, *, id_profesional: int, periodo: str,
     incluir_consultorio: bool = True, incluir_unidad: bool = True, incluir_edificio: bool = True,
@@ -746,7 +824,10 @@ def mensaje_detalle_reserva_aislada(
         lineas.append(f"{signo} {c['Concepto']} {_moneda(abs(c['Monto']))}")
         total_item_libre += c["Monto"]
 
-    saldo_a_abonar = saldo_anterior + total_reservas + total_llaves + total_item_libre + total_pagos
+    # Mismo número exacto que `saldo_actual_aislada` (Centro de
+    # mensajería): se llama a esa función en vez de volver a sumar estas
+    # mismas partes acá, para que ambos lugares no puedan divergir.
+    saldo_a_abonar = saldo_actual_aislada(conn, id_profesional, periodo)
     lineas += ["", f"*SALDO A ABONAR: {_moneda(saldo_a_abonar)}*"]
 
     if posteriores:

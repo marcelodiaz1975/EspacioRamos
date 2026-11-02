@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QMessageBox, QVBoxLayou
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.procesando import Procesando
 from app.negocio.archivos_generados import nombre_carpeta_consultorio, renombrar_carpeta_imagenes_consultorio
 from app.negocio.dias import periodo_actual
 from app.negocio.feriados import TIPOS_QUE_DESCUENTAN_100
@@ -464,8 +465,10 @@ def _afecta_periodo_actual(conn: sqlite3.Connection, fecha: str | None) -> bool:
 def _regenerar_liquidaciones_del_periodo_actual(conn: sqlite3.Connection) -> None:
     periodo = periodo_actual(conn)
     ids_profesional = {f["IdProfesional"] for f in obtener_repositorio(conn, "LiquidacionEmitida").listar(Periodo=periodo)}
-    for id_profesional in ids_profesional:
-        regenerar_si_corresponde(conn, id_profesional=id_profesional, periodo=periodo)
+    with Procesando(None, "Regenerando liquidaciones...") as procesando:
+        for id_profesional in ids_profesional:
+            regenerar_si_corresponde(conn, id_profesional=id_profesional, periodo=periodo)
+            procesando.tick()
     # Pedido explícito de la clienta: que SIEMPRE quede claro que esto
     # regeneró archivos y los marcó como no enviados, con un "proceso
     # completado" al terminar — mismo criterio que ya usan Aumentos y

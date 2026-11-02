@@ -2118,6 +2118,28 @@ def test_eliminar_reserva_aislada_borra_la_fila(qtbot, conn):
     assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 0
 
 
+def test_eliminar_reserva_aislada_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: "como con todos los demás
+    procesos" — faltaba la alerta final de éxito al eliminar una
+    reserva aislada (cuando no es el mismo día, que ya tenía su propio
+    aviso de "avisar al profesional")."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_aisladas.combo_profesional.setCurrentIndex(1)
+    pantalla.panel_aisladas.campo_fecha.setDate(QDate(2026, 12, 31))  # no es "hoy": no dispara el aviso de mismo día
+    pantalla.panel_aisladas.spin_desde.setValue(13)
+    pantalla.panel_aisladas.spin_hasta.setValue(14)
+    pantalla.panel_aisladas._crear()
+    pantalla.panel_aisladas.tabla.selectRow(0)
+
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: mensajes.append(a)))
+    pantalla.panel_aisladas._eliminar()
+
+    assert mensajes == [(pantalla.panel_aisladas, "Eliminar reserva", "Reserva eliminada con éxito.")]
+
+
 def test_eliminar_reserva_aislada_pide_confirmacion_explicita(qtbot, conn, monkeypatch):
     """Punto #9.1.6 (homólogo de "Eliminar reserva" en Regulares):
     "Eliminar reserva" (antes "Cancelar reserva") pide confirmación

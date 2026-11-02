@@ -43,7 +43,7 @@ from app.gui.pantallas.reservas import _opciones_profesional as _opciones_profes
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import aplicar_cambio_codigo
-from app.negocio.dias import fecha_actual
+from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.documentacion_profesional import (
     CATEGORIAS_DOCUMENTACION_PROFESIONAL,
     agregar_documento,
@@ -51,6 +51,7 @@ from app.negocio.documentacion_profesional import (
     listar_documentos,
 )
 from app.negocio.imagenes import CATEGORIA_OTRAS_IMAGENES, CATEGORIA_OTROS_DOCUMENTOS
+from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import opciones_lista
 from app.negocio.profesionales import (
     normalizar_cuit,
@@ -539,6 +540,22 @@ class _PanelProfesionales(QWidget):
             QMessageBox.warning(
                 self, "Cambio de código",
                 f"Se registró el cambio de código, pero no se pudo renombrar la carpeta en disco: {error}",
+            )
+        # Pedido explícito de la clienta: modificar el plazo de pago
+        # extendido (o su día de reactivación automática) tiene que
+        # regenerar la liquidación del período actual y dejarla marcada
+        # como no enviada — mismo criterio que el resto de los disparadores
+        # de `regenerar_si_corresponde` (vacaciones, cargos especiales,
+        # pagos imputados al mes anterior, etc.). Solo dispara si alguno de
+        # los tres campos realmente cambió, para no regenerar de más en una
+        # edición que tocó otra cosa.
+        campos_plazo = ("PlazoPagoExtendido", "MotivoPlazoExtra", "DiaPlazoExtendidoAutomatico")
+        if any(
+            campo in valores_nuevos and valores_nuevos[campo] != registro_anterior[campo]
+            for campo in campos_plazo
+        ):
+            regenerar_si_corresponde(
+                self.conn, id_profesional=registro_anterior["IdProfesional"], periodo=periodo_actual(self.conn),
             )
         self._actualizar_documentacion()
 

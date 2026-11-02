@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QMessageBox
@@ -124,6 +126,28 @@ def test_centro_mensajeria_saldo_actual_suma_anterior_y_actual(qtbot, conn):
     assert pantalla.tabla.item(0, 4).text() == "$ 1.500,00"
 
 
+def test_centro_mensajeria_saldo_actual_de_un_a_se_calcula_de_lo_agendado_menos_pagos(qtbot, conn):
+    """Pedido explícito de la clienta: para un profesional categoría A,
+    "Saldo actual" tiene que ser lo agendado en el mes en curso menos los
+    pagos que va haciendo — a diferencia de un R, nada acredita nunca
+    `SaldoCuentaActual` para un A (no hay liquidación propia de esa
+    categoría), así que la fórmula genérica vieja (`saldo_anterior +
+    SaldoCuentaActual`) daba un número que no tenía nada que ver con lo
+    agendado. Mismo criterio exacto que el "SALDO A ABONAR" del mensaje de
+    detalle (`saldo_actual_aislada`): acá, una reserva aislada de 1 hora a
+    $500 (ver `_hacer_visible_aislada`/`_crear_consultorio`)."""
+    id_prof = _crear_profesional(conn, categoria="A", apellido="Pérez", saldo=1000)
+    # SaldoCuentaActual con un valor cualquiera: tiene que ser ignorado
+    # por completo para un A (regresión a la fórmula genérica vieja).
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaActual=9999)
+    _hacer_visible_aislada(conn, id_prof)
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "aisladas")
+    assert pantalla.tabla.item(0, 3).text() == "$ 1.000,00"
+    assert pantalla.tabla.item(0, 4).text() == "$ 1.500,00"
+
+
 def test_centro_mensajeria_cambia_a_categoria_aislada(qtbot, conn):
     id_prof = _crear_profesional(conn, categoria="A", apellido="Pérez")
     _hacer_visible_aislada(conn, id_prof)
@@ -149,6 +173,41 @@ def test_centro_mensajeria_aislada_con_reserva_pasada_no_se_muestra(qtbot, conn)
     id_consultorio = _crear_consultorio(conn)
     obtener_repositorio(conn, "ReservaAislada").crear(
         IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2020-01-05",
+        HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "aisladas")
+    assert pantalla.tabla.rowCount() == 0
+
+
+def test_centro_mensajeria_aislada_depende_de_la_fecha_real_no_del_periodo_operativo_atrasado(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: "los profesionales de categoría A
+    que no tengas reservas activas para el mes en curso o posteriores" se
+    tienen que sacar de la lista — pero "mes en curso" tiene que ser el
+    mes REAL del calendario, no el período operativo (que puede estar
+    atrasado si todavía no se apretó "Avanzar de mes", mismo criterio que
+    ya usa el cuadrito de cumpleaños del Panel de control, `fecha_real`).
+    Antes de este fix, `_tiene_aisladas_vigentes` comparaba contra el
+    primer día del período OPERATIVO (octubre, atrasado) en vez de la
+    fecha real (2 de noviembre): una aislada del 15/10, ya pasada en la
+    realidad, seguía contando como "vigente" y el profesional no se
+    depuraba de la lista."""
+    from app.negocio import dias as dias_modulo
+
+    class _FechaFija(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 11, 2)
+
+    monkeypatch.setattr(dias_modulo, "date", _FechaFija)
+    conn.execute("UPDATE Configuracion SET PeriodoOperativoActual = '2026-10' WHERE IdConfiguracion = 1")
+    conn.commit()
+
+    id_prof = _crear_profesional(conn, categoria="A", apellido="Atrasado")
+    id_consultorio = _crear_consultorio(conn)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-10-15",
         HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
     )
     pantalla = _PanelCentroMensajeria(conn)

@@ -13,6 +13,8 @@ from app.gui.pantallas.profesionales import (
     _DialogoCategoriaDocumento,
     _PanelProfesionales,
 )
+from app.negocio.dias import periodo_actual
+from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -578,6 +580,57 @@ def test_cambiar_codigo_registra_historial_y_renombra_carpeta(qtbot, conn, tmp_p
     # sin ese prefijo.
     assert (tmp_path / "Profesionales" / "X1 - Ramos" / "2026-08 - Liquidación Ramos.pdf").exists()
     assert not (tmp_path / "Profesionales" / "R3 - Ramos").exists()
+
+
+def test_editar_plazo_pago_extendido_regenera_liquidacion_enviada(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: modificar el plazo de pago extendido
+    (o su día de reactivación automática) de un profesional tiene que
+    regenerar sola la liquidación del período en curso si ya estaba
+    Enviada — mismo criterio que Vacaciones/Licencias/Cargos especiales
+    (`regenerar_si_corresponde`)."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute(
+        "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio, ValorHoraRegularActual) VALUES (?, 1, 1000)",
+        (id_unidad,),
+    )
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Ramos", IdCodigo="R3",
+    )
+    conn.execute(
+        "INSERT INTO ReservaRegular (IdProfesional, IdConsultorio, DiaSemana, HoraInicio, HoraFin, VigenciaInicio) "
+        "VALUES (?, ?, 'Lunes', 9, 12, '2020-01-01')",
+        (id_profesional, id_consultorio),
+    )
+    conn.commit()
+
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla = _PanelProfesionales(conn)
+    qtbot.addWidget(pantalla)
+    fila = next(
+        i for i in range(pantalla.crud_profesionales.tabla_widget.rowCount())
+        if pantalla.crud_profesionales.tabla_widget.item(i, 3).text() == "Ramos"
+    )
+    pantalla.crud_profesionales.tabla_widget.selectRow(fila)
+
+    def _dialogo_agrega_plazo(self, *a, **k):
+        self._entradas["PlazoPagoExtendido"].setText("2026-12-31")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_agrega_plazo)
+    pantalla.crud_profesionales._editar()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
 
 
 def test_seleccionar_profesional_muestra_su_documentacion(qtbot, conn, tmp_path):

@@ -1529,7 +1529,7 @@ class _PanelReservasRegulares(QWidget):
         self._resetear_formulario()
         self._sincronizar_grilla()
 
-    def _crear_un_dia(self, dia_semana: str, forzar: bool = False) -> tuple[bool, list[str]]:
+    def _crear_un_dia(self, dia_semana: str) -> tuple[bool, list[str]]:
         datos = dict(
             id_profesional=self.combo_profesional.currentData(),
             id_consultorio=self.combo_consultorio.currentData(),
@@ -1541,17 +1541,17 @@ class _PanelReservasRegulares(QWidget):
                 None if self.campo_vigencia_fin.date() == _FECHA_SIN_DATO
                 else self.campo_vigencia_fin.date().toPython().isoformat()
             ),
-            forzar=forzar,
         )
         try:
             _id, advertencias = crear_reserva_regular(self.conn, **datos)
         except ConflictoBloqueanteError as error:
-            confirmacion = QMessageBox.question(
-                self, "Conflictos detectados",
-                f"{dia_semana}: {error}\n\n¿Crear la reserva de todos modos?",
-            )
-            if confirmacion == QMessageBox.StandardButton.Yes:
-                return self._crear_un_dia(dia_semana, forzar=True)
+            # Pedido explícito de la clienta ("lo más sagrado de este
+            # sistema"): una superposición de horarios YA NO ofrece
+            # crear la reserva de todos modos — alerta bloqueante con el
+            # detalle exacto (nombres, días, horarios y consultorios,
+            # armado en `Conflicto.mensaje`) e interrumpe el proceso,
+            # sin ninguna forma de sortearla.
+            QMessageBox.warning(self, "Conflicto de horarios", f"{dia_semana}: {error}")
             return False, []
         except ValueError as error:
             QMessageBox.warning(self, "Crear reserva regular", f"{dia_semana}: {error}")
@@ -1609,16 +1609,11 @@ class _PanelReservasRegulares(QWidget):
                 vigencia_fin=dialogo.vigencia_fin,
             )
         except ConflictoBloqueanteError as error:
-            confirmacion = QMessageBox.question(
-                self, "Conflictos detectados", f"{error}\n\n¿Modificar la reserva de todos modos?",
-            )
-            if confirmacion != QMessageBox.StandardButton.Yes:
-                return
-            advertencias = modificar_reserva_regular(
-                self.conn, reserva["IdReservaRegular"], hora_inicio=dialogo.hora_inicio,
-                hora_fin=dialogo.hora_fin, vigencia_inicio=dialogo.vigencia_inicio,
-                vigencia_fin=dialogo.vigencia_fin, forzar=True,
-            )
+            # Pedido explícito de la clienta ("lo más sagrado de este
+            # sistema"): alerta bloqueante con el detalle exacto, sin
+            # ofrecer modificar la reserva de todos modos.
+            QMessageBox.warning(self, "Conflicto de horarios", str(error))
+            return
         except ValueError as error:
             QMessageBox.warning(self, "Modificar reserva", str(error))
             return
@@ -2567,7 +2562,7 @@ class _PanelReservasAisladas(QWidget):
         }
         return claves[columna]
 
-    def _crear(self, forzar: bool = False) -> None:
+    def _crear(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
             QMessageBox.warning(self, "Crear reserva aislada", "Elegí un profesional.")
@@ -2580,32 +2575,27 @@ class _PanelReservasAisladas(QWidget):
             QMessageBox.warning(self, "Crear reserva aislada", "Elegí localidad, edificio, unidad y consultorio.")
             return
         fecha = self.campo_fecha.date().toPython().isoformat()
-        if not forzar and not confirmar_si_fecha_es_mes_anterior(self, self.conn, fecha):
+        if not confirmar_si_fecha_es_mes_anterior(self, self.conn, fecha):
             return
-        # Mismo criterio que Reservas regulares (ver esa solapa): se
-        # chequea una sola vez, no en cada reintento con `forzar=True`
-        # (ya se confirmó, o no hacía falta, la primera vez).
-        if not forzar:
-            faltantes = llaves_faltantes_para_reserva(
-                self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio,
-            ) + placa_faltante_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
-            if faltantes and not _confirmar_llave_o_placa_faltante(self, faltantes):
-                return
-            # Pedido explícito de la clienta ("EN GENERAL"): vista previa
-            # de los datos con Confirmar/Cancelar antes de crear — mismo
-            # criterio que Reservas regulares, sin repetir en el
-            # reintento automático con `forzar=True`.
-            if not confirmar_datos_antes_de_crear(self, "Crear reserva aislada", [
-                f"Profesional: {self.combo_profesional.currentText()}",
-                f"Ubicación: {self.combo_localidad.currentText()} - {self.combo_edificio.currentText()} - "
-                f"{self.combo_unidad.currentText()} - {self.combo_consultorio.currentText()}",
-                f"Fecha: {self.campo_fecha.date().toString('dd-MM-yyyy')}",
-                f"Horario: {_fmt_hora(self.spin_desde.value())} a {_fmt_hora(self.spin_hasta.value())}",
-                f"Aplica recargo: {'Sí' if self.casilla_recargo.isChecked() else 'No'}",
-                f"Es reubicación: {'Sí' if self.casilla_reubicacion.isChecked() else 'No'}",
-                f"Período a imputar: {self.combo_periodo_imputar.currentText()}",
-            ]):
-                return
+        faltantes = llaves_faltantes_para_reserva(
+            self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio,
+        ) + placa_faltante_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
+        if faltantes and not _confirmar_llave_o_placa_faltante(self, faltantes):
+            return
+        # Pedido explícito de la clienta ("EN GENERAL"): vista previa de
+        # los datos con Confirmar/Cancelar antes de crear — mismo
+        # criterio que Reservas regulares.
+        if not confirmar_datos_antes_de_crear(self, "Crear reserva aislada", [
+            f"Profesional: {self.combo_profesional.currentText()}",
+            f"Ubicación: {self.combo_localidad.currentText()} - {self.combo_edificio.currentText()} - "
+            f"{self.combo_unidad.currentText()} - {self.combo_consultorio.currentText()}",
+            f"Fecha: {self.campo_fecha.date().toString('dd-MM-yyyy')}",
+            f"Horario: {_fmt_hora(self.spin_desde.value())} a {_fmt_hora(self.spin_hasta.value())}",
+            f"Aplica recargo: {'Sí' if self.casilla_recargo.isChecked() else 'No'}",
+            f"Es reubicación: {'Sí' if self.casilla_reubicacion.isChecked() else 'No'}",
+            f"Período a imputar: {self.combo_periodo_imputar.currentText()}",
+        ]):
+            return
         datos = dict(
             id_profesional=id_profesional,
             id_consultorio=id_consultorio,
@@ -2614,7 +2604,6 @@ class _PanelReservasAisladas(QWidget):
             hora_fin=self.spin_hasta.value(),
             aplica_recargo=self.casilla_recargo.isChecked(),
             es_reubicacion=self.casilla_reubicacion.isChecked(),
-            forzar=forzar,
             # "En la tabla agregar el campo 'Período imputado'" — se
             # guarda ya resuelto a "AAAA-MM" (no "actual"/"siguiente" tal
             # cual viene del combo), mismo criterio que `_resolver_
@@ -2627,12 +2616,10 @@ class _PanelReservasAisladas(QWidget):
         try:
             _id, advertencias = crear_reserva_aislada(self.conn, **datos)
         except ConflictoBloqueanteError as error:
-            confirmacion = QMessageBox.question(
-                self, "Conflictos detectados",
-                f"{error}\n\n¿Crear la reserva de todos modos?",
-            )
-            if confirmacion == QMessageBox.StandardButton.Yes:
-                self._crear(forzar=True)
+            # Pedido explícito de la clienta ("lo más sagrado de este
+            # sistema"): alerta bloqueante con el detalle exacto, sin
+            # ofrecer crear la reserva de todos modos.
+            QMessageBox.warning(self, "Conflicto de horarios", str(error))
             return
         except ValueError as error:
             QMessageBox.warning(self, "Crear reserva aislada", str(error))
@@ -2729,6 +2716,13 @@ class _PanelReservasAisladas(QWidget):
         self.conn.commit()
         if requiere_aviso:
             QMessageBox.information(self, titulo, "Eliminada el mismo día: avisar al profesional.")
+        else:
+            # Pedido explícito de la clienta: "como con todos los demás
+            # procesos" — faltaba la alerta final de éxito para el caso
+            # normal (no el mismo día), mismo criterio que ya tiene
+            # Reserva extraordinaria (`_cancelar_registro`) para su
+            # propio "Cancelar reserva".
+            QMessageBox.information(self, titulo, "Reserva eliminada con éxito.")
         self._copiar_mensaje_detalle(reserva["IdProfesional"])
         self.actualizar()
         return True
@@ -2785,17 +2779,11 @@ class _PanelReservasAisladas(QWidget):
                 item_extraordinario=dialogo.item_extraordinario, monto_extraordinario=dialogo.monto_extraordinario,
             )
         except ConflictoBloqueanteError as error:
-            confirmacion = QMessageBox.question(
-                self, "Conflictos detectados", f"{error}\n\n¿Modificar la reserva de todos modos?",
-            )
-            if confirmacion != QMessageBox.StandardButton.Yes:
-                return
-            advertencias = modificar_reserva_aislada(
-                self.conn, reserva["IdReservaAislada"], hora_inicio=dialogo.hora_inicio,
-                hora_fin=dialogo.hora_fin, aplica_recargo=dialogo.aplica_recargo,
-                item_extraordinario=dialogo.item_extraordinario, monto_extraordinario=dialogo.monto_extraordinario,
-                forzar=True,
-            )
+            # Pedido explícito de la clienta ("lo más sagrado de este
+            # sistema"): alerta bloqueante con el detalle exacto, sin
+            # ofrecer modificar la reserva de todos modos.
+            QMessageBox.warning(self, "Conflicto de horarios", str(error))
+            return
         except ValueError as error:
             QMessageBox.warning(self, "Modificar reserva", str(error))
             return
@@ -3073,7 +3061,7 @@ class _PanelReservaExtraordinaria(QWidget):
             return
         QGuiApplication.clipboard().setText(texto)
 
-    def _crear(self, forzar: bool = False) -> None:
+    def _crear(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
             QMessageBox.warning(self, "Crear reserva extraordinaria", "Elegí un profesional.")
@@ -3096,34 +3084,33 @@ class _PanelReservaExtraordinaria(QWidget):
             QMessageBox.warning(self, "Crear reserva extraordinaria", "Cargá el monto a cobrar.")
             return
         fecha = self.campo_fecha.date().toPython().isoformat()
-        if not forzar and not confirmar_si_fecha_es_mes_anterior(self, self.conn, fecha):
+        if not confirmar_si_fecha_es_mes_anterior(self, self.conn, fecha):
             return
-        if not forzar:
-            faltantes = llaves_faltantes_para_reserva(
-                self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio,
-            ) + placa_faltante_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
-            if faltantes and not _confirmar_llave_o_placa_faltante(self, faltantes):
-                return
-            # Pedido explícito de la clienta ("EN GENERAL"): vista previa
-            # de los datos con Confirmar/Cancelar antes de crear — mismo
-            # criterio que Reservas regulares/aisladas.
-            lineas_confirmacion = [
-                f"Profesional: {self.combo_profesional.currentText()}",
-                f"Ubicación: {self.combo_localidad.currentText()} - {self.combo_edificio.currentText()} - "
-                f"{self.combo_unidad.currentText()} - {self.combo_consultorio.currentText()}",
-                f"Fecha: {self.campo_fecha.date().toString('dd-MM-yyyy')}",
-                f"Horario: {_fmt_hora(self.spin_desde.value())} a {_fmt_hora(self.spin_hasta.value())}",
-                f"Ítem a cargar: {item}",
-                f"Monto a cobrar: {formatear_moneda(monto)}",
-                f"Período a imputar: {self.combo_periodo_imputar.currentText()}",
-            ]
-            if not confirmar_datos_antes_de_crear(self, "Crear reserva extraordinaria", lineas_confirmacion):
-                return
+        faltantes = llaves_faltantes_para_reserva(
+            self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio,
+        ) + placa_faltante_para_reserva(self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio)
+        if faltantes and not _confirmar_llave_o_placa_faltante(self, faltantes):
+            return
+        # Pedido explícito de la clienta ("EN GENERAL"): vista previa de
+        # los datos con Confirmar/Cancelar antes de crear — mismo
+        # criterio que Reservas regulares/aisladas.
+        lineas_confirmacion = [
+            f"Profesional: {self.combo_profesional.currentText()}",
+            f"Ubicación: {self.combo_localidad.currentText()} - {self.combo_edificio.currentText()} - "
+            f"{self.combo_unidad.currentText()} - {self.combo_consultorio.currentText()}",
+            f"Fecha: {self.campo_fecha.date().toString('dd-MM-yyyy')}",
+            f"Horario: {_fmt_hora(self.spin_desde.value())} a {_fmt_hora(self.spin_hasta.value())}",
+            f"Ítem a cargar: {item}",
+            f"Monto a cobrar: {formatear_moneda(monto)}",
+            f"Período a imputar: {self.combo_periodo_imputar.currentText()}",
+        ]
+        if not confirmar_datos_antes_de_crear(self, "Crear reserva extraordinaria", lineas_confirmacion):
+            return
         try:
             _id, advertencias = crear_reserva_aislada(
                 self.conn, id_profesional=id_profesional, id_consultorio=id_consultorio, fecha=fecha,
                 hora_inicio=self.spin_desde.value(), hora_fin=self.spin_hasta.value(),
-                es_extraordinaria=True, item_extraordinario=item, monto_extraordinario=monto, forzar=forzar,
+                es_extraordinaria=True, item_extraordinario=item, monto_extraordinario=monto,
                 # Mismo criterio que Reservas aisladas: se guarda ya
                 # resuelto a "AAAA-MM" (no "actual"/"siguiente" tal cual
                 # viene del combo), para la columna "Período imputado".
@@ -3132,11 +3119,10 @@ class _PanelReservaExtraordinaria(QWidget):
                 ),
             )
         except ConflictoBloqueanteError as error:
-            confirmacion = QMessageBox.question(
-                self, "Conflictos detectados", f"{error}\n\n¿Crear la reserva de todos modos?",
-            )
-            if confirmacion == QMessageBox.StandardButton.Yes:
-                self._crear(forzar=True)
+            # Pedido explícito de la clienta ("lo más sagrado de este
+            # sistema"): alerta bloqueante con el detalle exacto, sin
+            # ofrecer crear la reserva de todos modos.
+            QMessageBox.warning(self, "Conflicto de horarios", str(error))
             return
         except ValueError as error:
             QMessageBox.warning(self, "Crear reserva extraordinaria", str(error))
@@ -3222,16 +3208,11 @@ class _PanelReservaExtraordinaria(QWidget):
                 monto_extraordinario=dialogo.monto_extraordinario,
             )
         except ConflictoBloqueanteError as error:
-            confirmacion = QMessageBox.question(
-                self, "Conflictos detectados", f"{error}\n\n¿Modificar la reserva de todos modos?",
-            )
-            if confirmacion != QMessageBox.StandardButton.Yes:
-                return
-            advertencias = modificar_reserva_aislada(
-                self.conn, reserva["IdReservaAislada"], hora_inicio=dialogo.hora_inicio,
-                hora_fin=dialogo.hora_fin, item_extraordinario=dialogo.item_extraordinario,
-                monto_extraordinario=dialogo.monto_extraordinario, forzar=True,
-            )
+            # Pedido explícito de la clienta ("lo más sagrado de este
+            # sistema"): alerta bloqueante con el detalle exacto, sin
+            # ofrecer modificar la reserva de todos modos.
+            QMessageBox.warning(self, "Conflicto de horarios", str(error))
+            return
         except ValueError as error:
             QMessageBox.warning(self, "Modificar reserva", str(error))
             return

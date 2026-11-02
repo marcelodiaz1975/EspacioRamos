@@ -648,6 +648,142 @@ Pedido de la clienta, tres puntos:
      agosto. Confirmado por reversión que ambos tests fallan sin el
      fix, con el síntoma exacto reportado.
 
+## Hilo abierto: batch de 8 pedidos (F5, mensajería, plazo extendido, Procesando, conflictos de horarios, Configuración general)
+
+Pedido de la clienta, ocho puntos en un solo mensaje:
+
+1. **Pendiente de la clienta — F5 ("Refrescar") "no funciona en ningún
+   lado".** Investigado con un repro directo (`QTest.keyClick` sobre un
+   `VentanaPrincipal` real con un panel sintético): el mecanismo del
+   atajo en sí (`VentanaPrincipal._reiniciar_solapa_activa`/
+   `_panel_mas_interno`, `app/gui/main_window.py`) sigue andando bien —
+   encuentra el panel más interno de la solapa activa y le llama
+   `reiniciar()` sin problema. Ya existe una auditoría completa previa
+   de los ~24 métodos `reiniciar()` del sistema (ver "F5 ('Refrescar')"
+   más arriba y `docs/historial/general.md`), así que no parece un
+   atajo roto a nivel global. La nueva especificación que dio la
+   clienta en este pedido es más estricta que lo que esa auditoría
+   confirmó en su momento: "los filtros y los distintos elementos
+   tienen valores iniciales, al presionar esa tecla quiero que devuelva
+   la solapa a esos estados iniciales a TODOS los elementos" — no solo
+   el primer filtro/el foco, sino cada campo de cada solapa. Verificar
+   eso de verdad (no solo que el foco vuelva al principio) en las ~24
+   pantallas es un relevamiento exhaustivo — tal cual la clienta pidió
+   que se avise en ese caso en vez de adivinar. Falta que indique si
+   quiere ese barrido completo ahora, o algunas pantallas puntuales
+   donde lo haya visto fallar, para arrancar por ahí.
+
+2. **Resuelto — Centro de mensajería, "Saldo actual" mal calculado para
+   categoría A.** La columna usaba la misma fórmula genérica para R y A
+   (`saldo_anterior + SaldoCuentaActual`), pero `SaldoCuentaActual`
+   nunca se acredita para un A (no hay liquidación propia de esa
+   categoría — `emitir_liquidacion` es exclusiva de R). Se agrega
+   `saldo_actual_aislada` (`app/negocio/mensajes.py`), con el mismo
+   criterio EXACTO que el "SALDO A ABONAR" de `mensaje_detalle_reserva_
+   aislada` (reservas aisladas del mes + llaves + ítems libres, menos
+   pagos del período, más saldo anterior) — de hecho `mensaje_detalle_
+   reserva_aislada` pasa a llamar a esta función nueva para su propio
+   total, para que los dos lugares no puedan divergir nunca. `actualizar()`
+   (`app/gui/pantallas/mensajeria.py`) usa esta función para A y sigue
+   con la fórmula de siempre para R/X (que sí es correcta: `SaldoCuenta
+   Actual` para un R refleja justo "lo liquidado menos los pagos del
+   período", vía `emitir_liquidacion`/`registrar_pago`). Tests nuevos:
+   `test_centro_mensajeria_saldo_actual_de_un_a_se_calcula_de_lo_
+   agendado_menos_pagos` (`tests/test_gui_mensajeria.py`, confirmado que
+   falla sin el fix, mostrando `SaldoCuentaActual` crudo en vez del
+   cálculo real).
+
+3. **Resuelto — modificar el plazo de pago extendido de un R no
+   regeneraba la liquidación.** `_al_actualizar_profesional`
+   (`app/gui/pantallas/profesionales.py`) suma el mismo disparador que
+   ya usan Vacaciones/Cargos especiales/Pagos: si `PlazoPagoExtendido`,
+   `MotivoPlazoExtra` o `DiaPlazoExtendidoAutomatico` cambiaron en la
+   edición, llama a `regenerar_si_corresponde` con el período actual.
+   Test nuevo: `test_editar_plazo_pago_extendido_regenera_liquidacion_
+   enviada` (`tests/test_profesionales.py`).
+
+4. **Resuelto — Fechas especiales no mostraba el indicador de
+   Procesando al regenerar liquidaciones.** `_regenerar_liquidaciones_
+   del_periodo_actual` (`app/gui/pantallas/catalogos.py`) envuelve su
+   loop en `Procesando` (mismo mecanismo que Liquidaciones), con
+   `procesando.tick()` por profesional.
+
+5. **Resuelto — editar en Configuración general / "Valores y
+   liquidación" un campo que afecta saldos no regeneraba nada.**
+   `ConfiguracionGeneral._guardar` (`app/gui/pantallas/configuracion.py`)
+   ahora compara el registro antes/después de guardar contra
+   `_CAMPOS_VALORES_LIQUIDACION_AFECTAN_SALDO` (recargo de aisladas,
+   ajuste por saldo atrasado, tolerancia de deuda, descuento feriados/
+   no laborables, semanas de vacaciones máximas, decimales del total) —
+   los únicos de ese grupo que de verdad entran en `calcular_
+   liquidacion`/`vacaciones`/el redondeo del total (confirmado uno por
+   uno contra el código, no a ojo). Si cambió alguno, regenera TODAS las
+   liquidaciones ya emitidas del período actual (no acotado a un
+   profesional puntual, a diferencia de Fechas especiales) con el mismo
+   indicador de Procesando. El resto del grupo (frecuencia de
+   actualización de valores, el default de "aplica recargo" de una
+   aislada nueva, cadencias de recordatorios, retención de historial) no
+   cambia ningún cálculo ya hecho, así que no dispara nada. Tests
+   nuevos: `test_guardar_campo_que_afecta_saldo_regenera_liquidaciones_
+   enviadas`/`..._que_no_afecta_saldo_no_regenera_...`
+   (`tests/test_gui_configuracion.py`).
+
+6. **Resuelto — "lo más sagrado de este sistema": una superposición de
+   horarios bloqueante ya no se puede forzar de ninguna forma.** Antes,
+   `crear_reserva_regular`/`modificar_reserva_regular`/`crear_reserva_
+   aislada`/`modificar_reserva_aislada` (`app/negocio/reservas.py`)
+   tenían un parámetro `forzar` que, si el operador confirmaba un
+   cartel "¿Crear/Modificar la reserva de todos modos?" después de ver
+   el conflicto, creaba/modificaba la reserva IGUAL. Se sacó el
+   parámetro por completo de las cuatro funciones (y de los seis
+   lugares de la GUI, `app/gui/pantallas/reservas.py`, que lo usaban
+   para reintentar) — un `ConflictoBloqueanteError` ahora siempre
+   interrumpe el proceso, sin ninguna vía para sortearlo, en Reservas
+   regulares/aisladas/extraordinarias, tanto al crear como al modificar.
+   El cartel pasa de `QMessageBox.question` (Sí/No) a `QMessageBox.
+   warning` (solo Aceptar) con el detalle del conflicto. Ese detalle
+   (`Conflicto.mensaje`, armado en `verificar_conflictos_regular`/
+   `verificar_conflictos_aislada`) ya incluía el nombre del profesional,
+   el día/fecha y el horario de la reserva con la que choca — se le
+   suma el CONSULTORIO exacto (`_texto_consultorio_conflicto`, nueva),
+   que antes no se mencionaba (se daba por obvio porque es el mismo que
+   se está reservando), completando el pedido explícito de "nombres,
+   días, horarios y consultorios exactos". Tests: `test_conflicto_
+   bloqueante_no_se_puede_forzar_de_ninguna_forma` (reemplaza al viejo
+   `test_forzar_ignora_conflicto_bloqueante`, que probaba justo el
+   comportamiento contrario) y el ajuste de `test_crear_reserva_
+   regular_en_periodo_cerrado_no_se_puede_forzar` (ambos en
+   `tests/test_reservas.py`) — confirmada la suite completa de Reservas
+   (GUI + negocio) sin romper nada de lo ya existente.
+
+7. **Resuelto — Centro de mensajería mostraba profesionales categoría A
+   sin reservas activas.** La depuración de A sin aisladas vigentes
+   (DC-02 §2.2, `_tiene_aisladas_vigentes` en `app/gui/pantallas/
+   mensajeria.py`) ya existía y tenía tests, pero comparaba contra el
+   primer día del PERÍODO OPERATIVO (que puede estar atrasado si todavía
+   no se apretó "Avanzar de mes") en vez de la fecha REAL del calendario
+   — mismo bug de fondo que ya se había corregido para el cuadrito de
+   cumpleaños del Panel de control (`fecha_real` vs `fecha_actual`, ver
+   #148). Una aislada de un período ya pasado en la realidad, pero
+   dentro del período operativo atrasado, seguía contando como
+   "vigente" y el profesional no se depuraba. Cambiado a `fecha_real`
+   (ya no depende de `periodo`, se sacó ese parámetro de `_tiene_
+   aisladas_vigentes`). Test nuevo: `test_centro_mensajeria_aislada_
+   depende_de_la_fecha_real_no_del_periodo_operativo_atrasado`
+   (`tests/test_gui_mensajeria.py`, confirmado que falla sin el fix). El
+   pedido de mostrar en marrón a los A sin reservas pero con deuda
+   queda explícitamente SIN implementar — la clienta está evaluando un
+   cambio de esquema de colores y pidió no tocarlo todavía.
+
+8. **Resuelto — eliminar una reserva aislada (caso normal, no el mismo
+   día) no mostraba la alerta final de éxito.** `_PanelReservasAisladas.
+   _eliminar_registro` (`app/gui/pantallas/reservas.py`) tenía el aviso
+   de "avisar al profesional" para el caso del mismo día, pero el resto
+   de los casos no mostraba ningún cartel al terminar — mismo criterio
+   que ya tenía Reserva extraordinaria para su "Cancelar reserva".
+   Test nuevo: `test_eliminar_reserva_aislada_muestra_alerta_final_de_
+   exito` (`tests/test_gui_reservas.py`).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

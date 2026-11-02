@@ -60,7 +60,10 @@ from PySide6.QtWidgets import (
 from app.gui.pantallas.bloques_rigidos import _PanelBloquesRigidos
 from app.gui.widgets.fecha import aplicar_color_sabado_negro, instalar_flechas_cambian_fecha_completa
 from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.procesando import Procesando
+from app.negocio.dias import periodo_actual
 from app.negocio.formato import formatear_moneda
+from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.seguridad import cambiar_contrasena_maestra, hay_contrasena_maestra
 from app.repositorio.registro import obtener_repositorio
 
@@ -212,6 +215,24 @@ _GRUPOS: list[tuple[str, list[str]]] = [
     ]),
     ("Modo QA", ["FechaFicticia", "ModoFechaFicticia"]),
     ("Seguridad", ["MinutosInactividadBloqueo", "ContrasenaMaestra"]),
+]
+
+# Pedido explícito de la clienta: de todos los campos de "Valores y
+# liquidación", estos siete son los que de verdad entran en el cálculo
+# de un saldo ya liquidado (`app.negocio.liquidaciones.calcular_
+# liquidacion`/`app.negocio.vacaciones`/`app.negocio.formato.
+# decimales_total_liquidacion`) — recargo de aisladas, ajuste por saldo
+# atrasado, tolerancia de deuda, descuento de feriados/no laborables,
+# semanas de vacaciones (define el % de descuento por semana) y los
+# decimales del total (cambia el redondeo del monto final). El resto
+# del grupo (frecuencia de actualización de valores, el default de
+# "aplica recargo" para una aislada NUEVA, cadencias de recordatorios,
+# retención de historial) no cambia ningún número ya calculado de una
+# liquidación existente, así que editarlos no dispara nada acá.
+_CAMPOS_VALORES_LIQUIDACION_AFECTAN_SALDO = [
+    "RecargoPorcentajeAisladas", "PorcentajeAjusteSaldoAtrasado", "ToleranciaDeudaDescuento",
+    "PorcentajeDescuentoFeriado", "PorcentajeDescuentoNoLaborable", "SemanasVacacionesMaximasPorAnio",
+    "DecimalesTotalLiquidacion",
 ]
 
 
@@ -566,6 +587,7 @@ class ConfiguracionGeneral(QWidget):
         self._entradas["FechaFicticia"].setDate(fecha)
 
     def _guardar(self) -> None:
+        registro_anterior = self.repositorio.obtener(1)
         valores = {}
         for nombre, _ in _CAMPOS_NUMERICOS:
             valores[nombre] = self._entradas[nombre].value()
@@ -588,5 +610,37 @@ class ConfiguracionGeneral(QWidget):
         aplicar_tema = getattr(self.window(), "_aplicar_tema", None)
         if aplicar_tema is not None:
             aplicar_tema()
+        if registro_anterior is not None:
+            self._regenerar_liquidaciones_si_corresponde(registro_anterior, valores)
         QMessageBox.information(self, "Guardar configuración", "Configuración guardada.")
         self.actualizar()
+
+    def _regenerar_liquidaciones_si_corresponde(self, registro_anterior: sqlite3.Row, valores_nuevos: dict) -> None:
+        """Pedido explícito de la clienta: editar en "Valores y
+        liquidación" cualquier campo que afecte el cálculo de un saldo ya
+        liquidado (`_CAMPOS_VALORES_LIQUIDACION_AFECTAN_SALDO`) tiene que
+        regenerar TODAS las liquidaciones ya emitidas del período actual y
+        dejarlas marcadas como no enviadas, con el mismo indicador de
+        Procesando que ya usa Fechas especiales para su propio disparador
+        equivalente (`catalogos._regenerar_liquidaciones_del_periodo_
+        actual`, acotado a los profesionales de un feriado puntual — acá
+        es TODOS, sin acotar a nada, porque el cambio es general)."""
+        if not any(
+            valores_nuevos[campo] != registro_anterior[campo]
+            for campo in _CAMPOS_VALORES_LIQUIDACION_AFECTAN_SALDO
+        ):
+            return
+        periodo = periodo_actual(self.conn)
+        ids_profesional = {
+            f["IdProfesional"] for f in obtener_repositorio(self.conn, "LiquidacionEmitida").listar(Periodo=periodo)
+        }
+        with Procesando(self, "Regenerando liquidaciones...") as procesando:
+            for id_profesional in ids_profesional:
+                regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo)
+                procesando.tick()
+        if ids_profesional:
+            QMessageBox.information(
+                self, "Configuración general",
+                f"Se regeneraron {len(ids_profesional)} liquidación(es) ya emitida(s) del período {periodo}: "
+                "quedaron marcadas como no enviadas.",
+            )

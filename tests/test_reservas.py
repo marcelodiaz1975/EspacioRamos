@@ -113,14 +113,17 @@ def test_crear_reserva_regular_en_periodo_cerrado_bloquea(conn, consultorio, pro
 
 
 def test_crear_reserva_regular_en_periodo_cerrado_no_se_puede_forzar(conn, consultorio, profesional_factory):
-    """A diferencia de los conflictos de superposición, `forzar=True` no
-    pisa este bloqueo — no es una advertencia que se pueda confirmar."""
+    """Este bloqueo no tiene ningún parámetro que lo pise — a diferencia
+    de los conflictos de superposición (que sí tenían uno, `forzar`,
+    hasta que se sacó por completo: ver `test_forzar_ya_no_existe_para_
+    ningun_conflicto_de_superposicion`), nunca existió una forma de
+    confirmar esto como advertencia."""
     id_prof = profesional_factory("Lo Veci")
     emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-09", fecha_emision="2026-09-01")
     with pytest.raises(ValueError):
         crear_reserva_regular(
             conn, id_profesional=id_prof, id_consultorio=consultorio, dia_semana="Lunes",
-            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01", forzar=True,
+            hora_inicio=14, hora_fin=16, vigencia_inicio="2026-08-01",
         )
 
 
@@ -632,19 +635,26 @@ def test_superposicion_equipo_e_con_su_r_solo_advierte(conn, consultorio, profes
     assert "reserva regular" in advertencias[0]
 
 
-def test_forzar_ignora_conflicto_bloqueante(conn, consultorio, profesional_factory):
+def test_conflicto_bloqueante_no_se_puede_forzar_de_ninguna_forma(conn, consultorio, profesional_factory):
+    """Pedido explícito de la clienta ("lo más sagrado de este sistema"):
+    una superposición de horarios bloqueante ya no se puede forzar desde
+    ningún lado — se sacó por completo el parámetro `forzar` que antes
+    dejaba crear la reserva igual (ver el viejo `test_forzar_ignora_
+    conflicto_bloqueante`, reemplazado por este)."""
     id_prof_a = profesional_factory("Lo Veci")
     id_prof_b = profesional_factory("Gomez")
     crear_reserva_regular(
         conn, id_profesional=id_prof_a, id_consultorio=consultorio, dia_semana="Lunes",
         hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01",
     )
-    id_reserva, advertencias = crear_reserva_regular(
-        conn, id_profesional=id_prof_b, id_consultorio=consultorio, dia_semana="Lunes",
-        hora_inicio=15, hora_fin=17, vigencia_inicio="2026-01-01", forzar=True,
-    )
-    assert id_reserva is not None
-    assert advertencias
+    with pytest.raises(ConflictoBloqueanteError):
+        crear_reserva_regular(
+            conn, id_profesional=id_prof_b, id_consultorio=consultorio, dia_semana="Lunes",
+            hora_inicio=15, hora_fin=17, vigencia_inicio="2026-01-01",
+        )
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM ReservaRegular WHERE IdProfesional = ?", (id_prof_b,),
+    ).fetchone()["c"] == 0
 
 
 def test_no_superposicion_si_no_hay_solapamiento_horario(conn, consultorio, profesional_factory):

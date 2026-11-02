@@ -61,7 +61,7 @@ from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.orden_tabla import clave_orden_codigo
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
-from app.negocio.dias import fecha_actual, periodo_actual
+from app.negocio.dias import fecha_actual, fecha_real, periodo_actual
 from app.negocio.formato import formatear_moneda
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
 from app.negocio.mensajeria import (
@@ -82,6 +82,7 @@ from app.negocio.mensajes import (
     mensaje_recordatorio_fin_de_mes,
     mensaje_situacion_1,
     mensaje_situacion_5,
+    saldo_actual_aislada,
 )
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
 from app.repositorio.registro import obtener_repositorio
@@ -372,7 +373,19 @@ class _PanelCentroMensajeria(QWidget):
             for fila_idx, profesional in enumerate(self._profesionales):
                 color = colores[profesional["IdProfesional"]]
                 saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
-                saldo_actual = saldo_anterior + (profesional["SaldoCuentaActual"] or 0.0)
+                # Pedido explícito de la clienta: para un R, "lo liquidado
+                # en el mes en curso menos los pagos que hizo" — ya es
+                # justo lo que acredita/descuenta SaldoCuentaActual
+                # (`emitir_liquidacion`/`registrar_pago`), sumado al saldo
+                # anterior. Para un A, en cambio, nada acredita nunca ese
+                # campo (no hay liquidación propia de categoría A) — "lo
+                # agendado... menos los pagos" se calcula en vivo con el
+                # mismo criterio exacto que el "SALDO A ABONAR" del
+                # mensaje de detalle (`saldo_actual_aislada`).
+                if profesional["CategoriaProfesional"] == "A":
+                    saldo_actual = saldo_actual_aislada(self.conn, profesional["IdProfesional"], periodo)
+                else:
+                    saldo_actual = saldo_anterior + (profesional["SaldoCuentaActual"] or 0.0)
                 self.tabla.setItem(fila_idx, 0, _ItemCodigo(profesional["IdCodigo"] or ""))
                 self.tabla.setItem(fila_idx, 1, QTableWidgetItem(_nombre_con_tratamiento(profesional)))
                 estado = _texto_estado(profesional["CategoriaProfesional"], color)
@@ -426,7 +439,7 @@ class _PanelCentroMensajeria(QWidget):
         ]
         candidatos = [
             p for p in candidatos
-            if p["CategoriaProfesional"] != "A" or self._tiene_aisladas_vigentes(p["IdProfesional"], periodo)
+            if p["CategoriaProfesional"] != "A" or self._tiene_aisladas_vigentes(p["IdProfesional"])
         ]
         candidatos = [
             p for p in candidatos
@@ -443,12 +456,21 @@ class _PanelCentroMensajeria(QWidget):
             return [p for p in candidatos if color_profesional(self.conn, p, periodo) in grupo]
         return candidatos  # "todos"
 
-    def _tiene_aisladas_vigentes(self, id_profesional: int, periodo: str) -> bool:
-        anio, mes = (int(p) for p in periodo.split("-"))
-        primer_dia_periodo = f"{anio:04d}-{mes:02d}-01"
+    def _tiene_aisladas_vigentes(self, id_profesional: int) -> bool:
+        """DC-02 §2.2: "mes en curso o posteriores" se evalúa contra la
+        fecha REAL del calendario (`fecha_real`), no contra el período
+        operativo (que puede estar atrasado si todavía no se apretó
+        "Avanzar de mes") ni contra el período que esté tipeado en el
+        filtro de esta pantalla (que puede ser uno viejo, a propósito,
+        para revisar saldos pasados) — mismo criterio que ya usa el
+        cuadrito de cumpleaños del Panel de control (`fecha_real`, no
+        `fecha_actual`): si el profesional todavía tiene algo agendado
+        desde HOY en adelante, sigue siendo un contacto activo sin
+        importar en qué período esté parado el sistema."""
+        primer_dia_mes_real = fecha_real(self.conn).replace(day=1).isoformat()
         fila = self.conn.execute(
             "SELECT 1 FROM ReservaAislada WHERE IdProfesional = ? AND Estado = 'Confirmada' AND Fecha >= ? LIMIT 1",
-            (id_profesional, primer_dia_periodo),
+            (id_profesional, primer_dia_mes_real),
         ).fetchone()
         return fila is not None
 

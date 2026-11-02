@@ -26,6 +26,9 @@ from app.gui.pantallas.configuracion import (
     _CampoRuta,
     ConfiguracionGeneral,
 )
+from app.negocio.dias import periodo_actual
+from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
+from app.repositorio.registro import obtener_repositorio
 
 
 @pytest.fixture
@@ -76,6 +79,68 @@ def test_guardar_persiste_texto_y_numero(qtbot, conn):
     fila = conn.execute("SELECT * FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     assert fila["NombreEspacio"] == "Espacio Nuevo"
     assert fila["ToleranciaDeudaDescuento"] == 500.0
+
+
+def test_guardar_campo_que_afecta_saldo_regenera_liquidaciones_enviadas(qtbot, conn):
+    """Pedido explícito de la clienta: editar en "Valores y liquidación"
+    un campo que afecte el cálculo de saldos (ej. tolerancia de deuda)
+    tiene que regenerar TODAS las liquidaciones ya emitidas del período
+    actual y dejarlas marcadas como no enviadas — mismo criterio que
+    Fechas especiales para su propio disparador equivalente."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,))
+    id_unidad = conn.execute("SELECT IdUnidad FROM Unidad").fetchone()["IdUnidad"]
+    conn.execute(
+        "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio, ValorHoraRegularActual) VALUES (?, 1, 1000)",
+        (id_unidad,),
+    )
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ramos")
+    conn.execute(
+        "INSERT INTO ReservaRegular (IdProfesional, IdConsultorio, DiaSemana, HoraInicio, HoraFin, VigenciaInicio) "
+        "VALUES (?, ?, 'Lunes', 9, 12, '2020-01-01')",
+        (id_profesional, id_consultorio),
+    )
+    conn.commit()
+
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["ToleranciaDeudaDescuento"].setValue(
+        pantalla._entradas["ToleranciaDeudaDescuento"].value() + 500
+    )
+    pantalla._guardar()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_guardar_campo_que_no_afecta_saldo_no_regenera_liquidaciones(qtbot, conn):
+    """Contraparte del test anterior: un campo de "Valores y liquidación"
+    que NO entra en el cálculo de ningún saldo (ej. la cadencia de un
+    recordatorio) no tiene que disparar ninguna regeneración."""
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ramos")
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla = ConfiguracionGeneral(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._entradas["DiasAntesFinMesRecordatorioGeneral"].setValue(
+        pantalla._entradas["DiasAntesFinMesRecordatorioGeneral"].value() + 1
+    )
+    pantalla._guardar()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    assert len(emisiones) == 1
 
 
 def test_guardar_persiste_booleano(qtbot, conn):
