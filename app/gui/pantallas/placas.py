@@ -84,7 +84,7 @@ from app.negocio.placas import (
     posiciones_libres,
     texto_para_imprimir,
 )
-from app.pdf.estilos import MARGEN
+from app.pdf.estilos import MARGEN, clave_orden_unidad
 from app.pdf.placas_pdf import (
     ALTO_PLACA,
     ANCHO_PLACA,
@@ -450,7 +450,7 @@ class _PanelPlacasOperativas(QWidget):
         claves = {
             0: lambda e: e["localidad"],
             1: lambda e: e["edificio"],
-            2: lambda e: e["unidad"],
+            2: lambda e: clave_orden_unidad(e["unidad"]),
             3: lambda e: e["placa"]["PosicionTablero"] or 0,
             4: lambda e: clave_orden_codigo(e["texto_profesional"]),
             5: lambda e: e["nombre"],
@@ -485,7 +485,7 @@ class _PanelPlacasOperativas(QWidget):
             # Localidad, Edificio, Unidad, Posición (sort estable: se ordena
             # primero por la clave menos significativa, pedido de la clienta).
             enriquecidos.sort(key=lambda e: e["placa"]["PosicionTablero"] or 0)
-            enriquecidos.sort(key=lambda e: e["unidad"])
+            enriquecidos.sort(key=lambda e: clave_orden_unidad(e["unidad"]))
             enriquecidos.sort(key=lambda e: e["edificio"])
             enriquecidos.sort(key=lambda e: e["localidad"])
 

@@ -14,7 +14,7 @@ from app.gui.pantallas.reservas import (
     _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
-from app.negocio.dias import periodo_actual
+from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.formato import mes_texto
 from app.negocio.lista_espera import GrupoCobertura, crear_pedido
 from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
@@ -81,6 +81,45 @@ def _preparar(conn):
     conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
     conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Gómez')")
     conn.commit()
+
+
+def test_vigencia_inicio_arranca_en_el_primer_dia_del_mes(qtbot, conn):
+    """Pedido explícito de la clienta: "cuando asigno una reserva regular
+    que por defecto me ponga el primer día del mes como fecha por
+    defecto" — en vez del día de hoy (sin ningún significado especial
+    para cuándo arranca a correr una reserva nueva)."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    hoy = fecha_actual(conn)
+    assert panel.campo_vigencia_inicio.date().toPython() == hoy.replace(day=1)
+
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()  # deja el formulario listo para cargar otra
+
+    assert panel.campo_vigencia_inicio.date().toPython() == hoy.replace(day=1)
+
+
+def test_cambiar_categoria_de_profesional_en_caliente_lo_muestra_sin_reiniciar(qtbot, conn):
+    """Bug real reportado por la clienta: tenía un profesional categoría
+    X, lo pasó a R, y en la solapa de Reservas regulares no aparecía en
+    "Profesional" hasta cerrar y volver a abrir el sistema —
+    `combo_profesional` se armaba una sola vez al construir el panel y
+    nunca se volvía a poblar. F5/reingresar a la solapa (`reiniciar()`)
+    ahora reconstruye el combo desde cero."""
+    _preparar(conn)
+    id_prof_x = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="X", Apellido="RecienCambiado")
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    assert panel.combo_profesional.findData(id_prof_x) < 0  # todavía X: no aparece
+
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof_x, CategoriaProfesional="R")
+    conn.commit()
+    panel.reiniciar()
+
+    assert panel.combo_profesional.findData(id_prof_x) >= 0
 
 
 def test_combos_profesional_son_buscables_por_codigo_o_nombre(qtbot, conn):

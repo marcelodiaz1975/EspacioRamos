@@ -60,15 +60,28 @@ def test_nombre_archivo_incluye_localidad_si_hay_varias(conn, tmp_path):
     assert "San Justo" in ruta
 
 
-def test_incluye_las_dos_secciones_de_nivel_1_con_departamento_real(conn, tmp_path):
+def test_incluye_las_tres_secciones_de_nivel_1_con_departamento_real(conn, tmp_path):
+    """Pedido explícito de la clienta: abajo de la grilla y antes de las
+    fotos, el cuadro de valores de todos los consultorios (mismo
+    `matriz_valores_edificio` que ya usa Propuesta/Liquidación) — a
+    diferencia de Propuesta (que anonimiza con "Unidad N" porque va a
+    profesionales NO activos), acá muestra el departamento real."""
     _crear_edificio(conn, "Ramos 1", "CABA")
     ruta = generar_pdf_disponibilidad(conn, str(tmp_path))
 
-    texto = fitz.open(ruta)[0].get_text()
+    paginas = fitz.open(ruta)
+    texto = "".join(pagina.get_text() for pagina in paginas)
     assert "Disponibilidad de consultorios al" in texto
+    assert "Valores de los consultorios para el período comprendido entre" in texto
     assert "Fotos de los consultorios" in texto
     assert "Condiciones y forma de reserva" not in texto  # solo la grilla, no el resto de Propuesta
     assert "Valores vigentes" not in texto
+    assert "1ro A" in texto  # departamento real, no "Unidad 1" anonimizado
+
+    pos_grilla = texto.index("Disponibilidad de consultorios al")
+    pos_valores = texto.index("Valores de los consultorios para el período")
+    pos_fotos = texto.index("Fotos de los consultorios")
+    assert pos_grilla < pos_valores < pos_fotos
 
 
 def test_fotos_muestran_valor_sin_apto_camilla(conn, tmp_path):

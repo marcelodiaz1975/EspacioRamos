@@ -849,6 +849,130 @@ Pedido de la clienta, ocho puntos en un solo mensaje:
    Test nuevo: `test_eliminar_reserva_aislada_muestra_alerta_final_de_
    exito` (`tests/test_gui_reservas.py`).
 
+## Hilo abierto: batch de 8 pedidos (PDF disponibilidad, mensajería R, Placas, Llaves, categoría en caliente, fecha de reservas, bug liquidación)
+
+Pedido de la clienta, ocho puntos en un solo mensaje:
+
+1. **Resuelto — PDF de Disponibilidad: cuadro de valores de todos los
+   consultorios.** Abajo de la grilla y antes de las fotos, como en el
+   archivo de la propuesta (`referencia/generar_propuesta.py`,
+   `tabla_valores`) — la app real ya tenía el mismo cuadro implementado
+   como `matriz_valores_edificio` (`app/pdf/valores_pdf.py`), usado por
+   Propuesta (anonimizado, "Unidad N") y Liquidación. Se agrega una
+   tercera sección de nivel 1 a `generar_pdf_disponibilidad`
+   (`app/pdf/disponibilidad_pdf.py`), "Valores de los consultorios para
+   el período comprendido entre...", entre "Disponibilidad de
+   consultorios al..." y "Fotos de los consultorios" — SIN anonimizar
+   (a diferencia de Propuesta, Disponibilidad es para profesionales ya
+   ACTIVOS, muestra el departamento real). Test actualizado:
+   `test_incluye_las_tres_secciones_de_nivel_1_con_departamento_real`
+   (antes "las dos secciones", `tests/test_pdf_disponibilidad.py`) —
+   confirma las tres secciones, el orden (grilla → valores → fotos) y
+   que no aparece anonimizado.
+
+2. **Resuelto — Centro de mensajería: los R sin reservas activas
+   tampoco deben figurar.** Mismo criterio que ya tenía A
+   (`_tiene_aisladas_vigentes`, DC-02 §2.2): se agrega
+   `_tiene_regulares_vigentes` (`app/gui/pantallas/mensajeria.py`), que
+   considera también las reservas de un E consolidado en el equipo del
+   R (`ids_consolidados`). Impacto grande en los tests existentes: la
+   enorme mayoría de `test_gui_mensajeria.py` crea un R "liso" (sin
+   ninguna reserva) esperando que aparezca en la lista — se agregó
+   `con_reserva_regular=True` por default a `_crear_profesional` (crea
+   una reserva mínima siempre vigente para no tocar los ~55 tests que
+   no están probando esta depuración en sí) y `con_reserva_regular=
+   False` explícito en los tests nuevos que sí la prueban:
+   `test_centro_mensajeria_regular_sin_reservas_vigentes_no_se_muestra`,
+   `..._con_reserva_finalizada_no_se_muestra`,
+   `..._con_reserva_consolidada_de_un_e_se_muestra`.
+
+3. **Investigado, sin reproducir — "al modificar una reserva regular
+   que salga el alerta de proceso completado".** Repro directo del
+   botón "Modificar reserva" cambiando el horario
+   (`_PanelReservasRegulares._modificar_seleccionada`): el cartel
+   "Reserva modificada con éxito." YA aparece, confirmado capturando los
+   `QMessageBox.information` reales en un test ad-hoc. Única vía de
+   "Modificar" en esta solapa (un solo botón, sin doble-click ni atajo
+   alternativo). La clienta confirmó dejarlo así por ahora — si vuelve
+   a pasar, hace falta el caso puntual (pantalla exacta, pasos) para
+   seguir investigando.
+
+4. **Resuelto — Placas: Unidad no ordenaba natural (PB/EP/piso), sino
+   alfabético por texto.** El orden por defecto (Localidad/Edificio/
+   Unidad/Posición, #97) y el click en el encabezado de "Unidad"
+   (`_PanelPlacasOperativas._clave_orden`/`_actualizar_tabla`,
+   `app/gui/pantallas/placas.py`) comparaban `e["unidad"]` como string
+   crudo — "10mo" quedaba antes que "2do" alfabéticamente. Se suma
+   `clave_orden_unidad` (`app/pdf/estilos.py`, mismo helper que ya usan
+   Reservas/Catálogos) en los dos lugares. Test nuevo:
+   `test_orden_por_defecto_de_unidad_es_natural_no_alfabetico`
+   (`tests/test_gui_placas.py`).
+
+5. **Resuelto — Llaves: el depósito por defecto al asignar pasa a
+   "abonado".** `_DialogoAsignar.combo_deposito`
+   (`app/gui/pantallas/llaves.py`) arrancaba en "Bonificado" (pedido
+   anterior, punto 4 del batch de 6) — pedido explícito posterior:
+   "cuando asigno una llave por defecto que el depósito sea Depósito
+   abonado". Se invierte el orden de los `addItem` (abonado primero) y
+   `spin_monto` arranca habilitado; la fuerza a "Bonificado" para
+   categoría B (`_al_cambiar_profesional`) pasa de `setCurrentIndex(0)`
+   a `findData("bonificado")`, para no depender de qué índice quedó
+   primero. Test actualizado (antes probaba "arranca en bonificado", lo
+   contrario): `test_dialogo_asignar_arranca_en_abonado_con_monto_
+   habilitado` + `..._elegir_bonificado_deshabilita_el_monto`
+   (`tests/test_gui_llaves.py`).
+
+6. **Resuelto — cambiar la categoría de un profesional en caliente no
+   lo mostraba en Reservas regulares hasta reiniciar el sistema.** Bug
+   real: `combo_profesional` de `_PanelReservasRegulares`
+   (`app/gui/pantallas/reservas.py`) se poblaba una sola vez en
+   `_armar_ui` y nunca se volvía a construir — ni `showEvent` ni F5
+   (`reiniciar()`) lo refrescaban, solo reseteaban el índice
+   seleccionado. Se extrae `_cargar_combo_profesional()` (reconstruye
+   la lista desde cero) y se llama también desde `reiniciar()`, mismo
+   patrón ya usado para combos de profesional en Liquidaciones/Lista de
+   espera/Novedades/Oferta/Pagos. Test nuevo: `test_cambiar_categoria_
+   de_profesional_en_caliente_lo_muestra_sin_reiniciar`
+   (`tests/test_gui_reservas.py`).
+
+7. **Resuelto — Reserva regular: "Vigencia desde" arranca en el primer
+   día del mes, no en hoy.** `_PanelReservasRegulares` ponía la fecha de
+   HOY como default en tres lugares (`_armar_ui`, `_resetear_
+   formulario`, `_cargar_grupo_cobertura` de #22) — se cambia los dos
+   primeros (el formulario manual de alta) a `QDate(hoy.year, hoy.month,
+   1)`; `_cargar_grupo_cobertura` (precarga desde "Confirmar reserva"
+   de Lista de espera, un flujo distinto con su propio criterio) queda
+   sin tocar. Test nuevo: `test_vigencia_inicio_arranca_en_el_primer_
+   dia_del_mes` (`tests/test_gui_reservas.py`).
+
+8. **Pendiente de la clienta — bug real en liquidaciones con un
+   profesional que cambia de consultorio/horario a mitad de mes.**
+   Reproducido con un script directo contra `calcular_liquidacion`: si
+   el mes YA fue emitido una vez (con `fecha_emision` real) y DESPUÉS,
+   ese mismo mes, se finaliza una reserva regular y se crea una nueva
+   (otro consultorio/horario, típico de "Modificar" cuando cambia el
+   consultorio, que esta pantalla no soporta — hay que finalizar +
+   crear de nuevo), el tramo nuevo queda en bruto $0 y descuento $0 — la
+   plata aparece recién en la liquidación del MES SIGUIENTE, como "horas
+   regulares agregadas". Causa: `_ids_reservas_tardias`
+   (`app/negocio/liquidaciones.py`) trata cualquier reserva con
+   `VigenciaInicio` posterior a la última emisión del período como
+   "tardía" y la excluye del bruto de ese mes sin excepción — diseño
+   explícito para no reabrir una liquidación YA EMITIDA (ver "Hilo
+   abierto: reserva aislada de un mes pasado" y `docs/historial/
+   general.md`, "ajuste retroactivo"). El choque: `regenerar_si_
+   corresponde` (llamado automáticamente al crear/finalizar una reserva
+   regular) SÍ está pensado para reflejar el cambio al instante ese
+   mismo mes — pero la deferral de "tardía" lo pisa igual, sin importar
+   que la liquidación de ese mes nunca se haya ENVIADO al profesional.
+   Propuesta de fix presentada a la clienta (no aplicada todavía,
+   pendiente de que confirme con el caso real si la liquidación de
+   noviembre ya estaba emitida Y enviada antes del cambio de
+   consultorio): que `_ids_reservas_tardias` solo difiera al mes
+   siguiente si la última emisión de ese período ya quedó "Enviada" —
+   si todavía está "No enviada"/"Regenerada no enviada", reflejar el
+   cambio completo ese mismo mes es seguro (nadie la vio todavía).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

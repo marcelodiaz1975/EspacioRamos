@@ -39,10 +39,24 @@ def _set_filtro(pantalla, clave: str) -> None:
     pantalla.combo_filtro.setCurrentIndex(indice)
 
 
-def _crear_profesional(conn, categoria="R", apellido="Gómez", saldo=0.0, codigo=None):
-    return obtener_repositorio(conn, "Profesional").crear(
+def _crear_profesional(conn, categoria="R", apellido="Gómez", saldo=0.0, codigo=None, con_reserva_regular=True):
+    """`con_reserva_regular` (default `True`, solo aplica a categoría
+    "R"): la depuración de R sin reservas vigentes (mismo criterio que
+    ya tenía A, ver `_hacer_visible_aislada`) exige que un R tenga algo
+    agendado para aparecer en esta solapa — la enorme mayoría de los
+    tests de este archivo no están probando esa depuración en sí, así
+    que les alcanza con una reserva regular mínima siempre vigente por
+    default; los tests que SÍ prueban la depuración pasan `False`."""
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
         CategoriaProfesional=categoria, Apellido=apellido, SaldoCuentaAnterior=saldo, IdCodigo=codigo,
     )
+    if categoria == "R" and con_reserva_regular:
+        id_consultorio = _crear_consultorio(conn)
+        obtener_repositorio(conn, "ReservaRegular").crear(
+            IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+            HoraInicio=10, HoraFin=11, VigenciaInicio="2020-01-01", VigenciaFin=None,
+        )
+    return id_prof
 
 
 def _color(conn, id_profesional):
@@ -97,6 +111,50 @@ def test_centro_mensajeria_lista_profesionales_categoria_r(qtbot, conn):
     _set_filtro(pantalla, "todos")
     assert pantalla.tabla.rowCount() == 1
     assert "Gómez" in pantalla.tabla.item(0, 1).text()
+
+
+def test_centro_mensajeria_regular_sin_reservas_vigentes_no_se_muestra(qtbot, conn):
+    """Pedido explícito de la clienta: además de los A, los R sin ninguna
+    reserva regular activa (ni propia ni de un E consolidado en su
+    equipo) tampoco tienen que figurar en esta solapa — mismo criterio
+    exacto que ya tenía A (DC-02 §2.2)."""
+    _crear_profesional(conn, saldo=500, con_reserva_regular=False)
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    assert pantalla.tabla.rowCount() == 0
+
+
+def test_centro_mensajeria_regular_con_reserva_finalizada_no_se_muestra(qtbot, conn):
+    id_prof = _crear_profesional(conn, apellido="YaTermino", con_reserva_regular=False)
+    id_consultorio = _crear_consultorio(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=11, VigenciaInicio="2020-01-01", VigenciaFin="2020-02-01",
+    )
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    assert pantalla.tabla.rowCount() == 0
+
+
+def test_centro_mensajeria_regular_con_reserva_consolidada_de_un_e_se_muestra(qtbot, conn):
+    """La depuración de un R considera también las reservas de un E
+    consolidado en su equipo (`ids_consolidados`), aunque el R mismo no
+    tenga ninguna reserva propia."""
+    id_r = _crear_profesional(conn, apellido="CabezaEquipo", con_reserva_regular=False)
+    id_e = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="E", Apellido="DelEquipo", ProfesionalCabezaEquipo=id_r,
+    )
+    id_consultorio = _crear_consultorio(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_e, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=11, VigenciaInicio="2020-01-01", VigenciaFin=None,
+    )
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    assert pantalla.tabla.rowCount() == 1
 
 
 def test_centro_mensajeria_muestra_estado_en_columna_propia(qtbot, conn):
@@ -788,9 +846,7 @@ def test_marcar_enviada_vuelve_el_scroll_al_principio(qtbot, conn):
     """Punto 90: el refresco al marcar "Enviada" tiene que dejar la
     parte de arriba de la tabla a la vista."""
     for codigo in ("R1", "R2"):
-        obtener_repositorio(conn, "Profesional").crear(
-            CategoriaProfesional="R", IdCodigo=codigo, Apellido=f"Prof{codigo}",
-        )
+        _crear_profesional(conn, codigo=codigo, apellido=f"Prof{codigo}")
     pantalla = _PanelCentroMensajeria(conn)
     qtbot.addWidget(pantalla)
     pantalla.tabla.verticalScrollBar().setValue(pantalla.tabla.verticalScrollBar().maximum())

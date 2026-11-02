@@ -225,6 +225,26 @@ def test_orden_por_defecto_desempata_por_posicion(qtbot, conn):
     assert posiciones == ["1", "2", "3"]
 
 
+def test_orden_por_defecto_de_unidad_es_natural_no_alfabetico(qtbot, conn):
+    """Pedido explícito de la clienta: Unidad ordena PB/EP/piso ascendente
+    (`clave_orden_unidad`, mismo criterio que reservas.py/catalogos.py),
+    no alfabéticamente por el texto — "10mo" antes que "2do" en orden
+    alfabético quedaría mal, tiene que ir después."""
+    _, id_unidad_10 = _crear_unidad(conn, nombre_edificio="Ramos 1", departamento='10mo "A"')
+    _, id_unidad_2 = _crear_unidad(conn, nombre_edificio="Ramos 1", departamento='2do "A"')
+    _, id_unidad_pb = _crear_unidad(conn, nombre_edificio="Ramos 1", departamento='PB "A"')
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad_10, posicion=1, id_profesional=id_profesional)
+    asignar_placa(conn, id_unidad=id_unidad_2, posicion=1, id_profesional=id_profesional)
+    asignar_placa(conn, id_unidad=id_unidad_pb, posicion=1, id_profesional=id_profesional)
+
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+
+    unidades = [pantalla.tabla.item(f, 2).text() for f in range(pantalla.tabla.rowCount())]
+    assert unidades == ['PB "A"', '2do "A"', '10mo "A"']
+
+
 def test_click_en_encabezado_ordena_por_esa_columna(qtbot, conn):
     _, id_unidad = _crear_unidad(conn)
     id_z = _crear_profesional(conn, apellido="Zeta")

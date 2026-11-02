@@ -1283,16 +1283,18 @@ class _DialogoAsignar(QDialog):
         # Selector explícito (en vez de un checkbox "Cobrar depósito",
         # fácil de dejar sin tocar por descuido) — pedido de la clienta:
         # "que me memorice también qué depósito les cobro y qué les
-        # bonifico" (punto 4 del documento de correcciones). Arranca en
-        # "Bonificado" (mismo default que tenía el checkbox sin tildar).
+        # bonifico" (punto 4 del documento de correcciones). Arrancaba en
+        # "Bonificado" (mismo default que tenía el checkbox sin tildar) —
+        # pedido explícito posterior de la clienta: "cuando asigno una
+        # llave por defecto que el depósito sea Depósito abonado".
         self.combo_deposito = QComboBox()
-        self.combo_deposito.addItem("Depósito bonificado (no se cobra nada)", "bonificado")
         self.combo_deposito.addItem("Depósito abonado (se cobra el monto)", "abonado")
+        self.combo_deposito.addItem("Depósito bonificado (no se cobra nada)", "bonificado")
         layout.addRow("Depósito", self.combo_deposito)
         self.spin_monto = _SpinMonto()
         self.spin_monto.setMaximum(10_000_000)
         self.spin_monto.setValue(tipo["ValorDepositoActual"] or 0)
-        self.spin_monto.setEnabled(False)
+        self.spin_monto.setEnabled(True)
         layout.addRow("Monto cobrado", self.spin_monto)
         self.combo_deposito.currentIndexChanged.connect(self._al_cambiar_deposito)
         self.combo_profesional.currentIndexChanged.connect(self._al_cambiar_profesional)
@@ -1341,7 +1343,7 @@ class _DialogoAsignar(QDialog):
         profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional) if id_profesional else None
         es_b = profesional is not None and profesional["CategoriaProfesional"] == "B"
         if es_b:
-            self.combo_deposito.setCurrentIndex(0)  # "bonificado"
+            self.combo_deposito.setCurrentIndex(self.combo_deposito.findData("bonificado"))
         self.combo_deposito.setEnabled(not es_b)
 
     def valores(self) -> dict:

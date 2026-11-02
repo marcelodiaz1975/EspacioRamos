@@ -565,6 +565,7 @@ def test_dialogo_asignar_fecha_muestra_dia_de_la_semana(qtbot, conn):
 def test_asignar_con_exito_muestra_alerta(qtbot, conn, monkeypatch):
     """Punto #1.11: alerta de éxito al confirmar — antes no se avisaba
     nada, mismo criterio que el resto del sistema."""
+    obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Lo Veci")
     _crear_tipo_con_copia(conn)
     pantalla = _PanelLlaves(conn)
     qtbot.addWidget(pantalla)
@@ -951,31 +952,33 @@ def test_campos_de_deposito_usan_spinmonto_con_formato_y_select_all(qtbot):
 
 # ------------------------------------------------- punto 4: bonificado/abonado
 
-def test_dialogo_asignar_arranca_en_bonificado_con_monto_deshabilitado(qtbot, conn):
+def test_dialogo_asignar_arranca_en_abonado_con_monto_habilitado(qtbot, conn):
     """Punto 4: selector explícito "Depósito bonificado"/"Depósito
-    abonado" en vez del checkbox "Cobrar depósito" de antes — arranca en
-    "Bonificado", mismo default que tenía el checkbox sin tildar."""
+    abonado" en vez del checkbox "Cobrar depósito" de antes. Arrancaba en
+    "Bonificado" (mismo default que tenía el checkbox sin tildar) — pedido
+    explícito posterior de la clienta: "cuando asigno una llave por
+    defecto que el depósito sea Depósito abonado"."""
     id_llave = _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
     tipo = obtener_repositorio(conn, "Llave").obtener(id_llave)
     dialogo = _DialogoAsignar(conn, tipo, 1)
     qtbot.addWidget(dialogo)
-    assert dialogo.combo_deposito.currentData() == "bonificado"
-    assert not dialogo.spin_monto.isEnabled()
-    valores = dialogo.valores()
-    assert valores["cobrar_deposito"] is False
-    assert valores["monto_cobrado"] is None
-
-
-def test_dialogo_asignar_elegir_abonado_habilita_el_monto(qtbot, conn):
-    id_llave = _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
-    tipo = obtener_repositorio(conn, "Llave").obtener(id_llave)
-    dialogo = _DialogoAsignar(conn, tipo, 1)
-    qtbot.addWidget(dialogo)
-    dialogo.combo_deposito.setCurrentIndex(dialogo.combo_deposito.findData("abonado"))
+    assert dialogo.combo_deposito.currentData() == "abonado"
     assert dialogo.spin_monto.isEnabled()
     valores = dialogo.valores()
     assert valores["cobrar_deposito"] is True
     assert valores["monto_cobrado"] == 3000
+
+
+def test_dialogo_asignar_elegir_bonificado_deshabilita_el_monto(qtbot, conn):
+    id_llave = _crear_tipo_con_copia(conn, valor_deposito_actual=3000)
+    tipo = obtener_repositorio(conn, "Llave").obtener(id_llave)
+    dialogo = _DialogoAsignar(conn, tipo, 1)
+    qtbot.addWidget(dialogo)
+    dialogo.combo_deposito.setCurrentIndex(dialogo.combo_deposito.findData("bonificado"))
+    assert not dialogo.spin_monto.isEnabled()
+    valores = dialogo.valores()
+    assert valores["cobrar_deposito"] is False
+    assert valores["monto_cobrado"] is None
 
 
 def test_dialogo_devolucion_muestra_abonado_y_pretilda_reintegrar(qtbot, conn):

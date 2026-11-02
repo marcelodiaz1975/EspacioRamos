@@ -63,7 +63,7 @@ from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_profesional
 from app.negocio.dias import fecha_actual, fecha_real, periodo_actual
 from app.negocio.formato import formatear_moneda
-from app.negocio.liquidaciones import emitir_liquidacion, marcar_estado_envio
+from app.negocio.liquidaciones import emitir_liquidacion, ids_consolidados, marcar_estado_envio
 from app.negocio.mensajeria import (
     COLORES_ENVIADOS,
     COLORES_PENDIENTES_ENVIO,
@@ -430,7 +430,10 @@ class _PanelCentroMensajeria(QWidget):
         acotada según el filtro elegido (DC-02 §4). Los A sin ninguna
         reserva aislada del mes en curso en adelante se depuran de la
         lista (DC-02 §2.2: "los profesionales que ya no tienen reservas
-        aisladas activas ni pendientes se depuran"); los X sin deuda
+        aisladas activas ni pendientes se depuran") — mismo criterio
+        para los R sin ninguna reserva regular vigente (ni propia ni de
+        un E consolidado en su equipo): si ya no tiene nada agendado,
+        tampoco tiene nada que hacer en esta solapa. Los X sin deuda
         (SaldoCuentaAnterior <= 0) ni siquiera participan — no hay nada
         para hacerles acá."""
         candidatos = [
@@ -440,6 +443,10 @@ class _PanelCentroMensajeria(QWidget):
         candidatos = [
             p for p in candidatos
             if p["CategoriaProfesional"] != "A" or self._tiene_aisladas_vigentes(p["IdProfesional"])
+        ]
+        candidatos = [
+            p for p in candidatos
+            if p["CategoriaProfesional"] != "R" or self._tiene_regulares_vigentes(p["IdProfesional"])
         ]
         candidatos = [
             p for p in candidatos
@@ -471,6 +478,26 @@ class _PanelCentroMensajeria(QWidget):
         fila = self.conn.execute(
             "SELECT 1 FROM ReservaAislada WHERE IdProfesional = ? AND Estado = 'Confirmada' AND Fecha >= ? LIMIT 1",
             (id_profesional, primer_dia_mes_real),
+        ).fetchone()
+        return fila is not None
+
+    def _tiene_regulares_vigentes(self, id_profesional: int) -> bool:
+        """Mismo criterio que `_tiene_aisladas_vigentes` (fecha REAL, no
+        operativa ni la tipeada en el filtro) para reservas regulares:
+        alcanza con que la vigencia de ALGUNA reserva (propia o de un E
+        consolidado en su equipo, `ids_consolidados`) siga abierta o
+        termine en el mes real en curso o después — `VigenciaFin IS NULL
+        OR VigenciaFin >= primer_dia_mes_real` ya cubre tanto una reserva
+        en curso como una que todavía no empezó (su `VigenciaInicio`,
+        y por lo tanto su `VigenciaFin` si lo tiene, no puede ser anterior
+        a su propio inicio)."""
+        primer_dia_mes_real = fecha_real(self.conn).replace(day=1).isoformat()
+        ids = ids_consolidados(self.conn, id_profesional)
+        placeholders = ", ".join("?" for _ in ids)
+        fila = self.conn.execute(
+            f"SELECT 1 FROM ReservaRegular WHERE IdProfesional IN ({placeholders}) "
+            "AND (VigenciaFin IS NULL OR VigenciaFin >= ?) LIMIT 1",
+            (*ids, primer_dia_mes_real),
         ).fetchone()
         return fila is not None
 

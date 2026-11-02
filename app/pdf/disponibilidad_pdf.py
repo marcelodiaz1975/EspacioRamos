@@ -11,14 +11,18 @@ localidad cuando el espacio tiene edificios en más de una
 el mismo PDF, un nivel 2 "Edificio {Nombre} - {Dirección}, {Localidad}"
 por cada uno.
 
-Estructura (2 secciones de nivel 1, sin el resto de Propuesta —
-"Detalle de las unidades/consultorios", "Condiciones y forma de reserva" y
-"Valores vigentes" quedan afuera; esto es solo para consultar
-disponibilidad, no para pesar la decisión de un profesional nuevo):
+Estructura (3 secciones de nivel 1, sin el resto de Propuesta —
+"Detalle de las unidades/consultorios" y "Condiciones y forma de reserva"
+quedan afuera; esto es solo para consultar disponibilidad, no para pesar
+la decisión de un profesional nuevo):
 "Disponibilidad de consultorios al {fecha}" (grilla, sección 4.2, con
-piso/departamento real) -> "Fotos de los consultorios" (agrupadas por
-unidad real, con valor de la hora regular, sin ✔ Apto camilla). La grilla
-es la misma que se embebe en el PDF de Liquidación
+piso/departamento real) -> "Valores de los consultorios" (pedido
+explícito de la clienta: mismo cuadro Unidad x Consultorio que ya usa
+Propuesta/Liquidación, `matriz_valores_edificio`, sin anonimizar — a
+diferencia de Propuesta, que va a profesionales NO activos, acá se
+muestra el departamento real) -> "Fotos de los consultorios" (agrupadas
+por unidad real, con valor de la hora regular, sin ✔ Apto camilla). La
+grilla es la misma que se embebe en el PDF de Liquidación
 (`app/pdf/grilla_pdf.py`).
 """
 from __future__ import annotations
@@ -38,10 +42,11 @@ from app.pdf.edificios_pdf import (
     sufijo_localidad,
     titulo_edificio,
 )
-from app.negocio.formato import decimales_configurados
+from app.negocio.formato import decimales_configurados, periodo_mm_aaaa
 from app.pdf.estilos import clave_orden_unidad, construir_sin_saltos, encabezado, encabezado_espacio, estilo_texto
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
 from app.pdf.grilla_pdf import altura_estimada_grilla, secciones_disponibilidad
+from app.pdf.valores_pdf import matriz_valores_edificio, rango_actualizacion
 
 
 def _bloque_fotos_por_unidad(imagenes_edificio: list[sqlite3.Row], ancho: float, nivel: int, decimales: int) -> list:
@@ -80,6 +85,11 @@ def generar_pdf_disponibilidad(conn: sqlite3.Connection, directorio: str, ids_ed
     nombre_archivo = f"Disponibilidad {nombre_espacio} Consultorios{sufijo}.pdf"
 
     anio, mes = parsear_periodo(periodo_actual(conn))
+    desde, hasta = rango_actualizacion(conn, periodo_actual(conn))
+    titulo_valores = (
+        f"Valores de los consultorios para el período comprendido entre "
+        f"{periodo_mm_aaaa(desde)} al {periodo_mm_aaaa(hasta)}"
+    )
 
     ids_edificio_incluidos = [e["IdEdificio"] for e in edificios]
     ids_consultorio = ids_consultorio_de_edificios(conn, ids_edificio_incluidos)
@@ -97,6 +107,7 @@ def generar_pdf_disponibilidad(conn: sqlite3.Connection, directorio: str, ids_ed
         6 * cm  # encabezado_espacio (logo + línea)
         + 1.5 * cm + n_ed * 1 * cm  # nivel1 "Disponibilidad..." + wrapper nivel2 por edificio (si multi)
         + altura_disponibilidad  # grillas (ya suma por edificio)
+        + 1.5 * cm + n_ed * 2 * cm  # nivel1 "Valores de los consultorios" + matriz por edificio
         + 1.5 * cm + n_ed * 1 * cm  # nivel1 "Fotos de los consultorios" + wrapper por edificio
         + (len(imagenes) // 2 + 1) * 7 * cm + n_unidades_con_fotos * 1 * cm  # fotos + encabezado de unidad
     ) * 1.15
@@ -126,6 +137,16 @@ def generar_pdf_disponibilidad(conn: sqlite3.Connection, directorio: str, ids_ed
                 mostrar_titulo=False, mostrar_encabezado_edificio=False,
             ))
         story.append(Spacer(1, 10))
+
+        # ------------------------------------------------------- Valores
+        story.append(encabezado(1, titulo_valores, ancho))
+        story.append(Spacer(1, 8))
+        for e in edificios:
+            if multi:
+                story.append(encabezado(2, titulo_edificio(e), ancho))
+                story.append(Spacer(1, 6))
+            story.extend(matriz_valores_edificio(conn, e["IdEdificio"], ancho))
+            story.append(Spacer(1, 10))
 
         # ----------------------------------------------------------------- Fotos
         story.append(encabezado(1, "Fotos de los consultorios", ancho))

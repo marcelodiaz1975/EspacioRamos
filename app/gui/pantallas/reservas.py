@@ -928,9 +928,7 @@ class _PanelReservasRegulares(QWidget):
         form.setSpacing(_ESPACIADO_FORM)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_REGULARES):
-            self.combo_profesional.addItem(etiqueta, id_)
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self.actualizar)
         form.addWidget(QLabel("Profesional"))
@@ -1143,7 +1141,11 @@ class _PanelReservasRegulares(QWidget):
         layout.addWidget(splitter_superior)
 
         hoy = fecha_actual(self.conn)
-        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        # Pedido explícito de la clienta: "cuando asigno una reserva
+        # regular que por defecto me ponga el primer día del mes" — en
+        # vez del día de hoy, que no tiene ningún significado especial
+        # para cuándo arranca a correr una reserva nueva.
+        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, 1))
 
         scroll.setWidget(contenido)
         # Pedido explícito de la clienta ("ampliá el tamaño de la tabla,
@@ -1416,17 +1418,36 @@ class _PanelReservasRegulares(QWidget):
         self.spin_desde.setValue(9)
         self.spin_hasta.setValue(10)
         hoy = fecha_actual(self.conn)
-        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, hoy.day))
+        self.campo_vigencia_inicio.setDate(QDate(hoy.year, hoy.month, 1))
         self.campo_vigencia_fin.setDate(_FECHA_SIN_DATO)
         self.combo_profesional.setFocus()
+
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta: cambiar la categoría de un
+        profesional (ej. de X a R) en la pantalla de Profesionales no lo
+        hacía aparecer en este combo hasta cerrar y volver a abrir el
+        sistema — `combo_profesional` se armaba una sola vez en
+        `_armar_ui` y nunca se volvía a poblar. Se reconstruye desde
+        cero (no solo se resetea el índice) cada vez que corresponde
+        refrescarlo, para que una categoría cambiada en caliente ya
+        aparezca sin reiniciar nada."""
+        self.combo_profesional.blockSignals(True)
+        self.combo_profesional.clear()
+        self.combo_profesional.addItem("Todos los profesionales", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_REGULARES):
+            self.combo_profesional.addItem(etiqueta, id_)
+        self.combo_profesional.blockSignals(False)
 
     def reiniciar(self) -> None:
         """Punto #1.4: reset completo de filtros al reingresar a la
         solapa (incluido "Profesional", a diferencia de `_resetear_
         formulario`) + foco en el primer control — ver el comentario de
         esa función para por qué están separadas. Se llama desde
-        `showEvent` y desde F3 ("Reiniciar solapa")."""
+        `showEvent` y desde F3 ("Reiniciar solapa"); de paso, reconstruye
+        `combo_profesional` (`_cargar_combo_profesional`) para que un
+        cambio de categoría reciente ya se vea sin reiniciar el sistema."""
         self._orden.reiniciar()
+        self._cargar_combo_profesional()
         self.combo_profesional.setCurrentIndex(0)
         self._resetear_formulario()
         self.actualizar()
