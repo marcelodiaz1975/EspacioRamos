@@ -465,6 +465,80 @@ Pedido de la clienta, dos pantallas:
    cálculo real). Test nuevo: `test_saldo_total_suma_anterior_y_actual_
    y_nuevo_saldo_lo_usa_de_base` (`tests/test_gui_pagos.py`).
 
+3. **Resuelto — Pagos/Registrar pagos: un pago que cubría el saldo
+   anterior Y el actual, con margen, solo descontaba del actual y
+   dejaba el resto como crédito desconectado.** Bug real reportado por
+   la clienta: "al cargar un importe de pago de un profesional que
+   abonó el saldo del mes anterior, el actual y un poco más, me
+   tendría que dejar como saldo de cuenta actual la diferencia del
+   pago hecho menos los dos saldos, solo resta del saldo actual y
+   carga el resto como crédito al profesional" — pedido explícito de
+   que el fix impacte también los registros ya cargados, no solo los
+   pagos nuevos.
+
+   `registrar_pago` (`app/negocio/pagos.py`) imputa siempre a un solo
+   campo (`SaldoCuentaAnterior` o `SaldoCuentaActual`, según
+   `periodo_imputado` — "Nunca toca ambos a la vez", documentado desde
+   siempre) — eso seguía intencional. El bug era que, si el pago
+   alcanzaba a cubrir ese campo por completo Y TAMBIÉN el otro con
+   margen, el sobrante se quedaba en el campo imputado como crédito
+   (muy negativo) mientras el OTRO campo seguía mostrando una deuda ya
+   cobrada en los hechos. `_aplicar_pago_con_cascada` (helper nuevo)
+   agrega la cascada: solo cuando el sobrante alcanza para cubrir el
+   OTRO saldo POR COMPLETO (no con que lo achique nomás), lo cancela y
+   el resto queda como crédito final en el campo imputado. Ese umbral
+   de "cobertura completa" (no cualquier sobrante) es clave: un pago
+   que deja el campo imputado en crédito sin llegar a cubrir el otro
+   saldo entero no reparte nada — es indistinguible de un pago por
+   adelantado normal contra un período que todavía no tiene cargado el
+   saldo real (ej. una reserva aislada recién creada, antes de pasar
+   por `emitir_liquidacion`) — confirmado con una regresión real de la
+   suite (`test_mensajes.test_detalle_aislada_calcula_saldo_a_abonar`)
+   al probar primero con "cualquier sobrante reparte", que hubo que
+   descartar por este motivo antes de subir el umbral a cobertura
+   completa.
+
+   `modificar_pago`/`eliminar_pago` ahora revierten por los deltas
+   exactos que quedaron guardados en dos columnas nuevas de
+   `HistorialPagos`, `ImpactoSaldoAnterior`/`ImpactoSaldoActual` (una
+   de las dos en 0 si el pago no cayó en cascada) — ya no asumen que
+   el pago tocó un solo campo, así que revierten bien un pago
+   repartido entre los dos. Migración (`app/db/migraciones.py`): las
+   filas de `HistorialPagos` ya cargadas (de antes de este fix, que
+   nunca repartían) se backfillean con el mismo campo único que ya
+   usaba `_campo_saldo`, para que sigan revirtiéndose exactamente igual
+   que antes.
+
+   Corrección retroactiva (lo pedido explícitamente: "que me impacte
+   en los registros que ya pude haber cargado hasta el momento"):
+   `reconciliar_saldos_cruzados` (`app/negocio/pagos.py`) corre sola en
+   cada arranque (`app.db.init_db.init_database`, después de
+   `aplicar_migraciones`) y neta, para cada profesional, un campo en
+   deuda contra el otro en crédito — pero SOLO cuando el crédito
+   alcanza a cubrir esa deuda por completo (mismo umbral exacto que el
+   fix, para no corregir un estado que nunca estuvo roto). Deja su
+   propio movimiento en `HistorialPagos` (Monto=0, EsAjuste, con el
+   detalle de antes/después en Observación) para que quede visible en
+   Estado de cuenta y sea reversible (Eliminar) como cualquier pago; es
+   de por sí idempotente (una vez corregido un profesional ya no
+   vuelve a cumplir la condición, y el fix en `registrar_pago` ya no
+   vuelve a generarla).
+
+   El cartel de confirmación de "Eliminar pago" (`app/gui/pantallas/
+   pagos.py`) ahora distingue si el pago a revertir cayó en cascada
+   (avisa "repartiéndolo entre el saldo del período anterior y el
+   saldo actual") de uno que tocó un solo campo, en vez de asumir
+   siempre un solo campo.
+
+   Tests: `tests/test_pagos.py` (cascada en los dos sentidos, umbral de
+   cobertura completa, `modificar_pago`/`eliminar_pago` con un pago
+   repartido, `reconciliar_saldos_cruzados` en los dos sentidos + no-op
+   si no hay cobertura completa + idempotencia, y wiring completo vía
+   `init_database`), `tests/test_migraciones.py` (backfill de
+   `ImpactoSaldoAnterior`/`ImpactoSaldoActual` en filas viejas +
+   idempotencia), `tests/test_gui_pagos.py` (wording del cartel de
+   Eliminar con cascada).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

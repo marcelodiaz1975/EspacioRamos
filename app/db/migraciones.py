@@ -18,6 +18,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 
+from app.negocio.dias import periodo_actual
+
 # (tabla, columna, definición SQL de la columna — tipo + constraints)
 _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Ausencia", "IdReservaAislada", "INTEGER REFERENCES ReservaAislada(IdReservaAislada)"),
@@ -97,6 +99,8 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Configuracion", "DiasRecordatorioProfesionalXDejoEspacio", "INTEGER NOT NULL DEFAULT 30"),
     ("Profesional", "FechaUltimoRecordatorioDeudaX", "TEXT"),
     ("Configuracion", "FormatoDiaProfesionInvertido", "INTEGER NOT NULL DEFAULT 0"),
+    ("HistorialPagos", "ImpactoSaldoAnterior", "REAL"),
+    ("HistorialPagos", "ImpactoSaldoActual", "REAL"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja
@@ -466,6 +470,48 @@ def _invertir_formato_dia_profesion_a_dd_mm(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE Configuracion SET FormatoDiaProfesionInvertido = 1 WHERE IdConfiguracion = 1")
 
 
+def _inicializar_impacto_historial_pagos(conn: sqlite3.Connection) -> None:
+    """Bug real reportado por la clienta (ver CLAUDE.md, hilo de Pagos):
+    un pago que se pasaba del saldo del período al que se imputaba no
+    caía en cascada sobre el otro período — `app.negocio.pagos.
+    registrar_pago` ahora sí lo hace, y usa `ImpactoSaldoAnterior`/
+    `ImpactoSaldoActual` (ver `_COLUMNAS_NUEVAS`) para poder revertir
+    con exactitud un pago repartido entre los dos campos. Una fila de
+    `HistorialPagos` ya cargada antes de este fix nunca estuvo
+    repartida (el bug es justamente que nunca se repartía), así que se
+    backfillea con el mismo campo único que ya usaba
+    `app.negocio.pagos._campo_saldo` para saber a cuál de los dos
+    imputarla — así `modificar_pago`/`eliminar_pago` siguen
+    revirtiéndola exactamente igual que antes de este fix."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'HistorialPagos'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(HistorialPagos)").fetchall()}
+    if "ImpactoSaldoAnterior" not in columnas_existentes:
+        return
+    pendientes = conn.execute(
+        "SELECT IdPago, Monto, PeriodoImputado FROM HistorialPagos WHERE ImpactoSaldoAnterior IS NULL"
+    ).fetchall()
+    if not pendientes:
+        return
+    existe_configuracion = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Configuracion'"
+    ).fetchone()
+    if not existe_configuracion:
+        return  # no se puede saber el período actual todavía — se backfillea en el próximo arranque
+    periodo_hoy = periodo_actual(conn)
+    for pago in pendientes:
+        es_mes_anterior = bool(pago["PeriodoImputado"]) and pago["PeriodoImputado"] < periodo_hoy
+        impacto_anterior = pago["Monto"] if es_mes_anterior else 0.0
+        impacto_actual = 0.0 if es_mes_anterior else pago["Monto"]
+        conn.execute(
+            "UPDATE HistorialPagos SET ImpactoSaldoAnterior = ?, ImpactoSaldoActual = ? WHERE IdPago = ?",
+            (impacto_anterior, impacto_actual, pago["IdPago"]),
+        )
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -496,4 +542,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _inicializar_periodo_operativo_actual(conn)
     _permitir_profesional_sin_apellido(conn)
     _invertir_formato_dia_profesion_a_dd_mm(conn)
+    _inicializar_impacto_historial_pagos(conn)
     conn.commit()

@@ -716,12 +716,23 @@ class _PanelRegistrarPago(QWidget):
             return
         profesional = obtener_repositorio(self.conn, "Profesional").obtener(registro["IdProfesional"])
         periodo = registro["PeriodoImputado"] or "(sin período)"
-        campo_saldo = "saldo del período anterior" if periodo < periodo_actual(self.conn) else "saldo actual"
+        impacto_anterior = registro["ImpactoSaldoAnterior"] or 0.0
+        impacto_actual = registro["ImpactoSaldoActual"] or 0.0
+        if impacto_anterior and impacto_actual:
+            # El pago se pasó del saldo del período al que se imputaba y cayó
+            # en cascada sobre el otro (ver `_aplicar_pago_con_cascada`) — el
+            # cartel tiene que avisar que la reversión toca los dos campos,
+            # no solo el que eligió el operador al cargarlo.
+            destino = "repartiéndolo entre el saldo del período anterior y el saldo actual"
+        elif impacto_anterior:
+            destino = "devolviéndolo al saldo del período anterior"
+        else:
+            destino = "devolviéndolo al saldo actual"
         respuesta = QMessageBox.question(
             self, "Eliminar pago",
             f"Esto afecta la cuenta de {_texto_profesional(profesional) if profesional else '?'}: revierte por "
             f"completo este pago de {formatear_moneda(registro['Monto'])} imputado al período {periodo}, "
-            f"devolviéndolo al {campo_saldo} (de donde salió al cargarlo) y borra el registro. ¿Confirmás?",
+            f"{destino} (de donde salió al cargarlo) y borra el registro. ¿Confirmás?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

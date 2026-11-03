@@ -17,6 +17,74 @@ def test_base_nueva_ya_tiene_las_columnas_migradas(tmp_path):
     assert "SaldoAnterior" in columnas_pagos
     assert "SaldoNuevo" in columnas_pagos
     assert "RegistroModificado" in columnas_pagos
+    assert "ImpactoSaldoAnterior" in columnas_pagos
+    assert "ImpactoSaldoActual" in columnas_pagos
+    conn.close()
+
+
+def test_aplicar_migraciones_backfillea_impacto_de_pagos_viejos_segun_el_campo_unico_que_ya_tocaban(tmp_path):
+    """Bug real (ver CLAUDE.md): antes del fix, un pago nunca repartía su
+    efecto entre SaldoCuentaAnterior y SaldoCuentaActual — tocaba uno
+    solo. Una fila de HistorialPagos ya cargada antes de este fix recibe
+    las dos columnas nuevas (ver `_COLUMNAS_NUEVAS`) en NULL con el
+    `ALTER TABLE`; `aplicar_migraciones` las backfillea con ese mismo
+    campo único, calculado igual que `app.negocio.pagos._campo_saldo`
+    (según PeriodoImputado contra el período actual), para que
+    `modificar_pago`/`eliminar_pago` sigan revirtiéndolas exactamente
+    igual que antes de este fix."""
+    conn = init_database(tmp_path / "vieja.db")
+    sembrar_valores_por_defecto(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    id_profesional = conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Lo Veci')"
+    ).lastrowid
+    # un pago contra el mes en curso y otro contra el mes anterior, ambos
+    # cargados como quedaban ANTES de este fix (columnas nuevas en NULL)
+    conn.execute(
+        "INSERT INTO HistorialPagos (IdProfesional, Monto, PeriodoImputado) VALUES (?, -100, NULL)",
+        (id_profesional,),
+    )
+    conn.execute(
+        "INSERT INTO HistorialPagos (IdProfesional, Monto, PeriodoImputado) VALUES (?, -200, '2026-07')",
+        (id_profesional,),
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    pago_actual = conn.execute("SELECT * FROM HistorialPagos WHERE Monto = -100").fetchone()
+    assert pago_actual["ImpactoSaldoAnterior"] == 0.0
+    assert pago_actual["ImpactoSaldoActual"] == -100.0
+    pago_anterior = conn.execute("SELECT * FROM HistorialPagos WHERE Monto = -200").fetchone()
+    assert pago_anterior["ImpactoSaldoAnterior"] == -200.0
+    assert pago_anterior["ImpactoSaldoActual"] == 0.0
+    conn.close()
+
+
+def test_aplicar_migraciones_no_backfillea_de_nuevo_un_pago_ya_migrado(tmp_path):
+    """Idempotente: una fila que YA tiene sus columnas de impacto
+    cargadas (ej. porque se creó después del fix, con un reparto real
+    entre los dos campos) no se vuelve a tocar en el próximo arranque."""
+    conn = init_database(tmp_path / "test.db")
+    sembrar_valores_por_defecto(conn)
+    id_profesional = conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Lo Veci')"
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO HistorialPagos (IdProfesional, Monto, ImpactoSaldoAnterior, ImpactoSaldoActual) "
+        "VALUES (?, -3500, -1000, -2500)",
+        (id_profesional,),
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    pago = conn.execute("SELECT * FROM HistorialPagos WHERE Monto = -3500").fetchone()
+    assert pago["ImpactoSaldoAnterior"] == -1000.0
+    assert pago["ImpactoSaldoActual"] == -2500.0
     conn.close()
 
 

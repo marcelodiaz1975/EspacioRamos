@@ -207,7 +207,17 @@ CREATE TABLE IF NOT EXISTS HistorialPagos (
     SaldoNuevo REAL,
     -- 1 si el registro se editó con "Modificar pago" después de creado
     -- (en ese caso conserva su FechaHoraCarga original).
-    RegistroModificado INTEGER NOT NULL DEFAULT 0
+    RegistroModificado INTEGER NOT NULL DEFAULT 0,
+    -- Delta real que este movimiento aplicó a cada campo de
+    -- Profesional (Saldo{Anterior,Actual} ya no es invariante: un pago
+    -- que se pasa del saldo del período al que se imputa cae en
+    -- cascada sobre el otro período si tiene saldo pendiente — ver
+    -- `app.negocio.pagos._aplicar_pago_con_cascada`). Para un pago sin
+    -- cascada, uno de los dos vale 0. Es lo que usan `modificar_pago`/
+    -- `eliminar_pago` para revertir este movimiento con exactitud, sin
+    -- volver a adivinar un solo campo.
+    ImpactoSaldoAnterior REAL,
+    ImpactoSaldoActual REAL
 );
 
 -- 3.7 Llave / LlaveAcceso / LlaveMovimiento -----------------------

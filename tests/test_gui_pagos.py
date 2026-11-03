@@ -1187,6 +1187,36 @@ def test_eliminar_pago_seleccionado_revierte_saldo(qtbot, conn, monkeypatch):
     assert saldo == 1000
 
 
+def test_eliminar_pago_con_cascada_avisa_que_se_reparte_entre_los_dos_saldos(qtbot, conn, monkeypatch):
+    """Bug real (ver CLAUDE.md): un pago que se pasó del saldo actual y
+    cayó en cascada sobre el anterior (`_aplicar_pago_con_cascada`) se
+    revierte tocando los dos campos — el cartel de confirmación tiene
+    que avisarlo, no decir que vuelve a un solo saldo."""
+    id_profesional = _crear_profesional(conn, saldo=2000)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-3500)  # cubre actual (2000) + anterior (1000) + 500 de crédito
+    panel._registrar()
+
+    textos_preguntados = []
+
+    def _question(*args, **kwargs):
+        textos_preguntados.append(args[2])
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_question))
+    panel.tabla.selectRow(0)
+    panel._eliminar()
+
+    assert "repartiéndolo entre el saldo del período anterior y el saldo actual" in textos_preguntados[0]
+    saldo = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    assert saldo["SaldoCuentaAnterior"] == pytest.approx(1000)
+    assert saldo["SaldoCuentaActual"] == pytest.approx(2000)
+
+
 def test_tecla_delete_elimina_el_pago_igual_que_el_boton(qtbot, conn, monkeypatch):
     id_profesional = _crear_profesional(conn, saldo=1000)
     pantalla = PantallaPagos(conn)

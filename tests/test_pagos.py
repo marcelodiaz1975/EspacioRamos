@@ -15,6 +15,7 @@ from app.negocio.pagos import (
     marcar_cuota_pagada,
     modificar_pago,
     plan_activo_de,
+    reconciliar_saldos_cruzados,
     refinanciar_plan,
     registrar_pago,
     resolver_profesional_para_cargo,
@@ -122,6 +123,135 @@ def test_registrar_pago_guarda_saldo_anterior_y_nuevo(conn, profesional):
     assert pago["SaldoAnterior"] == pytest.approx(1000)
     assert pago["SaldoNuevo"] == pytest.approx(600)
     assert pago["RegistroModificado"] == 0
+
+
+# --------------------------------------------------------------- cascada (bug real reportado por la clienta)
+
+def test_registrar_pago_que_supera_el_saldo_actual_cae_en_cascada_sobre_el_anterior(conn, profesional):
+    """Escenario real reportado: un profesional debe 1000 del período
+    anterior y 2000 del actual; paga 3500 (cubre los dos y le quedan 500
+    de más) imputando el pago al período actual (el default del
+    formulario). Antes del fix, el sobrante quedaba como un crédito de
+    -1500 en SaldoCuentaActual mientras SaldoCuentaAnterior seguía
+    mostrando 1000 de deuda ya cobrada; ahora el sobrante cae en cascada
+    y cancela esa deuda, dejando el crédito final (500) en el actual."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=1000, SaldoCuentaActual=2000,
+    )
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-3500)
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(0)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(-500)
+
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["ImpactoSaldoAnterior"] == pytest.approx(-1000)
+    assert pago["ImpactoSaldoActual"] == pytest.approx(-2500)
+
+
+def test_registrar_pago_que_no_supera_el_saldo_actual_no_toca_el_anterior(conn, profesional):
+    """Un pago normal, que no se pasa del saldo al que se imputa, sigue
+    sin tocar el otro período — mismo comportamiento que antes del fix."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=1000, SaldoCuentaActual=2000,
+    )
+    registrar_pago(conn, id_profesional=profesional, monto=-500)
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(1000)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(1500)
+
+
+def test_registrar_pago_que_supera_el_saldo_anterior_cae_en_cascada_sobre_el_actual(conn, profesional):
+    """La cascada es simétrica: un pago imputado al período anterior que
+    alcanza a cubrir por completo esa deuda Y la del período actual
+    también achica esta última en vez de dejar un crédito desconectado
+    en el anterior."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=500, SaldoCuentaActual=300,
+    )
+    _fijar_periodo_actual(conn, "2026-08")
+    registrar_pago(conn, id_profesional=profesional, monto=-900, periodo_imputado="2026-07")
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(-100)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(0)
+
+
+def test_registrar_pago_que_supera_parcialmente_el_saldo_al_que_se_imputa_no_cae_en_cascada(conn, profesional):
+    """Mismo caso real que motivó el umbral de cobertura completa (ver
+    docstring de `_aplicar_pago_con_cascada` y `test_mensajes.
+    test_detalle_aislada_calcula_saldo_a_abonar`): un pago que deja el
+    campo al que se imputa en crédito, pero sin alcanzar a cubrir por
+    completo la deuda del otro período, no reparte nada — sigue como un
+    pago por adelantado normal."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=1000, SaldoCuentaActual=0,
+    )
+    registrar_pago(conn, id_profesional=profesional, monto=-500)
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(1000)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(-500)
+
+
+def test_registrar_pago_con_cascada_no_genera_credito_de_mas_si_el_otro_saldo_no_alcanza(conn, profesional):
+    """Si el otro período no tiene saldo pendiente suficiente para
+    absorber todo el sobrante, el resto queda como crédito en el campo
+    al que se imputó el pago — la cascada nunca "fabrica" plata de la
+    nada, solo redistribuye lo que ya había como deuda."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=100, SaldoCuentaActual=200,
+    )
+    registrar_pago(conn, id_profesional=profesional, monto=-500)
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(0)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(-200)  # 200 - 500 + 100 de cascada
+
+
+def test_cargo_positivo_no_cae_en_cascada_aunque_el_otro_saldo_sea_credito(conn, profesional):
+    """Un cargo (monto positivo) nunca reparte con el otro campo, ni
+    siquiera si ese otro campo ya está en crédito — la cascada es
+    exclusiva de pagos (monto negativo)."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=-300, SaldoCuentaActual=100,
+    )
+    registrar_pago(conn, id_profesional=profesional, monto=250, es_ajuste=True)
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(-300)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(350)
+
+
+def test_eliminar_pago_con_cascada_revierte_los_dos_campos(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=1000, SaldoCuentaActual=2000,
+    )
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-3500)  # anterior: 0, actual: -500
+
+    eliminado = eliminar_pago(conn, id_pago)
+
+    assert eliminado["IdPago"] == id_pago
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(1000)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(2000)
+
+
+def test_modificar_pago_con_cascada_revierte_el_viejo_y_aplica_el_nuevo_reparto(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=1000, SaldoCuentaActual=2000,
+    )
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-3500)  # anterior: 0, actual: -500
+
+    modificar_pago(conn, id_pago, monto=-3000)  # ahora cubre menos: 1000 + 2000, con 0 de más
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(0)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(0)
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["ImpactoSaldoAnterior"] == pytest.approx(-1000)
+    assert pago["ImpactoSaldoActual"] == pytest.approx(-2000)
 
 
 # --------------------------------------------------------------- modificar / deshacer
@@ -625,3 +755,103 @@ def test_crear_cargo_especial_a_un_c_rechaza(conn):
             conn, id_profesional=id_c, tipo="Débito", concepto="x", monto=100,
             periodo_imputado=periodo_actual(conn),
         )
+
+
+# --------------------------------------------------------------- reconciliar_saldos_cruzados
+
+def test_reconciliar_saldos_cruzados_corrige_credito_en_actual_con_deuda_en_anterior(conn, profesional):
+    """Estado ya cargado antes del fix (ver CLAUDE.md): el profesional
+    quedó con SaldoCuentaAnterior en deuda (1000, ya cobrada en los
+    hechos) y SaldoCuentaActual en crédito (-500, el sobrante que nunca
+    se repartió) al mismo tiempo. La magnitud del crédito (1500) alcanza
+    para cubrir la deuda (1000) por completo — mismo umbral que
+    `_aplicar_pago_con_cascada` — así que la reconciliación lo neta sin
+    cambiar la suma de los dos campos."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=1000, SaldoCuentaActual=-1500,
+    )
+    corregidos = reconciliar_saldos_cruzados(conn)
+
+    assert corregidos == [profesional]
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(0)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(-500)
+
+    movimiento = obtener_repositorio(conn, "HistorialPagos").listar()[0]
+    assert movimiento["Monto"] == pytest.approx(0)
+    assert movimiento["EsAjuste"] == 1
+    assert movimiento["ImpactoSaldoAnterior"] == pytest.approx(-1000)
+    assert movimiento["ImpactoSaldoActual"] == pytest.approx(1000)
+
+
+def test_reconciliar_saldos_cruzados_corrige_credito_en_anterior_con_deuda_en_actual(conn, profesional):
+    """Simétrico: crédito en el anterior (-900) que alcanza a cubrir por
+    completo la deuda en el actual (800) también se netea."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=-900, SaldoCuentaActual=800,
+    )
+    reconciliar_saldos_cruzados(conn)
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(-100)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(0)
+
+
+def test_reconciliar_saldos_cruzados_no_toca_un_credito_que_no_alcanza_a_cubrir_la_otra_deuda(conn, profesional):
+    """Mismo umbral que `_aplicar_pago_con_cascada` (ver su docstring,
+    caso real `test_mensajes.test_detalle_aislada_calcula_saldo_a_
+    abonar`): un crédito que no llega a cubrir la otra deuda por
+    completo no se toca — es indistinguible de un pago por adelantado
+    normal contra un período que todavía no tiene cargado el saldo
+    real."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=1000, SaldoCuentaActual=-500,
+    )
+    assert reconciliar_saldos_cruzados(conn) == []
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(1000)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(-500)
+
+
+def test_reconciliar_saldos_cruzados_no_toca_profesionales_sin_signos_cruzados(conn, profesional):
+    """Dos deudas, dos créditos, o un saldo en cero no son el bug — no se
+    tocan (cualquier otro estado tiene causas legítimas, ver docstring de
+    `reconciliar_saldos_cruzados`)."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=1000, SaldoCuentaActual=2000,
+    )
+    assert reconciliar_saldos_cruzados(conn) == []
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(1000)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(2000)
+
+
+def test_reconciliar_saldos_cruzados_es_idempotente(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=1000, SaldoCuentaActual=-1500,
+    )
+    reconciliar_saldos_cruzados(conn)
+    assert reconciliar_saldos_cruzados(conn) == []  # ya corregido, no vuelve a cumplir la condición
+
+
+def test_init_database_reconcilia_saldos_cruzados_ya_cargados_al_reabrir_la_base(tmp_path):
+    """Pedido explícito de la clienta: el fix tiene que impactar en los
+    registros que ya se pudieron haber cargado hasta el momento, no solo
+    en los pagos nuevos — `init_database` corre la reconciliación sola en
+    cada arranque (después de `aplicar_migraciones`), así que alcanza con
+    reabrir la base (sin tocar nada a mano) para que quede corregida."""
+    db_path = tmp_path / "test.db"
+    conn = init_database(db_path)
+    sembrar_valores_por_defecto(conn)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Lo Veci", SaldoCuentaAnterior=1000, SaldoCuentaActual=-1500,
+    )
+    conn.commit()
+    conn.close()
+
+    conn = init_database(db_path)  # simula el próximo arranque de la app
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(0)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(-500)
+    conn.close()
