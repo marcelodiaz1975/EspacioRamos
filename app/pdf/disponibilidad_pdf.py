@@ -88,7 +88,7 @@ def generar_pdf_disponibilidad(conn: sqlite3.Connection, directorio: str, ids_ed
     desde, hasta = rango_actualizacion(conn, periodo_actual(conn))
     titulo_valores = (
         f"Valores de los consultorios para el período comprendido entre "
-        f"{periodo_mm_aaaa(desde)} al {periodo_mm_aaaa(hasta)}"
+        f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
     )
 
     ids_edificio_incluidos = [e["IdEdificio"] for e in edificios]

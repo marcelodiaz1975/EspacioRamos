@@ -195,7 +195,7 @@ def test_mensaje_situacion_5_incluye_saldo_anterior(conn, consultorio):
 def test_mensaje_envio_liquidacion_menciona_el_mes(conn, consultorio):
     id_prof = _crear_regular(conn, consultorio)
     texto = mensaje_envio_liquidacion(conn, id_prof, PERIODO)
-    assert "agosto" in texto
+    assert "AGOSTO 2026" in texto
     assert "MENSAJE AUTOMATICO" in texto
 
 

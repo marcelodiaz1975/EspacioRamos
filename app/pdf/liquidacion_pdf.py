@@ -758,11 +758,12 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
             ))
         story.append(Spacer(1, 10))
 
-        # #40: "al" en vez de "y" — es un RANGO continuo (desde/hasta de
-        # `rango_actualizacion`), no dos fechas sueltas.
+        # Pedido explícito posterior de la clienta (revisión del PDF de
+        # Disponibilidad): "y" en vez de "al" — reemplaza la decisión de
+        # #40, que había elegido "al" para este mismo rango.
         titulo_valores = (
             f"Valores de los consultorios para el período comprendido entre "
-            f"{periodo_mm_aaaa(desde)} al {periodo_mm_aaaa(hasta)}"
+            f"{periodo_mm_aaaa(desde)} y {periodo_mm_aaaa(hasta)}"
         )
         story.append(Spacer(1, 6))
         story.append(encabezado(2, titulo_valores, ancho))

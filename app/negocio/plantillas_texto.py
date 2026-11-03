@@ -168,10 +168,10 @@ DEFAULT_SITUACION_5 = (
 )
 
 DEFAULT_ENVIO_LIQUIDACION = (
-    "MENSAJE AUTOMATICO\n"
-    "(no es necesario responder)\n\n"
-    "* Se adjunta liquidación correspondiente al mes de {mes}\n"
-    "* Abrir el archivo enseguida de recibirlo para que les quede en el teléfono\n"
+    "*MENSAJE AUTOMATICO*\n"
+    "_(no es necesario responder)_\n\n"
+    "* Se adjunta liquidación correspondiente al mes de *{mes}*\n"
+    "* Abrir el archivo al recibirlo para que quede en guardado en el teléfono\n"
     "* Revisar el contenido, por cualquier duda comunicarse con el administrador"
 )
 

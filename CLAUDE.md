@@ -996,6 +996,113 @@ Pedido de la clienta, ocho puntos en un solo mensaje:
    ese_mismo_mes` (reproduce el caso real de la clienta, confirmado que
    sin el fix de `_ids_reservas_tardias` falla).
 
+## Hilo abierto: título "Valores de los consultorios" (al→y), investigación de "desde", grilla operativa por período y mensaje de envío de liquidación
+
+Pedido de la clienta, cuatro puntos en un solo mensaje:
+
+1. **Resuelto — conector "al"→"y" en el título "Valores de los
+   consultorios para el período comprendido entre...".** Pedido
+   explícito: reemplazar "al" por "y" ("...entre 10/2026 y 11/2026" en
+   vez de "...entre 10/2026 al 11/2026"). El título se arma igual en
+   tres PDFs distintos que compaten `rango_actualizacion`
+   (`app/pdf/valores_pdf.py`) — Disponibilidad (`disponibilidad_pdf.py`),
+   Liquidación (`liquidacion_pdf.py`) y Propuesta (`propuesta_pdf.py`) —
+   se cambió el conector en los tres por igual, como pidió la clienta
+   explícitamente ("esa sección también se reproduce en las
+   liquidaciones y en el archivo de la propuesta"). Test actualizado:
+   `test_titulo_valores_usa_la_frecuencia_de_actualizacion`
+   (`tests/test_pdf_liquidacion.py`).
+
+2. **Investigado, sin bug encontrado — "aunque el archivo se genere en
+   noviembre que se vea el período en el cual comenzó a regir el
+   esquema actual de valores" (ej. 10/2026).** `rango_actualizacion` ya
+   hace exactamente esto: `desde` es el período del último
+   `AumentoAplicado` con `Periodo <= periodo` consultado (o el período
+   consultado mismo, si nunca hubo uno). Confirmado con un repro directo
+   contra el motor (sin pasar por la GUI): confirmando un aumento con
+   `periodo="2026-10"` y generando después el PDF para `periodo="2026-
+   11"`, `rango_actualizacion` devuelve `desde="2026-10"` — exactamente
+   lo pedido. El síntoma real que vio la clienta ("11/2026 al 11/2026")
+   significa que, para el sistema, ese aumento quedó registrado con
+   `Periodo="2026-11"` (el campo "Período" de la pantalla "Aumentos y
+   descuentos" trae por defecto el período en curso al momento de
+   confirmar, pero admite escribir uno distinto a mano para una
+   confirmación retroactiva) — o que los valores actuales nunca pasaron
+   por `confirmar_aumento` en absoluto (ej. si se editaron directo en el
+   catálogo de Consultorios), en cuyo caso no hay ningún "desde"
+   histórico que mostrar. Consultada la clienta sobre cuál de los dos
+   fue el caso real, no lo recuerda — no se tocó la lógica (compartida
+   por las tres PDFs y ya correcta) sin poder reproducir un caso real
+   distinto al ya confirmado. Explicado el mecanismo para la próxima
+   vez: al confirmar un aumento retroactivo, el campo "Período" tiene
+   que quedar en el mes real en que empezó a regir, no en el que trae
+   por defecto; si se confirmó con el período equivocado, se puede
+   deshacer ("Deshacer último aumento") y reconfirmar con el correcto.
+
+3. **Resuelto — bug real: la grilla operativa (Reservas regulares/
+   aisladas/Oferta/Novedades/Grilla semanal, `GrillaOperativaWidget`)
+   ignoraba el combo "Período" para decidir quién ocupa cada horario.**
+   Pedido explícito: "si cambio el periodo de visualización en la
+   grilla [quiero] que cambie el comportamiento de la misma y se vea lo
+   de ese período combinado con los otros valores que tengo seteados".
+   Investigado: cambiar el combo SÍ disparaba `actualizar()` y SÍ movía
+   la ventana de aisladas/ausencias al mes elegido, pero
+   `calcular_grilla_operativa` (`app/negocio/grilla_operativa.py`)
+   clasificaba cada reserva regular como "actual" (la vigente ahora) o
+   "entrante" (todavía no arrancó) comparando `VigenciaInicio`/
+   `VigenciaFin` contra `hoy` (la fecha real del sistema) SIEMPRE, sin
+   importar qué período se hubiera elegido en el combo — una reserva que
+   arranca el mes que viene seguía en rojo ("entrante") aunque se
+   mirara un período en el que, para esa fecha, ya tendría que estar
+   activa.
+
+   Se agrega `fecha_referencia = max(hoy, mes_actual_inicio)` (el primer
+   día del período elegido, si es un mes todavía no llegado; `hoy` si el
+   período elegido es el actual — el combo de la pantalla no ofrece
+   meses pasados) y se usa en vez de `hoy` para clasificar regulares
+   (`_clasificar_regulares`) y para resolver la celda
+   (`_resolver_regular`/`_resolver_aislada`). El resto de los usos de
+   `hoy` como piso (aisladas/ausencias dentro del mes consultado) no
+   necesitó tocarse — ya quedaban dominados por `mes_actual_inicio` al
+   mirar un período futuro (`max(fecha_desde_rango, hoy)` ya daba
+   `fecha_desde_rango` en ese caso), así que el cambio es exactamente
+   el punto que estaba roto, sin tocar el resto del comportamiento ya
+   confirmado con la clienta (todos los tests existentes, con período =
+   mes de "hoy", siguen pasando sin cambios). Tests nuevos en
+   `tests/test_grilla_operativa.py`:
+   `test_regular_entrante_pasa_a_actual_si_el_periodo_visualizado_es_
+   posterior_a_su_vigencia` y
+   `test_regular_conflicto_el_periodo_visualizado_determina_quien_es_
+   el_titular` (este último con una reserva "actual" liberada el 31/8 y
+   una "entrante" desde el 3/9 — confirma que mirando agosto la celda
+   sigue marcando a la titular de agosto con el conflicto en rojo, y
+   mirando octubre ya muestra a la nueva titular, blanco liso, sin
+   conflicto).
+
+4. **Resuelto — mensaje de WhatsApp "Mensaje 4" (envío de liquidación):
+   formato con negrita/itálica + mes en mayúscula con año.** Pedido
+   explícito con el antes/después completo: "MENSAJE AUTOMATICO" y
+   "(no es necesario responder)" pasan a negrita/itálica
+   (`*MENSAJE AUTOMATICO*` / `_(no es necesario responder)_` — markdown
+   de WhatsApp tal cual, mismo criterio que ya usaba
+   `DEFAULT_RECORDATORIO_DEUDA_PROFESIONAL_X` en el mismo archivo), el
+   mes de la liquidación pasa de minúscula sola ("noviembre") a negrita
+   con el año ("*NOVIEMBRE 2026*"), y "Abrir el archivo enseguida de
+   recibirlo para que les quede en el teléfono" cambia a "Abrir el
+   archivo al recibirlo para que quede en guardado en el teléfono" (la
+   línea de "revisar el contenido" queda igual). Cambiado
+   `DEFAULT_ENVIO_LIQUIDACION` (`app/negocio/plantillas_texto.py`, el
+   markdown va fijo en la plantilla) y `mensaje_envio_liquidacion`
+   (`app/negocio/mensajes.py`, pasa a sustituir `{mes}` con
+   `f"{mes_texto(int(mes)).upper()} {anio}"` en vez de solo
+   `mes_texto(int(mes))`). Tests actualizados (ambos ya existentes,
+   dependían del formato viejo del mes):
+   `test_mensaje_envio_liquidacion_menciona_el_mes`
+   (`tests/test_mensajes.py`, ahora busca "AGOSTO 2026") y
+   `test_mensaje_envio_liquidacion_usa_plantilla_personalizada`
+   (`tests/test_plantillas_texto.py`, ahora espera "Mes: AGOSTO 2026.
+   Gracias." al sustituir sobre una plantilla personalizada).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

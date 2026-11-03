@@ -86,7 +86,7 @@ def test_mensaje_envio_liquidacion_usa_plantilla_personalizada(conn):
     guardar_texto_personalizado(conn, "mensaje_envio_liquidacion", "Mes: {mes}. Gracias.")
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Test")
     texto = mensaje_envio_liquidacion(conn, id_prof, "2026-08")
-    assert texto == "Mes: agosto. Gracias."
+    assert texto == "Mes: AGOSTO 2026. Gracias."
 
 
 def test_mensaje_grupal_bloque_feriados_sigue_armando_el_sistema(conn):

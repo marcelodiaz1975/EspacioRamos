@@ -470,12 +470,13 @@ def test_titulo_de_fotos_menciona_consultorios_reservados(conn, profesional, tmp
 
 def test_titulo_valores_usa_la_frecuencia_de_actualizacion(conn, profesional, tmp_path):
     """Default sembrado: bimestral en meses pares — agosto vigente hasta
-    septiembre, no "08/2026 y 08/2026". #40: conector "al" (es un rango
-    continuo), no "y"."""
+    septiembre, no "08/2026 y 08/2026" dos veces. Conector "y" (pedido
+    explícito posterior de la clienta, reemplaza la decisión de #40 que
+    había elegido "al")."""
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
     texto = _texto_pdf(ruta)
-    assert "comprendido entre 08/2026 al 09/2026" in texto
+    assert "comprendido entre 08/2026 y 09/2026" in texto
 
 
 def test_consultorios_y_horas_ordenados_por_edificio_y_numero(conn, profesional, consultorio):

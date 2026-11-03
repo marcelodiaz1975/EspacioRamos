@@ -286,6 +286,18 @@ def calcular_grilla_operativa(
     mes_actual_fin = ultimo_dia_mes(anio, mes)
     dias = [d for d in DIAS_SEMANA if d in dias]
 
+    # Pedido de la clienta ("si cambio el período de visualización en la
+    # grilla, que cambie el comportamiento de la misma"): si `periodo` es
+    # un mes FUTURO (todavía no llegó según la fecha real), evaluar quién
+    # tiene cada horario "como si ya fuera" el primer día de ese mes, no
+    # como hoy mismo — una reserva con VigenciaInicio dentro del mes
+    # consultado pero posterior a hoy pasa a contar como la titular
+    # ACTUAL de ese mes (ya no "entrante"), reflejando el período elegido
+    # combinado con el resto de los filtros. Si `periodo` es el mes en
+    # curso (o ya pasó, aunque el combo de la pantalla no ofrece meses
+    # pasados), `fecha_referencia` queda igual a `hoy` — sin cambios.
+    fecha_referencia = max(hoy, mes_actual_inicio)
+
     profesionales = {p["IdProfesional"]: p for p in conn.execute("SELECT * FROM Profesional").fetchall()}
 
     regulares_por_slot: dict[tuple[int, str], list[sqlite3.Row]] = {}
@@ -303,15 +315,15 @@ def calcular_grilla_operativa(
             candidatas = regulares_por_slot.get((id_consultorio, dia), [])
             for hora in range(int(hora_ini), int(hora_fin)):
                 cubren = [r for r in candidatas if r["HoraInicio"] <= hora < r["HoraFin"]]
-                actual, entrante = _clasificar_regulares(cubren, hoy)
+                actual, entrante = _clasificar_regulares(cubren, fecha_referencia)
                 if modo == "regular":
                     celda = _resolver_regular(
-                        conn, id_consultorio, dia, hora, hoy, mes_actual_inicio, mes_actual_fin,
+                        conn, id_consultorio, dia, hora, fecha_referencia, mes_actual_inicio, mes_actual_fin,
                         actual, entrante, profesionales, id_profesional_filtro,
                     )
                 else:
                     celda = _resolver_aislada(
-                        conn, id_consultorio, dia, hora, hoy, mes_actual_inicio, mes_actual_fin,
+                        conn, id_consultorio, dia, hora, fecha_referencia, mes_actual_inicio, mes_actual_fin,
                         actual, profesionales, id_profesional_filtro,
                     )
                 clave = (id_consultorio, dia, hora)

@@ -123,6 +123,45 @@ def test_regular_conflicto_con_profesional_distinto_entrante_es_rojo_liso(conn, 
     )
 
 
+def test_regular_entrante_pasa_a_actual_si_el_periodo_visualizado_es_posterior_a_su_vigencia(
+    conn, consultorio, eugenia,
+):
+    """Pedido de la clienta ("si cambio el período de visualización en la
+    grilla, que cambie el comportamiento de la misma"): con "hoy" todavía
+    en agosto, una reserva "entrante" (vigente desde el 3/9) sigue en
+    rojo liso al mirar el período de agosto (como antes), pero al elegir
+    el combo "Período" de octubre (ya pasó su VigenciaInicio para ese
+    mes) pasa a ser la titular ACTUAL de esa celda."""
+    _regular(conn, eugenia, consultorio, vigencia_inicio="2026-09-03")
+    celda_agosto = _celda(conn, consultorio, periodo="2026-08")
+    assert (celda_agosto.color_aro, celda_agosto.color_centro) == (ROJO, ROJO)
+
+    celda_octubre = _celda(conn, consultorio, periodo="2026-10")
+    assert (celda_octubre.color_aro, celda_octubre.color_centro) == (BLANCO, BLANCO)
+    assert celda_octubre.codigo == "R2"
+
+
+def test_regular_conflicto_el_periodo_visualizado_determina_quien_es_el_titular(
+    conn, consultorio, virginia, eugenia,
+):
+    """Mismo pedido, caso con conflicto: Virginia es la titular vigente
+    hoy (con liberación cargada para el 31/8), y a partir del 3/9 la
+    reemplaza Eugenia. Mirando el período de agosto la celda sigue
+    marcando a Virginia (R1, con la liberación tapada por el entrante);
+    mirando octubre (combinado con el resto de los filtros, sin tocar
+    nada más) ya muestra a Eugenia (R2) como titular, sin ningún
+    conflicto."""
+    _regular(conn, virginia, consultorio, vigencia_fin="2026-08-31")
+    _regular(conn, eugenia, consultorio, vigencia_inicio="2026-09-03")
+    celda_agosto = _celda(conn, consultorio, periodo="2026-08")
+    assert celda_agosto.codigo == "R1"
+    assert (celda_agosto.color_aro, celda_agosto.color_centro) == (ROJO, ROJO)
+
+    celda_octubre = _celda(conn, consultorio, periodo="2026-10")
+    assert celda_octubre.codigo == "R2"
+    assert (celda_octubre.color_aro, celda_octubre.color_centro) == (BLANCO, BLANCO)
+
+
 def test_regular_entrante_mas_aislada_en_mes_actual_es_rojo_con_triangulo_amarillo(conn, consultorio, virginia, eugenia):
     _regular(conn, virginia, consultorio)
     _regular(conn, eugenia, consultorio, vigencia_inicio="2026-09-03")

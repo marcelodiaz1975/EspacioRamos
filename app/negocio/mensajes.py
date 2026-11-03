@@ -268,7 +268,7 @@ def mensaje_envio_liquidacion(conn: sqlite3.Connection, id_profesional: int, per
     _profesional_r(conn, id_profesional)
     anio, mes = periodo.split("-")
     plantilla = resolver_plantilla(conn, "mensaje_envio_liquidacion", DEFAULT_ENVIO_LIQUIDACION)
-    return sustituir_variables(plantilla, {"mes": mes_texto(int(mes))})
+    return sustituir_variables(plantilla, {"mes": f"{mes_texto(int(mes)).upper()} {anio}"})
 
 
 def mensaje_recordatorio_deuda_profesional_x(conn: sqlite3.Connection, id_profesional: int) -> str:
