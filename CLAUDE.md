@@ -406,6 +406,65 @@ Panel de control - Avance de período, backup, y vista rápida.png". Sección es
 el nombre del `Seccion` del menú, Solapa el texto de la pestaña
 mostrada (si la pantalla no tiene solapas, se omite esa tercera parte).
 
+## Hilo abierto: Reservas aisladas — check "Mostrar todas las reservas"; Pagos — "Saldo total"
+
+Pedido de la clienta, dos pantallas:
+
+1. **Resuelto — Reservas aisladas: la tabla acumulaba TODAS las aisladas
+   alguna vez cargadas, sin filtro de fecha.** Investigado antes de
+   tocar código (la clienta pidió confirmación explícita): ¿son seguras
+   de borrar las aisladas de meses viejos? NO — `_aisladas_periodo`
+   (liquidaciones) solo lee mes anterior + mes actual, así que una vieja
+   nunca vuelve a afectar ningún cálculo de liquidación, PERO
+   `monto_neto_aislada_periodo` (`app/negocio/estadisticas.py`) se usa
+   en vivo por Estadísticas ("Historial general", con selector Desde/
+   Hasta) y Balance del negocio (Ingresos) para CUALQUIER período
+   histórico que se elija mirar — borrar una aislada vieja dejaría esos
+   reportes en $0 para siempre en ese mes. Se resolvió con un filtro de
+   VISUALIZACIÓN nomás (mismo criterio que "Filtros que solo afectan la
+   visualización"): debajo del filtro de Profesional de la columna 2
+   (la de `GrillaOperativaWidget.extraer_panel_filtros()`, no la del
+   formulario de alta de la columna 1), una línea divisoria y un check
+   "Mostrar todas las reservas" (`_PanelReservasAisladas.check_mostrar_
+   todas`) — desactivado por defecto (solo se listan desde hoy en
+   adelante), activado muestra el historial completo como antes. F5
+   lo resetea a desactivado, igual que el resto de los filtros de esta
+   solapa.
+
+   Pedido de seguimiento: al activar el check, la tabla no tiene que
+   arrancar escroleada arriba de todo (la más vieja) — se posiciona en
+   la primera fila de hoy en adelante (`self.tabla.scrollToItem(...,
+   PositionAtTop)`), dejando habilitado escrolear para atrás además de
+   para adelante. Solo aplica con el orden por defecto (fecha/hora/
+   código) — un click en un encabezado de columna cambia el criterio de
+   orden, así que "hoy" deja de tener una posición fija.
+
+   Tests nuevos/actualizados en `tests/test_gui_reservas.py`: se agregó
+   `check_mostrar_todas.setChecked(True)` a los 14 tests existentes que
+   cargaban aisladas con fechas fijas (ya en el pasado respecto de la
+   fecha real del sistema) para que sigan viendo sus filas; un test de
+   scroll (`test_tabla_reservas_aisladas_escrolea_con_mas_filas_de_las_
+   que_entran`) necesitó además mover el `setChecked(True)` a ANTES de
+   `show()` (si no, el layout se resuelve con la tabla vacía y el
+   scrollbar queda sin rango aunque después se agreguen filas — mismo
+   tipo de problema de timing que otros tests de geometría offscreen de
+   este archivo).
+
+2. **Resuelto — Pagos/Registrar pagos: "Nuevo saldo" solo restaba el
+   pago del período ACTUAL.** Si el pago se imputa al período anterior,
+   "Nuevo saldo" (que solo mira `SaldoCuentaActual`) daba un importe
+   incompleto/mentiroso — no reflejaba el saldo real a cubrir. Se agrega
+   "Saldo total" (`etiqueta_saldo_total`, debajo de "Saldo período
+   actual"), que suma las dos etiquetas de arriba (`SaldoCuentaAnterior
+   + SaldoCuentaActual`), y "Nuevo saldo" pasa a calcularse en vivo
+   sobre ESE total en vez de sobre el saldo actual a secas
+   (`_actualizar_saldos`, `app/gui/pantallas/pagos.py`). Puro cambio de
+   PREVIEW en pantalla — no toca todavía `registrar_pago` (ver el hilo
+   del bug real de `SaldoCuentaAnterior`/`SaldoCuentaActual` más abajo,
+   reportado de inmediato después de este cambio, que sí ataca el
+   cálculo real). Test nuevo: `test_saldo_total_suma_anterior_y_actual_
+   y_nuevo_saldo_lo_usa_de_base` (`tests/test_gui_pagos.py`).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

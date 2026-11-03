@@ -17,6 +17,7 @@ import shiboken6
 from PySide6.QtCore import QDate, QEvent, QLocale, QObject, QTimer
 from PySide6.QtGui import QFontMetrics, QGuiApplication, QValidator
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -1858,9 +1859,12 @@ class _PanelReservasAisladas(QWidget):
         """F3 ("Reiniciar solapa"): mismo criterio que `_PanelReservas
         Regulares.reiniciar` — a diferencia de esa solapa, acá
         `_resetear_formulario` ya incluye "Profesional" (punto #9.1.9
-        no aplica acá), así que alcanza con llamarla directo."""
+        no aplica acá), así que alcanza con llamarla directo.
+        "Mostrar todas las reservas" vuelve a su valor inicial
+        (desactivado) — mismo criterio que el resto de los filtros."""
         self._orden.reiniciar()
         self._resetear_formulario()
+        self.check_mostrar_todas.setChecked(False)
         self.actualizar()
         self.combo_profesional.setFocus()
 
@@ -2152,6 +2156,32 @@ class _PanelReservasAisladas(QWidget):
         # columna 1, nunca al revés.
         panel_filtros_aisladas.setMaximumHeight(self._alto_referencia_aisladas)
         self._panel_filtros_aisladas = panel_filtros_aisladas
+
+        # Pedido explícito de la clienta: la tabla de abajo acumulaba
+        # TODAS las aisladas que se hayan cargado alguna vez, sin ningún
+        # filtro de fecha — con el tiempo queda larga de reservas que ya
+        # pasaron y no aportan nada para el trabajo del día a día. Debajo
+        # del filtro de Profesional de esta columna (la de la grilla, no
+        # la del formulario de alta de la columna 1), una línea divisoria
+        # y un check "Mostrar todas las reservas" — desactivado por
+        # defecto, así que la tabla solo muestra desde hoy en adelante
+        # (ver `actualizar`); activado, muestra el historial completo
+        # como antes. Puro filtro de VISUALIZACIÓN (mismo criterio que
+        # "Filtros que solo afectan la visualización" de Vista rápida/
+        # Aumentos): no borra ni deja de leer ninguna fila de la base —
+        # Estadísticas (Historial general) y Balance del negocio siguen
+        # necesitando las aisladas viejas para sus reportes de períodos
+        # pasados, así que nunca se tocan.
+        layout_filtros_aisladas = panel_filtros_aisladas.layout()
+        indice_profesional = layout_filtros_aisladas.indexOf(self.grilla.campo_profesional)
+        linea_mostrar_todas = QFrame()
+        linea_mostrar_todas.setFrameShape(QFrame.Shape.HLine)
+        linea_mostrar_todas.setFrameShadow(QFrame.Shadow.Sunken)
+        self.check_mostrar_todas = QCheckBox("Mostrar todas las reservas")
+        self.check_mostrar_todas.stateChanged.connect(self.actualizar)
+        layout_filtros_aisladas.insertWidget(indice_profesional + 1, linea_mostrar_todas)
+        layout_filtros_aisladas.insertWidget(indice_profesional + 2, self.check_mostrar_todas)
+
         layout_col_filtros = QVBoxLayout()
         layout_col_filtros.setContentsMargins(0, 0, 0, 0)
         layout_col_filtros.addWidget(panel_filtros_aisladas, stretch=1)
@@ -2215,7 +2245,7 @@ class _PanelReservasAisladas(QWidget):
         # de foco propia para el panel de Filtros de la grilla, separada
         # de `self._foco` (el formulario de alta).
         self._foco_filtros_grilla = instalar_enter_avanza_foco(
-            self.grilla.widgets_filtro_para_foco(), parent=self.grilla,
+            [*self.grilla.widgets_filtro_para_foco(), self.check_mostrar_todas], parent=self.grilla,
         )
         fila_columnas.addWidget(self.grilla, stretch=1)
 
@@ -2490,7 +2520,13 @@ class _PanelReservasAisladas(QWidget):
         historia — canceladas incluidas — para poder revisarla), mismo
         orden por fecha/hora (la categoría/código no distinguen nada
         dentro de un solo profesional). Overridable en los dos casos
-        haciendo click en el título de una columna (ver `OrdenTabla`)."""
+        haciendo click en el título de una columna (ver `OrdenTabla`).
+
+        `check_mostrar_todas` desactivado (default): solo se listan las
+        de hoy en adelante — pedido explícito de la clienta, puro filtro
+        de VISUALIZACIÓN (no borra ni deja de leer nada de la base, ver
+        el comentario completo en `_armar_ui` sobre por qué las aisladas
+        viejas siguen haciendo falta para Estadísticas/Balance)."""
         id_profesional_filtro = self.combo_profesional.currentData()
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
         todas = obtener_repositorio(self.conn, "ReservaAislada").listar()
@@ -2498,6 +2534,9 @@ class _PanelReservasAisladas(QWidget):
             filtradas = [r for r in todas if r["IdProfesional"] == id_profesional_filtro]
         else:
             filtradas = [r for r in todas if not r["EsExtraordinaria"]]
+        if not self.check_mostrar_todas.isChecked():
+            hoy_iso = fecha_actual(self.conn).isoformat()
+            filtradas = [r for r in filtradas if r["Fecha"] >= hoy_iso]
 
         cfg = self.conn.execute(
             "SELECT RecargoPorcentajeAisladas FROM Configuracion WHERE IdConfiguracion = 1"
@@ -2563,6 +2602,21 @@ class _PanelReservasAisladas(QWidget):
             self.tabla.setItem(fila_idx, 9, item_numero(self._valor_reserva(r, valor_hora, recargo_pct)))
             self.tabla.setItem(fila_idx, 10, item_centrado(r["PeriodoImputado"] or ""))
         _ajustar_columnas_aisladas(self.tabla)
+        # Pedido explícito de la clienta: al activar "Mostrar todas las
+        # reservas" (o al refrescar con el check ya activado) la tabla
+        # NO tiene que arrancar escroleada arriba de todo (la más
+        # vieja) — se posiciona en la primera fila de hoy en adelante,
+        # dejando habilitado escrolear para atrás (lo más viejo) además
+        # de para adelante (lo más nuevo), como ya pasaba con el check
+        # desactivado. Solo tiene sentido con el orden por defecto
+        # (fecha/hora/código) — un click en un encabezado de columna
+        # cambia el criterio de orden, así que "hoy" ya no tiene una
+        # posición fija dentro de la tabla.
+        if self.check_mostrar_todas.isChecked() and self._orden.columna is None:
+            hoy_iso = fecha_actual(self.conn).isoformat()
+            indice_hoy = next((i for i, (r, _, _) in enumerate(filas) if r["Fecha"] >= hoy_iso), None)
+            if indice_hoy is not None:
+                self.tabla.scrollToItem(self.tabla.item(indice_hoy, 0), QAbstractItemView.ScrollHint.PositionAtTop)
         self._sincronizar_grilla()
         self.grilla.actualizar()
 

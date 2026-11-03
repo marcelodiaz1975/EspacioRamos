@@ -1119,6 +1119,31 @@ def test_registrar_pago_muestra_etiqueta_de_saldo_periodo_anterior(qtbot, conn):
     panel.combo_profesional.setCurrentIndex(0)
     assert panel.etiqueta_saldo_anterior.text() == "Saldo período anterior: —"
     assert panel.etiqueta_saldo_actual.text() == "Saldo período actual: —"
+    assert panel.etiqueta_saldo_total.text() == "Saldo total: —"
+
+
+def test_saldo_total_suma_anterior_y_actual_y_nuevo_saldo_lo_usa_de_base(qtbot, conn):
+    """Pedido explícito de la clienta: "Nuevo saldo" solo restaba el pago
+    del período ACTUAL — si el pago se imputa al período anterior, el
+    importe quedaba incompleto/mentiroso. "Saldo total" (debajo de
+    "Saldo período actual") suma las dos etiquetas de arriba, y "Nuevo
+    saldo" pasa a calcularse en vivo sobre ESE total en vez de sobre el
+    saldo actual a secas."""
+    id_profesional = _crear_profesional(conn, saldo=1234.5)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=-678.9)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+
+    assert panel.etiqueta_saldo_total.text() == (
+        f'Saldo total: <span style="color:black;">{formatear_moneda(1234.5 - 678.9)}</span>'
+    )
+
+    panel.spin_monto.setValue(-2000)  # pago imputado al período anterior, mayor que el saldo actual solo
+    assert panel.etiqueta_nuevo_saldo.text() == (
+        f'Nuevo saldo: <span style="color:{COLOR_ROJO};">{formatear_moneda(1234.5 - 678.9 - 2000)}</span>'
+    )
 
 
 def test_saldo_anterior_y_nuevo_saldo_se_colorean_en_negativo(qtbot, conn):

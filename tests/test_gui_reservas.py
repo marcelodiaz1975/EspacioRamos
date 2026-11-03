@@ -419,6 +419,14 @@ def test_tabla_reservas_aisladas_escrolea_con_mas_filas_de_las_que_entran(qtbot,
 
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
+    # "Mostrar todas las reservas": las fechas de este test son fijas
+    # (no relativas a "hoy"), así que sin esto el filtro de visualización
+    # por defecto (desde hoy en adelante) las ocultaría todas. Activado
+    # ANTES de `show()`/`resize()` para que la tabla ya tenga sus 30
+    # filas reales cuando Qt resuelve el layout por primera vez, mismo
+    # criterio que el resto de este test (forzar el desborde desde el
+    # arranque, no después de mostrada).
+    pantalla.panel_aisladas.check_mostrar_todas.setChecked(True)
     pantalla.resize(1300, 900)
     pantalla.show()
     pantalla.pestanas.setCurrentIndex(1)  # Reservas aisladas — no es la solapa por default
@@ -501,6 +509,10 @@ def test_tabla_aisladas_formato_fecha_horario_y_columnas_centradas(qtbot, conn):
     pantalla.resize(1500, 900)
     pantalla.show()
     pantalla.pestanas.setCurrentIndex(1)
+    # "Mostrar todas las reservas": la fecha de este test es fija (no
+    # relativa a "hoy"), así que sin esto el filtro de visualización por
+    # defecto (desde hoy en adelante) la ocultaría.
+    pantalla.panel_aisladas.check_mostrar_todas.setChecked(True)
     qtbot.waitExposed(pantalla)
 
     tabla = pantalla.panel_aisladas.tabla
@@ -1857,6 +1869,10 @@ def test_eliminar_reserva_aislada_de_mes_anterior_regenera_liquidacion_actual(qt
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    # "Mostrar todas las reservas": la fecha de este test es fija (no
+    # relativa a "hoy"), así que sin esto el filtro de visualización por
+    # defecto (desde hoy en adelante) la ocultaría.
+    panel.check_mostrar_todas.setChecked(True)
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
     panel.tabla.selectRow(0)
     panel._eliminar()
@@ -2576,6 +2592,10 @@ def test_tabla_aisladas_ordenada_por_fecha_y_hora(qtbot, conn):
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    # "Mostrar todas las reservas": las fechas de este test son fijas (no
+    # relativas a "hoy"), así que sin esto el filtro de visualización por
+    # defecto (desde hoy en adelante) las ocultaría.
+    panel.check_mostrar_todas.setChecked(True)
     filas = [
         (panel.tabla.item(f, 5).text(), panel.tabla.item(f, 6).text(), panel.tabla.item(f, 7).text())
         for f in range(panel.tabla.rowCount())
@@ -2696,6 +2716,10 @@ def test_tablas_de_abajo_muestran_tratamiento_nombre_apellido_y_columna_ancha(qt
     assert tabla_r.columnWidth(0) >= 180
     assert tabla_r.item(0, 6).text() == "9:00 a 10:00"
 
+    # "Mostrar todas las reservas": la fecha de la aislada de este test
+    # es fija (no relativa a "hoy"), así que sin esto el filtro de
+    # visualización por defecto (desde hoy en adelante) la ocultaría.
+    pantalla.panel_aisladas.check_mostrar_todas.setChecked(True)
     tabla_a = pantalla.panel_aisladas.tabla
     assert tabla_a.item(0, 0).text() == "Lic. Virginia Gómez"
     assert tabla_a.columnWidth(0) >= 180
@@ -2787,6 +2811,10 @@ def test_dia_de_la_semana_en_tabla_de_aisladas(qtbot, conn):
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    # "Mostrar todas las reservas": la fecha de este test es fija (no
+    # relativa a "hoy"), así que sin esto el filtro de visualización por
+    # defecto (desde hoy en adelante) la ocultaría.
+    panel.check_mostrar_todas.setChecked(True)
     assert panel.tabla.horizontalHeaderItem(5).text() == "Día"
     assert panel.tabla.item(0, 5).text() == "Martes"
     # "ddd dd-MM-yyyy" (ej. "mar 18-08-2026") — pedido puntual de esta
@@ -2803,6 +2831,10 @@ def test_modificar_reserva_aislada_edita_la_fila_existente_sin_cancelarla(qtbot,
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    # "Mostrar todas las reservas": la fecha de este test es fija (no
+    # relativa a "hoy"), así que sin esto el filtro de visualización por
+    # defecto (desde hoy en adelante) ocultaría la fila que se crea.
+    panel.check_mostrar_todas.setChecked(True)
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     panel.campo_fecha.setDate(QDate(2026, 8, 18))
     panel.spin_desde.setValue(9)
@@ -2851,6 +2883,10 @@ def test_modificar_reserva_aislada_al_confirmar_regenera_mensaje_al_portapapeles
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    # "Mostrar todas las reservas": la fecha de este test es fija (no
+    # relativa a "hoy"), así que sin esto el filtro de visualización por
+    # defecto (desde hoy en adelante) ocultaría la fila que se crea.
+    panel.check_mostrar_todas.setChecked(True)
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     panel.campo_fecha.setDate(QDate(2026, 8, 18))
     panel._crear()
@@ -2881,6 +2917,10 @@ def test_columna_reubicacion_en_tabla_de_aisladas(qtbot, conn):
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    # "Mostrar todas las reservas": las fechas de este test son fijas
+    # (no relativas a "hoy"), así que sin esto el filtro de
+    # visualización por defecto (desde hoy en adelante) las ocultaría.
+    panel.check_mostrar_todas.setChecked(True)
     assert panel.tabla.horizontalHeaderItem(8).text() == "Reubicación"
     assert panel.tabla.horizontalHeaderItem(9).text() == "Valor"
     valores = {panel.tabla.item(f, 6).text(): panel.tabla.item(f, 8).text() for f in range(panel.tabla.rowCount())}
@@ -2896,6 +2936,10 @@ def test_columna_periodo_imputado_en_tabla_de_aisladas(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
     assert panel.tabla.horizontalHeaderItem(10).text() == "Período imputado"
+    # "Mostrar todas las reservas": la fecha de este test es fija (no
+    # relativa a "hoy"), así que sin esto el filtro de visualización por
+    # defecto (desde hoy en adelante) ocultaría la fila que se crea.
+    panel.check_mostrar_todas.setChecked(True)
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
     panel.campo_fecha.setDate(QDate(2026, 8, 18))
     # Categoría R arranca en "Período siguiente" por default
@@ -3147,6 +3191,10 @@ def test_tabla_aisladas_sin_profesional_muestra_todas_de_todos(qtbot, conn):
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    # "Mostrar todas las reservas": las fechas de este test son fijas
+    # (no relativas a "hoy"), así que sin esto el filtro de
+    # visualización por defecto (desde hoy en adelante) las ocultaría.
+    panel.check_mostrar_todas.setChecked(True)
     panel.combo_profesional.setCurrentIndex(0)  # placeholder: sin profesional elegido
     assert panel.tabla.rowCount() == 2
 
@@ -3164,6 +3212,10 @@ def test_tabla_aisladas_con_profesional_acota_a_sus_reservas(qtbot, conn):
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    # "Mostrar todas las reservas": las fechas de este test son fijas
+    # (no relativas a "hoy"), así que sin esto el filtro de
+    # visualización por defecto (desde hoy en adelante) las ocultaría.
+    panel.check_mostrar_todas.setChecked(True)
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional_1))
     assert panel.tabla.rowCount() == 1
     assert panel.tabla.item(0, 6).text() == "mar 18-08-2026"
@@ -3198,6 +3250,10 @@ def test_tabla_aisladas_todos_los_profesionales_excluye_extraordinarias_y_ordena
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    # "Mostrar todas las reservas": las fechas de este test son fijas
+    # (no relativas a "hoy"), así que sin esto el filtro de
+    # visualización por defecto (desde hoy en adelante) las ocultaría.
+    panel.check_mostrar_todas.setChecked(True)
     assert panel.tabla.rowCount() == 3
     codigos = [panel.tabla.item(f, 0).text().split(" - ")[0] for f in range(panel.tabla.rowCount())]
     assert codigos == ["A1", "R10", "R2"]
@@ -3239,6 +3295,10 @@ def test_tabla_aisladas_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
+    # "Mostrar todas las reservas": las fechas de este test son fijas
+    # (no relativas a "hoy"), así que sin esto el filtro de
+    # visualización por defecto (desde hoy en adelante) las ocultaría.
+    panel.check_mostrar_todas.setChecked(True)
     assert panel.tabla.rowCount() == 2
 
     panel.tabla.horizontalHeader().sectionClicked.emit(6)  # "Fecha" ascendente
