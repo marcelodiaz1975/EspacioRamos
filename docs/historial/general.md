@@ -3820,3 +3820,651 @@ ventana y demás, ver ese módulo) pasa de `"v0.11.2026.10"` a
 `"v.2026.11"` — sin ningún otro cambio, `NOMBRE_Y_VERSION` ya se arma
 solo a partir de esa constante (mismo patrón que el cambio de versión
 anterior, punto 1.14 más arriba en este mismo archivo).
+
+## Batch de 6 pedidos: Horas aisladas, Liquidaciones, Llaves, Pagos
+
+Pedido de la clienta, seis puntos en un solo mensaje. Tres quedaron
+desestimados/pendientes de que ella los verifique mejor antes de
+seguir — dos porque, al investigar, el comportamiento pedido YA estaba
+implementado (así que probablemente el síntoma real que vio es otra
+cosa), uno porque se resolvió directo sin necesidad de más vueltas:
+
+1. **Desestimado por la clienta** ("si ya tiene scroll ese cuadro de
+   detalle desestimá mi pedido"): el cuadro "Detalle" de Reservas
+   aisladas (`GrillaOperativaWidget.texto_detalle`, un `QTextEdit`) ya
+   muestra su propia barra de scroll vertical en cuanto el texto no
+   entra en el alto disponible — confirmado con un script de geometría
+   offscreen (`verticalScrollBar().maximum() > 0` con el mismo alto
+   acotado que usa esa pantalla). No se tocó código.
+2. **Pendiente, a verificar por la clienta**: el concepto de "Depósito
+   de llave" en la liquidación (`_lugar_llave_texto`, `app/negocio/
+   llaves.py`) YA incluye la unidad cuando el Tipo de llave abre una
+   sola unidad sin ambigüedad (ej. "Depósito llave unidad del 7mo "L"
+   del edificio Ramos 1" — confirmado en `tests/test_llaves.py`). Si el
+   caso real que motivó el pedido es otro (ej. una llave tipo Edificio,
+   o sin acceso configurado todavía), falta que la clienta lo
+   puntualice antes de tocar nada.
+3. **Resuelto**: buscador de profesionales en Tenencias de llaves,
+   arriba de "Ingresar copia al stock" — combo buscable ("Todos los
+   profesionales" + código/nombre, mismo criterio que
+   `combo_filtro_stock` de esta misma pantalla), filtrando la tabla de
+   "Movimientos de llaves" (la última de la pantalla) SIN afectar a
+   `combo_filtro_stock` ni a su tabla derivada (`self._movimientos_
+   actuales` se mantiene completo, el filtro nuevo solo recorta lo que
+   se vuelca a `self.tabla_movimientos`). `_PanelLlaves._grupo_botones`
+   suma un parámetro opcional `combo_extra`: descuenta su alto (+ el
+   espaciado que agrega como ítem nuevo del layout) del espaciador que
+   alinea el primer botón con el primer registro de la tabla, así
+   "Ingresar copia al stock" sigue exactamente a la misma altura que
+   antes — confirmado con el test de geometría ya existente de esta
+   pantalla (`test_cada_grupo_de_botones_arranca_a_la_altura_del_
+   primer_registro`). Test nuevo: `test_movimientos_se_filtra_por_el_
+   buscador_de_profesional` (`tests/test_gui_llaves.py`).
+4. **Resuelto**: "Horas aisladas a trabajar/trabajada" en plural en vez
+   de "Hora aislada" fijo cuando el bloque dura más de una hora
+   (`_texto_aislada`, `app/pdf/liquidacion_pdf.py` — compara `item.
+   hora_fin - item.hora_inicio`). Tests nuevos: `test_horas_aisladas_
+   en_plural_cuando_el_bloque_dura_mas_de_una_hora`/`..._en_singular_
+   cuando_el_bloque_dura_una_hora` (`tests/test_pdf_liquidacion.py`) —
+   de paso, dos tests ya existentes que usaban un bloque de 2hs
+   (`test_hora_aislada_omite_el_edificio_...`/`..._menciona_el_
+   edificio_...`) se actualizaron a la redacción en plural que les
+   corresponde ahora.
+5. **Resuelto**: en Pagos/Registrar pagos, debajo de "Deshacer último
+   movimiento", se agregó "Saldo período anterior:" (`SaldoCuenta
+   Anterior` del profesional — cómo cerró el período anterior, antes
+   sin mostrarse en esta solapa) arriba de "Saldo período actual:"
+   (antes "Saldo actual" a secas, renombrada para distinguirlas). Test
+   nuevo: `test_registrar_pago_muestra_etiqueta_de_saldo_periodo_
+   anterior` (`tests/test_gui_pagos.py`).
+6. **Resuelto**: eliminar una hora aislada del MES ANTERIOR que afecta
+   el "saldo anterior" de la liquidación ACTUAL (`_aisladas_periodo` la
+   toma por fecha real, no por Período imputado — mismo mecanismo que
+   "Reserva aislada de un mes pasado..." en `docs/historial/
+   reservas.md`) no rehacía esa liquidación ni la dejaba como no
+   enviada — `eliminar_reserva_aislada` (negocio) nunca llamaba a
+   `regenerar_si_corresponde`, a diferencia de crear/modificar una
+   aislada. Se agregó el llamado en `_PanelReservasAisladas._eliminar_
+   registro` (`app/gui/pantallas/reservas.py`), con `periodo=periodo_
+   actual(self.conn)` — mismo criterio que el resto de los disparadores
+   de `regenerar_si_corresponde` en pantallas de este sistema. Test
+   nuevo: `test_eliminar_reserva_aislada_de_mes_anterior_regenera_
+   liquidacion_actual` (`tests/test_gui_reservas.py`) — confirmado que
+   SIN el fix falla (queda 1 emisión en vez de 2).
+
+Hilo cerrado a pedido de la clienta — los puntos 2 (depósito de llave)
+quedan pendientes de un caso puntual nuevo si vuelve a aparecer.
+
+## Reservas aisladas en día feriado; anular un feriado con aisladas asignadas; bug de pagos en "Detalle reserva"
+
+Pedido de la clienta, tres puntos:
+
+1. **Resuelto — reserva aislada en un día feriado no choca con la
+   reserva regular.** Pedido explícito: "si el día es feriado en
+   principio todos los horarios se consideran libres" — no debería
+   haber problema en asignar una aislada ese día, sea al mismo
+   profesional de la regular o a otro distinto. `verificar_conflictos_
+   aislada` (`app/negocio/reservas.py`) solo liberaba el consultorio de
+   la reserva regular si el profesional tenía una Ausencia/Vacación/
+   Licencia activa ese día — un feriado no estaba contemplado como otra
+   razón válida. Se suma `es_feriado_relevante(conn, fecha)` (nueva,
+   `app/negocio/feriados.py` — mismo criterio de "tipo relevante" que
+   `feriados_relevantes_periodo`, pero para una fecha puntual, sin el
+   filtro de domingo que es específico del descuento en la
+   liquidación) como otra condición que libera el consultorio, igual
+   que las tres anteriores. La otra validación (aislada contra otra
+   aislada ya confirmada ese mismo día/horario/consultorio, más arriba
+   en la misma función) NO cambia — sigue corriendo siempre, sea
+   feriado o no, tal cual lo pidió la clienta ("lo que empiezo a
+   anotar como reservas aisladas es lo que hay que controlar"). Test
+   nuevo: `test_reserva_aislada_en_feriado_no_choca_con_regular`
+   (`tests/test_reservas.py`).
+
+2. **Resuelto — anular un feriado con aisladas confirmadas ese día
+   queda bloqueado.** Caso hipotético planteado por la clienta ("en el
+   improbable caso de que yo quiera anular un feriado... el sistema me
+   tiene que avisar que antes tengo que cancelar todas las reservas
+   aisladas de ese día"): como consecuencia del punto 1, eliminar el
+   feriado sin revisar esas aisladas podría dejarlas pisando una
+   reserva regular sin que nadie lo haya evaluado — no hay forma
+   automática segura de resolverlo, así que el sistema bloquea y
+   obliga a revisar caso por caso. `PantallaCRUD` (`app/gui/crud_
+   generico.py`) suma un hook nuevo, `antes_de_eliminar` (a diferencia
+   de `al_eliminar`, que ya existía pero corre DESPUÉS del borrado,
+   este corre ANTES de pedir la confirmación genérica "¿Confirmás
+   eliminar?" y puede bloquear devolviendo un mensaje). `pantalla_
+   fechas_especiales` (`app/gui/pantallas/catalogos.py`) lo usa para
+   chequear si hay alguna `ReservaAislada` con `Estado='Confirmada'`
+   en la fecha del feriado que se intenta eliminar — de haber alguna,
+   bloquea con `QMessageBox.warning` y ni siquiera llega a preguntar
+   la confirmación genérica. Tests nuevos: `test_eliminar_fecha_
+   especial_feriado_con_aisladas_confirmadas_bloquea`/`..._con_
+   aisladas_canceladas_no_bloquea` (`tests/test_catalogos.py`).
+
+3. **Resuelto — bug real de doble error en "Detalle reserva" (Mensaje 1
+   de WhatsApp, categoría A).** La clienta imputó un pago de $40.000 al
+   mes ANTERIOR (octubre) estando parada en noviembre, y el mensaje de
+   noviembre lo mostraba de todas formas en "Pagos registrados en mes
+   en curso" — Y ADEMÁS lo sumaba al saldo a abonar en vez de
+   descontarlo. Dos bugs independientes en `mensaje_detalle_reserva_
+   aislada` (`app/negocio/mensajes.py`):
+   - La consulta de pagos filtraba por `Fecha` (fecha de CARGA del
+     pago en el sistema) en vez de por `PeriodoImputado` (a qué
+     período se imputó) — un pago cargado este mes pero imputado a
+     otro no es "de este mes" para este mensaje. Cambiado a `WHERE
+     IdProfesional = ? AND PeriodoImputado = ?`.
+   - La fórmula de `saldo_a_abonar` hacía `- total_pagos`, pero
+     `Monto` en `HistorialPagos` YA viene con signo (negativo = pago
+     recibido, resta de la cuenta — ver `registrar_pago`): restar un
+     valor ya negativo lo SUMABA en vez de descontarlo (doble
+     negación). Cambiado a `+ total_pagos`, mismo criterio que
+     `total_llaves`/`total_reservas`/`total_item_libre`, que ya se
+     suman directo sin negación aparte.
+   - Un test ya existente (`test_detalle_aislada_calcula_saldo_a_
+     abonar`) tenía `monto=500` (positivo, semánticamente un CARGO, no
+     un pago) para simular "un pago de 500" — los dos bugs se
+     compensaban sin querer y el test pasaba por las razones
+     equivocadas; corregido a `monto=-500` junto con el fix real (el
+     resultado esperado no cambia). Test nuevo: `test_detalle_aislada_
+     ignora_pago_imputado_a_otro_periodo` (`tests/test_mensajes.py`) —
+     reproduce el caso real de la clienta (pago cargado en agosto,
+     imputado a julio) y confirma que no aparece en el mensaje de
+     agosto. Confirmado por reversión que ambos tests fallan sin el
+     fix, con el síntoma exacto reportado.
+
+Hilo cerrado a pedido de la clienta.
+
+## Batch de 8 pedidos: F5, mensajería, plazo extendido, Procesando, conflictos de horarios, Configuración general
+
+Pedido de la clienta, ocho puntos en un solo mensaje:
+
+1. **Resuelto (en ese momento) — F5 ("Refrescar") "no funciona en
+   ningún lado".** Investigado con un repro directo (`QTest.keyClick`
+   sobre un `VentanaPrincipal` real con un panel sintético): el
+   mecanismo del atajo en sí (`VentanaPrincipal._reiniciar_solapa_
+   activa`/`_panel_mas_interno`, `app/gui/main_window.py`) parecía andar
+   bien — el problema que se atacó en esta ronda fue otro: la clienta
+   pidió explícitamente el barrido completo de las ~24 pantallas ("los
+   filtros y los distintos elementos tienen valores iniciales, al
+   presionar esa tecla quiero que devuelva la solapa a esos estados
+   iniciales a TODOS los elementos", más estricto que la auditoría
+   previa de "F3 ('Reiniciar solapa')" en el apartado "Nueva versión...
+   F3" más arriba, que solo había confirmado el foco).
+
+   **⚠️ CORRECCIÓN POSTERIOR IMPORTANTE** (ver la entrada "F5 no hacía
+   NADA en ninguna pantalla compuesta del sistema" más abajo en este
+   mismo archivo): esta ronda NO detectó el bug real — `_panel_mas_
+   interno` nunca bajaba de hecho a la solapa activa en ninguna
+   pantalla compuesta, porque todas sus pruebas llamaban `panel.
+   reiniciar()` directo sobre el panel YA conocido, nunca a través del
+   camino real de la tecla. Lo que sigue documenta la auditoría tal
+   cual se hizo en su momento (sigue siendo válida en cuanto a QUÉ
+   reinicia cada panel); la corrección posterior es sobre CÓMO F5
+   llegaba — o no — a invocarlo.
+
+   Cruzando las 18 Secciones de nivel superior contra cada `addTab()`
+   de cada pantalla compuesta, **13 solapas no tenían NINGÚN método
+   `reiniciar()`** — para cada una se reusó, con un `reiniciar()`
+   nuevo, el reset que YA existía para otro disparador (un botón
+   "Actualizar tabla"/"Nueva búsqueda", o `showEvent` en los dos casos
+   donde ese método ya hacía un reset completo) en vez de duplicar
+   lógica:
+
+   - `_PanelAvancePeriodo`/`_PanelImportacion` (`panel_control.py`):
+     `actualizar()`/limpiar campo+resultados.
+   - `_PanelAumentos`/`_PanelEsquemaDescuentos` (`aumentos.py`): cada
+     uno con su propio `actualizar()`.
+   - `_PanelHistorialGeneral`/`_PanelEstadisticasVarias`
+     (`estadisticas.py`): cada uno con su propio `_restablecer()`
+     (botón "Actualizar tabla").
+   - `_PanelIngresos`/`_PanelResultado` (`balance.py`): nuevo
+     `_restablecer_filtros()` compartido en `_PanelFiltrosMixin` (a
+     diferencia de "Ver período actual", que a propósito NO toca la
+     cascada de ubicación, F5 sí vuelve período Y ubicación a
+     "Todas/Todos").
+   - `_PanelLlaves` (`llaves.py`): mismo reset completo que ya hacía
+     `showEvent` en esta pantalla (anti-patrón ya existente, no tocado
+     — solo se le sumó `reiniciar()` con la misma lógica), más el
+     filtro de profesional de "Movimientos de llaves" (que no existía
+     cuando se escribió ese `showEvent`).
+   - `_PanelBuscarPlacas`/`_PanelImprimirPlacas` (`placas.py`): mismo
+     caso que Llaves para Buscar (se extrajo `_reiniciar_filtros()` del
+     `showEvent` existente para compartirla); Imprimir no tenía ningún
+     reset, se armó nuevo (profesional + cola de impresión + vista
+     previa, todo a blanco).
+   - `_PanelOferta` (`oferta.py`): reusa `_nueva_busqueda()` tal cual
+     (a diferencia de entrar/salir de la solapa, que a propósito NO
+     resetea nada en esta pantalla — confirmado en su momento con la
+     clienta).
+   - `_PanelProfesionales` (`profesionales.py`): no tenía NI SIQUIERA
+     `showEvent` — reusa `crud_profesionales.reiniciar()` (ver bug de
+     abajo) + `_actualizar_documentacion()` explícito.
+
+   **Bug real encontrado de rebote, en el mecanismo COMPARTIDO de
+   catálogos genéricos:** al escribir el test de `_PanelProfesionales`
+   (seleccionar una fila, F5, verificar que la documentación de la
+   derecha quedara vacía) se descubrió que `PantallaCRUD.reiniciar()`
+   (`app/gui/crud_generico.py`) NUNCA deseleccionaba la fila — limpia
+   "Buscar" y reconstruye la tabla (`actualizar()`), pero `actualizar()`
+   reescribe los `QTableWidgetItem` por ÍNDICE de fila, no por
+   identidad de registro, así que la selección vieja (por índice)
+   seguía marcada después de F5, aunque esa fila pasara a mostrar otro
+   registro. Esto afecta a TODOS los catálogos genéricos del sistema
+   (Edificios, Unidades, Consultorios, Profesiones, etc.), no solo
+   Profesionales — arreglado una sola vez en la base
+   (`tabla_widget.clearSelection()`, que de rebote dispara
+   `itemSelectionChanged` y deshabilita Editar/Eliminar, el estado
+   correcto de apertura).
+
+   Suite completa corrida sin regresiones nuevas tras el cambio en la
+   base compartida (476 tests de las pantallas afectadas + la suite
+   completa). Tests nuevos: uno por cada una de las 13 solapas
+   (`test_gui_panel_control.py`, `test_gui_aumentos.py`,
+   `test_gui_estadisticas.py` ×2, `test_gui_balance.py` ×2,
+   `test_gui_llaves.py`, `test_gui_placas.py` ×2, `test_gui_oferta.py`,
+   `test_profesionales.py` — este último confirmado que falla sin el
+   fix de `clearSelection()`).
+
+   **Fuera de alcance de este barrido** (deliberado, no un gap
+   pendiente): las ~11 solapas que ya tenían `reiniciar()` desde la
+   auditoría previa no se revisaron campo por campo de nuevo — esa
+   auditoría ya había confirmado que cubrían el caso general (foco +
+   filtros propios), y la excepción conocida de `_PanelEstadoCuenta*`
+   (no resetea el profesional elegido, decisión explícita de la
+   clienta) sigue vigente sin cambios.
+
+2. **Resuelto — Centro de mensajería, "Saldo actual" mal calculado para
+   categoría A.** La columna usaba la misma fórmula genérica para R y A
+   (`saldo_anterior + SaldoCuentaActual`), pero `SaldoCuentaActual`
+   nunca se acredita para un A (no hay liquidación propia de esa
+   categoría — `emitir_liquidacion` es exclusiva de R). Se agrega
+   `saldo_actual_aislada` (`app/negocio/mensajes.py`), con el mismo
+   criterio EXACTO que el "SALDO A ABONAR" de `mensaje_detalle_reserva_
+   aislada` (reservas aisladas del mes + llaves + ítems libres, menos
+   pagos del período, más saldo anterior) — de hecho `mensaje_detalle_
+   reserva_aislada` pasa a llamar a esta función nueva para su propio
+   total, para que los dos lugares no puedan divergir nunca.
+   `actualizar()` (`app/gui/pantallas/mensajeria.py`) usa esta función
+   para A y sigue con la fórmula de siempre para R/X (que sí es
+   correcta: `SaldoCuentaActual` para un R refleja justo "lo liquidado
+   menos los pagos del período", vía `emitir_liquidacion`/
+   `registrar_pago`). Test nuevo: `test_centro_mensajeria_saldo_actual_
+   de_un_a_se_calcula_de_lo_agendado_menos_pagos`
+   (`tests/test_gui_mensajeria.py`, confirmado que falla sin el fix,
+   mostrando `SaldoCuentaActual` crudo en vez del cálculo real).
+
+3. **Resuelto — modificar el plazo de pago extendido de un R no
+   regeneraba la liquidación.** `_al_actualizar_profesional`
+   (`app/gui/pantallas/profesionales.py`) suma el mismo disparador que
+   ya usan Vacaciones/Cargos especiales/Pagos: si `PlazoPagoExtendido`,
+   `MotivoPlazoExtra` o `DiaPlazoExtendidoAutomatico` cambiaron en la
+   edición, llama a `regenerar_si_corresponde` con el período actual.
+   Test nuevo: `test_editar_plazo_pago_extendido_regenera_liquidacion_
+   enviada` (`tests/test_profesionales.py`).
+
+4. **Resuelto — Fechas especiales no mostraba el indicador de
+   Procesando al regenerar liquidaciones.** `_regenerar_liquidaciones_
+   del_periodo_actual` (`app/gui/pantallas/catalogos.py`) envuelve su
+   loop en `Procesando` (mismo mecanismo que Liquidaciones), con
+   `procesando.tick()` por profesional.
+
+5. **Resuelto — editar en Configuración general / "Valores y
+   liquidación" un campo que afecta saldos no regeneraba nada.**
+   `ConfiguracionGeneral._guardar` (`app/gui/pantallas/
+   configuracion.py`) ahora compara el registro antes/después de
+   guardar contra `_CAMPOS_VALORES_LIQUIDACION_AFECTAN_SALDO` (recargo
+   de aisladas, ajuste por saldo atrasado, tolerancia de deuda,
+   descuento feriados/no laborables, semanas de vacaciones máximas,
+   decimales del total) — los únicos de ese grupo que de verdad entran
+   en `calcular_liquidacion`/`vacaciones`/el redondeo del total
+   (confirmado uno por uno contra el código, no a ojo). Si cambió
+   alguno, regenera TODAS las liquidaciones ya emitidas del período
+   actual (no acotado a un profesional puntual, a diferencia de Fechas
+   especiales) con el mismo indicador de Procesando. El resto del grupo
+   (frecuencia de actualización de valores, el default de "aplica
+   recargo" de una aislada nueva, cadencias de recordatorios, retención
+   de historial) no cambia ningún cálculo ya hecho, así que no dispara
+   nada. Tests nuevos: `test_guardar_campo_que_afecta_saldo_regenera_
+   liquidaciones_enviadas`/`..._que_no_afecta_saldo_no_regenera_...`
+   (`tests/test_gui_configuracion.py`).
+
+6. **Resuelto — "lo más sagrado de este sistema": una superposición de
+   horarios bloqueante ya no se puede forzar de ninguna forma.** Antes,
+   `crear_reserva_regular`/`modificar_reserva_regular`/`crear_reserva_
+   aislada`/`modificar_reserva_aislada` (`app/negocio/reservas.py`)
+   tenían un parámetro `forzar` que, si el operador confirmaba un
+   cartel "¿Crear/Modificar la reserva de todos modos?" después de ver
+   el conflicto, creaba/modificaba la reserva IGUAL. Se sacó el
+   parámetro por completo de las cuatro funciones (y de los seis
+   lugares de la GUI, `app/gui/pantallas/reservas.py`, que lo usaban
+   para reintentar) — un `ConflictoBloqueanteError` ahora siempre
+   interrumpe el proceso, sin ninguna vía para sortearlo, en Reservas
+   regulares/aisladas/extraordinarias, tanto al crear como al modificar.
+   El cartel pasa de `QMessageBox.question` (Sí/No) a `QMessageBox.
+   warning` (solo Aceptar) con el detalle del conflicto. Ese detalle
+   (`Conflicto.mensaje`, armado en `verificar_conflictos_regular`/
+   `verificar_conflictos_aislada`) ya incluía el nombre del profesional,
+   el día/fecha y el horario de la reserva con la que choca — se le
+   suma el CONSULTORIO exacto (`_texto_consultorio_conflicto`, nueva),
+   que antes no se mencionaba (se daba por obvio porque es el mismo que
+   se está reservando), completando el pedido explícito de "nombres,
+   días, horarios y consultorios exactos". Tests: `test_conflicto_
+   bloqueante_no_se_puede_forzar_de_ninguna_forma` (reemplaza al viejo
+   `test_forzar_ignora_conflicto_bloqueante`, que probaba justo el
+   comportamiento contrario) y el ajuste de `test_crear_reserva_
+   regular_en_periodo_cerrado_no_se_puede_forzar` (ambos en
+   `tests/test_reservas.py`) — confirmada la suite completa de Reservas
+   (GUI + negocio) sin romper nada de lo ya existente.
+
+7. **Resuelto — Centro de mensajería mostraba profesionales categoría A
+   sin reservas activas.** La depuración de A sin aisladas vigentes
+   (`_tiene_aisladas_vigentes` en `app/gui/pantallas/mensajeria.py`) ya
+   existía y tenía tests, pero comparaba contra el primer día del
+   PERÍODO OPERATIVO (que puede estar atrasado si todavía no se apretó
+   "Avanzar de mes") en vez de la fecha REAL del calendario — mismo
+   bug de fondo que ya se había corregido para el cuadrito de
+   cumpleaños del Panel de control (`fecha_real` vs `fecha_actual`).
+   Una aislada de un período ya pasado en la realidad, pero dentro del
+   período operativo atrasado, seguía contando como "vigente" y el
+   profesional no se depuraba. Cambiado a `fecha_real` (ya no depende
+   de `periodo`, se sacó ese parámetro de `_tiene_aisladas_vigentes`).
+   Test nuevo: `test_centro_mensajeria_aislada_depende_de_la_fecha_
+   real_no_del_periodo_operativo_atrasado` (`tests/test_gui_
+   mensajeria.py`, confirmado que falla sin el fix). El pedido de
+   mostrar en marrón a los A sin reservas pero con deuda queda
+   explícitamente SIN implementar — la clienta está evaluando un
+   cambio de esquema de colores y pidió no tocarlo todavía.
+
+8. **Resuelto — eliminar una reserva aislada (caso normal, no el mismo
+   día) no mostraba la alerta final de éxito.** `_PanelReservasAisladas.
+   _eliminar_registro` (`app/gui/pantallas/reservas.py`) tenía el aviso
+   de "avisar al profesional" para el caso del mismo día, pero el resto
+   de los casos no mostraba ningún cartel al terminar — mismo criterio
+   que ya tenía Reserva extraordinaria para su "Cancelar reserva". Test
+   nuevo: `test_eliminar_reserva_aislada_muestra_alerta_final_de_
+   exito` (`tests/test_gui_reservas.py`).
+
+Hilo cerrado a pedido de la clienta (salvo el punto 1, cuya corrección
+real está en la entrada de más abajo, y el pedido de colores del punto
+7, explícitamente diferido).
+
+## Batch de 8 pedidos: PDF disponibilidad, mensajería R, Placas, Llaves, categoría en caliente, fecha de reservas, bug liquidación
+
+Pedido de la clienta, ocho puntos en un solo mensaje:
+
+1. **Resuelto — PDF de Disponibilidad: cuadro de valores de todos los
+   consultorios.** Abajo de la grilla y antes de las fotos, como en el
+   archivo de la propuesta (`referencia/generar_propuesta.py`,
+   `tabla_valores`) — la app real ya tenía el mismo cuadro implementado
+   como `matriz_valores_edificio` (`app/pdf/valores_pdf.py`), usado por
+   Propuesta (anonimizado, "Unidad N") y Liquidación. Se agrega una
+   tercera sección de nivel 1 a `generar_pdf_disponibilidad`
+   (`app/pdf/disponibilidad_pdf.py`), "Valores de los consultorios para
+   el período comprendido entre...", entre "Disponibilidad de
+   consultorios al..." y "Fotos de los consultorios" — SIN anonimizar
+   (a diferencia de Propuesta, Disponibilidad es para profesionales ya
+   ACTIVOS, muestra el departamento real). Test actualizado:
+   `test_incluye_las_tres_secciones_de_nivel_1_con_departamento_real`
+   (antes "las dos secciones", `tests/test_pdf_disponibilidad.py`) —
+   confirma las tres secciones, el orden (grilla → valores → fotos) y
+   que no aparece anonimizado.
+
+2. **Resuelto — Centro de mensajería: los R sin reservas activas
+   tampoco deben figurar.** Mismo criterio que ya tenía A
+   (`_tiene_aisladas_vigentes`): se agrega `_tiene_regulares_vigentes`
+   (`app/gui/pantallas/mensajeria.py`), que considera también las
+   reservas de un E consolidado en el equipo del R (`ids_
+   consolidados`). Impacto grande en los tests existentes: la enorme
+   mayoría de `test_gui_mensajeria.py` crea un R "liso" (sin ninguna
+   reserva) esperando que aparezca en la lista — se agregó `con_
+   reserva_regular=True` por default a `_crear_profesional` (crea una
+   reserva mínima siempre vigente para no tocar los ~55 tests que no
+   están probando esta depuración en sí) y `con_reserva_regular=False`
+   explícito en los tests nuevos que sí la prueban: `test_centro_
+   mensajeria_regular_sin_reservas_vigentes_no_se_muestra`, `..._con_
+   reserva_finalizada_no_se_muestra`, `..._con_reserva_consolidada_de_
+   un_e_se_muestra`.
+
+3. **Investigado, sin reproducir — "al modificar una reserva regular
+   que salga el alerta de proceso completado".** Repro directo del
+   botón "Modificar reserva" cambiando el horario
+   (`_PanelReservasRegulares._modificar_seleccionada`): el cartel
+   "Reserva modificada con éxito." YA aparece, confirmado capturando
+   los `QMessageBox.information` reales en un test ad-hoc. Única vía de
+   "Modificar" en esta solapa (un solo botón, sin doble-click ni atajo
+   alternativo). La clienta confirmó dejarlo así por ahora.
+
+4. **Resuelto — Placas: Unidad no ordenaba natural (PB/EP/piso), sino
+   alfabético por texto.** El orden por defecto (Localidad/Edificio/
+   Unidad/Posición) y el click en el encabezado de "Unidad"
+   (`_PanelPlacasOperativas._clave_orden`/`_actualizar_tabla`,
+   `app/gui/pantallas/placas.py`) comparaban `e["unidad"]` como string
+   crudo — "10mo" quedaba antes que "2do" alfabéticamente. Se suma
+   `clave_orden_unidad` (`app/pdf/estilos.py`, mismo helper que ya usan
+   Reservas/Catálogos) en los dos lugares. Test nuevo: `test_orden_por_
+   defecto_de_unidad_es_natural_no_alfabetico` (`tests/test_gui_
+   placas.py`).
+
+5. **Resuelto — Llaves: el depósito por defecto al asignar pasa a
+   "abonado".** `_DialogoAsignar.combo_deposito` (`app/gui/pantallas/
+   llaves.py`) arrancaba en "Bonificado" (pedido anterior del batch de
+   6 pedidos más arriba) — pedido explícito posterior: "cuando asigno
+   una llave por defecto que el depósito sea Depósito abonado". Se
+   invierte el orden de los `addItem` (abonado primero) y `spin_monto`
+   arranca habilitado; la fuerza a "Bonificado" para categoría B
+   (`_al_cambiar_profesional`) pasa de `setCurrentIndex(0)` a
+   `findData("bonificado")`, para no depender de qué índice quedó
+   primero. Test actualizado (antes probaba "arranca en bonificado", lo
+   contrario): `test_dialogo_asignar_arranca_en_abonado_con_monto_
+   habilitado` + `..._elegir_bonificado_deshabilita_el_monto`
+   (`tests/test_gui_llaves.py`).
+
+6. **Resuelto — cambiar la categoría de un profesional en caliente no
+   lo mostraba en Reservas regulares hasta reiniciar el sistema.** Bug
+   real: `combo_profesional` de `_PanelReservasRegulares` (`app/gui/
+   pantallas/reservas.py`) se poblaba una sola vez en `_armar_ui` y
+   nunca se volvía a construir — ni `showEvent` ni F5 (`reiniciar()`)
+   lo refrescaban, solo reseteaban el índice seleccionado. Se extrae
+   `_cargar_combo_profesional()` (reconstruye la lista desde cero) y se
+   llama también desde `reiniciar()`, mismo patrón ya usado para combos
+   de profesional en Liquidaciones/Lista de espera/Novedades/Oferta/
+   Pagos. Test nuevo: `test_cambiar_categoria_de_profesional_en_
+   caliente_lo_muestra_sin_reiniciar` (`tests/test_gui_reservas.py`).
+
+7. **Resuelto — Reserva regular: "Vigencia desde" arranca en el primer
+   día del mes, no en hoy.** `_PanelReservasRegulares` ponía la fecha
+   de HOY como default en tres lugares (`_armar_ui`, `_resetear_
+   formulario`, `_cargar_grupo_cobertura`) — se cambia los dos primeros
+   (el formulario manual de alta) a `QDate(hoy.year, hoy.month, 1)`;
+   `_cargar_grupo_cobertura` (precarga desde "Confirmar reserva" de
+   Lista de espera, un flujo distinto con su propio criterio) queda sin
+   tocar. Test nuevo: `test_vigencia_inicio_arranca_en_el_primer_dia_
+   del_mes` (`tests/test_gui_reservas.py`).
+
+8. **Resuelto — bug real en liquidaciones con un profesional que cambia
+   de consultorio/horario a mitad de mes.** Ver "Liquidaciones: bug
+   real con un profesional que cambia de consultorio/horario a mitad
+   de mes (ya emitida pero no enviada)" en `docs/historial/
+   liquidaciones.md` — único punto de esta tanda específico de
+   Liquidaciones, archivado ahí en vez de acá.
+
+Hilo cerrado a pedido de la clienta (salvo el punto 3, investigado sin
+reproducir, que la clienta confirmó dejar así por ahora).
+
+## Título "Valores de los consultorios" (al→y), investigación de "desde", grilla operativa por período y mensaje de envío de liquidación
+
+Pedido de la clienta, cuatro puntos en un solo mensaje:
+
+1. **Resuelto — conector "al"→"y" en el título "Valores de los
+   consultorios para el período comprendido entre...".** Pedido
+   explícito: reemplazar "al" por "y" ("...entre 10/2026 y 11/2026" en
+   vez de "...entre 10/2026 al 11/2026"). El título se arma igual en
+   tres PDFs distintos que comparten `rango_actualizacion`
+   (`app/pdf/valores_pdf.py`) — Disponibilidad (`disponibilidad_
+   pdf.py`), Liquidación (`liquidacion_pdf.py`) y Propuesta (`propuesta_
+   pdf.py`) — se cambió el conector en los tres por igual, como pidió
+   la clienta explícitamente ("esa sección también se reproduce en las
+   liquidaciones y en el archivo de la propuesta"). Test actualizado:
+   `test_titulo_valores_usa_la_frecuencia_de_actualizacion`
+   (`tests/test_pdf_liquidacion.py`).
+
+2. **Investigado, sin bug encontrado — "aunque el archivo se genere en
+   noviembre que se vea el período en el cual comenzó a regir el
+   esquema actual de valores" (ej. 10/2026).** `rango_actualizacion` ya
+   hace exactamente esto: `desde` es el período del último
+   `AumentoAplicado` con `Periodo <= periodo` consultado (o el período
+   consultado mismo, si nunca hubo uno). Confirmado con un repro
+   directo contra el motor (sin pasar por la GUI): confirmando un
+   aumento con `periodo="2026-10"` y generando después el PDF para
+   `periodo="2026-11"`, `rango_actualizacion` devuelve `desde="2026-
+   10"` — exactamente lo pedido. El síntoma real que vio la clienta
+   ("11/2026 al 11/2026") significa que, para el sistema, ese aumento
+   quedó registrado con `Periodo="2026-11"` (el campo "Período" de la
+   pantalla "Aumentos y descuentos" trae por defecto el período en
+   curso al momento de confirmar, pero admite escribir uno distinto a
+   mano para una confirmación retroactiva) — o que los valores actuales
+   nunca pasaron por `confirmar_aumento` en absoluto (ej. si se
+   editaron directo en el catálogo de Consultorios), en cuyo caso no
+   hay ningún "desde" histórico que mostrar. Consultada la clienta
+   sobre cuál de los dos fue el caso real, no lo recuerda — no se tocó
+   la lógica (compartida por las tres PDFs y ya correcta). Explicado el
+   mecanismo para la próxima vez: al confirmar un aumento retroactivo,
+   el campo "Período" tiene que quedar en el mes real en que empezó a
+   regir, no en el que trae por defecto; si se confirmó con el período
+   equivocado, se puede deshacer ("Deshacer último aumento") y
+   reconfirmar con el correcto.
+
+3. **Resuelto — bug real: la grilla operativa (Reservas regulares/
+   aisladas/Oferta/Novedades/Grilla semanal, `GrillaOperativaWidget`)
+   ignoraba el combo "Período" para decidir quién ocupa cada horario.**
+   Pedido explícito: "si cambio el periodo de visualización en la
+   grilla [quiero] que cambie el comportamiento de la misma y se vea lo
+   de ese período combinado con los otros valores que tengo seteados".
+   Investigado: cambiar el combo SÍ disparaba `actualizar()` y SÍ movía
+   la ventana de aisladas/ausencias al mes elegido, pero `calcular_
+   grilla_operativa` (`app/negocio/grilla_operativa.py`) clasificaba
+   cada reserva regular como "actual" (la vigente ahora) o "entrante"
+   (todavía no arrancó) comparando `VigenciaInicio`/`VigenciaFin`
+   contra `hoy` (la fecha real del sistema) SIEMPRE, sin importar qué
+   período se hubiera elegido en el combo — una reserva que arranca el
+   mes que viene seguía en rojo ("entrante") aunque se mirara un
+   período en el que, para esa fecha, ya tendría que estar activa.
+
+   Se agrega `fecha_referencia = max(hoy, mes_actual_inicio)` (el
+   primer día del período elegido, si es un mes todavía no llegado;
+   `hoy` si el período elegido es el actual — el combo de la pantalla
+   no ofrece meses pasados) y se usa en vez de `hoy` para clasificar
+   regulares (`_clasificar_regulares`) y para resolver la celda
+   (`_resolver_regular`/`_resolver_aislada`). El resto de los usos de
+   `hoy` como piso (aisladas/ausencias dentro del mes consultado) no
+   necesitó tocarse — ya quedaban dominados por `mes_actual_inicio` al
+   mirar un período futuro (`max(fecha_desde_rango, hoy)` ya daba
+   `fecha_desde_rango` en ese caso), así que el cambio es exactamente el
+   punto que estaba roto, sin tocar el resto del comportamiento ya
+   confirmado con la clienta (todos los tests existentes, con período =
+   mes de "hoy", siguen pasando sin cambios). Tests nuevos en
+   `tests/test_grilla_operativa.py`: `test_regular_entrante_pasa_a_
+   actual_si_el_periodo_visualizado_es_posterior_a_su_vigencia` y
+   `test_regular_conflicto_el_periodo_visualizado_determina_quien_es_
+   el_titular` (este último con una reserva "actual" liberada el 31/8 y
+   una "entrante" desde el 3/9 — confirma que mirando agosto la celda
+   sigue marcando a la titular de agosto con el conflicto en rojo, y
+   mirando octubre ya muestra a la nueva titular, blanco liso, sin
+   conflicto).
+
+4. **Resuelto — mensaje de WhatsApp "Mensaje 4" (envío de liquidación):
+   formato con negrita/itálica + mes en mayúscula con año.** Pedido
+   explícito con el antes/después completo: "MENSAJE AUTOMATICO" y
+   "(no es necesario responder)" pasan a negrita/itálica
+   (`*MENSAJE AUTOMATICO*` / `_(no es necesario responder)_` — markdown
+   de WhatsApp tal cual, mismo criterio que ya usaba `DEFAULT_
+   RECORDATORIO_DEUDA_PROFESIONAL_X` en el mismo archivo), el mes de la
+   liquidación pasa de minúscula sola ("noviembre") a negrita con el año
+   ("*NOVIEMBRE 2026*"), y "Abrir el archivo enseguida de recibirlo
+   para que les quede en el teléfono" cambia a "Abrir el archivo al
+   recibirlo para que quede en guardado en el teléfono" (la línea de
+   "revisar el contenido" queda igual). Cambiado `DEFAULT_ENVIO_
+   LIQUIDACION` (`app/negocio/plantillas_texto.py`, el markdown va fijo
+   en la plantilla) y `mensaje_envio_liquidacion` (`app/negocio/
+   mensajes.py`, pasa a sustituir `{mes}` con `f"{mes_texto(int(mes)).
+   upper()} {anio}"` en vez de solo `mes_texto(int(mes))`). Tests
+   actualizados (ambos ya existentes, dependían del formato viejo del
+   mes): `test_mensaje_envio_liquidacion_menciona_el_mes` (`tests/
+   test_mensajes.py`, ahora busca "AGOSTO 2026") y `test_mensaje_envio_
+   liquidacion_usa_plantilla_personalizada` (`tests/test_plantillas_
+   texto.py`, ahora espera "Mes: AGOSTO 2026. Gracias." al sustituir
+   sobre una plantilla personalizada).
+
+Hilo cerrado a pedido de la clienta — el punto 2 queda sin cambio de
+código (investigado y explicado, sin un caso reproducible distinto al
+ya confirmado correcto).
+
+## CORRECCIÓN CRÍTICA: F5 no hacía NADA en ninguna pantalla compuesta del sistema
+
+La clienta insistió en que seguía sin poder transmitir lo que pedía con
+F5 en Reservas aisladas, con un ejemplo concreto paso a paso (elegir un
+profesional en el combo, apretar F5, esperar que vuelva a "Todos los
+profesionales"). Repitiendo el repro EXACTO que describió (con foco real
+en el combo, apretando la tecla F5 de verdad vía `QTest.keyClick` sobre
+la ventana completa — no llamando `panel.reiniciar()` a mano como hacían
+TODOS los tests de la auditoría del "Batch de 8 pedidos: F5, mensajería,
+plazo extendido..." más arriba en este mismo archivo) se encontró que
+**el repro fallaba**: F5 no cambiaba nada.
+
+**Causa raíz, mucho más grave que un combo puntual de una pantalla**:
+`VentanaPrincipal._panel_mas_interno()` (`app/gui/main_window.py`) baja
+por `self._pila.currentWidget()` solo si ESE widget ya es, él mismo, un
+`QTabWidget` (`isinstance(widget, QTabWidget)`). Pero NINGUNA pantalla
+compuesta real del sistema es un `QTabWidget` — son todas un `QWidget`
+con título (`tituloPantalla`) que contiene un `QTabWidget` PROPIO como
+atributo (`self.pestanas`): Reservas, Grilla y mensajería, Llaves y
+otros conceptos, Placas para timbres, Panel de control, Liquidación,
+Pagos, Novedades, Profesionales, Estadísticas, Balance, Disponibilidad,
+Archivos y listas, Valores, y CUALQUIER catálogo armado con
+`PantallaCRUD` (que también es un `QWidget`, no un `QTabWidget`) — es
+decir, literalmente todas las pantallas compuestas o con solapas de
+todo el sistema. Como la condición `isinstance(widget, QTabWidget)`
+nunca era cierta para el widget de nivel Seccion, el método devolvía
+siempre ese `QWidget` envolvente sin bajar nunca a la solapa activa; y
+como ese envolvente no tiene su propio `reiniciar()` (solo lo tienen los
+paneles internos de cada solapa), `_reiniciar_solapa_activa` no
+encontraba el método y F5 no hacía absolutamente nada, en NINGUNA
+pantalla con solapas de todo el sistema — no era un caso puntual de
+Reservas aisladas, era el mismo bug en las ~24 pantallas de la auditoría
+anterior.
+
+**Por qué la auditoría anterior no lo detectó**: sus tests (uno por cada
+una de las 13 solapas sin `reiniciar()`, más los ya existentes) siempre
+llamaban `panel.reiniciar()` DIRECTO sobre la instancia del panel interno
+ya conocida (ej. `pantalla.panel_regulares.reiniciar()`), nunca a través
+del camino real de F5 (`ventana._reiniciar_solapa_activa()` →
+`_panel_mas_interno()`, con navegación real a la Seccion y la solapa
+activa puesta a mano). Esos tests confirmaban que la lógica de reseteo
+DE CADA PANEL estaba bien escrita, pero nunca confirmaban que F5 de
+verdad LLEGARA a ese panel — el gap exacto que permitió que este bug
+pasara desapercibido en una auditoría completa.
+
+**Fix**: `_panel_mas_interno` busca el `QTabWidget` con `widget.
+findChild(QTabWidget)` (mismo criterio ya usado por `ir_a_solapa`, que
+sí lo hacía bien desde el principio) en vez de comparar el widget mismo,
+y sigue bajando si la solapa activa tiene a su vez OTRO `QTabWidget`
+propio (pantalla compuesta anidada dentro de otra). Test de regresión
+nuevo que sí reproduce la forma real (envoltorio + `pestanas` + dos
+paneles con su propio `reiniciar()`, confirmando que F5 llama al de la
+solapa ACTIVA): `test_f5_llama_reiniciar_del_panel_activo_en_pantalla_
+compuesta_con_solapas` (`tests/test_main_window.py`) — confirmado por
+reversión que falla sin el fix (`_PanelConReset`, el sintético de la
+auditoría anterior, no alcanzaba a reproducirlo porque no tiene solapas
+propias). Suite completa (2799 tests) sin regresiones nuevas — los
+mismos 3 fallos preexistentes de `test_avance_mes.py` (no relacionados,
+confirmados también en la rama base) siguen igual.
+
+**Alcance de este fix**: arregla F5 de verdad en TODAS las pantallas
+compuestas del sistema de una sola vez (es el mecanismo compartido), no
+solo en Reservas aisladas — pero NO vuelve a auditar campo por campo
+cada una de las 13+11 solapas de la ronda anterior; esa lógica de
+`reiniciar()` de cada panel ya estaba bien escrita y sigue intacta, el
+problema era exclusivamente que F5 nunca llegaba a invocarla.
+
+Hilo cerrado — la clienta confirmó que F5 ya funciona como corresponde
+y pidió archivar.

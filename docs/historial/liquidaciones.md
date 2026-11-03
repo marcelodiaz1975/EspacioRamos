@@ -868,3 +868,107 @@ invertida, y un test nuevo
 cubre el caso real de un feriado nacional y un día no laborable en el
 mismo mes saliendo en un solo listado intercalado.
 
+## Liquidaciones: un solo listado cronológico para feriados, feriados trabajados y horas aisladas
+
+Pedido explícito de la clienta: *"las horas aisladas, los feriados y lo
+que tenga fecha que esté ordenado de menor a mayor por fecha ... no
+importa si es aislada o feriado, todo lo que tenga fecha que se ordene
+por fecha en el archivo"*.
+
+Alcance acordado explícitamente con la clienta (sobre tres opciones
+presentadas): se fusionan en un ÚNICO listado cronológico ascendente
+los descuentos por feriado/día no laborable (actual + pendientes del
+mes anterior, que ya estaban fusionados entre sí desde la ronda
+anterior — ver "Feriados y días no laborables en orden cronológico
+(PDF)" más arriba en este mismo archivo), los feriados trabajados
+(actual + mes anterior) y las horas aisladas (actual + mes anterior).
+Vacaciones/licencias (un RANGO de fechas, no un día puntual) y horas
+regulares agregadas (vigencia desde una fecha) quedan FUERA de este
+listado, en sus bloques de siempre — alcance explícitamente acotado,
+no "todo lo que tenga alguna fecha en el documento".
+
+`_items_cuenta` (`app/pdf/liquidacion_pdf.py`) arma ahora una lista
+intermedia `eventos_con_fecha` (fecha, texto, monto) con los seis
+orígenes de arriba y la ordena una sola vez con `sorted(..., key=lambda
+e: e[0])` antes de volcarla a `items` — en vez de los bloques separados
+de antes (feriados+no laborables ya fusionados por un lado, feriados
+trabajados y aisladas cada uno en su propio loop más abajo, después de
+vacaciones/licencias/horas agregadas). Como consecuencia, feriados
+trabajados y aisladas se mueven MÁS ARRIBA en el documento (antes de
+vacaciones/licencias/horas agregadas) — es la posición natural del
+único bloque fusionado, no algo pedido aparte. `sorted` es estable, así
+que dos eventos de la misma fecha exacta mantienen el orden de carga de
+siempre (feriado/no laborable primero, feriado trabajado después,
+aislada al final).
+
+Test nuevo: `test_feriados_y_aisladas_se_intercalan_por_fecha_sin_
+importar_el_tipo` (`tests/test_pdf_liquidacion.py`) — un feriado
+trabajado del 2/8, un descuento por feriado del 17/8 y una aislada del
+28/8, cargados fuera de orden y de tipos distintos, confirmando que
+salen en ese mismo orden cronológico en `_items_cuenta`. Confirmado por
+reversión que el test falla sin el fix (el feriado del 17/8 salía
+primero, antes del feriado trabajado del 2/8).
+
+`liquidacion_simulada_pdf.py` no tiene este problema — no separa
+feriados trabajados ni aisladas en bloques propios (es más simple, sin
+esas dos categorías), así que no hizo falta tocarlo.
+
+Hilo cerrado a pedido de la clienta.
+
+## Liquidaciones: bug real con un profesional que cambia de consultorio/horario a mitad de mes (ya emitida pero no enviada)
+
+Reproducido con un script directo contra `calcular_liquidacion`: si el
+mes YA fue emitido una vez (con `fecha_emision` real) y DESPUÉS, ese
+mismo mes, se finaliza una reserva regular y se crea una nueva (otro
+consultorio/horario, típico de "Modificar" cuando cambia el
+consultorio, que esa pantalla no soporta — hay que finalizar + crear de
+nuevo), el tramo nuevo quedaba en bruto $0 y descuento $0 — la plata
+aparecía recién en la liquidación del MES SIGUIENTE, como "horas
+regulares agregadas". Causa: `_ids_reservas_tardias`
+(`app/negocio/liquidaciones.py`) trataba cualquier reserva con
+`VigenciaInicio` posterior a la última emisión del período como
+"tardía" y la excluía del bruto de ese mes sin excepción — diseño
+explícito para no reabrir una liquidación YA EMITIDA (ver "Reserva
+aislada de un mes pasado..." en `docs/historial/reservas.md`, y "ajuste
+retroactivo" más arriba en este mismo archivo). El choque:
+`regenerar_si_corresponde` (llamado automáticamente al crear/finalizar
+una reserva regular) SÍ está pensado para reflejar el cambio al
+instante ese mismo mes — pero la deferral de "tardía" lo pisaba igual,
+sin importar que la liquidación de ese mes nunca se hubiera ENVIADO al
+profesional. Confirmado por la clienta sobre el caso real: la
+liquidación de noviembre estaba emitida pero todavía NO enviada.
+
+Fix: nueva `_fecha_emision_enviada_periodo` (reemplaza a
+`_fecha_emision_periodo` como fuente de `fecha_corte` para
+`_ids_reservas_tardias`) — solo cuenta como "corte" la fecha de la
+ÚLTIMA emisión del período si esa emisión ya quedó
+`EstadoEnvio = 'Enviada'`; si sigue "No enviada"/"Regenerada no
+enviada", devuelve `None` (equivalente a "el mes no fue emitido
+todavía": nada que diferir) y el cambio se refleja completo ese mismo
+mes. `_calcular_horas_regulares_agregadas` (la mitad "mes siguiente"
+del mismo mecanismo, que decide qué reservas agregadas al mes anterior
+cobrar ahora) tenía el mismo problema de fondo y se cambió igual — de
+no hacerlo, una reserva que con el fix ya se cobra completa en su
+propio mes (porque no estaba enviada) se habría contado DE NUEVO al mes
+siguiente como "agregada", duplicando el monto (confirmado por un test
+que lo reproducía antes de este segundo cambio). `_calcular_feriados_
+pendientes` (mismo patrón, pero para feriados de último momento
+agregados a un mes ya cerrado, sin el mismo disparador automático de
+`regenerar_si_corresponde`) queda sin tocar — no es el caso reportado.
+
+Tests actualizados/nuevos en `tests/test_liquidaciones.py`:
+`test_reserva_agregada_luego_de_emitida_se_traslada_al_mes_siguiente`
+pasa a `..._luego_de_emitida_Y_ENVIADA_se_traslada_al_mes_siguiente`
+(agrega el `marcar_estado_envio` que le faltaba, sigue probando el
+diferimiento cuando SÍ se envió) + nuevo
+`test_reserva_agregada_luego_de_emitida_pero_no_enviada_se_cobra_
+ese_mismo_mes` (reproduce el caso real de la clienta, confirmado que
+sin el fix de `_ids_reservas_tardias` falla).
+
+Hilo cerrado a pedido de la clienta — reportado originalmente como uno
+de ocho puntos de un batch que tocaba varias pantallas a la vez (ver
+"Batch de 8 pedidos: PDF disponibilidad, mensajería R, Placas, Llaves,
+categoría en caliente, fecha de reservas" en `docs/historial/
+general.md`), archivado acá por ser el único punto de esa tanda
+específico de Liquidaciones.
+
