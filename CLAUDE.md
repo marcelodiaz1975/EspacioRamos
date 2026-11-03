@@ -1103,6 +1103,72 @@ Pedido de la clienta, cuatro puntos en un solo mensaje:
    (`tests/test_plantillas_texto.py`, ahora espera "Mes: AGOSTO 2026.
    Gracias." al sustituir sobre una plantilla personalizada).
 
+## CORRECCIÓN CRÍTICA al "Hilo abierto: batch de 8 pedidos (F5...)": F5 no hacía NADA en ninguna pantalla compuesta del sistema
+
+La clienta insistió en que seguía sin poder transmitir lo que pedía con
+F5 en Reservas aisladas, con un ejemplo concreto paso a paso (elegir un
+profesional en el combo, apretar F5, esperar que vuelva a "Todos los
+profesionales"). Repitiendo el repro EXACTO que describió (con foco real
+en el combo, apretando la tecla F5 de verdad vía `QTest.keyClick` sobre
+la ventana completa — no llamando `panel.reiniciar()` a mano como hacían
+TODOS los tests de la auditoría anterior) se encontró que **el repro
+fallaba**: F5 no cambiaba nada.
+
+**Causa raíz, mucho más grave que un combo puntual de una pantalla**:
+`VentanaPrincipal._panel_mas_interno()` (`app/gui/main_window.py`) baja
+por `self._pila.currentWidget()` solo si ESE widget ya es, él mismo, un
+`QTabWidget` (`isinstance(widget, QTabWidget)`). Pero NINGUNA pantalla
+compuesta real del sistema es un `QTabWidget` — son todas un `QWidget`
+con título (`tituloPantalla`) que contiene un `QTabWidget` PROPIO como
+atributo (`self.pestanas`): Reservas, Grilla y mensajería, Llaves y
+otros conceptos, Placas para timbres, Panel de control, Liquidación,
+Pagos, Novedades, Profesionales, Estadísticas, Balance, Disponibilidad,
+Archivos y listas, Valores, y CUALQUIER catálogo armado con
+`PantallaCRUD` (que también es un `QWidget`, no un `QTabWidget`) — es
+decir, literalmente todas las pantallas compuestas o con solapas de
+todo el sistema. Como la condición `isinstance(widget, QTabWidget)`
+nunca era cierta para el widget de nivel Seccion, el método devolvía
+siempre ese `QWidget` envolvente sin bajar nunca a la solapa activa; y
+como ese envolvente no tiene su propio `reiniciar()` (solo lo tienen los
+paneles internos de cada solapa), `_reiniciar_solapa_activa` no
+encontraba el método y F5 no hacía absolutamente nada, en NINGUNA
+pantalla con solapas de todo el sistema — no era un caso puntual de
+Reservas aisladas, era el mismo bug en las ~24 pantallas de la auditoría
+anterior ("Hilo abierto: batch de 8 pedidos (F5...)" más arriba).
+
+**Por qué la auditoría anterior no lo detectó**: sus tests (uno por cada
+una de las 13 solapas sin `reiniciar()`, más los ya existentes) siempre
+llamaban `panel.reiniciar()` DIRECTO sobre la instancia del panel interno
+ya conocida (ej. `pantalla.panel_regulares.reiniciar()`), nunca a través
+del camino real de F5 (`ventana._reiniciar_solapa_activa()` →
+`_panel_mas_interno()`, con navegación real a la Seccion y la solapa
+activa puesta a mano). Esos tests confirmaban que la lógica de reseteo
+DE CADA PANEL estaba bien escrita, pero nunca confirmaban que F5 de
+verdad LLEGARA a ese panel — el gap exacto que permitió que este bug
+pasara desapercibido en una auditoría completa.
+
+**Fix**: `_panel_mas_interno` busca el `QTabWidget` con `widget.
+findChild(QTabWidget)` (mismo criterio ya usado por `ir_a_solapa`, que
+sí lo hacía bien desde el principio) en vez de comparar el widget mismo,
+y sigue bajando si la solapa activa tiene a su vez OTRO `QTabWidget`
+propio (pantalla compuesta anidada dentro de otra). Test de regresión
+nuevo que sí reproduce la forma real (envoltorio + `pestanas` + dos
+paneles con su propio `reiniciar()`, confirmando que F5 llama al de la
+solapa ACTIVA): `test_f5_llama_reiniciar_del_panel_activo_en_pantalla_
+compuesta_con_solapas` (`tests/test_main_window.py`) — confirmado por
+reversión que falla sin el fix (`_PanelConReset`, el sintético de la
+auditoría anterior, no alcanzaba a reproducirlo porque no tiene solapas
+propias). Suite completa (2799 tests) sin regresiones nuevas — los
+mismos 3 fallos preexistentes de `test_avance_mes.py` (no relacionados,
+confirmados también en la rama base) siguen igual.
+
+**Alcance de este fix**: arregla F5 de verdad en TODAS las pantallas
+compuestas del sistema de una sola vez (es el mecanismo compartido), no
+solo en Reservas aisladas — pero NO vuelve a auditar campo por campo
+cada una de las 13+11 solapas de la ronda anterior; esa lógica de
+`reiniciar()` de cada panel ya estaba bien escrita y sigue intacta, el
+problema era exclusivamente que F5 nunca llegaba a invocarla.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

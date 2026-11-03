@@ -274,17 +274,41 @@ class VentanaPrincipal(QMainWindow):
 
     def _panel_mas_interno(self) -> QWidget | None:
         """Baja por la cadena de `QTabWidget` anidados hasta el panel de
-        verdad que se está viendo en este momento — una pantalla compuesta
-        (ej. "Archivos y listas") es un `QTabWidget` cuyo contenido de cada
-        pestaña puede a su vez ser OTRO formulario con sus propias
-        solapas. `visto` evita un loop infinito si alguna vez un
-        `QTabWidget` quedara anidado dentro de sí mismo (no debería pasar,
-        es una guarda defensiva nomás)."""
+        verdad que se está viendo en este momento.
+
+        Bug real encontrado al investigar el reporte de la clienta de que
+        F5 "no hace nada" en Reservas aisladas (y, se confirmó, en
+        absolutamente NINGUNA pantalla compuesta del sistema): el widget
+        de una Seccion compuesta (Reservas, Grilla y mensajería, Llaves y
+        otros conceptos, Placas para timbres, Panel de control,
+        Liquidación, Pagos, Novedades, Profesionales, Estadísticas,
+        Balance, Disponibilidad, Archivos y listas, Valores, cualquier
+        catálogo armado con `PantallaCRUD`...) NUNCA es, él mismo, un
+        `QTabWidget` — es un `QWidget` con título que contiene un
+        `QTabWidget` propio como ATRIBUTO (`self.pestanas`, mismo
+        criterio en todas), igual que ya asume `ir_a_solapa` más abajo.
+        La versión anterior de este método comparaba el widget de la
+        Seccion contra `isinstance(widget, QTabWidget)` — esa condición
+        nunca era cierta para ninguna pantalla real del sistema, así que
+        el método devolvía siempre el `QWidget` de más afuera sin bajar
+        nunca a la solapa activa; como ese `QWidget` no tiene su propio
+        `reiniciar()` (solo lo tienen los paneles internos de cada
+        solapa), F5 no hacía absolutamente nada. Se busca el
+        `QTabWidget` con `findChild` (alcanza aunque esté en un layout
+        intermedio, no directamente como hijo) en vez de compararlo con
+        el widget mismo, y se sigue bajando si la solapa activa a su vez
+        tiene OTRO `QTabWidget` propio (una pantalla compuesta anidada
+        dentro de otra). `visto` evita un loop infinito si alguna vez un
+        `QTabWidget` quedara anidado dentro de sí mismo (no debería
+        pasar, es una guarda defensiva nomás)."""
         widget = self._pila.currentWidget()
         visto: set[int] = set()
-        while isinstance(widget, QTabWidget) and id(widget) not in visto:
+        while widget is not None and id(widget) not in visto:
             visto.add(id(widget))
-            siguiente = widget.currentWidget()
+            pestanas = widget if isinstance(widget, QTabWidget) else widget.findChild(QTabWidget)
+            if pestanas is None:
+                break
+            siguiente = pestanas.currentWidget()
             if siguiente is None:
                 break
             widget = siguiente

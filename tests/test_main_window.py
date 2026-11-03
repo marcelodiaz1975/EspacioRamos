@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QMessageBox, QWidget
+from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget, QVBoxLayout, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -443,6 +443,55 @@ def test_f5_llama_reiniciar_del_panel_activo_si_lo_tiene(qtbot, conn):
     ventana._reiniciar_solapa_activa()
 
     assert llamadas == [True]
+
+
+def test_f5_llama_reiniciar_del_panel_activo_en_pantalla_compuesta_con_solapas(qtbot, conn):
+    """Bug real reportado por la clienta ("no logro trasmitirte lo que
+    busco con F5"): TODAS las pantallas compuestas del sistema (Reservas,
+    Grilla y mensajería, Llaves y otros conceptos, etc.) son un `QWidget`
+    con TÍTULO que contiene un `QTabWidget` propio como atributo
+    (`self.pestanas`) — nunca son, ellas mismas, un `QTabWidget`. El
+    `_PanelConReset` sintético de `test_f5_llama_reiniciar_del_panel_
+    activo_si_lo_tiene` no reproducía ese caso real (es un panel liso,
+    sin solapas propias): con la versión vieja de `_panel_mas_interno`
+    (que solo bajaba un nivel si el widget de la Seccion YA era un
+    `QTabWidget`), F5 nunca llegaba al panel de la solapa activa en
+    ninguna pantalla compuesta real — se quedaba en el `QWidget`
+    envolvente, que no tiene su propio `reiniciar()`, así que no hacía
+    nada en absoluto. Reproduce la forma real (envoltorio + `pestanas` +
+    dos paneles con su propio `reiniciar()`) y confirma que F5 llama al
+    de la solapa ACTIVA (la segunda, no la primera)."""
+    llamadas = []
+
+    class _PanelUno(QWidget):
+        def reiniciar(self):
+            llamadas.append("uno")
+
+    class _PanelDos(QWidget):
+        def reiniciar(self):
+            llamadas.append("dos")
+
+    class _PantallaCompuesta(QWidget):
+        def __init__(self):
+            super().__init__()
+            layout = QVBoxLayout(self)
+            titulo = QLabel("Compuesta")
+            layout.addWidget(titulo)
+            self.pestanas = QTabWidget()
+            self.pestanas.addTab(_PanelUno(), "Uno")
+            self.pestanas.addTab(_PanelDos(), "Dos")
+            layout.addWidget(self.pestanas)
+
+    pantalla = _PantallaCompuesta()
+    secciones = [Seccion("Compuesta", lambda c: pantalla, categoria="X")]
+    ventana = VentanaPrincipal(conn, secciones)
+    qtbot.addWidget(ventana)
+    ventana._navegacion.setCurrentRow(1)
+    pantalla.pestanas.setCurrentIndex(1)  # el operador está parado en "Dos"
+
+    ventana._reiniciar_solapa_activa()
+
+    assert llamadas == ["dos"]
 
 
 def test_f5_sin_metodo_reiniciar_no_rompe(qtbot, conn):
