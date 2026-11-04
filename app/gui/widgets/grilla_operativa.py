@@ -104,13 +104,24 @@ class _CeldaGrilla(QWidget):
 
     def __init__(
         self, celda: CeldaGrillaOperativa, clave: tuple[int, str, int], on_click,
-        bordes: frozenset[str] = frozenset(), parent=None,
+        bordes: frozenset[str] = frozenset(), dibujar_separador: bool = True, parent=None,
     ):
         super().__init__(parent)
         self.celda = celda
         self._clave = clave
         self._on_click = on_click
         self._bordes = bordes
+        # `dibujar_separador` (pensado para `LeyendaColores`, ver ese uso):
+        # la línea fina gris (abajo/derecha, ver `_dibujar_bordes_gruesos`)
+        # se dibuja SIEMPRE, sin pasar por `bordes` — es el separador entre
+        # celdas VECINAS de la grilla real, que una muestra suelta de la
+        # leyenda no tiene. Quedaba oculta detrás del marco negro de 4
+        # caras que envolvía cada muestra (Punto #9.1.2) hasta que ese
+        # marco se sacó a pedido de la clienta — recién ahí se hizo visible
+        # como un resto de "L" gris, bug real reportado con foto/video de
+        # la app real ("recuadros alrededor de las referencias" seguía
+        # después de sacar el borde del QFrame).
+        self._dibujar_separador = dibujar_separador
         self.setMinimumHeight(24)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (nombre impuesto por Qt)
@@ -134,11 +145,13 @@ class _CeldaGrilla(QWidget):
         if self.celda.codigo:
             painter.setPen(QColor(_FUENTE_HEX.get(self.celda.color_fuente, "#000000")))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.celda.codigo)
-        _dibujar_bordes_gruesos(painter, rect, self._bordes)
+        _dibujar_bordes_gruesos(painter, rect, self._bordes, dibujar_separador=self._dibujar_separador)
         painter.end()
 
 
-def _dibujar_bordes_gruesos(painter: QPainter, rect, bordes: frozenset[str]) -> None:
+def _dibujar_bordes_gruesos(
+    painter: QPainter, rect, bordes: frozenset[str], dibujar_separador: bool = True,
+) -> None:
     # Línea fina propia — reemplaza a la cuadrícula nativa de la tabla
     # (desactivada): con "showGrid" activo, Qt le resta 1px a la altura de
     # columnas angostas como Tipo Bloque/Horario para dejarle lugar a su
@@ -157,11 +170,19 @@ def _dibujar_bordes_gruesos(painter: QPainter, rect, bordes: frozenset[str]) -> 
     # arriba/la de la izquierda) — el borde exterior superior/izquierdo de
     # la grilla sigue cerrado porque ahí ya cae la línea gruesa estructural
     # (día/encabezado), nunca la fina.
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.setPen(QPen(QColor("#999999"), 1))
-    esquina = rect.bottomRight()
-    painter.drawLine(rect.bottomLeft(), esquina)
-    painter.drawLine(rect.topRight(), esquina)
+    #
+    # `dibujar_separador=False` (pensado para `LeyendaColores`, ver
+    # `_CeldaGrilla.__init__`): esta línea separa UNA celda de su VECINA de
+    # al lado/abajo — una muestra suelta de la leyenda no tiene vecinas, así
+    # que dibujarla ahí es un resto de borde sin sentido (bug real,
+    # confirmado con foto/video de la app real: quedaba un resto en "L"
+    # gris después de sacar el marco negro del `QFrame` que lo tapaba).
+    if dibujar_separador:
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#999999"), 1))
+        esquina = rect.bottomRight()
+        painter.drawLine(rect.bottomLeft(), esquina)
+        painter.drawLine(rect.topRight(), esquina)
 
     # "right"/"bottom"/"left"/"top" (sin sufijo) = línea estructural
     # gruesa y negra, de siempre (separa días/encierra el bloque de
@@ -645,7 +666,7 @@ class LeyendaColores(QGroupBox):
         referencias = REFERENCIAS_REGULAR if modo == "regular" else REFERENCIAS_AISLADA
         for i, (celda, texto) in enumerate(referencias):
             fila, columna = divmod(i, self._columnas)
-            muestra = _CeldaGrilla(celda, (0, "Lunes", 0), lambda *_: None)
+            muestra = _CeldaGrilla(celda, (0, "Lunes", 0), lambda *_: None, dibujar_separador=False)
             muestra.setFixedSize(*self._tamano_muestra)
             # Punto #9.1.2 (SistemaDF v0.11.2026.10): "que los cuadritos de
             # las referencias de colores sean recuadrados con una línea

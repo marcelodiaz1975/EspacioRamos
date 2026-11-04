@@ -1378,6 +1378,82 @@ existente, `test_regulares_con_grilla_densa_no_muestra_scroll_vertical_
 de_la_solapa`, sigue pasando — el cambio en `_ajustar_alto_detalle` es
 un no-op con ese dataset, confirmado).
 
+## Reservas regulares: ronda 3 — video real confirma que el fix anterior no alcanzaba, causa de fondo de los dos puntos
+
+La clienta mandó un video de la app real (mismo build que el fix de la
+ronda anterior, confirmado explícitamente: "el video es de lo último que
+subiste") — así que los dos puntos de abajo son fallas reales del fix
+anterior, no evidencia vieja. Revisado extrayendo frames del video
+(`ffmpeg`): se ve "Detalle:" literalmente escrito letra sobre letra
+encima de la fila de la grilla (caso extremo, mucho más claro que
+cualquier captura propia hasta ahora), la barra de scroll vertical de la
+solapa todavía visible bajando hasta la barra de tareas de Windows, y
+cada muestra de la leyenda con un resto de línea visible a pesar del
+`border: none` de la ronda anterior.
+
+1. **Resto de borde en la leyenda — causa real distinta a la asumida.**
+   `_CeldaGrilla.paintEvent` (la clase que pinta cada muestra de color,
+   reutilizada tal cual de la grilla real) llama a `_dibujar_bordes_
+   gruesos`, que dibuja una línea fina gris (`#999999`, abajo y derecha)
+   de forma INCONDICIONAL, sin pasar por el parámetro `bordes` — es el
+   separador entre una celda de la grilla y su vecina de al lado/abajo,
+   documentado como necesario para la grilla real ("cada límite interno
+   lo traza una única celda"). La leyenda reusa esta misma clase para
+   cada muestra sin pasarle una vecina real, así que esa línea se
+   dibujaba igual, sin sentido para una muestra suelta — quedaba
+   TAPADA por el marco negro de 4 caras del `QFrame` (Punto #9.1.2)
+   hasta que ese marco se sacó en la ronda anterior, momento en el que
+   quedó expuesta como un resto en forma de "L" en la esquina
+   inferior/derecha de cada muestra. `_CeldaGrilla.__init__` suma
+   `dibujar_separador: bool = True` (guardado en `self._dibujar_
+   separador`, pasado a `_dibujar_bordes_gruesos` en `paintEvent`);
+   `LeyendaColores.actualizar` arma cada muestra con `dibujar_
+   separador=False`. No afecta ningún otro uso de `_CeldaGrilla` (la
+   grilla real sigue con el default `True`, sin tocar).
+
+2. **"Detalle" seguía superpuesto — el tope de la ronda anterior no era
+   un techo independiente.** `_ajustar_alto_detalle` topeaba contra el
+   pie REAL MEDIDO de `self.grilla` (`self.grilla.mapToGlobal(self.
+   grilla.rect().bottomLeft())`) — pero ese pie no es una referencia
+   fija: depende en parte de cuánto el propio método ya estiró `texto_
+   detalle` en la llamada anterior (`self.grilla` crece para darle
+   lugar a sus hijos). Un techo que se mueve junto con lo que se está
+   limitando no frena nada — dos pasadas seguidas (la de `showEvent` y
+   la del reajuste diferido) podían seguir forzando a `texto_detalle`
+   más alto de lo que la columna realmente tenía, exactamente el mismo
+   síntoma que se había intentado resolver.
+
+   Arreglo: el techo pasa a ser el TOPE que `limitar_alto_grilla` ya le
+   fija a `self.grilla` (`self._alto_referencia_regulares`, el alto de
+   la columna 1 — un valor que NO depende de `texto_detalle` en
+   absoluto) sumado al TECHO de `self.grilla` (`self.grilla.mapToGlobal
+   (self.grilla.rect().topLeft())` — tampoco se mueve con el alto de
+   los hijos de la columna, solo con lo que hay arriba de ella en el
+   splitter). Dos referencias genuinamente independientes de `texto_
+   detalle`, a diferencia del pie medido de la ronda anterior.
+
+   Confirmado con el mismo script de geometría de las rondas anteriores
+   (36 consultorios/200+ reservas/1366×768): sin cambios en los números
+   medidos acá (el pie de `boton_eliminar` sigue siendo el techo más
+   chico en este dataset, así que el cambio es un no-op en este
+   sandbox, igual que la ronda anterior) — la corrección de fondo
+   (techo genuinamente independiente, no circular) es la que debería
+   notarse en la PC real, donde el pie "real medido" de `self.grilla`
+   SÍ resultaba más chico que su verdadero tope.
+
+Tests: sin cambios de assert en ninguno de los dos archivos (`tests/
+test_gui_grilla_operativa.py`, `tests/test_gui_reservas.py`) — los
+escenarios de prueba disponibles en este sandbox no alcanzan a
+reproducir ninguno de los dos síntomas reales (ni el resto de borde, que
+necesita zoom sobre una captura real para notarse en píxeles tan chicos;
+ni la circularidad del tope, que solo se manifiesta cuando el pie
+"medido" de `self.grilla` es menor que su tope real — no ocurre con los
+datasets disponibles acá), así que las dos correcciones son de mecanismo
+(nunca pedirle a `texto_detalle` más de lo que la columna tiene
+garantizado, nunca dejar dibujar un separador sin vecina), no de un
+número recalibrado — pendiente de que la clienta confirme con la build
+nueva.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

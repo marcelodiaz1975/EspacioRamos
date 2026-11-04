@@ -1100,31 +1100,40 @@ class _PanelReservasRegulares(QWidget):
 
         El pie de `self.boton_eliminar` (columna 1) es el objetivo
         IDEAL, pero nunca el único techo válido: también se topea contra
-        el pie REAL de `self.grilla` (columna 2/3, ya con su propio tope
-        de `limitar_alto_grilla` aplicado) — bug real reportado por la
-        clienta con una foto de la app en Windows, con datos densos:
-        "Detalle" terminaba superpuesto a la última fila de la grilla.
-        Con métricas de fuente distintas a las de este sandbox (ver
-        "Metodología de trabajo" en CLAUDE.md), la tabla/filtros de
-        arriba pueden necesitar más alto real del que mide en este
-        contenedor, dejándole a `texto_detalle` menos lugar real del que
-        hace falta para llegar hasta el pie de `boton_eliminar` SIN
-        invadir lo que ya ocupa el resto de la columna — forzarlo de
-        todos modos (el bug de antes de este fix) hace que Qt no pueda
-        darle a la vez el alto fijo que se le pide a `texto_detalle` Y
-        el tope de alto de `self.grilla`, y el resultado visual es
-        contenido superpuesto en vez de un error. Tomar el MENOR de los
-        dos techos (pie de `boton_eliminar`, pie de `self.grilla`) nunca
-        le pide a `texto_detalle` más alto del que la columna 2/3
-        realmente tiene disponible — en el caso normal (el medido en
-        este sandbox, con el pie de `boton_eliminar` como techo más
-        chico) no cambia nada; solo achica el resultado, a costa de un
-        posible hueco en blanco en vez de recorte, cuando el pie de
-        `self.grilla` termina siendo el más restrictivo."""
+        el pie MÁXIMO que la columna 2/3 tiene permitido (`self.grilla`,
+        ya con su propio tope de `limitar_alto_grilla` aplicado) — bug
+        real reportado por la clienta con foto y video de la app en
+        Windows, con datos densos: "Detalle" terminaba superpuesto a la
+        última fila de la grilla, incluso después de un primer intento de
+        este mismo tope (ver el historial de esta sección en CLAUDE.md).
+
+        Ese primer intento topeaba contra el pie REAL medido de
+        `self.grilla` (`self.grilla.mapToGlobal(self.grilla.rect().
+        bottomLeft())`) — insuficiente: el pie de `self.grilla` NO es un
+        techo independiente, depende en parte del alto que ESTE MISMO
+        método ya le fijó a `texto_detalle` en la pasada anterior (`self.
+        grilla` crece para darle lugar a sus hijos, `texto_detalle`
+        incluido) — un techo que se mueve con lo que se está midiendo no
+        frena nada, dos pasadas seguidas del mismo "techo inflado" podían
+        seguir forzando a `texto_detalle` más alto de lo que la columna
+        tiene de verdad. El techo real e independiente de `texto_detalle`
+        es el TOPE que `limitar_alto_grilla` le puso a `self.grilla`
+        (`self._alto_referencia_regulares`, el alto de la columna 1 —
+        ninguno de los dos depende de `texto_detalle`), sumado al TECHO
+        de `self.grilla` (que tampoco se mueve con el alto de sus hijos,
+        solo con lo que hay ARRIBA de la columna en el splitter). Tomar
+        el MENOR entre el pie de `boton_eliminar` y ese techo máximo
+        nunca le pide a `texto_detalle` más alto del que la columna 2/3
+        realmente tiene — en el caso normal (medido en este sandbox, con
+        el pie de `boton_eliminar` como techo más chico) no cambia nada;
+        solo achica el resultado, a costa de un posible hueco en blanco
+        en vez de recorte, cuando el tope de `self.grilla` termina siendo
+        el más restrictivo."""
         pie_eliminar = self.boton_eliminar.mapToGlobal(self.boton_eliminar.rect().bottomLeft()).y()
-        pie_grilla = self.grilla.mapToGlobal(self.grilla.rect().bottomLeft()).y()
+        techo_grilla = self.grilla.mapToGlobal(self.grilla.rect().topLeft()).y()
+        pie_maximo_grilla = techo_grilla + self._alto_referencia_regulares
         techo_detalle = self.grilla.texto_detalle.mapToGlobal(self.grilla.texto_detalle.rect().topLeft()).y()
-        alto_disponible = min(pie_eliminar, pie_grilla) - techo_detalle
+        alto_disponible = min(pie_eliminar, pie_maximo_grilla) - techo_detalle
         if alto_disponible > 0:
             self.grilla.texto_detalle.setFixedHeight(alto_disponible)
 
