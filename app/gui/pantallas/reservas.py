@@ -245,6 +245,75 @@ def _distribuir_ancho_sobrante_aisladas(tabla: QTableWidget) -> None:
     tabla.setColumnWidth(_COL_AISLADAS_PROFESIONAL, max(ancho_disponible - suma_resto, _ANCHO_COL_PROFESIONAL))
 
 
+# Índices de columna de la tabla de abajo de Reservas regulares (ver
+# `_PanelReservasRegulares._armar_ui`, `setHorizontalHeaderLabels`) —
+# mismo criterio que `_COL_AISLADAS_*`, usados en `_ajustar_columnas_
+# regulares`.
+_COL_REGULARES_PROFESIONAL = 0
+_COL_REGULARES_LOCALIDAD = 1
+_COL_REGULARES_EDIFICIO = 2
+_COL_REGULARES_UNIDAD = 3
+_COL_REGULARES_CONSULTORIO = 4
+_COL_REGULARES_HORARIO = 6
+
+
+def _ajustar_columnas_regulares(tabla: QTableWidget) -> None:
+    """Variante de `_ajustar_columnas` para la tabla de abajo de
+    Reservas regulares — mismo criterio y mismos helpers que `_ajustar_
+    columnas_aisladas` (ver esa función), pedido explícito de la clienta
+    sobre esta solapa: Unidad y "Consul" (antes "Consultorio") más
+    angostas y centradas, y Profesional/Localidad/Edificio se reparten
+    el ancho sobrante para que la tabla llegue hasta el borde derecho
+    disponible sin dejar hueco en blanco (ver `_distribuir_ancho_
+    sobrante_regulares`) — a diferencia de Aisladas, que le da TODO el
+    sobrante a Profesional sola, acá la clienta pidió repartirlo entre
+    las tres."""
+    tabla.resizeColumnsToContents()
+    anchos_sin_relleno = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
+    for columna in range(tabla.columnCount()):
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
+    # Mismo piso mínimo que la variante genérica (`_ajustar_columnas`) y
+    # que Aisladas (`_ANCHO_COL_PROFESIONAL`) — se aplica ANTES de
+    # `_distribuir_ancho_sobrante_regulares`, que lo toma como "piso" al
+    # repartir el sobrante (nunca termina más angosta que esto).
+    tabla.setColumnWidth(
+        _COL_REGULARES_PROFESIONAL, max(tabla.columnWidth(_COL_REGULARES_PROFESIONAL), _ANCHO_COL_PROFESIONAL),
+    )
+    tabla.setColumnWidth(_COL_REGULARES_UNIDAD, round(tabla.columnWidth(_COL_REGULARES_UNIDAD) * 0.8))
+    # "Que entre justo" — mismo criterio que Consultorio/Fecha/etc. en
+    # Aisladas: el ancho natural (sin relleno) ya calculado arriba, que
+    # `resizeColumnsToContents()` mide sobre el título en negrita
+    # ("Consul") y el contenido real de la celda.
+    tabla.setColumnWidth(_COL_REGULARES_CONSULTORIO, anchos_sin_relleno[_COL_REGULARES_CONSULTORIO])
+    _distribuir_ancho_sobrante_regulares(tabla)
+
+
+def _distribuir_ancho_sobrante_regulares(tabla: QTableWidget) -> None:
+    """Pedido explícito de la clienta: "dale más ancho a las columnas
+    profesional, localidad y edificio para que el fin de la tabla
+    llegue al pixel 1475... teniendo en cuenta también la barra de
+    scroll vertical" — mismo mecanismo que `_distribuir_ancho_sobrante_
+    aisladas` (mismo descuento de barra de scroll vertical/borde, ver
+    esa función), pero repartido entre TRES columnas en vez de una sola.
+    El sobrante (o faltante) se reparte en partes iguales entre las
+    tres, con el resto del reparto entero yendo a Edificio (la última)
+    para que la suma coincida exacto; ninguna de las tres baja de su
+    propio ancho natural ya calculado en `_ajustar_columnas_regulares`
+    (piso, igual que `_ANCHO_COL_PROFESIONAL` en Aisladas)."""
+    ancho_vertical_header = tabla.verticalHeader().width()
+    ancho_scrollbar_vertical = tabla.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+    ancho_disponible = tabla.width() - ancho_vertical_header - ancho_scrollbar_vertical - _ANCHO_BORDE_TABLA
+    columnas_a_repartir = (_COL_REGULARES_PROFESIONAL, _COL_REGULARES_LOCALIDAD, _COL_REGULARES_EDIFICIO)
+    pisos = {c: tabla.columnWidth(c) for c in columnas_a_repartir}
+    suma_resto = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()) if c not in columnas_a_repartir)
+    ancho_para_repartir = max(ancho_disponible - suma_resto, sum(pisos.values()))
+    base = ancho_para_repartir // len(columnas_a_repartir)
+    resto_redondeo = ancho_para_repartir - base * len(columnas_a_repartir)
+    for i, columna in enumerate(columnas_a_repartir):
+        ancho = base + (resto_redondeo if i == len(columnas_a_repartir) - 1 else 0)
+        tabla.setColumnWidth(columna, max(ancho, pisos[columna]))
+
+
 class _FiltroCalendarioArrancaHoy(QObject):
     """Hallazgo real de la clienta en Licencias ("el selector de fecha
     hasta... me lleva al año 2000"), mismo patrón en Reservas regulares
@@ -911,9 +980,39 @@ class _PanelReservasRegulares(QWidget):
         referencia para la columna 2 — ver `_armar_ui`)."""
         super().showEvent(event)
         self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
-        self._alto_referencia_regulares = self._panel_form_regulares.sizeHint().height()
+        # `.height()` (alto YA asentado por el splitter), no `sizeHint()`
+        # (el "preferido" de columna 1 sola) — con la leyenda/grilla de
+        # la columna 2 pidiendo más alto del que mide `panel_form` sola,
+        # el splitter ya venía estirando a columna 1 un poco más que su
+        # propio `sizeHint()` para que las dos terminen parejas (ver
+        # "Resultado" en el historial de esta ronda) — tomar `sizeHint()`
+        # acá dejaba a `self.grilla` con un tope más chico que el real,
+        # y el sobrante quedaba como hueco en blanco entre "Detalle" y
+        # el pie real de la columna, en vez de que "Detalle" llegara
+        # hasta ahí.
+        self._alto_referencia_regulares = self._panel_form_regulares.height()
         self.grilla.limitar_alto_grilla(self._alto_referencia_regulares)
         self.reiniciar()
+        # Mismo motivo y mismo mecanismo que Reservas aisladas (ver
+        # `QTimer.singleShot` en el `showEvent` de esa solapa): tanto el
+        # alto de `panel_form` como el ancho de `self.tabla` (para
+        # `_ajustar_columnas_regulares`/`_distribuir_ancho_sobrante_
+        # regulares`, pedido explícito de la clienta — "que el fin de la
+        # tabla llegue al pixel 1475") pueden seguir desincronizados en
+        # este punto de `showEvent`, antes de que Qt termine de resolver
+        # el layout de toda la ventana — se vuelve a correr apenas el
+        # loop de eventos procese ese layout pendiente.
+        QTimer.singleShot(0, self._reajustar_alto_y_columnas_si_sigue_vivo)
+
+    def _reajustar_alto_y_columnas_si_sigue_vivo(self) -> None:
+        """Ver el `QTimer.singleShot` en `showEvent` — mismo guard que
+        `_PanelReservasAisladas._distribuir_ancho_sobrante_si_sigue_
+        vivo` para el mismo problema (la pantalla pudo cerrarse antes de
+        que el loop de eventos llegue a disparar el timer)."""
+        if shiboken6.isValid(self._panel_form_regulares) and shiboken6.isValid(self.tabla):
+            self._alto_referencia_regulares = self._panel_form_regulares.height()
+            self.grilla.limitar_alto_grilla(self._alto_referencia_regulares)
+            self.actualizar()
 
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
@@ -1085,6 +1184,14 @@ class _PanelReservasRegulares(QWidget):
         # aisladas.
         self.grilla.fijar_alto_filas(_ALTO_FILA_ENCABEZADO_REGULARES, _ALTO_FILA_DATO_REGULARES)
         self.grilla.fijar_modo("regular")
+        # Pedido explícito de la clienta: el combo "Visualización" pasa a
+        # quedar habilitado (en vez de bloqueado en "Reservas regulares"
+        # para siempre, que es lo que hace `fijar_modo` sola) tanto acá
+        # como en Reservas aisladas, para poder ver la grilla en el otro
+        # modo sin cambiar de solapa — "Reservas regulares" sigue siendo
+        # el valor por default de ESTA solapa (ya lo dejó `fijar_modo`
+        # arriba), reactivarlo después no le cambia el valor actual.
+        self.grilla.combo_modo.setEnabled(True)
         self.grilla.activar_filtro_exclusivo_profesional(True)
         self.grilla.agrandar_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA)
         self.grilla.agrupar_dias_en_pares()
@@ -1165,6 +1272,16 @@ class _PanelReservasRegulares(QWidget):
         # misma altura que el formulario ("que quede parejo", pedido
         # explícito de la clienta), ver `dar_stretch_a_detalle`.
         self.grilla.dar_stretch_a_detalle()
+        # Pedido explícito de la clienta ("bajá un poco la etiqueta
+        # 'Detalle' abajo de la grilla para que no se superponga con la
+        # grilla"): el espaciado parejo por defecto de esta columna (6px,
+        # igual que entre cualquier otro par de controles) no dejaba
+        # suficiente respiro entre la última fila de la grilla (8 a 22hs,
+        # ver `fijar_alto_filas` más abajo) y "Detalle:" — "Detalle"
+        # (`texto_detalle`, con `stretch=1` vía `dar_stretch_a_detalle`
+        # de arriba) sigue llegando al mismo pie que la columna de al
+        # lado sin más ajuste: se achica solo por este espacio nuevo.
+        self.grilla.agregar_espacio_antes_de_detalle(14)
         # Tope de alto IGUAL al de `panel_form` (columna 1, con Días/
         # Vigencia/3 botones) en vez de a `alto_natural_grilla()` (el
         # alto natural de la grilla sola): pedido explícito de la
@@ -1279,7 +1396,12 @@ class _PanelReservasRegulares(QWidget):
         self.tabla.setColumnCount(9)
         self.tabla.setHorizontalHeaderLabels(
             [
-                "Profesional", "Localidad", "Edificio", "Unidad", "Consultorio", "Día", "Horario",
+                # "Consultorio" pasa a "Consul" (pedido explícito de la
+                # clienta, mismo criterio ya aplicado en Reservas
+                # aisladas) — ver `_ajustar_columnas_regulares` para el
+                # recorte de ancho que además se le aplica a esta
+                # columna.
+                "Profesional", "Localidad", "Edificio", "Unidad", "Consul", "Día", "Horario",
                 "Vigencia desde", "Vigencia hasta",
             ]
         )
@@ -1360,15 +1482,27 @@ class _PanelReservasRegulares(QWidget):
                 QTableWidgetItem((consultorio["DomicilioLocalidad"] or "(Sin localidad)") if consultorio else "?"),
             )
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(consultorio["NombreEdificio"] if consultorio else "?"))
-            self.tabla.setItem(fila_idx, 3, QTableWidgetItem(consultorio["Departamento"] if consultorio else "?"))
+            # Centrado (pedido explícito de la clienta, mismo criterio ya
+            # aplicado en Reservas aisladas) — código corto, a diferencia
+            # de Localidad/Edificio (texto largo, a la izquierda).
             self.tabla.setItem(
-                fila_idx, 4, item_numero(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
+                fila_idx, 3, item_centrado(consultorio["Departamento"] if consultorio else "?"),
+            )
+            self.tabla.setItem(
+                fila_idx, 4, item_centrado(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
             )
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(r["DiaSemana"]))
-            self.tabla.setItem(fila_idx, 6, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
-            self.tabla.setItem(fila_idx, 7, QTableWidgetItem(_fmt_fecha(r["VigenciaInicio"])))
-            self.tabla.setItem(fila_idx, 8, QTableWidgetItem(_fmt_fecha(r["VigenciaFin"])))
-        _ajustar_columnas(self.tabla)
+            # "hs" al final, alineado a la derecha (ej. "9:00 a
+            # 10:00hs") — mismo pedido puntual ya aplicado en Aisladas.
+            self.tabla.setItem(fila_idx, 6, item_numero(_fmt_horario(r["HoraInicio"], r["HoraFin"]) + "hs"))
+            # "ddd dd-MM-yyyy" (ej. "mar 15-10-2026"), alineado a la
+            # derecha — mismo formato y alineación ya usados en la
+            # columna "Fecha" de Aisladas (`_fmt_fecha_dia_abrev`); el
+            # orden por click en el encabezado sigue ordenando por el
+            # AAAA-MM-DD real (`_clave_orden`), no por este texto.
+            self.tabla.setItem(fila_idx, 7, item_numero(_fmt_fecha_dia_abrev(r["VigenciaInicio"])))
+            self.tabla.setItem(fila_idx, 8, item_numero(_fmt_fecha_dia_abrev(r["VigenciaFin"])))
+        _ajustar_columnas_regulares(self.tabla)
         self._sincronizar_grilla()
         self._actualizar_botones()
 
@@ -2134,6 +2268,10 @@ class _PanelReservasAisladas(QWidget):
         # "vamos a agregar una cuarta columna a ver cómo queda".
         self.grilla = GrillaOperativaWidget(self.conn)
         self.grilla.fijar_modo("aislada")
+        # Mismo pedido que en Reservas regulares (ver esa solapa): combo
+        # "Visualización" habilitado, con "Reservas aisladas" como
+        # default propio de ESTA solapa.
+        self.grilla.combo_modo.setEnabled(True)
         self.grilla.activar_filtro_exclusivo_profesional(True)
         self.grilla.mostrar_leyenda_colores(compacta=False)
         # Sin título "Filtros" (pedido de la clienta) — cada filtro pasa a

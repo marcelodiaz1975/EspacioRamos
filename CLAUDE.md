@@ -868,6 +868,119 @@ hubo_pago_por_sobre` (antes `..._nota_de_sobres_...`).
    verificación explícita de que "Detalle:" no arranca antes de que
    termine la tabla).
 
+   **Ronda siguiente: tabla inferior, ancho de columnas, "Detalle" y
+   Visualización en las dos solapas.** Pedido explícito de la clienta
+   (verbatim, varios puntos en un mismo mensaje):
+
+   - "Sacale el recuadro que rodea a las referencias de colores, que
+     quede como en reservas aisladas" — **ya resuelto en la ronda
+     anterior** (`quitar_marco_leyenda_colores`/`quitar_marco_panel_
+     filtros`): confirmado con una captura de zoom sobre la leyenda, sin
+     ningún borde propio (solo el de cada "cuadrito" de color, que es
+     el `#000000` fino pedido aparte y se queda). No hizo falta tocar
+     nada de nuevo acá.
+
+   - **Alineaciones de la tabla inferior**: Unidad y "Consul" (antes
+     "Consultorio", mismo rename ya aplicado en Aisladas) centradas;
+     Horario con sufijo "hs" alineado a la derecha (ej. "9:00 a
+     17:00hs"); Vigencia desde/hasta en formato "ddd dd-MM-yyyy" (ej.
+     "jue 01-01-2026"), alineadas a la derecha. Mismos helpers que ya
+     usa Aisladas para su propia tabla (`item_centrado`/`item_numero`,
+     `_fmt_fecha_dia_abrev`) — nueva función `_ajustar_columnas_
+     regulares` (análoga a `_ajustar_columnas_aisladas`, reemplaza a la
+     genérica `_ajustar_columnas`, que no se usaba en ningún otro lado
+     de este archivo). El orden por click en el encabezado de Vigencia
+     desde/hasta sigue ordenando por el AAAA-MM-DD real (`_clave_orden`,
+     sin tocar), no por el texto mostrado.
+
+   - **"Dale más ancho a Profesional/Localidad/Edificio para que la
+     tabla llegue al pixel 1475... contemplando la barra de scroll
+     vertical."** `_distribuir_ancho_sobrante_regulares` (nueva, mismo
+     descuento de ancho de scrollbar/borde que `_distribuir_ancho_
+     sobrante_aisladas`): a diferencia de Aisladas (que le da TODO el
+     sobrante a "Profesional" sola), acá el sobrante se reparte en
+     partes iguales entre las tres columnas pedidas, con el resto del
+     reparto entero yendo a Edificio (la última) para que la suma
+     coincida exacto, sin que ninguna de las tres baje de su propio
+     ancho natural (piso, mismo criterio que `_ANCHO_COL_PROFESIONAL`
+     en Aisladas). Medido: el borde derecho de la tabla llega a
+     x≈1477 (ventana de referencia 1500px), con las 9 columnas usando
+     todo ese ancho — nada de hueco en blanco al final. Al igual que en
+     Aisladas (`_distribuir_ancho_sobrante_si_sigue_vivo`), el ancho
+     real de `self.tabla` recién se conoce después de que Qt termina de
+     resolver el layout de toda la ventana — `showEvent` suma un
+     `QTimer.singleShot(0, self._reajustar_alto_y_columnas_si_sigue_
+     vivo)` (mismo guard `shiboken6.isValid(...)`) que vuelve a correr
+     `_ajustar_columnas_regulares` (vía `actualizar()`) una vez resuelto
+     ese layout pendiente — sin esto, el reparto se quedaba con un
+     `tabla.width()` todavía angosto (una de las corridas intermedias
+     midió 546px en vez de los 1452px reales).
+
+   - **"Bajá un poco la etiqueta 'Detalle'... para que no se superponga
+     con la grilla, y a partir de ahí bajá el alto del cuadro de
+     detalle para que termine justo antes de que empiece la tabla de
+     abajo."** `GrillaOperativaWidget.agregar_espacio_antes_de_detalle
+     (espacio)` (nueva): suma un `insertSpacing` puntual justo antes de
+     la etiqueta "Detalle:" en `layout_grilla`, sin tocar el resto del
+     espaciado de esa columna (la separación entre "Período/
+     Visualización" y la grilla se queda igual) — Reservas regulares la
+     llama con 14px. Como "Detalle" (`texto_detalle`) ya se estira con
+     `dar_stretch_a_detalle` (ronda anterior) para llegar siempre al pie
+     de la columna 1, el cuadro se achica solo por este espacio nuevo,
+     sin tener que tocarle el alto a mano. De paso, `showEvent` pasa a
+     usar `panel_form.height()` (el alto YA asentado por el splitter)
+     en vez de `panel_form.sizeHint()` (el "preferido" de la columna
+     sola, que subestimaba cuánto la estira el splitter cuando la
+     columna de al lado — Filtros + leyenda — pide más alto del que
+     `panel_form` mide por su cuenta) para recalcular `_alto_referencia_
+     regulares`, mismo motivo que el `QTimer.singleShot` del punto de
+     arriba. **No resuelto del todo**: queda un margen residual de
+     ~19px entre el pie de "Detalle" y el techo de la tabla de abajo
+     (bajó de ~26px a ~19px con estos dos cambios) — se investigó subir
+     `self.grilla` a `QSizePolicy.Expanding` + `stretch=1` en
+     `layout_grupo_grilla` (mismo mecanismo que `panel_filtros_
+     aisladas` en Reservas aisladas) y hasta forzarle un `setMinimumHeight`
+     igual al tope, pero ninguno de los dos hizo que `self.grilla`
+     creciera más allá de su propio alto mínimo natural (531px, medido),
+     y el segundo intento además desencadenaba un crecimiento en
+     cascada de `panel_form` (vía el splitter) que dejaba a `_scroll_
+     superior` con un alto ya desactualizado (riesgo real de recorte) —
+     se revirtieron los dos, se dejó el resultado más chico (19px) por
+     ser estable y no arriesgar un recorte visible. Pendiente para una
+     próxima ronda si la clienta pide cerrar ese margen del todo.
+
+   - **"Que el selector de Visualización esté habilitado en las dos
+     solapas, con 'Reservas regulares'/'Reservas aisladas' como default
+     de cada una, y que cambiar la visualización cambie también las
+     referencias."** `fijar_modo(...)` sigue fijando el modo por
+     default de cada solapa (sin tocarla), pero ya no se deja
+     deshabilitado el combo después: `self.grilla.combo_modo.setEnabled
+     (True)`, tanto en Reservas regulares como en Reservas aisladas. El
+     cambio de referencias al cambiar de visualización YA estaba
+     conectado de antes (`combo_modo.currentIndexChanged` ->
+     `_actualizar_leyenda_colores`, sin uso real hasta ahora porque el
+     combo estaba bloqueado) — confirmado con una captura en cada
+     sentido: Reservas regulares mostrando "Reservas aisladas" (6
+     referencias, propias de Aisladas, en el mismo panel de 2 columnas)
+     y Reservas aisladas mostrando "Reservas regulares" (8 referencias,
+     en su propia leyenda a 1 columna) — ninguna de las dos
+     desborda ni se superpone, aunque el tamaño de muestra/letra sigue
+     optimizado para la visualización POR DEFECTO de cada solapa (pedido
+     explícito: "optimizando el espacio... para la visualización por
+     defecto de cada una"), no para la alternativa.
+
+   Tests nuevos/actualizados en `tests/test_gui_reservas.py`:
+   `test_tabla_regulares_desglosa_localidad_edificio_unidad_consultorio`
+   (header "Consul" en vez de "Consultorio"), `test_tablas_de_abajo_
+   muestran_tratamiento_nombre_apellido_y_columna_ancha` (Horario con
+   "hs"); se reemplazan `test_grilla_preview_regulares_bloquea_la_
+   visualizacion_en_regular`/`test_grilla_preview_aisladas_bloquea_la_
+   visualizacion_en_aislada` (verificaban el combo bloqueado, ya no
+   aplica) por `test_grilla_preview_regulares_arranca_en_regular_con_
+   el_combo_habilitado`/`test_grilla_preview_aisladas_arranca_en_
+   aislada_con_el_combo_habilitado`, y se suma `test_grilla_preview_
+   regulares_cambia_la_leyenda_al_cambiar_visualizacion`.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

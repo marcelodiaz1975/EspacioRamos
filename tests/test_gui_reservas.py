@@ -2019,24 +2019,50 @@ def _textos_leyenda_visibles(leyenda) -> list[str]:
     return [lbl.text() for lbl in leyenda.findChildren(QLabel) if not lbl.isHidden()]
 
 
-def test_grilla_preview_regulares_bloquea_la_visualizacion_en_regular(qtbot, conn):
+def test_grilla_preview_regulares_arranca_en_regular_con_el_combo_habilitado(qtbot, conn):
+    """Pedido explícito de la clienta: el combo "Visualización" pasa a
+    quedar habilitado en las dos solapas (antes bloqueado para siempre
+    en el modo de cada una, ver `fijar_modo`) — "Reservas regulares"
+    sigue siendo el default propio de ESTA solapa, pero ahora se puede
+    cambiar a "Reservas aisladas" sin salir de acá."""
     _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_regulares
 
     assert panel.grilla.combo_modo.currentData() == "regular"
-    assert panel.grilla.combo_modo.isEnabled() is False
+    assert panel.grilla.combo_modo.isEnabled() is True
 
 
-def test_grilla_preview_aisladas_bloquea_la_visualizacion_en_aislada(qtbot, conn):
+def test_grilla_preview_aisladas_arranca_en_aislada_con_el_combo_habilitado(qtbot, conn):
+    """Mismo pedido que en Reservas regulares (ver esa solapa): "Reservas
+    aisladas" sigue siendo el default propio de ESTA solapa, con el
+    combo ya habilitado para poder cambiarlo."""
     _preparar(conn)
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_aisladas
 
     assert panel.grilla.combo_modo.currentData() == "aislada"
-    assert panel.grilla.combo_modo.isEnabled() is False
+    assert panel.grilla.combo_modo.isEnabled() is True
+
+
+def test_grilla_preview_regulares_cambia_la_leyenda_al_cambiar_visualizacion(qtbot, conn):
+    """Pedido explícito de la clienta: "al hacer este switch entre las
+    visualizaciones me tendría que también cambiar las referencias" —
+    ya conectado de antes (`combo_modo.currentIndexChanged` ->
+    `_actualizar_leyenda_colores`), este test confirma que sigue
+    funcionando ahora que el combo es usable de verdad (antes bloqueado,
+    nunca disparaba este cambio en la práctica)."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+
+    texto_inicial = panel.grilla._leyenda_colores.layout().itemAt(1).widget().text()
+    panel.grilla.combo_modo.setCurrentIndex(panel.grilla.combo_modo.findData("aislada"))
+    texto_cambiado = panel.grilla._leyenda_colores.layout().itemAt(1).widget().text()
+    assert texto_cambiado != texto_inicial
 
 
 def test_grilla_preview_regulares_muestra_leyenda_de_colores_de_regular(qtbot, conn):
@@ -2816,7 +2842,9 @@ def test_tablas_de_abajo_muestran_tratamiento_nombre_apellido_y_columna_ancha(qt
     tabla_r = pantalla.panel_regulares.tabla
     assert tabla_r.item(0, 0).text() == "Lic. Virginia Gómez"
     assert tabla_r.columnWidth(0) >= 180
-    assert tabla_r.item(0, 6).text() == "9:00 a 10:00"
+    # "hs" al final (pedido explícito de la clienta, mismo criterio ya
+    # usado en Aisladas, ver `_PanelReservasRegulares.actualizar`).
+    assert tabla_r.item(0, 6).text() == "9:00 a 10:00hs"
 
     # "Mostrar todas las reservas": la fecha de la aislada de este test
     # es fija (no relativa a "hoy"), así que sin esto el filtro de
@@ -3171,7 +3199,10 @@ def test_tabla_regulares_desglosa_localidad_edificio_unidad_consultorio(qtbot, c
     qtbot.addWidget(pantalla)
     tabla = pantalla.panel_regulares.tabla
     assert [tabla.horizontalHeaderItem(i).text() for i in range(1, 5)] == [
-        "Localidad", "Edificio", "Unidad", "Consultorio",
+        # "Consultorio" pasa a "Consul" (pedido explícito de la clienta,
+        # mismo criterio ya aplicado en Aisladas, ver `_ajustar_columnas_
+        # regulares`).
+        "Localidad", "Edificio", "Unidad", "Consul",
     ]
     assert tabla.item(0, 1).text() == "(Sin localidad)"
     assert tabla.item(0, 2).text() == "Torre Norte"

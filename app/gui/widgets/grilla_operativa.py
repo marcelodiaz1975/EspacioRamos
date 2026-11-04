@@ -1443,6 +1443,23 @@ class GrillaOperativaWidget(QWidget):
         self._layout_grilla.setStretchFactor(self.texto_detalle, 1)
         self.texto_detalle.setMaximumHeight(16_777_215)  # sin límite (máximo de Qt)
 
+    def agregar_espacio_antes_de_detalle(self, espacio: int) -> None:
+        """Suma `espacio` px de separación entre la grilla (`self.tabla`)
+        y la etiqueta "Detalle:" — pensado para Reservas regulares
+        (pedido explícito de la clienta: "bajá un poco la etiqueta
+        'Detalle' ... para que no se superponga con la grilla"), que
+        hasta ahora solo tenía el espaciado parejo por defecto de
+        `layout_grilla` (6px, el mismo que separa cualquier otro par de
+        controles de esta columna). No toca el resto de los espaciados
+        de este layout — un `insertSpacing` puntual, justo antes de
+        "Detalle:", no cambia `layout_grilla.spacing()` en general. Como
+        "Detalle" (`texto_detalle`) ya se estira con `dar_stretch_a_
+        detalle` para llegar siempre al mismo pie que la columna de al
+        lado, el cuadro se achica solo por la diferencia exacta de este
+        espacio nuevo — no hace falta tocar su alto a mano."""
+        indice = self._layout_grilla.indexOf(self._etiqueta_detalle)
+        self._layout_grilla.insertSpacing(indice, espacio)
+
     def achicar_detalle(self, alto: int) -> None:
         """Baja el alto máximo del cuadro "Detalle" (90px por defecto, con
         un alto natural bastante más chico que eso todavía) — pensado para
