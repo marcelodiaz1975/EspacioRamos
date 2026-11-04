@@ -1498,45 +1498,6 @@ class GrillaOperativaWidget(QWidget):
         indice = self._layout_grilla.indexOf(self.etiqueta_detalle)
         self._layout_grilla.insertSpacing(indice, espacio)
 
-    def alinear_etiqueta_detalle_al_pie(self) -> None:
-        """La etiqueta "Detalle:" pasa a alinear su texto abajo a la
-        izquierda (en vez del default de Qt, arriba a la izquierda) —
-        pensado para usarse junto con `fijar_alto_etiqueta_y_cuadro_
-        detalle`, que agranda esta etiqueta para que ocupe el hueco
-        entre el pie de la grilla y el cuadro "Detalle": con el texto
-        pegado abajo (contra el cuadro, al que describe) en vez de
-        pegado arriba (contra la grilla), queda del lado correcto del
-        hueco agrandado. Hay que llamarlo UNA sola vez, en el armado
-        inicial."""
-        self.etiqueta_detalle.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
-
-    def fijar_alto_etiqueta_y_cuadro_detalle(self, alto_etiqueta: int, alto_cuadro: int) -> None:
-        """Fija el alto de la etiqueta "Detalle:" Y del cuadro
-        `texto_detalle` juntos, en una sola llamada — pensado para
-        Reservas regulares (pedido explícito de la clienta, sobre un
-        video real de la app: en vez de que el cuadro ocupe TODO el alto
-        de sobra con la etiqueta pegada arriba de todo, el cuadro pasa a
-        ocupar solo la MITAD de ese sobra y la etiqueta crece para
-        ocupar la otra mitad — ver `alinear_etiqueta_detalle_al_pie`
-        para que el texto quede pegado al cuadro, no a la grilla).
-
-        Las dos alturas se fijan con `setFixedHeight` sobre dos widgets
-        REALES (la etiqueta y el cuadro), no con un espaciador — un
-        intento anterior insertaba un `QSpacerItem` nuevo antes de la
-        etiqueta para este mismo propósito, pero su geometría real no
-        llegaba a reflejar el alto que se le pedía (confirmado con un
-        script de geometría: `sizeHint()` daba el valor correcto pero
-        `geometry()` seguía en 0) — un espaciador sin contenido propio
-        es, aparentemente, el primer lugar de donde Qt recorta cuando el
-        layout no entra del todo en el tope de alto de `self` (ver
-        `limitar_alto_grilla`), a diferencia de un widget real con
-        `setFixedHeight`, que Qt sí respeta como una restricción dura.
-        Agrandar la etiqueta en vez de un espaciador nuevo evita ese
-        problema de raíz, reusando el mismo mecanismo ya confirmado
-        confiable para `texto_detalle`."""
-        self.etiqueta_detalle.setFixedHeight(alto_etiqueta)
-        self.texto_detalle.setFixedHeight(alto_cuadro)
-
     def achicar_detalle(self, alto: int) -> None:
         """Baja el alto máximo del cuadro "Detalle" (90px por defecto, con
         un alto natural bastante más chico que eso todavía) — pensado para

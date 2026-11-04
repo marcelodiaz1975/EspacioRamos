@@ -89,6 +89,13 @@ class VentanaPrincipal(QMainWindow):
         self._navegacion = QListWidget()
         self._navegacion.setObjectName("navegacion")
         self._navegacion.setFixedWidth(240)
+        # Defensivo, además de achicar la fuente de la categoría más abajo
+        # (la causa real confirmada de la barra que apareció): un nombre de
+        # espacio todavía más largo que el probado acá no tiene por qué
+        # volver a mostrar la barra de scroll horizontal — con la política
+        # en "siempre apagada", un texto de más simplemente se recorta
+        # contra el borde del menú en vez de disparar una barra nueva.
+        self._navegacion.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._pila = QStackedWidget()
         self._pantalla_inicial = _pantalla_inicial()
         self._pila.addWidget(self._pantalla_inicial)
@@ -120,8 +127,26 @@ class VentanaPrincipal(QMainWindow):
                 # ítem queda ENABLED (solo se le sacó ItemIsSelectable), así
                 # que ese selector de QSS nunca matchea; se fija la fuente
                 # directo sobre el ítem en vez de depender de esa regla.
+                #
+                # Bug real reportado por la clienta: el nombre del espacio
+                # (categoría del segundo grupo, personalizable en
+                # Configuración general — ej. "Espacio Ramos consultorios")
+                # en mayúscula y negrita podía superar el ancho fijo del
+                # menú (240px, con 14px de padding a cada lado — 212px
+                # disponibles), disparando la barra de scroll horizontal
+                # nativa de `QListWidget` (sin pedirla, nunca se había
+                # configurado qué hacer con texto de más). Confirmado
+                # midiendo con `QFontMetrics`: "ESPACIO RAMOS CONSULTORIOS"
+                # a 13px negrita (el tamaño normal del resto del menú) da
+                # 214px, ya por encima de los 212px disponibles en este
+                # sandbox — la fuente real de Windows mide distinto (ver
+                # "Metodología de trabajo" en CLAUDE.md), así que el
+                # sobrante real podía ser todavía mayor. Un tamaño más
+                # chico para la categoría (11px, sigue en negrita) deja
+                # ese mismo texto en 181px, con margen de sobra.
                 fuente_negrita = separador.font()
                 fuente_negrita.setBold(True)
+                fuente_negrita.setPixelSize(11)
                 separador.setFont(fuente_negrita)
                 separador.setData(_CATEGORIA_SEPARADOR, seccion.categoria)
                 self._navegacion.addItem(separador)

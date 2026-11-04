@@ -1558,6 +1558,105 @@ grilla) — el resto de los tests de ambos archivos, y el escenario denso
 (`test_regulares_con_grilla_densa_no_muestra_scroll_vertical_de_la_
 solapa`), siguen pasando sin cambios.
 
+## Reservas regulares: ronda 5 — pedido más concreto de "Detalle" (vuelta al criterio simple), tabla contra "Eliminar reserva", barra horizontal nueva en el menú lateral
+
+Pedido explícito de la clienta, tres puntos en un mismo mensaje (ya NO
+sobre Reservas regulares el primero — un bug nuevo, distinto, en el menú
+lateral de toda la app):
+
+"* Aparece una barra de escroll horizontal en el menu lateral que antes
+no aparecía, fijate si podes ajustar algo para que no se vea, si tenés
+que reducir alguna fuente del menú hacelo.
+* Subí la etiqueta "Detalle" para que quede abajo de la grilla, abajo de
+la barra de escroll horizontal de la grilla concretamente. Luego que el
+cuadro de detalle empiece abajo de esa etiqueta, y que se estire hasta
+la altura donde termina el botón de eliminar reserva.
+* La tabla subila un poco hasta abajo del botón "Eliminar reserva", sin
+superponerse con esa altura, justo abajo. Y luego que la tabla termine
+abajo de la solapa hasta donde llegue como para ver cuatro filas de
+registros enteras"
+
+1. **Barra de scroll horizontal nueva en el menú lateral — bug real,
+   nada que ver con Reservas.** `QListWidget#navegacion` (`app/gui/
+   main_window.py`) tiene ancho fijo (240px, 14px de padding a cada
+   lado en `estilos.py` — 212px disponibles) y nunca había tenido
+   política de scroll horizontal explícita. La categoría del segundo
+   grupo de secciones es el NOMBRE DEL ESPACIO, personalizable en
+   Configuración general — en mayúscula y negrita (pedido de siempre) —
+   y el de la clienta ("Espacio Ramos consultorios") es bastante largo.
+   Confirmado con `QFontMetrics`: "ESPACIO RAMOS CONSULTORIOS" a 13px
+   negrita (el tamaño que tenían las categorías hasta ahora, igual al
+   resto del menú) mide 214px, ya por encima de los 212px disponibles
+   EN ESTE SANDBOX — la fuente real de Windows mide distinto (ver
+   "Metodología de trabajo"), así que el sobrante real podía ser mayor
+   todavía; de ahí la barra de scroll horizontal nativa de `QListWidget`
+   que apareció sola, nunca pedida ni contemplada antes. Dos capas de
+   arreglo: la fuente de la categoría baja a 11px (sigue en negrita —
+   "ESPACIO RAMOS CONSULTORIOS" pasa a medir 181px, con margen de
+   sobra) y, defensivo, `self._navegacion.setHorizontalScrollBarPolicy
+   (Qt.ScrollBarPolicy.ScrollBarAlwaysOff)` — un nombre de espacio
+   TODAVÍA más largo que el de la clienta no tiene por qué volver a
+   mostrar una barra nueva: con la política apagada, se recorta contra
+   el borde del menú en vez de eso. Test nuevo en `tests/test_main_
+   window.py`: `test_categoria_de_nombre_largo_no_dispara_scroll_
+   horizontal_del_menu` (categoría "ESPACIO RAMOS CONSULTORIOS",
+   confirma `horizontalScrollBar().maximum() == 0`).
+
+2. **"Detalle": pedido más concreto, vuelve al criterio simple
+   (reemplaza el reparto a la mitad de la ronda anterior).** La ronda
+   anterior probó partir el sobrante en dos mitades (etiqueta agrandada
+   + cuadro a la mitad) — la clienta lo descartó con un pedido más
+   directo: la etiqueta vuelve a su alto NATURAL, pegada abajo de la
+   grilla (sin tocar nada — `agregar_espacio_antes_de_detalle(14)` ya
+   mide desde el pie real de la grilla, barra de scroll horizontal
+   incluida si está visible, de rondas bien anteriores) y el cuadro
+   `texto_detalle` vuelve a ocupar TODO el sobrante hasta el pie de
+   "Eliminar reserva" — el criterio de dos rondas atrás, con el tope
+   anti-superposición de la ronda inmediatamente anterior (`min(pie_
+   eliminar, pie_maximo_grilla)`) que SÍ se queda, sin tocar: ese tope
+   es el que evita la superposición real que había reportado la clienta
+   con foto/video, independiente de cómo se reparta el sobrante adentro.
+   Se sacan los dos métodos que ya no hacían falta
+   (`alinear_etiqueta_detalle_al_pie`/`fijar_alto_etiqueta_y_cuadro_
+   detalle`, `GrillaOperativaWidget`) y se revierte el test asociado
+   (`test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_
+   con_grilla_cargada`) a su forma de dos rondas atrás.
+
+3. **Tabla de abajo: pegada contra el pie de "Eliminar reserva", y 4
+   filas en vez de 3.** `_scroll_superior` (el `QScrollArea` que
+   envuelve formulario+grilla+Detalle) fijaba su alto SOLO contra
+   `_contenido_superior.minimumSizeHint()` — ese mínimo puede incluir
+   de más: `panel_form` termina con un `addStretch()` final que el
+   splitter puede estirar más allá del pie de `boton_eliminar` cuando
+   la columna de al lado (`self.grilla`) necesita más alto, dejando a
+   la tabla de abajo (`panel_tabla`, que arranca justo donde termina
+   `scroll`) empezando más abajo de lo necesario. `_fijar_alto_scroll_
+   superior` (nueva, reemplaza el cálculo inline que estaba repetido en
+   `showEvent`/`_reajustar_alto_y_columnas_si_sigue_vivo`) mide también
+   la distancia real entre el techo de `scroll` y el pie de `boton_
+   eliminar`, y usa el MAYOR entre esa distancia y el mínimo del
+   contenido — nunca más chico que lo que el contenido necesita de
+   verdad (evita reabrir la barra de scroll vertical de rondas
+   anteriores), pero prefiere la referencia de `boton_eliminar` cuando
+   alcanza, en vez de arrastrar el sobrante del `addStretch()`.
+   `_FILAS_VISIBLES_TABLA_INFERIOR_REGULARES` sube de 3 a 4 (mismo
+   valor que ya tenía Aisladas) para la segunda parte del pedido.
+
+   Confirmado con el script de geometría de rondas anteriores (36
+   consultorios/200+ reservas/1366×768): sin cambios en los números
+   medidos acá (el mínimo de contenido sigue siendo el más grande de
+   los dos en este dataset, así que el cambio es un no-op en este
+   sandbox) — el mecanismo (preferir `boton_eliminar` cuando alcanza,
+   nunca por debajo del mínimo real) es el que debería notarse en la PC
+   real, donde aparentemente el mínimo de contenido deja más margen de
+   sobra del necesario.
+
+Tests: `tests/test_main_window.py` (nuevo, ver punto 1); `tests/test_
+gui_reservas.py` (`test_regulares_detalle_termina_cerca_del_pie_de_
+eliminar_reserva_con_grilla_cargada`, revertido a la versión de dos
+rondas atrás) — el resto de los tests de Reservas regulares, incluido
+el escenario denso, siguen pasando sin cambios.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

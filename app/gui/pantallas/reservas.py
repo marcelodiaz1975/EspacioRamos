@@ -471,10 +471,10 @@ _ESTILO_BOTON_AISLADAS_ALTO = _ESTILO_BOTON_COMPACTO
 # filas (ver `_alto_para_filas`) y no una altura mínima aproximada: cuanto
 # menos alto se lleve, más le queda disponible al panel de arriba
 # (formulario + grilla, con su "Detalle" que antes quedaba fuera de la
-# vista). Aisladas muestra más filas que Regulares porque a esta pantalla
-# le sobraba lugar debajo de "Detalle"/"% Descuento" incluso con las 3 de
-# antes (pedido explícito de la clienta al revisar la captura).
-_FILAS_VISIBLES_TABLA_INFERIOR_REGULARES = 3
+# vista). Subido de 3 a 4 (pedido explícito de la clienta, ronda sobre el
+# reposicionamiento de esta tabla contra el pie de "Eliminar reserva" —
+# ver `showEvent`), mismo valor que ya tenía Aisladas.
+_FILAS_VISIBLES_TABLA_INFERIOR_REGULARES = 4
 _FILAS_VISIBLES_TABLA_INFERIOR_AISLADAS = 4
 # Hasta la ronda anterior, `layout_externo` (form+grilla scrolleable,
 # `stretch=1`, seguido de la tabla de abajo, sin stretch) le daba TODO el
@@ -1043,23 +1043,14 @@ class _PanelReservasRegulares(QWidget):
         `_alto_referencia_regulares` (alto de la columna 1, tomado como
         referencia para la columna 2 — ver `_armar_ui`).
 
-        `_scroll_superior.setFixedHeight(...)` se fija DESPUÉS de
-        `_ajustar_alto_detalle()` (bug real, reportado por la clienta con
-        una captura de la app real en Windows con datos densos — muchos
-        consultorios/profesionales: "Detalle" seguía superpuesto a la
-        grilla, la tabla de abajo no llegaba al final de la solapa, y
-        aparecía una barra de scroll vertical de la solapa en sí que no
-        tendría que estar). Antes, `_scroll_superior` se fijaba ANTES de
-        `_ajustar_alto_detalle()` — que puede agrandar `texto_detalle` (y
-        con él, el alto mínimo real de `_contenido_superior`) — así que
-        quedaba desincronizado por la misma diferencia (reproducido con
-        un script de geometría: `scroll.verticalScrollBar().maximum()`
-        daba 4, con `_contenido_superior.minimumSizeHint()` en 544 contra
-        un `scroll` ya fijado en 540). Ese faltante de unos pocos pixels
-        es justamente la barra de scroll vertical de más (el contenido ya
-        no entra en el alto fijo que `scroll` le dejó) y el motivo de que
-        le sobre menos lugar a la tabla de abajo (`panel_tabla`, que se
-        queda con lo que `scroll` no usa)."""
+        `_scroll_superior.setFixedHeight(...)` (ver `_fijar_alto_scroll_
+        superior`) se fija DESPUÉS de `_ajustar_alto_detalle()` — que
+        puede agrandar `texto_detalle` (y con él, el alto mínimo real de
+        `_contenido_superior`) — para no quedar desincronizado con ese
+        cambio (ver el historial de esta sección en CLAUDE.md para el
+        hilo completo de bugs reales ya resueltos acá: superposición de
+        "Detalle" con la grilla, barra de scroll vertical de la solapa de
+        más, tabla de abajo sin llegar al final)."""
         super().showEvent(event)
         # `.height()` (alto YA asentado por el splitter), no `sizeHint()`
         # (el "preferido" de columna 1 sola) — con la leyenda/grilla de
@@ -1074,9 +1065,7 @@ class _PanelReservasRegulares(QWidget):
         self._alto_referencia_regulares = self._panel_form_regulares.height()
         self.grilla.limitar_alto_grilla(self._alto_referencia_regulares)
         self._ajustar_alto_detalle()
-        self._scroll_superior.setFixedHeight(
-            self._contenido_superior.minimumSizeHint().height() + _MARGEN_SCROLL_SUPERIOR_REGULARES
-        )
+        self._fijar_alto_scroll_superior()
         self.reiniciar()
         # Mismo motivo y mismo mecanismo que Reservas aisladas (ver
         # `QTimer.singleShot` en el `showEvent` de esa solapa): tanto el
@@ -1090,54 +1079,72 @@ class _PanelReservasRegulares(QWidget):
         QTimer.singleShot(0, self._reajustar_alto_y_columnas_si_sigue_vivo)
 
     def _ajustar_alto_detalle(self) -> None:
-        """Mide cuánto alto le sobra a la columna 2/3 debajo de la
-        grilla (entre el techo actual de la etiqueta "Detalle:" y el
-        MENOR de dos techos: el pie de `self.boton_eliminar` — columna
-        1, el objetivo "ideal" de siempre — y el pie MÁXIMO que la
-        columna 2/3 tiene permitido, `self._alto_referencia_regulares`
-        sumado al techo real de `self.grilla`; ver el historial de esta
-        sección en CLAUDE.md sobre por qué ese segundo tope, y no el pie
-        medido de `self.grilla` a secas, es el que no queda atrapado en
-        un ciclo con el propio alto de "Detalle").
+        """Pedido explícito de la clienta, ronda sobre un pedido más
+        concreto después de probar el reparto a la mitad etiqueta/cuadro
+        de la ronda anterior — vuelve al criterio original, con el tope
+        anti-superposición ya incorporado: "Detalle:" (la etiqueta)
+        queda a su alto natural, pegada abajo de la grilla (con el
+        espacio fijo de 14px de siempre, `agregar_espacio_antes_de_
+        detalle`, que ya mide desde el pie real de la grilla, barra de
+        scroll horizontal incluida si está visible); el cuadro
+        `texto_detalle` ocupa TODO el sobrante debajo de la etiqueta,
+        hasta el MENOR de dos techos: el pie de `self.boton_eliminar`
+        (columna 1, el objetivo ideal) y el pie MÁXIMO que la columna
+        2/3 tiene permitido (`self._alto_referencia_regulares` sumado
+        al techo real de `self.grilla` — ver el historial de esta
+        sección en CLAUDE.md sobre por qué este segundo tope, medido
+        así, no queda atrapado en un ciclo con el propio alto de
+        "Detalle", a diferencia de un primer intento que topeaba contra
+        el pie medido de `self.grilla` a secas).
 
-        Pedido explícito de la clienta, ronda sobre un video real de la
-        app: en vez de que "Detalle" (el `QTextEdit`) ocupe TODO ese
-        sobrante con la etiqueta pegada arriba de todo, el cuadro pasa a
-        ocupar solo la MITAD de ese sobrante — con el PIE en la misma
-        posición de siempre (el techo más chico de los dos de arriba) —
-        y la etiqueta "Detalle:" crece para ocupar la otra mitad, con su
-        texto pegado abajo, contra el cuadro (`alinear_etiqueta_detalle_
-        al_pie`, llamado una sola vez en `_armar_ui`).
-
-        El techo de la ETIQUETA (no el del cuadro) es la referencia de
-        medición: a diferencia del techo de `self.grilla` (que si se
-        mide DESPUÉS de haber fijado el alto de sus propios hijos queda
-        atrapado en el mismo ciclo que se resolvió para el punto de
-        arriba), el techo de la etiqueta nunca depende de su PROPIO alto
-        — lo determina lo que hay ARRIBA de ella (la grilla + el espacio
-        fijo de 14px), así que el cálculo es idempotente sin necesitar
-        resetear nada antes de medir, aunque este método se llame dos
-        veces por entrada a la solapa (`showEvent` y el reajuste
-        diferido por `QTimer`).
-
-        Un primer intento (revertido) repartía el sobrante con un
-        `QSpacerItem` nuevo antes de la etiqueta en vez de agrandar la
-        etiqueta misma — su `sizeHint()` reflejaba el alto pedido pero
-        su `geometry()` real se quedaba en 0 (confirmado con un script
-        de geometría): un espaciador sin contenido propio parece ser lo
-        primero que Qt recorta cuando el layout no entra del todo en el
-        tope de `self.grilla` (ver `limitar_alto_grilla`), a diferencia
-        de un widget real con `setFixedHeight`, que si se respeta como
-        restricción dura — agrandar la etiqueta (un widget real) en vez
-        de sumar un espaciador nuevo evita ese problema de raíz."""
+        `setFixedHeight` en vez de `setMaximumHeight`/`stretch` por una
+        razón de fondo, no solo de exactitud: al fijar un alto mínimo
+        explícito en esta hoja, ese mínimo se propaga solo hacia arriba
+        por el árbol de widgets, que es el mecanismo de Qt que sí
+        funciona de manera confiable para este caso (ver el hilo
+        completo, con los intentos que no funcionaron, en el historial
+        de esta sección)."""
         pie_eliminar = self.boton_eliminar.mapToGlobal(self.boton_eliminar.rect().bottomLeft()).y()
         techo_grilla = self.grilla.mapToGlobal(self.grilla.rect().topLeft()).y()
         pie_maximo_grilla = techo_grilla + self._alto_referencia_regulares
-        techo_etiqueta = self.grilla.etiqueta_detalle.mapToGlobal(self.grilla.etiqueta_detalle.rect().topLeft()).y()
-        alto_disponible = min(pie_eliminar, pie_maximo_grilla) - techo_etiqueta
+        techo_detalle = self.grilla.texto_detalle.mapToGlobal(self.grilla.texto_detalle.rect().topLeft()).y()
+        alto_disponible = min(pie_eliminar, pie_maximo_grilla) - techo_detalle
         if alto_disponible > 0:
-            mitad = alto_disponible // 2
-            self.grilla.fijar_alto_etiqueta_y_cuadro_detalle(alto_disponible - mitad, mitad)
+            self.grilla.texto_detalle.setFixedHeight(alto_disponible)
+
+    def _fijar_alto_scroll_superior(self) -> None:
+        """Fija el alto de `_scroll_superior` (el `QScrollArea` que
+        envuelve formulario+grilla+Detalle, ver `_armar_ui`) — de ese
+        alto depende dónde arranca la tabla de abajo (`panel_tabla`, que
+        se queda con lo que `scroll` no usa, `stretch=1`).
+
+        Pedido explícito de la clienta: "la tabla subila un poco hasta
+        abajo del botón 'Eliminar reserva', sin superponerse con esa
+        altura, justo abajo" — en vez de basar el alto de `scroll`
+        únicamente en `_contenido_superior.minimumSizeHint()` (que
+        puede incluir de más: `panel_form` termina con un `addStretch()`
+        final que el splitter puede estirar más allá del pie de
+        `boton_eliminar` cuando la columna de al lado, `self.grilla`,
+        necesita más alto — ver `dar_stretch_a_detalle`/`limitar_alto_
+        grilla`), se mide también la distancia real entre el techo de
+        `scroll` y el pie de `boton_eliminar`, y se usa esa medida
+        siempre que sea suficiente.
+
+        `max(...)` con `minimumSizeHint()` sigue siendo necesario como
+        piso — nunca hay que dejar a `scroll` más chico que lo que su
+        contenido realmente ocupa (bug real documentado en el historial
+        de esta sección: un `scroll` más chico que su contenido le hace
+        mostrar su propia barra de scroll vertical, el síntoma que varias
+        rondas anteriores ya resolvieron) — el pie de `boton_eliminar`
+        es la referencia preferida cuando alcanza, pero nunca se usa por
+        debajo de ese piso."""
+        pie_eliminar = self.boton_eliminar.mapToGlobal(self.boton_eliminar.rect().bottomLeft()).y()
+        techo_scroll = self._scroll_superior.mapToGlobal(self._scroll_superior.rect().topLeft()).y()
+        alto_hasta_eliminar = pie_eliminar - techo_scroll
+        alto_minimo_contenido = self._contenido_superior.minimumSizeHint().height()
+        self._scroll_superior.setFixedHeight(
+            max(alto_hasta_eliminar, alto_minimo_contenido) + _MARGEN_SCROLL_SUPERIOR_REGULARES
+        )
 
     def _reajustar_alto_y_columnas_si_sigue_vivo(self) -> None:
         """Ver el `QTimer.singleShot` en `showEvent` — mismo guard que
@@ -1145,22 +1152,21 @@ class _PanelReservasRegulares(QWidget):
         vivo` para el mismo problema (la pantalla pudo cerrarse antes de
         que el loop de eventos llegue a disparar el timer).
 
-        Vuelve a fijar el alto de `_scroll_superior` también acá, después
-        de `_ajustar_alto_detalle()` (mismo motivo que en `showEvent` —
-        ver ese docstring): este paso diferido es el que mide contra el
-        layout ya resuelto de verdad, así que si `_ajustar_alto_detalle`
-        cambia el alto de `texto_detalle` en esta segunda pasada (puede
-        diferir del primer cálculo sincrónico de `showEvent`, antes de
-        que Qt termine de acomodar toda la ventana), `_scroll_superior`
-        tiene que quedar sincronizado con ese valor final — sin este
-        refresco quedaba fijado al valor de `showEvent` para siempre."""
+        Vuelve a fijar el alto de `_scroll_superior` también acá (`_fijar_
+        alto_scroll_superior`), después de `_ajustar_alto_detalle()`
+        (mismo motivo que en `showEvent` — ver ese docstring): este paso
+        diferido es el que mide contra el layout ya resuelto de verdad,
+        así que si `_ajustar_alto_detalle` cambia el alto de `texto_
+        detalle` en esta segunda pasada (puede diferir del primer
+        cálculo sincrónico de `showEvent`, antes de que Qt termine de
+        acomodar toda la ventana), `_scroll_superior` tiene que quedar
+        sincronizado con ese valor final — sin este refresco quedaba
+        fijado al valor de `showEvent` para siempre."""
         if shiboken6.isValid(self._panel_form_regulares) and shiboken6.isValid(self.tabla):
             self._alto_referencia_regulares = self._panel_form_regulares.height()
             self.grilla.limitar_alto_grilla(self._alto_referencia_regulares)
             self._ajustar_alto_detalle()
-            self._scroll_superior.setFixedHeight(
-                self._contenido_superior.minimumSizeHint().height() + _MARGEN_SCROLL_SUPERIOR_REGULARES
-            )
+            self._fijar_alto_scroll_superior()
             self.actualizar()
 
     def _armar_ui(self) -> None:
@@ -1431,16 +1437,6 @@ class _PanelReservasRegulares(QWidget):
         # de arriba) sigue llegando al mismo pie que la columna de al
         # lado sin más ajuste: se achica solo por este espacio nuevo.
         self.grilla.agregar_espacio_antes_de_detalle(14)
-        # Pedido explícito de la clienta, sobre el mecanismo de arriba
-        # ("dar_stretch_a_detalle" + el espacio fijo de 14px): en vez de
-        # que el cuadro "Detalle" ocupe todo el alto de sobra con la
-        # etiqueta pegada arriba de todo, el cuadro pasa a ocupar solo la
-        # MITAD de ese sobra (con el pie en la misma posición de
-        # siempre) y la etiqueta "Detalle" crece para ocupar la otra
-        # mitad, con su texto pegado abajo (contra el cuadro al que
-        # describe) — ver `_ajustar_alto_detalle`, que calcula y aplica
-        # las dos mitades con `fijar_alto_etiqueta_y_cuadro_detalle`.
-        self.grilla.alinear_etiqueta_detalle_al_pie()
         # Tope de alto IGUAL al de `panel_form` (columna 1, con Días/
         # Vigencia/3 botones) en vez de a `alto_natural_grilla()` (el
         # alto natural de la grilla sola): pedido explícito de la

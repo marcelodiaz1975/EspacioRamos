@@ -545,3 +545,30 @@ def test_ir_a_solapa_seccion_inexistente_devuelve_none(qtbot, conn):
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
     assert ventana.ir_a_solapa("No existe", "Lo que sea") is None
+
+
+def test_categoria_de_nombre_largo_no_dispara_scroll_horizontal_del_menu(qtbot, conn):
+    """Bug real reportado por la clienta: el nombre del espacio (la
+    categoría del segundo grupo de secciones, personalizable en
+    Configuración general) en mayúscula y negrita podía superar el
+    ancho fijo del menú lateral (240px, con 14px de padding a cada lado
+    de QListWidget#navegacion en estilos.py), disparando la barra de
+    scroll horizontal nativa de QListWidget. Confirmado midiendo con
+    QFontMetrics: "ESPACIO RAMOS CONSULTORIOS" a 13px negrita (el
+    tamaño que tenían antes las categorías) da 214px, por encima de los
+    212px disponibles. Arreglo con dos capas: la categoría pasa a 11px
+    (181px, con margen de sobra) y, defensivo, `_navegacion` fija su
+    política de scroll horizontal en "siempre apagada" (un nombre
+    todavía más largo se recorta contra el borde en vez de mostrar una
+    barra nueva)."""
+    secciones = [
+        Seccion("Reservas", lambda c: QWidget(), categoria="ESPACIO RAMOS CONSULTORIOS"),
+        Seccion("Pagos", lambda c: QWidget(), categoria="ESPACIO RAMOS CONSULTORIOS"),
+    ]
+    ventana = VentanaPrincipal(conn, secciones)
+    qtbot.addWidget(ventana)
+    ventana.setStyleSheet(hoja_estilos(modo_oscuro=False))
+    ventana.show()
+    qtbot.waitExposed(ventana)
+    assert ventana._navegacion.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert ventana._navegacion.horizontalScrollBar().maximum() == 0
