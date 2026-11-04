@@ -578,7 +578,8 @@ def saldo_actual_aislada(conn: sqlite3.Connection, id_profesional: int, periodo:
         """
         SELECT ra.Fecha, ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo, ra.EsReubicacion,
                ra.EsExtraordinaria, ra.ItemExtraordinario, ra.MontoExtraordinario,
-               c.IdConsultorio, c.ValorHoraAisladaActual
+               c.IdConsultorio, COALESCE(ra.ValorHoraAlMomentoDeLaReserva, c.ValorHoraAisladaActual)
+                   AS ValorHoraAislada
         FROM ReservaAislada ra JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
         WHERE ra.IdProfesional = ? AND ra.Estado = 'Confirmada' AND ra.Fecha LIKE ?
         """,
@@ -588,7 +589,11 @@ def saldo_actual_aislada(conn: sqlite3.Connection, id_profesional: int, periodo:
     def _monto(f: sqlite3.Row) -> float:
         if f["EsReubicacion"]:
             return 0.0
-        monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
+        # Valor congelado al tomar la reserva (ver `crear_reserva_
+        # aislada`/`app.negocio.liquidaciones._aisladas_periodo`), no el
+        # vigente hoy del consultorio — mismo motivo: este "saldo actual"
+        # tiene que coincidir con lo que la reserva realmente cuesta.
+        monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAislada"]
         return monto * (1 + recargo_pct / 100) if f["AplicaRecargo"] else monto
 
     _, total_reservas = _lineas_reservas_aisladas(
@@ -679,7 +684,9 @@ def mensaje_detalle_reserva_aislada(
         """
         SELECT ra.IdReservaAislada, ra.Fecha, ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo, ra.EsReubicacion,
                ra.EsExtraordinaria, ra.ItemExtraordinario, ra.MontoExtraordinario,
-               c.IdConsultorio, c.NumeroConsultorio, c.ValorHoraAisladaActual, u.IdUnidad, u.Departamento,
+               c.IdConsultorio, c.NumeroConsultorio,
+               COALESCE(ra.ValorHoraAlMomentoDeLaReserva, c.ValorHoraAisladaActual) AS ValorHoraAislada,
+               u.IdUnidad, u.Departamento,
                e.IdEdificio, e.Nombre AS NombreEdificio, e.Domicilio, loc.Localidad AS DomicilioLocalidad
         FROM ReservaAislada ra
         JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
@@ -729,7 +736,11 @@ def mensaje_detalle_reserva_aislada(
             # compensa una ausencia del mismo profesional en otro horario —
             # no genera cargo (confirmado por el usuario).
             return 0.0
-        monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
+        # Valor congelado al tomar la reserva, no el vigente hoy del
+        # consultorio — mismo motivo que `saldo_actual_aislada` más
+        # arriba: este detalle tiene que coincidir con lo realmente
+        # facturado en la liquidación.
+        monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAislada"]
         return monto * (1 + recargo_pct / 100) if f["AplicaRecargo"] else monto
 
     # 1. depósitos/reintegros de llaves del período: unidad primero, edificio después.

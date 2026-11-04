@@ -803,14 +803,27 @@ def _aisladas_periodo(
     conn: sqlite3.Connection, ids: list[int], anio: int, mes: int, recargo_pct: float,
 ) -> list[ItemAislada]:
     """Un ítem por ReservaAislada confirmada del período (no un total): el
-    PDF de liquidación detalla cada una con fecha, horario y consultorio."""
+    PDF de liquidación detalla cada una con fecha, horario y consultorio.
+
+    El monto usa `ra.ValorHoraAlMomentoDeLaReserva` (congelado al crear
+    la reserva, ver `crear_reserva_aislada`) en vez de `Consultorio.
+    ValorHoraAisladaActual` — bug real reportado por la clienta: una
+    aislada tomada a fin de un mes pero que recién entra en una
+    liquidación del mes siguiente (ej. "aisladas_mes_anterior" más
+    abajo) usaba, sin esto, la tarifa VIGENTE HOY del consultorio en vez
+    de la que tenía la reserva cuando se tomó — con un aumento de por
+    medio, el monto quedaba mal ("el valor que se aplica es el valor
+    que tiene la reserva en noviembre, no en diciembre"). `COALESCE`
+    con el valor en vivo del consultorio solo por las dudas de una fila
+    sin backfillear todavía (no debería pasar — la migración lo cubre)."""
     placeholders = ", ".join("?" for _ in ids)
     prefijo = f"{anio:04d}-{mes:02d}-"
     filas = conn.execute(
         f"""
         SELECT ra.IdReservaAislada, ra.IdConsultorio, ra.Fecha, ra.HoraInicio, ra.HoraFin,
                ra.AplicaRecargo, ra.EsReubicacion, ra.EsExtraordinaria, ra.MontoExtraordinario,
-               ra.ItemExtraordinario, c.ValorHoraAisladaActual
+               ra.ItemExtraordinario, COALESCE(ra.ValorHoraAlMomentoDeLaReserva, c.ValorHoraAisladaActual)
+                   AS ValorHoraAislada
         FROM ReservaAislada ra
         JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
         WHERE ra.IdProfesional IN ({placeholders}) AND ra.Estado = 'Confirmada' AND ra.Fecha LIKE ?
@@ -831,7 +844,7 @@ def _aisladas_periodo(
             # ocupa el consultorio pero no genera cargo (confirmado por el usuario).
             monto = 0.0
         else:
-            monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAisladaActual"]
+            monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAislada"]
             if f["AplicaRecargo"]:
                 monto *= 1 + recargo_pct / 100
         items.append(ItemAislada(

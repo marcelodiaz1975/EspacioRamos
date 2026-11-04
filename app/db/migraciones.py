@@ -101,6 +101,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("Configuracion", "FormatoDiaProfesionInvertido", "INTEGER NOT NULL DEFAULT 0"),
     ("HistorialPagos", "ImpactoSaldoAnterior", "REAL"),
     ("HistorialPagos", "ImpactoSaldoActual", "REAL"),
+    ("ReservaAislada", "ValorHoraAlMomentoDeLaReserva", "REAL"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja
@@ -512,6 +513,52 @@ def _inicializar_impacto_historial_pagos(conn: sqlite3.Connection) -> None:
         )
 
 
+def _inicializar_valor_aislada_al_momento_de_la_reserva(conn: sqlite3.Connection) -> None:
+    """Bug real reportado por la clienta: el monto de una reserva aislada
+    se calculaba siempre con `Consultorio.ValorHoraAisladaActual` — el
+    valor VIGENTE HOY del consultorio, leído recién al momento de armar
+    la liquidación, nunca el que tenía la reserva cuando se tomó. Con un
+    aumento de por medio entre el mes en que se tomó la reserva y el mes
+    en que termina entrando en una liquidación (ej. tomada a fin de
+    noviembre, imputada a diciembre), el monto terminaba usando la
+    tarifa de diciembre en vez de la de noviembre, que es la que
+    corresponde ("el valor que se aplica es el valor que tiene la
+    reserva en noviembre, no en diciembre", confirmado por la clienta).
+    `ValorHoraAlMomentoDeLaReserva` (ver `_COLUMNAS_NUEVAS`) congela ese
+    valor al crear la reserva (`app.negocio.reservas.crear_reserva_
+    aislada`) — mismo criterio que `Vacacion.ValorSemanalAlMomentoDel
+    Registro`, ya establecido en este sistema para el mismo problema en
+    otra pantalla. Una fila ya cargada antes de este fix nunca tuvo este
+    valor congelado — se backfillea con el `ValorHoraAisladaActual` de
+    HOY del consultorio (lo más parecido disponible; no hay forma de
+    recuperar el valor histórico real de un aumento ya aplicado), igual
+    que el valor que ya venía usando el cálculo hasta ahora para esa
+    fila — no cambia ningún resultado ya calculado de algo viejo, solo
+    corrige el cálculo de acá en adelante."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ReservaAislada'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(ReservaAislada)").fetchall()}
+    if "ValorHoraAlMomentoDeLaReserva" not in columnas_existentes:
+        return
+    existe_consultorio = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Consultorio'"
+    ).fetchone()
+    if not existe_consultorio:
+        return
+    conn.execute(
+        """
+        UPDATE ReservaAislada
+        SET ValorHoraAlMomentoDeLaReserva = (
+            SELECT c.ValorHoraAisladaActual FROM Consultorio c WHERE c.IdConsultorio = ReservaAislada.IdConsultorio
+        )
+        WHERE ValorHoraAlMomentoDeLaReserva IS NULL
+        """
+    )
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -543,4 +590,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _permitir_profesional_sin_apellido(conn)
     _invertir_formato_dia_profesion_a_dd_mm(conn)
     _inicializar_impacto_historial_pagos(conn)
+    _inicializar_valor_aislada_al_momento_de_la_reserva(conn)
     conn.commit()

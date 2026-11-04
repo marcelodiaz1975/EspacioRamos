@@ -981,6 +981,133 @@ hubo_pago_por_sobre` (antes `..._nota_de_sobres_...`).
    aislada_con_el_combo_habilitado`, y se suma `test_grilla_preview_
    regulares_cambia_la_leyenda_al_cambiar_visualizacion`.
 
+## Reservas aisladas imputadas al mes siguiente: generación prematura de liquidación y valor congelado
+
+Pedido/reporte de la clienta (verbatim, un solo mensaje con cuatro
+puntos):
+
+"Cargué una reserva aislada a ser tomada dentro del mes de noviembre
+para ser rendida en el mes de diciembre, estoy parado en noviembre
+ahora, a un profesional categoría R con reservas activas. Mes a
+imputar el próximo, por ende se tiene que incluír dentro de la futura
+liquidación. Vi que el sistema en ese momento me generó una
+liquidación para el mes próximo, esta mal, no lo tiene que hacer, solo
+tiene que agendar la reserva, y cuando avancemos de mes y se generen
+las liquidaciones de ese mes, es decir en este ejemplo diciembre, ahi
+en ese momento contemplar esas reservas que se agendaron para rendir
+en el mes próximo. Esto es asi porque la idea en lo posible es emitir
+solo una vez la liquidación de cada profesional, se manda, y lo nuevo
+que pueda ir apareciendo se carga para el otro mes. Aparte, pueden
+cambiar los valores de un mes a otro, por eso. El valor de la reserva
+es siempre el que tiene dentro del mes donde se toma... el valor que
+se aplica es el valor que tiene la reserva en noviembre, no en
+diciembre."
+
+Dos bugs reales, investigados y confirmados con tests que reproducen
+cada uno ANTES de tocar código (mismo criterio de siempre: nunca se
+arregla a ciegas), ambos en el mismo flujo (reserva aislada con
+"Período a imputar" = siguiente) y hay que resolverlos juntos: arreglar
+solo el primero sin el segundo dejaría una regresión silenciosa más
+difícil de notar (ver el final de esta sección).
+
+1. **Generación prematura de la liquidación del mes siguiente.**
+   `_resolver_periodo_imputar` (`app/gui/pantallas/reservas.py`,
+   compartida por Reservas aisladas y Reservas extraordinarias) ya
+   tenía un fix de una ronda anterior (reserva de un mes YA PASADO,
+   imputada a "siguiente", que podía resolver al período OPERATIVO
+   ACTUAL — ver el comentario completo que sigue ahí) que, al
+   resolverlo, pasó a llamar a `regenerar_si_corresponde` SIEMPRE,
+   incluido el caso NORMAL (reserva del mes en curso, imputada al
+   próximo, un mes genuinamente futuro) — `emitir_liquidacion` trata
+   ese caso sin romper nada (dejaba una `LiquidacionEmitida`/PDF
+   "preview", sin acreditar `SaldoCuentaActual` todavía, pensado para
+   que el profesional pudiera verla si la pedía), pero la clienta pidió
+   ahora que directamente NO se genere nada para un mes que todavía no
+   llegó — ni siquiera como preview. Se agrega un guard: `_resolver_
+   periodo_imputar` solo llama a `regenerar_si_corresponde` si el
+   período real resuelto ya está alcanzado por el período operativo
+   (`periodo_real <= periodo_actual(conn)`) — para un período
+   genuinamente futuro, no hace nada más que la reserva en sí (que ya
+   quedó guardada ANTES de este helper, nunca se pierde). El caso de la
+   ronda anterior (mes pasado -> "siguiente" resuelve al actual) sigue
+   regenerando YA, sin cambios — ese período no es futuro.
+
+   Confirmado con `periodo_actual(conn) == periodo_operativo_actual
+   (conn)` (`app/negocio/dias.py`: el primero es solo el "AAAA-MM" del
+   segundo, recortado por `fecha_actual`) — usar cualquiera de los dos
+   da lo mismo acá, se usa `periodo_actual` por ser el que ya importaba
+   este archivo.
+
+2. **Valor de la reserva aislada no congelado — usaba la tarifa VIGENTE
+   HOY del consultorio, no la del momento en que se tomó.** Reproducido
+   con un test antes del fix: una aislada tomada en noviembre
+   ($1000/hora), con un aumento después que sube el consultorio a
+   $2000/hora, calculada recién en la liquidación de diciembre (donde
+   entra por "aisladas_mes_anterior", ver `_aisladas_periodo`) daba
+   $2000, no $1000. Causa: `_aisladas_periodo`/`monto_neto_aislada_
+   periodo`/`mensaje_detalle_reserva_aislada`/`saldo_actual_aislada`
+   leían `Consultorio.ValorHoraAisladaActual` en vivo, recién al armar
+   cada cálculo — `ReservaAislada` no guardaba ningún valor propio.
+   Antes de este reporte, el bug de arriba (generación inmediata, en
+   noviembre, mientras el valor de noviembre todavía era el vigente)
+   tapaba este segundo bug como efecto colateral — arreglar el primero
+   SOLO habría expuesto este segundo de lleno (el valor recién se
+   leería en diciembre, ya con el aumento aplicado), así que había que
+   arreglar los dos juntos.
+
+   `ReservaAislada.ValorHoraAlMomentoDeLaReserva` (columna nueva, mismo
+   criterio que `Vacacion.ValorSemanalAlMomentoDelRegistro`, ya
+   establecido en este sistema para el mismo problema en otra
+   pantalla): `crear_reserva_aislada` (`app/negocio/reservas.py`) lo
+   congela con el `ValorHoraAisladaActual` del consultorio al momento
+   de crear la reserva. `_aisladas_periodo` (`app/negocio/
+   liquidaciones.py`) pasa a leer `COALESCE(ra.ValorHoraAlMomentoDeLa
+   Reserva, c.ValorHoraAisladaActual)` en vez del valor en vivo a
+   secas — el `COALESCE` es solo por las filas ya cargadas antes del
+   backfill (no debería pasar en la práctica, la migración las cubre).
+   Mismo cambio en las dos funciones de `app/negocio/mensajes.py` que
+   independientemente repetían el mismo cálculo (`saldo_actual_
+   aislada`, el "saldo actual" en vivo de categoría A, y `mensaje_
+   detalle_reserva_aislada`, el "SALDO A ABONAR") — tienen que coincidir
+   con lo que realmente factura la liquidación. `app/negocio/
+   estadisticas.py::monto_neto_aislada_periodo` (usada por "Historial
+   general"/Balance) se deja SIN TOCAR a propósito: su propio docstring
+   ya dice explícitamente "a valores vigentes" — parece una elección
+   deliberada de esa pantalla (comparar contra la tarifa de HOY, no
+   reconstruir el monto histórico real), no lo que se reportó acá; se
+   toca aparte si la clienta lo pide.
+
+   Migración (`app/db/migraciones.py`): las filas de `ReservaAislada`
+   ya cargadas antes de este fix reciben la columna nueva en NULL con
+   el `ALTER TABLE` — `_inicializar_valor_aislada_al_momento_de_la_
+   reserva` las backfillea con el `ValorHoraAisladaActual` de HOY del
+   consultorio (lo más parecido disponible; no hay forma de recuperar
+   el valor histórico real de un aumento ya aplicado) — el mismo valor
+   que ya venía usando el cálculo para esa fila hasta ahora, así que no
+   le cambia el resultado a nada ya calculado de algo viejo, solo
+   corrige el cálculo de acá en adelante.
+
+   No se tocó `RecargoPorcentajeAisladas` (el % de recargo de
+   `Configuracion`, también usado en el mismo cálculo): tiene el mismo
+   problema en teoría (también podría cambiar de un mes a otro sin
+   quedar congelado), pero no es lo que se reportó — queda anotado acá
+   por si la clienta lo pide en una próxima ronda.
+
+   Tests nuevos: `tests/test_reservas.py` (`test_crear_reserva_aislada_
+   congela_el_valor_hora_del_consultorio`), `tests/test_liquidaciones.py`
+   (`test_aislada_usa_el_valor_congelado_no_el_vigente_del_consultorio`),
+   `tests/test_mensajes.py` (`test_detalle_aislada_usa_el_valor_
+   congelado_no_el_vigente_del_consultorio`), `tests/test_migraciones.py`
+   (`test_aplicar_migraciones_backfillea_valor_aislada_con_el_del_
+   consultorio_hoy`, más la columna nueva sumada a `test_base_nueva_ya_
+   tiene_las_columnas_migradas`), y en `tests/test_gui_reservas.py`
+   (`test_crear_reserva_aislada_del_mes_actual_con_periodo_siguiente_no_
+   genera_nada_todavia`, a nivel de pantalla completa, para el primer
+   bug) — el test ya existente de la ronda anterior (`test_crear_
+   reserva_aislada_de_mes_pasado_con_periodo_siguiente_regenera_
+   liquidacion_del_periodo_operativo`) sigue pasando sin cambios,
+   confirmando que el caso de "mes pasado" no se rompió con este fix.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

@@ -900,6 +900,31 @@ def test_crear_reserva_aislada_sin_periodo_imputado_queda_en_blanco(conn, consul
     assert obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)["PeriodoImputado"] is None
 
 
+def test_crear_reserva_aislada_congela_el_valor_hora_del_consultorio(conn, profesional_factory):
+    """Bug real reportado por la clienta: el monto de una aislada se
+    recalculaba siempre con el valor VIGENTE HOY del consultorio, nunca
+    el que tenía al tomarla — con un aumento de por medio entre el mes
+    en que se toma y el mes en que termina entrando en una liquidación,
+    el monto quedaba mal. `ValorHoraAlMomentoDeLaReserva` tiene que
+    quedar fijo con el valor del consultorio al momento de crear la
+    reserva, sin importar que ese valor cambie después."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=1000.0,
+    )
+    id_prof = profesional_factory("Lo Veci")
+
+    id_reserva, _ = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=id_consultorio,
+        fecha="2026-11-28", hora_inicio=9, hora_fin=10, periodo_imputado="2026-12",
+    )
+    obtener_repositorio(conn, "Consultorio").actualizar(id_consultorio, ValorHoraAisladaActual=2000.0)
+
+    reserva = obtener_repositorio(conn, "ReservaAislada").obtener(id_reserva)
+    assert reserva["ValorHoraAlMomentoDeLaReserva"] == 1000.0
+
+
 def test_modificar_reserva_aislada_edita_horario_y_recargo_sin_cancelarla(conn, consultorio, profesional_factory):
     """#9.1.4 (homólogo de Reservas regulares): edita la fila existente,
     sigue Confirmada."""

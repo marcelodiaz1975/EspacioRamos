@@ -273,6 +273,24 @@ def test_detalle_aislada_calcula_saldo_a_abonar(conn, profesional_aislada_con_ed
     assert "- Pagos registrados en mes en curso $500" in texto
 
 
+def test_detalle_aislada_usa_el_valor_congelado_no_el_vigente_del_consultorio(conn, profesional_aislada_con_edificios):
+    """Bug real reportado por la clienta: el detalle (y "SALDO A ABONAR")
+    tienen que coincidir con lo que realmente se factura en la
+    liquidación — una reserva tomada con un valor y luego subido el
+    consultorio no puede cambiar de precio en el mensaje."""
+    id_prof, c1, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=c1, Fecha="2026-08-05", HoraInicio=10, HoraFin=12,
+        Estado="Confirmada", AplicaRecargo=0, ValorHoraAlMomentoDeLaReserva=500,
+    )
+    obtener_repositorio(conn, "Consultorio").actualizar(c1, ValorHoraAisladaActual=1000)
+
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    # saldo_anterior 1000 + reserva (2hs x 500, el valor congelado, no el
+    # vigente de 1000) = 2000
+    assert "SALDO A ABONAR: $2.000" in texto
+
+
 def test_detalle_aislada_ignora_pago_imputado_a_otro_periodo(conn, profesional_aislada_con_edificios):
     """Bug real reportado por la clienta: un pago CARGADO en noviembre
     (parada en ese mes) pero IMPUTADO a octubre (mes anterior) no tiene

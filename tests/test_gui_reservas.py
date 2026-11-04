@@ -1972,6 +1972,43 @@ def test_crear_reserva_aislada_de_mes_pasado_con_periodo_siguiente_regenera_liqu
     assert ultima["MontoGenerado"] > 0
 
 
+def test_crear_reserva_aislada_del_mes_actual_con_periodo_siguiente_no_genera_nada_todavia(qtbot, conn):
+    """Bug real reportado por la clienta (caso normal, distinto del test
+    de arriba sobre un mes YA pasado): parada en noviembre, carga una
+    aislada tomada en noviembre con "Período a imputar" en "Período
+    siguiente" (diciembre, un mes genuinamente futuro, sin alcanzar
+    todavía). Antes de este fix, `_resolver_periodo_imputar` disparaba
+    igual `regenerar_si_corresponde` para diciembre, dejando una
+    `LiquidacionEmitida`/PDF "preview" ahí — la clienta pidió que esto
+    NO pase: "no lo tiene que hacer, solo tiene que agendar la reserva
+    ... cuando avancemos de mes y se generen las liquidaciones de ese
+    mes, ahí en ese momento contemplar esas reservas". La reserva en sí
+    tiene que quedar cargada igual — lo único que no debe pasar es la
+    generación prematura de diciembre."""
+    _preparar(conn)
+    conn.execute("UPDATE Configuracion SET PeriodoOperativoActual = '2026-11' WHERE IdConfiguracion = 1")
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "Consultorio").actualizar(id_consultorio, ValorHoraAisladaActual=1000)
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_fecha.setDate(QDate(2026, 11, 28))
+    assert panel.combo_periodo_imputar.currentData() == "siguiente"  # default de categoría R, sin tocarlo
+
+    panel._crear()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1  # la reserva sí se agendó
+    emisiones_diciembre = obtener_repositorio(conn, "LiquidacionEmitida").listar(
+        IdProfesional=id_profesional, Periodo="2026-12",
+    )
+    assert emisiones_diciembre == []
+
+
 def test_eliminar_reserva_aislada_de_mes_anterior_regenera_liquidacion_actual(qtbot, conn, monkeypatch):
     """Pedido explícito de la clienta: eliminar una hora aislada del mes
     anterior (que entra al "saldo anterior" de la liquidación ACTUAL —

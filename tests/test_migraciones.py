@@ -19,6 +19,8 @@ def test_base_nueva_ya_tiene_las_columnas_migradas(tmp_path):
     assert "RegistroModificado" in columnas_pagos
     assert "ImpactoSaldoAnterior" in columnas_pagos
     assert "ImpactoSaldoActual" in columnas_pagos
+    columnas_aislada = {f["name"] for f in conn.execute("PRAGMA table_info(ReservaAislada)").fetchall()}
+    assert "ValorHoraAlMomentoDeLaReserva" in columnas_aislada
     conn.close()
 
 
@@ -61,6 +63,44 @@ def test_aplicar_migraciones_backfillea_impacto_de_pagos_viejos_segun_el_campo_u
     pago_anterior = conn.execute("SELECT * FROM HistorialPagos WHERE Monto = -200").fetchone()
     assert pago_anterior["ImpactoSaldoAnterior"] == -200.0
     assert pago_anterior["ImpactoSaldoActual"] == 0.0
+    conn.close()
+
+
+def test_aplicar_migraciones_backfillea_valor_aislada_con_el_del_consultorio_hoy(tmp_path):
+    """Bug real (ver CLAUDE.md, "generación prematura de liquidación"):
+    el monto de una aislada usaba siempre `Consultorio.ValorHoraAislada
+    Actual` en vivo en vez de un valor congelado al tomarla. Una fila de
+    ReservaAislada ya cargada antes de este fix recibe la columna nueva
+    (ver `_COLUMNAS_NUEVAS`) en NULL con el `ALTER TABLE`; `aplicar_
+    migraciones` la backfillea con el `ValorHoraAisladaActual` de HOY
+    del consultorio — lo más parecido disponible (no hay forma de
+    recuperar el valor histórico real), el mismo que ya venía usando el
+    cálculo para esa fila hasta ahora, así que no le cambia el resultado
+    a nada ya calculado."""
+    conn = init_database(tmp_path / "vieja.db")
+    sembrar_valores_por_defecto(conn)
+    id_edificio = conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Ramos 1')").lastrowid
+    id_unidad = conn.execute(
+        "INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '1A')", (id_edificio,)
+    ).lastrowid
+    id_consultorio = conn.execute(
+        "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio, ValorHoraAisladaActual) VALUES (?, 1, 750)",
+        (id_unidad,),
+    ).lastrowid
+    id_profesional = conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Lo Veci')"
+    ).lastrowid
+    id_reserva = conn.execute(
+        "INSERT INTO ReservaAislada (IdProfesional, IdConsultorio, Fecha, HoraInicio, HoraFin) "
+        "VALUES (?, ?, '2026-08-05', 9, 11)",
+        (id_profesional, id_consultorio),
+    ).lastrowid
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    reserva = conn.execute("SELECT * FROM ReservaAislada WHERE IdReservaAislada = ?", (id_reserva,)).fetchone()
+    assert reserva["ValorHoraAlMomentoDeLaReserva"] == 750.0
     conn.close()
 
 

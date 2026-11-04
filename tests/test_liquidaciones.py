@@ -342,6 +342,27 @@ def test_aisladas_mes_en_curso_y_mes_anterior(conn, consultorio):
     assert liquidacion.total_aisladas_mes_anterior == pytest.approx(2 * VALOR_HORA_AISLADA * 1.10)
 
 
+def test_aislada_usa_el_valor_congelado_no_el_vigente_del_consultorio(conn, consultorio):
+    """Bug real reportado por la clienta: una aislada tomada a fin de
+    julio pero imputada/incluida en la liquidación de agosto (vía
+    "aisladas_mes_anterior") tiene que usar el valor que tenía el
+    consultorio en julio (cuando se tomó), no el vigente en agosto si
+    hubo un aumento de por medio — "el valor que se aplica es el valor
+    que tiene la reserva en noviembre, no en diciembre" (mismo caso,
+    meses distintos)."""
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-07-06",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+        ValorHoraAlMomentoDeLaReserva=VALOR_HORA_AISLADA,
+    )
+    # Aumento: el consultorio pasa a valer el doble para agosto.
+    obtener_repositorio(conn, "Consultorio").actualizar(consultorio, ValorHoraAisladaActual=VALOR_HORA_AISLADA * 2)
+
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion.total_aisladas_mes_anterior == pytest.approx(2 * VALOR_HORA_AISLADA)
+
+
 def test_reserva_aislada_cancelada_no_se_factura(conn, consultorio):
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
     obtener_repositorio(conn, "ReservaAislada").crear(

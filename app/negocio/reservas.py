@@ -648,6 +648,23 @@ def crear_reserva_aislada(
         ).fetchone()
         aplica_recargo = bool(fila_cfg["RecargoAisladasActivoPorDefecto"]) if fila_cfg else False
 
+    # Bug real reportado por la clienta: el monto de una aislada se
+    # recalculaba siempre contra `Consultorio.ValorHoraAisladaActual` —
+    # el valor VIGENTE AL MOMENTO DE ARMAR LA LIQUIDACIÓN, no el que
+    # tenía la reserva cuando se tomó. Si hay un aumento de por medio
+    # entre el mes en que se toma la reserva y el mes en que termina
+    # entrando en una liquidación (ej. tomada a fin de noviembre,
+    # imputada a diciembre), el monto terminaba usando la tarifa de
+    # diciembre en vez de la de noviembre, que es la que corresponde
+    # ("el valor que se aplica es el valor que tiene la reserva en
+    # noviembre, no en diciembre", confirmado por la clienta). Se
+    # congela acá, al crear la reserva — mismo criterio que `Vacacion.
+    # ValorSemanalAlMomentoDelRegistro` — y `_aisladas_periodo`
+    # (`app.negocio.liquidaciones`) pasa a usar este valor en vez de
+    # volver a leer el del consultorio en vivo.
+    valor_consultorio = conn.execute(
+        "SELECT ValorHoraAisladaActual FROM Consultorio WHERE IdConsultorio = ?", (id_consultorio,)
+    ).fetchone()
     repo = obtener_repositorio(conn, "ReservaAislada")
     id_reserva = repo.crear(
         IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha=fecha,
@@ -663,6 +680,7 @@ def crear_reserva_aislada(
         # ya resuelto a un "AAAA-MM" concreto, para poder mostrarlo en la
         # tabla sin tener que recalcularlo cada vez.
         PeriodoImputado=periodo_imputado,
+        ValorHoraAlMomentoDeLaReserva=valor_consultorio["ValorHoraAisladaActual"] if valor_consultorio else None,
     )
     advertencias = [c.mensaje for c in conflictos if not c.bloqueante]
     return id_reserva, advertencias

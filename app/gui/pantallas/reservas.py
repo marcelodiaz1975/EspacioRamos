@@ -721,16 +721,33 @@ def _resolver_periodo_imputar(
     actual, cuya liquidación bien puede ya estar emitida de antes y
     necesitar regenerarse YA, no "sola en el próximo cálculo".
 
-    Se resuelve llamando a `regenerar_si_corresponde` siempre, contra el
-    período real que corresponda ("actual" -> `periodo_reserva`,
-    "siguiente" -> el mes siguiente a `periodo_reserva`) — sin
-    distinguir casos, porque `emitir_liquidacion` ya sabe tratar sin
-    romper nada un período genuinamente futuro (deja la `LiquidacionEmitida`/
-    PDF al día como preview, sin acreditar todavía a `SaldoCuentaActual`,
-    ver su docstring) y uno ya alcanzado (lo reemite de verdad y lo marca
-    "Regenerada no enviada" si hacía falta)."""
+    Se calcula el período real que corresponde ("actual" ->
+    `periodo_reserva`, "siguiente" -> el mes siguiente a
+    `periodo_reserva`) y se llama a `regenerar_si_corresponde` SOLO si
+    ese período ya está alcanzado por el período operativo (`periodo <=
+    periodo_actual`) — nunca para un período genuinamente futuro.
+
+    Bug real reportado por la clienta, segunda vuelta sobre esta misma
+    función: cargar una reserva aislada del mes EN CURSO imputada al
+    "período siguiente" (el caso normal, no el de arriba) SÍ disparaba
+    `regenerar_si_corresponde` para ese mes futuro — `emitir_liquidacion`
+    lo trata sin romper nada (deja una `LiquidacionEmitida`/PDF "preview"
+    al día, sin acreditar `SaldoCuentaActual` todavía, ver su docstring),
+    pero la clienta pidió que directamente no se genere NADA para un mes
+    que todavía no llegó: "no lo tiene que hacer, solo tiene que agendar
+    la reserva... cuando avancemos de mes y se generen las liquidaciones
+    de ese mes, ahí en ese momento contemplar esas reservas" — la idea
+    es emitir la liquidación de cada profesional una sola vez por mes,
+    no ir generando (ni como preview) algo que todavía puede cambiar de
+    valores antes de llegar a ese mes. La reserva en sí ya quedó
+    guardada (este helper se llama DESPUÉS de crearla) — sin este
+    guard, lo único que se pierde es la regeneración/el PDF preview
+    prematuros, nunca la reserva. Para el período YA alcanzado (el caso
+    de arriba, o el normal "actual") sigue regenerando de una, como
+    siempre."""
     periodo_real = periodo_reserva if periodo_a_imputar == "actual" else sumar_meses(periodo_reserva, 1)
-    regenerar_si_corresponde(conn, id_profesional=id_profesional, periodo=periodo_real)
+    if periodo_real <= periodo_actual(conn):
+        regenerar_si_corresponde(conn, id_profesional=id_profesional, periodo=periodo_real)
     conn.commit()
 
 
