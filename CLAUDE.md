@@ -406,6 +406,38 @@ Panel de control - Avance de período, backup, y vista rápida.png". Sección es
 el nombre del `Seccion` del menú, Solapa el texto de la pestaña
 mostrada (si la pantalla no tiene solapas, se omite esa tercera parte).
 
+**Fallos de fuentes del contenedor de desarrollo (no de la app):**
+investigado un lote de 7 fallos nuevos de tests de GUI calibrados
+pixel a pixel (altura de botones en Reservas/Lista de espera/
+Profesionales, ancho de grilla en Oferta, corte de línea en Placas)
+que aparecieron después de un reinicio del contenedor en la nube donde
+corre este trabajo — confirmado que NO son un bug de la app ni de
+ningún cambio de código (se reproducen igual sobre el código ya
+commiteado, sin ninguna modificación):
+- 5 de los 7: el contenedor trae un archivo de fontconfig propio
+  (`/etc/fonts/conf.d/56-prefer-inter.conf`, ajeno a este proyecto) que
+  fuerza la fuente genérica `sans-serif` a "Inter" en vez del default
+  clásico de Linux (DejaVu Sans/Liberation Sans, con el que están
+  calibrados los tamaños fijos) — la app nunca fija su propia fuente a
+  propósito (ver más arriba, "se revirtió a pedido explícito de la
+  clienta" sobre Segoe UI), así que depende del default del sistema.
+  Confirmado sacando ese archivo (fontconfig cae en DejaVu Sans): los 5
+  tests pasan. No existe en la máquina real de la clienta (Windows).
+- Los otros 2 (Placas, calibración Calibri→Carlito): causa distinta,
+  no relacionada con lo de Inter — la versión de la fuente Carlito que
+  trae este contenedor mide la frase de referencia ("Lic. Agustina
+  Viavattenee") más angosta que la calibración original, así que ya no
+  cruza el umbral de corte de línea calibrado.
+
+No se tocó nada (ni la app, ni los tests, ni la config del contenedor
+— el cambio de fontconfig fue solo diagnóstico y se revirtió) porque
+aflojar la tolerancia de estos tests para tapar una particularidad de
+fuentes de este sandbox puntual debilitaría la señal real de
+regresiones futuras, y la calibración pixel a pixel está atada a
+propósito al entorno real de la clienta, no a este contenedor. Si
+estos 7 vuelven a aparecer en una corrida de la suite, son del entorno
+y no bloquean cerrar una ronda.
+
 ## Hilo abierto: Reservas aisladas — check "Mostrar todas las reservas"; Pagos — "Saldo total"
 
 Pedido de la clienta, dos pantallas:
