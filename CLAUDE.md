@@ -596,6 +596,278 @@ Tests renombrados/actualizados en `tests/test_mensajes.py`:
 sobre` y `test_detalle_aislada_sin_ultima_levantada_de_sobres_si_no_
 hubo_pago_por_sobre` (antes `..._nota_de_sobres_...`).
 
+## Batch de 7 pedidos sueltos + arranque de revisión de Reservas regulares
+
+1. **Reservas aisladas: check "Mostrar todas las reservas" renombrado a
+   "Mostrar reservas anteriores"** (`_PanelReservasAisladas.check_
+   mostrar_todas`, `app/gui/pantallas/reservas.py`) — mismo
+   comportamiento de siempre, solo cambia la etiqueta.
+
+2. **Resuelto — Profesionales: a veces no salía el cartel de "Registro
+   editado con éxito" al completar una edición, y al volver a editar sí
+   salía.** Bug real: `regenerar_si_corresponde` (`app/negocio/
+   liquidaciones.py`), disparada desde `_al_actualizar_profesional`
+   cuando cambia el plazo de pago extendido, escribe el PDF de la
+   liquidación en disco sin atajar ningún error de escritura — si ese
+   PDF estaba abierto en otro programa en ese momento (lector de PDF,
+   escenario común), la escritura tiraba `PermissionError` (un
+   `OSError`) que se propagaba sin capturar hasta `_editar`
+   (`crud_generico.py`), abortando el flujo ANTES de su cartel de éxito
+   final, sin ningún aviso visible (PySide6 solo imprime el traceback a
+   la consola, invisible en el .exe empaquetado). Se agrega un
+   `try/except OSError` alrededor de la escritura del PDF: si falla, se
+   salta sin más (igual que las otras condiciones de esa función que
+   tampoco regeneran el PDF — "no es motivo para interrumpir la
+   operación principal", ya documentado ahí), dejando que el flujo
+   llegue igual al cartel de éxito. Test nuevo:
+   `test_regenerar_si_corresponde_no_rompe_si_el_pdf_esta_bloqueado`
+   (`tests/test_liquidaciones.py`).
+
+3. **Resuelto — Regla general nueva: filtrar una tabla hasta dejar un
+   solo registro visible lo selecciona solo**, para poder ir directo a
+   Editar/Eliminar sin pinchar en la fila. Implementado en
+   `PantallaCRUD._aplicar_filtro_busqueda` (`app/gui/crud_generico.py`)
+   — cubre de una los ~15 catálogos genéricos (incluida Profesionales,
+   que arma su CRUD con esta misma clase). Solo dispara con un filtro
+   de Buscar ACTIVO (texto no vacío): un catálogo que de entrada tenga
+   una sola fila cargada no se autoselecciona al abrir la pantalla
+   (confirmado con un test — rompía la vista previa de documentación de
+   Profesionales, que tiene que arrancar sin selección). Pendiente
+   (pedido explícito "y en todas en realidad", pero fuera de esta
+   ronda, mismo criterio que toda convención general de este sistema —
+   "se va resolviendo pantalla por pantalla"): extenderlo a las
+   pantallas con filtro armado a mano, no genérico (Reservas aisladas,
+   Llaves, Estado de cuenta, etc.), caso por caso a medida que se
+   revise cada una. Tests nuevos en `tests/test_crud_generico.py`.
+
+4. **Resuelto — Badge "PERÍODO {mes}/{año}" (barra de estado, abajo a
+   la derecha): pasa de azul a color de texto normal (negro).**
+   `QLabel#badgePeriodo` en `estilos.py` — probado primero en azul
+   (`COLOR_NIVEL_1_OSCURO`, mismo tono que los encabezados de columna,
+   pedido de una ronda anterior), la clienta pidió el cambio al
+   revisarlo de nuevo: se ve mejor en negro.
+
+5-7. **Arranca la revisión de Reservas regulares.** Primeros dos
+   pedidos de esta pantalla:
+
+   - **"Quitale el recuadro a las referencias de colores"**: mismo
+     tratamiento ya aplicado antes en Reservas aisladas
+     (`LeyendaColores.quitar_marco`) — el título se queda, se saca la
+     caja nativa de `QGroupBox`. Como acá la leyenda sigue embebida
+     dentro del panel de Filtros (no se extrae a su propia columna como
+     en Aisladas), se agregó el método público `GrillaOperativaWidget.
+     quitar_marco_leyenda_colores(margen_superior=None)`, que reenvía a
+     `LeyendaColores.quitar_marco` sin que el llamador tenga que tocar
+     el atributo privado `_leyenda_colores`.
+
+   - **"Que el primer elemento de cada columna arranque en el pixel 85
+     como en Reservas aisladas, subiendo todo lo más posible"**: las
+     "tres columnas" son, de izquierda a derecha, el formulario de
+     alta, el panel de Filtros de la grilla (Localidad/Edificio/.../
+     Profesional) y la grilla en sí — las dos primeras comparten
+     margen de arriba (tienen que arrancar a la misma altura entre sí,
+     mismo criterio de siempre), la tercera ya estaba prácticamente
+     alineada sin tocar nada (diferencia de 1px, dentro del margen de
+     error de medición). Medido programáticamente (geometría real,
+     no a ojo) contra Reservas aisladas como referencia:
+     - Columna 1 (formulario): `_ALTO_TITULO_COLUMNAS_REGULARES = 7`
+       (antes `_ALTO_TITULO_FILTROS = 21`, que solo alineaba las
+       columnas 1 y 2 de Regulares ENTRE SÍ, sin relación con
+       Aisladas) como margen de arriba de `form`.
+     - Columna 2 (panel de Filtros embebido): a diferencia de la
+       leyenda, este panel SÍ seguía con su marco nativo de
+       `QGroupBox` (con título vacío, `fijar_titulo_filtros("")`, pero
+       sin sacarle el borde) — se agregó
+       `GrillaOperativaWidget.quitar_marco_panel_filtros(margen_
+       superior=None)` (mismo mecanismo que la leyenda) y se llama con
+       `_ALTO_TITULO_COLUMNAS_REGULARES - _ALTO_BASE_GRUPO_GRILLA`: el
+       `QGroupBox` sin título que envuelve esta columna completa
+       (`grupo_grilla`) reserva 6px propios arriba ANTES de que
+       arranque el panel de Filtros, que la columna 1 no tiene (vive
+       directo en el splitter) — hay que restarlos para que las dos
+       columnas terminen en el mismo píxel final a pesar de partir de
+       bases distintas.
+
+   **Hilo cerrado en la ronda siguiente — bug preexistente encontrado al
+   armar la captura de la ronda anterior:** la leyenda compacta (2
+   columnas) de Reservas regulares tenía las descripciones de texto
+   superpuestas entre sí — confirmado con `git stash` que el bug ya
+   estaba así antes de esa ronda (desajuste distinto, misma causa).
+   Causa identificada: `hacer_compacta()` nunca llamó a `fijar_ancho_
+   etiqueta_leyenda` (el fix que sí tiene Oferta de consultorios, ver
+   `LeyendaColores.fijar_ancho_etiqueta`). Un primer intento con
+   `fijar_ancho_etiqueta_leyenda(98)` solo (sin tocar el tamaño de
+   letra) empeoró el problema — se había revertido en su momento.
+
+   Pedido explícito de la clienta sobre esta misma solapa, ronda
+   siguiente: "En la solapa de reservas regulares hay una linea
+   divisoria y dos etiquetas informativas abajo del botón 'Eliminar
+   reserva'. Sacá los tres elementos, que la columna termine con
+   'Eliminar reserva'. Ajustá lo necesario en tamaño del recuadro de
+   referencia y tamaño de la fuente de referencia para que entre todo
+   sin apelmazar y la columna termine a la misma altura que la primer
+   columna."
+
+   - **Línea divisoria + 2 etiquetas afuera.** `_PanelReservasRegulares.
+     _armar_ui` (`app/gui/pantallas/reservas.py`): se saca el `QFrame`
+     divisorio y las dos `QLabel` ("Cant. horas regulares semanales"/
+     "% Descuento") que colgaban debajo de "Eliminar reserva" — la
+     columna 1 pasa a terminar directo en `form.addStretch()`. Se borra
+     también el método que las alimentaba (`_actualizar_resumen_
+     profesional`, con su único call site) y el import ya sin uso de
+     `calcular_resumen_profesional` (`app/negocio/resumen_profesional`).
+
+   - **Columna 2 (Filtros + leyenda) a la misma altura que la columna 1
+     — causa de fondo del "apelmazamiento".** `limitar_alto_grilla`
+     (ver `app/gui/widgets/grilla_operativa.py`) tapa el alto de TODO
+     `self.grilla` (Filtros + grilla embebida), no solo la tabla — y
+     Reservas regulares lo venía llamando con `alto_natural_grilla()`
+     (el alto natural de la GRILLA sola, pensado solo para dejarla
+     scrolleable a futuro "sin cambiar nada visible"). Medido: ese tope
+     (458px) quedaba por DEBAJO del alto natural del panel de Filtros
+     (472px) — el panel de Filtros (con la leyenda adentro) se achicaba
+     por este tope sin que nadie lo hubiera pedido, apretando la
+     leyenda contra un límite más chico del que necesitaba. Se cambia
+     la referencia de `limitar_alto_grilla` de `alto_natural_grilla()`
+     a `panel_form.sizeHint().height()` (guardado en `self._alto_
+     referencia_regulares`, mismo mecanismo que `_alto_referencia_
+     aisladas` en Reservas aisladas) — ahora el panel de Filtros tiene
+     el mismo alto de sobra que la columna 1, en vez de un tope más
+     chico impuesto por la grilla sola. Recalculado también en
+     `showEvent` (mismo motivo que `_scroll_superior` ahí mismo: el
+     `sizeHint()` de acá, antes del primer show, no siempre coincide
+     con el real).
+
+   - **Bug de fondo de la leyenda, ahora sí resuelto.** Con más alto
+     disponible, la leyenda compacta quedó visible SIN comprimirse —
+     pero reveló que las descripciones SÍ disparan wrap en este ancho
+     (al contrario de lo que se había asumido en una ronda anterior de
+     Oferta de consultorios, "su texto es corto y nunca dispara wrap" —
+     ya no es así). Mismo arreglo de fondo que ya usa Oferta de
+     consultorios (ver `docs/historial/disponibilidad.md`):
+     `hacer_compacta()` fija la letra con un `setStyleSheet` de CSS
+     crudo (cambia lo que Qt PINTA pero no lo que devuelve `QLabel.
+     font()`), así que el `QFontMetrics` que usa `fijar_ancho_etiqueta_
+     leyenda` para
+     calcular el alto de cada fila medía con la letra default de la
+     app, no con la compacta real. Se suma `self.grilla.fijar_tamano_
+     fuente_leyenda(10)` (usa `QLabel.setFont`, no CSS) ANTES de
+     `fijar_ancho_etiqueta_leyenda(98)` (98px, el ancho real medido de
+     cada columna de etiqueta) — con la letra medida correctamente, el
+     alto de fila calculado ya alcanza para el texto wrapeado real, sin
+     superponerse con la fila de abajo.
+
+   - **"Apelmazada contra el título", mismo bug ya documentado en
+     Aisladas.** Con el bug de wrap resuelto, quedó un segundo síntoma
+     real: el título "Referencias de colores" pegado contra la primera
+     fila (`quitar_marco_leyenda_colores()` sin argumento usa el margen
+     mínimo nativo, que ya estaba documentado como insuficiente —
+     "queda apelmazada con la primera referencia", mismo bug que
+     Aisladas ya había resuelto pasándole un margen explícito). Se pasa
+     `self.grilla.quitar_marco_leyenda_colores(20)` en vez de sin
+     argumento.
+
+   - **Resultado.** Las 8 referencias entran en 2 columnas × 4 filas sin
+     ningún texto superpuesto, con respiro claro entre el título y la
+     primera fila. La columna 2 (Filtros + leyenda) termina a ≤5px del
+     pie de "Eliminar reserva" (columna 1) — el splitter iguala el alto
+     de las dos columnas automáticamente (`QSplitter` horizontal: todos
+     los hijos comparten el mismo alto), así que ambas crecieron juntas
+     unos pocos píxeles más que el alto natural original de la columna
+     1 (524→540px) para darle a la leyenda, ya correctamente medida, el
+     lugar que necesita — aceptado, mismo criterio que el "residuo"
+     documentado para Oferta de consultorios (`docs/historial/
+     disponibilidad.md`): preferible a dejar la leyenda apretada.
+     Captura enviada a la clienta.
+
+   Tests en `tests/test_gui_reservas.py`: se reemplaza `test_datos_
+   complementarios_del_profesional`/`test_etiquetas_horas_regulares_y_
+   aisladas_tienen_wordwrap`/`test_regulares_con_horas_semanales_y_
+   descuento_aisladas_sin_ninguno` (la línea divisoria/etiquetas que
+   verificaban ya no existen) por `test_columna_del_formulario_termina_
+   en_eliminar_reserva`; se reemplaza `test_grilla_de_regulares_
+   mantiene_el_tope_identidad_sin_achicarse` (verificaba el tope viejo,
+   `alto_natural_grilla()`) por `test_grilla_de_regulares_usa_panel_
+   form_como_referencia_de_alto` y se suma `test_regulares_columna_de_
+   filtros_termina_cerca_del_pie_de_eliminar_reserva` (tolerancia de
+   20px, mismo criterio que el test análogo de Aisladas).
+
+   **Ronda siguiente, sobre la captura ya enviada: pixel 85, grilla sin
+   scroll (8 a 22hs) y "Detalle" alineado.** Pedido explícito de la
+   clienta: "chequea que los elementos iniciales de las tres columnas
+   arranquen en el pixel 85. La grilla que sea visible de la misma
+   manera que la de reservas aisladas, escroleable en horizontal, si es
+   necesario en vertical si se agregan horarios también, pero en
+   principio de 8 a 22hs se tiene que ver todo entero sin escrolear como
+   en la otra solapa. Ajustá el cuadro de detalle para que termine a la
+   misma altura que los otros elementos de la primer y segunda columna."
+
+   - **Columna 3 no arrancaba al mismo pixel que las columnas 1 y 2.**
+     Medido programáticamente: columnas 1 y 2 arrancaban al mismo pixel
+     (comparten `_ALTO_TITULO_COLUMNAS_REGULARES - _ALTO_BASE_GRUPO_
+     GRILLA` como margen de arriba, ver la ronda anterior), pero la
+     columna 3 (Período/Visualización + la grilla, `layout_grilla`
+     dentro de `GrillaOperativaWidget`) se había quedado con el margen
+     default de Qt (9px) — 8px más abajo que sus vecinas, aunque las
+     tres viven dentro del mismo `self.grilla` sin margen propio.
+     `GrillaOperativaWidget.fijar_margen_superior_grilla(margen)`
+     (nueva, mismo mecanismo que `quitar_marco_panel_filtros`) expone
+     el margen de `layout_grilla` para pisarlo desde afuera; Reservas
+     regulares la llama con el mismo valor que la columna 2, por el
+     mismo motivo (son hermanas dentro de `self.grilla`). Las tres
+     columnas quedan al mismo pixel exacto (medido: 93 en los tres,
+     antes 91/91/99 — el valor absoluto no es literalmente 85 en este
+     contenedor por el mismo desvío de fuente ya documentado en
+     "Metodología de trabajo", pero la alineación relativa entre las
+     tres es la que importa y ya es exacta).
+
+   - **La grilla (8 a 22hs) quedaba recortada/superpuesta con "Detalle",
+     no por falta de alto sino por el alto de fila default.** Al cargar
+     una reserva real y medir con las 14 horas pobladas: la tabla (alto
+     de fila 26px encabezado/24px dato, el default de esta grilla
+     compartida) necesitaba más alto del que le quedaba disponible
+     dentro del tope de la columna (el de la columna 1, ver la ronda
+     anterior) una vez descontado "Período/Visualización" — el sobrante
+     no alcanzaba para "Detalle" también, y como `limitar_alto_grilla`
+     le da a la tabla un tope de alto que no la obliga a achicarse por
+     debajo de su contenido real, el resultado no era scroll sino
+     superposición visual real entre la etiqueta "Detalle:" y la última
+     fila de la grilla (confirmado con geometría: "Detalle:" arrancaba
+     en medio del rango vertical de la tabla). Mismo arreglo que ya usa
+     Reservas aisladas para el mismo problema (8 a 22hs sin scroll
+     vertical): `self.grilla.fijar_alto_filas(_ALTO_FILA_ENCABEZADO_
+     REGULARES, _ALTO_FILA_DATO_REGULARES)` (18px/16px, mismos valores
+     que `_ALTO_FILA_ENCABEZADO_AISLADAS`/`_ALTO_FILA_DATO_AISLADAS`),
+     llamado ANTES de la primera construcción real de la grilla (mismo
+     requisito que en Aisladas). Con el alto de fila más chico, las 14
+     horas entran sin scroll vertical (`tabla.verticalScrollBar().
+     maximum() == 0`, confirmado) y "Detalle" (que ya absorbía el
+     sobrante vía `dar_stretch_a_detalle`, ronda anterior) vuelve a
+     tener lugar de sobra, sin superponerse con la última fila.
+
+   - **"Detalle" a la misma altura que las columnas 1 y 2, ya sin
+     recortarse.** Con el punto de arriba resuelto, "Detalle" vuelve a
+     terminar cerca del pie de "Eliminar reserva" (columna 1) por el
+     mismo mecanismo de siempre (`dar_stretch_a_detalle` + el tope de
+     `limitar_alto_grilla` igualado a la columna 1) — no hizo falta
+     ningún ajuste nuevo en el reparto de alto, solo liberar el espacio
+     que el alto de fila default le sacaba.
+
+   - **Scroll horizontal, sin cambios.** La grilla ya era scrolleable en
+     horizontal de siempre (`reservar_alto_scroll_horizontal`/
+     `activar_filas_y_columnas_fijas`, filas/columnas fijas al estilo
+     Excel) — mismo criterio que Reservas aisladas, no hizo falta
+     tocar nada ahí.
+
+   Tests nuevos en `tests/test_gui_reservas.py`:
+   `test_regulares_las_tres_columnas_arrancan_a_la_misma_altura`,
+   `test_regulares_grilla_de_8_a_22_entra_sin_scroll_vertical`,
+   `test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_
+   con_grilla_cargada` (tolerancia de 20px, mismo criterio que el resto
+   de los tests de este archivo sobre la plataforma offscreen, más una
+   verificación explícita de que "Detalle:" no arranca antes de que
+   termine la tabla).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

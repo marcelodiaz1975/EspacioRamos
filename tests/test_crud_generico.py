@@ -321,6 +321,34 @@ def test_pantalla_crud_buscar_filtra_filas_por_cualquier_columna(qtbot, conn):
     assert all(not pantalla.tabla_widget.isRowHidden(f) for f in range(pantalla.tabla_widget.rowCount()))
 
 
+def test_pantalla_crud_buscar_que_deja_una_sola_fila_la_selecciona_sola(qtbot, conn):
+    """Pedido explícito de la clienta, regla general: filtrar hasta dejar
+    un solo registro visible lo selecciona solo, para poder ir directo a
+    Editar/Eliminar sin tener que pinchar en la fila."""
+    conn.execute("INSERT INTO Edificio (Nombre, CampoLibre1) VALUES ('Torre Norte', 'Ramos Mejía')")
+    conn.execute("INSERT INTO Edificio (Nombre, CampoLibre1) VALUES ('Torre Sur', 'Haedo')")
+    conn.commit()
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
+    qtbot.addWidget(pantalla)
+    assert pantalla.fila_seleccionada_id() is None  # sin filtrar nada, no hay selección de entrada
+
+    pantalla.campo_buscar.setText("haedo")
+
+    assert pantalla.fila_seleccionada_id() is not None
+    assert pantalla.boton_editar.isEnabled()
+
+
+def test_pantalla_crud_con_una_sola_fila_de_entrada_no_se_autoselecciona(qtbot, conn):
+    """A diferencia del caso de arriba, un catálogo que de entrada tenga
+    una sola fila cargada (sin que el operador haya filtrado nada) NO se
+    selecciona sola al abrir la pantalla."""
+    conn.execute("INSERT INTO Edificio (Nombre, CampoLibre1) VALUES ('Torre Norte', 'Ramos Mejía')")
+    conn.commit()
+    pantalla = PantallaCRUD(conn, "Edificio", "Edificios", _campos_edificio())
+    qtbot.addWidget(pantalla)
+    assert pantalla.fila_seleccionada_id() is None
+
+
 def test_pantalla_crud_buscar_ignora_mayusculas_y_acentos(qtbot, conn):
     conn.execute("INSERT INTO Edificio (Nombre, CampoLibre1) VALUES ('Torre Norte', 'Ramos Mejía')")
     conn.commit()

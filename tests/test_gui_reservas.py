@@ -699,18 +699,145 @@ def test_botones_de_aisladas_quedan_igual_de_compactos_que_los_de_regulares(qtbo
         assert boton.isVisible()
 
 
-def test_grilla_de_regulares_mantiene_el_tope_identidad_sin_achicarse(qtbot, conn):
-    """Pedido explícito de la clienta: la grilla de Reservas regulares
-    queda scrolleable a futuro (por si algún día hace falta mostrar más
-    horarios) pero SIN cambiar nada visible hoy — `limitar_alto_grilla`
-    se llama con `alto_natural_grilla()` (el propio alto natural de la
-    columna), no con un valor más chico, así que el tope no debe recortar
-    nada de lo que ya se ve."""
+def test_grilla_de_regulares_usa_panel_form_como_referencia_de_alto(qtbot, conn):
+    """Pedido explícito de la clienta, misma ronda que saca la línea
+    divisoria y las dos etiquetas de resumen del pie de la columna 1
+    ("que la columna termine a la misma altura que la primer columna"):
+    `limitar_alto_grilla` pasa a usar el alto de `panel_form` (columna 1)
+    como referencia, en vez del alto natural de la grilla sola — mismo
+    mecanismo que `_alto_referencia_aisladas` en Reservas aisladas."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel_r = pantalla.panel_regulares
 
-    assert panel_r.grilla.maximumHeight() == panel_r.grilla.alto_natural_grilla()
+    assert panel_r.grilla.maximumHeight() == panel_r._alto_referencia_regulares
+    assert panel_r._alto_referencia_regulares == panel_r._panel_form_regulares.sizeHint().height()
+
+
+def test_regulares_columna_de_filtros_termina_cerca_del_pie_de_eliminar_reserva(qtbot, conn):
+    """Mismo pedido que el test de arriba: con la línea divisoria y las
+    dos etiquetas de resumen afuera, "Eliminar reserva" pasa a ser el
+    último control de la columna 1 — la columna de Filtros/leyenda
+    (columna 2) tiene que terminar a una altura comparable (no
+    necesariamente pixel exacto, por la plataforma offscreen, ver otros
+    tests de este archivo con el mismo criterio de tolerancia)."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(0)
+    qtbot.waitExposed(pantalla)
+
+    panel_r = pantalla.panel_regulares
+
+    def pie(widget):
+        return widget.mapToGlobal(widget.rect().bottomLeft()).y()
+
+    pie_eliminar = pie(panel_r.boton_eliminar)
+    pie_leyenda = pie(panel_r.grilla._leyenda_colores)
+    assert abs(pie_leyenda - pie_eliminar) <= 20
+
+
+def test_regulares_las_tres_columnas_arrancan_a_la_misma_altura(qtbot, conn):
+    """Pedido explícito de la clienta, misma ronda que el tope de alto de
+    la columna de Filtros: "que el primer elemento de cada columna
+    arranque en el mismo pixel" — columna 3 (Período/Visualización +
+    grilla) tenía el margen default de Qt (9px) en vez del margen pisado
+    en las columnas 1 y 2 (`_ALTO_TITULO_COLUMNAS_REGULARES -
+    _ALTO_BASE_GRUPO_GRILLA`, ver `fijar_margen_superior_grilla`), así
+    que arrancaba unos píxeles más abajo que ellas."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(0)
+    qtbot.waitExposed(pantalla)
+
+    panel_r = pantalla.panel_regulares
+
+    def topy(widget):
+        return widget.mapToGlobal(widget.rect().topLeft()).y()
+
+    etiqueta_periodo = next(
+        l for l in panel_r.grilla._panel_grilla.findChildren(QLabel) if l.text() == "Período:"
+    )
+    top_col1 = topy(panel_r.combo_profesional.parentWidget().layout().itemAt(0).widget())
+    top_col2 = topy(panel_r.grilla._etiqueta_localidad)
+    top_col3 = topy(etiqueta_periodo)
+    assert top_col1 == top_col2 == top_col3
+
+
+def test_regulares_grilla_de_8_a_22_entra_sin_scroll_vertical(qtbot, conn):
+    """Pedido explícito de la clienta: "que sea visible de la misma
+    manera que la de reservas aisladas... en principio de 8 a 22hs se
+    tiene que ver todo entero sin escrolear como en la otra solapa" —
+    mismo alto de fila que Reservas aisladas (`fijar_alto_filas`, ver
+    `_ALTO_FILA_ENCABEZADO_REGULARES`/`_ALTO_FILA_DATO_REGULARES`), sin
+    el cual las 14 horas con el alto de fila default no entraban en el
+    alto de columna disponible."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(0)
+    qtbot.waitExposed(pantalla)
+
+    panel_r = pantalla.panel_regulares
+    tabla = panel_r.grilla.tabla
+    assert tabla.rowCount() > 0
+    assert tabla.verticalScrollBar().maximum() == 0
+
+
+def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_cargada(qtbot, conn):
+    """Mismo pedido que el test de arriba, sobre el cuadro "Detalle":
+    "ajustá el cuadro de detalle para que termine a la misma altura que
+    los otros elementos de la primer y segunda columna" — con la grilla
+    completa (8 a 22hs) ya sin scroll vertical, "Detalle" (que absorbe el
+    sobrante vía `dar_stretch_a_detalle`) tiene que seguir llegando hasta
+    cerca del pie de la columna 1, sin quedar recortado ni superpuesto
+    con la última fila de la grilla."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(0)
+    qtbot.waitExposed(pantalla)
+
+    panel_r = pantalla.panel_regulares
+
+    def pie(widget):
+        return widget.mapToGlobal(widget.rect().bottomLeft()).y()
+
+    pie_eliminar = pie(panel_r.boton_eliminar)
+    pie_detalle = pie(panel_r.grilla.texto_detalle)
+    assert abs(pie_detalle - pie_eliminar) <= 20
+    # Sin superposición: "Detalle:" (la etiqueta) arranca DESPUÉS de que
+    # termina la grilla, no encima de la última fila.
+    etiqueta_detalle = next(
+        l for l in panel_r.grilla._panel_grilla.findChildren(QLabel) if l.text().startswith("Detalle")
+    )
+    tabla = panel_r.grilla.tabla
+    pie_tabla = pie(tabla)
+    top_etiqueta_detalle = etiqueta_detalle.mapToGlobal(etiqueta_detalle.rect().topLeft()).y()
+    assert top_etiqueta_detalle >= pie_tabla
 
 
 def test_detalle_de_aisladas_llega_al_pie_de_su_columna(qtbot, conn):
@@ -2031,49 +2158,24 @@ def test_reiniciar_vuelve_profesional_a_todos_los_profesionales(qtbot, conn):
     assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad]
 
 
-def test_datos_complementarios_del_profesional(qtbot, conn):
-    _preparar(conn)
-    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
-    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
-    obtener_repositorio(conn, "ReservaRegular").crear(
-        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
-        HoraInicio=9, HoraFin=12, VigenciaInicio="2020-01-01",
-    )
-    conn.commit()
-
+def test_columna_del_formulario_termina_en_eliminar_reserva(qtbot, conn):
+    """Pedido explícito de la clienta, en varias vueltas sobre esta
+    columna: primero se sacó "Horas aisladas mensuales" (solo quedaban
+    "Horas regulares semanales" y "% Descuento"); esta ronda se sacan
+    también esas dos últimas (y la línea divisoria que las separaba de
+    los botones) — la columna del formulario termina directo en
+    "Eliminar reserva", sin ningún título informativo debajo."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_regulares
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    # el profesional elegido tiene la reserva Lunes 9-12 (3 horas), recién cargada
-    assert "3" in panel.etiqueta_horas_semanales.text()
-    assert "%" in panel.etiqueta_descuento.text()
-
-    panel.combo_profesional.setCurrentIndex(0)  # vuelve al placeholder en blanco
-    assert panel.etiqueta_horas_semanales.text() == "Cant. horas regulares semanales: —"
-    assert panel.etiqueta_descuento.text() == "% Descuento: —"
-
-    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
-    assert panel.etiqueta_horas_semanales.text() == "Cant. horas regulares semanales: 3"
-
-
-def test_regulares_con_horas_semanales_y_descuento_aisladas_sin_ninguno(qtbot, conn):
-    """Pedido explícito de la clienta, en varias vueltas: primero se sacó
-    "Horas aisladas mensuales" de Reservas regulares (solo importan
-    "Horas regulares semanales" y "% Descuento" ahí); después se sacó
-    "Horas regulares semanales" y "% Descuento" de Reservas aisladas; en
-    el rediseño a 4 columnas se terminó sacando también "Horas aisladas
-    mensuales" de Aisladas — esa solapa queda sin ningún título
-    informativo de este tipo, Regulares se queda con los dos de siempre
-    ("Horas regulares semanales" y "% Descuento")."""
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    assert not hasattr(pantalla.panel_regulares, "etiqueta_horas_aisladas")
-    assert hasattr(pantalla.panel_regulares, "etiqueta_horas_semanales")
-    assert hasattr(pantalla.panel_regulares, "etiqueta_descuento")
-    assert not hasattr(pantalla.panel_aisladas, "etiqueta_horas_aisladas")
-    assert not hasattr(pantalla.panel_aisladas, "etiqueta_horas_semanales")
-    assert not hasattr(pantalla.panel_aisladas, "etiqueta_descuento")
+    assert not hasattr(panel, "etiqueta_horas_aisladas")
+    assert not hasattr(panel, "etiqueta_horas_semanales")
+    assert not hasattr(panel, "etiqueta_descuento")
+    form = panel.boton_eliminar.parentWidget().layout()
+    indice_boton = form.indexOf(panel.boton_eliminar)
+    # Lo único después del botón en el layout es el addStretch() final.
+    assert indice_boton == form.count() - 2
+    assert form.itemAt(form.count() - 1).widget() is None  # el stretch, no un widget
 
 
 def test_grilla_preview_sigue_al_profesional_no_al_consultorio_elegido(qtbot, conn):
@@ -3438,16 +3540,6 @@ def test_tab_en_filtro_de_unidad_de_la_grilla_no_salta_el_filtro_de_dia(qtbot, c
         qtbot.keyClick(boton_filtro_unidad, Qt.Key.Key_Tab)
         siguiente = QApplication.focusWidget()
         assert siguiente in panel.grilla._checks_dia.values()
-
-
-def test_etiquetas_horas_regulares_y_aisladas_tienen_wordwrap(qtbot, conn):
-    """Pedido de la clienta: "Cantidad de horas regulares semanales" se
-    veía cortado — con wordWrap pasa a una segunda línea en vez de
-    desbordar la columna."""
-    pantalla = PantallaReservas(conn)
-    qtbot.addWidget(pantalla)
-    assert pantalla.panel_regulares.etiqueta_horas_semanales.wordWrap() is True
-    assert pantalla.panel_regulares.etiqueta_descuento.wordWrap() is True
 
 
 # ------------------------------------------------------------ reserva extraordinaria

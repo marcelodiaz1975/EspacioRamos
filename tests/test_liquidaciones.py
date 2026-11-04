@@ -837,6 +837,39 @@ def test_regenerar_si_corresponde_tambien_regenera_el_pdf(conn, consultorio, tmp
     assert (tmp_path / "Profesionales" / "R1 - Lo Veci" / nueva["NombreArchivo"]).exists()
 
 
+def test_regenerar_si_corresponde_no_rompe_si_el_pdf_esta_bloqueado(conn, consultorio, tmp_path, monkeypatch):
+    """Bug real reportado por la clienta (Profesionales: "en un momento
+    no me tiró el alerta de éxito y luego sí al volver a editarlo"): si
+    el PDF de la liquidación está abierto en otro programa (ej. un
+    lector de PDF) en el momento de regenerarlo, la escritura en disco
+    tira `PermissionError` (un `OSError`) — antes eso se propagaba sin
+    atajar hasta el llamador (ej. `_al_actualizar_profesional`, en medio
+    de un guardado), abortando el flujo ANTES de su cartel de éxito
+    final, sin ningún aviso visible. Ahora se salta sin romper nada,
+    igual que las otras condiciones de esta función que tampoco
+    regeneran el PDF (sin carpeta base, sin código, etc.)."""
+    import app.negocio.liquidaciones as liquidaciones_modulo
+
+    id_r = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "Profesional").actualizar(id_r, IdCodigo="R1")
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+
+    id_liq, _ = emitir_liquidacion(conn, id_profesional=id_r, periodo=PERIODO, fecha_emision="2026-08-01")
+    obtener_repositorio(conn, "LiquidacionEmitida").actualizar(id_liq, EstadoEnvio="Enviada", NombreArchivo="viejo.pdf")
+
+    def _generar_pdf_bloqueado(*args, **kwargs):
+        raise PermissionError("El proceso no tiene acceso al archivo porque está siendo utilizado por otro proceso")
+
+    monkeypatch.setattr("app.pdf.liquidacion_pdf.generar_pdf_liquidacion", _generar_pdf_bloqueado)
+
+    liquidaciones_modulo.regenerar_si_corresponde(conn, id_profesional=id_r, periodo=PERIODO)  # no debe lanzar
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_r, Periodo=PERIODO)
+    nueva = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert nueva["EstadoEnvio"] == "Regenerada no enviada"  # la liquidación en la base SÍ se regeneró
+    assert nueva["NombreArchivo"] is None  # pero el PDF en disco no se pudo tocar
+
+
 def test_regenerar_si_corresponde_sin_carpeta_base_no_genera_pdf_ni_rompe(conn, consultorio):
     """Sin carpeta base configurada todavía, sigue dejando la liquidación
     marcada en la base (lo que ya alcanza para el Centro de mensajería),

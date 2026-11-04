@@ -1202,6 +1202,22 @@ class GrillaOperativaWidget(QWidget):
         referencia visual completa de la semana, no solo como filtros)."""
         self._panel_filtros.setTitle(titulo)
 
+    def quitar_marco_panel_filtros(self, margen_superior: int | None = None) -> None:
+        """Saca el marco nativo de `QGroupBox` del panel de Filtros
+        embebido (mismo mecanismo que `LeyendaColores.quitar_marco`,
+        ver esa clase) — pensado para Reservas regulares, que ya vacía
+        el título con `fijar_titulo_filtros("")` pero se queda con el
+        borde nativo y el alto que reserva para un título (aunque esté
+        vacío). Opt-in: Oferta de consultorios/Novedades/Grilla semanal,
+        que SÍ usan el título de este panel, no lo llaman y se quedan
+        con el marco de siempre."""
+        self._panel_filtros.setStyleSheet("QGroupBox { border: none; }")
+        margenes = self._panel_filtros.layout().contentsMargins()
+        margen_arriba = margen_superior if margen_superior is not None else margenes.top()
+        self._panel_filtros.layout().setContentsMargins(
+            margenes.left(), margen_arriba, margenes.right(), margenes.bottom(),
+        )
+
     def agrandar_panel_filtros(self, ancho: int) -> None:
         """Sube el ancho máximo del panel de Filtros (260px por defecto)
         — pensado para Reservas, que angosta su propia columna del
@@ -1385,6 +1401,28 @@ class GrillaOperativaWidget(QWidget):
         termine a la misma altura que el borde inferior de la grilla."""
         self._leyenda_colores.fijar_tamano_muestra(ancho, alto)
         self._actualizar_leyenda_colores()
+
+    def quitar_marco_leyenda_colores(self, margen_superior: int | None = None) -> None:
+        """Saca el marco nativo de `QGroupBox` de "Referencias de
+        colores" (ver `LeyendaColores.quitar_marco`) sin que el llamador
+        tenga que tocar `_leyenda_colores` directo — pensado para
+        Reservas regulares, mismo pedido explícito de la clienta ya
+        aplicado antes en Reservas aisladas ("sacale el recuadro que
+        recubre las referencias de colores")."""
+        self._leyenda_colores.quitar_marco(margen_superior)
+
+    def fijar_margen_superior_grilla(self, margen: int) -> None:
+        """Fija el margen de arriba de esta columna (Período/
+        Visualización + la grilla, `self._layout_grilla`) — pensado para
+        Reservas regulares: esta columna vive al lado del panel de
+        Filtros dentro del mismo `self` (`layout_principal`, sin margen
+        propio), así que el margen por defecto de Qt (9px) la deja
+        arrancando más abajo que "Filtro de localidad" (ver `quitar_
+        marco_panel_filtros`, que sí lo pisa) en vez de a la misma
+        altura. No toca el resto de los márgenes (izquierda/derecha/
+        abajo)."""
+        margenes = self._layout_grilla.contentsMargins()
+        self._layout_grilla.setContentsMargins(margenes.left(), margen, margenes.right(), margenes.bottom())
 
     def dar_stretch_a_detalle(self) -> None:
         """La grilla (`self.tabla`) tiene `stretch=1` por defecto: si esta

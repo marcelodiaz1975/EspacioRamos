@@ -522,6 +522,22 @@ class PantallaCRUD(QWidget):
                 if self.tabla_widget.item(fila, col) is not None
             )
             self.tabla_widget.setRowHidden(fila, buscado not in _normalizar_busqueda(texto_fila))
+        if buscado:
+            self._seleccionar_si_queda_una_sola_fila_visible()
+
+    def _seleccionar_si_queda_una_sola_fila_visible(self) -> None:
+        """Pedido explícito de la clienta, regla general para toda
+        pantalla que filtre una tabla (acá, "Buscar"): si escribir en el
+        filtro deja UNA sola fila visible, se selecciona sola — para
+        poder ir directo a Editar/Eliminar sin tener que pinchar primero
+        en esa fila. Solo con un filtro activo (`buscado` no vacío): un
+        catálogo que de entrada tenga una sola fila cargada no se
+        selecciona sola al abrir la pantalla — nadie "filtró" nada
+        todavía, y los paneles que dependen de la selección (ej. la
+        documentación de Profesionales) tienen que arrancar vacíos."""
+        visibles = [f for f in range(self.tabla_widget.rowCount()) if not self.tabla_widget.isRowHidden(f)]
+        if len(visibles) == 1:
+            self.tabla_widget.selectRow(visibles[0])
 
     def actualizar(self) -> None:
         registros = self.repositorio.listar()

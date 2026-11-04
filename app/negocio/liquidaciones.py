@@ -363,7 +363,25 @@ def regenerar_si_corresponde(conn: sqlite3.Connection, *, id_profesional: int, p
         return
     from app.pdf.liquidacion_pdf import generar_pdf_liquidacion  # import tardío: evita el ciclo con este módulo
 
-    ruta = generar_pdf_liquidacion(conn, liquidacion, str(carpeta_profesional(conn, profesional["IdCodigo"])))
+    # Bug real reportado por la clienta (Profesionales: "en un momento no
+    # me tiró el alerta de éxito y luego sí al volver a editarlo"):
+    # `generar_pdf_liquidacion` escribe el PDF en disco, y si ese archivo
+    # está abierto en otro programa en ese momento (ej. un lector de PDF —
+    # escenario común, la clienta suele tenerlo abierto para revisarlo) la
+    # escritura tira `PermissionError` (un `OSError`). Esa excepción se
+    # propagaba sin atajar hasta el llamador de `regenerar_si_corresponde`
+    # (ej. `_al_actualizar_profesional`, en medio de un guardado), que la
+    # dejaba sin capturar — abortaba el flujo ANTES del cartel de éxito
+    # final, sin ningún aviso visible (PySide6 solo imprime el traceback a
+    # la consola, invisible en el .exe empaquetado). Mismo criterio que el
+    # resto de esta función: no interrumpir la operación principal (el
+    # guardado del profesional, que ya se hizo, ya es un éxito real) por
+    # no poder actualizar el PDF en disco — se salta sin más, igual que
+    # las otras condiciones de arriba que tampoco regeneran nada.
+    try:
+        ruta = generar_pdf_liquidacion(conn, liquidacion, str(carpeta_profesional(conn, profesional["IdCodigo"])))
+    except OSError:
+        return
     obtener_repositorio(conn, "LiquidacionEmitida").actualizar(
         id_liquidacion, NombreArchivo=os.path.basename(ruta),
         FechaHoraGeneracion=datetime.now().isoformat(timespec="seconds"),

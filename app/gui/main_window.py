@@ -438,10 +438,12 @@ class VentanaPrincipal(QMainWindow):
         ficticia, para que un avance de mes se refleje sin reiniciar.
 
         Pedido de la clienta en el hilo de "saldo actual"/atajos de
-        teclado: mismo azul que los encabezados de columna de las tablas
-        (`COLOR_NIVEL_1_OSCURO`, ver `estilos.py#badgePeriodo`), negrita y
-        mayúscula — `.upper()` en el texto porque QSS no soporta
-        text-transform, mismo criterio que `tituloPantalla`."""
+        teclado: negrita y mayúscula — `.upper()` en el texto porque QSS
+        no soporta text-transform, mismo criterio que `tituloPantalla`.
+        Probado primero en azul (mismo tono que los encabezados de
+        columna de las tablas, `COLOR_NIVEL_1_OSCURO`) — la clienta pidió
+        pasarlo a color de texto normal (`estilos.py#badgePeriodo`),
+        se ve mejor en negro."""
         self._badge_periodo.setText(f"Período {self._periodo_legible()}".upper())
 
     def _periodo_legible(self) -> str:
