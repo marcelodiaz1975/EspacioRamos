@@ -288,30 +288,67 @@ def _ajustar_columnas_regulares(tabla: QTableWidget) -> None:
     _distribuir_ancho_sobrante_regulares(tabla)
 
 
+_ANCHO_MINIMO_EDIFICIO = 60
+# Ancho mínimo absoluto para "Edificio" en `_distribuir_ancho_sobrante_
+# regulares" — pedido explícito de la clienta: "sacale ancho a la
+# columna edificio" cuando no alcanza, nunca a Profesional/Localidad.
+# No se calcula con `QFontMetrics` sobre el título como el resto de los
+# anchos "que entran justo" de este archivo: alcanza con no desaparecer
+# del todo, el contenido real puede seguir recortándose en pantalla si
+# el nombre del edificio es largo — ese es el costo aceptado de nunca
+# mostrar la barra de scroll horizontal.
+
+
 def _distribuir_ancho_sobrante_regulares(tabla: QTableWidget) -> None:
     """Pedido explícito de la clienta: "dale más ancho a las columnas
     profesional, localidad y edificio para que el fin de la tabla
     llegue al pixel 1475... teniendo en cuenta también la barra de
-    scroll vertical" — mismo mecanismo que `_distribuir_ancho_sobrante_
-    aisladas` (mismo descuento de barra de scroll vertical/borde, ver
-    esa función), pero repartido entre TRES columnas en vez de una sola.
-    El sobrante (o faltante) se reparte en partes iguales entre las
-    tres, con el resto del reparto entero yendo a Edificio (la última)
-    para que la suma coincida exacto; ninguna de las tres baja de su
-    propio ancho natural ya calculado en `_ajustar_columnas_regulares`
-    (piso, igual que `_ANCHO_COL_PROFESIONAL` en Aisladas)."""
+    scroll vertical" (ronda anterior) — mismo mecanismo que `_distribuir_
+    ancho_sobrante_aisladas` (mismo descuento de barra de scroll
+    vertical/borde, ver esa función), pero repartido entre TRES columnas
+    en vez de una sola.
+
+    Pedido explícito de la clienta, ronda siguiente: "ajustá la tabla
+    sacándole ancho a la columna edificio... así no se ve la barra de
+    escroll horizontal". El primer reparto (parejo entre las tres, cada
+    una con un piso igual a su propio ancho natural) podía terminar
+    pidiendo MÁS ancho total del que había disponible si el piso natural
+    de Profesional+Localidad+Edificio juntos ya superaba `ancho_
+    disponible` (nombres reales más largos que los de prueba) —
+    `max(ancho_para_repartir, suma de los tres pisos)` dejaba que la
+    tabla se pasara de ancho en vez de recortar algo, apareciendo el
+    scroll horizontal que se quiere evitar siempre. Profesional y
+    Localidad se quedan con el reparto parejo + piso de siempre (nunca
+    bajan de su propio ancho natural, para no recortar nombres); Edificio
+    pasa a ser la única que cede: se lleva lo que sobre después de esas
+    dos (puede terminar MÁS ANGOSTA que su propio ancho natural si hace
+    falta, con un piso absoluto bajo — `_ANCHO_MINIMO_EDIFICIO` — para no
+    desaparecer del todo)."""
     ancho_vertical_header = tabla.verticalHeader().width()
     ancho_scrollbar_vertical = tabla.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
     ancho_disponible = tabla.width() - ancho_vertical_header - ancho_scrollbar_vertical - _ANCHO_BORDE_TABLA
     columnas_a_repartir = (_COL_REGULARES_PROFESIONAL, _COL_REGULARES_LOCALIDAD, _COL_REGULARES_EDIFICIO)
     pisos = {c: tabla.columnWidth(c) for c in columnas_a_repartir}
     suma_resto = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()) if c not in columnas_a_repartir)
-    ancho_para_repartir = max(ancho_disponible - suma_resto, sum(pisos.values()))
+    # Sin el piso-suma de antes: puede dar menos que lo que Profesional/
+    # Localidad/Edificio ya miden hoy — es intencional, Edificio lo va a
+    # compensar cediendo más abajo.
+    ancho_para_repartir = max(ancho_disponible - suma_resto, 0)
     base = ancho_para_repartir // len(columnas_a_repartir)
     resto_redondeo = ancho_para_repartir - base * len(columnas_a_repartir)
+    anchos = {}
     for i, columna in enumerate(columnas_a_repartir):
-        ancho = base + (resto_redondeo if i == len(columnas_a_repartir) - 1 else 0)
-        tabla.setColumnWidth(columna, max(ancho, pisos[columna]))
+        anchos[columna] = base + (resto_redondeo if i == len(columnas_a_repartir) - 1 else 0)
+
+    faltante = 0
+    for columna in (_COL_REGULARES_PROFESIONAL, _COL_REGULARES_LOCALIDAD):
+        if anchos[columna] < pisos[columna]:
+            faltante += pisos[columna] - anchos[columna]
+            anchos[columna] = pisos[columna]
+    anchos[_COL_REGULARES_EDIFICIO] = max(anchos[_COL_REGULARES_EDIFICIO] - faltante, _ANCHO_MINIMO_EDIFICIO)
+
+    for columna, ancho in anchos.items():
+        tabla.setColumnWidth(columna, ancho)
 
 
 class _FiltroCalendarioArrancaHoy(QObject):
@@ -1009,6 +1046,7 @@ class _PanelReservasRegulares(QWidget):
         # hasta ahí.
         self._alto_referencia_regulares = self._panel_form_regulares.height()
         self.grilla.limitar_alto_grilla(self._alto_referencia_regulares)
+        self._ajustar_alto_detalle()
         self.reiniciar()
         # Mismo motivo y mismo mecanismo que Reservas aisladas (ver
         # `QTimer.singleShot` en el `showEvent` de esa solapa): tanto el
@@ -1021,6 +1059,33 @@ class _PanelReservasRegulares(QWidget):
         # loop de eventos procese ese layout pendiente.
         QTimer.singleShot(0, self._reajustar_alto_y_columnas_si_sigue_vivo)
 
+    def _ajustar_alto_detalle(self) -> None:
+        """Pedido explícito de la clienta: "ajustá el cuadro de detalle
+        de manera que... termine justo antes de que comience la tabla de
+        abajo. Es decir a la altura de donde termina el botón 'Eliminar
+        reserva'" — un objetivo más preciso que "el pie de la columna 1"
+        a secas (`panel_form` termina más abajo todavía, con el
+        `addStretch()` final del formulario de sobra). Fija el alto de
+        `texto_detalle` (`QTextEdit`, con `setFixedHeight` en vez de
+        `setMaximumHeight`/`stretch`, ver el hilo de la ronda anterior
+        sobre por qué esos dos no alcanzaban) para que termine exacto en
+        el pie de `self.boton_eliminar`, midiendo coordenadas globales
+        (sin depender de un ancestro común entre las dos columnas).
+        `setFixedHeight` en vez de `setMaximumHeight` por una razón de
+        fondo, no solo de exactitud: al fijar un alto mínimo explícito
+        en esta hoja (en vez de dejar que `self.grilla` "adivine" cuánto
+        estirarse con `Expanding`/`stretch`, que no funcionaba — ver esa
+        misma ronda), ese mínimo se propaga solo hacia arriba por el
+        árbol de widgets (`texto_detalle` -> `panel_grilla` -> `self.
+        grilla` -> `grupo_grilla`), que es el mecanismo de Qt que sí
+        funciona de manera confiable para este caso."""
+        alto_disponible = (
+            self.boton_eliminar.mapToGlobal(self.boton_eliminar.rect().bottomLeft()).y()
+            - self.grilla.texto_detalle.mapToGlobal(self.grilla.texto_detalle.rect().topLeft()).y()
+        )
+        if alto_disponible > 0:
+            self.grilla.texto_detalle.setFixedHeight(alto_disponible)
+
     def _reajustar_alto_y_columnas_si_sigue_vivo(self) -> None:
         """Ver el `QTimer.singleShot` en `showEvent` — mismo guard que
         `_PanelReservasAisladas._distribuir_ancho_sobrante_si_sigue_
@@ -1029,6 +1094,7 @@ class _PanelReservasRegulares(QWidget):
         if shiboken6.isValid(self._panel_form_regulares) and shiboken6.isValid(self.tabla):
             self._alto_referencia_regulares = self._panel_form_regulares.height()
             self.grilla.limitar_alto_grilla(self._alto_referencia_regulares)
+            self._ajustar_alto_detalle()
             self.actualizar()
 
     def _armar_ui(self) -> None:
@@ -1658,11 +1724,18 @@ class _PanelReservasRegulares(QWidget):
         esa función para por qué están separadas. Se llama desde
         `showEvent` y desde F3 ("Reiniciar solapa"); de paso, reconstruye
         `combo_profesional` (`_cargar_combo_profesional`) para que un
-        cambio de categoría reciente ya se vea sin reiniciar el sistema."""
+        cambio de categoría reciente ya se vea sin reiniciar el sistema.
+
+        Pedido explícito de la clienta: si el combo "Visualización" de
+        la grilla se tocó (ver `combo_modo.setEnabled(True)`, ronda
+        anterior), F5 lo vuelve a "Reservas regulares" — el default
+        propio de ESTA solapa — igual que cualquier otro filtro de la
+        pantalla."""
         self._orden.reiniciar()
         self._cargar_combo_profesional()
         self.combo_profesional.setCurrentIndex(0)
         self._resetear_formulario()
+        self.grilla.combo_modo.setCurrentIndex(self.grilla.combo_modo.findData("regular"))
         self.actualizar()
 
     def _dias_seleccionados(self) -> list[str]:
@@ -2073,10 +2146,14 @@ class _PanelReservasAisladas(QWidget):
         `_resetear_formulario` ya incluye "Profesional" (punto #9.1.9
         no aplica acá), así que alcanza con llamarla directo.
         "Mostrar reservas anteriores" vuelve a su valor inicial
-        (desactivado) — mismo criterio que el resto de los filtros."""
+        (desactivado) — mismo criterio que el resto de los filtros.
+        Mismo pedido que en Reservas regulares (ver esa solapa): el
+        combo "Visualización" de la grilla vuelve a "Reservas
+        aisladas", el default propio de ESTA solapa."""
         self._orden.reiniciar()
         self._resetear_formulario()
         self.check_mostrar_todas.setChecked(False)
+        self.grilla.combo_modo.setCurrentIndex(self.grilla.combo_modo.findData("aislada"))
         self.actualizar()
         self.combo_profesional.setFocus()
 

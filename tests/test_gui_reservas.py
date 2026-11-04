@@ -799,12 +799,17 @@ def test_regulares_grilla_de_8_a_22_entra_sin_scroll_vertical(qtbot, conn):
 
 def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_cargada(qtbot, conn):
     """Mismo pedido que el test de arriba, sobre el cuadro "Detalle":
-    "ajustá el cuadro de detalle para que termine a la misma altura que
-    los otros elementos de la primer y segunda columna" — con la grilla
-    completa (8 a 22hs) ya sin scroll vertical, "Detalle" (que absorbe el
-    sobrante vía `dar_stretch_a_detalle`) tiene que seguir llegando hasta
-    cerca del pie de la columna 1, sin quedar recortado ni superpuesto
-    con la última fila de la grilla."""
+    "ajustá el cuadro de detalle de manera que... termine justo antes de
+    que comience la tabla de abajo. Es decir a la altura de donde
+    termina el botón 'Eliminar reserva'" — `_ajustar_alto_detalle` (ver
+    `showEvent`) lo fija con `setFixedHeight` calculado contra el pie
+    real de `boton_eliminar`, así que la tolerancia pasa a ser chica
+    (unos pocos píxeles de margen de medición, no "cerca" — antes de
+    ese fix quedaba un margen residual de hasta 19px, documentado como
+    pendiente en CLAUDE.md).
+    Con la grilla completa (8 a 22hs) ya sin scroll vertical, "Detalle"
+    tiene que seguir sin quedar recortado ni superpuesto con la última
+    fila de la grilla."""
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
@@ -828,7 +833,7 @@ def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_
 
     pie_eliminar = pie(panel_r.boton_eliminar)
     pie_detalle = pie(panel_r.grilla.texto_detalle)
-    assert abs(pie_detalle - pie_eliminar) <= 20
+    assert abs(pie_detalle - pie_eliminar) <= 5
     # Sin superposición: "Detalle:" (la etiqueta) arranca DESPUÉS de que
     # termina la grilla, no encima de la última fila.
     etiqueta_detalle = next(
@@ -2221,6 +2226,41 @@ def test_reiniciar_vuelve_profesional_a_todos_los_profesionales(qtbot, conn):
     assert panel.grilla.ids_unidad_seleccionadas() == [id_unidad]
 
 
+def test_reiniciar_regulares_repone_la_visualizacion_a_reservas_regulares(qtbot, conn):
+    """Pedido explícito de la clienta: "si yo toco el filtro de
+    visualización... y cambio el estado del mismo, que al presionar F5
+    refresque y devuelva el valor de ese filtro al estado original, es
+    decir visualización regulares en reservas regulares" — `reiniciar()`
+    (F3/`showEvent`) tiene que volver el combo "Visualización" de la
+    grilla a "Reservas regulares", el default propio de esta solapa."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.grilla.combo_modo.setCurrentIndex(panel.grilla.combo_modo.findData("aislada"))
+    assert panel.grilla.combo_modo.currentData() == "aislada"
+
+    panel.reiniciar()
+
+    assert panel.grilla.combo_modo.currentData() == "regular"
+
+
+def test_reiniciar_aisladas_repone_la_visualizacion_a_reservas_aisladas(qtbot, conn):
+    """Mismo pedido que en Reservas regulares (ver ese test): en esta
+    solapa, F3/F5 tiene que volver el combo "Visualización" a "Reservas
+    aisladas", su propio default."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.grilla.combo_modo.setCurrentIndex(panel.grilla.combo_modo.findData("regular"))
+    assert panel.grilla.combo_modo.currentData() == "regular"
+
+    panel.reiniciar()
+
+    assert panel.grilla.combo_modo.currentData() == "aislada"
+
+
 def test_columna_del_formulario_termina_en_eliminar_reserva(qtbot, conn):
     """Pedido explícito de la clienta, en varias vueltas sobre esta
     columna: primero se sacó "Horas aisladas mensuales" (solo quedaban
@@ -3245,6 +3285,43 @@ def test_tabla_regulares_desglosa_localidad_edificio_unidad_consultorio(qtbot, c
     assert tabla.item(0, 2).text() == "Torre Norte"
     assert tabla.item(0, 3).text() == "1A"
     assert tabla.item(0, 4).text() == "1"
+
+
+def test_tabla_regulares_edificio_cede_ancho_para_no_mostrar_scroll_horizontal(qtbot, conn):
+    """Pedido explícito de la clienta: "ajustá la tabla sacándole ancho
+    a la columna edificio... así no se ve la barra de escroll
+    horizontal" — con nombres reales (más largos que los de prueba
+    habituales), el reparto parejo de ancho sobrante entre Profesional/
+    Localidad/Edificio (`_distribuir_ancho_sobrante_regulares`) podía
+    pedir más ancho total del disponible, apareciendo la barra de
+    scroll horizontal que se quiere evitar siempre. Edificio es la
+    única de las tres que cede (puede terminar más angosta que su
+    propio ancho natural) — Profesional/Localidad nunca se recortan."""
+    id_loc = obtener_repositorio(conn, "Localidad").crear(Localidad="Localidad con nombre bastante largo")
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(
+        Nombre="Edificio con nombre extremadamente largo para forzar overflow", IdLocalidad=id_loc,
+    )
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Fernandez Castro Villanueva", NombrePila="Maria Jose Del Carmen",
+        Tratamiento="Dra.", IdCodigo="R1",
+    )
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(0)
+    qtbot.waitExposed(pantalla)
+
+    tabla = pantalla.panel_regulares.tabla
+    assert tabla.horizontalScrollBar().maximum() == 0
 
 
 def test_tabla_regulares_desglosa_con_varias_localidades(qtbot, conn):

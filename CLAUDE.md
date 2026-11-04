@@ -1108,6 +1108,95 @@ difícil de notar (ver el final de esta sección).
    liquidacion_del_periodo_operativo`) sigue pasando sin cambios,
    confirmando que el caso de "mes pasado" no se rompió con este fix.
 
+## Reservas regulares: ancho de la tabla, "Detalle" pegado al pie de "Eliminar reserva" y F5 repone Visualización
+
+Pedido explícito de la clienta, solapa Reservas regulares (varios
+puntos en un mismo mensaje):
+
+- **"Sacale el recuadro a las referencias de colores... que se vea
+  como está en la solapa de reservas aisladas."** Ya resuelto en una
+  ronda anterior — confirmado de nuevo con una captura de zoom sobre la
+  leyenda: sin ningún borde propio, solo el `#000000` fino de cada
+  "cuadrito" de color (Punto #9.1.2, pedido aparte y distinto de esto).
+  No hizo falta ningún cambio de código.
+
+- **"Ajustá la tabla sacándole ancho a la columna edificio de manera
+  que el final de la columna 'Vigencia hasta' termine justo antes de
+  donde se visualiza la barra de escroll vertical, así no se ve la
+  barra de escroll horizontal."** `_distribuir_ancho_sobrante_
+  regulares` (ronda anterior) repartía el sobrante en partes iguales
+  entre Profesional/Localidad/Edificio, con un piso igual al ancho
+  natural de cada una — `max(ancho_para_repartir, suma de los tres
+  pisos)` dejaba que el total pedido superara el ancho disponible si
+  esos tres pisos ya sumaban más (nombres reales más largos que los de
+  prueba de la ronda anterior), apareciendo el scroll horizontal que
+  se quiere evitar siempre. Reescrita: Profesional y Localidad se
+  quedan con el reparto parejo + piso de siempre (nunca se recortan);
+  Edificio pasa a ser la única columna que cede — se lleva lo que
+  sobre después de esas dos, incluso por debajo de su propio ancho
+  natural si hace falta, con un piso absoluto bajo (`_ANCHO_MINIMO_
+  EDIFICIO = 60`) solo para no desaparecer del todo. Confirmado
+  forzando un escenario de overflow real (localidad/edificio/
+  profesional con nombres largos a propósito): sin la barra de scroll
+  horizontal, Edificio efectivamente la columna que se angosta.
+
+- **"Bajá la etiqueta 'Detalle'... se ve apelmazada arriba de la barra
+  de escroll horizontal de la grilla. Bajala por abajo de esa barra, y
+  ajustá el cuadro de detalle de manera que arranque justo abajo de la
+  etiqueta 'Detalle' y el cuadro termine justo antes de que comience la
+  tabla de abajo. Es decir a la altura de donde termina el botón
+  'Eliminar reserva'."** El espaciado antes de "Detalle:" (`agregar_
+  espacio_antes_de_detalle(14)`, ronda anterior) ya medía desde el pie
+  REAL de la grilla (que incluye su barra de scroll horizontal cuando
+  está visible, parte del `rect()` de la tabla) — confirmado con
+  geometría que el gap ya es de ~21px, no apelmazado; no hizo falta
+  tocar ese número.
+
+  El segundo pedido — que "Detalle" termine exacto en el pie de
+  "Eliminar reserva" — es el mismo hilo abierto de la ronda anterior
+  (quedaba un margen residual de ~19px, con dos intentos revertidos por
+  riesgo de recorte). Esta vez se resuelve con un mecanismo distinto,
+  más directo: `_ajustar_alto_detalle` (nueva, llamada desde `showEvent`
+  y desde el `QTimer.singleShot` de reajuste diferido) mide en
+  coordenadas GLOBALES el pie real de `self.boton_eliminar` y el techo
+  real de `self.grilla.texto_detalle`, y fija ese `QTextEdit` con
+  `setFixedHeight` (no `setMaximumHeight`/`stretch`, que es lo que no
+  había alcanzado la ronda anterior) al alto exacto que hace falta para
+  que las dos líneas coincidan. La diferencia de fondo con los intentos
+  de antes: ahí se intentaba hacer crecer a `self.grilla` (el widget
+  compuesto completo, Filtros + grilla) con `QSizePolicy.Expanding` +
+  `stretch=1` o `setMinimumHeight`, apoyándose en que Qt "adivinara"
+  cuánto estirarlo — no funcionaba (se quedaba en su alto mínimo
+  natural) y el segundo intento además desencadenaba un crecimiento en
+  cascada de `panel_form` vía el splitter. Acá, en cambio, se fija un
+  alto mínimo EXPLÍCITO en la hoja más profunda del árbol (`texto_
+  detalle`), que Qt sí propaga hacia arriba de manera confiable
+  (`texto_detalle` -> `panel_grilla` -> `self.grilla` -> `grupo_
+  grilla`) sin depender de que ningún widget intermedio "decida"
+  estirarse por su cuenta. Medido: la diferencia entre el pie de
+  "Detalle" y el de "Eliminar reserva" bajó de hasta 19px a 1-3px
+  (redondeo normal de geometría, no un margen real).
+
+- **"Si toco el filtro de Visualización... y presiono F5, que devuelva
+  el valor de ese filtro al estado original (visualización regulares
+  en Reservas regulares, visualización aisladas en Reservas
+  aisladas)."** El combo "Visualización" (`combo_modo`) se había
+  habilitado la ronda anterior pero `reiniciar()` (F3/F5/`showEvent`)
+  no lo tocaba — quedaba en lo último que el operador hubiera elegido.
+  Las dos `reiniciar()` (Regulares y Aisladas) ahora reponen `combo_
+  modo` a su propio default ("regular"/"aislada" respectivamente),
+  mismo criterio que el resto de los filtros de cada solapa.
+
+Tests nuevos/actualizados en `tests/test_gui_reservas.py`:
+`test_tabla_regulares_edificio_cede_ancho_para_no_mostrar_scroll_
+horizontal` (localidad/edificio/profesional con nombres largos a
+propósito, confirma `horizontalScrollBar().maximum() == 0`);
+`test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_
+grilla_cargada` (tolerancia bajada de 20px a 5px, ahora que el alto se
+fija exacto); `test_reiniciar_regulares_repone_la_visualizacion_a_
+reservas_regulares`/`test_reiniciar_aisladas_repone_la_visualizacion_a_
+reservas_aisladas` (nuevos).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
