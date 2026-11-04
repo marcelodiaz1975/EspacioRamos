@@ -842,18 +842,6 @@ def mensaje_detalle_reserva_aislada(
         )
         lineas += ["", "_RESERVAS POSTERIORES_"] + lineas_posteriores + lineas_posteriores_extraordinarias
 
-    pagos_sobre = [p for p in pagos if p["MedioPago"] == "Sobre en buzón" and p["FechaHoraRecogidaSobres"]]
-    if pagos_sobre:
-        ultimo = max(pagos_sobre, key=lambda p: p["FechaHoraRecogidaSobres"])
-        dt = datetime.fromisoformat(ultimo["FechaHoraRecogidaSobres"])
-        dia_semana = fecha_a_dia_semana(dt.date()).lower()
-        hora = hora_fmt(dt.hour + dt.minute / 60)
-        lineas += [
-            "",
-            f"* Nota: Se imputaron los pagos de los sobres recogidos en las unidades hasta el "
-            f"{dia_semana} {dt.day}/{dt.month} a las {hora}.",
-        ]
-
     # "PLACAS PARA LOS TIMBRES": pedido explícito de la clienta, para que
     # el profesional sepa en qué posición del tablero de timbres está su
     # placa en cada unidad involucrada en ESTE mensaje (del mes +
@@ -883,6 +871,26 @@ def mensaje_detalle_reserva_aislada(
             lineas_placas.append(f"+ {u['NombreEdificio']} - {u['Departamento']}: Posición {placa['PosicionTablero']}")
     if lineas_placas:
         lineas += ["", "_PLACAS PARA LOS TIMBRES_"] + lineas_placas
+
+    # "ÚLTIMA LEVANTADA DE PAGOS EN SOBRES": pedido explícito de la
+    # clienta, mismo criterio de sección que "PLACAS PARA LOS TIMBRES"
+    # (título en itálica, línea de detalle con "+") en vez de la frase
+    # suelta que tenía antes ("* Nota: Se imputaron los pagos..."). El
+    # dato sale de lo que se va cargando con los pagos en ese campo
+    # (`HistorialPagos.FechaHoraRecogidaSobres`, precargado al registrar
+    # un pago por sobre dentro de una tanda — ver `app.negocio.pagos.
+    # tanda_sobres_abierta`): de los pagos de ESTE profesional imputados
+    # a este período con medio "Sobre en buzón", la fecha/hora más
+    # reciente. Se omite la sección si no hubo ningún pago por sobre.
+    pagos_sobre = [p for p in pagos if p["MedioPago"] == "Sobre en buzón" and p["FechaHoraRecogidaSobres"]]
+    if pagos_sobre:
+        ultimo = max(pagos_sobre, key=lambda p: p["FechaHoraRecogidaSobres"])
+        dt = datetime.fromisoformat(ultimo["FechaHoraRecogidaSobres"])
+        dia_semana = fecha_a_dia_semana(dt.date())
+        lineas += [
+            "", "_ÚLTIMA LEVANTADA DE PAGOS EN SOBRES_",
+            f"+ {dia_semana} {dt.day}/{dt.month} - {dt.strftime('%H:%M')}hs",
+        ]
 
     plantilla = resolver_plantilla(
         conn, "mensaje_detalle_reserva_aislada", DEFAULT_DETALLE_RESERVA_AISLADA,

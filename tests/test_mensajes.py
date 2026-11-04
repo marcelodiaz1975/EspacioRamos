@@ -633,7 +633,7 @@ def test_detalle_aislada_item_libre_no_incluye_cargos_de_llave(conn, profesional
     assert "depósito llave" not in texto.lower().replace("depósito por llave", "")
 
 
-def test_detalle_aislada_nota_de_sobres_solo_si_hubo_pago_por_sobre(conn, profesional_aislada_con_edificios):
+def test_detalle_aislada_ultima_levantada_de_sobres_solo_si_hubo_pago_por_sobre(conn, profesional_aislada_con_edificios):
     id_prof, _, _, _, _ = profesional_aislada_con_edificios
     registrar_pago(
         conn, id_profesional=id_prof, monto=500, fecha="2026-08-15", periodo_imputado="2026-08",
@@ -642,14 +642,15 @@ def test_detalle_aislada_nota_de_sobres_solo_si_hubo_pago_por_sobre(conn, profes
     ultimo = obtener_repositorio(conn, "HistorialPagos").listar(IdProfesional=id_prof)[-1]
     obtener_repositorio(conn, "HistorialPagos").actualizar(ultimo["IdPago"], FechaHoraRecogidaSobres="2026-08-18T15:00:00")
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
-    assert "* Nota: Se imputaron los pagos de los sobres recogidos en las unidades hasta el martes 18/8 a las 15hs." in texto
+    assert "_ÚLTIMA LEVANTADA DE PAGOS EN SOBRES_" in texto
+    assert "+ Martes 18/8 - 15:00hs" in texto
 
 
-def test_detalle_aislada_sin_nota_de_sobres_si_no_hubo_pago_por_sobre(conn, profesional_aislada_con_edificios):
+def test_detalle_aislada_sin_ultima_levantada_de_sobres_si_no_hubo_pago_por_sobre(conn, profesional_aislada_con_edificios):
     id_prof, _, _, _, _ = profesional_aislada_con_edificios
     registrar_pago(conn, id_profesional=id_prof, monto=500, fecha="2026-08-15", periodo_imputado="2026-08")
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
-    assert "Nota:" not in texto
+    assert "LEVANTADA" not in texto
 
 
 # ------------------------------------- combinar misma/distintas unidades (5.1)

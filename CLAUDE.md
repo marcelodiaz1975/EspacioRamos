@@ -539,6 +539,31 @@ Pedido de la clienta, dos pantallas:
    idempotencia), `tests/test_gui_pagos.py` (wording del cartel de
    Eliminar con cascada).
 
+## Mensaje "DETALLE RESERVA {MES}" (reservas aisladas): sección "ÚLTIMA LEVANTADA DE PAGOS EN SOBRES"
+
+Pedido de la clienta, con el mensaje modelo real como referencia: la
+frase suelta que ya existía al pie del mensaje ("* Nota: Se imputaron
+los pagos de los sobres recogidos en las unidades hasta el {día}
+{dd/mm} a las {hora}.", generada en `mensaje_detalle_reserva_aislada`,
+`app/negocio/mensajes.py`) pasa a ser una sección propia, con el mismo
+formato que "PLACAS PARA LOS TIMBRES" (título en itálica + línea de
+detalle con "+"): "_ÚLTIMA LEVANTADA DE PAGOS EN SOBRES_" / "+ {Día}
+{dd/mm} - {HH:MM}hs" — mayúscula inicial en el día (antes iba en
+minúscula) y hora siempre con minutos (`dt.strftime("%H:%M")` en vez de
+`hora_fmt`, que recorta los ":00"). Se ubica DESPUÉS de "PLACAS PARA
+LOS TIMBRES" (antes la frase vieja iba antes, pegada a "RESERVAS
+POSTERIORES"), mismo orden que el mensaje modelo. El dato sigue
+saliendo de la misma fuente de siempre ("lo que se va cargando con los
+pagos en ese campo", confirmado por la clienta): de los pagos de este
+profesional imputados a este período con medio "Sobre en buzón"
+(`HistorialPagos.FechaHoraRecogidaSobres`), el más reciente — se omite
+la sección entera si no hubo ningún pago por sobre, igual que antes.
+
+Tests renombrados/actualizados en `tests/test_mensajes.py`:
+`test_detalle_aislada_ultima_levantada_de_sobres_solo_si_hubo_pago_por_
+sobre` y `test_detalle_aislada_sin_ultima_levantada_de_sobres_si_no_
+hubo_pago_por_sobre` (antes `..._nota_de_sobres_...`).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
