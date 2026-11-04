@@ -510,18 +510,19 @@ def test_mostrar_leyenda_colores_la_revela_con_las_referencias_de_regular(qtbot,
     assert "Libre de reserva regular." not in textos  # propia de "aislada"
 
 
-def test_muestras_de_la_leyenda_siguen_envueltas_en_su_propio_marco(qtbot, conn):
-    """Punto #9.1.2 (SistemaDF v0.11.2026.10) pedía un borde negro fino
-    en cada muestra de color de "Referencias de colores" — revertido
-    después, a pedido de la clienta ("Recuadros alrededor de las
-    referencias"), sobre la foto real de Reservas regulares con datos
-    densos: `QWidget#muestraLeyenda` pasa a `border: none` en
-    `estilos.py`. El `QFrame` propio con `objectName="muestraLeyenda"`
-    que envuelve cada muestra se queda igual (ya no por el borde, sino
-    porque sigue siendo el mecanismo que evita pintar directo sobre
-    `_CeldaGrilla` con `WA_StyledBackground` — esa alternativa se probó
-    primero y se descartó por un segfault real, ver el comentario en
-    `grilla_operativa.py`)."""
+def test_muestras_de_la_leyenda_quedan_recuadradas_pegadas_a_su_contorno(qtbot, conn):
+    """Punto #9.1.2 (SistemaDF v0.11.2026.10): cada muestra de color de
+    "Referencias de colores" queda envuelta en un `QFrame` propio con
+    `objectName="muestraLeyenda"`, para que el QSS de `estilos.py` le
+    pinte un marco negro cerrado en las 4 caras. Bug real reportado con
+    foto/video de la app real, aclarado después por la clienta: sin
+    `setFixedSize` en ese `QFrame`, el grid layout lo estiraba a toda la
+    celda (más ancha/alta que la muestra si algún vecino de esa columna
+    pedía más lugar) — el borde quedaba alrededor de esa "celda
+    invisible" más grande, no pegado al contorno real de la muestra
+    ("dos rectángulos" en la foto). `marco_muestra.setFixedSize(...)`
+    (mismo tamaño que la muestra que envuelve) ata el QFrame a ese
+    tamaño exacto, sea cual sea el ancho real de la columna."""
     _preparar(conn)
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
@@ -531,7 +532,9 @@ def test_muestras_de_la_leyenda_siguen_envueltas_en_su_propio_marco(qtbot, conn)
     ]
     assert len(marcos) > 0
     for marco in marcos:
-        assert marco.findChild(QWidget) is not None
+        muestra = marco.findChild(QWidget)
+        assert muestra is not None
+        assert marco.size() == muestra.size()
 
 
 def test_leyenda_colores_sigue_al_cambio_de_modo(qtbot, conn):
@@ -790,14 +793,14 @@ def test_extraer_detalle_saca_la_etiqueta_y_el_texto_de_la_grilla(qtbot, conn):
     _preparar(conn)
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)
-    assert widget._layout_grilla.indexOf(widget._etiqueta_detalle) != -1
+    assert widget._layout_grilla.indexOf(widget.etiqueta_detalle) != -1
     assert widget._layout_grilla.indexOf(widget.texto_detalle) != -1
 
     etiqueta, texto = widget.extraer_detalle()
 
-    assert etiqueta is widget._etiqueta_detalle
+    assert etiqueta is widget.etiqueta_detalle
     assert texto is widget.texto_detalle
-    assert widget._layout_grilla.indexOf(widget._etiqueta_detalle) == -1
+    assert widget._layout_grilla.indexOf(widget.etiqueta_detalle) == -1
     assert widget._layout_grilla.indexOf(widget.texto_detalle) == -1
 
 

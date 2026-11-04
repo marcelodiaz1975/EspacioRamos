@@ -685,8 +685,25 @@ class LeyendaColores(QGroupBox):
             # este sistema, ej. `QFrame#tarjetaAlerta`), sin tocar el
             # paintEvent compartido por el resto de los usos de esta celda
             # en la grilla real.
+            #
+            # Bug real reportado con foto/video de la app real, aclarado
+            # después por la clienta: lo que se veía no era UN borde de
+            # más, era el MISMO borde (el de este `QFrame`) dibujado
+            # alrededor de un área más grande que la muestra de color —
+            # sin `setFixedSize` acá, `marco_muestra` quedaba estirado por
+            # el grid layout a TODO el ancho/alto de su celda (columnas
+            # con `alineacion=0`, "sin alinear a la izquierda", estiran el
+            # widget para ocupar toda la celda), una "celda invisible" más
+            # grande que la muestra de color de adentro — el borde quedaba
+            # alrededor de esa celda estirada, no pegado al contorno real
+            # de la muestra. `setFixedSize` (mismo tamaño que `muestra`,
+            # sin margen) hace que el `QFrame` nunca pueda ser más grande
+            # que la muestra que envuelve, así el borde queda pegado
+            # justo a su contorno, sea cual sea el ancho real de la
+            # columna del grid.
             marco_muestra = QFrame()
             marco_muestra.setObjectName("muestraLeyenda")
+            marco_muestra.setFixedSize(*self._tamano_muestra)
             layout_marco = QHBoxLayout(marco_muestra)
             layout_marco.setContentsMargins(0, 0, 0, 0)
             layout_marco.addWidget(muestra)
@@ -881,8 +898,8 @@ class GrillaOperativaWidget(QWidget):
         excluir_tabla_del_tab(self.tabla)
         layout_grilla.addWidget(self.tabla, stretch=1)
 
-        self._etiqueta_detalle = QLabel("Detalle:")
-        layout_grilla.addWidget(self._etiqueta_detalle)
+        self.etiqueta_detalle = QLabel("Detalle:")
+        layout_grilla.addWidget(self.etiqueta_detalle)
         self.texto_detalle = QTextEdit()
         self.texto_detalle.setReadOnly(True)
         self.texto_detalle.setMaximumHeight(90)
@@ -1478,8 +1495,47 @@ class GrillaOperativaWidget(QWidget):
         detalle` para llegar siempre al mismo pie que la columna de al
         lado, el cuadro se achica solo por la diferencia exacta de este
         espacio nuevo — no hace falta tocar su alto a mano."""
-        indice = self._layout_grilla.indexOf(self._etiqueta_detalle)
+        indice = self._layout_grilla.indexOf(self.etiqueta_detalle)
         self._layout_grilla.insertSpacing(indice, espacio)
+
+    def alinear_etiqueta_detalle_al_pie(self) -> None:
+        """La etiqueta "Detalle:" pasa a alinear su texto abajo a la
+        izquierda (en vez del default de Qt, arriba a la izquierda) —
+        pensado para usarse junto con `fijar_alto_etiqueta_y_cuadro_
+        detalle`, que agranda esta etiqueta para que ocupe el hueco
+        entre el pie de la grilla y el cuadro "Detalle": con el texto
+        pegado abajo (contra el cuadro, al que describe) en vez de
+        pegado arriba (contra la grilla), queda del lado correcto del
+        hueco agrandado. Hay que llamarlo UNA sola vez, en el armado
+        inicial."""
+        self.etiqueta_detalle.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+
+    def fijar_alto_etiqueta_y_cuadro_detalle(self, alto_etiqueta: int, alto_cuadro: int) -> None:
+        """Fija el alto de la etiqueta "Detalle:" Y del cuadro
+        `texto_detalle` juntos, en una sola llamada — pensado para
+        Reservas regulares (pedido explícito de la clienta, sobre un
+        video real de la app: en vez de que el cuadro ocupe TODO el alto
+        de sobra con la etiqueta pegada arriba de todo, el cuadro pasa a
+        ocupar solo la MITAD de ese sobra y la etiqueta crece para
+        ocupar la otra mitad — ver `alinear_etiqueta_detalle_al_pie`
+        para que el texto quede pegado al cuadro, no a la grilla).
+
+        Las dos alturas se fijan con `setFixedHeight` sobre dos widgets
+        REALES (la etiqueta y el cuadro), no con un espaciador — un
+        intento anterior insertaba un `QSpacerItem` nuevo antes de la
+        etiqueta para este mismo propósito, pero su geometría real no
+        llegaba a reflejar el alto que se le pedía (confirmado con un
+        script de geometría: `sizeHint()` daba el valor correcto pero
+        `geometry()` seguía en 0) — un espaciador sin contenido propio
+        es, aparentemente, el primer lugar de donde Qt recorta cuando el
+        layout no entra del todo en el tope de alto de `self` (ver
+        `limitar_alto_grilla`), a diferencia de un widget real con
+        `setFixedHeight`, que Qt sí respeta como una restricción dura.
+        Agrandar la etiqueta en vez de un espaciador nuevo evita ese
+        problema de raíz, reusando el mismo mecanismo ya confirmado
+        confiable para `texto_detalle`."""
+        self.etiqueta_detalle.setFixedHeight(alto_etiqueta)
+        self.texto_detalle.setFixedHeight(alto_cuadro)
 
     def achicar_detalle(self, alto: int) -> None:
         """Baja el alto máximo del cuadro "Detalle" (90px por defecto, con
@@ -1506,9 +1562,9 @@ class GrillaOperativaWidget(QWidget):
         texto_detalle` sigue siendo válido y sigue recibiendo el
         contenido en `_actualizar_detalle`, solo cambia de padre al
         agregarlo a otro layout."""
-        self._layout_grilla.removeWidget(self._etiqueta_detalle)
+        self._layout_grilla.removeWidget(self.etiqueta_detalle)
         self._layout_grilla.removeWidget(self.texto_detalle)
-        return self._etiqueta_detalle, self.texto_detalle
+        return self.etiqueta_detalle, self.texto_detalle
 
     def alto_natural_filtros(self) -> int:
         """Alto natural (`sizeHint`) del panel de Filtros — pensado para

@@ -798,18 +798,17 @@ def test_regulares_grilla_de_8_a_22_entra_sin_scroll_vertical(qtbot, conn):
 
 
 def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_cargada(qtbot, conn):
-    """Mismo pedido que el test de arriba, sobre el cuadro "Detalle":
-    "ajustá el cuadro de detalle de manera que... termine justo antes de
-    que comience la tabla de abajo. Es decir a la altura de donde
-    termina el botón 'Eliminar reserva'" — `_ajustar_alto_detalle` (ver
-    `showEvent`) lo fija con `setFixedHeight` calculado contra el pie
-    real de `boton_eliminar`, así que la tolerancia pasa a ser chica
-    (unos pocos píxeles de margen de medición, no "cerca" — antes de
-    ese fix quedaba un margen residual de hasta 19px, documentado como
-    pendiente en CLAUDE.md).
-    Con la grilla completa (8 a 22hs) ya sin scroll vertical, "Detalle"
-    tiene que seguir sin quedar recortado ni superpuesto con la última
-    fila de la grilla."""
+    """Pedido explícito de la clienta, ronda sobre un video real de la
+    app: en vez de que el cuadro "Detalle" ocupe TODO el sobrante hasta
+    el pie de "Eliminar reserva" (como hacía antes) con la etiqueta
+    pegada arriba de todo, el cuadro pasa a ocupar solo la MITAD de ese
+    sobrante — con el PIE en la misma posición de siempre, cerca del pie
+    de "Eliminar reserva" — y la etiqueta "Detalle:" crece para ocupar
+    la otra mitad, entre el pie de la grilla y el nuevo techo, más alto,
+    del cuadro (`_ajustar_alto_detalle`, `fijar_alto_etiqueta_y_cuadro_
+    detalle`). Con la grilla completa (8 a 22hs) ya sin scroll vertical,
+    ninguno de los dos (etiqueta ni cuadro) tiene que quedar recortado
+    ni superpuesto con la última fila de la grilla."""
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
@@ -831,18 +830,24 @@ def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_
     def pie(widget):
         return widget.mapToGlobal(widget.rect().bottomLeft()).y()
 
+    def top(widget):
+        return widget.mapToGlobal(widget.rect().topLeft()).y()
+
     pie_eliminar = pie(panel_r.boton_eliminar)
     pie_detalle = pie(panel_r.grilla.texto_detalle)
     assert abs(pie_detalle - pie_eliminar) <= 5
-    # Sin superposición: "Detalle:" (la etiqueta) arranca DESPUÉS de que
-    # termina la grilla, no encima de la última fila.
-    etiqueta_detalle = next(
-        l for l in panel_r.grilla._panel_grilla.findChildren(QLabel) if l.text().startswith("Detalle")
-    )
-    tabla = panel_r.grilla.tabla
-    pie_tabla = pie(tabla)
-    top_etiqueta_detalle = etiqueta_detalle.mapToGlobal(etiqueta_detalle.rect().topLeft()).y()
-    assert top_etiqueta_detalle >= pie_tabla
+    # El sobrante se reparte en dos mitades casi iguales (como mucho 1px
+    # de diferencia, de la división entera) entre la etiqueta y el cuadro.
+    etiqueta_detalle = panel_r.grilla.etiqueta_detalle
+    assert abs(etiqueta_detalle.height() - panel_r.grilla.texto_detalle.height()) <= 1
+    # Sin superposición: "Detalle:" (la etiqueta, ahora más alta) arranca
+    # DESPUÉS de que termina la grilla, no encima de la última fila, y el
+    # cuadro arranca justo donde termina la etiqueta, salvo el espaciado
+    # parejo de siempre entre controles de esta columna (6px, `layout_
+    # grilla.spacing()` — no un hueco de más).
+    pie_tabla = pie(panel_r.grilla.tabla)
+    assert top(etiqueta_detalle) >= pie_tabla
+    assert 0 <= top(panel_r.grilla.texto_detalle) - pie(etiqueta_detalle) <= 10
 
 
 def test_regulares_con_grilla_densa_no_muestra_scroll_vertical_de_la_solapa(qtbot, conn):

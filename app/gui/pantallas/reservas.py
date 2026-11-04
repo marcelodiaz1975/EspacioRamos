@@ -420,6 +420,16 @@ _ALTO_BASE_GRUPO_GRILLA = 6
 # alto que le suma `_ALTO_TITULO_COLUMNAS_REGULARES` de arriba, ver el
 # comentario en `_PanelReservasRegulares._armar_ui`.
 _ESPACIADO_FORM = 4
+# Colchón extra (px) al fijar el alto de `_scroll_superior` — pedido
+# explícito de la clienta, propuesto por ella misma como la forma más
+# simple de terminar de cerrar la barra de scroll vertical de la solapa
+# que seguía apareciendo "por un pelín" en la PC real con fuentes
+# distintas a las de este sandbox (ver el historial de esta sección en
+# CLAUDE.md): unos pocos píxeles de margen absorben una pequeña
+# diferencia de medición sin arriesgar que el contenido real no entre —
+# a costa de esos mismos píxeles de menos para la tabla de abajo
+# (`panel_tabla`, que se queda con lo que `scroll` no usa).
+_MARGEN_SCROLL_SUPERIOR_REGULARES = 5
 # Alto (px) de fila de encabezado/dato de la grilla embebida (columna 3),
 # más chico que el default de `GrillaOperativaWidget` (26px/24px) —
 # mismos valores que Reservas aisladas (`_ALTO_FILA_ENCABEZADO_AISLADAS`/
@@ -1064,7 +1074,9 @@ class _PanelReservasRegulares(QWidget):
         self._alto_referencia_regulares = self._panel_form_regulares.height()
         self.grilla.limitar_alto_grilla(self._alto_referencia_regulares)
         self._ajustar_alto_detalle()
-        self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
+        self._scroll_superior.setFixedHeight(
+            self._contenido_superior.minimumSizeHint().height() + _MARGEN_SCROLL_SUPERIOR_REGULARES
+        )
         self.reiniciar()
         # Mismo motivo y mismo mecanismo que Reservas aisladas (ver
         # `QTimer.singleShot` en el `showEvent` de esa solapa): tanto el
@@ -1078,64 +1090,54 @@ class _PanelReservasRegulares(QWidget):
         QTimer.singleShot(0, self._reajustar_alto_y_columnas_si_sigue_vivo)
 
     def _ajustar_alto_detalle(self) -> None:
-        """Pedido explícito de la clienta: "ajustá el cuadro de detalle
-        de manera que... termine justo antes de que comience la tabla de
-        abajo. Es decir a la altura de donde termina el botón 'Eliminar
-        reserva'" — un objetivo más preciso que "el pie de la columna 1"
-        a secas (`panel_form` termina más abajo todavía, con el
-        `addStretch()` final del formulario de sobra). Fija el alto de
-        `texto_detalle` (`QTextEdit`, con `setFixedHeight` en vez de
-        `setMaximumHeight`/`stretch`, ver el hilo de la ronda anterior
-        sobre por qué esos dos no alcanzaban) para que termine exacto en
-        el pie de `self.boton_eliminar`, midiendo coordenadas globales
-        (sin depender de un ancestro común entre las dos columnas).
-        `setFixedHeight` en vez de `setMaximumHeight` por una razón de
-        fondo, no solo de exactitud: al fijar un alto mínimo explícito
-        en esta hoja (en vez de dejar que `self.grilla` "adivine" cuánto
-        estirarse con `Expanding`/`stretch`, que no funcionaba — ver esa
-        misma ronda), ese mínimo se propaga solo hacia arriba por el
-        árbol de widgets (`texto_detalle` -> `panel_grilla` -> `self.
-        grilla` -> `grupo_grilla`), que es el mecanismo de Qt que sí
-        funciona de manera confiable para este caso.
+        """Mide cuánto alto le sobra a la columna 2/3 debajo de la
+        grilla (entre el techo actual de la etiqueta "Detalle:" y el
+        MENOR de dos techos: el pie de `self.boton_eliminar` — columna
+        1, el objetivo "ideal" de siempre — y el pie MÁXIMO que la
+        columna 2/3 tiene permitido, `self._alto_referencia_regulares`
+        sumado al techo real de `self.grilla`; ver el historial de esta
+        sección en CLAUDE.md sobre por qué ese segundo tope, y no el pie
+        medido de `self.grilla` a secas, es el que no queda atrapado en
+        un ciclo con el propio alto de "Detalle").
 
-        El pie de `self.boton_eliminar` (columna 1) es el objetivo
-        IDEAL, pero nunca el único techo válido: también se topea contra
-        el pie MÁXIMO que la columna 2/3 tiene permitido (`self.grilla`,
-        ya con su propio tope de `limitar_alto_grilla` aplicado) — bug
-        real reportado por la clienta con foto y video de la app en
-        Windows, con datos densos: "Detalle" terminaba superpuesto a la
-        última fila de la grilla, incluso después de un primer intento de
-        este mismo tope (ver el historial de esta sección en CLAUDE.md).
+        Pedido explícito de la clienta, ronda sobre un video real de la
+        app: en vez de que "Detalle" (el `QTextEdit`) ocupe TODO ese
+        sobrante con la etiqueta pegada arriba de todo, el cuadro pasa a
+        ocupar solo la MITAD de ese sobrante — con el PIE en la misma
+        posición de siempre (el techo más chico de los dos de arriba) —
+        y la etiqueta "Detalle:" crece para ocupar la otra mitad, con su
+        texto pegado abajo, contra el cuadro (`alinear_etiqueta_detalle_
+        al_pie`, llamado una sola vez en `_armar_ui`).
 
-        Ese primer intento topeaba contra el pie REAL medido de
-        `self.grilla` (`self.grilla.mapToGlobal(self.grilla.rect().
-        bottomLeft())`) — insuficiente: el pie de `self.grilla` NO es un
-        techo independiente, depende en parte del alto que ESTE MISMO
-        método ya le fijó a `texto_detalle` en la pasada anterior (`self.
-        grilla` crece para darle lugar a sus hijos, `texto_detalle`
-        incluido) — un techo que se mueve con lo que se está midiendo no
-        frena nada, dos pasadas seguidas del mismo "techo inflado" podían
-        seguir forzando a `texto_detalle` más alto de lo que la columna
-        tiene de verdad. El techo real e independiente de `texto_detalle`
-        es el TOPE que `limitar_alto_grilla` le puso a `self.grilla`
-        (`self._alto_referencia_regulares`, el alto de la columna 1 —
-        ninguno de los dos depende de `texto_detalle`), sumado al TECHO
-        de `self.grilla` (que tampoco se mueve con el alto de sus hijos,
-        solo con lo que hay ARRIBA de la columna en el splitter). Tomar
-        el MENOR entre el pie de `boton_eliminar` y ese techo máximo
-        nunca le pide a `texto_detalle` más alto del que la columna 2/3
-        realmente tiene — en el caso normal (medido en este sandbox, con
-        el pie de `boton_eliminar` como techo más chico) no cambia nada;
-        solo achica el resultado, a costa de un posible hueco en blanco
-        en vez de recorte, cuando el tope de `self.grilla` termina siendo
-        el más restrictivo."""
+        El techo de la ETIQUETA (no el del cuadro) es la referencia de
+        medición: a diferencia del techo de `self.grilla` (que si se
+        mide DESPUÉS de haber fijado el alto de sus propios hijos queda
+        atrapado en el mismo ciclo que se resolvió para el punto de
+        arriba), el techo de la etiqueta nunca depende de su PROPIO alto
+        — lo determina lo que hay ARRIBA de ella (la grilla + el espacio
+        fijo de 14px), así que el cálculo es idempotente sin necesitar
+        resetear nada antes de medir, aunque este método se llame dos
+        veces por entrada a la solapa (`showEvent` y el reajuste
+        diferido por `QTimer`).
+
+        Un primer intento (revertido) repartía el sobrante con un
+        `QSpacerItem` nuevo antes de la etiqueta en vez de agrandar la
+        etiqueta misma — su `sizeHint()` reflejaba el alto pedido pero
+        su `geometry()` real se quedaba en 0 (confirmado con un script
+        de geometría): un espaciador sin contenido propio parece ser lo
+        primero que Qt recorta cuando el layout no entra del todo en el
+        tope de `self.grilla` (ver `limitar_alto_grilla`), a diferencia
+        de un widget real con `setFixedHeight`, que si se respeta como
+        restricción dura — agrandar la etiqueta (un widget real) en vez
+        de sumar un espaciador nuevo evita ese problema de raíz."""
         pie_eliminar = self.boton_eliminar.mapToGlobal(self.boton_eliminar.rect().bottomLeft()).y()
         techo_grilla = self.grilla.mapToGlobal(self.grilla.rect().topLeft()).y()
         pie_maximo_grilla = techo_grilla + self._alto_referencia_regulares
-        techo_detalle = self.grilla.texto_detalle.mapToGlobal(self.grilla.texto_detalle.rect().topLeft()).y()
-        alto_disponible = min(pie_eliminar, pie_maximo_grilla) - techo_detalle
+        techo_etiqueta = self.grilla.etiqueta_detalle.mapToGlobal(self.grilla.etiqueta_detalle.rect().topLeft()).y()
+        alto_disponible = min(pie_eliminar, pie_maximo_grilla) - techo_etiqueta
         if alto_disponible > 0:
-            self.grilla.texto_detalle.setFixedHeight(alto_disponible)
+            mitad = alto_disponible // 2
+            self.grilla.fijar_alto_etiqueta_y_cuadro_detalle(alto_disponible - mitad, mitad)
 
     def _reajustar_alto_y_columnas_si_sigue_vivo(self) -> None:
         """Ver el `QTimer.singleShot` en `showEvent` — mismo guard que
@@ -1156,7 +1158,9 @@ class _PanelReservasRegulares(QWidget):
             self._alto_referencia_regulares = self._panel_form_regulares.height()
             self.grilla.limitar_alto_grilla(self._alto_referencia_regulares)
             self._ajustar_alto_detalle()
-            self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
+            self._scroll_superior.setFixedHeight(
+                self._contenido_superior.minimumSizeHint().height() + _MARGEN_SCROLL_SUPERIOR_REGULARES
+            )
             self.actualizar()
 
     def _armar_ui(self) -> None:
@@ -1427,6 +1431,16 @@ class _PanelReservasRegulares(QWidget):
         # de arriba) sigue llegando al mismo pie que la columna de al
         # lado sin más ajuste: se achica solo por este espacio nuevo.
         self.grilla.agregar_espacio_antes_de_detalle(14)
+        # Pedido explícito de la clienta, sobre el mecanismo de arriba
+        # ("dar_stretch_a_detalle" + el espacio fijo de 14px): en vez de
+        # que el cuadro "Detalle" ocupe todo el alto de sobra con la
+        # etiqueta pegada arriba de todo, el cuadro pasa a ocupar solo la
+        # MITAD de ese sobra (con el pie en la misma posición de
+        # siempre) y la etiqueta "Detalle" crece para ocupar la otra
+        # mitad, con su texto pegado abajo (contra el cuadro al que
+        # describe) — ver `_ajustar_alto_detalle`, que calcula y aplica
+        # las dos mitades con `fijar_alto_etiqueta_y_cuadro_detalle`.
+        self.grilla.alinear_etiqueta_detalle_al_pie()
         # Tope de alto IGUAL al de `panel_form` (columna 1, con Días/
         # Vigencia/3 botones) en vez de a `alto_natural_grilla()` (el
         # alto natural de la grilla sola): pedido explícito de la

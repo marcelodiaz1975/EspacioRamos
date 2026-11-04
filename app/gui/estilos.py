@@ -230,28 +230,33 @@ QHeaderView:vertical {{ qproperty-defaultAlignment: AlignCenter; }}
 
 /* Punto #9.1.2 (SistemaDF v0.11.2026.10, Reservas regulares): "que los
 cuadritos de las referencias de colores sean recuadrados con una línea
-finita negra... para que se vean delimitados" — pedido de esa ronda, ya
-revertido (ver más abajo). Una celda real de la grilla (`_CeldaGrilla`)
-solo pinta su borde abajo/derecha (ver `_dibujar_bordes_gruesos` en
-grilla_operativa.py); cada muestra de la leyenda sigue envuelta en un
-`QFrame` propio con objectName `muestraLeyenda` (`LeyendaColores.
-actualizar`) — no por el borde (ver abajo), sino porque sigue siendo el
-mecanismo que evita tocar el paintEvent propio de `_CeldaGrilla` (que
-pinta a mano, sin `super().paintEvent()`): un `WA_StyledBackground`
-directo sobre `_CeldaGrilla` funcionaba visualmente pero reventaba en un
-segfault real al correr la suite completa.
+finita negra... para que se vean delimitados" — una celda real de la
+grilla (`_CeldaGrilla`) solo pinta su borde abajo/derecha (ver
+`_dibujar_bordes_gruesos` en grilla_operativa.py), así que la muestra de
+color de la leyenda necesita un marco CERRADO propio en las 4 caras.
+Acotado por objectName (mismo criterio que QFrame#tarjetaAlerta) — cada
+muestra va envuelta en un `QFrame` propio con este objectName
+(`LeyendaColores.actualizar`), que es el que de verdad recibe el borde
+de QSS: un `WA_StyledBackground` directo sobre `_CeldaGrilla` (que pinta
+su propio contenido a mano, sin llamar a `super().paintEvent()`)
+funcionaba visualmente pero reventaba en un segfault real al correr la
+suite completa.
 
-Pedido explícito de la clienta, ronda sobre la foto real de Reservas
-regulares con datos densos: sacar también este borde — "Recuadros
-alrededor de las referencias", confirmado que se refería a este, no al
-marco grande de toda la sección "Referencias de colores" (ese ya estaba
-sacado, `LeyendaColores.quitar_marco`, sin cambios). Cambio de criterio
-sobre el Punto #9.1.2 original: `border: none` en vez del borde negro
-fino — alcance general (no puntual de Reservas regulares), mismo
-criterio de siempre: este objectName lo pintan todas las pantallas que
-usan `LeyendaColores` (Vista rápida, Oferta de consultorios, Reservas
-regulares/aisladas), así que se saca de una para todas. */
-QWidget#muestraLeyenda {{ border: none; }}
+Hilo de ida y vuelta sobre este mismo borde, con la clienta: una ronda
+después pidió sacarlo ("Recuadros alrededor de las referencias", sobre
+una foto real con datos densos) — se sacó (`border: none`) — pero
+aclaró después que el problema real era otro: el `QFrame` quedaba
+estirado por el grid layout a TODO el ancho/alto de su celda (sin
+`setFixedSize`, una columna más ancha por algún vecino estira a todos
+sus hijos), así que el borde quedaba alrededor de una "celda invisible"
+más grande que la muestra de color de adentro — dos rectángulos
+visibles (el borde grande + el color chico adentro) en vez de uno solo
+pegado al contorno real. El borde en sí SÍ se quería conservar — se
+repone acá (`border: 1px solid #000000`) — y el arreglo real es
+`marco_muestra.setFixedSize(...)` en `LeyendaColores.actualizar` (ver
+ese archivo), que ata el `QFrame` al tamaño exacto de la muestra que
+envuelve, sin poder estirarse más allá. */
+QWidget#muestraLeyenda {{ border: 1px solid #000000; }}
 
 /* Indicador de foco en botones (pedido explícito de la clienta): "toco
 Tab, pasa de botón en botón, pero no veo dónde estoy parado" — el estilo

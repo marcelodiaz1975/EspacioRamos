@@ -1454,6 +1454,110 @@ garantizado, nunca dejar dibujar un separador sin vecina), no de un
 número recalibrado — pendiente de que la clienta confirme con la build
 nueva.
 
+## Reservas regulares: ronda 4 — aclaración de la clienta sobre el borde, pedido nuevo de "Detalle", colchón de 5px para el scroll
+
+La clienta aclaró cada uno de los tres puntos de la ronda anterior con
+pedidos mucho más concretos (verbatim, un solo mensaje):
+
+"* Referencia de colores: ponele de nuevo la linea fina del contorno a
+cada referencia de colores. Lo que te había pedido que saques era
+porque había un recuadro "doble" llamalo asi, uno que envolvía justo el
+contorno de la referencia, que es lo que quiero conservar, y otro que
+ocupaba un area mas grande, como si fuera la celda invisible en el cual
+estaba adentro la referencia.
+* Lo de la etiqueta detalle y el cuadro de detalle te lo explico de
+manera distinta. Tomando como referencia que la linea de abajo del
+cuadro de detalle esta en la posición correcta, a partir de ahi reducí
+el alto del cuadro a la mitad, y arriba donde termina el cuadro y abajo
+de la grilla poné la etiqueta que dice "Detalle"
+* Para evitar la barra de scroll vertical del formulario, baja la tabla
+5px a ver si asi la pegamos y resolvemos el tema"
+
+1. **Borde de la leyenda — aclarado: el "recuadro doble" era el MISMO
+   borde del `QFrame` (Punto #9.1.2), dibujado alrededor de una celda
+   más grande que la muestra, no dos mecanismos de borde distintos.**
+   `marco_muestra` (el `QFrame` que envuelve cada muestra, ver
+   `LeyendaColores.actualizar`) no tenía `setFixedSize` — el grid layout
+   lo estiraba a TODO el ancho/alto de su celda (columnas sin alinear a
+   la izquierda estiran sus widgets a ocupar toda la celda), una "celda
+   invisible" más grande que la muestra de color de adentro cuando algún
+   vecino de esa columna pedía más ancho — el borde quedaba alrededor de
+   esa celda estirada, no pegado al contorno real de la muestra: visto
+   de cerca, dos rectángulos (el borde grande + el color chico adentro
+   con espacio en blanco al rededor). Se repone `border: 1px solid
+   #000000` en `estilos.py` (revertido el `border: none` de la ronda
+   anterior) y se suma `marco_muestra.setFixedSize(*self._tamano_
+   muestra)` — el `QFrame` nunca puede ser más grande que la muestra que
+   envuelve, así el borde queda pegado justo a su contorno sea cual sea
+   el ancho real de la columna. Confirmado con zoom x3 sobre una captura
+   con datos densos: un solo rectángulo por muestra, pegado a su color.
+
+2. **"Detalle": pedido nuevo y más concreto, reemplaza el intento de la
+   ronda anterior.** El pie del cuadro (ya en la posición correcta,
+   `min(pie_eliminar, pie_maximo_grilla)`, sin tocar) se toma como
+   referencia fija; el cuadro pasa a medir la MITAD de lo que medía
+   antes, y la etiqueta "Detalle:" (antes de alto fijo/chico, pegada
+   arriba de todo) crece para ocupar la otra mitad, con su texto
+   alineado abajo (pegado al cuadro al que describe, no a la grilla).
+
+   Primer intento (revertido): un `QSpacerItem` nuevo insertado antes de
+   la etiqueta, redimensionado en cada pasada de `_ajustar_alto_
+   detalle`. Confirmado con un script de geometría que NO funcionaba:
+   `sizeHint()` del espaciador reflejaba el alto pedido pero su
+   `geometry()` real se quedaba en 0 — un espaciador sin contenido
+   propio parece ser lo primero que Qt recorta cuando el layout no entra
+   del todo en el tope de `self.grilla` (`limitar_alto_grilla`), a
+   diferencia de un widget real con `setFixedHeight`, que si se respeta
+   como restricción dura (confirmado: `texto_detalle.setFixedHeight(...)`
+   sí se refleja siempre, en todas las rondas anteriores).
+
+   Arreglo definitivo: en vez de un espaciador nuevo, se agranda la
+   ETIQUETA misma (`etiqueta_detalle`, pasada de privada — `_etiqueta_
+   detalle` — a pública, mismo criterio que `texto_detalle`, para que
+   Reservas regulares pueda medirla y fijarle el alto desde afuera sin
+   reinventar el acceso) con `setFixedHeight`, un widget real — mismo
+   mecanismo ya confiable. `GrillaOperativaWidget` suma dos métodos
+   nuevos: `alinear_etiqueta_detalle_al_pie()` (alinea el texto abajo a
+   la izquierda, llamado una sola vez en el armado) y `fijar_alto_
+   etiqueta_y_cuadro_detalle(alto_etiqueta, alto_cuadro)` (fija los dos
+   altos juntos). `_ajustar_alto_detalle` mide ahora contra el TECHO de
+   la etiqueta (no el del cuadro) — ese techo no depende de su propio
+   alto (lo determina lo que hay ARRIBA: la grilla + el espacio fijo de
+   14px), así que el cálculo es idempotente sin necesitar resetear nada
+   antes de medir, ni siquiera llamándose dos veces por entrada a la
+   solapa.
+
+   Confirmado con el script de geometría de rondas anteriores (36
+   consultorios/200+ reservas/1366×768): `etiqueta_detalle.height()` y
+   `texto_detalle.height()` quedan parejos (57px cada uno, de un
+   sobrante de 114), sin superposición con la grilla, scroll vertical de
+   `_scroll_superior` en 0. Con el dataset simple de los tests (1
+   reserva, sin forzar el tope de `self.grilla`), el pie del cuadro
+   sigue cerca del pie de "Eliminar reserva" (mismo criterio de
+   siempre), confirmando que el reparto nuevo no rompe el caso normal.
+
+3. **Colchón de 5px en `_scroll_superior`, propuesto por la clienta
+   como arreglo pragmático para el resto de la barra de scroll vertical
+   ("por un pelín") que seguía apareciendo en rondas anteriores.**
+   `_MARGEN_SCROLL_SUPERIOR_REGULARES = 5`, sumado al `setFixedHeight`
+   de `_scroll_superior` (en `showEvent` y en el reajuste diferido) —
+   unos pocos píxeles de margen absorben una pequeña diferencia de
+   medición entre este sandbox y la PC real sin arriesgar que el
+   contenido no entre, a costa de esos mismos píxeles de menos para la
+   tabla de abajo (imperceptible frente al resto del alto disponible).
+
+Tests: `tests/test_gui_grilla_operativa.py` (`test_muestras_de_la_
+leyenda_quedan_recuadradas_pegadas_a_su_contorno`, reemplaza al test de
+la ronda anterior — verifica que el `QFrame` queda EXACTAMENTE del
+mismo tamaño que la muestra que envuelve, la causa real del "recuadro
+doble"); `tests/test_gui_reservas.py` (`test_regulares_detalle_termina_
+cerca_del_pie_de_eliminar_reserva_con_grilla_cargada`, reescrito:
+verifica el reparto parejo entre etiqueta/cuadro, que quedan contiguos
+sin hueco entre sí, y que ninguno de los dos se superpone con la
+grilla) — el resto de los tests de ambos archivos, y el escenario denso
+(`test_regulares_con_grilla_densa_no_muestra_scroll_vertical_de_la_
+solapa`), siguen pasando sin cambios.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
