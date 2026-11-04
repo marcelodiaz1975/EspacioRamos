@@ -510,16 +510,18 @@ def test_mostrar_leyenda_colores_la_revela_con_las_referencias_de_regular(qtbot,
     assert "Libre de reserva regular." not in textos  # propia de "aislada"
 
 
-def test_muestras_de_la_leyenda_quedan_recuadradas_en_negro(qtbot, conn):
-    """Punto #9.1.2 (SistemaDF v0.11.2026.10): cada muestra de color de
-    "Referencias de colores" queda envuelta en un `QFrame` propio con
-    `objectName="muestraLeyenda"`, para que el QSS de `estilos.py` le
-    pinte un marco negro cerrado en las 4 caras (a diferencia de una
-    celda real de la grilla, que solo pinta abajo/derecha). Un `QFrame`
-    soporta el borde de QSS de forma nativa, sin necesitar
-    `WA_StyledBackground` sobre `_CeldaGrilla` — esa alternativa se
-    probó primero y se descartó por un segfault real (ver el comentario
-    en `grilla_operativa.py`)."""
+def test_muestras_de_la_leyenda_siguen_envueltas_en_su_propio_marco(qtbot, conn):
+    """Punto #9.1.2 (SistemaDF v0.11.2026.10) pedía un borde negro fino
+    en cada muestra de color de "Referencias de colores" — revertido
+    después, a pedido de la clienta ("Recuadros alrededor de las
+    referencias"), sobre la foto real de Reservas regulares con datos
+    densos: `QWidget#muestraLeyenda` pasa a `border: none` en
+    `estilos.py`. El `QFrame` propio con `objectName="muestraLeyenda"`
+    que envuelve cada muestra se queda igual (ya no por el borde, sino
+    porque sigue siendo el mecanismo que evita pintar directo sobre
+    `_CeldaGrilla` con `WA_StyledBackground` — esa alternativa se probó
+    primero y se descartó por un segfault real, ver el comentario en
+    `grilla_operativa.py`)."""
     _preparar(conn)
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)

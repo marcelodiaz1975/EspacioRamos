@@ -1291,6 +1291,93 @@ maximum() == 0`) — los tests existentes de esta solapa (con datasets
 chicos, donde el bug nunca llegaba a disparar una barra de scroll
 visible) siguen pasando sin cambios.
 
+## Reservas regulares: foto real con datos densos, ronda 2 — borde de la leyenda, "Detalle" todavía superpuesto, resto de la barra de scroll
+
+La clienta confirmó que el .exe que probó para la ronda anterior (la del
+`_scroll_superior` desincronizado) ya tenía ese fix — así que estos tres
+puntos, con fotos nuevas más detalladas (incluido el .exe real,
+"SistemaDF v.2026.11", con datos igual de densos que la ronda anterior:
+muchos consultorios por edificio, decenas de profesionales), son
+síntomas reales que ese fix no alcanzó a resolver del todo:
+
+"* Recuadros alrededor de las referencias.
+* Barra de escroll vertical de la solapa por un pelín que aún hay que
+ajustar.
+* Cuadro de detalle y etiqueta muy sobre la grilla, lo pisa."
+
+1. **"Recuadros alrededor de las referencias" — no era el marco grande
+   de la leyenda (ese seguía sacado), era el bordecito de cada "cuadrito"
+   de color.** Confirmado con la clienta antes de tocar nada (ambigüedad
+   real: el Punto #9.1.2 había pedido ESE borde a propósito, "para que
+   se vean delimitados", y quedó documentado como una decisión
+   deliberada) — cambio de criterio explícito: ahora se quiere sacar
+   también. `QWidget#muestraLeyenda` pasa de `border: 1px solid #000000`
+   a `border: none` en `estilos.py` — alcance general (no puntual de
+   Reservas regulares), mismo criterio de siempre: ese objectName lo usan
+   todas las pantallas con `LeyendaColores` (Vista rápida, Oferta de
+   consultorios, Reservas regulares/aisladas). El `QFrame` que envuelve
+   cada muestra se queda igual (ya no hace falta por el borde, pero sigue
+   siendo necesario para evitar el segfault de pintar directo sobre
+   `_CeldaGrilla` con `WA_StyledBackground`, documentado desde el
+   Punto #9.1.2 original). Test renombrado en
+   `tests/test_gui_grilla_operativa.py`:
+   `test_muestras_de_la_leyenda_siguen_envueltas_en_su_propio_marco`
+   (antes `test_muestras_de_la_leyenda_quedan_recuadradas_en_negro` —
+   ya no verificaba un color de borde puntual, solo la estructura del
+   `QFrame`, así que no hacía falta cambiar sus asserts, solo el nombre
+   y el docstring).
+
+2. **"Detalle" seguía superpuesto a la grilla — confirmado real con la
+   foto, no solo una sospecha.** La ronda anterior ya había anotado este
+   riesgo como posible ("en la PC real... la distancia real... puede ser
+   bastante mayor que en este sandbox") sin poder reproducirlo con los
+   datasets de prueba disponibles acá. Causa real, ahora sí identificada:
+   `_ajustar_alto_detalle` fijaba el alto de `texto_detalle` para que
+   llegara exacto al pie de `self.boton_eliminar` (columna 1) SIN
+   comparar ese objetivo contra lo que la columna 2/3 (`self.grilla`,
+   con su propio tope de `limitar_alto_grilla`) realmente tiene
+   disponible — en este sandbox el pie de `boton_eliminar` siempre
+   resultó ser el techo más chico de los dos (así que el fix de la
+   ronda anterior funcionaba bien acá), pero con métricas de fuente
+   reales de Windows la tabla/filtros de arriba de la columna 2/3 pueden
+   necesitar más alto del medido en este contenedor, dejándole a
+   `texto_detalle` menos lugar real del que `_ajustar_alto_detalle` le
+   pedía — forzarlo de todos modos hace que Qt no pueda satisfacer a la
+   vez el alto fijo pedido y el tope de `self.grilla`, y el resultado es
+   contenido superpuesto en vez de un error visible.
+
+   Arreglo: `_ajustar_alto_detalle` pasa a tomar el MENOR de dos techos
+   — el pie de `boton_eliminar` (el objetivo ideal, sin cambios) Y el
+   pie REAL de `self.grilla` (`self.grilla.mapToGlobal(...)`, nuevo) —
+   nunca le pide a `texto_detalle` más alto del que la columna 2/3
+   realmente tiene, a costa de un posible hueco en blanco (mejor que un
+   recorte) cuando el pie de `self.grilla` termina siendo el más
+   restrictivo. Confirmado con el mismo script de geometría de la ronda
+   anterior (36 consultorios/200+ reservas/1366×768): sin cambios en los
+   números medidos acá (el pie de `boton_eliminar` sigue siendo el techo
+   más chico en este dataset, así que el cambio es un no-op en este
+   sandbox) — no se pudo reproducir la superposición real con los datos
+   disponibles acá, pero el mecanismo de fondo (nunca pedir más alto del
+   que la columna realmente tiene) es el que corrige la causa, no un
+   número calibrado a ciegas.
+
+3. **Resto de la barra de scroll vertical ("por un pelín").** Mismo
+   mecanismo que el punto 2: si `_ajustar_alto_detalle` forzaba a
+   `texto_detalle` más alto del que `self.grilla` tenía disponible, eso
+   inflaba de más el alto mínimo real de `self.grilla` (y con él, el de
+   `_contenido_superior` completo) más allá de lo que hacía falta — el
+   mismo tope nuevo del punto 2 evita ese sobre-pedido, así que debería
+   achicar o cerrar del todo el resto de esta barra en la PC real
+   también (no se pudo confirmar con un número exacto por no poder
+   reproducir el escenario límite acá — pendiente de que la clienta
+   pruebe la build nueva).
+
+Tests: `tests/test_gui_grilla_operativa.py` (rename, ver punto 1);
+`tests/test_gui_reservas.py` sin cambios de assert (el escenario denso ya
+existente, `test_regulares_con_grilla_densa_no_muestra_scroll_vertical_
+de_la_solapa`, sigue pasando — el cambio en `_ajustar_alto_detalle` es
+un no-op con ese dataset, confirmado).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

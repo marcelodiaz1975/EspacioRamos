@@ -1096,11 +1096,35 @@ class _PanelReservasRegulares(QWidget):
         misma ronda), ese mínimo se propaga solo hacia arriba por el
         árbol de widgets (`texto_detalle` -> `panel_grilla` -> `self.
         grilla` -> `grupo_grilla`), que es el mecanismo de Qt que sí
-        funciona de manera confiable para este caso."""
-        alto_disponible = (
-            self.boton_eliminar.mapToGlobal(self.boton_eliminar.rect().bottomLeft()).y()
-            - self.grilla.texto_detalle.mapToGlobal(self.grilla.texto_detalle.rect().topLeft()).y()
-        )
+        funciona de manera confiable para este caso.
+
+        El pie de `self.boton_eliminar` (columna 1) es el objetivo
+        IDEAL, pero nunca el único techo válido: también se topea contra
+        el pie REAL de `self.grilla` (columna 2/3, ya con su propio tope
+        de `limitar_alto_grilla` aplicado) — bug real reportado por la
+        clienta con una foto de la app en Windows, con datos densos:
+        "Detalle" terminaba superpuesto a la última fila de la grilla.
+        Con métricas de fuente distintas a las de este sandbox (ver
+        "Metodología de trabajo" en CLAUDE.md), la tabla/filtros de
+        arriba pueden necesitar más alto real del que mide en este
+        contenedor, dejándole a `texto_detalle` menos lugar real del que
+        hace falta para llegar hasta el pie de `boton_eliminar` SIN
+        invadir lo que ya ocupa el resto de la columna — forzarlo de
+        todos modos (el bug de antes de este fix) hace que Qt no pueda
+        darle a la vez el alto fijo que se le pide a `texto_detalle` Y
+        el tope de alto de `self.grilla`, y el resultado visual es
+        contenido superpuesto en vez de un error. Tomar el MENOR de los
+        dos techos (pie de `boton_eliminar`, pie de `self.grilla`) nunca
+        le pide a `texto_detalle` más alto del que la columna 2/3
+        realmente tiene disponible — en el caso normal (el medido en
+        este sandbox, con el pie de `boton_eliminar` como techo más
+        chico) no cambia nada; solo achica el resultado, a costa de un
+        posible hueco en blanco en vez de recorte, cuando el pie de
+        `self.grilla` termina siendo el más restrictivo."""
+        pie_eliminar = self.boton_eliminar.mapToGlobal(self.boton_eliminar.rect().bottomLeft()).y()
+        pie_grilla = self.grilla.mapToGlobal(self.grilla.rect().bottomLeft()).y()
+        techo_detalle = self.grilla.texto_detalle.mapToGlobal(self.grilla.texto_detalle.rect().topLeft()).y()
+        alto_disponible = min(pie_eliminar, pie_grilla) - techo_detalle
         if alto_disponible > 0:
             self.grilla.texto_detalle.setFixedHeight(alto_disponible)
 
