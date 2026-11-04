@@ -1031,9 +1031,26 @@ class _PanelReservasRegulares(QWidget):
         `minimumSizeHint()` calculado ANTES de este primer show puede
         quedar unos pixels desincronizado del real. Mismo motivo para
         `_alto_referencia_regulares` (alto de la columna 1, tomado como
-        referencia para la columna 2 — ver `_armar_ui`)."""
+        referencia para la columna 2 — ver `_armar_ui`).
+
+        `_scroll_superior.setFixedHeight(...)` se fija DESPUÉS de
+        `_ajustar_alto_detalle()` (bug real, reportado por la clienta con
+        una captura de la app real en Windows con datos densos — muchos
+        consultorios/profesionales: "Detalle" seguía superpuesto a la
+        grilla, la tabla de abajo no llegaba al final de la solapa, y
+        aparecía una barra de scroll vertical de la solapa en sí que no
+        tendría que estar). Antes, `_scroll_superior` se fijaba ANTES de
+        `_ajustar_alto_detalle()` — que puede agrandar `texto_detalle` (y
+        con él, el alto mínimo real de `_contenido_superior`) — así que
+        quedaba desincronizado por la misma diferencia (reproducido con
+        un script de geometría: `scroll.verticalScrollBar().maximum()`
+        daba 4, con `_contenido_superior.minimumSizeHint()` en 544 contra
+        un `scroll` ya fijado en 540). Ese faltante de unos pocos pixels
+        es justamente la barra de scroll vertical de más (el contenido ya
+        no entra en el alto fijo que `scroll` le dejó) y el motivo de que
+        le sobre menos lugar a la tabla de abajo (`panel_tabla`, que se
+        queda con lo que `scroll` no usa)."""
         super().showEvent(event)
-        self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
         # `.height()` (alto YA asentado por el splitter), no `sizeHint()`
         # (el "preferido" de columna 1 sola) — con la leyenda/grilla de
         # la columna 2 pidiendo más alto del que mide `panel_form` sola,
@@ -1047,6 +1064,7 @@ class _PanelReservasRegulares(QWidget):
         self._alto_referencia_regulares = self._panel_form_regulares.height()
         self.grilla.limitar_alto_grilla(self._alto_referencia_regulares)
         self._ajustar_alto_detalle()
+        self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
         self.reiniciar()
         # Mismo motivo y mismo mecanismo que Reservas aisladas (ver
         # `QTimer.singleShot` en el `showEvent` de esa solapa): tanto el
@@ -1090,11 +1108,22 @@ class _PanelReservasRegulares(QWidget):
         """Ver el `QTimer.singleShot` en `showEvent` — mismo guard que
         `_PanelReservasAisladas._distribuir_ancho_sobrante_si_sigue_
         vivo` para el mismo problema (la pantalla pudo cerrarse antes de
-        que el loop de eventos llegue a disparar el timer)."""
+        que el loop de eventos llegue a disparar el timer).
+
+        Vuelve a fijar el alto de `_scroll_superior` también acá, después
+        de `_ajustar_alto_detalle()` (mismo motivo que en `showEvent` —
+        ver ese docstring): este paso diferido es el que mide contra el
+        layout ya resuelto de verdad, así que si `_ajustar_alto_detalle`
+        cambia el alto de `texto_detalle` en esta segunda pasada (puede
+        diferir del primer cálculo sincrónico de `showEvent`, antes de
+        que Qt termine de acomodar toda la ventana), `_scroll_superior`
+        tiene que quedar sincronizado con ese valor final — sin este
+        refresco quedaba fijado al valor de `showEvent` para siempre."""
         if shiboken6.isValid(self._panel_form_regulares) and shiboken6.isValid(self.tabla):
             self._alto_referencia_regulares = self._panel_form_regulares.height()
             self.grilla.limitar_alto_grilla(self._alto_referencia_regulares)
             self._ajustar_alto_detalle()
+            self._scroll_superior.setFixedHeight(self._contenido_superior.minimumSizeHint().height())
             self.actualizar()
 
     def _armar_ui(self) -> None:

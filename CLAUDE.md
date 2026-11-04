@@ -1197,6 +1197,100 @@ fija exacto); `test_reiniciar_regulares_repone_la_visualizacion_a_
 reservas_regulares`/`test_reiniciar_aisladas_repone_la_visualizacion_a_
 reservas_aisladas` (nuevos).
 
+## Reservas regulares: barra de scroll vertical de la solapa (bug real de la ronda anterior, visto con datos densos de la app real)
+
+La ronda anterior se verificó solo con los datasets chicos de los tests
+(1-2 consultorios, 1 reserva) — la clienta mandó después una captura de
+la app real en Windows (muchos consultorios por edificio: "EP", "7mo",
+"9no" con varias columnas cada uno; la grilla con su propio scroll
+horizontal; la tabla de abajo con decenas de profesionales reales) con
+tres síntomas nuevos en la misma solapa, los tres en un mismo mensaje:
+
+1. "Baja la terminación de la tabla de abajo para que coincida con el
+   final de la solapa, estira la tabla un pelín más para aprovechar ese
+   espacio que quedó porque la barra de desplazamiento horizontal no se
+   ve más por el momento" (confirma de paso que el fix de la ronda
+   anterior para esa barra horizontal funcionó).
+2. "Detalle sigue estando superpuesto a la grilla... que detalle quede
+   ABAJO de la grilla, y luego ajustá el cuadro de detalle para que esté
+   abajo de esa etiqueta que dice 'Detalle' y el final de la tabla."
+3. "Se sigue viendo la barra de escrol vertical de la solapa en sí...
+   la idea es que la barra de desplazamiento vertical de la solapa no
+   se vea."
+
+Investigado antes de tocar nada (mismo criterio de siempre: nunca a
+ciegas) con un script de geometría que reproduce un escenario denso de
+verdad — 36 consultorios en 4 edificios (fuerza el scroll horizontal de
+la grilla, igual que la foto real) y más de 200 reservas regulares
+repartidas entre 25 profesionales (pobla la tabla de abajo con muchas
+filas) — contra una ventana de 1366×768 (una resolución real más chica
+que los 1500×900 de los tests existentes). Confirmado con ese script:
+`self._scroll_superior.verticalScrollBar().maximum()` daba 4, no 0 —
+había efectivamente una barra de scroll vertical de más dentro de
+`_scroll_superior` (el `QScrollArea` que envuelve formulario+grilla,
+ver `_armar_ui`), con `self._contenido_superior.minimumSizeHint()` en
+544 contra un `scroll` ya fijado (`setFixedHeight`) en 540.
+
+Causa real, en el propio `showEvent` de `_PanelReservasRegulares`:
+`self._scroll_superior.setFixedHeight(self._contenido_superior.
+minimumSizeHint().height())` se llamaba ANTES de `self._ajustar_alto_
+detalle()` — que puede agrandar `texto_detalle` con `setFixedHeight`
+(ver la ronda anterior) para cerrar la distancia hasta el pie de
+"Eliminar reserva", cambiando de paso el alto mínimo real de TODO
+`_contenido_superior` (formulario + grilla + Detalle, todo adentro del
+mismo `QScrollArea`). `_scroll_superior` quedaba fijado al valor de
+ANTES de ese agrandamiento, así que su alto fijo terminaba por debajo
+de lo que su propio contenido necesitaba de verdad — un `QScrollArea`
+con `setWidgetResizable(True)` en esa situación muestra su propia barra
+de scroll vertical en vez de dejar que el contenido se recorte sin
+avisar, que es justo la barra que la clienta reportó (síntoma #3), y el
+motivo de que le quedara menos lugar real a la tabla de abajo (síntoma
+#1: `panel_tabla` se queda con lo que `_scroll_superior` NO usa, `stretch
+=1`, así que cualquier pixel de más que `_scroll_superior` reclame de
+manera errónea es un pixel menos para la tabla). El reajuste diferido
+(`_reajustar_alto_y_columnas_si_sigue_vivo`, disparado por el `QTimer.
+singleShot` de `showEvent`) tampoco ayudaba: vuelve a llamar a `_ajustar_
+alto_detalle()` (una segunda vez, ya con el layout de toda la ventana
+resuelto de verdad — mismo motivo que recalcula `_alto_referencia_
+regulares`/`limitar_alto_grilla` ahí mismo) pero nunca volvía a fijar el
+alto de `_scroll_superior`, así que quedaba pegado para siempre al
+valor de la primera pasada de `showEvent`, sin importar cuánto cambiara
+`texto_detalle` después.
+
+Sobre el síntoma #2 ("Detalle superpuesto a la grilla"): no se reprodujo
+una superposición visible dentro del script de geometría con este
+dataset (la causa de fondo — `_scroll_superior` desincronizado — sí se
+confirmó igual), pero es consistente con el mismo mecanismo: en la PC
+real de la clienta, con métricas de fuente distintas a las de este
+contenedor (ver "Metodología de trabajo" más arriba sobre Carlito/
+Inter), la distancia real entre el pie de "Eliminar reserva" y el techo
+de "Detalle" puede ser bastante mayor que en este sandbox — agrandando
+`texto_detalle` mucho más de lo que agranda acá, y por lo tanto
+agrandando mucho más la desincronización de `_scroll_superior` con
+él, lo que alcanza para que el contenido de más abajo dentro de ese
+`QScrollArea` (la grilla, "Detalle") se vea recortado/superpuesto en vez
+de solo una barra de scroll de unos pocos píxeles como en este sandbox.
+
+Arreglo: `_scroll_superior.setFixedHeight(...)` se mueve a DESPUÉS de
+`_ajustar_alto_detalle()` en `showEvent`, y se suma el mismo llamado al
+final de `_reajustar_alto_y_columnas_si_sigue_vivo` (que antes solo
+recalculaba `_alto_referencia_regulares`/`limitar_alto_grilla`/
+`_ajustar_alto_detalle` pero no volvía a sincronizar `_scroll_superior`
+con el resultado) — así `_scroll_superior` queda siempre fijado DESPUÉS
+de que todo lo demás que puede cambiar el alto mínimo real de su
+contenido ya corrió, en las dos pasadas (la sincrónica de `showEvent` y
+la diferida del `QTimer`). Confirmado con el mismo script de geometría:
+`scroll.verticalScrollBar().maximum()` pasa a dar 0, tanto con la
+ventana de 1366×768 como con la de 1500×900 de los tests existentes.
+
+Test nuevo en `tests/test_gui_reservas.py`:
+`test_regulares_con_grilla_densa_no_muestra_scroll_vertical_de_la_
+solapa` (36 consultorios/200+ reservas/1366×768, mismo dataset que el
+script de diagnóstico, verifica `_scroll_superior.verticalScrollBar().
+maximum() == 0`) — los tests existentes de esta solapa (con datasets
+chicos, donde el bug nunca llegaba a disparar una barra de scroll
+visible) siguen pasando sin cambios.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

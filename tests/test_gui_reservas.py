@@ -845,6 +845,70 @@ def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_
     assert top_etiqueta_detalle >= pie_tabla
 
 
+def test_regulares_con_grilla_densa_no_muestra_scroll_vertical_de_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta con una captura de la app real en
+    Windows (datos bien más densos que los de los tests de arriba: muchos
+    consultorios/profesionales): "Detalle" seguía superpuesto a la
+    grilla, la tabla de abajo no llegaba al final de la solapa, y se
+    seguía viendo la barra de scroll vertical de la solapa en sí.
+    Investigado con un script de geometría contra un escenario denso
+    (36 consultorios en 4 edificios — fuerza el scroll horizontal de la
+    grilla — y más de 200 reservas regulares): `_scroll_superior` (el
+    `QScrollArea` que envuelve formulario+grilla, ver `_armar_ui`) se
+    fijaba con `setFixedHeight` ANTES de que `_ajustar_alto_detalle()`
+    corriera (en `showEvent`) y nunca se volvía a fijar en el reajuste
+    diferido (`_reajustar_alto_y_columnas_si_sigue_vivo`) — como
+    `_ajustar_alto_detalle` puede agrandar `texto_detalle` (y con él el
+    alto mínimo real de todo el contenido scrolleable), `_scroll_
+    superior` quedaba con un alto fijo más chico que el que su propio
+    contenido necesitaba de verdad, y el `QScrollArea` terminaba
+    mostrando su propia barra de scroll vertical (reproducido: `scroll.
+    verticalScrollBar().maximum()` daba 4, no 0) — exactamente la barra
+    que la clienta reportó, y la causa de que le quedara menos lugar a
+    la tabla de abajo. Se resuelve fijando `_scroll_superior` siempre
+    DESPUÉS de `_ajustar_alto_detalle()`, tanto en `showEvent` como en
+    el reajuste diferido."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    ids_consultorio = []
+    for n_unidad in range(6):
+        conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, ?)", (id_edificio, f"{n_unidad}A"))
+        id_unidad = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        for n_cons in range(6):
+            conn.execute(
+                "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, ?)",
+                (id_unidad, n_cons + 1),
+            )
+            ids_consultorio.append(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+    ids_profesional = []
+    for i in range(20):
+        conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', ?)", (f"Apellido{i}",))
+        ids_profesional.append(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+    conn.commit()
+
+    repo_regular = obtener_repositorio(conn, "ReservaRegular")
+    dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
+    for i, id_consultorio in enumerate(ids_consultorio):
+        repo_regular.crear(
+            IdProfesional=ids_profesional[i % len(ids_profesional)], IdConsultorio=id_consultorio,
+            DiaSemana=dias[i % len(dias)], HoraInicio=8 + (i % 12), HoraFin=9 + (i % 12),
+            VigenciaInicio="2026-01-01",
+        )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1366, 768)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(0)
+    qtbot.waitExposed(pantalla)
+    QApplication.processEvents()
+    QApplication.processEvents()
+
+    panel_r = pantalla.panel_regulares
+    assert panel_r._scroll_superior.verticalScrollBar().maximum() == 0
+
+
 def test_detalle_de_aisladas_llega_al_pie_de_su_columna(qtbot, conn):
     """Desde la ronda siguiente sobre la pantalla ya en uso, la columna 3
     (leyenda + Detalle) tiene un tope de alto explícito, igual al de la
