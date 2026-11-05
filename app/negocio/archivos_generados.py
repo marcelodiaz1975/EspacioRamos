@@ -397,6 +397,56 @@ def carpeta_imagenes(conn: sqlite3.Connection, alcance: str, id_valor: int | Non
     return carpeta
 
 
+def resincronizar_carpetas_imagenes(conn: sqlite3.Connection) -> int:
+    """Pedido explícito de la clienta ("tengo las carpetas de imágenes de
+    los consultorios con el formato viejo, ¿cómo hago para pasarlas al
+    nuevo formato de una manera sencilla?"): `carpeta_imagenes` ya migra
+    sola la carpeta de UN registro puntual cada vez que se accede a sus
+    imágenes (ver su docstring), pero eso significaba, en la práctica,
+    tener que entrar uno por uno a cada Localidad/Edificio/Unidad/
+    Consultorio para que se renombrara. Esta función recorre TODOS los
+    registros existentes de los cuatro alcances y dispara esa misma
+    migración para cada uno que todavía tenga una carpeta vieja en
+    disco — se llama sola en cada arranque (`app.db.init_db.
+    init_database`, mismo criterio que `app.negocio.pagos.
+    reconciliar_saldos_cruzados`), así que no hace falta ningún paso
+    manual: la próxima vez que se abra el sistema, ya están todas al día.
+
+    Solo toca un registro si encuentra, en disco, su carpeta vieja
+    (basada en ID, o — para Consultorio — el formato descriptivo anterior
+    con guiones): un registro que nunca tuvo imágenes cargadas no tiene
+    ninguna carpeta vieja que migrar, así que no se le crea una carpeta
+    nueva vacía de la nada (a diferencia de llamar a `carpeta_imagenes`
+    directo, que SIEMPRE crea la carpeta si no existe). Sin efecto si la
+    carpeta base de archivos todavía no está configurada. Devuelve la
+    cantidad de carpetas migradas, para quien quiera loguearlo — el
+    llamador de `init_database` no hace nada con el valor."""
+    base = carpeta_base(conn)
+    if base is None:
+        return 0
+    carpeta_base_imagenes = base / "Imagenes"
+    if not carpeta_base_imagenes.is_dir():
+        return 0
+
+    migradas = 0
+    for alcance, (buscar_fila, armar_nombre) in _DATOS_PARA_CARPETA.items():
+        ids = [f[0] for f in conn.execute(f"SELECT Id{alcance} FROM {alcance}").fetchall()]
+        for id_valor in ids:
+            fila = buscar_fila(conn, id_valor)
+            if fila is None:
+                continue
+            nombre_nuevo = armar_nombre(fila)
+            carpeta_vieja_por_id = carpeta_base_imagenes / f"{alcance}_{id_valor}"
+            necesita_migrar = carpeta_vieja_por_id.is_dir() and carpeta_vieja_por_id.name != nombre_nuevo
+            if not necesita_migrar and alcance == "Consultorio":
+                carpeta_vieja_guiones = carpeta_base_imagenes / _FORMATO_CONSULTORIO_ANTERIOR(fila)
+                necesita_migrar = carpeta_vieja_guiones.is_dir() and carpeta_vieja_guiones.name != nombre_nuevo
+            if necesita_migrar:
+                carpeta_imagenes(conn, alcance, id_valor)
+                migradas += 1
+    return migradas
+
+
 def carpeta_liquidaciones_simuladas(conn: sqlite3.Connection) -> Path:
     """"Liquidaciones simuladas" bajo la carpeta base — carpeta ÚNICA
     compartida por todos los profesionales (a diferencia de

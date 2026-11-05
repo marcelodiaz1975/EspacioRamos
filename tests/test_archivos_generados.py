@@ -25,6 +25,7 @@ from app.negocio.archivos_generados import (
     renombrar_carpeta_imagenes_localidad,
     renombrar_carpeta_imagenes_unidad,
     renombrar_carpeta_profesional,
+    resincronizar_carpetas_imagenes,
     vaciar_carpeta,
 )
 from app.repositorio.registro import obtener_repositorio
@@ -378,6 +379,97 @@ def test_carpeta_imagenes_consultorio_sin_registro_sigue_usando_el_id(conn, tmp_
     _configurar_carpeta_base(conn, tmp_path)
     carpeta = carpeta_imagenes(conn, "Consultorio", 999)
     assert carpeta == tmp_path / "Imagenes" / "Consultorio_999"
+
+
+def test_resincronizar_carpetas_imagenes_migra_los_cuatro_alcances_de_una(conn, tmp_path):
+    """Pedido explícito de la clienta ("tengo las carpetas de imágenes de
+    los consultorios con el formato viejo, ¿cómo hago para pasarlas al
+    nuevo formato de una manera sencilla?"): no hace falta entrar
+    registro por registro — `resincronizar_carpetas_imagenes` encuentra
+    y migra sola todas las carpetas viejas basadas en ID, para los cuatro
+    alcances a la vez."""
+    _configurar_carpeta_base(conn, tmp_path)
+    id_localidad = _crear_localidad(conn)
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn)
+    id_consultorio = _crear_consultorio(conn)
+    carpetas_viejas = {
+        "Localidad": tmp_path / "Imagenes" / f"Localidad_{id_localidad}",
+        "Edificio": tmp_path / "Imagenes" / f"Edificio_{id_edificio}",
+        "Unidad": tmp_path / "Imagenes" / f"Unidad_{id_unidad}",
+        "Consultorio": tmp_path / "Imagenes" / f"Consultorio_{id_consultorio}",
+    }
+    for carpeta_vieja in carpetas_viejas.values():
+        carpeta_vieja.mkdir(parents=True)
+        (carpeta_vieja / "foto.jpg").write_text("x")
+
+    migradas = resincronizar_carpetas_imagenes(conn)
+
+    assert migradas == 4
+    assert (tmp_path / "Imagenes" / "Localidad_Ramos Mejia" / "foto.jpg").exists()
+    assert (tmp_path / "Imagenes" / "Edificio_Ramos Mejia_Imperio" / "foto.jpg").exists()
+    assert (tmp_path / "Imagenes" / "Unidad_Ramos Mejia_Imperio_7mo L" / "foto.jpg").exists()
+    assert (tmp_path / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
+    for carpeta_vieja in carpetas_viejas.values():
+        assert not carpeta_vieja.exists()
+
+
+def test_resincronizar_carpetas_imagenes_migra_el_formato_anterior_con_guiones(conn, tmp_path):
+    _configurar_carpeta_base(conn, tmp_path)
+    id_consultorio = _crear_consultorio(conn)
+    carpeta_vieja = tmp_path / "Imagenes" / "Consultorio - Imperio - 7mo L - 3"
+    carpeta_vieja.mkdir(parents=True)
+    (carpeta_vieja / "foto.jpg").write_text("x")
+
+    migradas = resincronizar_carpetas_imagenes(conn)
+
+    assert migradas == 1
+    assert (tmp_path / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
+    assert not carpeta_vieja.exists()
+    assert id_consultorio  # usado solo para crear el registro
+
+
+def test_resincronizar_carpetas_imagenes_no_crea_carpetas_vacias(conn, tmp_path):
+    """Un registro que nunca tuvo imágenes cargadas no tiene ninguna
+    carpeta vieja en disco — no tiene que terminar con una carpeta nueva
+    vacía creada de la nada (a diferencia de llamar a `carpeta_imagenes`
+    directo, que siempre crea la carpeta)."""
+    _configurar_carpeta_base(conn, tmp_path)
+    _crear_consultorio(conn)
+    (tmp_path / "Imagenes").mkdir()  # existe la carpeta base de Imagenes, pero vacía
+
+    migradas = resincronizar_carpetas_imagenes(conn)
+
+    assert migradas == 0
+    assert list((tmp_path / "Imagenes").iterdir()) == []
+
+
+def test_resincronizar_carpetas_imagenes_sin_carpeta_base_no_hace_nada(conn):
+    assert resincronizar_carpetas_imagenes(conn) == 0
+
+
+def test_init_database_resincroniza_carpetas_de_imagenes_al_reabrir_la_base(tmp_path):
+    """Mismo criterio que `test_pagos.test_init_database_reconcilia_
+    saldos_cruzados_ya_cargados_al_reabrir_la_base`: alcanza con reabrir
+    la base (sin tocar nada a mano) para que las carpetas viejas queden
+    migradas — `init_database` corre la resincronización sola en cada
+    arranque."""
+    db_path = tmp_path / "test.db"
+    conn = init_database(db_path)
+    sembrar_valores_por_defecto(conn)
+    _configurar_carpeta_base(conn, tmp_path / "base")
+    id_consultorio = _crear_consultorio(conn)
+    carpeta_vieja = tmp_path / "base" / "Imagenes" / f"Consultorio_{id_consultorio}"
+    carpeta_vieja.mkdir(parents=True)
+    (carpeta_vieja / "foto.jpg").write_text("x")
+    conn.commit()
+    conn.close()
+
+    conn = init_database(db_path)  # simula el próximo arranque de la app
+
+    assert (tmp_path / "base" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
+    assert not carpeta_vieja.exists()
+    conn.close()
 
 
 def test_renombrar_carpeta_imagenes_localidad_conserva_archivos(conn, tmp_path):

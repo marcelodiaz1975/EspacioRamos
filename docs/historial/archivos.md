@@ -381,3 +381,53 @@ armados por el código) y `test_oferta_busqueda_whatsapp_sin_
 personalizar_sigue_igual_que_antes`. El conteo de `MENSAJES_EDITABLES`
 sube de 8 a 9.
 
+## Gestor de archivos: cartel de descarga exitosa + migración masiva de carpetas de imágenes (hilo nuevo, nov-2026)
+
+Dos pedidos puntuales de la clienta sobre esta solapa.
+
+**"Descargar"/"Copiar enlace" quedaban silenciosos al terminar** — a
+diferencia de "Agregar archivo"/"Eliminar archivo", que ya mostraban
+"Archivo agregado/eliminado con éxito". `_descargar()` (botón
+"Descargar", copia el archivo al destino elegido) suma "Archivo
+descargado con éxito." después de un `shutil.copy2` exitoso (nunca si
+se cancela el diálogo "Guardar como" o si la copia falla — ahí ya
+avisaba el `warning` de siempre); `_copiar_enlace()` (mismo botón, con
+el texto cambiado a "Copiar enlace" para el tipo Enlace) suma "Enlace
+copiado con éxito." Las acciones rápidas de la tabla (reordenar,
+activar/desactivar, marcar principal) se dejaron como estaban —
+silenciosas a propósito, no es el proceso del que habló la clienta.
+
+**Migración masiva de carpetas de imágenes con formato viejo**:
+pregunta de la clienta ("¿cómo hago para pasarlas al nuevo formato de
+una manera sencilla?") sobre el cambio de formato de carpetas de
+`docs/historial/catalogos.md` ("Carpetas de imágenes: formato con
+Localidad..."), que hasta ahora solo migraba una carpeta a la vez,
+cuando se accedía a ESE registro puntual (`carpeta_imagenes` ya hacía
+la migración sola, pero había que entrar uno por uno a cada
+Localidad/Edificio/Unidad/Consultorio para dispararla).
+
+`resincronizar_carpetas_imagenes(conn)` (`app/negocio/
+archivos_generados.py`) recorre TODOS los registros de los cuatro
+alcances y, para cada uno que tenga una carpeta vieja en disco (basada
+en ID, o — solo Consultorio — el formato descriptivo anterior con
+guiones), dispara la misma migración que ya hacía `carpeta_imagenes`
+registro por registro. No crea carpetas nuevas vacías para registros
+que nunca tuvieron imágenes (a diferencia de llamar a `carpeta_
+imagenes` directo, que siempre crea la carpeta si no existe) — solo
+actúa cuando encuentra algo concreto para migrar. Se llama sola en
+cada arranque (`app.db.init_db.init_database`, mismo criterio y mismo
+lugar que `app.negocio.pagos.reconciliar_saldos_cruzados`) — no hace
+falta ningún paso manual de la clienta: alcanza con reabrir el sistema.
+
+Tests nuevos: `tests/test_gui_imagenes.py`
+(`test_descargar_con_exito_muestra_cartel_de_operacion_exitosa`,
+`test_descargar_sin_destino_elegido_no_muestra_cartel`,
+`test_copiar_enlace_copia_la_url_al_portapapeles` extendido para
+confirmar también el cartel), `tests/test_archivos_generados.py`
+(`test_resincronizar_carpetas_imagenes_migra_los_cuatro_alcances_de_
+una`, `..._migra_el_formato_anterior_con_guiones`, `..._no_crea_
+carpetas_vacias`, `..._sin_carpeta_base_no_hace_nada`,
+`test_init_database_resincroniza_carpetas_de_imagenes_al_reabrir_la_
+base` — mismo patrón que el test de wiring de `reconciliar_saldos_
+cruzados` en `test_pagos.py`).
+

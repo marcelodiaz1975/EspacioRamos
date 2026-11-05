@@ -750,6 +750,13 @@ class _PanelGestorArchivos(QWidget):
             QMessageBox.warning(self, "Gestor de archivos", "Este enlace no tiene una URL asociada.")
             return
         QApplication.clipboard().setText(img["RutaArchivo"])
+        # Pedido explícito de la clienta: el cartel de "operación exitosa"
+        # tiene que salir para todos los procesos de esta solapa (mismo
+        # criterio que "Archivo agregado con éxito"/"Archivo eliminado con
+        # éxito") — acá faltaba, tanto para "Copiar enlace" como para
+        # "Descargar" (ver `_descargar`, el otro camino de este mismo
+        # botón).
+        QMessageBox.information(self, "Gestor de archivos", "Enlace copiado con éxito.")
 
     def _descargar(self) -> None:
         img = self._imagen_seleccionada()
@@ -767,6 +774,11 @@ class _PanelGestorArchivos(QWidget):
             shutil.copy2(img["RutaArchivo"], destino)
         except OSError as error:
             QMessageBox.warning(self, "Gestor de archivos", f"No se pudo descargar el archivo: {error}")
+            return
+        # Pedido explícito de la clienta: mismo cartel de "operación
+        # exitosa" que ya tienen "Agregar archivo"/"Eliminar archivo" en
+        # esta solapa — acá faltaba.
+        QMessageBox.information(self, "Gestor de archivos", "Archivo descargado con éxito.")
 
     def _eliminar(self) -> None:
         img = self._imagen_seleccionada()

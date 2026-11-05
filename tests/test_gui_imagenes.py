@@ -329,6 +329,53 @@ def test_descargar_copia_el_archivo_al_destino_elegido(qtbot, conn, edificio, un
     assert destino.is_file()
 
 
+def test_descargar_con_exito_muestra_cartel_de_operacion_exitosa(
+    qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch,
+):
+    """Pedido explícito de la clienta: mismo cartel de "operación exitosa"
+    que ya tienen "Agregar archivo"/"Eliminar archivo" en esta solapa —
+    antes "Descargar" quedaba silencioso."""
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (_archivo_jpg(tmp_path), "")))
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+    pantalla.tabla.selectRow(0)
+
+    destino = tmp_path / "descargas" / "copia.jpg"
+    destino.parent.mkdir()
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(destino), "")))
+    mostrados = []
+    monkeypatch.setattr(
+        QMessageBox, "information", staticmethod(lambda *a, **k: mostrados.append(a[2] if len(a) > 2 else k.get("text"))),
+    )
+
+    pantalla._descargar()
+
+    assert mostrados == ["Archivo descargado con éxito."]
+
+
+def test_descargar_sin_destino_elegido_no_muestra_cartel(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
+    """Cancelar el diálogo "Guardar como" no es una descarga exitosa — no
+    tiene que mostrar el cartel."""
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (_archivo_jpg(tmp_path), "")))
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+    pantalla.tabla.selectRow(0)
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: ("", "")))
+    mostrados = []
+    monkeypatch.setattr(
+        QMessageBox, "information", staticmethod(lambda *a, **k: mostrados.append(a[2] if len(a) > 2 else k.get("text"))),
+    )
+
+    pantalla._descargar()
+
+    assert mostrados == []
+
+
 def _monkeypatch_clipboard(monkeypatch):
     """Mismo criterio que `test_gui_reservas._monkeypatch_clipboard`."""
     copiado = []
@@ -410,9 +457,16 @@ def test_copiar_enlace_copia_la_url_al_portapapeles(qtbot, conn, edificio, unida
     pantalla.tabla.selectRow(0)
 
     copiado = _monkeypatch_clipboard(monkeypatch)
+    mostrados = []
+    monkeypatch.setattr(
+        QMessageBox, "information", staticmethod(lambda *a, **k: mostrados.append(a[2] if len(a) > 2 else k.get("text"))),
+    )
     pantalla._descargar_o_copiar()
 
     assert copiado == ["https://youtu.be/abc123"]
+    # Pedido explícito de la clienta: mismo cartel de "operación exitosa"
+    # para los dos caminos del botón "Descargar"/"Copiar enlace".
+    assert mostrados == ["Enlace copiado con éxito."]
 
 
 def test_previsualizacion_de_enlace_muestra_la_url_como_texto(qtbot, conn, edificio, unidad, consultorio, monkeypatch):
