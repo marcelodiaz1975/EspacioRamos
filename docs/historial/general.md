@@ -4468,3 +4468,32 @@ problema era exclusivamente que F5 nunca llegaba a invocarla.
 
 Hilo cerrado — la clienta confirmó que F5 ya funciona como corresponde
 y pidió archivar.
+
+## Reorganización de carpetas: Imagenes y Liquidaciones simuladas adentro de Archivos varios (nov-2026)
+
+Pedido explícito de la clienta: "Imagenes" y "Liquidaciones simuladas"
+(antes directo bajo la carpeta base, al mismo nivel que "Profesionales"
+y "Archivos varios") pasan a vivir DENTRO de "Archivos varios" — junto
+con Propuesta/Disponibilidad/Oferta/Placas/Manual, que ya vivían ahí.
+"Profesionales" se deja a propósito AFUERA, al mismo nivel que "Archivos
+varios" (pedido explícito, no es un descuido). Una tercera carpeta que
+mencionó, "Logo", resultó ser una carpeta que ella arma a mano fuera del
+sistema (el logo configurado en Configuración general solo guarda la
+RUTA al archivo, nunca copia nada a una carpeta propia) — confirmado con
+la clienta, desestimado.
+
+`carpeta_imagenes`/`carpeta_liquidaciones_simuladas`
+(`app/negocio/archivos_generados.py`) migran solas, la primera vez que
+se accede, el contenido completo de la carpeta vieja a su nueva
+ubicación (mismo criterio de auto-migración que el resto de este
+módulo) — no hace falta mover nada a mano. `resincronizar_carpetas_
+imagenes` (corre sola en cada arranque) también dispara esta migración
+de nivel antes de resincronizar cada registro. Nueva función `_migrar_
+carpeta_imagenes_al_nivel_viejo`.
+
+Tests nuevos en `tests/test_archivos_generados.py`:
+`test_carpeta_imagenes_migra_sola_desde_el_nivel_viejo`, `test_carpeta_
+liquidaciones_simuladas_migra_sola_desde_el_nivel_viejo`, `test_
+resincronizar_carpetas_imagenes_migra_tambien_el_nivel_viejo`. El resto
+de los tests de archivos/imágenes/liquidaciones (`test_catalogos.py`,
+`test_gui_liquidacion.py`) actualizados a la nueva ruta esperada.
