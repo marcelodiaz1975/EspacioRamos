@@ -806,15 +806,15 @@ def test_regulares_grilla_de_8_a_22_entra_sin_scroll_vertical(qtbot, conn):
 
 
 def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_cargada(qtbot, conn):
-    """Pedido explícito de la clienta, ronda siguiente a la que sacó la
-    etiqueta "Detalle:" de en medio: "respetá sí o sí la posición en
-    pantalla de donde termina [el cuadro]. Con esa referencia, reducí a
-    la mitad la altura del cuadro para que baje la posición en
-    pantalla de donde comienza" — el PIE de `texto_detalle` sigue
-    fijo en el mismo tope de siempre (`_ajustar_alto_detalle`, contra
-    el pie real de `boton_eliminar`), pero ahora solo se lleva la mitad
-    del sobrante total (desde el pie de la grilla hasta ese tope); la
-    otra mitad pasa a ser espacio en blanco arriba de él."""
+    """Pedido explícito de la clienta, ronda siguiente a la que dejó el
+    cuadro a la mitad del sobrante: "ampliá la altura del cuadro de
+    detalle respetando donde termina, o sea de abajo lo estirás para
+    arriba 1/2 de tamaño que tiene ahora" — el PIE de `texto_detalle`
+    sigue fijo en el mismo tope de siempre (`_ajustar_alto_detalle`,
+    contra el pie real de `boton_eliminar`), pero ahora se lleva 3/4
+    del sobrante total (1.5 veces la mitad de antes) en vez de la
+    mitad; el espacio en blanco de arriba se achica a la cuarta parte
+    que queda."""
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
@@ -845,13 +845,14 @@ def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_
     # resto de los "residuos" aceptados en esta sección) — el pie del
     # cuadro sigue siendo el mismo tope de siempre, sin tocar.
     assert abs(pie_detalle - pie_eliminar) <= 10
-    # La mitad del sobrante quedó arriba del cuadro, como espacio en
+    # Solo 1/4 del sobrante quedó arriba del cuadro, como espacio en
     # blanco — el gap entre el pie de la grilla y el techo del cuadro
-    # tiene que ser comparable al alto del cuadro mismo (reparto
-    # parejo, con margen por redondeo/medición offscreen).
+    # tiene que ser comparable a UN TERCIO del alto del cuadro (3/4
+    # cuadro, 1/4 espacio → espacio = cuadro/3), con margen por
+    # redondeo/medición offscreen.
     pie_tabla = pie(panel_r.grilla.tabla)
     gap_arriba = top(panel_r.grilla.texto_detalle) - pie_tabla
-    assert abs(gap_arriba - panel_r.grilla.texto_detalle.height()) <= 10
+    assert abs(gap_arriba - panel_r.grilla.texto_detalle.height() / 3) <= 10
 
 
 def test_regulares_etiqueta_detalle_queda_oculta_solo_el_cuadro(qtbot, conn):

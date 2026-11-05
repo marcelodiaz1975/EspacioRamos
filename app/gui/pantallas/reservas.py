@@ -425,9 +425,10 @@ _ESPACIADO_FORM = 4
 # simple de terminar de cerrar la barra de scroll vertical de la solapa
 # que seguía apareciendo "por un pelín" en la PC real con fuentes
 # distintas a las de este sandbox (ver el historial de esta sección en
-# CLAUDE.md): unos pocos píxeles de margen absorben una pequeña
-# diferencia de medición sin arriesgar que el contenido real no entre —
-# a costa de esos mismos píxeles de menos para la tabla de abajo
+# `docs/historial/reservas.md`): unos pocos píxeles de margen absorben
+# una pequeña diferencia de medición sin arriesgar que el contenido
+# real no entre — a costa de esos mismos píxeles de menos para la
+# tabla de abajo
 # (`panel_tabla`, que se queda con lo que `scroll` no usa). Pedido
 # explícito de la clienta, ronda siguiente a la que ya resolvió la
 # causa de fondo del sobrante real (ver `_ajustar_alto_detalle` sobre
@@ -1060,8 +1061,9 @@ class _PanelReservasRegulares(QWidget):
         superior`) se fija DESPUÉS de `_ajustar_alto_detalle()` — que
         puede agrandar `texto_detalle` (y con él, el alto mínimo real de
         `_contenido_superior`) — para no quedar desincronizado con ese
-        cambio (ver el historial de esta sección en CLAUDE.md para el
-        hilo completo de bugs reales ya resueltos acá: superposición de
+        cambio (ver el historial de esta sección en `docs/historial/
+        reservas.md` para el hilo completo de bugs reales ya resueltos
+        acá: superposición de
         "Detalle" con la grilla, barra de scroll vertical de la solapa de
         más, tabla de abajo sin llegar al final)."""
         super().showEvent(event)
@@ -1103,32 +1105,33 @@ class _PanelReservasRegulares(QWidget):
         QTimer.singleShot(0, self._reajustar_alto_y_columnas_si_sigue_vivo)
 
     def _ajustar_alto_detalle(self) -> None:
-        """Pedido explícito de la clienta, ronda siguiente a la que sacó
-        la etiqueta "Detalle:" de en medio (ver `GrillaOperativaWidget.
-        ocultar_etiqueta_detalle`, llamada en `_armar_ui`, "para no
-        tener más problemas, eliminá la etiqueta... que quede solo el
-        cuadro"): "respetá sí o sí la posición en pantalla de donde
-        termina [el cuadro]. Con esa referencia, reducí a la mitad la
-        altura del cuadro para que baje la posición en pantalla de
-        donde comienza el elemento" — el PIE del cuadro sigue siendo el
-        mismo tope de siempre, `min(pie_eliminar, pie_maximo_grilla)`
-        (sin tocar — pie de `self.boton_eliminar`, columna 1, y el pie
-        MÁXIMO que la columna 2/3 tiene permitido, ver `_ALTO_BASE_
-        GRUPO_GRILLA` más abajo), pero el cuadro ya NO ocupa todo el
-        sobrante hasta ese tope: se queda con la MITAD, y la otra mitad
-        pasa a ser espacio en blanco arriba de él (el mismo widget real
-        de `agregar_espacio_antes_de_detalle`, agrandado) — así el pie
-        no se mueve un pixel, pero el techo baja exactamente la mitad
-        del sobrante.
+        """Pedido explícito de la clienta, ronda siguiente a la que dejó
+        el cuadro a la mitad del sobrante (ver el historial de esta
+        sección en `docs/historial/reservas.md`): "ampliá la altura del
+        cuadro de detalle respetando donde termina, o sea de abajo lo
+        estirás para arriba 1/2 de tamaño que tiene ahora... si mide
+        100 que mida 150" — el PIE del cuadro sigue siendo el mismo
+        tope de siempre, `min(pie_eliminar, pie_maximo_grilla)` (sin
+        tocar), pero en vez de quedarse con la mitad del sobrante total
+        ahora se queda con 1.5 veces esa mitad (3/4 del sobrante total)
+        — el espacio en blanco de arriba (el mismo widget real de
+        `agregar_espacio_antes_de_detalle`) se achica a la cuarta parte
+        que le queda, sin que el PIE del cuadro se mueva un pixel.
+
+        `texto_detalle` es un `QTextEdit` con alto FIJO
+        (`setFixedHeight`) — ya viene con scrollbar vertical `AsNeeded`
+        por default de Qt (nunca se le pisó esa política en este
+        archivo), así que un detalle más largo que el cuadro ya
+        reducido/agrandado escrolea solo, sin recortarse ("que el
+        cuadro se escrolee solo si es necesario", ya cubierto de
+        fábrica).
 
         La referencia de TECHO para medir el sobrante total es el pie
         real de `self.grilla.tabla` (la grilla de horarios, con su
         barra de scroll horizontal si está visible) — estable, no
-        depende de cuánto midan el espacio ni el cuadro en este momento
-        (a diferencia de medir desde `texto_detalle` mismo, que si
-        dependía de su propio alto cuando la etiqueta todavía estaba en
-        medio), así que el cálculo es idempotente sin necesitar resetear
-        nada antes de medir, aunque este método se llame dos veces por
+        depende de cuánto midan el espacio ni el cuadro en este momento,
+        así que el cálculo es idempotente sin necesitar resetear nada
+        antes de medir, aunque este método se llame dos veces por
         entrada a la solapa.
 
         El presupuesto de la columna 2/3 (`pie_maximo_grilla`) resta
@@ -1136,8 +1139,8 @@ class _PanelReservasRegulares(QWidget):
         envuelve a `self.grilla` en el splitter, ver `_armar_ui`) le
         suma 6px propios de chroma ARRIBA de `self.grilla` que el
         presupuesto nunca restaba — ver el historial de esta sección en
-        CLAUDE.md (ronda 7) para el detalle completo de por qué hace
-        falta este descuento."""
+        `docs/historial/reservas.md` para el detalle completo de por
+        qué hace falta este descuento."""
         pie_eliminar = self.boton_eliminar.mapToGlobal(self.boton_eliminar.rect().bottomLeft()).y()
         techo_grilla = self.grilla.mapToGlobal(self.grilla.rect().topLeft()).y()
         pie_maximo_grilla = techo_grilla + self._alto_referencia_regulares - _ALTO_BASE_GRUPO_GRILLA
@@ -1145,7 +1148,8 @@ class _PanelReservasRegulares(QWidget):
         techo_fijo = self.grilla.tabla.mapToGlobal(self.grilla.tabla.rect().bottomLeft()).y()
         alto_total = pie_fijo - techo_fijo
         if alto_total > 0:
-            alto_cuadro = alto_total // 2
+            alto_cuadro_mitad = alto_total // 2
+            alto_cuadro = min(alto_total, alto_cuadro_mitad + alto_cuadro_mitad // 2)
             alto_espacio = alto_total - alto_cuadro
             self.grilla.fijar_espacio_y_alto_cuadro_detalle(alto_espacio, alto_cuadro)
 
@@ -3210,10 +3214,10 @@ class _PanelReservasAisladas(QWidget):
         # mes anterior, afectaba el "saldo anterior" de la liquidación
         # ACTUAL (`_aisladas_periodo` la toma por fecha real, no por
         # Período imputado — ver el hilo "reserva aislada de un mes
-        # pasado" en CLAUDE.md) — hay que rehacerla y dejarla marcada
-        # como no enviada, mismo mecanismo que ya usa el resto del
-        # sistema (`regenerar_si_corresponde`, sin efecto si no hay nada
-        # que reemitir para este profesional/período).
+        # pasado" en `docs/historial/reservas.md`) — hay que rehacerla
+        # y dejarla marcada como no enviada, mismo mecanismo que ya usa
+        # el resto del sistema (`regenerar_si_corresponde`, sin efecto
+        # si no hay nada que reemitir para este profesional/período).
         regenerar_si_corresponde(self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn))
         self.conn.commit()
         if requiere_aviso:
@@ -3334,7 +3338,8 @@ class _PanelReservaExtraordinaria(QWidget):
     (función compartida con Reservas aisladas, mismo mecanismo).
 
     A diferencia de Reservas regulares/aisladas (con rondas y rondas de
-    calibración pixel a pixel documentadas en CLAUDE.md), esta solapa es
+    calibración pixel a pixel documentadas en `docs/historial/
+    reservas.md`), esta solapa es
     un primer armado deliberadamente simple — sin grilla de referencia
     embebida —, para no arriesgar esa geometría ya afinada de las otras
     dos solapas."""
