@@ -1731,6 +1731,125 @@ el resto de los tests de Reservas regulares, incluido el escenario
 denso (`test_regulares_con_grilla_densa_no_muestra_scroll_vertical_
 de_la_solapa`), siguen pasando sin cambios.
 
+## Reservas regulares: ronda 7 — vuelta al criterio simple de "Detalle" más arriba, tabla pegada a "Eliminar reserva" (causa de fondo, no solo colchón)
+
+La clienta mandó una captura real de la app (video/foto de rondas
+anteriores habían llevado a la tabla 5px más abajo y al reparto 1/3-2/3
+de la ronda 6) con tres preguntas de pixeles concretas antes de pedir
+nada, para evitar seguir iterando a ciegas — respondidas con geometría
+medida directamente sobre esa captura (no a ojo): la grilla completa
+(con la barra de scroll horizontal) terminaba en y≈708; el cuadro de
+"Detalle" en y≈809; la etiqueta "Detalle:" en y≈742-752; "Eliminar
+reserva" en y≈802 y la tabla de abajo recién arrancaba en y≈869 — un
+gap de 67px contra el botón, muy por encima de los 5px que se venían
+pidiendo. La clienta confirmó además un "efecto raro": la pantalla se
+ve distinta recién abierta que después de navegar a otra solapa y
+volver (la segunda, más cercana a lo pedido) — consistente con el
+`showEvent` disparándose de nuevo con geometría ya asentada por el
+splitter, mismo mecanismo que describen rondas anteriores.
+
+Con esos números como referencia, pedido confirmado en tres partes:
+
+1. **Subir la etiqueta "Detalle" para que quede pegada (casi) al pie
+   de la grilla+scrollbar.** `agregar_espacio_antes_de_detalle`
+   (`_armar_ui`) baja de 14 a 2 — se probó primero en 0 (replicando el
+   "hasta antes de la barra" de manera literal) pero un test con
+   geometría real detectó que la etiqueta quedaba a -1px de la última
+   fila de la grilla (superposición de 1px) — 2px de margen alcanzan
+   para evitarlo sin volver a los 14px de antes, que ya no hacían falta
+   (el riesgo real de superposición lo resuelve `fijar_alto_filas`, no
+   este espacio).
+
+2. **El cuadro mantiene su pie fijo, pero su techo sube con la
+   etiqueta.** Se revierte el reparto 1/3 (etiqueta) / 2/3 (cuadro) de
+   la ronda 6 al criterio simple de dos rondas atrás: la etiqueta a su
+   alto NATURAL (sin `setFixedHeight` ni alineación especial) y
+   `texto_detalle` ocupando TODO el sobrante hasta el mismo tope de
+   siempre (`min(pie_eliminar, pie_maximo_grilla)`, sin tocar). Como el
+   cuadro arranca justo debajo de la etiqueta, y la etiqueta subió por
+   el punto 1, el cuadro automáticamente "arranca más arriba" sin
+   perder su pie — exactamente lo pedido, sin necesitar ningún cálculo
+   nuevo de reparto.
+
+3. **La tabla de abajo, a 5px exactos de "Eliminar reserva" — causa de
+   fondo, no un colchón más.** Las dos rondas anteriores (colchón
+   `_MARGEN_SCROLL_SUPERIOR_REGULARES`, de 5 a 10) atacaban el SÍNTOMA
+   (la tabla lejos del botón) sumando margen a ciegas, sin explicar por
+   qué `_fijar_alto_scroll_superior` elegía el piso de `_contenido_
+   superior.minimumSizeHint()` por encima del pie real de "Eliminar
+   reserva" en vez de usar este último. Investigado con un script de
+   geometría sobre el escenario denso (36 consultorios/200+ reservas):
+   dos causas reales, encontradas recién esta ronda porque las
+   anteriores solo se habían confirmado con datasets chicos de test,
+   donde nunca llegaban a disparar:
+
+   - **`self._alto_referencia_regulares` (el presupuesto de columna 1,
+     usado para topear columna 2/3 vía `limitar_alto_grilla`) se
+     retroalimentaba solo.** Se leía de `panel_form.height()` (el alto
+     YA estirado por el splitter) — si `self.grilla` alguna vez pedía
+     más alto del que columna 1 necesitaba de verdad (por ejemplo, el
+     propio cálculo de "Detalle" de la ronda anterior), el splitter
+     estiraba panel_form para dárselo, y la PRÓXIMA vuelta de
+     `showEvent`/`QTimer` volvía a leer ESE alto ya estirado como si
+     fuera el "natural" de columna 1 — un ciclo que no converge al pie
+     real de "Eliminar reserva" (confirmado con el script: `panel_form.
+     height()` terminaba en 547px, 23px por encima de su propio
+     `minimumSizeHint()`, 524px — que sí coincide con el pie de
+     "Eliminar reserva"). Las tres lecturas de `_alto_referencia_
+     regulares` (en `showEvent`, en el reajuste diferido y en `_armar_
+     ui`) pasan de `.height()`/`.sizeHint()` a `.minimumSizeHint()` de
+     `panel_form` — el piso GENUINO de la columna, que no se mueve
+     aunque el splitter la haya estirado de más en una pasada previa,
+     rompiendo el ciclo.
+
+   - **El presupuesto que recibía `self.grilla` nunca restaba el
+     chroma propio de `grupo_grilla`.** `grupo_grilla` (el `QGroupBox`
+     que envuelve a `self.grilla` en el splitter, ver `_armar_ui`) le
+     suma 6px propios arriba (`_ALTO_BASE_GRUPO_GRILLA`, ya usado para
+     alinear el PRIMER pixel de la columna con sus vecinas, ver rondas
+     anteriores) que nunca se habían restado del presupuesto de ALTO
+     TOTAL — solo del margen superior. Las tres llamadas a `limitar_
+     alto_grilla` y el cálculo de `pie_maximo_grilla` (`_ajustar_alto_
+     detalle`) pasan a usar `self._alto_referencia_regulares -
+     _ALTO_BASE_GRUPO_GRILLA` en vez del valor entero.
+
+   Con las dos causas corregidas juntas (una sola no alcanzaba: se
+   probó restar el chroma sin romper el ciclo de `.height()` primero, y
+   el piso seguía igual de inflado), el piso de `_fijar_alto_scroll_
+   superior` (`alto_minimo_contenido`) bajó de 542 a 527 en el mismo
+   escenario denso — contra un `alto_hasta_eliminar` de 523, una
+   diferencia de apenas 4px (antes 19px) — y el `_MARGEN_SCROLL_
+   SUPERIOR_REGULARES` baja de 10 a 5 (el valor que la clienta pidió
+   literalmente: "una separación de 5 pixeles"), ya que ahora sí
+   gobierna el cálculo real en vez de competir contra un piso inflado.
+   Confirmado visualmente con una captura del escenario denso: la
+   leyenda de colores (que en una ronda anterior se había cuidado de no
+   dejar apretada al usar `.height()` en vez de `sizeHint()`) sigue sin
+   superponerse ni comprimirse con este cambio — el piso corregido solo
+   le resta presupuesto a lo que `self.grilla` pedía de más por el
+   ciclo de Detalle, no al natural de la leyenda.
+
+   **Investigado y descartado antes de aceptar el residuo de ~4-9px
+   final** (en vez de 0 exacto): no se pudo bajar más sin arriesgar
+   reabrir el bug de rondas anteriores (`_scroll_superior` mostrando su
+   propia barra de scroll vertical) — un pequeño colchón estable sigue
+   siendo necesario, mismo criterio que cualquier otro "residuo"
+   aceptado en esta sección.
+
+Tests: `tests/test_gui_reservas.py` —
+`test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_
+con_grilla_cargada` (docstring y tolerancia actualizados al criterio
+simple, sube de 5 a 10px por el residuo de la corrección de fondo);
+`test_grilla_de_regulares_usa_panel_form_como_referencia_de_alto`
+(actualizado: `maximumHeight()` ya no es igual a `_alto_referencia_
+regulares` sino `_ALTO_BASE_GRUPO_GRILLA` menos, y la referencia en sí
+usa `minimumSizeHint()` en vez de `sizeHint()`); test nuevo
+`test_regulares_tabla_de_abajo_arranca_cerca_del_pie_de_eliminar_
+reserva` (gap real entre `boton_eliminar` y `self.tabla`, tolerancia de
+15px) — el resto de los tests de Reservas regulares, incluido el
+escenario denso (`test_regulares_con_grilla_densa_no_muestra_scroll_
+vertical_de_la_solapa`), siguen pasando sin cambios.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

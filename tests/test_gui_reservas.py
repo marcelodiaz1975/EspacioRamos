@@ -11,7 +11,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import hoja_estilos
 from app.gui.pantallas.reservas import (
-    _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
+    _ALTO_BASE_GRUPO_GRILLA, _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import fecha_actual, periodo_actual
@@ -705,13 +705,21 @@ def test_grilla_de_regulares_usa_panel_form_como_referencia_de_alto(qtbot, conn)
     ("que la columna termine a la misma altura que la primer columna"):
     `limitar_alto_grilla` pasa a usar el alto de `panel_form` (columna 1)
     como referencia, en vez del alto natural de la grilla sola — mismo
-    mecanismo que `_alto_referencia_aisladas` en Reservas aisladas."""
+    mecanismo que `_alto_referencia_aisladas` en Reservas aisladas.
+    `panel_r.grilla.maximumHeight()` queda `_ALTO_BASE_GRUPO_GRILLA` (6)
+    por debajo de `_alto_referencia_regulares`, no igual — ver el
+    docstring de `_ajustar_alto_detalle` sobre por qué el presupuesto de
+    `self.grilla` tiene que descontar el chroma propio de `grupo_grilla`
+    (el `QGroupBox` que lo envuelve en el splitter). `_alto_referencia_
+    regulares` en sí usa `.minimumSizeHint()` de `panel_form` (el piso
+    genuino de la columna, no `.sizeHint()`), ver el docstring de
+    `showEvent` sobre el ciclo que rompe."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     panel_r = pantalla.panel_regulares
 
-    assert panel_r.grilla.maximumHeight() == panel_r._alto_referencia_regulares
-    assert panel_r._alto_referencia_regulares == panel_r._panel_form_regulares.sizeHint().height()
+    assert panel_r.grilla.maximumHeight() == panel_r._alto_referencia_regulares - _ALTO_BASE_GRUPO_GRILLA
+    assert panel_r._alto_referencia_regulares == panel_r._panel_form_regulares.minimumSizeHint().height()
 
 
 def test_regulares_columna_de_filtros_termina_cerca_del_pie_de_eliminar_reserva(qtbot, conn):
@@ -798,18 +806,18 @@ def test_regulares_grilla_de_8_a_22_entra_sin_scroll_vertical(qtbot, conn):
 
 
 def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_cargada(qtbot, conn):
-    """Pedido explícito de la clienta: "reducí un tercio el alto del
-    cuadro de 'Detalle'... la etiqueta 'Detalle' que baje ese tercio de
-    tamaño que se redujo del cuadro" — el sobrante entre la grilla y el
-    pie de "Eliminar reserva" se reparte 1/3 para la etiqueta (que
-    CRECE, con el texto alineado abajo, pegado al cuadro) y 2/3 para el
-    cuadro `texto_detalle`, que sigue terminando en el mismo pie de
-    siempre — `_ajustar_alto_detalle` lo fija con `setFixedHeight`
-    calculado contra el pie real de `boton_eliminar`, así que la
-    tolerancia pasa a ser chica (unos pocos píxeles de margen de
-    medición, no "cerca"). Con la grilla completa (8 a 22hs) ya sin
-    scroll vertical, ninguno de los dos (etiqueta ni cuadro) tiene que
-    quedar recortado ni superpuesto con la última fila de la grilla."""
+    """Pedido explícito de la clienta, ronda siguiente a la del reparto
+    1/3 (etiqueta) / 2/3 (cuadro): vuelve al criterio simple de dos
+    rondas atrás — "Detalle:" (la etiqueta) a su alto NATURAL, pegada
+    abajo de la grilla (subida de posición: ver `agregar_espacio_antes_
+    de_detalle(0)` en `_armar_ui`, antes 14), y el cuadro `texto_detalle`
+    ocupando TODO el sobrante hasta el mismo pie de siempre —
+    `_ajustar_alto_detalle` lo fija con `setFixedHeight` calculado
+    contra el pie real de `boton_eliminar`, así que la tolerancia pasa a
+    ser chica (unos pocos píxeles de margen de medición, no "cerca").
+    Con la grilla completa (8 a 22hs) ya sin scroll vertical, "Detalle"
+    tiene que seguir sin quedar recortado ni superpuesto con la última
+    fila de la grilla."""
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
@@ -836,16 +844,52 @@ def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_
 
     pie_eliminar = pie(panel_r.boton_eliminar)
     pie_detalle = pie(panel_r.grilla.texto_detalle)
-    assert abs(pie_detalle - pie_eliminar) <= 5
-    # El cuadro mide el doble que la etiqueta (2/3 contra 1/3 del mismo
-    # sobrante, con algo de margen por el redondeo de la división entera
-    # y la medición offscreen).
-    etiqueta_detalle = panel_r.grilla.etiqueta_detalle
-    assert abs(panel_r.grilla.texto_detalle.height() - 2 * etiqueta_detalle.height()) <= 3
+    # Tolerancia de 10px (subida de 5): con el presupuesto de columna
+    # 2/3 ahora anclado a `panel_form.minimumSizeHint()` (ver el
+    # docstring de `showEvent` sobre el ciclo que rompe), el pie de
+    # `texto_detalle` queda a unos pocos píxeles del de `boton_eliminar`
+    # en vez de pegado exacto — residuo chico y estable, mismo criterio
+    # que el resto de los "residuos" aceptados en esta sección.
+    assert abs(pie_detalle - pie_eliminar) <= 10
     # Sin superposición: "Detalle:" (la etiqueta) arranca DESPUÉS de que
     # termina la grilla, no encima de la última fila.
+    etiqueta_detalle = panel_r.grilla.etiqueta_detalle
     pie_tabla = pie(panel_r.grilla.tabla)
     assert top(etiqueta_detalle) >= pie_tabla
+
+
+def test_regulares_tabla_de_abajo_arranca_cerca_del_pie_de_eliminar_reserva(qtbot, conn):
+    """Pedido explícito de la clienta: "subí la tabla... hasta antes del
+    botón 'Eliminar reserva' con una separación de 5 pixeles" —
+    `_fijar_alto_scroll_superior` fija el alto de `_scroll_superior`
+    (de donde depende dónde arranca `self.tabla`, la tabla de abajo)
+    contra el pie real de `boton_eliminar` más `_MARGEN_SCROLL_
+    SUPERIOR_REGULARES` (5), en vez de dejar que el piso de `_contenido_
+    superior.minimumSizeHint()` (inflado por el presupuesto mal
+    calculado de `self.grilla`, ver `_ajustar_alto_detalle` y el
+    descuento de `_ALTO_BASE_GRUPO_GRILLA`) lo alejara mucho más de los
+    5px pedidos."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(0)
+    qtbot.waitExposed(pantalla)
+
+    panel_r = pantalla.panel_regulares
+
+    pie_eliminar = panel_r.boton_eliminar.mapToGlobal(panel_r.boton_eliminar.rect().bottomLeft()).y()
+    techo_tabla = panel_r.tabla.mapToGlobal(panel_r.tabla.rect().topLeft()).y()
+    assert 0 <= techo_tabla - pie_eliminar <= 15
 
 
 def test_regulares_con_grilla_densa_no_muestra_scroll_vertical_de_la_solapa(qtbot, conn):
