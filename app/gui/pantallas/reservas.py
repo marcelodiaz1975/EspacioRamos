@@ -14,7 +14,7 @@ import sqlite3
 from datetime import date
 
 import shiboken6
-from PySide6.QtCore import QDate, QEvent, QLocale, QObject, QTimer
+from PySide6.QtCore import QDate, QEvent, QLocale, QObject, Qt, QTimer
 from PySide6.QtGui import QFontMetrics, QGuiApplication, QValidator
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -428,8 +428,13 @@ _ESPACIADO_FORM = 4
 # CLAUDE.md): unos pocos píxeles de margen absorben una pequeña
 # diferencia de medición sin arriesgar que el contenido real no entre —
 # a costa de esos mismos píxeles de menos para la tabla de abajo
-# (`panel_tabla`, que se queda con lo que `scroll` no usa).
-_MARGEN_SCROLL_SUPERIOR_REGULARES = 5
+# (`panel_tabla`, que se queda con lo que `scroll` no usa). Subido de 5
+# a 10 (+5 más, ronda siguiente): pedido explícito de la clienta sobre
+# la tabla de abajo ya reposicionada ("la tabla entera, así como está,
+# bajala 5 pixeles") — bajar la tabla es, en los hechos, agrandar este
+# mismo colchón, ya que `panel_tabla` arranca justo donde termina
+# `scroll`.
+_MARGEN_SCROLL_SUPERIOR_REGULARES = 10
 # Alto (px) de fila de encabezado/dato de la grilla embebida (columna 3),
 # más chico que el default de `GrillaOperativaWidget` (26px/24px) —
 # mismos valores que Reservas aisladas (`_ALTO_FILA_ENCABEZADO_AISLADAS`/
@@ -1079,38 +1084,48 @@ class _PanelReservasRegulares(QWidget):
         QTimer.singleShot(0, self._reajustar_alto_y_columnas_si_sigue_vivo)
 
     def _ajustar_alto_detalle(self) -> None:
-        """Pedido explícito de la clienta, ronda sobre un pedido más
-        concreto después de probar el reparto a la mitad etiqueta/cuadro
-        de la ronda anterior — vuelve al criterio original, con el tope
-        anti-superposición ya incorporado: "Detalle:" (la etiqueta)
-        queda a su alto natural, pegada abajo de la grilla (con el
-        espacio fijo de 14px de siempre, `agregar_espacio_antes_de_
-        detalle`, que ya mide desde el pie real de la grilla, barra de
-        scroll horizontal incluida si está visible); el cuadro
-        `texto_detalle` ocupa TODO el sobrante debajo de la etiqueta,
-        hasta el MENOR de dos techos: el pie de `self.boton_eliminar`
-        (columna 1, el objetivo ideal) y el pie MÁXIMO que la columna
-        2/3 tiene permitido (`self._alto_referencia_regulares` sumado
-        al techo real de `self.grilla` — ver el historial de esta
-        sección en CLAUDE.md sobre por qué este segundo tope, medido
-        así, no queda atrapado en un ciclo con el propio alto de
-        "Detalle", a diferencia de un primer intento que topeaba contra
-        el pie medido de `self.grilla` a secas).
+        """Pedido explícito de la clienta, ronda siguiente a la que
+        volvió al criterio simple (etiqueta a su alto natural, cuadro
+        ocupando todo el sobrante): "reducí un tercio el alto del cuadro
+        de 'Detalle'... la etiqueta 'Detalle' que baje ese tercio de
+        tamaño que se redujo del cuadro" — el sobrante disponible (entre
+        el techo natural de la etiqueta y el MENOR de dos techos: el pie
+        de `self.boton_eliminar`, columna 1, el objetivo ideal; y el pie
+        MÁXIMO que la columna 2/3 tiene permitido, `self._alto_
+        referencia_regulares` sumado al techo real de `self.grilla` —
+        ver el historial de esta sección en CLAUDE.md sobre por qué este
+        segundo tope no queda atrapado en un ciclo con el propio alto de
+        "Detalle") se reparte 1/3 para la etiqueta (que CRECE para
+        "bajar" ese tercio, con el texto alineado abajo — pegado al
+        cuadro al que describe, no a la grilla — en vez de arriba de
+        todo) y 2/3 para el cuadro, que sigue terminando en el mismo pie
+        de siempre (el tope anti-superposición no cambia, solo CÓMO se
+        reparte el sobrante por encima de él).
 
-        `setFixedHeight` en vez de `setMaximumHeight`/`stretch` por una
-        razón de fondo, no solo de exactitud: al fijar un alto mínimo
-        explícito en esta hoja, ese mínimo se propaga solo hacia arriba
-        por el árbol de widgets, que es el mecanismo de Qt que sí
-        funciona de manera confiable para este caso (ver el hilo
-        completo, con los intentos que no funcionaron, en el historial
-        de esta sección)."""
+        El techo de la ETIQUETA (no el del cuadro) es la referencia de
+        medición, igual que en el reparto a la mitad de dos rondas
+        atrás: nunca depende de su PROPIO alto (lo determina lo que hay
+        ARRIBA de ella — la grilla + el espacio fijo de 14px), así que
+        el cálculo es idempotente sin necesitar resetear nada antes de
+        medir, aunque este método se llame dos veces por entrada a la
+        solapa.
+
+        `setFixedHeight` sobre los dos widgets REALES (etiqueta y
+        cuadro), no un espaciador nuevo — ver el historial de esta
+        sección en CLAUDE.md sobre por qué un `QSpacerItem` no funcionaba
+        (su `sizeHint()` reflejaba el alto pedido pero su `geometry()`
+        real se quedaba en 0, a diferencia de un widget real, que Qt sí
+        respeta como restricción dura)."""
         pie_eliminar = self.boton_eliminar.mapToGlobal(self.boton_eliminar.rect().bottomLeft()).y()
         techo_grilla = self.grilla.mapToGlobal(self.grilla.rect().topLeft()).y()
         pie_maximo_grilla = techo_grilla + self._alto_referencia_regulares
-        techo_detalle = self.grilla.texto_detalle.mapToGlobal(self.grilla.texto_detalle.rect().topLeft()).y()
-        alto_disponible = min(pie_eliminar, pie_maximo_grilla) - techo_detalle
+        techo_etiqueta = self.grilla.etiqueta_detalle.mapToGlobal(self.grilla.etiqueta_detalle.rect().topLeft()).y()
+        alto_disponible = min(pie_eliminar, pie_maximo_grilla) - techo_etiqueta
         if alto_disponible > 0:
-            self.grilla.texto_detalle.setFixedHeight(alto_disponible)
+            un_tercio = alto_disponible // 3
+            self.grilla.etiqueta_detalle.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+            self.grilla.etiqueta_detalle.setFixedHeight(un_tercio)
+            self.grilla.texto_detalle.setFixedHeight(alto_disponible - un_tercio)
 
     def _fijar_alto_scroll_superior(self) -> None:
         """Fija el alto de `_scroll_superior` (el `QScrollArea` que

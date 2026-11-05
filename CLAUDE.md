@@ -1657,6 +1657,80 @@ eliminar_reserva_con_grilla_cargada`, revertido a la versión de dos
 rondas atrás) — el resto de los tests de Reservas regulares, incluido
 el escenario denso, siguen pasando sin cambios.
 
+## Reservas regulares: ronda 6 — tabla 5px más abajo, "Detalle" repartido un tercio/dos tercios
+
+Pedido explícito de la clienta, tres puntos en un mismo mensaje:
+
+"* La tabla entera, asi como está, bajala 5 pixeles
+* Reducí un tercio el alto del cuadro de "Detalle".
+* La etiqueta "Detalle" que baje ese tercio de tamaño que se redujo del
+cuadro"
+
+1. **Tabla de abajo 5px más abajo.** `panel_tabla` arranca justo donde
+   termina `_scroll_superior` (`stretch=1` en `layout_externo`), así que
+   bajar la tabla entera es lo mismo que agrandar el alto fijo de
+   `_scroll_superior` en 5px más. `_MARGEN_SCROLL_SUPERIOR_REGULARES`
+   (el colchón ya sumado en la ronda 4 para absorber diferencias de
+   medición de fuente entre este sandbox y la PC real de la clienta)
+   sube de `5` a `10` — mismo mecanismo de siempre
+   (`_fijar_alto_scroll_superior`, sin tocar su lógica), el pedido es
+   literalmente "5 píxeles más" sobre el colchón que ya había.
+
+2. **"Detalle": reparto un tercio (etiqueta) / dos tercios (cuadro) del
+   mismo sobrante de siempre.** Hasta la ronda anterior, "Detalle:" (la
+   etiqueta) se quedaba en su alto natural y `texto_detalle` (el cuadro)
+   se llevaba TODO el sobrante hasta el tope anti-superposición (`min
+   (pie_eliminar, pie_maximo_grilla)`, sin cambios — sigue siendo la
+   misma referencia que evita el recorte/superposición real reportado
+   en rondas 2 y 3). Ahora ese mismo sobrante se reparte: 1/3 para la
+   etiqueta (que CRECE, con su texto alineado abajo — pegado al cuadro
+   al que describe, `Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.
+   AlignBottom` — en vez de arriba de todo, para que visualmente "baje"
+   ese tercio hacia el cuadro) y 2/3 para el cuadro.
+
+   Mismo mecanismo PROBADO de la ronda 4 (no el de la ronda inmediata
+   anterior, que había vuelto al reparto 100% simple): `setFixedHeight`
+   sobre los dos widgets REALES (`self.grilla.etiqueta_detalle`,
+   `self.grilla.texto_detalle`) — NO un `QSpacerItem` nuevo (ver el
+   historial de la ronda 4 sobre por qué un espaciador no funciona en
+   este layout: su `sizeHint()` refleja el alto pedido pero su
+   `geometry()` real queda en 0 cuando el layout contenedor está
+   acotado por `setMaximumHeight`, a diferencia de un widget real, que
+   Qt sí respeta como restricción dura). A diferencia de la ronda 4
+   (que agregaba métodos nuevos en `GrillaOperativaWidget`,
+   `alinear_etiqueta_detalle_al_pie`/`fijar_alto_etiqueta_y_cuadro_
+   detalle`, borrados en la ronda 5 por quedar sin uso), el reparto
+   queda esta vez inline en `_ajustar_alto_detalle`
+   (`app/gui/pantallas/reservas.py`), usando directamente los atributos
+   ya públicos `etiqueta_detalle`/`texto_detalle` — no hace falta
+   reponer esos métodos.
+
+   La referencia de medición sigue siendo el TECHO de la etiqueta
+   (`self.grilla.etiqueta_detalle`, no el del cuadro) — no depende de
+   su PROPIO alto (lo determina solo lo que hay arriba: la grilla + el
+   espacio fijo de 14px), así que el cálculo sigue siendo idempotente
+   sin necesitar resetear nada antes de medir, aunque `_ajustar_alto_
+   detalle` se llame dos veces por entrada a la solapa (la sincrónica
+   de `showEvent` y la diferida del `QTimer`).
+
+   Confirmado con el script de geometría de rondas anteriores (36
+   consultorios/200+ reservas/1366×768): `etiqueta_detalle.height()`
+   pasa de compartir el 100% del sobrante con el cuadro a quedarse con
+   un tercio exacto (38px de 114px totales) y `texto_detalle.height()`
+   con los dos tercios restantes (76px) — sin superposición con la
+   grilla y sin scrollbar vertical interna en `_scroll_superior`
+   (`verticalScrollBar().maximum() == 0`, sin cambios respecto de
+   rondas anteriores).
+
+Tests: `tests/test_gui_reservas.py`
+(`test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_
+con_grilla_cargada`, docstring actualizado al reparto 1/3-2/3 y se
+suma una verificación explícita de que el cuadro mide el doble que la
+etiqueta, con margen de 3px por el redondeo de la división entera) —
+el resto de los tests de Reservas regulares, incluido el escenario
+denso (`test_regulares_con_grilla_densa_no_muestra_scroll_vertical_
+de_la_solapa`), siguen pasando sin cambios.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
