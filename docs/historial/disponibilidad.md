@@ -1390,3 +1390,99 @@ en vez de los fragmentos día/hora de la versión vieja;
 `test_comentario_de_bloques_rigidos_es_personalizable`, nuevo, confirma
 que un texto guardado vía `guardar_texto_personalizado` reemplaza al
 de fábrica en ambos documentos).
+
+## Oferta de consultorios: layout (borde, ancho de columna, scroll al entrar) + lógica de combinación con "horas mínimas" (hilo nuevo, nov-2026)
+
+Pedido explícito de la clienta, mismo hilo que el de Grilla semanal (ver
+`docs/historial/grilla_mensajeria.md`): "se ve raro al ingresar al
+sistema, luego con la navegación se va acomodando de una manera
+distinta... no se ve la línea de la izquierda del cuadro de 'Franjas
+agregadas a esta búsqueda'... achicá la columna al mínimo... la tercera
+columna dejala del mismo ancho", más un bug de lógica en la búsqueda con
+"con X horas alcanza".
+
+**Layout:**
+
+- **Borde izquierdo invisible de "Franjas agregadas a esta búsqueda"**
+  (`self.lista_franjas`, oferta.py): el `QListWidget` no tenía ningún
+  `objectName`/regla QSS propia — se quedaba con el marco nativo
+  `StyledPanel` sunken de la plataforma, que en el estilo nativo de
+  Windows (la PC real de la clienta) termina casi invisible de ese
+  lado. Mismo criterio que el resto de los cuadros importantes del
+  sistema (`QTableView`, `#muestraLeyenda`, botones, combos): se suma
+  `objectName="listaFranjas"` + `QListWidget#listaFranjas { border: 1px
+  solid #000000; }` en `estilos.py` — un borde negro explícito, parejo
+  en los cuatro lados, que no depende del estilo nativo.
+- **Columna "Franjas agregadas" al mínimo**: `panel_franjas` pasa de
+  `setMaximumWidth(_ANCHO_BOTON_ACCION + 16)` a `setFixedWidth(_ANCHO_
+  BOTON_ACCION + 8)`, con el margen horizontal del layout bajado de los
+  9px default de Qt a 4px (mismo criterio que `_ESPACIADO_FORM` en
+  Reservas) — la columna no puede terminar más ancha de lo que
+  realmente necesitan los tres botones de abajo, y la diferencia
+  (~32px medidos) queda para la grilla (columna 4). La tercera columna
+  (el panel de Filtros de la grilla embebida, `_ANCHO_PANEL_FILTROS_
+  GRILLA`) no se tocó, pedido explícito de la clienta.
+- **"Se ve raro al ingresar, se acomoda distinto después de navegar"**:
+  `self.splitter` reparte sus columnas la primera vez que resuelve su
+  layout; la columna 1 (`panel_form`, el formulario de búsqueda) es la
+  única de las tres sin ancho fijo/tope propio — su reparto inicial
+  depende del `sizeHint` de un formulario largo, que puede calcularse
+  antes de que la pantalla cuelgue de verdad del árbol de la ventana
+  real con su hoja de estilos aplicada (mismo motivo ya documentado en
+  `_PanelPromedios.showEvent`, Valores vigentes: un widget recién
+  construido, todavía huérfano, mide con la fuente sin estilar). A
+  diferencia de esa pantalla, acá nada volvía a pedirle al `QSplitter`
+  que repartiera de nuevo sus columnas una vez mostrado de verdad —
+  quedaba con el reparto inicial hasta que algún otro evento (cambiar
+  de solapa y volver) forzaba un relayout real. `showEvent` ahora llama
+  a `_reacomodar_columnas_splitter()` (y de nuevo vía `QTimer.
+  singleShot(0, ...)`, mismo patrón que Reservas regulares/Grilla
+  semanal, para la pasada ya con el layout de toda la ventana resuelto)
+  — vuelve a pedirle al `splitter` que reparta sus columnas según el
+  `sizeHint` ACTUAL (ya con el estilo real puesto) de `panel_form`,
+  dejando la pantalla estable desde la primera entrada. No se pudo
+  reproducir el síntoma exacto (barra de scroll apenas visible) en el
+  sandbox offscreen con los tamaños de ventana probados — el fix aplica
+  el mismo mecanismo ya probado para esta clase de bug en otras
+  pantallas de este sistema.
+
+**Lógica — "cantidad de horas dentro del rango" (horas mínimas)
+devolvía solo UNA alternativa:** bug real reportado con un ejemplo
+concreto: "si yo tengo un consultorio libre entre 8 y 18hs y otro entre
+8 y 14hs, pongo una búsqueda para ese día de 9 a 18hs, con 4 horas
+alcanza... me tendría que poner ambos consultorios como alternativa,
+uno me tendría que decir de 9 a 18hs, y otro de 9 a 14hs, solo me pone
+el de 9 a 18hs". `_opciones_con_duracion` (`app/negocio/
+oferta_busqueda.py`) probaba, de mayor a menor longitud, una ÚNICA
+ventana horaria compartida entre TODOS los consultorios candidatos, y
+devolvía apenas encontraba alguna opción — el consultorio libre todo el
+rango pedido "ganaba" en la primera vuelta (la más larga) y la función
+nunca llegaba a probar una ventana más corta, así que la alternativa
+más corta de otro consultorio (que también cumplía el mínimo) quedaba
+afuera.
+
+Nueva función `_opciones_individuales_por_consultorio` (+ `_mejor_
+bloque_individual`): en vez de compartir una ventana entre todos, cada
+consultorio candidato (de cualquier edificio del alcance) calcula POR
+SU CUENTA el bloque más largo posible dentro de [hora_desde,
+hora_hasta) que arranque con al menos la duración mínima pedida —
+mismo criterio de "el más largo posible, el rango pedido como techo,
+nunca agrandado" que ya tenía la función vieja, pero sin que el
+consultorio con el bloque más largo le tape la alternativa (más corta)
+a otro. Con el rango pedido completo (checkbox sin tildar) da
+exactamente el mismo resultado que antes — un consultorio libre todo
+el rango solo tiene UN bloque posible, el rango entero. Las opciones de
+COMBINACIÓN (más de un consultorio a la vez, amarillo/naranja) siguen
+sin cambios: se sigue ofreciendo como respaldo una sola (la primera que
+cierra, no todas las combinaciones posibles) — el pedido de la clienta
+era sobre consultorios que cubren solos, no sobre combinaciones.
+
+Tests nuevos en `tests/test_oferta_busqueda.py`:
+`test_cantidad_horas_minimas_ofrece_el_bloque_propio_de_cada_
+consultorio` (reproduce el ejemplo exacto de la clienta: 9-18hs/9-14hs,
+dos alternativas verdes separadas) y `test_cantidad_horas_minimas_
+consultorio_que_no_llega_al_minimo_no_se_ofrece` (un consultorio con
+menos horas libres que el mínimo pedido no se ofrece ni con un bloque
+corto). Los tres tests viejos de `cantidad_horas_minimas` (subrango,
+"bloque más grande no solo el mínimo", "nunca fuera del rango pedido")
+siguen pasando sin tocarlos.

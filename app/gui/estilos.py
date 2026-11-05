@@ -258,6 +258,17 @@ ese archivo), que ata el `QFrame` al tamaño exacto de la muestra que
 envuelve, sin poder estirarse más allá. */
 QWidget#muestraLeyenda {{ border: 1px solid #000000; }}
 
+/* Pedido explícito de la clienta sobre Oferta de consultorios: no se veía
+la línea del borde izquierdo del cuadro "Franjas agregadas a esta
+búsqueda" (`self.lista_franjas`, oferta.py) — sin este objectName/regla,
+ese `QListWidget` se queda con el marco nativo `StyledPanel` sunken de la
+plataforma, que en algunos estilos nativos (la PC real de la clienta,
+Windows) termina casi invisible de ese lado. Mismo criterio que el resto
+de los cuadros importantes del sistema (`QTableView`, `#muestraLeyenda`,
+botones, combos, arriba): un borde negro explícito por QSS, parejo en los
+cuatro lados sin depender del estilo nativo. */
+QListWidget#listaFranjas {{ border: 1px solid #000000; }}
+
 /* Indicador de foco en botones (pedido explícito de la clienta): "toco
 Tab, pasa de botón en botón, pero no veo dónde estoy parado" — el estilo
 propio de botonPrimario/botonSecundario (fondo + borde negro) le ganaba

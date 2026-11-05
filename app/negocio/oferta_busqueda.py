@@ -54,6 +54,15 @@ reportan TODAS esas opciones (todas "verde") en vez de quedarse con la
 primera — el operador decide cuál ofrecer. Si ninguna cubre sola, se
 ofrece como respaldo UNA combinación (la primera que se encuentra), no se
 buscan todas las combinaciones posibles.
+
+Con "cantidad de horas dentro del rango" (`Busqueda.cantidad_horas_
+minimas`, en vez de exigir el rango completo): cada consultorio que
+alcance el mínimo ofrece SU PROPIO bloque más largo posible dentro del
+rango pedido, sin que el más largo de todos le tape la alternativa a uno
+más corto (pedido explícito de la clienta: un consultorio libre 8-18hs y
+otro libre 8-14hs, búsqueda 9-18hs con mínimo de 4 horas, tienen que
+ofrecerse LAS DOS alternativas — "9 a 18hs" y "9 a 14hs" — no solo la
+más larga). Ver `_opciones_individuales_por_consultorio`.
 """
 from __future__ import annotations
 
@@ -350,6 +359,47 @@ def _opciones_en_horas(
     return opciones if opciones else None
 
 
+def _mejor_bloque_individual(
+    id_consultorio: int, hd: int, hh: int, dur: int, ocupado_lookup,
+) -> tuple[int, int] | None:
+    """El sub-rango más largo posible dentro de [hd, hh) en el que
+    `id_consultorio`, por sí solo, está libre — con al menos `dur` horas
+    — probando primero el rango pedido completo y achicándolo recién si
+    no cierra, nunca agrandándolo más allá de lo pedido. A igual
+    longitud, se prefiere el inicio más temprano. `None` si ni el bloque
+    mínimo entra en ningún lado de [hd, hh)."""
+    libre = [not ocupado_lookup(id_consultorio, h) for h in range(hd, hh)]
+    for longitud in range(hh - hd, dur - 1, -1):
+        for inicio in range(0, hh - hd - longitud + 1):
+            if all(libre[inicio:inicio + longitud]):
+                return (hd + inicio, hd + inicio + longitud)
+    return None
+
+
+def _opciones_individuales_por_consultorio(
+    candidatos_por_edificio: dict[int, dict[int, sqlite3.Row]], hd: int, hh: int, dur: int, ocupado_lookup,
+) -> list[Opcion]:
+    """Pedido explícito de la clienta: con "cantidad de horas dentro del
+    rango" tildado, cada consultorio candidato (de cualquier edificio del
+    alcance) ofrece SU PROPIO bloque más largo posible (ver
+    `_mejor_bloque_individual`) — nunca comparten una única ventana
+    horaria entre todos. Ejemplo real: un consultorio libre de 8 a 18hs y
+    otro libre de 8 a 14hs, búsqueda de 9 a 18hs con 4 horas de mínimo —
+    antes solo se ofrecía "9 a 18hs" (el primero que cerraba con la
+    ventana más larga posible) y la alternativa más corta "9 a 14hs" del
+    segundo consultorio quedaba afuera, aunque también cumplía el
+    mínimo. Acá cada uno entra con su propia duración, sin que uno tape
+    al otro."""
+    opciones = []
+    for candidatos_por_id in candidatos_por_edificio.values():
+        for id_consultorio in candidatos_por_id:
+            bloque = _mejor_bloque_individual(id_consultorio, hd, hh, dur, ocupado_lookup)
+            if bloque is not None:
+                tramo = TramoCobertura(id_consultorio, bloque[0], bloque[1])
+                opciones.append(Opcion(color=VERDE, tramos=[tramo]))
+    return opciones
+
+
 def _opciones_con_duracion(
     candidatos_por_edificio: dict[int, dict[int, sqlite3.Row]], busqueda: Busqueda, ocupado_lookup,
 ) -> list[Opcion] | None:
@@ -360,19 +410,40 @@ def _opciones_con_duracion(
     completo y achicándolo recién si no cierra, nunca agrandándolo más
     allá de lo que se buscó. A igual longitud, se prefiere el inicio más
     temprano (mismo criterio que antes). El profesional ve el bloque real
-    completo y elige dentro de él qué hora tomar."""
+    completo y elige dentro de él qué hora tomar.
+
+    Las opciones de UN SOLO consultorio ("verde") se calculan por
+    separado para cada consultorio (`_opciones_individuales_por_
+    consultorio`), cada una con su propio bloque — sin minimizar: con el
+    rango pedido completo (`cantidad_horas_minimas` sin tildar, `dur ==
+    hh - hd`), esto da exactamente el mismo resultado que antes (todo
+    consultorio libre el rango entero, con ESE rango como único bloque
+    posible). Las opciones de COMBINACIÓN (más de un consultorio,
+    amarillo/naranja) siguen buscándose como antes: la primera que cierra
+    probando desde el rango más largo hacia abajo — no se buscan todas
+    las combinaciones posibles, mismo criterio ya documentado al tope de
+    este módulo."""
     hd, hh = int(busqueda.hora_desde), int(busqueda.hora_hasta)
     dur = int(busqueda.cantidad_horas_minimas) if busqueda.cantidad_horas_minimas else hh - hd
     if dur <= 0 or dur > hh - hd:
         return None
+
+    opciones = _opciones_individuales_por_consultorio(candidatos_por_edificio, hd, hh, dur, ocupado_lookup)
+
     for longitud in range(hh - hd, dur - 1, -1):
+        encontrada_combinacion = False
         for inicio in range(hd, hh - longitud + 1):
-            opciones = _opciones_en_horas(
+            resultado = _opciones_en_horas(
                 candidatos_por_edificio, list(range(inicio, inicio + longitud)), ocupado_lookup, busqueda.combinacion,
             )
-            if opciones is not None:
-                return opciones
-    return None
+            if resultado is not None:
+                opciones += [op for op in resultado if op.color != VERDE]
+                encontrada_combinacion = True
+                break
+        if encontrada_combinacion:
+            break
+
+    return opciones if opciones else None
 
 
 def _ocupado_regular(conn: sqlite3.Connection, anio: int, mes: int, dia_semana: str):

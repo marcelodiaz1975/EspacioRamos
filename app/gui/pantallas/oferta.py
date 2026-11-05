@@ -42,7 +42,8 @@ from __future__ import annotations
 import math
 import sqlite3
 
-from PySide6.QtCore import QDate, QLocale, Qt
+import shiboken6
+from PySide6.QtCore import QDate, QLocale, Qt, QTimer
 from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
     QApplication,
@@ -471,12 +472,35 @@ class _PanelOferta(QWidget):
         # inferior de la columna, terminando "Nueva búsqueda" a la misma
         # altura que "Agregar franja"/"Quitar franja" de la columna 1.
         panel_franjas = QWidget()
-        panel_franjas.setMaximumWidth(_ANCHO_BOTON_ACCION + 16)
+        # Pedido explícito de la clienta ("achicá la columna al mínimo
+        # para darle más espacio a la visualización de la grilla"):
+        # `setFixedWidth` (no solo un tope) para que esta columna no
+        # pueda terminar más ancha de lo que en verdad necesita — el
+        # ancho de los tres botones de abajo (fijo, `_ANCHO_BOTON_
+        # ACCION`) sigue siendo lo que manda, pero el margen horizontal
+        # del layout baja de los 9px default de Qt a 4px (mismo criterio
+        # que `_ESPACIADO_FORM` en Reservas) para no regalarle más ancho
+        # del necesario a la columna de al lado (la tercera, la de
+        # Filtros de la grilla embebida, se deja sin tocar — ver
+        # `_ANCHO_PANEL_FILTROS_GRILLA`).
         columna_franjas = QVBoxLayout(panel_franjas)
+        columna_franjas.setContentsMargins(4, 9, 4, 9)
+        panel_franjas.setFixedWidth(_ANCHO_BOTON_ACCION + 8)
         etiqueta_franjas = QLabel("Franjas agregadas a esta búsqueda")
         etiqueta_franjas.setWordWrap(True)
         columna_franjas.addWidget(etiqueta_franjas)
         self.lista_franjas = QListWidget()
+        # Pedido explícito de la clienta: no se veía la línea del borde
+        # izquierdo de este cuadro — el marco nativo `StyledPanel`
+        # sunken (sin ningún `objectName`/QSS propio hasta ahora) queda
+        # a merced de cómo cada estilo nativo dibuja ese marco, que en
+        # la PC real de la clienta terminaba casi invisible de ese lado.
+        # Mismo criterio que el resto de los cuadros importantes del
+        # sistema (`QTableView`, `muestraLeyenda`, botones, combos): un
+        # borde negro de 1px explícito por QSS (`estilos.py`,
+        # `QListWidget#listaFranjas`), que no depende del estilo nativo
+        # de la plataforma y se ve igual en los cuatro lados siempre.
+        self.lista_franjas.setObjectName("listaFranjas")
         instalar_eliminar_con_tecla(self.lista_franjas, self._quitar_franja_seleccionada)
         columna_franjas.addWidget(self.lista_franjas, stretch=1)
 
@@ -572,6 +596,8 @@ class _PanelOferta(QWidget):
 
         splitter.addWidget(self.grilla)
         splitter.setStretchFactor(2, 1)
+        self.splitter = splitter
+        self._panel_form = panel_form
 
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
@@ -607,9 +633,46 @@ class _PanelOferta(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802
         """Mismo motivo que Reservas: `setFocus()` durante la
         construcción no alcanza a "pegar" porque la pantalla todavía no
-        está mostrada en ese momento."""
+        está mostrada en ese momento.
+
+        Bug real reportado por la clienta: "se ve raro al ingresar al
+        sistema, luego con la navegación se va acomodando de una manera
+        distinta... se ve apenitas la barra de scroll vertical del
+        formulario". `self.splitter` reparte sus columnas la primera vez
+        que se resuelve su layout — para la columna 1 (`panel_form`, la
+        única de las tres sin un ancho fijo/tope propio, a diferencia de
+        `panel_franjas` y `self.grilla`) ese reparto inicial depende del
+        `sizeHint` de un formulario largo (muchos combos/checks/labels),
+        que puede calcularse ANTES de que esta pantalla cuelgue de
+        verdad del árbol de la ventana real con su hoja de estilos
+        aplicada (mismo motivo ya documentado en `_PanelPromedios.
+        showEvent`, Valores vigentes: un widget recién construido, todavía
+        huérfano, mide con la fuente sin estilar). A diferencia de esa
+        pantalla, acá nada vuelve a pedirle al `QSplitter` que reparta de
+        nuevo sus columnas una vez mostrado de verdad — se queda con el
+        reparto inicial (de ahí que "se vea raro al entrar" y recién se
+        acomode bien después de un evento que SÍ fuerza un relayout,
+        como cambiar de solapa y volver). Pedirle acá, ya con el estilo
+        real puesto, que vuelva a repartir sus columnas según el
+        `sizeHint` actual dejan la pantalla estable desde la primera
+        entrada, sin depender de una navegación extra para "acomodarse"."""
         super().showEvent(event)
         self.combo_profesional.setFocus()
+        self._reacomodar_columnas_splitter()
+        # Mismo motivo que Reservas regulares/Grilla semanal (ver el
+        # `QTimer.singleShot` en sus propios `showEvent`): en este punto
+        # Qt puede no haber terminado de resolver el layout de toda la
+        # ventana todavía — se repite apenas el loop de eventos lo
+        # procese, ya con la geometría final asentada.
+        QTimer.singleShot(0, self._reacomodar_columnas_splitter_si_sigue_vivo)
+
+    def _reacomodar_columnas_splitter(self) -> None:
+        ancho_form = self._panel_form.sizeHint().width()
+        self.splitter.setSizes([ancho_form, self.splitter.widget(1).width(), self.splitter.widget(2).width()])
+
+    def _reacomodar_columnas_splitter_si_sigue_vivo(self) -> None:
+        if shiboken6.isValid(self.splitter):
+            self._reacomodar_columnas_splitter()
 
     def _cargar_profesionales(self) -> None:
         self.combo_profesional.clear()

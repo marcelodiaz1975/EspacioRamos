@@ -259,6 +259,60 @@ def test_cantidad_horas_minimas_nunca_ofrece_horas_fuera_del_rango_buscado(conn)
     assert (tramo.hora_inicio, tramo.hora_fin) == (9, 13)
 
 
+def test_cantidad_horas_minimas_ofrece_el_bloque_propio_de_cada_consultorio(conn):
+    """Bug real reportado por la clienta: "si yo tengo un consultorio
+    libre entre 8 y 18hs y otro entre 8 y 14hs, pongo una búsqueda para
+    ese día de 9 a 18hs, con 4 horas alcanza... me tendría que poner
+    ambos consultorios como alternativa, uno me tendría que decir de 9 a
+    18hs, y otro de 9 a 14hs, solo me pone el de 9 a 18hs". Antes, al
+    encontrar una opción con el rango completo (9-18hs, el consultorio
+    libre todo el día), la búsqueda se quedaba ahí y nunca llegaba a
+    ofrecer el bloque más corto (9-14hs) del segundo consultorio, aunque
+    también cumplía el mínimo de 4 horas pedido."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_libre_todo_el_dia = _crear_consultorio(conn, id_unidad, 1)
+    id_libre_hasta_las_14 = _crear_consultorio(conn, id_unidad, 2)
+    _ocupar_regular(conn, id_libre_hasta_las_14, "Lunes", 14, 18)
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=18,
+        cantidad_horas_minimas=4,
+    )
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    assert len(resultado.alternativas) == 1
+    opciones = resultado.alternativas[0].opciones
+    assert len(opciones) == 2
+    assert all(op.color == VERDE for op in opciones)
+    bloques = {op.tramos[0].id_consultorio: (op.tramos[0].hora_inicio, op.tramos[0].hora_fin) for op in opciones}
+    assert bloques == {id_libre_todo_el_dia: (9, 18), id_libre_hasta_las_14: (9, 14)}
+
+
+def test_cantidad_horas_minimas_consultorio_que_no_llega_al_minimo_no_se_ofrece(conn):
+    """El consultorio que ni siquiera llega al mínimo pedido (3 horas
+    libres, contra un mínimo de 4) no se ofrece como alternativa — ni con
+    su bloque corto ni de ninguna otra forma."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_libre_todo_el_dia = _crear_consultorio(conn, id_unidad, 1)
+    id_libre_3_horas = _crear_consultorio(conn, id_unidad, 2)
+    _ocupar_regular(conn, id_libre_3_horas, "Lunes", 12, 18)
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=18,
+        cantidad_horas_minimas=4,
+    )
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    assert len(resultado.alternativas) == 1
+    opciones = resultado.alternativas[0].opciones
+    assert len(opciones) == 1
+    assert opciones[0].tramos[0].id_consultorio == id_libre_todo_el_dia
+
+
 def test_valor_maximo_hora_descarta_consultorios_caros(conn):
     id_edificio = _crear_edificio(conn)
     id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
