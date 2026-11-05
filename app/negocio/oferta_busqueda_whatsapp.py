@@ -2,10 +2,9 @@
 — misma información, mismo orden y misma redacción que
 `app.pdf.oferta_busqueda_pdf` (ambos se arman sobre
 `app.negocio.oferta_busqueda_texto`), pero con la sintaxis de WhatsApp en
-vez de Paragraphs: *negrita* para los títulos, _itálica_ para los avisos,
-"-" en vez de "*" para las viñetas (un "*" sin cerrar en un renglón
-rompería la negrita del resto del mensaje, WhatsApp la extendería hasta
-el próximo "*" que encuentre).
+vez de Paragraphs: *negrita* para los títulos, "-" en vez de "*" para las
+viñetas (un "*" sin cerrar en un renglón rompería la negrita del resto
+del mensaje, WhatsApp la extendería hasta el próximo "*" que encuentre).
 
 No incluye la sección de fotos: son archivos aparte, se adjuntan sueltos
 en el chat — no hay forma de incrustarlas en el texto del mensaje. Por
@@ -16,10 +15,12 @@ de la cual mostrarlo.
 Editable desde "Textos del sistema" (clave `oferta_busqueda_whatsapp`)
 — ver `app.negocio.plantillas_texto`: los tres títulos en negrita son
 texto de plantilla de verdad; el contenido armado con loops (detalle de
-la búsqueda, listado de alternativas, comentario de edificios/avisos)
-llega ya resuelto como tres variables de bloque, nunca editable línea
-por línea — mismo criterio que `{detalle_items}` en `mensaje_detalle_
-reserva_aislada`."""
+la búsqueda, listado de alternativas, comentario de edificios/bloques
+rígidos) llega ya resuelto como tres variables de bloque, nunca editable
+línea por línea — mismo criterio que `{detalle_items}` en `mensaje_
+detalle_reserva_aislada`. Los avisos de hora aislada asignada ya no van
+acá — se le avisan en pantalla al operador, ver `app.gui.pantallas.
+oferta._PanelOferta._generar_y_mostrar`."""
 from __future__ import annotations
 
 import sqlite3
@@ -28,7 +29,6 @@ from app.negocio.formato import decimales_configurados
 from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales, resolver_busquedas_documento
 from app.negocio.oferta_busqueda_texto import (
     alternativas_planas,
-    avisos_planos,
     categoria_es_activa,
     edificios_comentario,
     filtrar_excluidas,
@@ -72,7 +72,6 @@ def generar_texto_oferta_busqueda(
     ids_edificio_resultado = {c["IdEdificio"] for c in consultorios.values()}
     mostrar_edificio = len(ids_edificio_resultado) > 1
     mostrar_consultorio = not globales.detalle_reducido
-    avisos = avisos_planos(listas_alternativas)
 
     detalle_lineas = [f"- {resumen_busqueda(b, globales.tipo_busqueda)}" for b in busquedas]
 
@@ -99,7 +98,6 @@ def generar_texto_oferta_busqueda(
             conn, "oferta_busqueda_nota_bloques_rigidos", DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS,
         )
         comentario.append(f"- {nota}")
-    comentario += [f"- {aviso}" for aviso in avisos]
     bloque_comentario = ("\n\n*Comentario*\n" + "\n".join(comentario)) if comentario else ""
 
     plantilla = resolver_plantilla(conn, "oferta_busqueda_whatsapp", DEFAULT_OFERTA_BUSQUEDA_WHATSAPP)

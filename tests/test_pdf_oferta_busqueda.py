@@ -374,7 +374,14 @@ def test_comentario_excluye_edificio_sin_resultados(conn, tmp_path):
     assert "Ramos 2" not in texto
 
 
-def test_comentario_incluye_aviso_de_hora_aislada_con_un_solo_edificio(conn, edificio_con_consultorio, tmp_path):
+def test_comentario_no_incluye_aviso_de_hora_aislada(conn, edificio_con_consultorio, tmp_path):
+    """Pedido explícito de la clienta: el aviso de hora aislada asignada
+    dentro de un horario regular ofrecido deja de imprimirse en el PDF —
+    el profesional no tiene por qué verlo. Se le avisa en pantalla al
+    operador en su lugar (ver `app.gui.pantallas.oferta`), no en el
+    documento. "Comentario" igual aparece acá por otro motivo ajeno a este
+    cambio (`_busqueda_simple` cae dentro de un BloqueRigido default,
+    9-11hs — ver `test_comentario_aclara_bloque_rigido_involucrado`)."""
     id_edificio, _, id_consultorio = edificio_con_consultorio
     obtener_repositorio(conn, "ReservaAislada").crear(
         IdProfesional=obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ocupante"),
@@ -384,9 +391,8 @@ def test_comentario_incluye_aviso_de_hora_aislada_con_un_solo_edificio(conn, edi
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
     ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
     texto = fitz.open(ruta)[0].get_text()
-    assert "Comentario" in texto
-    assert "hora aislada asignada" in texto
-    assert f"{ANIO}-{MES:02d}-03" in texto
+    assert "hora aislada asignada" not in texto
+    assert f"{ANIO}-{MES:02d}-03" not in texto
 
 
 def test_comentario_aclara_bloque_rigido_involucrado(conn, edificio_con_consultorio, tmp_path):

@@ -2,10 +2,16 @@
 Oferta de consultorios: arma, a partir de una búsqueda ya resuelta con
 `app.negocio.oferta_busqueda.resolver_busqueda`, las mismas líneas de
 texto plano (resumen de la búsqueda pedida, detalle de cada alternativa
-encontrada, comentarios de edificio/avisos) para que ambos formatos de
-salida digan lo mismo con distinta presentación — el PDF envuelve estas
-líneas en Paragraphs con estilos y encabezados, el texto de WhatsApp las
-arma con la sintaxis de WhatsApp (*negrita*, _itálica_).
+encontrada, comentarios de edificio) para que ambos formatos de salida
+digan lo mismo con distinta presentación — el PDF envuelve estas líneas
+en Paragraphs con estilos y encabezados, el texto de WhatsApp las arma
+con la sintaxis de WhatsApp (*negrita*).
+
+`avisos_planos` (horas aisladas asignadas dentro de un horario regular
+ofrecido) ya NO forma parte de ninguno de los dos documentos — pedido
+explícito de la clienta: el profesional no tiene por qué verlo, es un
+dato interno del espacio. Se usa en cambio para un aviso en pantalla al
+operador, ver `app.gui.pantallas.oferta._PanelOferta._generar_y_mostrar`.
 
 El valor por hora es opcional (`mostrar_valor` en `detalle_tramo`/
 `lineas_opcion`): el PDF lo omite en el listado de alternativas porque ya
@@ -123,7 +129,8 @@ def alternativas_planas(listas_alternativas: list[list[Alternativa]]) -> list[tu
 
 def avisos_planos(listas_alternativas: list[list[Alternativa]]) -> list[str]:
     """Avisos de todas las búsquedas, sin duplicados y en orden de
-    aparición — van al comentario general, no repetidos por alternativa."""
+    aparición — ya no van al PDF/texto (ver `avisos_para_documento`), solo
+    al aviso en pantalla."""
     avisos: list[str] = []
     for alternativas in listas_alternativas:
         for alt in alternativas:
@@ -131,6 +138,20 @@ def avisos_planos(listas_alternativas: list[list[Alternativa]]) -> list[str]:
                 if aviso not in avisos:
                     avisos.append(aviso)
     return avisos
+
+
+def avisos_para_documento(
+    conn: sqlite3.Connection, globales: CriteriosGlobales, busquedas: list[Busqueda],
+) -> list[str]:
+    """Pedido explícito de la clienta: los avisos de hora aislada asignada
+    dentro de un horario regular ofrecido ya no van impresos en el PDF/
+    texto — se usan para un aviso en pantalla, al operador, nada más. Esta
+    función resuelve la búsqueda igual que `previsualizar_documento` (sin
+    aplicar `excluir` — el aviso tiene sentido apenas se arma la
+    búsqueda, antes incluso de que el operador llegue a destildar
+    opciones puntuales en la previsualización) y devuelve la misma lista
+    sin duplicados que antes se embebía en el documento."""
+    return avisos_planos(resolver_busquedas_documento(conn, globales, busquedas))
 
 
 def detalle_tramo(

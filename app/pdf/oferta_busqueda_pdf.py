@@ -48,7 +48,6 @@ from reportlab.platypus import Paragraph, Spacer
 from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales, resolver_busquedas_documento
 from app.negocio.oferta_busqueda_texto import (
     alternativas_planas,
-    avisos_planos,
     categoria_es_activa,
     edificios_comentario,
     filtrar_excluidas,
@@ -95,19 +94,24 @@ def _texto_alternativas(
 
 def _texto_comentario(
     conn: sqlite3.Connection, ids_edificio_resultado: set[int], mostrar_edificio: bool,
-    mostrar_nota_bloques_rigidos: bool, avisos: list[str],
+    mostrar_nota_bloques_rigidos: bool,
 ) -> list:
     """Sin título de nivel 2 propio — va pegado abajo de las alternativas,
-    con el mismo estilo de etiqueta en negrita que "Alternativa N"."""
+    con el mismo estilo de etiqueta en negrita que "Alternativa N".
+
+    Pedido explícito de la clienta: los avisos de hora aislada asignada
+    DENTRO de un horario regular ofrecido (ver `app.negocio.
+    oferta_busqueda._avisos_aislada_regular`) dejan de imprimirse acá — el
+    profesional no tiene por qué ver ese dato interno del espacio. Se
+    avisan en pantalla al operador en su lugar, ver `_PanelOferta.
+    _generar_y_mostrar`."""
     style = estilo_texto(9)
-    style_aviso = estilo_texto(8, italica=True)
     lineas = [Paragraph(f"* {t}", style) for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
     if mostrar_nota_bloques_rigidos:
         nota = resolver_plantilla(
             conn, "oferta_busqueda_nota_bloques_rigidos", DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS,
         )
         lineas.append(Paragraph(f"* {nota}", style))
-    lineas += [Paragraph(f"* {aviso}", style_aviso) for aviso in avisos]
     if not lineas:
         return []
     return [Paragraph("<b>Comentario</b>", style), Spacer(1, 2)] + lineas
@@ -205,7 +209,6 @@ def generar_pdf_oferta_busqueda(
     ids_edificio_resultado = {c["IdEdificio"] for c in consultorios.values()}
     mostrar_edificio = len(ids_edificio_resultado) > 1
     mostrar_consultorio = not globales.detalle_reducido
-    avisos = avisos_planos(listas_alternativas)
     mostrar_nota_bloques_rigidos = hay_bloque_rigido_involucrado(conn, listas_alternativas)
 
     altura = (
@@ -227,9 +230,7 @@ def generar_pdf_oferta_busqueda(
         story.append(Spacer(1, 6))
         story.extend(_texto_alternativas(listas_alternativas, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar))
 
-        comentario = _texto_comentario(
-            conn, ids_edificio_resultado, mostrar_edificio, mostrar_nota_bloques_rigidos, avisos,
-        )
+        comentario = _texto_comentario(conn, ids_edificio_resultado, mostrar_edificio, mostrar_nota_bloques_rigidos)
         if comentario:
             story.append(Spacer(1, 8))
             story.extend(comentario)

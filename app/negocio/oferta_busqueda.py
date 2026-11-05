@@ -80,6 +80,7 @@ from app.negocio.dias import (
     ultimo_dia_mes,
 )
 from app.negocio.grilla import calcular_ocupacion_regular
+from app.pdf.estilos import clave_orden_unidad
 
 TIPO_REGULAR = "Regular"
 TIPO_AISLADA = "Aislada"
@@ -192,8 +193,17 @@ def fecha_fin_default(tipo_busqueda: str, fecha_desde: str) -> str | None:
 def _consultorios_candidatos(
     conn: sqlite3.Connection, globales: CriteriosGlobales, busqueda: Busqueda,
 ) -> list[sqlite3.Row]:
+    # Localidad/NombreEdificioReal/DepartamentoReal (además de IdEdificioReal,
+    # que ya se usaba para agrupar por edificio) se suman para poder ordenar
+    # las opciones encontradas — ver `_clave_orden_opcion` — sin tener que
+    # volver a consultar la base más adelante. LEFT JOIN Localidad: Edificio.
+    # IdLocalidad admite nulo (mismo criterio que el resto del sistema).
     filas = conn.execute(
-        "SELECT c.*, u.IdEdificio AS IdEdificioReal FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad"
+        "SELECT c.*, u.IdEdificio AS IdEdificioReal, u.Departamento AS DepartamentoReal, "
+        "e.Nombre AS NombreEdificioReal, loc.Localidad AS LocalidadReal "
+        "FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad "
+        "JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+        "LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad"
     ).fetchall()
     resultado = []
     for c in filas:
@@ -451,14 +461,24 @@ def _ocupado_regular(conn: sqlite3.Connection, anio: int, mes: int, dia_semana: 
     return lambda id_consultorio, hora: mapa.get((id_consultorio, dia_semana, hora), False)
 
 
-def _avisos_aislada_regular(conn: sqlite3.Connection, anio: int, mes: int, dia_semana: str, opciones: list[Opcion]) -> list[str]:
+def _avisos_aislada_regular(
+    conn: sqlite3.Connection, anio: int, mes: int, dia_semana: str, opciones: list[Opcion], fecha_desde: date,
+) -> list[str]:
     """Fechas puntuales del mes que caen en `dia_semana` donde alguno de
     los tramos ofrecidos (de cualquier opción) se superpone con una
     ReservaAislada confirmada en ese consultorio — la disponibilidad
     regular no las tiene en cuenta para bloquear (ver docstring de
-    `Alternativa.avisos`), pero se reportan para decisión manual."""
+    `Alternativa.avisos`), pero se reportan para decisión manual.
+
+    Nunca antes de `fecha_desde` (pedido explícito de la clienta): la
+    oferta regular recién arranca a partir de esa fecha (lo que haya
+    pasado antes, en el mismo mes, no es parte de lo que se está
+    ofreciendo) — antes se recorría el mes completo desde el día 1, así
+    que una `fecha_desde` a mitad de mes podía avisar de una hora
+    aislada en una fecha anterior a la propia búsqueda, ruido sin sentido
+    ("se ofrece algo sobre fechas que van a estar disponibles")."""
     avisos = []
-    fecha = primer_dia_mes(anio, mes)
+    fecha = max(primer_dia_mes(anio, mes), fecha_desde)
     ultimo = ultimo_dia_mes(anio, mes)
     tramos = [t for op in opciones for t in op.tramos]
     while fecha <= ultimo:
@@ -496,16 +516,41 @@ def _ocupado_fecha(conn: sqlite3.Connection, fecha: date):
     return lambda id_consultorio, hora: ocupado.get((id_consultorio, hora), False)
 
 
+def _clave_orden_opcion(opcion: Opcion, candidatos_por_id: dict[int, sqlite3.Row]) -> tuple:
+    """Orden pedido por la clienta para listar las opciones encontradas en
+    el PDF/texto de WhatsApp (el día de la semana/fecha ya ordena las
+    `Alternativa` entre sí — ver `resolver_busqueda`): localidad, edificio,
+    unidad (`clave_orden_unidad`, mismo criterio ya usado en el resto del
+    sistema: departamentos con letra tipo PB/EP primero, pisos numéricos
+    ascendente después) y, por último, número de consultorio. Se ordena por
+    el PRIMER tramo de la opción — en una combinación, `_combinacion_
+    subrango` ya arranca esa lista en la hora más temprana, así que es el
+    tramo más representativo para decidir dónde cae la opción entera."""
+    primer_tramo = opcion.tramos[0]
+    c = candidatos_por_id.get(primer_tramo.id_consultorio)
+    if c is None:
+        return ("", "", (2.0, ""), 0)
+    return (
+        c["LocalidadReal"] or "", c["NombreEdificioReal"] or "",
+        clave_orden_unidad(c["DepartamentoReal"]), c["NumeroConsultorio"],
+    )
+
+
 def resolver_busqueda(conn: sqlite3.Connection, globales: CriteriosGlobales, busqueda: Busqueda) -> ResultadoBusqueda:
     candidatos = _consultorios_candidatos(conn, globales, busqueda)
     candidatos_por_edificio = _candidatos_por_edificio(candidatos)
     if not candidatos_por_edificio or not busqueda.dias:
         return ResultadoBusqueda()
+    candidatos_por_id = {c["IdConsultorio"]: c for c in candidatos}
+
+    def ordenar(opciones: list[Opcion]) -> list[Opcion]:
+        return sorted(opciones, key=lambda op: _clave_orden_opcion(op, candidatos_por_id))
 
     alternativas: list[Alternativa] = []
 
     if globales.tipo_busqueda == TIPO_REGULAR:
-        anio, mes = date.fromisoformat(busqueda.fecha_desde).year, date.fromisoformat(busqueda.fecha_desde).month
+        fecha_desde = date.fromisoformat(busqueda.fecha_desde)
+        anio, mes = fecha_desde.year, fecha_desde.month
         opciones_por_dia: dict[str, list[Opcion]] = {}
         for dia in busqueda.dias:
             opciones = _opciones_con_duracion(candidatos_por_edificio, busqueda, _ocupado_regular(conn, anio, mes, dia))
@@ -514,8 +559,8 @@ def resolver_busqueda(conn: sqlite3.Connection, globales: CriteriosGlobales, bus
         if len(opciones_por_dia) != len(busqueda.dias):
             return ResultadoBusqueda()  # Regular: todos los días pedidos tienen que coincidir
         for dia in busqueda.dias:
-            opciones = opciones_por_dia[dia]
-            avisos = _avisos_aislada_regular(conn, anio, mes, dia, opciones)
+            opciones = ordenar(opciones_por_dia[dia])
+            avisos = _avisos_aislada_regular(conn, anio, mes, dia, opciones, fecha_desde)
             alternativas.append(Alternativa(dia_semana=dia, fecha=None, opciones=opciones, avisos=avisos))
     else:
         fecha = date.fromisoformat(busqueda.fecha_desde)
@@ -525,7 +570,9 @@ def resolver_busqueda(conn: sqlite3.Connection, globales: CriteriosGlobales, bus
             if dia_semana in busqueda.dias:
                 opciones = _opciones_con_duracion(candidatos_por_edificio, busqueda, _ocupado_fecha(conn, fecha))
                 if opciones is not None:
-                    alternativas.append(Alternativa(dia_semana=dia_semana, fecha=fecha.isoformat(), opciones=opciones))
+                    alternativas.append(
+                        Alternativa(dia_semana=dia_semana, fecha=fecha.isoformat(), opciones=ordenar(opciones))
+                    )
             fecha += timedelta(days=1)
 
     return ResultadoBusqueda(alternativas=alternativas)

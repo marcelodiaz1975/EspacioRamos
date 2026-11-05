@@ -1486,3 +1486,73 @@ menos horas libres que el mínimo pedido no se ofrece ni con un bloque
 corto). Los tres tests viejos de `cantidad_horas_minimas` (subrango,
 "bloque más grande no solo el mínimo", "nunca fuera del rango pedido")
 siguen pasando sin tocarlos.
+
+## Oferta de consultorios: default de combinación, orden de salida, scroll residual, avisos fuera del documento (hilo nuevo, nov-2026)
+
+Cuatro pedidos puntuales de la clienta sobre esta misma solapa, en un
+mismo mensaje.
+
+**"Requisitos de búsqueda" arranca en "Sin combinación de
+consultorios"** (antes "Combinar, mismo edificio", índice 2 del combo) —
+`combo_combinacion.setCurrentIndex(0)` tanto en `_armar_ui` como en
+`_nueva_busqueda` (el reset de "Nueva búsqueda"/F5). El caso más común
+es buscar un consultorio que cubra todo el pedido solo.
+
+**Orden de las alternativas en el PDF y el texto de WhatsApp**: día de
+la semana (ya ordenaba bien — `_dias_seleccionados` en cascada Lunes→
+Sábado para Regular, fecha calendario para Aislada), después localidad,
+edificio, unidad (`clave_orden_unidad` — letras tipo PB/EP antes que
+pisos numéricos, mismo criterio ya usado en toda la app) y consultorio.
+Antes el orden dentro de cada día era el que diera una consulta SQL sin
+`ORDER BY` — arbitrario. `_consultorios_candidatos`
+(`app/negocio/oferta_busqueda.py`) suma Localidad/NombreEdificio/
+Departamento a la fila de cada candidato (antes solo traía lo
+imprescindible para resolver disponibilidad); `_clave_orden_opcion` +
+`resolver_busqueda` ordenan `Alternativa.opciones` con esos datos,
+usando el PRIMER tramo de cada opción como representante (en una
+combinación, `_combinacion_subrango` ya arranca esa lista en la hora más
+temprana). Al ordenarse accá, en el dato crudo, preview/PDF/WhatsApp
+(que comparten `alternativas_planas`) quedan consistentes entre sí
+solos, sin tocar cada consumidor por separado.
+
+**Barra de scroll vertical mínima, todavía visible después del fix de
+la ronda anterior** (que reacomodaba el ancho de las columnas del
+splitter en `showEvent`, pero nunca tocó el ALTO): medido con un script
+de geometría, `panel_form` (columna 1, el formulario de búsqueda, ~22
+campos entre labels/combos/checks) es la columna más alta de las
+cuatro y la que termina fijando el alto total — nunca tuvo un
+`setSpacing` propio, así que usaba el espaciado nativo de Qt (6px) entre
+cada ítem. `form.setSpacing(4)` (mismo criterio ya aplicado en Reservas,
+`_ESPACIADO_FORM`) baja el `sizeHint` de esa columna de 692px a 646px
+(46px recuperados) — confirmado que alcanza para que el escenario que
+antes necesitaba scroll (un tamaño de ventana límite, medido con un
+script) deje de necesitarlo.
+
+**Avisos de hora aislada asignada: salen del PDF/texto, pasan a un
+alerta en pantalla** — pedido explícito: el profesional no tiene por qué
+ver ese dato interno del espacio. `_texto_comentario` (PDF) y el armado
+de `bloque_comentario` (WhatsApp) ya no reciben/imprimen `avisos`;
+`avisos_planos`/`avisos_para_documento` (nueva, `oferta_busqueda_
+texto.py`) se usan en cambio desde `_PanelOferta._generar_y_mostrar`
+(`oferta.py`) para un `QMessageBox.information` propio, antes de abrir
+la previsualización — común a "Generar PDF" y "Generar texto WhatsApp",
+un solo punto de entrada para los dos.
+
+De paso, bug real encontrado al revisar el pedido ("si tengo alguna
+reserva anterior a esa fecha... que no me avise"): `_avisos_aislada_
+regular` recorría el MES completo de `fecha_desde` desde el día 1,
+así que una búsqueda que arranca a mitad de mes podía avisar de una
+hora aislada en una fecha ANTERIOR a la propia búsqueda — ruido sin
+sentido, esa fecha no es parte de lo que se está ofreciendo. Ahora
+arranca en `max(primer_dia_mes, fecha_desde)`.
+
+Tests nuevos: `tests/test_gui_oferta.py`
+(`test_combinacion_de_consultorios_arranca_en_sin_combinar`,
+`test_generar_avisa_en_pantalla_hora_aislada_sin_mostrarla_en_el_
+documento` — confirma las dos cosas a la vez: aviso en pantalla Y
+ausencia en el PDF generado), `tests/test_oferta_busqueda.py`
+(`test_opciones_ordenadas_por_localidad_edificio_unidad_consultorio`,
+`test_regular_no_avisa_hora_aislada_anterior_a_la_fecha_desde`),
+`tests/test_pdf_oferta_busqueda.py` (`test_comentario_incluye_aviso_
+de_hora_aislada_con_un_solo_edificio` renombrado a `test_comentario_
+no_incluye_aviso_de_hora_aislada`, invertido para confirmar la ausencia).

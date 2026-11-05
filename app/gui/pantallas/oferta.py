@@ -96,7 +96,7 @@ from app.negocio.oferta_busqueda import (
     fecha_fin_default,
     fecha_inicio_default,
 )
-from app.negocio.oferta_busqueda_texto import previsualizar_documento, resumen_busqueda
+from app.negocio.oferta_busqueda_texto import avisos_para_documento, previsualizar_documento, resumen_busqueda
 from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
 from app.pdf.estilos import clave_orden_unidad
 from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
@@ -291,6 +291,16 @@ class _PanelOferta(QWidget):
         # porque acá `form` parte de los márgenes default de Qt (9px) en
         # vez de 0.
         form.setContentsMargins(9, 15, 9, 9)
+        # Pedido explícito de la clienta: todavía quedaba una barra de
+        # scroll vertical mínima en esta solapa — el formulario (columna
+        # 1, con ~20 campos entre labels/combos/checks) es la columna más
+        # alta de las cuatro y la que termina fijando cuánto mide el
+        # contenido completo. El espaciado nativo de Qt entre cada ítem
+        # (6px, sin fijar hasta ahora) nunca tuvo un valor propio acá —
+        # mismo criterio ya aplicado en Reservas (`_ESPACIADO_FORM`, 4px
+        # en vez de 6) para recuperar unos milímetros de alto sin
+        # amontonar los campos entre sí.
+        form.setSpacing(4)
 
         self.combo_profesional = QComboBox()
         habilitar_busqueda_profesional(self.combo_profesional)
@@ -397,7 +407,11 @@ class _PanelOferta(QWidget):
         self.combo_combinacion = QComboBox()
         for etiqueta, valor in _COMBINACIONES:
             self.combo_combinacion.addItem(etiqueta, valor)
-        self.combo_combinacion.setCurrentIndex(2)
+        # Pedido explícito de la clienta: arranca en "Sin combinación de
+        # consultorios" (antes "Combinar, mismo edificio") — el caso más
+        # común es buscar un consultorio que cubra todo el pedido solo,
+        # no uno que ya arranque combinando.
+        self.combo_combinacion.setCurrentIndex(0)
         form.addWidget(self.combo_combinacion)
 
         self.casilla_ventana = QCheckBox("Con ventana")
@@ -906,6 +920,16 @@ class _PanelOferta(QWidget):
             QMessageBox.warning(self, "Oferta de consultorios", str(error))
             return
 
+        # Pedido explícito de la clienta: los avisos de hora aislada
+        # asignada dentro de un horario regular ofrecido ya no van
+        # impresos en el PDF/texto (el profesional no tiene por qué
+        # verlos) — se avisan acá, en pantalla, antes de la
+        # previsualización, para que el operador los tenga en cuenta al
+        # decidir qué alternativas ofrecer.
+        avisos = avisos_para_documento(self.conn, globales, busquedas)
+        if avisos:
+            QMessageBox.information(self, "Oferta de consultorios", "\n\n".join(avisos))
+
         dialogo = _DialogoPrevisualizacion(filas, self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
@@ -952,7 +976,7 @@ class _PanelOferta(QWidget):
         self.spin_hasta.setValue(12)
         self.casilla_horas_minimas.setChecked(False)
         self.spin_horas_minimas.setValue(1)
-        self.combo_combinacion.setCurrentIndex(2)
+        self.combo_combinacion.setCurrentIndex(0)  # "Sin combinación de consultorios" — mismo default que al abrir
         self.casilla_ventana.setChecked(False)
         self.casilla_camilla.setChecked(False)
         self.casilla_tamano.setChecked(False)

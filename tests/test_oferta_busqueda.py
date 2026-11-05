@@ -259,6 +259,38 @@ def test_cantidad_horas_minimas_nunca_ofrece_horas_fuera_del_rango_buscado(conn)
     assert (tramo.hora_inicio, tramo.hora_fin) == (9, 13)
 
 
+def test_opciones_ordenadas_por_localidad_edificio_unidad_consultorio(conn):
+    """Pedido explícito de la clienta: orden de los consultorios ofrecidos
+    (PDF y texto de WhatsApp) por localidad, luego edificio, luego unidad
+    (letras tipo PB/EP antes que los pisos numéricos, `clave_orden_unidad`
+    — mismo criterio ya usado en el resto del sistema), luego consultorio.
+    Acá se verifica directo sobre `alt.opciones`, antes de que el PDF/texto
+    lo consuman — los tres consumen la misma lista ya ordenada."""
+    id_loc_haedo = obtener_repositorio(conn, "Localidad").crear(Localidad="Haedo")
+    id_loc_ramos = obtener_repositorio(conn, "Localidad").crear(Localidad="Ramos Mejía")
+
+    id_edificio_imperio = obtener_repositorio(conn, "Edificio").crear(Nombre="Imperio", IdLocalidad=id_loc_ramos)
+    id_unidad_3b = _crear_unidad(conn, id_edificio_imperio, '3 "B"')
+    id_c_3b = _crear_consultorio(conn, id_unidad_3b, 1)
+    id_unidad_pb = _crear_unidad(conn, id_edificio_imperio, 'PB "A"')
+    id_c_pb = _crear_consultorio(conn, id_unidad_pb, 2)
+
+    id_edificio_sol = obtener_repositorio(conn, "Edificio").crear(Nombre="Sol", IdLocalidad=id_loc_haedo)
+    id_unidad_sol = _crear_unidad(conn, id_edificio_sol, '1 "A"')
+    id_c_sol = _crear_consultorio(conn, id_unidad_sol, 5)
+
+    globales = CriteriosGlobales(
+        tipo_busqueda="Regular", ids_edificio=[id_edificio_imperio, id_edificio_sol],
+    )
+    busqueda = Busqueda(
+        fecha_desde=f"{ANIO}-{MES:02d}-01", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11,
+    )
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    ids_en_orden = [op.tramos[0].id_consultorio for op in resultado.alternativas[0].opciones]
+    assert ids_en_orden == [id_c_sol, id_c_pb, id_c_3b]
+
+
 def test_cantidad_horas_minimas_ofrece_el_bloque_propio_de_cada_consultorio(conn):
     """Bug real reportado por la clienta: "si yo tengo un consultorio
     libre entre 8 y 18hs y otro entre 8 y 14hs, pongo una búsqueda para
@@ -391,6 +423,29 @@ def test_regular_avisa_hora_aislada_superpuesta_sin_bloquear(conn):
     assert alt.opciones[0].color == VERDE
     assert len(alt.avisos) == 1
     assert "2026-08-10" in alt.avisos[0]
+
+
+def test_regular_no_avisa_hora_aislada_anterior_a_la_fecha_desde(conn):
+    """Pedido explícito de la clienta: "si yo pongo en una búsqueda para
+    el 1/12 o a partir del 1/12... si tengo alguna reserva anterior a esa
+    fecha... que no me avise, está todo bien porque se ofrece algo sobre
+    fechas que van a estar disponibles". 2026-08-03 y 2026-08-17 son los
+    dos primeros lunes de agosto; la búsqueda arranca el 10/08 (después
+    del primero, antes del segundo) — solo avisa del segundo."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    _ocupar_aislada(conn, id_consultorio, "2026-08-03", 9, 10)  # ANTES de fecha_desde: no avisa
+    _ocupar_aislada(conn, id_consultorio, "2026-08-17", 9, 10)  # DESPUÉS de fecha_desde: sí avisa
+
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    busqueda = Busqueda(fecha_desde="2026-08-10", fecha_hasta=None, dias=["Lunes"], hora_desde=9, hora_hasta=11)
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    alt = resultado.alternativas[0]
+    assert len(alt.avisos) == 1
+    assert "2026-08-17" in alt.avisos[0]
+    assert "2026-08-03" not in alt.avisos[0]
 
 
 def test_regular_sin_hora_aislada_no_genera_avisos(conn):

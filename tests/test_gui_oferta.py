@@ -1,5 +1,8 @@
+from datetime import date
+
+import fitz
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import QDialog, QLabel, QMessageBox
 
 from app.db.init_db import init_database
@@ -240,6 +243,18 @@ def test_combinacion_de_consultorios_bajo_el_titulo_requisitos_de_busqueda(qtbot
     assert indice_combo == indice_titulo + 1
 
 
+def test_combinacion_de_consultorios_arranca_en_sin_combinar(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: arranca en "Sin combinación de
+    consultorios" (antes "Combinar, mismo edificio") — el caso más común
+    es buscar un consultorio que cubra todo el pedido solo."""
+    from app.negocio.oferta_busqueda import SIN_COMBINAR
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.combo_combinacion.currentData() == SIN_COMBINAR
+    assert pantalla.combo_combinacion.currentText() == "Sin combinación de consultorios"
+
+
 def test_hay_tres_botones_y_nueva_busqueda_es_la_principal(qtbot, conn, profesional_y_consultorio):
     from PySide6.QtWidgets import QPushButton
 
@@ -262,6 +277,7 @@ def test_nueva_busqueda_resetea_el_formulario_y_enfoca_profesional(qtbot, conn, 
     pantalla._checks_dia["Lunes"].setChecked(True)
     pantalla.casilla_ventana.setChecked(True)
     pantalla.casilla_tamano.setChecked(True)
+    pantalla.combo_combinacion.setCurrentIndex(2)
     pantalla._agregar_franja()  # deja además una franja cargada
 
     pantalla._nueva_busqueda()
@@ -269,6 +285,7 @@ def test_nueva_busqueda_resetea_el_formulario_y_enfoca_profesional(qtbot, conn, 
     assert pantalla._dias_seleccionados() == []
     assert not pantalla.casilla_ventana.isChecked()
     assert not pantalla.casilla_tamano.isChecked()
+    assert pantalla.combo_combinacion.currentIndex() == 0  # "Sin combinación de consultorios"
     assert pantalla._franjas == []
     assert pantalla.lista_franjas.count() == 0
     qtbot.waitUntil(lambda: pantalla.combo_profesional.hasFocus())
@@ -432,6 +449,50 @@ def test_generar_texto_muestra_dialogo_con_el_texto(qtbot, conn, tmp_path, monke
     pantalla._generar_texto()
 
     assert "Búsqueda requerida por el profesional" in capturado["texto"]
+
+
+def test_generar_avisa_en_pantalla_hora_aislada_sin_mostrarla_en_el_documento(
+    qtbot, conn, tmp_path, monkeypatch, profesional_y_consultorio,
+):
+    """Pedido explícito de la clienta: el aviso de hora aislada asignada
+    dentro de un horario regular ofrecido ya no va en el PDF/texto — se
+    muestra como un alerta en pantalla al operador, para cualquiera de los
+    dos procesos de generación."""
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    id_prof, id_edificio = profesional_y_consultorio
+    id_consultorio = obtener_repositorio(conn, "Consultorio").listar()[0]["IdConsultorio"]
+    fecha_aviso = date(2026, 12, 7)  # un lunes
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio,
+        Fecha=fecha_aviso.isoformat(), HoraInicio=9, HoraFin=10,
+    )
+    conn.commit()
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_profesional.setCurrentIndex(pantalla.combo_profesional.findData(id_prof))
+    pantalla.campo_fecha_desde.setDate(QDate(2026, 12, 1))
+    pantalla._checks_dia["Lunes"].setChecked(True)
+
+    avisos_mostrados = []
+    monkeypatch.setattr(
+        QMessageBox, "information",
+        staticmethod(lambda *a, **k: avisos_mostrados.append(a[2] if len(a) > 2 else k.get("text"))),
+    )
+
+    pantalla._generar_pdf()
+
+    # Dos llamadas a QMessageBox.information: la primera es el aviso de
+    # hora aislada (acá, antes de la previsualización); la segunda es el
+    # "Se generó: {ruta}" de siempre al terminar `_generar_pdf`.
+    assert len(avisos_mostrados) == 2
+    assert "hora aislada asignada" in avisos_mostrados[0]
+    assert fecha_aviso.isoformat() in avisos_mostrados[0]
+
+    ruta = next((tmp_path / "Archivos varios" / "Oferta").iterdir())
+    texto_pdf = fitz.open(ruta)[0].get_text()
+    assert "hora aislada asignada" not in texto_pdf
 
 
 def test_sin_dias_no_genera_archivo(qtbot, conn, tmp_path, profesional_y_consultorio):
