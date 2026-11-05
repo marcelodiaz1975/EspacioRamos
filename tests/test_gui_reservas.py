@@ -858,6 +858,44 @@ def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_
     assert top(etiqueta_detalle) >= pie_tabla
 
 
+def test_regulares_detalle_no_se_superpone_con_la_barra_de_scroll_con_margen_de_sobra(qtbot, conn):
+    """Pedido/reporte real de la clienta sobre la ronda anterior (que
+    había bajado el espacio antes de "Detalle:" a 2px): "la etiqueta
+    'Detalle' está superpuesta a la barra de scroll horizontal...
+    cuando te digo subir la altura del cuadro... no tiene en cuenta lo
+    que ocupa ese título, esa etiqueta, y termina quedando arriba de la
+    barra." Causa real: 2px de margen EXPLÍCITO dependían de que el
+    espaciado POR DEFECTO de `layout_grilla` (el de la hoja de estilos
+    NATIVA de Qt, no un número fijo del sistema) resolviera igual en la
+    PC real de la clienta que en este sandbox — sin garantía de eso
+    (`agregar_espacio_antes_de_detalle`, ver su docstring). Subido a 8:
+    bastante más margen de sobra que una tolerancia de "no se toquen" —
+    para que un default más chico en el tema de Windows de la clienta
+    siga dejando un gap cómodo, no al límite."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
+    )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 900)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(0)
+    qtbot.waitExposed(pantalla)
+
+    panel_r = pantalla.panel_regulares
+    pie_tabla = panel_r.grilla.tabla.mapToGlobal(panel_r.grilla.tabla.rect().bottomLeft()).y()
+    techo_etiqueta = panel_r.grilla.etiqueta_detalle.mapToGlobal(
+        panel_r.grilla.etiqueta_detalle.rect().topLeft()
+    ).y()
+    assert techo_etiqueta - pie_tabla >= 4
+
+
 def test_regulares_tabla_de_abajo_arranca_cerca_del_pie_de_eliminar_reserva(qtbot, conn):
     """Pedido explícito de la clienta: "subí la tabla... hasta antes del
     botón 'Eliminar reserva' con una separación de 5 pixeles" —

@@ -1850,6 +1850,73 @@ reserva` (gap real entre `boton_eliminar` y `self.tabla`, tolerancia de
 escenario denso (`test_regulares_con_grilla_densa_no_muestra_scroll_
 vertical_de_la_solapa`), siguen pasando sin cambios.
 
+## Reservas regulares: ronda 8 — "Detalle" superpuesto con la barra de scroll en la ronda anterior: la causa era el espaciado por defecto de Qt, no un número fijo
+
+Reporte real de la clienta sobre la captura ya enviada de la ronda
+anterior (2px de margen explícito antes de "Detalle:"): "en la captura
+veo que la etiqueta 'Detalle' está superpuesta a la barra de scroll
+horizontal... porque es el problema que venimos teniendo, cuando te
+digo subir la altura del cuadro para que llegue abajo de la grilla no
+tiene en cuenta lo que ocupa ese título, esa etiqueta, y termina
+quedando arriba de la barra." Antes de pedir que probara el .exe,
+investigado el mecanismo de fondo (sin reproducir todavía la
+superposición exacta en este sandbox, pero identificando la causa real
+con certeza): `agregar_espacio_antes_de_detalle(2)` sumaba 2px
+EXPLÍCITOS, pensados para sumarse al espaciado PAREJO POR DEFECTO de
+`layout_grilla` — pero ese default no es un número fijo del sistema,
+es el que resuelve el ESTILO NATIVO de Qt para `QVBoxLayout.spacing()
+== -1` ("usar el del estilo"). Confirmado programáticamente: en este
+sandbox resuelve a 6px — pero no hay ninguna garantía de que el tema
+nativo de Windows de la clienta resuelva ese mismo valor (mismo tipo de
+diferencia de entorno que las fuentes, ya documentado en "Metodología
+de trabajo", pero acá en espaciado de layout en vez de texto). Un
+número fijo pensado para sumarse a un default ambiguo nunca puede
+garantizar un gap mínimo real — exactamente el patrón que la clienta
+describe ("no tiene en cuenta lo que ocupa...").
+
+**Primer intento (revertido): un mecanismo dinámico que medía el gap
+real y agrandaba un widget si no alcanzaba un mínimo.** Sonaba más
+robusto que un número fijo (medir, no asumir — el mismo criterio que
+ya usa `_ajustar_alto_detalle`), pero un test que forzaba `layout_
+grilla.setSpacing(0)` (el peor caso posible, más adverso que cualquier
+tema real) reveló que la corrección dinámica podía EMPEORAR el gap en
+vez de mejorarlo: agrandar el espaciador en una pasada de `showEvent`/
+`QTimer` no se refleja en la posición de los widgets de abajo dentro
+del MISMO evento síncrono (necesita que Qt procese el layout pendiente
+en otra vuelta del loop de eventos), así que la SIGUIENTE medición
+(ya sea la pasada diferida, o la del test) termina viendo una posición
+todavía no asentada — y como el sistema completo (splitter, `panel_
+form`, `self.grilla`) sigue conviviendo con el ciclo de convergencia ya
+documentado en la ronda 7, la corrección del espaciador interactuaba
+con ESE ciclo de forma impredecible: en el escenario de prueba, el gap
+terminó en -15px (peor que el -7px de partida) después de "corregirlo"
+dos veces. Revertido por completo (`asegurar_espacio_minimo_antes_de_
+detalle` y el guard dinámico, eliminados de `GrillaOperativaWidget` y
+de los dos `showEvent`/reajuste diferido de Reservas regulares) — un
+mecanismo que puede empeorar el problema bajo ciertas condiciones es
+peor que uno simple que no lo resuelve del todo.
+
+**Arreglo definitivo: un colchón ESTÁTICO más generoso, no una
+corrección dinámica.** `agregar_espacio_antes_de_detalle` sigue
+armando un widget REAL con `setFixedHeight` (eso sí se queda — más
+confiable que un `insertSpacing`, mismo criterio que el resto de esta
+sección), pero el valor que Reservas regulares le pasa sube de 2 a 8 —
+lo bastante grande como para que, incluso si el tema nativo de Windows
+resolviera un default sensiblemente más chico que los 6px de este
+sandbox (o incluso 0), el gap total siga siendo cómodo, sin tener que
+confiar en medir y corregir en tiempo real. Vuelta al criterio simple y
+pragmático ya usado para el resto de los "colchones" de esta sección
+(`_MARGEN_SCROLL_SUPERIOR_REGULARES`): un número con margen de sobra,
+no calibrado al límite.
+
+Tests: `tests/test_gui_reservas.py` —
+`test_regulares_detalle_no_se_superpone_con_la_barra_de_scroll_con_
+margen_de_sobra` (nuevo, reemplaza un primer intento que forzaba
+`setSpacing(0)` — revertido junto con el mecanismo dinámico que
+probaba — verifica un gap de al menos 4px, no solo "sin superposición")
+— el resto de los tests de Reservas regulares, incluido el escenario
+denso y el de la tabla de abajo, siguen pasando sin cambios.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

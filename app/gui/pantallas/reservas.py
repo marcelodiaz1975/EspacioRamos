@@ -1474,21 +1474,23 @@ class _PanelReservasRegulares(QWidget):
         # misma altura que el formulario ("que quede parejo", pedido
         # explícito de la clienta), ver `dar_stretch_a_detalle`.
         self.grilla.dar_stretch_a_detalle()
-        # Pedido explícito de la clienta, ronda siguiente a la que agregó
-        # este espacio extra ("subí la etiqueta 'Detalle' para que quede
-        # abajo de la grilla, abajo de la barra de escroll horizontal...
-        # concretamente"): bajado de 14 a 2 — el espaciado parejo por
-        # defecto de esta columna (6px, igual que entre cualquier otro
-        # par de controles) casi alcanza para no superponerse con la
-        # última fila de la grilla (8 a 22hs, ver `fijar_alto_filas` más
-        # abajo), pero medido con 0 extra quedaba a 1px de superponerse
-        # (confirmado con un test) — 2px de margen explícito alcanzan
-        # sin volver a los 14px de antes (que el único riesgo real de
-        # superposición, el alto de fila, ya no necesita) — "Detalle"
-        # (`texto_detalle`, con `stretch=1` vía `dar_stretch_a_detalle`
-        # de arriba) sigue llegando al mismo pie que la columna de al
-        # lado sin más ajuste.
-        self.grilla.agregar_espacio_antes_de_detalle(2)
+        # Reporte real de la clienta sobre la ronda anterior (que había
+        # bajado este valor a 2): "la etiqueta 'Detalle' está superpuesta
+        # a la barra de scroll horizontal... cuando te digo subir la
+        # altura del cuadro... no tiene en cuenta lo que ocupa ese
+        # título, esa etiqueta, y termina quedando arriba de la barra."
+        # Causa real: 2px de margen EXPLÍCITO, pensados para sumarse al
+        # espaciado por defecto de `layout_grilla` (el de la hoja de
+        # estilos NATIVA de Qt — `QVBoxLayout.spacing() == -1`, "usar el
+        # del estilo", 6px en este sandbox), dependían de que ese
+        # default resuelva igual en la PC real de la clienta — no hay
+        # garantía de eso (mismo tipo de diferencia de entorno que las
+        # fuentes, ver "Metodología de trabajo", pero en espaciado de
+        # layout). Subido a 8: lo bastante generoso como para que el
+        # gap real quede seguro aunque el estilo nativo de Windows
+        # resuelva un default bien más chico que el de acá — sin volver
+        # a los 14px de antes, que la clienta había pedido reducir.
+        self.grilla.agregar_espacio_antes_de_detalle(8)
         # Tope de alto IGUAL al de `panel_form` (columna 1, con Días/
         # Vigencia/3 botones) en vez de a `alto_natural_grilla()` (el
         # alto natural de la grilla sola): pedido explícito de la
