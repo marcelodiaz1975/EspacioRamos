@@ -88,7 +88,7 @@ import shutil
 import sqlite3
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QFontMetrics, QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -112,7 +112,7 @@ from PySide6.QtWidgets import (
 from app.gui.main_window import Seccion
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import excluir_tabla_del_tab, instalar_enter_avanza_foco
-from app.gui.widgets.items_tabla import item_numero
+from app.gui.widgets.items_tabla import item_centrado, item_numero
 from app.negocio.archivos_generados import SUBCARPETA_MANUAL, carpeta_archivos_varios
 from app.negocio.imagenes import (
     CATEGORIAS_CON_ETIQUETA_LIBRE,
@@ -140,7 +140,7 @@ _TODOS = "Todos los archivos"
 _NIVEL_ALCANCE = {"Espacio": 0, "Localidad": 1, "Edificio": 2, "Unidad": 3, "Consultorio": 4}
 _ALCANCES = [_TODOS, *_NIVEL_ALCANCE]
 _PADDING_COLUMNA = 30  # mismo criterio que novedades._ajustar_columnas
-_ANCHO_MINIMO_DESCRIPCION = 300  # la clienta pidió más aire acá en particular
+_COLCHON_TITULO_COLUMNA = 12  # padding interno que Qt le suma a la celda del encabezado, ver _ajustar_columnas
 _ANCHO_PREVISUALIZACION = 400
 _LINEAS_PREVIEW_TXT = 12
 
@@ -176,25 +176,47 @@ def _ajustar_columnas(
     tabla: QTableWidget, indice_descripcion: int, columnas_minimas: frozenset[int] = frozenset(),
 ) -> None:
     """Mismo criterio que `novedades._ajustar_columnas`: más aire que el
-    ancho justo de `resizeColumnsToContents`, con Descripción todavía
-    más generosa — pedido puntual de la clienta al revisar esta pantalla.
-    El ancho final de la tabla queda fijo a la suma de sus columnas (sin
+    ancho justo de `resizeColumnsToContents` — con una excepción. El
+    ancho final de la tabla queda fijo a la suma de sus columnas (sin
     stretch) para que no quede un espacio en blanco antes del panel de
     vista previa, que es el que se estira y ocupa el resto del ancho.
 
-    `columnas_minimas` (puntos 25/27, SistemaDF v0.11.2026.10): las
-    columnas "Orden"/"Principal"/"Activo" (vista por alcance) o
-    "Consultorio"/"Principal"/"Activo" (vista "Todos los archivos") se
-    quedan en el ancho justo de `resizeColumnsToContents` — sin el
-    padding de las demás — para que el ancho que esas tres dejan de
+    `columnas_minimas` (puntos 25/27/30, SistemaDF v0.11.2026.10):
+    "Orden"/"Categoría"/"Principal"/"Activo" (vista por alcance) o
+    "Consultorio"/"Categoría"/"Principal"/"Activo" (vista "Todos los
+    archivos") se quedan en el ancho justo de `resizeColumnsToContents`
+    — sin el padding de las demás — para que el ancho que esas dejan de
     usar se lo lleve la Vista previa, que es la única con `stretch=1` en
-    el layout de la solapa."""
+    el layout de la solapa.
+
+    Pedido explícito de la clienta sobre esta misma ronda: antes
+    "Descripción" tenía además un piso propio (`_ANCHO_MINIMO_
+    DESCRIPCION`, 300px) más generoso que el resto — "achicala lo
+    necesario para que se vea toda la tabla completa sin espacios en
+    blanco" — se saca ese piso, Descripción queda con el mismo criterio
+    que el resto de las columnas con aire (`_PADDING_COLUMNA`), ni más
+    ni menos.
+
+    `resizeColumnsToContents()` mide el ancho necesario por el CONTENIDO
+    de las celdas, no por el título del encabezado — con una columna
+    "mínima" cuyo contenido es corto ("Sí"/"No") pero cuyo título es más
+    largo ("Categoría", en negrita, más ancho que esa misma palabra sin
+    negrita), el título quedaba cortado. Se le suma a cada columna
+    mínima un piso calculado a mano con `QFontMetrics` sobre la fuente
+    REAL del encabezado (`tabla.horizontalHeader().font()`, ya con el
+    peso que le da `estilos.py` vía `QHeaderView` aplicado) más un
+    colchón chico (`_COLCHON_TITULO_COLUMNA`) para el padding interno
+    que Qt le suma a la celda del encabezado."""
     tabla.resizeColumnsToContents()
+    metrica_encabezado = QFontMetrics(tabla.horizontalHeader().font())
     for columna in range(tabla.columnCount()):
         if columna in columnas_minimas:
+            ancho_titulo = metrica_encabezado.horizontalAdvance(tabla.horizontalHeaderItem(columna).text())
+            tabla.setColumnWidth(
+                columna, max(tabla.columnWidth(columna), ancho_titulo + _COLCHON_TITULO_COLUMNA),
+            )
             continue
         tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
-    tabla.setColumnWidth(indice_descripcion, max(tabla.columnWidth(indice_descripcion), _ANCHO_MINIMO_DESCRIPCION))
     ancho_total = tabla.verticalHeader().width() + tabla.horizontalHeader().length() + 2 * tabla.frameWidth() + 4
     tabla.setFixedWidth(ancho_total)
 
@@ -607,9 +629,9 @@ class _PanelGestorArchivos(QWidget):
             self.tabla.setItem(fila_idx, 0, item_numero(str(img["NumeroOrden"])))
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(img["Descripcion"] or ""))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(img["Tipo"] or ""))
-            self.tabla.setItem(fila_idx, 3, QTableWidgetItem("Sí" if img["NumeroOrden"] == 1 else "No"))
-            self.tabla.setItem(fila_idx, 4, QTableWidgetItem("Sí" if img["Activo"] else "No"))
-        _ajustar_columnas(self.tabla, indice_descripcion=1, columnas_minimas=frozenset({0, 3, 4}))
+            self.tabla.setItem(fila_idx, 3, item_centrado("Sí" if img["NumeroOrden"] == 1 else "No"))
+            self.tabla.setItem(fila_idx, 4, item_centrado("Sí" if img["Activo"] else "No"))
+        _ajustar_columnas(self.tabla, indice_descripcion=1, columnas_minimas=frozenset({0, 2, 3, 4}))
 
     def _llenar_tabla_todos(self) -> None:
         self.tabla.setRowCount(len(self._imagenes))
@@ -623,9 +645,9 @@ class _PanelGestorArchivos(QWidget):
             )
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(img["Descripcion"] or ""))
             self.tabla.setItem(fila_idx, 6, QTableWidgetItem(img["Tipo"] or ""))
-            self.tabla.setItem(fila_idx, 7, QTableWidgetItem("Sí" if img["NumeroOrden"] == 1 else "No"))
-            self.tabla.setItem(fila_idx, 8, QTableWidgetItem("Sí" if img["Activo"] else "No"))
-        _ajustar_columnas(self.tabla, indice_descripcion=5, columnas_minimas=frozenset({4, 7, 8}))
+            self.tabla.setItem(fila_idx, 7, item_centrado("Sí" if img["NumeroOrden"] == 1 else "No"))
+            self.tabla.setItem(fila_idx, 8, item_centrado("Sí" if img["Activo"] else "No"))
+        _ajustar_columnas(self.tabla, indice_descripcion=5, columnas_minimas=frozenset({4, 6, 7, 8}))
 
     def _actualizar_previsualizacion(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()

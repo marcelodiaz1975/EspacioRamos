@@ -431,3 +431,43 @@ carpetas_vacias`, `..._sin_carpeta_base_no_hace_nada`,
 base` — mismo patrón que el test de wiring de `reconciliar_saldos_
 cruzados` en `test_pagos.py`).
 
+## Gestor de archivos: columnas de la tabla al mínimo, "1" es la principal (hilo nuevo, nov-2026)
+
+Pregunta de la clienta: "la foto principal sería la que enumera como
+'1' en cada categoría?" — sí, confirmado directo en el código:
+`_llenar_tabla_normal`/`_llenar_tabla_todos` arman la columna
+"Principal" con `"Sí" if img["NumeroOrden"] == 1 else "No"`, y el
+propio docstring del módulo (`app/negocio/imagenes.py`) ya lo documenta:
+"el de orden 1 es el 'principal'".
+
+Pedido explícito sobre las columnas de la tabla:
+
+- **"Categoría"/"Principal"/"Activo" al mínimo de ancho, sin cortar el
+  título**: ya estaban en `columnas_minimas` (sin el padding extra de
+  `_PADDING_COLUMNA` que sí llevan el resto) "Orden"/"Principal"/
+  "Activo" (vista por alcance) o "Consultorio"/"Principal"/"Activo"
+  (vista "Todos los archivos") — faltaba sumar "Categoría". Bug real
+  encontrado al implementar esto: `QTableWidget.resizeColumnsToContents()`
+  mide el ancho necesario por el CONTENIDO de las celdas, no por el
+  título del encabezado — con celdas cortas ("Sí"/"No", una categoría
+  corta) pero un título más largo y en negrita ("Categoría"), el título
+  quedaba cortado. `_ajustar_columnas` ahora calcula, para cada columna
+  "mínima", el ancho real del título con `QFontMetrics` sobre la fuente
+  REAL del encabezado (`tabla.horizontalHeader().font()`, ya con el
+  peso que le aplica `estilos.py`) + un colchón chico
+  (`_COLCHON_TITULO_COLUMNA`), y usa el máximo entre eso y el ancho que
+  ya daba `resizeColumnsToContents()`.
+- **Centrar "Principal"/"Activo"**: usan el helper ya compartido
+  `item_centrado` (`app/gui/widgets/items_tabla.py`) en vez de un
+  `QTableWidgetItem` liso (alineado a la izquierda por default).
+- **Achicar "Descripción" lo necesario**: tenía un piso propio
+  (`_ANCHO_MINIMO_DESCRIPCION`, 300px, pedido de una ronda anterior) más
+  generoso que el resto de las columnas — se saca ese piso; Descripción
+  queda con el mismo criterio que las demás columnas "con aire"
+  (`resizeColumnsToContents` + `_PADDING_COLUMNA`), ni más ni menos.
+
+Tests nuevos en `tests/test_gui_imagenes.py`:
+`test_columnas_categoria_principal_activo_no_cortan_el_titulo`,
+`test_principal_y_activo_quedan_centrados`, `test_descripcion_sin_
+piso_minimo_artificial`.
+

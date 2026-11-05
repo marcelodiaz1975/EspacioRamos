@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QWidget
 
 from app.db.init_db import init_database
@@ -205,6 +206,60 @@ def test_agregar_imagen_via_dialogo(qtbot, conn, edificio, unidad, consultorio, 
     assert pantalla.tabla.item(0, 1).text() == "Consultorio - Foto general - 1"
     assert pantalla.tabla.item(0, 2).text() == "Foto general"
     assert pantalla.tabla.item(0, 3).text() == "Sí"
+
+
+def test_columnas_categoria_principal_activo_no_cortan_el_titulo(
+    qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch,
+):
+    """Pedido explícito de la clienta: "Categoría", "Principal" y
+    "Activo" al mínimo de ancho, pero sin cortar el título de la
+    columna — el contenido de esas celdas ("Sí"/"No"/una categoría
+    corta) es más angosto que el propio título en negrita, así que
+    `resizeColumnsToContents` (que solo mide contenido, no encabezado)
+    no alcanza sola."""
+    from PySide6.QtGui import QFontMetrics
+
+    ruta = _archivo_jpg(tmp_path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (ruta, "")))
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+
+    metrica = QFontMetrics(pantalla.tabla.horizontalHeader().font())
+    for columna, titulo in ((2, "Categoría"), (3, "Principal"), (4, "Activo")):
+        ancho_titulo = metrica.horizontalAdvance(titulo)
+        assert pantalla.tabla.columnWidth(columna) >= ancho_titulo, (
+            f"la columna {titulo!r} quedó más angosta que su propio título"
+        )
+
+
+def test_principal_y_activo_quedan_centrados(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
+    ruta = _archivo_jpg(tmp_path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (ruta, "")))
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+
+    assert pantalla.tabla.item(0, 3).textAlignment() == (Qt.AlignmentFlag.AlignCenter)
+    assert pantalla.tabla.item(0, 4).textAlignment() == (Qt.AlignmentFlag.AlignCenter)
+
+
+def test_descripcion_sin_piso_minimo_artificial(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
+    """Pedido explícito de la clienta: "achicá la columna Descripción lo
+    necesario" — el piso propio de 300px que tenía antes (más generoso
+    que el resto de las columnas) se saca; con una descripción corta,
+    la columna queda angosta, no forzada a 300px."""
+    ruta = _archivo_jpg(tmp_path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (ruta, "")))
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+
+    assert pantalla.tabla.columnWidth(1) < 300
 
 
 def test_agregar_imagen_elige_categoria_del_dialogo(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
