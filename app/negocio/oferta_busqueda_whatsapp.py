@@ -15,12 +15,12 @@ de la cual mostrarlo.
 Editable desde "Textos del sistema" (clave `oferta_busqueda_whatsapp`)
 — ver `app.negocio.plantillas_texto`: los tres títulos en negrita son
 texto de plantilla de verdad; el contenido armado con loops (detalle de
-la búsqueda, listado de alternativas, comentario de edificios/bloques
-rígidos) llega ya resuelto como tres variables de bloque, nunca editable
-línea por línea — mismo criterio que `{detalle_items}` en `mensaje_
-detalle_reserva_aislada`. Los avisos de hora aislada asignada ya no van
-acá — se le avisan en pantalla al operador, ver `app.gui.pantallas.
-oferta._PanelOferta._generar_y_mostrar`."""
+la búsqueda, listado de alternativas, comentario de edificios/
+comentarios fijos) llega ya resuelto como tres variables de bloque,
+nunca editable línea por línea — mismo criterio que `{detalle_items}`
+en `mensaje_detalle_reserva_aislada`. Los avisos de hora aislada
+asignada ya no van acá — se le avisan en pantalla al operador, ver
+`app.gui.pantallas.oferta._PanelOferta._generar_y_mostrar`."""
 from __future__ import annotations
 
 import sqlite3
@@ -30,19 +30,15 @@ from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales
 from app.negocio.oferta_busqueda_texto import (
     alternativas_planas,
     categoria_es_activa,
+    comentarios_fijos,
     edificios_comentario,
     filtrar_excluidas,
-    hay_bloque_rigido_involucrado,
+    identificacion_efectiva,
     lineas_opcion,
     mapa_consultorios_basico,
     resumen_busqueda,
 )
-from app.negocio.plantillas_texto import (
-    DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS,
-    DEFAULT_OFERTA_BUSQUEDA_WHATSAPP,
-    resolver_plantilla,
-    sustituir_variables,
-)
+from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_WHATSAPP, resolver_plantilla, sustituir_variables
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -71,7 +67,7 @@ def generar_texto_oferta_busqueda(
     consultorios = mapa_consultorios_basico(conn, ids_consultorio)
     ids_edificio_resultado = {c["IdEdificio"] for c in consultorios.values()}
     mostrar_edificio = len(ids_edificio_resultado) > 1
-    mostrar_consultorio = not globales.detalle_reducido
+    mostrar_unidad, mostrar_consultorio = identificacion_efectiva(globales)
 
     detalle_lineas = [f"- {resumen_busqueda(b, globales.tipo_busqueda)}" for b in busquedas]
 
@@ -87,18 +83,25 @@ def generar_texto_oferta_busqueda(
             if numerar:
                 alternativas_lineas.append(f"_Alternativa {indice + 1}_")
             for linea in lineas_opcion(
-                etiqueta, opcion, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar,
+                etiqueta, opcion, consultorios, mostrar_edificio, mostrar_unidad, mostrar_consultorio, anonimizar,
                 mostrar_valor=True, decimales=decimales,
             ):
                 alternativas_lineas.append(f"- {linea}")
 
-    comentario = [f"- {t}" for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
-    if hay_bloque_rigido_involucrado(conn, listas_alternativas):
-        nota = resolver_plantilla(
-            conn, "oferta_busqueda_nota_bloques_rigidos", DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS,
-        )
-        comentario.append(f"- {nota}")
-    bloque_comentario = ("\n\n*Comentario*\n" + "\n".join(comentario)) if comentario else ""
+    # `mostrar_unidad` también gatea el comentario de direcciones de
+    # edificio — ver el comentario análogo en `oferta_busqueda_pdf.
+    # generar_pdf_oferta_busqueda`: sin ningún edificio nombrado en las
+    # alternativas (modo "solo días y horarios"), aclarar su dirección
+    # no tiene con qué correlacionarse.
+    comentario = (
+        [f"- {t}" for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio and mostrar_unidad else []
+    )
+    # Las tres líneas de `comentarios_fijos` van SIEMPRE — a diferencia
+    # de la vieja "nota de bloques rígidos" que reemplazan, ya no están
+    # condicionadas a si la búsqueda involucra un bloque rígido, así
+    # que el bloque de comentario ya no puede quedar vacío.
+    comentario += [f"- {t}" for t in comentarios_fijos(conn)]
+    bloque_comentario = "\n\n*Comentarios*\n" + "\n".join(comentario)
 
     plantilla = resolver_plantilla(conn, "oferta_busqueda_whatsapp", DEFAULT_OFERTA_BUSQUEDA_WHATSAPP)
     return sustituir_variables(plantilla, {

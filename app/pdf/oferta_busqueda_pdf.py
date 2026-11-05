@@ -49,16 +49,16 @@ from app.negocio.oferta_busqueda import Alternativa, Busqueda, CriteriosGlobales
 from app.negocio.oferta_busqueda_texto import (
     alternativas_planas,
     categoria_es_activa,
+    comentarios_fijos,
     edificios_comentario,
     filtrar_excluidas,
-    hay_bloque_rigido_involucrado,
+    identificacion_efectiva,
     lineas_opcion,
     mapa_consultorios_basico,
     nombre_archivo_oferta,
     resumen_busqueda,
 )
 from app.negocio.formato import decimales_configurados, formatear_valor
-from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS, resolver_plantilla
 from app.pdf.edificios_pdf import numero_unidad_en_edificio
 from app.pdf.estilos import clave_orden_unidad, construir_sin_saltos, encabezado, encabezado_espacio, estilo_texto
 from app.pdf.fotos_pdf import imagenes_de_consultorios, tabla_fotos
@@ -71,8 +71,8 @@ def _texto_detalle_busqueda(busquedas: list[Busqueda], tipo_busqueda: str) -> li
 
 
 def _texto_alternativas(
-    listas_alternativas: list[list[Alternativa]], consultorios: dict, mostrar_edificio: bool, mostrar_consultorio: bool,
-    anonimizar: bool,
+    listas_alternativas: list[list[Alternativa]], consultorios: dict, mostrar_edificio: bool, mostrar_unidad: bool,
+    mostrar_consultorio: bool, anonimizar: bool,
 ) -> list:
     style = estilo_texto(9)
     planas = alternativas_planas(listas_alternativas)
@@ -87,15 +87,12 @@ def _texto_alternativas(
         if numerar:
             story.append(Paragraph(f"<b>Alternativa {indice + 1}</b>", style))
             story.append(Spacer(1, 2))
-        for linea in lineas_opcion(etiqueta, opcion, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar):
+        for linea in lineas_opcion(etiqueta, opcion, consultorios, mostrar_edificio, mostrar_unidad, mostrar_consultorio, anonimizar):
             story.append(Paragraph(f"* {linea}", style))
     return story
 
 
-def _texto_comentario(
-    conn: sqlite3.Connection, ids_edificio_resultado: set[int], mostrar_edificio: bool,
-    mostrar_nota_bloques_rigidos: bool,
-) -> list:
+def _texto_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[int], mostrar_edificio: bool) -> list:
     """Sin título de nivel 2 propio — va pegado abajo de las alternativas,
     con el mismo estilo de etiqueta en negrita que "Alternativa N".
 
@@ -104,17 +101,18 @@ def _texto_comentario(
     oferta_busqueda._avisos_aislada_regular`) dejan de imprimirse acá — el
     profesional no tiene por qué ver ese dato interno del espacio. Se
     avisan en pantalla al operador en su lugar, ver `_PanelOferta.
-    _generar_y_mostrar`."""
+    _generar_y_mostrar`.
+
+    Las tres líneas de `comentarios_fijos` (ver `app.negocio.oferta_
+    busqueda_texto`) van SIEMPRE — a diferencia de la vieja "nota de
+    bloques rígidos" que reemplazan, ya no están condicionadas a si la
+    búsqueda involucra un bloque rígido — así que esta sección ya no
+    puede quedar vacía: "Comentarios" (pedido explícito de la clienta,
+    pluralizado de "Comentario") se muestra siempre."""
     style = estilo_texto(9)
     lineas = [Paragraph(f"* {t}", style) for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
-    if mostrar_nota_bloques_rigidos:
-        nota = resolver_plantilla(
-            conn, "oferta_busqueda_nota_bloques_rigidos", DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS,
-        )
-        lineas.append(Paragraph(f"* {nota}", style))
-    if not lineas:
-        return []
-    return [Paragraph("<b>Comentario</b>", style), Spacer(1, 2)] + lineas
+    lineas += [Paragraph(f"* {t}", style) for t in comentarios_fijos(conn)]
+    return [Paragraph("<b>Comentarios</b>", style), Spacer(1, 2)] + lineas
 
 
 def _consultorios_ordenados(conn: sqlite3.Connection, consultorios: dict, anonimizar: bool) -> list[sqlite3.Row]:
@@ -208,8 +206,7 @@ def generar_pdf_oferta_busqueda(
     imagenes = imagenes_de_consultorios(conn, ids_consultorio)
     ids_edificio_resultado = {c["IdEdificio"] for c in consultorios.values()}
     mostrar_edificio = len(ids_edificio_resultado) > 1
-    mostrar_consultorio = not globales.detalle_reducido
-    mostrar_nota_bloques_rigidos = hay_bloque_rigido_involucrado(conn, listas_alternativas)
+    mostrar_unidad, mostrar_consultorio = identificacion_efectiva(globales)
 
     altura = (
         6 * cm + 3 * cm + len(busquedas) * 1 * cm + len(ids_consultorio) * 2 * 1.2 * cm
@@ -228,19 +225,29 @@ def generar_pdf_oferta_busqueda(
 
         story.append(encabezado(2, "Listado de alternativas encontradas", ancho))
         story.append(Spacer(1, 6))
-        story.extend(_texto_alternativas(listas_alternativas, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar))
+        story.extend(_texto_alternativas(
+            listas_alternativas, consultorios, mostrar_edificio, mostrar_unidad, mostrar_consultorio, anonimizar,
+        ))
 
-        comentario = _texto_comentario(conn, ids_edificio_resultado, mostrar_edificio, mostrar_nota_bloques_rigidos)
+        # `mostrar_unidad` también gatea el comentario de direcciones de
+        # edificio: ese comentario existe para aclarar a qué dirección
+        # corresponde cada Nombre de edificio — si "solo días y
+        # horarios" ya no nombra ningún edificio en las alternativas,
+        # aclarar la dirección de un nombre que no aparece en ningún
+        # lado no tiene sentido (y de paso revelaría ubicación exacta
+        # que el modo justamente quiere evitar).
+        comentario = _texto_comentario(conn, ids_edificio_resultado, mostrar_edificio and mostrar_unidad)
         if comentario:
             story.append(Spacer(1, 8))
             story.extend(comentario)
         story.append(Spacer(1, 10))
 
-        # Con detalle reducido no se identifica qué consultorio puntual se
-        # ofrece (ver `Busqueda`/`detalle_tramo`) — una foto es, en los
-        # hechos, el consultorio mostrado sin ambigüedad, así que esta
-        # sección completa no tiene sentido en ese modo.
-        if not globales.detalle_reducido:
+        # Sin identificar el consultorio puntual (detalle reducido o
+        # "solo días y horarios", ver `Busqueda`/`detalle_tramo`) — una
+        # foto es, en los hechos, el consultorio mostrado sin
+        # ambigüedad, así que esta sección completa no tiene sentido en
+        # ninguno de esos dos modos.
+        if mostrar_consultorio:
             story.append(encabezado(2, "Fotos de los consultorios ofrecidos", ancho))
             story.append(Spacer(1, 8))
             story.extend(_bloque_consultorios_intervinientes(conn, consultorios, imagenes, anonimizar, mostrar_edificio, ancho, decimales))

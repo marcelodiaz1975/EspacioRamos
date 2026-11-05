@@ -4,7 +4,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.oferta_busqueda import Busqueda, CriteriosGlobales
 from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
-from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS, guardar_texto_personalizado
+from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS, guardar_texto_personalizado
 from app.repositorio.registro import obtener_repositorio
 
 ANIO, MES = 2026, 8
@@ -33,11 +33,6 @@ def _busqueda_simple(dias=("Lunes",)):
 
 
 def test_estructura_basica_con_una_sola_alternativa(conn, edificio_con_consultorio, tmp_path):
-    # Sin esto, 9-11hs Lunes cae dentro del BloqueRigido default (ver
-    # test propio de la nota de bloques rígidos) y dispara el comentario
-    # que esta prueba busca ver AUSENTE por los otros dos motivos
-    # (edificio único, sin avisos).
-    conn.execute("UPDATE BloqueRigido SET Activo = 0")
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
@@ -49,7 +44,9 @@ def test_estructura_basica_con_una_sola_alternativa(conn, edificio_con_consultor
     assert "*Listado de alternativas encontradas*" in texto
     assert "_Alternativa" not in texto  # una sola alternativa: no se numera
     assert '- Lunes de 9 a 11hs consultorio 1 del 7mo "L" - Hora regular $ 1.000' in texto
-    assert "*Comentario*" not in texto  # un solo edificio, sin avisos ni bloques rígidos
+    # "*Comentarios*" (plural) está siempre, por los tres textos fijos —
+    # ver test_comentario_siempre_presente_con_los_tres_textos_fijos.
+    assert "*Comentarios*" in texto
 
 
 def test_muestra_valor_al_final_cuando_se_identifica_el_consultorio(conn, edificio_con_consultorio, tmp_path):
@@ -68,7 +65,7 @@ def test_detalle_reducido_no_muestra_valor(conn, edificio_con_consultorio, tmp_p
     hablar — detalle reducido no debe mostrar "Hora regular"."""
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
-    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio], detalle_reducido=True)
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio], identificar_consultorio=False)
     texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
     assert "Hora regular" not in texto
 
@@ -117,34 +114,40 @@ def test_comentario_enumera_edificios_cuando_hay_mas_de_uno(conn, tmp_path):
     )
     texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
 
-    assert "*Comentario*" in texto
+    assert "*Comentarios*" in texto
     assert "- Ramos 1 corresponde a Av. Rivadavia 13876, Ramos Mejía." in texto
     assert "- Ramos 2 corresponde a Alvear 856, Ramos Mejía." in texto
 
 
-def test_comentario_aclara_bloque_rigido_involucrado(conn, edificio_con_consultorio, tmp_path):
-    """`_busqueda_simple` (9-11hs Lunes) cae justo dentro del BloqueRigido
-    default sembrado por `sembrar_valores_por_defecto` (9-11hs, Lunes a
-    Sábado) — mismo criterio que el PDF (`test_pdf_oferta_busqueda.py`):
-    nota fija y editable (`DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_
-    RIGIDOS`), un único texto para todos los casos."""
+def test_comentario_siempre_presente_con_los_tres_textos_fijos(conn, edificio_con_consultorio, tmp_path):
+    """Pedido explícito de la clienta: el texto ahora siempre incluye
+    "*Comentarios*" (plural, antes "*Comentario*") con las tres líneas
+    fijas de `DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS` — ya no
+    depende de si hay más de un edificio ni de si la búsqueda involucra
+    un bloque rígido, a diferencia de la vieja "nota de bloques
+    rígidos" que reemplazan."""
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
     texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
 
-    assert "*Comentario*" in texto
-    assert DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS in texto
+    assert "*Comentarios*" in texto
+    for linea in DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS.split("\n"):
+        assert f"- {linea}" in texto
 
 
-def test_comentario_de_bloques_rigidos_es_personalizable(conn, edificio_con_consultorio, tmp_path):
+def test_comentarios_fijos_son_personalizables(conn, edificio_con_consultorio, tmp_path):
+    """Pedido explícito de la clienta: las tres líneas fijas del
+    comentario siguen siendo UN ÚNICO texto editable
+    (`oferta_busqueda_comentarios_fijos`), igual que la vieja "nota de
+    bloques rígidos" que reemplazan — no línea por línea."""
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
-    guardar_texto_personalizado(conn, "oferta_busqueda_nota_bloques_rigidos", "Nota personalizada de bloques.")
+    guardar_texto_personalizado(conn, "oferta_busqueda_comentarios_fijos", "Texto personalizado de comentarios.")
     texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
-    assert "- Nota personalizada de bloques." in texto
-    assert DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS not in texto
+    assert "- Texto personalizado de comentarios." in texto
+    assert "Reservas regulares:" not in texto
 
 
 def test_aislada_incluye_rango_de_fechas(conn, tmp_path):
@@ -180,10 +183,33 @@ def test_anonimiza_para_profesional_no_activo(conn, edificio_con_consultorio, tm
 def test_detalle_reducido_omite_consultorio(conn, edificio_con_consultorio, tmp_path):
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
-    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio], detalle_reducido=True)
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio], identificar_consultorio=False)
     texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
     assert "consultorio 1" not in texto.lower()
     assert 'en la unidad del 7mo "L"' in texto
+
+
+def test_solo_dias_y_horarios_omite_unidad_y_edificio(conn, tmp_path):
+    """Pedido explícito de la clienta: desmarcar "Identificar unidad"
+    (que de una desmarca "Identificar consultorio") muestra solo días y
+    horarios — a diferencia del detalle reducido de siempre, tampoco
+    nombra la unidad ni el edificio, aunque haya más de uno en juego."""
+    id_edificio_1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2")
+    id_unidad_1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento='7mo "L"')
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento='3ro "B"')
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_1, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(
+        tipo_busqueda="Regular", ids_edificio=[id_edificio_1, id_edificio_2],
+        identificar_unidad=False, identificar_consultorio=False,
+    )
+    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
+    assert "consultorio 1" not in texto.lower()
+    assert "7mo" not in texto and "3ro" not in texto
+    assert "Ramos 1" not in texto and "Ramos 2" not in texto
+    assert "Hora regular" not in texto
 
 
 def test_sin_busquedas_lanza_error(conn, tmp_path):

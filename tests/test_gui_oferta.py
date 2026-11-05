@@ -223,6 +223,43 @@ def test_tamano_desmarcado_no_filtra_por_tamano(qtbot, conn, profesional_y_consu
     assert busqueda.tamano is None
 
 
+def test_identificar_unidad_y_consultorio_arrancan_marcados(qtbot, conn, profesional_y_consultorio):
+    """Reemplazo del viejo check único "Detalle reducido" (pedido
+    explícito de la clienta): los dos checks nuevos arrancan marcados —
+    el default sigue siendo el detalle completo de siempre."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.casilla_identificar_unidad.isChecked()
+    assert pantalla.casilla_identificar_consultorio.isChecked()
+    assert pantalla.casilla_identificar_consultorio.isEnabled()
+
+
+def test_desmarcar_identificar_unidad_desmarca_y_deshabilita_consultorio(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: "Si desactivo 'Identificar
+    unidad' en el mismo acto se desactiva 'Identificar consultorio'" —
+    y queda inhabilitada mientras tanto, para no poder tildarla sola en
+    ese estado."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.casilla_identificar_unidad.setChecked(False)
+    assert not pantalla.casilla_identificar_consultorio.isChecked()
+    assert not pantalla.casilla_identificar_consultorio.isEnabled()
+
+    pantalla.casilla_identificar_unidad.setChecked(True)
+    assert pantalla.casilla_identificar_consultorio.isEnabled()
+
+
+def test_armar_criterios_refleja_los_dos_checks(qtbot, conn, profesional_y_consultorio):
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    pantalla.casilla_identificar_unidad.setChecked(False)
+
+    _id_profesional, globales, _busquedas = pantalla._armar_criterios()
+    assert globales.identificar_unidad is False
+    assert globales.identificar_consultorio is False
+
+
 def test_combinacion_de_consultorios_bajo_el_titulo_requisitos_de_busqueda(qtbot, conn, profesional_y_consultorio):
     """Pedido explícito de la clienta sobre esta vuelta: se saca la
     etiqueta propia "Combinación de consultorios" y el combo pasa a

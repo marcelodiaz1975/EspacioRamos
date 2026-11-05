@@ -4,7 +4,7 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.oferta_busqueda import Busqueda, CriteriosGlobales
-from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS, guardar_texto_personalizado
+from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS, guardar_texto_personalizado
 from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
 from app.repositorio.registro import obtener_repositorio
 
@@ -101,7 +101,10 @@ def test_alternativa_unica_no_se_numera(conn, edificio_con_consultorio, tmp_path
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
     ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
     texto = fitz.open(ruta)[0].get_text()
-    assert "Alternativa" not in texto
+    # No confundir con "Alternativas ofrecidas:" del comentario fijo
+    # (siempre presente, ver test_comentario_siempre_presente_con_los_
+    # tres_textos_fijos) — la numeración real diría "Alternativa 1".
+    assert "Alternativa 1" not in texto
     assert 'Lunes de 9 a 11hs consultorio 1 del 7mo "L"' in texto
 
 
@@ -141,7 +144,7 @@ def test_combinacion_dos_lineas_en_una_sola_alternativa(conn, tmp_path):
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
     ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
     texto = fitz.open(ruta)[0].get_text()
-    assert "Alternativa" not in texto  # una sola alternativa total: no se numera
+    assert "Alternativa 1" not in texto  # una sola alternativa total: no se numera
     assert 'Lunes de 9 a 10hs consultorio 1 del EP "K"' in texto
     assert 'Lunes de 10 a 11hs consultorio 2 del EP "K"' in texto
 
@@ -259,7 +262,7 @@ def test_detalle_reducido_omite_consultorio_y_fotos(conn, tmp_path):
         hora_desde=9, hora_hasta=11,
     )
     globales = CriteriosGlobales(
-        tipo_busqueda="Aislada", ids_edificio=[id_edificio], salida="Texto", detalle_reducido=True,
+        tipo_busqueda="Aislada", ids_edificio=[id_edificio], salida="Texto", identificar_consultorio=False,
     )
     ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [busqueda])
     texto = fitz.open(ruta)[0].get_text()
@@ -271,10 +274,41 @@ def test_detalle_reducido_omite_consultorio_y_fotos(conn, tmp_path):
 def test_detalle_reducido_tambien_aplica_a_busqueda_regular(conn, edificio_con_consultorio, tmp_path):
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
-    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio], detalle_reducido=True)
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio], identificar_consultorio=False)
     ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
     texto = fitz.open(ruta)[0].get_text()
     assert "consultorio 1" not in texto.lower()
+    assert "Fotos de los consultorios ofrecidos" not in texto
+
+
+def test_solo_dias_y_horarios_omite_unidad_edificio_y_fotos(conn, tmp_path):
+    """Pedido explícito de la clienta: desmarcar "Identificar unidad"
+    (que de una desmarca "Identificar consultorio" también, ver
+    `_PanelOferta._al_desmarcar_identificar_unidad`) tiene que mostrar
+    solo días y horarios, sin ubicación — ni unidad, ni consultorio, ni
+    edificio (a diferencia del detalle reducido de siempre, que sigue
+    nombrando la unidad)."""
+    id_caba = obtener_repositorio(conn, "Localidad").crear(Localidad="CABA")
+    id_edificio_1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", IdLocalidad=id_caba)
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2", IdLocalidad=id_caba)
+    id_unidad_1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento='7mo "L"')
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento='3ro "B"')
+    id_consultorio_1 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_1, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    id_consultorio_2 = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad_2, NumeroConsultorio=1, ValorHoraRegularActual=1000)
+    for id_consultorio in (id_consultorio_1, id_consultorio_2):
+        obtener_repositorio(conn, "Imagen").crear(
+            IdConsultorio=id_consultorio, NumeroOrden=1, Descripcion="Vista", RutaArchivo="/no/existe.jpg", Activo=1,
+        )
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(
+        tipo_busqueda="Regular", ids_edificio=[id_edificio_1, id_edificio_2],
+        identificar_unidad=False, identificar_consultorio=False,
+    )
+    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
+    texto = fitz.open(ruta)[0].get_text()
+    assert "consultorio 1" not in texto.lower()
+    assert "7mo" not in texto and "3ro" not in texto  # sin unidad
+    assert "Ramos 1" not in texto and "Ramos 2" not in texto  # sin edificio, aunque haya más de uno
     assert "Fotos de los consultorios ofrecidos" not in texto
 
 
@@ -309,17 +343,27 @@ def test_detalle_tramo_formato_con_consultorio_varios_edificios(conn, tmp_path):
     assert 'consultorio 1 del 3ro "B" en Ramos 2' in texto
 
 
-def test_comentario_ausente_sin_contenido(conn, edificio_con_consultorio, tmp_path):
+def test_comentario_siempre_presente_con_los_tres_textos_fijos(conn, edificio_con_consultorio, tmp_path):
+    """Pedido explícito de la clienta: el documento ahora siempre
+    incluye "Comentarios" (plural, antes "Comentario") con las tres
+    líneas fijas de `DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS" — ya no
+    depende de si hay más de un edificio ni de si la búsqueda involucra
+    un bloque rígido, a diferencia de la vieja "nota de bloques
+    rígidos" que reemplazan (ver `docs/historial/disponibilidad.md`)."""
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
-    # Horario fuera de los BloqueRigido default (9-11 y 18-21) para que no
-    # dispare, de rebote, la nota de bloques rígidos (ver test propio).
+    # Horario fuera de los BloqueRigido default (9-11 y 18-21) y un solo
+    # edificio: con el mecanismo viejo, "Comentario" no aparecía acá.
     ruta = generar_pdf_oferta_busqueda(
         conn, str(tmp_path), id_prof, globales, [_busqueda_simple(hora_desde=12, hora_hasta=14)],
     )
-    texto = fitz.open(ruta)[0].get_text()
-    assert "Comentario" not in texto
+    # El párrafo puede partirse en varias líneas al ajustar el ancho —
+    # se normaliza antes de comparar cada línea de la nota completa.
+    texto = fitz.open(ruta)[0].get_text().replace("\n", " ")
+    assert "Comentarios" in texto
+    for linea in DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS.split("\n"):
+        assert linea in texto
 
 
 def test_comentario_enumera_edificios_cuando_hay_mas_de_uno(conn, tmp_path):
@@ -349,8 +393,10 @@ def test_comentario_excluye_edificio_sin_resultados(conn, tmp_path):
     """Un edificio incluido en el alcance de la búsqueda (ids_edificio) pero
     sin ninguna coincidencia real no debe figurar en el comentario — acá
     solo Ramos 1 tiene resultados, así que ni siquiera hace falta aclarar
-    edificios (un único edificio entre los resultados: no hay ambigüedad
-    y no se genera el comentario)."""
+    edificios (un único edificio entre los resultados: no hay ambigüedad).
+    El comentario igual aparece, por los tres textos fijos que ahora están
+    siempre (ver `test_comentario_siempre_presente_con_los_tres_textos_
+    fijos`)."""
     id_ramos_mejia = obtener_repositorio(conn, "Localidad").crear(Localidad="Ramos Mejía")
     id_edificio1 = obtener_repositorio(conn, "Edificio").crear(
         Nombre="Ramos 1", Domicilio="Av. Rivadavia 13876", IdLocalidad=id_ramos_mejia,
@@ -365,12 +411,12 @@ def test_comentario_excluye_edificio_sin_resultados(conn, tmp_path):
         tipo_busqueda="Regular", ids_edificio=[id_edificio1, id_edificio2], localidad="Ramos Mejía",
     )
     # Horario fuera de los BloqueRigido default (9-11 y 18-21) para que no
-    # dispare, de rebote, la nota de bloques rígidos (ver test propio).
+    # agregue, de rebote, una dirección de más al comentario.
     ruta = generar_pdf_oferta_busqueda(
         conn, str(tmp_path), id_prof, globales, [_busqueda_simple(hora_desde=12, hora_hasta=14)],
     )
     texto = fitz.open(ruta)[0].get_text()
-    assert "Comentario" not in texto
+    assert "Comentarios" in texto  # los tres textos fijos están siempre
     assert "Ramos 2" not in texto
 
 
@@ -395,43 +441,17 @@ def test_comentario_no_incluye_aviso_de_hora_aislada(conn, edificio_con_consulto
     assert f"{ANIO}-{MES:02d}-03" not in texto
 
 
-def test_comentario_aclara_bloque_rigido_involucrado(conn, edificio_con_consultorio, tmp_path):
-    """Pedido explícito de la clienta: cuando la oferta incluye horas de
-    un BloqueRigido activo, el documento muestra la nota fija y
-    editable de `app.negocio.plantillas_texto.DEFAULT_OFERTA_BUSQUEDA_
-    NOTA_BLOQUES_RIGIDOS` (un único texto para todos los casos, en vez
-    de detallar día por día — pedido explícito de la clienta).
-    `_busqueda_simple` (9-11hs Lunes) cae justo dentro del BloqueRigido
-    default sembrado por `sembrar_valores_por_defecto` (9-11hs, Lunes a
-    Sábado)."""
+def test_comentarios_fijos_son_personalizables(conn, edificio_con_consultorio, tmp_path):
+    """Pedido explícito de la clienta: las tres líneas fijas del
+    comentario (ver `test_comentario_siempre_presente_con_los_tres_
+    textos_fijos`) siguen siendo UN ÚNICO texto editable
+    (`oferta_busqueda_comentarios_fijos`), igual que la vieja "nota de
+    bloques rígidos" que reemplazan — no línea por línea."""
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    guardar_texto_personalizado(conn, "oferta_busqueda_comentarios_fijos", "Texto personalizado de comentarios.")
     ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
     texto = fitz.open(ruta)[0].get_text()
-    assert "Comentario" in texto
-    # El párrafo puede partirse en varias líneas al ajustar el ancho —
-    # se normaliza antes de comparar la nota completa.
-    assert DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS in texto.replace("\n", " ")
-
-
-def test_comentario_de_bloques_rigidos_es_personalizable(conn, edificio_con_consultorio, tmp_path):
-    id_edificio, _, _ = edificio_con_consultorio
-    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
-    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
-    guardar_texto_personalizado(conn, "oferta_busqueda_nota_bloques_rigidos", "Nota personalizada de bloques.")
-    ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
-    texto = fitz.open(ruta)[0].get_text()
-    assert "Nota personalizada de bloques." in texto
-    assert DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS not in texto
-
-
-def test_comentario_sin_bloque_rigido_involucrado_no_lo_menciona(conn, edificio_con_consultorio, tmp_path):
-    id_edificio, _, _ = edificio_con_consultorio
-    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
-    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
-    ruta = generar_pdf_oferta_busqueda(
-        conn, str(tmp_path), id_prof, globales, [_busqueda_simple(hora_desde=12, hora_hasta=14)],
-    )
-    texto = fitz.open(ruta)[0].get_text()
-    assert "bloque rígido" not in texto
+    assert "Texto personalizado de comentarios." in texto
+    assert "Reservas regulares:" not in texto

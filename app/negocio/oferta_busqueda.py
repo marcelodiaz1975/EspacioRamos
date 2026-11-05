@@ -111,7 +111,17 @@ class CriteriosGlobales:
     ids_unidad: list[int] | None = None  # None = todas las de los edificios seleccionados
     ids_consultorio: list[int] | None = None  # None = todos los de las unidades seleccionadas
     salida: str = SALIDA_PDF  # SALIDA_PDF | SALIDA_TEXTO — a dónde vuelca el resultado, no es un criterio de búsqueda
-    detalle_reducido: bool = False  # el detalle de cada alternativa omite el consultorio (y su valor)
+    # Qué tan identificada queda cada alternativa en el documento (ver
+    # `app.negocio.oferta_busqueda_texto.detalle_tramo`): las tres
+    # combinaciones con sentido son unidad+consultorio (detalle
+    # completo), unidad sola (detalle reducido de siempre) y ninguna de
+    # las dos (solo días y horarios) — `identificar_consultorio=True`
+    # con `identificar_unidad=False` no tiene un caso de uso real (la
+    # pantalla lo impide, ver `_PanelOferta._al_desmarcar_identificar_
+    # unidad`), así que el código que lee estos dos campos normaliza
+    # igual por las dudas (consultorio implica unidad).
+    identificar_unidad: bool = True
+    identificar_consultorio: bool = True
 
 
 @dataclass

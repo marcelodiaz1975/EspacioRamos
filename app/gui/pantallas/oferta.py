@@ -446,8 +446,24 @@ class _PanelOferta(QWidget):
         form.addWidget(QLabel("Combinación con la próxima franja"))
         form.addWidget(self.combo_union_franja)
 
-        self.casilla_detalle_reducido = QCheckBox("Detalle reducido (sin identificar el consultorio puntual)")
-        form.addWidget(self.casilla_detalle_reducido)
+        # Reemplaza al viejo check único "Detalle reducido" (pedido
+        # explícito de la clienta): dos checks en la misma línea,
+        # activados por defecto. Desactivar "Identificar unidad"
+        # desactiva de una "Identificar consultorio" también (no tiene
+        # sentido identificar el consultorio sin identificar antes la
+        # unidad que lo contiene) y la deja inhabilitada mientras tanto
+        # — en ese estado el documento muestra solo días y horarios, sin
+        # ubicación. Con "Identificar unidad" solo (sin "Identificar
+        # consultorio") se reproduce el viejo "detalle reducido".
+        self.casilla_identificar_unidad = QCheckBox("Identificar unidad")
+        self.casilla_identificar_unidad.setChecked(True)
+        self.casilla_identificar_consultorio = QCheckBox("Identificar consultorio")
+        self.casilla_identificar_consultorio.setChecked(True)
+        self.casilla_identificar_unidad.toggled.connect(self._al_desmarcar_identificar_unidad)
+        fila_identificar = QHBoxLayout()
+        fila_identificar.addWidget(self.casilla_identificar_unidad)
+        fila_identificar.addWidget(self.casilla_identificar_consultorio)
+        form.addLayout(fila_identificar)
 
         # "Agregar franja a la búsqueda"/"Quitar franja seleccionada" SE
         # CONSERVAN (corregido: una vuelta anterior los había sacado por
@@ -637,7 +653,7 @@ class _PanelOferta(QWidget):
                 self.combo_combinacion, self.casilla_ventana, self.casilla_camilla,
                 self.casilla_tamano, self.combo_tamano,
                 self.casilla_valor_maximo, self.spin_valor_maximo,
-                self.combo_union_franja, self.casilla_detalle_reducido,
+                self.combo_union_franja, self.casilla_identificar_unidad, self.casilla_identificar_consultorio,
                 self.boton_agregar_franja, self.boton_quitar_franja,
                 self.boton_pdf, self.boton_texto, self.boton_nueva,
             ],
@@ -780,6 +796,16 @@ class _PanelOferta(QWidget):
     def _ids_unidad_seleccionadas(self) -> list[int]:
         return _ids_reales(self.lista_unidad)
 
+    def _al_desmarcar_identificar_unidad(self, activado: bool) -> None:
+        """Pedido explícito de la clienta: desactivar "Identificar
+        unidad" desactiva de una "Identificar consultorio" (no hay caso
+        de uso para identificar el consultorio sin identificar antes la
+        unidad que lo contiene) y la deja inhabilitada mientras tanto,
+        para que no se pueda volver a tildar sola en ese estado."""
+        if not activado:
+            self.casilla_identificar_consultorio.setChecked(False)
+        self.casilla_identificar_consultorio.setEnabled(activado)
+
     def _al_cambiar_tipo(self) -> None:
         tipo = self.combo_tipo.currentData()
         desde_iso = fecha_inicio_default(self.conn, tipo)
@@ -900,7 +926,8 @@ class _PanelOferta(QWidget):
             tipo_busqueda=self.combo_tipo.currentData(),
             ids_edificio=[],
             ids_unidad=self._ids_unidad_seleccionadas(),
-            detalle_reducido=self.casilla_detalle_reducido.isChecked(),
+            identificar_unidad=self.casilla_identificar_unidad.isChecked(),
+            identificar_consultorio=self.casilla_identificar_consultorio.isChecked(),
         )
         return id_profesional, globales, busquedas
 
@@ -983,7 +1010,8 @@ class _PanelOferta(QWidget):
         self.combo_tamano.setCurrentIndex(0)
         self.casilla_valor_maximo.setChecked(False)
         self.spin_valor_maximo.setValue(0)
-        self.casilla_detalle_reducido.setChecked(False)
+        self.casilla_identificar_unidad.setChecked(True)
+        self.casilla_identificar_consultorio.setChecked(True)
         self.combo_union_franja.setCurrentIndex(0)
         self._limpiar_franjas()
         self.combo_profesional.setFocus()

@@ -226,10 +226,13 @@ DEFAULT_OFERTA_BUSQUEDA_WHATSAPP = (
     "{bloque_comentario}"
 )
 
-DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS = (
-    "Las horas que van de 9 a 11hs de lunes a sábados y las que van de 18 a 21hs de lunes a viernes son "
-    "bloques rígidos que no se fraccionan para ser reservados en forma regular. Dicha limitación no aplica "
-    "para las reservas aisladas."
+DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS = (
+    "Reservas regulares: Las horas que van de 9 a 11hs de lunes a sábados y las que van de 18 a 21hs de lunes "
+    "a viernes son bloques rígidos que no se fraccionan.\n"
+    "Reservas aisladas: No hay limitación alguna para reservar horarios bajo esta modalidad.\n"
+    "Alternativas ofrecidas: Los horarios ofrecidos pueden ser tomados en forma total o parcial, solo se "
+    "muestra la disponibilidad total de los bloques para que el profesional ubique dentro de esas horas su "
+    "mejor opción."
 )
 
 
@@ -286,8 +289,8 @@ MENSAJES_EDITABLES: list[PlantillaMensaje] = [
         DEFAULT_OFERTA_BUSQUEDA_WHATSAPP, ("bloque_detalle_busqueda", "bloque_alternativas", "bloque_comentario"),
     ),
     PlantillaMensaje(
-        "oferta_busqueda_nota_bloques_rigidos",
-        "Oferta de consultorios/Disponibilidad: aclaración de bloques rígidos (PDF y WhatsApp)",
-        DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS, (),
+        "oferta_busqueda_comentarios_fijos",
+        "Oferta de consultorios/Disponibilidad: comentarios fijos (PDF y WhatsApp)",
+        DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS, (),
     ),
 ]

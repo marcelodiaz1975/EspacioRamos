@@ -25,7 +25,6 @@ son los que se usaron para ENCONTRAR las alternativas, no hacen falta
 para elegir entre ellas — el profesional ya sabe lo que pidió."""
 from __future__ import annotations
 
-import json
 import sqlite3
 
 from app.negocio.formato import decimales_configurados, fecha_larga, formatear_valor, hora_fmt
@@ -38,6 +37,7 @@ from app.negocio.oferta_busqueda import (
     TramoCobertura,
     resolver_busquedas_documento,
 )
+from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS, resolver_plantilla
 from app.repositorio.registro import obtener_repositorio
 
 _ES_ACTIVO = ("R", "A", "E", "X", "B")
@@ -154,24 +154,47 @@ def avisos_para_documento(
     return avisos_planos(resolver_busquedas_documento(conn, globales, busquedas))
 
 
+def identificacion_efectiva(globales: CriteriosGlobales) -> tuple[bool, bool]:
+    """(mostrar_unidad, mostrar_consultorio) a partir de `globales.
+    identificar_unidad`/`identificar_consultorio`, normalizado: no tiene
+    sentido mostrar el consultorio sin la unidad que lo contiene, así
+    que `identificar_consultorio` sin `identificar_unidad` no muestra
+    ninguno de los dos — mismo criterio que ya impide esa combinación
+    desde la pantalla (`_PanelOferta._al_desmarcar_identificar_unidad`),
+    repetido acá por las dudas para quien arme un `CriteriosGlobales` a
+    mano (ej. tests) sin pasar por la pantalla."""
+    mostrar_unidad = globales.identificar_unidad
+    mostrar_consultorio = globales.identificar_unidad and globales.identificar_consultorio
+    return mostrar_unidad, mostrar_consultorio
+
+
 def detalle_tramo(
-    etiqueta: str, t: TramoCobertura, c: sqlite3.Row, mostrar_edificio: bool, mostrar_consultorio: bool, anonimizar: bool,
-    mostrar_valor: bool = False, decimales: int = 2,
+    etiqueta: str, t: TramoCobertura, c: sqlite3.Row, mostrar_edificio: bool, mostrar_unidad: bool,
+    mostrar_consultorio: bool, anonimizar: bool, mostrar_valor: bool = False, decimales: int = 2,
 ) -> str:
-    """Con consultorio (modo normal): "Viernes de 13 a 16hs consultorio 4
-    del EP "K" en Ramos 2" (el edificio se omite si hay uno solo). Sin
-    consultorio (detalle reducido): "Viernes de 13 a 16hs en la unidad del
-    EP "K" en Ramos 2". `mostrar_valor` agrega el valor por hora al final
-    ("- Hora regular $X") — solo tiene sentido junto con un consultorio
-    identificado, si no no hay un valor puntual del que hablar."""
+    """Con consultorio (detalle completo): "Viernes de 13 a 16hs
+    consultorio 4 del EP "K" en Ramos 2" (el edificio se omite si hay uno
+    solo). Sin consultorio pero con unidad (detalle reducido de siempre):
+    "Viernes de 13 a 16hs en la unidad del EP "K" en Ramos 2". Sin
+    unidad ni consultorio ("solo días y horarios", pedido explícito de
+    la clienta): "Viernes de 13 a 16hs" a secas — tampoco se identifica
+    el edificio en ese caso (`mostrar_edificio` solo aplica si `mostrar_
+    unidad` también está activo: nombrar el edificio sin la unidad
+    seguiría siendo identificar el lugar, lo que se quiere evitar del
+    todo en este modo). `mostrar_valor` agrega el valor por hora al
+    final ("- Hora regular $X") — solo tiene sentido junto con un
+    consultorio identificado, si no no hay un valor puntual del que
+    hablar."""
     rango = f"{etiqueta} de {hora_fmt(t.hora_inicio)[:-2]} a {hora_fmt(t.hora_fin)}"
     if mostrar_consultorio:
         unidad_txt = f"- Unidad {c['IdUnidad']}" if anonimizar else f"del {c['Departamento']}"
         texto = f"{rango} consultorio {c['NumeroConsultorio']} {unidad_txt}"
-    else:
+    elif mostrar_unidad:
         unidad_txt = f"en la Unidad {c['IdUnidad']}" if anonimizar else f"en la unidad del {c['Departamento']}"
         texto = f"{rango} {unidad_txt}"
-    if mostrar_edificio:
+    else:
+        texto = rango
+    if mostrar_edificio and mostrar_unidad:
         texto += f" en {c['NombreEdificio']}"
     if mostrar_valor and mostrar_consultorio:
         texto += f" - Hora regular {formatear_valor(c['ValorHoraRegularActual'], decimales)}"
@@ -179,8 +202,8 @@ def detalle_tramo(
 
 
 def lineas_opcion(
-    etiqueta: str, opcion: Opcion, consultorios: dict, mostrar_edificio: bool, mostrar_consultorio: bool, anonimizar: bool,
-    mostrar_valor: bool = False, decimales: int = 2,
+    etiqueta: str, opcion: Opcion, consultorios: dict, mostrar_edificio: bool, mostrar_unidad: bool,
+    mostrar_consultorio: bool, anonimizar: bool, mostrar_valor: bool = False, decimales: int = 2,
 ) -> list[str]:
     """Una línea por tramo — una sola si es un consultorio solo, varias si
     es una combinación (una por cada consultorio que interviene)."""
@@ -189,7 +212,9 @@ def lineas_opcion(
         c = consultorios.get(t.id_consultorio)
         if c is None:
             continue
-        lineas.append(detalle_tramo(etiqueta, t, c, mostrar_edificio, mostrar_consultorio, anonimizar, mostrar_valor, decimales))
+        lineas.append(
+            detalle_tramo(etiqueta, t, c, mostrar_edificio, mostrar_unidad, mostrar_consultorio, anonimizar, mostrar_valor, decimales)
+        )
     return lineas
 
 
@@ -202,6 +227,18 @@ def _texto_edificio_comentario(edificio: sqlite3.Row) -> str:
     else:
         ubicacion = edificio["Domicilio"] or edificio["DomicilioLocalidad"] or "—"
     return f"{edificio['Nombre']} corresponde a {ubicacion}."
+
+
+def comentarios_fijos(conn: sqlite3.Connection) -> list[str]:
+    """Pedido explícito de la clienta: tres líneas fijas y SIEMPRE
+    presentes en el documento (ya no condicionadas a si hay bloque
+    rígido involucrado, como la vieja "nota de bloques rígidos" que
+    reemplazan — "Reservas regulares"/"Reservas aisladas"/"Alternativas
+    ofrecidas") — editables en conjunto como un único texto
+    (`oferta_busqueda_comentarios_fijos`, ver `app.negocio.
+    plantillas_texto`), una por línea."""
+    texto = resolver_plantilla(conn, "oferta_busqueda_comentarios_fijos", DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS)
+    return [linea for linea in texto.split("\n") if linea]
 
 
 def edificios_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[int]) -> list[str]:
@@ -218,36 +255,6 @@ def edificios_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[i
         list(ids_edificio_resultado),
     ).fetchall()
     return [_texto_edificio_comentario(f) for f in filas]
-
-
-def hay_bloque_rigido_involucrado(conn: sqlite3.Connection, listas_alternativas: list[list[Alternativa]]) -> bool:
-    """Pedido de la clienta: cuando alguna alternativa ofrecida incluye
-    horas que caen dentro de un `BloqueRigido` activo, el documento
-    tiene que aclararlo — mismo bloqueo que ya aplica Reservas al crear
-    una reserva real (`reservas.verificar_bloques_rigidos`), acá solo
-    informativo (todavía no se está reservando nada, es una oferta).
-
-    A diferencia de la primera versión (una línea distinta por cada
-    bloque/día involucrado, armada acá), la clienta pidió un ÚNICO
-    texto fijo y editable para todos los casos (ver `app.negocio.
-    plantillas_texto.DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_RIGIDOS`) —
-    esta función solo decide SI corresponde mostrarlo, nunca arma el
-    texto en sí."""
-    bloques = conn.execute("SELECT * FROM BloqueRigido WHERE Activo = 1").fetchall()
-    if not bloques:
-        return False
-    for alternativas in listas_alternativas:
-        for alt in alternativas:
-            for opcion in alt.opciones:
-                for t in opcion.tramos:
-                    for b in bloques:
-                        dias = json.loads(b["DiasLogica"] or "[]")
-                        if alt.dia_semana not in dias:
-                            continue
-                        b_ini, b_fin = b["HoraInicio"], b["HoraFin"]
-                        if t.hora_inicio < b_fin and b_ini < t.hora_fin:
-                            return True
-    return False
 
 
 def previsualizar_documento(
@@ -273,7 +280,7 @@ def previsualizar_documento(
     consultorios = mapa_consultorios_basico(conn, ids_consultorio)
     ids_edificio_resultado = {c["IdEdificio"] for c in consultorios.values()}
     mostrar_edificio = len(ids_edificio_resultado) > 1
-    mostrar_consultorio = not globales.detalle_reducido
+    mostrar_unidad, mostrar_consultorio = identificacion_efectiva(globales)
 
     filas: list[tuple[int, int, int, str]] = []
     for i_busqueda, alternativas in enumerate(resultados):
@@ -281,7 +288,7 @@ def previsualizar_documento(
             etiqueta = etiqueta_dia(alt.dia_semana, alt.fecha)
             for i_op, opcion in enumerate(alt.opciones):
                 lineas = lineas_opcion(
-                    etiqueta, opcion, consultorios, mostrar_edificio, mostrar_consultorio, anonimizar,
+                    etiqueta, opcion, consultorios, mostrar_edificio, mostrar_unidad, mostrar_consultorio, anonimizar,
                     mostrar_valor=True, decimales=decimales,
                 )
                 filas.append((i_busqueda, i_alt, i_op, " / ".join(lineas)))

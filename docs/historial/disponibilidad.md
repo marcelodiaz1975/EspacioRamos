@@ -1556,3 +1556,87 @@ ausencia en el PDF generado), `tests/test_oferta_busqueda.py`
 `tests/test_pdf_oferta_busqueda.py` (`test_comentario_incluye_aviso_
 de_hora_aislada_con_un_solo_edificio` renombrado a `test_comentario_
 no_incluye_aviso_de_hora_aislada`, invertido para confirmar la ausencia).
+
+## "Detalle reducido" reemplazado por "Identificar unidad"/"Identificar consultorio", y nuevo "Comentarios" fijo (nov-2026)
+
+Dos pedidos explícitos de la clienta en el mismo hilo, ambos tocando el
+documento (PDF y texto de WhatsApp) de Oferta de consultorios:
+
+**1. El check único "Detalle reducido (sin identificar el consultorio
+puntual)" se reemplaza por dos checks en la misma línea**, debajo de
+"Combinación con la próxima franja": "Identificar unidad" e
+"Identificar consultorio", los dos activados por defecto (mismo
+resultado que el default de siempre). Comportamiento pedido:
+desactivar "Identificar unidad" desactiva de una "Identificar
+consultorio" también (no tiene sentido identificar el consultorio sin
+identificar antes la unidad que lo contiene) y la deja INHABILITADA
+mientras tanto (`_PanelOferta._al_desmarcar_identificar_unidad`) —
+reactivarla no la vuelve a tildar sola, el operador la tilda a mano si
+la quiere de nuevo. Con las dos activadas se obtiene el detalle
+completo de siempre (unidad + consultorio); con solo "Identificar
+unidad" se reproduce EXACTO el viejo "detalle reducido" (unidad sin
+consultorio); con las dos desactivadas (solo posible desactivando
+primero "Identificar unidad") se obtiene un modo nuevo, "solo días y
+horarios": ni unidad ni consultorio, y TAMPOCO el edificio (aunque la
+búsqueda involucre más de uno) — nombrar el edificio sin la unidad
+seguiría siendo identificar el lugar, lo que el modo justamente evita.
+
+`CriteriosGlobales.detalle_reducido: bool` (`app/negocio/
+oferta_busqueda.py`) se reemplaza por `identificar_unidad: bool = True`
+/ `identificar_consultorio: bool = True`. `identificacion_efectiva`
+(nueva, `app/negocio/oferta_busqueda_texto.py`) normaliza las dos
+banderas a `(mostrar_unidad, mostrar_consultorio)` —
+`identificar_consultorio=True` con `identificar_unidad=False` (que la
+pantalla ya impide, pero un `CriteriosGlobales` armado a mano podría
+pasar) no muestra ninguno de los dos. `detalle_tramo`/`lineas_opcion`
+suman el parámetro `mostrar_unidad`; el comentario de direcciones de
+edificio (`edificios_comentario`) también queda gateado por `mostrar_
+unidad` (sin ningún edificio nombrado en las alternativas, aclarar su
+dirección no tiene con qué correlacionarse, y de paso revelaría
+ubicación exacta que el modo "solo días y horarios" quiere evitar).
+
+**2. El texto del comentario del documento (PDF y WhatsApp) cambia a un
+modelo fijo de tres líneas, SIEMPRE presentes** (pedido explícito, con
+el texto exacto a usar): "Reservas regulares: ...", "Reservas
+aisladas: ...", "Alternativas ofrecidas: ...". Reemplaza a la vieja
+"nota de bloques rígidos" (`DEFAULT_OFERTA_BUSQUEDA_NOTA_BLOQUES_
+RIGIDOS`, un único párrafo, condicionado a `hay_bloque_rigido_
+involucrado` — si la búsqueda no tocaba un BloqueRigido activo, no se
+mostraba nada) — el primer párrafo del texto nuevo cubre esa misma
+información, pero ahora SIEMPRE, sin condición. La función `hay_
+bloque_rigido_involucrado` queda sin uso (no se usaba en ningún otro
+lado) y se elimina.
+
+`DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS` (`app/negocio/
+plantillas_texto.py`) reemplaza a `DEFAULT_OFERTA_BUSQUEDA_NOTA_
+BLOQUES_RIGIDOS` — mismo criterio que el texto que reemplaza: UN ÚNICO
+texto editable desde "Textos del sistema" (clave `oferta_busqueda_
+comentarios_fijos`), tres líneas separadas por salto de línea, cada
+una ya con su etiqueta en texto plano ("Reservas regulares: ...") —
+sin markup de WhatsApp (`*`/`_`) embebido en el texto editable, mismo
+motivo que el resto de los textos compartidos entre PDF y WhatsApp en
+este módulo (el PDF no entiende esa sintaxis). `comentarios_fijos`
+(nueva, `oferta_busqueda_texto.py`) resuelve la plantilla y devuelve
+la lista de líneas no vacías, compartida por los dos formatos.
+
+Como el comentario ya no puede quedar vacío (las tres líneas fijas
+siempre están), la sección deja de omitirse — y como ahora agrupa más
+de un tipo de contenido (direcciones de edificio + los tres
+comentarios fijos), el título pasa de "Comentario" a "Comentarios"
+(pedido explícito, singular → plural) en los dos formatos.
+
+Tests actualizados/nuevos: `tests/test_gui_oferta.py`
+(`test_identificar_unidad_y_consultorio_arrancan_marcados`,
+`test_desmarcar_identificar_unidad_desmarca_y_deshabilita_consultorio`,
+`test_armar_criterios_refleja_los_dos_checks`),
+`tests/test_pdf_oferta_busqueda.py`/`tests/test_oferta_busqueda_
+whatsapp.py` (`test_detalle_reducido_omite_consultorio*` y
+`test_detalle_reducido_no_muestra_valor` migrados a
+`identificar_consultorio=False`; `test_solo_dias_y_horarios_omite_
+unidad*` nuevos para el modo sin ubicación; `test_comentario_siempre_
+presente_con_los_tres_textos_fijos` y `test_comentarios_fijos_son_
+personalizables` reemplazan a los tests de la vieja nota de bloques
+rígidos; `test_alternativa_unica_no_se_numera`/`test_combinacion_dos_
+lineas_en_una_sola_alternativa` ajustados para no confundir "Alternativa
+1" con el "Alternativas ofrecidas:" del comentario fijo, ahora siempre
+presente).
