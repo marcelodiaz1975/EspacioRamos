@@ -1265,6 +1265,21 @@ class GrillaOperativaWidget(QWidget):
         columnas."""
         self._panel_filtros.setMaximumWidth(ancho)
 
+    def fijar_ancho_panel_filtros(self, ancho: int) -> None:
+        """Como `agrandar_panel_filtros`, pero con `setFixedWidth` (mínimo
+        Y máximo) en vez de solo un tope — pensado para Grilla semanal,
+        que necesita el ancho REAL del panel (no solo un tope que puede
+        quedar sin usar, ver `agrandar_panel_filtros`) para calcular bien
+        el alto de "Referencias de colores" a una sola columna
+        (`fijar_ancho_etiqueta_leyenda`, que mide el wrap de cada
+        descripción contra un ancho de referencia — si el ancho real
+        termina siendo más angosto que ese, el texto wrapeado necesita
+        más líneas de las reservadas y queda recortado abajo). Opt-in:
+        el resto de los usos de esta grilla compartida (Reservas, Oferta
+        de consultorios, Novedades) siguen con `agrandar_panel_filtros`,
+        sin cambios."""
+        self._panel_filtros.setFixedWidth(ancho)
+
     def fijar_alto_filas(self, alto_encabezado: int, alto_dato: int) -> None:
         """Achica (o agranda) el alto de fila de encabezado/dato de la
         grilla (26px/24px por defecto) — pensado para Reservas aisladas,

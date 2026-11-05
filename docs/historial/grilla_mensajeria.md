@@ -618,3 +618,70 @@ La clienta abrió el hilo mencionando también "archivos PDF varios, como
 liquidaciones, disponibilidad y oferta" — no llegó a pedir nada concreto
 sobre eso en este hilo.
 
+## Grilla semanal: leyenda al panel de Filtros, sin necesidad de escrolear (hilo nuevo, nov-2026)
+
+Pedido explícito de la clienta: "vamos a buscar que no sea falta
+escrolear. Las referencias ponelas de a una por fila abajo de los
+filtros, con el mismo título... tendrían que entrar bien las 8
+referencias de regulares y las 6 de aisladas... el cuadro de detalle de
+al lado estiralo para abajo y que termine abajo de todo donde termina la
+parte visible de la solapa".
+
+`_PanelGrillaSemanal` (`app/gui/pantallas/grilla_operativa.py`) tenía
+"Referencias de colores" como un `LeyendaColores()` SUELTO, a 2 columnas,
+debajo de la grilla completa (mismo criterio que "Vista rápida" en su
+momento) — eso le sumaba un bloque entero de alto extra al final del
+contenido, siendo la causa de que, con la cantidad de horarios configurada
+hoy (8 a 22hs, 30min), el contenido ya no entrara sin escrolear.
+
+Se reemplaza por `GrillaOperativaWidget.mostrar_leyenda_colores()` — el
+mismo mecanismo que ya usan Reservas/Oferta de consultorios para mostrar
+la leyenda DENTRO del panel de Filtros, debajo de "Profesional" (ya a una
+sola columna, "una por fila", por default). Se ensancha el panel de
+Filtros (`GrillaOperativaWidget.fijar_ancho_panel_filtros`, nuevo —
+`setFixedWidth` en vez del `setMaximumWidth` de `agrandar_panel_filtros`:
+acá interesa el ancho REAL, no solo un tope, para que el cálculo de
+`fijar_ancho_etiqueta_leyenda` no quede corto y recorte texto) en vez de
+achicar mucho la letra como en Reservas (panel angosto ahí) — con 320px
+de ancho y la letra apenas reducida (11px), las 8 referencias de
+Regulares y las 6 de Aisladas entran sin apelmazarse, confirmado
+calculando el alto real necesario de cada etiqueta wrapeada
+(`QFontMetrics.boundingRect`) contra el ancho real renderizado y
+verificando que siempre quede por debajo del alto reservado.
+
+Para que ni el panel de Filtros (con la leyenda ya adentro) ni la columna
+de la grilla necesiten escrolear: `_PanelGrillaSemanal._ajustar_alto`
+(llamado desde `showEvent`, con el mismo patrón `QTimer.singleShot(0,
+...)` ya usado en Reservas regulares para esperar a que Qt termine de
+resolver el layout real) mide el alto visible de `self._scroll.viewport()`
+(la parte de la solapa que realmente se ve) y se lo fija, con
+`GrillaOperativaWidget.limitar_alto_grilla` + `setFixedHeight`, al
+widget de la grilla completo (filtros + grid, un único `QHBoxLayout`) —
+las dos columnas reciben ese mismo alto del layout y lo reparten solas
+con su `addStretch()`/`dar_stretch_a_detalle()` ya puesto, sin que este
+método tenga que repartir nada a mano. `GrillaOperativaWidget.dar_
+stretch_a_detalle()` (ya existía, pensado para Reservas regulares) hace
+que el cuadro "Detalle" (no la grilla) absorba el alto de sobra de su
+columna, así que termina justo donde termina la parte visible de la
+solapa — igual que el panel de Filtros, que llega ahí solo con su
+`addStretch()` nativo. El `QScrollArea` que envuelve toda la solapa
+(agregado en una ronda anterior, punto 86, para el caso de que algún día
+se configuren más horarios de los que entran) se mantiene para ese caso
+límite — con la configuración de hoy, simplemente no llega a necesitarse
+en la práctica.
+
+Confirmado con un script de geometría (offscreen, con datos reales de
+catálogo — Localidad/Edificio/Unidad/2 Consultorios): la grilla completa
+termina exactamente del mismo alto que el viewport visible
+(`scrollbar().maximum() == 0`) tanto en modo Regular como Aislada, y
+vuelve a necesitar scroll correctamente si la ventana se achica (caso
+límite, sigue andando).
+
+Test actualizado: `test_cambiar_modo_de_visualizacion_oculta_la_leyenda_
+anterior` (`tests/test_gui_pantalla_grilla_operativa.py`) ahora lee la
+leyenda desde `panel.grilla._leyenda_colores` (donde vive ahora) en vez
+de `panel._leyenda` (atributo que dejó de existir). Nuevo método en
+`app/gui/widgets/grilla_operativa.py`: `GrillaOperativaWidget.
+fijar_ancho_panel_filtros` (opt-in, el resto de los usos de esta grilla
+compartida siguen con `agrandar_panel_filtros`, sin cambios).
+

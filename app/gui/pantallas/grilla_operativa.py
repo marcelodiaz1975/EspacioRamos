@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtCore import Qt
+import shiboken6
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
@@ -36,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, LeyendaColores, _FiltroColapsable
+from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, _FiltroColapsable
 from app.negocio.formato import formatear_moneda
 from app.negocio.valores_operativos import PromediosValorHora, calcular_promedios_valor_hora
 from app.pdf.estilos import clave_orden_unidad
@@ -49,6 +50,21 @@ _COLUMNAS_VALORES = [
 _COLOR_TOTAL = QColor("#B7C8DC")
 _COLOR_LOCALIDAD = QColor("#D2DEEB")
 _COLOR_EDIFICIO = QColor("#E9EFF5")
+
+# Pedido explícito de la clienta sobre "Grilla semanal": con "Referencias
+# de colores" dentro del panel de Filtros (ver `_PanelGrillaSemanal`), el
+# ancho default de ese panel (260px, `GrillaOperativaWidget._armar_ui`) le
+# queda corto a una descripción de referencia completa en una sola
+# columna — se ensancha en vez de achicar más la letra (que ya se reduce
+# un poco, ver `_PanelGrillaSemanal.__init__`) para que las 8 referencias
+# de Regulares/6 de Aisladas entren sin apelmazarse.
+_ANCHO_PANEL_FILTROS_GRILLA_SEMANAL = 320
+# Descuento sobre `_ANCHO_PANEL_FILTROS_GRILLA_SEMANAL` para calcular el
+# ancho de referencia que se le pasa a `fijar_ancho_etiqueta_leyenda`: la
+# etiqueta de cada referencia no ocupa el ancho completo del panel — le
+# restan el margen del `QGroupBox` "Filtros" y el ancho de la muestra de
+# color de al lado (ver `LeyendaColores.actualizar`).
+_DESCUENTO_ETIQUETA_LEYENDA = 60
 
 
 class _ItemNumerico(QTableWidgetItem):
@@ -526,7 +542,9 @@ class _PanelGrillaSemanal(QWidget):
     """Solapa "Grilla semanal" de "Grilla y mensajería" — antes la
     primera solapa de "Vista rápida". Sin filtro propio: reusa
     `GrillaOperativaWidget` tal cual (el mismo widget compartido que usan
-    otros formularios), con su leyenda de colores debajo."""
+    otros formularios), con su leyenda de colores ahora dentro del propio
+    panel de Filtros (una referencia por fila, pedido explícito de la
+    clienta — ver `_armar_ui` y `_ajustar_alto`)."""
 
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -539,18 +557,25 @@ class _PanelGrillaSemanal(QWidget):
         # ningún elemento (Detalle, la leyenda) quede inaccesible —
         # mismo criterio "los cuadros escrolean, no la pantalla" que el
         # resto del sistema. Antes esta solapa agregaba todo directo a
-        # `self`, sin ningún `QScrollArea` de por medio.
+        # `self`, sin ningún `QScrollArea` de por medio. Se mantiene para
+        # ese caso extremo; la ronda siguiente (ver `_ajustar_alto`) hace
+        # que, con la configuración de hoy, el contenido entre justo sin
+        # necesitar ese scroll en la práctica.
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
+        self._scroll = scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
         contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
+        # Sin margen propio: pedido explícito de la clienta de que el
+        # contenido llegue justo al fondo de la parte visible de la
+        # solapa sin necesitar scroll — cualquier margen acá le resta
+        # alto disponible a ese cálculo (ver `_ajustar_alto`).
+        layout.setContentsMargins(0, 0, 0, 0)
 
         self.grilla = GrillaOperativaWidget(conn)
-        self.grilla.combo_modo.currentIndexChanged.connect(self._actualizar_leyenda)
         # Pedido explícito de la clienta, extendido desde Oferta de
         # consultorios a toda pantalla con esta grilla: Tipo de bloque/
         # Horario y las filas de encabezado quedan siempre visibles al
@@ -563,9 +588,30 @@ class _PanelGrillaSemanal(QWidget):
         # propia altura, pudiendo tapar la última fila de horario con su
         # línea inferior.
         self.grilla.reservar_alto_scroll_horizontal()
+        # Pedido explícito de la clienta (hilo nuevo): "Referencias de
+        # colores" deja de ir suelta debajo de la grilla completa (a dos
+        # columnas) y pasa al panel de Filtros, una por fila, mismo
+        # mecanismo ya usado en Reservas/Oferta de consultorios — ver
+        # `GrillaOperativaWidget.mostrar_leyenda_colores`. A diferencia de
+        # Reservas (`compacta=True`, letra chica porque el panel de
+        # Filtros ahí es muy angosto), acá se ensancha el panel en vez de
+        # achicar tanto la letra (ver `_ANCHO_PANEL_FILTROS_GRILLA_
+        # SEMANAL`): con 8 referencias de regulares/6 de aisladas, la
+        # letra normal ya entra una por línea sin apelmazarse si el
+        # ancho de la columna alcanza.
+        self.grilla.fijar_ancho_panel_filtros(_ANCHO_PANEL_FILTROS_GRILLA_SEMANAL)
+        self.grilla.fijar_ancho_etiqueta_leyenda(_ANCHO_PANEL_FILTROS_GRILLA_SEMANAL - _DESCUENTO_ETIQUETA_LEYENDA)
+        self.grilla.fijar_tamano_fuente_leyenda(11)
+        self.grilla.mostrar_leyenda_colores()
+        # El cuadro "Detalle" (al lado de la grilla) se estira hacia
+        # abajo en vez de dejar un hueco en blanco al final de esa
+        # columna — mismo mecanismo que Reservas regulares (`dar_
+        # stretch_a_detalle`) — para que, junto con el panel de Filtros
+        # (que también crece solo con su `addStretch()` nativo), las dos
+        # columnas lleguen al mismo punto: el fondo de la parte visible
+        # de la solapa, fijado en `_ajustar_alto`.
+        self.grilla.dar_stretch_a_detalle()
         layout.addWidget(self.grilla)
-        self._leyenda = LeyendaColores()
-        layout.addWidget(self._leyenda)
 
         scroll.setWidget(contenido)
         layout_externo.addWidget(scroll)
@@ -583,11 +629,58 @@ class _PanelGrillaSemanal(QWidget):
         que el operador ya había elegido). El reset completo de
         filtros queda reservado a `reiniciar()`, que es lo que F3
         dispara — un pedido explícito de empezar de cero, distinto de
-        solo volver a mirar la pantalla."""
+        solo volver a mirar la pantalla.
+
+        De paso, ajusta el alto de la grilla al de la parte visible de
+        la solapa (ver `_ajustar_alto`) — hace falta repetirlo acá,
+        además de en `__init__`, porque recién al mostrarse de verdad
+        `self._scroll.viewport()` tiene su tamaño real (antes del primer
+        show, puede medir 100x30, el tamaño por defecto de un widget
+        huérfano)."""
         super().showEvent(event)
         widgets = self.grilla.widgets_filtro_para_foco()
         if widgets:
             widgets[0].setFocus()
+        self._ajustar_alto()
+        # Mismo motivo que Reservas regulares (ver el `QTimer.singleShot`
+        # en su propio `showEvent`): en este punto Qt puede no haber
+        # terminado de resolver el layout de toda la ventana todavía —
+        # se vuelve a medir y ajustar apenas el loop de eventos lo
+        # procese.
+        QTimer.singleShot(0, self._ajustar_alto_si_sigue_vivo)
+
+    def _ajustar_alto(self) -> None:
+        """Pedido explícito de la clienta: que no haga falta escrolear
+        la solapa con la configuración de horarios de hoy. Al panel de
+        Filtros (con la leyenda ya adentro) y a la columna de la grilla
+        (grilla + "Detalle") se les da, a los dos, el mismo alto total —
+        el de la parte VISIBLE de la solapa (`self._scroll.viewport()`,
+        no el `sizeHint` del contenido, que es lo que se está limitando)
+        — así ninguna de las dos columnas le pide a `self._scroll` más
+        alto del que ya tiene visible, y el `QScrollArea` externo no
+        necesita mostrar su propia barra de scroll.
+
+        `GrillaOperativaWidget.limitar_alto_grilla` ya topea el alto de
+        `self.tabla` Y el de todo el widget (`self.grilla`) al valor que
+        se le pasa; como el panel de Filtros vive DENTRO de `self.grilla`
+        (mismo `QHBoxLayout`), fijarle un alto FIJO a `self.grilla` (no
+        solo un tope) alcanza para que las dos columnas reciban ese
+        mismo alto del layout — cada una lo reparte entre sus propios
+        widgets con `addStretch()`/`dar_stretch_a_detalle` ya aplicado,
+        sin que este método tenga que repartir nada a mano."""
+        alto_visible = self._scroll.viewport().height()
+        if alto_visible <= 0:
+            return
+        self.grilla.limitar_alto_grilla(alto_visible)
+        self.grilla.setFixedHeight(alto_visible)
+
+    def _ajustar_alto_si_sigue_vivo(self) -> None:
+        """Ver el `QTimer.singleShot` en `showEvent` — mismo guard que
+        `_PanelReservasRegulares._reajustar_alto_y_columnas_si_sigue_
+        vivo` para el mismo problema (la pantalla pudo cerrarse antes de
+        que el loop de eventos llegue a disparar el timer)."""
+        if shiboken6.isValid(self._scroll):
+            self._ajustar_alto()
 
     def reiniciar(self) -> None:
         """F3 ("Reiniciar solapa"): los filtros vuelven al estado
@@ -598,9 +691,6 @@ class _PanelGrillaSemanal(QWidget):
         widgets = self.grilla.widgets_filtro_para_foco()
         if widgets:
             widgets[0].setFocus()
-
-    def _actualizar_leyenda(self) -> None:
-        self._leyenda.actualizar(self.grilla.combo_modo.currentData() or "regular")
 
 
 class _PanelValoresVigentes(QWidget):

@@ -62,10 +62,15 @@ def test_cambiar_modo_de_visualizacion_oculta_la_leyenda_anterior(qtbot, conn):
     """Bug real: `deleteLater()` sola no saca el widget de pantalla al
     toque (la destrucción queda diferida al loop de eventos) — al pasar
     de "Reservas regulares" a "Reservas aisladas" la leyenda vieja
-    quedaba superpuesta con la nueva, con el texto ilegible."""
+    quedaba superpuesta con la nueva, con el texto ilegible. La leyenda
+    ahora vive dentro del panel de Filtros de `self.grilla` (pedido
+    explícito de la clienta: una referencia por fila, debajo de los
+    filtros, en vez de un bloque aparte debajo de toda la grilla — ver
+    `_PanelGrillaSemanal.__init__`), no en un atributo propio de este
+    panel."""
     panel = _PanelGrillaSemanal(conn)
     qtbot.addWidget(panel)
-    leyenda = panel._leyenda
+    leyenda = panel.grilla._leyenda_colores
     widgets_regular = [leyenda._layout.itemAt(i).widget() for i in range(leyenda._layout.count())]
     assert widgets_regular  # la leyenda de "regular" arranca poblada
 
