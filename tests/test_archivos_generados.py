@@ -128,8 +128,25 @@ def test_limpiar_liquidaciones_antiguas_borra_mas_de_un_anio(tmp_path):
 def test_carpeta_liquidaciones_simuladas_crea_subcarpeta_unica(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     carpeta = carpeta_liquidaciones_simuladas(conn)
-    assert carpeta == tmp_path / "Liquidaciones simuladas"
+    assert carpeta == tmp_path / "Archivos varios" / "Liquidaciones simuladas"
     assert carpeta.is_dir()
+
+
+def test_carpeta_liquidaciones_simuladas_migra_sola_desde_el_nivel_viejo(conn, tmp_path):
+    """Pedido explícito de la clienta: "Liquidaciones simuladas" pasa a
+    vivir dentro de "Archivos varios" (antes al mismo nivel que
+    "Profesionales") — si todavía existe la carpeta vieja, se migra sola
+    la primera vez que se accede, sin perder lo ya generado."""
+    _configurar_carpeta_base(conn, tmp_path)
+    carpeta_vieja = tmp_path / "Liquidaciones simuladas"
+    carpeta_vieja.mkdir()
+    (carpeta_vieja / "2026-09 - Liquidación simulada Juan Perez.pdf").write_text("x")
+
+    carpeta = carpeta_liquidaciones_simuladas(conn)
+
+    assert carpeta == tmp_path / "Archivos varios" / "Liquidaciones simuladas"
+    assert (carpeta / "2026-09 - Liquidación simulada Juan Perez.pdf").exists()
+    assert not carpeta_vieja.exists()
 
 
 def test_limpiar_liquidaciones_simuladas_antiguas_retiene_solo_3_meses(tmp_path):
@@ -213,8 +230,29 @@ def test_carpeta_documentacion_profesional_crea_subcarpeta(conn, tmp_path):
 def test_carpeta_imagenes_crea_subcarpeta_por_id(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     carpeta = carpeta_imagenes(conn, "Consultorio", 7)
-    assert carpeta == tmp_path / "Imagenes" / "Consultorio_7"
+    assert carpeta == tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_7"
     assert carpeta.is_dir()
+
+
+def test_carpeta_imagenes_migra_sola_desde_el_nivel_viejo(conn, tmp_path):
+    """Pedido explícito de la clienta: "Imagenes" pasa a vivir dentro de
+    "Archivos varios" (antes al mismo nivel que "Profesionales") — si
+    todavía existe la carpeta vieja completa (con varias subcarpetas
+    adentro, de distintos registros), se migra sola de una, sin perder
+    nada de lo ya cargado."""
+    _configurar_carpeta_base(conn, tmp_path)
+    carpeta_vieja_base = tmp_path / "Imagenes"
+    (carpeta_vieja_base / "Consultorio_7").mkdir(parents=True)
+    (carpeta_vieja_base / "Consultorio_7" / "foto.jpg").write_text("x")
+    (carpeta_vieja_base / "Espacio").mkdir()
+    (carpeta_vieja_base / "Espacio" / "logo.png").write_text("x")
+
+    carpeta = carpeta_imagenes(conn, "Consultorio", 7)
+
+    assert carpeta == tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_7"
+    assert (tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_7" / "foto.jpg").exists()
+    assert (tmp_path / "Archivos varios" / "Imagenes" / "Espacio" / "logo.png").exists()
+    assert not carpeta_vieja_base.exists()
 
 
 def _crear_localidad(conn, localidad="Ramos Mejia") -> int:
@@ -280,7 +318,7 @@ def test_carpeta_imagenes_de_localidad_real_usa_nombre_descriptivo(conn, tmp_pat
     _configurar_carpeta_base(conn, tmp_path)
     id_localidad = _crear_localidad(conn)
     carpeta = carpeta_imagenes(conn, "Localidad", id_localidad)
-    assert carpeta == tmp_path / "Imagenes" / "Localidad_Ramos Mejia"
+    assert carpeta == tmp_path / "Archivos varios" / "Imagenes" / "Localidad_Ramos Mejia"
     assert carpeta.is_dir()
 
 
@@ -288,7 +326,7 @@ def test_carpeta_imagenes_de_edificio_real_usa_nombre_descriptivo(conn, tmp_path
     _configurar_carpeta_base(conn, tmp_path)
     id_edificio = _crear_edificio(conn)
     carpeta = carpeta_imagenes(conn, "Edificio", id_edificio)
-    assert carpeta == tmp_path / "Imagenes" / "Edificio_Ramos Mejia_Imperio"
+    assert carpeta == tmp_path / "Archivos varios" / "Imagenes" / "Edificio_Ramos Mejia_Imperio"
     assert carpeta.is_dir()
 
 
@@ -302,14 +340,14 @@ def test_carpeta_imagenes_de_edificio_sin_localidad_usa_signo_de_pregunta(conn, 
     _configurar_carpeta_base(conn, tmp_path)
     id_edificio = _crear_edificio(conn, localidad=None)
     carpeta = carpeta_imagenes(conn, "Edificio", id_edificio)
-    assert carpeta == tmp_path / "Imagenes" / "Edificio___Imperio"
+    assert carpeta == tmp_path / "Archivos varios" / "Imagenes" / "Edificio___Imperio"
 
 
 def test_carpeta_imagenes_de_unidad_real_usa_nombre_descriptivo(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     id_unidad = _crear_unidad(conn)
     carpeta = carpeta_imagenes(conn, "Unidad", id_unidad)
-    assert carpeta == tmp_path / "Imagenes" / "Unidad_Ramos Mejia_Imperio_7mo L"
+    assert carpeta == tmp_path / "Archivos varios" / "Imagenes" / "Unidad_Ramos Mejia_Imperio_7mo L"
     assert carpeta.is_dir()
 
 
@@ -320,7 +358,7 @@ def test_carpeta_imagenes_de_consultorio_real_usa_nombre_descriptivo(conn, tmp_p
     _configurar_carpeta_base(conn, tmp_path)
     id_consultorio = _crear_consultorio(conn)
     carpeta = carpeta_imagenes(conn, "Consultorio", id_consultorio)
-    assert carpeta == tmp_path / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3"
+    assert carpeta == tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3"
     assert carpeta.is_dir()
 
 
@@ -342,13 +380,13 @@ def test_carpeta_imagenes_migra_sola_la_carpeta_vieja_basada_en_id(conn, tmp_pat
     para los cuatro alcances, no solo Consultorio."""
     _configurar_carpeta_base(conn, tmp_path)
     id_valor = crear(conn)
-    carpeta_vieja = tmp_path / "Imagenes" / f"{alcance}_{id_valor}"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / f"{alcance}_{id_valor}"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
     carpeta = carpeta_imagenes(conn, alcance, id_valor)
 
-    assert carpeta == tmp_path / "Imagenes" / nombre_nuevo
+    assert carpeta == tmp_path / "Archivos varios" / "Imagenes" / nombre_nuevo
     assert (carpeta / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 
@@ -361,13 +399,13 @@ def test_carpeta_imagenes_consultorio_migra_sola_el_formato_anterior_con_guiones
     vieja basada en ID) también se migra sola al nombre nuevo."""
     _configurar_carpeta_base(conn, tmp_path)
     id_consultorio = _crear_consultorio(conn)
-    carpeta_vieja = tmp_path / "Imagenes" / "Consultorio - Imperio - 7mo L - 3"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / "Consultorio - Imperio - 7mo L - 3"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
     carpeta = carpeta_imagenes(conn, "Consultorio", id_consultorio)
 
-    assert carpeta == tmp_path / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3"
+    assert carpeta == tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3"
     assert (carpeta / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 
@@ -378,7 +416,7 @@ def test_carpeta_imagenes_consultorio_sin_registro_sigue_usando_el_id(conn, tmp_
     cae al esquema viejo por ID en vez de romper."""
     _configurar_carpeta_base(conn, tmp_path)
     carpeta = carpeta_imagenes(conn, "Consultorio", 999)
-    assert carpeta == tmp_path / "Imagenes" / "Consultorio_999"
+    assert carpeta == tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_999"
 
 
 def test_resincronizar_carpetas_imagenes_migra_los_cuatro_alcances_de_una(conn, tmp_path):
@@ -394,10 +432,10 @@ def test_resincronizar_carpetas_imagenes_migra_los_cuatro_alcances_de_una(conn, 
     id_unidad = _crear_unidad(conn)
     id_consultorio = _crear_consultorio(conn)
     carpetas_viejas = {
-        "Localidad": tmp_path / "Imagenes" / f"Localidad_{id_localidad}",
-        "Edificio": tmp_path / "Imagenes" / f"Edificio_{id_edificio}",
-        "Unidad": tmp_path / "Imagenes" / f"Unidad_{id_unidad}",
-        "Consultorio": tmp_path / "Imagenes" / f"Consultorio_{id_consultorio}",
+        "Localidad": tmp_path / "Archivos varios" / "Imagenes" / f"Localidad_{id_localidad}",
+        "Edificio": tmp_path / "Archivos varios" / "Imagenes" / f"Edificio_{id_edificio}",
+        "Unidad": tmp_path / "Archivos varios" / "Imagenes" / f"Unidad_{id_unidad}",
+        "Consultorio": tmp_path / "Archivos varios" / "Imagenes" / f"Consultorio_{id_consultorio}",
     }
     for carpeta_vieja in carpetas_viejas.values():
         carpeta_vieja.mkdir(parents=True)
@@ -406,10 +444,10 @@ def test_resincronizar_carpetas_imagenes_migra_los_cuatro_alcances_de_una(conn, 
     migradas = resincronizar_carpetas_imagenes(conn)
 
     assert migradas == 4
-    assert (tmp_path / "Imagenes" / "Localidad_Ramos Mejia" / "foto.jpg").exists()
-    assert (tmp_path / "Imagenes" / "Edificio_Ramos Mejia_Imperio" / "foto.jpg").exists()
-    assert (tmp_path / "Imagenes" / "Unidad_Ramos Mejia_Imperio_7mo L" / "foto.jpg").exists()
-    assert (tmp_path / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
+    assert (tmp_path / "Archivos varios" / "Imagenes" / "Localidad_Ramos Mejia" / "foto.jpg").exists()
+    assert (tmp_path / "Archivos varios" / "Imagenes" / "Edificio_Ramos Mejia_Imperio" / "foto.jpg").exists()
+    assert (tmp_path / "Archivos varios" / "Imagenes" / "Unidad_Ramos Mejia_Imperio_7mo L" / "foto.jpg").exists()
+    assert (tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
     for carpeta_vieja in carpetas_viejas.values():
         assert not carpeta_vieja.exists()
 
@@ -417,14 +455,14 @@ def test_resincronizar_carpetas_imagenes_migra_los_cuatro_alcances_de_una(conn, 
 def test_resincronizar_carpetas_imagenes_migra_el_formato_anterior_con_guiones(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     id_consultorio = _crear_consultorio(conn)
-    carpeta_vieja = tmp_path / "Imagenes" / "Consultorio - Imperio - 7mo L - 3"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / "Consultorio - Imperio - 7mo L - 3"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
     migradas = resincronizar_carpetas_imagenes(conn)
 
     assert migradas == 1
-    assert (tmp_path / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
+    assert (tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
     assert id_consultorio  # usado solo para crear el registro
 
@@ -436,12 +474,30 @@ def test_resincronizar_carpetas_imagenes_no_crea_carpetas_vacias(conn, tmp_path)
     directo, que siempre crea la carpeta)."""
     _configurar_carpeta_base(conn, tmp_path)
     _crear_consultorio(conn)
-    (tmp_path / "Imagenes").mkdir()  # existe la carpeta base de Imagenes, pero vacía
+    (tmp_path / "Archivos varios" / "Imagenes").mkdir(parents=True)  # existe la carpeta base de Imagenes, pero vacía
 
     migradas = resincronizar_carpetas_imagenes(conn)
 
     assert migradas == 0
-    assert list((tmp_path / "Imagenes").iterdir()) == []
+    assert list((tmp_path / "Archivos varios" / "Imagenes").iterdir()) == []
+
+
+def test_resincronizar_carpetas_imagenes_migra_tambien_el_nivel_viejo(conn, tmp_path):
+    """Lo mismo que `test_carpeta_imagenes_migra_sola_desde_el_nivel_
+    viejo`, pero disparado por `resincronizar_carpetas_imagenes` (la
+    migración que corre sola en cada arranque) en vez de un acceso
+    puntual."""
+    _configurar_carpeta_base(conn, tmp_path)
+    id_consultorio = _crear_consultorio(conn)
+    carpeta_vieja = tmp_path / "Imagenes" / f"Consultorio_{id_consultorio}"
+    carpeta_vieja.mkdir(parents=True)
+    (carpeta_vieja / "foto.jpg").write_text("x")
+
+    migradas = resincronizar_carpetas_imagenes(conn)
+
+    assert migradas == 1
+    assert (tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
+    assert not (tmp_path / "Imagenes").exists()
 
 
 def test_resincronizar_carpetas_imagenes_sin_carpeta_base_no_hace_nada(conn):
@@ -459,7 +515,7 @@ def test_init_database_resincroniza_carpetas_de_imagenes_al_reabrir_la_base(tmp_
     sembrar_valores_por_defecto(conn)
     _configurar_carpeta_base(conn, tmp_path / "base")
     id_consultorio = _crear_consultorio(conn)
-    carpeta_vieja = tmp_path / "base" / "Imagenes" / f"Consultorio_{id_consultorio}"
+    carpeta_vieja = tmp_path / "base" / "Archivos varios" / "Imagenes" / f"Consultorio_{id_consultorio}"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
     conn.commit()
@@ -467,7 +523,7 @@ def test_init_database_resincroniza_carpetas_de_imagenes_al_reabrir_la_base(tmp_
 
     conn = init_database(db_path)  # simula el próximo arranque de la app
 
-    assert (tmp_path / "base" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
+    assert (tmp_path / "base" / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
     conn.close()
 
@@ -475,7 +531,7 @@ def test_init_database_resincroniza_carpetas_de_imagenes_al_reabrir_la_base(tmp_
 def test_renombrar_carpeta_imagenes_localidad_conserva_archivos(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     id_localidad = _crear_localidad(conn, "Ramos Mejia")
-    carpeta_vieja = tmp_path / "Imagenes" / "Localidad_Ramos Mejia"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / "Localidad_Ramos Mejia"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
@@ -483,7 +539,7 @@ def test_renombrar_carpeta_imagenes_localidad_conserva_archivos(conn, tmp_path):
     conn.commit()
     renombrar_carpeta_imagenes_localidad(conn, id_localidad, "Localidad_Ramos Mejia")
 
-    carpeta_nueva = tmp_path / "Imagenes" / "Localidad_Haedo"
+    carpeta_nueva = tmp_path / "Archivos varios" / "Imagenes" / "Localidad_Haedo"
     assert (carpeta_nueva / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 
@@ -491,7 +547,7 @@ def test_renombrar_carpeta_imagenes_localidad_conserva_archivos(conn, tmp_path):
 def test_renombrar_carpeta_imagenes_edificio_conserva_archivos(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     id_edificio = _crear_edificio(conn, "Imperio")
-    carpeta_vieja = tmp_path / "Imagenes" / "Edificio_Ramos Mejia_Imperio"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / "Edificio_Ramos Mejia_Imperio"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
@@ -499,7 +555,7 @@ def test_renombrar_carpeta_imagenes_edificio_conserva_archivos(conn, tmp_path):
     conn.commit()
     renombrar_carpeta_imagenes_edificio(conn, id_edificio, "Edificio_Ramos Mejia_Imperio")
 
-    carpeta_nueva = tmp_path / "Imagenes" / "Edificio_Ramos Mejia_Torre Norte"
+    carpeta_nueva = tmp_path / "Archivos varios" / "Imagenes" / "Edificio_Ramos Mejia_Torre Norte"
     assert (carpeta_nueva / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 
@@ -507,7 +563,7 @@ def test_renombrar_carpeta_imagenes_edificio_conserva_archivos(conn, tmp_path):
 def test_renombrar_carpeta_imagenes_unidad_conserva_archivos(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     id_unidad = _crear_unidad(conn, unidad="7mo L")
-    carpeta_vieja = tmp_path / "Imagenes" / "Unidad_Ramos Mejia_Imperio_7mo L"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / "Unidad_Ramos Mejia_Imperio_7mo L"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
@@ -515,7 +571,7 @@ def test_renombrar_carpeta_imagenes_unidad_conserva_archivos(conn, tmp_path):
     conn.commit()
     renombrar_carpeta_imagenes_unidad(conn, id_unidad, "Unidad_Ramos Mejia_Imperio_7mo L")
 
-    carpeta_nueva = tmp_path / "Imagenes" / "Unidad_Ramos Mejia_Imperio_1A"
+    carpeta_nueva = tmp_path / "Archivos varios" / "Imagenes" / "Unidad_Ramos Mejia_Imperio_1A"
     assert (carpeta_nueva / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 
@@ -523,7 +579,7 @@ def test_renombrar_carpeta_imagenes_unidad_conserva_archivos(conn, tmp_path):
 def test_renombrar_carpeta_imagenes_consultorio_conserva_archivos(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     id_consultorio = _crear_consultorio(conn, numero=3)
-    carpeta_vieja = tmp_path / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
@@ -531,7 +587,7 @@ def test_renombrar_carpeta_imagenes_consultorio_conserva_archivos(conn, tmp_path
     conn.commit()
     renombrar_carpeta_imagenes_consultorio(conn, id_consultorio, "Consultorio_Ramos Mejia_Imperio_7mo L_C3")
 
-    carpeta_nueva = tmp_path / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C4"
+    carpeta_nueva = tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C4"
     assert (carpeta_nueva / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 
@@ -539,7 +595,7 @@ def test_renombrar_carpeta_imagenes_consultorio_conserva_archivos(conn, tmp_path
 def test_renombrar_carpeta_imagenes_consultorio_sin_cambios_no_hace_nada(conn, tmp_path):
     _configurar_carpeta_base(conn, tmp_path)
     id_consultorio = _crear_consultorio(conn, numero=3)
-    carpeta = tmp_path / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3"
+    carpeta = tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3"
     carpeta.mkdir(parents=True)
     (carpeta / "foto.jpg").write_text("x")
 

@@ -249,7 +249,8 @@ def _renombrar_carpeta_imagenes_si_cambio(base: Path, nombre_anterior: str, nomb
     nueva vacía)."""
     if nombre_nuevo == nombre_anterior:
         return
-    _mover_contenido_carpeta(base / "Imagenes" / nombre_anterior, base / "Imagenes" / nombre_nuevo)
+    carpeta_base_imagenes = base / "Archivos varios" / "Imagenes"
+    _mover_contenido_carpeta(carpeta_base_imagenes / nombre_anterior, carpeta_base_imagenes / nombre_nuevo)
 
 
 def renombrar_carpeta_imagenes_localidad(conn: sqlite3.Connection, id_localidad: int, nombre_anterior: str) -> None:
@@ -364,8 +365,21 @@ _FORMATO_CONSULTORIO_ANTERIOR = (
 
 
 def carpeta_imagenes(conn: sqlite3.Connection, alcance: str, id_valor: int | None = None) -> Path:
-    """"Imagenes/{Alcance}" (alcance "Espacio", sin id: imágenes
-    generales del sistema) bajo la carpeta base. La crea si hace falta.
+    """"Archivos varios/Imagenes/{Alcance}" (alcance "Espacio", sin id:
+    imágenes generales del sistema) bajo la carpeta base. La crea si
+    hace falta.
+
+    Pedido explícito de la clienta: "Imagenes" pasa a vivir DENTRO de
+    "Archivos varios" (antes directo bajo la carpeta base, al mismo
+    nivel que "Profesionales") — el resto de las carpetas generadas por
+    el sistema ya vivía ahí (Propuesta/Disponibilidad/Oferta/Placas/
+    Manual, ver `carpeta_archivos_varios`); "Profesionales" es la única
+    que se deja a propósito FUERA, al mismo nivel que "Archivos varios".
+    Si todavía existe la carpeta vieja "Imagenes" al nivel de arriba (de
+    antes de este cambio), se migra sola la primera vez que se accede a
+    CUALQUIER imagen (ver `_migrar_carpeta_imagenes_al_nivel_viejo`) —
+    mismo criterio de "no hace falta mover nada a mano" que el resto de
+    las migraciones de este módulo.
 
     Para "Localidad", "Edificio", "Unidad" y "Consultorio" usa en
     cambio el nombre descriptivo de cada nivel (`nombre_carpeta_
@@ -376,25 +390,51 @@ def carpeta_imagenes(conn: sqlite3.Connection, alcance: str, id_valor: int | Non
     ese registro, sin que haga falta renombrar nada a mano. Consultorio
     además migra, de la misma forma, desde su formato descriptivo
     anterior con guiones (ver `_FORMATO_CONSULTORIO_ANTERIOR`)."""
+    base = _requerir_carpeta_base(conn)
+    _migrar_carpeta_imagenes_al_nivel_viejo(base)
+    carpeta_base_imagenes = base / "Archivos varios" / "Imagenes"
     datos = _DATOS_PARA_CARPETA.get(alcance)
     if datos is not None and id_valor is not None:
         buscar_fila, armar_nombre = datos
-        base = _requerir_carpeta_base(conn)
         fila = buscar_fila(conn, id_valor)
         nombre = armar_nombre(fila) if fila is not None else f"{alcance}_{id_valor}"
-        carpeta = base / "Imagenes" / nombre
-        carpeta_vieja_por_id = base / "Imagenes" / f"{alcance}_{id_valor}"
+        carpeta = carpeta_base_imagenes / nombre
+        carpeta_vieja_por_id = carpeta_base_imagenes / f"{alcance}_{id_valor}"
         if carpeta_vieja_por_id != carpeta:
             _mover_contenido_carpeta(carpeta_vieja_por_id, carpeta)
         if alcance == "Consultorio" and fila is not None:
-            carpeta_vieja_con_guiones = base / "Imagenes" / _FORMATO_CONSULTORIO_ANTERIOR(fila)
+            carpeta_vieja_con_guiones = carpeta_base_imagenes / _FORMATO_CONSULTORIO_ANTERIOR(fila)
             if carpeta_vieja_con_guiones != carpeta:
                 _mover_contenido_carpeta(carpeta_vieja_con_guiones, carpeta)
     else:
         nombre = alcance if id_valor is None else f"{alcance}_{id_valor}"
-        carpeta = _requerir_carpeta_base(conn) / "Imagenes" / nombre
+        carpeta = carpeta_base_imagenes / nombre
     carpeta.mkdir(parents=True, exist_ok=True)
     return carpeta
+
+
+def _migrar_carpeta_imagenes_al_nivel_viejo(base: Path) -> None:
+    """Si todavía existe "Imagenes" al nivel viejo (bajo la carpeta
+    base, al lado de "Archivos varios"/"Profesionales"), mueve TODO su
+    contenido a "Archivos varios/Imagenes" de una sola vez — se llama al
+    principio de `carpeta_imagenes`, así que corre sola la primera vez
+    que se accede a cualquier imagen después de esta ronda, sin tocar
+    nada a mano. No usa `_mover_contenido_carpeta` directo (que mueve
+    TODO lo de `origen`, sin mirar si `destino` ya tiene algo con el
+    mismo nombre) porque acá adentro hay subcarpetas por registro — si
+    "Archivos varios/Imagenes" ya tuviera una subcarpeta con el mismo
+    nombre (poco probable pero posible, ej. corriendo esta migración dos
+    veces con algo creado en el medio), hay que fusionar el contenido de
+    cada una en vez de que `shutil.move` falle."""
+    carpeta_vieja = base / "Imagenes"
+    if not carpeta_vieja.is_dir():
+        return
+    carpeta_nueva = base / "Archivos varios" / "Imagenes"
+    carpeta_nueva.mkdir(parents=True, exist_ok=True)
+    for entrada in list(carpeta_vieja.iterdir()):
+        _mover_contenido_carpeta(entrada, carpeta_nueva / entrada.name)
+    if not any(carpeta_vieja.iterdir()):
+        carpeta_vieja.rmdir()
 
 
 def resincronizar_carpetas_imagenes(conn: sqlite3.Connection) -> int:
@@ -424,7 +464,8 @@ def resincronizar_carpetas_imagenes(conn: sqlite3.Connection) -> int:
     base = carpeta_base(conn)
     if base is None:
         return 0
-    carpeta_base_imagenes = base / "Imagenes"
+    _migrar_carpeta_imagenes_al_nivel_viejo(base)
+    carpeta_base_imagenes = base / "Archivos varios" / "Imagenes"
     if not carpeta_base_imagenes.is_dir():
         return 0
 
@@ -448,12 +489,26 @@ def resincronizar_carpetas_imagenes(conn: sqlite3.Connection) -> int:
 
 
 def carpeta_liquidaciones_simuladas(conn: sqlite3.Connection) -> Path:
-    """"Liquidaciones simuladas" bajo la carpeta base — carpeta ÚNICA
-    compartida por todos los profesionales (a diferencia de
-    `carpeta_profesional`, una por código): la retención acá es corta
+    """"Archivos varios/Liquidaciones simuladas" bajo la carpeta base —
+    carpeta ÚNICA compartida por todos los profesionales (a diferencia
+    de `carpeta_profesional`, una por código): la retención acá es corta
     (`limpiar_liquidaciones_simuladas_antiguas`), no hace falta separar
-    por profesional. La crea si hace falta."""
-    carpeta = _requerir_carpeta_base(conn) / SUBCARPETA_LIQUIDACIONES_SIMULADAS
+    por profesional. La crea si hace falta.
+
+    Pedido explícito de la clienta: pasa a vivir DENTRO de "Archivos
+    varios" (antes directo bajo la carpeta base, al mismo nivel que
+    "Profesionales") — mismo criterio que `carpeta_imagenes`. Si
+    todavía existe la carpeta vieja al nivel de arriba, se migra sola
+    (mueve TODO su contenido, sin pisar nada si la nueva ya tiene algo
+    con el mismo nombre — mismas liquidaciones simuladas generadas en
+    dos corridas distintas antes de reabrir el sistema, caso de borde
+    poco probable pero cubierto)."""
+    base = _requerir_carpeta_base(conn)
+    carpeta = base / "Archivos varios" / SUBCARPETA_LIQUIDACIONES_SIMULADAS
+    carpeta_vieja = base / SUBCARPETA_LIQUIDACIONES_SIMULADAS
+    if carpeta_vieja.is_dir():
+        carpeta.parent.mkdir(parents=True, exist_ok=True)  # _mover_contenido_carpeta necesita el padre ya creado
+        _mover_contenido_carpeta(carpeta_vieja, carpeta)
     carpeta.mkdir(parents=True, exist_ok=True)
     return carpeta
 

@@ -191,7 +191,7 @@ def test_editar_consultorio_cambia_numero_renombra_carpeta_de_imagenes(qtbot, co
     conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
     conn.commit()
 
-    carpeta_vieja = tmp_path / "Imagenes" / "Consultorio___Torre Norte_1A_C1"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / "Consultorio___Torre Norte_1A_C1"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
@@ -207,7 +207,7 @@ def test_editar_consultorio_cambia_numero_renombra_carpeta_de_imagenes(qtbot, co
     pantalla._editar()
 
     assert conn.execute("SELECT NumeroConsultorio FROM Consultorio").fetchone()["NumeroConsultorio"] == 2
-    carpeta_nueva = tmp_path / "Imagenes" / "Consultorio___Torre Norte_1A_C2"
+    carpeta_nueva = tmp_path / "Archivos varios" / "Imagenes" / "Consultorio___Torre Norte_1A_C2"
     assert (carpeta_nueva / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 
@@ -220,7 +220,7 @@ def test_editar_localidad_cambia_nombre_renombra_carpeta_de_imagenes(qtbot, conn
     conn.execute("INSERT INTO Localidad (Localidad) VALUES ('Ramos Mejia')")
     conn.commit()
 
-    carpeta_vieja = tmp_path / "Imagenes" / "Localidad_Ramos Mejia"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / "Localidad_Ramos Mejia"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
@@ -235,7 +235,7 @@ def test_editar_localidad_cambia_nombre_renombra_carpeta_de_imagenes(qtbot, conn
     monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _cambia_nombre)
     pantalla._editar()
 
-    carpeta_nueva = tmp_path / "Imagenes" / "Localidad_Haedo"
+    carpeta_nueva = tmp_path / "Archivos varios" / "Imagenes" / "Localidad_Haedo"
     assert (carpeta_nueva / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 
@@ -247,7 +247,7 @@ def test_editar_edificio_cambia_nombre_renombra_carpeta_de_imagenes(qtbot, conn,
     conn.execute("INSERT INTO Edificio (Nombre, IdLocalidad) VALUES ('Imperio', ?)", (id_localidad,))
     conn.commit()
 
-    carpeta_vieja = tmp_path / "Imagenes" / "Edificio_Ramos Mejia_Imperio"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / "Edificio_Ramos Mejia_Imperio"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
@@ -262,7 +262,7 @@ def test_editar_edificio_cambia_nombre_renombra_carpeta_de_imagenes(qtbot, conn,
     monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _cambia_nombre)
     pantalla._editar()
 
-    carpeta_nueva = tmp_path / "Imagenes" / "Edificio_Ramos Mejia_Torre Norte"
+    carpeta_nueva = tmp_path / "Archivos varios" / "Imagenes" / "Edificio_Ramos Mejia_Torre Norte"
     assert (carpeta_nueva / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 
@@ -276,7 +276,7 @@ def test_editar_unidad_cambia_departamento_renombra_carpeta_de_imagenes(qtbot, c
     conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '7mo L')", (id_edificio,))
     conn.commit()
 
-    carpeta_vieja = tmp_path / "Imagenes" / "Unidad_Ramos Mejia_Imperio_7mo L"
+    carpeta_vieja = tmp_path / "Archivos varios" / "Imagenes" / "Unidad_Ramos Mejia_Imperio_7mo L"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
@@ -291,7 +291,7 @@ def test_editar_unidad_cambia_departamento_renombra_carpeta_de_imagenes(qtbot, c
     monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _cambia_departamento)
     pantalla._editar()
 
-    carpeta_nueva = tmp_path / "Imagenes" / "Unidad_Ramos Mejia_Imperio_1A"
+    carpeta_nueva = tmp_path / "Archivos varios" / "Imagenes" / "Unidad_Ramos Mejia_Imperio_1A"
     assert (carpeta_nueva / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 

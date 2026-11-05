@@ -684,7 +684,7 @@ def test_liquidaciones_simuladas_generar_crea_el_pdf_y_muestra_el_resultado(qtbo
 
     panel._generar()
 
-    carpeta = tmp_path / "Liquidaciones simuladas"
+    carpeta = tmp_path / "Archivos varios" / "Liquidaciones simuladas"
     archivos = list(carpeta.glob("*.pdf"))
     assert len(archivos) == 1
     assert "Liquidación simulada" in archivos[0].name
