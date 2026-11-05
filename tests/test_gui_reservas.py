@@ -11,7 +11,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import hoja_estilos
 from app.gui.pantallas.reservas import (
-    _ALTO_BASE_GRUPO_GRILLA, _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
+    _ALTO_BASE_GRUPO_GRILLA, _COLCHON_SCROLL_HORIZONTAL_GRILLA, _FECHA_SIN_DATO, PantallaReservas, _alto_para_filas,
 )
 from app.gui.widgets.selector_profesional import _ProxyBusquedaSinAcentos
 from app.negocio.dias import fecha_actual, periodo_actual
@@ -973,6 +973,76 @@ def test_regulares_con_grilla_densa_no_muestra_scroll_vertical_de_la_solapa(qtbo
 
     panel_r = pantalla.panel_regulares
     assert panel_r._scroll_superior.verticalScrollBar().maximum() == 0
+
+
+def test_regulares_barra_de_scroll_horizontal_no_queda_tapada(qtbot, conn):
+    """Bug real reportado por la clienta: "veo todo bien, pero no me
+    permite usar la barra de scroll horizontal en la grilla, está
+    visible pero no se puede pinchar y correr" — con la grilla angosta
+    (mismo escenario denso que el test de arriba, que fuerza su scroll
+    horizontal), el presupuesto de alto de `self.grilla` no contemplaba
+    el alto real que `reservar_alto_scroll_horizontal()` ya le reserva a
+    `self.tabla`, y el layout terminaba ubicando el espacio antes de
+    "Detalle" (`agregar_espacio_antes_de_detalle`) unos píxeles DENTRO
+    del propio alto de la tabla — tapando la franja de la barra y
+    absorbiendo los clics que deberían llegarle a ella. Se corrige en
+    `_presupuesto_columna_grilla` sumando el alto de la barra (más un
+    colchón chico) al presupuesto de la columna completa cuando la barra
+    está visible. Acá se confirma en geometría real: el pie de la tabla
+    (global) tiene que quedar en o antes del techo del espacio que
+    precede a "Detalle", nunca superpuesto."""
+    conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    ids_consultorio = []
+    for n_unidad in range(6):
+        conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, ?)", (id_edificio, f"{n_unidad}A"))
+        id_unidad = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        for n_cons in range(6):
+            conn.execute(
+                "INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, ?)",
+                (id_unidad, n_cons + 1),
+            )
+            ids_consultorio.append(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+    ids_profesional = []
+    for i in range(20):
+        conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', ?)", (f"Apellido{i}",))
+        ids_profesional.append(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+    conn.commit()
+
+    repo_regular = obtener_repositorio(conn, "ReservaRegular")
+    dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
+    for i, id_consultorio in enumerate(ids_consultorio):
+        repo_regular.crear(
+            IdProfesional=ids_profesional[i % len(ids_profesional)], IdConsultorio=id_consultorio,
+            DiaSemana=dias[i % len(dias)], HoraInicio=8 + (i % 12), HoraFin=9 + (i % 12),
+            VigenciaInicio="2026-01-01",
+        )
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1366, 768)
+    pantalla.show()
+    pantalla.pestanas.setCurrentIndex(0)
+    qtbot.waitExposed(pantalla)
+    QApplication.processEvents()
+    QApplication.processEvents()
+
+    panel_r = pantalla.panel_regulares
+    tabla = panel_r.grilla.tabla
+    assert tabla.horizontalScrollBar().isVisible()  # sanity: el escenario realmente fuerza el scroll
+
+    pie_tabla = tabla.mapToGlobal(tabla.rect().bottomLeft()).y()
+    techo_espacio = panel_r.grilla._espacio_antes_detalle.mapToGlobal(
+        panel_r.grilla._espacio_antes_detalle.rect().topLeft()
+    ).y()
+    assert techo_espacio >= pie_tabla
+
+    # El presupuesto de la columna efectivamente creció respecto del caso
+    # sin barra (`_alto_referencia_regulares - _ALTO_BASE_GRUPO_GRILLA`).
+    extent = tabla.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+    presupuesto_sin_barra = panel_r._alto_referencia_regulares - _ALTO_BASE_GRUPO_GRILLA
+    assert panel_r._presupuesto_columna_grilla() == presupuesto_sin_barra + extent + _COLCHON_SCROLL_HORIZONTAL_GRILLA
 
 
 def test_detalle_de_aisladas_llega_al_pie_de_su_columna(qtbot, conn):

@@ -3863,3 +3863,89 @@ rondas 1 a 10 enteras de Reservas regulares (todo lo que vivía bajo
 "## Reservas regulares: ..." en CLAUDE.md). Los docstrings/comentarios
 de `app/gui/pantallas/reservas.py` que apuntaban a "CLAUDE.md" para
 este contexto se actualizaron para apuntar acá.
+
+## Reservas regulares: barra de scroll horizontal de la grilla, visible pero no arrastrable (nov-2026)
+
+Bug real reportado por la clienta, revisando la pantalla ya cerrada:
+"veo todo bien, pero no me permite usar la barra de scroll horizontal
+en la grilla, está visible pero no se puede pinchar y correr".
+
+Investigación: `reservar_alto_scroll_horizontal()` (ya activado en esta
+pantalla, ver "Reservas: sin título de la grilla..." más arriba y
+`test_grillas_de_reservas_reservan_alto_para_el_scroll_horizontal`) le
+reserva a `self.grilla.tabla` el alto extra que esa barra necesita
+(`_construir_tabla` suma `PM_ScrollBarExtent` al alto mínimo), pero el
+presupuesto de TODA la columna (`limitar_alto_grilla`, que fija el alto
+de `self.grilla` entero — filtros + grilla) no lo contemplaba: con el
+presupuesto de siempre, `layout_grilla` (un `QVBoxLayout`, con
+`self.tabla` en `stretch=1`) terminaba ubicando el espacio que precede
+a "Detalle" (`agregar_espacio_antes_de_detalle`) unos píxeles DENTRO
+del propio alto de `self.tabla` — tapando exactamente la franja donde
+vive la barra y absorbiendo los clics que deberían llegarle a ella.
+
+Confirmado con un script de diagnóstico que compara `childAt(punto)`
+(hit-testing real, como resolvería un click genuino) contra
+`sendEvent(widget, ...)` (entrega directa, sin hit-testing) en la
+posición real del handle de la barra (`QStyleOptionSlider` +
+`style().subControlRect(...)`): el widget que de verdad recibía el
+click en esa posición era el espacio antes de "Detalle", no la barra.
+Causa raíz: `self.tabla.sizeHint()` devuelve el `QSize(256, 192)`
+genérico de `QAbstractScrollArea` (no refleja el `minimumHeight`
+forzado), así que el cálculo de posición del WIDGET SIGUIENTE en el
+`QVBoxLayout` usaba un alto de `tabla` más chico que su geometría real
+ya renderizada — no se pudo resincronizar ese cálculo con
+`layout.invalidate()+activate()`, `tabla.updateGeometry()` ni
+`tabla.setFixedHeight(...)` (ninguno de los tres hizo que el layout
+recalculara la posición del espacio siguiente).
+
+Se resuelve en el presupuesto de la COLUMNA, no en el de la tabla sola:
+`_PanelReservasRegulares._presupuesto_columna_grilla()` (nuevo método)
+devuelve el presupuesto de siempre (`_alto_referencia_regulares -
+_ALTO_BASE_GRUPO_GRILLA`) salvo que `self.grilla.tabla.
+horizontalScrollBar().isVisible()`, caso en el que suma el alto real de
+la barra (`PM_ScrollBarExtent`) más un colchón chico fijo
+(`_COLCHON_SCROLL_HORIZONTAL_GRILLA = 6`, mismo criterio de "colchón
+estático por encima de la autocorrección dinámica de Qt" ya usado en
+otros puntos de esta pantalla — ver `_ALTO_BASE_GRUPO_GRILLA`). El
+chequeo es condicional (depende de un estado ya resuelto,
+`isVisible()`, no de una remedición dinámica con timing propio) para no
+correr la columna 2/3 por encima de la 1 quitándoles alto de más en el
+caso común, que es sin barra. Los tres lugares que llamaban a
+`self.grilla.limitar_alto_grilla(self._alto_referencia_regulares -
+_ALTO_BASE_GRUPO_GRILLA)` (en `showEvent`, en el reajuste diferido
+`_reajustar_alto_y_columnas_si_sigue_vivo`, y en `_armar_ui` — este
+último en la práctica un no-op para este fix porque la grilla todavía
+no tiene datos cuando corre, pero se actualizó igual por consistencia)
+pasan a usar `self.grilla.limitar_alto_grilla(self.
+_presupuesto_columna_grilla())`.
+
+De paso, el docstring de `test_reservar_alto_scroll_horizontal_es_opt_in`
+(`tests/test_gui_grilla_operativa.py`) decía que "Reservas, Novedades,
+Grilla semanal... no la llaman" — quedó desactualizado desde que
+Reservas (regulares y aisladas) empezó a llamarla, ver arriba. Se
+corrigió el texto; el test en sí seguía siendo válido (un widget recién
+construido, sin pasar por Reservas, sigue sin activarlo por defecto).
+
+Test de regresión nuevo:
+`test_regulares_barra_de_scroll_horizontal_no_queda_tapada`
+(`tests/test_gui_reservas.py`, mismo escenario denso — 36 consultorios
+en 6 unidades, fuerza el scroll horizontal — que
+`test_regulares_con_grilla_densa_no_muestra_scroll_vertical_de_la_solapa`)
+confirma en geometría real que el pie de la tabla queda en o antes del
+techo del espacio previo a "Detalle" (nunca superpuesto), y que el
+presupuesto de la columna efectivamente creció en `extent +
+_COLCHON_SCROLL_HORIZONTAL_GRILLA` respecto del caso sin barra.
+`tests/test_gui_reservas.py` completo: solo los 2 fallos de calibración
+de altura de botón ya conocidos (`assert 23 == 22`, fuente del
+contenedor — ver CLAUDE.md, "Fallos de fuentes del contenedor de
+desarrollo"), sin regresiones nuevas.
+
+## Reservas aisladas: "Mostrar reservas anteriores" → "Ver reservas anteriores" (nov-2026)
+
+Pedido explícito de la clienta, puro cambio de texto: el check
+`check_mostrar_todas` (panel de Filtros de la grilla, columna 2 — ver
+"Reservas: sin título de la grilla..." más arriba sobre dónde vive) pasa
+de "Mostrar reservas anteriores" a "Ver reservas anteriores". El nombre
+del atributo Python (`check_mostrar_todas`) y su comportamiento (filtro
+de VISUALIZACIÓN, desactivado por defecto, muestra desde hoy en
+adelante) no cambian — solo el texto visible del check.

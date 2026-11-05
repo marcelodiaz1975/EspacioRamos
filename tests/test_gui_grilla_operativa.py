@@ -905,9 +905,11 @@ def test_reservar_alto_scroll_horizontal_suma_el_alto_de_la_barra(qtbot, conn):
 
 
 def test_reservar_alto_scroll_horizontal_es_opt_in(qtbot, conn):
-    """No afecta al resto de los usos de esta grilla compartida (Reservas,
-    Novedades, Grilla semanal) — que no lo llaman, mismo criterio que el
-    resto de los métodos opt-in de este widget."""
+    """No afecta a un uso "crudo" de esta grilla compartida que no lo
+    pida — mismo criterio que el resto de los métodos opt-in de este
+    widget (Reservas regulares/aisladas y Oferta de consultorios sí lo
+    llaman, ver `test_grillas_de_reservas_reservan_alto_para_el_scroll_
+    horizontal` en `test_gui_reservas.py`)."""
     _preparar(conn)
     widget = GrillaOperativaWidget(conn)
     qtbot.addWidget(widget)

@@ -420,6 +420,10 @@ _ALTO_BASE_GRUPO_GRILLA = 6
 # alto que le suma `_ALTO_TITULO_COLUMNAS_REGULARES` de arriba, ver el
 # comentario en `_PanelReservasRegulares._armar_ui`.
 _ESPACIADO_FORM = 4
+# Colchón extra (px) sumado, además de la propia barra de scroll
+# horizontal, al presupuesto de `self.grilla` cuando esa barra está
+# visible — ver `_PanelReservasRegulares._presupuesto_columna_grilla`.
+_COLCHON_SCROLL_HORIZONTAL_GRILLA = 6
 # Colchón extra (px) al fijar el alto de `_scroll_superior` — pedido
 # explícito de la clienta, propuesto por ella misma como la forma más
 # simple de terminar de cerrar la barra de scroll vertical de la solapa
@@ -1043,6 +1047,42 @@ class _PanelReservasRegulares(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def _presupuesto_columna_grilla(self) -> int:
+        """Presupuesto de alto para `self.grilla` (`limitar_alto_grilla`):
+        el de siempre (columna 1 menos el chroma propio de `grupo_grilla`,
+        `_ALTO_BASE_GRUPO_GRILLA`) — salvo que la grilla necesite scroll
+        horizontal con los filtros actuales (muchas unidades/días
+        elegidos a la vez), caso en el que se le suma el alto real de esa
+        barra más un colchón chico (`_COLCHON_SCROLL_HORIZONTAL_GRILLA`).
+
+        Bug real reportado por la clienta: "veo todo bien, pero no me
+        permite usar la barra de scroll horizontal en la grilla, está
+        visible pero no se puede pinchar y correr". `reservar_alto_
+        scroll_horizontal()` (activado para esta pantalla) ya le reserva
+        a `self.tabla` el alto que esa barra necesita (`_construir_tabla`
+        suma `PM_ScrollBarExtent` al alto mínimo) — pero el presupuesto
+        de ESTA columna (`limitar_alto_grilla`, que fija el alto de TODO
+        `self.grilla`, filtros + grilla) no lo contemplaba: con el
+        presupuesto justo, el layout de `layout_grilla` terminaba
+        ubicando el espacio antes de "Detalle" (`agregar_espacio_antes_
+        de_detalle`) unos píxeles DENTRO del propio alto de `self.tabla`
+        — tapando exactamente la franja donde vive la barra de scroll
+        horizontal y absorbiendo los clics que deberían llegarle a ella.
+        Sumar ese mismo alto acá, al presupuesto de la columna completa,
+        le da a `self.tabla` el margen real que necesita dentro del
+        layout y saca al espacio/Detalle de encima.
+
+        Solo pasa con la grilla realmente angosta (muchas columnas,
+        pocas unidades en pantalla) — con el presupuesto de siempre
+        alcanza en el caso común, por eso el agregado es condicional, no
+        un colchón fijo siempre puesto (que correría la columna 2/3 por
+        encima de la 1 sin necesidad)."""
+        presupuesto = self._alto_referencia_regulares - _ALTO_BASE_GRUPO_GRILLA
+        if self.grilla.tabla.horizontalScrollBar().isVisible():
+            extent = self.grilla.tabla.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+            presupuesto += extent + _COLCHON_SCROLL_HORIZONTAL_GRILLA
+        return presupuesto
+
     def showEvent(self, event) -> None:  # noqa: N802
         """`setFocus()` durante la construcción no alcanza a "pegar":
         el QTabWidget contenedor todavía no está mostrado y se termina
@@ -1084,12 +1124,11 @@ class _PanelReservasRegulares(QWidget):
         # rompe el ciclo: es el piso real de columna 1, no se mueve
         # aunque el splitter la haya estirado de más en una pasada previa.
         self._alto_referencia_regulares = self._panel_form_regulares.minimumSizeHint().height()
-        # Se resta `_ALTO_BASE_GRUPO_GRILLA`: ver el docstring de
-        # `_ajustar_alto_detalle` sobre por qué el presupuesto que recibe
-        # `self.grilla` tiene que descontar el chroma propio de
-        # `grupo_grilla` (el `QGroupBox` que lo envuelve en el splitter),
-        # no solo el de `self.grilla` mismo.
-        self.grilla.limitar_alto_grilla(self._alto_referencia_regulares - _ALTO_BASE_GRUPO_GRILLA)
+        # Ver `_presupuesto_columna_grilla` — descuenta `_ALTO_BASE_GRUPO_
+        # GRILLA` (chroma propio de `grupo_grilla`, el `QGroupBox` que
+        # envuelve a `self.grilla` en el splitter) y suma, si hace falta,
+        # el alto de la barra de scroll horizontal de la grilla.
+        self.grilla.limitar_alto_grilla(self._presupuesto_columna_grilla())
         self._ajustar_alto_detalle()
         self._fijar_alto_scroll_superior()
         self.reiniciar()
@@ -1209,9 +1248,9 @@ class _PanelReservasRegulares(QWidget):
             # presupuesto de Detalle que no convergía al pie real de
             # "Eliminar reserva").
             self._alto_referencia_regulares = self._panel_form_regulares.minimumSizeHint().height()
-            # Se resta `_ALTO_BASE_GRUPO_GRILLA` — mismo motivo que en
-            # `showEvent`, ver el docstring de `_ajustar_alto_detalle`.
-            self.grilla.limitar_alto_grilla(self._alto_referencia_regulares - _ALTO_BASE_GRUPO_GRILLA)
+            # Ver `_presupuesto_columna_grilla` — mismo motivo que en
+            # `showEvent`.
+            self.grilla.limitar_alto_grilla(self._presupuesto_columna_grilla())
             self._ajustar_alto_detalle()
             self._fijar_alto_scroll_superior()
             self.actualizar()
@@ -1514,9 +1553,14 @@ class _PanelReservasRegulares(QWidget):
         # (mismo motivo que `_scroll_superior` más abajo: el `sizeHint()`
         # de acá, antes del primer show, no siempre coincide con el real).
         self._alto_referencia_regulares = panel_form.minimumSizeHint().height()
-        # Se resta `_ALTO_BASE_GRUPO_GRILLA` — mismo motivo que en
-        # `showEvent`, ver el docstring de `_ajustar_alto_detalle`.
-        self.grilla.limitar_alto_grilla(self._alto_referencia_regulares - _ALTO_BASE_GRUPO_GRILLA)
+        # Ver `_presupuesto_columna_grilla` — acá, en plena construcción,
+        # la grilla todavía no tiene datos reales cargados (`reservar_
+        # alto_scroll_horizontal()`/`activar_filas_y_columnas_fijas()`
+        # recién se llaman unas líneas más abajo), así que el agregado por
+        # scroll horizontal nunca aplica en este primer llamado puntual —
+        # queda igual al valor de siempre; se usa el mismo helper que
+        # `showEvent` solo para no duplicar la cuenta en un tercer lugar.
+        self.grilla.limitar_alto_grilla(self._presupuesto_columna_grilla())
         # Pedido explícito de la clienta, extendido desde Oferta de
         # consultorios a toda pantalla con esta grilla: Tipo de bloque/
         # Horario y las filas de encabezado quedan siempre visibles al
@@ -2281,7 +2325,7 @@ class _PanelReservasAisladas(QWidget):
         Regulares.reiniciar` — a diferencia de esa solapa, acá
         `_resetear_formulario` ya incluye "Profesional" (punto #9.1.9
         no aplica acá), así que alcanza con llamarla directo.
-        "Mostrar reservas anteriores" vuelve a su valor inicial
+        "Ver reservas anteriores" vuelve a su valor inicial
         (desactivado) — mismo criterio que el resto de los filtros.
         Mismo pedido que en Reservas regulares (ver esa solapa): el
         combo "Visualización" de la grilla vuelve a "Reservas
@@ -2594,7 +2638,7 @@ class _PanelReservasAisladas(QWidget):
         # pasaron y no aportan nada para el trabajo del día a día. Debajo
         # del filtro de Profesional de esta columna (la de la grilla, no
         # la del formulario de alta de la columna 1), una línea divisoria
-        # y un check "Mostrar reservas anteriores" — desactivado por
+        # y un check "Ver reservas anteriores" — desactivado por
         # defecto, así que la tabla solo muestra desde hoy en adelante
         # (ver `actualizar`); activado, muestra el historial completo
         # como antes. Puro filtro de VISUALIZACIÓN (mismo criterio que
@@ -2608,7 +2652,7 @@ class _PanelReservasAisladas(QWidget):
         linea_mostrar_todas = QFrame()
         linea_mostrar_todas.setFrameShape(QFrame.Shape.HLine)
         linea_mostrar_todas.setFrameShadow(QFrame.Shadow.Sunken)
-        self.check_mostrar_todas = QCheckBox("Mostrar reservas anteriores")
+        self.check_mostrar_todas = QCheckBox("Ver reservas anteriores")
         self.check_mostrar_todas.stateChanged.connect(self.actualizar)
         layout_filtros_aisladas.insertWidget(indice_profesional + 1, linea_mostrar_todas)
         layout_filtros_aisladas.insertWidget(indice_profesional + 2, self.check_mostrar_todas)
