@@ -176,10 +176,13 @@ def test_pantalla_consultorios_tiene_tres_campos_libres(qtbot, conn):
 
 def test_editar_consultorio_cambia_numero_renombra_carpeta_de_imagenes(qtbot, conn, tmp_path, monkeypatch):
     """Pedido explícito de la clienta: la carpeta de imágenes del
-    consultorio usa un nombre descriptivo ("Consultorio - {Edificio} -
-    {Unidad} - {Número}") en vez del ID interno — al cambiar el Número
-    desde esta pantalla, la carpeta se renombra sola, sin perder los
-    archivos ya cargados (ver `_al_actualizar_consultorio`)."""
+    consultorio usa un nombre descriptivo ("Consultorio_{Localidad}_
+    {Edificio}_{Departamento}_C{Número}") en vez del ID interno — al
+    cambiar el Número desde esta pantalla, la carpeta se renombra sola,
+    sin perder los archivos ya cargados (ver `_al_actualizar_
+    consultorio`). Este edificio no tiene Localidad asignada, así que
+    el nombre de carpeta cae al placeholder "?" saneado ("_") para ese
+    tramo, como cualquier otro dato faltante."""
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
     conn.execute("INSERT INTO Edificio (Nombre) VALUES ('Torre Norte')")
     id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
@@ -188,7 +191,7 @@ def test_editar_consultorio_cambia_numero_renombra_carpeta_de_imagenes(qtbot, co
     conn.execute("INSERT INTO Consultorio (IdUnidad, NumeroConsultorio) VALUES (?, 1)", (id_unidad,))
     conn.commit()
 
-    carpeta_vieja = tmp_path / "Imagenes" / "Consultorio - Torre Norte - 1A - 1"
+    carpeta_vieja = tmp_path / "Imagenes" / "Consultorio___Torre Norte_1A_C1"
     carpeta_vieja.mkdir(parents=True)
     (carpeta_vieja / "foto.jpg").write_text("x")
 
@@ -204,7 +207,91 @@ def test_editar_consultorio_cambia_numero_renombra_carpeta_de_imagenes(qtbot, co
     pantalla._editar()
 
     assert conn.execute("SELECT NumeroConsultorio FROM Consultorio").fetchone()["NumeroConsultorio"] == 2
-    carpeta_nueva = tmp_path / "Imagenes" / "Consultorio - Torre Norte - 1A - 2"
+    carpeta_nueva = tmp_path / "Imagenes" / "Consultorio___Torre Norte_1A_C2"
+    assert (carpeta_nueva / "foto.jpg").exists()
+    assert not carpeta_vieja.exists()
+
+
+def test_editar_localidad_cambia_nombre_renombra_carpeta_de_imagenes(qtbot, conn, tmp_path, monkeypatch):
+    """Mismo pedido que el test de arriba, extendido a Localidad/
+    Edificio/Unidad ("la idea es que se replique el formato de ruta
+    para otros elementos")."""
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.execute("INSERT INTO Localidad (Localidad) VALUES ('Ramos Mejia')")
+    conn.commit()
+
+    carpeta_vieja = tmp_path / "Imagenes" / "Localidad_Ramos Mejia"
+    carpeta_vieja.mkdir(parents=True)
+    (carpeta_vieja / "foto.jpg").write_text("x")
+
+    pantalla = catalogos.pantalla_localidades(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_widget.selectRow(0)
+
+    def _cambia_nombre(self, *a, **k):
+        self._entradas["Localidad"].setText("Haedo")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _cambia_nombre)
+    pantalla._editar()
+
+    carpeta_nueva = tmp_path / "Imagenes" / "Localidad_Haedo"
+    assert (carpeta_nueva / "foto.jpg").exists()
+    assert not carpeta_vieja.exists()
+
+
+def test_editar_edificio_cambia_nombre_renombra_carpeta_de_imagenes(qtbot, conn, tmp_path, monkeypatch):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.execute("INSERT INTO Localidad (Localidad) VALUES ('Ramos Mejia')")
+    id_localidad = conn.execute("SELECT IdLocalidad FROM Localidad").fetchone()["IdLocalidad"]
+    conn.execute("INSERT INTO Edificio (Nombre, IdLocalidad) VALUES ('Imperio', ?)", (id_localidad,))
+    conn.commit()
+
+    carpeta_vieja = tmp_path / "Imagenes" / "Edificio_Ramos Mejia_Imperio"
+    carpeta_vieja.mkdir(parents=True)
+    (carpeta_vieja / "foto.jpg").write_text("x")
+
+    pantalla = catalogos.pantalla_edificios(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_widget.selectRow(0)
+
+    def _cambia_nombre(self, *a, **k):
+        self._entradas["Nombre"].setText("Torre Norte")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _cambia_nombre)
+    pantalla._editar()
+
+    carpeta_nueva = tmp_path / "Imagenes" / "Edificio_Ramos Mejia_Torre Norte"
+    assert (carpeta_nueva / "foto.jpg").exists()
+    assert not carpeta_vieja.exists()
+
+
+def test_editar_unidad_cambia_departamento_renombra_carpeta_de_imagenes(qtbot, conn, tmp_path, monkeypatch):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.execute("INSERT INTO Localidad (Localidad) VALUES ('Ramos Mejia')")
+    id_localidad = conn.execute("SELECT IdLocalidad FROM Localidad").fetchone()["IdLocalidad"]
+    conn.execute("INSERT INTO Edificio (Nombre, IdLocalidad) VALUES ('Imperio', ?)", (id_localidad,))
+    id_edificio = conn.execute("SELECT IdEdificio FROM Edificio").fetchone()["IdEdificio"]
+    conn.execute("INSERT INTO Unidad (IdEdificio, Departamento) VALUES (?, '7mo L')", (id_edificio,))
+    conn.commit()
+
+    carpeta_vieja = tmp_path / "Imagenes" / "Unidad_Ramos Mejia_Imperio_7mo L"
+    carpeta_vieja.mkdir(parents=True)
+    (carpeta_vieja / "foto.jpg").write_text("x")
+
+    pantalla = catalogos.pantalla_unidades(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.tabla_widget.selectRow(0)
+
+    def _cambia_departamento(self, *a, **k):
+        self._entradas["Departamento"].setText("1A")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _cambia_departamento)
+    pantalla._editar()
+
+    carpeta_nueva = tmp_path / "Imagenes" / "Unidad_Ramos Mejia_Imperio_1A"
     assert (carpeta_nueva / "foto.jpg").exists()
     assert not carpeta_vieja.exists()
 

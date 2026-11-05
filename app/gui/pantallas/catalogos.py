@@ -16,7 +16,16 @@ from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QMessageBox, QVBoxLayou
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.procesando import Procesando
-from app.negocio.archivos_generados import nombre_carpeta_consultorio, renombrar_carpeta_imagenes_consultorio
+from app.negocio.archivos_generados import (
+    nombre_carpeta_consultorio,
+    nombre_carpeta_edificio,
+    nombre_carpeta_localidad,
+    nombre_carpeta_unidad,
+    renombrar_carpeta_imagenes_consultorio,
+    renombrar_carpeta_imagenes_edificio,
+    renombrar_carpeta_imagenes_localidad,
+    renombrar_carpeta_imagenes_unidad,
+)
 from app.negocio.dias import periodo_actual
 from app.negocio.feriados import TIPOS_QUE_DESCUENTAN_100
 from app.negocio.formato import formatear_moneda
@@ -93,6 +102,18 @@ def _opciones_consultorio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
     ]
 
 
+def _al_actualizar_localidad(conn: sqlite3.Connection, registro_anterior, valores_nuevos: dict) -> None:
+    """Al cambiar el nombre de una Localidad, la carpeta de sus
+    imágenes se renombra sola para seguir el nombre descriptivo (pedido
+    explícito de la clienta: "la idea es que se replique el formato de
+    ruta [de Consultorio] para otros elementos", ver `nombre_carpeta_
+    localidad`) — `registro_anterior` ya trae el nombre de ANTES de
+    guardar directo (no hace falta ningún JOIN, a diferencia de
+    Edificio/Unidad/Consultorio, que dependen de un nivel de arriba)."""
+    nombre_anterior = nombre_carpeta_localidad(registro_anterior["Localidad"])
+    renombrar_carpeta_imagenes_localidad(conn, registro_anterior["IdLocalidad"], nombre_anterior)
+
+
 def pantalla_localidades(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Localidad", "Localidad", requerido=True),
@@ -101,7 +122,37 @@ def pantalla_localidades(conn: sqlite3.Connection, *, anidado: bool = False) -> 
         Campo("Pais", "País"),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "Localidad", "Localidades", campos, anidado=anidado)
+    al_actualizar = lambda registro, valores: _al_actualizar_localidad(conn, registro, valores)  # noqa: E731
+    pantalla = PantallaCRUD(
+        conn, "Localidad", "Localidades", campos, anidado=anidado, al_actualizar=al_actualizar,
+    )
+    # al_actualizar queda como weakref dentro de PantallaCRUD (mismo motivo
+    # que Fechas especiales, más abajo): hay que anclar la lambda a mano
+    # para que no la recolecte el GC apenas retorna esta función.
+    pantalla._hook_renombrar_carpeta = al_actualizar
+    return pantalla
+
+
+def _nombre_carpeta_edificio_de_registro(conn: sqlite3.Connection, registro) -> str | None:
+    fila_localidad = (
+        conn.execute(
+            "SELECT Localidad FROM Localidad WHERE IdLocalidad = ?", (registro["IdLocalidad"],),
+        ).fetchone()
+        if registro["IdLocalidad"] is not None else None
+    )
+    localidad = fila_localidad["Localidad"] if fila_localidad is not None else None
+    return nombre_carpeta_edificio(localidad, registro["Nombre"])
+
+
+def _al_actualizar_edificio(conn: sqlite3.Connection, registro_anterior, valores_nuevos: dict) -> None:
+    """Al cambiar el nombre o la Localidad de un Edificio, la carpeta de
+    sus imágenes se renombra sola para seguir el nombre descriptivo
+    (mismo criterio que `_al_actualizar_localidad`) — `registro_
+    anterior` da los datos de ANTES de guardar; el nombre después se
+    recalcula solo, ya con los datos nuevos ya escritos en la base
+    (`renombrar_carpeta_imagenes_edificio`)."""
+    nombre_anterior = _nombre_carpeta_edificio_de_registro(conn, registro_anterior)
+    renombrar_carpeta_imagenes_edificio(conn, registro_anterior["IdEdificio"], nombre_anterior)
 
 
 def pantalla_edificios(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
@@ -111,7 +162,35 @@ def pantalla_edificios(conn: sqlite3.Connection, *, anidado: bool = False) -> Pa
         Campo("IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "Edificio", "Edificios", campos, anidado=anidado)
+    al_actualizar = lambda registro, valores: _al_actualizar_edificio(conn, registro, valores)  # noqa: E731
+    pantalla = PantallaCRUD(
+        conn, "Edificio", "Edificios", campos, anidado=anidado, al_actualizar=al_actualizar,
+    )
+    pantalla._hook_renombrar_carpeta = al_actualizar  # ver comentario análogo en pantalla_localidades
+    return pantalla
+
+
+def _nombre_carpeta_unidad_de_registro(conn: sqlite3.Connection, registro) -> str | None:
+    fila_edificio = conn.execute(
+        "SELECT e.Nombre AS Edificio, l.Localidad FROM Edificio e "
+        "LEFT JOIN Localidad l ON l.IdLocalidad = e.IdLocalidad WHERE e.IdEdificio = ?",
+        (registro["IdEdificio"],),
+    ).fetchone()
+    if fila_edificio is None:
+        return None
+    return nombre_carpeta_unidad(fila_edificio["Localidad"], fila_edificio["Edificio"], registro["Departamento"])
+
+
+def _al_actualizar_unidad(conn: sqlite3.Connection, registro_anterior, valores_nuevos: dict) -> None:
+    """Al cambiar el Departamento o el Edificio de una Unidad, la
+    carpeta de sus imágenes se renombra sola para seguir el nombre
+    descriptivo (mismo criterio que `_al_actualizar_localidad`) —
+    `registro_anterior` da los datos de ANTES de guardar; el nombre
+    después se recalcula solo, ya con los datos nuevos ya escritos en
+    la base (`renombrar_carpeta_imagenes_unidad`)."""
+    nombre_anterior = _nombre_carpeta_unidad_de_registro(conn, registro_anterior)
+    if nombre_anterior is not None:
+        renombrar_carpeta_imagenes_unidad(conn, registro_anterior["IdUnidad"], nombre_anterior)
 
 
 def pantalla_unidades(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
@@ -133,18 +212,26 @@ def pantalla_unidades(conn: sqlite3.Connection, *, anidado: bool = False) -> Pan
         Campo("CantLimitePlacas", "Límite de placas", tipo="numero"),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "Unidad", "Unidades", campos, anidado=anidado)
+    al_actualizar = lambda registro, valores: _al_actualizar_unidad(conn, registro, valores)  # noqa: E731
+    pantalla = PantallaCRUD(
+        conn, "Unidad", "Unidades", campos, anidado=anidado, al_actualizar=al_actualizar,
+    )
+    pantalla._hook_renombrar_carpeta = al_actualizar  # ver comentario análogo en pantalla_localidades
+    return pantalla
 
 
 def _nombre_carpeta_consultorio_de_registro(conn: sqlite3.Connection, registro) -> str | None:
     fila_unidad = conn.execute(
-        "SELECT u.Departamento, e.Nombre AS Edificio FROM Unidad u "
-        "JOIN Edificio e ON e.IdEdificio = u.IdEdificio WHERE u.IdUnidad = ?",
+        "SELECT u.Departamento, e.Nombre AS Edificio, l.Localidad FROM Unidad u "
+        "JOIN Edificio e ON e.IdEdificio = u.IdEdificio "
+        "LEFT JOIN Localidad l ON l.IdLocalidad = e.IdLocalidad WHERE u.IdUnidad = ?",
         (registro["IdUnidad"],),
     ).fetchone()
     if fila_unidad is None:
         return None
-    return nombre_carpeta_consultorio(fila_unidad["Edificio"], fila_unidad["Departamento"], registro["NumeroConsultorio"])
+    return nombre_carpeta_consultorio(
+        fila_unidad["Localidad"], fila_unidad["Edificio"], fila_unidad["Departamento"], registro["NumeroConsultorio"],
+    )
 
 
 def _al_actualizar_consultorio(conn: sqlite3.Connection, registro_anterior, valores_nuevos: dict) -> None:

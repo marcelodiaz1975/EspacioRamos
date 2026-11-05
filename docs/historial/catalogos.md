@@ -436,3 +436,59 @@ carpeta vieja por ID, consultorio inexistente cae al esquema viejo,
 `renombrar_carpeta_imagenes_consultorio` conserva archivos y es
 idempotente sin cambios) y `tests/test_catalogos.py` (editar el Número
 desde la pantalla renombra la carpeta sin perder archivos).
+
+## Carpetas de imágenes: formato con Localidad, replicado a Localidad/Edificio/Unidad (hilo nuevo, nov-2026)
+
+Pedido explícito de la clienta (hilo nuevo, primer punto de una tanda
+de cuatro): el formato de carpeta de Consultorio (ronda anterior,
+dash-separado, sin Localidad) pasa a
+`"Consultorio_{Localidad}_{Edificio}_{Unidad}_C{Número}"` (ejemplo dado
+por la clienta: "Consultorio_Ramos Mejia_Imperio_7mo L_C3") —
+underscore-separado, con Localidad sumada al principio. Pedido
+explícito de que el MISMO criterio se replique a los otros tres
+niveles, que hasta ahora eran puramente numéricos por Id (sin nombre
+descriptivo): `Localidad_{Localidad}`, `Edificio_{Localidad}_
+{Edificio}`, `Unidad_{Localidad}_{Edificio}_{Unidad}`.
+
+`app/negocio/archivos_generados.py`: `nombre_carpeta_consultorio` pasa
+a 4 argumentos (suma Localidad al principio); nuevas
+`nombre_carpeta_localidad`/`nombre_carpeta_edificio`/`nombre_carpeta_
+unidad`, cada una con el mismo criterio de sanitizado
+(`_CARACTERES_INVALIDOS_CARPETA`) y el mismo fallback `or '?'` para un
+dato faltante que ya usaba Consultorio (importante: el sanitizador
+también convierte el propio `"?"` a `"_"`, así que "sin Localidad" en
+Edificio queda literalmente `"Edificio___Imperio"`, tres guiones bajos
+— confirmado con un test, no es un bug). `carpeta_imagenes` ahora
+despacha los 4 alcances contra sus respectivas tablas (con `LEFT JOIN
+Localidad`, porque `Edificio.IdLocalidad` admite nulo) y migra sola, en
+cada acceso, desde el formato viejo basado en Id — Consultorio además
+encadena una segunda migración desde el formato dash-separado de la
+ronda anterior (dos generaciones de formato viejo a resolver, no una).
+`renombrar_carpeta_imagenes_localidad`/`..._edificio`/`..._unidad`
+(nuevas, mismo patrón que la de Consultorio) renombran la carpeta real
+cuando el nombre descriptivo cambia, conservando el contenido.
+
+`app/gui/pantallas/catalogos.py`: `pantalla_localidades`/
+`pantalla_edificios`/`pantalla_unidades` ahora pasan su propio
+`al_actualizar` (mismo mecanismo `PantallaCRUD.al_actualizar` ya usado
+por Consultorio, con el hook pineado como atributo de la pantalla para
+que no lo recoja el garbage collector antes de disparar).
+
+**Misma limitación ya documentada para Consultorio, ahora también para
+los otros tres niveles**: renombrar una Localidad/Edificio/Unidad desde
+su propia pantalla no propaga el cambio hacia ABAJO (ej. renombrar un
+Edificio no toca ya mismo las carpetas de sus Unidades/Consultorios) —
+cada nivel resuelve solo su propia carpeta; los niveles de abajo se
+reconcilian solos la próxima vez que SU PROPIO registro se vuelva a
+guardar.
+
+Tests: `tests/test_archivos_generados.py` (formato de los 4 niveles,
+`carpeta_imagenes` descriptivo + migración de Id para los 4, migración
+en cascada desde el formato dash de Consultorio, `renombrar_carpeta_
+imagenes_*` conserva archivos para los 3 niveles nuevos),
+`tests/test_catalogos.py` (editar Localidad/Edificio/Unidad desde su
+pantalla renombra la carpeta sin perder archivos), `tests/
+test_imagenes.py` (un test viejo que todavía esperaba el formato por
+Id en Localidad, actualizado al nuevo nombre descriptivo). Suite
+completa: mismos ~10 fallos conocidos/ambientales de siempre, sin
+regresiones nuevas.

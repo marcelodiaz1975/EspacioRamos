@@ -60,7 +60,11 @@ def test_agregar_imagen_sin_alcance_es_espacio_y_se_guarda(conn, tmp_path):
     assert Path(fila["RutaArchivo"]).parent.name == "Espacio"
 
 
-def test_agregar_imagen_de_localidad_usa_el_id_como_carpeta(conn, tmp_path):
+def test_agregar_imagen_de_localidad_usa_nombre_descriptivo_como_carpeta(conn, tmp_path):
+    """Pedido explícito de la clienta: la carpeta de imágenes de
+    Localidad (igual que Edificio/Unidad/Consultorio) usa el nombre
+    descriptivo en vez del ID interno — ver `app.negocio.archivos_
+    generados.nombre_carpeta_localidad`."""
     _configurar_carpeta_base(conn, tmp_path / "base")
     id_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Rosario")
     id_imagen = agregar_imagen(
@@ -69,7 +73,7 @@ def test_agregar_imagen_de_localidad_usa_el_id_como_carpeta(conn, tmp_path):
 
     fila = obtener_repositorio(conn, "Imagen").obtener(id_imagen)
     assert fila["IdLocalidad"] == id_localidad
-    assert Path(fila["RutaArchivo"]).parent.name == f"Localidad_{id_localidad}"
+    assert Path(fila["RutaArchivo"]).parent.name == "Localidad_Rosario"
 
 
 def test_imagenes_del_alcance_espacio_no_incluye_las_de_localidad(conn, tmp_path):
