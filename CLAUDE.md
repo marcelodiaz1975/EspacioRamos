@@ -1917,6 +1917,81 @@ probaba — verifica un gap de al menos 4px, no solo "sin superposición")
 — el resto de los tests de Reservas regulares, incluido el escenario
 denso y el de la tabla de abajo, siguen pasando sin cambios.
 
+## Reservas regulares: ronda 9 — nuevo intento, más simple: tabla 5px más abajo, cuadro a la mitad sin mover el pie, etiqueta "Detalle" eliminada
+
+Pedido explícito de la clienta, abriendo con "es terrible pero no
+termina de salir bien algo simple, vamos de nuevo con otro intento" —
+tres puntos en un mismo mensaje:
+
+"* Se superpone un poco la tabla con el botón de 'Eliminar reserva'.
+Baja la posición de la tabla 5px
+* Del cuadro de detalle respetá si o si la posición en pantalla de
+donde termina. Con es referencia reduci a la mitad la altura del
+cuadro para que baje posición en pantalla de donde comienza el
+elemento
+* Una vez reducido el cuadro, para no tener mas problemas, eliminá la
+etiqueta que dice 'Detalle', que quede solo el cuadro"
+
+1. **Tabla de abajo 5px más abajo.** Mismo mecanismo de siempre
+   (`_fijar_alto_scroll_superior`, sin tocar su lógica) — `_MARGEN_
+   SCROLL_SUPERIOR_REGULARES` sube de 5 a 10 (+5, el mismo pedido
+   literal que ya se había hecho una vez en la ronda 6).
+
+2. **El cuadro a la mitad, con el pie SIN TOCAR.** Hasta la ronda
+   anterior, `texto_detalle` ocupaba TODO el sobrante entre la grilla y
+   el tope de siempre (`min(pie_eliminar, pie_maximo_grilla)`, que
+   sigue siendo exactamente el mismo tope, sin cambios). Ahora ese
+   sobrante se reparte en dos mitades iguales: la de ABAJO para el
+   cuadro (que sigue terminando en el mismo pie de siempre — "respetá
+   sí o sí la posición de dónde termina" — pero mide la mitad de alto)
+   y la de ARRIBA, que pasa a ser espacio en blanco (el mismo widget
+   real de `agregar_espacio_antes_de_detalle`, agrandado) entre la
+   grilla y el cuadro — "que baje la posición de dónde comienza el
+   elemento" es automático: al quedarse con menos alto pero el mismo
+   pie, el techo del cuadro baja exactamente esa mitad.
+
+   La referencia de TECHO para medir el sobrante total pasa a ser el
+   pie real de `self.grilla.tabla` (la grilla de horarios) en vez del
+   techo de `texto_detalle` mismo (que usaban las rondas anteriores,
+   cuando la etiqueta todavía estaba en medio) — sigue siendo estable/
+   independiente de lo que mida el cuadro o el espacio en este momento,
+   mismo criterio de idempotencia de siempre.
+
+3. **Etiqueta "Detalle:" eliminada — "para no tener más problemas".**
+   `GrillaOperativaWidget.ocultar_etiqueta_detalle()` (nueva) saca
+   `self.etiqueta_detalle` de `layout_grilla` por completo (`removeWidget`
+   + `.hide()`, no solo ocultarla — dejarla en el layout sin sacarla
+   reservaría su lugar igual) — llamada una sola vez desde `_armar_ui`
+   de Reservas regulares, DESPUÉS de `agregar_espacio_antes_de_detalle`
+   (que todavía necesita el índice de la etiqueta para insertarse antes
+   de ella, ver su propio código). No afecta a Reservas aisladas, que
+   usa `extraer_detalle()` para un caso distinto (reubicar los dos
+   widgets en otro lado, no eliminar ninguno) ni a ningún otro uso
+   compartido de esta grilla (Oferta, Novedades, Grilla semanal).
+
+   `agregar_espacio_antes_de_detalle` pasa a guardar el widget real que
+   arma como atributo (`self._espacio_antes_detalle`, antes una
+   variable local) para que un método nuevo, `fijar_espacio_y_alto_
+   cuadro_detalle(espacio, alto_cuadro)`, pueda fijar los dos altos
+   (el del espacio en blanco de arriba y el del cuadro) juntos, calculados
+   los dos del mismo sobrante total por quien llama (`_ajustar_alto_
+   detalle`, reservas.py) — fijar uno sin el otro dejaría el reparto a
+   medio hacer.
+
+Tests: `tests/test_gui_reservas.py` —
+`test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_
+con_grilla_cargada` (reescrito: ya no depende de la etiqueta, verifica
+que el pie del cuadro sigue en el mismo tope de siempre Y que el gap
+que quedó arriba del cuadro es comparable a su propio alto — reparto
+mitad y mitad); se reemplaza `test_regulares_detalle_no_se_superpone_
+con_la_barra_de_scroll_con_margen_de_sobra` (verificaba la posición de
+una etiqueta que ya no existe) por `test_regulares_etiqueta_detalle_
+queda_oculta_solo_el_cuadro` (confirma que la etiqueta está afuera del
+layout Y oculta); `test_regulares_tabla_de_abajo_arranca_cerca_del_
+pie_de_eliminar_reserva` (tolerancia subida de 15 a 25px, +5 por el
+mismo colchón) — el resto de los tests de Reservas regulares, incluido
+el escenario denso, siguen pasando sin cambios.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

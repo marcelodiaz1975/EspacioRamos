@@ -806,18 +806,15 @@ def test_regulares_grilla_de_8_a_22_entra_sin_scroll_vertical(qtbot, conn):
 
 
 def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_cargada(qtbot, conn):
-    """Pedido explícito de la clienta, ronda siguiente a la del reparto
-    1/3 (etiqueta) / 2/3 (cuadro): vuelve al criterio simple de dos
-    rondas atrás — "Detalle:" (la etiqueta) a su alto NATURAL, pegada
-    abajo de la grilla (subida de posición: ver `agregar_espacio_antes_
-    de_detalle(0)` en `_armar_ui`, antes 14), y el cuadro `texto_detalle`
-    ocupando TODO el sobrante hasta el mismo pie de siempre —
-    `_ajustar_alto_detalle` lo fija con `setFixedHeight` calculado
-    contra el pie real de `boton_eliminar`, así que la tolerancia pasa a
-    ser chica (unos pocos píxeles de margen de medición, no "cerca").
-    Con la grilla completa (8 a 22hs) ya sin scroll vertical, "Detalle"
-    tiene que seguir sin quedar recortado ni superpuesto con la última
-    fila de la grilla."""
+    """Pedido explícito de la clienta, ronda siguiente a la que sacó la
+    etiqueta "Detalle:" de en medio: "respetá sí o sí la posición en
+    pantalla de donde termina [el cuadro]. Con esa referencia, reducí a
+    la mitad la altura del cuadro para que baje la posición en
+    pantalla de donde comienza" — el PIE de `texto_detalle` sigue
+    fijo en el mismo tope de siempre (`_ajustar_alto_detalle`, contra
+    el pie real de `boton_eliminar`), pero ahora solo se lleva la mitad
+    del sobrante total (desde el pie de la grilla hasta ese tope); la
+    otra mitad pasa a ser espacio en blanco arriba de él."""
     _preparar(conn)
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
@@ -844,56 +841,36 @@ def test_regulares_detalle_termina_cerca_del_pie_de_eliminar_reserva_con_grilla_
 
     pie_eliminar = pie(panel_r.boton_eliminar)
     pie_detalle = pie(panel_r.grilla.texto_detalle)
-    # Tolerancia de 10px (subida de 5): con el presupuesto de columna
-    # 2/3 ahora anclado a `panel_form.minimumSizeHint()` (ver el
-    # docstring de `showEvent` sobre el ciclo que rompe), el pie de
-    # `texto_detalle` queda a unos pocos píxeles del de `boton_eliminar`
-    # en vez de pegado exacto — residuo chico y estable, mismo criterio
-    # que el resto de los "residuos" aceptados en esta sección.
+    # Tolerancia de 10px (residuo chico y estable, mismo criterio que el
+    # resto de los "residuos" aceptados en esta sección) — el pie del
+    # cuadro sigue siendo el mismo tope de siempre, sin tocar.
     assert abs(pie_detalle - pie_eliminar) <= 10
-    # Sin superposición: "Detalle:" (la etiqueta) arranca DESPUÉS de que
-    # termina la grilla, no encima de la última fila.
-    etiqueta_detalle = panel_r.grilla.etiqueta_detalle
+    # La mitad del sobrante quedó arriba del cuadro, como espacio en
+    # blanco — el gap entre el pie de la grilla y el techo del cuadro
+    # tiene que ser comparable al alto del cuadro mismo (reparto
+    # parejo, con margen por redondeo/medición offscreen).
     pie_tabla = pie(panel_r.grilla.tabla)
-    assert top(etiqueta_detalle) >= pie_tabla
+    gap_arriba = top(panel_r.grilla.texto_detalle) - pie_tabla
+    assert abs(gap_arriba - panel_r.grilla.texto_detalle.height()) <= 10
 
 
-def test_regulares_detalle_no_se_superpone_con_la_barra_de_scroll_con_margen_de_sobra(qtbot, conn):
-    """Pedido/reporte real de la clienta sobre la ronda anterior (que
-    había bajado el espacio antes de "Detalle:" a 2px): "la etiqueta
-    'Detalle' está superpuesta a la barra de scroll horizontal...
-    cuando te digo subir la altura del cuadro... no tiene en cuenta lo
-    que ocupa ese título, esa etiqueta, y termina quedando arriba de la
-    barra." Causa real: 2px de margen EXPLÍCITO dependían de que el
-    espaciado POR DEFECTO de `layout_grilla` (el de la hoja de estilos
-    NATIVA de Qt, no un número fijo del sistema) resolviera igual en la
-    PC real de la clienta que en este sandbox — sin garantía de eso
-    (`agregar_espacio_antes_de_detalle`, ver su docstring). Subido a 8:
-    bastante más margen de sobra que una tolerancia de "no se toquen" —
-    para que un default más chico en el tema de Windows de la clienta
-    siga dejando un gap cómodo, no al límite."""
-    _preparar(conn)
-    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
-    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
-    obtener_repositorio(conn, "ReservaRegular").crear(
-        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
-        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01",
-    )
-    conn.commit()
-
+def test_regulares_etiqueta_detalle_queda_oculta_solo_el_cuadro(qtbot, conn):
+    """Pedido explícito de la clienta: "una vez reducido el cuadro,
+    para no tener más problemas, eliminá la etiqueta que dice
+    'Detalle', que quede solo el cuadro" —
+    `GrillaOperativaWidget.ocultar_etiqueta_detalle` la saca del
+    layout por completo (no solo `.hide()`, que dejaría su lugar
+    reservado)."""
     pantalla = PantallaReservas(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1500, 900)
     pantalla.show()
     pantalla.pestanas.setCurrentIndex(0)
     qtbot.waitExposed(pantalla)
-
     panel_r = pantalla.panel_regulares
-    pie_tabla = panel_r.grilla.tabla.mapToGlobal(panel_r.grilla.tabla.rect().bottomLeft()).y()
-    techo_etiqueta = panel_r.grilla.etiqueta_detalle.mapToGlobal(
-        panel_r.grilla.etiqueta_detalle.rect().topLeft()
-    ).y()
-    assert techo_etiqueta - pie_tabla >= 4
+
+    assert panel_r.grilla._layout_grilla.indexOf(panel_r.grilla.etiqueta_detalle) == -1
+    assert panel_r.grilla.etiqueta_detalle.isVisible() is False
 
 
 def test_regulares_tabla_de_abajo_arranca_cerca_del_pie_de_eliminar_reserva(qtbot, conn):
@@ -927,7 +904,10 @@ def test_regulares_tabla_de_abajo_arranca_cerca_del_pie_de_eliminar_reserva(qtbo
 
     pie_eliminar = panel_r.boton_eliminar.mapToGlobal(panel_r.boton_eliminar.rect().bottomLeft()).y()
     techo_tabla = panel_r.tabla.mapToGlobal(panel_r.tabla.rect().topLeft()).y()
-    assert 0 <= techo_tabla - pie_eliminar <= 15
+    # Tolerancia subida de 15 a 25 (+5, mismo colchón bajado de 5 a 10
+    # en `_MARGEN_SCROLL_SUPERIOR_REGULARES`, pedido explícito de la
+    # clienta: "baja la posición de la tabla 5px").
+    assert 0 <= techo_tabla - pie_eliminar <= 25
 
 
 def test_regulares_con_grilla_densa_no_muestra_scroll_vertical_de_la_solapa(qtbot, conn):

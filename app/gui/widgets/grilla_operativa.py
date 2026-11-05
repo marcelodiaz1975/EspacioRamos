@@ -1483,33 +1483,62 @@ class GrillaOperativaWidget(QWidget):
 
     def agregar_espacio_antes_de_detalle(self, espacio: int) -> None:
         """Suma `espacio` px de separación entre la grilla (`self.tabla`)
-        y la etiqueta "Detalle:" — pensado para Reservas regulares
-        (pedido explícito de la clienta: "bajá un poco la etiqueta
-        'Detalle' ... para que no se superponga con la grilla").
+        y lo que sigue (la etiqueta "Detalle:", o directo el cuadro
+        `texto_detalle` si la etiqueta ya se ocultó, ver `ocultar_
+        etiqueta_detalle`) — pensado para Reservas regulares (pedido
+        explícito de la clienta: "bajá un poco la etiqueta 'Detalle'
+        ... para que no se superponga con la grilla").
 
-        Widget REAL (un `QWidget` vacío con `setFixedHeight`), no un
-        `insertSpacing` — mismo criterio que el resto de los anchos/
-        altos de esta sección (ver el historial de `_ajustar_alto_
-        detalle` en reservas.py sobre por qué un `QSpacerItem` no es
-        confiable bajo un layout acotado por `setMaximumHeight`, a
-        diferencia de un widget real). Se SUMA al espaciado parejo por
-        defecto de `layout_grilla` (el de la hoja de estilos nativa de
-        Qt — no un número fijo propio del sistema, puede resolver
-        distinto en la PC real de Windows que en este sandbox, igual
-        que las diferencias de fuente ya documentadas en "Metodología
-        de trabajo") — `espacio` tiene que ser lo bastante generoso
-        como para que el gap real nunca dependa de cuánto aporte ese
-        default ambiguo por su cuenta (ver el historial de esta sección
-        en CLAUDE.md sobre el reporte real de superposición que motivó
-        subir este valor). Como "Detalle" (`texto_detalle`) ya se
-        estira con `dar_stretch_a_detalle` para llegar siempre al mismo
-        pie que la columna de al lado, el cuadro se achica solo por la
-        diferencia exacta de este espacio nuevo — no hace falta tocar
-        su alto a mano."""
-        espacio_widget = QWidget()
-        espacio_widget.setFixedHeight(espacio)
+        Widget REAL (`self._espacio_antes_detalle`, un `QWidget` vacío
+        con `setFixedHeight`), no un `insertSpacing` — mismo criterio
+        que el resto de los anchos/altos de esta sección (ver el
+        historial de `_ajustar_alto_detalle` en reservas.py sobre por
+        qué un `QSpacerItem` no es confiable bajo un layout acotado por
+        `setMaximumHeight`, a diferencia de un widget real). Queda
+        guardado como atributo para que `fijar_espacio_y_alto_cuadro_
+        detalle` pueda agrandarlo después (Reservas regulares, para
+        bajar el techo del cuadro sin mover su pie). Se SUMA al
+        espaciado parejo por defecto de `layout_grilla` (el de la hoja
+        de estilos nativa de Qt — no un número fijo propio del sistema,
+        puede resolver distinto en la PC real de Windows que en este
+        sandbox, igual que las diferencias de fuente ya documentadas en
+        "Metodología de trabajo") — `espacio` tiene que ser lo bastante
+        generoso como para que el gap real nunca dependa de cuánto
+        aporte ese default ambiguo por su cuenta."""
+        self._espacio_antes_detalle = QWidget()
+        self._espacio_antes_detalle.setFixedHeight(espacio)
         indice = self._layout_grilla.indexOf(self.etiqueta_detalle)
-        self._layout_grilla.insertWidget(indice, espacio_widget)
+        self._layout_grilla.insertWidget(indice, self._espacio_antes_detalle)
+
+    def ocultar_etiqueta_detalle(self) -> None:
+        """Saca la etiqueta "Detalle:" de `layout_grilla` por completo
+        (no solo `.hide()`, que dejaría su lugar reservado en el
+        layout) — pedido explícito de la clienta, Reservas regulares:
+        "una vez reducido el cuadro, para no tener más problemas,
+        eliminá la etiqueta que dice 'Detalle', que quede solo el
+        cuadro". `self.texto_detalle` (el cuadro) sigue siendo el mismo
+        objeto, en el mismo lugar del layout — solo cambia qué hay
+        arriba de él (el espacio de `agregar_espacio_antes_de_detalle`
+        pasa a tocar directo contra `self.tabla`, sin la etiqueta en
+        medio). No afecta a Reservas aisladas, que no llama a este
+        método (saca la etiqueta con `extraer_detalle()` para
+        reubicarla en otro lado, un caso distinto)."""
+        self._layout_grilla.removeWidget(self.etiqueta_detalle)
+        self.etiqueta_detalle.hide()
+
+    def fijar_espacio_y_alto_cuadro_detalle(self, espacio: int, alto_cuadro: int) -> None:
+        """Fija juntos el alto del espacio antes de "Detalle" (`self.
+        _espacio_antes_detalle`, ver `agregar_espacio_antes_de_
+        detalle`) y el del cuadro `texto_detalle` — pensado para
+        Reservas regulares: "respetá sí o sí la posición en pantalla de
+        donde termina [el cuadro]... con esa referencia, reducí a la
+        mitad la altura del cuadro para que baje la posición en
+        pantalla de donde comienza". Los dos altos se fijan juntos
+        porque los calcula quien llama (`_ajustar_alto_detalle`,
+        reservas.py) a partir del mismo sobrante total repartido en dos
+        — fijar uno sin el otro dejaría el reparto a medio hacer."""
+        self._espacio_antes_detalle.setFixedHeight(espacio)
+        self.texto_detalle.setFixedHeight(alto_cuadro)
 
     def achicar_detalle(self, alto: int) -> None:
         """Baja el alto máximo del cuadro "Detalle" (90px por defecto, con

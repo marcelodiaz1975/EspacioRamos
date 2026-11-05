@@ -438,7 +438,11 @@ _ESPACIADO_FORM = 4
 # antes del botón 'Eliminar reserva' con una separación de 5 pixeles"),
 # bajado de 10 a 5 ahora que `alto_hasta_eliminar` (no el piso de
 # `minimumSizeHint()`) es el que de verdad gobierna este cálculo.
-_MARGEN_SCROLL_SUPERIOR_REGULARES = 5
+# Reporte real de la clienta, ronda siguiente: "se superpone un poco la
+# tabla con el botón de 'Eliminar reserva'. Baja la posición de la
+# tabla 5px" — subido de 5 a 10 (+5 más sobre el mismo colchón, mismo
+# pedido literal que ya se había hecho una vez en la ronda 6).
+_MARGEN_SCROLL_SUPERIOR_REGULARES = 10
 # Alto (px) de fila de encabezado/dato de la grilla embebida (columna 3),
 # más chico que el default de `GrillaOperativaWidget` (26px/24px) —
 # mismos valores que Reservas aisladas (`_ALTO_FILA_ENCABEZADO_AISLADAS`/
@@ -1099,59 +1103,51 @@ class _PanelReservasRegulares(QWidget):
         QTimer.singleShot(0, self._reajustar_alto_y_columnas_si_sigue_vivo)
 
     def _ajustar_alto_detalle(self) -> None:
-        """Pedido explícito de la clienta, ronda siguiente a la del
-        reparto 1/3 (etiqueta) / 2/3 (cuadro): vuelve al criterio simple
-        de dos rondas atrás — la etiqueta "Detalle:" a su alto NATURAL
-        (sin `setFixedHeight`, ni alineación especial) y el cuadro
-        `texto_detalle` ocupando TODO el sobrante hasta el mismo tope de
-        siempre, `min(pie_eliminar, pie_maximo_grilla)` — el pie de
-        `self.boton_eliminar` (columna 1, el objetivo ideal) y el pie
-        MÁXIMO que la columna 2/3 tiene permitido (el techo real de
-        `self.grilla` más el presupuesto que le toca, ver abajo). Subir
-        la etiqueta (pedido explícito: "subí la etiqueta 'Detalle' para
-        que quede abajo de la grilla, abajo de la barra de escroll
-        horizontal... concretamente") ya no depende de este método —
-        sale de reducir el espacio fijo antes de la etiqueta (ver
-        `agregar_espacio_antes_de_detalle` en `_armar_ui`, bajado de 14
-        a 0): al mover la etiqueta hacia arriba, el cuadro (que arranca
-        justo debajo de ella) sube con ella, SIN perder su pie (que
-        sigue fijo en el mismo tope de siempre) — exactamente el pedido
-        "dale más altura al cuadro... que termine donde está ahora pero
-        que arranque más arriba".
+        """Pedido explícito de la clienta, ronda siguiente a la que sacó
+        la etiqueta "Detalle:" de en medio (ver `GrillaOperativaWidget.
+        ocultar_etiqueta_detalle`, llamada en `_armar_ui`, "para no
+        tener más problemas, eliminá la etiqueta... que quede solo el
+        cuadro"): "respetá sí o sí la posición en pantalla de donde
+        termina [el cuadro]. Con esa referencia, reducí a la mitad la
+        altura del cuadro para que baje la posición en pantalla de
+        donde comienza el elemento" — el PIE del cuadro sigue siendo el
+        mismo tope de siempre, `min(pie_eliminar, pie_maximo_grilla)`
+        (sin tocar — pie de `self.boton_eliminar`, columna 1, y el pie
+        MÁXIMO que la columna 2/3 tiene permitido, ver `_ALTO_BASE_
+        GRUPO_GRILLA` más abajo), pero el cuadro ya NO ocupa todo el
+        sobrante hasta ese tope: se queda con la MITAD, y la otra mitad
+        pasa a ser espacio en blanco arriba de él (el mismo widget real
+        de `agregar_espacio_antes_de_detalle`, agrandado) — así el pie
+        no se mueve un pixel, pero el techo baja exactamente la mitad
+        del sobrante.
+
+        La referencia de TECHO para medir el sobrante total es el pie
+        real de `self.grilla.tabla` (la grilla de horarios, con su
+        barra de scroll horizontal si está visible) — estable, no
+        depende de cuánto midan el espacio ni el cuadro en este momento
+        (a diferencia de medir desde `texto_detalle` mismo, que si
+        dependía de su propio alto cuando la etiqueta todavía estaba en
+        medio), así que el cálculo es idempotente sin necesitar resetear
+        nada antes de medir, aunque este método se llame dos veces por
+        entrada a la solapa.
 
         El presupuesto de la columna 2/3 (`pie_maximo_grilla`) resta
-        `_ALTO_BASE_GRUPO_GRILLA`: medido con datos reales densos (ver
-        diagnóstico de esta ronda, antes solo se había confirmado con
-        datasets chicos de test) — `self.grilla` sí quedaba acotado a
-        `self._alto_referencia_regulares` vía `limitar_alto_grilla`,
-        pero `grupo_grilla` (el `QGroupBox` que lo envuelve en el
-        splitter, ver `_armar_ui`) le suma 6px propios de chroma ARRIBA
-        de `self.grilla` que esta cuenta nunca restaba — el presupuesto
-        real disponible para el contenido de `self.grilla` (controles +
-        tabla + Detalle) es `self._alto_referencia_regulares -
-        _ALTO_BASE_GRUPO_GRILLA`, no el valor entero. Sin este descuento,
-        `self.grilla.minimumSizeHint()` terminaba pidiendo más alto del
-        que `panel_form` (columna 1) realmente tiene, y esa diferencia
-        era justo lo que inflaba el piso de `_fijar_alto_scroll_
-        superior` (`_contenido_superior.minimumSizeHint()`) por encima
-        del pie de "Eliminar reserva", alejando la tabla de abajo del
-        botón en vez de los 5px pedidos — mismo motivo, ver `limitar_
-        alto_grilla` en `showEvent`/`_reajustar_alto_y_columnas_si_
-        sigue_vivo`, que ahora resta lo mismo.
-
-        El techo del CUADRO (no el de la etiqueta) es la referencia de
-        medición acá — nunca depende de su PROPIO alto (lo determina lo
-        que hay ARRIBA: la grilla + el espacio antes de la etiqueta + el
-        alto natural de la etiqueta), así que el cálculo es idempotente
-        sin necesitar resetear nada antes de medir, aunque este método
-        se llame dos veces por entrada a la solapa."""
+        `_ALTO_BASE_GRUPO_GRILLA`: `grupo_grilla` (el `QGroupBox` que
+        envuelve a `self.grilla` en el splitter, ver `_armar_ui`) le
+        suma 6px propios de chroma ARRIBA de `self.grilla` que el
+        presupuesto nunca restaba — ver el historial de esta sección en
+        CLAUDE.md (ronda 7) para el detalle completo de por qué hace
+        falta este descuento."""
         pie_eliminar = self.boton_eliminar.mapToGlobal(self.boton_eliminar.rect().bottomLeft()).y()
         techo_grilla = self.grilla.mapToGlobal(self.grilla.rect().topLeft()).y()
         pie_maximo_grilla = techo_grilla + self._alto_referencia_regulares - _ALTO_BASE_GRUPO_GRILLA
-        techo_cuadro = self.grilla.texto_detalle.mapToGlobal(self.grilla.texto_detalle.rect().topLeft()).y()
-        alto = min(pie_eliminar, pie_maximo_grilla) - techo_cuadro
-        if alto > 0:
-            self.grilla.texto_detalle.setFixedHeight(alto)
+        pie_fijo = min(pie_eliminar, pie_maximo_grilla)
+        techo_fijo = self.grilla.tabla.mapToGlobal(self.grilla.tabla.rect().bottomLeft()).y()
+        alto_total = pie_fijo - techo_fijo
+        if alto_total > 0:
+            alto_cuadro = alto_total // 2
+            alto_espacio = alto_total - alto_cuadro
+            self.grilla.fijar_espacio_y_alto_cuadro_detalle(alto_espacio, alto_cuadro)
 
     def _fijar_alto_scroll_superior(self) -> None:
         """Fija el alto de `_scroll_superior` (el `QScrollArea` que
@@ -1486,11 +1482,19 @@ class _PanelReservasRegulares(QWidget):
         # default resuelva igual en la PC real de la clienta — no hay
         # garantía de eso (mismo tipo de diferencia de entorno que las
         # fuentes, ver "Metodología de trabajo", pero en espaciado de
-        # layout). Subido a 8: lo bastante generoso como para que el
-        # gap real quede seguro aunque el estilo nativo de Windows
-        # resuelva un default bien más chico que el de acá — sin volver
-        # a los 14px de antes, que la clienta había pedido reducir.
+        # layout). Subido a 8 (valor de arranque nomás — `_ajustar_alto_
+        # detalle` lo recalcula enseguida vía `fijar_espacio_y_alto_
+        # cuadro_detalle`, ver más abajo): lo bastante generoso como
+        # para que el gap real quede seguro aunque el estilo nativo de
+        # Windows resuelva un default bien más chico que el de acá — sin
+        # volver a los 14px de antes, que la clienta había pedido
+        # reducir.
         self.grilla.agregar_espacio_antes_de_detalle(8)
+        # Pedido explícito de la clienta, ronda siguiente: "una vez
+        # reducido el cuadro, para no tener más problemas, eliminá la
+        # etiqueta que dice 'Detalle', que quede solo el cuadro" — ver
+        # `GrillaOperativaWidget.ocultar_etiqueta_detalle`.
+        self.grilla.ocultar_etiqueta_detalle()
         # Tope de alto IGUAL al de `panel_form` (columna 1, con Días/
         # Vigencia/3 botones) en vez de a `alto_natural_grilla()` (el
         # alto natural de la grilla sola): pedido explícito de la
