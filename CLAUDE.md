@@ -438,6 +438,33 @@ propósito al entorno real de la clienta, no a este contenedor. Si
 estos 7 vuelven a aparecer en una corrida de la suite, son del entorno
 y no bloquean cerrar una ronda.
 
+**3 fallos más de `test_avance_mes.py`, por el mismo motivo "del
+entorno" pero con una causa distinta (no fuentes — el reloj real del
+sandbox):** `test_puede_avanzarse_mes_sin_ningun_avance_pendiente`,
+`test_no_se_puede_avanzar_mas_de_un_periodo_por_delante_de_la_fecha_
+real`, `test_vuelve_a_poder_avanzarse_cuando_la_fecha_real_alcanza_el_
+periodo_operativo` — investigados en nov-2026 al confirmar una ronda
+de trabajo sin relación (Oferta de consultorios/Reservas). Los tres
+dependen de que `PeriodoOperativoActual` quede sembrado en "2026-10"
+al construirse el fixture `conn` (`sembrar_valores_por_defecto`, que
+lo calcula contra la fecha REAL del sistema en el momento de sembrar,
+no contra el `date.today()` pisado por `_congelar_hoy_real` dentro del
+cuerpo del test, que corre después) — dejaron de valer apenas el reloj
+real de este sandbox cruzó a noviembre (confirmado: `sembrar_valores_
+por_defecto` siembra "2026-11" en un sandbox con fecha real 2026-11-05,
+no "2026-10" como asumían estos tres tests al escribirse). Van a
+volver a fallar un mes más, hasta que el reloj real alcance diciembre
+(ahí "2026-11" vuelve a cuadrar con lo que los tests asumen) — y
+después, otra vez, cuando vuelva a desalinearse. No se tocó nada
+(mismo criterio que el bloque de arriba): no es un bug de `avance_mes.
+py` ni de ningún cambio de código de esta ronda (reproducido igual
+sobre código ya commiteado de rondas anteriores, sin relación), es un
+test con una dependencia del reloj real no contemplada al escribirlo.
+Si reaparecen, son del entorno y no bloquean cerrar una ronda — una
+futura revisión de este archivo podría congelar `date.today()` ANTES
+de que el fixture `conn` siembre, para que no dependa de en qué mes
+real se corra la suite.
+
 ## Hilo cerrado: Pagos — "Saldo total" y cascada entre saldo anterior/actual
 
 Pedido de la clienta:
