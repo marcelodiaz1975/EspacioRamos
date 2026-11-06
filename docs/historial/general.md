@@ -4497,3 +4497,33 @@ liquidaciones_simuladas_migra_sola_desde_el_nivel_viejo`, `test_
 resincronizar_carpetas_imagenes_migra_tambien_el_nivel_viejo`. El resto
 de los tests de archivos/imágenes/liquidaciones (`test_catalogos.py`,
 `test_gui_liquidacion.py`) actualizados a la nueva ruta esperada.
+
+### Bug real reportado por la clienta: la app no arrancaba más (`PermissionError` al borrar la carpeta vieja)
+
+Traceback real recibido: `PermissionError: [WinError 5] Acceso
+denegado` en `pathlib.rmdir`, disparado desde `_migrar_carpeta_
+imagenes_al_nivel_viejo` vía `resincronizar_carpetas_imagenes` vía
+`init_database` — es decir, en CADA arranque del sistema, no solo la
+primera vez. `_migrar_carpeta_imagenes_al_nivel_viejo` mueve todo el
+contenido de la vieja "Imagenes" (al nivel de arriba) a su nueva
+ubicación y, si queda vacía, la borra con `rmdir()` sin capturar nada —
+en Windows, borrar una carpeta ya vacía puede de todas formas tirar
+"Acceso denegado" (ej. el Explorador o un antivirus la tiene abierta en
+ese instante), y como esto corre sin ningún `try/except` en el camino
+crítico del arranque, ese error tiraba abajo la aplicación entera antes
+de llegar a abrir ninguna ventana — la clienta quedaba sin poder entrar
+al sistema de ninguna manera.
+
+Para entonces el contenido YA se movió (lo único que falla es borrar la
+carpeta vieja, que ya quedó vacía) — no borrarla todavía no es motivo
+para interrumpir el arranque, mismo criterio que el resto de las
+migraciones "best effort" de este módulo (ej. `regenerar_si_corresponde`
+en `liquidaciones.py` con un PDF bloqueado). Se envuelve el `rmdir()` en
+`try/except OSError: pass`: si falla, la carpeta vieja (ya vacía) queda
+en disco una vuelta más, y se reintenta sola en el próximo arranque sin
+que el operador tenga que hacer nada.
+
+Test nuevo: `test_resincronizar_carpetas_imagenes_no_rompe_si_no_puede_
+borrar_la_carpeta_vieja` (simula el `PermissionError` de Windows con
+`monkeypatch` sobre `Path.rmdir`, confirma que la migración del
+contenido se completa igual y que no se interrumpe nada).

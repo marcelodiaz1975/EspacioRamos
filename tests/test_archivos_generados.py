@@ -1,4 +1,5 @@
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -498,6 +499,35 @@ def test_resincronizar_carpetas_imagenes_migra_tambien_el_nivel_viejo(conn, tmp_
     assert migradas == 1
     assert (tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
     assert not (tmp_path / "Imagenes").exists()
+
+
+def test_resincronizar_carpetas_imagenes_no_rompe_si_no_puede_borrar_la_carpeta_vieja(conn, tmp_path, monkeypatch):
+    """Bug real reportado por la clienta: en Windows, borrar la carpeta
+    vieja ya vacía puede tirar `PermissionError` (ej. el Explorador o un
+    antivirus la tiene abierta en ese instante) — como esto corre en
+    CADA arranque, eso tiraba abajo el arranque entero de la app. El
+    contenido ya se movió para entonces, así que no tiene que
+    interrumpir nada: se reintenta sola en el próximo arranque."""
+    _configurar_carpeta_base(conn, tmp_path)
+    id_consultorio = _crear_consultorio(conn)
+    carpeta_vieja = tmp_path / "Imagenes" / f"Consultorio_{id_consultorio}"
+    carpeta_vieja.mkdir(parents=True)
+    (carpeta_vieja / "foto.jpg").write_text("x")
+
+    rmdir_original = Path.rmdir
+
+    def rmdir_que_falla(self):
+        if self == tmp_path / "Imagenes":
+            raise PermissionError("Acceso denegado")
+        return rmdir_original(self)
+
+    monkeypatch.setattr(Path, "rmdir", rmdir_que_falla)
+
+    migradas = resincronizar_carpetas_imagenes(conn)
+
+    assert migradas == 1
+    assert (tmp_path / "Archivos varios" / "Imagenes" / "Consultorio_Ramos Mejia_Imperio_7mo L_C3" / "foto.jpg").exists()
+    assert (tmp_path / "Imagenes").is_dir()
 
 
 def test_resincronizar_carpetas_imagenes_sin_carpeta_base_no_hace_nada(conn):

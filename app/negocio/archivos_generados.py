@@ -425,7 +425,17 @@ def _migrar_carpeta_imagenes_al_nivel_viejo(base: Path) -> None:
     "Archivos varios/Imagenes" ya tuviera una subcarpeta con el mismo
     nombre (poco probable pero posible, ej. corriendo esta migración dos
     veces con algo creado en el medio), hay que fusionar el contenido de
-    cada una en vez de que `shutil.move` falle."""
+    cada una en vez de que `shutil.move` falle.
+
+    Bug real reportado por la clienta: en Windows, `rmdir()` de la
+    carpeta vieja ya vacía puede tirar `PermissionError` (ej. un
+    antivirus o el propio Explorer la tiene abierta/bloqueada en ese
+    instante) — como esto corre en CADA arranque (`resincronizar_
+    carpetas_imagenes`, llamada desde `init_database`), ese error
+    tiraba abajo el arranque entero de la aplicación. El contenido ya
+    se movió para entonces (lo único que falla es borrar la carpeta
+    vieja, ya vacía), así que no borrarla todavía no es motivo para
+    interrumpir el arranque — se reintenta sola en el próximo arranque."""
     carpeta_vieja = base / "Imagenes"
     if not carpeta_vieja.is_dir():
         return
@@ -434,7 +444,10 @@ def _migrar_carpeta_imagenes_al_nivel_viejo(base: Path) -> None:
     for entrada in list(carpeta_vieja.iterdir()):
         _mover_contenido_carpeta(entrada, carpeta_nueva / entrada.name)
     if not any(carpeta_vieja.iterdir()):
-        carpeta_vieja.rmdir()
+        try:
+            carpeta_vieja.rmdir()
+        except OSError:
+            pass
 
 
 def resincronizar_carpetas_imagenes(conn: sqlite3.Connection) -> int:
