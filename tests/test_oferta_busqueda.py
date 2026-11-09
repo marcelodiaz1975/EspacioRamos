@@ -44,6 +44,7 @@ def _ocupar_regular(conn, id_consultorio, dia, hora_inicio, hora_fin, vigencia_i
         IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana=dia,
         HoraInicio=hora_inicio, HoraFin=hora_fin, VigenciaInicio=vigencia_inicio, VigenciaFin=vigencia_fin,
     )
+    return id_prof
 
 
 def _ocupar_aislada(conn, id_consultorio, fecha, hora_inicio, hora_fin):
@@ -123,6 +124,92 @@ def test_aislada_alternativas_no_requieren_todas_las_fechas(conn):
 
     assert len(resultado.alternativas) == 1
     assert resultado.alternativas[0].fecha == "2026-08-10"
+
+
+def test_aislada_ofrece_horario_regular_liberado_por_ausencia(conn):
+    """Pedido explícito de la clienta: la búsqueda de disponibilidad de
+    horas aisladas tiene que contemplar las ausencias del profesional
+    regular — si está ausente esa fecha puntual, el horario regular
+    queda libre para ofrecerse como aislada, mismo criterio que ya
+    aplica `verificar_conflictos_aislada` al cargar una reserva aislada
+    a mano."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    id_prof = _ocupar_regular(conn, id_consultorio, "Lunes", 9, 11)  # 2026-08-03 es lunes
+    obtener_repositorio(conn, "Ausencia").crear(
+        IdProfesional=id_prof, FechaDesde="2026-08-03", FechaHasta="2026-08-03", Motivo="Ausencia",
+    )
+
+    globales = CriteriosGlobales(tipo_busqueda="Aislada", ids_edificio=[id_edificio])
+    busqueda = Busqueda(fecha_desde="2026-08-03", fecha_hasta="2026-08-03", dias=["Lunes"], hora_desde=9, hora_hasta=11)
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    assert len(resultado.alternativas) == 1
+    assert resultado.alternativas[0].fecha == "2026-08-03"
+
+
+def test_aislada_ofrece_horario_regular_liberado_por_vacacion(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    id_prof = _ocupar_regular(conn, id_consultorio, "Lunes", 9, 11)  # 2026-08-03 es lunes
+    obtener_repositorio(conn, "Vacacion").crear(IdProfesional=id_prof, FechaDesde="2026-08-03", FechaHasta="2026-08-10")
+
+    globales = CriteriosGlobales(tipo_busqueda="Aislada", ids_edificio=[id_edificio])
+    busqueda = Busqueda(fecha_desde="2026-08-03", fecha_hasta="2026-08-03", dias=["Lunes"], hora_desde=9, hora_hasta=11)
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    assert len(resultado.alternativas) == 1
+    assert resultado.alternativas[0].fecha == "2026-08-03"
+
+
+def test_aislada_ofrece_horario_regular_liberado_por_licencia(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    id_prof = _ocupar_regular(conn, id_consultorio, "Lunes", 9, 11)  # 2026-08-03 es lunes
+    id_tipo_licencia = obtener_repositorio(conn, "TipoLicencia").listar()[0]["IdTipoLicencia"]
+    obtener_repositorio(conn, "Licencia").crear(
+        IdProfesional=id_prof, IdTipoLicencia=id_tipo_licencia, FechaDesde="2026-08-03", FechaHasta="2026-08-03",
+    )
+
+    globales = CriteriosGlobales(tipo_busqueda="Aislada", ids_edificio=[id_edificio])
+    busqueda = Busqueda(fecha_desde="2026-08-03", fecha_hasta="2026-08-03", dias=["Lunes"], hora_desde=9, hora_hasta=11)
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    assert len(resultado.alternativas) == 1
+    assert resultado.alternativas[0].fecha == "2026-08-03"
+
+
+def test_aislada_ofrece_horario_regular_liberado_por_feriado(conn):
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    _ocupar_regular(conn, id_consultorio, "Lunes", 9, 11)  # 2026-08-03 es lunes
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-08-03", Tipo="Feriado nacional", Activo=1)
+
+    globales = CriteriosGlobales(tipo_busqueda="Aislada", ids_edificio=[id_edificio])
+    busqueda = Busqueda(fecha_desde="2026-08-03", fecha_hasta="2026-08-03", dias=["Lunes"], hora_desde=9, hora_hasta=11)
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    assert len(resultado.alternativas) == 1
+    assert resultado.alternativas[0].fecha == "2026-08-03"
+
+
+def test_aislada_no_ofrece_horario_regular_sin_ninguna_excepcion(conn):
+    """Caso base de los cuatro tests de arriba: sin ausencia/vacación/
+    licencia/feriado, el horario regular sigue ocupado como siempre."""
+    id_edificio = _crear_edificio(conn)
+    id_unidad = _crear_unidad(conn, id_edificio, '7mo "L"')
+    id_consultorio = _crear_consultorio(conn, id_unidad, 1)
+    _ocupar_regular(conn, id_consultorio, "Lunes", 9, 11)  # 2026-08-03 es lunes
+
+    globales = CriteriosGlobales(tipo_busqueda="Aislada", ids_edificio=[id_edificio])
+    busqueda = Busqueda(fecha_desde="2026-08-03", fecha_hasta="2026-08-03", dias=["Lunes"], hora_desde=9, hora_hasta=11)
+    resultado = resolver_busqueda(conn, globales, busqueda)
+
+    assert resultado.alternativas == []
 
 
 def test_sin_combinar_rechaza_cobertura_combinada(conn):

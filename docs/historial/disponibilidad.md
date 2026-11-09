@@ -1827,3 +1827,40 @@ asumía por error la versión anterior). `tests/test_gui_oferta.py`
 `test_elegir_profesional_categorias_x_c_b_e_precargan_tipo_busqueda_
 regular`, `test_tipo_busqueda_precargado_sigue_siendo_editable_a_
 mano`).
+
+## La búsqueda de disponibilidad de horas aisladas ahora contempla feriados, ausencias, vacaciones y licencias (nov-2026)
+
+Pedido explícito de la clienta, acotado a Aislada (no toca Regular ni la
+grilla — "los feriados no me interesa distinguirlos visualmente... la
+grilla no se toca"): si un profesional tiene una reserva regular pero
+está de vacaciones/licencia/ausente esa fecha puntual, o la fecha es un
+feriado/día no laborable, ese horario queda libre ese día y la Oferta
+de consultorios (tipo Aislada) tiene que poder ofrecerlo — antes no lo
+hacía, perdiendo disponibilidad real.
+
+`_ocupado_fecha` (`app/negocio/oferta_busqueda.py`, usada solo por la
+rama `TIPO_AISLADA` de `resolver_busqueda`) marcaba ocupado cualquier
+horario con una `ReservaRegular` vigente ese día de la semana, sin
+ninguna excepción. Se suman las mismas cuatro condiciones que ya usa
+`verificar_conflictos_aislada` (`app.negocio.reservas`, al validar una
+reserva aislada nueva a mano) y `calcular_ocupacion_fecha`
+(`app.negocio.grilla`, DC-03 Mensaje 2 Variante B) para el mismo tipo
+de pregunta ("¿el profesional regular va a estar este día puntual?"):
+`es_feriado_relevante` (`app.negocio.feriados`), `esta_ausente`
+(`app.negocio.ausencias`), `tiene_vacacion` (`app.negocio.vacaciones`),
+`tiene_licencia` (`app.negocio.licencias`) — si cualquiera aplica, esa
+`ReservaRegular` no ocupa nada ese día, igual que ya pasaba en esos
+otros dos lugares. `TIPO_REGULAR` sigue sin tocarse: `_ocupado_regular`/
+`calcular_ocupacion_regular` promedian el mes por día de semana
+genérico a propósito, sin mirar excepciones de un día puntual — mismo
+criterio de siempre ("la disponibilidad regular se calcula IGNORANDO
+las horas aisladas/excepciones puntuales").
+
+Tests nuevos en `tests/test_oferta_busqueda.py`: uno por cada una de
+las cuatro condiciones (`test_aislada_ofrece_horario_regular_liberado_
+por_ausencia/vacacion/licencia/feriado`) más el caso base sin ninguna
+excepción (`test_aislada_no_ofrece_horario_regular_sin_ninguna_
+excepcion`, confirma que sigue ocupado como siempre). `_ocupar_regular`
+pasa a devolver el `IdProfesional` que crea, para poder cargarle
+ausencias/vacaciones/licencias en estos tests nuevos (los llamadores
+existentes, que no usaban el valor de retorno, no se ven afectados).

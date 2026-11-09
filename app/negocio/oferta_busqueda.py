@@ -70,6 +70,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
+from app.negocio.ausencias import esta_ausente
 from app.negocio.dias import (
     fecha_a_dia_semana,
     fecha_actual,
@@ -79,7 +80,10 @@ from app.negocio.dias import (
     sumar_meses,
     ultimo_dia_mes,
 )
+from app.negocio.feriados import es_feriado_relevante
 from app.negocio.grilla import calcular_ocupacion_regular
+from app.negocio.licencias import tiene_licencia
+from app.negocio.vacaciones import tiene_vacacion
 from app.pdf.estilos import clave_orden_unidad
 
 TIPO_REGULAR = "Regular"
@@ -510,14 +514,33 @@ def _avisos_aislada_regular(
 
 
 def _ocupado_fecha(conn: sqlite3.Connection, fecha: date):
+    """Pedido explícito de la clienta: la búsqueda de disponibilidad de
+    horas aisladas tiene que contemplar que, para esta fecha puntual, un
+    horario regular puede quedar libre por feriado/día no laborable,
+    ausencia, vacación o licencia del profesional regular — mismo
+    criterio exacto que ya usa `verificar_conflictos_aislada`
+    (`app.negocio.reservas`) al validar una reserva aislada nueva, y que
+    `calcular_ocupacion_fecha` (`app.negocio.grilla`, DC-03 Mensaje 2
+    Variante B) usa para mostrar disponibilidad real de un día puntual
+    — antes esta función no los tenía en cuenta, así que la Oferta de
+    consultorios (Aislada) podía no ofrecer un horario que en los hechos
+    estaba libre ese día."""
     dia_semana = fecha_a_dia_semana(fecha)
     fecha_iso = fecha.isoformat()
+    es_feriado = es_feriado_relevante(conn, fecha_iso)
     ocupado: dict[tuple[int, int], bool] = {}
     for r in conn.execute("SELECT * FROM ReservaRegular WHERE DiaSemana = ?", (dia_semana,)):
         if r["VigenciaInicio"] > fecha_iso:
             continue
         if r["VigenciaFin"] and r["VigenciaFin"] < fecha_iso:
             continue
+        if (
+            es_feriado
+            or esta_ausente(conn, r["IdProfesional"], fecha_iso, r["IdConsultorio"])
+            or tiene_vacacion(conn, r["IdProfesional"], fecha_iso)
+            or tiene_licencia(conn, r["IdProfesional"], fecha_iso)
+        ):
+            continue  # el profesional regular no va a estar: el consultorio queda libre
         for h in range(int(r["HoraInicio"]), int(r["HoraFin"])):
             ocupado[(r["IdConsultorio"], h)] = True
     for r in conn.execute("SELECT * FROM ReservaAislada WHERE Fecha = ? AND Estado = 'Confirmada'", (fecha_iso,)):
