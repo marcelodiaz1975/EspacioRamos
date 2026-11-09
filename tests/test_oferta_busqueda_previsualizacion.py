@@ -125,11 +125,12 @@ def test_localidad_se_antepone_solo_si_hay_mas_de_una(conn):
     assert any(t.startswith("Haedo - ") for t in textos)
 
 
-def test_opciones_a_destildar_por_bloque_mantiene_la_mas_extensa_del_grupo_superpuesto():
+def test_opciones_a_destildar_por_bloque_destilda_la_contenida_por_completo():
     """Ejemplo real de la clienta: lunes 9-18hs con 3hs mínimas da las
     alternativas 9-13hs, 9-12hs y 14-18hs — 14-18hs no se superpone con
-    nada (no se toca) y, de las otras dos (que sí se superponen entre
-    sí), se destilda la más corta (9-12hs)."""
+    nada (no se toca) y 9-12hs se destilda porque queda ENTERAMENTE
+    adentro de 9-13hs (no por ser más corta en términos generales, ver
+    el bug de abajo)."""
     filas = [
         (0, 0, 0, "9 a 13hs", 9, 13),
         (0, 0, 1, "9 a 12hs", 9, 12),
@@ -138,28 +139,29 @@ def test_opciones_a_destildar_por_bloque_mantiene_la_mas_extensa_del_grupo_super
     assert opciones_a_destildar_por_bloque(filas) == {(0, 0, 1)}
 
 
+def test_opciones_a_destildar_por_bloque_no_destilda_superpuestas_que_no_se_contienen():
+    """Bug real reportado por la clienta: criterio 8-18hs con 3hs
+    mínimas, alternativas 8-13hs y 11-14hs para el mismo día — se
+    superponen (comparten 11-13hs) pero NINGUNA contiene a la otra:
+    11-14hs tiene una hora (13-14hs) que 8-13hs no cubre, así que las
+    dos tienen que quedar tildadas aunque 8-13hs sea más extensa en
+    total ("tendría que estar en oferta también porque contiene una
+    hora que el otro bloque no, aunque sea más extenso")."""
+    filas = [(0, 0, 0, "8 a 13hs", 8, 13), (0, 0, 1, "11 a 14hs", 11, 14)]
+    assert opciones_a_destildar_por_bloque(filas) == set()
+
+
 def test_opciones_a_destildar_por_bloque_no_toca_nada_sin_superposicion():
     filas = [(0, 0, 0, "9 a 11hs", 9, 11), (0, 0, 1, "11 a 13hs", 11, 13)]
     assert opciones_a_destildar_por_bloque(filas) == set()
 
 
-def test_opciones_a_destildar_por_bloque_empate_no_destilda_a_ninguna():
-    """Pedido explícito de la clienta: con un empate exacto de extensión
-    entre las que se superponen, las deja todas tildadas — queda a su
-    criterio en el momento."""
-    filas = [(0, 0, 0, "9 a 13hs", 9, 13), (0, 0, 1, "10 a 14hs", 10, 14)]
+def test_opciones_a_destildar_por_bloque_empate_exacto_no_destilda_a_ninguna():
+    """Pedido explícito de la clienta: con un empate exacto de rango
+    entre dos opciones, no destilda a ninguna — queda a su criterio en
+    el momento."""
+    filas = [(0, 0, 0, "9 a 13hs", 9, 13), (0, 0, 1, "9 a 13hs (otro consultorio)", 9, 13)]
     assert opciones_a_destildar_por_bloque(filas) == set()
-
-
-def test_opciones_a_destildar_por_bloque_superposicion_transitiva():
-    """A se superpone con B, B con C, pero A y C no se tocan entre sí —
-    los tres forman un único grupo y gana la de mayor extensión."""
-    filas = [
-        (0, 0, 0, "9 a 12hs", 9, 12),
-        (0, 0, 1, "11 a 16hs", 11, 16),
-        (0, 0, 2, "15 a 17hs", 15, 17),
-    ]
-    assert opciones_a_destildar_por_bloque(filas) == {(0, 0, 0), (0, 0, 2)}
 
 
 def test_opciones_a_destildar_por_bloque_agrupa_por_dia_por_separado():

@@ -368,57 +368,37 @@ def opciones_a_destildar_por_bloque(
     """"Seleccionar solo una opción por bloque" (pedido explícito de la
     clienta, ejemplo real: buscando lunes 9-18hs con 3hs mínimas, si
     aparecen las alternativas 9-13hs, 9-12hs y 14-18hs, tiene que quedar
-    tildada 14-18hs por no superponerse con ninguna otra, y 9-13hs por
-    ser la más extensa de las dos que SÍ se superponen entre sí).
+    tildada 14-18hs por no superponerse con ninguna otra, y 9-13hs
+    porque CONTIENE del todo a 9-12hs — no hace falta ofrecer las dos).
 
-    Agrupa, dentro de cada día (misma búsqueda + misma alternativa), las
-    opciones que se superponen en horario con al menos otra — aunque sea
-    de forma transitiva (A con B, B con C, sin que A y C se toquen entre
-    sí) — y devuelve las tripletas a destildar: todas las de cada grupo
-    salvo la(s) de mayor extensión (hora_fin - hora_inicio). Un grupo
-    sin ningún superpuesto (tamaño 1) no aporta nada al resultado, sin
-    importar cuántas opciones distintas haya ese día. Un empate exacto
-    de extensión entre las más extensas de un grupo no destilda a
-    ninguna de esas dos — decisión explícita de la clienta: "no tengo
-    claro un criterio... deja las dos o más opciones tildadas y eso
-    queda a mi criterio en el momento"."""
+    Bug real reportado por la clienta sobre una primera versión de esta
+    función, que destildaba "la más corta de cada grupo superpuesto" en
+    vez de "la que queda enteramente adentro de otra": con criterio
+    9-18hs/3hs mínimas, 8-13hs y 11-14hs se superponen (comparten
+    11-13hs) pero NINGUNA contiene a la otra — 11-14hs tiene una hora
+    (13-14hs) que 8-13hs no tiene, así que las dos tienen que ofrecerse
+    aunque 8-13hs sea más extensa en total. El criterio correcto es
+    CONTENCIÓN, no extensión total: una opción se destilda solo si
+    existe OTRA opción del mismo día cuyo rango la cubre por completo
+    (`otro.hora_inicio <= esta.hora_inicio and esta.hora_fin <=
+    otro.hora_fin`) y que además sea realmente más extensa (no un
+    empate exacto de rango) — un empate exacto no destilda a ninguna de
+    las dos, decisión explícita de la clienta: "no tengo claro un
+    criterio... deja las dos o más opciones tildadas y eso queda a mi
+    criterio en el momento". Las opciones que no están contenidas en
+    ninguna otra se dejan siempre tildadas, se superpongan o no con
+    algo más."""
     por_dia: dict[tuple[int, int], list[tuple[int, int, int, float, float]]] = {}
     for i_busqueda, i_alt, i_op, _texto, hora_inicio, hora_fin in filas:
         por_dia.setdefault((i_busqueda, i_alt), []).append((i_busqueda, i_alt, i_op, hora_inicio, hora_fin))
 
     destildar: set[tuple[int, int, int]] = set()
     for opciones in por_dia.values():
-        if len(opciones) < 2:
-            continue
-        # Unión por conjuntos disjuntos (pocas opciones por día, no hace
-        # falta nada más sofisticado) para agrupar las conectadas por
-        # superposición, directa o transitiva.
-        padres = list(range(len(opciones)))
-
-        def raiz(i: int) -> int:
-            while padres[i] != i:
-                i = padres[i]
-            return i
-
-        for i in range(len(opciones)):
-            for j in range(i + 1, len(opciones)):
-                inicio_i, fin_i = opciones[i][3], opciones[i][4]
-                inicio_j, fin_j = opciones[j][3], opciones[j][4]
-                if inicio_i < fin_j and inicio_j < fin_i:
-                    ri, rj = raiz(i), raiz(j)
-                    if ri != rj:
-                        padres[ri] = rj
-
-        grupos: dict[int, list[int]] = {}
-        for i in range(len(opciones)):
-            grupos.setdefault(raiz(i), []).append(i)
-
-        for indices in grupos.values():
-            if len(indices) < 2:
-                continue
-            duraciones = {i: opciones[i][4] - opciones[i][3] for i in indices}
-            maxima = max(duraciones.values())
-            for i in indices:
-                if duraciones[i] < maxima:
-                    destildar.add(opciones[i][:3])
+        for i_busqueda, i_alt, i_op, inicio, fin in opciones:
+            contenida_en_otra = any(
+                otro_inicio <= inicio and fin <= otro_fin and (otro_inicio, otro_fin) != (inicio, fin)
+                for _, _, _, otro_inicio, otro_fin in opciones
+            )
+            if contenida_en_otra:
+                destildar.add((i_busqueda, i_alt, i_op))
     return destildar

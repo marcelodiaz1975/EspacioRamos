@@ -1382,3 +1382,62 @@ def test_destildar_una_opcion_a_mano_despues_de_tildar_no_se_revierte_al_destild
 
     indice_corta = next(i for i, f in enumerate(filas) if (f[4], f[5]) == (9, 14))
     assert dialogo.lista.item(indice_corta).checkState() == Qt.CheckState.Unchecked
+
+
+def test_elegir_profesional_categoria_a_precarga_tipo_busqueda_aislada(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: elegir un profesional categoría A
+    precarga "Tipo de búsqueda" en "Aislada" — el campo sigue editable
+    (nunca se deshabilita), solo cambia el valor con el que arranca."""
+    id_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Aislada")
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+
+    pantalla.combo_profesional.setCurrentIndex(pantalla.combo_profesional.findData(id_aislada))
+
+    assert pantalla.combo_tipo.currentData() == "Aislada"
+    assert pantalla.combo_tipo.isEnabled()
+
+
+def test_elegir_profesional_categoria_r_precarga_tipo_busqueda_regular(qtbot, conn, profesional_y_consultorio):
+    id_regular = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Regular")
+    id_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Aislada")
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_profesional.setCurrentIndex(pantalla.combo_profesional.findData(id_aislada))
+    assert pantalla.combo_tipo.currentData() == "Aislada"
+
+    pantalla.combo_profesional.setCurrentIndex(pantalla.combo_profesional.findData(id_regular))
+
+    assert pantalla.combo_tipo.currentData() == "Regular"
+
+
+def test_elegir_profesional_categorias_x_c_b_e_precargan_tipo_busqueda_regular(
+    qtbot, conn, profesional_y_consultorio,
+):
+    id_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Aislada")
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+
+    for categoria in ("X", "C", "B", "E"):
+        id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional=categoria, Apellido=categoria)
+        pantalla.combo_profesional.setCurrentIndex(pantalla.combo_profesional.findData(id_aislada))
+        assert pantalla.combo_tipo.currentData() == "Aislada"
+
+        pantalla.combo_profesional.setCurrentIndex(pantalla.combo_profesional.findData(id_prof))
+
+        assert pantalla.combo_tipo.currentData() == "Regular", categoria
+
+
+def test_tipo_busqueda_precargado_sigue_siendo_editable_a_mano(qtbot, conn, profesional_y_consultorio):
+    """El precargado no reemplaza la posibilidad de elegir el otro tipo
+    a mano — pedido explícito: "aunque se pueda modificar... en ningún
+    momento queda deshabilitado ese filtro"."""
+    id_aislada = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Aislada")
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_profesional.setCurrentIndex(pantalla.combo_profesional.findData(id_aislada))
+    assert pantalla.combo_tipo.currentData() == "Aislada"
+
+    pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData("Regular"))
+
+    assert pantalla.combo_tipo.currentData() == "Regular"

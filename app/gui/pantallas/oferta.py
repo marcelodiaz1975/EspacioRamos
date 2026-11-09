@@ -68,7 +68,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.pantallas.reservas import _opciones_profesional
+from app.gui.pantallas.reservas import _opciones_profesional_con_categoria
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.fecha import aplicar_color_sabado_negro, instalar_flechas_cambian_fecha_completa
 from app.gui.widgets.foco import instalar_enter_avanza_foco
@@ -171,6 +171,7 @@ _AJUSTE_EXTRA_MUESTRA_PARES = 9  # pedido de la clienta: los días siempre de a 
 _ANCHO_MUESTRA_LEYENDA_COMPACTA = 28
 
 _DIAS_BUSQUEDA = DIAS_SEMANA[:6]  # de acuerdo a los parámetros del sistema: reservas de lunes a sábado
+_CATEGORIAS_TODAS = ("R", "A", "B", "E", "X", "C")
 
 _COMBINACIONES = [
     ("Sin combinación de consultorios", SIN_COMBINAR),
@@ -363,6 +364,7 @@ class _PanelOferta(QWidget):
 
         self.combo_profesional = QComboBox()
         habilitar_busqueda_profesional(self.combo_profesional)
+        self.combo_profesional.currentIndexChanged.connect(self._al_cambiar_profesional)
         form.addWidget(QLabel("Profesional"))
         form.addWidget(self.combo_profesional)
 
@@ -765,8 +767,31 @@ class _PanelOferta(QWidget):
 
     def _cargar_profesionales(self) -> None:
         self.combo_profesional.clear()
-        for id_, etiqueta in _opciones_profesional(self.conn):
+        self._categoria_por_profesional: dict[int, str] = {}
+        for id_, etiqueta, categoria in _opciones_profesional_con_categoria(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
+            self._categoria_por_profesional[id_] = categoria
+        # Llamado explícito (no alcanza con el signal de `addItem`, que no
+        # dispara si el combo ya arranca o se queda en el índice 0): deja
+        # "Tipo de búsqueda" ya precargado según la categoría del primer
+        # profesional de la lista.
+        self._ajustar_tipo_busqueda_segun_profesional()
+
+    def _al_cambiar_profesional(self) -> None:
+        self._ajustar_tipo_busqueda_segun_profesional()
+
+    def _ajustar_tipo_busqueda_segun_profesional(self) -> None:
+        """Pedido explícito de la clienta: elegir un profesional precarga
+        "Tipo de búsqueda" según su categoría — "Aislada" solo para
+        categoría A, "Regular" para cualquier otra (R/B/E/X/C) — pero el
+        campo queda siempre editable, nunca se deshabilita: el operador
+        puede cambiarlo a mano después sin ninguna restricción."""
+        id_profesional = self.combo_profesional.currentData()
+        categoria = self._categoria_por_profesional.get(id_profesional)
+        tipo = TIPO_AISLADA if categoria == "A" else TIPO_REGULAR
+        indice = self.combo_tipo.findData(tipo)
+        if indice >= 0:
+            self.combo_tipo.setCurrentIndex(indice)
 
     def _cargar_localidades(self) -> None:
         """Cascada Localidad -> Edificio -> Unidad, mismo patrón compacto
@@ -1058,7 +1083,11 @@ class _PanelOferta(QWidget):
         salir de la pantalla NO lo resetea (confirmado por la clienta:
         la última búsqueda queda cargada tal cual se la dejó)."""
         self.combo_profesional.setCurrentIndex(0)
-        self.combo_tipo.setCurrentIndex(0)
+        # "Tipo de búsqueda" vuelve a quedar según la categoría del
+        # profesional que termine seleccionado en el combo (ver
+        # `_ajustar_tipo_busqueda_segun_profesional`) — ya no se fuerza a
+        # "Regular" sin mirar la categoría.
+        self._ajustar_tipo_busqueda_segun_profesional()
         self._al_cambiar_tipo()
         self._cargar_localidades()  # vuelve la cascada a "Todas las..." en los tres niveles
         for check in self._checks_dia.values():

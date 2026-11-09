@@ -1764,3 +1764,66 @@ el nuevo modelo opt-in (`test_comentario_ausente_sin_nada_tildado`,
 `test_comentario_de_reservas_regulares_es_personalizable`,
 `test_comentario_personalizado_no_aparece_si_no_se_tildo`).
 `tests/test_plantillas_texto.py` (conteo de claves únicas, 11 → 13).
+
+## "Tipo de búsqueda" precargado según categoría; corrección del criterio de "Seleccionar solo una opción por bloque" (nov-2026)
+
+Dos pedidos sobre lo armado en la ronda anterior:
+
+**1. "Tipo de búsqueda" se precarga según la categoría del profesional
+elegido, pero sigue siendo editable siempre** ("aunque se pueda
+modificar a 'Regular', es decir en ningún momento queda deshabilitado
+ese filtro"). Solo categoría A precarga "Aislada" — R/B/E/X/C precargan
+"Regular". `_cargar_profesionales` pasa a usar `_opciones_profesional_
+con_categoria` (ya existía, reusada de Reservas aisladas/
+extraordinarias) en vez de `_opciones_profesional`, para tener la
+categoría de cada profesional sin una consulta aparte
+(`self._categoria_por_profesional`, mismo patrón que esas dos
+pantallas). Nueva `_ajustar_tipo_busqueda_segun_profesional`, llamada
+al cambiar `combo_profesional` (`currentIndexChanged`, nuevo
+`_al_cambiar_profesional`) y explícitamente después de recargar el
+combo y en "Nueva búsqueda" (`_nueva_busqueda` ya no fuerza "Regular" a
+secas, deja que esta función decida según quién quedó seleccionado).
+Nunca se llama a `setEnabled(False)` sobre `combo_tipo` — el pedido es
+solo sobre el VALOR inicial, no sobre poder cambiarlo después.
+
+**2. Bug real reportado por la clienta sobre "Seleccionar solo una
+opción por bloque":** con criterio 8-18hs y 3hs mínimas, aparecían las
+alternativas 8-13hs y 11-14hs para el mismo día (se superponen en
+11-13hs) — al tildar el check, la primera versión de esta función
+destildaba 11-14hs por ser "más corta" que 8-13hs dentro del mismo
+grupo superpuesto. Mal: 11-14hs cubre una hora (13-14hs) que 8-13hs NO
+cubre, así que destildarla deja afuera disponibilidad real que el
+profesional sí podría aprovechar.
+
+El criterio correcto no es "la más extensa de cada grupo superpuesto"
+sino CONTENCIÓN: una opción se destilda solo si existe OTRA opción del
+mismo día cuyo rango horario la cubre POR COMPLETO (y que sea
+realmente más extensa — un empate exacto de rango no destilda a
+ninguna de las dos, mismo criterio ya acordado con la clienta). Dos
+opciones que se superponen sin que ninguna contenga a la otra se dejan
+tildadas las dos, aunque una sea más larga que la otra en total.
+`opciones_a_destildar_por_bloque` (`oferta_busqueda_texto.py`) se
+reescribe entera con este criterio — mucho más simple que la versión
+anterior (agrupar por superposición transitiva vía unión de conjuntos
+disjuntos, elegir la más extensa de cada grupo): ahora es una
+comparación par a par dentro de cada día, sin necesitar agrupar nada,
+porque "está contenida en alguna otra" ya es la pregunta correcta
+directamente, sin pasar por componentes conexas.
+
+Tests: `tests/test_oferta_busqueda_previsualizacion.py`
+(`test_opciones_a_destildar_por_bloque_destilda_la_contenida_por_
+completo` reemplaza al test con el nombre viejo "mantiene_la_mas_
+extensa...";
+`test_opciones_a_destildar_por_bloque_no_destilda_superpuestas_que_no_
+se_contienen` es el caso real reportado por la clienta;
+`test_opciones_a_destildar_por_bloque_empate_exacto_no_destilda_a_
+ninguna` ahora prueba un empate de RANGO idéntico, no solo de
+extensión; se elimina el test de "superposición transitiva" — ya no
+aplica, tres opciones que se superponen de a pares sin que ninguna
+contenga del todo a otra ya no pierden ninguna, a diferencia de lo que
+asumía por error la versión anterior). `tests/test_gui_oferta.py`
+(`test_elegir_profesional_categoria_a_precarga_tipo_busqueda_aislada`,
+`test_elegir_profesional_categoria_r_precarga_tipo_busqueda_regular`,
+`test_elegir_profesional_categorias_x_c_b_e_precargan_tipo_busqueda_
+regular`, `test_tipo_busqueda_precargado_sigue_siendo_editable_a_
+mano`).
