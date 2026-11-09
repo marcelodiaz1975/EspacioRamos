@@ -3,8 +3,9 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.oferta_busqueda import Busqueda, CriteriosGlobales
+from app.negocio.oferta_busqueda_texto import COMENTARIO_ALTERNATIVAS_OFRECIDAS, COMENTARIO_RESERVAS_REGULARES
 from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
-from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS, guardar_texto_personalizado
+from app.negocio.plantillas_texto import guardar_texto_personalizado
 from app.repositorio.registro import obtener_repositorio
 
 ANIO, MES = 2026, 8
@@ -44,9 +45,9 @@ def test_estructura_basica_con_una_sola_alternativa(conn, edificio_con_consultor
     assert "*Listado de alternativas encontradas*" in texto
     assert "_Alternativa" not in texto  # una sola alternativa: no se numera
     assert '- Lunes de 9 a 11hs consultorio 1 del 7mo "L" - Hora regular $ 1.000' in texto
-    # "*Comentarios*" (plural) está siempre, por los tres textos fijos —
-    # ver test_comentario_siempre_presente_con_los_tres_textos_fijos.
-    assert "*Comentarios*" in texto
+    # "*Comentarios*" es opt-in (checks "Comentarios a incluír", todos
+    # destildados por defecto) — ver test_comentario_ausente_sin_nada_tildado.
+    assert "*Comentarios*" not in texto
 
 
 def test_muestra_valor_al_final_cuando_se_identifica_el_consultorio(conn, edificio_con_consultorio, tmp_path):
@@ -119,35 +120,65 @@ def test_comentario_enumera_edificios_cuando_hay_mas_de_uno(conn, tmp_path):
     assert "- Ramos 2 corresponde a Alvear 856, Ramos Mejía." in texto
 
 
-def test_comentario_siempre_presente_con_los_tres_textos_fijos(conn, edificio_con_consultorio, tmp_path):
-    """Pedido explícito de la clienta: el texto ahora siempre incluye
-    "*Comentarios*" (plural, antes "*Comentario*") con las tres líneas
-    fijas de `DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS` — ya no
-    depende de si hay más de un edificio ni de si la búsqueda involucra
-    un bloque rígido, a diferencia de la vieja "nota de bloques
-    rígidos" que reemplazan."""
+def test_comentario_ausente_sin_nada_tildado(conn, edificio_con_consultorio, tmp_path):
+    """Pedido explícito de la clienta: los tres comentarios fijos pasan
+    a ser opt-in (checks "Comentarios a incluír", todos destildados por
+    defecto) — sin ninguno tildado y sin ambigüedad de edificio, la
+    sección "*Comentarios*" desaparece del todo (a diferencia de la
+    vuelta anterior, donde los tres textos fijos iban siempre)."""
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
     texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
+
+    assert "*Comentarios*" not in texto
+
+
+def test_comentario_incluye_solo_los_tildados_en_orden_fijo(conn, edificio_con_consultorio, tmp_path):
+    """Cada uno de los tres se tilda por separado y el orden en el
+    texto es siempre el mismo (regulares / aisladas / alternativas),
+    sin importar el orden en que se pasen en `comentarios_incluidos`."""
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    texto = generar_texto_oferta_busqueda(
+        conn, id_prof, globales, [_busqueda_simple()],
+        comentarios_incluidos={COMENTARIO_ALTERNATIVAS_OFRECIDAS, COMENTARIO_RESERVAS_REGULARES},
+    )
 
     assert "*Comentarios*" in texto
-    for linea in DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS.split("\n"):
-        assert f"- {linea}" in texto
+    assert "- Reservas regulares: Las horas que van de 9 a 11hs" in texto
+    assert "- Alternativas ofrecidas: Los horarios ofrecidos" in texto
+    assert "Reservas aisladas:" not in texto
+    assert texto.index("Reservas regulares:") < texto.index("Alternativas ofrecidas:")
 
 
-def test_comentarios_fijos_son_personalizables(conn, edificio_con_consultorio, tmp_path):
-    """Pedido explícito de la clienta: las tres líneas fijas del
-    comentario siguen siendo UN ÚNICO texto editable
-    (`oferta_busqueda_comentarios_fijos`), igual que la vieja "nota de
-    bloques rígidos" que reemplazan — no línea por línea."""
+def test_comentario_de_reservas_regulares_es_personalizable(conn, edificio_con_consultorio, tmp_path):
+    """Cada uno de los tres comentarios fijos sigue siendo editable por
+    separado en "Textos del sistema" — solo se ve si además está
+    tildado en "Comentarios a incluír"."""
     id_edificio, _, _ = edificio_con_consultorio
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
     globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
-    guardar_texto_personalizado(conn, "oferta_busqueda_comentarios_fijos", "Texto personalizado de comentarios.")
-    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
+    guardar_texto_personalizado(
+        conn, "oferta_busqueda_comentario_reservas_regulares", "Texto personalizado de comentarios.",
+    )
+    texto = generar_texto_oferta_busqueda(
+        conn, id_prof, globales, [_busqueda_simple()], comentarios_incluidos={COMENTARIO_RESERVAS_REGULARES},
+    )
     assert "- Texto personalizado de comentarios." in texto
     assert "Reservas regulares:" not in texto
+
+
+def test_comentario_personalizado_no_aparece_si_no_se_tildo(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    guardar_texto_personalizado(
+        conn, "oferta_busqueda_comentario_reservas_regulares", "Texto personalizado de comentarios.",
+    )
+    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()])
+    assert "Texto personalizado de comentarios." not in texto
 
 
 def test_aislada_incluye_rango_de_fechas(conn, tmp_path):

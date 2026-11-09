@@ -37,7 +37,12 @@ from app.negocio.oferta_busqueda import (
     TramoCobertura,
     resolver_busquedas_documento,
 )
-from app.negocio.plantillas_texto import DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS, resolver_plantilla
+from app.negocio.plantillas_texto import (
+    DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_ALTERNATIVAS_OFRECIDAS,
+    DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_RESERVAS_AISLADAS,
+    DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_RESERVAS_REGULARES,
+    resolver_plantilla,
+)
 from app.repositorio.registro import obtener_repositorio
 
 _ES_ACTIVO = ("R", "A", "E", "X", "B")
@@ -80,14 +85,21 @@ def filtrar_excluidas(alternativas: list[Alternativa], indice_busqueda: int, exc
 
 
 def mapa_consultorios_basico(conn: sqlite3.Connection, ids_consultorio: list[int]) -> dict[int, sqlite3.Row]:
+    """IdLocalidad/NombreLocalidad (vía LEFT JOIN, un edificio puede no
+    tener localidad cargada): solo los usa la previsualización interna
+    de la operadora (`_lineas_opcion_previsualizacion`), para anteponer
+    la localidad cuando hay más de una entre los resultados — el
+    documento final para el profesional nunca la menciona."""
     if not ids_consultorio:
         return {}
     placeholders = ", ".join("?" for _ in ids_consultorio)
     filas = conn.execute(
         f"""
         SELECT c.IdConsultorio, c.NumeroConsultorio, c.ValorHoraRegularActual,
-               u.IdUnidad, u.Departamento, e.IdEdificio, e.Nombre AS NombreEdificio
+               u.IdUnidad, u.Departamento, e.IdEdificio, e.Nombre AS NombreEdificio,
+               l.IdLocalidad, l.Localidad AS NombreLocalidad
         FROM Consultorio c JOIN Unidad u ON u.IdUnidad = c.IdUnidad JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        LEFT JOIN Localidad l ON l.IdLocalidad = e.IdLocalidad
         WHERE c.IdConsultorio IN ({placeholders})
         """,
         ids_consultorio,
@@ -229,16 +241,40 @@ def _texto_edificio_comentario(edificio: sqlite3.Row) -> str:
     return f"{edificio['Nombre']} corresponde a {ubicacion}."
 
 
-def comentarios_fijos(conn: sqlite3.Connection) -> list[str]:
-    """Pedido explícito de la clienta: tres líneas fijas y SIEMPRE
-    presentes en el documento (ya no condicionadas a si hay bloque
-    rígido involucrado, como la vieja "nota de bloques rígidos" que
-    reemplazan — "Reservas regulares"/"Reservas aisladas"/"Alternativas
-    ofrecidas") — editables en conjunto como un único texto
-    (`oferta_busqueda_comentarios_fijos`, ver `app.negocio.
-    plantillas_texto`), una por línea."""
-    texto = resolver_plantilla(conn, "oferta_busqueda_comentarios_fijos", DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS)
-    return [linea for linea in texto.split("\n") if linea]
+# Claves de los tres comentarios fijos, independientes entre sí (pedido
+# explícito de la clienta, reemplaza al bloque único de la vuelta
+# anterior): cada uno se tilda por separado en la previsualización
+# ("Comentarios a incluír", `app.gui.pantallas.oferta._DialogoPrevisualizacion`),
+# TODOS destildados por defecto, y cada uno es a su vez editable como su
+# propio texto en "Textos del sistema" (ver `app.negocio.plantillas_texto`).
+COMENTARIO_RESERVAS_REGULARES = "reservas_regulares"
+COMENTARIO_RESERVAS_AISLADAS = "reservas_aisladas"
+COMENTARIO_ALTERNATIVAS_OFRECIDAS = "alternativas_ofrecidas"
+
+_PLANTILLAS_COMENTARIOS_FIJOS = {
+    COMENTARIO_RESERVAS_REGULARES: (
+        "oferta_busqueda_comentario_reservas_regulares", DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_RESERVAS_REGULARES,
+    ),
+    COMENTARIO_RESERVAS_AISLADAS: (
+        "oferta_busqueda_comentario_reservas_aisladas", DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_RESERVAS_AISLADAS,
+    ),
+    COMENTARIO_ALTERNATIVAS_OFRECIDAS: (
+        "oferta_busqueda_comentario_alternativas_ofrecidas", DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_ALTERNATIVAS_OFRECIDAS,
+    ),
+}
+
+
+def comentarios_fijos(conn: sqlite3.Connection, incluidos: set[str]) -> list[str]:
+    """Una línea por cada comentario fijo tildado en `incluidos` (alguna
+    de las tres claves de arriba), en el orden fijo "Reservas regulares"/
+    "Reservas aisladas"/"Alternativas ofrecidas" — sin importar el orden
+    en que se hayan tildado los checks. Vacío si no se tildó ninguno (ya
+    no van siempre, como en la vuelta anterior de este mecanismo)."""
+    return [
+        resolver_plantilla(conn, clave_plantilla, default)
+        for clave, (clave_plantilla, default) in _PLANTILLAS_COMENTARIOS_FIJOS.items()
+        if clave in incluidos
+    ]
 
 
 def edificios_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[int]) -> list[str]:
@@ -257,20 +293,51 @@ def edificios_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[i
     return [_texto_edificio_comentario(f) for f in filas]
 
 
+def _lineas_opcion_previsualizacion(
+    etiqueta: str, opcion: Opcion, consultorios: dict, mostrar_localidad: bool, mostrar_edificio: bool,
+    decimales: int,
+) -> list[str]:
+    """Para la pantalla de previsualización (operadora, nunca el
+    profesional): SIEMPRE con el detalle completo (unidad + consultorio)
+    y sin anonimizar, sin importar los checks "Identificar unidad/
+    consultorio" (que solo rigen lo que termina viendo el profesional en
+    el documento final) ni la categoría del profesional — la operadora
+    necesita identificar bien qué está tildando/destildando. Localidad se
+    antepone si hay más de una entre los resultados de esta búsqueda
+    (mismo criterio "solo si hace falta desambiguar" que ya usa
+    `mostrar_edificio`)."""
+    lineas = []
+    for t in opcion.tramos:
+        c = consultorios.get(t.id_consultorio)
+        if c is None:
+            continue
+        texto = detalle_tramo(etiqueta, t, c, mostrar_edificio, True, True, False, mostrar_valor=True, decimales=decimales)
+        if mostrar_localidad and c["NombreLocalidad"]:
+            texto = f"{c['NombreLocalidad']} - {texto}"
+        lineas.append(texto)
+    return lineas
+
+
 def previsualizar_documento(
     conn: sqlite3.Connection, id_profesional: int, globales: CriteriosGlobales, busquedas: list[Busqueda],
-) -> list[tuple[int, int, int, str]]:
+) -> list[tuple[int, int, int, str, float, float]]:
     """Para la pantalla de previsualización (`app.gui.pantallas.oferta`):
     una entrada por cada opción encontrada, ya con la combinación Y/O
     entre búsquedas aplicada (`resolver_busquedas_documento`), junto con
     la tripleta de índices (búsqueda, alternativa/día, opción) que la
     identifica para poder excluirla puntualmente sin descartar el resto
     de la búsqueda (ver `excluir` en `generar_pdf_oferta_busqueda` /
-    `generar_texto_oferta_busqueda`)."""
+    `generar_texto_oferta_busqueda`), y el rango horario que cubre la
+    opción completa (min/max de sus tramos — un solo tramo salvo
+    combinación) para que el diálogo pueda calcular superposiciones
+    ("Seleccionar solo una opción por bloque").
+
+    El texto de cada fila SIEMPRE muestra el detalle completo (ver
+    `_lineas_opcion_previsualizacion`) — independiente de "Identificar
+    unidad/consultorio", que solo rige el documento final."""
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None:
         raise ValueError(f"No existe el profesional #{id_profesional}")
-    anonimizar = not categoria_es_activa(profesional)
     decimales = decimales_configurados(conn)
 
     resultados = resolver_busquedas_documento(conn, globales, busquedas)
@@ -279,17 +346,79 @@ def previsualizar_documento(
     })
     consultorios = mapa_consultorios_basico(conn, ids_consultorio)
     ids_edificio_resultado = {c["IdEdificio"] for c in consultorios.values()}
+    ids_localidad_resultado = {c["IdLocalidad"] for c in consultorios.values()}
     mostrar_edificio = len(ids_edificio_resultado) > 1
-    mostrar_unidad, mostrar_consultorio = identificacion_efectiva(globales)
+    mostrar_localidad = len(ids_localidad_resultado) > 1
 
-    filas: list[tuple[int, int, int, str]] = []
+    filas: list[tuple[int, int, int, str, float, float]] = []
     for i_busqueda, alternativas in enumerate(resultados):
         for i_alt, alt in enumerate(alternativas):
             etiqueta = etiqueta_dia(alt.dia_semana, alt.fecha)
             for i_op, opcion in enumerate(alt.opciones):
-                lineas = lineas_opcion(
-                    etiqueta, opcion, consultorios, mostrar_edificio, mostrar_unidad, mostrar_consultorio, anonimizar,
-                    mostrar_valor=True, decimales=decimales,
-                )
-                filas.append((i_busqueda, i_alt, i_op, " / ".join(lineas)))
+                lineas = _lineas_opcion_previsualizacion(etiqueta, opcion, consultorios, mostrar_localidad, mostrar_edificio, decimales)
+                hora_inicio = min(t.hora_inicio for t in opcion.tramos)
+                hora_fin = max(t.hora_fin for t in opcion.tramos)
+                filas.append((i_busqueda, i_alt, i_op, " / ".join(lineas), hora_inicio, hora_fin))
     return filas
+
+
+def opciones_a_destildar_por_bloque(
+    filas: list[tuple[int, int, int, str, float, float]],
+) -> set[tuple[int, int, int]]:
+    """"Seleccionar solo una opción por bloque" (pedido explícito de la
+    clienta, ejemplo real: buscando lunes 9-18hs con 3hs mínimas, si
+    aparecen las alternativas 9-13hs, 9-12hs y 14-18hs, tiene que quedar
+    tildada 14-18hs por no superponerse con ninguna otra, y 9-13hs por
+    ser la más extensa de las dos que SÍ se superponen entre sí).
+
+    Agrupa, dentro de cada día (misma búsqueda + misma alternativa), las
+    opciones que se superponen en horario con al menos otra — aunque sea
+    de forma transitiva (A con B, B con C, sin que A y C se toquen entre
+    sí) — y devuelve las tripletas a destildar: todas las de cada grupo
+    salvo la(s) de mayor extensión (hora_fin - hora_inicio). Un grupo
+    sin ningún superpuesto (tamaño 1) no aporta nada al resultado, sin
+    importar cuántas opciones distintas haya ese día. Un empate exacto
+    de extensión entre las más extensas de un grupo no destilda a
+    ninguna de esas dos — decisión explícita de la clienta: "no tengo
+    claro un criterio... deja las dos o más opciones tildadas y eso
+    queda a mi criterio en el momento"."""
+    por_dia: dict[tuple[int, int], list[tuple[int, int, int, float, float]]] = {}
+    for i_busqueda, i_alt, i_op, _texto, hora_inicio, hora_fin in filas:
+        por_dia.setdefault((i_busqueda, i_alt), []).append((i_busqueda, i_alt, i_op, hora_inicio, hora_fin))
+
+    destildar: set[tuple[int, int, int]] = set()
+    for opciones in por_dia.values():
+        if len(opciones) < 2:
+            continue
+        # Unión por conjuntos disjuntos (pocas opciones por día, no hace
+        # falta nada más sofisticado) para agrupar las conectadas por
+        # superposición, directa o transitiva.
+        padres = list(range(len(opciones)))
+
+        def raiz(i: int) -> int:
+            while padres[i] != i:
+                i = padres[i]
+            return i
+
+        for i in range(len(opciones)):
+            for j in range(i + 1, len(opciones)):
+                inicio_i, fin_i = opciones[i][3], opciones[i][4]
+                inicio_j, fin_j = opciones[j][3], opciones[j][4]
+                if inicio_i < fin_j and inicio_j < fin_i:
+                    ri, rj = raiz(i), raiz(j)
+                    if ri != rj:
+                        padres[ri] = rj
+
+        grupos: dict[int, list[int]] = {}
+        for i in range(len(opciones)):
+            grupos.setdefault(raiz(i), []).append(i)
+
+        for indices in grupos.values():
+            if len(indices) < 2:
+                continue
+            duraciones = {i: opciones[i][4] - opciones[i][3] for i in indices}
+            maxima = max(duraciones.values())
+            for i in indices:
+                if duraciones[i] < maxima:
+                    destildar.add(opciones[i][:3])
+    return destildar

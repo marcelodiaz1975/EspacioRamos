@@ -1640,3 +1640,127 @@ rígidos; `test_alternativa_unica_no_se_numera`/`test_combinacion_dos_
 lineas_en_una_sola_alternativa` ajustados para no confundir "Alternativa
 1" con el "Alternativas ofrecidas:" del comentario fijo, ahora siempre
 presente).
+
+## Previsualización siempre con detalle completo, comentarios opt-in individuales, "Seleccionar solo una opción por bloque" (nov-2026)
+
+Batch de pedidos de la clienta sobre la pantalla de previsualización
+("Previsualización de la oferta", `_DialogoPrevisualizacion`), más dos
+bugs reportados aparte (pago de categoría A sin regenerar el
+portapapeles; "PLACAS PARA LOS TIMBRES" duplicado — este último
+investigado sin poder reproducirse con el código commiteado, la clienta
+pidió dejarlo en stand-by hasta que vuelva a aparecer).
+
+**1. Bug real: registrar/modificar/eliminar un pago (o deshacer el
+último movimiento) a un profesional categoría A no actualizaba el
+"Detalle reserva" del portapapeles.** Reservas aisladas ya regeneraba y
+copiaba sola ese mensaje al confirmar/cancelar/modificar una reserva,
+pero Pagos nunca lo hacía — ese mensaje incluye la línea de pagos del
+mes/saldo pendiente, así que cualquier movimiento de pago lo deja
+desactualizado. `_PanelRegistrarPago._actualizar_portapapeles_si_es_
+aislada` (`app/gui/pantallas/pagos.py`), llamada desde las cuatro
+acciones (`_registrar`/`_modificar`/`_eliminar`/`_deshacer_ultimo`,
+pedido explícito de la clienta: "también Modificar/Eliminar/Deshacer"):
+si el profesional es categoría A, regenera `mensaje_detalle_reserva_
+aislada` con `periodo_actual` y lo copia, mismo mecanismo que Reservas.
+Tests nuevos en `tests/test_gui_pagos.py` (uno por cada una de las
+cuatro acciones, más uno confirmando que una categoría R no toca el
+portapapeles).
+
+**2. La previsualización ahora SIEMPRE identifica la ubicación
+completa (Localidad si hay más de una/Edificio si hay más de uno/
+Unidad/Consultorio), sin importar "Identificar unidad/consultorio" ni
+la categoría del profesional.** Bug de diseño real: antes reusaba el
+mismo texto que termina en el documento final (`lineas_opcion` con
+`identificacion_efectiva(globales)` + `anonimizar` según categoría) —
+al desactivar los checks para que el PROFESIONAL no identifique el
+consultorio, la operadora perdía esa misma información en SU propia
+pantalla de selección, justo donde más la necesita para decidir qué
+tildar/destildar.
+
+`previsualizar_documento` (`app/negocio/oferta_busqueda_texto.py`) ya
+no usa `identificacion_efectiva`/`categoria_es_activa` para armar el
+texto de cada fila — nueva `_lineas_opcion_previsualizacion` llama a
+`detalle_tramo` siempre con `mostrar_unidad=True, mostrar_
+consultorio=True, anonimizar=False`, y antepone la Localidad
+("{Localidad} - ...") cuando hay más de una entre los resultados
+(`mapa_consultorios_basico` suma `IdLocalidad`/`NombreLocalidad` vía
+LEFT JOIN a Localidad, antes ausente de esa consulta). El documento
+final (PDF/WhatsApp) no cambia: sigue usando `identificacion_efectiva`/
+`anonimizar` como siempre, la previsualización es una vista aparte solo
+para la operadora.
+
+**3. "Seleccionar solo una opción por bloque"** (no es un comentario,
+check aparte en el mismo diálogo): ejemplo de la clienta — buscando un
+rango con "cantidad de horas mínimas", si aparecen alternativas que se
+superponen en horario (ej. 9-13hs y 9-12hs) y otras que no se superponen
+con nada (ej. 14-18hs), al tildar el check se auto-destildan las
+perdedoras de cada grupo superpuesto (todas salvo la de mayor
+extensión), dejando intactas las que no se superponen con ninguna otra.
+
+`previsualizar_documento` ahora devuelve también el rango horario de
+cada opción (`hora_inicio`, `hora_fin` — min/max de sus tramos, un solo
+tramo salvo combinación), así el diálogo puede calcular superposiciones
+sin tocar la base de datos de nuevo. Nueva `opciones_a_destildar_por_
+bloque` (`oferta_busqueda_texto.py`, función pura y testeable aparte de
+la GUI): agrupa por día (unión por conjuntos disjuntos, cubre también
+superposición transitiva — A con B, B con C, sin que A y C se toquen) y
+devuelve las tripletas a destildar de cada grupo de tamaño > 1, salvo
+la(s) de mayor extensión. **Empate exacto de extensión entre las que se
+superponen: no destilda a ninguna de las dos** — decisión explícita de
+la clienta al preguntarle el criterio ("no tengo claro un criterio...
+deja las dos o más opciones tildadas y eso queda a mi criterio en el
+momento").
+
+El check es de una sola vía: tildarlo aplica el auto-destilde una vez
+sobre la lista ya armada (destildando filas, no removiéndolas — se
+puede revertir a mano volviendo a tildar una fila); destildar el check
+NO reitilda lo que ya se auto-destildó, para no pisar un ajuste manual
+posterior.
+
+**4. Los tres comentarios fijos pasan de un único bloque siempre
+presente a tres entradas independientes, opt-in, todas destildadas por
+defecto.** Pedido explícito de la clienta, reestructura lo armado la
+ronda anterior: `DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS` (una sola
+clave `oferta_busqueda_comentarios_fijos`) se separa en tres constantes
+y tres claves propias en `app/negocio/plantillas_texto.py`
+(`oferta_busqueda_comentario_reservas_regulares`/`_reservas_aisladas`/
+`_alternativas_ofrecidas`), cada una su propia fila editable en
+"Textos del sistema".
+
+`comentarios_fijos(conn, incluidos)` (`oferta_busqueda_texto.py`) pasa
+a recibir el conjunto de claves tildadas y devuelve solo esas líneas,
+siempre en el mismo orden fijo (regulares/aisladas/alternativas) sin
+importar el orden de tildado — vacío si no se tildó ninguna (la
+sección "Comentarios" completa desaparece del documento en ese caso,
+igual que antes de la ronda anterior). `generar_pdf_oferta_busqueda`/
+`generar_texto_oferta_busqueda` suman el parámetro `comentarios_
+incluidos: set[str] | None`, threadeado desde la pantalla.
+
+`_DialogoPrevisualizacion` suma un `QGroupBox("Comentarios a incluír")`
+arriba de los botones "Confirmar y generar"/"Cancelar", con un
+`QCheckBox` por comentario (`_COMENTARIOS_DISPONIBLES`), todos
+destildados al abrir — `comentarios_incluidos()` (nuevo método) junta
+los tildados y se pasa a `generador(...)` en `_generar_y_mostrar` junto
+con `excluir`.
+
+Tests nuevos: `tests/test_oferta_busqueda_previsualizacion.py`
+(`test_categoria_c_no_se_anonimiza_en_la_previsualizacion` — reemplaza
+al test viejo que afirmaba lo contrario —,
+`test_identificar_unidad_desactivado_no_afecta_la_previsualizacion`,
+`test_localidad_se_antepone_solo_si_hay_mas_de_una`,
+`test_opciones_a_destildar_por_bloque_*` — cinco casos: ejemplo real,
+sin superposición, empate, superposición transitoria, agrupado por día
+por separado). `tests/test_gui_oferta.py`
+(`test_previsualizacion_siempre_identifica_unidad_y_consultorio_
+aunque_los_checks_esten_apagados`, `test_comentarios_a_incluir_
+arrancan_todos_destildados`, `test_tildar_comentario_lo_incluye_en_el_
+pdf_generado`, `test_seleccionar_solo_una_opcion_por_bloque_destilda_
+la_mas_corta`, `test_seleccionar_solo_una_opcion_por_bloque_empate_no_
+destilda_ninguna`, `test_destildar_una_opcion_a_mano_despues_de_tildar_
+no_se_revierte_al_destildar_el_check`). `tests/test_pdf_oferta_
+busqueda.py`/`tests/test_oferta_busqueda_whatsapp.py` reescritos para
+el nuevo modelo opt-in (`test_comentario_ausente_sin_nada_tildado`,
+`test_comentario_incluye_solo_los_tildados_en_orden_fijo`,
+`test_comentario_de_reservas_regulares_es_personalizable`,
+`test_comentario_personalizado_no_aparece_si_no_se_tildo`).
+`tests/test_plantillas_texto.py` (conteo de claves únicas, 11 → 13).

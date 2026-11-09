@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFrame,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -96,7 +97,15 @@ from app.negocio.oferta_busqueda import (
     fecha_fin_default,
     fecha_inicio_default,
 )
-from app.negocio.oferta_busqueda_texto import avisos_para_documento, previsualizar_documento, resumen_busqueda
+from app.negocio.oferta_busqueda_texto import (
+    COMENTARIO_ALTERNATIVAS_OFRECIDAS,
+    COMENTARIO_RESERVAS_AISLADAS,
+    COMENTARIO_RESERVAS_REGULARES,
+    avisos_para_documento,
+    opciones_a_destildar_por_bloque,
+    previsualizar_documento,
+    resumen_busqueda,
+)
 from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
 from app.pdf.estilos import clave_orden_unidad
 from app.pdf.oferta_busqueda_pdf import generar_pdf_oferta_busqueda
@@ -223,30 +232,65 @@ class _DialogoTexto(QDialog):
         layout.addWidget(boton_cerrar)
 
 
+_COMENTARIOS_DISPONIBLES = [
+    (COMENTARIO_RESERVAS_REGULARES, "Reservas regulares"),
+    (COMENTARIO_RESERVAS_AISLADAS, "Reservas aisladas"),
+    (COMENTARIO_ALTERNATIVAS_OFRECIDAS, "Alternativas ofrecidas"),
+]
+
+
 class _DialogoPrevisualizacion(QDialog):
     """Muestra las alternativas encontradas (ya con la combinación Y/O
     entre franjas aplicada) con un casillero por opción: destildar una la
-    deja afuera del documento sin descartar el resto de la búsqueda."""
+    deja afuera del documento sin descartar el resto de la búsqueda. El
+    texto de cada fila siempre identifica la ubicación completa
+    (Localidad/Edificio/Unidad/Consultorio), sin importar "Identificar
+    unidad/consultorio" — ver `previsualizar_documento`.
 
-    def __init__(self, filas: list[tuple[int, int, int, str]], parent=None):
+    Pedido explícito de la clienta, agregado en la misma pantalla:
+    - "Seleccionar solo una opción por bloque" (debajo de la lista):
+      auto-destilda las opciones superpuestas de menor extensión dentro
+      de cada día (ver `opciones_a_destildar_por_bloque`) — se puede
+      revertir a mano volviendo a tildar una fila, no es un filtro que
+      se reaplique solo.
+    - Cuadro "Comentarios a incluír" (arriba de los botones): los tres
+      comentarios fijos de "Textos del sistema", todos destildados por
+      defecto — solo entra al documento final el que esté tildado en
+      esta generación puntual."""
+
+    def __init__(self, filas: list[tuple[int, int, int, str, float, float]], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Previsualización de la oferta")
-        self.resize(560, 480)
+        self.resize(560, 560)
         self._filas = filas
         layout = QVBoxLayout(self)
 
         if not filas:
             layout.addWidget(QLabel("No se encontraron alternativas para los criterios cargados."))
             self.lista = None
+            self.casilla_una_opcion_por_bloque = None
         else:
             layout.addWidget(QLabel("Destildá las opciones que no querés ofrecer:"))
             self.lista = QListWidget()
-            for _, _, _, texto in filas:
+            for _, _, _, texto, _, _ in filas:
                 item = QListWidgetItem(texto)
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(Qt.CheckState.Checked)
                 self.lista.addItem(item)
             layout.addWidget(self.lista, stretch=1)
+
+            self.casilla_una_opcion_por_bloque = QCheckBox("Seleccionar solo una opción por bloque")
+            self.casilla_una_opcion_por_bloque.toggled.connect(self._al_tildar_una_opcion_por_bloque)
+            layout.addWidget(self.casilla_una_opcion_por_bloque)
+
+        cuadro_comentarios = QGroupBox("Comentarios a incluír")
+        layout_comentarios = QVBoxLayout(cuadro_comentarios)
+        self._casillas_comentario: dict[str, QCheckBox] = {}
+        for clave, etiqueta in _COMENTARIOS_DISPONIBLES:
+            casilla = QCheckBox(etiqueta)
+            self._casillas_comentario[clave] = casilla
+            layout_comentarios.addWidget(casilla)
+        layout.addWidget(cuadro_comentarios)
 
         fila_botones = QHBoxLayout()
         boton_confirmar = QPushButton("Confirmar y generar")
@@ -258,6 +302,18 @@ class _DialogoPrevisualizacion(QDialog):
         fila_botones.addWidget(boton_cancelar)
         layout.addLayout(fila_botones)
 
+    def _al_tildar_una_opcion_por_bloque(self, activado: bool) -> None:
+        """Acción de una sola vía (pedido de la clienta — ver empate más
+        abajo): al tildarse, destilda las opciones perdedoras de cada
+        grupo superpuesto; destildar este check NO revierte lo ya
+        auto-destildado, para no pisar un ajuste manual posterior."""
+        if not activado or self.lista is None:
+            return
+        destildar = opciones_a_destildar_por_bloque(self._filas)
+        for i, fila in enumerate(self._filas):
+            if fila[:3] in destildar:
+                self.lista.item(i).setCheckState(Qt.CheckState.Unchecked)
+
     def excluidas(self) -> set[tuple[int, int, int]]:
         if self.lista is None:
             return set()
@@ -266,6 +322,9 @@ class _DialogoPrevisualizacion(QDialog):
             if self.lista.item(i).checkState() != Qt.CheckState.Checked:
                 excluidas.add(self._filas[i][:3])
         return excluidas
+
+    def comentarios_incluidos(self) -> set[str]:
+        return {clave for clave, casilla in self._casillas_comentario.items() if casilla.isChecked()}
 
 
 class _PanelOferta(QWidget):
@@ -961,24 +1020,29 @@ class _PanelOferta(QWidget):
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
         excluir = dialogo.excluidas()
+        comentarios_incluidos = dialogo.comentarios_incluidos()
 
         try:
-            generador(id_profesional, globales, busquedas, excluir)
+            generador(id_profesional, globales, busquedas, excluir, comentarios_incluidos)
         except ValueError as error:
             QMessageBox.warning(self, "Oferta de consultorios", str(error))
             return
         self._limpiar_franjas()
 
     def _generar_pdf(self) -> None:
-        def hacer(id_profesional, globales, busquedas, excluir) -> None:
+        def hacer(id_profesional, globales, busquedas, excluir, comentarios_incluidos) -> None:
             directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_OFERTA))
-            ruta = generar_pdf_oferta_busqueda(self.conn, directorio, id_profesional, globales, busquedas, excluir)
+            ruta = generar_pdf_oferta_busqueda(
+                self.conn, directorio, id_profesional, globales, busquedas, excluir, comentarios_incluidos,
+            )
             QMessageBox.information(self, "Oferta de consultorios", f"Se generó:\n{ruta}")
         self._generar_y_mostrar(hacer)
 
     def _generar_texto(self) -> None:
-        def hacer(id_profesional, globales, busquedas, excluir) -> None:
-            texto = generar_texto_oferta_busqueda(self.conn, id_profesional, globales, busquedas, excluir)
+        def hacer(id_profesional, globales, busquedas, excluir, comentarios_incluidos) -> None:
+            texto = generar_texto_oferta_busqueda(
+                self.conn, id_profesional, globales, busquedas, excluir, comentarios_incluidos,
+            )
             _DialogoTexto(texto, self).exec()
         self._generar_y_mostrar(hacer)
 

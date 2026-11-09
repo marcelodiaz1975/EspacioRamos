@@ -78,6 +78,24 @@ def _crear_profesional(conn, saldo=10000):
     return conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
 
 
+def _crear_profesional_aislada(conn, saldo=10000):
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido, SaldoCuentaActual) VALUES ('A', 'La Regina', ?)",
+        (saldo,),
+    )
+    conn.commit()
+    return conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = 'La Regina'").fetchone()["IdProfesional"]
+
+
+def _monkeypatch_clipboard(monkeypatch):
+    copiado = []
+    monkeypatch.setattr(
+        pagos_modulo.QGuiApplication, "clipboard",
+        staticmethod(lambda: type("_C", (), {"setText": lambda self, t: copiado.append(t)})()),
+    )
+    return copiado
+
+
 def _seleccionar_profesional(panel, id_profesional):
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
 
@@ -187,6 +205,37 @@ def test_registrar_pago_positivo_suma_saldo_actual(qtbot, conn):
         "SELECT SaldoCuentaActual FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
     ).fetchone()["SaldoCuentaActual"]
     assert saldo == 1500
+
+
+def test_registrar_pago_a_profesional_aislada_actualiza_el_portapapeles(qtbot, conn, monkeypatch):
+    """Bug real reportado por la clienta: registrar un pago a un
+    profesional categoría A no regeneraba el "Detalle reserva" del
+    portapapeles — ese mensaje incluye la línea de pagos/saldo del mes,
+    así que queda desactualizado si no se lo copia de nuevo."""
+    id_profesional = _crear_profesional_aislada(conn)
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-500)
+    panel._registrar()
+
+    assert len(copiado) == 1
+    assert "DETALLE RESERVA" in copiado[0]
+
+
+def test_registrar_pago_a_profesional_regular_no_toca_el_portapapeles(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn)
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-500)
+    panel._registrar()
+
+    assert copiado == []
 
 
 def test_registrar_pago_formulario_se_resetea_y_vuelve_foco_a_profesional(qtbot, conn):
@@ -555,6 +604,27 @@ def test_modificar_pago_seleccionado_ajusta_saldo_y_marca_modificado(qtbot, conn
     assert fila["RegistroModificado"] == 1
 
 
+def test_modificar_pago_de_profesional_aislada_actualiza_el_portapapeles(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional_aislada(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()
+
+    panel.tabla.selectRow(0)
+    _mockear_dialogo_modificar(
+        monkeypatch, periodo_imputado=periodo_actual(conn), monto=-600, medio_pago="Efectivo",
+        cuenta_receptora=None,
+    )
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    panel._modificar()
+
+    assert len(copiado) == 1
+    assert "DETALLE RESERVA" in copiado[0]
+
+
 def test_modificar_pago_sin_seleccion_no_falla(qtbot, conn):
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
@@ -628,6 +698,23 @@ def test_deshacer_ultimo_movimiento_revierte_y_borra(qtbot, conn, monkeypatch):
     saldo = obtener_repositorio(conn, "Profesional").obtener(id_profesional)["SaldoCuentaActual"]
     assert saldo == 1000
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
+
+
+def test_deshacer_ultimo_movimiento_de_profesional_aislada_actualiza_el_portapapeles(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional_aislada(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    panel._deshacer_ultimo()
+
+    assert len(copiado) == 1
+    assert "DETALLE RESERVA" in copiado[0]
 
 
 def test_deshacer_ultimo_movimiento_sin_confirmar_no_hace_nada(qtbot, conn, monkeypatch):
@@ -1165,6 +1252,24 @@ def test_saldo_anterior_y_nuevo_saldo_se_colorean_en_negativo(qtbot, conn):
     assert panel.tabla.item(0, 6).foreground().color() != QColor(COLOR_ROJO)  # saldo anterior: 100, positivo
     assert panel.tabla.item(0, 7).foreground().color() == QColor(COLOR_ROJO)  # nuevo saldo: -400, negativo
     assert panel.tabla.item(0, 3).foreground().color() == QColor(COLOR_ROJO)  # el Monto también
+
+
+def test_eliminar_pago_de_profesional_aislada_actualiza_el_portapapeles(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional_aislada(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel.tabla.selectRow(0)
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    panel._eliminar()
+
+    assert len(copiado) == 1
+    assert "DETALLE RESERVA" in copiado[0]
 
 
 def test_eliminar_pago_seleccionado_revierte_saldo(qtbot, conn, monkeypatch):

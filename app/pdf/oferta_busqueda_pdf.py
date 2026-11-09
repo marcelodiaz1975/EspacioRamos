@@ -92,7 +92,9 @@ def _texto_alternativas(
     return story
 
 
-def _texto_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[int], mostrar_edificio: bool) -> list:
+def _texto_comentario(
+    conn: sqlite3.Connection, ids_edificio_resultado: set[int], mostrar_edificio: bool, comentarios_incluidos: set[str],
+) -> list:
     """Sin título de nivel 2 propio — va pegado abajo de las alternativas,
     con el mismo estilo de etiqueta en negrita que "Alternativa N".
 
@@ -103,15 +105,17 @@ def _texto_comentario(conn: sqlite3.Connection, ids_edificio_resultado: set[int]
     avisan en pantalla al operador en su lugar, ver `_PanelOferta.
     _generar_y_mostrar`.
 
-    Las tres líneas de `comentarios_fijos` (ver `app.negocio.oferta_
-    busqueda_texto`) van SIEMPRE — a diferencia de la vieja "nota de
-    bloques rígidos" que reemplazan, ya no están condicionadas a si la
-    búsqueda involucra un bloque rígido — así que esta sección ya no
-    puede quedar vacía: "Comentarios" (pedido explícito de la clienta,
-    pluralizado de "Comentario") se muestra siempre."""
+    `comentarios_fijos` (ver `app.negocio.oferta_busqueda_texto`) ya no
+    van siempre: cada uno de los tres se tilda por separado en la
+    previsualización ("Comentarios a incluír"), todos destildados por
+    defecto — así que esta sección puede volver a quedar vacía del todo
+    (el llamador no la agrega si `_texto_comentario` devuelve una lista
+    vacía de líneas de contenido)."""
     style = estilo_texto(9)
     lineas = [Paragraph(f"* {t}", style) for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
-    lineas += [Paragraph(f"* {t}", style) for t in comentarios_fijos(conn)]
+    lineas += [Paragraph(f"* {t}", style) for t in comentarios_fijos(conn, comentarios_incluidos)]
+    if not lineas:
+        return []
     return [Paragraph("<b>Comentarios</b>", style), Spacer(1, 2)] + lineas
 
 
@@ -173,6 +177,7 @@ def _bloque_consultorios_intervinientes(
 def generar_pdf_oferta_busqueda(
     conn: sqlite3.Connection, directorio: str, id_profesional: int, globales: CriteriosGlobales,
     busquedas: list[Busqueda], excluir: set[tuple[int, int, int]] | None = None,
+    comentarios_incluidos: set[str] | None = None,
 ) -> str:
     """Genera el PDF de Oferta de consultorios a partir de una búsqueda
     ad-hoc y devuelve la ruta completa. `busquedas` es la lista de franjas de la búsqueda global,
@@ -184,10 +189,16 @@ def generar_pdf_oferta_busqueda(
     (`app.gui.pantallas.oferta`), donde se puede destildar una opción
     puntual para no ofrecerla (p. ej. porque se prefiere guardar ese
     consultorio libre para otro profesional) sin descartar el resto de
-    la búsqueda."""
+    la búsqueda.
+
+    `comentarios_incluidos` — subconjunto de las claves de `app.negocio.
+    oferta_busqueda_texto.comentarios_fijos` a mostrar en "Comentarios"
+    (checks "Comentarios a incluír" de la previsualización, todos
+    destildados por defecto): ninguno si no viene nada."""
     if not busquedas:
         raise ValueError("La búsqueda necesita al menos una franja")
     excluir = excluir or set()
+    comentarios_incluidos = comentarios_incluidos or set()
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None:
@@ -236,7 +247,7 @@ def generar_pdf_oferta_busqueda(
         # aclarar la dirección de un nombre que no aparece en ningún
         # lado no tiene sentido (y de paso revelaría ubicación exacta
         # que el modo justamente quiere evitar).
-        comentario = _texto_comentario(conn, ids_edificio_resultado, mostrar_edificio and mostrar_unidad)
+        comentario = _texto_comentario(conn, ids_edificio_resultado, mostrar_edificio and mostrar_unidad, comentarios_incluidos)
         if comentario:
             story.append(Spacer(1, 8))
             story.extend(comentario)

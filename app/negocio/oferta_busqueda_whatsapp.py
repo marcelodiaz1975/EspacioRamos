@@ -44,12 +44,18 @@ from app.repositorio.registro import obtener_repositorio
 
 def generar_texto_oferta_busqueda(
     conn: sqlite3.Connection, id_profesional: int, globales: CriteriosGlobales, busquedas: list[Busqueda],
-    excluir: set[tuple[int, int, int]] | None = None,
+    excluir: set[tuple[int, int, int]] | None = None, comentarios_incluidos: set[str] | None = None,
 ) -> str:
-    """Devuelve el texto completo, listo para copiar y pegar en WhatsApp."""
+    """Devuelve el texto completo, listo para copiar y pegar en WhatsApp.
+
+    `comentarios_incluidos` — subconjunto de las claves de
+    `app.negocio.oferta_busqueda_texto.comentarios_fijos` a mostrar
+    (checks "Comentarios a incluír" de la previsualización, todos
+    destildados por defecto): ninguno si no viene nada."""
     if not busquedas:
         raise ValueError("La búsqueda necesita al menos una franja")
     excluir = excluir or set()
+    comentarios_incluidos = comentarios_incluidos or set()
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None:
@@ -96,12 +102,13 @@ def generar_texto_oferta_busqueda(
     comentario = (
         [f"- {t}" for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio and mostrar_unidad else []
     )
-    # Las tres líneas de `comentarios_fijos` van SIEMPRE — a diferencia
-    # de la vieja "nota de bloques rígidos" que reemplazan, ya no están
-    # condicionadas a si la búsqueda involucra un bloque rígido, así
-    # que el bloque de comentario ya no puede quedar vacío.
-    comentario += [f"- {t}" for t in comentarios_fijos(conn)]
-    bloque_comentario = "\n\n*Comentarios*\n" + "\n".join(comentario)
+    # `comentarios_fijos` ya no van siempre: cada uno de los tres se
+    # tilda por separado en la previsualización, todos destildados por
+    # defecto — el bloque entero (con su título) puede volver a quedar
+    # vacío, mismo criterio que el resto de los bloques opcionales de
+    # este mecanismo (ej. `{bloque_feriados}` del Mensaje grupal).
+    comentario += [f"- {t}" for t in comentarios_fijos(conn, comentarios_incluidos)]
+    bloque_comentario = ("\n\n*Comentarios*\n" + "\n".join(comentario)) if comentario else ""
 
     plantilla = resolver_plantilla(conn, "oferta_busqueda_whatsapp", DEFAULT_OFERTA_BUSQUEDA_WHATSAPP)
     return sustituir_variables(plantilla, {

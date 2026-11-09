@@ -16,7 +16,7 @@ import sqlite3
 from datetime import datetime
 
 from PySide6.QtCore import QDateTime, QLocale, Qt, QTimer
-from PySide6.QtGui import QColor, QValidator
+from PySide6.QtGui import QColor, QGuiApplication, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDateTimeEdit,
@@ -51,6 +51,7 @@ from app.negocio.dias import fecha_a_dia_semana, periodo_actual, periodo_anterio
 from app.negocio.formato import formatear_moneda, periodo_mm_aaaa
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
+from app.negocio.mensajes import mensaje_detalle_reserva_aislada
 from app.negocio.validaciones import FORMATO_PERIODO, es_periodo_valido
 from app.negocio.pagos import (
     abrir_tanda_sobres,
@@ -652,6 +653,7 @@ class _PanelRegistrarPago(QWidget):
         if es_sobre and recogida_sobres:
             obtener_repositorio(self.conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres=recogida_sobres)
         self.conn.commit()
+        self._actualizar_portapapeles_si_es_aislada(id_profesional)
         self.actualizar()
         self._resetear_formulario()
         QMessageBox.information(self, "Registrar pago", "Pago registrado con éxito.")
@@ -698,6 +700,7 @@ class _PanelRegistrarPago(QWidget):
         self._regenerar_si_afecta_mes_anterior(registro["IdProfesional"], periodo_viejo)
         self._regenerar_si_afecta_mes_anterior(registro["IdProfesional"], dialogo.periodo_imputado)
         self.conn.commit()
+        self._actualizar_portapapeles_si_es_aislada(registro["IdProfesional"])
         self.actualizar()
         self._resetear_formulario()
 
@@ -708,6 +711,27 @@ class _PanelRegistrarPago(QWidget):
         saldo — hay que regenerarla y dejarla marcada como no enviada."""
         if periodo_imputado and periodo_imputado < periodo_actual(self.conn):
             regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
+
+    def _actualizar_portapapeles_si_es_aislada(self, id_profesional: int) -> None:
+        """Bug real reportado por la clienta: registrar/modificar/
+        eliminar un pago (o deshacer el último movimiento) de un
+        profesional categoría A no actualizaba el "Detalle reserva" del
+        portapapeles — ese mensaje incluye la línea "Pagos registrados en
+        mes en curso"/el saldo pendiente del mes anterior, así que
+        cualquier movimiento de pago lo deja desactualizado. Mismo
+        mecanismo que ya usa Reservas aisladas al confirmar/cancelar/
+        modificar una reserva (`_copiar_mensaje_detalle`): regenera y
+        copia sola, sin pedir nada aparte. `periodo_actual` (no el
+        período imputado del pago) porque es el mismo mensaje que ya se
+        viene copiando en el resto del sistema para este profesional."""
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        if profesional is None or profesional["CategoriaProfesional"] != "A":
+            return
+        try:
+            texto = mensaje_detalle_reserva_aislada(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
+        except ValueError:
+            return
+        QGuiApplication.clipboard().setText(texto)
 
     def _eliminar(self) -> None:
         registro = self._fila_seleccionada()
@@ -745,6 +769,7 @@ class _PanelRegistrarPago(QWidget):
             return
         self._regenerar_si_afecta_mes_anterior(eliminado["IdProfesional"], eliminado["PeriodoImputado"])
         self.conn.commit()
+        self._actualizar_portapapeles_si_es_aislada(eliminado["IdProfesional"])
         self.actualizar()
         self._resetear_formulario()
 
@@ -768,6 +793,7 @@ class _PanelRegistrarPago(QWidget):
             return
         self._regenerar_si_afecta_mes_anterior(deshecho["IdProfesional"], deshecho["PeriodoImputado"])
         self.conn.commit()
+        self._actualizar_portapapeles_si_es_aislada(deshecho["IdProfesional"])
         self.actualizar()
         self._resetear_formulario()
 

@@ -226,10 +226,16 @@ DEFAULT_OFERTA_BUSQUEDA_WHATSAPP = (
     "{bloque_comentario}"
 )
 
-DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS = (
+DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_RESERVAS_REGULARES = (
     "Reservas regulares: Las horas que van de 9 a 11hs de lunes a sábados y las que van de 18 a 21hs de lunes "
-    "a viernes son bloques rígidos que no se fraccionan.\n"
-    "Reservas aisladas: No hay limitación alguna para reservar horarios bajo esta modalidad.\n"
+    "a viernes son bloques rígidos que no se fraccionan."
+)
+
+DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_RESERVAS_AISLADAS = (
+    "Reservas aisladas: No hay limitación alguna para reservar horarios bajo esta modalidad."
+)
+
+DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_ALTERNATIVAS_OFRECIDAS = (
     "Alternativas ofrecidas: Los horarios ofrecidos pueden ser tomados en forma total o parcial, solo se "
     "muestra la disponibilidad total de los bloques para que el profesional ubique dentro de esas horas su "
     "mejor opción."
@@ -289,8 +295,18 @@ MENSAJES_EDITABLES: list[PlantillaMensaje] = [
         DEFAULT_OFERTA_BUSQUEDA_WHATSAPP, ("bloque_detalle_busqueda", "bloque_alternativas", "bloque_comentario"),
     ),
     PlantillaMensaje(
-        "oferta_busqueda_comentarios_fijos",
-        "Oferta de consultorios/Disponibilidad: comentarios fijos (PDF y WhatsApp)",
-        DEFAULT_OFERTA_BUSQUEDA_COMENTARIOS_FIJOS, (),
+        "oferta_busqueda_comentario_reservas_regulares",
+        'Oferta de consultorios/Disponibilidad: comentario "Reservas regulares" (PDF y WhatsApp)',
+        DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_RESERVAS_REGULARES, (),
+    ),
+    PlantillaMensaje(
+        "oferta_busqueda_comentario_reservas_aisladas",
+        'Oferta de consultorios/Disponibilidad: comentario "Reservas aisladas" (PDF y WhatsApp)',
+        DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_RESERVAS_AISLADAS, (),
+    ),
+    PlantillaMensaje(
+        "oferta_busqueda_comentario_alternativas_ofrecidas",
+        'Oferta de consultorios/Disponibilidad: comentario "Alternativas ofrecidas" (PDF y WhatsApp)',
+        DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_ALTERNATIVAS_OFRECIDAS, (),
     ),
 ]

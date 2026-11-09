@@ -1211,3 +1211,174 @@ def test_referencias_de_colores_sin_recorte_al_ancho_real_renderizado(qtbot, con
                 _QRect(0, 0, ancho_real, 0), Qt.TextFlag.TextWordWrap, etiqueta.text(),
             )
             assert etiqueta.height() >= rect.height(), (tipo, etiqueta.text())
+
+
+def test_previsualizacion_siempre_identifica_unidad_y_consultorio_aunque_los_checks_esten_apagados(
+    qtbot, conn, monkeypatch, profesional_y_consultorio,
+):
+    """Pedido explícito de la clienta: la previsualización (pantalla de
+    la operadora) tiene que identificar siempre la ubicación completa
+    para poder tildar/destildar con criterio, sin importar "Identificar
+    unidad"/"Identificar consultorio" (que solo rigen lo que ve el
+    profesional en el documento final)."""
+    capturado = {}
+
+    def _exec_capturando(self):
+        capturado["filas"] = list(self._filas)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoPrevisualizacion, "exec", _exec_capturando)
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    pantalla.casilla_identificar_unidad.setChecked(False)
+
+    pantalla._generar_pdf()
+
+    assert "consultorio 1" in capturado["filas"][0][3]
+
+
+def test_comentarios_a_incluir_arrancan_todos_destildados(qtbot, conn, profesional_y_consultorio):
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    armado = pantalla._armar_criterios()
+    id_profesional, globales, busquedas = armado
+    from app.negocio.oferta_busqueda_texto import previsualizar_documento
+
+    filas = previsualizar_documento(conn, id_profesional, globales, busquedas)
+    dialogo = _DialogoPrevisualizacion(filas, pantalla)
+    qtbot.addWidget(dialogo)
+
+    assert dialogo.comentarios_incluidos() == set()
+    for casilla in dialogo._casillas_comentario.values():
+        assert not casilla.isChecked()
+
+
+def test_tildar_comentario_lo_incluye_en_el_pdf_generado(qtbot, conn, tmp_path, monkeypatch, profesional_y_consultorio):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+
+    def _exec_tildando_regulares(self):
+        self._casillas_comentario["reservas_regulares"].setChecked(True)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoPrevisualizacion, "exec", _exec_tildando_regulares)
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+
+    pantalla._generar_pdf()
+
+    ruta = next((tmp_path / "Archivos varios" / "Oferta").iterdir())
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Reservas regulares" in texto
+    assert "Alternativas ofrecidas" not in texto
+
+
+def test_seleccionar_solo_una_opcion_por_bloque_destilda_la_mas_corta(qtbot, conn, profesional_y_consultorio):
+    """Ejemplo real de la clienta: un consultorio libre todo el rango
+    pedido (9-18hs) y otro libre solo hasta las 14hs — buscando con
+    "cantidad de horas mínimas" (3hs) aparecen las dos alternativas,
+    superpuestas entre sí; al tildar el check se auto-destilda la más
+    corta (9-14hs), quedando solo la más extensa (9-18hs)."""
+    id_profesional, id_edificio = profesional_y_consultorio
+    id_unidad = obtener_repositorio(conn, "Unidad").listar(IdEdificio=id_edificio)[0]["IdUnidad"]
+    id_libre_hasta_las_14 = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=2, ValorHoraRegularActual=1200,
+    )
+    id_ocupante = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ocupante")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_ocupante, IdConsultorio=id_libre_hasta_las_14, DiaSemana="Lunes",
+        HoraInicio=14, HoraFin=18, VigenciaInicio="2020-01-01",
+    )
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    pantalla.spin_desde.setValue(9)
+    pantalla.spin_hasta.setValue(18)
+    pantalla.casilla_horas_minimas.setChecked(True)
+    pantalla.spin_horas_minimas.setValue(3)
+    armado = pantalla._armar_criterios()
+    id_profesional, globales, busquedas = armado
+    from app.negocio.oferta_busqueda_texto import previsualizar_documento
+
+    filas = previsualizar_documento(conn, id_profesional, globales, busquedas)
+    assert len(filas) == 2
+    assert {(f[4], f[5]) for f in filas} == {(9, 18), (9, 14)}
+
+    dialogo = _DialogoPrevisualizacion(filas, pantalla)
+    qtbot.addWidget(dialogo)
+    dialogo.casilla_una_opcion_por_bloque.setChecked(True)
+
+    indice_corta = next(i for i, f in enumerate(filas) if (f[4], f[5]) == (9, 14))
+    indice_larga = next(i for i, f in enumerate(filas) if (f[4], f[5]) == (9, 18))
+    assert dialogo.lista.item(indice_corta).checkState() == Qt.CheckState.Unchecked
+    assert dialogo.lista.item(indice_larga).checkState() == Qt.CheckState.Checked
+
+
+def test_seleccionar_solo_una_opcion_por_bloque_empate_no_destilda_ninguna(
+    qtbot, conn, monkeypatch, profesional_y_consultorio,
+):
+    """Dos consultorios cubren exactamente el mismo horario pedido (sin
+    "cantidad de horas mínimas", ambos ofrecen el rango completo) — es un
+    empate exacto de extensión: no se destilda ninguna (decisión
+    explícita de la clienta: "queda a mi criterio en el momento")."""
+    id_profesional, id_edificio = profesional_y_consultorio
+    id_unidad = obtener_repositorio(conn, "Unidad").listar(IdEdificio=id_edificio)[0]["IdUnidad"]
+    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=2, ValorHoraRegularActual=1200)
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    armado = pantalla._armar_criterios()
+    id_profesional, globales, busquedas = armado
+    from app.negocio.oferta_busqueda_texto import previsualizar_documento
+
+    filas = previsualizar_documento(conn, id_profesional, globales, busquedas)
+    assert len(filas) == 2  # dos consultorios disponibles, mismo horario completo: mismo "bloque"
+
+    dialogo = _DialogoPrevisualizacion(filas, pantalla)
+    qtbot.addWidget(dialogo)
+    dialogo.casilla_una_opcion_por_bloque.setChecked(True)
+
+    estados = [dialogo.lista.item(i).checkState() for i in range(dialogo.lista.count())]
+    assert estados == [Qt.CheckState.Checked, Qt.CheckState.Checked]
+
+
+def test_destildar_una_opcion_a_mano_despues_de_tildar_no_se_revierte_al_destildar_el_check(
+    qtbot, conn, profesional_y_consultorio,
+):
+    """El check es de una sola vía (pedido explícito): destildarlo NO
+    vuelve a tildar lo que auto-destildó mientras estaba activo."""
+    id_profesional, id_edificio = profesional_y_consultorio
+    id_unidad = obtener_repositorio(conn, "Unidad").listar(IdEdificio=id_edificio)[0]["IdUnidad"]
+    id_libre_hasta_las_14 = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=2, ValorHoraRegularActual=1200,
+    )
+    id_ocupante = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Ocupante")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_ocupante, IdConsultorio=id_libre_hasta_las_14, DiaSemana="Lunes",
+        HoraInicio=14, HoraFin=18, VigenciaInicio="2020-01-01",
+    )
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    pantalla.spin_desde.setValue(9)
+    pantalla.spin_hasta.setValue(18)
+    pantalla.casilla_horas_minimas.setChecked(True)
+    pantalla.spin_horas_minimas.setValue(3)
+    armado = pantalla._armar_criterios()
+    id_profesional, globales, busquedas = armado
+    from app.negocio.oferta_busqueda_texto import previsualizar_documento
+
+    filas = previsualizar_documento(conn, id_profesional, globales, busquedas)
+    dialogo = _DialogoPrevisualizacion(filas, pantalla)
+    qtbot.addWidget(dialogo)
+    dialogo.casilla_una_opcion_por_bloque.setChecked(True)
+    dialogo.casilla_una_opcion_por_bloque.setChecked(False)
+
+    indice_corta = next(i for i, f in enumerate(filas) if (f[4], f[5]) == (9, 14))
+    assert dialogo.lista.item(indice_corta).checkState() == Qt.CheckState.Unchecked
