@@ -58,8 +58,15 @@ from app.negocio.plantillas_texto import (
     resolver_plantilla,
 )
 
-_ANCHO_LISTA = 360
 _ANCHO_BOTON = 200
+# Proporción pedida por la clienta: "dos tercios del ancho la primera
+# columna [la lista] y un tercio del ancho de la pantalla el cuadro de
+# la vista del contenido" — factores de stretch de `QHBoxLayout`, no un
+# ancho fijo en píxeles (antes `self.lista.setFixedWidth(360)`, que
+# además dejaba la proporción al revés en una ventana ancha: la lista
+# se quedaba angosta y el editor se llevaba casi todo el sobrante).
+_STRETCH_LISTA = 2
+_STRETCH_EDITOR = 1
 _CLAVE = Qt.ItemDataRole.UserRole
 
 
@@ -102,10 +109,9 @@ class _PanelTextosDelSistema(QWidget):
         self.titulo_lista.setObjectName("subtituloSeccion")
         columna.addWidget(self.titulo_lista)
         self.lista = QListWidget()
-        self.lista.setFixedWidth(_ANCHO_LISTA)
         self.lista.currentItemChanged.connect(self._al_cambiar_seleccion)
         columna.addWidget(self.lista, stretch=1)
-        layout.addWidget(panel_izquierda)
+        layout.addWidget(panel_izquierda, stretch=_STRETCH_LISTA)
 
         panel_derecha = QWidget()
         panel_derecha.setObjectName("panelSolapa")
@@ -132,7 +138,7 @@ class _PanelTextosDelSistema(QWidget):
             fila_botones.addWidget(boton)
         fila_botones.addStretch()
         columna_derecha.addLayout(fila_botones)
-        layout.addWidget(panel_derecha, stretch=1)
+        layout.addWidget(panel_derecha, stretch=_STRETCH_EDITOR)
 
         self._llenar_lista()
         self._mostrar_sin_seleccion()

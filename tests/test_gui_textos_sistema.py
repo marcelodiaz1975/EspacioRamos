@@ -36,6 +36,23 @@ def test_es_un_panel_solapa(qtbot, conn):
     assert pantalla.objectName() == "panelSolapa"
 
 
+def test_lista_ocupa_dos_tercios_y_editor_un_tercio(qtbot, conn):
+    """Pedido explícito de la clienta: "dos tercios del ancho la
+    primera columna [la lista] y un tercio del ancho de la pantalla el
+    cuadro de la vista del contenido" — proporción (no un ancho fijo en
+    píxeles, que antes dejaba la lista angosta en una ventana ancha)."""
+    pantalla = _PanelTextosDelSistema(conn, _SECCIONES)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1500, 800)
+    qtbot.waitExposed(pantalla)
+
+    ancho_lista = pantalla.lista.parentWidget().width()
+    ancho_editor = pantalla.editor.parentWidget().width()
+    proporcion = ancho_lista / (ancho_lista + ancho_editor)
+    assert 0.60 <= proporcion <= 0.70
+
+
 def test_lista_incluye_los_7_mensajes_y_las_secciones(qtbot, conn):
     pantalla = _PanelTextosDelSistema(conn, _SECCIONES)
     qtbot.addWidget(pantalla)

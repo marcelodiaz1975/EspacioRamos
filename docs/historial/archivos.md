@@ -642,3 +642,27 @@ Tests nuevos en `tests/test_gui_imagenes.py`:
 (mecanismo puro, con una tabla chica armada a mano) y
 `test_unidad_y_categoria_vista_todos_los_archivos` (integración, sobre
 el panel real).
+
+## Textos del sistema: lista a 2/3, editor a 1/3 (nov-2026)
+
+Pedido explícito de la clienta: "Dale mas ancho a la primer columna,
+que quede dos tercios del ancho la primer columna y un tercio del
+ancho de la pantalla el cuadro de la vista del contenido". Antes la
+lista (`self.lista`, izquierda) tenía un ancho FIJO (`setFixedWidth`,
+360px) y el editor (derecha) se llevaba todo el resto vía `stretch=1` —
+en una ventana ancha quedaba al revés de lo pedido: la lista angosta y
+fija, el editor llevándose casi toda la pantalla.
+
+`_PanelTextosDelSistema._armar_ui` (`app/gui/pantallas/textos_
+sistema.py`) saca el `setFixedWidth` de `self.lista` y pasa a repartir
+el ancho entre `panel_izquierda`/`panel_derecha` con factores de
+stretch de `QHBoxLayout` (`_STRETCH_LISTA = 2`, `_STRETCH_EDITOR = 1`)
+en vez de un ancho en píxeles — proporción, no un valor fijo, así que
+se mantiene 2:1 sea cual sea el tamaño real de la ventana. Un widget
+con `setFixedWidth` no responde a los factores de stretch de su layout
+(tiene política de tamaño Fija, el layout no lo puede estirar más allá
+de eso), por eso había que sacarlo del todo, no solo ajustar el número.
+
+Test nuevo: `tests/test_gui_textos_sistema.py::
+test_lista_ocupa_dos_tercios_y_editor_un_tercio` (resize a 1500×800,
+confirma que la proporción real cae entre 0.60 y 0.70).
