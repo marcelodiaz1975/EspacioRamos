@@ -4358,6 +4358,58 @@ def test_botones_modificar_y_cancelar_extraordinaria_deshabilitados_sin_seleccio
     assert not panel.boton_cancelar.isEnabled()
 
 
+def test_panel_filtros_extraordinaria_se_achico_respecto_al_de_regulares_aisladas(qtbot, conn):
+    """Pedido explícito de la clienta: "Reducí al mínimo la columna de
+    los filtros para que salgan todos los elementos y las etiquetas sin
+    cortar" — antes reusaba el mismo ancho fijo que Regulares/Aisladas
+    (290px, con su propia grilla embebida), sin relación con lo que
+    necesita esta solapa, deliberadamente más simple."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel_form = pantalla.panel_extraordinaria.combo_profesional.parentWidget()
+    assert panel_form.width() < reservas_modulo._ANCHO_PANEL_FILTROS_GRILLA
+    assert panel_form.width() == reservas_modulo._ANCHO_PANEL_FILTROS_EXTRAORDINARIA
+
+
+def test_boton_crear_extraordinaria_no_corta_su_texto(qtbot, conn):
+    """Confirma que el ancho reducido del panel de filtros sigue siendo
+    suficiente para el texto del botón más largo de la solapa."""
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    boton_crear = next(
+        b for b in panel.findChildren(QPushButton) if b.text() == "Crear reserva extraordinaria"
+    )
+    metrica = QFontMetrics(boton_crear.font())
+    assert boton_crear.width() >= metrica.horizontalAdvance(boton_crear.text())
+
+
+def test_tabla_extraordinaria_ocupa_todo_el_ancho_disponible(qtbot, conn):
+    """Pedido explícito de la clienta: "Redistribuí en ancho de la
+    pantalla en blanco entre todas las columnas de la tabla" — se
+    reparte en partes iguales entre las 12 columnas (a diferencia de
+    otras pantallas, acá no hay una columna "prioritaria")."""
+    _preparar_categoria_a(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.pestanas.setCurrentIndex(2)
+    pantalla.show()
+    pantalla.resize(1800, 800)
+    qtbot.waitExposed(pantalla)
+
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Taller")
+    panel.spin_monto.setValue(1000)
+    panel._crear()
+
+    tabla = panel.tabla
+    disponible = tabla.viewport().width()
+    suma_columnas = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
+    assert suma_columnas <= disponible + 1
+    assert suma_columnas >= disponible - tabla.columnCount()  # sin dejar sobrante sin repartir
+
+
 def test_spin_monto_de_reserva_extraordinaria_selecciona_todo_al_enfocar(qtbot):
     """Pedido de la clienta sobre "Monto a cobrar" de Reserva
     extraordinaria, extendido a "todos los cuadros de texto similares

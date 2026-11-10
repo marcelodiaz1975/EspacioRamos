@@ -95,6 +95,21 @@ def _ajustar_columnas(tabla: QTableWidget) -> None:
     for columna in range(tabla.columnCount()):
         tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
     tabla.setColumnWidth(0, max(tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
+    # Pedido explícito de la clienta sobre Reservas extraordinarias
+    # (único uso hoy de esta función genérica): "redistribuí el ancho
+    # sobrante de la pantalla entre todas las columnas de la tabla" —
+    # a diferencia de otras pantallas (que priorizan una columna
+    # puntual), acá se reparte en partes iguales entre TODAS, el
+    # residuo de la división (si no es exacta) para las primeras.
+    disponible = tabla.viewport().width()
+    suma_natural = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
+    sobrante = disponible - suma_natural
+    if sobrante <= 0 or tabla.columnCount() == 0:
+        return
+    por_columna, residuo = divmod(sobrante, tabla.columnCount())
+    for columna in range(tabla.columnCount()):
+        extra = por_columna + (1 if columna < residuo else 0)
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + extra)
 
 
 # Índices de columna de la tabla de abajo de Reservas aisladas (ver
@@ -3349,15 +3364,42 @@ class _PanelReservasAisladas(QWidget):
         self.actualizar()
 
 
-# `panel_form` usa `_ANCHO_PANEL_FILTROS_GRILLA` como ancho TOTAL fijo,
-# pero su `QVBoxLayout` se queda con el margen default de Qt (9px por
-# lado) — el ancho de CONTENIDO real es 290 - 9 - 9 = 272 (confirmado
-# con `combo_profesional`, que ya se dimensiona bien a ese ancho). Los
-# tres botones de acción, en cambio, se fijaban al ancho TOTAL del panel
-# (290) en vez de al de contenido — su borde derecho terminaba 9px más
-# allá del borde del panel y quedaba cortado contra él. Ancho correcto
-# para estos tres botones, medido, no el de `panel_form`.
-_ANCHO_BOTON_EXTRAORDINARIA = _ANCHO_PANEL_FILTROS_GRILLA - 18
+# Pedido explícito de la clienta: "Reducí al mínimo la columna de los
+# filtros para que salgan todos los elementos y las etiquetas sin
+# cortar" — antes reusaba `_ANCHO_PANEL_FILTROS_GRILLA` (290, calibrado
+# para Regulares/Aisladas, con su propia grilla de referencia embebida)
+# sin relación real con lo que necesita ESTA solapa, deliberadamente
+# simple y sin esa grilla (ver docstring de la clase). Medido a mano
+# (offscreen, con la hoja de estilos real aplicada, sacándole el ancho
+# fijo a los botones para ver cuánto necesita cada uno de verdad): el
+# elemento más angosto de todos es la fila "Desde"/"Hasta" (dos
+# etiquetas + dos spinbox), no el botón "Crear reserva extraordinaria"
+# (más corto de lo que parece, 200px) — el panel completo nunca
+# necesita menos de ~259px de ancho total. 270 deja un colchón chico
+# sin volver a los 290 de antes.
+_ANCHO_PANEL_FILTROS_EXTRAORDINARIA = 270
+# Mismo motivo que antes (ver más abajo, docstring de la clase): el
+# `QVBoxLayout` de `panel_form` se queda con el margen default de Qt
+# (9px por lado) — el ancho de CONTENIDO real es `_ANCHO_PANEL_FILTROS_
+# EXTRAORDINARIA - 9 - 9`. Los tres botones de acción se fijan a ese
+# ancho de contenido, no al total del panel.
+_ANCHO_BOTON_EXTRAORDINARIA = _ANCHO_PANEL_FILTROS_EXTRAORDINARIA - 18
+
+
+class _TablaConAnchoDinamico(QTableWidget):
+    """Notifica a `al_redimensionar` cada vez que cambia de tamaño —
+    mismo motivo y mismo patrón que `app.gui.pantallas.imagenes.
+    _TablaConAnchoDinamico`: el ancho real disponible (para repartir el
+    sobrante, ver `_ajustar_columnas`) recién se conoce después de que
+    el layout se resuelve, no al construirse."""
+
+    def __init__(self, al_redimensionar, parent=None):
+        super().__init__(parent)
+        self._al_redimensionar = al_redimensionar
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        super().resizeEvent(evento)
+        self._al_redimensionar()
 
 
 class _PanelReservaExtraordinaria(QWidget):
@@ -3417,7 +3459,7 @@ class _PanelReservaExtraordinaria(QWidget):
         layout_externo = QHBoxLayout(self)
 
         panel_form = QWidget()
-        panel_form.setFixedWidth(_ANCHO_PANEL_FILTROS_GRILLA)
+        panel_form.setFixedWidth(_ANCHO_PANEL_FILTROS_EXTRAORDINARIA)
         form = QVBoxLayout(panel_form)
 
         self.combo_profesional = QComboBox()
@@ -3531,7 +3573,8 @@ class _PanelReservaExtraordinaria(QWidget):
             "Profesional", "Localidad", "Edificio", "Unidad", "Consultorio",
             "Día", "Fecha", "Horario", "Ítem", "Monto", "Estado", "Período imputado",
         ]
-        self.tabla = QTableWidget(0, len(columnas))
+        self.tabla = _TablaConAnchoDinamico(self._reajustar_ancho_tabla)
+        self.tabla.setColumnCount(len(columnas))
         self.tabla.setHorizontalHeaderLabels(columnas)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -3838,8 +3881,17 @@ class _PanelReservaExtraordinaria(QWidget):
             self.tabla.setItem(fila_idx, 9, item_numero(formatear_moneda(r["MontoExtraordinario"] or 0.0)))
             self.tabla.setItem(fila_idx, 10, QTableWidgetItem(r["Estado"]))
             self.tabla.setItem(fila_idx, 11, QTableWidgetItem(r["PeriodoImputado"] or ""))
-        self.tabla.resizeColumnsToContents()
+        _ajustar_columnas(self.tabla)
         self._actualizar_botones()
+
+    def _reajustar_ancho_tabla(self) -> None:
+        """Se llama sola cada vez que `self.tabla` cambia de tamaño
+        (`_TablaConAnchoDinamico`), no solo al refrescar los datos —
+        para que el reparto del ancho sobrante (`_ajustar_columnas`) se
+        recalcule si se redimensiona la ventana."""
+        if self.tabla.columnCount() == 0:
+            return
+        _ajustar_columnas(self.tabla)
 
     @staticmethod
     def _clave_orden(columna: int):

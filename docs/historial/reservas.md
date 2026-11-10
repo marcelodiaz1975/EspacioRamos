@@ -3949,3 +3949,49 @@ de "Mostrar reservas anteriores" a "Ver reservas anteriores". El nombre
 del atributo Python (`check_mostrar_todas`) y su comportamiento (filtro
 de VISUALIZACIÓN, desactivado por defecto, muestra desde hoy en
 adelante) no cambian — solo el texto visible del check.
+
+## Reservas extraordinarias: filtros al mínimo, tabla a ancho completo (nov-2026)
+
+Pedido explícito de la clienta: "Reducí al mínimo la columna de los
+filtros para que salgan todos los elementos y las etiquetas sin cortar"
++ "Redistribuí en ancho de la pantalla en blanco entre todas las
+columnas de la tabla".
+
+El panel de filtros de esta solapa reusaba `_ANCHO_PANEL_FILTROS_
+GRILLA` (290px) — la misma constante que Regulares/Aisladas, calibrada
+para SU grilla de referencia embebida, sin relación real con lo que
+necesita esta solapa (deliberadamente más simple, sin esa grilla — ver
+docstring de `_PanelReservaExtraordinaria`). Medido a mano (offscreen,
+con la hoja de estilos real, sacándole el ancho fijo a los tres botones
+para ver cuánto necesita cada uno de verdad): el elemento más angosto
+de todo el panel es la fila "Desde"/"Hasta" (dos etiquetas + dos
+spinbox), no el botón "Crear reserva extraordinaria" (más corto de lo
+que parece, 200px) — el panel completo nunca necesita menos de ~259px.
+Nueva constante independiente `_ANCHO_PANEL_FILTROS_EXTRAORDINARIA =
+270` (antes 290), con `_ANCHO_BOTON_EXTRAORDINARIA` derivado de ella
+con el mismo descuento de margen (18px) que ya tenía.
+
+Para la tabla, la función genérica `_ajustar_columnas` (definida al
+principio del archivo, pensada para esta solapa pero nunca conectada —
+quedaba sin ningún llamador, código huérfano) pasa a usarse de verdad
+acá, con un reparto nuevo: a diferencia de otras pantallas (que
+priorizan una sola columna con el sobrante), acá se reparte en partes
+iguales entre las 12 columnas de la tabla (el residuo de la división,
+si no es exacta, para las primeras) — no hay una columna "más
+importante" en este listado. `_TablaConAnchoDinamico` (duplicada en
+este módulo, mismo criterio de "no centralizar entre módulos" del resto
+del sistema) recalcula el reparto en cada resize de la tabla, no solo
+al refrescar los datos.
+
+Confirmado que, igual que `columna_flexible` en `crud_generico.py`, si
+el contenido NATURAL de las 12 columnas con datos reales ya supera el
+ancho disponible (puede pasar con nombres/ítems largos en una ventana
+angosta), no hay sobrante que repartir y la tabla escrolea — preferible
+a ocultar columnas sin aviso, mismo criterio ya aplicado ahí.
+
+Tests nuevos en `tests/test_gui_reservas.py`:
+`test_panel_filtros_extraordinaria_se_achico_respecto_al_de_regulares_
+aisladas`, `test_boton_crear_extraordinaria_no_corta_su_texto`,
+`test_tabla_extraordinaria_ocupa_todo_el_ancho_disponible`. Suite
+completa de este archivo: 186 passed, mismos 2 fallos de calibración de
+altura de botón ya conocidos, sin regresiones nuevas.
