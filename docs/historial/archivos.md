@@ -471,3 +471,97 @@ Tests nuevos en `tests/test_gui_imagenes.py`:
 `test_principal_y_activo_quedan_centrados`, `test_descripcion_sin_
 piso_minimo_artificial`.
 
+
+## Gestor de archivos del espacio: layout en dos filas, tabla a todo el ancho (nov-2026)
+
+Pedido explícito de la clienta sobre esta pantalla:
+
+1. **Columnas "Unidad"/"Consul" (vista "Todos los archivos")**: "Unidad"
+   pasa a mostrarse centrada (`item_centrado`, excepción puntual a la
+   regla general de "texto a la izquierda" — igual que "Principal"/
+   "Activo"). "Consultorio" se renombra a "Consul" y también queda
+   centrada, con el mismo ancho mínimo (ajustado a la etiqueta) que ya
+   tenían "Categoría"/"Principal"/"Activo" — ya estaba en
+   `columnas_minimas`, solo cambió el texto del encabezado y la
+   alineación de la celda (antes `item_numero`, right-aligned).
+
+2. **Layout: de "filtros | tabla | vista previa" en una sola fila a dos
+   filas.** Arriba, tres columnas de igual alto: filtros (antes
+   mezclados con los botones en una sola columna, ahora separados),
+   botones de acción (de "Agregar archivo" a "Manual del usuario") y
+   Vista previa (la única con `stretch=1`). Abajo, la tabla sola,
+   ocupando todo el ancho de la fila. `QHBoxLayout` ya estira sus
+   widgets hijos directos al alto de la fila sin necesitar nada extra
+   — alcanzó con que cada columna nueva tenga su propio `addStretch()`
+   al final (antes solo existía uno, al final de la columna combinada)
+   para que el contenido quede arriba y el alto de sobra no se reparta
+   adentro de cada columna.
+
+3. **La tabla pasa a ocupar todo el ancho disponible de la pantalla**
+   (antes quedaba con `setFixedWidth` al ancho justo de sus columnas, y
+   el ancho sobrante se lo llevaba la Vista previa, que compartía fila
+   con ella) — al vivir ahora en su propia fila, sin nada al lado, el
+   ancho sobrante lo reparte ella misma entre sus columnas. Pedido
+   explícito: "Descripción" es la que puede tener más ancho, y el resto
+   del sobrante se reparte entre las otras columnas.
+
+   `_ajustar_columnas` (`app/gui/pantallas/imagenes.py`) ya no fija el
+   ancho de la tabla — calcula el ancho natural de cada columna como
+   antes (contenido + `_PADDING_COLUMNA`, o el piso de la etiqueta para
+   las columnas "mínimas") y después reparte lo que sobra
+   (`disponible = tabla.viewport().width()` menos la suma de los
+   anchos naturales) con la nueva `_repartir_sobrante` (función pura,
+   sin nada de Qt, separada a propósito para poder testearla con
+   números simples): la mitad entera del sobrante va completa para
+   "Descripción", la otra mitad se reparte en partes iguales entre el
+   resto de las columnas que NO son "mínimas" (esas se quedan siempre
+   en su ancho mínimo) — sin ninguna otra columna así (caso típico de
+   la vista por alcance, donde las únicas columnas no-mínimas son
+   "Orden"/Descripción), "Descripción" se lleva el sobrante entero. Sin
+   sobrante (ventana angosta), no se reparte nada — "Descripción" sigue
+   sin ningún piso artificial propio, ni éste ni ningún otro.
+
+   Nueva `_TablaConAnchoDinamico` (subclase mínima de `QTableWidget`
+   que notifica a un callback en cada `resizeEvent`): como la tabla
+   recién conoce su ancho real disponible después de que termine de
+   resolverse el layout (en la construcción, y de nuevo si se
+   redimensiona la ventana — no alcanza con calcularlo una sola vez al
+   cargar los datos), `_PanelGestorArchivos._reajustar_ancho_tabla`
+   vuelve a llamar a `_ajustar_columnas` con el `indice_descripcion`/
+   `columnas_minimas` de la vista activa (guardados como atributos de
+   instancia en `_llenar_tabla_normal`/`_llenar_tabla_todos`) cada vez
+   que la tabla cambia de tamaño.
+
+Tests actualizados/nuevos en `tests/test_gui_imagenes.py`:
+`test_panel_izquierdo_tiene_fondo_blanco_no_gris` (ahora espera 3
+`panelSolapa` anidados, no 2, por la columna nueva de botones);
+`test_descripcion_sin_piso_minimo_artificial_sin_sobrante_que_repartir`
+reemplaza al viejo `test_descripcion_sin_piso_minimo_artificial` (que
+asumía que la tabla nunca podía crecer más allá de su ancho natural —
+ya no es así a propósito); `test_repartir_sobrante_*` (cinco casos,
+función pura, sin Qt: mitad a Descripción + resto parejo, reparto del
+residuo cuando no divide exacto, sin otras columnas, columnas mínimas
+excluidas, sobrante cero o negativo); `test_tabla_crece_para_ocupar_
+todo_el_ancho_disponible` (integración real, mostrando la pantalla a
+un ancho generoso).
+
+## Ventana principal: mitigación de "no abre realmente maximizada" (nov-2026)
+
+Bug real reportado por la clienta, intermitente, en su PC con Windows:
+"a veces veo que cuando ingreso al sistema no abre con la pantalla
+maximizada... al presionar el botón de minimizar y maximizar ahí se
+acomoda". Clásico de Windows/Qt: `showMaximized()` llamado sobre una
+ventana recién creada, en el mismo instante en que se construye, puede
+calcular mal el "ancho disponible de la pantalla" (`availableGeometry`)
+si Windows todavía no terminó de asentar la ventana nueva — minimizar y
+volver a maximizar fuerza a recalcular contra la geometría ya resuelta.
+
+Mitigación en `gui_main.main()`: `ventana.showNormal()` + `app.
+processEvents()` ANTES de `ventana.showMaximized()` (antes se llamaba
+`showMaximized()` directo apenas construida) — le da a Windows una
+ventana ya mostrada y asentada contra la que calcular el maximizado,
+en vez de pedírselo en el mismo golpe que la crea. No reproducible en
+este sandbox Linux (el bug es puntual de Windows, y `main()` no es
+testeable sin una base real + diálogo de login, mismo criterio ya
+documentado para el resto de lo que pasa ahí) — queda como mitigación
+de buena fe hasta que la clienta confirme si sigue pasando.

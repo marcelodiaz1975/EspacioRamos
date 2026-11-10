@@ -384,7 +384,22 @@ def main() -> None:
     )
 
     ventana = VentanaPrincipal(conn, secciones, id_nivel_usuario=usuario["IdNivelAcceso"])
-    ventana.showMaximized()  # pedido explícito de la clienta: arrancar siempre maximizada
+    # Pedido explícito de la clienta: arrancar siempre maximizada. Bug
+    # real reportado después (intermitente, en su PC con Windows): a
+    # veces no abría realmente maximizada del todo (se le tapaba la
+    # barra de abajo con la leyenda de las funciones) — minimizar y
+    # volver a maximizar a mano lo acomodaba, señal clásica de Windows
+    # resolviendo el "ancho disponible de la pantalla" (`availableGeometry`)
+    # antes de que la ventana recién creada esté del todo lista. Mostrar
+    # primero en su tamaño normal y procesar esos eventos ANTES de pedir
+    # maximizar le da a Windows una ventana ya asentada contra la que
+    # calcular bien el maximizado, en vez de maximizar en el mismo golpe
+    # que la crea. No reproducible en este sandbox Linux (el bug es
+    # puntual de Windows) — mitigación de buena fe, a confirmar con la
+    # clienta si sigue pasando.
+    ventana.showNormal()
+    app.processEvents()
+    ventana.showMaximized()
     pantalla_carga.finish(ventana)
 
     # Bloqueo por inactividad: se instala sobre la QApplication entera

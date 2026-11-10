@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QWidget
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion
-from app.gui.pantallas.imagenes import _PanelGestorArchivos, _DialogoAgregarArchivo
+from app.gui.pantallas.imagenes import _PanelGestorArchivos, _DialogoAgregarArchivo, _repartir_sobrante
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -86,14 +86,19 @@ def test_panel_izquierdo_tiene_fondo_blanco_no_gris(qtbot, conn):
     QScrollArea nunca tenían objectName propio, así que quedaban con el
     gris default de Qt en vez del blanco de `t['superficie']` que sí
     pintaba `self` — `QWidget#panelSolapa` es un selector por id, no
-    cascada a los hijos. Se corrigió sumándoles el mismo objectName."""
+    cascada a los hijos. Se corrigió sumándoles el mismo objectName.
+
+    Pedido explícito de la clienta sobre una ronda posterior: filtros y
+    botones pasan a ser DOS columnas separadas (antes una sola) — ahora
+    son tres los `panelSolapa` anidados (filtros + botones + `contenido`
+    del scroll)."""
     pantalla = _PanelGestorArchivos(conn)
     qtbot.addWidget(pantalla)
     paneles = [w for w in pantalla.findChildren(QWidget) if w.objectName() == "panelSolapa"]
-    # `contenido` (dentro del scroll) + el panel izquierdo anidado adentro
-    # (self mismo no cuenta: findChildren busca descendientes, no el
-    # propio widget).
-    assert len(paneles) == 2
+    # `contenido` (dentro del scroll) + panel de filtros + panel de
+    # botones (self mismo no cuenta: findChildren busca descendientes,
+    # no el propio widget).
+    assert len(paneles) == 3
 
 
 def test_boton_manual_del_usuario_es_primario_y_va_despues_de_eliminar(qtbot, conn):
@@ -247,19 +252,62 @@ def test_principal_y_activo_quedan_centrados(qtbot, conn, edificio, unidad, cons
     assert pantalla.tabla.item(0, 4).textAlignment() == (Qt.AlignmentFlag.AlignCenter)
 
 
-def test_descripcion_sin_piso_minimo_artificial(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
-    """Pedido explícito de la clienta: "achicá la columna Descripción lo
-    necesario" — el piso propio de 300px que tenía antes (más generoso
-    que el resto de las columnas) se saca; con una descripción corta,
-    la columna queda angosta, no forzada a 300px."""
-    ruta = _archivo_jpg(tmp_path)
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (ruta, "")))
+def test_descripcion_sin_piso_minimo_artificial_sin_sobrante_que_repartir(qtbot):
+    """Pedido explícito de la clienta, ronda original: "achicá la columna
+    Descripción lo necesario" — el piso propio de 300px que tenía antes
+    (más generoso que el resto de las columnas) se saca. Confirmado acá
+    con `_repartir_sobrante` directo (sin sobrante, no hay ningún piso
+    artificial para "Descripción" ni para nada) — la tabla puede SÍ
+    terminar más ancha que eso cuando hay ancho de sobra para repartir
+    (ver los tests de `_repartir_sobrante` más abajo), pero eso ya no es
+    un piso fijo, depende del ancho real disponible."""
+    assert _repartir_sobrante(0, indice_descripcion=1, cantidad_columnas=5, columnas_minimas=frozenset({0, 2, 3, 4})) == {}
+
+
+def test_repartir_sobrante_mitad_a_descripcion_resto_parejo_entre_las_otras():
+    reparto = _repartir_sobrante(100, indice_descripcion=1, cantidad_columnas=4, columnas_minimas=frozenset({2, 3}))
+    assert reparto == {1: 50, 0: 50}
+
+
+def test_repartir_sobrante_reparte_el_residuo_entre_las_primeras_columnas():
+    # sobrante=103 -> 51 para "Descripción" (índice 0), resto=52 entre 3
+    # columnas (1, 2, 3): 17 + 17 + 18, el residuo de la división (1) va
+    # a la primera.
+    reparto = _repartir_sobrante(103, indice_descripcion=0, cantidad_columnas=4, columnas_minimas=frozenset())
+    assert reparto[0] == 51
+    assert reparto[1] == 18
+    assert reparto[2] == 17
+    assert reparto[3] == 17
+
+
+def test_repartir_sobrante_sin_otras_columnas_descripcion_se_lleva_todo():
+    reparto = _repartir_sobrante(100, indice_descripcion=1, cantidad_columnas=2, columnas_minimas=frozenset({0}))
+    assert reparto == {1: 100}
+
+
+def test_repartir_sobrante_columnas_minimas_no_participan_del_reparto():
+    reparto = _repartir_sobrante(100, indice_descripcion=1, cantidad_columnas=5, columnas_minimas=frozenset({2, 3, 4}))
+    assert 2 not in reparto and 3 not in reparto and 4 not in reparto
+
+
+def test_repartir_sobrante_cero_o_negativo_no_reparte_nada():
+    assert _repartir_sobrante(0, indice_descripcion=1, cantidad_columnas=3, columnas_minimas=frozenset()) == {}
+    assert _repartir_sobrante(-10, indice_descripcion=1, cantidad_columnas=3, columnas_minimas=frozenset()) == {}
+
+
+def test_tabla_crece_para_ocupar_todo_el_ancho_disponible(qtbot, conn):
+    """Pedido explícito de la clienta sobre esta ronda: la tabla pasa a
+    ocupar todo el ancho de la pantalla (antes quedaba fija al ancho
+    justo de sus columnas, y la Vista previa se llevaba el resto) —
+    confirmado mostrando la pantalla real a un ancho generoso y viendo
+    que "Descripción" terminó más ancha que su ancho natural."""
     pantalla = _PanelGestorArchivos(conn)
     qtbot.addWidget(pantalla)
-    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
-    pantalla._agregar()
+    pantalla.show()
+    pantalla.resize(1600, 800)
+    qtbot.waitExposed(pantalla)
 
-    assert pantalla.tabla.columnWidth(1) < 300
+    assert pantalla.tabla.columnWidth(pantalla._indice_descripcion) > 300
 
 
 def test_agregar_imagen_elige_categoria_del_dialogo(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):

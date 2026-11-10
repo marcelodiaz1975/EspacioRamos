@@ -3,11 +3,15 @@ fotos y documentos de edificios, unidades y consultorios
 (app.negocio.imagenes) que se muestran en Propuesta, Disponibilidad,
 Liquidación y Oferta de consultorios.
 
-Mismo formato que los catálogos (solapa "Archivos del espacio", filtros
-a la izquierda, tabla escroleable a la derecha, botones debajo de los
-filtros) aunque no usa `PantallaCRUD` porque no es un catálogo de
-registros con un cuadro de diálogo: es un administrador de archivos por
-alcance. El combo "Alcance" tiene un primer valor especial "Todos los
+Layout en dos filas (pedido explícito de la clienta, reemplaza al
+formato "filtros a la izquierda, tabla al medio, vista previa a la
+derecha" de antes): arriba, tres columnas de igual alto —
+filtros/Alcance (primera), botones de acción (segunda, de "Agregar
+archivo" a "Manual del usuario") y Vista previa (tercera, la única con
+`stretch=1`); abajo, la tabla ocupando todo el ancho disponible (ver
+`_ajustar_columnas` para cómo reparte ese ancho entre sus columnas). No
+usa `PantallaCRUD` porque no es un catálogo de registros con un cuadro
+de diálogo: es un administrador de archivos por alcance. El combo "Alcance" tiene un primer valor especial "Todos los
 archivos" (lista completa, sin filtros, ordenada por nivel y
 Descripción — ver `_TODOS`) y después los 5 niveles reales (Espacio/
 Localidad/Edificio/Unidad/Consultorio — ver `app.negocio.imagenes.
@@ -145,8 +149,11 @@ _ANCHO_PREVISUALIZACION = 400
 _LINEAS_PREVIEW_TXT = 12
 
 _COLUMNAS_NORMAL = ["Orden", "Descripción", "Categoría", "Principal", "Activo"]
+# "Consul" (no "Consultorio", pedido explícito de la clienta): ancho
+# mínimo para que entre la etiqueta, mismo criterio que Categoría/
+# Principal/Activo — ver `columnas_minimas` en `_llenar_tabla_todos`.
 _COLUMNAS_TODOS = [
-    "Alcance", "Localidad", "Edificio", "Unidad", "Consultorio", "Descripción", "Categoría", "Principal", "Activo",
+    "Alcance", "Localidad", "Edificio", "Unidad", "Consul", "Descripción", "Categoría", "Principal", "Activo",
 ]
 
 _FILTRO_ARCHIVO = {
@@ -176,26 +183,13 @@ def _ajustar_columnas(
     tabla: QTableWidget, indice_descripcion: int, columnas_minimas: frozenset[int] = frozenset(),
 ) -> None:
     """Mismo criterio que `novedades._ajustar_columnas`: más aire que el
-    ancho justo de `resizeColumnsToContents` — con una excepción. El
-    ancho final de la tabla queda fijo a la suma de sus columnas (sin
-    stretch) para que no quede un espacio en blanco antes del panel de
-    vista previa, que es el que se estira y ocupa el resto del ancho.
+    ancho justo de `resizeColumnsToContents` — con una excepción.
 
     `columnas_minimas` (puntos 25/27/30, SistemaDF v0.11.2026.10):
     "Orden"/"Categoría"/"Principal"/"Activo" (vista por alcance) o
-    "Consultorio"/"Categoría"/"Principal"/"Activo" (vista "Todos los
+    "Consul"/"Categoría"/"Principal"/"Activo" (vista "Todos los
     archivos") se quedan en el ancho justo de `resizeColumnsToContents`
-    — sin el padding de las demás — para que el ancho que esas dejan de
-    usar se lo lleve la Vista previa, que es la única con `stretch=1` en
-    el layout de la solapa.
-
-    Pedido explícito de la clienta sobre esta misma ronda: antes
-    "Descripción" tenía además un piso propio (`_ANCHO_MINIMO_
-    DESCRIPCION`, 300px) más generoso que el resto — "achicala lo
-    necesario para que se vea toda la tabla completa sin espacios en
-    blanco" — se saca ese piso, Descripción queda con el mismo criterio
-    que el resto de las columnas con aire (`_PADDING_COLUMNA`), ni más
-    ni menos.
+    — sin el padding de las demás.
 
     `resizeColumnsToContents()` mide el ancho necesario por el CONTENIDO
     de las celdas, no por el título del encabezado — con una columna
@@ -206,7 +200,23 @@ def _ajustar_columnas(
     REAL del encabezado (`tabla.horizontalHeader().font()`, ya con el
     peso que le da `estilos.py` vía `QHeaderView` aplicado) más un
     colchón chico (`_COLCHON_TITULO_COLUMNA`) para el padding interno
-    que Qt le suma a la celda del encabezado."""
+    que Qt le suma a la celda del encabezado.
+
+    Pedido explícito de la clienta sobre esta ronda: la tabla pasa a
+    vivir en su propia fila, ocupando todo el ancho disponible (ya no
+    comparte fila con "Vista previa", que ahora vive arriba junto con
+    los filtros y los botones) — así que el ancho que sobra después de
+    que cada columna mida lo que necesita (`sobrante`, puede ser 0 si
+    la ventana es angosta) se reparte en dos mitades: una mitad entera
+    para "Descripción" ("la columna que puede tener más ancho"), la
+    otra mitad repartida en partes iguales entre el resto de las
+    columnas que NO están en `columnas_minimas` (esas se quedan siempre
+    en su ancho mínimo, no participan del reparto) — si no queda
+    ninguna otra columna así, "Descripción" se lleva el sobrante
+    entero. Se vuelve a llamar sola cada vez que la tabla cambia de
+    tamaño (`_TablaConAnchoDinamico.resizeEvent`), no solo al cargar
+    datos nuevos — para que el reparto se recalcule si se redimensiona
+    la ventana."""
     tabla.resizeColumnsToContents()
     metrica_encabezado = QFontMetrics(tabla.horizontalHeader().font())
     for columna in range(tabla.columnCount()):
@@ -217,8 +227,62 @@ def _ajustar_columnas(
             )
             continue
         tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
-    ancho_total = tabla.verticalHeader().width() + tabla.horizontalHeader().length() + 2 * tabla.frameWidth() + 4
-    tabla.setFixedWidth(ancho_total)
+
+    disponible = tabla.viewport().width()
+    suma_natural = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
+    sobrante = disponible - suma_natural
+    reparto = _repartir_sobrante(sobrante, indice_descripcion, tabla.columnCount(), columnas_minimas)
+    for columna, extra in reparto.items():
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + extra)
+
+
+def _repartir_sobrante(
+    sobrante: int, indice_descripcion: int, cantidad_columnas: int, columnas_minimas: frozenset[int],
+) -> dict[int, int]:
+    """La mitad entera del `sobrante` (ancho disponible de la tabla menos
+    la suma de los anchos naturales ya calculados) va para "Descripción"
+    ("la columna que puede tener más ancho", pedido explícito de la
+    clienta); la otra mitad se reparte en partes iguales (el residuo de
+    la división, si no es exacta, para las primeras columnas) entre el
+    resto de las columnas que no están en `columnas_minimas` — esas se
+    quedan siempre en su ancho mínimo, no participan del reparto. Sin
+    ninguna otra columna así, "Descripción" se lleva el sobrante entero.
+    `sobrante <= 0` (la tabla ya no tiene más ancho disponible que el
+    que sus columnas necesitan) no reparte nada — sin esto, "Descripción"
+    no tendría ningún piso artificial propio, ni éste ni ningún otro.
+
+    Separada de `_ajustar_columnas` (que sí depende de un `QTableWidget`
+    real) para poder probar el reparto en sí, con números simples, sin
+    necesitar una tabla de Qt."""
+    if sobrante <= 0:
+        return {}
+    otras = [c for c in range(cantidad_columnas) if c not in columnas_minimas and c != indice_descripcion]
+    if not otras:
+        return {indice_descripcion: sobrante}
+    para_descripcion = sobrante // 2
+    resto = sobrante - para_descripcion
+    reparto = {indice_descripcion: para_descripcion}
+    por_columna, residuo = divmod(resto, len(otras))
+    for i, columna in enumerate(otras):
+        reparto[columna] = por_columna + (1 if i < residuo else 0)
+    return reparto
+
+
+class _TablaConAnchoDinamico(QTableWidget):
+    """Notifica a `al_redimensionar` cada vez que cambia de tamaño —
+    necesario para repartir el ancho sobrante entre sus columnas apenas
+    se conoce el ancho real disponible (en la construcción, y de nuevo
+    si la ventana se redimensiona), ver `_ajustar_columnas`. No alcanza
+    con un `resizeEvent` del panel contenedor: el ancho final de ESTA
+    tabla puede resolverse recién después, al terminar el layout."""
+
+    def __init__(self, al_redimensionar, parent=None):
+        super().__init__(parent)
+        self._al_redimensionar = al_redimensionar
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        super().resizeEvent(evento)
+        self._al_redimensionar()
 
 
 def _pixmap_primera_pagina_pdf(ruta: str, escala: float = 0.6) -> QPixmap | None:
@@ -353,11 +417,19 @@ class _PanelGestorArchivos(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
         contenido.setObjectName("panelSolapa")
-        layout_solapa = QHBoxLayout(contenido)
+        layout_contenido = QVBoxLayout(contenido)
 
-        panel_izquierda = QWidget()
-        panel_izquierda.setObjectName("panelSolapa")
-        form = QVBoxLayout(panel_izquierda)
+        # Fila de arriba: tres columnas (filtros, botones de acción,
+        # vista previa) de igual alto — `QHBoxLayout` ya estira sus
+        # widgets hijos directos al alto de la fila (el más alto de los
+        # tres) sin necesitar nada extra, así que alcanza con un
+        # `addStretch()` propio al final de cada columna para que su
+        # contenido quede arriba y no se reparta en el alto de sobra.
+        fila_superior = QHBoxLayout()
+
+        panel_filtros = QWidget()
+        panel_filtros.setObjectName("panelSolapa")
+        form = QVBoxLayout(panel_filtros)
 
         form.addWidget(_titulo_campo("Alcance"))
         self.combo_alcance = QComboBox()
@@ -397,71 +469,65 @@ class _PanelGestorArchivos(QWidget):
         self.combo_consultorio.currentIndexChanged.connect(self.actualizar)
         form.addWidget(self.combo_consultorio)
 
-        form.addWidget(_linea_divisoria())
+        form.addStretch()
+        fila_superior.addWidget(panel_filtros)
+
+        panel_botones = QWidget()
+        panel_botones.setObjectName("panelSolapa")
+        columna_botones = QVBoxLayout(panel_botones)
 
         self.boton_agregar = QPushButton("Agregar archivo")
         self.boton_agregar.setObjectName("botonPrimario")
         self.boton_agregar.setFixedWidth(_ANCHO_CAMPO)
         self.boton_agregar.clicked.connect(self._agregar)
-        form.addWidget(self.boton_agregar)
+        columna_botones.addWidget(self.boton_agregar)
 
         self.boton_principal = QPushButton("Marcar como principal")
         self.boton_principal.setObjectName("botonSecundario")
         self.boton_principal.setFixedWidth(_ANCHO_CAMPO)
         self.boton_principal.clicked.connect(self._marcar_principal)
-        form.addWidget(self.boton_principal)
+        columna_botones.addWidget(self.boton_principal)
 
         self.boton_subir = QPushButton("Subir")
         self.boton_subir.setObjectName("botonSecundario")
         self.boton_subir.setFixedWidth(_ANCHO_CAMPO)
         self.boton_subir.clicked.connect(lambda: self._reordenar(-1))
-        form.addWidget(self.boton_subir)
+        columna_botones.addWidget(self.boton_subir)
 
         self.boton_bajar = QPushButton("Bajar")
         self.boton_bajar.setObjectName("botonSecundario")
         self.boton_bajar.setFixedWidth(_ANCHO_CAMPO)
         self.boton_bajar.clicked.connect(lambda: self._reordenar(1))
-        form.addWidget(self.boton_bajar)
+        columna_botones.addWidget(self.boton_bajar)
 
         self.boton_activo = QPushButton("Activar/Desactivar")
         self.boton_activo.setObjectName("botonSecundario")
         self.boton_activo.setFixedWidth(_ANCHO_CAMPO)
         self.boton_activo.clicked.connect(self._alternar_activo)
-        form.addWidget(self.boton_activo)
+        columna_botones.addWidget(self.boton_activo)
 
         self.boton_descargar = QPushButton("Descargar")
         self.boton_descargar.setObjectName("botonSecundario")
         self.boton_descargar.setFixedWidth(_ANCHO_CAMPO)
         self.boton_descargar.clicked.connect(self._descargar_o_copiar)
-        form.addWidget(self.boton_descargar)
+        columna_botones.addWidget(self.boton_descargar)
 
         self.boton_eliminar = QPushButton("Eliminar")
         self.boton_eliminar.setObjectName("botonSecundario")
         self.boton_eliminar.setFixedWidth(_ANCHO_CAMPO)
         self.boton_eliminar.clicked.connect(self._eliminar)
-        form.addWidget(self.boton_eliminar)
+        columna_botones.addWidget(self.boton_eliminar)
 
-        form.addWidget(_linea_divisoria())
+        columna_botones.addWidget(_linea_divisoria())
 
         self.boton_manual = QPushButton("Manual del usuario")
         self.boton_manual.setObjectName("botonPrimario")
         self.boton_manual.setFixedWidth(_ANCHO_CAMPO)
         self.boton_manual.clicked.connect(self._regenerar_manual)
-        form.addWidget(self.boton_manual)
+        columna_botones.addWidget(self.boton_manual)
 
-        form.addStretch()
-        layout_solapa.addWidget(panel_izquierda)
-
-        self.tabla = QTableWidget()
-        excluir_tabla_del_tab(self.tabla)
-        self._configurar_columnas(es_todos=True)  # "Todos los archivos" es la primera opción del combo Alcance
-        self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabla.itemSelectionChanged.connect(self._actualizar_previsualizacion)
-        instalar_eliminar_con_tecla(self.tabla, self._eliminar)
-        layout_solapa.addWidget(self.tabla)
+        columna_botones.addStretch()
+        fila_superior.addWidget(panel_botones)
 
         panel_preview = QWidget()
         layout_preview = QVBoxLayout(panel_preview)
@@ -474,7 +540,22 @@ class _PanelGestorArchivos(QWidget):
         self.etiqueta_preview.setStyleSheet("border: 1px solid #000000;")
         layout_preview.addWidget(self.etiqueta_preview)
         layout_preview.addStretch()
-        layout_solapa.addWidget(panel_preview, stretch=1)
+        fila_superior.addWidget(panel_preview, stretch=1)
+
+        layout_contenido.addLayout(fila_superior)
+
+        self._indice_descripcion = 5
+        self._columnas_minimas: frozenset[int] = frozenset({4, 6, 7, 8})
+        self.tabla = _TablaConAnchoDinamico(self._reajustar_ancho_tabla)
+        excluir_tabla_del_tab(self.tabla)
+        self._configurar_columnas(es_todos=True)  # "Todos los archivos" es la primera opción del combo Alcance
+        self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tabla.itemSelectionChanged.connect(self._actualizar_previsualizacion)
+        instalar_eliminar_con_tecla(self.tabla, self._eliminar)
+        layout_contenido.addWidget(self.tabla)
 
         scroll.setWidget(contenido)
         layout_externo.addWidget(scroll)
@@ -631,7 +712,9 @@ class _PanelGestorArchivos(QWidget):
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(img["Tipo"] or ""))
             self.tabla.setItem(fila_idx, 3, item_centrado("Sí" if img["NumeroOrden"] == 1 else "No"))
             self.tabla.setItem(fila_idx, 4, item_centrado("Sí" if img["Activo"] else "No"))
-        _ajustar_columnas(self.tabla, indice_descripcion=1, columnas_minimas=frozenset({0, 2, 3, 4}))
+        self._indice_descripcion = 1
+        self._columnas_minimas = frozenset({0, 2, 3, 4})
+        _ajustar_columnas(self.tabla, self._indice_descripcion, self._columnas_minimas)
 
     def _llenar_tabla_todos(self) -> None:
         self.tabla.setRowCount(len(self._imagenes))
@@ -639,15 +722,33 @@ class _PanelGestorArchivos(QWidget):
             self.tabla.setItem(fila_idx, 0, QTableWidgetItem(img["Alcance"]))
             self.tabla.setItem(fila_idx, 1, QTableWidgetItem(img["LocalidadTexto"] or ""))
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(img["EdificioTexto"] or ""))
-            self.tabla.setItem(fila_idx, 3, QTableWidgetItem(img["UnidadTexto"] or ""))
+            # "Unidad"/"Consul" centrados (pedido explícito de la clienta):
+            # excepción puntual a la regla general de "texto a la
+            # izquierda" — ver convención "Contenido de celda" en CLAUDE.md.
+            self.tabla.setItem(fila_idx, 3, item_centrado(img["UnidadTexto"] or ""))
             self.tabla.setItem(
-                fila_idx, 4, item_numero(str(img["ConsultorioNumero"])) if img["ConsultorioNumero"] else QTableWidgetItem(""),
+                fila_idx, 4, item_centrado(str(img["ConsultorioNumero"]) if img["ConsultorioNumero"] else ""),
             )
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(img["Descripcion"] or ""))
             self.tabla.setItem(fila_idx, 6, QTableWidgetItem(img["Tipo"] or ""))
             self.tabla.setItem(fila_idx, 7, item_centrado("Sí" if img["NumeroOrden"] == 1 else "No"))
             self.tabla.setItem(fila_idx, 8, item_centrado("Sí" if img["Activo"] else "No"))
-        _ajustar_columnas(self.tabla, indice_descripcion=5, columnas_minimas=frozenset({4, 6, 7, 8}))
+        self._indice_descripcion = 5
+        self._columnas_minimas = frozenset({4, 6, 7, 8})
+        _ajustar_columnas(self.tabla, self._indice_descripcion, self._columnas_minimas)
+
+    def _reajustar_ancho_tabla(self) -> None:
+        """Se llama sola cada vez que la tabla cambia de tamaño
+        (`_TablaConAnchoDinamico`), para recalcular cómo se reparte el
+        ancho sobrante entre sus columnas con el ancho real ya
+        conocido — en la construcción (todavía huérfana, sin mostrarse)
+        el viewport mide 0 o un valor chico cualquiera, así que el
+        primer reparto que de verdad importa es este, no el que ya hizo
+        `_llenar_tabla_normal`/`_llenar_tabla_todos` al cargar los
+        datos."""
+        if self.tabla.columnCount() == 0:
+            return
+        _ajustar_columnas(self.tabla, self._indice_descripcion, self._columnas_minimas)
 
     def _actualizar_previsualizacion(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()
