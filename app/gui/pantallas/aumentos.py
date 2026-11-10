@@ -91,7 +91,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
-    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -140,6 +139,7 @@ _COL_DIF_AISLADA = 11
 _COL_RESTABLECER = 12
 
 _ANCHO_CAMPO = 300  # ancho compartido por todo lo que va en el panel izquierdo de "Aumentos"
+_PADDING_COLUMNA = 30  # mismo criterio y mismo valor que novedades._ajustar_columnas/llaves._ajustar_columnas
 _MULTIPLOS_REDONDEO = (1, 10, 100, 1000)
 _GUION = "-"
 _TODAS = object()  # sentinel para "Todas/Todos" en los combos de filtro, distinto de una localidad real en None
@@ -147,13 +147,6 @@ _TODAS = object()  # sentinel para "Todas/Todos" en los combos de filtro, distin
 _HORAS_DEFAULT = 2.0
 _PORCENTAJE_DESCUENTO_DEFAULT = 1.0
 _PORCENTAJE_TOPE_DEFAULT = 25.0
-
-
-def _linea_divisoria() -> QFrame:
-    linea = QFrame()
-    linea.setFrameShape(QFrame.Shape.HLine)
-    linea.setFrameShadow(QFrame.Shadow.Sunken)
-    return linea
 
 
 def _titulo_campo(texto: str) -> QLabel:
@@ -245,6 +238,47 @@ class _DialogoValorFila(QDialog):
         return self.campo.text().strip()
 
 
+class _TablaConAnchoDinamico(QTableWidget):
+    """Notifica a `al_redimensionar` cada vez que cambia de tamaño —
+    mismo motivo y mismo patrón que `app.gui.pantallas.imagenes.
+    _TablaConAnchoDinamico`: el ancho real disponible (para repartir el
+    sobrante, ver `_PanelAumentos._ajustar_columnas`) recién se conoce
+    después de que el layout se resuelve, no al construirse."""
+
+    def __init__(self, al_redimensionar, parent=None):
+        super().__init__(parent)
+        self._al_redimensionar = al_redimensionar
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        super().resizeEvent(evento)
+        self._al_redimensionar()
+
+
+def _ajustar_columnas(tabla: QTableWidget) -> None:
+    """Pedido explícito de la clienta: "redistribuí el ancho sobrante de
+    la pantalla entre todas las columnas en principio, se tiene que ver
+    la tabla entera con todo a la vista sin escrolear y sin espacio en
+    blanco" — mismo criterio que `reservas._ajustar_columnas`: el ancho
+    sobrante (disponible menos la suma de las columnas en su ancho
+    natural + padding) se reparte en partes iguales entre TODAS las
+    columnas (el residuo de la división, si no es exacta, para las
+    primeras) — no hay una columna "más importante" en este listado."""
+    tabla.resizeColumnsToContents()
+    for columna in range(tabla.columnCount()):
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
+    if tabla.columnCount() == 0:
+        return
+    disponible = tabla.viewport().width()
+    suma_natural = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
+    sobrante = disponible - suma_natural
+    if sobrante <= 0:
+        return
+    por_columna, residuo = divmod(sobrante, tabla.columnCount())
+    for columna in range(tabla.columnCount()):
+        extra = por_columna + (1 if columna < residuo else 0)
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + extra)
+
+
 class _PanelAumentos(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -272,48 +306,69 @@ class _PanelAumentos(QWidget):
         self.campo_periodo.setFocus()
 
     def _armar_ui(self) -> None:
-        layout = QHBoxLayout(self)
+        # Pedido explícito de la clienta sobre esta ronda: "Vamos a
+        # poner los filtros de unidad en la primer columna, y vamos a
+        # crear una segunda columna con los otros elementos que ahora
+        # están abajo de los filtros. Ancho igual, mitad de la pantalla
+        # a cada columna... Abajo de las dos columnas poné la tabla" —
+        # antes todo el panel izquierdo (filtros + acciones, apilados en
+        # una sola columna) iba al lado de la tabla en un `QHBoxLayout`;
+        # ahora es un `QVBoxLayout`: arriba, las dos columnas lado a
+        # lado (mismo `stretch=1` en cada una, Qt las reparte a la
+        # mitad), abajo la tabla a todo el ancho. El orden de foco se
+        # mantiene igual que antes (se arma con la misma lista, en el
+        # mismo orden, al final de este método) — el reacomodo visual en
+        # dos columnas no lo toca.
+        layout = QVBoxLayout(self)
 
-        panel_form = QWidget()
-        form = QVBoxLayout(panel_form)
+        fila_superior = QHBoxLayout()
 
-        form.addWidget(_titulo_campo("Período"))
+        columna_filtros = QWidget()
+        form_filtros = QVBoxLayout(columna_filtros)
+        form_filtros.setContentsMargins(0, 0, 0, 0)
+
+        form_filtros.addWidget(_titulo_campo("Período"))
         self.campo_periodo = QLineEdit()
         self.campo_periodo.setFixedWidth(_ANCHO_CAMPO)
-        form.addWidget(self.campo_periodo)
+        form_filtros.addWidget(self.campo_periodo)
 
-        form.addWidget(_titulo_campo("Localidad"))
+        form_filtros.addWidget(_titulo_campo("Localidad"))
         self.combo_localidad = QComboBox()
         self.combo_localidad.setFixedWidth(_ANCHO_CAMPO)
         self.combo_localidad.currentIndexChanged.connect(self._cargar_combo_edificio)
-        form.addWidget(self.combo_localidad)
+        form_filtros.addWidget(self.combo_localidad)
 
-        form.addWidget(_titulo_campo("Edificio"))
+        form_filtros.addWidget(_titulo_campo("Edificio"))
         self.combo_edificio = QComboBox()
         self.combo_edificio.setFixedWidth(_ANCHO_CAMPO)
         self.combo_edificio.currentIndexChanged.connect(self._cargar_combo_unidad)
-        form.addWidget(self.combo_edificio)
+        form_filtros.addWidget(self.combo_edificio)
 
-        form.addWidget(_titulo_campo("Unidad"))
+        form_filtros.addWidget(_titulo_campo("Unidad"))
         self.combo_unidad = QComboBox()
         self.combo_unidad.setFixedWidth(_ANCHO_CAMPO)
         self.combo_unidad.currentIndexChanged.connect(self._aplicar_filtro_visual)
-        form.addWidget(self.combo_unidad)
+        form_filtros.addWidget(self.combo_unidad)
 
-        form.addWidget(_linea_divisoria())
+        form_filtros.addStretch()
+        fila_superior.addWidget(columna_filtros, stretch=1)
 
-        form.addWidget(_titulo_campo("Porcentaje aumento general a aplicar"))
+        columna_acciones = QWidget()
+        form_acciones = QVBoxLayout(columna_acciones)
+        form_acciones.setContentsMargins(0, 0, 0, 0)
+
+        form_acciones.addWidget(_titulo_campo("Porcentaje aumento general a aplicar"))
         self.spin_porcentaje = QDoubleSpinBox()
         self.spin_porcentaje.setFixedWidth(_ANCHO_CAMPO)
         self.spin_porcentaje.setRange(-100, 1000)
         self.spin_porcentaje.setDecimals(2)
         self.spin_porcentaje.setSuffix(" %")
-        form.addWidget(self.spin_porcentaje)
+        form_acciones.addWidget(self.spin_porcentaje)
 
         self.check_redondear = QCheckBox("Redondear valores")
         self.check_redondear.setChecked(True)
         self.check_redondear.toggled.connect(self._al_tildar_redondear)
-        form.addWidget(self.check_redondear)
+        form_acciones.addWidget(self.check_redondear)
 
         panel_multiplo = QWidget()
         grilla_multiplo = QGridLayout(panel_multiplo)
@@ -327,20 +382,20 @@ class _PanelAumentos(QWidget):
             self._grupo_multiplo.addButton(radio)
             self._radios_multiplo[multiplo] = radio
             grilla_multiplo.addWidget(radio, indice // 2, indice % 2)
-        form.addWidget(panel_multiplo)
+        form_acciones.addWidget(panel_multiplo)
         self.panel_multiplo = panel_multiplo
 
         self.boton_simular = QPushButton("Simular")
         self.boton_simular.setObjectName("botonSecundario")
         self.boton_simular.setFixedWidth(_ANCHO_CAMPO)
         self.boton_simular.clicked.connect(self._simular)
-        form.addWidget(self.boton_simular)
+        form_acciones.addWidget(self.boton_simular)
 
         self.boton_confirmar = QPushButton("Confirmar y aplicar aumentos")
         self.boton_confirmar.setObjectName("botonPrimario")
         self.boton_confirmar.setFixedWidth(_ANCHO_CAMPO)
         self.boton_confirmar.clicked.connect(self._confirmar)
-        form.addWidget(self.boton_confirmar)
+        form_acciones.addWidget(self.boton_confirmar)
 
         self.etiqueta_ayuda_edicion = QLabel(
             "Para fijar un % diferencial o un valor manual en una fila puntual, clickeá la celda "
@@ -348,12 +403,14 @@ class _PanelAumentos(QWidget):
         )
         self.etiqueta_ayuda_edicion.setWordWrap(True)
         self.etiqueta_ayuda_edicion.setFixedWidth(_ANCHO_CAMPO)
-        form.addWidget(self.etiqueta_ayuda_edicion)
+        form_acciones.addWidget(self.etiqueta_ayuda_edicion)
 
-        form.addStretch()
-        layout.addWidget(panel_form)
+        form_acciones.addStretch()
+        fila_superior.addWidget(columna_acciones, stretch=1)
 
-        self.tabla = QTableWidget()
+        layout.addLayout(fila_superior)
+
+        self.tabla = _TablaConAnchoDinamico(self._reajustar_ancho_tabla)
         excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(13)
         self.tabla.setHorizontalHeaderLabels([
@@ -369,6 +426,15 @@ class _PanelAumentos(QWidget):
             self.spin_porcentaje, self.check_redondear, *self._radios_multiplo.values(),
             self.boton_simular, self.boton_confirmar,
         ], parent=self)
+
+    def _reajustar_ancho_tabla(self) -> None:
+        """Se llama sola cada vez que `self.tabla` cambia de tamaño
+        (`_TablaConAnchoDinamico`), no solo al refrescar los datos —
+        para que el reparto del ancho sobrante (`_ajustar_columnas`) se
+        recalcule si se redimensiona la ventana."""
+        if self.tabla.columnCount() == 0:
+            return
+        _ajustar_columnas(self.tabla)
 
     def actualizar(self) -> None:
         self.campo_periodo.setText(periodo_actual(self.conn))
@@ -570,7 +636,7 @@ class _PanelAumentos(QWidget):
                 self.tabla.setCellWidget(fila, _COL_RESTABLECER, boton_restablecer)
         finally:
             self.tabla.blockSignals(False)
-        self.tabla.resizeColumnsToContents()
+        _ajustar_columnas(self.tabla)
         self._aplicar_filtro_visual()
 
     @staticmethod

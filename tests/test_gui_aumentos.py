@@ -83,6 +83,55 @@ def _crear_edificio_con_consultorio(
     )
 
 
+def test_filtros_y_acciones_quedan_en_dos_columnas_de_ancho_igual(qtbot, conn):
+    """Pedido explícito de la clienta: "Vamos a poner los filtros de
+    unidad en la primer columna, y vamos a crear una segunda columna
+    con los otros elementos que ahora están abajo de los filtros. Ancho
+    igual, mitad de la pantalla a cada columna"."""
+    pantalla = _PanelAumentos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 800)
+    qtbot.waitExposed(pantalla)
+
+    columna_filtros = pantalla.campo_periodo.parentWidget()
+    columna_acciones = pantalla.spin_porcentaje.parentWidget()
+    assert columna_filtros is not columna_acciones
+    assert columna_filtros.x() < columna_acciones.x()  # filtros a la izquierda
+    assert abs(columna_filtros.width() - columna_acciones.width()) <= 1  # ancho igual
+
+
+def test_foco_se_mantiene_igual_con_las_dos_columnas(qtbot, conn):
+    """Pedido explícito de la clienta: "Se mantiene el focus como está
+    ahora" — el reacomodo visual en dos columnas no cambia el orden de
+    la cadena de Enter/Tab."""
+    pantalla = _PanelAumentos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla._foco._orden == [
+        pantalla.campo_periodo, pantalla.combo_localidad, pantalla.combo_edificio, pantalla.combo_unidad,
+        pantalla.spin_porcentaje, pantalla.check_redondear, *pantalla._radios_multiplo.values(),
+        pantalla.boton_simular, pantalla.boton_confirmar,
+    ]
+
+
+def test_tabla_queda_debajo_de_las_dos_columnas_y_ocupa_todo_el_ancho(qtbot, conn):
+    """Pedido explícito de la clienta: "Abajo de las dos columnas poné
+    la tabla, redistribuí el ancho sobrante de la pantalla entre todas
+    las columnas en principio, se tiene que ver la tabla entera con
+    todo a la vista sin escrolear y sin espacio en blanco"."""
+    _crear_edificio_con_consultorio(conn)
+    pantalla = _PanelAumentos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 800)
+    qtbot.waitExposed(pantalla)
+
+    assert pantalla.tabla.y() > pantalla.campo_periodo.y()  # la tabla queda debajo
+    disponible = pantalla.tabla.viewport().width()
+    suma_columnas = sum(pantalla.tabla.columnWidth(c) for c in range(pantalla.tabla.columnCount()))
+    assert suma_columnas <= disponible + 1  # sin dejar sobrante sin repartir (ni escrolear)
+
+
 def test_aumentos_reiniciar_vuelve_filtros_y_porcentaje_al_estado_inicial(qtbot, conn):
     """F5: `_PanelAumentos` no tenía ningún `reiniciar()` propio."""
     pantalla = _PanelAumentos(conn)

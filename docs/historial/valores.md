@@ -389,3 +389,52 @@ reemplazado por `test_promedios_redistribuye_el_sobrante_entre_las_
 tres_primeras_columnas`, y `test_promedios_queda_arriba_de_valores_con_
 un_tercio_del_alto` (confirma la proporción 1:2 geométricamente).
 
+## Aumentos: filtros en dos columnas, tabla a ancho completo (nov-2026)
+
+Pedido explícito de la clienta: "Vamos a poner los filtros de unidad en
+la primer columna, y vamos a crear una segunda columna con los otros
+elementos que ahora están abajo de los filtros. Ancho igual, mitad de
+la pantalla a cada columna. Se mantiene el focus como está ahora. Abajo
+de las dos columnas poné la tabla, redistribuí el ancho sobrante de la
+pantalla entre todas las columnas en principio, se tiene que ver la
+tabla entera con todo a la vista sin escrolear y sin espacio en
+blanco."
+
+`_PanelAumentos._armar_ui` (`app/gui/pantallas/aumentos.py`) pasa de un
+`QHBoxLayout` (panel izquierdo apilado — filtros y acciones en una sola
+columna — al lado de la tabla) a un `QVBoxLayout`: arriba, `fila_
+superior` con dos columnas (`columna_filtros`: Período/Localidad/
+Edificio/Unidad; `columna_acciones`: Porcentaje/Redondear/Múltiplo/
+Simular/Confirmar/ayuda), cada una con `stretch=1` en el mismo
+`QHBoxLayout` — Qt las reparte a la mitad sin necesitar ningún cálculo
+de píxeles. Abajo, la tabla a todo el ancho (`stretch=1` en el
+`QVBoxLayout` externo). La línea divisoria que separaba antes filtros
+de acciones (apilados en una sola columna) se saca: ya no hace falta,
+cada grupo vive en su propia columna — `_linea_divisoria` quedó sin
+ningún otro llamador en este archivo y se borra entera (código
+muerto), junto con el import de `QFrame` que solo ella usaba.
+
+"Se mantiene el focus como está ahora": la cadena de `instalar_enter_
+avanza_foco` se arma con la MISMA lista, en el MISMO orden, al final de
+`_armar_ui` — el reacomodo visual en dos columnas no la toca (el orden
+de foco de este mecanismo es explícito por lista, no depende de la
+posición en pantalla).
+
+Para la tabla, nueva función `_ajustar_columnas` (mismo criterio que
+`reservas._ajustar_columnas`, agregada en la ronda de Reservas
+extraordinarias): `resizeColumnsToContents()` + padding de siempre, y
+el sobrante (ancho disponible del viewport menos la suma natural de
+las 13 columnas) se reparte en partes iguales entre TODAS — no hay una
+columna "más importante" en este listado, "en principio" (sus
+palabras) deja la puerta abierta a una prioridad puntual en una futura
+ronda si hiciera falta. `_TablaConAnchoDinamico` (duplicada en este
+módulo, mismo criterio de "no centralizar entre módulos" del resto del
+sistema) recalcula el reparto en cada resize, no solo al repoblar
+filas (`_renderizar_tabla`, que antes solo llamaba a
+`resizeColumnsToContents()` sin padding ni reparto).
+
+Tests nuevos en `tests/test_gui_aumentos.py`:
+`test_filtros_y_acciones_quedan_en_dos_columnas_de_ancho_igual`,
+`test_foco_se_mantiene_igual_con_las_dos_columnas`,
+`test_tabla_queda_debajo_de_las_dos_columnas_y_ocupa_todo_el_ancho`.
+
