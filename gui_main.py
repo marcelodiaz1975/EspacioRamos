@@ -3,7 +3,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QLibraryInfo, QLocale, Qt, QTranslator
+from PySide6.QtCore import QLibraryInfo, QLocale, Qt, QTimer, QTranslator
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -401,6 +401,31 @@ def main() -> None:
     app.processEvents()
     ventana.showMaximized()
     pantalla_carga.finish(ventana)
+
+    # La mitigación de arriba (`showNormal()` + `processEvents()` +
+    # `showMaximized()`) sigue sin alcanzar: la clienta reporta que
+    # todavía tiene que maximizar dos veces a mano (restaurar y volver a
+    # maximizar, con el botón al lado de la cruz) para que la ventana se
+    # vea completa. Esas tres llamadas corren ANTES de `app.exec()` —
+    # `processEvents()` despacha los eventos ya encolados, pero en
+    # Windows el tamaño "disponible" definitivo de la pantalla (contra el
+    # que `showMaximized()` calcula su geometría) puede no estar resuelto
+    # todavía en ese momento puntual, antes de que el message loop nativo
+    # esté de verdad corriendo. Se repite el mismo gesto manual (restaurar
+    # y volver a maximizar) pero diferido con `QTimer.singleShot(0, ...)`
+    # encadenado dos veces, para que ambos pasos corran DENTRO del loop
+    # real (una vez que `app.exec()`, más abajo, arranca a despachar) en
+    # vez de en estos `processEvents()` de antes de arrancarlo — cada
+    # `singleShot(0, ...)` encola su callback para la vuelta siguiente del
+    # loop, dándole a Windows una vuelta completa de más para terminar de
+    # asentar la geometría entre un paso y el otro. No reproducible en
+    # este sandbox Linux; mitigación de buena fe, a confirmar con la
+    # clienta si sigue pasando.
+    def _reafirmar_maximizado_en_el_loop() -> None:
+        ventana.showNormal()
+        QTimer.singleShot(0, ventana.showMaximized)
+
+    QTimer.singleShot(0, _reafirmar_maximizado_en_el_loop)
 
     # Bloqueo por inactividad: se instala sobre la QApplication entera
     # (cualquier click/tecla en cualquier pantalla la reinicia), así que

@@ -4630,3 +4630,72 @@ instancia, `False` en `__init__`): el ciclo restaurar→maximizar corre
 una sola vez, en el primer `_cambiar_seccion` real de la sesión, nunca
 más después. Tampoco reproducible en este sandbox — a confirmar con la
 clienta en su Windows real.
+
+**Este segundo intento TAMPOCO alcanzó** (nov-2026, reportado por la
+clienta: "Sigo necesitando pinchar dos veces al iniciar en maximizar...
+para normalizar la visualización"). El mitigador de `_cambiar_seccion`
+sigue siendo correcto para el caso que ataca (primer layout pesado
+dentro de `self._pila`), pero el problema real que la clienta sigue
+viendo es más temprano: pasa YA al arrancar, antes de tocar ninguna
+solapa. `gui_main.main()` ya hacía el mismo gesto completo (`showNormal()`
++ `app.processEvents()` + `showMaximized()`) antes de este cambio —
+pero las tres llamadas corren ANTES de `app.exec()`, es decir, antes de
+que el message loop nativo esté de verdad despachando eventos del
+sistema operativo. La hipótesis revisada: en Windows, el tamaño
+"disponible" definitivo de la pantalla (contra el que `showMaximized()`
+calcula la geometría final) puede no estar resuelto todavía en ese
+momento puntual (antes de `exec()`), aunque `processEvents()` sí
+despache lo que ya esté encolado — no hay garantía de que Windows ya
+haya terminado de asignarle a la ventana su monitor/geometría definitiva
+tan temprano.
+
+Tercer intento, en `gui_main.main()`: se agrega, después del mismo
+`showNormal()`/`processEvents()`/`showMaximized()` de siempre (se deja
+sin tocar, por si ayuda en el caso más simple), un segundo ciclo
+restaurar→maximizar pero diferido con `QTimer.singleShot(0, ...)`
+encadenado dos veces (`showNormal()` primero, y desde ahí otro
+`singleShot(0, ...)` a `showMaximized()`) — cada `singleShot(0, ...)`
+encola su callback para la vuelta siguiente del loop real de eventos
+(el que arranca más abajo con `app.exec()`), dándole a Windows una
+vuelta completa de más entre un paso y el otro para terminar de asentar
+la geometría, en vez de los `processEvents()` manuales de antes de
+arrancar el loop. Tampoco reproducible en este sandbox Linux — mitigación
+de buena fe, a confirmar con la clienta.
+
+## Ventana principal: confirmación al cerrar con la cruz
+
+Pedido explícito de la clienta: al presionar la cruz de cerrar ventana
+tiene que aparecer un cuadro de diálogo preguntando si está segura de
+querer salir del sistema, y solo cerrar si confirma.
+
+`VentanaPrincipal.closeEvent` (override de `QMainWindow.closeEvent`)
+muestra un `QMessageBox.question` y acepta o ignora el evento según la
+respuesta. El punto delicado: decenas de tests de GUI de todo el
+sistema construyen `VentanaPrincipal` y la registran con
+`qtbot.addWidget(ventana)` — pytest-qt llama `widget.close()` sobre
+cada widget registrado al terminar cada test, para destruirlo. Sin
+ninguna distinción, ese `close()` programático dispararía el mismo
+`QMessageBox.question` real en cada uno de esos tests, colgando la
+suite entera (nadie puede contestarle a un diálogo modal en un entorno
+headless).
+
+La distinción la da `QCloseEvent.spontaneous()`: Qt marca como
+"espontáneo" únicamente el evento de cierre que se originó en el
+sistema de ventanas (click real en la cruz, Alt+F4, cerrar desde la
+barra de tareas) — un `widget.close()` llamado desde código (el de
+pytest-qt incluido) genera un evento NO espontáneo. `closeEvent`
+acepta sin preguntar nada cuando `not event.spontaneous()`, y solo pide
+confirmación cuando sí lo es. Probado en `tests/test_main_window.py`
+simulando ambos casos con una subclase de prueba de `QCloseEvent`
+(`_EventoCierre`, con `spontaneous()` devolviendo el valor que indique
+el test) ya que no hay forma pública de marcar un `QCloseEvent`
+construido a mano como espontáneo: `test_cerrar_programaticamente_no_
+pide_confirmacion` (evento no espontáneo: se acepta sin llamar a
+`QMessageBox.question`), `test_cerrar_con_la_cruz_pide_confirmacion_y_
+confirma_cierra` y `test_cerrar_con_la_cruz_y_cancelar_no_cierra`
+(evento espontáneo: pide confirmación, y el evento se acepta o se
+ignora según la respuesta). Confirmado además que las 42 instancias de
+`VentanaPrincipal` ya existentes en el resto de la suite (`test_gui_
+main.py`, `test_gui_estilos.py`, `test_gui_configuracion.py`, `test_gui_
+panel_control.py`, `test_gui_lista_espera.py`, `test_gui_usuarios.py`,
+`test_gui_valores.py`) siguen pasando sin ningún cambio ni cuelgue.

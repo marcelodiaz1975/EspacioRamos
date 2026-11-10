@@ -1,5 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget, QVBoxLayout, QWidget
 
 from app.db.init_db import init_database
@@ -572,3 +573,46 @@ def test_categoria_de_nombre_largo_no_dispara_scroll_horizontal_del_menu(qtbot, 
     qtbot.waitExposed(ventana)
     assert ventana._navegacion.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     assert ventana._navegacion.horizontalScrollBar().maximum() == 0
+
+
+class _EventoCierre(QCloseEvent):
+    """Simula un `QCloseEvent` espontáneo (click real en la cruz) o no
+    (`widget.close()` desde código, como el `qtbot.addWidget` de todos
+    los tests de este módulo), para poder probar `closeEvent` sin
+    depender de un evento real del sistema de ventanas."""
+
+    def __init__(self, espontaneo: bool):
+        super().__init__()
+        self._espontaneo = espontaneo
+
+    def spontaneous(self) -> bool:
+        return self._espontaneo
+
+
+def test_cerrar_programaticamente_no_pide_confirmacion(qtbot, conn, monkeypatch):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    llamadas = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: llamadas.append(1))
+    evento = _EventoCierre(espontaneo=False)
+    ventana.closeEvent(evento)
+    assert evento.isAccepted()
+    assert llamadas == []
+
+
+def test_cerrar_con_la_cruz_pide_confirmacion_y_confirma_cierra(qtbot, conn, monkeypatch):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    evento = _EventoCierre(espontaneo=True)
+    ventana.closeEvent(evento)
+    assert evento.isAccepted()
+
+
+def test_cerrar_con_la_cruz_y_cancelar_no_cierra(qtbot, conn, monkeypatch):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    evento = _EventoCierre(espontaneo=True)
+    ventana.closeEvent(evento)
+    assert not evento.isAccepted()

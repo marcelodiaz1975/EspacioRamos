@@ -12,7 +12,7 @@ from datetime import date
 from typing import Callable
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QShortcut
+from PySide6.QtGui import QCloseEvent, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -34,7 +34,7 @@ from app.negocio.avance_mes import puede_avanzarse_mes
 from app.negocio.dias import periodo_actual
 from app.negocio.plantillas_texto import resolver_plantilla
 from app.negocio.seguridad import nivel_alcanza
-from app.version import NOMBRE_Y_VERSION
+from app.version import NOMBRE_PROGRAMA, NOMBRE_Y_VERSION
 
 
 def _pantalla_inicial() -> QWidget:
@@ -512,3 +512,29 @@ class VentanaPrincipal(QMainWindow):
                 self.showNormal()
                 QApplication.processEvents()
                 self.showMaximized()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Pedido de la clienta: al presionar la cruz de cerrar ventana
+        tiene que aparecer un cuadro de diálogo preguntando si está
+        segura de querer salir del sistema, y solo cerrar si confirma.
+
+        `event.spontaneous()` distingue un cierre real iniciado por el
+        usuario (click en la cruz, Alt+F4, cerrar desde la barra de
+        tareas — el sistema operativo encola un evento "espontáneo") de
+        uno disparado por código (ej. `widget.close()` que llama pytest-
+        qt en el `qtbot.addWidget(ventana)` de decenas de tests, al
+        terminar cada test, para destruir la ventana — ese cierre no es
+        espontáneo). Sin esta distinción, cada uno de esos tests quedaría
+        colgado esperando una respuesta a un `QMessageBox.question` que
+        nadie puede contestar en un entorno headless."""
+        if not event.spontaneous():
+            event.accept()
+            return
+        respuesta = QMessageBox.question(
+            self, NOMBRE_PROGRAMA,
+            "¿Seguro que querés salir del sistema?",
+        )
+        if respuesta == QMessageBox.StandardButton.Yes:
+            event.accept()
+        else:
+            event.ignore()
