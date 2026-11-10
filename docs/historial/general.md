@@ -4575,3 +4575,37 @@ Pedido explícito de la clienta, varios puntos en un mismo mensaje:
    (`COLOR_NIVEL_1_OSCURO`, mismo tono que los encabezados de columna,
    pedido de una ronda anterior), la clienta pidió el cambio al
    revisarlo de nuevo: se ve mejor en negro.
+
+## Ventana principal: maximizado se destapa al entrar a la primera solapa (nov-2026)
+
+Seguimiento del bug de maximizado reportado por la clienta (Windows): el
+fix en `gui_main.main()` (`showNormal()` + `processEvents()` antes de
+`showMaximized()`) resolvió el caso del arranque ("Abre, se acomoda solo
+para que se vea lo de abajo como te lo pedí"), pero destapó un segundo
+caso relacionado — el primer click en cualquier solapa del menú, o el
+atajo de función equivalente, vuelve a tapar la barra de abajo (leyenda
+de funciones) hasta maximizar dos veces a mano; de ahí en adelante
+navega bien.
+
+Investigado en `VentanaPrincipal.__init__` (`app/gui/main_window.py`):
+todas las pantallas de las ~18 Secciones visibles se construyen de
+entrada y se agregan a `self._pila` (`QStackedWidget`), pero la que se
+muestra por defecto es `_pantalla_inicial()` — un ícono centrado
+trivial, a propósito, para no mostrar ninguna pantalla real hasta el
+primer click (pedido de la clienta documentado en el propio docstring
+de esa función). Esto significa que el primer click en una solapa real
+es también la primera vez que Qt hace un layout/pintado de verdad sobre
+un widget pesado dentro del `QStackedWidget` — la misma clase de
+problema de `availableGeometry` que ya se vio en el arranque, solo que
+disparada por este otro camino (`_cambiar_seccion`, que llama a
+`self._pila.setCurrentIndex(...)`).
+
+Misma mitigación que en el arranque, aplicada en
+`VentanaPrincipal._cambiar_seccion` después de cambiar de página: si la
+ventana está maximizada (`self.isMaximized()`), se reafirma llamando a
+`self.showMaximized()` de nuevo (con un `QApplication.processEvents()`
+en el medio) — barata e idempotente, no se nota si la ventana ya estaba
+bien. No reproducible en este sandbox Linux (el bug es puntual de
+Windows), así que queda a confirmar con la clienta si el paso de
+maximizar dos veces ya no hace falta. Suite de `tests/test_main_window.py`
+(39 tests) sigue pasando sin cambios.

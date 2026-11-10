@@ -486,3 +486,16 @@ class VentanaPrincipal(QMainWindow):
         self._actualizar_barra_fecha_ficticia()
         self._actualizar_badge_periodo()
         self._aplicar_tema()
+        # Bug real reportado por la clienta (Windows): mostrar por
+        # primera vez una pantalla de verdad en `self._pila` (la
+        # inicial, `_pantalla_inicial()`, es solo un ícono — nunca
+        # forzó un layout pesado) puede destapar el mismo problema de
+        # maximizado que ya se mitigó en `gui_main.main()` — la barra
+        # de abajo (leyenda de funciones) queda tapada hasta maximizar
+        # dos veces a mano. Reafirmar acá el estado maximizado, después
+        # de procesar el cambio de página, es la misma mitigación:
+        # barata e idempotente (no reproducida en este sandbox Linux,
+        # así que no hace nada distinto acá).
+        if self.isMaximized():
+            QApplication.processEvents()
+            self.showMaximized()
