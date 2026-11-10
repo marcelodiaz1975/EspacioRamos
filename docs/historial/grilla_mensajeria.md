@@ -712,3 +712,72 @@ test_saldo_anterior_y_actual_crecen_un_tercio_y_profesional_se_lleva_
 el_resto` (confirma la fórmula exacta contra el ancho natural puro, y
 que la suma de columnas no deja sobrante sin usar).
 
+## Mensajes predefinidos: diálogo Nuevo al doble, novena variable, ajustes de tabla (nov-2026)
+
+Pedido explícito de la clienta, tres partes:
+
+1. **Diálogo "Nuevo"/"Editar" al doble de ancho y de alto**, arrancando
+   más arriba en pantalla y centrado horizontalmente, "para que se vea
+   completo al abrir". `PantallaCRUD` suma `multiplicador_tamano_
+   dialogo: float = 1.0` (constructor) → `_DialogoRegistro(...,
+   multiplicador_tamano=...)`: el tamaño ya calculado por la fórmula de
+   siempre (`max(480, min(sizeHint+32, 900))` x `min(60+40*campos,
+   640)`) se multiplica por este factor, así que un formulario con más
+   campos sigue creciendo según su contenido, solo que ahora al doble —
+   no un tamaño fijo propio. Con `multiplicador_tamano != 1.0` además
+   se reposiciona a mano (`move`, no el `exec()` default de Qt): `_
+   DialogoRegistro` no recibe `parent` en ningún llamador de este
+   sistema, así que Qt no lo centra solo — se calcula contra
+   `QGuiApplication.primaryScreen().availableGeometry()`, centrado en X,
+   cerca del techo en Y (un décimo del alto disponible, no la mitad —
+   si no, quedaría más abajo de lo pedido). `1.0` (default) no cambia
+   nada en el resto de los ~14 catálogos genéricos.
+
+2. **Novena variable `{nombre_espacio}`** (`Configuracion.NombreEspacio`,
+   mismo criterio que `app.negocio.mensajes`/`plantillas_texto`,
+   duplicado acá sin relación de dependencia) sumada a `_VARIABLES_
+   MENSAJE` y resuelta en `_actualizar_vista_previa`. Con 9 variables,
+   la grilla de botones del diálogo pasa de 4 a 3 columnas
+   (`_DialogoRegistro._COLUMNAS_BOTONES_VARIABLES`, constante
+   compartida de `crud_generico.py`) — "ahora que son 9 variables
+   ponelas en tres filas de tres botones": da exactamente 3x3. Como
+   solo Mensajes predefinidos usa `Campo.variables` hoy, este cambio no
+   afecta a ningún otro catálogo todavía.
+
+3. **Ajustes de la tabla**: "Categoría"/"Descripción" al ancho natural
+   más un tercio (`Campo.tercio_extra`, nuevo en `crud_generico.py` —
+   mismo criterio que ya usa `mensajeria._PanelCentroMensajeria.
+   _ajustar_columnas` para "Saldo anterior"/"Saldo actual", generalizado
+   acá al `Campo` genérico); "Consultorio" pasa a titularse "Consul" y,
+   junto con "Activo", al ancho mínimo que necesita su propio título de
+   encabezado (`Campo.ancho_minimo_etiqueta`, nuevo — equivalente al
+   `columnas_minimas` de `imagenes._ajustar_columnas`, pero como
+   override DURO al ancho del título en vez de `max(natural, título)`:
+   acá el contenido real de "Consul" suele ser más largo que su propio
+   título, así que un `max` no lo habría achicado), ambas además
+   centradas (`Campo.centrado`, ya existía). "Mensaje" pasa a titularse
+   "Texto" y a `columna_flexible` (ya existía, ronda de Condiciones y
+   normas): se achica a lo que sobre para que la tabla entera entre en
+   el ancho de pantalla, con "Activo" como última columna visible.
+   `ancho_minimo_etiqueta`/`tercio_extra` quedan excluidas del reparto
+   de `columna_prioritaria` (mismo criterio que `ancho_fijo`) — ya
+   tienen su propio ancho fijado por otro camino.
+
+   Se evaluó forzar `ScrollBarAlwaysOff` en la tabla de `PantallaCRUD`
+   cuando usa `columna_prioritaria`/`columna_flexible` (mismo criterio
+   que imagenes.py/mensajeria.py) pero se descartó: `columna_flexible`
+   tiene un piso (`_ANCHO_MINIMO_COLUMNA_FLEXIBLE`) para no degenerar a
+   0 en una ventana angosta o con muchas columnas fijas (ej. Campos
+   libres activados) — si ese piso llega a dejar la tabla más ancha que
+   la pantalla, mejor que la barra aparezca sola (como siempre) a que
+   esas columnas queden inaccesibles sin aviso. Confirmado con un
+   catálogo de prueba de 11 columnas en una ventana angosta: sin la
+   barra, "Campo libre 3" quedaba recortado contra el borde sin forma
+   de llegar a verlo.
+
+Tests nuevos en `tests/test_mensajes_predefinidos.py`:
+`test_dialogo_nuevo_tiene_9_variables_en_grilla_de_3x3`,
+`test_vista_previa_sustituye_nombre_espacio`,
+`test_dialogo_nuevo_queda_al_doble_de_tamano_y_centrado_arriba`,
+`test_tabla_categoria_y_descripcion_crecen_consul_y_activo_al_minimo`.
+

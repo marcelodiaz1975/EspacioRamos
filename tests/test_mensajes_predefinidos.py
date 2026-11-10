@@ -296,6 +296,7 @@ def test_campo_mensaje_suma_variables_al_diccionario_de_campo(qtbot, conn):
     assert campo_mensaje.variables is not None
     assert set(campo_mensaje.variables) == {
         "apodo", "nombre", "apellido", "tratamiento", "edificio", "unidad", "consultorio", "localidad",
+        "nombre_espacio",
     }
 
 
@@ -322,6 +323,101 @@ def test_dialogo_suma_un_boton_por_variable_que_inserta_en_el_cursor(qtbot, conn
     boton_localidad = next(b for b in botones if b.text() == "{localidad}")
     boton_localidad.click()
     assert entrada.toPlainText() == "Hola, {apodo}{localidad}"
+
+
+def test_dialogo_nuevo_tiene_9_variables_en_grilla_de_3x3(qtbot, conn):
+    """Pedido explícito de la clienta: "Ahora que son 9 variables
+    ponelas en tres filas de tres botones" (antes 4 columnas)."""
+    from PySide6.QtWidgets import QGridLayout
+
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.crud.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+
+    botones_variable = [b for b in dialogo.findChildren(QPushButton) if b.text().startswith("{")]
+    assert len(botones_variable) == 9
+    grilla = next(g for g in dialogo.findChildren(QGridLayout) if g.count() == 9)
+    assert grilla.rowCount() == 3
+    assert grilla.columnCount() == 3
+
+
+def test_vista_previa_sustituye_nombre_espacio(qtbot, conn):
+    """Pedido explícito de la clienta: nueva variable {nombre_espacio},
+    resuelta contra Configuracion.NombreEspacio."""
+    obtener_repositorio(conn, "Configuracion").actualizar(1, NombreEspacio="Espacio Ramos")
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Prueba", Mensaje="Hola desde {nombre_espacio}.", Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud.tabla_widget.selectRow(0)
+    assert pantalla.texto_vista_previa.toPlainText() == "Hola desde Espacio Ramos."
+
+
+def test_dialogo_nuevo_queda_al_doble_de_tamano_y_centrado_arriba(qtbot, conn):
+    """Pedido explícito de la clienta: "el doble de ancho y de alto que
+    el que se abre ahora, que arranque mas arriba en pantalla,
+    centralizado, para que se vea completo al abrir"."""
+    from app.gui.crud_generico import Campo
+
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+
+    campos = pantalla.crud.campos
+    dialogo_normal = _DialogoRegistro(conn, campos, "Nuevo registro")
+    qtbot.addWidget(dialogo_normal)
+    dialogo_doble = _DialogoRegistro(conn, campos, "Nuevo registro", multiplicador_tamano=2.0)
+    qtbot.addWidget(dialogo_doble)
+
+    assert dialogo_doble.width() == dialogo_normal.width() * 2
+    assert dialogo_doble.height() == dialogo_normal.height() * 2
+
+    sin_variables = _DialogoRegistro(conn, [Campo("X", "X")], "Nuevo registro", multiplicador_tamano=1.0)
+    qtbot.addWidget(sin_variables)
+    pos_default = sin_variables.pos()
+    con_multiplicador = _DialogoRegistro(conn, [Campo("X", "X")], "Nuevo registro", multiplicador_tamano=2.0)
+    qtbot.addWidget(con_multiplicador)
+    assert con_multiplicador.pos() != pos_default  # se reposiciona a mano (centrado, arriba), no el default de Qt
+
+
+def test_tabla_categoria_y_descripcion_crecen_consul_y_activo_al_minimo(qtbot, conn):
+    """Pedido explícito de la clienta sobre la tabla: "Categoría"/
+    "Descripción" +1/3; "Consul"/"Activo" al mínimo y centrados;
+    "Texto" (antes "Mensaje") se achica para que la tabla entera entre
+    en el ancho de pantalla, con "Activo" como última columna visible."""
+    obtener_repositorio(conn, "Configuracion").actualizar(1, VisualizarCamposLibres=0)
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Pagos", Descripcion="Aviso de pago pendiente con un texto largo", Mensaje="x" * 300, Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 850)
+    qtbot.waitExposed(pantalla)
+
+    tabla = pantalla.crud.tabla_widget
+    campos = pantalla.crud.campos
+    indice = {c.nombre: i for i, c in enumerate(campos)}
+
+    from app.gui.crud_generico import _PADDING_COLUMNA
+
+    ancho_categoria_ajustado = tabla.columnWidth(indice["Categoria"])
+    ancho_descripcion_ajustado = tabla.columnWidth(indice["Descripcion"])
+    tabla.resizeColumnsToContents()
+    ancho_categoria_con_padding = tabla.columnWidth(indice["Categoria"]) + _PADDING_COLUMNA
+    ancho_descripcion_con_padding = tabla.columnWidth(indice["Descripcion"]) + _PADDING_COLUMNA
+    assert ancho_categoria_ajustado == ancho_categoria_con_padding + ancho_categoria_con_padding // 3
+    assert ancho_descripcion_ajustado == ancho_descripcion_con_padding + ancho_descripcion_con_padding // 3
+
+    pantalla.crud.actualizar()
+    disponible = tabla.viewport().width()
+    suma_columnas = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
+    assert suma_columnas <= disponible + 1  # la tabla entera entra sin espacio en blanco
+
+    from PySide6.QtCore import Qt
+    assert tabla.item(0, indice["IdConsultorio"]).textAlignment() == Qt.AlignmentFlag.AlignCenter
+    assert tabla.item(0, indice["Activo"]).textAlignment() == Qt.AlignmentFlag.AlignCenter
 
 
 def test_campos_sin_variables_no_suman_ningun_boton_extra(qtbot, conn):

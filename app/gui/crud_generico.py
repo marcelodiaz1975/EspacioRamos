@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from PySide6.QtCore import QDate, QLocale, Qt
+from PySide6.QtGui import QFontMetrics, QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -58,6 +59,7 @@ _ID_REGISTRO = Qt.ItemDataRole.UserRole
 _ANCHO_CAMPO = 240  # ancho compartido por el panel izquierdo (buscar + botones), mismo criterio que otras pantallas
 _PADDING_COLUMNA = 30  # mismo criterio y mismo valor que novedades._ajustar_columnas/llaves._ajustar_columnas
 _ANCHO_MINIMO_COLUMNA_FLEXIBLE = 80  # piso de `columna_flexible` — evita que quede en 0/negativo en una ventana angosta
+_COLCHON_TITULO_COLUMNA = 12  # padding interno que Qt le suma a la celda del encabezado, ver Campo.ancho_minimo_etiqueta
 _LOCALE_ES = QLocale(QLocale.Language.Spanish)
 # "lun 07-09-2026" — mismo formato que los campos Desde/Hasta de Registro de
 # ausencias (app/gui/pantallas/novedades.py), generalizado acá para
@@ -203,6 +205,24 @@ class Campo:
     se queda siempre en el ancho justo de `resizeColumnsToContents()`
     más el padding general — mismo criterio que `columnas_minimas` en
     `app.gui.pantallas.imagenes._ajustar_columnas`."""
+    ancho_minimo_etiqueta: bool = False
+    """En vez del ancho natural de `resizeColumnsToContents()` + padding,
+    esta columna queda exactamente en lo que mide su propio título de
+    encabezado (`Campo.etiqueta`) más un colchón chico — pedido puntual
+    (ej. "Consul"/"Activo" en Mensajes predefinidos): "reducí el ancho
+    para que entre la etiqueta sin cortar", aunque el contenido real sea
+    más largo (ahí se ve truncado con elipsis, comportamiento nativo de
+    Qt). Nunca participa del reparto de `columna_prioritaria` (mismo
+    criterio que `ancho_fijo`, que para esta columna no hace falta
+    sumar aparte)."""
+    tercio_extra: bool = False
+    """Esta columna se lleva un tercio más de su propio ancho natural
+    (`ancho + ancho // 3`) — pedido puntual (ej. "Categoría"/
+    "Descripción" en Mensajes predefinidos), mismo criterio que ya usa
+    `app.gui.pantallas.mensajeria._PanelCentroMensajeria._ajustar_
+    columnas` para "Saldo anterior"/"Saldo actual". Tampoco participa
+    del reparto de `columna_prioritaria`: ya tiene su propio ancho
+    fijado, no uno a repartir de nuevo."""
     variables: dict[str, str] | None = None
     """Solo para tipo="texto_largo": variables `{nombre}` disponibles
     para sustituir en este campo, como `{"apodo": "Apodo del
@@ -272,6 +292,7 @@ class PantallaCRUD(QWidget):
         campos_primero_dialogo: list[str] | None = None,
         columna_prioritaria: str | None = None,
         columna_flexible: str | None = None,
+        multiplicador_tamano_dialogo: float = 1.0,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -364,6 +385,14 @@ class PantallaCRUD(QWidget):
         # agranda con el sobrante, la otra fuerza un ancho fijo
         # calculado distinto) — cada catálogo usa el que corresponda.
         self._columna_flexible = columna_flexible
+        # multiplicador_tamano_dialogo: pedido puntual (Mensajes
+        # predefinidos, "el doble de ancho y de alto") — se aplica al
+        # tamaño ya calculado por `_DialogoRegistro` (no a un valor fijo
+        # propio), así que un formulario con muchos campos sigue
+        # creciendo en función de su contenido, solo que ahora al doble.
+        # 1.0 (default) deja el tamaño de siempre en el resto de los
+        # catálogos — no se toca de una sola vez.
+        self._multiplicador_tamano_dialogo = multiplicador_tamano_dialogo
         # compacto: layout viejo (título + fila de botones arriba de la
         # tabla, sin solapa/filtro) — para cuando una pantalla compuesta
         # (ej. Mensajes predefinidos) inserta este CRUD como un componente
@@ -557,6 +586,13 @@ class PantallaCRUD(QWidget):
         excluir_tabla_del_tab(self.tabla_widget)
         self.tabla_widget.setColumnCount(len(self.campos))
         self.tabla_widget.setHorizontalHeaderLabels([c.etiqueta for c in self.campos])
+        # A propósito NO se fuerza `ScrollBarAlwaysOff` acá (a diferencia
+        # de imagenes.py/mensajeria.py): `columna_flexible` tiene un piso
+        # (`_ANCHO_MINIMO_COLUMNA_FLEXIBLE`) para no degenerar a 0 en una
+        # ventana angosta o con muchas columnas fijas (ej. Campos libres
+        # activados) — si ESE piso llega a dejar la tabla más ancha que
+        # la pantalla, mejor que la barra horizontal aparezca sola (como
+        # siempre) a que esas columnas queden inaccesibles sin aviso.
         self.tabla_widget.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla_widget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla_widget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -632,8 +668,16 @@ class PantallaCRUD(QWidget):
         # ancho en el panel, no tiene sentido dejar las columnas al
         # ancho justo de resizeColumnsToContents().
         self.tabla_widget.resizeColumnsToContents()
-        for col in range(self.tabla_widget.columnCount()):
-            self.tabla_widget.setColumnWidth(col, self.tabla_widget.columnWidth(col) + _PADDING_COLUMNA)
+        metrica_encabezado = QFontMetrics(self.tabla_widget.horizontalHeader().font())
+        for col, campo in enumerate(self.campos):
+            if campo.ancho_minimo_etiqueta:
+                ancho_titulo = metrica_encabezado.horizontalAdvance(campo.etiqueta)
+                self.tabla_widget.setColumnWidth(col, ancho_titulo + _COLCHON_TITULO_COLUMNA)
+            else:
+                self.tabla_widget.setColumnWidth(col, self.tabla_widget.columnWidth(col) + _PADDING_COLUMNA)
+            if campo.tercio_extra:
+                ancho = self.tabla_widget.columnWidth(col)
+                self.tabla_widget.setColumnWidth(col, ancho + ancho // 3)
         if self._columna_prioritaria is not None:
             self._repartir_ancho_sobrante()
         if self._columna_flexible is not None:
@@ -673,9 +717,10 @@ class PantallaCRUD(QWidget):
         `self._columna_prioritaria`; la otra mitad se reparte en partes
         iguales entre el resto de las columnas que no tengan `Campo.
         ancho_fijo=True` (si es una sola, se la lleva entera). Mismo
-        criterio que `imagenes._repartir_sobrante`, sin el ancho mínimo
-        por etiqueta de encabezado (ningún catálogo genérico lo
-        necesitó todavía)."""
+        criterio que `imagenes._repartir_sobrante`. Tampoco participan
+        `Campo.ancho_minimo_etiqueta`/`tercio_extra`: ya tienen su
+        propio ancho fijado por otro criterio, no uno a repartir de
+        nuevo acá."""
         indice_prioritaria = next(
             (i for i, c in enumerate(self.campos) if c.nombre == self._columna_prioritaria), None,
         )
@@ -686,7 +731,10 @@ class PantallaCRUD(QWidget):
         sobrante = disponible - suma_natural
         if sobrante <= 0:
             return
-        otras = [i for i, c in enumerate(self.campos) if i != indice_prioritaria and not c.ancho_fijo]
+        otras = [
+            i for i, c in enumerate(self.campos)
+            if i != indice_prioritaria and not c.ancho_fijo and not c.ancho_minimo_etiqueta and not c.tercio_extra
+        ]
         para_prioritaria = sobrante // 2
         resto = sobrante - para_prioritaria
         self.tabla_widget.setColumnWidth(
@@ -761,7 +809,10 @@ class PantallaCRUD(QWidget):
         return primeros + resto
 
     def _nuevo(self) -> None:
-        dialogo = _DialogoRegistro(self.conn, self._campos_dialogo(), "Nuevo registro")
+        dialogo = _DialogoRegistro(
+            self.conn, self._campos_dialogo(), "Nuevo registro",
+            multiplicador_tamano=self._multiplicador_tamano_dialogo,
+        )
         if self.al_abrir_dialogo:
             self.al_abrir_dialogo(dialogo)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
@@ -789,7 +840,10 @@ class PantallaCRUD(QWidget):
             QMessageBox.information(self, "Editar", "Seleccioná un registro para editar.")
             return
         registro = self.repositorio.obtener(id_valor)
-        dialogo = _DialogoRegistro(self.conn, self._campos_dialogo(), "Editar registro", registro=registro)
+        dialogo = _DialogoRegistro(
+            self.conn, self._campos_dialogo(), "Editar registro", registro=registro,
+            multiplicador_tamano=self._multiplicador_tamano_dialogo,
+        )
         if self.al_abrir_dialogo:
             self.al_abrir_dialogo(dialogo)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
@@ -842,7 +896,10 @@ class PantallaCRUD(QWidget):
 
 
 class _DialogoRegistro(QDialog):
-    def __init__(self, conn: sqlite3.Connection, campos: list[Campo], titulo: str, registro=None, parent=None):
+    def __init__(
+        self, conn: sqlite3.Connection, campos: list[Campo], titulo: str, registro=None, parent=None,
+        multiplicador_tamano: float = 1.0,
+    ):
         super().__init__(parent)
         self.conn = conn
         self.campos = campos
@@ -888,7 +945,27 @@ class _DialogoRegistro(QDialog):
         # terminar con un diálogo absurdamente ancho por un solo campo
         # larguísimo (ahí ya pasa a envolver en dos líneas, como antes).
         ancho = max(480, min(formulario.sizeHint().width() + 32, 900))
-        self.resize(ancho, min(60 + 40 * len(campos), 640))
+        alto = min(60 + 40 * len(campos), 640)
+        # multiplicador_tamano (pedido puntual, Mensajes predefinidos:
+        # "el doble de ancho y de alto que el que se abre ahora") se
+        # aplica sobre el tamaño ya calculado arriba, no sobre un valor
+        # fijo propio — un formulario con más campos sigue creciendo en
+        # función de su contenido, solo que ahora al doble (o lo que
+        # pida cada catálogo). 1.0 (default) no cambia nada.
+        self.resize(int(ancho * multiplicador_tamano), int(alto * multiplicador_tamano))
+        if multiplicador_tamano != 1.0:
+            # "que arranque más arriba en pantalla, centralizado" — Qt no
+            # centra sola una ventana sin padre (`parent=None` en todos
+            # los llamadores de este diálogo); se calcula a mano contra
+            # la pantalla principal, centrada en X y bien arriba en Y en
+            # vez de centrada en Y (que la dejaría más abajo de lo que
+            # pidió la clienta, "para que se vea completo al abrir").
+            pantalla = QGuiApplication.primaryScreen()
+            if pantalla is not None:
+                geometria = pantalla.availableGeometry()
+                x = geometria.x() + max(0, (geometria.width() - self.width()) // 2)
+                y = geometria.y() + max(0, (geometria.height() - self.height()) // 10)
+                self.move(x, y)
 
         boton_ok = botones.button(QDialogButtonBox.StandardButton.Ok)
         boton_cancelar = botones.button(QDialogButtonBox.StandardButton.Cancel)
@@ -952,18 +1029,24 @@ class _DialogoRegistro(QDialog):
             entrada.setText(str(valor))
         return entrada
 
-    _COLUMNAS_BOTONES_VARIABLES = 4
+    # 3 (antes 4, pedido explícito de la clienta al sumar la novena
+    # variable en Mensajes predefinidos — "ahora que son 9 variables
+    # ponelas en tres filas de tres botones"): con 9 variables da
+    # exactamente 3x3. Solo Mensajes predefinidos usa `variables=` hoy
+    # (ver `Campo.variables`), así que este cambio no afecta a ningún
+    # otro catálogo todavía.
+    _COLUMNAS_BOTONES_VARIABLES = 3
 
     def _armar_fila_variables(self, entrada: QPlainTextEdit, variables: dict[str, str]) -> QWidget:
         """Un botón por variable disponible (hallazgo #24 de la
         auditoría): clickearlo inserta "{nombre}" en el cursor de
         `entrada`, sin pisar nada de lo que ya estaba tipeado. La
         descripción de cada variable queda como tooltip del botón, para
-        no alargar la fila con texto largo. En grilla de 4 columnas (no
-        una sola fila corrida) para que una lista más larga de variables
-        no termine recortada contra el borde del diálogo, angosto por
-        default — mismo criterio que la grilla de días de Llaves/
-        Oferta de consultorios."""
+        no alargar la fila con texto largo. En grilla (no una sola fila
+        corrida) para que una lista más larga de variables no termine
+        recortada contra el borde del diálogo, angosto por default —
+        mismo criterio que la grilla de días de Llaves/Oferta de
+        consultorios."""
         contenedor = QWidget()
         layout_variables = QVBoxLayout(contenedor)
         layout_variables.setContentsMargins(0, 0, 0, 0)

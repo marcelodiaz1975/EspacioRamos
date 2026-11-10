@@ -79,6 +79,15 @@ def _titulo_campo(texto: str) -> QLabel:
     return etiqueta
 
 
+def _nombre_espacio(conn: sqlite3.Connection) -> str:
+    """Mismo criterio que `app.negocio.mensajes`/`plantillas_texto`
+    (duplicado acá, sin relación de dependencia con esos módulos): el
+    nombre del espacio de `Configuracion`, en blanco si no está
+    cargado."""
+    fila = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+    return (fila["NombreEspacio"] if fila else None) or ""
+
+
 def _opciones_localidad_o_general(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
     return [(None, "En general")] + _opciones_localidad(conn)[1:]
 
@@ -96,15 +105,29 @@ def _opciones_consultorio_o_general(conn: sqlite3.Connection) -> list[tuple[int 
 
 
 def _campos_mensaje_predefinido(conn: sqlite3.Connection) -> list[Campo]:
+    # Pedido explícito de la clienta sobre esta tabla: "Categoría"/
+    # "Descripción" +1/3 de ancho; "Consul" (no "Consultorio") y
+    # "Activo" al mínimo para que entre la etiqueta sin cortar,
+    # centrados; la columna "Mensaje" pasa a titularse "Texto" y queda
+    # como `columna_flexible` del `PantallaCRUD` (ver `_armar_ui`) —
+    # se achica a lo que haga falta para que la tabla entera entre en
+    # el ancho de pantalla sin espacio en blanco, con "Activo" como
+    # última columna visible.
     return [
-        Campo("Categoria", "Categoría", tipo="combo", opciones=opciones_lista("CategoriaMensaje"), combo_editable=True),
-        Campo("Descripcion", "Descripción"),
+        Campo(
+            "Categoria", "Categoría", tipo="combo", opciones=opciones_lista("CategoriaMensaje"),
+            combo_editable=True, tercio_extra=True,
+        ),
+        Campo("Descripcion", "Descripción", tercio_extra=True),
         Campo("IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad_o_general),
         Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio_o_general),
         Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad_o_general),
-        Campo("IdConsultorio", "Consultorio", tipo="combo", opciones=_opciones_consultorio_o_general),
-        Campo("Mensaje", "Mensaje", tipo="texto_largo", variables=_VARIABLES_MENSAJE),
-        Campo("Activo", "Activo", tipo="booleano"),
+        Campo(
+            "IdConsultorio", "Consul", tipo="combo", opciones=_opciones_consultorio_o_general,
+            centrado=True, ancho_minimo_etiqueta=True,
+        ),
+        Campo("Mensaje", "Texto", tipo="texto_largo", variables=_VARIABLES_MENSAJE),
+        Campo("Activo", "Activo", tipo="booleano", centrado=True, ancho_minimo_etiqueta=True),
         *campos_libres(conn),
     ]
 
@@ -163,6 +186,7 @@ _VARIABLES_MENSAJE = {
     "unidad": "Departamento de la unidad vinculada al mensaje (o elegida en los selectores de contexto).",
     "consultorio": "Número del consultorio vinculado al mensaje (o elegido en los selectores de contexto).",
     "localidad": "Localidad vinculada al mensaje (o elegida en los selectores de contexto).",
+    "nombre_espacio": "Nombre del espacio (Configuración general).",
 }
 """Catálogo único de variables ofrecidas en el diálogo Nuevo/Editar
 (hallazgo #24 de la auditoría) — mismo dict que alimenta la fila de
@@ -237,6 +261,15 @@ class _PanelMensajesPredefinidos(QWidget):
             panel_extra_superior_izquierda=panel_superior,
             nuevo_secundario=True,
             anidado=True,
+            # Pedido explícito de la clienta: el diálogo "Nuevo"/"Editar"
+            # al doble de ancho y de alto que el default, para verse
+            # completo al abrir (ver `_DialogoRegistro.__init__`).
+            multiplicador_tamano_dialogo=2.0,
+            # "Texto" (antes "Mensaje") se achica a lo que haga falta
+            # para que la tabla entre en el ancho de pantalla sin dejar
+            # espacio en blanco, con "Activo" como última columna
+            # visible (ver `columna_flexible` en crud_generico.py).
+            columna_flexible="Mensaje",
             # Punto 95 (SistemaDF v0.11.2026.10): la cadena de foco de
             # esta pantalla no es solo Buscar/Nuevo/Editar/Eliminar (el
             # default de `PantallaCRUD`) — tiene que incluir también los
@@ -342,6 +375,7 @@ class _PanelMensajesPredefinidos(QWidget):
             id_localidad = mensaje["IdLocalidad"]
         variables = _variables_ubicacion(self.conn, id_edificio, id_unidad, id_consultorio, id_localidad)
         variables.update(self._variables_profesional_dirigido_a())
+        variables["nombre_espacio"] = _nombre_espacio(self.conn)
         self.texto_vista_previa.setPlainText(sustituir_variables(mensaje["Mensaje"] or "", variables))
 
     def _variables_profesional_dirigido_a(self) -> dict[str, str]:
