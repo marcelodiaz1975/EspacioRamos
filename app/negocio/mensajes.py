@@ -22,7 +22,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Callable
 
-from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, sumar_meses, ultimo_dia_mes
+from app.negocio.dias import DIAS_SEMANA, sumar_meses, ultimo_dia_mes
 from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, hora_fmt, mes_texto
 from app.negocio.liquidaciones import CATEGORIAS_CON_LIQUIDACION_MENSUAL
@@ -883,24 +883,30 @@ def mensaje_detalle_reserva_aislada(
     if lineas_placas:
         lineas += ["", "_PLACAS PARA LOS TIMBRES_"] + lineas_placas
 
-    # "ÚLTIMA LEVANTADA DE PAGOS EN SOBRES": pedido explícito de la
-    # clienta, mismo criterio de sección que "PLACAS PARA LOS TIMBRES"
-    # (título en itálica, línea de detalle con "+") en vez de la frase
-    # suelta que tenía antes ("* Nota: Se imputaron los pagos..."). El
-    # dato sale de lo que se va cargando con los pagos en ese campo
-    # (`HistorialPagos.FechaHoraRecogidaSobres`, precargado al registrar
-    # un pago por sobre dentro de una tanda — ver `app.negocio.pagos.
-    # tanda_sobres_abierta`): de los pagos de ESTE profesional imputados
-    # a este período con medio "Sobre en buzón", la fecha/hora más
-    # reciente. Se omite la sección si no hubo ningún pago por sobre.
-    pagos_sobre = [p for p in pagos if p["MedioPago"] == "Sobre en buzón" and p["FechaHoraRecogidaSobres"]]
-    if pagos_sobre:
-        ultimo = max(pagos_sobre, key=lambda p: p["FechaHoraRecogidaSobres"])
-        dt = datetime.fromisoformat(ultimo["FechaHoraRecogidaSobres"])
-        dia_semana = fecha_a_dia_semana(dt.date())
+    # "PAGOS EN SOBRES IMPUTADOS": pedido explícito de la clienta, en
+    # reemplazo de "ÚLTIMA LEVANTADA DE PAGOS EN SOBRES" (misma sección,
+    # título e texto nuevos). Esa versión anterior derivaba la fecha/hora
+    # del pago MÁS RECIENTE de ESTE profesional con medio "Sobre en
+    # buzón" en este período (`HistorialPagos.FechaHoraRecogidaSobres`) —
+    # un valor que solo existía si ya se había registrado un pago así, y
+    # que variaba de profesional a profesional. El valor correcto es
+    # otro, ya usado en `mensaje_recordatorio_fin_de_mes` más arriba:
+    # `Configuracion.FechaHoraRecogidaSobres`, el campo GLOBAL de "Pagos"
+    # que la clienta edita a mano cada vez que levanta los sobres del
+    # buzón, independientemente de que se registre o no un pago en ese
+    # momento ("yo lo edito, proceso un pago o no, ese valor queda, es
+    # el que se toma") — el mismo corte para todos los profesionales. Se
+    # omite la sección si ese campo está vacío (nunca se cargó).
+    cfg_sobres = conn.execute(
+        "SELECT FechaHoraRecogidaSobres FROM Configuracion WHERE IdConfiguracion = 1"
+    ).fetchone()
+    if cfg_sobres and cfg_sobres["FechaHoraRecogidaSobres"]:
+        dt = datetime.fromisoformat(cfg_sobres["FechaHoraRecogidaSobres"])
+        dia_semana = DIAS_SEMANA[dt.weekday()].lower()
         lineas += [
-            "", "_ÚLTIMA LEVANTADA DE PAGOS EN SOBRES_",
-            f"+ {dia_semana} {dt.day}/{dt.month} - {dt.strftime('%H:%M')}hs",
+            "", "_PAGOS EN SOBRES IMPUTADOS_",
+            f"+ Se contemplaron en el detalle los pagos depositados hasta el {dia_semana} "
+            f"{dt.day:02d}-{dt.month:02d} a las {dt.hour}:{dt.minute:02d}hs.",
         ]
 
     plantilla = resolver_plantilla(

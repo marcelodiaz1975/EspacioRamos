@@ -61,7 +61,7 @@ from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, peri
 from app.negocio.estadisticas import regenerar_snapshot_si_corresponde
 from app.negocio.formato import formatear_moneda
 from app.negocio.lista_espera import GrupoCobertura, marcar_resuelto
-from app.negocio.liquidaciones import regenerar_si_corresponde
+from app.negocio.liquidaciones import calcular_liquidacion, id_profesional_liquidable, regenerar_si_corresponde
 from app.negocio.llaves import llaves_faltantes_para_reserva
 from app.negocio.mensajes import mensaje_detalle_reserva_aislada
 from app.negocio.placas import placa_faltante_para_reserva
@@ -829,6 +829,67 @@ def _resolver_periodo_imputar(
     if periodo_real <= periodo_actual(conn):
         regenerar_si_corresponde(conn, id_profesional=id_profesional, periodo=periodo_real)
     conn.commit()
+
+
+def _regenerar_segun_periodo_imputado(conn: sqlite3.Connection, id_profesional: int, periodo_imputado: str | None) -> None:
+    """Pedido de la clienta ("Reservas extraordinarias"): "si la reserva
+    afecta mes en curso de una profesional R que regenere la liquidación
+    y la marque como no enviada" — cancelar o modificar una reserva
+    extraordinaria YA CREADA no lo estaba haciendo (solo `_crear`, vía
+    `_resolver_periodo_imputar`, regeneraba algo; `_cancelar_registro`/
+    `_modificar_seleccionada` solo llamaban a `regenerar_snapshot_si_
+    corresponde`, que actualiza la grilla operativa, nunca la
+    liquidación). Mismo mecanismo y mismo guard que `_resolver_periodo_
+    imputar` ("nunca para un período genuinamente futuro"), pero acá el
+    período ya está resuelto de antes (`PeriodoImputado`, guardado en la
+    fila al crearla) en vez de venir como 'actual'/'siguiente' de un
+    combo — no hace falta reinterpretarlo."""
+    if periodo_imputado and periodo_imputado <= periodo_actual(conn):
+        regenerar_si_corresponde(conn, id_profesional=id_profesional, periodo=periodo_imputado)
+        conn.commit()
+
+
+def _total_liquidacion_del_periodo(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> float | None:
+    """Monto total calculado (sin persistir nada, `calcular_liquidacion`
+    es de solo lectura) de la liquidación de `periodo` para el R al que
+    `id_profesional` liquida — `None` si no hay ningún R al que
+    liquidarle nada (A/B, o un E sin cabeza R) o si ese período no se
+    puede calcular todavía (`ValueError`, ej. categoría sin liquidación
+    mensual propia). Se usa comparando el valor ANTES y DESPUÉS de una
+    modificación para saber si de verdad cambió algo económico en ese
+    período — devolver `None` en estos casos (en vez de 0.0) evita que
+    dos "no se pudo calcular" se lean como "no cambió nada", perdiendo
+    así una regeneración real."""
+    id_r = id_profesional_liquidable(conn, id_profesional)
+    if id_r is None:
+        return None
+    try:
+        return calcular_liquidacion(conn, id_profesional=id_r, periodo=periodo).total
+    except ValueError:
+        return None
+
+
+def _afecta_economicamente_el_periodo_actual(
+    conn: sqlite3.Connection, id_profesional: int, periodo: str, antes: float | None,
+) -> bool:
+    """Pedido de la clienta ("Reservas regulares"): "si no afecta
+    económicamente al mes en curso no tiene que" regenerar su liquidación
+    — el caso real reportado es "Modificar reserva" para ponerle una
+    Vigencia hasta en el último día del mes en curso (una "liberación"
+    con finalización, en palabras de la clienta): la reserva sigue
+    cubriendo TODOS los días del mes en curso igual que antes (la
+    `VigenciaFin` nueva recién empieza a excluir días a partir del mes
+    SIGUIENTE), así que el total de la liquidación de este período no
+    cambia un centavo — no hay ningún motivo real para regenerarla y
+    marcarla "no enviada" de nuevo.
+
+    Si no se pudo calcular el total ANTES (`antes is None`, ver
+    `_total_liquidacion_del_periodo`) se asume que sí afecta — más vale
+    regenerar de más (el comportamiento de siempre) que perder una
+    regeneración real por no poder comparar."""
+    if antes is None:
+        return True
+    return _total_liquidacion_del_periodo(conn, id_profesional, periodo) != antes
 
 
 def _opciones_horario_regular(conn: sqlite3.Connection, id_profesional: int | None) -> list[tuple[int, str]]:
@@ -2104,6 +2165,14 @@ class _PanelReservasRegulares(QWidget):
         dialogo = _DialogoModificarReservaRegular(self.conn, reserva, parent=self)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
+        periodo = periodo_actual(self.conn)
+        # Capturado ANTES de modificar (ver `_afecta_economicamente_el_
+        # periodo_actual`): pedido de la clienta, "liberación con
+        # finalización el último día del mes en curso" (poner Vigencia
+        # hasta ahí) no tiene que regenerar nada si la reserva sigue
+        # cubriendo igual todos los días de este período — solo cambia a
+        # partir del mes siguiente.
+        total_antes = _total_liquidacion_del_periodo(self.conn, reserva["IdProfesional"], periodo)
         try:
             advertencias = modificar_reserva_regular(
                 self.conn, reserva["IdReservaRegular"], hora_inicio=dialogo.hora_inicio,
@@ -2119,9 +2188,8 @@ class _PanelReservasRegulares(QWidget):
         except ValueError as error:
             QMessageBox.warning(self, "Modificar reserva", str(error))
             return
-        regenerar_si_corresponde(
-            self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn),
-        )
+        if _afecta_economicamente_el_periodo_actual(self.conn, reserva["IdProfesional"], periodo, total_antes):
+            regenerar_si_corresponde(self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo)
         self.conn.commit()
         if advertencias:
             QMessageBox.information(
@@ -3744,6 +3812,7 @@ class _PanelReservaExtraordinaria(QWidget):
             return False
         self.conn.commit()
         regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
+        _regenerar_segun_periodo_imputado(self.conn, reserva["IdProfesional"], reserva["PeriodoImputado"])
         if requiere_aviso:
             QMessageBox.information(self, titulo, "Cancelada el mismo día: avisar al profesional.")
         else:
@@ -3812,6 +3881,7 @@ class _PanelReservaExtraordinaria(QWidget):
             return
         self.conn.commit()
         regenerar_snapshot_si_corresponde(self.conn, reserva["Fecha"][:7])
+        _regenerar_segun_periodo_imputado(self.conn, reserva["IdProfesional"], reserva["PeriodoImputado"])
         self._copiar_mensaje_detalle(reserva["IdProfesional"])
         if advertencias:
             QMessageBox.information(

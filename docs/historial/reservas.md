@@ -3995,3 +3995,148 @@ aisladas`, `test_boton_crear_extraordinaria_no_corta_su_texto`,
 `test_tabla_extraordinaria_ocupa_todo_el_ancho_disponible`. Suite
 completa de este archivo: 186 passed, mismos 2 fallos de calibración de
 altura de botón ya conocidos, sin regresiones nuevas.
+
+## Reservas regulares: "Modificar reserva" no regenera si no afecta económicamente el período actual (nov-2026)
+
+Pedido de la clienta: "cuando hago una liberación con finalización el
+último día del mes en curso, o sea que impacta para el mes siguiente,
+vuelve a regenerar la liquidación del mes en curso y la marca como no
+enviada. Si no afecta económicamente al mes en curso no tiene que
+volver a hacer ese proceso." El caso real: "Modificar reserva" (el
+mecanismo vigente para "terminar" una reserva regular, ver Punto #9.1.4
+más arriba) permite poner una `VigenciaFin` real — poniéndola en el
+ÚLTIMO día del mes EN CURSO, la reserva sigue cubriendo absolutamente
+todos los días de este período igual que antes (`VigenciaFin >= día`
+es cierto para cualquier día del mes hasta ese último inclusive) — solo
+empieza a excluir días a partir del mes SIGUIENTE. El total económico
+de la liquidación de ESTE período, por lo tanto, no cambia un centavo,
+así que regenerarla y marcarla "no enviada" de nuevo no tiene sentido:
+nada en el PDF/estado de cuenta de este mes cambió.
+
+`_modificar_seleccionada` (`_PanelReservasRegulares`) llamaba a
+`regenerar_si_corresponde` SIEMPRE, sin mirar si el cambio realmente
+afectaba algo (Punto #9.1.9: "cualquiera de los tres botones... que
+toque el período en curso regenera"). Se agrega un guard: se calcula el
+TOTAL de la liquidación del período actual ANTES de aplicar
+`modificar_reserva_regular` (`_total_liquidacion_del_periodo`, nueva
+función de módulo — usa `calcular_liquidacion`, de solo lectura, no
+persiste nada) y se lo vuelve a calcular DESPUÉS; solo si cambió
+(`_afecta_economicamente_el_periodo_actual`) se llama a `regenerar_si_
+corresponde`. Comparar el TOTAL calculado (en vez de reimplementar a
+mano una regla sobre `VigenciaInicio`/`VigenciaFin`/`HoraInicio`/
+`HoraFin` por separado) es deliberado: es la misma fuente de verdad que
+ya usa el sistema para decidir cuánto se le debe a un profesional, así
+que cualquier otro campo que also afecte el cálculo (feriados,
+descuentos, lo que sea) queda cubierto sin tener que enumerar casos a
+mano. Si no se puede calcular el total ANTES (`None` — profesional sin
+liquidación mensual propia, o algo que todavía no se puede calcular),
+el guard asume que SÍ afecta (prefiere regenerar de más que perder una
+regeneración real por no poder comparar).
+
+Mismo guard reusable si en el futuro se detecta el mismo patrón en
+"Eliminar reserva" (`_eliminar_seleccionada`) — no tocado en esta
+ronda porque el pedido puntual de la clienta fue sobre "Modificar
+reserva" ("una liberación con finalización"), y eliminar una reserva
+por completo casi siempre SÍ cambia algo (deja de existir, no solo le
+cambia la fecha de fin) — se deja para revisar puntualmente si alguna
+vez se reporta el mismo síntoma ahí.
+
+Test nuevo: `test_modificar_reserva_regular_con_vigencia_fin_a_fin_de_
+mes_no_regenera_si_no_afecta_el_periodo_actual` — con un valor hora
+real configurado en el consultorio (si no, el total ya es 0 sin que
+nada cambie nunca, lo que no probaría nada), pone `VigenciaFin` en el
+último día del mes actual y confirma que NO se crea una nueva
+`LiquidacionEmitida` y que la ya `Enviada` sigue así. El test
+preexistente `test_modificar_reserva_regular_regenera_liquidacion_
+enviada` (cambia `HoraFin`, un cambio económico real) necesitó la misma
+configuración de valor hora — antes pasaba por casualidad con el
+consultorio en $0 (cualquier cambio de horario da total 0 igual,
+ningún motivo real para regenerar), ahora deja explícito que el
+cambio SÍ tiene impacto económico real, acorde a cómo se usa el
+guard nuevo.
+
+## Reservas extraordinarias: cancelar/modificar regenera la liquidación si corresponde (nov-2026)
+
+Pedido de la clienta: "si la reserva afecta mes en curso de una
+profesional R que regenere la liquidación y la marque como no
+enviada." Investigado: esto YA pasaba al CREAR una reserva
+extraordinaria (`_crear` llama a `_resolver_periodo_imputar`, que a su
+vez llama a `regenerar_si_corresponde`), pero NO al cancelarla ni al
+modificarla — `_cancelar_registro`/`_modificar_seleccionada` solo
+llamaban a `regenerar_snapshot_si_corresponde` (que solo actualiza la
+grilla operativa/ocupación, nunca la liquidación). Mismo gap existe en
+Reservas aisladas (`_PanelReservasAisladas`, mismos dos métodos) pero
+no se toca en esta ronda — la clienta pidió esto puntualmente sobre
+"Reservas extraordinarias", y la convención de este proyecto es
+revisar pantalla por pantalla, no un barrido completo de una sola vez.
+
+Nueva función de módulo `_regenerar_segun_periodo_imputado(conn,
+id_profesional, periodo_imputado)`: mismo mecanismo y mismo guard que
+`_resolver_periodo_imputar` ("nunca para un período genuinamente
+futuro"), pero recibe el período YA RESUELTO (`PeriodoImputado`,
+guardado en la fila al crearla como "AAAA-MM" real) en vez de
+'actual'/'siguiente' de un combo — no hace falta reinterpretarlo,
+porque la reserva que se cancela/modifica ya existe de antes con ese
+valor fijo. Se llama desde `_cancelar_registro` y `_modificar_
+seleccionada` de `_PanelReservaExtraordinaria`, después del `regenerar_
+snapshot_si_corresponde` de siempre.
+
+Tests nuevos en `tests/test_gui_reservas.py`:
+`test_cancelar_reserva_extraordinaria_de_un_r_con_periodo_actual_
+regenera_liquidacion` y `test_modificar_reserva_extraordinaria_de_un_r_
+con_periodo_actual_regenera_liquidacion` — la reserva se crea directo
+por `crear_reserva_aislada` (la función de negocio, no `panel._crear()`)
+para que la única regeneración de todo el test sea la que dispara la
+cancelación/modificación bajo prueba, no la de la creación.
+
+Suite completa de `tests/test_gui_reservas.py`: 191 passed, mismos 2
+fallos de calibración de altura de botón ya conocidos, sin regresiones
+nuevas.
+
+## Reservas aisladas: "PAGOS EN SOBRES IMPUTADOS" en vez de "ÚLTIMA LEVANTADA..." (nov-2026)
+
+Pedido explícito de la clienta, en reemplazo del texto acordado antes
+("_ÚLTIMA LEVANTADA DE PAGOS EN SOBRES_ / + Viernes 23/10 - 09:21hs"):
+"_PAGOS EN SOBRES IMPUTADOS_ / + Se contemplaron en el detalle los
+pagos depositados hasta el martes 10-11 a las 9:00hs." Más importante
+que el texto en sí: de DÓNDE sale ese dato. La versión anterior
+(`mensaje_detalle_reserva_aislada`, `app.negocio.mensajes`) derivaba la
+fecha/hora del pago MÁS RECIENTE de ESTE profesional con medio "Sobre
+en buzón" en este período (`HistorialPagos.FechaHoraRecogidaSobres`,
+precargado al registrar un pago por sobre) — un valor que solo existía
+si ya se había registrado un pago así, y que variaba de profesional a
+profesional (cada uno veía "su" último pago, no un corte único para
+todos). La clienta aclaró que el valor correcto es otro, ya usado en
+otro mensaje del sistema (`mensaje_recordatorio_fin_de_mes`): el campo
+GLOBAL `Configuracion.FechaHoraRecogidaSobres`, el mismo que precarga
+el campo de la solapa Pagos y que ella edita a mano cada vez que
+levanta los sobres del buzón — "yo lo edito, proceso un pago o no, ese
+valor queda, es el que se toma". Mismo corte para todos los
+profesionales, independiente de si hubo o no un pago imputado.
+
+Se reemplaza la derivación entera: en vez de filtrar `pagos` (de este
+profesional/período) por medio "Sobre en buzón" y tomar el máximo, se
+lee directo `Configuracion.FechaHoraRecogidaSobres` (mismo query que ya
+usa `mensaje_recordatorio_fin_de_mes`) y se omite la sección si está
+vacío — ya no depende de si HUBO algún pago por sobre de este
+profesional en particular. Formato de fecha/hora nuevo, pedido tal
+cual en el ejemplo (no el `hora_fmt` que usa el resto del sistema, que
+abrevia una hora en punto como "9hs" sin los minutos): día de semana en
+minúscula (`DIAS_SEMANA[...].lower()`, mismo criterio que el otro
+mensaje), fecha "DD-MM" con cero a la izquierda y los dos siempre con
+minutos ("9:00hs", nunca "9hs").
+
+`from app.negocio.dias import fecha_a_dia_semana` quedó sin usar en el
+módulo (era solo para este bloque) y se sacó del import.
+
+Tests actualizados en `tests/test_mensajes.py`: `test_detalle_aislada_
+ultima_levantada_de_sobres_solo_si_hubo_pago_por_sobre`/`test_detalle_
+aislada_sin_ultima_levantada_de_sobres_si_no_hubo_pago_por_sobre` se
+reemplazan por `test_detalle_aislada_pagos_en_sobres_imputados_usa_el_
+campo_global_de_configuracion` (carga `Configuracion.
+FechaHoraRecogidaSobres` sin ningún pago y confirma que la sección
+aparece igual, con el texto nuevo) y `test_detalle_aislada_sin_pagos_
+en_sobres_imputados_si_el_campo_global_esta_vacio` (pago por sobre
+registrado pero el campo global nunca cargado: la sección se omite —
+antes habría aparecido). Suite completa de `test_mensajes.py`: 64
+passed, sin regresiones.

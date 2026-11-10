@@ -1635,8 +1635,14 @@ def test_crear_reserva_regular_regenera_liquidacion_enviada(qtbot, conn):
 def test_modificar_reserva_regular_regenera_liquidacion_enviada(qtbot, conn, monkeypatch):
     """Punto #9.1.9: cualquiera de los tres botones que afecte el
     período en curso regenera y marca no enviada la liquidación del
-    profesional — acá vía "Modificar reserva"."""
+    profesional — acá vía "Modificar reserva". Necesita un valor hora
+    real en el consultorio (`_preparar` no pone ninguno, queda en 0):
+    sin eso, cambiar el horario no afecta económicamente nada y el guard
+    de la tarea #32 (`_afecta_economicamente_el_periodo_actual`) con
+    razón no regeneraría — este test sí quiere un cambio real."""
     _preparar(conn)
+    conn.execute("UPDATE Consultorio SET ValorHoraRegularActual = 1000")
+    conn.commit()
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     periodo = periodo_actual(conn)
     pantalla = PantallaReservas(conn)
@@ -1665,6 +1671,63 @@ def test_modificar_reserva_regular_regenera_liquidacion_enviada(qtbot, conn, mon
     assert len(emisiones) == emitidas_antes + 1
     ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
     assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_modificar_reserva_regular_con_vigencia_fin_a_fin_de_mes_no_regenera_si_no_afecta_el_periodo_actual(
+    qtbot, conn, monkeypatch,
+):
+    """Pedido de la clienta: "cuando hago una liberación con finalización
+    el último día del mes en curso... vuelve a regenerar la liquidación
+    del mes en curso y la marca como no enviada. Si no afecta
+    económicamente al mes en curso no tiene que volver a hacer ese
+    proceso" — poner `VigenciaFin` en el último día del mes EN CURSO no
+    excluye ningún día de ESTE período (recién empieza a excluir días a
+    partir del mes que viene), así que el total de la liquidación de
+    este período no cambia nada: no hay que regenerarla de nuevo."""
+    from app.negocio.dias import ultimo_dia_mes
+
+    _preparar(conn)
+    # Con un valor hora real (no 0, el default de `_preparar`): si el
+    # guard de abajo no comparara de verdad el total económico del
+    # período, bastaría con que el consultorio no tuviera tarifa para
+    # que la aserción "no regenera" pasara por el motivo equivocado.
+    conn.execute("UPDATE Consultorio SET ValorHoraRegularActual = 1000")
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    periodo = periodo_actual(conn)
+    anio, mes = (int(p) for p in periodo.split("-"))
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.panel_regulares.combo_profesional.setCurrentIndex(
+        pantalla.panel_regulares.combo_profesional.findData(id_profesional)
+    )
+    pantalla.panel_regulares._crear()
+
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+
+    emitidas_antes = len(
+        obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    )
+    pantalla.panel_regulares.tabla.selectRow(0)
+    reserva = pantalla.panel_regulares._fila_seleccionada()
+    _mockear_dialogo_modificar_regular(
+        monkeypatch, hora_inicio=reserva["HoraInicio"], hora_fin=reserva["HoraFin"],
+        vigencia_inicio=reserva["VigenciaInicio"], vigencia_fin=ultimo_dia_mes(anio, mes).isoformat(),
+    )
+    pantalla.panel_regulares._modificar_seleccionada()
+
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    assert len(emisiones) == emitidas_antes
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Enviada"
+    # La `VigenciaFin` sí se guardó — el guard solo evita regenerar la
+    # liquidación, nunca bloquea la modificación en sí.
+    assert (
+        obtener_repositorio(conn, "ReservaRegular").obtener(reserva["IdReservaRegular"])["VigenciaFin"]
+        == ultimo_dia_mes(anio, mes).isoformat()
+    )
 
 
 def test_eliminar_reserva_regular_borra_la_fila_con_confirmacion(qtbot, conn):
@@ -4058,6 +4121,91 @@ def test_crear_reserva_extraordinaria_de_un_r_con_periodo_siguiente_no_toca_liqu
     emisiones = repo(conn, "LiquidacionEmitida").listar(IdProfesional=id_r, Periodo=periodo)
     assert len(emisiones) == 1
     assert emisiones[0]["EstadoEnvio"] == "Enviada"
+
+
+def test_cancelar_reserva_extraordinaria_de_un_r_con_periodo_actual_regenera_liquidacion(qtbot, conn):
+    """Pedido de la clienta: "si la reserva afecta mes en curso de una
+    profesional R que regenere la liquidación y la marque como no
+    enviada" — también al CANCELARLA (`_cancelar_registro` solo
+    regeneraba el snapshot de la grilla operativa, nunca tocaba la
+    liquidación). La reserva se crea directo por `crear_reserva_aislada`
+    (no por `panel._crear()`) para que la única regeneración de la
+    liquidación en todo el test sea la que dispara la cancelación."""
+    from app.negocio.dias import periodo_actual
+    from app.negocio.reservas import crear_reserva_aislada
+    from app.repositorio.registro import obtener_repositorio as repo
+
+    _preparar_categoria_a(conn)
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido, SaldoCuentaActual) "
+        "VALUES ('R', 'R1', 'Lo Veci', 0)"
+    )
+    conn.commit()
+    id_r = conn.execute("SELECT IdProfesional FROM Profesional WHERE IdCodigo = 'R1'").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    periodo = periodo_actual(conn)
+    fecha = fecha_actual(conn).isoformat()
+    crear_reserva_aislada(
+        conn, id_profesional=id_r, id_consultorio=id_consultorio, fecha=fecha, hora_inicio=9, hora_fin=10,
+        es_extraordinaria=True, item_extraordinario="Ajuste puntual", monto_extraordinario=3000,
+        periodo_imputado=periodo,
+    )
+    conn.commit()
+    emitir_liquidacion(conn, id_profesional=id_r, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_r, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.tabla.selectRow(0)
+    panel._cancelar()
+
+    emisiones = repo(conn, "LiquidacionEmitida").listar(IdProfesional=id_r, Periodo=periodo)
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_modificar_reserva_extraordinaria_de_un_r_con_periodo_actual_regenera_liquidacion(qtbot, conn, monkeypatch):
+    """Mismo pedido que el test de cancelar, para "Modificar reserva"."""
+    from app.negocio.dias import periodo_actual
+    from app.negocio.reservas import crear_reserva_aislada
+    from app.repositorio.registro import obtener_repositorio as repo
+
+    _preparar_categoria_a(conn)
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, IdCodigo, Apellido, SaldoCuentaActual) "
+        "VALUES ('R', 'R1', 'Lo Veci', 0)"
+    )
+    conn.commit()
+    id_r = conn.execute("SELECT IdProfesional FROM Profesional WHERE IdCodigo = 'R1'").fetchone()["IdProfesional"]
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    periodo = periodo_actual(conn)
+    fecha = fecha_actual(conn).isoformat()
+    crear_reserva_aislada(
+        conn, id_profesional=id_r, id_consultorio=id_consultorio, fecha=fecha, hora_inicio=9, hora_fin=10,
+        es_extraordinaria=True, item_extraordinario="Ajuste puntual", monto_extraordinario=3000,
+        periodo_imputado=periodo,
+    )
+    conn.commit()
+    emitir_liquidacion(conn, id_profesional=id_r, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_r, periodo=periodo, enviada=True)
+    conn.commit()
+
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    _mockear_dialogo_modificar_aislada(
+        monkeypatch, hora_inicio=9, hora_fin=11, item_extraordinario="Ajuste corregido", monto_extraordinario=4000,
+    )
+    panel.tabla.selectRow(0)
+    panel._modificar_seleccionada()
+
+    emisiones = repo(conn, "LiquidacionEmitida").listar(IdProfesional=id_r, Periodo=periodo)
+    assert len(emisiones) == 2
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Regenerada no enviada"
 
 
 def test_crear_reserva_extraordinaria_se_guarda_y_copia_mensaje_al_portapapeles(qtbot, conn, monkeypatch):

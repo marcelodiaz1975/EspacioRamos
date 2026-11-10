@@ -651,24 +651,37 @@ def test_detalle_aislada_item_libre_no_incluye_cargos_de_llave(conn, profesional
     assert "depósito llave" not in texto.lower().replace("depósito por llave", "")
 
 
-def test_detalle_aislada_ultima_levantada_de_sobres_solo_si_hubo_pago_por_sobre(conn, profesional_aislada_con_edificios):
+def test_detalle_aislada_pagos_en_sobres_imputados_usa_el_campo_global_de_configuracion(
+    conn, profesional_aislada_con_edificios,
+):
+    """Pedido de la clienta, en reemplazo de "ÚLTIMA LEVANTADA DE PAGOS
+    EN SOBRES": el corte que se muestra ya no sale del pago MÁS RECIENTE
+    con medio "Sobre en buzón" de este profesional en este período
+    (podía no existir, o variar de profesional a profesional) — sale del
+    campo GLOBAL `Configuracion.FechaHoraRecogidaSobres`, que la clienta
+    edita a mano cada vez que levanta los sobres, "independientemente de
+    registrarse un pago o no". Ningún pago hace falta para que aparezca."""
+    id_prof, _, _, _, _ = profesional_aislada_con_edificios
+    obtener_repositorio(conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres="2026-11-10T09:00:00")
+    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
+    assert "_PAGOS EN SOBRES IMPUTADOS_" in texto
+    assert "+ Se contemplaron en el detalle los pagos depositados hasta el martes 10-11 a las 9:00hs." in texto
+
+
+def test_detalle_aislada_sin_pagos_en_sobres_imputados_si_el_campo_global_esta_vacio(
+    conn, profesional_aislada_con_edificios,
+):
+    """Si nunca se cargó el campo global (default de `Configuracion`),
+    la sección se omite — aunque haya un pago por sobre registrado:
+    el corte ya no depende de los pagos de este profesional en
+    particular."""
     id_prof, _, _, _, _ = profesional_aislada_con_edificios
     registrar_pago(
         conn, id_profesional=id_prof, monto=500, fecha="2026-08-15", periodo_imputado="2026-08",
         medio_pago="Sobre en buzón",
     )
-    ultimo = obtener_repositorio(conn, "HistorialPagos").listar(IdProfesional=id_prof)[-1]
-    obtener_repositorio(conn, "HistorialPagos").actualizar(ultimo["IdPago"], FechaHoraRecogidaSobres="2026-08-18T15:00:00")
     texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
-    assert "_ÚLTIMA LEVANTADA DE PAGOS EN SOBRES_" in texto
-    assert "+ Martes 18/8 - 15:00hs" in texto
-
-
-def test_detalle_aislada_sin_ultima_levantada_de_sobres_si_no_hubo_pago_por_sobre(conn, profesional_aislada_con_edificios):
-    id_prof, _, _, _, _ = profesional_aislada_con_edificios
-    registrar_pago(conn, id_profesional=id_prof, monto=500, fecha="2026-08-15", periodo_imputado="2026-08")
-    texto = mensaje_detalle_reserva_aislada(conn, id_profesional=id_prof, periodo="2026-08")
-    assert "LEVANTADA" not in texto
+    assert "PAGOS EN SOBRES IMPUTADOS" not in texto
 
 
 # ------------------------------------- combinar misma/distintas unidades (5.1)
