@@ -559,3 +559,44 @@ prioritaria` (confirma que el resto de los catálogos no cambia). En
 base_vieja`, `test_aplicar_migraciones_es_idempotente_para_medio_pago_
 y_cuenta_receptora`. Fixtures viejas de `tests/test_gui_pagos.py`
 actualizadas a los valores nuevos.
+
+## Condiciones y normas / Detalles complementarios: columna "Texto" achicada + vista previa (nov-2026)
+
+Pedido explícito de la clienta sobre las dos pantallas (mismo patrón en
+ambas, catálogos genéricos de `catalogos.py`): la columna "Texto"
+(`tipo="texto_largo"`, el contenido puede ser un párrafo entero) se
+achica para que "Activo" entre siempre en pantalla sin escroleo
+horizontal — "aunque se vea el contenido en forma parcial" — y un
+cuadro de vista previa debajo de los botones (hasta el pie del panel)
+muestra el texto COMPLETO del registro que se selecciona en la tabla,
+escroleable si no entra.
+
+Para lo primero, `PantallaCRUD`/`Campo` suman `columna_flexible`
+(`app/gui/crud_generico.py`): a diferencia de `columna_prioritaria`
+(ronda de Listas editables, arriba — SOLO agranda una columna con el
+sobrante), `columna_flexible` fuerza el ancho de esa columna a lo que
+sobre del ancho disponible una vez que el resto de las columnas ya
+tiene el suyo — puede agrandarla o ACHICARLA por debajo de su ancho
+natural, según haga falta, con un piso (`_ANCHO_MINIMO_COLUMNA_
+FLEXIBLE`, 80px) para que nunca quede en 0 en una ventana muy angosta.
+Mismo mecanismo de recálculo en cada resize que `columna_prioritaria`
+(`_TablaConAnchoDinamico`, `_reajustar_ancho_tabla`).
+
+Para lo segundo, no hizo falta ningún cambio en `PantallaCRUD`: el
+parámetro `panel_extra_izquierda` ya existía (mismo mecanismo que la
+documentación de Profesionales — "esa sección va DEBAJO de esos tres
+botones... con una línea divisoria propia arriba"). `catalogos.py` suma
+dos funciones chicas reusadas por ambas pantallas:
+`_armar_vista_previa_texto` (arma el panel con línea divisoria + título
++ un `QTextEdit` de solo lectura, `stretch=1` para que llegue al pie) y
+`_conectar_vista_previa_texto` (conecta `tabla_widget.
+itemSelectionChanged` — construido recién DESPUÉS de `panel_extra_
+izquierda`, mismo patrón de "el binding funciona porque el click llega
+mucho después de que todo ya está armado" que Profesionales — a una
+función que lee `pantalla.fila_seleccionada_id()` y muestra el campo
+pedido, vacío si no hay selección).
+
+Tests nuevos en `tests/test_catalogos.py` (parametrizados sobre las dos
+pantallas): `test_texto_se_achica_para_que_activo_entre_sin_escrolear`,
+`test_vista_previa_muestra_el_texto_completo_del_registro_
+seleccionado`.

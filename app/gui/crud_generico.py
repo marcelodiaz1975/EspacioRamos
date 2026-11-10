@@ -57,6 +57,7 @@ from app.repositorio.registro import obtener_repositorio
 _ID_REGISTRO = Qt.ItemDataRole.UserRole
 _ANCHO_CAMPO = 240  # ancho compartido por el panel izquierdo (buscar + botones), mismo criterio que otras pantallas
 _PADDING_COLUMNA = 30  # mismo criterio y mismo valor que novedades._ajustar_columnas/llaves._ajustar_columnas
+_ANCHO_MINIMO_COLUMNA_FLEXIBLE = 80  # piso de `columna_flexible` — evita que quede en 0/negativo en una ventana angosta
 _LOCALE_ES = QLocale(QLocale.Language.Spanish)
 # "lun 07-09-2026" — mismo formato que los campos Desde/Hasta de Registro de
 # ausencias (app/gui/pantallas/novedades.py), generalizado acá para
@@ -270,6 +271,7 @@ class PantallaCRUD(QWidget):
         anidado: bool = False,
         campos_primero_dialogo: list[str] | None = None,
         columna_prioritaria: str | None = None,
+        columna_flexible: str | None = None,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -344,6 +346,24 @@ class PantallaCRUD(QWidget):
         # revisa cada uno (mismo criterio que el resto del sistema), no
         # en los ~14 catálogos genéricos de una sola vez.
         self._columna_prioritaria = columna_prioritaria
+        # columna_flexible: nombre de un `Campo` (típicamente tipo=
+        # "texto_largo", cuyo contenido puede ser un párrafo entero y
+        # haría que `resizeColumnsToContents()` la deje enorme) cuyo
+        # ancho NO se calcula por contenido — se fuerza a lo que sobre
+        # del ancho disponible una vez que el resto de las columnas ya
+        # tiene el suyo, para que esas otras columnas (ej. "Activo")
+        # entren siempre en pantalla sin escroleo horizontal (pedido
+        # explícito de la clienta sobre Condiciones y normas/Detalles
+        # complementarios: "reducila... entre la columna Activo en la
+        # pantalla sin necesidad de escrolear"). Si el contenido de esa
+        # columna queda cortado, se ve solo en parte — la clienta pidió
+        # explícitamente esto ("aunque se vea el contenido en forma
+        # parcial"), para eso suma el cuadro de vista previa aparte
+        # (`panel_extra_izquierda`, ver `catalogos.py`). No both at
+        # once con `columna_prioritaria` sobre la MISMA columna (una
+        # agranda con el sobrante, la otra fuerza un ancho fijo
+        # calculado distinto) — cada catálogo usa el que corresponda.
+        self._columna_flexible = columna_flexible
         # compacto: layout viejo (título + fila de botones arriba de la
         # tabla, sin solapa/filtro) — para cuando una pantalla compuesta
         # (ej. Mensajes predefinidos) inserta este CRUD como un componente
@@ -616,6 +636,8 @@ class PantallaCRUD(QWidget):
             self.tabla_widget.setColumnWidth(col, self.tabla_widget.columnWidth(col) + _PADDING_COLUMNA)
         if self._columna_prioritaria is not None:
             self._repartir_ancho_sobrante()
+        if self._columna_flexible is not None:
+            self._ajustar_columna_flexible()
         self._aplicar_filtro_busqueda()
         self._actualizar_botones_seleccion()
 
@@ -624,9 +646,26 @@ class PantallaCRUD(QWidget):
         (`_TablaConAnchoDinamico`) — mismo motivo que `imagenes.
         _PanelGestorArchivos._reajustar_ancho_tabla`: recién ahí se
         conoce el ancho real disponible para repartir el sobrante."""
-        if self._columna_prioritaria is None or self.tabla_widget.columnCount() == 0:
+        if self.tabla_widget.columnCount() == 0:
             return
-        self._repartir_ancho_sobrante()
+        if self._columna_prioritaria is not None:
+            self._repartir_ancho_sobrante()
+        if self._columna_flexible is not None:
+            self._ajustar_columna_flexible()
+
+    def _ajustar_columna_flexible(self) -> None:
+        """Ver `columna_flexible` más arriba: fuerza el ancho de esa
+        columna a lo que sobre del ancho disponible de la tabla una vez
+        que el resto de las columnas ya tiene el suyo (natural +
+        padding) — nunca se calcula por su propio contenido."""
+        indice = next((i for i, c in enumerate(self.campos) if c.nombre == self._columna_flexible), None)
+        if indice is None:
+            return
+        disponible = self.tabla_widget.viewport().width()
+        suma_otras = sum(
+            self.tabla_widget.columnWidth(c) for c in range(self.tabla_widget.columnCount()) if c != indice
+        )
+        self.tabla_widget.setColumnWidth(indice, max(_ANCHO_MINIMO_COLUMNA_FLEXIBLE, disponible - suma_otras))
 
     def _repartir_ancho_sobrante(self) -> None:
         """La mitad del ancho sobrante (disponible menos lo que ya

@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox, QTextEdit
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -473,6 +473,70 @@ def test_pantalla_detalles_complementarios_tiene_tres_campos_libres(qtbot, conn)
     assert nombres.count("CampoLibre1") == 1
     assert nombres.count("CampoLibre2") == 1
     assert nombres.count("CampoLibre3") == 1
+
+
+@pytest.mark.parametrize(
+    "fabrica, repositorio, campos_crear",
+    [
+        (catalogos.pantalla_condiciones_normas, "CondicionNorma", {"Numero": 1, "Titulo": "N1", "Texto": "x" * 500}),
+        (
+            catalogos.pantalla_detalles_complementarios_propuesta, "DetalleComplementarioPropuesta",
+            {"Orden": 1, "Titulo": "D1", "Texto": "y" * 500},
+        ),
+    ],
+)
+def test_texto_se_achica_para_que_activo_entre_sin_escrolear(qtbot, conn, fabrica, repositorio, campos_crear):
+    """Pedido explícito de la clienta: la columna "Texto" (contenido
+    largo, tipo="texto_largo") se achica para que "Activo" entre en
+    pantalla sin escroleo horizontal — en vez del ancho natural de
+    `resizeColumnsToContents()`, que con un párrafo entero la dejaría
+    enorme."""
+    obtener_repositorio(conn, repositorio).crear(**campos_crear, Activo=1)
+    pantalla = fabrica(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 800)
+    qtbot.waitExposed(pantalla)
+
+    indice_activo = next(i for i, c in enumerate(pantalla.campos) if c.nombre == "Activo")
+    ancho_tabla = pantalla.tabla_widget.viewport().width()
+    suma_columnas = sum(pantalla.tabla_widget.columnWidth(c) for c in range(pantalla.tabla_widget.columnCount()))
+    assert pantalla.tabla_widget.columnWidth(indice_activo) > 0
+    assert suma_columnas <= ancho_tabla + 1  # +1: redondeo del reparto, no escrolea — "Activo" entra sin scroll
+
+
+@pytest.mark.parametrize(
+    "fabrica, repositorio, campos_crear",
+    [
+        (
+            catalogos.pantalla_condiciones_normas, "CondicionNorma",
+            {"Numero": 1, "Titulo": "N1", "Texto": "Texto completo de la condición."},
+        ),
+        (
+            catalogos.pantalla_detalles_complementarios_propuesta, "DetalleComplementarioPropuesta",
+            {"Orden": 1, "Titulo": "D1", "Texto": "Texto completo del detalle."},
+        ),
+    ],
+)
+def test_vista_previa_muestra_el_texto_completo_del_registro_seleccionado(
+    qtbot, conn, fabrica, repositorio, campos_crear,
+):
+    """Pedido explícito de la clienta: un cuadro debajo de los botones
+    muestra el texto completo del registro que se pincha en la tabla —
+    sin selección, queda vacío (ver placeholder)."""
+    obtener_repositorio(conn, repositorio).crear(**campos_crear, Activo=1)
+    pantalla = fabrica(conn)
+    qtbot.addWidget(pantalla)
+
+    area_texto = pantalla.panel_extra_izquierda.findChild(QTextEdit)
+    assert area_texto.toPlainText() == ""
+
+    fila_nueva = pantalla.tabla_widget.rowCount() - 1  # la base ya trae registros sembrados antes de este
+    pantalla.tabla_widget.selectRow(fila_nueva)
+    assert area_texto.toPlainText() == campos_crear["Texto"]
+
+    pantalla.tabla_widget.clearSelection()
+    assert area_texto.toPlainText() == ""
 
 
 def test_pantalla_profesiones_tiene_tres_campos_libres(qtbot, conn):

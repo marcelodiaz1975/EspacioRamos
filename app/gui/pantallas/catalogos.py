@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QMessageBox, QTextEdit, QVBoxLayout, QWidget
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.widgets.foco import instalar_enter_avanza_foco
@@ -59,6 +59,39 @@ def _linea_divisoria() -> QFrame:
     linea.setFrameShape(QFrame.Shape.HLine)
     linea.setFrameShadow(QFrame.Shadow.Sunken)
     return linea
+
+
+def _armar_vista_previa_texto(etiqueta: str = "Vista previa") -> tuple[QWidget, QTextEdit]:
+    """Cuadro de vista previa debajo de Nuevo/Editar/Eliminar
+    (`panel_extra_izquierda` de `PantallaCRUD`, mismo criterio que la
+    documentación de Profesionales: línea divisoria propia arriba,
+    separándolo de los tres botones del CRUD) — pedido explícito de la
+    clienta sobre Condiciones y normas/Detalles complementarios: un
+    cuadro escroleable que llega hasta el pie del panel (`stretch=1`)
+    con el texto completo del registro seleccionado en la tabla, visible
+    aunque la columna "Texto" lo muestre cortado (ver `columna_flexible`
+    en `crud_generico.py`). Devuelve el panel (para `panel_extra_
+    izquierda`) y el área de texto en sí (para que cada pantalla la
+    conecte a su propia tabla, que todavía no existe en este punto)."""
+    panel = QWidget()
+    layout_panel = QVBoxLayout(panel)
+    layout_panel.setContentsMargins(0, 0, 0, 0)
+    layout_panel.addWidget(_linea_divisoria())
+    layout_panel.addWidget(_titulo_campo(etiqueta))
+    area_texto = QTextEdit()
+    area_texto.setReadOnly(True)
+    area_texto.setPlaceholderText("Seleccioná un registro para ver el texto completo acá.")
+    layout_panel.addWidget(area_texto, stretch=1)
+    return panel, area_texto
+
+
+def _conectar_vista_previa_texto(pantalla: PantallaCRUD, area_texto: QTextEdit, campo_texto: str) -> None:
+    def _actualizar() -> None:
+        id_valor = pantalla.fila_seleccionada_id()
+        registro = pantalla.repositorio.obtener(id_valor) if id_valor is not None else None
+        area_texto.setPlainText(registro[campo_texto] if registro is not None else "")
+
+    pantalla.tabla_widget.itemSelectionChanged.connect(_actualizar)
 
 
 def _opciones_tamano(conn: sqlite3.Connection) -> list[tuple[str | None, str]]:
@@ -353,8 +386,17 @@ def pantalla_condiciones_normas(conn: sqlite3.Connection, *, anidado: bool = Fal
         Campo("Activo", "Activo", tipo="booleano"),
         *campos_libres(conn),
     ]
-    pantalla = PantallaCRUD(conn, "CondicionNorma", "Condiciones y normas", campos, anidado=anidado)
+    # Pedido explícito de la clienta: "Texto" se achica para que
+    # "Activo" entre siempre en pantalla sin escroleo horizontal (ver
+    # `columna_flexible`), y un cuadro de vista previa debajo de los
+    # botones muestra el texto completo del registro seleccionado.
+    panel_preview, area_preview = _armar_vista_previa_texto()
+    pantalla = PantallaCRUD(
+        conn, "CondicionNorma", "Condiciones y normas", campos, anidado=anidado,
+        panel_extra_izquierda=panel_preview, columna_flexible="Texto",
+    )
     pantalla.al_guardar = lambda valores, registro: reordenar_condiciones_al_guardar(conn, valores, registro)
+    _conectar_vista_previa_texto(pantalla, area_preview, "Texto")
     return pantalla
 
 
@@ -366,10 +408,14 @@ def pantalla_detalles_complementarios_propuesta(conn: sqlite3.Connection, *, ani
         Campo("Activo", "Activo", tipo="booleano"),
         *campos_libres(conn),
     ]
+    # Mismo pedido que Condiciones y normas, sobre este catálogo.
+    panel_preview, area_preview = _armar_vista_previa_texto()
     pantalla = PantallaCRUD(
         conn, "DetalleComplementarioPropuesta", "Detalles complementarios (Propuesta)", campos, anidado=anidado,
+        panel_extra_izquierda=panel_preview, columna_flexible="Texto",
     )
     pantalla.al_guardar = lambda valores, registro: reordenar_detalles_al_guardar(conn, valores, registro)
+    _conectar_vista_previa_texto(pantalla, area_preview, "Texto")
     return pantalla
 
 
