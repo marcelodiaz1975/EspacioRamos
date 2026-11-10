@@ -685,3 +685,30 @@ de `panel._leyenda` (atributo que dejó de existir). Nuevo método en
 fijar_ancho_panel_filtros` (opt-in, el resto de los usos de esta grilla
 compartida siguen con `agrandar_panel_filtros`, sin cambios).
 
+## Centro de mensajería: "Saldo anterior"/"Saldo actual" +1/3, el resto para "Profesional" (nov-2026)
+
+Pedido explícito de la clienta: "Dale un tercio mas de ancho a las
+columnas 'Saldo anterior' y 'Saldo actual'. Luego el ancho que falte
+para cubrir la pantalla dáselo a la columna 'Profesional'" — a
+diferencia del reparto "mitad a una, mitad al resto" de otras pantallas
+(Gestor de archivos, Listas editables), acá son DOS columnas con un
+incremento FIJO (natural + 1/3) y una TERCERA que se lleva el sobrante
+que sobre después de eso — no participan del reparto ni "Código" ni
+"Estado" ni "Enviada" ni la columna del botón.
+
+`_PanelCentroMensajeria._ajustar_columnas` (`app/gui/pantallas/
+mensajeria.py`), llamada desde `actualizar()` en vez del `resizeColumnsToContents()`
+suelto que tenía antes: `resizeColumnsToContents()` + `ancho + ancho //
+3` en `_COLUMNA_SALDO_ANTERIOR`/`_COLUMNA_SALDO_ACTUAL`, después el
+sobrante completo (`viewport().width()` menos la suma de todas las
+columnas ya ajustadas) para `_COLUMNA_PROFESIONAL`. Mismo patrón de
+`_TablaConAnchoDinamico` (duplicado en este módulo, no importado de
+`imagenes.py`/`crud_generico.py` — mismo criterio de "no centralizar
+entre módulos" del resto del sistema) para recalcular en cada resize,
+no solo al refrescar los datos.
+
+Test nuevo: `tests/test_gui_mensajeria.py::
+test_saldo_anterior_y_actual_crecen_un_tercio_y_profesional_se_lleva_
+el_resto` (confirma la fórmula exacta contra el ancho natural puro, y
+que la suma de columnas no deja sobrante sin usar).
+

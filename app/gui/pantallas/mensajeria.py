@@ -87,6 +87,9 @@ from app.negocio.mensajes import (
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
 from app.repositorio.registro import obtener_repositorio
 
+_COLUMNA_PROFESIONAL = 1
+_COLUMNA_SALDO_ANTERIOR = 3
+_COLUMNA_SALDO_ACTUAL = 4
 _COLUMNA_ENVIADA = 5
 _COLUMNA_BOTON = 6
 
@@ -202,6 +205,22 @@ class _ItemMoneda(QTableWidgetItem):
         return super().__lt__(other)
 
 
+class _TablaConAnchoDinamico(QTableWidget):
+    """Notifica a `al_redimensionar` cada vez que cambia de tamaño —
+    mismo motivo y mismo patrón que `app.gui.pantallas.imagenes.
+    _TablaConAnchoDinamico`: el ancho real disponible (para repartir el
+    sobrante, ver `_PanelCentroMensajeria._ajustar_columnas`) recién se
+    conoce después de que el layout se resuelve, no al construirse."""
+
+    def __init__(self, al_redimensionar, parent=None):
+        super().__init__(parent)
+        self._al_redimensionar = al_redimensionar
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        super().resizeEvent(evento)
+        self._al_redimensionar()
+
+
 class _PanelCentroMensajeria(QWidget):
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -301,7 +320,7 @@ class _PanelCentroMensajeria(QWidget):
         columna.addWidget(self.texto_mensaje, stretch=1)
         layout_solapa.addWidget(panel_izquierda)
 
-        self.tabla = QTableWidget()
+        self.tabla = _TablaConAnchoDinamico(self._reajustar_ancho_tabla)
         excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(7)
         self.tabla.setHorizontalHeaderLabels(
@@ -420,7 +439,29 @@ class _PanelCentroMensajeria(QWidget):
         finally:
             self._actualizando_tabla = False
         self.tabla.setSortingEnabled(True)
+        self._ajustar_columnas()
+
+    def _ajustar_columnas(self) -> None:
+        """Pedido explícito de la clienta: "Saldo anterior"/"Saldo
+        actual" al ancho natural más un tercio, y el ancho que falte
+        para cubrir la pantalla (el sobrante después de eso) para
+        "Profesional" — no para el resto de las columnas. Se vuelve a
+        llamar sola cada vez que la tabla cambia de tamaño
+        (`_TablaConAnchoDinamico`), no solo al refrescar los datos."""
+        if self.tabla.columnCount() == 0:
+            return
         self.tabla.resizeColumnsToContents()
+        for columna in (_COLUMNA_SALDO_ANTERIOR, _COLUMNA_SALDO_ACTUAL):
+            ancho = self.tabla.columnWidth(columna)
+            self.tabla.setColumnWidth(columna, ancho + ancho // 3)
+        disponible = self.tabla.viewport().width()
+        suma_natural = sum(self.tabla.columnWidth(c) for c in range(self.tabla.columnCount()))
+        sobrante = disponible - suma_natural
+        if sobrante > 0:
+            self.tabla.setColumnWidth(_COLUMNA_PROFESIONAL, self.tabla.columnWidth(_COLUMNA_PROFESIONAL) + sobrante)
+
+    def _reajustar_ancho_tabla(self) -> None:
+        self._ajustar_columnas()
 
     def _listar_filtrados(
         self, periodo: str, filtro: str, id_profesional_filtro: int | None,

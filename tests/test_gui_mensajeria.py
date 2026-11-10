@@ -113,6 +113,35 @@ def test_centro_mensajeria_lista_profesionales_categoria_r(qtbot, conn):
     assert "Gómez" in pantalla.tabla.item(0, 1).text()
 
 
+def test_saldo_anterior_y_actual_crecen_un_tercio_y_profesional_se_lleva_el_resto(qtbot, conn):
+    """Pedido explícito de la clienta: "Saldo anterior"/"Saldo actual"
+    al ancho natural más un tercio, y el ancho que falte para cubrir la
+    pantalla (el sobrante) para "Profesional" — no para el resto de las
+    columnas."""
+    _crear_profesional(conn, saldo=500)
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 800)
+    qtbot.waitExposed(pantalla)
+    _set_filtro(pantalla, "todos")
+
+    tabla = pantalla.tabla
+    ancho_ajustado_anterior = tabla.columnWidth(3)
+    ancho_ajustado_actual = tabla.columnWidth(4)
+
+    tabla.resizeColumnsToContents()  # vuelve al ancho natural puro, sin el agregado de un tercio
+    ancho_natural_anterior = tabla.columnWidth(3)
+    ancho_natural_actual = tabla.columnWidth(4)
+    assert ancho_ajustado_anterior == ancho_natural_anterior + ancho_natural_anterior // 3
+    assert ancho_ajustado_actual == ancho_natural_actual + ancho_natural_actual // 3
+
+    pantalla._ajustar_columnas()  # restablece el reparto real antes de verificar "Profesional"
+    disponible = tabla.viewport().width()
+    suma_columnas = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
+    assert suma_columnas <= disponible + 1  # no sobra ancho sin usar (ni escrolea)
+
+
 def test_centro_mensajeria_regular_sin_reservas_vigentes_no_se_muestra(qtbot, conn):
     """Pedido explícito de la clienta: además de los A, los R sin ninguna
     reserva regular activa (ni propia ni de un E consolidado en su
