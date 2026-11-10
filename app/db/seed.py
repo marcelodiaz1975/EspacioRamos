@@ -250,8 +250,13 @@ DETALLES_COMPLEMENTARIOS_PROPUESTA = [
 
 LISTAS_EDITABLES = {
     "CondicionFiscal": ["Consumidor Final", "Responsable Inscripto", "Monotributo", "Exento"],
-    "MedioPago": ["Sobre en buzón", "Dinero en mano", "Transferencia a cta Celeste", "Transferencia a cta Marcelo"],
-    "CuentaReceptora": ["CA Banco Macro - Celeste", "CA Banco Hipotecario - Marcelo", "CA Banco Patagonia - Marcelo"],
+    # Pedido explícito de la clienta: el nombre de la persona primero
+    # ("Celeste"/"Marcelo"), después qué es — ver también la migración
+    # `_renombrar_medio_pago_y_cuenta_receptora` para una base ya en uso.
+    "MedioPago": [
+        "Sobre en buzón", "Dinero en mano", "Celeste - Transferencia a cta propia", "Marcelo - Transferencia a cta propia",
+    ],
+    "CuentaReceptora": ["Celeste - CA Banco Macro", "Marcelo - CA Banco Hipotecario", "Marcelo - CA Banco Patagonia"],
     "TipoFechaEspecial": ["Feriado nacional", "Día no laborable", "Paro general", "Paro de transporte",
                           "Asueto extraordinario", "Puente turístico"],
     "RolResponsable": ["Administrador principal", "Administrador", "Administrativo", "Mantenimiento general",

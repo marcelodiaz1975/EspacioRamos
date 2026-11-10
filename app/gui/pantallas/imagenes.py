@@ -155,7 +155,7 @@ _LINEAS_PREVIEW_TXT = 12
 
 _COLUMNAS_NORMAL = ["Orden", "Descripción", "Categoría", "Principal", "Activo"]
 # "Consul" (no "Consultorio", pedido explícito de la clienta): ancho
-# mínimo para que entre la etiqueta, mismo criterio que Categoría/
+# mínimo para que entre la etiqueta, mismo criterio que Unidad/Categoría/
 # Principal/Activo — ver `columnas_minimas` en `_llenar_tabla_todos`.
 _COLUMNAS_TODOS = [
     "Alcance", "Localidad", "Edificio", "Unidad", "Consul", "Descripción", "Categoría", "Principal", "Activo",
@@ -185,16 +185,27 @@ def _linea_divisoria() -> QFrame:
 
 
 def _ajustar_columnas(
-    tabla: QTableWidget, indice_descripcion: int, columnas_minimas: frozenset[int] = frozenset(),
+    tabla: QTableWidget,
+    indice_descripcion: int,
+    columnas_minimas: frozenset[int] = frozenset(),
+    columnas_dobles: frozenset[int] = frozenset(),
 ) -> None:
     """Mismo criterio que `novedades._ajustar_columnas`: más aire que el
     ancho justo de `resizeColumnsToContents` — con una excepción.
 
     `columnas_minimas` (puntos 25/27/30, SistemaDF v0.11.2026.10):
     "Orden"/"Categoría"/"Principal"/"Activo" (vista por alcance) o
-    "Consul"/"Categoría"/"Principal"/"Activo" (vista "Todos los
+    "Unidad"/"Consul"/"Categoría"/"Principal"/"Activo" (vista "Todos los
     archivos") se quedan en el ancho justo de `resizeColumnsToContents`
     — sin el padding de las demás.
+
+    `columnas_dobles` (pedido explícito de la clienta: "dale el doble de
+    ancho a la columna Categoría"): último paso, después de repartir el
+    sobrante — toma el ancho que le haya quedado a cada columna de esta
+    lista (siempre una de `columnas_minimas`, nunca tocada por el
+    reparto de sobrante) y la duplica, descontándole ese mismo extra a
+    "Descripción" ("si falta algo más de ancho, sacáselo a Descripción"
+    — nunca del resto de las columnas).
 
     `resizeColumnsToContents()` mide el ancho necesario por el CONTENIDO
     de las celdas, no por el título del encabezado — con una columna
@@ -239,6 +250,11 @@ def _ajustar_columnas(
     reparto = _repartir_sobrante(sobrante, indice_descripcion, tabla.columnCount(), columnas_minimas)
     for columna, extra in reparto.items():
         tabla.setColumnWidth(columna, tabla.columnWidth(columna) + extra)
+
+    for columna in columnas_dobles:
+        extra_doble = tabla.columnWidth(columna)
+        tabla.setColumnWidth(columna, extra_doble * 2)
+        tabla.setColumnWidth(indice_descripcion, max(0, tabla.columnWidth(indice_descripcion) - extra_doble))
 
 
 def _repartir_sobrante(
@@ -575,7 +591,8 @@ class _PanelGestorArchivos(QWidget):
         layout_contenido.addLayout(fila_superior)
 
         self._indice_descripcion = 5
-        self._columnas_minimas: frozenset[int] = frozenset({4, 6, 7, 8})
+        self._columnas_minimas: frozenset[int] = frozenset({3, 4, 6, 7, 8})
+        self._columnas_dobles: frozenset[int] = frozenset({6})
         self.tabla = _TablaConAnchoDinamico(self._reajustar_ancho_tabla)
         excluir_tabla_del_tab(self.tabla)
         self._configurar_columnas(es_todos=True)  # "Todos los archivos" es la primera opción del combo Alcance
@@ -744,7 +761,8 @@ class _PanelGestorArchivos(QWidget):
             self.tabla.setItem(fila_idx, 4, item_centrado("Sí" if img["Activo"] else "No"))
         self._indice_descripcion = 1
         self._columnas_minimas = frozenset({0, 2, 3, 4})
-        _ajustar_columnas(self.tabla, self._indice_descripcion, self._columnas_minimas)
+        self._columnas_dobles = frozenset({2})
+        _ajustar_columnas(self.tabla, self._indice_descripcion, self._columnas_minimas, self._columnas_dobles)
 
     def _llenar_tabla_todos(self) -> None:
         self.tabla.setRowCount(len(self._imagenes))
@@ -764,8 +782,9 @@ class _PanelGestorArchivos(QWidget):
             self.tabla.setItem(fila_idx, 7, item_centrado("Sí" if img["NumeroOrden"] == 1 else "No"))
             self.tabla.setItem(fila_idx, 8, item_centrado("Sí" if img["Activo"] else "No"))
         self._indice_descripcion = 5
-        self._columnas_minimas = frozenset({4, 6, 7, 8})
-        _ajustar_columnas(self.tabla, self._indice_descripcion, self._columnas_minimas)
+        self._columnas_minimas = frozenset({3, 4, 6, 7, 8})
+        self._columnas_dobles = frozenset({6})
+        _ajustar_columnas(self.tabla, self._indice_descripcion, self._columnas_minimas, self._columnas_dobles)
 
     def _reajustar_ancho_tabla(self) -> None:
         """Se llama sola cada vez que la tabla cambia de tamaño
@@ -778,7 +797,7 @@ class _PanelGestorArchivos(QWidget):
         datos."""
         if self.tabla.columnCount() == 0:
             return
-        _ajustar_columnas(self.tabla, self._indice_descripcion, self._columnas_minimas)
+        _ajustar_columnas(self.tabla, self._indice_descripcion, self._columnas_minimas, self._columnas_dobles)
 
     def _actualizar_previsualizacion(self) -> None:
         filas = self.tabla.selectionModel().selectedRows()

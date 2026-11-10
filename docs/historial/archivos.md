@@ -616,3 +616,29 @@ Tests nuevos en `tests/test_gui_imagenes.py`:
 `test_vista_previa_no_tiene_tamano_fijo_se_estira_al_ancho_disponible`,
 `test_alto_de_la_fila_superior_lo_define_filtros_o_botones_no_vista_
 previa`, `test_vista_previa_reescala_la_imagen_al_cambiar_de_tamano`.
+
+## Gestor de archivos del espacio: "Categoría" al doble, "Unidad" al mínimo (nov-2026)
+
+Pedido explícito de la clienta sobre la vista "Todos los archivos":
+"Dale el doble de ancho a la columna 'Categoría', ajustá al mínimo el
+ancho de la columna 'Unidad' para que entre la etiqueta sin cortar, si
+falta algo mas de ancho sacáselo a la columna 'Descripción'".
+
+`_ajustar_columnas` (`app/gui/pantallas/imagenes.py`) suma un parámetro
+`columnas_dobles`: después de repartir el sobrante igual que siempre
+(ver ronda anterior, `_repartir_sobrante`), cada columna de esa lista
+se duplica, descontándole ese mismo extra a `indice_descripcion` — nunca
+al resto de las columnas, tal cual pidió la clienta ("si falta algo
+más de ancho, sacáselo a Descripción"). Como las columnas de
+`columnas_dobles` siempre están también en `columnas_minimas` (nunca
+las toca el reparto del sobrante), el ancho de partida para duplicar es
+siempre el mínimo que ya tenían (ajustado al título del encabezado, no
+al contenido) — "Categoría" en ambas vistas (`_llenar_tabla_normal` y
+`_llenar_tabla_todos`), "Unidad" sumada a `columnas_minimas` solo en la
+vista "Todos los archivos" (es la única que tiene esa columna).
+
+Tests nuevos en `tests/test_gui_imagenes.py`:
+`test_ajustar_columnas_duplica_columnas_dobles_restandole_a_descripcion`
+(mecanismo puro, con una tabla chica armada a mano) y
+`test_unidad_y_categoria_vista_todos_los_archivos` (integración, sobre
+el panel real).

@@ -49,6 +49,7 @@ from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.fecha import aplicar_color_sabado_negro, instalar_flechas_cambian_fecha_completa
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.items_tabla import item_centrado
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.resumen_saldo import item_monto
 from app.repositorio.registro import obtener_repositorio
@@ -190,6 +191,17 @@ class Campo:
     importes del sistema") — en vez del número crudo sin formato que
     usan los campos numéricos que NO son un importe (ej. "Cantidad de
     baños", "% Bonificación", "Orden")."""
+    centrado: bool = False
+    """Centra el contenido de esta columna en la tabla (no en el cuadro
+    de diálogo Nuevo/Editar) — pedido puntual de un catálogo (ej.
+    "Orden"/"Activo" en Listas editables), no un comportamiento default
+    de `PantallaCRUD`."""
+    ancho_fijo: bool = False
+    """Esta columna no participa del reparto de ancho sobrante que hace
+    `PantallaCRUD` cuando se pasa `columna_prioritaria` (ver más abajo):
+    se queda siempre en el ancho justo de `resizeColumnsToContents()`
+    más el padding general — mismo criterio que `columnas_minimas` en
+    `app.gui.pantallas.imagenes._ajustar_columnas`."""
     variables: dict[str, str] | None = None
     """Solo para tipo="texto_largo": variables `{nombre}` disponibles
     para sustituir en este campo, como `{"apodo": "Apodo del
@@ -203,6 +215,22 @@ class Campo:
     tipeado a mano use solo variables de esta lista (`sustituir_
     variables` deja cualquier `{token}` desconocido tal cual, sin
     reemplazarlo ni romper)."""
+
+
+class _TablaConAnchoDinamico(QTableWidget):
+    """Notifica a `al_redimensionar` cada vez que cambia de tamaño —
+    mismo motivo y mismo patrón que `app.gui.pantallas.imagenes.
+    _TablaConAnchoDinamico`: el ancho real disponible (para repartir el
+    sobrante, ver `PantallaCRUD._repartir_ancho_sobrante`) recién se
+    conoce después de que el layout se resuelve, no al construirse."""
+
+    def __init__(self, al_redimensionar, parent=None):
+        super().__init__(parent)
+        self._al_redimensionar = al_redimensionar
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        super().resizeEvent(evento)
+        self._al_redimensionar()
 
 
 def campos_libres(conn: sqlite3.Connection) -> list[Campo]:
@@ -241,6 +269,7 @@ class PantallaCRUD(QWidget):
         nuevo_secundario: bool = False,
         anidado: bool = False,
         campos_primero_dialogo: list[str] | None = None,
+        columna_prioritaria: str | None = None,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -300,6 +329,21 @@ class PantallaCRUD(QWidget):
         # orden original de `campos`, que no se toca (pedido puntual
         # sobre el diálogo, no sobre el listado).
         self._campos_primero_dialogo = campos_primero_dialogo
+        # columna_prioritaria: nombre de un `Campo` que se lleva la
+        # mitad del ancho sobrante de la tabla (disponible menos lo que
+        # ya ocupan sus columnas) una vez que ya mide su ancho real
+        # disponible — la otra mitad se reparte entre el resto de las
+        # columnas que no tengan `ancho_fijo=True` (si es una sola, se
+        # la lleva entera: "dale más a X, lo que te quede a Y"). Mismo
+        # criterio que `app.gui.pantallas.imagenes._repartir_sobrante`
+        # (sin el ancho mínimo por etiqueta de encabezado, que ningún
+        # catálogo genérico necesitó todavía). None (default) deja el
+        # comportamiento de siempre: columnas al ancho justo de
+        # `resizeColumnsToContents()` + padding, sin ocupar el resto de
+        # la pantalla — se suma catálogo por catálogo a medida que se
+        # revisa cada uno (mismo criterio que el resto del sistema), no
+        # en los ~14 catálogos genéricos de una sola vez.
+        self._columna_prioritaria = columna_prioritaria
         # compacto: layout viejo (título + fila de botones arriba de la
         # tabla, sin solapa/filtro) — para cuando una pantalla compuesta
         # (ej. Mensajes predefinidos) inserta este CRUD como un componente
@@ -489,7 +533,7 @@ class PantallaCRUD(QWidget):
                 fila_botones.addStretch()
                 layout.addLayout(fila_botones)
 
-        self.tabla_widget = QTableWidget()
+        self.tabla_widget = _TablaConAnchoDinamico(self._reajustar_ancho_tabla)
         excluir_tabla_del_tab(self.tabla_widget)
         self.tabla_widget.setColumnCount(len(self.campos))
         self.tabla_widget.setHorizontalHeaderLabels([c.etiqueta for c in self.campos])
@@ -554,6 +598,8 @@ class PantallaCRUD(QWidget):
                     # Estado de cuenta de Pagos/Liquidaciones/Cargos
                     # especiales — moneda, a la derecha, rojo si negativo.
                     item = item_monto(registro[campo.nombre])
+                elif campo.centrado:
+                    item = item_centrado(self._texto_celda(registro, campo))
                 else:
                     item = QTableWidgetItem(self._texto_celda(registro, campo))
                 if col_idx == 0:
@@ -568,8 +614,54 @@ class PantallaCRUD(QWidget):
         self.tabla_widget.resizeColumnsToContents()
         for col in range(self.tabla_widget.columnCount()):
             self.tabla_widget.setColumnWidth(col, self.tabla_widget.columnWidth(col) + _PADDING_COLUMNA)
+        if self._columna_prioritaria is not None:
+            self._repartir_ancho_sobrante()
         self._aplicar_filtro_busqueda()
         self._actualizar_botones_seleccion()
+
+    def _reajustar_ancho_tabla(self) -> None:
+        """Se llama sola cada vez que `tabla_widget` cambia de tamaño
+        (`_TablaConAnchoDinamico`) — mismo motivo que `imagenes.
+        _PanelGestorArchivos._reajustar_ancho_tabla`: recién ahí se
+        conoce el ancho real disponible para repartir el sobrante."""
+        if self._columna_prioritaria is None or self.tabla_widget.columnCount() == 0:
+            return
+        self._repartir_ancho_sobrante()
+
+    def _repartir_ancho_sobrante(self) -> None:
+        """La mitad del ancho sobrante (disponible menos lo que ya
+        ocupan las columnas en su ancho natural + padding) va para
+        `self._columna_prioritaria`; la otra mitad se reparte en partes
+        iguales entre el resto de las columnas que no tengan `Campo.
+        ancho_fijo=True` (si es una sola, se la lleva entera). Mismo
+        criterio que `imagenes._repartir_sobrante`, sin el ancho mínimo
+        por etiqueta de encabezado (ningún catálogo genérico lo
+        necesitó todavía)."""
+        indice_prioritaria = next(
+            (i for i, c in enumerate(self.campos) if c.nombre == self._columna_prioritaria), None,
+        )
+        if indice_prioritaria is None:
+            return
+        disponible = self.tabla_widget.viewport().width()
+        suma_natural = sum(self.tabla_widget.columnWidth(c) for c in range(self.tabla_widget.columnCount()))
+        sobrante = disponible - suma_natural
+        if sobrante <= 0:
+            return
+        otras = [i for i, c in enumerate(self.campos) if i != indice_prioritaria and not c.ancho_fijo]
+        para_prioritaria = sobrante // 2
+        resto = sobrante - para_prioritaria
+        self.tabla_widget.setColumnWidth(
+            indice_prioritaria, self.tabla_widget.columnWidth(indice_prioritaria) + para_prioritaria,
+        )
+        if not otras:
+            self.tabla_widget.setColumnWidth(
+                indice_prioritaria, self.tabla_widget.columnWidth(indice_prioritaria) + resto,
+            )
+            return
+        por_columna, residuo = divmod(resto, len(otras))
+        for i, columna in enumerate(otras):
+            extra = por_columna + (1 if i < residuo else 0)
+            self.tabla_widget.setColumnWidth(columna, self.tabla_widget.columnWidth(columna) + extra)
 
     def _actualizar_botones_seleccion(self) -> None:
         if self.solo_lectura:

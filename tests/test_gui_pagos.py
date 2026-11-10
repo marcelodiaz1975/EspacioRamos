@@ -273,15 +273,15 @@ def test_registrar_pago_transferencia_guarda_cuenta_receptora(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
-    panel.combo_medio_pago.setCurrentText("Transferencia a cta Celeste")
-    panel.combo_cuenta_receptora.setCurrentText("CA Banco Macro - Celeste")
+    panel.combo_medio_pago.setCurrentText("Celeste - Transferencia a cta propia")
+    panel.combo_cuenta_receptora.setCurrentText("Celeste - CA Banco Macro")
     panel.spin_monto.setValue(-1000)
 
     panel._registrar()
 
     fila = conn.execute("SELECT MedioPago, CuentaReceptora FROM HistorialPagos").fetchone()
-    assert fila["MedioPago"] == "Transferencia a cta Celeste"
-    assert fila["CuentaReceptora"] == "CA Banco Macro - Celeste"
+    assert fila["MedioPago"] == "Celeste - Transferencia a cta propia"
+    assert fila["CuentaReceptora"] == "Celeste - CA Banco Macro"
 
 
 def test_registrar_pago_transferencia_sin_cuenta_receptora_no_persiste(qtbot, conn):
@@ -290,7 +290,7 @@ def test_registrar_pago_transferencia_sin_cuenta_receptora_no_persiste(qtbot, co
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
-    panel.combo_medio_pago.setCurrentText("Transferencia a cta Celeste")
+    panel.combo_medio_pago.setCurrentText("Celeste - Transferencia a cta propia")
     panel.spin_monto.setValue(-1000)
 
     panel._registrar()
@@ -485,7 +485,7 @@ def test_cuenta_receptora_se_deshabilita_salvo_transferencia(qtbot, conn):
     assert panel.combo_cuenta_receptora.isEnabled() is False
     assert panel.combo_cuenta_receptora.isHidden() is False  # ya no se oculta, solo se deshabilita
 
-    panel.combo_medio_pago.setCurrentText("Transferencia a cta Marcelo")
+    panel.combo_medio_pago.setCurrentText("Marcelo - Transferencia a cta propia")
     assert panel.combo_cuenta_receptora.isEnabled() is True
 
 
@@ -564,8 +564,8 @@ def test_seleccionar_fila_habilita_modificar_y_eliminar_sin_tocar_el_formulario(
     panel = pantalla.panel_pagos
     periodo = panel.combo_periodo.currentData()
     _seleccionar_profesional(panel, id_profesional)
-    panel.combo_medio_pago.setCurrentText("Transferencia a cta Celeste")
-    panel.combo_cuenta_receptora.setCurrentText("CA Banco Macro - Celeste")
+    panel.combo_medio_pago.setCurrentText("Celeste - Transferencia a cta propia")
+    panel.combo_cuenta_receptora.setCurrentText("Celeste - CA Banco Macro")
     panel.spin_monto.setValue(-500)
     panel._registrar()  # resetea el formulario al confirmar
 

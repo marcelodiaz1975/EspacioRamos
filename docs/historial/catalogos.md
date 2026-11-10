@@ -492,3 +492,70 @@ test_imagenes.py` (un test viejo que todavía esperaba el formato por
 Id en Localidad, actualizado al nuevo nombre descriptivo). Suite
 completa: mismos ~10 fallos conocidos/ambientales de siempre, sin
 regresiones nuevas.
+
+## Listas editables: alineación, ancho de tabla, y renombre de valores (nov-2026)
+
+Pedido explícito de la clienta: "Orden"/"Activo" centrados; la tabla
+pasa a usar todo el ancho de la pantalla, con "Valor" llevándose la
+mayor parte del sobrante y "Tipo de lista" el resto — "las otras dos
+columnas [Orden/Activo] dejalas igual de ancho". De paso, renombra los
+valores de "Cuenta receptora" ("CA Banco Macro - Celeste" → "Celeste -
+CA Banco Macro", y análogo para Hipotecario/Patagonia-Marcelo) y "Medio
+de pago" ("Transferencia a cta Celeste/Marcelo" → "Celeste/Marcelo -
+Transferencia a cta propia") para que el nombre de la persona vaya
+primero.
+
+Dos cambios genéricos nuevos en `PantallaCRUD`/`Campo`
+(`app/gui/crud_generico.py`), pensados para sumarse catálogo por
+catálogo (no de una sola vez a los ~14 catálogos genéricos existentes,
+mismo criterio que el resto del sistema):
+
+- `Campo.centrado` (bool): la columna se arma con `item_centrado` en
+  vez de un `QTableWidgetItem` liso.
+- `Campo.ancho_fijo` (bool) + `PantallaCRUD(..., columna_prioritaria=
+  "NombreDelCampo")`: igual mecanismo que `app.gui.pantallas.imagenes.
+  _repartir_sobrante` (mitad del ancho sobrante de la tabla para la
+  columna prioritaria, la otra mitad repartida entre el resto de las
+  columnas que no tengan `ancho_fijo=True` — si queda una sola, se la
+  lleva entera), pero sin el piso por ancho de etiqueta de encabezado
+  que sí necesitaba imagenes.py (ningún catálogo genérico lo precisó
+  todavía). `columna_prioritaria=None` (default) deja el comportamiento
+  de siempre — columnas al ancho justo de `resizeColumnsToContents()` +
+  padding, sin ocupar el resto de la pantalla.
+  `_TablaConAnchoDinamico` (duplicada de imagenes.py, mismo criterio de
+  "no centralizar entre módulos" que ya seguían `novedades.py`/
+  `llaves.py` con su propio `_ajustar_columnas`) recalcula el reparto
+  cada vez que la tabla cambia de tamaño, no solo al cargar datos.
+
+`pantalla_listas_editables` usa los dos: `Campo("Orden", ...,
+centrado=True, ancho_fijo=True)`, `Campo("Activo", ..., centrado=True,
+ancho_fijo=True)`, `columna_prioritaria="Valor"` — y de paso marca los
+tres Campo libres (`campos_libres(conn)`) con `ancho_fijo=True`
+también: son `Campo` genéricos compartidos por todos los catálogos, no
+pensados para este reparto, y sin este ajuste le estarían sacando parte
+del sobrante a "Tipo de lista" (que la clienta pidió que se quedara con
+TODO el resto, no una parte).
+
+El renombre de valores necesitó además una migración de base de datos
+(`_renombrar_medio_pago_y_cuenta_receptora`, `app/db/migraciones.py`):
+`HistorialPagos.MedioPago`/`CuentaReceptora` guardan el texto plano
+directo de cada pago YA registrado (no una referencia a
+`ListasEditables`), así que además de actualizar el catálogo había que
+actualizar esas filas ya cargadas — si no, un pago viejo seguiría
+mostrando el valor anterior, que ya no existe en el combo. Naturalmente
+idempotente (mismo criterio que `_normalizar_tamanos_consultorio`): una
+vez renombrado, el valor viejo ya no existe para que el UPDATE lo
+vuelva a encontrar. `app/db/seed.py` también actualizado para que una
+base nueva nazca directo con los valores nuevos.
+
+Tests nuevos: `tests/test_gui_imagenes.py` no aplica acá — en
+`tests/test_catalogos.py`:
+`test_listas_editables_orden_y_activo_quedan_centrados`,
+`test_listas_editables_valor_y_tipo_lista_ocupan_el_ancho_sobrante`,
+`test_otros_catalogos_no_reparten_ancho_sobrante_sin_columna_
+prioritaria` (confirma que el resto de los catálogos no cambia). En
+`tests/test_migraciones.py`:
+`test_aplicar_migraciones_renombra_medio_pago_y_cuenta_receptora_en_
+base_vieja`, `test_aplicar_migraciones_es_idempotente_para_medio_pago_
+y_cuenta_receptora`. Fixtures viejas de `tests/test_gui_pagos.py`
+actualizadas a los valores nuevos.

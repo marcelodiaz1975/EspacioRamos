@@ -318,14 +318,29 @@ def _opciones_tipo_lista(conn: sqlite3.Connection) -> list[tuple[str, str]]:
 
 
 def pantalla_listas_editables(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
+    # Campos libres a ancho fijo (igual que "Orden"/"Activo"): pedido
+    # explícito de la clienta sobre ESTE catálogo, "Tipo de lista" se
+    # lleva TODO el ancho sobrante que no se lleva "Valor" — si los
+    # campos libres participaran del reparto (son `Campo` genéricos, no
+    # pensados para esto), le estarían sacando parte de ese sobrante.
+    campos_libres_ancho_fijo = campos_libres(conn)
+    for campo in campos_libres_ancho_fijo:
+        campo.ancho_fijo = True
     campos = [
         Campo("TipoLista", "Tipo de lista", tipo="combo", opciones=_opciones_tipo_lista, requerido=True),
         Campo("Valor", "Valor", requerido=True),
-        Campo("Orden", "Orden", tipo="numero"),
-        Campo("Activo", "Activo", tipo="booleano"),
-        *campos_libres(conn),
+        # "Orden"/"Activo" centrados y a ancho fijo (pedido explícito de
+        # la clienta): "Valor" se lleva la mitad del ancho sobrante de
+        # la tabla, "Tipo de lista" (la única columna que no es ni
+        # prioritaria ni de ancho fijo) se lleva la otra mitad — ver
+        # `PantallaCRUD.columna_prioritaria`.
+        Campo("Orden", "Orden", tipo="numero", centrado=True, ancho_fijo=True),
+        Campo("Activo", "Activo", tipo="booleano", centrado=True, ancho_fijo=True),
+        *campos_libres_ancho_fijo,
     ]
-    pantalla = PantallaCRUD(conn, "ListasEditables", "Listas editables", campos, anidado=anidado)
+    pantalla = PantallaCRUD(
+        conn, "ListasEditables", "Listas editables", campos, anidado=anidado, columna_prioritaria="Valor",
+    )
     pantalla.al_guardar = lambda valores, registro: reordenar_al_guardar(conn, valores, registro)
     return pantalla
 

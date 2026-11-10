@@ -559,6 +559,47 @@ def _inicializar_valor_aislada_al_momento_de_la_reserva(conn: sqlite3.Connection
     )
 
 
+# Pedido explícito de la clienta: el nombre de la persona primero
+# ("Celeste"/"Marcelo"), después qué es — mismos valores nuevos que
+# `app.db.seed.LISTAS_EDITABLES` para una base recién creada.
+_RENOMBRES_MEDIO_PAGO_CUENTA_RECEPTORA: list[tuple[str, str, str]] = [
+    ("MedioPago", "Transferencia a cta Celeste", "Celeste - Transferencia a cta propia"),
+    ("MedioPago", "Transferencia a cta Marcelo", "Marcelo - Transferencia a cta propia"),
+    ("CuentaReceptora", "CA Banco Macro - Celeste", "Celeste - CA Banco Macro"),
+    ("CuentaReceptora", "CA Banco Hipotecario - Marcelo", "Marcelo - CA Banco Hipotecario"),
+    ("CuentaReceptora", "CA Banco Patagonia - Marcelo", "Marcelo - CA Banco Patagonia"),
+]
+
+
+def _renombrar_medio_pago_y_cuenta_receptora(conn: sqlite3.Connection) -> None:
+    """Pedido explícito de la clienta sobre "Listas editables": los
+    valores de "Medio de pago"/"Cuenta receptora" pasan a empezar con el
+    nombre de la persona. `ListasEditables.Valor` es lo que ofrece el
+    combo de ahí en adelante; `HistorialPagos.MedioPago`/
+    `CuentaReceptora` guarda el texto plano directo (no una referencia a
+    `ListasEditables`, ver schema.sql) en cada pago YA registrado — sin
+    actualizar esa tabla también, los pagos viejos quedarían mostrando
+    el valor anterior. Naturalmente idempotente (como `_normalizar_
+    tamanos_consultorio`): una vez renombrado, el valor viejo ya no
+    existe para que el UPDATE vuelva a encontrarlo."""
+    existe_listas = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ListasEditables'"
+    ).fetchone()
+    existe_historial = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'HistorialPagos'"
+    ).fetchone()
+    for tipo_lista, valor_viejo, valor_nuevo in _RENOMBRES_MEDIO_PAGO_CUENTA_RECEPTORA:
+        if existe_listas:
+            conn.execute(
+                "UPDATE ListasEditables SET Valor = ? WHERE TipoLista = ? AND Valor = ?",
+                (valor_nuevo, tipo_lista, valor_viejo),
+            )
+        if existe_historial:
+            conn.execute(
+                f"UPDATE HistorialPagos SET {tipo_lista} = ? WHERE {tipo_lista} = ?", (valor_nuevo, valor_viejo),
+            )
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -591,4 +632,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _invertir_formato_dia_profesion_a_dd_mm(conn)
     _inicializar_impacto_historial_pagos(conn)
     _inicializar_valor_aislada_al_momento_de_la_reserva(conn)
+    _renombrar_medio_pago_y_cuenta_receptora(conn)
     conn.commit()

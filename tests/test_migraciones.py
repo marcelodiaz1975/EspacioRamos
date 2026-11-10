@@ -801,3 +801,75 @@ def test_aplicar_migraciones_sin_tabla_configuracion_no_rompe(tmp_path):
     conn.row_factory = sqlite3.Row
     aplicar_migraciones(conn)  # no debe lanzar excepción
     conn.close()
+
+
+def test_aplicar_migraciones_renombra_medio_pago_y_cuenta_receptora_en_base_vieja(tmp_path):
+    """Pedido explícito de la clienta ("Listas editables"): los valores
+    de Medio de pago/Cuenta receptora pasan a empezar con el nombre de
+    la persona. Una base vieja tiene los valores ANTERIORES tanto en
+    `ListasEditables` (lo que ofrece el combo) como ya escritos en
+    `HistorialPagos` de pagos reales ya registrados (texto plano, no una
+    referencia a `ListasEditables`) — las dos tienen que quedar
+    actualizadas, si no un pago viejo mostraría un medio de pago/cuenta
+    que ya no existe en el catálogo."""
+    conn = init_database(tmp_path / "vieja.db")
+    sembrar_valores_por_defecto(conn)
+    # Deshace el seed (ya con los valores nuevos) para simular una base
+    # vieja, todavía con los valores ANTERIORES.
+    for valor_nuevo, valor_viejo in (
+        ("Celeste - Transferencia a cta propia", "Transferencia a cta Celeste"),
+        ("Marcelo - Transferencia a cta propia", "Transferencia a cta Marcelo"),
+        ("Celeste - CA Banco Macro", "CA Banco Macro - Celeste"),
+        ("Marcelo - CA Banco Hipotecario", "CA Banco Hipotecario - Marcelo"),
+        ("Marcelo - CA Banco Patagonia", "CA Banco Patagonia - Marcelo"),
+    ):
+        conn.execute("UPDATE ListasEditables SET Valor = ? WHERE Valor = ?", (valor_viejo, valor_nuevo))
+    id_profesional = conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Lo Veci')"
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO HistorialPagos (IdProfesional, Monto, MedioPago, CuentaReceptora) VALUES (?, -100, "
+        "'Transferencia a cta Celeste', 'CA Banco Macro - Celeste')",
+        (id_profesional,),
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    valores_lista = {
+        (f["TipoLista"], f["Valor"])
+        for f in conn.execute(
+            "SELECT TipoLista, Valor FROM ListasEditables WHERE TipoLista IN ('MedioPago', 'CuentaReceptora')"
+        ).fetchall()
+    }
+    assert ("MedioPago", "Celeste - Transferencia a cta propia") in valores_lista
+    assert ("MedioPago", "Marcelo - Transferencia a cta propia") in valores_lista
+    assert ("CuentaReceptora", "Celeste - CA Banco Macro") in valores_lista
+    assert ("CuentaReceptora", "Marcelo - CA Banco Hipotecario") in valores_lista
+    assert ("CuentaReceptora", "Marcelo - CA Banco Patagonia") in valores_lista
+    assert not any(valor.startswith("Transferencia a cta") or valor.startswith("CA Banco") for _, valor in valores_lista)
+
+    pago = conn.execute("SELECT MedioPago, CuentaReceptora FROM HistorialPagos WHERE Monto = -100").fetchone()
+    assert pago["MedioPago"] == "Celeste - Transferencia a cta propia"
+    assert pago["CuentaReceptora"] == "Celeste - CA Banco Macro"
+    conn.close()
+
+
+def test_aplicar_migraciones_es_idempotente_para_medio_pago_y_cuenta_receptora(tmp_path):
+    conn = init_database(tmp_path / "vieja.db")
+    sembrar_valores_por_defecto(conn)
+    conn.execute(
+        "UPDATE ListasEditables SET Valor = 'Transferencia a cta Celeste' "
+        "WHERE Valor = 'Celeste - Transferencia a cta propia'"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+    aplicar_migraciones(conn)
+
+    valores = {
+        f["Valor"] for f in conn.execute("SELECT Valor FROM ListasEditables WHERE TipoLista = 'MedioPago'").fetchall()
+    }
+    assert "Celeste - Transferencia a cta propia" in valores
+    assert "Transferencia a cta Celeste" not in valores
+    conn.close()

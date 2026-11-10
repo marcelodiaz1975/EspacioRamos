@@ -382,6 +382,61 @@ def test_listas_editables_tipo_lista_es_combo_cerrado_a_los_existentes(qtbot, co
     assert "MedioPago" in tipos
 
 
+def test_listas_editables_orden_y_activo_quedan_centrados(qtbot, conn):
+    """Pedido explícito de la clienta: "Orden" y "Activo" centrados en
+    la tabla de Listas editables (no así en el resto de los catálogos,
+    que no pidieron este cambio)."""
+    from PySide6.QtCore import Qt
+
+    pantalla = catalogos.pantalla_listas_editables(conn)
+    qtbot.addWidget(pantalla)
+    obtener_repositorio(conn, "ListasEditables").crear(TipoLista="CondicionFiscal", Valor="Otra", Orden=1, Activo=1)
+    pantalla.actualizar()
+
+    assert pantalla.tabla_widget.item(0, 2).textAlignment() == Qt.AlignmentFlag.AlignCenter
+    assert pantalla.tabla_widget.item(0, 3).textAlignment() == Qt.AlignmentFlag.AlignCenter
+
+
+def test_listas_editables_valor_y_tipo_lista_ocupan_el_ancho_sobrante(qtbot, conn):
+    """Pedido explícito de la clienta: la tabla ocupa todo el ancho de
+    la pantalla — "Valor" se lleva la mayor parte del sobrante, "Tipo
+    de lista" el resto, "Orden"/"Activo" se quedan en su ancho natural
+    (no crecen)."""
+    pantalla = catalogos.pantalla_listas_editables(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 800)
+    qtbot.waitExposed(pantalla)
+
+    ancho_orden_antes = pantalla.tabla_widget.columnWidth(2)
+    ancho_activo_antes = pantalla.tabla_widget.columnWidth(3)
+    pantalla.resize(1600, 800)
+    qtbot.wait(50)
+
+    assert pantalla.tabla_widget.columnWidth(1) > 300  # "Valor"
+    assert pantalla.tabla_widget.columnWidth(0) > 0  # "Tipo de lista" también crece (resto del sobrante)
+    assert pantalla.tabla_widget.columnWidth(2) == ancho_orden_antes
+    assert pantalla.tabla_widget.columnWidth(3) == ancho_activo_antes
+
+
+def test_otros_catalogos_no_reparten_ancho_sobrante_sin_columna_prioritaria(qtbot, conn):
+    """`columna_prioritaria=None` (default) deja el comportamiento de
+    siempre en el resto de los catálogos genéricos — el reparto de
+    sobrante es un opt-in explícito, no algo que `PantallaCRUD` les
+    sume solo por existir."""
+    pantalla = catalogos.pantalla_responsables(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 800)
+    qtbot.waitExposed(pantalla)
+
+    ancho_justo = pantalla.tabla_widget.columnWidth(0)
+    pantalla.resize(1900, 800)
+    qtbot.wait(50)
+
+    assert pantalla.tabla_widget.columnWidth(0) == ancho_justo
+
+
 def test_campos_libres_apagados_los_saca_de_todos_los_catalogos(qtbot, conn):
     """Un solo parámetro (Configuracion.VisualizarCamposLibres) controla
     los tres campos libres en todos los catálogos a la vez, porque todos

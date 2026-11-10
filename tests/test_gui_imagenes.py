@@ -1,12 +1,14 @@
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QTableWidget, QWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.main_window import Seccion
-from app.gui.pantallas.imagenes import _PanelGestorArchivos, _DialogoAgregarArchivo, _repartir_sobrante
+from app.gui.pantallas.imagenes import (
+    _COLCHON_TITULO_COLUMNA, _PanelGestorArchivos, _DialogoAgregarArchivo, _ajustar_columnas, _repartir_sobrante,
+)
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -294,6 +296,62 @@ def test_repartir_sobrante_columnas_minimas_no_participan_del_reparto():
 def test_repartir_sobrante_cero_o_negativo_no_reparte_nada():
     assert _repartir_sobrante(0, indice_descripcion=1, cantidad_columnas=3, columnas_minimas=frozenset()) == {}
     assert _repartir_sobrante(-10, indice_descripcion=1, cantidad_columnas=3, columnas_minimas=frozenset()) == {}
+
+
+def test_ajustar_columnas_duplica_columnas_dobles_restandole_a_descripcion(qtbot):
+    """Pedido explícito de la clienta: "Dale el doble de ancho a la
+    columna Categoría... si falta algo más de ancho sacáselo a la
+    columna Descripción" — confirmado comparando el ancho de una tabla
+    sin `columnas_dobles` contra la misma tabla con la columna 1
+    marcada como doble: termina con el doble de ancho, y "Descripción"
+    (índice 2) pierde exactamente ese mismo extra, no el resto."""
+
+    def _tabla_ajustada(columnas_dobles):
+        tabla = QTableWidget(0, 3)
+        tabla.setHorizontalHeaderLabels(["Alcance", "Categoría", "Descripción"])
+        qtbot.addWidget(tabla)
+        tabla.show()
+        tabla.resize(900, 300)
+        qtbot.waitExposed(tabla)
+        _ajustar_columnas(tabla, indice_descripcion=2, columnas_minimas=frozenset({1}), columnas_dobles=columnas_dobles)
+        return tabla
+
+    sin_doblar = _tabla_ajustada(frozenset())
+    ancho_categoria_base = sin_doblar.columnWidth(1)
+    ancho_descripcion_base = sin_doblar.columnWidth(2)
+
+    con_doble = _tabla_ajustada(frozenset({1}))
+    assert con_doble.columnWidth(1) == ancho_categoria_base * 2
+    assert con_doble.columnWidth(2) == ancho_descripcion_base - ancho_categoria_base
+
+
+def test_unidad_y_categoria_vista_todos_los_archivos(qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch):
+    """Pedido explícito de la clienta: en la vista "Todos los archivos",
+    "Unidad" pasa al mismo criterio de ancho mínimo que ya tenía
+    "Consul" (sin cortar el título), y "Categoría" queda al doble de lo
+    que le tocaría con ese mismo criterio."""
+    from PySide6.QtGui import QFontMetrics
+
+    ruta = _archivo_jpg(tmp_path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (ruta, "")))
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 800)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+    pantalla.combo_alcance.setCurrentText("Todos los archivos")
+    qtbot.waitExposed(pantalla)
+
+    metrica = QFontMetrics(pantalla.tabla.horizontalHeader().font())
+    ancho_titulo_unidad = metrica.horizontalAdvance("Unidad")
+    ancho_minimo_categoria = metrica.horizontalAdvance("Categoría") + _COLCHON_TITULO_COLUMNA
+    ancho_unidad = pantalla.tabla.columnWidth(3)
+    ancho_categoria = pantalla.tabla.columnWidth(6)
+    assert ancho_unidad >= ancho_titulo_unidad, "'Unidad' quedó más angosta que su propio título"
+    assert ancho_categoria >= ancho_minimo_categoria * 2, (
+        "'Categoría' tendría que quedar al doble de su ancho mínimo"
+    )
 
 
 def test_tabla_crece_para_ocupar_todo_el_ancho_disponible(qtbot, conn):
