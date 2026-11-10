@@ -69,9 +69,17 @@ def _cargar_consultorios(conn):
 
 
 def test_promedios_localidad_y_edificio_mas_anchas_que_sin_padding(qtbot, conn):
+    """`_ajustar_ancho` todavía le suma el padding de siempre (20px) al
+    ancho natural de Localidad/Edificio antes de repartir cualquier
+    sobrante — con un ancho de ventana angosto (sin sobrante que
+    repartir, ver el test de más abajo sobre el reparto en sí), el
+    resultado es exactamente ese padding."""
     _cargar_consultorios(conn)
     panel = _PanelValoresVigentes(conn)
     qtbot.addWidget(panel)
+    panel.show()
+    panel.resize(300, 400)  # angosto a propósito: sin sobrante para las 3 primeras columnas
+    qtbot.waitExposed(panel)
     promedios = panel.promedios_valores
     sin_padding_localidad = promedios.tabla.sizeHintForColumn(0)
     sin_padding_edificio = promedios.tabla.sizeHintForColumn(1)
@@ -79,13 +87,48 @@ def test_promedios_localidad_y_edificio_mas_anchas_que_sin_padding(qtbot, conn):
     assert promedios.tabla.columnWidth(1) == sin_padding_edificio + 20
 
 
-def test_promedios_sin_espacio_en_blanco_tras_la_ultima_columna(qtbot, conn):
+def test_promedios_redistribuye_el_sobrante_entre_las_tres_primeras_columnas(qtbot, conn):
+    """Pedido explícito de la clienta sobre la ronda de reordenamiento
+    de "Valores vigentes": "redistribuí el ancho de pantalla y dale mas
+    ancho a las tres primeras columnas" (Localidad/Edificio/Unidad) — ya
+    no queda fija a la suma exacta de sus columnas (eso era el criterio
+    de la ronda anterior, cuando vivía angosta al costado): ahora crece
+    para llenar el ancho real que le da su contenedor, arriba de
+    "Valores vigentes por horas regulares y aisladas"."""
     _cargar_consultorios(conn)
     panel = _PanelValoresVigentes(conn)
     qtbot.addWidget(panel)
+    panel.show()
+    panel.resize(1700, 800)
+    qtbot.waitExposed(panel)
     promedios = panel.promedios_valores
-    ancho_columnas = sum(promedios.tabla.columnWidth(i) for i in range(promedios.tabla.columnCount()))
-    assert promedios.tabla.width() == ancho_columnas + 2 * promedios.tabla.frameWidth() + 2
+    ancho_justo_localidad = promedios.tabla.sizeHintForColumn(0) + 20
+    disponible = promedios.tabla.viewport().width()
+    suma_columnas = sum(promedios.tabla.columnWidth(i) for i in range(promedios.tabla.columnCount()))
+    assert suma_columnas <= disponible + 1  # sin dejar sobrante sin repartir (ni escrolear)
+    assert promedios.tabla.columnWidth(0) > ancho_justo_localidad  # creció más allá de su ancho justo
+
+
+def test_promedios_queda_arriba_de_valores_con_un_tercio_del_alto(qtbot, conn):
+    """Pedido explícito de la clienta: "las tablas están apelmazadas,
+    las vamos a reubicar, una arriba de la otra... Primero arriba la
+    tabla de promedios, usá un tercio del alto de la pantalla... Abajo
+    de esa tabla poné la otra, la de valores, que llegue hasta abajo" —
+    proporción 1:2 de stretch en el `QVBoxLayout` (no un alto fijo en
+    píxeles), confirmada geométricamente: Promedios por arriba,
+    Valores por debajo, con aproximadamente un tercio/dos tercios del
+    alto disponible."""
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.resize(1500, 900)
+    qtbot.waitExposed(panel)
+
+    promedios = panel.promedios_valores
+    valores = panel.tabla_valores.parentWidget()  # grupo_valores, el QGroupBox que lo envuelve
+    assert promedios.y() < valores.y()  # Promedios arriba, Valores abajo
+    proporcion = promedios.height() / (promedios.height() + valores.height())
+    assert 0.25 <= proporcion <= 0.40
 
 
 def test_valores_vigentes_muestra_columna_con_recargo(qtbot, conn):

@@ -297,3 +297,95 @@ event loop, mismo criterio ya usado en varios tests de
 `test_gui_pantalla_grilla_operativa.py` + `test_gui_aumentos.py` +
 `test_gui_grilla_y_mensajeria.py`): 72 passed, sin regresiones.
 
+## Valores vigentes: cascada de filtros, tablas apiladas, anchos (nov-2026)
+
+Pedido explícito de la clienta, tres partes sobre `_PanelFiltrosJerarquico`/`_PanelValoresVigentes`/`_PanelPromedios` (`app/gui/pantallas/grilla_operativa.py`):
+
+**1) Cascada de filtros.** "En los filtros que no se pueda elegir unidad
+o consultorio [si] no hay localidad y edificio seleccionado. Si hay
+solo un edificio y una localidad sí que se pueda seleccionar ya que se
+sabría de dónde es la unidad a consultar. No se puede seleccionar
+consultorio sin antes haber seleccionado unidad". Localidad/Edificio/
+Unidad/Consultorio son listas de MULTIselección (no un combo de una
+sola opción, a diferencia de otros filtros en cascada del sistema), así
+que "seleccionado" se toma literal: exactamente UNA localidad y UN
+edificio tildados (no "Todas", no varios a la vez) — salvo que el
+sistema entero solo tenga una localidad y un edificio posibles
+(`_cantidad_real`, cuenta ítems reales sin contar "Todas/os"), caso en
+el que esa única opción no tiene ninguna ambigüedad que evitar.
+`_PanelFiltrosJerarquico._actualizar_habilitacion_unidad`/
+`_actualizar_habilitacion_consultorio` (llamadas al final de
+`_cargar_unidades`/`_cargar_consultorios`, ya con la selección de
+arriba corregida) habilitan/deshabilitan el `_FiltroColapsable`
+correspondiente (`setEnabled`, grisa el botón-resumen y bloquea
+expandirlo) y, al deshabilitarse, fuerzan la selección de vuelta a
+"Todas/os" (con `blockSignals` para no disparar una cascada recursiva
+— el refresco real ya ocurre al final de la misma función que llamó a
+este método).
+
+**2) Reducir el panel de filtros un 20%.** "Reducí primero un 20% el
+ancho de la columna de los filtros, ese ancho que se gana va para las
+tablas" — `_PanelFiltrosJerarquico.setFixedWidth` pasa de 260 a
+`round(260 * 0.8)` = 208. El ancho liberado no hay que repartirlo a
+mano: con este panel en la columna de ancho fijo del `QHBoxLayout` y
+las tablas del lado derecho con `stretch=1`, Qt se lo da solo.
+
+**3) Tablas apiladas, no una al lado de la otra.** "Las tablas están
+apelmazadas, las vamos a reubicar, una arriba de la otra... Primero
+arriba la tabla de promedios, usá un tercio del alto de la pantalla,
+redistribuí el ancho y dale mas ancho a las tres primeras columnas...
+Abajo de esa tabla poné la otra, la de valores, que llegue hasta
+abajo... redistribuí el ancho de las columnas... de esa segunda tabla
+de valores". Antes el `QHBoxLayout` de `_PanelValoresVigentes` ponía
+filtros/promedios/valores una al lado de la otra (tres columnas);
+ahora filtros queda a la izquierda y a la derecha se arma un
+`QVBoxLayout` (`panel_derecho`) con Promedios arriba (`stretch=1`) y
+Valores abajo (`stretch=2`) — la proporción 1:2 da el tercio/dos
+tercios pedido sin necesitar un alto fijo en píxeles, y se mantiene
+sea cual sea el tamaño real de la ventana. Ambas tablas ya quedaban
+escroleables (`_armar_tabla` deja `ScrollBarAsNeeded` en los dos ejes),
+así que no hizo falta ningún cambio ahí.
+
+La tabla de Valores (`tabla_valores`) ya repartía su ancho sobrante
+entre "Valor regular"/"Valor aislada"/"Valor aislada con recargo" vía
+`QHeaderView.ResizeMode.Stretch` (rondas anteriores) — al vivir ahora
+en una fila propia, a todo el ancho de la pantalla, ese mecanismo ya
+existente le alcanza solo, sin tocar nada.
+
+La tabla de Promedios (`_PanelPromedios.tabla`) sí necesitó un cambio
+real: antes vivía angosta al costado (una columna más del `QHBoxLayout`
+viejo, sin `stretch`) y se fijaba a mano a la suma EXACTA de sus
+columnas (`setFixedWidth`) para no dejar espacio en blanco después de
+la última — pedido de una ronda anterior, hoy exactamente lo contrario
+de lo que hace falta. Se saca ese `setFixedWidth` y se suma un reparto
+de sobrante nuevo en `_ajustar_ancho`: Localidad/Edificio/Unidad pasan
+las tres a `Interactive` (antes solo Localidad/Edificio — Unidad se
+queda en `ResizeToContents`, que ignora cualquier `setColumnWidth`
+manual, mismo motivo ya documentado para Localidad/Edificio) y se
+llevan el sobrante (ancho disponible del viewport menos la suma natural
+de las 5 columnas) en partes iguales entre las tres; "Promedio hora
+regular"/"Promedio hora aislada" no participan, se quedan en su ancho
+justo. `_TablaConAnchoDinamico` (duplicada en este módulo, mismo
+criterio de "no centralizar entre módulos" del resto del sistema;
+`_armar_tabla` suma un parámetro opcional `tabla` para poder pasarle
+esta instancia en vez de que construya un `QTableWidget` liso) recalcula
+el reparto en cada resize, no solo al repoblar filas o en el primer
+`showEvent`.
+
+Tests actualizados/nuevos en `tests/test_gui_pantalla_grilla_operativa.py`:
+`test_filtros_de_valores_mantienen_ancho_fijo_al_desplegar` (208, no
+260), `test_filtros_de_valores_se_redujeron_un_20_porciento`,
+`test_unidad_deshabilitada_sin_localidad_y_edificio_especificos`,
+`test_unidad_habilitada_con_localidad_y_edificio_especificos`,
+`test_unidad_habilitada_si_sistema_tiene_un_solo_edificio_y_localidad`,
+`test_unidad_se_fuerza_a_todas_al_deshabilitarse`,
+`test_consultorio_deshabilitado_sin_unidad_especifica`,
+`test_consultorio_habilitado_con_unidad_especifica`. En
+`tests/test_gui_valores.py`: `test_promedios_localidad_y_edificio_
+mas_anchas_que_sin_padding` (reescrito, ahora en una ventana angosta a
+propósito, sin sobrante que repartir — el caso "ancho justo" sigue
+intacto), `test_promedios_sin_espacio_en_blanco_tras_la_ultima_columna`
+reemplazado por `test_promedios_redistribuye_el_sobrante_entre_las_
+tres_primeras_columnas`, y `test_promedios_queda_arriba_de_valores_con_
+un_tercio_del_alto` (confirma la proporción 1:2 geométricamente).
+

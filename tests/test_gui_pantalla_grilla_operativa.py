@@ -111,18 +111,110 @@ def test_filtros_de_valores_mantienen_ancho_fijo_al_desplegar(qtbot, conn):
     `_FiltroColapsable` no tiene que correr la tabla de la derecha —
     `_PanelFiltrosJerarquico` pasó de `setMaximumWidth` (se achicaba
     colapsado y volvía a ensancharse al desplegar, quitándole ancho al
-    `grupo_valores` de al lado) a `setFixedWidth`, siempre en 260."""
+    `grupo_valores` de al lado) a `setFixedWidth` (260, luego reducido
+    un 20% a 208 — ver el test de ese pedido más abajo)."""
     _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"')
     conn.commit()
 
     panel = _PanelValoresVigentes(conn)
     qtbot.addWidget(panel)
     filtros = panel.filtros_valores
-    assert filtros.width() == 260
+    assert filtros.width() == 208
 
     filtros._filtro_localidad._boton.setChecked(True)
     filtros._filtro_localidad._alternar()  # despliega la lista de Localidad
-    assert filtros.width() == 260
+    assert filtros.width() == 208
+
+
+def test_filtros_de_valores_se_redujeron_un_20_porciento(qtbot, conn):
+    """Pedido explícito de la clienta: "Reducí primero un 20% el ancho
+    de la columna de los filtros, ese ancho que se gana va para las
+    tablas" — 260 * 0.8 = 208."""
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    assert panel.filtros_valores.width() == round(260 * 0.8) == 208
+
+
+def test_unidad_deshabilitada_sin_localidad_y_edificio_especificos(qtbot, conn):
+    """Pedido explícito de la clienta: "que no se pueda elegir unidad...
+    [si] no hay localidad y edificio seleccionado" — con más de una
+    localidad/edificio en el sistema y "Todas"/"Todos" tildado (el
+    default), el filtro de Unidad queda deshabilitado."""
+    _unidad_con_consultorio(conn, "Ramos 1", "1A", localidad="Ramos Mejía")
+    _unidad_con_consultorio(conn, "Haedo 1", "2B", localidad="Haedo")
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    assert panel.filtros_valores._filtro_unidad.isEnabled() is False
+    assert panel.filtros_valores._filtro_consultorio.isEnabled() is False
+
+
+def test_unidad_habilitada_con_localidad_y_edificio_especificos(qtbot, conn):
+    """Pedido explícito de la clienta: "Si hay solo un edificio y una
+    localidad sí que se pueda seleccionar ya que se sabría de dónde es
+    la unidad a consultar" — acá elegidos a mano (no el único del
+    sistema), mismo resultado: habilitado."""
+    _unidad_con_consultorio(conn, "Ramos 1", "1A", localidad="Ramos Mejía")
+    _unidad_con_consultorio(conn, "Haedo 1", "2B", localidad="Haedo")
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    filtros = panel.filtros_valores
+
+    _deseleccionar_todo_menos(filtros.lista_localidad, "Ramos Mejía")
+    _deseleccionar_todo_menos(filtros.lista_edificio, "Ramos 1")
+    assert filtros._filtro_unidad.isEnabled() is True
+
+
+def test_unidad_habilitada_si_sistema_tiene_un_solo_edificio_y_localidad(qtbot, conn):
+    """Excepción explícita de la clienta: con un solo edificio y una
+    sola localidad en todo el sistema, Unidad queda habilitado aunque
+    "Todas"/"Todos" sigan tildados — no hay ninguna ambigüedad posible."""
+    _unidad_con_consultorio(conn, "Ramos 1", "1A", localidad="Ramos Mejía")
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    assert panel.filtros_valores._filtro_unidad.isEnabled() is True
+
+
+def test_unidad_se_fuerza_a_todas_al_deshabilitarse(qtbot, conn):
+    """Si Unidad tenía una selección específica y Localidad/Edificio
+    vuelven a quedar ambiguos, la selección de Unidad se fuerza de
+    nuevo a "Todas" — no puede quedar una elección específica en un
+    filtro que ya no se puede ni ver ni tocar."""
+    _unidad_con_consultorio(conn, "Ramos 1", "1A", localidad="Ramos Mejía")
+    _unidad_con_consultorio(conn, "Haedo 1", "2B", localidad="Haedo")
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    filtros = panel.filtros_valores
+
+    _deseleccionar_todo_menos(filtros.lista_localidad, "Ramos Mejía")
+    _deseleccionar_todo_menos(filtros.lista_edificio, "Ramos 1")
+    assert filtros._filtro_unidad.isEnabled() is True
+    _deseleccionar_todo_menos(filtros.lista_unidad, "1A")
+
+    # Volver a "Todas las localidades" (ambiguo de nuevo) deshabilita
+    # Unidad y la fuerza de vuelta a "Todas las unidades".
+    filtros.lista_localidad.item(0).setSelected(True)
+    assert filtros._filtro_unidad.isEnabled() is False
+    assert filtros.lista_unidad.item(0).isSelected() is True
+
+
+def test_consultorio_deshabilitado_sin_unidad_especifica(qtbot, conn):
+    """Pedido explícito de la clienta: "No se puede seleccionar
+    consultorio sin antes haber seleccionado unidad" — sin la excepción
+    de "un solo valor posible" (no pedida para Consultorio)."""
+    _unidad_con_consultorio(conn, "Ramos 1", "1A")
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    assert panel.filtros_valores._filtro_consultorio.isEnabled() is False
+
+
+def test_consultorio_habilitado_con_unidad_especifica(qtbot, conn):
+    _unidad_con_consultorio(conn, "Ramos 1", "1A")
+    _unidad_con_consultorio(conn, "Ramos 1", "2B")
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    filtros = panel.filtros_valores
+    _deseleccionar_todo_menos(filtros.lista_unidad, "Ramos 1 - 1A")
+    assert filtros._filtro_consultorio.isEnabled() is True
 
 
 def test_tablas_de_valores_no_entran_al_tab_chain_salvo_click(qtbot, conn):

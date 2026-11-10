@@ -84,7 +84,25 @@ class _ItemNumerico(QTableWidgetItem):
         return super().__lt__(other)
 
 
-def _armar_tabla(columnas: list[str], *, ordenable_nativo: bool = True) -> QTableWidget:
+class _TablaConAnchoDinamico(QTableWidget):
+    """Notifica a `al_redimensionar` cada vez que cambia de tamaño —
+    mismo motivo y mismo patrón que `app.gui.pantallas.imagenes.
+    _TablaConAnchoDinamico`: el ancho real disponible (para repartir el
+    sobrante, ver `_PanelPromedios._ajustar_ancho`) recién se conoce
+    después de que el layout se resuelve, no al construirse."""
+
+    def __init__(self, al_redimensionar, parent=None):
+        super().__init__(parent)
+        self._al_redimensionar = al_redimensionar
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        super().resizeEvent(evento)
+        self._al_redimensionar()
+
+
+def _armar_tabla(
+    columnas: list[str], *, ordenable_nativo: bool = True, tabla: QTableWidget | None = None,
+) -> QTableWidget:
     """Filas seleccionables completas y sombreadas, con scroll cuando no
     entra todo, y columnas pinchables para ordenar ascendente/descendente
     (confirmado por la clienta).
@@ -96,8 +114,12 @@ def _armar_tabla(columnas: list[str], *, ordenable_nativo: bool = True) -> QTabl
     Localidad/Edificio/Unidad con jerarquía) solo deja el clic disponible
     y la flechita de orden — quien arma la tabla escucha `sectionClicked`
     y reconstruye las filas a mano con `_ordenar_grupos_jerarquico`, para
-    no perder el agrupamiento al ordenar."""
-    tabla = QTableWidget()
+    no perder el agrupamiento al ordenar.
+
+    `tabla`: instancia ya construida (ej. `_TablaConAnchoDinamico`, para
+    `_PanelPromedios`) en vez de un `QTableWidget` liso — default `None`
+    para los llamadores que no necesitan nada especial."""
+    tabla = tabla if tabla is not None else QTableWidget()
     tabla.setColumnCount(len(columnas))
     tabla.setHorizontalHeaderLabels(columnas)
     tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -191,6 +213,15 @@ def _ids_seleccionados(lista: QListWidget) -> list:
     ]
 
 
+def _cantidad_real(lista: QListWidget) -> int:
+    """Cantidad de ítems reales (sin contar "Todas/os las/los X", que
+    siempre se agrega primero) — usado para la excepción de "si hay
+    solo un edificio y una localidad [en todo el sistema] sí que se
+    pueda elegir Unidad", ver `_PanelFiltrosJerarquico._actualizar_
+    habilitacion_unidad`."""
+    return lista.count() - 1
+
+
 def _ids_reales(lista: QListWidget) -> list:
     """Como `_ids_seleccionados`, pero resolviendo "Todas las X" al
     conjunto real completo de la lista — para los métodos públicos
@@ -234,7 +265,15 @@ class _PanelFiltrosJerarquico(QGroupBox):
         # en el panel de Filtros de Oferta de consultorios ("con solo
         # un máximo, el panel se achicaba... con setFixedWidth ahora sí
         # ocupa ese ancho completo").
-        self.setFixedWidth(260)
+        #
+        # Pedido explícito de la clienta en la ronda de reordenamiento de
+        # "Valores vigentes": "Reducí primero un 20% el ancho de la
+        # columna de los filtros, ese ancho que se gana va para las
+        # tablas" — 260 * 0.8 = 208. El ancho liberado no hay que
+        # repartirlo a mano: con este panel en la columna de ancho fijo
+        # del `QHBoxLayout` de `_PanelValoresVigentes` y las tablas del
+        # lado derecho con `stretch=1`, Qt se lo da solo a ese lado.
+        self.setFixedWidth(round(260 * 0.8))
         layout = QVBoxLayout(self)
 
         layout.addWidget(QLabel("Localidad"))
@@ -331,7 +370,30 @@ class _PanelFiltrosJerarquico(QGroupBox):
         _seleccionar_todos(self.lista_unidad)
         self.lista_unidad.blockSignals(False)
         self._filtro_unidad.actualizar_resumen()
+        self._actualizar_habilitacion_unidad()
         self._cargar_consultorios()
+
+    def _actualizar_habilitacion_unidad(self) -> None:
+        """Pedido explícito de la clienta: "que no se pueda elegir
+        unidad... [si] no hay localidad y edificio seleccionado. Si hay
+        solo un edificio y una localidad sí que se pueda seleccionar ya
+        que se sabría de dónde es la unidad a consultar" — Localidad y
+        Edificio son listas de multiselección (no un combo de una sola
+        opción), así que "seleccionado" se toma literal: exactamente UNA
+        localidad y UN edificio tildados (no "Todas", no varios a la
+        vez) — salvo que el sistema entero solo tenga una localidad y un
+        edificio posibles, caso en el que "Todas" ya equivale a esa
+        única opción real y no hay ninguna ambigüedad que evitar."""
+        localidad_especifica = len(_ids_seleccionados(self.lista_localidad)) == 1
+        edificio_especifico = len(_ids_seleccionados(self.lista_edificio)) == 1
+        un_solo_valor_posible = _cantidad_real(self.lista_localidad) <= 1 and _cantidad_real(self.lista_edificio) <= 1
+        habilitada = (localidad_especifica and edificio_especifico) or un_solo_valor_posible
+        self._filtro_unidad.setEnabled(habilitada)
+        if not habilitada:
+            self.lista_unidad.blockSignals(True)
+            _seleccionar_todos(self.lista_unidad)
+            self.lista_unidad.blockSignals(False)
+            self._filtro_unidad.actualizar_resumen()
 
     def _cargar_consultorios(self) -> None:
         _corregir_seleccion_todos(self.lista_unidad)
@@ -359,7 +421,21 @@ class _PanelFiltrosJerarquico(QGroupBox):
         _seleccionar_todos(self.lista_consultorio)
         self.lista_consultorio.blockSignals(False)
         self._filtro_consultorio.actualizar_resumen()
+        self._actualizar_habilitacion_consultorio()
         self._emitir_cambio()
+
+    def _actualizar_habilitacion_consultorio(self) -> None:
+        """Pedido explícito de la clienta: "No se puede seleccionar
+        consultorio sin antes haber seleccionado unidad" — sin la
+        excepción de "un solo valor posible" que sí tiene Unidad (acá no
+        la pidió)."""
+        unidad_especifica = len(_ids_seleccionados(self.lista_unidad)) == 1
+        self._filtro_consultorio.setEnabled(unidad_especifica)
+        if not unidad_especifica:
+            self.lista_consultorio.blockSignals(True)
+            _seleccionar_todos(self.lista_consultorio)
+            self.lista_consultorio.blockSignals(False)
+            self._filtro_consultorio.actualizar_resumen()
 
     def _emitir_cambio(self) -> None:
         _corregir_seleccion_todos(self.lista_consultorio)
@@ -407,7 +483,9 @@ class _PanelPromedios(QGroupBox):
     def __init__(self, parent=None):
         super().__init__("Promedios de valor hora regular y aislada", parent)
         layout = QVBoxLayout(self)
-        self.tabla = _armar_tabla(_COLUMNAS_PROMEDIOS, ordenable_nativo=False)
+        self.tabla = _armar_tabla(
+            _COLUMNAS_PROMEDIOS, ordenable_nativo=False, tabla=_TablaConAnchoDinamico(self._ajustar_ancho),
+        )
         # Pedido explícito de la clienta ("Valores vigentes"): Tab no
         # tiene que entrar a esta tabla salvo que se haga click primero
         # — `ClickFocus` la saca del tab-chain nativo (que la ponía con
@@ -419,15 +497,17 @@ class _PanelPromedios(QGroupBox):
         # recorre celda a celda en vez de salir hacia el próximo widget.
         self.tabla.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.tabla.setTabKeyNavigation(True)
-        # Localidad/Edificio (pedido explícito de la clienta: "agrandá un
-        # poquito" esas dos) pasan a Interactive para poder sumarles
-        # padding a mano — igual que "Día" en Liquidaciones simuladas,
-        # `resizeColumnToContents` + `setColumnWidth(... + padding)` no
+        # Localidad/Edificio/Unidad ("las tres primeras columnas", pedido
+        # explícito de la clienta sobre esta ronda: "dale mas ancho a las
+        # tres primeras columnas") pasan a Interactive para poder
+        # sumarles ancho a mano — igual que "Día" en Liquidaciones
+        # simuladas, `resizeColumnToContents` + `setColumnWidth(...)` no
         # pega en una columna que sigue en ResizeToContents continuo, que
         # la Qt vuelve a ajustar sola en cuanto cambia el contenido.
         header = self.tabla.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         header.sectionClicked.connect(self._ordenar_por_columna)
         layout.addWidget(self.tabla)
         self._promedios = PromediosValorHora()
@@ -510,32 +590,41 @@ class _PanelPromedios(QGroupBox):
         self._ajustar_ancho()
 
     def _ajustar_ancho(self) -> None:
-        """Localidad/Edificio (Interactive) se agrandan a mano sobre su
-        ancho justo; Unidad/los dos Promedio (ResizeToContents) ya se
-        ajustan solos. Antes el GroupBox entero tenía un rango de ancho
-        fijo (720-780) que no guardaba relación con el contenido real,
-        dejando un espacio en blanco después de la última columna (pedido
-        de la clienta: sacarlo). Se fija el ancho de la TABLA (no del
-        GroupBox) a la suma real de sus columnas — el GroupBox se achica
-        solo a su alrededor, dejándole a su `QVBoxLayout` resolver el
-        margen/borde propios en vez de replicarlos a mano acá (un intento
-        con `setFixedWidth` en el GroupBox, calculando margen + borde a
-        mano, quedó corto por no contemplar el borde con esquinas
-        redondeadas de `QGroupBox` en `estilos.py`, y disparaba un
-        scroll horizontal). Se suma un colchón de 2px al resultado: la
-        suma de `columnWidth()` quedaba 1-2px corta contra el ancho real
-        que termina pidiendo el viewport de la tabla (residuo de
-        redondeo de Qt entre el ancho "lógico" por columna y el pixel
-        real renderizado, no algo que dependa del contenido) — sin este
-        colchón disparaba un scroll horizontal de 1px, imperceptible
-        pero real (ver `test_valores_vigentes_sin_scroll_horizontal_
-        con_estilo_real_aplicado`)."""
+        """Localidad/Edificio/Unidad (Interactive) se agrandan a mano;
+        los dos Promedio (ResizeToContents) ya se ajustan solos.
+
+        Antes esta tabla vivía angosta al costado de "Valores vigentes"
+        (un GroupBox más, sin `stretch`) y se fijaba a la suma EXACTA de
+        sus columnas para no dejar espacio en blanco después de la
+        última (pedido de la clienta de esa ronda). Pedido explícito de
+        la ronda de reordenamiento de "Valores vigentes": esta tabla
+        pasa a vivir ARRIBA, ocupando todo el ancho de la pantalla
+        ("redistribuí el ancho de pantalla y dale más ancho a las tres
+        primeras columnas") — ya no tiene sentido fijarla a su ancho
+        justo, tiene que CRECER para llenar lo que le da su contenedor.
+        Mismo criterio que el resto del sistema: el sobrante (ancho
+        disponible del viewport menos la suma de las columnas en su
+        ancho natural) se reparte en partes iguales entre las tres
+        primeras columnas (Localidad/Edificio/Unidad) — los dos
+        Promedio no participan, se quedan en su ancho justo. Se vuelve
+        a llamar sola en cada resize de la tabla (`_TablaConAnchoDinamico`),
+        no solo al repoblar filas o al primer `showEvent`."""
         self.tabla.resizeColumnToContents(0)
         self.tabla.resizeColumnToContents(1)
         self.tabla.setColumnWidth(0, self.tabla.columnWidth(0) + _PADDING_COLUMNA_PROMEDIOS)
         self.tabla.setColumnWidth(1, self.tabla.columnWidth(1) + _PADDING_COLUMNA_PROMEDIOS)
-        ancho = sum(self.tabla.columnWidth(i) for i in range(self.tabla.columnCount()))
-        self.tabla.setFixedWidth(ancho + 2 * self.tabla.frameWidth() + 2)
+        if self.tabla.columnCount() == 0:
+            return
+        disponible = self.tabla.viewport().width()
+        suma_natural = sum(self.tabla.columnWidth(c) for c in range(self.tabla.columnCount()))
+        sobrante = disponible - suma_natural
+        if sobrante <= 0:
+            return
+        columnas_a_agrandar = (0, 1, 2)
+        por_columna, residuo = divmod(sobrante, len(columnas_a_agrandar))
+        for i, columna in enumerate(columnas_a_agrandar):
+            extra = por_columna + (1 if i < residuo else 0)
+            self.tabla.setColumnWidth(columna, self.tabla.columnWidth(columna) + extra)
 
 
 class _PanelGrillaSemanal(QWidget):
@@ -742,11 +831,25 @@ class _PanelValoresVigentes(QWidget):
 
         self.filtros_valores = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_valores)
         layout.addWidget(self.filtros_valores)
-        layout.addWidget(self.promedios_valores)
+
+        # Pedido explícito de la clienta ("las tablas están apelmazadas,
+        # las vamos a reubicar, una arriba de la otra"): antes las tres
+        # columnas (filtros/promedios/tabla de valores) iban una al lado
+        # de la otra en el mismo `QHBoxLayout` — ahora filtros queda a la
+        # izquierda y a la derecha se apilan las dos tablas, Promedios
+        # arriba (un tercio del alto) y Valores abajo (el resto, hasta el
+        # pie). El factor de stretch 1:2 en el `QVBoxLayout` da esa
+        # proporción sin necesitar un alto fijo en píxeles — se mantiene
+        # sea cual sea el tamaño real de la ventana. Ambas tablas quedan
+        # escroleables si hace falta (ya lo eran, `_armar_tabla` deja
+        # `ScrollBarAsNeeded` en los dos ejes).
+        panel_derecho = QVBoxLayout()
+        panel_derecho.addWidget(self.promedios_valores, stretch=1)
         grupo_valores = QGroupBox("Valores vigentes por horas regulares y aisladas")
         layout_grupo_valores = QVBoxLayout(grupo_valores)
         layout_grupo_valores.addWidget(self.tabla_valores)
-        layout.addWidget(grupo_valores, stretch=1)
+        panel_derecho.addWidget(grupo_valores, stretch=2)
+        layout.addLayout(panel_derecho, stretch=1)
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
