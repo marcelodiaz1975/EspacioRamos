@@ -565,3 +565,54 @@ este sandbox Linux (el bug es puntual de Windows, y `main()` no es
 testeable sin una base real + diálogo de login, mismo criterio ya
 documentado para el resto de lo que pasa ahí) — queda como mitigación
 de buena fe hasta que la clienta confirme si sigue pasando.
+
+## Gestor de archivos del espacio: columnas más anchas, Vista previa sin tamaño fijo (nov-2026)
+
+Ajuste puntual sobre el layout en dos filas de la ronda anterior:
+
+1. **Filtros y botones (columnas 1 y 2) un poco más anchos**:
+   `_ANCHO_CAMPO` sube de 240 a 270 — como todos los combos/botones de
+   las dos columnas usan esa misma constante, el cambio las ensancha
+   a las dos de una.
+
+2. **Vista previa (columna 3) deja de tener tamaño fijo (400x400) y se
+   estira hasta el borde de la pantalla**, para no tener que escrolear.
+   `self.etiqueta_preview` pasa de `setFixedSize` a `setMinimumSize`
+   (`_ANCHO_MINIMO_PREVISUALIZACION`/`_ALTO_MINIMO_PREVISUALIZACION`,
+   un piso para que no quede degenerada) + `stretch=1` dentro de su
+   propio layout — así ocupa todo el ancho que le deja su columna y
+   todo el alto que le deje la fila.
+
+   Como ya no tiene un tamaño fijo, la imagen/PDF que tenga cargada en
+   ese momento necesita volver a escalarse cada vez que cambia de
+   tamaño (si no, se queda con el tamaño de cuando se seleccionó el
+   archivo) — nueva `_EtiquetaConAnchoDinamico` (subclase mínima de
+   `QLabel`, mismo patrón que `_TablaConAnchoDinamico` de la ronda
+   anterior: notifica a un callback en cada `resizeEvent`). El panel
+   guarda el pixmap SIN escalar (`self._pixmap_original`) para poder
+   reescalarlo las veces que haga falta sin perder calidad — reescalar
+   la versión ya escalada, en vez de la original, iría degradándola en
+   redimensionados sucesivos.
+
+3. **Bug real encontrado al medir la pantalla ya armada**: la fila de
+   arriba terminaba más alta que lo que de verdad necesitaban filtros/
+   botones — Vista previa (ahora con `stretch=1` en su propio layout)
+   estaba, de rebote, absorbiendo el alto de sobra que el
+   `QScrollArea` (`setWidgetResizable(True)`) le fuerza a `contenido`
+   cuando la ventana es más alta que el contenido natural, en vez de
+   que ese sobrante se lo llevara la tabla de abajo. Se corrigió
+   dándole el `stretch=1` explícito a `self.tabla` en
+   `layout_contenido` (antes sin stretch) y dejando `fila_superior`
+   sin stretch (antes tampoco lo tenía, pero sin nadie más
+   reclamándolo, el sobrante terminaba repartiéndose para cualquier
+   lado) — ahora la fila de arriba se queda en su alto natural
+   (filtros o botones, el que sea más alto) y la tabla se lleva
+   cualquier alto de sobra, pedido explícito de la clienta ("la altura
+   que te la defina lo que ocupan los botones o los filtros... luego
+   de ahí para abajo acomodás la tabla").
+
+Tests nuevos en `tests/test_gui_imagenes.py`:
+`test_anchos_de_filtros_y_botones_son_mas_generosos`,
+`test_vista_previa_no_tiene_tamano_fijo_se_estira_al_ancho_disponible`,
+`test_alto_de_la_fila_superior_lo_define_filtros_o_botones_no_vista_
+previa`, `test_vista_previa_reescala_la_imagen_al_cambiar_de_tamano`.

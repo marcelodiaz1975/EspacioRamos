@@ -139,13 +139,18 @@ from app.negocio.imagenes import (
 from app.pdf.estilos import clave_orden_unidad
 from app.pdf.manual_pdf import generar_pdf_manual
 
-_ANCHO_CAMPO = 240
+_ANCHO_CAMPO = 270  # pedido explícito de la clienta: "dale un poco más de ancho" a filtros/botones (antes 240)
 _TODOS = "Todos los archivos"
 _NIVEL_ALCANCE = {"Espacio": 0, "Localidad": 1, "Edificio": 2, "Unidad": 3, "Consultorio": 4}
 _ALCANCES = [_TODOS, *_NIVEL_ALCANCE]
 _PADDING_COLUMNA = 30  # mismo criterio que novedades._ajustar_columnas
 _COLCHON_TITULO_COLUMNA = 12  # padding interno que Qt le suma a la celda del encabezado, ver _ajustar_columnas
-_ANCHO_PREVISUALIZACION = 400
+# Piso de la Vista previa (pedido explícito de la clienta: ya no tiene
+# tamaño fijo, se estira sola al ancho de su columna y al alto que deje
+# libre filtros/botones — ver `_armar_ui`) — evita que quede
+# degenerada si esa columna terminara más chica que esto.
+_ANCHO_MINIMO_PREVISUALIZACION = 300
+_ALTO_MINIMO_PREVISUALIZACION = 220
 _LINEAS_PREVIEW_TXT = 12
 
 _COLUMNAS_NORMAL = ["Orden", "Descripción", "Categoría", "Principal", "Activo"]
@@ -278,6 +283,22 @@ class _TablaConAnchoDinamico(QTableWidget):
 
     def __init__(self, al_redimensionar, parent=None):
         super().__init__(parent)
+        self._al_redimensionar = al_redimensionar
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        super().resizeEvent(evento)
+        self._al_redimensionar()
+
+
+class _EtiquetaConAnchoDinamico(QLabel):
+    """Mismo motivo que `_TablaConAnchoDinamico`: la Vista previa ya no
+    tiene un tamaño fijo (se estira sola, ver `_armar_ui`), así que la
+    imagen/PDF que tenga cargada en ese momento hay que volver a
+    escalarla cada vez que el label cambia de tamaño — si no, se queda
+    con el tamaño de la última vez que se seleccionó un archivo."""
+
+    def __init__(self, al_redimensionar, texto: str = "", parent=None):
+        super().__init__(texto, parent)
         self._al_redimensionar = al_redimensionar
 
     def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre impuesto por Qt)
@@ -532,16 +553,25 @@ class _PanelGestorArchivos(QWidget):
         panel_preview = QWidget()
         layout_preview = QVBoxLayout(panel_preview)
         layout_preview.addWidget(_titulo_campo("Vista previa"))
-        self.etiqueta_preview = QLabel("Seleccioná un archivo para verlo acá.")
+        self._pixmap_original: QPixmap | None = None
+        self.etiqueta_preview = _EtiquetaConAnchoDinamico(self._reescalar_preview, "Seleccioná un archivo para verlo acá.")
         self.etiqueta_preview.setObjectName("previsualizacionImagen")
         self.etiqueta_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.etiqueta_preview.setWordWrap(True)
-        self.etiqueta_preview.setFixedSize(_ANCHO_PREVISUALIZACION, _ANCHO_PREVISUALIZACION)
+        # Pedido explícito de la clienta: ya no queda fijo a 400x400 —
+        # se estira hasta el borde de la pantalla (ancho) y hasta donde
+        # llegue filtros/botones, lo que ocupe más en alto (alto) — ver
+        # `_ANCHO_MINIMO_PREVISUALIZACION`/`_ALTO_MINIMO_PREVISUALIZACION`
+        # para el piso que evita que quede degenerado.
+        self.etiqueta_preview.setMinimumSize(_ANCHO_MINIMO_PREVISUALIZACION, _ALTO_MINIMO_PREVISUALIZACION)
         self.etiqueta_preview.setStyleSheet("border: 1px solid #000000;")
-        layout_preview.addWidget(self.etiqueta_preview)
-        layout_preview.addStretch()
+        layout_preview.addWidget(self.etiqueta_preview, stretch=1)
         fila_superior.addWidget(panel_preview, stretch=1)
 
+        # Sin stretch (se queda en su alto natural, el que definen filtros/
+        # botones — pedido explícito de la clienta) — el que se lleva
+        # cualquier alto de sobra que deje el QScrollArea es `self.tabla`
+        # de abajo (`stretch=1`), no esta fila.
         layout_contenido.addLayout(fila_superior)
 
         self._indice_descripcion = 5
@@ -555,7 +585,7 @@ class _PanelGestorArchivos(QWidget):
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._actualizar_previsualizacion)
         instalar_eliminar_con_tecla(self.tabla, self._eliminar)
-        layout_contenido.addWidget(self.tabla)
+        layout_contenido.addWidget(self.tabla, stretch=1)
 
         scroll.setWidget(contenido)
         layout_externo.addWidget(scroll)
@@ -784,13 +814,26 @@ class _PanelGestorArchivos(QWidget):
         self._mostrar_preview_texto("No hay vista disponible.")
 
     def _mostrar_preview_texto(self, texto: str) -> None:
+        self._pixmap_original = None
         self.etiqueta_preview.setPixmap(QPixmap())
         self.etiqueta_preview.setText(texto)
 
     def _mostrar_preview_pixmap(self, pixmap: QPixmap) -> None:
+        self._pixmap_original = pixmap
         self.etiqueta_preview.setText("")
+        self._reescalar_preview()
+
+    def _reescalar_preview(self) -> None:
+        """Vuelve a escalar `self._pixmap_original` (siempre la imagen
+        original, nunca la ya escalada — si no, achicar y agrandar
+        varias veces seguidas iría perdiendo calidad) al tamaño actual
+        de la Vista previa. Se llama sola cada vez que el label cambia
+        de tamaño (`_EtiquetaConAnchoDinamico`), no solo al elegir un
+        archivo — la Vista previa ya no tiene un tamaño fijo."""
+        if self._pixmap_original is None:
+            return
         self.etiqueta_preview.setPixmap(
-            pixmap.scaled(
+            self._pixmap_original.scaled(
                 self.etiqueta_preview.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation,
             )
         )

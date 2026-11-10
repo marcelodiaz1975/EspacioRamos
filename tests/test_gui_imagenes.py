@@ -1,5 +1,6 @@
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QWidget
 
 from app.db.init_db import init_database
@@ -753,3 +754,78 @@ def test_previsualizacion_sin_soporte_avisa_que_no_hay_vista(qtbot, conn, monkey
     pantalla.tabla.selectRow(0)
 
     assert pantalla.etiqueta_preview.text() == "No hay vista disponible."
+
+
+def test_anchos_de_filtros_y_botones_son_mas_generosos(qtbot, conn):
+    """Pedido explícito de la clienta: "dale un poco más de ancho a las
+    dos primeras columnas" (filtros y botones, antes 240px)."""
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.combo_alcance.width() == 270
+    assert pantalla.boton_agregar.width() == 270
+
+
+def test_vista_previa_no_tiene_tamano_fijo_se_estira_al_ancho_disponible(qtbot, conn):
+    """Pedido explícito de la clienta: la Vista previa (tercera columna)
+    ya no queda fija a 400x400 — se estira hasta el borde de la
+    pantalla para no tener que escrolear."""
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 850)
+    qtbot.waitExposed(pantalla)
+
+    assert pantalla.etiqueta_preview.width() > 900  # bien por encima del viejo piso fijo de 400px
+
+
+def test_alto_de_la_fila_superior_lo_define_filtros_o_botones_no_vista_previa(qtbot, conn):
+    """Pedido explícito de la clienta: "la altura que te la defina lo
+    que ocupan los botones o los filtros, lo que ocupen más en alto" —
+    la Vista previa, ya sin tamaño fijo, no puede terminar dictando una
+    fila más alta que eso (bug real de una primera versión: el label
+    reclamaba más alto del que de verdad necesitaba, estirando la fila
+    entera de rebote — se corrigió dándole el `stretch` a la tabla de
+    abajo, no a esta fila, para que sea ella la que absorba cualquier
+    alto de sobra del `QScrollArea`)."""
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 850)
+    qtbot.waitExposed(pantalla)
+
+    fin_filtros = pantalla.combo_consultorio.y() + pantalla.combo_consultorio.height()
+    fin_botones = pantalla.boton_manual.y() + pantalla.boton_manual.height()
+    alto_fila = pantalla.combo_alcance.parentWidget().height()  # panel_filtros, ya estirado a la fila
+    # Margen chico esperable por los márgenes del layout — si Vista
+    # previa estuviera dictando la fila, sería mucho más alta que esto.
+    assert alto_fila <= max(fin_filtros, fin_botones) + 20
+
+
+def test_vista_previa_reescala_la_imagen_al_cambiar_de_tamano(
+    qtbot, conn, edificio, unidad, consultorio, tmp_path, monkeypatch,
+):
+    """Pedido de la clienta, consecuencia de que la Vista previa ya no
+    tenga tamaño fijo: la imagen ya mostrada tiene que volver a
+    escalarse si la columna cambia de ancho — si no, se queda con el
+    tamaño de cuando se la seleccionó."""
+    ruta = tmp_path / "foto.png"
+    imagen = QImage(800, 600, QImage.Format.Format_RGB32)
+    imagen.fill(0)
+    imagen.save(str(ruta), "PNG")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(ruta), "")))
+
+    pantalla = _PanelGestorArchivos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(900, 700)
+    qtbot.waitExposed(pantalla)
+    _elegir_consultorio(pantalla, edificio, unidad, consultorio)
+    pantalla._agregar()
+    pantalla.tabla.selectRow(0)
+    ancho_chico = pantalla.etiqueta_preview.pixmap().width()
+
+    pantalla.resize(1700, 900)
+    qtbot.waitExposed(pantalla)
+    ancho_grande = pantalla.etiqueta_preview.pixmap().width()
+
+    assert ancho_grande > ancho_chico
