@@ -85,6 +85,9 @@ class VentanaPrincipal(QMainWindow):
         self.setWindowTitle(NOMBRE_Y_VERSION)
         self.resize(1200, 800)
         self._aplicar_tema()
+        # Ver `_cambiar_seccion`: el primer cambio de página real
+        # reafirma el maximizado una sola vez, no en cada click.
+        self._geometria_reafirmada = False
 
         self._navegacion = QListWidget()
         self._navegacion.setObjectName("navegacion")
@@ -492,10 +495,20 @@ class VentanaPrincipal(QMainWindow):
         # forzó un layout pesado) puede destapar el mismo problema de
         # maximizado que ya se mitigó en `gui_main.main()` — la barra
         # de abajo (leyenda de funciones) queda tapada hasta maximizar
-        # dos veces a mano. Reafirmar acá el estado maximizado, después
-        # de procesar el cambio de página, es la misma mitigación:
-        # barata e idempotente (no reproducida en este sandbox Linux,
-        # así que no hace nada distinto acá).
-        if self.isMaximized():
-            QApplication.processEvents()
-            self.showMaximized()
+        # dos veces a mano. Primer intento (solo reafirmar `showMaximized()`
+        # estando ya maximizada) NO resolvió el problema, reportado por la
+        # clienta al probarlo: Qt muy probablemente lo toma como no-op
+        # porque el estado de la ventana ya es "maximizada" y no dispara
+        # ningún recálculo de geometría nuevo — hace falta imitar el gesto
+        # manual real que sí lo arregla (restaurar y volver a maximizar,
+        # no solo maximizar de nuevo sobre sí misma). Solo la PRIMERA vez
+        # (`self._geometria_reafirmada`): la clienta confirma que, pasado
+        # ese primer cambio de solapa, la navegación ya queda bien — repetir
+        # esto en cada click sería un parpadeo visible de más sin necesidad.
+        if not self._geometria_reafirmada:
+            self._geometria_reafirmada = True
+            if self.isMaximized():
+                QApplication.processEvents()
+                self.showNormal()
+                QApplication.processEvents()
+                self.showMaximized()

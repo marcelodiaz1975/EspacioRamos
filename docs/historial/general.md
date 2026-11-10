@@ -4609,3 +4609,24 @@ bien. No reproducible en este sandbox Linux (el bug es puntual de
 Windows), así que queda a confirmar con la clienta si el paso de
 maximizar dos veces ya no hace falta. Suite de `tests/test_main_window.py`
 (39 tests) sigue pasando sin cambios.
+
+**Este primer intento NO funcionó** (reportado por la clienta al
+probarlo: "Aun no se resuelve el problema"). Hipótesis revisada: llamar
+a `showMaximized()` estando la ventana YA maximizada muy probablemente
+es un no-op para Qt/Windows — el estado de la ventana no cambia, así
+que no dispara ningún recálculo de geometría nuevo. El gesto manual que
+sí lo arregla (maximizar dos veces) en realidad implica un cambio de
+estado real en el medio: el primer click sobre una ventana maximizada
+la RESTAURA (la desmaximiza), el segundo click la vuelve a maximizar —
+dos transiciones de estado reales, no la misma llamada repetida.
+
+Segundo intento: `_cambiar_seccion` ahora imita ese gesto completo
+—`self.showNormal()` (con `processEvents()` después) y recién ahí
+`self.showMaximized()` de nuevo— en vez de solo reafirmar el estado
+maximizado sobre sí mismo. Para no parpadear en cada cambio de solapa
+(la clienta confirma que, pasado el primer cambio, la navegación ya
+anda bien), se agrega `self._geometria_reafirmada` (bandera de
+instancia, `False` en `__init__`): el ciclo restaurar→maximizar corre
+una sola vez, en el primer `_cambiar_seccion` real de la sesión, nunca
+más después. Tampoco reproducible en este sandbox — a confirmar con la
+clienta en su Windows real.
