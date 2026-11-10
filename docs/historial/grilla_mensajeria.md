@@ -781,3 +781,37 @@ Tests nuevos en `tests/test_mensajes_predefinidos.py`:
 `test_dialogo_nuevo_queda_al_doble_de_tamano_y_centrado_arriba`,
 `test_tabla_categoria_y_descripcion_crecen_consul_y_activo_al_minimo`.
 
+## Mensajes predefinidos: alto del diálogo -30%, multiplicador independiente del ancho (nov-2026)
+
+Pedido explícito de la clienta, sobre el mismo diálogo que ya había
+pedido al doble (arriba): "reducí el alto del cuadro de diálogo que se
+abre cuando pongo 'Nuevo' o 'Editar' un 30% y mantenelo centrado en
+pantalla al abrir" — SIN tocar el ancho (sigue al doble, ya aprobado).
+`PantallaCRUD`/`_DialogoRegistro` (`crud_generico.py`) tenían un solo
+`multiplicador_tamano` aplicado por igual a ancho y alto — no alcanzaba
+para escalarlos distinto. Se separa en dos parámetros independientes:
+`multiplicador_tamano_dialogo` (ancho, nombre sin cambios) y
+`multiplicador_alto_dialogo` (nuevo, `None` por default — reusa el de
+ancho si no se pasa, así que cualquier catálogo que solo use el
+primero sigue exactamente igual). `_DialogoRegistro.__init__` pasa de
+un solo `multiplicador_tamano: float` a `multiplicador_ancho`/
+`multiplicador_alto`, cada uno aplicado por separado en el `resize()`.
+
+Mensajes predefinidos pasa a `multiplicador_tamano_dialogo=2.0,
+multiplicador_alto_dialogo=1.4` (2.0 * (1 - 0.30) = 1.4) — el ancho
+queda igual que antes, el alto un 30% más chico que el doble que tenía.
+El centrado (`move()`, misma lógica de siempre) sigue disparándose si
+CUALQUIERA de los dos multiplicadores es distinto de 1.0.
+
+`test_dialogo_nuevo_queda_al_doble_de_tamano_y_centrado_arriba` pasa a
+`test_dialogo_nuevo_queda_al_doble_de_ancho_y_un_40_porciento_mas_alto_
+centrado_arriba` (ancho x2, alto x1.4, en vez de los dos x2) — nuevo
+test `test_pantalla_mensajes_predefinidos_usa_el_mismo_ancho_y_el_
+alto_reducido` confirma que `_PanelMensajesPredefinidos` arma su
+`PantallaCRUD` con esos dos valores reales, no solo que `_DialogoRegistro`
+soporta multiplicadores independientes. Suite de `test_mensajes_
+predefinidos.py`: 31 passed. Confirmado además sin regresiones en
+`test_catalogos.py`/`test_crud_basico.py`/`test_crud_generico.py` (113
+passed) — ningún otro catálogo pasa `multiplicador_alto_dialogo`, así
+que todos siguen con el comportamiento de siempre (ancho = alto).
+

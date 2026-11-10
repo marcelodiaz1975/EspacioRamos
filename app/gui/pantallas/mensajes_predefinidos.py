@@ -262,9 +262,13 @@ class _PanelMensajesPredefinidos(QWidget):
             nuevo_secundario=True,
             anidado=True,
             # Pedido explícito de la clienta: el diálogo "Nuevo"/"Editar"
-            # al doble de ancho y de alto que el default, para verse
-            # completo al abrir (ver `_DialogoRegistro.__init__`).
+            # al doble de ancho que el default, para verse completo al
+            # abrir (ver `_DialogoRegistro.__init__`). El alto arrancó
+            # también al doble, pero quedaba demasiado alto — pedido
+            # posterior, "reducí el alto... un 30%" SIN tocar el ancho:
+            # 2.0 * 0.7 = 1.4, multiplicador independiente del de ancho.
             multiplicador_tamano_dialogo=2.0,
+            multiplicador_alto_dialogo=1.4,
             # "Texto" (antes "Mensaje") se achica a lo que haga falta
             # para que la tabla entre en el ancho de pantalla sin dejar
             # espacio en blanco, con "Activo" como última columna

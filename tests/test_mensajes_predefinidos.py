@@ -355,10 +355,14 @@ def test_vista_previa_sustituye_nombre_espacio(qtbot, conn):
     assert pantalla.texto_vista_previa.toPlainText() == "Hola desde Espacio Ramos."
 
 
-def test_dialogo_nuevo_queda_al_doble_de_tamano_y_centrado_arriba(qtbot, conn):
-    """Pedido explícito de la clienta: "el doble de ancho y de alto que
-    el que se abre ahora, que arranque mas arriba en pantalla,
-    centralizado, para que se vea completo al abrir"."""
+def test_dialogo_nuevo_queda_al_doble_de_ancho_y_un_40_porciento_mas_alto_centrado_arriba(qtbot, conn):
+    """Pedido explícito de la clienta, en dos rondas: primero "el doble
+    de ancho y de alto que el que se abre ahora, que arranque mas
+    arriba en pantalla, centralizado, para que se vea completo al
+    abrir"; después, sobre ese mismo diálogo, "reducí el alto... un 30%"
+    SIN tocar el ancho — 2.0 (ancho) se mantiene, el alto pasa a 2.0 *
+    0.7 = 1.4 (un multiplicador independiente del de ancho, ver
+    `PantallaCRUD.__init__`/`_DialogoRegistro.__init__`)."""
     from app.gui.crud_generico import Campo
 
     pantalla = _PanelMensajesPredefinidos(conn)
@@ -367,18 +371,33 @@ def test_dialogo_nuevo_queda_al_doble_de_tamano_y_centrado_arriba(qtbot, conn):
     campos = pantalla.crud.campos
     dialogo_normal = _DialogoRegistro(conn, campos, "Nuevo registro")
     qtbot.addWidget(dialogo_normal)
-    dialogo_doble = _DialogoRegistro(conn, campos, "Nuevo registro", multiplicador_tamano=2.0)
-    qtbot.addWidget(dialogo_doble)
+    dialogo_ajustado = _DialogoRegistro(
+        conn, campos, "Nuevo registro", multiplicador_ancho=2.0, multiplicador_alto=1.4,
+    )
+    qtbot.addWidget(dialogo_ajustado)
 
-    assert dialogo_doble.width() == dialogo_normal.width() * 2
-    assert dialogo_doble.height() == dialogo_normal.height() * 2
+    assert dialogo_ajustado.width() == dialogo_normal.width() * 2
+    assert dialogo_ajustado.height() == int(dialogo_normal.height() * 1.4)
 
-    sin_variables = _DialogoRegistro(conn, [Campo("X", "X")], "Nuevo registro", multiplicador_tamano=1.0)
-    qtbot.addWidget(sin_variables)
-    pos_default = sin_variables.pos()
-    con_multiplicador = _DialogoRegistro(conn, [Campo("X", "X")], "Nuevo registro", multiplicador_tamano=2.0)
+    sin_multiplicador = _DialogoRegistro(conn, [Campo("X", "X")], "Nuevo registro")
+    qtbot.addWidget(sin_multiplicador)
+    pos_default = sin_multiplicador.pos()
+    con_multiplicador = _DialogoRegistro(
+        conn, [Campo("X", "X")], "Nuevo registro", multiplicador_ancho=2.0, multiplicador_alto=1.4,
+    )
     qtbot.addWidget(con_multiplicador)
     assert con_multiplicador.pos() != pos_default  # se reposiciona a mano (centrado, arriba), no el default de Qt
+
+
+def test_pantalla_mensajes_predefinidos_usa_el_mismo_ancho_y_el_alto_reducido(qtbot, conn):
+    """Confirma que `_PanelMensajesPredefinidos` arma su `PantallaCRUD`
+    con los multiplicadores reales (2.0 de ancho, 1.4 de alto) — no solo
+    que `_DialogoRegistro` SOPORTA valores independientes (el test de
+    arriba), sino que esta pantalla puntual los está usando."""
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.crud._multiplicador_tamano_dialogo == 2.0
+    assert pantalla.crud._multiplicador_alto_dialogo == 1.4
 
 
 def test_tabla_categoria_y_descripcion_crecen_consul_y_activo_al_minimo(qtbot, conn):

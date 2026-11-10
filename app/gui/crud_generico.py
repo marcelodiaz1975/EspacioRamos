@@ -293,6 +293,7 @@ class PantallaCRUD(QWidget):
         columna_prioritaria: str | None = None,
         columna_flexible: str | None = None,
         multiplicador_tamano_dialogo: float = 1.0,
+        multiplicador_alto_dialogo: float | None = None,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -393,6 +394,14 @@ class PantallaCRUD(QWidget):
         # 1.0 (default) deja el tamaño de siempre en el resto de los
         # catálogos — no se toca de una sola vez.
         self._multiplicador_tamano_dialogo = multiplicador_tamano_dialogo
+        # multiplicador_alto_dialogo: independiente del de ancho (pedido
+        # posterior, misma pantalla: "reducí el alto... un 30%" sin tocar
+        # el ancho ya aprobado) — `None` (default) reusa el multiplicador
+        # de ancho para el alto también, mismo comportamiento de siempre
+        # para cualquier otro catálogo que solo pase uno de los dos.
+        self._multiplicador_alto_dialogo = (
+            multiplicador_tamano_dialogo if multiplicador_alto_dialogo is None else multiplicador_alto_dialogo
+        )
         # compacto: layout viejo (título + fila de botones arriba de la
         # tabla, sin solapa/filtro) — para cuando una pantalla compuesta
         # (ej. Mensajes predefinidos) inserta este CRUD como un componente
@@ -811,7 +820,8 @@ class PantallaCRUD(QWidget):
     def _nuevo(self) -> None:
         dialogo = _DialogoRegistro(
             self.conn, self._campos_dialogo(), "Nuevo registro",
-            multiplicador_tamano=self._multiplicador_tamano_dialogo,
+            multiplicador_ancho=self._multiplicador_tamano_dialogo,
+            multiplicador_alto=self._multiplicador_alto_dialogo,
         )
         if self.al_abrir_dialogo:
             self.al_abrir_dialogo(dialogo)
@@ -842,7 +852,8 @@ class PantallaCRUD(QWidget):
         registro = self.repositorio.obtener(id_valor)
         dialogo = _DialogoRegistro(
             self.conn, self._campos_dialogo(), "Editar registro", registro=registro,
-            multiplicador_tamano=self._multiplicador_tamano_dialogo,
+            multiplicador_ancho=self._multiplicador_tamano_dialogo,
+            multiplicador_alto=self._multiplicador_alto_dialogo,
         )
         if self.al_abrir_dialogo:
             self.al_abrir_dialogo(dialogo)
@@ -898,7 +909,7 @@ class PantallaCRUD(QWidget):
 class _DialogoRegistro(QDialog):
     def __init__(
         self, conn: sqlite3.Connection, campos: list[Campo], titulo: str, registro=None, parent=None,
-        multiplicador_tamano: float = 1.0,
+        multiplicador_ancho: float = 1.0, multiplicador_alto: float = 1.0,
     ):
         super().__init__(parent)
         self.conn = conn
@@ -946,14 +957,16 @@ class _DialogoRegistro(QDialog):
         # larguísimo (ahí ya pasa a envolver en dos líneas, como antes).
         ancho = max(480, min(formulario.sizeHint().width() + 32, 900))
         alto = min(60 + 40 * len(campos), 640)
-        # multiplicador_tamano (pedido puntual, Mensajes predefinidos:
-        # "el doble de ancho y de alto que el que se abre ahora") se
-        # aplica sobre el tamaño ya calculado arriba, no sobre un valor
-        # fijo propio — un formulario con más campos sigue creciendo en
-        # función de su contenido, solo que ahora al doble (o lo que
-        # pida cada catálogo). 1.0 (default) no cambia nada.
-        self.resize(int(ancho * multiplicador_tamano), int(alto * multiplicador_tamano))
-        if multiplicador_tamano != 1.0:
+        # multiplicador_ancho/multiplicador_alto (pedido puntual, Mensajes
+        # predefinidos: "el doble de ancho y de alto que el que se abre
+        # ahora", y después "reducí el alto... un 30%" sin tocar el
+        # ancho — de ahí que sean dos multiplicadores independientes, no
+        # uno solo) se aplican sobre el tamaño ya calculado arriba, no
+        # sobre un valor fijo propio — un formulario con más campos sigue
+        # creciendo en función de su contenido, solo que ahora escalado.
+        # 1.0 (default) en los dos no cambia nada.
+        self.resize(int(ancho * multiplicador_ancho), int(alto * multiplicador_alto))
+        if multiplicador_ancho != 1.0 or multiplicador_alto != 1.0:
             # "que arranque más arriba en pantalla, centralizado" — Qt no
             # centra sola una ventana sin padre (`parent=None` en todos
             # los llamadores de este diálogo); se calcula a mano contra
