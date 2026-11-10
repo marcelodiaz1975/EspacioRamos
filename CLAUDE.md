@@ -180,31 +180,15 @@ la clienta al revisar esa pantalla), se usa el hermano de ese parámetro,
 Eliminar. Un catálogo puede usar los dos a la vez (uno arriba, otro
 abajo de los botones); ninguno de los dos existe en modo `compacto`.
 
-Se evaluó centralizar la documentación de Profesionales en el Gestor de
-archivos (agregando una segunda solapa "Archivos de los profesionales")
-pero la clienta pidió dejarla como estaba, solo mejorando el nombrado:
-"Agregar archivo" ahora abre `_DialogoCategoriaDocumento` (lista cerrada
-`app.negocio.documentacion_profesional.
-CATEGORIAS_DOCUMENTACION_PROFESIONAL` — DNI completo/frente/dorso,
-Título, Curso, Capacitación, Seguro mala praxis, Matrícula nacional/
-provincial, más las dos categorías libres "Otras imágenes"/"Otros
-documentos", compartidas por nombre con las de Gestor de archivos) y el
-archivo se guarda con el nombre de esa categoría (o "{categoría} -
-{detalle}" para las dos libres) en vez del nombre original — sigue
-siendo pura gestión de archivos en carpeta, sin fila propia en la base,
-sin concepto de "principal" ni de orden: es deliberadamente más simple
-que Gestor de archivos.
-
 El título del campo Buscar es "Buscar" por default, pero se puede
 personalizar por catálogo con `etiqueta_buscar` (ej. Profesionales:
 "Buscar profesional") sin cambiar el criterio de filtrado en sí (sigue
 siendo substring por cualquier columna visible, no restringido a
-campos puntuales). En Profesionales además el orden de columnas
-arranca con Código/Tratamiento/Nombre/Apellido (el mismo orden que el
-formato canónico "{código} - {tratamiento} {nombre} {apellido}" de los
-selectores de profesional del resto del sistema) — pedido puntual de
-esa pantalla, cada catálogo define el orden de sus propias columnas
-según lo que tenga más sentido mostrar primero, no hay una regla única.
+campos puntuales) — cada catálogo define el orden de sus propias
+columnas según lo que tenga más sentido mostrar primero, no hay una
+regla única (ver `docs/historial/profesionales.md` para el caso de
+Profesionales, y la decisión sobre el nombrado de archivos de su
+documentación).
 
 ## Selectores y fecha
 
@@ -464,147 +448,6 @@ Si reaparecen, son del entorno y no bloquean cerrar una ronda — una
 futura revisión de este archivo podría congelar `date.today()` ANTES
 de que el fixture `conn` siembre, para que no dependa de en qué mes
 real se corra la suite.
-
-## Hilo cerrado: Pagos — "Saldo total" y cascada entre saldo anterior/actual
-
-Pedido de la clienta:
-
-1. **Resuelto — Pagos/Registrar pagos: "Nuevo saldo" solo restaba el
-   pago del período ACTUAL.** Si el pago se imputa al período anterior,
-   "Nuevo saldo" (que solo mira `SaldoCuentaActual`) daba un importe
-   incompleto/mentiroso — no reflejaba el saldo real a cubrir. Se agrega
-   "Saldo total" (`etiqueta_saldo_total`, debajo de "Saldo período
-   actual"), que suma las dos etiquetas de arriba (`SaldoCuentaAnterior
-   + SaldoCuentaActual`), y "Nuevo saldo" pasa a calcularse en vivo
-   sobre ESE total en vez de sobre el saldo actual a secas
-   (`_actualizar_saldos`, `app/gui/pantallas/pagos.py`). Puro cambio de
-   PREVIEW en pantalla — no toca todavía `registrar_pago` (ver el hilo
-   del bug real de `SaldoCuentaAnterior`/`SaldoCuentaActual` más abajo,
-   reportado de inmediato después de este cambio, que sí ataca el
-   cálculo real). Test nuevo: `test_saldo_total_suma_anterior_y_actual_
-   y_nuevo_saldo_lo_usa_de_base` (`tests/test_gui_pagos.py`).
-
-2. **Resuelto — Pagos/Registrar pagos: un pago que cubría el saldo
-   anterior Y el actual, con margen, solo descontaba del actual y
-   dejaba el resto como crédito desconectado.** Bug real reportado por
-   la clienta: "al cargar un importe de pago de un profesional que
-   abonó el saldo del mes anterior, el actual y un poco más, me
-   tendría que dejar como saldo de cuenta actual la diferencia del
-   pago hecho menos los dos saldos, solo resta del saldo actual y
-   carga el resto como crédito al profesional" — pedido explícito de
-   que el fix impacte también los registros ya cargados, no solo los
-   pagos nuevos.
-
-   `registrar_pago` (`app/negocio/pagos.py`) imputa siempre a un solo
-   campo (`SaldoCuentaAnterior` o `SaldoCuentaActual`, según
-   `periodo_imputado` — "Nunca toca ambos a la vez", documentado desde
-   siempre) — eso seguía intencional. El bug era que, si el pago
-   alcanzaba a cubrir ese campo por completo Y TAMBIÉN el otro con
-   margen, el sobrante se quedaba en el campo imputado como crédito
-   (muy negativo) mientras el OTRO campo seguía mostrando una deuda ya
-   cobrada en los hechos. `_aplicar_pago_con_cascada` (helper nuevo)
-   agrega la cascada: solo cuando el sobrante alcanza para cubrir el
-   OTRO saldo POR COMPLETO (no con que lo achique nomás), lo cancela y
-   el resto queda como crédito final en el campo imputado. Ese umbral
-   de "cobertura completa" (no cualquier sobrante) es clave: un pago
-   que deja el campo imputado en crédito sin llegar a cubrir el otro
-   saldo entero no reparte nada — es indistinguible de un pago por
-   adelantado normal contra un período que todavía no tiene cargado el
-   saldo real (ej. una reserva aislada recién creada, antes de pasar
-   por `emitir_liquidacion`) — confirmado con una regresión real de la
-   suite (`test_mensajes.test_detalle_aislada_calcula_saldo_a_abonar`)
-   al probar primero con "cualquier sobrante reparte", que hubo que
-   descartar por este motivo antes de subir el umbral a cobertura
-   completa.
-
-   `modificar_pago`/`eliminar_pago` ahora revierten por los deltas
-   exactos que quedaron guardados en dos columnas nuevas de
-   `HistorialPagos`, `ImpactoSaldoAnterior`/`ImpactoSaldoActual` (una
-   de las dos en 0 si el pago no cayó en cascada) — ya no asumen que
-   el pago tocó un solo campo, así que revierten bien un pago
-   repartido entre los dos. Migración (`app/db/migraciones.py`): las
-   filas de `HistorialPagos` ya cargadas (de antes de este fix, que
-   nunca repartían) se backfillean con el mismo campo único que ya
-   usaba `_campo_saldo`, para que sigan revirtiéndose exactamente igual
-   que antes.
-
-   Corrección retroactiva (lo pedido explícitamente: "que me impacte
-   en los registros que ya pude haber cargado hasta el momento"):
-   `reconciliar_saldos_cruzados` (`app/negocio/pagos.py`) corre sola en
-   cada arranque (`app.db.init_db.init_database`, después de
-   `aplicar_migraciones`) y neta, para cada profesional, un campo en
-   deuda contra el otro en crédito — pero SOLO cuando el crédito
-   alcanza a cubrir esa deuda por completo (mismo umbral exacto que el
-   fix, para no corregir un estado que nunca estuvo roto). Deja su
-   propio movimiento en `HistorialPagos` (Monto=0, EsAjuste, con el
-   detalle de antes/después en Observación) para que quede visible en
-   Estado de cuenta y sea reversible (Eliminar) como cualquier pago; es
-   de por sí idempotente (una vez corregido un profesional ya no
-   vuelve a cumplir la condición, y el fix en `registrar_pago` ya no
-   vuelve a generarla).
-
-   El cartel de confirmación de "Eliminar pago" (`app/gui/pantallas/
-   pagos.py`) ahora distingue si el pago a revertir cayó en cascada
-   (avisa "repartiéndolo entre el saldo del período anterior y el
-   saldo actual") de uno que tocó un solo campo, en vez de asumir
-   siempre un solo campo.
-
-   Tests: `tests/test_pagos.py` (cascada en los dos sentidos, umbral de
-   cobertura completa, `modificar_pago`/`eliminar_pago` con un pago
-   repartido, `reconciliar_saldos_cruzados` en los dos sentidos + no-op
-   si no hay cobertura completa + idempotencia, y wiring completo vía
-   `init_database`), `tests/test_migraciones.py` (backfill de
-   `ImpactoSaldoAnterior`/`ImpactoSaldoActual` en filas viejas +
-   idempotencia), `tests/test_gui_pagos.py` (wording del cartel de
-   Eliminar con cascada).
-
-## Batch de 3 pedidos sueltos (Profesionales, catálogos genéricos, badge de período)
-
-Pedido explícito de la clienta, varios puntos en un mismo mensaje:
-
-1. **Resuelto — Profesionales: a veces no salía el cartel de "Registro
-   editado con éxito" al completar una edición, y al volver a editar sí
-   salía.** Bug real: `regenerar_si_corresponde` (`app/negocio/
-   liquidaciones.py`), disparada desde `_al_actualizar_profesional`
-   cuando cambia el plazo de pago extendido, escribe el PDF de la
-   liquidación en disco sin atajar ningún error de escritura — si ese
-   PDF estaba abierto en otro programa en ese momento (lector de PDF,
-   escenario común), la escritura tiraba `PermissionError` (un
-   `OSError`) que se propagaba sin capturar hasta `_editar`
-   (`crud_generico.py`), abortando el flujo ANTES de su cartel de éxito
-   final, sin ningún aviso visible (PySide6 solo imprime el traceback a
-   la consola, invisible en el .exe empaquetado). Se agrega un
-   `try/except OSError` alrededor de la escritura del PDF: si falla, se
-   salta sin más (igual que las otras condiciones de esa función que
-   tampoco regeneran el PDF — "no es motivo para interrumpir la
-   operación principal", ya documentado ahí), dejando que el flujo
-   llegue igual al cartel de éxito. Test nuevo:
-   `test_regenerar_si_corresponde_no_rompe_si_el_pdf_esta_bloqueado`
-   (`tests/test_liquidaciones.py`).
-
-2. **Resuelto — Regla general nueva: filtrar una tabla hasta dejar un
-   solo registro visible lo selecciona solo**, para poder ir directo a
-   Editar/Eliminar sin pinchar en la fila. Implementado en
-   `PantallaCRUD._aplicar_filtro_busqueda` (`app/gui/crud_generico.py`)
-   — cubre de una los ~15 catálogos genéricos (incluida Profesionales,
-   que arma su CRUD con esta misma clase). Solo dispara con un filtro
-   de Buscar ACTIVO (texto no vacío): un catálogo que de entrada tenga
-   una sola fila cargada no se autoselecciona al abrir la pantalla
-   (confirmado con un test — rompía la vista previa de documentación de
-   Profesionales, que tiene que arrancar sin selección). Pendiente
-   (pedido explícito "y en todas en realidad", pero fuera de esta
-   ronda, mismo criterio que toda convención general de este sistema —
-   "se va resolviendo pantalla por pantalla"): extenderlo a las
-   pantallas con filtro armado a mano, no genérico (Reservas aisladas,
-   Llaves, Estado de cuenta, etc.), caso por caso a medida que se
-   revise cada una. Tests nuevos en `tests/test_crud_generico.py`.
-
-3. **Resuelto — Badge "PERÍODO {mes}/{año}" (barra de estado, abajo a
-   la derecha): pasa de azul a color de texto normal (negro).**
-   `QLabel#badgePeriodo` en `estilos.py` — probado primero en azul
-   (`COLOR_NIVEL_1_OSCURO`, mismo tono que los encabezados de columna,
-   pedido de una ronda anterior), la clienta pidió el cambio al
-   revisarlo de nuevo: se ve mejor en negro.
 
 ## Historial archivado
 

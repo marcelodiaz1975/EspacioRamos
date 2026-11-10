@@ -342,3 +342,27 @@ autorreferenciado) — confirmado a mano que ESTE test sí fallaba sin el
 `commit()` (y los tests viejos de la segunda ronda, con esquemas
 mínimos sin datos reales, no lo habían detectado).
 
+
+## Documentación del profesional: nombrado de archivos y orden de columnas
+
+Se evaluó centralizar la documentación de Profesionales en el Gestor de
+archivos (agregando una segunda solapa "Archivos de los profesionales")
+pero la clienta pidió dejarla como estaba, solo mejorando el nombrado:
+"Agregar archivo" ahora abre `_DialogoCategoriaDocumento` (lista cerrada
+`app.negocio.documentacion_profesional.
+CATEGORIAS_DOCUMENTACION_PROFESIONAL` — DNI completo/frente/dorso,
+Título, Curso, Capacitación, Seguro mala praxis, Matrícula nacional/
+provincial, más las dos categorías libres "Otras imágenes"/"Otros
+documentos", compartidas por nombre con las de Gestor de archivos) y el
+archivo se guarda con el nombre de esa categoría (o "{categoría} -
+{detalle}" para las dos libres) en vez del nombre original — sigue
+siendo pura gestión de archivos en carpeta, sin fila propia en la base,
+sin concepto de "principal" ni de orden: es deliberadamente más simple
+que Gestor de archivos.
+
+En Profesionales el orden de columnas arranca con Código/Tratamiento/
+Nombre/Apellido (el mismo orden que el formato canónico "{código} -
+{tratamiento} {nombre} {apellido}" de los selectores de profesional del
+resto del sistema) — pedido puntual de esa pantalla; la etiqueta del
+campo Buscar es "Buscar profesional" (`etiqueta_buscar`, ver CLAUDE.md
+"Catálogos (PantallaCRUD genérica)" para el mecanismo general).

@@ -4527,3 +4527,51 @@ Test nuevo: `test_resincronizar_carpetas_imagenes_no_rompe_si_no_puede_
 borrar_la_carpeta_vieja` (simula el `PermissionError` de Windows con
 `monkeypatch` sobre `Path.rmdir`, confirma que la migración del
 contenido se completa igual y que no se interrumpe nada).
+
+## Batch de 3 pedidos sueltos (Profesionales, catálogos genéricos, badge de período)
+
+Pedido explícito de la clienta, varios puntos en un mismo mensaje:
+
+1. **Resuelto — Profesionales: a veces no salía el cartel de "Registro
+   editado con éxito" al completar una edición, y al volver a editar sí
+   salía.** Bug real: `regenerar_si_corresponde` (`app/negocio/
+   liquidaciones.py`), disparada desde `_al_actualizar_profesional`
+   cuando cambia el plazo de pago extendido, escribe el PDF de la
+   liquidación en disco sin atajar ningún error de escritura — si ese
+   PDF estaba abierto en otro programa en ese momento (lector de PDF,
+   escenario común), la escritura tiraba `PermissionError` (un
+   `OSError`) que se propagaba sin capturar hasta `_editar`
+   (`crud_generico.py`), abortando el flujo ANTES de su cartel de éxito
+   final, sin ningún aviso visible (PySide6 solo imprime el traceback a
+   la consola, invisible en el .exe empaquetado). Se agrega un
+   `try/except OSError` alrededor de la escritura del PDF: si falla, se
+   salta sin más (igual que las otras condiciones de esa función que
+   tampoco regeneran el PDF — "no es motivo para interrumpir la
+   operación principal", ya documentado ahí), dejando que el flujo
+   llegue igual al cartel de éxito. Test nuevo:
+   `test_regenerar_si_corresponde_no_rompe_si_el_pdf_esta_bloqueado`
+   (`tests/test_liquidaciones.py`).
+
+2. **Resuelto — Regla general nueva: filtrar una tabla hasta dejar un
+   solo registro visible lo selecciona solo**, para poder ir directo a
+   Editar/Eliminar sin pinchar en la fila. Implementado en
+   `PantallaCRUD._aplicar_filtro_busqueda` (`app/gui/crud_generico.py`)
+   — cubre de una los ~15 catálogos genéricos (incluida Profesionales,
+   que arma su CRUD con esta misma clase). Solo dispara con un filtro
+   de Buscar ACTIVO (texto no vacío): un catálogo que de entrada tenga
+   una sola fila cargada no se autoselecciona al abrir la pantalla
+   (confirmado con un test — rompía la vista previa de documentación de
+   Profesionales, que tiene que arrancar sin selección). Pendiente
+   (pedido explícito "y en todas en realidad", pero fuera de esta
+   ronda, mismo criterio que toda convención general de este sistema —
+   "se va resolviendo pantalla por pantalla"): extenderlo a las
+   pantallas con filtro armado a mano, no genérico (Reservas aisladas,
+   Llaves, Estado de cuenta, etc.), caso por caso a medida que se
+   revise cada una. Tests nuevos en `tests/test_crud_generico.py`.
+
+3. **Resuelto — Badge "PERÍODO {mes}/{año}" (barra de estado, abajo a
+   la derecha): pasa de azul a color de texto normal (negro).**
+   `QLabel#badgePeriodo` en `estilos.py` — probado primero en azul
+   (`COLOR_NIVEL_1_OSCURO`, mismo tono que los encabezados de columna,
+   pedido de una ronda anterior), la clienta pidió el cambio al
+   revisarlo de nuevo: se ve mejor en negro.
