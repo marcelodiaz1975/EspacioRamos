@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QDialog, QMessageBox
 
@@ -18,6 +19,7 @@ from app.gui.pantallas.aumentos import (
     _COL_REGULAR_NUEVO,
     _COL_RESTABLECER,
     _COL_UNIDAD,
+    _COLUMNAS_FIJAS_AUMENTOS,
     _GUION,
     _PanelAumentos,
     _PanelEsquemaDescuentos,
@@ -83,11 +85,13 @@ def _crear_edificio_con_consultorio(
     )
 
 
-def test_filtros_y_acciones_quedan_en_dos_columnas_de_ancho_igual(qtbot, conn):
-    """Pedido explícito de la clienta: "Vamos a poner los filtros de
-    unidad en la primer columna, y vamos a crear una segunda columna
-    con los otros elementos que ahora están abajo de los filtros. Ancho
-    igual, mitad de la pantalla a cada columna"."""
+def test_filtros_y_acciones_vuelven_a_una_sola_columna(qtbot, conn):
+    """Pedido explícito de la clienta, ronda posterior a la que había
+    armado dos columnas lado a lado: "Volveme a poner en la primer
+    columna los filtros y todos los elementos, hasta la leyenda que
+    está abajo de los botones... Desarmamos esas dos columnas, no
+    corren más." Todo (filtros + acciones + leyenda) vuelve a compartir
+    el mismo contenedor, a la izquierda de la tabla."""
     pantalla = _PanelAumentos(conn)
     qtbot.addWidget(pantalla)
     pantalla.show()
@@ -96,15 +100,15 @@ def test_filtros_y_acciones_quedan_en_dos_columnas_de_ancho_igual(qtbot, conn):
 
     columna_filtros = pantalla.campo_periodo.parentWidget()
     columna_acciones = pantalla.spin_porcentaje.parentWidget()
-    assert columna_filtros is not columna_acciones
-    assert columna_filtros.x() < columna_acciones.x()  # filtros a la izquierda
-    assert abs(columna_filtros.width() - columna_acciones.width()) <= 1  # ancho igual
+    columna_leyenda = pantalla.etiqueta_ayuda_edicion.parentWidget()
+    assert columna_filtros is columna_acciones is columna_leyenda
+    assert columna_filtros.x() < pantalla.tabla.x()  # columna a la izquierda de la tabla
 
 
-def test_foco_se_mantiene_igual_con_las_dos_columnas(qtbot, conn):
-    """Pedido explícito de la clienta: "Se mantiene el focus como está
-    ahora" — el reacomodo visual en dos columnas no cambia el orden de
-    la cadena de Enter/Tab."""
+def test_foco_se_mantiene_igual_tras_volver_a_una_columna(qtbot, conn):
+    """Pedido explícito de la clienta, misma ronda: el reacomodo visual
+    de vuelta a una sola columna no cambia el orden de la cadena de
+    Enter/Tab."""
     pantalla = _PanelAumentos(conn)
     qtbot.addWidget(pantalla)
     assert pantalla._foco._orden == [
@@ -114,11 +118,14 @@ def test_foco_se_mantiene_igual_con_las_dos_columnas(qtbot, conn):
     ]
 
 
-def test_tabla_queda_debajo_de_las_dos_columnas_y_ocupa_todo_el_ancho(qtbot, conn):
-    """Pedido explícito de la clienta: "Abajo de las dos columnas poné
-    la tabla, redistribuí el ancho sobrante de la pantalla entre todas
-    las columnas en principio, se tiene que ver la tabla entera con
-    todo a la vista sin escrolear y sin espacio en blanco"."""
+def test_tabla_queda_a_la_derecha_de_la_columna_y_escrolea_en_horizontal(qtbot, conn):
+    """Pedido explícito de la clienta: "la tabla la ponemos a la derecha
+    de la columna, arranca arriba como antes. Que sea escroleble en
+    horizontal, no hay manera que entre todo en la misma pantalla" — al
+    revés del pedido de la ronda anterior (sin scroll, todo a la
+    vista): ahora la suma de columnas puede superar el ancho
+    disponible sin problema, la tabla escrolea en vez de forzar que
+    todo entre."""
     _crear_edificio_con_consultorio(conn)
     pantalla = _PanelAumentos(conn)
     qtbot.addWidget(pantalla)
@@ -126,10 +133,103 @@ def test_tabla_queda_debajo_de_las_dos_columnas_y_ocupa_todo_el_ancho(qtbot, con
     pantalla.resize(1600, 800)
     qtbot.waitExposed(pantalla)
 
-    assert pantalla.tabla.y() > pantalla.campo_periodo.y()  # la tabla queda debajo
-    disponible = pantalla.tabla.viewport().width()
-    suma_columnas = sum(pantalla.tabla.columnWidth(c) for c in range(pantalla.tabla.columnCount()))
-    assert suma_columnas <= disponible + 1  # sin dejar sobrante sin repartir (ni escrolear)
+    columna = pantalla.campo_periodo.parentWidget()
+    assert pantalla.tabla.x() > columna.x()  # tabla a la derecha de la columna
+    assert abs(pantalla.tabla.y() - columna.y()) <= 2  # "arranca arriba", misma altura que la columna
+
+
+def test_columnas_fijas_muestran_las_mismas_seis_columnas_que_la_tabla_real(qtbot, conn):
+    """Pedido explícito de la clienta: "que se inmovilice la navegación
+    a partir de Regular actual, o sea que hasta % diferencial esté
+    todo a la vista, como inmovilizar columnas en Excel" —
+    `_tabla_fija` (el overlay que queda fijo al escrolear) muestra
+    Localidad/Edificio/Unidad/Consul/% general/% diferencial, en ese
+    orden, con el mismo contenido que `self.tabla` para cada fila."""
+    _crear_edificio_con_consultorio(conn)
+    pantalla = _PanelAumentos(conn)
+    qtbot.addWidget(pantalla)
+
+    assert _COLUMNAS_FIJAS_AUMENTOS == (0, 1, 2, 3, 4, 5)
+    assert pantalla._tabla_fija.columnCount() == 6
+    assert [
+        pantalla._tabla_fija.horizontalHeaderItem(i).text() for i in range(6)
+    ] == ["Localidad", "Edificio", "Unidad", "Consul", "% general", "% diferencial"]
+    assert pantalla._tabla_fija.rowCount() == pantalla.tabla.rowCount() == 1
+    for columna_real in _COLUMNAS_FIJAS_AUMENTOS:
+        assert pantalla._tabla_fija.item(0, columna_real).text() == pantalla.tabla.item(0, columna_real).text()
+
+
+def test_columnas_fijas_siguen_el_filtro_visual_y_el_scroll_vertical(qtbot, conn):
+    """La fila oculta por el filtro de Localidad/Edificio/Unidad (ver
+    `_aplicar_filtro_visual`) tiene que quedar oculta también en la
+    tabla fija de encima, o quedaría una fila "fantasma" ahí mientras
+    la tabla real ya la sacó — y el scroll vertical de las dos tiene
+    que quedar sincronizado, para que las filas no se desalineen."""
+    _crear_edificio_con_consultorio(conn, nombre_edificio="Torre Norte")
+    _crear_edificio_con_consultorio(conn, nombre_edificio="Torre Sur")
+    pantalla = _PanelAumentos(conn)
+    qtbot.addWidget(pantalla)
+
+    indice_norte = pantalla.combo_edificio.findText("Torre Norte")
+    pantalla.combo_edificio.setCurrentIndex(indice_norte)
+
+    for fila in range(pantalla.tabla.rowCount()):
+        assert pantalla._tabla_fija.isRowHidden(fila) == pantalla.tabla.isRowHidden(fila)
+    assert any(not pantalla.tabla.isRowHidden(f) for f in range(pantalla.tabla.rowCount()))
+    assert any(pantalla.tabla.isRowHidden(f) for f in range(pantalla.tabla.rowCount()))
+
+    pantalla.tabla.verticalScrollBar().setValue(pantalla.tabla.verticalScrollBar().maximum())
+    assert pantalla._tabla_fija.verticalScrollBar().value() == pantalla.tabla.verticalScrollBar().value()
+
+
+def test_click_en_porcentaje_diferencial_de_la_columna_fija_abre_el_mismo_dialogo(qtbot, conn, monkeypatch):
+    """La única de las seis columnas fijas que se puede clickear para
+    editar ("% diferencial") tiene que seguir funcionando igual desde
+    la tabla fija de encima — el click ahí se traduce al índice real de
+    columna antes de delegarlo a `_al_click_celda`."""
+    id_consultorio = _crear_edificio_con_consultorio(conn)
+    pantalla = _PanelAumentos(conn)
+    qtbot.addWidget(pantalla)
+    _mockear_dialogo_valor(monkeypatch, "12,5")
+
+    pantalla._tabla_fija.cellClicked.emit(0, 5)  # 5 = % diferencial dentro de _tabla_fija
+
+    assert pantalla._diferenciales[id_consultorio] == 12.5
+
+
+def test_unidad_y_consul_quedan_centralizados(qtbot, conn):
+    """Pedido explícito de la clienta: "Contenido de la tabla: Consul
+    en lugar de Consultorio, centralizado; Unidad, centralizado"."""
+    _crear_edificio_con_consultorio(conn)
+    pantalla = _PanelAumentos(conn)
+    qtbot.addWidget(pantalla)
+
+    assert pantalla.tabla.horizontalHeaderItem(_COL_CONSULTORIO).text() == "Consul"
+    assert pantalla.tabla.item(0, _COL_UNIDAD).textAlignment() == Qt.AlignmentFlag.AlignCenter
+    assert pantalla.tabla.item(0, _COL_CONSULTORIO).textAlignment() == Qt.AlignmentFlag.AlignCenter
+
+
+def test_columnas_desde_general_en_adelante_al_piso_de_general_salvo_que_necesiten_mas(qtbot, conn):
+    """Pedido explícito de la clienta, aclarado al preguntarle sobre el
+    riesgo de recortar importes: "Ancho de las columnas desde %general
+    incluído en adelante iguales a %general a como está ahora" — el
+    ancho de %general es un PISO común, no un tope: una columna cuyo
+    contenido real necesite más (un importe largo) crece por encima de
+    ese piso en vez de truncarse."""
+    _crear_edificio_con_consultorio(conn, valor_regular=123456.78, valor_aislada=700)
+    pantalla = _PanelAumentos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 800)
+    qtbot.waitExposed(pantalla)
+
+    tabla = pantalla.tabla
+    piso = tabla.columnWidth(_COL_PORCENTAJE_GENERAL)
+    for columna in range(_COL_PORCENTAJE_GENERAL, tabla.columnCount()):
+        assert tabla.columnWidth(columna) >= piso
+    # "Regular actual" (importe largo, "$ 123.456,78") necesita más que
+    # el piso de %general (un texto corto, "0,00%") y no se trunca.
+    assert tabla.columnWidth(_COL_REGULAR_ACTUAL) > piso
 
 
 def test_aumentos_reiniciar_vuelve_filtros_y_porcentaje_al_estado_inicial(qtbot, conn):

@@ -491,3 +491,93 @@ Suite completa: `test_gui_valores.py` (10 passed), `test_gui_pantalla_
 grilla_operativa.py` (26 passed), `test_gui_estadisticas.py` incluido
 en la misma corrida — sin regresiones.
 
+## Aumentos: vuelta a una columna, columnas inmovilizadas, anchos (nov-2026)
+
+Pedido explícito de la clienta, revirtiendo y extendiendo la ronda
+anterior (dos columnas lado a lado + tabla a ancho completo sin
+scroll):
+
+**Vuelta a una sola columna.** "Volveme a poner en la primer columna
+los filtros y todos los elementos, hasta la leyenda que está abajo de
+los botones... Desarmamos esas dos columnas, no corren más." `_armar_ui`
+vuelve al `QHBoxLayout` de siempre: una sola columna (Período,
+Localidad, Edificio, Unidad, Porcentaje, Redondear + múltiplo, Simular,
+Confirmar, la leyenda de ayuda) a la izquierda de la tabla, cada widget
+en su `_ANCHO_CAMPO` de siempre (300px, ya probado sin cortar nada en
+la ronda de dos columnas). Orden de foco sin cambios.
+
+**Tabla a la derecha, con scroll horizontal y columnas inmovilizadas.**
+"La tabla la ponemos a la derecha de la columna, arranca arriba como
+antes. Que sea escroleable en horizontal, no hay manera que entre todo
+en la misma pantalla. Que se inmovilice la navegación a partir de
+Regular actual, o sea que hasta % diferencial esté todo a la vista,
+como inmovilizar columnas en Excel." Dos cambios de fondo:
+
+1. `_ajustar_columnas` deja de redistribuir el sobrante para forzar que
+   todo entre sin escrolear (pedido de la ronda anterior, ahora al
+   revés) — cada columna va a su ancho natural (contenido + padding);
+   si la suma supera el disponible, la tabla escrolea nativamente.
+2. Columnas inmovilizadas: mismo mecanismo que `GrillaOperativaWidget.
+   activar_filas_y_columnas_fijas` (`app.gui.widgets.grilla_operativa`)
+   — un overlay (`self._tabla_fija`, otro `QTableWidget`, hijo de
+   `self.tabla`) posicionado encima de las columnas Localidad..%
+   diferencial (`_COLUMNAS_FIJAS_AUMENTOS = (0..5)`), sincronizado a
+   mano: mismo contenido por fila (`_sincronizar_tabla_fija`, clona
+   cada `QTableWidgetItem` — no se puede compartir la misma instancia
+   entre dos tablas), mismos anchos de columna, misma visibilidad de
+   fila (el filtro de Localidad/Edificio/Unidad oculta filas en
+   `self.tabla`, tienen que quedar ocultas también en el overlay), y el
+   scroll VERTICAL de las dos sincronizado (`valueChanged.connect`, una
+   sola dirección: real → overlay). Simplificado respecto del mecanismo
+   de `GrillaOperativaWidget` (que inmoviliza filas Y columnas, con tres
+   tablas superpuestas): acá no hace falta inmovilizar ninguna fila
+   (alcanza con el encabezado horizontal nativo de Qt, que ya se
+   mantiene fijo solo al escrolear VERTICAL — el problema a resolver es
+   el eje horizontal), así que una sola tabla de encima alcanza.
+   Geometría: `origen_x` sale de `self.tabla.viewport().pos().x()` (así
+   se descuenta el ancho del encabezado vertical — números de fila — y
+   el borde del frame, que el overlay no tiene) pero la Y arranca en 0
+   (no en la Y del viewport), porque el overlay SÍ necesita mostrar su
+   propio encabezado horizontal (el real escrolea junto con sus
+   columnas al desplazar horizontalmente, no queda fijo solo) —
+   confirmado con una captura que el primer intento (Y en el viewport,
+   como el mecanismo de `GrillaOperativaWidget`) duplicaba una fila de
+   encabezado de más, porque el propio encabezado del overlay ya
+   reservaba ese espacio debajo del real. "% diferencial" (la única de
+   las seis columnas fijas que se puede clickear para fijar un
+   override) sigue funcionando igual desde el overlay: su
+   `cellClicked` traduce el índice de columna (0..5) al real de
+   `self.tabla` antes de delegarlo al mismo `_al_click_celda` de
+   siempre.
+
+**Contenido de tabla: "Consul"/Unidad centralizados.** "Consul" en vez
+de "Consultorio" (encabezado) con el contenido centralizado, igual que
+"Unidad" — nueva `_celda_centrada_no_editable` (mismo criterio que
+`_celda_no_editable`, con `item_centrado` en vez de la alineación
+default a la izquierda).
+
+**Anchos desde %general en adelante.** "Ancho de las columnas desde
+%general incluído en adelante iguales a %general a como está ahora."
+Antes de implementar, se le preguntó a la clienta qué hacer si un
+importe largo ("$ 123.456,78") no entra en el ancho angosto de
+%general — confirmó: "ancho de %general, pero MAYOR si hace falta"
+(el ancho de %general es un PISO común, nunca un tope que trunque un
+importe). `_ajustar_columnas` calcula el ancho natural de %general
+después del padding de siempre y lo aplica como mínimo a todas las
+columnas desde ahí en adelante (`max(ancho_actual, piso)`, Regular
+actual/nuevo, Dif. regular, Aislada actual/nuevo, Dif. aislada, y el
+botón "Restablecer" — "en adelante" no distingue).
+
+Tests nuevos/actualizados en `tests/test_gui_aumentos.py`:
+`test_filtros_y_acciones_vuelven_a_una_sola_columna`/`test_foco_se_
+mantiene_igual_tras_volver_a_una_columna` (reemplazan los de la ronda
+de dos columnas), `test_tabla_queda_a_la_derecha_de_la_columna_y_
+escrolea_en_horizontal` (reemplaza el de "sin escrolear"),
+`test_columnas_fijas_muestran_las_mismas_seis_columnas_que_la_tabla_
+real`, `test_columnas_fijas_siguen_el_filtro_visual_y_el_scroll_
+vertical`, `test_click_en_porcentaje_diferencial_de_la_columna_fija_
+abre_el_mismo_dialogo`, `test_unidad_y_consul_quedan_centralizados`,
+`test_columnas_desde_general_en_adelante_al_piso_de_general_salvo_que_
+necesiten_mas`. Suite completa: 49 passed, sin regresiones en
+`test_gui_valores.py`/`test_gui_pantalla_grilla_operativa.py`.
+

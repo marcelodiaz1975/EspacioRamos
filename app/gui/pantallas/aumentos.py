@@ -85,6 +85,7 @@ import sqlite3
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -107,7 +108,7 @@ from PySide6.QtWidgets import (
 from app.gui.estilos import COLOR_AMARILLO
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.gui.widgets.items_tabla import item_numero
+from app.gui.widgets.items_tabla import item_centrado, item_numero
 from app.gui.widgets.resumen_saldo import item_monto
 from app.negocio.aumentos import (
     actualizar_esquema_descuentos,
@@ -184,6 +185,16 @@ def _celda_no_editable(texto: str) -> QTableWidgetItem:
     return item
 
 
+def _celda_centrada_no_editable(texto: str) -> QTableWidgetItem:
+    """"Unidad"/"Consul" (pedido explícito de la clienta: contenido
+    centralizado) — mismo criterio que `_celda_no_editable` para el
+    resto de las columnas de solo texto de esta tabla, con `item_
+    centrado` en vez de la alineación por default (izquierda)."""
+    item = item_centrado(texto)
+    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    return item
+
+
 def _celda_monto_fija(valor: float) -> QTableWidgetItem:
     item = item_monto(valor)
     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -254,29 +265,46 @@ class _TablaConAnchoDinamico(QTableWidget):
         self._al_redimensionar()
 
 
+_COLUMNAS_FIJAS_AUMENTOS = (
+    _COL_LOCALIDAD, _COL_EDIFICIO, _COL_UNIDAD, _COL_CONSULTORIO,
+    _COL_PORCENTAJE_GENERAL, _COL_PORCENTAJE_DIFERENCIAL,
+)
+"""Pedido explícito de la clienta: "que se inmovilice la navegación a
+partir de Regular actual, o sea que hasta % diferencial esté todo a la
+vista, como inmovilizar columnas en Excel" — estas seis quedan FIJAS
+(no escrolean horizontalmente) en `_TablaColumnasFijas`, ver más abajo."""
+
+
 def _ajustar_columnas(tabla: QTableWidget) -> None:
-    """Pedido explícito de la clienta: "redistribuí el ancho sobrante de
-    la pantalla entre todas las columnas en principio, se tiene que ver
-    la tabla entera con todo a la vista sin escrolear y sin espacio en
-    blanco" — mismo criterio que `reservas._ajustar_columnas`: el ancho
-    sobrante (disponible menos la suma de las columnas en su ancho
-    natural + padding) se reparte en partes iguales entre TODAS las
-    columnas (el residuo de la división, si no es exacta, para las
-    primeras) — no hay una columna "más importante" en este listado."""
+    """Pedido explícito de la clienta, segunda ronda sobre esta misma
+    tabla: "que sea escroleable en horizontal, no hay manera que entre
+    todo en la misma pantalla" — al revés del pedido original de la
+    ronda anterior ("se tiene que ver la tabla entera... sin escrolear
+    y sin espacio en blanco"), así que la redistribución del sobrante
+    para llenar la pantalla QUEDA SIN EFECTO: cada columna va a su
+    ancho NATURAL (contenido + padding de siempre), sin estirarse de
+    más — si la suma total termina superando el ancho disponible, la
+    tabla escrolea (comportamiento nativo de `QTableWidget`), en vez de
+    forzar que todo entre.
+
+    "Ancho de las columnas desde %general en adelante iguales a
+    %general a como está ahora" (confirmado con la clienta: el ancho de
+    %general es un PISO común, no un tope — una columna cuyo contenido
+    real necesite más, ej. un importe largo, crece por encima de ese
+    piso en vez de truncarse; nunca se trunca un importe): el ancho
+    natural de `_COL_PORCENTAJE_GENERAL` pasa a ser el mínimo de todas
+    las columnas desde ahí en adelante (Regular actual/nuevo, Dif.
+    regular, Aislada actual/nuevo, Dif. aislada, y el botón
+    "Restablecer", sin título propio pero con el mismo criterio -
+    "en adelante" no distingue)."""
     tabla.resizeColumnsToContents()
     for columna in range(tabla.columnCount()):
         tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
-    if tabla.columnCount() == 0:
+    if tabla.columnCount() <= _COL_PORCENTAJE_GENERAL:
         return
-    disponible = tabla.viewport().width()
-    suma_natural = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
-    sobrante = disponible - suma_natural
-    if sobrante <= 0:
-        return
-    por_columna, residuo = divmod(sobrante, tabla.columnCount())
-    for columna in range(tabla.columnCount()):
-        extra = por_columna + (1 if columna < residuo else 0)
-        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + extra)
+    piso_desde_general = tabla.columnWidth(_COL_PORCENTAJE_GENERAL)
+    for columna in range(_COL_PORCENTAJE_GENERAL, tabla.columnCount()):
+        tabla.setColumnWidth(columna, max(tabla.columnWidth(columna), piso_desde_general))
 
 
 class _PanelAumentos(QWidget):
@@ -291,6 +319,7 @@ class _PanelAumentos(QWidget):
         self._valores_manuales: dict[int, dict[str, float]] = {}
         self._botones_restablecer: dict[int, QPushButton] = {}
         self._armar_ui()
+        self._armar_tabla_fija()
         self.actualizar()
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -306,69 +335,56 @@ class _PanelAumentos(QWidget):
         self.campo_periodo.setFocus()
 
     def _armar_ui(self) -> None:
-        # Pedido explícito de la clienta sobre esta ronda: "Vamos a
-        # poner los filtros de unidad en la primer columna, y vamos a
-        # crear una segunda columna con los otros elementos que ahora
-        # están abajo de los filtros. Ancho igual, mitad de la pantalla
-        # a cada columna... Abajo de las dos columnas poné la tabla" —
-        # antes todo el panel izquierdo (filtros + acciones, apilados en
-        # una sola columna) iba al lado de la tabla en un `QHBoxLayout`;
-        # ahora es un `QVBoxLayout`: arriba, las dos columnas lado a
-        # lado (mismo `stretch=1` en cada una, Qt las reparte a la
-        # mitad), abajo la tabla a todo el ancho. El orden de foco se
-        # mantiene igual que antes (se arma con la misma lista, en el
-        # mismo orden, al final de este método) — el reacomodo visual en
-        # dos columnas no lo toca.
-        layout = QVBoxLayout(self)
+        # Pedido explícito de la clienta, ronda posterior a la que
+        # había armado dos columnas lado a lado: "Volveme a poner en la
+        # primer columna los filtros y todos los elementos, hasta la
+        # leyenda que está abajo de los botones... Desarmamos esas dos
+        # columnas, no corren más." Vuelve el `QHBoxLayout` de siempre:
+        # una sola columna (filtros + acciones apilados, orden de
+        # siempre) al lado de la tabla, que ahora "arranca arriba" (ver
+        # más abajo) en vez de quedar debajo de dos columnas. El orden
+        # de foco no cambia (se arma con la misma lista, mismo orden).
+        layout = QHBoxLayout(self)
 
-        fila_superior = QHBoxLayout()
+        columna = QWidget()
+        form = QVBoxLayout(columna)
+        form.setContentsMargins(0, 0, 0, 0)
 
-        columna_filtros = QWidget()
-        form_filtros = QVBoxLayout(columna_filtros)
-        form_filtros.setContentsMargins(0, 0, 0, 0)
-
-        form_filtros.addWidget(_titulo_campo("Período"))
+        form.addWidget(_titulo_campo("Período"))
         self.campo_periodo = QLineEdit()
         self.campo_periodo.setFixedWidth(_ANCHO_CAMPO)
-        form_filtros.addWidget(self.campo_periodo)
+        form.addWidget(self.campo_periodo)
 
-        form_filtros.addWidget(_titulo_campo("Localidad"))
+        form.addWidget(_titulo_campo("Localidad"))
         self.combo_localidad = QComboBox()
         self.combo_localidad.setFixedWidth(_ANCHO_CAMPO)
         self.combo_localidad.currentIndexChanged.connect(self._cargar_combo_edificio)
-        form_filtros.addWidget(self.combo_localidad)
+        form.addWidget(self.combo_localidad)
 
-        form_filtros.addWidget(_titulo_campo("Edificio"))
+        form.addWidget(_titulo_campo("Edificio"))
         self.combo_edificio = QComboBox()
         self.combo_edificio.setFixedWidth(_ANCHO_CAMPO)
         self.combo_edificio.currentIndexChanged.connect(self._cargar_combo_unidad)
-        form_filtros.addWidget(self.combo_edificio)
+        form.addWidget(self.combo_edificio)
 
-        form_filtros.addWidget(_titulo_campo("Unidad"))
+        form.addWidget(_titulo_campo("Unidad"))
         self.combo_unidad = QComboBox()
         self.combo_unidad.setFixedWidth(_ANCHO_CAMPO)
         self.combo_unidad.currentIndexChanged.connect(self._aplicar_filtro_visual)
-        form_filtros.addWidget(self.combo_unidad)
+        form.addWidget(self.combo_unidad)
 
-        form_filtros.addStretch()
-        fila_superior.addWidget(columna_filtros, stretch=1)
-
-        columna_acciones = QWidget()
-        form_acciones = QVBoxLayout(columna_acciones)
-        form_acciones.setContentsMargins(0, 0, 0, 0)
-
-        form_acciones.addWidget(_titulo_campo("Porcentaje aumento general a aplicar"))
+        form.addWidget(_titulo_campo("Porcentaje aumento general a aplicar"))
         self.spin_porcentaje = QDoubleSpinBox()
         self.spin_porcentaje.setFixedWidth(_ANCHO_CAMPO)
         self.spin_porcentaje.setRange(-100, 1000)
         self.spin_porcentaje.setDecimals(2)
         self.spin_porcentaje.setSuffix(" %")
-        form_acciones.addWidget(self.spin_porcentaje)
+        form.addWidget(self.spin_porcentaje)
 
         self.check_redondear = QCheckBox("Redondear valores")
         self.check_redondear.setChecked(True)
         self.check_redondear.toggled.connect(self._al_tildar_redondear)
-        form_acciones.addWidget(self.check_redondear)
+        form.addWidget(self.check_redondear)
 
         panel_multiplo = QWidget()
         grilla_multiplo = QGridLayout(panel_multiplo)
@@ -382,20 +398,20 @@ class _PanelAumentos(QWidget):
             self._grupo_multiplo.addButton(radio)
             self._radios_multiplo[multiplo] = radio
             grilla_multiplo.addWidget(radio, indice // 2, indice % 2)
-        form_acciones.addWidget(panel_multiplo)
+        form.addWidget(panel_multiplo)
         self.panel_multiplo = panel_multiplo
 
         self.boton_simular = QPushButton("Simular")
         self.boton_simular.setObjectName("botonSecundario")
         self.boton_simular.setFixedWidth(_ANCHO_CAMPO)
         self.boton_simular.clicked.connect(self._simular)
-        form_acciones.addWidget(self.boton_simular)
+        form.addWidget(self.boton_simular)
 
         self.boton_confirmar = QPushButton("Confirmar y aplicar aumentos")
         self.boton_confirmar.setObjectName("botonPrimario")
         self.boton_confirmar.setFixedWidth(_ANCHO_CAMPO)
         self.boton_confirmar.clicked.connect(self._confirmar)
-        form_acciones.addWidget(self.boton_confirmar)
+        form.addWidget(self.boton_confirmar)
 
         self.etiqueta_ayuda_edicion = QLabel(
             "Para fijar un % diferencial o un valor manual en una fila puntual, clickeá la celda "
@@ -403,18 +419,22 @@ class _PanelAumentos(QWidget):
         )
         self.etiqueta_ayuda_edicion.setWordWrap(True)
         self.etiqueta_ayuda_edicion.setFixedWidth(_ANCHO_CAMPO)
-        form_acciones.addWidget(self.etiqueta_ayuda_edicion)
+        form.addWidget(self.etiqueta_ayuda_edicion)
 
-        form_acciones.addStretch()
-        fila_superior.addWidget(columna_acciones, stretch=1)
+        form.addStretch()
+        layout.addWidget(columna)
 
-        layout.addLayout(fila_superior)
-
+        # Pedido explícito de la clienta: "la tabla la ponemos a la
+        # derecha de la columna, arranca arriba como antes" — y "que
+        # sea escroleable en horizontal, no hay manera que entre todo
+        # en la misma pantalla" (ver `_ajustar_columnas`, que ya NO
+        # fuerza que todo entre sin scroll). `_tabla_fija` (ver
+        # `_armar_tabla_fija`) inmoviliza Localidad..% diferencial.
         self.tabla = _TablaConAnchoDinamico(self._reajustar_ancho_tabla)
         excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(13)
         self.tabla.setHorizontalHeaderLabels([
-            "Localidad", "Edificio", "Unidad", "Consultorio", "% general", "% diferencial",
+            "Localidad", "Edificio", "Unidad", "Consul", "% general", "% diferencial",
             "Regular actual", "Regular nuevo", "Dif. regular", "Aislada actual", "Aislada nuevo", "Dif. aislada",
             "",
         ])
@@ -427,14 +447,98 @@ class _PanelAumentos(QWidget):
             self.boton_simular, self.boton_confirmar,
         ], parent=self)
 
+    def _armar_tabla_fija(self) -> None:
+        """Pedido explícito de la clienta: "que se inmovilice la
+        navegación a partir de Regular actual, o sea que hasta %
+        diferencial esté todo a la vista, como inmovilizar columnas en
+        Excel" — mismo mecanismo (overlay encima de `self.tabla`,
+        sincronizado a mano) que `GrillaOperativaWidget.
+        activar_filas_y_columnas_fijas` (`app.gui.widgets.
+        grilla_operativa`), simplificado: acá no hace falta inmovilizar
+        NINGUNA fila (solo el encabezado, que Qt ya deja fijo solo), así
+        que alcanza con UNA tabla de encima en vez de las tres
+        (esquina/fila fija/columna fija) que usa ese mecanismo más
+        general — ver `_sincronizar_tabla_fija`/`_actualizar_geometria_
+        tabla_fija`."""
+        self._tabla_fija = QTableWidget(self.tabla)
+        self._tabla_fija.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._tabla_fija.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._tabla_fija.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        excluir_tabla_del_tab(self._tabla_fija)
+        self._tabla_fija.verticalHeader().setVisible(False)
+        self._tabla_fija.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._tabla_fija.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._tabla_fija.setColumnCount(len(_COLUMNAS_FIJAS_AUMENTOS))
+        self._tabla_fija.setHorizontalHeaderLabels(
+            [self.tabla.horizontalHeaderItem(c).text() for c in _COLUMNAS_FIJAS_AUMENTOS]
+        )
+        # % diferencial (la única de las seis columnas fijas que se
+        # puede clickear para editar) tiene que seguir funcionando
+        # igual desde acá arriba — traduce el índice de columna de
+        # `_tabla_fija` (0..5) al real de `self.tabla` antes de
+        # delegarlo al mismo manejador de siempre.
+        self._tabla_fija.cellClicked.connect(
+            lambda fila, columna: self._al_click_celda(fila, _COLUMNAS_FIJAS_AUMENTOS[columna])
+        )
+        self.tabla.verticalScrollBar().valueChanged.connect(self._tabla_fija.verticalScrollBar().setValue)
+
+    def _actualizar_geometria_tabla_fija(self) -> None:
+        """A diferencia de `GrillaOperativaWidget.activar_filas_y_
+        columnas_fijas` (que escucha el resize del viewport porque su
+        tabla es un `QTableWidget` liso), acá alcanza con que esto se
+        llame desde `_sincronizar_tabla_fija` — `self.tabla` ya es
+        `_TablaConAnchoDinamico`, que dispara su propio resize hacia
+        `_reajustar_ancho_tabla` en cualquier cambio de tamaño, directo
+        o indirecto (de la ventana completa). Geometría relativa a
+        `self.tabla` (no a su viewport): `_tabla_fija` tiene su PROPIO
+        encabezado visible (el real escrolea horizontalmente junto con
+        sus columnas, no queda fijo solo) — arrancando en (0, 0) ese
+        encabezado se superpone pixel a pixel contra el real (mismas
+        columnas, mismo ancho), y las filas de dato de abajo quedan
+        alineadas solas."""
+        # La X sí sale del viewport (no de (0, 0) liso): descuenta lo que
+        # ocupan el encabezado vertical (números de fila) y el borde del
+        # frame de `self.tabla`, que `_tabla_fija` no tiene — sin este
+        # descuento, la columna 0 del overlay no caía exactamente encima
+        # de "Localidad" (confirmado con una captura: quedaba corrido a
+        # la izquierda, dejando ver un sliver de la tabla real detrás).
+        origen_x = self.tabla.viewport().pos().x()
+        ancho_fijo = sum(self._tabla_fija.columnWidth(i) for i in range(len(_COLUMNAS_FIJAS_AUMENTOS)))
+        self._tabla_fija.setGeometry(origen_x, 0, ancho_fijo, self.tabla.height())
+        self._tabla_fija.raise_()
+
+    def _sincronizar_tabla_fija(self) -> None:
+        """Se llama después de cualquier cambio real a `self.tabla`
+        (repoblar filas, aplicar el filtro visual, o un simple resize
+        que mueve el ancho de columnas) — clona filas/anchos/visibilidad
+        hacia `_tabla_fija`, nunca al revés (`self.tabla` sigue siendo
+        la única fuente de verdad)."""
+        self._tabla_fija.setRowCount(self.tabla.rowCount())
+        for fila in range(self.tabla.rowCount()):
+            self._tabla_fija.setRowHidden(fila, self.tabla.isRowHidden(fila))
+            self._tabla_fija.setRowHeight(fila, self.tabla.rowHeight(fila))
+            for indice, columna_real in enumerate(_COLUMNAS_FIJAS_AUMENTOS):
+                origen = self.tabla.item(fila, columna_real)
+                if origen is None:
+                    continue
+                clon = QTableWidgetItem(origen.text())
+                clon.setTextAlignment(Qt.AlignmentFlag(origen.textAlignment()))
+                clon.setFlags(origen.flags())
+                clon.setData(_ID_CONSULTORIO, origen.data(_ID_CONSULTORIO))
+                self._tabla_fija.setItem(fila, indice, clon)
+        for indice, columna_real in enumerate(_COLUMNAS_FIJAS_AUMENTOS):
+            self._tabla_fija.setColumnWidth(indice, self.tabla.columnWidth(columna_real))
+        self._actualizar_geometria_tabla_fija()
+
     def _reajustar_ancho_tabla(self) -> None:
         """Se llama sola cada vez que `self.tabla` cambia de tamaño
         (`_TablaConAnchoDinamico`), no solo al refrescar los datos —
-        para que el reparto del ancho sobrante (`_ajustar_columnas`) se
-        recalcule si se redimensiona la ventana."""
+        para que los anchos (`_ajustar_columnas`) y la tabla fija de
+        encima se recalculen si se redimensiona la ventana."""
         if self.tabla.columnCount() == 0:
             return
         _ajustar_columnas(self.tabla)
+        self._sincronizar_tabla_fija()
 
     def actualizar(self) -> None:
         self.campo_periodo.setText(periodo_actual(self.conn))
@@ -560,6 +664,7 @@ class _PanelAumentos(QWidget):
                 or (id_unidad is not _TODAS and info.get("id_unidad") != id_unidad)
             )
             self.tabla.setRowHidden(fila, oculto)
+        self._sincronizar_tabla_fija()
 
     def _simular(self) -> None:
         periodo = self.campo_periodo.text().strip() or periodo_actual(self.conn)
@@ -582,8 +687,11 @@ class _PanelAumentos(QWidget):
                 item_localidad.setData(_ID_CONSULTORIO, id_consultorio)
                 self.tabla.setItem(fila, _COL_LOCALIDAD, item_localidad)
                 self.tabla.setItem(fila, _COL_EDIFICIO, _celda_no_editable(info["edificio"]))
-                self.tabla.setItem(fila, _COL_UNIDAD, _celda_no_editable(info["unidad"]))
-                self.tabla.setItem(fila, _COL_CONSULTORIO, _celda_no_editable(str(info["numero"])))
+                # Pedido explícito de la clienta: "Consul" en lugar de
+                # "Consultorio" (encabezado, ver `_armar_ui`), y
+                # "Unidad"/"Consul" con el contenido centralizado.
+                self.tabla.setItem(fila, _COL_UNIDAD, _celda_centrada_no_editable(info["unidad"]))
+                self.tabla.setItem(fila, _COL_CONSULTORIO, _celda_centrada_no_editable(str(info["numero"])))
 
                 diferencial = self._diferenciales.get(id_consultorio)
                 self.tabla.setItem(
