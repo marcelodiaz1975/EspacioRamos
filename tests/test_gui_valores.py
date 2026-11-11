@@ -68,12 +68,14 @@ def _cargar_consultorios(conn):
     conn.commit()
 
 
-def test_promedios_localidad_y_edificio_mas_anchas_que_sin_padding(qtbot, conn):
-    """`_ajustar_ancho` todavía le suma el padding de siempre (20px) al
-    ancho natural de Localidad/Edificio antes de repartir cualquier
-    sobrante — con un ancho de ventana angosto (sin sobrante que
-    repartir, ver el test de más abajo sobre el reparto en sí), el
-    resultado es exactamente ese padding."""
+def test_promedios_localidad_edificio_y_unidad_quedan_al_mismo_ancho(qtbot, conn):
+    """Pedido explícito de la clienta: "Que en la primer tabla las
+    columnas Localidad, Edificio y Unidad tengan el mismo ancho" — con
+    un ancho de ventana angosto (sin sobrante que repartir, ver el test
+    de más abajo sobre el reparto en sí), el resultado es el MÁXIMO
+    natural+padding (20px) de las tres, aplicado a las tres por igual —
+    nunca el ancho propio de cada una por separado (que antes podía
+    diferir entre sí, ver el historial de esta ronda)."""
     _cargar_consultorios(conn)
     panel = _PanelValoresVigentes(conn)
     qtbot.addWidget(panel)
@@ -83,8 +85,11 @@ def test_promedios_localidad_y_edificio_mas_anchas_que_sin_padding(qtbot, conn):
     promedios = panel.promedios_valores
     sin_padding_localidad = promedios.tabla.sizeHintForColumn(0)
     sin_padding_edificio = promedios.tabla.sizeHintForColumn(1)
-    assert promedios.tabla.columnWidth(0) == sin_padding_localidad + 20
-    assert promedios.tabla.columnWidth(1) == sin_padding_edificio + 20
+    sin_padding_unidad = promedios.tabla.sizeHintForColumn(2)
+    ancho_comun_esperado = max(sin_padding_localidad, sin_padding_edificio, sin_padding_unidad) + 20
+    assert promedios.tabla.columnWidth(0) == ancho_comun_esperado
+    assert promedios.tabla.columnWidth(1) == ancho_comun_esperado
+    assert promedios.tabla.columnWidth(2) == ancho_comun_esperado
 
 
 def test_promedios_redistribuye_el_sobrante_entre_las_tres_primeras_columnas(qtbot, conn):
@@ -107,6 +112,9 @@ def test_promedios_redistribuye_el_sobrante_entre_las_tres_primeras_columnas(qtb
     suma_columnas = sum(promedios.tabla.columnWidth(i) for i in range(promedios.tabla.columnCount()))
     assert suma_columnas <= disponible + 1  # sin dejar sobrante sin repartir (ni escrolear)
     assert promedios.tabla.columnWidth(0) > ancho_justo_localidad  # creció más allá de su ancho justo
+    # Las tres (Localidad/Edificio/Unidad) siguen iguales entre sí
+    # después de repartir el sobrante, no solo antes.
+    assert promedios.tabla.columnWidth(0) == promedios.tabla.columnWidth(1) == promedios.tabla.columnWidth(2)
 
 
 def test_promedios_queda_arriba_de_valores_con_un_tercio_del_alto(qtbot, conn):

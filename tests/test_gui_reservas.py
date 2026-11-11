@@ -4558,6 +4558,61 @@ def test_tabla_extraordinaria_ocupa_todo_el_ancho_disponible(qtbot, conn):
     assert suma_columnas >= disponible - tabla.columnCount()  # sin dejar sobrante sin repartir
 
 
+def test_tabla_extraordinaria_anchos_y_formato_de_columnas_especificas(qtbot, conn):
+    """Pedido explícito de la clienta sobre esta tabla, segunda ronda:
+    "Profesional"/"Localidad"/"Edificio" +15%; "Consul" (en vez de
+    "Consultorio") al mínimo, centralizado; "Unidad" centralizado;
+    "Fecha" centralizado; "Horario" con terminación "hs" alineado a la
+    derecha; "Ítem" +30%; "Estado"/"Período imputado" al mínimo."""
+    _preparar_categoria_a(conn)
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido, NombrePila, Tratamiento) "
+        "VALUES ('A', 'Viavattenee Rodriguez', 'Agustina Del Valle', 'Lic.')"
+    )
+    conn.commit()
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.pestanas.setCurrentIndex(2)
+    pantalla.show()
+    pantalla.resize(2200, 800)
+    qtbot.waitExposed(pantalla)
+
+    panel = pantalla.panel_extraordinaria
+    indice_prof = panel.combo_profesional.findText("Agus", Qt.MatchFlag.MatchContains)
+    panel.combo_profesional.setCurrentIndex(indice_prof)
+    panel.combo_consultorio.setCurrentIndex(panel.combo_consultorio.count() - 1)
+    panel.campo_item.setText("Uso puntual del consultorio para un taller de grupo")
+    panel.spin_monto.setValue(5000)
+    panel._crear()
+
+    tabla = panel.tabla
+    anchos_ajustados = [tabla.columnWidth(c) for c in range(tabla.columnCount())]
+    tabla.resizeColumnsToContents()
+    anchos_naturales = [tabla.columnWidth(c) + reservas_modulo._PADDING_COLUMNA for c in range(tabla.columnCount())]
+    reservas_modulo._ajustar_columnas(tabla)  # restaura el ajuste real antes de seguir usando la tabla
+
+    base_profesional = max(anchos_naturales[0], reservas_modulo._ANCHO_COL_PROFESIONAL)
+    # Columnas que crecen (+15%/+30%): el ajuste real es como mínimo ese
+    # crecimiento (puede llevarse además una porción del sobrante, que
+    # solo puede sumar, nunca restar).
+    assert anchos_ajustados[0] >= base_profesional + base_profesional * 15 // 100
+    assert anchos_ajustados[1] >= anchos_naturales[1] + anchos_naturales[1] * 15 // 100
+    assert anchos_ajustados[2] >= anchos_naturales[2] + anchos_naturales[2] * 15 // 100
+    assert anchos_ajustados[8] >= anchos_naturales[8] + anchos_naturales[8] * 30 // 100
+    # Columnas "al mínimo" (4 Consul, 10 Estado, 11 Período imputado):
+    # exactamente el ancho natural, sin nada del sobrante.
+    assert anchos_ajustados[4] == anchos_naturales[4]
+    assert anchos_ajustados[10] == anchos_naturales[10]
+    assert anchos_ajustados[11] == anchos_naturales[11]
+
+    assert tabla.horizontalHeaderItem(4).text() == "Consul"
+    assert tabla.item(0, 3).textAlignment() == Qt.AlignmentFlag.AlignCenter  # Unidad
+    assert tabla.item(0, 4).textAlignment() == Qt.AlignmentFlag.AlignCenter  # Consul
+    assert tabla.item(0, 6).textAlignment() == Qt.AlignmentFlag.AlignCenter  # Fecha
+    assert tabla.item(0, 7).textAlignment() == Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter  # Horario
+    assert tabla.item(0, 7).text() == "9:00 a 10:00hs"
+
+
 def test_spin_monto_de_reserva_extraordinaria_selecciona_todo_al_enfocar(qtbot):
     """Pedido de la clienta sobre "Monto a cobrar" de Reserva
     extraordinaria, extendido a "todos los cuadros de texto similares

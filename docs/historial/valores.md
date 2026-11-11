@@ -438,3 +438,56 @@ Tests nuevos en `tests/test_gui_aumentos.py`:
 `test_foco_se_mantiene_igual_con_las_dos_columnas`,
 `test_tabla_queda_debajo_de_las_dos_columnas_y_ocupa_todo_el_ancho`.
 
+## Valores vigentes: Localidad/Edificio/Unidad al mismo ancho, valores -50% (nov-2026)
+
+Pedido explícito de la clienta, ronda posterior a la de arriba, sobre
+las dos tablas ya reordenadas (Promedios arriba, Valores abajo):
+
+**Tabla de Promedios: "Que... Localidad, Edificio y Unidad tengan el
+mismo ancho".** Antes (`_PanelPromedios._ajustar_ancho`) cada una
+arrancaba de un ancho NATURAL propio (su contenido) y recibía la misma
+PORCIÓN del sobrante — el resultado final típicamente no quedaba igual
+entre las tres, porque dos anchos distintos más el mismo incremento
+siguen siendo distintos. Ahora se calcula un ancho COMÚN: el máximo de
+lo que necesita cada una por separado (incluida Unidad, que antes ni
+se medía acá — quedaba con lo último que le hubiera dejado Qt) y se
+aplica ese mismo valor a las tres. El sobrante de pantalla se sigue
+repartiendo entre esas tres, pero ahora en partes EXACTAMENTE iguales
+(`sobrante // 3`, sin el residuo de antes, que rompería la igualdad en
+1-2px si la división no era exacta).
+
+**Tabla de Valores: "Que se reduzcan los anchos de los tres valores un
+50%, y ese sobrante dáselo a las columnas Localidad y Edificio. Contenido
+de Unidad y de Consul (en lugar de Consultorio) centralizado".** Las
+tres columnas de valor ("Valor regular"/"Valor aislada"/"...con
+recargo") vivían en modo `Stretch` — se llevaban el 100% del ancho
+sobrante del `QGroupBox`, repartido en partes iguales entre las tres,
+sin forma de cederle nada a otra columna. Stretch no alcanza para "la
+mitad a estas tres, la otra mitad a esas otras dos" — pasan a
+`Interactive` (igual que Localidad/Edificio, que también necesitan
+ancho fijado a mano ahora) y una nueva `_ajustar_ancho_valores`: mide
+cuánto les daría el Stretch de siempre (disponible menos el ancho
+natural de Localidad/Edificio/Unidad/Consul) y las deja en la MITAD de
+eso; la otra mitad ("el sobrante liberado") se reparte por igual entre
+Localidad y Edificio. Unidad/Consul no cambian de ancho (seguían en
+`ResizeToContents`, no fue parte de este pedido) — sí cambia su
+contenido, que pasa a centralizado (`item_centrado` para Unidad;
+`_ItemNumerico` suma un parámetro `centrado: bool = False` para Consul,
+que necesita seguir ordenando como número pero ya no a la derecha).
+"Consultorio" pasa a llamarse "Consul" en el encabezado, mismo criterio
+que otras tablas del sistema.
+
+Tests actualizados/nuevos: `test_promedios_localidad_y_edificio_mas_
+anchas_que_sin_padding` → `test_promedios_localidad_edificio_y_unidad_
+quedan_al_mismo_ancho` (confirma las tres iguales al máximo natural);
+`test_promedios_redistribuye_el_sobrante_entre_las_tres_primeras_
+columnas` suma la aserción de igualdad tras repartir el sobrante;
+`test_columnas_de_valores_numericas_alineadas_a_la_derecha`
+(`test_gui_pantalla_grilla_operativa.py`) ya no espera a "Consul" a la
+derecha, ahora centralizado; nuevos `test_tabla_valores_columna_
+consultorio_se_llama_consul` y `test_tabla_valores_reduce_las_tres_
+columnas_de_valor_un_50_porciento_y_se_lo_da_a_localidad_y_edificio`.
+Suite completa: `test_gui_valores.py` (10 passed), `test_gui_pantalla_
+grilla_operativa.py` (26 passed), `test_gui_estadisticas.py` incluido
+en la misma corrida — sin regresiones.
+

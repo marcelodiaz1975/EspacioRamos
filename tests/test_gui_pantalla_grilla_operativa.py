@@ -262,13 +262,63 @@ def test_columnas_de_valores_numericas_alineadas_a_la_derecha(qtbot, conn):
     qtbot.addWidget(panel)
 
     alineacion_derecha = int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-    # Localidad/Edificio/Unidad (texto) siguen a la izquierda; Consultorio/
-    # Valor hora regular/Valor hora aislada (numéricas) van a la derecha.
+    alineacion_centro = int(Qt.AlignmentFlag.AlignCenter)
+    # Localidad/Edificio (texto) siguen a la izquierda; Valor hora
+    # regular/Valor hora aislada (numéricas) van a la derecha. "Consul"
+    # (antes también a la derecha) pasa a centralizado — pedido
+    # explícito de la clienta sobre esta misma tabla, ver
+    # `_ajustar_ancho_valores`/`_refrescar_valores`.
     assert panel.tabla_valores.item(0, 0).textAlignment() != alineacion_derecha
-    for columna in (3, 4, 5):
+    assert panel.tabla_valores.item(0, 3).textAlignment() == alineacion_centro
+    for columna in (4, 5):
         assert panel.tabla_valores.item(0, columna).textAlignment() == alineacion_derecha
     assert panel.promedios_valores.tabla.item(0, 3).textAlignment() == alineacion_derecha
     assert panel.promedios_valores.tabla.item(0, 4).textAlignment() == alineacion_derecha
+
+
+def test_tabla_valores_columna_consultorio_se_llama_consul(qtbot, conn):
+    """Pedido explícito de la clienta: "Consul" en lugar de
+    "Consultorio", mismo criterio ya usado en otras tablas del sistema."""
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    assert panel.tabla_valores.horizontalHeaderItem(3).text() == "Consul"
+
+
+def test_tabla_valores_reduce_las_tres_columnas_de_valor_un_50_porciento_y_se_lo_da_a_localidad_y_edificio(
+    qtbot, conn,
+):
+    """Pedido explícito de la clienta: "que se reduzcan los anchos de
+    los tres valores un 50%, y ese sobrante dáselo a las columnas
+    Localidad y Edificio." Antes esas tres (Stretch) se llevaban el
+    100% del sobrante del GroupBox — ahora se mide cuánto les hubiera
+    dado ese Stretch (disponible menos el ancho natural de las otras
+    cuatro columnas) y se las deja en la mitad; la otra mitad va, por
+    partes iguales, a Localidad y Edificio."""
+    _unidad_con_consultorio(conn, "Ramos 1", '7mo "L"', valor_regular=1500, valor_aislada=700)
+    panel = _PanelValoresVigentes(conn)
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.resize(1700, 800)
+    qtbot.waitExposed(panel)
+
+    tabla = panel.tabla_valores
+    ancho_0123_natural = 0
+    for columna in (0, 1, 2, 3):
+        tabla.resizeColumnToContents(columna)
+        ancho_0123_natural += tabla.columnWidth(columna)
+    disponible = tabla.viewport().width()
+    ancho_valores_total_stretch_de_antes = disponible - ancho_0123_natural
+    panel._ajustar_ancho_valores()  # vuelve a aplicar el ajuste real (resizeColumnToContents lo pisó arriba)
+
+    ancho_valores_total_nuevo = sum(tabla.columnWidth(c) for c in (4, 5, 6))
+    # La mitad del que le daría el Stretch de siempre (con 1-2px de
+    # margen por la división entera en más de un lugar).
+    assert abs(ancho_valores_total_nuevo - ancho_valores_total_stretch_de_antes // 2) <= 2
+    # Nada se pierde: el total de la tabla sigue llenando el ancho
+    # disponible, sin dejar espacio en blanco ni forzar scroll.
+    suma_columnas = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
+    assert suma_columnas <= disponible + 1
+    assert suma_columnas >= disponible - 3
 
 
 def test_tabla_de_valores_tiene_titulo_propio(qtbot, conn):

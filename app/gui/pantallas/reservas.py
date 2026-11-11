@@ -89,26 +89,50 @@ _FECHA_SIN_DATO = QDate(2000, 1, 1)  # sentinel de QDateEdit.setSpecialValueText
 # (duplicado acá, pantallas sin relación entre sí).
 _PADDING_COLUMNA = 30
 
+# Índices de columna de la tabla de Reservas extraordinarias (único uso
+# de `_ajustar_columnas`, ver más abajo) — "Profesional", "Localidad",
+# "Edificio", "Unidad", "Consultorio"/"Consul", "Día", "Fecha",
+# "Horario", "Ítem", "Monto", "Estado", "Período imputado", en ese
+# orden fijo (ver `_PanelReservaExtraordinaria.actualizar`).
+_COL_EXTRAORDINARIA_ITEM = 8
+_COLS_EXTRAORDINARIA_AL_MINIMO = frozenset({4, 10, 11})  # Consul, Estado, Período imputado
+
 
 def _ajustar_columnas(tabla: QTableWidget) -> None:
     tabla.resizeColumnsToContents()
     for columna in range(tabla.columnCount()):
         tabla.setColumnWidth(columna, tabla.columnWidth(columna) + _PADDING_COLUMNA)
     tabla.setColumnWidth(0, max(tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
-    # Pedido explícito de la clienta sobre Reservas extraordinarias
-    # (único uso hoy de esta función genérica): "redistribuí el ancho
-    # sobrante de la pantalla entre todas las columnas de la tabla" —
-    # a diferencia de otras pantallas (que priorizan una columna
-    # puntual), acá se reparte en partes iguales entre TODAS, el
-    # residuo de la división (si no es exacta) para las primeras.
+    # Pedido explícito de la clienta sobre esta misma tabla (índices
+    # fijos — único uso hoy de esta función, ver `_PanelReservaExtra
+    # ordinaria.actualizar`): "Profesional"/"Localidad"/"Edificio" (0,
+    # 1, 2) un 15% más de ancho; "Ítem" (8) un 30% más; "Consul" (4),
+    # "Estado" (10) y "Período imputado" (11) al mínimo — no reciben
+    # nada del sobrante más abajo, quedan tal cual natural+padding.
+    for columna in (0, 1, 2):
+        ancho = tabla.columnWidth(columna)
+        tabla.setColumnWidth(columna, ancho + ancho * 15 // 100)
+    ancho_item = tabla.columnWidth(_COL_EXTRAORDINARIA_ITEM)
+    tabla.setColumnWidth(_COL_EXTRAORDINARIA_ITEM, ancho_item + ancho_item * 30 // 100)
+
+    # "Redistribuí el ancho sobrante de la pantalla entre todas las
+    # columnas de la tabla" (pedido original, primera ronda) sigue
+    # vigente para el resto — a diferencia de otras pantallas (que
+    # priorizan una columna puntual), acá se reparte en partes iguales,
+    # el residuo de la división (si no es exacta) para las primeras —
+    # salvo las tres que la clienta pidió "al mínimo" en esta segunda
+    # ronda, que quedan afuera del reparto.
     disponible = tabla.viewport().width()
     suma_natural = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
     sobrante = disponible - suma_natural
     if sobrante <= 0 or tabla.columnCount() == 0:
         return
-    por_columna, residuo = divmod(sobrante, tabla.columnCount())
-    for columna in range(tabla.columnCount()):
-        extra = por_columna + (1 if columna < residuo else 0)
+    columnas_a_crecer = [c for c in range(tabla.columnCount()) if c not in _COLS_EXTRAORDINARIA_AL_MINIMO]
+    if not columnas_a_crecer:
+        return
+    por_columna, residuo = divmod(sobrante, len(columnas_a_crecer))
+    for i, columna in enumerate(columnas_a_crecer):
+        extra = por_columna + (1 if i < residuo else 0)
         tabla.setColumnWidth(columna, tabla.columnWidth(columna) + extra)
 
 
@@ -3638,7 +3662,7 @@ class _PanelReservaExtraordinaria(QWidget):
         layout_externo.addWidget(panel_form)
 
         columnas = [
-            "Profesional", "Localidad", "Edificio", "Unidad", "Consultorio",
+            "Profesional", "Localidad", "Edificio", "Unidad", "Consul",
             "Día", "Fecha", "Horario", "Ítem", "Monto", "Estado", "Período imputado",
         ]
         self.tabla = _TablaConAnchoDinamico(self._reajustar_ancho_tabla)
@@ -3940,13 +3964,24 @@ class _PanelReservaExtraordinaria(QWidget):
                 QTableWidgetItem((consultorio["DomicilioLocalidad"] or "(Sin localidad)") if consultorio else "?"),
             )
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(consultorio["NombreEdificio"] if consultorio else "?"))
-            self.tabla.setItem(fila_idx, 3, QTableWidgetItem(consultorio["Departamento"] if consultorio else "?"))
             self.tabla.setItem(
-                fila_idx, 4, item_numero(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
+                fila_idx, 3, item_centrado(consultorio["Departamento"] if consultorio else "?"),
+            )
+            self.tabla.setItem(
+                fila_idx, 4, item_centrado(str(consultorio["NumeroConsultorio"]) if consultorio else "?"),
             )
             self.tabla.setItem(fila_idx, 5, QTableWidgetItem(fecha_a_dia_semana(date.fromisoformat(r["Fecha"]))))
-            self.tabla.setItem(fila_idx, 6, QTableWidgetItem(_fmt_fecha(r["Fecha"])))
-            self.tabla.setItem(fila_idx, 7, QTableWidgetItem(_fmt_horario(r["HoraInicio"], r["HoraFin"])))
+            self.tabla.setItem(fila_idx, 6, item_centrado(_fmt_fecha(r["Fecha"])))
+            # "Horario" (pedido explícito de la clienta): termina con
+            # "hs" ("9:00 a 10:00hs") y queda alineado a la derecha
+            # (`item_numero`, mismo criterio que cualquier columna
+            # numérica) — no se toca `_fmt_horario` en sí (compartida
+            # con el resto de las tablas de Reservas, que no pidieron
+            # este cambio), se le agrega el sufijo acá nomás, al armar
+            # la celda.
+            self.tabla.setItem(
+                fila_idx, 7, item_numero(f"{_fmt_horario(r['HoraInicio'], r['HoraFin'])}hs"),
+            )
             self.tabla.setItem(fila_idx, 8, QTableWidgetItem(r["ItemExtraordinario"] or ""))
             self.tabla.setItem(fila_idx, 9, item_numero(formatear_moneda(r["MontoExtraordinario"] or 0.0)))
             self.tabla.setItem(fila_idx, 10, QTableWidgetItem(r["Estado"]))

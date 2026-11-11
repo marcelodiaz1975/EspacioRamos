@@ -4140,3 +4140,47 @@ en_sobres_imputados_si_el_campo_global_esta_vacio` (pago por sobre
 registrado pero el campo global nunca cargado: la sección se omite —
 antes habría aparecido). Suite completa de `test_mensajes.py`: 64
 passed, sin regresiones.
+
+## Reservas extraordinarias: anchos/formato específicos de columnas de tabla (nov-2026)
+
+Pedido explícito de la clienta sobre esta misma tabla (`_ajustar_
+columnas`, único uso hoy de esa función genérica — ver la ronda
+anterior más arriba): "Profesional", "Localidad" y "Edificio" un 15%
+más de ancho; "Unidad" centralizado; "Consul" (antes "Consultorio")
+reducir al mínimo, centralizado; "Fecha" centralizado; "Horario" con
+terminación "hs" (ej. "9:00 a 10:00hs") alineado a la derecha; "Ítem"
+un 30% más de ancho; "Estado" y "Período imputado" al mínimo. "Día" y
+"Monto" no fueron parte de este pedido, siguen igual.
+
+`_ajustar_columnas` pasa de repartir el sobrante por igual entre TODAS
+las columnas a: (1) hacer crecer Profesional/Localidad/Edificio (+15%)
+e Ítem (+30%) sobre su ancho natural (contenido+padding, con el piso
+de siempre para Profesional, `_ANCHO_COL_PROFESIONAL`); (2) excluir
+Consul/Estado/Período imputado (`_COLS_EXTRAORDINARIA_AL_MINIMO =
+{4, 10, 11}`) del reparto del sobrante restante, que ahora solo se
+reparte entre las columnas que no están "al mínimo" — el resto del
+mecanismo (padding uniforme primero, sobrante repartido en partes
+iguales con el residuo para las primeras) sigue igual. Índices
+hardcodeados (`_COL_EXTRAORDINARIA_ITEM = 8`, el set de arriba) porque
+esta función es de uso exclusivo de esta tabla puntual, con un orden
+de columnas fijo — no hace falta generalizarla.
+
+Contenido de celda: "Unidad" (3) y "Consul" (4, antes ya alineado a la
+derecha con `item_numero` por error — en realidad es un dato "más
+descriptivo" que numérico, arma la etiqueta completa "Edificio — Unidad
+— Consultorio N", no solo el número) y "Fecha" (6) pasan a
+`item_centrado`. "Horario" (7) pasa de texto plano a `item_numero`
+(alineado a la derecha, mismo criterio que cualquier columna numérica)
+con "hs" agregado al final del string ya armado por `_fmt_horario`
+(`f"{_fmt_horario(...)}hs"`) — no se tocó `_fmt_horario` en sí
+(compartida con Regulares/Aisladas, que no pidieron este cambio).
+
+Test nuevo: `test_tabla_extraordinaria_anchos_y_formato_de_columnas_
+especificas` — mide el ancho "natural" (resetea con `resizeColumns
+ToContents()`, restaura con `_ajustar_columnas` después) y confirma que
+las columnas que crecen quedan en AL MENOS su natural+15%/30% (pueden
+llevarse además una porción del sobrante) y que las "al mínimo" quedan
+en EXACTAMENTE su natural, sin nada de sobrante; confirma además la
+alineación centrada/derecha y el texto "Consul"/"9:00 a 10:00hs".
+Suite completa de `test_gui_reservas.py`: 193 passed, mismos 2 fallos
+de calibración de altura de botón ya conocidos, sin regresiones nuevas.

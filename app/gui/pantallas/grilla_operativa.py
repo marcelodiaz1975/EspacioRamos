@@ -38,12 +38,13 @@ from PySide6.QtWidgets import (
 
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, _FiltroColapsable
+from app.gui.widgets.items_tabla import item_centrado
 from app.negocio.formato import formatear_moneda
 from app.negocio.valores_operativos import PromediosValorHora, calcular_promedios_valor_hora
 from app.pdf.estilos import clave_orden_unidad
 
 _COLUMNAS_VALORES = [
-    "Localidad", "Edificio", "Unidad", "Consultorio", "Valor regular", "Valor aislada",
+    "Localidad", "Edificio", "Unidad", "Consul", "Valor regular", "Valor aislada",
     "Valor aislada\ncon recargo",
 ]
 
@@ -71,12 +72,20 @@ class _ItemNumerico(QTableWidgetItem):
     """QTableWidgetItem que ordena por un valor numérico propio en vez de
     comparar el texto formateado ("$ 1.234,00", "67,8 %") como si fuera
     texto — para que el clic en el título de una columna numérica de
-    verdad ordene de mayor a menor y viceversa."""
+    verdad ordene de mayor a menor y viceversa.
 
-    def __init__(self, texto: str, valor: float):
+    `centrado` (pedido explícito de la clienta sobre "Consul" en
+    "Valores vigentes": contenido centralizado en vez de a la derecha,
+    aunque siga ordenando como número) — default `False` deja el resto
+    de los usos de esta clase sin cambios."""
+
+    def __init__(self, texto: str, valor: float, *, centrado: bool = False):
         super().__init__(texto)
         self._valor = valor
-        self.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        alineacion = Qt.AlignmentFlag.AlignCenter if centrado else (
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.setTextAlignment(alineacion)
 
     def __lt__(self, other: object) -> bool:
         if isinstance(other, _ItemNumerico):
@@ -602,17 +611,36 @@ class _PanelPromedios(QGroupBox):
         ("redistribuí el ancho de pantalla y dale más ancho a las tres
         primeras columnas") — ya no tiene sentido fijarla a su ancho
         justo, tiene que CRECER para llenar lo que le da su contenedor.
-        Mismo criterio que el resto del sistema: el sobrante (ancho
-        disponible del viewport menos la suma de las columnas en su
-        ancho natural) se reparte en partes iguales entre las tres
-        primeras columnas (Localidad/Edificio/Unidad) — los dos
+
+        Pedido explícito de la clienta, ronda posterior a la de arriba:
+        "Que en la primer tabla las columnas Localidad, Edificio y
+        Unidad tengan el mismo ancho" — antes cada una arrancaba de un
+        ancho NATURAL distinto (su propio contenido) y recibía la misma
+        porción del sobrante, así que el resultado final típicamente NO
+        quedaba igual entre las tres (una localidad corta y un nombre
+        de unidad largo, por caso, nunca terminan con el mismo ancho
+        aunque el incremento sea igual). Ahora se calcula un ancho
+        COMÚN — el máximo de lo que necesita cada una de las tres por
+        separado (incluida Unidad, que antes ni se medía acá: quedaba
+        con lo último que le hubiera dejado Qt) — y se les aplica ese
+        mismo valor a las tres por igual, sin cortar ninguna. El
+        sobrante de pantalla (ancho disponible del viewport menos la
+        suma de las columnas) se sigue repartiendo entre esas tres, pero
+        ahora en partes EXACTAMENTE iguales (sin el residuo de una
+        división no exacta, que rompería la igualdad en 1-2px) — los dos
         Promedio no participan, se quedan en su ancho justo. Se vuelve
         a llamar sola en cada resize de la tabla (`_TablaConAnchoDinamico`),
         no solo al repoblar filas o al primer `showEvent`."""
         self.tabla.resizeColumnToContents(0)
         self.tabla.resizeColumnToContents(1)
-        self.tabla.setColumnWidth(0, self.tabla.columnWidth(0) + _PADDING_COLUMNA_PROMEDIOS)
-        self.tabla.setColumnWidth(1, self.tabla.columnWidth(1) + _PADDING_COLUMNA_PROMEDIOS)
+        self.tabla.resizeColumnToContents(2)
+        ancho_localidad = self.tabla.columnWidth(0) + _PADDING_COLUMNA_PROMEDIOS
+        ancho_edificio = self.tabla.columnWidth(1) + _PADDING_COLUMNA_PROMEDIOS
+        ancho_unidad = self.tabla.columnWidth(2) + _PADDING_COLUMNA_PROMEDIOS
+        ancho_comun = max(ancho_localidad, ancho_edificio, ancho_unidad)
+        columnas_a_agrandar = (0, 1, 2)
+        for columna in columnas_a_agrandar:
+            self.tabla.setColumnWidth(columna, ancho_comun)
         if self.tabla.columnCount() == 0:
             return
         disponible = self.tabla.viewport().width()
@@ -620,11 +648,9 @@ class _PanelPromedios(QGroupBox):
         sobrante = disponible - suma_natural
         if sobrante <= 0:
             return
-        columnas_a_agrandar = (0, 1, 2)
-        por_columna, residuo = divmod(sobrante, len(columnas_a_agrandar))
-        for i, columna in enumerate(columnas_a_agrandar):
-            extra = por_columna + (1 if i < residuo else 0)
-            self.tabla.setColumnWidth(columna, self.tabla.columnWidth(columna) + extra)
+        por_columna = sobrante // len(columnas_a_agrandar)
+        for columna in columnas_a_agrandar:
+            self.tabla.setColumnWidth(columna, self.tabla.columnWidth(columna) + por_columna)
 
 
 class _PanelGrillaSemanal(QWidget):
@@ -798,35 +824,42 @@ class _PanelValoresVigentes(QWidget):
         # constructor de `_PanelFiltrosJerarquico` ya dispara `on_cambiar`
         # una vez (con todo tildado por defecto), y ese refresco necesita
         # que ya existan.
-        self.tabla_valores = _armar_tabla(_COLUMNAS_VALORES)
+        self.tabla_valores = _armar_tabla(
+            _COLUMNAS_VALORES, tabla=_TablaConAnchoDinamico(self._ajustar_ancho_valores),
+        )
         # Mismo pedido y mismo mecanismo que `_PanelPromedios.tabla` (ver
         # su comentario): Tab no entra a esta tabla salvo click directo.
         self.tabla_valores.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.tabla_valores.setTabKeyNavigation(True)
-        # Pedido explícito de la clienta: que se vea completa sin
-        # escrolear para los costados. Localidad/Edificio/Unidad/
-        # Consultorio se quedan en el ResizeToContents de `_armar_tabla`
-        # (su contenido es corto, no necesitan más que eso); "Valor
-        # regular"/"Valor aislada" (acortados de "Valor hora regular"/
-        # "...aislada" — "hora" ya está en el título del GroupBox, de
-        # sobra en la columna, mismo criterio que otros títulos de
-        # columna acortados en el sistema) pasan a Stretch, para que se
-        # lleven todo el ancho que sobra del GroupBox en vez de dejarlo
-        # en blanco o forzar scroll horizontal (mismo criterio que
-        # "Totales por bloques" en Liquidaciones simuladas: columnas
-        # cortas con su ancho justo, las últimas en Stretch). Puntual de
-        # esta tabla — no toca el default de `_armar_tabla` ni la de
-        # `_PanelPromedios`. "Valor aislada con recargo" (sumada después,
-        # pedido de la clienta: "si activo un porcentaje de recargo en
-        # horas aisladas... en el cuadro tendría que ver el valor con el
-        # recargo" — el valor base de al lado nunca cambiaba) se agrega
-        # APARTE en vez de pisarlo, porque el recargo es opcional por
-        # reserva (`AplicaRecargo`), no algo que siempre corresponda
-        # aplicar al valor de referencia del consultorio.
+        # Pedido explícito de la clienta, primera ronda: que se vea
+        # completa sin escrolear para los costados — Localidad/Edificio/
+        # Unidad/Consul se quedan en el ResizeToContents de `_armar_
+        # tabla` (su contenido es corto); "Valor regular"/"Valor
+        # aislada"/"...con recargo" pasaban a Stretch, para llevarse todo
+        # el ancho que sobra del GroupBox. Pedido explícito de la
+        # clienta, segunda ronda, sobre esos mismos tres: "que se
+        # reduzcan los anchos... un 50%, y ese sobrante dáselo a las
+        # columnas Localidad y Edificio" — Stretch ya no alcanza (se
+        # lleva el 100% del sobrante repartido solo entre esos tres, sin
+        # forma de cederle nada a otra columna), así que pasan a
+        # Interactive para poder fijarles un ancho a mano (mismo motivo
+        # que Localidad/Edificio, ver `_ajustar_ancho_valores`) — Unidad/
+        # Consul (2, 3) siguen en ResizeToContents de siempre, no fueron
+        # parte de este pedido de ancho (solo de centralizar su
+        # contenido, ver `_refrescar_valores`). "Valor aislada con
+        # recargo" (sumada después, pedido de la clienta: "si activo un
+        # porcentaje de recargo en horas aisladas... en el cuadro
+        # tendría que ver el valor con el recargo" — el valor base de al
+        # lado nunca cambiaba) se agrega APARTE en vez de pisarlo,
+        # porque el recargo es opcional por reserva (`AplicaRecargo`),
+        # no algo que siempre corresponda aplicar al valor de referencia
+        # del consultorio.
         header_valores = self.tabla_valores.horizontalHeader()
-        header_valores.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        header_valores.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        header_valores.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        header_valores.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header_valores.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header_valores.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
+        header_valores.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
+        header_valores.setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
         self.promedios_valores = _PanelPromedios()
 
         self.filtros_valores = _PanelFiltrosJerarquico(conn, on_cambiar=self._refrescar_valores)
@@ -868,6 +901,7 @@ class _PanelValoresVigentes(QWidget):
         if not ids_consultorio:
             self.tabla_valores.setSortingEnabled(True)
             self.promedios_valores.actualizar(PromediosValorHora())
+            self._ajustar_ancho_valores()
             return
         cfg = self.conn.execute(
             "SELECT RecargoPorcentajeAisladas FROM Configuracion WHERE IdConfiguracion = 1"
@@ -895,13 +929,48 @@ class _PanelValoresVigentes(QWidget):
             valor_aislada_recargo = valor_aislada * (1 + recargo_pct / 100)
             self.tabla_valores.setItem(fila, 0, QTableWidgetItem(f["DomicilioLocalidad"] or "(Sin localidad)"))
             self.tabla_valores.setItem(fila, 1, QTableWidgetItem(f["NombreEdificio"]))
-            self.tabla_valores.setItem(fila, 2, QTableWidgetItem(f["Departamento"]))
-            self.tabla_valores.setItem(fila, 3, _ItemNumerico(str(f["NumeroConsultorio"]), f["NumeroConsultorio"]))
+            self.tabla_valores.setItem(fila, 2, item_centrado(f["Departamento"]))
+            self.tabla_valores.setItem(
+                fila, 3, _ItemNumerico(str(f["NumeroConsultorio"]), f["NumeroConsultorio"], centrado=True),
+            )
             self.tabla_valores.setItem(fila, 4, _ItemNumerico(formatear_moneda(valor_regular), valor_regular))
             self.tabla_valores.setItem(fila, 5, _ItemNumerico(formatear_moneda(valor_aislada), valor_aislada))
             self.tabla_valores.setItem(
                 fila, 6, _ItemNumerico(formatear_moneda(valor_aislada_recargo), valor_aislada_recargo),
             )
         self.tabla_valores.setSortingEnabled(True)
+        self._ajustar_ancho_valores()
 
         self.promedios_valores.actualizar(calcular_promedios_valor_hora(self.conn, ids_consultorio))
+
+    def _ajustar_ancho_valores(self) -> None:
+        """Pedido explícito de la clienta: "que se reduzcan los anchos
+        de los tres valores un 50%, y ese sobrante dáselo a las
+        columnas Localidad y Edificio." Antes "Valor regular"/"Valor
+        aislada"/"...con recargo" (4, 5, 6) vivían en modo Stretch —
+        Qt les repartía el 100% del ancho sobrante del `QGroupBox` en
+        partes iguales entre los tres, sin dejar margen para cederle
+        nada a otra columna. Pasaron a Interactive (ver `__init__`)
+        para poder fijarles un ancho a mano: se calcula cuánto les
+        daría el Stretch de siempre (disponible menos el ancho natural
+        de Localidad/Edificio/Unidad/Consul) y se los deja en la MITAD
+        de eso — la otra mitad (el sobrante que se "libera") se reparte
+        por igual entre Localidad y Edificio (0, 1). Unidad/Consul
+        (2, 3) no son parte de este pedido de ancho (solo de
+        centralizar su contenido, ver `_refrescar_valores`), se quedan
+        en su ResizeToContents de siempre."""
+        for columna in (0, 1, 2, 3):
+            self.tabla_valores.resizeColumnToContents(columna)
+        ancho_0123 = sum(self.tabla_valores.columnWidth(c) for c in (0, 1, 2, 3))
+        disponible = self.tabla_valores.viewport().width()
+        ancho_valores_total_antes = max(disponible - ancho_0123, 0)
+        ancho_valores_total_nuevo = ancho_valores_total_antes // 2
+        columnas_valor = (4, 5, 6)
+        por_columna_valor, residuo_valor = divmod(ancho_valores_total_nuevo, len(columnas_valor))
+        for i, columna in enumerate(columnas_valor):
+            self.tabla_valores.setColumnWidth(columna, por_columna_valor + (1 if i < residuo_valor else 0))
+
+        liberado = ancho_valores_total_antes - ancho_valores_total_nuevo
+        mitad, residuo_mitad = divmod(liberado, 2)
+        self.tabla_valores.setColumnWidth(0, self.tabla_valores.columnWidth(0) + mitad + residuo_mitad)
+        self.tabla_valores.setColumnWidth(1, self.tabla_valores.columnWidth(1) + mitad)
