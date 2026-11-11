@@ -1,10 +1,11 @@
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox, QPushButton
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.crud_generico import _DialogoRegistro
-from app.gui.pantallas.mensajes_predefinidos import _PanelMensajesPredefinidos
+from app.gui.pantallas.mensajes_predefinidos import _opciones_categoria_mensaje, _PanelMensajesPredefinidos
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -296,7 +297,7 @@ def test_campo_mensaje_suma_variables_al_diccionario_de_campo(qtbot, conn):
     assert campo_mensaje.variables is not None
     assert set(campo_mensaje.variables) == {
         "apodo", "nombre", "apellido", "tratamiento", "edificio", "unidad", "consultorio", "localidad",
-        "nombre_espacio",
+        "nombre_espacio", "nombre_administrador_principal",
     }
 
 
@@ -325,9 +326,10 @@ def test_dialogo_suma_un_boton_por_variable_que_inserta_en_el_cursor(qtbot, conn
     assert entrada.toPlainText() == "Hola, {apodo}{localidad}"
 
 
-def test_dialogo_nuevo_tiene_9_variables_en_grilla_de_3x3(qtbot, conn):
-    """Pedido explícito de la clienta: "Ahora que son 9 variables
-    ponelas en tres filas de tres botones" (antes 4 columnas)."""
+def test_dialogo_nuevo_tiene_10_variables_en_grilla_de_2x5(qtbot, conn):
+    """Pedido explícito de la clienta al sumar {nombre_administrador_
+    principal}: "ahora que son [10] variables ponelas en dos filas de 5
+    botones" (antes 3x3 con 9)."""
     from PySide6.QtWidgets import QGridLayout
 
     pantalla = _PanelMensajesPredefinidos(conn)
@@ -336,10 +338,10 @@ def test_dialogo_nuevo_tiene_9_variables_en_grilla_de_3x3(qtbot, conn):
     qtbot.addWidget(dialogo)
 
     botones_variable = [b for b in dialogo.findChildren(QPushButton) if b.text().startswith("{")]
-    assert len(botones_variable) == 9
-    grilla = next(g for g in dialogo.findChildren(QGridLayout) if g.count() == 9)
-    assert grilla.rowCount() == 3
-    assert grilla.columnCount() == 3
+    assert len(botones_variable) == 10
+    grilla = next(g for g in dialogo.findChildren(QGridLayout) if g.count() == 10)
+    assert grilla.rowCount() == 2
+    assert grilla.columnCount() == 5
 
 
 def test_vista_previa_sustituye_nombre_espacio(qtbot, conn):
@@ -353,6 +355,40 @@ def test_vista_previa_sustituye_nombre_espacio(qtbot, conn):
     qtbot.addWidget(pantalla)
     pantalla.crud.tabla_widget.selectRow(0)
     assert pantalla.texto_vista_previa.toPlainText() == "Hola desde Espacio Ramos."
+
+
+def test_vista_previa_sustituye_nombre_administrador_principal(qtbot, conn):
+    """Pedido explícito de la clienta: nueva variable {nombre_
+    administrador_principal}, resuelta contra el Responsable con
+    Rol="Administrador principal" y EsContactoPrincipal=1."""
+    obtener_repositorio(conn, "Responsable").crear(
+        Nombre="Marcela Díaz", Rol="Administrador principal", EsContactoPrincipal=1,
+    )
+    # Responsable NO elegible (otro rol) — no tiene que interferir.
+    obtener_repositorio(conn, "Responsable").crear(Nombre="Otro", Rol="Mantenimiento general", EsContactoPrincipal=1)
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Prueba", Mensaje="Hola de parte de {nombre_administrador_principal}.", Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud.tabla_widget.selectRow(0)
+    assert pantalla.texto_vista_previa.toPlainText() == "Hola de parte de Marcela Díaz."
+
+
+def test_vista_previa_sin_administrador_principal_configurado_queda_en_blanco(qtbot, conn):
+    """Sin ningún Responsable que cumpla las dos condiciones a la vez
+    (Rol="Administrador principal" Y Contacto principal), la variable
+    queda en blanco — no rompe la vista previa."""
+    obtener_repositorio(conn, "Responsable").crear(
+        Nombre="Marcela Díaz", Rol="Administrador principal", EsContactoPrincipal=0,
+    )
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Prueba", Mensaje="Hola de parte de {nombre_administrador_principal}.", Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud.tabla_widget.selectRow(0)
+    assert pantalla.texto_vista_previa.toPlainText() == "Hola de parte de ."
 
 
 def test_dialogo_nuevo_queda_al_doble_de_ancho_y_un_40_porciento_mas_alto_centrado_arriba(qtbot, conn):
@@ -400,11 +436,15 @@ def test_pantalla_mensajes_predefinidos_usa_el_mismo_ancho_y_el_alto_reducido(qt
     assert pantalla.crud._multiplicador_alto_dialogo == 1.4
 
 
-def test_tabla_categoria_y_descripcion_crecen_consul_y_activo_al_minimo(qtbot, conn):
-    """Pedido explícito de la clienta sobre la tabla: "Categoría"/
-    "Descripción" +1/3; "Consul"/"Activo" al mínimo y centrados;
-    "Texto" (antes "Mensaje") se achica para que la tabla entera entre
-    en el ancho de pantalla, con "Activo" como última columna visible."""
+def test_tabla_categoria_y_descripcion_al_ancho_natural_consul_como_localidad(qtbot, conn):
+    """Segunda ronda sobre esta tabla (la primera, +1/3 para Categoría/
+    Descripción y Consul al mínimo de su etiqueta, queda en el test de
+    abajo con datos reales desestimada): "Reducí el ancho de las
+    columnas 'Categoría' y 'Descripción'... que quede un poco mas ancha
+    [Descripción]" y "'Consul' dejala del mismo ancho que localidad,
+    edificio y unidad" — ninguna de las tres usa ya `tercio_extra`/
+    `ancho_minimo_etiqueta`, vuelven al ancho natural (contenido +
+    padding) que ya usan Localidad/Edificio/Unidad."""
     obtener_repositorio(conn, "Configuracion").actualizar(1, VisualizarCamposLibres=0)
     obtener_repositorio(conn, "MensajePredefinido").crear(
         Categoria="Pagos", Descripcion="Aviso de pago pendiente con un texto largo", Mensaje="x" * 300, Activo=1,
@@ -423,11 +463,20 @@ def test_tabla_categoria_y_descripcion_crecen_consul_y_activo_al_minimo(qtbot, c
 
     ancho_categoria_ajustado = tabla.columnWidth(indice["Categoria"])
     ancho_descripcion_ajustado = tabla.columnWidth(indice["Descripcion"])
+    ancho_consul_ajustado = tabla.columnWidth(indice["IdConsultorio"])
     tabla.resizeColumnsToContents()
-    ancho_categoria_con_padding = tabla.columnWidth(indice["Categoria"]) + _PADDING_COLUMNA
-    ancho_descripcion_con_padding = tabla.columnWidth(indice["Descripcion"]) + _PADDING_COLUMNA
-    assert ancho_categoria_ajustado == ancho_categoria_con_padding + ancho_categoria_con_padding // 3
-    assert ancho_descripcion_ajustado == ancho_descripcion_con_padding + ancho_descripcion_con_padding // 3
+    ancho_categoria_natural = tabla.columnWidth(indice["Categoria"]) + _PADDING_COLUMNA
+    ancho_descripcion_natural = tabla.columnWidth(indice["Descripcion"]) + _PADDING_COLUMNA
+    ancho_consul_natural = tabla.columnWidth(indice["IdConsultorio"]) + _PADDING_COLUMNA
+    # Ancho natural (contenido + padding), sin ningún +1/3 ni recorte al
+    # mínimo de la etiqueta — mismo mecanismo que Localidad/Edificio/
+    # Unidad, no un caso especial aparte.
+    assert ancho_categoria_ajustado == ancho_categoria_natural
+    assert ancho_descripcion_ajustado == ancho_descripcion_natural
+    assert ancho_consul_ajustado == ancho_consul_natural
+    # "Descripción" (una frase) naturalmente más ancha que "Categoría"
+    # (una palabra), sin ningún truco de más.
+    assert ancho_descripcion_ajustado > ancho_categoria_ajustado
 
     pantalla.crud.actualizar()
     disponible = tabla.viewport().width()
@@ -530,3 +579,100 @@ def test_reiniciar_limpia_buscar_y_enfoca_el_primero(qtbot, conn):
     pantalla.reiniciar()
 
     assert pantalla.crud.campo_buscar.text() == ""
+
+
+def test_opciones_categoria_incluye_categorias_en_uso_no_registradas_en_listas_editables(conn):
+    """Bug real reportado por la clienta: "ya habiendo una [categoría]
+    cargada si despliego la cascada me tendría que ofrecer como opción
+    esa categoría, tengo una pero pincho ahí y no aparece nada" — una
+    categoría tipeada directo en un mensaje (Categoría es catálogo
+    abierto, no pasa por "Listas editables") tiene que aparecer igual
+    en la cascada de cualquier otro mensaje."""
+    obtener_repositorio(conn, "MensajePredefinido").crear(Categoria="Saludo", Mensaje="Hola.", Activo=1)
+    opciones = _opciones_categoria_mensaje(conn)
+    assert ("Saludo", "Saludo") in opciones
+
+
+def test_dialogo_nuevo_ofrece_en_la_cascada_una_categoria_ya_en_uso(qtbot, conn):
+    obtener_repositorio(conn, "MensajePredefinido").crear(Categoria="Saludo", Mensaje="Hola.", Activo=1)
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    dialogo = _DialogoRegistro(conn, pantalla.crud.campos, "Nuevo registro")
+    qtbot.addWidget(dialogo)
+    combo_categoria = dialogo._entradas["Categoria"]
+    assert combo_categoria.findText("Saludo") >= 0
+
+
+def test_editar_categoria_de_un_mensaje_renombra_todos_los_que_la_compartian(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: "en el hipotético caso de que
+    quiero editar una categoría cargada dentro de un registro, por
+    ejemplo algo que tenía como 'Saludo' ponerlo como 'Saludo inicial',
+    a todos los items que tienen la categoría 'Saludo' afecta el mismo
+    cambio"."""
+    repo = obtener_repositorio(conn, "MensajePredefinido")
+    repo.crear(Categoria="Saludo", Descripcion="Uno", Mensaje="Hola 1.", Activo=1)
+    repo.crear(Categoria="Saludo", Descripcion="Dos", Mensaje="Hola 2.", Activo=1)
+    repo.crear(Categoria="Despedida", Descripcion="Otra", Mensaje="Chau.", Activo=1)  # no tiene que tocarse
+
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    id_uno = next(m["IdMensaje"] for m in repo.listar() if m["Descripcion"] == "Uno")
+    fila = next(f for f in range(pantalla.crud.tabla_widget.rowCount())
+                if pantalla.crud.tabla_widget.item(f, 0).data(Qt.ItemDataRole.UserRole) == id_uno)
+    pantalla.crud.tabla_widget.selectRow(fila)
+
+    def _dialogo_con_categoria_renombrada(self, *a, **k):
+        self._entradas["Categoria"].setEditText("Saludo inicial")
+        return _DialogoRegistro.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_con_categoria_renombrada)
+    pantalla.crud._editar()
+
+    categorias = {m["Descripcion"]: m["Categoria"] for m in repo.listar()}
+    assert categorias["Uno"] == "Saludo inicial"
+    assert categorias["Dos"] == "Saludo inicial"
+    assert categorias["Otra"] == "Despedida"
+
+
+def test_editar_categoria_sin_cambiarla_no_toca_a_nadie_mas(qtbot, conn, monkeypatch):
+    repo = obtener_repositorio(conn, "MensajePredefinido")
+    repo.crear(Categoria="Saludo", Descripcion="Uno", Mensaje="Hola 1.", Activo=1)
+    repo.crear(Categoria="Saludo", Descripcion="Dos", Mensaje="Hola 2.", Activo=1)
+
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud.tabla_widget.selectRow(0)
+
+    def _dialogo_sin_cambios(self, *a, **k):
+        return _DialogoRegistro.DialogCode.Accepted
+
+    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _dialogo_sin_cambios)
+    pantalla.crud._editar()
+
+    categorias = {m["Descripcion"]: m["Categoria"] for m in repo.listar()}
+    assert categorias["Uno"] == "Saludo"
+    assert categorias["Dos"] == "Saludo"
+
+
+def test_columna_de_filtros_queda_fija_al_minimo_sin_cortar_dirigido_a(qtbot, conn):
+    """Pedido explícito de la clienta: "reducí al mínimo la columna de
+    los filtros para que no quede ninguna etiqueta o elemnto cortado".
+    Caso real que puede cortarse sin este ajuste: "Dirigido a" es un
+    combo EDITABLE (`habilitar_busqueda_profesional`) cuyo `sizeHint()`
+    no crece con el nombre más largo cargado — si ningún otro combo de
+    este panel necesita más ancho que ese nombre, el panel quedaría más
+    angosto de lo que ese nombre necesita para mostrarse completo."""
+    from app.gui.pantallas.mensajes_predefinidos import _ancho_necesario_combo
+
+    conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido, NombrePila, Tratamiento) "
+        "VALUES ('R', 'Viavattenee Rodriguez', 'Agustina Del Valle', 'Lic.')"
+    )
+    conn.commit()
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+
+    panel_filtros = pantalla.combo_filtro.parentWidget()
+    assert panel_filtros.minimumWidth() == panel_filtros.maximumWidth()  # ancho fijo
+    ancho_necesario_dirigido_a = _ancho_necesario_combo(pantalla.combo_dirigido_a)
+    assert panel_filtros.width() >= ancho_necesario_dirigido_a

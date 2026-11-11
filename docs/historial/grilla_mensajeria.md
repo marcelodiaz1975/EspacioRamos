@@ -815,3 +815,106 @@ predefinidos.py`: 31 passed. Confirmado además sin regresiones en
 passed) — ningún otro catálogo pasa `multiplicador_alto_dialogo`, así
 que todos siguen con el comportamiento de siempre (ancho = alto).
 
+## Mensajes predefinidos: variable nueva, combo Categoría, rename en cascada, filtros y tabla (nov-2026)
+
+Pedido explícito de la clienta, varios puntos sobre esta misma pantalla
+en la misma ronda:
+
+**Variable {nombre_administrador_principal} (grilla 2x5).** Pedido:
+"Agregame {Nombre administrador principal} como variable, pone 2 filas
+de 5 botones". De dónde sale el valor — aclarado por la clienta tras
+preguntarle, porque no hay ningún campo así hoy (`Usuario` solo tiene
+un nombre de LOGIN, no el nombre real de una persona, y puede haber
+varios usuarios Administrador): "Base de datos/Responsables, de esa
+solapa el Nombre del responsable que está agendado como 'Administrador
+principal' con campo 'Contacto principal' seteado en 'Sí'". Nueva
+`_nombre_administrador_principal(conn)`: `SELECT Nombre FROM
+Responsable WHERE Rol = 'Administrador principal' AND
+EsContactoPrincipal = 1 AND Activo = 1 LIMIT 1` — en blanco si no hay
+ninguno así. Distinto del "{contacto}" que ya arma el PDF de Valores
+vigentes (`app.pdf.valores_pdf._sustituciones_detalles_
+complementarios`): ese filtra solo por `EsContactoPrincipal`/`AptoPDF`
+(sin mirar `Rol`) y arma "Nombre - Celular - Email"; acá es solo el
+nombre, filtrado además por `Rol`. `_DialogoRegistro._COLUMNAS_
+BOTONES_VARIABLES` pasa de 3 a 5 (10 variables ahora, 2x5 en vez de
+3x3).
+
+**Bug real: combo "Categoría" no ofrecía una categoría ya en uso.**
+"Ya habiendo una cargada si despliego la cascada me tendría que
+ofrecer como opción esa categoría, tengo una pero pincho ahí y no
+aparece nada." Categoría es un catálogo ABIERTO (la clienta puede
+tipear una categoría nueva directo en un mensaje, sin pasar por "Listas
+editables") — pero el combo del diálogo usaba directo
+`opciones_lista("CategoriaMensaje")`, que solo trae lo cargado en ESE
+catálogo, nunca lo que esté en uso de verdad en algún `MensajePredefinido`.
+Nueva `_opciones_categoria_mensaje(conn)`: une lo de Listas editables
+con las categorías realmente en uso (`DISTINCT Categoria` de
+`MensajePredefinido`, mismo criterio que ya usa `_refrescar_categorias`
+para el filtro de arriba) — reemplaza el `opciones=` del campo
+"Categoria".
+
+**Renombrar una categoría afecta a todos los mensajes que la
+compartían.** "En el hipotético caso de que quiero editar una categoría
+cargada dentro de un registro, por ejemplo algo que tenía como 'Saludo'
+ponerlo como 'Saludo inicial', a todos los items que tienen la
+categoría 'Saludo' afecta el mismo cambio." Nuevo `_cascada_renombrar_
+categoria(registro, valores)`, conectado como `al_actualizar` de
+`self.crud` (hook ya existente en `PantallaCRUD`, corre DESPUÉS de que
+`_editar` ya guardó el registro editado): si `Categoria` cambió (y la
+anterior no estaba vacía, y la nueva tampoco), actualiza TODOS los
+demás `MensajePredefinido` que todavía tenían la categoría vieja a la
+nueva — sin tocar el propio registro ya editado ni "vaciar" otros si la
+categoría nueva queda en blanco.
+
+**Columna de filtros al mínimo, sin cortar "Dirigido a".** "Reducí al
+mínimo la columna de los filtros para que no quede ninguna etiqueta o
+elemnto cortado." Investigado: `panel_extra_superior_izquierda`
+(`panel_superior`) no tenía ancho fijo propio — quedaba librado al
+`sizeHint()` natural de Qt de cada combo, que para los NO editables
+(Localidad/Edificio/Unidad/Consultorio de contexto, filtro Categoría)
+sí refleja el ítem más largo cargado, pero NO para "Dirigido a"
+(`habilitar_busqueda_profesional` lo vuelve editable — el `sizeHint()`
+de un combo editable sale del `QLineEdit` interno, un valor genérico
+que no crece con el nombre de profesional más largo cargado). Si
+"Dirigido a" terminaba siendo el más ancho de los seis combos (posible
+con nombres/tratamientos largos y edificios/unidades cortos), el resto
+no lo salvaba y el nombre elegido quedaba cortado dentro del combo
+cerrado. Nueva `_ancho_necesario_combo(combo)`: mide con `QFontMetrics`
+el texto real de CADA ítem cargado (`itemText(i)`, no `sizeHint()`) —
+funciona igual para un combo editable o uno normal, porque lee el
+modelo directo. El máximo de los seis combos + el botón "Copiar
+mensaje" fija `panel_superior.setFixedWidth(...)` — ancho real mínimo,
+sin cortar nada, sin sobrar tampoco.
+
+**Anchos de tabla, segunda ronda (desestima la primera).** Con datos
+reales cargados, "Categoría"/"Descripción" (+1/3 de ancho, primera
+ronda) quedaban demasiado anchas, y "Consul" (antes al mínimo de su
+etiqueta) resultó ser una de las columnas CON MÁS contenido real —
+`_opciones_consultorio_o_general` arma la etiqueta completa
+"Edificio — Unidad — Consultorio N", no solo el número. Pedido: "Dale
+'Consul' el mismo ancho que localidad, edificio y unidad [en vez de al
+mínimo de su etiqueta]; reducí 'Categoría'/'Descripción', que
+'Descripción' quede un poco más ancha." Se saca `tercio_extra=True` de
+Categoria/Descripcion y `ancho_minimo_etiqueta=True` de IdConsultorio
+— las tres vuelven al mismo mecanismo natural (contenido + padding) que
+ya usan Localidad/Edificio/Unidad, sin ningún caso especial. "Descripción"
+queda más ancha que "Categoría" sola, por contenido real (una frase
+vs. una palabra), sin necesitar ningún multiplicador extra. "Activo"
+sigue al mínimo de su etiqueta (no fue parte de este pedido).
+`columna_flexible="Mensaje"` sigue absorbiendo el resto para que la
+tabla entera entre en pantalla sin scroll horizontal — con las dos
+columnas más angostas ahora, sobra más margen que antes, nunca menos.
+
+Tests nuevos/actualizados en `tests/test_mensajes_predefinidos.py`:
+`test_vista_previa_sustituye_nombre_administrador_principal`,
+`test_vista_previa_sin_administrador_principal_configurado_queda_en_
+blanco`, `test_dialogo_nuevo_tiene_10_variables_en_grilla_de_2x5`
+(reemplaza la de 9/3x3), `test_opciones_categoria_incluye_categorias_
+en_uso_no_registradas_en_listas_editables`, `test_dialogo_nuevo_ofrece_
+en_la_cascada_una_categoria_ya_en_uso`, `test_editar_categoria_de_un_
+mensaje_renombra_todos_los_que_la_compartian`, `test_editar_categoria_
+sin_cambiarla_no_toca_a_nadie_mas`, `test_columna_de_filtros_queda_
+fija_al_minimo_sin_cortar_dirigido_a`, `test_tabla_categoria_y_
+descripcion_al_ancho_natural_consul_como_localidad` (reemplaza la del
++1/3). Suite completa: 38 passed.
+

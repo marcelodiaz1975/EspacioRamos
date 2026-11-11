@@ -58,7 +58,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QFontMetrics, QGuiApplication
 from PySide6.QtWidgets import QComboBox, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
@@ -79,6 +79,24 @@ def _titulo_campo(texto: str) -> QLabel:
     return etiqueta
 
 
+_COLCHON_COMBO = 45
+"""Margen para la flecha del desplegable y los bordes del combo, sumado
+al ancho real del texto más largo cargado (ver `_ancho_necesario_
+combo`) — Qt no lo cuenta dentro de `QFontMetrics.horizontalAdvance`."""
+
+
+def _ancho_necesario_combo(combo: QComboBox) -> int:
+    """Ancho mínimo para que NINGÚN ítem de `combo` quede cortado — a
+    diferencia de `combo.sizeHint()` (que para un combo EDITABLE, como
+    "Dirigido a" en este formulario, sale del `QLineEdit` interno y NO
+    crece con el ítem más largo cargado), esto mide el texto real de
+    CADA ítem con `QFontMetrics`, así que funciona igual para un combo
+    editable o uno normal."""
+    metrica = QFontMetrics(combo.font())
+    ancho_texto = max((metrica.horizontalAdvance(combo.itemText(i)) for i in range(combo.count())), default=0)
+    return ancho_texto + _COLCHON_COMBO
+
+
 def _nombre_espacio(conn: sqlite3.Connection) -> str:
     """Mismo criterio que `app.negocio.mensajes`/`plantillas_texto`
     (duplicado acá, sin relación de dependencia con esos módulos): el
@@ -86,6 +104,27 @@ def _nombre_espacio(conn: sqlite3.Connection) -> str:
     cargado."""
     fila = conn.execute("SELECT NombreEspacio FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     return (fila["NombreEspacio"] if fila else None) or ""
+
+
+def _nombre_administrador_principal(conn: sqlite3.Connection) -> str:
+    """Variable {nombre_administrador_principal}: pedido explícito de la
+    clienta sobre de DÓNDE sacarlo — "Base de datos/Responsables, de esa
+    solapa el Nombre del responsable que está agendado como
+    'Administrador principal' [`Responsable.Rol`, catálogo abierto, ver
+    `app.db.seed.RolResponsable`] con campo 'Contacto principal'
+    [`Responsable.EsContactoPrincipal`] seteado en 'Sí'." En blanco si no
+    hay ningún responsable que cumpla las dos condiciones a la vez (o
+    hay más de uno — se toma el primero, no debería pasar en un uso
+    normal). Distinto del "{contacto}" que ya usa el PDF de Valores
+    vigentes (`app.pdf.valores_pdf._sustituciones_detalles_
+    complementarios`): ese filtra por `EsContactoPrincipal`/`AptoPDF`
+    sin mirar el `Rol`, y arma "Nombre - Celular - Email"; acá es solo
+    el nombre, filtrado además por `Rol`."""
+    fila = conn.execute(
+        "SELECT Nombre FROM Responsable WHERE Rol = 'Administrador principal' "
+        "AND EsContactoPrincipal = 1 AND Activo = 1 LIMIT 1"
+    ).fetchone()
+    return (fila["Nombre"] if fila else None) or ""
 
 
 def _opciones_localidad_o_general(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
@@ -104,27 +143,59 @@ def _opciones_consultorio_o_general(conn: sqlite3.Connection) -> list[tuple[int 
     return [(None, "En general")] + _opciones_consultorio(conn)
 
 
+def _opciones_categoria_mensaje(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """Sugerencias del combo editable "Categoría" (diálogo Nuevo/
+    Editar). Bug real reportado por la clienta: "ya habiendo una
+    cargada si despliego la cascada me tendría que ofrecer como opción
+    esa categoría, tengo una pero pincho ahí y no aparece nada" — antes
+    usaba directo `opciones_lista("CategoriaMensaje")`, que solo trae lo
+    que esté cargado en el catálogo "Listas editables"; pero Categoría
+    es un catálogo ABIERTO (ver el docstring del módulo): la clienta
+    puede tipear una categoría nueva directo en un mensaje sin pasar por
+    ese catálogo, y esa categoría quedaba sin aparecer nunca más en la
+    cascada de ningún otro mensaje. Se suman también las categorías que
+    YA están en uso en algún `MensajePredefinido` — mismo criterio que
+    ya usa `_refrescar_categorias` para el filtro "Categoría" de
+    arriba — además de lo que haya en Listas editables, sin duplicar."""
+    desde_lista = {v for v, _ in opciones_lista("CategoriaMensaje")(conn)}
+    en_uso = {m["Categoria"] for m in obtener_repositorio(conn, "MensajePredefinido").listar() if m["Categoria"]}
+    return [(v, v) for v in sorted(desde_lista | en_uso)]
+
+
 def _campos_mensaje_predefinido(conn: sqlite3.Connection) -> list[Campo]:
-    # Pedido explícito de la clienta sobre esta tabla: "Categoría"/
-    # "Descripción" +1/3 de ancho; "Consul" (no "Consultorio") y
-    # "Activo" al mínimo para que entre la etiqueta sin cortar,
-    # centrados; la columna "Mensaje" pasa a titularse "Texto" y queda
-    # como `columna_flexible` del `PantallaCRUD` (ver `_armar_ui`) —
-    # se achica a lo que haga falta para que la tabla entera entre en
-    # el ancho de pantalla sin espacio en blanco, con "Activo" como
-    # última columna visible.
+    # Pedido explícito de la clienta sobre esta tabla, primera ronda:
+    # "Categoría"/"Descripción" +1/3 de ancho; "Consul" (no
+    # "Consultorio") y "Activo" al mínimo para que entre la etiqueta sin
+    # cortar, centrados. Segunda ronda, sobre la misma tabla ya con
+    # datos reales: "Categoría"/"Descripción" quedaban DEMASIADO anchas
+    # —se saca el `tercio_extra`, vuelven al ancho natural (contenido +
+    # padding, igual que Localidad/Edificio/Unidad) — y "Consul" pasa a
+    # ese mismo criterio natural en vez de achicarse al mínimo de su
+    # etiqueta ("dejala del mismo ancho que localidad, edificio y
+    # unidad"): con contenido numérico corto, de novo queda chica igual,
+    # pero por el mismo mecanismo que esas tres, no por un caso especial
+    # aparte. "Activo" sigue al mínimo de su etiqueta (sin cambios, no
+    # fue parte de este segundo pedido). "Descripción" queda un poco más
+    # ancha que "Categoría" sin necesidad de ningún truco extra: su
+    # contenido real (una frase) es naturalmente más largo que una
+    # categoría (una palabra o dos) — el mismo ancho natural+padding ya
+    # lo resuelve solo. La columna "Mensaje" sigue titulada "Texto" y
+    # como `columna_flexible` del `PantallaCRUD` (ver `_armar_ui`) — se
+    # achica a lo que haga falta para que la tabla entera entre en el
+    # ancho de pantalla sin espacio en blanco, con "Activo" como última
+    # columna visible.
     return [
         Campo(
-            "Categoria", "Categoría", tipo="combo", opciones=opciones_lista("CategoriaMensaje"),
-            combo_editable=True, tercio_extra=True,
+            "Categoria", "Categoría", tipo="combo", opciones=_opciones_categoria_mensaje,
+            combo_editable=True,
         ),
-        Campo("Descripcion", "Descripción", tercio_extra=True),
+        Campo("Descripcion", "Descripción"),
         Campo("IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad_o_general),
         Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio_o_general),
         Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad_o_general),
         Campo(
             "IdConsultorio", "Consul", tipo="combo", opciones=_opciones_consultorio_o_general,
-            centrado=True, ancho_minimo_etiqueta=True,
+            centrado=True,
         ),
         Campo("Mensaje", "Texto", tipo="texto_largo", variables=_VARIABLES_MENSAJE),
         Campo("Activo", "Activo", tipo="booleano", centrado=True, ancho_minimo_etiqueta=True),
@@ -187,6 +258,10 @@ _VARIABLES_MENSAJE = {
     "consultorio": "Número del consultorio vinculado al mensaje (o elegido en los selectores de contexto).",
     "localidad": "Localidad vinculada al mensaje (o elegida en los selectores de contexto).",
     "nombre_espacio": "Nombre del espacio (Configuración general).",
+    "nombre_administrador_principal": (
+        "Nombre del responsable agendado como \"Administrador principal\" con \"Contacto principal\" en "
+        "Sí (Base de datos del espacio / Responsables)."
+    ),
 }
 """Catálogo único de variables ofrecidas en el diálogo Nuevo/Editar
 (hallazgo #24 de la auditoría) — mismo dict que alimenta la fila de
@@ -256,6 +331,41 @@ class _PanelMensajesPredefinidos(QWidget):
         self.boton_copiar.clicked.connect(self._copiar_mensaje)
         layout_superior.addWidget(self.boton_copiar)
 
+        # Pedido explícito de la clienta: "reducí al mínimo la columna
+        # de los filtros para que no quede ninguna etiqueta o elemento
+        # cortado". Sin esto, el ancho de `panel_superior` queda librado
+        # al `sizeHint()` de Qt de cada combo — que para los combos NO
+        # editables (Localidad/Edificio/Unidad/Consultorio de contexto,
+        # Categoría) sí refleja el ítem más largo de la lista, pero NO
+        # para "Dirigido a" (`habilitar_busqueda_profesional` lo vuelve
+        # editable, y el `sizeHint()` de un combo editable sale del
+        # `QLineEdit` interno — un valor genérico que NO crece con el
+        # nombre de profesional más largo cargado). Si "Dirigido a"
+        # termina siendo el más ancho de los seis (puede pasar con
+        # nombres/tratamientos largos y edificios/unidades cortos), el
+        # resto de los combos no lo salvan y el nombre elegido queda
+        # cortado dentro del combo cerrado.
+        #
+        # `_ancho_necesario_combo` mide el texto real de CADA ítem
+        # cargado (vía `QFontMetrics`, no `sizeHint()`) — funciona igual
+        # para los combos editables y los que no, porque lee
+        # `itemText(i)` directo del modelo, sin pasar por el cálculo
+        # interno de Qt que falla para el editable. El máximo de los
+        # seis (+ el botón "Copiar mensaje", que puede ser más ancho que
+        # cualquier combo si la base está recién instalada, sin
+        # edificios/profesionales cargados todavía) fija el ancho real
+        # mínimo que hace falta — ni un píxel más.
+        ancho_panel_filtros = max(
+            _ancho_necesario_combo(self.combo_filtro),
+            _ancho_necesario_combo(self.combo_dirigido_a),
+            _ancho_necesario_combo(self.combo_localidad_contexto),
+            _ancho_necesario_combo(self.combo_edificio_contexto),
+            _ancho_necesario_combo(self.combo_unidad_contexto),
+            _ancho_necesario_combo(self.combo_consultorio_contexto),
+            self.boton_copiar.sizeHint().width(),
+        )
+        panel_superior.setFixedWidth(ancho_panel_filtros)
+
         self.crud = PantallaCRUD(
             self.conn, "MensajePredefinido", "Mensajes predefinidos", _campos_mensaje_predefinido(self.conn),
             panel_extra_superior_izquierda=panel_superior,
@@ -280,6 +390,15 @@ class _PanelMensajesPredefinidos(QWidget):
             # selectores de contexto de arriba, así que se arma una
             # propia más abajo (mismo criterio que Gastos operativos).
             instalar_foco=False,
+            # Pedido explícito de la clienta: "en el hipotético caso de
+            # que quiero editar una categoría cargada dentro de un
+            # registro... a todos los items que tienen la categoría
+            # [vieja] afecta el mismo cambio" — renombrar la Categoría
+            # de UN mensaje (Categoría es texto libre por registro, no
+            # una referencia a un catálogo) tiene que renombrarla en
+            # TODOS los mensajes que todavía tenían la vieja. Ver
+            # `_cascada_renombrar_categoria`.
+            al_actualizar=self._cascada_renombrar_categoria,
         )
         self.crud.tabla_widget.itemSelectionChanged.connect(self._actualizar_vista_previa)
         layout.addWidget(self.crud, stretch=1)
@@ -335,6 +454,31 @@ class _PanelMensajesPredefinidos(QWidget):
         self.crud.reiniciar()
         self.crud.campo_buscar.setFocus()
 
+    def _cascada_renombrar_categoria(self, registro: sqlite3.Row, valores: dict) -> None:
+        """`al_actualizar` de `self.crud` (ver `_armar_ui`): corre
+        DESPUÉS de que `PantallaCRUD._editar` ya guardó `valores` en el
+        registro editado — `registro` es la fila COMO ESTABA ANTES de
+        ese guardado. Si la Categoría cambió (y la anterior no estaba
+        vacía), el resto de los mensajes que todavía tengan la vieja
+        pasan a la nueva — pedido explícito de la clienta: renombrar la
+        categoría de un mensaje puntual tiene que renombrarla en TODOS
+        los que la compartían, no dejar un registro "aislado" con el
+        nombre nuevo mientras el resto sigue con el viejo. Sin tocar la
+        categoría nueva en blanco (no es un pedido de "vaciar todas las
+        demás", solo de rename) ni el propio registro ya editado (ya
+        quedó con el valor nuevo, lo hizo `_editar` antes de llamar
+        acá)."""
+        categoria_anterior = registro["Categoria"]
+        categoria_nueva = valores.get("Categoria")
+        if not categoria_anterior or not categoria_nueva or categoria_nueva == categoria_anterior:
+            return
+        repo = obtener_repositorio(self.conn, "MensajePredefinido")
+        for mensaje in repo.listar(Categoria=categoria_anterior):
+            if mensaje["IdMensaje"] == registro["IdMensaje"]:
+                continue
+            repo.actualizar(mensaje["IdMensaje"], Categoria=categoria_nueva)
+        self.conn.commit()
+
     def _refrescar_categorias(self) -> None:
         categoria_actual = self.combo_filtro.currentData()
         self.combo_filtro.blockSignals(True)
@@ -380,6 +524,7 @@ class _PanelMensajesPredefinidos(QWidget):
         variables = _variables_ubicacion(self.conn, id_edificio, id_unidad, id_consultorio, id_localidad)
         variables.update(self._variables_profesional_dirigido_a())
         variables["nombre_espacio"] = _nombre_espacio(self.conn)
+        variables["nombre_administrador_principal"] = _nombre_administrador_principal(self.conn)
         self.texto_vista_previa.setPlainText(sustituir_variables(mensaje["Mensaje"] or "", variables))
 
     def _variables_profesional_dirigido_a(self) -> dict[str, str]:
