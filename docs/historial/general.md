@@ -4772,3 +4772,86 @@ ignora según la respuesta). Confirmado además que las 42 instancias de
 main.py`, `test_gui_estilos.py`, `test_gui_configuracion.py`, `test_gui_
 panel_control.py`, `test_gui_lista_espera.py`, `test_gui_usuarios.py`,
 `test_gui_valores.py`) siguen pasando sin ningún cambio ni cuelgue.
+
+## Fallos del sandbox/contenedor, ajenos a la app: fuentes y reloj real
+
+Migrado desde CLAUDE.md (sección "Metodología de trabajo") — investigación
+puntual, no una convención de pantalla.
+
+**Fallos de fuentes del contenedor de desarrollo (no de la app):**
+investigado un lote de 7 fallos nuevos de tests de GUI calibrados
+pixel a pixel (altura de botones en Reservas/Lista de espera/
+Profesionales, ancho de grilla en Oferta, corte de línea en Placas)
+que aparecieron después de un reinicio del contenedor en la nube donde
+corre este trabajo — confirmado que NO son un bug de la app ni de
+ningún cambio de código (se reproducen igual sobre el código ya
+commiteado, sin ninguna modificación):
+- 5 de los 7: el contenedor trae un archivo de fontconfig propio
+  (`/etc/fonts/conf.d/56-prefer-inter.conf`, ajeno a este proyecto) que
+  fuerza la fuente genérica `sans-serif` a "Inter" en vez del default
+  clásico de Linux (DejaVu Sans/Liberation Sans, con el que están
+  calibrados los tamaños fijos) — la app nunca fija su propia fuente a
+  propósito (ver más arriba, "se revirtió a pedido explícito de la
+  clienta" sobre Segoe UI), así que depende del default del sistema.
+  Confirmado sacando ese archivo (fontconfig cae en DejaVu Sans): los 5
+  tests pasan. No existe en la máquina real de la clienta (Windows).
+- Los otros 2 (Placas, calibración Calibri→Carlito): causa distinta,
+  no relacionada con lo de Inter — la versión de la fuente Carlito que
+  trae este contenedor mide la frase de referencia ("Lic. Agustina
+  Viavattenee") más angosta que la calibración original, así que ya no
+  cruza el umbral de corte de línea calibrado.
+
+No se tocó nada (ni la app, ni los tests, ni la config del contenedor
+— el cambio de fontconfig fue solo diagnóstico y se revirtió) porque
+aflojar la tolerancia de estos tests para tapar una particularidad de
+fuentes de este sandbox puntual debilitaría la señal real de
+regresiones futuras, y la calibración pixel a pixel está atada a
+propósito al entorno real de la clienta, no a este contenedor. Si
+estos 7 vuelven a aparecer en una corrida de la suite, son del entorno
+y no bloquean cerrar una ronda.
+
+Los 7 tests de este lote:
+`test_gui_reservas.py::test_botones_de_accion_quedan_compactos_con_su_
+color`, `test_gui_reservas.py::test_botones_de_aisladas_quedan_igual_de_
+compactos_que_los_de_regulares`, `test_gui_lista_espera.py::test_
+agregar_quitar_y_crear_pedido_quedan_a_la_misma_altura`,
+`test_profesionales.py::test_pantalla_profesionales_botones_quedan_a_
+la_mitad_del_alto_default`, `test_gui_oferta.py::test_grilla_reserva_
+alto_para_que_el_scroll_horizontal_no_tape_la_ultima_fila`,
+`test_gui_placas.py::test_previa_calibracion_replica_el_corte_de_linea_
+del_sistema_fisico_de_la_clienta`, `test_gui_placas.py::test_previa_
+placa_replica_el_corte_de_linea_del_sistema_fisico_de_la_clienta`.
+
+**3 fallos más de `test_avance_mes.py`, por el mismo motivo "del
+entorno" pero con una causa distinta (no fuentes — el reloj real del
+sandbox):** `test_puede_avanzarse_mes_sin_ningun_avance_pendiente`,
+`test_no_se_puede_avanzar_mas_de_un_periodo_por_delante_de_la_fecha_
+real`, `test_vuelve_a_poder_avanzarse_cuando_la_fecha_real_alcanza_el_
+periodo_operativo` — investigados en nov-2026 al confirmar una ronda
+de trabajo sin relación (Oferta de consultorios/Reservas). Los tres
+dependen de que `PeriodoOperativoActual` quede sembrado en "2026-10"
+al construirse el fixture `conn` (`sembrar_valores_por_defecto`, que
+lo calcula contra la fecha REAL del sistema en el momento de sembrar,
+no contra el `date.today()` pisado por `_congelar_hoy_real` dentro del
+cuerpo del test, que corre después) — dejaron de valer apenas el reloj
+real de este sandbox cruzó a noviembre (confirmado: `sembrar_valores_
+por_defecto` siembra "2026-11" en un sandbox con fecha real 2026-11-05,
+no "2026-10" como asumían estos tres tests al escribirse). Van a
+volver a fallar un mes más, hasta que el reloj real alcance diciembre
+(ahí "2026-11" vuelve a cuadrar con lo que los tests asumen) — y
+después, otra vez, cuando vuelva a desalinearse. No se tocó nada
+(mismo criterio que el bloque de arriba): no es un bug de `avance_mes.
+py` ni de ningún cambio de código de esta ronda (reproducido igual
+sobre código ya commiteado de rondas anteriores, sin relación), es un
+test con una dependencia del reloj real no contemplada al escribirlo.
+Si reaparecen, son del entorno y no bloquean cerrar una ronda — una
+futura revisión de este archivo podría congelar `date.today()` ANTES
+de que el fixture `conn` siembre, para que no dependa de en qué mes
+real se corra la suite.
+
+Confirmado otra vez al cerrar el batch de rondas #56-#63 (F5/Estado de
+cuenta/Feriados/Planes de pago/Vacaciones/bug de disponibilidad/
+Licencias/Ausencias, nov-2026): misma lista de 10 fallos exactos,
+mismas causas ya diagnosticadas acá, 3008 passed contra una suite que
+sumó 19 tests nuevos en esa tanda (2989 + 19 = 3008) — ninguna
+regresión nueva.
