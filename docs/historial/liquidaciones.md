@@ -972,3 +972,30 @@ categoría en caliente, fecha de reservas" en `docs/historial/
 general.md`), archivado acá por ser el único punto de esa tanda
 específico de Liquidaciones.
 
+## Liquidaciones simuladas: Localidad/Edificio no seleccionables con una sola opción
+
+Pedido explícito de la clienta: "que los filtros de Localidad y edificio
+no sean seleccionables si hay una sola localidad y/o edificio". Mismo
+criterio ya usado en la cascada Localidad/Edificio/Unidad de
+`_DialogoPlaca` (`placas.py`, ver "Si un nivel tiene una sola opción, se
+preselecciona y se deshabilita" en ese archivo): `_cargar_localidades`/
+`_al_cambiar_localidad` de `_PanelLiquidacionesSimuladas`
+(`app/gui/pantallas/liquidacion.py`) ahora llaman
+`self.combo_localidad.setEnabled(len(opciones) > 1)`/
+`self.combo_edificio.setEnabled(len(opciones) > 1)` después de cargar
+cada combo — se evalúa por nivel (Edificio se deshabilita si la
+localidad ELEGIDA en ese momento tiene un solo edificio, sin importar
+cuántas localidades haya en total). Un combo deshabilitado queda afuera
+de la cadena de foco de Qt solo, sin tocar
+`instalar_enter_avanza_foco`.
+
+Tests nuevos en `tests/test_gui_liquidacion.py`:
+`test_liquidaciones_simuladas_una_sola_localidad_deshabilita_el_combo`,
+`test_liquidaciones_simuladas_un_solo_edificio_deshabilita_el_combo`,
+`test_liquidaciones_simuladas_varias_localidades_habilita_el_combo`,
+`test_liquidaciones_simuladas_un_solo_edificio_en_la_localidad_elegida_
+deshabilita_edificio` (confirma que se evalúa por localidad, no por el
+total del sistema), `test_liquidaciones_simuladas_dos_edificios_en_la_
+misma_localidad_habilita_el_combo`. Verificado visualmente con captura
+offscreen. Suite completa de `test_gui_liquidacion.py`: 69 passed.
+

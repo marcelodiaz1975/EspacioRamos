@@ -779,17 +779,26 @@ class _PanelLiquidacionesSimuladas(QWidget):
 
     def _cargar_localidades(self) -> None:
         self.combo_localidad.clear()
-        for id_, etiqueta in _opciones_localidad(self.conn):
+        opciones = _opciones_localidad(self.conn)
+        for id_, etiqueta in opciones:
             self.combo_localidad.addItem(etiqueta, id_)
+        # Pedido explícito de la clienta: si hay una sola localidad (o un
+        # solo edificio dentro de la localidad elegida), el combo queda
+        # deshabilitado — no hay nada para elegir, mismo criterio que la
+        # cascada de Localidad/Edificio/Unidad de `_DialogoPlaca` en
+        # `placas.py`.
+        self.combo_localidad.setEnabled(len(opciones) > 1)
         self._al_cambiar_localidad()
 
     def _al_cambiar_localidad(self) -> None:
         id_localidad = self.combo_localidad.currentData()
         self.combo_edificio.blockSignals(True)
         self.combo_edificio.clear()
-        for id_, etiqueta in _opciones_edificio(self.conn, id_localidad):
+        opciones = _opciones_edificio(self.conn, id_localidad)
+        for id_, etiqueta in opciones:
             self.combo_edificio.addItem(etiqueta, id_)
         self.combo_edificio.blockSignals(False)
+        self.combo_edificio.setEnabled(len(opciones) > 1)
         self._al_cambiar_edificio()
 
     def _al_cambiar_edificio(self) -> None:

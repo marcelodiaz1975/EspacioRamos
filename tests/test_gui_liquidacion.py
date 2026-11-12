@@ -583,6 +583,78 @@ def test_liquidaciones_simuladas_lista_todas_las_categorias(qtbot, conn):
     assert any("Suárez" in e for e in etiquetas)
 
 
+def test_liquidaciones_simuladas_una_sola_localidad_deshabilita_el_combo(qtbot, conn):
+    """Pedido explícito de la clienta: los filtros de Localidad y
+    Edificio no son seleccionables si hay una sola opción — mismo
+    criterio que la cascada de `_DialogoPlaca` en `placas.py`.
+    `_crear_consultorio` arma un único Edificio sin Localidad, así que
+    `_opciones_localidad` devuelve una sola opción ("(Sin localidad)")."""
+    _crear_consultorio(conn)
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+
+    assert panel.combo_localidad.count() == 1
+    assert panel.combo_localidad.isEnabled() is False
+
+
+def test_liquidaciones_simuladas_un_solo_edificio_deshabilita_el_combo(qtbot, conn):
+    _crear_consultorio(conn)
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+
+    assert panel.combo_edificio.count() == 1
+    assert panel.combo_edificio.isEnabled() is False
+
+
+def test_liquidaciones_simuladas_varias_localidades_habilita_el_combo(qtbot, conn):
+    id_localidad_1 = obtener_repositorio(conn, "Localidad").crear(Localidad="Ramos Mejía")
+    id_localidad_2 = obtener_repositorio(conn, "Localidad").crear(Localidad="Haedo")
+    id_edificio_1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre 1", IdLocalidad=id_localidad_1)
+    obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento="1A")
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre 2", IdLocalidad=id_localidad_2)
+    obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento="2A")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+
+    assert panel.combo_localidad.count() == 2
+    assert panel.combo_localidad.isEnabled() is True
+
+
+def test_liquidaciones_simuladas_un_solo_edificio_en_la_localidad_elegida_deshabilita_edificio(qtbot, conn):
+    """Aunque haya más de una localidad en total, el combo Edificio se
+    deshabilita si la localidad elegida en ese momento solo tiene un
+    edificio — se evalúa por localidad, no por el total del sistema."""
+    id_localidad_1 = obtener_repositorio(conn, "Localidad").crear(Localidad="Ramos Mejía")
+    id_localidad_2 = obtener_repositorio(conn, "Localidad").crear(Localidad="Haedo")
+    id_edificio_1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre 1", IdLocalidad=id_localidad_1)
+    obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento="1A")
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre 2", IdLocalidad=id_localidad_2)
+    obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento="2A")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+
+    assert panel.combo_edificio.count() == 1
+    assert panel.combo_edificio.isEnabled() is False
+
+
+def test_liquidaciones_simuladas_dos_edificios_en_la_misma_localidad_habilita_el_combo(qtbot, conn):
+    id_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Ramos Mejía")
+    id_edificio_1 = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre 1", IdLocalidad=id_localidad)
+    obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_1, Departamento="1A")
+    id_edificio_2 = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre 2", IdLocalidad=id_localidad)
+    obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio_2, Departamento="2A")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+
+    assert panel.combo_edificio.count() == 2
+    assert panel.combo_edificio.isEnabled() is True
+
+
 def test_liquidaciones_simuladas_boton_quitar_bloque_arranca_deshabilitado(qtbot, conn):
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
