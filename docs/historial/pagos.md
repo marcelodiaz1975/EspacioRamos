@@ -268,3 +268,18 @@ ajuste_centrados`,
 `test_tabla_registrar_pagos_monto_saldos_al_mismo_ancho_que_registro_
 modificado`. Verificado visualmente con captura offscreen. Suite
 completa de `test_gui_pagos.py`: 78 passed.
+
+## Planes de pago: ancho de Profesional
+
+Pedido explícito de la clienta: "dale mas ancho a Profesional para
+aprovechar el ancho de la pantalla" en `_PanelPlanesPago`. "Profesional"
+pasa a `QHeaderView.ResizeMode.Stretch` (mismo criterio que "Profesional"
+en Emisión de archivos/"Archivo" en Estado de cuenta de Liquidaciones)
+— se saca el piso manual `setColumnWidth(0, max(..., _ANCHO_COL_
+PROFESIONAL))` de `actualizar()`, que queda sin efecto (y sin sentido)
+una vez que la columna está en modo Stretch.
+
+Test nuevo en `tests/test_gui_pagos.py`:
+`test_planes_de_pago_columna_profesional_se_estira_al_ancho_de_
+pantalla`. Verificado visualmente con captura offscreen. Suite completa
+de `test_gui_pagos.py`: 79 passed.

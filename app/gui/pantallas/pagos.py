@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -1013,6 +1014,11 @@ class _PanelPlanesPago(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones_fila)
+        # Pedido explícito de la clienta: "dale mas ancho a Profesional
+        # para aprovechar el ancho de la pantalla" — mismo criterio que
+        # "Profesional" en Emisión de archivos/"Archivo" en Estado de
+        # cuenta de Liquidaciones.
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         instalar_eliminar_con_tecla(self.tabla, self._cancelar)
         splitter.addWidget(self.tabla)
@@ -1093,7 +1099,6 @@ class _PanelPlanesPago(QWidget):
             self.tabla.setItem(i, 7, item_numero(formatear_moneda(saldo_restante)))
             self.tabla.setItem(i, 8, QTableWidgetItem(estado))
         self.tabla.resizeColumnsToContents()
-        self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), _ANCHO_COL_PROFESIONAL))
         self._actualizar_botones_fila()
 
     @staticmethod

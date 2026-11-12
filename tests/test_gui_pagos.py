@@ -158,6 +158,19 @@ def test_planes_de_pago_reiniciar_vuelve_combo_y_spins_al_default(qtbot, conn):
     assert panel.spin_interes.value() == 0
 
 
+def test_planes_de_pago_columna_profesional_se_estira_al_ancho_de_pantalla(qtbot, conn):
+    """Pedido explícito de la clienta: "dale mas ancho a Profesional
+    para aprovechar el ancho de la pantalla" — mismo criterio que
+    "Profesional" en Emisión de archivos/"Archivo" en Estado de cuenta
+    de Liquidaciones."""
+    from PySide6.QtWidgets import QHeaderView
+
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    header = pantalla.panel_planes.tabla.horizontalHeader()
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
+
+
 def test_registrar_pago_sin_monto_no_persiste(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)
