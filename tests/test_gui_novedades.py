@@ -226,6 +226,71 @@ def test_vacaciones_profesional_y_filtro_de_localidad_arrancan_a_la_misma_altura
     assert y_profesional == y_filtro
 
 
+def test_vacaciones_visualizacion_de_la_grilla_queda_fija_en_regulares(qtbot, conn):
+    """Pedido explícito de la clienta: "dejá la grilla en esta solapa
+    con la visualización fija en 'Reservas regulares'" — mismo
+    mecanismo que esa pantalla (`fijar_modo`)."""
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+
+    assert panel.grilla.combo_modo.currentData() == "regular"
+    assert panel.grilla.combo_modo.isEnabled() is False
+
+
+def test_vacaciones_solo_azul_oscuro_sin_otros_colores(qtbot, conn):
+    """Pedido explícito de la clienta: "que no aparezcan las referencias
+    de colores ni los colores en la grilla, el único color que quiero
+    que se vea es del azul oscuro, el que marca el profesional
+    filtrado" — `activar_filtro_exclusivo_profesional` activado, y la
+    leyenda nunca se muestra (no se llama `mostrar_leyenda_colores`)."""
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+
+    assert panel.grilla._filtro_exclusivo_profesional is True
+    assert panel.grilla._leyenda_colores.isVisible() is False
+
+
+def test_vacaciones_sin_cuadro_de_detalle_ni_etiqueta(qtbot, conn):
+    """Pedido explícito de la clienta: "el cuadro de detalle y su
+    etiqueta en esta solapa eliminalo" — `extraer_detalle` los saca del
+    layout de la grilla, y quedan ocultos (no reubicados en ningún otro
+    lado de esta pantalla)."""
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+
+    assert panel.grilla.etiqueta_detalle.isVisible() is False
+    assert panel.grilla.texto_detalle.isVisible() is False
+    assert panel.grilla._layout_grilla.indexOf(panel.grilla.etiqueta_detalle) == -1
+    assert panel.grilla._layout_grilla.indexOf(panel.grilla.texto_detalle) == -1
+
+
+def test_vacaciones_grilla_misma_altura_con_todos_o_un_profesional(qtbot, conn):
+    """Pedido explícito de la clienta: "fija la altura de la grilla de
+    entrada cuando está seleccionado 'Todos los profesionales' que sea
+    lo mismo que cuando elijo a un profesional... quiero que la grilla
+    aparezca así de entrada" — la cantidad de filas (horas de
+    Configuración) es siempre la misma, elegido o no un profesional
+    puntual."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.show()
+
+    assert panel.combo_profesional.currentData() is None  # "Todos los profesionales", default al entrar
+    alto_con_todos = panel.grilla.height()
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    assert panel.grilla.height() == alto_con_todos
+
+
 def test_ajustar_columnas_agrega_padding_sobre_el_ancho_natural(qtbot):
     """La clienta pidió más aire en las columnas de las tablas de esta
     pantalla: `_ajustar_columnas` le suma `_PADDING_COLUMNA` al ancho

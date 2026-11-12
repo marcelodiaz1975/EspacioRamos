@@ -359,3 +359,73 @@ colores"/"Detalle" renderizan sin superponerse). Suite completa de
 2978 passed, mismos 10 fallos preexistentes del entorno, sin
 regresiones nuevas.
 
+## Vacaciones: grilla fija en "Reservas regulares", sin leyenda ni detalle
+
+Ronda siguiente a la de arriba, sobre la misma solapa. Seis pedidos
+explícitos de la clienta, todos sobre `self.grilla` de `_PanelVacaciones`:
+
+1. **Visualización fija en "Reservas regulares".** `self.grilla.
+   fijar_modo("regular")` — mismo mecanismo que esa pantalla, bloquea
+   el combo "Visualización".
+2. **Sin colores salvo el azul oscuro del profesional filtrado, sin
+   referencias de colores.** `self.grilla.activar_filtro_exclusivo_
+   profesional(True)` — ya existía (pensado justamente para "usos
+   vista previa embebidos" como este) y hace exactamente lo pedido:
+   deja en blanco cualquier celda que no sea del profesional filtrado.
+   La ronda anterior había sumado `mostrar_leyenda_colores(compacta=
+   True)` — se saca: sin colores que explicar, no hace falta leyenda
+   (default de esta grilla compartida: oculta si no se llama a ese
+   método).
+3. **Sin cuadro "Detalle" ni su etiqueta.** `self.grilla.extraer_
+   detalle()` los saca de `_layout_grilla` (su contenedor de layout
+   de siempre) y, como acá no se los reubica en ningún otro lado
+   (a diferencia de Reservas aisladas, que sí los reubica), se
+   ocultan con `.hide()` — sin esto quedarían flotando, fuera de
+   cualquier layout pero igual visibles en su última posición. Quedan
+   sin efecto (y se sacan) los dos ajustes de la ronda anterior
+   pensados solo para ESE cuadro: `dar_stretch_a_detalle()` y
+   `agregar_espacio_antes_de_detalle(8)`.
+4. **Mantiene el comportamiento de mostrar días/horarios/consultorios
+   del profesional filtrado.** Sin cambios — `_sincronizar_grilla` (la
+   misma de siempre) sigue acotando la grilla a los pares (día,
+   unidad) donde el profesional elegido tiene una reserva regular
+   vigente.
+5. **Altura de la grilla fija, igual con "Todos los profesionales" que
+   con un profesional elegido.** Investigado: con "Todos" (sin
+   profesional puntual), `_sincronizar_grilla` deja la grilla sin
+   ningún día/unidad marcado — grilla vacía, alto 0 (atajo explícito
+   de `_actualizar_grilla` en `grilla_operativa.py` cuando no hay
+   columnas). Con un profesional elegido, la cantidad de FILAS
+   (horas de Configuración, `HoraInicioGrilla`/`HoraFinGrilla`) es
+   SIEMPRE la misma sin importar cuál — solo cambia el ANCHO (sus
+   propios días/consultorios). Se mide una sola vez, al construir la
+   pantalla: se fuerza momentáneamente la grilla sin ningún filtro
+   (`filtrar_por_unidades(None)`/`filtrar_por_dias(None)`/`filtrar_
+   por_pares_unidad_dia(None)` — "todos los días, todas las unidades,
+   sin restricción de pares", el mismo sentinel `None` que esos tres
+   métodos ya usan para "sin filtro") para que arme sus filas reales,
+   se mide `alto_natural_grilla()` (método público ya existente) y se
+   fija ese valor con `self.grilla.setMinimumHeight(...)` (API nativa
+   de `QWidget`, no hizo falta sumar nada a `grilla_operativa.py`) —
+   así la grilla nunca vuelve a colapsar a 0, esté "Todos" seleccionado
+   o no. La llamada real a `_sincronizar_grilla()`, más abajo en el
+   mismo método, deja el filtro real (vacío con "Todos") sin tocar el
+   alto ya fijado.
+6. **La tabla arranca más arriba, sigue escroleable.** Consecuencia
+   directa de sacar leyenda y detalle: el alto natural de `self.grilla`
+   es menor, así que `scroll.setMinimumHeight(contenido.sizeHint().
+   height())` (mecanismo de la ronda anterior, sin tocar) termina
+   dándole menos alto al panel de arriba y más a "Vacaciones tomadas"
+   — sin necesitar ningún cambio nuevo en esa mecánica.
+
+Tests nuevos en `tests/test_gui_novedades.py`:
+`test_vacaciones_visualizacion_de_la_grilla_queda_fija_en_regulares`,
+`test_vacaciones_solo_azul_oscuro_sin_otros_colores`, `test_vacaciones_
+sin_cuadro_de_detalle_ni_etiqueta`, `test_vacaciones_grilla_misma_
+altura_con_todos_o_un_profesional`. Verificado visualmente con
+capturas offscreen (estado "Todos los profesionales" y con un
+profesional elegido, confirmando el mismo alto de grilla — 469px en
+ambos casos en el sandbox — y que solo el profesional filtrado queda
+en azul oscuro, el resto en blanco). Suite completa de `test_gui_
+novedades.py`: 111 passed.
+

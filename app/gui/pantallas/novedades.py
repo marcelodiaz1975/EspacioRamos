@@ -456,6 +456,24 @@ class _PanelVacaciones(QWidget):
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
         layout_grupo_grilla.setContentsMargins(0, 0, 0, 0)
         self.grilla = GrillaOperativaWidget(self.conn)
+        # Pedido explícito de la clienta, ronda siguiente a la que armó
+        # esta grilla "como en reservas regulares": "dejá la grilla en
+        # esta solapa con la visualización fija en 'Reservas
+        # regulares'" — mismo mecanismo que esa pantalla (`fijar_modo`,
+        # deja el combo "Visualización" bloqueado en ese valor).
+        self.grilla.fijar_modo("regular")
+        # Pedido explícito de la clienta: "que no aparezcan las
+        # referencias de colores ni los colores en la grilla, el único
+        # color que quiero que se vea es del azul oscuro, el que marca
+        # el profesional filtrado" — `activar_filtro_exclusivo_
+        # profesional` ya hace exactamente esto (deja en blanco
+        # cualquier celda que no sea del profesional filtrado); sin un
+        # profesional filtrado ("Todos los profesionales") no hay nada
+        # que resaltar, así que no hace falta la leyenda tampoco — a
+        # diferencia de la ronda anterior, acá NO se llama `mostrar_
+        # leyenda_colores` (sigue oculta, default de esta grilla
+        # compartida).
+        self.grilla.activar_filtro_exclusivo_profesional(True)
         # Pedido explícito de la clienta, extendido desde Oferta de
         # consultorios a toda pantalla con esta grilla: Tipo de bloque/
         # Horario y las filas de encabezado quedan siempre visibles al
@@ -467,39 +485,43 @@ class _PanelVacaciones(QWidget):
         # tope mínimo lo contemple — tapaba la última fila y podía
         # disparar un scroll vertical de más, innecesario.
         self.grilla.reservar_alto_scroll_horizontal()
-        # Pedido explícito de la clienta: "ampliá la grilla para que se
-        # vea como en reservas regulares y que el cuadro de detalle sea
-        # también como en el de esa solapa" — mismo tratamiento visual
-        # (sin repetir los ajustes puntuales de alto de fila/leyenda de
-        # esa pantalla, pensados para SU propio formulario más largo):
-        # sin título "Filtros" (cada filtro se renombra "Filtro de..."),
-        # sin el marco nativo del panel de Filtros ni de "Referencias de
-        # colores", leyenda compacta, y "Detalle" se estira para ocupar
-        # el sobrante de esta columna, igual que panel_form.
-        self.grilla.mostrar_leyenda_colores(compacta=True)
-        # Margen explícito (no el mínimo nativo, 9px): mismo bug ya
-        # documentado en Reservas regulares/aisladas ("queda apelmazada
-        # con la primera referencia") — sin título visible, el panel
-        # necesita este respiro para no superponer "Referencias de
-        # colores" con la primera fila.
-        self.grilla.quitar_marco_leyenda_colores(20)
+        # Sin título "Filtros" (cada filtro se renombra "Filtro de..."),
+        # sin el marco nativo del panel de Filtros — mismo tratamiento
+        # visual que Reservas regulares.
         self.grilla.fijar_titulo_filtros("")
         self.grilla.renombrar_etiquetas_filtro()
         self.grilla.quitar_marco_panel_filtros(_ALTO_TITULO_COLUMNAS_VACACIONES - _ALTO_BASE_GRUPO_GRILLA_VACACIONES)
         self.grilla.fijar_margen_superior_grilla(_ALTO_TITULO_COLUMNAS_VACACIONES - _ALTO_BASE_GRUPO_GRILLA_VACACIONES)
-        # A diferencia de Reservas regulares (cuyo panel_form es la
-        # columna más larga, con Localidad/Edificio/Unidad/Consultorio/
-        # Días/Horario/2 Vigencias/3 botones), acá panel_form es más
-        # corto que el panel de Filtros de la grilla (4 combos de
-        # ubicación + Día + Profesional + leyenda) — así que NO hay que
-        # toparla a la altura de panel_form (`limitar_alto_grilla`): eso
-        # apretaría el panel de Filtros por debajo de lo que su propio
-        # contenido necesita, superponiendo sus filas entre sí. Sin el
-        # tope, el splitter deja que esta columna (la más alta de las
-        # dos) marque el alto real, y `form.addStretch()` ya hace que
-        # panel_form la acompañe sin hueco.
-        self.grilla.dar_stretch_a_detalle()
-        self.grilla.agregar_espacio_antes_de_detalle(8)
+        # Pedido explícito de la clienta: "el cuadro de detalle y su
+        # etiqueta en esta solapa eliminalo" — `extraer_detalle` los
+        # saca de `_layout_grilla` (donde ocupaban espacio); como acá no
+        # se los reubica en ningún otro lado, se ocultan también (sin
+        # esto quedarían flotando, fuera de cualquier layout pero
+        # igual visibles).
+        etiqueta_detalle, texto_detalle = self.grilla.extraer_detalle()
+        etiqueta_detalle.hide()
+        texto_detalle.hide()
+        # Pedido explícito de la clienta: "fija la altura de la grilla de
+        # entrada cuando está seleccionado 'Todos los profesionales' que
+        # sea lo mismo que cuando elijo a un profesional... quiero que la
+        # grilla aparezca así de entrada" — con "Todos" (sin profesional
+        # puntual), `_sincronizar_grilla` deja la grilla sin ningún
+        # día/unidad marcado (grilla vacía, alto 0); con un profesional
+        # elegido, la cantidad de FILAS (horas de Configuración) es
+        # siempre la misma, nunca cambia según cuál sea — solo cambia el
+        # ANCHO (sus propios días/consultorios). Se mide una sola vez,
+        # forzando momentáneamente la grilla sin filtro (`None` en los
+        # tres filtros — "todos los días, todas las unidades, sin
+        # restricción de pares") para que arme sus filas reales, y se fija
+        # ese alto como piso permanente (`setMinimumHeight`, API nativa de
+        # `QWidget`) — así la grilla nunca vuelve a colapsar a 0, esté
+        # "Todos" seleccionado o no. `_sincronizar_grilla()`, más abajo en
+        # este mismo método, deja el filtro real (vacío con "Todos") sin
+        # tocar el alto ya fijado acá.
+        self.grilla.filtrar_por_unidades(None)
+        self.grilla.filtrar_por_dias(None)
+        self.grilla.filtrar_por_pares_unidad_dia(None)
+        self.grilla.setMinimumHeight(self.grilla.alto_natural_grilla())
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
