@@ -350,18 +350,17 @@ class VentanaPrincipal(QMainWindow):
         ella" — mismo método (`reiniciar`) que cada panel ya implementa
         para el reseteo automático al cambiar de pestaña (ver #1.4); los
         paneles que todavía no lo tienen simplemente no hacen nada con F3,
-        en vez de romper."""
+        en vez de romper.
+
+        Pedido explícito de la clienta, ronda siguiente a la que sumó acá
+        el reafirmado de maximizado "por las dudas": sacarlo de F5 — que
+        vuelva a limitarse al refresco de siempre. El reafirmado al
+        iniciar el sistema (`_cambiar_seccion`/`_recien_ingresado`) ya
+        resuelve el bug visual; si hiciera falta volver a cubrirlo desde
+        F5 también, es la clienta la que lo vuelve a pedir explícitamente."""
         panel = self._panel_mas_interno()
         if panel is not None and hasattr(panel, "reiniciar"):
             panel.reiniciar()
-        # Pedido explícito de la clienta: que F5 en cualquier solapa,
-        # además de lo de arriba, haga "por las dudas" el mismo reafirmado
-        # de maximizado que ya se dispara una sola vez al entrar a la
-        # primera solapa (`_cambiar_seccion`) — acá SIN la guarda de
-        # `_recien_ingresado` (se repite en cada F5, no solo una vez),
-        # para cubrir el bug de maximizado si reaparece en cualquier
-        # momento de la sesión.
-        self._reafirmar_maximizado(veces=2)
 
     def _reafirmar_maximizado(self, *, veces: int) -> None:
         """Repite el gesto manual que la clienta confirma que arregla el

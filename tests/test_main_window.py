@@ -672,11 +672,11 @@ def test_reafirmar_maximizado_no_hace_nada_si_no_esta_maximizada(qtbot, conn, mo
     assert ventana._recien_ingresado is False  # se consume igual, esté o no maximizada
 
 
-def test_f5_tambien_reafirma_el_maximizado_por_las_dudas(qtbot, conn, monkeypatch):
-    """Pedido explícito de la clienta: F5 en cualquier solapa, además de
-    su función de siempre, hace "por las dudas" el mismo reafirmado doble
-    — no depende de `_recien_ingresado` (se repite en cada F5, no solo
-    una vez)."""
+def test_f5_ya_no_reafirma_el_maximizado(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta, corrigiendo la ronda anterior: que
+    F5 vuelva a limitarse al refresco de siempre, sin simular el doble
+    maximizar "por las dudas" — ese reafirmado queda solo al iniciar el
+    sistema (`_recien_ingresado`, ver `_cambiar_seccion`)."""
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
     ventana._recien_ingresado = False  # ya se consumió, como en una sesión avanzada
@@ -685,4 +685,4 @@ def test_f5_tambien_reafirma_el_maximizado_por_las_dudas(qtbot, conn, monkeypatc
     ventana._reiniciar_solapa_activa()
     qtbot.wait(50)
 
-    assert llamadas == ["normal", "maximizar", "normal", "maximizar"]
+    assert llamadas == []

@@ -4715,6 +4715,26 @@ depender de un maximizado real, que Qt offscreen no provee):
 `test_f5_tambien_reafirma_el_maximizado_por_las_dudas`. Suite completa
 de `test_main_window.py`: 46 passed.
 
+### Corrección: F5 ya no reafirma el maximizado
+
+Pedido explícito de la clienta, ronda siguiente ("vamos acercándonos a
+la solución del tema visual"): sacar de F5 el reafirmado doble "por las
+dudas" que sumó el cuarto intento — F5 vuelve a limitarse al refresco
+de siempre (`panel.reiniciar()`), sin tocar la geometría de la ventana.
+El reafirmado al iniciar el sistema (`_recien_ingresado`/`_cambiar_
+seccion`, sin tocar) sigue siendo el único disparador. Si más adelante
+hiciera falta cubrir el bug también desde F5, queda a que la clienta lo
+vuelva a pedir explícitamente — no se reinstala por las dudas.
+
+`_reiniciar_solapa_activa` saca la llamada a `self._reafirmar_
+maximizado(veces=2)` del final del método; `_reafirmar_maximizado` en
+sí queda sin tocar (lo sigue usando `_cambiar_seccion`). Test afectado
+en `tests/test_main_window.py`: `test_f5_tambien_reafirma_el_
+maximizado_por_las_dudas` se reemplaza por `test_f5_ya_no_reafirma_el_
+maximizado` (confirma que, con la ventana maximizada, F5 no dispara
+ningún `showNormal`/`showMaximized`). Suite completa de `test_main_
+window.py`: 46 passed.
+
 ## Ventana principal: confirmación al cerrar con la cruz
 
 Pedido explícito de la clienta: al presionar la cruz de cerrar ventana
