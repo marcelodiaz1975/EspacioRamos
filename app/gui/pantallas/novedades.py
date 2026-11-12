@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -127,6 +128,25 @@ _ANCHO_COL_PROFESIONAL = 180
 # mismo valor que `_ANCHO_PANEL_FILTROS_ESTADO_CUENTA` de Liquidaciones.
 _ANCHO_PANEL_FILTROS_ESTADO_CUENTA_CARGOS = 340
 _PADDING_COLUMNA = 30  # pedido de la clienta: las columnas se veían apretadas, sobraba ancho de sobra
+# Pedido explícito de la clienta sobre Vacaciones: "que los elementos de
+# las tres columnas arranquen en el pixel 85 como en reservas regulares"
+# — mismo mecanismo que esa pantalla (`_ALTO_TITULO_COLUMNAS_REGULARES`/
+# `_ALTO_BASE_GRUPO_GRILLA` en `reservas.py`, ver esos comentarios para
+# el detalle completo): "Profesional" (columna 1, `form.setContentsMargins`)
+# y "Filtro de localidad"/la grilla (columnas 2 y 3, `quitar_marco_panel_
+# filtros`/`fijar_margen_superior_grilla`) tienen que arrancar a la misma
+# altura. Valor propio (no se reusa el de Reservas regulares): el
+# formulario de Vacaciones es mucho más corto, así que el margen que
+# alinea sus columnas entre sí no tiene por qué coincidir con el de esa
+# pantalla — medido programáticamente contra el panel de Filtros de la
+# grilla, mismo criterio.
+_ALTO_TITULO_COLUMNAS_VACACIONES = 7
+# `grupo_grilla` (el QGroupBox sin título que envuelve la columna 2/3 —
+# ver `_PanelVacaciones._armar_ui`) reserva un colchón propio arriba
+# ANTES de que arranque el panel de Filtros embebido adentro, aunque no
+# tenga título ni borde — medido programáticamente, mismo motivo que
+# `_ALTO_BASE_GRUPO_GRILLA` de Reservas regulares.
+_ALTO_BASE_GRUPO_GRILLA_VACACIONES = 6
 _LOCALE_ES = QLocale(QLocale.Language.Spanish)
 _FORMATO_FECHA_DIA = "ddd dd-MM-yyyy"  # ej. "lun 07-09-2026" — pedido de la clienta al revisar esta
                                        # pantalla, para las fechas Desde/Hasta y el contenido de las
@@ -348,16 +368,31 @@ class _PanelVacaciones(QWidget):
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
+        # Sin espaciado default de Qt entre lo de arriba y la tabla —
+        # mismo criterio que Reservas regulares (ver `_PanelReservas
+        # Regulares._armar_ui`).
+        layout_externo.setSpacing(0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
         contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
+        layout.setContentsMargins(0, 0, 0, 0)
         splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
+        # Pedido explícito de la clienta: "que el primer elemento de cada
+        # columna arranque en el pixel 85 como en reservas regulares" —
+        # mismo mecanismo que esa pantalla (`_ALTO_TITULO_COLUMNAS_
+        # REGULARES`/`quitar_marco_panel_filtros`/`fijar_margen_superior_
+        # grilla`, ver más abajo): "Profesional" (columna 1) y "Filtro de
+        # localidad"/el encabezado de la grilla (columnas 2 y 3) tienen
+        # que arrancar a la misma altura — valor medido programáticamente
+        # contra el panel de Filtros de la grilla, mismo criterio que esa
+        # pantalla.
+        form.setContentsMargins(9, _ALTO_TITULO_COLUMNAS_VACACIONES, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
@@ -411,9 +446,15 @@ class _PanelVacaciones(QWidget):
 
         form.addStretch()
         splitter_superior.addWidget(panel_form)
+        self._panel_form_vacaciones = panel_form
 
-        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        # Sin título (pedido explícito de la clienta: "en la grilla sacar
+        # la etiqueta de 'Grilla operativa'") — antes decía "Vista
+        # previa: grilla operativa", mismo criterio que Reservas
+        # regulares (que tampoco tiene título acá).
+        grupo_grilla = QGroupBox()
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        layout_grupo_grilla.setContentsMargins(0, 0, 0, 0)
         self.grilla = GrillaOperativaWidget(self.conn)
         # Pedido explícito de la clienta, extendido desde Oferta de
         # consultorios a toda pantalla con esta grilla: Tipo de bloque/
@@ -426,6 +467,39 @@ class _PanelVacaciones(QWidget):
         # tope mínimo lo contemple — tapaba la última fila y podía
         # disparar un scroll vertical de más, innecesario.
         self.grilla.reservar_alto_scroll_horizontal()
+        # Pedido explícito de la clienta: "ampliá la grilla para que se
+        # vea como en reservas regulares y que el cuadro de detalle sea
+        # también como en el de esa solapa" — mismo tratamiento visual
+        # (sin repetir los ajustes puntuales de alto de fila/leyenda de
+        # esa pantalla, pensados para SU propio formulario más largo):
+        # sin título "Filtros" (cada filtro se renombra "Filtro de..."),
+        # sin el marco nativo del panel de Filtros ni de "Referencias de
+        # colores", leyenda compacta, y "Detalle" se estira para ocupar
+        # el sobrante de esta columna, igual que panel_form.
+        self.grilla.mostrar_leyenda_colores(compacta=True)
+        # Margen explícito (no el mínimo nativo, 9px): mismo bug ya
+        # documentado en Reservas regulares/aisladas ("queda apelmazada
+        # con la primera referencia") — sin título visible, el panel
+        # necesita este respiro para no superponer "Referencias de
+        # colores" con la primera fila.
+        self.grilla.quitar_marco_leyenda_colores(20)
+        self.grilla.fijar_titulo_filtros("")
+        self.grilla.renombrar_etiquetas_filtro()
+        self.grilla.quitar_marco_panel_filtros(_ALTO_TITULO_COLUMNAS_VACACIONES - _ALTO_BASE_GRUPO_GRILLA_VACACIONES)
+        self.grilla.fijar_margen_superior_grilla(_ALTO_TITULO_COLUMNAS_VACACIONES - _ALTO_BASE_GRUPO_GRILLA_VACACIONES)
+        # A diferencia de Reservas regulares (cuyo panel_form es la
+        # columna más larga, con Localidad/Edificio/Unidad/Consultorio/
+        # Días/Horario/2 Vigencias/3 botones), acá panel_form es más
+        # corto que el panel de Filtros de la grilla (4 combos de
+        # ubicación + Día + Profesional + leyenda) — así que NO hay que
+        # toparla a la altura de panel_form (`limitar_alto_grilla`): eso
+        # apretaría el panel de Filtros por debajo de lo que su propio
+        # contenido necesita, superponiendo sus filas entre sí. Sin el
+        # tope, el splitter deja que esta columna (la más alta de las
+        # dos) marque el alto real, y `form.addStretch()` ya hace que
+        # panel_form la acompañe sin hueco.
+        self.grilla.dar_stretch_a_detalle()
+        self.grilla.agregar_espacio_antes_de_detalle(8)
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -433,7 +507,20 @@ class _PanelVacaciones(QWidget):
         splitter_superior.setStretchFactor(1, 1)
         layout.addWidget(splitter_superior, stretch=2)
 
+        scroll.setWidget(contenido)
+        # Sin esto, cuando la ventana no alcanza para mostrar todo
+        # (splitter + tabla de abajo) de una, `layout_externo` aprieta
+        # este `scroll` por debajo de lo que su contenido necesita (en
+        # vez de reducir "Vacaciones tomadas", que tiene su propio
+        # scroll nativo de sobra para eso) — superponiendo la grilla con
+        # "Detalle" en vez de dejar que escrolee. Un piso explícito, del
+        # alto que el contenido realmente pide, para que sea siempre
+        # "Vacaciones tomadas" la que cede espacio primero.
+        scroll.setMinimumHeight(contenido.sizeHint().height())
+        layout_externo.addWidget(scroll)
+
         panel_tabla = QGroupBox("Vacaciones tomadas")
+        panel_tabla.setObjectName("panelSolapa")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         excluir_tabla_del_tab(self.tabla)
@@ -446,11 +533,26 @@ class _PanelVacaciones(QWidget):
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         instalar_eliminar_con_tecla(self.tabla, self._cancelar)
+        # Pedido explícito de la clienta: "amplia el ancho de las
+        # columnas para que se aproveche el ancho de la pantalla" —
+        # Desde/Hasta/Valor bonificado/Cupo utilizado/Cupo restante se
+        # reparten el ancho sobrante del panel (mismo criterio que
+        # Registrar pagos/Liquidaciones simuladas), Profesional/Año
+        # calendario se quedan con su ancho natural + padding de
+        # `_ajustar_columnas`.
+        header_vacaciones = self.tabla.horizontalHeader()
+        for columna in (2, 3, 4, 5, 6):
+            header_vacaciones.setSectionResizeMode(columna, QHeaderView.ResizeMode.Stretch)
         layout_tabla.addWidget(self.tabla, stretch=1)
-        layout.addWidget(panel_tabla, stretch=1)
+        # Pedido explícito de la clienta: "que la tabla sea escroleable"
+        # — fuera del `scroll` de arriba (que antes envolvía splitter Y
+        # tabla, dejando que la página entera escroleara en vez de la
+        # tabla sola), mismo criterio que Reservas regulares
+        # (`panel_tabla` vive directo en `layout_externo`, con el
+        # sobrante de la ventana — la tabla escrolea con su propia barra
+        # nativa cuando no entran todas las filas).
+        layout_externo.addWidget(panel_tabla, stretch=1)
 
-        scroll.setWidget(contenido)
-        layout_externo.addWidget(scroll)
         self._actualizar_disponibilidad_crear()
         self._sincronizar_grilla()
         self._actualizar_simulacion_periodo()
@@ -560,8 +662,12 @@ class _PanelVacaciones(QWidget):
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             self.tabla.setItem(i, 1, _item_centrado(r["FechaDesde"][:4]))
-            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaDesde"])))
-            self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaHasta"])))
+            # Pedido explícito de la clienta: "contenido de fecha
+            # alineado a la derecha" — `item_numero` en vez de
+            # `QTableWidgetItem` liso (alineación default a la
+            # izquierda), mismo helper que ya usan los importes.
+            self.tabla.setItem(i, 2, item_numero(_fmt_fecha_dia_abrev(r["FechaDesde"])))
+            self.tabla.setItem(i, 3, item_numero(_fmt_fecha_dia_abrev(r["FechaHasta"])))
             texto_valor = _texto_valor_bonificado(r["ValorBonificado"], r["FechaDesde"], periodo_en_curso)
             self.tabla.setItem(i, 4, item_numero(texto_valor))
             cupo_utilizado = r["CupoConsumidoPorcentaje"]

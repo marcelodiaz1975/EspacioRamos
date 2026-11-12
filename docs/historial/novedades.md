@@ -263,3 +263,99 @@ Suite combinada `test_gui_novedades.py`+`test_catalogos.py`+
 `test_crud_generico.py`: 190 passed. Suite completa: 2479 passed, sin
 regresiones.
 
+## Vacaciones: layout como Reservas regulares
+
+Batch de 4 pedidos explícitos de la clienta sobre `_PanelVacaciones`
+(`app/gui/pantallas/novedades.py`), todos con la misma referencia
+visual ("como en reservas regulares"). Explícitamente, el mismo
+tratamiento se aplica DESPUÉS a Licencias (`_PanelLicencias`), recién
+cuando la clienta dé el OK sobre esta ronda — no tocado todavía.
+
+1. **Alineación "pixel 85".** "Que los elementos de las tres columnas
+   arranquen en el pixel 85 como en reservas regulares" — mismo
+   mecanismo que esa pantalla (`_ALTO_TITULO_COLUMNAS_REGULARES`/
+   `_ALTO_BASE_GRUPO_GRILLA` en `reservas.py`), con valores PROPIOS de
+   esta pantalla (`_ALTO_TITULO_COLUMNAS_VACACIONES`/`_ALTO_BASE_GRUPO_
+   GRILLA_VACACIONES`, ambos en 7/6 — coincidentemente los mismos
+   números que Reservas regulares, porque son hechos de chroma de Qt
+   — margen de `QVBoxLayout`, colchón de `QGroupBox` — no algo que
+   dependa del contenido de cada formulario; medido programáticamente
+   contra el panel de Filtros de la grilla igual que esa pantalla, con
+   delta 0 confirmado): "Profesional" (columna 1, `form.set
+   ContentsMargins`) y "Filtro de localidad"/"Período:" (columnas 2 y
+   3, `quitar_marco_panel_filtros`/`fijar_margen_superior_grilla`)
+   arrancan a la misma altura.
+2. **Sin título "Grilla operativa", grilla ampliada, "Detalle" como en
+   Reservas regulares.** `grupo_grilla` pasa de `QGroupBox("Vista
+   previa: grilla operativa")` a `QGroupBox()` sin título. Mismo
+   tratamiento visual que esa pantalla: `mostrar_leyenda_colores(
+   compacta=True)`, `quitar_marco_leyenda_colores(20)` (margen
+   explícito — sin él, "Referencias de colores" queda apelmazada con
+   la primera fila, mismo bug ya documentado en Reservas regulares/
+   aisladas), `fijar_titulo_filtros("")` + `renombrar_etiquetas_
+   filtro()`, `quitar_marco_panel_filtros(...)`, `fijar_margen_
+   superior_grilla(...)`, `dar_stretch_a_detalle()` y `agregar_espacio_
+   antes_de_detalle(8)`.
+
+   **A diferencia de Reservas regulares, NO se llama `limitar_alto_
+   grilla`:** esa pantalla la usa para toparle el alto a la grilla
+   contra `panel_form` (que ahí es la columna MÁS LARGA de las dos).
+   En Vacaciones es al revés — `panel_form` (Profesional/Año/Desde/
+   Hasta/3 botones/2 etiquetas de cupo) es más corto que el panel de
+   Filtros de la grilla (4 combos de ubicación + Día + Profesional +
+   leyenda) — toparla a la altura de `panel_form` apretaba el panel de
+   Filtros por debajo de lo que necesita, superponiendo sus propias
+   filas entre sí (confirmado con una captura real antes de sacarlo).
+   Sin el tope, el splitter deja que la columna más alta (la grilla)
+   marque el alto real, y el `addStretch()` de siempre en `panel_form`
+   la acompaña sin hueco — más simple que la máquina completa de
+   Reservas regulares (`_presupuesto_columna_grilla`/`_ajustar_alto_
+   detalle`/reajuste dinámico post-`showEvent`), que resuelve un caso
+   de precisión que acá no hace falta.
+
+   **Bug real encontrado con una captura real durante la implementación:**
+   mover la tabla de abajo FUERA del `scroll` de arriba (ver punto 3)
+   hizo que, por primera vez, `scroll` (splitter+grilla) y `panel_
+   tabla` compitieran por el alto de la ventana en `layout_externo`
+   — sin un piso explícito, `layout_externo` apretaba `scroll` por
+   debajo de lo que su contenido necesita (la columna de la grilla,
+   con "Detalle" ya estirado) en vez de reducir primero "Vacaciones
+   tomadas" (que tiene su propio scroll nativo de sobra para eso),
+   superponiendo la grilla con "Detalle" — confirmado con una captura
+   que mostraba "Detalle:" encima de la fila de las 19:00 y
+   "Referencias de colores" tachada por la primera fila de la leyenda.
+   `scroll.setMinimumHeight(contenido.sizeHint().height())` (un piso
+   fijo, calculado una sola vez al construir la pantalla) asegura que
+   sea siempre "Vacaciones tomadas" la que cede espacio primero.
+3. **Tabla de abajo: ancho y scroll propio.** "A continuación poner la
+   tabla, amplia el ancho de las columnas para que se aproveche el
+   ancho de la pantalla... Que la tabla sea escroleable" — Desde/
+   Hasta/Valor bonificado/Cupo utilizado %/Cupo restante % pasan a
+   `QHeaderView.ResizeMode.Stretch` (mismo criterio que Registrar
+   pagos/Liquidaciones simuladas), Profesional/Año calendario se
+   quedan con su ancho natural + padding de `_ajustar_columnas`
+   (sin cambios, sigue siendo compartida con Licencias/Ausencias).
+   `panel_tabla` ("Vacaciones tomadas") sale del `scroll` que antes
+   envolvía splitter Y tabla juntos (dejando que la PÁGINA entera
+   escroleara en vez de la tabla sola) y pasa a vivir directo en
+   `layout_externo` con `stretch=1` (mismo criterio que Reservas
+   regulares) — necesita su propio `objectName("panelSolapa")`
+   (convención "Panel izquierdo gris" de CLAUDE.md) porque ya no
+   hereda el tono claro de `contenido`.
+4. **Fecha alineada a la derecha.** Desde/Hasta de la tabla pasan de
+   `QTableWidgetItem` liso a `item_numero` (mismo helper que ya usan
+   los importes).
+
+Tests nuevos en `tests/test_gui_novedades.py`:
+`test_vacaciones_fechas_desde_hasta_alineadas_a_la_derecha`,
+`test_vacaciones_columnas_desde_hasta_en_adelante_se_estiran_al_ancho_
+de_la_pantalla`, `test_vacaciones_grilla_sin_titulo_de_vista_previa`,
+`test_vacaciones_tabla_queda_fuera_del_scroll_superior`, `test_
+vacaciones_profesional_y_filtro_de_localidad_arrancan_a_la_misma_
+altura`. Verificado visualmente con capturas offscreen (incluyendo
+el escroleo del panel superior, para confirmar que "Referencias de
+colores"/"Detalle" renderizan sin superponerse). Suite completa de
+`test_gui_novedades.py`: 107 passed. Suite completa del proyecto:
+2978 passed, mismos 10 fallos preexistentes del entorno, sin
+regresiones nuevas.
+

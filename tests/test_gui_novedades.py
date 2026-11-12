@@ -137,6 +137,95 @@ def test_columna_anio_calendario_de_vacaciones_queda_centrada(qtbot, conn):
     assert panel.tabla.item(0, 1).textAlignment() == Qt.AlignmentFlag.AlignCenter
 
 
+def test_vacaciones_fechas_desde_hasta_alineadas_a_la_derecha(qtbot, conn):
+    """Pedido explícito de la clienta: "contenido de fecha alineado a la
+    derecha" — mismo helper (`item_numero`) que ya usan los importes."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel._crear()
+
+    assert panel.tabla.item(0, 2).textAlignment() == Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+    assert panel.tabla.item(0, 3).textAlignment() == Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+
+
+def test_vacaciones_columnas_desde_hasta_en_adelante_se_estiran_al_ancho_de_la_pantalla(qtbot, conn):
+    """Pedido explícito de la clienta: "amplia el ancho de las columnas
+    para que se aproveche el ancho de la pantalla" — Desde/Hasta/Valor
+    bonificado/Cupo utilizado/Cupo restante quedan en modo Stretch
+    (mismo criterio que Registrar pagos/Liquidaciones simuladas),
+    Profesional/Año calendario se quedan con su ancho natural."""
+    from PySide6.QtWidgets import QHeaderView
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    header = pantalla.panel_vacaciones.tabla.horizontalHeader()
+    for columna in (2, 3, 4, 5, 6):
+        assert header.sectionResizeMode(columna) == QHeaderView.ResizeMode.Stretch
+    for columna in (0, 1):
+        assert header.sectionResizeMode(columna) != QHeaderView.ResizeMode.Stretch
+
+
+def test_vacaciones_grilla_sin_titulo_de_vista_previa(qtbot, conn):
+    """Pedido explícito de la clienta: "en la grilla sacar la etiqueta de
+    'Grilla operativa'" — antes el `QGroupBox` que envuelve la grilla
+    decía "Vista previa: grilla operativa", mismo criterio que Reservas
+    regulares (que tampoco tiene título ahí)."""
+    from PySide6.QtWidgets import QGroupBox
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    titulos = [g.title() for g in panel.findChildren(QGroupBox)]
+    assert "Vista previa: grilla operativa" not in titulos
+
+
+def test_vacaciones_tabla_queda_fuera_del_scroll_superior(qtbot, conn):
+    """Pedido explícito de la clienta: "que la tabla sea escroleable" —
+    antes de esta ronda, "Vacaciones tomadas" vivía DENTRO del mismo
+    `QScrollArea` que el formulario/grilla, así que escroleaba la
+    PÁGINA entera en vez de solo la tabla; ahora `self.tabla` cuelga de
+    `panel_vacaciones` directo, sin pasar por ningún `QScrollArea`
+    (mismo criterio que Reservas regulares)."""
+    from PySide6.QtWidgets import QScrollArea
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    scrolls = panel.findChildren(QScrollArea)
+    assert len(scrolls) == 1
+    assert scrolls[0].widget() is not None
+    assert panel.tabla not in scrolls[0].widget().findChildren(type(panel.tabla))
+
+
+def test_vacaciones_profesional_y_filtro_de_localidad_arrancan_a_la_misma_altura(qtbot, conn):
+    """Pedido explícito de la clienta: "que los elementos de las tres
+    columnas arranquen en el pixel 85 como en reservas regulares" —
+    "Profesional" (columna 1) y "Filtro de localidad" (columna 2, el
+    primer filtro de la grilla) tienen que arrancar a la misma altura."""
+    from PySide6.QtWidgets import QLabel
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.show()
+
+    etiqueta_profesional = panel._panel_form_vacaciones.findChildren(QLabel)[0]
+    etiqueta_filtro = next(lbl for lbl in panel.grilla.findChildren(QLabel) if lbl.text() == "Filtro de localidad")
+    y_profesional = etiqueta_profesional.mapTo(panel, etiqueta_profesional.rect().topLeft()).y()
+    y_filtro = etiqueta_filtro.mapTo(panel, etiqueta_filtro.rect().topLeft()).y()
+
+    assert y_profesional == y_filtro
+
+
 def test_ajustar_columnas_agrega_padding_sobre_el_ancho_natural(qtbot):
     """La clienta pidió más aire en las columnas de las tablas de esta
     pantalla: `_ajustar_columnas` le suma `_PADDING_COLUMNA` al ancho
