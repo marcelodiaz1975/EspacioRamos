@@ -1864,3 +1864,46 @@ excepcion`, confirma que sigue ocupado como siempre). `_ocupar_regular`
 pasa a devolver el `IdProfesional` que crea, para poder cargarle
 ausencias/vacaciones/licencias en estos tests nuevos (los llamadores
 existentes, que no usaban el valor de retorno, no se ven afectados).
+
+## Bug real: la grilla de disponibilidad no contemplaba una liberación que termina a fin del mes activo
+
+Reportado por la clienta: cargó una liberación (`VigenciaFin` de una
+reserva regular activa al ÚLTIMO día del mes en curso, liberando un
+bloque a partir del mes siguiente) y, al regenerar los archivos de
+Disponibilidad y Propuesta, la grilla de esos documentos seguía
+mostrando ese horario en rojo (ocupado) en vez de amarillo (1 libre con
+ventana) — no estaba contemplando que ese consultorio se libera el mes
+que viene.
+
+Investigado en `app/negocio/grilla.py` (`calcular_ocupacion_regular`,
+usada tanto por el PDF de Disponibilidad standalone como por la
+sección "Disponibilidad" embebida en Propuesta/Liquidación — y también
+por `oferta_busqueda._ocupado_regular`, así que el mismo bug afectaba
+la búsqueda de Oferta de consultorios): el mecanismo que ya existía
+para esto (`_termina_mes_siguiente`, "una reserva cuya VigenciaFin cae
+en el mes siguiente al mes activo marca el slot como disponible")
+chequeaba que `VigenciaFin` cayera DENTRO del rango del mes siguiente
+(`primer_dia_mes(mes_siguiente) <= fin <= ultimo_dia_mes(mes_
+siguiente)`) — pero una `VigenciaFin` en el ÚLTIMO día del mes ACTIVO
+(el caso más común y más urgente de liberar: "fin de la reserva activa
+a fin de [este mes]") caía FUERA de ese rango (antes de que arranque el
+mes siguiente), así que paradójicamente NO calificaba, mientras que una
+reserva que termina más tarde (dentro del mes siguiente) sí lo hacía.
+
+Renombrada a `_termina_pronto` y relajado el piso del rango: ahora
+alcanza con que `VigenciaFin <= ultimo_dia_mes(mes_siguiente)` (sin
+exigir que sea `>= primer_dia_mes(mes_siguiente)`) — `_reserva_
+relevante`, que ya se llama siempre antes en `calcular_ocupacion_
+regular`, garantiza el piso real (`fin >= primer_dia_mes(mes_activo)`),
+así que no hacía falta duplicarlo acá. Con esto, una reserva que
+termina en cualquier punto del mes activo O del mes siguiente se
+considera "a liberarse pronto" y el slot pasa a verse disponible.
+
+Test nuevo en `tests/test_grilla.py`: `test_reserva_que_termina_a_fin_
+del_mes_activo_ya_figura_disponible` (reproduce el caso real reportado:
+`VigenciaFin` al 31 del mes activo). Suite de `tests/test_grilla.py`:
+19 passed. Verificado sin regresiones en las suites relacionadas
+(`test_grilla_pdf.py`, `test_oferta_busqueda*.py`, `test_lista_
+espera.py`, `test_pdf_disponibilidad.py`, `test_pdf_oferta_busqueda.py`,
+`test_pdf_propuesta.py`, `test_pdf_liquidacion.py`): 231 passed en
+total entre todas.

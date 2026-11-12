@@ -120,6 +120,24 @@ def test_reserva_que_termina_el_mes_que_viene_ya_figura_disponible(conn, unidad_
     assert grilla[(id_unidad, "Lunes", 15)] == "verde"
 
 
+def test_reserva_que_termina_a_fin_del_mes_activo_ya_figura_disponible(conn, unidad_con_dos_consultorios, profesional):
+    """Bug real reportado por la clienta: cargar una liberación con
+    VigenciaFin en el último día del mes activo (el caso más común —
+    "marcando fin de la reserva activa a fin de [este mes]") seguía
+    mostrando el slot ocupado en vez de disponible — más urgente para
+    liberarse que una que termina el mes siguiente (ya cubierto por el
+    test de arriba), pero antes no calificaba."""
+    id_unidad, id_c1, id_c2 = unidad_con_dos_consultorios
+    # c1 (con ventana) termina el 31 de agosto -> libre a partir de septiembre,
+    # tiene que figurar disponible ya en la grilla de agosto (mes activo).
+    crear_reserva_regular(
+        conn, id_profesional=profesional, id_consultorio=id_c1, dia_semana="Lunes",
+        hora_inicio=14, hora_fin=16, vigencia_inicio="2026-01-01", vigencia_fin="2026-08-31",
+    )
+    grilla = calcular_grilla(conn, 2026, 8)  # mes activo: agosto
+    assert grilla[(id_unidad, "Lunes", 15)] == "verde"
+
+
 # --------------------------------------------------------------- dias_grilla (3.28)
 
 def test_dias_grilla_usa_el_default_sin_configurar(conn):

@@ -6,8 +6,9 @@ vigente que lo cubre. Reglas particulares del documento:
 - Una reserva confirmada que arranca en un mes posterior al mes activo
   también marca el slot como ocupado (ya está comprometido, aunque todavía
   no haya empezado).
-- Una reserva cuya VigenciaFin cae en el mes siguiente al mes activo marca
-  el slot como disponible (se va a liberar pronto, así que se puede ofrecer).
+- Una reserva cuya VigenciaFin cae en el mes activo o en el mes siguiente
+  marca el slot como disponible (se va a liberar pronto, así que se puede
+  ofrecer) — ver `_termina_pronto`.
 - Vacaciones y ausencias NO afectan esta grilla (así lo indica el documento).
 
 Color de cada celda (por unidad/día/hora), según cuántos consultorios de
@@ -66,18 +67,35 @@ def _reserva_relevante(reserva: sqlite3.Row, anio_activo: int, mes_activo: int) 
     return date.fromisoformat(fin) >= _primer_dia_mes(anio_activo, mes_activo)
 
 
-def _termina_mes_siguiente(vigencia_fin: str | None, anio_activo: int, mes_activo: int) -> bool:
+def _termina_pronto(vigencia_fin: str | None, anio_activo: int, mes_activo: int) -> bool:
+    """True si `vigencia_fin` cae dentro del mes activo o del mes
+    siguiente — en ambos casos la reserva se va a liberar pronto, así que
+    el slot se puede ofrecer ya mismo (ver docstring del módulo).
+
+    Bug real reportado por la clienta: cargar una liberación con
+    `VigenciaFin` en el ÚLTIMO día del mes activo (el caso más común —
+    "marcando fin de la reserva activa a fin de [este mes]") seguía
+    mostrando el slot ocupado en vez de disponible, porque el chequeo
+    anterior (`_termina_mes_siguiente`) solo reconocía un `vigencia_fin`
+    que cayera DENTRO del mes siguiente (`primer_dia_mes(mes_siguiente)
+    <= fin <= ultimo_dia_mes(mes_siguiente)`), dejando afuera cualquier
+    fecha de fin dentro del propio mes activo — más urgente para
+    liberarse que una del mes siguiente, pero paradójicamente la única
+    que no calificaba. `_reserva_relevante` (llamada siempre antes, ver
+    `calcular_ocupacion_regular`) ya garantiza `fin >= primer_dia_mes(mes_
+    activo)`, así que acá alcanza con chequear el techo (fin dentro del
+    mes activo o del siguiente), sin duplicar el piso."""
     if not vigencia_fin:
         return False
     anio_sig, mes_sig = _mes_siguiente(anio_activo, mes_activo)
     fin = date.fromisoformat(vigencia_fin)
-    return _primer_dia_mes(anio_sig, mes_sig) <= fin <= _ultimo_dia_mes(anio_sig, mes_sig)
+    return fin <= _ultimo_dia_mes(anio_sig, mes_sig)
 
 
 def _ocupa_mes_activo(reserva: sqlite3.Row, anio_activo: int, mes_activo: int) -> bool:
-    """Una reserva relevante ocupa el slot salvo que se esté por liberar el
-    mes que viene (ver docstring del módulo)."""
-    return not _termina_mes_siguiente(reserva["VigenciaFin"], anio_activo, mes_activo)
+    """Una reserva relevante ocupa el slot salvo que se esté por liberar
+    pronto (ver docstring del módulo y `_termina_pronto`)."""
+    return not _termina_pronto(reserva["VigenciaFin"], anio_activo, mes_activo)
 
 
 def _clasificar(consultorios_libres: list[sqlite3.Row]) -> str:
