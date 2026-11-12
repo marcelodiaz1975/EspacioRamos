@@ -138,22 +138,24 @@ def test_tabla_queda_a_la_derecha_de_la_columna_y_escrolea_en_horizontal(qtbot, 
     assert abs(pantalla.tabla.y() - columna.y()) <= 2  # "arranca arriba", misma altura que la columna
 
 
-def test_columnas_fijas_muestran_las_mismas_seis_columnas_que_la_tabla_real(qtbot, conn):
-    """Pedido explícito de la clienta: "que se inmovilice la navegación
-    a partir de Regular actual, o sea que hasta % diferencial esté
-    todo a la vista, como inmovilizar columnas en Excel" —
-    `_tabla_fija` (el overlay que queda fijo al escrolear) muestra
-    Localidad/Edificio/Unidad/Consul/% general/% diferencial, en ese
-    orden, con el mismo contenido que `self.tabla` para cada fila."""
+def test_columnas_fijas_muestran_las_mismas_cuatro_columnas_que_la_tabla_real(qtbot, conn):
+    """Pedido explícito de la clienta, corrigiendo la ronda anterior
+    (que llegaba hasta "% diferencial"): "que quede inmovilizada luego
+    de la columna de 'Consul', hasta ahi quieto, lo demás se mueve con
+    el escroleo" — `_tabla_fija` (el overlay que queda fijo al
+    escrolear) muestra solo Localidad/Edificio/Unidad/Consul, en ese
+    orden, con el mismo contenido que `self.tabla` para cada fila; "%
+    general"/"% diferencial" ya NO quedan fijas, escrolean con el
+    resto."""
     _crear_edificio_con_consultorio(conn)
     pantalla = _PanelAumentos(conn)
     qtbot.addWidget(pantalla)
 
-    assert _COLUMNAS_FIJAS_AUMENTOS == (0, 1, 2, 3, 4, 5)
-    assert pantalla._tabla_fija.columnCount() == 6
+    assert _COLUMNAS_FIJAS_AUMENTOS == (0, 1, 2, 3)
+    assert pantalla._tabla_fija.columnCount() == 4
     assert [
-        pantalla._tabla_fija.horizontalHeaderItem(i).text() for i in range(6)
-    ] == ["Localidad", "Edificio", "Unidad", "Consul", "% general", "% diferencial"]
+        pantalla._tabla_fija.horizontalHeaderItem(i).text() for i in range(4)
+    ] == ["Localidad", "Edificio", "Unidad", "Consul"]
     assert pantalla._tabla_fija.rowCount() == pantalla.tabla.rowCount() == 1
     for columna_real in _COLUMNAS_FIJAS_AUMENTOS:
         assert pantalla._tabla_fija.item(0, columna_real).text() == pantalla.tabla.item(0, columna_real).text()
@@ -180,21 +182,6 @@ def test_columnas_fijas_siguen_el_filtro_visual_y_el_scroll_vertical(qtbot, conn
 
     pantalla.tabla.verticalScrollBar().setValue(pantalla.tabla.verticalScrollBar().maximum())
     assert pantalla._tabla_fija.verticalScrollBar().value() == pantalla.tabla.verticalScrollBar().value()
-
-
-def test_click_en_porcentaje_diferencial_de_la_columna_fija_abre_el_mismo_dialogo(qtbot, conn, monkeypatch):
-    """La única de las seis columnas fijas que se puede clickear para
-    editar ("% diferencial") tiene que seguir funcionando igual desde
-    la tabla fija de encima — el click ahí se traduce al índice real de
-    columna antes de delegarlo a `_al_click_celda`."""
-    id_consultorio = _crear_edificio_con_consultorio(conn)
-    pantalla = _PanelAumentos(conn)
-    qtbot.addWidget(pantalla)
-    _mockear_dialogo_valor(monkeypatch, "12,5")
-
-    pantalla._tabla_fija.cellClicked.emit(0, 5)  # 5 = % diferencial dentro de _tabla_fija
-
-    assert pantalla._diferenciales[id_consultorio] == 12.5
 
 
 def test_unidad_y_consul_quedan_centralizados(qtbot, conn):

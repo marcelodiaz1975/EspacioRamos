@@ -581,3 +581,35 @@ abre_el_mismo_dialogo`, `test_unidad_y_consul_quedan_centralizados`,
 necesiten_mas`. Suite completa: 49 passed, sin regresiones en
 `test_gui_valores.py`/`test_gui_pantalla_grilla_operativa.py`.
 
+**Corrección: inmovilizar solo hasta "Consul" (no hasta "%
+diferencial").** Pedido explícito de la clienta sobre la ronda
+anterior: "que quede inmovilizada luego de la columna de 'Consul',
+hasta ahi quieto, lo demás se mueve con el escroleo" — "% general" y
+"% diferencial" dejan de estar fijas y pasan a escrolear junto con el
+resto de la tabla (Regular actual/nuevo, Dif. regular, Aislada
+actual/nuevo, Dif. aislada, Restablecer). `_COLUMNAS_FIJAS_AUMENTOS`
+pasa de seis a cuatro columnas: `(_COL_LOCALIDAD, _COL_EDIFICIO,
+_COL_UNIDAD, _COL_CONSULTORIO)`. El mecanismo de overlay
+(`self._tabla_fija`, `_sincronizar_tabla_fija`,
+`_actualizar_geometria_tabla_fija`) es el mismo de la ronda anterior,
+sin cambios — solo se angostó el conjunto de columnas que clona.
+
+Como ninguna de las cuatro columnas que quedan fijas es clickeable
+para editar (a diferencia de "% diferencial", que sí lo era y ahora
+escrolea con el resto), se eliminó el passthrough de `cellClicked` del
+overlay hacia `_al_click_celda` — ya no hace falta traducir ningún
+click desde la tabla fija, porque ningún click en ella dispara nada.
+
+Tests en `tests/test_gui_aumentos.py`:
+`test_columnas_fijas_muestran_las_mismas_seis_columnas_que_la_tabla_
+real` se renombró y corrigió a
+`test_columnas_fijas_muestran_las_mismas_cuatro_columnas_que_la_tabla_
+real` (ahora espera `(0, 1, 2, 3)` = Localidad/Edificio/Unidad/Consul).
+Se eliminó `test_click_en_porcentaje_diferencial_de_la_columna_fija_
+abre_el_mismo_dialogo`: probaba el passthrough de clicks que ya no
+existe, porque "% diferencial" dejó de ser una columna fija. Suite
+completa de `test_gui_aumentos.py`: 48 passed. Verificado visualmente
+con captura offscreen: Localidad/Edificio/Unidad/Consul quedan fijas
+al escrolear horizontalmente, "% general" en adelante se desplaza con
+el resto de la tabla.
+

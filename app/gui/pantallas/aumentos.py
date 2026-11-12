@@ -265,14 +265,16 @@ class _TablaConAnchoDinamico(QTableWidget):
         self._al_redimensionar()
 
 
-_COLUMNAS_FIJAS_AUMENTOS = (
-    _COL_LOCALIDAD, _COL_EDIFICIO, _COL_UNIDAD, _COL_CONSULTORIO,
-    _COL_PORCENTAJE_GENERAL, _COL_PORCENTAJE_DIFERENCIAL,
-)
-"""Pedido explícito de la clienta: "que se inmovilice la navegación a
-partir de Regular actual, o sea que hasta % diferencial esté todo a la
-vista, como inmovilizar columnas en Excel" — estas seis quedan FIJAS
-(no escrolean horizontalmente) en `_TablaColumnasFijas`, ver más abajo."""
+_COLUMNAS_FIJAS_AUMENTOS = (_COL_LOCALIDAD, _COL_EDIFICIO, _COL_UNIDAD, _COL_CONSULTORIO)
+"""Pedido explícito de la clienta, primera ronda: "que se inmovilice la
+navegación a partir de Regular actual, o sea que hasta % diferencial
+esté todo a la vista" (es decir, Localidad..% diferencial fijas). Pedido
+explícito de la clienta, segunda ronda, corrigiendo lo de arriba: "que
+quede inmovilizada luego de la columna de 'Consul', hasta ahi quieto,
+lo demás se mueve con el escroleo" — "% general"/"% diferencial" pasan
+a escrolear junto con el resto, solo estas cuatro quedan FIJAS (no
+escrolean horizontalmente) en el overlay (`self._tabla_fija`, ver más
+abajo)."""
 
 
 def _ajustar_columnas(tabla: QTableWidget) -> None:
@@ -472,14 +474,11 @@ class _PanelAumentos(QWidget):
         self._tabla_fija.setHorizontalHeaderLabels(
             [self.tabla.horizontalHeaderItem(c).text() for c in _COLUMNAS_FIJAS_AUMENTOS]
         )
-        # % diferencial (la única de las seis columnas fijas que se
-        # puede clickear para editar) tiene que seguir funcionando
-        # igual desde acá arriba — traduce el índice de columna de
-        # `_tabla_fija` (0..5) al real de `self.tabla` antes de
-        # delegarlo al mismo manejador de siempre.
-        self._tabla_fija.cellClicked.connect(
-            lambda fila, columna: self._al_click_celda(fila, _COLUMNAS_FIJAS_AUMENTOS[columna])
-        )
+        # Ninguna de las cuatro columnas fijas (Localidad/Edificio/
+        # Unidad/Consul) es clickeable para editar — a diferencia de la
+        # primera ronda (que llegaba hasta "% diferencial" y necesitaba
+        # traducir el click de acá arriba hacia `_al_click_celda`), acá
+        # no hace falta ningún passthrough de clicks.
         self.tabla.verticalScrollBar().valueChanged.connect(self._tabla_fija.verticalScrollBar().setValue)
 
     def _actualizar_geometria_tabla_fija(self) -> None:
