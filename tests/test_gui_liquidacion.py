@@ -467,6 +467,18 @@ def test_solapa_estado_cuenta_lista_liquidaciones_del_profesional(qtbot, conn):
     assert panel.tabla.item(0, 2).text() == formatear_moneda(1100)
 
 
+def test_solapa_estado_cuenta_columna_archivo_se_estira_al_ancho_de_pantalla(qtbot, conn):
+    """Pedido explícito de la clienta: "ajustar el ancho de las columnas
+    para aprovechar el ancho de pantalla" — "Archivo" (la única columna
+    de texto realmente variable) pasa a modo Stretch."""
+    from PySide6.QtWidgets import QHeaderView
+
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    header = pantalla.panel_estado_cuenta.tabla.horizontalHeader()
+    assert header.sectionResizeMode(5) == QHeaderView.ResizeMode.Stretch
+
+
 def test_solapa_estado_cuenta_combo_es_buscable_por_codigo_o_nombre(qtbot, conn):
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)

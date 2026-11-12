@@ -506,6 +506,13 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
             "Fecha y hora generación del archivo",
         ])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Pedido explícito de la clienta: "ajustar el ancho de las
+        # columnas para aprovechar el ancho de pantalla" — "Archivo" (el
+        # nombre del PDF generado) es la única columna de texto
+        # realmente variable de esta tabla, así que es la que se lleva
+        # el ancho sobrante (mismo criterio que "Profesional" en
+        # "Emisión de archivos", más arriba en este archivo).
+        self.tabla.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         layout_externo.addWidget(self.tabla, stretch=1)
 
     def actualizar(self) -> None:

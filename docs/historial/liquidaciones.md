@@ -999,3 +999,19 @@ total del sistema), `test_liquidaciones_simuladas_dos_edificios_en_la_
 misma_localidad_habilita_el_combo`. Verificado visualmente con captura
 offscreen. Suite completa de `test_gui_liquidacion.py`: 69 passed.
 
+## Estado de cuenta (Liquidaciones): ancho de columnas
+
+Pedido explícito de la clienta: "ajustar el ancho de las columnas para
+aprovechar el ancho de pantalla" en `_PanelEstadoCuentaLiquidaciones`.
+De las siete columnas (Período/Fecha emisión/Monto generado/Reemisión/
+Estado de envío/Archivo/Fecha y hora generación del archivo), "Archivo"
+(el nombre del PDF generado) es la única de texto realmente variable —
+pasa a `QHeaderView.ResizeMode.Stretch`, mismo criterio ya usado con
+"Profesional" en "Emisión de archivos" (misma pantalla, más arriba en
+`liquidacion.py`).
+
+Test nuevo en `tests/test_gui_liquidacion.py`:
+`test_solapa_estado_cuenta_columna_archivo_se_estira_al_ancho_de_
+pantalla`. Verificado visualmente con captura offscreen. Suite completa
+de `test_gui_liquidacion.py`: 70 passed.
+
