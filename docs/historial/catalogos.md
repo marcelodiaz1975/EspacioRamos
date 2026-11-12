@@ -600,3 +600,38 @@ Tests nuevos en `tests/test_catalogos.py` (parametrizados sobre las dos
 pantallas): `test_texto_se_achica_para_que_activo_entre_sin_escrolear`,
 `test_vista_previa_muestra_el_texto_completo_del_registro_
 seleccionado`.
+
+## Tipos de licencia: anchos de columna y alineación
+
+Tres pedidos explícitos de la clienta sobre `pantalla_tipos_licencia`
+(`app/gui/pantallas/catalogos.py`):
+
+1. **"% Bonificación"/"Duración máxima (días)" alineadas a la
+   derecha.** Estos dos campos son `tipo="numero"` SIN `es_monto` (no
+   son importes, no llevan formato moneda) — `PantallaCRUD.actualizar`
+   solo alineaba a la derecha los campos con `es_monto` (vía
+   `item_monto`); un `numero` liso sin `es_monto`/`centrado` caía en
+   `QTableWidgetItem` sin alinear (izquierda, por default de Qt). Se
+   suma `Campo.alineado_derecha` (nuevo, `app/gui/crud_generico.py`):
+   mismo criterio que `Campo.centrado`, pero con `item_numero` (número
+   crudo alineado a la derecha, sin formato moneda) — opt-in explícito
+   por catálogo, no un default nuevo para TODO campo "numero" del
+   sistema (otros catálogos con campos "numero" sin marcar esto, ej.
+   Consultorios, siguen sin revisar — mismo criterio "uno por uno" de
+   siempre).
+2. **"Carga manual"/"Activo" centralizados.** `centrado=True` en los
+   dos `Campo` — mecanismo ya existente, sin cambios (mismo que Listas
+   editables usa para "Orden"/"Activo").
+3. **Anchos de columna, aprovechar el ancho de la pantalla.** `Nombre`
+   (el único campo de texto libre del catálogo) pasa a ser
+   `columna_prioritaria` — mismo mecanismo que ya usa Listas editables
+   (`_repartir_ancho_sobrante`): se lleva la mitad del ancho sobrante,
+   la otra mitad se reparte entre el resto de las columnas sin `ancho_
+   fijo`.
+
+Tests nuevos en `tests/test_catalogos.py`:
+`test_tipos_licencia_bonificacion_y_duracion_alineadas_a_la_derecha`,
+`test_tipos_licencia_carga_manual_y_activo_centralizados`,
+`test_tipos_licencia_nombre_se_lleva_el_ancho_sobrante`. Verificado
+visualmente con captura offscreen. Suite completa de
+`test_catalogos.py`: 76 passed.

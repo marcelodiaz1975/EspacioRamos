@@ -50,7 +50,7 @@ from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.fecha import aplicar_color_sabado_negro, instalar_flechas_cambian_fecha_completa
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.gui.widgets.items_tabla import item_centrado
+from app.gui.widgets.items_tabla import item_centrado, item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.resumen_saldo import item_monto
 from app.repositorio.registro import obtener_repositorio
@@ -199,6 +199,16 @@ class Campo:
     de diálogo Nuevo/Editar) — pedido puntual de un catálogo (ej.
     "Orden"/"Activo" en Listas editables), no un comportamiento default
     de `PantallaCRUD`."""
+    alineado_derecha: bool = False
+    """Solo para tipo="numero" SIN `es_monto` (que ya alinea a la
+    derecha con formato moneda, `item_monto`): alinea el número crudo a
+    la derecha con `item_numero`, en vez de la celda de texto liso
+    (alineada a la izquierda) que usa por default cualquier campo
+    "numero" sin esto — pedido puntual de un catálogo (Tipos de
+    licencia: "% Bonificación"/"Duración máxima (días)"), no un
+    comportamiento default de `PantallaCRUD` (otros catálogos con
+    campos "numero" sin marcar esto, ej. Consultorios, siguen sin
+    revisar)."""
     ancho_fijo: bool = False
     """Esta columna no participa del reparto de ancho sobrante que hace
     `PantallaCRUD` cuando se pasa `columna_prioritaria` (ver más abajo):
@@ -665,6 +675,8 @@ class PantallaCRUD(QWidget):
                     item = item_monto(registro[campo.nombre])
                 elif campo.centrado:
                     item = item_centrado(self._texto_celda(registro, campo))
+                elif campo.alineado_derecha:
+                    item = item_numero(self._texto_celda(registro, campo))
                 else:
                     item = QTableWidgetItem(self._texto_celda(registro, campo))
                 if col_idx == 0:

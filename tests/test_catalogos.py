@@ -804,6 +804,56 @@ def test_pantalla_tipos_licencia_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre3") == 1
 
 
+def test_tipos_licencia_bonificacion_y_duracion_alineadas_a_la_derecha(qtbot, conn):
+    """Pedido explícito de la clienta: "% Bonificación"/"Duración
+    máxima (días)" alineadas a la derecha — campos "numero" sin
+    `es_monto`, así que usan `alineado_derecha` en vez de `item_monto`."""
+    from PySide6.QtCore import Qt
+
+    obtener_repositorio(conn, "TipoLicencia").crear(
+        Nombre="Licencia por estudio", PorcentajeBonificacion=100, DuracionMaximaDias=30,
+    )
+    conn.commit()
+    pantalla = catalogos.pantalla_tipos_licencia(conn)
+    qtbot.addWidget(pantalla)
+
+    assert pantalla.tabla_widget.item(0, 1).textAlignment() == Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+    assert pantalla.tabla_widget.item(0, 2).textAlignment() == Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+
+
+def test_tipos_licencia_carga_manual_y_activo_centralizados(qtbot, conn):
+    """Pedido explícito de la clienta: "Carga manual" y "Activo"
+    centralizados."""
+    from PySide6.QtCore import Qt
+
+    obtener_repositorio(conn, "TipoLicencia").crear(Nombre="Licencia por estudio", EsManual=1, Activo=1)
+    conn.commit()
+    pantalla = catalogos.pantalla_tipos_licencia(conn)
+    qtbot.addWidget(pantalla)
+
+    assert pantalla.tabla_widget.item(0, 3).textAlignment() == Qt.AlignmentFlag.AlignCenter
+    assert pantalla.tabla_widget.item(0, 4).textAlignment() == Qt.AlignmentFlag.AlignCenter
+
+
+def test_tipos_licencia_nombre_se_lleva_el_ancho_sobrante(qtbot, conn):
+    """Pedido explícito de la clienta: "amplia los anchos de las
+    columnas para aprovechar el ancho de la pantalla" — "Nombre" (el
+    único campo de texto libre) se lleva el sobrante, mismo mecanismo
+    que ya usa Listas editables (`columna_prioritaria`)."""
+    pantalla = catalogos.pantalla_tipos_licencia(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(1600, 800)
+    qtbot.waitExposed(pantalla)
+
+    ancho_bonificacion_antes = pantalla.tabla_widget.columnWidth(1)
+    pantalla.resize(1600, 800)
+    qtbot.wait(50)
+
+    assert pantalla.tabla_widget.columnWidth(0) > 300  # "Nombre"
+    assert pantalla.tabla_widget.columnWidth(1) == ancho_bonificacion_antes  # "% Bonificación" no crece
+
+
 def test_tabla_de_catalogo_generico_suma_padding_sobre_el_ancho_justo(qtbot, conn):
     """Hallazgo puntual sobre "Nombre" de Tipos de licencia (quedaba muy
     pegada al contenido, sin el padding que ya tienen las tablas de

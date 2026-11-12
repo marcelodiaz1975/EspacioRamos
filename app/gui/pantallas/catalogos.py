@@ -332,13 +332,24 @@ def pantalla_responsables(conn: sqlite3.Connection, *, anidado: bool = False) ->
 def pantalla_tipos_licencia(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
     campos = [
         Campo("Nombre", "Nombre", requerido=True),
-        Campo("PorcentajeBonificacion", "% Bonificación", tipo="numero"),
-        Campo("DuracionMaximaDias", "Duración máxima (días)", tipo="numero"),
-        Campo("EsManual", "Carga manual", tipo="booleano"),
-        Campo("Activo", "Activo", tipo="booleano"),
+        # Pedido explícito de la clienta: "% Bonificación"/"Duración
+        # máxima (días)" alineados a la derecha (número crudo, no
+        # importe — `alineado_derecha`, no `es_monto`).
+        Campo("PorcentajeBonificacion", "% Bonificación", tipo="numero", alineado_derecha=True),
+        Campo("DuracionMaximaDias", "Duración máxima (días)", tipo="numero", alineado_derecha=True),
+        # Pedido explícito de la clienta: "Carga manual"/"Activo"
+        # centralizados.
+        Campo("EsManual", "Carga manual", tipo="booleano", centrado=True),
+        Campo("Activo", "Activo", tipo="booleano", centrado=True),
         *campos_libres(conn),
     ]
-    return PantallaCRUD(conn, "TipoLicencia", "Tipos de licencia", campos, anidado=anidado)
+    # Pedido explícito de la clienta: "amplia los anchos de las columnas
+    # para aprovechar el ancho de la pantalla" — "Nombre" (el único
+    # campo de texto libre) se lleva el ancho sobrante, mismo mecanismo
+    # que ya usa Listas editables (`columna_prioritaria`).
+    return PantallaCRUD(
+        conn, "TipoLicencia", "Tipos de licencia", campos, anidado=anidado, columna_prioritaria="Nombre",
+    )
 
 
 def _opciones_tipo_lista(conn: sqlite3.Connection) -> list[tuple[str, str]]:
