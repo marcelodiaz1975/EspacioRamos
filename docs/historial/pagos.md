@@ -242,3 +242,29 @@ Pedido de la clienta:
    `ImpactoSaldoAnterior`/`ImpactoSaldoActual` en filas viejas +
    idempotencia), `tests/test_gui_pagos.py` (wording del cartel de
    Eliminar con cascada).
+
+## Registrar pagos: centrado y anchos de columna
+
+Dos pedidos explícitos de la clienta sobre la tabla de
+`_PanelRegistrarPago` (`app/gui/pantallas/pagos.py`):
+
+1. **Centrado.** "Período imputado", "Registro modificado" y "Es
+   ajuste" pasan de `QTableWidgetItem` liso (alineación default a la
+   izquierda) a `item_centrado` (`app/gui/widgets/items_tabla.py`,
+   mismo helper que ya usan otras pantallas para esta misma excepción
+   puntual — ver "Contenido de celda" en CLAUDE.md).
+2. **Anchos.** "Monto", "Saldo anterior" y "Nuevo saldo" al mismo
+   ancho que "Registro modificado": tras el `resizeColumnsToContents()`
+   de siempre, se toma `columnWidth()` de "Registro modificado" (ya
+   calculado) y se aplica a esas tres columnas con `setColumnWidth`.
+
+Alcance acotado a esta solapa puntual (no a la tabla de "Estado de
+cuenta" de `_PanelEstadoCuentaPagos`, que comparte varias de estas
+columnas pero no se tocó — no fue parte del pedido).
+
+Tests nuevos en `tests/test_gui_pagos.py`:
+`test_tabla_registrar_pagos_periodo_imputado_registro_modificado_y_es_
+ajuste_centrados`,
+`test_tabla_registrar_pagos_monto_saldos_al_mismo_ancho_que_registro_
+modificado`. Verificado visualmente con captura offscreen. Suite
+completa de `test_gui_pagos.py`: 78 passed.

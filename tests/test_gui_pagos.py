@@ -192,6 +192,40 @@ def test_registrar_pago_negativo_descuenta_saldo_actual(qtbot, conn):
     assert panel.tabla.rowCount() == 1
 
 
+def test_tabla_registrar_pagos_periodo_imputado_registro_modificado_y_es_ajuste_centrados(qtbot, conn):
+    """Pedido explícito de la clienta: contenidos de "Período imputado",
+    "Registro modificado" y "Es ajuste" centralizados (el resto de las
+    columnas de texto sigue a la izquierda, mismo criterio de siempre)."""
+    id_profesional = _crear_profesional(conn, saldo=10000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(500)
+    panel._registrar()
+
+    assert panel.tabla.item(0, 2).textAlignment() == Qt.AlignmentFlag.AlignCenter  # Período imputado
+    assert panel.tabla.item(0, 8).textAlignment() == Qt.AlignmentFlag.AlignCenter  # Registro modificado
+    assert panel.tabla.item(0, 9).textAlignment() == Qt.AlignmentFlag.AlignCenter  # Es ajuste
+
+
+def test_tabla_registrar_pagos_monto_saldos_al_mismo_ancho_que_registro_modificado(qtbot, conn):
+    """Pedido explícito de la clienta: "Monto", "Saldo anterior" y
+    "Nuevo saldo" al mismo ancho que "Registro modificado"."""
+    id_profesional = _crear_profesional(conn, saldo=10000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(500)
+    panel._registrar()
+
+    ancho_registro_modificado = panel.tabla.columnWidth(8)
+    assert panel.tabla.columnWidth(3) == ancho_registro_modificado  # Monto
+    assert panel.tabla.columnWidth(6) == ancho_registro_modificado  # Saldo anterior
+    assert panel.tabla.columnWidth(7) == ancho_registro_modificado  # Nuevo saldo
+
+
 def test_registrar_pago_positivo_suma_saldo_actual(qtbot, conn):
     id_profesional = _crear_profesional(conn, saldo=1000)
     pantalla = PantallaPagos(conn)

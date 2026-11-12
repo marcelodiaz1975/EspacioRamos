@@ -43,7 +43,7 @@ from app.gui.pantallas.reservas import _opciones_profesional, _texto_profesional
 from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.gui.widgets.items_tabla import item_numero
+from app.gui.widgets.items_tabla import item_centrado, item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
 from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, partes_resumen
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
@@ -544,16 +544,24 @@ class _PanelRegistrarPago(QWidget):
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_fmt_fecha_hora_larga(r["FechaHoraCarga"])))
             self.tabla.setItem(i, 1, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            self.tabla.setItem(i, 2, QTableWidgetItem(r["PeriodoImputado"] or ""))
+            self.tabla.setItem(i, 2, item_centrado(r["PeriodoImputado"] or ""))
             self._poner_item_monto(i, 3, r["Monto"])
             self.tabla.setItem(i, 4, QTableWidgetItem(r["MedioPago"] or ""))
             self.tabla.setItem(i, 5, QTableWidgetItem(r["CuentaReceptora"] or ""))
             self._poner_item_monto(i, 6, r["SaldoAnterior"])
             self._poner_item_monto(i, 7, r["SaldoNuevo"])
-            self.tabla.setItem(i, 8, QTableWidgetItem("Sí" if r["RegistroModificado"] else "No"))
-            self.tabla.setItem(i, 9, QTableWidgetItem("Sí" if r["EsAjuste"] else "No"))
+            self.tabla.setItem(i, 8, item_centrado("Sí" if r["RegistroModificado"] else "No"))
+            self.tabla.setItem(i, 9, item_centrado("Sí" if r["EsAjuste"] else "No"))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(1, max(self.tabla.columnWidth(1), _ANCHO_COL_PROFESIONAL))
+        # Pedido explícito de la clienta: "Monto"/"Saldo anterior"/"Nuevo
+        # saldo" al mismo ancho que "Registro modificado" — se toma ESE
+        # ancho ya calculado por `resizeColumnsToContents()` (columna 8)
+        # como ancho común para las tres, igual que el resto del sistema
+        # usa una columna de referencia como piso/ancho común.
+        ancho_registro_modificado = self.tabla.columnWidth(8)
+        for columna in (3, 6, 7):
+            self.tabla.setColumnWidth(columna, ancho_registro_modificado)
         self._actualizar_tanda()
         self._actualizar_saldos()
         self._actualizar_botones()
