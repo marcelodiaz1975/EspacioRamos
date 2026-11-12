@@ -321,6 +321,42 @@ def test_fechas_especiales_tipo_es_combo_cerrado(qtbot, conn):
     assert textos[0] == "Feriado nacional"
 
 
+def test_fechas_especiales_activo_queda_centralizado(qtbot, conn):
+    """Pedido explícito de la clienta: "Activo" centralizado."""
+    from PySide6.QtCore import Qt
+
+    obtener_repositorio(conn, "FechasEspeciales").crear(Fecha="2026-12-25", Descripcion="Navidad", Activo=1)
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+
+    assert pantalla.tabla_widget.item(0, 3).textAlignment() == Qt.AlignmentFlag.AlignCenter
+
+
+def test_fechas_especiales_descripcion_y_tipo_se_llevan_el_ancho_sobrante(qtbot, conn):
+    """Pedido explícito de la clienta: "dale mas ancho a las columnas
+    Descripción y Tipo" — "Descripcion" es `columna_prioritaria` (mitad
+    del sobrante); "Fecha"/"Activo"/campos libres quedan `ancho_fijo`,
+    así que "Tipo" es la única columna del reparto de la otra mitad y se
+    la lleva entera."""
+    pantalla = catalogos.pantalla_fechas_especiales(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    pantalla.resize(900, 800)
+    qtbot.waitExposed(pantalla)
+
+    ancho_fecha_antes = pantalla.tabla_widget.columnWidth(0)
+    ancho_activo_antes = pantalla.tabla_widget.columnWidth(3)
+    ancho_descripcion_antes = pantalla.tabla_widget.columnWidth(1)
+    ancho_tipo_antes = pantalla.tabla_widget.columnWidth(2)
+    pantalla.resize(1900, 800)
+    qtbot.wait(50)
+
+    assert pantalla.tabla_widget.columnWidth(1) > ancho_descripcion_antes  # "Descripción"
+    assert pantalla.tabla_widget.columnWidth(2) > ancho_tipo_antes  # "Tipo"
+    assert pantalla.tabla_widget.columnWidth(0) == ancho_fecha_antes
+    assert pantalla.tabla_widget.columnWidth(3) == ancho_activo_antes
+
+
 def test_consultorios_tiene_tamano_de_escritorio_ademas_del_ambiente(qtbot, conn):
     """LargoEscritorio/AnchoEscritorio son el tamaño del mueble, distinto
     de Largo/Ancho (el ambiente) — pedido puntual de la clienta, sin

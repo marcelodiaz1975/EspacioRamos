@@ -635,3 +635,29 @@ Tests nuevos en `tests/test_catalogos.py`:
 `test_tipos_licencia_nombre_se_lleva_el_ancho_sobrante`. Verificado
 visualmente con captura offscreen. Suite completa de
 `test_catalogos.py`: 76 passed.
+
+## Feriados y fechas especiales: centrar Activo, ampliar Descripción/Tipo
+
+Dos pedidos explícitos de la clienta sobre `pantalla_fechas_especiales`
+(solapa "Feriados y fechas especiales" de Liquidaciones, catálogo
+anidado):
+
+1. **"Activo" centralizado** — `centrado=True`, mecanismo ya existente.
+2. **"Descripción" y "Tipo" se llevan el ancho sobrante** — a
+   diferencia de Listas editables/Tipos de licencia (una sola columna
+   prioritaria), acá son DOS las que tienen que crecer. `columna_
+   prioritaria="Descripcion"` se lleva la mitad del sobrante de
+   siempre; para que "Tipo" se lleve la OTRA mitad entera (en vez de
+   repartirla con "Fecha"/"Activo"/campos libres, que no tienen que
+   crecer), esas tres quedan marcadas `ancho_fijo=True` — así "Tipo"
+   termina siendo la única columna del reparto de `_repartir_ancho_
+   sobrante` y se la lleva completa. Campos libres: como `campos_
+   libres(conn)` es compartida por ~14 catálogos, se marca `ancho_fijo`
+   sobre la lista YA devuelta (son `Campo` mutables, no un dataclass
+   frozen) en vez de tocar esa función compartida.
+
+Tests nuevos en `tests/test_catalogos.py`:
+`test_fechas_especiales_activo_queda_centralizado`,
+`test_fechas_especiales_descripcion_y_tipo_se_llevan_el_ancho_
+sobrante`. Verificado visualmente con captura offscreen. Suite completa
+de `test_catalogos.py`: 78 passed.

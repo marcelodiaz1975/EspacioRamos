@@ -711,16 +711,29 @@ def _antes_de_eliminar_fecha_especial(conn: sqlite3.Connection, registro) -> str
 
 
 def pantalla_fechas_especiales(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
+    # Pedido explícito de la clienta: "Descripción" y "Tipo" se llevan el
+    # ancho sobrante de la pantalla ("Fecha" es un `QDateEdit`, ancho
+    # fijo de por sí; "Activo" ya queda centralizado más abajo y no
+    # necesita crecer; campos libres se quedan en su ancho natural,
+    # mismo criterio que el resto de los catálogos). `columna_
+    # prioritaria="Descripcion"` se lleva la mitad del sobrante; al
+    # marcar el resto de las columnas `ancho_fijo=True`, "Tipo" queda
+    # como la única columna del reparto de la otra mitad y se la lleva
+    # entera (ver `PantallaCRUD._repartir_ancho_sobrante`).
+    campos_libres_fechas = campos_libres(conn)
+    for campo in campos_libres_fechas:
+        campo.ancho_fijo = True
     campos = [
         # requerido=True: la columna es NOT NULL en el schema — sin esto,
         # "Nuevo" sin tocar el campo deja la fecha en el sentinel "(sin
         # fecha)" (ver `_FECHA_SIN_DATO`) y el guardado revienta con un
         # IntegrityError (bug real, encontrado al revisar esta pantalla).
-        Campo("Fecha", "Fecha", tipo="fecha", requerido=True),
+        Campo("Fecha", "Fecha", tipo="fecha", requerido=True, ancho_fijo=True),
         Campo("Descripcion", "Descripción"),
         Campo("Tipo", "Tipo", tipo="combo", opciones=opciones_lista("TipoFechaEspecial")),
-        Campo("Activo", "Activo", tipo="booleano"),
-        *campos_libres(conn),
+        # Pedido explícito de la clienta: "Activo" centralizado.
+        Campo("Activo", "Activo", tipo="booleano", centrado=True, ancho_fijo=True),
+        *campos_libres_fechas,
     ]
     al_crear = lambda id_nuevo, valores: _al_crear_fecha_especial(conn, id_nuevo, valores)  # noqa: E731
     al_actualizar = lambda registro, valores: _al_actualizar_fecha_especial(conn, registro, valores)  # noqa: E731
@@ -730,7 +743,7 @@ def pantalla_fechas_especiales(conn: sqlite3.Connection, *, anidado: bool = Fals
         conn, "FechasEspeciales", "Fechas especiales", campos, anidado=anidado,
         al_guardar=lambda valores, registro: _al_guardar_fecha_especial(valores, registro, conn),
         al_crear=al_crear, al_actualizar=al_actualizar, al_eliminar=al_eliminar,
-        antes_de_eliminar=antes_de_eliminar,
+        antes_de_eliminar=antes_de_eliminar, columna_prioritaria="Descripcion",
     )
     # `al_crear`/`al_actualizar`/`al_eliminar`/`antes_de_eliminar` quedan
     # como weakref dentro de `PantallaCRUD` (mismo motivo que Llaves:
