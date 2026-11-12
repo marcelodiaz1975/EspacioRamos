@@ -291,6 +291,263 @@ def test_vacaciones_grilla_misma_altura_con_todos_o_un_profesional(qtbot, conn):
     assert panel.grilla.height() == alto_con_todos
 
 
+def test_licencias_fechas_desde_hasta_alineadas_a_la_derecha(qtbot, conn):
+    """Replicado de Vacaciones (#54): mismo helper (`item_numero`) para
+    Desde/Hasta."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel._crear()
+
+    assert panel.tabla.item(0, 2).textAlignment() == Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+    assert panel.tabla.item(0, 3).textAlignment() == Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+
+
+def test_licencias_columnas_tipo_en_adelante_se_estiran_al_ancho_de_la_pantalla(qtbot, conn):
+    """Replicado de Vacaciones (#54): Tipo/Desde/Hasta/Bonificación/Valor
+    bonificado en modo Stretch, Profesional se queda con su ancho natural."""
+    from PySide6.QtWidgets import QHeaderView
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    header = pantalla.panel_licencias.tabla.horizontalHeader()
+    for columna in (1, 2, 3, 4, 5):
+        assert header.sectionResizeMode(columna) == QHeaderView.ResizeMode.Stretch
+    assert header.sectionResizeMode(0) != QHeaderView.ResizeMode.Stretch
+
+
+def test_licencias_grilla_sin_titulo_de_vista_previa(qtbot, conn):
+    """Replicado de Vacaciones (#54)."""
+    from PySide6.QtWidgets import QGroupBox
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    titulos = [g.title() for g in panel.findChildren(QGroupBox)]
+    assert "Vista previa: grilla operativa" not in titulos
+
+
+def test_licencias_tabla_queda_fuera_del_scroll_superior(qtbot, conn):
+    """Replicado de Vacaciones (#54)."""
+    from PySide6.QtWidgets import QScrollArea
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    scrolls = panel.findChildren(QScrollArea)
+    assert len(scrolls) == 1
+    assert scrolls[0].widget() is not None
+    assert panel.tabla not in scrolls[0].widget().findChildren(type(panel.tabla))
+
+
+def test_licencias_profesional_y_filtro_de_localidad_arrancan_a_la_misma_altura(qtbot, conn):
+    """Replicado de Vacaciones (#54)."""
+    from PySide6.QtWidgets import QLabel
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.show()
+
+    etiqueta_profesional = panel._panel_form_licencias.findChildren(QLabel)[0]
+    etiqueta_filtro = next(lbl for lbl in panel.grilla.findChildren(QLabel) if lbl.text() == "Filtro de localidad")
+    y_profesional = etiqueta_profesional.mapTo(panel, etiqueta_profesional.rect().topLeft()).y()
+    y_filtro = etiqueta_filtro.mapTo(panel, etiqueta_filtro.rect().topLeft()).y()
+
+    assert y_profesional == y_filtro
+
+
+def test_licencias_visualizacion_de_la_grilla_queda_fija_en_regulares(qtbot, conn):
+    """Replicado de Vacaciones (#54)."""
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+
+    assert panel.grilla.combo_modo.currentData() == "regular"
+    assert panel.grilla.combo_modo.isEnabled() is False
+
+
+def test_licencias_solo_azul_oscuro_sin_otros_colores(qtbot, conn):
+    """Replicado de Vacaciones (#54)."""
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+
+    assert panel.grilla._filtro_exclusivo_profesional is True
+    assert panel.grilla._leyenda_colores.isVisible() is False
+
+
+def test_licencias_sin_cuadro_de_detalle_ni_etiqueta(qtbot, conn):
+    """Replicado de Vacaciones (#54)."""
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+
+    assert panel.grilla.etiqueta_detalle.isVisible() is False
+    assert panel.grilla.texto_detalle.isVisible() is False
+    assert panel.grilla._layout_grilla.indexOf(panel.grilla.etiqueta_detalle) == -1
+    assert panel.grilla._layout_grilla.indexOf(panel.grilla.texto_detalle) == -1
+
+
+def test_licencias_grilla_misma_altura_con_todos_o_un_profesional(qtbot, conn):
+    """Replicado de Vacaciones (#54)."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.show()
+
+    assert panel.combo_profesional.currentData() is None
+    alto_con_todos = panel.grilla.height()
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    assert panel.grilla.height() == alto_con_todos
+
+
+def test_ausencias_fechas_desde_hasta_alineadas_a_la_derecha(qtbot, conn):
+    """Replicado de Vacaciones (#62): mismo helper (`item_numero`) para
+    Desde/Hasta."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-03"))
+    panel.combo_motivo.setEditText("Congreso")
+    panel._crear()
+
+    assert panel.tabla.item(0, 1).textAlignment() == Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+    assert panel.tabla.item(0, 2).textAlignment() == Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+
+
+def test_ausencias_columnas_desde_en_adelante_se_estiran_al_ancho_de_la_pantalla(qtbot, conn):
+    """Replicado de Vacaciones (#62): Desde/Hasta/Horario/Motivo/Origen en
+    modo Stretch, Profesional se queda con su ancho natural."""
+    from PySide6.QtWidgets import QHeaderView
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    header = pantalla.panel_ausencias.tabla.horizontalHeader()
+    for columna in (1, 2, 3, 4, 5):
+        assert header.sectionResizeMode(columna) == QHeaderView.ResizeMode.Stretch
+    assert header.sectionResizeMode(0) != QHeaderView.ResizeMode.Stretch
+
+
+def test_ausencias_grilla_sin_titulo_de_vista_previa(qtbot, conn):
+    """Replicado de Vacaciones (#62)."""
+    from PySide6.QtWidgets import QGroupBox
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    titulos = [g.title() for g in panel.findChildren(QGroupBox)]
+    assert "Vista previa: grilla operativa" not in titulos
+
+
+def test_ausencias_tabla_queda_fuera_del_scroll_superior(qtbot, conn):
+    """Replicado de Vacaciones (#62)."""
+    from PySide6.QtWidgets import QScrollArea
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    scrolls = panel.findChildren(QScrollArea)
+    assert len(scrolls) == 1
+    assert scrolls[0].widget() is not None
+    assert panel.tabla not in scrolls[0].widget().findChildren(type(panel.tabla))
+
+
+def test_ausencias_profesional_y_filtro_de_localidad_arrancan_a_la_misma_altura(qtbot, conn):
+    """Replicado de Vacaciones (#62)."""
+    from PySide6.QtWidgets import QLabel
+
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.show()
+
+    etiqueta_profesional = panel._panel_form_ausencias.findChildren(QLabel)[0]
+    etiqueta_filtro = next(lbl for lbl in panel.grilla.findChildren(QLabel) if lbl.text() == "Filtro de localidad")
+    y_profesional = etiqueta_profesional.mapTo(panel, etiqueta_profesional.rect().topLeft()).y()
+    y_filtro = etiqueta_filtro.mapTo(panel, etiqueta_filtro.rect().topLeft()).y()
+
+    assert y_profesional == y_filtro
+
+
+def test_ausencias_visualizacion_de_la_grilla_queda_fija_en_regulares(qtbot, conn):
+    """Replicado de Vacaciones (#62)."""
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+
+    assert panel.grilla.combo_modo.currentData() == "regular"
+    assert panel.grilla.combo_modo.isEnabled() is False
+
+
+def test_ausencias_solo_azul_oscuro_sin_otros_colores(qtbot, conn):
+    """Replicado de Vacaciones (#62). El resalte verde de
+    `activar_resalte_ausencias` (feature propia de esta solapa, anterior
+    a esta ronda) sigue activo y no es parte de esta aserción: el filtro
+    exclusivo solo vacía las celdas de OTROS profesionales, nunca las del
+    profesional filtrado (que es justo lo que resalte_ausencias recolorea
+    de verde) — ver `test_panel_ausencias_grilla_resalta_verde_donde_hay_
+    ausencia`, que sigue pasando sin cambios."""
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+
+    assert panel.grilla._filtro_exclusivo_profesional is True
+    assert panel.grilla._leyenda_colores.isVisible() is False
+
+
+def test_ausencias_sin_cuadro_de_detalle_ni_etiqueta(qtbot, conn):
+    """Replicado de Vacaciones (#62)."""
+    _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+
+    assert panel.grilla.etiqueta_detalle.isVisible() is False
+    assert panel.grilla.texto_detalle.isVisible() is False
+    assert panel.grilla._layout_grilla.indexOf(panel.grilla.etiqueta_detalle) == -1
+    assert panel.grilla._layout_grilla.indexOf(panel.grilla.texto_detalle) == -1
+
+
+def test_ausencias_grilla_misma_altura_con_todos_o_un_profesional(qtbot, conn):
+    """Replicado de Vacaciones (#62)."""
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.show()
+
+    assert panel.combo_profesional.currentData() is None
+    alto_con_todos = panel.grilla.height()
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    assert panel.grilla.height() == alto_con_todos
+
+
 def test_ajustar_columnas_agrega_padding_sobre_el_ancho_natural(qtbot):
     """La clienta pidió más aire en las columnas de las tablas de esta
     pantalla: `_ajustar_columnas` le suma `_PADDING_COLUMNA` al ancho

@@ -128,25 +128,30 @@ _ANCHO_COL_PROFESIONAL = 180
 # mismo valor que `_ANCHO_PANEL_FILTROS_ESTADO_CUENTA` de Liquidaciones.
 _ANCHO_PANEL_FILTROS_ESTADO_CUENTA_CARGOS = 340
 _PADDING_COLUMNA = 30  # pedido de la clienta: las columnas se veían apretadas, sobraba ancho de sobra
-# Pedido explícito de la clienta sobre Vacaciones: "que los elementos de
-# las tres columnas arranquen en el pixel 85 como en reservas regulares"
-# — mismo mecanismo que esa pantalla (`_ALTO_TITULO_COLUMNAS_REGULARES`/
+# Pedido explícito de la clienta sobre Vacaciones, replicado después a
+# Licencias y Ausencias ("todos los cambios que te pedí en la solapa de
+# vacaciones replicalos en estas solapas"): "que los elementos de las
+# tres columnas arranquen en el pixel 85 como en reservas regulares" —
+# mismo mecanismo que esa pantalla (`_ALTO_TITULO_COLUMNAS_REGULARES`/
 # `_ALTO_BASE_GRUPO_GRILLA` en `reservas.py`, ver esos comentarios para
 # el detalle completo): "Profesional" (columna 1, `form.setContentsMargins`)
 # y "Filtro de localidad"/la grilla (columnas 2 y 3, `quitar_marco_panel_
 # filtros`/`fijar_margen_superior_grilla`) tienen que arrancar a la misma
-# altura. Valor propio (no se reusa el de Reservas regulares): el
-# formulario de Vacaciones es mucho más corto, así que el margen que
-# alinea sus columnas entre sí no tiene por qué coincidir con el de esa
-# pantalla — medido programáticamente contra el panel de Filtros de la
-# grilla, mismo criterio.
-_ALTO_TITULO_COLUMNAS_VACACIONES = 7
-# `grupo_grilla` (el QGroupBox sin título que envuelve la columna 2/3 —
-# ver `_PanelVacaciones._armar_ui`) reserva un colchón propio arriba
-# ANTES de que arranque el panel de Filtros embebido adentro, aunque no
-# tenga título ni borde — medido programáticamente, mismo motivo que
+# altura. Valor propio (no se reusa el de Reservas regulares): los
+# formularios de estas tres solapas son mucho más cortos, así que el
+# margen que alinea sus columnas entre sí no tiene por qué coincidir con
+# el de esa pantalla — medido programáticamente contra el panel de
+# Filtros de la grilla, mismo criterio, y resultó ser el mismo valor en
+# las tres (son hechos de chroma de Qt — margen de `QVBoxLayout`,
+# colchón de `QGroupBox` — no algo que dependa del contenido de cada
+# formulario).
+_ALTO_TITULO_COLUMNAS_NOVEDADES = 7
+# `grupo_grilla` (el QGroupBox sin título que envuelve la columna 2/3 de
+# cada una de las tres solapas) reserva un colchón propio arriba ANTES
+# de que arranque el panel de Filtros embebido adentro, aunque no tenga
+# título ni borde — medido programáticamente, mismo motivo que
 # `_ALTO_BASE_GRUPO_GRILLA` de Reservas regulares.
-_ALTO_BASE_GRUPO_GRILLA_VACACIONES = 6
+_ALTO_BASE_GRUPO_GRILLA_NOVEDADES = 6
 _LOCALE_ES = QLocale(QLocale.Language.Spanish)
 _FORMATO_FECHA_DIA = "ddd dd-MM-yyyy"  # ej. "lun 07-09-2026" — pedido de la clienta al revisar esta
                                        # pantalla, para las fechas Desde/Hasta y el contenido de las
@@ -392,7 +397,7 @@ class _PanelVacaciones(QWidget):
         # que arrancar a la misma altura — valor medido programáticamente
         # contra el panel de Filtros de la grilla, mismo criterio que esa
         # pantalla.
-        form.setContentsMargins(9, _ALTO_TITULO_COLUMNAS_VACACIONES, 9, 0)
+        form.setContentsMargins(9, _ALTO_TITULO_COLUMNAS_NOVEDADES, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
@@ -490,8 +495,8 @@ class _PanelVacaciones(QWidget):
         # visual que Reservas regulares.
         self.grilla.fijar_titulo_filtros("")
         self.grilla.renombrar_etiquetas_filtro()
-        self.grilla.quitar_marco_panel_filtros(_ALTO_TITULO_COLUMNAS_VACACIONES - _ALTO_BASE_GRUPO_GRILLA_VACACIONES)
-        self.grilla.fijar_margen_superior_grilla(_ALTO_TITULO_COLUMNAS_VACACIONES - _ALTO_BASE_GRUPO_GRILLA_VACACIONES)
+        self.grilla.quitar_marco_panel_filtros(_ALTO_TITULO_COLUMNAS_NOVEDADES - _ALTO_BASE_GRUPO_GRILLA_NOVEDADES)
+        self.grilla.fijar_margen_superior_grilla(_ALTO_TITULO_COLUMNAS_NOVEDADES - _ALTO_BASE_GRUPO_GRILLA_NOVEDADES)
         # Pedido explícito de la clienta: "el cuadro de detalle y su
         # etiqueta en esta solapa eliminalo" — `extraer_detalle` los
         # saca de `_layout_grilla` (donde ocupaban espacio); como acá no
@@ -836,16 +841,26 @@ class _PanelLicencias(QWidget):
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
+        # Sin espaciado default de Qt entre lo de arriba y la tabla —
+        # mismo criterio que Vacaciones/Reservas regulares.
+        layout_externo.setSpacing(0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
         contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
+        layout.setContentsMargins(0, 0, 0, 0)
         splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
+        # Pedido explícito de la clienta ("todos los cambios que te pedí
+        # en la solapa de vacaciones replicalos en estas solapas"): ver
+        # el comentario completo de `_ALTO_TITULO_COLUMNAS_NOVEDADES`
+        # más arriba en este archivo — "Profesional" y "Filtro de
+        # localidad"/la grilla tienen que arrancar a la misma altura.
+        form.setContentsMargins(9, _ALTO_TITULO_COLUMNAS_NOVEDADES, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
@@ -897,10 +912,20 @@ class _PanelLicencias(QWidget):
 
         form.addStretch()
         splitter_superior.addWidget(panel_form)
+        self._panel_form_licencias = panel_form
 
-        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        # Sin título (pedido explícito de la clienta, replicado de
+        # Vacaciones) — antes decía "Vista previa: grilla operativa".
+        grupo_grilla = QGroupBox()
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        layout_grupo_grilla.setContentsMargins(0, 0, 0, 0)
         self.grilla = GrillaOperativaWidget(self.conn)
+        # Pedido explícito de la clienta, replicado de Vacaciones: la
+        # grilla queda fija en "Reservas regulares" y solo se ve el azul
+        # oscuro del profesional filtrado — ver el comentario completo
+        # en `_PanelVacaciones._armar_ui`.
+        self.grilla.fijar_modo("regular")
+        self.grilla.activar_filtro_exclusivo_profesional(True)
         # Pedido explícito de la clienta, extendido desde Oferta de
         # consultorios a toda pantalla con esta grilla: Tipo de bloque/
         # Horario y las filas de encabezado quedan siempre visibles al
@@ -912,6 +937,23 @@ class _PanelLicencias(QWidget):
         # tope mínimo lo contemple — tapaba la última fila y podía
         # disparar un scroll vertical de más, innecesario.
         self.grilla.reservar_alto_scroll_horizontal()
+        self.grilla.fijar_titulo_filtros("")
+        self.grilla.renombrar_etiquetas_filtro()
+        self.grilla.quitar_marco_panel_filtros(_ALTO_TITULO_COLUMNAS_NOVEDADES - _ALTO_BASE_GRUPO_GRILLA_NOVEDADES)
+        self.grilla.fijar_margen_superior_grilla(_ALTO_TITULO_COLUMNAS_NOVEDADES - _ALTO_BASE_GRUPO_GRILLA_NOVEDADES)
+        # Pedido explícito de la clienta, replicado de Vacaciones: sin
+        # cuadro "Detalle" ni su etiqueta en esta solapa.
+        etiqueta_detalle, texto_detalle = self.grilla.extraer_detalle()
+        etiqueta_detalle.hide()
+        texto_detalle.hide()
+        # Pedido explícito de la clienta, replicado de Vacaciones: la
+        # grilla tiene que arrancar con la misma altura esté o no
+        # elegido un profesional puntual — ver el comentario completo en
+        # `_PanelVacaciones._armar_ui`.
+        self.grilla.filtrar_por_unidades(None)
+        self.grilla.filtrar_por_dias(None)
+        self.grilla.filtrar_por_pares_unidad_dia(None)
+        self.grilla.setMinimumHeight(self.grilla.alto_natural_grilla())
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -919,7 +961,16 @@ class _PanelLicencias(QWidget):
         splitter_superior.setStretchFactor(1, 1)
         layout.addWidget(splitter_superior, stretch=2)
 
+        scroll.setWidget(contenido)
+        # Pedido explícito de la clienta, replicado de Vacaciones: piso
+        # explícito para que sea siempre "Licencias tomadas" la que cede
+        # espacio primero — ver el comentario completo en
+        # `_PanelVacaciones._armar_ui`.
+        scroll.setMinimumHeight(contenido.sizeHint().height())
+        layout_externo.addWidget(scroll)
+
         panel_tabla = QGroupBox("Licencias tomadas")
+        panel_tabla.setObjectName("panelSolapa")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         excluir_tabla_del_tab(self.tabla)
@@ -932,11 +983,18 @@ class _PanelLicencias(QWidget):
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         instalar_eliminar_con_tecla(self.tabla, self._cancelar)
+        # Pedido explícito de la clienta, replicado de Vacaciones: las
+        # columnas se reparten el ancho sobrante del panel, "Profesional"
+        # se queda con su ancho natural + padding de `_ajustar_columnas`.
+        header_licencias = self.tabla.horizontalHeader()
+        for columna in (1, 2, 3, 4, 5):
+            header_licencias.setSectionResizeMode(columna, QHeaderView.ResizeMode.Stretch)
         layout_tabla.addWidget(self.tabla, stretch=1)
-        layout.addWidget(panel_tabla, stretch=1)
+        # Pedido explícito de la clienta, replicado de Vacaciones: la
+        # tabla queda fuera del `scroll` de arriba, con su propio scroll
+        # nativo.
+        layout_externo.addWidget(panel_tabla, stretch=1)
 
-        scroll.setWidget(contenido)
-        layout_externo.addWidget(scroll)
         self._sincronizar_grilla()
         self._foco = instalar_enter_avanza_foco(
             [
@@ -1003,8 +1061,10 @@ class _PanelLicencias(QWidget):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             tipo = cache_tipo.get(r["IdTipoLicencia"])
             self.tabla.setItem(i, 1, QTableWidgetItem(tipo["Nombre"] if tipo else "?"))
-            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaDesde"])))
-            self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaHasta"])))
+            # Pedido explícito de la clienta, replicado de Vacaciones:
+            # fecha alineada a la derecha.
+            self.tabla.setItem(i, 2, item_numero(_fmt_fecha_dia_abrev(r["FechaDesde"])))
+            self.tabla.setItem(i, 3, item_numero(_fmt_fecha_dia_abrev(r["FechaHasta"])))
             porcentaje = r["PorcentajeBonificacionAplicado"]
             self.tabla.setItem(i, 4, item_numero(f"{porcentaje:.1f}%" if porcentaje is not None else ""))
             texto_valor = _texto_valor_bonificado(r["ValorBonificado"], r["FechaDesde"], periodo_en_curso)
@@ -1158,16 +1218,26 @@ class _PanelAusencias(QWidget):
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
+        # Sin espaciado default de Qt entre lo de arriba y la tabla —
+        # mismo criterio que Vacaciones/Licencias/Reservas regulares.
+        layout_externo.setSpacing(0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         contenido = QWidget()
         contenido.setObjectName("panelSolapa")
         layout = QVBoxLayout(contenido)
+        layout.setContentsMargins(0, 0, 0, 0)
         splitter_superior = QSplitter()
 
         panel_form = QWidget()
         form = QVBoxLayout(panel_form)
+        # Pedido explícito de la clienta ("todos los cambios que te pedí
+        # en la solapa de vacaciones replicalos en estas solapas"): ver
+        # el comentario completo de `_ALTO_TITULO_COLUMNAS_NOVEDADES`
+        # más arriba en este archivo — "Profesional" y "Filtro de
+        # localidad"/la grilla tienen que arrancar a la misma altura.
+        form.setContentsMargins(9, _ALTO_TITULO_COLUMNAS_NOVEDADES, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
         self.combo_profesional.addItem("Todos los profesionales", None)
@@ -1229,10 +1299,23 @@ class _PanelAusencias(QWidget):
         form.addWidget(self.boton_cancelar)
         form.addStretch()
         splitter_superior.addWidget(panel_form)
+        self._panel_form_ausencias = panel_form
 
-        grupo_grilla = QGroupBox("Vista previa: grilla operativa")
+        # Sin título (pedido explícito de la clienta, replicado de
+        # Vacaciones) — antes decía "Vista previa: grilla operativa".
+        grupo_grilla = QGroupBox()
         layout_grupo_grilla = QVBoxLayout(grupo_grilla)
+        layout_grupo_grilla.setContentsMargins(0, 0, 0, 0)
         self.grilla = GrillaOperativaWidget(self.conn)
+        # Pedido explícito de la clienta, replicado de Vacaciones: la
+        # grilla queda fija en "Reservas regulares" y solo se ve el azul
+        # oscuro del profesional filtrado — ver el comentario completo
+        # en `_PanelVacaciones._armar_ui`. `activar_resalte_ausencias`
+        # (pedido puntual, anterior, propio de esta solapa — no tocado)
+        # sigue funcionando igual sobre las celdas del profesional
+        # filtrado, que el filtro exclusivo no toca.
+        self.grilla.fijar_modo("regular")
+        self.grilla.activar_filtro_exclusivo_profesional(True)
         self.grilla.activar_resalte_ausencias(True)
         # Pedido explícito de la clienta, extendido desde Oferta de
         # consultorios a toda pantalla con esta grilla: Tipo de bloque/
@@ -1245,6 +1328,23 @@ class _PanelAusencias(QWidget):
         # tope mínimo lo contemple — tapaba la última fila y podía
         # disparar un scroll vertical de más, innecesario.
         self.grilla.reservar_alto_scroll_horizontal()
+        self.grilla.fijar_titulo_filtros("")
+        self.grilla.renombrar_etiquetas_filtro()
+        self.grilla.quitar_marco_panel_filtros(_ALTO_TITULO_COLUMNAS_NOVEDADES - _ALTO_BASE_GRUPO_GRILLA_NOVEDADES)
+        self.grilla.fijar_margen_superior_grilla(_ALTO_TITULO_COLUMNAS_NOVEDADES - _ALTO_BASE_GRUPO_GRILLA_NOVEDADES)
+        # Pedido explícito de la clienta, replicado de Vacaciones: sin
+        # cuadro "Detalle" ni su etiqueta en esta solapa.
+        etiqueta_detalle, texto_detalle = self.grilla.extraer_detalle()
+        etiqueta_detalle.hide()
+        texto_detalle.hide()
+        # Pedido explícito de la clienta, replicado de Vacaciones: la
+        # grilla tiene que arrancar con la misma altura esté o no
+        # elegido un profesional puntual — ver el comentario completo en
+        # `_PanelVacaciones._armar_ui`.
+        self.grilla.filtrar_por_unidades(None)
+        self.grilla.filtrar_por_dias(None)
+        self.grilla.filtrar_por_pares_unidad_dia(None)
+        self.grilla.setMinimumHeight(self.grilla.alto_natural_grilla())
         layout_grupo_grilla.addWidget(self.grilla)
         splitter_superior.addWidget(grupo_grilla)
 
@@ -1252,7 +1352,16 @@ class _PanelAusencias(QWidget):
         splitter_superior.setStretchFactor(1, 1)
         layout.addWidget(splitter_superior, stretch=2)
 
+        scroll.setWidget(contenido)
+        # Pedido explícito de la clienta, replicado de Vacaciones: piso
+        # explícito para que sea siempre "Ausencias registradas" la que
+        # cede espacio primero — ver el comentario completo en
+        # `_PanelVacaciones._armar_ui`.
+        scroll.setMinimumHeight(contenido.sizeHint().height())
+        layout_externo.addWidget(scroll)
+
         panel_tabla = QGroupBox("Ausencias registradas")
+        panel_tabla.setObjectName("panelSolapa")
         layout_tabla = QVBoxLayout(panel_tabla)
         self.tabla = QTableWidget()
         excluir_tabla_del_tab(self.tabla)
@@ -1264,11 +1373,18 @@ class _PanelAusencias(QWidget):
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones)
         self._orden = OrdenTabla(self.tabla, self.actualizar)
         instalar_eliminar_con_tecla(self.tabla, self._cancelar)
+        # Pedido explícito de la clienta, replicado de Vacaciones: las
+        # columnas se reparten el ancho sobrante del panel, "Profesional"
+        # se queda con su ancho natural + padding de `_ajustar_columnas`.
+        header_ausencias = self.tabla.horizontalHeader()
+        for columna in (1, 2, 3, 4, 5):
+            header_ausencias.setSectionResizeMode(columna, QHeaderView.ResizeMode.Stretch)
         layout_tabla.addWidget(self.tabla, stretch=1)
-        layout.addWidget(panel_tabla, stretch=1)
+        # Pedido explícito de la clienta, replicado de Vacaciones: la
+        # tabla queda fuera del `scroll` de arriba, con su propio scroll
+        # nativo.
+        layout_externo.addWidget(panel_tabla, stretch=1)
 
-        scroll.setWidget(contenido)
-        layout_externo.addWidget(scroll)
         self._sincronizar_grilla()
         self._actualizar_botones()
         self._foco = instalar_enter_avanza_foco(
@@ -1348,8 +1464,10 @@ class _PanelAusencias(QWidget):
         self.tabla.setRowCount(len(filas))
         for i, (r, profesional) in enumerate(filas):
             self.tabla.setItem(i, 0, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
-            self.tabla.setItem(i, 1, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaDesde"])))
-            self.tabla.setItem(i, 2, QTableWidgetItem(_fmt_fecha_dia_abrev(r["FechaHasta"])))
+            # Pedido explícito de la clienta, replicado de Vacaciones:
+            # fecha alineada a la derecha.
+            self.tabla.setItem(i, 1, item_numero(_fmt_fecha_dia_abrev(r["FechaDesde"])))
+            self.tabla.setItem(i, 2, item_numero(_fmt_fecha_dia_abrev(r["FechaHasta"])))
             self.tabla.setItem(i, 3, QTableWidgetItem(_fmt_horario_ausencia(r)))
             self.tabla.setItem(i, 4, QTableWidgetItem(r["Motivo"] or ""))
             self.tabla.setItem(i, 5, QTableWidgetItem(self._origen(r)))

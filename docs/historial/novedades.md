@@ -429,3 +429,70 @@ ambos casos en el sandbox — y que solo el profesional filtrado queda
 en azul oscuro, el resto en blanco). Suite completa de `test_gui_
 novedades.py`: 111 passed.
 
+## Licencias y Ausencias por motivos varios: mismo layout que Vacaciones
+
+Pedido explícito de la clienta, ronda siguiente a la de arriba: "Todos
+los cambios que te pedí en la solapa de Vacaciones replicalos en estas
+solapas" (Licencias y Ausencias por motivos varios) — las dos rondas de
+Vacaciones (pixel 85 / grilla ampliada / tabla escroleable, y después
+grilla fija en "Reservas regulares" sin leyenda ni detalle) combinadas,
+sin pedir nada nuevo propio de estas dos pantallas.
+
+Aplicado tal cual a `_PanelLicencias` y `_PanelAusencias` en
+`novedades.py` — mismo patrón, mismos métodos de `GrillaOperativaWidget`
+que ya se habían usado en Vacaciones (`fijar_modo("regular")`,
+`activar_filtro_exclusivo_profesional(True)`, `fijar_titulo_filtros("")`
++ `renombrar_etiquetas_filtro()`, `quitar_marco_panel_filtros(...)`,
+`fijar_margen_superior_grilla(...)`, `extraer_detalle()` + `.hide()` en
+los dos widgets, el alto fijo vía filtros en `None` + `alto_natural_
+grilla()` + `setMinimumHeight`, `scroll.setMinimumHeight(contenido.
+sizeHint().height())`, tabla movida fuera del `scroll` superior con
+columnas en modo Stretch desde la segunda en adelante — Licencias:
+"Tipo"/"Desde"/"Hasta"/"Bonificación"/"Valor bonificado"; Ausencias:
+"Desde"/"Hasta"/"Horario"/"Motivo"/"Origen" — "Profesional" se queda con
+su ancho natural en las dos). Fechas Desde/Hasta de ambas tablas pasan
+de `QTableWidgetItem` a `item_numero` (alineadas a la derecha, mismo
+criterio que Vacaciones).
+
+Las dos constantes de alto que ya usaba Vacaciones para este cálculo
+(antes con sufijo `_VACACIONES`) se generalizaron a `_ALTO_TITULO_
+COLUMNAS_NOVEDADES`/`_ALTO_BASE_GRUPO_GRILLA_NOVEDADES` porque
+describen hechos de "chrome" de Qt que no dependen de qué paneles tenga
+cada formulario (margen default de `QVBoxLayout`, padding de borde de
+`QGroupBox`) — confirmado empíricamente antes de reusarlas: con los
+mismos valores, la grilla de Licencias y la de Ausencias arrancan
+exactamente al pixel 85 igual que Vacaciones (ver captura), sin
+necesitar un ajuste propio por panel.
+
+Decisión explícita de alcance: NO se tocó el `activar_resalte_
+ausencias(True)` propio de Ausencias (pre-existente, de una ronda
+anterior sin relación con esta) — sigue resaltando en verde la celda
+del profesional filtrado si tiene una ausencia registrada ese día/hora.
+No hay conflicto con el nuevo `activar_filtro_exclusivo_profesional
+(True)`: ese filtro solo vacía las celdas de OTROS profesionales, nunca
+toca las celdas del profesional filtrado (que es justo lo que
+resalte_ausencias puede recolorear). `test_panel_ausencias_grilla_
+resalta_verde_donde_hay_ausencia` (ronda anterior) sigue pasando sin
+cambios.
+
+Tests nuevos en `tests/test_gui_novedades.py` (9 por panel, mismo
+criterio que los de Vacaciones de las dos rondas anteriores, adaptados
+a las columnas propias de cada tabla):
+`test_licencias_fechas_desde_hasta_alineadas_a_la_derecha`,
+`test_licencias_columnas_tipo_en_adelante_se_estiran_al_ancho_de_la_
+pantalla`, `test_licencias_grilla_sin_titulo_de_vista_previa`,
+`test_licencias_tabla_queda_fuera_del_scroll_superior`,
+`test_licencias_profesional_y_filtro_de_localidad_arrancan_a_la_misma_
+altura`, `test_licencias_visualizacion_de_la_grilla_queda_fija_en_
+regulares`, `test_licencias_solo_azul_oscuro_sin_otros_colores`,
+`test_licencias_sin_cuadro_de_detalle_ni_etiqueta`, `test_licencias_
+grilla_misma_altura_con_todos_o_un_profesional`; y los mismos nueve
+para Ausencias (`test_ausencias_...`, mismos nombres con el prefijo
+cambiado). Suite completa de `tests/test_gui_novedades.py`: 129
+passed (111 + 18 nuevos). Verificado visualmente con capturas offscreen
+de ambos paneles (estado "Todos" y con un profesional elegido): mismo
+layout que Vacaciones, sin superposición, grilla fija en "Reservas
+regulares" con solo el azul oscuro del profesional filtrado, sin
+leyenda ni cuadro de detalle, tabla arrancando debajo de la grilla y
+escroleable por separado.
+
