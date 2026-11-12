@@ -616,3 +616,73 @@ def test_cerrar_con_la_cruz_y_cancelar_no_cierra(qtbot, conn, monkeypatch):
     evento = _EventoCierre(espontaneo=True)
     ventana.closeEvent(evento)
     assert not evento.isAccepted()
+
+
+def _espiar_reafirmado(ventana, monkeypatch, *, maximizada: bool):
+    """Mockea `isMaximized`/`showNormal`/`showMaximized` de la instancia
+    para poder contar cuántas veces se llama cada una sin depender de un
+    maximizado real (no disponible con Qt offscreen)."""
+    llamadas = []
+    monkeypatch.setattr(ventana, "isMaximized", lambda: maximizada)
+    monkeypatch.setattr(ventana, "showNormal", lambda: llamadas.append("normal"))
+    monkeypatch.setattr(ventana, "showMaximized", lambda: llamadas.append("maximizar"))
+    return llamadas
+
+
+def test_entrar_a_la_primera_solapa_reafirma_el_maximizado_dos_veces(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: una variable que identifique que
+    recién se ingresó al sistema, consultada al entrar a la primera
+    solapa real, dispara el reafirmado de maximizado DOS veces (restaurar
+    y volver a maximizar, dos veces seguidas)."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    llamadas = _espiar_reafirmado(ventana, monkeypatch, maximizada=True)
+
+    ventana._navegacion.setCurrentRow(1)  # "Uno" — primera solapa real
+    qtbot.wait(50)  # deja correr los QTimer.singleShot(0, ...) encadenados
+
+    assert llamadas == ["normal", "maximizar", "normal", "maximizar"]
+
+
+def test_recien_ingresado_solo_dispara_una_vez(qtbot, conn, monkeypatch):
+    """Pasado el primer cambio de solapa, la variable ya se apagó — no se
+    vuelve a tocar mientras el sistema siga abierto, aunque se siga
+    navegando entre solapas."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    llamadas = _espiar_reafirmado(ventana, monkeypatch, maximizada=True)
+
+    ventana._navegacion.setCurrentRow(1)  # "Uno"
+    qtbot.wait(50)
+    ventana._navegacion.setCurrentRow(2)  # "Dos"
+    qtbot.wait(50)
+
+    assert llamadas == ["normal", "maximizar", "normal", "maximizar"]
+
+
+def test_reafirmar_maximizado_no_hace_nada_si_no_esta_maximizada(qtbot, conn, monkeypatch):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    llamadas = _espiar_reafirmado(ventana, monkeypatch, maximizada=False)
+
+    ventana._navegacion.setCurrentRow(1)
+    qtbot.wait(50)
+
+    assert llamadas == []
+    assert ventana._recien_ingresado is False  # se consume igual, esté o no maximizada
+
+
+def test_f5_tambien_reafirma_el_maximizado_por_las_dudas(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: F5 en cualquier solapa, además de
+    su función de siempre, hace "por las dudas" el mismo reafirmado doble
+    — no depende de `_recien_ingresado` (se repite en cada F5, no solo
+    una vez)."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    ventana._recien_ingresado = False  # ya se consumió, como en una sesión avanzada
+    llamadas = _espiar_reafirmado(ventana, monkeypatch, maximizada=True)
+
+    ventana._reiniciar_solapa_activa()
+    qtbot.wait(50)
+
+    assert llamadas == ["normal", "maximizar", "normal", "maximizar"]

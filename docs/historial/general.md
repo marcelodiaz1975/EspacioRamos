@@ -4662,6 +4662,59 @@ la geometría, en vez de los `processEvents()` manuales de antes de
 arrancar el loop. Tampoco reproducible en este sandbox Linux — mitigación
 de buena fe, a confirmar con la clienta.
 
+### Cuarto intento: variable "recién ingresado" + reafirmado doble, también desde F5
+
+**Tampoco alcanzó** el tercer intento (reportado por la clienta: "Se
+sigue dando ese efecto visual al ingresar a la primer solapa luego de
+ingresar al sistema en el cual tengo que presionar dos veces el botón de
+maximizar"). La clienta propuso ella misma el mecanismo: una variable
+que identifique que recién se ingresó al sistema, consultada al entrar a
+la primera solapa real, que dispare el gesto de maximizar dos veces y
+después se apague sin volver a tocarse mientras el sistema siga abierto.
+
+Es, en esencia, el mismo rol que ya cumplía `_geometria_reafirmada`
+(segundo intento, más arriba) — pero ese reafirmado corría UNA sola vez
+el ciclo restaurar→maximizar, de forma sincrónica (`QApplication.
+processEvents()` intercalado, sin `QTimer`). Dos cambios sobre eso,
+ambos pedidos explícitos de esta ronda:
+
+1. **Dos veces, no una.** `VentanaPrincipal._reafirmar_maximizado(self,
+   *, veces)` (nuevo método) arma una lista de pasos
+   (`showNormal`/`showMaximized` repetidos `veces` veces) y los corre
+   encadenados con `QTimer.singleShot(0, ...)` — mismo patrón que el
+   tercer intento de `gui_main.main()` (cada paso en su propia vuelta
+   del loop real), en vez de los `processEvents()` sincrónicos de
+   antes, que corrían todos en el mismo frame.
+2. **Variable propia, nombre explícito.** `self._recien_ingresado`
+   (reemplaza a `_geometria_reafirmada` en `__init__`, `True` desde que
+   se crea la ventana) es la que `_cambiar_seccion` consulta y apaga en
+   el primer cambio de página real — exactamente la semántica que pidió
+   la clienta ("que cuando se ingrese a la primer solapa viendo esa
+   variable ejecute [el proceso], y luego esa variable cambie de estado
+   y no se vuelva a tocar").
+
+**F5 ("por las dudas"):** pedido explícito de la clienta en el mismo
+batch — que F5, en cualquier solapa del sistema, además de su función de
+siempre (`panel.reiniciar()`), haga también el mismo reafirmado doble
+"por si las dudas" de que el bug reaparezca en cualquier momento de la
+sesión (no solo al entrar). `_reiniciar_solapa_activa` ahora llama a
+`self._reafirmar_maximizado(veces=2)` al final, sin la guarda de
+`_recien_ingresado` — se repite en cada F5, no una sola vez.
+
+`_reafirmar_maximizado` no hace nada si `self.isMaximized()` es falso
+(no hay geometría que reafirmar sobre una ventana que el operador ya
+restauró a mano a propósito). Tampoco reproducible en este sandbox Linux
+— mitigación de buena fe, a confirmar con la clienta en su Windows real.
+
+Tests nuevos en `tests/test_main_window.py` (mockean `isMaximized`/
+`showNormal`/`showMaximized` de la instancia para contar llamadas sin
+depender de un maximizado real, que Qt offscreen no provee):
+`test_entrar_a_la_primera_solapa_reafirma_el_maximizado_dos_veces`,
+`test_recien_ingresado_solo_dispara_una_vez`,
+`test_reafirmar_maximizado_no_hace_nada_si_no_esta_maximizada`,
+`test_f5_tambien_reafirma_el_maximizado_por_las_dudas`. Suite completa
+de `test_main_window.py`: 46 passed.
+
 ## Ventana principal: confirmación al cerrar con la cruz
 
 Pedido explícito de la clienta: al presionar la cruz de cerrar ventana

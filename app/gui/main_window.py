@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -85,9 +85,12 @@ class VentanaPrincipal(QMainWindow):
         self.setWindowTitle(NOMBRE_Y_VERSION)
         self.resize(1200, 800)
         self._aplicar_tema()
-        # Ver `_cambiar_seccion`: el primer cambio de página real
-        # reafirma el maximizado una sola vez, no en cada click.
-        self._geometria_reafirmada = False
+        # Pedido explícito de la clienta sobre el bug de maximizado (ver
+        # `_cambiar_seccion`): variable que identifica que recién se
+        # ingresó al sistema — se consulta al entrar a la primera solapa
+        # real, dispara ahí el reafirmado doble, y se apaga sin volver a
+        # tocarse mientras el sistema siga abierto.
+        self._recien_ingresado = True
 
         self._navegacion = QListWidget()
         self._navegacion.setObjectName("navegacion")
@@ -351,6 +354,44 @@ class VentanaPrincipal(QMainWindow):
         panel = self._panel_mas_interno()
         if panel is not None and hasattr(panel, "reiniciar"):
             panel.reiniciar()
+        # Pedido explícito de la clienta: que F5 en cualquier solapa,
+        # además de lo de arriba, haga "por las dudas" el mismo reafirmado
+        # de maximizado que ya se dispara una sola vez al entrar a la
+        # primera solapa (`_cambiar_seccion`) — acá SIN la guarda de
+        # `_recien_ingresado` (se repite en cada F5, no solo una vez),
+        # para cubrir el bug de maximizado si reaparece en cualquier
+        # momento de la sesión.
+        self._reafirmar_maximizado(veces=2)
+
+    def _reafirmar_maximizado(self, *, veces: int) -> None:
+        """Repite el gesto manual que la clienta confirma que arregla el
+        bug de maximizado (restaurar y volver a maximizar, no solo
+        maximizar de nuevo sobre una ventana que Qt ya considera
+        maximizada) `veces` veces seguidas. No hace nada si la ventana no
+        está maximizada (no hay geometría que reafirmar).
+
+        Cada paso se difiere con `QTimer.singleShot(0, ...)` encadenado
+        — mismo criterio que `gui_main.main()` — para que cada
+        restaurar/maximizar corra en su propia vuelta del loop de
+        eventos real, dándole a Windows una vuelta completa para asentar
+        la geometría entre un paso y el otro (en vez de encimarlos todos
+        en el mismo frame con `processEvents()`, que era la mitigación
+        anterior y no alcanzó)."""
+        if not self.isMaximized():
+            return
+
+        pasos: list[Callable[[], None]] = []
+        for _ in range(veces):
+            pasos.append(self.showNormal)
+            pasos.append(self.showMaximized)
+
+        def _siguiente_paso(indice: int) -> None:
+            if indice >= len(pasos):
+                return
+            pasos[indice]()
+            QTimer.singleShot(0, lambda: _siguiente_paso(indice + 1))
+
+        _siguiente_paso(0)
 
     def ir_a_seccion(self, nombre: str) -> QWidget | None:
         """Salta a la Seccion de nombre `nombre` (la selecciona en el menú
@@ -495,23 +536,18 @@ class VentanaPrincipal(QMainWindow):
         # forzó un layout pesado) puede destapar el mismo problema de
         # maximizado que ya se mitigó en `gui_main.main()` — la barra
         # de abajo (leyenda de funciones) queda tapada hasta maximizar
-        # dos veces a mano. Primer intento (solo reafirmar `showMaximized()`
-        # estando ya maximizada) NO resolvió el problema, reportado por la
-        # clienta al probarlo: Qt muy probablemente lo toma como no-op
-        # porque el estado de la ventana ya es "maximizada" y no dispara
-        # ningún recálculo de geometría nuevo — hace falta imitar el gesto
-        # manual real que sí lo arregla (restaurar y volver a maximizar,
-        # no solo maximizar de nuevo sobre sí misma). Solo la PRIMERA vez
-        # (`self._geometria_reafirmada`): la clienta confirma que, pasado
-        # ese primer cambio de solapa, la navegación ya queda bien — repetir
-        # esto en cada click sería un parpadeo visible de más sin necesidad.
-        if not self._geometria_reafirmada:
-            self._geometria_reafirmada = True
-            if self.isMaximized():
-                QApplication.processEvents()
-                self.showNormal()
-                QApplication.processEvents()
-                self.showMaximized()
+        # dos veces a mano. Mitigaciones anteriores (reafirmar una sola
+        # vez, de forma sincrónica) no alcanzaron — la clienta sigue
+        # reportando el mismo efecto. Pedido explícito de la clienta:
+        # una variable que identifique que recién se ingresó al sistema
+        # (`self._recien_ingresado`), consultada acá (el primer cambio de
+        # página real), que dispare el reafirmado DOS veces y se apague
+        # para no volver a tocarse mientras el sistema siga abierto —
+        # repetirlo en cada click sería un parpadeo visible de más sin
+        # necesidad.
+        if self._recien_ingresado:
+            self._recien_ingresado = False
+            self._reafirmar_maximizado(veces=2)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Pedido de la clienta: al presionar la cruz de cerrar ventana
