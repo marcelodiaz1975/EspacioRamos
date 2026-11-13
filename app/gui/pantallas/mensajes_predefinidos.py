@@ -65,7 +65,7 @@ from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
 from app.gui.pantallas.catalogos import _opciones_consultorio, _opciones_edificio, _opciones_localidad, _opciones_unidad
 from app.gui.pantallas.reservas import _opciones_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional, repoblar_combo_profesional
 from app.negocio.listas_editables import opciones_lista
 from app.negocio.mensajes import sustituir_variables
 from app.repositorio.registro import obtener_repositorio
@@ -291,9 +291,7 @@ class _PanelMensajesPredefinidos(QWidget):
 
         layout_superior.addWidget(_titulo_campo("Dirigido a"))
         self.combo_dirigido_a = QComboBox()
-        self.combo_dirigido_a.addItem("Nadie en particular", None)
-        for id_profesional, etiqueta in _opciones_profesional(self.conn):
-            self.combo_dirigido_a.addItem(etiqueta, id_profesional)
+        self._cargar_combo_dirigido_a()
         habilitar_busqueda_profesional(self.combo_dirigido_a)
         self.combo_dirigido_a.currentIndexChanged.connect(self._actualizar_vista_previa)
         layout_superior.addWidget(self.combo_dirigido_a)
@@ -449,10 +447,19 @@ class _PanelMensajesPredefinidos(QWidget):
         """Punto 1.4: al volver a entrar (o F3), se resetea el filtro de
         Categoría (`combo_filtro`, antes no se tocaba) y la tabla
         (`self.crud.reiniciar()`, limpia Buscar), y el foco vuelve al
-        primero de la cadena completa de esta pantalla."""
+        primero de la cadena completa de esta pantalla. Bug real
+        reportado por la clienta: un profesional recién creado no
+        aparecía en "Dirigido a" hasta reiniciar TODO el sistema —
+        `_cargar_combo_dirigido_a` lo repuebla acá también, preservando
+        la selección vigente."""
+        self._cargar_combo_dirigido_a()
         self.combo_filtro.setCurrentIndex(0)
         self.crud.reiniciar()
         self.crud.campo_buscar.setFocus()
+
+    def _cargar_combo_dirigido_a(self) -> None:
+        opciones = [(None, "Nadie en particular")] + list(_opciones_profesional(self.conn))
+        repoblar_combo_profesional(self.combo_dirigido_a, opciones)
 
     def _cascada_renombrar_categoria(self, registro: sqlite3.Row, valores: dict) -> None:
         """`al_actualizar` de `self.crud` (ver `_armar_ui`): corre

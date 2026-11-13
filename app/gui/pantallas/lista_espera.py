@@ -486,7 +486,13 @@ class _PanelListaEspera(QWidget):
         clienta pidió explícitamente conservar la última búsqueda al
         salir y volver a entrar), esta pantalla no tiene ninguna
         decisión documentada en contra — el formulario de "Nuevo pedido"
-        vuelve a su estado en blanco y el foco arranca en Profesional."""
+        vuelve a su estado en blanco y el foco arranca en Profesional.
+
+        Bug real reportado por la clienta: un profesional recién creado
+        no aparecía acá hasta reiniciar TODO el sistema —
+        `_cargar_profesionales` se llamaba una sola vez, en `_armar_ui`,
+        y nunca se volvía a invocar."""
+        self._cargar_profesionales()
         self.combo_profesional.setCurrentIndex(0)
         self._cargar_localidades()  # vuelve la cascada a "Todas/Todos" en los tres niveles
         for check in self._checks_dia.values():

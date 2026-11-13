@@ -4855,3 +4855,106 @@ Licencias/Ausencias, nov-2026): misma lista de 10 fallos exactos,
 mismas causas ya diagnosticadas acá, 3008 passed contra una suite que
 sumó 19 tests nuevos en esa tanda (2989 + 19 = 3008) — ninguna
 regresión nueva.
+
+## Bug sistémico: el combo de Profesional no se actualizaba sin reiniciar todo el sistema
+
+Pedido de la clienta: "Cuando se ingresa a un profesional tengo que
+salir del sistema y volver a entrar para luego poder recién asignarle
+una reserva."
+
+### Causa raíz
+
+Cada pantalla puebla su combo de profesional UNA SOLA VEZ, al
+construirse (`_armar_ui`/`__init__`) — porque `VentanaPrincipal` arma
+cada pantalla una única vez al arrancar el proceso y la mantiene viva
+toda la sesión (`self._pila.addWidget(widget)`, una sola vez, nunca se
+reconstruye al navegar entre solapas). Ni `showEvent` (volver a la
+solapa) ni `reiniciar()` (F5) volvían a agregar ítems al combo en la
+mayoría de las pantallas — solo tocaban la selección/filtro vigente.
+Por eso hacía falta reiniciar TODO el sistema, no alcanzaba con volver
+a entrar a la solapa ni con F5.
+
+Un relevamiento inicial (grep de `habilitar_busqueda_profesional`/
+`_opciones_profesional`) encontró 11 pantallas con algún combo de
+profesional. Dos de esas NO tenían el bug real y quedaron afuera del
+alcance:
+
+- **`_PanelReservasRegulares`** (Reservas regulares) ya estaba
+  arreglada desde una ronda anterior (commit `39805c2`, nov-2026,
+  pedido puntual sobre un cambio de categoría en caliente) —
+  `_cargar_combo_profesional()` ya reconstruye el combo y `reiniciar()`
+  (llamado desde `showEvent`) ya la invoca. No se tocó.
+- **Profesionales → "Cabeza de equipo"** (`_opciones_cabeza_equipo`,
+  usado en el diálogo Nuevo/Editar de la pantalla de Profesionales):
+  ese combo vive DENTRO de `_DialogoRegistro` (`crud_generico.py`), que
+  se reconstruye de cero cada vez que se abre el diálogo — `campo.
+  opciones(self.conn)` corre fresco en cada apertura, así que nunca
+  queda poblado una sola vez. Confirmado que no tiene el bug; no se
+  tocó.
+
+### Arreglo
+
+Helper nuevo, compartido, en `app/gui/widgets/selector_profesional.py`:
+
+```python
+def repoblar_combo_profesional(combo: QComboBox, opciones: list[tuple]) -> None:
+```
+
+Repuebla `combo` desde cero con `opciones` (mismo formato `(dato,
+etiqueta)` que se le pasaba a `addItem`), preservando la selección
+vigente por dato si sigue existiendo en la lista nueva — si no, cae al
+primer ítem. Bloquea señales durante el repoblado para no disparar
+`currentIndexChanged` de más. Se usa desde `showEvent` en las pantallas
+donde simplemente volver a la solapa NO debe resetear el filtro
+elegido (ej. Reservas aisladas/extraordinarias, Oferta de
+consultorios, Cargos especiales, Llaves, Placas), y desde `reiniciar()`
+en las que ya reseteaban todo a "Todos los profesionales"/el primer
+ítem en cada entrada a la solapa (ej. Vacaciones/Licencias/Ausencias,
+Liquidaciones simuladas) — en estas últimas simplemente se repuebla
+antes del reset explícito, sin cambiar ese comportamiento.
+
+En las pantallas donde `actualizar()` YA repoblaba el combo completo
+preservando la selección (patrón ya usado antes de este bug, ej. los
+"Estado de cuenta" de Cargos especiales/Liquidaciones/Pagos), el
+problema era más chico: a esos paneles directamente les faltaba un
+`showEvent` que llamara a `actualizar()` al volver a la solapa (dos de
+los tres, "Estado de cuenta" de Cargos especiales y de Pagos, no
+tenían `showEvent` en absoluto) — se sumó esa llamada en vez de
+duplicar lógica con el helper nuevo.
+
+### Pantallas arregladas (9 archivos, 18 combos)
+
+- `app/gui/pantallas/reservas.py` — Reservas aisladas, Reservas
+  extraordinarias (2 combos).
+- `app/gui/pantallas/novedades.py` — Vacaciones, Licencias, Ausencias,
+  Cargos especiales, Estado de cuenta - Cargos (5 combos).
+- `app/gui/pantallas/liquidacion.py` — Emisión de archivos, Estado de
+  cuenta, Liquidaciones simuladas (3 combos).
+- `app/gui/pantallas/pagos.py` — Registrar pago, Planes de pago, Estado
+  de cuenta (3 combos).
+- `app/gui/pantallas/lista_espera.py` — Lista de espera (1 combo, vía
+  el método ya existente `_cargar_profesionales`, antes nunca
+  reinvocado).
+- `app/gui/pantallas/llaves.py` — filtro de Stock, filtro de
+  Movimientos (2 combos).
+- `app/gui/pantallas/mensajeria.py` — Centro de mensajería (1 combo).
+- `app/gui/pantallas/mensajes_predefinidos.py` — "Dirigido a" (1
+  combo).
+- `app/gui/pantallas/oferta.py` — Oferta de consultorios (1 combo, vía
+  el método ya existente `_cargar_profesionales`, reescrito para
+  preservar selección en vez de solo repoblar sin tocar nada más —
+  "la última búsqueda queda cargada tal cual se la dejó" seguía
+  cumpliéndose).
+- `app/gui/pantallas/placas.py` — filtro de "Buscar y asignar", "Buscar
+  profesional" de Imprimir (2 combos).
+
+### Tests
+
+Un test de regresión por cada combo arreglado (crear un profesional
+nuevo directo en la conexión, disparar `showEvent`/`reiniciar()`,
+confirmar que aparece en el combo) más tests de preservación de
+selección donde correspondía, y tests directos de `repoblar_combo_
+profesional` en `tests/test_gui_widget_selector_profesional.py`.
+pyflakes limpio en los 11 archivos de código+test tocados; suite
+completa del proyecto sin regresiones nuevas (ver más arriba la lista
+de fallos conocidos del entorno).

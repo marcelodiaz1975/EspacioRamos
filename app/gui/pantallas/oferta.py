@@ -82,7 +82,7 @@ from app.gui.widgets.grilla_operativa import (
     _lista_multiseleccion,
     _seleccionar_todos,
 )
-from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional, repoblar_combo_profesional
 from app.negocio.archivos_generados import SUBCARPETA_OFERTA, carpeta_archivos_varios
 from app.negocio.dias import DIAS_SEMANA
 from app.negocio.oferta_busqueda import (
@@ -746,8 +746,13 @@ class _PanelOferta(QWidget):
         como cambiar de solapa y volver). Pedirle acá, ya con el estilo
         real puesto, que vuelva a repartir sus columnas según el
         `sizeHint` actual dejan la pantalla estable desde la primera
-        entrada, sin depender de una navegación extra para "acomodarse"."""
+        entrada, sin depender de una navegación extra para "acomodarse".
+
+        También repuebla `combo_profesional` (`_cargar_profesionales`,
+        bug real — ver esa función) preservando la selección vigente,
+        sin tocar la última búsqueda cargada."""
         super().showEvent(event)
+        self._cargar_profesionales()
         self.combo_profesional.setFocus()
         self._reacomodar_columnas_splitter()
         # Mismo motivo que Reservas regulares/Grilla semanal (ver el
@@ -766,11 +771,19 @@ class _PanelOferta(QWidget):
             self._reacomodar_columnas_splitter()
 
     def _cargar_profesionales(self) -> None:
-        self.combo_profesional.clear()
-        self._categoria_por_profesional: dict[int, str] = {}
-        for id_, etiqueta, categoria in _opciones_profesional_con_categoria(self.conn, _CATEGORIAS_TODAS):
-            self.combo_profesional.addItem(etiqueta, id_)
-            self._categoria_por_profesional[id_] = categoria
+        """Bug real reportado por la clienta: un profesional recién
+        creado no aparecía acá hasta reiniciar TODO el sistema — antes
+        solo se llamaba una vez, en `_armar_ui`. Ahora también se llama
+        desde `showEvent` (ver esa función) y desde `_nueva_busqueda`/F5
+        — `repoblar_combo_profesional` preserva la selección vigente
+        por id, así que entrar y salir de la solapa sigue sin tocar la
+        última búsqueda cargada (pedido explícito de la clienta, ver
+        `_nueva_busqueda`)."""
+        opciones = _opciones_profesional_con_categoria(self.conn, _CATEGORIAS_TODAS)
+        self._categoria_por_profesional = {id_: categoria for id_, _etiqueta, categoria in opciones}
+        repoblar_combo_profesional(
+            self.combo_profesional, [(id_, etiqueta) for id_, etiqueta, _categoria in opciones]
+        )
         # Llamado explícito (no alcanza con el signal de `addItem`, que no
         # dispara si el combo ya arranca o se queda en el índice 0): deja
         # "Tipo de búsqueda" ya precargado según la categoría del primer
@@ -1082,6 +1095,7 @@ class _PanelOferta(QWidget):
         """Único punto que limpia el formulario a propósito — entrar y
         salir de la pantalla NO lo resetea (confirmado por la clienta:
         la última búsqueda queda cargada tal cual se la dejó)."""
+        self._cargar_profesionales()
         self.combo_profesional.setCurrentIndex(0)
         # "Tipo de búsqueda" vuelve a quedar según la categoría del
         # profesional que termine seleccionado en el combo (ver

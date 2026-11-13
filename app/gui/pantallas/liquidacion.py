@@ -66,7 +66,7 @@ from app.gui.widgets.orden_tabla import clave_orden_codigo
 from app.gui.widgets.procesando import Procesando
 from app.gui.widgets.resumen_saldo import item_monto
 from app.gui.widgets.selector_periodo import SelectorPeriodo
-from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional, repoblar_combo_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_liquidaciones_simuladas, carpeta_profesional
 from app.negocio.dias import fecha_a_dia_semana, fecha_actual, periodo_actual, sumar_meses
 from app.negocio.formato import formatear_moneda
@@ -170,6 +170,7 @@ class _PanelEmisionArchivos(QWidget):
         sí arranca con una consulta nueva), nunca al volver a entrar a
         esta solapa en caliente."""
         super().showEvent(event)
+        self._cargar_combo_profesional()
         self.actualizar()
         self.campo_periodo.setFocus()
 
@@ -180,10 +181,23 @@ class _PanelEmisionArchivos(QWidget):
         elegido), F3 es un pedido explícito de empezar de cero: Período/
         Profesional/Estado vuelven a su valor inicial."""
         self.campo_periodo.set_periodo(periodo_actual(self.conn))
+        self._cargar_combo_profesional()
         self.combo_profesional_filtro.setCurrentIndex(0)
         self.combo_estado_filtro.setCurrentIndex(0)
         self.actualizar()
         self.campo_periodo.setFocus()
+
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta: un profesional R recién
+        creado no aparecía acá hasta reiniciar TODO el sistema —
+        `combo_profesional_filtro` se poblaba una sola vez en
+        `_armar_ui` y `showEvent`/`actualizar()` nunca volvían a tocar
+        sus ítems (solo leían la selección vigente). Se llama desde
+        `showEvent` preservando la selección (`repoblar_combo_
+        profesional`, por id) para no perder el filtro elegido al
+        simplemente volver a esta solapa."""
+        opciones = [(None, "Todos los profesionales")] + list(_opciones_profesional(self.conn, ("R",)))
+        repoblar_combo_profesional(self.combo_profesional_filtro, opciones)
 
     def _armar_ui(self) -> None:
         layout_externo = QHBoxLayout(self)
@@ -199,9 +213,7 @@ class _PanelEmisionArchivos(QWidget):
 
         layout_filtros.addWidget(QLabel("Profesional:"))
         self.combo_profesional_filtro = QComboBox()
-        self.combo_profesional_filtro.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, ("R",)):
-            self.combo_profesional_filtro.addItem(etiqueta, id_)
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional_filtro)
         self.combo_profesional_filtro.currentIndexChanged.connect(self.actualizar)
         layout_filtros.addWidget(self.combo_profesional_filtro)
@@ -462,15 +474,23 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802
         """Mismo motivo que en Emisión de archivos: al mostrarse la
         solapa (recién ahí "pega" el foco) lo manda a Profesional, el
-        único control con el que se interactúa en este panel."""
+        único control con el que se interactúa en este panel.
+
+        Bug real reportado por la clienta: un profesional recién creado
+        no aparecía acá hasta reiniciar TODO el sistema — `actualizar()`
+        ya repoblaba `combo_profesional` preservando la selección (ver
+        esa función), pero nada la volvía a llamar al simplemente volver
+        a esta solapa."""
         super().showEvent(event)
+        self.actualizar()
         self.combo_profesional.setFocus()
 
     def reiniciar(self) -> None:
         """F3 ("Reiniciar solapa"): no hay ningún filtro que resetear
         acá — "Profesional" se conserva a propósito incluso al volver a
         entrar (ver el comentario de `actualizar()`) — alcanza con
-        devolver el foco, igual que `showEvent`."""
+        refrescar (mismo motivo que `showEvent`) y devolver el foco."""
+        self.actualizar()
         self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:
@@ -630,13 +650,20 @@ class _PanelLiquidacionesSimuladas(QWidget):
         la última simulación vaciados, foco en Profesional. El combo
         Profesional no tiene una opción en blanco (siempre hace falta
         elegir uno para poder generar), así que no se toca — queda en
-        el que ya estuviera seleccionado."""
+        el que ya estuviera seleccionado (`_cargar_combo_profesional`
+        repuebla preservando esa selección — bug real reportado por la
+        clienta: un profesional recién creado no aparecía acá hasta
+        reiniciar TODO el sistema)."""
+        self._cargar_combo_profesional()
         self.campo_periodo.set_periodo(sumar_meses(periodo_actual(self.conn), 1))
         self.combo_localidad.setCurrentIndex(0)
         self._bloques.clear()
         self._refrescar_tabla_bloques()
         self.tabla_subtotales.setRowCount(0)
         self.combo_profesional.setFocus()
+
+    def _cargar_combo_profesional(self) -> None:
+        repoblar_combo_profesional(self.combo_profesional, list(_opciones_profesional(self.conn)))
 
     def _armar_ui(self) -> None:
         layout_externo = QHBoxLayout(self)
@@ -653,8 +680,7 @@ class _PanelLiquidacionesSimuladas(QWidget):
         # categoría C (todavía no activo) cuánto le saldría, igual que
         # ya hacen Oferta de consultorios/Disponibilidad con ese mismo
         # perfil de profesional.
-        for id_, etiqueta in _opciones_profesional(self.conn):
-            self.combo_profesional.addItem(etiqueta, id_)
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional)
         layout_izquierda.addWidget(self.combo_profesional)
 

@@ -74,7 +74,7 @@ from app.gui.widgets.grilla_operativa import (
     _seleccionar_todos,
 )
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
-from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional, repoblar_combo_profesional
 from app.negocio.archivos_generados import SUBCARPETA_PLACAS_PARA_IMPRIMIR, carpeta_archivos_varios
 from app.negocio.placas import (
     asignar_placa,
@@ -213,6 +213,7 @@ class _PanelBuscarPlacas(QWidget):
         self._reiniciar_filtros()
 
     def _reiniciar_filtros(self) -> None:
+        self._contenedor._cargar_combo_profesional_filtro()
         self._contenedor._orden.reiniciar()
         self._contenedor.combo_profesional_filtro.setCurrentIndex(0)
         self._contenedor._cargar_localidades()
@@ -229,7 +230,13 @@ class _PanelImprimirPlacas(QWidget):
         self._contenedor = contenedor
 
     def showEvent(self, event) -> None:  # noqa: N802
+        """Bug real reportado por la clienta: un profesional recién
+        creado no aparecía acá hasta reiniciar TODO el sistema —
+        `_cargar_combo_profesional_imprimir` lo repuebla acá,
+        preservando la selección vigente (no corresponde resetear nada
+        más, mismo criterio que el resto del showEvent de siempre)."""
         super().showEvent(event)
+        self._contenedor._cargar_combo_profesional_imprimir()
         self._contenedor.combo_profesional_imprimir.setFocus()
 
     def reiniciar(self) -> None:
@@ -238,6 +245,7 @@ class _PanelImprimirPlacas(QWidget):
         ningún profesional elegido, la lista de "Placas a imprimir"
         vacía y la vista previa en blanco."""
         c = self._contenedor
+        c._cargar_combo_profesional_imprimir()
         c.combo_profesional_imprimir.setCurrentIndex(0)
         c._cargar_placas_profesional_imprimir()
         c._cola_impresion.clear()
@@ -279,9 +287,7 @@ class _PanelPlacasOperativas(QWidget):
         columna_filtros.setContentsMargins(0, 0, 0, 0)
         columna_filtros.addWidget(_titulo_campo("Profesional"))
         self.combo_profesional_filtro = QComboBox()
-        self.combo_profesional_filtro.addItem("Todos los profesionales", None)
-        for id_profesional, etiqueta in _opciones_profesional(self.conn):
-            self.combo_profesional_filtro.addItem(etiqueta, id_profesional)
+        self._cargar_combo_profesional_filtro()
         habilitar_busqueda_profesional(self.combo_profesional_filtro)
         self.combo_profesional_filtro.currentIndexChanged.connect(self._actualizar_tabla)
         columna_filtros.addWidget(self.combo_profesional_filtro)
@@ -366,6 +372,21 @@ class _PanelPlacasOperativas(QWidget):
             self.boton_asignar_nueva, self.boton_reasignar, self.boton_liberar,
         ], parent=panel)
         return panel
+
+    def _cargar_combo_profesional_filtro(self) -> None:
+        """Bug real reportado por la clienta: un profesional recién
+        creado no aparecía acá hasta reiniciar TODO el sistema —
+        `combo_profesional_filtro` se poblaba una sola vez, en
+        `_armar_panel_buscar`."""
+        opciones = [(None, "Todos los profesionales")] + list(_opciones_profesional(self.conn))
+        repoblar_combo_profesional(self.combo_profesional_filtro, opciones)
+
+    def _cargar_combo_profesional_imprimir(self) -> None:
+        """Bug real reportado por la clienta: ver `_cargar_combo_
+        profesional_filtro` — mismo motivo, acá sin sentinel "Todos"
+        (siempre hay un profesional real elegido, igual que Liquidaciones
+        simuladas)."""
+        repoblar_combo_profesional(self.combo_profesional_imprimir, list(_opciones_profesional(self.conn)))
 
     def _cargar_localidades(self) -> None:
         self.lista_localidad.blockSignals(True)
@@ -594,8 +615,7 @@ class _PanelPlacasOperativas(QWidget):
         columna_izquierda = QVBoxLayout()
         columna_izquierda.addWidget(_titulo_campo("Buscar profesional"))
         self.combo_profesional_imprimir = QComboBox()
-        for id_profesional, etiqueta in _opciones_profesional(self.conn):
-            self.combo_profesional_imprimir.addItem(etiqueta, id_profesional)
+        self._cargar_combo_profesional_imprimir()
         habilitar_busqueda_profesional(self.combo_profesional_imprimir)
         self.combo_profesional_imprimir.currentIndexChanged.connect(self._cargar_placas_profesional_imprimir)
         columna_izquierda.addWidget(self.combo_profesional_imprimir)

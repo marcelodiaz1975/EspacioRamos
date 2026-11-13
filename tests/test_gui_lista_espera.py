@@ -1109,3 +1109,23 @@ def test_tabla_bloques_tiene_cuatro_columnas_con_horas_minimas(qtbot, conn):
     pantalla.casilla_cantidad_horas.setChecked(False)
     pantalla._agregar_bloque()
     assert pantalla.tabla_bloques.item(1, 3).text() == "Completo"
+
+
+def test_lista_espera_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: un profesional recién creado
+    no aparecía acá hasta reiniciar TODO el sistema — `_cargar_
+    profesionales` se llamaba una sola vez, en `_armar_ui`."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = _PanelListaEspera(conn)
+    qtbot.addWidget(pantalla)
+
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Nuevo')")
+    conn.commit()
+    id_nuevo = conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = 'Nuevo'").fetchone()[
+        "IdProfesional"
+    ]
+
+    pantalla.showEvent(QShowEvent())
+
+    assert pantalla.combo_profesional.findData(id_nuevo) >= 0

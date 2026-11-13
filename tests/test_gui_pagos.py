@@ -1541,3 +1541,58 @@ def test_estado_cuenta_pagos_reiniciar_no_rompe(qtbot, conn):
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     pantalla.panel_estado_cuenta.reiniciar()
+
+
+def _crear_profesional_r(conn, apellido="Nuevo") -> int:
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', ?)", (apellido,))
+    conn.commit()
+    return conn.execute(
+        "SELECT IdProfesional FROM Profesional WHERE Apellido = ?", (apellido,)
+    ).fetchone()["IdProfesional"]
+
+
+def test_registrar_pago_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: un profesional recién creado
+    no aparecía acá hasta reiniciar TODO el sistema — el combo se
+    poblaba una sola vez, al construirse la pantalla."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+
+    id_nuevo = _crear_profesional_r(conn)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0
+
+
+def test_planes_de_pago_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta — mismo motivo que Registrar
+    pago (solo profesionales R)."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_planes
+
+    id_nuevo = _crear_profesional_r(conn)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0
+
+
+def test_estado_cuenta_pagos_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: esta solapa no tenía
+    `showEvent` propio que llamara a `actualizar()` (que ya repuebla el
+    combo preservando la selección)."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_estado_cuenta
+
+    id_nuevo = _crear_profesional_r(conn)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0

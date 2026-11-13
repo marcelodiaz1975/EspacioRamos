@@ -965,3 +965,46 @@ def test_generar_pdf_genera_archivo_y_vacia_la_cola(qtbot, conn, tmp_path):
     assert generados[0].name.startswith("Placas para imprimir")
     assert pantalla.lista_impresion.count() == 0
     assert pantalla._cola_impresion == []
+
+
+def test_combo_profesional_filtro_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: un profesional recién creado
+    no aparecía acá hasta reiniciar TODO el sistema — el combo se
+    poblaba una sola vez, al construirse la pantalla."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+
+    id_nuevo = _crear_profesional(conn)
+    pantalla.panel_buscar.showEvent(QShowEvent())
+
+    assert pantalla.combo_profesional_filtro.findData(id_nuevo) >= 0
+
+
+def test_combo_profesional_imprimir_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta — mismo motivo que el combo de
+    filtro de "Buscar y asignar", acá sin sentinel "Todos" (siempre hay
+    un profesional real elegido)."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+
+    id_nuevo = _crear_profesional(conn)
+    pantalla.panel_imprimir.showEvent(QShowEvent())
+
+    assert pantalla.combo_profesional_imprimir.findData(id_nuevo) >= 0
+
+
+def test_combo_profesional_imprimir_preserva_la_seleccion_al_volver_a_la_solapa(qtbot, conn):
+    from PySide6.QtGui import QShowEvent
+
+    id_profesional = _crear_profesional(conn)
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_profesional_imprimir.setCurrentIndex(pantalla.combo_profesional_imprimir.findData(id_profesional))
+
+    pantalla.panel_imprimir.showEvent(QShowEvent())
+
+    assert pantalla.combo_profesional_imprimir.currentData() == id_profesional

@@ -79,7 +79,7 @@ from app.gui.widgets.grilla_operativa import GrillaOperativaWidget, pares_dia_un
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo, clave_orden_profesional
 from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, partes_resumen
-from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional, repoblar_combo_profesional
 from app.negocio.ausencias import cancelar_ausencia, crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual
 from app.negocio.formato import formatear_moneda
@@ -362,6 +362,7 @@ class _PanelVacaciones(QWidget):
         actual, Desde/Hasta a hoy, orden de la tabla reiniciado y foco
         en Profesional."""
         self._orden.reiniciar()
+        self._cargar_combo_profesional()
         self.combo_profesional.setCurrentIndex(0)
         self.spin_anio.setValue(fecha_actual(self.conn).year)
         hoy = fecha_actual(self.conn)
@@ -369,6 +370,20 @@ class _PanelVacaciones(QWidget):
         self.campo_hasta.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self.actualizar()
         self.combo_profesional.setFocus()
+
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta: un profesional recién
+        creado no aparecía acá hasta reiniciar TODO el sistema —
+        `combo_profesional` se armaba una sola vez en `_armar_ui` y
+        nunca se volvía a poblar. Se reconstruye desde cero cada vez
+        que corresponde refrescarlo (`reiniciar()`, llamado desde
+        `showEvent` — mismo criterio que `_PanelReservasRegulares`)."""
+        self.combo_profesional.blockSignals(True)
+        self.combo_profesional.clear()
+        self.combo_profesional.addItem("Todos los profesionales", None)
+        for id_, etiqueta in _opciones_profesional_vacaciones(self.conn):
+            self.combo_profesional.addItem(etiqueta, id_)
+        self.combo_profesional.blockSignals(False)
 
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
@@ -400,9 +415,7 @@ class _PanelVacaciones(QWidget):
         form.setContentsMargins(9, _ALTO_TITULO_COLUMNAS_NOVEDADES, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional_vacaciones(self.conn):
-            self.combo_profesional.addItem(etiqueta, id_)
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(_titulo_campo("Profesional"))
@@ -829,6 +842,7 @@ class _PanelLicencias(QWidget):
         Hasta a "(sin fecha)", orden de la tabla reiniciado y foco en
         Profesional."""
         self._orden.reiniciar()
+        self._cargar_combo_profesional()
         self.combo_profesional.setCurrentIndex(0)
         self.combo_tipo.setCurrentIndex(0)
         self._precargar_porcentaje()
@@ -837,6 +851,16 @@ class _PanelLicencias(QWidget):
         self.campo_hasta.setDate(_FECHA_SIN_DATO)
         self.actualizar()
         self.combo_profesional.setFocus()
+
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta — ver `_PanelVacaciones.
+        _cargar_combo_profesional`, mismo motivo y mecanismo."""
+        self.combo_profesional.blockSignals(True)
+        self.combo_profesional.clear()
+        self.combo_profesional.addItem("Todos los profesionales", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+            self.combo_profesional.addItem(etiqueta, id_)
+        self.combo_profesional.blockSignals(False)
 
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
@@ -863,9 +887,7 @@ class _PanelLicencias(QWidget):
         form.setContentsMargins(9, _ALTO_TITULO_COLUMNAS_NOVEDADES, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
-            self.combo_profesional.addItem(etiqueta, id_)
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(_titulo_campo("Profesional"))
@@ -1204,6 +1226,7 @@ class _PanelAusencias(QWidget):
         default (9 a 10), orden de la tabla reiniciado y foco en
         Profesional."""
         self._orden.reiniciar()
+        self._cargar_combo_profesional()
         self.combo_profesional.setCurrentIndex(0)
         self.combo_motivo.setCurrentIndex(0)
         hoy = fecha_actual(self.conn)
@@ -1214,6 +1237,16 @@ class _PanelAusencias(QWidget):
         self.spin_hora_hasta.setValue(10)
         self.actualizar()
         self.combo_profesional.setFocus()
+
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta — ver `_PanelVacaciones.
+        _cargar_combo_profesional`, mismo motivo y mecanismo."""
+        self.combo_profesional.blockSignals(True)
+        self.combo_profesional.clear()
+        self.combo_profesional.addItem("Todos los profesionales", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
+            self.combo_profesional.addItem(etiqueta, id_)
+        self.combo_profesional.blockSignals(False)
 
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
@@ -1240,9 +1273,7 @@ class _PanelAusencias(QWidget):
         form.setContentsMargins(9, _ALTO_TITULO_COLUMNAS_NOVEDADES, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setFixedWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
-            self.combo_profesional.addItem(etiqueta, id_)
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(_titulo_campo("Profesional"))
@@ -1584,8 +1615,13 @@ class _PanelCargosEspeciales(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         """Mismo motivo que en las demás pestañas de esta pantalla:
-        `setFocus()` durante la construcción no alcanza a "pegar"."""
+        `setFocus()` durante la construcción no alcanza a "pegar". Sí
+        repuebla `combo_profesional` (`_cargar_combo_profesional`, bug
+        real — ver esa función) preservando la selección vigente: a
+        diferencia de F3 (`reiniciar()`), simplemente volver a esta
+        solapa no tiene que perder el profesional elegido."""
         super().showEvent(event)
+        self._cargar_combo_profesional()
         self._orden.reiniciar()
         self.actualizar()
         self.combo_profesional.setFocus()
@@ -1599,6 +1635,7 @@ class _PanelCargosEspeciales(QWidget):
         tabla) al estado inicial, mismo criterio que Reservas
         regulares."""
         self._orden.reiniciar()
+        self._cargar_combo_profesional()
         self.combo_profesional.setCurrentIndex(0)
         self.combo_subtipo.setCurrentIndex(0)
         self._actualizar_tipo_segun_subtipo()
@@ -1608,6 +1645,18 @@ class _PanelCargosEspeciales(QWidget):
         self.actualizar()
         self.combo_profesional.setFocus()
 
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta — ver `_PanelVacaciones.
+        _cargar_combo_profesional`. Acá se llama también desde
+        `showEvent` (no solo desde `reiniciar()`/F3), preservando la
+        selección vigente (`repoblar_combo_profesional`), porque esta
+        solapa no resetea el formulario al simplemente volver a
+        entrar."""
+        opciones = [(None, "Todos los profesionales")] + list(
+            _opciones_profesional(self.conn, _CATEGORIAS_CON_CARGOS)
+        )
+        repoblar_combo_profesional(self.combo_profesional, opciones)
+
     def _armar_ui(self) -> None:
         layout = QHBoxLayout(self)
         splitter = QSplitter()
@@ -1616,9 +1665,7 @@ class _PanelCargosEspeciales(QWidget):
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_CON_CARGOS):
-            self.combo_profesional.addItem(etiqueta, id_)
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self.actualizar)
         form.addWidget(QLabel("Profesional"))
@@ -1885,11 +1932,23 @@ class _PanelEstadoCuentaCargos(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Bug real reportado por la clienta: un profesional recién
+        creado no aparecía acá hasta reiniciar TODO el sistema —
+        `actualizar()` ya repoblaba `combo_profesional` preservando la
+        selección (ver esa función), pero nada la volvía a llamar al
+        simplemente volver a esta solapa (no tenía `showEvent` propio)."""
+        super().showEvent(event)
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
     def reiniciar(self) -> None:
         """F3 ("Reiniciar solapa"): no hay ningún filtro que resetear
         acá — "Profesional" se conserva a propósito al refrescar (ver
         `actualizar()`, mismo criterio que el Estado de cuenta de
-        Liquidaciones/Pagos) — alcanza con devolver el foco."""
+        Liquidaciones/Pagos) — alcanza con refrescar (mismo motivo que
+        `showEvent`) y devolver el foco."""
+        self.actualizar()
         self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:

@@ -244,6 +244,34 @@ class _SeleccionarTodoAlEnfocar(QObject):
             self._line_edit.selectAll()
 
 
+def repoblar_combo_profesional(combo: QComboBox, opciones: list[tuple]) -> None:
+    """Vuelve a poblar `combo` con `opciones` (lista de tuplas
+    `(dato, etiqueta)`, mismo formato que se le pasaba a `addItem`
+    originalmente), preservando la selección vigente por dato si sigue
+    existiendo en la lista nueva — si no, cae al primer ítem.
+
+    Bug real reportado por la clienta: un profesional recién creado (o
+    con la categoría recién cambiada) no aparecía para asignarle una
+    reserva hasta reiniciar TODO el sistema — `combo_profesional` se
+    poblaba una sola vez, en la construcción del panel (`VentanaPrincipal`
+    arma cada pantalla una única vez y la mantiene viva toda la sesión,
+    nunca la reconstruye al navegar entre solapas). Pensada para
+    llamarse desde el `showEvent` (si ese `showEvent` no debe perder la
+    selección vigente, ej. Reservas aisladas/extraordinarias) o desde
+    `reiniciar()` (si ese método ya resetea todo a "Todos los
+    profesionales" en cada entrada a la solapa, ej. Reservas regulares
+    o los paneles de Registro de ausencias) de cualquier pantalla con
+    combo de profesional."""
+    valor_actual = combo.currentData()
+    combo.blockSignals(True)
+    combo.clear()
+    for valor, etiqueta in opciones:
+        combo.addItem(etiqueta, valor)
+    indice = combo.findData(valor_actual)
+    combo.setCurrentIndex(indice if indice >= 0 else 0)
+    combo.blockSignals(False)
+
+
 def habilitar_busqueda_profesional(combo: QComboBox) -> None:
     combo.setEditable(True)
     combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)

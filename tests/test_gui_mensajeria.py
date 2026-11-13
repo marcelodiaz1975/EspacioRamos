@@ -940,3 +940,18 @@ def test_categoria_x_gris_queda_al_final_del_grupo_gris(qtbot, conn):
     assert pantalla.tabla.rowCount() == 2
     assert "Gris" in pantalla.tabla.item(0, 1).text()  # gris de R primero
     assert "ConDeuda" in pantalla.tabla.item(1, 1).text()  # gris de X al final
+
+
+def test_combo_profesional_filtro_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: un profesional recién creado
+    no aparecía acá hasta reiniciar TODO el sistema — el combo se
+    poblaba una sola vez, al construirse la pantalla."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+
+    id_nuevo = _crear_profesional(conn, apellido="Nuevo")
+    pantalla.showEvent(QShowEvent())
+
+    assert pantalla.combo_profesional_filtro.findData(id_nuevo) >= 0

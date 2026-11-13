@@ -68,7 +68,7 @@ from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
-from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional, repoblar_combo_profesional
 from app.negocio.dias import periodo_actual, sumar_meses
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import opciones_lista
@@ -191,11 +191,25 @@ class _PanelLlaves(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        self._cargar_combos_filtro_profesional()
         self._orden_tipos.reiniciar()
         self._orden_accesos.reiniciar()
         self._orden_movimientos.reiniciar()
         self.actualizar()
         self.boton_nuevo_tipo.setFocus()
+
+    def _cargar_combos_filtro_profesional(self) -> None:
+        """Bug real reportado por la clienta: un profesional recién
+        creado no aparecía en `combo_filtro_stock`/`combo_filtro_
+        movimientos` hasta reiniciar TODO el sistema — se poblaban una
+        sola vez, en `_armar_ui`, y ni `showEvent` ni F5 (`reiniciar()`)
+        volvían a tocar sus ítems. Se llama desde `showEvent`
+        preservando la selección vigente (`repoblar_combo_profesional`,
+        por id) — el reset a índice 0 de F5 sigue a cargo de
+        `reiniciar()`, después de llamar a este mismo método."""
+        opciones = [(None, "Todos los profesionales")] + list(_opciones_profesional(self.conn, _CATEGORIAS_TODAS))
+        repoblar_combo_profesional(self.combo_filtro_stock, opciones)
+        repoblar_combo_profesional(self.combo_filtro_movimientos, opciones)
 
     def reiniciar(self) -> None:
         """F5: mismo reset completo que ya hacía `showEvent` en esta
@@ -203,6 +217,7 @@ class _PanelLlaves(QWidget):
         "Movimientos de llaves" (`combo_filtro_movimientos`, #117), que
         `showEvent` no tocaba porque no existía todavía cuando se
         escribió ese reset."""
+        self._cargar_combos_filtro_profesional()
         self._orden_tipos.reiniciar()
         self._orden_accesos.reiniciar()
         self._orden_movimientos.reiniciar()

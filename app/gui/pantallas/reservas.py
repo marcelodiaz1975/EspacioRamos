@@ -54,7 +54,7 @@ from app.gui.widgets.grilla_operativa import (
 )
 from app.gui.widgets.items_tabla import item_centrado, item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo, clave_orden_profesional
-from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional, repoblar_combo_profesional
 from app.pdf.estilos import clave_orden_unidad
 from app.negocio.ausencias import crear_ausencia
 from app.negocio.dias import DIAS_SEMANA, fecha_a_dia_semana, fecha_actual, periodo_actual, sumar_meses
@@ -2377,8 +2377,13 @@ class _PanelReservasAisladas(QWidget):
         perder el filtro de Profesional que el operador ya había
         elegido (comportamiento de siempre, sin tocar); `reiniciar()`
         es exclusivamente para F3 ("Reiniciar solapa"), que sí es un
-        pedido explícito de empezar de cero."""
+        pedido explícito de empezar de cero. Sí repuebla `combo_
+        profesional` (`_cargar_combo_profesional`, bug real — ver esa
+        función) PRESERVANDO la selección vigente, a diferencia de
+        Reservas regulares: acá no corresponde resetear a "Todos los
+        profesionales" solo por repoblar la lista."""
         super().showEvent(event)
+        self._cargar_combo_profesional()
         # `sizeHint()`, no `minimumSizeHint()` (a diferencia de Reservas
         # regulares, ver esa solapa): acá la columna 2 (Filtros) tiene
         # `QSizePolicy.Expanding` para estirarse hasta el pie de la
@@ -2426,6 +2431,21 @@ class _PanelReservasAisladas(QWidget):
         TodoAlEnfocar`/`foco._EnterAvanzaFoco` para este mismo problema."""
         if shiboken6.isValid(self.tabla):
             _distribuir_ancho_sobrante_aisladas(self.tabla)
+
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta: un profesional recién
+        creado (o con la categoría recién cambiada) no aparecía acá
+        hasta reiniciar TODO el sistema — `combo_profesional` se
+        armaba una sola vez en `_armar_ui` y nunca se volvía a poblar.
+        Se llama desde `showEvent` (preservando la selección vigente,
+        ver esa función — `repoblar_combo_profesional` lo hace por id)
+        y desde `_armar_ui`, para no duplicar la carga inicial."""
+        opciones = _opciones_profesional_con_categoria(self.conn, _CATEGORIAS_AISLADAS)
+        self._categoria_por_profesional = {id_: categoria for id_, _etiqueta, categoria in opciones}
+        repoblar_combo_profesional(
+            self.combo_profesional,
+            [(None, "Todos los profesionales")] + [(id_, etiqueta) for id_, etiqueta, _categoria in opciones],
+        )
 
     def reiniciar(self) -> None:
         """F3 ("Reiniciar solapa"): mismo criterio que `_PanelReservas
@@ -2481,11 +2501,8 @@ class _PanelReservasAisladas(QWidget):
         form.setContentsMargins(9, _ALTO_ETIQUETA_COLUMNAS_1_2_AISLADAS, 9, 0)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Todos los profesionales", None)
         self._categoria_por_profesional: dict[int, str] = {}
-        for id_, etiqueta, categoria in _opciones_profesional_con_categoria(self.conn, _CATEGORIAS_AISLADAS):
-            self.combo_profesional.addItem(etiqueta, id_)
-            self._categoria_por_profesional[id_] = categoria
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self.actualizar)
         self.combo_profesional.currentIndexChanged.connect(self._al_cambiar_profesional)
@@ -3533,8 +3550,11 @@ class _PanelReservaExtraordinaria(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802
         """No llama a `reiniciar()` — mismo motivo que en Reservas
         aisladas: volver a esta solapa no tiene que perder el filtro de
-        Profesional elegido."""
+        Profesional elegido. Sí repuebla `combo_profesional`
+        (`_cargar_combo_profesional`, bug real — ver esa función)
+        preservando la selección vigente."""
         super().showEvent(event)
+        self._cargar_combo_profesional()
         self._orden.reiniciar()
         self.actualizar()
         self.combo_profesional.setFocus()
@@ -3547,6 +3567,18 @@ class _PanelReservaExtraordinaria(QWidget):
         self.actualizar()
         self.combo_profesional.setFocus()
 
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta: ver el mismo método en
+        `_PanelReservasAisladas` — idéntico motivo y mecanismo, esta
+        solapa usa el mismo universo de categorías (`_CATEGORIAS_
+        AISLADAS`)."""
+        opciones = _opciones_profesional_con_categoria(self.conn, _CATEGORIAS_AISLADAS)
+        self._categoria_por_profesional = {id_: categoria for id_, _etiqueta, categoria in opciones}
+        repoblar_combo_profesional(
+            self.combo_profesional,
+            [(None, "Todos los profesionales")] + [(id_, etiqueta) for id_, etiqueta, _categoria in opciones],
+        )
+
     def _armar_ui(self) -> None:
         layout_externo = QHBoxLayout(self)
 
@@ -3555,11 +3587,8 @@ class _PanelReservaExtraordinaria(QWidget):
         form = QVBoxLayout(panel_form)
 
         self.combo_profesional = QComboBox()
-        self.combo_profesional.addItem("Todos los profesionales", None)
         self._categoria_por_profesional: dict[int, str] = {}
-        for id_, etiqueta, categoria in _opciones_profesional_con_categoria(self.conn, _CATEGORIAS_AISLADAS):
-            self.combo_profesional.addItem(etiqueta, id_)
-            self._categoria_por_profesional[id_] = categoria
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._al_cambiar_profesional)
         form.addWidget(QLabel("Profesional"))

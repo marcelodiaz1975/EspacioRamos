@@ -300,8 +300,23 @@ class _PanelRegistrarPago(QWidget):
         Profesional —el mismo combo que la tabla lee para acotarse—,
         Período y Monto) más el orden de la tabla y un refresco."""
         self._orden.reiniciar()
+        self._cargar_combo_profesional()
         self._resetear_formulario()
         self.actualizar()
+
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta: un profesional recién
+        creado no aparecía acá hasta reiniciar TODO el sistema —
+        `combo_profesional` se armaba una sola vez en `_armar_ui` y
+        nunca se volvía a poblar. Se reconstruye desde cero cada vez
+        que corresponde refrescarlo (`reiniciar()`, llamado desde
+        `showEvent`)."""
+        self.combo_profesional.blockSignals(True)
+        self.combo_profesional.clear()
+        self.combo_profesional.addItem("Todos los profesionales", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_CON_PAGOS):
+            self.combo_profesional.addItem(etiqueta, id_)
+        self.combo_profesional.blockSignals(False)
 
     def _armar_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -312,9 +327,7 @@ class _PanelRegistrarPago(QWidget):
 
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Todos los profesionales", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_CON_PAGOS):
-            self.combo_profesional.addItem(etiqueta, id_)
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
@@ -939,11 +952,22 @@ class _PanelPlanesPago(QWidget):
         Profesional a "Seleccionar profesional…", cuotas/interés a su
         default, orden de la tabla reiniciado y foco en Profesional."""
         self._orden.reiniciar()
+        self._cargar_combo_profesional()
         self.combo_profesional.setCurrentIndex(0)
         self.spin_cuotas.setValue(3)
         self.spin_interes.setValue(0)
         self._profesional_cambio()
         self.combo_profesional.setFocus()
+
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta — ver `_PanelRegistrarPago.
+        _cargar_combo_profesional`, mismo motivo y mecanismo."""
+        self.combo_profesional.blockSignals(True)
+        self.combo_profesional.clear()
+        self.combo_profesional.addItem("Seleccionar profesional…", None)
+        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIA_R):
+            self.combo_profesional.addItem(etiqueta, id_)
+        self.combo_profesional.blockSignals(False)
 
     def _armar_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -953,9 +977,7 @@ class _PanelPlanesPago(QWidget):
         form = QVBoxLayout(panel_form)
         self.combo_profesional = QComboBox()
         self.combo_profesional.setMinimumWidth(_ANCHO_COMBO_PROFESIONAL)
-        self.combo_profesional.addItem("Seleccionar profesional…", None)
-        for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIA_R):
-            self.combo_profesional.addItem(etiqueta, id_)
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional)
         self.combo_profesional.currentIndexChanged.connect(self._profesional_cambio)
         form.addWidget(QLabel("Profesional"))
@@ -1227,12 +1249,23 @@ class _PanelEstadoCuentaPagos(QWidget):
         self._armar_ui()
         self.actualizar()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Bug real reportado por la clienta: un profesional recién
+        creado no aparecía acá hasta reiniciar TODO el sistema —
+        `actualizar()` ya repoblaba `combo_profesional` preservando la
+        selección (ver esa función), pero nada la volvía a llamar al
+        simplemente volver a esta solapa (no tenía `showEvent` propio)."""
+        super().showEvent(event)
+        self.actualizar()
+        self.combo_profesional.setFocus()
+
     def reiniciar(self) -> None:
         """F3 ("Reiniciar solapa"): no hay ningún filtro que resetear
         acá — "Profesional" se conserva a propósito al refrescar (ver
         `actualizar()`, mismo criterio que el Estado de cuenta de
-        Liquidaciones/Cargos especiales) — alcanza con devolver el
-        foco."""
+        Liquidaciones/Cargos especiales) — alcanza con refrescar (mismo
+        motivo que `showEvent`) y devolver el foco."""
+        self.actualizar()
         self.combo_profesional.setFocus()
 
     def _armar_ui(self) -> None:

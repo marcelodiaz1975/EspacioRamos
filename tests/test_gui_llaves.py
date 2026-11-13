@@ -1258,3 +1258,25 @@ def test_fecha_de_movimientos_usa_el_dia_de_la_semana_abreviado(qtbot, conn):
     assert texto_fecha[:3] in ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
     assert "Lunes" not in texto_fecha and "Martes" not in texto_fecha
     assert len(texto_fecha.split(" ", 1)[0]) == 3
+
+
+def test_llaves_combos_filtro_profesional_se_actualizan_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: un profesional recién creado
+    no aparecía en `combo_filtro_stock`/`combo_filtro_movimientos`
+    hasta reiniciar TODO el sistema — se poblaban una sola vez, en
+    `_armar_ui`."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = _PanelLlaves(conn)
+    qtbot.addWidget(pantalla)
+
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Nuevo')")
+    conn.commit()
+    id_nuevo = conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = 'Nuevo'").fetchone()[
+        "IdProfesional"
+    ]
+
+    pantalla.showEvent(QShowEvent())
+
+    assert pantalla.combo_filtro_stock.findData(id_nuevo) >= 0
+    assert pantalla.combo_filtro_movimientos.findData(id_nuevo) >= 0

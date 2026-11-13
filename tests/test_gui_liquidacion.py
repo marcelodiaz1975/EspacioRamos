@@ -998,3 +998,73 @@ def test_reiniciar_estado_cuenta_liquidaciones_no_rompe(qtbot, conn):
     pantalla = ProcesoLiquidacion(conn)
     qtbot.addWidget(pantalla)
     pantalla.panel_estado_cuenta.reiniciar()
+
+
+def _crear_profesional_r(conn, apellido="Nuevo") -> int:
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', ?)", (apellido,))
+    conn.commit()
+    return conn.execute(
+        "SELECT IdProfesional FROM Profesional WHERE Apellido = ?", (apellido,)
+    ).fetchone()["IdProfesional"]
+
+
+def test_emision_archivos_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: un profesional R recién creado
+    no aparecía acá hasta reiniciar TODO el sistema — el combo se
+    poblaba una sola vez, al construirse la pantalla."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_emision
+
+    id_nuevo = _crear_profesional_r(conn)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional_filtro.findData(id_nuevo) >= 0
+
+
+def test_emision_archivos_combo_profesional_preserva_la_seleccion_al_volver_a_la_solapa(qtbot, conn):
+    from PySide6.QtGui import QShowEvent
+
+    id_profesional = _crear_profesional_r(conn, apellido="Gómez")
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_emision
+    panel.combo_profesional_filtro.setCurrentIndex(panel.combo_profesional_filtro.findData(id_profesional))
+
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional_filtro.currentData() == id_profesional
+
+
+def test_estado_cuenta_liquidaciones_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: esta solapa no tenía
+    `showEvent` propio que llamara a `actualizar()` (que ya repuebla el
+    combo preservando la selección)."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_estado_cuenta
+
+    id_nuevo = _crear_profesional_r(conn)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0
+
+
+def test_liquidaciones_simuladas_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: acá `reiniciar()` (llamado
+    desde `showEvent`) no tiene un ítem "Todos" para resetear — se
+    queda en el profesional vigente, pero el combo nunca se repoblaba."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = ProcesoLiquidacion(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_liquidaciones_simuladas
+
+    id_nuevo = _crear_profesional_r(conn)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0

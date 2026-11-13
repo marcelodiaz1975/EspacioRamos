@@ -3,7 +3,11 @@ from PySide6.QtGui import QFocusEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox
 
-from app.gui.widgets.selector_profesional import _rango_resaltado, habilitar_busqueda_profesional
+from app.gui.widgets.selector_profesional import (
+    _rango_resaltado,
+    habilitar_busqueda_profesional,
+    repoblar_combo_profesional,
+)
 
 
 def _combo_de_prueba() -> QComboBox:
@@ -249,3 +253,56 @@ def test_rango_resaltado_sin_coincidencia_devuelve_none():
 
 def test_rango_resaltado_sin_patron_devuelve_none():
     assert _rango_resaltado("R1 - Lic. Virginia Lo Veci", "") is None
+
+
+def test_repoblar_combo_profesional_agrega_un_profesional_nuevo(qtbot):
+    """Bug real reportado por la clienta: un profesional recién creado
+    no aparecía en el combo hasta reiniciar TODO el sistema — el combo
+    se poblaba una sola vez, al construirse la pantalla."""
+    combo = QComboBox()
+    qtbot.addWidget(combo)
+    repoblar_combo_profesional(combo, [(None, "Todos los profesionales"), (1, "R1 - Lic. Virginia Lo Veci")])
+
+    repoblar_combo_profesional(
+        combo,
+        [
+            (None, "Todos los profesionales"), (1, "R1 - Lic. Virginia Lo Veci"),
+            (2, "R2 - Lic. Nuevo Profesional"),
+        ],
+    )
+
+    assert combo.findData(2) >= 0
+
+
+def test_repoblar_combo_profesional_preserva_la_seleccion_vigente(qtbot):
+    combo = QComboBox()
+    qtbot.addWidget(combo)
+    repoblar_combo_profesional(combo, [(None, "Todos los profesionales"), (1, "R1"), (2, "R2")])
+    combo.setCurrentIndex(combo.findData(2))
+
+    repoblar_combo_profesional(combo, [(None, "Todos los profesionales"), (1, "R1"), (2, "R2"), (3, "R3")])
+
+    assert combo.currentData() == 2
+
+
+def test_repoblar_combo_profesional_cae_al_primero_si_la_seleccion_ya_no_existe(qtbot):
+    combo = QComboBox()
+    qtbot.addWidget(combo)
+    repoblar_combo_profesional(combo, [(None, "Todos los profesionales"), (1, "R1")])
+    combo.setCurrentIndex(combo.findData(1))
+
+    repoblar_combo_profesional(combo, [(None, "Todos los profesionales"), (2, "R2")])
+
+    assert combo.currentIndex() == 0
+
+
+def test_repoblar_combo_profesional_no_dispara_senales_durante_el_repoblado(qtbot):
+    combo = QComboBox()
+    qtbot.addWidget(combo)
+    repoblar_combo_profesional(combo, [(None, "Todos los profesionales"), (1, "R1")])
+    disparos = []
+    combo.currentIndexChanged.connect(lambda i: disparos.append(i))
+
+    repoblar_combo_profesional(combo, [(None, "Todos los profesionales"), (1, "R1"), (2, "R2")])
+
+    assert disparos == []

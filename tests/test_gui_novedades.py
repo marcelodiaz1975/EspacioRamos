@@ -2345,3 +2345,113 @@ def test_estado_cuenta_cargos_reiniciar_no_rompe(qtbot, conn):
     panel = _PanelEstadoCuentaCargos(conn)
     qtbot.addWidget(panel)
     panel.reiniciar()
+
+
+def _crear_profesional_nuevo(conn, categoria="R", apellido="Nuevo") -> int:
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES (?, ?)", (categoria, apellido))
+    conn.commit()
+    return conn.execute(
+        "SELECT IdProfesional FROM Profesional WHERE Apellido = ?", (apellido,)
+    ).fetchone()["IdProfesional"]
+
+
+def test_vacaciones_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: un profesional recién creado
+    no aparecía acá hasta reiniciar TODO el sistema — el combo se
+    poblaba una sola vez, al construirse la pantalla. `_opciones_
+    profesional_vacaciones` solo trae profesionales con una
+    `ReservaRegular` vigente (criterio propio de esta solapa, sin
+    relación con este bug), así que el profesional nuevo necesita una
+    para poder aparecer."""
+    from PySide6.QtGui import QShowEvent
+
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    id_nuevo = _crear_profesional_nuevo(conn)
+    conn.execute(
+        "INSERT INTO ReservaRegular (IdProfesional, IdConsultorio, DiaSemana, HoraInicio, HoraFin, VigenciaInicio) "
+        "VALUES (?, ?, 'Martes', 9, 12, '2020-01-01')",
+        (id_nuevo, id_consultorio),
+    )
+    conn.commit()
+    assert id_profesional != id_nuevo
+
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0
+
+
+def test_licencias_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta — mismo motivo que Vacaciones."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+
+    id_nuevo = _crear_profesional_nuevo(conn)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0
+
+
+def test_ausencias_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta — mismo motivo que Vacaciones."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+
+    id_nuevo = _crear_profesional_nuevo(conn)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0
+
+
+def test_cargos_especiales_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: acá el `showEvent` a propósito
+    NO resetea el formulario — la repoblación tiene que preservar la
+    selección vigente."""
+    from PySide6.QtGui import QShowEvent
+
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+
+    id_nuevo = _crear_profesional_nuevo(conn)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0
+
+
+def test_cargos_especiales_combo_profesional_preserva_la_seleccion_al_volver_a_la_solapa(qtbot, conn):
+    from PySide6.QtGui import QShowEvent
+
+    id_profesional = _crear_profesional_nuevo(conn, apellido="Gómez")
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.currentData() == id_profesional
+
+
+def test_estado_cuenta_cargos_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: esta solapa no tenía
+    `showEvent` propio — nada volvía a llamar a `actualizar()` (que ya
+    repuebla el combo preservando la selección) al simplemente volver a
+    entrar."""
+    from PySide6.QtGui import QShowEvent
+
+    panel = _PanelEstadoCuentaCargos(conn)
+    qtbot.addWidget(panel)
+
+    id_nuevo = _crear_profesional_nuevo(conn)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0

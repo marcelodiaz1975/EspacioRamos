@@ -4693,3 +4693,61 @@ def test_vigencia_fin_calendario_no_se_repaginea_con_una_fecha_real(qtbot, conn)
     # cual estaba antes de mostrar el calendario.
     assert calendario.yearShown() == 2015
     assert calendario.monthShown() == 3
+
+
+def test_aisladas_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: un profesional recién creado
+    no aparecía para asignarle una reserva hasta reiniciar TODO el
+    sistema — el combo se poblaba una sola vez, al construirse la
+    pantalla."""
+    from PySide6.QtGui import QShowEvent
+
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('A', 'Nuevo')")
+    conn.commit()
+    id_nuevo = conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = 'Nuevo'").fetchone()[
+        "IdProfesional"
+    ]
+
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0
+
+
+def test_aisladas_combo_profesional_preserva_la_seleccion_al_volver_a_la_solapa(qtbot, conn):
+    from PySide6.QtGui import QShowEvent
+
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.currentData() == id_profesional
+
+
+def test_extraordinaria_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta — mismo motivo que Aisladas."""
+    from PySide6.QtGui import QShowEvent
+
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('A', 'Nuevo')")
+    conn.commit()
+    id_nuevo = conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = 'Nuevo'").fetchone()[
+        "IdProfesional"
+    ]
+
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_profesional.findData(id_nuevo) >= 0

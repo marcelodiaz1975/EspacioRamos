@@ -1441,3 +1441,35 @@ def test_tipo_busqueda_precargado_sigue_siendo_editable_a_mano(qtbot, conn, prof
     pantalla.combo_tipo.setCurrentIndex(pantalla.combo_tipo.findData("Regular"))
 
     assert pantalla.combo_tipo.currentData() == "Regular"
+
+
+def test_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: un profesional recién creado
+    no aparecía acá hasta reiniciar TODO el sistema — el combo se
+    poblaba una sola vez, al construirse la pantalla."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+
+    id_nuevo = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Nuevo")
+    pantalla.showEvent(QShowEvent())
+
+    assert pantalla.combo_profesional.findData(id_nuevo) >= 0
+
+
+def test_combo_profesional_preserva_la_ultima_busqueda_al_volver_a_la_solapa(qtbot, conn):
+    """Pedido explícito de la clienta, confirmado antes: "la última
+    búsqueda queda cargada tal cual se la dejó" — entrar/salir de la
+    solapa NO puede resetear el profesional elegido, ni al repoblar el
+    combo para este bug."""
+    from PySide6.QtGui import QShowEvent
+
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_profesional.setCurrentIndex(pantalla.combo_profesional.findData(id_profesional))
+
+    pantalla.showEvent(QShowEvent())
+
+    assert pantalla.combo_profesional.currentData() == id_profesional

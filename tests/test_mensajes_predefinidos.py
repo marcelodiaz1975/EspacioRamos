@@ -676,3 +676,21 @@ def test_columna_de_filtros_queda_fija_al_minimo_sin_cortar_dirigido_a(qtbot, co
     assert panel_filtros.minimumWidth() == panel_filtros.maximumWidth()  # ancho fijo
     ancho_necesario_dirigido_a = _ancho_necesario_combo(pantalla.combo_dirigido_a)
     assert panel_filtros.width() >= ancho_necesario_dirigido_a
+
+
+def test_dirigido_a_combo_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: un profesional recién creado
+    no aparecía en "Dirigido a" hasta reiniciar TODO el sistema — el
+    combo se poblaba una sola vez, al construirse la pantalla."""
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+
+    conn.execute("INSERT INTO Profesional (CategoriaProfesional, Apellido) VALUES ('R', 'Nuevo')")
+    conn.commit()
+    id_nuevo = conn.execute("SELECT IdProfesional FROM Profesional WHERE Apellido = 'Nuevo'").fetchone()[
+        "IdProfesional"
+    ]
+
+    pantalla.reiniciar()
+
+    assert pantalla.combo_dirigido_a.findData(id_nuevo) >= 0

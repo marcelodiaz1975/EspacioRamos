@@ -246,12 +246,27 @@ class _PanelCentroMensajeria(QWidget):
         del refresco de punto 90 (al marcar "Enviada"), que a propósito
         CONSERVA el filtro/período/checks elegidos."""
         self.combo_filtro.setCurrentIndex([clave for _, clave in _FILTROS].index(_FILTRO_DEFAULT))
+        self._cargar_combo_profesional()
         self.combo_profesional_filtro.setCurrentIndex(0)
         self.campo_periodo.setText(periodo_actual(self.conn))
         self.check_combinar_misma_unidad.setChecked(False)
         self.check_combinar_distintas_unidades.setChecked(False)
         self.actualizar()
         self.combo_filtro.setFocus()
+
+    def _cargar_combo_profesional(self) -> None:
+        """Bug real reportado por la clienta: un profesional recién
+        creado no aparecía acá hasta reiniciar TODO el sistema —
+        `combo_profesional_filtro` se armaba una sola vez en `_armar_ui`
+        y nunca se volvía a poblar. Se reconstruye desde cero cada vez
+        que corresponde refrescarlo (`reiniciar()`, llamado desde
+        `showEvent`)."""
+        self.combo_profesional_filtro.blockSignals(True)
+        self.combo_profesional_filtro.clear()
+        self.combo_profesional_filtro.addItem("Todos los profesionales", None)
+        for id_profesional, etiqueta in _opciones_profesional(self.conn, ("R", "A", "X")):
+            self.combo_profesional_filtro.addItem(etiqueta, id_profesional)
+        self.combo_profesional_filtro.blockSignals(False)
 
     def _armar_ui(self) -> None:
         layout_solapa = QHBoxLayout(self)
@@ -271,9 +286,7 @@ class _PanelCentroMensajeria(QWidget):
 
         columna.addWidget(_titulo_campo("Profesional"))
         self.combo_profesional_filtro = QComboBox()
-        self.combo_profesional_filtro.addItem("Todos los profesionales", None)
-        for id_profesional, etiqueta in _opciones_profesional(self.conn, ("R", "A", "X")):
-            self.combo_profesional_filtro.addItem(etiqueta, id_profesional)
+        self._cargar_combo_profesional()
         habilitar_busqueda_profesional(self.combo_profesional_filtro)
         self.combo_profesional_filtro.currentIndexChanged.connect(self.actualizar)
         self.combo_profesional_filtro.setFixedWidth(_ANCHO_CAMPO)
