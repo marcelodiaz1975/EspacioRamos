@@ -61,6 +61,23 @@ def test_panel_de_control_es_la_primera_seccion_de_la_categoria_del_espacio():
     assert "Panel de control" not in [s.nombre for s in secciones if s.categoria == "Parámetros del sistema"]
 
 
+def test_control_pagos_solo_aparece_con_modulos_extendidos_prendido(conn):
+    """Módulo extendido ME1: pedido explícito de la clienta sobre
+    `Configuracion.ModulosExtendidos` — con el parámetro apagado (el
+    default) no tiene que verse ni la solapa ni nada."""
+    secciones_apagado = construir_secciones(conn=conn)
+    assert "Control de pagos" not in [s.nombre for s in secciones_apagado]
+
+    conn.execute("UPDATE Configuracion SET ModulosExtendidos = 1 WHERE IdConfiguracion = 1")
+    conn.commit()
+    secciones_prendido = construir_secciones(conn=conn)
+    seccion = next(s for s in secciones_prendido if s.nombre == "Control de pagos")
+    assert seccion.ayuda.strip() != ""
+
+    secciones_sin_conn = construir_secciones()
+    assert "Control de pagos" not in [s.nombre for s in secciones_sin_conn]
+
+
 def test_archivos_y_listas_recibe_la_lista_completa_de_secciones(qtbot, conn):
     """"Manual del usuario" (reubicado en Gestor de archivos del espacio,
     ver imagenes.py) sigue necesitando la lista completa de secciones

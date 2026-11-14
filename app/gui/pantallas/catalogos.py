@@ -753,3 +753,38 @@ def pantalla_fechas_especiales(conn: sqlite3.Connection, *, anidado: bool = Fals
     # apenas retorna esta función.
     pantalla._hooks_regeneracion = (al_crear, al_actualizar, al_eliminar, antes_de_eliminar)
     return pantalla
+
+
+# Módulo extendido ME1 ("Control de pagos"): tres catálogos livianos para
+# que "Afectación" (ver app.negocio.control_pagos) pueda apuntar a algo
+# que no es del espacio — ver ConceptoControlPago/InstanciaControlPago.
+
+
+def pantalla_inmuebles_personales(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
+    campos = [
+        Campo("TipoInmueble", "Tipo de inmueble", tipo="combo", opciones=opciones_lista("TipoInmueble"), combo_editable=True),
+        Campo("Direccion", "Dirección", requerido=True),
+        Campo("IdLocalidad", "Localidad", tipo="combo", opciones=_opciones_localidad),
+        *campos_libres(conn),
+    ]
+    return PantallaCRUD(
+        conn, "InmueblePersonal", "Inmuebles personales", campos, anidado=anidado, columna_prioritaria="Direccion",
+    )
+
+
+def pantalla_rodados(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
+    campos = [
+        Campo("Marca", "Marca"),
+        Campo("Modelo", "Modelo"),
+        Campo("Dominio", "Dominio", requerido=True),
+        *campos_libres(conn),
+    ]
+    return PantallaCRUD(conn, "Rodado", "Rodados", campos, anidado=anidado, columna_prioritaria="Modelo")
+
+
+def pantalla_personas_familia(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
+    campos = [
+        Campo("Nombre", "Nombre", requerido=True),
+        *campos_libres(conn),
+    ]
+    return PantallaCRUD(conn, "PersonaFamilia", "Personas", campos, anidado=anidado, columna_prioritaria="Nombre")

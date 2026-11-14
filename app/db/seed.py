@@ -263,6 +263,18 @@ LISTAS_EDITABLES = {
                        "Mantenimiento limpieza", "Mantenimiento y administrativo"],
     "TipoLlave": ["Unidad", "Edificio", "No especificada"],
     "MotivoAusencia": ["Motivos personales", "Vacaciones fuera de cupo"],
+    # Módulo extendido ME1 ("Control de pagos") — precargadas a pedido
+    # explícito de la clienta, orden tal cual se las pasó.
+    "CategoriaControlPagos": [
+        "Servicios", "Impuestos personales", "Impuestos", "Alquiler", "Expensas", "Insumos y limpieza",
+        "Mantenimiento", "Seguros", "Gastos de consumo", "Gastos de salud", "Gastos de educación",
+        "Publicidad y redes", "Tarjetas",
+    ],
+    "MedioPagoControlPagos": [
+        "CA Bco Patagonia", "CA Bco Provincia", "CA Bco Hipotecario", "CA Bco Macro",
+        "Tarjeta Bco Patagonia", "Tarjeta Bco Provincia", "Tarjeta Bco Hipotecario", "Tarjeta Bco Macro",
+        "Pago manual",
+    ],
 }
 
 

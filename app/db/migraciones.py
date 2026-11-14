@@ -600,6 +600,59 @@ def _renombrar_medio_pago_y_cuenta_receptora(conn: sqlite3.Connection) -> None:
             )
 
 
+def _precargar_listas_control_pagos(conn: sqlite3.Connection) -> None:
+    """Módulo extendido ME1 ("Control de pagos"): las categorías y
+    medios de pago que pasó la clienta para precargar
+    (`app.db.seed.LISTAS_EDITABLES["CategoriaControlPagos"/
+    "MedioPagoControlPagos"]`) no llegan a una base YA en uso vía
+    `sembrar_listas_editables` (que solo corre con la tabla entera
+    vacía) — acá se insertan uno por uno, el valor que falte, en vez de
+    depender de que la tabla completa esté vacía. Idempotente: no
+    inserta un (TipoLista, Valor) que ya exista.
+
+    Bug real encontrado al revisar esto: en una base RECIÉN creada
+    (`init_database` corre `aplicar_migraciones` antes de que quien
+    llama decida sembrar los valores por defecto, ver `app.db.seed.
+    sembrar_valores_por_defecto`), si esta función insertara igual,
+    `ListasEditables` dejaría de estar vacía y `sembrar_listas_
+    editables` (que solo siembra con la tabla ENTERA vacía) se saltaría
+    TODOS los demás tipos (`CondicionFiscal`, `MedioPago`, etc.), no
+    solo los de este módulo — `LISTAS_EDITABLES` en `seed.py` ya incluye
+    estos dos tipos, así que una base nueva los recibe por ese camino.
+    Por eso acá se sale sin tocar nada si la tabla está TOTALMENTE
+    vacía (base nueva, todavía sin sembrar) — esta función es solo para
+    agregarlos a una base que YA tiene datos de antes."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ListasEditables'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    if conn.execute("SELECT COUNT(*) FROM ListasEditables").fetchone()[0] == 0:
+        return
+    # Import diferido (mismo criterio que otros import diferidos de este
+    # módulo): evita que `app.db.migraciones` dependa de `app.db.seed` al
+    # cargar el módulo, aunque acá no hay ciclo real — es solo para
+    # mantener el mismo estilo del resto del archivo.
+    from app.db.seed import LISTAS_EDITABLES
+
+    for tipo_lista in ("CategoriaControlPagos", "MedioPagoControlPagos"):
+        valores = LISTAS_EDITABLES[tipo_lista]
+        existentes = {
+            f["Valor"] for f in conn.execute(
+                "SELECT Valor FROM ListasEditables WHERE TipoLista = ?", (tipo_lista,)
+            ).fetchall()
+        }
+        orden_siguiente = len(existentes)
+        for valor in valores:
+            if valor in existentes:
+                continue
+            conn.execute(
+                "INSERT INTO ListasEditables (TipoLista, Valor, Activo, Orden) VALUES (?, ?, 1, ?)",
+                (tipo_lista, valor, orden_siguiente),
+            )
+            orden_siguiente += 1
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -633,4 +686,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _inicializar_impacto_historial_pagos(conn)
     _inicializar_valor_aislada_al_momento_de_la_reserva(conn)
     _renombrar_medio_pago_y_cuenta_receptora(conn)
+    _precargar_listas_control_pagos(conn)
     conn.commit()

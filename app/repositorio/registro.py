@@ -52,6 +52,11 @@ TABLAS = [
     "Usuario",
     "HistorialContrasenas",
     "PermisoPantalla",
+    "InmueblePersonal",
+    "Rodado",
+    "PersonaFamilia",
+    "ConceptoControlPago",
+    "InstanciaControlPago",
 ]
 
 

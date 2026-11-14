@@ -521,6 +521,70 @@ def test_aplicar_migraciones_es_idempotente_para_supervisor_general(tmp_path):
     conn.close()
 
 
+def test_base_nueva_siembra_listas_control_pagos_via_seed_no_via_migracion(tmp_path):
+    """Bug real encontrado al revisar esto: `_precargar_listas_control_
+    pagos` insertaba directo en una base RECIÉN creada (sin `sembrar_
+    valores_por_defecto` todavía) — eso dejaba `ListasEditables` de
+    estar vacía, y `sembrar_listas_editables` (que solo siembra con la
+    tabla ENTERA vacía) se salteaba TODOS los demás tipos
+    (`CondicionFiscal`, `MedioPago`, etc.), no solo los de este módulo.
+    Confirmado acá que una base recién creada no recibe nada de la
+    migración — eso lo hace `app.db.seed.sembrar_listas_editables` más
+    adelante, con el resto de los tipos."""
+    conn = init_database(tmp_path / "test.db")
+    filas = conn.execute("SELECT * FROM ListasEditables").fetchall()
+    assert filas == []
+    conn.close()
+
+
+def test_aplicar_migraciones_agrega_listas_control_pagos_a_base_ya_sembrada(tmp_path):
+    """Simula una base ya en uso (con algo sembrado de antes, de
+    cualquier tipo) — confirma que `aplicar_migraciones` agrega las
+    categorías y medios de pago de Control de pagos que todavía no
+    tenía, sin tocar lo que ya había."""
+    conn = init_database(tmp_path / "vieja.db")
+    conn.execute(
+        "INSERT INTO ListasEditables (TipoLista, Valor, Activo, Orden) VALUES ('CondicionFiscal', 'Monotributo', 1, 0)"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    categorias = {
+        f["Valor"] for f in conn.execute(
+            "SELECT Valor FROM ListasEditables WHERE TipoLista = 'CategoriaControlPagos'"
+        ).fetchall()
+    }
+    medios = {
+        f["Valor"] for f in conn.execute(
+            "SELECT Valor FROM ListasEditables WHERE TipoLista = 'MedioPagoControlPagos'"
+        ).fetchall()
+    }
+    assert "Servicios" in categorias and len(categorias) == 13
+    assert "Pago manual" in medios and len(medios) == 9
+    assert conn.execute(
+        "SELECT COUNT(*) AS c FROM ListasEditables WHERE TipoLista = 'CondicionFiscal'"
+    ).fetchone()["c"] == 1
+    conn.close()
+
+
+def test_aplicar_migraciones_es_idempotente_para_listas_control_pagos(tmp_path):
+    conn = init_database(tmp_path / "vieja.db")
+    conn.execute(
+        "INSERT INTO ListasEditables (TipoLista, Valor, Activo, Orden) VALUES ('CondicionFiscal', 'Monotributo', 1, 0)"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+    aplicar_migraciones(conn)
+
+    cantidad = conn.execute(
+        "SELECT COUNT(*) AS c FROM ListasEditables WHERE TipoLista = 'CategoriaControlPagos'"
+    ).fetchone()["c"]
+    assert cantidad == 13
+    conn.close()
+
+
 def test_aplicar_migraciones_ignora_nivel_acceso_que_no_existe_todavia(tmp_path):
     """Una base sin la tabla NivelAcceso (de antes de la solapa Seguridad)
     no debería romper — solo salteársela."""

@@ -356,6 +356,136 @@ nueva con el mismo patrón. `self._etiqueta_funciones` (barra de estado,
 costado izquierdo) muestra la leyenda completa de las 12 teclas en el
 orden pedido por la clienta.
 
+## Módulo extendido ME1: "Control de pagos" (ronda en curso, no cerrada)
+
+Primera implementación del primero de los seis módulos extendidos
+identificados en la especificación v1.0 (ver `Configuracion.
+ModulosExtendidos`, ya existía como parámetro preparado pero sin nada
+conectado — ver `docs/historial/sistema.md` para ese antecedente).
+Pedido explícito de la clienta: control mes a mes de todo lo que hay
+que abonar, sea del espacio o personal/familiar, con un solo lugar de
+carga del que las demás pantallas levantan la información (no al
+revés). Arrancado con el grueso del concepto ya definido, a iterar con
+correcciones según lo que la clienta vaya encontrando en el uso real
+(pedido explícito: "lo voy probando y las correcciones las hacemos por
+lo que vaya encontrando con el sistema en sí" — no se espera que esta
+primera vuelta quede perfecta).
+
+### Modelo de datos
+
+Dos niveles (`app/negocio/control_pagos.py`, tablas 3.35-3.37 de
+`schema.sql`):
+- `ConceptoControlPago`: el "maestro" recurrente (ej. "Edenor") — Nombre,
+  Categoría (lista editable `CategoriaControlPagos`, las 13 que pasó la
+  clienta), Afectación y Medio de pago sugerido.
+- `InstanciaControlPago`: una fila por Concepto y Período — se genera en
+  blanco (`generar_instancias_periodo`, llamada desde el `showEvent` de
+  "Carga y control", idempotente) para cada concepto Activo que todavía
+  no tenga una ese mes.
+
+**Afectación** (pedido explícito: "la opción robusta", con referencias
+reales, no texto suelto): no es una tabla aparte — `TipoAfectacion` +
+hasta 5 columnas FK nullable directo en `ConceptoControlPago` (mismo
+criterio que `GastoOperativo.Alcance`, `sanear_afectacion` limpia las
+que no corresponden). Siete tipos: "Espacio general"/"Edificio"/"Unidad"
+(referencias reales a las tablas de siempre del espacio — llega hasta
+Unidad, no baja a Consultorio, mismo criterio que Gastos operativos) y
+"Inmueble personal"/"Rodado"/"Persona" (catálogos nuevos y livianos,
+`InmueblePersonal`/`Rodado`/`PersonaFamilia` — NO se reutilizó
+`Responsable`, que es para contactos administrativos del negocio, otro
+dominio) / "Familia" (sin catálogo, un único valor fijo).
+
+**Sincronización con Balance del negocio** (pedido explícito: "lo que
+cargo en módulo extendido pase al balance del negocio y no al revés"):
+cada vez que cambia el Importe de una instancia imputada al Espacio
+(Espacio general/Edificio/Unidad), `sincronizar_gasto_operativo` crea o
+actualiza el `GastoOperativo` correspondiente con Origen="Importado" —
+exactamente el mecanismo que ya estaba preparado para esto desde que se
+armó Gastos operativos (ver `docs/historial/catalogos.md`: "esta tabla
+se puede cargar tanto a mano como, a futuro, importada desde un módulo
+extendido"). Si ya existe un gasto Manual en conflicto para el mismo
+Período+Concepto, no se pisa (`gasto_en_conflicto`, regla ya existente).
+Los conceptos personales/familiares/de rodados nunca tocan
+`GastoOperativo`. Vaciar el Importe borra el gasto sincronizado.
+
+### Decisiones confirmadas con la clienta antes de implementar
+
+- Afectación con referencias reales (no texto libre) — ver arriba.
+- No hace falta Consultorio como nivel de Afectación por ahora (se puede
+  sumar después, mismo criterio que ya se usó para Gastos operativos).
+- Un concepto nuevo puede arrancar directo en el mes en curso, no hace
+  falta esperar al período siguiente.
+- Además de "Editar" (vencimiento/monto de UN mes) y "Archivar"
+  (cierra solo ese mes, el concepto sigue generándose), dos acciones
+  más pedidas explícitamente: "Editar concepto seleccionado" (Nombre/
+  Categoría/Afectación/Medio de pago sugerido del concepto en sí) y
+  "Dar de baja concepto seleccionado" (para siempre — deja de generar
+  instancias nuevas, el historial ya generado no se toca). Las dos
+  viven como botones en el panel izquierdo (debajo de "Crear
+  concepto"), no como botón por fila — "Dar de baja..." no entraba en
+  la tabla sin angostar demasiado el resto de las columnas.
+
+### Pantalla
+
+`PantallaControlPagos` (`app/gui/pantallas/control_pagos.py`), cinco
+solapas: "Carga y control" (formulario de alta a la izquierda — Nombre/
+Categoría/Afectación/Medio de pago/Vencimiento/Importe/3 campos libres,
+crea el concepto y, si se cargó algo, su primera instancia de una —
+mismo criterio que el "Crear licencia" combinado de Novedades; tabla a
+la derecha con los tres botones por fila: Editar/Marcar abonado/
+Archivar, habilitados según Estado/si hay datos cargados), "Historial"
+(filtros por Categoría/Concepto/Afectación/Medio de pago, "todos los
+que se puedan poner" como pidió la clienta — mismo criterio "filtro que
+solo afecta la visualización"), y los tres catálogos de Afectación
+anidados (Inmuebles personales/Rodados/Personas, `PantallaCRUD`
+genérica, sin código propio).
+
+Solo aparece en el menú (`gui_main.construir_secciones`) con
+`Configuracion.ModulosExtendidos` prendido — apagado (el default), ni
+la Sección ni nada se ve, confirmando lo que ya estaba previsto para
+ese parámetro.
+
+### Bug real encontrado y arreglado en el camino
+
+La migración que precarga las categorías/medios de pago en
+`ListasEditables` (`app.db.migraciones._precargar_listas_control_
+pagos`, para que lleguen también a una base YA en uso, no solo a una
+nueva) corría dentro de `init_database`, ANTES de que quien llama
+decida sembrar los valores por defecto — en una base recién creada
+insertaba igual, dejando `ListasEditables` de estar vacía y haciendo
+que `sembrar_listas_editables` (que solo siembra con la tabla ENTERA
+vacía) se salteara TODOS los demás tipos (`CondicionFiscal`,
+`MedioPago`, etc.), no solo los de este módulo. Arreglado agregando un
+guard explícito: si `ListasEditables` está totalmente vacía (base
+nueva, sin sembrar todavía), la migración no toca nada — esos dos
+tipos ya están en `LISTAS_EDITABLES` de `seed.py`, así que una base
+nueva los recibe por ese camino. Tests de regresión en
+`tests/test_migraciones.py` (`test_base_nueva_siembra_listas_control_
+pagos_via_seed_no_via_migracion` y dos más).
+
+### Verificación de esta ronda
+
+pyflakes limpio en los 9 archivos tocados/nuevos. Suite completa de
+`test_control_pagos.py` (12, negocio), `test_gui_control_pagos.py` (11,
+GUI), más `test_migraciones.py`/`test_gui_main.py`/`test_catalogos.py`/
+`test_seed.py`/`test_main_window.py`/`test_pagos.py`/`test_gui_pagos.py`/
+`test_balance.py`/`test_gui_balance.py`/`test_mensajes.py`/
+`test_gui_mensajeria.py`/`test_gui_novedades.py`/
+`test_gastos_operativos.py`: 660 passed. Verificado visualmente con
+capturas offscreen de "Carga y control" e "Historial" (alta de
+concepto, columnas de botones a su ancho real, Importe en blanco
+cuando no se cargó nada — no "$ 0,00").
+
+### Pendiente (explícitamente para la próxima ronda, no bloquea cerrar esta)
+
+- Planilla de importación: agregar una hoja nueva para precargar los
+  ~40 conceptos reales que ya pasó la clienta, y dejar la plantilla en
+  blanco del sistema con esa hoja ya incorporada — pedido explícito,
+  todavía no hecho (las columnas de la hoja reflejan el modelo de
+  arriba, que recién ahora quedó cerrado).
+- Nada más del resto de los módulos extendidos (ME2-ME6) — fuera de
+  alcance de esta ronda, se planifican recién al iniciar esa etapa.
+
 ## Indicador "Procesando..." para operaciones largas
 
 Mecanismo compartido (`Procesando`, `app/gui/widgets/procesando.py` —

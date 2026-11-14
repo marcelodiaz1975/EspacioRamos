@@ -18,6 +18,7 @@ from app.gui.pantallas.archivos_y_listas import PantallaArchivosYListas
 from app.gui.pantallas.balance import PantallaBalanceDelNegocio
 from app.gui.pantallas.base_datos_espacio import PantallaBaseDatosEspacio
 from app.gui.pantallas.configuracion import ConfiguracionGeneral
+from app.gui.pantallas.control_pagos import PantallaControlPagos
 from app.gui.pantallas.disponibilidad import PantallaDisponibilidad
 from app.gui.pantallas.estadisticas import PantallaEstadisticas
 from app.gui.pantallas.grilla_y_mensajeria import PantallaGrillaYMensajeria
@@ -217,6 +218,29 @@ def construir_secciones(usuario: sqlite3.Row | None = None, conn: sqlite3.Connec
             "Solapa Resultado: ingresos menos gastos del período, para el mismo alcance de ubicación.",
         ),
     ])
+
+    # Módulo extendido ME1 ("Control de pagos"): solo aparece en el menú
+    # con `Configuracion.ModulosExtendidos` prendido — con el parámetro
+    # apagado no tiene que verse ni la solapa ni nada (pedido explícito
+    # de la clienta sobre este parámetro, ver docs/historial/sistema.md).
+    # `conn is None` (algunos tests llaman esta función sin conexión):
+    # se asume apagado, mismo criterio conservador que el resto de las
+    # lecturas de `Configuracion` acá arriba.
+    modulos_extendidos = False
+    if conn is not None:
+        fila_modulos = conn.execute("SELECT ModulosExtendidos FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
+        modulos_extendidos = bool(fila_modulos["ModulosExtendidos"]) if fila_modulos else False
+    if modulos_extendidos:
+        secciones.append(
+            Seccion(
+                "Control de pagos", lambda conn: PantallaControlPagos(conn), categoria=categoria_espacio,
+                ayuda="Solapa Carga y control: control mes a mes de todo lo que hay que abonar, del espacio o "
+                "personal/familiar, con generación automática de período y sincronización con Balance del "
+                "negocio para lo imputado al espacio. Solapa Historial: consulta de todo lo cargado, filtrable "
+                "por categoría/concepto/afectación/medio de pago. Solapas Inmuebles personales/Rodados/"
+                "Personas: catálogos de Afectación para lo que no es del espacio.",
+            )
+        )
     return secciones
 
 

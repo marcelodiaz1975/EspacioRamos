@@ -858,3 +858,80 @@ CREATE TABLE IF NOT EXISTS PermisoPantalla (
     NombrePantalla TEXT PRIMARY KEY,
     IdNivelAcceso INTEGER NOT NULL REFERENCES NivelAcceso(IdNivelAcceso)
 );
+
+-- 3.35 InmueblePersonal / Rodado / PersonaFamilia (módulo extendido ME1 -
+-- "Control de pagos": catálogos livianos para que "Afectación" (ver
+-- ConceptoControlPago) pueda apuntar a algo que NO es del espacio -
+-- inmuebles propios fuera del negocio, vehículos y personas de la
+-- familia) ----------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS InmueblePersonal (
+    IdInmueblePersonal INTEGER PRIMARY KEY AUTOINCREMENT,
+    TipoInmueble TEXT,
+    Direccion TEXT NOT NULL,
+    IdLocalidad INTEGER REFERENCES Localidad(IdLocalidad),
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
+);
+
+CREATE TABLE IF NOT EXISTS Rodado (
+    IdRodado INTEGER PRIMARY KEY AUTOINCREMENT,
+    Marca TEXT,
+    Modelo TEXT,
+    Dominio TEXT NOT NULL,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
+);
+
+CREATE TABLE IF NOT EXISTS PersonaFamilia (
+    IdPersonaFamilia INTEGER PRIMARY KEY AUTOINCREMENT,
+    Nombre TEXT NOT NULL,
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT
+);
+
+-- 3.36 ConceptoControlPago (módulo extendido ME1): el "maestro" recurrente
+-- de cada cosa a controlar mes a mes (ej. "Edenor"). TipoAfectacion +
+-- las cinco FK (una sola completa por fila, igual que GastoOperativo.
+-- Alcance — ver app.negocio.control_pagos.sanear_afectacion) definen a
+-- qué apunta: del espacio (Espacio general/Edificio/Unidad, referencia
+-- real a las tablas de siempre) o fuera de él (Inmueble personal/
+-- Rodado/Persona/Familia, sin referencia puntual esta última). Activo
+-- en 0 = dado de baja para siempre, deja de generar instancias nuevas
+-- pero conserva su historial --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ConceptoControlPago (
+    IdConcepto INTEGER PRIMARY KEY AUTOINCREMENT,
+    Nombre TEXT NOT NULL,
+    Categoria TEXT,
+    TipoAfectacion TEXT NOT NULL CHECK (TipoAfectacion IN (
+        'Espacio general', 'Edificio', 'Unidad', 'Inmueble personal', 'Rodado', 'Persona', 'Familia'
+    )),
+    IdEdificio INTEGER REFERENCES Edificio(IdEdificio),
+    IdUnidad INTEGER REFERENCES Unidad(IdUnidad),
+    IdInmueblePersonal INTEGER REFERENCES InmueblePersonal(IdInmueblePersonal),
+    IdRodado INTEGER REFERENCES Rodado(IdRodado),
+    IdPersonaFamilia INTEGER REFERENCES PersonaFamilia(IdPersonaFamilia),
+    MedioPagoSugerido TEXT,
+    Activo INTEGER NOT NULL DEFAULT 1
+);
+
+-- 3.37 InstanciaControlPago (módulo extendido ME1): una fila por Concepto
+-- y Período — se genera en blanco (Vencimiento/Importe NULL) apenas
+-- arranca un período nuevo para cada concepto Activo (ver
+-- app.negocio.control_pagos.generar_instancias_periodo), y el operador
+-- la va completando/archivando/marcando como abonada mes a mes --------------------
+CREATE TABLE IF NOT EXISTS InstanciaControlPago (
+    IdInstancia INTEGER PRIMARY KEY AUTOINCREMENT,
+    IdConcepto INTEGER NOT NULL REFERENCES ConceptoControlPago(IdConcepto),
+    Periodo TEXT NOT NULL,
+    Vencimiento TEXT,
+    Importe REAL,
+    MedioPago TEXT,
+    Estado TEXT NOT NULL DEFAULT 'Pendiente' CHECK (Estado IN ('Pendiente', 'Abonado', 'Archivado')),
+    CampoLibre1 TEXT,
+    CampoLibre2 TEXT,
+    CampoLibre3 TEXT,
+    UNIQUE (IdConcepto, Periodo)
+);
