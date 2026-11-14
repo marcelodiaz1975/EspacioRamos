@@ -712,3 +712,111 @@ def test_importar_plan_pago_duplicado_no_se_vuelve_a_crear(conn, tmp_path):
     assert resultado["PlanPago"].filas_duplicadas == 1
     assert len(obtener_repositorio(conn, "PlanPago").listar()) == 1
     assert len(obtener_repositorio(conn, "CuotaPlan").listar()) == 12
+
+
+def _agregar_estructura_basica(wb) -> None:
+    wb["Localidad"].append(["Ramos Mejía", "La Matanza", "Buenos Aires", "Argentina"])
+    wb["Edificio"].append(["Ramos 1", "Av. Rivadavia 13876", "Ramos Mejía"])
+    wb["Unidad"].append(["Ramos 1", '7mo "L"', "SI", "SI", 2, "NO", "NO", "NO", "NO", "NO", "NO", "SI", 60])
+
+
+def test_importar_concepto_control_pago_los_siete_tipos_de_afectacion(conn, tmp_path):
+    """Módulo extendido ME1: cada TipoAfectacion resuelve contra la
+    tabla/hoja que le corresponde — "Espacio general"/"Familia" no
+    necesitan ninguna referencia puntual."""
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    _agregar_estructura_basica(wb)
+    wb["Edificio"].append(["Ramos 2", None, "Ramos Mejía"])
+    wb["InmueblePersonal"].append(["Casa", "Lynch 2203", "Ramos Mejía"])
+    wb["Rodado"].append(["Renault", "Kangoo II", "AH422LE"])
+    wb["PersonaFamilia"].append(["Marcelo"])
+
+    wb["ConceptoControlPago"].append(["Google Ads", "Publicidad y redes", "Espacio general", None, None, None, None, None, "Tarjeta"])
+    wb["ConceptoControlPago"].append(["Seguro edificio", "Seguros", "Edificio", "Ramos 2", None, None, None, None, "Pago manual"])
+    wb["ConceptoControlPago"].append(["Edenor", "Servicios", "Unidad", "Ramos 1", '7mo "L"', None, None, None, "CA Bco Hipotecario"])
+    wb["ConceptoControlPago"].append(["Edenor casa", "Servicios", "Inmueble personal", None, None, "Lynch 2203", None, None, "CA Bco Hipotecario"])
+    wb["ConceptoControlPago"].append(["Patente", "Impuestos", "Rodado", None, None, None, "AH422LE", None, "Pago manual"])
+    wb["ConceptoControlPago"].append(["Monotributo", "Impuestos personales", "Persona", None, None, None, None, "Marcelo", "CA Bco Hipotecario"])
+    wb["ConceptoControlPago"].append(["Celular Bruno", "Gastos de consumo", "Familia", None, None, None, None, None, "Pago manual"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+    assert resultados["ConceptoControlPago"].filas_importadas == 7
+    assert resultados["ConceptoControlPago"].errores == []
+
+    conceptos = {c["Nombre"]: c for c in obtener_repositorio(conn, "ConceptoControlPago").listar()}
+    assert conceptos["Google Ads"]["TipoAfectacion"] == "Espacio general"
+    assert conceptos["Seguro edificio"]["IdEdificio"] == obtener_repositorio(conn, "Edificio").listar()[1]["IdEdificio"]
+    assert conceptos["Edenor"]["IdUnidad"] == obtener_repositorio(conn, "Unidad").listar()[0]["IdUnidad"]
+    assert conceptos["Edenor casa"]["IdInmueblePersonal"] == obtener_repositorio(conn, "InmueblePersonal").listar()[0]["IdInmueblePersonal"]
+    assert conceptos["Patente"]["IdRodado"] == obtener_repositorio(conn, "Rodado").listar()[0]["IdRodado"]
+    assert conceptos["Monotributo"]["IdPersonaFamilia"] == obtener_repositorio(conn, "PersonaFamilia").listar()[0]["IdPersonaFamilia"]
+    assert conceptos["Celular Bruno"]["TipoAfectacion"] == "Familia"
+    assert all(c["Activo"] == 1 for c in conceptos.values())
+
+
+def test_importar_concepto_control_pago_tipo_afectacion_invalido_reporta_error(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["ConceptoControlPago"].append(["Algo", "Categoria", "No existe", None, None, None, None, None, None])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+
+    assert resultados["ConceptoControlPago"].filas_importadas == 0
+    assert len(resultados["ConceptoControlPago"].errores) == 1
+    assert "TipoAfectacion inválido" in resultados["ConceptoControlPago"].errores[0]
+
+
+def test_importar_concepto_control_pago_unidad_inexistente_reporta_error(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["ConceptoControlPago"].append(["Edenor", "Servicios", "Unidad", "Edificio Que No Existe", "PB", None, None, None, None])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+
+    assert resultados["ConceptoControlPago"].filas_importadas == 0
+    assert len(resultados["ConceptoControlPago"].errores) == 1
+    assert "Edificio Que No Existe" in resultados["ConceptoControlPago"].errores[0]
+
+
+def test_importar_concepto_control_pago_inmueble_personal_inexistente_reporta_error(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["ConceptoControlPago"].append(
+        ["Edenor casa", "Servicios", "Inmueble personal", None, None, "Dirección Que No Existe", None, None, None]
+    )
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+
+    assert resultados["ConceptoControlPago"].filas_importadas == 0
+    assert "Dirección Que No Existe" in resultados["ConceptoControlPago"].errores[0]
+
+
+def test_importar_inmueble_personal_con_localidad_inexistente_reporta_error(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["InmueblePersonal"].append(["Casa", "Lynch 2203", "Localidad Que No Existe"])
+    wb.save(ruta)
+
+    resultados = {r.entidad: r for r in importar_planilla(conn, ruta)}
+
+    assert resultados["InmueblePersonal"].filas_importadas == 0
+    assert "Localidad Que No Existe" in resultados["InmueblePersonal"].errores[0]
+
+
+def test_importar_concepto_control_pago_duplicado_no_se_vuelve_a_crear(conn, tmp_path):
+    ruta = generar_plantillas(tmp_path / "plantilla.xlsx")
+    wb = load_workbook(ruta)
+    wb["ConceptoControlPago"].append(["Google Ads", "Publicidad y redes", "Espacio general", None, None, None, None, None, "Tarjeta"])
+    wb.save(ruta)
+    importar_planilla(conn, ruta)
+
+    resultado = {r.entidad: r for r in importar_planilla(conn, ruta)}
+
+    assert resultado["ConceptoControlPago"].filas_importadas == 0
+    assert resultado["ConceptoControlPago"].filas_duplicadas == 1
+    assert len(obtener_repositorio(conn, "ConceptoControlPago").listar()) == 1

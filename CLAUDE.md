@@ -443,7 +443,10 @@ genérica, sin código propio).
 Solo aparece en el menú (`gui_main.construir_secciones`) con
 `Configuracion.ModulosExtendidos` prendido — apagado (el default), ni
 la Sección ni nada se ve, confirmando lo que ya estaba previsto para
-ese parámetro.
+ese parámetro. Prendido, pedido explícito de la clienta: categoría
+PROPIA, tercera del menú ("Módulos extendidos", no mezclada con
+"Parámetros del sistema" ni con la del espacio) — ahí van también los
+que se sumen más adelante (ME2-ME6), no solo este.
 
 ### Bug real encontrado y arreglado en el camino
 
@@ -476,15 +479,63 @@ capturas offscreen de "Carga y control" e "Historial" (alta de
 concepto, columnas de botones a su ancho real, Importe en blanco
 cuando no se cargó nada — no "$ 0,00").
 
-### Pendiente (explícitamente para la próxima ronda, no bloquea cerrar esta)
+### Categoría propia en el menú
 
-- Planilla de importación: agregar una hoja nueva para precargar los
-  ~40 conceptos reales que ya pasó la clienta, y dejar la plantilla en
-  blanco del sistema con esa hoja ya incorporada — pedido explícito,
-  todavía no hecho (las columnas de la hoja reflejan el modelo de
-  arriba, que recién ahora quedó cerrado).
-- Nada más del resto de los módulos extendidos (ME2-ME6) — fuera de
-  alcance de esta ronda, se planifican recién al iniciar esa etapa.
+Pedido explícito de la clienta, ronda siguiente a la de arriba:
+"Control de pagos" pasa a tener su PROPIA categoría en el menú lateral
+("Módulos extendidos", tercera categoría, no mezclada con "Parámetros
+del sistema" ni con la del espacio) — ahí van también los módulos
+extendidos que se sumen más adelante (ME2-ME6), no solo este.
+
+### Planilla de importación: cuatro hojas nuevas
+
+Pedido explícito de la clienta, misma ronda: carga inicial de los
+conceptos reales que ya tenía, vía la planilla de importación del
+sistema (`app/importacion/`) — mismo criterio que `PlanPago` (una
+excepción al alcance de la Etapa 1, que en general no importa entidades
+que se cargan desde la propia pantalla: acá tiene sentido porque es
+"lo que ya existía antes de empezar a usar el sistema", no algo que se
+repita por planilla mes a mes).
+
+Cuatro hojas nuevas (`definiciones.COLUMNAS_PLANTILLA`, en orden:
+`InmueblePersonal`/`Rodado`/`PersonaFamilia` ANTES que
+`ConceptoControlPago`, que las referencia): solo se importan los
+CONCEPTOS (el maestro) — las instancias de cada período las genera
+sola la pantalla al entrar, nunca por planilla. `ConceptoControlPago`
+tiene columnas "Edificio"/"Unidad"/"InmueblePersonal"/"Rodado"/
+"Persona" (una sola completa según "TipoAfectacion", validado contra
+los siete valores exactos — `app.importacion.importar_excel._resolver_
+referencias`, mismo patrón que el resto de las entidades con
+referencia a otra ya cargada en la planilla).
+
+Se le armó y mandó por acá (no es parte del repositorio) una copia YA
+PRECARGADA con los ~60 conceptos reales que pasó la clienta (categoría,
+afectación y medio de pago actual de cada uno, como los describió) —
+confirmado que importa limpio contra una base de prueba. Los conceptos
+imputados a una Unidad del espacio (28 de los 60: Edenor/AYSA/
+Municipal/ARBA/Expensas/etc. de las cuatro unidades) quedaron con
+"COMPLETAR (tu edificio real)" en la columna Edificio — el sistema no
+tiene forma de adivinar el nombre real del edificio de cada unidad, así
+que esas filas fallan la importación a propósito (mensaje de error
+claro, señalando exactamente cuál) hasta que la clienta lo reemplace a
+mano por el Edificio real antes de importar. Las dos Localidades
+usadas para los inmuebles personales (San Justo/CABA) se precargaron
+con datos geográficos reales (no inventados) — si ya existen en el
+sistema con otros valores, sacar esas dos filas de la hoja Localidad
+antes de importar, para no generar una duplicada (el chequeo de
+duplicados compara la fila entera, no solo el nombre).
+
+Tests nuevos en `tests/test_importacion.py` (7): los siete
+TipoAfectacion resolviendo correctamente, error con tipo inválido,
+error con Edificio/Unidad inexistente, error con Inmueble personal
+inexistente, error de Localidad inexistente (hoja InmueblePersonal), y
+que un concepto duplicado no se vuelve a crear. Suite completa de
+`test_importacion.py`: 42 passed.
+
+### Pendiente (no bloquea cerrar esta ronda)
+
+Nada más del resto de los módulos extendidos (ME2-ME6) — fuera de
+alcance de esta ronda, se planifican recién al iniciar esa etapa.
 
 ## Indicador "Procesando..." para operaciones largas
 

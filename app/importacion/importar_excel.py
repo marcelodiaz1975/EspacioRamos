@@ -30,6 +30,7 @@ from app.importacion.definiciones import (
     COLUMNAS_REFERENCIA,
     ENTIDADES_IMPORTABLES,
 )
+from app.negocio.control_pagos import TIPOS_AFECTACION
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.llaves import _LETRA_POR_TIPO, agregar_acceso_llave, ingresar_copias, siguiente_nombre_llave
 from app.negocio.pagos import crear_plan_pago_historico, marcar_cuota_pagada
@@ -278,6 +279,55 @@ def _resolver_referencias(
         if id_profesional is None:
             errores.append(f"No se encontró el profesional con código '{codigo_prof}'")
         datos["IdProfesional"] = id_profesional
+
+    elif entidad == "InmueblePersonal":
+        nombre_loc = datos.pop("Localidad", None)
+        if nombre_loc is not None:
+            id_localidad = _buscar_id(conn, "Localidad", "Localidad", nombre_loc)
+            if id_localidad is None:
+                errores.append(f"No se encontró la localidad '{nombre_loc}'")
+            datos["IdLocalidad"] = id_localidad
+
+    elif entidad == "ConceptoControlPago":
+        nombre_ed = datos.pop("Edificio", None)
+        depto = datos.pop("Unidad", None)
+        direccion_inmueble = datos.pop("InmueblePersonal", None)
+        dominio_rodado = datos.pop("Rodado", None)
+        nombre_persona = datos.pop("Persona", None)
+        datos["IdEdificio"] = datos["IdUnidad"] = None
+        datos["IdInmueblePersonal"] = datos["IdRodado"] = datos["IdPersonaFamilia"] = None
+
+        tipo = datos.get("TipoAfectacion")
+        if tipo not in TIPOS_AFECTACION:
+            errores.append(
+                f"TipoAfectacion inválido o vacío: {tipo!r} (debe ser uno de {', '.join(TIPOS_AFECTACION)})"
+            )
+        elif tipo == "Edificio":
+            id_edificio = _buscar_id(conn, "Edificio", "Nombre", nombre_ed)
+            if id_edificio is None:
+                errores.append(f"No se encontró el edificio '{nombre_ed}'")
+            datos["IdEdificio"] = id_edificio
+        elif tipo == "Unidad":
+            id_unidad = _buscar_unidad(conn, nombre_ed, depto)
+            if id_unidad is None:
+                errores.append(f"No se encontró la unidad '{depto}' del edificio '{nombre_ed}'")
+            datos["IdUnidad"] = id_unidad
+        elif tipo == "Inmueble personal":
+            id_inmueble = _buscar_id(conn, "InmueblePersonal", "Direccion", direccion_inmueble)
+            if id_inmueble is None:
+                errores.append(f"No se encontró el inmueble personal con dirección '{direccion_inmueble}'")
+            datos["IdInmueblePersonal"] = id_inmueble
+        elif tipo == "Rodado":
+            id_rodado = _buscar_id(conn, "Rodado", "Dominio", dominio_rodado)
+            if id_rodado is None:
+                errores.append(f"No se encontró el rodado con dominio '{dominio_rodado}'")
+            datos["IdRodado"] = id_rodado
+        elif tipo == "Persona":
+            id_persona = _buscar_id(conn, "PersonaFamilia", "Nombre", nombre_persona)
+            if id_persona is None:
+                errores.append(f"No se encontró la persona '{nombre_persona}'")
+            datos["IdPersonaFamilia"] = id_persona
+        # "Espacio general"/"Familia": ninguna referencia puntual que resolver.
 
     return datos, errores
 

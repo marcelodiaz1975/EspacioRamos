@@ -103,6 +103,19 @@ COLUMNAS_PLANTILLA: dict[str, list[str]] = {
         "Profesional", "MesAnoInicio", "MontoRefinanciado",
         "PorcentajeInteresMensual", "CantidadCuotas", "Observacion",
     ],
+    # Módulo extendido ME1 ("Control de pagos"): mismo criterio que PlanPago
+    # más arriba — carga inicial única de lo que ya existía antes de usar
+    # el sistema, no algo que se repita por planilla mes a mes (eso lo hace
+    # la propia pantalla, generando una instancia en blanco por período).
+    # Los tres catálogos de Afectación que no son del espacio van ANTES que
+    # "ConceptoControlPago" (que los referencia) — ver COLUMNAS_REFERENCIA.
+    "InmueblePersonal": ["TipoInmueble", "Direccion", "Localidad", "CampoLibre1", "CampoLibre2", "CampoLibre3"],
+    "Rodado": ["Marca", "Modelo", "Dominio", "CampoLibre1", "CampoLibre2", "CampoLibre3"],
+    "PersonaFamilia": ["Nombre", "CampoLibre1", "CampoLibre2", "CampoLibre3"],
+    "ConceptoControlPago": [
+        "Nombre", "Categoria", "TipoAfectacion", "Edificio", "Unidad", "InmueblePersonal", "Rodado", "Persona",
+        "MedioPagoSugerido",
+    ],
 }
 
 ENTIDADES_IMPORTABLES: list[str] = list(COLUMNAS_PLANTILLA.keys())
@@ -142,4 +155,6 @@ COLUMNAS_REFERENCIA = {
     # que la clienta inventa, no uno que ya exista en ningún lado).
     "LlaveAcceso": {"CodigoLlave", "Edificio", "Unidad"},
     "LlaveMovimiento": {"CodigoLlave", "Profesional"},
+    "InmueblePersonal": {"Localidad"},
+    "ConceptoControlPago": {"Edificio", "Unidad", "InmueblePersonal", "Rodado", "Persona"},
 }
