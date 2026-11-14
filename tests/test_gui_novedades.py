@@ -2207,6 +2207,31 @@ def test_estado_cuenta_cargos_tiene_filtro_a_la_izquierda_y_datos_uno_por_linea(
     assert len(panel.etiquetas_resumen) == 4
 
 
+def test_estado_cuenta_cargos_saldo_actual_de_un_a_se_calcula_de_la_aislada_pendiente(qtbot, conn):
+    """Mismo bug real que en Pagos (ver test_gui_pagos.py): esta solapa
+    comparte `partes_resumen`, así que tenía el mismo problema — "Saldo
+    actual" en $0 para un A con una aislada pendiente de pago."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=35434,
+    )
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Diaz")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha=f"{periodo_actual(conn)}-10",
+        HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    panel = _PanelEstadoCuentaCargos(conn)
+    qtbot.addWidget(panel)
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+
+    from app.negocio.formato import formatear_moneda
+
+    assert panel.etiquetas_resumen[0].text() == (
+        f'Saldo actual: <span style="color:black;">{formatear_moneda(35434)}</span>'
+    )
+
+
 def test_estado_cuenta_cargos_panel_de_filtros_ancho_fijo_y_tabla_sin_blanco(qtbot, conn):
     """Pedido explícito de la clienta: el panel de filtros entero (no
     solo el combo) a un ancho fijo más ancho, para que la tabla no se

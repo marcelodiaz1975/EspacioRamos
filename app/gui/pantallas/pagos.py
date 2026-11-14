@@ -46,7 +46,7 @@ from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_centrado, item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla, clave_orden_codigo
-from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, partes_resumen
+from app.gui.widgets.resumen_saldo import TEXTO_SIN_PROFESIONAL, item_monto, partes_resumen, saldo_actual_mostrado
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.dias import fecha_a_dia_semana, periodo_actual, periodo_anterior
 from app.negocio.formato import formatear_moneda, periodo_mm_aaaa
@@ -499,7 +499,10 @@ class _PanelRegistrarPago(QWidget):
             return
         profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
         saldo_anterior = (profesional["SaldoCuentaAnterior"] or 0.0) if profesional else 0.0
-        saldo_actual = (profesional["SaldoCuentaActual"] or 0.0) if profesional else 0.0
+        # Bug real reportado por la clienta: para categoría A no hay
+        # liquidación mensual propia, así que `SaldoCuentaActual` nunca
+        # se acredita — ver `saldo_actual_mostrado`.
+        saldo_actual = saldo_actual_mostrado(self.conn, profesional) if profesional else 0.0
         saldo_total = saldo_anterior + saldo_actual
         nuevo_saldo = saldo_total + self.spin_monto.value()
         self.etiqueta_saldo_anterior.setText(self._fmt_saldo_label("Saldo período anterior", saldo_anterior))

@@ -283,3 +283,73 @@ Test nuevo en `tests/test_gui_pagos.py`:
 `test_planes_de_pago_columna_profesional_se_estira_al_ancho_de_
 pantalla`. Verificado visualmente con captura offscreen. Suite completa
 de `test_gui_pagos.py`: 79 passed.
+
+## Bug real: "Saldo período actual" en $0 para un A con una aislada pendiente de pagar
+
+Pedido de la clienta: "Estoy intentando cargar un pago de un
+profesional que me hizo una reserva aislada en noviembre, ya pasó la
+reserva... en la etiqueta de saldo período actual o saldo total aparece
+en cero." Caso real: profesional categoría A, aislada confirmada del
+10/11 por $35.434, "hoy" del sistema 13/11, sin ningún pago imputado
+todavía.
+
+Investigado antes de tocar nada (la hipótesis original de la clienta —
+que las aisladas con `Fecha` ya pasada se "sacan" del cálculo — no era
+la causa): ni `calcular_liquidacion`/`_aisladas_periodo`
+(`app/negocio/liquidaciones.py`) ni ningún otro lugar filtra una
+aislada por "¿ya pasó respecto a hoy?" — solo filtran por período
+(`Fecha LIKE 'AAAA-MM-%'`). Confirmado con un escenario sintético
+(misma aislada, mismo monto): con categoría R el cálculo daba el monto
+correcto; con categoría A, siempre $0.
+
+**Causa real**: `_PanelRegistrarPago._actualizar_saldos` (pagos.py) y
+`partes_resumen`/`texto_resumen` (`app/gui/widgets/resumen_saldo.py`,
+compartidos también por "Estado de cuenta" de Cargos especiales)
+mostraban "Saldo actual" leyendo DIRECTO el campo persistido
+`Profesional.SaldoCuentaActual`. Ese campo solo se acredita al emitir
+una liquidación mensual (`emitir_liquidacion`,
+`app/negocio/liquidaciones.py`) — y la categoría A no tiene liquidación
+mensual propia (`CATEGORIAS_CON_LIQUIDACION_MENSUAL = ("R",)`), así que
+ese campo queda en $0 para siempre para un A, sin importar la fecha de
+la aislada ni si está pagada o no. El sistema YA calculaba bien este
+número en vivo para categoría A (`saldo_actual_aislada`,
+`app/negocio/mensajes.py`) — pero esa cuenta solo la usaba Centro de
+mensajería, nunca se conectó a Pagos ni a Cargos especiales.
+
+**Arreglo** (opción elegida por la clienta de las dos propuestas:
+reusar el cálculo en vivo en vez de hacer que una aislada acredite el
+campo persistido, como si tuviera una "liquidación" simplificada —
+menos invasivo, reutiliza una cuenta ya validada):
+
+- `saldo_actual_aislada` se separó en dos funciones
+  (`app/negocio/mensajes.py`): `movimiento_periodo_aislada` (el
+  movimiento de UN período solo — reservas aisladas + llaves + ítems
+  libres, menos pagos imputados — sin el saldo anterior) y
+  `saldo_actual_aislada` (que ahora es `saldo_anterior +
+  movimiento_periodo_aislada`, sin cambiar su comportamiento externo —
+  Centro de mensajería sigue llamándola igual). La separación hacía
+  falta porque Pagos/Cargos especiales muestran "Saldo actual" y
+  "Saldo anterior" en DOS líneas separadas (nunca sumadas), a
+  diferencia de la columna "Saldo actual" de Mensajería (que sí
+  muestra el total).
+- `saldo_actual_mostrado(conn, profesional)`, helper nuevo en
+  `resumen_saldo.py`: para categoría A, usa `movimiento_periodo_
+  aislada`; para el resto, el campo persistido de siempre. Lo usan
+  `partes_resumen` (Pagos y Cargos especiales) y `_actualizar_saldos`
+  (Pagos, que no pasa por `partes_resumen`).
+
+Liquidación mensual no se tocó: ahí "Saldo actual" solo se muestra para
+R (único combo que ofrece esa pantalla), que siempre tuvo el campo
+persistido correcto.
+
+Tests nuevos: `test_movimiento_periodo_aislada_no_incluye_el_saldo_
+anterior` (`tests/test_mensajes.py`, a nivel de negocio — confirma que
+la función extraída no suma el saldo anterior y que `saldo_actual_
+aislada` sigue dando lo mismo de siempre), `test_saldo_periodo_actual_
+de_un_a_se_calcula_de_la_aislada_pendiente` (`tests/test_gui_pagos.py`,
+reproduce el caso real reportado) y `test_estado_cuenta_cargos_saldo_
+actual_de_un_a_se_calcula_de_la_aislada_pendiente` (`tests/test_gui_
+novedades.py`, misma solapa compartida). Suite de los módulos tocados
+(`test_mensajes.py`, `test_gui_pagos.py`, `test_gui_novedades.py`,
+`test_gui_mensajeria.py`, `test_mensajeria_negocio.py`,
+`test_pagos.py`): 440 passed, sin regresiones.

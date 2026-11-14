@@ -554,20 +554,21 @@ def _lugar_llave(fila: sqlite3.Row, incluir_edificio: bool) -> str:
     return texto
 
 
-def saldo_actual_aislada(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> float:
-    """"Saldo actual" (Centro de mensajería) de un profesional categoría A
-    para un período dado. A diferencia de un R (que acredita lo liquidado
-    a `Profesional.SaldoCuentaActual` al emitir la liquidación — ver
-    `emitir_liquidacion`), un A nunca acredita nada ahí: no hay
-    liquidación propia para categoría A. Este número se calcula en vivo,
-    mismo criterio EXACTO que el "SALDO A ABONAR" de
-    `mensaje_detalle_reserva_aislada` (reutiliza sus mismos helpers de
-    reservas para no duplicar esa cuenta): reservas aisladas del período +
-    llaves + ítems libres (`CargoEspecial`), más el saldo pendiente del mes
-    anterior, menos los pagos imputados a este período."""
-    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
-    if profesional is None:
-        return 0.0
+def movimiento_periodo_aislada(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> float:
+    """Movimiento de UN período (sin el saldo anterior arrastrado) de un
+    profesional categoría A: reservas aisladas del período + llaves +
+    ítems libres (`CargoEspecial`), menos los pagos imputados a este
+    período. Es el equivalente, para A, de lo que `Profesional.
+    SaldoCuentaActual` representa para un R (el neto del período en
+    curso, acreditado recién al emitir la liquidación — ver
+    `emitir_liquidacion`) — un A nunca acredita nada ahí porque no tiene
+    liquidación propia, así que este número se calcula en vivo. Extraída
+    de `saldo_actual_aislada` (bug real reportado por la clienta: Pagos/
+    Cargos especiales mostraban "Saldo actual" en $0 para un A con una
+    aislada pendiente, porque leían directo ese campo, que para A nunca
+    se acredita) para poder mostrar el movimiento del período SOLO, sin
+    sumarle el saldo anterior — `partes_resumen`/`_actualizar_saldos`
+    (Pagos) ya muestran "Saldo anterior" en su propia línea aparte."""
     anio, mes = (int(p) for p in periodo.split("-"))
     prefijo_mes = f"{anio:04d}-{mes:02d}-"
 
@@ -633,8 +634,19 @@ def saldo_actual_aislada(conn: sqlite3.Connection, id_profesional: int, periodo:
         ).fetchall()
     )
 
+    return total_reservas + total_llaves + total_item_libre + total_pagos
+
+
+def saldo_actual_aislada(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> float:
+    """"Saldo actual" (Centro de mensajería) de un profesional categoría
+    A para un período dado: `movimiento_periodo_aislada` (el período en
+    sí) más el saldo pendiente del mes anterior — mismo criterio EXACTO
+    que el "SALDO A ABONAR" de `mensaje_detalle_reserva_aislada`."""
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    if profesional is None:
+        return 0.0
     saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
-    return saldo_anterior + total_reservas + total_llaves + total_item_libre + total_pagos
+    return saldo_anterior + movimiento_periodo_aislada(conn, id_profesional, periodo)
 
 
 def mensaje_detalle_reserva_aislada(

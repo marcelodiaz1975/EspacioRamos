@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QTableWidgetItem
 from app.gui.estilos import COLOR_ROJO
 from app.negocio.dias import periodo_actual, periodo_anterior
 from app.negocio.formato import formatear_moneda
+from app.negocio.mensajes import movimiento_periodo_aislada
 from app.repositorio.registro import obtener_repositorio
 
 TEXTO_SIN_PROFESIONAL = "Saldo actual: — - Saldo anterior: —"
@@ -37,6 +38,22 @@ def fmt_dato(prefijo: str, valor: float) -> str:
     return f'{prefijo}: <span style="color:{color};">{formatear_moneda(valor)}</span>'
 
 
+def saldo_actual_mostrado(conn: sqlite3.Connection, profesional: sqlite3.Row) -> float:
+    """"Saldo actual" que corresponde mostrar para un profesional. Bug
+    real reportado por la clienta: para categoría A no hay liquidación
+    mensual propia (ver `app.negocio.liquidaciones.CATEGORIAS_CON_
+    LIQUIDACION_MENSUAL`), así que nada acredita nunca `Profesional.
+    SaldoCuentaActual` — quedaba siempre en $0 aunque el profesional
+    tuviera una reserva aislada ya ocurrida y sin pagar. Para un A se
+    calcula en vivo (`movimiento_periodo_aislada`, mismo criterio EXACTO
+    que usa Centro de mensajería para su columna "Saldo actual"); para
+    el resto, el campo persistido ya es correcto (se acredita al emitir
+    la liquidación, para R, o al registrar un pago/cargo)."""
+    if profesional["CategoriaProfesional"] == "A":
+        return movimiento_periodo_aislada(conn, profesional["IdProfesional"], periodo_actual(conn))
+    return profesional["SaldoCuentaActual"] or 0.0
+
+
 def partes_resumen(
     conn: sqlite3.Connection, id_profesional: int, *,
     entidad_imputado: str | None = None, etiqueta_imputado: str | None = None,
@@ -47,7 +64,7 @@ def partes_resumen(
     especiales) en vez de todo corrido en un renglón."""
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     partes = [
-        fmt_dato("Saldo actual", profesional["SaldoCuentaActual"] or 0.0),
+        fmt_dato("Saldo actual", saldo_actual_mostrado(conn, profesional)),
         fmt_dato("Saldo anterior", profesional["SaldoCuentaAnterior"] or 0.0),
     ]
     if entidad_imputado is not None:

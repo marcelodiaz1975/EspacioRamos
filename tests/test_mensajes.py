@@ -16,8 +16,10 @@ from app.negocio.mensajes import (
     mensaje_situacion_2,
     mensaje_situacion_3,
     mensaje_situacion_5,
+    movimiento_periodo_aislada,
     nombre_para_mensaje,
     plan_activo,
+    saldo_actual_aislada,
     sustituir_variables,
 )
 from app.negocio.pagos import crear_cargo_especial, crear_plan_pago_historico, registrar_pago
@@ -93,6 +95,32 @@ def test_mensaje_situacion_1_rechaza_categoria_no_r(conn):
     id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Aislada")
     with pytest.raises(ValueError):
         mensaje_situacion_1(conn, id_prof, HOY)
+
+
+def test_movimiento_periodo_aislada_no_incluye_el_saldo_anterior(conn):
+    """Bug real reportado por la clienta: Pagos/Cargos especiales
+    mostraban "Saldo actual" en $0 para un A con una reserva aislada ya
+    ocurrida y sin pagar, porque leían directo `Profesional.
+    SaldoCuentaActual` (que para A nunca se acredita). `movimiento_
+    periodo_aislada` (extraída de `saldo_actual_aislada`) tiene que
+    devolver SOLO el movimiento del período — sin el saldo anterior,
+    que esas pantallas muestran en su propia línea aparte."""
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=obtener_repositorio(conn, "Unidad").crear(
+            IdEdificio=obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2"), Departamento="PB",
+        ),
+        NumeroConsultorio=1, ValorHoraAisladaActual=35434,
+    )
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="A", Apellido="Pérez", SaldoCuentaAnterior=1000,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha=f"{PERIODO}-10",
+        HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+
+    assert movimiento_periodo_aislada(conn, id_prof, PERIODO) == 35434
+    assert saldo_actual_aislada(conn, id_prof, PERIODO) == 1000 + 35434
 
 
 def test_mensaje_situacion_2_incluye_nombre_y_mes(conn, consultorio):

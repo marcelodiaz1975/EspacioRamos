@@ -1280,6 +1280,36 @@ def test_saldo_total_suma_anterior_y_actual_y_nuevo_saldo_lo_usa_de_base(qtbot, 
     )
 
 
+def test_saldo_periodo_actual_de_un_a_se_calcula_de_la_aislada_pendiente(qtbot, conn):
+    """Bug real reportado por la clienta: cargó una reserva aislada ya
+    ocurrida (categoría A) y todavía sin pagar, y "Saldo período
+    actual"/"Saldo total" mostraban $0 — `Profesional.SaldoCuentaActual`
+    nunca se acredita para un A (no hay liquidación mensual propia, ver
+    `app.negocio.liquidaciones.CATEGORIAS_CON_LIQUIDACION_MENSUAL`),
+    así que leerlo directo siempre daba cero sin importar la aislada."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=35434,
+    )
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Diaz")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha=f"{periodo_actual(conn)}-10",
+        HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+
+    assert panel.etiqueta_saldo_actual.text() == (
+        f'Saldo período actual: <span style="color:black;">{formatear_moneda(35434)}</span>'
+    )
+    assert panel.etiqueta_saldo_total.text() == (
+        f'Saldo total: <span style="color:black;">{formatear_moneda(35434)}</span>'
+    )
+
+
 def test_saldo_anterior_y_nuevo_saldo_se_colorean_en_negativo(qtbot, conn):
     """Confirmado por la clienta: Saldo anterior y Nuevo saldo respetan el
     mismo color rojo-si-negativo que Monto, igual que en todo el sistema
