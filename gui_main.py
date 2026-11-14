@@ -225,15 +225,19 @@ def construir_secciones(usuario: sqlite3.Row | None = None, conn: sqlite3.Connec
     # de la clienta sobre este parámetro, ver docs/historial/sistema.md).
     # `conn is None` (algunos tests llaman esta función sin conexión):
     # se asume apagado, mismo criterio conservador que el resto de las
-    # lecturas de `Configuracion` acá arriba.
+    # lecturas de `Configuracion` acá arriba. Pedido explícito de la
+    # clienta: categoría PROPIA, tercera del menú (no mezclada con
+    # "Parámetros del sistema" ni con la del espacio) — acá va cualquier
+    # módulo extendido que se sume más adelante (ME2-ME6), no solo este.
     modulos_extendidos = False
     if conn is not None:
         fila_modulos = conn.execute("SELECT ModulosExtendidos FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
         modulos_extendidos = bool(fila_modulos["ModulosExtendidos"]) if fila_modulos else False
     if modulos_extendidos:
+        categoria_modulos_extendidos = "Módulos extendidos"
         secciones.append(
             Seccion(
-                "Control de pagos", lambda conn: PantallaControlPagos(conn), categoria=categoria_espacio,
+                "Control de pagos", lambda conn: PantallaControlPagos(conn), categoria=categoria_modulos_extendidos,
                 ayuda="Solapa Carga y control: control mes a mes de todo lo que hay que abonar, del espacio o "
                 "personal/familiar, con generación automática de período y sincronización con Balance del "
                 "negocio para lo imputado al espacio. Solapa Historial: consulta de todo lo cargado, filtrable "

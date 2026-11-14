@@ -64,15 +64,26 @@ def test_panel_de_control_es_la_primera_seccion_de_la_categoria_del_espacio():
 def test_control_pagos_solo_aparece_con_modulos_extendidos_prendido(conn):
     """Módulo extendido ME1: pedido explícito de la clienta sobre
     `Configuracion.ModulosExtendidos` — con el parámetro apagado (el
-    default) no tiene que verse ni la solapa ni nada."""
+    default) no tiene que verse ni la solapa ni nada. Prendido, aparece
+    en una categoría PROPIA, tercera del menú ("Módulos extendidos",
+    pedido explícito), no mezclada con "Parámetros del sistema" ni con
+    la del espacio."""
     secciones_apagado = construir_secciones(conn=conn)
     assert "Control de pagos" not in [s.nombre for s in secciones_apagado]
+    assert "Módulos extendidos" not in {s.categoria for s in secciones_apagado}
 
     conn.execute("UPDATE Configuracion SET ModulosExtendidos = 1 WHERE IdConfiguracion = 1")
     conn.commit()
     secciones_prendido = construir_secciones(conn=conn)
     seccion = next(s for s in secciones_prendido if s.nombre == "Control de pagos")
     assert seccion.ayuda.strip() != ""
+    assert seccion.categoria == "Módulos extendidos"
+    # Tres categorías, cada una contigua (un solo tramo de cada una,
+    # no intercalada con las otras) — mismo criterio que la pantalla
+    # arma los separadores del menú lateral.
+    categorias = [s.categoria for s in secciones_prendido]
+    cambios = sum(1 for a, b in zip(categorias, categorias[1:]) if a != b)
+    assert cambios == 2
 
     secciones_sin_conn = construir_secciones()
     assert "Control de pagos" not in [s.nombre for s in secciones_sin_conn]
