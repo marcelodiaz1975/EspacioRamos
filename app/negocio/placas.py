@@ -39,7 +39,9 @@ pasar por acá."""
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 
+from app.negocio.dias import fecha_actual
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -146,6 +148,81 @@ def posiciones_libres(conn: sqlite3.Connection, id_unidad: int) -> list[int]:
         if f["PosicionTablero"] is not None
     }
     return [p for p in range(1, unidad["CantLimitePlacas"] + 1) if p not in ocupadas]
+
+
+def _reserva_regular_activa_en_unidad(conn: sqlite3.Connection, id_profesional: int, id_unidad: int, hoy: str) -> bool:
+    """Mismo criterio que `app.negocio.panel_control._reserva_regular_
+    activa`/`app.negocio.mensajeria._reserva_regular_activa` (vigente
+    HOY, no "alguna vez"), acá acotado a los consultorios de UNA unidad
+    puntual — la de la placa que se está evaluando."""
+    return conn.execute(
+        """
+        SELECT 1 FROM ReservaRegular rr JOIN Consultorio c ON c.IdConsultorio = rr.IdConsultorio
+        WHERE rr.IdProfesional = ? AND c.IdUnidad = ?
+              AND rr.VigenciaInicio <= ? AND (rr.VigenciaFin IS NULL OR rr.VigenciaFin >= ?)
+        LIMIT 1
+        """,
+        (id_profesional, id_unidad, hoy, hoy),
+    ).fetchone() is not None
+
+
+def _hace_mas_de_un_anio_sin_reservar(conn: sqlite3.Connection, id_profesional: int, hoy: date) -> bool:
+    """Categoría A: sin ninguna `ReservaAislada` Confirmada (en TODO el
+    espacio, no acotado a una unidad — pedido explícito de la clienta,
+    a diferencia de R/E más abajo) con fecha dentro del último año.
+    Mismo cálculo del límite de un año que `app.negocio.avance_mes.
+    _limite_retencion_activos` (29 de febrero sin año bisiesto
+    equivalente: se recorta al 28)."""
+    try:
+        limite = hoy.replace(year=hoy.year - 1).isoformat()
+    except ValueError:
+        limite = hoy.replace(year=hoy.year - 1, day=28).isoformat()
+    ultima = conn.execute(
+        "SELECT MAX(Fecha) AS Ultima FROM ReservaAislada WHERE IdProfesional = ? AND Estado = 'Confirmada'",
+        (id_profesional,),
+    ).fetchone()["Ultima"]
+    return ultima is None or ultima < limite
+
+
+def placa_se_podria_liberar(conn: sqlite3.Connection, placa: sqlite3.Row, hoy: date | None = None) -> bool:
+    """Pedido explícito de la clienta ("Búsqueda y asignación de
+    placas"): candidatas a revisar porque el profesional que ocupa esa
+    posición da señales de ya no estar usando el espacio — el criterio
+    es distinto por categoría, cada uno definido explícitamente por
+    ella:
+    - R: no tiene una `ReservaRegular` vigente HOY en la unidad de la
+      placa (puede seguir reservando en otra unidad del espacio, eso no
+      cuenta).
+    - X: siempre candidata (sin reservas regulares propias, no hay una
+      condición más puntual que mirar).
+    - E: su Cabeza de equipo (categoría R) es el que realmente ocupa el
+      consultorio — se mira si ESE R tiene `ReservaRegular` vigente hoy
+      en la unidad de la placa, no el E (que nunca tiene reservas
+      regulares propias, ver `crear_reserva_regular`). Sin cabeza válido
+      cargado, se toma como candidata (no hay nada que la sostenga).
+    - A: hace más de un año sin ninguna `ReservaAislada` Confirmada en
+      TODO el espacio (pedido explícito: "no en la unidad solamente").
+    - B y cualquier otra categoría, o sin profesional asignado: nunca
+      candidata (la clienta no dio un criterio para B)."""
+    if placa["IdProfesional"] is None:
+        return False
+    profesional = obtener_repositorio(conn, "Profesional").obtener(placa["IdProfesional"])
+    if profesional is None:
+        return False
+    hoy = hoy or fecha_actual(conn)
+    categoria = profesional["CategoriaProfesional"]
+    if categoria == "R":
+        return not _reserva_regular_activa_en_unidad(conn, profesional["IdProfesional"], placa["IdUnidad"], hoy.isoformat())
+    if categoria == "X":
+        return True
+    if categoria == "E":
+        id_cabeza = profesional["ProfesionalCabezaEquipo"]
+        if id_cabeza is None:
+            return True
+        return not _reserva_regular_activa_en_unidad(conn, id_cabeza, placa["IdUnidad"], hoy.isoformat())
+    if categoria == "A":
+        return _hace_mas_de_un_anio_sin_reservar(conn, profesional["IdProfesional"], hoy)
+    return False
 
 
 def asignar_placa(

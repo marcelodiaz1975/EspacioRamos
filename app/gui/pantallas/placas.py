@@ -81,6 +81,7 @@ from app.negocio.placas import (
     liberar_posicion,
     listar_placas,
     nombre_grabado,
+    placa_se_podria_liberar,
     posiciones_libres,
     texto_para_imprimir,
 )
@@ -331,9 +332,23 @@ class _PanelPlacasOperativas(QWidget):
         self.boton_liberar.setFixedWidth(_ANCHO_BOTON_BUSCAR)
         self.boton_liberar.setFixedHeight(_ALTO_BOTON_BUSCAR)
         self.boton_liberar.clicked.connect(self._liberar)
+        # Pedido explícito de la clienta: no es una acción sobre la fila
+        # elegida como los tres de arriba, sino un filtro más (mismo
+        # criterio que "Filtros que solo afectan la visualización" —
+        # ver `app.negocio.placas.placa_se_podria_liberar` para el
+        # criterio exacto por categoría) — por eso es `checkable`
+        # (marcado = filtro activo) en vez de disparar una acción al
+        # click.
+        self.boton_filtro_liberables = QPushButton("Posiciones que se\npodrían liberar")
+        self.boton_filtro_liberables.setObjectName("botonSecundario")
+        self.boton_filtro_liberables.setFixedWidth(_ANCHO_BOTON_BUSCAR)
+        self.boton_filtro_liberables.setFixedHeight(_ALTO_BOTON_BUSCAR)
+        self.boton_filtro_liberables.setCheckable(True)
+        self.boton_filtro_liberables.toggled.connect(self._actualizar_tabla)
         columna_filtros.addWidget(self.boton_asignar_nueva)
         columna_filtros.addWidget(self.boton_reasignar)
         columna_filtros.addWidget(self.boton_liberar)
+        columna_filtros.addWidget(self.boton_filtro_liberables)
 
         columna_filtros.addStretch()
         layout_principal.addWidget(panel_filtros)
@@ -370,6 +385,7 @@ class _PanelPlacasOperativas(QWidget):
             self.combo_profesional_filtro, self._filtro_localidad.foco_widget(),
             self._filtro_edificio.foco_widget(), self._filtro_unidad.foco_widget(),
             self.boton_asignar_nueva, self.boton_reasignar, self.boton_liberar,
+            self.boton_filtro_liberables,
         ], parent=panel)
         return panel
 
@@ -487,6 +503,8 @@ class _PanelPlacasOperativas(QWidget):
             ids_unidad=_ids_seleccionados(self.lista_unidad) or None,
             id_profesional=self.combo_profesional_filtro.currentData(),
         )
+        if self.boton_filtro_liberables.isChecked():
+            placas = [p for p in placas if placa_se_podria_liberar(self.conn, p)]
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
         enriquecidos = []
         for placa in placas:

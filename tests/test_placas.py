@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from app.db.init_db import init_database
@@ -10,6 +12,7 @@ from app.negocio.placas import (
     nombre_grabado,
     personalizacion_del_profesional,
     placa_faltante_para_reserva,
+    placa_se_podria_liberar,
     posiciones_libres,
     texto_para_imprimir,
 )
@@ -328,3 +331,170 @@ def test_placa_faltante_no_cuenta_la_placa_de_otro_profesional(conn):
 def test_placa_faltante_consultorio_inexistente_no_rompe(conn):
     id_profesional = _crear_profesional(conn)
     assert placa_faltante_para_reserva(conn, id_profesional=id_profesional, id_consultorio=99999) == []
+
+
+# ------------------------------------------------------- placa_se_podria_liberar
+
+_HOY = date(2026, 11, 16)
+
+
+def _crear_reserva_regular(conn, id_profesional, id_consultorio, vigencia_fin=None):
+    return obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01", VigenciaFin=vigencia_fin,
+    )
+
+
+def _crear_aislada(conn, id_profesional, id_consultorio, fecha, estado="Confirmada"):
+    return obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, Fecha=fecha,
+        HoraInicio=9, HoraFin=10, Estado=estado,
+    )
+
+
+def test_placa_se_podria_liberar_r_sin_reserva_regular_en_la_unidad(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is True
+
+
+def test_placa_se_podria_liberar_r_con_reserva_regular_activa_en_la_unidad_no_es_candidata(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_consultorio = _crear_consultorio(conn, id_unidad)
+    id_profesional = _crear_profesional(conn)
+    _crear_reserva_regular(conn, id_profesional, id_consultorio)
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is False
+
+
+def test_placa_se_podria_liberar_r_reserva_en_otra_unidad_sigue_siendo_candidata(conn):
+    """Pedido explícito de la clienta: solo importa la unidad de la
+    placa — una reserva regular en otra unidad del espacio no cuenta."""
+    _, id_unidad = _crear_unidad(conn, departamento="1ro A")
+    _, id_unidad_otra = _crear_unidad(conn, nombre_edificio="Ramos 2", departamento="2do B")
+    id_consultorio_otra = _crear_consultorio(conn, id_unidad_otra)
+    id_profesional = _crear_profesional(conn)
+    _crear_reserva_regular(conn, id_profesional, id_consultorio_otra)
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is True
+
+
+def test_placa_se_podria_liberar_r_con_reserva_vencida_vuelve_a_ser_candidata(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_consultorio = _crear_consultorio(conn, id_unidad)
+    id_profesional = _crear_profesional(conn)
+    _crear_reserva_regular(conn, id_profesional, id_consultorio, vigencia_fin="2026-01-31")
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is True
+
+
+def test_placa_se_podria_liberar_x_siempre_es_candidata(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, CategoriaProfesional="X")
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is True
+
+
+def test_placa_se_podria_liberar_e_mira_la_reserva_del_cabeza_de_equipo(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_consultorio = _crear_consultorio(conn, id_unidad)
+    id_cabeza = _crear_profesional(conn, apellido="Cabeza")
+    _crear_reserva_regular(conn, id_cabeza, id_consultorio)
+    id_e = _crear_profesional(conn, apellido="Equipo")
+    obtener_repositorio(conn, "Profesional").actualizar(
+        id_e, CategoriaProfesional="E", ProfesionalCabezaEquipo=id_cabeza,
+    )
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_e)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is False
+
+
+def test_placa_se_podria_liberar_e_candidata_si_el_cabeza_no_reserva_ahi(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_cabeza = _crear_profesional(conn, apellido="Cabeza")
+    id_e = _crear_profesional(conn, apellido="Equipo")
+    obtener_repositorio(conn, "Profesional").actualizar(
+        id_e, CategoriaProfesional="E", ProfesionalCabezaEquipo=id_cabeza,
+    )
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_e)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is True
+
+
+def test_placa_se_podria_liberar_e_sin_cabeza_cargado_es_candidata(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_e = _crear_profesional(conn, apellido="Equipo")
+    obtener_repositorio(conn, "Profesional").actualizar(id_e, CategoriaProfesional="E")
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_e)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is True
+
+
+def test_placa_se_podria_liberar_a_con_aislada_reciente_no_es_candidata(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_consultorio = _crear_consultorio(conn, id_unidad)
+    id_profesional = _crear_profesional(conn)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, CategoriaProfesional="A")
+    _crear_aislada(conn, id_profesional, id_consultorio, fecha="2026-11-01")
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is False
+
+
+def test_placa_se_podria_liberar_a_con_aislada_de_mas_de_un_anio_es_candidata(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_consultorio = _crear_consultorio(conn, id_unidad)
+    id_profesional = _crear_profesional(conn)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, CategoriaProfesional="A")
+    _crear_aislada(conn, id_profesional, id_consultorio, fecha="2025-11-01")
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is True
+
+
+def test_placa_se_podria_liberar_a_mira_todo_el_espacio_no_solo_la_unidad(conn):
+    """Pedido explícito de la clienta: para A, el año sin reservar se
+    mira "en el espacio en general, no en la unidad solamente" — una
+    aislada reciente en OTRA unidad también la saca de la lista."""
+    _, id_unidad = _crear_unidad(conn, departamento="1ro A")
+    _, id_unidad_otra = _crear_unidad(conn, nombre_edificio="Ramos 2", departamento="2do B")
+    id_consultorio_otra = _crear_consultorio(conn, id_unidad_otra)
+    id_profesional = _crear_profesional(conn)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, CategoriaProfesional="A")
+    _crear_aislada(conn, id_profesional, id_consultorio_otra, fecha="2026-11-01")
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is False
+
+
+def test_placa_se_podria_liberar_a_sin_ninguna_aislada_nunca_es_candidata(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, CategoriaProfesional="A")
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is True
+
+
+def test_placa_se_podria_liberar_b_nunca_es_candidata(conn):
+    """La clienta no dio un criterio para B: queda siempre afuera."""
+    _, id_unidad = _crear_unidad(conn)
+    id_profesional = _crear_profesional(conn)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, CategoriaProfesional="B")
+    id_placa = asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is False
+
+
+def test_placa_se_podria_liberar_sin_profesional_asignado_no_es_candidata(conn):
+    _, id_unidad = _crear_unidad(conn)
+    id_placa = obtener_repositorio(conn, "Placa").crear(IdUnidad=id_unidad, PosicionTablero=1, IdProfesional=None)
+    placa = obtener_repositorio(conn, "Placa").obtener(id_placa)
+    assert placa_se_podria_liberar(conn, placa, hoy=_HOY) is False

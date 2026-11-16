@@ -361,8 +361,74 @@ def test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar(qtbot, conn):
     assert pantalla.boton_liberar.text() == "Liberar posición de placa"
     assert pantalla.boton_asignar_nueva.width() == pantalla.boton_reasignar.width()
     assert pantalla.boton_asignar_nueva.width() == pantalla.boton_liberar.width()
+    assert pantalla.boton_asignar_nueva.width() == pantalla.boton_filtro_liberables.width()
     assert pantalla.boton_asignar_nueva.height() == pantalla.boton_reasignar.height()
     assert pantalla.boton_asignar_nueva.height() == pantalla.boton_liberar.height()
+    assert pantalla.boton_asignar_nueva.height() == pantalla.boton_filtro_liberables.height()
+    assert pantalla.boton_filtro_liberables.isCheckable() is True
+
+
+def _crear_consultorio(conn, id_unidad):
+    return obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
+
+
+def _crear_reserva_regular(conn, id_profesional, id_consultorio):
+    return obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=9, HoraFin=10, VigenciaInicio="2026-01-01", VigenciaFin=None,
+    )
+
+
+def test_boton_filtro_liberables_acota_la_tabla_a_las_candidatas(qtbot, conn):
+    """Pedido explícito de la clienta ("Búsqueda y asignación de
+    placas"): un botón secundario más que, al activarse, filtra solo
+    las posiciones que se podrían liberar (ver `app.negocio.placas.
+    placa_se_podria_liberar` para el criterio exacto por categoría) —
+    acá con dos R: uno sin reserva regular en su unidad (candidato) y
+    otro con una reserva regular vigente ahí (no candidato)."""
+    _, id_unidad = _crear_unidad(conn)
+    id_consultorio = _crear_consultorio(conn, id_unidad)
+    id_sin_reserva = _crear_profesional(conn, apellido="SinReserva")
+    id_con_reserva = _crear_profesional(conn, apellido="ConReserva")
+    _crear_reserva_regular(conn, id_con_reserva, id_consultorio)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_sin_reserva)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=2, id_profesional=id_con_reserva)
+
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.rowCount() == 2
+
+    pantalla.boton_filtro_liberables.setChecked(True)
+    assert pantalla.tabla.rowCount() == 1
+    assert pantalla.tabla.item(0, 4).text() == "Lic. Virginia SinReserva"
+
+    pantalla.boton_filtro_liberables.setChecked(False)
+    assert pantalla.tabla.rowCount() == 2
+
+
+def test_boton_filtro_liberables_combina_con_el_resto_de_los_filtros(qtbot, conn):
+    """Mismo criterio que el resto de los filtros de esta pantalla
+    ("Filtros que solo afectan la visualización"): se combinan todos
+    entre sí, no se pisan."""
+    _, id_unidad_1 = _crear_unidad(conn, nombre_edificio="Torre A", departamento="1A")
+    _, id_unidad_2 = _crear_unidad(conn, nombre_edificio="Torre B", departamento="1B")
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad_1, posicion=1, id_profesional=id_profesional)
+    asignar_placa(conn, id_unidad=id_unidad_2, posicion=1, id_profesional=id_profesional)
+
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.boton_filtro_liberables.setChecked(True)
+    assert pantalla.tabla.rowCount() == 2
+
+    pantalla.lista_unidad.clearSelection()
+    for i in range(pantalla.lista_unidad.count()):
+        if pantalla.lista_unidad.item(i).text() == "Torre A - 1A":
+            pantalla.lista_unidad.item(i).setSelected(True)
+            break
+
+    assert pantalla.tabla.rowCount() == 1
+    assert pantalla.tabla.item(0, 1).text() == "Torre A"
 
 
 def test_columnas_unidad_y_personalizada_quedan_centradas(qtbot, conn):
