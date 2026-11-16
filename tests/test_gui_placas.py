@@ -385,8 +385,10 @@ def test_boton_filtro_liberables_acota_la_tabla_a_las_candidatas(qtbot, conn):
     las posiciones que se podrían liberar (ver `app.negocio.placas.
     placa_se_podria_liberar` para el criterio exacto por categoría) —
     acá con dos R: uno sin reserva regular en su unidad (candidato) y
-    otro con una reserva regular vigente ahí (no candidato)."""
-    _, id_unidad = _crear_unidad(conn)
+    otro con una reserva regular vigente ahí (no candidato). Tablero de
+    2 posiciones, las dos ocupadas -- sin posiciones libres de por
+    medio (ver test aparte para esas)."""
+    _, id_unidad = _crear_unidad(conn, limite_placas=2)
     id_consultorio = _crear_consultorio(conn, id_unidad)
     id_sin_reserva = _crear_profesional(conn, apellido="SinReserva")
     id_con_reserva = _crear_profesional(conn, apellido="ConReserva")
@@ -409,9 +411,10 @@ def test_boton_filtro_liberables_acota_la_tabla_a_las_candidatas(qtbot, conn):
 def test_boton_filtro_liberables_combina_con_el_resto_de_los_filtros(qtbot, conn):
     """Mismo criterio que el resto de los filtros de esta pantalla
     ("Filtros que solo afectan la visualización"): se combinan todos
-    entre sí, no se pisan."""
-    _, id_unidad_1 = _crear_unidad(conn, nombre_edificio="Torre A", departamento="1A")
-    _, id_unidad_2 = _crear_unidad(conn, nombre_edificio="Torre B", departamento="1B")
+    entre sí, no se pisan. Tableros de 1 sola posición -- cada unidad
+    queda llena, sin posiciones libres de por medio."""
+    _, id_unidad_1 = _crear_unidad(conn, nombre_edificio="Torre A", departamento="1A", limite_placas=1)
+    _, id_unidad_2 = _crear_unidad(conn, nombre_edificio="Torre B", departamento="1B", limite_placas=1)
     id_profesional = _crear_profesional(conn)
     asignar_placa(conn, id_unidad=id_unidad_1, posicion=1, id_profesional=id_profesional)
     asignar_placa(conn, id_unidad=id_unidad_2, posicion=1, id_profesional=id_profesional)
@@ -429,6 +432,88 @@ def test_boton_filtro_liberables_combina_con_el_resto_de_los_filtros(qtbot, conn
 
     assert pantalla.tabla.rowCount() == 1
     assert pantalla.tabla.item(0, 1).text() == "Torre A"
+
+
+def test_boton_filtro_liberables_muestra_tambien_las_posiciones_libres(qtbot, conn):
+    """Pedido explícito de la clienta, ronda siguiente: "que el nuevo
+    botón muestre también las posiciones libres aparte de mostrar las
+    posiciones ocupadas" -- tablero de 3, una ocupada por un R
+    liberable (sin reserva regular en la unidad), dos libres."""
+    _, id_unidad = _crear_unidad(conn, limite_placas=3)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    assert pantalla.tabla.rowCount() == 1
+
+    pantalla.boton_filtro_liberables.setChecked(True)
+    assert pantalla.tabla.rowCount() == 3
+    posiciones = sorted(int(pantalla.tabla.item(f, 3).text()) for f in range(3))
+    assert posiciones == [1, 2, 3]
+    profesionales_por_posicion = {
+        int(pantalla.tabla.item(f, 3).text()): pantalla.tabla.item(f, 4).text() for f in range(3)
+    }
+    assert profesionales_por_posicion[1] == "Lic. Virginia Lo Veci"
+    assert profesionales_por_posicion[2] == ""
+    assert profesionales_por_posicion[3] == ""
+
+
+def test_posicion_libre_seleccionada_deshabilita_liberar_pero_no_reasignar(qtbot, conn):
+    """Una posición libre no tiene nada que liberar, pero "Reasignar..."
+    (que por debajo solo hace `asignar_placa`) sirve igual para
+    asignarle un profesional de una."""
+    _, id_unidad = _crear_unidad(conn, limite_placas=2)
+    id_profesional = _crear_profesional(conn)
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.boton_filtro_liberables.setChecked(True)
+    assert pantalla.tabla.rowCount() == 2
+    fila_libre = next(f for f in range(2) if pantalla.tabla.item(f, 3).text() == "2")
+    pantalla.tabla.selectRow(fila_libre)
+
+    assert pantalla.boton_liberar.isEnabled() is False
+    assert pantalla.boton_reasignar.isEnabled() is True
+
+
+def test_tecla_delete_sobre_posicion_libre_no_hace_nada(qtbot, conn):
+    _, id_unidad = _crear_unidad(conn, limite_placas=1)
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.boton_filtro_liberables.setChecked(True)
+    assert pantalla.tabla.rowCount() == 1
+    pantalla.tabla.selectRow(0)
+    pantalla._liberar()  # mismo camino que la tecla Delete -- no debe romper ni tocar la base
+    assert pantalla.tabla.rowCount() == 1
+
+
+def test_reasignar_una_posicion_libre_la_asigna(qtbot, conn, monkeypatch):
+    _, id_unidad = _crear_unidad(conn, limite_placas=1)
+    id_profesional = _crear_profesional(conn)
+
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.boton_filtro_liberables.setChecked(True)
+    assert pantalla.tabla.rowCount() == 1
+    pantalla.tabla.selectRow(0)
+
+    from app.gui.pantallas.placas import _DialogoPlaca
+
+    def _fake_init(self, conn, *, placa_existente=None, parent=None):
+        self.conn = conn
+        self.placa_existente = placa_existente
+        self.combo_profesional = type("_F", (), {"currentData": lambda self_: id_profesional})()
+        self.casilla_personalizada = type("_F", (), {"isChecked": lambda self_: False})()
+        self.campo_linea1_personalizada = type("_F", (), {"text": lambda self_: ""})()
+        self.campo_linea2_personalizada = type("_F", (), {"text": lambda self_: ""})()
+
+    monkeypatch.setattr(_DialogoPlaca, "__init__", _fake_init)
+    monkeypatch.setattr(_DialogoPlaca, "exec", lambda self: QDialog.DialogCode.Accepted)
+    pantalla._reasignar()
+
+    assert obtener_repositorio(conn, "Placa").listar(IdUnidad=id_unidad)[0]["IdProfesional"] == id_profesional
 
 
 def test_columnas_unidad_y_personalizada_quedan_centradas(qtbot, conn):

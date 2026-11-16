@@ -150,6 +150,47 @@ def posiciones_libres(conn: sqlite3.Connection, id_unidad: int) -> list[int]:
     return [p for p in range(1, unidad["CantLimitePlacas"] + 1) if p not in ocupadas]
 
 
+def unidades_en_alcance(
+    conn: sqlite3.Connection, *, ids_localidad: list[int | None] | None = None,
+    ids_edificio: list[int] | None = None, ids_unidad: list[int] | None = None,
+) -> list[sqlite3.Row]:
+    """Unidades (con su Edificio/Localidad) que entran en el mismo
+    alcance de filtros que `listar_placas` — a diferencia de esa, no
+    pasa por la tabla `Placa`, así que también alcanza unidades sin
+    ninguna placa asignada todavía. Usada para ofrecer también las
+    posiciones LIBRES del tablero (`posiciones_libres`) cuando el
+    filtro "Posiciones que se podrían liberar" está activo — pedido
+    explícito de la clienta: "que muestre también las posiciones
+    libres, aparte de las ocupadas según la situación de cada
+    profesional"."""
+    sql = """
+        SELECT u.IdUnidad, u.CantLimitePlacas, u.Departamento, u.IdEdificio,
+               e.Nombre AS NombreEdificio, loc.Localidad AS DomicilioLocalidad
+        FROM Unidad u JOIN Edificio e ON e.IdEdificio = u.IdEdificio
+        LEFT JOIN Localidad loc ON loc.IdLocalidad = e.IdLocalidad
+        WHERE 1=1
+    """
+    parametros: list = []
+    if ids_localidad:
+        marcas = []
+        for id_localidad in ids_localidad:
+            if id_localidad is None:
+                marcas.append("e.IdLocalidad IS NULL")
+            else:
+                marcas.append("e.IdLocalidad = ?")
+                parametros.append(id_localidad)
+        sql += " AND (" + " OR ".join(marcas) + ")"
+    if ids_edificio:
+        placeholders = ", ".join("?" for _ in ids_edificio)
+        sql += f" AND u.IdEdificio IN ({placeholders})"
+        parametros.extend(ids_edificio)
+    if ids_unidad:
+        placeholders = ", ".join("?" for _ in ids_unidad)
+        sql += f" AND u.IdUnidad IN ({placeholders})"
+        parametros.extend(ids_unidad)
+    return conn.execute(sql, parametros).fetchall()
+
+
 def _reserva_regular_activa_en_unidad(conn: sqlite3.Connection, id_profesional: int, id_unidad: int, hoy: str) -> bool:
     """Mismo criterio que `app.negocio.panel_control._reserva_regular_
     activa`/`app.negocio.mensajeria._reserva_regular_activa` (vigente

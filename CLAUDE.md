@@ -623,6 +623,31 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   se combina con el resto de los filtros) + 1 ampliado
   (`test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar`, suma
   el nuevo botón a la comparación de ancho/alto).
+
+  Ronda siguiente, pedido explícito de la clienta: el filtro también
+  tiene que mostrar las posiciones LIBRES del tablero (sin profesional
+  asignado), no solo las ocupadas que califican por categoría — una
+  foto completa de qué lugar hay disponible. `unidades_en_alcance`
+  (nueva, `app.negocio.placas`) replica el mismo alcance de filtros
+  Localidad/Edificio/Unidad que `listar_placas`, pero consultando
+  `Unidad` directo (no `Placa`), así que también alcanza unidades sin
+  ninguna placa — de ahí, `posiciones_libres` por unidad. Las
+  posiciones libres NUNCA se acotan por el filtro de Profesional (una
+  posición libre no es de nadie) y se muestran como diccionarios
+  "placa" livianos con `IdPlaca=None` — `_DialogoPlaca`/`_reasignar` ya
+  saben leer un `placa_existente` sin profesional actual (mismo caso
+  que una placa vieja sin dueño), así que seleccionar una fila libre y
+  tocar "Reasignar..." la asigna de una, sin código extra. "Liberar" (y
+  la tecla Delete, que llama a `_liberar` directo sin mirar si el botón
+  está habilitado) queda deshabilitado/no hace nada para esas filas —
+  nada que liberar. Tests nuevos en `tests/test_gui_placas.py`:
+  `test_boton_filtro_liberables_muestra_tambien_las_posiciones_libres`,
+  `test_posicion_libre_seleccionada_deshabilita_liberar_pero_no_
+  reasignar`, `test_tecla_delete_sobre_posicion_libre_no_hace_nada`,
+  `test_reasignar_una_posicion_libre_la_asigna` — más los dos tests
+  existentes de esta misma ronda, ajustados a tableros de tamaño fijo
+  (antes usaban el default de 10 posiciones, que ahora sí aparecen
+  todas como libres y rompían el conteo esperado).
 - **Reservas regulares: la grilla/vista previa no reflejaba una reserva
   nueva cargada a mitad de mes.** Hecho — bug real, confirmado y
   arreglado. La clienta aclaró que se refería a la grilla/vista previa

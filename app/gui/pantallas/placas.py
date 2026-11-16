@@ -84,6 +84,7 @@ from app.negocio.placas import (
     placa_se_podria_liberar,
     posiciones_libres,
     texto_para_imprimir,
+    unidades_en_alcance,
 )
 from app.pdf.estilos import MARGEN, clave_orden_unidad
 from app.pdf.placas_pdf import (
@@ -495,16 +496,45 @@ class _PanelPlacasOperativas(QWidget):
         }
         return claves[columna]
 
+    def _posiciones_libres_en_alcance(self, ids_localidad, ids_edificio, ids_unidad) -> list[dict]:
+        """Posiciones del tablero todavía SIN placa, dentro del mismo
+        alcance de Localidad/Edificio/Unidad que el resto de la tabla
+        (nunca acotadas por el filtro de Profesional — una posición
+        libre no es de nadie). Pedido explícito de la clienta: el
+        filtro "Posiciones que se podrían liberar" tiene que mostrar
+        también estas, no solo las ocupadas que califican por
+        categoría — da una foto completa de qué lugar hay disponible.
+        Se devuelven como diccionarios "placa" livianos (`IdPlaca=None`)
+        — `_DialogoPlaca`/`_reasignar` ya saben leer un `placa_existente`
+        sin profesional (el mismo caso que una placa vieja sin dueño
+        actual), así que seleccionar una de estas filas y usar
+        "Reasignar..." funciona igual que asignar una nueva; `_liberar`
+        y la tecla Delete quedan deshabilitados para estas filas
+        (`_actualizar_botones_tabla`, `_liberar` — nada que liberar)."""
+        libres = []
+        for unidad in unidades_en_alcance(
+            self.conn, ids_localidad=ids_localidad, ids_edificio=ids_edificio, ids_unidad=ids_unidad,
+        ):
+            for posicion in posiciones_libres(self.conn, unidad["IdUnidad"]):
+                libres.append({
+                    "IdPlaca": None, "IdUnidad": unidad["IdUnidad"], "PosicionTablero": posicion,
+                    "IdProfesional": None, "NombreGrabado": None, "EsPersonalizada": 0,
+                    "Departamento": unidad["Departamento"], "IdEdificio": unidad["IdEdificio"],
+                    "NombreEdificio": unidad["NombreEdificio"], "DomicilioLocalidad": unidad["DomicilioLocalidad"],
+                })
+        return libres
+
     def _actualizar_tabla(self) -> None:
+        ids_localidad = _ids_seleccionados(self.lista_localidad) or None
+        ids_edificio = _ids_seleccionados(self.lista_edificio) or None
+        ids_unidad = _ids_seleccionados(self.lista_unidad) or None
         placas = listar_placas(
-            self.conn,
-            ids_localidad=_ids_seleccionados(self.lista_localidad) or None,
-            ids_edificio=_ids_seleccionados(self.lista_edificio) or None,
-            ids_unidad=_ids_seleccionados(self.lista_unidad) or None,
+            self.conn, ids_localidad=ids_localidad, ids_edificio=ids_edificio, ids_unidad=ids_unidad,
             id_profesional=self.combo_profesional_filtro.currentData(),
         )
         if self.boton_filtro_liberables.isChecked():
             placas = [p for p in placas if placa_se_podria_liberar(self.conn, p)]
+            placas = placas + self._posiciones_libres_en_alcance(ids_localidad, ids_edificio, ids_unidad)
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
         enriquecidos = []
         for placa in placas:
@@ -566,9 +596,14 @@ class _PanelPlacasOperativas(QWidget):
         return self._placas_actuales[filas[0].row()]
 
     def _actualizar_botones_tabla(self) -> None:
-        hay_seleccion = self._fila_seleccionada_placa() is not None
+        placa = self._fila_seleccionada_placa()
+        hay_seleccion = placa is not None
+        # Una posición LIBRE (ver `_posiciones_libres_en_alcance`) no
+        # tiene `IdPlaca` real — "Reasignar..." la asigna de una
+        # (`_DialogoPlaca` ya sabe armarse sin profesional previo), pero
+        # "Liberar" no tiene nada que liberar.
         self.boton_reasignar.setEnabled(hay_seleccion)
-        self.boton_liberar.setEnabled(hay_seleccion)
+        self.boton_liberar.setEnabled(hay_seleccion and placa["IdPlaca"] is not None)
 
     def _asignar_nueva(self) -> None:
         dialogo = _DialogoPlaca(self.conn, parent=self)
@@ -612,7 +647,12 @@ class _PanelPlacasOperativas(QWidget):
 
     def _liberar(self) -> None:
         placa = self._fila_seleccionada_placa()
-        if placa is None:
+        # Una posición ya LIBRE (ver `_posiciones_libres_en_alcance`) no
+        # tiene `IdPlaca` real — nada que liberar. El botón ya queda
+        # deshabilitado para esta fila (`_actualizar_botones_tabla`),
+        # pero la tecla Delete (`instalar_eliminar_con_tecla`) llama a
+        # esta acción directo sin mirar ese estado.
+        if placa is None or placa["IdPlaca"] is None:
             return
         confirmacion = QMessageBox.question(
             self, "Liberar posición", "¿Confirmás dejar esta posición del tablero vacía?",
