@@ -109,6 +109,22 @@ def test_regular_entrante_sin_titular_actual_es_rojo_liso(conn, consultorio, eug
     assert "Horario reservado por Lic. Eugenia Viegas (R2) a partir del jueves 3/9." in celda.detalle
 
 
+def test_regular_entrante_sin_titular_actual_queda_identificado_para_el_filtro_exclusivo(conn, consultorio, eugenia):
+    """Bug real reportado por la clienta ("cargo una reserva regular
+    nueva a mitad de mes... no me actualiza la grilla que veo a
+    continuación"): aunque `codigo` sigue en blanco (nadie la ocupa
+    hoy, ver el test de arriba), `id_profesional_mostrado` tiene que
+    identificar al entrante — es lo único que mira el filtro exclusivo
+    de la vista previa de Reservas regulares
+    (`GrillaOperativaWidget._actualizar_grilla`) para decidir si esta
+    celda sobrevive al filtrar justo por ESE profesional; antes quedaba
+    en `None` (heredado de `actual`, que acá no existe) y la celda
+    desaparecía de la vista previa en vez de mostrarse en rojo."""
+    _regular(conn, eugenia, consultorio, vigencia_inicio="2026-09-03")
+    celda = _celda(conn, consultorio)
+    assert celda.id_profesional_mostrado == eugenia
+
+
 def test_regular_conflicto_con_profesional_distinto_entrante_es_rojo_liso(conn, consultorio, virginia, eugenia):
     """Rojo liso: hoy lo tiene Virginia (código visible, sigue siendo
     vigente), pero a futuro pasa a Eugenia."""
@@ -121,6 +137,21 @@ def test_regular_conflicto_con_profesional_distinto_entrante_es_rojo_liso(conn, 
         "Horario reservado por Lic. Virginia Lo Veci (R1). "
         "Horario reservado por Lic. Eugenia Viegas (R2) a partir del jueves 3/9."
     )
+
+
+def test_regular_conflicto_el_entrante_tambien_queda_identificado_para_el_filtro_exclusivo(
+    conn, consultorio, virginia, eugenia,
+):
+    """Mismo caso que arriba, con conflicto: `codigo` sigue siendo el de
+    Virginia (titular actual, sin cambios), pero `id_profesional_
+    mostrado` tiene que ser el de Eugenia (la entrante) — si no, el
+    filtro exclusivo de la vista previa de Reservas regulares, filtrando
+    por Eugenia mientras carga esta misma reserva a futuro, la hacía
+    desaparecer igual (comparaba contra Virginia, no contra ella)."""
+    _regular(conn, virginia, consultorio)
+    _regular(conn, eugenia, consultorio, vigencia_inicio="2026-09-03")
+    celda = _celda(conn, consultorio)
+    assert celda.id_profesional_mostrado == eugenia
 
 
 def test_regular_entrante_pasa_a_actual_si_el_periodo_visualizado_es_posterior_a_su_vigencia(

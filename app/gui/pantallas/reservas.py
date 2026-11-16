@@ -3076,7 +3076,10 @@ class _PanelReservasAisladas(QWidget):
     def _resetear_formulario(self) -> None:
         """Igual que en Reservas regulares: después de aplicar un cambio,
         deja el formulario listo y en blanco para cargar otro registro,
-        aunque sea de otro profesional."""
+        aunque sea de otro profesional — y, pedido explícito de la
+        clienta, el foco vuelve al selector de Profesional (mismo
+        criterio que ya tenía `_eliminar`, más abajo, para ese otro
+        proceso exitoso de esta misma solapa)."""
         self.combo_profesional.setCurrentIndex(0)
         if self.combo_localidad.count():
             self.combo_localidad.setCurrentIndex(0)
@@ -3088,6 +3091,7 @@ class _PanelReservasAisladas(QWidget):
         self.campo_fecha_ausencia.setDate(QDate(hoy.year, hoy.month, hoy.day))
         self.casilla_recargo.setChecked(False)
         self.casilla_reubicacion.setChecked(False)
+        self.combo_profesional.setFocus()
 
     def _valor_reserva(self, reserva: sqlite3.Row, valor_hora_aislada: float, recargo_pct: float) -> str:
         """Vacío si la reserva cae en un período posterior al actual —
@@ -3471,6 +3475,7 @@ class _PanelReservasAisladas(QWidget):
         else:
             QMessageBox.information(self, "Modificar reserva", "Reserva modificada con éxito.")
         self.actualizar()
+        self.combo_profesional.setFocus()
 
 
 # Pedido explícito de la clienta: "Reducí al mínimo la columna de los

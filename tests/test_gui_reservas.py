@@ -2626,6 +2626,47 @@ def test_grilla_preview_se_refresca_al_crear_una_reserva(qtbot, conn):
     assert panel.grilla._resultado[clave].id_profesional_mostrado is not None
 
 
+def test_grilla_preview_se_refresca_al_crear_una_reserva_que_arranca_a_mitad_de_mes(qtbot, conn):
+    """Bug real reportado por la clienta: "cuando cargo una reserva
+    regular nueva a mitad de mes... no me actualiza la grilla que veo a
+    continuación" — una reserva con Vigencia desde posterior a hoy
+    (todavía "entrante", nadie la ocupa hoy) desaparecía por completo de
+    esta vista previa en vez de mostrarse en rojo, porque el filtro
+    exclusivo por profesional (`_filtro_exclusivo_profesional`) comparaba
+    contra `id_profesional_mostrado`, que para una celda "entrante sin
+    titular actual" quedaba en `None` (ver `app.negocio.grilla_
+    operativa._resolver_regular`) — nunca coincidía con el profesional
+    recién cargado, así que la celda se pisaba con `_CELDA_VACIA`."""
+    _preparar(conn)
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-11-16' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    # "Viernes" porque el 20/11/2026 cae viernes -- tiene que coincidir
+    # con el día de la semana real de `campo_vigencia_inicio` para que
+    # la reserva quede vigente ese día.
+    for dia, check in panel._checks_dia.items():
+        check.setChecked(dia == "Viernes")
+    panel.campo_vigencia_inicio.setDate(QDate(2026, 11, 20))
+    panel._crear()
+
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    id_consultorio = conn.execute("SELECT IdConsultorio FROM Consultorio").fetchone()["IdConsultorio"]
+    clave = (id_consultorio, "Viernes", 9)
+
+    from app.gui.widgets.grilla_operativa import _CELDA_VACIA
+
+    celda = panel.grilla._resultado[clave]
+    assert celda is not _CELDA_VACIA
+    assert celda.id_profesional_mostrado == id_profesional
+
+
 def test_eliminar_reserva_aislada_borra_la_fila(qtbot, conn):
     # 13-14 cae fuera de los bloques rígidos por defecto (9-11 y 18-21) para
     # que la eliminación el mismo día no choque con esa restricción aparte.
@@ -3791,6 +3832,50 @@ def test_panel_aisladas_recibe_foco_en_profesional_al_mostrarse(qtbot, conn):
     qtbot.waitExposed(pantalla)
     pantalla.pestanas.setCurrentWidget(pantalla.panel_aisladas)
     qtbot.waitUntil(lambda: pantalla.panel_aisladas.combo_profesional.hasFocus())
+
+
+def test_crear_reserva_aislada_devuelve_el_foco_al_selector_de_profesional(qtbot, conn):
+    """Pedido explícito de la clienta: "luego de un proceso exitoso que
+    vuelva el foco al campo de selector del profesional" — mismo
+    criterio que ya tenía `_eliminar` para esta solapa."""
+    _preparar(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.pestanas.setCurrentWidget(pantalla.panel_aisladas)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.spin_desde.setFocus()
+    panel._crear()
+    qtbot.waitUntil(lambda: panel.combo_profesional.hasFocus())
+
+
+def test_modificar_reserva_aislada_devuelve_el_foco_al_selector_de_profesional(qtbot, conn, monkeypatch):
+    """Mismo pedido que la creación, acá sobre "Modificar reserva" —
+    esta acción no pasa por `_resetear_formulario` (edita la fila
+    existente sin tocar el resto del formulario), así que necesita su
+    propio `setFocus()` al final."""
+    _preparar(conn)
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+    pantalla.pestanas.setCurrentWidget(pantalla.panel_aisladas)
+    panel = pantalla.panel_aisladas
+    panel.check_mostrar_todas.setChecked(True)
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_fecha.setDate(QDate(2026, 8, 18))
+    panel.spin_desde.setValue(9)
+    panel.spin_hasta.setValue(10)
+    panel._crear()
+
+    panel.tabla.selectRow(0)
+    panel.spin_desde.setFocus()
+    _mockear_dialogo_modificar_aislada(monkeypatch, hora_inicio=9, hora_fin=11, aplica_recargo=True)
+    panel._modificar_seleccionada()
+    qtbot.waitUntil(lambda: panel.combo_profesional.hasFocus())
 
 
 def test_tabla_aisladas_click_en_columna_ordena_y_alterna_sentido(qtbot, conn):

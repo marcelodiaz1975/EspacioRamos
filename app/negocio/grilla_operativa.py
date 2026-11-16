@@ -375,6 +375,30 @@ def _resolver_regular(
         return CeldaGrillaOperativa(AZUL_OSCURO, AZUL_OSCURO, BLANCA, codigo, base, id_mostrado)
 
     if entrante is not None:
+        # Bug real reportado por la clienta ("cargo una reserva regular
+        # nueva a mitad de mes... no me actualiza la grilla que veo a
+        # continuación"): `id_mostrado` de arriba se calcula sobre
+        # `actual` — `None` cuando el horario todavía no tiene a nadie
+        # reservado HOY pero sí alguien "entrante" (ej. la reserva
+        # recién cargada, con VigenciaInicio unos días después de hoy,
+        # dentro del mismo mes), y sigue siendo el de `actual` (no el
+        # del entrante) cuando hay conflicto (alguien lo ocupa hoy, otro
+        # entra después) — en ningún caso refleja al entrante.
+        # `_actualizar_grilla` (`app.gui.widgets.grilla_operativa.
+        # GrillaOperativaWidget`), con el filtro exclusivo que usa la
+        # vista previa de Reservas regulares, pisa a `_CELDA_VACIA`
+        # cualquier celda cuyo `id_profesional_mostrado` no coincida con
+        # el profesional filtrado — así que la reserva recién cargada
+        # desaparecía de esa vista previa (en vez de mostrarse en rojo
+        # como "entrante") apenas el operador filtraba por ESE
+        # profesional, que es exactamente lo que hace la vista previa de
+        # Reservas regulares. `codigo`/`base` (lo que se PINTA en la
+        # celda) no cambian — eso sigue siendo una decisión de diseño
+        # aparte (en blanco si nadie la ocupa hoy, el código del titular
+        # actual si hay conflicto) — solo `id_mostrado` (de uso interno,
+        # nunca se pinta) pasa a ser siempre el del entrante, que es el
+        # profesional al que esta celda sí le resulta relevante.
+        id_mostrado = entrante["IdProfesional"]
         nombre_entrante = _nombre_con_codigo(profesionales[entrante["IdProfesional"]])
         clausula_entrante = f"Horario reservado por {nombre_entrante} a partir del {_fecha_dia_texto(entrante['VigenciaInicio'])}."
         texto = " ".join(([base] if base else []) + [clausula_entrante])

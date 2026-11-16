@@ -581,6 +581,108 @@ qué no se tocan en `docs/historial/general.md` ("Fallos del
 sandbox/contenedor, ajenos a la app"). Si reaparecen, no bloquean
 cerrar una ronda.
 
+## Ronda de pedidos sueltos (en curso)
+
+Cuatro pedidos de la clienta en un mismo mensaje, sobre pantallas
+distintas — se van resolviendo uno por uno, no todos juntos.
+
+- **Reservas aisladas: foco vuelve al selector de Profesional tras un
+  proceso exitoso.** Hecho. `_eliminar` ya lo hacía; se sumó el mismo
+  `self.combo_profesional.setFocus()` al final de `_resetear_formulario`
+  (cubre "Crear reserva aislada", su único llamador) y al final de
+  `_modificar_seleccionada` (no pasa por `_resetear_formulario`, edita
+  la fila existente sin tocar el resto del formulario). Tests nuevos en
+  `tests/test_gui_reservas.py`:
+  `test_crear_reserva_aislada_devuelve_el_foco_al_selector_de_profesional`,
+  `test_modificar_reserva_aislada_devuelve_el_foco_al_selector_de_profesional`.
+- **Placas: botón "Posiciones que se podrían liberar".** Hecho. Nuevo
+  botón `checkable` (`boton_filtro_liberables`, mismo ancho/alto que
+  Asignar/Reasignar/Liberar) en "Búsqueda y asignación de placas" —
+  mismo criterio que "Filtros que solo afectan la visualización": se
+  combina con Profesional/Localidad/Edificio/Unidad, nunca los
+  reemplaza. El criterio de "candidata" es por categoría del
+  profesional que ocupa la posición (`app.negocio.placas.
+  placa_se_podria_liberar`, nueva función), tal cual lo pidió la
+  clienta:
+  - R: sin `ReservaRegular` vigente HOY en la unidad de la placa (otra
+    unidad del espacio no cuenta).
+  - X: siempre candidata.
+  - E: no tiene reservas regulares propias (ver `crear_reserva_
+    regular`, solo R/B) — se mira si su Cabeza de equipo (R) tiene
+    `ReservaRegular` vigente hoy en esa unidad; sin cabeza cargado,
+    candidata.
+  - A: hace más de un año sin ninguna `ReservaAislada` Confirmada en
+    TODO el espacio (pedido explícito: "no en la unidad solamente") —
+    mismo cálculo de "un año atrás" que `app.negocio.avance_mes.
+    _limite_retencion_activos` (29 de febrero sin bisiesto equivalente
+    recorta al 28).
+  - B y cualquier otra categoría, o posición sin profesional asignado:
+    nunca candidata (la clienta no dio un criterio para B).
+  Tests nuevos: 14 en `tests/test_placas.py` (uno por caso de
+  categoría/borde) + 2 en `tests/test_gui_placas.py` (acota la tabla,
+  se combina con el resto de los filtros) + 1 ampliado
+  (`test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar`, suma
+  el nuevo botón a la comparación de ancho/alto).
+- **Reservas regulares: la grilla/vista previa no reflejaba una reserva
+  nueva cargada a mitad de mes.** Hecho — bug real, confirmado y
+  arreglado. La clienta aclaró que se refería a la grilla/vista previa
+  DENTRO de la propia solapa de Reservas regulares (`self.grilla`,
+  `GrillaOperativaWidget` en modo "regular"), no a "Grilla semanal".
+  Reproducido: una `ReservaRegular` con `VigenciaInicio` posterior a
+  hoy pero dentro del mismo mes visualizado (ej. parada el 16/11,
+  reserva con vigencia desde el 20/11) queda clasificada como
+  "entrante" (`_clasificar_regulares`, `app.negocio.grilla_
+  operativa`) — nadie la ocupa "hoy" todavía (`actual is None`). El
+  bug real: `_resolver_regular` armaba `id_mostrado` (campo interno,
+  nunca se pinta — ver `CeldaGrillaOperativa`) a partir de `actual`
+  en TODA la función, nunca a partir de `entrante`; en la rama
+  "entrante", `id_mostrado` quedaba en `None` (o en el del titular
+  actual si había conflicto, nunca el del entrante). El filtro
+  exclusivo por profesional que usa justo esta vista previa
+  (`GrillaOperativaWidget._actualizar_grilla`, `_filtro_exclusivo_
+  profesional`) compara `celda.id_profesional_mostrado ==
+  id_profesional_filtro` y pisa a `_CELDA_VACIA` lo que no coincide —
+  así que la reserva recién cargada (filtrada por ESE mismo
+  profesional, que es lo que hace siempre esta vista previa)
+  desaparecía por completo de la grilla en vez de mostrarse en rojo
+  como "entrante". Arreglado en `_resolver_regular` (rama `entrante`):
+  `id_mostrado` pasa a tomarse siempre de `entrante`, no de `actual` —
+  `codigo`/`base` (lo que se PINTA en la celda) no cambian, eso sigue
+  siendo una decisión de diseño aparte ya probada (en blanco si nadie
+  la ocupa hoy, el código del titular actual si hay conflicto). Tests
+  nuevos: `tests/test_grilla_operativa.py`
+  (`test_regular_entrante_sin_titular_actual_queda_identificado_para_
+  el_filtro_exclusivo`, `test_regular_conflicto_el_entrante_tambien_
+  queda_identificado_para_el_filtro_exclusivo`) y
+  `tests/test_gui_reservas.py`
+  (`test_grilla_preview_se_refresca_al_crear_una_reserva_que_arranca_
+  a_mitad_de_mes`, reproduce el reporte textual de la clienta de punta
+  a punta vía `_PanelReservasRegulares._crear`).
+- **Registrar pagos: saldo período actual mal para una profesional
+  categoría R con liquidación de noviembre pendiente y una aislada ya
+  agendada para diciembre.** Investigado en profundidad, sin poder
+  reproducirlo — no se tocó código. Se armaron dos escenarios
+  completos (categoría R confirmada por la clienta): uno con
+  `SaldoCuentaActual` puesto a mano simulando una liquidación de
+  noviembre ya emitida, otro con una `ReservaRegular` real + `emitir_
+  liquidacion` de verdad para noviembre — en los dos, cargar después
+  una `ReservaAislada` de diciembre vía la pantalla real (`_crear`),
+  probando las dos opciones de "Período a imputar" ("actual"/
+  "siguiente"), deja `SaldoCuentaActual` sin cambios y no genera
+  ninguna `LiquidacionEmitida` de diciembre — los dos fixes ya
+  existentes en esta rama sobre "saldo actual inflado por una
+  liquidación-preview de un mes futuro" (commits de fines de
+  octubre/principios de noviembre, antes de que arrancara esta ronda)
+  cubren exactamente este caso. Dos posibilidades a confirmar con la
+  clienta: (1) que su copia del sistema no tenga todavía esos dos
+  fixes (valdría la pena confirmar que está actualizada/reiniciada
+  desde que se subieron); (2) que el escenario real tenga algún detalle
+  distinto al reproducido acá (ej. una reserva extraordinaria en vez de
+  una aislada común, más de una aislada, categoría E en vez de R
+  después de todo, etc.) — para seguir investigando hace falta el
+  código de la profesional y los tres números exactos que mostró la
+  pantalla (saldo anterior/actual/total).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
