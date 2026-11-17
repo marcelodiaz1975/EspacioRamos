@@ -66,11 +66,33 @@ _ANCHO_PANEL_IZQUIERDA = 280
 # Pedido explícito de la clienta: la primer columna (el formulario de
 # "Carga y control", NO el panel de filtros de "Historial" — mismo
 # criterio que el resto de las constantes de acá, cada panel se mide
-# por separado) se achica un 15%, y ese ancho liberado pasa a la tabla.
-# Los campos/botones del formulario se escalan en la misma proporción
-# para no desbordar el panel ya angosto.
-_ANCHO_PANEL_CARGA_CONTROL = round(_ANCHO_PANEL_IZQUIERDA * 0.85)
-_ANCHO_CAMPO_CARGA_CONTROL = round(_ANCHO_CAMPO * 0.85)
+# por separado) tiene que entrar completa la etiqueta del botón más
+# largo ("Dar de baja concepto seleccionado", sizeHint real medido con
+# QFontMetrics contra la hoja de estilos: 239px) sin cortarse — bajarla
+# a un 15% (como se probó primero) lo dejaba en 204px y la cortaba. El
+# ancho que gana esta columna se le resta a la columna "Medio de pago"
+# de la tabla (pedido explícito), no a Nombre/Categoría/Afectación.
+_ANCHO_CAMPO_CARGA_CONTROL = 240
+_ANCHO_PANEL_CARGA_CONTROL = 262  # _ANCHO_CAMPO_CARGA_CONTROL + márgenes (9px por lado) + un margen chico
+# Lo que gana el panel de arriba se le resta acá a "Medio de pago" —
+# medido contra su ancho real bajo Stretch a una ventana de referencia
+# (1500px, el mismo ancho de las capturas de verificación): 246px, baja
+# a 222px. Nombre/Categoría/Afectación siguen en Stretch sin cambios
+# (la cuenta cierra sola: lo que se le saca a esta columna es
+# exactamente lo que ganan las otras tres al dejar de repartirse el
+# espacio entre cuatro).
+_ANCHO_MEDIO_PAGO_CARGA_CONTROL = 222
+
+# Pedido explícito de la clienta, misma solapa: 10% del ancho de
+# "Categoría" pasa a "Importe" — medidos contra su ancho real en la
+# tabla con datos cargados (escenario de verificación con 8 filas):
+# Categoría 228px -> 205px (10% menos), Importe 67px -> 90px (se le
+# suma exactamente lo que pierde Categoría). Mismo mecanismo que
+# "Medio de pago": las dos salen de Stretch/ResizeToContents a un
+# ancho fijo propio, Nombre/Afectación no se tocan (228+67 = 205+90,
+# la cuenta cierra sola).
+_ANCHO_CATEGORIA_CARGA_CONTROL = 205
+_ANCHO_IMPORTE_CARGA_CONTROL = 90
 
 # "Que el primer elemento de la columna arranque en el pixel 85" —
 # mismo mecanismo (y mismo valor medido) que Reservas regulares/
@@ -373,8 +395,11 @@ class _PanelCargaControl(QWidget):
         # `_ALTO_TITULO_CARGA_CONTROL` más arriba.
         form.setContentsMargins(9, _ALTO_TITULO_CARGA_CONTROL, 9, 0)
 
-        form.addWidget(_titulo_campo("Período actual"))
-        self.etiqueta_periodo = QLabel(periodo_actual(self.conn))
+        # Pedido explícito de la clienta: una sola línea ("Período
+        # actual: 2026-11"), el valor en negrita — antes eran dos
+        # widgets (título + etiqueta), así que todo lo de abajo sube un
+        # renglón de una.
+        self.etiqueta_periodo = QLabel()
         form.addWidget(self.etiqueta_periodo)
 
         form.addWidget(_titulo_campo("Nombre"))
@@ -507,10 +532,19 @@ class _PanelCargaControl(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         header = self.tabla.horizontalHeader()
-        for columna in (self._COL_NOMBRE, self._COL_CATEGORIA, self._COL_AFECTACION, self._COL_MEDIO_PAGO):
+        for columna in (self._COL_NOMBRE, self._COL_AFECTACION):
             header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Stretch)
-        for columna in (self._COL_PERIODO, self._COL_VENCIMIENTO, self._COL_IMPORTE, self._COL_ESTADO):
+        # "Categoría" sale del Stretch y "Medio de pago" del Stretch
+        # también — le ceden ancho fijo a la columna 1 del formulario y
+        # a "Importe" respectivamente (ver las constantes más arriba).
+        header.setSectionResizeMode(self._COL_CATEGORIA, QHeaderView.ResizeMode.Interactive)
+        header.resizeSection(self._COL_CATEGORIA, _ANCHO_CATEGORIA_CARGA_CONTROL)
+        header.setSectionResizeMode(self._COL_MEDIO_PAGO, QHeaderView.ResizeMode.Interactive)
+        header.resizeSection(self._COL_MEDIO_PAGO, _ANCHO_MEDIO_PAGO_CARGA_CONTROL)
+        for columna in (self._COL_PERIODO, self._COL_VENCIMIENTO, self._COL_ESTADO):
             header.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self._COL_IMPORTE, QHeaderView.ResizeMode.Interactive)
+        header.resizeSection(self._COL_IMPORTE, _ANCHO_IMPORTE_CARGA_CONTROL)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones_seleccion)
         layout_externo.addWidget(self.tabla, stretch=1)
 
@@ -640,7 +674,7 @@ class _PanelCargaControl(QWidget):
         return "verde"
 
     def actualizar(self) -> None:
-        self.etiqueta_periodo.setText(periodo_actual(self.conn))
+        self.etiqueta_periodo.setText(f"Período actual: <b>{periodo_actual(self.conn)}</b>")
         periodo = periodo_actual(self.conn)
         periodo_proximo = sumar_meses(periodo, 1)
         repo_instancia = obtener_repositorio(self.conn, "InstanciaControlPago")

@@ -865,6 +865,47 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   tocados. Suite completa sin regresiones nuevas (los mismos ~10
   fallos conocidos del sandbox, ver más abajo).
 
+  **Ronda siguiente, tres ajustes de layout sobre esta misma solapa:**
+
+  - **"Período actual" en una sola línea, el valor en negrita.** Pasa
+    de dos widgets (`_titulo_campo` + `QLabel`) a uno solo:
+    `self.etiqueta_periodo.setText(f"Período actual: <b>{periodo}</b>")`
+    — `QLabel` detecta el HTML solo (`Qt.AutoText`, sin `setTextFormat`
+    explícito, mismo criterio que `_fmt_saldo_label` en `pagos.py`). Al
+    sacar un renglón, todo lo de abajo sube solo (es la misma
+    `QVBoxLayout`, no hace falta tocar nada más) y la columna deja de
+    necesitar scroll vertical para llegar a "Archivar registro".
+  - **Ancho de columna 1 recalculado desde el texto real, no desde un
+    85% arbitrario.** El 15% de achique de la ronda anterior dejaba el
+    botón "Dar de baja concepto seleccionado" en 204px cuando su
+    `sizeHint()` real (medido con `QFontMetrics` contra la hoja de
+    estilos real) es 239px — se cortaba. `_ANCHO_CAMPO_CARGA_CONTROL`
+    pasa a 240 (el que ya tenía el resto del sistema, antes de esta
+    pantalla) y `_ANCHO_PANEL_CARGA_CONTROL` a 262. El ancho que gana
+    el panel (262 contra los 238 que tenía) se le resta a la columna
+    "Medio de pago" de la tabla (pedido explícito, no a Nombre/
+    Categoría/Afectación): sale del `Stretch` a `Interactive` con un
+    ancho fijo (`_ANCHO_MEDIO_PAGO_CARGA_CONTROL`, medido contra su
+    ancho real bajo Stretch menos lo que gana la columna 1) — Nombre/
+    Categoría/Afectación siguen en Stretch sin cambios, la cuenta
+    cierra sola (lo que pierde una columna es exactamente lo que gana
+    la otra, verificado con captura y medición programática).
+  - **10% de "Categoría" pasa a "Importe".** Mismo mecanismo que
+    "Medio de pago": las dos salen de Stretch/`ResizeToContents` a un
+    ancho fijo propio (`_ANCHO_CATEGORIA_CARGA_CONTROL`/`_ANCHO_
+    IMPORTE_CARGA_CONTROL`), medidos contra sus anchos reales con datos
+    cargados — Nombre/Afectación no se tocan.
+
+  Verificado con captura offscreen y medición programática de cada
+  columna antes/después (`tabla.columnWidth`) confirmando que Nombre/
+  Afectación quedan exactamente iguales. Tests nuevos en `tests/test_
+  gui_control_pagos.py`: `test_etiqueta_periodo_actual_en_una_sola_
+  linea_con_el_periodo_en_negrita`, `test_columna_1_entra_el_boton_
+  dar_de_baja_sin_cortar`, `test_anchos_de_columna_categoria_medio_
+  pago_e_importe_se_ajustan_sin_tocar_nombre_ni_afectacion`. pyflakes
+  limpio, resto de la suite de control de pagos sin regresiones (57
+  tests).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

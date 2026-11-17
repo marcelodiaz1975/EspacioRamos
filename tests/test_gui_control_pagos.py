@@ -328,6 +328,40 @@ def test_historial_boton_editar_registro_habilita_con_seleccion_y_edita_estado(q
     assert panel_historial.tabla.item(0, 7).text() == "Archivado"
 
 
+def test_etiqueta_periodo_actual_en_una_sola_linea_con_el_periodo_en_negrita(qtbot, conn):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+
+    assert panel.etiqueta_periodo.text() == f"Período actual: <b>{periodo_actual(conn)}</b>"
+
+
+def test_columna_1_entra_el_boton_dar_de_baja_sin_cortar(qtbot, conn):
+    from app.gui.pantallas.control_pagos import _ANCHO_CAMPO_CARGA_CONTROL
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+
+    assert panel.boton_dar_de_baja.sizeHint().width() <= _ANCHO_CAMPO_CARGA_CONTROL
+
+
+def test_anchos_de_columna_categoria_medio_pago_e_importe_se_ajustan_sin_tocar_nombre_ni_afectacion(qtbot, conn, unidad):
+    from app.gui.pantallas.control_pagos import (
+        _ANCHO_CATEGORIA_CARGA_CONTROL, _ANCHO_IMPORTE_CARGA_CONTROL, _ANCHO_MEDIO_PAGO_CARGA_CONTROL,
+    )
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 850)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad)
+
+    assert panel.tabla.columnWidth(panel._COL_CATEGORIA) == _ANCHO_CATEGORIA_CARGA_CONTROL
+    assert panel.tabla.columnWidth(panel._COL_MEDIO_PAGO) == _ANCHO_MEDIO_PAGO_CARGA_CONTROL
+    assert panel.tabla.columnWidth(panel._COL_IMPORTE) == _ANCHO_IMPORTE_CARGA_CONTROL
+
+
 def test_catalogos_anidados_de_afectacion_funcionan(qtbot, conn):
     pantalla = PantallaControlPagos(conn)
     qtbot.addWidget(pantalla)
