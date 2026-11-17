@@ -1549,6 +1549,9 @@ class _PanelAusencias(QWidget):
             QMessageBox.warning(self, "Crear ausencia", str(error))
             return
         self.conn.commit()
+        # Punto #9.1.9: faltaba la alerta final de éxito — pedido
+        # explícito de la clienta al revisar esta solapa.
+        QMessageBox.information(self, "Ausencia creada", "Ausencia cargada con éxito.")
         self.actualizar()
         self.combo_profesional.setFocus()
 
@@ -1741,20 +1744,36 @@ class _PanelCargosEspeciales(QWidget):
         )
 
     def _actualizar_tipo_segun_subtipo(self) -> None:
-        """Pedido explícito de la clienta: "Si se selecciona 'Bonificación'
-        el tipo se pone en débito y no se puede modificar; si es ajuste se
-        puede editar tipo pero que sea por defecto crédito; si es ítem
-        libre se puede editar pero que sea por defecto débito." — se
-        reaplica cada vez que cambia el Subtipo (no solo al construir la
-        pantalla), así que elegir un Subtipo siempre vuelve el Tipo a su
-        default para ESE subtipo."""
+        """Pedido explícito de la clienta, invertido sobre el pedido
+        original (ver historial más abajo): "el subtipo ajuste obliga a
+        un débito (importe positivo) en contra del profesional, y el
+        subtipo bonificación obliga a un crédito a favor del profesional
+        (importe negativo)" — Ajuste queda bloqueado en Débito, igual que
+        antes quedaba Bonificación; Ítem libre sigue igual (editable, por
+        defecto Débito). Aclaración de la clienta sobre el motivo de la
+        confusión: en general el sistema mira Débito/Crédito desde la
+        óptica del espacio, pero en Cargos especiales tiene más sentido
+        mirarlo desde el impacto en la cuenta del PROFESIONAL — un Ajuste
+        a su favor sería un Crédito para el espacio pero acá se sigue
+        llamando "Débito" porque es lo que el profesional le debe de más
+        al espacio (monto positivo); viceversa para Bonificación.
+
+        Pedido original (antes de esta vuelta, con los roles de Ajuste/
+        Bonificación al revés): "Si se selecciona 'Bonificación' el tipo
+        se pone en débito y no se puede modificar; si es ajuste se puede
+        editar tipo pero que sea por defecto crédito; si es ítem libre se
+        puede editar pero que sea por defecto débito."
+
+        Se reaplica cada vez que cambia el Subtipo (no solo al construir
+        la pantalla), así que elegir un Subtipo siempre vuelve el Tipo a
+        su default para ESE subtipo."""
         subtipo = self.combo_subtipo.currentData()
-        if subtipo == "Bonificación":
+        if subtipo == "Ajuste":
             self.combo_tipo.setCurrentIndex(self.combo_tipo.findData("Débito"))
             self.combo_tipo.setEnabled(False)
             return
         self.combo_tipo.setEnabled(True)
-        default = "Crédito" if subtipo == "Ajuste" else "Débito"  # Ítem libre -> Débito
+        default = "Crédito" if subtipo == "Bonificación" else "Débito"  # Ítem libre -> Débito
         self.combo_tipo.setCurrentIndex(self.combo_tipo.findData(default))
 
     def _actualizar_color_monto(self) -> None:
@@ -1834,6 +1853,9 @@ class _PanelCargosEspeciales(QWidget):
             QMessageBox.warning(self, "Crear cargo especial", str(error))
             return
         self.conn.commit()
+        # Punto #9.1.9: faltaba la alerta final de éxito — pedido
+        # explícito de la clienta al revisar esta solapa.
+        QMessageBox.information(self, "Cargo especial creado", "Cargo especial cargado con éxito.")
         # Pedido explícito de la clienta: imputado al mes en curso, la
         # liquidación de ESE período (si ya estaba emitida) se regenera y
         # queda marcada como no enviada; imputado al mes que viene, no hay
@@ -1905,13 +1927,13 @@ class _PanelCargosEspeciales(QWidget):
         if indice_profesional >= 0:
             self.combo_profesional.setCurrentIndex(indice_profesional)
         # Subtipo primero: `_actualizar_tipo_segun_subtipo` se dispara solo
-        # y pisa Tipo con el default de ese subtipo — para Ajuste/Ítem
-        # libre se vuelve a pisar después con el Tipo real ya guardado
-        # (puede no coincidir con el default); para Bonificación el
+        # y pisa Tipo con el default de ese subtipo — para Bonificación/
+        # Ítem libre se vuelve a pisar después con el Tipo real ya
+        # guardado (puede no coincidir con el default); para Ajuste el
         # default SIEMPRE es Débito y queda bloqueado, así que no hay nada
         # que restaurar.
         self.combo_subtipo.setCurrentIndex(self.combo_subtipo.findData(registro["Subtipo"]))
-        if registro["Subtipo"] != "Bonificación":
+        if registro["Subtipo"] != "Ajuste":
             self.combo_tipo.setCurrentIndex(self.combo_tipo.findData(registro["Tipo"]))
         self.campo_concepto.setText(registro["Concepto"])
         self.spin_monto.setValue(registro["Monto"])

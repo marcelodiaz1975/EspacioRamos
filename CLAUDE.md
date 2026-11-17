@@ -685,28 +685,72 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   a punta vía `_PanelReservasRegulares._crear`).
 - **Registrar pagos: saldo período actual mal para una profesional
   categoría R con liquidación de noviembre pendiente y una aislada ya
-  agendada para diciembre.** Investigado en profundidad, sin poder
-  reproducirlo — no se tocó código. Se armaron dos escenarios
-  completos (categoría R confirmada por la clienta): uno con
-  `SaldoCuentaActual` puesto a mano simulando una liquidación de
-  noviembre ya emitida, otro con una `ReservaRegular` real + `emitir_
-  liquidacion` de verdad para noviembre — en los dos, cargar después
-  una `ReservaAislada` de diciembre vía la pantalla real (`_crear`),
-  probando las dos opciones de "Período a imputar" ("actual"/
-  "siguiente"), deja `SaldoCuentaActual` sin cambios y no genera
-  ninguna `LiquidacionEmitida` de diciembre — los dos fixes ya
-  existentes en esta rama sobre "saldo actual inflado por una
-  liquidación-preview de un mes futuro" (commits de fines de
-  octubre/principios de noviembre, antes de que arrancara esta ronda)
-  cubren exactamente este caso. Dos posibilidades a confirmar con la
-  clienta: (1) que su copia del sistema no tenga todavía esos dos
-  fixes (valdría la pena confirmar que está actualizada/reiniciada
-  desde que se subieron); (2) que el escenario real tenga algún detalle
-  distinto al reproducido acá (ej. una reserva extraordinaria en vez de
-  una aislada común, más de una aislada, categoría E en vez de R
-  después de todo, etc.) — para seguir investigando hace falta el
-  código de la profesional y los tres números exactos que mostró la
-  pantalla (saldo anterior/actual/total).
+  agendada para diciembre.** Cerrado — no era un bug activo, era un
+  resabio de un bug YA arreglado. Con el PDF real de la liquidación de
+  noviembre de Lic. Aldana Portillo (R2) y el detalle exacto que la
+  clienta pasó del pago, se reconstruyó que su `SaldoCuentaActual` de
+  antes del pago ($220.530) era exactamente la suma de dos cosas: el
+  total real de noviembre ($118.731, el de la última emisión
+  "Enviada") más el `MontoGenerado` de una `LiquidacionEmitida` de
+  **diciembre** ($101.799) que había quedado acreditada de más. Esa
+  fila de diciembre (confirmado con la base real que mandó la clienta,
+  vía `IdLiquidacion`/`FechaHoraGeneracion`) se generó el **27/10/2026
+  a las 10:19hs** — TRES DÍAS ANTES del commit que agregó el guard
+  "no acreditar una liquidación-preview de un mes que el período
+  operativo todavía no alcanzó" (30/10/2026, ya documentado arriba en
+  este mismo archivo). O sea: se acreditó por un bug que en ese momento
+  todavía existía en el código, antes de que arrancara esta ronda — el
+  fix posterior no revierte datos que ya habían quedado mal, solo
+  evita que vuelva a pasar de ahí en adelante. Confirmado buscando en
+  toda la base si había otro caso igual: solo una fila más de un
+  período futuro en todo el sistema (Lic. Valeria Sambucari, R100,
+  también diciembre) — pero esa se generó el 4/11, YA con el fix
+  puesto, y no acreditó nada (su saldo coincide exacto con su última
+  liquidación de noviembre) — confirma que el fix funciona bien hoy.
+  Corrección aplicada por la clienta a mano en Profesionales > Editar
+  (`SaldoCuentaActual`, el único lugar editable de ese campo — `Campo
+  tipo="numero"` en `app.gui.pantallas.profesionales`), sin tocar
+  código. No hace falta ningún barrido del resto de los profesionales:
+  los demás saldos altos que aparecían en la base real que mandó la
+  clienta son correctos (cada uno coincide con su última liquidación
+  de noviembre).
+
+- **Ausencias por motivos varios: alerta de proceso exitoso al crear.**
+  Hecho. Punto #9.1.9 — faltaba, `_PanelAusencias._crear`
+  (`app/gui/pantallas/novedades.py`) no mostraba nada al completar el
+  registro (a diferencia de Vacaciones/Licencias, que sí avisan pero
+  solo cuando hay advertencias de por medio). Se sumó `QMessageBox.
+  information(..., "Ausencia cargada con éxito.")`, incondicional, al
+  final de `_crear`. Test nuevo:
+  `test_crear_ausencia_muestra_alerta_final_de_exito`.
+- **Cargos especiales: Ajuste/Bonificación con el signo al revés +
+  alerta de éxito.** Hecho. Pedido explícito de la clienta: "el
+  subtipo ajuste obliga a un débito (importe positivo) en contra del
+  profesional, y el subtipo bonificación obliga a un crédito a favor
+  del profesional (importe negativo)" — invierte el pedido original
+  (`_actualizar_tipo_segun_subtipo`, que tenía Bonificación bloqueada
+  en Débito y Ajuste editable por defecto en Crédito). Aclaración de
+  la clienta sobre el motivo de la confusión: el resto del sistema
+  mira Débito/Crédito desde la óptica del espacio, pero acá tiene más
+  sentido mirarlo desde el impacto en la cuenta del PROFESIONAL.
+  Arreglado invirtiendo literalmente los roles de los dos subtipos en
+  `_actualizar_tipo_segun_subtipo` (ahora Ajuste es el bloqueado en
+  Débito, Bonificación el editable por defecto en Crédito — Ítem libre
+  no cambia) y en el único otro lugar que distinguía el subtipo
+  bloqueado (`_modificar_seleccionada`, precarga del Tipo real
+  guardado). `crear_cargo_especial` (`app/negocio/pagos.py`) no se
+  tocó — nunca acopló Subtipo a Tipo, solo valida que el signo del
+  monto sea consistente con el Tipo elegido, sin importar el Subtipo.
+  De paso, mismo pedido que Ausencias: alerta final de éxito al cargar
+  el registro (faltaba, igual que en esa otra solapa). Tests
+  actualizados/nuevos en `tests/test_gui_novedades.py`:
+  `test_subtipo_ajuste_fuerza_tipo_debito_y_lo_bloquea` (antes era
+  sobre Bonificación), `test_subtipo_bonificacion_deja_tipo_editable_
+  por_defecto_credito` (antes era sobre Ajuste),
+  `test_modificar_cargo_especial_sin_llave_precarga_el_subtipo`
+  (monto pasa a positivo, ya que ahora prueba Ajuste bloqueado en
+  Débito), `test_crear_cargo_especial_muestra_alerta_final_de_exito`
+  (nuevo).
 
 ## Historial archivado
 

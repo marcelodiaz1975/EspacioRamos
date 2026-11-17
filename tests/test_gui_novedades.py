@@ -672,6 +672,22 @@ def test_crear_ausencia_persiste(qtbot, conn):
     assert panel.tabla.item(0, 4).text() == "Congreso"
 
 
+def test_crear_ausencia_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    """Punto #9.1.9, pedido explícito de la clienta al revisar esta
+    solapa: faltaba la alerta final de éxito al completar el registro."""
+    id_profesional = _preparar(conn)
+    textos: list[tuple] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: textos.append(a)))
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-03"))
+    panel._crear()
+    assert any("Ausencia cargada con éxito" in t[2] for t in textos)
+
+
 def test_crear_ausencia_cancelando_confirmacion_no_persiste(qtbot, conn, monkeypatch):
     id_profesional = _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)
@@ -2044,22 +2060,26 @@ def test_combo_subtipo_cargos_especiales_ofrece_los_tres_editables_sin_deposito_
     assert opciones == {"Ajuste", "Bonificación", "Ítem libre"}
 
 
-def test_subtipo_bonificacion_fuerza_tipo_debito_y_lo_bloquea(qtbot, conn):
-    """Pedido explícito de la clienta: "Si se selecciona 'Bonificación' el
-    tipo se pone en débito y no se puede modificar"."""
-    _preparar(conn)
-    panel = _PanelCargosEspeciales(conn)
-    qtbot.addWidget(panel)
-    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Bonificación"))
-    assert panel.combo_tipo.currentData() == "Débito"
-    assert not panel.combo_tipo.isEnabled()
-
-
-def test_subtipo_ajuste_deja_tipo_editable_por_defecto_credito(qtbot, conn):
+def test_subtipo_ajuste_fuerza_tipo_debito_y_lo_bloquea(qtbot, conn):
+    """Pedido explícito de la clienta, invertido sobre el pedido original
+    (ver el historial en `_actualizar_tipo_segun_subtipo`): "el subtipo
+    ajuste obliga a un débito (importe positivo) en contra del
+    profesional"."""
     _preparar(conn)
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
     panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ajuste"))
+    assert panel.combo_tipo.currentData() == "Débito"
+    assert not panel.combo_tipo.isEnabled()
+
+
+def test_subtipo_bonificacion_deja_tipo_editable_por_defecto_credito(qtbot, conn):
+    """Mismo pedido invertido: "el subtipo bonificación obliga a un
+    crédito a favor del profesional (importe negativo)"."""
+    _preparar(conn)
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Bonificación"))
     assert panel.combo_tipo.currentData() == "Crédito"
     assert panel.combo_tipo.isEnabled()
 
@@ -2071,6 +2091,22 @@ def test_subtipo_item_libre_deja_tipo_editable_por_defecto_debito(qtbot, conn):
     panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))
     assert panel.combo_tipo.currentData() == "Débito"
     assert panel.combo_tipo.isEnabled()
+
+
+def test_crear_cargo_especial_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    """Punto #9.1.9, pedido explícito de la clienta al revisar esta
+    solapa: faltaba la alerta final de éxito al completar el registro."""
+    _preparar(conn)
+    textos: list[tuple] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: textos.append(a)))
+    panel = _PanelCargosEspeciales(conn)
+    qtbot.addWidget(panel)
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))
+    panel.campo_concepto.setText("item libre")
+    panel.spin_monto.setValue(100)
+    panel._crear()
+    assert any("Cargo especial cargado con éxito" in t[2] for t in textos)
 
 
 def test_subtipo_arriba_de_tipo_en_la_cadena_de_foco(qtbot, conn):
@@ -2145,9 +2181,9 @@ def test_modificar_cargo_especial_sin_llave_precarga_el_subtipo(qtbot, conn):
     panel = _PanelCargosEspeciales(conn)
     qtbot.addWidget(panel)
     panel.combo_profesional.setCurrentIndex(1)
-    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ajuste"))  # default Tipo=Crédito
+    panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ajuste"))  # fuerza Tipo=Débito, bloqueado
     panel.campo_concepto.setText("ajuste manual")
-    panel.spin_monto.setValue(-1500)
+    panel.spin_monto.setValue(1500)
     panel._crear()
 
     panel.combo_subtipo.setCurrentIndex(panel.combo_subtipo.findData("Ítem libre"))  # para confirmar que se repone
