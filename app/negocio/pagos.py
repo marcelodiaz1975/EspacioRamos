@@ -176,12 +176,24 @@ def registrar_pago(
 
     campo_objetivo = _campo_saldo(conn, periodo_imputado)
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
-    saldo_previo = profesional[campo_objetivo] or 0.0
+    saldo_campo_previo = profesional[campo_objetivo] or 0.0
+    # Pedido explícito de la clienta: "Saldo antes del pago"/"Saldo
+    # después del pago" en Estado de cuenta/Registrar pagos muestran el
+    # COMBINADO de los dos períodos (antes mostraban un solo campo,
+    # según a qué período se imputaba el pago — daba un número
+    # "incompleto" al mirar la fila sola, mismo problema que ya se
+    # había corregido una vez para las etiquetas de arriba, ver
+    # `_actualizar_saldos` en la GUI). El combinado siempre cambia en
+    # exactamente `monto` sin importar cómo reparta la cascada entre
+    # los dos campos (`_aplicar_pago_con_cascada` nunca cambia la SUMA,
+    # solo la redistribuye) — no hace falta ningún caso especial.
+    saldo_previo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
 
     impacto_anterior, impacto_actual = _aplicar_pago_con_cascada(conn, id_profesional, monto, periodo_imputado)
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
-    nuevo_saldo = profesional[campo_objetivo] or 0.0
+    saldo_campo_nuevo = profesional[campo_objetivo] or 0.0
+    nuevo_saldo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
     es_mes_anterior = campo_objetivo == "SaldoCuentaAnterior"
 
     repo = obtener_repositorio(conn, "HistorialPagos")
@@ -196,13 +208,17 @@ def registrar_pago(
         ImpactoSaldoAnterior=impacto_anterior, ImpactoSaldoActual=impacto_actual,
     )
 
+    # El cruce de tolerancia sigue mirando el campo puntual (Saldo
+    # período anterior), no el combinado — es una decisión de negocio
+    # distinta (DC-06 §5.2: si LA DEUDA DEL MES ANTERIOR puntual bajó
+    # del umbral), no afectada por este cambio de qué se muestra.
     cruza_tolerancia = False
     if es_mes_anterior:
         cfg = conn.execute(
             "SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1"
         ).fetchone()
         tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
-        cruza_tolerancia = saldo_previo > tolerancia >= nuevo_saldo
+        cruza_tolerancia = saldo_campo_previo > tolerancia >= saldo_campo_nuevo
     return id_pago, cruza_tolerancia
 
 
@@ -240,14 +256,14 @@ def modificar_pago(
 
     nuevo_monto = monto if monto is not None else pago["Monto"]
     nuevo_periodo = periodo_imputado if periodo_imputado is not None else pago["PeriodoImputado"]
-    campo_nuevo = _campo_saldo(conn, nuevo_periodo)
     profesional = repo_prof.obtener(pago["IdProfesional"])
-    saldo_previo = profesional[campo_nuevo] or 0.0
+    # Combinado de los dos períodos — mismo criterio que `registrar_pago`.
+    saldo_previo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
 
     impacto_anterior, impacto_actual = _aplicar_pago_con_cascada(conn, pago["IdProfesional"], nuevo_monto, nuevo_periodo)
 
     profesional = repo_prof.obtener(pago["IdProfesional"])
-    nuevo_saldo = profesional[campo_nuevo] or 0.0
+    nuevo_saldo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
 
     repo.actualizar(
         id_pago, Monto=nuevo_monto,
@@ -354,7 +370,11 @@ def reconciliar_saldos_cruzados(conn: sqlite3.Connection) -> list[int]:
                 f"(bug ya corregido): saldo período anterior {anterior:.2f} -> {nuevo_anterior:.2f}, "
                 f"saldo período actual {actual:.2f} -> {nuevo_actual:.2f}."
             ),
-            SaldoAnterior=anterior, SaldoNuevo=nuevo_anterior, RegistroModificado=0,
+            # Combinado — mismo criterio que `registrar_pago`/`modificar_
+            # pago`: acá la suma no cambia (es un reparto interno, Monto=0),
+            # así que "antes"/"después" quedan iguales — coherente, no se
+            # movió plata real.
+            SaldoAnterior=anterior + actual, SaldoNuevo=nuevo_anterior + nuevo_actual, RegistroModificado=0,
             ImpactoSaldoAnterior=nuevo_anterior - anterior, ImpactoSaldoActual=nuevo_actual - actual,
         )
         corregidos.append(prof["IdProfesional"])

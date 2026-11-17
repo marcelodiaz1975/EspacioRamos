@@ -715,6 +715,52 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   clienta son correctos (cada uno coincide con su última liquidación
   de noviembre).
 
+- **Pagos: "Saldo anterior"/"Nuevo saldo" de la tabla de historial
+  (Registrar pagos y Estado de cuenta) pasan a combinar los dos
+  períodos.** Hecho. Pedido explícito de la clienta, con el PDF real de
+  la liquidación de noviembre de Lic. Gabriela Icutza (R16) como caso de
+  prueba: notó que esas dos columnas, POR FILA, no "se relacionaban"
+  entre sí al pasar de un pago a otro — porque cada una mostraba un solo
+  campo (`SaldoCuentaAnterior` o `SaldoCuentaActual`, según a qué
+  período se imputaba ESE pago puntual), mismo problema que ya se había
+  corregido una vez para las etiquetas de arriba del formulario ("Saldo
+  total"/"Nuevo saldo", ver el comentario en `_armar_ui` de
+  `_PanelPagos`) pero nunca se había llevado a las columnas de la tabla.
+  Renombradas a "Saldo antes del pago"/"Saldo después del pago", ahora
+  muestran el COMBINADO (`SaldoCuentaAnterior + SaldoCuentaActual`)
+  antes/después de cada movimiento — comprobado matemáticamente en
+  `_aplicar_pago_con_cascada` que el combinado SIEMPRE cambia en
+  exactamente `monto`, reparta como reparta la cascada entre los dos
+  campos, así que no hace falta ningún caso especial. El encadenado que
+  pidió la clienta ("si hay un nuevo pago en el mes, 'antes' muestra el
+  último 'después' de ese mes") sale solo de leer los dos campos en vivo
+  en cada registro — no hubo que programar ningún encadenamiento manual,
+  y de paso queda más fiel a la realidad si en el medio se emite una
+  liquidación nueva (la seguiría reflejando, cosa que un encadenado a
+  ciegas no haría). Tocados los tres lugares que escriben esas columnas
+  en `app/negocio/pagos.py` (`registrar_pago`, `modificar_pago`,
+  `reconciliar_saldos_cruzados`) — el cruce de tolerancia de
+  `registrar_pago` (DC-06 §5.2) sigue mirando el campo puntual, no el
+  combinado, por ser una decisión de negocio distinta. Sin migración:
+  las columnas de `HistorialPagos` se siguen llamando igual
+  (`SaldoAnterior`/`SaldoNuevo`), solo cambia qué calculan y cómo se
+  llaman en pantalla — confirmado que son los ÚNICOS dos lugares de la
+  GUI que las leen (la tabla de "Registrar pagos" y la de "Estado de
+  cuenta"; la etiqueta "Nuevo saldo" del panel de arriba es una cosa
+  distinta, la vista previa en vivo de un pago que todavía no se
+  registró, y no se tocó). Tests nuevos en `tests/test_pagos.py`:
+  `test_registrar_pago_saldo_antes_y_despues_combina_los_dos_periodos`
+  (reproduce el caso real de Gabriela Icutza), `test_registrar_pago_
+  saldo_antes_del_pago_encadena_con_el_despues_del_pago_anterior`,
+  `test_registrar_pago_con_cascada_tambien_combina_correctamente`,
+  `test_modificar_pago_saldo_antes_y_despues_combina_los_dos_periodos`
+  — más una aserción nueva en un test ya existente de
+  `reconciliar_saldos_cruzados` (el combinado no cambia, es un reparto
+  interno sin plata real de por medio). pyflakes limpio, suite completa
+  de Pagos sin regresiones (162 tests) y sin regresiones en Mensajes/
+  Balance/Avance de mes (los mismos 3 fallos conocidos del reloj del
+  sandbox).
+
 - **Ausencias por motivos varios: alerta de proceso exitoso al crear.**
   Hecho. Punto #9.1.9 — faltaba, `_PanelAusencias._crear`
   (`app/gui/pantallas/novedades.py`) no mostraba nada al completar el

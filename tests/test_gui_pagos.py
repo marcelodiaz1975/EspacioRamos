@@ -793,7 +793,7 @@ def test_tabla_pagos_columnas_y_orden(qtbot, conn):
     panel = pantalla.panel_pagos
     assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
         "Fecha de carga", "Profesional", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
-        "Saldo anterior", "Nuevo saldo", "Registro modificado", "Es ajuste",
+        "Saldo antes del pago", "Saldo después del pago", "Registro modificado", "Es ajuste",
     ]
 
     _seleccionar_profesional(panel, id_profesional)
@@ -1513,7 +1513,7 @@ def test_solapa_estado_cuenta_muestra_saldos_y_tabla_igual_a_registrar_pago(qtbo
 
     assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
         "Fecha de carga", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
-        "Saldo anterior", "Nuevo saldo", "Registro modificado", "Es ajuste",
+        "Saldo antes del pago", "Saldo después del pago", "Registro modificado", "Es ajuste",
     ]
 
     registrar_pago(

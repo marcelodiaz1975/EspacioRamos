@@ -125,6 +125,50 @@ def test_registrar_pago_guarda_saldo_anterior_y_nuevo(conn, profesional):
     assert pago["RegistroModificado"] == 0
 
 
+def test_registrar_pago_saldo_antes_y_despues_combina_los_dos_periodos(conn, profesional):
+    """Pedido explícito de la clienta ("Saldo antes del pago"/"Saldo
+    después del pago"): acá "SaldoAnterior"/"SaldoNuevo" de HistorialPagos
+    pasan a representar el COMBINADO de SaldoCuentaAnterior +
+    SaldoCuentaActual, no un solo campo según a qué período se imputa el
+    pago — reproduce el caso real de Lic. Gabriela Icutza que trajo la
+    clienta: $81.236 de saldo anterior + $277.292 que le acreditó la
+    liquidación del mes, pagó $70.000 imputados al mes en curso."""
+    obtener_repositorio(conn, "Profesional").actualizar(
+        profesional, SaldoCuentaAnterior=81236, SaldoCuentaActual=277292,
+    )
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-70000)
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["SaldoAnterior"] == pytest.approx(81236 + 277292)
+    assert pago["SaldoNuevo"] == pytest.approx(81236 + 277292 - 70000)
+
+
+def test_registrar_pago_saldo_antes_del_pago_encadena_con_el_despues_del_pago_anterior(conn, profesional):
+    """"Si en el mes se realiza un nuevo pago, 'Saldo antes del pago' va a
+    mostrar el último 'Saldo después del pago' de ese mes" — sale solo de
+    leer los dos campos en vivo en cada registro, sin encadenar a mano."""
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=500, SaldoCuentaActual=1000)
+    id_pago_1, _ = registrar_pago(conn, id_profesional=profesional, monto=-300)
+    id_pago_2, _ = registrar_pago(conn, id_profesional=profesional, monto=-200)
+
+    repo_pagos = obtener_repositorio(conn, "HistorialPagos")
+    pago_1 = repo_pagos.obtener(id_pago_1)
+    pago_2 = repo_pagos.obtener(id_pago_2)
+    assert pago_1["SaldoNuevo"] == pytest.approx(pago_2["SaldoAnterior"])
+    assert pago_2["SaldoAnterior"] == pytest.approx(1500 - 300)
+    assert pago_2["SaldoNuevo"] == pytest.approx(1500 - 300 - 200)
+
+
+def test_registrar_pago_con_cascada_tambien_combina_correctamente(conn, profesional):
+    """El combinado tiene que cambiar en exactamente `monto`, incluso
+    cuando el pago cae en cascada sobre el otro período (ver
+    `_aplicar_pago_con_cascada`) — no hace falta ningún caso especial."""
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=1000, SaldoCuentaActual=2000)
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-3500)  # cubre los dos, sobran 500
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["SaldoAnterior"] == pytest.approx(3000)
+    assert pago["SaldoNuevo"] == pytest.approx(-500)
+
+
 # --------------------------------------------------------------- cascada (bug real reportado por la clienta)
 
 def test_registrar_pago_que_supera_el_saldo_actual_cae_en_cascada_sobre_el_anterior(conn, profesional):
@@ -269,6 +313,17 @@ def test_modificar_pago_ajusta_monto_y_marca_modificado(conn, profesional):
     assert pago["RegistroModificado"] == 1
     assert pago["SaldoAnterior"] == pytest.approx(1000)
     assert pago["SaldoNuevo"] == pytest.approx(400)
+
+
+def test_modificar_pago_saldo_antes_y_despues_combina_los_dos_periodos(conn, profesional):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=500, SaldoCuentaActual=1000)
+    id_pago, _ = registrar_pago(conn, id_profesional=profesional, monto=-400)  # combinado: 1500 -> 1100
+
+    modificar_pago(conn, id_pago, monto=-600)  # combinado antes de este pago sigue siendo 1500 (se revierte el viejo)
+
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["SaldoAnterior"] == pytest.approx(1500)
+    assert pago["SaldoNuevo"] == pytest.approx(900)
 
 
 def test_modificar_pago_mantiene_fecha_de_carga_original(conn, profesional):
@@ -782,6 +837,10 @@ def test_reconciliar_saldos_cruzados_corrige_credito_en_actual_con_deuda_en_ante
     assert movimiento["EsAjuste"] == 1
     assert movimiento["ImpactoSaldoAnterior"] == pytest.approx(-1000)
     assert movimiento["ImpactoSaldoActual"] == pytest.approx(1000)
+    # Es un reparto interno (no se movió plata real): el combinado "antes
+    # del pago"/"después del pago" queda igual.
+    assert movimiento["SaldoAnterior"] == pytest.approx(1000 + -1500)
+    assert movimiento["SaldoNuevo"] == pytest.approx(0 + -500)
 
 
 def test_reconciliar_saldos_cruzados_corrige_credito_en_anterior_con_deuda_en_actual(conn, profesional):
