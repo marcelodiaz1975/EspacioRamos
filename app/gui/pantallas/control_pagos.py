@@ -11,6 +11,7 @@ ModulosExtendidos` está prendido — ver `gui_main.construir_secciones`."""
 from __future__ import annotations
 
 import sqlite3
+import unicodedata
 from datetime import date
 
 from PySide6.QtGui import QColor
@@ -40,6 +41,7 @@ from app.gui.pantallas.pagos import _SpinMonto
 from app.gui.pantallas.reservas import _FECHA_SIN_DATO
 from app.gui.widgets.foco import excluir_tabla_del_tab, instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_centrado, item_numero
+from app.gui.widgets.orden_tabla import OrdenTabla
 from app.gui.widgets.resumen_saldo import item_monto
 from app.negocio.control_pagos import (
     ESTADOS_INSTANCIA,
@@ -185,6 +187,15 @@ def _item_importe(valor: float | None) -> QTableWidgetItem:
     ningún importe — "$ 0,00" confundiría "sin cargar" con "cargado en
     cero", dos cosas distintas acá."""
     return QTableWidgetItem("") if valor is None else item_monto(valor)
+
+
+def _normalizar_filtro(texto: str) -> str:
+    """Substring sin distinguir mayúsculas ni acentos — mismo criterio
+    que `crud_generico._normalizar_busqueda` (duplicado acá, no
+    importado: son dominios sin relación)."""
+    descompuesto = unicodedata.normalize("NFKD", texto)
+    sin_acentos = "".join(c for c in descompuesto if not unicodedata.combining(c))
+    return sin_acentos.casefold()
 
 
 def _armar_combo_tipo_afectacion() -> QComboBox:
@@ -546,7 +557,55 @@ class _PanelCargaControl(QWidget):
         header.setSectionResizeMode(self._COL_IMPORTE, QHeaderView.ResizeMode.Interactive)
         header.resizeSection(self._COL_IMPORTE, _ANCHO_IMPORTE_CARGA_CONTROL)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones_seleccion)
-        layout_externo.addWidget(self.tabla, stretch=1)
+        # Pedido explícito de la clienta: tabla ordenable por click en el
+        # encabezado — mismo mecanismo que el resto del sistema
+        # (`OrdenTabla`, ver `app/gui/widgets/orden_tabla.py`). El orden
+        # por defecto (tres grupos, ver `_clave_orden_instancia`) se
+        # sigue aplicando primero; un click en una columna se aplica
+        # ENCIMA (sort estable), y un segundo click en la misma invierte
+        # el sentido.
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
+
+        # Pedido explícito de la clienta: fila de filtros propia arriba
+        # de la tabla, uno por columna de Nombre a Vencimiento incluido
+        # (sustituto, texto libre sin distinguir mayúsculas/acentos —
+        # mismo criterio que "Buscar" de los catálogos genéricos), y
+        # sobre Importe/Estado un botón "Reiniciar filtros" en vez de
+        # filtro. Es un widget PROPIO (no una fila de la tabla): así no
+        # hay que pelear con la selección/el orden por click de la
+        # tabla — el ancho de cada campo se sincroniza con el de su
+        # columna real vía `_sincronizar_ancho_filtros` (se llama al
+        # armar, en cada `actualizar()` y cada vez que el header cambia
+        # de ancho).
+        panel_tabla = QWidget()
+        layout_tabla = QVBoxLayout(panel_tabla)
+        layout_tabla.setContentsMargins(0, 0, 0, 0)
+        layout_tabla.setSpacing(0)
+
+        fila_filtros = QWidget()
+        layout_filtros = QHBoxLayout(fila_filtros)
+        layout_filtros.setContentsMargins(0, 0, 0, 0)
+        layout_filtros.setSpacing(0)
+        self._espaciador_filtros = QWidget()
+        layout_filtros.addWidget(self._espaciador_filtros)
+        self.filtros_columna: dict[int, QLineEdit] = {}
+        for columna in (
+            self._COL_NOMBRE, self._COL_CATEGORIA, self._COL_AFECTACION, self._COL_MEDIO_PAGO,
+            self._COL_PERIODO, self._COL_VENCIMIENTO,
+        ):
+            campo_filtro = QLineEdit()
+            campo_filtro.textChanged.connect(self.actualizar)
+            layout_filtros.addWidget(campo_filtro)
+            self.filtros_columna[columna] = campo_filtro
+        self.boton_reiniciar_filtros = QPushButton("Reiniciar filtros")
+        self.boton_reiniciar_filtros.setObjectName("botonSecundario")
+        self.boton_reiniciar_filtros.clicked.connect(self._reiniciar_filtros_columna)
+        layout_filtros.addWidget(self.boton_reiniciar_filtros)
+        layout_tabla.addWidget(fila_filtros)
+        layout_tabla.addWidget(self.tabla)
+        header.sectionResized.connect(lambda *_args: self._sincronizar_ancho_filtros())
+
+        layout_externo.addWidget(panel_tabla, stretch=1)
 
         self._foco = instalar_enter_avanza_foco(
             [
@@ -556,6 +615,44 @@ class _PanelCargaControl(QWidget):
             parent=self,
         )
         self._actualizar_botones_seleccion()
+        self._sincronizar_ancho_filtros()
+
+    def _sincronizar_ancho_filtros(self) -> None:
+        """Mantiene cada campo de la fila de filtros exactamente al
+        ancho de su columna real — se llama al armar la pantalla, cada
+        vez que cambia el ancho de una columna (`sectionResized`, ej.
+        al redimensionar la ventana) y al final de cada `actualizar()`
+        (las columnas en `ResizeToContents` pueden cambiar de ancho con
+        los datos)."""
+        self._espaciador_filtros.setFixedWidth(self.tabla.verticalHeader().width() + self.tabla.frameWidth())
+        for columna, campo in self.filtros_columna.items():
+            campo.setFixedWidth(self.tabla.columnWidth(columna))
+        self.boton_reiniciar_filtros.setFixedWidth(
+            self.tabla.columnWidth(self._COL_IMPORTE) + self.tabla.columnWidth(self._COL_ESTADO)
+        )
+
+    def _reiniciar_filtros_columna(self) -> None:
+        for campo in self.filtros_columna.values():
+            campo.blockSignals(True)
+            campo.clear()
+            campo.blockSignals(False)
+        self.actualizar()
+
+    def _coincide_filtros(self, fila: tuple) -> bool:
+        instancia, concepto, afectacion = fila
+        valores = {
+            self._COL_NOMBRE: concepto["Nombre"] if concepto else "",
+            self._COL_CATEGORIA: (concepto["Categoria"] if concepto else "") or "",
+            self._COL_AFECTACION: afectacion,
+            self._COL_MEDIO_PAGO: instancia["MedioPago"] or "",
+            self._COL_PERIODO: instancia["Periodo"],
+            self._COL_VENCIMIENTO: instancia["Vencimiento"] or "",
+        }
+        for columna, campo in self.filtros_columna.items():
+            texto_filtro = _normalizar_filtro(campo.text())
+            if texto_filtro and texto_filtro not in _normalizar_filtro(str(valores[columna])):
+                return False
+        return True
 
     def _actualizar_detalle_afectacion(self) -> None:
         _actualizar_combo_detalle_afectacion(self.conn, self.combo_tipo_afectacion, self.combo_detalle_afectacion)
@@ -654,6 +751,24 @@ class _PanelCargaControl(QWidget):
             return (0, "", "", nombre, afectacion)
         return (1, instancia["Periodo"], instancia["Vencimiento"], nombre, afectacion)
 
+    @staticmethod
+    def _clave_orden_columna(columna: int):
+        """Clave de orden para un click de encabezado — mismo criterio
+        que `_PanelPagos._clave_orden` (`app/gui/pantallas/pagos.py`):
+        un dict de lambdas, una por columna, sobre la misma tupla
+        (instancia, concepto, afectación) que ya arma `actualizar`."""
+        claves = {
+            0: lambda f: f[1]["Nombre"] if f[1] else "",
+            1: lambda f: (f[1]["Categoria"] if f[1] else "") or "",
+            2: lambda f: f[2],
+            3: lambda f: f[0]["MedioPago"] or "",
+            4: lambda f: f[0]["Periodo"],
+            5: lambda f: f[0]["Vencimiento"] or "",
+            6: lambda f: f[0]["Importe"] or 0,
+            7: lambda f: f[0]["Estado"],
+        }
+        return claves[columna]
+
     def _color_fila(self, instancia: sqlite3.Row, hoy: date) -> str | None:
         """Color de fondo pedido explícitamente por la clienta: gris
         para lo Abonado/Archivado (sin importar el vencimiento); si
@@ -684,7 +799,10 @@ class _PanelCargaControl(QWidget):
             (i, conceptos.get(i["IdConcepto"]), texto_afectacion(self.conn, conceptos[i["IdConcepto"]]) if i["IdConcepto"] in conceptos else "?")
             for i in instancias
         ]
+        filas = [f for f in filas if self._coincide_filtros(f)]
         filas.sort(key=self._clave_orden_instancia)
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden_columna(self._orden.columna), reverse=not self._orden.ascendente)
         self._registros = [f[0] for f in filas]
 
         hoy = fecha_actual(self.conn)
@@ -714,6 +832,7 @@ class _PanelCargaControl(QWidget):
                     celda.setBackground(fondo)
                     celda.setForeground(letra)
         self._actualizar_botones_seleccion()
+        self._sincronizar_ancho_filtros()
 
     def _editar_registro_seleccionado(self) -> None:
         instancia = self._fila_seleccionada_instancia()
@@ -798,6 +917,11 @@ class _PanelCargaControl(QWidget):
         CLAUDE.md, "F5... reinicia desde cero, distinto de showEvent")."""
         self._resetear_formulario()
         self.tabla.clearSelection()
+        self._orden.reiniciar()
+        for campo in self.filtros_columna.values():
+            campo.blockSignals(True)
+            campo.clear()
+            campo.blockSignals(False)
         self.actualizar()
         self.campo_nombre.setFocus()
 

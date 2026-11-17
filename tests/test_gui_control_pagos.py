@@ -362,6 +362,109 @@ def test_anchos_de_columna_categoria_medio_pago_e_importe_se_ajustan_sin_tocar_n
     assert panel.tabla.columnWidth(panel._COL_IMPORTE) == _ANCHO_IMPORTE_CARGA_CONTROL
 
 
+def test_click_en_encabezado_ordena_por_esa_columna_y_el_segundo_click_invierte(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, nombre="Zeta")
+    _crear_concepto_unidad(panel, unidad, nombre="Alfa")
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(panel._COL_NOMBRE)
+    nombres = [panel.tabla.item(f, panel._COL_NOMBRE).text() for f in range(panel.tabla.rowCount())]
+    assert nombres == ["Alfa", "Zeta"]
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(panel._COL_NOMBRE)
+    nombres = [panel.tabla.item(f, panel._COL_NOMBRE).text() for f in range(panel.tabla.rowCount())]
+    assert nombres == ["Zeta", "Alfa"]
+
+
+def test_f5_reiniciar_vuelve_al_orden_por_defecto(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, nombre="Zeta")
+    _crear_concepto_unidad(panel, unidad, nombre="Alfa")
+    panel.tabla.horizontalHeader().sectionClicked.emit(panel._COL_NOMBRE)
+
+    panel.reiniciar()
+
+    assert panel._orden.columna is None
+
+
+def test_filtros_por_columna_acotan_la_tabla_sin_distinguir_acentos_ni_mayusculas(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, nombre="Edenor")
+    _crear_concepto_unidad(panel, unidad, nombre="AYSA")
+
+    panel.filtros_columna[panel._COL_NOMBRE].setText("EDÉNOR")
+    assert panel.tabla.rowCount() == 1
+    assert panel.tabla.item(0, panel._COL_NOMBRE).text() == "Edenor"
+
+
+def test_filtros_por_columna_se_combinan_entre_si(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, nombre="Edenor")
+    _crear_concepto_unidad(panel, unidad, nombre="AYSA")
+    panel.combo_medio_pago.setCurrentText("Transferencia")
+    panel.campo_nombre.setText("Expensas")
+    panel._crear()
+
+    panel.filtros_columna[panel._COL_CATEGORIA].setText("Servicios")
+    panel.filtros_columna[panel._COL_MEDIO_PAGO].setText("Transferencia")
+    assert panel.tabla.rowCount() == 0  # Edenor/AYSA no tienen ese medio de pago
+
+
+def test_boton_reiniciar_filtros_los_vuelve_a_su_estado_natural(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, nombre="Edenor")
+    _crear_concepto_unidad(panel, unidad, nombre="AYSA")
+    panel.filtros_columna[panel._COL_NOMBRE].setText("Edenor")
+    assert panel.tabla.rowCount() == 1
+
+    panel.boton_reiniciar_filtros.click()
+
+    assert panel.tabla.rowCount() == 2
+    assert all(not campo.text() for campo in panel.filtros_columna.values())
+
+
+def test_f5_reiniciar_tambien_limpia_los_filtros_por_columna(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, nombre="Edenor")
+    _crear_concepto_unidad(panel, unidad, nombre="AYSA")
+    panel.filtros_columna[panel._COL_NOMBRE].setText("Edenor")
+
+    panel.reiniciar()
+
+    assert panel.tabla.rowCount() == 2
+    assert all(not campo.text() for campo in panel.filtros_columna.values())
+
+
+def test_anchos_de_filtros_quedan_sincronizados_con_las_columnas_reales(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1500, 850)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad)
+
+    for columna, campo in panel.filtros_columna.items():
+        assert campo.width() == panel.tabla.columnWidth(columna)
+    assert panel.boton_reiniciar_filtros.width() == (
+        panel.tabla.columnWidth(panel._COL_IMPORTE) + panel.tabla.columnWidth(panel._COL_ESTADO)
+    )
+
+    pantalla.resize(1800, 850)
+    for columna, campo in panel.filtros_columna.items():
+        assert campo.width() == panel.tabla.columnWidth(columna)
+
+
 def test_catalogos_anidados_de_afectacion_funcionan(qtbot, conn):
     pantalla = PantallaControlPagos(conn)
     qtbot.addWidget(pantalla)

@@ -952,6 +952,50 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   limpio, resto de la suite de control de pagos sin regresiones (57
   tests).
 
+  **Ronda siguiente, dos pedidos más sobre esta misma tabla:**
+
+  - **Ordenable por click en el encabezado.** `self._orden = OrdenTabla
+    (self.tabla, self.actualizar)` (mismo mecanismo que ya usan las
+    tablas de Pagos, `app/gui/widgets/orden_tabla.py`): un click ordena
+    por esa columna, otro click invierte el sentido. El orden por
+    defecto (los tres grupos de `_clave_orden_instancia`) se sigue
+    aplicando siempre primero; si hay una columna elegida por click, se
+    aplica ENCIMA (`_clave_orden_columna`, sort estable). `reiniciar()`
+    (F5) llama a `self._orden.reiniciar()`, mismo criterio que el resto
+    del sistema.
+  - **Fila de filtros por columna arriba de la tabla.** Un `QLineEdit`
+    por columna de Nombre a Vencimiento incluido (texto libre, sin
+    distinguir mayúsculas ni acentos — mismo criterio que "Buscar" de
+    los catálogos genéricos) y, sobre Importe/Estado, un botón
+    "Reiniciar filtros" en vez de más filtros. Es un widget PROPIO (una
+    fila en su propio `QHBoxLayout`, arriba de la tabla dentro de un
+    `QVBoxLayout` compartido) y no una fila de la `QTableWidget` en sí —
+    así no hace falta pelear con la selección ni con el orden por click
+    de la tabla. El ancho de cada campo se sincroniza con el de su
+    columna real (`_sincronizar_ancho_filtros`, incluido un espaciador
+    al ancho del encabezado vertical de filas para que el primer campo
+    arranque justo donde arranca "Nombre") — se llama al armar la
+    pantalla, en cada `actualizar()` (las columnas en `ResizeToContents`
+    pueden cambiar de ancho con los datos) y cada vez que el usuario
+    redimensiona una columna (`header.sectionResized`); verificado con
+    captura y medición programática que la sincronización también
+    sobrevive a un resize de ventana completo. El filtrado se aplica
+    sobre la lista de Python ANTES de ordenar y poblar la tabla (mismo
+    criterio que ya usa "Historial" con sus combos) — F5 y "Reiniciar
+    filtros" limpian los seis campos por igual.
+
+  Tests nuevos en `tests/test_gui_control_pagos.py`:
+  `test_click_en_encabezado_ordena_por_esa_columna_y_el_segundo_click_
+  invierte`, `test_f5_reiniciar_vuelve_al_orden_por_defecto`,
+  `test_filtros_por_columna_acotan_la_tabla_sin_distinguir_acentos_ni_
+  mayusculas`, `test_filtros_por_columna_se_combinan_entre_si`,
+  `test_boton_reiniciar_filtros_los_vuelve_a_su_estado_natural`,
+  `test_f5_reiniciar_tambien_limpia_los_filtros_por_columna`,
+  `test_anchos_de_filtros_quedan_sincronizados_con_las_columnas_
+  reales`. pyflakes limpio, suite completa de Control de pagos/Pagos/
+  Avance de mes sin regresiones nuevas (238 passed, los mismos 3
+  fallos conocidos del reloj del sandbox).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
