@@ -325,6 +325,29 @@ def test_avanzar_mes_elimina_fechas_especiales_del_periodo_cerrado_y_anteriores(
     assert [f["IdFecha"] for f in restantes] == [id_futura]
 
 
+def test_avanzar_mes_archiva_instancias_de_control_pagos_no_abonadas_del_periodo_cerrado(conn):
+    """Pedido explícito de la clienta: al avanzar de mes, todo lo que
+    quedó Pendiente del período que se cierra se archiva solo — lo
+    Abonado no se toca."""
+    from app.negocio.control_pagos import crear_concepto, generar_instancias_periodo, marcar_abonada
+
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
+    id_pendiente = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_abonado = crear_concepto(conn, nombre="AYSA", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-08")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia_abonada = repo.listar(IdConcepto=id_abonado, Periodo="2026-08")[0]
+    marcar_abonada(conn, instancia_abonada["IdInstancia"])
+
+    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+
+    assert resumen.instancias_control_pagos_archivadas == 1
+    instancia_pendiente = repo.listar(IdConcepto=id_pendiente, Periodo="2026-08")[0]
+    assert instancia_pendiente["Estado"] == "Archivado"
+    assert repo.obtener(instancia_abonada["IdInstancia"])["Estado"] == "Abonado"
+
+
 def test_avanzar_mes_limpia_liquidaciones_simuladas_con_mas_de_3_meses(conn, tmp_path):
     obtener_repositorio(conn, "Configuracion").actualizar(1, CarpetaBaseArchivos=str(tmp_path))
     _fijar_periodo_actual(conn, "2026-08")  # controla `fecha_actual`, de donde sale el límite de retención

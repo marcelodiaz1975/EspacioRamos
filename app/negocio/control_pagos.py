@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from app.negocio.dias import sumar_meses
 from app.negocio.gastos_operativos import gasto_en_conflicto
 from app.repositorio.registro import obtener_repositorio
 
@@ -157,7 +158,9 @@ def archivar_instancia(conn: sqlite3.Connection, id_instancia: int) -> None:
     """Cierra una instancia sin datos cargados ese mes ("no tengo
     vencimientos de ese concepto este mes") — habilitado solo cuando no
     hay Vencimiento ni Importe cargados, para no poder archivar algo que
-    en realidad hay que pagar."""
+    en realidad hay que pagar. Botón manual de una fila puntual —
+    distinto de `archivar_pendientes_del_periodo` (el barrido automático
+    del cierre de mes, que archiva sin este chequeo)."""
     instancia = obtener_repositorio(conn, "InstanciaControlPago").obtener(id_instancia)
     if instancia is None:
         raise ValueError(f"No existe la instancia #{id_instancia}")
@@ -166,20 +169,90 @@ def archivar_instancia(conn: sqlite3.Connection, id_instancia: int) -> None:
     obtener_repositorio(conn, "InstanciaControlPago").actualizar(id_instancia, Estado="Archivado")
 
 
+def archivar_pendientes_del_periodo(conn: sqlite3.Connection, periodo: str) -> int:
+    """Pedido explícito de la clienta: al avanzar de mes, todo concepto
+    del período que se cierra y que no quedó marcado como Abonado se
+    archiva solo — a diferencia de `archivar_instancia` (el botón manual
+    de una fila, que exige vencimiento/importe vacíos), este barrido NO
+    mira si hay datos cargados: el período ya se cierra de cualquier
+    forma, y lo que se archivó por descuido se puede reabrir después
+    desde "Historial" con "Editar registro". Pensado para llamarse desde
+    `app.negocio.avance_mes.avanzar_mes`. Devuelve la cantidad de
+    instancias archivadas."""
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    pendientes = [i for i in repo.listar(Periodo=periodo) if i["Estado"] == "Pendiente"]
+    for instancia in pendientes:
+        repo.actualizar(instancia["IdInstancia"], Estado="Archivado")
+    return len(pendientes)
+
+
 def marcar_abonada(conn: sqlite3.Connection, id_instancia: int) -> None:
     obtener_repositorio(conn, "InstanciaControlPago").actualizar(id_instancia, Estado="Abonado")
 
 
+def duplicar_para_periodo_proximo(conn: sqlite3.Connection, id_instancia: int) -> int:
+    """Pedido explícito de la clienta: "por si ya tengo la información
+    para adelantar" un concepto del período en curso — duplica la
+    instancia elegida al período siguiente, EN BLANCO (solo con el
+    Medio de pago sugerido del concepto, igual que `generar_instancias_
+    periodo`) para que se cargue a mano el vencimiento/importe real ya
+    conocido. Nunca copia Vencimiento/Importe de la instancia de
+    origen — confirmado explícitamente con la clienta. Devuelve el
+    `IdInstancia` nuevo."""
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia = repo.obtener(id_instancia)
+    if instancia is None:
+        raise ValueError(f"No existe la instancia #{id_instancia}")
+    periodo_proximo = sumar_meses(instancia["Periodo"], 1)
+    if repo.listar(IdConcepto=instancia["IdConcepto"], Periodo=periodo_proximo):
+        raise ValueError("Ya existe un registro de este concepto para el período próximo.")
+    concepto = obtener_repositorio(conn, "ConceptoControlPago").obtener(instancia["IdConcepto"])
+    return repo.crear(
+        IdConcepto=instancia["IdConcepto"], Periodo=periodo_proximo, Estado="Pendiente",
+        MedioPago=concepto["MedioPagoSugerido"] if concepto else None,
+    )
+
+
+def eliminar_instancia_duplicada(conn: sqlite3.Connection, id_instancia: int) -> None:
+    """Deshace un "Duplicar para período próximo" hecho por error — a
+    diferencia de `archivar_instancia`/`archivar_pendientes_del_periodo`
+    (que solo cambian el Estado), esto borra la fila entera: no es
+    historial real, es un duplicado que nunca debió existir. Si ya
+    había sincronizado un `GastoOperativo` (Importe cargado antes de
+    borrarla), también se borra ese gasto — mismo criterio que
+    `sincronizar_gasto_operativo` cuando el Importe se vacía."""
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia = repo.obtener(id_instancia)
+    if instancia is None:
+        raise ValueError(f"No existe la instancia #{id_instancia}")
+    concepto = obtener_repositorio(conn, "ConceptoControlPago").obtener(instancia["IdConcepto"])
+    if concepto is not None and concepto["TipoAfectacion"] in _TIPOS_AFECTACION_ESPACIO:
+        repo_gasto = obtener_repositorio(conn, "GastoOperativo")
+        existente = next(
+            (
+                g for g in repo_gasto.listar(Periodo=instancia["Periodo"], Concepto=concepto["Nombre"])
+                if g["Origen"] == "Importado"
+            ),
+            None,
+        )
+        if existente is not None:
+            repo_gasto.eliminar(existente["IdGasto"])
+    repo.eliminar(id_instancia)
+
+
 def actualizar_instancia(
     conn: sqlite3.Connection, id_instancia: int, *,
-    vencimiento=_SIN_CAMBIOS, importe=_SIN_CAMBIOS, medio_pago=_SIN_CAMBIOS,
+    vencimiento=_SIN_CAMBIOS, importe=_SIN_CAMBIOS, medio_pago=_SIN_CAMBIOS, estado=_SIN_CAMBIOS,
 ) -> None:
-    """Edita vencimiento/monto (y opcionalmente el medio de pago) de UNA
-    instancia puntual — distinto de `editar_concepto`. Cada parámetro
-    que se deja sin pasar queda sin tocar (`_SIN_CAMBIOS`); pasarlo en
-    `None` explícitamente SÍ lo vacía (ej. borrar un vencimiento ya
-    cargado). Sincroniza `GastoOperativo` después, si corresponde (ver
-    `sincronizar_gasto_operativo`)."""
+    """Edita vencimiento/monto (y opcionalmente el medio de pago y/o el
+    Estado) de UNA instancia puntual — distinto de `editar_concepto`.
+    Cada parámetro que se deja sin pasar queda sin tocar (`_SIN_
+    CAMBIOS`); pasarlo en `None` explícitamente SÍ lo vacía (ej. borrar
+    un vencimiento ya cargado). `estado` lo usa "Editar registro" de la
+    solapa "Historial" (vencimiento+importe+estado juntos, para poder
+    reabrir algo que el cierre de mes archivó de más). Sincroniza
+    `GastoOperativo` después, si corresponde (ver `sincronizar_gasto_
+    operativo`)."""
     campos = {}
     if vencimiento is not _SIN_CAMBIOS:
         campos["Vencimiento"] = vencimiento
@@ -187,6 +260,10 @@ def actualizar_instancia(
         campos["Importe"] = importe
     if medio_pago is not _SIN_CAMBIOS:
         campos["MedioPago"] = medio_pago
+    if estado is not _SIN_CAMBIOS:
+        if estado not in ESTADOS_INSTANCIA:
+            raise ValueError(f"Estado inválido: {estado!r}")
+        campos["Estado"] = estado
     if campos:
         obtener_repositorio(conn, "InstanciaControlPago").actualizar(id_instancia, **campos)
     sincronizar_gasto_operativo(conn, id_instancia)

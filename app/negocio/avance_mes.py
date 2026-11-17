@@ -55,6 +55,7 @@ from app.negocio.archivos_generados import (
     vaciar_carpeta,
 )
 from app.negocio.backup import generar_backup
+from app.negocio.control_pagos import archivar_pendientes_del_periodo
 from app.negocio.dias import (
     fecha_actual, parsear_periodo, periodo_operativo_actual, primer_dia_mes, sumar_meses, ultimo_dia_mes,
 )
@@ -81,6 +82,7 @@ class ResumenAvanceMes:
     ofertas_eliminadas: int = 0
     snapshots_operacion_importante_eliminados: int = 0
     fechas_especiales_antiguas_eliminadas: int = 0
+    instancias_control_pagos_archivadas: int = 0
 
 
 def _traspasar_saldos(conn: sqlite3.Connection) -> int:
@@ -328,6 +330,11 @@ def avanzar_mes(
         conn, fecha_actual(conn),
     )
     resumen.fechas_especiales_antiguas_eliminadas = _limpiar_fechas_especiales_antiguas(conn, periodo_cerrado)
+    # Módulo extendido ME1 "Control de pagos" (pedido explícito de la
+    # clienta): todo concepto del período que se cierra que no quedó
+    # marcado como Abonado se archiva solo — se puede reabrir después
+    # desde "Historial" > "Editar registro" si hace falta corregirlo.
+    resumen.instancias_control_pagos_archivadas = archivar_pendientes_del_periodo(conn, periodo_cerrado)
     # DC-06 §6 (hallazgo de la auditoría DC-01/DC-10): retención de 12
     # meses para los snapshots "de operación importante" (ver
     # `aumentos.confirmar_aumento`) — los mensuales de siempre no se

@@ -752,6 +752,119 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   Débito), `test_crear_cargo_especial_muestra_alerta_final_de_exito`
   (nuevo).
 
+- **Control de pagos (ME1): rediseño completo de "Carga y control".**
+  Hecho. Pedido explícito de la clienta, 17 puntos en un mismo mensaje
+  sobre esta sola solapa. Dos ambigüedades consultadas antes de
+  empezar (`AskUserQuestion`): la idea de "tres columnas arriba" la
+  retiró ella misma ("me olvidé de borrarlo, era una idea y luego me
+  arrepentí") — queda solo "que el primer elemento arranque en el
+  pixel 85, y de ahí baje el resto", mismo mecanismo de siempre (ver
+  "Jerarquía de títulos" más arriba), sin coordinar con una segunda
+  columna porque acá no la hay. Y "Duplicar para período próximo"
+  confirmado en blanco (solo Medio de pago, igual que un concepto
+  nuevo) — nunca copia Vencimiento/Importe de la fila de origen.
+
+  - **Avance de mes archiva lo no abonado.** `app.negocio.control_
+    pagos.archivar_pendientes_del_periodo(conn, periodo)` (nueva):
+    archiva TODA instancia Pendiente de `periodo`, tenga o no datos
+    cargados — a diferencia de `archivar_instancia` (el botón manual
+    de una fila, que sigue exigiendo vencimiento/importe vacíos, sin
+    tocar). Se puede reabrir después desde "Historial" con "Editar
+    registro". Llamada desde `avance_mes.avanzar_mes` (nuevo campo
+    `ResumenAvanceMes.instancias_control_pagos_archivadas`), junto a
+    la limpieza de fechas especiales del período cerrado.
+  - **Columna "Período" (yyyy-mm) después de "Medio de pago".** La
+    tabla de "Carga y control" ahora muestra a la vez las instancias
+    del período actual Y las del período próximo (si se duplicó
+    alguna, ver abajo) — sin esta columna no se podrían distinguir.
+  - **Pixel 85 + achique del 15% del panel del formulario.**
+    `_ALTO_TITULO_CARGA_CONTROL = 7` (mismo valor medido que Reservas
+    regulares/aisladas y los paneles de Novedades — confirmado
+    programáticamente offscreen: con ese valor, el primer elemento
+    queda al mismo píxel relativo, ±1px, que la referencia aprobada).
+    `_ANCHO_PANEL_CARGA_CONTROL`/`_ANCHO_CAMPO_CARGA_CONTROL` son
+    `_ANCHO_PANEL_IZQUIERDA`/`_ANCHO_CAMPO` al 85% (238px/204px) —
+    constantes propias de esta pantalla, no se tocó el panel de
+    filtros de "Historial" (comparte las constantes genéricas, pero
+    no estaba pedido achicarlo). Verificado con captura offscreen que
+    ningún botón queda con el texto cortado al nuevo ancho.
+  - **Campos libres fuera de la UI.** Las tres `QLineEdit` y la
+    lectura/escritura de `CampoLibre1/2/3` en `_crear` se sacaron del
+    todo de este archivo — las columnas siguen en el schema, sin uso.
+  - **Botones reordenados y nuevos, todos habilitados solo con
+    selección.** Orden final de la columna 1: Nombre/Categoría/
+    Afectación/Medio de pago/Vencimiento/Importe, "Crear concepto"
+    (subido al lugar que dejaron los campos libres, sin la línea
+    divisoria que había antes), "Editar concepto seleccionado", "Dar
+    de baja concepto seleccionado", "Duplicar para período próximo"
+    (nuevo), "Eliminar registro duplicado" (nuevo), línea divisoria,
+    "Editar registro"/"Marcar abonado"/"Archivar registro" (bajados
+    acá desde el final de cada fila de la tabla — ya no hay
+    `cellWidget` por fila). `_actualizar_botones_seleccion` centraliza
+    el habilitado: todos requieren una fila seleccionada, y además
+    "Duplicar..." solo sobre una fila del período ACTUAL, "Eliminar
+    registro duplicado" solo sobre una del período PRÓXIMO (pedido
+    explícito: "solo se pueden duplicar registros para el período
+    próximo nada más"), "Marcar abonado"/"Archivar registro" con la
+    misma condición de Estado/datos cargados que ya tenían como botón
+    de fila. `app.negocio.control_pagos.duplicar_para_periodo_
+    proximo`/`eliminar_instancia_duplicada` (nuevas) — la segunda
+    también borra el `GastoOperativo` sincronizado si lo había, mismo
+    criterio que vaciar un Importe.
+  - **Ancho de tabla repartido.** Al sacar las tres columnas de botón,
+    el `Stretch` que ya tenían Nombre/Categoría/Afectación/Medio de
+    pago absorbe todo el ancho liberado solo — no hizo falta ningún
+    cálculo manual. Período/Vencimiento/Importe/Estado quedan en
+    `ResizeToContents`.
+  - **Colores de fila por vencimiento + gris para lo resuelto.**
+    `_PanelCargaControl._color_fila`: gris (`COLOR_GRIS`, nueva
+    constante en `estilos.py`, mismo hex que `mensajeria._COLOR_
+    FONDO["gris"]`) para Abonado/Archivado sin mirar el vencimiento;
+    si Pendiente, violeta (`COLOR_VIOLETA`, nueva constante, mismo
+    criterio) si ya venció, rojo si vence hoy, amarillo si vence
+    mañana, verde si faltan 2 días o más, blanco si no tiene
+    vencimiento cargado. Letra blanca salvo sobre amarillo (letra
+    negra) — mismo criterio exacto que Centro de mensajería.
+  - **Orden de filas en tres grupos.** `_clave_orden_instancia`:
+    arriba las Pendientes sin vencimiento O sin importe (por Nombre,
+    Afectación); en el medio las Pendientes con ambos datos (por
+    Período más próximo, Vencimiento, Nombre, Afectación); al fondo,
+    en gris, las Abonadas/Archivadas — "parecido a lo que se hace con
+    el centro de mensajería".
+  - **Alertas de éxito en cada acción** (crear/editar concepto, dar de
+    baja, duplicar, eliminar duplicado, editar/marcar abonado/archivar
+    registro) — antes varias de estas acciones no avisaban nada.
+  - **F5 reinicia la solapa.** `_PanelCargaControl.reiniciar()`
+    (nuevo): resetea el formulario (a diferencia de `showEvent`, que
+    no lo toca), limpia la selección de la tabla, refresca y devuelve
+    el foco a "Nombre" — mismo criterio general documentado más arriba
+    ("F5... reinicia desde cero, distinto de showEvent").
+  - **"Editar registro" en "Historial".** Botón nuevo debajo de los
+    cuatro filtros, habilitado solo con una fila seleccionada; abre
+    `_DialogoEditarInstancia(..., incluir_estado=True)` — mismo diálogo
+    que ya existía, con un combo de Estado sumado solo para este caso
+    (la "Editar registro" de "Carga y control" no lo necesita, ahí
+    "Marcar abonado"/"Archivar registro" están aparte). `app.negocio.
+    control_pagos.actualizar_instancia` suma el parámetro `estado`
+    (mismo patrón `_SIN_CAMBIOS` que ya tenía para vencimiento/importe/
+    medio de pago), validado contra `ESTADOS_INSTANCIA`.
+
+  Verificado con captura offscreen (`Carga y control` con filas en
+  cada color/bucket, incluida una duplicada para el período próximo, y
+  `Historial` con "Editar registro" habilitado) y con el mismo script
+  de medición programática usado para confirmar el pixel 85 contra
+  Reservas regulares como referencia. Tests nuevos: 8 en
+  `tests/test_control_pagos.py` (archivar_pendientes_del_periodo,
+  duplicar_para_periodo_proximo ×2, eliminar_instancia_duplicada,
+  actualizar_instancia con estado ×2), 1 en `tests/test_avance_mes.py`,
+  8 en `tests/test_gui_control_pagos.py` (columna Período, botones sin
+  selección, duplicar/eliminar duplicado, gris al fondo, los cuatro
+  colores de vencimiento, reiniciar, Editar registro de Historial) —
+  más 3 tests existentes ajustados a la nueva API (los botones de fila
+  pasaron a vivir en la columna 1). pyflakes limpio en los 4 archivos
+  tocados. Suite completa sin regresiones nuevas (los mismos ~10
+  fallos conocidos del sandbox, ver más abajo).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

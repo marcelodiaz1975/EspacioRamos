@@ -5,9 +5,12 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.control_pagos import (
     actualizar_instancia,
     archivar_instancia,
+    archivar_pendientes_del_periodo,
     crear_concepto,
     dar_de_baja_concepto,
+    duplicar_para_periodo_proximo,
     editar_concepto,
+    eliminar_instancia_duplicada,
     generar_instancias_periodo,
     marcar_abonada,
     texto_afectacion,
@@ -198,6 +201,100 @@ def test_editar_concepto_cambia_afectacion_y_limpia_la_anterior(conn, unidad):
     assert concepto["TipoAfectacion"] == "Edificio"
     assert concepto["IdEdificio"] == id_edificio
     assert concepto["IdUnidad"] is None
+
+
+def test_archivar_pendientes_del_periodo_archiva_sin_mirar_datos_cargados(conn, unidad):
+    """A diferencia de `archivar_instancia` (el botón manual, que exige
+    vencimiento/importe vacíos), el barrido automático del cierre de
+    mes archiva SIEMPRE lo que quedó Pendiente, con o sin datos
+    cargados — y no toca lo que ya está Abonado."""
+    id_con_datos = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_sin_datos = crear_concepto(conn, nombre="AYSA", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_abonado = crear_concepto(conn, nombre="ARBA", categoria="Impuestos", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia_con_datos = repo.listar(IdConcepto=id_con_datos, Periodo="2026-11")[0]
+    instancia_abonada = repo.listar(IdConcepto=id_abonado, Periodo="2026-11")[0]
+    actualizar_instancia(conn, instancia_con_datos["IdInstancia"], vencimiento="2026-11-10", importe=1000)
+    marcar_abonada(conn, instancia_abonada["IdInstancia"])
+
+    cantidad = archivar_pendientes_del_periodo(conn, "2026-11")
+
+    assert cantidad == 2
+    assert repo.obtener(instancia_con_datos["IdInstancia"])["Estado"] == "Archivado"
+    instancia_sin_datos = repo.listar(IdConcepto=id_sin_datos, Periodo="2026-11")[0]
+    assert repo.obtener(instancia_sin_datos["IdInstancia"])["Estado"] == "Archivado"
+    assert repo.obtener(instancia_abonada["IdInstancia"])["Estado"] == "Abonado"
+
+
+def test_duplicar_para_periodo_proximo_crea_en_blanco_solo_con_medio_de_pago(conn, unidad):
+    """Pedido explícito de la clienta (confirmado): nunca copia
+    Vencimiento/Importe de la instancia de origen, solo el Medio de
+    pago sugerido del concepto — igual que `generar_instancias_periodo`."""
+    id_concepto = crear_concepto(
+        conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad,
+        medio_pago_sugerido="CA Bco Hipotecario",
+    )
+    generar_instancias_periodo(conn, "2026-11")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia = repo.listar(IdConcepto=id_concepto, Periodo="2026-11")[0]
+    actualizar_instancia(conn, instancia["IdInstancia"], vencimiento="2026-11-10", importe=5000)
+
+    id_nueva = duplicar_para_periodo_proximo(conn, instancia["IdInstancia"])
+
+    nueva = repo.obtener(id_nueva)
+    assert nueva["Periodo"] == "2026-12"
+    assert nueva["Estado"] == "Pendiente"
+    assert nueva["MedioPago"] == "CA Bco Hipotecario"
+    assert nueva["Vencimiento"] is None
+    assert nueva["Importe"] is None
+
+
+def test_duplicar_para_periodo_proximo_rechaza_si_ya_existe(conn, unidad):
+    id_concepto = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    generar_instancias_periodo(conn, "2026-12")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia = repo.listar(IdConcepto=id_concepto, Periodo="2026-11")[0]
+
+    with pytest.raises(ValueError):
+        duplicar_para_periodo_proximo(conn, instancia["IdInstancia"])
+
+
+def test_eliminar_instancia_duplicada_borra_la_fila_y_su_gasto_sincronizado(conn, unidad):
+    id_concepto = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia = repo.listar(IdConcepto=id_concepto, Periodo="2026-11")[0]
+    id_duplicada = duplicar_para_periodo_proximo(conn, instancia["IdInstancia"])
+    actualizar_instancia(conn, id_duplicada, importe=1000)
+    assert obtener_repositorio(conn, "GastoOperativo").listar(Periodo="2026-12", Concepto="Edenor") != []
+
+    eliminar_instancia_duplicada(conn, id_duplicada)
+
+    assert repo.obtener(id_duplicada) is None
+    assert obtener_repositorio(conn, "GastoOperativo").listar(Periodo="2026-12", Concepto="Edenor") == []
+
+
+def test_actualizar_instancia_estado_invalido_rechaza(conn, unidad):
+    id_concepto = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    instancia = obtener_repositorio(conn, "InstanciaControlPago").listar(IdConcepto=id_concepto, Periodo="2026-11")[0]
+
+    with pytest.raises(ValueError):
+        actualizar_instancia(conn, instancia["IdInstancia"], estado="No existe")
+
+
+def test_actualizar_instancia_estado_reabre_una_instancia_archivada(conn, unidad):
+    id_concepto = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia = repo.listar(IdConcepto=id_concepto, Periodo="2026-11")[0]
+    archivar_instancia(conn, instancia["IdInstancia"])
+
+    actualizar_instancia(conn, instancia["IdInstancia"], estado="Pendiente")
+
+    assert repo.obtener(instancia["IdInstancia"])["Estado"] == "Pendiente"
 
 
 def test_gasto_manual_existente_no_se_pisa_al_sincronizar(conn, unidad):
