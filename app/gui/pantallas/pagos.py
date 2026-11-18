@@ -438,7 +438,7 @@ class _PanelRegistrarPago(QWidget):
         self.tabla.setColumnCount(10)
         self.tabla.setHorizontalHeaderLabels([
             "Fecha de carga", "Profesional", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
-            "Saldo antes del pago", "Saldo después del pago", "Registro modificado", "Es ajuste",
+            "Saldo previo", "Nuevo saldo", "Registro modificado", "Es ajuste",
         ])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -571,8 +571,8 @@ class _PanelRegistrarPago(QWidget):
             self.tabla.setItem(i, 9, item_centrado("Sí" if r["EsAjuste"] else "No"))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(1, max(self.tabla.columnWidth(1), _ANCHO_COL_PROFESIONAL))
-        # Pedido explícito de la clienta: "Monto"/"Saldo antes del pago"/
-        # "Saldo después del pago" al mismo ancho que "Registro
+        # Pedido explícito de la clienta: "Monto"/"Saldo previo"/
+        # "Nuevo saldo" al mismo ancho que "Registro
         # modificado" — se toma ESE ancho ya calculado por
         # `resizeColumnsToContents()` (columna 8) como ancho común para
         # las tres, igual que el resto del sistema usa una columna de
@@ -1303,7 +1303,7 @@ class _PanelEstadoCuentaPagos(QWidget):
         self.tabla.setColumnCount(9)
         self.tabla.setHorizontalHeaderLabels([
             "Fecha de carga", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
-            "Saldo antes del pago", "Saldo después del pago", "Registro modificado", "Es ajuste",
+            "Saldo previo", "Nuevo saldo", "Registro modificado", "Es ajuste",
         ])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         splitter.addWidget(self.tabla)

@@ -996,6 +996,183 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   Avance de mes sin regresiones nuevas (238 passed, los mismos 3
   fallos conocidos del reloj del sandbox).
 
+- **General: confirmar salida con botones en español.** Hecho. La
+  clienta notó que el cartel de "¿Seguro que querés salir?" (ya
+  agregado en una ronda anterior, ver #31 en la lista de tareas) seguía
+  mostrando "Yes"/"No" en inglés en vez de "Sí"/"No" — Qt no trae
+  traducidas sus propias traducciones de botones estándar en este
+  entorno. `VentanaPrincipal.closeEvent` pasa a usar `preguntar_si_no`
+  (`app/gui/dialogos.py`, ya existía para "Restablecer descuentos" en
+  Pagos — construye el `QMessageBox` a mano con botones "Sí"/"No"
+  propios vía `addButton(..., ButtonRole.YesRole/NoRole)`, sin depender
+  de ninguna traducción de Qt) en vez de `QMessageBox.question(...,
+  StandardButton.Yes | StandardButton.No)`. Test nuevo en
+  `tests/test_main_window.py`:
+  `test_cerrar_con_la_cruz_usa_botones_en_espanol_no_yes_no`.
+
+- **Profesionales: fila "Saldo total" combinado en Editar/Nuevo.**
+  Hecho. Mismo criterio ya aplicado en Pagos (ver "Saldo previo"/
+  "Nuevo saldo" más abajo): en el diálogo de alta/edición de un
+  profesional, `SaldoCuentaAnterior` y `SaldoCuentaActual` siguen
+  siendo dos campos EDITABLES por separado (no se tocó su mecánica:
+  siguen siendo dos columnas reales de la base, cada una con su propio
+  ciclo de pago/traspaso de mes — ver `avance_mes._traspasar_saldos`),
+  pero se les agrega abajo una tercera fila de solo lectura, "Saldo
+  total" (`_al_abrir_dialogo`, `app/gui/pantallas/profesionales.py`),
+  que muestra la suma de los dos en vivo (se actualiza con cada
+  `textChanged`/`valueChanged` de los dos campos editables) — para que
+  se pueda ver de un vistazo "lo que me debe en total" sin tener que
+  sumar a mano. Test nuevo en `tests/test_profesionales.py`:
+  `test_dialogo_muestra_saldo_total_combinado_y_se_actualiza_en_vivo`.
+
+- **Pagos: las columnas de saldo se renombran a "Saldo previo"/"Nuevo
+  saldo".** Hecho. Pedido explícito de la clienta, "para simplificar",
+  sobre las dos columnas de la tabla de "Registrar pagos"/"Estado de
+  cuenta" que una ronda anterior había renombrado a "Saldo antes del
+  pago"/"Saldo después del pago" (ver más abajo en el historial de esta
+  misma sección) — el CÁLCULO combinado (`SaldoCuentaAnterior +
+  SaldoCuentaActual` antes/después de cada pago) no cambia, es
+  exactamente el mismo, solo cambia la etiqueta en las dos tablas
+  (`_PanelPagos`/`_PanelEstadoCuentaPagos`, `app/gui/pantallas/
+  pagos.py`). La etiqueta "Nuevo saldo" que ya existía ARRIBA del
+  formulario (la vista previa en vivo de un pago todavía no
+  registrado, `etiqueta_nuevo_saldo`) es una cosa aparte, de una ronda
+  bastante anterior, y queda con el mismo texto — coincide de nombre
+  con la columna nueva de la tabla pero son dos widgets sin relación,
+  no hubo que tocar nada ahí.
+
+  Se usó este mismo caso (Lic. Gabriela Icutza, $81.236 de saldo
+  anterior + $277.292 de la liquidación de noviembre, pago de $70.000)
+  para confirmar los números esperados: "Saldo previo" $358.528,
+  "Nuevo saldo" $288.528 — coincide exacto con el cálculo COMBINADO ya
+  implementado, sin tocar `registrar_pago`/`modificar_pago`/
+  `reconciliar_saldos_cruzados` (`app/negocio/pagos.py`) ni el cálculo
+  de liquidaciones (`calcular_liquidacion` sigue leyendo
+  `SaldoCuentaAnterior` en vivo, confirmado correcto por lectura de
+  código) — el desajuste que la clienta reportó en el saldo real de
+  Gabriela Icutza ($207.292 en vez de $288.528) ya estaba identificado
+  y cerrado en la ronda anterior como un resabio de datos (una
+  liquidación de diciembre acreditada de más por un bug YA arreglado
+  antes de esta ronda, corregida a mano por la clienta en Profesionales
+  — ver el bloque correspondiente más abajo) — no un bug de cálculo
+  vigente. No se hizo un barrido exhaustivo de la base real completa
+  más allá de ese caso puntual y el chequeo ya documentado de que no
+  hay otra fila con el mismo patrón.
+
+- **Control de pagos: rediseño completo de "Carga y control" en 4
+  columnas.** Hecho. Pedido explícito de la clienta sobre el layout de
+  la ronda anterior (un solo panel de formulario a la izquierda + tabla
+  a la derecha): pasa a 4 columnas de ancho IGUAL (`stretch=1` cada una
+  en un `QHBoxLayout` común, cada una un `QWidget` propio con
+  `objectName="panelSolapa"`) que abarcan todo el ancho de la pantalla,
+  con la tabla ahora DEBAJO de esas 4 columnas (no al costado — el
+  layout externo de `_PanelCargaControl` pasa de `QHBoxLayout` a
+  `QVBoxLayout`), escroleable (`QTableWidget` normal, sin
+  `QScrollArea` — ya no hace falta, al no competir por espacio con un
+  panel lateral).
+
+  - **Columna 1:** Nombre, Categoría, Afectación (sus dos combos) y
+    Medio de pago.
+  - **Columna 2:** Vencimiento, Importe, y el botón principal "Crear
+    concepto".
+  - **Columna 3:** los 4 botones secundarios sobre el CONCEPTO
+    seleccionado — "Editar concepto seleccionado"/"Dar de baja concepto
+    seleccionado"/"Duplicar para período próximo"/"Eliminar registro
+    duplicado" (bajados de la columna 1 de la ronda anterior, sin
+    cambiar su comportamiento).
+  - **Columna 4:** los filtros, en cascada MUTUA — Nombre/Categoría/
+    Afectación/Medio de pago no tienen jerarquía entre sí (a diferencia
+    de una cascada jerárquica real del sistema, ej. Localidad->
+    Edificio->Unidad en Estadísticas), así que cada combo se acota por
+    la selección VIGENTE de los otros tres, nunca la propia
+    (`_repoblar_filtros_cascada`/`_coincide_filtros` con el parámetro
+    `excepto`) — si se acotara también a sí mismo, elegir un valor
+    haría desaparecer las demás opciones de ESE mismo combo,
+    imposibilitando cambiar la selección. Sentinel `_TODOS` (mismo
+    criterio que `_PanelHistorialControlPagos._TODAS`) para "sin
+    filtro", nunca `None`. Buscador con el mismo mecanismo que el
+    selector de profesional (`habilitar_busqueda_profesional`, `app/
+    gui/widgets/selector_profesional.py` — confirmado genérico, no
+    depende de que el combo tenga datos de un profesional, solo de que
+    ya esté poblado con pares etiqueta/dato) — no cambia de ancho al
+    seleccionar ni al tipear, mismo `setFixedWidth` que el resto de los
+    campos. Reemplaza por completo la fila de filtros de texto libre
+    por columna que había armado la ronda anterior (sacados
+    `filtros_columna`, `_sincronizar_ancho_filtros`, `_coincide_
+    filtros` de texto libre, `_normalizar_filtro` y las constantes de
+    ancho que esa fila necesitaba).
+
+  **Pixel 85 en las 4 columnas:** cada columna usa el mismo margen
+  superior que ya tenían Reservas regulares/Novedades
+  (`_ALTO_TITULO_CARGA_CONTROL = 7`, sin cambios — confirmado que sigue
+  dando el mismo resultado relativo en esta estructura de 4 columnas
+  planas, sin el `QScrollArea` que envolvía el panel único de antes).
+  Verificado por medición programática (offscreen) que el primer
+  elemento de las 4 columnas — título o botón, lo que haya primero en
+  cada una — queda exactamente a la misma altura relativa al panel, y
+  que las 4 columnas quedan del mismo ancho entre sí (±1px por
+  redondeo del `stretch` al repartir el ancho total entre 4).
+
+  **Tabla:** vuelve a 8 columnas de datos (Nombre/Categoría/Afectación/
+  Medio de pago en `Stretch`, el resto en `ResizeToContents` — se
+  revierten los anchos fijos "robados" entre columnas de la ronda
+  anterior, que ya no hacen falta al no competir con un panel lateral
+  angosto) más 3 columnas de botón al final de cada fila — "Editar"
+  (antes "Editar registro"), "Abonar" (antes "Marcar abonado") y
+  "Archivar" (antes "Archivar registro"), mismas funciones y
+  comportamientos, vueltas a vivir por fila (`_armar_botones_fila`) en
+  vez de en la columna 1.
+
+  **Bug real encontrado y arreglado en el camino — abort del proceso al
+  cerrar, NO una falla de ningún test:** la primera versión de
+  `_armar_botones_fila` reusaba el botón YA EXISTENTE en esa posición
+  (fila_idx, columna) con `self.tabla.cellWidget(fila_idx, columna)`,
+  llamando `.clicked.disconnect()` + `.connect(...)` para apuntarlo a
+  la instancia nueva — el mismo patrón que tenía la primera
+  implementación de este módulo. Como `_clave_orden_instancia`/un
+  click de encabezado puede cambiar qué instancia cae en cada posición
+  entre un `actualizar()` y el siguiente, reconectar un botón visual
+  reciclado sobre una posición que before tenía una instancia distinta
+  corrompía silenciosamente el estado de Qt/shiboken — los 26 tests de
+  este archivo pasaban igual (ninguna aserción fallaba), pero el
+  PROCESO terminaba con `Fatal Python error: bool_dealloc` (refcount
+  corrupto) al cerrarse, solo en determinadas combinaciones de archivos
+  de test ejecutados en el mismo proceso (confirmado: solo este
+  archivo solo = aborta; combinado con `test_gui_pagos.py` = aborta;
+  combinado con `test_gui_placas.py` = NO aborta — la combinación
+  exacta de asignaciones/liberaciones de memoria es lo que determina si
+  se manifiesta, no algo determinable por lógica de la app).
+  Confirmado con el código ANTERIOR a esta ronda (sin estos botones por
+  fila) que el abort no existía antes — es una regresión de esta
+  ronda, no algo preexistente del sandbox. Arreglado creando un botón
+  `QPushButton` NUEVO en cada `actualizar()` (igual que ya se hace con
+  el resto de las celdas de la fila, un `QTableWidgetItem` nuevo cada
+  vez) en vez de reusar por posición — de paso, `self.tabla.
+  setRowCount(0)` antes de volver a crecer con `setRowCount(len(
+  filas))`, para que Qt suelte los cell widgets viejos de una en vez
+  de arrastrar alguno huérfano a una fila con otro contenido
+  (confirmado con captura offscreen: sin este `setRowCount(0)`, un
+  botón "Archivar" de una fila vieja quedaba pintado encimado contra la
+  esquina superior izquierda de la tabla al agregar conceptos uno por
+  uno — mismo tipo de huérfano ya documentado en Aumentos, "`setCellWidget`
+  NO borra solo el widget que reemplaza").
+
+  Tests reescritos/nuevos en `tests/test_gui_control_pagos.py` para la
+  nueva API (botones por fila vía `tabla.cellWidget(fila, columna)` en
+  vez de `panel.boton_editar_registro`/etc.; filtros vía los 4 combos
+  `combo_filtro_*` en vez de `filtros_columna`):
+  `test_las_cuatro_columnas_arrancan_a_la_misma_altura_y_con_igual_
+  ancho`, `test_boton_dar_de_baja_entra_en_el_ancho_fijo_compartido_
+  sin_cortar`, `test_filtro_categoria_acota_la_tabla_por_la_seleccion`,
+  `test_filtros_cascada_se_acotan_mutuamente_sin_acotar_la_propia_
+  seleccion`, `test_boton_reiniciar_filtros_vuelve_todos_los_combos_a_
+  todos`, `test_f5_reiniciar_tambien_reinicia_los_filtros_cascada` —
+  más los tests existentes de botones/colores/orden adaptados a la
+  nueva ubicación de los tres botones por fila. pyflakes limpio. Suite
+  completa sin regresiones nuevas (mismos fallos conocidos del
+  sandbox/reloj, ver la lista de abajo) y sin el abort al cerrar en
+  ninguna combinación de archivos probada.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

@@ -11,22 +11,20 @@ ModulosExtendidos` está prendido — ver `gui_main.construir_secciones`."""
 from __future__ import annotations
 
 import sqlite3
-import unicodedata
 from datetime import date
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -43,6 +41,7 @@ from app.gui.widgets.foco import excluir_tabla_del_tab, instalar_enter_avanza_fo
 from app.gui.widgets.items_tabla import item_centrado, item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.gui.widgets.resumen_saldo import item_monto
+from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.control_pagos import (
     ESTADOS_INSTANCIA,
     TIPOS_AFECTACION,
@@ -65,44 +64,18 @@ from app.repositorio.registro import obtener_repositorio
 _ANCHO_CAMPO = 240
 _ANCHO_PANEL_IZQUIERDA = 280
 
-# Pedido explícito de la clienta: la primer columna (el formulario de
-# "Carga y control", NO el panel de filtros de "Historial" — mismo
-# criterio que el resto de las constantes de acá, cada panel se mide
-# por separado) tiene que entrar completa la etiqueta del botón más
-# largo ("Dar de baja concepto seleccionado", sizeHint real medido con
-# QFontMetrics contra la hoja de estilos: 239px) sin cortarse — bajarla
-# a un 15% (como se probó primero) lo dejaba en 204px y la cortaba. El
-# ancho que gana esta columna se le resta a la columna "Medio de pago"
-# de la tabla (pedido explícito), no a Nombre/Categoría/Afectación.
+# Pedido explícito de la clienta: rediseño de "Carga y control" en 4
+# columnas de igual ancho (ver `_PanelCargaControl._armar_ui`) — todos
+# los campos/botones/filtros de las 4 columnas comparten este mismo
+# ancho fijo (calculado para que entre el texto más largo sin
+# cortarse, el botón "Dar de baja concepto seleccionado": sizeHint
+# real medido con QFontMetrics contra la hoja de estilos, 239px).
 _ANCHO_CAMPO_CARGA_CONTROL = 240
-_ANCHO_PANEL_CARGA_CONTROL = 262  # _ANCHO_CAMPO_CARGA_CONTROL + márgenes (9px por lado) + un margen chico
-# Lo que gana el panel de arriba se le resta acá a "Medio de pago" —
-# medido contra su ancho real bajo Stretch a una ventana de referencia
-# (1500px, el mismo ancho de las capturas de verificación): 246px, baja
-# a 222px. Nombre/Categoría/Afectación siguen en Stretch sin cambios
-# (la cuenta cierra sola: lo que se le saca a esta columna es
-# exactamente lo que ganan las otras tres al dejar de repartirse el
-# espacio entre cuatro).
-_ANCHO_MEDIO_PAGO_CARGA_CONTROL = 222
 
-# Pedido explícito de la clienta, misma solapa: 10% del ancho de
-# "Categoría" pasa a "Importe" — medidos contra su ancho real en la
-# tabla con datos cargados (escenario de verificación con 8 filas):
-# Categoría 228px -> 205px (10% menos), Importe 67px -> 90px (se le
-# suma exactamente lo que pierde Categoría). Mismo mecanismo que
-# "Medio de pago": las dos salen de Stretch/ResizeToContents a un
-# ancho fijo propio, Nombre/Afectación no se tocan (228+67 = 205+90,
-# la cuenta cierra sola).
-_ANCHO_CATEGORIA_CARGA_CONTROL = 205
-_ANCHO_IMPORTE_CARGA_CONTROL = 90
-
-# "Que el primer elemento de la columna arranque en el pixel 85" —
-# mismo mecanismo (y mismo valor medido) que Reservas regulares/
-# aisladas y los paneles de Novedades (`_ALTO_TITULO_COLUMNAS_
-# REGULARES`/`_ALTO_TITULO_COLUMNAS_NOVEDADES`): acá no hay una segunda
-# columna con la que coordinar (la clienta aclaró que la idea de
-# "tres columnas" no corría), así que es solo el margen de arriba de
-# `form`.
+# "Que el primer elemento de cada una de las 4 columnas arranque en el
+# pixel 85" — mismo mecanismo (valor confirmado por medición
+# programática contra esta estructura en 4 columnas, sin QScrollArea)
+# que Reservas regulares/aisladas y los paneles de Novedades.
 _ALTO_TITULO_CARGA_CONTROL = 7
 
 # Colores de fondo de fila según proximidad del vencimiento (pedido
@@ -187,15 +160,6 @@ def _item_importe(valor: float | None) -> QTableWidgetItem:
     ningún importe — "$ 0,00" confundiría "sin cargar" con "cargado en
     cero", dos cosas distintas acá."""
     return QTableWidgetItem("") if valor is None else item_monto(valor)
-
-
-def _normalizar_filtro(texto: str) -> str:
-    """Substring sin distinguir mayúsculas ni acentos — mismo criterio
-    que `crud_generico._normalizar_busqueda` (duplicado acá, no
-    importado: son dominios sin relación)."""
-    descompuesto = unicodedata.normalize("NFKD", texto)
-    sin_acentos = "".join(c for c in descompuesto if not unicodedata.combining(c))
-    return sin_acentos.casefold()
 
 
 def _armar_combo_tipo_afectacion() -> QComboBox:
@@ -373,6 +337,12 @@ class _DialogoEditarConcepto(QDialog):
 class _PanelCargaControl(QWidget):
     _COL_NOMBRE, _COL_CATEGORIA, _COL_AFECTACION, _COL_MEDIO_PAGO = 0, 1, 2, 3
     _COL_PERIODO, _COL_VENCIMIENTO, _COL_IMPORTE, _COL_ESTADO = 4, 5, 6, 7
+    _COL_EDITAR, _COL_ABONAR, _COL_ARCHIVAR = 8, 9, 10
+
+    # Sentinel para "sin filtro" en los 4 combos de la columna 4 — no
+    # se usa `None`, que puede ser un valor real (ej. una Categoría sin
+    # cargar), mismo criterio que `_PanelHistorialControlPagos._TODAS`.
+    _TODOS = object()
 
     def __init__(self, conn: sqlite3.Connection, parent=None):
         super().__init__(parent)
@@ -388,93 +358,117 @@ class _PanelCargaControl(QWidget):
         self.actualizar()
         self.campo_nombre.setFocus()
 
+    @staticmethod
+    def _nueva_columna() -> QWidget:
+        """Una de las 4 columnas de igual ancho (pedido explícito de la
+        clienta) — `objectName="panelSolapa"` (regla general de CLAUDE.
+        md: todo contenedor intermedio dentro de la solapa activa tiene
+        que quedar del mismo tono claro, nunca el gris default de Qt).
+        El margen superior es el mismo mecanismo de "pixel 85" que el
+        resto del sistema (ver `_ALTO_TITULO_CARGA_CONTROL`)."""
+        columna = QWidget()
+        columna.setObjectName("panelSolapa")
+        layout = QVBoxLayout(columna)
+        layout.setContentsMargins(9, _ALTO_TITULO_CARGA_CONTROL, 9, 0)
+        return columna
+
+    @staticmethod
+    def _agregar(layout: QVBoxLayout, widget) -> None:
+        """Alineado a la izquierda explícito — a diferencia del panel
+        único de antes (apenas más ancho que los campos), estas 4
+        columnas abarcan todo el ancho de la pantalla, y un campo de
+        ancho fijo no tiene que quedar centrado en el espacio sobrante."""
+        layout.addWidget(widget, 0, Qt.AlignmentFlag.AlignLeft)
+
     def _armar_ui(self) -> None:
-        layout_externo = QHBoxLayout(self)
+        # Pedido explícito de la clienta: rediseño completo en 4
+        # columnas de igual ancho que abarcan todo el ancho de la
+        # pantalla — la tabla va DEBAJO de esas 4 columnas (no al
+        # costado, a diferencia del layout de un solo panel+tabla de
+        # antes), así que el layout externo pasa a ser vertical.
+        layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
 
-        panel_form = QWidget()
-        panel_form.setObjectName("panelSolapa")
-        panel_form.setMinimumWidth(_ANCHO_PANEL_CARGA_CONTROL)
-        panel_form.setMaximumWidth(_ANCHO_PANEL_CARGA_CONTROL)
-        scroll_form = QScrollArea()
-        scroll_form.setWidgetResizable(True)
-        scroll_form.setWidget(panel_form)
-        scroll_form.setMinimumWidth(_ANCHO_PANEL_CARGA_CONTROL + 20)
-        scroll_form.setMaximumWidth(_ANCHO_PANEL_CARGA_CONTROL + 20)
-        form = QVBoxLayout(panel_form)
-        # "Que el primer elemento arranque en el pixel 85" — ver
-        # `_ALTO_TITULO_CARGA_CONTROL` más arriba.
-        form.setContentsMargins(9, _ALTO_TITULO_CARGA_CONTROL, 9, 0)
+        fila_columnas = QWidget()
+        fila_columnas.setObjectName("panelSolapa")
+        layout_columnas = QHBoxLayout(fila_columnas)
+        layout_columnas.setContentsMargins(0, 0, 0, 0)
 
-        # Pedido explícito de la clienta: una sola línea ("Período
-        # actual: 2026-11"), el valor en negrita — antes eran dos
-        # widgets (título + etiqueta), así que todo lo de abajo sube un
-        # renglón de una.
-        self.etiqueta_periodo = QLabel()
-        form.addWidget(self.etiqueta_periodo)
+        columna1 = self._nueva_columna()
+        columna2 = self._nueva_columna()
+        columna3 = self._nueva_columna()
+        columna4 = self._nueva_columna()
+        for columna in (columna1, columna2, columna3, columna4):
+            layout_columnas.addWidget(columna, stretch=1)
+        col1, col2, col3, col4 = columna1.layout(), columna2.layout(), columna3.layout(), columna4.layout()
 
-        form.addWidget(_titulo_campo("Nombre"))
+        # Columna 1: Nombre, Categoría, Afectación (sus dos combos) y
+        # Medio de pago.
+        self._agregar(col1, _titulo_campo("Nombre"))
         self.campo_nombre = QLineEdit()
         self.campo_nombre.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
-        form.addWidget(self.campo_nombre)
+        self._agregar(col1, self.campo_nombre)
 
-        form.addWidget(_titulo_campo("Categoría"))
+        self._agregar(col1, _titulo_campo("Categoría"))
         self.combo_categoria = QComboBox()
         self.combo_categoria.setEditable(True)
         self.combo_categoria.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         for valor, etiqueta in opciones_lista("CategoriaControlPagos")(self.conn):
             self.combo_categoria.addItem(etiqueta, valor)
         self.combo_categoria.setCurrentIndex(-1)
-        form.addWidget(self.combo_categoria)
+        self._agregar(col1, self.combo_categoria)
 
-        form.addWidget(_titulo_campo("Afectación"))
+        self._agregar(col1, _titulo_campo("Afectación"))
         self.combo_tipo_afectacion = _armar_combo_tipo_afectacion()
         self.combo_tipo_afectacion.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
-        form.addWidget(self.combo_tipo_afectacion)
+        self._agregar(col1, self.combo_tipo_afectacion)
         self.combo_detalle_afectacion = QComboBox()
         self.combo_detalle_afectacion.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
-        form.addWidget(self.combo_detalle_afectacion)
+        self._agregar(col1, self.combo_detalle_afectacion)
         self.combo_tipo_afectacion.currentIndexChanged.connect(self._actualizar_detalle_afectacion)
         self._actualizar_detalle_afectacion()
 
-        form.addWidget(_titulo_campo("Medio de pago"))
+        self._agregar(col1, _titulo_campo("Medio de pago"))
         self.combo_medio_pago = QComboBox()
         self.combo_medio_pago.setEditable(True)
         self.combo_medio_pago.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         for valor, etiqueta in opciones_lista("MedioPagoControlPagos")(self.conn):
             self.combo_medio_pago.addItem(etiqueta, valor)
         self.combo_medio_pago.setCurrentIndex(-1)
-        form.addWidget(self.combo_medio_pago)
+        self._agregar(col1, self.combo_medio_pago)
+        col1.addStretch(1)
 
-        form.addWidget(_titulo_campo("Vencimiento (opcional)"))
+        # Columna 2: Vencimiento, Importe y el botón principal "Crear
+        # concepto".
+        self._agregar(col2, _titulo_campo("Vencimiento (opcional)"))
         self.campo_vencimiento = _campo_fecha_opcional(self.conn)
         self.campo_vencimiento.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
-        form.addWidget(self.campo_vencimiento)
+        self._agregar(col2, self.campo_vencimiento)
 
-        form.addWidget(_titulo_campo("Importe (opcional)"))
+        self._agregar(col2, _titulo_campo("Importe (opcional)"))
         self.spin_importe = _SpinMonto()
         self.spin_importe.setRange(0, 100_000_000)
         self.spin_importe.setDecimals(2)
         self.spin_importe.setSpecialValueText("(sin cargar)")
         self.spin_importe.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
-        form.addWidget(self.spin_importe)
+        self._agregar(col2, self.spin_importe)
 
-        # Pedido explícito de la clienta: el botón "Crear concepto" sube
-        # a ocupar el lugar que dejaron los tres campos libres (sacados
-        # de esta pantalla — quedan en la BD pero sin uso por ahora) y
-        # la línea divisoria que había antes de "Editar concepto
-        # seleccionado" se saca.
         self.boton_crear = QPushButton("Crear concepto")
         self.boton_crear.setObjectName("botonPrimario")
         self.boton_crear.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         self.boton_crear.clicked.connect(self._crear)
-        form.addWidget(self.boton_crear)
+        self._agregar(col2, self.boton_crear)
+        col2.addStretch(1)
 
+        # Columna 3: los 4 botones secundarios sobre el CONCEPTO
+        # seleccionado (no sobre un registro puntual — esos tres
+        # vuelven a vivir al final de cada fila de la tabla, ver
+        # `_armar_botones_fila`).
         self.boton_editar_concepto = QPushButton("Editar concepto seleccionado")
         self.boton_editar_concepto.setObjectName("botonSecundario")
         self.boton_editar_concepto.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         self.boton_editar_concepto.clicked.connect(self._editar_concepto_seleccionado)
-        form.addWidget(self.boton_editar_concepto)
+        self._agregar(col3, self.boton_editar_concepto)
 
         # Pedido explícito de la clienta: baja DEFINITIVA de un concepto
         # (distinta de "Archivar", que solo cierra el mes en curso).
@@ -482,7 +476,7 @@ class _PanelCargaControl(QWidget):
         self.boton_dar_de_baja.setObjectName("botonSecundario")
         self.boton_dar_de_baja.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         self.boton_dar_de_baja.clicked.connect(self._dar_de_baja_seleccionado)
-        form.addWidget(self.boton_dar_de_baja)
+        self._agregar(col3, self.boton_dar_de_baja)
 
         # Pedido explícito de la clienta: "por si ya tengo la información
         # para adelantar y anotar un importe o vencimiento" de un
@@ -495,49 +489,58 @@ class _PanelCargaControl(QWidget):
         self.boton_duplicar_periodo_proximo.setObjectName("botonSecundario")
         self.boton_duplicar_periodo_proximo.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         self.boton_duplicar_periodo_proximo.clicked.connect(self._duplicar_para_periodo_proximo)
-        form.addWidget(self.boton_duplicar_periodo_proximo)
+        self._agregar(col3, self.boton_duplicar_periodo_proximo)
 
         self.boton_eliminar_duplicado = QPushButton("Eliminar registro duplicado")
         self.boton_eliminar_duplicado.setObjectName("botonSecundario")
         self.boton_eliminar_duplicado.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         self.boton_eliminar_duplicado.clicked.connect(self._eliminar_registro_duplicado)
-        form.addWidget(self.boton_eliminar_duplicado)
+        self._agregar(col3, self.boton_eliminar_duplicado)
+        col3.addStretch(1)
 
-        linea = QFrame()
-        linea.setFrameShape(QFrame.Shape.HLine)
-        linea.setFrameShadow(QFrame.Shadow.Sunken)
-        form.addWidget(linea)
+        # Columna 4: los filtros, en cascada MUTUA (sin jerarquía entre
+        # sí, a diferencia de Localidad->Edificio->Unidad) — las
+        # opciones de cada combo se acotan según la selección vigente
+        # de los otros tres (nunca la propia, ver
+        # `_repoblar_filtros_cascada`). Buscador estilo selector de
+        # profesional (`habilitar_busqueda_profesional`, genérico: no
+        # depende de que el combo tenga datos de un profesional) — no
+        # cambia de ancho al seleccionar ni al tipear, el combo ya
+        # queda con `setFixedWidth` como el resto de los campos.
+        self.combo_filtro_nombre = QComboBox()
+        self.combo_filtro_categoria = QComboBox()
+        self.combo_filtro_afectacion = QComboBox()
+        self.combo_filtro_medio_pago = QComboBox()
+        for etiqueta, combo in (
+            ("Nombre", self.combo_filtro_nombre), ("Categoría", self.combo_filtro_categoria),
+            ("Afectación", self.combo_filtro_afectacion), ("Medio de pago", self.combo_filtro_medio_pago),
+        ):
+            self._agregar(col4, _titulo_campo(etiqueta))
+            combo.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
+            habilitar_busqueda_profesional(combo)
+            combo.currentIndexChanged.connect(self.actualizar)
+            self._agregar(col4, combo)
 
-        # Pedido explícito de la clienta: los tres botones que antes
-        # vivían al final de cada fila de la tabla pasan a vivir acá,
-        # al final de esta columna — se habilitan con una fila
-        # seleccionada (ver `_actualizar_botones_seleccion`).
-        self.boton_editar_registro = QPushButton("Editar registro")
-        self.boton_editar_registro.setObjectName("botonSecundario")
-        self.boton_editar_registro.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
-        self.boton_editar_registro.clicked.connect(self._editar_registro_seleccionado)
-        form.addWidget(self.boton_editar_registro)
+        self.boton_reiniciar_filtros = QPushButton("Reiniciar filtros")
+        self.boton_reiniciar_filtros.setObjectName("botonSecundario")
+        self.boton_reiniciar_filtros.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
+        self.boton_reiniciar_filtros.clicked.connect(self._reiniciar_filtros)
+        self._agregar(col4, self.boton_reiniciar_filtros)
+        col4.addStretch(1)
 
-        self.boton_marcar_abonado = QPushButton("Marcar abonado")
-        self.boton_marcar_abonado.setObjectName("botonSecundario")
-        self.boton_marcar_abonado.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
-        self.boton_marcar_abonado.clicked.connect(self._marcar_abonada_seleccionada)
-        form.addWidget(self.boton_marcar_abonado)
+        layout_externo.addWidget(fila_columnas)
 
-        self.boton_archivar_registro = QPushButton("Archivar registro")
-        self.boton_archivar_registro.setObjectName("botonSecundario")
-        self.boton_archivar_registro.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
-        self.boton_archivar_registro.clicked.connect(self._archivar_seleccionada)
-        form.addWidget(self.boton_archivar_registro)
-
-        form.addStretch(1)
-        layout_externo.addWidget(scroll_form)
-
+        # La tabla va abajo de las 4 columnas, a lo ancho de toda la
+        # pantalla y escroleable (`QTableWidget` ya scrollea solo si
+        # hace falta). Al final de cada fila, los tres botones que
+        # vivían ahí antes de pasar (en la ronda anterior) a la
+        # columna 1 — "Editar"/"Abonar"/"Archivar", mismas funciones.
         self.tabla = QTableWidget()
         excluir_tabla_del_tab(self.tabla)
-        self.tabla.setColumnCount(8)
+        self.tabla.setColumnCount(11)
         self.tabla.setHorizontalHeaderLabels([
             "Nombre", "Categoría", "Afectación", "Medio de pago", "Período", "Vencimiento", "Importe", "Estado",
+            "", "", "",
         ])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -545,17 +548,11 @@ class _PanelCargaControl(QWidget):
         header = self.tabla.horizontalHeader()
         for columna in (self._COL_NOMBRE, self._COL_AFECTACION):
             header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Stretch)
-        # "Categoría" sale del Stretch y "Medio de pago" del Stretch
-        # también — le ceden ancho fijo a la columna 1 del formulario y
-        # a "Importe" respectivamente (ver las constantes más arriba).
-        header.setSectionResizeMode(self._COL_CATEGORIA, QHeaderView.ResizeMode.Interactive)
-        header.resizeSection(self._COL_CATEGORIA, _ANCHO_CATEGORIA_CARGA_CONTROL)
-        header.setSectionResizeMode(self._COL_MEDIO_PAGO, QHeaderView.ResizeMode.Interactive)
-        header.resizeSection(self._COL_MEDIO_PAGO, _ANCHO_MEDIO_PAGO_CARGA_CONTROL)
-        for columna in (self._COL_PERIODO, self._COL_VENCIMIENTO, self._COL_ESTADO):
+        for columna in (
+            self._COL_CATEGORIA, self._COL_MEDIO_PAGO, self._COL_PERIODO, self._COL_VENCIMIENTO,
+            self._COL_IMPORTE, self._COL_ESTADO,
+        ):
             header.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(self._COL_IMPORTE, QHeaderView.ResizeMode.Interactive)
-        header.resizeSection(self._COL_IMPORTE, _ANCHO_IMPORTE_CARGA_CONTROL)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones_seleccion)
         # Pedido explícito de la clienta: tabla ordenable por click en el
         # encabezado — mismo mecanismo que el resto del sistema
@@ -565,47 +562,7 @@ class _PanelCargaControl(QWidget):
         # ENCIMA (sort estable), y un segundo click en la misma invierte
         # el sentido.
         self._orden = OrdenTabla(self.tabla, self.actualizar)
-
-        # Pedido explícito de la clienta: fila de filtros propia arriba
-        # de la tabla, uno por columna de Nombre a Vencimiento incluido
-        # (sustituto, texto libre sin distinguir mayúsculas/acentos —
-        # mismo criterio que "Buscar" de los catálogos genéricos), y
-        # sobre Importe/Estado un botón "Reiniciar filtros" en vez de
-        # filtro. Es un widget PROPIO (no una fila de la tabla): así no
-        # hay que pelear con la selección/el orden por click de la
-        # tabla — el ancho de cada campo se sincroniza con el de su
-        # columna real vía `_sincronizar_ancho_filtros` (se llama al
-        # armar, en cada `actualizar()` y cada vez que el header cambia
-        # de ancho).
-        panel_tabla = QWidget()
-        layout_tabla = QVBoxLayout(panel_tabla)
-        layout_tabla.setContentsMargins(0, 0, 0, 0)
-        layout_tabla.setSpacing(0)
-
-        fila_filtros = QWidget()
-        layout_filtros = QHBoxLayout(fila_filtros)
-        layout_filtros.setContentsMargins(0, 0, 0, 0)
-        layout_filtros.setSpacing(0)
-        self._espaciador_filtros = QWidget()
-        layout_filtros.addWidget(self._espaciador_filtros)
-        self.filtros_columna: dict[int, QLineEdit] = {}
-        for columna in (
-            self._COL_NOMBRE, self._COL_CATEGORIA, self._COL_AFECTACION, self._COL_MEDIO_PAGO,
-            self._COL_PERIODO, self._COL_VENCIMIENTO,
-        ):
-            campo_filtro = QLineEdit()
-            campo_filtro.textChanged.connect(self.actualizar)
-            layout_filtros.addWidget(campo_filtro)
-            self.filtros_columna[columna] = campo_filtro
-        self.boton_reiniciar_filtros = QPushButton("Reiniciar filtros")
-        self.boton_reiniciar_filtros.setObjectName("botonSecundario")
-        self.boton_reiniciar_filtros.clicked.connect(self._reiniciar_filtros_columna)
-        layout_filtros.addWidget(self.boton_reiniciar_filtros)
-        layout_tabla.addWidget(fila_filtros)
-        layout_tabla.addWidget(self.tabla)
-        header.sectionResized.connect(lambda *_args: self._sincronizar_ancho_filtros())
-
-        layout_externo.addWidget(panel_tabla, stretch=1)
+        layout_externo.addWidget(self.tabla, stretch=1)
 
         self._foco = instalar_enter_avanza_foco(
             [
@@ -615,44 +572,6 @@ class _PanelCargaControl(QWidget):
             parent=self,
         )
         self._actualizar_botones_seleccion()
-        self._sincronizar_ancho_filtros()
-
-    def _sincronizar_ancho_filtros(self) -> None:
-        """Mantiene cada campo de la fila de filtros exactamente al
-        ancho de su columna real — se llama al armar la pantalla, cada
-        vez que cambia el ancho de una columna (`sectionResized`, ej.
-        al redimensionar la ventana) y al final de cada `actualizar()`
-        (las columnas en `ResizeToContents` pueden cambiar de ancho con
-        los datos)."""
-        self._espaciador_filtros.setFixedWidth(self.tabla.verticalHeader().width() + self.tabla.frameWidth())
-        for columna, campo in self.filtros_columna.items():
-            campo.setFixedWidth(self.tabla.columnWidth(columna))
-        self.boton_reiniciar_filtros.setFixedWidth(
-            self.tabla.columnWidth(self._COL_IMPORTE) + self.tabla.columnWidth(self._COL_ESTADO)
-        )
-
-    def _reiniciar_filtros_columna(self) -> None:
-        for campo in self.filtros_columna.values():
-            campo.blockSignals(True)
-            campo.clear()
-            campo.blockSignals(False)
-        self.actualizar()
-
-    def _coincide_filtros(self, fila: tuple) -> bool:
-        instancia, concepto, afectacion = fila
-        valores = {
-            self._COL_NOMBRE: concepto["Nombre"] if concepto else "",
-            self._COL_CATEGORIA: (concepto["Categoria"] if concepto else "") or "",
-            self._COL_AFECTACION: afectacion,
-            self._COL_MEDIO_PAGO: instancia["MedioPago"] or "",
-            self._COL_PERIODO: instancia["Periodo"],
-            self._COL_VENCIMIENTO: instancia["Vencimiento"] or "",
-        }
-        for columna, campo in self.filtros_columna.items():
-            texto_filtro = _normalizar_filtro(campo.text())
-            if texto_filtro and texto_filtro not in _normalizar_filtro(str(valores[columna])):
-                return False
-        return True
 
     def _actualizar_detalle_afectacion(self) -> None:
         _actualizar_combo_detalle_afectacion(self.conn, self.combo_tipo_afectacion, self.combo_detalle_afectacion)
@@ -704,12 +623,66 @@ class _PanelCargaControl(QWidget):
             return None
         return obtener_repositorio(self.conn, "ConceptoControlPago").obtener(instancia["IdConcepto"])
 
+    def _valor_filtro(self, fila: tuple, clave: str) -> str:
+        instancia, concepto, afectacion = fila
+        if clave == "nombre":
+            return concepto["Nombre"] if concepto else "?"
+        if clave == "categoria":
+            return (concepto["Categoria"] if concepto else "") or ""
+        if clave == "afectacion":
+            return afectacion
+        return instancia["MedioPago"] or ""
+
+    def _combos_filtro(self) -> dict:
+        return {
+            "nombre": self.combo_filtro_nombre, "categoria": self.combo_filtro_categoria,
+            "afectacion": self.combo_filtro_afectacion, "medio_pago": self.combo_filtro_medio_pago,
+        }
+
+    def _coincide_filtros(self, fila: tuple, *, excepto: str | None = None) -> bool:
+        for clave, combo in self._combos_filtro().items():
+            if clave == excepto:
+                continue
+            filtro = combo.currentData()
+            if filtro is not None and filtro is not self._TODOS and self._valor_filtro(fila, clave) != filtro:
+                return False
+        return True
+
+    def _repoblar_filtros_cascada(self, filas_totales: list) -> None:
+        """Cascada MUTUA entre los cuatro filtros (Nombre/Categoría/
+        Afectación/Medio de pago no tienen jerarquía entre sí, a
+        diferencia de Localidad->Edificio->Unidad): las opciones de
+        cada combo se acotan por la selección VIGENTE de los otros
+        tres, nunca la propia — si acotara también por la propia,
+        elegir un valor haría desaparecer las demás opciones de ESE
+        mismo combo."""
+        etiquetas_todos = {"nombre": "Todos", "categoria": "Todas", "afectacion": "Todas", "medio_pago": "Todos"}
+        for clave, combo in self._combos_filtro().items():
+            valores = sorted({
+                self._valor_filtro(f, clave) for f in filas_totales if self._coincide_filtros(f, excepto=clave)
+            })
+            actual = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem(etiquetas_todos[clave], self._TODOS)
+            for valor in valores:
+                combo.addItem(valor, valor)
+            indice = combo.findData(actual) if actual is not None else 0
+            combo.setCurrentIndex(indice if indice >= 0 else 0)
+            combo.blockSignals(False)
+
+    def _reiniciar_filtros(self) -> None:
+        for combo in self._combos_filtro().values():
+            combo.blockSignals(True)
+            combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+        self.actualizar()
+
     def _actualizar_botones_seleccion(self) -> None:
         """Pedido explícito de la clienta: los botones de acción sobre
-        una fila (todos menos "Crear concepto") se habilitan solo
-        cuando hay un registro seleccionado — algunos además con una
-        condición propia (estado/período) que ya tenían como guarda
-        manual antes de este rediseño."""
+        el CONCEPTO seleccionado se habilitan solo cuando hay un
+        registro seleccionado — Duplicar/Eliminar duplicado además con
+        la condición de período que ya tenían como guarda manual."""
         instancia = self._fila_seleccionada_instancia()
         hay_seleccion = instancia is not None
         periodo = periodo_actual(self.conn)
@@ -718,12 +691,6 @@ class _PanelCargaControl(QWidget):
         self.boton_dar_de_baja.setEnabled(hay_seleccion)
         self.boton_duplicar_periodo_proximo.setEnabled(hay_seleccion and instancia["Periodo"] == periodo)
         self.boton_eliminar_duplicado.setEnabled(hay_seleccion and instancia["Periodo"] == periodo_proximo)
-        self.boton_editar_registro.setEnabled(hay_seleccion)
-        self.boton_marcar_abonado.setEnabled(hay_seleccion and instancia["Estado"] == "Pendiente")
-        self.boton_archivar_registro.setEnabled(
-            hay_seleccion and instancia["Estado"] == "Pendiente"
-            and not instancia["Vencimiento"] and instancia["Importe"] is None
-        )
 
     def _editar_concepto_seleccionado(self) -> None:
         concepto = self._fila_seleccionada_concepto()
@@ -789,23 +756,34 @@ class _PanelCargaControl(QWidget):
         return "verde"
 
     def actualizar(self) -> None:
-        self.etiqueta_periodo.setText(f"Período actual: <b>{periodo_actual(self.conn)}</b>")
         periodo = periodo_actual(self.conn)
         periodo_proximo = sumar_meses(periodo, 1)
         repo_instancia = obtener_repositorio(self.conn, "InstanciaControlPago")
         instancias = repo_instancia.listar(Periodo=periodo) + repo_instancia.listar(Periodo=periodo_proximo)
         conceptos = {c["IdConcepto"]: c for c in obtener_repositorio(self.conn, "ConceptoControlPago").listar()}
-        filas = [
+        filas_totales = [
             (i, conceptos.get(i["IdConcepto"]), texto_afectacion(self.conn, conceptos[i["IdConcepto"]]) if i["IdConcepto"] in conceptos else "?")
             for i in instancias
         ]
-        filas = [f for f in filas if self._coincide_filtros(f)]
+        self._repoblar_filtros_cascada(filas_totales)
+        filas = [f for f in filas_totales if self._coincide_filtros(f)]
         filas.sort(key=self._clave_orden_instancia)
         if self._orden.columna is not None:
             filas.sort(key=self._clave_orden_columna(self._orden.columna), reverse=not self._orden.ascendente)
         self._registros = [f[0] for f in filas]
 
         hoy = fecha_actual(self.conn)
+        # `setRowCount(0)` antes de volver a crecer: como la cantidad
+        # de filas y su orden cambian de una `actualizar()` a la
+        # siguiente (alta de un concepto, click de encabezado, cambio
+        # de filtro), reusar directamente `setRowCount(len(filas))`
+        # podía dejar huérfano algún botón de una fila vieja en la
+        # posición equivocada (`setCellWidget` reemplazando un botón
+        # por otro en una fila que ya tenía uno de ANTES no lo
+        # reposiciona limpio) — vaciar la tabla entera primero fuerza a
+        # Qt a soltar todos los cell widgets viejos antes de crear los
+        # nuevos.
+        self.tabla.setRowCount(0)
         self.tabla.setRowCount(len(filas))
         for fila_idx, (instancia, concepto, afectacion) in enumerate(filas):
             self.tabla.setItem(fila_idx, self._COL_NOMBRE, QTableWidgetItem(concepto["Nombre"] if concepto else "?"))
@@ -822,49 +800,75 @@ class _PanelCargaControl(QWidget):
             )
             self.tabla.setItem(fila_idx, self._COL_IMPORTE, _item_importe(instancia["Importe"]))
             self.tabla.setItem(fila_idx, self._COL_ESTADO, item_centrado(instancia["Estado"]))
+            self._armar_botones_fila(fila_idx, instancia)
 
             color = self._color_fila(instancia, hoy)
             if color is not None:
                 fondo = QColor(_COLOR_FONDO_VENCIMIENTO[color])
                 letra = QColor("#000000" if color in _COLORES_CON_LETRA_NEGRA else COLOR_TEXTO_CLARO)
-                for columna in range(self.tabla.columnCount()):
+                for columna in (
+                    self._COL_NOMBRE, self._COL_CATEGORIA, self._COL_AFECTACION, self._COL_MEDIO_PAGO,
+                    self._COL_PERIODO, self._COL_VENCIMIENTO, self._COL_IMPORTE, self._COL_ESTADO,
+                ):
                     celda = self.tabla.item(fila_idx, columna)
                     celda.setBackground(fondo)
                     celda.setForeground(letra)
+        # Las columnas de botones no entran en el Stretch/ResizeToContents
+        # de arriba — necesitan su ancho real para no cortar el texto.
+        for columna in (self._COL_EDITAR, self._COL_ABONAR, self._COL_ARCHIVAR):
+            self.tabla.resizeColumnToContents(columna)
         self._actualizar_botones_seleccion()
-        self._sincronizar_ancho_filtros()
 
-    def _editar_registro_seleccionado(self) -> None:
-        instancia = self._fila_seleccionada_instancia()
-        if instancia is None:
-            return
+    def _armar_botones_fila(self, fila_idx: int, instancia: sqlite3.Row) -> None:
+        # Un botón NUEVO por fila en cada `actualizar()` — no se reusa
+        # por posición (fila_idx, columna) como se probó primero.
+        # `_clave_orden_instancia`/un click de encabezado puede mover
+        # qué instancia cae en cada posición entre una llamada y la
+        # siguiente, y reconectar un botón viejo con `.clicked.
+        # disconnect()` + `.connect(...)` sobre esa posición reciclada
+        # corrompía el estado de Qt/shiboken de forma silenciosa — los
+        # tests pasaban igual, pero el proceso terminaba con un abort
+        # ("bool_dealloc", refcount corrupto) recién al cerrar. Crear un
+        # botón nuevo siempre es exactamente lo mismo que ya se hace
+        # con el resto de las celdas de la fila (`QTableWidgetItem`
+        # nuevo en cada `actualizar()`), así que queda consistente.
+        def _boton(columna: int, texto: str, callback) -> QPushButton:
+            boton = QPushButton(texto)
+            boton.setObjectName("botonSecundario")
+            boton.clicked.connect(callback)
+            self.tabla.setCellWidget(fila_idx, columna, boton)
+            return boton
+
+        _boton(self._COL_EDITAR, "Editar", lambda _c=False, i=instancia: self._editar_instancia(i))
+        boton_abonar = _boton(self._COL_ABONAR, "Abonar", lambda _c=False, i=instancia: self._marcar_abonada(i))
+        boton_abonar.setEnabled(instancia["Estado"] == "Pendiente")
+        boton_archivar = _boton(self._COL_ARCHIVAR, "Archivar", lambda _c=False, i=instancia: self._archivar(i))
+        boton_archivar.setEnabled(
+            instancia["Estado"] == "Pendiente" and not instancia["Vencimiento"] and instancia["Importe"] is None
+        )
+
+    def _editar_instancia(self, instancia: sqlite3.Row) -> None:
         dialogo = _DialogoEditarInstancia(self.conn, instancia, parent=self)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             actualizar_instancia(
                 self.conn, instancia["IdInstancia"], vencimiento=dialogo.vencimiento(), importe=dialogo.importe(),
             )
             self.actualizar()
-            QMessageBox.information(self, "Editar registro", "Registro actualizado con éxito.")
+            QMessageBox.information(self, "Editar", "Registro actualizado con éxito.")
 
-    def _marcar_abonada_seleccionada(self) -> None:
-        instancia = self._fila_seleccionada_instancia()
-        if instancia is None:
-            return
+    def _marcar_abonada(self, instancia: sqlite3.Row) -> None:
         marcar_abonada(self.conn, instancia["IdInstancia"])
         self.actualizar()
-        QMessageBox.information(self, "Marcar abonado", "Registro marcado como abonado con éxito.")
+        QMessageBox.information(self, "Abonar", "Registro marcado como abonado con éxito.")
 
-    def _archivar_seleccionada(self) -> None:
-        instancia = self._fila_seleccionada_instancia()
-        if instancia is None:
-            return
+    def _archivar(self, instancia: sqlite3.Row) -> None:
         try:
             archivar_instancia(self.conn, instancia["IdInstancia"])
         except ValueError as error:
-            QMessageBox.warning(self, "Archivar registro", str(error))
+            QMessageBox.warning(self, "Archivar", str(error))
             return
         self.actualizar()
-        QMessageBox.information(self, "Archivar registro", "Registro archivado con éxito.")
+        QMessageBox.information(self, "Archivar", "Registro archivado con éxito.")
 
     def _duplicar_para_periodo_proximo(self) -> None:
         instancia = self._fila_seleccionada_instancia()
@@ -918,13 +922,8 @@ class _PanelCargaControl(QWidget):
         self._resetear_formulario()
         self.tabla.clearSelection()
         self._orden.reiniciar()
-        for campo in self.filtros_columna.values():
-            campo.blockSignals(True)
-            campo.clear()
-            campo.blockSignals(False)
-        self.actualizar()
+        self._reiniciar_filtros()
         self.campo_nombre.setFocus()
-
 
 class _PanelHistorialControlPagos(QWidget):
     _TODAS = object()
