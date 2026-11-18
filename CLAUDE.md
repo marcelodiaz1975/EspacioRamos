@@ -1308,6 +1308,53 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   únicamente) — confirmado por bit a bit que las filas de categoría A
   quedan idénticas al archivo original sin tocar.
 
+
+  **Aplicado de nuevo, sobre una base más nueva que mandó la clienta.**
+  Mismo resultado (filtrado a categoría R, partiendo siempre del
+  archivo que llega SIN corregir, nunca de uno ya corregido).
+
+  **Hallazgo real distinto, en el camino — sin arreglar todavía, hace
+  falta definir el diseño con la clienta antes de tocar código:**
+  reportó que al generar el texto de detalle de una reserva aislada
+  (categoría A) para A1, no aparece la línea de "saldo pendiente mes
+  anterior" pese a que ella lleva esa diferencia en su propia cuenta.
+  Confirmado que NO es por nada de esta ronda (nunca toqué
+  `Profesional.SaldoCuentaAnterior`, solo las columnas de display de
+  `HistorialPagos`) — es un hueco real y bastante más de fondo:
+
+  - Para categoría A, lo que se debe por reservas aisladas/llaves/
+    ítems libres de UN período se calcula siempre EN VIVO
+    (`app.negocio.mensajes.movimiento_periodo_aislada`, filtrando
+    `ReservaAislada.Fecha` por ese período puntual) — nunca se
+    acredita a ningún campo de `Profesional`, a diferencia de un R
+    (que sí acredita el neto del mes al emitir su liquidación, ver
+    `emitir_liquidacion`).
+  - `avance_mes.avanzar_mes`/`_traspasar_saldos` NUNCA llama a
+    `movimiento_periodo_aislada` — confirmado buscando en todo
+    `avance_mes.py`. O sea: al cerrar un mes, lo que un A debe por
+    aisladas de ESE mes que se cierra nunca se traslada a
+    `SaldoCuentaAnterior` para el mes que viene. El mensaje de detalle
+    del mes siguiente, al calcular en vivo, solo ve LAS RESERVAS DE ESE
+    NUEVO MES — las del mes anterior ya no entran en el filtro de
+    fecha, y como tampoco se acreditaron a ningún lado, el sistema deja
+    de poder "verlas" en cualquier cálculo futuro. Coincide exacto con
+    el síntoma: `SaldoCuentaAnterior` de A1 está en `0.0` en la base
+    real (confirmado), mientras la clienta sí lleva una diferencia real
+    aparte.
+  - Esto es DISTINTO del bug de traspaso ya arreglado arriba (ese
+    perdía lo que YA estaba en `SaldoCuentaAnterior`/`SaldoCuentaActual`
+    al no sumarlos; esto es que para A nunca llega a cargarse ahí en
+    primer lugar, por diseño, desde siempre).
+  - Pendiente: definir con la clienta qué tiene que pasar en el avance
+    de mes para un A con aisladas sin cobrar al cerrar el período —
+    ¿se acredita automático a `SaldoCuentaAnterior` (y de ahí en más A
+    empieza a comportarse como R: paga en cualquier momento, se
+    combina para mostrar "Saldo total")? ¿O el flujo real es otro
+    (ella cobra en el momento, nunca debería quedar pendiente, y lo que
+    reportó es un caso puntual a cargar a mano)? No se tocó código
+    todavía — es un cambio de fondo real sobre cómo cierra el mes esta
+    categoría, no un ajuste quirúrgico como el de arriba.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
