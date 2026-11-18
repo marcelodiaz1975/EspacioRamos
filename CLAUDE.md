@@ -1235,6 +1235,60 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   `test_placa_asignada_en_buscar_aparece_en_imprimir_sin_cambiar_de_
   profesional`.
 
+- **Registro de ausencias: alerta de éxito en las cuatro solapas.**
+  Hecho. Pedido explícito de la clienta sobre Vacaciones/Licencias/
+  Ausencias (Tipos de licencia ya la tenía: es el catálogo genérico
+  `PantallaCRUD`, que ya avisa "Registro creado/editado/eliminado con
+  éxito." sin tocar nada). Dos huecos reales en las otras tres:
+  - "Crear..." en Vacaciones/Licencias solo avisaba cuando había
+    advertencias de por medio (Ausencias ya avisaba siempre, de una
+    ronda anterior) — pasa a avisar siempre ("Vacación cargada con
+    éxito."/"Licencia cargada con éxito."), sumando las advertencias
+    debajo del mensaje cuando las hay, en vez de reemplazarlo.
+  - "Anular..." (botón `_cancelar`) no avisaba nada en ninguna de las
+    tres — se agrega el aviso ("... anulada con éxito.") solo en el
+    método del botón, no en `_cancelar_registro` (el helper
+    compartido con "Modificar...", que primero anula y recién después
+    deja el formulario precargado para dar de alta la versión
+    corregida — avisar ahí sería prematuro, la alerta de éxito real
+    de un "Modificar" llega sola al tocar "Crear..." después).
+  Tests nuevos en `tests/test_gui_novedades.py`:
+  `test_crear_vacacion_muestra_alerta_final_de_exito`,
+  `test_anular_vacacion_muestra_alerta_final_de_exito`,
+  `test_crear_licencia_muestra_alerta_final_de_exito`,
+  `test_anular_licencia_muestra_alerta_final_de_exito`,
+  `test_anular_ausencia_muestra_alerta_final_de_exito`.
+
+- **Corrección general de "Saldo previo"/"Nuevo saldo" en filas
+  históricas de `HistorialPagos`.** Hecho, sobre la base real que
+  mandó la clienta. Investigando el caso de Gabriela Icutza se vio que
+  el problema era mucho más general: como el cálculo combinado es de
+  esta sesión, TODA fila de `HistorialPagos` anterior a hoy muestra el
+  valor viejo de un solo campo en vez del combinado, para cualquier
+  profesional que tuviera algo en el OTRO campo en ese momento — no es
+  plata perdida, es una foto vieja de una columna que antes no existía
+  así.
+
+  Se armó un script de reconstrucción (no forma parte del repositorio,
+  vive en el historial de esta sesión) que reconstruye el combinado
+  real de cada pago CON CERTEZA MATEMÁTICA caminando hacia atrás desde
+  el saldo combinado vigente HOY de cada profesional, restando el
+  `Monto` de cada pago uno por uno — válido únicamente mientras no haya
+  ningún otro evento en el medio que también mueva el saldo (una
+  liquidación emitida, un cambio de mes que sugiere un avance de mes,
+  o una corrección manual ya conocida). Sobre la base real: 123 pagos
+  en total — 18 ya estaban bien, 64 se corrigieron con certeza, 39 no
+  se tocaron (tienen una liquidación emitida en el medio y no se puede
+  asegurar el número sin mirar el PDF real, caso por caso, si alguna
+  vez hace falta) y 2 profesionales quedaron afuera a propósito: uno
+  con un plan de pagos activo (la refinanciación mueve plata entre
+  campos de una forma que esta cuenta no contempla) y Aldana Portillo
+  (R2, ya tiene una corrección manual documentada en el saldo que
+  rompe la reconstrucción retroactiva para ella). Solo se tocaron las
+  columnas `SaldoAnterior`/`SaldoNuevo` de `HistorialPagos` — ningún
+  otro dato de la base, confirmado con `PRAGMA integrity_check` y
+  comparando la cantidad de filas de cada tabla antes/después.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

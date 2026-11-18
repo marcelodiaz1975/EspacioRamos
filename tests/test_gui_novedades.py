@@ -688,6 +688,88 @@ def test_crear_ausencia_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
     assert any("Ausencia cargada con éxito" in t[2] for t in textos)
 
 
+def test_crear_vacacion_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: alerta de éxito al completar
+    cualquier proceso de las cuatro solapas de "Registro de ausencias" —
+    antes acá solo se avisaba si había advertencias de por medio."""
+    id_profesional = _preparar(conn)
+    textos: list[tuple] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: textos.append(a)))
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel._crear()
+    assert any("Vacación cargada con éxito" in t[2] for t in textos)
+
+
+def test_anular_vacacion_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-07"))
+    panel.campo_hasta.setDate(_fecha("2026-09-07"))
+    panel._crear()
+    panel.tabla.selectRow(0)
+
+    textos: list[tuple] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: textos.append(a)))
+    panel._cancelar()
+    assert any("Vacación anulada con éxito" in t[2] for t in textos)
+
+
+def test_crear_licencia_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    textos: list[tuple] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: textos.append(a)))
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-03"))
+    panel._crear()
+    assert any("Licencia cargada con éxito" in t[2] for t in textos)
+
+
+def test_anular_licencia_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-03"))
+    panel._crear()
+    panel.tabla.selectRow(0)
+
+    textos: list[tuple] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: textos.append(a)))
+    panel._cancelar()
+    assert any("Licencia anulada con éxito" in t[2] for t in textos)
+
+
+def test_anular_ausencia_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    id_profesional = _preparar(conn)
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_ausencias
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel.campo_desde.setDate(_fecha("2026-09-01"))
+    panel.campo_hasta.setDate(_fecha("2026-09-03"))
+    panel._crear()
+    panel.tabla.selectRow(0)
+
+    textos: list[tuple] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: textos.append(a)))
+    panel._cancelar()
+    assert any("Ausencia anulada con éxito" in t[2] for t in textos)
+
+
 def test_crear_ausencia_cancelando_confirmacion_no_persiste(qtbot, conn, monkeypatch):
     id_profesional = _preparar(conn)
     pantalla = PantallaRegistroAusencias(conn)

@@ -761,8 +761,13 @@ class _PanelVacaciones(QWidget):
             QMessageBox.warning(self, "Crear vacaciones", str(error))
             return
         self.conn.commit()
+        # Pedido explícito de la clienta: alerta de éxito al completar
+        # cualquier proceso de las cuatro solapas de "Registro de
+        # ausencias" — antes acá solo se avisaba si había advertencias.
+        mensaje = "Vacación cargada con éxito."
         if advertencias:
-            QMessageBox.information(self, "Vacación creada", "\n".join(advertencias))
+            mensaje += "\n\n" + "\n".join(advertencias)
+        QMessageBox.information(self, "Vacación creada", mensaje)
         regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
         self.conn.commit()
         self.actualizar()
@@ -795,6 +800,7 @@ class _PanelVacaciones(QWidget):
         if registro is None:
             return
         if self._cancelar_registro(registro, "Anular vacaciones"):
+            QMessageBox.information(self, "Anular vacaciones", "Vacación anulada con éxito.")
             self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
@@ -1136,8 +1142,13 @@ class _PanelLicencias(QWidget):
             QMessageBox.warning(self, "Crear licencia", str(error))
             return
         self.conn.commit()
+        # Pedido explícito de la clienta: alerta de éxito al completar
+        # cualquier proceso de las cuatro solapas de "Registro de
+        # ausencias" — antes acá solo se avisaba si había advertencias.
+        mensaje = "Licencia cargada con éxito."
         if advertencias:
-            QMessageBox.information(self, "Licencia creada", "\n".join(advertencias))
+            mensaje += "\n\n" + "\n".join(advertencias)
+        QMessageBox.information(self, "Licencia creada", mensaje)
         # Mismo criterio que Vacaciones: si la licencia recién cargada afecta
         # al período en curso (su valor bonificado se prorratea contra ese
         # mes), la liquidación ya emitida de ese período tiene que
@@ -1174,6 +1185,7 @@ class _PanelLicencias(QWidget):
         if registro is None:
             return
         if self._cancelar_registro(registro, "Anular licencia"):
+            QMessageBox.information(self, "Anular licencia", "Licencia anulada con éxito.")
             self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
@@ -1576,6 +1588,7 @@ class _PanelAusencias(QWidget):
         if registro is None:
             return
         if self._cancelar_registro(registro, "Anular ausencia"):
+            QMessageBox.information(self, "Anular ausencia", "Ausencia anulada con éxito.")
             self.combo_profesional.setFocus()
 
     def _modificar_seleccionada(self) -> None:
