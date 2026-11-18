@@ -38,11 +38,17 @@ def _fijar_periodo_actual(conn, periodo):
     )
 
 
-def test_traspaso_de_saldo(conn):
+def test_traspaso_de_saldo_suma_el_anterior_sin_pagar_en_vez_de_perderlo(conn):
+    """Bug real arreglado: si el profesional no terminó de pagar
+    SaldoCuentaAnterior antes de avanzar de mes, ese saldo pendiente
+    tiene que SUMARSE al nuevo SaldoCuentaAnterior (junto con lo que
+    había en SaldoCuentaActual), no perderse — antes el traspaso
+    reemplazaba directamente SaldoCuentaAnterior por SaldoCuentaActual,
+    descartando los $999 que todavía se le debían de antes."""
     id_prof = _crear_profesional(conn, saldo_actual=500, saldo_anterior=999)
     avanzar_mes(conn, periodo_cerrado="2026-08")
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_prof)
-    assert profesional["SaldoCuentaAnterior"] == pytest.approx(500)
+    assert profesional["SaldoCuentaAnterior"] == pytest.approx(999 + 500)
     assert profesional["SaldoCuentaActual"] == 0
 
 

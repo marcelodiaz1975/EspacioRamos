@@ -1159,3 +1159,31 @@ def test_combo_profesional_imprimir_preserva_la_seleccion_al_volver_a_la_solapa(
     pantalla.panel_imprimir.showEvent(QShowEvent())
 
     assert pantalla.combo_profesional_imprimir.currentData() == id_profesional
+
+
+def test_placa_asignada_en_buscar_aparece_en_imprimir_sin_cambiar_de_profesional(qtbot, conn):
+    """Bug real reportado por la clienta: "había asignado una posición,
+    luego la busqué para imprimir y no estaba, tuve que entrar a otra
+    solapa distinta para que refresque" — `_cargar_placas_profesional_
+    imprimir` (la lista "Placa a imprimir") solo estaba conectada al
+    currentIndexChanged del combo de profesional, así que si el
+    profesional seleccionado no cambiaba de índice al volver a esta
+    solapa, la lista se quedaba con los datos de la última vez que SÍ
+    cambió — sin importar qué se hubiera asignado mientras tanto en
+    "Búsqueda y asignación de placas"."""
+    from PySide6.QtGui import QShowEvent
+
+    id_profesional = _crear_profesional(conn)
+    _, id_unidad = _crear_unidad(conn)
+    pantalla = _PanelPlacasOperativas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_profesional_imprimir.setCurrentIndex(pantalla.combo_profesional_imprimir.findData(id_profesional))
+    pantalla.panel_imprimir.showEvent(QShowEvent())
+    assert pantalla.lista_placa_imprimir.count() == 0
+
+    asignar_placa(conn, id_unidad=id_unidad, posicion=1, id_profesional=id_profesional)
+
+    assert pantalla.combo_profesional_imprimir.currentData() == id_profesional  # sigue el mismo, sin disparar el combo
+    pantalla.panel_imprimir.showEvent(QShowEvent())
+
+    assert pantalla.lista_placa_imprimir.count() == 1

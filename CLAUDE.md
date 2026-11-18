@@ -1173,6 +1173,68 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   sandbox/reloj, ver la lista de abajo) y sin el abort al cerrar en
   ninguna combinación de archivos probada.
 
+- **Avance de mes: el traspaso de saldo perdía lo que quedaba sin pagar
+  del período anterior.** Hecho — bug real, grave, encontrado al
+  investigar en profundidad el pedido de la clienta de simplificar
+  "Saldo anterior"/"Saldo actual". `_traspasar_saldos` (`app/negocio/
+  avance_mes.py`) hacía `SaldoCuentaAnterior_nuevo = SaldoCuentaActual_
+  viejo` — REEMPLAZABA en vez de sumar. Si un profesional terminaba el
+  mes sin haber pagado del todo el saldo anterior (ej. $81.236
+  pendientes de antes + $277.292 generados este mes), ese saldo
+  anterior sin pagar se perdía directo al avanzar de mes (quedaba en
+  $277.292 en vez de $358.528) — plata que dejaba de figurar en
+  ningún lado sin que nadie la hubiera pagado ni perdonado.
+
+  Arreglo quirúrgico, no una redefinición: pasa a sumar
+  (`SaldoCuentaAnterior_nuevo = SaldoCuentaAnterior_viejo +
+  SaldoCuentaActual_viejo`) — el significado de los dos campos no
+  cambia en ningún otro lugar del sistema (planes de pago, mensajería
+  automática a categoría X, las dos alertas de panel de control,
+  Reinicio de prueba), así que no hubo que tocar nada más. Se evaluó y
+  se descartó adoptar la propuesta de la clienta de redefinir
+  "Saldo actual" para que ya incluya el anterior (`Saldo actual =
+  Saldo anterior + liquidación del mes - pagos al actual`): arreglaría
+  este mismo bug de rebote, pero pisa el significado que usan
+  TEXTUALMENTE esos otros cuatro lugares — se prefirió el cambio
+  mínimo que ataca la causa real sin ese riesgo. Test actualizado en
+  `tests/test_avance_mes.py`: `test_traspaso_de_saldo_suma_el_anterior_
+  sin_pagar_en_vez_de_perderlo` (antes `test_traspaso_de_saldo`,
+  verificaba el comportamiento VIEJO/roto).
+
+  **Pendiente, a pedido de la clienta:** no hay forma barata de saber
+  con certeza, mirando solo el estado actual, a qué otros
+  profesionales les pasó esto en el pasado — no se guarda ningún
+  historial de qué valía `SaldoCuentaAnterior` en cada traspaso viejo
+  (`SnapshotMensual` solo guarda ocupación/valores de consultorio, no
+  saldos por profesional). Si hace falta auditar la base real, el
+  camino es reconstruir por profesional "cuánto debería sumar hoy el
+  combinado" a partir de lo que SÍ queda registrado para siempre
+  (`LiquidacionEmitida.MontoGenerado` de la última emisión de cada
+  período + todo `HistorialPagos.Monto` + los movimientos de
+  `PlanPago`/refinanciación) y compararlo contra el combinado real —
+  cualquier diferencia hacia abajo es plata perdida por este bug. No
+  se armó ese script todavía (hace falta la base real para correrlo y
+  confirmar los números contra algo verificable, igual que se hizo a
+  mano con Gabriela Icutza y Aldana Portillo) — queda disponible para
+  cuando la clienta la vuelva a mandar.
+
+- **Placas: una posición recién asignada no aparecía para imprimir sin
+  cambiar de solapa.** Hecho — bug real. `_PanelImprimirPlacas.
+  showEvent` repoblaba el combo de profesional (`_cargar_combo_
+  profesional_imprimir`) pero la lista "Placa a imprimir" (`_cargar_
+  placas_profesional_imprimir`) solo estaba conectada al
+  `currentIndexChanged` de ESE combo — si el profesional seleccionado
+  no cambiaba de índice al volver a la solapa (el caso normal: sigue
+  siendo el mismo de antes), la lista de placas se quedaba con los
+  datos de la última vez que sí cambió de profesional, sin reflejar lo
+  que se hubiera asignado/liberado mientras tanto en "Búsqueda y
+  asignación de placas". Se suma el llamado directo a `_cargar_placas_
+  profesional_imprimir()` en el `showEvent`, junto al del combo — ya
+  consulta la base en vivo, así que entrar a la solapa siempre refleja
+  lo recién asignado. Test nuevo en `tests/test_gui_placas.py`:
+  `test_placa_asignada_en_buscar_aparece_en_imprimir_sin_cambiar_de_
+  profesional`.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

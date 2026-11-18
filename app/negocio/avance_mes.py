@@ -86,14 +86,31 @@ class ResumenAvanceMes:
 
 
 def _traspasar_saldos(conn: sqlite3.Connection) -> int:
-    """Paso 2: SaldoCuentaAnterior = SaldoCuentaActual; SaldoCuentaActual
-    arranca en cero para el mes nuevo (se va cargando con las liquidaciones
-    y pagos que se registren)."""
+    """Paso 2: SaldoCuentaAnterior = SaldoCuentaAnterior + SaldoCuentaActual;
+    SaldoCuentaActual arranca en cero para el mes nuevo (se va cargando con
+    las liquidaciones y pagos que se registren).
+
+    Bug real encontrado y arreglado (pedido explícito de la clienta de
+    revisar el traspaso al indagar un desajuste de saldo puntual): antes
+    este paso REEMPLAZABA SaldoCuentaAnterior por SaldoCuentaActual en vez
+    de SUMARLOS — si un profesional terminaba el mes sin haber pagado del
+    todo el saldo anterior (ej. le queda $81.236 pendientes de antes y este
+    mes se le generaron $277.292 más), ese saldo anterior sin pagar se
+    PERDÍA directo al avanzar de mes (quedaba en $277.292 en vez de
+    $358.528) — plata que dejaba de figurar en ningún lado, sin que nadie
+    la hubiera pagado ni perdonado. No afecta ningún otro significado de
+    los dos campos (`SaldoCuentaAnterior` sigue siendo "lo que se arrastra,
+    pendiente de pago"; `SaldoCuentaActual` sigue arrancando en cero cada
+    mes) — un arreglo quirúrgico, no una redefinición de para qué se usa
+    cada campo en el resto del sistema (planes de pago, mensajería
+    automática, panel de control, reinicio de prueba)."""
     repo = obtener_repositorio(conn, "Profesional")
     profesionales = repo.listar()
     for p in profesionales:
         repo.actualizar(
-            p["IdProfesional"], SaldoCuentaAnterior=p["SaldoCuentaActual"] or 0.0, SaldoCuentaActual=0.0,
+            p["IdProfesional"],
+            SaldoCuentaAnterior=(p["SaldoCuentaAnterior"] or 0.0) + (p["SaldoCuentaActual"] or 0.0),
+            SaldoCuentaActual=0.0,
         )
     return len(profesionales)
 

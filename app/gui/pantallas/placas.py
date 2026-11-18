@@ -236,9 +236,25 @@ class _PanelImprimirPlacas(QWidget):
         creado no aparecía acá hasta reiniciar TODO el sistema —
         `_cargar_combo_profesional_imprimir` lo repuebla acá,
         preservando la selección vigente (no corresponde resetear nada
-        más, mismo criterio que el resto del showEvent de siempre)."""
+        más, mismo criterio que el resto del showEvent de siempre).
+
+        Bug real relacionado, encontrado después: asignar una posición
+        nueva en "Búsqueda y asignación de placas" y venir derecho acá a
+        imprimirla no la mostraba — `_cargar_placas_profesional_
+        imprimir` (la lista de "Placa a imprimir" de la columna
+        derecha) solo estaba conectada a `combo_profesional_imprimir.
+        currentIndexChanged`, así que si el profesional seleccionado NO
+        cambiaba de índice al repoblar el combo (el caso normal: sigue
+        siendo el mismo profesional de antes), la lista de placas
+        quedaba con los datos de la última vez que SÍ cambió de
+        profesional, sin importar qué se hubiera asignado/liberado
+        mientras tanto en la otra solapa. Se suma el llamado directo acá
+        — `listar_placas` ya consulta la base en vivo, así que recién
+        entrando a esta solapa siempre refleja lo que haya quedado
+        asignado."""
         super().showEvent(event)
         self._contenedor._cargar_combo_profesional_imprimir()
+        self._contenedor._cargar_placas_profesional_imprimir()
         self._contenedor.combo_profesional_imprimir.setFocus()
 
     def reiniciar(self) -> None:
