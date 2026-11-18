@@ -1289,6 +1289,25 @@ distintas — se van resolviendo uno por uno, no todos juntos.
   otro dato de la base, confirmado con `PRAGMA integrity_check` y
   comparando la cantidad de filas de cada tabla antes/después.
 
+  **Revertido y vuelto a aplicar, SOLO categoría R.** La clienta
+  reportó que la corrección de categoría A dio error — investigado:
+  los profesionales categoría A nunca pasan por `LiquidacionEmitida`
+  ("solo los profesionales categoría R tienen liquidación mensual
+  propia", `app.negocio.liquidaciones`), así que su saldo de arranque
+  (antes del primer pago registrado) no sale de ningún evento
+  rastreable en la base — sale de una carga manual puntual (mismo
+  punto ciego que ya tenía Aldana Portillo, pero generalizado a toda
+  la categoría) que el script no tenía forma de detectar como "riesgo"
+  en la cadena hacia atrás. Se corrigió filtrando la reconstrucción a
+  `CategoriaProfesional == "R"` únicamente, corriendo de NUEVO contra
+  el archivo ORIGINAL que había mandado la clienta (no sobre el ya
+  corregido, para no encadenar un error sobre otro) — sin esto, A
+  (y cualquier otra categoría salvo R) queda exactamente en el valor
+  que tenía antes de cualquier corrección. Resultado sobre la base
+  real: 32 profesionales / 52 pagos corregidos (categoría R
+  únicamente) — confirmado por bit a bit que las filas de categoría A
+  quedan idénticas al archivo original sin tocar.
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
