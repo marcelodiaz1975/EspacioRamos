@@ -1355,6 +1355,27 @@ distintas — se van resolviendo uno por uno, no todos juntos.
     todavía — es un cambio de fondo real sobre cómo cierra el mes esta
     categoría, no un ajuste quirúrgico como el de arriba.
 
+- **Registrar pagos: alerta de éxito en Modificar/Eliminar/Deshacer.**
+  Hecho. "Registrar pago" ya avisaba ("Pago registrado con éxito."); las
+  otras tres acciones de `_PanelRegistrarPago` (`app/gui/pantallas/
+  pagos.py`) no avisaban nada al completarse — se suma `QMessageBox.
+  information(...)` incondicional al final de cada una, mismo criterio
+  que el resto del sistema: "Pago modificado con éxito." (`_modificar`),
+  "Pago eliminado con éxito." (`_eliminar`, después de la confirmación
+  `QMessageBox.question` ya existente) y "Último movimiento deshecho
+  con éxito." (`_deshacer_ultimo`, idem). "Iniciar tanda"/"Cerrar tanda"
+  no se tocaron: esas dos ya tienen su propio feedback inmediato en
+  pantalla (la etiqueta "Con tanda abierta"/"Sin tanda abierta" se
+  actualiza en el acto), así que un cartel ahí sería redundante.
+  "Restablecer descuentos" tampoco: es una sub-pregunta dentro del flujo
+  de "Registrar pago", que ya tiene su propia alerta final. Tests
+  nuevos en `tests/test_gui_pagos.py`:
+  `test_modificar_pago_muestra_alerta_final_de_exito`,
+  `test_eliminar_pago_muestra_alerta_final_de_exito`,
+  `test_deshacer_ultimo_movimiento_muestra_alerta_final_de_exito`.
+  pyflakes limpio, suite completa de `test_gui_pagos.py` sin
+  regresiones (86 passed).
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la

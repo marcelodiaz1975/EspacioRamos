@@ -730,6 +730,31 @@ def test_modificar_pago_a_mes_anterior_regenera_liquidacion_del_mes_en_curso(qtb
     assert ultima["EstadoEnvio"] == "Regenerada no enviada"
 
 
+def test_modificar_pago_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: alerta final de proceso exitoso
+    también al modificar/eliminar/deshacer un pago en "Registrar
+    pagos" — "Registrar pago" ya la tenía, estas tres no."""
+    id_profesional = _crear_profesional(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()
+
+    panel.tabla.selectRow(0)
+    _mockear_dialogo_modificar(
+        monkeypatch, periodo_imputado=periodo_actual(conn), monto=-600, medio_pago="Efectivo",
+        cuenta_receptora=None,
+    )
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: mensajes.append(a)))
+
+    panel._modificar()
+
+    assert mensajes == [(panel, "Modificar pago", "Pago modificado con éxito.")]
+
+
 def test_deshacer_ultimo_movimiento_revierte_y_borra(qtbot, conn, monkeypatch):
     id_profesional = _crear_profesional(conn, saldo=1000)
     pantalla = PantallaPagos(conn)
@@ -745,6 +770,24 @@ def test_deshacer_ultimo_movimiento_revierte_y_borra(qtbot, conn, monkeypatch):
     saldo = obtener_repositorio(conn, "Profesional").obtener(id_profesional)["SaldoCuentaActual"]
     assert saldo == 1000
     assert conn.execute("SELECT COUNT(*) c FROM HistorialPagos").fetchone()["c"] == 0
+
+
+def test_deshacer_ultimo_movimiento_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: mensajes.append(a)))
+
+    panel._deshacer_ultimo()
+
+    assert mensajes == [(panel, "Deshacer último movimiento", "Último movimiento deshecho con éxito.")]
 
 
 def test_deshacer_ultimo_movimiento_de_profesional_aislada_actualiza_el_portapapeles(qtbot, conn, monkeypatch):
@@ -1367,6 +1410,25 @@ def test_eliminar_pago_seleccionado_revierte_saldo(qtbot, conn, monkeypatch):
         "SELECT SaldoCuentaActual FROM Profesional WHERE IdProfesional = ?", (id_profesional,)
     ).fetchone()["SaldoCuentaActual"]
     assert saldo == 1000
+
+
+def test_eliminar_pago_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn, saldo=1000)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.spin_monto.setValue(-400)
+    panel._registrar()
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    panel.tabla.selectRow(0)
+    mensajes = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: mensajes.append(a)))
+
+    panel._eliminar()
+
+    assert mensajes == [(panel, "Eliminar pago", "Pago eliminado con éxito.")]
 
 
 def test_eliminar_pago_con_cascada_avisa_que_se_reparte_entre_los_dos_saldos(qtbot, conn, monkeypatch):

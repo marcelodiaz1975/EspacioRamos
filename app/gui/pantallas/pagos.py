@@ -729,6 +729,7 @@ class _PanelRegistrarPago(QWidget):
         self._actualizar_portapapeles_si_es_aislada(registro["IdProfesional"])
         self.actualizar()
         self._resetear_formulario()
+        QMessageBox.information(self, "Modificar pago", "Pago modificado con éxito.")
 
     def _regenerar_si_afecta_mes_anterior(self, id_profesional: int, periodo_imputado: str | None) -> None:
         """Mismo criterio que al registrar/modificar: si el pago que se
@@ -798,6 +799,7 @@ class _PanelRegistrarPago(QWidget):
         self._actualizar_portapapeles_si_es_aislada(eliminado["IdProfesional"])
         self.actualizar()
         self._resetear_formulario()
+        QMessageBox.information(self, "Eliminar pago", "Pago eliminado con éxito.")
 
     def _deshacer_ultimo(self) -> None:
         if not self._registros:
@@ -822,6 +824,7 @@ class _PanelRegistrarPago(QWidget):
         self._actualizar_portapapeles_si_es_aislada(deshecho["IdProfesional"])
         self.actualizar()
         self._resetear_formulario()
+        QMessageBox.information(self, "Deshacer último movimiento", "Último movimiento deshecho con éxito.")
 
     def _iniciar_tanda(self) -> None:
         if tanda_sobres_es_de_otro_dia(self.conn):
