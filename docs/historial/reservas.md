@@ -4184,3 +4184,49 @@ en EXACTAMENTE su natural, sin nada de sobrante; confirma además la
 alineación centrada/derecha y el texto "Consul"/"9:00 a 10:00hs".
 Suite completa de `test_gui_reservas.py`: 193 passed, mismos 2 fallos
 de calibración de altura de botón ya conocidos, sin regresiones nuevas.
+
+## Reservas aisladas: foco vuelve al selector de Profesional tras un proceso exitoso
+
+`_eliminar` ya lo hacía; se sumó el mismo
+`self.combo_profesional.setFocus()` al final de `_resetear_formulario`
+(cubre "Crear reserva aislada", su único llamador) y al final de
+`_modificar_seleccionada` (no pasa por `_resetear_formulario`, edita
+la fila existente sin tocar el resto del formulario). Tests nuevos en
+`tests/test_gui_reservas.py`:
+`test_crear_reserva_aislada_devuelve_el_foco_al_selector_de_profesional`,
+`test_modificar_reserva_aislada_devuelve_el_foco_al_selector_de_profesional`.
+
+## Reservas regulares: la grilla/vista previa no reflejaba una reserva nueva cargada a mitad de mes
+
+Bug real, confirmado y arreglado. La clienta aclaró que se refería a la
+grilla/vista previa DENTRO de la propia solapa de Reservas regulares
+(`self.grilla`, `GrillaOperativaWidget` en modo "regular"), no a
+"Grilla semanal". Reproducido: una `ReservaRegular` con
+`VigenciaInicio` posterior a hoy pero dentro del mismo mes visualizado
+(ej. parada el 16/11, reserva con vigencia desde el 20/11) queda
+clasificada como "entrante" (`_clasificar_regulares`, `app.negocio.
+grilla_operativa`) — nadie la ocupa "hoy" todavía (`actual is None`).
+El bug real: `_resolver_regular` armaba `id_mostrado` (campo interno,
+nunca se pinta — ver `CeldaGrillaOperativa`) a partir de `actual` en
+TODA la función, nunca a partir de `entrante`; en la rama "entrante",
+`id_mostrado` quedaba en `None` (o en el del titular actual si había
+conflicto, nunca el del entrante). El filtro exclusivo por profesional
+que usa justo esta vista previa (`GrillaOperativaWidget.
+_actualizar_grilla`, `_filtro_exclusivo_profesional`) compara
+`celda.id_profesional_mostrado == id_profesional_filtro` y pisa a
+`_CELDA_VACIA` lo que no coincide — así que la reserva recién cargada
+(filtrada por ESE mismo profesional, que es lo que hace siempre esta
+vista previa) desaparecía por completo de la grilla en vez de
+mostrarse en rojo como "entrante". Arreglado en `_resolver_regular`
+(rama `entrante`): `id_mostrado` pasa a tomarse siempre de `entrante`,
+no de `actual` — `codigo`/`base` (lo que se PINTA en la celda) no
+cambian, eso sigue siendo una decisión de diseño aparte ya probada (en
+blanco si nadie la ocupa hoy, el código del titular actual si hay
+conflicto). Tests nuevos: `tests/test_grilla_operativa.py`
+(`test_regular_entrante_sin_titular_actual_queda_identificado_para_
+el_filtro_exclusivo`, `test_regular_conflicto_el_entrante_tambien_
+queda_identificado_para_el_filtro_exclusivo`) y
+`tests/test_gui_reservas.py`
+(`test_grilla_preview_se_refresca_al_crear_una_reserva_que_arranca_
+a_mitad_de_mes`, reproduce el reporte textual de la clienta de punta
+a punta vía `_PanelReservasRegulares._crear`).

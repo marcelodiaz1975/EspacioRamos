@@ -266,3 +266,78 @@ sobre el panel suelto. No es un cambio de convención general de
 capturas para el resto del sistema — es puntual de este pedido sobre
 esta pantalla.
 
+## Placas: botón "Posiciones que se podrían liberar"
+
+Nuevo botón `checkable` (`boton_filtro_liberables`, mismo ancho/alto
+que Asignar/Reasignar/Liberar) en "Búsqueda y asignación de placas" —
+mismo criterio que "Filtros que solo afectan la visualización" (ver
+CLAUDE.md): se combina con Profesional/Localidad/Edificio/Unidad,
+nunca los reemplaza. El criterio de "candidata" es por categoría del
+profesional que ocupa la posición (`app.negocio.placas.
+placa_se_podria_liberar`, nueva función), tal cual lo pidió la
+clienta:
+
+- R: sin `ReservaRegular` vigente HOY en la unidad de la placa (otra
+  unidad del espacio no cuenta).
+- X: siempre candidata.
+- E: no tiene reservas regulares propias (ver `crear_reserva_
+  regular`, solo R/B) — se mira si su Cabeza de equipo (R) tiene
+  `ReservaRegular` vigente hoy en esa unidad; sin cabeza cargado,
+  candidata.
+- A: hace más de un año sin ninguna `ReservaAislada` Confirmada en
+  TODO el espacio (pedido explícito: "no en la unidad solamente") —
+  mismo cálculo de "un año atrás" que `app.negocio.avance_mes.
+  _limite_retencion_activos` (29 de febrero sin bisiesto equivalente
+  recorta al 28).
+- B y cualquier otra categoría, o posición sin profesional asignado:
+  nunca candidata (la clienta no dio un criterio para B).
+
+Tests nuevos: 14 en `tests/test_placas.py` (uno por caso de
+categoría/borde) + 2 en `tests/test_gui_placas.py` (acota la tabla,
+se combina con el resto de los filtros) + 1 ampliado
+(`test_etiquetas_y_tamano_de_los_botones_de_buscar_y_asignar`, suma
+el nuevo botón a la comparación de ancho/alto).
+
+Ronda siguiente, pedido explícito de la clienta: el filtro también
+tiene que mostrar las posiciones LIBRES del tablero (sin profesional
+asignado), no solo las ocupadas que califican por categoría — una
+foto completa de qué lugar hay disponible. `unidades_en_alcance`
+(nueva, `app.negocio.placas`) replica el mismo alcance de filtros
+Localidad/Edificio/Unidad que `listar_placas`, pero consultando
+`Unidad` directo (no `Placa`), así que también alcanza unidades sin
+ninguna placa — de ahí, `posiciones_libres` por unidad. Las
+posiciones libres NUNCA se acotan por el filtro de Profesional (una
+posición libre no es de nadie) y se muestran como diccionarios
+"placa" livianos con `IdPlaca=None` — `_DialogoPlaca`/`_reasignar` ya
+saben leer un `placa_existente` sin profesional actual (mismo caso
+que una placa vieja sin dueño), así que seleccionar una fila libre y
+tocar "Reasignar..." la asigna de una, sin código extra. "Liberar" (y
+la tecla Delete, que llama a `_liberar` directo sin mirar si el botón
+está habilitado) queda deshabilitado/no hace nada para esas filas —
+nada que liberar. Tests nuevos en `tests/test_gui_placas.py`:
+`test_boton_filtro_liberables_muestra_tambien_las_posiciones_libres`,
+`test_posicion_libre_seleccionada_deshabilita_liberar_pero_no_
+reasignar`, `test_tecla_delete_sobre_posicion_libre_no_hace_nada`,
+`test_reasignar_una_posicion_libre_la_asigna` — más los dos tests
+existentes de esta misma ronda, ajustados a tableros de tamaño fijo
+(antes usaban el default de 10 posiciones, que ahora sí aparecen
+todas como libres y rompían el conteo esperado).
+
+## Placas: una posición recién asignada no aparecía para imprimir sin cambiar de solapa
+
+Bug real. `_PanelImprimirPlacas.showEvent` repoblaba el combo de
+profesional (`_cargar_combo_profesional_imprimir`) pero la lista
+"Placa a imprimir" (`_cargar_placas_profesional_imprimir`) solo estaba
+conectada al `currentIndexChanged` de ESE combo — si el profesional
+seleccionado no cambiaba de índice al volver a la solapa (el caso
+normal: sigue siendo el mismo de antes), la lista de placas se quedaba
+con los datos de la última vez que sí cambió de profesional, sin
+reflejar lo que se hubiera asignado/liberado mientras tanto en
+"Búsqueda y asignación de placas". Se suma el llamado directo a
+`_cargar_placas_profesional_imprimir()` en el `showEvent`, junto al
+del combo — ya consulta la base en vivo, así que entrar a la solapa
+siempre refleja lo recién asignado. Test nuevo en
+`tests/test_gui_placas.py`:
+`test_placa_asignada_en_buscar_aparece_en_imprimir_sin_cambiar_de_
+profesional`.
+

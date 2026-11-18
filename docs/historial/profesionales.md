@@ -366,3 +366,19 @@ Nombre/Apellido (el mismo orden que el formato canónico "{código} -
 resto del sistema) — pedido puntual de esa pantalla; la etiqueta del
 campo Buscar es "Buscar profesional" (`etiqueta_buscar`, ver CLAUDE.md
 "Catálogos (PantallaCRUD genérica)" para el mecanismo general).
+
+## Profesionales: fila "Saldo total" combinado en Editar/Nuevo
+
+Mismo criterio ya aplicado en Pagos (ver "Saldo previo"/"Nuevo saldo"
+en `docs/historial/pagos.md`): en el diálogo de alta/edición de un
+profesional, `SaldoCuentaAnterior` y `SaldoCuentaActual` siguen siendo
+dos campos EDITABLES por separado (no se tocó su mecánica: siguen
+siendo dos columnas reales de la base, cada una con su propio ciclo de
+pago/traspaso de mes — ver `avance_mes._traspasar_saldos`), pero se
+les agrega abajo una tercera fila de solo lectura, "Saldo total"
+(`_al_abrir_dialogo`, `app/gui/pantallas/profesionales.py`), que
+muestra la suma de los dos en vivo (se actualiza con cada
+`textChanged`/`valueChanged` de los dos campos editables) — para que
+se pueda ver de un vistazo "lo que me debe en total" sin tener que
+sumar a mano. Test nuevo en `tests/test_profesionales.py`:
+`test_dialogo_muestra_saldo_total_combinado_y_se_actualiza_en_vivo`.

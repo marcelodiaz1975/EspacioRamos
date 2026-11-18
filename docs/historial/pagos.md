@@ -353,3 +353,281 @@ novedades.py`, misma solapa compartida). Suite de los módulos tocados
 (`test_mensajes.py`, `test_gui_pagos.py`, `test_gui_novedades.py`,
 `test_gui_mensajeria.py`, `test_mensajeria_negocio.py`,
 `test_pagos.py`): 440 passed, sin regresiones.
+
+## Registrar pagos: saldo período actual mal para una profesional categoría R con liquidación de noviembre pendiente y una aislada ya agendada para diciembre
+
+Cerrado — no era un bug activo, era un resabio de un bug YA arreglado.
+Con el PDF real de la liquidación de noviembre de Lic. Aldana Portillo
+(R2) y el detalle exacto que la clienta pasó del pago, se reconstruyó
+que su `SaldoCuentaActual` de antes del pago ($220.530) era exactamente
+la suma de dos cosas: el total real de noviembre ($118.731, el de la
+última emisión "Enviada") más el `MontoGenerado` de una
+`LiquidacionEmitida` de **diciembre** ($101.799) que había quedado
+acreditada de más. Esa fila de diciembre (confirmado con la base real
+que mandó la clienta, vía `IdLiquidacion`/`FechaHoraGeneracion`) se
+generó el **27/10/2026 a las 10:19hs** — TRES DÍAS ANTES del commit
+que agregó el guard "no acreditar una liquidación-preview de un mes
+que el período operativo todavía no alcanzó" (30/10/2026, ya
+documentado en una ronda anterior). O sea: se acreditó por un bug que
+en ese momento todavía existía en el código, antes de que arrancara
+esta ronda — el fix posterior no revierte datos que ya habían quedado
+mal, solo evita que vuelva a pasar de ahí en adelante. Confirmado
+buscando en toda la base si había otro caso igual: solo una fila más
+de un período futuro en todo el sistema (Lic. Valeria Sambucari, R100,
+también diciembre) — pero esa se generó el 4/11, YA con el fix puesto,
+y no acreditó nada (su saldo coincide exacto con su última liquidación
+de noviembre) — confirma que el fix funciona bien hoy. Corrección
+aplicada por la clienta a mano en Profesionales > Editar
+(`SaldoCuentaActual`, el único lugar editable de ese campo — `Campo
+tipo="numero"` en `app.gui.pantallas.profesionales`), sin tocar
+código. No hace falta ningún barrido del resto de los profesionales:
+los demás saldos altos que aparecían en la base real que mandó la
+clienta son correctos (cada uno coincide con su última liquidación de
+noviembre).
+
+## Pagos: "Saldo anterior"/"Nuevo saldo" de la tabla de historial (Registrar pagos y Estado de cuenta) pasan a combinar los dos períodos
+
+Pedido explícito de la clienta, con el PDF real de la liquidación de
+noviembre de Lic. Gabriela Icutza (R16) como caso de prueba: notó que
+esas dos columnas, POR FILA, no "se relacionaban" entre sí al pasar de
+un pago a otro — porque cada una mostraba un solo campo
+(`SaldoCuentaAnterior` o `SaldoCuentaActual`, según a qué período se
+imputaba ESE pago puntual), mismo problema que ya se había corregido
+una vez para las etiquetas de arriba del formulario ("Saldo total"/
+"Nuevo saldo", ver el comentario en `_armar_ui` de `_PanelPagos`) pero
+nunca se había llevado a las columnas de la tabla. Renombradas a
+"Saldo antes del pago"/"Saldo después del pago", ahora muestran el
+COMBINADO (`SaldoCuentaAnterior + SaldoCuentaActual`) antes/después de
+cada movimiento — comprobado matemáticamente en
+`_aplicar_pago_con_cascada` que el combinado SIEMPRE cambia en
+exactamente `monto`, reparta como reparta la cascada entre los dos
+campos, así que no hace falta ningún caso especial. El encadenado que
+pidió la clienta ("si hay un nuevo pago en el mes, 'antes' muestra el
+último 'después' de ese mes") sale solo de leer los dos campos en vivo
+en cada registro — no hubo que programar ningún encadenamiento manual,
+y de paso queda más fiel a la realidad si en el medio se emite una
+liquidación nueva (la seguiría reflejando, cosa que un encadenado a
+ciegas no haría). Tocados los tres lugares que escriben esas columnas
+en `app/negocio/pagos.py` (`registrar_pago`, `modificar_pago`,
+`reconciliar_saldos_cruzados`) — el cruce de tolerancia de
+`registrar_pago` (DC-06 §5.2) sigue mirando el campo puntual, no el
+combinado, por ser una decisión de negocio distinta. Sin migración:
+las columnas de `HistorialPagos` se siguen llamando igual
+(`SaldoAnterior`/`SaldoNuevo`), solo cambia qué calculan y cómo se
+llaman en pantalla — confirmado que son los ÚNICOS dos lugares de la
+GUI que las leen (la tabla de "Registrar pagos" y la de "Estado de
+cuenta"; la etiqueta "Nuevo saldo" del panel de arriba es una cosa
+distinta, la vista previa en vivo de un pago que todavía no se
+registró, y no se tocó). Tests nuevos en `tests/test_pagos.py`:
+`test_registrar_pago_saldo_antes_y_despues_combina_los_dos_periodos`
+(reproduce el caso real de Gabriela Icutza), `test_registrar_pago_
+saldo_antes_del_pago_encadena_con_el_despues_del_pago_anterior`,
+`test_registrar_pago_con_cascada_tambien_combina_correctamente`,
+`test_modificar_pago_saldo_antes_y_despues_combina_los_dos_periodos`
+— más una aserción nueva en un test ya existente de
+`reconciliar_saldos_cruzados` (el combinado no cambia, es un reparto
+interno sin plata real de por medio). pyflakes limpio, suite completa
+de Pagos sin regresiones (162 tests) y sin regresiones en Mensajes/
+Balance/Avance de mes (los mismos 3 fallos conocidos del reloj del
+sandbox).
+
+## Pagos: las columnas de saldo se renombran a "Saldo previo"/"Nuevo saldo"
+
+Pedido explícito de la clienta, "para simplificar", sobre las dos
+columnas de la tabla de "Registrar pagos"/"Estado de cuenta" que una
+ronda anterior había renombrado a "Saldo antes del pago"/"Saldo
+después del pago" (ver más abajo en el historial de esta misma
+sección) — el CÁLCULO combinado (`SaldoCuentaAnterior +
+SaldoCuentaActual` antes/después de cada pago) no cambia, es
+exactamente el mismo, solo cambia la etiqueta en las dos tablas
+(`_PanelPagos`/`_PanelEstadoCuentaPagos`, `app/gui/pantallas/
+pagos.py`). La etiqueta "Nuevo saldo" que ya existía ARRIBA del
+formulario (la vista previa en vivo de un pago todavía no registrado,
+`etiqueta_nuevo_saldo`) es una cosa aparte, de una ronda bastante
+anterior, y queda con el mismo texto — coincide de nombre con la
+columna nueva de la tabla pero son dos widgets sin relación, no hubo
+que tocar nada ahí.
+
+Se usó este mismo caso (Lic. Gabriela Icutza, $81.236 de saldo
+anterior + $277.292 de la liquidación de noviembre, pago de $70.000)
+para confirmar los números esperados: "Saldo previo" $358.528, "Nuevo
+saldo" $288.528 — coincide exacto con el cálculo COMBINADO ya
+implementado, sin tocar `registrar_pago`/`modificar_pago`/
+`reconciliar_saldos_cruzados` (`app/negocio/pagos.py`) ni el cálculo
+de liquidaciones (`calcular_liquidacion` sigue leyendo
+`SaldoCuentaAnterior` en vivo, confirmado correcto por lectura de
+código) — el desajuste que la clienta reportó en el saldo real de
+Gabriela Icutza ($207.292 en vez de $288.528) ya estaba identificado y
+cerrado en la ronda anterior como un resabio de datos (una liquidación
+de diciembre acreditada de más por un bug YA arreglado antes de esta
+ronda, corregida a mano por la clienta en Profesionales — ver el
+bloque correspondiente más abajo) — no un bug de cálculo vigente. No
+se hizo un barrido exhaustivo de la base real completa más allá de ese
+caso puntual y el chequeo ya documentado de que no hay otra fila con
+el mismo patrón.
+
+## Avance de mes: el traspaso de saldo perdía lo que quedaba sin pagar del período anterior
+
+Bug real, grave, encontrado al investigar en profundidad el pedido de
+la clienta de simplificar "Saldo anterior"/"Saldo actual".
+`_traspasar_saldos` (`app/negocio/avance_mes.py`) hacía
+`SaldoCuentaAnterior_nuevo = SaldoCuentaActual_viejo` — REEMPLAZABA en
+vez de sumar. Si un profesional terminaba el mes sin haber pagado del
+todo el saldo anterior (ej. $81.236 pendientes de antes + $277.292
+generados este mes), ese saldo anterior sin pagar se perdía directo al
+avanzar de mes (quedaba en $277.292 en vez de $358.528) — plata que
+dejaba de figurar en ningún lado sin que nadie la hubiera pagado ni
+perdonado.
+
+Arreglo quirúrgico, no una redefinición: pasa a sumar
+(`SaldoCuentaAnterior_nuevo = SaldoCuentaAnterior_viejo +
+SaldoCuentaActual_viejo`) — el significado de los dos campos no
+cambia en ningún otro lugar del sistema (planes de pago, mensajería
+automática a categoría X, las dos alertas de panel de control,
+Reinicio de prueba), así que no hubo que tocar nada más. Se evaluó y
+se descartó adoptar la propuesta de la clienta de redefinir "Saldo
+actual" para que ya incluya el anterior (`Saldo actual = Saldo
+anterior + liquidación del mes - pagos al actual`): arreglaría este
+mismo bug de rebote, pero pisa el significado que usan TEXTUALMENTE
+esos otros cuatro lugares — se prefirió el cambio mínimo que ataca la
+causa real sin ese riesgo. Test actualizado en
+`tests/test_avance_mes.py`: `test_traspaso_de_saldo_suma_el_anterior_
+sin_pagar_en_vez_de_perderlo` (antes `test_traspaso_de_saldo`,
+verificaba el comportamiento VIEJO/roto).
+
+**Pendiente, a pedido de la clienta:** no hay forma barata de saber
+con certeza, mirando solo el estado actual, a qué otros profesionales
+les pasó esto en el pasado — no se guarda ningún historial de qué
+valía `SaldoCuentaAnterior` en cada traspaso viejo (`SnapshotMensual`
+solo guarda ocupación/valores de consultorio, no saldos por
+profesional). Si hace falta auditar la base real, el camino es
+reconstruir por profesional "cuánto debería sumar hoy el combinado" a
+partir de lo que SÍ queda registrado para siempre
+(`LiquidacionEmitida.MontoGenerado` de la última emisión de cada
+período + todo `HistorialPagos.Monto` + los movimientos de
+`PlanPago`/refinanciación) y compararlo contra el combinado real —
+cualquier diferencia hacia abajo es plata perdida por este bug. No se
+armó ese script todavía (hace falta la base real para correrlo y
+confirmar los números contra algo verificable, igual que se hizo a
+mano con Gabriela Icutza y Aldana Portillo) — queda disponible para
+cuando la clienta la vuelva a mandar.
+
+## Corrección general de "Saldo previo"/"Nuevo saldo" en filas históricas de HistorialPagos
+
+Hecho sobre la base real que mandó la clienta. Investigando el caso de
+Gabriela Icutza se vio que el problema era mucho más general: como el
+cálculo combinado es de esta sesión, TODA fila de `HistorialPagos`
+anterior a hoy muestra el valor viejo de un solo campo en vez del
+combinado, para cualquier profesional que tuviera algo en el OTRO
+campo en ese momento — no es plata perdida, es una foto vieja de una
+columna que antes no existía así.
+
+Se armó un script de reconstrucción (no forma parte del repositorio,
+vive en el historial de esta sesión) que reconstruye el combinado real
+de cada pago CON CERTEZA MATEMÁTICA caminando hacia atrás desde el
+saldo combinado vigente HOY de cada profesional, restando el `Monto`
+de cada pago uno por uno — válido únicamente mientras no haya ningún
+otro evento en el medio que también mueva el saldo (una liquidación
+emitida, un cambio de mes que sugiere un avance de mes, o una
+corrección manual ya conocida). Sobre la base real: 123 pagos en
+total — 18 ya estaban bien, 64 se corrigieron con certeza, 39 no se
+tocaron (tienen una liquidación emitida en el medio y no se puede
+asegurar el número sin mirar el PDF real, caso por caso, si alguna vez
+hace falta) y 2 profesionales quedaron afuera a propósito: uno con un
+plan de pagos activo (la refinanciación mueve plata entre campos de
+una forma que esta cuenta no contempla) y Aldana Portillo (R2, ya
+tiene una corrección manual documentada en el saldo que rompe la
+reconstrucción retroactiva para ella). Solo se tocaron las columnas
+`SaldoAnterior`/`SaldoNuevo` de `HistorialPagos` — ningún otro dato de
+la base, confirmado con `PRAGMA integrity_check` y comparando la
+cantidad de filas de cada tabla antes/después.
+
+**Revertido y vuelto a aplicar, SOLO categoría R.** La clienta reportó
+que la corrección de categoría A dio error — investigado: los
+profesionales categoría A nunca pasan por `LiquidacionEmitida` ("solo
+los profesionales categoría R tienen liquidación mensual propia",
+`app.negocio.liquidaciones`), así que su saldo de arranque (antes del
+primer pago registrado) no sale de ningún evento rastreable en la base
+— sale de una carga manual puntual (mismo punto ciego que ya tenía
+Aldana Portillo, pero generalizado a toda la categoría) que el script
+no tenía forma de detectar como "riesgo" en la cadena hacia atrás. Se
+corrigió filtrando la reconstrucción a `CategoriaProfesional == "R"`
+únicamente, corriendo de NUEVO contra el archivo ORIGINAL que había
+mandado la clienta (no sobre el ya corregido, para no encadenar un
+error sobre otro) — sin esto, A (y cualquier otra categoría salvo R)
+queda exactamente en el valor que tenía antes de cualquier corrección.
+Resultado sobre la base real: 32 profesionales / 52 pagos corregidos
+(categoría R únicamente) — confirmado por bit a bit que las filas de
+categoría A quedan idénticas al archivo original sin tocar.
+
+**Aplicado de nuevo, sobre una base más nueva que mandó la clienta.**
+Mismo resultado (filtrado a categoría R, partiendo siempre del archivo
+que llega SIN corregir, nunca de uno ya corregido).
+
+**Hallazgo real distinto, en el camino — sin arreglar todavía, hace
+falta definir el diseño con la clienta antes de tocar código:**
+reportó que al generar el texto de detalle de una reserva aislada
+(categoría A) para A1, no aparece la línea de "saldo pendiente mes
+anterior" pese a que ella lleva esa diferencia en su propia cuenta.
+Confirmado que NO es por nada de esta ronda (nunca se tocó
+`Profesional.SaldoCuentaAnterior`, solo las columnas de display de
+`HistorialPagos`) — es un hueco real y bastante más de fondo:
+
+- Para categoría A, lo que se debe por reservas aisladas/llaves/ítems
+  libres de UN período se calcula siempre EN VIVO (`app.negocio.
+  mensajes.movimiento_periodo_aislada`, filtrando `ReservaAislada.
+  Fecha` por ese período puntual) — nunca se acredita a ningún campo
+  de `Profesional`, a diferencia de un R (que sí acredita el neto del
+  mes al emitir su liquidación, ver `emitir_liquidacion`).
+- `avance_mes.avanzar_mes`/`_traspasar_saldos` NUNCA llama a
+  `movimiento_periodo_aislada` — confirmado buscando en todo
+  `avance_mes.py`. O sea: al cerrar un mes, lo que un A debe por
+  aisladas de ESE mes que se cierra nunca se traslada a
+  `SaldoCuentaAnterior` para el mes que viene. El mensaje de detalle
+  del mes siguiente, al calcular en vivo, solo ve LAS RESERVAS DE ESE
+  NUEVO MES — las del mes anterior ya no entran en el filtro de
+  fecha, y como tampoco se acreditaron a ningún lado, el sistema deja
+  de poder "verlas" en cualquier cálculo futuro. Coincide exacto con
+  el síntoma: `SaldoCuentaAnterior` de A1 está en `0.0` en la base
+  real (confirmado), mientras la clienta sí lleva una diferencia real
+  aparte.
+- Esto es DISTINTO del bug de traspaso ya arreglado más arriba (ese
+  perdía lo que YA estaba en `SaldoCuentaAnterior`/`SaldoCuentaActual`
+  al no sumarlos; esto es que para A nunca llega a cargarse ahí en
+  primer lugar, por diseño, desde siempre).
+- Pendiente: definir con la clienta qué tiene que pasar en el avance
+  de mes para un A con aisladas sin cobrar al cerrar el período — ¿se
+  acredita automático a `SaldoCuentaAnterior` (y de ahí en más A
+  empieza a comportarse como R: paga en cualquier momento, se combina
+  para mostrar "Saldo total")? ¿O el flujo real es otro (ella cobra en
+  el momento, nunca debería quedar pendiente, y lo que reportó es un
+  caso puntual a cargar a mano)? No se tocó código todavía — es un
+  cambio de fondo real sobre cómo cierra el mes esta categoría, no un
+  ajuste quirúrgico como el de arriba.
+
+Cerrado por el momento a pedido de la clienta ("Tema pagos y saldos de
+profesionales A y R por el momento conforme, si retomamos te aviso.")
+— el hallazgo de categoría A queda documentado acá para cuando se
+retome, sin código tocado todavía.
+
+## Registrar pagos: alerta de éxito en Modificar/Eliminar/Deshacer
+
+"Registrar pago" ya avisaba ("Pago registrado con éxito."); las otras
+tres acciones de `_PanelRegistrarPago` (`app/gui/pantallas/pagos.py`)
+no avisaban nada al completarse — se suma `QMessageBox.
+information(...)` incondicional al final de cada una, mismo criterio
+que el resto del sistema: "Pago modificado con éxito."
+(`_modificar`), "Pago eliminado con éxito." (`_eliminar`, después de
+la confirmación `QMessageBox.question` ya existente) y "Último
+movimiento deshecho con éxito." (`_deshacer_ultimo`, idem). "Iniciar
+tanda"/"Cerrar tanda" no se tocaron: esas dos ya tienen su propio
+feedback inmediato en pantalla (la etiqueta "Con tanda abierta"/"Sin
+tanda abierta" se actualiza en el acto), así que un cartel ahí sería
+redundante. "Restablecer descuentos" tampoco: es una sub-pregunta
+dentro del flujo de "Registrar pago", que ya tiene su propia alerta
+final. Tests nuevos en `tests/test_gui_pagos.py`:
+`test_modificar_pago_muestra_alerta_final_de_exito`,
+`test_eliminar_pago_muestra_alerta_final_de_exito`,
+`test_deshacer_ultimo_movimiento_muestra_alerta_final_de_exito`.
+pyflakes limpio, suite completa de `test_gui_pagos.py` sin
+regresiones (86 passed).

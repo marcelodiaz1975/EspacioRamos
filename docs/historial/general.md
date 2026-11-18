@@ -4958,3 +4958,18 @@ profesional` en `tests/test_gui_widget_selector_profesional.py`.
 pyflakes limpio en los 11 archivos de código+test tocados; suite
 completa del proyecto sin regresiones nuevas (ver más arriba la lista
 de fallos conocidos del entorno).
+
+## General: confirmar salida con botones en español
+
+La clienta notó que el cartel de "¿Seguro que querés salir?" (ya
+agregado en una ronda anterior, confirmar salida con diálogo al
+presionar la cruz) seguía mostrando "Yes"/"No" en inglés en vez de
+"Sí"/"No" — Qt no trae traducidas sus propias traducciones de botones
+estándar en este entorno. `VentanaPrincipal.closeEvent` pasa a usar
+`preguntar_si_no` (`app/gui/dialogos.py`, ya existía para "Restablecer
+descuentos" en Pagos — construye el `QMessageBox` a mano con botones
+"Sí"/"No" propios vía `addButton(..., ButtonRole.YesRole/NoRole)`, sin
+depender de ninguna traducción de Qt) en vez de `QMessageBox.
+question(..., StandardButton.Yes | StandardButton.No)`. Test nuevo en
+`tests/test_main_window.py`:
+`test_cerrar_con_la_cruz_usa_botones_en_espanol_no_yes_no`.

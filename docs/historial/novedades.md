@@ -496,3 +496,67 @@ regulares" con solo el azul oscuro del profesional filtrado, sin
 leyenda ni cuadro de detalle, tabla arrancando debajo de la grilla y
 escroleable por separado.
 
+## Ausencias por motivos varios: alerta de proceso exitoso al crear
+
+Punto #9.1.9 — faltaba, `_PanelAusencias._crear` (`app/gui/pantallas/
+novedades.py`) no mostraba nada al completar el registro (a diferencia
+de Vacaciones/Licencias, que sí avisan pero solo cuando hay
+advertencias de por medio). Se sumó `QMessageBox.information(...,
+"Ausencia cargada con éxito.")`, incondicional, al final de `_crear`.
+Test nuevo: `test_crear_ausencia_muestra_alerta_final_de_exito`.
+
+## Cargos especiales: Ajuste/Bonificación con el signo al revés + alerta de éxito
+
+Pedido explícito de la clienta: "el subtipo ajuste obliga a un débito
+(importe positivo) en contra del profesional, y el subtipo
+bonificación obliga a un crédito a favor del profesional (importe
+negativo)" — invierte el pedido original (`_actualizar_tipo_segun_
+subtipo`, que tenía Bonificación bloqueada en Débito y Ajuste editable
+por defecto en Crédito). Aclaración de la clienta sobre el motivo de
+la confusión: el resto del sistema mira Débito/Crédito desde la óptica
+del espacio, pero acá tiene más sentido mirarlo desde el impacto en la
+cuenta del PROFESIONAL. Arreglado invirtiendo literalmente los roles
+de los dos subtipos en `_actualizar_tipo_segun_subtipo` (ahora Ajuste
+es el bloqueado en Débito, Bonificación el editable por defecto en
+Crédito — Ítem libre no cambia) y en el único otro lugar que
+distinguía el subtipo bloqueado (`_modificar_seleccionada`, precarga
+del Tipo real guardado). `crear_cargo_especial` (`app/negocio/
+pagos.py`) no se tocó — nunca acopló Subtipo a Tipo, solo valida que
+el signo del monto sea consistente con el Tipo elegido, sin importar
+el Subtipo. De paso, mismo pedido que Ausencias: alerta final de
+éxito al cargar el registro (faltaba, igual que en esa otra solapa).
+Tests actualizados/nuevos en `tests/test_gui_novedades.py`:
+`test_subtipo_ajuste_fuerza_tipo_debito_y_lo_bloquea` (antes era sobre
+Bonificación), `test_subtipo_bonificacion_deja_tipo_editable_por_
+defecto_credito` (antes era sobre Ajuste), `test_modificar_cargo_
+especial_sin_llave_precarga_el_subtipo` (monto pasa a positivo, ya que
+ahora prueba Ajuste bloqueado en Débito), `test_crear_cargo_especial_
+muestra_alerta_final_de_exito` (nuevo).
+
+## Registro de ausencias: alerta de éxito en las cuatro solapas
+
+Pedido explícito de la clienta sobre Vacaciones/Licencias/Ausencias
+(Tipos de licencia ya la tenía: es el catálogo genérico
+`PantallaCRUD`, que ya avisa "Registro creado/editado/eliminado con
+éxito." sin tocar nada). Dos huecos reales en las otras tres:
+
+- "Crear..." en Vacaciones/Licencias solo avisaba cuando había
+  advertencias de por medio (Ausencias ya avisaba siempre, de una
+  ronda anterior) — pasa a avisar siempre ("Vacación cargada con
+  éxito."/"Licencia cargada con éxito."), sumando las advertencias
+  debajo del mensaje cuando las hay, en vez de reemplazarlo.
+- "Anular..." (botón `_cancelar`) no avisaba nada en ninguna de las
+  tres — se agrega el aviso ("... anulada con éxito.") solo en el
+  método del botón, no en `_cancelar_registro` (el helper compartido
+  con "Modificar...", que primero anula y recién después deja el
+  formulario precargado para dar de alta la versión corregida —
+  avisar ahí sería prematuro, la alerta de éxito real de un
+  "Modificar" llega sola al tocar "Crear..." después).
+
+Tests nuevos en `tests/test_gui_novedades.py`:
+`test_crear_vacacion_muestra_alerta_final_de_exito`,
+`test_anular_vacacion_muestra_alerta_final_de_exito`,
+`test_crear_licencia_muestra_alerta_final_de_exito`,
+`test_anular_licencia_muestra_alerta_final_de_exito`,
+`test_anular_ausencia_muestra_alerta_final_de_exito`.
+
