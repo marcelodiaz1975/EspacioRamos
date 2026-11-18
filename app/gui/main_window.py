@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gui.dialogos import preguntar_si_no
 from app.gui.estilos import hoja_estilos, paleta
 from app.gui.recursos import RUTA_ICONO
 from app.gui.widgets.calculadora import Calculadora
@@ -565,11 +566,12 @@ class VentanaPrincipal(QMainWindow):
         if not event.spontaneous():
             event.accept()
             return
-        respuesta = QMessageBox.question(
-            self, NOMBRE_PROGRAMA,
-            "¿Seguro que querés salir del sistema?",
-        )
-        if respuesta == QMessageBox.StandardButton.Yes:
+        # Pedido explícito de la clienta: los botones tienen que decir
+        # "Sí"/"No" en español, no "Yes"/"No" — mismo mecanismo ya usado
+        # en "Restablecer descuentos" de Pagos (`preguntar_si_no`, ver su
+        # docstring en `app/gui/dialogos.py`), botones armados a mano
+        # para no depender de que la traducción de Qt esté disponible.
+        if preguntar_si_no(self, NOMBRE_PROGRAMA, "¿Seguro que querés salir del sistema?", default_si=False):
             event.accept()
         else:
             event.ignore()

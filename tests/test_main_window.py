@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QLabel, QMessageBox, QTabWidget, QVBoxLayout, QWid
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.gui.estilos import hoja_estilos
+from app.gui import main_window as main_window_modulo
 from app.gui.main_window import Seccion, VentanaPrincipal
 from app.negocio.seguridad import asegurar_permisos_pantalla
 from app.repositorio.registro import obtener_repositorio
@@ -603,7 +604,7 @@ def test_cerrar_programaticamente_no_pide_confirmacion(qtbot, conn, monkeypatch)
 def test_cerrar_con_la_cruz_pide_confirmacion_y_confirma_cierra(qtbot, conn, monkeypatch):
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(main_window_modulo, "preguntar_si_no", lambda *a, **k: True)
     evento = _EventoCierre(espontaneo=True)
     ventana.closeEvent(evento)
     assert evento.isAccepted()
@@ -612,10 +613,29 @@ def test_cerrar_con_la_cruz_pide_confirmacion_y_confirma_cierra(qtbot, conn, mon
 def test_cerrar_con_la_cruz_y_cancelar_no_cierra(qtbot, conn, monkeypatch):
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(main_window_modulo, "preguntar_si_no", lambda *a, **k: False)
     evento = _EventoCierre(espontaneo=True)
     ventana.closeEvent(evento)
     assert not evento.isAccepted()
+
+
+def test_cerrar_con_la_cruz_usa_botones_en_espanol_no_yes_no(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: los botones del cartel de salida
+    tienen que decir "Sí"/"No", no "Yes"/"No" como mostraba `QMessageBox.
+    question` sin traducción instalada."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    llamadas = []
+    monkeypatch.setattr(
+        main_window_modulo, "preguntar_si_no",
+        lambda *a, default_si=True, **k: llamadas.append((a, default_si)) or False,
+    )
+    evento = _EventoCierre(espontaneo=True)
+    ventana.closeEvent(evento)
+    assert len(llamadas) == 1
+    args, default_si = llamadas[0]
+    assert args[2] == "¿Seguro que querés salir del sistema?"
+    assert default_si is False
 
 
 def _espiar_reafirmado(ventana, monkeypatch, *, maximizada: bool):
