@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QFrame,
     QLabel,
     QLineEdit,
@@ -44,6 +45,7 @@ from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import aplicar_cambio_codigo
 from app.negocio.dias import fecha_actual, periodo_actual
+from app.negocio.formato import formatear_moneda
 from app.negocio.documentacion_profesional import (
     CATEGORIAS_DOCUMENTACION_PROFESIONAL,
     agregar_documento,
@@ -374,6 +376,41 @@ def _al_abrir_dialogo(dialogo) -> None:
     _actualizar_codigo()
     _actualizar_cabeza_equipo(resetear=False)
     _actualizar_tratamiento()
+
+    # Pedido explícito de la clienta (caso real Lic. Gabriela Icutza):
+    # "Saldo cuenta anterior"/"Saldo cuenta actual" son dos campos
+    # EDITABLES independientes (correcciones manuales puntuales, ver
+    # más abajo en CLAUDE.md) — no se tocan. Pero lo que la clienta mira
+    # para saber "cuánto me debe en total" es la SUMA de los dos, no el
+    # campo Actual solo (que únicamente refleja lo que se acumuló DESDE
+    # que arrancó el período en curso). Se agrega una tercera fila de
+    # SOLO LECTURA al final del formulario con ese combinado, actualizada
+    # en vivo mientras se edita cualquiera de los dos campos — sin tocar
+    # el mecanismo genérico de `crud_generico.Campo` (es un agregado
+    # puntual de este diálogo, vía `al_abrir_dialogo`, no un tipo de
+    # campo nuevo para todos los catálogos).
+    campo_saldo_actual = dialogo._entradas["SaldoCuentaActual"]
+    campo_saldo_anterior = dialogo._entradas["SaldoCuentaAnterior"]
+    etiqueta_saldo_total = QLabel()
+
+    def _actualizar_saldo_total() -> None:
+        def _a_numero(texto: str) -> float:
+            texto = texto.strip()
+            try:
+                return float(texto) if texto else 0.0
+            except ValueError:
+                return 0.0
+
+        total = _a_numero(campo_saldo_actual.text()) + _a_numero(campo_saldo_anterior.text())
+        etiqueta_saldo_total.setText(formatear_moneda(total))
+
+    campo_saldo_actual.textChanged.connect(_actualizar_saldo_total)
+    campo_saldo_anterior.textChanged.connect(_actualizar_saldo_total)
+    _actualizar_saldo_total()
+
+    formulario_layout = dialogo.findChild(QFormLayout)
+    if formulario_layout is not None:
+        formulario_layout.addRow(QLabel("Saldo total"), etiqueta_saldo_total)
 
 
 def _al_guardar_profesional(valores: dict, registro: sqlite3.Row | None, conn: sqlite3.Connection) -> dict | None:

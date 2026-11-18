@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QDialog, QFileDialog, QLabel, QMessageBox, QPushButton, QTabWidget
+from PySide6.QtWidgets import QDialog, QFileDialog, QFormLayout, QLabel, QMessageBox, QPushButton, QTabWidget
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
@@ -344,6 +344,32 @@ def test_editar_profesional_e_existente_abre_con_cabeza_de_equipo_habilitada_y_c
     combo = dialogo._entradas["ProfesionalCabezaEquipo"]
     assert combo.isEnabled() is True
     assert combo.currentData() == id_r
+
+
+def test_dialogo_muestra_saldo_total_combinado_y_se_actualiza_en_vivo(qtbot, conn):
+    """Pedido explícito de la clienta (caso real Lic. Gabriela Icutza):
+    "Saldo cuenta actual" y "Saldo cuenta anterior" siguen siendo dos
+    campos editables independientes (correcciones manuales puntuales),
+    pero el diálogo suma una tercera fila de solo lectura con el
+    combinado de los dos, para que se vea "cuánto debe en total" sin
+    confundirlo con el campo Actual solo."""
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Icutza", SaldoCuentaActual=207292, SaldoCuentaAnterior=81236,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    _al_abrir_dialogo(dialogo)
+
+    formulario_layout = dialogo.findChild(QFormLayout)
+    ultima_fila = formulario_layout.rowCount() - 1
+    etiqueta_titulo = formulario_layout.itemAt(ultima_fila, QFormLayout.ItemRole.LabelRole).widget()
+    etiqueta_total = formulario_layout.itemAt(ultima_fila, QFormLayout.ItemRole.FieldRole).widget()
+    assert etiqueta_titulo.text() == "Saldo total"
+    assert etiqueta_total.text() == "$ 288.528,00"
+
+    dialogo._entradas["SaldoCuentaActual"].setText("100000")
+    assert etiqueta_total.text() == "$ 181.236,00"
 
 
 def test_sugerencia_de_codigo_se_actualiza_al_cambiar_categoria(qtbot, conn):
