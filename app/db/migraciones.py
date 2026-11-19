@@ -359,6 +359,65 @@ def _ampliar_alcance_gasto_a_localidad(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE GastoOperativo_viejo")
 
 
+def _agregar_id_concepto_control_pago_a_gasto(conn: sqlite3.Connection) -> None:
+    """Identidad estable para `app.negocio.control_pagos.sincronizar_
+    gasto_operativo` (ver su docstring y el bug real que resuelve: "un
+    concepto repetido para distintas unidades pisa al anterior" —
+    encontraba "el gasto ya sincronizado" por Periodo+Concepto, el
+    NOMBRE, que no es único: dos conceptos distintos pueden compartir
+    nombre, ej. "Alquiler" del 9no "C" y del 15 "H"). A diferencia de
+    `IdConsultorio`/`IdLocalidad` (que necesitaron recrear la tabla por
+    el CHECK de `Alcance`), esta columna no tiene ningún CHECK, así que
+    alcanza un `ALTER TABLE ... ADD COLUMN` simple — corre DESPUÉS de
+    las dos migraciones que recrean `GastoOperativo`
+    (`_ampliar_alcance_gasto_a_consultorio`/`_localidad`), para este
+    punto la tabla ya tiene su forma final, nada más le falta esta
+    columna. Idempotente."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'GastoOperativo'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(GastoOperativo)").fetchall()}
+    if "IdConceptoControlPago" in columnas_existentes:
+        return
+    conn.execute(
+        "ALTER TABLE GastoOperativo ADD COLUMN IdConceptoControlPago "
+        "INTEGER REFERENCES ConceptoControlPago(IdConcepto)"
+    )
+
+
+def _corregir_gastos_importados_sin_identidad_de_concepto(conn: sqlite3.Connection) -> None:
+    """Repara el daño real que ya hizo el bug de `sincronizar_gasto_
+    operativo` descripto arriba: borra los `GastoOperativo` Origen=
+    'Importado' que quedaron sin `IdConceptoControlPago` (todos los que
+    existían ANTES de que `_agregar_id_concepto_control_pago_a_gasto`
+    sumara la columna — cualquiera de esos, por diseño, quedó pisado
+    por o pisando a otro concepto con el mismo nombre) y vuelve a
+    sincronizar TODAS las instancias con Importe cargado —
+    `sincronizar_gasto_operativo`, ya con el arreglo, crea un gasto por
+    cada una sin pisarse más. Se puede llamar las veces que haga falta
+    (una vez reparado, no quedan Importado con el link en NULL, así que
+    no hace nada de ahí en más). No hay forma de recuperar el Monto
+    exacto que un gasto ya perdido tenía ANTES de perderse — el valor
+    ACTUAL de cada instancia (lo que ya se ve/opera en "Carga y
+    control") es lo único que queda, y es lo que se vuelca de nuevo."""
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(GastoOperativo)").fetchall()}
+    if "IdConceptoControlPago" not in columnas_existentes:
+        return
+    hay_huerfanos = conn.execute(
+        "SELECT 1 FROM GastoOperativo WHERE Origen = 'Importado' AND IdConceptoControlPago IS NULL"
+    ).fetchone()
+    if not hay_huerfanos:
+        return
+    conn.execute("DELETE FROM GastoOperativo WHERE Origen = 'Importado' AND IdConceptoControlPago IS NULL")
+    from app.negocio.control_pagos import sincronizar_gasto_operativo
+    for instancia in conn.execute(
+        "SELECT IdInstancia FROM InstanciaControlPago WHERE Importe IS NOT NULL"
+    ).fetchall():
+        sincronizar_gasto_operativo(conn, instancia["IdInstancia"])
+
+
 def _inicializar_ultimo_backup_propio(conn: sqlite3.Connection) -> None:
     """Detección de base local desactualizada
     (`app.negocio.backup.hay_backup_mas_reciente_sin_sincronizar`): una
@@ -732,6 +791,8 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _clasificar_subtipo_deposito_llave(conn)
     _ampliar_alcance_gasto_a_consultorio(conn)
     _ampliar_alcance_gasto_a_localidad(conn)
+    _agregar_id_concepto_control_pago_a_gasto(conn)
+    _corregir_gastos_importados_sin_identidad_de_concepto(conn)
     _inicializar_ultimo_backup_propio(conn)
     _inicializar_periodo_operativo_actual(conn)
     _permitir_profesional_sin_apellido(conn)

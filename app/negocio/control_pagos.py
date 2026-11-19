@@ -245,7 +245,9 @@ def eliminar_instancia_duplicada(conn: sqlite3.Connection, id_instancia: int) ->
         repo_gasto = obtener_repositorio(conn, "GastoOperativo")
         existente = next(
             (
-                g for g in repo_gasto.listar(Periodo=instancia["Periodo"], Concepto=concepto["Nombre"])
+                g for g in repo_gasto.listar(
+                    Periodo=instancia["Periodo"], IdConceptoControlPago=concepto["IdConcepto"],
+                )
                 if g["Origen"] == "Importado"
             ),
             None,
@@ -300,7 +302,19 @@ def sincronizar_gasto_operativo(conn: sqlite3.Connection, id_instancia: int) -> 
     monto viejo en Balance del negocio. Si ya existe un gasto Manual en
     conflicto (mismo Período+Concepto, cargado aparte antes de que
     existiera este módulo) no se pisa — se respeta la regla de
-    `gasto_en_conflicto`, el gasto manual sigue mandando."""
+    `gasto_en_conflicto`, el gasto manual sigue mandando.
+
+    Bug real encontrado y arreglado (pedido explícito de la clienta,
+    "Gastos" de Balance del negocio): "el gasto ya sincronizado" se
+    encontraba antes por Periodo+Concepto, el NOMBRE — que no es único,
+    dos conceptos distintos pueden compartir nombre (ej. "Alquiler" del
+    9no "C" y del 15 "H") — así que sincronizar el segundo pisaba el
+    `GastoOperativo` del primero en vez de crear uno nuevo, y uno de
+    los dos quedaba "perdido" en Balance del negocio. Ahora se busca
+    por `IdConceptoControlPago` (identidad real y estable del concepto,
+    ver `schema.sql`), nunca por el nombre — dos conceptos con el mismo
+    nombre quedan en dos filas de `GastoOperativo` separadas, cada una
+    siempre al día con SU propia instancia."""
     instancia = obtener_repositorio(conn, "InstanciaControlPago").obtener(id_instancia)
     if instancia is None:
         return
@@ -311,7 +325,9 @@ def sincronizar_gasto_operativo(conn: sqlite3.Connection, id_instancia: int) -> 
     repo_gasto = obtener_repositorio(conn, "GastoOperativo")
     existente = next(
         (
-            g for g in repo_gasto.listar(Periodo=instancia["Periodo"], Concepto=concepto["Nombre"])
+            g for g in repo_gasto.listar(
+                Periodo=instancia["Periodo"], IdConceptoControlPago=concepto["IdConcepto"],
+            )
             if g["Origen"] == "Importado"
         ),
         None,
@@ -331,6 +347,7 @@ def sincronizar_gasto_operativo(conn: sqlite3.Connection, id_instancia: int) -> 
         "Periodo": instancia["Periodo"], "Categoria": concepto["Categoria"], "Concepto": concepto["Nombre"],
         "Monto": instancia["Importe"], "Alcance": concepto["TipoAfectacion"],
         "IdEdificio": concepto["IdEdificio"], "IdUnidad": concepto["IdUnidad"], "Origen": "Importado",
+        "IdConceptoControlPago": concepto["IdConcepto"],
     }
     if existente is not None:
         repo_gasto.actualizar(existente["IdGasto"], **valores)

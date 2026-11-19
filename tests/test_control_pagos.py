@@ -296,6 +296,72 @@ def test_gasto_manual_existente_no_se_pisa_al_sincronizar(conn, unidad):
     assert gastos[0]["Monto"] == 1000
 
 
+def test_dos_conceptos_con_el_mismo_nombre_para_distintas_unidades_sincronizan_gastos_separados(conn, unidad):
+    """Bug real reportado por la clienta: "tengo dos alquileres, uno por
+    la unidad del 9no 'C' y otro por la del 15 'H', solo me muestra y
+    computa la del 15 'H'" — dos conceptos con el mismo nombre
+    ("Alquiler") para unidades distintas no se pueden pisar entre sí al
+    sincronizar (ver `sincronizar_gasto_operativo`, antes buscaba "el
+    gasto ya sincronizado" por el nombre, ahora por `IdConceptoControlPago`)."""
+    id_edificio = obtener_repositorio(conn, "Unidad").obtener(unidad)["IdEdificio"]
+    otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='15 "H"')
+    id_concepto_1 = crear_concepto(conn, nombre="Alquiler", categoria="Ingresos", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_concepto_2 = crear_concepto(conn, nombre="Alquiler", categoria="Ingresos", tipo_afectacion="Unidad", id_unidad=otra_unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia_1 = repo.listar(IdConcepto=id_concepto_1, Periodo="2026-11")[0]
+    instancia_2 = repo.listar(IdConcepto=id_concepto_2, Periodo="2026-11")[0]
+
+    actualizar_instancia(conn, instancia_1["IdInstancia"], importe=1000)
+    actualizar_instancia(conn, instancia_2["IdInstancia"], importe=2000)
+
+    gastos = obtener_repositorio(conn, "GastoOperativo").listar(Periodo="2026-11", Concepto="Alquiler")
+    assert len(gastos) == 2
+    montos_por_unidad = {g["IdUnidad"]: g["Monto"] for g in gastos}
+    assert montos_por_unidad[unidad] == 1000
+    assert montos_por_unidad[otra_unidad] == 2000
+
+    # Editar uno de los dos no tiene que tocar al otro.
+    actualizar_instancia(conn, instancia_1["IdInstancia"], importe=1500)
+    gastos = obtener_repositorio(conn, "GastoOperativo").listar(Periodo="2026-11", Concepto="Alquiler")
+    montos_por_unidad = {g["IdUnidad"]: g["Monto"] for g in gastos}
+    assert montos_por_unidad[unidad] == 1500
+    assert montos_por_unidad[otra_unidad] == 2000
+
+    # Vaciar el importe de uno de los dos solo borra SU gasto, no el del otro.
+    actualizar_instancia(conn, instancia_1["IdInstancia"], importe=None)
+    gastos = obtener_repositorio(conn, "GastoOperativo").listar(Periodo="2026-11", Concepto="Alquiler")
+    assert len(gastos) == 1
+    assert gastos[0]["IdUnidad"] == otra_unidad
+
+
+def test_eliminar_instancia_duplicada_con_concepto_de_nombre_repetido_no_borra_el_gasto_del_otro(conn, unidad):
+    """Mismo bug que el de arriba, pero en `eliminar_instancia_duplicada`
+    (deshacer un "Duplicar para período próximo" hecho por error): tenía
+    el mismo lookup por nombre en vez de `IdConceptoControlPago`."""
+    id_edificio = obtener_repositorio(conn, "Unidad").obtener(unidad)["IdEdificio"]
+    otra_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='15 "H"')
+    id_concepto_1 = crear_concepto(conn, nombre="Alquiler", categoria="Ingresos", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_concepto_2 = crear_concepto(conn, nombre="Alquiler", categoria="Ingresos", tipo_afectacion="Unidad", id_unidad=otra_unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia_1 = repo.listar(IdConcepto=id_concepto_1, Periodo="2026-11")[0]
+    instancia_2 = repo.listar(IdConcepto=id_concepto_2, Periodo="2026-11")[0]
+    actualizar_instancia(conn, instancia_1["IdInstancia"], importe=1000)
+    actualizar_instancia(conn, instancia_2["IdInstancia"], importe=2000)
+    id_duplicada_1 = duplicar_para_periodo_proximo(conn, instancia_1["IdInstancia"])
+    actualizar_instancia(conn, id_duplicada_1, importe=1200)
+    id_duplicada_2 = duplicar_para_periodo_proximo(conn, instancia_2["IdInstancia"])
+    actualizar_instancia(conn, id_duplicada_2, importe=2200)
+
+    eliminar_instancia_duplicada(conn, id_duplicada_1)
+
+    assert repo.obtener(id_duplicada_1) is None
+    gastos = obtener_repositorio(conn, "GastoOperativo").listar(Periodo="2026-12", Concepto="Alquiler")
+    assert len(gastos) == 1
+    assert gastos[0]["Monto"] == 2200
+
+
 def test_es_medio_pago_tarjeta_detecta_por_substring():
     """No por nombre exacto (el combo de Medio de pago es editable) —
     por contener "tarjeta", sin distinguir mayúsculas."""

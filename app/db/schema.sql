@@ -642,7 +642,14 @@ CREATE TABLE IF NOT EXISTS GastoOperativo (
     Observacion TEXT,
     CampoLibre1 TEXT,
     CampoLibre2 TEXT,
-    CampoLibre3 TEXT
+    CampoLibre3 TEXT,
+    -- Identidad estable del ConceptoControlPago que sincronizó este gasto
+    -- (solo Origen='Importado', ver app.negocio.control_pagos.
+    -- sincronizar_gasto_operativo) — NO se puede usar "Concepto" (el
+    -- nombre) para encontrar "el gasto de ESTE concepto": dos conceptos
+    -- distintos pueden compartir el mismo nombre (ej. "Alquiler" de dos
+    -- unidades distintas), y el nombre no es único.
+    IdConceptoControlPago INTEGER REFERENCES ConceptoControlPago(IdConcepto)
 );
 
 -- 3.26 Imagen -------------------------------------------------------------------------------

@@ -5,6 +5,8 @@ import pytest
 from app.db.init_db import init_database
 from app.db.migraciones import aplicar_migraciones
 from app.db.seed import sembrar_valores_por_defecto
+from app.negocio.control_pagos import crear_concepto, generar_instancias_periodo
+from app.repositorio.registro import obtener_repositorio
 
 
 def test_base_nueva_ya_tiene_las_columnas_migradas(tmp_path):
@@ -400,6 +402,57 @@ def test_aplicar_migraciones_es_idempotente_para_gasto_operativo(tmp_path):
     filas = conn.execute("SELECT * FROM GastoOperativo").fetchall()
     assert len(filas) == 1
     assert filas[0]["Monto"] == 2000
+    conn.close()
+
+
+def test_aplicar_migraciones_repara_gastos_importados_huerfanos_de_concepto_duplicado_por_nombre(tmp_path):
+    """Repara el daño real que hacía el bug de `sincronizar_gasto_
+    operativo` antes de `IdConceptoControlPago` (ver CLAUDE.md, "Gastos"
+    de Balance del negocio): dos conceptos con el mismo nombre
+    ("Alquiler" del 9no "C" y del 15 "H") quedaban pisados en una sola
+    fila de `GastoOperativo`. Simula ese estado ya dañado (una fila
+    Importado sin la identidad nueva, como quedaba justo después del
+    `ALTER TABLE` que la suma — ver `_agregar_id_concepto_control_pago_
+    a_gasto`/`_corregir_gastos_importados_sin_identidad_de_concepto`) y
+    confirma que `aplicar_migraciones` la borra y vuelve a sincronizar
+    TODAS las instancias con importe cargado, una fila separada por
+    concepto, con el Monto ACTUAL de cada instancia."""
+    conn = init_database(tmp_path / "test.db")
+    sembrar_valores_por_defecto(conn)
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad_1 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='9no "C"')
+    id_unidad_2 = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='15 "H"')
+    id_concepto_1 = crear_concepto(conn, nombre="Alquiler", categoria="Ingresos", tipo_afectacion="Unidad", id_unidad=id_unidad_1)
+    id_concepto_2 = crear_concepto(conn, nombre="Alquiler", categoria="Ingresos", tipo_afectacion="Unidad", id_unidad=id_unidad_2)
+    generar_instancias_periodo(conn, "2026-11")
+    repo_instancia = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia_1 = repo_instancia.listar(IdConcepto=id_concepto_1, Periodo="2026-11")[0]
+    instancia_2 = repo_instancia.listar(IdConcepto=id_concepto_2, Periodo="2026-11")[0]
+    # Carga el importe directo en la instancia (sin sincronizar todavía,
+    # para simular el estado "ya dañado" a mano más abajo).
+    repo_instancia.actualizar(instancia_1["IdInstancia"], Importe=1000)
+    repo_instancia.actualizar(instancia_2["IdInstancia"], Importe=2000)
+    conn.execute(
+        "INSERT INTO GastoOperativo (Periodo, Categoria, Concepto, Monto, Alcance, IdUnidad, Origen) "
+        "VALUES ('2026-11', 'Ingresos', 'Alquiler', 2000, 'Unidad', ?, 'Importado')",
+        (id_unidad_2,),
+    )
+    conn.commit()
+    assert len(obtener_repositorio(conn, "GastoOperativo").listar(Periodo="2026-11", Concepto="Alquiler")) == 1
+
+    aplicar_migraciones(conn)
+
+    gastos = obtener_repositorio(conn, "GastoOperativo").listar(Periodo="2026-11", Concepto="Alquiler")
+    assert len(gastos) == 2
+    montos_por_unidad = {g["IdUnidad"]: g["Monto"] for g in gastos}
+    assert montos_por_unidad[id_unidad_1] == 1000
+    assert montos_por_unidad[id_unidad_2] == 2000
+    for g in gastos:
+        assert g["IdConceptoControlPago"] is not None
+
+    # Idempotente: ya no hay huérfanos, una segunda corrida no vuelve a tocar nada.
+    aplicar_migraciones(conn)
+    assert len(obtener_repositorio(conn, "GastoOperativo").listar(Periodo="2026-11", Concepto="Alquiler")) == 2
     conn.close()
 
 
