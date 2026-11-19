@@ -396,6 +396,9 @@ def test_historial_editar_registro_permite_un_periodo_viejo(qtbot, conn, unidad,
         def cuenta_id(self):
             return None
 
+        def numero_transaccion(self):
+            return None
+
     monkeypatch.setattr(control_pagos_modulo, "_DialogoEditarInstancia", lambda *a, **k: _DialogoFalso())
     panel_historial._editar_registro()
 
@@ -649,6 +652,67 @@ def test_dialogo_editar_instancia_sin_vencimiento_precarga_hoy(qtbot, conn, unid
     assert dialogo.campo_vencimiento.isEnabled()
 
 
+def test_dialogo_editar_instancia_campo_numero_transaccion_debajo_de_cuenta_id(qtbot, conn, unidad):
+    """Pedido explícito de la clienta: campo nuevo "N° transacción
+    (opcional)" debajo de "Cuenta/Id (opcional)", texto libre, precargado
+    desde `CampoLibre2` (distinto de Cuenta/Id, que es `CampoLibre1`)."""
+    from app.gui.pantallas.control_pagos import _DialogoEditarInstancia
+    from app.negocio.control_pagos import actualizar_instancia
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="CA Bco Hipotecario")
+    instancia = _instancia_actual(conn, panel)
+    actualizar_instancia(conn, instancia["IdInstancia"], numero_transaccion="OP-999")
+    instancia = obtener_repositorio(conn, "InstanciaControlPago").obtener(instancia["IdInstancia"])
+
+    dialogo = _DialogoEditarInstancia(conn, instancia, parent=panel)
+
+    assert dialogo.campo_numero_transaccion.text() == "OP-999"
+    assert dialogo.numero_transaccion() == "OP-999"
+
+
+def test_editar_instancia_guarda_el_numero_de_transaccion_sin_mostrarlo_en_la_tabla(qtbot, conn, unidad, monkeypatch):
+    """El número de transacción se guarda por instancia (`CampoLibre2`)
+    pero no tiene columna propia en ninguna tabla — pedido explícito."""
+    from PySide6.QtWidgets import QDialog
+
+    import app.gui.pantallas.control_pagos as control_pagos_modulo
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="CA Bco Hipotecario")
+    instancia = _instancia_actual(conn, panel)
+
+    class _DialogoFalso:
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def vencimiento(self):
+            return None
+
+        def importe(self):
+            return None
+
+        def cuenta_id(self):
+            return None
+
+        def numero_transaccion(self):
+            return "OP-777"
+
+    monkeypatch.setattr(control_pagos_modulo, "_DialogoEditarInstancia", lambda *a, **k: _DialogoFalso())
+    panel._editar_instancia(instancia)
+
+    actualizada = obtener_repositorio(conn, "InstanciaControlPago").obtener(instancia["IdInstancia"])
+    assert actualizada["CampoLibre2"] == "OP-777"
+    assert panel.tabla.columnCount() == 13  # sin columna nueva
+
+
 def test_dialogo_editar_instancia_tarjeta_deshabilita_vencimiento(qtbot, conn, unidad):
     from app.gui.pantallas.control_pagos import _DialogoEditarInstancia
 
@@ -692,6 +756,9 @@ def test_editar_item_tarjeta_al_cargar_importe_queda_abonado_directo(qtbot, conn
             return 1500.0
 
         def cuenta_id(self):
+            return None
+
+        def numero_transaccion(self):
             return None
 
     monkeypatch.setattr(control_pagos_modulo, "_DialogoEditarInstancia", lambda *a, **k: _DialogoFalso())
@@ -781,6 +848,42 @@ def test_tabla_carga_control_importe_ancho_para_el_formato_maximo(qtbot, conn, u
     assert panel.tabla.columnWidth(panel._COL_IMPORTE) == ancho_esperado
 
 
+def test_tabla_carga_control_cuenta_id_alineado_a_la_derecha(qtbot, conn, unidad):
+    """Pedido explícito de la clienta."""
+    from PySide6.QtCore import Qt
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    panel.campo_cuenta_id.setText("12345-6")
+    _crear_concepto_unidad(panel, unidad)
+
+    item = panel.tabla.item(0, panel._COL_CUENTA_ID)
+    assert item.textAlignment() == (Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+
+def test_etiquetas_expensas_y_saldos_bancarios_muestran_los_valores_de_saldos_expensas_y_bancos(qtbot, conn, unidad):
+    """Pedido explícito de la clienta: "Total expensas sin abonar" y los
+    cuatro "Saldo a cubrir..." debajo de "Eliminar registro duplicado",
+    con el mismo criterio de `saldos_expensas_y_bancos`."""
+    from app.negocio.control_pagos import actualizar_instancia
+    from app.negocio.formato import formatear_moneda
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, nombre="Expensas 9no C", categoria="Expensas", medio_pago="CA Bco Patagonia")
+    instancia = _instancia_actual(conn, panel, nombre="Expensas 9no C")
+    actualizar_instancia(conn, instancia["IdInstancia"], importe=5000)
+    panel.actualizar()
+
+    assert panel.etiqueta_total_expensas.text() == f"Total expensas sin abonar: {formatear_moneda(5000.0)}"
+    assert panel.etiqueta_saldo_patagonia.text() == f"Saldo a cubrir en CA Bco Patagonia: {formatear_moneda(5000.0)}"
+    assert panel.etiqueta_saldo_provincia.text() == f"Saldo a cubrir en CA Bco Provincia: {formatear_moneda(0.0)}"
+    assert panel.etiqueta_saldo_hipotecario.text() == f"Saldo a cubrir Bco Hipotecario: {formatear_moneda(0.0)}"
+    assert panel.etiqueta_saldo_macro.text() == f"Saldo a cubrir Bco Macro: {formatear_moneda(0.0)}"
+
+
 def test_boton_deshacer_deshabilitado_sin_datos_habilitado_con_datos(qtbot, conn, unidad):
     pantalla = PantallaControlPagos(conn)
     qtbot.addWidget(pantalla)
@@ -847,6 +950,9 @@ def test_editar_item_archivado_lo_vuelve_a_pendiente(qtbot, conn, unidad, monkey
             return 700.0
 
         def cuenta_id(self):
+            return None
+
+        def numero_transaccion(self):
             return None
 
     monkeypatch.setattr(control_pagos_modulo, "_DialogoEditarInstancia", lambda *a, **k: _DialogoFalso())

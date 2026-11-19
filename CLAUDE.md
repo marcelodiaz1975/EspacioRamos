@@ -1427,3 +1427,52 @@ una cae en la línea correcta). pyflakes limpio en los dos archivos de
 negocio/GUI y los dos de test tocados; suites `test_panel_control.py`
 (35 passed) y `test_gui_panel_control.py` (66 passed) sin regresiones.
 
+## Control de pagos ("Carga y control"): "Total expensas sin abonar" + saldos por banco, campo "N° transacción", Cuenta/Id a la derecha
+
+Cuatro pedidos puntuales de la clienta sobre `_PanelCargaControl` (`app/
+gui/pantallas/control_pagos.py`):
+
+- Etiqueta nueva "Total expensas sin abonar" debajo de "Eliminar
+  registro duplicado" (columna 3): suma el `Importe` de toda instancia
+  `Estado='Pendiente'` del período vigente cuyo concepto tiene
+  `Categoria='Expensas'`. Debajo, cuatro etiquetas más — "Saldo a
+  cubrir en CA Bco Patagonia"/"...Provincia"/"Saldo a cubrir Bco
+  Hipotecario"/"...Macro" — mismo criterio pero agrupado por `MedioPago`
+  (los cuatro medios de pago bancarios ya precargados en
+  `MedioPagoControlPagos`, ver `seed.py`), sin filtrar por categoría.
+  Nueva función `saldos_expensas_y_bancos` (`app/negocio/control_pagos.
+  py`) — a diferencia de las siete etiquetas de conteo de la columna 2
+  (que SÍ reflejan los cuatro filtros en cascada de la columna 4), estas
+  cinco son totales absolutos del período actual, siempre sobre TODO lo
+  cargado (mismo criterio que los totales "sin filtro" de Panel de
+  control). Los cinco `QLabel` necesitan `setWordWrap(True)` +
+  `setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)` — sin esto, el texto largo
+  ("Saldo a cubrir en CA Bco Patagonia: $...") ensanchaba esa columna
+  más que las otras tres del `QHBoxLayout` con `stretch=1` parejo.
+- Campo nuevo "N° transacción (opcional)" en `_DialogoEditarInstancia`,
+  debajo de "Cuenta/Id (opcional)": texto libre, reusa `CampoLibre2` de
+  `InstanciaControlPago` (`CampoLibre1` ya lo usa Cuenta/Id) — pedido
+  explícito de la clienta: "por si el día de mañana tengo que
+  consultar", sin mostrarse en ninguna columna de ninguna tabla (a
+  diferencia de Cuenta/Id) ni heredarse de un período al siguiente (es
+  el número de operación de ESE pago puntual, no un dato del concepto).
+  `actualizar_instancia` suma el parámetro `numero_transaccion` →
+  `CampoLibre2`.
+- Columna "Cuenta/Id" de la tabla de "Carga y control" pasa a alineada
+  a la derecha (`item_numero`, mismo helper que las columnas numéricas,
+  aunque el contenido sea texto libre).
+
+Tests: `tests/test_control_pagos.py` (+2: `saldos_expensas_y_bancos`
+con pendiente/abonado/otro medio de pago mezclados; `numero_
+transaccion` mapea a `CampoLibre2` sin tocar `CampoLibre1`).
+`tests/test_gui_control_pagos.py` (+4: alineación de Cuenta/Id, las
+cinco etiquetas muestran los valores de `saldos_expensas_y_bancos`,
+el campo del diálogo precarga desde `CampoLibre2`, guardar vía
+"Editar" persiste el número de transacción sin sumar ninguna columna
+nueva a la tabla; 3 fakes `_DialogoFalso` de tests preexistentes
+actualizados con el método `numero_transaccion()` nuevo). Suite:
+27 + 50 passed, más 171 passed en la corrida conjunta con `test_
+avance_mes.py`/`test_catalogos.py` (los 3 fallos de `test_avance_mes.py`
+son los conocidos por el reloj real del sandbox, ajenos a esta ronda).
+pyflakes limpio en los cuatro archivos tocados.
+

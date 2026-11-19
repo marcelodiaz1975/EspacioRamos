@@ -260,17 +260,22 @@ def eliminar_instancia_duplicada(conn: sqlite3.Connection, id_instancia: int) ->
 def actualizar_instancia(
     conn: sqlite3.Connection, id_instancia: int, *,
     vencimiento=_SIN_CAMBIOS, importe=_SIN_CAMBIOS, medio_pago=_SIN_CAMBIOS, estado=_SIN_CAMBIOS,
-    cuenta_id=_SIN_CAMBIOS,
+    cuenta_id=_SIN_CAMBIOS, numero_transaccion=_SIN_CAMBIOS,
 ) -> None:
     """Edita vencimiento/monto (y opcionalmente el medio de pago, el
-    Estado y/o "Cuenta/Id") de UNA instancia puntual — distinto de
-    `editar_concepto`. Cada parámetro que se deja sin pasar queda sin
-    tocar (`_SIN_CAMBIOS`); pasarlo en `None` explícitamente SÍ lo vacía
-    (ej. borrar un vencimiento ya cargado). `estado` lo usa "Editar
-    registro" de la solapa "Historial" (vencimiento+importe+estado
-    juntos, para poder reabrir algo que el cierre de mes archivó de
-    más). `cuenta_id` mapea a `CampoLibre1` (reusado — pedido explícito
-    de la clienta, ver `_cuenta_id_heredada`). Sincroniza
+    Estado y/o "Cuenta/Id"/"N° transacción") de UNA instancia puntual —
+    distinto de `editar_concepto`. Cada parámetro que se deja sin pasar
+    queda sin tocar (`_SIN_CAMBIOS`); pasarlo en `None` explícitamente
+    SÍ lo vacía (ej. borrar un vencimiento ya cargado). `estado` lo usa
+    "Editar registro" de la solapa "Historial" (vencimiento+importe+
+    estado juntos, para poder reabrir algo que el cierre de mes archivó
+    de más). `cuenta_id` mapea a `CampoLibre1` (reusado — pedido
+    explícito de la clienta, ver `_cuenta_id_heredada`). `numero_
+    transaccion` mapea a `CampoLibre2` — pedido explícito de la
+    clienta ("por si el día de mañana tengo que consultar"): texto
+    libre guardado por instancia, SIN mostrarse en ninguna tabla ni
+    heredarse de un período al siguiente (a diferencia de Cuenta/Id,
+    el número de operación es propio de CADA pago puntual). Sincroniza
     `GastoOperativo` después, si corresponde (ver `sincronizar_gasto_
     operativo`)."""
     campos = {}
@@ -282,6 +287,8 @@ def actualizar_instancia(
         campos["MedioPago"] = medio_pago
     if cuenta_id is not _SIN_CAMBIOS:
         campos["CampoLibre1"] = cuenta_id
+    if numero_transaccion is not _SIN_CAMBIOS:
+        campos["CampoLibre2"] = numero_transaccion
     if estado is not _SIN_CAMBIOS:
         if estado not in ESTADOS_INSTANCIA:
             raise ValueError(f"Estado inválido: {estado!r}")
@@ -404,3 +411,37 @@ def resumen_conteo_vencimientos(conn: sqlite3.Connection) -> dict:
         "archivados": sum(1 for i in instancias if i["Estado"] == "Archivado"),
         "total": len(instancias),
     }
+
+
+MEDIOS_PAGO_SALDO_BANCOS = ("CA Bco Patagonia", "CA Bco Provincia", "CA Bco Hipotecario", "CA Bco Macro")
+"""Pedido explícito de la clienta sobre "Carga y control" — los cuatro
+medios de pago bancarios ya precargados en `MedioPagoControlPagos`
+(ver `seed.py`) sobre los que quiere ver el saldo sin pagar, línea por
+línea."""
+
+
+def saldos_expensas_y_bancos(conn: sqlite3.Connection) -> dict:
+    """Pedido explícito de la clienta sobre "Carga y control": "Total
+    expensas sin abonar" (todo lo cargado en la categoría "Expensas"
+    del período vigente que todavía no se pagó) más el saldo sin pagar
+    en cada uno de los cuatro medios de pago bancarios (`MEDIOS_PAGO_
+    SALDO_BANCOS`, sin importar la categoría). Las cinco cifras son
+    sobre TODO lo cargado del período actual, sin filtrar por lo que
+    esté elegido en los combos de "Filtros" (esos filtros solo ocultan
+    filas de la tabla, ver CLAUDE.md "Filtros que solo afectan la
+    visualización") — "sin abonar"/"sin pagar" es `Estado == 'Pendiente'`,
+    nunca `Abonado` ni `Archivado`."""
+    periodo = periodo_actual(conn)
+    instancias = [
+        i for i in obtener_repositorio(conn, "InstanciaControlPago").listar(Periodo=periodo)
+        if i["Estado"] == "Pendiente"
+    ]
+    conceptos = {c["IdConcepto"]: c for c in obtener_repositorio(conn, "ConceptoControlPago").listar()}
+    total_expensas = sum(
+        i["Importe"] or 0.0 for i in instancias
+        if conceptos.get(i["IdConcepto"]) is not None and conceptos[i["IdConcepto"]]["Categoria"] == "Expensas"
+    )
+    resultado = {"total_expensas_sin_abonar": total_expensas}
+    for medio in MEDIOS_PAGO_SALDO_BANCOS:
+        resultado[medio] = sum(i["Importe"] or 0.0 for i in instancias if i["MedioPago"] == medio)
+    return resultado

@@ -14,6 +14,7 @@ from app.negocio.control_pagos import (
     generar_instancias_periodo,
     marcar_abonada,
     resumen_conteo_vencimientos,
+    saldos_expensas_y_bancos,
     texto_afectacion,
 )
 from app.repositorio.registro import obtener_repositorio
@@ -456,3 +457,64 @@ def test_resumen_conteo_vencimientos_cuenta_los_siete_buckets(conn, unidad):
     assert resumen["vencimiento_en_dias"] == 1
     assert resumen["archivados"] == 1
     assert resumen["total"] == 7
+
+
+def test_saldos_expensas_y_bancos_suma_solo_lo_pendiente_del_periodo_actual(conn, unidad):
+    """Pedido explícito de la clienta sobre "Carga y control": "Total
+    expensas sin abonar" suma todo lo cargado en la categoría
+    "Expensas" del período vigente que todavía está Pendiente (no lo
+    Abonado ni lo Archivado); los cuatro saldos bancarios suman el
+    Importe Pendiente agrupado por Medio de pago, sin importar la
+    categoría."""
+    from app.negocio.dias import periodo_actual
+
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    periodo_actual_real = periodo_actual(conn)
+
+    id_expensas_pendiente = crear_concepto(
+        conn, nombre="Expensas 9no C", categoria="Expensas", tipo_afectacion="Unidad", id_unidad=unidad,
+    )
+    id_expensas_abonada = crear_concepto(
+        conn, nombre="Expensas 15 H", categoria="Expensas", tipo_afectacion="Unidad", id_unidad=unidad,
+    )
+    id_servicio_patagonia = crear_concepto(
+        conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad,
+    )
+    generar_instancias_periodo(conn, periodo_actual_real)
+
+    def _instancia(id_concepto):
+        return repo.listar(IdConcepto=id_concepto, Periodo=periodo_actual_real)[0]
+
+    actualizar_instancia(
+        conn, _instancia(id_expensas_pendiente)["IdInstancia"], importe=5000, medio_pago="CA Bco Patagonia",
+    )
+    id_instancia_abonada = _instancia(id_expensas_abonada)["IdInstancia"]
+    actualizar_instancia(conn, id_instancia_abonada, importe=3000, medio_pago="CA Bco Patagonia")
+    marcar_abonada(conn, id_instancia_abonada)  # ya pagada: no debe sumar a "sin abonar"
+    actualizar_instancia(
+        conn, _instancia(id_servicio_patagonia)["IdInstancia"], importe=1200, medio_pago="CA Bco Patagonia",
+    )
+
+    resumen = saldos_expensas_y_bancos(conn)
+
+    assert resumen["total_expensas_sin_abonar"] == pytest.approx(5000.0)  # no suma la ya abonada
+    assert resumen["CA Bco Patagonia"] == pytest.approx(6200.0)  # expensas pendiente + servicio, no la abonada
+    assert resumen["CA Bco Provincia"] == 0.0
+    assert resumen["CA Bco Hipotecario"] == 0.0
+    assert resumen["CA Bco Macro"] == 0.0
+
+
+def test_actualizar_instancia_numero_transaccion_mapea_a_campo_libre_2(conn, unidad):
+    """Pedido explícito de la clienta: "N° transacción" se guarda por
+    instancia/pago, reusando `CampoLibre2` — distinto de "Cuenta/Id"
+    (`CampoLibre1`), que es del concepto y se hereda de un período al
+    siguiente."""
+    id_concepto = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    instancia = obtener_repositorio(conn, "InstanciaControlPago").listar(IdConcepto=id_concepto, Periodo="2026-11")[0]
+
+    actualizar_instancia(conn, instancia["IdInstancia"], numero_transaccion="OP-12345")
+
+    actualizada = obtener_repositorio(conn, "InstanciaControlPago").obtener(instancia["IdInstancia"])
+    assert actualizada["CampoLibre2"] == "OP-12345"
+    assert actualizada["CampoLibre1"] is None  # Cuenta/Id no se tocó

@@ -56,9 +56,11 @@ from app.negocio.control_pagos import (
     es_medio_pago_tarjeta,
     generar_instancias_periodo,
     marcar_abonada,
+    saldos_expensas_y_bancos,
     texto_afectacion,
 )
 from app.negocio.dias import fecha_actual, periodo_actual, sumar_meses
+from app.negocio.formato import formatear_moneda
 from app.negocio.listas_editables import opciones_lista
 from app.pdf.estilos import clave_orden_unidad
 from app.repositorio.registro import obtener_repositorio
@@ -307,6 +309,15 @@ class _DialogoEditarInstancia(QDialog):
         self.campo_cuenta_id = QLineEdit(instancia["CampoLibre1"] or "")
         layout.addWidget(self.campo_cuenta_id)
 
+        # Pedido explícito de la clienta: "por si el día de mañana tengo
+        # que consultar" — texto libre, reusa `CampoLibre2` (ver
+        # `actualizar_instancia`). A diferencia de Cuenta/Id, no se
+        # muestra en ninguna tabla ni se hereda de un período al
+        # siguiente — es el número de operación de ESE pago puntual.
+        layout.addWidget(_titulo_campo("N° transacción (opcional)"))
+        self.campo_numero_transaccion = QLineEdit(instancia["CampoLibre2"] or "")
+        layout.addWidget(self.campo_numero_transaccion)
+
         self.combo_estado: QComboBox | None = None
         if incluir_estado:
             layout.addWidget(_titulo_campo("Estado"))
@@ -325,7 +336,9 @@ class _DialogoEditarInstancia(QDialog):
         # Pedido explícito de la clienta: después de Enter en Importe,
         # el foco pasa al botón OK (así se puede confirmar con la barra
         # espaciadora) en vez de volver al principio de la cadena.
-        campos_foco = [self.campo_vencimiento, self.spin_importe, self.campo_cuenta_id]
+        campos_foco = [
+            self.campo_vencimiento, self.spin_importe, self.campo_cuenta_id, self.campo_numero_transaccion,
+        ]
         if self.combo_estado is not None:
             campos_foco.append(self.combo_estado)
         campos_foco.append(botones.button(QDialogButtonBox.StandardButton.Ok))
@@ -352,6 +365,9 @@ class _DialogoEditarInstancia(QDialog):
 
     def cuenta_id(self) -> str | None:
         return self.campo_cuenta_id.text().strip() or None
+
+    def numero_transaccion(self) -> str | None:
+        return self.campo_numero_transaccion.text().strip() or None
 
     def estado(self) -> str | None:
         return self.combo_estado.currentData() if self.combo_estado is not None else None
@@ -622,6 +638,29 @@ class _PanelCargaControl(QWidget):
         self.boton_eliminar_duplicado.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         self.boton_eliminar_duplicado.clicked.connect(self._eliminar_registro_duplicado)
         self._agregar(col3, self.boton_eliminar_duplicado)
+
+        # Pedido explícito de la clienta: cinco etiquetas más debajo de
+        # "Eliminar registro duplicado" — a diferencia de las siete
+        # etiquetas de conteo de la columna 2 (que SÍ reflejan los
+        # cuatro filtros en cascada de la columna 4), estas cinco son
+        # totales absolutos del período actual, siempre sobre TODO lo
+        # cargado (ver `saldos_expensas_y_bancos`).
+        self.etiqueta_total_expensas = QLabel()
+        self.etiqueta_saldo_patagonia = QLabel()
+        self.etiqueta_saldo_provincia = QLabel()
+        self.etiqueta_saldo_hipotecario = QLabel()
+        self.etiqueta_saldo_macro = QLabel()
+        for etiqueta in (
+            self.etiqueta_total_expensas, self.etiqueta_saldo_patagonia, self.etiqueta_saldo_provincia,
+            self.etiqueta_saldo_hipotecario, self.etiqueta_saldo_macro,
+        ):
+            # Texto largo ("Saldo a cubrir en CA Bco Patagonia: $...") —
+            # sin esto, una columna del `QHBoxLayout` de 4 columnas con
+            # `stretch=1` cada una terminaba más ancha que las otras
+            # tres para no cortar el texto.
+            etiqueta.setWordWrap(True)
+            etiqueta.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
+            self._agregar(col3, etiqueta)
         col3.addStretch(1)
 
         # Línea divisoria vertical entre la columna 3 y la columna 4 —
@@ -965,7 +1004,10 @@ class _PanelCargaControl(QWidget):
                 fila_idx, self._COL_CATEGORIA, QTableWidgetItem((concepto["Categoria"] if concepto else "") or ""),
             )
             self.tabla.setItem(fila_idx, self._COL_AFECTACION, QTableWidgetItem(afectacion))
-            self.tabla.setItem(fila_idx, self._COL_CUENTA_ID, QTableWidgetItem(instancia["CampoLibre1"] or ""))
+            # Pedido explícito de la clienta: contenido alineado a la
+            # derecha (mismo helper que las columnas numéricas, aunque
+            # "Cuenta/Id" sea texto libre).
+            self.tabla.setItem(fila_idx, self._COL_CUENTA_ID, item_numero(instancia["CampoLibre1"] or ""))
             self.tabla.setItem(
                 fila_idx, self._COL_MEDIO_PAGO, QTableWidgetItem(instancia["MedioPago"] or ""),
             )
@@ -1006,6 +1048,25 @@ class _PanelCargaControl(QWidget):
         self.tabla.setColumnWidth(self._COL_IMPORTE, ancho_importe + _PADDING_COLUMNA_IMPORTE)
         self._actualizar_botones_seleccion()
         self._actualizar_etiquetas_conteo(colores_fila, filas)
+        self._actualizar_etiquetas_expensas_bancos()
+
+    def _actualizar_etiquetas_expensas_bancos(self) -> None:
+        resumen = saldos_expensas_y_bancos(self.conn)
+        self.etiqueta_total_expensas.setText(
+            f"Total expensas sin abonar: {formatear_moneda(resumen['total_expensas_sin_abonar'])}"
+        )
+        self.etiqueta_saldo_patagonia.setText(
+            f"Saldo a cubrir en CA Bco Patagonia: {formatear_moneda(resumen['CA Bco Patagonia'])}"
+        )
+        self.etiqueta_saldo_provincia.setText(
+            f"Saldo a cubrir en CA Bco Provincia: {formatear_moneda(resumen['CA Bco Provincia'])}"
+        )
+        self.etiqueta_saldo_hipotecario.setText(
+            f"Saldo a cubrir Bco Hipotecario: {formatear_moneda(resumen['CA Bco Hipotecario'])}"
+        )
+        self.etiqueta_saldo_macro.setText(
+            f"Saldo a cubrir Bco Macro: {formatear_moneda(resumen['CA Bco Macro'])}"
+        )
 
     def _actualizar_etiquetas_conteo(self, colores_fila: list, filas: list) -> None:
         """Siete etiquetas pedidas explícitamente por la clienta, sobre
@@ -1076,7 +1137,7 @@ class _PanelCargaControl(QWidget):
                 kwargs["estado"] = "Pendiente"
             actualizar_instancia(
                 self.conn, instancia["IdInstancia"], vencimiento=dialogo.vencimiento(), importe=importe,
-                cuenta_id=dialogo.cuenta_id(), **kwargs,
+                cuenta_id=dialogo.cuenta_id(), numero_transaccion=dialogo.numero_transaccion(), **kwargs,
             )
             self.actualizar()
             self._seleccionar_instancia(instancia["IdInstancia"])
@@ -1379,6 +1440,7 @@ class _PanelHistorialControlPagos(QWidget):
             actualizar_instancia(
                 self.conn, instancia["IdInstancia"], vencimiento=dialogo.vencimiento(), importe=dialogo.importe(),
                 estado=dialogo.estado(), cuenta_id=dialogo.cuenta_id(),
+                numero_transaccion=dialogo.numero_transaccion(),
             )
             self.actualizar()
             QMessageBox.information(self, "Editar registro", "Registro actualizado con éxito.")
