@@ -1053,3 +1053,75 @@ test tocados. Verificado además contra la base de datos real adjunta
 por la clienta (`espacio_ramos.db`) que el número final del cuadrito
 queda por debajo del total liquidado, como corresponde.
 
+## Panel de control: desglose de "Total liquidado" (feriados/vacaciones/aisladas/cuotas)
+
+La clienta preguntó, con capturas reales, por qué "Monto por reservas
+regulares" sale más alto que "Total liquidado" y cómo se calcula cada
+concepto — se le explicó (y se confirmó con su base real) que la
+diferencia viene de que "Monto por reservas regulares"/"Monto por
+reservas aisladas" miran la grilla/reservas VIGENTE tal cual, mientras
+que "Total liquidado" resta lo que la liquidación de cada profesional
+descuenta por ausencias reales del mes (feriados no trabajados,
+vacaciones, licencias) y suma lo que no está en la grilla regular
+(aisladas, cuotas de planes de pago). A pedido explícito, esas cuatro
+líneas se agregan al cuadrito para que la diferencia se vea de un
+vistazo, entre "Total liquidado" y "Saldo pendiente de cobro".
+
+**Tres preguntas de la clienta, respondidas con el código real (no solo
+de palabra, confirmado leyendo `app.negocio.liquidaciones`/`vacaciones`/
+`licencias`):**
+
+1. El subtotal de reservas regulares (`Tramo.subtotal`, usado tanto por
+   `monto_neto_regular_periodo` como por `calcular_liquidacion`) YA está
+   neto del descuento por volumen de horas semanales — nunca es el
+   bruto.
+2. Feriados (recalculado día a día, con el % vigente ESE día —
+   `_monto_feriado_dia`) y vacaciones/licencias (`ValorBonificado`,
+   congelado al cargar la vacación/licencia pero YA calculado con el %
+   vigente en ese momento, ver `crear_vacacion`/`crear_licencia`) también
+   están netos de ese mismo descuento — ninguno de los dos trabaja sobre
+   el valor bruto.
+3. **Hallazgo real, corrige una suposición equivocada de la clienta**:
+   "Monto por reservas aisladas" (`monto_neto_aislada_periodo`, en
+   `app.negocio.estadisticas`) NO filtra por categoría de profesional —
+   suma TODAS las `ReservaAislada` confirmadas del período, incluidas
+   las de categoría A (que nunca entran en ninguna liquidación mensual,
+   se cobran aparte). Confirmado con la base real: de las aisladas de
+   noviembre, 58 eran de profesionales A y solo 20 de R — la mayoría del
+   monto que se ve en ese cuadrito corresponde a profesionales que
+   jamás tienen una liquidación. Dato a tener en cuenta para la "vista
+   previa de balance del negocio" que la clienta quiere armar en el
+   octavo cuadrito (en espera de más definición de su parte).
+
+### Implementación
+
+`DesgloseLiquidaciones`/`_desglose_liquidaciones_periodo` (`app/
+negocio/panel_control.py`, nuevo campo `EstadisticasPrincipales.
+desglose_liquidaciones`): recorre los profesionales con una
+`LiquidacionEmitida` este período (misma población que `_total_
+liquidado_periodo`) y recalcula la liquidación de cada uno AHORA con
+`calcular_liquidacion` — mismo criterio "en vivo" que ya usan `monto_
+neto_regular_periodo`/`monto_neto_aislada_periodo` en este mismo
+cuadrito (puede no coincidir centavo a centavo con el `MontoGenerado`
+ya congelado si algo cambió después de emitida la liquidación, mismo
+caso ya documentado para feriados/aisladas — sirve para explicar de un
+vistazo, no para una reconciliación exacta). Categoría E (se consolida
+en la liquidación de su R) y categoría B (nunca se liquida) hacen que
+`calcular_liquidacion` tire `ValueError` — se ignoran en el loop, su
+aporte ya está contado en la liquidación del R que las consolida.
+`descuento_feriados`/`descuento_vacaciones_licencias` se guardan en
+NEGATIVO (restan, mismo signo con el que ya trabaja `formatear_moneda`
+para mostrar el "-" solo); `aisladas_en_liquidaciones`/`cuotas_planes_
+pago` en positivo (suman). Tiempo medido contra la base real de la
+clienta (109 profesionales): 0.175s — no hace falta ningún `Procesando`.
+
+Tests: `tests/test_panel_control.py` (+2: escenario con los cuatro
+conceptos a la vez —feriado, vacación, aislada, cuota de plan—, montos
+verificados contra las mismas fórmulas de `calcular_liquidacion`; y
+una `LiquidacionEmitida` de categoría E con `MontoGenerado=0` no rompe
+el desglose); `tests/test_gui_panel_control.py` (+1: las cuatro líneas
+quedan entre "Total liquidado" y "Saldo pendiente de cobro"). Suite:
+35 + 65 passed, más 153 passed en la corrida conjunta con `test_
+liquidaciones.py`. pyflakes limpio en `app/negocio/panel_control.py`,
+`app/gui/pantallas/panel_control.py` y los dos archivos de test.
+
