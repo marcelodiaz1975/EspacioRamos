@@ -5,14 +5,15 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.control_pagos import (
     actualizar_instancia,
     archivar_instancia,
-    archivar_pendientes_del_periodo,
     crear_concepto,
     dar_de_baja_concepto,
     duplicar_para_periodo_proximo,
     editar_concepto,
     eliminar_instancia_duplicada,
+    es_medio_pago_tarjeta,
     generar_instancias_periodo,
     marcar_abonada,
+    resumen_conteo_vencimientos,
     texto_afectacion,
 )
 from app.repositorio.registro import obtener_repositorio
@@ -203,29 +204,6 @@ def test_editar_concepto_cambia_afectacion_y_limpia_la_anterior(conn, unidad):
     assert concepto["IdUnidad"] is None
 
 
-def test_archivar_pendientes_del_periodo_archiva_sin_mirar_datos_cargados(conn, unidad):
-    """A diferencia de `archivar_instancia` (el botón manual, que exige
-    vencimiento/importe vacíos), el barrido automático del cierre de
-    mes archiva SIEMPRE lo que quedó Pendiente, con o sin datos
-    cargados — y no toca lo que ya está Abonado."""
-    id_con_datos = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
-    id_sin_datos = crear_concepto(conn, nombre="AYSA", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
-    id_abonado = crear_concepto(conn, nombre="ARBA", categoria="Impuestos", tipo_afectacion="Unidad", id_unidad=unidad)
-    generar_instancias_periodo(conn, "2026-11")
-    repo = obtener_repositorio(conn, "InstanciaControlPago")
-    instancia_con_datos = repo.listar(IdConcepto=id_con_datos, Periodo="2026-11")[0]
-    instancia_abonada = repo.listar(IdConcepto=id_abonado, Periodo="2026-11")[0]
-    actualizar_instancia(conn, instancia_con_datos["IdInstancia"], vencimiento="2026-11-10", importe=1000)
-    marcar_abonada(conn, instancia_abonada["IdInstancia"])
-
-    cantidad = archivar_pendientes_del_periodo(conn, "2026-11")
-
-    assert cantidad == 2
-    assert repo.obtener(instancia_con_datos["IdInstancia"])["Estado"] == "Archivado"
-    instancia_sin_datos = repo.listar(IdConcepto=id_sin_datos, Periodo="2026-11")[0]
-    assert repo.obtener(instancia_sin_datos["IdInstancia"])["Estado"] == "Archivado"
-    assert repo.obtener(instancia_abonada["IdInstancia"])["Estado"] == "Abonado"
-
 
 def test_duplicar_para_periodo_proximo_crea_en_blanco_solo_con_medio_de_pago(conn, unidad):
     """Pedido explícito de la clienta (confirmado): nunca copia
@@ -316,3 +294,99 @@ def test_gasto_manual_existente_no_se_pisa_al_sincronizar(conn, unidad):
     assert len(gastos) == 1
     assert gastos[0]["Origen"] == "Manual"
     assert gastos[0]["Monto"] == 1000
+
+
+def test_es_medio_pago_tarjeta_detecta_por_substring():
+    """No por nombre exacto (el combo de Medio de pago es editable) —
+    por contener "tarjeta", sin distinguir mayúsculas."""
+    assert es_medio_pago_tarjeta("Tarjeta Bco Macro") is True
+    assert es_medio_pago_tarjeta("tarjeta de crédito nueva") is True
+    assert es_medio_pago_tarjeta("CA Bco Macro") is False
+    assert es_medio_pago_tarjeta("Pago manual") is False
+    assert es_medio_pago_tarjeta(None) is False
+
+
+def test_generar_instancias_periodo_hereda_cuenta_id_de_la_instancia_mas_reciente(conn, unidad):
+    """"Cuenta/Id" (`CampoLibre1`) es una referencia estable del
+    concepto aunque viva en la tabla de instancias — se hereda sola en
+    los períodos siguientes, sin volver a tipearla."""
+    id_concepto = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia_nov = repo.listar(IdConcepto=id_concepto, Periodo="2026-11")[0]
+    actualizar_instancia(conn, instancia_nov["IdInstancia"], cuenta_id="12345-6")
+
+    generar_instancias_periodo(conn, "2026-12")
+
+    instancia_dic = repo.listar(IdConcepto=id_concepto, Periodo="2026-12")[0]
+    assert instancia_dic["CampoLibre1"] == "12345-6"
+
+
+def test_generar_instancias_periodo_sin_cuenta_id_previa_queda_en_blanco(conn, unidad):
+    id_concepto = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    assert repo.listar(IdConcepto=id_concepto, Periodo="2026-11")[0]["CampoLibre1"] is None
+
+
+def test_duplicar_para_periodo_proximo_copia_cuenta_id(conn, unidad):
+    id_concepto = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia = repo.listar(IdConcepto=id_concepto, Periodo="2026-11")[0]
+    actualizar_instancia(conn, instancia["IdInstancia"], cuenta_id="98765-4")
+
+    id_nuevo = duplicar_para_periodo_proximo(conn, instancia["IdInstancia"])
+
+    assert repo.obtener(id_nuevo)["CampoLibre1"] == "98765-4"
+
+
+def test_actualizar_instancia_cuenta_id_se_puede_editar_y_vaciar(conn, unidad):
+    id_concepto = crear_concepto(conn, nombre="Edenor", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancia = repo.listar(IdConcepto=id_concepto, Periodo="2026-11")[0]
+
+    actualizar_instancia(conn, instancia["IdInstancia"], cuenta_id="11-22")
+    assert repo.obtener(instancia["IdInstancia"])["CampoLibre1"] == "11-22"
+
+    actualizar_instancia(conn, instancia["IdInstancia"], cuenta_id=None)
+    assert repo.obtener(instancia["IdInstancia"])["CampoLibre1"] is None
+
+
+def test_resumen_conteo_vencimientos_cuenta_los_siete_buckets(conn, unidad):
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-11-15' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+
+    id_sin_datos = crear_concepto(conn, nombre="Sin datos", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_vencido = crear_concepto(conn, nombre="Vencido", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_hoy = crear_concepto(conn, nombre="Hoy", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_mañana = crear_concepto(conn, nombre="Mañana", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_en_dias = crear_concepto(conn, nombre="En días", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_abonado = crear_concepto(conn, nombre="Abonado", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    id_archivado = crear_concepto(conn, nombre="Archivado", categoria="Servicios", tipo_afectacion="Unidad", id_unidad=unidad)
+    generar_instancias_periodo(conn, "2026-11")
+
+    def _instancia(id_concepto):
+        return repo.listar(IdConcepto=id_concepto, Periodo="2026-11")[0]
+
+    actualizar_instancia(conn, _instancia(id_vencido)["IdInstancia"], vencimiento="2026-11-10", importe=1000)
+    actualizar_instancia(conn, _instancia(id_hoy)["IdInstancia"], vencimiento="2026-11-15", importe=1000)
+    actualizar_instancia(conn, _instancia(id_mañana)["IdInstancia"], vencimiento="2026-11-16", importe=1000)
+    actualizar_instancia(conn, _instancia(id_en_dias)["IdInstancia"], vencimiento="2026-11-20", importe=1000)
+    marcar_abonada(conn, _instancia(id_abonado)["IdInstancia"])
+    archivar_instancia(conn, _instancia(id_archivado)["IdInstancia"])
+    _ = id_sin_datos  # el concepto sin datos queda Pendiente sin cargar, cuenta en "por_cargar"
+
+    resumen = resumen_conteo_vencimientos(conn)
+
+    assert resumen["por_cargar"] == 1
+    assert resumen["vencimiento_vencido"] == 1
+    assert resumen["vencimiento_hoy"] == 1
+    assert resumen["vencimiento_mañana"] == 1
+    assert resumen["vencimiento_en_dias"] == 1
+    assert resumen["archivados"] == 1
+    assert resumen["total"] == 7

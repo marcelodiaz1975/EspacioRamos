@@ -193,8 +193,8 @@ def test_tabla_carga_control_tiene_columna_periodo_despues_de_medio_de_pago(qtbo
     assert [
         panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())
     ] == [
-        "Nombre", "Categoría", "Afectación", "Medio de pago", "Período", "Vencimiento", "Importe", "Estado",
-        "", "", "",
+        "Nombre", "Categoría", "Afectación", "Cuenta/Id", "Medio de pago", "Período", "Vencimiento", "Importe",
+        "Estado", "", "", "", "",
     ]
     assert panel.tabla.item(0, panel._COL_PERIODO).text() == periodo_actual(conn)
 
@@ -204,6 +204,10 @@ def test_botones_de_registro_deshabilitados_sin_seleccion(qtbot, conn, unidad):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_carga_control
     _crear_concepto_unidad(panel, unidad)
+    # Pedido explícito de la clienta: crear un concepto deja la
+    # instancia nueva seleccionada — para probar "sin selección" hay
+    # que sacarla a mano.
+    panel.tabla.clearSelection()
 
     for boton in (
         panel.boton_editar_concepto, panel.boton_dar_de_baja, panel.boton_duplicar_periodo_proximo,
@@ -468,3 +472,289 @@ def test_catalogos_anidados_de_afectacion_funcionan(qtbot, conn):
     for panel in (pantalla.panel_inmuebles_personales, pantalla.panel_rodados, pantalla.panel_personas):
         assert panel.objectName() == "panelSolapa"
         assert panel.anidado is True
+
+
+def _instancia_actual(conn, panel, nombre="Edenor"):
+    concepto = next(
+        c for c in obtener_repositorio(conn, "ConceptoControlPago").listar() if c["Nombre"] == nombre
+    )
+    return obtener_repositorio(conn, "InstanciaControlPago").listar(
+        IdConcepto=concepto["IdConcepto"], Periodo=periodo_actual(conn),
+    )[0]
+
+
+def test_dialogo_editar_instancia_sin_vencimiento_precarga_hoy(qtbot, conn, unidad):
+    """Pedido explícito de la clienta: en vez de quedar en "(sin
+    fecha)", se precarga con la fecha de hoy — así Flecha arriba/abajo
+    (ya instalado por `_campo_fecha`) la mueve cerca de hoy."""
+    from app.gui.pantallas.control_pagos import _DialogoEditarInstancia
+    from app.negocio.dias import fecha_actual
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="CA Bco Hipotecario")
+    instancia = _instancia_actual(conn, panel)
+
+    dialogo = _DialogoEditarInstancia(conn, instancia, parent=panel)
+
+    hoy = fecha_actual(conn)
+    assert dialogo.campo_vencimiento.date().toPython() == hoy
+    assert dialogo.campo_vencimiento.isEnabled()
+
+
+def test_dialogo_editar_instancia_tarjeta_deshabilita_vencimiento(qtbot, conn, unidad):
+    from app.gui.pantallas.control_pagos import _DialogoEditarInstancia
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="Tarjeta Bco Macro")
+    instancia = _instancia_actual(conn, panel)
+
+    dialogo = _DialogoEditarInstancia(conn, instancia, parent=panel)
+
+    assert not dialogo.campo_vencimiento.isEnabled()
+
+
+def test_editar_item_tarjeta_al_cargar_importe_queda_abonado_directo(qtbot, conn, unidad, monkeypatch):
+    """Pedido explícito de la clienta: una tarjeta solo admite Importe
+    — al cargarlo, la instancia queda Abonada sin pasar por el botón
+    "Abonar"."""
+    from PySide6.QtWidgets import QDialog
+
+    import app.gui.pantallas.control_pagos as control_pagos_modulo
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="Tarjeta Bco Macro")
+    instancia = _instancia_actual(conn, panel)
+    panel.tabla.selectRow(0)
+
+    class _DialogoFalso:
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def vencimiento(self):
+            return None
+
+        def importe(self):
+            return 1500.0
+
+        def cuenta_id(self):
+            return None
+
+    monkeypatch.setattr(control_pagos_modulo, "_DialogoEditarInstancia", lambda *a, **k: _DialogoFalso())
+    panel._editar_instancia(instancia)
+
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    assert repo.obtener(instancia["IdInstancia"])["Estado"] == "Abonado"
+
+
+def test_dialogo_editar_instancia_manual_exige_vencimiento_e_importe_juntos(qtbot, conn, unidad, monkeypatch):
+    """Pedido explícito de la clienta: para un medio de pago NO tarjeta
+    (débito manual de una caja de ahorro), vencimiento e importe van
+    juntos — no se puede aceptar con uno solo cargado."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from app.gui.pantallas.control_pagos import _DialogoEditarInstancia
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="CA Bco Hipotecario")
+    instancia = _instancia_actual(conn, panel)
+
+    dialogo = _DialogoEditarInstancia(conn, instancia, parent=panel)
+    dialogo.spin_importe.setValue(0)  # vencimiento queda precargado con hoy, importe en blanco
+    avisos = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: avisos.append(a)))
+
+    dialogo.accept()
+
+    assert len(avisos) == 1
+    assert dialogo.result() != dialogo.DialogCode.Accepted
+
+
+def test_dialogo_editar_instancia_manual_acepta_los_dos_en_blanco(qtbot, conn, unidad):
+    from PySide6.QtWidgets import QDialog
+
+    from app.gui.pantallas.control_pagos import _DialogoEditarInstancia
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="CA Bco Hipotecario")
+    instancia = _instancia_actual(conn, panel)
+
+    dialogo = _DialogoEditarInstancia(conn, instancia, parent=panel)
+    dialogo.campo_vencimiento.setDate(dialogo.campo_vencimiento.minimumDate())
+    dialogo.spin_importe.setValue(0)
+
+    dialogo.accept()
+
+    assert dialogo.result() == QDialog.DialogCode.Accepted
+
+
+def test_tabla_carga_control_cuenta_id_despues_de_afectacion_y_ancho_igual_a_categoria(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    panel.campo_cuenta_id.setText("12345-6")
+    _crear_concepto_unidad(panel, unidad)
+
+    assert panel.tabla.item(0, panel._COL_CUENTA_ID).text() == "12345-6"
+    assert panel.tabla.columnWidth(panel._COL_CUENTA_ID) == panel.tabla.columnWidth(panel._COL_CATEGORIA)
+
+
+def test_tabla_carga_control_importe_un_20_por_ciento_mas_ancho(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad)
+    ancho_achicado = panel.tabla.columnWidth(panel._COL_IMPORTE)
+
+    panel.tabla.resizeColumnToContents(panel._COL_IMPORTE)
+
+    assert abs(ancho_achicado - round(panel.tabla.columnWidth(panel._COL_IMPORTE) * 1.2)) <= 1
+
+
+def test_boton_deshacer_deshabilitado_sin_datos_habilitado_con_datos(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="CA Bco Hipotecario")
+    boton_deshacer = panel.tabla.cellWidget(0, panel._COL_DESHACER)
+    assert not boton_deshacer.isEnabled()
+
+    instancia = _instancia_actual(conn, panel)
+    from app.negocio.control_pagos import actualizar_instancia
+    actualizar_instancia(conn, instancia["IdInstancia"], vencimiento="2026-12-01", importe=500)
+    panel.actualizar()
+
+    boton_deshacer = panel.tabla.cellWidget(0, panel._COL_DESHACER)
+    assert boton_deshacer.isEnabled()
+
+
+def test_deshacer_vacia_vencimiento_e_importe_y_vuelve_a_pendiente(qtbot, conn, unidad):
+    from app.negocio.control_pagos import actualizar_instancia
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="CA Bco Hipotecario")
+    instancia = _instancia_actual(conn, panel)
+    actualizar_instancia(conn, instancia["IdInstancia"], vencimiento="2026-12-01", importe=500)
+    panel.actualizar()
+
+    panel._deshacer(obtener_repositorio(conn, "InstanciaControlPago").obtener(instancia["IdInstancia"]))
+
+    actualizada = obtener_repositorio(conn, "InstanciaControlPago").obtener(instancia["IdInstancia"])
+    assert actualizada["Vencimiento"] is None
+    assert actualizada["Importe"] is None
+    assert actualizada["Estado"] == "Pendiente"
+
+
+def test_editar_item_archivado_lo_vuelve_a_pendiente(qtbot, conn, unidad, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    import app.gui.pantallas.control_pagos as control_pagos_modulo
+    from app.negocio.control_pagos import archivar_instancia
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="CA Bco Hipotecario")
+    instancia = _instancia_actual(conn, panel)
+    archivar_instancia(conn, instancia["IdInstancia"])
+    panel.actualizar()
+    instancia_archivada = obtener_repositorio(conn, "InstanciaControlPago").obtener(instancia["IdInstancia"])
+    assert instancia_archivada["Estado"] == "Archivado"
+
+    class _DialogoFalso:
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def vencimiento(self):
+            return "2026-12-05"
+
+        def importe(self):
+            return 700.0
+
+        def cuenta_id(self):
+            return None
+
+    monkeypatch.setattr(control_pagos_modulo, "_DialogoEditarInstancia", lambda *a, **k: _DialogoFalso())
+    panel._editar_instancia(instancia_archivada)
+
+    resultado = obtener_repositorio(conn, "InstanciaControlPago").obtener(instancia["IdInstancia"])
+    assert resultado["Estado"] == "Pendiente"
+
+
+def test_crear_concepto_deja_la_instancia_nueva_seleccionada(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad)
+
+    filas = panel.tabla.selectionModel().selectedRows()
+    assert len(filas) == 1
+    assert panel._registros[filas[0].row()]["IdInstancia"] == _instancia_actual(conn, panel)["IdInstancia"]
+
+
+def test_etiquetas_de_conteo_reflejan_lo_que_esta_en_pantalla(qtbot, conn, unidad):
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-11-15' WHERE IdConfiguracion = 1"
+    )
+    conn.commit()
+    from app.negocio.control_pagos import actualizar_instancia
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, nombre="Sin datos")
+    _crear_concepto_unidad(panel, unidad, nombre="Vence hoy")
+    instancia_hoy = _instancia_actual(conn, panel, nombre="Vence hoy")
+    actualizar_instancia(conn, instancia_hoy["IdInstancia"], vencimiento="2026-11-15", importe=1000)
+    panel.actualizar()
+
+    assert panel.etiqueta_conteo_por_cargar.text() == "Conceptos por cargar: 1"
+    assert panel.etiqueta_conteo_vencimiento_hoy.text() == "Con vencimiento hoy: 1"
+    assert panel.etiqueta_conteo_total.text() == "Total conceptos: 2"
+
+
+def test_dialogo_editar_instancia_foco_despues_de_importe_va_al_boton_ok(qtbot, conn, unidad):
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    from app.gui.pantallas.control_pagos import _DialogoEditarInstancia
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel, unidad, medio_pago="CA Bco Hipotecario")
+    instancia = _instancia_actual(conn, panel)
+
+    dialogo = _DialogoEditarInstancia(conn, instancia, parent=panel)
+    boton_ok = None
+    for boton in dialogo.findChildren(QDialogButtonBox):
+        boton_ok = boton.button(QDialogButtonBox.StandardButton.Ok)
+    assert boton_ok in dialogo._foco._orden
+
+
+def test_spin_importe_control_pagos_acepta_punto_como_decimal(qtbot, conn):
+    from app.gui.pantallas.control_pagos import _SpinImporteControlPagos
+
+    spin = _SpinImporteControlPagos()
+    qtbot.addWidget(spin)
+    spin.setRange(0, 100_000_000)
+    spin.setDecimals(2)
+
+    assert spin.valueFromText("1500.50") == 1500.50
+    assert spin.valueFromText("1500,50") == 1500.50

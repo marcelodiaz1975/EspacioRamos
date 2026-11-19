@@ -331,10 +331,11 @@ def test_avanzar_mes_elimina_fechas_especiales_del_periodo_cerrado_y_anteriores(
     assert [f["IdFecha"] for f in restantes] == [id_futura]
 
 
-def test_avanzar_mes_archiva_instancias_de_control_pagos_no_abonadas_del_periodo_cerrado(conn):
-    """Pedido explícito de la clienta: al avanzar de mes, todo lo que
-    quedó Pendiente del período que se cierra se archiva solo — lo
-    Abonado no se toca."""
+def test_avanzar_mes_no_toca_las_instancias_de_control_pagos_pendientes_del_periodo_cerrado(conn):
+    """Pedido explícito de la clienta (ronda posterior a la que
+    archivaba solas las no abonadas al cerrar el mes): lo Pendiente
+    queda en pantalla tal cual hasta que ella decida archivarlo o
+    marcarlo como abonado — avanzar de mes no lo toca."""
     from app.negocio.control_pagos import crear_concepto, generar_instancias_periodo, marcar_abonada
 
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
@@ -346,11 +347,10 @@ def test_avanzar_mes_archiva_instancias_de_control_pagos_no_abonadas_del_periodo
     instancia_abonada = repo.listar(IdConcepto=id_abonado, Periodo="2026-08")[0]
     marcar_abonada(conn, instancia_abonada["IdInstancia"])
 
-    resumen = avanzar_mes(conn, periodo_cerrado="2026-08")
+    avanzar_mes(conn, periodo_cerrado="2026-08")
 
-    assert resumen.instancias_control_pagos_archivadas == 1
     instancia_pendiente = repo.listar(IdConcepto=id_pendiente, Periodo="2026-08")[0]
-    assert instancia_pendiente["Estado"] == "Archivado"
+    assert instancia_pendiente["Estado"] == "Pendiente"
     assert repo.obtener(instancia_abonada["IdInstancia"])["Estado"] == "Abonado"
 
 

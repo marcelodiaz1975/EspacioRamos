@@ -476,3 +476,76 @@ saldos_se_achican_un_40_por_ciento` (achicado vs. natural post-carga,
 encabezados_partidos_en_dos_lineas` (alto de encabezado crece, sin
 asumir un múltiplo exacto). Suite completa de `test_gui_pagos.py` sin
 regresiones (87 tests).
+
+## Control de pagos (Carga y control): doce pedidos sobre vencimiento/importe/columna nueva/deshacer/etiquetas de conteo
+
+Ronda grande de pedidos puntuales de la clienta sobre `_PanelCargaControl`
+y `_DialogoEditarInstancia` (`app/gui/pantallas/control_pagos.py`):
+
+- El campo Vencimiento, al editar, arranca en la fecha de hoy (no en
+  "(sin fecha)") para que las flechas de teclado (`instalar_flechas_
+  cambian_fecha_completa`) muevan la fecha real día por día desde un
+  punto cercano, en vez de saltar desde la fecha mínima sentinel.
+- El campo Importe acepta "." como separador decimal además de ",":
+  `_SpinImporteControlPagos(_SpinMonto)` sobreescribe solo
+  `valueFromText` — cambio acotado a Control de pagos, no al
+  `_SpinMonto` compartido con Pagos.
+- Editar un ítem Archivado lo reabre como Pendiente (disponible para
+  abonar/archivar de nuevo).
+- Enter en el campo Importe avanza el foco a los botones del diálogo
+  (para poder confirmar con Espacio).
+- Conceptos con medio de pago "tarjeta" (`es_medio_pago_tarjeta`,
+  substring case-insensitive, mismo criterio que `_es_transferencia`/
+  `_es_sobre` en el resto del sistema): Vencimiento queda deshabilitado,
+  solo se carga Importe, y cargarlo marca la instancia Abonada
+  directamente.
+- Conceptos pagados a mano (caja de ahorro, no tarjeta): Vencimiento e
+  Importe van siempre juntos — cargar uno sin el otro rechaza el
+  diálogo con un aviso.
+- Columna nueva "Cuenta/Id" después de "Afectación": texto libre,
+  opcional, para el número de cuenta/servicio. Reusa `CampoLibre1` de
+  `InstanciaControlPago` (confirmado por `schema.sql` que ese campo
+  vive solo ahí, no en `ConceptoControlPago`) y se hereda de la
+  instancia más reciente del mismo concepto que lo tenga cargado
+  (`_cuenta_id_heredada`) al generar instancias nuevas o duplicar al
+  período próximo — se comporta como si fuera un dato del concepto sin
+  tocar el esquema. Ancho igual al de "Categoría", sacado mitad de
+  "Nombre" y mitad de "Afectación".
+- Los ítems Pendientes (sin vencimiento/importe) ya NO se archivan
+  solos al avanzar de mes — quedan en pantalla indefinidamente hasta
+  que se cargan o se archivan a mano. Se revierte `archivar_pendientes_
+  del_periodo` (`app/negocio/control_pagos.py`), que una ronda anterior
+  había sumado — se eliminó entera (función, llamada desde `avance_mes.
+  py`, campo del resumen, test). El avance de mes sigue generando las
+  instancias del período nuevo como siempre.
+- Botón "↩" (Deshacer) al final de cada fila, habilitado solo si la
+  fila tiene vencimiento o importe cargado: limpia los dos campos y
+  vuelve el ítem a Pendiente. Ancho sacado mitad de "Nombre" y mitad de
+  "Afectación".
+- Ancho de "Importe" +20% (mismo reparto mitad "Nombre"/mitad
+  "Afectación").
+- Cargar o editar un concepto deja la selección de la tabla parada en
+  esa fila (`_seleccionar_instancia`, llamado también después de crear,
+  abonar, archivar y duplicar al período próximo).
+- Cuatro etiquetas nuevas debajo de "Crear concepto": "Conceptos por
+  cargar", "Con vencimiento hoy", "Con vencimiento mañana", "Con
+  vencimiento en días" — y dos más debajo de "Eliminar registro
+  duplicado": "Con vencimiento vencido", "Conceptos archivados", más
+  "Total conceptos". Los siete conteos salen de `resumen_conteo_
+  vencimientos` (`app/negocio/control_pagos.py`), compartida con la
+  tarjeta nueva de Panel de control (ver más abajo) para no duplicar el
+  cálculo — en "Carga y control" se calculan además los cuatro filtros
+  en cascada que ya tenía la pantalla, mientras que en Panel de control
+  es el total sin filtrar.
+
+Tests: ~6 nuevos en `tests/test_control_pagos.py` (detección de tarjeta,
+herencia de Cuenta/Id en generar/duplicar, `resumen_conteo_vencimientos`
+de siete buckets), renombrado el test de avance de mes en `tests/
+test_avance_mes.py` a `test_avanzar_mes_no_toca_las_instancias_de_
+control_pagos_pendientes_del_periodo_cerrado`, y ~15 nuevos en `tests/
+test_gui_control_pagos.py` (default de fecha, tarjeta deshabilita
+vencimiento y auto-abona, pago manual exige los dos campos juntos,
+columna Cuenta/Id, +20% de Importe, Deshacer habilitado/limpia, editar
+archivado reabre a Pendiente, selección tras crear/editar, etiquetas de
+conteo, foco a OK, parseo de "."). Suite completa: 23 + 40 tests,
+verificados sin regresiones.

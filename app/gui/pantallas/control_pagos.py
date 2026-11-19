@@ -52,6 +52,7 @@ from app.negocio.control_pagos import (
     duplicar_para_periodo_proximo,
     editar_concepto,
     eliminar_instancia_duplicada,
+    es_medio_pago_tarjeta,
     generar_instancias_periodo,
     marcar_abonada,
     texto_afectacion,
@@ -92,6 +93,22 @@ _COLORES_CON_LETRA_NEGRA = {"amarillo"}
 # Tipos de Afectación que necesitan un combo de detalle (el resto,
 # "Espacio general"/"Familia", no apuntan a ningún registro puntual).
 _TIPOS_CON_DETALLE = ("Edificio", "Unidad", "Inmueble personal", "Rodado", "Persona")
+
+
+class _SpinImporteControlPagos(_SpinMonto):
+    """Como `_SpinMonto` (misma presentación "$ 1.234,56"), pero al
+    tipear admite el "." como separador decimal — pedido explícito de
+    la clienta, puntual de los campos "Importe" de esta pantalla (no
+    se tocó `_SpinMonto`, que sigue esperando "," en el resto del
+    sistema). También acepta "," (no hace falta reaprender), así que
+    no rompe nada tipeado a la vieja usanza."""
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        texto = text.strip().replace("$", "").replace(",", ".").strip()
+        try:
+            return float(texto) if texto else 0.0
+        except ValueError:
+            return 0.0
 
 
 def _opciones_edificio(conn: sqlite3.Connection) -> list[tuple[int, str]]:
@@ -205,11 +222,20 @@ class _DialogoEditarInstancia(QDialog):
     pasar por "Marcar abonado"/"Archivar" por separado. El "Editar
     registro" de "Carga y control" no lo necesita (ahí ya están
     "Marcar abonado"/"Archivar registro" aparte), así que queda en
-    `False` por default."""
+    `False` por default.
+
+    Pedido explícito de la clienta sobre el Medio de pago del concepto
+    (`es_medio_pago_tarjeta`): si es "tarjeta", Vencimiento queda
+    deshabilitado (una tarjeta no se controla por vencimiento acá, solo
+    por Importe) y no es obligatorio cargar nada; si NO es tarjeta
+    (débito manual de una caja de ahorro, "CA Bco X", o "Pago manual"),
+    Vencimiento e Importe son obligatorios JUNTOS al aceptar (`accept`,
+    ver abajo) — o los dos cargados, o los dos en blanco."""
 
     def __init__(self, conn: sqlite3.Connection, instancia: sqlite3.Row, parent=None, *, incluir_estado: bool = False):
         super().__init__(parent)
         self.setWindowTitle("Editar vencimiento, monto y estado" if incluir_estado else "Editar vencimiento y monto")
+        self._es_tarjeta = es_medio_pago_tarjeta(instancia["MedioPago"])
         layout = QVBoxLayout(self)
 
         layout.addWidget(_titulo_campo("Vencimiento"))
@@ -217,15 +243,27 @@ class _DialogoEditarInstancia(QDialog):
         if instancia["Vencimiento"]:
             from PySide6.QtCore import QDate
             self.campo_vencimiento.setDate(QDate.fromString(instancia["Vencimiento"], "yyyy-MM-dd"))
+        elif not self._es_tarjeta:
+            # Pedido explícito de la clienta: precargada con la fecha de
+            # hoy (en vez de quedar en "(sin fecha)") para que Flecha
+            # arriba/abajo (`instalar_flechas_cambian_fecha_completa`,
+            # ya instalado por `_campo_fecha`) la mueva de a un día real
+            # cerca de hoy, no desde el mínimo sentinel.
+            self.campo_vencimiento.setDate(fecha_actual(conn))
+        self.campo_vencimiento.setEnabled(not self._es_tarjeta)
         layout.addWidget(self.campo_vencimiento)
 
         layout.addWidget(_titulo_campo("Importe"))
-        self.spin_importe = _SpinMonto()
+        self.spin_importe = _SpinImporteControlPagos()
         self.spin_importe.setRange(0, 100_000_000)
         self.spin_importe.setDecimals(2)
         self.spin_importe.setSpecialValueText("(sin cargar)")
         self.spin_importe.setValue(instancia["Importe"] or 0)
         layout.addWidget(self.spin_importe)
+
+        layout.addWidget(_titulo_campo("Cuenta/Id (opcional)"))
+        self.campo_cuenta_id = QLineEdit(instancia["CampoLibre1"] or "")
+        layout.addWidget(self.campo_cuenta_id)
 
         self.combo_estado: QComboBox | None = None
         if incluir_estado:
@@ -242,10 +280,24 @@ class _DialogoEditarInstancia(QDialog):
         botones.accepted.connect(self.accept)
         botones.rejected.connect(self.reject)
         layout.addWidget(botones)
-        campos_foco = [self.campo_vencimiento, self.spin_importe]
+        # Pedido explícito de la clienta: después de Enter en Importe,
+        # el foco pasa al botón OK (así se puede confirmar con la barra
+        # espaciadora) en vez de volver al principio de la cadena.
+        campos_foco = [self.campo_vencimiento, self.spin_importe, self.campo_cuenta_id]
         if self.combo_estado is not None:
             campos_foco.append(self.combo_estado)
+        campos_foco.append(botones.button(QDialogButtonBox.StandardButton.Ok))
         self._foco = instalar_enter_avanza_foco(campos_foco, parent=self)
+
+    def accept(self) -> None:  # noqa: N802
+        if not self._es_tarjeta and (self.vencimiento() is None) != (self.importe() is None):
+            QMessageBox.warning(
+                self, "Editar",
+                "Para este medio de pago, el vencimiento y el importe van juntos: "
+                "cargá los dos o dejá los dos en blanco.",
+            )
+            return
+        super().accept()
 
     def vencimiento(self) -> str | None:
         return (
@@ -255,6 +307,9 @@ class _DialogoEditarInstancia(QDialog):
 
     def importe(self) -> float | None:
         return None if self.spin_importe.value() == 0 else self.spin_importe.value()
+
+    def cuenta_id(self) -> str | None:
+        return self.campo_cuenta_id.text().strip() or None
 
     def estado(self) -> str | None:
         return self.combo_estado.currentData() if self.combo_estado is not None else None
@@ -335,9 +390,9 @@ class _DialogoEditarConcepto(QDialog):
 
 
 class _PanelCargaControl(QWidget):
-    _COL_NOMBRE, _COL_CATEGORIA, _COL_AFECTACION, _COL_MEDIO_PAGO = 0, 1, 2, 3
-    _COL_PERIODO, _COL_VENCIMIENTO, _COL_IMPORTE, _COL_ESTADO = 4, 5, 6, 7
-    _COL_EDITAR, _COL_ABONAR, _COL_ARCHIVAR = 8, 9, 10
+    _COL_NOMBRE, _COL_CATEGORIA, _COL_AFECTACION, _COL_CUENTA_ID = 0, 1, 2, 3
+    _COL_MEDIO_PAGO, _COL_PERIODO, _COL_VENCIMIENTO, _COL_IMPORTE, _COL_ESTADO = 4, 5, 6, 7, 8
+    _COL_EDITAR, _COL_ABONAR, _COL_ARCHIVAR, _COL_DESHACER = 9, 10, 11, 12
 
     # Sentinel para "sin filtro" en los 4 combos de la columna 4 — no
     # se usa `None`, que puede ser un valor real (ej. una Categoría sin
@@ -428,6 +483,15 @@ class _PanelCargaControl(QWidget):
         self.combo_tipo_afectacion.currentIndexChanged.connect(self._actualizar_detalle_afectacion)
         self._actualizar_detalle_afectacion()
 
+        # Pedido explícito de la clienta: referencia libre (número de
+        # cuenta o de servicio), no obligatoria — reusa `CampoLibre1`
+        # de `InstanciaControlPago` (ver `_cuenta_id_heredada`, que la
+        # hereda sola en los períodos siguientes sin volver a tipearla).
+        self._agregar(col1, _titulo_campo("Cuenta/Id (opcional)"))
+        self.campo_cuenta_id = QLineEdit()
+        self.campo_cuenta_id.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
+        self._agregar(col1, self.campo_cuenta_id)
+
         self._agregar(col1, _titulo_campo("Medio de pago"))
         self.combo_medio_pago = QComboBox()
         self.combo_medio_pago.setEditable(True)
@@ -446,7 +510,7 @@ class _PanelCargaControl(QWidget):
         self._agregar(col2, self.campo_vencimiento)
 
         self._agregar(col2, _titulo_campo("Importe (opcional)"))
-        self.spin_importe = _SpinMonto()
+        self.spin_importe = _SpinImporteControlPagos()
         self.spin_importe.setRange(0, 100_000_000)
         self.spin_importe.setDecimals(2)
         self.spin_importe.setSpecialValueText("(sin cargar)")
@@ -458,6 +522,20 @@ class _PanelCargaControl(QWidget):
         self.boton_crear.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         self.boton_crear.clicked.connect(self._crear)
         self._agregar(col2, self.boton_crear)
+
+        # Pedido explícito de la clienta: cuatro etiquetas de conteo
+        # debajo de "Crear concepto" — los mismos buckets de color que
+        # ya usa `_color_fila`, sobre lo que está actualmente en
+        # pantalla (post-filtro). Se actualizan en cada `actualizar()`.
+        self.etiqueta_conteo_por_cargar = QLabel()
+        self.etiqueta_conteo_vencimiento_hoy = QLabel()
+        self.etiqueta_conteo_vencimiento_mañana = QLabel()
+        self.etiqueta_conteo_vencimiento_en_dias = QLabel()
+        for etiqueta in (
+            self.etiqueta_conteo_por_cargar, self.etiqueta_conteo_vencimiento_hoy,
+            self.etiqueta_conteo_vencimiento_mañana, self.etiqueta_conteo_vencimiento_en_dias,
+        ):
+            self._agregar(col2, etiqueta)
         col2.addStretch(1)
 
         # Columna 3: los 4 botones secundarios sobre el CONCEPTO
@@ -496,6 +574,15 @@ class _PanelCargaControl(QWidget):
         self.boton_eliminar_duplicado.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         self.boton_eliminar_duplicado.clicked.connect(self._eliminar_registro_duplicado)
         self._agregar(col3, self.boton_eliminar_duplicado)
+
+        # Pedido explícito de la clienta: tres etiquetas de conteo más,
+        # debajo de "Eliminar registro duplicado" — mismo mecanismo que
+        # las cuatro de la columna 2.
+        self.etiqueta_conteo_vencido = QLabel()
+        self.etiqueta_conteo_archivados = QLabel()
+        self.etiqueta_conteo_total = QLabel()
+        for etiqueta in (self.etiqueta_conteo_vencido, self.etiqueta_conteo_archivados, self.etiqueta_conteo_total):
+            self._agregar(col3, etiqueta)
         col3.addStretch(1)
 
         # Columna 4: los filtros, en cascada MUTUA (sin jerarquía entre
@@ -537,10 +624,10 @@ class _PanelCargaControl(QWidget):
         # columna 1 — "Editar"/"Abonar"/"Archivar", mismas funciones.
         self.tabla = QTableWidget()
         excluir_tabla_del_tab(self.tabla)
-        self.tabla.setColumnCount(11)
+        self.tabla.setColumnCount(13)
         self.tabla.setHorizontalHeaderLabels([
-            "Nombre", "Categoría", "Afectación", "Medio de pago", "Período", "Vencimiento", "Importe", "Estado",
-            "", "", "",
+            "Nombre", "Categoría", "Afectación", "Cuenta/Id", "Medio de pago", "Período", "Vencimiento",
+            "Importe", "Estado", "", "", "", "",
         ])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -548,11 +635,16 @@ class _PanelCargaControl(QWidget):
         header = self.tabla.horizontalHeader()
         for columna in (self._COL_NOMBRE, self._COL_AFECTACION):
             header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Stretch)
-        for columna in (
-            self._COL_CATEGORIA, self._COL_MEDIO_PAGO, self._COL_PERIODO, self._COL_VENCIMIENTO,
-            self._COL_IMPORTE, self._COL_ESTADO,
-        ):
+        for columna in (self._COL_CATEGORIA, self._COL_MEDIO_PAGO, self._COL_PERIODO, self._COL_VENCIMIENTO, self._COL_ESTADO):
             header.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
+        # "Cuenta/Id"/"Importe" quedan en ancho manual (`Interactive`,
+        # fijado a mano en cada `actualizar()`, ver más abajo) — pedido
+        # explícito de la clienta: "Cuenta/Id" al ancho de "Categoría",
+        # "Importe" un 20% más ancho que su ancho natural, en los dos
+        # casos sacándole el espacio a Nombre/Afectación (los únicos
+        # dos en `Stretch`, que lo absorben solos).
+        for columna in (self._COL_CUENTA_ID, self._COL_IMPORTE):
+            header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Interactive)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones_seleccion)
         # Pedido explícito de la clienta: tabla ordenable por click en el
         # encabezado — mismo mecanismo que el resto del sistema
@@ -567,7 +659,8 @@ class _PanelCargaControl(QWidget):
         self._foco = instalar_enter_avanza_foco(
             [
                 self.campo_nombre, self.combo_categoria, self.combo_tipo_afectacion, self.combo_detalle_afectacion,
-                self.combo_medio_pago, self.campo_vencimiento, self.spin_importe, self.boton_crear,
+                self.campo_cuenta_id, self.combo_medio_pago, self.campo_vencimiento, self.spin_importe,
+                self.boton_crear,
             ],
             parent=self,
         )
@@ -580,6 +673,7 @@ class _PanelCargaControl(QWidget):
         self.campo_nombre.clear()
         self.combo_categoria.setCurrentIndex(-1)
         self.combo_tipo_afectacion.setCurrentIndex(0)
+        self.campo_cuenta_id.clear()
         self.combo_medio_pago.setCurrentIndex(-1)
         self.campo_vencimiento.setDate(_FECHA_SIN_DATO)
         self.spin_importe.setValue(0)
@@ -604,12 +698,30 @@ class _PanelCargaControl(QWidget):
             else self.campo_vencimiento.date().toPython().isoformat()
         )
         importe = None if self.spin_importe.value() == 0 else self.spin_importe.value()
-        if instancias and (vencimiento is not None or importe is not None):
-            actualizar_instancia(self.conn, instancias[0]["IdInstancia"], vencimiento=vencimiento, importe=importe)
+        cuenta_id = self.campo_cuenta_id.text().strip() or None
+        id_instancia_nueva = instancias[0]["IdInstancia"] if instancias else None
+        if id_instancia_nueva is not None and (vencimiento is not None or importe is not None or cuenta_id is not None):
+            actualizar_instancia(
+                self.conn, id_instancia_nueva, vencimiento=vencimiento, importe=importe, cuenta_id=cuenta_id,
+            )
         self._resetear_formulario()
         self.actualizar()
+        if id_instancia_nueva is not None:
+            self._seleccionar_instancia(id_instancia_nueva)
         self.campo_nombre.setFocus()
         QMessageBox.information(self, "Crear concepto", "Concepto creado con éxito.")
+
+    def _seleccionar_instancia(self, id_instancia: int) -> None:
+        """Pedido explícito de la clienta: después de cargar o editar un
+        item, queda seleccionado en la tabla — `actualizar()` repuebla
+        la tabla entera (`setRowCount(0)` + de nuevo), así que la
+        selección anterior se pierde sola y hay que volver a aplicarla
+        después, buscando la fila por `IdInstancia` (el orden puede
+        cambiar de una `actualizar()` a la siguiente)."""
+        for fila_idx, instancia in enumerate(self._registros):
+            if instancia["IdInstancia"] == id_instancia:
+                self.tabla.selectRow(fila_idx)
+                return
 
     def _fila_seleccionada_instancia(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -728,11 +840,12 @@ class _PanelCargaControl(QWidget):
             0: lambda f: f[1]["Nombre"] if f[1] else "",
             1: lambda f: (f[1]["Categoria"] if f[1] else "") or "",
             2: lambda f: f[2],
-            3: lambda f: f[0]["MedioPago"] or "",
-            4: lambda f: f[0]["Periodo"],
-            5: lambda f: f[0]["Vencimiento"] or "",
-            6: lambda f: f[0]["Importe"] or 0,
-            7: lambda f: f[0]["Estado"],
+            3: lambda f: f[0]["CampoLibre1"] or "",
+            4: lambda f: f[0]["MedioPago"] or "",
+            5: lambda f: f[0]["Periodo"],
+            6: lambda f: f[0]["Vencimiento"] or "",
+            7: lambda f: f[0]["Importe"] or 0,
+            8: lambda f: f[0]["Estado"],
         }
         return claves[columna]
 
@@ -759,7 +872,16 @@ class _PanelCargaControl(QWidget):
         periodo = periodo_actual(self.conn)
         periodo_proximo = sumar_meses(periodo, 1)
         repo_instancia = obtener_repositorio(self.conn, "InstanciaControlPago")
-        instancias = repo_instancia.listar(Periodo=periodo) + repo_instancia.listar(Periodo=periodo_proximo)
+        # Pedido explícito de la clienta: lo Pendiente de un período
+        # viejo que nunca se tocó queda en pantalla indefinidamente (ya
+        # no se archiva solo al avanzar de mes, ver `avance_mes.py`) —
+        # además de las instancias del período actual/próximo (en
+        # cualquier Estado, para seguir viendo lo Abonado/Archivado
+        # reciente y los duplicados ya cargados del próximo).
+        instancias = [
+            i for i in repo_instancia.listar()
+            if i["Estado"] == "Pendiente" or i["Periodo"] in (periodo, periodo_proximo)
+        ]
         conceptos = {c["IdConcepto"]: c for c in obtener_repositorio(self.conn, "ConceptoControlPago").listar()}
         filas_totales = [
             (i, conceptos.get(i["IdConcepto"]), texto_afectacion(self.conn, conceptos[i["IdConcepto"]]) if i["IdConcepto"] in conceptos else "?")
@@ -785,12 +907,14 @@ class _PanelCargaControl(QWidget):
         # nuevos.
         self.tabla.setRowCount(0)
         self.tabla.setRowCount(len(filas))
+        colores_fila: list[str | None] = []
         for fila_idx, (instancia, concepto, afectacion) in enumerate(filas):
             self.tabla.setItem(fila_idx, self._COL_NOMBRE, QTableWidgetItem(concepto["Nombre"] if concepto else "?"))
             self.tabla.setItem(
                 fila_idx, self._COL_CATEGORIA, QTableWidgetItem((concepto["Categoria"] if concepto else "") or ""),
             )
             self.tabla.setItem(fila_idx, self._COL_AFECTACION, QTableWidgetItem(afectacion))
+            self.tabla.setItem(fila_idx, self._COL_CUENTA_ID, QTableWidgetItem(instancia["CampoLibre1"] or ""))
             self.tabla.setItem(
                 fila_idx, self._COL_MEDIO_PAGO, QTableWidgetItem(instancia["MedioPago"] or ""),
             )
@@ -803,21 +927,48 @@ class _PanelCargaControl(QWidget):
             self._armar_botones_fila(fila_idx, instancia)
 
             color = self._color_fila(instancia, hoy)
+            colores_fila.append(color)
             if color is not None:
                 fondo = QColor(_COLOR_FONDO_VENCIMIENTO[color])
                 letra = QColor("#000000" if color in _COLORES_CON_LETRA_NEGRA else COLOR_TEXTO_CLARO)
                 for columna in (
-                    self._COL_NOMBRE, self._COL_CATEGORIA, self._COL_AFECTACION, self._COL_MEDIO_PAGO,
-                    self._COL_PERIODO, self._COL_VENCIMIENTO, self._COL_IMPORTE, self._COL_ESTADO,
+                    self._COL_NOMBRE, self._COL_CATEGORIA, self._COL_AFECTACION, self._COL_CUENTA_ID,
+                    self._COL_MEDIO_PAGO, self._COL_PERIODO, self._COL_VENCIMIENTO, self._COL_IMPORTE,
+                    self._COL_ESTADO,
                 ):
                     celda = self.tabla.item(fila_idx, columna)
                     celda.setBackground(fondo)
                     celda.setForeground(letra)
         # Las columnas de botones no entran en el Stretch/ResizeToContents
         # de arriba — necesitan su ancho real para no cortar el texto.
-        for columna in (self._COL_EDITAR, self._COL_ABONAR, self._COL_ARCHIVAR):
+        for columna in (self._COL_EDITAR, self._COL_ABONAR, self._COL_ARCHIVAR, self._COL_DESHACER):
             self.tabla.resizeColumnToContents(columna)
+        # "Cuenta/Id" al ancho de "Categoría"; "Importe" un 20% más
+        # ancho que su ancho natural — pedido explícito de la clienta,
+        # las dos le sacan el espacio a Nombre/Afectación (`Stretch`,
+        # lo absorben solas, sin cálculo manual — ver `_armar_ui`).
+        self.tabla.setColumnWidth(self._COL_CUENTA_ID, self.tabla.columnWidth(self._COL_CATEGORIA))
+        self.tabla.resizeColumnToContents(self._COL_IMPORTE)
+        self.tabla.setColumnWidth(self._COL_IMPORTE, round(self.tabla.columnWidth(self._COL_IMPORTE) * 1.2))
         self._actualizar_botones_seleccion()
+        self._actualizar_etiquetas_conteo(colores_fila, filas)
+
+    def _actualizar_etiquetas_conteo(self, colores_fila: list, filas: list) -> None:
+        """Siete etiquetas pedidas explícitamente por la clienta, sobre
+        lo que está actualmente en pantalla (post-filtro) — mismos
+        buckets de color que ya usa `_color_fila`."""
+        por_cargar = sum(
+            1 for (instancia, _c, _a) in filas
+            if instancia["Estado"] == "Pendiente" and (not instancia["Vencimiento"] or instancia["Importe"] is None)
+        )
+        archivados = sum(1 for (instancia, _c, _a) in filas if instancia["Estado"] == "Archivado")
+        self.etiqueta_conteo_por_cargar.setText(f"Conceptos por cargar: {por_cargar}")
+        self.etiqueta_conteo_vencimiento_hoy.setText(f"Con vencimiento hoy: {colores_fila.count('rojo')}")
+        self.etiqueta_conteo_vencimiento_mañana.setText(f"Con vencimiento mañana: {colores_fila.count('amarillo')}")
+        self.etiqueta_conteo_vencimiento_en_dias.setText(f"Con vencimiento en días: {colores_fila.count('verde')}")
+        self.etiqueta_conteo_vencido.setText(f"Con vencimiento vencido: {colores_fila.count('violeta')}")
+        self.etiqueta_conteo_archivados.setText(f"Conceptos archivados: {archivados}")
+        self.etiqueta_conteo_total.setText(f"Total conceptos: {len(filas)}")
 
     def _armar_botones_fila(self, fila_idx: int, instancia: sqlite3.Row) -> None:
         # Un botón NUEVO por fila en cada `actualizar()` — no se reusa
@@ -846,19 +997,41 @@ class _PanelCargaControl(QWidget):
         boton_archivar.setEnabled(
             instancia["Estado"] == "Pendiente" and not instancia["Vencimiento"] and instancia["Importe"] is None
         )
+        # Pedido explícito de la clienta: botón chico de "deshacer"
+        # (flecha típica de deshacer acción), habilitado solo cuando hay
+        # algo cargado (vencimiento o importe) — lo vacía todo y deja
+        # la instancia Pendiente otra vez, disponible para elegir
+        # cualquier acción sobre ella.
+        boton_deshacer = _boton(self._COL_DESHACER, "↩", lambda _c=False, i=instancia: self._deshacer(i))
+        boton_deshacer.setEnabled(bool(instancia["Vencimiento"]) or instancia["Importe"] is not None)
 
     def _editar_instancia(self, instancia: sqlite3.Row) -> None:
         dialogo = _DialogoEditarInstancia(self.conn, instancia, parent=self)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
+            importe = dialogo.importe()
+            kwargs = {}
+            if es_medio_pago_tarjeta(instancia["MedioPago"]) and importe is not None:
+                # Pedido explícito de la clienta: una tarjeta no se
+                # controla por vencimiento — al cargarle un importe
+                # queda abonada directamente, sin pasar por "Abonar".
+                kwargs["estado"] = "Abonado"
+            elif instancia["Estado"] == "Archivado":
+                # Pedido explícito de la clienta: editar un registro
+                # archivado lo vuelve a dejar disponible para elegir
+                # qué hacer con él (Abonar/Archivar de nuevo).
+                kwargs["estado"] = "Pendiente"
             actualizar_instancia(
-                self.conn, instancia["IdInstancia"], vencimiento=dialogo.vencimiento(), importe=dialogo.importe(),
+                self.conn, instancia["IdInstancia"], vencimiento=dialogo.vencimiento(), importe=importe,
+                cuenta_id=dialogo.cuenta_id(), **kwargs,
             )
             self.actualizar()
+            self._seleccionar_instancia(instancia["IdInstancia"])
             QMessageBox.information(self, "Editar", "Registro actualizado con éxito.")
 
     def _marcar_abonada(self, instancia: sqlite3.Row) -> None:
         marcar_abonada(self.conn, instancia["IdInstancia"])
         self.actualizar()
+        self._seleccionar_instancia(instancia["IdInstancia"])
         QMessageBox.information(self, "Abonar", "Registro marcado como abonado con éxito.")
 
     def _archivar(self, instancia: sqlite3.Row) -> None:
@@ -868,18 +1041,28 @@ class _PanelCargaControl(QWidget):
             QMessageBox.warning(self, "Archivar", str(error))
             return
         self.actualizar()
+        self._seleccionar_instancia(instancia["IdInstancia"])
         QMessageBox.information(self, "Archivar", "Registro archivado con éxito.")
+
+    def _deshacer(self, instancia: sqlite3.Row) -> None:
+        actualizar_instancia(
+            self.conn, instancia["IdInstancia"], vencimiento=None, importe=None, estado="Pendiente",
+        )
+        self.actualizar()
+        self._seleccionar_instancia(instancia["IdInstancia"])
+        QMessageBox.information(self, "Deshacer", "Registro vuelto a dejar sin vencimiento ni importe.")
 
     def _duplicar_para_periodo_proximo(self) -> None:
         instancia = self._fila_seleccionada_instancia()
         if instancia is None:
             return
         try:
-            duplicar_para_periodo_proximo(self.conn, instancia["IdInstancia"])
+            id_nuevo = duplicar_para_periodo_proximo(self.conn, instancia["IdInstancia"])
         except ValueError as error:
             QMessageBox.warning(self, "Duplicar para período próximo", str(error))
             return
         self.actualizar()
+        self._seleccionar_instancia(id_nuevo)
         QMessageBox.information(
             self, "Duplicar para período próximo", "Registro duplicado con éxito para el período próximo.",
         )
@@ -1071,7 +1254,7 @@ class _PanelHistorialControlPagos(QWidget):
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             actualizar_instancia(
                 self.conn, instancia["IdInstancia"], vencimiento=dialogo.vencimiento(), importe=dialogo.importe(),
-                estado=dialogo.estado(),
+                estado=dialogo.estado(), cuenta_id=dialogo.cuenta_id(),
             )
             self.actualizar()
             QMessageBox.information(self, "Editar registro", "Registro actualizado con éxito.")

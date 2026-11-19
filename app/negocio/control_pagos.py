@@ -15,8 +15,9 @@ Los conceptos personales/familiares/de rodados nunca tocan
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 
-from app.negocio.dias import sumar_meses
+from app.negocio.dias import fecha_actual, periodo_actual, sumar_meses
 from app.negocio.gastos_operativos import gasto_en_conflicto
 from app.repositorio.registro import obtener_repositorio
 
@@ -27,6 +28,18 @@ TIPOS_AFECTACION = ("Espacio general", "Edificio", "Unidad", "Inmueble personal"
 _TIPOS_AFECTACION_ESPACIO = ("Espacio general", "Edificio", "Unidad")
 
 ESTADOS_INSTANCIA = ("Pendiente", "Abonado", "Archivado")
+
+
+def es_medio_pago_tarjeta(medio_pago: str | None) -> bool:
+    """Pedido explícito de la clienta: los conceptos a debitar por
+    tarjeta ("Tarjeta Bco X" en `MedioPagoControlPagos`, ver `seed.py`)
+    se tratan distinto de los que se abonan en forma manual/débito de
+    una caja de ahorro ("CA Bco X") o "Pago manual" — no por nombre
+    exacto (el combo de Medio de pago es editable, la clienta puede
+    agregar valores nuevos), sino por contener "tarjeta", mismo
+    criterio que `_es_transferencia`/`_es_sobre` en `app/gui/pantallas/
+    pagos.py`."""
+    return "tarjeta" in (medio_pago or "").lower()
 
 _SIN_CAMBIOS = object()
 """Sentinel para `actualizar_instancia`: distingue "no tocar este campo"
@@ -125,16 +138,31 @@ def dar_de_baja_concepto(conn: sqlite3.Connection, id_concepto: int) -> None:
     obtener_repositorio(conn, "ConceptoControlPago").actualizar(id_concepto, Activo=0)
 
 
+def _cuenta_id_heredada(conn: sqlite3.Connection, id_concepto: int) -> str | None:
+    """"Cuenta/Id" (`InstanciaControlPago.CampoLibre1`, reusado — pedido
+    explícito de la clienta) es una referencia estable del concepto (el
+    número de cuenta o servicio de "Edenor", por ejemplo no cambia mes a
+    mes), pero vive en la tabla de instancias, no en `ConceptoControlPago`
+    — se hereda de la instancia más reciente del mismo concepto que la
+    tenga cargada, para no tener que volver a tipearla cada período."""
+    filas = obtener_repositorio(conn, "InstanciaControlPago").listar(IdConcepto=id_concepto)
+    con_dato = [f for f in filas if f["CampoLibre1"]]
+    if not con_dato:
+        return None
+    return max(con_dato, key=lambda f: f["IdInstancia"])["CampoLibre1"]
+
+
 def generar_instancias_periodo(conn: sqlite3.Connection, periodo: str) -> int:
     """Genera una `InstanciaControlPago` en blanco (Vencimiento/Importe
     NULL, Estado "Pendiente", `MedioPago` precargado del sugerido por el
-    concepto) para cada concepto Activo que todavía no tenga una
-    instancia de este período — pedido explícito de la clienta: "a
-    principio de mes yo quiero que en la tabla me cargue todos los
-    conceptos, con los vencimientos y los importes en blanco". Se puede
-    llamar las veces que haga falta (ej. cada vez que se entra a la
-    solapa): es naturalmente idempotente, no duplica nada. Devuelve la
-    cantidad de instancias nuevas creadas."""
+    concepto, "Cuenta/Id" heredada de la instancia más reciente del
+    mismo concepto que la tenga — ver `_cuenta_id_heredada`) para cada
+    concepto Activo que todavía no tenga una instancia de este período
+    — pedido explícito de la clienta: "a principio de mes yo quiero que
+    en la tabla me cargue todos los conceptos, con los vencimientos y
+    los importes en blanco". Se puede llamar las veces que haga falta
+    (ej. cada vez que se entra a la solapa): es naturalmente idempotente,
+    no duplica nada. Devuelve la cantidad de instancias nuevas creadas."""
     conceptos_activos = conn.execute("SELECT IdConcepto FROM ConceptoControlPago WHERE Activo = 1").fetchall()
     ya_generados = {
         f["IdConcepto"] for f in conn.execute(
@@ -148,7 +176,7 @@ def generar_instancias_periodo(conn: sqlite3.Connection, periodo: str) -> int:
         concepto = obtener_repositorio(conn, "ConceptoControlPago").obtener(c["IdConcepto"])
         obtener_repositorio(conn, "InstanciaControlPago").crear(
             IdConcepto=c["IdConcepto"], Periodo=periodo, Estado="Pendiente",
-            MedioPago=concepto["MedioPagoSugerido"],
+            MedioPago=concepto["MedioPagoSugerido"], CampoLibre1=_cuenta_id_heredada(conn, c["IdConcepto"]),
         )
         creadas += 1
     return creadas
@@ -158,32 +186,16 @@ def archivar_instancia(conn: sqlite3.Connection, id_instancia: int) -> None:
     """Cierra una instancia sin datos cargados ese mes ("no tengo
     vencimientos de ese concepto este mes") — habilitado solo cuando no
     hay Vencimiento ni Importe cargados, para no poder archivar algo que
-    en realidad hay que pagar. Botón manual de una fila puntual —
-    distinto de `archivar_pendientes_del_periodo` (el barrido automático
-    del cierre de mes, que archiva sin este chequeo)."""
+    en realidad hay que pagar. Botón manual de una fila puntual — a
+    diferencia de un concepto Pendiente sin tocar, que ya no se archiva
+    solo al avanzar de mes (pedido explícito de la clienta: queda en
+    pantalla hasta que ella decida qué hacer con él)."""
     instancia = obtener_repositorio(conn, "InstanciaControlPago").obtener(id_instancia)
     if instancia is None:
         raise ValueError(f"No existe la instancia #{id_instancia}")
     if instancia["Vencimiento"] or instancia["Importe"] is not None:
         raise ValueError("No se puede archivar una instancia con vencimiento o importe cargado.")
     obtener_repositorio(conn, "InstanciaControlPago").actualizar(id_instancia, Estado="Archivado")
-
-
-def archivar_pendientes_del_periodo(conn: sqlite3.Connection, periodo: str) -> int:
-    """Pedido explícito de la clienta: al avanzar de mes, todo concepto
-    del período que se cierra y que no quedó marcado como Abonado se
-    archiva solo — a diferencia de `archivar_instancia` (el botón manual
-    de una fila, que exige vencimiento/importe vacíos), este barrido NO
-    mira si hay datos cargados: el período ya se cierra de cualquier
-    forma, y lo que se archivó por descuido se puede reabrir después
-    desde "Historial" con "Editar registro". Pensado para llamarse desde
-    `app.negocio.avance_mes.avanzar_mes`. Devuelve la cantidad de
-    instancias archivadas."""
-    repo = obtener_repositorio(conn, "InstanciaControlPago")
-    pendientes = [i for i in repo.listar(Periodo=periodo) if i["Estado"] == "Pendiente"]
-    for instancia in pendientes:
-        repo.actualizar(instancia["IdInstancia"], Estado="Archivado")
-    return len(pendientes)
 
 
 def marcar_abonada(conn: sqlite3.Connection, id_instancia: int) -> None:
@@ -197,8 +209,11 @@ def duplicar_para_periodo_proximo(conn: sqlite3.Connection, id_instancia: int) -
     Medio de pago sugerido del concepto, igual que `generar_instancias_
     periodo`) para que se cargue a mano el vencimiento/importe real ya
     conocido. Nunca copia Vencimiento/Importe de la instancia de
-    origen — confirmado explícitamente con la clienta. Devuelve el
-    `IdInstancia` nuevo."""
+    origen — confirmado explícitamente con la clienta. "Cuenta/Id"
+    (`CampoLibre1`) SÍ se copia: es una referencia estable del
+    concepto, no un dato del período (mismo criterio que la herencia de
+    `generar_instancias_periodo`, ver `_cuenta_id_heredada`). Devuelve
+    el `IdInstancia` nuevo."""
     repo = obtener_repositorio(conn, "InstanciaControlPago")
     instancia = repo.obtener(id_instancia)
     if instancia is None:
@@ -209,18 +224,18 @@ def duplicar_para_periodo_proximo(conn: sqlite3.Connection, id_instancia: int) -
     concepto = obtener_repositorio(conn, "ConceptoControlPago").obtener(instancia["IdConcepto"])
     return repo.crear(
         IdConcepto=instancia["IdConcepto"], Periodo=periodo_proximo, Estado="Pendiente",
-        MedioPago=concepto["MedioPagoSugerido"] if concepto else None,
+        MedioPago=concepto["MedioPagoSugerido"] if concepto else None, CampoLibre1=instancia["CampoLibre1"],
     )
 
 
 def eliminar_instancia_duplicada(conn: sqlite3.Connection, id_instancia: int) -> None:
     """Deshace un "Duplicar para período próximo" hecho por error — a
-    diferencia de `archivar_instancia`/`archivar_pendientes_del_periodo`
-    (que solo cambian el Estado), esto borra la fila entera: no es
-    historial real, es un duplicado que nunca debió existir. Si ya
-    había sincronizado un `GastoOperativo` (Importe cargado antes de
-    borrarla), también se borra ese gasto — mismo criterio que
-    `sincronizar_gasto_operativo` cuando el Importe se vacía."""
+    diferencia de `archivar_instancia` (que solo cambia el Estado), esto
+    borra la fila entera: no es historial real, es un duplicado que
+    nunca debió existir. Si ya había sincronizado un `GastoOperativo`
+    (Importe cargado antes de borrarla), también se borra ese gasto —
+    mismo criterio que `sincronizar_gasto_operativo` cuando el Importe
+    se vacía."""
     repo = obtener_repositorio(conn, "InstanciaControlPago")
     instancia = repo.obtener(id_instancia)
     if instancia is None:
@@ -243,14 +258,17 @@ def eliminar_instancia_duplicada(conn: sqlite3.Connection, id_instancia: int) ->
 def actualizar_instancia(
     conn: sqlite3.Connection, id_instancia: int, *,
     vencimiento=_SIN_CAMBIOS, importe=_SIN_CAMBIOS, medio_pago=_SIN_CAMBIOS, estado=_SIN_CAMBIOS,
+    cuenta_id=_SIN_CAMBIOS,
 ) -> None:
-    """Edita vencimiento/monto (y opcionalmente el medio de pago y/o el
-    Estado) de UNA instancia puntual — distinto de `editar_concepto`.
-    Cada parámetro que se deja sin pasar queda sin tocar (`_SIN_
-    CAMBIOS`); pasarlo en `None` explícitamente SÍ lo vacía (ej. borrar
-    un vencimiento ya cargado). `estado` lo usa "Editar registro" de la
-    solapa "Historial" (vencimiento+importe+estado juntos, para poder
-    reabrir algo que el cierre de mes archivó de más). Sincroniza
+    """Edita vencimiento/monto (y opcionalmente el medio de pago, el
+    Estado y/o "Cuenta/Id") de UNA instancia puntual — distinto de
+    `editar_concepto`. Cada parámetro que se deja sin pasar queda sin
+    tocar (`_SIN_CAMBIOS`); pasarlo en `None` explícitamente SÍ lo vacía
+    (ej. borrar un vencimiento ya cargado). `estado` lo usa "Editar
+    registro" de la solapa "Historial" (vencimiento+importe+estado
+    juntos, para poder reabrir algo que el cierre de mes archivó de
+    más). `cuenta_id` mapea a `CampoLibre1` (reusado — pedido explícito
+    de la clienta, ver `_cuenta_id_heredada`). Sincroniza
     `GastoOperativo` después, si corresponde (ver `sincronizar_gasto_
     operativo`)."""
     campos = {}
@@ -260,6 +278,8 @@ def actualizar_instancia(
         campos["Importe"] = importe
     if medio_pago is not _SIN_CAMBIOS:
         campos["MedioPago"] = medio_pago
+    if cuenta_id is not _SIN_CAMBIOS:
+        campos["CampoLibre1"] = cuenta_id
     if estado is not _SIN_CAMBIOS:
         if estado not in ESTADOS_INSTANCIA:
             raise ValueError(f"Estado inválido: {estado!r}")
@@ -316,3 +336,54 @@ def sincronizar_gasto_operativo(conn: sqlite3.Connection, id_instancia: int) -> 
         repo_gasto.actualizar(existente["IdGasto"], **valores)
     else:
         repo_gasto.crear(**valores)
+
+
+def _bucket_vencimiento(instancia: sqlite3.Row, hoy: date) -> str | None:
+    """Mismo criterio de color que `_PanelCargaControl._color_fila`
+    (`app/gui/pantallas/control_pagos.py`), separado acá para que
+    "Panel de control" pueda replicar el mismo conteo sin depender de
+    la pantalla."""
+    if instancia["Estado"] in ("Abonado", "Archivado"):
+        return "gris"
+    vencimiento = instancia["Vencimiento"]
+    if not vencimiento:
+        return None
+    dias = (date.fromisoformat(vencimiento) - hoy).days
+    if dias < 0:
+        return "violeta"
+    if dias == 0:
+        return "rojo"
+    if dias == 1:
+        return "amarillo"
+    return "verde"
+
+
+def resumen_conteo_vencimientos(conn: sqlite3.Connection) -> dict:
+    """Siete conteos pedidos explícitamente por la clienta — usados por
+    "Carga y control" (sobre lo filtrado en pantalla, ver `_PanelCarga
+    Control._actualizar_etiquetas_conteo`) y por "Panel de control"
+    (sin filtro, sobre TODO lo que entra en el mismo alcance: toda
+    instancia Pendiente más las del período actual/próximo en
+    cualquier Estado — mismo criterio que `_PanelCargaControl.
+    actualizar`)."""
+    periodo = periodo_actual(conn)
+    periodo_proximo = sumar_meses(periodo, 1)
+    hoy = fecha_actual(conn)
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    instancias = [
+        i for i in repo.listar()
+        if i["Estado"] == "Pendiente" or i["Periodo"] in (periodo, periodo_proximo)
+    ]
+    colores = [_bucket_vencimiento(i, hoy) for i in instancias]
+    return {
+        "por_cargar": sum(
+            1 for i in instancias
+            if i["Estado"] == "Pendiente" and (not i["Vencimiento"] or i["Importe"] is None)
+        ),
+        "vencimiento_hoy": colores.count("rojo"),
+        "vencimiento_mañana": colores.count("amarillo"),
+        "vencimiento_en_dias": colores.count("verde"),
+        "vencimiento_vencido": colores.count("violeta"),
+        "archivados": sum(1 for i in instancias if i["Estado"] == "Archivado"),
+        "total": len(instancias),
+    }
